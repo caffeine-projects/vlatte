@@ -24,8 +24,17 @@ go.work.sum
 # env file
 .env
 
+# OS
 .DS_Store
+
+# Tests
+coverage.txt
+coverage.out
+coverage.html
+test-report.out
 
 # Project
 
 .local/
+
+out/

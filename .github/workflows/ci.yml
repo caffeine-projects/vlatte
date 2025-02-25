@@ -1,0 +1,47 @@
+name: "CI"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - '[0-9]+.x'
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!**.md'
+  pull_request:
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!**.md'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: 'stable'
+
+    - name: Deps
+      run: make deps
+
+    - name: Golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: v1.64
+
+    - name: Test
+      run: make testci
+
+    - name: Coverage
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}

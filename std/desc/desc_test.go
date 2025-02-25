@@ -40,8 +40,8 @@ func TestDescriptor_Append(t *testing.T) {
 	existing := map[string]any{"a": "100", "b": "200"}
 	d := Descriptor{Key: "c", Props: map[string]any{"d": "300", "e": "400"}}
 
-	d.Append(existing)
-
+	err := d.Append(existing)
+	require.NoError(t, err)
 	require.Equal(t, map[string]any{"a": "100", "b": "200", "c": map[string]any{"d": "300", "e": "400"}}, existing)
 	require.ErrorIs(t, d.Append(map[string]any{"c": "something else"}), ErrKeyAlreadyExists)
 }
