@@ -1,0 +1,16 @@
+{
+  "name": "001",
+  "request": {
+    "method": "GET",
+    "path": "/test",
+    "query": {
+      "term": "test",
+      "filter": [ "contains", "all" ],
+      "page": [ "all", "present", [ "equal", 10 ] ]
+    }
+  },
+  "response": {
+    "status": 201,
+    "body": "hi"
+  }
+}

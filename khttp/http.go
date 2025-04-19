@@ -1,0 +1,524 @@
+package khttp
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"math/rand"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/jwalton/gchalk"
+	"github.com/rs/zerolog"
+
+	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/khttp/cors"
+	"github.com/caffeine-projects/vlatte/khttp/internal/bufpool"
+	"github.com/caffeine-projects/vlatte/khttp/internal/mid"
+	"github.com/caffeine-projects/vlatte/khttp/internal/mid/recover"
+	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/caffeine-projects/vlatte/matcher/mfeat"
+)
+
+var (
+	_ kcore.MockApp[*HTTPMock] = (*HTTPMockApp)(nil)
+)
+
+const (
+	Version = "1.0.0"
+)
+
+// StatusNoMatch describes an HTTP response where no Mock was found.
+//
+// It uses http.StatusTeapot to reduce the chance of using the same
+// expected response from the actual server being mocked.
+// Basically, every request that doesn't match against a Mock, will have a response with http.StatusTeapot.
+const StatusNoMatch = http.StatusTeapot
+
+// HTTPMockApp is the base for the mock server.
+type HTTPMockApp struct {
+	*kcore.BaseApp[*HTTPMock, *HTTPMockApp]
+
+	config             *Config
+	server             Server
+	storage            kcore.MockRepository[*HTTPMock]
+	scenarioStore      *mfeat.ScenarioStore
+	cancel             context.CancelFunc
+	requestBodyParsers []RequestBodyParser
+	params             kcore.Params
+	loaders            []Loader
+	rec                *recorder
+	rwMutex            sync.RWMutex
+	proxy              *reverseProxy
+	templateEngine     kcore.TemplateEngine
+	extensions         map[string]kcore.Extension
+	data               map[string]any
+	colorizer          *gchalk.Builder
+	logger             *zerolog.Logger
+	startOnce          sync.Once
+	random             *rand.Rand
+	admin              *Admin
+}
+
+// NewAPI creates a new HTTPMockApp mock server with the given configurations.
+// Parameter config accepts a Config or a ConfigBuilder implementation.
+// If no configuration is provided, a default one will be used.
+// If no port is set, it will start the server on localhost using a random port.
+func NewAPI(config ...Configurer) *HTTPMockApp {
+	app := &HTTPMockApp{}
+	app.random = rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	_, cancel := context.WithCancel(context.Background())
+	app.cancel = cancel
+
+	conf := defaultConfig()
+
+	for i, configurer := range config {
+		err := configurer.Apply(conf)
+		if err != nil {
+			panic(fmt.Errorf(
+				"server: error applying configuration at index %d with type %T\n%w",
+				i,
+				configurer,
+				err,
+			))
+		}
+	}
+
+	if conf.DebugFn == nil {
+		conf.DebugFn = func(_ string, _ any) {}
+	}
+
+	app.config = conf
+	app.logger = app.getLog(conf)
+
+	colors := gchalk.New()
+	if !conf.Colors {
+		colors.SetLevel(gchalk.LevelNone)
+	}
+
+	repository := kcore.NewStore[*HTTPMock]()
+
+	parsers := make([]RequestBodyParser, 0, len(conf.RequestBodyParsers)+3)
+	parsers = append(parsers, conf.RequestBodyParsers...)
+	parsers = append(parsers, &plainTextParser{}, &formURLEncodedParser{}, &noopParser{})
+
+	recovery := recover.New(func(err error) { app.logger.Error().Err(err).Msg(err.Error()) },
+		conf.RequestWasNotMatchedStatusCode)
+
+	middlewares := make([]func(handler http.Handler) http.Handler, 0)
+	middlewares = append(middlewares, recovery.Recover)
+
+	if conf.CORS != nil {
+		middlewares = append(middlewares, cors.New(conf.CORS))
+	}
+
+	middlewares = append(middlewares, conf.Middlewares...)
+
+	var params kcore.Params
+	if conf.Parameters != nil {
+		params = conf.Parameters
+	} else {
+		params = kcore.NewInMemoryParameters()
+	}
+
+	var rec *recorder
+	if conf.Record != nil {
+		rec = newRecorder(app, conf.Record)
+	}
+
+	var p *reverseProxy
+	if conf.Proxy != nil {
+		p = newProxy(app.Logger(), conf)
+	}
+
+	var lifecycle mockHTTPLifecycle
+	if conf.Debug {
+		lifecycle = newBuiltInDescriptiveMockHTTPLifecycle(app, colors, os.Stdout)
+	} else {
+		lifecycle = newBuiltInMockHTTPLifecycle(app)
+	}
+
+	handler := mid.Compose(middlewares...).Root(newMockHandler(app, lifecycle))
+
+	if conf.HandlerDecorator != nil {
+		handler = conf.HandlerDecorator(handler)
+	}
+
+	server := conf.Server
+
+	if server == nil {
+		server = newServer()
+	}
+
+	internalLoaders := 1
+	loaders := make([]Loader, 0, len(conf.Loaders)+internalLoaders)
+	loaders = append(loaders, &fileLoader{})
+	loaders = append(loaders, conf.Loaders...)
+
+	if conf.TemplateEngine == nil {
+		tmpl := newGoTemplate()
+		if len(conf.TemplateFunctions) > 0 {
+			tmpl.FuncMap(conf.TemplateFunctions)
+		}
+
+		app.templateEngine = tmpl
+	}
+
+	app.BaseApp = kcore.NewBaseApp[*HTTPMock, *HTTPMockApp](app, repository)
+	app.server = server
+	app.storage = repository
+	app.scenarioStore = mfeat.NewScenarioStore()
+	app.params = params
+	app.loaders = loaders
+	app.rec = rec
+	app.proxy = p
+	app.requestBodyParsers = parsers
+	app.extensions = make(map[string]kcore.Extension)
+	app.colorizer = colors
+	app.admin = &Admin{app: app, repo: repository}
+
+	if app.config.Forward != nil {
+		app.MustMock(Request().
+			MethodMatches(matcher.Anything()).
+			Priority(10).
+			Reply(From(app.config.Forward.Target).
+				Headers(app.config.Forward.Headers).
+				ProxyHeaders(app.config.Forward.ProxyHeaders).
+				RemoveProxyHeaders(app.config.Forward.ProxyHeadersToRemove...).
+				TrimPrefix(app.config.Forward.TrimPrefix).
+				TrimSuffix(app.config.Forward.TrimSuffix).
+				SSLVerify(app.config.Forward.SSLVerify)))
+	}
+
+	err := server.Setup(app, handler)
+	if err != nil {
+		panic(fmt.Errorf("server: setup failed. %w", err))
+	}
+
+	return app
+}
+
+// Name returns mock server name.
+func (app *HTTPMockApp) Name() string {
+	return app.config.Name
+}
+
+// Start starts the mock server.
+func (app *HTTPMockApp) Start() error {
+	err := app.server.Start()
+	if err != nil {
+		return err
+	}
+
+	return app.onStart()
+}
+
+// MustStart starts the mock server.
+// It fails immediately if any error occurs.
+func (app *HTTPMockApp) MustStart() {
+	err := app.Start()
+	if err != nil {
+		panic(fmt.Errorf("server: start failed. %w", err))
+	}
+}
+
+// StartTLS starts TLS on a mock server.
+func (app *HTTPMockApp) StartTLS() error {
+	err := app.server.StartTLS()
+	if err != nil {
+		return err
+	}
+
+	return app.onStart()
+}
+
+// MustStartTLS starts TLS on a mock server.
+// It fails immediately if any error occurs.
+func (app *HTTPMockApp) MustStartTLS() {
+	err := app.StartTLS()
+	if err != nil {
+		panic(fmt.Errorf("server: failed to start server with TLS. %w", err))
+	}
+}
+
+// URL returns the base URL string for the mock server.
+// If parameter paths is provided, it will be concatenated with the server base URL.
+func (app *HTTPMockApp) URL(paths ...string) string {
+	if len(paths) == 0 {
+		return app.server.Info().URL
+	}
+
+	u, err := url.JoinPath(app.server.Info().URL, paths...)
+	if err != nil {
+		app.logger.Fatal().Err(err).
+			Msgf("server: building server url with path elements %s", paths)
+	}
+
+	return u
+}
+
+// Parameters returns Params instance associated with this application.
+func (app *HTTPMockApp) Parameters() kcore.Params {
+	return app.params
+}
+
+// Config returns the mock server Config.
+func (app *HTTPMockApp) Config() *Config {
+	return app.config
+}
+
+// Server returns the Server implementation being used by this application.
+func (app *HTTPMockApp) Server() Server {
+	return app.server
+}
+
+// TemplateEngine returns the TemplateEngine associated with this instance.
+func (app *HTTPMockApp) TemplateEngine() kcore.TemplateEngine {
+	return app.templateEngine
+}
+
+// Logger returns the zerolog.Logger of this application.
+func (app *HTTPMockApp) Logger() *zerolog.Logger {
+	return app.logger
+}
+
+// Reload reloads mocks from external sources, like the filesystem.
+// Coded mocks will be kept.
+func (app *HTTPMockApp) Reload() error {
+	// app.storage.DeleteExternal()
+	return app.load()
+}
+
+// MustReload reloads mocks from external sources, like the filesystem.
+// Coded mocks will be kept.
+// It panics if any error occurs.
+func (app *HTTPMockApp) MustReload() {
+	err := app.Reload()
+
+	if err != nil {
+		panic(fmt.Errorf("server: error reloading mock definitions. %w", err))
+	}
+}
+
+// Close closes the mock server.
+func (app *HTTPMockApp) Close() {
+	app.cancel()
+
+	err := app.server.Close()
+	if err != nil {
+		app.logger.Debug().Err(err).Msg("server: Close: error closing server")
+	}
+
+	if app.rec != nil {
+		app.rec.stop()
+	}
+}
+
+// CloseWithT register Server Close function on TestingT Cleanup().
+// Useful to close the server when tests finish.
+func (app *HTTPMockApp) CloseWithT(t kcore.TestingT) *HTTPMockApp {
+	t.Cleanup(func() { app.Close() })
+	return app
+}
+
+// IsRecording checks if mock recording is enabled.
+func (app *HTTPMockApp) IsRecording() bool {
+	return app.rec != nil && app.rec.isActive()
+}
+
+func (app *HTTPMockApp) StopRecording() {
+	app.rec.stop()
+}
+
+func (app *HTTPMockApp) RegisterExtension(extension kcore.Extension) error {
+	app.rwMutex.Lock()
+	defer app.rwMutex.Unlock()
+
+	_, ok := app.extensions[extension.UniqueName()]
+	if ok {
+		return fmt.Errorf(
+			"server: there is already an extension registered with the name \"%s\"",
+			extension.UniqueName(),
+		)
+	}
+
+	app.extensions[extension.UniqueName()] = extension
+
+	return nil
+}
+
+// SetData sets the data to be used as template data during mock configurations parsing.
+func (app *HTTPMockApp) SetData(data map[string]any) {
+	app.data = data
+}
+
+// Data returns the template data associated to this instance.
+func (app *HTTPMockApp) Data() map[string]any {
+	return app.data
+}
+
+// DescribeConfig describes key configurations of the currrent HTTPMockApp instance.
+func (app *HTTPMockApp) DescribeConfig() string {
+	buf := bufpool.Get()
+	buf.Reset()
+
+	defer bufpool.Put(buf)
+
+	if app.Name() != "" {
+		buf.WriteString("Server Name: ")
+		buf.WriteString(app.Name())
+		buf.WriteString("\n")
+	}
+
+	buf.WriteString("Mock Search Patterns: ")
+	buf.WriteString(strings.Join(app.config.MockFileSearchPatterns, ", "))
+	buf.WriteString("\n")
+
+	buf.WriteString("Log: ")
+	buf.WriteString(app.config.LogVerbosity.String())
+	buf.WriteString("\n")
+
+	if app.config.Proxy != nil {
+		buf.WriteString("Reverse Proxy: ")
+		buf.WriteString("enabled")
+		buf.WriteString("\n")
+	}
+
+	if app.config.Record != nil {
+		buf.WriteString("Recording: ")
+		buf.WriteString(app.config.Record.SaveDir)
+		buf.WriteString("\n")
+	}
+
+	buf.WriteString("\n")
+	buf.WriteString("Listening: ")
+	buf.WriteString(app.URL())
+	buf.WriteString("\n")
+
+	return buf.String()
+}
+
+// --
+// Mock Builder Initializers
+// --
+
+// AnyMethod creates a new empty Builder.
+func (app *HTTPMockApp) AnyMethod() *HTTPMockBuilder {
+	b := &HTTPMockBuilder{mock: newMock()}
+	return b.MethodMatches(matcher.Anything())
+}
+
+// Get initializes a mock for GET method.
+func (app *HTTPMockApp) Get(m matcher.Matcher) *HTTPMockBuilder {
+	return Request().URL(m).Method(http.MethodGet)
+}
+
+// Getf initializes a mock for GET method.
+func (app *HTTPMockApp) Getf(path string, a ...any) *HTTPMockBuilder {
+	return Request().URLPathf(path, a...).Method(http.MethodGet)
+}
+
+// Post initializes a mock for Post method.
+func (app *HTTPMockApp) Post(m matcher.Matcher) *HTTPMockBuilder {
+	return Request().URL(m).Method(http.MethodPost)
+}
+
+// Postf initializes a mock for Post method.
+func (app *HTTPMockApp) Postf(path string, a ...any) *HTTPMockBuilder {
+	return Request().URLPathf(path, a...).Method(http.MethodPost)
+}
+
+// Put inits a mock for Put method.
+func (app *HTTPMockApp) Put(m matcher.Matcher) *HTTPMockBuilder {
+	return Request().URL(m).Method(http.MethodPut)
+}
+
+// Putf initializes a mock for Put method.
+func (app *HTTPMockApp) Putf(path string, a ...any) *HTTPMockBuilder {
+	return Request().URLPathf(path, a...).Method(http.MethodPut)
+}
+
+// Patch initializes a mock for Patch method.
+func (app *HTTPMockApp) Patch(u matcher.Matcher) *HTTPMockBuilder {
+	return Request().URL(u).Method(http.MethodPatch)
+}
+
+// Patchf initializes a mock for Patch method.
+func (app *HTTPMockApp) Patchf(path string, a ...any) *HTTPMockBuilder {
+	return Request().URLPathf(path, a...).Method(http.MethodPatch)
+}
+
+// Delete initializes a mock for Delete method.
+func (app *HTTPMockApp) Delete(m matcher.Matcher) *HTTPMockBuilder {
+	return Request().URL(m).Method(http.MethodDelete)
+}
+
+// Deletef initializes a mock for Delete method.
+func (app *HTTPMockApp) Deletef(path string, a ...any) *HTTPMockBuilder {
+	return Request().URLPathf(path, a...).Method(http.MethodDelete)
+}
+
+// Head initializes a mock for Head method.
+func (app *HTTPMockApp) Head(m matcher.Matcher) *HTTPMockBuilder {
+	return Request().URL(m).Method(http.MethodHead)
+}
+
+// Headf initializes a mock for Head method.
+func (app *HTTPMockApp) Headf(path string, a ...any) *HTTPMockBuilder {
+	return Request().URLPathf(path, a...).Method(http.MethodHead)
+}
+
+// --
+// Internals
+// --
+
+func (app *HTTPMockApp) onStart() (err error) {
+	app.startOnce.Do(func() { err = app.load() })
+
+	if err != nil {
+		return err
+	}
+
+	if app.rec != nil {
+		app.rec.start()
+	}
+
+	return nil
+}
+
+func (app *HTTPMockApp) load() error {
+	for _, loader := range app.loaders {
+		err := loader.Load(app)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (app *HTTPMockApp) getLog(conf *Config) *zerolog.Logger {
+	if conf.Logger != nil {
+		return conf.Logger
+	}
+
+	var output io.Writer
+	if conf.LogPretty {
+		output = zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+	} else {
+		output = os.Stdout
+	}
+
+	c := zerolog.New(output).Level(zerolog.Level(conf.LogLevel)).With().Timestamp()
+	if conf.Name != "" {
+		c.Str("server", conf.Name)
+	}
+
+	log := c.Logger()
+	return &log
+}

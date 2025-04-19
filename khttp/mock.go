@@ -1,0 +1,414 @@
+package khttp
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/url"
+	"time"
+
+	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
+	"github.com/caffeine-projects/vlatte/matcher"
+)
+
+var _ kcore.Mock = (*HTTPMock)(nil)
+
+// RequestValues groups HTTP request data, including the parsed body.
+// It is used by several components during the request matching phase.
+type RequestValues struct {
+	// StartedAt indicates when the request arrived.
+	StartedAt time.Time
+
+	// RawRequest is the original incoming http.Request.
+	RawRequest *http.Request
+
+	// URL is the full request url.URL, including scheme, host, port.
+	URL *url.URL
+
+	// URLPathSegments stores path segments.
+	// Eg.: /test/100 -> []string{"test", "100"}
+	URLPathSegments []string
+
+	// RawBody is the HTTP request body bytes.
+	RawBody []byte
+
+	// ParsedBody is the parsed http.Request body parsed by a RequestBodyParser instance.
+	// It'll be nil if the HTTP request does not contain a body.
+	ParsedBody any
+
+	// App exposes application instance associated with the incoming HTTP request.
+	App *HTTPMockApp
+
+	// Mock is the matched Mock for the current HTTP request.
+	Mock *HTTPMock
+}
+
+// CallbackInput represents the arguments that will be passed to every Callback implementation
+type CallbackInput struct {
+	// RawRequest is the original incoming http.Request.
+	RawRequest *http.Request
+
+	// URL is the full request url.URL, including scheme, host, port.
+	URL *url.URL
+
+	// ParsedBody is the parsed http.Request body.
+	ParsedBody any
+
+	// App exposes the application instance associated with the incoming HTTP request.
+	App *HTTPMockApp
+
+	// Mock is the matched Mock for the current HTTP request.
+	Mock *HTTPMock
+
+	// MockedResponse is the HTTP response MockedResponse served.
+	MockedResponse *MockedResponse
+}
+
+// Callback defines the contract for an action that will be executed after serving a mocked HTTP response.
+type Callback func(input *CallbackInput) error
+
+// PostActionInput represents the arguments that will be passed to every Callback implementation
+type PostActionInput struct {
+	// RawRequest is the original incoming http.Request.
+	RawRequest *http.Request
+
+	// URL is the full request url.URL, including scheme, host, port.
+	URL *url.URL
+
+	// ParsedBody is the parsed http.Request body.
+	ParsedBody any
+
+	// App exposes the application instance associated with the incoming HTTP request.
+	App *HTTPMockApp
+
+	// Mock is the matched Mock for the current HTTP request.
+	Mock *HTTPMock
+
+	// MockedResponse is the HTTP response MockedResponse served.
+	MockedResponse *MockedResponse
+
+	// Args allow passing custom arguments to a PostAction.
+	Args any
+}
+
+// PostAction defines the contract for an action that will be executed after serving a mocked HTTP response.
+type PostAction interface {
+	// Run runs the Callback implementation.
+	Run(input *PostActionInput) error
+}
+
+type PostActionDef struct {
+	Name          string
+	RawParameters any
+}
+
+// Mapper is the function definition to be used to map a Mock response MockedResponse before serving it.
+type Mapper func(requestValues *RequestValues, res *MockedResponse) error
+
+// MockFileHandler defines a custom Mock file configuration handler.
+// It lets users define custom fields on mock configuration files that could be handled by a MockFileHandler instance.
+// It is also possible to change how built-in fields are handled.
+type MockFileHandler interface {
+	// Handle handles a Mock configuration file.
+	//  Parameter fields
+	Handle(fields map[string]any, b *HTTPMockBuilder) error
+}
+
+// mockFileData represents the data that is passed to Mock files during template parsing.
+type mockFileData struct {
+	params  kcore.Params
+	data    map[string]any
+	baseURL string
+}
+
+func (t *mockFileData) Parameters() kcore.Params {
+	return t.params
+}
+
+func (t *mockFileData) Data() map[string]any {
+	return t.data
+}
+
+func (t *mockFileData) URL(paths ...string) string {
+	if len(paths) == 0 {
+		return t.baseURL
+	}
+
+	u, err := url.JoinPath(t.baseURL, paths...)
+	if err != nil {
+		return ""
+	}
+
+	return u
+}
+
+// HTTPValueSelector defines a function that will be used to extract the value that will be passed to the associated matcher.
+type HTTPValueSelector func(ctx context.Context, r *HTTPValueSelectorInput) any
+
+type HTTPValueSelectorInput struct {
+	// RawRequest is the original incoming http.Request.
+	RawRequest *http.Request
+
+	// URL is the full request url.URL, including scheme, host, port.
+	URL *url.URL
+
+	Query url.Values
+
+	Form url.Values
+
+	// ParsedBody is the parsed http.Request body.
+	ParsedBody any
+}
+
+type HTTPExpectation = kcore.Expectation[*HTTPValueSelectorInput]
+
+// HTTPMock holds metadata and expectations to be matched against HTTP requests in order to serve mocked responses.
+// This is the core entity of this project, and most features work based on it.
+type HTTPMock struct {
+	*kcore.BaseMock
+
+	// Callbacks holds a Callback list to be executed after the Mock was matched and served.
+	Callbacks []Callback
+
+	PostActions []*PostActionDef
+
+	// Source describes the source of the mock. E.g.: if it was built from a file,
+	// it will contain the filename.
+	Source string
+
+	Reply Reply
+
+	// Mappers stores response mappers associated with this Mock.
+	Mappers []Mapper
+
+	Interceptors []kcore.Interceptor
+
+	after        []int
+	expectations []*kcore.Expectation[*HTTPValueSelectorInput]
+}
+
+// newMock returns a new Mock with default values set.
+func newMock() *HTTPMock {
+	return &HTTPMock{
+		BaseMock:     kcore.NewMock(),
+		Callbacks:    make([]Callback, 0),
+		PostActions:  make([]*PostActionDef, 0),
+		Mappers:      make([]Mapper, 0),
+		Interceptors: make([]kcore.Interceptor, 0),
+		expectations: make([]*kcore.Expectation[*HTTPValueSelectorInput], 0),
+	}
+}
+
+// Build allows users to use the Mock itself as a HTTPMockBuilder.
+func (m *HTTPMock) Build() (*HTTPMock, error) {
+	return m, nil
+}
+
+func (m *HTTPMock) Prepare() {
+	for i, e := range m.expectations {
+		_, ok := e.Matcher.(matcher.OnMockSent)
+		if ok {
+			m.after = append(m.after, i)
+		}
+	}
+}
+
+func (m *HTTPMock) Describe() map[string]any {
+	mockExpectations := m.expectations
+	data := make(map[string]any)
+	request := make(map[string]any)
+	counters := make(map[matchingScope]int)
+
+	for _, v := range mockExpectations {
+		counters[matchingScope(v.Target)]++
+	}
+
+	expectationsByTarget := make(map[matchingScope][]*HTTPExpectation)
+	for _, v := range mockExpectations {
+		t := matchingScope(v.Target)
+		expectationsByTarget[t] = append(expectationsByTarget[t], v)
+	}
+
+	for target, expectations := range expectationsByTarget {
+		switch target {
+		case matchingScopeQuery, matchingScopeQueries, matchingScopeHeader, matchingScopeFormField:
+			keys := make(map[string]any, counters[target])
+
+			if len(expectations) == 1 {
+				if sd, ok := expectations[0].Matcher.(descriptor.SelfDescribing); ok {
+					keys[expectations[0].Key] = sd.Describe()
+					request[target.FieldName()] = keys
+				}
+
+				continue
+			}
+
+			byKey := make(map[string][]*HTTPExpectation, counters[target])
+			for _, e := range expectations {
+				byKey[e.Key] = append(byKey[e.Key], e)
+			}
+
+			for _, e := range expectations {
+				size := len(byKey[e.Key])
+				if size == 0 {
+					continue
+				}
+
+				if size == 1 {
+					if sd, ok := e.Matcher.(descriptor.SelfDescribing); ok {
+						keys[e.Key] = sd.Describe()
+					}
+				} else {
+					matchers := make([]matcher.Matcher, 0, size)
+					for _, e := range byKey[e.Key] {
+						matchers = append(matchers, e.Matcher)
+					}
+
+					all := matcher.All(matchers...)
+					keys[e.Key] = all.(descriptor.SelfDescribing).Describe()
+				}
+			}
+
+			request[target.FieldName()] = keys
+
+		case matchingScopeScheme, matchingScopeURL, matchingScopeURLPath, matchingScopeBody:
+			if len(expectations) == 1 {
+				if sd, ok := expectations[0].Matcher.(descriptor.SelfDescribing); ok {
+					request[target.FieldName()] = sd.Describe()
+				}
+
+				continue
+			}
+
+			matchers := make([]matcher.Matcher, len(expectations))
+			for i, e := range expectations {
+				matchers[i] = e.Matcher
+			}
+
+			all := matcher.All(matchers...)
+			request[target.FieldName()] = all.(descriptor.SelfDescribing).Describe()
+
+		default:
+			for _, e := range expectations {
+				if sd, ok := e.Matcher.(descriptor.SelfDescribing); ok {
+					switch desc := sd.Describe().(type) {
+					case map[string]any:
+						for k, v := range desc {
+							data[k] = v
+						}
+					}
+				}
+			}
+		}
+	}
+
+	data["id"] = m.ID
+
+	if len(m.Name) > 0 {
+		data["name"] = m.Name
+	}
+
+	if m.Priority != 0 {
+		data["priority"] = m.Priority
+	}
+
+	if len(request) > 0 {
+		data["request"] = request
+	}
+
+	if m.Reply != nil {
+		if sd, ok := m.Reply.(descriptor.SelfDescribing); ok {
+			switch desc := sd.Describe().(type) {
+			case map[string]any:
+				for k, v := range desc {
+					data[k] = v
+				}
+			}
+		}
+	}
+
+	return data
+}
+
+func (m *HTTPMock) MarshalJSON() ([]byte, error) {
+	return json.Marshal(m.Describe())
+}
+
+type matchingScope int
+
+const (
+	matchingScopeNone matchingScope = iota
+	matchingScopeScheme
+	matchingScopeMethod
+	matchingScopeURL
+	matchingScopeURLPath
+	matchingScopeHeader
+	matchingScopeQuery
+	matchingScopeQueries
+	matchingScopeBody
+	matchingScopeFormField
+	matchingScopeScenario
+)
+
+func (t matchingScope) FieldName() string {
+	switch t {
+	case matchingScopeScheme:
+		return "scheme"
+	case matchingScopeMethod:
+		return "method"
+	case matchingScopeURL:
+		return "url"
+	case matchingScopeURLPath:
+		return "path"
+	case matchingScopeHeader:
+		return "header"
+	case matchingScopeQuery:
+		return "query"
+	case matchingScopeQueries:
+		return "queries"
+	case matchingScopeBody:
+		return "body"
+	case matchingScopeFormField:
+		return "form_url_encoded"
+	case matchingScopeScenario:
+		return "scenario"
+	default:
+		return ""
+	}
+}
+
+func (t matchingScope) String() string {
+	switch t {
+	case matchingScopeNone:
+		return "Req"
+	case matchingScopeScheme:
+		return "Scheme"
+	case matchingScopeMethod:
+		return "Method"
+	case matchingScopeURL:
+		return "URL"
+	case matchingScopeURLPath:
+		return "URLPath"
+	case matchingScopeHeader:
+		return "Header"
+	case matchingScopeQuery, matchingScopeQueries:
+		return "Query"
+	case matchingScopeBody:
+		return "Body"
+	case matchingScopeFormField:
+		return "Form"
+	case matchingScopeScenario:
+		return "Scenario"
+	default:
+		return "Req"
+	}
+}
+
+func describeTarget(t matchingScope, key string) string {
+	if len(key) == 0 {
+		return t.String()
+	}
+
+	return t.String() + "(" + key + ")"
+}

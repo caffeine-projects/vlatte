@@ -1,0 +1,18 @@
+request:
+  method: get
+  path: /test
+
+response:
+  status: 202
+
+post_actions:
+  - name: webhook
+    parameters:
+      url: {{ .Data.webhook_target }}
+      method: POST
+      header:
+        hello: world
+        dev: ok
+        content-type: application/json
+      body: '{"task": "done"}'
+      ssl_verify: false
