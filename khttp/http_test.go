@@ -48,7 +48,7 @@ func TestMocha(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-	require.True(t, scoped.HasBeenCalled())
+	require.True(t, scoped.Called())
 	require.Equal(t, 201, res.StatusCode)
 	require.Equal(t, string(body), "hello world")
 }
@@ -103,7 +103,7 @@ func TestErrors(t *testing.T) {
 	res, err := http.Get(fmt.Sprintf("%s/test2", m.URL()))
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-	require.False(t, scoped.HasBeenCalled())
+	require.False(t, scoped.Called())
 	require.Equal(t, StatusNoMatch, res.StatusCode)
 }
 
@@ -201,7 +201,7 @@ func TestMochaSilently(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-	require.True(t, scoped.HasBeenCalled())
+	require.True(t, scoped.Called())
 	require.Equal(t, 201, res.StatusCode)
 	require.Equal(t, string(body), "hello world")
 }
@@ -222,7 +222,7 @@ func TestSchemeMatching(t *testing.T) {
 	res, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-	require.True(t, scoped.HasBeenCalled())
+	require.True(t, scoped.Called())
 	require.Equal(t, http.StatusOK, res.StatusCode)
 }
 
@@ -265,7 +265,7 @@ func TestMocha_RequestMatches(t *testing.T) {
 	res, err := httpClient.Do(req)
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-	require.True(t, scoped.HasBeenCalled())
+	require.True(t, scoped.Called())
 	require.Equal(t, http.StatusOK, res.StatusCode)
 
 	req, _ = http.NewRequest(http.MethodPost, m.URL()+"/test", nil)

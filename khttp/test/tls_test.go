@@ -60,7 +60,7 @@ func TestTLS(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
 			require.Equal(t, "hello+world", string(b))
-			require.True(t, scoped.HasBeenCalled())
+			require.True(t, scoped.Called())
 		})
 	}
 }
@@ -88,7 +88,7 @@ func TestTLS_FileSetup(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, "hello+world", string(b))
-	require.True(t, scoped.HasBeenCalled())
+	require.True(t, scoped.Called())
 }
 
 func TestTLSMutual(t *testing.T) {

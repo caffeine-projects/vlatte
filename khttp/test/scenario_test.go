@@ -63,7 +63,7 @@ func TestScenarios(t *testing.T) {
 			body, err := io.ReadAll(res.Body)
 			require.NoError(t, err)
 
-			require.True(t, s1.HasBeenCalled())
+			require.True(t, s1.Called())
 			require.Equal(t, http.StatusOK, res.StatusCode)
 			require.Equal(t, "step1", string(body))
 			require.NoError(t, res.Body.Close())
@@ -85,7 +85,7 @@ func TestScenarios(t *testing.T) {
 			body, err = io.ReadAll(res.Body)
 			require.NoError(t, err)
 
-			require.True(t, s2.HasBeenCalled())
+			require.True(t, s2.Called())
 			require.Equal(t, http.StatusOK, res.StatusCode)
 			require.Equal(t, "step2", string(body))
 			require.NoError(t, res.Body.Close())
@@ -107,7 +107,7 @@ func TestScenarios(t *testing.T) {
 			body, err = io.ReadAll(res.Body)
 			require.NoError(t, err)
 
-			require.True(t, s3.HasBeenCalled())
+			require.True(t, s3.Called())
 			require.Equal(t, http.StatusOK, res.StatusCode)
 			require.Equal(t, "step3", string(body))
 			require.NoError(t, res.Body.Close())

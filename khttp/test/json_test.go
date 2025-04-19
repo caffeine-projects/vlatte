@@ -60,7 +60,7 @@ func TestPostJSON(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
-		assert.True(t, scoped.HasBeenCalled())
+		assert.True(t, scoped.Called())
 		assert.Equal(t, http.StatusOK, res.StatusCode)
 	})
 
@@ -87,7 +87,7 @@ func TestPostJSON(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
-		assert.True(t, scoped.HasBeenCalled())
+		assert.True(t, scoped.Called())
 		assert.Equal(t, http.StatusOK, res.StatusCode)
 	})
 
@@ -115,7 +115,7 @@ func TestPostJSON(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
-		assert.True(t, scoped.HasBeenCalled())
+		assert.True(t, scoped.Called())
 		assert.Equal(t, http.StatusOK, res.StatusCode)
 	})
 
@@ -148,7 +148,7 @@ func TestPostJSON(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
-		assert.True(t, scoped.HasBeenCalled())
+		assert.True(t, scoped.Called())
 		assert.Equal(t, http.StatusOK, res.StatusCode)
 	})
 
@@ -176,7 +176,7 @@ func TestPostJSON(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
-		assert.False(t, scoped.HasBeenCalled())
+		assert.False(t, scoped.Called())
 		assert.Equal(t, StatusNoMatch, res.StatusCode)
 	})
 
@@ -198,7 +198,7 @@ func TestPostJSON(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
-		assert.True(t, scoped.HasBeenCalled())
+		assert.True(t, scoped.Called())
 		assert.Equal(t, http.StatusOK, res.StatusCode)
 	})
 
@@ -268,7 +268,7 @@ func TestPostJSON(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
-		assert.True(t, scoped.HasBeenCalled())
+		assert.True(t, scoped.Called())
 		assert.Equal(t, http.StatusOK, res.StatusCode)
 	})
 }
@@ -328,7 +328,7 @@ func TestMalformedJSON_ShouldMatchOtherFieldsAndContinue(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-	assert.True(t, scoped.HasBeenCalled())
+	assert.True(t, scoped.Called())
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 }
 

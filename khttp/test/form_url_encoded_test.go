@@ -34,7 +34,7 @@ func TestFormUrlEncoded(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-	require.True(t, scoped.HasBeenCalled())
+	require.True(t, scoped.Called())
 }
 
 func TestFormUrlEncoded_InvalidFieldValues(t *testing.T) {

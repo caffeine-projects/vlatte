@@ -9,15 +9,15 @@ import (
 // Scope keeps a reference to a group of mocks.
 // With a Scope instance, it is possible to verify if one or a group of mocks were called,
 // how many times they were called and so on.
-type Scope[TMock Mock] struct {
-	mocks      map[string]TMock
-	del        map[string]struct{}
-	repository MockRepository[TMock]
-	rwmu       sync.RWMutex
+type Scope[M Mock] struct {
+	mocks map[string]M
+	del   map[string]struct{}
+	store MockRepository[M]
+	mu    sync.RWMutex
 }
 
-func NewScope[TMock Mock](repository MockRepository[TMock], mocks []TMock) *Scope[TMock] {
-	scoped := &Scope[TMock]{mocks: make(map[string]TMock, len(mocks)), del: make(map[string]struct{}), repository: repository}
+func Scoped[M Mock](store MockRepository[M], mocks []M) *Scope[M] {
+	scoped := &Scope[M]{mocks: make(map[string]M, len(mocks)), del: make(map[string]struct{}), store: store}
 	for _, m := range mocks {
 		scoped.mocks[m.GetID()] = m
 	}
@@ -25,9 +25,9 @@ func NewScope[TMock Mock](repository MockRepository[TMock], mocks []TMock) *Scop
 	return scoped
 }
 
-func (s *Scope[TMock]) IDs() []string {
-	s.rwmu.RLock()
-	defer s.rwmu.RUnlock()
+func (s *Scope[M]) IDs() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	ids := make([]string, 0, len(s.mocks))
 	for _, id := range s.mocks {
@@ -37,28 +37,28 @@ func (s *Scope[TMock]) IDs() []string {
 	return ids
 }
 
-func (s *Scope[TMock]) Exists(id string) bool {
-	s.rwmu.RLock()
-	defer s.rwmu.RUnlock()
+func (s *Scope[M]) Exists(id string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	_, exists := s.mocks[id]
 	return exists
 }
 
 // Get returns a Mock with the given ID.
-func (s *Scope[TMock]) Get(id string) TMock {
-	s.rwmu.RLock()
-	defer s.rwmu.RUnlock()
+func (s *Scope[M]) Get(id string) M {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	return s.mocks[id]
 }
 
 // GetAll returns all Mock instances kept in this Scope.
-func (s *Scope[TMock]) GetAll() []TMock {
-	s.rwmu.RLock()
-	defer s.rwmu.RUnlock()
+func (s *Scope[M]) GetAll() []M {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	mocks := make([]TMock, len(s.mocks))
+	mocks := make([]M, len(s.mocks))
 	i := 0
 
 	for _, m := range s.mocks {
@@ -70,11 +70,11 @@ func (s *Scope[TMock]) GetAll() []TMock {
 }
 
 // GetPending returns all Mock instances that were not called at least once.
-func (s *Scope[TMock]) GetPending() []TMock {
-	s.rwmu.RLock()
-	defer s.rwmu.RUnlock()
+func (s *Scope[M]) GetPending() []M {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	mocks := make([]TMock, 0, len(s.mocks))
+	mocks := make([]M, 0, len(s.mocks))
 
 	for _, m := range s.mocks {
 		if !m.HasBeenCalled() {
@@ -86,11 +86,11 @@ func (s *Scope[TMock]) GetPending() []TMock {
 }
 
 // GetCalled returns all Mock instances that were called.
-func (s *Scope[TMock]) GetCalled() []TMock {
-	s.rwmu.RLock()
-	defer s.rwmu.RUnlock()
+func (s *Scope[M]) GetCalled() []M {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	mocks := make([]TMock, 0, len(s.mocks))
+	mocks := make([]M, 0, len(s.mocks))
 
 	for _, m := range s.mocks {
 		if m.HasBeenCalled() {
@@ -101,10 +101,10 @@ func (s *Scope[TMock]) GetCalled() []TMock {
 	return mocks
 }
 
-// HasBeenCalled returns true if all Scope Mock instances were called at least once.
-func (s *Scope[TMock]) HasBeenCalled() bool {
-	s.rwmu.RLock()
-	defer s.rwmu.RUnlock()
+// Called returns true if all Scope Mock instances were called at least once.
+func (s *Scope[M]) Called() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	for _, m := range s.GetAll() {
 		if !m.HasBeenCalled() {
@@ -115,8 +115,8 @@ func (s *Scope[TMock]) HasBeenCalled() bool {
 	return true
 }
 
-// IsPending returns true when there are one or more Mock instances that were not called at least once.
-func (s *Scope[TMock]) IsPending() bool {
+// Pending returns true when there are one or more Mock instances that were not called at least once.
+func (s *Scope[M]) Pending() bool {
 	for _, m := range s.GetAll() {
 		if !m.HasBeenCalled() {
 			return true
@@ -128,23 +128,23 @@ func (s *Scope[TMock]) IsPending() bool {
 
 // Disable scoped store.
 // Disabled Mock will be ignored.
-func (s *Scope[TMock]) Disable() {
+func (s *Scope[M]) Disable() {
 	for _, m := range s.GetAll() {
 		m.Disable()
 	}
 }
 
 // Enable all Mock instances kept in this Scope.
-func (s *Scope[TMock]) Enable() {
+func (s *Scope[M]) Enable() {
 	for _, m := range s.GetAll() {
 		m.Enable()
 	}
 }
 
 // Delete removes a by ID, as long as it is scoped by this instance.
-func (s *Scope[TMock]) Delete(id string) bool {
-	s.rwmu.Lock()
-	defer s.rwmu.Unlock()
+func (s *Scope[M]) Delete(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	_, ok := s.mocks[id]
 	if !ok {
@@ -158,7 +158,7 @@ func (s *Scope[TMock]) Delete(id string) bool {
 }
 
 // Clean all scoped Mock instances.
-func (s *Scope[TMock]) Clean(ctx context.Context) error {
+func (s *Scope[M]) Clean(ctx context.Context) error {
 	for id := range s.mocks {
 		s.Delete(id)
 	}
@@ -167,7 +167,7 @@ func (s *Scope[TMock]) Clean(ctx context.Context) error {
 }
 
 // Hits returns the sum of the Scope store calls.
-func (s *Scope[TMock]) Hits() int64 {
+func (s *Scope[M]) Hits() int64 {
 	total := int64(0)
 	for _, m := range s.GetAll() {
 		total += m.Hits()
@@ -176,16 +176,16 @@ func (s *Scope[TMock]) Hits() int64 {
 	return total
 }
 
-func (s *Scope[TMock]) Sync(ctx context.Context) error {
-	s.rwmu.RLock()
-	defer s.rwmu.RUnlock()
+func (s *Scope[M]) Sync(ctx context.Context) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	mocks := make([]TMock, 0, len(s.mocks))
+	mocks := make([]M, 0, len(s.mocks))
 	for _, v := range s.mocks {
 		mocks = append(mocks, v)
 	}
 
-	if err := s.repository.Save(ctx, mocks...); err != nil {
+	if err := s.store.Save(ctx, mocks...); err != nil {
 		return err
 	}
 
@@ -195,7 +195,7 @@ func (s *Scope[TMock]) Sync(ctx context.Context) error {
 	}
 
 	for _, id := range ids {
-		err := s.repository.Delete(ctx, id)
+		err := s.store.Delete(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -207,10 +207,10 @@ func (s *Scope[TMock]) Sync(ctx context.Context) error {
 }
 
 // AssertCalled reports an error if there are still pending Mock instances.
-func (s *Scope[TMock]) AssertCalled(t TestingT) bool {
+func (s *Scope[M]) AssertCalled(t TestingT) bool {
 	t.Helper()
 
-	if !s.IsPending() {
+	if !s.Pending() {
 		return true
 	}
 
@@ -232,10 +232,10 @@ func (s *Scope[TMock]) AssertCalled(t TestingT) bool {
 }
 
 // AssertNotCalled reports an error if any mock was called.
-func (s *Scope[TMock]) AssertNotCalled(t TestingT) bool {
+func (s *Scope[M]) AssertNotCalled(t TestingT) bool {
 	t.Helper()
 
-	if s.IsPending() {
+	if s.Pending() {
 		return true
 	}
 
@@ -258,7 +258,7 @@ func (s *Scope[TMock]) AssertNotCalled(t TestingT) bool {
 
 // AssertNumberOfCalls asserts that the sum of matched request hits
 // is equal to the given expected value.
-func (s *Scope[TMock]) AssertNumberOfCalls(t TestingT, expected int64) bool {
+func (s *Scope[M]) AssertNumberOfCalls(t TestingT, expected int64) bool {
 	t.Helper()
 
 	hits := s.Hits()

@@ -73,7 +73,7 @@ func (a *MockBag[TMock, TMockApp]) Add(builders ...Builder[TMock, TMockApp]) (*S
 		added[i] = mock
 	}
 
-	scope := NewScope[TMock](a.repository, added)
+	scope := Scoped[TMock](a.repository, added)
 	a.scopes = append(a.scopes, scope)
 
 	return scope, nil
@@ -195,7 +195,7 @@ func (app *BaseApp[TMock, TMockApp]) AssertCalled(t TestingT) bool {
 	buf := strings.Builder{}
 
 	for i, s := range app.mockBag.List() {
-		if s.IsPending() {
+		if s.Pending() {
 			buf.WriteString(fmt.Sprintf("   Scope %d\n", i))
 			pending := s.GetPending()
 			size += len(pending)
@@ -231,7 +231,7 @@ func (app *BaseApp[TMock, TMockApp]) AssertNotCalled(t TestingT) bool {
 	buf := strings.Builder{}
 
 	for i, s := range app.mockBag.List() {
-		if !s.IsPending() {
+		if !s.Pending() {
 			buf.WriteString(fmt.Sprintf("   Scope %d\n", i))
 			called := s.GetCalled()
 			size += len(called)

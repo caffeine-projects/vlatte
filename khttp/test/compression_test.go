@@ -72,6 +72,6 @@ func Test_GZIPProxiedResponse(t *testing.T) {
 	assert.False(t, res.Uncompressed)
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 	assert.Equal(t, "hello world", string(b))
-	assert.True(t, ps.HasBeenCalled())
-	assert.True(t, ms.HasBeenCalled())
+	assert.True(t, ps.Called())
+	assert.True(t, ms.Called())
 }

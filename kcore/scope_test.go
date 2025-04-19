@@ -29,7 +29,7 @@ func TestScoped(t *testing.T) {
 	repo := kcore.NewStore[*testMock]()
 	repo.Save(context.Background(), m1, m2, m3)
 
-	scoped := kcore.NewScope(repo, []*testMock{m1, m2, m3})
+	scoped := kcore.Scoped(repo, []*testMock{m1, m2, m3})
 
 	require.Equal(t, 3, len(scoped.GetAll()))
 	require.Equal(t, m1, scoped.Get(m1.GetID()))
@@ -38,9 +38,9 @@ func TestScoped(t *testing.T) {
 	t.Run("should not return done when there is still pending mocks", func(t *testing.T) {
 		ft := testmock.NewFakeT()
 
-		require.False(t, scoped.HasBeenCalled())
+		require.False(t, scoped.Called())
 		require.Equal(t, 3, len(scoped.GetPending()))
-		require.True(t, scoped.IsPending())
+		require.True(t, scoped.Pending())
 
 		scoped.AssertCalled(ft)
 		ft.AssertNumberOfCalls(t, "Errorf", 1)
@@ -51,7 +51,7 @@ func TestScoped(t *testing.T) {
 
 		m1.Inc()
 
-		require.False(t, scoped.HasBeenCalled())
+		require.False(t, scoped.Called())
 		scoped.AssertCalled(ft)
 
 		m2.Inc()
@@ -59,11 +59,11 @@ func TestScoped(t *testing.T) {
 
 		ft.AssertNumberOfCalls(t, "Errorf", 1)
 		require.True(t, scoped.AssertCalled(t))
-		require.True(t, scoped.HasBeenCalled())
+		require.True(t, scoped.Called())
 		require.True(t, scoped.AssertNumberOfCalls(t, 3))
 		require.False(t, scoped.AssertNumberOfCalls(ft, 1))
 		require.Equal(t, 0, len(scoped.GetPending()))
-		require.False(t, scoped.IsPending())
+		require.False(t, scoped.Pending())
 	})
 
 	t.Run("should return total hits from store", func(t *testing.T) {
@@ -77,7 +77,7 @@ func TestScoped(t *testing.T) {
 
 		require.Equal(t, 0, len(scoped.GetPending()))
 		require.True(t, scoped.AssertNumberOfCalls(t, 0))
-		require.False(t, scoped.IsPending())
+		require.False(t, scoped.Pending())
 	})
 
 	t.Run("should only consider enabled store", func(t *testing.T) {
@@ -108,8 +108,8 @@ func TestScoped(t *testing.T) {
 			require.NoError(t, res.Body.Close())
 			require.Equal(t, http.StatusOK, res.StatusCode)
 
-			require.True(t, s1.HasBeenCalled())
-			require.True(t, s2.HasBeenCalled())
+			require.True(t, s1.Called())
+			require.True(t, s2.Called())
 		})
 
 		t.Run("disabled", func(t *testing.T) {
@@ -176,7 +176,7 @@ func TestScopedDelete(t *testing.T) {
 	m2 := newTestMock()
 	m3 := newTestMock()
 
-	scoped := kcore.NewScope(nil, []*testMock{m1, m2, m3})
+	scoped := kcore.Scoped(nil, []*testMock{m1, m2, m3})
 
 	require.True(t, scoped.Delete(m1.GetID()))
 	require.False(t, scoped.Delete("unknown"))
