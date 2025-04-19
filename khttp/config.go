@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/kcore/kv"
 	"github.com/caffeine-projects/vlatte/khttp/cors"
 )
 
@@ -156,7 +157,7 @@ type Config struct {
 	HandlerDecorator func(handler http.Handler) http.Handler
 
 	// Parameters sets a custom reply parameters store.
-	Parameters kcore.Params
+	Parameters kv.KV
 
 	// MockFileSearchPatterns configures glob patterns to load mock from the file system.
 	MockFileSearchPatterns []string
@@ -473,7 +474,7 @@ func (cb *ConfigBuilder) RedactHeader(names ...string) *ConfigBuilder {
 }
 
 // Parameters sets a custom reply parameters store.
-func (cb *ConfigBuilder) Parameters(params kcore.Params) *ConfigBuilder {
+func (cb *ConfigBuilder) Parameters(params kv.KV) *ConfigBuilder {
 	cb.conf.Parameters = params
 	return cb
 }

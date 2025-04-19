@@ -9,6 +9,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/kcore"
 	"github.com/caffeine-projects/vlatte/kcore/descriptor"
+	"github.com/caffeine-projects/vlatte/kcore/kv"
 	"github.com/caffeine-projects/vlatte/matcher"
 )
 
@@ -117,12 +118,12 @@ type MockFileHandler interface {
 
 // mockFileData represents the data that is passed to Mock files during template parsing.
 type mockFileData struct {
-	params  kcore.Params
+	params  kv.KV
 	data    map[string]any
 	baseURL string
 }
 
-func (t *mockFileData) Parameters() kcore.Params {
+func (t *mockFileData) Parameters() kv.KV {
 	return t.params
 }
 

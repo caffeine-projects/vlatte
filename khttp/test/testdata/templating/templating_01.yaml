@@ -1,7 +1,7 @@
 request:
   path: /test/templating
   method: POST
-  body: 'hello world -> {{ .Parameters.Get "test" }}'
+  body: 'hello world -> string({{ .Parameters.Get "test" }})'
 
 response:
   status: 200

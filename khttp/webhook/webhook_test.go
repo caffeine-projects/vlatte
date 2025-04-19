@@ -50,7 +50,7 @@ func TestWebHook_Run(t *testing.T) {
 		},
 		{"complex",
 			khttp.Postf("/third_party/hook").
-				Headerf("X-Key", key).
+				Headerf("X-Key", "%s", key).
 				Headerf(HeaderContentType, MIMETextPlain).
 				Body(Eq("hi")).
 				Reply(khttp.OK().PlainText("bye")),
@@ -66,7 +66,7 @@ func TestWebHook_Run(t *testing.T) {
 		{
 			"no body",
 			khttp.Postf("/third_party/hook").
-				Headerf("X-Key", key).
+				Headerf("X-Key", "%s", key).
 				Headerf(HeaderContentType, MIMETextPlain).
 				Reply(khttp.OK().PlainText("bye")),
 			Setup().
@@ -181,7 +181,7 @@ func TestWebHook_TLS(t *testing.T) {
 	target := khttp.NewAPI(khttp.Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile)).CloseWithT(t)
 	target.MustStartTLS()
 	target.MustMock(khttp.Postf("/third_party/hook/tls").
-		Headerf("X-Key", key).
+		Headerf("X-Key", "%s", key).
 		Headerf(HeaderContentType, MIMETextPlainCharsetUTF8).
 		Reply(khttp.OK().PlainText("hello")))
 

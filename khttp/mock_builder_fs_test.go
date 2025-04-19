@@ -19,11 +19,11 @@ func (p *customMockFileHandler) Handle(v map[string]any, b *HTTPMockBuilder) err
 	key := query.(map[string]any)["key"]
 	value := query.(map[string]any)["value"]
 
-	b.Queryf(key.(string), value.(string))
+	b.Queryf(key.(string), "%s", value.(string))
 
 	another := v["another_custom_field"]
 
-	b.Queryf("custom", fmt.Sprintf("%v", another))
+	b.Queryf("custom", "%s", fmt.Sprintf("%v", another))
 
 	return nil
 }

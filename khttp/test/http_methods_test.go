@@ -19,9 +19,9 @@ func TestHTTPMethods(t *testing.T) {
 
 	defer m.Close()
 
-	path1 := "/test/1"
-	path2 := "/test/2"
-	path3 := "/test/3"
+	const path1 = "/test/1"
+	const path2 = "/test/2"
+	const path3 = "/test/3"
 
 	testCases := []struct {
 		method string

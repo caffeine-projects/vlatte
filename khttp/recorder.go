@@ -162,7 +162,7 @@ func (r *recorder) start() {
 
 				err := r.process(a)
 				if err != nil {
-					r.logger.Error().Err(err).Msgf(err.Error())
+					r.logger.Error().Err(err).Msgf("%s", err.Error())
 				}
 
 			case <-r.close:

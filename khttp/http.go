@@ -16,6 +16,8 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/kcore/kv"
+	"github.com/caffeine-projects/vlatte/kcore/kv/kvmem"
 	"github.com/caffeine-projects/vlatte/khttp/cors"
 	"github.com/caffeine-projects/vlatte/khttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/khttp/internal/mid"
@@ -49,7 +51,7 @@ type HTTPMockApp struct {
 	scenarioStore      *mfeat.ScenarioStore
 	cancel             context.CancelFunc
 	requestBodyParsers []RequestBodyParser
-	params             kcore.Params
+	params             kv.KV
 	loaders            []Loader
 	rec                *recorder
 	rwMutex            sync.RWMutex
@@ -119,11 +121,11 @@ func NewAPI(config ...Configurer) *HTTPMockApp {
 
 	middlewares = append(middlewares, conf.Middlewares...)
 
-	var params kcore.Params
+	var params kv.KV
 	if conf.Parameters != nil {
 		params = conf.Parameters
 	} else {
-		params = kcore.NewInMemoryParameters()
+		params = kvmem.New()
 	}
 
 	var rec *recorder
@@ -263,7 +265,7 @@ func (app *HTTPMockApp) URL(paths ...string) string {
 }
 
 // Parameters returns Params instance associated with this application.
-func (app *HTTPMockApp) Parameters() kcore.Params {
+func (app *HTTPMockApp) Parameters() kv.KV {
 	return app.params
 }
 

@@ -8,6 +8,7 @@ import (
 	"text/template"
 
 	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/kcore/kv"
 )
 
 var (
@@ -20,12 +21,12 @@ type templateData struct {
 	Request *templateRequest
 	Extra   any
 
-	params  kcore.Params
+	params  kv.KV
 	data    map[string]any
 	baseURL string
 }
 
-func (t *templateData) Parameters() kcore.Params {
+func (t *templateData) Parameters() kv.KV {
 	return t.params
 }
 

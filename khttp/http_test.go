@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/caffeine-projects/vlatte/kcore/kv/kvmem"
 	"github.com/caffeine-projects/vlatte/khttp/test/testmock"
 	. "github.com/caffeine-projects/vlatte/matcher"
 )
@@ -57,8 +58,11 @@ func TestResponseMapperModifyingResponse(t *testing.T) {
 	const k = "key"
 	const v = "test-ok"
 
-	m := NewAPI()
-	_ = m.Parameters().Set(k, v)
+	kv := kvmem.New()
+	err := kv.Set(t.Context(), k, []byte(v))
+	require.NoError(t, err)
+
+	m := NewAPI(Setup().Parameters(kv))
 	m.MustStart()
 
 	defer m.Close()
@@ -66,9 +70,9 @@ func TestResponseMapperModifyingResponse(t *testing.T) {
 	scoped := m.MustMock(Get(URLPath("/test")).
 		Reply(OK()).
 		Map(func(rv *RequestValues, r *MockedResponse) error {
-			val, _ := rv.App.Parameters().Get(k)
+			val, _ := rv.App.Parameters().Get(t.Context(), k)
 
-			r.Header.Add("x-param-key", val.(string))
+			r.Header.Add("x-param-key", string(val))
 			r.Header.Add("x-test", rv.RawRequest.Header.Get("x-param"))
 
 			return nil
@@ -285,8 +289,8 @@ func TestMochaConcurrency(t *testing.T) {
 	for i := 0; i < jobs; i++ {
 		wg.Add(1)
 		go func(index int) {
-			m.MustMock(Getf("/test--" + strconv.FormatInt(int64(index), 10)).Reply(OK()))
-			m.MustMock(Getf("/concurrency--" + strconv.FormatInt(int64(index), 10)).Reply(Accepted()))
+			m.MustMock(Getf("%s", "/test--"+strconv.FormatInt(int64(index), 10)).Reply(OK()))
+			m.MustMock(Getf("%s", "/concurrency--"+strconv.FormatInt(int64(index), 10)).Reply(Accepted()))
 
 			m.Hits()
 			m.Disable()
@@ -294,13 +298,13 @@ func TestMochaConcurrency(t *testing.T) {
 
 			m.Clean()
 
-			m.MustMock(Getf("/test--" + strconv.FormatInt(int64(index), 10)).Reply(OK()))
-			m.MustMock(Getf("/concurrency--" + strconv.FormatInt(int64(index), 10)).Reply(Accepted()))
+			m.MustMock(Getf("%s", "/test--"+strconv.FormatInt(int64(index), 10)).Reply(OK()))
+			m.MustMock(Getf("%s", "/concurrency--"+strconv.FormatInt(int64(index), 10)).Reply(Accepted()))
 
 			wg.Done()
 		}(i)
 
-		m.MustMock(Getf("/test-outside--" + strconv.FormatInt(int64(i), 10)).Reply(Created()))
+		m.MustMock(Getf("%s", "/test-outside--"+strconv.FormatInt(int64(i), 10)).Reply(Created()))
 		m.Clean()
 
 		m.Hits()
@@ -333,24 +337,24 @@ func TestMochaConcurrentRequests(t *testing.T) {
 		go func(index int) {
 			num := strconv.FormatInt(int64(index), 10)
 
-			scope1 := m.MustMock(Getf("/test--" + num).Reply(OK()))
-			scope2 := m.MustMock(Getf("/concurrency--" + num).Reply(Accepted()))
-			scope3 := m.MustMock(Getf("/seq--" + num).Reply(Seq(OK(), BadRequest())))
-			scope4 := m.MustMock(Getf("/rand--" + num).Reply(Rand(Accepted(), InternalServerError())))
+			scope1 := m.MustMock(Getf("%s", "/test--"+num).Reply(OK()))
+			scope2 := m.MustMock(Getf("%s", "/concurrency--"+num).Reply(Accepted()))
+			scope3 := m.MustMock(Getf("%s", "/seq--"+num).Reply(Seq(OK(), BadRequest())))
+			scope4 := m.MustMock(Getf("%s", "/rand--"+num).Reply(Rand(Accepted(), InternalServerError())))
 
 			res, err := httpClient.Get(m.URL() + "/test--" + num)
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
 			require.Equal(t, http.StatusOK, res.StatusCode)
 
-			m.MustMock(Getf("/test-after--" + num).Reply(BadRequest()))
+			m.MustMock(Getf("%s", "/test-after--"+num).Reply(BadRequest()))
 
 			res, err = httpClient.Get(m.URL() + "/concurrency--" + num)
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
 			require.Equal(t, http.StatusAccepted, res.StatusCode)
 
-			m.MustMock(Getf("/concurrency-after--" + num).Reply(InternalServerError()))
+			m.MustMock(Getf("%s", "/concurrency-after--"+num).Reply(InternalServerError()))
 
 			res, err = httpClient.Get(m.URL() + "/seq--" + num)
 			require.NoError(t, err)
@@ -378,7 +382,7 @@ func TestMochaConcurrentRequests(t *testing.T) {
 			scope4.AssertCalled(t)
 			scope4.AssertNumberOfCalls(t, 50)
 
-			m.MustMock(Getf("/test-final--" + num).Reply(PartialContent()))
+			m.MustMock(Getf("%s", "/test-final--"+num).Reply(PartialContent()))
 
 			wg.Done()
 		}(i)

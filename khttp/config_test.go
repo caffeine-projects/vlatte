@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
-	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/kcore/kv/kvmem"
 	"github.com/caffeine-projects/vlatte/khttp/cors"
 	"github.com/caffeine-projects/vlatte/khttp/httpval"
 	"github.com/caffeine-projects/vlatte/matcher"
@@ -183,7 +183,7 @@ func TestConfigBuilder(t *testing.T) {
 		Logger(&customLogger).
 		UseDescriptiveLogger().
 		RedactHeader("header-1", "HEADER-2", "hEaDeR-3").
-		Parameters(kcore.NewInMemoryParameters()).
+		Parameters(kvmem.New()).
 		MockFilePatterns("test", "dev").
 		Loader(&fileLoader{}).
 		MockFileHandlers(&customMockFileHandler{}).
@@ -211,7 +211,7 @@ func TestConfigBuilder(t *testing.T) {
 	require.False(t, conf.LogPretty)
 	require.Equal(t, &customLogger, conf.Logger)
 	require.Equal(t, int64(100), conf.LogBodyMaxSize)
-	require.Equal(t, kcore.NewInMemoryParameters(), conf.Parameters)
+	require.Equal(t, kvmem.New(), conf.Parameters)
 	require.Equal(t, []string{"test", "dev"}, conf.MockFileSearchPatterns)
 	require.True(t, conf.Debug)
 	require.Len(t, conf.HeaderNamesToRedact, 3)
