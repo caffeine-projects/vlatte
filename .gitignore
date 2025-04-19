@@ -34,7 +34,8 @@ coverage.html
 test-report.out
 
 # Project
-
+.idea/
+.vscode/
 .local/
 
 out/
