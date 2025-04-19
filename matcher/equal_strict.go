@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/caffeine-projects/vlatte/matcher/internal/mfmt"
 )
 
@@ -20,8 +21,8 @@ func (m *equalStrictMatcher) Match(v any) (Result, error) {
 	return mismatch(strings.Join([]string{"StrictEq(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, "")), nil
 }
 
-func (m *equalStrictMatcher) Describe() any {
-	return []any{"eqs", m.expected}
+func (m *equalStrictMatcher) Describe() descriptor.Descriptor {
+	return descriptor.MultiArgs("eqs", m.expected)
 }
 
 // StrictEqual strictly compares the expected value with incoming request values, considering value and type.

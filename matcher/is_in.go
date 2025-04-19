@@ -3,6 +3,8 @@ package matcher
 import (
 	"fmt"
 	"reflect"
+
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 )
 
 type isContainedInMatcher struct {
@@ -32,8 +34,8 @@ func (m *isContainedInMatcher) Match(v any) (Result, error) {
 	}, nil
 }
 
-func (m *isContainedInMatcher) Describe() any {
-	return []any{"isIn", m.items}
+func (m *isContainedInMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("isIn", m.items)
 }
 
 // IsIn checks if the incoming request value is in the given items.

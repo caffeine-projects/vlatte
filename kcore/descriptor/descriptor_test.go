@@ -1,4 +1,4 @@
-package desc
+package descriptor
 
 import (
 	"testing"
@@ -20,6 +20,9 @@ func TestDescriptor_MarshalJSON(t *testing.T) {
 		{"array with map", []any{"a", "b", map[string]any{"c": "d", "e": []int{1, 2, 3}}}, `["array with map","a","b",{"c":"d","e":[1,2,3]}]`},
 		{"slice + inner slice", []any{"a", "b", []any{"c", "d"}}, `["slice + inner slice","a","b",["c","d"]]`},
 		{"arrays", []any{"a", "b", []any{"c", "d"}, []any{"e", "f"}}, `["arrays","a","b",["c","d"],["e","f"]]`},
+		{"inner descriptor", []any{"a", "b", New("inner", []any{"c", "d"})}, `["inner descriptor","a","b",["inner","c","d"]]`},
+		{"only key", nil, `["only key"]`},
+		{"descriptor", New("key", []any{"a", "b", false, 10}), `["key","a","b",false,10]`},
 	}
 
 	for _, tc := range testCases {
@@ -38,12 +41,12 @@ func TestDescriptor_MarshalJSON(t *testing.T) {
 
 func TestDescriptor_Append(t *testing.T) {
 	existing := map[string]any{"a": "100", "b": "200"}
-	d := Descriptor{Key: "c", Props: map[string]any{"d": "300", "e": "400"}}
+	d := New("c", map[string]any{"d": "300", "e": "400"})
 
-	err := d.Append(existing)
+	err := d.Merge(existing)
 	require.NoError(t, err)
 	require.Equal(t, map[string]any{"a": "100", "b": "200", "c": map[string]any{"d": "300", "e": "400"}}, existing)
-	require.ErrorIs(t, d.Append(map[string]any{"c": "something else"}), ErrKeyAlreadyExists)
+	require.ErrorIs(t, d.Merge(map[string]any{"c": "something else"}), ErrKeyAlreadyExists)
 }
 
 func TestDescriptor_Validate(t *testing.T) {

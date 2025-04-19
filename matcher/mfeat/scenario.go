@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/caffeine-projects/vlatte/matcher"
 )
 
@@ -101,12 +102,12 @@ func (m *scenarioMatcher) OnMockSent() error {
 	return nil
 }
 
-func (m *scenarioMatcher) Describe() any {
-	return map[string]any{"scenario": map[string]any{
+func (m *scenarioMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("scenario", map[string]any{
 		"name":           m.name,
 		"required_state": m.requiredState,
 		"new_state":      m.newState,
-	}}
+	})
 }
 
 func Scenario(store *ScenarioStore, name, requiredState, newState string) matcher.Matcher {

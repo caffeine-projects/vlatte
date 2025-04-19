@@ -75,10 +75,10 @@ func (r *SequentialReply) Build(w http.ResponseWriter, req *RequestValues) (*Moc
 	return reply.Build(w, req)
 }
 
-func (r *SequentialReply) Describe() any {
+func (r *SequentialReply) Describe() descriptor.Descriptor {
 	replies := make([]any, 0, len(r.replies))
 	for _, v := range r.replies {
-		if sd, ok := v.(descriptor.SelfDescribing); ok {
+		if sd, ok := v.(descriptor.Self); ok {
 			replies = append(replies, sd.Describe())
 		}
 	}
@@ -86,12 +86,12 @@ func (r *SequentialReply) Describe() any {
 	desc := map[string]any{"responses": replies}
 
 	if r.replyAfterSequenceEnded != nil {
-		if sd, ok := r.replyAfterSequenceEnded.(descriptor.SelfDescribing); ok {
+		if sd, ok := r.replyAfterSequenceEnded.(descriptor.Self); ok {
 			desc["after_ended"] = sd.Describe()
 		}
 	}
 
-	return map[string]any{"response_sequence": desc}
+	return descriptor.New("response_sequence", desc)
 }
 
 func (r *SequentialReply) totalHits() int {

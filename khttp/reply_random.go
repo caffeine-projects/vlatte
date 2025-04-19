@@ -75,10 +75,10 @@ func (rep *RandomReply) Build(w http.ResponseWriter, r *RequestValues) (*MockedR
 	return reply.Build(w, r)
 }
 
-func (rep *RandomReply) Describe() any {
+func (rep *RandomReply) Describe() descriptor.Descriptor {
 	replies := make([]any, 0, len(rep.replies))
 	for _, v := range rep.replies {
-		if sd, ok := v.(descriptor.SelfDescribing); ok {
+		if sd, ok := v.(descriptor.Self); ok {
 			replies = append(replies, sd.Describe())
 		}
 	}
@@ -88,5 +88,5 @@ func (rep *RandomReply) Describe() any {
 		desc["seed"] = rep.seed
 	}
 
-	return map[string]any{"response_random": desc}
+	return descriptor.New("response_random", desc)
 }

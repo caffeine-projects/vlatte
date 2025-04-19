@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/caffeine-projects/vlatte/matcher/internal/mfmt"
 )
 
@@ -19,8 +20,8 @@ func (m *equalMatcher) Match(v any) (Result, error) {
 	return mismatch(strings.Join([]string{"Equal(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, "")), nil
 }
 
-func (m *equalMatcher) Describe() any {
-	return []any{"eq", m.expected}
+func (m *equalMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("eq", m.expected)
 }
 
 // Equal asserts that the given expectation is equal to the incoming request value.

@@ -3,6 +3,8 @@ package matcher
 import (
 	"fmt"
 	"strings"
+
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 )
 
 type hasSuffixMatcher struct {
@@ -24,8 +26,8 @@ func (m *hasSuffixMatcher) Match(v any) (Result, error) {
 	}, nil
 }
 
-func (m *hasSuffixMatcher) Describe() any {
-	return []any{"hasSuffix", m.suffix}
+func (m *hasSuffixMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("hasSuffix", m.suffix)
 }
 
 // HasSuffix passes when matcher argument ends with the given suffix.

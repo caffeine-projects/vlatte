@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/caffeine-projects/vlatte/matcher/internal/mfmt"
 )
 
@@ -23,8 +24,8 @@ func (m *emptyMatcher) Match(v any) (Result, error) {
 	return Result{result.Pass, strings.Join([]string{"Empty(", mfmt.Stringify(v), ")"}, "")}, nil
 }
 
-func (m *emptyMatcher) Describe() any {
-	return []any{"empty"}
+func (m *emptyMatcher) Describe() descriptor.Descriptor {
+	return descriptor.KeyOnly("empty")
 }
 
 // Empty passes if the incoming request value is empty or has zero value.

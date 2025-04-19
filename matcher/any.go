@@ -41,15 +41,15 @@ func (m *anyOfMatcher) Match(v any) (r Result, e error) {
 	return Result{Message: strings.Join([]string{"Any(", strconv.Itoa(len(m.matchers)), ")\n", mfmt.Indent(strings.Join(mismatches, "\n"))}, "")}, nil
 }
 
-func (m *anyOfMatcher) Describe() any {
+func (m *anyOfMatcher) Describe() descriptor.Descriptor {
 	d := make([]any, 0, len(m.matchers))
 	for _, v := range m.matchers {
-		if vv, ok := v.(descriptor.SelfDescribing); ok {
+		if vv, ok := v.(descriptor.Self); ok {
 			d = append(d, vv.Describe())
 		}
 	}
 
-	return []any{"any", d}
+	return descriptor.MultiArgs("any", d)
 }
 
 // Any matches when any of the given matchers pass.

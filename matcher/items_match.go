@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 )
 
 type itemsMatchMatcher struct {
@@ -63,8 +65,8 @@ func (m *itemsMatchMatcher) Match(v any) (Result, error) {
 	return Result{Message: "ItemsMatch() Items doesn't match"}, nil
 }
 
-func (m *itemsMatchMatcher) Describe() any {
-	return []any{"itemsMatch", m.expected}
+func (m *itemsMatchMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("itemsMatch", m.expected)
 }
 
 // ItemsMatch if the given array items match with the incoming request value array.

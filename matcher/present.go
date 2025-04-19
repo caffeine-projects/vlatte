@@ -3,6 +3,7 @@ package matcher
 import (
 	"reflect"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/caffeine-projects/vlatte/matcher/internal/mfmt"
 )
 
@@ -34,8 +35,8 @@ func (m *bePresentMatcher) Match(v any) (Result, error) {
 	return Result{Pass: true}, nil
 }
 
-func (m *bePresentMatcher) Describe() any {
-	return []any{"present"}
+func (m *bePresentMatcher) Describe() descriptor.Descriptor {
+	return descriptor.KeyOnly("present")
 }
 
 // Present checks if the incoming request value contains a value that is not nil or the zero value for the argument type.

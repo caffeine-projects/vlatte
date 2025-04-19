@@ -3,6 +3,8 @@ package matcher
 import (
 	"fmt"
 	"strings"
+
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 )
 
 type equalIgnoreCaseMatcher struct {
@@ -26,8 +28,8 @@ func (m *equalIgnoreCaseMatcher) Match(v any) (Result, error) {
 	return mismatch(strings.Join([]string{"Eqi(", m.expected, ") Got: ", txt}, "")), nil
 }
 
-func (m *equalIgnoreCaseMatcher) Describe() any {
-	return []any{"eqi", m.expected}
+func (m *equalIgnoreCaseMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("eqi", m.expected)
 }
 
 // EqualIgnoreCase compares the expected value with the incoming request value ignoring the case.

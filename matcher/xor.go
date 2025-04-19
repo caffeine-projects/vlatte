@@ -3,6 +3,8 @@ package matcher
 import (
 	"fmt"
 	"strings"
+
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 )
 
 type xorMatcher struct {
@@ -39,8 +41,8 @@ func (m *xorMatcher) Match(v any) (Result, error) {
 	return Result{Message: strings.Join([]string{"XOR()", message}, " ")}, nil
 }
 
-func (m *xorMatcher) Describe() any {
-	return []any{"xor", describe(m.first), describe(m.second)}
+func (m *xorMatcher) Describe() descriptor.Descriptor {
+	return descriptor.MultiArgs("xor", describe(m.first), describe(m.second))
 }
 
 // XOR is an exclusive OR matcher.

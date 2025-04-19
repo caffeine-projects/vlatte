@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/caffeine-projects/vlatte/matcher/internal/mfmt"
 )
 
@@ -54,8 +55,8 @@ func (m *equalJSONMatcher) Match(v any) (Result, error) {
 	}, nil
 }
 
-func (m *equalJSONMatcher) Describe() any {
-	return []any{"eqj", m.expected}
+func (m *equalJSONMatcher) Describe() descriptor.Descriptor {
+	return descriptor.MultiArgs("eqj", m.expected)
 }
 
 // EqualJSON matches JSON values.

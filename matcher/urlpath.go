@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 )
 
 type urlPathMatcher struct {
@@ -48,8 +50,8 @@ func (m *urlPathMatcher) Match(v any) (Result, error) {
 	return Result{Message: strings.Join([]string{"URLPath(", value, ") ", res.Message}, "")}, nil
 }
 
-func (m *urlPathMatcher) Describe() any {
-	return []any{"urlPath", describe(m.matcher)}
+func (m *urlPathMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("urlPath", describe(m.matcher))
 }
 
 // URLPath compares the URL path with the expected value and matches if they are equal.

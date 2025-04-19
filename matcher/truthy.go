@@ -3,6 +3,8 @@ package matcher
 import (
 	"fmt"
 	"strconv"
+
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 )
 
 type truthyMatcher struct {
@@ -32,8 +34,8 @@ func (m *truthyMatcher) Match(v any) (Result, error) {
 	return Result{Pass: true}, nil
 }
 
-func (m *truthyMatcher) Describe() any {
-	return []any{"truthy"}
+func (m *truthyMatcher) Describe() descriptor.Descriptor {
+	return descriptor.KeyOnly("truthy")
 }
 
 // Truthy passes if the request value is true.

@@ -2,6 +2,8 @@ package matcher
 
 import (
 	"fmt"
+
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 )
 
 type notMatcher struct {
@@ -23,8 +25,8 @@ func (m *notMatcher) Match(v any) (Result, error) {
 	}, nil
 }
 
-func (m *notMatcher) Describe() any {
-	return []any{"not", describe(m.matcher)}
+func (m *notMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("not", describe(m.matcher))
 }
 
 // Not negates the provided matcher.

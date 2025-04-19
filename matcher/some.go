@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/caffeine-projects/vlatte/matcher/internal/mfmt"
 )
 
@@ -52,8 +53,8 @@ func (m *someMatcher) Match(v any) (Result, error) {
 	}, nil
 }
 
-func (m *someMatcher) Describe() any {
-	return []any{"some", describe(m.matcher)}
+func (m *someMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("some", describe(m.matcher))
 }
 
 // Some will use the given matcher to test whether at least one element in the request value passes.

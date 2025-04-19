@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 )
 
 var _ Reply = (*ProxyReply)(nil)
@@ -248,18 +250,16 @@ func noFollow(_ *http.Request, _ []*http.Request) error {
 	return http.ErrUseLastResponse
 }
 
-func (r *ProxyReply) Describe() any {
-	return map[string]any{
-		"proxy": map[string]any{
-			"target":         r.target.String(),
-			"forward_header": r.proxyHeaders,
-			"header":         r.headers,
-			"remove_headers": r.proxyHeadersToRemove,
-			"trim_prefix":    r.trimPrefix,
-			"trim_suffix":    r.trimSuffix,
-			"timeout":        r.timeout.String(),
-			"ssl_verify":     r.sslVerify,
-			"no_follow":      r.noFollow,
-		},
-	}
+func (r *ProxyReply) Describe() descriptor.Descriptor {
+	return descriptor.New("proxy", map[string]any{
+		"target":         r.target.String(),
+		"forward_header": r.proxyHeaders,
+		"header":         r.headers,
+		"remove_headers": r.proxyHeadersToRemove,
+		"trim_prefix":    r.trimPrefix,
+		"trim_suffix":    r.trimSuffix,
+		"timeout":        r.timeout.String(),
+		"ssl_verify":     r.sslVerify,
+		"no_follow":      r.noFollow,
+	})
 }

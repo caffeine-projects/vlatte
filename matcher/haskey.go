@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/ohler55/ojg/jp"
 	"github.com/ohler55/ojg/oj"
 )
@@ -38,8 +39,8 @@ func (m *hasKeyMatcher) Match(v any) (Result, error) {
 	return Result{Pass: true}, nil
 }
 
-func (m *hasKeyMatcher) Describe() any {
-	return []any{"hasKey", m.path}
+func (m *hasKeyMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("hasKey", m.path)
 }
 
 // HasKey passes if the JSON key in the given path is present.

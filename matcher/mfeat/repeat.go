@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/caffeine-projects/vlatte/matcher"
 )
 
@@ -29,8 +30,8 @@ func (m *repeatMatcher) OnMockSent() error {
 	return nil
 }
 
-func (m *repeatMatcher) Describe() any {
-	return map[string]any{"repeat": m.max}
+func (m *repeatMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("repeat", m.max)
 }
 
 func Repeat(times int64) matcher.Matcher {

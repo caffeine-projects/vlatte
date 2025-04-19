@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/caffeine-projects/vlatte/matcher/internal/mconv"
 	"github.com/caffeine-projects/vlatte/matcher/internal/mfmt"
 )
@@ -29,8 +30,8 @@ func (m *greaterOrEqualMatcher) Match(v any) (Result, error) {
 	return Result{Message: strings.Join([]string{"Gte(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, "")}, nil
 }
 
-func (m *greaterOrEqualMatcher) Describe() any {
-	return []any{"gte", m.expected}
+func (m *greaterOrEqualMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("gte", m.expected)
 }
 
 // GreaterThanOrEqual passes if the incoming request value is greater than or equal to the given value.

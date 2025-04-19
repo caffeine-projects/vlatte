@@ -62,12 +62,12 @@ func (m *eachMatcher) Match(v any) (Result, error) {
 	return Result{}, fmt.Errorf("type %s is not supported. accepted types: map, array", valType.String())
 }
 
-func (m *eachMatcher) Describe() any {
-	if sd, ok := m.matcher.(descriptor.SelfDescribing); ok {
-		return []any{"each", sd.Describe()}
+func (m *eachMatcher) Describe() descriptor.Descriptor {
+	if desc, ok := descriptor.IsSD(m.matcher); ok {
+		return descriptor.MultiArgs("each", desc)
 	}
 
-	return []any{"each"}
+	return descriptor.KeyOnly("each")
 }
 
 // Each applies the given matcher on all items of the incoming request value.

@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 )
 
 type regExpMatcher struct {
@@ -40,8 +42,8 @@ func (m *regExpMatcher) Match(v any) (Result, error) {
 	return Result{Message: strings.Join([]string{"Match(", m.expression, ") Expression did not match. Got: ", txt}, "")}, nil
 }
 
-func (m *regExpMatcher) Describe() any {
-	return []any{"regexp", m.expression}
+func (m *regExpMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("regexp", m.expression)
 }
 
 // Matches passes when the given regular expression matches the incoming request value.

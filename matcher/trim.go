@@ -3,6 +3,8 @@ package matcher
 import (
 	"fmt"
 	"strings"
+
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 )
 
 type trimMatcher struct {
@@ -27,8 +29,8 @@ func (m *trimMatcher) Match(v any) (Result, error) {
 	return Result{Message: strings.Join([]string{"Trim(", txt, ") ", result.Message}, "")}, nil
 }
 
-func (m *trimMatcher) Describe() any {
-	return []any{"trim", describe(m.matcher)}
+func (m *trimMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("trim", describe(m.matcher))
 }
 
 // Trim trims' spaces of the incoming request value before submitting it to the provided matcher.

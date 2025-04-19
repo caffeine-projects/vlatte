@@ -2,7 +2,6 @@ package khttp
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"time"
@@ -215,7 +214,7 @@ func (m *HTTPMock) Prepare() {
 	}
 }
 
-func (m *HTTPMock) Describe() map[string]any {
+func (m *HTTPMock) Describe() descriptor.Descriptor {
 	mockExpectations := m.expectations
 	data := make(map[string]any)
 	request := make(map[string]any)
@@ -237,7 +236,7 @@ func (m *HTTPMock) Describe() map[string]any {
 			keys := make(map[string]any, counters[target])
 
 			if len(expectations) == 1 {
-				if sd, ok := expectations[0].Matcher.(descriptor.SelfDescribing); ok {
+				if sd, ok := expectations[0].Matcher.(descriptor.Self); ok {
 					keys[expectations[0].Key] = sd.Describe()
 					request[target.FieldName()] = keys
 				}
@@ -257,7 +256,7 @@ func (m *HTTPMock) Describe() map[string]any {
 				}
 
 				if size == 1 {
-					if sd, ok := e.Matcher.(descriptor.SelfDescribing); ok {
+					if sd, ok := e.Matcher.(descriptor.Self); ok {
 						keys[e.Key] = sd.Describe()
 					}
 				} else {
@@ -267,7 +266,7 @@ func (m *HTTPMock) Describe() map[string]any {
 					}
 
 					all := matcher.All(matchers...)
-					keys[e.Key] = all.(descriptor.SelfDescribing).Describe()
+					keys[e.Key] = all.(descriptor.Self).Describe()
 				}
 			}
 
@@ -275,7 +274,7 @@ func (m *HTTPMock) Describe() map[string]any {
 
 		case matchingScopeScheme, matchingScopeURL, matchingScopeURLPath, matchingScopeBody:
 			if len(expectations) == 1 {
-				if sd, ok := expectations[0].Matcher.(descriptor.SelfDescribing); ok {
+				if sd, ok := expectations[0].Matcher.(descriptor.Self); ok {
 					request[target.FieldName()] = sd.Describe()
 				}
 
@@ -288,16 +287,13 @@ func (m *HTTPMock) Describe() map[string]any {
 			}
 
 			all := matcher.All(matchers...)
-			request[target.FieldName()] = all.(descriptor.SelfDescribing).Describe()
+			request[target.FieldName()] = all.(descriptor.Self).Describe()
 
 		default:
 			for _, e := range expectations {
-				if sd, ok := e.Matcher.(descriptor.SelfDescribing); ok {
-					switch desc := sd.Describe().(type) {
-					case map[string]any:
-						for k, v := range desc {
-							data[k] = v
-						}
+				if sd, ok := e.Matcher.(descriptor.Self); ok {
+					if desc := sd.Describe(); desc.IsMap() {
+						desc.Merge(data)
 					}
 				}
 			}
@@ -319,21 +315,18 @@ func (m *HTTPMock) Describe() map[string]any {
 	}
 
 	if m.Reply != nil {
-		if sd, ok := m.Reply.(descriptor.SelfDescribing); ok {
-			switch desc := sd.Describe().(type) {
-			case map[string]any:
-				for k, v := range desc {
-					data[k] = v
-				}
+		if sd, ok := m.Reply.(descriptor.Self); ok {
+			if desc := sd.Describe(); desc.IsMap() {
+				desc.Merge(data)
 			}
 		}
 	}
 
-	return data
+	return descriptor.Root(data)
 }
 
 func (m *HTTPMock) MarshalJSON() ([]byte, error) {
-	return json.Marshal(m.Describe())
+	return m.Describe().MarshalJSON()
 }
 
 type matchingScope int

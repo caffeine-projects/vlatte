@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/ryanuber/go-glob"
 )
 
@@ -24,8 +25,8 @@ func (m *globMatcher) Match(v any) (Result, error) {
 	return Result{Message: strings.Join([]string{"Glob(", m.pattern, ") ", text}, "")}, nil
 }
 
-func (m *globMatcher) Describe() any {
-	return []any{"glob", m.pattern}
+func (m *globMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("glob", m.pattern)
 }
 
 func GlobMatch(pattern string) Matcher {

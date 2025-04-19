@@ -3,6 +3,8 @@ package matcher
 import (
 	"fmt"
 	"strings"
+
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 )
 
 type lowerCaseMatcher struct {
@@ -29,8 +31,8 @@ func (m *lowerCaseMatcher) Match(v any) (Result, error) {
 	}, nil
 }
 
-func (m *lowerCaseMatcher) Describe() any {
-	return []any{"lowercase", describe(m.matcher)}
+func (m *lowerCaseMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("lowercase", describe(m.matcher))
 }
 
 // ToLower lowers the incoming request value case value before submitting it to provided matcher.

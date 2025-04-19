@@ -3,6 +3,8 @@ package matcher
 import (
 	"fmt"
 	"strings"
+
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 )
 
 type hasPrefixMatcher struct {
@@ -23,8 +25,8 @@ func (m *hasPrefixMatcher) Match(v any) (Result, error) {
 	}, nil
 }
 
-func (m *hasPrefixMatcher) Describe() any {
-	return []any{"hasPrefix", m.prefix}
+func (m *hasPrefixMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("hasPrefix", m.prefix)
 }
 
 // HasPrefix passes if the matcher argument starts with the given prefix.

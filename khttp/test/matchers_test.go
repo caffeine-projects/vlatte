@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -52,7 +53,7 @@ func TestMatcherCombinations(t *testing.T) {
 	sHTTP := m.MustMock(FromFile("testdata/matchers/01_matchers.yaml"))
 	sHTTPS := m.MustMock(FromFile("testdata/matchers/02_matchers.yaml"))
 
-	actuateAndAssert := func(baseURL string) {
+	actAndAssert := func(baseURL string) {
 		body := &model{
 			Name:    "hello world",
 			Hobbies: []string{"bike", "trekking"},
@@ -70,8 +71,7 @@ func TestMatcherCombinations(t *testing.T) {
 			Department: "  Bombs  ",
 			Place:      "Berlin",
 			Numbers:    []int{10, 20, 30, 40, 50},
-
-			Days: 10,
+			Days:       10,
 		}
 
 		buf := new(bytes.Buffer)
@@ -117,12 +117,12 @@ func TestMatcherCombinations(t *testing.T) {
 
 	m.MustStart()
 	u := m.URL()
-	actuateAndAssert(u)
+	actAndAssert(u)
 	m.Close()
 
 	m.MustStartTLS()
 	u = m.URL()
-	actuateAndAssert(u)
+	actAndAssert(u)
 	m.Close()
 
 	require.True(t, sHTTP.AssertNumberOfCalls(t, 1))
@@ -136,9 +136,11 @@ func TestMatcherCombinations(t *testing.T) {
 	b, err := entry.MarshalJSON()
 	require.NoError(t, err)
 
+	fmt.Println(string(b))
+
 	m.MustMock(FromBytes(b, "json"))
 
-	actuateAndAssert(m.URL())
+	actAndAssert(m.URL())
 }
 
 func TestMatchers_MultipleMethods(t *testing.T) {

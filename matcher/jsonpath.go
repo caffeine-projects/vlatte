@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/ohler55/ojg/jp"
 	"github.com/ohler55/ojg/oj"
 )
@@ -55,8 +56,8 @@ func (m *jsonPathMatcher) Match(v any) (Result, error) {
 	}, nil
 }
 
-func (m *jsonPathMatcher) Describe() any {
-	return []any{"jsonPath", m.path, describe(m.matcher)}
+func (m *jsonPathMatcher) Describe() descriptor.Descriptor {
+	return descriptor.MultiArgs("jsonPath", m.path, describe(m.matcher))
 }
 
 // JSONPath applies the provided matcher to the JSON field value in the given path.

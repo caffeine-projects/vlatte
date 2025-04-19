@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/caffeine-projects/vlatte/khttp/httpval"
 	"github.com/caffeine-projects/vlatte/khttp/internal/bufpool"
 )
@@ -502,7 +503,7 @@ func (rep *StdReply) buildTemplateData(r *RequestValues, ext any) *templateData 
 		Extra:   ext}
 }
 
-func (rep *StdReply) Describe() any {
+func (rep *StdReply) Describe() descriptor.Descriptor {
 	headers := rep.response.Header.Clone()
 	for _, cookie := range rep.response.Cookies {
 		headers.Add("Set-Cookie", cookie.String())
@@ -539,5 +540,5 @@ func (rep *StdReply) Describe() any {
 		response["template"] = tmpl
 	}
 
-	return map[string]any{"response": response}
+	return descriptor.New("response", response)
 }

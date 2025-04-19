@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/caffeine-projects/vlatte/matcher/internal/mfmt"
 )
 
@@ -51,8 +52,8 @@ ret:
 	return Result{Message: strings.Join([]string{"Contain(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, "")}, nil
 }
 
-func (m *containsMatcher) Describe() any {
-	return []any{"contains", m.expected}
+func (m *containsMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("contains", m.expected)
 }
 
 // Contain passes when the expected value is contained in the incoming value from the request.

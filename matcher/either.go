@@ -3,6 +3,8 @@ package matcher
 import (
 	"fmt"
 	"strings"
+
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 )
 
 type eitherMatcher struct {
@@ -40,8 +42,8 @@ func (m *eitherMatcher) Match(v any) (Result, error) {
 	return Result{Message: strings.Join([]string{"Either() ", message}, "")}, nil
 }
 
-func (m *eitherMatcher) Describe() any {
-	return []any{"either", describe(m.first), describe(m.second)}
+func (m *eitherMatcher) Describe() descriptor.Descriptor {
+	return descriptor.MultiArgs("either", describe(m.first), describe(m.second))
 }
 
 // Either passes when any of the two given matchers pass.

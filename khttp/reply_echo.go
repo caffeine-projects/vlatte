@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/caffeine-projects/vlatte/khttp/httpval"
 )
 
@@ -31,8 +32,8 @@ func (e *ReplyEcho) Build(w http.ResponseWriter, r *RequestValues) (*MockedRespo
 	return nil, r.RawRequest.Write(w)
 }
 
-func (e *ReplyEcho) Describe() any {
-	return map[string]any{"echo": map[string]any{
+func (e *ReplyEcho) Describe() descriptor.Descriptor {
+	return descriptor.New("echo", map[string]any{
 		"stdout_log": e.stdoutLog,
-	}}
+	})
 }

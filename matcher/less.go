@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte/kcore/descriptor"
 	"github.com/caffeine-projects/vlatte/matcher/internal/mconv"
 	"github.com/caffeine-projects/vlatte/matcher/internal/mfmt"
 )
@@ -27,8 +28,8 @@ func (m *lessMatcher) Match(v any) (Result, error) {
 	}, nil
 }
 
-func (m *lessMatcher) Describe() any {
-	return []any{"lt", m.expected}
+func (m *lessMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("lt", m.expected)
 }
 
 // LessThan passes if the incoming request value is lower than the given value.

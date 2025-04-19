@@ -32,9 +32,9 @@ func success() Result                { return Result{Pass: true, Message: ""} }
 func mismatch(message string) Result { return Result{Pass: false, Message: message} }
 
 func describe(m Matcher) any {
-	if sd, ok := m.(descriptor.SelfDescribing); ok {
+	if sd, ok := m.(descriptor.Self); ok {
 		return sd.Describe()
 	}
 
-	return Anything().(descriptor.SelfDescribing).Describe()
+	return Anything().(descriptor.Self).Describe()
 }
