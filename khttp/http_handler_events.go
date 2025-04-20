@@ -23,7 +23,7 @@ var (
 type mockHTTPLifecycle interface {
 	OnRequest(*RequestValues)
 	OnMatch(*RequestValues, *MockedResponse)
-	OnNoMatch(*RequestValues, *kcore.FindResult[*HTTPMock], *kcore.Results)
+	OnNoMatch(*RequestValues, *kcore.Results)
 	OnWarning(*RequestValues, error)
 	OnError(*RequestValues, error)
 }
@@ -100,24 +100,12 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *MockedResponse) 
 	evt.Msgf("<--- REQUEST MATCHED %s %s", r.RawRequest.Method, r.URL.Path)
 }
 
-func (h *builtInMockHTTPLifecycle) OnNoMatch(r *RequestValues, fr *kcore.FindResult[*HTTPMock], d *kcore.Results) {
+func (h *builtInMockHTTPLifecycle) OnNoMatch(r *RequestValues, d *kcore.Results) {
 	if h.app.config.LogLevel == LogLevelDisabled {
 		return
 	}
 
 	evt := h.app.logger.Warn().Str("url", r.URL.String())
-	if fr.ClosestMatch != nil {
-		md := zerolog.Dict().Str("id", fr.ClosestMatch.GetID())
-		if fr.ClosestMatch.GetName() != "" {
-			md.Str("name", fr.ClosestMatch.GetName())
-		}
-
-		evt.Dict("nearest", md)
-	}
-
-	if d.Len() > 0 {
-		evt.Strs("mismatches", d.Buf)
-	}
 
 	evt.Msgf("<--- REQUEST DID NOT MATCH %s %s", r.RawRequest.Method, r.URL.Path)
 }
@@ -247,7 +235,6 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Mock
 
 func (h *builtInDescriptiveMockHTTPLifecycle) OnNoMatch(
 	reqValues *RequestValues,
-	result *kcore.FindResult[*HTTPMock],
 	d *kcore.Results,
 ) {
 	if h.app.config.LogLevel == LogLevelDisabled {
@@ -261,19 +248,6 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnNoMatch(
 		h.cz.Yellow(reqValues.URL.Path),
 		reqValues.RawRequest.Method,
 		reqValues.URL.String())
-
-	if result.ClosestMatch != nil {
-		fmt.Fprintf(h.out, "%s: %s %s\n",
-			h.cz.Bold("Closest Match"), result.ClosestMatch.GetID(), result.ClosestMatch.GetName())
-	}
-
-	if d.Len() > 0 {
-		if h.app.config.LogVerbosity <= LogHeader {
-			fmt.Fprintf(h.out, "%s: %d\n", h.cz.Bold("Mismatches"), result.MismatchesCount)
-		} else {
-			fmt.Fprintf(h.out, "%s(%d):\n%s\n", h.cz.Bold("Mismatches"), result.MismatchesCount, d.String())
-		}
-	}
 
 	h.out.Write([]byte("\n"))
 }

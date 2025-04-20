@@ -21,7 +21,7 @@ type GRPCMockApp struct {
 	config  *Config
 	logger  *zerolog.Logger
 	addr    string
-	storage kcore.MockRepository[*GRPCMock]
+	storage kcore.Store[*GRPCMock]
 }
 
 type ServerInfo struct {

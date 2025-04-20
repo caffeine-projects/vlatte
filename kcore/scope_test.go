@@ -15,11 +15,11 @@ import (
 
 func TestScoped(t *testing.T) {
 	type testMock struct {
-		*kcore.BaseMock
+		*kcore.M
 	}
 
 	newTestMock := func() *testMock {
-		return &testMock{BaseMock: kcore.NewMock()}
+		return &testMock{M: kcore.NewMock(kcore.UseUUID())}
 	}
 
 	m1 := newTestMock()
@@ -165,11 +165,11 @@ func TestScoped(t *testing.T) {
 
 func TestScopedDelete(t *testing.T) {
 	type testMock struct {
-		*kcore.BaseMock
+		*kcore.M
 	}
 
 	newTestMock := func() *testMock {
-		return &testMock{BaseMock: kcore.NewMock()}
+		return &testMock{M: kcore.NewMock(kcore.UseUUID())}
 	}
 
 	m1 := newTestMock()

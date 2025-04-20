@@ -12,11 +12,11 @@ import (
 type Scope[M Mock] struct {
 	mocks map[string]M
 	del   map[string]struct{}
-	store MockRepository[M]
+	store Store[M]
 	mu    sync.RWMutex
 }
 
-func Scoped[M Mock](store MockRepository[M], mocks []M) *Scope[M] {
+func Scoped[M Mock](store Store[M], mocks []M) *Scope[M] {
 	scoped := &Scope[M]{mocks: make(map[string]M, len(mocks)), del: make(map[string]struct{}), store: store}
 	for _, m := range mocks {
 		scoped.mocks[m.GetID()] = m
@@ -77,7 +77,7 @@ func (s *Scope[M]) GetPending() []M {
 	mocks := make([]M, 0, len(s.mocks))
 
 	for _, m := range s.mocks {
-		if !m.HasBeenCalled() {
+		if !m.Called() {
 			mocks = append(mocks, m)
 		}
 	}
@@ -93,7 +93,7 @@ func (s *Scope[M]) GetCalled() []M {
 	mocks := make([]M, 0, len(s.mocks))
 
 	for _, m := range s.mocks {
-		if m.HasBeenCalled() {
+		if m.Called() {
 			mocks = append(mocks, m)
 		}
 	}
@@ -107,7 +107,7 @@ func (s *Scope[M]) Called() bool {
 	defer s.mu.RUnlock()
 
 	for _, m := range s.GetAll() {
-		if !m.HasBeenCalled() {
+		if !m.Called() {
 			return false
 		}
 	}
@@ -118,7 +118,7 @@ func (s *Scope[M]) Called() bool {
 // Pending returns true when there are one or more Mock instances that were not called at least once.
 func (s *Scope[M]) Pending() bool {
 	for _, m := range s.GetAll() {
-		if !m.HasBeenCalled() {
+		if !m.Called() {
 			return true
 		}
 	}
@@ -195,7 +195,7 @@ func (s *Scope[M]) Sync(ctx context.Context) error {
 	}
 
 	for _, id := range ids {
-		err := s.store.Delete(ctx, id)
+		err := s.store.Del(ctx, id)
 		if err != nil {
 			return err
 		}

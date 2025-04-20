@@ -161,12 +161,12 @@ type HTTPValueSelectorInput struct {
 	ParsedBody any
 }
 
-type HTTPExpectation = kcore.Expectation[*HTTPValueSelectorInput]
+type HTTPExpectation = kcore.Eval[*HTTPValueSelectorInput]
 
 // HTTPMock holds metadata and expectations to be matched against HTTP requests in order to serve mocked responses.
 // This is the core entity of this project, and most features work based on it.
 type HTTPMock struct {
-	*kcore.BaseMock
+	*kcore.M
 
 	// Callbacks holds a Callback list to be executed after the Mock was matched and served.
 	Callbacks []Callback
@@ -185,18 +185,18 @@ type HTTPMock struct {
 	Interceptors []kcore.Interceptor
 
 	after        []int
-	expectations []*kcore.Expectation[*HTTPValueSelectorInput]
+	expectations []*kcore.Eval[*HTTPValueSelectorInput]
 }
 
 // newMock returns a new Mock with default values set.
 func newMock() *HTTPMock {
 	return &HTTPMock{
-		BaseMock:     kcore.NewMock(),
+		M:            kcore.NewMock(kcore.UseUUID()),
 		Callbacks:    make([]Callback, 0),
 		PostActions:  make([]*PostActionDef, 0),
 		Mappers:      make([]Mapper, 0),
 		Interceptors: make([]kcore.Interceptor, 0),
-		expectations: make([]*kcore.Expectation[*HTTPValueSelectorInput], 0),
+		expectations: make([]*kcore.Eval[*HTTPValueSelectorInput], 0),
 	}
 }
 
@@ -300,10 +300,10 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 		}
 	}
 
-	data["id"] = m.ID
+	data["id"] = m.GetID()
 
-	if len(m.Name) > 0 {
-		data["name"] = m.Name
+	if len(m.GetName()) > 0 {
+		data["name"] = m.GetName()
 	}
 
 	if m.Priority != 0 {

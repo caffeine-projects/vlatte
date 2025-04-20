@@ -47,7 +47,7 @@ type HTTPMockApp struct {
 
 	config             *Config
 	server             Server
-	storage            kcore.MockRepository[*HTTPMock]
+	storage            kcore.Store[*HTTPMock]
 	scenarioStore      *mfeat.ScenarioStore
 	cancel             context.CancelFunc
 	requestBodyParsers []RequestBodyParser

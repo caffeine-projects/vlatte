@@ -45,25 +45,22 @@ func (in *Interceptors) UnaryInterceptor(
 		return nil, err
 	}
 
+	em, err := in.app.storage.Eligible(ctx)
+	if err != nil {
+		return nil, interceptError("http: error finding eligible mocks for request. %w", err)
+	}
+
 	rawBody := string(b)
-	description := kcore.Results{Buf: make([]string, 0)}
-	result, err := kcore.FindMockForRequest(
-		ctx,
-		in.app.storage,
-		func(m *GRPCMock) []*kcore.Expectation[*UnaryValueSelectorIn] { return m.unaryExpectations },
-		&UnaryValueSelectorIn{rawBody, info},
-		&description,
-		kcore.FindOptions{FailFast: false},
-	)
+	mocks := kcore.Mocks[*GRPCMock, *UnaryValueSelectorIn](em)
+	mock, pass, err := mocks.Find(ctx, &UnaryValueSelectorIn{rawBody, info}, func(m *GRPCMock) kcore.Evaluators[*GRPCMock, *UnaryValueSelectorIn] { return m.unaryExpectations })
 	if err != nil {
 		return nil, status.Error(codes.Internal, fmt.Errorf("unary: error finding mock for request: %w", err).Error())
 	}
 
-	if !result.Pass {
+	if !pass {
 		return nil, interceptError("unary: request was not matched with any mock")
 	}
 
-	mock := result.Matched
 	reply, ok := mock.Reply.(UnaryReply)
 	if !ok {
 		return nil, interceptError("unary: mock %s must implement an unary reply: got %T", mock.getRef(), mock.Reply)

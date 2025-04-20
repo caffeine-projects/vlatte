@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-var _ MockApp[*BaseMock] = (*baseApp)(nil)
+var _ MockApp[*M] = (*baseApp)(nil)
 
 // Configurer lets users configure the Mock API.
 type Configurer[TConfig any] interface {
@@ -48,7 +48,7 @@ type MockApp[TMock Mock] interface {
 type MockBag[TMock Mock, TMockApp MockApp[TMock]] struct {
 	rwm        sync.RWMutex
 	app        TMockApp
-	repository MockRepository[TMock]
+	repository Store[TMock]
 	scopes     []*Scope[TMock]
 }
 
@@ -73,7 +73,7 @@ func (a *MockBag[TMock, TMockApp]) Add(builders ...Builder[TMock, TMockApp]) (*S
 		added[i] = mock
 	}
 
-	scope := Scoped[TMock](a.repository, added)
+	scope := Scoped(a.repository, added)
 	a.scopes = append(a.scopes, scope)
 
 	return scope, nil
@@ -91,7 +91,7 @@ type BaseApp[TMock Mock, TMockApp MockApp[TMock]] struct {
 	rwm     sync.RWMutex
 }
 
-func NewBaseApp[TMock Mock, TMockApp MockApp[TMock]](app TMockApp, repo MockRepository[TMock]) *BaseApp[TMock, TMockApp] {
+func NewBaseApp[TMock Mock, TMockApp MockApp[TMock]](app TMockApp, repo Store[TMock]) *BaseApp[TMock, TMockApp] {
 	return &BaseApp[TMock, TMockApp]{mockBag: &MockBag[TMock, TMockApp]{app: app, repository: repo}}
 }
 
@@ -276,7 +276,7 @@ func (app *BaseApp[TMock, TMockApp]) AssertNumberOfCalls(t TestingT, expected in
 }
 
 type baseApp struct {
-	BaseApp[*BaseMock, *baseApp]
+	BaseApp[*M, *baseApp]
 }
 
 func (a *baseApp) Hits() int64  { return 0 }

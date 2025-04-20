@@ -22,11 +22,9 @@ func ServerStreamMethod(method string) *ServerStreamMockBuilder {
 	b := &ServerStreamMockBuilder{m: newMock()}
 	b.m.streamExpectations = append(
 		b.m.streamExpectations,
-		&kcore.Expectation[*StreamValueSelectorIn]{
-			TargetDescription: describeTarget(targetMethod, method),
-			Matcher:           matcher.Contain(method),
-			ValueSelector:     streamSelectMethod,
-			Weight:            10,
+		&kcore.Eval[*StreamValueSelectorIn]{
+			Matcher:  matcher.Contain(method),
+			Selector: streamSelectMethod,
 		},
 	)
 
@@ -36,11 +34,9 @@ func ServerStreamMethod(method string) *ServerStreamMockBuilder {
 func (b *ServerStreamMockBuilder) Header(key string, m matcher.Matcher) *ServerStreamMockBuilder {
 	b.m.streamExpectations = append(
 		b.m.streamExpectations,
-		&kcore.Expectation[*StreamValueSelectorIn]{
-			TargetDescription: describeTarget(targetHeader, key),
-			Matcher:           m,
-			ValueSelector:     streamSelectHeader(key),
-			Weight:            3,
+		&kcore.Eval[*StreamValueSelectorIn]{
+			Matcher:  m,
+			Selector: streamSelectHeader(key),
 		},
 	)
 
@@ -50,11 +46,9 @@ func (b *ServerStreamMockBuilder) Header(key string, m matcher.Matcher) *ServerS
 func (b *ServerStreamMockBuilder) Field(path string, m matcher.Matcher) *ServerStreamMockBuilder {
 	b.m.streamExpectations = append(
 		b.m.streamExpectations,
-		&kcore.Expectation[*StreamValueSelectorIn]{
-			TargetDescription: describeTarget(targetBodyField, path),
-			Matcher:           matcher.Field(path, m),
-			ValueSelector:     streamSelectBody,
-			Weight:            3,
+		&kcore.Eval[*StreamValueSelectorIn]{
+			Matcher:  matcher.Field(path, m),
+			Selector: streamSelectBody,
 		},
 	)
 	return b
@@ -73,7 +67,7 @@ func streamSelectMethod(_ context.Context, r *StreamValueSelectorIn) any {
 	return r.Info.FullMethod
 }
 
-func streamSelectHeader(k string) StreamValueSelector {
+func streamSelectHeader(k string) kcore.Selector[*StreamValueSelectorIn] {
 	return func(ctx context.Context, r *StreamValueSelectorIn) any {
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {

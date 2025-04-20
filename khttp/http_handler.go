@@ -50,26 +50,26 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.lifecycle.OnRequest(reqValues)
 
-	results := &kcore.Results{Buf: make([]string, 0)}
-	selectorInput := &HTTPValueSelectorInput{r, parsedURL, r.URL.Query(), r.Form, parsedBody}
-	result, err := kcore.FindMockForRequest(
-		r.Context(),
-		h.app.storage,
-		func(mock *HTTPMock) []*kcore.Expectation[*HTTPValueSelectorInput] { return mock.expectations },
-		selectorInput,
-		results,
-		kcore.FindOptions{FailFast: h.app.config.FailFast},
-	)
+	em, err := h.app.storage.Eligible(r.Context())
 	if err != nil {
 		h.lifecycle.OnError(reqValues, fmt.Errorf("http: error finding eligible mocks for request. %w", err))
 		return
 	}
 
+	results := &kcore.Results{Buf: make([]string, 0)}
+	selectorInput := &HTTPValueSelectorInput{r, parsedURL, r.URL.Query(), r.Form, parsedBody}
+
+	mocks := kcore.Mocks[*HTTPMock, *HTTPValueSelectorInput](em)
+	mock, pass, err := mocks.Find(r.Context(), selectorInput, func(m *HTTPMock) kcore.Evaluators[*HTTPMock, *HTTPValueSelectorInput] { return m.expectations })
+	if err != nil {
+		h.lifecycle.OnError(reqValues, fmt.Errorf("http: error finding eligible mocks for request. %w", err))
+	}
+
 	// no mocks matched with the incoming request
 	// lets check if we need to proxy and record this request.
-	if !result.Pass {
+	if !pass {
 		if h.app.proxy == nil {
-			h.onNoMatches(w, reqValues, result, results)
+			h.onNoMatches(w, reqValues, results)
 			return
 		}
 
@@ -94,7 +94,6 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mock := result.Matched
 	reqValues.Mock = mock
 
 	if mock.Delay != nil {
@@ -104,7 +103,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		<-ctxTimeout.Done()
 	}
 
-	res, err := result.Matched.Reply.Build(w, reqValues)
+	res, err := mock.Reply.Build(w, reqValues)
 	if err != nil {
 		h.onError(w, reqValues, fmt.Errorf(
 			"http: error building reply for request=%s source=%s. %w",
@@ -239,8 +238,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, result *kcore.FindResult[*HTTPMock], desc *kcore.Results) {
-	defer h.lifecycle.OnNoMatch(r, result, desc)
+func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, desc *kcore.Results) {
+	defer h.lifecycle.OnNoMatch(r, desc)
 
 	buf := bufpool.Get()
 	buf.Reset()
@@ -251,15 +250,6 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, resul
 	buf.WriteString(" ")
 	buf.WriteString(r.URL.String())
 	buf.WriteString("\n\n")
-
-	if result.ClosestMatch != nil {
-		fmt.Fprintf(buf, "NEAREST: %s %s\n", result.ClosestMatch.GetID(), result.ClosestMatch.GetName())
-	}
-
-	if desc.Len() > 0 {
-		fmt.Fprintf(buf, "MISSES(%d):\n", result.MismatchesCount)
-		buf.WriteString(desc.String())
-	}
 
 	w.Header().Add(httpval.HeaderContentType, httpval.MIMETextPlainCharsetUTF8)
 	w.WriteHeader(h.app.config.RequestWasNotMatchedStatusCode)

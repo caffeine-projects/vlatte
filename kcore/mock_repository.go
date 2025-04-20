@@ -6,25 +6,25 @@ import (
 	"sync"
 )
 
-var _ MockRepository[*BaseMock] = (*InMemMockStore[*BaseMock])(nil)
+var _ Store[*M] = (*InMemMockStore[*M])(nil)
 
-type MockRepository[TMock Mock] interface {
-	FindEligible(ctx context.Context, done <-chan struct{}) (<-chan TMock, error)
+type Store[T Mock] interface {
+	EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan T, error)
+	Eligible(ctx context.Context) ([]T, error)
 
-	Save(ctx context.Context, mock ...TMock) error
+	Save(ctx context.Context, mock ...T) error
 
-	Get(ctx context.Context, id string) (TMock, error)
-	GetAll(ctx context.Context) ([]TMock, error)
-	GetByIDs(ctx context.Context, ids ...string) ([]TMock, error)
+	Get(ctx context.Context, id string) (T, error)
+	GetAll(ctx context.Context) ([]T, error)
+	GetByIDs(ctx context.Context, ids ...string) ([]T, error)
 
-	Delete(ctx context.Context, ids ...string) error
-	DeleteExternal(ctx context.Context) error
-	DeleteAll(ctx context.Context) error
+	Del(ctx context.Context, ids ...string) error
+	DelAll(ctx context.Context) error
 }
 
 type InMemMockStore[TMock Mock] struct {
-	data    []TMock
-	rwMutex sync.RWMutex
+	data []TMock
+	mu   sync.RWMutex
 }
 
 // NewStore returns Mock InMemMockStore implementation.
@@ -32,17 +32,17 @@ func NewStore[TMock Mock]() *InMemMockStore[TMock] {
 	return &InMemMockStore[TMock]{data: make([]TMock, 0)}
 }
 
-func (s *InMemMockStore[TMock]) FindEligible(ctx context.Context, done <-chan struct{}) (<-chan TMock, error) {
-	s.rwMutex.RLock()
+func (s *InMemMockStore[TMock]) EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan TMock, error) {
+	s.mu.RLock()
 	mocks := make([]TMock, len(s.data))
 	copy(mocks, s.data)
-	s.rwMutex.RUnlock()
+	s.mu.RUnlock()
 
 	out := make(chan TMock, len(mocks))
 	go func() {
 		defer close(out)
 		for _, mock := range mocks {
-			if mock.IsEnabled() {
+			if mock.Enabled() {
 				select {
 				case out <- mock:
 				case <-ctx.Done():
@@ -57,9 +57,21 @@ func (s *InMemMockStore[TMock]) FindEligible(ctx context.Context, done <-chan st
 	return out, nil
 }
 
+func (s *InMemMockStore[TMock]) Eligible(ctx context.Context) ([]TMock, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	mocks := make([]TMock, 0, len(s.data))
+	for _, mock := range s.data {
+		if mock.Enabled() {
+			mocks = append(mocks, mock)
+		}
+	}
+	return mocks, nil
+}
+
 func (s *InMemMockStore[TMock]) Save(_ context.Context, mocks ...TMock) error {
-	s.rwMutex.Lock()
-	defer s.rwMutex.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	s.data = append(s.data, mocks...)
 
@@ -71,8 +83,8 @@ func (s *InMemMockStore[TMock]) Save(_ context.Context, mocks ...TMock) error {
 }
 
 func (s *InMemMockStore[TMock]) Get(_ context.Context, id string) (TMock, error) {
-	s.rwMutex.RLock()
-	defer s.rwMutex.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	for _, datum := range s.data {
 		if datum.GetID() == id {
@@ -99,8 +111,8 @@ func (s *InMemMockStore[TMock]) GetByIDs(ctx context.Context, ids ...string) ([]
 }
 
 func (s *InMemMockStore[TMock]) GetAll(_ context.Context) ([]TMock, error) {
-	s.rwMutex.RLock()
-	defer s.rwMutex.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	ret := make([]TMock, len(s.data))
 	copy(ret, s.data)
@@ -108,9 +120,9 @@ func (s *InMemMockStore[TMock]) GetAll(_ context.Context) ([]TMock, error) {
 	return ret, nil
 }
 
-func (s *InMemMockStore[TMock]) Delete(_ context.Context, ids ...string) error {
-	s.rwMutex.Lock()
-	defer s.rwMutex.Unlock()
+func (s *InMemMockStore[TMock]) Del(_ context.Context, ids ...string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	for _, id := range ids {
 		index := -1
@@ -127,7 +139,7 @@ func (s *InMemMockStore[TMock]) Delete(_ context.Context, ids ...string) error {
 	return nil
 }
 
-func (s *InMemMockStore[TMock]) DeleteExternal(ctx context.Context) error {
+func (s *InMemMockStore[TMock]) DelExt(ctx context.Context) error {
 	ids := make([]string, 0, len(s.data))
 
 	for _, m := range s.data {
@@ -137,7 +149,7 @@ func (s *InMemMockStore[TMock]) DeleteExternal(ctx context.Context) error {
 	}
 
 	for _, id := range ids {
-		if err := s.Delete(ctx, id); err != nil {
+		if err := s.Del(ctx, id); err != nil {
 			return err
 		}
 	}
@@ -145,9 +157,9 @@ func (s *InMemMockStore[TMock]) DeleteExternal(ctx context.Context) error {
 	return nil
 }
 
-func (s *InMemMockStore[TMock]) DeleteAll(_ context.Context) error {
-	s.rwMutex.Lock()
-	defer s.rwMutex.Unlock()
+func (s *InMemMockStore[TMock]) DelAll(_ context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	s.data = nil
 	s.data = make([]TMock, 0)

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/caffeine-projects/vlatte/kcore"
 	"github.com/caffeine-projects/vlatte/khttp/httpval"
@@ -118,12 +117,10 @@ func (b *HTTPMockBuilder) Priority(p int) *HTTPMockBuilder {
 // Scheme sets the HTTP request scheme to be matched.
 func (b *HTTPMockBuilder) Scheme(scheme string) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
-		Target:            int(matchingScopeScheme),
-		TargetDescription: describeTarget(matchingScopeScheme, scheme),
-		Key:               scheme,
-		Matcher:           matcher.EqualIgnoreCase(scheme),
-		ValueSelector:     selectScheme,
-		Weight:            kcore.WeightVeryLow,
+		Target:   int(matchingScopeScheme),
+		Key:      scheme,
+		Matcher:  matcher.EqualIgnoreCase(scheme),
+		Selector: selectScheme,
 	})
 
 	return b
@@ -132,11 +129,9 @@ func (b *HTTPMockBuilder) Scheme(scheme string) *HTTPMockBuilder {
 // SchemeMatches sets a matcher.Matcher for the URL scheme part.
 func (b *HTTPMockBuilder) SchemeMatches(m matcher.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
-		Target:            int(matchingScopeScheme),
-		TargetDescription: describeTarget(matchingScopeScheme, ""),
-		Matcher:           m,
-		ValueSelector:     selectScheme,
-		Weight:            kcore.WeightVeryLow,
+		Target:   int(matchingScopeScheme),
+		Matcher:  m,
+		Selector: selectScheme,
 	})
 
 	return b
@@ -157,12 +152,10 @@ func (b *HTTPMockBuilder) Method(methods ...string) *HTTPMockBuilder {
 	}
 
 	b.appendExpectation(&HTTPExpectation{
-		Target:            int(matchingScopeMethod),
-		TargetDescription: describeTarget(matchingScopeMethod, strings.Join(methods, ",")),
-		Key:               key,
-		ValueSelector:     selectMethod,
-		Matcher:           m,
-		Weight:            kcore.WeightNone,
+		Target:   int(matchingScopeMethod),
+		Key:      key,
+		Selector: selectMethod,
+		Matcher:  m,
 	})
 
 	return b
@@ -172,11 +165,9 @@ func (b *HTTPMockBuilder) Method(methods ...string) *HTTPMockBuilder {
 // Useful to set a Mock for multiple HTTP Request methods.
 func (b *HTTPMockBuilder) MethodMatches(m matcher.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
-		Target:            int(matchingScopeMethod),
-		TargetDescription: describeTarget(matchingScopeMethod, ""),
-		ValueSelector:     selectMethod,
-		Matcher:           m,
-		Weight:            kcore.WeightNone,
+		Target:   int(matchingScopeMethod),
+		Selector: selectMethod,
+		Matcher:  m,
 	})
 
 	return b
@@ -185,11 +176,9 @@ func (b *HTTPMockBuilder) MethodMatches(m matcher.Matcher) *HTTPMockBuilder {
 // URL defines a matcher to be applied to the http.Request url.URL.
 func (b *HTTPMockBuilder) URL(m matcher.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
-		Target:            int(matchingScopeURL),
-		TargetDescription: describeTarget(matchingScopeURL, ""),
-		ValueSelector:     selectURL,
-		Matcher:           m,
-		Weight:            kcore.WeightRegular,
+		Target:   int(matchingScopeURL),
+		Selector: selectURL,
+		Matcher:  m,
 	})
 
 	return b
@@ -204,11 +193,9 @@ func (b *HTTPMockBuilder) URLf(format string, a ...any) *HTTPMockBuilder {
 // URLPath defines a matcher to be applied to the url.URL path.
 func (b *HTTPMockBuilder) URLPath(m matcher.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
-		Target:            int(matchingScopeURL),
-		TargetDescription: describeTarget(matchingScopeURL, ""),
-		ValueSelector:     selectURLPath,
-		Matcher:           m,
-		Weight:            kcore.WeightRegular,
+		Target:   int(matchingScopeURL),
+		Selector: selectURLPath,
+		Matcher:  m,
 	})
 
 	return b
@@ -223,11 +210,9 @@ func (b *HTTPMockBuilder) URLPathf(format string, a ...any) *HTTPMockBuilder {
 // URLPath defines a matcher to be applied to the url.URL path.
 func (b *HTTPMockBuilder) URLFragment(m matcher.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
-		Target:            int(matchingScopeURL),
-		TargetDescription: describeTarget(matchingScopeURL, ""),
-		ValueSelector:     selectURLFragment,
-		Matcher:           m,
-		Weight:            kcore.WeightLow,
+		Target:   int(matchingScopeURL),
+		Selector: selectURLFragment,
+		Matcher:  m,
 	})
 
 	return b
@@ -242,12 +227,10 @@ func (b *HTTPMockBuilder) URLFragmentf(format string, a ...any) *HTTPMockBuilder
 // Header adds a matcher to a specific http.Header key.
 func (b *HTTPMockBuilder) Header(name string, m matcher.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
-		Target:            int(matchingScopeHeader),
-		TargetDescription: describeTarget(matchingScopeHeader, name),
-		Key:               name,
-		ValueSelector:     selectHeader(name),
-		Matcher:           m,
-		Weight:            kcore.WeightLow,
+		Target:   int(matchingScopeHeader),
+		Key:      name,
+		Selector: selectHeader(name),
+		Matcher:  m,
 	})
 
 	return b
@@ -266,12 +249,10 @@ func (b *HTTPMockBuilder) ContentType(value string, a ...any) *HTTPMockBuilder {
 // Query defines a matcher to a specific query.
 func (b *HTTPMockBuilder) Query(name string, m matcher.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
-		Target:            int(matchingScopeQuery),
-		TargetDescription: describeTarget(matchingScopeQuery, name),
-		Key:               name,
-		ValueSelector:     selectQuery(name),
-		Matcher:           m,
-		Weight:            kcore.WeightVeryLow,
+		Target:   int(matchingScopeQuery),
+		Key:      name,
+		Selector: selectQuery(name),
+		Matcher:  m,
 	})
 
 	return b
@@ -285,12 +266,10 @@ func (b *HTTPMockBuilder) Queryf(name string, value string, a ...any) *HTTPMockB
 // Queries define a matcher.Matcher for query parameters that contains multiple values.
 func (b *HTTPMockBuilder) Queries(name string, m matcher.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
-		Target:            int(matchingScopeQueries),
-		TargetDescription: describeTarget(matchingScopeQueries, name),
-		Key:               name,
-		Matcher:           m,
-		ValueSelector:     selectQueries(name),
-		Weight:            kcore.WeightVeryLow,
+		Target:   int(matchingScopeQueries),
+		Key:      name,
+		Matcher:  m,
+		Selector: selectQueries(name),
 	})
 
 	return b
@@ -312,11 +291,9 @@ func (b *HTTPMockBuilder) Body(matcherList ...matcher.Matcher) *HTTPMockBuilder 
 	}
 
 	b.appendExpectation(&HTTPExpectation{
-		Target:            int(matchingScopeBody),
-		TargetDescription: describeTarget(matchingScopeBody, ""),
-		ValueSelector:     selectBody,
-		Matcher:           m,
-		Weight:            kcore.WeightHigh,
+		Target:   int(matchingScopeBody),
+		Selector: selectBody,
+		Matcher:  m,
 	})
 
 	return b
@@ -325,12 +302,10 @@ func (b *HTTPMockBuilder) Body(matcherList ...matcher.Matcher) *HTTPMockBuilder 
 // FormField defines a matcher for a specific form field by its key.
 func (b *HTTPMockBuilder) FormField(name string, m matcher.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
-		Target:            int(matchingScopeFormField),
-		TargetDescription: describeTarget(matchingScopeFormField, name),
-		Key:               name,
-		ValueSelector:     selectFormField(name),
-		Matcher:           m,
-		Weight:            kcore.WeightVeryLow,
+		Target:   int(matchingScopeFormField),
+		Key:      name,
+		Selector: selectFormField(name),
+		Matcher:  m,
 	})
 
 	return b
@@ -344,10 +319,8 @@ func (b *HTTPMockBuilder) FormFieldf(field string, value string, a ...any) *HTTP
 // Times defines the total times that a mock should be served if the request matches.
 func (b *HTTPMockBuilder) Times(times int64) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
-		Target:            int(matchingScopeNone),
-		TargetDescription: describeTarget(matchingScopeNone, "repeat"),
-		Matcher:           mfeat.Repeat(times),
-		Weight:            kcore.WeightNone,
+		Target:  int(matchingScopeNone),
+		Matcher: mfeat.Repeat(times),
 	})
 
 	return b
@@ -361,11 +334,9 @@ func (b *HTTPMockBuilder) Once() *HTTPMockBuilder {
 // RequestMatches applies the given predicate to the incoming http.Request.
 func (b *HTTPMockBuilder) RequestMatches(predicate func(r *http.Request) (bool, error)) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
-		Target:            int(matchingScopeNone),
-		TargetDescription: describeTarget(matchingScopeNone, ""),
-		ValueSelector:     selectRawRequest,
-		Matcher:           matcher.Function(func(v any) (bool, error) { return predicate(v.(*http.Request)) }),
-		Weight:            kcore.WeightLow,
+		Target:   int(matchingScopeNone),
+		Selector: selectRawRequest,
+		Matcher:  matcher.Function(func(v any) (bool, error) { return predicate(v.(*http.Request)) }),
 	})
 
 	return b
@@ -478,9 +449,8 @@ func (b *HTTPMockBuilder) Build(app *HTTPMockApp) (*HTTPMock, error) {
 
 	if b.scenario != "" {
 		b.appendExpectation(&HTTPExpectation{
-			Target:            int(matchingScopeScenario),
-			TargetDescription: describeTarget(matchingScopeScenario, b.scenario),
-			Matcher:           mfeat.Scenario(app.scenarioStore, b.scenario, b.scenarioRequiredState, b.scenarioNewState),
+			Target:  int(matchingScopeScenario),
+			Matcher: mfeat.Scenario(app.scenarioStore, b.scenario, b.scenarioRequiredState, b.scenarioNewState),
 		})
 	}
 
@@ -498,7 +468,7 @@ func (b *HTTPMockBuilder) Build(app *HTTPMockApp) (*HTTPMock, error) {
 	return b.mock, nil
 }
 
-func (b *HTTPMockBuilder) appendExpectation(e *kcore.Expectation[*HTTPValueSelectorInput]) {
+func (b *HTTPMockBuilder) appendExpectation(e *kcore.Eval[*HTTPValueSelectorInput]) {
 	b.mock.expectations = append(b.mock.expectations, e)
 }
 
@@ -511,17 +481,17 @@ func selectMethod(_ context.Context, r *HTTPValueSelectorInput) any      { retur
 func selectURL(_ context.Context, r *HTTPValueSelectorInput) any         { return r.URL.String() }
 func selectURLPath(_ context.Context, r *HTTPValueSelectorInput) any     { return r.URL.Path }
 func selectURLFragment(_ context.Context, r *HTTPValueSelectorInput) any { return r.URL.Fragment }
-func selectHeader(k string) HTTPValueSelector {
+func selectHeader(k string) kcore.Selector[*HTTPValueSelectorInput] {
 	return func(_ context.Context, r *HTTPValueSelectorInput) any { return r.RawRequest.Header.Get(k) }
 }
-func selectQuery(k string) HTTPValueSelector {
+func selectQuery(k string) kcore.Selector[*HTTPValueSelectorInput] {
 	return func(_ context.Context, r *HTTPValueSelectorInput) any { return r.Query.Get(k) }
 }
-func selectQueries(k string) HTTPValueSelector {
+func selectQueries(k string) kcore.Selector[*HTTPValueSelectorInput] {
 	return func(_ context.Context, r *HTTPValueSelectorInput) any { return r.Query[k] }
 }
 func selectBody(_ context.Context, r *HTTPValueSelectorInput) any { return r.ParsedBody }
-func selectFormField(k string) HTTPValueSelector {
+func selectFormField(k string) kcore.Selector[*HTTPValueSelectorInput] {
 	return func(_ context.Context, r *HTTPValueSelectorInput) any { return r.RawRequest.Form.Get(k) }
 }
 func selectRawRequest(_ context.Context, r *HTTPValueSelectorInput) any { return r.RawRequest }

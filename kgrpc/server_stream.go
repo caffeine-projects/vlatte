@@ -23,7 +23,7 @@ type GRPCStreamMock struct {
 	*GRPCMock
 }
 
-func (s *GRPCStreamMock) GetExpectations() []*kcore.Expectation[*StreamValueSelectorIn] {
+func (s *GRPCStreamMock) GetExpectations() []*kcore.Eval[*StreamValueSelectorIn] {
 	return s.streamExpectations
 }
 
@@ -171,25 +171,22 @@ func (in *Interceptors) StreamInterceptor(
 		return err
 	}
 
+	em, err := in.app.storage.Eligible(stream.Context())
+	if err != nil {
+		return interceptError("http: error finding eligible mocks for request. %w", err)
+	}
+
 	rawBody := string(b)
-	description := kcore.Results{Buf: make([]string, 0)}
-	result, err := kcore.FindMockForRequest(
-		stream.Context(),
-		in.app.storage,
-		func(m *GRPCMock) []*kcore.Expectation[*StreamValueSelectorIn] { return m.streamExpectations },
-		&StreamValueSelectorIn{RequestMessage: rawBody, Info: info},
-		&description,
-		kcore.FindOptions{FailFast: false},
-	)
+	mocks := kcore.Mocks[*GRPCMock, *StreamValueSelectorIn](em)
+	mock, pass, err := mocks.Find(stream.Context(), &StreamValueSelectorIn{rawBody, info}, func(m *GRPCMock) kcore.Evaluators[*GRPCMock, *StreamValueSelectorIn] { return m.streamExpectations })
 	if err != nil {
 		return status.Error(codes.Internal, fmt.Errorf("stream: error finding mock for request: %w", err).Error())
 	}
 
-	if !result.Pass {
+	if !pass {
 		return status.Error(codes.NotFound, "stream: request was not matched with any mock")
 	}
 
-	mock := result.Matched
 	reply, ok := mock.Reply.(ServerStreamReply)
 	if !ok {
 		return status.Errorf(

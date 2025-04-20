@@ -8,12 +8,12 @@ import (
 )
 
 func TestInMemoryStorage(t *testing.T) {
-	st := NewStore[*BaseMock]()
+	st := NewStore[*M]()
 	ctx := context.Background()
 
-	mock1 := &BaseMock{ID: "1", Name: "mock_1", enabled: true, Priority: 0}
-	mock2 := &BaseMock{ID: "2", Name: "mock_2", enabled: true, Priority: 1}
-	mock3 := &BaseMock{ID: "3", Name: "mock_3", enabled: true, Priority: 2}
+	mock1 := &M{ID: "1", Name: "mock_1", enabled: true, Priority: 0}
+	mock2 := &M{ID: "2", Name: "mock_2", enabled: true, Priority: 1}
+	mock3 := &M{ID: "3", Name: "mock_3", enabled: true, Priority: 2}
 
 	err := st.Save(ctx, mock1)
 	require.NoError(t, err)
@@ -37,9 +37,9 @@ func TestInMemoryStorage(t *testing.T) {
 
 	m.Disable()
 
-	eligible := make([]*BaseMock, 0)
+	eligible := make([]*M, 0)
 	done := make(chan struct{})
-	out, err := st.FindEligible(ctx, done)
+	out, err := st.EligibleStream(ctx, done)
 	for v := range out {
 		eligible = append(eligible, v)
 	}
@@ -51,14 +51,14 @@ func TestInMemoryStorage(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, eligible, 3)
 
-	err = st.Delete(ctx, "2")
+	err = st.Del(ctx, "2")
 	require.NoError(t, err)
 	eligible, err = st.GetAll(ctx)
 	require.NoError(t, err)
 	require.Len(t, eligible, 2)
 
-	eligible = make([]*BaseMock, 0)
-	out, err = st.FindEligible(ctx, done)
+	eligible = make([]*M, 0)
+	out, err = st.EligibleStream(ctx, done)
 	for v := range out {
 		eligible = append(eligible, v)
 	}
@@ -67,23 +67,23 @@ func TestInMemoryStorage(t *testing.T) {
 	require.Len(t, eligible, 1)
 	require.Equal(t, "3", eligible[0].ID)
 
-	err = st.DeleteAll(ctx)
+	err = st.DelAll(ctx)
 	require.NoError(t, err)
 
 	eligible, err = st.GetAll(ctx)
 	require.NoError(t, err)
 	require.Len(t, eligible, 0)
 
-	err = st.Save(ctx, &BaseMock{ID: "10", Name: "mock_ext_1", enabled: true, Priority: 0, Source: "ext"})
+	err = st.Save(ctx, &M{ID: "10", Name: "mock_ext_1", enabled: true, Priority: 0, Source: "ext"})
 	require.NoError(t, err)
-	err = st.Save(ctx, &BaseMock{ID: "11", Name: "mock_11", enabled: true, Priority: 0})
+	err = st.Save(ctx, &M{ID: "11", Name: "mock_11", enabled: true, Priority: 0})
 	require.NoError(t, err)
 
 	all, err := st.GetAll(ctx)
 	require.NoError(t, err)
 	require.Len(t, all, 2)
 
-	err = st.DeleteExternal(ctx)
+	err = st.DelExt(ctx)
 	require.NoError(t, err)
 
 	eligible, err = st.GetAll(ctx)
@@ -91,24 +91,24 @@ func TestInMemoryStorage(t *testing.T) {
 	require.Len(t, eligible, 1)
 	require.Equal(t, "11", eligible[0].ID)
 
-	err = st.DeleteAll(ctx)
+	err = st.DelAll(ctx)
 	require.NoError(t, err)
 
 	all, err = st.GetAll(ctx)
 	require.NoError(t, err)
 	require.Len(t, all, 0)
 
-	err = st.DeleteExternal(ctx)
+	err = st.DelExt(ctx)
 	require.NoError(t, err)
 }
 
 func TestDeleteExt(t *testing.T) {
 	ctx := context.Background()
-	st := NewStore[*BaseMock]()
+	st := NewStore[*M]()
 
-	require.NoError(t, st.Save(ctx, &BaseMock{ID: "10", Name: "mock_ext_1", enabled: true, Priority: 0, Source: "ext"}))
-	require.NoError(t, st.Save(ctx, &BaseMock{ID: "10", Name: "mock_ext_2", enabled: true, Priority: 0, Source: "ext"}))
-	require.NoError(t, st.DeleteExternal(ctx))
+	require.NoError(t, st.Save(ctx, &M{ID: "10", Name: "mock_ext_1", enabled: true, Priority: 0, Source: "ext"}))
+	require.NoError(t, st.Save(ctx, &M{ID: "10", Name: "mock_ext_2", enabled: true, Priority: 0, Source: "ext"}))
+	require.NoError(t, st.DelExt(ctx))
 
 	all, err := st.GetAll(ctx)
 	require.NoError(t, err)

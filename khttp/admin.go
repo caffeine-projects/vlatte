@@ -33,7 +33,7 @@ type Encoders map[string]Encoder
 
 type Admin struct {
 	app      *HTTPMockApp
-	repo     kcore.MockRepository[*HTTPMock]
+	repo     kcore.Store[*HTTPMock]
 	encoders Encoders
 	rwmu     sync.RWMutex
 }
@@ -100,7 +100,7 @@ func (a *Admin) add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Add(httpval.HeaderLocation, "/mocks/"+mock.ID)
+	w.Header().Add(httpval.HeaderLocation, "/mocks/"+mock.GetID())
 	w.WriteHeader(http.StatusCreated)
 }
 

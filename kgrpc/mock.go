@@ -14,25 +14,25 @@ type GRPCMockBuilder interface {
 }
 
 type GRPCMock struct {
-	*kcore.BaseMock
+	*kcore.M
 
 	Reply any
 
 	after              []matcher.OnMockSent
-	unaryExpectations  []*kcore.Expectation[*UnaryValueSelectorIn]
-	streamExpectations []*kcore.Expectation[*StreamValueSelectorIn]
+	unaryExpectations  []*kcore.Eval[*UnaryValueSelectorIn]
+	streamExpectations []*kcore.Eval[*StreamValueSelectorIn]
 }
 
 func newMock() *GRPCMock {
-	return &GRPCMock{BaseMock: kcore.NewMock(), after: make([]matcher.OnMockSent, 0)}
+	return &GRPCMock{M: kcore.NewMock(kcore.UseUUID()), after: make([]matcher.OnMockSent, 0)}
 }
 
 func (m *GRPCMock) getRef() string {
-	if len(m.Name) == 0 {
-		return m.ID
+	if len(m.GetName()) == 0 {
+		return m.GetID()
 	}
 
-	return m.Name
+	return m.GetName()
 }
 
 const (
