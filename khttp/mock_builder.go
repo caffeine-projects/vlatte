@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/kcore/flow"
 	"github.com/caffeine-projects/vlatte/khttp/httpval"
 	"github.com/caffeine-projects/vlatte/matcher"
 	"github.com/caffeine-projects/vlatte/matcher/mfeat"
@@ -384,7 +385,7 @@ func (b *HTTPMockBuilder) PostAction(input *PostActionDef) *HTTPMockBuilder {
 	return b
 }
 
-func (b *HTTPMockBuilder) Intercept(interceptor ...kcore.Interceptor) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) Intercept(interceptor ...flow.Step) *HTTPMockBuilder {
 	b.mock.Interceptors = append(b.mock.Interceptors, interceptor...)
 
 	return b

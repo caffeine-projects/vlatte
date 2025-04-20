@@ -8,6 +8,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/kcore"
 	"github.com/caffeine-projects/vlatte/kcore/descriptor"
+	"github.com/caffeine-projects/vlatte/kcore/flow"
 	"github.com/caffeine-projects/vlatte/kcore/kv"
 	"github.com/caffeine-projects/vlatte/matcher"
 )
@@ -182,7 +183,7 @@ type HTTPMock struct {
 	// Mappers stores response mappers associated with this Mock.
 	Mappers []Mapper
 
-	Interceptors []kcore.Interceptor
+	Interceptors []flow.Step
 
 	after        []int
 	expectations []*kcore.Eval[*HTTPValueSelectorInput]
@@ -195,7 +196,7 @@ func newMock() *HTTPMock {
 		Callbacks:    make([]Callback, 0),
 		PostActions:  make([]*PostActionDef, 0),
 		Mappers:      make([]Mapper, 0),
-		Interceptors: make([]kcore.Interceptor, 0),
+		Interceptors: make([]flow.Step, 0),
 		expectations: make([]*kcore.Eval[*HTTPValueSelectorInput], 0),
 	}
 }

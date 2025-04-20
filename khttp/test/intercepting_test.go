@@ -7,13 +7,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/kcore/flow"
 	"github.com/caffeine-projects/vlatte/khttp"
 )
 
 type TestInterceptor struct{ txt string }
 
-func (in *TestInterceptor) Intercept(p []byte, chain kcore.Chain) (n int, err error) {
+func (in *TestInterceptor) Handle(p []byte, chain flow.Next) (n int, err error) {
 	return chain.Next(append(p, []byte(in.txt)...))
 }
 

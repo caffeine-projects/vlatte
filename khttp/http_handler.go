@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/kcore/flow"
 	"github.com/caffeine-projects/vlatte/khttp/httpval"
 	"github.com/caffeine-projects/vlatte/khttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/khttp/internal/httprec"
@@ -18,7 +19,7 @@ import (
 )
 
 type topResponseWriter struct {
-	chain kcore.Chain
+	chain flow.Next
 	rw    http.ResponseWriter
 }
 
@@ -126,7 +127,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if len(mock.Interceptors) > 0 {
-			w = &topResponseWriter{kcore.NewChain(append(mock.Interceptors, &kcore.RootIntereptor{W: w})), w}
+			w = &topResponseWriter{flow.New(&flow.Sink{W: w}, mock.Interceptors), w}
 		}
 
 		for k, vv := range res.Header {
