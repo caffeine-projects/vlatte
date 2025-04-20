@@ -8,20 +8,6 @@ import (
 
 var _ Store[*M] = (*InMemMockStore[*M])(nil)
 
-type Store[T Mock] interface {
-	EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan T, error)
-	Eligible(ctx context.Context) ([]T, error)
-
-	Save(ctx context.Context, mock ...T) error
-
-	Get(ctx context.Context, id string) (T, error)
-	GetAll(ctx context.Context) ([]T, error)
-	GetByIDs(ctx context.Context, ids ...string) ([]T, error)
-
-	Del(ctx context.Context, ids ...string) error
-	DelAll(ctx context.Context) error
-}
-
 type InMemMockStore[TMock Mock] struct {
 	data []TMock
 	mu   sync.RWMutex

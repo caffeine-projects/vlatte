@@ -1,6 +1,7 @@
 package kcore
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
@@ -37,6 +38,20 @@ func UseUUID() IDGen {
 // Builder describes a Mock builder.
 type Builder[TMock Mock, TMockApp MockApp[TMock]] interface {
 	Build(app TMockApp) (TMock, error)
+}
+
+type Store[T Mock] interface {
+	EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan T, error)
+	Eligible(ctx context.Context) ([]T, error)
+
+	Save(ctx context.Context, mock ...T) error
+
+	Get(ctx context.Context, id string) (T, error)
+	GetAll(ctx context.Context) ([]T, error)
+	GetByIDs(ctx context.Context, ids ...string) ([]T, error)
+
+	Del(ctx context.Context, ids ...string) error
+	DelAll(ctx context.Context) error
 }
 
 // M holds metadata and expectations to be matched against HTTP requests in order to serve mocked responses.

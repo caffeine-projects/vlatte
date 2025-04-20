@@ -65,13 +65,13 @@ func (e *Eval[TIn]) Match(ctx context.Context, in TIn) (result matcher.Result, e
 type GetEvals[M Mock, TIn any] func(m M) Evaluators[M, TIn]
 
 // Mocks is a list of sorted eligible mocks.
-// This list can searched for a match
+// This list can searched for a match.
 type Mocks[M Mock, TIn any] []M
 
 // Find tries to find an exact match in the mocks.
-func (mocks Mocks[M, TIn]) Find(ctx context.Context, in TIn, fnEv GetEvals[M, TIn]) (M, bool, error) {
+func (mocks Mocks[M, TIn]) Find(ctx context.Context, in TIn, evals GetEvals[M, TIn]) (M, bool, error) {
 	for i, mock := range mocks {
-		ok, err := fnEv(mock).Eval(ctx, in)
+		ok, err := evals(mock).Eval(ctx, in)
 		if err != nil {
 			var nothing M
 			return nothing, false, fmt.Errorf("%w: error at mock[%d] %s. reason: %w", ErrMatching, i, mock.String(), err)

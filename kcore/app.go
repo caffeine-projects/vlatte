@@ -9,12 +9,6 @@ import (
 
 var _ MockApp[*M] = (*baseApp)(nil)
 
-// Configurer lets users configure the Mock API.
-type Configurer[TConfig any] interface {
-	// Apply applies a configuration.
-	Apply(conf TConfig) error
-}
-
 // TestingT is based on testing.T and is used for assertions.
 // See Assert* methods on the application instance.
 type TestingT interface {
@@ -46,15 +40,15 @@ type MockApp[TMock Mock] interface {
 }
 
 type MockBag[TMock Mock, TMockApp MockApp[TMock]] struct {
-	rwm        sync.RWMutex
-	app        TMockApp
-	repository Store[TMock]
-	scopes     []*Scope[TMock]
+	mu     sync.RWMutex
+	app    TMockApp
+	store  Store[TMock]
+	scopes []*Scope[TMock]
 }
 
 func (a *MockBag[TMock, TMockApp]) Add(builders ...Builder[TMock, TMockApp]) (*Scope[TMock], error) {
-	a.rwm.Lock()
-	defer a.rwm.Unlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	added := make([]TMock, len(builders))
 
@@ -66,33 +60,33 @@ func (a *MockBag[TMock, TMockApp]) Add(builders ...Builder[TMock, TMockApp]) (*S
 
 		mock.Prepare()
 
-		if err := a.repository.Save(context.Background(), mock); err != nil {
+		if err := a.store.Save(context.Background(), mock); err != nil {
 			return nil, err
 		}
 
 		added[i] = mock
 	}
 
-	scope := Scoped(a.repository, added)
+	scope := Scoped(a.store, added)
 	a.scopes = append(a.scopes, scope)
 
 	return scope, nil
 }
 
 func (a *MockBag[TMock, TMockApp]) List() []*Scope[TMock] {
-	a.rwm.RLock()
-	defer a.rwm.RUnlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 
 	return a.scopes
 }
 
 type BaseApp[TMock Mock, TMockApp MockApp[TMock]] struct {
 	mockBag *MockBag[TMock, TMockApp]
-	rwm     sync.RWMutex
+	mu      sync.RWMutex
 }
 
 func NewBaseApp[TMock Mock, TMockApp MockApp[TMock]](app TMockApp, repo Store[TMock]) *BaseApp[TMock, TMockApp] {
-	return &BaseApp[TMock, TMockApp]{mockBag: &MockBag[TMock, TMockApp]{app: app, repository: repo}}
+	return &BaseApp[TMock, TMockApp]{mockBag: &MockBag[TMock, TMockApp]{app: app, store: repo}}
 }
 
 // Mock adds one or multiple request mocks.
@@ -108,8 +102,8 @@ func NewBaseApp[TMock Mock, TMockApp MockApp[TMock]](app TMockApp, repo Store[TM
 //
 //	assert.True(txtTemplate, scoped.HasBeenCalled())
 func (app *BaseApp[TMock, TMockApp]) Mock(builders ...Builder[TMock, TMockApp]) (*Scope[TMock], error) {
-	app.rwm.Lock()
-	defer app.rwm.Unlock()
+	app.mu.Lock()
+	defer app.mu.Unlock()
 
 	return app.mockBag.Add(builders...)
 }
@@ -149,8 +143,8 @@ func (app *BaseApp[TMock, TMockApp]) Hits() int64 {
 
 // Enable enables all mocks.
 func (app *BaseApp[TMock, TMockApp]) Enable() {
-	app.rwm.Lock()
-	defer app.rwm.Unlock()
+	app.mu.Lock()
+	defer app.mu.Unlock()
 
 	for _, scoped := range app.mockBag.List() {
 		scoped.Enable()
@@ -159,8 +153,8 @@ func (app *BaseApp[TMock, TMockApp]) Enable() {
 
 // Disable disables all mocks.
 func (app *BaseApp[TMock, TMockApp]) Disable() {
-	app.rwm.Lock()
-	defer app.rwm.Unlock()
+	app.mu.Lock()
+	defer app.mu.Unlock()
 
 	for _, scoped := range app.mockBag.List() {
 		scoped.Disable()
@@ -169,8 +163,8 @@ func (app *BaseApp[TMock, TMockApp]) Disable() {
 
 // Clean removes all scoped mocks.
 func (app *BaseApp[TMock, TMockApp]) Clean() error {
-	app.rwm.Lock()
-	defer app.rwm.Unlock()
+	app.mu.Lock()
+	defer app.mu.Unlock()
 
 	for i, s := range app.mockBag.List() {
 		err := s.Clean(context.Background())
