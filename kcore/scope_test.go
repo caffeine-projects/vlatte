@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/caffeine-projects/vlatte/bean/khttp"
-	"github.com/caffeine-projects/vlatte/bean/khttp/test/testmock"
+	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp/test/testmock"
 	"github.com/caffeine-projects/vlatte/kcore"
 	"github.com/caffeine-projects/vlatte/matcher"
 	"github.com/stretchr/testify/require"
