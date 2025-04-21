@@ -171,7 +171,7 @@ func NewAPI(config ...Configurer) *HTTPMockApp {
 		app.templateEngine = tmpl
 	}
 
-	app.BaseApp = kcore.NewBaseApp[*HTTPMock, *HTTPMockApp](app, repository)
+	app.BaseApp = kcore.NewBaseApp(app, repository)
 	app.server = server
 	app.storage = repository
 	app.scenarioStore = mfeat.NewScenarioStore()
