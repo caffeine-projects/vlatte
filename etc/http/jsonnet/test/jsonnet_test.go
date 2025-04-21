@@ -24,7 +24,7 @@ func TestJSONNet(t *testing.T) {
 	j, err := vm.EvaluateAnonymousSnippet("root.jsonnet", string(b))
 	require.NoError(t, err)
 
-	fschema, err := os.Open("../../dzhttpjsonschema/schema.json")
+	fschema, err := os.Open("../../http.schema.json")
 	require.NoError(t, err)
 
 	defer fschema.Close()
