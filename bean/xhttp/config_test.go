@@ -14,8 +14,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp/cors"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte/std/kv/kvmem"
 	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/std/kv/kvmem"
 )
 
 type testBodyParser struct{}
@@ -167,7 +167,6 @@ func TestConfigBuilder(t *testing.T) {
 		Name(nm).
 		Addr(addr).
 		RootDir("test_root_dir").
-		FailFast(true).
 		MockNotFoundStatusCode(http.StatusNotFound).
 		RequestBodyParsers(&plainTextParser{}).
 		MaxBodyParsingLimit(10).
@@ -198,7 +197,6 @@ func TestConfigBuilder(t *testing.T) {
 	require.Equal(t, nm, conf.Name)
 	require.Equal(t, addr, conf.Addr)
 	require.Equal(t, "test_root_dir", conf.RootDir)
-	require.Equal(t, true, conf.FailFast)
 	require.Equal(t, http.StatusNotFound, conf.RequestWasNotMatchedStatusCode)
 	require.Len(t, conf.RequestBodyParsers, 1)
 	require.EqualValues(t, conf.MaxBodyParsingLimit, 10)
