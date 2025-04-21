@@ -202,8 +202,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	callbackInput := &CallbackInput{r, parsedURL, parsedBody, h.app, mock, res}
-	for i, callback := range mock.Callbacks {
+	callbackInput := &kcore.CallbackInput{RawRequest: r, URL: parsedURL, ParsedBody: parsedBody, App: h.app, Mock: mock, MockedResponse: res}
+	for i, callback := range mock.Callbacks() {
 		err = callback(callbackInput)
 		if err != nil {
 			h.lifecycle.OnWarning(reqValues, fmt.Errorf(

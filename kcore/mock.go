@@ -27,6 +27,7 @@ type Mock interface {
 	Prepare()
 
 	PostActions() PostActions
+	Callbacks() []Callback
 }
 
 type IDGen func() string
@@ -80,6 +81,8 @@ type M struct {
 	Delay Delay
 
 	PostActionList PostActions
+
+	CallbackList []Callback
 }
 
 // NewMock returns a new Mock with default values set.
@@ -87,6 +90,7 @@ func NewMock(idgen IDGen) *M {
 	mock := &M{
 		ID:             idgen(),
 		PostActionList: make(PostActions, 0),
+		CallbackList:   make([]Callback, 0),
 
 		enabled: true,
 	}
@@ -165,13 +169,17 @@ func (m *M) String() string {
 	return ""
 }
 
+func (m *M) PostActions() PostActions {
+	return m.PostActionList
+}
+
+func (m *M) Callbacks() []Callback {
+	return m.CallbackList
+}
+
 // Build allows users to use the Mock itself as a HTTPMockBuilder.
 func (m *M) Build() (*M, error) {
 	return m, nil
-}
-
-func (m *M) PostActions() PostActions {
-	return m.PostActionList
 }
 
 type Results struct {

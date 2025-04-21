@@ -45,30 +45,6 @@ type RequestValues struct {
 	Mock *HTTPMock
 }
 
-// CallbackInput represents the arguments that will be passed to every Callback implementation
-type CallbackInput struct {
-	// RawRequest is the original incoming http.Request.
-	RawRequest *http.Request
-
-	// URL is the full request url.URL, including scheme, host, port.
-	URL *url.URL
-
-	// ParsedBody is the parsed http.Request body.
-	ParsedBody any
-
-	// App exposes the application instance associated with the incoming HTTP request.
-	App *HTTPMockApp
-
-	// Mock is the matched Mock for the current HTTP request.
-	Mock *HTTPMock
-
-	// MockedResponse is the HTTP response MockedResponse served.
-	MockedResponse *MockedResponse
-}
-
-// Callback defines the contract for an action that will be executed after serving a mocked HTTP response.
-type Callback func(input *CallbackInput) error
-
 // Mapper is the function definition to be used to map a Mock response MockedResponse before serving it.
 type Mapper func(requestValues *RequestValues, res *MockedResponse) error
 
@@ -134,9 +110,6 @@ type HTTPExpectation = kcore.Eval[*HTTPValueSelectorInput]
 type HTTPMock struct {
 	*kcore.M
 
-	// Callbacks holds a Callback list to be executed after the Mock was matched and served.
-	Callbacks []Callback
-
 	// Source describes the source of the mock. E.g.: if it was built from a file,
 	// it will contain the filename.
 	Source string
@@ -156,7 +129,6 @@ type HTTPMock struct {
 func newMock() *HTTPMock {
 	return &HTTPMock{
 		M:            kcore.NewMock(kcore.UseUUID()),
-		Callbacks:    make([]Callback, 0),
 		Mappers:      make([]Mapper, 0),
 		Interceptors: make([]flow.Step, 0),
 		expectations: make([]*kcore.Eval[*HTTPValueSelectorInput], 0),

@@ -373,8 +373,8 @@ func (b *HTTPMockBuilder) ScenarioStateWillBe(newState string) *HTTPMockBuilder 
 }
 
 // Callback adds a callback that will be executed after the mocked response is served.
-func (b *HTTPMockBuilder) Callback(callback Callback) *HTTPMockBuilder {
-	b.mock.Callbacks = append(b.mock.Callbacks, callback)
+func (b *HTTPMockBuilder) Callback(callback kcore.Callback) *HTTPMockBuilder {
+	b.mock.CallbackList = append(b.mock.CallbackList, callback)
 
 	return b
 }
