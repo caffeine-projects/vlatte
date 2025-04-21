@@ -11,7 +11,7 @@ type MockApp[TM Mock] interface {
 	Hits() int64
 	Enable()
 	Disable()
-	Clean() error
+	Clean(ctx context.Context) error
 }
 
 type BaseApp[TM Mock, A MockApp[TM]] struct {
@@ -96,12 +96,12 @@ func (app *BaseApp[TM, A]) Disable() {
 }
 
 // Clean removes all scoped mocks.
-func (app *BaseApp[TM, A]) Clean() error {
+func (app *BaseApp[TM, A]) Clean(ctx context.Context) error {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
 	for i, s := range app.roaster.List() {
-		err := s.Clean(context.Background())
+		err := s.Clean(ctx)
 		if err != nil {
 			return fmt.Errorf("error cleaning mocks from scope %d. %w", i, err)
 		}

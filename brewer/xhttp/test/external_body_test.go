@@ -43,7 +43,7 @@ func TestExternalResponseBodies(t *testing.T) {
 			require.Equal(t, http.StatusOK, res.StatusCode)
 			require.Equal(t, tc.body, string(b))
 
-			m.Clean()
+			m.Clean(t.Context())
 		})
 	}
 }

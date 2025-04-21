@@ -94,7 +94,7 @@ func TestHTTPMethods(t *testing.T) {
 			require.NoError(t, res.Body.Close())
 			require.Equal(t, StatusNoMatch, res.StatusCode)
 
-			m.Clean()
+			m.Clean(t.Context())
 		})
 	}
 }

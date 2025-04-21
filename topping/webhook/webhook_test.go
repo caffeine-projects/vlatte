@@ -154,7 +154,7 @@ func TestWebHook_Run(t *testing.T) {
 			m := xhttp.NewAPI(xhttp.Setup().PostAction(name, wh))
 			m.MustStart()
 			defer m.Close()
-			defer target.Clean()
+			defer target.Clean(t.Context())
 
 			target.MustMock(tc.targetMock)
 
@@ -329,7 +329,7 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 			require.NoError(t, res.Body.Close())
 			require.Equal(t, http.StatusNoContent, res.StatusCode)
 
-			m.Clean()
+			m.Clean(t.Context())
 		})
 	}
 }

@@ -296,7 +296,7 @@ func TestMochaConcurrency(t *testing.T) {
 			m.Disable()
 			m.Enable()
 
-			m.Clean()
+			m.Clean(t.Context())
 
 			m.MustMock(Getf("%s", "/test--"+strconv.FormatInt(int64(index), 10)).Reply(OK()))
 			m.MustMock(Getf("%s", "/concurrency--"+strconv.FormatInt(int64(index), 10)).Reply(Accepted()))
@@ -305,7 +305,7 @@ func TestMochaConcurrency(t *testing.T) {
 		}(i)
 
 		m.MustMock(Getf("%s", "/test-outside--"+strconv.FormatInt(int64(i), 10)).Reply(Created()))
-		m.Clean()
+		m.Clean(t.Context())
 
 		m.Hits()
 		m.Disable()
