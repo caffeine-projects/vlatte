@@ -8,8 +8,8 @@ import (
 )
 
 type bothMatcher struct {
-	first  Matcher
-	second Matcher
+	first  Filter
+	second Filter
 }
 
 func (m *bothMatcher) Match(value any) (Result, error) {
@@ -47,6 +47,6 @@ func (m *bothMatcher) Describe() descriptor.Descriptor {
 }
 
 // Both passes when both the given matchers pass.
-func Both(first Matcher, second Matcher) Matcher {
+func Both(first Filter, second Filter) Filter {
 	return &bothMatcher{first: first, second: second}
 }

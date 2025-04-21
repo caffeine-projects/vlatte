@@ -70,6 +70,6 @@ func (m *itemsMatchMatcher) Describe() descriptor.Descriptor {
 }
 
 // ItemsMatch if the given array items match with the incoming request value array.
-func ItemsMatch(items any) Matcher {
+func ItemsMatch(items any) Filter {
 	return &itemsMatchMatcher{expected: items}
 }

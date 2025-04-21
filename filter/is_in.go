@@ -40,6 +40,6 @@ func (m *isContainedInMatcher) Describe() descriptor.Descriptor {
 
 // IsIn checks if the incoming request value is in the given items.
 // Parameter items must be a slice.
-func IsIn(items any) Matcher {
+func IsIn(items any) Filter {
 	return &isContainedInMatcher{items: items}
 }

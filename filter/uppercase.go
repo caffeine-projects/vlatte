@@ -8,7 +8,7 @@ import (
 )
 
 type upperCaseMatcher struct {
-	matcher Matcher
+	matcher Filter
 }
 
 func (m *upperCaseMatcher) Match(v any) (Result, error) {
@@ -34,6 +34,6 @@ func (m *upperCaseMatcher) Describe() descriptor.Descriptor {
 }
 
 // ToUpper uppers the case of the incoming request value before submitting it to provided matcher.
-func ToUpper(matcher Matcher) Matcher {
+func ToUpper(matcher Filter) Filter {
 	return &upperCaseMatcher{matcher: matcher}
 }

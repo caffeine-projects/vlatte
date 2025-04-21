@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 type equalStrictMatcher struct {
@@ -26,17 +26,17 @@ func (m *equalStrictMatcher) Describe() descriptor.Descriptor {
 }
 
 // StrictEqual strictly compares the expected value with incoming request values, considering value and type.
-func StrictEqual(expected any) Matcher {
+func StrictEqual(expected any) Filter {
 	return &equalStrictMatcher{expected: expected}
 }
 
 // StrictEqualf strictly compares the expected value with incoming request values, considering value and type.
 // This is short-hand to format the expected value.
-func StrictEqualf(format string, a ...any) Matcher {
+func StrictEqualf(format string, a ...any) Filter {
 	return &equalStrictMatcher{expected: fmt.Sprintf(format, a...)}
 }
 
 // Eqs strictly compares the expected value with incoming request values, considering value and type.
-func Eqs(expected any) Matcher {
+func Eqs(expected any) Filter {
 	return &equalStrictMatcher{expected: expected}
 }

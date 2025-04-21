@@ -8,7 +8,7 @@ import (
 )
 
 type trimMatcher struct {
-	matcher Matcher
+	matcher Filter
 }
 
 func (m *trimMatcher) Match(v any) (Result, error) {
@@ -34,6 +34,6 @@ func (m *trimMatcher) Describe() descriptor.Descriptor {
 }
 
 // Trim trims' spaces of the incoming request value before submitting it to the provided matcher.
-func Trim(matcher Matcher) Matcher {
+func Trim(matcher Filter) Filter {
 	return &trimMatcher{matcher: matcher}
 }

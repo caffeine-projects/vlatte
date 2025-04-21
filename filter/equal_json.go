@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 type equalJSONMatcher struct {
@@ -60,11 +60,11 @@ func (m *equalJSONMatcher) Describe() descriptor.Descriptor {
 }
 
 // EqualJSON matches JSON values.
-func EqualJSON(expected any) Matcher {
+func EqualJSON(expected any) Filter {
 	return &equalJSONMatcher{expected: expected}
 }
 
 // Eqj matches JSON values.
-func Eqj(expected any) Matcher {
+func Eqj(expected any) Filter {
 	return &equalJSONMatcher{expected: expected}
 }

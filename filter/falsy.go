@@ -39,6 +39,6 @@ func (m *falsyMatcher) Describe() descriptor.Descriptor {
 }
 
 // Falsy checks if the incoming request value is false.
-func Falsy() Matcher {
+func Falsy() Filter {
 	return &falsyMatcher{}
 }

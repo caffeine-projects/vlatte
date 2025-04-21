@@ -11,7 +11,7 @@ import (
 
 type itemMatcher struct {
 	index   int
-	matcher Matcher
+	matcher Filter
 }
 
 func (m *itemMatcher) Match(v any) (Result, error) {
@@ -49,6 +49,6 @@ func (m *itemMatcher) Describe() descriptor.Descriptor {
 }
 
 // Item matches a specific array item from the incoming request value.
-func Item(index int, matcher Matcher) Matcher {
+func Item(index int, matcher Filter) Filter {
 	return &itemMatcher{index: index, matcher: matcher}
 }

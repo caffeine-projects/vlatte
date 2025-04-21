@@ -3,7 +3,7 @@ package filter
 import "fmt"
 
 type peekMatcher struct {
-	matcher Matcher
+	matcher Filter
 	action  func(v any) error
 }
 
@@ -18,6 +18,6 @@ func (m *peekMatcher) Match(v any) (Result, error) {
 
 // Peek will return the expected of the given matcher, after executing the provided function.
 // Peek can be used to check the matcher argument.
-func Peek(matcher Matcher, action func(v any) error) Matcher {
+func Peek(matcher Filter, action func(v any) error) Filter {
 	return &peekMatcher{matcher: matcher, action: action}
 }

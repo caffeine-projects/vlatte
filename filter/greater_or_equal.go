@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/caffeine-projects/vlatte/filter/internal/mconv"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 type greaterOrEqualMatcher struct {
@@ -35,11 +35,11 @@ func (m *greaterOrEqualMatcher) Describe() descriptor.Descriptor {
 }
 
 // GreaterThanOrEqual passes if the incoming request value is greater than or equal to the given value.
-func GreaterThanOrEqual(expected float64) Matcher {
+func GreaterThanOrEqual(expected float64) Filter {
 	return &greaterOrEqualMatcher{expected: expected}
 }
 
 // Gte passes if the incoming request value is greater than or equal to the given value.
-func Gte(expected float64) Matcher {
+func Gte(expected float64) Filter {
 	return &greaterOrEqualMatcher{expected: expected}
 }

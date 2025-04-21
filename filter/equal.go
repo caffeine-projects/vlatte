@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 type equalMatcher struct {
@@ -26,20 +26,20 @@ func (m *equalMatcher) Describe() descriptor.Descriptor {
 
 // Equal asserts that the given expectation is equal to the incoming request value.
 // It considers equivalent value. Eg.: float64(10) is equal to int(10).
-func Equal(expected any) Matcher {
+func Equal(expected any) Filter {
 	return &equalMatcher{expected: expected}
 }
 
 // Equalf returns true if the matcher value is equal to the given parameter value.
 // It considers equivalent value. Eg.: float64(10) is equal to int(10).
 // This is short-hand to format the expected value.
-func Equalf(format string, a ...any) Matcher {
+func Equalf(format string, a ...any) Filter {
 	return &equalMatcher{expected: fmt.Sprintf(format, a...)}
 }
 
 // Eq is an alias to Equal.
 // It asserts that the given expectation is equal to the incoming request value.
 // It considers equivalent value. Eg.: float64(10) is equal to int(10).
-func Eq(expected any) Matcher {
+func Eq(expected any) Filter {
 	return &equalMatcher{expected: expected}
 }

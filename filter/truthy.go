@@ -39,6 +39,6 @@ func (m *truthyMatcher) Describe() descriptor.Descriptor {
 }
 
 // Truthy passes if the request value is true.
-func Truthy() Matcher {
+func Truthy() Filter {
 	return &truthyMatcher{}
 }

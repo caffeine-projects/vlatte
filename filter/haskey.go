@@ -49,7 +49,7 @@ func (m *hasKeyMatcher) Describe() descriptor.Descriptor {
 //	JSON: { "name": "test" }
 //	HasKey("name") will pass
 //	HasKey("address.street") will not pass.
-func HasKey(path string) Matcher {
+func HasKey(path string) Filter {
 	x, err := jp.ParseString(path)
 	if err != nil {
 		panic(fmt.Errorf("the json path expression %s is invalid: %w", path, err))

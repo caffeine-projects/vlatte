@@ -12,7 +12,7 @@ import (
 type jsonPathMatcher struct {
 	path    string
 	expr    jp.Expr
-	matcher Matcher
+	matcher Filter
 	name    string
 }
 
@@ -64,7 +64,7 @@ func (m *jsonPathMatcher) Describe() descriptor.Descriptor {
 // Example:
 //
 //	JSONPath("address.city", EqualTo("Santiago"))
-func JSONPath(path string, matcher Matcher) Matcher {
+func JSONPath(path string, matcher Filter) Filter {
 	x, err := jp.ParseString(path)
 	if err != nil {
 		panic(fmt.Errorf("the json path expression %s is invalid: %w", path, err))
@@ -83,7 +83,7 @@ func JSONPath(path string, matcher Matcher) Matcher {
 // Example:
 //
 //	Field("address.city", EqualTo("Santiago"))
-func Field(path string, matcher Matcher) Matcher {
+func Field(path string, matcher Filter) Filter {
 	x, err := jp.ParseString(path)
 	if err != nil {
 		panic(fmt.Errorf("the json path expression %s is invalid: %w", path, err))

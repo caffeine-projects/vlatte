@@ -7,7 +7,7 @@ import (
 )
 
 type notMatcher struct {
-	matcher Matcher
+	matcher Filter
 }
 
 func (m *notMatcher) Match(v any) (Result, error) {
@@ -30,6 +30,6 @@ func (m *notMatcher) Describe() descriptor.Descriptor {
 }
 
 // Not negates the provided matcher.
-func Not(matcher Matcher) Matcher {
+func Not(matcher Filter) Filter {
 	return &notMatcher{matcher: matcher}
 }

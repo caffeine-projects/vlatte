@@ -9,7 +9,7 @@ import (
 func TestNot(t *testing.T) {
 	tcs := []struct {
 		name     string
-		matcher  Matcher
+		matcher  Filter
 		expected bool
 	}{
 		{"is not equal", StrictEqual("dev"), true},

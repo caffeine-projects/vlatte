@@ -31,6 +31,6 @@ func (m *hasSuffixMatcher) Describe() descriptor.Descriptor {
 }
 
 // HasSuffix passes when matcher argument ends with the given suffix.
-func HasSuffix(suffix string) Matcher {
+func HasSuffix(suffix string) Filter {
 	return &hasSuffixMatcher{suffix: suffix}
 }

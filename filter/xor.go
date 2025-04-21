@@ -8,8 +8,8 @@ import (
 )
 
 type xorMatcher struct {
-	first  Matcher
-	second Matcher
+	first  Filter
+	second Filter
 }
 
 func (m *xorMatcher) Match(v any) (Result, error) {
@@ -46,6 +46,6 @@ func (m *xorMatcher) Describe() descriptor.Descriptor {
 }
 
 // XOR is an exclusive OR matcher.
-func XOR(first Matcher, second Matcher) Matcher {
+func XOR(first Filter, second Filter) Filter {
 	return &xorMatcher{first: first, second: second}
 }

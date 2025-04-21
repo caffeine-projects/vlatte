@@ -5,8 +5,8 @@ import (
 
 	"google.golang.org/grpc/metadata"
 
-	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/std"
 )
 
 var (
@@ -31,7 +31,7 @@ func UnaryMethod(method string) *UnaryMockBuilder {
 	return b
 }
 
-func (b *UnaryMockBuilder) Header(key string, m filter.Matcher) *UnaryMockBuilder {
+func (b *UnaryMockBuilder) Header(key string, m filter.Filter) *UnaryMockBuilder {
 	b.m.unaryExpectations = append(
 		b.m.unaryExpectations,
 		&std.Eval[*UnaryValueSelectorIn]{
@@ -43,7 +43,7 @@ func (b *UnaryMockBuilder) Header(key string, m filter.Matcher) *UnaryMockBuilde
 	return b
 }
 
-func (b *UnaryMockBuilder) Field(path string, m filter.Matcher) *UnaryMockBuilder {
+func (b *UnaryMockBuilder) Field(path string, m filter.Filter) *UnaryMockBuilder {
 	b.m.unaryExpectations = append(
 		b.m.unaryExpectations,
 		&std.Eval[*UnaryValueSelectorIn]{

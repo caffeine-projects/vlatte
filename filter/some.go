@@ -5,12 +5,12 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 type someMatcher struct {
-	matcher Matcher
+	matcher Filter
 }
 
 func (m *someMatcher) Match(v any) (Result, error) {
@@ -58,6 +58,6 @@ func (m *someMatcher) Describe() descriptor.Descriptor {
 }
 
 // Some will use the given matcher to test whether at least one element in the request value passes.
-func Some(matcher Matcher) Matcher {
+func Some(matcher Filter) Filter {
 	return &someMatcher{matcher: matcher}
 }

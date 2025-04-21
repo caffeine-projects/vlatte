@@ -14,6 +14,6 @@ func (m *anythingMatcher) Describe() descriptor.Descriptor {
 }
 
 // Anything is an empty matcher that always passes.
-func Anything() Matcher {
+func Anything() Filter {
 	return &anythingMatcher{}
 }

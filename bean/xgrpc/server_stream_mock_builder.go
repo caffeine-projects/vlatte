@@ -5,8 +5,8 @@ import (
 
 	"google.golang.org/grpc/metadata"
 
-	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/std"
 )
 
 var (
@@ -31,7 +31,7 @@ func ServerStreamMethod(method string) *ServerStreamMockBuilder {
 	return b
 }
 
-func (b *ServerStreamMockBuilder) Header(key string, m filter.Matcher) *ServerStreamMockBuilder {
+func (b *ServerStreamMockBuilder) Header(key string, m filter.Filter) *ServerStreamMockBuilder {
 	b.m.streamExpectations = append(
 		b.m.streamExpectations,
 		&std.Eval[*StreamValueSelectorIn]{
@@ -43,7 +43,7 @@ func (b *ServerStreamMockBuilder) Header(key string, m filter.Matcher) *ServerSt
 	return b
 }
 
-func (b *ServerStreamMockBuilder) Field(path string, m filter.Matcher) *ServerStreamMockBuilder {
+func (b *ServerStreamMockBuilder) Field(path string, m filter.Filter) *ServerStreamMockBuilder {
 	b.m.streamExpectations = append(
 		b.m.streamExpectations,
 		&std.Eval[*StreamValueSelectorIn]{

@@ -5,12 +5,12 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 type eachMatcher struct {
-	matcher Matcher
+	matcher Filter
 }
 
 func (m *eachMatcher) Match(v any) (Result, error) {
@@ -72,6 +72,6 @@ func (m *eachMatcher) Describe() descriptor.Descriptor {
 
 // Each applies the given matcher on all items of the incoming request value.
 // It works with slices and maps.
-func Each(matcher Matcher) Matcher {
+func Each(matcher Filter) Filter {
 	return &eachMatcher{matcher: matcher}
 }

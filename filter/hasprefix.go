@@ -30,6 +30,6 @@ func (m *hasPrefixMatcher) Describe() descriptor.Descriptor {
 }
 
 // HasPrefix passes if the matcher argument starts with the given prefix.
-func HasPrefix(prefix string) Matcher {
+func HasPrefix(prefix string) Filter {
 	return &hasPrefixMatcher{prefix: prefix}
 }

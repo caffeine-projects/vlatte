@@ -242,7 +242,7 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 						keys[e.Key] = sd.Describe()
 					}
 				} else {
-					matchers := make([]filter.Matcher, 0, size)
+					matchers := make([]filter.Filter, 0, size)
 					for _, e := range byKey[e.Key] {
 						matchers = append(matchers, e.Matcher)
 					}
@@ -263,7 +263,7 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 				continue
 			}
 
-			matchers := make([]filter.Matcher, len(expectations))
+			matchers := make([]filter.Filter, len(expectations))
 			for i, e := range expectations {
 				matchers[i] = e.Matcher
 			}

@@ -62,7 +62,7 @@ const (
 
 // TryBuildMatcher builds a matcher.Matcher if the given parameter is a slice following the matchers convention: [\"<MATCHER_NAME>\", ARG_1, ARG_2...]
 // If it is not slice, it will return an equal matcher by default.
-func TryBuildMatcher(possibleMatcher any) (m filter.Matcher, err error) {
+func TryBuildMatcher(possibleMatcher any) (m filter.Filter, err error) {
 	val := reflect.ValueOf(possibleMatcher)
 	if possibleMatcher == nil || !val.IsValid() {
 		return nil, fmt.Errorf("definition must be a string or an array in the format: [\"<MATCHER_NAME>\", ARG_1, ARG_2...]")
@@ -77,7 +77,7 @@ func TryBuildMatcher(possibleMatcher any) (m filter.Matcher, err error) {
 }
 
 // BuildMatcher always builds a matcher.Matcher from a text or a slice matcher specification.
-func BuildMatcher(possibleMatcher any) (m filter.Matcher, err error) {
+func BuildMatcher(possibleMatcher any) (m filter.Filter, err error) {
 	val := reflect.ValueOf(possibleMatcher)
 	if possibleMatcher == nil || !val.IsValid() {
 		return nil, fmt.Errorf("definition must be a string or an array in the format: [\"<MATCHER_NAME>\", ARG_1, ARG_2...]")
@@ -91,7 +91,7 @@ func BuildMatcher(possibleMatcher any) (m filter.Matcher, err error) {
 	}
 }
 
-func buildMatcherFromArray(possibleMatcher any) (filter.Matcher, error) {
+func buildMatcherFromArray(possibleMatcher any) (filter.Filter, error) {
 	val := reflect.ValueOf(possibleMatcher)
 	if val.Len() == 0 {
 		return nil, fmt.Errorf("definition must be a string or an array in the format: [\"<MATCHER_NAME>\", ARG_1, ARG_2...]")
@@ -113,17 +113,17 @@ func buildMatcherFromArray(possibleMatcher any) (filter.Matcher, error) {
 	return discoverAndBuild(mk, val.Slice(1, val.Len()).Interface())
 }
 
-func extractMultipleMatchers(v any) ([]filter.Matcher, error) {
+func extractMultipleMatchers(v any) ([]filter.Filter, error) {
 	a, ok := v.([]any)
 	if !ok {
 		return nil,
 			fmt.Errorf("attempt to build multiple matchers using non-array type. got: %T", v)
 	}
 
-	matchers := make([]filter.Matcher, len(a))
+	matchers := make([]filter.Filter, len(a))
 
 	for i, entry := range a {
-		var mat filter.Matcher
+		var mat filter.Filter
 		var err error
 
 		eType := reflect.TypeOf(entry)
@@ -145,7 +145,7 @@ func extractMultipleMatchers(v any) ([]filter.Matcher, error) {
 	return matchers, nil
 }
 
-func discoverAndBuild(key string, args any) (ma filter.Matcher, err error) {
+func discoverAndBuild(key string, args any) (ma filter.Filter, err error) {
 	defer func() {
 		if recovery := recover(); recovery != nil {
 			err = fmt.Errorf(

@@ -9,7 +9,7 @@ import (
 )
 
 type urlPathMatcher struct {
-	matcher Matcher
+	matcher Filter
 }
 
 func (m *urlPathMatcher) Match(v any) (Result, error) {
@@ -56,18 +56,18 @@ func (m *urlPathMatcher) Describe() descriptor.Descriptor {
 
 // URLPath compares the URL path with the expected value and matches if they are equal.
 // Comparison is case-insensitive.
-func URLPath(expected string) Matcher {
+func URLPath(expected string) Filter {
 	return URLPathMatch(GlobMatch(expected))
 }
 
 // URLPathf compares the URL path with the expected value and matches if they are equal.
 // The expected value will be formatted according to the given format specifier.
 // Comparison is case-insensitive.
-func URLPathf(format string, a ...any) Matcher {
+func URLPathf(format string, a ...any) Filter {
 	return URLPathMatch(GlobMatch(fmt.Sprintf(format, a...)))
 }
 
 // URLPathMatch applies the provided matcher to the URL path.
-func URLPathMatch(matcher Matcher) Matcher {
+func URLPathMatch(matcher Filter) Filter {
 	return &urlPathMatcher{matcher: matcher}
 }

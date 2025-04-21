@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 type emptyMatcher struct {
@@ -29,6 +29,6 @@ func (m *emptyMatcher) Describe() descriptor.Descriptor {
 }
 
 // Empty passes if the incoming request value is empty or has zero value.
-func Empty() Matcher {
+func Empty() Filter {
 	return &emptyMatcher{}
 }

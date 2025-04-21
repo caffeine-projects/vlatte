@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 const ScenarioStateStarted = "started"
@@ -110,7 +110,7 @@ func (m *scenarioMatcher) Describe() descriptor.Descriptor {
 	})
 }
 
-func Scenario(store *ScenarioStore, name, requiredState, newState string) filter.Matcher {
+func Scenario(store *ScenarioStore, name, requiredState, newState string) filter.Filter {
 	return &scenarioMatcher{
 		store:         store,
 		requiredState: requiredState,

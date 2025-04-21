@@ -19,7 +19,7 @@ func TestJSONPath(t *testing.T) {
 	testCases := []struct {
 		name     string
 		path     string
-		matcher  Matcher
+		matcher  Filter
 		expected bool
 	}{
 		{
@@ -68,7 +68,7 @@ func TestJSONPathMatcherMatchErrors(t *testing.T) {
 	testCases := []struct {
 		name    string
 		path    string
-		matcher Matcher
+		matcher Filter
 	}{
 		{name: "field not present", path: "life", matcher: StrictEqual("anything")},
 		{name: "deep field not present", path: "path.to.another.field", matcher: StrictEqual("any")},
@@ -88,7 +88,7 @@ func TestJSONPathMatcherInvalidPaths(t *testing.T) {
 	testCases := []struct {
 		name    string
 		path    string
-		matcher Matcher
+		matcher Filter
 	}{
 		{name: "invalid path", path: "312nj.,", matcher: StrictEqual("anything")},
 	}

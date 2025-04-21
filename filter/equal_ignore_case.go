@@ -33,18 +33,18 @@ func (m *equalIgnoreCaseMatcher) Describe() descriptor.Descriptor {
 }
 
 // EqualIgnoreCase compares the expected value with the incoming request value ignoring the case.
-func EqualIgnoreCase(expected string) Matcher {
+func EqualIgnoreCase(expected string) Filter {
 	return &equalIgnoreCaseMatcher{expected: expected}
 }
 
 // EqualIgnoreCasef compares the expected value with the incoming request value ignoring the case.
 // This is short-hand to format the expected value.
-func EqualIgnoreCasef(format string, a ...any) Matcher {
+func EqualIgnoreCasef(format string, a ...any) Filter {
 	return EqualIgnoreCase(fmt.Sprintf(format, a...))
 }
 
 // Eqi is an alias to EqualIgnoreCase.
 // It compares the expected value with the incoming request value ignoring the case.
-func Eqi(expected string) Matcher {
+func Eqi(expected string) Filter {
 	return &equalIgnoreCaseMatcher{expected: expected}
 }

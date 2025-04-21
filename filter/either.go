@@ -8,8 +8,8 @@ import (
 )
 
 type eitherMatcher struct {
-	first  Matcher
-	second Matcher
+	first  Filter
+	second Filter
 }
 
 func (m *eitherMatcher) Match(v any) (Result, error) {
@@ -47,6 +47,6 @@ func (m *eitherMatcher) Describe() descriptor.Descriptor {
 }
 
 // Either passes when any of the two given matchers pass.
-func Either(first Matcher, second Matcher) Matcher {
+func Either(first Filter, second Filter) Filter {
 	return &eitherMatcher{first: first, second: second}
 }

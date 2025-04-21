@@ -5,12 +5,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 type allOfMatcher struct {
-	matchers []Matcher
+	matchers []Filter
 }
 
 func (m *allOfMatcher) Match(v any) (r Result, err error) {
@@ -58,6 +58,6 @@ func (m *allOfMatcher) Describe() descriptor.Descriptor {
 // Example:
 //
 //	All(Equal("test"), EqualIgnoreCase("test"), Contain("tes"))
-func All(matchers ...Matcher) Matcher {
+func All(matchers ...Filter) Filter {
 	return &allOfMatcher{matchers: matchers}
 }

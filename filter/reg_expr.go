@@ -48,6 +48,6 @@ func (m *regExpMatcher) Describe() descriptor.Descriptor {
 
 // Matches passes when the given regular expression matches the incoming request value.
 // It accepts a string, regexp.Regexp or *regexp.Regexp.
-func Matches(expression string) Matcher {
+func Matches(expression string) Filter {
 	return &regExpMatcher{expression: expression}
 }

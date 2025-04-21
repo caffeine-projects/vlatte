@@ -16,7 +16,7 @@ func TestItem(t *testing.T) {
 
 	testCases := []struct {
 		index    int
-		matcher  Matcher
+		matcher  Filter
 		expected bool
 	}{
 		{0, Equal("test"), true},

@@ -8,7 +8,7 @@ import (
 )
 
 type lowerCaseMatcher struct {
-	matcher Matcher
+	matcher Filter
 }
 
 func (m *lowerCaseMatcher) Match(v any) (Result, error) {
@@ -36,6 +36,6 @@ func (m *lowerCaseMatcher) Describe() descriptor.Descriptor {
 }
 
 // ToLower lowers the incoming request value case value before submitting it to provided matcher.
-func ToLower(matcher Matcher) Matcher {
+func ToLower(matcher Filter) Filter {
 	return &lowerCaseMatcher{matcher: matcher}
 }

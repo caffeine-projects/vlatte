@@ -18,6 +18,6 @@ func (m *nilMatcher) Describe() descriptor.Descriptor {
 }
 
 // IsNil passes if the incoming request value is nil.
-func IsNil() Matcher {
+func IsNil() Filter {
 	return &nilMatcher{}
 }

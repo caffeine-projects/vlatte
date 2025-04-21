@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 type repeatMatcher struct {
@@ -34,6 +34,6 @@ func (m *repeatMatcher) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("repeat", m.max)
 }
 
-func Repeat(times int64) filter.Matcher {
+func Repeat(times int64) filter.Filter {
 	return &repeatMatcher{max: times}
 }

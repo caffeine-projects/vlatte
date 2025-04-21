@@ -33,7 +33,7 @@ type Eval[TIn any] struct {
 	Target int
 
 	// Matcher associated with this [Eval].
-	Matcher filter.Matcher
+	Matcher filter.Filter
 
 	// Selector will extract the [http.Request] or a specific field of it and feed it to the associated [filter.Matcher].
 	Selector Selector[TIn]

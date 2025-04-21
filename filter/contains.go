@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 type containsMatcher struct {
@@ -57,12 +57,12 @@ func (m *containsMatcher) Describe() descriptor.Descriptor {
 }
 
 // Contain passes when the expected value is contained in the incoming value from the request.
-func Contain(expected any) Matcher {
+func Contain(expected any) Filter {
 	return &containsMatcher{expected: expected}
 }
 
 // Containf passes when the expected value is contained in the incoming value from the request.
 // This is shorthand to format the expected value.
-func Containf(format string, a ...any) Matcher {
+func Containf(format string, a ...any) Filter {
 	return &containsMatcher{expected: fmt.Sprintf(format, a...)}
 }

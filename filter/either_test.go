@@ -10,13 +10,13 @@ import (
 func TestEither(t *testing.T) {
 	testCases := []struct {
 		name     string
-		matchers []Matcher
+		matchers []Filter
 		expected bool
 	}{
-		{"left true", []Matcher{StrictEqual("test"), Contain("qa")}, true},
-		{"right true", []Matcher{StrictEqual("qa"), Contain("tes")}, true},
-		{"both true", []Matcher{StrictEqual("test"), Contain("te")}, true},
-		{"both false", []Matcher{StrictEqual("qa"), Contain("dev")}, false},
+		{"left true", []Filter{StrictEqual("test"), Contain("qa")}, true},
+		{"right true", []Filter{StrictEqual("qa"), Contain("tes")}, true},
+		{"both true", []Filter{StrictEqual("test"), Contain("te")}, true},
+		{"both false", []Filter{StrictEqual("qa"), Contain("dev")}, false},
 	}
 
 	for _, tc := range testCases {

@@ -3,8 +3,8 @@ package filter
 import (
 	"reflect"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 type bePresentMatcher struct {
@@ -40,6 +40,6 @@ func (m *bePresentMatcher) Describe() descriptor.Descriptor {
 }
 
 // Present checks if the incoming request value contains a value that is not nil or the zero value for the argument type.
-func Present() Matcher {
+func Present() Filter {
 	return &bePresentMatcher{}
 }

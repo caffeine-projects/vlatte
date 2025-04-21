@@ -4,10 +4,10 @@ import (
 	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
-var _ Matcher = MatcherFunc(nil)
+var _ Filter = FilterFunc(nil)
 
-// Matcher matches values.
-type Matcher interface {
+// Filter matches values.
+type Filter interface {
 	Match(v any) (Result, error)
 }
 
@@ -17,9 +17,9 @@ type Result struct {
 	Message string // Message describes why the associated Matcher did not pass.
 }
 
-type MatcherFunc func(v any) (Result, error)
+type FilterFunc func(v any) (Result, error)
 
-func (f MatcherFunc) Match(v any) (Result, error) { return f(v) }
+func (f FilterFunc) Match(v any) (Result, error) { return f(v) }
 
 // OnMockSent describes a Matcher that has post processes that need to be executed after the matched mock is served.
 // Dedicated for stateful matchers.
@@ -31,7 +31,7 @@ type OnMockSent interface {
 func success() Result                { return Result{Pass: true, Message: ""} }
 func mismatch(message string) Result { return Result{Pass: false, Message: message} }
 
-func describe(m Matcher) any {
+func describe(m Filter) any {
 	if sd, ok := m.(descriptor.Self); ok {
 		return sd.Describe()
 	}

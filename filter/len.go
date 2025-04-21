@@ -29,6 +29,6 @@ func (m *lenMatcher) Describe() descriptor.Descriptor {
 }
 
 // Len passes when the expected value length is equal to the incoming request value.
-func Len(length int) Matcher {
+func Len(length int) Filter {
 	return &lenMatcher{length: length}
 }

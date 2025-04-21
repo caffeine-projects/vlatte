@@ -10,7 +10,7 @@ import (
 func TestSome(t *testing.T) {
 	tcs := []struct {
 		name     string
-		matcher  Matcher
+		matcher  Filter
 		items    []any
 		expected bool
 	}{

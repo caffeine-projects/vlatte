@@ -3,7 +3,7 @@ package filter
 import "fmt"
 
 // Function creates an anonymous Matcher using the given function.
-func Function(fn func(v any) (bool, error)) MatcherFunc {
+func Function(fn func(v any) (bool, error)) FilterFunc {
 	return func(v any) (Result, error) {
 		pass, err := fn(v)
 		if err != nil {

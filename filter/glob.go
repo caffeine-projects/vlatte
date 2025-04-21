@@ -29,6 +29,6 @@ func (m *globMatcher) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("glob", m.pattern)
 }
 
-func GlobMatch(pattern string) Matcher {
+func GlobMatch(pattern string) Filter {
 	return &globMatcher{pattern}
 }

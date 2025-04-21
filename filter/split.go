@@ -9,7 +9,7 @@ import (
 
 type splitMatcher struct {
 	separator string
-	matcher   Matcher
+	matcher   Filter
 }
 
 func (m *splitMatcher) Match(v any) (Result, error) {
@@ -36,6 +36,6 @@ func (m *splitMatcher) Describe() descriptor.Descriptor {
 
 // Split splits the incoming request value text using the separator parameter and
 // test each element with the provided matcher.
-func Split(separator string, matcher Matcher) Matcher {
+func Split(separator string, matcher Filter) Filter {
 	return &splitMatcher{separator: separator, matcher: matcher}
 }
