@@ -39,14 +39,14 @@ type MockApp[TMock Mock] interface {
 	Clean() error
 }
 
-type MockBag[TMock Mock, TMockApp MockApp[TMock]] struct {
+type MockBag[TMock Mock, A MockApp[TMock]] struct {
 	mu     sync.RWMutex
-	app    TMockApp
+	app    A
 	store  Store[TMock]
 	scopes []*Scope[TMock]
 }
 
-func (a *MockBag[TMock, TMockApp]) Add(builders ...Builder[TMock, TMockApp]) (*Scope[TMock], error) {
+func (a *MockBag[TMock, A]) Add(builders ...Builder[TMock, A]) (*Scope[TMock], error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -73,20 +73,20 @@ func (a *MockBag[TMock, TMockApp]) Add(builders ...Builder[TMock, TMockApp]) (*S
 	return scope, nil
 }
 
-func (a *MockBag[TMock, TMockApp]) List() []*Scope[TMock] {
+func (a *MockBag[TMock, A]) List() []*Scope[TMock] {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
 	return a.scopes
 }
 
-type BaseApp[TMock Mock, TMockApp MockApp[TMock]] struct {
-	mockBag *MockBag[TMock, TMockApp]
+type BaseApp[TMock Mock, A MockApp[TMock]] struct {
+	mockBag *MockBag[TMock, A]
 	mu      sync.RWMutex
 }
 
-func NewBaseApp[TMock Mock, TMockApp MockApp[TMock]](app TMockApp, repo Store[TMock]) *BaseApp[TMock, TMockApp] {
-	return &BaseApp[TMock, TMockApp]{mockBag: &MockBag[TMock, TMockApp]{app: app, store: repo}}
+func NewBaseApp[TMock Mock, A MockApp[TMock]](app A, repo Store[TMock]) *BaseApp[TMock, A] {
+	return &BaseApp[TMock, A]{mockBag: &MockBag[TMock, A]{app: app, store: repo}}
 }
 
 // Mock adds one or multiple request mocks.
@@ -101,7 +101,7 @@ func NewBaseApp[TMock Mock, TMockApp MockApp[TMock]](app TMockApp, repo Store[TM
 //			Reply(reply.Created().PlainText("hello world")))
 //
 //	assert.True(txtTemplate, scoped.HasBeenCalled())
-func (app *BaseApp[TMock, TMockApp]) Mock(builders ...Builder[TMock, TMockApp]) (*Scope[TMock], error) {
+func (app *BaseApp[TMock, A]) Mock(builders ...Builder[TMock, A]) (*Scope[TMock], error) {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
@@ -121,7 +121,7 @@ func (app *BaseApp[TMock, TMockApp]) Mock(builders ...Builder[TMock, TMockApp]) 
 //			Reply(reply.Created().PlainText("hello world")))
 //
 //	assert.True(txtTemplate, scoped.HasBeenCalled())
-func (app *BaseApp[TMock, TMockApp]) MustMock(builders ...Builder[TMock, TMockApp]) *Scope[TMock] {
+func (app *BaseApp[TMock, A]) MustMock(builders ...Builder[TMock, A]) *Scope[TMock] {
 	scoped, err := app.Mock(builders...)
 	if err != nil {
 		panic(err)
@@ -131,7 +131,7 @@ func (app *BaseApp[TMock, TMockApp]) MustMock(builders ...Builder[TMock, TMockAp
 }
 
 // Hits returns the total matched request hits.
-func (app *BaseApp[TMock, TMockApp]) Hits() int64 {
+func (app *BaseApp[TMock, A]) Hits() int64 {
 	hits := int64(0)
 
 	for _, s := range app.mockBag.List() {
@@ -142,7 +142,7 @@ func (app *BaseApp[TMock, TMockApp]) Hits() int64 {
 }
 
 // Enable enables all mocks.
-func (app *BaseApp[TMock, TMockApp]) Enable() {
+func (app *BaseApp[TMock, A]) Enable() {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
@@ -152,7 +152,7 @@ func (app *BaseApp[TMock, TMockApp]) Enable() {
 }
 
 // Disable disables all mocks.
-func (app *BaseApp[TMock, TMockApp]) Disable() {
+func (app *BaseApp[TMock, A]) Disable() {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
@@ -162,7 +162,7 @@ func (app *BaseApp[TMock, TMockApp]) Disable() {
 }
 
 // Clean removes all scoped mocks.
-func (app *BaseApp[TMock, TMockApp]) Clean() error {
+func (app *BaseApp[TMock, A]) Clean() error {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
@@ -181,7 +181,7 @@ func (app *BaseApp[TMock, TMockApp]) Clean() error {
 // --
 
 // AssertCalled asserts that all mocks associated with this instance were called at least once.
-func (app *BaseApp[TMock, TMockApp]) AssertCalled(t TestingT) bool {
+func (app *BaseApp[TMock, A]) AssertCalled(t TestingT) bool {
 	t.Helper()
 
 	result := true
@@ -217,7 +217,7 @@ func (app *BaseApp[TMock, TMockApp]) AssertCalled(t TestingT) bool {
 }
 
 // AssertNotCalled asserts that all mocks associated with this instance were called at least once.
-func (app *BaseApp[TMock, TMockApp]) AssertNotCalled(t TestingT) bool {
+func (app *BaseApp[TMock, A]) AssertNotCalled(t TestingT) bool {
 	t.Helper()
 
 	result := true
@@ -255,7 +255,7 @@ func (app *BaseApp[TMock, TMockApp]) AssertNotCalled(t TestingT) bool {
 
 // AssertNumberOfCalls asserts that the sum of matched request hits
 // is equal to the given expected value.
-func (app *BaseApp[TMock, TMockApp]) AssertNumberOfCalls(t TestingT, expected int64) bool {
+func (app *BaseApp[TMock, A]) AssertNumberOfCalls(t TestingT, expected int64) bool {
 	t.Helper()
 
 	hits := app.Hits()
