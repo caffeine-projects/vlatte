@@ -15,7 +15,7 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 
-	pb "github.com/caffeine-projects/vlatte/bean/kgrpc/internal/protobuf"
+	pb "github.com/caffeine-projects/vlatte/bean/xgrpc/internal/protobuf"
 )
 
 func TestServerStreaming(t *testing.T) {

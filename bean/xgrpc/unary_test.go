@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
-	pb "github.com/caffeine-projects/vlatte/bean/kgrpc/internal/protobuf"
+	pb "github.com/caffeine-projects/vlatte/bean/xgrpc/internal/protobuf"
 	. "github.com/caffeine-projects/vlatte/matcher"
 )
 
