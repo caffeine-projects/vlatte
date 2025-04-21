@@ -17,14 +17,14 @@ import (
 	"github.com/caffeine-projects/vlatte/kcore"
 	"github.com/caffeine-projects/vlatte/khttp"
 	. "github.com/caffeine-projects/vlatte/khttp/httpval"
-	"github.com/caffeine-projects/vlatte/khttp/webhook"
 	. "github.com/caffeine-projects/vlatte/matcher"
+	webhook2 "github.com/caffeine-projects/vlatte/topping/webhook"
 )
 
 const (
-	_tlsCertFile       = "../test/testdata/cert/cert.pem"
-	_tlsKeyFile        = "../test/testdata/cert/key.pem"
-	_tlsClientCertFile = "../test/testdata/cert/cert_client.pem"
+	_tlsCertFile       = "./testdata/cert/cert.pem"
+	_tlsKeyFile        = "./testdata/cert/key.pem"
+	_tlsClientCertFile = "./testdata/cert/cert_client.pem"
 )
 
 func TestWebHook_Run(t *testing.T) {
@@ -38,13 +38,13 @@ func TestWebHook_Run(t *testing.T) {
 		name          string
 		targetMock    *khttp.HTTPMockBuilder
 		webhookDef    kcore.PostActionDefinition
-		options       []webhook.Option
+		options       []webhook2.Option
 		expectedCalls int64
 	}{
 		{"basic with default method",
 			khttp.Getf("/third_party/hook").
 				Reply(khttp.OK()),
-			webhook.Options().
+			webhook2.Options().
 				URL(target.URL("/third_party/hook")).
 				Build(name),
 			nil,
@@ -56,7 +56,7 @@ func TestWebHook_Run(t *testing.T) {
 				Headerf(HeaderContentType, MIMETextPlain).
 				Body(Eq("hi")).
 				Reply(khttp.OK().PlainText("bye")),
-			webhook.Options().
+			webhook2.Options().
 				URL(target.URL("/third_party/hook")).
 				Method(http.MethodPost).
 				Header("X-Key", key).
@@ -71,7 +71,7 @@ func TestWebHook_Run(t *testing.T) {
 				Headerf("X-Key", "%s", key).
 				Headerf(HeaderContentType, MIMETextPlain).
 				Reply(khttp.OK().PlainText("bye")),
-			webhook.Options().
+			webhook2.Options().
 				URL(target.URL("/third_party/hook")).
 				Method(http.MethodPost).
 				Header("X-Key", key).
@@ -84,7 +84,7 @@ func TestWebHook_Run(t *testing.T) {
 			khttp.Postf("/third_party/hook").
 				Headerf(HeaderContentType, MIMETextPlain).
 				Reply(khttp.BadRequest()),
-			webhook.Options().
+			webhook2.Options().
 				URL(target.URL("/third_party/hook")).
 				Method(http.MethodPost).
 				Header(HeaderContentType, MIMETextPlain).
@@ -97,13 +97,13 @@ func TestWebHook_Run(t *testing.T) {
 				Headerf(HeaderContentType, MIMETextPlain).
 				Body(Eq("hello world")).
 				Reply(khttp.BadRequest()),
-			webhook.Options().
+			webhook2.Options().
 				URL(target.URL("/third_party/hook")).
 				Method(http.MethodPost).
 				Header(HeaderContentType, MIMETextPlain).
 				Build(name),
-			[]webhook.Option{
-				webhook.WithTransform(func(_ context.Context, input *kcore.PostActionInput, args *webhook.Args) error {
+			[]webhook2.Option{
+				webhook2.WithTransform(func(_ context.Context, input *kcore.PostActionInput, args *webhook2.Args) error {
 					args.URL += "/transformed"
 					args.Method = http.MethodPut
 					args.Body = "hello world"
@@ -114,12 +114,12 @@ func TestWebHook_Run(t *testing.T) {
 		{"transform with error",
 			khttp.Getf("/third_party/hook/transformed").
 				Reply(khttp.BadRequest()),
-			webhook.Options().
+			webhook2.Options().
 				URL(target.URL("/third_party/hook")).
 				Method(http.MethodGet).
 				Build(name),
-			[]webhook.Option{
-				webhook.WithTransform(func(_ context.Context, input *kcore.PostActionInput, args *webhook.Args) error {
+			[]webhook2.Option{
+				webhook2.WithTransform(func(_ context.Context, input *kcore.PostActionInput, args *webhook2.Args) error {
 					return errors.New("boom")
 				})},
 			0,
@@ -127,7 +127,7 @@ func TestWebHook_Run(t *testing.T) {
 		{"malformed url",
 			khttp.Postf("/third_party/hook").
 				Reply(khttp.OK()),
-			webhook.Options().
+			webhook2.Options().
 				URL(" -   " + string(rune(0x7f))).
 				Method(http.MethodPost).
 				Build(name),
@@ -136,7 +136,7 @@ func TestWebHook_Run(t *testing.T) {
 		},
 		{"unable to build http request",
 			khttp.Postf("/third_party/hook").Reply(khttp.OK()),
-			webhook.Options().
+			webhook2.Options().
 				URL(target.URL("/third_party/hook")).
 				Method("ghjk%&^*()").
 				Build(name),
@@ -148,7 +148,7 @@ func TestWebHook_Run(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			wh, err := webhook.New(tc.options...)
+			wh, err := webhook2.New(tc.options...)
 			require.NoError(t, err)
 
 			m := khttp.NewAPI(khttp.Setup().PostAction(name, wh))
@@ -196,7 +196,7 @@ func TestWebHook_TLS(t *testing.T) {
 		Headerf(HeaderContentType, MIMETextPlainCharsetUTF8).
 		Reply(khttp.OK().PlainText("hello")))
 
-	wh, err := webhook.New(webhook.WithRoundTripper(&http.Transport{
+	wh, err := webhook2.New(webhook2.WithRoundTripper(&http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true,
 			Certificates:       []tls.Certificate{cert},
@@ -212,7 +212,7 @@ func TestWebHook_TLS(t *testing.T) {
 	defer m.Close()
 
 	m.MustMock(khttp.Putf("/test").
-		PostAction(webhook.Options().
+		PostAction(webhook2.Options().
 			URL(whSrv.URL("/third_party/hook/tls")).
 			Method(http.MethodPost).
 			Header("X-Key", key).
@@ -250,14 +250,14 @@ func TestWebHook_FaultTarget(t *testing.T) {
 		Delay(kcore.Latency(1 * time.Minute)).
 		Reply(khttp.OK().PlainText("hello")))
 
-	wh, err := webhook.New()
+	wh, err := webhook2.New()
 	require.NoError(t, err)
 	m := khttp.NewAPI(khttp.Setup().PostAction(name, wh))
 	m.MustStart()
 	defer m.Close()
 
 	m.MustMock(khttp.Getf("/test").
-		PostAction(webhook.Options().
+		PostAction(webhook2.Options().
 			URL(target.URL("/hook/fault")).
 			Method(http.MethodGet).
 			Build(name)).
@@ -309,7 +309,7 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 
 	whSrv.MustMock(khttp.Getf("/hook").Reply(khttp.OK()))
 
-	wh, err := webhook.New()
+	wh, err := webhook2.New()
 	require.NoError(t, err)
 
 	m := khttp.NewAPI(khttp.Setup().PostAction(name, wh))
@@ -347,7 +347,7 @@ func TestWebHook_FileSetup(t *testing.T) {
 		Body(Eq(`{"task": "done"}`)).
 		Reply(khttp.NoContent()))
 
-	wh, err := webhook.New()
+	wh, err := webhook2.New()
 	require.NoError(t, err)
 
 	m := khttp.NewAPI(khttp.Setup().PostAction(name, wh))
@@ -381,7 +381,7 @@ func TestWebHook_InvalidFiles(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			wh, err := webhook.New()
+			wh, err := webhook2.New()
 			require.NoError(t, err)
 
 			m := khttp.NewAPI(khttp.Setup().PostAction(name, wh))

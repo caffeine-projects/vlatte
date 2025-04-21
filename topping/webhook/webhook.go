@@ -10,8 +10,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/kcore"
 	"github.com/go-viper/mapstructure/v2"
+
+	"github.com/caffeine-projects/vlatte/kcore"
 )
 
 var _ kcore.PostAction = (*WebHook)(nil)
