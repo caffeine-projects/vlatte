@@ -1,6 +1,8 @@
 package filter
 
-import "github.com/caffeine-projects/vlatte/std/descriptor"
+import (
+	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+)
 
 type anythingMatcher struct {
 }

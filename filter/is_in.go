@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
+	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 type isContainedInMatcher struct {

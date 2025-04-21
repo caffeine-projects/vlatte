@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
+	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 type regExpMatcher struct {

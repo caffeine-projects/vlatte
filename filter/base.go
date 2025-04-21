@@ -1,7 +1,7 @@
 package filter
 
 import (
-	"github.com/caffeine-projects/vlatte/std/descriptor"
+	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 var _ Filter = FilterFunc(nil)

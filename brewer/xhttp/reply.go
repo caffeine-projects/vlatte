@@ -11,8 +11,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/internal/bufpool"
+	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 	"github.com/caffeine-projects/vlatte/std"
-	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 var _ Reply = (*StdReply)(nil)

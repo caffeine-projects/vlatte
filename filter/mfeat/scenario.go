@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/caffeine-projects/vlatte/filter"
-	"github.com/caffeine-projects/vlatte/std/descriptor"
+	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 const ScenarioStateStarted = "started"

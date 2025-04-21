@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/ryanuber/go-glob"
+
+	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 type globMatcher struct {

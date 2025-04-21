@@ -6,7 +6,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/filter/internal/mconv"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
-	"github.com/caffeine-projects/vlatte/std/descriptor"
+	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 type greaterOrEqualMatcher struct {
