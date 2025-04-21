@@ -6,19 +6,19 @@ import (
 	"sync"
 )
 
-var _ Store[*M] = (*InMemMockStore[*M])(nil)
+var _ Jar[*M] = (*Canister[*M])(nil)
 
-type InMemMockStore[TMock Mock] struct {
+type Canister[TMock Mock] struct {
 	data []TMock
 	mu   sync.RWMutex
 }
 
-// NewStore returns Mock InMemMockStore implementation.
-func NewStore[TMock Mock]() *InMemMockStore[TMock] {
-	return &InMemMockStore[TMock]{data: make([]TMock, 0)}
+// NewJar returns Mock InMemMockStore implementation.
+func NewJar[TMock Mock]() Jar[TMock] {
+	return &Canister[TMock]{data: make([]TMock, 0)}
 }
 
-func (s *InMemMockStore[TMock]) EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan TMock, error) {
+func (s *Canister[TMock]) EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan TMock, error) {
 	s.mu.RLock()
 	mocks := make([]TMock, len(s.data))
 	copy(mocks, s.data)
@@ -43,7 +43,7 @@ func (s *InMemMockStore[TMock]) EligibleStream(ctx context.Context, done <-chan 
 	return out, nil
 }
 
-func (s *InMemMockStore[TMock]) Eligible(ctx context.Context) ([]TMock, error) {
+func (s *Canister[TMock]) Eligible(ctx context.Context) ([]TMock, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	mocks := make([]TMock, 0, len(s.data))
@@ -55,7 +55,7 @@ func (s *InMemMockStore[TMock]) Eligible(ctx context.Context) ([]TMock, error) {
 	return mocks, nil
 }
 
-func (s *InMemMockStore[TMock]) Save(_ context.Context, mocks ...TMock) error {
+func (s *Canister[TMock]) Save(_ context.Context, mocks ...TMock) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -68,7 +68,7 @@ func (s *InMemMockStore[TMock]) Save(_ context.Context, mocks ...TMock) error {
 	return nil
 }
 
-func (s *InMemMockStore[TMock]) Get(_ context.Context, id string) (TMock, error) {
+func (s *Canister[TMock]) Get(_ context.Context, id string) (TMock, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -82,7 +82,7 @@ func (s *InMemMockStore[TMock]) Get(_ context.Context, id string) (TMock, error)
 	return result, nil
 }
 
-func (s *InMemMockStore[TMock]) GetByIDs(ctx context.Context, ids ...string) ([]TMock, error) {
+func (s *Canister[TMock]) GetByIDs(ctx context.Context, ids ...string) ([]TMock, error) {
 	mocks := make([]TMock, 0, len(ids))
 	for _, id := range ids {
 		m, err := s.Get(ctx, id)
@@ -96,7 +96,7 @@ func (s *InMemMockStore[TMock]) GetByIDs(ctx context.Context, ids ...string) ([]
 	return mocks, nil
 }
 
-func (s *InMemMockStore[TMock]) GetAll(_ context.Context) ([]TMock, error) {
+func (s *Canister[TMock]) GetAll(_ context.Context) ([]TMock, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -106,7 +106,7 @@ func (s *InMemMockStore[TMock]) GetAll(_ context.Context) ([]TMock, error) {
 	return ret, nil
 }
 
-func (s *InMemMockStore[TMock]) Del(_ context.Context, ids ...string) error {
+func (s *Canister[TMock]) Del(_ context.Context, ids ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -125,7 +125,7 @@ func (s *InMemMockStore[TMock]) Del(_ context.Context, ids ...string) error {
 	return nil
 }
 
-func (s *InMemMockStore[TMock]) DelExt(ctx context.Context) error {
+func (s *Canister[TMock]) DelExt(ctx context.Context) error {
 	ids := make([]string, 0, len(s.data))
 
 	for _, m := range s.data {
@@ -143,7 +143,7 @@ func (s *InMemMockStore[TMock]) DelExt(ctx context.Context) error {
 	return nil
 }
 
-func (s *InMemMockStore[TMock]) DelAll(_ context.Context) error {
+func (s *Canister[TMock]) DelAll(_ context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

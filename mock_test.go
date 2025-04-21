@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestInMemoryStorage(t *testing.T) {
-	st := NewStore[*M]()
+func TestCanister(t *testing.T) {
+	st := NewJar[*M]()
 	ctx := context.Background()
 
 	mock1 := &M{ID: "1", Name: "mock_1", enabled: true, Priority: 0}
@@ -83,34 +83,10 @@ func TestInMemoryStorage(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, all, 2)
 
-	err = st.DelExt(ctx)
-	require.NoError(t, err)
-
-	eligible, err = st.GetAll(ctx)
-	require.NoError(t, err)
-	require.Len(t, eligible, 1)
-	require.Equal(t, "11", eligible[0].ID)
-
 	err = st.DelAll(ctx)
 	require.NoError(t, err)
 
 	all, err = st.GetAll(ctx)
-	require.NoError(t, err)
-	require.Len(t, all, 0)
-
-	err = st.DelExt(ctx)
-	require.NoError(t, err)
-}
-
-func TestDeleteExt(t *testing.T) {
-	ctx := context.Background()
-	st := NewStore[*M]()
-
-	require.NoError(t, st.Save(ctx, &M{ID: "10", Name: "mock_ext_1", enabled: true, Priority: 0, Source: "ext"}))
-	require.NoError(t, st.Save(ctx, &M{ID: "10", Name: "mock_ext_2", enabled: true, Priority: 0, Source: "ext"}))
-	require.NoError(t, st.DelExt(ctx))
-
-	all, err := st.GetAll(ctx)
 	require.NoError(t, err)
 	require.Len(t, all, 0)
 }

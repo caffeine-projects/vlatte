@@ -43,11 +43,11 @@ const StatusNoMatch = http.StatusTeapot
 
 // HTTPMockApp is the base for the mock server.
 type HTTPMockApp struct {
-	*vlatte.BaseApp[*HTTPMock, *HTTPMockApp]
+	*vlatte.Boilerplate[*HTTPMock, *HTTPMockApp]
 
 	config             *Config
 	server             Server
-	storage            vlatte.Store[*HTTPMock]
+	storage            vlatte.Jar[*HTTPMock]
 	scenarioStore      *mfeat.ScenarioStore
 	cancel             context.CancelFunc
 	requestBodyParsers []RequestBodyParser
@@ -103,7 +103,7 @@ func NewAPI(config ...Configurer) *HTTPMockApp {
 		colors.SetLevel(gchalk.LevelNone)
 	}
 
-	repository := vlatte.NewStore[*HTTPMock]()
+	repository := vlatte.NewJar[*HTTPMock]()
 
 	parsers := make([]RequestBodyParser, 0, len(conf.RequestBodyParsers)+3)
 	parsers = append(parsers, conf.RequestBodyParsers...)
@@ -171,7 +171,7 @@ func NewAPI(config ...Configurer) *HTTPMockApp {
 		app.templateEngine = tmpl
 	}
 
-	app.BaseApp = vlatte.NewBaseApp(app, repository)
+	app.Boilerplate = vlatte.NewBaseApp(app, repository)
 	app.server = server
 	app.storage = repository
 	app.scenarioStore = mfeat.NewScenarioStore()

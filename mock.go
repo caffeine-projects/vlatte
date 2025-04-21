@@ -45,7 +45,7 @@ type Builder[TMock Mock, TMockApp MockApp[TMock]] interface {
 	Build(app TMockApp) (TMock, error)
 }
 
-type Store[T Mock] interface {
+type Jar[T Mock] interface {
 	EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan T, error)
 	Eligible(ctx context.Context) ([]T, error)
 

@@ -13,14 +13,14 @@ import (
 )
 
 type GRPCMockApp struct {
-	*vlatte.BaseApp[*GRPCMock, *GRPCMockApp]
+	*vlatte.Boilerplate[*GRPCMock, *GRPCMockApp]
 
 	cancel  context.CancelFunc
 	server  *grpc.Server
 	config  *Config
 	logger  *zerolog.Logger
 	addr    string
-	storage vlatte.Store[*GRPCMock]
+	storage vlatte.Jar[*GRPCMock]
 }
 
 type ServerInfo struct {
@@ -43,7 +43,7 @@ func NewGRPC(config ...vlatte.Configurer[*Config]) *GRPCMockApp {
 		}
 	}
 
-	store := vlatte.NewStore[*GRPCMock]()
+	store := vlatte.NewJar[*GRPCMock]()
 	in := &Interceptors{app: app}
 	srv := grpc.NewServer(
 		grpc.UnaryInterceptor(in.UnaryInterceptor),
@@ -54,7 +54,7 @@ func NewGRPC(config ...vlatte.Configurer[*Config]) *GRPCMockApp {
 		srv.RegisterService(conf.ServiceDesc, conf.Service)
 	}
 
-	app.BaseApp = vlatte.NewBaseApp(app, store)
+	app.Boilerplate = vlatte.NewBaseApp(app, store)
 	app.storage = store
 	app.config = conf
 	app.server = srv

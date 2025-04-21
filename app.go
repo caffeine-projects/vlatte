@@ -14,13 +14,13 @@ type MockApp[TM Mock] interface {
 	Clean(ctx context.Context) error
 }
 
-type BaseApp[TM Mock, A MockApp[TM]] struct {
-	roaster *Roaster[TM, A]
-	mu      sync.RWMutex
+type Boilerplate[TM Mock, A MockApp[TM]] struct {
+	tray *Tray[TM, A]
+	mu   sync.RWMutex
 }
 
-func NewBaseApp[TM Mock, A MockApp[TM]](app A, repo Store[TM]) *BaseApp[TM, A] {
-	return &BaseApp[TM, A]{roaster: &Roaster[TM, A]{app: app, store: repo}}
+func NewBaseApp[TM Mock, A MockApp[TM]](app A, repo Jar[TM]) *Boilerplate[TM, A] {
+	return &Boilerplate[TM, A]{tray: &Tray[TM, A]{brewer: app, jar: repo}}
 }
 
 // Mock adds one or multiple request mocks.
@@ -35,11 +35,11 @@ func NewBaseApp[TM Mock, A MockApp[TM]](app A, repo Store[TM]) *BaseApp[TM, A] {
 //			Reply(reply.Created().PlainText("hello world")))
 //
 //	assert.True(txtTemplate, scoped.HasBeenCalled())
-func (app *BaseApp[TM, A]) Mock(builders ...Builder[TM, A]) (*Scope[TM], error) {
+func (app *Boilerplate[TM, A]) Mock(builders ...Builder[TM, A]) (*Mug[TM], error) {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	return app.roaster.Add(builders...)
+	return app.tray.Add(builders...)
 }
 
 // MustMock adds one or multiple request mocks.
@@ -55,20 +55,20 @@ func (app *BaseApp[TM, A]) Mock(builders ...Builder[TM, A]) (*Scope[TM], error) 
 //			Reply(reply.Created().PlainText("hello world")))
 //
 //	assert.True(txtTemplate, scoped.HasBeenCalled())
-func (app *BaseApp[TM, A]) MustMock(builders ...Builder[TM, A]) *Scope[TM] {
-	scoped, err := app.Mock(builders...)
+func (app *Boilerplate[TM, A]) MustMock(builders ...Builder[TM, A]) *Mug[TM] {
+	mug, err := app.Mock(builders...)
 	if err != nil {
 		panic(err)
 	}
 
-	return scoped
+	return mug
 }
 
 // Hits returns the total matched request hits.
-func (app *BaseApp[TM, A]) Hits() int64 {
+func (app *Boilerplate[TM, A]) Hits() int64 {
 	hits := int64(0)
 
-	for _, s := range app.roaster.List() {
+	for _, s := range app.tray.Mugs() {
 		hits += s.Hits()
 	}
 
@@ -76,24 +76,24 @@ func (app *BaseApp[TM, A]) Hits() int64 {
 }
 
 // Enable enables all mocks.
-func (app *BaseApp[TM, A]) Enable() {
+func (app *Boilerplate[TM, A]) Enable() {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	for _, scoped := range app.roaster.List() {
+	for _, scoped := range app.tray.Mugs() {
 		scoped.Enable()
 	}
 }
 
 // Disable disables all mocks.
-func (app *BaseApp[TM, A]) Disable() {
-	for _, scoped := range app.roaster.List() {
+func (app *Boilerplate[TM, A]) Disable() {
+	for _, scoped := range app.tray.Mugs() {
 		scoped.Disable()
 	}
 }
 
-func (app *BaseApp[TM, A]) ListPending() []TM {
-	mugs := app.roaster.List()
+func (app *Boilerplate[TM, A]) ListPending() []TM {
+	mugs := app.tray.Mugs()
 	ret := make([]TM, 0, len(mugs)/2)
 	for _, mug := range mugs {
 		ret = append(ret, mug.ListPending()...)
@@ -102,8 +102,8 @@ func (app *BaseApp[TM, A]) ListPending() []TM {
 	return ret
 }
 
-func (app *BaseApp[TM, A]) ListCalled() []TM {
-	mugs := app.roaster.List()
+func (app *Boilerplate[TM, A]) ListCalled() []TM {
+	mugs := app.tray.Mugs()
 	ret := make([]TM, 0, len(mugs)/2)
 	for _, mug := range mugs {
 		ret = append(ret, mug.ListCalled()...)
@@ -113,11 +113,11 @@ func (app *BaseApp[TM, A]) ListCalled() []TM {
 }
 
 // Clean removes all scoped mocks.
-func (app *BaseApp[TM, A]) Clean(ctx context.Context) error {
+func (app *Boilerplate[TM, A]) Clean(ctx context.Context) error {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	for i, s := range app.roaster.List() {
+	for i, s := range app.tray.Mugs() {
 		err := s.Clean(ctx)
 		if err != nil {
 			return fmt.Errorf("error cleaning mocks from scope %d. %w", i, err)
@@ -132,14 +132,14 @@ func (app *BaseApp[TM, A]) Clean(ctx context.Context) error {
 // --
 
 // AssertCalled asserts that all mocks associated with this instance were called at least once.
-func (app *BaseApp[TM, A]) AssertCalled(t TestingT) bool {
+func (app *Boilerplate[TM, A]) AssertCalled(t TestingT) bool {
 	t.Helper()
 
 	result := true
 	size := 0
 	buf := strings.Builder{}
 
-	for i, s := range app.roaster.List() {
+	for i, s := range app.tray.Mugs() {
 		if s.Pending() {
 			buf.WriteString(fmt.Sprintf("   Scope %d\n", i))
 			pending := s.ListPending()
@@ -168,14 +168,14 @@ func (app *BaseApp[TM, A]) AssertCalled(t TestingT) bool {
 }
 
 // AssertNotCalled asserts that all mocks associated with this instance were called at least once.
-func (app *BaseApp[TM, A]) AssertNotCalled(t TestingT) bool {
+func (app *Boilerplate[TM, A]) AssertNotCalled(t TestingT) bool {
 	t.Helper()
 
 	result := true
 	size := 0
 	buf := strings.Builder{}
 
-	for i, s := range app.roaster.List() {
+	for i, s := range app.tray.Mugs() {
 		if !s.Pending() {
 			buf.WriteString(fmt.Sprintf("   Scope %d\n", i))
 			called := s.ListCalled()
@@ -206,7 +206,7 @@ func (app *BaseApp[TM, A]) AssertNotCalled(t TestingT) bool {
 
 // AssertNumberOfCalls asserts that the sum of matched request hits
 // is equal to the given expected value.
-func (app *BaseApp[TM, A]) AssertNumberOfCalls(t TestingT, expected int64) bool {
+func (app *Boilerplate[TM, A]) AssertNumberOfCalls(t TestingT, expected int64) bool {
 	t.Helper()
 
 	hits := app.Hits()

@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestScoped(t *testing.T) {
+func TestMug(t *testing.T) {
 	type testMock struct {
 		*vlatte.M
 	}
@@ -27,23 +27,23 @@ func TestScoped(t *testing.T) {
 	m2 := newTestMock()
 	m3 := newTestMock()
 
-	repo := vlatte.NewStore[*testMock]()
+	repo := vlatte.NewJar[*testMock]()
 	repo.Save(context.Background(), m1, m2, m3)
 
-	scoped := vlatte.Scoped(repo, []*testMock{m1, m2, m3})
+	mug := vlatte.Pour(repo, []*testMock{m1, m2, m3})
 
-	require.Equal(t, 3, len(scoped.GetAll()))
-	require.Equal(t, m1, scoped.Get(m1.GetID()))
-	require.Nil(t, scoped.Get("unknown"))
+	require.Equal(t, 3, len(mug.GetAll()))
+	require.Equal(t, m1, mug.Get(m1.GetID()))
+	require.Nil(t, mug.Get("unknown"))
 
 	t.Run("should not return done when there is still pending mocks", func(t *testing.T) {
 		ft := testmock.NewFakeT()
 
-		require.False(t, scoped.Called())
-		require.Equal(t, 3, len(scoped.ListPending()))
-		require.True(t, scoped.Pending())
+		require.False(t, mug.Called())
+		require.Equal(t, 3, len(mug.ListPending()))
+		require.True(t, mug.Pending())
 
-		scoped.AssertCalled(ft)
+		mug.AssertCalled(ft)
 		ft.AssertNumberOfCalls(t, "Errorf", 1)
 	})
 
@@ -52,33 +52,33 @@ func TestScoped(t *testing.T) {
 
 		m1.Inc()
 
-		require.False(t, scoped.Called())
-		scoped.AssertCalled(ft)
+		require.False(t, mug.Called())
+		mug.AssertCalled(ft)
 
 		m2.Inc()
 		m3.Inc()
 
 		ft.AssertNumberOfCalls(t, "Errorf", 1)
-		require.True(t, scoped.AssertCalled(t))
-		require.True(t, scoped.Called())
-		require.True(t, sip.Times(t, scoped, 3))
-		require.False(t, sip.Times(ft, scoped, 1))
-		require.Equal(t, 0, len(scoped.ListPending()))
-		require.False(t, scoped.Pending())
+		require.True(t, mug.AssertCalled(t))
+		require.True(t, mug.Called())
+		require.True(t, sip.Times(t, mug, 3))
+		require.False(t, sip.Times(ft, mug, 1))
+		require.Equal(t, 0, len(mug.ListPending()))
+		require.False(t, mug.Pending())
 	})
 
 	t.Run("should return total hits from store", func(t *testing.T) {
-		require.EqualValues(t, 3, scoped.Hits())
-		sip.Times(t, scoped, 3)
+		require.EqualValues(t, 3, mug.Hits())
+		sip.Times(t, mug, 3)
 	})
 
 	t.Run("should clean all store associated with NewScope when calling .Clean()", func(t *testing.T) {
-		err := scoped.Clean(context.Background())
+		err := mug.Clean(context.Background())
 		require.NoError(t, err)
 
-		require.Equal(t, 0, len(scoped.ListPending()))
-		require.True(t, sip.Times(t, scoped, 0))
-		require.False(t, scoped.Pending())
+		require.Equal(t, 0, len(mug.ListPending()))
+		require.True(t, sip.Times(t, mug, 0))
+		require.False(t, mug.Pending())
 	})
 
 	t.Run("should only consider enabled store", func(t *testing.T) {
@@ -177,10 +177,10 @@ func TestScopedDelete(t *testing.T) {
 	m2 := newTestMock()
 	m3 := newTestMock()
 
-	scoped := vlatte.Scoped(nil, []*testMock{m1, m2, m3})
+	mug := vlatte.Pour(nil, []*testMock{m1, m2, m3})
 
-	require.True(t, scoped.Delete(m1.GetID()))
-	require.False(t, scoped.Delete("unknown"))
+	require.True(t, mug.Delete(m1.GetID()))
+	require.False(t, mug.Delete("unknown"))
 
-	require.Nil(t, scoped.Get(m1.GetID()))
+	require.Nil(t, mug.Get(m1.GetID()))
 }
