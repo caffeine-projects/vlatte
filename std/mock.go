@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/caffeine-projects/vlatte/internal/encutil"
+	"github.com/caffeine-projects/vlatte/std/flow"
 	"github.com/google/uuid"
 )
 
@@ -28,6 +29,7 @@ type Mock interface {
 
 	PostActions() PostActions
 	Callbacks() []Callback
+	Flow() []flow.Step
 }
 
 type IDGen func() string
@@ -83,6 +85,8 @@ type M struct {
 	PostActionList PostActions
 
 	CallbackList []Callback
+
+	Steps []flow.Step
 }
 
 // NewMock returns a new Mock with default values set.
@@ -91,6 +95,7 @@ func NewMock(idgen IDGen) *M {
 		ID:             idgen(),
 		PostActionList: make(PostActions, 0),
 		CallbackList:   make([]Callback, 0),
+		Steps:          make([]flow.Step, 0),
 
 		enabled: true,
 	}
@@ -175,6 +180,10 @@ func (m *M) PostActions() PostActions {
 
 func (m *M) Callbacks() []Callback {
 	return m.CallbackList
+}
+
+func (m *M) Flow() []flow.Step {
+	return m.Steps
 }
 
 // Build allows users to use the Mock itself as a HTTPMockBuilder.

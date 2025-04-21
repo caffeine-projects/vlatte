@@ -6,11 +6,10 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/caffeine-projects/vlatte/matcher"
 	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/std/descriptor"
-	"github.com/caffeine-projects/vlatte/std/flow"
 	"github.com/caffeine-projects/vlatte/std/kv"
-	"github.com/caffeine-projects/vlatte/matcher"
 )
 
 var _ std.Mock = (*HTTPMock)(nil)
@@ -170,8 +169,6 @@ type HTTPMock struct {
 	// Mappers stores response mappers associated with this Mock.
 	Mappers []Mapper
 
-	Interceptors []flow.Step
-
 	after        []int
 	expectations []*std.Eval[*HTTPValueSelectorInput]
 }
@@ -181,7 +178,6 @@ func newMock() *HTTPMock {
 	return &HTTPMock{
 		M:            std.NewMock(std.UseUUID()),
 		Mappers:      make([]Mapper, 0),
-		Interceptors: make([]flow.Step, 0),
 		expectations: make([]*std.Eval[*HTTPValueSelectorInput], 0),
 	}
 }

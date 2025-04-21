@@ -13,18 +13,18 @@ import (
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/internal/httprec"
+	"github.com/caffeine-projects/vlatte/matcher"
 	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/std/flow"
-	"github.com/caffeine-projects/vlatte/matcher"
 )
 
 type topResponseWriter struct {
-	chain flow.Next
-	rw    http.ResponseWriter
+	next flow.Next
+	rw   http.ResponseWriter
 }
 
 func (w *topResponseWriter) Header() http.Header         { return w.rw.Header() }
-func (w *topResponseWriter) Write(p []byte) (int, error) { return w.chain.Next(p) }
+func (w *topResponseWriter) Write(p []byte) (int, error) { return w.next.Next(p) }
 func (w *topResponseWriter) WriteHeader(statusCode int)  { w.rw.WriteHeader(statusCode) }
 
 type mockHandler struct {
@@ -126,8 +126,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if len(mock.Interceptors) > 0 {
-			w = &topResponseWriter{flow.New(&flow.Sink{W: w}, mock.Interceptors), w}
+		if len(mock.Flow()) > 0 {
+			w = &topResponseWriter{flow.New(&flow.Sink{W: w}, mock.Flow()), w}
 		}
 
 		for k, vv := range res.Header {

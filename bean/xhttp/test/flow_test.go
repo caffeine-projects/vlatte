@@ -10,20 +10,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type TestInterceptor struct{ txt string }
+type TestStep struct{ txt string }
 
-func (in *TestInterceptor) Handle(p []byte, chain flow.Next) (n int, err error) {
-	return chain.Next(append(p, []byte(in.txt)...))
+func (in *TestStep) Handle(p []byte, next flow.Next) (n int, err error) {
+	return next.Next(append(p, []byte(in.txt)...))
 }
 
-func TestInterceptors(t *testing.T) {
+func TestFlow(t *testing.T) {
 	m := xhttp.NewAPI(xhttp.Setup().LogVerbosity(xhttp.LogBody)).CloseWithT(t)
 	m.MustStart()
 
-	in1 := &TestInterceptor{"(extra)"}
-	in2 := &TestInterceptor{"(other)"}
+	in1 := &TestStep{"(extra)"}
+	in2 := &TestStep{"(other)"}
 
-	scope := m.MustMock(xhttp.Getf("/test").Intercept(in1, in2).Reply(xhttp.OK().BodyText("hi")))
+	scope := m.MustMock(xhttp.Getf("/test").Step(in1, in2).Reply(xhttp.OK().BodyText("hi")))
 
 	client := &http.Client{}
 	res, err := client.Get(m.URL("/test"))

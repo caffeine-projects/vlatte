@@ -7,10 +7,10 @@ import (
 	"net/http"
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte/std"
-	"github.com/caffeine-projects/vlatte/std/flow"
 	"github.com/caffeine-projects/vlatte/matcher"
 	"github.com/caffeine-projects/vlatte/matcher/mfeat"
+	"github.com/caffeine-projects/vlatte/std"
+	"github.com/caffeine-projects/vlatte/std/flow"
 )
 
 var _ std.Builder[*HTTPMock, *HTTPMockApp] = (*HTTPMockBuilder)(nil)
@@ -385,8 +385,8 @@ func (b *HTTPMockBuilder) PostAction(input std.PostActionDefinition) *HTTPMockBu
 	return b
 }
 
-func (b *HTTPMockBuilder) Intercept(interceptor ...flow.Step) *HTTPMockBuilder {
-	b.mock.Interceptors = append(b.mock.Interceptors, interceptor...)
+func (b *HTTPMockBuilder) Step(steps ...flow.Step) *HTTPMockBuilder {
+	b.mock.Steps = append(b.mock.Steps, steps...)
 
 	return b
 }
