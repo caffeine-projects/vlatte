@@ -14,8 +14,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/caffeine-projects/vlatte/bean/xhttp"
-	. "github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
+	"github.com/caffeine-projects/vlatte/brewer/xhttp"
+	. "github.com/caffeine-projects/vlatte/brewer/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/std"
 	. "github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/topping/webhook"
