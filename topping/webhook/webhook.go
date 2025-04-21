@@ -22,7 +22,7 @@ type Option func(*WebHook) error
 // Transform lets users transforms and customize the [WebHook] [*kcore.PostActionInput] and the [Args]
 // before they are used.
 // It will be executed everytime [WebHook] runs.
-type Transform func(ctx context.Context, input *kcore.PostActionInput, args *Args) error
+type Transform func(ctx context.Context, input kcore.PostActionInput, args *Args) error
 
 // WebHook is an automated HTTP request sent after a mocked response is served.
 type WebHook struct {
@@ -55,14 +55,14 @@ func (w *WebHook) Name() string {
 }
 
 // Run calls parses the parameters and calls the configured service.
-func (w *WebHook) Run(ctx context.Context, input *kcore.PostActionInput) error {
-	if input.Args == nil {
+func (w *WebHook) Run(ctx context.Context, input kcore.PostActionInput) error {
+	if input.Args() == nil {
 		return fmt.Errorf("webhook: arguments must not be nil")
 	}
 
-	args, ok := input.Args.(Args)
+	args, ok := input.Args().(Args)
 	if !ok {
-		err := mapstructure.Decode(input.Args, &args)
+		err := mapstructure.Decode(input.Args(), &args)
 		if err != nil {
 			return fmt.Errorf("webhook: error decoding args:\n%w", err)
 		}
@@ -92,7 +92,7 @@ func (w *WebHook) Run(ctx context.Context, input *kcore.PostActionInput) error {
 	txtURL := u.String()
 	w.Logger.Info(fmt.Sprintf("---> WEBHOOK REQUEST RECEIVED %s %s", method, u.Path),
 		slog.String("url", txtURL),
-		slog.String("flavor", input.Flavor))
+		slog.String("kind", input.Kind()))
 
 	req, err := http.NewRequestWithContext(ctx, method, txtURL, body)
 	if err != nil {
@@ -107,7 +107,7 @@ func (w *WebHook) Run(ctx context.Context, input *kcore.PostActionInput) error {
 	if err != nil {
 		w.Logger.Error(fmt.Sprintf("<--- WEBHOOK: %s %s", method, u.Path),
 			slog.String("url", txtURL),
-			slog.String("flavor", input.Flavor))
+			slog.String("kind", input.Kind()))
 		return fmt.Errorf("webhook: request failed: %w", err)
 	}
 
@@ -121,7 +121,7 @@ func (w *WebHook) Run(ctx context.Context, input *kcore.PostActionInput) error {
 	w.Logger.Log(ctx, level, fmt.Sprintf("<--- WEBHOOK %s %s", method, u.Path),
 		slog.String("url", txtURL),
 		slog.Int("status", res.StatusCode),
-		slog.String("flavor", input.Flavor))
+		slog.String("kind", input.Kind()))
 
 	return nil
 }

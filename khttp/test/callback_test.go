@@ -31,14 +31,12 @@ func TestCallbacks(t *testing.T) {
 				require.True(t, ok)
 				require.Equal(t, "http", cinput.Kind())
 				require.NotNil(t, cinput)
-				require.NotNil(t, cinput.URL())
 				require.NotNil(t, cinput.Mock())
 				require.NotNil(t, cinput.Request())
 				require.NotNil(t, cinput.Response())
-				require.NotNil(t, cinput.ParsedBody())
 				require.Equal(t, http.MethodPost, cinput.Request().RawRequest.Method)
-				require.Equal(t, "/test", cinput.URL().Path)
-				require.Equal(t, "hi", cinput.ParsedBody().(string))
+				require.Equal(t, "/test", cinput.Request().URL.Path)
+				require.Equal(t, "hi", cinput.Request().ParsedBody.(string))
 
 				spy = true
 

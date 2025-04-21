@@ -202,7 +202,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	callbackInput := &HTTPCallbackInput{m: mock, u: parsedURL, req: reqValues, res: res, body: parsedBody}
+	callbackInput := &HTTPCallbackInput{m: mock, req: reqValues, res: res}
 	for i, callback := range mock.Callbacks() {
 		err = callback(r.Context(), callbackInput)
 		if err != nil {
@@ -217,7 +217,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	for i, def := range mock.PostActions() {
 		postAction := h.app.config.PostActions[def.Name]
-		input := &kcore.PostActionInput{Request: r, Response: res, Mock: mock, Args: def.Parameters}
+		input := &HTTPPostActionInput{req: reqValues, res: res, m: mock, args: def.Parameters}
 		err = postAction.Run(r.Context(), input)
 		if err != nil {
 			h.lifecycle.OnWarning(reqValues, fmt.Errorf(
