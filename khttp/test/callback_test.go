@@ -1,6 +1,7 @@
 package test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -24,17 +25,20 @@ func TestCallbacks(t *testing.T) {
 		defer m.Close()
 
 		scope := m.MustMock(khttp.Post(matcher.URLPath("/test")).
-			Callback(func(input *kcore.CallbackInput) error {
-				require.NotNil(t, input)
-				require.NotNil(t, input.App)
-				require.NotNil(t, input.URL)
-				require.NotNil(t, input.Mock)
-				require.NotNil(t, input.RawRequest)
-				require.NotNil(t, input.MockedResponse)
-				require.NotNil(t, input.ParsedBody)
-				// require.Equal(t, http.MethodPost, input.RawRequest.Method)
-				// require.Equal(t, "/test", input.URL.Path)
-				require.Equal(t, "hi", input.ParsedBody.(string))
+			Callback(func(ctx context.Context, input kcore.CallbackInput) error {
+				cinput, ok := input.(*khttp.HTTPCallbackInput)
+
+				require.True(t, ok)
+				require.Equal(t, "http", cinput.Kind())
+				require.NotNil(t, cinput)
+				require.NotNil(t, cinput.URL())
+				require.NotNil(t, cinput.Mock())
+				require.NotNil(t, cinput.Request())
+				require.NotNil(t, cinput.Response())
+				require.NotNil(t, cinput.ParsedBody())
+				require.Equal(t, http.MethodPost, cinput.Request().RawRequest.Method)
+				require.Equal(t, "/test", cinput.URL().Path)
+				require.Equal(t, "hi", cinput.ParsedBody().(string))
 
 				spy = true
 
@@ -62,9 +66,13 @@ func TestCallbacks(t *testing.T) {
 		defer m.Close()
 
 		scope := m.MustMock(khttp.Get(matcher.URLPath("/test")).
-			Callback(func(input *kcore.CallbackInput) error {
-				require.NotNil(t, input)
+			Callback(func(ctx context.Context, input kcore.CallbackInput) error {
+				cinput, ok := input.(*khttp.HTTPCallbackInput)
+				require.True(t, ok)
+				require.NotNil(t, cinput)
+
 				callbackErrReceiver = callbackErr
+
 				return callbackErr
 			}).
 			Reply(khttp.OK()))

@@ -14,6 +14,7 @@ import (
 )
 
 var _ kcore.Mock = (*HTTPMock)(nil)
+var _ kcore.CallbackInput = (*HTTPCallbackInput)(nil)
 
 // RequestValues groups HTTP request data, including the parsed body.
 // It is used by several components during the request matching phase.
@@ -43,6 +44,38 @@ type RequestValues struct {
 
 	// Mock is the matched Mock for the current HTTP request.
 	Mock *HTTPMock
+}
+
+type HTTPCallbackInput struct {
+	m    *HTTPMock
+	u    *url.URL
+	req  *RequestValues
+	res  *MockedResponse
+	body any
+}
+
+func (i *HTTPCallbackInput) Kind() string {
+	return "http"
+}
+
+func (i *HTTPCallbackInput) Mock() kcore.Mock {
+	return i.m
+}
+
+func (i *HTTPCallbackInput) URL() *url.URL {
+	return i.u
+}
+
+func (i *HTTPCallbackInput) Request() *RequestValues {
+	return i.req
+}
+
+func (i *HTTPCallbackInput) Response() *MockedResponse {
+	return i.res
+}
+
+func (i *HTTPCallbackInput) ParsedBody() any {
+	return i.body
 }
 
 // Mapper is the function definition to be used to map a Mock response MockedResponse before serving it.
