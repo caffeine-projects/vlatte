@@ -8,8 +8,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/test/testmock"
-	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/caffeine-projects/vlatte/std"
 	"github.com/stretchr/testify/require"
 )
 
