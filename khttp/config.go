@@ -217,7 +217,7 @@ type Config struct {
 
 	// PostActions configures PostActions by name.
 	// They can later be referenced by name during mocking phase.
-	PostActions map[string]PostAction
+	PostActions map[string]kcore.PostAction
 
 	// HeaderNamesToRedact configures HTTP header names to be redacted in logs.
 	// Useful to avoid logging sensitive information.
@@ -314,7 +314,7 @@ func defaultConfig() *Config {
 		Middlewares:                    make([]func(http.Handler) http.Handler, 0),
 		Loaders:                        make([]Loader, 0),
 		MockFileHandlers:               make([]MockFileHandler, 0),
-		PostActions:                    make(map[string]PostAction),
+		PostActions:                    make(map[string]kcore.PostAction),
 		HeaderNamesToRedact:            make(map[string]struct{}),
 		LogPretty:                      true,
 		LogLevel:                       LogLevelInfo,
@@ -575,7 +575,7 @@ func (cb *ConfigBuilder) TLSMutual(certFile, keyFile, clientCert string) *Config
 	return cb
 }
 
-func (cb *ConfigBuilder) PostAction(name string, action PostAction) *ConfigBuilder {
+func (cb *ConfigBuilder) PostAction(name string, action kcore.PostAction) *ConfigBuilder {
 	cb.conf.PostActions[name] = action
 	return cb
 }

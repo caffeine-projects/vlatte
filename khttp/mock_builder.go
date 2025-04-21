@@ -379,8 +379,8 @@ func (b *HTTPMockBuilder) Callback(callback Callback) *HTTPMockBuilder {
 	return b
 }
 
-func (b *HTTPMockBuilder) PostAction(input *PostActionDef) *HTTPMockBuilder {
-	b.mock.PostActions = append(b.mock.PostActions, input)
+func (b *HTTPMockBuilder) PostAction(input kcore.PostActionDefinition) *HTTPMockBuilder {
+	b.mock.PostActionList = append(b.mock.PostActionList, input)
 
 	return b
 }
@@ -455,7 +455,7 @@ func (b *HTTPMockBuilder) Build(app *HTTPMockApp) (*HTTPMock, error) {
 		})
 	}
 
-	for i, def := range b.mock.PostActions {
+	for i, def := range b.mock.PostActionList {
 		postAction, ok := app.config.PostActions[def.Name]
 		if !ok {
 			return nil, fmt.Errorf("mock: post action %s at index %d is not registered", def.Name, i)

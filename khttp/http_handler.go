@@ -215,10 +215,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for i, def := range mock.PostActions {
+	for i, def := range mock.PostActions() {
 		postAction := h.app.config.PostActions[def.Name]
-		input := &PostActionInput{r, parsedURL, parsedBody, h.app, mock, res, def.RawParameters}
-		err = postAction.Run(input)
+		input := &kcore.PostActionInput{Request: r, Response: res, Mock: mock, Args: def.Parameters}
+		err = postAction.Run(r.Context(), input)
 		if err != nil {
 			h.lifecycle.OnWarning(reqValues, fmt.Errorf(
 				"post_action: error with post action %s(%d) %T:\n%w",

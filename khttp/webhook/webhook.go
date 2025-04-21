@@ -1,109 +1,75 @@
 package webhook
 
 import (
-	"crypto/tls"
+	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
-	"sync"
 
-	"github.com/mitchellh/mapstructure"
-	"github.com/rs/zerolog"
-
-	"github.com/caffeine-projects/vlatte/khttp"
+	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/go-viper/mapstructure/v2"
 )
 
-var _ khttp.PostAction = (*WebHook)(nil)
+var _ kcore.PostAction = (*WebHook)(nil)
 
-// Name is the WebHook extension identifier used to register it.
-const Name = "webhook"
+type Option func(*WebHook) error
 
-// Args configures an WebHook HTTP request.
-// It will be parsed from the parameters map provided during mocking phase.
-type Args struct {
-	URL            string
-	Method         string
-	Header         map[string]string
-	HeaderTemplate map[string]string
-	Body           string
-	BodyFile       string `mapstructure:"body_file"`
-	SSLVerify      bool   `mapstructure:"ssl_verify"`
-	IsTemplate     bool   `mapstructure:"is_template"`
-	Transform      Transform
-}
-
-type Config struct {
-	HTTPClient *http.Client
-}
-
-type Configurer func(*Config)
-
-// Transform lets users transforms and customize the WebHook Input
-// before it is used to build the HTTP request.
-// It will be executed everytime WebHook.Run is called.
-type Transform func(input *khttp.PostActionInput, args *Args) error
+// Transform lets users transforms and customize the [WebHook] [*kcore.PostActionInput] and the [Args]
+// before they are used.
+// It will be executed everytime [WebHook] runs.
+type Transform func(ctx context.Context, input *kcore.PostActionInput, args *Args) error
 
 // WebHook is an automated HTTP request sent after a mocked response is served.
 type WebHook struct {
-	httpClient *http.Client
-	rwMutex    sync.RWMutex
+	RoundTripper http.RoundTripper
+	Transform    Transform
+	Logger       *slog.Logger
+	LogLevel     slog.Level
 }
 
 // New creates a new WebHook instance.
-// New should be used to register the WebHook vlatte.PostAction within the server instance.
-// If you want to use the WebHook in a mock, call Setup.
-func New(conf ...Configurer) *WebHook {
-	return &WebHook{}
+// New should be used to register the WebHook [kcore.PostAction] within the server instance.
+func New(options ...Option) (*WebHook, error) {
+	w := &WebHook{Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))}
+
+	for i, opt := range options {
+		if err := opt(w); err != nil {
+			return nil, fmt.Errorf("webhook: error applying option at index %d. reason: %w", i, err)
+		}
+	}
+
+	if w.RoundTripper == nil {
+		w.RoundTripper = &http.Transport{}
+	}
+
+	return w, nil
+}
+
+func (w *WebHook) Name() string {
+	return "webhook"
 }
 
 // Run calls parses the parameters and calls the configured service.
-func (w *WebHook) Run(input *khttp.PostActionInput) error {
-	logger := input.App.Logger()
-	conf := input.App.Config()
-
+func (w *WebHook) Run(ctx context.Context, input *kcore.PostActionInput) error {
 	if input.Args == nil {
 		return fmt.Errorf("webhook: arguments must not be nil")
 	}
 
-	args := Args{}
-	a, ok := input.Args.(*Args)
-	if ok {
-		args = *a
-	} else {
+	args, ok := input.Args.(Args)
+	if !ok {
 		err := mapstructure.Decode(input.Args, &args)
 		if err != nil {
 			return fmt.Errorf("webhook: error decoding args:\n%w", err)
 		}
 	}
 
-	if args.Transform != nil {
-		err := args.Transform(input, &args)
-		if err != nil {
+	if w.Transform != nil {
+		if err := w.Transform(ctx, input, &args); err != nil {
 			return fmt.Errorf("webhook: failed to Transform args: %w", err)
-		}
-	}
-
-	if w.httpClient == nil {
-		w.rwMutex.Lock()
-		defer w.rwMutex.Unlock()
-
-		if w.httpClient == nil {
-			if conf.HTTPClientFactory == nil {
-				tlsConfig := conf.TLSConfig
-				if tlsConfig == nil {
-					tlsConfig = &tls.Config{
-						InsecureSkipVerify: args.SSLVerify,
-						RootCAs:            conf.TLSClientCAs,
-						Certificates:       conf.TLSCertificates,
-					}
-				}
-
-				w.httpClient = &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig}}
-			} else {
-				w.httpClient = conf.HTTPClientFactory()
-			}
 		}
 	}
 
@@ -123,11 +89,11 @@ func (w *WebHook) Run(input *khttp.PostActionInput) error {
 	}
 
 	txtURL := u.String()
-	logger.Info().
-		Str("url", txtURL).
-		Msgf("---> WEBHOOK REQUEST RECEIVED %s %s", method, u.Path)
+	w.Logger.Info(fmt.Sprintf("---> WEBHOOK REQUEST RECEIVED %s %s", method, u.Path),
+		slog.String("url", txtURL),
+		slog.String("flavor", input.Flavor))
 
-	req, err := http.NewRequestWithContext(input.RawRequest.Context(), method, txtURL, body)
+	req, err := http.NewRequestWithContext(ctx, method, txtURL, body)
 	if err != nil {
 		return err
 	}
@@ -136,25 +102,38 @@ func (w *WebHook) Run(input *khttp.PostActionInput) error {
 		req.Header.Add(k, v)
 	}
 
-	res, err := w.httpClient.Do(req)
+	res, err := w.RoundTripper.RoundTrip(req)
 	if err != nil {
-		logger.Err(err).
-			Str("url", txtURL).
-			Msgf("<--- WEBHOOK: %s %s", method, u.Path)
-
+		w.Logger.Error(fmt.Sprintf("<--- WEBHOOK: %s %s", method, u.Path),
+			slog.String("url", txtURL),
+			slog.String("flavor", input.Flavor))
 		return fmt.Errorf("webhook: request failed: %w", err)
 	}
 
 	defer res.Body.Close()
 
-	level := zerolog.InfoLevel
+	level := slog.LevelInfo
 	if res.StatusCode >= http.StatusBadRequest {
-		level = zerolog.WarnLevel
+		level = slog.LevelError
 	}
 
-	logger.WithLevel(level).
-		Str("url", txtURL).Int("status", res.StatusCode).
-		Msgf("<--- WEBHOOK %s %s", method, u.Path)
+	w.Logger.Log(ctx, level, fmt.Sprintf("<--- WEBHOOK %s %s", method, u.Path),
+		slog.String("url", txtURL),
+		slog.Int("status", res.StatusCode),
+		slog.String("flavor", input.Flavor))
 
 	return nil
+}
+
+// Args configures an WebHook HTTP request.
+// It will be parsed from the parameters map provided during mocking phase.
+type Args struct {
+	URL            string            `mapstructure:"url"`
+	Method         string            `mapstructure:"method"`
+	Header         map[string]string `mapstructure:"header"`
+	HeaderTemplate map[string]string `mapstructure:"header_template"`
+	Body           string            `mapstructure:"body"`
+	BodyFile       string            `mapstructure:"body_file"`
+	IsTemplate     bool              `mapstructure:"is_template"`
+	LogLevel       int               `mapstructure:"log_level"`
 }

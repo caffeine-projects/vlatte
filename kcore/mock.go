@@ -25,6 +25,8 @@ type Mock interface {
 	Disable()
 	String() string
 	Prepare()
+
+	PostActions() PostActions
 }
 
 type IDGen func() string
@@ -57,9 +59,9 @@ type Store[T Mock] interface {
 // M holds metadata and expectations to be matched against HTTP requests in order to serve mocked responses.
 // This is the core entity of this project, and most features work based on it.
 type M struct {
+	mu      sync.RWMutex
 	hits    atomic.Int64
 	enabled bool
-	mu      sync.RWMutex
 
 	// ID is the unique identifier of a Mock
 	ID string
@@ -76,12 +78,16 @@ type M struct {
 
 	// Delay sets the duration to delay serving the mocked response.
 	Delay Delay
+
+	PostActionList PostActions
 }
 
 // NewMock returns a new Mock with default values set.
 func NewMock(idgen IDGen) *M {
 	mock := &M{
-		ID:      idgen(),
+		ID:             idgen(),
+		PostActionList: make(PostActions, 0),
+
 		enabled: true,
 	}
 
@@ -162,6 +168,10 @@ func (m *M) String() string {
 // Build allows users to use the Mock itself as a HTTPMockBuilder.
 func (m *M) Build() (*M, error) {
 	return m, nil
+}
+
+func (m *M) PostActions() PostActions {
+	return m.PostActionList
 }
 
 type Results struct {

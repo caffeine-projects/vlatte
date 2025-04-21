@@ -16,3 +16,4 @@ post_actions:
         content-type: application/json
       body: '{"task": "done"}'
       ssl_verify: false
+      log_level: -1

@@ -397,7 +397,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 			}
 
 			builder.PostAction(
-				&PostActionDef{Name: pa[_fPostActionName].(string), RawParameters: pa[_fPostActionParameters]})
+				kcore.PostActionDefinition{Name: pa[_fPostActionName].(string), Parameters: pa[_fPostActionParameters]})
 		}
 	}
 

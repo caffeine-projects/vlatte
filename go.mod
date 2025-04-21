@@ -2,11 +2,14 @@ module github.com/caffeine-projects/vlatte
 
 go 1.24.1
 
-require github.com/stretchr/testify v1.10.0
+require (
+	github.com/go-viper/mapstructure/v2 v2.2.1
+	github.com/stretchr/testify v1.10.0
+	google.golang.org/protobuf v1.36.4
+)
 
 require (
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
-	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jwalton/go-supportscolor v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
@@ -26,7 +29,6 @@ require (
 	golang.org/x/term v0.31.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250115164207-1a7da9e5054f // indirect
-	google.golang.org/protobuf v1.36.4 // indirect
 	gopkg.in/yaml.v2 v2.2.7 // indirect
 	sigs.k8s.io/yaml v1.1.0 // indirect
 )
@@ -37,7 +39,6 @@ require (
 	github.com/google/go-jsonnet v0.20.0
 	github.com/google/uuid v1.6.0
 	github.com/jwalton/gchalk v1.3.0
-	github.com/mitchellh/mapstructure v1.5.0
 	github.com/ohler55/ojg v1.26.3
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rs/zerolog v1.34.0
