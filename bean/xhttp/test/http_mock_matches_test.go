@@ -33,13 +33,13 @@ package test
 // 	for _, tc := range testCases {
 // 		tc := tc
 // 		t.Run(tc.name, func(t *testing.T) {
-// 			evals := kcore.Evaluators[*xhttp.HTTPMock, *xhttp.HTTPValueSelectorInput]([]*kcore.Expectation[*xhttp.HTTPValueSelectorInput]{{
+// 			evals := std.Evaluators[*xhttp.HTTPMock, *xhttp.HTTPValueSelectorInput]([]*std.Expectation[*xhttp.HTTPValueSelectorInput]{{
 // 				Matcher: StrictEqual(tc.value),
 // 				Selector: func(_ context.Context, r *xhttp.HTTPValueSelectorInput) any {
 // 					return tc.selector
 // 				},
 // 			}})
-// 			evals.Eval(context.Background(), &xhttp.HTTPValueSelectorInput{}, func(m *xhttp.HTTPMock) kcore.Evaluators[*xhttp.HTTPMock, *xhttp.HTTPValueSelectorInput] {
+// 			evals.Eval(context.Background(), &xhttp.HTTPValueSelectorInput{}, func(m *xhttp.HTTPMock) std.Evaluators[*xhttp.HTTPMock, *xhttp.HTTPValueSelectorInput] {
 // 				return m.Expectations
 // 			})
 
@@ -49,38 +49,38 @@ package test
 
 // 	t.Run("should return not matched and error when one of expectations returns error", func(t *testing.T) {
 // 		// string
-// 		desc := &kcore.Results{}
-// 		pass, _ := kcore.Match(context.Background(), params, desc, []*kcore.Expectation[*xhttp.HTTPValueSelectorInput]{{
+// 		desc := &std.Results{}
+// 		pass, _ := std.Match(context.Background(), params, desc, []*std.Expectation[*xhttp.HTTPValueSelectorInput]{{
 // 			Matcher: Function(func(_ any) (bool, error) {
 // 				return false, fmt.Errorf("fail")
 // 			}),
 // 			Selector: func(_ context.Context, r *xhttp.HTTPValueSelectorInput) any {
 // 				return "dev"
 // 			},
-// 		}}, kcore.FindOptions{})
+// 		}}, std.FindOptions{})
 
 // 		require.False(t, pass)
 // 	})
 
 // 	t.Run("should not pass when it panics", func(t *testing.T) {
 // 		// string
-// 		desc := &kcore.Results{}
-// 		pass, _ := kcore.Match(context.Background(), params, desc, []*kcore.Expectation[*xhttp.HTTPValueSelectorInput]{{
+// 		desc := &std.Results{}
+// 		pass, _ := std.Match(context.Background(), params, desc, []*std.Expectation[*xhttp.HTTPValueSelectorInput]{{
 // 			Matcher: Function(func(_ any) (bool, error) {
 // 				panic("boom!")
 // 			}),
 // 			Selector: func(_ context.Context, r *xhttp.HTTPValueSelectorInput) any {
 // 				return "dev"
 // 			},
-// 		}}, kcore.FindOptions{})
+// 		}}, std.FindOptions{})
 
 // 		require.False(t, pass)
 // 	})
 
 // 	t.Run("should return the sum of the matchers Weight when it matches", func(t *testing.T) {
 // 		// any
-// 		desc := &kcore.Results{}
-// 		pass, weigth := kcore.Match(context.Background(), params, desc, []*kcore.Expectation[*xhttp.HTTPValueSelectorInput]{
+// 		desc := &std.Results{}
+// 		pass, weigth := std.Match(context.Background(), params, desc, []*std.Expectation[*xhttp.HTTPValueSelectorInput]{
 // 			{
 // 				Matcher: StrictEqual("test"),
 // 				Selector: func(_ context.Context, r *xhttp.HTTPValueSelectorInput) any {
@@ -102,7 +102,7 @@ package test
 // 				},
 // 				Weight: 2,
 // 			},
-// 		}, kcore.FindOptions{})
+// 		}, std.FindOptions{})
 
 // 		assert.True(t, pass)
 // 		assert.Equal(t, 5, weigth)
@@ -110,8 +110,8 @@ package test
 
 // 	t.Run("should return the sum of the matchers Weight when one of then doesn't match", func(t *testing.T) {
 // 		// any
-// 		desc := &kcore.Results{}
-// 		pass, weight := kcore.Match(context.Background(), params, desc, []*kcore.Expectation[*xhttp.HTTPValueSelectorInput]{
+// 		desc := &std.Results{}
+// 		pass, weight := std.Match(context.Background(), params, desc, []*std.Expectation[*xhttp.HTTPValueSelectorInput]{
 // 			{
 // 				Matcher: StrictEqual("test"),
 // 				Selector: func(_ context.Context, r *xhttp.HTTPValueSelectorInput) any {
@@ -133,7 +133,7 @@ package test
 // 				},
 // 				Weight: 2,
 // 			},
-// 		}, kcore.FindOptions{})
+// 		}, std.FindOptions{})
 
 // 		assert.False(t, pass)
 // 		assert.Equal(t, 4, weight)

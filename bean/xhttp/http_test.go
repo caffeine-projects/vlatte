@@ -14,7 +14,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp/test/testmock"
-	"github.com/caffeine-projects/vlatte/kcore/kv/kvmem"
+	"github.com/caffeine-projects/vlatte/std/kv/kvmem"
 	. "github.com/caffeine-projects/vlatte/matcher"
 )
 

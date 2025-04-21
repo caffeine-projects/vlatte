@@ -1,7 +1,7 @@
 package xgrpc
 
 import (
-	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/matcher"
 )
 
@@ -14,17 +14,17 @@ type GRPCMockBuilder interface {
 }
 
 type GRPCMock struct {
-	*kcore.M
+	*std.M
 
 	Reply any
 
 	after              []matcher.OnMockSent
-	unaryExpectations  []*kcore.Eval[*UnaryValueSelectorIn]
-	streamExpectations []*kcore.Eval[*StreamValueSelectorIn]
+	unaryExpectations  []*std.Eval[*UnaryValueSelectorIn]
+	streamExpectations []*std.Eval[*StreamValueSelectorIn]
 }
 
 func newMock() *GRPCMock {
-	return &GRPCMock{M: kcore.NewMock(kcore.UseUUID()), after: make([]matcher.OnMockSent, 0)}
+	return &GRPCMock{M: std.NewMock(std.UseUUID()), after: make([]matcher.OnMockSent, 0)}
 }
 
 func (m *GRPCMock) getRef() string {

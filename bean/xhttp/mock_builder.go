@@ -7,13 +7,13 @@ import (
 	"net/http"
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte/kcore"
-	"github.com/caffeine-projects/vlatte/kcore/flow"
+	"github.com/caffeine-projects/vlatte/std"
+	"github.com/caffeine-projects/vlatte/std/flow"
 	"github.com/caffeine-projects/vlatte/matcher"
 	"github.com/caffeine-projects/vlatte/matcher/mfeat"
 )
 
-var _ kcore.Builder[*HTTPMock, *HTTPMockApp] = (*HTTPMockBuilder)(nil)
+var _ std.Builder[*HTTPMock, *HTTPMockApp] = (*HTTPMockBuilder)(nil)
 
 var (
 	ErrNoExpectations = errors.New("mock: at least 1 request matcher must be set")
@@ -373,13 +373,13 @@ func (b *HTTPMockBuilder) ScenarioStateWillBe(newState string) *HTTPMockBuilder 
 }
 
 // Callback adds a callback that will be executed after the mocked response is served.
-func (b *HTTPMockBuilder) Callback(callback kcore.Callback) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) Callback(callback std.Callback) *HTTPMockBuilder {
 	b.mock.CallbackList = append(b.mock.CallbackList, callback)
 
 	return b
 }
 
-func (b *HTTPMockBuilder) PostAction(input kcore.PostActionDefinition) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) PostAction(input std.PostActionDefinition) *HTTPMockBuilder {
 	b.mock.PostActionList = append(b.mock.PostActionList, input)
 
 	return b
@@ -392,7 +392,7 @@ func (b *HTTPMockBuilder) Intercept(interceptor ...flow.Step) *HTTPMockBuilder {
 }
 
 // Delay sets a delay time before serving the mocked response.
-func (b *HTTPMockBuilder) Delay(duration kcore.Delay) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) Delay(duration std.Delay) *HTTPMockBuilder {
 	b.mock.Delay = duration
 
 	return b
@@ -469,7 +469,7 @@ func (b *HTTPMockBuilder) Build(app *HTTPMockApp) (*HTTPMock, error) {
 	return b.mock, nil
 }
 
-func (b *HTTPMockBuilder) appendExpectation(e *kcore.Eval[*HTTPValueSelectorInput]) {
+func (b *HTTPMockBuilder) appendExpectation(e *std.Eval[*HTTPValueSelectorInput]) {
 	b.mock.expectations = append(b.mock.expectations, e)
 }
 
@@ -482,17 +482,17 @@ func selectMethod(_ context.Context, r *HTTPValueSelectorInput) any      { retur
 func selectURL(_ context.Context, r *HTTPValueSelectorInput) any         { return r.URL.String() }
 func selectURLPath(_ context.Context, r *HTTPValueSelectorInput) any     { return r.URL.Path }
 func selectURLFragment(_ context.Context, r *HTTPValueSelectorInput) any { return r.URL.Fragment }
-func selectHeader(k string) kcore.Selector[*HTTPValueSelectorInput] {
+func selectHeader(k string) std.Selector[*HTTPValueSelectorInput] {
 	return func(_ context.Context, r *HTTPValueSelectorInput) any { return r.RawRequest.Header.Get(k) }
 }
-func selectQuery(k string) kcore.Selector[*HTTPValueSelectorInput] {
+func selectQuery(k string) std.Selector[*HTTPValueSelectorInput] {
 	return func(_ context.Context, r *HTTPValueSelectorInput) any { return r.Query.Get(k) }
 }
-func selectQueries(k string) kcore.Selector[*HTTPValueSelectorInput] {
+func selectQueries(k string) std.Selector[*HTTPValueSelectorInput] {
 	return func(_ context.Context, r *HTTPValueSelectorInput) any { return r.Query[k] }
 }
 func selectBody(_ context.Context, r *HTTPValueSelectorInput) any { return r.ParsedBody }
-func selectFormField(k string) kcore.Selector[*HTTPValueSelectorInput] {
+func selectFormField(k string) std.Selector[*HTTPValueSelectorInput] {
 	return func(_ context.Context, r *HTTPValueSelectorInput) any { return r.RawRequest.Form.Get(k) }
 }
 func selectRawRequest(_ context.Context, r *HTTPValueSelectorInput) any { return r.RawRequest }

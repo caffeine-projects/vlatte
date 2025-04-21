@@ -6,16 +6,16 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/caffeine-projects/vlatte/kcore"
-	"github.com/caffeine-projects/vlatte/kcore/descriptor"
-	"github.com/caffeine-projects/vlatte/kcore/flow"
-	"github.com/caffeine-projects/vlatte/kcore/kv"
+	"github.com/caffeine-projects/vlatte/std"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
+	"github.com/caffeine-projects/vlatte/std/flow"
+	"github.com/caffeine-projects/vlatte/std/kv"
 	"github.com/caffeine-projects/vlatte/matcher"
 )
 
-var _ kcore.Mock = (*HTTPMock)(nil)
-var _ kcore.CallbackInput = (*HTTPCallbackInput)(nil)
-var _ kcore.PostActionInput = (*HTTPPostActionInput)(nil)
+var _ std.Mock = (*HTTPMock)(nil)
+var _ std.CallbackInput = (*HTTPCallbackInput)(nil)
+var _ std.PostActionInput = (*HTTPPostActionInput)(nil)
 
 // RequestValues groups HTTP request data, including the parsed body.
 // It is used by several components during the request matching phase.
@@ -57,7 +57,7 @@ func (i *HTTPCallbackInput) Kind() string {
 	return "http"
 }
 
-func (i *HTTPCallbackInput) Mock() kcore.Mock {
+func (i *HTTPCallbackInput) Mock() std.Mock {
 	return i.m
 }
 
@@ -84,7 +84,7 @@ func (i *HTTPPostActionInput) Args() any {
 	return i.args
 }
 
-func (i *HTTPPostActionInput) Mock() kcore.Mock {
+func (i *HTTPPostActionInput) Mock() std.Mock {
 	return i.m
 }
 
@@ -154,12 +154,12 @@ type HTTPValueSelectorInput struct {
 	ParsedBody any
 }
 
-type HTTPExpectation = kcore.Eval[*HTTPValueSelectorInput]
+type HTTPExpectation = std.Eval[*HTTPValueSelectorInput]
 
 // HTTPMock holds metadata and expectations to be matched against HTTP requests in order to serve mocked responses.
 // This is the core entity of this project, and most features work based on it.
 type HTTPMock struct {
-	*kcore.M
+	*std.M
 
 	// Source describes the source of the mock. E.g.: if it was built from a file,
 	// it will contain the filename.
@@ -173,16 +173,16 @@ type HTTPMock struct {
 	Interceptors []flow.Step
 
 	after        []int
-	expectations []*kcore.Eval[*HTTPValueSelectorInput]
+	expectations []*std.Eval[*HTTPValueSelectorInput]
 }
 
 // newMock returns a new Mock with default values set.
 func newMock() *HTTPMock {
 	return &HTTPMock{
-		M:            kcore.NewMock(kcore.UseUUID()),
+		M:            std.NewMock(std.UseUUID()),
 		Mappers:      make([]Mapper, 0),
 		Interceptors: make([]flow.Step, 0),
-		expectations: make([]*kcore.Eval[*HTTPValueSelectorInput], 0),
+		expectations: make([]*std.Eval[*HTTPValueSelectorInput], 0),
 	}
 }
 

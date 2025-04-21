@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/caffeine-projects/vlatte/kcore/descriptor"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 var _ Reply = (*RandomReply)(nil)

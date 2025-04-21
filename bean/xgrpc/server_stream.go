@@ -16,14 +16,14 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/std"
 )
 
 type GRPCStreamMock struct {
 	*GRPCMock
 }
 
-func (s *GRPCStreamMock) GetExpectations() []*kcore.Eval[*StreamValueSelectorIn] {
+func (s *GRPCStreamMock) GetExpectations() []*std.Eval[*StreamValueSelectorIn] {
 	return s.streamExpectations
 }
 
@@ -177,8 +177,8 @@ func (in *Interceptors) StreamInterceptor(
 	}
 
 	rawBody := string(b)
-	mocks := kcore.Mocks[*GRPCMock, *StreamValueSelectorIn](em)
-	mock, pass, err := mocks.Find(stream.Context(), &StreamValueSelectorIn{rawBody, info}, func(m *GRPCMock) kcore.Evaluators[*GRPCMock, *StreamValueSelectorIn] { return m.streamExpectations })
+	mocks := std.Mocks[*GRPCMock, *StreamValueSelectorIn](em)
+	mock, pass, err := mocks.Find(stream.Context(), &StreamValueSelectorIn{rawBody, info}, func(m *GRPCMock) std.Evaluators[*GRPCMock, *StreamValueSelectorIn] { return m.streamExpectations })
 	if err != nil {
 		return status.Error(codes.Internal, fmt.Errorf("stream: error finding mock for request: %w", err).Error())
 	}

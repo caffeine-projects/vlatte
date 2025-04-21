@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/kcore/descriptor"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/ohler55/ojg/jp"
 	"github.com/ohler55/ojg/oj"
 )

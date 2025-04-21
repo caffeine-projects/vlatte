@@ -14,8 +14,8 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp/cors"
-	"github.com/caffeine-projects/vlatte/kcore"
-	"github.com/caffeine-projects/vlatte/kcore/kv"
+	"github.com/caffeine-projects/vlatte/std"
+	"github.com/caffeine-projects/vlatte/std/kv"
 )
 
 // Defaults
@@ -176,7 +176,7 @@ type Config struct {
 	MockFileHandlers []MockFileHandler
 
 	// TemplateEngine sets a custom template engine.
-	TemplateEngine kcore.TemplateEngine
+	TemplateEngine std.TemplateEngine
 
 	// TemplateFunctions sets custom template functions for the built-in template engine.
 	TemplateFunctions template.FuncMap
@@ -217,7 +217,7 @@ type Config struct {
 
 	// PostActions configures PostActions by name.
 	// They can later be referenced by name during mocking phase.
-	PostActions map[string]kcore.PostAction
+	PostActions map[string]std.PostAction
 
 	// HeaderNamesToRedact configures HTTP header names to be redacted in logs.
 	// Useful to avoid logging sensitive information.
@@ -314,7 +314,7 @@ func defaultConfig() *Config {
 		Middlewares:                    make([]func(http.Handler) http.Handler, 0),
 		Loaders:                        make([]Loader, 0),
 		MockFileHandlers:               make([]MockFileHandler, 0),
-		PostActions:                    make(map[string]kcore.PostAction),
+		PostActions:                    make(map[string]std.PostAction),
 		HeaderNamesToRedact:            make(map[string]struct{}),
 		LogPretty:                      true,
 		LogLevel:                       LogLevelInfo,
@@ -528,7 +528,7 @@ func (cb *ConfigBuilder) MockFileHandlers(handlers ...MockFileHandler) *ConfigBu
 
 // TemplateEngine sets the TemplateEngine to be used by all components.
 // Defaults to a built-in implementation based on Go Templates.
-func (cb *ConfigBuilder) TemplateEngine(te kcore.TemplateEngine) *ConfigBuilder {
+func (cb *ConfigBuilder) TemplateEngine(te std.TemplateEngine) *ConfigBuilder {
 	cb.conf.TemplateEngine = te
 	return cb
 }
@@ -575,7 +575,7 @@ func (cb *ConfigBuilder) TLSMutual(certFile, keyFile, clientCert string) *Config
 	return cb
 }
 
-func (cb *ConfigBuilder) PostAction(name string, action kcore.PostAction) *ConfigBuilder {
+func (cb *ConfigBuilder) PostAction(name string, action std.PostAction) *ConfigBuilder {
 	cb.conf.PostActions[name] = action
 	return cb
 }

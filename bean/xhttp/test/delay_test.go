@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	. "github.com/caffeine-projects/vlatte/bean/xhttp"
-	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/matcher"
 )
 
@@ -23,7 +23,7 @@ func TestResponseDelay(t *testing.T) {
 	delay := 250 * time.Millisecond
 
 	scoped := m.MustMock(Get(matcher.URLPath("/test")).
-		Delay(kcore.Latency(delay)).
+		Delay(std.Latency(delay)).
 		Reply(OK()))
 
 	res, err := http.Get(fmt.Sprintf("%s/test", m.URL()))

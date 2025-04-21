@@ -5,13 +5,13 @@ import (
 
 	"google.golang.org/grpc/metadata"
 
-	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/matcher"
 )
 
 var (
-	_ kcore.Builder[*GRPCMock, *GRPCMockApp] = (*UnaryMockBuilder)(nil)
-	_ GRPCMockBuilder                        = (*UnaryMockBuilder)(nil)
+	_ std.Builder[*GRPCMock, *GRPCMockApp] = (*UnaryMockBuilder)(nil)
+	_ GRPCMockBuilder                      = (*UnaryMockBuilder)(nil)
 )
 
 type UnaryMockBuilder struct {
@@ -22,7 +22,7 @@ func UnaryMethod(method string) *UnaryMockBuilder {
 	b := &UnaryMockBuilder{m: newMock()}
 	b.m.unaryExpectations = append(
 		b.m.unaryExpectations,
-		&kcore.Eval[*UnaryValueSelectorIn]{
+		&std.Eval[*UnaryValueSelectorIn]{
 			Matcher:  matcher.Contain(method),
 			Selector: unarySelectMethod,
 		},
@@ -34,7 +34,7 @@ func UnaryMethod(method string) *UnaryMockBuilder {
 func (b *UnaryMockBuilder) Header(key string, m matcher.Matcher) *UnaryMockBuilder {
 	b.m.unaryExpectations = append(
 		b.m.unaryExpectations,
-		&kcore.Eval[*UnaryValueSelectorIn]{
+		&std.Eval[*UnaryValueSelectorIn]{
 			Matcher:  m,
 			Selector: unarySelectHeader(key),
 		},
@@ -46,7 +46,7 @@ func (b *UnaryMockBuilder) Header(key string, m matcher.Matcher) *UnaryMockBuild
 func (b *UnaryMockBuilder) Field(path string, m matcher.Matcher) *UnaryMockBuilder {
 	b.m.unaryExpectations = append(
 		b.m.unaryExpectations,
-		&kcore.Eval[*UnaryValueSelectorIn]{
+		&std.Eval[*UnaryValueSelectorIn]{
 			Matcher:  matcher.Field(path, m),
 			Selector: unarySelectBody,
 		},
@@ -67,7 +67,7 @@ func unarySelectMethod(_ context.Context, r *UnaryValueSelectorIn) any {
 	return r.Info.FullMethod
 }
 
-func unarySelectHeader(k string) kcore.Selector[*UnaryValueSelectorIn] {
+func unarySelectHeader(k string) std.Selector[*UnaryValueSelectorIn] {
 	return func(ctx context.Context, r *UnaryValueSelectorIn) any {
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {

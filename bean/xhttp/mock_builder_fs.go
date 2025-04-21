@@ -17,15 +17,15 @@ import (
 	"github.com/xeipuuv/gojsonschema"
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp/internal/bufpool"
-	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/matcher"
 	"github.com/caffeine-projects/vlatte/matcher/mbuild"
 )
 
 var (
-	_ kcore.Builder[*HTTPMock, *HTTPMockApp] = (*mockBuilderFromFile)(nil)
-	_ kcore.Builder[*HTTPMock, *HTTPMockApp] = (*mockBuilderFromBytes)(nil)
-	_ error                                  = (*jsonSchemaValidationErr)(nil)
+	_ std.Builder[*HTTPMock, *HTTPMockApp] = (*mockBuilderFromFile)(nil)
+	_ std.Builder[*HTTPMock, *HTTPMockApp] = (*mockBuilderFromBytes)(nil)
+	_ error                                = (*jsonSchemaValidationErr)(nil)
 )
 
 const (
@@ -127,7 +127,7 @@ type mockBuilderFromFile struct {
 // Since every mock file is a Go template by default,
 // if you need to define templates for the response URL, header or body, remember to escape it.
 // Eg.: body: {{`{{ .Request.Method }}`}}
-func FromFile(filename string) kcore.Builder[*HTTPMock, *HTTPMockApp] {
+func FromFile(filename string) std.Builder[*HTTPMock, *HTTPMockApp] {
 	return &mockBuilderFromFile{filename: filename, builder: Request()}
 }
 
@@ -177,7 +177,7 @@ type mockBuilderFromBytes struct {
 	ext     string
 }
 
-func FromBytes(b []byte, extension string) kcore.Builder[*HTTPMock, *HTTPMockApp] {
+func FromBytes(b []byte, extension string) std.Builder[*HTTPMock, *HTTPMockApp] {
 	return &mockBuilderFromBytes{bytes: b, builder: Request(), ext: extension}
 }
 
@@ -380,7 +380,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 			return nil, fmt.Errorf("[delay] type %T is not supported. supported types: string, number", v)
 		}
 
-		builder.Delay(kcore.Latency(duration))
+		builder.Delay(std.Latency(duration))
 	}
 
 	if vi.IsSet(_fPostActions) {
@@ -397,7 +397,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 			}
 
 			builder.PostAction(
-				kcore.PostActionDefinition{Name: pa[_fPostActionName].(string), Parameters: pa[_fPostActionParameters]})
+				std.PostActionDefinition{Name: pa[_fPostActionName].(string), Parameters: pa[_fPostActionParameters]})
 		}
 	}
 

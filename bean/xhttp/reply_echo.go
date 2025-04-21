@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte/kcore/descriptor"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 type ReplyEcho struct {

@@ -13,8 +13,8 @@ import (
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/internal/httprec"
-	"github.com/caffeine-projects/vlatte/kcore"
-	"github.com/caffeine-projects/vlatte/kcore/flow"
+	"github.com/caffeine-projects/vlatte/std"
+	"github.com/caffeine-projects/vlatte/std/flow"
 	"github.com/caffeine-projects/vlatte/matcher"
 )
 
@@ -57,11 +57,11 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := &kcore.Results{Buf: make([]string, 0)}
+	results := &std.Results{Buf: make([]string, 0)}
 	selectorInput := &HTTPValueSelectorInput{r, parsedURL, r.URL.Query(), r.Form, parsedBody}
 
-	mocks := kcore.Mocks[*HTTPMock, *HTTPValueSelectorInput](em)
-	mock, pass, err := mocks.Find(r.Context(), selectorInput, func(m *HTTPMock) kcore.Evaluators[*HTTPMock, *HTTPValueSelectorInput] { return m.expectations })
+	mocks := std.Mocks[*HTTPMock, *HTTPValueSelectorInput](em)
+	mock, pass, err := mocks.Find(r.Context(), selectorInput, func(m *HTTPMock) std.Evaluators[*HTTPMock, *HTTPValueSelectorInput] { return m.expectations })
 	if err != nil {
 		h.lifecycle.OnError(reqValues, fmt.Errorf("http: error finding eligible mocks for request. %w", err))
 	}
@@ -239,7 +239,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, desc *kcore.Results) {
+func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, desc *std.Results) {
 	defer h.lifecycle.OnNoMatch(r, desc)
 
 	buf := bufpool.Get()

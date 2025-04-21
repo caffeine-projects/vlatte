@@ -1,4 +1,4 @@
-package kcore
+package std
 
 import (
 	"math"

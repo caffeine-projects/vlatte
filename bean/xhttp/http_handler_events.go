@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp/internal/bufpool"
-	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/std"
 )
 
 var (
@@ -23,7 +23,7 @@ var (
 type mockHTTPLifecycle interface {
 	OnRequest(*RequestValues)
 	OnMatch(*RequestValues, *MockedResponse)
-	OnNoMatch(*RequestValues, *kcore.Results)
+	OnNoMatch(*RequestValues, *std.Results)
 	OnWarning(*RequestValues, error)
 	OnError(*RequestValues, error)
 }
@@ -100,7 +100,7 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *MockedResponse) 
 	evt.Msgf("<--- REQUEST MATCHED %s %s", r.RawRequest.Method, r.URL.Path)
 }
 
-func (h *builtInMockHTTPLifecycle) OnNoMatch(r *RequestValues, d *kcore.Results) {
+func (h *builtInMockHTTPLifecycle) OnNoMatch(r *RequestValues, d *std.Results) {
 	if h.app.config.LogLevel == LogLevelDisabled {
 		return
 	}
@@ -235,7 +235,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Mock
 
 func (h *builtInDescriptiveMockHTTPLifecycle) OnNoMatch(
 	reqValues *RequestValues,
-	d *kcore.Results,
+	d *std.Results,
 ) {
 	if h.app.config.LogLevel == LogLevelDisabled {
 		return

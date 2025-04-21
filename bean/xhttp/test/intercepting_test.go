@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp"
-	"github.com/caffeine-projects/vlatte/kcore/flow"
+	"github.com/caffeine-projects/vlatte/std/flow"
 	"github.com/stretchr/testify/require"
 )
 

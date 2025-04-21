@@ -1,4 +1,4 @@
-package kcore_test
+package std_test
 
 import (
 	"context"
@@ -8,28 +8,28 @@ import (
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/test/testmock"
-	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/matcher"
 	"github.com/stretchr/testify/require"
 )
 
 func TestScoped(t *testing.T) {
 	type testMock struct {
-		*kcore.M
+		*std.M
 	}
 
 	newTestMock := func() *testMock {
-		return &testMock{M: kcore.NewMock(kcore.UseUUID())}
+		return &testMock{M: std.NewMock(std.UseUUID())}
 	}
 
 	m1 := newTestMock()
 	m2 := newTestMock()
 	m3 := newTestMock()
 
-	repo := kcore.NewStore[*testMock]()
+	repo := std.NewStore[*testMock]()
 	repo.Save(context.Background(), m1, m2, m3)
 
-	scoped := kcore.Scoped(repo, []*testMock{m1, m2, m3})
+	scoped := std.Scoped(repo, []*testMock{m1, m2, m3})
 
 	require.Equal(t, 3, len(scoped.GetAll()))
 	require.Equal(t, m1, scoped.Get(m1.GetID()))
@@ -165,18 +165,18 @@ func TestScoped(t *testing.T) {
 
 func TestScopedDelete(t *testing.T) {
 	type testMock struct {
-		*kcore.M
+		*std.M
 	}
 
 	newTestMock := func() *testMock {
-		return &testMock{M: kcore.NewMock(kcore.UseUUID())}
+		return &testMock{M: std.NewMock(std.UseUUID())}
 	}
 
 	m1 := newTestMock()
 	m2 := newTestMock()
 	m3 := newTestMock()
 
-	scoped := kcore.Scoped(nil, []*testMock{m1, m2, m3})
+	scoped := std.Scoped(nil, []*testMock{m1, m2, m3})
 
 	require.True(t, scoped.Delete(m1.GetID()))
 	require.False(t, scoped.Delete("unknown"))

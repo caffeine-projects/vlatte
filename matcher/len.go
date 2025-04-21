@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/kcore/descriptor"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 type lenMatcher struct {

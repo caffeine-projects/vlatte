@@ -1,6 +1,6 @@
 package webhook
 
-import "github.com/caffeine-projects/vlatte/kcore"
+import "github.com/caffeine-projects/vlatte/std"
 
 // builder provides a convenient way to configure a WebHook for a mock.
 type builder struct {
@@ -37,6 +37,6 @@ func (b *builder) Body(body string) *builder {
 }
 
 // Build builds the vlatte.PostActionDef required to set up a WebHook for a mock.
-func (b *builder) Build(name string) kcore.PostActionDefinition {
-	return kcore.PostActionDefinition{Name: name, Parameters: b.input}
+func (b *builder) Build(name string) std.PostActionDefinition {
+	return std.PostActionDefinition{Name: name, Parameters: b.input}
 }

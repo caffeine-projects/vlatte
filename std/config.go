@@ -1,4 +1,4 @@
-package kcore
+package std
 
 // Configurer lets users configure the Mock API.
 type Configurer[TConfig any] interface {

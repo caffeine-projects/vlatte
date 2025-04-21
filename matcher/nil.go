@@ -1,6 +1,6 @@
 package matcher
 
-import "github.com/caffeine-projects/vlatte/kcore/descriptor"
+import "github.com/caffeine-projects/vlatte/std/descriptor"
 
 type nilMatcher struct {
 }

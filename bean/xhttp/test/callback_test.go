@@ -12,7 +12,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/matcher"
 )
 
@@ -25,7 +25,7 @@ func TestCallbacks(t *testing.T) {
 		defer m.Close()
 
 		scope := m.MustMock(xhttp.Post(matcher.URLPath("/test")).
-			Callback(func(ctx context.Context, input kcore.CallbackInput) error {
+			Callback(func(ctx context.Context, input std.CallbackInput) error {
 				cinput, ok := input.(*xhttp.HTTPCallbackInput)
 
 				require.True(t, ok)
@@ -64,7 +64,7 @@ func TestCallbacks(t *testing.T) {
 		defer m.Close()
 
 		scope := m.MustMock(xhttp.Get(matcher.URLPath("/test")).
-			Callback(func(ctx context.Context, input kcore.CallbackInput) error {
+			Callback(func(ctx context.Context, input std.CallbackInput) error {
 				cinput, ok := input.(*xhttp.HTTPCallbackInput)
 				require.True(t, ok)
 				require.NotNil(t, cinput)

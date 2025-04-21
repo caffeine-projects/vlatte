@@ -10,25 +10,25 @@ import (
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 
-	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/std"
 )
 
 type GRPCMockApp struct {
-	*kcore.BaseApp[*GRPCMock, *GRPCMockApp]
+	*std.BaseApp[*GRPCMock, *GRPCMockApp]
 
 	cancel  context.CancelFunc
 	server  *grpc.Server
 	config  *Config
 	logger  *zerolog.Logger
 	addr    string
-	storage kcore.Store[*GRPCMock]
+	storage std.Store[*GRPCMock]
 }
 
 type ServerInfo struct {
 	Addr string
 }
 
-func NewGRPC(config ...kcore.Configurer[*Config]) *GRPCMockApp {
+func NewGRPC(config ...std.Configurer[*Config]) *GRPCMockApp {
 	app := &GRPCMockApp{}
 	conf := defaultConfig()
 
@@ -44,7 +44,7 @@ func NewGRPC(config ...kcore.Configurer[*Config]) *GRPCMockApp {
 		}
 	}
 
-	store := kcore.NewStore[*GRPCMock]()
+	store := std.NewStore[*GRPCMock]()
 	in := &Interceptors{app: app}
 	srv := grpc.NewServer(
 		grpc.UnaryInterceptor(in.UnaryInterceptor),
@@ -55,7 +55,7 @@ func NewGRPC(config ...kcore.Configurer[*Config]) *GRPCMockApp {
 		srv.RegisterService(conf.ServiceDesc, conf.Service)
 	}
 
-	app.BaseApp = kcore.NewBaseApp[*GRPCMock, *GRPCMockApp](app, store)
+	app.BaseApp = std.NewBaseApp[*GRPCMock, *GRPCMockApp](app, store)
 	app.storage = store
 	app.config = conf
 	app.server = srv
@@ -63,7 +63,7 @@ func NewGRPC(config ...kcore.Configurer[*Config]) *GRPCMockApp {
 	return app
 }
 
-func NewGRPCWithT(t kcore.TestingT, config ...kcore.Configurer[*Config]) *GRPCMockApp {
+func NewGRPCWithT(t std.TestingT, config ...std.Configurer[*Config]) *GRPCMockApp {
 	app := NewGRPC(config...)
 	t.Cleanup(app.Close)
 

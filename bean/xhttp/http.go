@@ -19,15 +19,15 @@ import (
 	"github.com/caffeine-projects/vlatte/bean/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/internal/mid"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/internal/mid/recover"
-	"github.com/caffeine-projects/vlatte/kcore"
-	"github.com/caffeine-projects/vlatte/kcore/kv"
-	"github.com/caffeine-projects/vlatte/kcore/kv/kvmem"
+	"github.com/caffeine-projects/vlatte/std"
+	"github.com/caffeine-projects/vlatte/std/kv"
+	"github.com/caffeine-projects/vlatte/std/kv/kvmem"
 	"github.com/caffeine-projects/vlatte/matcher"
 	"github.com/caffeine-projects/vlatte/matcher/mfeat"
 )
 
 var (
-	_ kcore.MockApp[*HTTPMock] = (*HTTPMockApp)(nil)
+	_ std.MockApp[*HTTPMock] = (*HTTPMockApp)(nil)
 )
 
 const (
@@ -43,11 +43,11 @@ const StatusNoMatch = http.StatusTeapot
 
 // HTTPMockApp is the base for the mock server.
 type HTTPMockApp struct {
-	*kcore.BaseApp[*HTTPMock, *HTTPMockApp]
+	*std.BaseApp[*HTTPMock, *HTTPMockApp]
 
 	config             *Config
 	server             Server
-	storage            kcore.Store[*HTTPMock]
+	storage            std.Store[*HTTPMock]
 	scenarioStore      *mfeat.ScenarioStore
 	cancel             context.CancelFunc
 	requestBodyParsers []RequestBodyParser
@@ -56,8 +56,8 @@ type HTTPMockApp struct {
 	rec                *recorder
 	rwMutex            sync.RWMutex
 	proxy              *reverseProxy
-	templateEngine     kcore.TemplateEngine
-	extensions         map[string]kcore.Extension
+	templateEngine     std.TemplateEngine
+	extensions         map[string]std.Extension
 	data               map[string]any
 	colorizer          *gchalk.Builder
 	logger             *zerolog.Logger
@@ -103,7 +103,7 @@ func NewAPI(config ...Configurer) *HTTPMockApp {
 		colors.SetLevel(gchalk.LevelNone)
 	}
 
-	repository := kcore.NewStore[*HTTPMock]()
+	repository := std.NewStore[*HTTPMock]()
 
 	parsers := make([]RequestBodyParser, 0, len(conf.RequestBodyParsers)+3)
 	parsers = append(parsers, conf.RequestBodyParsers...)
@@ -171,7 +171,7 @@ func NewAPI(config ...Configurer) *HTTPMockApp {
 		app.templateEngine = tmpl
 	}
 
-	app.BaseApp = kcore.NewBaseApp(app, repository)
+	app.BaseApp = std.NewBaseApp(app, repository)
 	app.server = server
 	app.storage = repository
 	app.scenarioStore = mfeat.NewScenarioStore()
@@ -180,7 +180,7 @@ func NewAPI(config ...Configurer) *HTTPMockApp {
 	app.rec = rec
 	app.proxy = p
 	app.requestBodyParsers = parsers
-	app.extensions = make(map[string]kcore.Extension)
+	app.extensions = make(map[string]std.Extension)
 	app.colorizer = colors
 	app.admin = &Admin{app: app, repo: repository}
 
@@ -280,7 +280,7 @@ func (app *HTTPMockApp) Server() Server {
 }
 
 // TemplateEngine returns the TemplateEngine associated with this instance.
-func (app *HTTPMockApp) TemplateEngine() kcore.TemplateEngine {
+func (app *HTTPMockApp) TemplateEngine() std.TemplateEngine {
 	return app.templateEngine
 }
 
@@ -323,7 +323,7 @@ func (app *HTTPMockApp) Close() {
 
 // CloseWithT register Server Close function on TestingT Cleanup().
 // Useful to close the server when tests finish.
-func (app *HTTPMockApp) CloseWithT(t kcore.TestingT) *HTTPMockApp {
+func (app *HTTPMockApp) CloseWithT(t std.TestingT) *HTTPMockApp {
 	t.Cleanup(func() { app.Close() })
 	return app
 }
@@ -337,7 +337,7 @@ func (app *HTTPMockApp) StopRecording() {
 	app.rec.stop()
 }
 
-func (app *HTTPMockApp) RegisterExtension(extension kcore.Extension) error {
+func (app *HTTPMockApp) RegisterExtension(extension std.Extension) error {
 	app.rwMutex.Lock()
 	defer app.rwMutex.Unlock()
 

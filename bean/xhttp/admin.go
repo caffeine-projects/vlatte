@@ -11,7 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte/kcore"
+	"github.com/caffeine-projects/vlatte/std"
 )
 
 var SupportedExtensions = map[string]struct{}{"json": {}, "yaml": {}, "yml": {}}
@@ -33,7 +33,7 @@ type Encoders map[string]Encoder
 
 type Admin struct {
 	app      *HTTPMockApp
-	repo     kcore.Store[*HTTPMock]
+	repo     std.Store[*HTTPMock]
 	encoders Encoders
 	rwmu     sync.RWMutex
 }

@@ -11,8 +11,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/internal/bufpool"
-	"github.com/caffeine-projects/vlatte/kcore"
-	"github.com/caffeine-projects/vlatte/kcore/descriptor"
+	"github.com/caffeine-projects/vlatte/std"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 var _ Reply = (*StdReply)(nil)
@@ -41,9 +41,9 @@ type StdReply struct {
 	bodyType                 bodyType
 	bodyEncoding             bodyEncoding
 	bodyFilename             string
-	bodyTemplateRenderer     kcore.TemplateRenderer
-	bodyFuncTemplateRenderer kcore.TemplateRenderer
-	headerTemplateRender     kcore.TemplateRenderer
+	bodyTemplateRenderer     std.TemplateRenderer
+	bodyFuncTemplateRenderer std.TemplateRenderer
+	headerTemplateRender     std.TemplateRenderer
 	teType                   teType
 	templateHeader           http.Header
 	bodyTemplateContent      string

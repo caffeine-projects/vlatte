@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/kcore/descriptor"
+	"github.com/caffeine-projects/vlatte/std/descriptor"
 )
 
 type xorMatcher struct {
