@@ -14,9 +14,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte/bean/khttp"
+	. "github.com/caffeine-projects/vlatte/bean/khttp/httpval"
 	"github.com/caffeine-projects/vlatte/kcore"
-	"github.com/caffeine-projects/vlatte/khttp"
-	. "github.com/caffeine-projects/vlatte/khttp/httpval"
 	. "github.com/caffeine-projects/vlatte/matcher"
 	"github.com/caffeine-projects/vlatte/topping/webhook"
 )
