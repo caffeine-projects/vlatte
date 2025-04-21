@@ -6,31 +6,31 @@ import (
 	"sync"
 )
 
-var _ Jar[*M] = (*Canister[*M])(nil)
+var _ Jar[*GreenBean] = (*Canister[*GreenBean])(nil)
 
-type Canister[TMock Mock] struct {
-	data []TMock
-	mu   sync.RWMutex
+type Canister[B Bean] struct {
+	beans []B
+	mu    sync.RWMutex
 }
 
-// NewJar returns Mock InMemMockStore implementation.
-func NewJar[TMock Mock]() Jar[TMock] {
-	return &Canister[TMock]{data: make([]TMock, 0)}
+// NewJar returns Bean InMemBeanstore implementation.
+func NewJar[B Bean]() Jar[B] {
+	return &Canister[B]{beans: make([]B, 0)}
 }
 
-func (s *Canister[TMock]) EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan TMock, error) {
+func (s *Canister[B]) EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan B, error) {
 	s.mu.RLock()
-	mocks := make([]TMock, len(s.data))
-	copy(mocks, s.data)
+	beans := make([]B, len(s.beans))
+	copy(beans, s.beans)
 	s.mu.RUnlock()
 
-	out := make(chan TMock, len(mocks))
+	out := make(chan B, len(beans))
 	go func() {
 		defer close(out)
-		for _, mock := range mocks {
-			if mock.Enabled() {
+		for _, bean := range beans {
+			if bean.Enabled() {
 				select {
-				case out <- mock:
+				case out <- bean:
 				case <-ctx.Done():
 					return
 				case <-done:
@@ -43,92 +43,92 @@ func (s *Canister[TMock]) EligibleStream(ctx context.Context, done <-chan struct
 	return out, nil
 }
 
-func (s *Canister[TMock]) Eligible(ctx context.Context) ([]TMock, error) {
+func (s *Canister[B]) Eligible(ctx context.Context) ([]B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	mocks := make([]TMock, 0, len(s.data))
-	for _, mock := range s.data {
-		if mock.Enabled() {
-			mocks = append(mocks, mock)
+	beans := make([]B, 0, len(s.beans))
+	for _, bean := range s.beans {
+		if bean.Enabled() {
+			beans = append(beans, bean)
 		}
 	}
-	return mocks, nil
+	return beans, nil
 }
 
-func (s *Canister[TMock]) Save(_ context.Context, mocks ...TMock) error {
+func (s *Canister[B]) Save(_ context.Context, beans ...B) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.data = append(s.data, mocks...)
+	s.beans = append(s.beans, beans...)
 
-	sort.SliceStable(s.data, func(a, b int) bool {
-		return s.data[a].GetPriority() < s.data[b].GetPriority()
+	sort.SliceStable(s.beans, func(a, b int) bool {
+		return s.beans[a].GetPriority() < s.beans[b].GetPriority()
 	})
 
 	return nil
 }
 
-func (s *Canister[TMock]) Get(_ context.Context, id string) (TMock, error) {
+func (s *Canister[B]) Get(_ context.Context, id string) (B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	for _, datum := range s.data {
+	for _, datum := range s.beans {
 		if datum.GetID() == id {
 			return datum, nil
 		}
 	}
 
-	var result TMock
+	var result B
 	return result, nil
 }
 
-func (s *Canister[TMock]) GetByIDs(ctx context.Context, ids ...string) ([]TMock, error) {
-	mocks := make([]TMock, 0, len(ids))
+func (s *Canister[B]) GetByIDs(ctx context.Context, ids ...string) ([]B, error) {
+	beans := make([]B, 0, len(ids))
 	for _, id := range ids {
 		m, err := s.Get(ctx, id)
 		if err != nil {
 			return nil, err
 		}
 
-		mocks = append(mocks, m)
+		beans = append(beans, m)
 	}
 
-	return mocks, nil
+	return beans, nil
 }
 
-func (s *Canister[TMock]) GetAll(_ context.Context) ([]TMock, error) {
+func (s *Canister[B]) GetAll(_ context.Context) ([]B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	ret := make([]TMock, len(s.data))
-	copy(ret, s.data)
+	ret := make([]B, len(s.beans))
+	copy(ret, s.beans)
 
 	return ret, nil
 }
 
-func (s *Canister[TMock]) Del(_ context.Context, ids ...string) error {
+func (s *Canister[B]) Del(_ context.Context, ids ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for _, id := range ids {
 		index := -1
-		for i, m := range s.data {
+		for i, m := range s.beans {
 			if m.GetID() == id {
 				index = i
 				break
 			}
 		}
 
-		s.data = s.data[:index+copy(s.data[index:], s.data[index+1:])]
+		s.beans = s.beans[:index+copy(s.beans[index:], s.beans[index+1:])]
 	}
 
 	return nil
 }
 
-func (s *Canister[TMock]) DelExt(ctx context.Context) error {
-	ids := make([]string, 0, len(s.data))
+func (s *Canister[B]) DelExt(ctx context.Context) error {
+	ids := make([]string, 0, len(s.beans))
 
-	for _, m := range s.data {
+	for _, m := range s.beans {
 		if len(m.GetSource()) > 0 {
 			ids = append(ids, m.GetID())
 		}
@@ -143,12 +143,12 @@ func (s *Canister[TMock]) DelExt(ctx context.Context) error {
 	return nil
 }
 
-func (s *Canister[TMock]) DelAll(_ context.Context) error {
+func (s *Canister[B]) DelAll(_ context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.data = nil
-	s.data = make([]TMock, 0)
+	s.beans = nil
+	s.beans = make([]B, 0)
 
 	return nil
 }

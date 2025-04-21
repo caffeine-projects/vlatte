@@ -6,19 +6,19 @@ import (
 	"sync"
 )
 
-var _ Taste[Mock] = (*Mug[Mock])(nil)
+var _ Taste[Bean] = (*Mug[Bean])(nil)
 
 // Mug keeps a reference to a group of mocks.
 // With a Mug instance, it is possible to verify if one or a group of mocks were called,
 // how many times they were called and so on.
-type Mug[M Mock] struct {
+type Mug[M Bean] struct {
 	beans map[string]M
 	del   map[string]struct{}
 	jar   Jar[M]
 	mu    sync.RWMutex
 }
 
-func Pour[M Mock](store Jar[M], mocks []M) *Mug[M] {
+func Pour[M Bean](store Jar[M], mocks []M) *Mug[M] {
 	scoped := &Mug[M]{beans: make(map[string]M, len(mocks)), del: make(map[string]struct{}), jar: store}
 	for _, m := range mocks {
 		scoped.beans[m.GetID()] = m

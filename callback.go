@@ -12,7 +12,7 @@ type CallbackInput interface {
 	Kind() string
 
 	// Mock is the matched [Mock] for the current request.
-	Mock() Mock
+	Mock() Bean
 }
 
 // Callback defines the contract for a simple action that will be executed after serving a mocked response.

@@ -60,13 +60,13 @@ func (e *Eval[TIn]) Match(ctx context.Context, in TIn) (result filter.Result, er
 	return e.Matcher.Match(val)
 }
 
-// GetEvals is a function that returns a list of evaluators of a given [Mock].
-// Normally [Mock] will have a function that returns a list of evaluators.
-type GetEvals[M Mock, TIn any] func(m M) Evaluators[M, TIn]
+// GetEvals is a function that returns a list of evaluators of a given [Bean].
+// Normally [Bean] will have a function that returns a list of evaluators.
+type GetEvals[M Bean, TIn any] func(m M) Evaluators[M, TIn]
 
 // Mocks is a list of sorted eligible mocks.
 // This list can searched for a match.
-type Mocks[M Mock, TIn any] []M
+type Mocks[M Bean, TIn any] []M
 
 // Find tries to find an exact match in the mocks.
 func (mocks Mocks[M, TIn]) Find(ctx context.Context, in TIn, evals GetEvals[M, TIn]) (M, bool, error) {
@@ -87,9 +87,9 @@ func (mocks Mocks[M, TIn]) Find(ctx context.Context, in TIn, evals GetEvals[M, T
 }
 
 // Evaluators is a list of evaluators.
-type Evaluators[M Mock, TIn any] []*Eval[TIn]
+type Evaluators[M Bean, TIn any] []*Eval[TIn]
 
-// Eval evaluates the input against all evaluators from a single [Mock].
+// Eval evaluates the input against all evaluators from a single [Bean].
 // Normally this function is used together with [Mocks.Find]
 func (e Evaluators[M, TIn]) Eval(ctx context.Context, in TIn) (bool, error) {
 	for i, eval := range e {

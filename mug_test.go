@@ -16,11 +16,11 @@ import (
 
 func TestMug(t *testing.T) {
 	type testMock struct {
-		*vlatte.M
+		*vlatte.GreenBean
 	}
 
 	newTestMock := func() *testMock {
-		return &testMock{M: vlatte.NewMock(vlatte.UseUUID())}
+		return &testMock{GreenBean: vlatte.NewMock(vlatte.UseUUID())}
 	}
 
 	m1 := newTestMock()
@@ -166,11 +166,11 @@ func TestMug(t *testing.T) {
 
 func TestScopedDelete(t *testing.T) {
 	type testMock struct {
-		*vlatte.M
+		*vlatte.GreenBean
 	}
 
 	newTestMock := func() *testMock {
-		return &testMock{M: vlatte.NewMock(vlatte.UseUUID())}
+		return &testMock{GreenBean: vlatte.NewMock(vlatte.UseUUID())}
 	}
 
 	m1 := newTestMock()

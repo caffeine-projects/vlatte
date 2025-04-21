@@ -8,8 +8,8 @@ import (
 type PostActionInput interface {
 	Kind() string
 
-	// Mock is the matched Mock for the current HTTP request.
-	Mock() Mock
+	// Bean is the matched Bean for the current HTTP request.
+	Bean() Bean
 
 	// Args allow passing custom arguments to a PostAction.
 	Args() any

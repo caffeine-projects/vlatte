@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-type Tray[TM Mock, A MockApp[TM]] struct {
+type Tray[TM Bean, A MockApp[TM]] struct {
 	mu     sync.RWMutex
 	brewer A
 	jar    Jar[TM]

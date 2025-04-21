@@ -1,6 +1,6 @@
 package vlatte
 
-type Taste[M Mock] interface {
+type Taste[M Bean] interface {
 	Hits() int64
 	ListPending() []M
 	ListCalled() []M

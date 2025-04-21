@@ -14,7 +14,7 @@ type GRPCMockBuilder interface {
 }
 
 type GRPCMock struct {
-	*vlatte.M
+	*vlatte.GreenBean
 
 	Reply any
 
@@ -24,7 +24,7 @@ type GRPCMock struct {
 }
 
 func newMock() *GRPCMock {
-	return &GRPCMock{M: vlatte.NewMock(vlatte.UseUUID()), after: make([]filter.OnMockSent, 0)}
+	return &GRPCMock{GreenBean: vlatte.NewMock(vlatte.UseUUID()), after: make([]filter.OnMockSent, 0)}
 }
 
 func (m *GRPCMock) getRef() string {

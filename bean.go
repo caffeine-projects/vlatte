@@ -10,9 +10,9 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/encutil"
 )
 
-var _ Mock = (*M)(nil)
+var _ Bean = (*GreenBean)(nil)
 
-type Mock interface {
+type Bean interface {
 	GetID() string
 	GetName() string
 	GetPriority() int
@@ -41,15 +41,15 @@ func UseUUID() IDGen {
 }
 
 // Builder describes a Mock builder.
-type Builder[TMock Mock, TMockApp MockApp[TMock]] interface {
-	Build(app TMockApp) (TMock, error)
+type Builder[B Bean, TMockApp MockApp[B]] interface {
+	Build(app TMockApp) (B, error)
 }
 
-type Jar[T Mock] interface {
+type Jar[T Bean] interface {
 	EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan T, error)
 	Eligible(ctx context.Context) ([]T, error)
 
-	Save(ctx context.Context, mock ...T) error
+	Save(ctx context.Context, bean ...T) error
 
 	Get(ctx context.Context, id string) (T, error)
 	GetAll(ctx context.Context) ([]T, error)
@@ -59,9 +59,9 @@ type Jar[T Mock] interface {
 	DelAll(ctx context.Context) error
 }
 
-// M holds metadata and expectations to be matched against HTTP requests in order to serve mocked responses.
+// GreenBean holds metadata and expectations to be matched against HTTP requests in order to serve mocked responses.
 // This is the core entity of this project, and most features work based on it.
-type M struct {
+type GreenBean struct {
 	mu      sync.RWMutex
 	hits    atomic.Int64
 	enabled bool
@@ -90,8 +90,8 @@ type M struct {
 }
 
 // NewMock returns a new Mock with default values set.
-func NewMock(idgen IDGen) *M {
-	mock := &M{
+func NewMock(idgen IDGen) *GreenBean {
+	return &GreenBean{
 		ID:             idgen(),
 		PostActionList: make(PostActions, 0),
 		CallbackList:   make([]Callback, 0),
@@ -99,55 +99,53 @@ func NewMock(idgen IDGen) *M {
 
 		enabled: true,
 	}
-
-	return mock
 }
 
-func (m *M) GetID() string {
+func (m *GreenBean) GetID() string {
 	return m.ID
 }
 
-func (m *M) GetName() string {
+func (m *GreenBean) GetName() string {
 	return m.Name
 }
 
-func (m *M) GetPriority() int {
+func (m *GreenBean) GetPriority() int {
 	return m.Priority
 }
 
-func (m *M) GetSource() string {
+func (m *GreenBean) GetSource() string {
 	return m.Source
 }
 
-func (m *M) Enabled() bool {
+func (m *GreenBean) Enabled() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.enabled
 }
 
 // Inc increment one Mock call.
-func (m *M) Inc() {
+func (m *GreenBean) Inc() {
 	m.hits.Add(1)
 }
 
 // Dec reduce one Mock call.
-func (m *M) Dec() {
+func (m *GreenBean) Dec() {
 	m.hits.Add(-1)
 }
 
 // Hits returns the amount of time this Mock was matched to a request and served.
-func (m *M) Hits() int64 {
+func (m *GreenBean) Hits() int64 {
 	return m.hits.Load()
 }
 
 // Called checks if the Mock was called at least once.
-func (m *M) Called() bool {
+func (m *GreenBean) Called() bool {
 	return m.hits.Load() > 0
 }
 
 // Enable enables the Mock.
 // The Mock will be eligible to be matched.
-func (m *M) Enable() {
+func (m *GreenBean) Enable() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.enabled = true
@@ -155,39 +153,39 @@ func (m *M) Enable() {
 
 // Disable disables the Mock.
 // The Mock will not be eligible to be matched.
-func (m *M) Disable() {
+func (m *GreenBean) Disable() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.enabled = false
 }
 
-func (m *M) Switch(state bool) {
+func (m *GreenBean) Switch(state bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.enabled = state
 }
 
-func (m *M) Prepare() {
+func (m *GreenBean) Prepare() {
 }
 
-func (m *M) String() string {
+func (m *GreenBean) String() string {
 	return ""
 }
 
-func (m *M) PostActions() PostActions {
+func (m *GreenBean) PostActions() PostActions {
 	return m.PostActionList
 }
 
-func (m *M) Callbacks() []Callback {
+func (m *GreenBean) Callbacks() []Callback {
 	return m.CallbackList
 }
 
-func (m *M) Flow() []Step {
+func (m *GreenBean) Flow() []Step {
 	return m.Steps
 }
 
 // Build allows users to use the Mock itself as a HTTPMockBuilder.
-func (m *M) Build() (*M, error) {
+func (m *GreenBean) Build() (*GreenBean, error) {
 	return m, nil
 }
 

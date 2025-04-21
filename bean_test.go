@@ -8,12 +8,12 @@ import (
 )
 
 func TestCanister(t *testing.T) {
-	st := NewJar[*M]()
+	st := NewJar[*GreenBean]()
 	ctx := context.Background()
 
-	mock1 := &M{ID: "1", Name: "mock_1", enabled: true, Priority: 0}
-	mock2 := &M{ID: "2", Name: "mock_2", enabled: true, Priority: 1}
-	mock3 := &M{ID: "3", Name: "mock_3", enabled: true, Priority: 2}
+	mock1 := &GreenBean{ID: "1", Name: "mock_1", enabled: true, Priority: 0}
+	mock2 := &GreenBean{ID: "2", Name: "mock_2", enabled: true, Priority: 1}
+	mock3 := &GreenBean{ID: "3", Name: "mock_3", enabled: true, Priority: 2}
 
 	err := st.Save(ctx, mock1)
 	require.NoError(t, err)
@@ -37,7 +37,7 @@ func TestCanister(t *testing.T) {
 
 	m.Disable()
 
-	eligible := make([]*M, 0)
+	eligible := make([]*GreenBean, 0)
 	done := make(chan struct{})
 	out, err := st.EligibleStream(ctx, done)
 	for v := range out {
@@ -57,7 +57,7 @@ func TestCanister(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, eligible, 2)
 
-	eligible = make([]*M, 0)
+	eligible = make([]*GreenBean, 0)
 	out, err = st.EligibleStream(ctx, done)
 	for v := range out {
 		eligible = append(eligible, v)
@@ -74,9 +74,9 @@ func TestCanister(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, eligible, 0)
 
-	err = st.Save(ctx, &M{ID: "10", Name: "mock_ext_1", enabled: true, Priority: 0, Source: "ext"})
+	err = st.Save(ctx, &GreenBean{ID: "10", Name: "mock_ext_1", enabled: true, Priority: 0, Source: "ext"})
 	require.NoError(t, err)
-	err = st.Save(ctx, &M{ID: "11", Name: "mock_11", enabled: true, Priority: 0})
+	err = st.Save(ctx, &GreenBean{ID: "11", Name: "mock_11", enabled: true, Priority: 0})
 	require.NoError(t, err)
 
 	all, err := st.GetAll(ctx)

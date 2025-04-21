@@ -7,19 +7,19 @@ import (
 	"sync"
 )
 
-type MockApp[TM Mock] interface {
+type MockApp[TM Bean] interface {
 	Hits() int64
 	Enable()
 	Disable()
 	Clean(ctx context.Context) error
 }
 
-type Boilerplate[TM Mock, A MockApp[TM]] struct {
+type Boilerplate[TM Bean, A MockApp[TM]] struct {
 	tray *Tray[TM, A]
 	mu   sync.RWMutex
 }
 
-func NewBaseApp[TM Mock, A MockApp[TM]](app A, repo Jar[TM]) *Boilerplate[TM, A] {
+func NewBaseApp[TM Bean, A MockApp[TM]](app A, repo Jar[TM]) *Boilerplate[TM, A] {
 	return &Boilerplate[TM, A]{tray: &Tray[TM, A]{brewer: app, jar: repo}}
 }
 

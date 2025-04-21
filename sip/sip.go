@@ -6,7 +6,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-func Times[M vlatte.Mock](t vlatte.TestingT, taste vlatte.Taste[M], expected int64) bool {
+func Times[M vlatte.Bean](t vlatte.TestingT, taste vlatte.Taste[M], expected int64) bool {
 	t.Helper()
 
 	hits := taste.Hits()
@@ -20,7 +20,7 @@ func Times[M vlatte.Mock](t vlatte.TestingT, taste vlatte.Taste[M], expected int
 	return false
 }
 
-func NotCalled[M vlatte.Mock](t vlatte.TestingT, taste vlatte.Taste[M]) bool {
+func NotCalled[M vlatte.Bean](t vlatte.TestingT, taste vlatte.Taste[M]) bool {
 	t.Helper()
 
 	called := taste.ListCalled()

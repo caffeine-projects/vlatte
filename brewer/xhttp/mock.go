@@ -12,7 +12,7 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/kv"
 )
 
-var _ vlatte.Mock = (*HTTPMock)(nil)
+var _ vlatte.Bean = (*HTTPMock)(nil)
 var _ vlatte.CallbackInput = (*HTTPCallbackInput)(nil)
 var _ vlatte.PostActionInput = (*HTTPPostActionInput)(nil)
 
@@ -56,7 +56,7 @@ func (i *HTTPCallbackInput) Kind() string {
 	return "http"
 }
 
-func (i *HTTPCallbackInput) Mock() vlatte.Mock {
+func (i *HTTPCallbackInput) Mock() vlatte.Bean {
 	return i.m
 }
 
@@ -83,7 +83,7 @@ func (i *HTTPPostActionInput) Args() any {
 	return i.args
 }
 
-func (i *HTTPPostActionInput) Mock() vlatte.Mock {
+func (i *HTTPPostActionInput) Bean() vlatte.Bean {
 	return i.m
 }
 
@@ -158,7 +158,7 @@ type HTTPExpectation = vlatte.Eval[*HTTPValueSelectorInput]
 // HTTPMock holds metadata and expectations to be matched against HTTP requests in order to serve mocked responses.
 // This is the core entity of this project, and most features work based on it.
 type HTTPMock struct {
-	*vlatte.M
+	*vlatte.GreenBean
 
 	// Source describes the source of the mock. E.g.: if it was built from a file,
 	// it will contain the filename.
@@ -176,7 +176,7 @@ type HTTPMock struct {
 // newMock returns a new Mock with default values set.
 func newMock() *HTTPMock {
 	return &HTTPMock{
-		M:            vlatte.NewMock(vlatte.UseUUID()),
+		GreenBean:    vlatte.NewMock(vlatte.UseUUID()),
 		Mappers:      make([]Mapper, 0),
 		expectations: make([]*vlatte.Eval[*HTTPValueSelectorInput], 0),
 	}
