@@ -74,7 +74,7 @@ func TestConfig(t *testing.T) {
 
 		defer m.Close()
 
-		scoped := m.MustMock(
+		scoped := m.MustBrew(
 			Getf("/test").
 				Reply(OK()))
 
@@ -93,7 +93,7 @@ func TestConfig(t *testing.T) {
 
 		defer m.Close()
 
-		scoped := m.MustMock(Post(filter.URLPath("/test")).
+		scoped := m.MustBrew(Post(filter.URLPath("/test")).
 			Body(filter.StrictEqual(10)).
 			Reply(OK()))
 
@@ -125,7 +125,7 @@ func TestConfig(t *testing.T) {
 
 		defer m.Close()
 
-		scoped := m.MustMock(
+		scoped := m.MustBrew(
 			Get(filter.URLPath("/test")).
 				Reply(OK()))
 
@@ -144,7 +144,7 @@ func TestConfig(t *testing.T) {
 
 		defer m.Close()
 
-		scoped := m.MustMock(
+		scoped := m.MustBrew(
 			Get(filter.URLPath("/test")).
 				Reply(OK()))
 

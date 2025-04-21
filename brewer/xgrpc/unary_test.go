@@ -17,7 +17,7 @@ func TestUnary(t *testing.T) {
 	m := NewGRPC().CloseWithT(t)
 	pb.RegisterTestServiceServer(m.Server(), pb.UnimplementedTestServiceServer{})
 	m.MustStart()
-	m.MustMock(UnaryMethod("Greetings").
+	m.MustBrew(UnaryMethod("Greetings").
 		Header("h1", Eq("v1")).
 		Field("message", Eq("hi")).
 		Reply(Unary().

@@ -44,7 +44,7 @@ func TestTLS(t *testing.T) {
 			m := NewAPI(tc.config).CloseWithT(t)
 			m.MustStartTLS()
 
-			scoped := m.MustMock(
+			scoped := m.MustBrew(
 				Get(URLPath("/test")).
 					Header("test", StrictEqual("hello")).
 					Reply(OK().PlainText("hello+world")))
@@ -72,7 +72,7 @@ func TestTLS_FileSetup(t *testing.T) {
 	m := NewAPI(UseConfig("testdata/tls/tls_app.yaml")).CloseWithT(t)
 	m.MustStartTLS()
 
-	scoped := m.MustMock(
+	scoped := m.MustBrew(
 		Get(URLPath("/test")).
 			Header("test", StrictEqual("hello")).
 			Reply(OK().PlainText("hello+world")))
@@ -112,7 +112,7 @@ func TestTLSMutual(t *testing.T) {
 
 	target := NewAPI(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile)).CloseWithT(t)
 	target.MustStartTLS()
-	target.MustMock(Getf("/test").Reply(Accepted().PlainText("accepted")))
+	target.MustBrew(Getf("/test").Reply(Accepted().PlainText("accepted")))
 
 	req, _ := http.NewRequest(http.MethodGet, target.URL("/test"), nil)
 	res, err := client.Do(req)
@@ -146,11 +146,11 @@ func TestTLSMutualWithProxy(t *testing.T) {
 
 	target := NewAPI(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile)).CloseWithT(t)
 	target.MustStartTLS()
-	target.MustMock(Getf("/test").Reply(Accepted().PlainText("accepted")))
+	target.MustBrew(Getf("/test").Reply(Accepted().PlainText("accepted")))
 
 	m := NewAPI(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile)).CloseWithT(t)
 	m.MustStartTLS()
-	m.MustMock(Get(URLPath("/test")).
+	m.MustBrew(Get(URLPath("/test")).
 		Header("test", StrictEqual("hello")).
 		Reply(From(target.URL()).SSLVerify(true)))
 
@@ -188,11 +188,11 @@ func TestTLSMutualWithProxy_FileSetup(t *testing.T) {
 
 	target := NewAPI(UseConfig("testdata/tls/tls_ca_target.yaml")).CloseWithT(t)
 	target.MustStartTLS()
-	target.MustMock(Getf("/test").Reply(Accepted().PlainText("accepted")))
+	target.MustBrew(Getf("/test").Reply(Accepted().PlainText("accepted")))
 
 	m := NewAPI(UseConfig("testdata/tls/tls_ca.yaml")).CloseWithT(t)
 	m.MustStartTLS()
-	m.MustMock(Get(URLPath("/test")).
+	m.MustBrew(Get(URLPath("/test")).
 		Header("test", StrictEqual("hello")).
 		Reply(From(target.URL()).SSLVerify(true)))
 

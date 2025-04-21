@@ -232,9 +232,9 @@ func TestForward(t *testing.T) {
 
 		defer m.Close()
 
-		redirectScope := target.MustMock(Getf("/redirected").Reply(Accepted()))
-		proxyScope := target.MustMock(Getf("/proxy").Reply(MovedPermanently(target.URL() + "/redirected")))
-		scoped := m.MustMock(Getf("/proxy").Reply(From(target.URL())))
+		redirectScope := target.MustBrew(Getf("/redirected").Reply(Accepted()))
+		proxyScope := target.MustBrew(Getf("/proxy").Reply(MovedPermanently(target.URL() + "/redirected")))
+		scoped := m.MustBrew(Getf("/proxy").Reply(From(target.URL())))
 
 		res, err := http.Get(m.URL() + "/proxy")
 
@@ -258,9 +258,9 @@ func TestForward(t *testing.T) {
 
 		defer m.Close()
 
-		redirectScope := target.MustMock(Getf("/redirected").Reply(Accepted()))
-		proxyScope := target.MustMock(Getf("/proxy").Reply(MovedPermanently(target.URL() + "/redirected")))
-		scoped := m.MustMock(Getf("/proxy").Reply(From(target.URL()).NoFollow()))
+		redirectScope := target.MustBrew(Getf("/redirected").Reply(Accepted()))
+		proxyScope := target.MustBrew(Getf("/proxy").Reply(MovedPermanently(target.URL() + "/redirected")))
+		scoped := m.MustBrew(Getf("/proxy").Reply(From(target.URL()).NoFollow()))
 
 		httpClient := &http.Client{CheckRedirect: noFollow}
 		res, err := httpClient.Get(m.URL() + "/proxy")
@@ -281,8 +281,8 @@ func TestForward(t *testing.T) {
 		m := NewAPI().CloseWithT(t)
 		m.MustStart()
 
-		s1 := target.MustMock(Getf("/test").Reply(OK().PlainText("hi")))
-		s2 := m.MustMock(Getf("/test").Reply(From(target.URL()).SSLVerify(true)))
+		s1 := target.MustBrew(Getf("/test").Reply(OK().PlainText("hi")))
+		s2 := m.MustBrew(Getf("/test").Reply(From(target.URL()).SSLVerify(true)))
 
 		httpClient := &http.Client{}
 		res, err := httpClient.Get(m.URL() + "/test")
@@ -296,7 +296,7 @@ func TestForward(t *testing.T) {
 		require.Equal(t, StatusNoMatch, res.StatusCode)
 
 		s2.Clean(context.Background())
-		s2 = m.MustMock(Getf("/test").Reply(From(target.URL()).SkipSSLVerify()))
+		s2 = m.MustBrew(Getf("/test").Reply(From(target.URL()).SkipSSLVerify()))
 
 		res, err = httpClient.Get(m.URL() + "/test")
 		require.NoError(t, err)

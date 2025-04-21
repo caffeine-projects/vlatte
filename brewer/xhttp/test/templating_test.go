@@ -26,7 +26,7 @@ func TestTemplating(t *testing.T) {
 	err := kv.Set(t.Context(), "test", []byte("hi"))
 	require.NoError(t, err)
 
-	m.MustMock(xhttp.FromFile("testdata/templating/templating_01.yaml"))
+	m.MustBrew(xhttp.FromFile("testdata/templating/templating_01.yaml"))
 
 	httpClient := &http.Client{}
 
@@ -54,7 +54,7 @@ func TestTemplating_BodyFilename(t *testing.T) {
 	m.MustStart()
 	defer m.Close()
 
-	m.MustMock(xhttp.FromFile("testdata/templating/templating_02.yaml"))
+	m.MustBrew(xhttp.FromFile("testdata/templating/templating_02.yaml"))
 
 	httpClient := &http.Client{}
 
@@ -80,7 +80,7 @@ func TestTemplating_BodyFilename_BodyTemplate(t *testing.T) {
 	m.MustStart()
 	defer m.Close()
 
-	m.MustMock(xhttp.FromFile("testdata/templating/templating_03.yaml"))
+	m.MustBrew(xhttp.FromFile("testdata/templating/templating_03.yaml"))
 
 	err := kv.Set(t.Context(), "message", []byte("hello world"))
 	require.NoError(t, err)
@@ -109,7 +109,7 @@ func TestTemplating_Header(t *testing.T) {
 	m.MustStart()
 	defer m.Close()
 
-	m.MustMock(xhttp.FromFile("testdata/templating/templating_04.yaml"))
+	m.MustBrew(xhttp.FromFile("testdata/templating/templating_04.yaml"))
 
 	err := kv.Set(t.Context(), "test", []byte("ok"))
 	require.NoError(t, err)
@@ -143,7 +143,7 @@ func TestTemplating_All(t *testing.T) {
 	err = kv.Set(t.Context(), "context", []byte("test"))
 	require.NoError(t, err)
 
-	m.MustMock(xhttp.FromFile("testdata/templating/templating_05.yaml"))
+	m.MustBrew(xhttp.FromFile("testdata/templating/templating_05.yaml"))
 
 	httpClient := &http.Client{}
 

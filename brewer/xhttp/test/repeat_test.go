@@ -15,7 +15,7 @@ func TestRepeat(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(xhttp.Get(filter.URLPath("/test")).
+	m.MustBrew(xhttp.Get(filter.URLPath("/test")).
 		Times(3).
 		Reply(xhttp.OK()))
 
@@ -46,7 +46,7 @@ func TestRepeat_Once(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(xhttp.Get(filter.URLPath("/test")).
+	m.MustBrew(xhttp.Get(filter.URLPath("/test")).
 		Once().
 		Reply(xhttp.OK()))
 
@@ -62,7 +62,7 @@ func TestRepeat_Once(t *testing.T) {
 func TestRepeat_FileSetup(t *testing.T) {
 	m := xhttp.NewAPI().CloseWithT(t)
 	m.MustStart()
-	m.MustMock(xhttp.FromFile("testdata/repeat/1_repeat.yaml"))
+	m.MustBrew(xhttp.FromFile("testdata/repeat/1_repeat.yaml"))
 
 	httpClient := &http.Client{}
 

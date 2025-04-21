@@ -15,7 +15,7 @@ func TestSimilarRequestURLPaths(t *testing.T) {
 
 	defer m.Close()
 
-	scope := m.MustMock(
+	scope := m.MustBrew(
 		xhttp.Getf("/customers").Reply(xhttp.OK()),
 		xhttp.Getf("/customers/100").Reply(xhttp.Accepted()),
 		xhttp.Getf("/customers/100/orders").Reply(xhttp.Unauthorized()),

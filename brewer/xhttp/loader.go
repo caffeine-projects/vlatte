@@ -67,7 +67,7 @@ func (l *fileLoader) Load(app *HTTPMockApp) error {
 					}
 
 					fn := func(filename string, c *errContainer) error {
-						_, err := app.Mock(FromFile(filename))
+						_, err := app.Brew(FromFile(filename))
 						if err != nil {
 							return fmt.Errorf("loader: error adding mock.\n%w", err)
 						}

@@ -51,8 +51,8 @@ func TestMatcherCombinations(t *testing.T) {
 	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
 	m := NewAPI()
 
-	sHTTP := m.MustMock(FromFile("testdata/matchers/01_matchers.yaml"))
-	sHTTPS := m.MustMock(FromFile("testdata/matchers/02_matchers.yaml"))
+	sHTTP := m.MustBrew(FromFile("testdata/matchers/01_matchers.yaml"))
+	sHTTPS := m.MustBrew(FromFile("testdata/matchers/02_matchers.yaml"))
 
 	actAndAssert := func(baseURL string) {
 		body := &model{
@@ -139,7 +139,7 @@ func TestMatcherCombinations(t *testing.T) {
 
 	fmt.Println(string(b))
 
-	m.MustMock(FromBytes(b, "json"))
+	m.MustBrew(FromBytes(b, "json"))
 
 	actAndAssert(m.URL())
 }
@@ -147,7 +147,7 @@ func TestMatcherCombinations(t *testing.T) {
 func TestMatchers_MultipleMethods(t *testing.T) {
 	m := NewAPI().CloseWithT(t)
 	m.MustStart()
-	m.MustMock(FromFile("testdata/matchers/03_url_template.yaml"))
+	m.MustBrew(FromFile("testdata/matchers/03_url_template.yaml"))
 
 	client := &http.Client{}
 	res, err := client.Get(m.URL("/test?q=none"))
@@ -173,7 +173,7 @@ func TestMatchers_MultipleMethods(t *testing.T) {
 func TestMatchers_URLMatchRegex(t *testing.T) {
 	m := NewAPI().CloseWithT(t)
 	m.MustStart()
-	m.MustMock(FromFile("testdata/matchers/04_url_match.yaml"))
+	m.MustBrew(FromFile("testdata/matchers/04_url_match.yaml"))
 
 	client := &http.Client{}
 	res, err := client.Get(m.URL("/test?q=hi"))
@@ -192,7 +192,7 @@ func TestMatchers_URLMatchRegex(t *testing.T) {
 func TestMatchers_URLCustomMatcher(t *testing.T) {
 	m := NewAPI().CloseWithT(t)
 	m.MustStart()
-	m.MustMock(FromFile("testdata/matchers/05_url_custom_matcher.yaml"))
+	m.MustBrew(FromFile("testdata/matchers/05_url_custom_matcher.yaml"))
 
 	client := &http.Client{}
 	res, err := client.Get(m.URL("/test?q=hi"))
@@ -211,7 +211,7 @@ func TestMatchers_URLCustomMatcher(t *testing.T) {
 func TestMatchers_PathCustomMatcher(t *testing.T) {
 	m := NewAPI().CloseWithT(t)
 	m.MustStart()
-	m.MustMock(FromFile("testdata/matchers/06_path_custom_matcher.yaml"))
+	m.MustBrew(FromFile("testdata/matchers/06_path_custom_matcher.yaml"))
 
 	client := &http.Client{}
 	res, err := client.Get(m.URL("/hi"))
@@ -230,7 +230,7 @@ func TestMatchers_PathCustomMatcher(t *testing.T) {
 func TestMatchers_URLFragment(t *testing.T) {
 	m := NewAPI()
 	m.MustStart()
-	m.MustMock(Getf("/test").URLFragmentf("contacts").Reply(OK().BodyText("hello world")))
+	m.MustBrew(Getf("/test").URLFragmentf("contacts").Reply(OK().BodyText("hello world")))
 
 	t.Cleanup(m.Close)
 
@@ -264,7 +264,7 @@ func TestMatchers_URLFragment(t *testing.T) {
 func TestMatchers_NoReply_ShouldReturn200ByDefault(t *testing.T) {
 	m := NewAPI().CloseWithT(t)
 	m.MustStart()
-	m.MustMock(FromFile("testdata/matchers/07_no_reply.yaml"))
+	m.MustBrew(FromFile("testdata/matchers/07_no_reply.yaml"))
 
 	client := &http.Client{}
 	res, err := client.Get(m.URL("/test"))

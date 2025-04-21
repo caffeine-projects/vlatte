@@ -18,7 +18,7 @@ func TestReplyEcho(t *testing.T) {
 	defer m.Close()
 
 	expectedBody := `{"status":"ok"}`
-	scope := m.MustMock(Postf("/test").Reply(Echo().Log()))
+	scope := m.MustBrew(Postf("/test").Reply(Echo().Log()))
 	httpClient := &http.Client{}
 
 	req, _ := http.NewRequest(http.MethodPost, m.URL("/test"), strings.NewReader(expectedBody))

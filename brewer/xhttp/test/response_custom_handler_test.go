@@ -26,7 +26,7 @@ func TestHandlerReply(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(xhttp.Get(filter.URLPath("/test")).
+	m.MustBrew(xhttp.Get(filter.URLPath("/test")).
 		Reply(xhttp.Handler(fn)),
 	)
 

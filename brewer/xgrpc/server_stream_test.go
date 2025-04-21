@@ -24,7 +24,7 @@ func TestServerStreaming(t *testing.T) {
 
 	ctx := context.Background()
 	list := []proto.Message{&pb.ListItem{Key: "a"}, &pb.ListItem{Key: "b"}}
-	scope := m.MustMock(
+	scope := m.MustBrew(
 		ServerStreamMethod("List").Reply(
 			ServerStream[*pb.ListItem]().
 				Messages(list)))
@@ -85,7 +85,7 @@ func TestServerStream_MessageReader(t *testing.T) {
 	buf.WriteString(string(m2b))
 
 	ctx := context.Background()
-	scope := m.MustMock(ServerStreamMethod("List").Reply(
+	scope := m.MustBrew(ServerStreamMethod("List").Reply(
 		ServerStream[*pb.ListItem]().
 			Text(strings.NewReader(buf.String()))))
 

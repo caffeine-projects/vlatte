@@ -33,7 +33,7 @@ func TestMocha(t *testing.T) {
 
 	defer m.Close()
 
-	scoped := m.MustMock(
+	scoped := m.MustBrew(
 		Get(URLPath("/test")).
 			Header("test", StrictEqual("hello")).
 			Query("filter", StrictEqual("all")).
@@ -68,7 +68,7 @@ func TestResponseMapperModifyingResponse(t *testing.T) {
 
 	defer m.Close()
 
-	scoped := m.MustMock(Get(URLPath("/test")).
+	scoped := m.MustBrew(Get(URLPath("/test")).
 		Reply(OK()).
 		Map(func(rv *RequestValues, r *MockedResponse) error {
 			val, _ := rv.App.Parameters().Get(t.Context(), k)
@@ -97,7 +97,7 @@ func TestErrors(t *testing.T) {
 
 	defer m.Close()
 
-	scoped := m.MustMock(
+	scoped := m.MustBrew(
 		Get(URLPath("/test2")).
 			Header("test", Function(
 				func(_ any) (bool, error) {
@@ -120,7 +120,7 @@ func TestMochaAssertions(t *testing.T) {
 
 	ft := testmock.NewFakeT()
 
-	scoped := m.MustMock(
+	scoped := m.MustBrew(
 		Get(URLPath("/test-ok")).
 			Reply(OK()))
 
@@ -147,7 +147,7 @@ func TestMochaEnableDisable(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(
+	m.MustBrew(
 		Get(URLPath("/test-1")).
 			Reply(OK()),
 		Get(URLPath("/test-2")).
@@ -192,7 +192,7 @@ func TestMochaSilently(t *testing.T) {
 
 	defer m.Close()
 
-	scoped := m.MustMock(
+	scoped := m.MustBrew(
 		Get(URLPath("/test")).
 			Reply(Created().
 				PlainText("hello world")))
@@ -217,7 +217,7 @@ func TestSchemeMatching(t *testing.T) {
 
 	defer m.Close()
 
-	scoped := m.MustMock(
+	scoped := m.MustBrew(
 		Get(URLPath("/test")).
 			Scheme("http").
 			Reply(OK()))
@@ -234,7 +234,7 @@ func TestSchemeMatching(t *testing.T) {
 func TestMochaNoReply(t *testing.T) {
 	m := NewAPI()
 
-	scoped, err := m.Mock(Get(URLPath("/test")))
+	scoped, err := m.Brew(Get(URLPath("/test")))
 	require.Nil(t, scoped)
 	require.Error(t, err)
 }
@@ -242,7 +242,7 @@ func TestMochaNoReply(t *testing.T) {
 func TestMochaNoMatchers(t *testing.T) {
 	m := NewAPI()
 
-	scoped, err := m.Mock(Request())
+	scoped, err := m.Brew(Request())
 	require.Nil(t, scoped)
 	require.Error(t, err)
 }
@@ -253,7 +253,7 @@ func TestMocha_RequestMatches(t *testing.T) {
 
 	defer m.Close()
 
-	scoped := m.MustMock(
+	scoped := m.MustBrew(
 		Get(URLPath("/test")).
 			RequestMatches(func(r *http.Request) (bool, error) {
 				if r.Method == http.MethodGet {
@@ -290,8 +290,8 @@ func TestMochaConcurrency(t *testing.T) {
 	for i := 0; i < jobs; i++ {
 		wg.Add(1)
 		go func(index int) {
-			m.MustMock(Getf("%s", "/test--"+strconv.FormatInt(int64(index), 10)).Reply(OK()))
-			m.MustMock(Getf("%s", "/concurrency--"+strconv.FormatInt(int64(index), 10)).Reply(Accepted()))
+			m.MustBrew(Getf("%s", "/test--"+strconv.FormatInt(int64(index), 10)).Reply(OK()))
+			m.MustBrew(Getf("%s", "/concurrency--"+strconv.FormatInt(int64(index), 10)).Reply(Accepted()))
 
 			m.Hits()
 			m.Disable()
@@ -299,13 +299,13 @@ func TestMochaConcurrency(t *testing.T) {
 
 			m.Clean(t.Context())
 
-			m.MustMock(Getf("%s", "/test--"+strconv.FormatInt(int64(index), 10)).Reply(OK()))
-			m.MustMock(Getf("%s", "/concurrency--"+strconv.FormatInt(int64(index), 10)).Reply(Accepted()))
+			m.MustBrew(Getf("%s", "/test--"+strconv.FormatInt(int64(index), 10)).Reply(OK()))
+			m.MustBrew(Getf("%s", "/concurrency--"+strconv.FormatInt(int64(index), 10)).Reply(Accepted()))
 
 			wg.Done()
 		}(i)
 
-		m.MustMock(Getf("%s", "/test-outside--"+strconv.FormatInt(int64(i), 10)).Reply(Created()))
+		m.MustBrew(Getf("%s", "/test-outside--"+strconv.FormatInt(int64(i), 10)).Reply(Created()))
 		m.Clean(t.Context())
 
 		m.Hits()
@@ -314,7 +314,7 @@ func TestMochaConcurrency(t *testing.T) {
 	}
 
 	m.Hits()
-	m.MustMock(Getf("/test-final").Reply(BadRequest()))
+	m.MustBrew(Getf("/test-final").Reply(BadRequest()))
 	m.MustStart()
 	m.Close()
 
@@ -338,24 +338,24 @@ func TestMochaConcurrentRequests(t *testing.T) {
 		go func(index int) {
 			num := strconv.FormatInt(int64(index), 10)
 
-			scope1 := m.MustMock(Getf("%s", "/test--"+num).Reply(OK()))
-			scope2 := m.MustMock(Getf("%s", "/concurrency--"+num).Reply(Accepted()))
-			scope3 := m.MustMock(Getf("%s", "/seq--"+num).Reply(Seq(OK(), BadRequest())))
-			scope4 := m.MustMock(Getf("%s", "/rand--"+num).Reply(Rand(Accepted(), InternalServerError())))
+			scope1 := m.MustBrew(Getf("%s", "/test--"+num).Reply(OK()))
+			scope2 := m.MustBrew(Getf("%s", "/concurrency--"+num).Reply(Accepted()))
+			scope3 := m.MustBrew(Getf("%s", "/seq--"+num).Reply(Seq(OK(), BadRequest())))
+			scope4 := m.MustBrew(Getf("%s", "/rand--"+num).Reply(Rand(Accepted(), InternalServerError())))
 
 			res, err := httpClient.Get(m.URL() + "/test--" + num)
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
 			require.Equal(t, http.StatusOK, res.StatusCode)
 
-			m.MustMock(Getf("%s", "/test-after--"+num).Reply(BadRequest()))
+			m.MustBrew(Getf("%s", "/test-after--"+num).Reply(BadRequest()))
 
 			res, err = httpClient.Get(m.URL() + "/concurrency--" + num)
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
 			require.Equal(t, http.StatusAccepted, res.StatusCode)
 
-			m.MustMock(Getf("%s", "/concurrency-after--"+num).Reply(InternalServerError()))
+			m.MustBrew(Getf("%s", "/concurrency-after--"+num).Reply(InternalServerError()))
 
 			res, err = httpClient.Get(m.URL() + "/seq--" + num)
 			require.NoError(t, err)
@@ -383,7 +383,7 @@ func TestMochaConcurrentRequests(t *testing.T) {
 			scope4.AssertCalled(t)
 			sip.Times(t, scope4, 50)
 
-			m.MustMock(Getf("%s", "/test-final--"+num).Reply(PartialContent()))
+			m.MustBrew(Getf("%s", "/test-final--"+num).Reply(PartialContent()))
 
 			wg.Done()
 		}(i)
@@ -406,7 +406,7 @@ func TestSettingOnlyPort(t *testing.T) {
 	port := randomPort()
 	m := NewAPI(Setup().Port(port)).CloseWithT(t)
 	m.MustStart()
-	m.MustMock(Getf("/test").Reply(OK()))
+	m.MustBrew(Getf("/test").Reply(OK()))
 
 	hc := &http.Client{}
 	res, err := hc.Get(m.URL("/test"))

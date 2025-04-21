@@ -185,7 +185,7 @@ func NewAPI(config ...Configurer) *HTTPMockApp {
 	app.admin = &Admin{app: app, repo: repository}
 
 	if app.config.Forward != nil {
-		app.MustMock(Request().
+		app.MustBrew(Request().
 			MethodMatches(filter.Anything()).
 			Priority(10).
 			Reply(From(app.config.Forward.Target).

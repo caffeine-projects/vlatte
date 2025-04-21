@@ -24,7 +24,7 @@ func TestFlow(t *testing.T) {
 	in1 := &TestStep{"(extra)"}
 	in2 := &TestStep{"(other)"}
 
-	scope := m.MustMock(xhttp.Getf("/test").Step(in1, in2).Reply(xhttp.OK().BodyText("hi")))
+	scope := m.MustBrew(xhttp.Getf("/test").Step(in1, in2).Reply(xhttp.OK().BodyText("hi")))
 
 	client := &http.Client{}
 	res, err := client.Get(m.URL("/test"))

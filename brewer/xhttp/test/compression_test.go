@@ -18,7 +18,7 @@ func TestCompressedResponse_GZIP(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(xhttp.Get(URLPath("/test")).
+	m.MustBrew(xhttp.Get(URLPath("/test")).
 		Reply(xhttp.OK().
 			BodyText("hello world").
 			Gzip()))
@@ -42,7 +42,7 @@ func Test_GZIPProxiedResponse(t *testing.T) {
 
 	defer p.Close()
 
-	ps := p.MustMock(xhttp.Get(URLPath("/test")).
+	ps := p.MustBrew(xhttp.Get(URLPath("/test")).
 		Reply(xhttp.OK().
 			BodyText("hello world").
 			Gzip()))
@@ -52,7 +52,7 @@ func Test_GZIPProxiedResponse(t *testing.T) {
 
 	defer m.Close()
 
-	ms := m.MustMock(xhttp.Get(URLPath("/test")).
+	ms := m.MustBrew(xhttp.Get(URLPath("/test")).
 		Reply(xhttp.From(p.URL())))
 
 	httpClient := &http.Client{Transport: &http.Transport{DisableCompression: true}}

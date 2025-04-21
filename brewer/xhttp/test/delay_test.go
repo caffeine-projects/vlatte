@@ -22,7 +22,7 @@ func TestResponseDelay(t *testing.T) {
 	start := time.Now()
 	delay := 250 * time.Millisecond
 
-	scoped := m.MustMock(Get(filter.URLPath("/test")).
+	scoped := m.MustBrew(Get(filter.URLPath("/test")).
 		Delay(vlatte.Latency(delay)).
 		Reply(OK()))
 
@@ -61,7 +61,7 @@ func TestResponseDelay_SetupFromFile(t *testing.T) {
 			t.Parallel()
 
 			start := time.Now()
-			scoped := m.MustMock(FromFile(tc.filename))
+			scoped := m.MustBrew(FromFile(tc.filename))
 
 			res, err := httpClient.Get(m.URL(tc.path))
 			require.NoError(t, err)

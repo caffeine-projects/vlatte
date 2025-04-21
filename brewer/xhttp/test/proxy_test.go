@@ -19,11 +19,11 @@ import (
 func TestProxy(t *testing.T) {
 	proxySrv := NewAPI(Setup().Proxy()).CloseWithT(t)
 	proxySrv.MustStart()
-	proxyScope := proxySrv.MustMock(Get(URLPath("/test")).Reply(Accepted()))
+	proxyScope := proxySrv.MustBrew(Get(URLPath("/test")).Reply(Accepted()))
 
 	targetSrv := NewAPI().CloseWithT(t)
 	targetSrv.MustStart()
-	targetScope := targetSrv.MustMock(Get(URLPath("/other")).Reply(Created()))
+	targetScope := targetSrv.MustBrew(Get(URLPath("/other")).Reply(Created()))
 
 	// client that acts like a browser proxying requests to our server
 	proxyURL, _ := url.Parse(proxySrv.URL())
@@ -46,11 +46,11 @@ func TestProxy(t *testing.T) {
 func TestProxyTLS(t *testing.T) {
 	proxySrv := NewAPI(Setup().Proxy(&ProxyConfig{SSLVerify: false})).CloseWithT(t)
 	proxySrv.MustStartTLS()
-	proxyScope := proxySrv.MustMock(Get(URLPath("/test")).Reply(Accepted()))
+	proxyScope := proxySrv.MustBrew(Get(URLPath("/test")).Reply(Accepted()))
 
 	targetSrv := NewAPI().CloseWithT(t)
 	targetSrv.MustStart()
-	targetScope := targetSrv.MustMock(Get(URLPath("/other")).Reply(Created()))
+	targetScope := targetSrv.MustBrew(Get(URLPath("/other")).Reply(Created()))
 
 	// client that acts like a browser proxying requests to our server
 	proxyURL, _ := url.Parse(proxySrv.URL())
@@ -90,11 +90,11 @@ func TestProxyTLS_CustomCert(t *testing.T) {
 			Proxy(&ProxyConfig{SSLVerify: true, Transport: transport}).TLSCertKeyPair(_tlsCertFile, _tlsKeyFile)).
 		CloseWithT(t)
 	proxySrv.MustStartTLS()
-	proxyScope := proxySrv.MustMock(Get(URLPath("/test")).Reply(Accepted()))
+	proxyScope := proxySrv.MustBrew(Get(URLPath("/test")).Reply(Accepted()))
 
 	targetSrv := NewAPI(Setup().TLSCertKeyPair(_tlsCertFile, _tlsKeyFile)).CloseWithT(t)
 	targetSrv.MustStart()
-	targetScope := targetSrv.MustMock(Get(URLPath("/other")).Reply(Created()))
+	targetScope := targetSrv.MustBrew(Get(URLPath("/other")).Reply(Created()))
 
 	// client that acts like a browser proxying requests to our server
 	proxyURL, _ := url.Parse(proxySrv.URL())
@@ -120,15 +120,15 @@ func TestProxyTLS_CustomCert(t *testing.T) {
 func TestProxyViaAnotherProxy(t *testing.T) {
 	p := NewAPI(Setup().Proxy()).CloseWithT(t)
 	p.MustStart()
-	scope1 := p.MustMock(Get(URLPath("/test")).Reply(Accepted()))
+	scope1 := p.MustBrew(Get(URLPath("/test")).Reply(Accepted()))
 
 	v := NewAPI(Setup().Proxy(&ProxyConfig{Via: p.URL()})).CloseWithT(t)
 	v.MustStart()
-	scope2 := v.MustMock(Get(URLPath("/unknown")).Reply(NoContent()))
+	scope2 := v.MustBrew(Get(URLPath("/unknown")).Reply(NoContent()))
 
 	m := NewAPI().CloseWithT(t)
 	m.MustStart()
-	m.MustMock(Get(URLPath("/other")).Reply(Created()))
+	m.MustBrew(Get(URLPath("/other")).Reply(Created()))
 
 	u, _ := url.Parse(v.URL())
 	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(u)}}

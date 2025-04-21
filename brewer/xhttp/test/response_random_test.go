@@ -14,7 +14,7 @@ func TestRandom_SetupFromFileWithSeed(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(xhttp.FromFile("testdata/response_random/rand_01.yaml"))
+	m.MustBrew(xhttp.FromFile("testdata/response_random/rand_01.yaml"))
 
 	req, _ := http.NewRequest(http.MethodGet, m.URL()+"/test", nil)
 

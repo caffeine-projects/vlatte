@@ -16,7 +16,7 @@ func TestCORS(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(xhttp.Get(filter.URLPath("/test")).
+	m.MustBrew(xhttp.Get(filter.URLPath("/test")).
 		Reply(xhttp.OK()))
 
 	corsReq, _ := http.NewRequest(http.MethodOptions, m.URL()+"/test", nil)

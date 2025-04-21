@@ -49,9 +49,9 @@ func TestScenarios(t *testing.T) {
 			m := xhttp.NewAPI().CloseWithT(t)
 			m.MustStart()
 
-			s1 := m.MustMock(tc.s1)
-			s2 := m.MustMock(tc.s2)
-			s3 := m.MustMock(tc.s3)
+			s1 := m.MustBrew(tc.s1)
+			s2 := m.MustBrew(tc.s2)
+			s3 := m.MustBrew(tc.s3)
 
 			// --- step1
 

@@ -34,7 +34,7 @@ func TestLogging(t *testing.T) {
 			&testBodyParser{"ERROR", func() error { return errors.New("FAIL") }})).
 		CloseWithT(t)
 	m.MustStart()
-	m.MustMock(Getf("/test").Reply(OK()))
+	m.MustBrew(Getf("/test").Reply(OK()))
 
 	res, err := http.Get(m.URL("/test"))
 
@@ -47,7 +47,7 @@ func TestLogging(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, StatusNoMatch, res.StatusCode)
 
-	m.MustMock(Postf("/fail").Reply(OK()))
+	m.MustBrew(Postf("/fail").Reply(OK()))
 
 	req, _ := http.NewRequest(http.MethodPost, m.URL("/panic"), strings.NewReader("hi"))
 	req.Header.Add(httpval.HeaderContentType, "PANIC")
@@ -62,7 +62,7 @@ func TestLogging(t *testing.T) {
 	require.Equal(t, StatusNoMatch, res.StatusCode)
 	require.Contains(t, string(b), "BOOM")
 
-	m.MustMock(Postf("/fail").Reply(OK()))
+	m.MustBrew(Postf("/fail").Reply(OK()))
 
 	req, _ = http.NewRequest(http.MethodPost, m.URL("/fail"), strings.NewReader("hi"))
 	req.Header.Add(httpval.HeaderContentType, "ERROR")
@@ -73,7 +73,7 @@ func TestLogging(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusOK, res.StatusCode)
 
-	m.MustMock(Getf("/err").RequestMatches(func(_ *http.Request) (bool, error) {
+	m.MustBrew(Getf("/err").RequestMatches(func(_ *http.Request) (bool, error) {
 		return false, errors.New("nope")
 	}).Reply(OK()))
 

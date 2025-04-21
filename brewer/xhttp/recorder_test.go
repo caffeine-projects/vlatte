@@ -48,11 +48,11 @@ func TestRecordingWithWebProxy(t *testing.T) {
 			RecordResponseHeaders("content-type", "content-encoding", "link", "content-length", includedResHeader, trailer),
 		))
 	p.MustStart()
-	scope1 := p.MustMock(Get(URLPath("/test")).Reply(Accepted()))
+	scope1 := p.MustBrew(Get(URLPath("/test")).Reply(Accepted()))
 
 	m := NewAPI()
 	m.MustStart()
-	scope2 := m.MustMock(Get(URLPath("/other")).
+	scope2 := m.MustBrew(Get(URLPath("/other")).
 		Reply(Created().
 			Header(includedResHeader, "included").
 			Header(excludedResHeader, "excluded").
@@ -150,11 +150,11 @@ func TestRecordingWithWebProxy_CustomRootDir(t *testing.T) {
 			RecordResponseHeaders("content-type", "content-encoding", "link", "content-length", includedResHeader, trailer),
 		))
 	p.MustStart()
-	scope1 := p.MustMock(Get(URLPath("/test")).Reply(Accepted()))
+	scope1 := p.MustBrew(Get(URLPath("/test")).Reply(Accepted()))
 
 	m := NewAPI()
 	m.MustStart()
-	scope2 := m.MustMock(Get(URLPath("/other")).
+	scope2 := m.MustBrew(Get(URLPath("/other")).
 		Reply(Created().
 			Header(includedResHeader, "included").
 			Header(excludedResHeader, "excluded").
@@ -244,7 +244,7 @@ func TestRecordSaveResponseBodyToFile(t *testing.T) {
 
 	target := NewAPI(Setup().Name("target"))
 	target.MustStart()
-	targetScope := target.MustMock(
+	targetScope := target.MustBrew(
 		Get(URLPath("/customers")).Reply(OK().JSON(data).Gzip()),
 		Getf("/customers/001").Reply(OK().JSON(data[0]).Gzip()),
 		Getf("/customers/002").Reply(OK().JSON(data[1])),
@@ -256,7 +256,7 @@ func TestRecordSaveResponseBodyToFile(t *testing.T) {
 		RecordResponseBodyToFile(true),
 	))
 	rec.MustStart()
-	recorderScope := rec.MustMock(AnyMethod().Reply(From(target.URL())))
+	recorderScope := rec.MustBrew(AnyMethod().Reply(From(target.URL())))
 
 	httpClient := &http.Client{}
 
@@ -366,7 +366,7 @@ func TestRecordEmbeddedResponseBodiesYAML(t *testing.T) {
 
 	target := NewAPI(Setup().Name("target"))
 	target.MustStart()
-	targetScope := target.MustMock(
+	targetScope := target.MustBrew(
 		Get(URLPath("/customers")).Reply(OK().JSON(data).Gzip()),
 		Getf("/customers/001").Reply(OK().JSON(data[0]).Gzip()),
 		Getf("/customers/002").Reply(OK().JSON(data[1])),
@@ -379,7 +379,7 @@ func TestRecordEmbeddedResponseBodiesYAML(t *testing.T) {
 		RecordExtension("yaml"),
 	))
 	rec.MustStart()
-	recorderScope := rec.MustMock(AnyMethod().Reply(From(target.URL())))
+	recorderScope := rec.MustBrew(AnyMethod().Reply(From(target.URL())))
 
 	httpClient := &http.Client{}
 
@@ -487,7 +487,7 @@ func TestRecordTargetTLS(t *testing.T) {
 
 	target := NewAPI(Setup().Name("target"))
 	target.MustStartTLS()
-	targetScope := target.MustMock(
+	targetScope := target.MustBrew(
 		Get(URLPath("/customers")).Reply(OK().JSON(data).Gzip()),
 		Getf("/customers/001").Reply(OK().JSON(data[0]).Gzip()),
 		Getf("/customers/002").Reply(OK().JSON(data[1])),
@@ -499,7 +499,7 @@ func TestRecordTargetTLS(t *testing.T) {
 		RecordResponseBodyToFile(false),
 	))
 	recorder.MustStart()
-	recorderScope := recorder.MustMock(AnyMethod().Reply(From(target.URL()).SkipSSLVerify()))
+	recorderScope := recorder.MustBrew(AnyMethod().Reply(From(target.URL()).SkipSSLVerify()))
 
 	httpClient := &http.Client{}
 
@@ -607,7 +607,7 @@ func TestRecordTLSClient(t *testing.T) {
 
 	target := NewAPI(Setup().Name("target"))
 	target.MustStart()
-	targetScope := target.MustMock(
+	targetScope := target.MustBrew(
 		Get(URLPath("/customers")).Reply(OK().JSON(data).Gzip()),
 		Getf("/customers/001").Reply(OK().JSON(data[0]).Gzip()),
 		Getf("/customers/002").Reply(OK().JSON(data[1])),
@@ -619,7 +619,7 @@ func TestRecordTLSClient(t *testing.T) {
 		RecordResponseBodyToFile(false),
 	))
 	recorder.MustStartTLS()
-	recorderScope := recorder.MustMock(AnyMethod().Reply(From(target.URL())))
+	recorderScope := recorder.MustBrew(AnyMethod().Reply(From(target.URL())))
 
 	httpClient := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -729,7 +729,7 @@ func TestRecordBothTLS(t *testing.T) {
 
 	target := NewAPI(Setup().Name("target"))
 	target.MustStartTLS()
-	targetScope := target.MustMock(
+	targetScope := target.MustBrew(
 		Get(URLPath("/customers")).Reply(OK().JSON(data).Gzip()),
 		Getf("/customers/001").Reply(OK().JSON(data[0]).Gzip()),
 		Getf("/customers/002").Reply(OK().JSON(data[1])),
@@ -741,7 +741,7 @@ func TestRecordBothTLS(t *testing.T) {
 		RecordResponseBodyToFile(false),
 	))
 	recorder.MustStartTLS()
-	recorderScope := recorder.MustMock(AnyMethod().Reply(From(target.URL()).SkipSSLVerify()))
+	recorderScope := recorder.MustBrew(AnyMethod().Reply(From(target.URL()).SkipSSLVerify()))
 
 	httpClient := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},

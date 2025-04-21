@@ -17,7 +17,7 @@ func TestTrailer_WithBody(t *testing.T) {
 
 	defer m.Close()
 
-	scoped := m.MustMock(
+	scoped := m.MustBrew(
 		xhttp.Get(filter.URLPath("/test")).
 			Reply(xhttp.OK().
 				PlainText("hello world").
@@ -50,7 +50,7 @@ func TestTrailer_WithoutBody(t *testing.T) {
 
 	defer m.Close()
 
-	scoped := m.MustMock(
+	scoped := m.MustBrew(
 		xhttp.Get(filter.URLPath("/test")).
 			Reply(xhttp.OK().
 				Header(httpval.HeaderContentType, httpval.MIMETextPlain).

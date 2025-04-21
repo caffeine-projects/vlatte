@@ -17,15 +17,15 @@ func TestPriority(t *testing.T) {
 
 	defer m.Close()
 
-	one := m.MustMock(Get(URLPath("/test")).
+	one := m.MustBrew(Get(URLPath("/test")).
 		Priority(3).
 		Reply(OK()))
 
-	two := m.MustMock(Get(URLPath("/test")).
+	two := m.MustBrew(Get(URLPath("/test")).
 		Priority(1).
 		Reply(BadRequest()))
 
-	three := m.MustMock(Get(URLPath("/test")).
+	three := m.MustBrew(Get(URLPath("/test")).
 		Priority(100).
 		Reply(Created()))
 

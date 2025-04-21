@@ -37,7 +37,7 @@ func TestProxiedReplies(t *testing.T) {
 
 	defer m.Close()
 
-	scoped := m.MustMock(xhttp.Post(URLPath("/test")).
+	scoped := m.MustBrew(xhttp.Post(URLPath("/test")).
 		Body(StrictEqual("hello world")).
 		Reply(xhttp.From(dest.URL).
 			ForwardHeader("x-test", "ok").
@@ -67,7 +67,7 @@ func TestProxiedReplyMockFileWithTemplate(t *testing.T) {
 	target.MustStart()
 	defer target.Close()
 
-	targetScoped := target.MustMock(
+	targetScoped := target.MustBrew(
 		xhttp.Postf("/test").
 			Headerf("test", "ok").
 			Header("del", Not(Present())).
@@ -81,7 +81,7 @@ func TestProxiedReplyMockFileWithTemplate(t *testing.T) {
 	data["target"] = target.URL()
 	m.SetData(data)
 
-	scoped := m.MustMock(xhttp.FromFile("testdata/response_forwarded/proxied_response.yaml"))
+	scoped := m.MustBrew(xhttp.FromFile("testdata/response_forwarded/proxied_response.yaml"))
 	httpClient := &http.Client{}
 
 	req, _ := http.NewRequest(http.MethodPost, m.URL()+"/test", strings.NewReader("hello world"))

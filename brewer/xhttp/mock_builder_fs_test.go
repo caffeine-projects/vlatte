@@ -34,7 +34,7 @@ func TestBuilderFs_CustomMockFileHandlers(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(FromFile("testdata/builder_fs/mock_file_handler/fixture.json"))
+	m.MustBrew(FromFile("testdata/builder_fs/mock_file_handler/fixture.json"))
 
 	httpClient := &http.Client{}
 	res, err := httpClient.Get(m.URL() + "/test?term=test&filter=all&page=10&q=hello-world&custom=100")
@@ -72,7 +72,7 @@ func TestBuilderFs_FromBytes(t *testing.T) {
 			b, err := io.ReadAll(file)
 			require.NoError(t, err)
 
-			m.MustMock(FromBytes(b, tc.extension))
+			m.MustBrew(FromBytes(b, tc.extension))
 
 			res, err := httpClient.Get(m.URL() + "/test")
 
@@ -97,7 +97,7 @@ func TestBuilderFs_MustNotAllowMultipleReplyDefinitions(t *testing.T) {
 
 	for _, filename := range filenames {
 		t.Run(filename, func(t *testing.T) {
-			s, err := m.Mock(FromFile(filename))
+			s, err := m.Brew(FromFile(filename))
 
 			require.Nil(t, s)
 			require.Error(t, err)
@@ -114,7 +114,7 @@ func TestBuilderFs_InvalidSchemaValid(t *testing.T) {
 
 	for _, filename := range filenames {
 		t.Run(filename, func(t *testing.T) {
-			s, err := m.Mock(FromFile(filename))
+			s, err := m.Brew(FromFile(filename))
 
 			require.Nil(t, s)
 			require.Error(t, err)

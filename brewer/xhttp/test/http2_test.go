@@ -32,7 +32,7 @@ func TestHTTP2(t *testing.T) {
 
 	m := NewAPI(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile)).CloseWithT(t)
 	m.MustStartTLS()
-	m.MustMock(Getf("/test").Reply(OK().PlainText("hello world")))
+	m.MustBrew(Getf("/test").Reply(OK().PlainText("hello world")))
 
 	res, err := client.Get(m.URL("/test"))
 	require.NoError(t, err)

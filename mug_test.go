@@ -87,8 +87,8 @@ func TestMug(t *testing.T) {
 
 		defer m.Close()
 
-		s1 := m.MustMock(xhttp.Get(filter.URLPath("/test1")).Reply(xhttp.OK()))
-		s2 := m.MustMock(
+		s1 := m.MustBrew(xhttp.Get(filter.URLPath("/test1")).Reply(xhttp.OK()))
+		s2 := m.MustBrew(
 			xhttp.Get(filter.URLPath("/test2")).Reply(xhttp.OK()),
 			xhttp.Get(filter.URLPath("/test3")).Reply(xhttp.OK()))
 

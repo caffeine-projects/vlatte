@@ -17,7 +17,7 @@ func TestSequenceReplies(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(xhttp.Get(URLPath("/test")).
+	m.MustBrew(xhttp.Get(URLPath("/test")).
 		Reply(xhttp.Seq().
 			Add(xhttp.Unauthorized(), xhttp.OK())))
 
@@ -47,7 +47,7 @@ func TestSequenceRepliesOnSequenceEndsSet(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(xhttp.Get(URLPath("/test")).
+	m.MustBrew(xhttp.Get(URLPath("/test")).
 		Reply(xhttp.Seq().
 			Add(xhttp.Unauthorized(), xhttp.OK()).
 			OnSequenceEnded(xhttp.Created())))
@@ -84,7 +84,7 @@ func TestSequence_SetupFromFile(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(xhttp.FromFile("testdata/response_sequence/seq_01.yaml"))
+	m.MustBrew(xhttp.FromFile("testdata/response_sequence/seq_01.yaml"))
 
 	req, _ := http.NewRequest(http.MethodGet, m.URL()+"/test", nil)
 

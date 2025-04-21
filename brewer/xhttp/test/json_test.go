@@ -44,7 +44,7 @@ func TestPostJSON(t *testing.T) {
 
 		defer m.Close()
 
-		scoped := m.MustMock(Postf("/test").
+		scoped := m.MustBrew(Postf("/test").
 			Header("test", StrictEqual("hello")).
 			Body(
 				JSONPath("name", StrictEqual("dev")), JSONPath("ok", StrictEqual(true))).
@@ -72,7 +72,7 @@ func TestPostJSON(t *testing.T) {
 
 		data := &jsonTestModel{OK: true, Name: "dev"}
 
-		scoped := m.MustMock(Post(URLPath("/test")).
+		scoped := m.MustBrew(Post(URLPath("/test")).
 			Header("test", StrictEqual("hello")).
 			Body(EqualJSON(data)).
 			Reply(OK()))
@@ -100,7 +100,7 @@ func TestPostJSON(t *testing.T) {
 		data1 := map[string]interface{}{"ok": true, "name": "dev"}
 		data2 := map[string]interface{}{"ok": true, "name": "dev"}
 
-		scoped := m.MustMock(Post(URLPath("/test")).
+		scoped := m.MustBrew(Post(URLPath("/test")).
 			Header("test", StrictEqual("hello")).
 			Body(EqualJSON(data1)).
 			Reply(OK()))
@@ -133,7 +133,7 @@ func TestPostJSON(t *testing.T) {
 		toMatch := map[string]interface{}{"name": "dev", "ok": true}
 		data := model{Name: "dev", OK: true}
 
-		scoped := m.MustMock(Post(URLPath("/test")).
+		scoped := m.MustBrew(Post(URLPath("/test")).
 			Header("test", StrictEqual("hello")).
 			Body(EqualJSON(toMatch)).
 			Reply(OK()))
@@ -161,7 +161,7 @@ func TestPostJSON(t *testing.T) {
 		body := map[string]interface{}{"ok": true, "name": "dev"}
 		exp := map[string]interface{}{"ok": false, "name": "qa"}
 
-		scoped := m.MustMock(Post(URLPath("/test")).
+		scoped := m.MustBrew(Post(URLPath("/test")).
 			Header("test", StrictEqual("hello")).
 			Body(EqualJSON(exp)).
 			Reply(OK()))
@@ -186,7 +186,7 @@ func TestPostJSON(t *testing.T) {
 
 		defer m.Close()
 
-		scoped := m.MustMock(Postf("/test").
+		scoped := m.MustBrew(Postf("/test").
 			Body(
 				JSONPath("name", StrictEqual(nil)), JSONPath("ok", StrictEqual(true))).
 			Reply(OK()))
@@ -227,7 +227,7 @@ func TestPostJSON(t *testing.T) {
 			},
 		}
 
-		scoped := m.MustMock(Postf("/test").
+		scoped := m.MustBrew(Postf("/test").
 			Header("test", Equal("hello")).
 			Body(
 				Field("name", StrictEqual("dev")),
@@ -293,7 +293,7 @@ func TestSimpleJSONValues(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			scoped := m.MustMock(Postf("/test").Body(JSONPath("$", Eq(tc.value))).Reply(Status(tc.status)))
+			scoped := m.MustBrew(Postf("/test").Body(JSONPath("$", Eq(tc.value))).Reply(Status(tc.status)))
 
 			buf := new(bytes.Buffer)
 			require.NoError(t, json.NewEncoder(buf).Encode(tc.value))
@@ -316,7 +316,7 @@ func TestMalformedJSON_ShouldMatchOtherFieldsAndContinue(t *testing.T) {
 
 	defer m.Close()
 
-	scoped := m.MustMock(Postf("/test").
+	scoped := m.MustBrew(Postf("/test").
 		Header("test", StrictEqual("hello")).
 		Reply(OK()))
 
@@ -345,7 +345,7 @@ func TestJSONResponse(t *testing.T) {
 
 	p := &payload{"go", true}
 
-	m.MustMock(Getf("/test").Reply(OK().JSON(p)))
+	m.MustBrew(Getf("/test").Reply(OK().JSON(p)))
 
 	res, err := http.Get(m.URL() + "/test")
 	require.NoError(t, err)

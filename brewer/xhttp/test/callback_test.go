@@ -24,14 +24,14 @@ func TestCallbacks(t *testing.T) {
 
 		defer m.Close()
 
-		scope := m.MustMock(xhttp.Post(filter.URLPath("/test")).
+		scope := m.MustBrew(xhttp.Post(filter.URLPath("/test")).
 			Callback(func(ctx context.Context, input vlatte.CallbackInput) error {
 				cinput, ok := input.(*xhttp.HTTPCallbackInput)
 
 				require.True(t, ok)
 				require.Equal(t, "http", cinput.Kind())
 				require.NotNil(t, cinput)
-				require.NotNil(t, cinput.Mock())
+				require.NotNil(t, cinput.Bean())
 				require.NotNil(t, cinput.Request())
 				require.NotNil(t, cinput.Response())
 				require.Equal(t, http.MethodPost, cinput.Request().RawRequest.Method)
@@ -63,7 +63,7 @@ func TestCallbacks(t *testing.T) {
 
 		defer m.Close()
 
-		scope := m.MustMock(xhttp.Get(filter.URLPath("/test")).
+		scope := m.MustBrew(xhttp.Get(filter.URLPath("/test")).
 			Callback(func(ctx context.Context, input vlatte.CallbackInput) error {
 				cinput, ok := input.(*xhttp.HTTPCallbackInput)
 				require.True(t, ok)

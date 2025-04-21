@@ -30,7 +30,7 @@ func TestExternalResponseBodies(t *testing.T) {
 	for i, tc := range cases {
 		tc := tc
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			m.MustMock(tc.mock)
+			m.MustBrew(tc.mock)
 
 			req, _ := http.NewRequest(http.MethodGet, m.URL("/test"), nil)
 			res, err := client.Do(req)

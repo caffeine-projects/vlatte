@@ -73,7 +73,7 @@ func TestHTTPMethods(t *testing.T) {
 	for i, tc := range testCases {
 		tc := tc
 		t.Run(fmt.Sprintf("%d_%s", i, tc.method), func(t *testing.T) {
-			m.MustMock(tc.mock.Reply(Status(tc.status)))
+			m.MustBrew(tc.mock.Reply(Status(tc.status)))
 
 			req, _ := http.NewRequest(tc.method, m.URL(tc.path), nil)
 			res, err := client.Do(req)

@@ -23,7 +23,7 @@ func NewBaseApp[TM Bean, A MockApp[TM]](app A, repo Jar[TM]) *Boilerplate[TM, A]
 	return &Boilerplate[TM, A]{tray: &Tray[TM, A]{brewer: app, jar: repo}}
 }
 
-// Mock adds one or multiple request mocks.
+// Brew adds one or multiple request mocks.
 // It returns a Scope instance that allows control of the added mocks and also checks if they were called or not.
 //
 // Usage:
@@ -35,28 +35,28 @@ func NewBaseApp[TM Bean, A MockApp[TM]](app A, repo Jar[TM]) *Boilerplate[TM, A]
 //			Reply(reply.Created().PlainText("hello world")))
 //
 //	assert.True(txtTemplate, scoped.HasBeenCalled())
-func (app *Boilerplate[TM, A]) Mock(builders ...Builder[TM, A]) (*Mug[TM], error) {
+func (app *Boilerplate[TM, A]) Brew(builders ...Builder[TM, A]) (*Mug[TM], error) {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
 	return app.tray.Add(builders...)
 }
 
-// MustMock adds one or multiple request mocks.
+// MustBrew adds one or multiple request mocks.
 // It returns a Scope instance that allows control of the added mocks and also checks if they were called or not.
 // It fails immediately if any error occurs.
 //
 // Usage:
 //
-//	scoped := m.MustMock(
+//	scoped := m.MustBrew(
 //		Get(matcher.URLPath("/test")).
 //			Header("test", matcher.StrictEqual("hello")).
 //			Query("filter", matcher.StrictEqual("all")).
 //			Reply(reply.Created().PlainText("hello world")))
 //
 //	assert.True(txtTemplate, scoped.HasBeenCalled())
-func (app *Boilerplate[TM, A]) MustMock(builders ...Builder[TM, A]) *Mug[TM] {
-	mug, err := app.Mock(builders...)
+func (app *Boilerplate[TM, A]) MustBrew(builders ...Builder[TM, A]) *Mug[TM] {
+	mug, err := app.Brew(builders...)
 	if err != nil {
 		panic(err)
 	}
@@ -80,15 +80,15 @@ func (app *Boilerplate[TM, A]) Enable() {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	for _, scoped := range app.tray.Mugs() {
-		scoped.Enable()
+	for _, mug := range app.tray.Mugs() {
+		mug.Enable()
 	}
 }
 
 // Disable disables all mocks.
 func (app *Boilerplate[TM, A]) Disable() {
-	for _, scoped := range app.tray.Mugs() {
-		scoped.Disable()
+	for _, mug := range app.tray.Mugs() {
+		mug.Disable()
 	}
 }
 
@@ -117,8 +117,8 @@ func (app *Boilerplate[TM, A]) Clean(ctx context.Context) error {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	for i, s := range app.tray.Mugs() {
-		err := s.Clean(ctx)
+	for i, mug := range app.tray.Mugs() {
+		err := mug.Clean(ctx)
 		if err != nil {
 			return fmt.Errorf("error cleaning mocks from scope %d. %w", i, err)
 		}
@@ -139,10 +139,10 @@ func (app *Boilerplate[TM, A]) AssertCalled(t TestingT) bool {
 	size := 0
 	buf := strings.Builder{}
 
-	for i, s := range app.tray.Mugs() {
-		if s.Pending() {
+	for i, mug := range app.tray.Mugs() {
+		if mug.Pending() {
 			buf.WriteString(fmt.Sprintf("   Scope %d\n", i))
-			pending := s.ListPending()
+			pending := mug.ListPending()
 			size += len(pending)
 
 			for _, p := range pending {
@@ -175,10 +175,10 @@ func (app *Boilerplate[TM, A]) AssertNotCalled(t TestingT) bool {
 	size := 0
 	buf := strings.Builder{}
 
-	for i, s := range app.tray.Mugs() {
-		if !s.Pending() {
+	for i, mug := range app.tray.Mugs() {
+		if !mug.Pending() {
 			buf.WriteString(fmt.Sprintf("   Scope %d\n", i))
-			called := s.ListCalled()
+			called := mug.ListCalled()
 			size += len(called)
 
 			for _, p := range called {

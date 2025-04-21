@@ -56,7 +56,7 @@ func (i *HTTPCallbackInput) Kind() string {
 	return "http"
 }
 
-func (i *HTTPCallbackInput) Mock() vlatte.Bean {
+func (i *HTTPCallbackInput) Bean() vlatte.Bean {
 	return i.m
 }
 
