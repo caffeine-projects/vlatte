@@ -1,8 +1,8 @@
 package xgrpc
 
 import (
-	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/std"
 )
 
 type Interceptors struct {
@@ -33,19 +33,4 @@ func (m *GRPCMock) getRef() string {
 	}
 
 	return m.GetName()
-}
-
-const (
-	targetMethod    = "Method"
-	targetHeader    = "Header"
-	targetBody      = "Body"
-	targetBodyField = "Field"
-)
-
-func describeTarget(target, key string) string {
-	if len(key) == 0 {
-		return target
-	}
-
-	return target + "(" + key + ")"
 }

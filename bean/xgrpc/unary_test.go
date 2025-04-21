@@ -27,7 +27,7 @@ func TestUnary(t *testing.T) {
 
 	ctx := context.Background()
 	ctx = metadata.AppendToOutgoingContext(ctx, "h1", "v1")
-	conn, err := grpc.Dial(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 
 	client := pb.NewTestServiceClient(conn)

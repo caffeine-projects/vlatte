@@ -35,11 +35,12 @@ func (m *jsonPathMatcher) Match(v any) (Result, error) {
 	var err error
 
 	size := len(results)
-	if size == 0 {
+	switch size {
+	case 0:
 		r, err = m.matcher.Match(nil)
-	} else if size == 1 {
+	case 1:
 		r, err = m.matcher.Match(results[0])
-	} else {
+	default:
 		r, err = m.matcher.Match(results)
 	}
 

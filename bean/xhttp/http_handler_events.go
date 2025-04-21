@@ -153,26 +153,28 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnRequest(rv *RequestValues) {
 	buf.Reset()
 	defer bufpool.Put(buf)
 
-	buf.WriteString(fmt.Sprintf("%s %s ---> %s %s\n%s %s",
+	fmt.Fprintf(buf, "%s %s ---> %s %s\n%s %s",
 		h.cz.BrightBlue(h.cz.Bold("REQUEST RECEIVED")),
 		rv.StartedAt.Format(time.RFC3339),
 		h.cz.Blue(rv.RawRequest.Method),
 		h.cz.Blue(rv.URL.Path),
 		rv.RawRequest.Method,
-		rv.URL))
+		rv.URL)
 
 	if h.app.config.LogVerbosity >= LogHeader && len(rv.RawRequest.Header) > 0 {
 		redactedHeader := redactHeader(rv.RawRequest.Header, h.app.config.HeaderNamesToRedact)
 
 		buf.WriteString("\n")
 		buf.WriteString(h.cz.Blue("Headers "))
-		buf.WriteString(fmt.Sprintf("%s", redactedHeader))
+
+		fmt.Fprintf(buf, "%s", redactedHeader)
 	}
 
 	if h.app.config.LogVerbosity >= LogBody && len(rv.RawBody) > 0 {
 		buf.WriteString("\n")
 		buf.WriteString(h.cz.Blue("Body: "))
-		buf.WriteString(fmt.Sprintf("%v", string(rv.RawBody)))
+
+		fmt.Fprintf(buf, "%v", string(rv.RawBody))
 	}
 
 	buf.WriteString("\n\n")

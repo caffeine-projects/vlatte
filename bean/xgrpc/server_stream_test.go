@@ -29,7 +29,7 @@ func TestServerStreaming(t *testing.T) {
 			ServerStream[*pb.ListItem]().
 				Messages(list)))
 
-	conn, err := grpc.Dial(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 
 	client := pb.NewTestServiceClient(conn)
@@ -89,7 +89,7 @@ func TestServerStream_MessageReader(t *testing.T) {
 		ServerStream[*pb.ListItem]().
 			Text(strings.NewReader(buf.String()))))
 
-	conn, err := grpc.Dial(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 
 	client := pb.NewTestServiceClient(conn)

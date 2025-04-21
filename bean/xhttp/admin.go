@@ -6,7 +6,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"sync"
 
 	"github.com/go-chi/chi/v5"
 
@@ -32,10 +31,8 @@ func (j *JSONEncoder) Encode(w io.Writer, v any) error {
 type Encoders map[string]Encoder
 
 type Admin struct {
-	app      *HTTPMockApp
-	repo     std.Store[*HTTPMock]
-	encoders Encoders
-	rwmu     sync.RWMutex
+	app  *HTTPMockApp
+	repo std.Store[*HTTPMock]
 }
 
 func (a *Admin) Init() http.Handler {
@@ -117,7 +114,11 @@ func (a *Admin) get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Add(httpval.HeaderContentType, httpval.MIMEApplicationCharsetUTF8)
-	w.WriteHeader(http.StatusOK)
 
-	json.NewEncoder(w).Encode(mock.Describe())
+	if err = json.NewEncoder(w).Encode(mock.Describe()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
