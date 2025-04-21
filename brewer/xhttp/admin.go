@@ -9,8 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte/std"
 )
 
 var SupportedExtensions = map[string]struct{}{"json": {}, "yaml": {}, "yml": {}}
@@ -32,7 +32,7 @@ type Encoders map[string]Encoder
 
 type Admin struct {
 	app  *HTTPMockApp
-	repo std.Store[*HTTPMock]
+	repo vlatte.Store[*HTTPMock]
 }
 
 func (a *Admin) Init() http.Handler {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"reflect"
 
+	"github.com/caffeine-projects/vlatte"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -15,15 +16,13 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
-
-	"github.com/caffeine-projects/vlatte/std"
 )
 
 type GRPCStreamMock struct {
 	*GRPCMock
 }
 
-func (s *GRPCStreamMock) GetExpectations() []*std.Eval[*StreamValueSelectorIn] {
+func (s *GRPCStreamMock) GetExpectations() []*vlatte.Eval[*StreamValueSelectorIn] {
 	return s.streamExpectations
 }
 
@@ -177,8 +176,8 @@ func (in *Interceptors) StreamInterceptor(
 	}
 
 	rawBody := string(b)
-	mocks := std.Mocks[*GRPCMock, *StreamValueSelectorIn](em)
-	mock, pass, err := mocks.Find(stream.Context(), &StreamValueSelectorIn{rawBody, info}, func(m *GRPCMock) std.Evaluators[*GRPCMock, *StreamValueSelectorIn] { return m.streamExpectations })
+	mocks := vlatte.Mocks[*GRPCMock, *StreamValueSelectorIn](em)
+	mock, pass, err := mocks.Find(stream.Context(), &StreamValueSelectorIn{rawBody, info}, func(m *GRPCMock) vlatte.Evaluators[*GRPCMock, *StreamValueSelectorIn] { return m.streamExpectations })
 	if err != nil {
 		return status.Error(codes.Internal, fmt.Errorf("stream: error finding mock for request: %w", err).Error())
 	}

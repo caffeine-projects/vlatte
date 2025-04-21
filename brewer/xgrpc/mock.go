@@ -1,8 +1,8 @@
 package xgrpc
 
 import (
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter"
-	"github.com/caffeine-projects/vlatte/std"
 )
 
 type Interceptors struct {
@@ -14,17 +14,17 @@ type GRPCMockBuilder interface {
 }
 
 type GRPCMock struct {
-	*std.M
+	*vlatte.M
 
 	Reply any
 
 	after              []filter.OnMockSent
-	unaryExpectations  []*std.Eval[*UnaryValueSelectorIn]
-	streamExpectations []*std.Eval[*StreamValueSelectorIn]
+	unaryExpectations  []*vlatte.Eval[*UnaryValueSelectorIn]
+	streamExpectations []*vlatte.Eval[*StreamValueSelectorIn]
 }
 
 func newMock() *GRPCMock {
-	return &GRPCMock{M: std.NewMock(std.UseUUID()), after: make([]filter.OnMockSent, 0)}
+	return &GRPCMock{M: vlatte.NewMock(vlatte.UseUUID()), after: make([]filter.OnMockSent, 0)}
 }
 
 func (m *GRPCMock) getRef() string {

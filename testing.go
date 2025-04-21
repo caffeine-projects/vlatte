@@ -1,4 +1,4 @@
-package std
+package vlatte
 
 // TestingT is based on testing.T and is used for assertions.
 // See Assert* methods on the application instance.

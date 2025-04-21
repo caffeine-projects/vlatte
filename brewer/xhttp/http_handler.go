@@ -10,15 +10,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/internal/httprec"
 	"github.com/caffeine-projects/vlatte/filter"
-	"github.com/caffeine-projects/vlatte/std"
 )
 
 type topResponseWriter struct {
-	next std.Next
+	next vlatte.Next
 	rw   http.ResponseWriter
 }
 
@@ -56,11 +56,11 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := &std.Results{Buf: make([]string, 0)}
+	results := &vlatte.Results{Buf: make([]string, 0)}
 	selectorInput := &HTTPValueSelectorInput{r, parsedURL, r.URL.Query(), r.Form, parsedBody}
 
-	mocks := std.Mocks[*HTTPMock, *HTTPValueSelectorInput](em)
-	mock, pass, err := mocks.Find(r.Context(), selectorInput, func(m *HTTPMock) std.Evaluators[*HTTPMock, *HTTPValueSelectorInput] { return m.expectations })
+	mocks := vlatte.Mocks[*HTTPMock, *HTTPValueSelectorInput](em)
+	mock, pass, err := mocks.Find(r.Context(), selectorInput, func(m *HTTPMock) vlatte.Evaluators[*HTTPMock, *HTTPValueSelectorInput] { return m.expectations })
 	if err != nil {
 		h.lifecycle.OnError(reqValues, fmt.Errorf("http: error finding eligible mocks for request. %w", err))
 	}
@@ -126,7 +126,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if len(mock.Flow()) > 0 {
-			w = &topResponseWriter{std.Flow(&std.Sink{W: w}, mock.Flow()), w}
+			w = &topResponseWriter{vlatte.Flow(&vlatte.Sink{W: w}, mock.Flow()), w}
 		}
 
 		for k, vv := range res.Header {
@@ -238,7 +238,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, desc *std.Results) {
+func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, desc *vlatte.Results) {
 	defer h.lifecycle.OnNoMatch(r, desc)
 
 	buf := bufpool.Get()

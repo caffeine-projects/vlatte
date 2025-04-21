@@ -1,4 +1,4 @@
-package std
+package vlatte
 
 type Assertions interface {
 	AssertCalled(t TestingT) bool

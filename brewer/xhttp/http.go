@@ -15,6 +15,7 @@ import (
 	"github.com/jwalton/gchalk"
 	"github.com/rs/zerolog"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/cors"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/internal/mid"
@@ -23,11 +24,10 @@ import (
 	"github.com/caffeine-projects/vlatte/filter/mfeat"
 	"github.com/caffeine-projects/vlatte/shelf/kv"
 	"github.com/caffeine-projects/vlatte/shelf/kv/kvmem"
-	"github.com/caffeine-projects/vlatte/std"
 )
 
 var (
-	_ std.MockApp[*HTTPMock] = (*HTTPMockApp)(nil)
+	_ vlatte.MockApp[*HTTPMock] = (*HTTPMockApp)(nil)
 )
 
 const (
@@ -43,11 +43,11 @@ const StatusNoMatch = http.StatusTeapot
 
 // HTTPMockApp is the base for the mock server.
 type HTTPMockApp struct {
-	*std.BaseApp[*HTTPMock, *HTTPMockApp]
+	*vlatte.BaseApp[*HTTPMock, *HTTPMockApp]
 
 	config             *Config
 	server             Server
-	storage            std.Store[*HTTPMock]
+	storage            vlatte.Store[*HTTPMock]
 	scenarioStore      *mfeat.ScenarioStore
 	cancel             context.CancelFunc
 	requestBodyParsers []RequestBodyParser
@@ -56,8 +56,8 @@ type HTTPMockApp struct {
 	rec                *recorder
 	rwMutex            sync.RWMutex
 	proxy              *reverseProxy
-	templateEngine     std.TemplateEngine
-	extensions         map[string]std.Extension
+	templateEngine     vlatte.TemplateEngine
+	extensions         map[string]vlatte.Extension
 	data               map[string]any
 	colorizer          *gchalk.Builder
 	logger             *zerolog.Logger
@@ -103,7 +103,7 @@ func NewAPI(config ...Configurer) *HTTPMockApp {
 		colors.SetLevel(gchalk.LevelNone)
 	}
 
-	repository := std.NewStore[*HTTPMock]()
+	repository := vlatte.NewStore[*HTTPMock]()
 
 	parsers := make([]RequestBodyParser, 0, len(conf.RequestBodyParsers)+3)
 	parsers = append(parsers, conf.RequestBodyParsers...)
@@ -171,7 +171,7 @@ func NewAPI(config ...Configurer) *HTTPMockApp {
 		app.templateEngine = tmpl
 	}
 
-	app.BaseApp = std.NewBaseApp(app, repository)
+	app.BaseApp = vlatte.NewBaseApp(app, repository)
 	app.server = server
 	app.storage = repository
 	app.scenarioStore = mfeat.NewScenarioStore()
@@ -180,7 +180,7 @@ func NewAPI(config ...Configurer) *HTTPMockApp {
 	app.rec = rec
 	app.proxy = p
 	app.requestBodyParsers = parsers
-	app.extensions = make(map[string]std.Extension)
+	app.extensions = make(map[string]vlatte.Extension)
 	app.colorizer = colors
 	app.admin = &Admin{app: app, repo: repository}
 
@@ -280,7 +280,7 @@ func (app *HTTPMockApp) Server() Server {
 }
 
 // TemplateEngine returns the TemplateEngine associated with this instance.
-func (app *HTTPMockApp) TemplateEngine() std.TemplateEngine {
+func (app *HTTPMockApp) TemplateEngine() vlatte.TemplateEngine {
 	return app.templateEngine
 }
 
@@ -323,7 +323,7 @@ func (app *HTTPMockApp) Close() {
 
 // CloseWithT register Server Close function on TestingT Cleanup().
 // Useful to close the server when tests finish.
-func (app *HTTPMockApp) CloseWithT(t std.TestingT) *HTTPMockApp {
+func (app *HTTPMockApp) CloseWithT(t vlatte.TestingT) *HTTPMockApp {
 	t.Cleanup(func() { app.Close() })
 	return app
 }
@@ -337,7 +337,7 @@ func (app *HTTPMockApp) StopRecording() {
 	app.rec.stop()
 }
 
-func (app *HTTPMockApp) RegisterExtension(extension std.Extension) error {
+func (app *HTTPMockApp) RegisterExtension(extension vlatte.Extension) error {
 	app.rwMutex.Lock()
 	defer app.rwMutex.Unlock()
 

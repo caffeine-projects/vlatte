@@ -14,9 +14,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp"
 	. "github.com/caffeine-projects/vlatte/brewer/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte/std"
 	. "github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/topping/webhook"
 )
@@ -37,7 +37,7 @@ func TestWebHook_Run(t *testing.T) {
 	testCases := []struct {
 		name          string
 		targetMock    *xhttp.HTTPMockBuilder
-		webhookDef    std.PostActionDefinition
+		webhookDef    vlatte.PostActionDefinition
 		options       []webhook.Option
 		expectedCalls int64
 	}{
@@ -103,7 +103,7 @@ func TestWebHook_Run(t *testing.T) {
 				Header(HeaderContentType, MIMETextPlain).
 				Build(name),
 			[]webhook.Option{
-				webhook.WithTransform(func(_ context.Context, input std.PostActionInput, args *webhook.Args) error {
+				webhook.WithTransform(func(_ context.Context, input vlatte.PostActionInput, args *webhook.Args) error {
 					args.URL += "/transformed"
 					args.Method = http.MethodPut
 					args.Body = "hello world"
@@ -119,7 +119,7 @@ func TestWebHook_Run(t *testing.T) {
 				Method(http.MethodGet).
 				Build(name),
 			[]webhook.Option{
-				webhook.WithTransform(func(_ context.Context, input std.PostActionInput, args *webhook.Args) error {
+				webhook.WithTransform(func(_ context.Context, input vlatte.PostActionInput, args *webhook.Args) error {
 					return errors.New("boom")
 				})},
 			0,
@@ -247,7 +247,7 @@ func TestWebHook_FaultTarget(t *testing.T) {
 	defer target.Close()
 
 	target.MustMock(xhttp.Getf("/hook/fault").
-		Delay(std.Latency(1 * time.Minute)).
+		Delay(vlatte.Latency(1 * time.Minute)).
 		Reply(xhttp.OK().PlainText("hello")))
 
 	wh, err := webhook.New()
@@ -320,7 +320,7 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 		tc := tc
 		t.Run(strconv.FormatInt(int64(i), 10), func(t *testing.T) {
 			m.MustMock(xhttp.Getf("/test").
-				PostAction(std.PostActionDefinition{Name: name, Parameters: tc}).
+				PostAction(vlatte.PostActionDefinition{Name: name, Parameters: tc}).
 				Reply(xhttp.NoContent()))
 
 			res, err := client.Get(m.URL("/test"))

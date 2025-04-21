@@ -10,9 +10,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/filter"
 )
 
@@ -25,7 +25,7 @@ func TestCallbacks(t *testing.T) {
 		defer m.Close()
 
 		scope := m.MustMock(xhttp.Post(filter.URLPath("/test")).
-			Callback(func(ctx context.Context, input std.CallbackInput) error {
+			Callback(func(ctx context.Context, input vlatte.CallbackInput) error {
 				cinput, ok := input.(*xhttp.HTTPCallbackInput)
 
 				require.True(t, ok)
@@ -64,7 +64,7 @@ func TestCallbacks(t *testing.T) {
 		defer m.Close()
 
 		scope := m.MustMock(xhttp.Get(filter.URLPath("/test")).
-			Callback(func(ctx context.Context, input std.CallbackInput) error {
+			Callback(func(ctx context.Context, input vlatte.CallbackInput) error {
 				cinput, ok := input.(*xhttp.HTTPCallbackInput)
 				require.True(t, ok)
 				require.NotNil(t, cinput)

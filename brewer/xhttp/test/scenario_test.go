@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp"
-	"github.com/caffeine-projects/vlatte/std"
 	. "github.com/caffeine-projects/vlatte/filter"
 	"github.com/stretchr/testify/require"
 )
@@ -14,9 +14,9 @@ import (
 func TestScenarios(t *testing.T) {
 	testCases := []struct {
 		name string
-		s1   std.Builder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
-		s2   std.Builder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
-		s3   std.Builder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
+		s1   vlatte.Builder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
+		s2   vlatte.Builder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
+		s3   vlatte.Builder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
 	}{
 		{"code",
 			xhttp.Get(URLPath("/1")).

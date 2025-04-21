@@ -7,13 +7,13 @@ import (
 	"net/url"
 	"text/template"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/kv"
-	"github.com/caffeine-projects/vlatte/std"
 )
 
 var (
-	_ std.TemplateEngine   = (*builtInGoTemplate)(nil)
-	_ std.TemplateRenderer = (*builtInGoTemplateRender)(nil)
+	_ vlatte.TemplateEngine   = (*builtInGoTemplate)(nil)
+	_ vlatte.TemplateRenderer = (*builtInGoTemplateRender)(nil)
 )
 
 // templateData is the data used in templates during rendering.
@@ -86,7 +86,7 @@ func (gt *builtInGoTemplate) FuncMap(fn template.FuncMap) *builtInGoTemplate {
 	return gt
 }
 
-func (gt *builtInGoTemplate) Parse(s string) (std.TemplateRenderer, error) {
+func (gt *builtInGoTemplate) Parse(s string) (vlatte.TemplateRenderer, error) {
 	t, err := template.New("").Funcs(gt.funcMap).Parse(s)
 	if err != nil {
 		return nil, err
@@ -99,7 +99,7 @@ type builtInGoTemplateRender struct {
 	template *template.Template
 }
 
-func newGoTemplateRender(template *template.Template) std.TemplateRenderer {
+func newGoTemplateRender(template *template.Template) vlatte.TemplateRenderer {
 	return &builtInGoTemplateRender{template: template}
 }
 

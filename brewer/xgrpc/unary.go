@@ -5,12 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/caffeine-projects/vlatte"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-
-	"github.com/caffeine-projects/vlatte/std"
 )
 
 type UnaryValueSelector func(ctx context.Context, in *UnaryValueSelectorIn) any
@@ -51,8 +50,8 @@ func (in *Interceptors) UnaryInterceptor(
 	}
 
 	rawBody := string(b)
-	mocks := std.Mocks[*GRPCMock, *UnaryValueSelectorIn](em)
-	mock, pass, err := mocks.Find(ctx, &UnaryValueSelectorIn{rawBody, info}, func(m *GRPCMock) std.Evaluators[*GRPCMock, *UnaryValueSelectorIn] { return m.unaryExpectations })
+	mocks := vlatte.Mocks[*GRPCMock, *UnaryValueSelectorIn](em)
+	mock, pass, err := mocks.Find(ctx, &UnaryValueSelectorIn{rawBody, info}, func(m *GRPCMock) vlatte.Evaluators[*GRPCMock, *UnaryValueSelectorIn] { return m.unaryExpectations })
 	if err != nil {
 		return nil, status.Error(codes.Internal, fmt.Errorf("unary: error finding mock for request: %w", err).Error())
 	}

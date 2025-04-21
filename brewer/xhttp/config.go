@@ -13,9 +13,9 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/cors"
 	"github.com/caffeine-projects/vlatte/shelf/kv"
-	"github.com/caffeine-projects/vlatte/std"
 )
 
 // Defaults
@@ -172,7 +172,7 @@ type Config struct {
 	MockFileHandlers []MockFileHandler
 
 	// TemplateEngine sets a custom template engine.
-	TemplateEngine std.TemplateEngine
+	TemplateEngine vlatte.TemplateEngine
 
 	// TemplateFunctions sets custom template functions for the built-in template engine.
 	TemplateFunctions template.FuncMap
@@ -213,7 +213,7 @@ type Config struct {
 
 	// PostActions configures PostActions by name.
 	// They can later be referenced by name during mocking phase.
-	PostActions map[string]std.PostAction
+	PostActions map[string]vlatte.PostAction
 
 	// HeaderNamesToRedact configures HTTP header names to be redacted in logs.
 	// Useful to avoid logging sensitive information.
@@ -309,7 +309,7 @@ func defaultConfig() *Config {
 		Middlewares:                    make([]func(http.Handler) http.Handler, 0),
 		Loaders:                        make([]Loader, 0),
 		MockFileHandlers:               make([]MockFileHandler, 0),
-		PostActions:                    make(map[string]std.PostAction),
+		PostActions:                    make(map[string]vlatte.PostAction),
 		HeaderNamesToRedact:            make(map[string]struct{}),
 		LogPretty:                      true,
 		LogLevel:                       LogLevelInfo,
@@ -516,7 +516,7 @@ func (cb *ConfigBuilder) MockFileHandlers(handlers ...MockFileHandler) *ConfigBu
 
 // TemplateEngine sets the TemplateEngine to be used by all components.
 // Defaults to a built-in implementation based on Go Templates.
-func (cb *ConfigBuilder) TemplateEngine(te std.TemplateEngine) *ConfigBuilder {
+func (cb *ConfigBuilder) TemplateEngine(te vlatte.TemplateEngine) *ConfigBuilder {
 	cb.conf.TemplateEngine = te
 	return cb
 }
@@ -563,7 +563,7 @@ func (cb *ConfigBuilder) TLSMutual(certFile, keyFile, clientCert string) *Config
 	return cb
 }
 
-func (cb *ConfigBuilder) PostAction(name string, action std.PostAction) *ConfigBuilder {
+func (cb *ConfigBuilder) PostAction(name string, action vlatte.PostAction) *ConfigBuilder {
 	cb.conf.PostActions[name] = action
 	return cb
 }

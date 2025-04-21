@@ -1,4 +1,4 @@
-package std_test
+package vlatte_test
 
 import (
 	"context"
@@ -6,30 +6,30 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/test/testmock"
 	"github.com/caffeine-projects/vlatte/filter"
-	"github.com/caffeine-projects/vlatte/std"
 	"github.com/stretchr/testify/require"
 )
 
 func TestScoped(t *testing.T) {
 	type testMock struct {
-		*std.M
+		*vlatte.M
 	}
 
 	newTestMock := func() *testMock {
-		return &testMock{M: std.NewMock(std.UseUUID())}
+		return &testMock{M: vlatte.NewMock(vlatte.UseUUID())}
 	}
 
 	m1 := newTestMock()
 	m2 := newTestMock()
 	m3 := newTestMock()
 
-	repo := std.NewStore[*testMock]()
+	repo := vlatte.NewStore[*testMock]()
 	repo.Save(context.Background(), m1, m2, m3)
 
-	scoped := std.Scoped(repo, []*testMock{m1, m2, m3})
+	scoped := vlatte.Scoped(repo, []*testMock{m1, m2, m3})
 
 	require.Equal(t, 3, len(scoped.GetAll()))
 	require.Equal(t, m1, scoped.Get(m1.GetID()))
@@ -165,18 +165,18 @@ func TestScoped(t *testing.T) {
 
 func TestScopedDelete(t *testing.T) {
 	type testMock struct {
-		*std.M
+		*vlatte.M
 	}
 
 	newTestMock := func() *testMock {
-		return &testMock{M: std.NewMock(std.UseUUID())}
+		return &testMock{M: vlatte.NewMock(vlatte.UseUUID())}
 	}
 
 	m1 := newTestMock()
 	m2 := newTestMock()
 	m3 := newTestMock()
 
-	scoped := std.Scoped(nil, []*testMock{m1, m2, m3})
+	scoped := vlatte.Scoped(nil, []*testMock{m1, m2, m3})
 
 	require.True(t, scoped.Delete(m1.GetID()))
 	require.False(t, scoped.Delete("unknown"))

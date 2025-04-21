@@ -10,19 +10,18 @@ import (
 	"os"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/go-viper/mapstructure/v2"
-
-	"github.com/caffeine-projects/vlatte/std"
 )
 
-var _ std.PostAction = (*WebHook)(nil)
+var _ vlatte.PostAction = (*WebHook)(nil)
 
 type Option func(*WebHook) error
 
-// Transform lets users transforms and customize the [WebHook] [*std.PostActionInput] and the [Args]
+// Transform lets users transforms and customize the [WebHook] [*vlatte.PostActionInput] and the [Args]
 // before they are used.
 // It will be executed everytime [WebHook] runs.
-type Transform func(ctx context.Context, input std.PostActionInput, args *Args) error
+type Transform func(ctx context.Context, input vlatte.PostActionInput, args *Args) error
 
 // WebHook is an automated HTTP request sent after a mocked response is served.
 type WebHook struct {
@@ -33,7 +32,7 @@ type WebHook struct {
 }
 
 // New creates a new WebHook instance.
-// New should be used to register the WebHook [std.PostAction] within the server instance.
+// New should be used to register the WebHook [vlatte.PostAction] within the server instance.
 func New(options ...Option) (*WebHook, error) {
 	w := &WebHook{Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))}
 
@@ -55,7 +54,7 @@ func (w *WebHook) Name() string {
 }
 
 // Run calls parses the parameters and calls the configured service.
-func (w *WebHook) Run(ctx context.Context, input std.PostActionInput) error {
+func (w *WebHook) Run(ctx context.Context, input vlatte.PostActionInput) error {
 	if input.Args() == nil {
 		return fmt.Errorf("webhook: arguments must not be nil")
 	}

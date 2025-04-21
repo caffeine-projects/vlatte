@@ -8,8 +8,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte"
 	. "github.com/caffeine-projects/vlatte/brewer/xhttp"
-	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/filter"
 )
 
@@ -23,7 +23,7 @@ func TestResponseDelay(t *testing.T) {
 	delay := 250 * time.Millisecond
 
 	scoped := m.MustMock(Get(filter.URLPath("/test")).
-		Delay(std.Latency(delay)).
+		Delay(vlatte.Latency(delay)).
 		Reply(OK()))
 
 	res, err := http.Get(fmt.Sprintf("%s/test", m.URL()))

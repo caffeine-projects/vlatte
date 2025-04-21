@@ -6,15 +6,15 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 	"github.com/caffeine-projects/vlatte/shelf/kv"
-	"github.com/caffeine-projects/vlatte/std"
 )
 
-var _ std.Mock = (*HTTPMock)(nil)
-var _ std.CallbackInput = (*HTTPCallbackInput)(nil)
-var _ std.PostActionInput = (*HTTPPostActionInput)(nil)
+var _ vlatte.Mock = (*HTTPMock)(nil)
+var _ vlatte.CallbackInput = (*HTTPCallbackInput)(nil)
+var _ vlatte.PostActionInput = (*HTTPPostActionInput)(nil)
 
 // RequestValues groups HTTP request data, including the parsed body.
 // It is used by several components during the request matching phase.
@@ -56,7 +56,7 @@ func (i *HTTPCallbackInput) Kind() string {
 	return "http"
 }
 
-func (i *HTTPCallbackInput) Mock() std.Mock {
+func (i *HTTPCallbackInput) Mock() vlatte.Mock {
 	return i.m
 }
 
@@ -83,7 +83,7 @@ func (i *HTTPPostActionInput) Args() any {
 	return i.args
 }
 
-func (i *HTTPPostActionInput) Mock() std.Mock {
+func (i *HTTPPostActionInput) Mock() vlatte.Mock {
 	return i.m
 }
 
@@ -153,12 +153,12 @@ type HTTPValueSelectorInput struct {
 	ParsedBody any
 }
 
-type HTTPExpectation = std.Eval[*HTTPValueSelectorInput]
+type HTTPExpectation = vlatte.Eval[*HTTPValueSelectorInput]
 
 // HTTPMock holds metadata and expectations to be matched against HTTP requests in order to serve mocked responses.
 // This is the core entity of this project, and most features work based on it.
 type HTTPMock struct {
-	*std.M
+	*vlatte.M
 
 	// Source describes the source of the mock. E.g.: if it was built from a file,
 	// it will contain the filename.
@@ -170,15 +170,15 @@ type HTTPMock struct {
 	Mappers []Mapper
 
 	after        []int
-	expectations []*std.Eval[*HTTPValueSelectorInput]
+	expectations []*vlatte.Eval[*HTTPValueSelectorInput]
 }
 
 // newMock returns a new Mock with default values set.
 func newMock() *HTTPMock {
 	return &HTTPMock{
-		M:            std.NewMock(std.UseUUID()),
+		M:            vlatte.NewMock(vlatte.UseUUID()),
 		Mappers:      make([]Mapper, 0),
-		expectations: make([]*std.Eval[*HTTPValueSelectorInput], 0),
+		expectations: make([]*vlatte.Eval[*HTTPValueSelectorInput], 0),
 	}
 }
 

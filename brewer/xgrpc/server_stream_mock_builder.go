@@ -5,13 +5,13 @@ import (
 
 	"google.golang.org/grpc/metadata"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter"
-	"github.com/caffeine-projects/vlatte/std"
 )
 
 var (
-	_ std.Builder[*GRPCMock, *GRPCMockApp] = (*ServerStreamMockBuilder)(nil)
-	_ GRPCMockBuilder                      = (*ServerStreamMockBuilder)(nil)
+	_ vlatte.Builder[*GRPCMock, *GRPCMockApp] = (*ServerStreamMockBuilder)(nil)
+	_ GRPCMockBuilder                         = (*ServerStreamMockBuilder)(nil)
 )
 
 type ServerStreamMockBuilder struct {
@@ -22,7 +22,7 @@ func ServerStreamMethod(method string) *ServerStreamMockBuilder {
 	b := &ServerStreamMockBuilder{m: newMock()}
 	b.m.streamExpectations = append(
 		b.m.streamExpectations,
-		&std.Eval[*StreamValueSelectorIn]{
+		&vlatte.Eval[*StreamValueSelectorIn]{
 			Matcher:  filter.Contain(method),
 			Selector: streamSelectMethod,
 		},
@@ -34,7 +34,7 @@ func ServerStreamMethod(method string) *ServerStreamMockBuilder {
 func (b *ServerStreamMockBuilder) Header(key string, m filter.Filter) *ServerStreamMockBuilder {
 	b.m.streamExpectations = append(
 		b.m.streamExpectations,
-		&std.Eval[*StreamValueSelectorIn]{
+		&vlatte.Eval[*StreamValueSelectorIn]{
 			Matcher:  m,
 			Selector: streamSelectHeader(key),
 		},
@@ -46,7 +46,7 @@ func (b *ServerStreamMockBuilder) Header(key string, m filter.Filter) *ServerStr
 func (b *ServerStreamMockBuilder) Field(path string, m filter.Filter) *ServerStreamMockBuilder {
 	b.m.streamExpectations = append(
 		b.m.streamExpectations,
-		&std.Eval[*StreamValueSelectorIn]{
+		&vlatte.Eval[*StreamValueSelectorIn]{
 			Matcher:  filter.Field(path, m),
 			Selector: streamSelectBody,
 		},
@@ -67,7 +67,7 @@ func streamSelectMethod(_ context.Context, r *StreamValueSelectorIn) any {
 	return r.Info.FullMethod
 }
 
-func streamSelectHeader(k string) std.Selector[*StreamValueSelectorIn] {
+func streamSelectHeader(k string) vlatte.Selector[*StreamValueSelectorIn] {
 	return func(ctx context.Context, r *StreamValueSelectorIn) any {
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {

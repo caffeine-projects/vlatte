@@ -7,28 +7,27 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
-
-	"github.com/caffeine-projects/vlatte/std"
 )
 
 type GRPCMockApp struct {
-	*std.BaseApp[*GRPCMock, *GRPCMockApp]
+	*vlatte.BaseApp[*GRPCMock, *GRPCMockApp]
 
 	cancel  context.CancelFunc
 	server  *grpc.Server
 	config  *Config
 	logger  *zerolog.Logger
 	addr    string
-	storage std.Store[*GRPCMock]
+	storage vlatte.Store[*GRPCMock]
 }
 
 type ServerInfo struct {
 	Addr string
 }
 
-func NewGRPC(config ...std.Configurer[*Config]) *GRPCMockApp {
+func NewGRPC(config ...vlatte.Configurer[*Config]) *GRPCMockApp {
 	app := &GRPCMockApp{}
 	conf := defaultConfig()
 
@@ -44,7 +43,7 @@ func NewGRPC(config ...std.Configurer[*Config]) *GRPCMockApp {
 		}
 	}
 
-	store := std.NewStore[*GRPCMock]()
+	store := vlatte.NewStore[*GRPCMock]()
 	in := &Interceptors{app: app}
 	srv := grpc.NewServer(
 		grpc.UnaryInterceptor(in.UnaryInterceptor),
@@ -55,7 +54,7 @@ func NewGRPC(config ...std.Configurer[*Config]) *GRPCMockApp {
 		srv.RegisterService(conf.ServiceDesc, conf.Service)
 	}
 
-	app.BaseApp = std.NewBaseApp(app, store)
+	app.BaseApp = vlatte.NewBaseApp(app, store)
 	app.storage = store
 	app.config = conf
 	app.server = srv
@@ -63,7 +62,7 @@ func NewGRPC(config ...std.Configurer[*Config]) *GRPCMockApp {
 	return app
 }
 
-func NewGRPCWithT(t std.TestingT, config ...std.Configurer[*Config]) *GRPCMockApp {
+func NewGRPCWithT(t vlatte.TestingT, config ...vlatte.Configurer[*Config]) *GRPCMockApp {
 	app := NewGRPC(config...)
 	t.Cleanup(app.Close)
 

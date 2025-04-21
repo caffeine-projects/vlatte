@@ -1,4 +1,4 @@
-package std
+package vlatte
 
 // Configurer lets users configure the Mock API.
 type Configurer[TConfig any] interface {

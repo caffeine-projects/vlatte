@@ -9,10 +9,10 @@ import (
 	"net/textproto"
 	"os"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
-	"github.com/caffeine-projects/vlatte/std"
 )
 
 var _ Reply = (*StdReply)(nil)
@@ -41,9 +41,9 @@ type StdReply struct {
 	bodyType                 bodyType
 	bodyEncoding             bodyEncoding
 	bodyFilename             string
-	bodyTemplateRenderer     std.TemplateRenderer
-	bodyFuncTemplateRenderer std.TemplateRenderer
-	headerTemplateRender     std.TemplateRenderer
+	bodyTemplateRenderer     vlatte.TemplateRenderer
+	bodyFuncTemplateRenderer vlatte.TemplateRenderer
+	headerTemplateRender     vlatte.TemplateRenderer
 	teType                   teType
 	templateHeader           http.Header
 	bodyTemplateContent      string
