@@ -40,7 +40,7 @@ jobs:
     - name: Golangci-lint
       uses: golangci/golangci-lint-action@v7
       with:
-        version: v1.64
+        version: v2.0
 
     - name: Test
       run: make testci
