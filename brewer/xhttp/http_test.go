@@ -14,8 +14,8 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/test/testmock"
-	"github.com/caffeine-projects/vlatte/std/kv/kvmem"
 	. "github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/shelf/kv/kvmem"
 )
 
 func TestMain(m *testing.M) {

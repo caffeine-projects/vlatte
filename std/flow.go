@@ -1,6 +1,6 @@
 // Package flow provides a lightweight middleware-style pipeline for processing byte streams in mock servers.
 // It is protocol-agnostic and can be used for I/O-based request/response flows.
-package flow
+package std
 
 import (
 	"io"

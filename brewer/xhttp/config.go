@@ -14,8 +14,8 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/cors"
+	"github.com/caffeine-projects/vlatte/shelf/kv"
 	"github.com/caffeine-projects/vlatte/std"
-	"github.com/caffeine-projects/vlatte/std/kv"
 )
 
 // Defaults

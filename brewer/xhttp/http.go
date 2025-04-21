@@ -21,9 +21,9 @@ import (
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/internal/mid/recover"
 	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/filter/mfeat"
+	"github.com/caffeine-projects/vlatte/shelf/kv"
+	"github.com/caffeine-projects/vlatte/shelf/kv/kvmem"
 	"github.com/caffeine-projects/vlatte/std"
-	"github.com/caffeine-projects/vlatte/std/kv"
-	"github.com/caffeine-projects/vlatte/std/kv/kvmem"
 )
 
 var (

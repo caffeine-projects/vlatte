@@ -7,7 +7,8 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte/brewer/xhttp"
-	"github.com/caffeine-projects/vlatte/std/kv/kvmem"
+	"github.com/caffeine-projects/vlatte/shelf/kv/kvmem"
+
 	"github.com/stretchr/testify/require"
 )
 

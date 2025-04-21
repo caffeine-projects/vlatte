@@ -8,8 +8,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/shelf/kv"
 	"github.com/caffeine-projects/vlatte/std"
-	"github.com/caffeine-projects/vlatte/std/kv"
 )
 
 var _ std.Mock = (*HTTPMock)(nil)

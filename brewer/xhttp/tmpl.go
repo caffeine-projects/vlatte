@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"text/template"
 
+	"github.com/caffeine-projects/vlatte/shelf/kv"
 	"github.com/caffeine-projects/vlatte/std"
-	"github.com/caffeine-projects/vlatte/std/kv"
 )
 
 var (

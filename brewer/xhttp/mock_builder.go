@@ -10,7 +10,6 @@ import (
 	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/filter/mfeat"
 	"github.com/caffeine-projects/vlatte/std"
-	"github.com/caffeine-projects/vlatte/std/flow"
 )
 
 var _ std.Builder[*HTTPMock, *HTTPMockApp] = (*HTTPMockBuilder)(nil)
@@ -385,7 +384,7 @@ func (b *HTTPMockBuilder) PostAction(input std.PostActionDefinition) *HTTPMockBu
 	return b
 }
 
-func (b *HTTPMockBuilder) Step(steps ...flow.Step) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) Step(steps ...std.Step) *HTTPMockBuilder {
 	b.mock.Steps = append(b.mock.Steps, steps...)
 
 	return b

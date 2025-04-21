@@ -5,14 +5,15 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/caffeine-projects/vlatte/brewer/xhttp"
-	"github.com/caffeine-projects/vlatte/std/flow"
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte/brewer/xhttp"
+	"github.com/caffeine-projects/vlatte/std"
 )
 
 type TestStep struct{ txt string }
 
-func (in *TestStep) Handle(p []byte, next flow.Next) (n int, err error) {
+func (in *TestStep) Handle(p []byte, next std.Next) (n int, err error) {
 	return next.Next(append(p, []byte(in.txt)...))
 }
 

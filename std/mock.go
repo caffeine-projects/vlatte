@@ -5,9 +5,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/caffeine-projects/vlatte/internal/encutil"
-	"github.com/caffeine-projects/vlatte/std/flow"
 	"github.com/google/uuid"
+
+	"github.com/caffeine-projects/vlatte/internal/encutil"
 )
 
 var _ Mock = (*M)(nil)
@@ -29,7 +29,7 @@ type Mock interface {
 
 	PostActions() PostActions
 	Callbacks() []Callback
-	Flow() []flow.Step
+	Flow() []Step
 }
 
 type IDGen func() string
@@ -86,7 +86,7 @@ type M struct {
 
 	CallbackList []Callback
 
-	Steps []flow.Step
+	Steps []Step
 }
 
 // NewMock returns a new Mock with default values set.
@@ -95,7 +95,7 @@ func NewMock(idgen IDGen) *M {
 		ID:             idgen(),
 		PostActionList: make(PostActions, 0),
 		CallbackList:   make([]Callback, 0),
-		Steps:          make([]flow.Step, 0),
+		Steps:          make([]Step, 0),
 
 		enabled: true,
 	}
@@ -182,7 +182,7 @@ func (m *M) Callbacks() []Callback {
 	return m.CallbackList
 }
 
-func (m *M) Flow() []flow.Step {
+func (m *M) Flow() []Step {
 	return m.Steps
 }
 

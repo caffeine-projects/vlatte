@@ -15,11 +15,10 @@ import (
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/internal/httprec"
 	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/std"
-	"github.com/caffeine-projects/vlatte/std/flow"
 )
 
 type topResponseWriter struct {
-	next flow.Next
+	next std.Next
 	rw   http.ResponseWriter
 }
 
@@ -127,7 +126,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if len(mock.Flow()) > 0 {
-			w = &topResponseWriter{flow.New(&flow.Sink{W: w}, mock.Flow()), w}
+			w = &topResponseWriter{std.New(&std.Sink{W: w}, mock.Flow()), w}
 		}
 
 		for k, vv := range res.Header {

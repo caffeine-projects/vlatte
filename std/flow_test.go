@@ -1,4 +1,4 @@
-package flow
+package std
 
 import (
 	"testing"
