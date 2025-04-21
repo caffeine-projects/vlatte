@@ -62,13 +62,6 @@ func NewGRPC(config ...vlatte.Configurer[*Config]) *GRPCMockApp {
 	return app
 }
 
-func NewGRPCWithT(t vlatte.TestingT, config ...vlatte.Configurer[*Config]) *GRPCMockApp {
-	app := NewGRPC(config...)
-	t.Cleanup(app.Close)
-
-	return app
-}
-
 // Start starts the mock server.
 func (app *GRPCMockApp) Start() error {
 	lis, err := net.Listen("tcp", app.config.Addr)
@@ -113,4 +106,11 @@ func (app *GRPCMockApp) Addr() string {
 
 func (app *GRPCMockApp) Close() {
 	app.cancel()
+}
+
+// CloseWithT register Server Close function on TestingT Cleanup().
+// Useful to close the server when tests finish.
+func (app *GRPCMockApp) CloseWithT(t vlatte.CleanupT) *GRPCMockApp {
+	t.Cleanup(func() { app.Close() })
+	return app
 }

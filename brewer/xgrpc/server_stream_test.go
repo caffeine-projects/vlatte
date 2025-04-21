@@ -19,7 +19,7 @@ import (
 )
 
 func TestServerStreaming(t *testing.T) {
-	m := NewGRPCWithT(t, Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
+	m := NewGRPC(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{})).CloseWithT(t)
 	m.MustStart()
 
 	ctx := context.Background()
@@ -71,7 +71,7 @@ func TestServerStreaming(t *testing.T) {
 }
 
 func TestServerStream_MessageReader(t *testing.T) {
-	m := NewGRPCWithT(t, Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
+	m := NewGRPC(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{})).CloseWithT(t)
 	m.MustStart()
 
 	buf := strings.Builder{}

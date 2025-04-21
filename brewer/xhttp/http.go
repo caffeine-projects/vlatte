@@ -323,7 +323,7 @@ func (app *HTTPMockApp) Close() {
 
 // CloseWithT register Server Close function on TestingT Cleanup().
 // Useful to close the server when tests finish.
-func (app *HTTPMockApp) CloseWithT(t vlatte.TestingT) *HTTPMockApp {
+func (app *HTTPMockApp) CloseWithT(t vlatte.CleanupT) *HTTPMockApp {
 	t.Cleanup(func() { app.Close() })
 	return app
 }

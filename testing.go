@@ -7,5 +7,10 @@ type TestingT interface {
 	Logf(format string, a ...any)
 	Error(a ...any)
 	Errorf(format string, a ...any)
+}
+
+// CleanupT is an interface that allows for cleanup functions to be registered.
+// Usually used in testing with [testing.T].
+type CleanupT interface {
 	Cleanup(func())
 }
