@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp"
-	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,7 +15,7 @@ func TestRepeat(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(xhttp.Get(matcher.URLPath("/test")).
+	m.MustMock(xhttp.Get(filter.URLPath("/test")).
 		Times(3).
 		Reply(xhttp.OK()))
 
@@ -46,7 +46,7 @@ func TestRepeat_Once(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(xhttp.Get(matcher.URLPath("/test")).
+	m.MustMock(xhttp.Get(filter.URLPath("/test")).
 		Once().
 		Reply(xhttp.OK()))
 

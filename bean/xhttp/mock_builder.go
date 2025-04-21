@@ -7,8 +7,8 @@ import (
 	"net/http"
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte/matcher"
-	"github.com/caffeine-projects/vlatte/matcher/mfeat"
+	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/filter/mfeat"
 	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/std/flow"
 )
@@ -36,11 +36,11 @@ func Request() *HTTPMockBuilder {
 // AnyMethod creates a new empty Builder.
 func AnyMethod() *HTTPMockBuilder {
 	b := &HTTPMockBuilder{mock: newMock()}
-	return b.MethodMatches(matcher.Anything())
+	return b.MethodMatches(filter.Anything())
 }
 
 // Get initializes a mock for GET method.
-func Get(m matcher.Matcher) *HTTPMockBuilder {
+func Get(m filter.Matcher) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodGet)
 }
 
@@ -50,7 +50,7 @@ func Getf(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Post initializes a mock for Post method.
-func Post(m matcher.Matcher) *HTTPMockBuilder {
+func Post(m filter.Matcher) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodPost)
 }
 
@@ -60,7 +60,7 @@ func Postf(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Put inits a mock for Put method.
-func Put(m matcher.Matcher) *HTTPMockBuilder {
+func Put(m filter.Matcher) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodPut)
 }
 
@@ -70,7 +70,7 @@ func Putf(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Patch initializes a mock for Patch method.
-func Patch(u matcher.Matcher) *HTTPMockBuilder {
+func Patch(u filter.Matcher) *HTTPMockBuilder {
 	return Request().URL(u).Method(http.MethodPatch)
 }
 
@@ -80,7 +80,7 @@ func Patchf(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Delete initializes a mock for Delete method.
-func Delete(m matcher.Matcher) *HTTPMockBuilder {
+func Delete(m filter.Matcher) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodDelete)
 }
 
@@ -90,7 +90,7 @@ func Deletef(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Head initializes a mock for Head method.
-func Head(m matcher.Matcher) *HTTPMockBuilder {
+func Head(m filter.Matcher) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodHead)
 }
 
@@ -120,7 +120,7 @@ func (b *HTTPMockBuilder) Scheme(scheme string) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeScheme),
 		Key:      scheme,
-		Matcher:  matcher.EqualIgnoreCase(scheme),
+		Matcher:  filter.EqualIgnoreCase(scheme),
 		Selector: selectScheme,
 	})
 
@@ -128,7 +128,7 @@ func (b *HTTPMockBuilder) Scheme(scheme string) *HTTPMockBuilder {
 }
 
 // SchemeMatches sets a matcher.Matcher for the URL scheme part.
-func (b *HTTPMockBuilder) SchemeMatches(m matcher.Matcher) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) SchemeMatches(m filter.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeScheme),
 		Matcher:  m,
@@ -140,16 +140,16 @@ func (b *HTTPMockBuilder) SchemeMatches(m matcher.Matcher) *HTTPMockBuilder {
 
 // Method sets the HTTP request method to be matched.
 func (b *HTTPMockBuilder) Method(methods ...string) *HTTPMockBuilder {
-	var m matcher.Matcher
+	var m filter.Matcher
 	var key string
 
 	if len(methods) == 0 {
 		panic(".Method() requires at least one HTTP Method")
 	} else if len(methods) == 1 {
-		m = matcher.EqualIgnoreCase(methods[0])
+		m = filter.EqualIgnoreCase(methods[0])
 		key = methods[0]
 	} else {
-		m = matcher.IsIn(methods)
+		m = filter.IsIn(methods)
 	}
 
 	b.appendExpectation(&HTTPExpectation{
@@ -164,7 +164,7 @@ func (b *HTTPMockBuilder) Method(methods ...string) *HTTPMockBuilder {
 
 // MethodMatches defines a matcher.Matcher for the request method.
 // Useful to set a Mock for multiple HTTP Request methods.
-func (b *HTTPMockBuilder) MethodMatches(m matcher.Matcher) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) MethodMatches(m filter.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeMethod),
 		Selector: selectMethod,
@@ -175,7 +175,7 @@ func (b *HTTPMockBuilder) MethodMatches(m matcher.Matcher) *HTTPMockBuilder {
 }
 
 // URL defines a matcher to be applied to the http.Request url.URL.
-func (b *HTTPMockBuilder) URL(m matcher.Matcher) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) URL(m filter.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeURL),
 		Selector: selectURL,
@@ -188,11 +188,11 @@ func (b *HTTPMockBuilder) URL(m matcher.Matcher) *HTTPMockBuilder {
 // URLf sets a matcher to the http.Request url.URL that compares the http.Request url.URL with the given value.
 // The expected value will be formatted with the provided format specifier.
 func (b *HTTPMockBuilder) URLf(format string, a ...any) *HTTPMockBuilder {
-	return b.URL(matcher.GlobMatch(fmt.Sprintf(format, a...)))
+	return b.URL(filter.GlobMatch(fmt.Sprintf(format, a...)))
 }
 
 // URLPath defines a matcher to be applied to the url.URL path.
-func (b *HTTPMockBuilder) URLPath(m matcher.Matcher) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) URLPath(m filter.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeURL),
 		Selector: selectURLPath,
@@ -205,11 +205,11 @@ func (b *HTTPMockBuilder) URLPath(m matcher.Matcher) *HTTPMockBuilder {
 // URLPathf sets a Matcher that compares the http.Request url.URL path with the given value, ignoring the case.
 // The expected value will be formatted with the provided format specifier.
 func (b *HTTPMockBuilder) URLPathf(format string, a ...any) *HTTPMockBuilder {
-	return b.URLPath(matcher.GlobMatch(fmt.Sprintf(format, a...)))
+	return b.URLPath(filter.GlobMatch(fmt.Sprintf(format, a...)))
 }
 
 // URLPath defines a matcher to be applied to the url.URL path.
-func (b *HTTPMockBuilder) URLFragment(m matcher.Matcher) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) URLFragment(m filter.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeURL),
 		Selector: selectURLFragment,
@@ -222,11 +222,11 @@ func (b *HTTPMockBuilder) URLFragment(m matcher.Matcher) *HTTPMockBuilder {
 // URLPathf sets a Matcher that compares the http.Request url.URL path with the given value, ignoring the case.
 // The expected value will be formatted with the provided format specifier.
 func (b *HTTPMockBuilder) URLFragmentf(format string, a ...any) *HTTPMockBuilder {
-	return b.URLFragment(matcher.GlobMatch(fmt.Sprintf(format, a...)))
+	return b.URLFragment(filter.GlobMatch(fmt.Sprintf(format, a...)))
 }
 
 // Header adds a matcher to a specific http.Header key.
-func (b *HTTPMockBuilder) Header(name string, m matcher.Matcher) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) Header(name string, m filter.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeHeader),
 		Key:      name,
@@ -239,16 +239,16 @@ func (b *HTTPMockBuilder) Header(name string, m matcher.Matcher) *HTTPMockBuilde
 
 // Headerf adds a matcher to a specific http.Header key.
 func (b *HTTPMockBuilder) Headerf(name string, value string, a ...any) *HTTPMockBuilder {
-	return b.Header(name, matcher.StrictEqual(fmt.Sprintf(value, a...)))
+	return b.Header(name, filter.StrictEqual(fmt.Sprintf(value, a...)))
 }
 
 // ContentType sets a matcher that will pass if the HTTP request content type is equal to given value.
 func (b *HTTPMockBuilder) ContentType(value string, a ...any) *HTTPMockBuilder {
-	return b.Header(httpval.HeaderContentType, matcher.Eqi(fmt.Sprintf(value, a...)))
+	return b.Header(httpval.HeaderContentType, filter.Eqi(fmt.Sprintf(value, a...)))
 }
 
 // Query defines a matcher to a specific query.
-func (b *HTTPMockBuilder) Query(name string, m matcher.Matcher) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) Query(name string, m filter.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeQuery),
 		Key:      name,
@@ -261,11 +261,11 @@ func (b *HTTPMockBuilder) Query(name string, m matcher.Matcher) *HTTPMockBuilder
 
 // Queryf defines a matcher to a specific query.
 func (b *HTTPMockBuilder) Queryf(name string, value string, a ...any) *HTTPMockBuilder {
-	return b.Query(name, matcher.StrictEqual(fmt.Sprintf(value, a...)))
+	return b.Query(name, filter.StrictEqual(fmt.Sprintf(value, a...)))
 }
 
 // Queries define a matcher.Matcher for query parameters that contains multiple values.
-func (b *HTTPMockBuilder) Queries(name string, m matcher.Matcher) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) Queries(name string, m filter.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeQueries),
 		Key:      name,
@@ -281,14 +281,14 @@ func (b *HTTPMockBuilder) Queries(name string, m matcher.Matcher) *HTTPMockBuild
 // Example:
 //
 //	m.Body(JSONPath("name", EqualTo("test")), JSONPath("address.street", ToContains("nowhere")))
-func (b *HTTPMockBuilder) Body(matcherList ...matcher.Matcher) *HTTPMockBuilder {
-	var m matcher.Matcher
+func (b *HTTPMockBuilder) Body(matcherList ...filter.Matcher) *HTTPMockBuilder {
+	var m filter.Matcher
 	if len(matcherList) == 0 {
 		panic(".Body() func requires at least one matcher.Matcher")
 	} else if len(matcherList) == 1 {
 		m = matcherList[0]
 	} else {
-		m = matcher.All(matcherList...)
+		m = filter.All(matcherList...)
 	}
 
 	b.appendExpectation(&HTTPExpectation{
@@ -301,7 +301,7 @@ func (b *HTTPMockBuilder) Body(matcherList ...matcher.Matcher) *HTTPMockBuilder 
 }
 
 // FormField defines a matcher for a specific form field by its key.
-func (b *HTTPMockBuilder) FormField(name string, m matcher.Matcher) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) FormField(name string, m filter.Matcher) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeFormField),
 		Key:      name,
@@ -314,7 +314,7 @@ func (b *HTTPMockBuilder) FormField(name string, m matcher.Matcher) *HTTPMockBui
 
 // FormFieldf defines a matcher for a specific form field by its key.
 func (b *HTTPMockBuilder) FormFieldf(field string, value string, a ...any) *HTTPMockBuilder {
-	return b.FormField(field, matcher.StrictEqual(fmt.Sprintf(value, a...)))
+	return b.FormField(field, filter.StrictEqual(fmt.Sprintf(value, a...)))
 }
 
 // Times defines the total times that a mock should be served if the request matches.
@@ -337,7 +337,7 @@ func (b *HTTPMockBuilder) RequestMatches(predicate func(r *http.Request) (bool, 
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeNone),
 		Selector: selectRawRequest,
-		Matcher:  matcher.Function(func(v any) (bool, error) { return predicate(v.(*http.Request)) }),
+		Matcher:  filter.Function(func(v any) (bool, error) { return predicate(v.(*http.Request)) }),
 	})
 
 	return b

@@ -10,7 +10,7 @@ import (
 
 	. "github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/std"
-	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/caffeine-projects/vlatte/filter"
 )
 
 func TestResponseDelay(t *testing.T) {
@@ -22,7 +22,7 @@ func TestResponseDelay(t *testing.T) {
 	start := time.Now()
 	delay := 250 * time.Millisecond
 
-	scoped := m.MustMock(Get(matcher.URLPath("/test")).
+	scoped := m.MustMock(Get(filter.URLPath("/test")).
 		Delay(std.Latency(delay)).
 		Reply(OK()))
 

@@ -8,7 +8,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/test/testmock"
-	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/std"
 	"github.com/stretchr/testify/require"
 )
@@ -86,10 +86,10 @@ func TestScoped(t *testing.T) {
 
 		defer m.Close()
 
-		s1 := m.MustMock(xhttp.Get(matcher.URLPath("/test1")).Reply(xhttp.OK()))
+		s1 := m.MustMock(xhttp.Get(filter.URLPath("/test1")).Reply(xhttp.OK()))
 		s2 := m.MustMock(
-			xhttp.Get(matcher.URLPath("/test2")).Reply(xhttp.OK()),
-			xhttp.Get(matcher.URLPath("/test3")).Reply(xhttp.OK()))
+			xhttp.Get(filter.URLPath("/test2")).Reply(xhttp.OK()),
+			xhttp.Get(filter.URLPath("/test3")).Reply(xhttp.OK()))
 
 		t.Run("initial state (enabled)", func(t *testing.T) {
 			res, err := http.Get(fmt.Sprintf("%s/test1", m.URL()))

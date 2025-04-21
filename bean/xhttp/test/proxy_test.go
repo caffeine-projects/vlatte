@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	. "github.com/caffeine-projects/vlatte/bean/xhttp"
-	. "github.com/caffeine-projects/vlatte/matcher"
+	. "github.com/caffeine-projects/vlatte/filter"
 )
 
 func TestProxy(t *testing.T) {

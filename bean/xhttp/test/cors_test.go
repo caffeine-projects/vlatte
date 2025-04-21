@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp"
-	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,7 +16,7 @@ func TestCORS(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(xhttp.Get(matcher.URLPath("/test")).
+	m.MustMock(xhttp.Get(filter.URLPath("/test")).
 		Reply(xhttp.OK()))
 
 	corsReq, _ := http.NewRequest(http.MethodOptions, m.URL()+"/test", nil)

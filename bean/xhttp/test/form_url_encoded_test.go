@@ -8,7 +8,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,9 +17,9 @@ func TestFormUrlEncoded(t *testing.T) {
 	m := xhttp.NewAPI().CloseWithT(t)
 	m.MustStart()
 
-	scoped := m.MustMock(xhttp.Post(matcher.URLPath("/test")).
-		FormField("var1", matcher.StrictEqual("dev")).
-		FormField("var2", matcher.Contain("q")).
+	scoped := m.MustMock(xhttp.Post(filter.URLPath("/test")).
+		FormField("var1", filter.StrictEqual("dev")).
+		FormField("var2", filter.Contain("q")).
 		Reply(xhttp.OK()))
 
 	data := url.Values{}

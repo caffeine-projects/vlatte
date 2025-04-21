@@ -7,7 +7,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,7 +18,7 @@ func TestTrailer_WithBody(t *testing.T) {
 	defer m.Close()
 
 	scoped := m.MustMock(
-		xhttp.Get(matcher.URLPath("/test")).
+		xhttp.Get(filter.URLPath("/test")).
 			Reply(xhttp.OK().
 				PlainText("hello world").
 				Header(httpval.HeaderContentType, httpval.MIMETextPlain).
@@ -51,7 +51,7 @@ func TestTrailer_WithoutBody(t *testing.T) {
 	defer m.Close()
 
 	scoped := m.MustMock(
-		xhttp.Get(matcher.URLPath("/test")).
+		xhttp.Get(filter.URLPath("/test")).
 			Reply(xhttp.OK().
 				Header(httpval.HeaderContentType, httpval.MIMETextPlain).
 				Trailer("trailer-1", "trailer-1-value").

@@ -15,7 +15,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp/test/testmock"
 	"github.com/caffeine-projects/vlatte/std/kv/kvmem"
-	. "github.com/caffeine-projects/vlatte/matcher"
+	. "github.com/caffeine-projects/vlatte/filter"
 )
 
 func TestMain(m *testing.M) {

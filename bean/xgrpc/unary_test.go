@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	pb "github.com/caffeine-projects/vlatte/bean/xgrpc/internal/protobuf"
-	. "github.com/caffeine-projects/vlatte/matcher"
+	. "github.com/caffeine-projects/vlatte/filter"
 )
 
 func TestUnary(t *testing.T) {

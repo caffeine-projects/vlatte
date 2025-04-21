@@ -7,7 +7,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/std"
-	. "github.com/caffeine-projects/vlatte/matcher"
+	. "github.com/caffeine-projects/vlatte/filter"
 	"github.com/stretchr/testify/require"
 )
 

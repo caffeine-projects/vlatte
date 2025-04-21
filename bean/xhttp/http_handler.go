@@ -13,7 +13,7 @@ import (
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/internal/httprec"
-	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/std/flow"
 )
@@ -195,7 +195,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// run matcher events after we sent the mock.
 	// some matcher might need to keep state.
 	for _, idx := range mock.after {
-		err = mock.expectations[idx].Matcher.(matcher.OnMockSent).OnMockSent()
+		err = mock.expectations[idx].Matcher.(filter.OnMockSent).OnMockSent()
 		if err != nil {
 			h.lifecycle.OnWarning(reqValues,
 				fmt.Errorf("http: after mock served event: matcher[%d] %w", idx, err))

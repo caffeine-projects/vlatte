@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp"
-	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,7 +26,7 @@ func TestHandlerReply(t *testing.T) {
 
 	defer m.Close()
 
-	m.MustMock(xhttp.Get(matcher.URLPath("/test")).
+	m.MustMock(xhttp.Get(filter.URLPath("/test")).
 		Reply(xhttp.Handler(fn)),
 	)
 

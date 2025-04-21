@@ -18,8 +18,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte/bean/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/std"
-	"github.com/caffeine-projects/vlatte/matcher"
-	"github.com/caffeine-projects/vlatte/matcher/mbuild"
+	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/filter/mbuild"
 )
 
 var (
@@ -455,9 +455,9 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 			}
 
 			if u.IsAbs() {
-				builder.URL(matcher.EqualIgnoreCase(e))
+				builder.URL(filter.EqualIgnoreCase(e))
 			} else {
-				builder.URL(matcher.URLPath(u.Path))
+				builder.URL(filter.URLPath(u.Path))
 			}
 		default:
 			m, err := mbuild.BuildMatcher(uv)
@@ -468,13 +468,13 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 			builder.URL(m)
 		}
 	} else if vi.IsSet(_fRequestURLMatch) {
-		builder.URL(matcher.Matches(vi.GetString(_fRequestURLMatch)))
+		builder.URL(filter.Matches(vi.GetString(_fRequestURLMatch)))
 	} else if vi.IsSet(_fRequestURLPath) {
 		uv := vi.Get(_fRequestURLPath)
 
 		switch e := uv.(type) {
 		case string:
-			builder.URL(matcher.URLPath(e))
+			builder.URL(filter.URLPath(e))
 		default:
 			m, err := mbuild.BuildMatcher(uv)
 			if err != nil {

@@ -22,8 +22,8 @@ import (
 	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/std/kv"
 	"github.com/caffeine-projects/vlatte/std/kv/kvmem"
-	"github.com/caffeine-projects/vlatte/matcher"
-	"github.com/caffeine-projects/vlatte/matcher/mfeat"
+	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/filter/mfeat"
 )
 
 var (
@@ -186,7 +186,7 @@ func NewAPI(config ...Configurer) *HTTPMockApp {
 
 	if app.config.Forward != nil {
 		app.MustMock(Request().
-			MethodMatches(matcher.Anything()).
+			MethodMatches(filter.Anything()).
 			Priority(10).
 			Reply(From(app.config.Forward.Target).
 				Headers(app.config.Forward.Headers).
@@ -412,11 +412,11 @@ func (app *HTTPMockApp) DescribeConfig() string {
 // AnyMethod creates a new empty Builder.
 func (app *HTTPMockApp) AnyMethod() *HTTPMockBuilder {
 	b := &HTTPMockBuilder{mock: newMock()}
-	return b.MethodMatches(matcher.Anything())
+	return b.MethodMatches(filter.Anything())
 }
 
 // Get initializes a mock for GET method.
-func (app *HTTPMockApp) Get(m matcher.Matcher) *HTTPMockBuilder {
+func (app *HTTPMockApp) Get(m filter.Matcher) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodGet)
 }
 
@@ -426,7 +426,7 @@ func (app *HTTPMockApp) Getf(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Post initializes a mock for Post method.
-func (app *HTTPMockApp) Post(m matcher.Matcher) *HTTPMockBuilder {
+func (app *HTTPMockApp) Post(m filter.Matcher) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodPost)
 }
 
@@ -436,7 +436,7 @@ func (app *HTTPMockApp) Postf(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Put inits a mock for Put method.
-func (app *HTTPMockApp) Put(m matcher.Matcher) *HTTPMockBuilder {
+func (app *HTTPMockApp) Put(m filter.Matcher) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodPut)
 }
 
@@ -446,7 +446,7 @@ func (app *HTTPMockApp) Putf(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Patch initializes a mock for Patch method.
-func (app *HTTPMockApp) Patch(u matcher.Matcher) *HTTPMockBuilder {
+func (app *HTTPMockApp) Patch(u filter.Matcher) *HTTPMockBuilder {
 	return Request().URL(u).Method(http.MethodPatch)
 }
 
@@ -456,7 +456,7 @@ func (app *HTTPMockApp) Patchf(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Delete initializes a mock for Delete method.
-func (app *HTTPMockApp) Delete(m matcher.Matcher) *HTTPMockBuilder {
+func (app *HTTPMockApp) Delete(m filter.Matcher) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodDelete)
 }
 
@@ -466,7 +466,7 @@ func (app *HTTPMockApp) Deletef(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Head initializes a mock for Head method.
-func (app *HTTPMockApp) Head(m matcher.Matcher) *HTTPMockBuilder {
+func (app *HTTPMockApp) Head(m filter.Matcher) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodHead)
 }
 

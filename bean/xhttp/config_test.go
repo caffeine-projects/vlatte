@@ -15,7 +15,7 @@ import (
 	"github.com/caffeine-projects/vlatte/bean/xhttp/cors"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/std/kv/kvmem"
-	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/caffeine-projects/vlatte/filter"
 )
 
 type testBodyParser struct{}
@@ -93,8 +93,8 @@ func TestConfig(t *testing.T) {
 
 		defer m.Close()
 
-		scoped := m.MustMock(Post(matcher.URLPath("/test")).
-			Body(matcher.StrictEqual(10)).
+		scoped := m.MustMock(Post(filter.URLPath("/test")).
+			Body(filter.StrictEqual(10)).
 			Reply(OK()))
 
 		req, _ := http.NewRequest(http.MethodPost, m.URL()+"/test", strings.NewReader("10"))
@@ -126,7 +126,7 @@ func TestConfig(t *testing.T) {
 		defer m.Close()
 
 		scoped := m.MustMock(
-			Get(matcher.URLPath("/test")).
+			Get(filter.URLPath("/test")).
 				Reply(OK()))
 
 		req, _ := http.NewRequest(http.MethodGet, m.URL()+"/test", nil)
@@ -145,7 +145,7 @@ func TestConfig(t *testing.T) {
 		defer m.Close()
 
 		scoped := m.MustMock(
-			Get(matcher.URLPath("/test")).
+			Get(filter.URLPath("/test")).
 				Reply(OK()))
 
 		req, _ := http.NewRequest(http.MethodGet, m.URL()+"/test", nil)

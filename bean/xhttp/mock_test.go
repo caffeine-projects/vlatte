@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	. "github.com/caffeine-projects/vlatte/matcher"
+	. "github.com/caffeine-projects/vlatte/filter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

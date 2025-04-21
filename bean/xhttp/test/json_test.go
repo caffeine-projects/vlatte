@@ -13,7 +13,7 @@ import (
 
 	. "github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
-	. "github.com/caffeine-projects/vlatte/matcher"
+	. "github.com/caffeine-projects/vlatte/filter"
 )
 
 func TestPostJSON(t *testing.T) {

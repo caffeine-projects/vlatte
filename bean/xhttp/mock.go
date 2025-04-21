@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/std"
 	"github.com/caffeine-projects/vlatte/std/descriptor"
 	"github.com/caffeine-projects/vlatte/std/kv"
@@ -189,7 +189,7 @@ func (m *HTTPMock) Build() (*HTTPMock, error) {
 
 func (m *HTTPMock) Prepare() {
 	for i, e := range m.expectations {
-		_, ok := e.Matcher.(matcher.OnMockSent)
+		_, ok := e.Matcher.(filter.OnMockSent)
 		if ok {
 			m.after = append(m.after, i)
 		}
@@ -242,12 +242,12 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 						keys[e.Key] = sd.Describe()
 					}
 				} else {
-					matchers := make([]matcher.Matcher, 0, size)
+					matchers := make([]filter.Matcher, 0, size)
 					for _, e := range byKey[e.Key] {
 						matchers = append(matchers, e.Matcher)
 					}
 
-					all := matcher.All(matchers...)
+					all := filter.All(matchers...)
 					keys[e.Key] = all.(descriptor.Self).Describe()
 				}
 			}
@@ -263,12 +263,12 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 				continue
 			}
 
-			matchers := make([]matcher.Matcher, len(expectations))
+			matchers := make([]filter.Matcher, len(expectations))
 			for i, e := range expectations {
 				matchers[i] = e.Matcher
 			}
 
-			all := matcher.All(matchers...)
+			all := filter.All(matchers...)
 			request[target.FieldName()] = all.(descriptor.Self).Describe()
 
 		default:

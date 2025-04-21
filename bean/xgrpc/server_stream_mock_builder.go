@@ -6,7 +6,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/caffeine-projects/vlatte/std"
-	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/caffeine-projects/vlatte/filter"
 )
 
 var (
@@ -23,7 +23,7 @@ func ServerStreamMethod(method string) *ServerStreamMockBuilder {
 	b.m.streamExpectations = append(
 		b.m.streamExpectations,
 		&std.Eval[*StreamValueSelectorIn]{
-			Matcher:  matcher.Contain(method),
+			Matcher:  filter.Contain(method),
 			Selector: streamSelectMethod,
 		},
 	)
@@ -31,7 +31,7 @@ func ServerStreamMethod(method string) *ServerStreamMockBuilder {
 	return b
 }
 
-func (b *ServerStreamMockBuilder) Header(key string, m matcher.Matcher) *ServerStreamMockBuilder {
+func (b *ServerStreamMockBuilder) Header(key string, m filter.Matcher) *ServerStreamMockBuilder {
 	b.m.streamExpectations = append(
 		b.m.streamExpectations,
 		&std.Eval[*StreamValueSelectorIn]{
@@ -43,11 +43,11 @@ func (b *ServerStreamMockBuilder) Header(key string, m matcher.Matcher) *ServerS
 	return b
 }
 
-func (b *ServerStreamMockBuilder) Field(path string, m matcher.Matcher) *ServerStreamMockBuilder {
+func (b *ServerStreamMockBuilder) Field(path string, m filter.Matcher) *ServerStreamMockBuilder {
 	b.m.streamExpectations = append(
 		b.m.streamExpectations,
 		&std.Eval[*StreamValueSelectorIn]{
-			Matcher:  matcher.Field(path, m),
+			Matcher:  filter.Field(path, m),
 			Selector: streamSelectBody,
 		},
 	)

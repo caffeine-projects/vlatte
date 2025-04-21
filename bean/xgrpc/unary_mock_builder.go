@@ -6,7 +6,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/caffeine-projects/vlatte/std"
-	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/caffeine-projects/vlatte/filter"
 )
 
 var (
@@ -23,7 +23,7 @@ func UnaryMethod(method string) *UnaryMockBuilder {
 	b.m.unaryExpectations = append(
 		b.m.unaryExpectations,
 		&std.Eval[*UnaryValueSelectorIn]{
-			Matcher:  matcher.Contain(method),
+			Matcher:  filter.Contain(method),
 			Selector: unarySelectMethod,
 		},
 	)
@@ -31,7 +31,7 @@ func UnaryMethod(method string) *UnaryMockBuilder {
 	return b
 }
 
-func (b *UnaryMockBuilder) Header(key string, m matcher.Matcher) *UnaryMockBuilder {
+func (b *UnaryMockBuilder) Header(key string, m filter.Matcher) *UnaryMockBuilder {
 	b.m.unaryExpectations = append(
 		b.m.unaryExpectations,
 		&std.Eval[*UnaryValueSelectorIn]{
@@ -43,11 +43,11 @@ func (b *UnaryMockBuilder) Header(key string, m matcher.Matcher) *UnaryMockBuild
 	return b
 }
 
-func (b *UnaryMockBuilder) Field(path string, m matcher.Matcher) *UnaryMockBuilder {
+func (b *UnaryMockBuilder) Field(path string, m filter.Matcher) *UnaryMockBuilder {
 	b.m.unaryExpectations = append(
 		b.m.unaryExpectations,
 		&std.Eval[*UnaryValueSelectorIn]{
-			Matcher:  matcher.Field(path, m),
+			Matcher:  filter.Field(path, m),
 			Selector: unarySelectBody,
 		},
 	)
