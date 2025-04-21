@@ -7,31 +7,6 @@ import (
 	"sync"
 )
 
-var _ MockApp[*M] = (*baseApp)(nil)
-
-// TestingT is based on testing.T and is used for assertions.
-// See Assert* methods on the application instance.
-type TestingT interface {
-	Helper()
-	Logf(format string, a ...any)
-	Error(a ...any)
-	Errorf(format string, a ...any)
-	Cleanup(func())
-}
-
-// Extension describes a component that can be registered within the mock server and used lately.
-// Only one instance of a specific Extension should be registered, but, depending on the component,
-// it could be used many times.
-type Extension interface {
-	UniqueName() string
-}
-
-type Assertions interface {
-	AssertCalled(t TestingT) bool
-	AssertNotCalled(t TestingT) bool
-	AssertNumberOfCalls(t TestingT, expected int) bool
-}
-
 type MockApp[TM Mock] interface {
 	Hits() int64
 	Enable()
@@ -268,12 +243,3 @@ func (app *BaseApp[TM, A]) AssertNumberOfCalls(t TestingT, expected int64) bool 
 
 	return false
 }
-
-type baseApp struct {
-	BaseApp[*M, *baseApp]
-}
-
-func (a *baseApp) Hits() int64  { return 0 }
-func (a *baseApp) Enable()      {}
-func (a *baseApp) Disable()     {}
-func (a *baseApp) Clean() error { return nil }
