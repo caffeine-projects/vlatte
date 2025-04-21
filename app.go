@@ -87,12 +87,29 @@ func (app *BaseApp[TM, A]) Enable() {
 
 // Disable disables all mocks.
 func (app *BaseApp[TM, A]) Disable() {
-	app.mu.Lock()
-	defer app.mu.Unlock()
-
 	for _, scoped := range app.roaster.List() {
 		scoped.Disable()
 	}
+}
+
+func (app *BaseApp[TM, A]) ListPending() []TM {
+	mugs := app.roaster.List()
+	ret := make([]TM, 0, len(mugs)/2)
+	for _, mug := range mugs {
+		ret = append(ret, mug.ListPending()...)
+	}
+
+	return ret
+}
+
+func (app *BaseApp[TM, A]) ListCalled() []TM {
+	mugs := app.roaster.List()
+	ret := make([]TM, 0, len(mugs)/2)
+	for _, mug := range mugs {
+		ret = append(ret, mug.ListCalled()...)
+	}
+
+	return ret
 }
 
 // Clean removes all scoped mocks.
@@ -125,7 +142,7 @@ func (app *BaseApp[TM, A]) AssertCalled(t TestingT) bool {
 	for i, s := range app.roaster.List() {
 		if s.Pending() {
 			buf.WriteString(fmt.Sprintf("   Scope %d\n", i))
-			pending := s.GetPending()
+			pending := s.ListPending()
 			size += len(pending)
 
 			for _, p := range pending {
@@ -161,7 +178,7 @@ func (app *BaseApp[TM, A]) AssertNotCalled(t TestingT) bool {
 	for i, s := range app.roaster.List() {
 		if !s.Pending() {
 			buf.WriteString(fmt.Sprintf("   Scope %d\n", i))
-			called := s.GetCalled()
+			called := s.ListCalled()
 			size += len(called)
 
 			for _, p := range called {

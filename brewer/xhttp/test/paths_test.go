@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte/brewer/xhttp"
+	"github.com/caffeine-projects/vlatte/sip"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,5 +52,5 @@ func TestSimilarRequestURLPaths(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, xhttp.StatusNoMatch, res.StatusCode)
 
-	scope.AssertNumberOfCalls(t, 5)
+	sip.Times(t, scope, 5)
 }

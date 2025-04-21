@@ -14,6 +14,7 @@ import (
 
 	. "github.com/caffeine-projects/vlatte/brewer/xhttp"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/httpval"
+	"github.com/caffeine-projects/vlatte/sip"
 )
 
 func TestMatcherCombinations(t *testing.T) {
@@ -125,8 +126,8 @@ func TestMatcherCombinations(t *testing.T) {
 	actAndAssert(u)
 	m.Close()
 
-	require.True(t, sHTTP.AssertNumberOfCalls(t, 1))
-	require.True(t, sHTTPS.AssertNumberOfCalls(t, 1))
+	require.True(t, sip.Times(t, sHTTP, 1))
+	require.True(t, sip.Times(t, sHTTPS, 1))
 
 	m = NewAPI()
 	m.MustStart()

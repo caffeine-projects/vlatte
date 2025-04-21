@@ -6,6 +6,8 @@ import (
 	"sync"
 )
 
+var _ Taste[Mock] = (*Scope[Mock])(nil)
+
 // Scope keeps a reference to a group of mocks.
 // With a Scope instance, it is possible to verify if one or a group of mocks were called,
 // how many times they were called and so on.
@@ -69,8 +71,8 @@ func (s *Scope[M]) GetAll() []M {
 	return mocks
 }
 
-// GetPending returns all Mock instances that were not called at least once.
-func (s *Scope[M]) GetPending() []M {
+// ListPending returns all Mock instances that were not called at least once.
+func (s *Scope[M]) ListPending() []M {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -85,8 +87,8 @@ func (s *Scope[M]) GetPending() []M {
 	return mocks
 }
 
-// GetCalled returns all Mock instances that were called.
-func (s *Scope[M]) GetCalled() []M {
+// ListCalled returns all Mock instances that were called.
+func (s *Scope[M]) ListCalled() []M {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -215,7 +217,7 @@ func (s *Scope[M]) AssertCalled(t TestingT) bool {
 	}
 
 	b := strings.Builder{}
-	pending := s.GetPending()
+	pending := s.ListPending()
 	size := len(pending)
 
 	for _, p := range pending {
@@ -240,7 +242,7 @@ func (s *Scope[M]) AssertNotCalled(t TestingT) bool {
 	}
 
 	b := strings.Builder{}
-	called := s.GetCalled()
+	called := s.ListCalled()
 	size := len(called)
 
 	for _, p := range called {

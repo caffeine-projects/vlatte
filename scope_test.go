@@ -10,6 +10,7 @@ import (
 	"github.com/caffeine-projects/vlatte/brewer/xhttp"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/test/testmock"
 	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/sip"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,7 +40,7 @@ func TestScoped(t *testing.T) {
 		ft := testmock.NewFakeT()
 
 		require.False(t, scoped.Called())
-		require.Equal(t, 3, len(scoped.GetPending()))
+		require.Equal(t, 3, len(scoped.ListPending()))
 		require.True(t, scoped.Pending())
 
 		scoped.AssertCalled(ft)
@@ -60,23 +61,23 @@ func TestScoped(t *testing.T) {
 		ft.AssertNumberOfCalls(t, "Errorf", 1)
 		require.True(t, scoped.AssertCalled(t))
 		require.True(t, scoped.Called())
-		require.True(t, scoped.AssertNumberOfCalls(t, 3))
-		require.False(t, scoped.AssertNumberOfCalls(ft, 1))
-		require.Equal(t, 0, len(scoped.GetPending()))
+		require.True(t, sip.Times(t, scoped, 3))
+		require.False(t, sip.Times(ft, scoped, 1))
+		require.Equal(t, 0, len(scoped.ListPending()))
 		require.False(t, scoped.Pending())
 	})
 
 	t.Run("should return total hits from store", func(t *testing.T) {
 		require.EqualValues(t, 3, scoped.Hits())
-		scoped.AssertNumberOfCalls(t, 3)
+		sip.Times(t, scoped, 3)
 	})
 
 	t.Run("should clean all store associated with NewScope when calling .Clean()", func(t *testing.T) {
 		err := scoped.Clean(context.Background())
 		require.NoError(t, err)
 
-		require.Equal(t, 0, len(scoped.GetPending()))
-		require.True(t, scoped.AssertNumberOfCalls(t, 0))
+		require.Equal(t, 0, len(scoped.ListPending()))
+		require.True(t, sip.Times(t, scoped, 0))
 		require.False(t, scoped.Pending())
 	})
 
@@ -132,7 +133,7 @@ func TestScoped(t *testing.T) {
 			require.Equal(t, http.StatusOK, res.StatusCode)
 			require.Equal(t, int64(1), s1.Hits())
 
-			s1.AssertNumberOfCalls(t, 1)
+			sip.Times(t, s1, 1)
 		})
 
 		t.Run("enabling previously disabled", func(t *testing.T) {
@@ -144,7 +145,7 @@ func TestScoped(t *testing.T) {
 			require.Equal(t, http.StatusOK, res.StatusCode)
 			require.EqualValues(t, 2, s1.Hits())
 
-			s1.AssertNumberOfCalls(t, 2)
+			sip.Times(t, s1, 2)
 		})
 
 		t.Run("disabling multiple", func(t *testing.T) {

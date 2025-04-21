@@ -16,6 +16,7 @@ import (
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/test/testmock"
 	. "github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/shelf/kv/kvmem"
+	"github.com/caffeine-projects/vlatte/sip"
 )
 
 func TestMain(m *testing.M) {
@@ -277,7 +278,7 @@ func TestMocha_RequestMatches(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 
-	scoped.AssertNumberOfCalls(t, 1)
+	sip.Times(t, scoped, 1)
 	require.Equal(t, StatusNoMatch, res.StatusCode)
 }
 
@@ -374,13 +375,13 @@ func TestMochaConcurrentRequests(t *testing.T) {
 			}
 
 			scope1.AssertCalled(t)
-			scope1.AssertNumberOfCalls(t, 1)
+			sip.Times(t, scope1, 1)
 			scope2.AssertCalled(t)
-			scope2.AssertNumberOfCalls(t, 1)
+			sip.Times(t, scope2, 1)
 			scope3.AssertCalled(t)
-			scope3.AssertNumberOfCalls(t, 2)
+			sip.Times(t, scope3, 2)
 			scope4.AssertCalled(t)
-			scope4.AssertNumberOfCalls(t, 50)
+			sip.Times(t, scope4, 50)
 
 			m.MustMock(Getf("%s", "/test-final--"+num).Reply(PartialContent()))
 

@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/httpval"
+	"github.com/caffeine-projects/vlatte/sip"
 )
 
 func TestForward(t *testing.T) {
@@ -270,7 +271,7 @@ func TestForward(t *testing.T) {
 
 		scoped.AssertCalled(t)
 		proxyScope.AssertCalled(t)
-		redirectScope.AssertNotCalled(t)
+		sip.NotCalled(t, redirectScope)
 	})
 
 	t.Run("tls", func(t *testing.T) {
@@ -289,8 +290,8 @@ func TestForward(t *testing.T) {
 
 		defer res.Body.Close()
 
-		s1.AssertNotCalled(t)
-		s2.AssertNotCalled(t)
+		sip.NotCalled(t, s1)
+		sip.NotCalled(t, s2)
 
 		require.Equal(t, StatusNoMatch, res.StatusCode)
 

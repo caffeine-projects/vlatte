@@ -9,6 +9,7 @@ import (
 	"github.com/caffeine-projects/vlatte/brewer/xhttp"
 	"github.com/caffeine-projects/vlatte/brewer/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/sip"
 	"github.com/stretchr/testify/require"
 )
 
@@ -134,5 +135,5 @@ func TestFormUrlEncoded_FromFileMock(t *testing.T) {
 		})
 	}
 
-	scoped.AssertNumberOfCalls(t, 2)
+	sip.Times(t, scoped, 2)
 }

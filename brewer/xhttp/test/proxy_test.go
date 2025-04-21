@@ -13,6 +13,7 @@ import (
 
 	. "github.com/caffeine-projects/vlatte/brewer/xhttp"
 	. "github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/sip"
 )
 
 func TestProxy(t *testing.T) {
@@ -137,7 +138,7 @@ func TestProxyViaAnotherProxy(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	scope1.AssertCalled(t)
-	scope2.AssertNotCalled(t)
+	sip.NotCalled(t, scope2)
 	require.Equal(t, http.StatusAccepted, res.StatusCode)
 
 	res, err = client.Get(m.URL() + "/other")

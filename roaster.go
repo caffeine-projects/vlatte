@@ -44,5 +44,8 @@ func (a *Roaster[TM, A]) List() []*Scope[TM] {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	return a.scopes
+	ret := make([]*Scope[TM], len(a.scopes))
+	copy(ret, a.scopes)
+
+	return ret
 }
