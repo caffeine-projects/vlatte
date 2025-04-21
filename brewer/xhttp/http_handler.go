@@ -126,7 +126,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if len(mock.Flow()) > 0 {
-			w = &topResponseWriter{std.New(&std.Sink{W: w}, mock.Flow()), w}
+			w = &topResponseWriter{std.Flow(&std.Sink{W: w}, mock.Flow()), w}
 		}
 
 		for k, vv := range res.Header {

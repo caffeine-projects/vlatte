@@ -33,7 +33,7 @@ func TestFlow(t *testing.T) {
 
 	w := &TestWriter{}
 	w.On("Write", expected).Return(len(expected), nil)
-	pipeline := New(&Sink{w}, []Step{step1, step2, step3})
+	pipeline := Flow(&Sink{w}, []Step{step1, step2, step3})
 
 	n, err := pipeline.Next(data)
 

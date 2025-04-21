@@ -47,10 +47,10 @@ type pipeline struct {
 	index int
 }
 
-// New creates a new pipeline from a slice of [Step]s.
+// Flow creates a new pipeline from a slice of [Step]s.
 // The resulting Pipeline implements the [Next] interface and can be passed
 // into Step.Handle to drive processing forward.
-func New(sink Step, steps []Step) Next {
+func Flow(sink Step, steps []Step) Next {
 	return &pipeline{steps: append(steps, sink)}
 }
 
