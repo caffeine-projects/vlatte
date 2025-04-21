@@ -4,13 +4,13 @@ import (
 	"net/http"
 	"testing"
 
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/stretchr/testify/require"
 )
 
 func TestEnabledDisabledMocks(t *testing.T) {
 	httpClient := &http.Client{}
-	m := khttp.NewAPI(khttp.Setup().MockFilePatterns("testdata/enabled/*.yaml")).CloseWithT(t)
+	m := xhttp.NewAPI(xhttp.Setup().MockFilePatterns("testdata/enabled/*.yaml")).CloseWithT(t)
 	m.MustStart()
 
 	testCases := []struct {
@@ -19,7 +19,7 @@ func TestEnabledDisabledMocks(t *testing.T) {
 	}{
 		{"/test", 200},
 		{"/hello", 200},
-		{"/dev", khttp.StatusNoMatch},
+		{"/dev", xhttp.StatusNoMatch},
 	}
 
 	for _, tc := range testCases {

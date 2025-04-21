@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/test/testmock"
 	"github.com/caffeine-projects/vlatte/kcore"
 	"github.com/caffeine-projects/vlatte/matcher"
@@ -81,15 +81,15 @@ func TestScoped(t *testing.T) {
 	})
 
 	t.Run("should only consider enabled store", func(t *testing.T) {
-		m := khttp.NewAPI()
+		m := xhttp.NewAPI()
 		m.MustStart()
 
 		defer m.Close()
 
-		s1 := m.MustMock(khttp.Get(matcher.URLPath("/test1")).Reply(khttp.OK()))
+		s1 := m.MustMock(xhttp.Get(matcher.URLPath("/test1")).Reply(xhttp.OK()))
 		s2 := m.MustMock(
-			khttp.Get(matcher.URLPath("/test2")).Reply(khttp.OK()),
-			khttp.Get(matcher.URLPath("/test3")).Reply(khttp.OK()))
+			xhttp.Get(matcher.URLPath("/test2")).Reply(xhttp.OK()),
+			xhttp.Get(matcher.URLPath("/test3")).Reply(xhttp.OK()))
 
 		t.Run("initial state (enabled)", func(t *testing.T) {
 			res, err := http.Get(fmt.Sprintf("%s/test1", m.URL()))
@@ -118,7 +118,7 @@ func TestScoped(t *testing.T) {
 			res, err := http.Get(fmt.Sprintf("%s/test1", m.URL()))
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
-			require.Equal(t, khttp.StatusNoMatch, res.StatusCode)
+			require.Equal(t, xhttp.StatusNoMatch, res.StatusCode)
 
 			res, err = http.Get(fmt.Sprintf("%s/test2", m.URL()))
 			require.NoError(t, err)
@@ -153,12 +153,12 @@ func TestScoped(t *testing.T) {
 			res, err := http.Get(fmt.Sprintf("%s/test2", m.URL()))
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
-			require.Equal(t, khttp.StatusNoMatch, res.StatusCode)
+			require.Equal(t, xhttp.StatusNoMatch, res.StatusCode)
 
 			res, err = http.Get(fmt.Sprintf("%s/test3", m.URL()))
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
-			require.Equal(t, khttp.StatusNoMatch, res.StatusCode)
+			require.Equal(t, xhttp.StatusNoMatch, res.StatusCode)
 		})
 	})
 }

@@ -1,4 +1,4 @@
-package khttp
+package xhttp
 
 import (
 	"encoding/json"

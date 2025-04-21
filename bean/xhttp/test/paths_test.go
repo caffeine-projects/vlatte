@@ -4,23 +4,22 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/stretchr/testify/require"
-
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
 )
 
 func TestSimilarRequestURLPaths(t *testing.T) {
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 
 	defer m.Close()
 
 	scope := m.MustMock(
-		khttp.Getf("/customers").Reply(khttp.OK()),
-		khttp.Getf("/customers/100").Reply(khttp.Accepted()),
-		khttp.Getf("/customers/100/orders").Reply(khttp.Unauthorized()),
-		khttp.Getf("/customers/100/orders/BR-500").Reply(khttp.BadRequest()),
-		khttp.Getf("/customers/100/orders/BR-500/items").Reply(khttp.InternalServerError()))
+		xhttp.Getf("/customers").Reply(xhttp.OK()),
+		xhttp.Getf("/customers/100").Reply(xhttp.Accepted()),
+		xhttp.Getf("/customers/100/orders").Reply(xhttp.Unauthorized()),
+		xhttp.Getf("/customers/100/orders/BR-500").Reply(xhttp.BadRequest()),
+		xhttp.Getf("/customers/100/orders/BR-500/items").Reply(xhttp.InternalServerError()))
 
 	res, err := http.DefaultClient.Get(m.URL() + "/customers")
 	require.NoError(t, err)
@@ -50,7 +49,7 @@ func TestSimilarRequestURLPaths(t *testing.T) {
 	res, err = http.DefaultClient.Get(m.URL() + "/customers/orders")
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-	require.Equal(t, khttp.StatusNoMatch, res.StatusCode)
+	require.Equal(t, xhttp.StatusNoMatch, res.StatusCode)
 
 	scope.AssertNumberOfCalls(t, 5)
 }

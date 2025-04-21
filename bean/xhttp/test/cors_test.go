@@ -4,21 +4,20 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCORS(t *testing.T) {
 	client := &http.Client{}
-	m := khttp.NewAPI(khttp.Setup().CORS())
+	m := xhttp.NewAPI(xhttp.Setup().CORS())
 	m.MustStart()
 
 	defer m.Close()
 
-	m.MustMock(khttp.Get(matcher.URLPath("/test")).
-		Reply(khttp.OK()))
+	m.MustMock(xhttp.Get(matcher.URLPath("/test")).
+		Reply(xhttp.OK()))
 
 	corsReq, _ := http.NewRequest(http.MethodOptions, m.URL()+"/test", nil)
 	res, err := client.Do(corsReq)

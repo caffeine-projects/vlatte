@@ -5,22 +5,21 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTrailer_WithBody(t *testing.T) {
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 
 	defer m.Close()
 
 	scoped := m.MustMock(
-		khttp.Get(matcher.URLPath("/test")).
-			Reply(khttp.OK().
+		xhttp.Get(matcher.URLPath("/test")).
+			Reply(xhttp.OK().
 				PlainText("hello world").
 				Header(httpval.HeaderContentType, httpval.MIMETextPlain).
 				Trailer("trailer-1", "trailer-1-value").
@@ -46,14 +45,14 @@ func TestTrailer_WithBody(t *testing.T) {
 }
 
 func TestTrailer_WithoutBody(t *testing.T) {
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 
 	defer m.Close()
 
 	scoped := m.MustMock(
-		khttp.Get(matcher.URLPath("/test")).
-			Reply(khttp.OK().
+		xhttp.Get(matcher.URLPath("/test")).
+			Reply(xhttp.OK().
 				Header(httpval.HeaderContentType, httpval.MIMETextPlain).
 				Trailer("trailer-1", "trailer-1-value").
 				Trailer("trailer-2", "trailer-2-value")))

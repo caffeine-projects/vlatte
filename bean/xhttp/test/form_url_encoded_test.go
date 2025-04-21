@@ -6,22 +6,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFormUrlEncoded(t *testing.T) {
 	httpClient := &http.Client{}
-	m := khttp.NewAPI().CloseWithT(t)
+	m := xhttp.NewAPI().CloseWithT(t)
 	m.MustStart()
 
-	scoped := m.MustMock(khttp.Post(matcher.URLPath("/test")).
+	scoped := m.MustMock(xhttp.Post(matcher.URLPath("/test")).
 		FormField("var1", matcher.StrictEqual("dev")).
 		FormField("var2", matcher.Contain("q")).
-		Reply(khttp.OK()))
+		Reply(xhttp.OK()))
 
 	data := url.Values{}
 	data.Set("var1", "dev")
@@ -38,8 +37,8 @@ func TestFormUrlEncoded(t *testing.T) {
 }
 
 func TestFormUrlEncoded_InvalidFieldValues(t *testing.T) {
-	m := khttp.NewAPI().CloseWithT(t)
-	scoped, err := m.Mock(khttp.FromFile("testdata/form_url_encoded/01_invalid.yaml"))
+	m := xhttp.NewAPI().CloseWithT(t)
+	scoped, err := m.Mock(xhttp.FromFile("testdata/form_url_encoded/01_invalid.yaml"))
 
 	require.Nil(t, scoped)
 	require.Error(t, err)
@@ -47,10 +46,10 @@ func TestFormUrlEncoded_InvalidFieldValues(t *testing.T) {
 
 func TestFormUrlEncoded_FromFileMock(t *testing.T) {
 	httpClient := &http.Client{}
-	m := khttp.NewAPI().CloseWithT(t)
+	m := xhttp.NewAPI().CloseWithT(t)
 	m.MustStart()
 
-	scoped := m.MustMock(khttp.FromFile("testdata/form_url_encoded/02_valid.yaml"))
+	scoped := m.MustMock(xhttp.FromFile("testdata/form_url_encoded/02_valid.yaml"))
 
 	testCases := []struct {
 		name           string
@@ -81,7 +80,7 @@ func TestFormUrlEncoded_FromFileMock(t *testing.T) {
 			data.Set("job", "qa")
 
 			return data
-		}, khttp.StatusNoMatch},
+		}, xhttp.StatusNoMatch},
 
 		{"no match (missing +)", func() url.Values {
 			data := url.Values{}
@@ -94,7 +93,7 @@ func TestFormUrlEncoded_FromFileMock(t *testing.T) {
 			data.Set("job", "dev")
 
 			return data
-		}, khttp.StatusNoMatch},
+		}, xhttp.StatusNoMatch},
 
 		{"no match (missing field)", func() url.Values {
 			data := url.Values{}
@@ -106,7 +105,7 @@ func TestFormUrlEncoded_FromFileMock(t *testing.T) {
 			data.Set("job", "dev")
 
 			return data
-		}, khttp.StatusNoMatch},
+		}, xhttp.StatusNoMatch},
 
 		{"match (float)", func() url.Values {
 			data := url.Values{}

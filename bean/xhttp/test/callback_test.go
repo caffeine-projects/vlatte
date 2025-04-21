@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/kcore"
 	"github.com/caffeine-projects/vlatte/matcher"
@@ -19,14 +19,14 @@ import (
 func TestCallbacks(t *testing.T) {
 	t.Run("should call registered post action", func(t *testing.T) {
 		spy := false
-		m := khttp.NewAPI()
+		m := xhttp.NewAPI()
 		m.MustStart()
 
 		defer m.Close()
 
-		scope := m.MustMock(khttp.Post(matcher.URLPath("/test")).
+		scope := m.MustMock(xhttp.Post(matcher.URLPath("/test")).
 			Callback(func(ctx context.Context, input kcore.CallbackInput) error {
-				cinput, ok := input.(*khttp.HTTPCallbackInput)
+				cinput, ok := input.(*xhttp.HTTPCallbackInput)
 
 				require.True(t, ok)
 				require.Equal(t, "http", cinput.Kind())
@@ -42,7 +42,7 @@ func TestCallbacks(t *testing.T) {
 
 				return nil
 			}).
-			Reply(khttp.OK()))
+			Reply(xhttp.OK()))
 
 		res, err := http.Post(fmt.Sprintf("%s/test", m.URL()), httpval.MIMETextPlain, strings.NewReader("hi"))
 		require.NoError(t, err)
@@ -58,14 +58,14 @@ func TestCallbacks(t *testing.T) {
 		var callbackErrReceiver error
 
 		callbackErr := errors.New("failed to run post action")
-		m := khttp.NewAPI()
+		m := xhttp.NewAPI()
 		m.MustStart()
 
 		defer m.Close()
 
-		scope := m.MustMock(khttp.Get(matcher.URLPath("/test")).
+		scope := m.MustMock(xhttp.Get(matcher.URLPath("/test")).
 			Callback(func(ctx context.Context, input kcore.CallbackInput) error {
-				cinput, ok := input.(*khttp.HTTPCallbackInput)
+				cinput, ok := input.(*xhttp.HTTPCallbackInput)
 				require.True(t, ok)
 				require.NotNil(t, cinput)
 
@@ -73,7 +73,7 @@ func TestCallbacks(t *testing.T) {
 
 				return callbackErr
 			}).
-			Reply(khttp.OK()))
+			Reply(xhttp.OK()))
 
 		res, err := http.Get(fmt.Sprintf("%s/test", m.URL()))
 		require.NoError(t, err)

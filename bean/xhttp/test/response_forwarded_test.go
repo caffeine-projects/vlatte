@@ -8,12 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
 	. "github.com/caffeine-projects/vlatte/matcher"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestProxiedReplies(t *testing.T) {
@@ -33,14 +32,14 @@ func TestProxiedReplies(t *testing.T) {
 
 	defer dest.Close()
 
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 
 	defer m.Close()
 
-	scoped := m.MustMock(khttp.Post(URLPath("/test")).
+	scoped := m.MustMock(xhttp.Post(URLPath("/test")).
 		Body(StrictEqual("hello world")).
-		Reply(khttp.From(dest.URL).
+		Reply(xhttp.From(dest.URL).
 			ForwardHeader("x-test", "ok").
 			Header("x-res", "example").
 			RemoveProxyHeaders("x-del")))
@@ -64,17 +63,17 @@ func TestProxiedReplies(t *testing.T) {
 }
 
 func TestProxiedReplyMockFileWithTemplate(t *testing.T) {
-	target := khttp.NewAPI()
+	target := xhttp.NewAPI()
 	target.MustStart()
 	defer target.Close()
 
 	targetScoped := target.MustMock(
-		khttp.Postf("/test").
+		xhttp.Postf("/test").
 			Headerf("test", "ok").
 			Header("del", Not(Present())).
-			Reply(khttp.OK().PlainText("done")))
+			Reply(xhttp.OK().PlainText("done")))
 
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 	defer m.Close()
 
@@ -82,7 +81,7 @@ func TestProxiedReplyMockFileWithTemplate(t *testing.T) {
 	data["target"] = target.URL()
 	m.SetData(data)
 
-	scoped := m.MustMock(khttp.FromFile("testdata/response_forwarded/proxied_response.yaml"))
+	scoped := m.MustMock(xhttp.FromFile("testdata/response_forwarded/proxied_response.yaml"))
 	httpClient := &http.Client{}
 
 	req, _ := http.NewRequest(http.MethodPost, m.URL()+"/test", strings.NewReader("hello world"))

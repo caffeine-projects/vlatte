@@ -4,17 +4,17 @@ import (
 	"net/http"
 	"testing"
 
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/stretchr/testify/require"
 )
 
 func TestRandom_SetupFromFileWithSeed(t *testing.T) {
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 
 	defer m.Close()
 
-	m.MustMock(khttp.FromFile("testdata/response_random/rand_01.yaml"))
+	m.MustMock(xhttp.FromFile("testdata/response_random/rand_01.yaml"))
 
 	req, _ := http.NewRequest(http.MethodGet, m.URL()+"/test", nil)
 

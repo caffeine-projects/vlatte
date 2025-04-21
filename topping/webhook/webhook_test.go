@@ -14,7 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	. "github.com/caffeine-projects/vlatte/bean/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/kcore"
 	. "github.com/caffeine-projects/vlatte/matcher"
@@ -30,20 +30,20 @@ const (
 func TestWebHook_Run(t *testing.T) {
 	name := "webhook"
 	key := "test_key"
-	target := khttp.NewAPI()
+	target := xhttp.NewAPI()
 	target.MustStart()
 	defer target.Close()
 
 	testCases := []struct {
 		name          string
-		targetMock    *khttp.HTTPMockBuilder
+		targetMock    *xhttp.HTTPMockBuilder
 		webhookDef    kcore.PostActionDefinition
 		options       []webhook.Option
 		expectedCalls int64
 	}{
 		{"basic with default method",
-			khttp.Getf("/third_party/hook").
-				Reply(khttp.OK()),
+			xhttp.Getf("/third_party/hook").
+				Reply(xhttp.OK()),
 			webhook.Options().
 				URL(target.URL("/third_party/hook")).
 				Build(name),
@@ -51,11 +51,11 @@ func TestWebHook_Run(t *testing.T) {
 			1,
 		},
 		{"complex",
-			khttp.Postf("/third_party/hook").
+			xhttp.Postf("/third_party/hook").
 				Headerf("X-Key", "%s", key).
 				Headerf(HeaderContentType, MIMETextPlain).
 				Body(Eq("hi")).
-				Reply(khttp.OK().PlainText("bye")),
+				Reply(xhttp.OK().PlainText("bye")),
 			webhook.Options().
 				URL(target.URL("/third_party/hook")).
 				Method(http.MethodPost).
@@ -67,10 +67,10 @@ func TestWebHook_Run(t *testing.T) {
 			1,
 		},
 		{"no body",
-			khttp.Postf("/third_party/hook").
+			xhttp.Postf("/third_party/hook").
 				Headerf("X-Key", "%s", key).
 				Headerf(HeaderContentType, MIMETextPlain).
-				Reply(khttp.OK().PlainText("bye")),
+				Reply(xhttp.OK().PlainText("bye")),
 			webhook.Options().
 				URL(target.URL("/third_party/hook")).
 				Method(http.MethodPost).
@@ -81,9 +81,9 @@ func TestWebHook_Run(t *testing.T) {
 			1,
 		},
 		{"bad request from target",
-			khttp.Postf("/third_party/hook").
+			xhttp.Postf("/third_party/hook").
 				Headerf(HeaderContentType, MIMETextPlain).
-				Reply(khttp.BadRequest()),
+				Reply(xhttp.BadRequest()),
 			webhook.Options().
 				URL(target.URL("/third_party/hook")).
 				Method(http.MethodPost).
@@ -93,10 +93,10 @@ func TestWebHook_Run(t *testing.T) {
 			1,
 		},
 		{"transform",
-			khttp.Putf("/third_party/hook/transformed").
+			xhttp.Putf("/third_party/hook/transformed").
 				Headerf(HeaderContentType, MIMETextPlain).
 				Body(Eq("hello world")).
-				Reply(khttp.BadRequest()),
+				Reply(xhttp.BadRequest()),
 			webhook.Options().
 				URL(target.URL("/third_party/hook")).
 				Method(http.MethodPost).
@@ -112,8 +112,8 @@ func TestWebHook_Run(t *testing.T) {
 			1,
 		},
 		{"transform with error",
-			khttp.Getf("/third_party/hook/transformed").
-				Reply(khttp.BadRequest()),
+			xhttp.Getf("/third_party/hook/transformed").
+				Reply(xhttp.BadRequest()),
 			webhook.Options().
 				URL(target.URL("/third_party/hook")).
 				Method(http.MethodGet).
@@ -125,8 +125,8 @@ func TestWebHook_Run(t *testing.T) {
 			0,
 		},
 		{"malformed url",
-			khttp.Postf("/third_party/hook").
-				Reply(khttp.OK()),
+			xhttp.Postf("/third_party/hook").
+				Reply(xhttp.OK()),
 			webhook.Options().
 				URL(" -   " + string(rune(0x7f))).
 				Method(http.MethodPost).
@@ -135,7 +135,7 @@ func TestWebHook_Run(t *testing.T) {
 			0,
 		},
 		{"unable to build http request",
-			khttp.Postf("/third_party/hook").Reply(khttp.OK()),
+			xhttp.Postf("/third_party/hook").Reply(xhttp.OK()),
 			webhook.Options().
 				URL(target.URL("/third_party/hook")).
 				Method("ghjk%&^*()").
@@ -151,16 +151,16 @@ func TestWebHook_Run(t *testing.T) {
 			wh, err := webhook.New(tc.options...)
 			require.NoError(t, err)
 
-			m := khttp.NewAPI(khttp.Setup().PostAction(name, wh))
+			m := xhttp.NewAPI(xhttp.Setup().PostAction(name, wh))
 			m.MustStart()
 			defer m.Close()
 			defer target.Clean()
 
 			target.MustMock(tc.targetMock)
 
-			m.MustMock(khttp.Getf("/test").
+			m.MustMock(xhttp.Getf("/test").
 				PostAction(tc.webhookDef).
-				Reply(khttp.NoContent()))
+				Reply(xhttp.NoContent()))
 
 			client := &http.Client{}
 			req, _ := http.NewRequest(http.MethodGet, m.URL("/test"), nil)
@@ -187,14 +187,14 @@ func TestWebHook_TLS(t *testing.T) {
 	certPool := x509.NewCertPool()
 	certPool.AppendCertsFromPEM(caCert)
 
-	whSrv := khttp.NewAPI(khttp.Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
+	whSrv := xhttp.NewAPI(xhttp.Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
 	whSrv.MustStartTLS()
 	defer whSrv.Close()
 
-	whSrv.MustMock(khttp.Postf("/third_party/hook/tls").
+	whSrv.MustMock(xhttp.Postf("/third_party/hook/tls").
 		Headerf("X-Key", "%s", key).
 		Headerf(HeaderContentType, MIMETextPlainCharsetUTF8).
-		Reply(khttp.OK().PlainText("hello")))
+		Reply(xhttp.OK().PlainText("hello")))
 
 	wh, err := webhook.New(webhook.WithRoundTripper(&http.Transport{
 		TLSClientConfig: &tls.Config{
@@ -205,13 +205,13 @@ func TestWebHook_TLS(t *testing.T) {
 	}))
 	require.NoError(t, err)
 
-	m := khttp.NewAPI(khttp.Setup().
+	m := xhttp.NewAPI(xhttp.Setup().
 		TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile).
 		PostAction(name, wh))
 	m.MustStartTLS()
 	defer m.Close()
 
-	m.MustMock(khttp.Putf("/test").
+	m.MustMock(xhttp.Putf("/test").
 		PostAction(webhook.Options().
 			URL(whSrv.URL("/third_party/hook/tls")).
 			Method(http.MethodPost).
@@ -219,7 +219,7 @@ func TestWebHook_TLS(t *testing.T) {
 			Header(HeaderContentType, MIMETextPlainCharsetUTF8).
 			Body("hi").
 			Build(name)).
-		Reply(khttp.NoContent()))
+		Reply(xhttp.NoContent()))
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -242,26 +242,26 @@ func TestWebHook_TLS(t *testing.T) {
 
 func TestWebHook_FaultTarget(t *testing.T) {
 	name := "webhook"
-	target := khttp.NewAPI()
+	target := xhttp.NewAPI()
 	target.MustStart()
 	defer target.Close()
 
-	target.MustMock(khttp.Getf("/hook/fault").
+	target.MustMock(xhttp.Getf("/hook/fault").
 		Delay(kcore.Latency(1 * time.Minute)).
-		Reply(khttp.OK().PlainText("hello")))
+		Reply(xhttp.OK().PlainText("hello")))
 
 	wh, err := webhook.New()
 	require.NoError(t, err)
-	m := khttp.NewAPI(khttp.Setup().PostAction(name, wh))
+	m := xhttp.NewAPI(xhttp.Setup().PostAction(name, wh))
 	m.MustStart()
 	defer m.Close()
 
-	m.MustMock(khttp.Getf("/test").
+	m.MustMock(xhttp.Getf("/test").
 		PostAction(webhook.Options().
 			URL(target.URL("/hook/fault")).
 			Method(http.MethodGet).
 			Build(name)).
-		Reply(khttp.NoContent()))
+		Reply(xhttp.NoContent()))
 
 	client := &http.Client{}
 	timeout := 2 * time.Second
@@ -300,28 +300,28 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 	client := &http.Client{}
 	testCases := []any{make(chan struct{}), nil}
 
-	whSrv := khttp.
-		NewAPI(khttp.Setup().HTTPClient(func() *http.Client {
+	whSrv := xhttp.
+		NewAPI(xhttp.Setup().HTTPClient(func() *http.Client {
 			return client
 		}))
 	whSrv.MustStart()
 	defer whSrv.Close()
 
-	whSrv.MustMock(khttp.Getf("/hook").Reply(khttp.OK()))
+	whSrv.MustMock(xhttp.Getf("/hook").Reply(xhttp.OK()))
 
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := khttp.NewAPI(khttp.Setup().PostAction(name, wh))
+	m := xhttp.NewAPI(xhttp.Setup().PostAction(name, wh))
 	m.MustStart()
 	defer m.Close()
 
 	for i, tc := range testCases {
 		tc := tc
 		t.Run(strconv.FormatInt(int64(i), 10), func(t *testing.T) {
-			m.MustMock(khttp.Getf("/test").
+			m.MustMock(xhttp.Getf("/test").
 				PostAction(kcore.PostActionDefinition{Name: name, Parameters: tc}).
-				Reply(khttp.NoContent()))
+				Reply(xhttp.NoContent()))
 
 			res, err := client.Get(m.URL("/test"))
 
@@ -336,26 +336,26 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 
 func TestWebHook_FileSetup(t *testing.T) {
 	name := "webhook"
-	target := khttp.NewAPI(khttp.Setup())
+	target := xhttp.NewAPI(xhttp.Setup())
 	target.MustStart()
 	defer target.Close()
 
-	target.MustMock(khttp.Postf("/fs/hook").
+	target.MustMock(xhttp.Postf("/fs/hook").
 		Headerf("hello", "world").
 		Headerf("dev", "ok").
 		ContentType(MIMEApplicationJSON).
 		Body(Eq(`{"task": "done"}`)).
-		Reply(khttp.NoContent()))
+		Reply(xhttp.NoContent()))
 
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := khttp.NewAPI(khttp.Setup().PostAction(name, wh))
+	m := xhttp.NewAPI(xhttp.Setup().PostAction(name, wh))
 	m.SetData(map[string]any{"webhook_target": target.URL("/fs/hook")})
 	m.MustStart()
 	defer m.Close()
 
-	m.MustMock(khttp.FromFile("testdata/1_webhook_complete_setup.yaml"))
+	m.MustMock(xhttp.FromFile("testdata/1_webhook_complete_setup.yaml"))
 
 	client := &http.Client{}
 	req, _ := http.NewRequest(http.MethodGet, m.URL("/test"), nil)
@@ -384,10 +384,10 @@ func TestWebHook_InvalidFiles(t *testing.T) {
 			wh, err := webhook.New()
 			require.NoError(t, err)
 
-			m := khttp.NewAPI(khttp.Setup().PostAction(name, wh))
+			m := xhttp.NewAPI(xhttp.Setup().PostAction(name, wh))
 			defer m.Close()
 
-			mock, err := m.Mock(khttp.FromFile(tc.filename))
+			mock, err := m.Mock(xhttp.FromFile(tc.filename))
 			require.Error(t, err)
 			require.Nil(t, mock)
 		})

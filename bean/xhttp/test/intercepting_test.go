@@ -5,10 +5,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/kcore/flow"
+	"github.com/stretchr/testify/require"
 )
 
 type TestInterceptor struct{ txt string }
@@ -18,13 +17,13 @@ func (in *TestInterceptor) Handle(p []byte, chain flow.Next) (n int, err error) 
 }
 
 func TestInterceptors(t *testing.T) {
-	m := khttp.NewAPI(khttp.Setup().LogVerbosity(khttp.LogBody)).CloseWithT(t)
+	m := xhttp.NewAPI(xhttp.Setup().LogVerbosity(xhttp.LogBody)).CloseWithT(t)
 	m.MustStart()
 
 	in1 := &TestInterceptor{"(extra)"}
 	in2 := &TestInterceptor{"(other)"}
 
-	scope := m.MustMock(khttp.Getf("/test").Intercept(in1, in2).Reply(khttp.OK().BodyText("hi")))
+	scope := m.MustMock(xhttp.Getf("/test").Intercept(in1, in2).Reply(xhttp.OK().BodyText("hi")))
 
 	client := &http.Client{}
 	res, err := client.Get(m.URL("/test"))

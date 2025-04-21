@@ -4,13 +4,13 @@ import (
 	"os"
 	"testing"
 
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestConfigDockerDefaultHTTPHost(t *testing.T) {
-	config := &khttp.Config{}
+	config := &xhttp.Config{}
 	conf := &dockerConfigurer{}
 	err := conf.Apply(config)
 
@@ -20,7 +20,7 @@ func TestConfigDockerDefaultHTTPHost(t *testing.T) {
 }
 
 func TestConfigDockerDefaultHTTPsHost(t *testing.T) {
-	config := &khttp.Config{}
+	config := &xhttp.Config{}
 	config.UseHTTPS = true
 
 	conf := &dockerConfigurer{}
@@ -38,7 +38,7 @@ func TestConfigDockerHostDefined(t *testing.T) {
 
 	require.NoError(t, os.Setenv(_dockerHostEnv, "example.org"))
 
-	config := &khttp.Config{}
+	config := &xhttp.Config{}
 	conf := &dockerConfigurer{}
 	err := conf.Apply(config)
 
@@ -54,7 +54,7 @@ func TestConfigDockerHostDefinedWithDots(t *testing.T) {
 
 	require.NoError(t, os.Setenv(_dockerHostEnv, "example.org:"))
 
-	config := &khttp.Config{}
+	config := &xhttp.Config{}
 	conf := &dockerConfigurer{}
 	err := conf.Apply(config)
 

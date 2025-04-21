@@ -9,22 +9,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/stretchr/testify/require"
-
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
 )
 
 func TestCLI(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { cancel() })
 
-	sc := khttp.StatusNoMatch
+	sc := xhttp.StatusNoMatch
 
 	port, err := getRandomPort()
 	require.NoError(t, err)
 
 	portTxt := strconv.FormatInt(int64(port), 10)
-	cfg := &khttp.Config{Addr: ":" + portTxt}
+	cfg := &xhttp.Config{Addr: ":" + portTxt}
 
 	go run(ctx, cfg)
 

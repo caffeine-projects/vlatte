@@ -5,49 +5,48 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/kcore"
 	. "github.com/caffeine-projects/vlatte/matcher"
+	"github.com/stretchr/testify/require"
 )
 
 func TestScenarios(t *testing.T) {
 	testCases := []struct {
 		name string
-		s1   kcore.Builder[*khttp.HTTPMock, *khttp.HTTPMockApp]
-		s2   kcore.Builder[*khttp.HTTPMock, *khttp.HTTPMockApp]
-		s3   kcore.Builder[*khttp.HTTPMock, *khttp.HTTPMockApp]
+		s1   kcore.Builder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
+		s2   kcore.Builder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
+		s3   kcore.Builder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
 	}{
 		{"code",
-			khttp.Get(URLPath("/1")).
+			xhttp.Get(URLPath("/1")).
 				StartScenario("code").
 				ScenarioStateWillBe("step2").
 				Name("step-1").
-				Reply(khttp.OK().PlainText("step1")),
-			khttp.Get(URLPath("/2")).
+				Reply(xhttp.OK().PlainText("step1")),
+			xhttp.Get(URLPath("/2")).
 				ScenarioIs("code").
 				ScenarioStateIs("step2").
 				ScenarioStateWillBe("step3").
 				Name("step-2").
-				Reply(khttp.OK().PlainText("step2")),
-			khttp.Get(URLPath("/3")).
+				Reply(xhttp.OK().PlainText("step2")),
+			xhttp.Get(URLPath("/3")).
 				ScenarioIs("code").
 				ScenarioStateIs("step3").
 				ScenarioStateWillBe("step4").
 				Name("step-3").
-				Reply(khttp.OK().PlainText("step3"))},
+				Reply(xhttp.OK().PlainText("step3"))},
 
 		{"file",
-			khttp.FromFile("testdata/scenario/step_1.yaml"),
-			khttp.FromFile("testdata/scenario/step_2.yaml"),
-			khttp.FromFile("testdata/scenario/step_3.yaml")},
+			xhttp.FromFile("testdata/scenario/step_1.yaml"),
+			xhttp.FromFile("testdata/scenario/step_2.yaml"),
+			xhttp.FromFile("testdata/scenario/step_3.yaml")},
 	}
 
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			m := khttp.NewAPI().CloseWithT(t)
+			m := xhttp.NewAPI().CloseWithT(t)
 			m.MustStart()
 
 			s1 := m.MustMock(tc.s1)
@@ -74,7 +73,7 @@ func TestScenarios(t *testing.T) {
 
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
-			require.Equal(t, khttp.StatusNoMatch, res.StatusCode)
+			require.Equal(t, xhttp.StatusNoMatch, res.StatusCode)
 
 			// --- step2
 
@@ -96,7 +95,7 @@ func TestScenarios(t *testing.T) {
 
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
-			require.Equal(t, khttp.StatusNoMatch, res.StatusCode)
+			require.Equal(t, xhttp.StatusNoMatch, res.StatusCode)
 
 			// --- step3
 
@@ -118,7 +117,7 @@ func TestScenarios(t *testing.T) {
 
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
-			require.Equal(t, khttp.StatusNoMatch, res.StatusCode)
+			require.Equal(t, xhttp.StatusNoMatch, res.StatusCode)
 		})
 	}
 }

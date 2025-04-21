@@ -6,10 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/kcore/kv/kvmem"
+	"github.com/stretchr/testify/require"
 )
 
 // TODO: rework templating implementation.
@@ -19,14 +18,14 @@ func TestTemplating(t *testing.T) {
 	t.SkipNow()
 
 	kv := kvmem.New()
-	m := khttp.NewAPI(khttp.Setup().Parameters(kv))
+	m := xhttp.NewAPI(xhttp.Setup().Parameters(kv))
 	m.MustStart()
 	defer m.Close()
 
 	err := kv.Set(t.Context(), "test", []byte("hi"))
 	require.NoError(t, err)
 
-	m.MustMock(khttp.FromFile("testdata/templating/templating_01.yaml"))
+	m.MustMock(xhttp.FromFile("testdata/templating/templating_01.yaml"))
 
 	httpClient := &http.Client{}
 
@@ -50,11 +49,11 @@ func TestTemplating_BodyFilename(t *testing.T) {
 	t.Log("templating needs rework")
 	t.SkipNow()
 
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 	defer m.Close()
 
-	m.MustMock(khttp.FromFile("testdata/templating/templating_02.yaml"))
+	m.MustMock(xhttp.FromFile("testdata/templating/templating_02.yaml"))
 
 	httpClient := &http.Client{}
 
@@ -76,11 +75,11 @@ func TestTemplating_BodyFilename_BodyTemplate(t *testing.T) {
 	t.SkipNow()
 
 	kv := kvmem.New()
-	m := khttp.NewAPI(khttp.Setup().Parameters(kv))
+	m := xhttp.NewAPI(xhttp.Setup().Parameters(kv))
 	m.MustStart()
 	defer m.Close()
 
-	m.MustMock(khttp.FromFile("testdata/templating/templating_03.yaml"))
+	m.MustMock(xhttp.FromFile("testdata/templating/templating_03.yaml"))
 
 	err := kv.Set(t.Context(), "message", []byte("hello world"))
 	require.NoError(t, err)
@@ -105,11 +104,11 @@ func TestTemplating_Header(t *testing.T) {
 	t.SkipNow()
 
 	kv := kvmem.New()
-	m := khttp.NewAPI(khttp.Setup().Parameters(kv))
+	m := xhttp.NewAPI(xhttp.Setup().Parameters(kv))
 	m.MustStart()
 	defer m.Close()
 
-	m.MustMock(khttp.FromFile("testdata/templating/templating_04.yaml"))
+	m.MustMock(xhttp.FromFile("testdata/templating/templating_04.yaml"))
 
 	err := kv.Set(t.Context(), "test", []byte("ok"))
 	require.NoError(t, err)
@@ -134,7 +133,7 @@ func TestTemplating_All(t *testing.T) {
 	t.SkipNow()
 
 	kv := kvmem.New()
-	m := khttp.NewAPI(khttp.Setup().Parameters(kv))
+	m := xhttp.NewAPI(xhttp.Setup().Parameters(kv))
 	m.MustStart()
 	defer m.Close()
 
@@ -143,7 +142,7 @@ func TestTemplating_All(t *testing.T) {
 	err = kv.Set(t.Context(), "context", []byte("test"))
 	require.NoError(t, err)
 
-	m.MustMock(khttp.FromFile("testdata/templating/templating_05.yaml"))
+	m.MustMock(xhttp.FromFile("testdata/templating/templating_05.yaml"))
 
 	httpClient := &http.Client{}
 

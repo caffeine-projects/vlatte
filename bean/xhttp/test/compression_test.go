@@ -6,21 +6,20 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
+	. "github.com/caffeine-projects/vlatte/matcher"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
-	. "github.com/caffeine-projects/vlatte/matcher"
 )
 
 func TestCompressedResponse_GZIP(t *testing.T) {
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 
 	defer m.Close()
 
-	m.MustMock(khttp.Get(URLPath("/test")).
-		Reply(khttp.OK().
+	m.MustMock(xhttp.Get(URLPath("/test")).
+		Reply(xhttp.OK().
 			BodyText("hello world").
 			Gzip()))
 
@@ -38,23 +37,23 @@ func TestCompressedResponse_GZIP(t *testing.T) {
 }
 
 func Test_GZIPProxiedResponse(t *testing.T) {
-	p := khttp.NewAPI()
+	p := xhttp.NewAPI()
 	p.MustStart()
 
 	defer p.Close()
 
-	ps := p.MustMock(khttp.Get(URLPath("/test")).
-		Reply(khttp.OK().
+	ps := p.MustMock(xhttp.Get(URLPath("/test")).
+		Reply(xhttp.OK().
 			BodyText("hello world").
 			Gzip()))
 
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 
 	defer m.Close()
 
-	ms := m.MustMock(khttp.Get(URLPath("/test")).
-		Reply(khttp.From(p.URL())))
+	ms := m.MustMock(xhttp.Get(URLPath("/test")).
+		Reply(xhttp.From(p.URL())))
 
 	httpClient := &http.Client{Transport: &http.Transport{DisableCompression: true}}
 

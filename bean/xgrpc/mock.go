@@ -1,4 +1,4 @@
-package kgrpc
+package xgrpc
 
 import (
 	"github.com/caffeine-projects/vlatte/kcore"

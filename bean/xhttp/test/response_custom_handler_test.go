@@ -6,11 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/matcher"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
-	"github.com/caffeine-projects/vlatte/matcher"
 )
 
 func TestHandlerReply(t *testing.T) {
@@ -22,13 +21,13 @@ func TestHandlerReply(t *testing.T) {
 		w.Write([]byte(msg))
 	}
 
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 
 	defer m.Close()
 
-	m.MustMock(khttp.Get(matcher.URLPath("/test")).
-		Reply(khttp.Handler(fn)),
+	m.MustMock(xhttp.Get(matcher.URLPath("/test")).
+		Reply(xhttp.Handler(fn)),
 	)
 
 	req, _ := http.NewRequest(http.MethodGet, m.URL()+"/test", nil)

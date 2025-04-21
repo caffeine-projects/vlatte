@@ -4,21 +4,20 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/caffeine-projects/vlatte/matcher"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRepeat(t *testing.T) {
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 
 	defer m.Close()
 
-	m.MustMock(khttp.Get(matcher.URLPath("/test")).
+	m.MustMock(xhttp.Get(matcher.URLPath("/test")).
 		Times(3).
-		Reply(khttp.OK()))
+		Reply(xhttp.OK()))
 
 	res, err := http.Get(m.URL() + "/test")
 	require.Equal(t, http.StatusOK, res.StatusCode)
@@ -36,20 +35,20 @@ func TestRepeat(t *testing.T) {
 	require.NoError(t, err)
 
 	res, err = http.Get(m.URL() + "/test")
-	require.Equal(t, khttp.StatusNoMatch, res.StatusCode)
+	require.Equal(t, xhttp.StatusNoMatch, res.StatusCode)
 	require.NoError(t, res.Body.Close())
 	require.NoError(t, err)
 }
 
 func TestRepeat_Once(t *testing.T) {
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 
 	defer m.Close()
 
-	m.MustMock(khttp.Get(matcher.URLPath("/test")).
+	m.MustMock(xhttp.Get(matcher.URLPath("/test")).
 		Once().
-		Reply(khttp.OK()))
+		Reply(xhttp.OK()))
 
 	res, _ := http.Get(m.URL() + "/test")
 	require.NoError(t, res.Body.Close())
@@ -57,13 +56,13 @@ func TestRepeat_Once(t *testing.T) {
 
 	res, _ = http.Get(m.URL() + "/test")
 	require.NoError(t, res.Body.Close())
-	require.Equal(t, khttp.StatusNoMatch, res.StatusCode)
+	require.Equal(t, xhttp.StatusNoMatch, res.StatusCode)
 }
 
 func TestRepeat_FileSetup(t *testing.T) {
-	m := khttp.NewAPI().CloseWithT(t)
+	m := xhttp.NewAPI().CloseWithT(t)
 	m.MustStart()
-	m.MustMock(khttp.FromFile("testdata/repeat/1_repeat.yaml"))
+	m.MustMock(xhttp.FromFile("testdata/repeat/1_repeat.yaml"))
 
 	httpClient := &http.Client{}
 
@@ -77,5 +76,5 @@ func TestRepeat_FileSetup(t *testing.T) {
 	res, err := httpClient.Get(m.URL("/test"))
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-	require.Equal(t, khttp.StatusNoMatch, res.StatusCode)
+	require.Equal(t, xhttp.StatusNoMatch, res.StatusCode)
 }

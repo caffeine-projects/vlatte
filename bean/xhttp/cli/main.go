@@ -10,10 +10,9 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
 )
 
 const (
@@ -53,20 +52,20 @@ func main() {
 	run(ctx) // should block
 }
 
-func run(ctx context.Context, custom ...khttp.Configurer) {
-	configurers := make([]khttp.Configurer, 0)
+func run(ctx context.Context, custom ...xhttp.Configurer) {
+	configurers := make([]xhttp.Configurer, 0)
 	if len(custom) > 0 {
 		configurers = append(configurers, custom...)
 	}
 
-	configurers = append(configurers, khttp.UseLocals())
+	configurers = append(configurers, xhttp.UseLocals())
 
 	_, exists := os.LookupEnv(_dockerHostEnv)
 	if exists {
 		configurers = append(configurers, &dockerConfigurer{})
 	}
 
-	m := khttp.NewAPI(configurers...)
+	m := xhttp.NewAPI(configurers...)
 
 	rootCmd := &cobra.Command{
 		Use:     _usage,
@@ -103,7 +102,7 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "print version info",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(khttp.Version)
+			fmt.Println(xhttp.Version)
 		},
 	}
 }

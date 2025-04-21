@@ -6,21 +6,20 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
-	khttp "github.com/caffeine-projects/vlatte/bean/xhttp"
+	"github.com/caffeine-projects/vlatte/bean/xhttp"
 	. "github.com/caffeine-projects/vlatte/matcher"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSequenceReplies(t *testing.T) {
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 
 	defer m.Close()
 
-	m.MustMock(khttp.Get(URLPath("/test")).
-		Reply(khttp.Seq().
-			Add(khttp.Unauthorized(), khttp.OK())))
+	m.MustMock(xhttp.Get(URLPath("/test")).
+		Reply(xhttp.Seq().
+			Add(xhttp.Unauthorized(), xhttp.OK())))
 
 	req, _ := http.NewRequest(http.MethodGet, m.URL()+"/test", nil)
 
@@ -43,15 +42,15 @@ func TestSequenceReplies(t *testing.T) {
 }
 
 func TestSequenceRepliesOnSequenceEndsSet(t *testing.T) {
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 
 	defer m.Close()
 
-	m.MustMock(khttp.Get(URLPath("/test")).
-		Reply(khttp.Seq().
-			Add(khttp.Unauthorized(), khttp.OK()).
-			OnSequenceEnded(khttp.Created())))
+	m.MustMock(xhttp.Get(URLPath("/test")).
+		Reply(xhttp.Seq().
+			Add(xhttp.Unauthorized(), xhttp.OK()).
+			OnSequenceEnded(xhttp.Created())))
 
 	req, _ := http.NewRequest(http.MethodGet, m.URL()+"/test", nil)
 
@@ -80,12 +79,12 @@ func TestSequence_SetupFromFile(t *testing.T) {
 		Num  float64 `json:"num,omitempty"`
 	}
 
-	m := khttp.NewAPI()
+	m := xhttp.NewAPI()
 	m.MustStart()
 
 	defer m.Close()
 
-	m.MustMock(khttp.FromFile("testdata/response_sequence/seq_01.yaml"))
+	m.MustMock(xhttp.FromFile("testdata/response_sequence/seq_01.yaml"))
 
 	req, _ := http.NewRequest(http.MethodGet, m.URL()+"/test", nil)
 
