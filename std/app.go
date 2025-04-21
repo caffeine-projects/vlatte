@@ -14,54 +14,13 @@ type MockApp[TM Mock] interface {
 	Clean() error
 }
 
-type MockBag[TM Mock, A MockApp[TM]] struct {
-	mu     sync.RWMutex
-	app    A
-	store  Store[TM]
-	scopes []*Scope[TM]
-}
-
-func (a *MockBag[TM, A]) Add(builders ...Builder[TM, A]) (*Scope[TM], error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	added := make([]TM, len(builders))
-
-	for i, b := range builders {
-		mock, err := b.Build(a.app)
-		if err != nil {
-			return nil, fmt.Errorf("server: error adding mock at index %d.\n%w", i, err)
-		}
-
-		mock.Prepare()
-
-		if err := a.store.Save(context.Background(), mock); err != nil {
-			return nil, err
-		}
-
-		added[i] = mock
-	}
-
-	scope := Scoped(a.store, added)
-	a.scopes = append(a.scopes, scope)
-
-	return scope, nil
-}
-
-func (a *MockBag[TM, A]) List() []*Scope[TM] {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-
-	return a.scopes
-}
-
 type BaseApp[TM Mock, A MockApp[TM]] struct {
-	mockBag *MockBag[TM, A]
+	roaster *Roaster[TM, A]
 	mu      sync.RWMutex
 }
 
 func NewBaseApp[TM Mock, A MockApp[TM]](app A, repo Store[TM]) *BaseApp[TM, A] {
-	return &BaseApp[TM, A]{mockBag: &MockBag[TM, A]{app: app, store: repo}}
+	return &BaseApp[TM, A]{roaster: &Roaster[TM, A]{app: app, store: repo}}
 }
 
 // Mock adds one or multiple request mocks.
@@ -80,7 +39,7 @@ func (app *BaseApp[TM, A]) Mock(builders ...Builder[TM, A]) (*Scope[TM], error) 
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	return app.mockBag.Add(builders...)
+	return app.roaster.Add(builders...)
 }
 
 // MustMock adds one or multiple request mocks.
@@ -109,7 +68,7 @@ func (app *BaseApp[TM, A]) MustMock(builders ...Builder[TM, A]) *Scope[TM] {
 func (app *BaseApp[TM, A]) Hits() int64 {
 	hits := int64(0)
 
-	for _, s := range app.mockBag.List() {
+	for _, s := range app.roaster.List() {
 		hits += s.Hits()
 	}
 
@@ -121,7 +80,7 @@ func (app *BaseApp[TM, A]) Enable() {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	for _, scoped := range app.mockBag.List() {
+	for _, scoped := range app.roaster.List() {
 		scoped.Enable()
 	}
 }
@@ -131,7 +90,7 @@ func (app *BaseApp[TM, A]) Disable() {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	for _, scoped := range app.mockBag.List() {
+	for _, scoped := range app.roaster.List() {
 		scoped.Disable()
 	}
 }
@@ -141,7 +100,7 @@ func (app *BaseApp[TM, A]) Clean() error {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	for i, s := range app.mockBag.List() {
+	for i, s := range app.roaster.List() {
 		err := s.Clean(context.Background())
 		if err != nil {
 			return fmt.Errorf("error cleaning mocks from scope %d. %w", i, err)
@@ -163,7 +122,7 @@ func (app *BaseApp[TM, A]) AssertCalled(t TestingT) bool {
 	size := 0
 	buf := strings.Builder{}
 
-	for i, s := range app.mockBag.List() {
+	for i, s := range app.roaster.List() {
 		if s.Pending() {
 			buf.WriteString(fmt.Sprintf("   Scope %d\n", i))
 			pending := s.GetPending()
@@ -199,7 +158,7 @@ func (app *BaseApp[TM, A]) AssertNotCalled(t TestingT) bool {
 	size := 0
 	buf := strings.Builder{}
 
-	for i, s := range app.mockBag.List() {
+	for i, s := range app.roaster.List() {
 		if !s.Pending() {
 			buf.WriteString(fmt.Sprintf("   Scope %d\n", i))
 			called := s.GetCalled()
