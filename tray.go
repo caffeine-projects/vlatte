@@ -6,18 +6,18 @@ import (
 	"sync"
 )
 
-type Tray[TM Bean, A MockApp[TM]] struct {
-	mu    sync.RWMutex
-	drink A
-	jar   Canister[TM]
-	mugs  []*Mug[TM]
+type Tray[B Bean, A MockApp[B]] struct {
+	mu       sync.RWMutex
+	drink    A
+	canister Canister[B]
+	mugs     []*Mug[B]
 }
 
-func (a *Tray[TM, A]) Add(builders ...Roaster[TM, A]) (*Mug[TM], error) {
+func (a *Tray[B, A]) Add(builders ...Roaster[B, A]) (*Mug[B], error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	added := make([]TM, len(builders))
+	added := make([]B, len(builders))
 
 	for i, b := range builders {
 		mock, err := b.Roast(a.drink)
@@ -27,24 +27,24 @@ func (a *Tray[TM, A]) Add(builders ...Roaster[TM, A]) (*Mug[TM], error) {
 
 		mock.Prepare()
 
-		if err := a.jar.Store(context.Background(), mock); err != nil {
+		if err := a.canister.Store(context.Background(), mock); err != nil {
 			return nil, err
 		}
 
 		added[i] = mock
 	}
 
-	mug := Pour(a.jar, added)
+	mug := Pour(a.canister, added)
 	a.mugs = append(a.mugs, mug)
 
 	return mug, nil
 }
 
-func (a *Tray[TM, A]) Mugs() []*Mug[TM] {
+func (a *Tray[B, A]) Mugs() []*Mug[B] {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	ret := make([]*Mug[TM], len(a.mugs))
+	ret := make([]*Mug[B], len(a.mugs))
 	copy(ret, a.mugs)
 
 	return ret

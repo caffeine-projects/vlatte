@@ -20,7 +20,7 @@ type Boilerplate[TM Bean, A MockApp[TM]] struct {
 }
 
 func NewBaseApp[TM Bean, A MockApp[TM]](app A, repo Canister[TM]) *Boilerplate[TM, A] {
-	return &Boilerplate[TM, A]{tray: &Tray[TM, A]{drink: app, jar: repo}}
+	return &Boilerplate[TM, A]{tray: &Tray[TM, A]{drink: app, canister: repo}}
 }
 
 // Brew adds one or multiple request mocks.
@@ -118,7 +118,7 @@ func (app *Boilerplate[TM, A]) Clean(ctx context.Context) error {
 	defer app.mu.Unlock()
 
 	for i, mug := range app.tray.Mugs() {
-		err := mug.Clean(ctx)
+		err := mug.Empty(ctx)
 		if err != nil {
 			return fmt.Errorf("error cleaning mocks from scope %d. %w", i, err)
 		}

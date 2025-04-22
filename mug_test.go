@@ -74,7 +74,7 @@ func TestMug(t *testing.T) {
 	})
 
 	t.Run("should clean all store associated with NewScope when calling .Clean()", func(t *testing.T) {
-		err := mug.Clean(context.Background())
+		err := mug.Empty(context.Background())
 		require.NoError(t, err)
 
 		require.Equal(t, 0, len(mug.ListPending()))
@@ -180,8 +180,8 @@ func TestScopedDelete(t *testing.T) {
 
 	mug := vlatte.Pour(nil, []*testMock{m1, m2, m3})
 
-	require.True(t, mug.Delete(m1.GetID()))
-	require.False(t, mug.Delete("unknown"))
+	require.True(t, mug.Toss(m1.GetID()))
+	require.False(t, mug.Toss("unknown"))
 
 	require.Nil(t, mug.Get(m1.GetID()))
 }

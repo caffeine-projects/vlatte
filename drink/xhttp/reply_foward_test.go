@@ -295,7 +295,7 @@ func TestForward(t *testing.T) {
 
 		require.Equal(t, StatusNoMatch, res.StatusCode)
 
-		s2.Clean(context.Background())
+		s2.Empty(context.Background())
 		s2 = m.MustBrew(Getf("/test").Reply(From(target.URL()).SkipSSLVerify()))
 
 		res, err = httpClient.Get(m.URL() + "/test")
