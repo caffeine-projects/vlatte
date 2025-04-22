@@ -55,7 +55,7 @@ func (s *Jar[B]) Eligible(ctx context.Context) ([]B, error) {
 	return beans, nil
 }
 
-func (s *Jar[B]) Save(_ context.Context, beans ...B) error {
+func (s *Jar[B]) Store(_ context.Context, beans ...B) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

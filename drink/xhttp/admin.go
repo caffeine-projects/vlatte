@@ -91,7 +91,7 @@ func (a *Admin) add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = a.repo.Save(r.Context(), mock)
+	err = a.repo.Store(r.Context(), mock)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

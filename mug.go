@@ -187,7 +187,7 @@ func (s *Mug[M]) Sync(ctx context.Context) error {
 		mocks = append(mocks, v)
 	}
 
-	if err := s.jar.Save(ctx, mocks...); err != nil {
+	if err := s.jar.Store(ctx, mocks...); err != nil {
 		return err
 	}
 

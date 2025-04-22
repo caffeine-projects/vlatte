@@ -49,7 +49,7 @@ type Canister[T Bean] interface {
 	EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan T, error)
 	Eligible(ctx context.Context) ([]T, error)
 
-	Save(ctx context.Context, bean ...T) error
+	Store(ctx context.Context, bean ...T) error
 
 	Get(ctx context.Context, id string) (T, error)
 	GetAll(ctx context.Context) ([]T, error)

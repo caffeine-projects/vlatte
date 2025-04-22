@@ -27,7 +27,7 @@ func (a *Tray[TM, A]) Add(builders ...Roaster[TM, A]) (*Mug[TM], error) {
 
 		mock.Prepare()
 
-		if err := a.jar.Save(context.Background(), mock); err != nil {
+		if err := a.jar.Store(context.Background(), mock); err != nil {
 			return nil, err
 		}
 

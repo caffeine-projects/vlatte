@@ -15,13 +15,13 @@ func TestCanister(t *testing.T) {
 	mock2 := &GreenBean{ID: "2", Name: "mock_2", enabled: true, Priority: 1}
 	mock3 := &GreenBean{ID: "3", Name: "mock_3", enabled: true, Priority: 2}
 
-	err := st.Save(ctx, mock1)
+	err := st.Store(ctx, mock1)
 	require.NoError(t, err)
 
-	err = st.Save(ctx, mock2)
+	err = st.Store(ctx, mock2)
 	require.NoError(t, err)
 
-	err = st.Save(ctx, mock3)
+	err = st.Store(ctx, mock3)
 	require.NoError(t, err)
 
 	mock, err := st.Get(ctx, mock1.ID)
@@ -74,9 +74,9 @@ func TestCanister(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, eligible, 0)
 
-	err = st.Save(ctx, &GreenBean{ID: "10", Name: "mock_ext_1", enabled: true, Priority: 0, Source: "ext"})
+	err = st.Store(ctx, &GreenBean{ID: "10", Name: "mock_ext_1", enabled: true, Priority: 0, Source: "ext"})
 	require.NoError(t, err)
-	err = st.Save(ctx, &GreenBean{ID: "11", Name: "mock_11", enabled: true, Priority: 0})
+	err = st.Store(ctx, &GreenBean{ID: "11", Name: "mock_11", enabled: true, Priority: 0})
 	require.NoError(t, err)
 
 	all, err := st.GetAll(ctx)

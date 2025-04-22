@@ -6,12 +6,13 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/drink/xhttp"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/test/testmock"
 	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/sip"
-	"github.com/stretchr/testify/require"
 )
 
 func TestMug(t *testing.T) {
@@ -28,7 +29,7 @@ func TestMug(t *testing.T) {
 	m3 := newTestMock()
 
 	repo := vlatte.NewCanister[*testMock]()
-	repo.Save(context.Background(), m1, m2, m3)
+	repo.Store(context.Background(), m1, m2, m3)
 
 	mug := vlatte.Pour(repo, []*testMock{m1, m2, m3})
 
