@@ -48,7 +48,7 @@ func New(config ...vlatte.Configurer[*Config]) *GRPCMockApp {
 		}
 	}
 
-	store := vlatte.NewCanister[*GRPCMock]()
+	store := vlatte.GrabCanister[*GRPCMock]()
 	in := &Interceptors{app: app}
 	srv := grpc.NewServer(
 		grpc.UnaryInterceptor(in.UnaryInterceptor),

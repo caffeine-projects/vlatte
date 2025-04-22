@@ -104,7 +104,7 @@ func New(config ...Configurer) *HTTPMockApp {
 		colors.SetLevel(gchalk.LevelNone)
 	}
 
-	repository := vlatte.NewCanister[*HTTPMock]()
+	repository := vlatte.GrabCanister[*HTTPMock]()
 
 	parsers := make([]RequestBodyParser, 0, len(conf.RequestBodyParsers)+3)
 	parsers = append(parsers, conf.RequestBodyParsers...)

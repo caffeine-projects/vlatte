@@ -13,8 +13,7 @@ type Jar[B Bean] struct {
 	mu    sync.RWMutex
 }
 
-// NewCanister returns Bean InMemBeanstore implementation.
-func NewCanister[B Bean]() Canister[B] {
+func GrabCanister[B Bean]() Canister[B] {
 	return &Jar[B]{beans: make([]B, 0)}
 }
 
@@ -43,15 +42,17 @@ func (s *Jar[B]) ScoopCuratedStream(ctx context.Context, done <-chan struct{}) (
 	return out, nil
 }
 
-func (s *Jar[B]) ScoopCurated(ctx context.Context) ([]B, error) {
+func (s *Jar[B]) ScoopCurated(_ context.Context) ([]B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	beans := make([]B, 0, len(s.beans))
 	for _, bean := range s.beans {
 		if bean.Enabled() {
 			beans = append(beans, bean)
 		}
 	}
+
 	return beans, nil
 }
 
@@ -82,20 +83,6 @@ func (s *Jar[B]) Pick(_ context.Context, id string) (B, error) {
 	return result, nil
 }
 
-func (s *Jar[B]) GetByIDs(ctx context.Context, ids ...string) ([]B, error) {
-	beans := make([]B, 0, len(ids))
-	for _, id := range ids {
-		m, err := s.Pick(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-
-		beans = append(beans, m)
-	}
-
-	return beans, nil
-}
-
 func (s *Jar[B]) PickAll(_ context.Context) ([]B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -120,24 +107,6 @@ func (s *Jar[B]) Toss(_ context.Context, ids ...string) error {
 		}
 
 		s.beans = s.beans[:index+copy(s.beans[index:], s.beans[index+1:])]
-	}
-
-	return nil
-}
-
-func (s *Jar[B]) DelExt(ctx context.Context) error {
-	ids := make([]string, 0, len(s.beans))
-
-	for _, m := range s.beans {
-		if len(m.GetSource()) > 0 {
-			ids = append(ids, m.GetID())
-		}
-	}
-
-	for _, id := range ids {
-		if err := s.Toss(ctx, id); err != nil {
-			return err
-		}
 	}
 
 	return nil
