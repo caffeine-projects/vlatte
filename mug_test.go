@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/brewer/xhttp"
-	"github.com/caffeine-projects/vlatte/brewer/xhttp/test/testmock"
+	"github.com/caffeine-projects/vlatte/drink/xhttp"
+	"github.com/caffeine-projects/vlatte/drink/xhttp/test/testmock"
 	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/sip"
 	"github.com/stretchr/testify/require"

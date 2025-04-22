@@ -7,7 +7,7 @@ type Recipe[B Bean, A MockApp[B]] interface {
 }
 
 type Pouch[B Bean, A MockApp[B]] struct {
-	Brewer Brewer[B, A]
+	Drink Drink[B, A]
 }
 
 type RecipeFunc[B Bean, A MockApp[B]] func(ctx context.Context, pouch *Pouch[B, A]) error

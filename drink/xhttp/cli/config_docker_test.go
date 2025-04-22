@@ -1,0 +1,64 @@
+package main
+
+import (
+	"os"
+	"testing"
+
+	"github.com/caffeine-projects/vlatte/drink/xhttp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestConfigDockerDefaultHTTPHost(t *testing.T) {
+	config := &xhttp.Config{}
+	conf := &dockerConfigurer{}
+	err := conf.Apply(config)
+
+	assert.NoError(t, err)
+	assert.False(t, config.UseHTTPS)
+	assert.Equal(t, "0.0.0.0:8080", config.Addr)
+}
+
+func TestConfigDockerDefaultHTTPsHost(t *testing.T) {
+	config := &xhttp.Config{}
+	config.UseHTTPS = true
+
+	conf := &dockerConfigurer{}
+	err := conf.Apply(config)
+
+	assert.NoError(t, err)
+	assert.True(t, config.UseHTTPS)
+	assert.Equal(t, "0.0.0.0:8443", config.Addr)
+}
+
+func TestConfigDockerHostDefined(t *testing.T) {
+	t.Cleanup(func() {
+		_ = os.Unsetenv(_dockerHostEnv)
+	})
+
+	require.NoError(t, os.Setenv(_dockerHostEnv, "example.org"))
+
+	config := &xhttp.Config{}
+	conf := &dockerConfigurer{}
+	err := conf.Apply(config)
+
+	assert.NoError(t, err)
+	assert.False(t, config.UseHTTPS)
+	assert.Equal(t, "example.org:8080", config.Addr)
+}
+
+func TestConfigDockerHostDefinedWithDots(t *testing.T) {
+	t.Cleanup(func() {
+		_ = os.Unsetenv(_dockerHostEnv)
+	})
+
+	require.NoError(t, os.Setenv(_dockerHostEnv, "example.org:"))
+
+	config := &xhttp.Config{}
+	conf := &dockerConfigurer{}
+	err := conf.Apply(config)
+
+	assert.NoError(t, err)
+	assert.False(t, config.UseHTTPS)
+	assert.Equal(t, "example.org:8080", config.Addr)
+}

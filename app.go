@@ -20,7 +20,7 @@ type Boilerplate[TM Bean, A MockApp[TM]] struct {
 }
 
 func NewBaseApp[TM Bean, A MockApp[TM]](app A, repo Jar[TM]) *Boilerplate[TM, A] {
-	return &Boilerplate[TM, A]{tray: &Tray[TM, A]{brewer: app, jar: repo}}
+	return &Boilerplate[TM, A]{tray: &Tray[TM, A]{drink: app, jar: repo}}
 }
 
 // Brew adds one or multiple request mocks.
