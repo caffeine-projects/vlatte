@@ -19,7 +19,7 @@ type Boilerplate[TM Bean, A MockApp[TM]] struct {
 	mu   sync.RWMutex
 }
 
-func NewBaseApp[TM Bean, A MockApp[TM]](app A, repo Jar[TM]) *Boilerplate[TM, A] {
+func NewBaseApp[TM Bean, A MockApp[TM]](app A, repo Canister[TM]) *Boilerplate[TM, A] {
 	return &Boilerplate[TM, A]{tray: &Tray[TM, A]{drink: app, jar: repo}}
 }
 

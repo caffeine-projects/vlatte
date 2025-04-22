@@ -27,7 +27,7 @@ func TestMug(t *testing.T) {
 	m2 := newTestMock()
 	m3 := newTestMock()
 
-	repo := vlatte.NewJar[*testMock]()
+	repo := vlatte.NewCanister[*testMock]()
 	repo.Save(context.Background(), m1, m2, m3)
 
 	mug := vlatte.Pour(repo, []*testMock{m1, m2, m3})

@@ -182,7 +182,7 @@ func newMock() *HTTPMock {
 	}
 }
 
-// Build allows users to use the Mock itself as a HTTPMockBuilder.
+// FIXME: this is not implmenting HTTPMockBuilder.
 func (m *HTTPMock) Build() (*HTTPMock, error) {
 	return m, nil
 }

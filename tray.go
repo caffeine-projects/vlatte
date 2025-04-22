@@ -9,7 +9,7 @@ import (
 type Tray[TM Bean, A MockApp[TM]] struct {
 	mu    sync.RWMutex
 	drink A
-	jar   Jar[TM]
+	jar   Canister[TM]
 	mugs  []*Mug[TM]
 }
 

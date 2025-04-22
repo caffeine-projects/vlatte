@@ -8,7 +8,7 @@ import (
 )
 
 func TestCanister(t *testing.T) {
-	st := NewJar[*GreenBean]()
+	st := NewCanister[*GreenBean]()
 	ctx := context.Background()
 
 	mock1 := &GreenBean{ID: "1", Name: "mock_1", enabled: true, Priority: 0}

@@ -25,7 +25,7 @@ type GRPCMockApp struct {
 	config  *Config
 	logger  *zerolog.Logger
 	addr    string
-	storage vlatte.Jar[*GRPCMock]
+	storage vlatte.Canister[*GRPCMock]
 }
 
 type ServerInfo struct {
@@ -48,7 +48,7 @@ func New(config ...vlatte.Configurer[*Config]) *GRPCMockApp {
 		}
 	}
 
-	store := vlatte.NewJar[*GRPCMock]()
+	store := vlatte.NewCanister[*GRPCMock]()
 	in := &Interceptors{app: app}
 	srv := grpc.NewServer(
 		grpc.UnaryInterceptor(in.UnaryInterceptor),

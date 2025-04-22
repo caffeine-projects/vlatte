@@ -32,7 +32,7 @@ type Encoders map[string]Encoder
 
 type Admin struct {
 	app  *HTTPMockApp
-	repo vlatte.Jar[*HTTPMock]
+	repo vlatte.Canister[*HTTPMock]
 }
 
 func (a *Admin) Init() http.Handler {

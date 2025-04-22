@@ -6,19 +6,19 @@ import (
 	"sync"
 )
 
-var _ Jar[*GreenBean] = (*Canister[*GreenBean])(nil)
+var _ Canister[*GreenBean] = (*Jar[*GreenBean])(nil)
 
-type Canister[B Bean] struct {
+type Jar[B Bean] struct {
 	beans []B
 	mu    sync.RWMutex
 }
 
-// NewJar returns Bean InMemBeanstore implementation.
-func NewJar[B Bean]() Jar[B] {
-	return &Canister[B]{beans: make([]B, 0)}
+// NewCanister returns Bean InMemBeanstore implementation.
+func NewCanister[B Bean]() Canister[B] {
+	return &Jar[B]{beans: make([]B, 0)}
 }
 
-func (s *Canister[B]) EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan B, error) {
+func (s *Jar[B]) EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan B, error) {
 	s.mu.RLock()
 	beans := make([]B, len(s.beans))
 	copy(beans, s.beans)
@@ -43,7 +43,7 @@ func (s *Canister[B]) EligibleStream(ctx context.Context, done <-chan struct{}) 
 	return out, nil
 }
 
-func (s *Canister[B]) Eligible(ctx context.Context) ([]B, error) {
+func (s *Jar[B]) Eligible(ctx context.Context) ([]B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	beans := make([]B, 0, len(s.beans))
@@ -55,7 +55,7 @@ func (s *Canister[B]) Eligible(ctx context.Context) ([]B, error) {
 	return beans, nil
 }
 
-func (s *Canister[B]) Save(_ context.Context, beans ...B) error {
+func (s *Jar[B]) Save(_ context.Context, beans ...B) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -68,7 +68,7 @@ func (s *Canister[B]) Save(_ context.Context, beans ...B) error {
 	return nil
 }
 
-func (s *Canister[B]) Get(_ context.Context, id string) (B, error) {
+func (s *Jar[B]) Get(_ context.Context, id string) (B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -82,7 +82,7 @@ func (s *Canister[B]) Get(_ context.Context, id string) (B, error) {
 	return result, nil
 }
 
-func (s *Canister[B]) GetByIDs(ctx context.Context, ids ...string) ([]B, error) {
+func (s *Jar[B]) GetByIDs(ctx context.Context, ids ...string) ([]B, error) {
 	beans := make([]B, 0, len(ids))
 	for _, id := range ids {
 		m, err := s.Get(ctx, id)
@@ -96,7 +96,7 @@ func (s *Canister[B]) GetByIDs(ctx context.Context, ids ...string) ([]B, error) 
 	return beans, nil
 }
 
-func (s *Canister[B]) GetAll(_ context.Context) ([]B, error) {
+func (s *Jar[B]) GetAll(_ context.Context) ([]B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -106,7 +106,7 @@ func (s *Canister[B]) GetAll(_ context.Context) ([]B, error) {
 	return ret, nil
 }
 
-func (s *Canister[B]) Del(_ context.Context, ids ...string) error {
+func (s *Jar[B]) Del(_ context.Context, ids ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -125,7 +125,7 @@ func (s *Canister[B]) Del(_ context.Context, ids ...string) error {
 	return nil
 }
 
-func (s *Canister[B]) DelExt(ctx context.Context) error {
+func (s *Jar[B]) DelExt(ctx context.Context) error {
 	ids := make([]string, 0, len(s.beans))
 
 	for _, m := range s.beans {
@@ -143,7 +143,7 @@ func (s *Canister[B]) DelExt(ctx context.Context) error {
 	return nil
 }
 
-func (s *Canister[B]) DelAll(_ context.Context) error {
+func (s *Jar[B]) DelAll(_ context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

@@ -14,11 +14,11 @@ var _ Taste[Bean] = (*Mug[Bean])(nil)
 type Mug[M Bean] struct {
 	beans map[string]M
 	del   map[string]struct{}
-	jar   Jar[M]
+	jar   Canister[M]
 	mu    sync.RWMutex
 }
 
-func Pour[M Bean](store Jar[M], mocks []M) *Mug[M] {
+func Pour[M Bean](store Canister[M], mocks []M) *Mug[M] {
 	scoped := &Mug[M]{beans: make(map[string]M, len(mocks)), del: make(map[string]struct{}), jar: store}
 	for _, m := range mocks {
 		scoped.beans[m.GetID()] = m

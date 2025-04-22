@@ -45,7 +45,7 @@ type Roaster[B Bean, TMockApp MockApp[B]] interface {
 	Roast(app TMockApp) (B, error)
 }
 
-type Jar[T Bean] interface {
+type Canister[T Bean] interface {
 	EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan T, error)
 	Eligible(ctx context.Context) ([]T, error)
 
@@ -182,11 +182,6 @@ func (m *GreenBean) Callbacks() []Callback {
 
 func (m *GreenBean) Flow() []Step {
 	return m.Steps
-}
-
-// Build allows users to use the Mock itself as a HTTPMockBuilder.
-func (m *GreenBean) Build() (*GreenBean, error) {
-	return m, nil
 }
 
 type Results struct {

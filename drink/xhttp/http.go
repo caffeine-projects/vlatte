@@ -48,7 +48,7 @@ type HTTPMockApp struct {
 
 	config             *Config
 	server             Server
-	storage            vlatte.Jar[*HTTPMock]
+	storage            vlatte.Canister[*HTTPMock]
 	scenarioStore      *mfeat.ScenarioStore
 	cancel             context.CancelFunc
 	requestBodyParsers []RequestBodyParser
@@ -104,7 +104,7 @@ func New(config ...Configurer) *HTTPMockApp {
 		colors.SetLevel(gchalk.LevelNone)
 	}
 
-	repository := vlatte.NewJar[*HTTPMock]()
+	repository := vlatte.NewCanister[*HTTPMock]()
 
 	parsers := make([]RequestBodyParser, 0, len(conf.RequestBodyParsers)+3)
 	parsers = append(parsers, conf.RequestBodyParsers...)
