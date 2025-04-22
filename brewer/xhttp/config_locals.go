@@ -3,8 +3,6 @@ package xhttp
 import (
 	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -70,15 +68,6 @@ const (
 	_kRecordSaveDir         = "record.save_dir"
 	_kRecordSaveBodyToFile  = "record.save_body_to_file"
 	_kRecordFileType        = "record.file_type"
-
-	_kForward                   = "forward"
-	_kForwardTarget             = "forward.target"
-	_kForwardHeaders            = "forward.headers"
-	_kForwardProxyHeaders       = "forward.proxy_headers"
-	_kForwardRemoveProxyHeaders = "forward.remove_proxy_headers"
-	_kForwardTrimPrefix         = "forward.trim_prefix"
-	_kForwardTrimSuffix         = "forward.trim_suffix"
-	_kForwardSSLVerify          = "forward.ssl_verify"
 )
 
 var _ Configurer = (*localConfigurer)(nil)
@@ -248,38 +237,6 @@ func (c *localConfigurer) apply(conf *Config, vi *viper.Viper) (err error) {
 		}
 	}
 
-	if vi.IsSet(_kForward) || vi.IsSet(_kForwardTarget) {
-		target := vi.GetString(_kForwardTarget)
-		if target == "" {
-			return errors.New(`when specifying a "forward" configuration, the field "forward.target" is required`)
-		}
-
-		targetURL, err := url.Parse(target)
-		if err != nil {
-			return fmt.Errorf(`field "forward.target" must contain a valid URL. error=%w`, err)
-		}
-
-		h := make(http.Header, len(vi.GetStringMapString(_kForwardHeaders)))
-		for k, v := range vi.GetStringMapString(_kForwardHeaders) {
-			h.Add(k, v)
-		}
-
-		hp := make(http.Header, len(vi.GetStringMapString(_kForwardProxyHeaders)))
-		for k, v := range vi.GetStringMapString(_kForwardProxyHeaders) {
-			hp.Add(k, v)
-		}
-
-		conf.Forward = &forwardConfig{
-			Target:               targetURL.String(),
-			Headers:              h,
-			ProxyHeaders:         hp,
-			ProxyHeadersToRemove: vi.GetStringSlice(_kForwardRemoveProxyHeaders),
-			TrimPrefix:           vi.GetString(_kForwardTrimPrefix),
-			TrimSuffix:           vi.GetString(_kForwardTrimSuffix),
-			SSLVerify:            vi.GetBool(_kForwardSSLVerify),
-		}
-	}
-
 	return nil
 }
 
@@ -378,12 +335,6 @@ func bindFlags(v *viper.Viper) error {
 	v.RegisterAlias(toFlagName(_kProxySSLVerify), _kProxySSLVerify)
 
 	cl.Bool(_kCORS, false, "Enabled CORS.")
-
-	cl.Bool(_kForward, false, "")
-	cl.String(_kForwardTarget, "", "Forward requests to the given URL.")
-	v.RegisterAlias(toFlagName(_kForwardTarget), _kForwardTarget)
-	cl.Bool(_kForwardSSLVerify, false, "SSL verify")
-	v.RegisterAlias(toFlagName(_kForwardSSLVerify), _kForwardSSLVerify)
 
 	err := cl.Parse(os.Args)
 	if err != nil {

@@ -184,19 +184,6 @@ func NewAPI(config ...Configurer) *HTTPMockApp {
 	app.colorizer = colors
 	app.admin = &Admin{app: app, repo: repository}
 
-	if app.config.Forward != nil {
-		app.MustBrew(Request().
-			MethodMatches(filter.Anything()).
-			Priority(10).
-			Reply(From(app.config.Forward.Target).
-				Headers(app.config.Forward.Headers).
-				ProxyHeaders(app.config.Forward.ProxyHeaders).
-				RemoveProxyHeaders(app.config.Forward.ProxyHeadersToRemove...).
-				TrimPrefix(app.config.Forward.TrimPrefix).
-				TrimSuffix(app.config.Forward.TrimSuffix).
-				SSLVerify(app.config.Forward.SSLVerify)))
-	}
-
 	err := server.Setup(app, handler)
 	if err != nil {
 		panic(fmt.Errorf("server: setup failed. %w", err))

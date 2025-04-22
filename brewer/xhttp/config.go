@@ -205,21 +205,6 @@ type Config struct {
 	// This is only used running the command-line version.
 	// To start an HTTPS server from code, call StartTLS() or MustStartTLS() from application instance.
 	UseHTTPS bool
-
-	// Forward configures a forward proxy for matched requests.
-	Forward *forwardConfig
-}
-
-// forwardConfig configures a forward proxy for matched requests.
-// Only for CLI.
-type forwardConfig struct {
-	Target               string
-	Headers              http.Header
-	ProxyHeaders         http.Header
-	ProxyHeadersToRemove []string
-	TrimPrefix           string
-	TrimSuffix           string
-	SSLVerify            bool
 }
 
 type DebugFn func(string, any)
@@ -245,7 +230,6 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Loaders = c.Loaders
 	conf.Proxy = c.Proxy
 	conf.Record = c.Record
-	conf.Forward = c.Forward
 	conf.UseHTTPS = c.UseHTTPS
 	conf.MockFileHandlers = c.MockFileHandlers
 	conf.TemplateEngine = c.TemplateEngine

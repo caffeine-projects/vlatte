@@ -68,8 +68,6 @@ func TestUseLocalsEnvVars(t *testing.T) {
 	assert.NoError(t, os.Setenv(_kProxy, "true"))
 	assert.NoError(t, os.Setenv(_kRecord, "true"))
 	assert.NoError(t, os.Setenv(_kCORS, "true"))
-	assert.NoError(t, os.Setenv(_kForward, "true"))
-	assert.NoError(t, os.Setenv(_kForwardTarget, "https://www.example.org/"))
 
 	assert.NoError(t, c.Apply(&Config{}))
 }
