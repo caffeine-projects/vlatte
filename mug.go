@@ -197,7 +197,7 @@ func (s *Mug[M]) Sync(ctx context.Context) error {
 	}
 
 	for _, id := range ids {
-		err := s.jar.Del(ctx, id)
+		err := s.jar.Toss(ctx, id)
 		if err != nil {
 			return err
 		}

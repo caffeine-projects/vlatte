@@ -103,7 +103,7 @@ func (a *Admin) add(w http.ResponseWriter, r *http.Request) {
 
 func (a *Admin) get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	mock, err := a.repo.Get(r.Context(), id)
+	mock, err := a.repo.Pick(r.Context(), id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

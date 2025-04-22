@@ -46,16 +46,15 @@ type Roaster[B Bean, TMockApp MockApp[B]] interface {
 }
 
 type Canister[T Bean] interface {
-	EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan T, error)
-	Eligible(ctx context.Context) ([]T, error)
+	ScoopCuratedStream(ctx context.Context, done <-chan struct{}) (<-chan T, error)
+	ScoopCurated(ctx context.Context) ([]T, error)
 
 	Store(ctx context.Context, bean ...T) error
 
-	Get(ctx context.Context, id string) (T, error)
-	GetAll(ctx context.Context) ([]T, error)
-	GetByIDs(ctx context.Context, ids ...string) ([]T, error)
+	Pick(ctx context.Context, id string) (T, error)
+	PickAll(ctx context.Context) ([]T, error)
 
-	Del(ctx context.Context, ids ...string) error
+	Toss(ctx context.Context, ids ...string) error
 	Empty(ctx context.Context) error
 }
 

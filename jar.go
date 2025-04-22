@@ -18,7 +18,7 @@ func NewCanister[B Bean]() Canister[B] {
 	return &Jar[B]{beans: make([]B, 0)}
 }
 
-func (s *Jar[B]) EligibleStream(ctx context.Context, done <-chan struct{}) (<-chan B, error) {
+func (s *Jar[B]) ScoopCuratedStream(ctx context.Context, done <-chan struct{}) (<-chan B, error) {
 	s.mu.RLock()
 	beans := make([]B, len(s.beans))
 	copy(beans, s.beans)
@@ -43,7 +43,7 @@ func (s *Jar[B]) EligibleStream(ctx context.Context, done <-chan struct{}) (<-ch
 	return out, nil
 }
 
-func (s *Jar[B]) Eligible(ctx context.Context) ([]B, error) {
+func (s *Jar[B]) ScoopCurated(ctx context.Context) ([]B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	beans := make([]B, 0, len(s.beans))
@@ -68,7 +68,7 @@ func (s *Jar[B]) Store(_ context.Context, beans ...B) error {
 	return nil
 }
 
-func (s *Jar[B]) Get(_ context.Context, id string) (B, error) {
+func (s *Jar[B]) Pick(_ context.Context, id string) (B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -85,7 +85,7 @@ func (s *Jar[B]) Get(_ context.Context, id string) (B, error) {
 func (s *Jar[B]) GetByIDs(ctx context.Context, ids ...string) ([]B, error) {
 	beans := make([]B, 0, len(ids))
 	for _, id := range ids {
-		m, err := s.Get(ctx, id)
+		m, err := s.Pick(ctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -96,7 +96,7 @@ func (s *Jar[B]) GetByIDs(ctx context.Context, ids ...string) ([]B, error) {
 	return beans, nil
 }
 
-func (s *Jar[B]) GetAll(_ context.Context) ([]B, error) {
+func (s *Jar[B]) PickAll(_ context.Context) ([]B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -106,7 +106,7 @@ func (s *Jar[B]) GetAll(_ context.Context) ([]B, error) {
 	return ret, nil
 }
 
-func (s *Jar[B]) Del(_ context.Context, ids ...string) error {
+func (s *Jar[B]) Toss(_ context.Context, ids ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -135,7 +135,7 @@ func (s *Jar[B]) DelExt(ctx context.Context) error {
 	}
 
 	for _, id := range ids {
-		if err := s.Del(ctx, id); err != nil {
+		if err := s.Toss(ctx, id); err != nil {
 			return err
 		}
 	}

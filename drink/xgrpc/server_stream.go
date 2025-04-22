@@ -8,7 +8,6 @@ import (
 	"io"
 	"reflect"
 
-	"github.com/caffeine-projects/vlatte"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -16,6 +15,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 type GRPCStreamMock struct {
@@ -170,7 +171,7 @@ func (in *Interceptors) StreamInterceptor(
 		return err
 	}
 
-	em, err := in.app.storage.Eligible(stream.Context())
+	em, err := in.app.storage.ScoopCurated(stream.Context())
 	if err != nil {
 		return interceptError("http: error finding eligible mocks for request. %w", err)
 	}

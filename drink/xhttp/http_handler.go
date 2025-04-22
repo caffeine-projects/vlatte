@@ -50,7 +50,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.lifecycle.OnRequest(reqValues)
 
-	em, err := h.app.storage.Eligible(r.Context())
+	em, err := h.app.storage.ScoopCurated(r.Context())
 	if err != nil {
 		h.lifecycle.OnError(reqValues, fmt.Errorf("http: error finding eligible mocks for request. %w", err))
 		return

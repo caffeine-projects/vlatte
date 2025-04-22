@@ -24,11 +24,11 @@ func TestCanister(t *testing.T) {
 	err = st.Store(ctx, mock3)
 	require.NoError(t, err)
 
-	mock, err := st.Get(ctx, mock1.ID)
+	mock, err := st.Pick(ctx, mock1.ID)
 	require.NoError(t, err)
 	require.Equal(t, mock1, mock)
 
-	mocks, err := st.GetAll(ctx)
+	mocks, err := st.PickAll(ctx)
 	require.NoError(t, err)
 
 	m := mocks[0]
@@ -39,7 +39,7 @@ func TestCanister(t *testing.T) {
 
 	eligible := make([]*GreenBean, 0)
 	done := make(chan struct{})
-	out, err := st.EligibleStream(ctx, done)
+	out, err := st.ScoopCuratedStream(ctx, done)
 	for v := range out {
 		eligible = append(eligible, v)
 	}
@@ -47,18 +47,18 @@ func TestCanister(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, eligible, 2)
 
-	eligible, err = st.GetAll(ctx)
+	eligible, err = st.PickAll(ctx)
 	require.NoError(t, err)
 	require.Len(t, eligible, 3)
 
-	err = st.Del(ctx, "2")
+	err = st.Toss(ctx, "2")
 	require.NoError(t, err)
-	eligible, err = st.GetAll(ctx)
+	eligible, err = st.PickAll(ctx)
 	require.NoError(t, err)
 	require.Len(t, eligible, 2)
 
 	eligible = make([]*GreenBean, 0)
-	out, err = st.EligibleStream(ctx, done)
+	out, err = st.ScoopCuratedStream(ctx, done)
 	for v := range out {
 		eligible = append(eligible, v)
 	}
@@ -70,7 +70,7 @@ func TestCanister(t *testing.T) {
 	err = st.Empty(ctx)
 	require.NoError(t, err)
 
-	eligible, err = st.GetAll(ctx)
+	eligible, err = st.PickAll(ctx)
 	require.NoError(t, err)
 	require.Len(t, eligible, 0)
 
@@ -79,14 +79,14 @@ func TestCanister(t *testing.T) {
 	err = st.Store(ctx, &GreenBean{ID: "11", Name: "mock_11", enabled: true, Priority: 0})
 	require.NoError(t, err)
 
-	all, err := st.GetAll(ctx)
+	all, err := st.PickAll(ctx)
 	require.NoError(t, err)
 	require.Len(t, all, 2)
 
 	err = st.Empty(ctx)
 	require.NoError(t, err)
 
-	all, err = st.GetAll(ctx)
+	all, err = st.PickAll(ctx)
 	require.NoError(t, err)
 	require.Len(t, all, 0)
 }

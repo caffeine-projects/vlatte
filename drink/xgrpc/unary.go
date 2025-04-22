@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/caffeine-projects/vlatte"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 type UnaryValueSelector func(ctx context.Context, in *UnaryValueSelectorIn) any
@@ -44,7 +45,7 @@ func (in *Interceptors) UnaryInterceptor(
 		return nil, err
 	}
 
-	em, err := in.app.storage.Eligible(ctx)
+	em, err := in.app.storage.ScoopCurated(ctx)
 	if err != nil {
 		return nil, interceptError("http: error finding eligible mocks for request. %w", err)
 	}
