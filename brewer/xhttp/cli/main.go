@@ -65,7 +65,7 @@ func run(ctx context.Context, custom ...xhttp.Configurer) {
 		configurers = append(configurers, &dockerConfigurer{})
 	}
 
-	m := xhttp.NewAPI(configurers...)
+	m := xhttp.New(configurers...)
 
 	rootCmd := &cobra.Command{
 		Use:     _usage,

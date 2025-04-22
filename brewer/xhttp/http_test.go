@@ -28,7 +28,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestMocha(t *testing.T) {
-	m := NewAPI()
+	m := New()
 	m.MustStart()
 
 	defer m.Close()
@@ -63,7 +63,7 @@ func TestResponseMapperModifyingResponse(t *testing.T) {
 	err := kv.Set(t.Context(), k, []byte(v))
 	require.NoError(t, err)
 
-	m := NewAPI(Setup().Parameters(kv))
+	m := New(Setup().Parameters(kv))
 	m.MustStart()
 
 	defer m.Close()
@@ -92,7 +92,7 @@ func TestResponseMapperModifyingResponse(t *testing.T) {
 }
 
 func TestErrors(t *testing.T) {
-	m := NewAPI()
+	m := New()
 	m.MustStart()
 
 	defer m.Close()
@@ -113,7 +113,7 @@ func TestErrors(t *testing.T) {
 }
 
 func TestMochaAssertions(t *testing.T) {
-	m := NewAPI()
+	m := New()
 	m.MustStart()
 
 	defer m.Close()
@@ -142,7 +142,7 @@ func TestMochaAssertions(t *testing.T) {
 }
 
 func TestMochaEnableDisable(t *testing.T) {
-	m := NewAPI()
+	m := New()
 	m.MustStart()
 
 	defer m.Close()
@@ -187,7 +187,7 @@ func TestMochaEnableDisable(t *testing.T) {
 }
 
 func TestMochaSilently(t *testing.T) {
-	m := NewAPI(Setup().LogVerbosity(LogBasic).LogLevel(LogLevelNone))
+	m := New(Setup().LogVerbosity(LogBasic).LogLevel(LogLevelNone))
 	m.MustStart()
 
 	defer m.Close()
@@ -212,7 +212,7 @@ func TestMochaSilently(t *testing.T) {
 }
 
 func TestSchemeMatching(t *testing.T) {
-	m := NewAPI()
+	m := New()
 	m.MustStart()
 
 	defer m.Close()
@@ -232,7 +232,7 @@ func TestSchemeMatching(t *testing.T) {
 }
 
 func TestMochaNoReply(t *testing.T) {
-	m := NewAPI()
+	m := New()
 
 	scoped, err := m.Brew(Get(URLPath("/test")))
 	require.Nil(t, scoped)
@@ -240,7 +240,7 @@ func TestMochaNoReply(t *testing.T) {
 }
 
 func TestMochaNoMatchers(t *testing.T) {
-	m := NewAPI()
+	m := New()
 
 	scoped, err := m.Brew(Request())
 	require.Nil(t, scoped)
@@ -248,7 +248,7 @@ func TestMochaNoMatchers(t *testing.T) {
 }
 
 func TestMocha_RequestMatches(t *testing.T) {
-	m := NewAPI()
+	m := New()
 	m.MustStart()
 
 	defer m.Close()
@@ -283,7 +283,7 @@ func TestMocha_RequestMatches(t *testing.T) {
 }
 
 func TestMochaConcurrency(t *testing.T) {
-	m := NewAPI()
+	m := New()
 	jobs := 10
 	wg := sync.WaitGroup{}
 
@@ -328,7 +328,7 @@ func TestMochaConcurrentRequests(t *testing.T) {
 	wg := sync.WaitGroup{}
 	httpClient := &http.Client{}
 
-	m := NewAPI()
+	m := New()
 	m.MustStart()
 
 	defer m.Close()
@@ -404,7 +404,7 @@ func TestSettingOnlyPort(t *testing.T) {
 	}
 
 	port := randomPort()
-	m := NewAPI(Setup().Port(port)).CloseWithT(t)
+	m := New(Setup().Port(port)).CloseWithT(t)
 	m.MustStart()
 	m.MustBrew(Getf("/test").Reply(OK()))
 
@@ -418,7 +418,7 @@ func TestSettingOnlyPort(t *testing.T) {
 }
 
 func TestMocha_Server(t *testing.T) {
-	m := NewAPI()
+	m := New()
 	srv := m.Server()
 
 	require.NotNil(t, srv)

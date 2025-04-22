@@ -12,6 +12,11 @@ import (
 	"google.golang.org/grpc"
 )
 
+var (
+	_ vlatte.MockApp[*GRPCMock]              = (*GRPCMockApp)(nil)
+	_ vlatte.Brewer[*GRPCMock, *GRPCMockApp] = (*GRPCMockApp)(nil)
+)
+
 type GRPCMockApp struct {
 	*vlatte.Boilerplate[*GRPCMock, *GRPCMockApp]
 
@@ -27,7 +32,7 @@ type ServerInfo struct {
 	Addr string
 }
 
-func NewGRPC(config ...vlatte.Configurer[*Config]) *GRPCMockApp {
+func New(config ...vlatte.Configurer[*Config]) *GRPCMockApp {
 	app := &GRPCMockApp{}
 	conf := defaultConfig()
 

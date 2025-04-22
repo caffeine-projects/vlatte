@@ -41,7 +41,7 @@ func TestTLS(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			m := NewAPI(tc.config).CloseWithT(t)
+			m := New(tc.config).CloseWithT(t)
 			m.MustStartTLS()
 
 			scoped := m.MustBrew(
@@ -69,7 +69,7 @@ func TestTLS_FileSetup(t *testing.T) {
 	client := &http.Client{
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 	}
-	m := NewAPI(UseConfig("testdata/tls/tls_app.yaml")).CloseWithT(t)
+	m := New(UseConfig("testdata/tls/tls_app.yaml")).CloseWithT(t)
 	m.MustStartTLS()
 
 	scoped := m.MustBrew(
@@ -110,7 +110,7 @@ func TestTLSMutual(t *testing.T) {
 			}},
 	}
 
-	target := NewAPI(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile)).CloseWithT(t)
+	target := New(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile)).CloseWithT(t)
 	target.MustStartTLS()
 	target.MustBrew(Getf("/test").Reply(Accepted().PlainText("accepted")))
 
@@ -144,11 +144,11 @@ func TestTLSMutualWithProxy(t *testing.T) {
 			}},
 	}
 
-	target := NewAPI(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile)).CloseWithT(t)
+	target := New(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile)).CloseWithT(t)
 	target.MustStartTLS()
 	target.MustBrew(Getf("/test").Reply(Accepted().PlainText("accepted")))
 
-	m := NewAPI(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile)).CloseWithT(t)
+	m := New(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile)).CloseWithT(t)
 	m.MustStartTLS()
 	m.MustBrew(Get(URLPath("/test")).
 		Header("test", StrictEqual("hello")).
@@ -186,11 +186,11 @@ func TestTLSMutualWithProxy_FileSetup(t *testing.T) {
 			}},
 	}
 
-	target := NewAPI(UseConfig("testdata/tls/tls_ca_target.yaml")).CloseWithT(t)
+	target := New(UseConfig("testdata/tls/tls_ca_target.yaml")).CloseWithT(t)
 	target.MustStartTLS()
 	target.MustBrew(Getf("/test").Reply(Accepted().PlainText("accepted")))
 
-	m := NewAPI(UseConfig("testdata/tls/tls_ca.yaml")).CloseWithT(t)
+	m := New(UseConfig("testdata/tls/tls_ca.yaml")).CloseWithT(t)
 	m.MustStartTLS()
 	m.MustBrew(Get(URLPath("/test")).
 		Header("test", StrictEqual("hello")).

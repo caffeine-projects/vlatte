@@ -14,7 +14,7 @@ import (
 )
 
 func TestUnary(t *testing.T) {
-	m := NewGRPC().CloseWithT(t)
+	m := New().CloseWithT(t)
 	pb.RegisterTestServiceServer(m.Server(), pb.UnimplementedTestServiceServer{})
 	m.MustStart()
 	m.MustBrew(UnaryMethod("Greetings").

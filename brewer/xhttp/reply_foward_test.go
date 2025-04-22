@@ -52,7 +52,7 @@ func TestForward(t *testing.T) {
 			RemoveProxyHeaders("x-to-be-removed").
 			Header("x-res", "response").
 			Headers(h)
-		require.NoError(t, reply.beforeBuild(NewAPI()))
+		require.NoError(t, reply.beforeBuild(New()))
 		res, err := reply.Build(nil, rv)
 
 		require.NoError(t, err)
@@ -81,7 +81,7 @@ func TestForward(t *testing.T) {
 
 		u, _ := url.Parse(dest.URL)
 		forward := From(u)
-		require.NoError(t, forward.beforeBuild(NewAPI()))
+		require.NoError(t, forward.beforeBuild(New()))
 		res, err := forward.Build(nil, rv)
 
 		require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestForward(t *testing.T) {
 
 		u, _ := url.Parse(dest.URL)
 		forward := From(u)
-		require.NoError(t, forward.beforeBuild(NewAPI()))
+		require.NoError(t, forward.beforeBuild(New()))
 		res, err := forward.Build(nil, rv)
 		require.NoError(t, err)
 
@@ -136,7 +136,7 @@ func TestForward(t *testing.T) {
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 
 		forward := From(dest.URL)
-		require.NoError(t, forward.beforeBuild(NewAPI()))
+		require.NoError(t, forward.beforeBuild(New()))
 		res, err := forward.Build(nil, rv)
 
 		require.NoError(t, err)
@@ -157,7 +157,7 @@ func TestForward(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080/path/test/example?filter=all", nil)
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		reply := From(dest.URL).TrimPrefix("/path/test")
-		require.NoError(t, reply.beforeBuild(NewAPI()))
+		require.NoError(t, reply.beforeBuild(New()))
 		res, err := reply.Build(nil, rv)
 
 		assert.NoError(t, err)
@@ -177,7 +177,7 @@ func TestForward(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080/path/test/example?filter=all", nil)
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		reply := From(dest.URL).TrimSuffix("/example")
-		require.NoError(t, reply.beforeBuild(NewAPI()))
+		require.NoError(t, reply.beforeBuild(New()))
 		res, err := reply.Build(nil, rv)
 
 		assert.NoError(t, err)
@@ -214,7 +214,7 @@ func TestForward(t *testing.T) {
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		reply := From(dest.URL).
 			Timeout(100 * time.Millisecond)
-		require.NoError(t, reply.beforeBuild(NewAPI()))
+		require.NoError(t, reply.beforeBuild(New()))
 		res, err := reply.Build(nil, rv)
 
 		require.Error(t, err)
@@ -222,12 +222,12 @@ func TestForward(t *testing.T) {
 	})
 
 	t.Run("should follow redirects when using default configs", func(t *testing.T) {
-		target := NewAPI()
+		target := New()
 		target.MustStart()
 
 		defer target.Close()
 
-		m := NewAPI()
+		m := New()
 		m.MustStart()
 
 		defer m.Close()
@@ -248,12 +248,12 @@ func TestForward(t *testing.T) {
 	})
 
 	t.Run("should NOT follow redirects when it is disabled", func(t *testing.T) {
-		target := NewAPI()
+		target := New()
 		target.MustStart()
 
 		defer target.Close()
 
-		m := NewAPI()
+		m := New()
 		m.MustStart()
 
 		defer m.Close()
@@ -275,10 +275,10 @@ func TestForward(t *testing.T) {
 	})
 
 	t.Run("tls", func(t *testing.T) {
-		target := NewAPI().CloseWithT(t)
+		target := New().CloseWithT(t)
 		target.MustStartTLS()
 
-		m := NewAPI().CloseWithT(t)
+		m := New().CloseWithT(t)
 		m.MustStart()
 
 		s1 := target.MustBrew(Getf("/test").Reply(OK().PlainText("hi")))

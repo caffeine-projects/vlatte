@@ -82,7 +82,7 @@ func TestMug(t *testing.T) {
 	})
 
 	t.Run("should only consider enabled store", func(t *testing.T) {
-		m := xhttp.NewAPI()
+		m := xhttp.New()
 		m.MustStart()
 
 		defer m.Close()

@@ -19,7 +19,7 @@ import (
 func TestCallbacks(t *testing.T) {
 	t.Run("should call registered post action", func(t *testing.T) {
 		spy := false
-		m := xhttp.NewAPI()
+		m := xhttp.New()
 		m.MustStart()
 
 		defer m.Close()
@@ -58,7 +58,7 @@ func TestCallbacks(t *testing.T) {
 		var callbackErrReceiver error
 
 		callbackErr := errors.New("failed to run post action")
-		m := xhttp.NewAPI()
+		m := xhttp.New()
 		m.MustStart()
 
 		defer m.Close()

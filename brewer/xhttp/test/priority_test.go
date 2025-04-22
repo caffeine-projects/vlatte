@@ -12,7 +12,7 @@ import (
 )
 
 func TestPriority(t *testing.T) {
-	m := NewAPI()
+	m := New()
 	m.MustStart()
 
 	defer m.Close()
@@ -43,7 +43,7 @@ func TestPriority(t *testing.T) {
 
 func TestPriority_DefaultIsZero(t *testing.T) {
 	httpClient := &http.Client{}
-	m := NewAPI(Setup().
+	m := New(Setup().
 		MockFilePatterns(
 			"testdata/priority/default_is_zero/*.json",
 			"testdata/priority/default_is_zero/*.yaml"))
@@ -78,7 +78,7 @@ func TestPriority_DefaultIsZero(t *testing.T) {
 
 func TestPriority_LowestShouldBeServed(t *testing.T) {
 	httpClient := &http.Client{}
-	m := NewAPI(Setup().
+	m := New(Setup().
 		RootDir("testdata/priority").
 		MockFilePatterns(
 			"lowest_should_be_served/*.json",

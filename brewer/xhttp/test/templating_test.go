@@ -19,7 +19,7 @@ func TestTemplating(t *testing.T) {
 	t.SkipNow()
 
 	kv := kvmem.New()
-	m := xhttp.NewAPI(xhttp.Setup().Parameters(kv))
+	m := xhttp.New(xhttp.Setup().Parameters(kv))
 	m.MustStart()
 	defer m.Close()
 
@@ -50,7 +50,7 @@ func TestTemplating_BodyFilename(t *testing.T) {
 	t.Log("templating needs rework")
 	t.SkipNow()
 
-	m := xhttp.NewAPI()
+	m := xhttp.New()
 	m.MustStart()
 	defer m.Close()
 
@@ -76,7 +76,7 @@ func TestTemplating_BodyFilename_BodyTemplate(t *testing.T) {
 	t.SkipNow()
 
 	kv := kvmem.New()
-	m := xhttp.NewAPI(xhttp.Setup().Parameters(kv))
+	m := xhttp.New(xhttp.Setup().Parameters(kv))
 	m.MustStart()
 	defer m.Close()
 
@@ -105,7 +105,7 @@ func TestTemplating_Header(t *testing.T) {
 	t.SkipNow()
 
 	kv := kvmem.New()
-	m := xhttp.NewAPI(xhttp.Setup().Parameters(kv))
+	m := xhttp.New(xhttp.Setup().Parameters(kv))
 	m.MustStart()
 	defer m.Close()
 
@@ -134,7 +134,7 @@ func TestTemplating_All(t *testing.T) {
 	t.SkipNow()
 
 	kv := kvmem.New()
-	m := xhttp.NewAPI(xhttp.Setup().Parameters(kv))
+	m := xhttp.New(xhttp.Setup().Parameters(kv))
 	m.MustStart()
 	defer m.Close()
 

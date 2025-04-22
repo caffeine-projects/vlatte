@@ -30,7 +30,7 @@ func TestHTTP2(t *testing.T) {
 		}},
 	}
 
-	m := NewAPI(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile)).CloseWithT(t)
+	m := New(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile)).CloseWithT(t)
 	m.MustStartTLS()
 	m.MustBrew(Getf("/test").Reply(OK().PlainText("hello world")))
 

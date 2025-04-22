@@ -12,7 +12,7 @@ import (
 )
 
 func TestTrailer_WithBody(t *testing.T) {
-	m := xhttp.NewAPI()
+	m := xhttp.New()
 	m.MustStart()
 
 	defer m.Close()
@@ -45,7 +45,7 @@ func TestTrailer_WithBody(t *testing.T) {
 }
 
 func TestTrailer_WithoutBody(t *testing.T) {
-	m := xhttp.NewAPI()
+	m := xhttp.New()
 	m.MustStart()
 
 	defer m.Close()

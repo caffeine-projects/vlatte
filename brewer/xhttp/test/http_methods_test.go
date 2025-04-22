@@ -14,7 +14,7 @@ import (
 func TestHTTPMethods(t *testing.T) {
 	client := &http.Client{}
 
-	m := NewAPI().CloseWithT(t)
+	m := New().CloseWithT(t)
 	m.MustStart()
 
 	defer m.Close()

@@ -13,7 +13,7 @@ import (
 )
 
 func TestCompressedResponse_GZIP(t *testing.T) {
-	m := xhttp.NewAPI()
+	m := xhttp.New()
 	m.MustStart()
 
 	defer m.Close()
@@ -37,7 +37,7 @@ func TestCompressedResponse_GZIP(t *testing.T) {
 }
 
 func Test_GZIPProxiedResponse(t *testing.T) {
-	p := xhttp.NewAPI()
+	p := xhttp.New()
 	p.MustStart()
 
 	defer p.Close()
@@ -47,7 +47,7 @@ func Test_GZIPProxiedResponse(t *testing.T) {
 			BodyText("hello world").
 			Gzip()))
 
-	m := xhttp.NewAPI()
+	m := xhttp.New()
 	m.MustStart()
 
 	defer m.Close()

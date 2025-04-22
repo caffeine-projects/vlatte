@@ -12,7 +12,7 @@ import (
 )
 
 func TestSequenceReplies(t *testing.T) {
-	m := xhttp.NewAPI()
+	m := xhttp.New()
 	m.MustStart()
 
 	defer m.Close()
@@ -42,7 +42,7 @@ func TestSequenceReplies(t *testing.T) {
 }
 
 func TestSequenceRepliesOnSequenceEndsSet(t *testing.T) {
-	m := xhttp.NewAPI()
+	m := xhttp.New()
 	m.MustStart()
 
 	defer m.Close()
@@ -79,7 +79,7 @@ func TestSequence_SetupFromFile(t *testing.T) {
 		Num  float64 `json:"num,omitempty"`
 	}
 
-	m := xhttp.NewAPI()
+	m := xhttp.New()
 	m.MustStart()
 
 	defer m.Close()

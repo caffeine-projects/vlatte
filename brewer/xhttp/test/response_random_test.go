@@ -9,7 +9,7 @@ import (
 )
 
 func TestRandom_SetupFromFileWithSeed(t *testing.T) {
-	m := xhttp.NewAPI()
+	m := xhttp.New()
 	m.MustStart()
 
 	defer m.Close()

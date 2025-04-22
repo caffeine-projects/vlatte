@@ -30,7 +30,7 @@ const (
 func TestWebHook_Run(t *testing.T) {
 	name := "webhook"
 	key := "test_key"
-	target := xhttp.NewAPI()
+	target := xhttp.New()
 	target.MustStart()
 	defer target.Close()
 
@@ -151,7 +151,7 @@ func TestWebHook_Run(t *testing.T) {
 			wh, err := webhook.New(tc.options...)
 			require.NoError(t, err)
 
-			m := xhttp.NewAPI(xhttp.Setup().PostAction(name, wh))
+			m := xhttp.New(xhttp.Setup().PostAction(name, wh))
 			m.MustStart()
 			defer m.Close()
 			defer target.Clean(t.Context())
@@ -187,7 +187,7 @@ func TestWebHook_TLS(t *testing.T) {
 	certPool := x509.NewCertPool()
 	certPool.AppendCertsFromPEM(caCert)
 
-	whSrv := xhttp.NewAPI(xhttp.Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
+	whSrv := xhttp.New(xhttp.Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
 	whSrv.MustStartTLS()
 	defer whSrv.Close()
 
@@ -205,7 +205,7 @@ func TestWebHook_TLS(t *testing.T) {
 	}))
 	require.NoError(t, err)
 
-	m := xhttp.NewAPI(xhttp.Setup().
+	m := xhttp.New(xhttp.Setup().
 		TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile).
 		PostAction(name, wh))
 	m.MustStartTLS()
@@ -242,7 +242,7 @@ func TestWebHook_TLS(t *testing.T) {
 
 func TestWebHook_FaultTarget(t *testing.T) {
 	name := "webhook"
-	target := xhttp.NewAPI()
+	target := xhttp.New()
 	target.MustStart()
 	defer target.Close()
 
@@ -252,7 +252,7 @@ func TestWebHook_FaultTarget(t *testing.T) {
 
 	wh, err := webhook.New()
 	require.NoError(t, err)
-	m := xhttp.NewAPI(xhttp.Setup().PostAction(name, wh))
+	m := xhttp.New(xhttp.Setup().PostAction(name, wh))
 	m.MustStart()
 	defer m.Close()
 
@@ -301,7 +301,7 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 	testCases := []any{make(chan struct{}), nil}
 
 	whSrv := xhttp.
-		NewAPI(xhttp.Setup().HTTPClient(func() *http.Client {
+		New(xhttp.Setup().HTTPClient(func() *http.Client {
 			return client
 		}))
 	whSrv.MustStart()
@@ -312,7 +312,7 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := xhttp.NewAPI(xhttp.Setup().PostAction(name, wh))
+	m := xhttp.New(xhttp.Setup().PostAction(name, wh))
 	m.MustStart()
 	defer m.Close()
 
@@ -336,7 +336,7 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 
 func TestWebHook_FileSetup(t *testing.T) {
 	name := "webhook"
-	target := xhttp.NewAPI(xhttp.Setup())
+	target := xhttp.New(xhttp.Setup())
 	target.MustStart()
 	defer target.Close()
 
@@ -350,7 +350,7 @@ func TestWebHook_FileSetup(t *testing.T) {
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := xhttp.NewAPI(xhttp.Setup().PostAction(name, wh))
+	m := xhttp.New(xhttp.Setup().PostAction(name, wh))
 	m.SetData(map[string]any{"webhook_target": target.URL("/fs/hook")})
 	m.MustStart()
 	defer m.Close()
@@ -384,7 +384,7 @@ func TestWebHook_InvalidFiles(t *testing.T) {
 			wh, err := webhook.New()
 			require.NoError(t, err)
 
-			m := xhttp.NewAPI(xhttp.Setup().PostAction(name, wh))
+			m := xhttp.New(xhttp.Setup().PostAction(name, wh))
 			defer m.Close()
 
 			mock, err := m.Brew(xhttp.FromFile(tc.filename))

@@ -14,7 +14,7 @@ import (
 )
 
 func TestResponseDelay(t *testing.T) {
-	m := NewAPI()
+	m := New()
 	m.MustStart()
 
 	defer m.Close()
@@ -41,7 +41,7 @@ func TestResponseDelay_SetupFromFile(t *testing.T) {
 	t.Parallel()
 
 	httpClient := &http.Client{}
-	m := NewAPI().CloseWithT(t)
+	m := New().CloseWithT(t)
 	m.MustStart()
 
 	testCases := []struct {

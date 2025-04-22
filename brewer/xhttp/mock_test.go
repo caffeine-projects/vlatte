@@ -72,7 +72,7 @@ func TestMockBuild(t *testing.T) {
 }
 
 func TestMock_MarshalJSON(t *testing.T) {
-	app := NewAPI()
+	app := New()
 	builder := Request().
 		Header("accept", Eq("test")).
 		Once().

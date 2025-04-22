@@ -21,9 +21,9 @@ type Config struct {
 
 func New(config Config) vlatte.Recipe[*xhttp.HTTPMock, *xhttp.HTTPMockApp] {
 	return vlatte.
-		RecipeFunc[*xhttp.HTTPMock, *xhttp.HTTPMockApp](func(ctx context.Context, pouch vlatte.Pouch[*xhttp.HTTPMock, *xhttp.HTTPMockApp]) error {
+		RecipeFunc[*xhttp.HTTPMock, *xhttp.HTTPMockApp](func(ctx context.Context, pouch *vlatte.Pouch[*xhttp.HTTPMock, *xhttp.HTTPMockApp]) error {
 
-		_, err := pouch.Brew(xhttp.Request().
+		_, err := pouch.Brewer.Brew(xhttp.Request().
 			MethodMatches(filter.Anything()).
 			Priority(10).
 			Reply(xhttp.From(config.Target).
