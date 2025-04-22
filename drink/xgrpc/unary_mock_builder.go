@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	_ vlatte.Builder[*GRPCMock, *GRPCMockApp] = (*UnaryMockBuilder)(nil)
+	_ vlatte.Roaster[*GRPCMock, *GRPCMockApp] = (*UnaryMockBuilder)(nil)
 	_ GRPCMockBuilder                         = (*UnaryMockBuilder)(nil)
 )
 
@@ -59,7 +59,7 @@ func (b *UnaryMockBuilder) Reply(r UnaryReply) *UnaryMockBuilder {
 	return b
 }
 
-func (b *UnaryMockBuilder) Build(_ *GRPCMockApp) (*GRPCMock, error) {
+func (b *UnaryMockBuilder) Roast(_ *GRPCMockApp) (*GRPCMock, error) {
 	return b.m, nil
 }
 

@@ -35,7 +35,7 @@ func NewBaseApp[TM Bean, A MockApp[TM]](app A, repo Jar[TM]) *Boilerplate[TM, A]
 //			Reply(reply.Created().PlainText("hello world")))
 //
 //	assert.True(txtTemplate, scoped.HasBeenCalled())
-func (app *Boilerplate[TM, A]) Brew(builders ...Builder[TM, A]) (*Mug[TM], error) {
+func (app *Boilerplate[TM, A]) Brew(builders ...Roaster[TM, A]) (*Mug[TM], error) {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
@@ -55,7 +55,7 @@ func (app *Boilerplate[TM, A]) Brew(builders ...Builder[TM, A]) (*Mug[TM], error
 //			Reply(reply.Created().PlainText("hello world")))
 //
 //	assert.True(txtTemplate, scoped.HasBeenCalled())
-func (app *Boilerplate[TM, A]) MustBrew(builders ...Builder[TM, A]) *Mug[TM] {
+func (app *Boilerplate[TM, A]) MustBrew(builders ...Roaster[TM, A]) *Mug[TM] {
 	mug, err := app.Brew(builders...)
 	if err != nil {
 		panic(err)

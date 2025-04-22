@@ -13,14 +13,14 @@ type Tray[TM Bean, A MockApp[TM]] struct {
 	mugs  []*Mug[TM]
 }
 
-func (a *Tray[TM, A]) Add(builders ...Builder[TM, A]) (*Mug[TM], error) {
+func (a *Tray[TM, A]) Add(builders ...Roaster[TM, A]) (*Mug[TM], error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	added := make([]TM, len(builders))
 
 	for i, b := range builders {
-		mock, err := b.Build(a.drink)
+		mock, err := b.Roast(a.drink)
 		if err != nil {
 			return nil, fmt.Errorf("server: error adding mock at index %d.\n%w", i, err)
 		}

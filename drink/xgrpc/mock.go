@@ -10,7 +10,7 @@ type Interceptors struct {
 }
 
 type GRPCMockBuilder interface {
-	Build(*GRPCMockApp) (*GRPCMock, error)
+	Roast(*GRPCMockApp) (*GRPCMock, error)
 }
 
 type GRPCMock struct {

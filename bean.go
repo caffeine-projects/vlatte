@@ -40,9 +40,9 @@ func UseUUID() IDGen {
 	}
 }
 
-// Builder describes a Mock builder.
-type Builder[B Bean, TMockApp MockApp[B]] interface {
-	Build(app TMockApp) (B, error)
+// Roaster describes a Mock builder.
+type Roaster[B Bean, TMockApp MockApp[B]] interface {
+	Roast(app TMockApp) (B, error)
 }
 
 type Jar[T Bean] interface {

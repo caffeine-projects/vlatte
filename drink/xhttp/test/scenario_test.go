@@ -14,9 +14,9 @@ import (
 func TestScenarios(t *testing.T) {
 	testCases := []struct {
 		name string
-		s1   vlatte.Builder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
-		s2   vlatte.Builder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
-		s3   vlatte.Builder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
+		s1   vlatte.Roaster[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
+		s2   vlatte.Roaster[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
+		s3   vlatte.Roaster[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
 	}{
 		{"code",
 			xhttp.Get(URLPath("/1")).

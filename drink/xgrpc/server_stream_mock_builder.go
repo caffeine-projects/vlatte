@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	_ vlatte.Builder[*GRPCMock, *GRPCMockApp] = (*ServerStreamMockBuilder)(nil)
+	_ vlatte.Roaster[*GRPCMock, *GRPCMockApp] = (*ServerStreamMockBuilder)(nil)
 	_ GRPCMockBuilder                         = (*ServerStreamMockBuilder)(nil)
 )
 
@@ -59,7 +59,7 @@ func (b *ServerStreamMockBuilder) Reply(r ServerStreamReply) *ServerStreamMockBu
 	return b
 }
 
-func (b *ServerStreamMockBuilder) Build(_ *GRPCMockApp) (*GRPCMock, error) {
+func (b *ServerStreamMockBuilder) Roast(_ *GRPCMockApp) (*GRPCMock, error) {
 	return b.m, nil
 }
 

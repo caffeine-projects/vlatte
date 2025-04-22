@@ -5,9 +5,10 @@ import (
 	"sync"
 	"testing"
 
-	. "github.com/caffeine-projects/vlatte/filter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	. "github.com/caffeine-projects/vlatte/filter"
 )
 
 func TestRace(t *testing.T) {
@@ -79,7 +80,7 @@ func TestMock_MarshalJSON(t *testing.T) {
 		ScenarioIs("test").ScenarioStateIs("state").ScenarioStateWillBe("future").
 		Reply(OK())
 
-	m, err := builder.Build(app)
+	m, err := builder.Roast(app)
 	require.NoError(t, err)
 
 	b, err := m.MarshalJSON()
