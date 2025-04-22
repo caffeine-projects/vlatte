@@ -56,7 +56,7 @@ type Canister[T Bean] interface {
 	GetByIDs(ctx context.Context, ids ...string) ([]T, error)
 
 	Del(ctx context.Context, ids ...string) error
-	DelAll(ctx context.Context) error
+	Empty(ctx context.Context) error
 }
 
 // GreenBean holds metadata and expectations to be matched against HTTP requests in order to serve mocked responses.

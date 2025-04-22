@@ -143,7 +143,7 @@ func (s *Jar[B]) DelExt(ctx context.Context) error {
 	return nil
 }
 
-func (s *Jar[B]) DelAll(_ context.Context) error {
+func (s *Jar[B]) Empty(_ context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

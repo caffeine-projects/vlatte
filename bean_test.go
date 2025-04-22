@@ -67,7 +67,7 @@ func TestCanister(t *testing.T) {
 	require.Len(t, eligible, 1)
 	require.Equal(t, "3", eligible[0].ID)
 
-	err = st.DelAll(ctx)
+	err = st.Empty(ctx)
 	require.NoError(t, err)
 
 	eligible, err = st.GetAll(ctx)
@@ -83,7 +83,7 @@ func TestCanister(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, all, 2)
 
-	err = st.DelAll(ctx)
+	err = st.Empty(ctx)
 	require.NoError(t, err)
 
 	all, err = st.GetAll(ctx)
