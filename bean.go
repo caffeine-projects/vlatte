@@ -10,7 +10,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/encutil"
 )
 
-var _ Bean = (*GreenBean)(nil)
+// var _ Bean = (*GreenBean)(nil)
 
 type Bean interface {
 	GetID() string
@@ -21,15 +21,16 @@ type Bean interface {
 	Dec()
 	Hits() int64
 	Called() bool
-	Enabled() bool
-	Enable()
-	Disable()
-	String() string
+	Roasted() bool
+	Roast()
+	Raw()
 	Prepare()
 
 	PostActions() PostActions
 	Callbacks() []Callback
 	Flow() []Step
+
+	String() string
 }
 
 type IDGen func() string
@@ -116,7 +117,7 @@ func (m *GreenBean) GetSource() string {
 	return m.Source
 }
 
-func (m *GreenBean) Enabled() bool {
+func (m *GreenBean) Roasted() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.enabled
@@ -144,7 +145,7 @@ func (m *GreenBean) Called() bool {
 
 // Enable enables the Mock.
 // The Mock will be eligible to be matched.
-func (m *GreenBean) Enable() {
+func (m *GreenBean) Roast() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.enabled = true
@@ -152,7 +153,7 @@ func (m *GreenBean) Enable() {
 
 // Disable disables the Mock.
 // The Mock will not be eligible to be matched.
-func (m *GreenBean) Disable() {
+func (m *GreenBean) Raw() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.enabled = false

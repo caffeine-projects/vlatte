@@ -35,7 +35,7 @@ func TestCanister(t *testing.T) {
 	require.Equal(t, m.ID, "1")
 	require.Equal(t, m.Name, "mock_1")
 
-	m.Disable()
+	m.Raw()
 
 	eligible := make([]*GreenBean, 0)
 	done := make(chan struct{})

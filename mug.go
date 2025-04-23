@@ -18,16 +18,40 @@ type Mug[B Bean] struct {
 	mu    sync.RWMutex
 }
 
-func Pour[B Bean](store Canister[B], mocks []B) *Mug[B] {
-	scoped := &Mug[B]{beans: make(map[string]B, len(mocks)), del: make(map[string]struct{}), jar: store}
-	for _, m := range mocks {
-		scoped.beans[m.GetID()] = m
+func Pour[B Bean](canister Canister[B], beans []B) *Mug[B] {
+	mug := &Mug[B]{beans: make(map[string]B, len(beans)), del: make(map[string]struct{}), jar: canister}
+	for _, m := range beans {
+		mug.beans[m.GetID()] = m
 	}
 
-	return scoped
+	return mug
 }
 
-func (s *Mug[B]) IDs() []string {
+// Bean returns a Mock with the given ID.
+func (s *Mug[B]) Bean(id string) B {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.beans[id]
+}
+
+// Beans returns all Mock instances kept in this Scope.
+func (s *Mug[B]) Beans() []B {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	mocks := make([]B, len(s.beans))
+	i := 0
+
+	for _, m := range s.beans {
+		mocks[i] = m
+		i++
+	}
+
+	return mocks
+}
+
+func (s *Mug[B]) BeanIDs() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -45,30 +69,6 @@ func (s *Mug[B]) Exists(id string) bool {
 
 	_, exists := s.beans[id]
 	return exists
-}
-
-// Get returns a Mock with the given ID.
-func (s *Mug[B]) Get(id string) B {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	return s.beans[id]
-}
-
-// GetAll returns all Mock instances kept in this Scope.
-func (s *Mug[B]) GetAll() []B {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	mocks := make([]B, len(s.beans))
-	i := 0
-
-	for _, m := range s.beans {
-		mocks[i] = m
-		i++
-	}
-
-	return mocks
 }
 
 // ListPending returns all Mock instances that were not called at least once.
@@ -108,7 +108,7 @@ func (s *Mug[B]) Called() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	for _, m := range s.GetAll() {
+	for _, m := range s.Beans() {
 		if !m.Called() {
 			return false
 		}
@@ -119,7 +119,7 @@ func (s *Mug[B]) Called() bool {
 
 // Pending returns true when there are one or more Mock instances that were not called at least once.
 func (s *Mug[B]) Pending() bool {
-	for _, m := range s.GetAll() {
+	for _, m := range s.Beans() {
 		if !m.Called() {
 			return true
 		}
@@ -131,15 +131,15 @@ func (s *Mug[B]) Pending() bool {
 // Disable scoped store.
 // Disabled Mock will be ignored.
 func (s *Mug[B]) Disable() {
-	for _, m := range s.GetAll() {
-		m.Disable()
+	for _, m := range s.Beans() {
+		m.Raw()
 	}
 }
 
 // Enable all Mock instances kept in this Scope.
 func (s *Mug[B]) Enable() {
-	for _, m := range s.GetAll() {
-		m.Enable()
+	for _, m := range s.Beans() {
+		m.Roast()
 	}
 }
 
@@ -171,7 +171,7 @@ func (s *Mug[B]) Empty(ctx context.Context) error {
 // Hits returns the sum of the Scope store calls.
 func (s *Mug[B]) Hits() int64 {
 	total := int64(0)
-	for _, m := range s.GetAll() {
+	for _, m := range s.Beans() {
 		total += m.Hits()
 	}
 

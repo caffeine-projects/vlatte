@@ -27,7 +27,7 @@ func (s *Jar[B]) ScoopCuratedStream(ctx context.Context, done <-chan struct{}) (
 	go func() {
 		defer close(out)
 		for _, bean := range beans {
-			if bean.Enabled() {
+			if bean.Roasted() {
 				select {
 				case out <- bean:
 				case <-ctx.Done():
@@ -48,7 +48,7 @@ func (s *Jar[B]) ScoopCurated(_ context.Context) ([]B, error) {
 
 	beans := make([]B, 0, len(s.beans))
 	for _, bean := range s.beans {
-		if bean.Enabled() {
+		if bean.Roasted() {
 			beans = append(beans, bean)
 		}
 	}

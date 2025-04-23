@@ -133,7 +133,7 @@ func TestMatcherCombinations(t *testing.T) {
 	m.MustStart()
 	defer m.Close()
 
-	entry := sHTTP.GetAll()[0]
+	entry := sHTTP.Beans()[0]
 	b, err := entry.MarshalJSON()
 	require.NoError(t, err)
 

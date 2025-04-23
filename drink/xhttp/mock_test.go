@@ -40,15 +40,15 @@ func TestMock(t *testing.T) {
 	m := newMock()
 
 	t.Run("should init enabled", func(t *testing.T) {
-		assert.True(t, m.Enabled())
+		assert.True(t, m.Roasted())
 	})
 
-	t.Run("should disable mock when calling .Disable()", func(t *testing.T) {
-		m.Disable()
-		assert.False(t, m.Enabled())
+	t.Run("should disable mock when calling .Raw()", func(t *testing.T) {
+		m.Raw()
+		assert.False(t, m.Roasted())
 
-		m.Enable()
-		assert.True(t, m.Enabled())
+		m.Roast()
+		assert.True(t, m.Roasted())
 	})
 
 	t.Run("should return called when it was hit", func(t *testing.T) {
@@ -64,7 +64,7 @@ func TestMock(t *testing.T) {
 func TestMockBuild(t *testing.T) {
 	m := newMock()
 	m.Inc()
-	m.Disable()
+	m.Raw()
 
 	mm, err := m.Build()
 

@@ -33,9 +33,9 @@ func TestMug(t *testing.T) {
 
 	mug := vlatte.Pour(repo, []*testMock{m1, m2, m3})
 
-	require.Equal(t, 3, len(mug.GetAll()))
-	require.Equal(t, m1, mug.Get(m1.GetID()))
-	require.Nil(t, mug.Get("unknown"))
+	require.Equal(t, 3, len(mug.Beans()))
+	require.Equal(t, m1, mug.Bean(m1.GetID()))
+	require.Nil(t, mug.Bean("unknown"))
 
 	t.Run("should not return done when there is still pending mocks", func(t *testing.T) {
 		ft := testmock.NewFakeT()
@@ -183,5 +183,5 @@ func TestScopedDelete(t *testing.T) {
 	require.True(t, mug.Toss(m1.GetID()))
 	require.False(t, mug.Toss("unknown"))
 
-	require.Nil(t, mug.Get(m1.GetID()))
+	require.Nil(t, mug.Bean(m1.GetID()))
 }
