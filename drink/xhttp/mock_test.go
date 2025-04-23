@@ -12,7 +12,7 @@ import (
 )
 
 func TestRace(t *testing.T) {
-	m := newMock()
+	m := NewMock()
 	jobs := 10
 	wg := sync.WaitGroup{}
 
@@ -37,7 +37,7 @@ func TestRace(t *testing.T) {
 }
 
 func TestMock(t *testing.T) {
-	m := newMock()
+	m := NewMock()
 
 	t.Run("should init enabled", func(t *testing.T) {
 		assert.True(t, m.Roasted())
@@ -59,17 +59,6 @@ func TestMock(t *testing.T) {
 		m.Dec()
 		assert.False(t, m.Called())
 	})
-}
-
-func TestMockBuild(t *testing.T) {
-	m := newMock()
-	m.Inc()
-	m.Raw()
-
-	mm, err := m.Build()
-
-	assert.NoError(t, err)
-	assert.Equal(t, m, mm)
 }
 
 func TestMock_MarshalJSON(t *testing.T) {

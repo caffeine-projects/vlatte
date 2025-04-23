@@ -12,7 +12,7 @@ help: ## show help
 
 .PHONY: test
 test: ## run tests
-	@go test -v -race ./...
+	@go test -v -race -timeout 1m ./...
 
 .PHONY: testci
 testci: ## run tests with a focus on ci

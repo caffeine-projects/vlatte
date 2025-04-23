@@ -97,7 +97,7 @@ func (a *Admin) add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Add(httpval.HeaderLocation, "/mocks/"+mock.GetID())
+	w.Header().Add(httpval.HeaderLocation, "/mocks/"+mock.ID())
 	w.WriteHeader(http.StatusCreated)
 }
 

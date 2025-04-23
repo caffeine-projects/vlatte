@@ -33,9 +33,9 @@ func NotCalled[M vlatte.Bean](t vlatte.TestingT, taste vlatte.Taste[M]) bool {
 
 	for _, p := range called {
 		b.WriteString("  Mock [")
-		b.WriteString(p.GetID())
+		b.WriteString(p.ID())
 		b.WriteString("] ")
-		b.WriteString(p.GetName())
+		b.WriteString(p.Name())
 		b.WriteString("\n")
 	}
 

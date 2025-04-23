@@ -2,21 +2,15 @@ package vlatte
 
 import (
 	"context"
-	"sync"
-	"sync/atomic"
-
-	"github.com/google/uuid"
 
 	"github.com/caffeine-projects/vlatte/internal/encutil"
 )
 
-// var _ Bean = (*GreenBean)(nil)
-
 type Bean interface {
-	GetID() string
-	GetName() string
-	GetPriority() int
-	GetSource() string
+	ID() string
+	Name() string
+	Priority() int
+	Origin() string
 	Inc()
 	Dec()
 	Hits() int64
@@ -31,14 +25,6 @@ type Bean interface {
 	Flow() []Step
 
 	String() string
-}
-
-type IDGen func() string
-
-func UseUUID() IDGen {
-	return func() string {
-		return uuid.New().String()
-	}
 }
 
 // Roaster describes a Mock builder.
@@ -57,131 +43,6 @@ type Canister[T Bean] interface {
 
 	Toss(ctx context.Context, ids ...string) error
 	Empty(ctx context.Context) error
-}
-
-// GreenBean holds metadata and expectations to be matched against HTTP requests in order to serve mocked responses.
-// This is the core entity of this project, and most features work based on it.
-type GreenBean struct {
-	mu      sync.RWMutex
-	hits    atomic.Int64
-	enabled bool
-
-	// ID is the unique identifier of a Mock
-	ID string
-
-	// Name describes the mock. Useful for debugging.
-	Name string
-
-	// Priority sets the priority of a Mock.
-	Priority int
-
-	// Source describes the source of the mock. E.g.: if it was built from a file,
-	// it will contain the filename.
-	Source string
-
-	// Delay sets the duration to delay serving the mocked response.
-	Delay Delay
-
-	PostActionList PostActions
-
-	CallbackList []Callback
-
-	Steps []Step
-}
-
-// NewMock returns a new Mock with default values set.
-func NewMock(idgen IDGen) *GreenBean {
-	return &GreenBean{
-		ID:             idgen(),
-		PostActionList: make(PostActions, 0),
-		CallbackList:   make([]Callback, 0),
-		Steps:          make([]Step, 0),
-
-		enabled: true,
-	}
-}
-
-func (m *GreenBean) GetID() string {
-	return m.ID
-}
-
-func (m *GreenBean) GetName() string {
-	return m.Name
-}
-
-func (m *GreenBean) GetPriority() int {
-	return m.Priority
-}
-
-func (m *GreenBean) GetSource() string {
-	return m.Source
-}
-
-func (m *GreenBean) Roasted() bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.enabled
-}
-
-// Inc increment one Mock call.
-func (m *GreenBean) Inc() {
-	m.hits.Add(1)
-}
-
-// Dec reduce one Mock call.
-func (m *GreenBean) Dec() {
-	m.hits.Add(-1)
-}
-
-// Hits returns the amount of time this Mock was matched to a request and served.
-func (m *GreenBean) Hits() int64 {
-	return m.hits.Load()
-}
-
-// Called checks if the Mock was called at least once.
-func (m *GreenBean) Called() bool {
-	return m.hits.Load() > 0
-}
-
-// Enable enables the Mock.
-// The Mock will be eligible to be matched.
-func (m *GreenBean) Roast() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.enabled = true
-}
-
-// Disable disables the Mock.
-// The Mock will not be eligible to be matched.
-func (m *GreenBean) Raw() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.enabled = false
-}
-
-func (m *GreenBean) Switch(state bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.enabled = state
-}
-
-func (m *GreenBean) Prepare() {
-}
-
-func (m *GreenBean) String() string {
-	return ""
-}
-
-func (m *GreenBean) PostActions() PostActions {
-	return m.PostActionList
-}
-
-func (m *GreenBean) Callbacks() []Callback {
-	return m.CallbackList
-}
-
-func (m *GreenBean) Flow() []Step {
-	return m.Steps
 }
 
 type Results struct {

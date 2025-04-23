@@ -713,6 +713,7 @@ func TestRecordTLSClient(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, res.StatusCode)
 }
 
+// TODO: flaky
 func TestRecordBothTLS(t *testing.T) {
 	dir := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

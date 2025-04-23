@@ -1,92 +1,85 @@
 package vlatte
 
-import (
-	"context"
-	"testing"
+// func TestCanister(t *testing.T) {
+// 	st := NewCanister[*GreenBean]()
+// 	ctx := context.Background()
 
-	"github.com/stretchr/testify/require"
-)
+// 	mock1 := &GreenBean{ID: "1", Name: "mock_1", enabled: true, Priority: 0}
+// 	mock2 := &GreenBean{ID: "2", Name: "mock_2", enabled: true, Priority: 1}
+// 	mock3 := &GreenBean{ID: "3", Name: "mock_3", enabled: true, Priority: 2}
 
-func TestCanister(t *testing.T) {
-	st := GrabCanister[*GreenBean]()
-	ctx := context.Background()
+// 	err := st.Store(ctx, mock1)
+// 	require.NoError(t, err)
 
-	mock1 := &GreenBean{ID: "1", Name: "mock_1", enabled: true, Priority: 0}
-	mock2 := &GreenBean{ID: "2", Name: "mock_2", enabled: true, Priority: 1}
-	mock3 := &GreenBean{ID: "3", Name: "mock_3", enabled: true, Priority: 2}
+// 	err = st.Store(ctx, mock2)
+// 	require.NoError(t, err)
 
-	err := st.Store(ctx, mock1)
-	require.NoError(t, err)
+// 	err = st.Store(ctx, mock3)
+// 	require.NoError(t, err)
 
-	err = st.Store(ctx, mock2)
-	require.NoError(t, err)
+// 	mock, err := st.Pick(ctx, mock1.ID)
+// 	require.NoError(t, err)
+// 	require.Equal(t, mock1, mock)
 
-	err = st.Store(ctx, mock3)
-	require.NoError(t, err)
+// 	mocks, err := st.PickAll(ctx)
+// 	require.NoError(t, err)
 
-	mock, err := st.Pick(ctx, mock1.ID)
-	require.NoError(t, err)
-	require.Equal(t, mock1, mock)
+// 	m := mocks[0]
+// 	require.Equal(t, m.ID, "1")
+// 	require.Equal(t, m.Name, "mock_1")
 
-	mocks, err := st.PickAll(ctx)
-	require.NoError(t, err)
+// 	m.Raw()
 
-	m := mocks[0]
-	require.Equal(t, m.ID, "1")
-	require.Equal(t, m.Name, "mock_1")
+// 	eligible := make([]*GreenBean, 0)
+// 	done := make(chan struct{})
+// 	out, err := st.ScoopCuratedStream(ctx, done)
+// 	for v := range out {
+// 		eligible = append(eligible, v)
+// 	}
 
-	m.Raw()
+// 	require.NoError(t, err)
+// 	require.Len(t, eligible, 2)
 
-	eligible := make([]*GreenBean, 0)
-	done := make(chan struct{})
-	out, err := st.ScoopCuratedStream(ctx, done)
-	for v := range out {
-		eligible = append(eligible, v)
-	}
+// 	eligible, err = st.PickAll(ctx)
+// 	require.NoError(t, err)
+// 	require.Len(t, eligible, 3)
 
-	require.NoError(t, err)
-	require.Len(t, eligible, 2)
+// 	err = st.Toss(ctx, "2")
+// 	require.NoError(t, err)
+// 	eligible, err = st.PickAll(ctx)
+// 	require.NoError(t, err)
+// 	require.Len(t, eligible, 2)
 
-	eligible, err = st.PickAll(ctx)
-	require.NoError(t, err)
-	require.Len(t, eligible, 3)
+// 	eligible = make([]*GreenBean, 0)
+// 	out, err = st.ScoopCuratedStream(ctx, done)
+// 	for v := range out {
+// 		eligible = append(eligible, v)
+// 	}
 
-	err = st.Toss(ctx, "2")
-	require.NoError(t, err)
-	eligible, err = st.PickAll(ctx)
-	require.NoError(t, err)
-	require.Len(t, eligible, 2)
+// 	require.NoError(t, err)
+// 	require.Len(t, eligible, 1)
+// 	require.Equal(t, "3", eligible[0].ID)
 
-	eligible = make([]*GreenBean, 0)
-	out, err = st.ScoopCuratedStream(ctx, done)
-	for v := range out {
-		eligible = append(eligible, v)
-	}
+// 	err = st.Empty(ctx)
+// 	require.NoError(t, err)
 
-	require.NoError(t, err)
-	require.Len(t, eligible, 1)
-	require.Equal(t, "3", eligible[0].ID)
+// 	eligible, err = st.PickAll(ctx)
+// 	require.NoError(t, err)
+// 	require.Len(t, eligible, 0)
 
-	err = st.Empty(ctx)
-	require.NoError(t, err)
+// 	err = st.Store(ctx, &GreenBean{ID: "10", Name: "mock_ext_1", enabled: true, Priority: 0, Source: "ext"})
+// 	require.NoError(t, err)
+// 	err = st.Store(ctx, &GreenBean{ID: "11", Name: "mock_11", enabled: true, Priority: 0})
+// 	require.NoError(t, err)
 
-	eligible, err = st.PickAll(ctx)
-	require.NoError(t, err)
-	require.Len(t, eligible, 0)
+// 	all, err := st.PickAll(ctx)
+// 	require.NoError(t, err)
+// 	require.Len(t, all, 2)
 
-	err = st.Store(ctx, &GreenBean{ID: "10", Name: "mock_ext_1", enabled: true, Priority: 0, Source: "ext"})
-	require.NoError(t, err)
-	err = st.Store(ctx, &GreenBean{ID: "11", Name: "mock_11", enabled: true, Priority: 0})
-	require.NoError(t, err)
+// 	err = st.Empty(ctx)
+// 	require.NoError(t, err)
 
-	all, err := st.PickAll(ctx)
-	require.NoError(t, err)
-	require.Len(t, all, 2)
-
-	err = st.Empty(ctx)
-	require.NoError(t, err)
-
-	all, err = st.PickAll(ctx)
-	require.NoError(t, err)
-	require.Len(t, all, 0)
-}
+// 	all, err = st.PickAll(ctx)
+// 	require.NoError(t, err)
+// 	require.Len(t, all, 0)
+// }

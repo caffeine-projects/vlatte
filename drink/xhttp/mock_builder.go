@@ -29,12 +29,12 @@ type HTTPMockBuilder struct {
 
 // Request creates a new empty Builder.
 func Request() *HTTPMockBuilder {
-	return &HTTPMockBuilder{mock: newMock()}
+	return &HTTPMockBuilder{mock: NewMock()}
 }
 
 // AnyMethod creates a new empty Builder.
 func AnyMethod() *HTTPMockBuilder {
-	b := &HTTPMockBuilder{mock: newMock()}
+	b := &HTTPMockBuilder{mock: NewMock()}
 	return b.MethodMatches(filter.Anything())
 }
 
@@ -101,7 +101,7 @@ func Headf(path string, a ...any) *HTTPMockBuilder {
 // Name defines a name for the mock.
 // Useful for debugging.
 func (b *HTTPMockBuilder) Name(name string) *HTTPMockBuilder {
-	b.mock.Name = name
+	b.mock.name = name
 
 	return b
 }
@@ -109,7 +109,7 @@ func (b *HTTPMockBuilder) Name(name string) *HTTPMockBuilder {
 // Priority sets the priority of the mock.
 // A higher priority will take precedence during request matching.
 func (b *HTTPMockBuilder) Priority(p int) *HTTPMockBuilder {
-	b.mock.Priority = p
+	b.mock.priority = p
 
 	return b
 }
@@ -424,7 +424,7 @@ func (b *HTTPMockBuilder) Enabled(enabled bool) *HTTPMockBuilder {
 // This could be a filename or any relevant information about the source of the Mock.
 // This is mostly used internally.
 func (b *HTTPMockBuilder) SetSource(src string) *HTTPMockBuilder {
-	b.mock.Source = src
+	b.mock.origin = src
 
 	return b
 }

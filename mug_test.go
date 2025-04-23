@@ -16,25 +16,22 @@ import (
 )
 
 func TestMug(t *testing.T) {
-	type testMock struct {
-		*vlatte.GreenBean
-	}
 
-	newTestMock := func() *testMock {
-		return &testMock{GreenBean: vlatte.NewMock(vlatte.UseUUID())}
+	newTestMock := func() *xhttp.HTTPMock {
+		return xhttp.NewMock()
 	}
 
 	m1 := newTestMock()
 	m2 := newTestMock()
 	m3 := newTestMock()
 
-	repo := vlatte.GrabCanister[*testMock]()
+	repo := vlatte.GrabCanister[*xhttp.HTTPMock]()
 	repo.Store(context.Background(), m1, m2, m3)
 
-	mug := vlatte.Pour(repo, []*testMock{m1, m2, m3})
+	mug := vlatte.Pour(repo, []*xhttp.HTTPMock{m1, m2, m3})
 
 	require.Equal(t, 3, len(mug.Beans()))
-	require.Equal(t, m1, mug.Bean(m1.GetID()))
+	require.Equal(t, m1, mug.Bean(m1.ID()))
 	require.Nil(t, mug.Bean("unknown"))
 
 	t.Run("should not return done when there is still pending mocks", func(t *testing.T) {
@@ -166,22 +163,18 @@ func TestMug(t *testing.T) {
 }
 
 func TestScopedDelete(t *testing.T) {
-	type testMock struct {
-		*vlatte.GreenBean
-	}
-
-	newTestMock := func() *testMock {
-		return &testMock{GreenBean: vlatte.NewMock(vlatte.UseUUID())}
+	newTestMock := func() *xhttp.HTTPMock {
+		return xhttp.NewMock()
 	}
 
 	m1 := newTestMock()
 	m2 := newTestMock()
 	m3 := newTestMock()
 
-	mug := vlatte.Pour(nil, []*testMock{m1, m2, m3})
+	mug := vlatte.Pour(nil, []*xhttp.HTTPMock{m1, m2, m3})
 
-	require.True(t, mug.Toss(m1.GetID()))
+	require.True(t, mug.Toss(m1.ID()))
 	require.False(t, mug.Toss("unknown"))
 
-	require.Nil(t, mug.Bean(m1.GetID()))
+	require.Nil(t, mug.Bean(m1.ID()))
 }

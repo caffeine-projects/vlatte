@@ -147,9 +147,9 @@ func (app *Boilerplate[TM, A]) AssertCalled(t TestingT) bool {
 
 			for _, p := range pending {
 				buf.WriteString("    Mock [")
-				buf.WriteString(p.GetID())
+				buf.WriteString(p.ID())
 				buf.WriteString("] ")
-				buf.WriteString(p.GetName())
+				buf.WriteString(p.Name())
 				buf.WriteString("\n")
 			}
 
@@ -183,9 +183,9 @@ func (app *Boilerplate[TM, A]) AssertNotCalled(t TestingT) bool {
 
 			for _, p := range called {
 				buf.WriteString("    Mock [")
-				buf.WriteString(p.GetID())
+				buf.WriteString(p.ID())
 				buf.WriteString("] ")
-				buf.WriteString(p.GetName())
+				buf.WriteString(p.Name())
 				buf.WriteString("\n")
 			}
 

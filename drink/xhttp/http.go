@@ -399,7 +399,7 @@ func (app *HTTPMockApp) DescribeConfig() string {
 
 // AnyMethod creates a new empty Builder.
 func (app *HTTPMockApp) AnyMethod() *HTTPMockBuilder {
-	b := &HTTPMockBuilder{mock: newMock()}
+	b := &HTTPMockBuilder{mock: NewMock()}
 	return b.MethodMatches(filter.Anything())
 }
 

@@ -4,7 +4,11 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter"
@@ -158,33 +162,120 @@ type HTTPExpectation = vlatte.Eval[*HTTPValueSelectorInput]
 // HTTPMock holds metadata and expectations to be matched against HTTP requests in order to serve mocked responses.
 // This is the core entity of this project, and most features work based on it.
 type HTTPMock struct {
-	*vlatte.GreenBean
+	mu sync.RWMutex
 
-	// Source describes the source of the mock. E.g.: if it was built from a file,
-	// it will contain the filename.
-	Source string
+	id           string
+	name         string
+	priority     int
+	origin       string
+	hits         atomic.Int64
+	enabled      bool
+	after        []int
+	expectations []*vlatte.Eval[*HTTPValueSelectorInput]
 
 	Reply Reply
 
 	// Mappers stores response mappers associated with this Mock.
 	Mappers []Mapper
 
-	after        []int
-	expectations []*vlatte.Eval[*HTTPValueSelectorInput]
+	// Delay sets the duration to delay serving the mocked response.
+	Delay vlatte.Delay
+
+	PostActionList vlatte.PostActions
+
+	CallbackList []vlatte.Callback
+
+	Steps []vlatte.Step
 }
 
-// newMock returns a new Mock with default values set.
-func newMock() *HTTPMock {
+// NewMock returns a new Mock with default values set.
+func NewMock() *HTTPMock {
 	return &HTTPMock{
-		GreenBean:    vlatte.NewMock(vlatte.UseUUID()),
-		Mappers:      make([]Mapper, 0),
+		id:           uuid.New().String(),
 		expectations: make([]*vlatte.Eval[*HTTPValueSelectorInput], 0),
+		enabled:      true,
+
+		PostActionList: make(vlatte.PostActions, 0),
+		CallbackList:   make([]vlatte.Callback, 0),
+		Steps:          make([]vlatte.Step, 0),
+		Mappers:        make([]Mapper, 0),
 	}
 }
 
-// FIXME: this is not implmenting HTTPMockBuilder.
-func (m *HTTPMock) Build() (*HTTPMock, error) {
-	return m, nil
+func (m *HTTPMock) ID() string {
+	return m.id
+}
+
+func (m *HTTPMock) Name() string {
+	return m.name
+}
+
+func (m *HTTPMock) Priority() int {
+	return m.priority
+}
+
+func (m *HTTPMock) Origin() string {
+	return m.origin
+}
+
+func (m *HTTPMock) Roasted() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.enabled
+}
+
+// Inc increment one Mock call.
+func (m *HTTPMock) Inc() {
+	m.hits.Add(1)
+}
+
+// Dec reduce one Mock call.
+func (m *HTTPMock) Dec() {
+	m.hits.Add(-1)
+}
+
+// Hits returns the amount of time this Mock was matched to a request and served.
+func (m *HTTPMock) Hits() int64 {
+	return m.hits.Load()
+}
+
+// Called checks if the Mock was called at least once.
+func (m *HTTPMock) Called() bool {
+	return m.hits.Load() > 0
+}
+
+// Enable enables the Mock.
+// The Mock will be eligible to be matched.
+func (m *HTTPMock) Roast() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.enabled = true
+}
+
+// Disable disables the Mock.
+// The Mock will not be eligible to be matched.
+func (m *HTTPMock) Raw() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.enabled = false
+}
+
+func (m *HTTPMock) Switch(state bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.enabled = state
+}
+
+func (m *HTTPMock) PostActions() vlatte.PostActions {
+	return m.PostActionList
+}
+
+func (m *HTTPMock) Callbacks() []vlatte.Callback {
+	return m.CallbackList
+}
+
+func (m *HTTPMock) Flow() []vlatte.Step {
+	return m.Steps
 }
 
 func (m *HTTPMock) Prepare() {
@@ -194,6 +285,11 @@ func (m *HTTPMock) Prepare() {
 			m.after = append(m.after, i)
 		}
 	}
+}
+
+func (m *HTTPMock) String() string {
+	// TODO: implement me.
+	return ""
 }
 
 func (m *HTTPMock) Describe() descriptor.Descriptor {
@@ -282,14 +378,14 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 		}
 	}
 
-	data["id"] = m.GetID()
+	data["id"] = m.ID()
 
-	if len(m.GetName()) > 0 {
-		data["name"] = m.GetName()
+	if len(m.Name()) > 0 {
+		data["name"] = m.Name()
 	}
 
-	if m.Priority != 0 {
-		data["priority"] = m.Priority
+	if m.Priority() != 0 {
+		data["priority"] = m.Priority()
 	}
 
 	if len(request) > 0 {

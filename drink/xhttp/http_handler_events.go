@@ -68,9 +68,9 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *MockedResponse) 
 		Str("url", r.URL.String()).
 		Dur("elapsed", time.Since(r.StartedAt))
 
-	dict := zerolog.Dict().Str("id", r.Mock.GetID())
-	if r.Mock.GetName() != "" {
-		dict.Str("name", r.Mock.GetName())
+	dict := zerolog.Dict().Str("id", r.Mock.ID())
+	if r.Mock.Name() != "" {
+		dict.Str("name", r.Mock.Name())
 	}
 
 	res := zerolog.Dict().Int("status", s.StatusCode)
@@ -199,7 +199,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Mock
 	buf.WriteString(rv.URL.String())
 	buf.WriteString("\n")
 	buf.WriteString(h.cz.Bold("Mock: "))
-	buf.WriteString(rv.Mock.GetID() + " " + rv.Mock.GetName())
+	buf.WriteString(rv.Mock.ID() + " " + rv.Mock.Name())
 	buf.WriteString("\n")
 	buf.WriteString(h.cz.Green("Took(ms): "))
 	buf.WriteString(strconv.FormatInt(time.Since(rv.StartedAt).Milliseconds(), 10))

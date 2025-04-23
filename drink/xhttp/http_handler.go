@@ -108,7 +108,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.onError(w, reqValues, fmt.Errorf(
 			"http: error building reply for request=%s source=%s. %w",
 			reqValues.URL.Path,
-			mock.Source,
+			mock.Origin(),
 			err,
 		))
 		return

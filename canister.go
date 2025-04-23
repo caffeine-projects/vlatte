@@ -6,8 +6,6 @@ import (
 	"sync"
 )
 
-var _ Canister[*GreenBean] = (*Jar[*GreenBean])(nil)
-
 type Jar[B Bean] struct {
 	beans []B
 	mu    sync.RWMutex
@@ -63,7 +61,7 @@ func (s *Jar[B]) Store(_ context.Context, beans ...B) error {
 	s.beans = append(s.beans, beans...)
 
 	sort.SliceStable(s.beans, func(a, b int) bool {
-		return s.beans[a].GetPriority() < s.beans[b].GetPriority()
+		return s.beans[a].Priority() < s.beans[b].Priority()
 	})
 
 	return nil
@@ -74,7 +72,7 @@ func (s *Jar[B]) Pick(_ context.Context, id string) (B, error) {
 	defer s.mu.RUnlock()
 
 	for _, datum := range s.beans {
-		if datum.GetID() == id {
+		if datum.ID() == id {
 			return datum, nil
 		}
 	}
@@ -100,7 +98,7 @@ func (s *Jar[B]) Toss(_ context.Context, ids ...string) error {
 	for _, id := range ids {
 		index := -1
 		for i, m := range s.beans {
-			if m.GetID() == id {
+			if m.ID() == id {
 				index = i
 				break
 			}

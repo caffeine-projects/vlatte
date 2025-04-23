@@ -21,7 +21,7 @@ type Mug[B Bean] struct {
 func Pour[B Bean](canister Canister[B], beans []B) *Mug[B] {
 	mug := &Mug[B]{beans: make(map[string]B, len(beans)), del: make(map[string]struct{}), jar: canister}
 	for _, m := range beans {
-		mug.beans[m.GetID()] = m
+		mug.beans[m.ID()] = m
 	}
 
 	return mug
@@ -57,7 +57,7 @@ func (s *Mug[B]) BeanIDs() []string {
 
 	ids := make([]string, 0, len(s.beans))
 	for _, id := range s.beans {
-		ids = append(ids, id.GetID())
+		ids = append(ids, id.ID())
 	}
 
 	return ids
@@ -222,9 +222,9 @@ func (s *Mug[B]) AssertCalled(t TestingT) bool {
 
 	for _, p := range pending {
 		b.WriteString("   Mock [")
-		b.WriteString(p.GetID())
+		b.WriteString(p.ID())
 		b.WriteString("] ")
-		b.WriteString(p.GetName())
+		b.WriteString(p.Name())
 		b.WriteString("\n")
 	}
 
@@ -247,9 +247,9 @@ func (s *Mug[B]) AssertNotCalled(t TestingT) bool {
 
 	for _, p := range called {
 		b.WriteString("  Mock [")
-		b.WriteString(p.GetID())
+		b.WriteString(p.ID())
 		b.WriteString("] ")
-		b.WriteString(p.GetName())
+		b.WriteString(p.Name())
 		b.WriteString("\n")
 	}
 
