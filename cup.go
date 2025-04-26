@@ -6,20 +6,20 @@ import (
 	"sync"
 )
 
-var _ Taste[Bean] = (*Mug[Bean])(nil)
+var _ Taste[Bean] = (*Cup[Bean])(nil)
 
-// Mug keeps a reference to a group of mocks.
-// With a Mug instance, it is possible to verify if one or a group of mocks were called,
+// Cup keeps a reference to a group of mocks.
+// With a Cup instance, it is possible to verify if one or a group of mocks were called,
 // how many times they were called and so on.
-type Mug[B Bean] struct {
+type Cup[B Bean] struct {
 	beans map[string]B
 	del   map[string]struct{}
 	jar   Canister[B]
 	mu    sync.RWMutex
 }
 
-func Pour[B Bean](canister Canister[B], beans []B) *Mug[B] {
-	mug := &Mug[B]{beans: make(map[string]B, len(beans)), del: make(map[string]struct{}), jar: canister}
+func Pour[B Bean](canister Canister[B], beans []B) *Cup[B] {
+	mug := &Cup[B]{beans: make(map[string]B, len(beans)), del: make(map[string]struct{}), jar: canister}
 	for _, m := range beans {
 		mug.beans[m.ID()] = m
 	}
@@ -28,7 +28,7 @@ func Pour[B Bean](canister Canister[B], beans []B) *Mug[B] {
 }
 
 // Bean returns a Mock with the given ID.
-func (s *Mug[B]) Bean(id string) B {
+func (s *Cup[B]) Bean(id string) B {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -36,7 +36,7 @@ func (s *Mug[B]) Bean(id string) B {
 }
 
 // Beans returns all Mock instances kept in this Scope.
-func (s *Mug[B]) Beans() []B {
+func (s *Cup[B]) Beans() []B {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -51,7 +51,7 @@ func (s *Mug[B]) Beans() []B {
 	return mocks
 }
 
-func (s *Mug[B]) BeanIDs() []string {
+func (s *Cup[B]) BeanIDs() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -63,7 +63,7 @@ func (s *Mug[B]) BeanIDs() []string {
 	return ids
 }
 
-func (s *Mug[B]) Exists(id string) bool {
+func (s *Cup[B]) Exists(id string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -72,7 +72,7 @@ func (s *Mug[B]) Exists(id string) bool {
 }
 
 // ListPending returns all Mock instances that were not called at least once.
-func (s *Mug[B]) ListPending() []B {
+func (s *Cup[B]) ListPending() []B {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -88,7 +88,7 @@ func (s *Mug[B]) ListPending() []B {
 }
 
 // ListCalled returns all Mock instances that were called.
-func (s *Mug[B]) ListCalled() []B {
+func (s *Cup[B]) ListCalled() []B {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -104,7 +104,7 @@ func (s *Mug[B]) ListCalled() []B {
 }
 
 // Called returns true if all Scope Mock instances were called at least once.
-func (s *Mug[B]) Called() bool {
+func (s *Cup[B]) Called() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -118,7 +118,7 @@ func (s *Mug[B]) Called() bool {
 }
 
 // Pending returns true when there are one or more Mock instances that were not called at least once.
-func (s *Mug[B]) Pending() bool {
+func (s *Cup[B]) Pending() bool {
 	for _, m := range s.Beans() {
 		if !m.Called() {
 			return true
@@ -130,21 +130,21 @@ func (s *Mug[B]) Pending() bool {
 
 // Disable scoped store.
 // Disabled Mock will be ignored.
-func (s *Mug[B]) Disable() {
+func (s *Cup[B]) Disable() {
 	for _, m := range s.Beans() {
 		m.Raw()
 	}
 }
 
 // Enable all Mock instances kept in this Scope.
-func (s *Mug[B]) Enable() {
+func (s *Cup[B]) Enable() {
 	for _, m := range s.Beans() {
 		m.Roast()
 	}
 }
 
 // Toss removes a by ID, as long as it is scoped by this instance.
-func (s *Mug[B]) Toss(id string) bool {
+func (s *Cup[B]) Toss(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -160,7 +160,7 @@ func (s *Mug[B]) Toss(id string) bool {
 }
 
 // Empty all scoped Mock instances.
-func (s *Mug[B]) Empty(ctx context.Context) error {
+func (s *Cup[B]) Empty(ctx context.Context) error {
 	for id := range s.beans {
 		s.Toss(id)
 	}
@@ -169,7 +169,7 @@ func (s *Mug[B]) Empty(ctx context.Context) error {
 }
 
 // Hits returns the sum of the Scope store calls.
-func (s *Mug[B]) Hits() int64 {
+func (s *Cup[B]) Hits() int64 {
 	total := int64(0)
 	for _, m := range s.Beans() {
 		total += m.Hits()
@@ -178,7 +178,7 @@ func (s *Mug[B]) Hits() int64 {
 	return total
 }
 
-func (s *Mug[B]) Sync(ctx context.Context) error {
+func (s *Cup[B]) Sync(ctx context.Context) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -209,7 +209,7 @@ func (s *Mug[B]) Sync(ctx context.Context) error {
 }
 
 // AssertCalled reports an error if there are still pending Mock instances.
-func (s *Mug[B]) AssertCalled(t TestingT) bool {
+func (s *Cup[B]) AssertCalled(t TestingT) bool {
 	t.Helper()
 
 	if !s.Pending() {
@@ -234,7 +234,7 @@ func (s *Mug[B]) AssertCalled(t TestingT) bool {
 }
 
 // AssertNotCalled reports an error if any mock was called.
-func (s *Mug[B]) AssertNotCalled(t TestingT) bool {
+func (s *Cup[B]) AssertNotCalled(t TestingT) bool {
 	t.Helper()
 
 	if s.Pending() {
@@ -260,7 +260,7 @@ func (s *Mug[B]) AssertNotCalled(t TestingT) bool {
 
 // AssertNumberOfCalls asserts that the sum of matched request hits
 // is equal to the given expected value.
-func (s *Mug[B]) AssertNumberOfCalls(t TestingT, expected int64) bool {
+func (s *Cup[B]) AssertNumberOfCalls(t TestingT, expected int64) bool {
 	t.Helper()
 
 	hits := s.Hits()

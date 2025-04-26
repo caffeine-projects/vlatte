@@ -5,18 +5,19 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/drink/xhttp"
 	. "github.com/caffeine-projects/vlatte/filter"
-	"github.com/stretchr/testify/require"
 )
 
 func TestScenarios(t *testing.T) {
 	testCases := []struct {
 		name string
-		s1   vlatte.Roaster[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
-		s2   vlatte.Roaster[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
-		s3   vlatte.Roaster[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
+		s1   vlatte.Grinder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
+		s2   vlatte.Grinder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
+		s3   vlatte.Grinder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
 	}{
 		{"code",
 			xhttp.Get(URLPath("/1")).

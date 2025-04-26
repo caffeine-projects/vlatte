@@ -15,7 +15,7 @@ import (
 	"github.com/caffeine-projects/vlatte/sip"
 )
 
-func TestMug(t *testing.T) {
+func TestCup(t *testing.T) {
 
 	newTestMock := func() *xhttp.HTTPMock {
 		return xhttp.NewMock()
@@ -28,20 +28,20 @@ func TestMug(t *testing.T) {
 	repo := vlatte.GrabCanister[*xhttp.HTTPMock]()
 	repo.Store(context.Background(), m1, m2, m3)
 
-	mug := vlatte.Pour(repo, []*xhttp.HTTPMock{m1, m2, m3})
+	cup := vlatte.Pour(repo, []*xhttp.HTTPMock{m1, m2, m3})
 
-	require.Equal(t, 3, len(mug.Beans()))
-	require.Equal(t, m1, mug.Bean(m1.ID()))
-	require.Nil(t, mug.Bean("unknown"))
+	require.Equal(t, 3, len(cup.Beans()))
+	require.Equal(t, m1, cup.Bean(m1.ID()))
+	require.Nil(t, cup.Bean("unknown"))
 
 	t.Run("should not return done when there is still pending mocks", func(t *testing.T) {
 		ft := testmock.NewFakeT()
 
-		require.False(t, mug.Called())
-		require.Equal(t, 3, len(mug.ListPending()))
-		require.True(t, mug.Pending())
+		require.False(t, cup.Called())
+		require.Equal(t, 3, len(cup.ListPending()))
+		require.True(t, cup.Pending())
 
-		mug.AssertCalled(ft)
+		cup.AssertCalled(ft)
 		ft.AssertNumberOfCalls(t, "Errorf", 1)
 	})
 
@@ -50,33 +50,33 @@ func TestMug(t *testing.T) {
 
 		m1.Inc()
 
-		require.False(t, mug.Called())
-		mug.AssertCalled(ft)
+		require.False(t, cup.Called())
+		cup.AssertCalled(ft)
 
 		m2.Inc()
 		m3.Inc()
 
 		ft.AssertNumberOfCalls(t, "Errorf", 1)
-		require.True(t, mug.AssertCalled(t))
-		require.True(t, mug.Called())
-		require.True(t, sip.Times(t, mug, 3))
-		require.False(t, sip.Times(ft, mug, 1))
-		require.Equal(t, 0, len(mug.ListPending()))
-		require.False(t, mug.Pending())
+		require.True(t, cup.AssertCalled(t))
+		require.True(t, cup.Called())
+		require.True(t, sip.Times(t, cup, 3))
+		require.False(t, sip.Times(ft, cup, 1))
+		require.Equal(t, 0, len(cup.ListPending()))
+		require.False(t, cup.Pending())
 	})
 
 	t.Run("should return total hits from store", func(t *testing.T) {
-		require.EqualValues(t, 3, mug.Hits())
-		sip.Times(t, mug, 3)
+		require.EqualValues(t, 3, cup.Hits())
+		sip.Times(t, cup, 3)
 	})
 
 	t.Run("should clean all store associated with NewScope when calling .Clean()", func(t *testing.T) {
-		err := mug.Empty(context.Background())
+		err := cup.Empty(context.Background())
 		require.NoError(t, err)
 
-		require.Equal(t, 0, len(mug.ListPending()))
-		require.True(t, sip.Times(t, mug, 0))
-		require.False(t, mug.Pending())
+		require.Equal(t, 0, len(cup.ListPending()))
+		require.True(t, sip.Times(t, cup, 0))
+		require.False(t, cup.Pending())
 	})
 
 	t.Run("should only consider enabled store", func(t *testing.T) {
@@ -171,10 +171,10 @@ func TestScopedDelete(t *testing.T) {
 	m2 := newTestMock()
 	m3 := newTestMock()
 
-	mug := vlatte.Pour(nil, []*xhttp.HTTPMock{m1, m2, m3})
+	cup := vlatte.Pour(nil, []*xhttp.HTTPMock{m1, m2, m3})
 
-	require.True(t, mug.Toss(m1.ID()))
-	require.False(t, mug.Toss("unknown"))
+	require.True(t, cup.Toss(m1.ID()))
+	require.False(t, cup.Toss("unknown"))
 
-	require.Nil(t, mug.Bean(m1.ID()))
+	require.Nil(t, cup.Bean(m1.ID()))
 }

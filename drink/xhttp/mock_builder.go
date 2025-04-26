@@ -12,7 +12,7 @@ import (
 	"github.com/caffeine-projects/vlatte/filter/mfeat"
 )
 
-var _ vlatte.Roaster[*HTTPMock, *HTTPMockApp] = (*HTTPMockBuilder)(nil)
+var _ vlatte.Grinder[*HTTPMock, *HTTPMockApp] = (*HTTPMockBuilder)(nil)
 
 var (
 	ErrNoExpectations = errors.New("mock: at least 1 request matcher must be set")
@@ -431,7 +431,7 @@ func (b *HTTPMockBuilder) SetSource(src string) *HTTPMockBuilder {
 
 // Build builds a Mock with previously configured parameters.
 // Used internally by HTTPMockApp.
-func (b *HTTPMockBuilder) Roast(app *HTTPMockApp) (*HTTPMock, error) {
+func (b *HTTPMockBuilder) Grind(app *HTTPMockApp) (*HTTPMock, error) {
 	if len(b.mock.expectations) == 0 {
 		return nil, ErrNoExpectations
 	}

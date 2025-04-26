@@ -69,7 +69,7 @@ func TestMock_MarshalJSON(t *testing.T) {
 		ScenarioIs("test").ScenarioStateIs("state").ScenarioStateWillBe("future").
 		Reply(OK())
 
-	m, err := builder.Roast(app)
+	m, err := builder.Grind(app)
 	require.NoError(t, err)
 
 	b, err := m.MarshalJSON()

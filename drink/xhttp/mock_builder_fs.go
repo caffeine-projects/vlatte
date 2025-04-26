@@ -23,8 +23,8 @@ import (
 )
 
 var (
-	_ vlatte.Roaster[*HTTPMock, *HTTPMockApp] = (*mockBuilderFromFile)(nil)
-	_ vlatte.Roaster[*HTTPMock, *HTTPMockApp] = (*mockBuilderFromBytes)(nil)
+	_ vlatte.Grinder[*HTTPMock, *HTTPMockApp] = (*mockBuilderFromFile)(nil)
+	_ vlatte.Grinder[*HTTPMock, *HTTPMockApp] = (*mockBuilderFromBytes)(nil)
 	_ error                                   = (*jsonSchemaValidationErr)(nil)
 )
 
@@ -127,11 +127,11 @@ type mockBuilderFromFile struct {
 // Since every mock file is a Go template by default,
 // if you need to define templates for the response URL, header or body, remember to escape it.
 // Eg.: body: {{`{{ .Request.Method }}`}}
-func FromFile(filename string) vlatte.Roaster[*HTTPMock, *HTTPMockApp] {
+func FromFile(filename string) vlatte.Grinder[*HTTPMock, *HTTPMockApp] {
 	return &mockBuilderFromFile{filename: filename, builder: Request()}
 }
 
-func (b *mockBuilderFromFile) Roast(app *HTTPMockApp) (mock *HTTPMock, err error) {
+func (b *mockBuilderFromFile) Grind(app *HTTPMockApp) (mock *HTTPMock, err error) {
 	mock, err = b.build(app)
 	if err != nil {
 		return nil, fmt.Errorf("mock: failed to build mock from file %s.\n%w", b.filename, err)
@@ -177,11 +177,11 @@ type mockBuilderFromBytes struct {
 	ext     string
 }
 
-func FromBytes(b []byte, extension string) vlatte.Roaster[*HTTPMock, *HTTPMockApp] {
+func FromBytes(b []byte, extension string) vlatte.Grinder[*HTTPMock, *HTTPMockApp] {
 	return &mockBuilderFromBytes{bytes: b, builder: Request(), ext: extension}
 }
 
-func (b *mockBuilderFromBytes) Roast(app *HTTPMockApp) (mock *HTTPMock, err error) {
+func (b *mockBuilderFromBytes) Grind(app *HTTPMockApp) (mock *HTTPMock, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("mock: error building mock from byte array. panic: %v", r)
@@ -688,7 +688,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 		}
 	}
 
-	return builder.Roast(app)
+	return builder.Grind(app)
 }
 
 func validateResponseDefinitions(vi *viper.Viper) error {

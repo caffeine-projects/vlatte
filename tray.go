@@ -10,17 +10,14 @@ type Tray[B Bean, A MockApp[B]] struct {
 	mu       sync.RWMutex
 	drink    A
 	canister Canister[B]
-	mugs     []*Mug[B]
+	mugs     []*Cup[B]
 }
 
-func (a *Tray[B, A]) Add(builders ...Roaster[B, A]) (*Mug[B], error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+func (a *Tray[B, A]) Add(grinder ...Grinder[B, A]) (*Cup[B], error) {
+	added := make([]B, len(grinder))
 
-	added := make([]B, len(builders))
-
-	for i, b := range builders {
-		mock, err := b.Roast(a.drink)
+	for i, b := range grinder {
+		mock, err := b.Grind(a.drink)
 		if err != nil {
 			return nil, fmt.Errorf("server: error adding mock at index %d.\n%w", i, err)
 		}
@@ -35,16 +32,19 @@ func (a *Tray[B, A]) Add(builders ...Roaster[B, A]) (*Mug[B], error) {
 	}
 
 	mug := Pour(a.canister, added)
+
+	a.mu.Lock()
 	a.mugs = append(a.mugs, mug)
+	a.mu.Unlock()
 
 	return mug, nil
 }
 
-func (a *Tray[B, A]) Mugs() []*Mug[B] {
+func (a *Tray[B, A]) Mugs() []*Cup[B] {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	ret := make([]*Mug[B], len(a.mugs))
+	ret := make([]*Cup[B], len(a.mugs))
 	copy(ret, a.mugs)
 
 	return ret

@@ -35,11 +35,11 @@ func NewBaseApp[TM Bean, A MockApp[TM]](app A, repo Canister[TM]) *Boilerplate[T
 //			Reply(reply.Created().PlainText("hello world")))
 //
 //	assert.True(txtTemplate, scoped.HasBeenCalled())
-func (app *Boilerplate[TM, A]) Brew(builders ...Roaster[TM, A]) (*Mug[TM], error) {
+func (app *Boilerplate[TM, A]) Brew(grinder ...Grinder[TM, A]) (*Cup[TM], error) {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	return app.tray.Add(builders...)
+	return app.tray.Add(grinder...)
 }
 
 // MustBrew adds one or multiple request mocks.
@@ -55,7 +55,7 @@ func (app *Boilerplate[TM, A]) Brew(builders ...Roaster[TM, A]) (*Mug[TM], error
 //			Reply(reply.Created().PlainText("hello world")))
 //
 //	assert.True(txtTemplate, scoped.HasBeenCalled())
-func (app *Boilerplate[TM, A]) MustBrew(builders ...Roaster[TM, A]) *Mug[TM] {
+func (app *Boilerplate[TM, A]) MustBrew(builders ...Grinder[TM, A]) *Cup[TM] {
 	mug, err := app.Brew(builders...)
 	if err != nil {
 		panic(err)

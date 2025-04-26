@@ -15,7 +15,7 @@ type Interceptors struct {
 }
 
 type GRPCMockBuilder interface {
-	Roast(*GRPCMockApp) (*GRPCMock, error)
+	Grind(*GRPCMockApp) (*GRPCMock, error)
 }
 
 type GRPCMock struct {

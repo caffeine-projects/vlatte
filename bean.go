@@ -27,9 +27,9 @@ type Bean interface {
 	String() string
 }
 
-// Roaster describes a Mock builder.
-type Roaster[B Bean, TMockApp MockApp[B]] interface {
-	Roast(app TMockApp) (B, error)
+// Grinder describes a Mock builder.
+type Grinder[B Bean, TMockApp MockApp[B]] interface {
+	Grind(app TMockApp) (B, error)
 }
 
 type Canister[T Bean] interface {
