@@ -16,7 +16,6 @@ import (
 )
 
 func TestCup(t *testing.T) {
-
 	newTestMock := func() *xhttp.HTTPMock {
 		return xhttp.NewMock()
 	}
@@ -31,8 +30,14 @@ func TestCup(t *testing.T) {
 	cup := vlatte.Pour(repo, []*xhttp.HTTPMock{m1, m2, m3})
 
 	require.Equal(t, 3, len(cup.Beans()))
-	require.Equal(t, m1, cup.Bean(m1.ID()))
-	require.Nil(t, cup.Bean("unknown"))
+
+	b, ok := cup.Bean(m1.ID())
+	require.True(t, ok)
+	require.Equal(t, m1, b)
+
+	b, ok = cup.Bean("unknown")
+	require.False(t, ok)
+	require.Nil(t, b)
 
 	t.Run("should not return done when there is still pending mocks", func(t *testing.T) {
 		ft := testmock.NewFakeT()

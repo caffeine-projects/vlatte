@@ -1,25 +1,30 @@
 package vlatte
 
 import (
-	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 var _ Taste[Bean] = (*Cup[Bean])(nil)
+
+type Coffee[B Bean] struct {
+	bean   B
+	sipped atomic.Bool
+}
 
 // Cup keeps a reference to a group of mocks.
 // With a Cup instance, it is possible to verify if one or a group of mocks were called,
 // how many times they were called and so on.
 type Cup[B Bean] struct {
-	beans map[string]B
-	del   map[string]struct{}
-	jar   Canister[B]
-	mu    sync.RWMutex
+	beans    map[string]B
+	del      map[string]struct{}
+	canister Canister[B]
+	mu       sync.RWMutex
 }
 
 func Pour[B Bean](canister Canister[B], beans []B) *Cup[B] {
-	mug := &Cup[B]{beans: make(map[string]B, len(beans)), del: make(map[string]struct{}), jar: canister}
+	mug := &Cup[B]{beans: make(map[string]B, len(beans)), del: make(map[string]struct{}), canister: canister}
 	for _, m := range beans {
 		mug.beans[m.ID()] = m
 	}
@@ -28,11 +33,12 @@ func Pour[B Bean](canister Canister[B], beans []B) *Cup[B] {
 }
 
 // Bean returns a Mock with the given ID.
-func (s *Cup[B]) Bean(id string) B {
+func (s *Cup[B]) Bean(id string) (B, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	return s.beans[id]
+	b, ok := s.beans[id]
+	return b, ok
 }
 
 // Beans returns all Mock instances kept in this Scope.
@@ -143,31 +149,6 @@ func (s *Cup[B]) Enable() {
 	}
 }
 
-// Toss removes a by ID, as long as it is scoped by this instance.
-func (s *Cup[B]) Toss(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	_, ok := s.beans[id]
-	if !ok {
-		return false
-	}
-
-	delete(s.beans, id)
-	s.del[id] = struct{}{}
-
-	return true
-}
-
-// Empty all scoped Mock instances.
-func (s *Cup[B]) Empty(ctx context.Context) error {
-	for id := range s.beans {
-		s.Toss(id)
-	}
-
-	return s.Sync(ctx)
-}
-
 // Hits returns the sum of the Scope store calls.
 func (s *Cup[B]) Hits() int64 {
 	total := int64(0)
@@ -176,36 +157,6 @@ func (s *Cup[B]) Hits() int64 {
 	}
 
 	return total
-}
-
-func (s *Cup[B]) Sync(ctx context.Context) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	mocks := make([]B, 0, len(s.beans))
-	for _, v := range s.beans {
-		mocks = append(mocks, v)
-	}
-
-	if err := s.jar.Store(ctx, mocks...); err != nil {
-		return err
-	}
-
-	ids := make([]string, 0, len(s.beans))
-	for k := range s.del {
-		ids = append(ids, k)
-	}
-
-	for _, id := range ids {
-		err := s.jar.Toss(ctx, id)
-		if err != nil {
-			return err
-		}
-
-		delete(s.del, id)
-	}
-
-	return nil
 }
 
 // AssertCalled reports an error if there are still pending Mock instances.
