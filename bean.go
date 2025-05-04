@@ -2,6 +2,7 @@ package vlatte
 
 import (
 	"context"
+	"iter"
 
 	"github.com/caffeine-projects/vlatte/internal/encutil"
 )
@@ -33,8 +34,7 @@ type Grinder[B Bean, TMockApp MockApp[B]] interface {
 }
 
 type Canister[T Bean] interface {
-	ScoopCuratedStream(ctx context.Context, done <-chan struct{}) (<-chan T, error)
-	ScoopCurated(ctx context.Context) ([]T, error)
+	Scoop(ctx context.Context) (iter.Seq[T], error)
 
 	Store(ctx context.Context, bean ...T) error
 

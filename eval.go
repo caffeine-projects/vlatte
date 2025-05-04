@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 
 	"github.com/caffeine-projects/vlatte/filter"
 )
@@ -66,11 +67,12 @@ type GetEvals[M Bean, TIn any] func(m M) Evaluators[M, TIn]
 
 // Mocks is a list of sorted eligible mocks.
 // This list can searched for a match.
-type Mocks[M Bean, TIn any] []M
+type Mocks[M Bean, TIn any] iter.Seq[M]
 
 // Find tries to find an exact match in the mocks.
 func (mocks Mocks[M, TIn]) Find(ctx context.Context, in TIn, evals GetEvals[M, TIn]) (M, bool, error) {
-	for i, mock := range mocks {
+	i := 0
+	for mock := range mocks {
 		ok, err := evals(mock).Eval(ctx, in)
 		if err != nil {
 			var nothing M
@@ -80,6 +82,8 @@ func (mocks Mocks[M, TIn]) Find(ctx context.Context, in TIn, evals GetEvals[M, T
 		if ok {
 			return mock, true, nil
 		}
+
+		i++
 	}
 
 	var nothing M

@@ -2,6 +2,7 @@ package vlatte
 
 import (
 	"context"
+	"iter"
 	"sort"
 	"sync"
 )
@@ -15,43 +16,21 @@ func GrabCanister[B Bean]() Canister[B] {
 	return &Jar[B]{beans: make([]B, 0)}
 }
 
-func (s *Jar[B]) ScoopCuratedStream(ctx context.Context, done <-chan struct{}) (<-chan B, error) {
+func (s *Jar[B]) Scoop(ctx context.Context) (iter.Seq[B], error) {
 	s.mu.RLock()
 	beans := make([]B, len(s.beans))
 	copy(beans, s.beans)
 	s.mu.RUnlock()
 
-	out := make(chan B, len(beans))
-	go func() {
-		defer close(out)
+	return func(yield func(B) bool) {
 		for _, bean := range beans {
 			if bean.Roasted() {
-				select {
-				case out <- bean:
-				case <-ctx.Done():
-					return
-				case <-done:
-					return
+				if !yield(bean) {
+					break
 				}
 			}
 		}
-	}()
-
-	return out, nil
-}
-
-func (s *Jar[B]) ScoopCurated(_ context.Context) ([]B, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	beans := make([]B, 0, len(s.beans))
-	for _, bean := range s.beans {
-		if bean.Roasted() {
-			beans = append(beans, bean)
-		}
-	}
-
-	return beans, nil
+	}, nil
 }
 
 func (s *Jar[B]) Store(_ context.Context, beans ...B) error {
@@ -71,9 +50,9 @@ func (s *Jar[B]) Pick(_ context.Context, id string) (B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	for _, datum := range s.beans {
-		if datum.ID() == id {
-			return datum, nil
+	for _, bean := range s.beans {
+		if bean.ID() == id {
+			return bean, nil
 		}
 	}
 
@@ -95,17 +74,19 @@ func (s *Jar[B]) Toss(_ context.Context, ids ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	idSet := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
-		index := -1
-		for i, m := range s.beans {
-			if m.ID() == id {
-				index = i
-				break
-			}
-		}
-
-		s.beans = s.beans[:index+copy(s.beans[index:], s.beans[index+1:])]
+		idSet[id] = struct{}{}
 	}
+
+	newBeans := s.beans[:0]
+	for _, bean := range s.beans {
+		if _, found := idSet[bean.ID()]; !found {
+			newBeans = append(newBeans, bean)
+		}
+	}
+
+	s.beans = newBeans
 
 	return nil
 }
@@ -114,7 +95,6 @@ func (s *Jar[B]) Empty(_ context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.beans = nil
 	s.beans = make([]B, 0)
 
 	return nil

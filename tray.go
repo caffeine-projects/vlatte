@@ -14,24 +14,24 @@ type Tray[B Bean, A MockApp[B]] struct {
 }
 
 func (a *Tray[B, A]) Add(grinder ...Grinder[B, A]) (*Cup[B], error) {
-	added := make([]B, len(grinder))
+	ground := make([]B, len(grinder))
 
 	for i, b := range grinder {
-		mock, err := b.Grind(a.drink)
+		b, err := b.Grind(a.drink)
 		if err != nil {
 			return nil, fmt.Errorf("server: error adding mock at index %d.\n%w", i, err)
 		}
 
-		mock.Prepare()
+		b.Prepare()
 
-		if err := a.canister.Store(context.Background(), mock); err != nil {
+		if err := a.canister.Store(context.Background(), b); err != nil {
 			return nil, err
 		}
 
-		added[i] = mock
+		ground[i] = b
 	}
 
-	cup := Pour(a.canister, added)
+	cup := Pour(Coffee(ground), a.canister)
 
 	a.mu.Lock()
 	a.cups = append(a.cups, cup)

@@ -45,7 +45,7 @@ func (in *Interceptors) UnaryInterceptor(
 		return nil, err
 	}
 
-	em, err := in.app.storage.ScoopCurated(ctx)
+	em, err := in.app.storage.Scoop(ctx)
 	if err != nil {
 		return nil, interceptError("http: error finding eligible mocks for request. %w", err)
 	}

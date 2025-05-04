@@ -171,7 +171,7 @@ func (in *Interceptors) StreamInterceptor(
 		return err
 	}
 
-	em, err := in.app.storage.ScoopCurated(stream.Context())
+	em, err := in.app.storage.Scoop(stream.Context())
 	if err != nil {
 		return interceptError("http: error finding eligible mocks for request. %w", err)
 	}

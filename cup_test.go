@@ -27,17 +27,12 @@ func TestCup(t *testing.T) {
 	repo := vlatte.GrabCanister[*xhttp.HTTPMock]()
 	repo.Store(context.Background(), m1, m2, m3)
 
-	cup := vlatte.Pour(repo, []*xhttp.HTTPMock{m1, m2, m3})
+	cup := vlatte.Pour(vlatte.Coffee([]*xhttp.HTTPMock{m1, m2, m3}), repo)
 
 	require.Equal(t, 3, len(cup.Beans()))
 
-	b, ok := cup.Bean(m1.ID())
-	require.True(t, ok)
-	require.Equal(t, m1, b)
-
-	b, ok = cup.Bean("unknown")
-	require.False(t, ok)
-	require.Nil(t, b)
+	require.Equal(t, m1, cup.Bean(m1.ID()))
+	require.Nil(t, cup.Bean("unknown"))
 
 	t.Run("should not return done when there is still pending mocks", func(t *testing.T) {
 		ft := testmock.NewFakeT()
@@ -176,10 +171,14 @@ func TestScopedDelete(t *testing.T) {
 	m2 := newTestMock()
 	m3 := newTestMock()
 
-	cup := vlatte.Pour(nil, []*xhttp.HTTPMock{m1, m2, m3})
+	canister := vlatte.GrabCanister[*xhttp.HTTPMock]()
+	err := canister.Store(t.Context(), m1, m2, m3)
+	require.NoError(t, err)
 
-	require.True(t, cup.Toss(m1.ID()))
-	require.False(t, cup.Toss("unknown"))
+	cup := vlatte.Pour(vlatte.Coffee([]*xhttp.HTTPMock{m1, m2, m3}), canister)
+
+	require.NoError(t, cup.Toss(t.Context(), m1.ID()))
+	require.NoError(t, cup.Toss(t.Context(), "unknown"))
 
 	require.Nil(t, cup.Bean(m1.ID()))
 }
