@@ -24,7 +24,7 @@ func (m *repeatMatcher) Match(_ any) (filter.Result, error) {
 	}, nil
 }
 
-func (m *repeatMatcher) OnMockSent() error {
+func (m *repeatMatcher) SetState() error {
 	atomic.AddInt64(&m.hits, 1)
 
 	return nil

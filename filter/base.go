@@ -21,11 +21,11 @@ type FilterFunc func(v any) (Result, error)
 
 func (f FilterFunc) Match(v any) (Result, error) { return f(v) }
 
-// OnMockSent describes a Matcher that has post processes that need to be executed after the matched mock is served.
+// Stateful describes a Matcher that has post processes that need to be executed after the matched mock is served.
 // Dedicated for stateful matchers.
 // TODO: consider moving this to a specific package for extensions. example: <ROOT>/ext
-type OnMockSent interface {
-	OnMockSent() error
+type Stateful interface {
+	SetState() error
 }
 
 func success() Result                { return Result{Pass: true, Message: ""} }

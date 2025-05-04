@@ -194,7 +194,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// run matcher events after we sent the mock.
 	// some matcher might need to keep state.
 	for _, idx := range mock.after {
-		err = mock.expectations[idx].Matcher.(filter.OnMockSent).OnMockSent()
+		err = mock.expectations[idx].Matcher.(filter.Stateful).SetState()
 		if err != nil {
 			h.lifecycle.OnWarning(reqValues,
 				fmt.Errorf("http: after mock served event: matcher[%d] %w", idx, err))

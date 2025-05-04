@@ -36,7 +36,7 @@ type GRPCMock struct {
 
 	Steps []vlatte.Step
 
-	after              []filter.OnMockSent
+	after              []filter.Stateful
 	unaryExpectations  []*vlatte.Eval[*UnaryValueSelectorIn]
 	streamExpectations []*vlatte.Eval[*StreamValueSelectorIn]
 }
@@ -44,7 +44,7 @@ type GRPCMock struct {
 func newMock() *GRPCMock {
 	return &GRPCMock{
 		id:      uuid.New().String(),
-		after:   make([]filter.OnMockSent, 0),
+		after:   make([]filter.Stateful, 0),
 		enabled: true,
 
 		PostActionList: make(vlatte.PostActions, 0),

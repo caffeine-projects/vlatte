@@ -280,7 +280,7 @@ func (m *HTTPMock) Flow() []vlatte.Step {
 
 func (m *HTTPMock) Prepare() {
 	for i, e := range m.expectations {
-		_, ok := e.Matcher.(filter.OnMockSent)
+		_, ok := e.Matcher.(filter.Stateful)
 		if ok {
 			m.after = append(m.after, i)
 		}

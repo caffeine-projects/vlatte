@@ -85,7 +85,7 @@ func (m *scenarioMatcher) Match(_ any) (filter.Result, error) {
 	}, nil
 }
 
-func (m *scenarioMatcher) OnMockSent() error {
+func (m *scenarioMatcher) SetState() error {
 	rmu.RLock()
 	scn, ok := m.store.fetchByName(m.name)
 	rmu.RUnlock()
