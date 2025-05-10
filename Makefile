@@ -14,6 +14,10 @@ help: ## show help
 test: ## run tests
 	@go test -v -race -timeout 1m ./...
 
+.PHONY: testfail
+testfail: ## run tests and print the name of failed ones
+	@go test -timeout 60000ms -race -v ./... | tee /dev/stderr | rg FAIL: | sed 's/^--- FAIL: //' | sed 's/ ([[:digit:]]*.[[:digit:]]*s)//'
+
 .PHONY: testci
 testci: ## run tests with a focus on ci
 	@go test -v -race ./... -coverpkg=./... -coverprofile=coverage.txt

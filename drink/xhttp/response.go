@@ -3,6 +3,7 @@ package xhttp
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"io"
 	"net/http"
 	"sync"
@@ -12,8 +13,8 @@ import (
 
 var gzipper = &sync.Pool{New: func() any { return gzip.NewWriter(nil) }}
 
-// MockedResponse defines the HTTP response that will be served once a Mock is matched with an HTTP Request.
-type MockedResponse struct {
+// Response defines the HTTP response that will be served once a Mock is matched with an HTTP Request.
+type Response struct {
 	StatusCode   int
 	Header       http.Header
 	Trailer      http.Header
@@ -22,14 +23,17 @@ type MockedResponse struct {
 	BodyCloser   io.ReadCloser
 	BodyFilename string
 	Encoding     string
+
+	NewBody func(w io.Writer) (int, error)
 }
 
-func newResponse() *MockedResponse {
-	return &MockedResponse{Cookies: make([]*http.Cookie, 0), Header: make(http.Header), Trailer: make(http.Header)}
+func newResponse() *Response {
+	json.NewEncoder(bytes.NewBuffer(nil)).Encode(&Response{})
+	return &Response{Cookies: make([]*http.Cookie, 0), Header: make(http.Header), Trailer: make(http.Header)}
 }
 
 // Gunzip decompresses Gzip body.
-func (res *MockedResponse) Gunzip() ([]byte, error) {
+func (res *Response) Gunzip() ([]byte, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(res.Body))
 	if err != nil {
 		return nil, err
@@ -40,7 +44,7 @@ func (res *MockedResponse) Gunzip() ([]byte, error) {
 	return io.ReadAll(gz)
 }
 
-func (res *MockedResponse) encode(w io.Writer, reader io.Reader) (n int64, err error) {
+func (res *Response) encode(w io.Writer, reader io.Reader) (n int64, err error) {
 	switch res.Encoding {
 	case "gzip":
 		gz := gzipper.Get().(*gzip.Writer)
@@ -57,7 +61,7 @@ func (res *MockedResponse) encode(w io.Writer, reader io.Reader) (n int64, err e
 	return 0, nil
 }
 
-func responseFromWriter(w http.ResponseWriter) (*MockedResponse, error) {
+func responseFromWriter(w http.ResponseWriter) (*Response, error) {
 	rw := w.(*httprec.HTTPRec)
 	result := rw.Result()
 
@@ -78,7 +82,7 @@ func responseFromWriter(w http.ResponseWriter) (*MockedResponse, error) {
 		}
 	}
 
-	res := new(MockedResponse)
+	res := new(Response)
 	res.StatusCode = result.StatusCode
 	res.Header = result.Header.Clone()
 	res.Cookies = result.Cookies()

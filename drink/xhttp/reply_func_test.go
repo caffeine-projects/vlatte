@@ -9,8 +9,8 @@ import (
 )
 
 func TestFunctionReply(t *testing.T) {
-	fn := func(http.ResponseWriter, *RequestValues) (*MockedResponse, error) {
-		return &MockedResponse{StatusCode: http.StatusAccepted}, nil
+	fn := func(http.ResponseWriter, *RequestValues) (*Response, error) {
+		return &Response{StatusCode: http.StatusAccepted}, nil
 	}
 
 	r := httptest.NewRequest(http.MethodGet, "http://localhost", nil)

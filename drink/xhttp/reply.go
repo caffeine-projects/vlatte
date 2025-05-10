@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"os"
+	"text/template"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/httpval"
@@ -21,35 +22,36 @@ var _ Reply = (*StdReply)(nil)
 type Reply interface {
 	// Build returns an HTTP response MockedResponse to be served; after the HTTP request was matched.
 	// Return a nil MockedResponse if the HTTP response was rendered inside the Build function.
-	Build(w http.ResponseWriter, r *RequestValues) (*MockedResponse, error)
+	Build(w http.ResponseWriter, r *RequestValues) (*Response, error)
 }
 
-type ReplyFunc func(w http.ResponseWriter, r *RequestValues) (*MockedResponse, error)
+type ReplyFunc func(w http.ResponseWriter, r *RequestValues) (*Response, error)
 
-func (rf ReplyFunc) Build(w http.ResponseWriter, r *RequestValues) (*MockedResponse, error) {
+func (rf ReplyFunc) Build(w http.ResponseWriter, r *RequestValues) (*Response, error) {
 	return rf(w, r)
 }
 
-// TODO: this makes extensions harder. consider removal or call this within the framework
 type replyOnBeforeBuild interface {
 	beforeBuild(app *HTTPMockApp) error
 }
 
 // StdReply holds the configuration on how the MockedResponse should be built.
 type StdReply struct {
-	response                 MockedResponse
+	response                 Response
 	bodyType                 bodyType
 	bodyEncoding             bodyEncoding
 	bodyFilename             string
-	bodyTemplateRenderer     vlatte.TemplateRenderer
-	bodyFuncTemplateRenderer vlatte.TemplateRenderer
-	headerTemplateRender     vlatte.TemplateRenderer
 	teType                   teType
-	templateHeader           http.Header
+	headerWithTemplate       http.Header
+	headerTemplate           *template.Template
 	bodyTemplateContent      string
+	bodyTemplate             vlatte.Sketch
+	bodyFuncTemplateRenderer vlatte.Sketch
+	bodyTemplateRenderer     vlatte.Sketch
 	teData                   any
-	delayedErr               error
 	encoded                  bool
+
+	delayedErr error
 }
 
 type bodyType int
@@ -78,10 +80,10 @@ const (
 // NewReply creates a new StdReply. Prefer to use factory functions for each status code.
 func NewReply() *StdReply {
 	return &StdReply{
-		response:       *newResponse(),
-		bodyType:       _bodyDefault,
-		bodyEncoding:   _bodyEncodingNone,
-		templateHeader: make(http.Header),
+		response:           *newResponse(),
+		bodyType:           _bodyDefault,
+		bodyEncoding:       _bodyEncodingNone,
+		headerWithTemplate: make(http.Header),
 	}
 }
 
@@ -170,7 +172,7 @@ func (rep *StdReply) HeaderArr(key string, values ...string) *StdReply {
 
 // HeaderTemplate adds a header that can have its value changed using templates.
 func (rep *StdReply) HeaderTemplate(key, value string) *StdReply {
-	rep.templateHeader.Add(key, value)
+	rep.headerWithTemplate.Add(key, value)
 	rep.teType += _teHeader
 	return rep
 }
@@ -209,6 +211,7 @@ func (rep *StdReply) Cookie(cookie *http.Cookie) *StdReply {
 }
 
 // ExpireCookie expires a cookie.
+// TODO: rename this
 func (rep *StdReply) ExpireCookie(cookie *http.Cookie) *StdReply {
 	cookie.MaxAge = -1
 	rep.response.Cookies = append(rep.response.Cookies, cookie)
@@ -224,6 +227,10 @@ func (rep *StdReply) Body(value []byte) *StdReply {
 // BodyText defines the response body using a string.
 func (rep *StdReply) BodyText(text string) *StdReply {
 	rep.response.Body = []byte(text)
+	rep.response.NewBody = func(w io.Writer) (int, error) {
+		return w.Write([]byte(text))
+	}
+
 	return rep
 }
 
@@ -311,40 +318,43 @@ func (rep *StdReply) beforeBuild(app *HTTPMockApp) error {
 	}
 
 	if rep.teType&_teBodyFilename == _teBodyFilename {
-		r, err := app.templateEngine.Parse(rep.bodyFilename)
-		if err != nil {
+		var err error
+		tmpl := template.New("")
+		if tmpl, err = tmpl.Parse(rep.bodyFilename); err != nil {
 			return err
 		}
 
-		rep.bodyFuncTemplateRenderer = r
+		rep.bodyFuncTemplateRenderer = tmpl
 	}
 
 	if rep.teType&_teBody == _teBody {
-		r, err := app.templateEngine.Parse(rep.bodyTemplateContent)
-		if err != nil {
+		var err error
+		tmpl := template.New("")
+		if tmpl, err = tmpl.Parse(rep.bodyTemplateContent); err != nil {
 			return err
 		}
 
-		rep.bodyTemplateRenderer = r
+		rep.bodyTemplateRenderer = tmpl
 	}
 
-	if len(rep.templateHeader) > 0 {
+	if len(rep.headerWithTemplate) > 0 {
 		buf := bufpool.Get()
 		buf.Reset()
 
-		err := rep.templateHeader.Write(buf)
+		defer bufpool.Put(buf)
+
+		err := rep.headerWithTemplate.Write(buf)
 		if err != nil {
 			return err
 		}
 
-		r, err := app.templateEngine.Parse(buf.String() + "\r\n")
+		tmpl := template.New("header")
+		tmpl, err = tmpl.Parse(buf.String() + "\r\n")
 		if err != nil {
 			return err
 		}
 
-		rep.headerTemplateRender = r
-
-		bufpool.Put(buf)
+		rep.headerTemplate = tmpl
 	}
 
 	if rep.encoded {
@@ -362,7 +372,7 @@ func (rep *StdReply) beforeBuild(app *HTTPMockApp) error {
 }
 
 // Build builds a MockedResponse based on StdReply definition.
-func (rep *StdReply) Build(w http.ResponseWriter, r *RequestValues) (res *MockedResponse, err error) {
+func (rep *StdReply) Build(w http.ResponseWriter, r *RequestValues) (res *Response, err error) {
 	res, err = rep.build(w, r)
 	if err != nil {
 		return nil, fmt.Errorf("reply: %w", err)
@@ -371,16 +381,23 @@ func (rep *StdReply) Build(w http.ResponseWriter, r *RequestValues) (res *Mocked
 	return res, nil
 }
 
-func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *MockedResponse, err error) {
+func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Response, err error) {
 	if rep.delayedErr != nil {
 		return nil, rep.delayedErr
 	}
 
-	if len(rep.templateHeader) > 0 {
+	hasTemplate := rep.teType&_teBody != 0 || rep.teType&_teBodyFilename != 0 || len(rep.headerWithTemplate) > 0
+	tmplData := (any)(nil)
+	if hasTemplate {
+		tmplData = rep.buildTemplateData(r, rep.teData)
+	}
+
+	if len(rep.headerWithTemplate) > 0 {
 		buf := bufpool.Get()
 		buf.Reset()
+		defer bufpool.Put(buf)
 
-		err = rep.headerTemplateRender.Render(buf, rep.buildTemplateData(r, rep.teData))
+		err = rep.headerTemplate.Execute(buf, tmplData)
 		if err != nil {
 			return nil, err
 		}
@@ -395,8 +412,6 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Mocked
 		for k, v := range h {
 			rep.HeaderArr(k, v...)
 		}
-
-		bufpool.Put(buf)
 	}
 
 	switch rep.bodyType {
@@ -415,7 +430,7 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Mocked
 
 		defer bufpool.Put(buf)
 
-		err = rep.bodyTemplateRenderer.Render(buf, rep.buildTemplateData(r, rep.teData))
+		err = rep.bodyTemplateRenderer.Execute(buf, rep.buildTemplateData(r, rep.teData))
 		if err != nil {
 			return nil, err
 		}
@@ -439,7 +454,7 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Mocked
 
 		filename := rep.bodyFilename
 		if rep.teType&_teBodyFilename == _teBodyFilename {
-			err = rep.bodyFuncTemplateRenderer.Render(buf, rep.buildTemplateData(r, rep.teData))
+			err = rep.bodyFuncTemplateRenderer.Execute(buf, rep.buildTemplateData(r, rep.teData))
 			if err != nil {
 				return nil, err
 			}
@@ -462,12 +477,13 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Mocked
 				return nil, err
 			}
 
-			t, err := r.App.TemplateEngine().Parse(string(b))
+			tmpl := template.New("")
+			t, err := tmpl.Parse(string(b))
 			if err != nil {
 				return nil, err
 			}
 
-			err = t.Render(buf, rep.buildTemplateData(r, rep.teData))
+			err = t.Execute(buf, rep.buildTemplateData(r, rep.teData))
 			if err != nil {
 				return nil, err
 			}
@@ -478,6 +494,13 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Mocked
 		}
 
 		rep.response.BodyFilename = filename
+	}
+
+	switch rep.bodyEncoding {
+	case _bodyEncodingGZIP:
+		rep.response.Header.Add(httpval.HeaderContentEncoding, "gzip")
+		rep.response.Encoding = "gzip"
+		rep.encoded = true
 	}
 
 	return &rep.response, nil

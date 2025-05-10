@@ -22,7 +22,7 @@ func (e *ReplyEcho) Log() *ReplyEcho {
 	return e
 }
 
-func (e *ReplyEcho) Build(w http.ResponseWriter, r *RequestValues) (*MockedResponse, error) {
+func (e *ReplyEcho) Build(w http.ResponseWriter, r *RequestValues) (*Response, error) {
 	w.Header().Add(httpval.HeaderContentType, httpval.MIMETextPlainCharsetUTF8)
 
 	if e.stdoutLog {

@@ -53,7 +53,7 @@ type RequestValues struct {
 type HTTPCallbackInput struct {
 	m   *HTTPMock
 	req *RequestValues
-	res *MockedResponse
+	res *Response
 }
 
 func (i *HTTPCallbackInput) Kind() string {
@@ -68,14 +68,14 @@ func (i *HTTPCallbackInput) Request() *RequestValues {
 	return i.req
 }
 
-func (i *HTTPCallbackInput) Response() *MockedResponse {
+func (i *HTTPCallbackInput) Response() *Response {
 	return i.res
 }
 
 type HTTPPostActionInput struct {
 	m    *HTTPMock
 	req  *RequestValues
-	res  *MockedResponse
+	res  *Response
 	args any
 }
 
@@ -95,12 +95,12 @@ func (i *HTTPPostActionInput) Request() *RequestValues {
 	return i.req
 }
 
-func (i *HTTPPostActionInput) Response() *MockedResponse {
+func (i *HTTPPostActionInput) Response() *Response {
 	return i.res
 }
 
 // Mapper is the function definition to be used to map a Mock response MockedResponse before serving it.
-type Mapper func(requestValues *RequestValues, res *MockedResponse) error
+type Mapper func(requestValues *RequestValues, res *Response) error
 
 // MockFileHandler defines a custom Mock file configuration handler.
 // It lets users define custom fields on mock configuration files that could be handled by a MockFileHandler instance.
@@ -170,7 +170,6 @@ type HTTPMock struct {
 	origin       string
 	hits         atomic.Int64
 	enabled      bool
-	after        []int
 	expectations []*vlatte.Eval[*HTTPValueSelectorInput]
 
 	Reply Reply
@@ -276,15 +275,6 @@ func (m *HTTPMock) Callbacks() []vlatte.Callback {
 
 func (m *HTTPMock) Flow() []vlatte.Step {
 	return m.Steps
-}
-
-func (m *HTTPMock) Prepare() {
-	for i, e := range m.expectations {
-		_, ok := e.Matcher.(filter.Stateful)
-		if ok {
-			m.after = append(m.after, i)
-		}
-	}
 }
 
 func (m *HTTPMock) String() string {

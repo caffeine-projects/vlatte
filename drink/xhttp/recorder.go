@@ -189,7 +189,7 @@ func (r *recorder) isActive() bool {
 	return r.active.Load()
 }
 
-func (r *recorder) dispatch(req *http.Request, parsedURL *url.URL, rawReqBody []byte, res *MockedResponse) {
+func (r *recorder) dispatch(req *http.Request, parsedURL *url.URL, rawReqBody []byte, res *Response) {
 	r.in <- recArgs{
 		request:  recRequest{parsedURL.RequestURI(), req.Method, req.Header.Clone(), req.URL.Query(), rawReqBody},
 		response: recResponse{res.StatusCode, res.Header.Clone(), res.Body},

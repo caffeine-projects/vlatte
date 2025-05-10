@@ -149,9 +149,6 @@ type Config struct {
 	// MockFileHandlers sets custom Mock file handlers for a server instance.
 	MockFileHandlers []MockFileHandler
 
-	// TemplateEngine sets a custom template engine.
-	TemplateEngine vlatte.TemplateEngine
-
 	// TemplateFunctions sets custom template functions for the built-in template engine.
 	TemplateFunctions template.FuncMap
 
@@ -197,6 +194,8 @@ type Config struct {
 	// Useful to avoid logging sensitive information.
 	HeaderNamesToRedact map[string]struct{}
 
+	Sketch vlatte.Sketch
+
 	DebugFn DebugFn
 
 	// CLI Only Options
@@ -232,7 +231,6 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Record = c.Record
 	conf.UseHTTPS = c.UseHTTPS
 	conf.MockFileHandlers = c.MockFileHandlers
-	conf.TemplateEngine = c.TemplateEngine
 	conf.TemplateFunctions = c.TemplateFunctions
 	conf.HTTPClientFactory = c.HTTPClientFactory
 	conf.Debug = c.Debug
@@ -473,13 +471,6 @@ func (cb *ConfigBuilder) Record(options ...RecordConfigurer) *ConfigBuilder {
 // MockFileHandlers sets MockFileHandler implementations.
 func (cb *ConfigBuilder) MockFileHandlers(handlers ...MockFileHandler) *ConfigBuilder {
 	cb.conf.MockFileHandlers = append(cb.conf.MockFileHandlers, handlers...)
-	return cb
-}
-
-// TemplateEngine sets the TemplateEngine to be used by all components.
-// Defaults to a built-in implementation based on Go Templates.
-func (cb *ConfigBuilder) TemplateEngine(te vlatte.TemplateEngine) *ConfigBuilder {
-	cb.conf.TemplateEngine = te
 	return cb
 }
 

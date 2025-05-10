@@ -70,7 +70,7 @@ func TestResponseMapperModifyingResponse(t *testing.T) {
 
 	scoped := m.MustBrew(Get(URLPath("/test")).
 		Reply(OK()).
-		Map(func(rv *RequestValues, r *MockedResponse) error {
+		Map(func(rv *RequestValues, r *Response) error {
 			val, _ := rv.App.Parameters().Get(t.Context(), k)
 
 			r.Header.Add("x-param-key", string(val))

@@ -19,7 +19,6 @@ type Bean interface {
 	Roasted() bool
 	Roast()
 	Raw()
-	Prepare()
 
 	PostActions() PostActions
 	Callbacks() []Callback

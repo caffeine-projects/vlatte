@@ -3,6 +3,7 @@ package xhttp
 import (
 	"context"
 	"fmt"
+	"html/template"
 	"io"
 	"math/rand"
 	"net/http"
@@ -57,7 +58,6 @@ type HTTPMockApp struct {
 	rec                *recorder
 	rwMutex            sync.RWMutex
 	proxy              *reverseProxy
-	templateEngine     vlatte.TemplateEngine
 	extensions         map[string]vlatte.Extension
 	data               map[string]any
 	colorizer          *gchalk.Builder
@@ -65,6 +65,7 @@ type HTTPMockApp struct {
 	startOnce          sync.Once
 	random             *rand.Rand
 	admin              *Admin
+	template           *template.Template
 }
 
 // New creates a new HTTPMockApp mock server with the given configurations.
@@ -163,15 +164,6 @@ func New(config ...Configurer) *HTTPMockApp {
 	loaders = append(loaders, &fileLoader{})
 	loaders = append(loaders, conf.Loaders...)
 
-	if conf.TemplateEngine == nil {
-		tmpl := newGoTemplate()
-		if len(conf.TemplateFunctions) > 0 {
-			tmpl.FuncMap(conf.TemplateFunctions)
-		}
-
-		app.templateEngine = tmpl
-	}
-
 	app.Boilerplate = vlatte.NewBaseApp(app, repository)
 	app.server = server
 	app.storage = repository
@@ -265,11 +257,6 @@ func (app *HTTPMockApp) Config() *Config {
 // Server returns the Server implementation being used by this application.
 func (app *HTTPMockApp) Server() Server {
 	return app.server
-}
-
-// TemplateEngine returns the TemplateEngine associated with this instance.
-func (app *HTTPMockApp) TemplateEngine() vlatte.TemplateEngine {
-	return app.templateEngine
 }
 
 // Logger returns the zerolog.Logger of this application.

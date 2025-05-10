@@ -22,8 +22,6 @@ func (a *Tray[B, A]) Add(grinder ...Grinder[B, A]) (*Cup[B], error) {
 			return nil, fmt.Errorf("server: error adding mock at index %d.\n%w", i, err)
 		}
 
-		b.Prepare()
-
 		if err := a.canister.Store(context.Background(), b); err != nil {
 			return nil, err
 		}

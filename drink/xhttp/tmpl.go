@@ -2,18 +2,10 @@ package xhttp
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-	"text/template"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/kv"
-)
-
-var (
-	_ vlatte.TemplateEngine   = (*builtInGoTemplate)(nil)
-	_ vlatte.TemplateRenderer = (*builtInGoTemplateRender)(nil)
 )
 
 // templateData is the data used in templates during rendering.
@@ -64,45 +56,4 @@ func (t *templateRequest) Cookie(name string) (*http.Cookie, error) {
 	}
 
 	return nil, fmt.Errorf(`cookie "%s" not found`, name)
-}
-
-// builtInGoTemplate is the built-in TemplateEngine implementation.
-// It uses Go templates.
-type builtInGoTemplate struct {
-	funcMap template.FuncMap
-}
-
-func newGoTemplate() *builtInGoTemplate {
-	return &builtInGoTemplate{funcMap: make(template.FuncMap)}
-}
-
-func (gt *builtInGoTemplate) Load() error {
-	return nil
-}
-
-// FuncMap adds a new function to be used inside the Go template.
-func (gt *builtInGoTemplate) FuncMap(fn template.FuncMap) *builtInGoTemplate {
-	gt.funcMap = fn
-	return gt
-}
-
-func (gt *builtInGoTemplate) Parse(s string) (vlatte.TemplateRenderer, error) {
-	t, err := template.New("").Funcs(gt.funcMap).Parse(s)
-	if err != nil {
-		return nil, err
-	}
-
-	return newGoTemplateRender(t), nil
-}
-
-type builtInGoTemplateRender struct {
-	template *template.Template
-}
-
-func newGoTemplateRender(template *template.Template) vlatte.TemplateRenderer {
-	return &builtInGoTemplateRender{template: template}
-}
-
-func (gt *builtInGoTemplateRender) Render(w io.Writer, data any) error {
-	return gt.template.Execute(w, data)
 }

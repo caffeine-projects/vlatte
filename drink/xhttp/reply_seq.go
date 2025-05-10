@@ -47,7 +47,7 @@ func (r *SequentialReply) beforeBuild(_ *HTTPMockApp) error {
 
 // Build builds a new response based on the current Mock call sequence.
 // When the sequence is over, it will return an error or a previously configured reply for this scenario.
-func (r *SequentialReply) Build(w http.ResponseWriter, req *RequestValues) (*MockedResponse, error) {
+func (r *SequentialReply) Build(w http.ResponseWriter, req *RequestValues) (*Response, error) {
 	r.rwMutex.Lock()
 	defer r.rwMutex.Unlock()
 

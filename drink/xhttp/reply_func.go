@@ -7,8 +7,8 @@ import (
 // -- Function Reply
 
 // Func returns a FunctionReply that builds a response using the given function.
-func Func(fn func(http.ResponseWriter, *RequestValues) (*MockedResponse, error)) ReplyFunc {
-	return func(w http.ResponseWriter, r *RequestValues) (*MockedResponse, error) {
+func Func(fn func(http.ResponseWriter, *RequestValues) (*Response, error)) ReplyFunc {
+	return func(w http.ResponseWriter, r *RequestValues) (*Response, error) {
 		return fn(w, r)
 	}
 }
@@ -16,7 +16,7 @@ func Func(fn func(http.ResponseWriter, *RequestValues) (*MockedResponse, error))
 // -- HTTP Handler Reply
 
 func Handler(h http.HandlerFunc) ReplyFunc {
-	return func(w http.ResponseWriter, r *RequestValues) (*MockedResponse, error) {
+	return func(w http.ResponseWriter, r *RequestValues) (*Response, error) {
 		h(w, r.RawRequest)
 		return nil, nil
 	}

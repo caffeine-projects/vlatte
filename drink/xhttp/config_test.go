@@ -186,7 +186,6 @@ func TestConfigBuilder(t *testing.T) {
 		MockFilePatterns("test", "dev").
 		Loader(&fileLoader{}).
 		MockFileHandlers(&customMockFileHandler{}).
-		TemplateEngine(newGoTemplate()).
 		TemplateEngineFunctions(template.FuncMap{"trim": strings.TrimSpace}).
 		Proxy(&ProxyConfig{}, &ProxyConfig{}).
 		TLSConfig(tlsConfig).
@@ -218,7 +217,6 @@ func TestConfigBuilder(t *testing.T) {
 	require.Equal(t, conf.HeaderNamesToRedact["header-3"], struct{}{})
 	require.Len(t, conf.Loaders, 1)
 	require.Len(t, conf.MockFileHandlers, 1)
-	require.IsType(t, &builtInGoTemplate{}, conf.TemplateEngine)
 	require.Len(t, conf.TemplateFunctions, 1)
 	require.NotNil(t, conf.Proxy)
 	require.Equal(t, tlsConfig, conf.TLSConfig)

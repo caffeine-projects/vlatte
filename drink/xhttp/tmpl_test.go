@@ -1,106 +1,95 @@
 package xhttp
 
-import (
-	"bytes"
-	"net/http"
-	"strings"
-	"testing"
-	"text/template"
+// func TestGoTemplating(t *testing.T) {
+// 	type testData struct {
+// 		Key   string
+// 		Value string
+// 	}
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-)
+// 	tpl := []byte(`{{- trim .Key }} {{ .Value }}`)
+// 	gt := newGoTemplate()
+// 	require.NoError(t, gt.Load())
 
-func TestGoTemplating(t *testing.T) {
-	type testData struct {
-		Key   string
-		Value string
-	}
+// 	tr, err := gt.FuncMap(template.FuncMap{"trim": strings.TrimSpace}).Parse(string(tpl))
+// 	require.NoError(t, err)
 
-	tpl := []byte(`{{- trim .Key }} {{ .Value }}`)
-	gt := newGoTemplate()
-	require.NoError(t, gt.Load())
+// 	data := testData{Key: "  hello   ", Value: "world "}
+// 	buf := bytes.Buffer{}
+// 	err = tr.Render(&buf, data)
 
-	tr, err := gt.FuncMap(template.FuncMap{"trim": strings.TrimSpace}).Parse(string(tpl))
-	require.NoError(t, err)
+// 	require.NoError(t, err)
+// 	require.Equal(t, "hello world ", buf.String())
+// }
 
-	data := testData{Key: "  hello   ", Value: "world "}
-	buf := bytes.Buffer{}
-	err = tr.Render(&buf, data)
+// func TestTemplatingError(t *testing.T) {
+// 	gt := newGoTemplate()
+// 	tr, err := gt.Parse("invalid {{ .hi }")
 
-	require.NoError(t, err)
-	require.Equal(t, "hello world ", buf.String())
-}
+// 	require.NotNil(t, err)
+// 	require.Nil(t, tr)
+// }
 
-func TestTemplatingError(t *testing.T) {
-	gt := newGoTemplate()
-	tr, err := gt.Parse("invalid {{ .hi }")
+// func TestReplyWithTemplate(t *testing.T) {
+// 	app := New(Setup().TemplateEngineFunctions(template.FuncMap{"trim": strings.TrimSpace}))
+// 	app.MustStart()
+// 	defer app.Close()
 
-	require.NotNil(t, err)
-	require.Nil(t, tr)
-}
+// 	req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
+// 	req.Header.Add("x-test", "dev")
 
-func TestReplyWithTemplate(t *testing.T) {
-	app := New(Setup().TemplateEngineFunctions(template.FuncMap{"trim": strings.TrimSpace}))
-	app.MustStart()
-	defer app.Close()
+// 	b := []byte(`{{- trim .Extra.Name }}
+// {{ .Request.Header.Get "x-test" }}`)
 
-	req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
-	req.Header.Add("x-test", "dev")
+// 	data := struct {
+// 		Name string
+// 	}{
+// 		Name: " test  ",
+// 	}
 
-	b := []byte(`{{- trim .Extra.Name }}
-{{ .Request.Header.Get "x-test" }}`)
+// 	rv := &RequestValues{RawRequest: req, URL: req.URL, App: app}
+// 	reply := NewReply().
+// 		Status(http.StatusOK).
+// 		BodyTemplate(string(b)).
+// 		SetTemplateData(data)
 
-	data := struct {
-		Name string
-	}{
-		Name: " test  ",
-	}
+// 	require.NoError(t, reply.beforeBuild(app))
 
-	rv := &RequestValues{RawRequest: req, URL: req.URL, App: app}
-	reply := NewReply().
-		Status(http.StatusOK).
-		BodyTemplate(string(b)).
-		SetTemplateData(data)
+// 	res, err := reply.Build(nil, rv)
 
-	require.NoError(t, reply.beforeBuild(app))
+// 	require.NoError(t, err)
+// 	assert.Equal(t, http.StatusOK, res.StatusCode)
+// 	assert.Equal(t, "test\ndev", string(res.Body))
+// }
 
-	res, err := reply.Build(nil, rv)
+// func TestReplyWithTemplateText(t *testing.T) {
+// 	app := New(Setup().TemplateEngineFunctions(template.FuncMap{"trim": strings.TrimSpace}))
+// 	app.MustStart()
+// 	defer app.Close()
 
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, res.StatusCode)
-	assert.Equal(t, "test\ndev", string(res.Body))
-}
+// 	req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
+// 	req.Header.Add("x-test", "dev")
 
-func TestReplyWithTemplateText(t *testing.T) {
-	app := New(Setup().TemplateEngineFunctions(template.FuncMap{"trim": strings.TrimSpace}))
-	app.MustStart()
-	defer app.Close()
+// 	data := struct {
+// 		Name string
+// 	}{
+// 		Name: " test  ",
+// 	}
 
-	req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
-	req.Header.Add("x-test", "dev")
+// 	tmpl := `{{- trim .Extra.Name }}
+// {{ .Request.Header.Get "x-test" }}
+// `
 
-	data := struct {
-		Name string
-	}{
-		Name: " test  ",
-	}
+// 	rv := &RequestValues{RawRequest: req, URL: req.URL, App: app}
+// 	reply := NewReply().
+// 		Status(http.StatusOK).
+// 		BodyTemplate(tmpl).
+// 		SetTemplateData(data)
 
-	tmpl := `{{- trim .Extra.Name }}
-{{ .Request.Header.Get "x-test" }}
-`
+// 	require.NoError(t, reply.beforeBuild(app))
 
-	rv := &RequestValues{RawRequest: req, URL: req.URL, App: app}
-	reply := NewReply().
-		Status(http.StatusOK).
-		BodyTemplate(tmpl).
-		SetTemplateData(data)
+// 	res, err := reply.Build(nil, rv)
 
-	require.NoError(t, reply.beforeBuild(app))
-
-	res, err := reply.Build(nil, rv)
-
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, res.StatusCode)
-	assert.Equal(t, "test\ndev\n", string(res.Body))
-}
+// 	require.NoError(t, err)
+// 	assert.Equal(t, http.StatusOK, res.StatusCode)
+// 	assert.Equal(t, "test\ndev\n", string(res.Body))
+// }

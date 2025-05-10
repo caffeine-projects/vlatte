@@ -59,7 +59,7 @@ func (rep *RandomReply) beforeBuild(_ *HTTPMockApp) error {
 }
 
 // Build builds a response randomly based on previously added replies.
-func (rep *RandomReply) Build(w http.ResponseWriter, r *RequestValues) (*MockedResponse, error) {
+func (rep *RandomReply) Build(w http.ResponseWriter, r *RequestValues) (*Response, error) {
 	_randomMu.Lock()
 	defer _randomMu.Unlock()
 

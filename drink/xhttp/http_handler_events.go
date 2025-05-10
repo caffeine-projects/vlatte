@@ -22,7 +22,7 @@ var (
 
 type mockHTTPLifecycle interface {
 	OnRequest(*RequestValues)
-	OnMatch(*RequestValues, *MockedResponse)
+	OnMatch(*RequestValues, *Response)
 	OnNoMatch(*RequestValues, *vlatte.Results)
 	OnWarning(*RequestValues, error)
 	OnError(*RequestValues, error)
@@ -59,7 +59,7 @@ func (h *builtInMockHTTPLifecycle) OnRequest(r *RequestValues) {
 	evt.Msgf("---> REQUEST RECEIVED %s %s", r.RawRequest.Method, r.URL.Path)
 }
 
-func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *MockedResponse) {
+func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *Response) {
 	if h.app.config.LogLevel == LogLevelDisabled {
 		return
 	}
@@ -181,7 +181,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnRequest(rv *RequestValues) {
 	buf.WriteTo(h.out)
 }
 
-func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *MockedResponse) {
+func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Response) {
 	if h.app.config.LogLevel == LogLevelDisabled {
 		return
 	}
