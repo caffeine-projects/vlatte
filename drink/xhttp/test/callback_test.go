@@ -29,7 +29,7 @@ func TestCallbacks(t *testing.T) {
 				cinput, ok := input.(*xhttp.HTTPCallbackInput)
 
 				require.True(t, ok)
-				require.Equal(t, "http", cinput.Kind())
+				require.Equal(t, "http", cinput.Kind().String())
 				require.NotNil(t, cinput)
 				require.NotNil(t, cinput.Bean())
 				require.NotNil(t, cinput.Request())

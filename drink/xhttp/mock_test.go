@@ -55,9 +55,6 @@ func TestMock(t *testing.T) {
 		assert.False(t, m.Called())
 		m.Inc()
 		assert.True(t, m.Called())
-
-		m.Dec()
-		assert.False(t, m.Called())
 	})
 }
 

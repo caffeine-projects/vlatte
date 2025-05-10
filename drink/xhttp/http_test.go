@@ -52,7 +52,7 @@ func TestMocha(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.True(t, scoped.Called())
 	require.Equal(t, 201, res.StatusCode)
-	require.Equal(t, string(body), "hello world")
+	require.Equal(t, "hello world", string(body))
 }
 
 func TestResponseMapperModifyingResponse(t *testing.T) {

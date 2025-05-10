@@ -13,7 +13,6 @@ type Bean interface {
 	Priority() int
 	Origin() string
 	Inc()
-	Dec()
 	Hits() int64
 	Called() bool
 	Roasted() bool

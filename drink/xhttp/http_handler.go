@@ -50,7 +50,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.lifecycle.OnRequest(reqValues)
 
-	em, err := h.app.storage.Scoop(r.Context())
+	beans, err := h.app.storage.Scoop(r.Context())
 	if err != nil {
 		h.lifecycle.OnError(reqValues, fmt.Errorf("http: error finding eligible mocks for request. %w", err))
 		return
@@ -59,15 +59,15 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	results := &vlatte.Results{Buf: make([]string, 0)}
 	selectorInput := &HTTPValueSelectorInput{r, parsedURL, r.URL.Query(), r.Form, parsedBody}
 
-	mocks := vlatte.Mocks[*HTTPMock, *HTTPValueSelectorInput](em)
-	mock, pass, err := mocks.Find(r.Context(), selectorInput, func(m *HTTPMock) vlatte.Evaluators[*HTTPMock, *HTTPValueSelectorInput] { return m.expectations })
+	mocks := vlatte.Mocks[*HTTPMock, *HTTPValueSelectorInput](beans)
+	mock, matched, err := mocks.Find(r.Context(), selectorInput, func(m *HTTPMock) vlatte.Evaluators[*HTTPMock, *HTTPValueSelectorInput] { return m.expectations })
 	if err != nil {
 		h.lifecycle.OnError(reqValues, fmt.Errorf("http: error finding eligible mocks for request. %w", err))
 	}
 
 	// no mocks matched with the incoming request
 	// lets check if we need to proxy and record this request.
-	if !pass {
+	if !matched {
 		if h.app.proxy == nil {
 			h.onNoMatches(w, reqValues, results)
 			return
@@ -103,6 +103,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		<-ctxTimeout.Done()
 	}
 
+	if len(mock.Flow()) > 0 {
+		w = &topResponseWriter{vlatte.Flow(&vlatte.Sink{W: w}, mock.Flow()), w}
+	}
+
 	res, err := mock.Reply.Build(w, reqValues)
 	if err != nil {
 		h.onError(w, reqValues, fmt.Errorf(
@@ -114,19 +118,12 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mock.Inc()
-
 	if res != nil {
 		for i, mapper := range mock.Mappers {
 			if err = mapper(reqValues, res); err != nil {
-				mock.Dec()
 				h.onError(w, reqValues, fmt.Errorf("http: error with response mapper at index %d. %w", i, err))
 				return
 			}
-		}
-
-		if len(mock.Flow()) > 0 {
-			w = &topResponseWriter{vlatte.Flow(&vlatte.Sink{W: w}, mock.Flow()), w}
 		}
 
 		for k, vv := range res.Header {
@@ -190,6 +187,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	mock.Inc()
 
 	// run matcher events after we sent the mock.
 	// some matcher might need to keep state.

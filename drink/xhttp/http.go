@@ -3,7 +3,6 @@ package xhttp
 import (
 	"context"
 	"fmt"
-	"html/template"
 	"io"
 	"math/rand"
 	"net/http"
@@ -65,7 +64,6 @@ type HTTPMockApp struct {
 	startOnce          sync.Once
 	random             *rand.Rand
 	admin              *Admin
-	template           *template.Template
 }
 
 // New creates a new HTTPMockApp mock server with the given configurations.

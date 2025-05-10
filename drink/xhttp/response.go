@@ -23,8 +23,6 @@ type Response struct {
 	BodyCloser   io.ReadCloser
 	BodyFilename string
 	Encoding     string
-
-	NewBody func(w io.Writer) (int, error)
 }
 
 func newResponse() *Response {
@@ -33,8 +31,8 @@ func newResponse() *Response {
 }
 
 // Gunzip decompresses Gzip body.
-func (res *Response) Gunzip() ([]byte, error) {
-	gz, err := gzip.NewReader(bytes.NewReader(res.Body))
+func (r *Response) Gunzip() ([]byte, error) {
+	gz, err := gzip.NewReader(bytes.NewReader(r.Body))
 	if err != nil {
 		return nil, err
 	}
@@ -44,8 +42,8 @@ func (res *Response) Gunzip() ([]byte, error) {
 	return io.ReadAll(gz)
 }
 
-func (res *Response) encode(w io.Writer, reader io.Reader) (n int64, err error) {
-	switch res.Encoding {
+func (r *Response) encode(w io.Writer, reader io.Reader) (n int64, err error) {
+	switch r.Encoding {
 	case "gzip":
 		gz := gzipper.Get().(*gzip.Writer)
 		gz.Reset(w)

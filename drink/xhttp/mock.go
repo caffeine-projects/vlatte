@@ -228,11 +228,6 @@ func (m *HTTPMock) Inc() {
 	m.hits.Add(1)
 }
 
-// Dec reduce one Mock call.
-func (m *HTTPMock) Dec() {
-	m.hits.Add(-1)
-}
-
 // Hits returns the amount of time this Mock was matched to a request and served.
 func (m *HTTPMock) Hits() int64 {
 	return m.hits.Load()

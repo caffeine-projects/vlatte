@@ -227,10 +227,6 @@ func (rep *StdReply) Body(value []byte) *StdReply {
 // BodyText defines the response body using a string.
 func (rep *StdReply) BodyText(text string) *StdReply {
 	rep.response.Body = []byte(text)
-	rep.response.NewBody = func(w io.Writer) (int, error) {
-		return w.Write([]byte(text))
-	}
-
 	return rep
 }
 
