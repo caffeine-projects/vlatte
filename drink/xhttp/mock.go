@@ -56,8 +56,8 @@ type HTTPCallbackInput struct {
 	res *Response
 }
 
-func (i *HTTPCallbackInput) Kind() string {
-	return "http"
+func (i *HTTPCallbackInput) Kind() vlatte.Kind {
+	return vlatte.KindHTTP
 }
 
 func (i *HTTPCallbackInput) Bean() vlatte.Bean {
@@ -79,8 +79,8 @@ type HTTPPostActionInput struct {
 	args any
 }
 
-func (i *HTTPPostActionInput) Kind() string {
-	return "http"
+func (i *HTTPPostActionInput) Kind() vlatte.Kind {
+	return vlatte.KindHTTP
 }
 
 func (i *HTTPPostActionInput) Args() any {

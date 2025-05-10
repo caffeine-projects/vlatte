@@ -91,7 +91,7 @@ func (w *WebHook) Run(ctx context.Context, input vlatte.PostActionInput) error {
 	txtURL := u.String()
 	w.Logger.Info(fmt.Sprintf("---> WEBHOOK REQUEST RECEIVED %s %s", method, u.Path),
 		slog.String("url", txtURL),
-		slog.String("kind", input.Kind()))
+		slog.String("kind", string(input.Kind())))
 
 	req, err := http.NewRequestWithContext(ctx, method, txtURL, body)
 	if err != nil {
@@ -106,7 +106,7 @@ func (w *WebHook) Run(ctx context.Context, input vlatte.PostActionInput) error {
 	if err != nil {
 		w.Logger.Error(fmt.Sprintf("<--- WEBHOOK: %s %s", method, u.Path),
 			slog.String("url", txtURL),
-			slog.String("kind", input.Kind()))
+			slog.String("kind", string(input.Kind())))
 		return fmt.Errorf("webhook: request failed: %w", err)
 	}
 
@@ -120,7 +120,7 @@ func (w *WebHook) Run(ctx context.Context, input vlatte.PostActionInput) error {
 	w.Logger.Log(ctx, level, fmt.Sprintf("<--- WEBHOOK %s %s", method, u.Path),
 		slog.String("url", txtURL),
 		slog.Int("status", res.StatusCode),
-		slog.String("kind", input.Kind()))
+		slog.String("kind", string(input.Kind())))
 
 	return nil
 }

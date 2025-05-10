@@ -6,7 +6,7 @@ import (
 
 // PostActionInput represents the arguments that will be passed to every Callback implementation
 type PostActionInput interface {
-	Kind() string
+	Kind() Kind
 
 	// Bean is the matched Bean for the current HTTP request.
 	Bean() Bean

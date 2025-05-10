@@ -9,7 +9,7 @@ import "context"
 type CallbackInput interface {
 	// Kind returns the type of the callback.
 	// Example: if HTTP mock is being used, it will return "http".
-	Kind() string
+	Kind() Kind
 
 	// Bean is the matched [Bean] for the current request.
 	Bean() Bean
