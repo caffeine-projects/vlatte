@@ -426,7 +426,7 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Respon
 
 		defer bufpool.Put(buf)
 
-		err = rep.bodyTemplateRenderer.Execute(buf, rep.buildTemplateData(r, rep.teData))
+		err = rep.bodyTemplateRenderer.Execute(buf, tmplData)
 		if err != nil {
 			return nil, err
 		}
@@ -450,7 +450,7 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Respon
 
 		filename := rep.bodyFilename
 		if rep.teType&_teBodyFilename == _teBodyFilename {
-			err = rep.bodyFuncTemplateRenderer.Execute(buf, rep.buildTemplateData(r, rep.teData))
+			err = rep.bodyFuncTemplateRenderer.Execute(buf, tmplData)
 			if err != nil {
 				return nil, err
 			}
@@ -479,7 +479,7 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Respon
 				return nil, err
 			}
 
-			err = t.Execute(buf, rep.buildTemplateData(r, rep.teData))
+			err = t.Execute(buf, tmplData)
 			if err != nil {
 				return nil, err
 			}

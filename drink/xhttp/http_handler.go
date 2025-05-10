@@ -1,10 +1,8 @@
 package xhttp
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -126,65 +124,9 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		for k, vv := range res.Header {
-			for _, v := range vv {
-				w.Header().Add(k, v)
-			}
-		}
-
-		for k := range res.Trailer {
-			w.Header().Add(httpval.HeaderTrailer, k)
-		}
-
-		for _, cookie := range res.Cookies {
-			http.SetCookie(w, cookie)
-		}
-
-		w.WriteHeader(res.StatusCode)
-
-		if len(res.Body) > 0 {
-			if len(res.Encoding) > 0 {
-				buf := bufpool.Get()
-				buf.Reset()
-
-				_, err = res.encode(buf, bytes.NewReader(res.Body))
-				if err != nil {
-					h.lifecycle.OnError(reqValues, fmt.Errorf("http: error encoding body: %w", err))
-					return
-				}
-
-				_, err = buf.WriteTo(w)
-				if err != nil {
-					h.lifecycle.OnError(reqValues, fmt.Errorf("http: error writting body: %w", err))
-					return
-				}
-
-				bufpool.Put(buf)
-			} else {
-				w.Write(res.Body)
-			}
-		} else if res.BodyCloser != nil {
-			defer res.BodyCloser.Close()
-
-			if len(res.Encoding) > 0 {
-				_, err = res.encode(w, res.BodyCloser)
-				if err != nil {
-					h.lifecycle.OnError(reqValues, fmt.Errorf("http: error encoding body: %w", err))
-					return
-				}
-			} else {
-				_, err = io.Copy(w, res.BodyCloser)
-				if err != nil {
-					h.lifecycle.OnError(reqValues, fmt.Errorf("http: error writting body: %w", err))
-					return
-				}
-			}
-		}
-
-		for k, v := range res.Trailer {
-			for _, vv := range v {
-				w.Header().Add(k, vv)
-			}
+		if err := res.Render(w); err != nil {
+			h.onError(w, reqValues, fmt.Errorf("http: error rendering response. %w", err))
+			return
 		}
 	}
 

@@ -3,11 +3,12 @@ package xhttp
 import (
 	"bytes"
 	"compress/gzip"
-	"encoding/json"
 	"io"
 	"net/http"
 	"sync"
 
+	"github.com/caffeine-projects/vlatte/drink/xhttp/httpval"
+	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/httprec"
 )
 
@@ -26,7 +27,6 @@ type Response struct {
 }
 
 func newResponse() *Response {
-	json.NewEncoder(bytes.NewBuffer(nil)).Encode(&Response{})
 	return &Response{Cookies: make([]*http.Cookie, 0), Header: make(http.Header), Trailer: make(http.Header)}
 }
 
@@ -40,6 +40,63 @@ func (r *Response) Gunzip() ([]byte, error) {
 	defer gz.Close()
 
 	return io.ReadAll(gz)
+}
+
+func (r *Response) Render(w http.ResponseWriter) error {
+	for k, vv := range r.Header {
+		for _, v := range vv {
+			w.Header().Add(k, v)
+		}
+	}
+
+	for k := range r.Trailer {
+		w.Header().Add(httpval.HeaderTrailer, k)
+	}
+
+	for _, cookie := range r.Cookies {
+		http.SetCookie(w, cookie)
+	}
+
+	w.WriteHeader(r.StatusCode)
+
+	if len(r.Body) > 0 {
+		if len(r.Encoding) > 0 {
+			buf := bufpool.Get()
+			buf.Reset()
+
+			if _, err := r.encode(buf, bytes.NewReader(r.Body)); err != nil {
+				return err
+			}
+
+			if _, err := buf.WriteTo(w); err != nil {
+				return err
+			}
+
+			bufpool.Put(buf)
+		} else {
+			w.Write(r.Body)
+		}
+	} else if r.BodyCloser != nil {
+		defer r.BodyCloser.Close()
+
+		if len(r.Encoding) > 0 {
+			if _, err := r.encode(w, r.BodyCloser); err != nil {
+				return err
+			}
+		} else {
+			if _, err := io.Copy(w, r.BodyCloser); err != nil {
+				return err
+			}
+		}
+	}
+
+	for k, v := range r.Trailer {
+		for _, vv := range v {
+			w.Header().Add(k, vv)
+		}
+	}
+
+	return nil
 }
 
 func (r *Response) encode(w io.Writer, reader io.Reader) (n int64, err error) {
