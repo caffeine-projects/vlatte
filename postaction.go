@@ -8,10 +8,13 @@ import (
 type PostActionInput interface {
 	Kind() Kind
 
-	// Bean is the matched Bean for the current HTTP request.
+	// Bean is the matched Bean for the current request.
 	Bean() Bean
 
+	Kit() Kit
+
 	// Args allow passing custom arguments to a PostAction.
+	// TODO: rename to parameters
 	Args() any
 }
 

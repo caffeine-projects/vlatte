@@ -2,8 +2,9 @@
 package webhook
 
 import (
-	"log/slog"
 	"net/http"
+
+	"github.com/rs/zerolog"
 )
 
 // WithTransform returns an [Option] that sets the [Transform] function for a [WebHook].
@@ -26,7 +27,7 @@ func WithRoundTripper(roundTripper http.RoundTripper) Option {
 
 // WithLogger returns an [Option] that sets the logger for a [WebHook].
 // The logger is used for recording webhook activities and errors.
-func WithLogger(logger *slog.Logger) Option {
+func WithLogger(logger *zerolog.Logger) Option {
 	return func(w *WebHook) error {
 		w.Logger = logger
 		return nil
@@ -35,7 +36,7 @@ func WithLogger(logger *slog.Logger) Option {
 
 // WithLogLevel returns an [Option] that sets the logging level for a [WebHook].
 // This controls the verbosity of webhook-related logs.
-func WithLogLevel(level slog.Level) Option {
+func WithLogLevel(level zerolog.Level) Option {
 	return func(w *WebHook) error {
 		w.LogLevel = level
 		return nil

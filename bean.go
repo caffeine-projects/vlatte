@@ -12,6 +12,7 @@ type Bean interface {
 	Name() string
 	Priority() int
 	Origin() string
+	Ext() any
 	Inc()
 	Hits() int64
 	Called() bool

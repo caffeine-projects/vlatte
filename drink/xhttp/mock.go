@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -18,37 +17,6 @@ import (
 
 var _ vlatte.Bean = (*HTTPMock)(nil)
 var _ vlatte.CallbackInput = (*HTTPCallbackInput)(nil)
-var _ vlatte.PostActionInput = (*HTTPPostActionInput)(nil)
-
-// RequestValues groups HTTP request data, including the parsed body.
-// It is used by several components during the request matching phase.
-type RequestValues struct {
-	// StartedAt indicates when the request arrived.
-	StartedAt time.Time
-
-	// RawRequest is the original incoming http.Request.
-	RawRequest *http.Request
-
-	// URL is the full request url.URL, including scheme, host, port.
-	URL *url.URL
-
-	// URLPathSegments stores path segments.
-	// Eg.: /test/100 -> []string{"test", "100"}
-	URLPathSegments []string
-
-	// RawBody is the HTTP request body bytes.
-	RawBody []byte
-
-	// ParsedBody is the parsed http.Request body parsed by a RequestBodyParser instance.
-	// It'll be nil if the HTTP request does not contain a body.
-	ParsedBody any
-
-	// App exposes application instance associated with the incoming HTTP request.
-	App *HTTPMockApp
-
-	// Mock is the matched Mock for the current HTTP request.
-	Mock *HTTPMock
-}
 
 type HTTPCallbackInput struct {
 	m   *HTTPMock
@@ -69,33 +37,6 @@ func (i *HTTPCallbackInput) Request() *RequestValues {
 }
 
 func (i *HTTPCallbackInput) Response() *Response {
-	return i.res
-}
-
-type HTTPPostActionInput struct {
-	m    *HTTPMock
-	req  *RequestValues
-	res  *Response
-	args any
-}
-
-func (i *HTTPPostActionInput) Kind() vlatte.Kind {
-	return vlatte.KindHTTP
-}
-
-func (i *HTTPPostActionInput) Args() any {
-	return i.args
-}
-
-func (i *HTTPPostActionInput) Bean() vlatte.Bean {
-	return i.m
-}
-
-func (i *HTTPPostActionInput) Request() *RequestValues {
-	return i.req
-}
-
-func (i *HTTPPostActionInput) Response() *Response {
 	return i.res
 }
 
@@ -171,6 +112,7 @@ type HTTPMock struct {
 	hits         atomic.Int64
 	enabled      bool
 	expectations []*vlatte.Eval[*HTTPValueSelectorInput]
+	ext          any
 
 	Reply Reply
 
@@ -215,6 +157,10 @@ func (m *HTTPMock) Priority() int {
 
 func (m *HTTPMock) Origin() string {
 	return m.origin
+}
+
+func (m *HTTPMock) Ext() any {
+	return m.ext
 }
 
 func (m *HTTPMock) Roasted() bool {

@@ -194,7 +194,9 @@ type Config struct {
 	// Useful to avoid logging sensitive information.
 	HeaderNamesToRedact map[string]struct{}
 
-	Sketch vlatte.Sketch
+	Sketch vlatte.Template
+
+	SketchDataProviders []vlatte.TemplateDataProvider
 
 	DebugFn DebugFn
 
@@ -246,6 +248,8 @@ func (c *Config) Apply(conf *Config) error {
 	conf.UseHTTP2 = c.UseHTTP2
 	conf.PostActions = c.PostActions
 	conf.DebugFn = c.DebugFn
+	conf.Sketch = c.Sketch
+	conf.SketchDataProviders = c.SketchDataProviders
 
 	return nil
 }
@@ -371,6 +375,11 @@ func (cb *ConfigBuilder) HandlerDecorator(fn func(handler http.Handler) http.Han
 // Logger sets a custom zerolog.Logger.
 func (cb *ConfigBuilder) Logger(l *zerolog.Logger) *ConfigBuilder {
 	cb.conf.Logger = l
+	return cb
+}
+
+func (cb *ConfigBuilder) Silent() *ConfigBuilder {
+	cb.conf.LogLevel = LogLevelDisabled
 	return cb
 }
 
@@ -533,6 +542,16 @@ func (cb *ConfigBuilder) AdminPath(path string) *ConfigBuilder {
 
 func (cb *ConfigBuilder) AdminEnabled(v bool) *ConfigBuilder {
 	cb.conf.AdminEnabled = v
+	return cb
+}
+
+func (cb *ConfigBuilder) Sketch(sketch vlatte.Template) *ConfigBuilder {
+	cb.conf.Sketch = sketch
+	return cb
+}
+
+func (cb *ConfigBuilder) SketchDataProviders(sdp []vlatte.TemplateDataProvider) *ConfigBuilder {
+	cb.conf.SketchDataProviders = sdp
 	return cb
 }
 

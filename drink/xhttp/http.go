@@ -145,7 +145,7 @@ func New(config ...Configurer) *HTTPMockApp {
 		lifecycle = newBuiltInMockHTTPLifecycle(app)
 	}
 
-	handler := mid.Compose(middlewares...).Root(newMockHandler(app, lifecycle))
+	handler := mid.Compose(middlewares...).Root(newMockHandler(app, lifecycle, conf.SketchDataProviders))
 
 	if conf.HandlerDecorator != nil {
 		handler = conf.HandlerDecorator(handler)

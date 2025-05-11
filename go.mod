@@ -3,13 +3,13 @@ module github.com/caffeine-projects/vlatte
 go 1.24.1
 
 require (
-	github.com/go-viper/mapstructure/v2 v2.2.1
 	github.com/stretchr/testify v1.10.0
 	google.golang.org/protobuf v1.36.4
 )
 
 require (
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
+	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jwalton/go-supportscolor v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect

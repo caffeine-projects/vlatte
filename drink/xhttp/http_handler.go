@@ -12,8 +12,11 @@ import (
 	"github.com/caffeine-projects/vlatte/drink/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/httprec"
+	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/viewdata"
 	"github.com/caffeine-projects/vlatte/filter"
 )
+
+var ErrTemplateDataKeyExists = fmt.Errorf("http: template data key already exists")
 
 type topResponseWriter struct {
 	next vlatte.Next
@@ -25,12 +28,17 @@ func (w *topResponseWriter) Write(p []byte) (int, error) { return w.next.Next(p)
 func (w *topResponseWriter) WriteHeader(statusCode int)  { w.rw.WriteHeader(statusCode) }
 
 type mockHandler struct {
-	app       *HTTPMockApp
-	lifecycle mockHTTPLifecycle
+	app                 *HTTPMockApp
+	lifecycle           mockHTTPLifecycle
+	sketchDataProviders []vlatte.TemplateDataProvider
 }
 
-func newMockHandler(app *HTTPMockApp, lifecycle mockHTTPLifecycle) *mockHandler {
-	return &mockHandler{app, lifecycle}
+func newMockHandler(
+	app *HTTPMockApp,
+	lifecycle mockHTTPLifecycle,
+	sketchDataProviders []vlatte.TemplateDataProvider,
+) *mockHandler {
+	return &mockHandler{app, lifecycle, sketchDataProviders}
 }
 
 func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +46,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	parsedURL, urlSegments := h.parseURL(r)
 	parsedBody, rawBody, err := parseRequestBody(h.app, r)
-	reqValues := &RequestValues{time.Now(), r, parsedURL, urlSegments, nil, nil, h.app, nil}
+	reqValues := &RequestValues{time.Now(), r, parsedURL, urlSegments, nil, nil, h.app, nil, nil}
 	if err != nil {
 		h.lifecycle.OnWarning(reqValues, fmt.Errorf("request_body_parser: %w", err))
 	}
@@ -92,6 +100,29 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	d := make(map[string]any, len(h.sketchDataProviders))
+	sdpIn := &TemplateDataProviderInput{r: reqValues, s: h.app.config.Sketch}
+
+	if len(h.sketchDataProviders) > 0 {
+		for _, sdp := range h.sketchDataProviders {
+			if _, ok := d[sdp.Key()]; ok {
+				h.lifecycle.OnWarning(reqValues, fmt.Errorf("%w: key=%s provider=%T", ErrTemplateDataKeyExists, sdp.Key(), sdp))
+			}
+
+			dd, err := sdp.Data(sdpIn)
+			if err != nil {
+				h.lifecycle.OnError(reqValues, fmt.Errorf("http: error getting sketch data provider. %w", err))
+				return
+			}
+
+			d[sdp.Key()] = dd
+		}
+	}
+
+	locals := locals(reqValues, d, mock.Ext(), nil)
+	kit := &Kit{template: h.app.config.Sketch, data: locals}
+
+	reqValues.Data = locals
 	reqValues.Mock = mock
 
 	if mock.Delay != nil {
@@ -158,7 +189,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	for i, def := range mock.PostActions() {
 		postAction := h.app.config.PostActions[def.Name]
-		input := &HTTPPostActionInput{req: reqValues, res: res, m: mock, args: def.Parameters}
+		input := &PostActionInput{req: reqValues, res: res, m: mock, args: def.Parameters, kit: kit}
 		err = postAction.Run(r.Context(), input)
 		if err != nil {
 			h.lifecycle.OnWarning(reqValues, fmt.Errorf(
@@ -217,4 +248,27 @@ func (h *mockHandler) parseURL(r *http.Request) (*url.URL, []string) {
 	parsedURL, _ := url.Parse(h.app.URL() + reqPath)
 
 	return parsedURL, strings.FieldsFunc(reqPath, func(c rune) bool { return c == '/' })
+}
+
+func locals(r *RequestValues, provided map[string]any, ext any, data any) *viewdata.Data {
+	cookies := make(map[string]*http.Cookie, len(r.RawRequest.Cookies()))
+	for _, cookie := range r.RawRequest.Cookies() {
+		cookies[cookie.Name] = cookie
+	}
+
+	body := (*viewdata.Body)(nil)
+	if len(r.RawBody) > 0 {
+		body = viewdata.NewBody(r.RawRequest.Method, r.RawBody, r.ParsedBody)
+	}
+
+	req := &viewdata.Request{
+		Method:          r.RawRequest.Method,
+		URL:             r.URL,
+		URLPathSegments: r.URLPathSegments,
+		Header:          r.RawRequest.Header.Clone(),
+		Cookies:         cookies,
+		Body:            body,
+	}
+
+	return viewdata.New(req, provided, ext, data)
 }

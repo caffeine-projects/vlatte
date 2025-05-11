@@ -2,19 +2,23 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/go-viper/mapstructure/v2"
+	"github.com/caffeine-projects/vlatte/internal/configutil"
+	"github.com/rs/zerolog"
 )
 
 var _ vlatte.PostAction = (*WebHook)(nil)
+
+var ErrBadArg = errors.New("webhook: bad argument")
+var ErrRenderingTemplate = errors.New("webhook: rendering error")
 
 type Option func(*WebHook) error
 
@@ -27,14 +31,14 @@ type Transform func(ctx context.Context, input vlatte.PostActionInput, args *Arg
 type WebHook struct {
 	RoundTripper http.RoundTripper
 	Transform    Transform
-	Logger       *slog.Logger
-	LogLevel     slog.Level
+	Logger       *zerolog.Logger
+	LogLevel     zerolog.Level
 }
 
 // New creates a new WebHook instance.
 // New should be used to register the WebHook [vlatte.PostAction] within the server instance.
 func New(options ...Option) (*WebHook, error) {
-	w := &WebHook{Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))}
+	w := &WebHook{LogLevel: zerolog.Disabled}
 
 	for i, opt := range options {
 		if err := opt(w); err != nil {
@@ -46,11 +50,24 @@ func New(options ...Option) (*WebHook, error) {
 		w.RoundTripper = &http.Transport{}
 	}
 
-	return w, nil
-}
+	// set a noop transform if none is provided
+	if w.Transform == nil {
+		w.Transform = func(ctx context.Context, input vlatte.PostActionInput, args *Args) error { return nil }
+	}
 
-func (w *WebHook) Name() string {
-	return "webhook"
+	if w.Logger == nil {
+		var wio io.Writer
+		if w.LogLevel == zerolog.Disabled {
+			wio = io.Discard
+		} else {
+			wio = os.Stdout
+		}
+
+		l := zerolog.New(wio).Level(w.LogLevel)
+		w.Logger = &l
+	}
+
+	return w, nil
 }
 
 // Run calls parses the parameters and calls the configured service.
@@ -59,18 +76,19 @@ func (w *WebHook) Run(ctx context.Context, input vlatte.PostActionInput) error {
 		return fmt.Errorf("webhook: arguments must not be nil")
 	}
 
-	args, ok := input.Args().(Args)
+	rawArgs := input.Args()
+	args, ok := rawArgs.(*Args)
 	if !ok {
-		err := mapstructure.Decode(input.Args(), &args)
-		if err != nil {
-			return fmt.Errorf("webhook: error decoding args:\n%w", err)
+		if m, ok := rawArgs.(map[string]any); ok {
+			var err error
+			if args, err = ArgsFromMap(m); err != nil {
+				return fmt.Errorf("webhook: error decoding args: %w", err)
+			}
 		}
 	}
 
-	if w.Transform != nil {
-		if err := w.Transform(ctx, input, &args); err != nil {
-			return fmt.Errorf("webhook: failed to Transform args: %w", err)
-		}
+	if err := w.Transform(ctx, input, args); err != nil {
+		return fmt.Errorf("webhook: failed to Transform args: %w", err)
 	}
 
 	method := args.Method
@@ -89,9 +107,10 @@ func (w *WebHook) Run(ctx context.Context, input vlatte.PostActionInput) error {
 	}
 
 	txtURL := u.String()
-	w.Logger.Info(fmt.Sprintf("---> WEBHOOK REQUEST RECEIVED %s %s", method, u.Path),
-		slog.String("url", txtURL),
-		slog.String("kind", string(input.Kind())))
+	w.Logger.Info().
+		Str("url", txtURL).
+		Str("kind", input.Kind().String()).
+		Msg(fmt.Sprintf("---> WEBHOOK REQUEST RECEIVED %s %s", method, u.Path))
 
 	req, err := http.NewRequestWithContext(ctx, method, txtURL, body)
 	if err != nil {
@@ -99,28 +118,34 @@ func (w *WebHook) Run(ctx context.Context, input vlatte.PostActionInput) error {
 	}
 
 	for k, v := range args.Header {
-		req.Header.Add(k, v)
+		req.Header.Set(k, v)
 	}
 
 	res, err := w.RoundTripper.RoundTrip(req)
 	if err != nil {
-		w.Logger.Error(fmt.Sprintf("<--- WEBHOOK: %s %s", method, u.Path),
-			slog.String("url", txtURL),
-			slog.String("kind", string(input.Kind())))
+		w.Logger.Err(err).
+			Str("url", txtURL).
+			Str("kind", input.Kind().String()).
+			Msg(fmt.Sprintf("<--- WEBHOOK: %s %s", method, u.Path))
+
 		return fmt.Errorf("webhook: request failed: %w", err)
 	}
 
 	defer res.Body.Close()
 
-	level := slog.LevelInfo
+	msg := fmt.Sprintf("<--- WEBHOOK %s %s", method, u.Path)
+	child := w.Logger.With().
+		Str("url", txtURL).
+		Str("kind", input.Kind().String()).
+		Int("status", res.StatusCode).
+		Logger()
+
 	if res.StatusCode >= http.StatusBadRequest {
-		level = slog.LevelError
+		child.Warn().Msg(msg)
+		return nil
 	}
 
-	w.Logger.Log(ctx, level, fmt.Sprintf("<--- WEBHOOK %s %s", method, u.Path),
-		slog.String("url", txtURL),
-		slog.Int("status", res.StatusCode),
-		slog.String("kind", string(input.Kind())))
+	child.Info().Msg(msg)
 
 	return nil
 }
@@ -128,12 +153,40 @@ func (w *WebHook) Run(ctx context.Context, input vlatte.PostActionInput) error {
 // Args configures an WebHook HTTP request.
 // It will be parsed from the parameters map provided during mocking phase.
 type Args struct {
-	URL            string            `mapstructure:"url"`
-	Method         string            `mapstructure:"method"`
-	Header         map[string]string `mapstructure:"header"`
-	HeaderTemplate map[string]string `mapstructure:"header_template"`
-	Body           string            `mapstructure:"body"`
-	BodyFile       string            `mapstructure:"body_file"`
-	IsTemplate     bool              `mapstructure:"is_template"`
-	LogLevel       int               `mapstructure:"log_level"`
+	URL            string
+	URLTemplate    string
+	Method         string
+	Header         map[string]string
+	HeaderTemplate map[string]string
+	Body           string
+	BodyFile       string
+	LogLevel       int
+}
+
+func ArgsFromMap(m map[string]any) (*Args, error) {
+	var r = configutil.New(m)
+	var err error
+
+	if err = r.Either("url", "url_template"); err != nil {
+		return nil, errorBadArg(err)
+	}
+
+	if err = r.OneOf("body", "body_file", "body_template"); err != nil {
+		return nil, errorBadArg(err)
+	}
+
+	args := new(Args)
+	args.URL = r.Str("url", "")
+	args.Method = r.Str("method", "")
+	args.Header = r.StrMap("header")
+	args.HeaderTemplate = r.StrMap("header_template")
+	args.Body = r.Str("body", "")
+	args.BodyFile = r.Str("body_file", "")
+	args.LogLevel = r.Int("log_level", int(zerolog.ErrorLevel))
+
+	return args, nil
+}
+
+func errorBadArg(cause error) error {
+	return fmt.Errorf("%w: %w", ErrBadArg, cause)
 }

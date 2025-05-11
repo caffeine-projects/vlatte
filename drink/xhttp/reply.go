@@ -37,19 +37,18 @@ type replyOnBeforeBuild interface {
 
 // StdReply holds the configuration on how the MockedResponse should be built.
 type StdReply struct {
-	response                 Response
-	bodyType                 bodyType
-	bodyEncoding             bodyEncoding
-	bodyFilename             string
-	teType                   teType
-	headerWithTemplate       http.Header
-	headerTemplate           *template.Template
-	bodyTemplateContent      string
-	bodyTemplate             vlatte.Sketch
-	bodyFuncTemplateRenderer vlatte.Sketch
-	bodyTemplateRenderer     vlatte.Sketch
-	teData                   any
-	encoded                  bool
+	response             Response
+	bodyType             bodyType
+	bodyEncoding         bodyEncoding
+	bodyFilename         string
+	teType               teType
+	headerWithTemplate   http.Header
+	headerTemplate       vlatte.Template
+	bodyTemplateContent  string
+	bodyFilenameTemplate vlatte.Template
+	bodyTemplate         vlatte.Template
+	teData               any
+	encoded              bool
 
 	delayedErr error
 }
@@ -320,7 +319,7 @@ func (rep *StdReply) beforeBuild(app *HTTPMockApp) error {
 			return err
 		}
 
-		rep.bodyFuncTemplateRenderer = tmpl
+		rep.bodyFilenameTemplate = vlatte.TemplateText(tmpl)
 	}
 
 	if rep.teType&_teBody == _teBody {
@@ -330,13 +329,12 @@ func (rep *StdReply) beforeBuild(app *HTTPMockApp) error {
 			return err
 		}
 
-		rep.bodyTemplateRenderer = tmpl
+		rep.bodyTemplate = vlatte.TemplateText(tmpl)
 	}
 
 	if len(rep.headerWithTemplate) > 0 {
 		buf := bufpool.Get()
 		buf.Reset()
-
 		defer bufpool.Put(buf)
 
 		err := rep.headerWithTemplate.Write(buf)
@@ -344,7 +342,13 @@ func (rep *StdReply) beforeBuild(app *HTTPMockApp) error {
 			return err
 		}
 
-		tmpl := template.New("header")
+		var tmpl vlatte.Template
+		if app.config.Sketch == nil {
+			tmpl = vlatte.TemplateText(template.New(""))
+		} else {
+			tmpl = app.config.Sketch
+		}
+
 		tmpl, err = tmpl.Parse(buf.String() + "\r\n")
 		if err != nil {
 			return err
@@ -382,10 +386,11 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Respon
 		return nil, rep.delayedErr
 	}
 
+	response := rep.response
 	hasTemplate := rep.teType&_teBody != 0 || rep.teType&_teBodyFilename != 0 || len(rep.headerWithTemplate) > 0
 	tmplData := (any)(nil)
 	if hasTemplate {
-		tmplData = rep.buildTemplateData(r, rep.teData)
+		tmplData = r.Data
 	}
 
 	if len(rep.headerWithTemplate) > 0 {
@@ -426,12 +431,12 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Respon
 
 		defer bufpool.Put(buf)
 
-		err = rep.bodyTemplateRenderer.Execute(buf, tmplData)
+		err = rep.bodyTemplate.Execute(buf, tmplData)
 		if err != nil {
 			return nil, err
 		}
 
-		rep.response.Body = buf.Bytes()
+		response.Body = buf.Bytes()
 
 	case _bodyFile:
 		defer func() {
@@ -450,7 +455,7 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Respon
 
 		filename := rep.bodyFilename
 		if rep.teType&_teBodyFilename == _teBodyFilename {
-			err = rep.bodyFuncTemplateRenderer.Execute(buf, tmplData)
+			err = rep.bodyFilenameTemplate.Execute(buf, tmplData)
 			if err != nil {
 				return nil, err
 			}
@@ -484,42 +489,15 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Respon
 				return nil, err
 			}
 
-			rep.response.Body = buf.Bytes()
+			response.Body = buf.Bytes()
 		} else {
-			rep.response.BodyCloser = file
+			response.BodyCloser = file
 		}
 
-		rep.response.BodyFilename = filename
+		response.BodyFilename = filename
 	}
 
-	switch rep.bodyEncoding {
-	case _bodyEncodingGZIP:
-		rep.response.Header.Add(httpval.HeaderContentEncoding, "gzip")
-		rep.response.Encoding = "gzip"
-		rep.encoded = true
-	}
-
-	return &rep.response, nil
-}
-
-func (rep *StdReply) buildTemplateData(r *RequestValues, ext any) *templateData {
-	reqExtra := &templateRequest{
-		Method:          r.RawRequest.Method,
-		URL:             r.URL,
-		URLPathSegments: r.URLPathSegments,
-		Header:          r.RawRequest.Header.Clone(),
-		Cookies:         r.RawRequest.Cookies(),
-		Body:            r.ParsedBody,
-	}
-
-	data := r.App.Data()
-
-	return &templateData{
-		Request: reqExtra,
-		params:  r.App.Parameters(),
-		data:    data,
-		baseURL: r.App.URL(),
-		Extra:   ext}
+	return &response, nil
 }
 
 func (rep *StdReply) Describe() descriptor.Descriptor {

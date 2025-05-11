@@ -27,6 +27,7 @@ type GRPCMock struct {
 	origin   string
 	hits     atomic.Int64
 	enabled  bool
+	ext      any
 
 	Reply any
 
@@ -69,6 +70,10 @@ func (m *GRPCMock) Origin() string {
 	return m.origin
 }
 
+func (m *GRPCMock) Ext() any {
+	return m.ext
+}
+
 func (m *GRPCMock) Roasted() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -109,6 +114,10 @@ func (m *GRPCMock) Raw() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.enabled = false
+}
+
+func (m *GRPCMock) SketchDataProvider() vlatte.TemplateDataProvider {
+	return nil
 }
 
 func (m *GRPCMock) PostActions() vlatte.PostActions {
