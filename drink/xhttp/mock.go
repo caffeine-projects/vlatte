@@ -112,6 +112,7 @@ type HTTPMock struct {
 	hits         atomic.Int64
 	enabled      bool
 	expectations []*vlatte.Eval[*HTTPValueSelectorInput]
+	buzzers      *vlatte.Buzzers
 	ext          any
 
 	Reply Reply
@@ -122,6 +123,7 @@ type HTTPMock struct {
 	// Delay sets the duration to delay serving the mocked response.
 	Delay vlatte.Delay
 
+	// DEPRECATED: will be removed soon.
 	PostActionList vlatte.PostActions
 
 	CallbackList []vlatte.Callback
@@ -206,8 +208,13 @@ func (m *HTTPMock) Switch(state bool) {
 	m.enabled = state
 }
 
+// DEPRECATED: being change to Hooks.
 func (m *HTTPMock) PostActions() vlatte.PostActions {
 	return m.PostActionList
+}
+
+func (m *HTTPMock) Buzzers() *vlatte.Buzzers {
+	return m.buzzers
 }
 
 func (m *HTTPMock) Callbacks() []vlatte.Callback {

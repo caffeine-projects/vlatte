@@ -18,7 +18,7 @@ func (in *TestStep) Handle(p []byte, next vlatte.Next) (n int, err error) {
 }
 
 func TestFlow(t *testing.T) {
-	m := xhttp.New(xhttp.Setup().LogVerbosity(xhttp.LogBody)).CloseWithT(t)
+	m := xhttp.New(xhttp.Setup().LogVerbosity(vlatte.LogBody)).CloseWithT(t)
 	m.MustStart()
 
 	in1 := &TestStep{"(extra)"}

@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/cors"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/filter"
@@ -175,8 +176,8 @@ func TestConfigBuilder(t *testing.T) {
 		CORS(&cors.DefaultConfig).
 		Server(&httpTestServer{}).
 		HandlerDecorator(func(handler http.Handler) http.Handler { return handler }).
-		LogVerbosity(LogBasic).
-		LogLevel(LogLevelInfo).
+		LogVerbosity(vlatte.LogBasic).
+		LogLevel(vlatte.LogLevelInfo).
 		LogPretty(false).
 		LogBodyMaxSize(100).
 		Logger(&customLogger).
@@ -203,8 +204,8 @@ func TestConfigBuilder(t *testing.T) {
 	require.Len(t, conf.Middlewares, 0)
 	require.Equal(t, &cors.DefaultConfig, conf.CORS)
 	require.NotNil(t, conf.HandlerDecorator)
-	require.Equal(t, LogBasic, conf.LogVerbosity)
-	require.Equal(t, LogLevelInfo, conf.LogLevel)
+	require.Equal(t, vlatte.LogBasic, conf.LogVerbosity)
+	require.Equal(t, vlatte.LogLevelInfo, conf.LogLevel)
 	require.False(t, conf.LogPretty)
 	require.Equal(t, &customLogger, conf.Logger)
 	require.Equal(t, int64(100), conf.LogBodyMaxSize)
@@ -225,7 +226,7 @@ func TestConfigBuilder(t *testing.T) {
 }
 
 func TestLogLevelString(t *testing.T) {
-	require.Equal(t, LogBasic.String(), "basic")
-	require.Equal(t, LogHeader.String(), "header")
-	require.Equal(t, LogBody.String(), "body")
+	require.Equal(t, vlatte.LogBasic.String(), "basic")
+	require.Equal(t, vlatte.LogHeader.String(), "header")
+	require.Equal(t, vlatte.LogBody.String(), "body")
 }

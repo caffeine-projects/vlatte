@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte"
 	. "github.com/caffeine-projects/vlatte/drink/xhttp"
 	. "github.com/caffeine-projects/vlatte/filter"
 )
@@ -31,7 +32,7 @@ func TestTLS(t *testing.T) {
 
 	testCases := []struct {
 		name   string
-		config Configurer
+		config vlatte.Configurer[*Config]
 	}{
 		{"default", Setup()},
 		{"custom key/pair", Setup().TLSCertKeyPair(_tlsCertFile, _tlsKeyFile)},

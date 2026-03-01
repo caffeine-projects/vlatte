@@ -24,200 +24,37 @@ var (
 	ConfigMockFilePattern = []string{"testdata/_mocks/*mock.yaml", "testdata/_mocks/*mock.yml"}
 )
 
-type LogVerbosity int8
-
-const (
-	// LogBasic logs only informative messages, without too many details.
-	LogBasic LogVerbosity = iota
-	LogHeader
-	LogBody
-)
-
-func (l LogVerbosity) String() string {
-	switch l {
-	case LogBasic:
-		return "basic"
-	case LogHeader:
-		return "header"
-	case LogBody:
-		return "body"
-	default:
-		return "none"
-	}
-}
-
-type LogLevel = int8
-
-const (
-	LogLevelDebug    = LogLevel(zerolog.DebugLevel)
-	LogLevelInfo     = LogLevel(zerolog.InfoLevel)
-	LogLevelWarn     = LogLevel(zerolog.WarnLevel)
-	LogLevelError    = LogLevel(zerolog.ErrorLevel)
-	LogLevelNone     = LogLevel(zerolog.NoLevel)
-	LogLevelDisabled = LogLevel(zerolog.Disabled)
-)
-
-// Configurer lets users configure the Mock API.
-type Configurer interface {
-	// Apply applies a configuration.
-	Apply(conf *Config) error
-}
-
 // Config holds HTTPMockApp mock server configurations.
 type Config struct {
-	// Name sets a name to the mock server.
-	// Adds more context for when you have more mocks APIs configured.
-	Name string
+	vlatte.Config
 
-	// Addr defines a custom server address.
-	Addr string
-
-	// UseHTTP2 enables HTTP/2
-	UseHTTP2 bool
-
-	// AdminPath sets the URL path to the Admin endpoints.
-	// Defaults to /__admin.
-	AdminPath string
-
-	// AdminEnabled enable/disable Admin endpoints.
-	// Defaults to true.
-	AdminEnabled bool
-
-	// RootDir defines the root directory where the server will start looking for configurations and mocks.
-	// Defaults to the current execution path.
-	RootDir string
-
-	// TLSConfig defines custom TLS configurations.
-	// This is only used when server is started using HTTPMockApp.StartTLS or HTTPMockApp.MustStartTLS.
-	// If TLSConfig is set, TLSCertificateFs and TLSKeyFs options will be ignored.
-	TLSConfig *tls.Config
-
-	// TLSCertificates is the TLS certificate that will be used by the server
-	// All built-in HTTP clients will use this certificate too.
-	TLSCertificates []tls.Certificate
-
-	// TLSClientCAs is the client certificate that will be used by the server.
-	// All built-in HTTP clients will use it in the RootCAs config.
-	TLSClientCAs *x509.CertPool
-
-	// RequestWasNotMatchedStatusCode defines the status code that should be used when
-	// an HTTP request doesn't match with any mock.
-	// Defaults to 418 (I'm a teapot).
+	Addr                           string
+	UseHTTP2                       bool
 	RequestWasNotMatchedStatusCode int
-
-	// RequestBodyParsers defines request body parsers to be executed before core parsers.
-	RequestBodyParsers []RequestBodyParser
-
-	// MaxBodyParsingLimit sets the limit of bytes that request body parsers should read.
-	// Zero means no limit.
-	MaxBodyParsingLimit int64
-
-	// NoBodyParsing disables request body parsing.
-	// This will also disable HTTP request body matching.
-	NoBodyParsing bool
-
-	// Middlewares defines a list of custom middlewares that will be
-	// set after panic recovery and before mock handler.
-	Middlewares []func(http.Handler) http.Handler
-
-	// CORS defines CORS configurations.
-	CORS *cors.Config
-
-	// Server defines a custom mock HTTP server.
-	Server Server
-
-	// HandlerDecorator provide means to configure a custom HTTP handler
-	// while leveraging the default mock handler.
-	HandlerDecorator func(handler http.Handler) http.Handler
-
-	// Parameters sets a custom reply parameters store.
-	Parameters kv.KV
-
-	// MockFileSearchPatterns configures glob patterns to load mock from the file system.
-	MockFileSearchPatterns []string
-
-	// Loaders configures additional loaders.
-	Loaders []Loader
-
-	// Proxy configures the mock server as a proxy.
-	Proxy *ProxyConfig
-
-	// Record configures Mock Request/MockedResponse recording.
-	// Needs to be used with Proxy.
-	Record *RecordConfig
-
-	// MockFileHandlers sets custom Mock file handlers for a server instance.
-	MockFileHandlers []MockFileHandler
-
-	// TemplateFunctions sets custom template functions for the built-in template engine.
-	TemplateFunctions template.FuncMap
-
-	// HTTPClientFactory builds an *http.Client that will be used by internal features, like ProxyReply.
-	// If none is set, a default one will be used.
-	HTTPClientFactory func() *http.Client
-
-	// Logger lets users define a custom logger.
-	// If none is provided, a default one will be set.
-	Logger *zerolog.Logger
-
-	// LogVerbosity defines the verbosity of the logs.
-	LogVerbosity LogVerbosity
-
-	// LogLevel sets the level of the default logger.
-	LogLevel LogLevel
-
-	// LogPretty enable/disable pretty logging.
-	// This only works with the default zerolog.Logger.
-	// If you are setting a custom logger, you need to set this by yourself.
-	// Defaults to true.
-	LogPretty bool
-
-	// LogBodyMaxSize sets the max size of the response body to be logged.
-	// By default, response bodies will be logged entirely.
-	LogBodyMaxSize int64
-
-	// Debug enable/disable the use of a more descriptive logger for HTTP request matching lifecycle.
-	// This is useful, specially for console mode usage, to understand the details of an HTTP request and
-	// why a match did not occur.
-	// If true, The Logger options will be ignored for the HTTP request matching.
-	Debug bool
-
-	// Colors enable/disable terminal colors for the descriptive logger.
-	// Defaults to true.
-	Colors bool
-
-	// PostActions configures PostActions by name.
-	// They can later be referenced by name during mocking phase.
-	PostActions map[string]vlatte.PostAction
-
-	// HeaderNamesToRedact configures HTTP header names to be redacted in logs.
-	// Useful to avoid logging sensitive information.
-	HeaderNamesToRedact map[string]struct{}
-
-	Sketch vlatte.Template
-
-	SketchDataProviders []vlatte.TemplateDataProvider
-
-	DebugFn DebugFn
-
-	// CLI Only Options
-
-	// UseHTTPS defines that the mock server should use HTTPS.
-	// This is only used running the command-line version.
-	// To start an HTTPS server from code, call StartTLS() or MustStartTLS() from application instance.
-	UseHTTPS bool
+	RequestBodyParsers             []RequestBodyParser
+	MaxBodyParsingLimit            int64
+	NoBodyParsing                  bool
+	Middlewares                    []func(http.Handler) http.Handler
+	CORS                           *cors.Config
+	Server                         Server
+	HandlerDecorator               func(handler http.Handler) http.Handler
+	MockFileSearchPatterns         []string
+	Loaders                        []Loader
+	Proxy                          *ProxyConfig
+	Record                         *RecordConfig
+	MockFileHandlers               []MockFileHandler
+	HTTPClientFactory              func() *http.Client
+	HeaderNamesToRedact            map[string]struct{}
+	UseHTTPS                       bool
 }
 
-type DebugFn func(string, any)
-
-// Apply copies of the current Config struct values to the given Config parameter.
-// It allows the Config struct to be used as a Configurer.
+// Apply copies the current Config struct values to the given Config parameter.
 func (c *Config) Apply(conf *Config) error {
-	conf.Name = c.Name
+	if err := c.Config.Apply(&conf.Config); err != nil {
+		return err
+	}
 	conf.Addr = c.Addr
-	conf.AdminPath = c.AdminPath
-	conf.AdminEnabled = c.AdminEnabled
-	conf.RootDir = c.RootDir
+	conf.UseHTTP2 = c.UseHTTP2
 	conf.RequestWasNotMatchedStatusCode = c.RequestWasNotMatchedStatusCode
 	conf.RequestBodyParsers = c.RequestBodyParsers
 	conf.MaxBodyParsingLimit = c.MaxBodyParsingLimit
@@ -226,31 +63,14 @@ func (c *Config) Apply(conf *Config) error {
 	conf.CORS = c.CORS
 	conf.Server = c.Server
 	conf.HandlerDecorator = c.HandlerDecorator
-	conf.Parameters = c.Parameters
 	conf.MockFileSearchPatterns = c.MockFileSearchPatterns
 	conf.Loaders = c.Loaders
 	conf.Proxy = c.Proxy
 	conf.Record = c.Record
 	conf.UseHTTPS = c.UseHTTPS
 	conf.MockFileHandlers = c.MockFileHandlers
-	conf.TemplateFunctions = c.TemplateFunctions
 	conf.HTTPClientFactory = c.HTTPClientFactory
-	conf.Debug = c.Debug
-	conf.Logger = c.Logger
-	conf.LogPretty = c.LogPretty
-	conf.LogVerbosity = c.LogVerbosity
-	conf.LogLevel = c.LogLevel
-	conf.LogBodyMaxSize = c.LogBodyMaxSize
 	conf.HeaderNamesToRedact = c.HeaderNamesToRedact
-	conf.TLSConfig = c.TLSConfig
-	conf.TLSCertificates = c.TLSCertificates
-	conf.TLSClientCAs = c.TLSClientCAs
-	conf.UseHTTP2 = c.UseHTTP2
-	conf.PostActions = c.PostActions
-	conf.DebugFn = c.DebugFn
-	conf.Sketch = c.Sketch
-	conf.SketchDataProviders = c.SketchDataProviders
-
 	return nil
 }
 
@@ -265,29 +85,27 @@ type ConfigBuilder struct {
 }
 
 func defaultConfig() *Config {
+	base := vlatte.DefaultConfig()
 	return &Config{
-		AdminPath:                      "/__admin",
+		Config:                         *base,
 		RequestWasNotMatchedStatusCode: StatusNoMatch,
 		MockFileSearchPatterns:         ConfigMockFilePattern,
 		RequestBodyParsers:             make([]RequestBodyParser, 0),
 		Middlewares:                    make([]func(http.Handler) http.Handler, 0),
 		Loaders:                        make([]Loader, 0),
 		MockFileHandlers:               make([]MockFileHandler, 0),
-		PostActions:                    make(map[string]vlatte.PostAction),
 		HeaderNamesToRedact:            make(map[string]struct{}),
-		LogPretty:                      true,
-		LogLevel:                       LogLevelInfo,
-		LogVerbosity:                   LogHeader,
-		Colors:                         true,
 		UseHTTP2:                       true,
-		DebugFn:                        func(evt string, a any) {},
 	}
 }
 
 // Setup initialize a new ConfigBuilder.
 // Entrypoint to start a new custom configuration for HTTPMockApp mock servers.
 func Setup() *ConfigBuilder {
-	return &ConfigBuilder{conf: defaultConfig()}
+	conf := defaultConfig()
+	return &ConfigBuilder{
+		conf: conf,
+	}
 }
 
 // Name sets a name to the mock server.
@@ -309,8 +127,7 @@ func (cb *ConfigBuilder) Port(port int) *ConfigBuilder {
 	return cb
 }
 
-// RootDir defines the root directory where the server will start looking for configurations and mocks.
-// Defaults to the current execution path.
+// RootDir defines the root directory.
 func (cb *ConfigBuilder) RootDir(rootDir string) *ConfigBuilder {
 	cb.conf.RootDir = rootDir
 	return cb
@@ -379,45 +196,43 @@ func (cb *ConfigBuilder) Logger(l *zerolog.Logger) *ConfigBuilder {
 }
 
 func (cb *ConfigBuilder) Silent() *ConfigBuilder {
-	cb.conf.LogLevel = LogLevelDisabled
+	cb.conf.LogLevel = vlatte.LogLevelDisabled
 	return cb
 }
 
 // LogVerbosity sets the verbosity of informative logs.
-// Defaults to LogVerbose.
-func (cb *ConfigBuilder) LogVerbosity(l LogVerbosity) *ConfigBuilder {
+func (cb *ConfigBuilder) LogVerbosity(l vlatte.LogVerbosity) *ConfigBuilder {
 	cb.conf.LogVerbosity = l
 	return cb
 }
 
-// LogLevel sets the level of the zerolog.Logger default implementation.
-func (cb *ConfigBuilder) LogLevel(l LogLevel) *ConfigBuilder {
+// LogLevel sets the level of the zerolog.Logger.
+func (cb *ConfigBuilder) LogLevel(l vlatte.LogLevel) *ConfigBuilder {
 	cb.conf.LogLevel = l
 	return cb
 }
 
 // LogPretty enable/disable pretty logging.
-// This only works with the default zerolog.Logger.
-// If you are setting a custom logger, you need to set this by yourself.
-// Defaults to true.
 func (cb *ConfigBuilder) LogPretty(v bool) *ConfigBuilder {
 	cb.conf.LogPretty = v
 	return cb
 }
 
 // LogBodyMaxSize sets the max size of the response body to be logged.
-// By default, response bodies will be logged entirely.
 func (cb *ConfigBuilder) LogBodyMaxSize(max int64) *ConfigBuilder {
 	cb.conf.LogBodyMaxSize = max
 	return cb
 }
 
-// UseDescriptiveLogger enable/disable the use of a more descriptive logger for HTTP request matching lifecycle.
-// This is useful, specially for console mode usage, to understand the details of an HTTP request and
-// why a match did not occur.
-// If true, The Logger options will be ignored for the HTTP request matching.
+// UseDescriptiveLogger enable/disable the use of a more descriptive logger.
 func (cb *ConfigBuilder) UseDescriptiveLogger() *ConfigBuilder {
 	cb.conf.Debug = true
+	return cb
+}
+
+// Colors enable/disable use of ANSI colors in logs.
+func (cb *ConfigBuilder) Colors(v bool) *ConfigBuilder {
+	cb.conf.Colors = v
 	return cb
 }
 
@@ -484,8 +299,6 @@ func (cb *ConfigBuilder) MockFileHandlers(handlers ...MockFileHandler) *ConfigBu
 }
 
 // TemplateEngineFunctions sets custom functions to be used in templates.
-// This only works with the built-in TemplateEngine implementation.
-// Custom template engine implementations must provide their own mean to set custom functions.
 func (cb *ConfigBuilder) TemplateEngineFunctions(fm template.FuncMap) *ConfigBuilder {
 	cb.conf.TemplateFunctions = fm
 	return cb
@@ -500,8 +313,6 @@ func (cb *ConfigBuilder) HTTPClient(f func() *http.Client) *ConfigBuilder {
 }
 
 // TLSConfig defines custom TLS configurations.
-// This is only used when server is started using HTTPMockApp.StartTLS or vlatte.MustStartTLS.
-// If TLSConfig is set, TLSCertificateFs and TLSKeyFs options will be ignored.
 func (cb *ConfigBuilder) TLSConfig(c *tls.Config) *ConfigBuilder {
 	cb.conf.TLSConfig = c
 	return cb
@@ -525,31 +336,40 @@ func (cb *ConfigBuilder) TLSMutual(certFile, keyFile, clientCert string) *Config
 	return cb
 }
 
+// PostAction registers a PostAction by name.
 func (cb *ConfigBuilder) PostAction(name string, action vlatte.PostAction) *ConfigBuilder {
+	if cb.conf.PostActions == nil {
+		cb.conf.PostActions = make(map[string]vlatte.PostAction)
+	}
 	cb.conf.PostActions[name] = action
 	return cb
 }
 
-func (cb *ConfigBuilder) DebugFn(dfn DebugFn) *ConfigBuilder {
+// DebugFn sets the debug function.
+func (cb *ConfigBuilder) DebugFn(dfn vlatte.DebugFn) *ConfigBuilder {
 	cb.conf.DebugFn = dfn
 	return cb
 }
 
+// AdminPath sets the Admin path.
 func (cb *ConfigBuilder) AdminPath(path string) *ConfigBuilder {
 	cb.conf.AdminPath = path
 	return cb
 }
 
+// AdminEnabled enable/disable Admin endpoints.
 func (cb *ConfigBuilder) AdminEnabled(v bool) *ConfigBuilder {
 	cb.conf.AdminEnabled = v
 	return cb
 }
 
+// Sketch sets the sketch template.
 func (cb *ConfigBuilder) Sketch(sketch vlatte.Template) *ConfigBuilder {
 	cb.conf.Sketch = sketch
 	return cb
 }
 
+// SketchDataProviders sets template data providers.
 func (cb *ConfigBuilder) SketchDataProviders(sdp []vlatte.TemplateDataProvider) *ConfigBuilder {
 	cb.conf.SketchDataProviders = sdp
 	return cb

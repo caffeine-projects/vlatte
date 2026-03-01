@@ -39,19 +39,19 @@ func newBuiltInMockHTTPLifecycle(app *HTTPMockApp) *builtInMockHTTPLifecycle {
 }
 
 func (h *builtInMockHTTPLifecycle) OnRequest(r *RequestValues) {
-	if h.app.config.LogLevel == LogLevelDisabled {
+	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
 		return
 	}
 
 	evt := h.app.logger.Info().Str("url", r.URL.String())
 	req := zerolog.Dict()
 
-	if h.app.config.LogVerbosity >= LogHeader {
+	if h.app.config.LogVerbosity >= vlatte.LogHeader {
 		redactedHeader := redactHeader(r.RawRequest.Header, h.app.config.HeaderNamesToRedact)
 		req.Any("header", redactedHeader)
 	}
 
-	if h.app.config.LogVerbosity >= LogBody && len(r.RawBody) > 0 {
+	if h.app.config.LogVerbosity >= vlatte.LogBody && len(r.RawBody) > 0 {
 		req.Bytes("body", r.RawBody)
 	}
 
@@ -60,7 +60,7 @@ func (h *builtInMockHTTPLifecycle) OnRequest(r *RequestValues) {
 }
 
 func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *Response) {
-	if h.app.config.LogLevel == LogLevelDisabled {
+	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
 		return
 	}
 
@@ -75,7 +75,7 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *Response) {
 
 	res := zerolog.Dict().Int("status", s.StatusCode)
 
-	if h.app.config.LogVerbosity >= LogHeader {
+	if h.app.config.LogVerbosity >= vlatte.LogHeader {
 		redactedHeader := redactHeader(s.Header, h.app.config.HeaderNamesToRedact)
 		res.Any("header", redactedHeader)
 
@@ -86,7 +86,7 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *Response) {
 	}
 
 	bodyLen := int64(len(s.Body))
-	if h.app.config.LogVerbosity >= LogBody && bodyLen > 0 &&
+	if h.app.config.LogVerbosity >= vlatte.LogBody && bodyLen > 0 &&
 		(h.app.config.LogBodyMaxSize == 0 || bodyLen <= h.app.config.LogBodyMaxSize) {
 		res.Bytes("body", s.Body)
 		if s.Encoding != "" {
@@ -101,7 +101,7 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *Response) {
 }
 
 func (h *builtInMockHTTPLifecycle) OnNoMatch(r *RequestValues, d *vlatte.Results) {
-	if h.app.config.LogLevel == LogLevelDisabled {
+	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
 		return
 	}
 
@@ -111,7 +111,7 @@ func (h *builtInMockHTTPLifecycle) OnNoMatch(r *RequestValues, d *vlatte.Results
 }
 
 func (h *builtInMockHTTPLifecycle) OnWarning(r *RequestValues, err error) {
-	if h.app.config.LogLevel == LogLevelDisabled {
+	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
 		return
 	}
 
@@ -122,7 +122,7 @@ func (h *builtInMockHTTPLifecycle) OnWarning(r *RequestValues, err error) {
 }
 
 func (h *builtInMockHTTPLifecycle) OnError(r *RequestValues, err error) {
-	if h.app.config.LogLevel == LogLevelDisabled {
+	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
 		return
 	}
 
@@ -145,7 +145,7 @@ func newBuiltInDescriptiveMockHTTPLifecycle(app *HTTPMockApp, cz *gchalk.Builder
 }
 
 func (h *builtInDescriptiveMockHTTPLifecycle) OnRequest(rv *RequestValues) {
-	if h.app.config.LogLevel == LogLevelDisabled {
+	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
 		return
 	}
 
@@ -161,7 +161,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnRequest(rv *RequestValues) {
 		rv.RawRequest.Method,
 		rv.URL)
 
-	if h.app.config.LogVerbosity >= LogHeader && len(rv.RawRequest.Header) > 0 {
+	if h.app.config.LogVerbosity >= vlatte.LogHeader && len(rv.RawRequest.Header) > 0 {
 		redactedHeader := redactHeader(rv.RawRequest.Header, h.app.config.HeaderNamesToRedact)
 
 		buf.WriteString("\n")
@@ -170,7 +170,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnRequest(rv *RequestValues) {
 		fmt.Fprintf(buf, "%s", redactedHeader)
 	}
 
-	if h.app.config.LogVerbosity >= LogBody && len(rv.RawBody) > 0 {
+	if h.app.config.LogVerbosity >= vlatte.LogBody && len(rv.RawBody) > 0 {
 		buf.WriteString("\n")
 		buf.WriteString(h.cz.Blue("Body: "))
 
@@ -182,7 +182,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnRequest(rv *RequestValues) {
 }
 
 func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Response) {
-	if h.app.config.LogLevel == LogLevelDisabled {
+	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
 		return
 	}
 
@@ -207,7 +207,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Resp
 	buf.WriteString(h.cz.Green("Status: "))
 	buf.WriteString(strconv.FormatInt(int64(s.StatusCode), 10))
 
-	if h.app.config.LogVerbosity >= LogHeader && len(s.Header) > 0 {
+	if h.app.config.LogVerbosity >= vlatte.LogHeader && len(s.Header) > 0 {
 		buf.WriteString("\n")
 		buf.WriteString(h.cz.Green("Headers: "))
 		fmt.Fprintf(buf, "%s", redactHeader(s.Header, h.app.config.HeaderNamesToRedact))
@@ -220,7 +220,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Resp
 	}
 
 	bodyLen := int64(len(s.Body))
-	if h.app.config.LogVerbosity >= LogBody && bodyLen > 0 &&
+	if h.app.config.LogVerbosity >= vlatte.LogBody && bodyLen > 0 &&
 		(h.app.config.LogBodyMaxSize == 0 || bodyLen <= h.app.config.LogBodyMaxSize) {
 		buf.WriteString("\n")
 		buf.WriteString(h.cz.Green("Body: "))
@@ -239,7 +239,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnNoMatch(
 	reqValues *RequestValues,
 	d *vlatte.Results,
 ) {
-	if h.app.config.LogLevel == LogLevelDisabled {
+	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
 		return
 	}
 
@@ -255,7 +255,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnNoMatch(
 }
 
 func (h *builtInDescriptiveMockHTTPLifecycle) OnWarning(r *RequestValues, err error) {
-	if h.app.config.LogLevel == LogLevelDisabled {
+	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
 		return
 	}
 
@@ -272,7 +272,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnWarning(r *RequestValues, err er
 }
 
 func (h *builtInDescriptiveMockHTTPLifecycle) OnError(r *RequestValues, err error) {
-	if h.app.config.LogLevel == LogLevelDisabled {
+	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
 		return
 	}
 

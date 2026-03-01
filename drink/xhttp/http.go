@@ -70,7 +70,7 @@ type HTTPMockApp struct {
 // Parameter config accepts a Config or a ConfigBuilder implementation.
 // If no configuration is provided, a default one will be used.
 // If no port is set, it will start the server on localhost using a random port.
-func New(config ...Configurer) *HTTPMockApp {
+func New(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
 	app := &HTTPMockApp{}
 	app.random = rand.New(rand.NewSource(time.Now().UnixNano()))
 

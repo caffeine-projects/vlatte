@@ -10,6 +10,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/drink/xhttp"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -52,8 +53,8 @@ func main() {
 	run(ctx) // should block
 }
 
-func run(ctx context.Context, custom ...xhttp.Configurer) {
-	configurers := make([]xhttp.Configurer, 0)
+func run(ctx context.Context, custom ...vlatte.Configurer[*xhttp.Config]) {
+	configurers := make([]vlatte.Configurer[*xhttp.Config], 0)
 	if len(custom) > 0 {
 		configurers = append(configurers, custom...)
 	}

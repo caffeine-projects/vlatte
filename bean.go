@@ -20,7 +20,9 @@ type Bean interface {
 	Roast()
 	Raw()
 
+	// DEPRECATED: being changed to Hooks.
 	PostActions() PostActions
+	Buzzers() *Buzzers
 	Callbacks() []Callback
 	Flow() []Step
 
@@ -42,6 +44,10 @@ type Canister[T Bean] interface {
 
 	Toss(ctx context.Context, ids ...string) error
 	Empty(ctx context.Context) error
+}
+
+type Buzzers struct {
+	OnComplete []OnComplete
 }
 
 type Results struct {

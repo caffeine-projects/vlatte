@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/cors"
 )
 
@@ -70,7 +71,7 @@ const (
 	_kRecordFileType        = "record.file_type"
 )
 
-var _ Configurer = (*localConfigurer)(nil)
+var _ vlatte.Configurer[*Config] = (*localConfigurer)(nil)
 
 var _once sync.Once
 
@@ -82,14 +83,14 @@ type localConfigurer struct {
 // UseLocals enables lookup for local configuration files using standard naming conventions.
 // It will look up for a file named ".moairc.(json|toml|yaml|yml|properties|props|prop|hcl|tfvars|dotenv|env|ini)"
 // in the directories "." and "testdata".
-func UseLocals() Configurer {
+func UseLocals() vlatte.Configurer[*Config] {
 	return &localConfigurer{filename: DefaultConfigFileName, paths: DefaultConfigDirectories}
 }
 
 // UseConfig enables lookup for local configuration files using standard naming conventions.
 // Supported extensions (json|toml|yaml|yml|properties|props|prop|hcl|tfvars|dotenv|env|ini)".
 // If only the filename is provided, it must contain the full path and extension to the configuration.
-func UseConfig(filename string, paths ...string) Configurer {
+func UseConfig(filename string, paths ...string) vlatte.Configurer[*Config] {
 	return &localConfigurer{filename: filename, paths: paths}
 }
 
@@ -173,8 +174,8 @@ func (c *localConfigurer) apply(conf *Config, vi *viper.Viper) (err error) {
 		}
 	}
 
-	runIfKeyIsSet(vi, _kLogLevel, func() { conf.LogLevel = LogLevel(vi.GetInt(_kLogLevel)) })
-	runIfKeyIsSet(vi, _kLogVerbosity, func() { conf.LogVerbosity = LogVerbosity(vi.GetInt(_kLogVerbosity)) })
+	runIfKeyIsSet(vi, _kLogLevel, func() { conf.LogLevel = vlatte.LogLevel(vi.GetInt(_kLogLevel)) })
+	runIfKeyIsSet(vi, _kLogVerbosity, func() { conf.LogVerbosity = vlatte.LogVerbosity(vi.GetInt(_kLogVerbosity)) })
 	runIfKeyIsSet(vi, _kLogMaxBodySize, func() { conf.LogBodyMaxSize = vi.GetInt64(_kLogMaxBodySize) })
 	runIfKeyIsSet(vi, _kLogPretty, func() { conf.LogPretty = vi.GetBool(_kLogPretty) })
 
@@ -305,9 +306,9 @@ func bindFlags(v *viper.Viper) error {
 	cl.String(_kTLSRootCAs, "", "TLS trusted CA certificates filenames.")
 	v.RegisterAlias(toFlagName(_kTLSRootCAs), _kTLSRootCAs)
 
-	cl.Int8(_kLogLevel, LogLevelInfo, "Log level.")
+	cl.Int8(_kLogLevel, vlatte.LogLevelInfo, "Log level.")
 	v.RegisterAlias(toFlagName(_kLogLevel), _kLogLevel)
-	cl.Int8(_kLogVerbosity, int8(LogHeader), "Log verbosity.")
+	cl.Int8(_kLogVerbosity, int8(vlatte.LogHeader), "Log verbosity.")
 	v.RegisterAlias(toFlagName(_kLogVerbosity), _kLogVerbosity)
 	cl.Bool(_kLogPretty, true, "Pretty logging.")
 	v.RegisterAlias(toFlagName(_kLogPretty), _kLogPretty)

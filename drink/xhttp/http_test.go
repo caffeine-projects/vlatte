@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/test/testmock"
 	. "github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/shelf/kv/kvmem"
@@ -187,7 +188,7 @@ func TestMochaEnableDisable(t *testing.T) {
 }
 
 func TestMochaSilently(t *testing.T) {
-	m := New(Setup().LogVerbosity(LogBasic).LogLevel(LogLevelNone))
+	m := New(Setup().LogVerbosity(vlatte.LogBasic).LogLevel(vlatte.LogLevelNone))
 	m.MustStart()
 
 	defer m.Close()

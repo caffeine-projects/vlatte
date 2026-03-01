@@ -27,6 +27,7 @@ type GRPCMock struct {
 	origin   string
 	hits     atomic.Int64
 	enabled  bool
+	buzzers  *vlatte.Buzzers
 	ext      any
 
 	Reply any
@@ -120,8 +121,13 @@ func (m *GRPCMock) SketchDataProvider() vlatte.TemplateDataProvider {
 	return nil
 }
 
+// DEPRECATED: being change to Hooks.
 func (m *GRPCMock) PostActions() vlatte.PostActions {
 	return m.PostActionList
+}
+
+func (m *GRPCMock) Buzzers() *vlatte.Buzzers {
+	return m.buzzers
 }
 
 func (m *GRPCMock) Callbacks() []vlatte.Callback {
