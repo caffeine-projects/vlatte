@@ -35,9 +35,9 @@ const (
 	_fDelay                = "delay"
 	_fRepeat               = "repeat"
 	_fExtenders            = "ext"
-	_fPostActions          = "post_actions"
-	_fPostActionName       = "name"
-	_fPostActionParameters = "parameters"
+	_fOnComplete          = "on_complete"
+	_fOnCompleteName      = "name"
+	_fOnCompleteParams    = "parameters"
 
 	_fScenario              = "scenario"
 	_fScenarioName          = "scenario.name"
@@ -383,21 +383,23 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 		builder.Delay(vlatte.Latency(duration))
 	}
 
-	if vi.IsSet(_fPostActions) {
-		rawPa := vi.Get(_fPostActions)
-		postActions, ok := rawPa.([]any)
+	if vi.IsSet(_fOnComplete) {
+		raw := vi.Get(_fOnComplete)
+		list, ok := raw.([]any)
 		if !ok {
-			return nil, fmt.Errorf("[post_actions] expected an array of objects. got: %T", rawPa)
+			return nil, fmt.Errorf("[on_complete] expected an array of objects. got: %T", raw)
 		}
 
-		for i, item := range postActions {
-			pa, ok := item.(map[string]any)
+		for i, item := range list {
+			obj, ok := item.(map[string]any)
 			if !ok {
-				return nil, fmt.Errorf("[post_actions][%d] expected an object. got: %T", i, item)
+				return nil, fmt.Errorf("[on_complete][%d] expected an object. got: %T", i, item)
 			}
 
-			builder.PostAction(
-				vlatte.PostActionDefinition{Name: pa[_fPostActionName].(string), Parameters: pa[_fPostActionParameters]})
+			builder.OnCompleteEvent(vlatte.EventConfig{
+				Name:       obj[_fOnCompleteName].(string),
+				Parameters: obj[_fOnCompleteParams],
+			})
 		}
 	}
 

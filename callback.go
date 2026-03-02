@@ -16,5 +16,5 @@ type CallbackInput interface {
 }
 
 // Callback defines the contract for a simple action that will be executed after serving a mocked response.
-// Similar to [PostAction], but it is just a function and cannot be configured through files.
+// Similar to event listeners ([EventListener], [OnComplete]), but it is just a function and cannot be configured through files.
 type Callback func(ctx context.Context, input CallbackInput) error

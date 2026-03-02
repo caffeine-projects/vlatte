@@ -20,8 +20,8 @@ type Bean interface {
 	Roast()
 	Raw()
 
-	// DEPRECATED: being changed to Hooks.
-	PostActions() PostActions
+	// OnCompleteEvents returns the list of on-complete event configs for this bean.
+	OnCompleteEvents() []EventConfig
 	Buzzers() *Buzzers
 	Callbacks() []Callback
 	Flow() []Step

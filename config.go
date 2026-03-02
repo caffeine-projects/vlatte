@@ -28,7 +28,7 @@ type Config struct {
 	LogBodyMaxSize      int64
 	Debug               bool
 	Colors              bool
-	PostActions         map[string]PostAction
+	Events              *Events
 	Sketch              Template
 	SketchDataProviders []TemplateDataProvider
 	DebugFn             DebugFn
@@ -52,7 +52,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.LogBodyMaxSize = c.LogBodyMaxSize
 	conf.Debug = c.Debug
 	conf.Colors = c.Colors
-	conf.PostActions = c.PostActions
+	conf.Events = c.Events
 	conf.Sketch = c.Sketch
 	conf.SketchDataProviders = c.SketchDataProviders
 	conf.DebugFn = c.DebugFn
@@ -71,8 +71,8 @@ type DebugFn func(string, any)
 // DefaultConfig returns a Config with default values.
 func DefaultConfig() *Config {
 	return &Config{
-		AdminPath:    "/__admin",
-		PostActions:  make(map[string]PostAction),
+		AdminPath:   "/__admin",
+		Events:      NewEvents(),
 		LogPretty:    true,
 		LogLevel:     LogLevelInfo,
 		LogVerbosity: LogHeader,

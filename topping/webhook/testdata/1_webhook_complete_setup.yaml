@@ -5,7 +5,7 @@ request:
 response:
   status: 202
 
-post_actions:
+on_complete:
   - name: webhook
     parameters:
       url: {{ .Data.webhook_target }}

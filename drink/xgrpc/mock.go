@@ -32,7 +32,7 @@ type GRPCMock struct {
 
 	Reply any
 
-	PostActionList vlatte.PostActions
+	OnCompleteList []vlatte.EventConfig
 
 	CallbackList []vlatte.Callback
 
@@ -49,7 +49,7 @@ func newMock() *GRPCMock {
 		after:   make([]filter.Stateful, 0),
 		enabled: true,
 
-		PostActionList: make(vlatte.PostActions, 0),
+		OnCompleteList: make([]vlatte.EventConfig, 0),
 		CallbackList:   make([]vlatte.Callback, 0),
 		Steps:          make([]vlatte.Step, 0),
 	}
@@ -121,9 +121,8 @@ func (m *GRPCMock) SketchDataProvider() vlatte.TemplateDataProvider {
 	return nil
 }
 
-// DEPRECATED: being change to Hooks.
-func (m *GRPCMock) PostActions() vlatte.PostActions {
-	return m.PostActionList
+func (m *GRPCMock) OnCompleteEvents() []vlatte.EventConfig {
+	return m.OnCompleteList
 }
 
 func (m *GRPCMock) Buzzers() *vlatte.Buzzers {

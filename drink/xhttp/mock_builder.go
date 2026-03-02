@@ -378,9 +378,9 @@ func (b *HTTPMockBuilder) Callback(callback vlatte.Callback) *HTTPMockBuilder {
 	return b
 }
 
-func (b *HTTPMockBuilder) PostAction(input vlatte.PostActionDefinition) *HTTPMockBuilder {
-	b.mock.PostActionList = append(b.mock.PostActionList, input)
-
+// OnCompleteEvent adds an on-complete event to the mock.
+func (b *HTTPMockBuilder) OnCompleteEvent(cfg vlatte.EventConfig) *HTTPMockBuilder {
+	b.mock.OnCompleteList = append(b.mock.OnCompleteList, cfg)
 	return b
 }
 
@@ -454,14 +454,9 @@ func (b *HTTPMockBuilder) Grind(app *HTTPMockApp) (*HTTPMock, error) {
 		})
 	}
 
-	for i, def := range b.mock.PostActionList {
-		postAction, ok := app.config.PostActions[def.Name]
-		if !ok {
-			return nil, fmt.Errorf("mock: post action %s at index %d is not registered", def.Name, i)
-		}
-
-		if postAction == nil {
-			return nil, fmt.Errorf("mock: post action %s at index %d is nil", def.Name, i)
+	for i, def := range b.mock.OnCompleteList {
+		if app.config.Events == nil || !app.config.Events.OnComplete.Has(def.Name) {
+			return nil, fmt.Errorf("mock: on_complete listener %s at index %d is not registered", def.Name, i)
 		}
 	}
 

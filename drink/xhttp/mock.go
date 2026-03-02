@@ -123,8 +123,7 @@ type HTTPMock struct {
 	// Delay sets the duration to delay serving the mocked response.
 	Delay vlatte.Delay
 
-	// DEPRECATED: will be removed soon.
-	PostActionList vlatte.PostActions
+	OnCompleteList []vlatte.EventConfig
 
 	CallbackList []vlatte.Callback
 
@@ -138,7 +137,7 @@ func NewMock() *HTTPMock {
 		expectations: make([]*vlatte.Eval[*HTTPValueSelectorInput], 0),
 		enabled:      true,
 
-		PostActionList: make(vlatte.PostActions, 0),
+		OnCompleteList: make([]vlatte.EventConfig, 0),
 		CallbackList:   make([]vlatte.Callback, 0),
 		Steps:          make([]vlatte.Step, 0),
 		Mappers:        make([]Mapper, 0),
@@ -208,9 +207,8 @@ func (m *HTTPMock) Switch(state bool) {
 	m.enabled = state
 }
 
-// DEPRECATED: being change to Hooks.
-func (m *HTTPMock) PostActions() vlatte.PostActions {
-	return m.PostActionList
+func (m *HTTPMock) OnCompleteEvents() []vlatte.EventConfig {
+	return m.OnCompleteList
 }
 
 func (m *HTTPMock) Buzzers() *vlatte.Buzzers {

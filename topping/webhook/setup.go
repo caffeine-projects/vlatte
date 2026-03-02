@@ -36,7 +36,7 @@ func (b *builder) Body(body string) *builder {
 	return b
 }
 
-// Build builds the vlatte.PostActionDef required to set up a WebHook for a mock.
-func (b *builder) Build(name string) vlatte.PostActionDefinition {
-	return vlatte.PostActionDefinition{Name: name, Parameters: b.input}
+// Build builds the vlatte.EventConfig required to set up a WebHook for a mock (on-complete event).
+func (b *builder) Build(name string) vlatte.EventConfig {
+	return vlatte.EventConfig{Name: name, Parameters: b.input}
 }

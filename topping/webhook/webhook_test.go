@@ -37,7 +37,7 @@ func TestWebHook_Run(t *testing.T) {
 	testCases := []struct {
 		name          string
 		targetMock    *xhttp.HTTPMockBuilder
-		webhookDef    vlatte.PostActionDefinition
+		webhookDef    vlatte.EventConfig
 		options       []webhook.Option
 		expectedCalls int64
 	}{
@@ -103,10 +103,10 @@ func TestWebHook_Run(t *testing.T) {
 				Header(HeaderContentType, MIMETextPlain).
 				Build(name),
 			[]webhook.Option{
-				webhook.WithTransform(func(_ context.Context, input vlatte.PostActionInput, args *webhook.Args) error {
-					args.URL += "/transformed"
-					args.Method = http.MethodPut
-					args.Body = "hello world"
+				webhook.WithTransform(func(_ context.Context, args vlatte.OnComplete, webhookArgs *webhook.Args) error {
+					webhookArgs.URL += "/transformed"
+					webhookArgs.Method = http.MethodPut
+					webhookArgs.Body = "hello world"
 					return nil
 				})},
 			1,
@@ -119,7 +119,7 @@ func TestWebHook_Run(t *testing.T) {
 				Method(http.MethodGet).
 				Build(name),
 			[]webhook.Option{
-				webhook.WithTransform(func(_ context.Context, input vlatte.PostActionInput, args *webhook.Args) error {
+				webhook.WithTransform(func(_ context.Context, args vlatte.OnComplete, webhookArgs *webhook.Args) error {
 					return errors.New("boom")
 				})},
 			0,
@@ -150,7 +150,7 @@ func TestWebHook_Run(t *testing.T) {
 			wh, err := webhook.New(tc.options...)
 			require.NoError(t, err)
 
-			m := xhttp.New(xhttp.Setup().Silent().PostAction(name, wh))
+			m := xhttp.New(xhttp.Setup().Silent().OnComplete(name, wh))
 			m.MustStart()
 			defer m.Close()
 			defer target.Clean(t.Context())
@@ -158,7 +158,7 @@ func TestWebHook_Run(t *testing.T) {
 			target.MustBrew(tc.targetMock)
 
 			m.MustBrew(xhttp.Getf("/test").
-				PostAction(tc.webhookDef).
+				OnCompleteEvent(tc.webhookDef).
 				Reply(xhttp.NoContent()))
 
 			client := &http.Client{}
@@ -207,12 +207,12 @@ func TestWebHook_TLS(t *testing.T) {
 	m := xhttp.New(xhttp.Setup().
 		Silent().
 		TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile).
-		PostAction(name, wh))
+		OnComplete(name, wh))
 	m.MustStartTLS()
 	defer m.Close()
 
 	m.MustBrew(xhttp.Putf("/test").
-		PostAction(webhook.Options().
+		OnCompleteEvent(webhook.Options().
 			URL(whSrv.URL("/third_party/hook/tls")).
 			Method(http.MethodPost).
 			Header("X-Key", key).
@@ -252,12 +252,12 @@ func TestWebHook_FaultTarget(t *testing.T) {
 
 	wh, err := webhook.New()
 	require.NoError(t, err)
-	m := xhttp.New(xhttp.Setup().PostAction(name, wh))
+	m := xhttp.New(xhttp.Setup().OnComplete(name, wh))
 	m.MustStart()
 	defer m.Close()
 
 	m.MustBrew(xhttp.Getf("/test").
-		PostAction(webhook.Options().
+		OnCompleteEvent(webhook.Options().
 			URL(target.URL("/hook/fault")).
 			Method(http.MethodGet).
 			Build(name)).
@@ -312,7 +312,7 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := xhttp.New(xhttp.Setup().PostAction(name, wh))
+	m := xhttp.New(xhttp.Setup().OnComplete(name, wh))
 	m.MustStart()
 	defer m.Close()
 
@@ -320,7 +320,7 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 		tc := tc
 		t.Run(strconv.FormatInt(int64(i), 10), func(t *testing.T) {
 			m.MustBrew(xhttp.Getf("/test").
-				PostAction(vlatte.PostActionDefinition{Name: name, Parameters: tc}).
+				OnCompleteEvent(vlatte.EventConfig{Name: name, Parameters: tc}).
 				Reply(xhttp.NoContent()))
 
 			res, err := client.Get(m.URL("/test"))
@@ -352,7 +352,7 @@ func TestWebHook_FileSetup(t *testing.T) {
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := xhttp.New(xhttp.Setup().PostAction(name, wh))
+	m := xhttp.New(xhttp.Setup().OnComplete(name, wh))
 	m.SetData(map[string]any{"webhook_target": target.URL("/fs/hook")})
 	m.MustStart()
 	defer m.Close()
@@ -376,7 +376,7 @@ func TestWebHook_InvalidFiles(t *testing.T) {
 		name     string
 		filename string
 	}{
-		{"post actions must be an an array", "testdata/2_webhook_object_not_array.yaml"},
+		{"on_complete must be an array", "testdata/2_webhook_object_not_array.yaml"},
 		{"item is not an object", "testdata/3_webhook_invalid_item_type.yaml"},
 	}
 
@@ -386,7 +386,7 @@ func TestWebHook_InvalidFiles(t *testing.T) {
 			wh, err := webhook.New()
 			require.NoError(t, err)
 
-			m := xhttp.New(xhttp.Setup().PostAction(name, wh))
+			m := xhttp.New(xhttp.Setup().OnComplete(name, wh))
 			defer m.Close()
 
 			mock, err := m.Brew(xhttp.FromFile(tc.filename))

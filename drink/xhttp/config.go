@@ -336,12 +336,12 @@ func (cb *ConfigBuilder) TLSMutual(certFile, keyFile, clientCert string) *Config
 	return cb
 }
 
-// PostAction registers a PostAction by name.
-func (cb *ConfigBuilder) PostAction(name string, action vlatte.PostAction) *ConfigBuilder {
-	if cb.conf.PostActions == nil {
-		cb.conf.PostActions = make(map[string]vlatte.PostAction)
+// OnComplete registers an on-complete event listener by name.
+func (cb *ConfigBuilder) OnComplete(name string, listener vlatte.EventListener[vlatte.OnComplete]) *ConfigBuilder {
+	if cb.conf.Events == nil {
+		cb.conf.Events = vlatte.NewEvents()
 	}
-	cb.conf.PostActions[name] = action
+	cb.conf.Events.OnComplete.Register(name, listener)
 	return cb
 }
 

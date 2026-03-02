@@ -187,16 +187,14 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for i, def := range mock.PostActions() {
-		postAction := h.app.config.PostActions[def.Name]
-		input := &PostActionInput{req: reqValues, res: res, m: mock, args: def.Parameters, kit: kit}
-		err = postAction.Run(r.Context(), input)
+	for i, def := range mock.OnCompleteEvents() {
+		input := &HTTPOnComplete{m: mock, req: reqValues, res: res, kit: kit, args: def.Parameters}
+		err = h.app.config.Events.OnComplete.Run(r.Context(), def.Name, input)
 		if err != nil {
 			h.lifecycle.OnWarning(reqValues, fmt.Errorf(
-				"post_action: error with post action %s(%d) %T:\n%w",
+				"on_complete: error with event %s(%d): %w",
 				def.Name,
 				i,
-				postAction,
 				err,
 			))
 		}
