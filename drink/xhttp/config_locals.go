@@ -168,8 +168,7 @@ func (c *localConfigurer) apply(conf *Config, vi *viper.Viper) (err error) {
 			return fmt.Errorf("both cert and key filename are required. got cert=%s key=%s", certFile, keyFile)
 		}
 
-		err = applyTLS(conf, certFile, keyFile, vi.GetString(_kTLSRootCAs))
-		if err != nil {
+		if err := vlatte.ApplyTLS(conf, certFile, keyFile, vi.GetString(_kTLSRootCAs)); err != nil {
 			return err
 		}
 	}

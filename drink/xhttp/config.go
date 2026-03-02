@@ -5,8 +5,6 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"text/template"
@@ -25,9 +23,31 @@ var (
 )
 
 // Config holds HTTPMockApp mock server configurations.
+// It implements [vlatte.C] for common fields.
 type Config struct {
-	vlatte.Config
+	// Common fields (vlatte.C)
+	Name                string
+	AdminPath           string
+	AdminEnabled        bool
+	RootDir             string
+	TLSConfig           *tls.Config
+	TLSCertificates     []tls.Certificate
+	TLSClientCAs        *x509.CertPool
+	Parameters          kv.KV
+	TemplateFunctions   template.FuncMap
+	Logger              *zerolog.Logger
+	LogVerbosity        vlatte.LogVerbosity
+	LogLevel            vlatte.LogLevel
+	LogPretty           bool
+	LogBodyMaxSize      int64
+	Debug               bool
+	Colors              bool
+	Events              *vlatte.Events
+	Sketch              vlatte.Template
+	SketchDataProviders []vlatte.TemplateDataProvider
+	DebugFn             vlatte.DebugFn
 
+	// HTTP-specific fields
 	Addr                           string
 	UseHTTP2                       bool
 	RequestWasNotMatchedStatusCode int
@@ -48,11 +68,51 @@ type Config struct {
 	UseHTTPS                       bool
 }
 
+var _ vlatte.C = (*Config)(nil)
+
+func (c *Config) SetName(v string)                                       { c.Name = v }
+func (c *Config) SetAdminPath(v string)                                  { c.AdminPath = v }
+func (c *Config) SetAdminEnabled(v bool)                                 { c.AdminEnabled = v }
+func (c *Config) SetRootDir(v string)                                    { c.RootDir = v }
+func (c *Config) SetTLSConfig(v *tls.Config)                             { c.TLSConfig = v }
+func (c *Config) SetTLSCertificates(v []tls.Certificate)                 { c.TLSCertificates = v }
+func (c *Config) SetTLSClientCAs(v *x509.CertPool)                       { c.TLSClientCAs = v }
+func (c *Config) SetParameters(v kv.KV)                                  { c.Parameters = v }
+func (c *Config) SetTemplateFunctions(v template.FuncMap)                { c.TemplateFunctions = v }
+func (c *Config) SetLogger(v *zerolog.Logger)                            { c.Logger = v }
+func (c *Config) SetLogVerbosity(v vlatte.LogVerbosity)                  { c.LogVerbosity = v }
+func (c *Config) SetLogLevel(v vlatte.LogLevel)                          { c.LogLevel = v }
+func (c *Config) SetLogPretty(v bool)                                    { c.LogPretty = v }
+func (c *Config) SetLogBodyMaxSize(v int64)                              { c.LogBodyMaxSize = v }
+func (c *Config) SetDebug(v bool)                                        { c.Debug = v }
+func (c *Config) SetColors(v bool)                                       { c.Colors = v }
+func (c *Config) SetEvents(v *vlatte.Events)                             { c.Events = v }
+func (c *Config) SetSketch(v vlatte.Template)                            { c.Sketch = v }
+func (c *Config) SetSketchDataProviders(v []vlatte.TemplateDataProvider) { c.SketchDataProviders = v }
+func (c *Config) SetDebugFn(v vlatte.DebugFn)                            { c.DebugFn = v }
+
 // Apply copies the current Config struct values to the given Config parameter.
 func (c *Config) Apply(conf *Config) error {
-	if err := c.Config.Apply(&conf.Config); err != nil {
-		return err
-	}
+	conf.Name = c.Name
+	conf.AdminPath = c.AdminPath
+	conf.AdminEnabled = c.AdminEnabled
+	conf.RootDir = c.RootDir
+	conf.TLSConfig = c.TLSConfig
+	conf.TLSCertificates = c.TLSCertificates
+	conf.TLSClientCAs = c.TLSClientCAs
+	conf.Parameters = c.Parameters
+	conf.TemplateFunctions = c.TemplateFunctions
+	conf.Logger = c.Logger
+	conf.LogVerbosity = c.LogVerbosity
+	conf.LogLevel = c.LogLevel
+	conf.LogPretty = c.LogPretty
+	conf.LogBodyMaxSize = c.LogBodyMaxSize
+	conf.Debug = c.Debug
+	conf.Colors = c.Colors
+	conf.Events = c.Events
+	conf.Sketch = c.Sketch
+	conf.SketchDataProviders = c.SketchDataProviders
+	conf.DebugFn = c.DebugFn
 	conf.Addr = c.Addr
 	conf.UseHTTP2 = c.UseHTTP2
 	conf.RequestWasNotMatchedStatusCode = c.RequestWasNotMatchedStatusCode
@@ -71,11 +131,13 @@ func (c *Config) Apply(conf *Config) error {
 	conf.MockFileHandlers = c.MockFileHandlers
 	conf.HTTPClientFactory = c.HTTPClientFactory
 	conf.HeaderNamesToRedact = c.HeaderNamesToRedact
+
 	return nil
 }
 
 // ConfigBuilder lets users create a Config using a fluent API.
 type ConfigBuilder struct {
+	base                   *vlatte.CB
 	conf                   *Config
 	recorderConf           []RecordConfigurer
 	proxyConf              []ProxyConfigurer
@@ -85,9 +147,7 @@ type ConfigBuilder struct {
 }
 
 func defaultConfig() *Config {
-	base := vlatte.DefaultConfig()
-	return &Config{
-		Config:                         *base,
+	c := &Config{
 		RequestWasNotMatchedStatusCode: StatusNoMatch,
 		MockFileSearchPatterns:         ConfigMockFilePattern,
 		RequestBodyParsers:             make([]RequestBodyParser, 0),
@@ -97,6 +157,8 @@ func defaultConfig() *Config {
 		HeaderNamesToRedact:            make(map[string]struct{}),
 		UseHTTP2:                       true,
 	}
+	vlatte.ApplyDefaults(c)
+	return c
 }
 
 // Setup initialize a new ConfigBuilder.
@@ -104,13 +166,19 @@ func defaultConfig() *Config {
 func Setup() *ConfigBuilder {
 	conf := defaultConfig()
 	return &ConfigBuilder{
+		base: vlatte.NewCB(conf),
 		conf: conf,
 	}
 }
 
+// Base returns the [vlatte.CB] for common configuration.
+func (cb *ConfigBuilder) Base() *vlatte.CB {
+	return cb.base
+}
+
 // Name sets a name to the mock server.
 func (cb *ConfigBuilder) Name(name string) *ConfigBuilder {
-	cb.conf.Name = name
+	cb.base.Name(name)
 	return cb
 }
 
@@ -129,7 +197,7 @@ func (cb *ConfigBuilder) Port(port int) *ConfigBuilder {
 
 // RootDir defines the root directory.
 func (cb *ConfigBuilder) RootDir(rootDir string) *ConfigBuilder {
-	cb.conf.RootDir = rootDir
+	cb.base.RootDir(rootDir)
 	return cb
 }
 
@@ -191,48 +259,48 @@ func (cb *ConfigBuilder) HandlerDecorator(fn func(handler http.Handler) http.Han
 
 // Logger sets a custom zerolog.Logger.
 func (cb *ConfigBuilder) Logger(l *zerolog.Logger) *ConfigBuilder {
-	cb.conf.Logger = l
+	cb.base.Logger(l)
 	return cb
 }
 
 func (cb *ConfigBuilder) Silent() *ConfigBuilder {
-	cb.conf.LogLevel = vlatte.LogLevelDisabled
+	cb.base.Silent()
 	return cb
 }
 
 // LogVerbosity sets the verbosity of informative logs.
 func (cb *ConfigBuilder) LogVerbosity(l vlatte.LogVerbosity) *ConfigBuilder {
-	cb.conf.LogVerbosity = l
+	cb.base.LogVerbosity(l)
 	return cb
 }
 
 // LogLevel sets the level of the zerolog.Logger.
 func (cb *ConfigBuilder) LogLevel(l vlatte.LogLevel) *ConfigBuilder {
-	cb.conf.LogLevel = l
+	cb.base.LogLevel(l)
 	return cb
 }
 
 // LogPretty enable/disable pretty logging.
 func (cb *ConfigBuilder) LogPretty(v bool) *ConfigBuilder {
-	cb.conf.LogPretty = v
+	cb.base.LogPretty(v)
 	return cb
 }
 
 // LogBodyMaxSize sets the max size of the response body to be logged.
 func (cb *ConfigBuilder) LogBodyMaxSize(max int64) *ConfigBuilder {
-	cb.conf.LogBodyMaxSize = max
+	cb.base.LogBodyMaxSize(max)
 	return cb
 }
 
 // UseDescriptiveLogger enable/disable the use of a more descriptive logger.
 func (cb *ConfigBuilder) UseDescriptiveLogger() *ConfigBuilder {
-	cb.conf.Debug = true
+	cb.base.Debug(true)
 	return cb
 }
 
 // Colors enable/disable use of ANSI colors in logs.
 func (cb *ConfigBuilder) Colors(v bool) *ConfigBuilder {
-	cb.conf.Colors = v
+	cb.base.Colors(v)
 	return cb
 }
 
@@ -247,7 +315,7 @@ func (cb *ConfigBuilder) RedactHeader(names ...string) *ConfigBuilder {
 
 // Parameters sets a custom reply parameters store.
 func (cb *ConfigBuilder) Parameters(params kv.KV) *ConfigBuilder {
-	cb.conf.Parameters = params
+	cb.base.Parameters(params)
 	return cb
 }
 
@@ -300,7 +368,7 @@ func (cb *ConfigBuilder) MockFileHandlers(handlers ...MockFileHandler) *ConfigBu
 
 // TemplateEngineFunctions sets custom functions to be used in templates.
 func (cb *ConfigBuilder) TemplateEngineFunctions(fm template.FuncMap) *ConfigBuilder {
-	cb.conf.TemplateFunctions = fm
+	cb.base.TemplateFunctions(fm)
 	return cb
 }
 
@@ -314,7 +382,7 @@ func (cb *ConfigBuilder) HTTPClient(f func() *http.Client) *ConfigBuilder {
 
 // TLSConfig defines custom TLS configurations.
 func (cb *ConfigBuilder) TLSConfig(c *tls.Config) *ConfigBuilder {
-	cb.conf.TLSConfig = c
+	cb.base.TLSConfig(c)
 	return cb
 }
 
@@ -347,31 +415,31 @@ func (cb *ConfigBuilder) OnComplete(name string, listener vlatte.EventListener[v
 
 // DebugFn sets the debug function.
 func (cb *ConfigBuilder) DebugFn(dfn vlatte.DebugFn) *ConfigBuilder {
-	cb.conf.DebugFn = dfn
+	cb.base.DebugFn(dfn)
 	return cb
 }
 
 // AdminPath sets the Admin path.
 func (cb *ConfigBuilder) AdminPath(path string) *ConfigBuilder {
-	cb.conf.AdminPath = path
+	cb.base.AdminPath(path)
 	return cb
 }
 
 // AdminEnabled enable/disable Admin endpoints.
 func (cb *ConfigBuilder) AdminEnabled(v bool) *ConfigBuilder {
-	cb.conf.AdminEnabled = v
+	cb.base.AdminEnabled(v)
 	return cb
 }
 
 // Sketch sets the sketch template.
 func (cb *ConfigBuilder) Sketch(sketch vlatte.Template) *ConfigBuilder {
-	cb.conf.Sketch = sketch
+	cb.base.Sketch(sketch)
 	return cb
 }
 
 // SketchDataProviders sets template data providers.
 func (cb *ConfigBuilder) SketchDataProviders(sdp []vlatte.TemplateDataProvider) *ConfigBuilder {
-	cb.conf.SketchDataProviders = sdp
+	cb.base.SketchDataProviders(sdp)
 	return cb
 }
 
@@ -405,33 +473,9 @@ func (cb *ConfigBuilder) Apply(conf *Config) error {
 		return cb.conf.Apply(conf)
 	}
 
-	err := applyTLS(cb.conf, cb.tlsCertificateFs, cb.tlsKeyFs, cb.tlsClientCertificateFs)
-	if err != nil {
-		return err
+	if err := cb.base.TLSFromFiles(cb.tlsCertificateFs, cb.tlsKeyFs, cb.tlsClientCertificateFs); err != nil {
+		return fmt.Errorf("config: failed to build TLS config: %w", err)
 	}
 
 	return cb.conf.Apply(conf)
-}
-
-func applyTLS(c *Config, certFile, keyFile, clientCertFile string) error {
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-	if err != nil {
-		return fmt.Errorf("config: failed to load certificate key pair from file=%s key=%s. %w", certFile, keyFile, err)
-	}
-
-	if len(clientCertFile) > 0 {
-		cc, err := os.ReadFile(filepath.Clean(clientCertFile))
-		if err != nil {
-			return fmt.Errorf("config: failed to load client certificate from %s. %w", clientCertFile, err)
-		}
-
-		cp := x509.NewCertPool()
-		cp.AppendCertsFromPEM(cc)
-
-		c.TLSClientCAs = cp
-	}
-
-	c.TLSCertificates = []tls.Certificate{cert}
-
-	return nil
 }

@@ -3,6 +3,8 @@ package vlatte
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"os"
+	"path/filepath"
 	"text/template"
 
 	"github.com/rs/zerolog"
@@ -10,54 +12,182 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/kv"
 )
 
-// Config holds base mock server configurations.
-type Config struct {
-	Name                string
-	AdminPath           string
-	AdminEnabled        bool
-	RootDir             string
-	TLSConfig           *tls.Config
-	TLSCertificates     []tls.Certificate
-	TLSClientCAs        *x509.CertPool
-	Parameters          kv.KV
-	TemplateFunctions   template.FuncMap
-	Logger              *zerolog.Logger
-	LogVerbosity        LogVerbosity
-	LogLevel            LogLevel
-	LogPretty           bool
-	LogBodyMaxSize      int64
-	Debug               bool
-	Colors              bool
-	Events              *Events
-	Sketch              Template
-	SketchDataProviders []TemplateDataProvider
-	DebugFn             DebugFn
+// C is the interface for common mock server configuration.
+// Specific configs (e.g. xhttp.Config) implement C and can be built with [CB].
+type C interface {
+	SetName(string)
+	SetAdminPath(string)
+	SetAdminEnabled(bool)
+	SetRootDir(string)
+	SetTLSConfig(*tls.Config)
+	SetTLSCertificates([]tls.Certificate)
+	SetTLSClientCAs(*x509.CertPool)
+	SetParameters(kv.KV)
+	SetTemplateFunctions(template.FuncMap)
+	SetLogger(*zerolog.Logger)
+	SetLogVerbosity(LogVerbosity)
+	SetLogLevel(LogLevel)
+	SetLogPretty(bool)
+	SetLogBodyMaxSize(int64)
+	SetDebug(bool)
+	SetColors(bool)
+	SetEvents(*Events)
+	SetSketch(Template)
+	SetSketchDataProviders([]TemplateDataProvider)
+	SetDebugFn(DebugFn)
 }
 
-// Apply copies the current Config values to the given Config.
-func (c *Config) Apply(conf *Config) error {
-	conf.Name = c.Name
-	conf.AdminPath = c.AdminPath
-	conf.AdminEnabled = c.AdminEnabled
-	conf.RootDir = c.RootDir
-	conf.TLSConfig = c.TLSConfig
-	conf.TLSCertificates = c.TLSCertificates
-	conf.TLSClientCAs = c.TLSClientCAs
-	conf.Parameters = c.Parameters
-	conf.TemplateFunctions = c.TemplateFunctions
-	conf.Logger = c.Logger
-	conf.LogVerbosity = c.LogVerbosity
-	conf.LogLevel = c.LogLevel
-	conf.LogPretty = c.LogPretty
-	conf.LogBodyMaxSize = c.LogBodyMaxSize
-	conf.Debug = c.Debug
-	conf.Colors = c.Colors
-	conf.Events = c.Events
-	conf.Sketch = c.Sketch
-	conf.SketchDataProviders = c.SketchDataProviders
-	conf.DebugFn = c.DebugFn
+// Option is a function that sets a configuration on a [C].
+type Option[T C] func(T) error
 
-	return nil
+// OptionFunc is a function that sets a configuration on a [C].
+type OptionFunc[T C] func(T) error
+
+// Apply implements [Configurer].
+func (o OptionFunc[T]) Apply(t T) error {
+	return o(t)
+}
+
+// CB sets common configuration fields on any [C].
+type CB struct {
+	conf C
+}
+
+// NewCB returns a builder that sets common fields on conf.
+func NewCB(conf C) *CB {
+	return &CB{conf: conf}
+}
+
+// Name sets the mock server name.
+func (cb *CB) Name(name string) *CB {
+	cb.conf.SetName(name)
+	return cb
+}
+
+// AdminPath sets the admin API path.
+func (cb *CB) AdminPath(path string) *CB {
+	cb.conf.SetAdminPath(path)
+	return cb
+}
+
+// AdminEnabled enables or disables the admin endpoints.
+func (cb *CB) AdminEnabled(v bool) *CB {
+	cb.conf.SetAdminEnabled(v)
+	return cb
+}
+
+// RootDir sets the root directory.
+func (cb *CB) RootDir(dir string) *CB {
+	cb.conf.SetRootDir(dir)
+	return cb
+}
+
+// TLSConfig sets the TLS config.
+func (cb *CB) TLSConfig(c *tls.Config) *CB {
+	cb.conf.SetTLSConfig(c)
+	return cb
+}
+
+// TLSCertificates sets the TLS certificates.
+func (cb *CB) TLSCertificates(certs []tls.Certificate) *CB {
+	cb.conf.SetTLSCertificates(certs)
+	return cb
+}
+
+// TLSClientCAs sets the client CA pool for mutual TLS.
+func (cb *CB) TLSClientCAs(pool *x509.CertPool) *CB {
+	cb.conf.SetTLSClientCAs(pool)
+	return cb
+}
+
+// Parameters sets the parameters store.
+func (cb *CB) Parameters(params kv.KV) *CB {
+	cb.conf.SetParameters(params)
+	return cb
+}
+
+// TemplateFunctions sets the template func map.
+func (cb *CB) TemplateFunctions(fm template.FuncMap) *CB {
+	cb.conf.SetTemplateFunctions(fm)
+	return cb
+}
+
+// Logger sets the logger.
+func (cb *CB) Logger(l *zerolog.Logger) *CB {
+	cb.conf.SetLogger(l)
+	return cb
+}
+
+// LogVerbosity sets the log verbosity.
+func (cb *CB) LogVerbosity(v LogVerbosity) *CB {
+	cb.conf.SetLogVerbosity(v)
+	return cb
+}
+
+// LogLevel sets the log level.
+func (cb *CB) LogLevel(v LogLevel) *CB {
+	cb.conf.SetLogLevel(v)
+	return cb
+}
+
+// LogPretty sets whether logging is pretty-printed.
+func (cb *CB) LogPretty(v bool) *CB {
+	cb.conf.SetLogPretty(v)
+	return cb
+}
+
+// LogBodyMaxSize sets the max body size for logging.
+func (cb *CB) LogBodyMaxSize(n int64) *CB {
+	cb.conf.SetLogBodyMaxSize(n)
+	return cb
+}
+
+// Debug sets the debug flag.
+func (cb *CB) Debug(v bool) *CB {
+	cb.conf.SetDebug(v)
+	return cb
+}
+
+// Colors sets whether to use colors in logs.
+func (cb *CB) Colors(v bool) *CB {
+	cb.conf.SetColors(v)
+	return cb
+}
+
+// Events sets the event listeners.
+func (cb *CB) Events(e *Events) *CB {
+	cb.conf.SetEvents(e)
+	return cb
+}
+
+// Sketch sets the sketch template.
+func (cb *CB) Sketch(t Template) *CB {
+	cb.conf.SetSketch(t)
+	return cb
+}
+
+// SketchDataProviders sets the template data providers.
+func (cb *CB) SketchDataProviders(p []TemplateDataProvider) *CB {
+	cb.conf.SetSketchDataProviders(p)
+	return cb
+}
+
+// DebugFn sets the debug function.
+func (cb *CB) DebugFn(fn DebugFn) *CB {
+	cb.conf.SetDebugFn(fn)
+	return cb
+}
+
+// Silent disables log output (same as LogLevel(LogLevelDisabled)).
+func (cb *CB) Silent() *CB {
+	cb.conf.SetLogLevel(LogLevelDisabled)
+	return cb
+}
+
+// TLSFromFiles loads TLS material from the given files and configures TLS on the underlying [C].
+// If clientCertFile is empty, only the server certificate/key are configured.
+func (cb *CB) TLSFromFiles(certFile, keyFile, clientCertFile string) error {
+	return ApplyTLS(cb.conf, certFile, keyFile, clientCertFile)
 }
 
 // Configurer lets users configure the Mock API.
@@ -68,15 +198,38 @@ type Configurer[TConfig any] interface {
 // DebugFn is a function for debug logging.
 type DebugFn func(string, any)
 
-// DefaultConfig returns a Config with default values.
-func DefaultConfig() *Config {
-	return &Config{
-		AdminPath:   "/__admin",
-		Events:      NewEvents(),
-		LogPretty:    true,
-		LogLevel:     LogLevelInfo,
-		LogVerbosity: LogHeader,
-		Colors:       true,
-		DebugFn:      func(evt string, a any) {},
+// ApplyDefaults sets default values on c for common fields.
+func ApplyDefaults(c C) {
+	c.SetAdminPath("/__admin")
+	c.SetEvents(NewEvents())
+	c.SetLogPretty(true)
+	c.SetLogLevel(LogLevelInfo)
+	c.SetLogVerbosity(LogHeader)
+	c.SetColors(true)
+	c.SetDebugFn(func(evt string, a any) {})
+}
+
+// ApplyTLS loads TLS material from the given files and configures TLS on c.
+// It is a shared helper for all mock server config builders.
+func ApplyTLS(c C, certFile, keyFile, clientCertFile string) error {
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return err
 	}
+
+	if len(clientCertFile) > 0 {
+		cc, err := os.ReadFile(filepath.Clean(clientCertFile))
+		if err != nil {
+			return err
+		}
+
+		cp := x509.NewCertPool()
+		cp.AppendCertsFromPEM(cc)
+
+		c.SetTLSClientCAs(cp)
+	}
+
+	c.SetTLSCertificates([]tls.Certificate{cert})
+
+	return nil
 }
