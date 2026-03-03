@@ -27,7 +27,7 @@ type Option func(*WebHook) error
 type Transform func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Args) error
 
 // WebHook is an automated HTTP request sent when an on-complete event is fired.
-// Register it with [vlatte.Events.OnComplete] (e.g. via xhttp.Setup().OnComplete(name, wh)).
+// Register it with [vlatte.Listener.OnComplete] (e.g. via xhttp.Setup().OnComplete(name, wh)).
 type WebHook struct {
 	RoundTripper http.RoundTripper
 	Transform    Transform

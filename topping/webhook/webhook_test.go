@@ -150,7 +150,7 @@ func TestWebHook_Run(t *testing.T) {
 			wh, err := webhook.New(tc.options...)
 			require.NoError(t, err)
 
-			m := xhttp.New(xhttp.Setup().Silent().OnComplete(name, wh))
+			m := xhttp.New(xhttp.Setup().Silent().OnCompleteListener(name, wh))
 			m.MustStart()
 			defer m.Close()
 			defer target.Clean(t.Context())
@@ -207,7 +207,7 @@ func TestWebHook_TLS(t *testing.T) {
 	m := xhttp.New(xhttp.Setup().
 		Silent().
 		TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile).
-		OnComplete(name, wh))
+		OnCompleteListener(name, wh))
 	m.MustStartTLS()
 	defer m.Close()
 
@@ -252,7 +252,7 @@ func TestWebHook_FaultTarget(t *testing.T) {
 
 	wh, err := webhook.New()
 	require.NoError(t, err)
-	m := xhttp.New(xhttp.Setup().OnComplete(name, wh))
+	m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
 	m.MustStart()
 	defer m.Close()
 
@@ -312,7 +312,7 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := xhttp.New(xhttp.Setup().OnComplete(name, wh))
+	m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
 	m.MustStart()
 	defer m.Close()
 
@@ -352,7 +352,7 @@ func TestWebHook_FileSetup(t *testing.T) {
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := xhttp.New(xhttp.Setup().OnComplete(name, wh))
+	m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
 	m.SetData(map[string]any{"webhook_target": target.URL("/fs/hook")})
 	m.MustStart()
 	defer m.Close()
@@ -386,7 +386,7 @@ func TestWebHook_InvalidFiles(t *testing.T) {
 			wh, err := webhook.New()
 			require.NoError(t, err)
 
-			m := xhttp.New(xhttp.Setup().OnComplete(name, wh))
+			m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
 			defer m.Close()
 
 			mock, err := m.Brew(xhttp.FromFile(tc.filename))

@@ -121,8 +121,8 @@ func (m *GRPCMock) SketchDataProvider() vlatte.TemplateDataProvider {
 	return nil
 }
 
-func (m *GRPCMock) OnCompleteEvents() []vlatte.EventConfig {
-	return m.OnCompleteList
+func (m *GRPCMock) Events() vlatte.Events {
+	return vlatte.Events{OnComplete: m.OnCompleteList}
 }
 
 func (m *GRPCMock) Buzzers() *vlatte.Buzzers {

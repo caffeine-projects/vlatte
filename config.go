@@ -31,11 +31,20 @@ type C interface {
 	SetLogBodyMaxSize(int64)
 	SetDebug(bool)
 	SetColors(bool)
-	SetEvents(*Events)
+	SetEventListeners(*Listener)
+	SetGlobalEvents(*Events)
 	SetSketch(Template)
 	SetSketchDataProviders([]TemplateDataProvider)
 	SetDebugFn(DebugFn)
 }
+
+// Configurer lets users configure the Mock API.
+type Configurer[TConfig any] interface {
+	Apply(conf TConfig) error
+}
+
+// DebugFn is a function for debug logging.
+type DebugFn func(string, any)
 
 // Option is a function that sets a configuration on a [C].
 type Option[T C] func(T) error
@@ -154,9 +163,15 @@ func (cb *CB) Colors(v bool) *CB {
 	return cb
 }
 
-// Events sets the event listeners.
-func (cb *CB) Events(e *Events) *CB {
-	cb.conf.SetEvents(e)
+// EventListeners sets the event listeners.
+func (cb *CB) EventListeners(e *Listener) *CB {
+	cb.conf.SetEventListeners(e)
+	return cb
+}
+
+// GlobalEvents sets the global events.
+func (cb *CB) GlobalEvents(e *Events) *CB {
+	cb.conf.SetGlobalEvents(e)
 	return cb
 }
 
@@ -190,18 +205,24 @@ func (cb *CB) TLSFromFiles(certFile, keyFile, clientCertFile string) error {
 	return ApplyTLS(cb.conf, certFile, keyFile, clientCertFile)
 }
 
-// Configurer lets users configure the Mock API.
-type Configurer[TConfig any] interface {
-	Apply(conf TConfig) error
+type CBEvt[RET any] struct {
+	ret              RET
+	OnCompleteEvents []EventConfig
 }
 
-// DebugFn is a function for debug logging.
-type DebugFn func(string, any)
+func (cb *CBEvt[RET]) OnComplete(name string, parameters Parameters) RET {
+	cb.OnCompleteEvents = append(cb.OnCompleteEvents, EventConfig{
+		Name:       name,
+		Parameters: parameters,
+	})
+
+	return cb.ret
+}
 
 // ApplyDefaults sets default values on c for common fields.
 func ApplyDefaults(c C) {
 	c.SetAdminPath("/__admin")
-	c.SetEvents(NewEvents())
+	c.SetEventListeners(NewListener())
 	c.SetLogPretty(true)
 	c.SetLogLevel(LogLevelInfo)
 	c.SetLogVerbosity(LogHeader)

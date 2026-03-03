@@ -6,10 +6,6 @@
 
 export
 
-.PHONY: help
-help: ## show help
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
-
 .PHONY: test
 test: ## run tests
 	@go test -v -race -timeout 1m ./...
@@ -39,3 +35,11 @@ cov: ## run tests and generate coverage report
 .PHONY: deps
 deps: ## dependencies
 	@go mod download
+
+# --
+# Miscellaneous
+# --
+
+.PHONY: help
+help: ## show help
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)

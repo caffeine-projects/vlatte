@@ -454,8 +454,8 @@ func (b *HTTPMockBuilder) Grind(app *HTTPMockApp) (*HTTPMock, error) {
 		})
 	}
 
-	for i, def := range b.mock.OnCompleteList {
-		if app.config.Events == nil || !app.config.Events.OnComplete.Has(def.Name) {
+	for i, def := range b.mock.Events().OnComplete {
+		if app.config.Listeners == nil || !app.config.Listeners.OnComplete.Has(def.Name) {
 			return nil, fmt.Errorf("mock: on_complete listener %s at index %d is not registered", def.Name, i)
 		}
 	}

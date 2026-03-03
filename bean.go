@@ -20,9 +20,7 @@ type Bean interface {
 	Roast()
 	Raw()
 
-	// OnCompleteEvents returns the list of on-complete event configs for this bean.
-	OnCompleteEvents() []EventConfig
-	Buzzers() *Buzzers
+	Events() Events
 	Callbacks() []Callback
 	Flow() []Step
 

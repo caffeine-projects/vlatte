@@ -42,7 +42,8 @@ type Config struct {
 	LogBodyMaxSize      int64
 	Debug               bool
 	Colors              bool
-	Events              *vlatte.Events
+	Listeners           *vlatte.Listener
+	GlobalEvents        *vlatte.Events
 	Sketch              vlatte.Template
 	SketchDataProviders []vlatte.TemplateDataProvider
 	DebugFn             vlatte.DebugFn
@@ -86,7 +87,8 @@ func (c *Config) SetLogPretty(v bool)                                    { c.Log
 func (c *Config) SetLogBodyMaxSize(v int64)                              { c.LogBodyMaxSize = v }
 func (c *Config) SetDebug(v bool)                                        { c.Debug = v }
 func (c *Config) SetColors(v bool)                                       { c.Colors = v }
-func (c *Config) SetEvents(v *vlatte.Events)                             { c.Events = v }
+func (c *Config) SetEventListeners(v *vlatte.Listener)                   { c.Listeners = v }
+func (c *Config) SetGlobalEvents(v *vlatte.Events)                       { c.GlobalEvents = v }
 func (c *Config) SetSketch(v vlatte.Template)                            { c.Sketch = v }
 func (c *Config) SetSketchDataProviders(v []vlatte.TemplateDataProvider) { c.SketchDataProviders = v }
 func (c *Config) SetDebugFn(v vlatte.DebugFn)                            { c.DebugFn = v }
@@ -109,7 +111,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.LogBodyMaxSize = c.LogBodyMaxSize
 	conf.Debug = c.Debug
 	conf.Colors = c.Colors
-	conf.Events = c.Events
+	conf.Listeners = c.Listeners
 	conf.Sketch = c.Sketch
 	conf.SketchDataProviders = c.SketchDataProviders
 	conf.DebugFn = c.DebugFn
@@ -156,6 +158,8 @@ func defaultConfig() *Config {
 		MockFileHandlers:               make([]MockFileHandler, 0),
 		HeaderNamesToRedact:            make(map[string]struct{}),
 		UseHTTP2:                       true,
+		Listeners:                      vlatte.NewListener(),
+		GlobalEvents:                   &vlatte.Events{},
 	}
 	vlatte.ApplyDefaults(c)
 	return c
@@ -404,12 +408,9 @@ func (cb *ConfigBuilder) TLSMutual(certFile, keyFile, clientCert string) *Config
 	return cb
 }
 
-// OnComplete registers an on-complete event listener by name.
-func (cb *ConfigBuilder) OnComplete(name string, listener vlatte.EventListener[vlatte.OnComplete]) *ConfigBuilder {
-	if cb.conf.Events == nil {
-		cb.conf.Events = vlatte.NewEvents()
-	}
-	cb.conf.Events.OnComplete.Register(name, listener)
+// OnCompleteListener registers an on-complete event listener by name.
+func (cb *ConfigBuilder) OnCompleteListener(name string, listener vlatte.EventListener[vlatte.OnComplete]) *ConfigBuilder {
+	cb.conf.Listeners.OnComplete.Register(name, listener)
 	return cb
 }
 

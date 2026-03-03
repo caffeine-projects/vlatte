@@ -207,12 +207,8 @@ func (m *HTTPMock) Switch(state bool) {
 	m.enabled = state
 }
 
-func (m *HTTPMock) OnCompleteEvents() []vlatte.EventConfig {
-	return m.OnCompleteList
-}
-
-func (m *HTTPMock) Buzzers() *vlatte.Buzzers {
-	return m.buzzers
+func (m *HTTPMock) Events() vlatte.Events {
+	return vlatte.Events{OnComplete: m.OnCompleteList}
 }
 
 func (m *HTTPMock) Callbacks() []vlatte.Callback {

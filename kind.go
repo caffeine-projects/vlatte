@@ -2,7 +2,7 @@ package vlatte
 
 // Kind describes the mock server implementation being used.
 // E.g.: the HTTP mock server will return "http".
-// The kind is useful to determine the mock server implementation within components like event listeners ([Events], [OnComplete]), [Callback], etc.
+// The kind is useful to determine the mock server implementation within components like event listeners ([Listener], [OnComplete]), [Callback], etc.
 // Also useful for a [Recipe] with different behaviors per mock server type.
 type Kind string
 

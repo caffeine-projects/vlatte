@@ -2,8 +2,12 @@ package vlatte
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"sync"
 )
+
+var ErrEventAlreadyRegistered = fmt.Errorf("vlatte: event already registered")
 
 // EventArgs is the common argument type for all events.
 // Event-specific interfaces (e.g. OnComplete) extend this.
@@ -32,6 +36,18 @@ type EventConfig struct {
 	Parameters Parameters
 }
 
+type EventConfigs []EventConfig
+
+func (e EventConfigs) Has(name string) bool {
+	return slices.ContainsFunc(e, func(v EventConfig) bool {
+		return v.Name == name
+	})
+}
+
+type Events struct {
+	OnComplete EventConfigs
+}
+
 // EventRegistry is a generic registry of named listeners for one event type.
 // Use one registry per event kind (e.g. OnComplete, OnMatch) so new events can be added without changing this type.
 type EventRegistry[T EventArgs] struct {
@@ -47,13 +63,14 @@ func NewEventRegistry[T EventArgs]() *EventRegistry[T] {
 }
 
 // Register adds or replaces a listener for the given name.
-func (r *EventRegistry[T]) Register(name string, evt EventListener[T]) {
+func (r *EventRegistry[T]) Register(name string, evt EventListener[T]) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.listeners == nil {
-		r.listeners = make(map[string]EventListener[T])
+	if _, ok := r.listeners[name]; ok {
+		return ErrEventAlreadyRegistered
 	}
 	r.listeners[name] = evt
+	return nil
 }
 
 // Has reports whether a listener is registered for the given name.
@@ -76,15 +93,51 @@ func (r *EventRegistry[T]) Run(ctx context.Context, name string, args T) error {
 	return listener.Run(ctx, args)
 }
 
-// Events holds registries for each event kind.
+// Listener holds registries for each event kind.
 // Add new event types by defining an interface (embedding EventArgs), adding a field here, and initializing it in NewEvents.
-type Events struct {
+type Listener struct {
 	OnComplete *EventRegistry[OnComplete]
 }
 
-// NewEvents creates a new Events with all event registries initialized.
-func NewEvents() *Events {
-	return &Events{
+// NewListener creates a new Listeners with all event registries initialized.
+func NewListener() *Listener {
+	return &Listener{
 		OnComplete: NewEventRegistry[OnComplete](),
 	}
+}
+
+type EventRunner struct {
+	Listeners *Listener
+	Global    *Events
+}
+
+func NewEventRunner(listeners *Listener, global *Events) *EventRunner {
+	if listeners == nil {
+		listeners = NewListener()
+	}
+	if global == nil {
+		global = &Events{}
+	}
+
+	return &EventRunner{Listeners: listeners, Global: global}
+}
+
+func (r *EventRunner) OnComplete(ctx context.Context, bean Bean, argsFn func(EventConfig) OnComplete) error {
+	for _, v := range r.Global.OnComplete {
+		if err := r.Listeners.OnComplete.Run(ctx, v.Name, argsFn(v)); err != nil {
+			return err
+		}
+	}
+
+	for _, def := range bean.Events().OnComplete {
+		if !bean.Events().OnComplete.Has(def.Name) {
+			return fmt.Errorf("event %s not found", def.Name)
+		}
+
+		if err := r.Listeners.OnComplete.Run(ctx, def.Name, argsFn(def)); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

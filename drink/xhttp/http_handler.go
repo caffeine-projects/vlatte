@@ -31,14 +31,16 @@ type mockHandler struct {
 	app                 *HTTPMockApp
 	lifecycle           mockHTTPLifecycle
 	sketchDataProviders []vlatte.TemplateDataProvider
+	runner              *vlatte.EventRunner
 }
 
 func newMockHandler(
 	app *HTTPMockApp,
 	lifecycle mockHTTPLifecycle,
 	sketchDataProviders []vlatte.TemplateDataProvider,
+	eventRunner *vlatte.EventRunner,
 ) *mockHandler {
-	return &mockHandler{app, lifecycle, sketchDataProviders}
+	return &mockHandler{app, lifecycle, sketchDataProviders, eventRunner}
 }
 
 func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -187,17 +189,14 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for i, def := range mock.OnCompleteEvents() {
-		input := &HTTPOnComplete{m: mock, req: reqValues, res: res, kit: kit, args: def.Parameters}
-		err = h.app.config.Events.OnComplete.Run(r.Context(), def.Name, input)
-		if err != nil {
-			h.lifecycle.OnWarning(reqValues, fmt.Errorf(
-				"on_complete: error with event %s(%d): %w",
-				def.Name,
-				i,
-				err,
-			))
-		}
+	if err = h.runner.OnComplete(
+		r.Context(),
+		mock,
+		func(cfg vlatte.EventConfig) vlatte.OnComplete {
+			return &HTTPOnComplete{m: mock, req: reqValues, res: res, kit: kit, args: cfg.Parameters}
+		},
+	); err != nil {
+		h.lifecycle.OnWarning(reqValues, fmt.Errorf("on_complete: %w", err))
 	}
 
 	h.lifecycle.OnMatch(reqValues, res)
