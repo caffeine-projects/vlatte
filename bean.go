@@ -22,7 +22,7 @@ type Bean interface {
 
 	Events() Events
 	Callbacks() []Callback
-	Flow() []Step
+	Steps() []Step
 
 	String() string
 }

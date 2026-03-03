@@ -1,6 +1,7 @@
 package vlatte
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -9,7 +10,7 @@ import (
 
 type TestStep struct{ txt string }
 
-func (in *TestStep) Handle(p []byte, next Next) (n int, err error) {
+func (in *TestStep) Handle(_ context.Context, p []byte, next Next) (n int, err error) {
 	return next.Next(append(p, []byte("--"+in.txt)...))
 }
 
@@ -23,17 +24,18 @@ func (m *TestWriter) Write(p []byte) (n int, err error) {
 }
 
 func TestFlow(t *testing.T) {
+	ctx := context.Background()
 	data := []byte("init")
 	expected := []byte("init--hello--world!")
 	step1 := &TestStep{"hello"}
 	step2 := &TestStep{"world"}
-	step3 := Func(func(p []byte, next Next) (n int, err error) {
+	step3 := StepFunc(func(_ context.Context, p []byte, next Next) (n int, err error) {
 		return next.Next(append(p, []byte("!")...))
 	})
 
 	w := &TestWriter{}
 	w.On("Write", expected).Return(len(expected), nil)
-	pipeline := Flow(&Sink{w}, []Step{step1, step2, step3})
+	pipeline := Flow(ctx, &Sink{w}, []Step{step1, step2, step3})
 
 	n, err := pipeline.Next(data)
 

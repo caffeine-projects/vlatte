@@ -385,7 +385,7 @@ func (b *HTTPMockBuilder) OnCompleteEvent(cfg vlatte.EventConfig) *HTTPMockBuild
 }
 
 func (b *HTTPMockBuilder) Step(steps ...vlatte.Step) *HTTPMockBuilder {
-	b.mock.Steps = append(b.mock.Steps, steps...)
+	b.mock.steps = append(b.mock.steps, steps...)
 
 	return b
 }

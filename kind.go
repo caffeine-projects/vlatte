@@ -6,25 +6,28 @@ package vlatte
 // Also useful for a [Recipe] with different behaviors per mock server type.
 type Kind string
 
-func (k Kind) HTTP() bool {
-	return k == "http"
-}
-
-func (k Kind) GRPC() bool {
-	return k == "grpc"
-}
-
-func (k Kind) GraphQL() bool {
-	return k == "graphql"
-}
-
-func (k Kind) String() string {
-	return string(k)
-}
-
-// Built in [Kind] values.
 const (
 	KindHTTP    = Kind("http")
 	KindGRPC    = Kind("grpc")
 	KindGraphQL = Kind("graphql")
 )
+
+func (k Kind) HTTP() bool {
+	return k == KindHTTP
+}
+
+func (k Kind) GRPC() bool {
+	return k == KindGRPC
+}
+
+func (k Kind) GraphQL() bool {
+	return k == KindGraphQL
+}
+
+func (k Kind) Is(other Kind) bool {
+	return k == other
+}
+
+func (k Kind) String() string {
+	return string(k)
+}

@@ -1,6 +1,7 @@
 package test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"testing"
@@ -13,7 +14,7 @@ import (
 
 type TestStep struct{ txt string }
 
-func (in *TestStep) Handle(p []byte, next vlatte.Next) (n int, err error) {
+func (in *TestStep) Handle(_ context.Context, p []byte, next vlatte.Next) (n int, err error) {
 	return next.Next(append(p, []byte(in.txt)...))
 }
 

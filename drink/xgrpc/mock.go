@@ -36,7 +36,7 @@ type GRPCMock struct {
 
 	CallbackList []vlatte.Callback
 
-	Steps []vlatte.Step
+	steps []vlatte.Step
 
 	after              []filter.Stateful
 	unaryExpectations  []*vlatte.Eval[*UnaryValueSelectorIn]
@@ -51,7 +51,7 @@ func newMock() *GRPCMock {
 
 		OnCompleteList: make([]vlatte.EventConfig, 0),
 		CallbackList:   make([]vlatte.Callback, 0),
-		Steps:          make([]vlatte.Step, 0),
+		steps:          make([]vlatte.Step, 0),
 	}
 }
 
@@ -133,8 +133,8 @@ func (m *GRPCMock) Callbacks() []vlatte.Callback {
 	return m.CallbackList
 }
 
-func (m *GRPCMock) Flow() []vlatte.Step {
-	return m.Steps
+func (m *GRPCMock) Steps() []vlatte.Step {
+	return m.steps
 }
 
 func (m *GRPCMock) Prepare() {

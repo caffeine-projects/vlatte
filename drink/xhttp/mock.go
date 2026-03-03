@@ -127,7 +127,7 @@ type HTTPMock struct {
 
 	CallbackList []vlatte.Callback
 
-	Steps []vlatte.Step
+	steps []vlatte.Step
 }
 
 // NewMock returns a new Mock with default values set.
@@ -139,7 +139,7 @@ func NewMock() *HTTPMock {
 
 		OnCompleteList: make([]vlatte.EventConfig, 0),
 		CallbackList:   make([]vlatte.Callback, 0),
-		Steps:          make([]vlatte.Step, 0),
+		steps:          make([]vlatte.Step, 0),
 		Mappers:        make([]Mapper, 0),
 	}
 }
@@ -215,8 +215,8 @@ func (m *HTTPMock) Callbacks() []vlatte.Callback {
 	return m.CallbackList
 }
 
-func (m *HTTPMock) Flow() []vlatte.Step {
-	return m.Steps
+func (m *HTTPMock) Steps() []vlatte.Step {
+	return m.steps
 }
 
 func (m *HTTPMock) String() string {

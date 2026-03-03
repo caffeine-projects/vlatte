@@ -38,6 +38,7 @@ test-report.out
 .vscode/
 .local/
 
+docs/.ai/
 out/
 
 Makefile.overrides
