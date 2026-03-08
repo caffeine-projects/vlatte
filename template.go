@@ -14,7 +14,7 @@ type Template interface {
 }
 
 type TemplateDataProviderInput interface {
-	Sketch() Template
+	Templating() Template
 }
 
 type TemplateDataProvider interface {

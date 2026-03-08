@@ -26,27 +26,27 @@ var (
 // It implements [vlatte.C] for common fields.
 type Config struct {
 	// Common fields (vlatte.C)
-	Name                string
-	AdminPath           string
-	AdminEnabled        bool
-	RootDir             string
-	TLSConfig           *tls.Config
-	TLSCertificates     []tls.Certificate
-	TLSClientCAs        *x509.CertPool
-	Parameters          kv.KV
-	TemplateFunctions   template.FuncMap
-	Logger              *zerolog.Logger
-	LogVerbosity        vlatte.LogVerbosity
-	LogLevel            vlatte.LogLevel
-	LogPretty           bool
-	LogBodyMaxSize      int64
-	Debug               bool
-	Colors              bool
-	Listeners           *vlatte.Listener
-	GlobalEvents        *vlatte.Events
-	Sketch              vlatte.Template
-	SketchDataProviders []vlatte.TemplateDataProvider
-	DebugFn             vlatte.DebugFn
+	Name                  string
+	AdminPath             string
+	AdminEnabled          bool
+	RootDir               string
+	TLSConfig             *tls.Config
+	TLSCertificates       []tls.Certificate
+	TLSClientCAs          *x509.CertPool
+	Parameters            kv.KV
+	TemplateFunctions     template.FuncMap
+	Logger                *zerolog.Logger
+	LogVerbosity          vlatte.LogVerbosity
+	LogLevel              vlatte.LogLevel
+	LogPretty             bool
+	LogBodyMaxSize        int64
+	Debug                 bool
+	Colors                bool
+	Listeners             *vlatte.Listener
+	GlobalEvents          *vlatte.Events
+	Template              vlatte.Template
+	TemplateDataProviders []vlatte.TemplateDataProvider
+	DebugFn               vlatte.DebugFn
 
 	// HTTP-specific fields
 	Addr                           string
@@ -71,27 +71,29 @@ type Config struct {
 
 var _ vlatte.C = (*Config)(nil)
 
-func (c *Config) SetName(v string)                                       { c.Name = v }
-func (c *Config) SetAdminPath(v string)                                  { c.AdminPath = v }
-func (c *Config) SetAdminEnabled(v bool)                                 { c.AdminEnabled = v }
-func (c *Config) SetRootDir(v string)                                    { c.RootDir = v }
-func (c *Config) SetTLSConfig(v *tls.Config)                             { c.TLSConfig = v }
-func (c *Config) SetTLSCertificates(v []tls.Certificate)                 { c.TLSCertificates = v }
-func (c *Config) SetTLSClientCAs(v *x509.CertPool)                       { c.TLSClientCAs = v }
-func (c *Config) SetParameters(v kv.KV)                                  { c.Parameters = v }
-func (c *Config) SetTemplateFunctions(v template.FuncMap)                { c.TemplateFunctions = v }
-func (c *Config) SetLogger(v *zerolog.Logger)                            { c.Logger = v }
-func (c *Config) SetLogVerbosity(v vlatte.LogVerbosity)                  { c.LogVerbosity = v }
-func (c *Config) SetLogLevel(v vlatte.LogLevel)                          { c.LogLevel = v }
-func (c *Config) SetLogPretty(v bool)                                    { c.LogPretty = v }
-func (c *Config) SetLogBodyMaxSize(v int64)                              { c.LogBodyMaxSize = v }
-func (c *Config) SetDebug(v bool)                                        { c.Debug = v }
-func (c *Config) SetColors(v bool)                                       { c.Colors = v }
-func (c *Config) SetEventListeners(v *vlatte.Listener)                   { c.Listeners = v }
-func (c *Config) SetGlobalEvents(v *vlatte.Events)                       { c.GlobalEvents = v }
-func (c *Config) SetSketch(v vlatte.Template)                            { c.Sketch = v }
-func (c *Config) SetSketchDataProviders(v []vlatte.TemplateDataProvider) { c.SketchDataProviders = v }
-func (c *Config) SetDebugFn(v vlatte.DebugFn)                            { c.DebugFn = v }
+func (c *Config) SetName(v string)                        { c.Name = v }
+func (c *Config) SetAdminPath(v string)                   { c.AdminPath = v }
+func (c *Config) SetAdminEnabled(v bool)                  { c.AdminEnabled = v }
+func (c *Config) SetRootDir(v string)                     { c.RootDir = v }
+func (c *Config) SetTLSConfig(v *tls.Config)              { c.TLSConfig = v }
+func (c *Config) SetTLSCertificates(v []tls.Certificate)  { c.TLSCertificates = v }
+func (c *Config) SetTLSClientCAs(v *x509.CertPool)        { c.TLSClientCAs = v }
+func (c *Config) SetParameters(v kv.KV)                   { c.Parameters = v }
+func (c *Config) SetTemplateFunctions(v template.FuncMap) { c.TemplateFunctions = v }
+func (c *Config) SetLogger(v *zerolog.Logger)             { c.Logger = v }
+func (c *Config) SetLogVerbosity(v vlatte.LogVerbosity)   { c.LogVerbosity = v }
+func (c *Config) SetLogLevel(v vlatte.LogLevel)           { c.LogLevel = v }
+func (c *Config) SetLogPretty(v bool)                     { c.LogPretty = v }
+func (c *Config) SetLogBodyMaxSize(v int64)               { c.LogBodyMaxSize = v }
+func (c *Config) SetDebug(v bool)                         { c.Debug = v }
+func (c *Config) SetColors(v bool)                        { c.Colors = v }
+func (c *Config) SetEventListeners(v *vlatte.Listener)    { c.Listeners = v }
+func (c *Config) SetGlobalEvents(v *vlatte.Events)        { c.GlobalEvents = v }
+func (c *Config) SetTemplate(v vlatte.Template)           { c.Template = v }
+func (c *Config) SetTemplateDataProviders(v []vlatte.TemplateDataProvider) {
+	c.TemplateDataProviders = v
+}
+func (c *Config) SetDebugFn(v vlatte.DebugFn) { c.DebugFn = v }
 
 // Apply copies the current Config struct values to the given Config parameter.
 func (c *Config) Apply(conf *Config) error {
@@ -112,8 +114,8 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Debug = c.Debug
 	conf.Colors = c.Colors
 	conf.Listeners = c.Listeners
-	conf.Sketch = c.Sketch
-	conf.SketchDataProviders = c.SketchDataProviders
+	conf.Template = c.Template
+	conf.TemplateDataProviders = c.TemplateDataProviders
 	conf.DebugFn = c.DebugFn
 	conf.Addr = c.Addr
 	conf.UseHTTP2 = c.UseHTTP2
@@ -432,15 +434,15 @@ func (cb *ConfigBuilder) AdminEnabled(v bool) *ConfigBuilder {
 	return cb
 }
 
-// Sketch sets the sketch template.
-func (cb *ConfigBuilder) Sketch(sketch vlatte.Template) *ConfigBuilder {
-	cb.base.Sketch(sketch)
+// Template sets the template template.
+func (cb *ConfigBuilder) Template(t vlatte.Template) *ConfigBuilder {
+	cb.base.Template(t)
 	return cb
 }
 
-// SketchDataProviders sets template data providers.
-func (cb *ConfigBuilder) SketchDataProviders(sdp []vlatte.TemplateDataProvider) *ConfigBuilder {
-	cb.base.SketchDataProviders(sdp)
+// TemplateDataProviders sets template data providers.
+func (cb *ConfigBuilder) TemplateDataProviders(sdp []vlatte.TemplateDataProvider) *ConfigBuilder {
+	cb.base.TemplateDataProviders(sdp)
 	return cb
 }
 

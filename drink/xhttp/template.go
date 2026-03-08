@@ -13,6 +13,6 @@ func (p *TemplateDataProviderInput) Request() *RequestValues {
 	return p.r
 }
 
-func (p *TemplateDataProviderInput) Sketch() vlatte.Template {
+func (p *TemplateDataProviderInput) Templating() vlatte.Template {
 	return p.s
 }

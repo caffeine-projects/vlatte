@@ -28,19 +28,19 @@ func (w *topResponseWriter) Write(p []byte) (int, error) { return w.next.Next(p)
 func (w *topResponseWriter) WriteHeader(statusCode int)  { w.rw.WriteHeader(statusCode) }
 
 type mockHandler struct {
-	app                 *HTTPMockApp
-	lifecycle           mockHTTPLifecycle
-	sketchDataProviders []vlatte.TemplateDataProvider
-	runner              *vlatte.EventRunner
+	app                   *HTTPMockApp
+	lifecycle             mockHTTPLifecycle
+	templateDataProviders []vlatte.TemplateDataProvider
+	runner                *vlatte.EventRunner
 }
 
 func newMockHandler(
 	app *HTTPMockApp,
 	lifecycle mockHTTPLifecycle,
-	sketchDataProviders []vlatte.TemplateDataProvider,
+	templateDataProviders []vlatte.TemplateDataProvider,
 	eventRunner *vlatte.EventRunner,
 ) *mockHandler {
-	return &mockHandler{app, lifecycle, sketchDataProviders, eventRunner}
+	return &mockHandler{app, lifecycle, templateDataProviders, eventRunner}
 }
 
 func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -102,18 +102,18 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	d := make(map[string]any, len(h.sketchDataProviders))
-	sdpIn := &TemplateDataProviderInput{r: reqValues, s: h.app.config.Sketch}
+	d := make(map[string]any, len(h.templateDataProviders))
+	sdpIn := &TemplateDataProviderInput{r: reqValues, s: h.app.config.Template}
 
-	if len(h.sketchDataProviders) > 0 {
-		for _, sdp := range h.sketchDataProviders {
+	if len(h.templateDataProviders) > 0 {
+		for _, sdp := range h.templateDataProviders {
 			if _, ok := d[sdp.Key()]; ok {
 				h.lifecycle.OnWarning(reqValues, fmt.Errorf("%w: key=%s provider=%T", ErrTemplateDataKeyExists, sdp.Key(), sdp))
 			}
 
 			dd, err := sdp.Data(sdpIn)
 			if err != nil {
-				h.lifecycle.OnError(reqValues, fmt.Errorf("http: error getting sketch data provider. %w", err))
+				h.lifecycle.OnError(reqValues, fmt.Errorf("http: error getting template data provider. %w", err))
 				return
 			}
 
@@ -122,7 +122,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	locals := locals(reqValues, d, mock.Ext(), nil)
-	kit := &Kit{template: h.app.config.Sketch, data: locals}
+	kit := &Kit{template: h.app.config.Template, data: locals}
 
 	reqValues.Data = locals
 	reqValues.Mock = mock

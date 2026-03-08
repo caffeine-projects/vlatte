@@ -33,8 +33,8 @@ type C interface {
 	SetColors(bool)
 	SetEventListeners(*Listener)
 	SetGlobalEvents(*Events)
-	SetSketch(Template)
-	SetSketchDataProviders([]TemplateDataProvider)
+	SetTemplate(Template)
+	SetTemplateDataProviders([]TemplateDataProvider)
 	SetDebugFn(DebugFn)
 }
 
@@ -175,15 +175,15 @@ func (cb *CB) GlobalEvents(e *Events) *CB {
 	return cb
 }
 
-// Sketch sets the sketch template.
-func (cb *CB) Sketch(t Template) *CB {
-	cb.conf.SetSketch(t)
+// Template sets the template template.
+func (cb *CB) Template(t Template) *CB {
+	cb.conf.SetTemplate(t)
 	return cb
 }
 
-// SketchDataProviders sets the template data providers.
-func (cb *CB) SketchDataProviders(p []TemplateDataProvider) *CB {
-	cb.conf.SetSketchDataProviders(p)
+// TemplateDataProviders sets the template data providers.
+func (cb *CB) TemplateDataProviders(p []TemplateDataProvider) *CB {
+	cb.conf.SetTemplateDataProviders(p)
 	return cb
 }
 

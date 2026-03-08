@@ -117,7 +117,7 @@ func (m *GRPCMock) Raw() {
 	m.enabled = false
 }
 
-func (m *GRPCMock) SketchDataProvider() vlatte.TemplateDataProvider {
+func (m *GRPCMock) TemplateDataProvider() vlatte.TemplateDataProvider {
 	return nil
 }
 

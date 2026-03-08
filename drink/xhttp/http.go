@@ -146,7 +146,7 @@ func New(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
 	}
 
 	eventRunner := &vlatte.EventRunner{Listeners: app.config.Listeners, Global: app.config.GlobalEvents}
-	handler := mid.Compose(middlewares...).Root(newMockHandler(app, lifecycle, conf.SketchDataProviders, eventRunner))
+	handler := mid.Compose(middlewares...).Root(newMockHandler(app, lifecycle, conf.TemplateDataProviders, eventRunner))
 
 	if conf.HandlerDecorator != nil {
 		handler = conf.HandlerDecorator(handler)

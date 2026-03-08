@@ -11,7 +11,7 @@ type Kit struct {
 	data     any
 }
 
-func (k *Kit) Sketch() vlatte.Template {
+func (k *Kit) Templating() vlatte.Template {
 	return k.template
 }
 

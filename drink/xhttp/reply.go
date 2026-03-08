@@ -343,10 +343,10 @@ func (rep *StdReply) beforeBuild(app *HTTPMockApp) error {
 		}
 
 		var tmpl vlatte.Template
-		if app.config.Sketch == nil {
+		if app.config.Template == nil {
 			tmpl = vlatte.TemplateText(template.New(""))
 		} else {
-			tmpl = app.config.Sketch
+			tmpl = app.config.Template
 		}
 
 		tmpl, err = tmpl.Parse(buf.String() + "\r\n")
