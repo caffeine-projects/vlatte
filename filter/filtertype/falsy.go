@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -27,14 +26,14 @@ func (m *FalsyMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	}
 
 	if err != nil {
-		return internal.Error(fmt.Errorf("falsy: error parsing value to bool"))
+		return Error(fmt.Errorf("falsy: error parsing value to bool"))
 	}
 
 	if b {
-		return internal.Mismatch("Falsy() Expected false but it is actually true")
+		return Mismatch("Falsy() Expected false but it is actually true")
 	}
 
-	return internal.Success()
+	return Success()
 }
 
 // Describe implements descriptor.SelfDescriptive.

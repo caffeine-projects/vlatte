@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -18,19 +17,19 @@ type UpperCaseMatcher struct {
 func (m *UpperCaseMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
-		return internal.Error(fmt.Errorf("upper: type %T is not supported. accepted types: string", v))
+		return Error(fmt.Errorf("upper: type %T is not supported. accepted types: string", v))
 	}
 
 	result, _, err := m.Matcher.Match(strings.ToUpper(txt))
 	if err != nil {
-		return internal.Error(fmt.Errorf("upper: %w", err))
+		return Error(fmt.Errorf("upper: %w", err))
 	}
 
 	if result {
-		return internal.Success()
+		return Success()
 	}
 
-	return internal.Mismatch(strings.Join([]string{"Upper(", txt, ")"}, ""))
+	return Mismatch(strings.Join([]string{"Upper(", txt, ")"}, ""))
 }
 
 // Describe implements descriptor.SelfDescriptive.

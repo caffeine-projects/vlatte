@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -17,14 +16,14 @@ type NotMatcher struct {
 func (m *NotMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	ok, reason, err := m.Matcher.Match(v)
 	if err != nil {
-		return internal.Error(fmt.Errorf("not: %w", err))
+		return Error(fmt.Errorf("not: %w", err))
 	}
 
 	if !ok {
-		return internal.Success()
+		return Success()
 	}
 
-	return internal.Mismatch(fmt.Sprintf("!(%s)", reason))
+	return Mismatch(fmt.Sprintf("!(%s)", reason))
 }
 
 // Describe implements descriptor.SelfDescriptive.

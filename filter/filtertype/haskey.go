@@ -8,7 +8,6 @@ import (
 	"github.com/ohler55/ojg/oj"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -26,7 +25,7 @@ func (m *HasKeyMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	case string:
 		data, err := oj.ParseString(vv)
 		if err != nil {
-			return internal.Error(fmt.Errorf("has_key: %s: error parsing incoming json: %w", m.Path, err))
+			return Error(fmt.Errorf("has_key: %s: error parsing incoming json: %w", m.Path, err))
 		}
 
 		results = m.Expr.Get(data)
@@ -36,10 +35,10 @@ func (m *HasKeyMatcher) Match(v any) (bool, vlatte.Reason, error) {
 
 	size := len(results)
 	if size == 0 || (size == 1 && results[0] == nil) {
-		return internal.Mismatch(strings.Join([]string{"HasKey(", m.Path, ") Is not present"}, ""))
+		return Mismatch(strings.Join([]string{"HasKey(", m.Path, ") Is not present"}, ""))
 	}
 
-	return internal.Success()
+	return Success()
 }
 
 // Describe implements descriptor.SelfDescriptive.

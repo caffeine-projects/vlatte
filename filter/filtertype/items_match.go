@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
+	"github.com/caffeine-projects/vlatte/filter/internal/equalutil"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -24,7 +24,7 @@ func (m *ItemsMatchMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	bLen := b.Len()
 
 	if aLen != bLen {
-		return internal.Mismatch(strings.Join(
+		return Mismatch(strings.Join(
 			[]string{"ItemsMatch() Expected value len to be ", strconv.Itoa(aLen), ". Got: ", strconv.Itoa(bLen)},
 			"",
 		))
@@ -43,7 +43,7 @@ func (m *ItemsMatchMatcher) Match(v any) (bool, vlatte.Reason, error) {
 				continue
 			}
 
-			if internal.EqualValues(b.Index(j).Interface(), element, false) {
+			if equalutil.EqualValues(b.Index(j).Interface(), element, false) {
 				visited[j] = true
 				found = true
 				break
@@ -64,10 +64,10 @@ func (m *ItemsMatchMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	}
 
 	if len(extraA) == 0 && len(extraB) == 0 {
-		return internal.Success()
+		return Success()
 	}
 
-	return internal.Mismatch("ItemsMatch() Items doesn't match")
+	return Mismatch("ItemsMatch() Items doesn't match")
 }
 
 // Describe implements descriptor.SelfDescriptive.

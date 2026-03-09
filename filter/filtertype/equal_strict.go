@@ -5,8 +5,7 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
-	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -18,10 +17,10 @@ type EqualStrictMatcher struct {
 // Match implements vlatte.Filter.
 func (m *EqualStrictMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	if reflect.DeepEqual(m.Expected, v) {
-		return internal.Success()
+		return Success()
 	}
 
-	return internal.Mismatch(strings.Join([]string{"StrictEq(", mfmt.Stringify(m.Expected), ") Got: ", mfmt.Stringify(v)}, ""))
+	return Mismatch(strings.Join([]string{"StrictEq(", anyconv.Stringify(m.Expected), ") Got: ", anyconv.Stringify(v)}, ""))
 }
 
 // Describe implements descriptor.SelfDescriptive.

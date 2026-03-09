@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -19,16 +18,16 @@ type XorMatcher struct {
 func (m *XorMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	aOK, aReason, err := m.First.Match(v)
 	if err != nil {
-		return internal.Error(fmt.Errorf("xor: first: %w", err))
+		return Error(fmt.Errorf("xor: first: %w", err))
 	}
 
 	bOK, bReason, err := m.Second.Match(v)
 	if err != nil {
-		return internal.Error(fmt.Errorf("xor: second: %w", err))
+		return Error(fmt.Errorf("xor: second: %w", err))
 	}
 
 	if aOK != bOK {
-		return internal.Success()
+		return Success()
 	}
 
 	var parts []string
@@ -39,7 +38,7 @@ func (m *XorMatcher) Match(v any) (bool, vlatte.Reason, error) {
 		parts = append(parts, string(bReason))
 	}
 
-	return internal.Mismatch(strings.Join([]string{"XOR()", strings.Join(parts, " - ")}, " "))
+	return Mismatch(strings.Join([]string{"XOR()", strings.Join(parts, " - ")}, " "))
 }
 
 // Describe implements descriptor.SelfDescriptive.

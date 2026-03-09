@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
-	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
+	"github.com/caffeine-projects/vlatte/filter/internal/equalutil"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -22,13 +22,13 @@ func (m *ContainsMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	var vValue = reflect.ValueOf(v)
 	var vType = reflect.TypeOf(v)
 	if vType == nil {
-		return internal.Error(errors.New("contains: unknown typeof value"))
+		return Error(errors.New("contains: unknown typeof value"))
 	}
 
 	switch vType.Kind() {
 	case reflect.String:
 		if pass := strings.Contains(vValue.String(), eValue.String()); pass {
-			return internal.Success()
+			return Success()
 		}
 
 		goto ret
@@ -36,8 +36,8 @@ func (m *ContainsMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	case reflect.Map:
 		keys := vValue.MapKeys()
 		for i := 0; i < len(keys); i++ {
-			if internal.EqualValues(keys[i].Interface(), m.Expected, false) {
-				return internal.Success()
+			if equalutil.EqualValues(keys[i].Interface(), m.Expected, false) {
+				return Success()
 			}
 		}
 
@@ -45,14 +45,14 @@ func (m *ContainsMatcher) Match(v any) (bool, vlatte.Reason, error) {
 
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < vValue.Len(); i++ {
-			if internal.EqualValues(vValue.Index(i).Interface(), eValue.Interface(), false) {
-				return internal.Success()
+			if equalutil.EqualValues(vValue.Index(i).Interface(), eValue.Interface(), false) {
+				return Success()
 			}
 		}
 	}
 
 ret:
-	return internal.Mismatch(strings.Join([]string{"Contain(", mfmt.Stringify(m.Expected), ") Got: ", mfmt.Stringify(v)}, ""))
+	return Mismatch(strings.Join([]string{"Contain(", anyconv.Stringify(m.Expected), ") Got: ", anyconv.Stringify(v)}, ""))
 }
 
 // Describe implements descriptor.SelfDescriptive.

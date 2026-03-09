@@ -6,8 +6,7 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
-	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/filter/internal/filterfmt"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -19,18 +18,18 @@ type SomeMatcher struct {
 // Match implements vlatte.Filter.
 func (m *SomeMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	if v == nil {
-		return internal.Mismatch("Some() Expected some values to match but got nil")
+		return Mismatch("Some() Expected some values to match but got nil")
 	}
 
 	typeOfV := reflect.TypeOf(v)
 	kind := typeOfV.Kind()
 	if kind != reflect.Slice && kind != reflect.Array {
-		return internal.Error(fmt.Errorf("some: matcher only works with slices. got: %v", typeOfV))
+		return Error(fmt.Errorf("some: matcher only works with slices. got: %v", typeOfV))
 	}
 
 	vv := reflect.ValueOf(v)
 	if vv.IsZero() {
-		return internal.Mismatch("Some() Expected some values to match but got zero")
+		return Mismatch("Some() Expected some values to match but got zero")
 	}
 
 	length := vv.Len()
@@ -39,19 +38,19 @@ func (m *SomeMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	for i := 0; i < length; i++ {
 		ok, reason, err := m.Matcher.Match(vv.Index(i).Interface())
 		if err != nil {
-			return internal.Error(fmt.Errorf("some: %w", err))
+			return Error(fmt.Errorf("some: %w", err))
 		}
 
 		if ok {
-			return internal.Success()
+			return Success()
 		}
 
 		messages = append(messages, string(reason))
 	}
 
-	return internal.Mismatch(fmt.Sprintf(
+	return Mismatch(fmt.Sprintf(
 		"Some()\n%s",
-		mfmt.Indent(strings.Join(messages, "\n")),
+		filterfmt.Indent(strings.Join(messages, "\n")),
 	))
 }
 

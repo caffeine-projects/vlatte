@@ -4,8 +4,7 @@ import (
 	"reflect"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
-	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -23,19 +22,19 @@ func (m *BePresentMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	switch val.Kind() {
 	case reflect.String, reflect.Array, reflect.Slice, reflect.Map, reflect.Struct, reflect.Interface:
 		if !val.IsZero() {
-			return internal.Success()
+			return Success()
 		}
 
-		return internal.Mismatch("Present() Expected value to be present. Got: " + mfmt.Stringify(v))
+		return Mismatch("Present() Expected value to be present. Got: " + anyconv.Stringify(v))
 	case reflect.Pointer:
 		if !val.IsNil() {
-			return internal.Success()
+			return Success()
 		}
 
-		return internal.Mismatch("Present() Expected value to be present. Got: " + mfmt.Stringify(v))
+		return Mismatch("Present() Expected value to be present. Got: " + anyconv.Stringify(v))
 	}
 
-	return internal.Success()
+	return Success()
 }
 
 // Describe implements descriptor.SelfDescriptive.

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -18,14 +17,14 @@ type HasSuffixMatcher struct {
 func (m *HasSuffixMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
-		return internal.Error(fmt.Errorf("has_suffix: it only works with string type. got %T", v))
+		return Error(fmt.Errorf("has_suffix: it only works with string type. got %T", v))
 	}
 
 	if strings.HasSuffix(txt, m.Suffix) {
-		return internal.Success()
+		return Success()
 	}
 
-	return internal.Mismatch(strings.Join([]string{"HasSuffix(", m.Suffix, ") Prefix is not present. Got: ", txt}, ""))
+	return Mismatch(strings.Join([]string{"HasSuffix(", m.Suffix, ") Prefix is not present. Got: ", txt}, ""))
 }
 
 // Describe implements descriptor.SelfDescriptive.

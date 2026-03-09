@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -19,16 +18,16 @@ type EitherMatcher struct {
 func (m *EitherMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	r1OK, r1Reason, err := m.First.Match(v)
 	if err != nil {
-		return internal.Error(fmt.Errorf("either: first: %w", err))
+		return Error(fmt.Errorf("either: first: %w", err))
 	}
 
 	r2OK, r2Reason, err := m.Second.Match(v)
 	if err != nil {
-		return internal.Error(fmt.Errorf("either: second: %w", err))
+		return Error(fmt.Errorf("either: second: %w", err))
 	}
 
 	if r1OK || r2OK {
-		return internal.Success()
+		return Success()
 	}
 
 	parts := []string{}
@@ -39,7 +38,7 @@ func (m *EitherMatcher) Match(v any) (bool, vlatte.Reason, error) {
 		parts = append(parts, string(r2Reason))
 	}
 
-	return internal.Mismatch(strings.Join([]string{"Either()", strings.Join(parts, " - ")}, " "))
+	return Mismatch(strings.Join([]string{"Either()", strings.Join(parts, " - ")}, " "))
 }
 
 // Describe implements descriptor.SelfDescriptive.

@@ -1,4 +1,4 @@
-package internal
+package filtertype
 
 import "github.com/caffeine-projects/vlatte"
 

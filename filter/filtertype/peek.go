@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
 )
 
 // PeekMatcher runs an action then matches with the inner matcher.
@@ -17,7 +16,7 @@ type PeekMatcher struct {
 func (m *PeekMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	err := m.Action(v)
 	if err != nil {
-		return internal.Error(fmt.Errorf("peek: %w", err))
+		return Error(fmt.Errorf("peek: %w", err))
 	}
 
 	return m.Matcher.Match(v)

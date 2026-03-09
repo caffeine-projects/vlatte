@@ -8,7 +8,6 @@ import (
 	"github.com/ohler55/ojg/oj"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -28,7 +27,7 @@ func (m *JSONPathMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	case string:
 		data, err := oj.ParseString(vv)
 		if err != nil {
-			return internal.Error(fmt.Errorf("field: %s: error parsing json: %w", m.Path, err))
+			return Error(fmt.Errorf("field: %s: error parsing json: %w", m.Path, err))
 		}
 
 		results = m.Expr.Get(data)
@@ -52,14 +51,14 @@ func (m *JSONPathMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	}
 
 	if err != nil {
-		return internal.Error(fmt.Errorf("field: %w", err))
+		return Error(fmt.Errorf("field: %w", err))
 	}
 
 	if ok {
-		return internal.Success()
+		return Success()
 	}
 
-	return internal.Mismatch(strings.Join([]string{"Field(", m.Path, ") value did not match"}, ""))
+	return Mismatch(strings.Join([]string{"Field(", m.Path, ") value did not match"}, ""))
 }
 
 // Describe implements descriptor.SelfDescriptive.

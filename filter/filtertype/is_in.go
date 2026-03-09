@@ -5,7 +5,7 @@ import (
 	"reflect"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
+	"github.com/caffeine-projects/vlatte/filter/internal/equalutil"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -19,18 +19,18 @@ func (m *IsContainedInMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	typeOfItems := reflect.TypeOf(m.Items)
 	kind := typeOfItems.Kind()
 	if kind != reflect.Slice && kind != reflect.Array {
-		return internal.Error(fmt.Errorf("is_in: it only works with slices. got: %v", typeOfItems))
+		return Error(fmt.Errorf("is_in: it only works with slices. got: %v", typeOfItems))
 	}
 
 	valueOf := reflect.ValueOf(m.Items)
 
 	for i := 0; i < valueOf.Len(); i++ {
-		if internal.EqualValues(v, valueOf.Index(i).Interface(), false) {
-			return internal.Success()
+		if equalutil.EqualValues(v, valueOf.Index(i).Interface(), false) {
+			return Success()
 		}
 	}
 
-	return internal.Mismatch(fmt.Sprintf(
+	return Mismatch(fmt.Sprintf(
 		"IsIn() Value %v is not contained in %v",
 		v,
 		m.Items,

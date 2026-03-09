@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -20,10 +19,10 @@ func (m *LenMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	value := reflect.ValueOf(v)
 	actual := value.Len()
 	if actual == m.Length {
-		return internal.Success()
+		return Success()
 	}
 
-	return internal.Mismatch(strings.Join(
+	return Mismatch(strings.Join(
 		[]string{"Len(", strconv.Itoa(m.Length), ") Got: ", strconv.Itoa(actual)},
 		"",
 	))

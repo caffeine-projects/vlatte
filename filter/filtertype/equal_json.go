@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
-	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
+	"github.com/caffeine-projects/vlatte/filter/internal/equalutil"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -27,14 +27,14 @@ func (m *EqualJSONMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	default:
 		expJSON, err = json.Marshal(m.Expected)
 		if err != nil {
-			return internal.Error(fmt.Errorf("equal_json: %w", err))
+			return Error(fmt.Errorf("equal_json: %w", err))
 		}
 	}
 
 	var exp any
 	err = json.Unmarshal(expJSON, &exp)
 	if err != nil {
-		return internal.Error(fmt.Errorf("equal_json: %w", err))
+		return Error(fmt.Errorf("equal_json: %w", err))
 	}
 
 	switch vv := v.(type) {
@@ -42,19 +42,19 @@ func (m *EqualJSONMatcher) Match(v any) (bool, vlatte.Reason, error) {
 		b := new(any)
 		err = json.Unmarshal([]byte(vv), b)
 		if err != nil {
-			return internal.Error(fmt.Errorf("equal_json: %w", err))
+			return Error(fmt.Errorf("equal_json: %w", err))
 		}
 
-		if internal.EqualValues(*b, exp, false) {
-			return internal.Success()
+		if equalutil.EqualValues(*b, exp, false) {
+			return Success()
 		}
 	default:
-		if internal.EqualValues(v, exp, false) {
-			return internal.Success()
+		if equalutil.EqualValues(v, exp, false) {
+			return Success()
 		}
 	}
 
-	return internal.Mismatch(strings.Join([]string{"EqualJSON(", mfmt.Stringify(v), ") Got: ", string(expJSON)}, ""))
+	return Mismatch(strings.Join([]string{"EqualJSON(", anyconv.Stringify(v), ") Got: ", string(expJSON)}, ""))
 }
 
 // Describe implements descriptor.SelfDescriptive.

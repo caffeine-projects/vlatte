@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -18,19 +17,19 @@ type LowerCaseMatcher struct {
 func (m *LowerCaseMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
-		return internal.Error(fmt.Errorf("lower: type %T is not supported. accepted types: string", v))
+		return Error(fmt.Errorf("lower: type %T is not supported. accepted types: string", v))
 	}
 
 	result, _, err := m.Matcher.Match(strings.ToLower(txt))
 	if err != nil {
-		return internal.Error(fmt.Errorf("lower: %w", err))
+		return Error(fmt.Errorf("lower: %w", err))
 	}
 
 	if result {
-		return internal.Success()
+		return Success()
 	}
 
-	return internal.Mismatch("Lower() value did not match")
+	return Mismatch("Lower() value did not match")
 }
 
 // Describe implements descriptor.SelfDescriptive.

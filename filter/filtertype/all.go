@@ -6,8 +6,7 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
-	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/filter/internal/filterfmt"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -31,7 +30,7 @@ func (m *AllOfMatcher) Match(v any) (ok bool, reason vlatte.Reason, err error) {
 		idx = i
 		res, r, err := matcher.Match(v)
 		if err != nil {
-			return internal.Error(fmt.Errorf("all: %d: %w", i, err))
+			return Error(fmt.Errorf("all: %d: %w", i, err))
 		}
 
 		if !res {
@@ -40,11 +39,11 @@ func (m *AllOfMatcher) Match(v any) (ok bool, reason vlatte.Reason, err error) {
 	}
 
 	if len(mismatches) == 0 {
-		return internal.Success()
+		return Success()
 	}
 
-	return internal.Mismatch(strings.Join(
-		[]string{"All(", strconv.Itoa(len(m.Matchers)), ")\n", mfmt.Indent(strings.Join(mismatches, "\n"))},
+	return Mismatch(strings.Join(
+		[]string{"All(", strconv.Itoa(len(m.Matchers)), ")\n", filterfmt.Indent(strings.Join(mismatches, "\n"))},
 		"",
 	))
 }

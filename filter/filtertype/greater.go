@@ -5,9 +5,7 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
-	"github.com/caffeine-projects/vlatte/filter/internal/mconv"
-	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -18,17 +16,17 @@ type GreaterMatcher struct {
 
 // Match implements vlatte.Filter.
 func (m *GreaterMatcher) Match(v any) (bool, vlatte.Reason, error) {
-	vv, err := mconv.ConvToFloat64(v)
+	vv, err := anyconv.ToFloat64(v)
 	if err != nil {
-		return internal.Error(fmt.Errorf(
+		return Error(fmt.Errorf(
 			"gt: type %T is not supported. the value must be compatible with float64. %w", v, err))
 	}
 
 	if vv > m.Expected {
-		return internal.Success()
+		return Success()
 	}
 
-	return internal.Mismatch(strings.Join([]string{"Gt(", mfmt.Stringify(m.Expected), ") Value is ", mfmt.Stringify(v)}, ""))
+	return Mismatch(strings.Join([]string{"Gt(", anyconv.Stringify(m.Expected), ") Value is ", anyconv.Stringify(v)}, ""))
 }
 
 // Describe implements descriptor.SelfDescriptive.

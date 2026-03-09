@@ -2,7 +2,6 @@ package filtertype
 
 import (
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -11,7 +10,7 @@ type AnythingMatcher struct{}
 
 // Match implements vlatte.Filter.
 func (m *AnythingMatcher) Match(_ any) (bool, vlatte.Reason, error) {
-	return internal.Success()
+	return Success()
 }
 
 // Describe implements descriptor.SelfDescriptive.

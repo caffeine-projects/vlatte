@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -22,7 +21,7 @@ type RegExpMatcher struct {
 func (m *RegExpMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
-		return internal.Error(fmt.Errorf("regexp: it only works with string values. got: %T", v))
+		return Error(fmt.Errorf("regexp: it only works with string values. got: %T", v))
 	}
 
 	if m.rg == nil {
@@ -31,7 +30,7 @@ func (m *RegExpMatcher) Match(v any) (bool, vlatte.Reason, error) {
 			r, err := regexp.Compile(m.Expression)
 			if err != nil {
 				m.mu.Unlock()
-				return internal.Error(fmt.Errorf("regexp: error compiling expression %s. %w", m.Expression, err))
+				return Error(fmt.Errorf("regexp: error compiling expression %s. %w", m.Expression, err))
 			}
 
 			m.rg = r
@@ -41,10 +40,10 @@ func (m *RegExpMatcher) Match(v any) (bool, vlatte.Reason, error) {
 
 	match := m.rg.Match([]byte(txt))
 	if match {
-		return internal.Success()
+		return Success()
 	}
 
-	return internal.Mismatch(strings.Join([]string{"Match(", m.Expression, ") Expression did not match. Got: ", txt}, ""))
+	return Mismatch(strings.Join([]string{"Match(", m.Expression, ") Expression did not match. Got: ", txt}, ""))
 }
 
 // Describe implements descriptor.SelfDescriptive.

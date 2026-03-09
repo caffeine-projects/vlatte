@@ -1,26 +1,16 @@
-package mfmt
+package anyconv
 
 import (
 	"fmt"
 	"net/http"
 	"reflect"
-	"regexp"
 	"strconv"
 )
 
-var _indentRegExp = regexp.MustCompile("(?m)^")
-
-func Indent(str string) string {
-	return _indentRegExp.ReplaceAllString(str, " ")
-}
-
-type stringer interface {
-	String() string
-}
-
+// Stringify returns a string representation of v for use in messages.
 func Stringify(v any) string {
 	switch s := v.(type) {
-	case stringer:
+	case fmt.Stringer:
 		return s.String()
 	case []byte:
 		return string(s)
@@ -43,4 +33,23 @@ func Stringify(v any) string {
 	}
 
 	return fmt.Sprintf("%v", v)
+}
+
+func ToFloat64(v any) (float64, error) {
+	switch e := v.(type) {
+	case string:
+		return strconv.ParseFloat(e, 64)
+	case float64:
+		return e, nil
+	case float32:
+		return float64(e), nil
+	case int:
+		return float64(e), nil
+	case int32:
+		return float64(e), nil
+	case int64:
+		return float64(e), nil
+	default:
+		return 0, fmt.Errorf("value cannot be parsed to float64")
+	}
 }

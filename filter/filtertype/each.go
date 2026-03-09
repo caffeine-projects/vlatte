@@ -6,8 +6,7 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
-	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -29,14 +28,14 @@ func (m *EachMatcher) Match(v any) (bool, vlatte.Reason, error) {
 			mv := iterator.Value().Interface()
 			ok, reason, err := m.Matcher.Match(mv)
 			if err != nil {
-				return internal.Error(fmt.Errorf("each: %w", err))
+				return Error(fmt.Errorf("each: %w", err))
 			}
 
 			if !ok {
 				return false, vlatte.Reason(strings.Join(
 					[]string{
 						"Each(",
-						mfmt.Stringify(iterator.Key().Interface()), ":", mfmt.Stringify(mv),
+						anyconv.Stringify(iterator.Key().Interface()), ":", anyconv.Stringify(mv),
 						") ", string(reason),
 					},
 					"",
@@ -44,30 +43,30 @@ func (m *EachMatcher) Match(v any) (bool, vlatte.Reason, error) {
 			}
 		}
 
-		return internal.Success()
+		return Success()
 
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < val.Len(); i++ {
 			entry := val.Index(i).Interface()
 			ok, reason, err := m.Matcher.Match(entry)
 			if err != nil {
-				return internal.Error(fmt.Errorf("each: %w", err))
+				return Error(fmt.Errorf("each: %w", err))
 			}
 
 			if !ok {
 				return false, vlatte.Reason(strings.Join(
 					[]string{
-						"Each(", mfmt.Stringify(entry), ") ", string(reason),
+						"Each(", anyconv.Stringify(entry), ") ", string(reason),
 					},
 					"",
 				)), nil
 			}
 		}
 
-		return internal.Success()
+		return Success()
 	}
 
-	return internal.Error(fmt.Errorf("type %s is not supported. accepted types: map, array", valType.String()))
+	return Error(fmt.Errorf("type %s is not supported. accepted types: map, array", valType.String()))
 }
 
 // Describe implements descriptor.SelfDescriptive.

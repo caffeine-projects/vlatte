@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -21,15 +20,15 @@ func (m *EqualIgnoreCaseMatcher) Match(v any) (bool, vlatte.Reason, error) {
 		var ok bool
 		txt, ok = v.(string)
 		if !ok {
-			return internal.Error(fmt.Errorf("eqi: value must be a string. got: %T", v))
+			return Error(fmt.Errorf("eqi: value must be a string. got: %T", v))
 		}
 	}
 
 	if strings.EqualFold(m.Expected, txt) {
-		return internal.Success()
+		return Success()
 	}
 
-	return internal.Mismatch(strings.Join([]string{"Eqi(", m.Expected, ") Got: ", txt}, ""))
+	return Mismatch(strings.Join([]string{"Eqi(", m.Expected, ") Got: ", txt}, ""))
 }
 
 // Describe implements descriptor.SelfDescriptive.
