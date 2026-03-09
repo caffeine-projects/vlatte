@@ -6,6 +6,6 @@ import (
 )
 
 // Any matches when any of the given matchers pass.
-func Any(matchers ...vlatte.Filter) vlatte.Filter {
+func Any(matchers ...vlatte.Filter) *filtertype.AnyOfMatcher {
 	return &filtertype.AnyOfMatcher{Matchers: matchers}
 }

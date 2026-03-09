@@ -6,6 +6,6 @@ import (
 )
 
 // Each applies the given matcher on all items of the incoming request value.
-func Each(matcher vlatte.Filter) vlatte.Filter {
+func Each(matcher vlatte.Filter) *filtertype.EachMatcher {
 	return &filtertype.EachMatcher{Matcher: matcher}
 }

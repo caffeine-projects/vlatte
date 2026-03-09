@@ -6,6 +6,6 @@ import (
 )
 
 // Some matches when at least one element matches the inner matcher.
-func Some(matcher vlatte.Filter) vlatte.Filter {
+func Some(matcher vlatte.Filter) *filtertype.SomeMatcher {
 	return &filtertype.SomeMatcher{Matcher: matcher}
 }

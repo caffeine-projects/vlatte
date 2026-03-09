@@ -6,6 +6,6 @@ import (
 )
 
 // ToLower lowers the incoming request value case before submitting it to the provided matcher.
-func ToLower(matcher vlatte.Filter) vlatte.Filter {
+func ToLower(matcher vlatte.Filter) *filtertype.LowerCaseMatcher {
 	return &filtertype.LowerCaseMatcher{Matcher: matcher}
 }

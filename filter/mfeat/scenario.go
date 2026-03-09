@@ -1,7 +1,6 @@
 package mfeat
 
 import (
-	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/filtertype"
 )
 
@@ -17,7 +16,7 @@ func NewScenarioStore() *ScenarioStore {
 }
 
 // Scenario returns a filter that matches based on scenario state.
-func Scenario(store *ScenarioStore, name, requiredState, newState string) vlatte.Filter {
+func Scenario(store *ScenarioStore, name, requiredState, newState string) *filtertype.ScenarioMatcher {
 	return &filtertype.ScenarioMatcher{
 		Store:         store,
 		RequiredState: requiredState,

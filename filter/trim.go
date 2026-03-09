@@ -6,6 +6,6 @@ import (
 )
 
 // Trim trims spaces and matches with the inner matcher.
-func Trim(matcher vlatte.Filter) vlatte.Filter {
+func Trim(matcher vlatte.Filter) *filtertype.TrimMatcher {
 	return &filtertype.TrimMatcher{Matcher: matcher}
 }

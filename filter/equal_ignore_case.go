@@ -3,21 +3,20 @@ package filter
 import (
 	"fmt"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/filtertype"
 )
 
 // EqualIgnoreCase compares the expected value with the incoming request value ignoring the case.
-func EqualIgnoreCase(expected string) vlatte.Filter {
+func EqualIgnoreCase(expected string) *filtertype.EqualIgnoreCaseMatcher {
 	return &filtertype.EqualIgnoreCaseMatcher{Expected: expected}
 }
 
 // EqualIgnoreCasef is short-hand to format the expected value.
-func EqualIgnoreCasef(format string, a ...any) vlatte.Filter {
+func EqualIgnoreCasef(format string, a ...any) *filtertype.EqualIgnoreCaseMatcher {
 	return &filtertype.EqualIgnoreCaseMatcher{Expected: fmt.Sprintf(format, a...)}
 }
 
 // Eqi is an alias to EqualIgnoreCase.
-func Eqi(expected string) vlatte.Filter {
+func Eqi(expected string) *filtertype.EqualIgnoreCaseMatcher {
 	return &filtertype.EqualIgnoreCaseMatcher{Expected: expected}
 }

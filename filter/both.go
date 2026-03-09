@@ -6,6 +6,6 @@ import (
 )
 
 // Both matches when both filters pass.
-func Both(first, second vlatte.Filter) vlatte.Filter {
+func Both(first, second vlatte.Filter) *filtertype.BothMatcher {
 	return &filtertype.BothMatcher{First: first, Second: second}
 }

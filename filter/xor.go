@@ -6,6 +6,6 @@ import (
 )
 
 // XOR matches when exactly one of the two filters passes.
-func XOR(first, second vlatte.Filter) vlatte.Filter {
+func XOR(first, second vlatte.Filter) *filtertype.XorMatcher {
 	return &filtertype.XorMatcher{First: first, Second: second}
 }

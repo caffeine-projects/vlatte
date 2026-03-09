@@ -10,7 +10,7 @@ import (
 )
 
 // JSONPath applies the provided matcher to the JSON field value in the given path.
-func JSONPath(path string, matcher vlatte.Filter) vlatte.Filter {
+func JSONPath(path string, matcher vlatte.Filter) *filtertype.JSONPathMatcher {
 	x, err := jp.ParseString(path)
 	if err != nil {
 		panic(fmt.Errorf("the json path expression %s is invalid: %w", path, err))
@@ -24,7 +24,7 @@ func JSONPath(path string, matcher vlatte.Filter) vlatte.Filter {
 }
 
 // Field is an alias for JSONPath.
-func Field(path string, matcher vlatte.Filter) vlatte.Filter {
+func Field(path string, matcher vlatte.Filter) *filtertype.JSONPathMatcher {
 	x, err := jp.ParseString(path)
 	if err != nil {
 		panic(fmt.Errorf("the json path expression %s is invalid: %w", path, err))

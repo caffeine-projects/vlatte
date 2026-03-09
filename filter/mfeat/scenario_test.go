@@ -18,9 +18,9 @@ func TestScenario(t *testing.T) {
 
 	t.Run("should match when state equals required state", func(t *testing.T) {
 		store := NewScenarioStore()
-		_, _, _ = Scenario(store, "s1", ScenarioStateStarted, "second").Match(nil)
-		stateful, _ := Scenario(store, "s1", ScenarioStateStarted, "second").(interface{ SetState() error })
-		_ = stateful.SetState()
+		first := Scenario(store, "s1", ScenarioStateStarted, "second")
+		_, _, _ = first.Match(nil)
+		_ = first.SetState()
 
 		matcher := Scenario(store, "s1", "second", "")
 		ok, _, err := matcher.Match(nil)

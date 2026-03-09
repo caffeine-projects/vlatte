@@ -6,6 +6,6 @@ import (
 )
 
 // Split splits the value by separator and matches with the inner matcher.
-func Split(separator string, matcher vlatte.Filter) vlatte.Filter {
+func Split(separator string, matcher vlatte.Filter) *filtertype.SplitMatcher {
 	return &filtertype.SplitMatcher{Separator: separator, Matcher: matcher}
 }

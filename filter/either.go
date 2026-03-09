@@ -6,6 +6,6 @@ import (
 )
 
 // Either matches when either filter passes.
-func Either(first, second vlatte.Filter) vlatte.Filter {
+func Either(first, second vlatte.Filter) *filtertype.EitherMatcher {
 	return &filtertype.EitherMatcher{First: first, Second: second}
 }

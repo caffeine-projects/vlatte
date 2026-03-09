@@ -275,7 +275,7 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 					}
 
 					all := filter.All(matchers...)
-					keys[e.Key] = all.(descriptor.SelfDescriptive).Describe()
+					keys[e.Key] = (vlatte.Filter(all)).(descriptor.SelfDescriptive).Describe()
 				}
 			}
 
@@ -296,7 +296,7 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 			}
 
 			all := filter.All(matchers...)
-			request[target.FieldName()] = all.(descriptor.SelfDescriptive).Describe()
+			request[target.FieldName()] = (vlatte.Filter(all)).(descriptor.SelfDescriptive).Describe()
 
 		default:
 			for _, e := range expectations {
