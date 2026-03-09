@@ -11,8 +11,8 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// JSONPathMatcher applies the inner matcher to the JSON value at the given path.
-type JSONPathMatcher struct {
+// JSONPath applies the inner matcher to the JSON value at the given path.
+type JSONPath struct {
 	Path    string
 	Expr    jp.Expr
 	Matcher vlatte.Filter
@@ -20,7 +20,7 @@ type JSONPathMatcher struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *JSONPathMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *JSONPath) Match(v any) (bool, vlatte.Reason, error) {
 	var results []any
 
 	switch vv := v.(type) {
@@ -62,6 +62,6 @@ func (m *JSONPathMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *JSONPathMatcher) Describe() descriptor.Descriptor {
+func (m *JSONPath) Describe() descriptor.Descriptor {
 	return descriptor.MultiArgs("jsonPath", m.Path, Describe(m.Matcher))
 }

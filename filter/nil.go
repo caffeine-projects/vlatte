@@ -5,6 +5,6 @@ import (
 )
 
 // IsNil matches when the value is nil.
-func IsNil() *filtertype.NilMatcher {
-	return &filtertype.NilMatcher{}
+func IsNil() *filtertype.Nil {
+	return &filtertype.Nil{}
 }

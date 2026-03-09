@@ -11,13 +11,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// EqualJSONMatcher passes when the value equals the expected JSON value.
-type EqualJSONMatcher struct {
+// EqualJSON passes when the value equals the expected JSON value.
+type EqualJSON struct {
 	Expected any
 }
 
 // Match implements vlatte.Filter.
-func (m *EqualJSONMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *EqualJSON) Match(v any) (bool, vlatte.Reason, error) {
 	var expJSON []byte
 	var err error
 
@@ -58,6 +58,6 @@ func (m *EqualJSONMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *EqualJSONMatcher) Describe() descriptor.Descriptor {
+func (m *EqualJSON) Describe() descriptor.Descriptor {
 	return descriptor.MultiArgs("eqj", m.Expected)
 }

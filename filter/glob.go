@@ -5,6 +5,6 @@ import (
 )
 
 // GlobMatch matches the value against a glob pattern.
-func GlobMatch(pattern string) *filtertype.GlobMatcher {
-	return &filtertype.GlobMatcher{Pattern: pattern}
+func GlobMatch(pattern string) *filtertype.Glob {
+	return &filtertype.Glob{Pattern: pattern}
 }

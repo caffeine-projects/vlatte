@@ -9,16 +9,16 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// EmptyMatcher passes when the value is empty or has zero length.
-type EmptyMatcher struct{}
+// Empty passes when the value is empty or has zero length.
+type Empty struct{}
 
 // Match implements vlatte.Filter.
-func (m *EmptyMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Empty) Match(v any) (bool, vlatte.Reason, error) {
 	if v == nil {
 		return Success()
 	}
 
-	lenMatcher := &LenMatcher{Length: 0}
+	lenMatcher := &Len{Length: 0}
 	ok, _, err := lenMatcher.Match(v)
 	if err != nil {
 		return Error(fmt.Errorf("empty: %w", err))
@@ -32,6 +32,6 @@ func (m *EmptyMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *EmptyMatcher) Describe() descriptor.Descriptor {
+func (m *Empty) Describe() descriptor.Descriptor {
 	return descriptor.KeyOnly("empty")
 }

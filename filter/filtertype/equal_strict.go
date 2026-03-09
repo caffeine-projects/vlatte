@@ -9,13 +9,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// EqualStrictMatcher passes when the value strictly equals the expected (reflect.DeepEqual).
-type EqualStrictMatcher struct {
+// EqualStrict passes when the value strictly equals the expected (reflect.DeepEqual).
+type EqualStrict struct {
 	Expected any
 }
 
 // Match implements vlatte.Filter.
-func (m *EqualStrictMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *EqualStrict) Match(v any) (bool, vlatte.Reason, error) {
 	if reflect.DeepEqual(m.Expected, v) {
 		return Success()
 	}
@@ -24,6 +24,6 @@ func (m *EqualStrictMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *EqualStrictMatcher) Describe() descriptor.Descriptor {
+func (m *EqualStrict) Describe() descriptor.Descriptor {
 	return descriptor.MultiArgs("eqs", m.Expected)
 }

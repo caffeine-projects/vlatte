@@ -9,13 +9,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// URLPathMatcher applies the inner matcher to the URL path of the value.
-type URLPathMatcher struct {
+// URLPath applies the inner matcher to the URL path of the value.
+type URLPath struct {
 	Matcher vlatte.Filter
 }
 
 // Match implements vlatte.Filter.
-func (m *URLPathMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *URLPath) Match(v any) (bool, vlatte.Reason, error) {
 	var value string
 
 	switch e := v.(type) {
@@ -54,6 +54,6 @@ func (m *URLPathMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *URLPathMatcher) Describe() descriptor.Descriptor {
+func (m *URLPath) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("urlPath", Describe(m.Matcher))
 }

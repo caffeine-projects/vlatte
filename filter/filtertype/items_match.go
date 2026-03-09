@@ -10,13 +10,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// ItemsMatchMatcher passes when the value slice has the same elements as expected (order-independent).
-type ItemsMatchMatcher struct {
+// ItemsMatch passes when the value slice has the same elements as expected (order-independent).
+type ItemsMatch struct {
 	Expected any
 }
 
 // Match implements vlatte.Filter.
-func (m *ItemsMatchMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *ItemsMatch) Match(v any) (bool, vlatte.Reason, error) {
 	a := reflect.ValueOf(v)
 	b := reflect.ValueOf(m.Expected)
 
@@ -71,6 +71,6 @@ func (m *ItemsMatchMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *ItemsMatchMatcher) Describe() descriptor.Descriptor {
+func (m *ItemsMatch) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("itemsMatch", m.Expected)
 }

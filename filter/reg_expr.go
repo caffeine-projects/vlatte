@@ -5,6 +5,6 @@ import (
 )
 
 // Matches matches the value against a regular expression.
-func Matches(expression string) *filtertype.RegExpMatcher {
-	return &filtertype.RegExpMatcher{Expression: expression}
+func Matches(expression string) *filtertype.RegExp {
+	return &filtertype.RegExp{Expression: expression}
 }

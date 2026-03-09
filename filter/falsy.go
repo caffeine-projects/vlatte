@@ -5,6 +5,6 @@ import (
 )
 
 // Falsy checks if the incoming request value is false.
-func Falsy() *filtertype.FalsyMatcher {
-	return &filtertype.FalsyMatcher{}
+func Falsy() *filtertype.Falsy {
+	return &filtertype.Falsy{}
 }

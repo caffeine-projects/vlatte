@@ -5,6 +5,6 @@ import (
 )
 
 // Truthy checks if the incoming request value is true.
-func Truthy() *filtertype.TruthyMatcher {
-	return &filtertype.TruthyMatcher{}
+func Truthy() *filtertype.Truthy {
+	return &filtertype.Truthy{}
 }

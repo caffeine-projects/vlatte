@@ -9,13 +9,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// GreaterMatcher passes if the value is greater than the expected value.
-type GreaterMatcher struct {
+// Greater passes if the value is greater than the expected value.
+type Greater struct {
 	Expected float64
 }
 
 // Match implements vlatte.Filter.
-func (m *GreaterMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Greater) Match(v any) (bool, vlatte.Reason, error) {
 	vv, err := anyconv.ToFloat64(v)
 	if err != nil {
 		return Error(fmt.Errorf(
@@ -30,6 +30,6 @@ func (m *GreaterMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *GreaterMatcher) Describe() descriptor.Descriptor {
+func (m *Greater) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("gt", m.Expected)
 }

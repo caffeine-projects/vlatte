@@ -10,13 +10,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// EachMatcher applies the inner matcher to all items of the value (map/slice).
-type EachMatcher struct {
+// Each applies the inner matcher to all items of the value (map/slice).
+type Each struct {
 	Matcher vlatte.Filter
 }
 
 // Match implements vlatte.Filter.
-func (m *EachMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Each) Match(v any) (bool, vlatte.Reason, error) {
 	var val = reflect.ValueOf(v)
 	var valType = reflect.TypeOf(v).Kind()
 
@@ -70,7 +70,7 @@ func (m *EachMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *EachMatcher) Describe() descriptor.Descriptor {
+func (m *Each) Describe() descriptor.Descriptor {
 	if desc, ok := descriptor.IsSelfDescriptive(m.Matcher); ok {
 		return descriptor.MultiArgs("each", desc)
 	}

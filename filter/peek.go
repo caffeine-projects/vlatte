@@ -6,6 +6,6 @@ import (
 )
 
 // Peek runs an action on the value then matches with the inner matcher.
-func Peek(matcher vlatte.Filter, action func(v any) error) *filtertype.PeekMatcher {
-	return &filtertype.PeekMatcher{Matcher: matcher, Action: action}
+func Peek(matcher vlatte.Filter, action func(v any) error) *filtertype.Peek {
+	return &filtertype.Peek{Matcher: matcher, Action: action}
 }

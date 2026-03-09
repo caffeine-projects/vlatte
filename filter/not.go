@@ -6,6 +6,6 @@ import (
 )
 
 // Not inverts the result of the given matcher.
-func Not(matcher vlatte.Filter) *filtertype.NotMatcher {
-	return &filtertype.NotMatcher{Matcher: matcher}
+func Not(matcher vlatte.Filter) *filtertype.Not {
+	return &filtertype.Not{Matcher: matcher}
 }

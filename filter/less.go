@@ -5,11 +5,11 @@ import (
 )
 
 // LessThan passes if the value is lower than the given value.
-func LessThan(expected float64) *filtertype.LessMatcher {
-	return &filtertype.LessMatcher{Expected: expected}
+func LessThan(expected float64) *filtertype.Less {
+	return &filtertype.Less{Expected: expected}
 }
 
 // Lt is an alias for LessThan.
-func Lt(expected float64) *filtertype.LessMatcher {
-	return &filtertype.LessMatcher{Expected: expected}
+func Lt(expected float64) *filtertype.Less {
+	return &filtertype.Less{Expected: expected}
 }

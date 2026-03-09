@@ -5,11 +5,11 @@ import (
 )
 
 // LessThanOrEqual passes if the value is lower than or equal to the given value.
-func LessThanOrEqual(expected float64) *filtertype.LessOrEqualMatcher {
-	return &filtertype.LessOrEqualMatcher{Expected: expected}
+func LessThanOrEqual(expected float64) *filtertype.LessOrEqual {
+	return &filtertype.LessOrEqual{Expected: expected}
 }
 
 // Lte is an alias for LessThanOrEqual.
-func Lte(expected float64) *filtertype.LessOrEqualMatcher {
-	return &filtertype.LessOrEqualMatcher{Expected: expected}
+func Lte(expected float64) *filtertype.LessOrEqual {
+	return &filtertype.LessOrEqual{Expected: expected}
 }

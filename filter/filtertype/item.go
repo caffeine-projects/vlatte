@@ -10,14 +10,14 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// ItemMatcher matches a specific array/slice item with the inner matcher.
-type ItemMatcher struct {
+// Item matches a specific array/slice item with the inner matcher.
+type Item struct {
 	Index   int
 	Matcher vlatte.Filter
 }
 
 // Match implements vlatte.Filter.
-func (m *ItemMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Item) Match(v any) (bool, vlatte.Reason, error) {
 	if m.Index < 0 {
 		return Error(fmt.Errorf("item: index must greater or equal to 0. got %d", m.Index))
 	}
@@ -46,6 +46,6 @@ func (m *ItemMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *ItemMatcher) Describe() descriptor.Descriptor {
+func (m *Item) Describe() descriptor.Descriptor {
 	return descriptor.MultiArgs("item", m.Index, Describe(m.Matcher))
 }

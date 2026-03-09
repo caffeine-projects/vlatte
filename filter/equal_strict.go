@@ -7,16 +7,16 @@ import (
 )
 
 // StrictEqual strictly compares the expected value with incoming request values.
-func StrictEqual(expected any) *filtertype.EqualStrictMatcher {
-	return &filtertype.EqualStrictMatcher{Expected: expected}
+func StrictEqual(expected any) *filtertype.EqualStrict {
+	return &filtertype.EqualStrict{Expected: expected}
 }
 
 // StrictEqualf is short-hand to format the expected value.
-func StrictEqualf(format string, a ...any) *filtertype.EqualStrictMatcher {
-	return &filtertype.EqualStrictMatcher{Expected: fmt.Sprintf(format, a...)}
+func StrictEqualf(format string, a ...any) *filtertype.EqualStrict {
+	return &filtertype.EqualStrict{Expected: fmt.Sprintf(format, a...)}
 }
 
 // Eqs is an alias for StrictEqual.
-func Eqs(expected any) *filtertype.EqualStrictMatcher {
-	return &filtertype.EqualStrictMatcher{Expected: expected}
+func Eqs(expected any) *filtertype.EqualStrict {
+	return &filtertype.EqualStrict{Expected: expected}
 }

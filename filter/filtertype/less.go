@@ -9,13 +9,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// LessMatcher passes if the value is less than the expected value.
-type LessMatcher struct {
+// Less passes if the value is less than the expected value.
+type Less struct {
 	Expected float64
 }
 
 // Match implements vlatte.Filter.
-func (m *LessMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Less) Match(v any) (bool, vlatte.Reason, error) {
 	vv, err := anyconv.ToFloat64(v)
 	if err != nil {
 		return Error(fmt.Errorf("lt: type %T is not supported. value must be compatible with float64. %w", v, err))
@@ -29,6 +29,6 @@ func (m *LessMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *LessMatcher) Describe() descriptor.Descriptor {
+func (m *Less) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("lt", m.Expected)
 }

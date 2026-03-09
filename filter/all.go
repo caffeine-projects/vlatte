@@ -6,6 +6,6 @@ import (
 )
 
 // All matches when all the given matchers pass.
-func All(matchers ...vlatte.Filter) *filtertype.AllOfMatcher {
-	return &filtertype.AllOfMatcher{Matchers: matchers}
+func All(matchers ...vlatte.Filter) *filtertype.AllOf {
+	return &filtertype.AllOf{Matchers: matchers}
 }

@@ -8,13 +8,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// EqualIgnoreCaseMatcher passes when the string value equals expected ignoring case.
-type EqualIgnoreCaseMatcher struct {
+// EqualIgnoreCase passes when the string value equals expected ignoring case.
+type EqualIgnoreCase struct {
 	Expected string
 }
 
 // Match implements vlatte.Filter.
-func (m *EqualIgnoreCaseMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *EqualIgnoreCase) Match(v any) (bool, vlatte.Reason, error) {
 	txt := ""
 	if v != nil {
 		var ok bool
@@ -32,6 +32,6 @@ func (m *EqualIgnoreCaseMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *EqualIgnoreCaseMatcher) Describe() descriptor.Descriptor {
+func (m *EqualIgnoreCase) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("eqi", m.Expected)
 }

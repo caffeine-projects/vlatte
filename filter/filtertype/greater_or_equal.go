@@ -9,13 +9,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// GreaterOrEqualMatcher passes if the value is greater than or equal to the expected value.
-type GreaterOrEqualMatcher struct {
+// GreaterOrEqual passes if the value is greater than or equal to the expected value.
+type GreaterOrEqual struct {
 	Expected float64
 }
 
 // Match implements vlatte.Filter.
-func (m *GreaterOrEqualMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *GreaterOrEqual) Match(v any) (bool, vlatte.Reason, error) {
 	vv, err := anyconv.ToFloat64(v)
 	if err != nil {
 		return Error(fmt.Errorf(
@@ -33,6 +33,6 @@ func (m *GreaterOrEqualMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *GreaterOrEqualMatcher) Describe() descriptor.Descriptor {
+func (m *GreaterOrEqual) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("gte", m.Expected)
 }

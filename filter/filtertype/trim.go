@@ -8,13 +8,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// TrimMatcher trims spaces and matches with the inner matcher.
-type TrimMatcher struct {
+// Trim trims spaces and matches with the inner matcher.
+type Trim struct {
 	Matcher vlatte.Filter
 }
 
 // Match implements vlatte.Filter.
-func (m *TrimMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Trim) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
 		return Error(fmt.Errorf("trim: type %T is not supported. accepted types: string", v))
@@ -33,6 +33,6 @@ func (m *TrimMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *TrimMatcher) Describe() descriptor.Descriptor {
+func (m *Trim) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("trim", Describe(m.Matcher))
 }

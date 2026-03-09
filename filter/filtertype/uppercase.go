@@ -8,13 +8,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// UpperCaseMatcher uppercases the value and matches with the inner matcher.
-type UpperCaseMatcher struct {
+// UpperCase uppercases the value and matches with the inner matcher.
+type UpperCase struct {
 	Matcher vlatte.Filter
 }
 
 // Match implements vlatte.Filter.
-func (m *UpperCaseMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *UpperCase) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
 		return Error(fmt.Errorf("upper: type %T is not supported. accepted types: string", v))
@@ -33,6 +33,6 @@ func (m *UpperCaseMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *UpperCaseMatcher) Describe() descriptor.Descriptor {
+func (m *UpperCase) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("uppercase", Describe(m.Matcher))
 }

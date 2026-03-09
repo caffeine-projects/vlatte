@@ -8,13 +8,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// HasPrefixMatcher passes if the value starts with the given prefix.
-type HasPrefixMatcher struct {
+// HasPrefix passes if the value starts with the given prefix.
+type HasPrefix struct {
 	Prefix string
 }
 
 // Match implements vlatte.Filter.
-func (m *HasPrefixMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *HasPrefix) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
 		return Error(fmt.Errorf("has_prefix: it only works with string type. got %T", v))
@@ -27,6 +27,6 @@ func (m *HasPrefixMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *HasPrefixMatcher) Describe() descriptor.Descriptor {
+func (m *HasPrefix) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("hasPrefix", m.Prefix)
 }

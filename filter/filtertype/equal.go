@@ -9,13 +9,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// EqualMatcher passes when the value equals the expected value (lenient comparison).
-type EqualMatcher struct {
+// Equal passes when the value equals the expected value (lenient comparison).
+type Equal struct {
 	Expected any
 }
 
 // Match implements vlatte.Filter.
-func (m *EqualMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Equal) Match(v any) (bool, vlatte.Reason, error) {
 	if equalutil.EqualValues(m.Expected, v, true) {
 		return Success()
 	}
@@ -24,6 +24,6 @@ func (m *EqualMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *EqualMatcher) Describe() descriptor.Descriptor {
+func (m *Equal) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("eq", m.Expected)
 }

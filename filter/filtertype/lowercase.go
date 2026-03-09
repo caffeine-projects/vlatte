@@ -8,13 +8,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// LowerCaseMatcher lowercases the value and matches with the inner matcher.
-type LowerCaseMatcher struct {
+// LowerCase lowercases the value and matches with the inner matcher.
+type LowerCase struct {
 	Matcher vlatte.Filter
 }
 
 // Match implements vlatte.Filter.
-func (m *LowerCaseMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *LowerCase) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
 		return Error(fmt.Errorf("lower: type %T is not supported. accepted types: string", v))
@@ -33,6 +33,6 @@ func (m *LowerCaseMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *LowerCaseMatcher) Describe() descriptor.Descriptor {
+func (m *LowerCase) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("lowercase", Describe(m.Matcher))
 }

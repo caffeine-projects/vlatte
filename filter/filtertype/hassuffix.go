@@ -8,13 +8,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// HasSuffixMatcher passes when the value ends with the given suffix.
-type HasSuffixMatcher struct {
+// HasSuffix passes when the value ends with the given suffix.
+type HasSuffix struct {
 	Suffix string
 }
 
 // Match implements vlatte.Filter.
-func (m *HasSuffixMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *HasSuffix) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
 		return Error(fmt.Errorf("has_suffix: it only works with string type. got %T", v))
@@ -28,6 +28,6 @@ func (m *HasSuffixMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *HasSuffixMatcher) Describe() descriptor.Descriptor {
+func (m *HasSuffix) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("hasSuffix", m.Suffix)
 }

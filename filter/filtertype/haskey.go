@@ -11,14 +11,14 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// HasKeyMatcher passes if the JSON key at the given path is present.
-type HasKeyMatcher struct {
+// HasKey passes if the JSON key at the given path is present.
+type HasKey struct {
 	Path string
 	Expr jp.Expr
 }
 
 // Match implements vlatte.Filter.
-func (m *HasKeyMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *HasKey) Match(v any) (bool, vlatte.Reason, error) {
 	var results []any
 
 	switch vv := v.(type) {
@@ -42,6 +42,6 @@ func (m *HasKeyMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *HasKeyMatcher) Describe() descriptor.Descriptor {
+func (m *HasKey) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("hasKey", m.Path)
 }

@@ -8,16 +8,16 @@ import (
 
 // Equal asserts that the given expectation is equal to the incoming request value.
 // It considers equivalent value. Eg.: float64(10) is equal to int(10).
-func Equal(expected any) *filtertype.EqualMatcher {
-	return &filtertype.EqualMatcher{Expected: expected}
+func Equal(expected any) *filtertype.Equal {
+	return &filtertype.Equal{Expected: expected}
 }
 
 // Equalf returns true if the matcher value is equal to the given parameter value.
-func Equalf(format string, a ...any) *filtertype.EqualMatcher {
-	return &filtertype.EqualMatcher{Expected: fmt.Sprintf(format, a...)}
+func Equalf(format string, a ...any) *filtertype.Equal {
+	return &filtertype.Equal{Expected: fmt.Sprintf(format, a...)}
 }
 
 // Eq is an alias to Equal.
-func Eq(expected any) *filtertype.EqualMatcher {
-	return &filtertype.EqualMatcher{Expected: expected}
+func Eq(expected any) *filtertype.Equal {
+	return &filtertype.Equal{Expected: expected}
 }

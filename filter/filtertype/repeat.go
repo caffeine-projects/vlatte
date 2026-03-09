@@ -9,14 +9,14 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// RepeatMatcher passes until the max number of matches is reached (stateful).
-type RepeatMatcher struct {
+// Repeat passes until the max number of matches is reached (stateful).
+type Repeat struct {
 	Max  int64
 	hits int64
 }
 
 // Match implements vlatte.Filter.
-func (m *RepeatMatcher) Match(_ any) (bool, vlatte.Reason, error) {
+func (m *Repeat) Match(_ any) (bool, vlatte.Reason, error) {
 	if atomic.LoadInt64(&m.hits) < m.Max {
 		return true, vlatte.Reason(""), nil
 	}
@@ -29,12 +29,12 @@ func (m *RepeatMatcher) Match(_ any) (bool, vlatte.Reason, error) {
 }
 
 // SetState implements vlatte.Stateful.
-func (m *RepeatMatcher) SetState() error {
+func (m *Repeat) SetState() error {
 	atomic.AddInt64(&m.hits, 1)
 	return nil
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *RepeatMatcher) Describe() descriptor.Descriptor {
+func (m *Repeat) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("repeat", m.Max)
 }

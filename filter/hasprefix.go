@@ -5,6 +5,6 @@ import (
 )
 
 // HasPrefix matches when the value has the given prefix.
-func HasPrefix(prefix string) *filtertype.HasPrefixMatcher {
-	return &filtertype.HasPrefixMatcher{Prefix: prefix}
+func HasPrefix(prefix string) *filtertype.HasPrefix {
+	return &filtertype.HasPrefix{Prefix: prefix}
 }

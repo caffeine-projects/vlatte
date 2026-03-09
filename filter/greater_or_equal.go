@@ -5,11 +5,11 @@ import (
 )
 
 // GreaterThanOrEqual passes if the value is greater than or equal to the given value.
-func GreaterThanOrEqual(expected float64) *filtertype.GreaterOrEqualMatcher {
-	return &filtertype.GreaterOrEqualMatcher{Expected: expected}
+func GreaterThanOrEqual(expected float64) *filtertype.GreaterOrEqual {
+	return &filtertype.GreaterOrEqual{Expected: expected}
 }
 
 // Gte is an alias for GreaterThanOrEqual.
-func Gte(expected float64) *filtertype.GreaterOrEqualMatcher {
-	return &filtertype.GreaterOrEqualMatcher{Expected: expected}
+func Gte(expected float64) *filtertype.GreaterOrEqual {
+	return &filtertype.GreaterOrEqual{Expected: expected}
 }

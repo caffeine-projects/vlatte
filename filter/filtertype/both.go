@@ -8,14 +8,14 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// BothMatcher passes when both inner matchers pass.
-type BothMatcher struct {
+// Both passes when both inner matchers pass.
+type Both struct {
 	First  vlatte.Filter
 	Second vlatte.Filter
 }
 
 // Match implements vlatte.Filter.
-func (m *BothMatcher) Match(value any) (bool, vlatte.Reason, error) {
+func (m *Both) Match(value any) (bool, vlatte.Reason, error) {
 	r1OK, r1Reason, err := m.First.Match(value)
 	if err != nil {
 		return Error(fmt.Errorf("both: first: %w", err))
@@ -43,6 +43,6 @@ func (m *BothMatcher) Match(value any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *BothMatcher) Describe() descriptor.Descriptor {
+func (m *Both) Describe() descriptor.Descriptor {
 	return descriptor.MultiArgs("both", Describe(m.First), Describe(m.Second))
 }

@@ -10,13 +10,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// GlobMatcher passes when the value matches the glob pattern.
-type GlobMatcher struct {
+// Glob passes when the value matches the glob pattern.
+type Glob struct {
 	Pattern string
 }
 
 // Match implements vlatte.Filter.
-func (m *GlobMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Glob) Match(v any) (bool, vlatte.Reason, error) {
 	text, ok := v.(string)
 	if !ok {
 		return Error(fmt.Errorf("glob: it only works with string types. got %T", v))
@@ -30,6 +30,6 @@ func (m *GlobMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *GlobMatcher) Describe() descriptor.Descriptor {
+func (m *Glob) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("glob", m.Pattern)
 }

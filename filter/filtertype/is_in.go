@@ -9,13 +9,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// IsContainedInMatcher passes when the value is contained in the items slice.
-type IsContainedInMatcher struct {
+// IsContainedIn passes when the value is contained in the items slice.
+type IsContainedIn struct {
 	Items any
 }
 
 // Match implements vlatte.Filter.
-func (m *IsContainedInMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *IsContainedIn) Match(v any) (bool, vlatte.Reason, error) {
 	typeOfItems := reflect.TypeOf(m.Items)
 	kind := typeOfItems.Kind()
 	if kind != reflect.Slice && kind != reflect.Array {
@@ -38,6 +38,6 @@ func (m *IsContainedInMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *IsContainedInMatcher) Describe() descriptor.Descriptor {
+func (m *IsContainedIn) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("isIn", m.Items)
 }

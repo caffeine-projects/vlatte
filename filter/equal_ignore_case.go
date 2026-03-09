@@ -7,16 +7,16 @@ import (
 )
 
 // EqualIgnoreCase compares the expected value with the incoming request value ignoring the case.
-func EqualIgnoreCase(expected string) *filtertype.EqualIgnoreCaseMatcher {
-	return &filtertype.EqualIgnoreCaseMatcher{Expected: expected}
+func EqualIgnoreCase(expected string) *filtertype.EqualIgnoreCase {
+	return &filtertype.EqualIgnoreCase{Expected: expected}
 }
 
 // EqualIgnoreCasef is short-hand to format the expected value.
-func EqualIgnoreCasef(format string, a ...any) *filtertype.EqualIgnoreCaseMatcher {
-	return &filtertype.EqualIgnoreCaseMatcher{Expected: fmt.Sprintf(format, a...)}
+func EqualIgnoreCasef(format string, a ...any) *filtertype.EqualIgnoreCase {
+	return &filtertype.EqualIgnoreCase{Expected: fmt.Sprintf(format, a...)}
 }
 
 // Eqi is an alias to EqualIgnoreCase.
-func Eqi(expected string) *filtertype.EqualIgnoreCaseMatcher {
-	return &filtertype.EqualIgnoreCaseMatcher{Expected: expected}
+func Eqi(expected string) *filtertype.EqualIgnoreCase {
+	return &filtertype.EqualIgnoreCase{Expected: expected}
 }

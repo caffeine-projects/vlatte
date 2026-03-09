@@ -5,11 +5,11 @@ import (
 )
 
 // EqualJSON matches JSON values.
-func EqualJSON(expected any) *filtertype.EqualJSONMatcher {
-	return &filtertype.EqualJSONMatcher{Expected: expected}
+func EqualJSON(expected any) *filtertype.EqualJSON {
+	return &filtertype.EqualJSON{Expected: expected}
 }
 
 // Eqj is an alias for EqualJSON.
-func Eqj(expected any) *filtertype.EqualJSONMatcher {
-	return &filtertype.EqualJSONMatcher{Expected: expected}
+func Eqj(expected any) *filtertype.EqualJSON {
+	return &filtertype.EqualJSON{Expected: expected}
 }

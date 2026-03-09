@@ -6,6 +6,6 @@ import (
 )
 
 // Item matches a specific array/slice item with the inner matcher.
-func Item(index int, matcher vlatte.Filter) *filtertype.ItemMatcher {
-	return &filtertype.ItemMatcher{Index: index, Matcher: matcher}
+func Item(index int, matcher vlatte.Filter) *filtertype.Item {
+	return &filtertype.Item{Index: index, Matcher: matcher}
 }

@@ -8,11 +8,11 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// BePresentMatcher passes when the value is present (not nil and not zero).
-type BePresentMatcher struct{}
+// BePresent passes when the value is present (not nil and not zero).
+type BePresent struct{}
 
 // Match implements vlatte.Filter.
-func (m *BePresentMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *BePresent) Match(v any) (bool, vlatte.Reason, error) {
 	if v == nil {
 		return false, vlatte.Reason("Present() value is nil"), nil
 	}
@@ -38,6 +38,6 @@ func (m *BePresentMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *BePresentMatcher) Describe() descriptor.Descriptor {
+func (m *BePresent) Describe() descriptor.Descriptor {
 	return descriptor.KeyOnly("present")
 }

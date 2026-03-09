@@ -8,14 +8,14 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// EitherMatcher passes when either of the two matchers pass.
-type EitherMatcher struct {
+// Either passes when either of the two matchers pass.
+type Either struct {
 	First  vlatte.Filter
 	Second vlatte.Filter
 }
 
 // Match implements vlatte.Filter.
-func (m *EitherMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Either) Match(v any) (bool, vlatte.Reason, error) {
 	r1OK, r1Reason, err := m.First.Match(v)
 	if err != nil {
 		return Error(fmt.Errorf("either: first: %w", err))
@@ -42,6 +42,6 @@ func (m *EitherMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *EitherMatcher) Describe() descriptor.Descriptor {
+func (m *Either) Describe() descriptor.Descriptor {
 	return descriptor.MultiArgs("either", Describe(m.First), Describe(m.Second))
 }

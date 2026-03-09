@@ -5,6 +5,6 @@ import (
 )
 
 // Repeat returns a filter that passes until the max number of matches is reached.
-func Repeat(times int64) *filtertype.RepeatMatcher {
-	return &filtertype.RepeatMatcher{Max: times}
+func Repeat(times int64) *filtertype.Repeat {
+	return &filtertype.Repeat{Max: times}
 }

@@ -5,6 +5,6 @@ import (
 )
 
 // Empty matches when the value is empty (slice, map, or string).
-func Empty() *filtertype.EmptyMatcher {
-	return &filtertype.EmptyMatcher{}
+func Empty() *filtertype.Empty {
+	return &filtertype.Empty{}
 }

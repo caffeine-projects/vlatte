@@ -8,11 +8,11 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// FalsyMatcher passes when the value is false.
-type FalsyMatcher struct{}
+// Falsy passes when the value is false.
+type Falsy struct{}
 
 // Match implements vlatte.Filter.
-func (m *FalsyMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Falsy) Match(v any) (bool, vlatte.Reason, error) {
 	var b bool
 	var err error
 
@@ -37,6 +37,6 @@ func (m *FalsyMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *FalsyMatcher) Describe() descriptor.Descriptor {
+func (m *Falsy) Describe() descriptor.Descriptor {
 	return descriptor.KeyOnly("falsy")
 }

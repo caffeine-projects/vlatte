@@ -5,6 +5,6 @@ import (
 )
 
 // HasSuffix matches when the value has the given suffix.
-func HasSuffix(suffix string) *filtertype.HasSuffixMatcher {
-	return &filtertype.HasSuffixMatcher{Suffix: suffix}
+func HasSuffix(suffix string) *filtertype.HasSuffix {
+	return &filtertype.HasSuffix{Suffix: suffix}
 }

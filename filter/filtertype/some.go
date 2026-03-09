@@ -10,13 +10,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// SomeMatcher passes when at least one element matches the inner matcher.
-type SomeMatcher struct {
+// Some passes when at least one element matches the inner matcher.
+type Some struct {
 	Matcher vlatte.Filter
 }
 
 // Match implements vlatte.Filter.
-func (m *SomeMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Some) Match(v any) (bool, vlatte.Reason, error) {
 	if v == nil {
 		return Mismatch("Some() Expected some values to match but got nil")
 	}
@@ -55,6 +55,6 @@ func (m *SomeMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *SomeMatcher) Describe() descriptor.Descriptor {
+func (m *Some) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("some", Describe(m.Matcher))
 }

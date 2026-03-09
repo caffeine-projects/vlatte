@@ -5,6 +5,6 @@ import (
 )
 
 // Anything is an empty matcher that always passes.
-func Anything() *filtertype.AnythingMatcher {
-	return &filtertype.AnythingMatcher{}
+func Anything() *filtertype.Anything {
+	return &filtertype.Anything{}
 }

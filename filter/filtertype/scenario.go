@@ -7,8 +7,8 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// ScenarioMatcher matches based on scenario state (stateful).
-type ScenarioMatcher struct {
+// Scenario matches based on scenario state (stateful).
+type Scenario struct {
 	Store         *ScenarioStore
 	RequiredState string
 	NewState      string
@@ -16,7 +16,7 @@ type ScenarioMatcher struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *ScenarioMatcher) Match(_ any) (bool, vlatte.Reason, error) {
+func (m *Scenario) Match(_ any) (bool, vlatte.Reason, error) {
 	if m.RequiredState == ScenarioStateStarted {
 		scenarioRmu.Lock()
 		m.Store.createNewIfNeeded(m.Name)
@@ -43,7 +43,7 @@ func (m *ScenarioMatcher) Match(_ any) (bool, vlatte.Reason, error) {
 }
 
 // SetState implements vlatte.Stateful.
-func (m *ScenarioMatcher) SetState() error {
+func (m *Scenario) SetState() error {
 	scenarioRmu.RLock()
 	scn, ok := m.Store.fetchByName(m.Name)
 	scenarioRmu.RUnlock()
@@ -61,7 +61,7 @@ func (m *ScenarioMatcher) SetState() error {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *ScenarioMatcher) Describe() descriptor.Descriptor {
+func (m *Scenario) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("scenario", map[string]any{
 		"name":           m.Name,
 		"required_state": m.RequiredState,

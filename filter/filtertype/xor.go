@@ -8,14 +8,14 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// XorMatcher is an exclusive OR matcher.
-type XorMatcher struct {
+// Xor is an exclusive OR matcher.
+type Xor struct {
 	First  vlatte.Filter
 	Second vlatte.Filter
 }
 
 // Match implements vlatte.Filter.
-func (m *XorMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Xor) Match(v any) (bool, vlatte.Reason, error) {
 	aOK, aReason, err := m.First.Match(v)
 	if err != nil {
 		return Error(fmt.Errorf("xor: first: %w", err))
@@ -42,6 +42,6 @@ func (m *XorMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *XorMatcher) Describe() descriptor.Descriptor {
+func (m *Xor) Describe() descriptor.Descriptor {
 	return descriptor.MultiArgs("xor", Describe(m.First), Describe(m.Second))
 }

@@ -10,13 +10,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// AnyOfMatcher passes when any of the inner matchers pass.
-type AnyOfMatcher struct {
+// AnyOf passes when any of the inner matchers pass.
+type AnyOf struct {
 	Matchers []vlatte.Filter
 }
 
 // Match implements vlatte.Filter.
-func (m *AnyOfMatcher) Match(v any) (ok bool, reason vlatte.Reason, e error) {
+func (m *AnyOf) Match(v any) (ok bool, reason vlatte.Reason, e error) {
 	var idx int
 	defer func() {
 		if recovery := recover(); recovery != nil {
@@ -48,7 +48,7 @@ func (m *AnyOfMatcher) Match(v any) (ok bool, reason vlatte.Reason, e error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *AnyOfMatcher) Describe() descriptor.Descriptor {
+func (m *AnyOf) Describe() descriptor.Descriptor {
 	d := make([]any, 0, len(m.Matchers))
 	for _, v := range m.Matchers {
 		if vv, ok := v.(descriptor.SelfDescriptive); ok {

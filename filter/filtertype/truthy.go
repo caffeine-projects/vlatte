@@ -8,11 +8,11 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// TruthyMatcher passes when the value is true.
-type TruthyMatcher struct{}
+// Truthy passes when the value is true.
+type Truthy struct{}
 
 // Match implements vlatte.Filter.
-func (m *TruthyMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Truthy) Match(v any) (bool, vlatte.Reason, error) {
 	var b bool
 	var err error
 
@@ -37,6 +37,6 @@ func (m *TruthyMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *TruthyMatcher) Describe() descriptor.Descriptor {
+func (m *Truthy) Describe() descriptor.Descriptor {
 	return descriptor.KeyOnly("truthy")
 }

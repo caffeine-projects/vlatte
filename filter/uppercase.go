@@ -6,6 +6,6 @@ import (
 )
 
 // ToUpper uppercases the value and matches with the inner matcher.
-func ToUpper(matcher vlatte.Filter) *filtertype.UpperCaseMatcher {
-	return &filtertype.UpperCaseMatcher{Matcher: matcher}
+func ToUpper(matcher vlatte.Filter) *filtertype.UpperCase {
+	return &filtertype.UpperCase{Matcher: matcher}
 }

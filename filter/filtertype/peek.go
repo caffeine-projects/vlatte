@@ -6,14 +6,14 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-// PeekMatcher runs an action then matches with the inner matcher.
-type PeekMatcher struct {
+// Peek runs an action then matches with the inner matcher.
+type Peek struct {
 	Matcher vlatte.Filter
 	Action  func(v any) error
 }
 
 // Match implements vlatte.Filter.
-func (m *PeekMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Peek) Match(v any) (bool, vlatte.Reason, error) {
 	err := m.Action(v)
 	if err != nil {
 		return Error(fmt.Errorf("peek: %w", err))

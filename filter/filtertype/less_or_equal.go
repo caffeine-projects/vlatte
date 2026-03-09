@@ -9,13 +9,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// LessOrEqualMatcher passes if the value is less than or equal to the expected value.
-type LessOrEqualMatcher struct {
+// LessOrEqual passes if the value is less than or equal to the expected value.
+type LessOrEqual struct {
 	Expected float64
 }
 
 // Match implements vlatte.Filter.
-func (m *LessOrEqualMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *LessOrEqual) Match(v any) (bool, vlatte.Reason, error) {
 	vv, err := anyconv.ToFloat64(v)
 	if err != nil {
 		return Error(fmt.Errorf(
@@ -33,6 +33,6 @@ func (m *LessOrEqualMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *LessOrEqualMatcher) Describe() descriptor.Descriptor {
+func (m *LessOrEqual) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("lte", m.Expected)
 }

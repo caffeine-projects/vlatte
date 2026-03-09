@@ -11,13 +11,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// ContainsMatcher passes when the expected value is contained in the incoming value.
-type ContainsMatcher struct {
+// Contains passes when the expected value is contained in the incoming value.
+type Contains struct {
 	Expected any
 }
 
 // Match implements vlatte.Filter.
-func (m *ContainsMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Contains) Match(v any) (bool, vlatte.Reason, error) {
 	var eValue = reflect.ValueOf(m.Expected)
 	var vValue = reflect.ValueOf(v)
 	var vType = reflect.TypeOf(v)
@@ -56,6 +56,6 @@ ret:
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *ContainsMatcher) Describe() descriptor.Descriptor {
+func (m *Contains) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("contains", m.Expected)
 }

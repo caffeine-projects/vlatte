@@ -7,13 +7,13 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// NotMatcher negates the provided matcher.
-type NotMatcher struct {
+// Not negates the provided matcher.
+type Not struct {
 	Matcher vlatte.Filter
 }
 
 // Match implements vlatte.Filter.
-func (m *NotMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Not) Match(v any) (bool, vlatte.Reason, error) {
 	ok, reason, err := m.Matcher.Match(v)
 	if err != nil {
 		return Error(fmt.Errorf("not: %w", err))
@@ -27,6 +27,6 @@ func (m *NotMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *NotMatcher) Describe() descriptor.Descriptor {
+func (m *Not) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("not", Describe(m.Matcher))
 }

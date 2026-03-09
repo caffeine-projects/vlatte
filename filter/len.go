@@ -5,6 +5,6 @@ import (
 )
 
 // Len matches when the value has the given length (slice, map, or string).
-func Len(length int) *filtertype.LenMatcher {
-	return &filtertype.LenMatcher{Length: length}
+func Len(length int) *filtertype.Len {
+	return &filtertype.Len{Length: length}
 }

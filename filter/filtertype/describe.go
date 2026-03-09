@@ -10,5 +10,5 @@ func Describe(m vlatte.Filter) any {
 	if sd, ok := m.(descriptor.SelfDescriptive); ok {
 		return sd.Describe()
 	}
-	return (&AnythingMatcher{}).Describe()
+	return (&Anything{}).Describe()
 }

@@ -7,10 +7,10 @@ import (
 )
 
 // HasKey matches when the value (map or struct) has the given key/path.
-func HasKey(path string) *filtertype.HasKeyMatcher {
+func HasKey(path string) *filtertype.HasKey {
 	x, err := jp.ParseString(path)
 	if err != nil {
 		panic(err)
 	}
-	return &filtertype.HasKeyMatcher{Path: path, Expr: x}
+	return &filtertype.HasKey{Path: path, Expr: x}
 }

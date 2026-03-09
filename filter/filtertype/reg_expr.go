@@ -10,15 +10,15 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// RegExpMatcher passes when the regular expression matches the value.
-type RegExpMatcher struct {
+// RegExp passes when the regular expression matches the value.
+type RegExp struct {
 	Expression string
 	rg         *regexp.Regexp
 	mu         sync.Mutex
 }
 
 // Match implements vlatte.Filter.
-func (m *RegExpMatcher) Match(v any) (bool, vlatte.Reason, error) {
+func (m *RegExp) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
 		return Error(fmt.Errorf("regexp: it only works with string values. got: %T", v))
@@ -47,6 +47,6 @@ func (m *RegExpMatcher) Match(v any) (bool, vlatte.Reason, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *RegExpMatcher) Describe() descriptor.Descriptor {
+func (m *RegExp) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("regexp", m.Expression)
 }
