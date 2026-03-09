@@ -9,10 +9,9 @@ func success() vlatte.Result                { return vlatte.Result{Pass: true, M
 func mismatch(message string) vlatte.Result { return vlatte.Result{Pass: false, Message: message} }
 
 func describe(m vlatte.Filter) any {
-	if sd, ok := m.(descriptor.Self); ok {
+	if sd, ok := m.(descriptor.SelfDescriptive); ok {
 		return sd.Describe()
 	}
 
-	return Anything().(descriptor.Self).Describe()
+	return Anything().(descriptor.SelfDescriptive).Describe()
 }
-

@@ -47,7 +47,7 @@ func (m *allOfMatcher) Match(v any) (r vlatte.Result, err error) {
 func (m *allOfMatcher) Describe() descriptor.Descriptor {
 	d := make([]any, 0, len(m.matchers))
 	for _, v := range m.matchers {
-		if vv, ok := v.(descriptor.Self); ok {
+		if vv, ok := v.(descriptor.SelfDescriptive); ok {
 			d = append(d, vv.Describe())
 		}
 	}

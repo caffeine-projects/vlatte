@@ -20,4 +20,3 @@ func (f FilterFunc) Match(v any) (Result, error) { return f(v) }
 type Stateful interface {
 	SetState() error
 }
-

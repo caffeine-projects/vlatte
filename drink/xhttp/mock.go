@@ -245,7 +245,7 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 			keys := make(map[string]any, counters[target])
 
 			if len(expectations) == 1 {
-				if sd, ok := expectations[0].Matcher.(descriptor.Self); ok {
+				if sd, ok := expectations[0].Matcher.(descriptor.SelfDescriptive); ok {
 					keys[expectations[0].Key] = sd.Describe()
 					request[target.FieldName()] = keys
 				}
@@ -265,17 +265,17 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 				}
 
 				if size == 1 {
-					if sd, ok := e.Matcher.(descriptor.Self); ok {
+					if sd, ok := e.Matcher.(descriptor.SelfDescriptive); ok {
 						keys[e.Key] = sd.Describe()
 					}
 				} else {
-			matchers := make([]vlatte.Filter, 0, size)
+					matchers := make([]vlatte.Filter, 0, size)
 					for _, e := range byKey[e.Key] {
 						matchers = append(matchers, e.Matcher)
 					}
 
 					all := filter.All(matchers...)
-					keys[e.Key] = all.(descriptor.Self).Describe()
+					keys[e.Key] = all.(descriptor.SelfDescriptive).Describe()
 				}
 			}
 
@@ -283,7 +283,7 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 
 		case matchingScopeScheme, matchingScopeURL, matchingScopeURLPath, matchingScopeBody:
 			if len(expectations) == 1 {
-				if sd, ok := expectations[0].Matcher.(descriptor.Self); ok {
+				if sd, ok := expectations[0].Matcher.(descriptor.SelfDescriptive); ok {
 					request[target.FieldName()] = sd.Describe()
 				}
 
@@ -296,11 +296,11 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 			}
 
 			all := filter.All(matchers...)
-			request[target.FieldName()] = all.(descriptor.Self).Describe()
+			request[target.FieldName()] = all.(descriptor.SelfDescriptive).Describe()
 
 		default:
 			for _, e := range expectations {
-				if sd, ok := e.Matcher.(descriptor.Self); ok {
+				if sd, ok := e.Matcher.(descriptor.SelfDescriptive); ok {
 					if desc := sd.Describe(); desc.IsMap() {
 						desc.Merge(data)
 					}
@@ -324,7 +324,7 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 	}
 
 	if m.Reply != nil {
-		if sd, ok := m.Reply.(descriptor.Self); ok {
+		if sd, ok := m.Reply.(descriptor.SelfDescriptive); ok {
 			if desc := sd.Describe(); desc.IsMap() {
 				desc.Merge(data)
 			}

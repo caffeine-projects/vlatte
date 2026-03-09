@@ -13,8 +13,8 @@ var ErrKeyEmpty = errors.New("descriptor: key is empty")
 var ErrSpecNotValidType = errors.New("descriptor: spec is not a valid type")
 var ErrKeyAlreadyExists = errors.New("descriptor: key already exists")
 
-// Self is an interface that allows a type to describe itself.
-type Self interface {
+// SelfDescriptive is an interface that allows a type to describe itself.
+type SelfDescriptive interface {
 	Describe() Descriptor
 }
 
@@ -39,7 +39,7 @@ func KeyOnly(key string) Descriptor {
 }
 
 func KeyOnlyMaybe(key string, item any) Descriptor {
-	if self, ok := item.(Self); ok {
+	if self, ok := item.(SelfDescriptive); ok {
 		return New(key, self.Describe())
 	}
 
@@ -78,8 +78,8 @@ func WithKeyValuePairs(key string, props ...any) Descriptor {
 	return New(key, m)
 }
 
-// WithMaybeItems is a helper function to create a descriptor with items that might be also [Self] descriptive.
-// In the case the child is not a [Self] descriptive type, it will be ignored.
+// WithMaybeItems is a helper function to create a descriptor with items that might be also [SelfDescriptive] descriptive.
+// In the case the child is not a [SelfDescriptive] descriptive type, it will be ignored.
 func WithMaybeItems(key string, items []any) Descriptor {
 	if len(key) == 0 {
 		panic(ErrKeyEmpty)
@@ -87,7 +87,7 @@ func WithMaybeItems(key string, items []any) Descriptor {
 
 	props := make([]any, 0, len(items))
 	for _, item := range items {
-		if self, ok := item.(Self); ok {
+		if self, ok := item.(SelfDescriptive); ok {
 			props = append(props, self.Describe())
 		}
 	}
@@ -99,7 +99,7 @@ func Root[T P](props T) Descriptor {
 	return Descriptor{Key: "root", Props: props, root: true}
 }
 
-// Props describes the properties of a [Self] describle type.
+// Props describes the properties of a [SelfDescriptive] describle type.
 type Props any
 
 // Descriptor describes a type.
@@ -197,8 +197,8 @@ func (d Descriptor) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m)
 }
 
-func IsSD(v any) (Descriptor, bool) {
-	if self, ok := v.(Self); ok {
+func IsSelfDescriptive(v any) (Descriptor, bool) {
+	if self, ok := v.(SelfDescriptive); ok {
 		return self.Describe(), true
 	}
 

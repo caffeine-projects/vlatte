@@ -64,7 +64,7 @@ func (m *eachMatcher) Match(v any) (vlatte.Result, error) {
 }
 
 func (m *eachMatcher) Describe() descriptor.Descriptor {
-	if desc, ok := descriptor.IsSD(m.matcher); ok {
+	if desc, ok := descriptor.IsSelfDescriptive(m.matcher); ok {
 		return descriptor.MultiArgs("each", desc)
 	}
 

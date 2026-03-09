@@ -78,7 +78,7 @@ func (rep *RandomReply) Build(w http.ResponseWriter, r *RequestValues) (*Respons
 func (rep *RandomReply) Describe() descriptor.Descriptor {
 	replies := make([]any, 0, len(rep.replies))
 	for _, v := range rep.replies {
-		if sd, ok := v.(descriptor.Self); ok {
+		if sd, ok := v.(descriptor.SelfDescriptive); ok {
 			replies = append(replies, sd.Describe())
 		}
 	}
