@@ -9,7 +9,7 @@ func GreaterThan(expected float64) *filtertype.Greater {
 	return &filtertype.Greater{Expected: expected}
 }
 
-// Gt is an alias for GreaterThan.
-func Gt(expected float64) *filtertype.Greater {
+// GT is an alias for GreaterThan.
+func GT(expected float64) *filtertype.Greater {
 	return &filtertype.Greater{Expected: expected}
 }

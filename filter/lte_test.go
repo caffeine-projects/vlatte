@@ -34,7 +34,7 @@ func TestOrEqualLess(t *testing.T) {
 }
 
 func TestLessOrEqualUnhandledType(t *testing.T) {
-	ok, _, err := Lte(10).Match(true)
+	ok, _, err := LTE(10).Match(true)
 
 	require.Error(t, err)
 	require.False(t, ok)

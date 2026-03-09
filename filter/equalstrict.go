@@ -16,7 +16,7 @@ func StrictEqualf(format string, a ...any) *filtertype.EqualStrict {
 	return &filtertype.EqualStrict{Expected: fmt.Sprintf(format, a...)}
 }
 
-// Eqs is an alias for StrictEqual.
-func Eqs(expected any) *filtertype.EqualStrict {
+// EQS is an alias for StrictEqual.
+func EQS(expected any) *filtertype.EqualStrict {
 	return &filtertype.EqualStrict{Expected: expected}
 }

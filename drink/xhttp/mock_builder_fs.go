@@ -470,7 +470,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 			builder.URL(m)
 		}
 	} else if vi.IsSet(_fRequestURLMatch) {
-		builder.URL(filter.Matches(vi.GetString(_fRequestURLMatch)))
+		builder.URL(filter.RegExpr(vi.GetString(_fRequestURLMatch)))
 	} else if vi.IsSet(_fRequestURLPath) {
 		uv := vi.Get(_fRequestURLPath)
 

@@ -9,7 +9,7 @@ func EqualJSON(expected any) *filtertype.EqualJSON {
 	return &filtertype.EqualJSON{Expected: expected}
 }
 
-// Eqj is an alias for EqualJSON.
-func Eqj(expected any) *filtertype.EqualJSON {
+// EQJ is an alias for EqualJSON.
+func EQJ(expected any) *filtertype.EqualJSON {
 	return &filtertype.EqualJSON{Expected: expected}
 }

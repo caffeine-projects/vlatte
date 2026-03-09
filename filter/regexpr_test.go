@@ -20,7 +20,7 @@ func TestRegExpMatches(t *testing.T) {
 
 	for i, tc := range tcs {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			ok, _, err := Matches(tc.expression).Match(tc.value)
+			ok, _, err := RegExpr(tc.expression).Match(tc.value)
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
 		})

@@ -8,8 +8,3 @@ import (
 func LessThan(expected float64) *filtertype.Less {
 	return &filtertype.Less{Expected: expected}
 }
-
-// Lt is an alias for LessThan.
-func Lt(expected float64) *filtertype.Less {
-	return &filtertype.Less{Expected: expected}
-}

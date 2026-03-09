@@ -53,7 +53,7 @@ func TestStrictEqual(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tc.result, ok)
 
-			ok, _, err = Eqs(tc.valueToCompare).Match(tc.value)
+			ok, _, err = EQS(tc.valueToCompare).Match(tc.value)
 
 			require.NoError(t, err)
 			require.Equal(t, tc.result, ok)

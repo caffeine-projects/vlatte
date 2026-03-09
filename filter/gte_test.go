@@ -33,7 +33,7 @@ func TestGreaterOrEqual(t *testing.T) {
 }
 
 func TestGreaterOrEqualUnhandledType(t *testing.T) {
-	ok, _, err := Gte(10).Match(true)
+	ok, _, err := GTE(10).Match(true)
 
 	require.Error(t, err)
 	require.False(t, ok)

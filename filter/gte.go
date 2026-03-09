@@ -9,7 +9,7 @@ func GreaterThanOrEqual(expected float64) *filtertype.GreaterOrEqual {
 	return &filtertype.GreaterOrEqual{Expected: expected}
 }
 
-// Gte is an alias for GreaterThanOrEqual.
-func Gte(expected float64) *filtertype.GreaterOrEqual {
+// GTE is an alias for GreaterThanOrEqual.
+func GTE(expected float64) *filtertype.GreaterOrEqual {
 	return &filtertype.GreaterOrEqual{Expected: expected}
 }

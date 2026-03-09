@@ -16,7 +16,7 @@ func EqualIgnoreCasef(format string, a ...any) *filtertype.EqualIgnoreCase {
 	return &filtertype.EqualIgnoreCase{Expected: fmt.Sprintf(format, a...)}
 }
 
-// Eqi is an alias to EqualIgnoreCase.
-func Eqi(expected string) *filtertype.EqualIgnoreCase {
+// EQI is an alias to EqualIgnoreCase.
+func EQI(expected string) *filtertype.EqualIgnoreCase {
 	return &filtertype.EqualIgnoreCase{Expected: expected}
 }

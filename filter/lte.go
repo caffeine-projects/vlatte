@@ -9,7 +9,7 @@ func LessThanOrEqual(expected float64) *filtertype.LessOrEqual {
 	return &filtertype.LessOrEqual{Expected: expected}
 }
 
-// Lte is an alias for LessThanOrEqual.
-func Lte(expected float64) *filtertype.LessOrEqual {
+// LTE is an alias for LessThanOrEqual.
+func LTE(expected float64) *filtertype.LessOrEqual {
 	return &filtertype.LessOrEqual{Expected: expected}
 }

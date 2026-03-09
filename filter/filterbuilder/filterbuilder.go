@@ -416,7 +416,7 @@ func discoverAndBuild(key string, args any) (ma vlatte.Filter, err error) {
 		return filter.LessThanOrEqual(num), nil
 
 	case _mNil:
-		return filter.IsNil(), nil
+		return filter.Nil(), nil
 
 	case _mNot:
 		m, err := BuildMatcher(args)
@@ -437,7 +437,7 @@ func discoverAndBuild(key string, args any) (ma vlatte.Filter, err error) {
 				fmt.Errorf("[%s] expects a string argument. got=%v", _mRegex, args)
 		}
 
-		return filter.Matches(str), nil
+		return filter.RegExpr(str), nil
 
 	case _mSome:
 		m, err := BuildMatcher(args)

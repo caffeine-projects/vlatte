@@ -63,7 +63,7 @@ func TestToEqualJSON(t *testing.T) {
 
 func TestEqualJSON_Errors(t *testing.T) {
 	ch := make(chan struct{})
-	ok, _, err := Eqj(ch).Match(map[string]interface{}{"ok": true, "name": "dev"})
+	ok, _, err := EQJ(ch).Match(map[string]interface{}{"ok": true, "name": "dev"})
 
 	require.Error(t, err)
 	require.False(t, ok)

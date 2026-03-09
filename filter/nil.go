@@ -4,7 +4,7 @@ import (
 	"github.com/caffeine-projects/vlatte/filter/filtertype"
 )
 
-// IsNil matches when the value is nil.
-func IsNil() *filtertype.Nil {
+// Nil matches when the value is nil.
+func Nil() *filtertype.Nil {
 	return &filtertype.Nil{}
 }
