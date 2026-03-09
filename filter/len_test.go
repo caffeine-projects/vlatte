@@ -21,10 +21,10 @@ func TestLen_String(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := Len(tc.size).Match(tc.value)
+			ok, _, err := Len(tc.size).Match(tc.value)
 
 			require.NoError(t, err)
-			require.Equal(t, tc.expected, result.Pass)
+			require.Equal(t, tc.expected, ok)
 		})
 	}
 }

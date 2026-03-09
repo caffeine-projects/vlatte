@@ -42,10 +42,10 @@ func TestGlob(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.pattern, func(t *testing.T) {
-			result, err := GlobMatch(tc.pattern).Match(tc.value)
+			ok, _, err := GlobMatch(tc.pattern).Match(tc.value)
 
 			require.NoError(t, err)
-			require.Equal(t, tc.expectedResult, result.Pass)
+			require.Equal(t, tc.expectedResult, ok)
 		})
 	}
 }

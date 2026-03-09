@@ -13,33 +13,30 @@ type xorMatcher struct {
 	second vlatte.Filter
 }
 
-func (m *xorMatcher) Match(v any) (vlatte.Result, error) {
-	a, err := m.first.Match(v)
+func (m *xorMatcher) Match(v any) (bool, vlatte.Reason, error) {
+	aOK, aReason, err := m.first.Match(v)
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("xor: first: %w", err)
+		return false, ReasonError, fmt.Errorf("xor: first: %w", err)
 	}
 
-	b, err := m.second.Match(v)
+	bOK, bReason, err := m.second.Match(v)
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("xor: second: %w", err)
+		return false, ReasonError, fmt.Errorf("xor: second: %w", err)
 	}
 
-	if a.Pass != b.Pass {
-		return vlatte.Result{Pass: true}, nil
+	if aOK != bOK {
+		return true, ReasonNone, nil
 	}
 
-	message := ""
-	if !a.Pass {
-		message = a.Message
+	var parts []string
+	if !aOK {
+		parts = append(parts, string(aReason))
 	}
-	if !b.Pass {
-		if !b.Pass {
-			message += " - "
-		}
-		message += b.Message
+	if !bOK {
+		parts = append(parts, string(bReason))
 	}
 
-	return vlatte.Result{Message: strings.Join([]string{"XOR()", message}, " ")}, nil
+	return false, vlatte.Reason(strings.Join([]string{"XOR()", strings.Join(parts, " - ")}, " ")), nil
 }
 
 func (m *xorMatcher) Describe() descriptor.Descriptor {

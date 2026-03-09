@@ -8,12 +8,12 @@ import (
 type nilMatcher struct {
 }
 
-func (m *nilMatcher) Match(v any) (vlatte.Result, error) {
+func (m *nilMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	if v == nil {
-		return vlatte.Result{Pass: true}, nil
+		return success()
 	}
 
-	return vlatte.Result{Message: "Nil() Value is not nil"}, nil
+	return mismatch("Nil() Value is not nil")
 }
 
 func (m *nilMatcher) Describe() descriptor.Descriptor {

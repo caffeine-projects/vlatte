@@ -8,37 +8,37 @@ import (
 
 func TestEachSlice(t *testing.T) {
 	s := []string{"test", "tested", "testing"}
-	r, err := Each(HasPrefix("test")).Match(s)
+	ok, _, err := Each(HasPrefix("test")).Match(s)
 
 	require.NoError(t, err)
-	require.True(t, r.Pass)
+	require.True(t, ok)
 }
 
 func TestEachSliceNotPass(t *testing.T) {
 	s := []string{"test", "tested", "dev"}
-	r, err := Each(HasPrefix("test")).Match(s)
+	ok, _, err := Each(HasPrefix("test")).Match(s)
 
 	require.NoError(t, err)
-	require.False(t, r.Pass)
+	require.False(t, ok)
 }
 
 func TestEachMap(t *testing.T) {
 	m := map[string]string{"1": "test", "2": "testing", "3": "tested"}
-	r, err := Each(HasPrefix("test")).Match(m)
+	ok, _, err := Each(HasPrefix("test")).Match(m)
 
 	require.NoError(t, err)
-	require.True(t, r.Pass)
+	require.True(t, ok)
 }
 
 func TestEachMapNotPass(t *testing.T) {
 	m := map[string]string{"1": "dev", "2": "testing", "3": "tested"}
-	r, err := Each(HasPrefix("test")).Match(m)
+	ok, _, err := Each(HasPrefix("test")).Match(m)
 
 	require.NoError(t, err)
-	require.False(t, r.Pass)
+	require.False(t, ok)
 }
 
 func TestEachInvalidValueType(t *testing.T) {
-	_, err := Each(Anything()).Match("hello")
+	_, _, err := Each(Anything()).Match("hello")
 	require.Error(t, err)
 }

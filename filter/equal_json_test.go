@@ -53,18 +53,18 @@ func TestToEqualJSON(t *testing.T) {
 
 	for i, tc := range testCases {
 		t.Run(strconv.FormatInt(int64(i), 10), func(t *testing.T) {
-			result, err := EqualJSON(tc.a).Match(tc.b)
+			ok, _, err := EqualJSON(tc.a).Match(tc.b)
 
 			require.NoError(t, err)
-			require.Equal(t, tc.expected, result.Pass)
+			require.Equal(t, tc.expected, ok)
 		})
 	}
 }
 
 func TestEqualJSON_Errors(t *testing.T) {
 	ch := make(chan struct{})
-	result, err := Eqj(ch).Match(map[string]interface{}{"ok": true, "name": "dev"})
+	ok, _, err := Eqj(ch).Match(map[string]interface{}{"ok": true, "name": "dev"})
 
 	require.Error(t, err)
-	require.False(t, result.Pass)
+	require.False(t, ok)
 }

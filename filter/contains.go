@@ -15,18 +15,18 @@ type containsMatcher struct {
 	expected any
 }
 
-func (m *containsMatcher) Match(v any) (vlatte.Result, error) {
+func (m *containsMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	var eValue = reflect.ValueOf(m.expected)
 	var vValue = reflect.ValueOf(v)
 	var vType = reflect.TypeOf(v)
 	if vType == nil {
-		return vlatte.Result{}, errors.New("contains: unknown typeof value")
+		return false, ReasonError, errors.New("contains: unknown typeof value")
 	}
 
 	switch vType.Kind() {
 	case reflect.String:
 		if pass := strings.Contains(vValue.String(), eValue.String()); pass {
-			return vlatte.Result{Pass: true}, nil
+			return success()
 		}
 
 		goto ret
@@ -35,7 +35,7 @@ func (m *containsMatcher) Match(v any) (vlatte.Result, error) {
 		keys := vValue.MapKeys()
 		for i := 0; i < len(keys); i++ {
 			if equalValues(keys[i].Interface(), m.expected, false) {
-				return vlatte.Result{Pass: true}, nil
+				return success()
 			}
 		}
 
@@ -44,13 +44,13 @@ func (m *containsMatcher) Match(v any) (vlatte.Result, error) {
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < vValue.Len(); i++ {
 			if equalValues(vValue.Index(i).Interface(), eValue.Interface(), false) {
-				return vlatte.Result{Pass: true}, nil
+				return success()
 			}
 		}
 	}
 
 ret:
-	return vlatte.Result{Message: strings.Join([]string{"Contain(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, "")}, nil
+	return mismatch(strings.Join([]string{"Contain(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, ""))
 }
 
 func (m *containsMatcher) Describe() descriptor.Descriptor {

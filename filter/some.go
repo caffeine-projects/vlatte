@@ -14,44 +14,42 @@ type someMatcher struct {
 	matcher vlatte.Filter
 }
 
-func (m *someMatcher) Match(v any) (vlatte.Result, error) {
+func (m *someMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	if v == nil {
-		return mismatch("Some() Expected some values to match but got nil"), nil
+		return mismatch("Some() Expected some values to match but got nil")
 	}
 
 	typeOfV := reflect.TypeOf(v)
 	kind := typeOfV.Kind()
 	if kind != reflect.Slice && kind != reflect.Array {
-		return vlatte.Result{}, fmt.Errorf("some: matcher only works with slices. got: %v", typeOfV)
+		return false, ReasonError, fmt.Errorf("some: matcher only works with slices. got: %v", typeOfV)
 	}
 
 	vv := reflect.ValueOf(v)
 	if vv.IsZero() {
-		return mismatch("Some() Expected some values to match but got zero"), nil
+		return mismatch("Some() Expected some values to match but got zero")
 	}
 
 	length := vv.Len()
 	messages := make([]string, 0, length)
 
 	for i := 0; i < length; i++ {
-		res, err := m.matcher.Match(vv.Index(i).Interface())
+		ok, reason, err := m.matcher.Match(vv.Index(i).Interface())
 		if err != nil {
-			return vlatte.Result{}, fmt.Errorf("some: %w", err)
+			return false, ReasonError, fmt.Errorf("some: %w", err)
 		}
 
-		if res.Pass {
-			return vlatte.Result{Pass: true}, nil
+		if ok {
+			return true, ReasonNone, nil
 		}
 
-		messages = append(messages, res.Message)
+		messages = append(messages, string(reason))
 	}
 
-	return vlatte.Result{
-		Message: fmt.Sprintf(
-			"Some()\n%s",
-			mfmt.Indent(strings.Join(messages, "\n")),
-		),
-	}, nil
+	return false, vlatte.Reason(fmt.Sprintf(
+		"Some()\n%s",
+		mfmt.Indent(strings.Join(messages, "\n")),
+	)), nil
 }
 
 func (m *someMatcher) Describe() descriptor.Descriptor {

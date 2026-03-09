@@ -14,7 +14,7 @@ type eachMatcher struct {
 	matcher vlatte.Filter
 }
 
-func (m *eachMatcher) Match(v any) (vlatte.Result, error) {
+func (m *eachMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	var val = reflect.ValueOf(v)
 	var valType = reflect.TypeOf(v).Kind()
 
@@ -24,43 +24,47 @@ func (m *eachMatcher) Match(v any) (vlatte.Result, error) {
 
 		for iterator.Next() {
 			mv := iterator.Value().Interface()
-			res, err := m.matcher.Match(mv)
+			ok, reason, err := m.matcher.Match(mv)
 			if err != nil {
-				return vlatte.Result{}, fmt.Errorf("each: %w", err)
+				return false, ReasonError, fmt.Errorf("each: %w", err)
 			}
 
-			if !res.Pass {
-				return vlatte.Result{
-					Message: strings.
-						Join([]string{
-							"Each(",
-							mfmt.Stringify(iterator.Key().Interface()), ":", mfmt.Stringify(mv),
-							") ", res.Message}, "")}, nil
+			if !ok {
+				return false, vlatte.Reason(strings.Join(
+					[]string{
+						"Each(",
+						mfmt.Stringify(iterator.Key().Interface()), ":", mfmt.Stringify(mv),
+						") ", string(reason),
+					},
+					"",
+				)), nil
 			}
 		}
 
-		return vlatte.Result{Pass: true}, nil
+		return true, ReasonNone, nil
 
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < val.Len(); i++ {
 			entry := val.Index(i).Interface()
-			res, err := m.matcher.Match(entry)
+			ok, reason, err := m.matcher.Match(entry)
 			if err != nil {
-				return vlatte.Result{}, fmt.Errorf("each: %w", err)
+				return false, ReasonError, fmt.Errorf("each: %w", err)
 			}
 
-			if !res.Pass {
-				return vlatte.Result{
-					Message: strings.
-						Join([]string{
-							"Each(", mfmt.Stringify(entry), ") ", res.Message}, "")}, nil
+			if !ok {
+				return false, vlatte.Reason(strings.Join(
+					[]string{
+						"Each(", mfmt.Stringify(entry), ") ", string(reason),
+					},
+					"",
+				)), nil
 			}
 		}
 
-		return vlatte.Result{Pass: true}, nil
+		return true, ReasonNone, nil
 	}
 
-	return vlatte.Result{}, fmt.Errorf("type %s is not supported. accepted types: map, array", valType.String())
+	return false, ReasonError, fmt.Errorf("type %s is not supported. accepted types: map, array", valType.String())
 }
 
 func (m *eachMatcher) Describe() descriptor.Descriptor {

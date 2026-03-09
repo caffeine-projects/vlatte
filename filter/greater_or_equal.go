@@ -14,10 +14,10 @@ type greaterOrEqualMatcher struct {
 	expected float64
 }
 
-func (m *greaterOrEqualMatcher) Match(v any) (vlatte.Result, error) {
+func (m *greaterOrEqualMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	vv, err := mconv.ConvToFloat64(v)
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf(
+		return false, ReasonError, fmt.Errorf(
 			"gte: type %T is not supported. the value must be compatible with float64. %w",
 			v,
 			err,
@@ -25,10 +25,10 @@ func (m *greaterOrEqualMatcher) Match(v any) (vlatte.Result, error) {
 	}
 
 	if vv >= m.expected {
-		return vlatte.Result{Pass: true}, nil
+		return success()
 	}
 
-	return vlatte.Result{Message: strings.Join([]string{"Gte(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, "")}, nil
+	return mismatch(strings.Join([]string{"Gte(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, ""))
 }
 
 func (m *greaterOrEqualMatcher) Describe() descriptor.Descriptor {

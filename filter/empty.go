@@ -12,17 +12,21 @@ import (
 type emptyMatcher struct {
 }
 
-func (m *emptyMatcher) Match(v any) (vlatte.Result, error) {
+func (m *emptyMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	if v == nil {
-		return vlatte.Result{Pass: true}, nil
+		return success()
 	}
 
-	result, err := Len(0).Match(v)
+	result, _, err := Len(0).Match(v)
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("empty: %w", err)
+		return false, ReasonError, fmt.Errorf("empty: %w", err)
 	}
 
-	return vlatte.Result{result.Pass, strings.Join([]string{"Empty(", mfmt.Stringify(v), ")"}, "")}, nil
+	if result {
+		return success()
+	}
+
+	return mismatch(strings.Join([]string{"Empty(", mfmt.Stringify(v), ")"}, ""))
 }
 
 func (m *emptyMatcher) Describe() descriptor.Descriptor {

@@ -12,19 +12,17 @@ type hasSuffixMatcher struct {
 	suffix string
 }
 
-func (m *hasSuffixMatcher) Match(v any) (vlatte.Result, error) {
+func (m *hasSuffixMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
-		return vlatte.Result{}, fmt.Errorf("has_suffix: it only works with string type. got %T", v)
+		return false, ReasonError, fmt.Errorf("has_suffix: it only works with string type. got %T", v)
 	}
 
 	if strings.HasSuffix(txt, m.suffix) {
-		return vlatte.Result{Pass: true}, nil
+		return success()
 	}
 
-	return vlatte.Result{
-		Message: strings.Join([]string{"HasSuffix(", m.suffix, ") Prefix is not present. Got: ", txt}, ""),
-	}, nil
+	return mismatch(strings.Join([]string{"HasSuffix(", m.suffix, ") Prefix is not present. Got: ", txt}, ""))
 }
 
 func (m *hasSuffixMatcher) Describe() descriptor.Descriptor {

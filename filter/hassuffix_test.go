@@ -17,10 +17,10 @@ func TestHasSuffix(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.value, func(t *testing.T) {
-			result, err := HasSuffix(tc.value).Match("hello world")
+			ok, _, err := HasSuffix(tc.value).Match("hello world")
 
 			require.NoError(t, err)
-			require.Equal(t, tc.expected, result.Pass)
+			require.Equal(t, tc.expected, ok)
 		})
 	}
 }

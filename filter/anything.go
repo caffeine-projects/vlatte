@@ -8,8 +8,8 @@ import (
 type anythingMatcher struct {
 }
 
-func (m *anythingMatcher) Match(_ any) (vlatte.Result, error) {
-	return vlatte.Result{Pass: true}, nil
+func (m *anythingMatcher) Match(_ any) (bool, vlatte.Reason, error) {
+	return true, ReasonNone, nil
 }
 
 func (m *anythingMatcher) Describe() descriptor.Descriptor {

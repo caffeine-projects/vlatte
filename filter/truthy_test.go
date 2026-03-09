@@ -24,17 +24,17 @@ func TestTruthy(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := Truthy().Match(tc.value)
+			ok, _, err := Truthy().Match(tc.value)
 
 			require.NoError(t, err)
-			require.Equal(t, tc.expected, result.Pass)
+			require.Equal(t, tc.expected, ok)
 		})
 	}
 }
 
 func TestTruthyInvalidSyntax(t *testing.T) {
-	result, err := Truthy().Match("y")
+	ok, _, err := Truthy().Match("y")
 
 	require.Error(t, err)
-	require.False(t, result.Pass)
+	require.False(t, ok)
 }

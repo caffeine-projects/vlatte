@@ -12,27 +12,26 @@ type isContainedInMatcher struct {
 	items any
 }
 
-func (m *isContainedInMatcher) Match(v any) (vlatte.Result, error) {
+func (m *isContainedInMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	typeOfItems := reflect.TypeOf(m.items)
 	kind := typeOfItems.Kind()
 	if kind != reflect.Slice && kind != reflect.Array {
-		return vlatte.Result{}, fmt.Errorf("is_in: it only works with slices. got: %v", typeOfItems)
+		return false, ReasonError, fmt.Errorf("is_in: it only works with slices. got: %v", typeOfItems)
 	}
 
 	valueOf := reflect.ValueOf(m.items)
 
 	for i := 0; i < valueOf.Len(); i++ {
 		if equalValues(v, valueOf.Index(i).Interface(), false) {
-			return vlatte.Result{Pass: true}, nil
+			return success()
 		}
 	}
 
-	return vlatte.Result{
-		Message: fmt.Sprintf(
-			"IsIn() Value %v is not contained in %v",
-			v,
-			m.items),
-	}, nil
+	return mismatch(fmt.Sprintf(
+		"IsIn() Value %v is not contained in %v",
+		v,
+		m.items,
+	))
 }
 
 func (m *isContainedInMatcher) Describe() descriptor.Descriptor {

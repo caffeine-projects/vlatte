@@ -7,7 +7,7 @@ import (
 )
 
 func TestAnything(t *testing.T) {
-	res, err := Anything().Match("")
+	ok, _, err := Anything().Match("")
 	require.NoError(t, err)
-	require.True(t, res.Pass)
+	require.True(t, ok)
 }

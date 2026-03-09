@@ -13,25 +13,25 @@ func TestFn(t *testing.T) {
 	})
 
 	t.Run("pass", func(t *testing.T) {
-		res, err := m.Match("ok")
+		ok, _, err := m.Match("ok")
 		require.NoError(t, err)
-		require.True(t, res.Pass)
+		require.True(t, ok)
 	})
 
 	t.Run("no pass", func(t *testing.T) {
-		res, err := m.Match("nok")
+		ok, _, err := m.Match("nok")
 		require.NoError(t, err)
-		require.False(t, res.Pass)
+		require.False(t, ok)
 	})
 }
 
 func TestFnError(t *testing.T) {
-	res, err := Function(
+	ok, _, err := Function(
 		func(_ any) (bool, error) {
 			return false, errors.New("boom")
 		}).
 		Match("ok")
 
 	require.Error(t, err)
-	require.False(t, res.Pass)
+	require.False(t, ok)
 }

@@ -13,12 +13,12 @@ type equalMatcher struct {
 	expected any
 }
 
-func (m *equalMatcher) Match(v any) (vlatte.Result, error) {
+func (m *equalMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	if equalValues(m.expected, v, true) {
-		return success(), nil
+		return success()
 	}
 
-	return mismatch(strings.Join([]string{"Equal(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, "")), nil
+	return mismatch(strings.Join([]string{"Equal(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, ""))
 }
 
 func (m *equalMatcher) Describe() descriptor.Descriptor {

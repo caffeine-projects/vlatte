@@ -9,40 +9,40 @@ import (
 
 func TestAllOf(t *testing.T) {
 	t.Run("should return true when all matchers evaluates to true", func(t *testing.T) {
-		result, err := All(
+		ok, _, err := All(
 			StrictEqual("test"),
 			EqualIgnoreCase("TEST"),
 			ToUpper(StrictEqual("TEST")),
 			Contain("tes")).
 			Match("test")
 		require.NoError(t, err)
-		require.True(t, result.Pass)
+		require.True(t, ok)
 	})
 
 	t.Run("should return false when just one matcher evaluates to false", func(t *testing.T) {
-		result, err := All(
+		ok, _, err := All(
 			StrictEqual("test"),
 			EqualIgnoreCase("dev"),
 			ToUpper(StrictEqual("TEST")),
 			Contain("tes")).
 			Match("test")
 		require.NoError(t, err)
-		require.False(t, result.Pass)
+		require.False(t, ok)
 	})
 
 	t.Run("should return false when all matchers evaluates to false", func(t *testing.T) {
-		result, err := All(
+		ok, _, err := All(
 			StrictEqual("dev"),
 			EqualIgnoreCase("qa"),
 			ToUpper(StrictEqual("none")),
 			Contain("blah")).
 			Match("test")
 		require.NoError(t, err)
-		require.False(t, result.Pass)
+		require.False(t, ok)
 	})
 
 	t.Run("should return false and an error when any error occurs", func(t *testing.T) {
-		res, err := All(
+		ok, _, err := All(
 			StrictEqual("dev"),
 			EqualIgnoreCase("qa"),
 			ToUpper(StrictEqual("none")),
@@ -51,6 +51,6 @@ func TestAllOf(t *testing.T) {
 			})).
 			Match("test")
 		require.Error(t, err)
-		require.False(t, res.Pass)
+		require.False(t, ok)
 	})
 }

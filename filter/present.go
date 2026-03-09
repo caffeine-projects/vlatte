@@ -11,9 +11,9 @@ import (
 type bePresentMatcher struct {
 }
 
-func (m *bePresentMatcher) Match(v any) (vlatte.Result, error) {
+func (m *bePresentMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	if v == nil {
-		return vlatte.Result{}, nil
+		return false, vlatte.Reason("Present() value is nil"), nil
 	}
 
 	val := reflect.ValueOf(v)
@@ -21,19 +21,19 @@ func (m *bePresentMatcher) Match(v any) (vlatte.Result, error) {
 	switch val.Kind() {
 	case reflect.String, reflect.Array, reflect.Slice, reflect.Map, reflect.Struct, reflect.Interface:
 		if !val.IsZero() {
-			return success(), nil
+			return success()
 		}
 
-		return vlatte.Result{Message: "Present() Expected value to be present. Got: " + mfmt.Stringify(v)}, nil
+		return mismatch("Present() Expected value to be present. Got: " + mfmt.Stringify(v))
 	case reflect.Pointer:
 		if !val.IsNil() {
-			return success(), nil
+			return success()
 		}
 
-		return vlatte.Result{Message: "Present() Expected value to be present. Got: " + mfmt.Stringify(v)}, nil
+		return mismatch("Present() Expected value to be present. Got: " + mfmt.Stringify(v))
 	}
 
-	return vlatte.Result{Pass: true}, nil
+	return success()
 }
 
 func (m *bePresentMatcher) Describe() descriptor.Descriptor {

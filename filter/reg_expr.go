@@ -16,10 +16,10 @@ type regExpMatcher struct {
 	mu         sync.Mutex
 }
 
-func (m *regExpMatcher) Match(v any) (vlatte.Result, error) {
+func (m *regExpMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
-		return vlatte.Result{}, fmt.Errorf("regexp: it only works with string values. got: %T", v)
+		return false, ReasonError, fmt.Errorf("regexp: it only works with string values. got: %T", v)
 	}
 
 	if m.rg == nil {
@@ -27,7 +27,7 @@ func (m *regExpMatcher) Match(v any) (vlatte.Result, error) {
 		if m.rg == nil {
 			r, err := regexp.Compile(m.expression)
 			if err != nil {
-				return vlatte.Result{}, fmt.Errorf("regexp: error compiling expression %s. %w", m.expression, err)
+				return false, ReasonError, fmt.Errorf("regexp: error compiling expression %s. %w", m.expression, err)
 			}
 
 			m.rg = r
@@ -37,10 +37,10 @@ func (m *regExpMatcher) Match(v any) (vlatte.Result, error) {
 
 	match := m.rg.Match([]byte(txt))
 	if match {
-		return success(), nil
+		return success()
 	}
 
-	return vlatte.Result{Message: strings.Join([]string{"Match(", m.expression, ") Expression did not match. Got: ", txt}, "")}, nil
+	return mismatch(strings.Join([]string{"Match(", m.expression, ") Expression did not match. Got: ", txt}, ""))
 }
 
 func (m *regExpMatcher) Describe() descriptor.Descriptor {

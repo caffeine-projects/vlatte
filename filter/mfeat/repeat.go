@@ -14,14 +14,16 @@ type repeatMatcher struct {
 	hits int64
 }
 
-func (m *repeatMatcher) Match(_ any) (vlatte.Result, error) {
+func (m *repeatMatcher) Match(_ any) (bool, vlatte.Reason, error) {
 	if atomic.LoadInt64(&m.hits) < m.max {
-		return vlatte.Result{Pass: true}, nil
+		return true, vlatte.Reason(""), nil
 	}
 
-	return vlatte.Result{
-		Message: strings.Join([]string{"Repeat(", strconv.FormatInt(m.max, 10), ") Reached the max matched requests for this mock"}, ""),
-	}, nil
+	return false, vlatte.Reason(strings.Join([]string{
+		"Repeat(",
+		strconv.FormatInt(m.max, 10),
+		") Reached the max matched requests for this mock",
+	}, "")), nil
 }
 
 func (m *repeatMatcher) SetState() error {

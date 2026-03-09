@@ -14,17 +14,17 @@ type globMatcher struct {
 	pattern string
 }
 
-func (m *globMatcher) Match(v any) (vlatte.Result, error) {
+func (m *globMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	text, ok := v.(string)
 	if !ok {
-		return vlatte.Result{}, fmt.Errorf("glob: it only works with string types. got %T", v)
+		return false, ReasonError, fmt.Errorf("glob: it only works with string types. got %T", v)
 	}
 
 	if glob.Glob(m.pattern, text) {
-		return vlatte.Result{Pass: true}, nil
+		return success()
 	}
 
-	return vlatte.Result{Message: strings.Join([]string{"Glob(", m.pattern, ") ", text}, "")}, nil
+	return mismatch(strings.Join([]string{"Glob(", m.pattern, ") ", text}, ""))
 }
 
 func (m *globMatcher) Describe() descriptor.Descriptor {

@@ -13,34 +13,31 @@ type bothMatcher struct {
 	second vlatte.Filter
 }
 
-func (m *bothMatcher) Match(value any) (vlatte.Result, error) {
-	r1, err := m.first.Match(value)
+func (m *bothMatcher) Match(value any) (bool, vlatte.Reason, error) {
+	r1OK, r1Reason, err := m.first.Match(value)
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("both: first: %w", err)
+		return false, ReasonError, fmt.Errorf("both: first: %w", err)
 	}
 
-	r2, err := m.second.Match(value)
+	r2OK, r2Reason, err := m.second.Match(value)
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("both: first: %w", err)
+		return false, ReasonError, fmt.Errorf("both: first: %w", err)
 	}
 
-	if r1.Pass && r2.Pass {
-		return vlatte.Result{Pass: true}, nil
+	if r1OK && r2OK {
+		return true, ReasonNone, nil
 	}
 
-	message := ""
-	if !r1.Pass {
-		message = r1.Message
+	parts := []string{}
+	if !r1OK {
+		parts = append(parts, string(r1Reason))
 	}
 
-	if !r2.Pass {
-		if !r1.Pass {
-			message += " - "
-		}
-		message += r2.Message
+	if !r2OK {
+		parts = append(parts, string(r2Reason))
 	}
 
-	return vlatte.Result{Message: strings.Join([]string{"Both() ", message}, "")}, nil
+	return false, vlatte.Reason(strings.Join([]string{"Both()", strings.Join(parts, " - ")}, " ")), nil
 }
 
 func (m *bothMatcher) Describe() descriptor.Descriptor {

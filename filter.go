@@ -1,19 +1,15 @@
 package vlatte
 
+type Reason string
+
 // Filter matches values.
 type Filter interface {
-	Match(v any) (Result, error)
+	Match(v any) (bool, Reason, error)
 }
 
-// Result represents a matcher result.
-type Result struct {
-	Pass    bool   // Pass defines if matcher passed or not.
-	Message string // Message describes why the associated matcher did not pass.
-}
+type FilterFunc func(v any) (bool, Reason, error)
 
-type FilterFunc func(v any) (Result, error)
-
-func (f FilterFunc) Match(v any) (Result, error) { return f(v) }
+func (f FilterFunc) Match(v any) (bool, Reason, error) { return f(v) }
 
 // Stateful describes a matcher that has post processes that need to be executed
 // after the matched mock is served. Dedicated for stateful matchers.

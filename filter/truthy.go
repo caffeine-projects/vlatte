@@ -11,7 +11,7 @@ import (
 type truthyMatcher struct {
 }
 
-func (m *truthyMatcher) Match(v any) (vlatte.Result, error) {
+func (m *truthyMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	var b bool
 	var err error
 
@@ -25,14 +25,14 @@ func (m *truthyMatcher) Match(v any) (vlatte.Result, error) {
 	}
 
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("truthy: error parsing value to bool")
+		return false, ReasonError, fmt.Errorf("truthy: error parsing value to bool")
 	}
 
 	if !b {
-		return vlatte.Result{Message: "Truthy() Expected true but it is actually false"}, nil
+		return mismatch("Truthy() Expected true but it is actually false")
 	}
 
-	return vlatte.Result{Pass: true}, nil
+	return success()
 }
 
 func (m *truthyMatcher) Describe() descriptor.Descriptor {

@@ -12,22 +12,22 @@ type trimMatcher struct {
 	matcher vlatte.Filter
 }
 
-func (m *trimMatcher) Match(v any) (vlatte.Result, error) {
+func (m *trimMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
-		return vlatte.Result{}, fmt.Errorf("trim: type %T is not supported. accepted types: string", v)
+		return false, ReasonError, fmt.Errorf("trim: type %T is not supported. accepted types: string", v)
 	}
 
-	result, err := m.matcher.Match(strings.TrimSpace(txt))
+	result, _, err := m.matcher.Match(strings.TrimSpace(txt))
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("trim: %w", err)
+		return false, ReasonError, fmt.Errorf("trim: %w", err)
 	}
 
-	if result.Pass {
-		return vlatte.Result{Pass: true}, nil
+	if result {
+		return success()
 	}
 
-	return vlatte.Result{Message: strings.Join([]string{"Trim(", txt, ") ", result.Message}, "")}, nil
+	return mismatch(strings.Join([]string{"Trim(", txt, ")"}, ""))
 }
 
 func (m *trimMatcher) Describe() descriptor.Descriptor {

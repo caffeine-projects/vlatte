@@ -24,21 +24,21 @@ func TestURLPath(t *testing.T) {
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := URLPath(tt.path).Match(u)
+			ok, _, err := URLPath(tt.path).Match(u)
 
 			assert.Nil(t, err)
-			assert.Equal(t, tt.expected, result.Pass)
+			assert.Equal(t, tt.expected, ok)
 
-			result, err = URLPathMatch(Contain(tt.path)).Match(u)
+			ok, _, err = URLPathMatch(Contain(tt.path)).Match(u)
 
 			assert.Nil(t, err)
-			assert.Equal(t, tt.expected, result.Pass)
+			assert.Equal(t, tt.expected, ok)
 		})
 	}
 
 	t.Run("should return error when providing a type that is not handled by URLPath", func(t *testing.T) {
-		res, err := URLPath("/test/hello").Match(10)
+		ok, _, err := URLPath("/test/hello").Match(10)
 		require.Error(t, err)
-		require.False(t, res.Pass)
+		require.False(t, ok)
 	})
 }

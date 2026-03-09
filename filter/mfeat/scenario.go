@@ -62,7 +62,7 @@ type scenarioMatcher struct {
 	name          string
 }
 
-func (m *scenarioMatcher) Match(_ any) (vlatte.Result, error) {
+func (m *scenarioMatcher) Match(_ any) (bool, vlatte.Reason, error) {
 	if m.requiredState == ScenarioStateStarted {
 		rmu.Lock()
 		m.store.createNewIfNeeded(m.name)
@@ -73,16 +73,19 @@ func (m *scenarioMatcher) Match(_ any) (vlatte.Result, error) {
 	scn, ok := m.store.fetchByName(m.name)
 	rmu.RUnlock()
 	if !ok {
-		return vlatte.Result{Pass: true}, nil
+		return true, vlatte.Reason(""), nil
 	}
 
 	if scn.state == m.requiredState {
-		return vlatte.Result{Pass: true}, nil
+		return true, vlatte.Reason(""), nil
 	}
 
-	return vlatte.Result{
-		Message: fmt.Sprintf("Scenario(%s): Required state: %s. Actual: %s", scn.name, m.requiredState, scn.state),
-	}, nil
+	return false, vlatte.Reason(fmt.Sprintf(
+		"Scenario(%s): Required state: %s. Actual: %s",
+		scn.name,
+		m.requiredState,
+		scn.state,
+	)), nil
 }
 
 func (m *scenarioMatcher) SetState() error {

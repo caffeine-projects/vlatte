@@ -14,19 +14,17 @@ type lessMatcher struct {
 	expected float64
 }
 
-func (m *lessMatcher) Match(v any) (vlatte.Result, error) {
+func (m *lessMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	vv, err := mconv.ConvToFloat64(v)
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("lt: type %T is not supported. value must be compatible with float64. %w", v, err)
+		return false, ReasonError, fmt.Errorf("lt: type %T is not supported. value must be compatible with float64. %w", v, err)
 	}
 
 	if vv < m.expected {
-		return vlatte.Result{Pass: true}, nil
+		return success()
 	}
 
-	return vlatte.Result{
-		Message: strings.Join([]string{"Lt(", mfmt.Stringify(m.expected), ") Value is ", mfmt.Stringify(v)}, ""),
-	}, nil
+	return mismatch(strings.Join([]string{"Lt(", mfmt.Stringify(m.expected), ") Value is ", mfmt.Stringify(v)}, ""))
 }
 
 func (m *lessMatcher) Describe() descriptor.Descriptor {

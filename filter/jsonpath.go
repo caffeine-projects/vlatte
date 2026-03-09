@@ -18,14 +18,14 @@ type jsonPathMatcher struct {
 	name    string
 }
 
-func (m *jsonPathMatcher) Match(v any) (vlatte.Result, error) {
+func (m *jsonPathMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	var results []any
 
 	switch vv := v.(type) {
 	case string:
 		data, err := oj.ParseString(vv)
 		if err != nil {
-			return vlatte.Result{}, fmt.Errorf("field: %s: error parsing json: %w", m.path, err)
+			return false, ReasonError, fmt.Errorf("field: %s: error parsing json: %w", m.path, err)
 		}
 
 		results = m.expr.Get(data)
@@ -33,30 +33,30 @@ func (m *jsonPathMatcher) Match(v any) (vlatte.Result, error) {
 		results = m.expr.Get(vv)
 	}
 
-	var r vlatte.Result
-	var err error
+	var (
+		ok  bool
+		err error
+	)
 
 	size := len(results)
 	switch size {
 	case 0:
-		r, err = m.matcher.Match(nil)
+		ok, _, err = m.matcher.Match(nil)
 	case 1:
-		r, err = m.matcher.Match(results[0])
+		ok, _, err = m.matcher.Match(results[0])
 	default:
-		r, err = m.matcher.Match(results)
+		ok, _, err = m.matcher.Match(results)
 	}
 
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("field: %w", err)
+		return false, ReasonError, fmt.Errorf("field: %w", err)
 	}
 
-	if r.Pass {
-		return vlatte.Result{Pass: true}, nil
+	if ok {
+		return success()
 	}
 
-	return vlatte.Result{
-		Message: strings.Join([]string{"Field(", m.path, ") ", r.Message}, ""),
-	}, nil
+	return mismatch(strings.Join([]string{"Field(", m.path, ") value did not match"}, ""))
 }
 
 func (m *jsonPathMatcher) Describe() descriptor.Descriptor {

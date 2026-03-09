@@ -12,14 +12,14 @@ func TestPredicate(t *testing.T) {
 	})
 
 	t.Run("pass", func(t *testing.T) {
-		res, err := m.Match("ok")
+		ok, _, err := m.Match("ok")
 		require.NoError(t, err)
-		require.True(t, res.Pass)
+		require.True(t, ok)
 	})
 
 	t.Run("no pass", func(t *testing.T) {
-		res, err := m.Match("nok")
+		ok, _, err := m.Match("nok")
 		require.NoError(t, err)
-		require.False(t, res.Pass)
+		require.False(t, ok)
 	})
 }

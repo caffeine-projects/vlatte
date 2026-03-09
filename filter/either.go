@@ -13,34 +13,30 @@ type eitherMatcher struct {
 	second vlatte.Filter
 }
 
-func (m *eitherMatcher) Match(v any) (vlatte.Result, error) {
-	r1, err := m.first.Match(v)
+func (m *eitherMatcher) Match(v any) (bool, vlatte.Reason, error) {
+	r1OK, r1Reason, err := m.first.Match(v)
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("either: first: %w", err)
+		return false, ReasonError, fmt.Errorf("either: first: %w", err)
 	}
 
-	r2, err := m.second.Match(v)
+	r2OK, r2Reason, err := m.second.Match(v)
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("either: second: %w", err)
+		return false, ReasonError, fmt.Errorf("either: second: %w", err)
 	}
 
-	if r1.Pass || r2.Pass {
-		return vlatte.Result{Pass: true}, nil
+	if r1OK || r2OK {
+		return true, ReasonNone, nil
 	}
 
-	message := ""
-	if !r1.Pass {
-		message = r1.Message
+	parts := []string{}
+	if !r1OK {
+		parts = append(parts, string(r1Reason))
+	}
+	if !r2OK {
+		parts = append(parts, string(r2Reason))
 	}
 
-	if !r2.Pass {
-		if !r1.Pass {
-			message += " - "
-		}
-		message += r2.Message
-	}
-
-	return vlatte.Result{Message: strings.Join([]string{"Either() ", message}, "")}, nil
+	return false, vlatte.Reason(strings.Join([]string{"Either()", strings.Join(parts, " - ")}, " ")), nil
 }
 
 func (m *eitherMatcher) Describe() descriptor.Descriptor {

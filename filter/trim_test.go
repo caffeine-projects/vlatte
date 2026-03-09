@@ -7,8 +7,8 @@ import (
 )
 
 func TestTrim(t *testing.T) {
-	result, err := Trim(StrictEqual("test")).Match("  test  ")
+	ok, _, err := Trim(StrictEqual("test")).Match("  test  ")
 
 	require.NoError(t, err)
-	require.True(t, result.Pass)
+	require.True(t, ok)
 }

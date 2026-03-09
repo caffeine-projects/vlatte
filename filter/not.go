@@ -11,19 +11,17 @@ type notMatcher struct {
 	matcher vlatte.Filter
 }
 
-func (m *notMatcher) Match(v any) (vlatte.Result, error) {
-	result, err := m.matcher.Match(v)
+func (m *notMatcher) Match(v any) (bool, vlatte.Reason, error) {
+	ok, reason, err := m.matcher.Match(v)
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("not: %w", err)
+		return false, ReasonError, fmt.Errorf("not: %w", err)
 	}
 
-	if !result.Pass {
-		return vlatte.Result{Pass: true}, nil
+	if !ok {
+		return true, ReasonNone, nil
 	}
 
-	return vlatte.Result{
-		Message: fmt.Sprintf("!(%s)", result.Message),
-	}, nil
+	return false, vlatte.Reason(fmt.Sprintf("!(%s)", reason)), nil
 }
 
 func (m *notMatcher) Describe() descriptor.Descriptor {

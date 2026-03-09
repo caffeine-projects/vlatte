@@ -13,7 +13,7 @@ type itemsMatchMatcher struct {
 	expected any
 }
 
-func (m *itemsMatchMatcher) Match(v any) (vlatte.Result, error) {
+func (m *itemsMatchMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	a := reflect.ValueOf(v)
 	b := reflect.ValueOf(m.expected)
 
@@ -21,9 +21,10 @@ func (m *itemsMatchMatcher) Match(v any) (vlatte.Result, error) {
 	bLen := b.Len()
 
 	if aLen != bLen {
-		return vlatte.Result{
-			Message: strings.
-				Join([]string{"ItemsMatch() Expected value len to be ", strconv.Itoa(aLen), ". Got: ", strconv.Itoa(bLen)}, "")}, nil
+		return mismatch(strings.Join(
+			[]string{"ItemsMatch() Expected value len to be ", strconv.Itoa(aLen), ". Got: ", strconv.Itoa(bLen)},
+			"",
+		))
 	}
 
 	var extraA, extraB []interface{}
@@ -60,10 +61,10 @@ func (m *itemsMatchMatcher) Match(v any) (vlatte.Result, error) {
 	}
 
 	if len(extraA) == 0 && len(extraB) == 0 {
-		return vlatte.Result{Pass: true}, nil
+		return success()
 	}
 
-	return vlatte.Result{Message: "ItemsMatch() Items doesn't match"}, nil
+	return mismatch("ItemsMatch() Items doesn't match")
 }
 
 func (m *itemsMatchMatcher) Describe() descriptor.Descriptor {

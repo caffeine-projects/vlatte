@@ -14,7 +14,7 @@ type anyOfMatcher struct {
 	matchers []vlatte.Filter
 }
 
-func (m *anyOfMatcher) Match(v any) (r vlatte.Result, e error) {
+func (m *anyOfMatcher) Match(v any) (ok bool, reason vlatte.Reason, e error) {
 	var idx int
 	defer func() {
 		if recovery := recover(); recovery != nil {
@@ -26,20 +26,23 @@ func (m *anyOfMatcher) Match(v any) (r vlatte.Result, e error) {
 
 	for i, matcher := range m.matchers {
 		idx = i
-		result, err := matcher.Match(v)
+		result, r, err := matcher.Match(v)
 		if err != nil {
-			return vlatte.Result{}, fmt.Errorf("any: %d: %w", i, err)
+			return false, ReasonError, fmt.Errorf("any: %d: %w", i, err)
 		}
 
-		if !result.Pass {
-			mismatches = append(mismatches, result.Message)
+		if !result {
+			mismatches = append(mismatches, string(r))
 			continue
 		}
 
-		return success(), nil
+		return true, ReasonNone, nil
 	}
 
-	return vlatte.Result{Message: strings.Join([]string{"Any(", strconv.Itoa(len(m.matchers)), ")\n", mfmt.Indent(strings.Join(mismatches, "\n"))}, "")}, nil
+	return false, vlatte.Reason(strings.Join(
+		[]string{"Any(", strconv.Itoa(len(m.matchers)), ")\n", mfmt.Indent(strings.Join(mismatches, "\n"))},
+		"",
+	)), nil
 }
 
 func (m *anyOfMatcher) Describe() descriptor.Descriptor {

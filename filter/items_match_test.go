@@ -24,10 +24,10 @@ func TestEqualElementsMatcher(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := ItemsMatch(tc.value).Match(tc.expectedValue)
+			ok, _, err := ItemsMatch(tc.value).Match(tc.expectedValue)
 
 			require.NoError(t, err)
-			require.Equal(t, tc.expected, res.Pass)
+			require.Equal(t, tc.expected, ok)
 		})
 	}
 }

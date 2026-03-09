@@ -25,18 +25,18 @@ func TestSome(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := Some(tc.matcher).Match(tc.items)
+			ok, _, err := Some(tc.matcher).Match(tc.items)
 			require.NoError(t, err)
-			require.Equal(t, tc.expected, result.Pass)
+			require.Equal(t, tc.expected, ok)
 		})
 	}
 }
 
 func TestSomeErr(t *testing.T) {
-	res, err := Some(Function(func(_ any) (bool, error) {
+	ok, _, err := Some(Function(func(_ any) (bool, error) {
 		return false, errors.New("boom")
 	})).Match(true)
 
 	require.Error(t, err)
-	require.False(t, res.Pass)
+	require.False(t, ok)
 }

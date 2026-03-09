@@ -12,22 +12,22 @@ type upperCaseMatcher struct {
 	matcher vlatte.Filter
 }
 
-func (m *upperCaseMatcher) Match(v any) (vlatte.Result, error) {
+func (m *upperCaseMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
-		return vlatte.Result{}, fmt.Errorf("upper: type %T is not supported. accepted types: string", v)
+		return false, ReasonError, fmt.Errorf("upper: type %T is not supported. accepted types: string", v)
 	}
 
-	result, err := m.matcher.Match(strings.ToUpper(txt))
+	result, _, err := m.matcher.Match(strings.ToUpper(txt))
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("upper: %w", err)
+		return false, ReasonError, fmt.Errorf("upper: %w", err)
 	}
 
-	if result.Pass {
-		return vlatte.Result{Pass: true}, nil
+	if result {
+		return success()
 	}
 
-	return vlatte.Result{Message: strings.Join([]string{"Upper(", txt, ") ", result.Message}, "")}, nil
+	return mismatch(strings.Join([]string{"Upper(", txt, ")"}, ""))
 }
 
 func (m *upperCaseMatcher) Describe() descriptor.Descriptor {

@@ -76,15 +76,15 @@ func TestEqual(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := Equal(tc.value).Match(tc.valueToCompare)
+			ok, _, err := Equal(tc.value).Match(tc.valueToCompare)
 
 			assert.NoError(t, err)
-			assert.Equal(t, tc.result, res.Pass)
+			assert.Equal(t, tc.result, ok)
 
-			res, err = Eq(tc.valueToCompare).Match(tc.value)
+			ok, _, err = Eq(tc.valueToCompare).Match(tc.value)
 
 			assert.NoError(t, err)
-			assert.Equal(t, tc.result, res.Pass)
+			assert.Equal(t, tc.result, ok)
 		})
 	}
 }
@@ -104,9 +104,9 @@ func TestEqualf(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := Equalf(tc.format, tc.args...).Match(tc.value)
+			ok, _, err := Equalf(tc.format, tc.args...).Match(tc.value)
 			require.NoError(t, err)
-			require.Equal(t, tc.expected, res.Pass)
+			require.Equal(t, tc.expected, ok)
 		})
 	}
 }

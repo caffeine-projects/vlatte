@@ -12,21 +12,21 @@ type equalIgnoreCaseMatcher struct {
 	expected string
 }
 
-func (m *equalIgnoreCaseMatcher) Match(v any) (vlatte.Result, error) {
+func (m *equalIgnoreCaseMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	txt := ""
 	if v != nil {
 		var ok bool
 		txt, ok = v.(string)
 		if !ok {
-			return vlatte.Result{}, fmt.Errorf("eqi: value must be a string. got: %T", v)
+			return false, ReasonError, fmt.Errorf("eqi: value must be a string. got: %T", v)
 		}
 	}
 
 	if strings.EqualFold(m.expected, txt) {
-		return vlatte.Result{Pass: true}, nil
+		return success()
 	}
 
-	return mismatch(strings.Join([]string{"Eqi(", m.expected, ") Got: ", txt}, "")), nil
+	return mismatch(strings.Join([]string{"Eqi(", m.expected, ") Got: ", txt}, ""))
 }
 
 func (m *equalIgnoreCaseMatcher) Describe() descriptor.Descriptor {

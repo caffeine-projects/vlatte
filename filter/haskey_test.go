@@ -36,8 +36,8 @@ func TestHasKey(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.key, func(t *testing.T) {
-			result, err := HasKey(tc.key).Match(m)
-			require.Equal(t, tc.expected, result.Pass)
+			ok, _, err := HasKey(tc.key).Match(m)
+			require.Equal(t, tc.expected, ok)
 			require.Nil(t, err)
 		})
 	}

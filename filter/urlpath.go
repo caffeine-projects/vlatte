@@ -13,7 +13,7 @@ type urlPathMatcher struct {
 	matcher vlatte.Filter
 }
 
-func (m *urlPathMatcher) Match(v any) (vlatte.Result, error) {
+func (m *urlPathMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	var value string
 
 	switch e := v.(type) {
@@ -24,31 +24,31 @@ func (m *urlPathMatcher) Match(v any) (vlatte.Result, error) {
 	case string:
 		u, err := url.Parse(e)
 		if err != nil {
-			return vlatte.Result{}, fmt.Errorf("urlpath: error parsing url: %w", err)
+			return false, ReasonError, fmt.Errorf("urlpath: error parsing url: %w", err)
 		}
 
 		value = u.Path
 	case fmt.Stringer:
 		u, err := url.Parse(e.String())
 		if err != nil {
-			return vlatte.Result{}, fmt.Errorf("urlpath: error parsing url: %w", err)
+			return false, ReasonError, fmt.Errorf("urlpath: error parsing url: %w", err)
 		}
 
 		value = u.Path
 	default:
-		return vlatte.Result{}, fmt.Errorf("urlpath: it only accepts the types: *url.URL | url.URL | string. got: %T", v)
+		return false, ReasonError, fmt.Errorf("urlpath: it only accepts the types: *url.URL | url.URL | string. got: %T", v)
 	}
 
-	res, err := m.matcher.Match(value)
+	ok, _, err := m.matcher.Match(value)
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("urlpath: %w", err)
+		return false, ReasonError, fmt.Errorf("urlpath: %w", err)
 	}
 
-	if res.Pass {
-		return vlatte.Result{Pass: true}, nil
+	if ok {
+		return success()
 	}
 
-	return vlatte.Result{Message: strings.Join([]string{"URLPath(", value, ") ", res.Message}, "")}, nil
+	return mismatch(strings.Join([]string{"URLPath(", value, ")"}, ""))
 }
 
 func (m *urlPathMatcher) Describe() descriptor.Descriptor {

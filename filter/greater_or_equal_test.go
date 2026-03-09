@@ -24,17 +24,17 @@ func TestGreaterOrEqual(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := GreaterThanOrEqual(tc.expected).Match(tc.value)
+			ok, _, err := GreaterThanOrEqual(tc.expected).Match(tc.value)
 
 			require.NoError(t, err)
-			require.Equal(t, tc.result, res.Pass)
+			require.Equal(t, tc.result, ok)
 		})
 	}
 }
 
 func TestGreaterOrEqualUnhandledType(t *testing.T) {
-	res, err := Gte(10).Match(true)
+	ok, _, err := Gte(10).Match(true)
 
 	require.Error(t, err)
-	require.False(t, res.Pass)
+	require.False(t, ok)
 }

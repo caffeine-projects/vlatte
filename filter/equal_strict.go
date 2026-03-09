@@ -14,12 +14,12 @@ type equalStrictMatcher struct {
 	expected any
 }
 
-func (m *equalStrictMatcher) Match(v any) (vlatte.Result, error) {
+func (m *equalStrictMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	if reflect.DeepEqual(m.expected, v) {
-		return vlatte.Result{Pass: true}, nil
+		return success()
 	}
 
-	return mismatch(strings.Join([]string{"StrictEq(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, "")), nil
+	return mismatch(strings.Join([]string{"StrictEq(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, ""))
 }
 
 func (m *equalStrictMatcher) Describe() descriptor.Descriptor {

@@ -34,22 +34,22 @@ func TestItem(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(strconv.Itoa(tc.index), func(t *testing.T) {
-			res, err := Item(tc.index, tc.matcher).Match(v)
+			ok, _, err := Item(tc.index, tc.matcher).Match(v)
 
 			require.NoError(t, err)
-			require.Equal(t, tc.expected, res.Pass)
+			require.Equal(t, tc.expected, ok)
 		})
 	}
 }
 
 func TestItemInvalidIndex(t *testing.T) {
-	res, err := Item(-1, Equal("dev")).Match([]string{"dev"})
+	ok, _, err := Item(-1, Equal("dev")).Match([]string{"dev"})
 	require.Error(t, err)
-	require.False(t, res.Pass)
+	require.False(t, ok)
 }
 
 func TestInvalidType(t *testing.T) {
-	res, err := Item(0, Equal("dev")).Match(true)
+	ok, _, err := Item(0, Equal("dev")).Match(true)
 	require.Error(t, err)
-	require.False(t, res.Pass)
+	require.False(t, ok)
 }

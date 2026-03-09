@@ -11,10 +11,10 @@ type peekMatcher struct {
 	action  func(v any) error
 }
 
-func (m *peekMatcher) Match(v any) (vlatte.Result, error) {
+func (m *peekMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	err := m.action(v)
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("peek: %w", err)
+		return false, ReasonError, fmt.Errorf("peek: %w", err)
 	}
 
 	return m.matcher.Match(v)

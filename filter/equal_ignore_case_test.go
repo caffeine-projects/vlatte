@@ -3,7 +3,6 @@ package filter
 import (
 	"testing"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,17 +24,17 @@ func TestEqualIgnoreCase(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			var result vlatte.Result
+			var ok bool
 			var err error
 
 			if len(tc.expectedValueArgs) > 0 {
-				result, err = EqualIgnoreCasef(tc.expectedValue, tc.expectedValueArgs...).Match(tc.matchValue)
+				ok, _, err = EqualIgnoreCasef(tc.expectedValue, tc.expectedValueArgs...).Match(tc.matchValue)
 			} else {
-				result, err = Eqi(tc.expectedValue).Match(tc.matchValue)
+				ok, _, err = Eqi(tc.expectedValue).Match(tc.matchValue)
 			}
 
 			require.NoError(t, err)
-			require.Equal(t, tc.expected, result.Pass)
+			require.Equal(t, tc.expected, ok)
 		})
 	}
 }

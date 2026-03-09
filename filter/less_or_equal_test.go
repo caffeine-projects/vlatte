@@ -25,17 +25,17 @@ func TestOrEqualLess(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := LessThanOrEqual(tc.expected).Match(tc.value)
+			ok, _, err := LessThanOrEqual(tc.expected).Match(tc.value)
 
 			require.NoError(t, err)
-			require.Equal(t, tc.result, res.Pass)
+			require.Equal(t, tc.result, ok)
 		})
 	}
 }
 
 func TestLessOrEqualUnhandledType(t *testing.T) {
-	res, err := Lte(10).Match(true)
+	ok, _, err := Lte(10).Match(true)
 
 	require.Error(t, err)
-	require.False(t, res.Pass)
+	require.False(t, ok)
 }

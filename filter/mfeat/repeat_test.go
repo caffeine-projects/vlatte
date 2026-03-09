@@ -9,27 +9,27 @@ import (
 func TestRepeat(t *testing.T) {
 	rep := Repeat(2).(*repeatMatcher)
 
-	res, err := rep.Match(nil)
+	ok, _, err := rep.Match(nil)
 	assert.NoError(t, rep.SetState())
 
 	assert.NoError(t, err)
-	assert.True(t, res.Pass)
+	assert.True(t, ok)
 
-	res, err = rep.Match(nil)
+	ok, _, err = rep.Match(nil)
 	assert.NoError(t, rep.SetState())
 
 	assert.NoError(t, err)
-	assert.True(t, res.Pass)
+	assert.True(t, ok)
 
-	res, err = rep.Match(nil)
+	ok, _, err = rep.Match(nil)
 	assert.NoError(t, rep.SetState())
 
 	assert.NoError(t, err)
-	assert.False(t, res.Pass)
+	assert.False(t, ok)
 
-	res, err = rep.Match(nil)
+	ok, _, err = rep.Match(nil)
 	assert.NoError(t, rep.SetState())
 
 	assert.NoError(t, err)
-	assert.False(t, res.Pass)
+	assert.False(t, ok)
 }

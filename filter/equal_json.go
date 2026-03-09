@@ -14,7 +14,7 @@ type equalJSONMatcher struct {
 	expected any
 }
 
-func (m *equalJSONMatcher) Match(v any) (vlatte.Result, error) {
+func (m *equalJSONMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	var expJSON []byte
 	var err error
 
@@ -24,14 +24,14 @@ func (m *equalJSONMatcher) Match(v any) (vlatte.Result, error) {
 	default:
 		expJSON, err = json.Marshal(m.expected)
 		if err != nil {
-			return vlatte.Result{}, fmt.Errorf("equal_json: %w", err)
+			return false, ReasonError, fmt.Errorf("equal_json: %w", err)
 		}
 	}
 
 	var exp any
 	err = json.Unmarshal(expJSON, &exp)
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("equal_json: %w", err)
+		return false, ReasonError, fmt.Errorf("equal_json: %w", err)
 	}
 
 	switch vv := v.(type) {
@@ -39,21 +39,19 @@ func (m *equalJSONMatcher) Match(v any) (vlatte.Result, error) {
 		b := new(any)
 		err = json.Unmarshal([]byte(vv), b)
 		if err != nil {
-			return vlatte.Result{}, fmt.Errorf("equal_json: %w", err)
+			return false, ReasonError, fmt.Errorf("equal_json: %w", err)
 		}
 
 		if equalValues(*b, exp, false) {
-			return vlatte.Result{Pass: true}, nil
+			return success()
 		}
 	default:
 		if equalValues(v, exp, false) {
-			return vlatte.Result{Pass: true}, nil
+			return success()
 		}
 	}
 
-	return vlatte.Result{
-		Message: strings.Join([]string{"EqualJSON(", mfmt.Stringify(v), ") Got: ", string(expJSON)}, ""),
-	}, nil
+	return mismatch(strings.Join([]string{"EqualJSON(", mfmt.Stringify(v), ") Got: ", string(expJSON)}, ""))
 }
 
 func (m *equalJSONMatcher) Describe() descriptor.Descriptor {

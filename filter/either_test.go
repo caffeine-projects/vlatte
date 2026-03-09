@@ -23,31 +23,31 @@ func TestEither(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := Either(tc.matchers[0], tc.matchers[1]).Match("test")
+			ok, _, err := Either(tc.matchers[0], tc.matchers[1]).Match("test")
 			require.NoError(t, err)
-			require.Equal(t, tc.expected, result.Pass)
+			require.Equal(t, tc.expected, ok)
 		})
 	}
 }
 
 func TestEitherLeftErr(t *testing.T) {
-	result, err := Either(
+	ok, _, err := Either(
 		Function(func(_ any) (bool, error) {
 			return false, fmt.Errorf("fail")
 		}),
 		Contain("qa")).Match("test")
 
 	require.Error(t, err)
-	require.False(t, result.Pass)
+	require.False(t, ok)
 }
 
 func TestEitherRightErr(t *testing.T) {
-	result, err := Either(
+	ok, _, err := Either(
 		Contain("qa"),
 		Function(func(_ any) (bool, error) {
 			return false, fmt.Errorf("fail")
 		})).Match("test")
 
 	require.Error(t, err)
-	require.False(t, result.Pass)
+	require.False(t, ok)
 }

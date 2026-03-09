@@ -13,16 +13,17 @@ type lenMatcher struct {
 	length int
 }
 
-func (m *lenMatcher) Match(v any) (vlatte.Result, error) {
+func (m *lenMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	value := reflect.ValueOf(v)
 	actual := value.Len()
 	if actual == m.length {
-		return vlatte.Result{Pass: true}, nil
+		return success()
 	}
 
-	return vlatte.Result{
-		Message: strings.
-			Join([]string{"Len(", strconv.Itoa(m.length), ") Got: ", strconv.Itoa(actual)}, "")}, nil
+	return mismatch(strings.Join(
+		[]string{"Len(", strconv.Itoa(m.length), ") Got: ", strconv.Itoa(actual)},
+		"",
+	))
 }
 
 func (m *lenMatcher) Describe() descriptor.Descriptor {

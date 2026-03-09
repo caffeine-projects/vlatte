@@ -13,22 +13,22 @@ type splitMatcher struct {
 	matcher   vlatte.Filter
 }
 
-func (m *splitMatcher) Match(v any) (vlatte.Result, error) {
+func (m *splitMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
-		return vlatte.Result{}, fmt.Errorf("split: type %T is not supported. accepted types: string", v)
+		return false, ReasonError, fmt.Errorf("split: type %T is not supported. accepted types: string", v)
 	}
 
-	result, err := m.matcher.Match(strings.Split(txt, m.separator))
+	result, _, err := m.matcher.Match(strings.Split(txt, m.separator))
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("split: %w", err)
+		return false, ReasonError, fmt.Errorf("split: %w", err)
 	}
 
-	if result.Pass {
-		return vlatte.Result{Pass: true}, err
+	if result {
+		return success()
 	}
 
-	return vlatte.Result{Message: strings.Join([]string{"Split(", m.separator, ") ", result.Message}, "")}, nil
+	return mismatch(strings.Join([]string{"Split(", m.separator, ")"}, ""))
 }
 
 func (m *splitMatcher) Describe() descriptor.Descriptor {

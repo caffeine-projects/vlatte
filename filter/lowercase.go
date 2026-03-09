@@ -12,24 +12,22 @@ type lowerCaseMatcher struct {
 	matcher vlatte.Filter
 }
 
-func (m *lowerCaseMatcher) Match(v any) (vlatte.Result, error) {
+func (m *lowerCaseMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	txt, ok := v.(string)
 	if !ok {
-		return vlatte.Result{}, fmt.Errorf("lower: type %T is not supported. accepted types: string", v)
+		return false, ReasonError, fmt.Errorf("lower: type %T is not supported. accepted types: string", v)
 	}
 
-	result, err := m.matcher.Match(strings.ToLower(txt))
+	result, _, err := m.matcher.Match(strings.ToLower(txt))
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf("lower: %w", err)
+		return false, ReasonError, fmt.Errorf("lower: %w", err)
 	}
 
-	if result.Pass {
-		return vlatte.Result{Pass: true}, nil
+	if result {
+		return success()
 	}
 
-	return vlatte.Result{
-		Message: "Lower() " + result.Message,
-	}, nil
+	return mismatch("Lower() value did not match")
 }
 
 func (m *lowerCaseMatcher) Describe() descriptor.Descriptor {

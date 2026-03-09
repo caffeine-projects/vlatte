@@ -16,14 +16,14 @@ type hasKeyMatcher struct {
 	expr jp.Expr
 }
 
-func (m *hasKeyMatcher) Match(v any) (vlatte.Result, error) {
+func (m *hasKeyMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	var results []any
 
 	switch vv := v.(type) {
 	case string:
 		data, err := oj.ParseString(vv)
 		if err != nil {
-			return vlatte.Result{}, fmt.Errorf("has_key: %s: error parsing incoming json: %w", m.path, err)
+			return false, ReasonError, fmt.Errorf("has_key: %s: error parsing incoming json: %w", m.path, err)
 		}
 
 		results = m.expr.Get(data)
@@ -33,12 +33,10 @@ func (m *hasKeyMatcher) Match(v any) (vlatte.Result, error) {
 
 	size := len(results)
 	if size == 0 || (size == 1 && results[0] == nil) {
-		return vlatte.Result{
-			Message: strings.Join([]string{"HasKey(", m.path, ") Is not present"}, ""),
-		}, nil
+		return mismatch(strings.Join([]string{"HasKey(", m.path, ") Is not present"}, ""))
 	}
 
-	return vlatte.Result{Pass: true}, nil
+	return success()
 }
 
 func (m *hasKeyMatcher) Describe() descriptor.Descriptor {

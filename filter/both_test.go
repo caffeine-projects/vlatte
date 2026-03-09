@@ -23,20 +23,20 @@ func TestBothMatcher(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := Both(tc.matchers[0], tc.matchers[1]).Match("test")
+			ok, _, err := Both(tc.matchers[0], tc.matchers[1]).Match("test")
 			require.Nil(t, err)
-			require.Equal(t, tc.expected, result.Pass)
+			require.Equal(t, tc.expected, ok)
 		})
 	}
 }
 
 func TestBothMatcherErr(t *testing.T) {
-	result, err := Both(
+	ok, _, err := Both(
 		Function(func(_ any) (bool, error) {
 			return false, fmt.Errorf("fail")
 		}),
 		Contain("qa")).Match("test")
 
 	require.Error(t, err)
-	require.False(t, result.Pass)
+	require.False(t, ok)
 }

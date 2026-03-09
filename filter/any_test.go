@@ -9,29 +9,29 @@ import (
 
 func TestAnyOf(t *testing.T) {
 	t.Run("should return true if any of the given matchers returns true", func(t *testing.T) {
-		result, err := Any(
+		ok, _, err := Any(
 			StrictEqual("test"),
 			EqualIgnoreCase("dev"),
 			ToLower(StrictEqual("TEST")),
 			Contain("qa")).
 			Match("test")
 		require.Nil(t, err)
-		require.True(t, result.Pass)
+		require.True(t, ok)
 	})
 
 	t.Run("should return false if all of the given matchers returns false", func(t *testing.T) {
-		result, err := Any(
+		ok, _, err := Any(
 			StrictEqual("abc"),
 			EqualIgnoreCase("def"),
 			ToLower(StrictEqual("TEST")),
 			Contain("dev")).
 			Match("test")
 		require.Nil(t, err)
-		require.False(t, result.Pass)
+		require.False(t, ok)
 	})
 
 	t.Run("should return error and false when any error occurs", func(t *testing.T) {
-		res, err := Any(
+		ok, _, err := Any(
 			StrictEqual("dev"),
 			ToUpper(StrictEqual("none")),
 			Function(func(v any) (bool, error) {
@@ -40,6 +40,6 @@ func TestAnyOf(t *testing.T) {
 			EqualIgnoreCase("qa")).
 			Match("test")
 		require.Error(t, err)
-		require.False(t, res.Pass)
+		require.False(t, ok)
 	})
 }

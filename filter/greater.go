@@ -14,20 +14,18 @@ type greaterMatcher struct {
 	expected float64
 }
 
-func (m *greaterMatcher) Match(v any) (vlatte.Result, error) {
+func (m *greaterMatcher) Match(v any) (bool, vlatte.Reason, error) {
 	vv, err := mconv.ConvToFloat64(v)
 	if err != nil {
-		return vlatte.Result{}, fmt.Errorf(
+		return false, ReasonError, fmt.Errorf(
 			"gt: type %T is not supported. the value must be compatible with float64. %w", v, err)
 	}
 
 	if vv > m.expected {
-		return vlatte.Result{Pass: true}, nil
+		return success()
 	}
 
-	return vlatte.Result{
-		Message: strings.Join([]string{"Gt(", mfmt.Stringify(m.expected), ") Value is ", mfmt.Stringify(v)}, ""),
-	}, nil
+	return mismatch(strings.Join([]string{"Gt(", mfmt.Stringify(m.expected), ") Value is ", mfmt.Stringify(v)}, ""))
 }
 
 func (m *greaterMatcher) Describe() descriptor.Descriptor {

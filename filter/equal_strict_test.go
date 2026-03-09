@@ -48,21 +48,21 @@ func TestStrictEqual(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := StrictEqual(tc.value).Match(tc.valueToCompare)
+			ok, _, err := StrictEqual(tc.value).Match(tc.valueToCompare)
 
 			require.NoError(t, err)
-			require.Equal(t, tc.result, res.Pass)
+			require.Equal(t, tc.result, ok)
 
-			res, err = Eqs(tc.valueToCompare).Match(tc.value)
+			ok, _, err = Eqs(tc.valueToCompare).Match(tc.value)
 
 			require.NoError(t, err)
-			require.Equal(t, tc.result, res.Pass)
+			require.Equal(t, tc.result, ok)
 		})
 	}
 }
 
 func TestStrictEqualf(t *testing.T) {
-	result, err := StrictEqualf("hello %s %d", "world", 10).Match("hello world 10")
+	ok, _, err := StrictEqualf("hello %s %d", "world", 10).Match("hello world 10")
 	require.NoError(t, err)
-	require.True(t, result.Pass)
+	require.True(t, ok)
 }
