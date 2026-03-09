@@ -19,7 +19,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/filter"
-	"github.com/caffeine-projects/vlatte/filter/mbuild"
+	"github.com/caffeine-projects/vlatte/filter/filterbuilder"
 )
 
 var (
@@ -29,15 +29,15 @@ var (
 )
 
 const (
-	_fName                 = "name"
-	_fEnabled              = "enabled"
-	_fPriority             = "priority"
-	_fDelay                = "delay"
-	_fRepeat               = "repeat"
-	_fExtenders            = "ext"
-	_fOnComplete          = "on_complete"
-	_fOnCompleteName      = "name"
-	_fOnCompleteParams    = "parameters"
+	_fName             = "name"
+	_fEnabled          = "enabled"
+	_fPriority         = "priority"
+	_fDelay            = "delay"
+	_fRepeat           = "repeat"
+	_fExtenders        = "ext"
+	_fOnComplete       = "on_complete"
+	_fOnCompleteName   = "name"
+	_fOnCompleteParams = "parameters"
 
 	_fScenario              = "scenario"
 	_fScenarioName          = "scenario.name"
@@ -421,7 +421,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 
 			builder.Method(methods...)
 		default:
-			m, err := mbuild.BuildMatcher(mv)
+			m, err := filterbuilder.BuildMatcher(mv)
 			if err != nil {
 				return nil, fmt.Errorf("[request.method] error building matcher %v.\n%w", mv, err)
 			}
@@ -437,7 +437,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 		case string:
 			builder.Scheme(t)
 		default:
-			m, err := mbuild.BuildMatcher(scheme)
+			m, err := filterbuilder.BuildMatcher(scheme)
 			if err != nil {
 				return nil, fmt.Errorf("[request.scheme] error building matcher %v.\n%w", scheme, err)
 			}
@@ -462,7 +462,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 				builder.URL(filter.URLPath(u.Path))
 			}
 		default:
-			m, err := mbuild.BuildMatcher(uv)
+			m, err := filterbuilder.BuildMatcher(uv)
 			if err != nil {
 				return nil, fmt.Errorf("[request.url] error building url.\n%w", err)
 			}
@@ -478,7 +478,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 		case string:
 			builder.URL(filter.URLPath(e))
 		default:
-			m, err := mbuild.BuildMatcher(uv)
+			m, err := filterbuilder.BuildMatcher(uv)
 			if err != nil {
 				return nil, fmt.Errorf("[request.url_path] error building matcher.\n%w", err)
 			}
@@ -488,7 +488,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 	}
 
 	for k, v := range vi.GetStringMap(_fRequestQuery) {
-		m, err := mbuild.TryBuildMatcher(v)
+		m, err := filterbuilder.TryBuildMatcher(v)
 		if err != nil {
 			return nil,
 				fmt.Errorf("[request.query[%s]] error building matcher.\n%w", k, err)
@@ -498,7 +498,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 	}
 
 	for k, v := range vi.GetStringMap(_fRequestQueries) {
-		m, err := mbuild.TryBuildMatcher(v)
+		m, err := filterbuilder.TryBuildMatcher(v)
 		if err != nil {
 			return nil,
 				fmt.Errorf("[request.queries[%s]] error building matcher.\n%w", k, err)
@@ -508,7 +508,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 	}
 
 	for k, v := range vi.GetStringMap(_fRequestHeader) {
-		m, err := mbuild.TryBuildMatcher(v)
+		m, err := filterbuilder.TryBuildMatcher(v)
 		if err != nil {
 			return nil,
 				fmt.Errorf("[request.header[%s]] error building matcher.\n%w", k, err)
@@ -518,7 +518,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 	}
 
 	for k, v := range vi.GetStringMap(_fRequestForm) {
-		m, err := mbuild.TryBuildMatcher(v)
+		m, err := filterbuilder.TryBuildMatcher(v)
 		if err != nil {
 			return nil,
 				fmt.Errorf("[request.form[%s]] error building matcher.\n%w", k, err)
@@ -528,7 +528,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 	}
 
 	if vi.IsSet(_fRequestBody) {
-		m, err := mbuild.TryBuildMatcher(vi.Get(_fRequestBody))
+		m, err := filterbuilder.TryBuildMatcher(vi.Get(_fRequestBody))
 		if err != nil {
 			return nil,
 				fmt.Errorf("[request.body] error building matcher.\n%w", err)

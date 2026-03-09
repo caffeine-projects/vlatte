@@ -1,5 +1,5 @@
 // Package mbuild implements functions to build Matcher instances from external sources.
-package mbuild
+package filterbuilder
 
 import (
 	"fmt"
