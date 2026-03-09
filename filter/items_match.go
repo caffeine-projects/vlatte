@@ -1,77 +1,11 @@
 package filter
 
 import (
-	"reflect"
-	"strconv"
-	"strings"
-
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/filter/filtertype"
 )
 
-type itemsMatchMatcher struct {
-	expected any
-}
-
-func (m *itemsMatchMatcher) Match(v any) (bool, vlatte.Reason, error) {
-	a := reflect.ValueOf(v)
-	b := reflect.ValueOf(m.expected)
-
-	aLen := a.Len()
-	bLen := b.Len()
-
-	if aLen != bLen {
-		return mismatch(strings.Join(
-			[]string{"ItemsMatch() Expected value len to be ", strconv.Itoa(aLen), ". Got: ", strconv.Itoa(bLen)},
-			"",
-		))
-	}
-
-	var extraA, extraB []interface{}
-
-	visited := make([]bool, bLen)
-
-	for i := 0; i < aLen; i++ {
-		element := a.Index(i).Interface()
-		found := false
-
-		for j := 0; j < bLen; j++ {
-			if visited[j] {
-				continue
-			}
-
-			if equalValues(b.Index(j).Interface(), element, false) {
-				visited[j] = true
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			extraA = append(extraA, element)
-		}
-	}
-
-	for j := 0; j < bLen; j++ {
-		if visited[j] {
-			continue
-		}
-
-		extraB = append(extraB, b.Index(j).Interface())
-	}
-
-	if len(extraA) == 0 && len(extraB) == 0 {
-		return success()
-	}
-
-	return mismatch("ItemsMatch() Items doesn't match")
-}
-
-func (m *itemsMatchMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("itemsMatch", m.expected)
-}
-
-// ItemsMatch if the given array items match with the incoming request value array.
+// ItemsMatch matches when the value slice has the same elements as expected (order-independent).
 func ItemsMatch(items any) vlatte.Filter {
-	return &itemsMatchMatcher{expected: items}
+	return &filtertype.ItemsMatchMatcher{Expected: items}
 }

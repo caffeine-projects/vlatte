@@ -1,0 +1,61 @@
+package filtertype
+
+import (
+	"fmt"
+	"reflect"
+	"strings"
+
+	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/filter/internal"
+	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
+	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+)
+
+// SomeMatcher passes when at least one element matches the inner matcher.
+type SomeMatcher struct {
+	Matcher vlatte.Filter
+}
+
+// Match implements vlatte.Filter.
+func (m *SomeMatcher) Match(v any) (bool, vlatte.Reason, error) {
+	if v == nil {
+		return internal.Mismatch("Some() Expected some values to match but got nil")
+	}
+
+	typeOfV := reflect.TypeOf(v)
+	kind := typeOfV.Kind()
+	if kind != reflect.Slice && kind != reflect.Array {
+		return internal.Error(fmt.Errorf("some: matcher only works with slices. got: %v", typeOfV))
+	}
+
+	vv := reflect.ValueOf(v)
+	if vv.IsZero() {
+		return internal.Mismatch("Some() Expected some values to match but got zero")
+	}
+
+	length := vv.Len()
+	messages := make([]string, 0, length)
+
+	for i := 0; i < length; i++ {
+		ok, reason, err := m.Matcher.Match(vv.Index(i).Interface())
+		if err != nil {
+			return internal.Error(fmt.Errorf("some: %w", err))
+		}
+
+		if ok {
+			return internal.Success()
+		}
+
+		messages = append(messages, string(reason))
+	}
+
+	return internal.Mismatch(fmt.Sprintf(
+		"Some()\n%s",
+		mfmt.Indent(strings.Join(messages, "\n")),
+	))
+}
+
+// Describe implements descriptor.SelfDescriptive.
+func (m *SomeMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("some", Describe(m.Matcher))
+}

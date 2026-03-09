@@ -2,73 +2,22 @@ package filter
 
 import (
 	"fmt"
-	"net/url"
-	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/filter/filtertype"
 )
 
-type urlPathMatcher struct {
-	matcher vlatte.Filter
-}
-
-func (m *urlPathMatcher) Match(v any) (bool, vlatte.Reason, error) {
-	var value string
-
-	switch e := v.(type) {
-	case *url.URL:
-		value = e.Path
-	case url.URL:
-		value = e.Path
-	case string:
-		u, err := url.Parse(e)
-		if err != nil {
-			return false, ReasonError, fmt.Errorf("urlpath: error parsing url: %w", err)
-		}
-
-		value = u.Path
-	case fmt.Stringer:
-		u, err := url.Parse(e.String())
-		if err != nil {
-			return false, ReasonError, fmt.Errorf("urlpath: error parsing url: %w", err)
-		}
-
-		value = u.Path
-	default:
-		return false, ReasonError, fmt.Errorf("urlpath: it only accepts the types: *url.URL | url.URL | string. got: %T", v)
-	}
-
-	ok, _, err := m.matcher.Match(value)
-	if err != nil {
-		return false, ReasonError, fmt.Errorf("urlpath: %w", err)
-	}
-
-	if ok {
-		return success()
-	}
-
-	return mismatch(strings.Join([]string{"URLPath(", value, ")"}, ""))
-}
-
-func (m *urlPathMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("urlPath", describe(m.matcher))
-}
-
-// URLPath compares the URL path with the expected value and matches if they are equal.
-// Comparison is case-insensitive.
+// URLPath compares the URL path with the expected value (glob match).
 func URLPath(expected string) vlatte.Filter {
 	return URLPathMatch(GlobMatch(expected))
 }
 
-// URLPathf compares the URL path with the expected value and matches if they are equal.
-// The expected value will be formatted according to the given format specifier.
-// Comparison is case-insensitive.
+// URLPathf compares the URL path with the formatted expected value.
 func URLPathf(format string, a ...any) vlatte.Filter {
 	return URLPathMatch(GlobMatch(fmt.Sprintf(format, a...)))
 }
 
 // URLPathMatch applies the provided matcher to the URL path.
 func URLPathMatch(matcher vlatte.Filter) vlatte.Filter {
-	return &urlPathMatcher{matcher: matcher}
+	return &filtertype.URLPathMatcher{Matcher: matcher}
 }

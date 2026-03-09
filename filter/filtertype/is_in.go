@@ -1,0 +1,43 @@
+package filtertype
+
+import (
+	"fmt"
+	"reflect"
+
+	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/filter/internal"
+	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+)
+
+// IsContainedInMatcher passes when the value is contained in the items slice.
+type IsContainedInMatcher struct {
+	Items any
+}
+
+// Match implements vlatte.Filter.
+func (m *IsContainedInMatcher) Match(v any) (bool, vlatte.Reason, error) {
+	typeOfItems := reflect.TypeOf(m.Items)
+	kind := typeOfItems.Kind()
+	if kind != reflect.Slice && kind != reflect.Array {
+		return internal.Error(fmt.Errorf("is_in: it only works with slices. got: %v", typeOfItems))
+	}
+
+	valueOf := reflect.ValueOf(m.Items)
+
+	for i := 0; i < valueOf.Len(); i++ {
+		if internal.EqualValues(v, valueOf.Index(i).Interface(), false) {
+			return internal.Success()
+		}
+	}
+
+	return internal.Mismatch(fmt.Sprintf(
+		"IsIn() Value %v is not contained in %v",
+		v,
+		m.Items,
+	))
+}
+
+// Describe implements descriptor.SelfDescriptive.
+func (m *IsContainedInMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("isIn", m.Items)
+}

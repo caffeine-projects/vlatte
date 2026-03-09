@@ -7,24 +7,24 @@ import (
 )
 
 func TestScenario(t *testing.T) {
-	t.Run("should init scenario as started", func(t *testing.T) {
-		assert.True(t, newScenarioState("test").hasStarted())
+	t.Run("should match when required state is started and scenario is created", func(t *testing.T) {
+		store := NewScenarioStore()
+		matcher := Scenario(store, "scenario-1", ScenarioStateStarted, "second")
+
+		ok, _, err := matcher.Match(nil)
+		assert.NoError(t, err)
+		assert.True(t, ok)
 	})
 
-	t.Run("should only create scenario if needed", func(t *testing.T) {
+	t.Run("should match when state equals required state", func(t *testing.T) {
 		store := NewScenarioStore()
-		store.createNewIfNeeded("scenario-1")
+		_, _, _ = Scenario(store, "s1", ScenarioStateStarted, "second").Match(nil)
+		stateful, _ := Scenario(store, "s1", ScenarioStateStarted, "second").(interface{ SetState() error })
+		_ = stateful.SetState()
 
-		s, ok := store.fetchByName("scenario-1")
+		matcher := Scenario(store, "s1", "second", "")
+		ok, _, err := matcher.Match(nil)
+		assert.NoError(t, err)
 		assert.True(t, ok)
-		assert.True(t, s.hasStarted())
-
-		s.state = "another-state"
-		store.createNewIfNeeded("scenario-1")
-
-		s, ok = store.fetchByName("scenario-1")
-		assert.True(t, ok)
-		assert.False(t, s.hasStarted())
-		assert.Equal(t, s.state, "another-state")
 	})
 }

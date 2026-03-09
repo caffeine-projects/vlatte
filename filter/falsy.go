@@ -1,45 +1,11 @@
 package filter
 
 import (
-	"fmt"
-	"strconv"
-
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/filter/filtertype"
 )
-
-type falsyMatcher struct {
-}
-
-func (m *falsyMatcher) Match(v any) (bool, vlatte.Reason, error) {
-	var b bool
-	var err error
-
-	switch e := v.(type) {
-	case bool:
-		b = e
-	case string:
-		b, err = strconv.ParseBool(e)
-	case int:
-		b, err = strconv.ParseBool(strconv.FormatInt(int64(e), 10))
-	}
-
-	if err != nil {
-		return false, ReasonError, fmt.Errorf("falsy: error parsing value to bool")
-	}
-
-	if b {
-		return mismatch("Falsy() Expected false but it is actually true")
-	}
-
-	return success()
-}
-
-func (m *falsyMatcher) Describe() descriptor.Descriptor {
-	return descriptor.KeyOnly("falsy")
-}
 
 // Falsy checks if the incoming request value is false.
 func Falsy() vlatte.Filter {
-	return &falsyMatcher{}
+	return &filtertype.FalsyMatcher{}
 }

@@ -1,40 +1,11 @@
 package filter
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/filter/filtertype"
 )
 
-type lowerCaseMatcher struct {
-	matcher vlatte.Filter
-}
-
-func (m *lowerCaseMatcher) Match(v any) (bool, vlatte.Reason, error) {
-	txt, ok := v.(string)
-	if !ok {
-		return false, ReasonError, fmt.Errorf("lower: type %T is not supported. accepted types: string", v)
-	}
-
-	result, _, err := m.matcher.Match(strings.ToLower(txt))
-	if err != nil {
-		return false, ReasonError, fmt.Errorf("lower: %w", err)
-	}
-
-	if result {
-		return success()
-	}
-
-	return mismatch("Lower() value did not match")
-}
-
-func (m *lowerCaseMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("lowercase", describe(m.matcher))
-}
-
-// ToLower lowers the incoming request value case value before submitting it to provided matcher.
+// ToLower lowers the incoming request value case before submitting it to the provided matcher.
 func ToLower(matcher vlatte.Filter) vlatte.Filter {
-	return &lowerCaseMatcher{matcher: matcher}
+	return &filtertype.LowerCaseMatcher{Matcher: matcher}
 }

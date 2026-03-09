@@ -2,45 +2,23 @@ package filter
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/filter/filtertype"
 )
-
-type equalMatcher struct {
-	expected any
-}
-
-func (m *equalMatcher) Match(v any) (bool, vlatte.Reason, error) {
-	if equalValues(m.expected, v, true) {
-		return success()
-	}
-
-	return mismatch(strings.Join([]string{"Equal(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, ""))
-}
-
-func (m *equalMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("eq", m.expected)
-}
 
 // Equal asserts that the given expectation is equal to the incoming request value.
 // It considers equivalent value. Eg.: float64(10) is equal to int(10).
 func Equal(expected any) vlatte.Filter {
-	return &equalMatcher{expected: expected}
+	return &filtertype.EqualMatcher{Expected: expected}
 }
 
 // Equalf returns true if the matcher value is equal to the given parameter value.
-// It considers equivalent value. Eg.: float64(10) is equal to int(10).
-// This is short-hand to format the expected value.
 func Equalf(format string, a ...any) vlatte.Filter {
-	return &equalMatcher{expected: fmt.Sprintf(format, a...)}
+	return &filtertype.EqualMatcher{Expected: fmt.Sprintf(format, a...)}
 }
 
 // Eq is an alias to Equal.
-// It asserts that the given expectation is equal to the incoming request value.
-// It considers equivalent value. Eg.: float64(10) is equal to int(10).
 func Eq(expected any) vlatte.Filter {
-	return &equalMatcher{expected: expected}
+	return &filtertype.EqualMatcher{Expected: expected}
 }

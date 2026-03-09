@@ -1,11 +1,12 @@
-package filter
+package internal
 
 import (
 	"reflect"
 	"strconv"
 )
 
-func equalValues(expected any, actual any, lenient bool) bool {
+// EqualValues reports whether expected and actual are equal, optionally with lenient type conversion.
+func EqualValues(expected, actual any, lenient bool) bool {
 	if reflect.DeepEqual(expected, actual) {
 		return true
 	}
@@ -53,7 +54,7 @@ func equalValues(expected any, actual any, lenient bool) bool {
 			a := actualValue.Index(i).Interface()
 			b := expectedValue.Index(i).Interface()
 
-			if !equalValues(b, a, lenient) {
+			if !EqualValues(b, a, lenient) {
 				return false
 			}
 		}
@@ -84,7 +85,7 @@ func equalValues(expected any, actual any, lenient bool) bool {
 				return false
 			}
 
-			if !equalValues(expectedEntry.Interface(), actualEntry.Interface(), lenient) {
+			if !EqualValues(expectedEntry.Interface(), actualEntry.Interface(), lenient) {
 				return false
 			}
 		}
@@ -105,7 +106,7 @@ func laxEq(aKind, bKind reflect.Kind, aValue, bValue reflect.Value, lenient bool
 				return false
 			}
 
-			return equalValues(a, bValue.Float(), lenient)
+			return EqualValues(a, bValue.Float(), lenient)
 
 		case reflect.Bool:
 			a, err := strconv.ParseBool(aValue.String())
@@ -113,7 +114,7 @@ func laxEq(aKind, bKind reflect.Kind, aValue, bValue reflect.Value, lenient bool
 				return false
 			}
 
-			return equalValues(a, bValue.Bool(), lenient)
+			return EqualValues(a, bValue.Bool(), lenient)
 
 		case reflect.Int, reflect.Int32, reflect.Int64:
 			a, err := strconv.ParseInt(aValue.String(), 10, 64)
@@ -121,7 +122,7 @@ func laxEq(aKind, bKind reflect.Kind, aValue, bValue reflect.Value, lenient bool
 				return false
 			}
 
-			return equalValues(a, bValue.Int(), lenient)
+			return EqualValues(a, bValue.Int(), lenient)
 		}
 	}
 

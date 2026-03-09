@@ -1,0 +1,43 @@
+package filtertype
+
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/filter/internal"
+	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+)
+
+// FalsyMatcher passes when the value is false.
+type FalsyMatcher struct{}
+
+// Match implements vlatte.Filter.
+func (m *FalsyMatcher) Match(v any) (bool, vlatte.Reason, error) {
+	var b bool
+	var err error
+
+	switch e := v.(type) {
+	case bool:
+		b = e
+	case string:
+		b, err = strconv.ParseBool(e)
+	case int:
+		b, err = strconv.ParseBool(strconv.FormatInt(int64(e), 10))
+	}
+
+	if err != nil {
+		return internal.Error(fmt.Errorf("falsy: error parsing value to bool"))
+	}
+
+	if b {
+		return internal.Mismatch("Falsy() Expected false but it is actually true")
+	}
+
+	return internal.Success()
+}
+
+// Describe implements descriptor.SelfDescriptive.
+func (m *FalsyMatcher) Describe() descriptor.Descriptor {
+	return descriptor.KeyOnly("falsy")
+}

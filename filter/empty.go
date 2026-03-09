@@ -1,39 +1,11 @@
 package filter
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/filter/filtertype"
 )
 
-type emptyMatcher struct {
-}
-
-func (m *emptyMatcher) Match(v any) (bool, vlatte.Reason, error) {
-	if v == nil {
-		return success()
-	}
-
-	result, _, err := Len(0).Match(v)
-	if err != nil {
-		return false, ReasonError, fmt.Errorf("empty: %w", err)
-	}
-
-	if result {
-		return success()
-	}
-
-	return mismatch(strings.Join([]string{"Empty(", mfmt.Stringify(v), ")"}, ""))
-}
-
-func (m *emptyMatcher) Describe() descriptor.Descriptor {
-	return descriptor.KeyOnly("empty")
-}
-
-// Empty passes if the incoming request value is empty or has zero value.
+// Empty matches when the value is empty (slice, map, or string).
 func Empty() vlatte.Filter {
-	return &emptyMatcher{}
+	return &filtertype.EmptyMatcher{}
 }

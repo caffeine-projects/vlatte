@@ -1,28 +1,11 @@
 package filter
 
 import (
-	"fmt"
-
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/filter/filtertype"
 )
 
-type peekMatcher struct {
-	matcher vlatte.Filter
-	action  func(v any) error
-}
-
-func (m *peekMatcher) Match(v any) (bool, vlatte.Reason, error) {
-	err := m.action(v)
-	if err != nil {
-		return false, ReasonError, fmt.Errorf("peek: %w", err)
-	}
-
-	return m.matcher.Match(v)
-}
-
-// Peek will return the expected of the given matcher, after executing the provided function.
-// Peek can be used to check the matcher argument.
+// Peek runs an action on the value then matches with the inner matcher.
 func Peek(matcher vlatte.Filter, action func(v any) error) vlatte.Filter {
-	return &peekMatcher{matcher: matcher, action: action}
+	return &filtertype.PeekMatcher{Matcher: matcher, Action: action}
 }
-

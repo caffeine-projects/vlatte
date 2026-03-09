@@ -2,21 +2,10 @@ package filter
 
 import (
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/filter/filtertype"
 )
-
-type anythingMatcher struct {
-}
-
-func (m *anythingMatcher) Match(_ any) (bool, vlatte.Reason, error) {
-	return true, ReasonNone, nil
-}
-
-func (m *anythingMatcher) Describe() descriptor.Descriptor {
-	return descriptor.KeyOnly("anything")
-}
 
 // Anything is an empty matcher that always passes.
 func Anything() vlatte.Filter {
-	return &anythingMatcher{}
+	return &filtertype.AnythingMatcher{}
 }
