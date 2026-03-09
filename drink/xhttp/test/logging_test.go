@@ -31,8 +31,8 @@ func TestLogging(t *testing.T) {
 		UseDescriptiveLogger().
 		RequestBodyParsers(
 			&testBodyParser{"PANIC", func() error { panic("BOOM") }},
-			&testBodyParser{"ERROR", func() error { return errors.New("FAIL") }})).
-		CloseWithT(t)
+			&testBodyParser{"ERROR", func() error { return errors.New("FAIL") }}))
+	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustBrew(Getf("/test").Reply(OK()))
 

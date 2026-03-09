@@ -12,10 +12,9 @@ import (
 )
 
 func TestReplyEcho(t *testing.T) {
-	m := New().CloseWithT(t)
+	m := New()
+	t.Cleanup(func() { m.Close() })
 	m.MustStart()
-
-	defer m.Close()
 
 	expectedBody := `{"status":"ok"}`
 	scope := m.MustBrew(Postf("/test").Reply(Echo().Log()))

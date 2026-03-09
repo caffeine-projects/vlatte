@@ -30,7 +30,7 @@ func (p testBodyParser) Parse(body []byte, _ *http.Request) (any, error) {
 }
 
 type customTestServer struct {
-	decorated Server
+	decorated vlatte.Server[*HTTPMockApp]
 }
 
 func (s *customTestServer) Setup(app *HTTPMockApp, handler http.Handler) error {
@@ -49,16 +49,8 @@ func (s *customTestServer) Close() error {
 	return s.decorated.Close()
 }
 
-func (s *customTestServer) CloseNow() error {
-	return s.decorated.CloseNow()
-}
-
-func (s *customTestServer) Info() *ServerInfo {
+func (s *customTestServer) Info() *vlatte.ServerInfo {
 	return s.decorated.Info()
-}
-
-func (s *customTestServer) S() any {
-	return s.decorated.S()
 }
 
 func TestConfig(t *testing.T) {
@@ -70,10 +62,9 @@ func TestConfig(t *testing.T) {
 			addr = "127.0.0.1:3000"
 		}
 
-		m := New(Setup().Addr(addr)).CloseWithT(t)
+		m := New(Setup().Addr(addr))
+		t.Cleanup(func() { m.Close() })
 		m.MustStart()
-
-		defer m.Close()
 
 		scoped := m.MustBrew(
 			Getf("/test").
@@ -90,9 +81,8 @@ func TestConfig(t *testing.T) {
 
 	t.Run("request body parsers from config should take precedence", func(t *testing.T) {
 		m := New(Setup().RequestBodyParsers(&testBodyParser{}))
+		t.Cleanup(func() { m.Close() })
 		m.MustStart()
-
-		defer m.Close()
 
 		scoped := m.MustBrew(Post(filter.URLPath("/test")).
 			Body(filter.StrictEqual(10)).
@@ -122,9 +112,8 @@ func TestConfig(t *testing.T) {
 		}
 
 		m := New(Setup().Middlewares(middleware))
+		t.Cleanup(func() { m.Close() })
 		m.MustStart()
-
-		defer m.Close()
 
 		scoped := m.MustBrew(
 			Get(filter.URLPath("/test")).
@@ -141,9 +130,8 @@ func TestConfig(t *testing.T) {
 
 	t.Run("configure custom server", func(t *testing.T) {
 		m := New(Setup().Server(&customTestServer{decorated: newServer()}))
+		t.Cleanup(func() { m.Close() })
 		m.MustStart()
-
-		defer m.Close()
 
 		scoped := m.MustBrew(
 			Get(filter.URLPath("/test")).

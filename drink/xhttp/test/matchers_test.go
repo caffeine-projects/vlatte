@@ -145,7 +145,8 @@ func TestMatcherCombinations(t *testing.T) {
 }
 
 func TestMatchers_MultipleMethods(t *testing.T) {
-	m := New().CloseWithT(t)
+	m := New()
+	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustBrew(FromFile("testdata/matchers/03_url_template.yaml"))
 
@@ -171,7 +172,8 @@ func TestMatchers_MultipleMethods(t *testing.T) {
 }
 
 func TestMatchers_URLMatchRegex(t *testing.T) {
-	m := New().CloseWithT(t)
+	m := New()
+	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustBrew(FromFile("testdata/matchers/04_url_match.yaml"))
 
@@ -190,7 +192,8 @@ func TestMatchers_URLMatchRegex(t *testing.T) {
 }
 
 func TestMatchers_URLCustomMatcher(t *testing.T) {
-	m := New().CloseWithT(t)
+	m := New()
+	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustBrew(FromFile("testdata/matchers/05_url_custom_matcher.yaml"))
 
@@ -209,7 +212,8 @@ func TestMatchers_URLCustomMatcher(t *testing.T) {
 }
 
 func TestMatchers_PathCustomMatcher(t *testing.T) {
-	m := New().CloseWithT(t)
+	m := New()
+	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustBrew(FromFile("testdata/matchers/06_path_custom_matcher.yaml"))
 
@@ -232,7 +236,7 @@ func TestMatchers_URLFragment(t *testing.T) {
 	m.MustStart()
 	m.MustBrew(Getf("/test").URLFragmentf("contacts").Reply(OK().BodyText("hello world")))
 
-	t.Cleanup(m.Close)
+	t.Cleanup(func() { m.Close() })
 
 	// no fragment
 	client := &http.Client{}
@@ -262,7 +266,8 @@ func TestMatchers_URLFragment(t *testing.T) {
 }
 
 func TestMatchers_NoReply_ShouldReturn200ByDefault(t *testing.T) {
-	m := New().CloseWithT(t)
+	m := New()
+	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustBrew(FromFile("testdata/matchers/07_no_reply.yaml"))
 

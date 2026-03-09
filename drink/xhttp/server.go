@@ -9,53 +9,23 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/go-chi/chi/v5"
 )
 
-var _ Server = (*httpTestServer)(nil)
-
-// ServerInfo holds HTTP server information, like its URL.
-type ServerInfo struct {
-	URL string
-}
-
-// Server defines HTTP mock server operations.
-type Server interface {
-	// Setup configures the HTTP mock.
-	// It is the first method called during initialization.
-	Setup(*HTTPMockApp, http.Handler) error
-
-	// Start starts a server.
-	Start() error
-
-	// StartTLS starts a server with TLS.
-	StartTLS() error
-
-	// Close closes the server.
-	Close() error
-
-	// CloseNow force close the server.
-	CloseNow() error
-
-	// Info returns server information.
-	Info() *ServerInfo
-
-	// S returns the server implementation that is being used by this component.
-	// For example, the built-in Server will return a *httptest.Server.
-	S() any
-}
+var _ vlatte.Server[*HTTPMockApp] = (*httpTestServer)(nil)
 
 type httpTestServer struct {
 	app       *HTTPMockApp
 	handler   http.Handler
 	server    *httptest.Server
-	info      *ServerInfo
+	info      *vlatte.ServerInfo
 	needSetup bool
 	rwMutex   sync.RWMutex
 }
 
-func newServer() Server {
-	return &httpTestServer{info: &ServerInfo{}}
+func newServer() vlatte.Server[*HTTPMockApp] {
+	return &httpTestServer{info: &vlatte.ServerInfo{}}
 }
 
 func (s *httpTestServer) Setup(app *HTTPMockApp, handler http.Handler) error {
@@ -145,23 +115,8 @@ func (s *httpTestServer) Close() error {
 	return nil
 }
 
-func (s *httpTestServer) CloseNow() error {
-	s.rwMutex.Lock()
-	defer s.rwMutex.Unlock()
-
-	s.server.CloseClientConnections()
-	s.server.Close()
-	s.needSetup = true
-
-	return nil
-}
-
-func (s *httpTestServer) Info() *ServerInfo {
+func (s *httpTestServer) Info() *vlatte.ServerInfo {
 	return s.info
-}
-
-func (s *httpTestServer) S() any {
-	return s.server
 }
 
 func (s *httpTestServer) beforeStart() error {

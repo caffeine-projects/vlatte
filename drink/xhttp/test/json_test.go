@@ -274,7 +274,8 @@ func TestPostJSON(t *testing.T) {
 }
 
 func TestSimpleJSONValues(t *testing.T) {
-	m := New().CloseWithT(t)
+	m := New()
+	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 
 	testCases := []struct {
@@ -312,9 +313,8 @@ func TestSimpleJSONValues(t *testing.T) {
 
 func TestMalformedJSON_ShouldMatchOtherFieldsAndContinue(t *testing.T) {
 	m := New()
+	t.Cleanup(func() { m.Close() })
 	m.MustStart()
-
-	defer m.Close()
 
 	scoped := m.MustBrew(Postf("/test").
 		Header("test", StrictEqual("hello")).

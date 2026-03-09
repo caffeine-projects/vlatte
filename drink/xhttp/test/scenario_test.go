@@ -47,7 +47,8 @@ func TestScenarios(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			m := xhttp.New().CloseWithT(t)
+			m := xhttp.New()
+			t.Cleanup(func() { m.Close() })
 			m.MustStart()
 
 			s1 := m.MustBrew(tc.s1)

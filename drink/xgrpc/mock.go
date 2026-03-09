@@ -27,7 +27,6 @@ type GRPCMock struct {
 	origin   string
 	hits     atomic.Int64
 	enabled  bool
-	buzzers  *vlatte.Buzzers
 	ext      any
 
 	Reply any
@@ -123,10 +122,6 @@ func (m *GRPCMock) TemplateDataProvider() vlatte.TemplateDataProvider {
 
 func (m *GRPCMock) Events() vlatte.Events {
 	return vlatte.Events{OnComplete: m.OnCompleteList}
-}
-
-func (m *GRPCMock) Buzzers() *vlatte.Buzzers {
-	return m.buzzers
 }
 
 func (m *GRPCMock) Callbacks() []vlatte.Callback {

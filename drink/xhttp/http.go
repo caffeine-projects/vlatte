@@ -47,7 +47,7 @@ type HTTPMockApp struct {
 	*vlatte.Boilerplate[*HTTPMock, *HTTPMockApp]
 
 	config             *Config
-	server             Server
+	server             vlatte.Server[*HTTPMockApp]
 	storage            vlatte.Canister[*HTTPMock]
 	scenarioStore      *mfeat.ScenarioStore
 	cancel             context.CancelFunc
@@ -254,7 +254,7 @@ func (app *HTTPMockApp) Config() *Config {
 }
 
 // Server returns the Server implementation being used by this application.
-func (app *HTTPMockApp) Server() Server {
+func (app *HTTPMockApp) Server() vlatte.Server[*HTTPMockApp] {
 	return app.server
 }
 
@@ -293,13 +293,6 @@ func (app *HTTPMockApp) Close() {
 	if app.rec != nil {
 		app.rec.stop()
 	}
-}
-
-// CloseWithT register Server Close function on TestingT Cleanup().
-// Useful to close the server when tests finish.
-func (app *HTTPMockApp) CloseWithT(t vlatte.CleanupT) *HTTPMockApp {
-	t.Cleanup(func() { app.Close() })
-	return app
 }
 
 // IsRecording checks if mock recording is enabled.

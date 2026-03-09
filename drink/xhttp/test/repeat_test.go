@@ -60,7 +60,8 @@ func TestRepeat_Once(t *testing.T) {
 }
 
 func TestRepeat_FileSetup(t *testing.T) {
-	m := xhttp.New().CloseWithT(t)
+	m := xhttp.New()
+	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustBrew(xhttp.FromFile("testdata/repeat/1_repeat.yaml"))
 

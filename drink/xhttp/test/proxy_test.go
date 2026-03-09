@@ -17,11 +17,13 @@ import (
 )
 
 func TestProxy(t *testing.T) {
-	proxySrv := New(Setup().Proxy()).CloseWithT(t)
+	proxySrv := New(Setup().Proxy())
+	t.Cleanup(func() { proxySrv.Close() })
 	proxySrv.MustStart()
 	proxyScope := proxySrv.MustBrew(Get(URLPath("/test")).Reply(Accepted()))
 
-	targetSrv := New().CloseWithT(t)
+	targetSrv := New()
+	t.Cleanup(func() { targetSrv.Close() })
 	targetSrv.MustStart()
 	targetScope := targetSrv.MustBrew(Get(URLPath("/other")).Reply(Created()))
 
@@ -44,11 +46,13 @@ func TestProxy(t *testing.T) {
 }
 
 func TestProxyTLS(t *testing.T) {
-	proxySrv := New(Setup().Proxy(&ProxyConfig{SSLVerify: false})).CloseWithT(t)
+	proxySrv := New(Setup().Proxy(&ProxyConfig{SSLVerify: false}))
+	t.Cleanup(func() { proxySrv.Close() })
 	proxySrv.MustStartTLS()
 	proxyScope := proxySrv.MustBrew(Get(URLPath("/test")).Reply(Accepted()))
 
-	targetSrv := New().CloseWithT(t)
+	targetSrv := New()
+	t.Cleanup(func() { targetSrv.Close() })
 	targetSrv.MustStart()
 	targetScope := targetSrv.MustBrew(Get(URLPath("/other")).Reply(Created()))
 
@@ -87,12 +91,13 @@ func TestProxyTLS_CustomCert(t *testing.T) {
 
 	proxySrv := New(
 		Setup().
-			Proxy(&ProxyConfig{SSLVerify: true, Transport: transport}).TLSCertKeyPair(_tlsCertFile, _tlsKeyFile)).
-		CloseWithT(t)
+			Proxy(&ProxyConfig{SSLVerify: true, Transport: transport}).TLSCertKeyPair(_tlsCertFile, _tlsKeyFile))
+	t.Cleanup(func() { proxySrv.Close() })
 	proxySrv.MustStartTLS()
 	proxyScope := proxySrv.MustBrew(Get(URLPath("/test")).Reply(Accepted()))
 
-	targetSrv := New(Setup().TLSCertKeyPair(_tlsCertFile, _tlsKeyFile)).CloseWithT(t)
+	targetSrv := New(Setup().TLSCertKeyPair(_tlsCertFile, _tlsKeyFile))
+	t.Cleanup(func() { targetSrv.Close() })
 	targetSrv.MustStart()
 	targetScope := targetSrv.MustBrew(Get(URLPath("/other")).Reply(Created()))
 
@@ -118,15 +123,18 @@ func TestProxyTLS_CustomCert(t *testing.T) {
 }
 
 func TestProxyViaAnotherProxy(t *testing.T) {
-	p := New(Setup().Proxy()).CloseWithT(t)
+	p := New(Setup().Proxy())
+	t.Cleanup(func() { p.Close() })
 	p.MustStart()
 	scope1 := p.MustBrew(Get(URLPath("/test")).Reply(Accepted()))
 
-	v := New(Setup().Proxy(&ProxyConfig{Via: p.URL()})).CloseWithT(t)
+	v := New(Setup().Proxy(&ProxyConfig{Via: p.URL()}))
+	t.Cleanup(func() { v.Close() })
 	v.MustStart()
 	scope2 := v.MustBrew(Get(URLPath("/unknown")).Reply(NoContent()))
 
-	m := New().CloseWithT(t)
+	m := New()
+	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustBrew(Get(URLPath("/other")).Reply(Created()))
 

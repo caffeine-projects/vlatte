@@ -112,10 +112,3 @@ func (app *GRPCMockApp) Addr() string {
 func (app *GRPCMockApp) Close() {
 	app.cancel()
 }
-
-// CloseWithT register Server Close function on TestingT Cleanup().
-// Useful to close the server when tests finish.
-func (app *GRPCMockApp) CloseWithT(t vlatte.CleanupT) *GRPCMockApp {
-	t.Cleanup(func() { app.Close() })
-	return app
-}

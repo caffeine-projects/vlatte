@@ -41,7 +41,8 @@ func TestResponseDelay_SetupFromFile(t *testing.T) {
 	t.Parallel()
 
 	httpClient := &http.Client{}
-	m := New().CloseWithT(t)
+	m := New()
+	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 
 	testCases := []struct {

@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"sync"
 	"testing"
@@ -405,7 +404,8 @@ func TestSettingOnlyPort(t *testing.T) {
 	}
 
 	port := randomPort()
-	m := New(Setup().Port(port)).CloseWithT(t)
+	m := New(Setup().Port(port))
+	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustBrew(Getf("/test").Reply(OK()))
 
@@ -424,5 +424,4 @@ func TestMocha_Server(t *testing.T) {
 
 	require.NotNil(t, srv)
 	require.IsType(t, &httpTestServer{}, srv)
-	require.IsType(t, &httptest.Server{}, srv.S())
 }

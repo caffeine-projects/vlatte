@@ -112,7 +112,6 @@ type HTTPMock struct {
 	hits         atomic.Int64
 	enabled      bool
 	expectations []*vlatte.Eval[*HTTPValueSelectorInput]
-	buzzers      *vlatte.Buzzers
 	ext          any
 
 	Reply Reply

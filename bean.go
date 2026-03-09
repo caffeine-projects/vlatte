@@ -44,10 +44,6 @@ type Canister[T Bean] interface {
 	Empty(ctx context.Context) error
 }
 
-type Buzzers struct {
-	OnComplete []OnComplete
-}
-
 type Results struct {
 	Buf []string
 }

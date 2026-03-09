@@ -14,10 +14,9 @@ import (
 func TestHTTPMethods(t *testing.T) {
 	client := &http.Client{}
 
-	m := New().CloseWithT(t)
+	m := New()
+	t.Cleanup(func() { m.Close() })
 	m.MustStart()
-
-	defer m.Close()
 
 	const path1 = "/test/1"
 	const path2 = "/test/2"

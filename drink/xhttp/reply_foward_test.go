@@ -275,10 +275,12 @@ func TestForward(t *testing.T) {
 	})
 
 	t.Run("tls", func(t *testing.T) {
-		target := New().CloseWithT(t)
+		target := New()
+		t.Cleanup(func() { target.Close() })
 		target.MustStartTLS()
 
-		m := New().CloseWithT(t)
+		m := New()
+		t.Cleanup(func() { m.Close() })
 		m.MustStart()
 
 		s1 := target.MustBrew(Getf("/test").Reply(OK().PlainText("hi")))
