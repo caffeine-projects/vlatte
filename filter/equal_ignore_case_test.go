@@ -3,6 +3,7 @@ package filter
 import (
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,7 +25,7 @@ func TestEqualIgnoreCase(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			var result Result
+			var result vlatte.Result
 			var err error
 
 			if len(tc.expectedValueArgs) > 0 {

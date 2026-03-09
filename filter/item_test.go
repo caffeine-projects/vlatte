@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,7 +17,7 @@ func TestItem(t *testing.T) {
 
 	testCases := []struct {
 		index    int
-		matcher  Filter
+		matcher  vlatte.Filter
 		expected bool
 	}{
 		{0, Equal("test"), true},

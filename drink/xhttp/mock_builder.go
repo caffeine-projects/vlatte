@@ -39,7 +39,7 @@ func AnyMethod() *HTTPMockBuilder {
 }
 
 // Get initializes a mock for GET method.
-func Get(m filter.Filter) *HTTPMockBuilder {
+func Get(m vlatte.Filter) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodGet)
 }
 
@@ -49,7 +49,7 @@ func Getf(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Post initializes a mock for Post method.
-func Post(m filter.Filter) *HTTPMockBuilder {
+func Post(m vlatte.Filter) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodPost)
 }
 
@@ -59,7 +59,7 @@ func Postf(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Put inits a mock for Put method.
-func Put(m filter.Filter) *HTTPMockBuilder {
+func Put(m vlatte.Filter) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodPut)
 }
 
@@ -69,7 +69,7 @@ func Putf(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Patch initializes a mock for Patch method.
-func Patch(u filter.Filter) *HTTPMockBuilder {
+func Patch(u vlatte.Filter) *HTTPMockBuilder {
 	return Request().URL(u).Method(http.MethodPatch)
 }
 
@@ -79,7 +79,7 @@ func Patchf(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Delete initializes a mock for Delete method.
-func Delete(m filter.Filter) *HTTPMockBuilder {
+func Delete(m vlatte.Filter) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodDelete)
 }
 
@@ -89,7 +89,7 @@ func Deletef(path string, a ...any) *HTTPMockBuilder {
 }
 
 // Head initializes a mock for Head method.
-func Head(m filter.Filter) *HTTPMockBuilder {
+func Head(m vlatte.Filter) *HTTPMockBuilder {
 	return Request().URL(m).Method(http.MethodHead)
 }
 
@@ -127,7 +127,7 @@ func (b *HTTPMockBuilder) Scheme(scheme string) *HTTPMockBuilder {
 }
 
 // SchemeMatches sets a matcher.Matcher for the URL scheme part.
-func (b *HTTPMockBuilder) SchemeMatches(m filter.Filter) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) SchemeMatches(m vlatte.Filter) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeScheme),
 		Matcher:  m,
@@ -139,7 +139,7 @@ func (b *HTTPMockBuilder) SchemeMatches(m filter.Filter) *HTTPMockBuilder {
 
 // Method sets the HTTP request method to be matched.
 func (b *HTTPMockBuilder) Method(methods ...string) *HTTPMockBuilder {
-	var m filter.Filter
+	var m vlatte.Filter
 	var key string
 
 	if len(methods) == 0 {
@@ -163,7 +163,7 @@ func (b *HTTPMockBuilder) Method(methods ...string) *HTTPMockBuilder {
 
 // MethodMatches defines a matcher.Matcher for the request method.
 // Useful to set a Mock for multiple HTTP Request methods.
-func (b *HTTPMockBuilder) MethodMatches(m filter.Filter) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) MethodMatches(m vlatte.Filter) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeMethod),
 		Selector: selectMethod,
@@ -174,7 +174,7 @@ func (b *HTTPMockBuilder) MethodMatches(m filter.Filter) *HTTPMockBuilder {
 }
 
 // URL defines a matcher to be applied to the http.Request url.URL.
-func (b *HTTPMockBuilder) URL(m filter.Filter) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) URL(m vlatte.Filter) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeURL),
 		Selector: selectURL,
@@ -191,7 +191,7 @@ func (b *HTTPMockBuilder) URLf(format string, a ...any) *HTTPMockBuilder {
 }
 
 // URLPath defines a matcher to be applied to the url.URL path.
-func (b *HTTPMockBuilder) URLPath(m filter.Filter) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) URLPath(m vlatte.Filter) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeURL),
 		Selector: selectURLPath,
@@ -208,7 +208,7 @@ func (b *HTTPMockBuilder) URLPathf(format string, a ...any) *HTTPMockBuilder {
 }
 
 // URLPath defines a matcher to be applied to the url.URL path.
-func (b *HTTPMockBuilder) URLFragment(m filter.Filter) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) URLFragment(m vlatte.Filter) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeURL),
 		Selector: selectURLFragment,
@@ -225,7 +225,7 @@ func (b *HTTPMockBuilder) URLFragmentf(format string, a ...any) *HTTPMockBuilder
 }
 
 // Header adds a matcher to a specific http.Header key.
-func (b *HTTPMockBuilder) Header(name string, m filter.Filter) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) Header(name string, m vlatte.Filter) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeHeader),
 		Key:      name,
@@ -247,7 +247,7 @@ func (b *HTTPMockBuilder) ContentType(value string, a ...any) *HTTPMockBuilder {
 }
 
 // Query defines a matcher to a specific query.
-func (b *HTTPMockBuilder) Query(name string, m filter.Filter) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) Query(name string, m vlatte.Filter) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeQuery),
 		Key:      name,
@@ -264,7 +264,7 @@ func (b *HTTPMockBuilder) Queryf(name string, value string, a ...any) *HTTPMockB
 }
 
 // Queries define a matcher.Matcher for query parameters that contains multiple values.
-func (b *HTTPMockBuilder) Queries(name string, m filter.Filter) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) Queries(name string, m vlatte.Filter) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeQueries),
 		Key:      name,
@@ -280,8 +280,8 @@ func (b *HTTPMockBuilder) Queries(name string, m filter.Filter) *HTTPMockBuilder
 // Example:
 //
 //	m.Body(JSONPath("name", EqualTo("test")), JSONPath("address.street", ToContains("nowhere")))
-func (b *HTTPMockBuilder) Body(matcherList ...filter.Filter) *HTTPMockBuilder {
-	var m filter.Filter
+func (b *HTTPMockBuilder) Body(matcherList ...vlatte.Filter) *HTTPMockBuilder {
+	var m vlatte.Filter
 	if len(matcherList) == 0 {
 		panic(".Body() func requires at least one matcher.Matcher")
 	} else if len(matcherList) == 1 {
@@ -300,7 +300,7 @@ func (b *HTTPMockBuilder) Body(matcherList ...filter.Filter) *HTTPMockBuilder {
 }
 
 // FormField defines a matcher for a specific form field by its key.
-func (b *HTTPMockBuilder) FormField(name string, m filter.Filter) *HTTPMockBuilder {
+func (b *HTTPMockBuilder) FormField(name string, m vlatte.Filter) *HTTPMockBuilder {
 	b.appendExpectation(&HTTPExpectation{
 		Target:   int(matchingScopeFormField),
 		Key:      name,

@@ -4,29 +4,30 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 type lowerCaseMatcher struct {
-	matcher Filter
+	matcher vlatte.Filter
 }
 
-func (m *lowerCaseMatcher) Match(v any) (Result, error) {
+func (m *lowerCaseMatcher) Match(v any) (vlatte.Result, error) {
 	txt, ok := v.(string)
 	if !ok {
-		return Result{}, fmt.Errorf("lower: type %T is not supported. accepted types: string", v)
+		return vlatte.Result{}, fmt.Errorf("lower: type %T is not supported. accepted types: string", v)
 	}
 
 	result, err := m.matcher.Match(strings.ToLower(txt))
 	if err != nil {
-		return Result{}, fmt.Errorf("lower: %w", err)
+		return vlatte.Result{}, fmt.Errorf("lower: %w", err)
 	}
 
 	if result.Pass {
-		return Result{Pass: true}, nil
+		return vlatte.Result{Pass: true}, nil
 	}
 
-	return Result{
+	return vlatte.Result{
 		Message: "Lower() " + result.Message,
 	}, nil
 }
@@ -36,6 +37,6 @@ func (m *lowerCaseMatcher) Describe() descriptor.Descriptor {
 }
 
 // ToLower lowers the incoming request value case value before submitting it to provided matcher.
-func ToLower(matcher Filter) Filter {
+func ToLower(matcher vlatte.Filter) vlatte.Filter {
 	return &lowerCaseMatcher{matcher: matcher}
 }

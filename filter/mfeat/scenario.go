@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -62,7 +62,7 @@ type scenarioMatcher struct {
 	name          string
 }
 
-func (m *scenarioMatcher) Match(_ any) (filter.Result, error) {
+func (m *scenarioMatcher) Match(_ any) (vlatte.Result, error) {
 	if m.requiredState == ScenarioStateStarted {
 		rmu.Lock()
 		m.store.createNewIfNeeded(m.name)
@@ -73,14 +73,14 @@ func (m *scenarioMatcher) Match(_ any) (filter.Result, error) {
 	scn, ok := m.store.fetchByName(m.name)
 	rmu.RUnlock()
 	if !ok {
-		return filter.Result{Pass: true}, nil
+		return vlatte.Result{Pass: true}, nil
 	}
 
 	if scn.state == m.requiredState {
-		return filter.Result{Pass: true}, nil
+		return vlatte.Result{Pass: true}, nil
 	}
 
-	return filter.Result{
+	return vlatte.Result{
 		Message: fmt.Sprintf("Scenario(%s): Required state: %s. Actual: %s", scn.name, m.requiredState, scn.state),
 	}, nil
 }
@@ -110,7 +110,7 @@ func (m *scenarioMatcher) Describe() descriptor.Descriptor {
 	})
 }
 
-func Scenario(store *ScenarioStore, name, requiredState, newState string) filter.Filter {
+func Scenario(store *ScenarioStore, name, requiredState, newState string) vlatte.Filter {
 	return &scenarioMatcher{
 		store:         store,
 		requiredState: requiredState,

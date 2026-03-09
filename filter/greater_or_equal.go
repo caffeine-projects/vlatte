@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/mconv"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
@@ -13,10 +14,10 @@ type greaterOrEqualMatcher struct {
 	expected float64
 }
 
-func (m *greaterOrEqualMatcher) Match(v any) (Result, error) {
+func (m *greaterOrEqualMatcher) Match(v any) (vlatte.Result, error) {
 	vv, err := mconv.ConvToFloat64(v)
 	if err != nil {
-		return Result{}, fmt.Errorf(
+		return vlatte.Result{}, fmt.Errorf(
 			"gte: type %T is not supported. the value must be compatible with float64. %w",
 			v,
 			err,
@@ -24,10 +25,10 @@ func (m *greaterOrEqualMatcher) Match(v any) (Result, error) {
 	}
 
 	if vv >= m.expected {
-		return Result{Pass: true}, nil
+		return vlatte.Result{Pass: true}, nil
 	}
 
-	return Result{Message: strings.Join([]string{"Gte(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, "")}, nil
+	return vlatte.Result{Message: strings.Join([]string{"Gte(", mfmt.Stringify(m.expected), ") Got: ", mfmt.Stringify(v)}, "")}, nil
 }
 
 func (m *greaterOrEqualMatcher) Describe() descriptor.Descriptor {
@@ -35,11 +36,11 @@ func (m *greaterOrEqualMatcher) Describe() descriptor.Descriptor {
 }
 
 // GreaterThanOrEqual passes if the incoming request value is greater than or equal to the given value.
-func GreaterThanOrEqual(expected float64) Filter {
+func GreaterThanOrEqual(expected float64) vlatte.Filter {
 	return &greaterOrEqualMatcher{expected: expected}
 }
 
 // Gte passes if the incoming request value is greater than or equal to the given value.
-func Gte(expected float64) Filter {
+func Gte(expected float64) vlatte.Filter {
 	return &greaterOrEqualMatcher{expected: expected}
 }

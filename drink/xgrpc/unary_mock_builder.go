@@ -31,7 +31,7 @@ func UnaryMethod(method string) *UnaryMockBuilder {
 	return b
 }
 
-func (b *UnaryMockBuilder) Header(key string, m filter.Filter) *UnaryMockBuilder {
+func (b *UnaryMockBuilder) Header(key string, m vlatte.Filter) *UnaryMockBuilder {
 	b.m.unaryExpectations = append(
 		b.m.unaryExpectations,
 		&vlatte.Eval[*UnaryValueSelectorIn]{
@@ -43,7 +43,7 @@ func (b *UnaryMockBuilder) Header(key string, m filter.Filter) *UnaryMockBuilder
 	return b
 }
 
-func (b *UnaryMockBuilder) Field(path string, m filter.Filter) *UnaryMockBuilder {
+func (b *UnaryMockBuilder) Field(path string, m vlatte.Filter) *UnaryMockBuilder {
 	b.m.unaryExpectations = append(
 		b.m.unaryExpectations,
 		&vlatte.Eval[*UnaryValueSelectorIn]{

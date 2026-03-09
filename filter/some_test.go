@@ -4,13 +4,14 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
 func TestSome(t *testing.T) {
 	tcs := []struct {
 		name     string
-		matcher  Filter
+		matcher  vlatte.Filter
 		items    []any
 		expected bool
 	}{

@@ -5,15 +5,16 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 type allOfMatcher struct {
-	matchers []Filter
+	matchers []vlatte.Filter
 }
 
-func (m *allOfMatcher) Match(v any) (r Result, err error) {
+func (m *allOfMatcher) Match(v any) (r vlatte.Result, err error) {
 	var idx int
 	defer func() {
 		if recovery := recover(); recovery != nil {
@@ -27,7 +28,7 @@ func (m *allOfMatcher) Match(v any) (r Result, err error) {
 		idx = i
 		res, err := matcher.Match(v)
 		if err != nil {
-			return Result{}, fmt.Errorf("all: %d: %w", i, err)
+			return vlatte.Result{}, fmt.Errorf("all: %d: %w", i, err)
 		}
 
 		if !res.Pass {
@@ -39,7 +40,7 @@ func (m *allOfMatcher) Match(v any) (r Result, err error) {
 		return success(), nil
 	}
 
-	return Result{
+	return vlatte.Result{
 		Message: strings.Join([]string{"All(", strconv.Itoa(len(m.matchers)), ")\n", mfmt.Indent(strings.Join(mismatches, "\n"))}, "")}, nil
 }
 
@@ -58,6 +59,6 @@ func (m *allOfMatcher) Describe() descriptor.Descriptor {
 // Example:
 //
 //	All(Equal("test"), EqualIgnoreCase("test"), Contain("tes"))
-func All(matchers ...Filter) Filter {
+func All(matchers ...vlatte.Filter) vlatte.Filter {
 	return &allOfMatcher{matchers: matchers}
 }

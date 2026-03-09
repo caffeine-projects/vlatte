@@ -7,24 +7,25 @@ import (
 	"github.com/ohler55/ojg/jp"
 	"github.com/ohler55/ojg/oj"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 type jsonPathMatcher struct {
 	path    string
 	expr    jp.Expr
-	matcher Filter
+	matcher vlatte.Filter
 	name    string
 }
 
-func (m *jsonPathMatcher) Match(v any) (Result, error) {
+func (m *jsonPathMatcher) Match(v any) (vlatte.Result, error) {
 	var results []any
 
 	switch vv := v.(type) {
 	case string:
 		data, err := oj.ParseString(vv)
 		if err != nil {
-			return Result{}, fmt.Errorf("field: %s: error parsing json: %w", m.path, err)
+			return vlatte.Result{}, fmt.Errorf("field: %s: error parsing json: %w", m.path, err)
 		}
 
 		results = m.expr.Get(data)
@@ -32,7 +33,7 @@ func (m *jsonPathMatcher) Match(v any) (Result, error) {
 		results = m.expr.Get(vv)
 	}
 
-	var r Result
+	var r vlatte.Result
 	var err error
 
 	size := len(results)
@@ -46,14 +47,14 @@ func (m *jsonPathMatcher) Match(v any) (Result, error) {
 	}
 
 	if err != nil {
-		return Result{}, fmt.Errorf("field: %w", err)
+		return vlatte.Result{}, fmt.Errorf("field: %w", err)
 	}
 
 	if r.Pass {
-		return Result{Pass: true}, nil
+		return vlatte.Result{Pass: true}, nil
 	}
 
-	return Result{
+	return vlatte.Result{
 		Message: strings.Join([]string{"Field(", m.path, ") ", r.Message}, ""),
 	}, nil
 }
@@ -66,7 +67,7 @@ func (m *jsonPathMatcher) Describe() descriptor.Descriptor {
 // Example:
 //
 //	JSONPath("address.city", EqualTo("Santiago"))
-func JSONPath(path string, matcher Filter) Filter {
+func JSONPath(path string, matcher vlatte.Filter) vlatte.Filter {
 	x, err := jp.ParseString(path)
 	if err != nil {
 		panic(fmt.Errorf("the json path expression %s is invalid: %w", path, err))
@@ -85,7 +86,7 @@ func JSONPath(path string, matcher Filter) Filter {
 // Example:
 //
 //	Field("address.city", EqualTo("Santiago"))
-func Field(path string, matcher Filter) Filter {
+func Field(path string, matcher vlatte.Filter) vlatte.Filter {
 	x, err := jp.ParseString(path)
 	if err != nil {
 		panic(fmt.Errorf("the json path expression %s is invalid: %w", path, err))

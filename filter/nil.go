@@ -1,18 +1,19 @@
 package filter
 
 import (
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 type nilMatcher struct {
 }
 
-func (m *nilMatcher) Match(v any) (Result, error) {
+func (m *nilMatcher) Match(v any) (vlatte.Result, error) {
 	if v == nil {
-		return Result{Pass: true}, nil
+		return vlatte.Result{Pass: true}, nil
 	}
 
-	return Result{Message: "Nil() Value is not nil"}, nil
+	return vlatte.Result{Message: "Nil() Value is not nil"}, nil
 }
 
 func (m *nilMatcher) Describe() descriptor.Descriptor {
@@ -20,6 +21,6 @@ func (m *nilMatcher) Describe() descriptor.Descriptor {
 }
 
 // IsNil passes if the incoming request value is nil.
-func IsNil() Filter {
+func IsNil() vlatte.Filter {
 	return &nilMatcher{}
 }

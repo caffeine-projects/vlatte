@@ -5,15 +5,16 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 type anyOfMatcher struct {
-	matchers []Filter
+	matchers []vlatte.Filter
 }
 
-func (m *anyOfMatcher) Match(v any) (r Result, e error) {
+func (m *anyOfMatcher) Match(v any) (r vlatte.Result, e error) {
 	var idx int
 	defer func() {
 		if recovery := recover(); recovery != nil {
@@ -27,7 +28,7 @@ func (m *anyOfMatcher) Match(v any) (r Result, e error) {
 		idx = i
 		result, err := matcher.Match(v)
 		if err != nil {
-			return Result{}, fmt.Errorf("any: %d: %w", i, err)
+			return vlatte.Result{}, fmt.Errorf("any: %d: %w", i, err)
 		}
 
 		if !result.Pass {
@@ -38,7 +39,7 @@ func (m *anyOfMatcher) Match(v any) (r Result, e error) {
 		return success(), nil
 	}
 
-	return Result{Message: strings.Join([]string{"Any(", strconv.Itoa(len(m.matchers)), ")\n", mfmt.Indent(strings.Join(mismatches, "\n"))}, "")}, nil
+	return vlatte.Result{Message: strings.Join([]string{"Any(", strconv.Itoa(len(m.matchers)), ")\n", mfmt.Indent(strings.Join(mismatches, "\n"))}, "")}, nil
 }
 
 func (m *anyOfMatcher) Describe() descriptor.Descriptor {
@@ -56,6 +57,6 @@ func (m *anyOfMatcher) Describe() descriptor.Descriptor {
 // Example:
 //
 //	Any(Equal("test"), EqualIgnoreCase("TEST"), Contain("tes"))
-func Any(matchers ...Filter) Filter {
+func Any(matchers ...vlatte.Filter) vlatte.Filter {
 	return &anyOfMatcher{matchers: matchers}
 }

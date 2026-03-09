@@ -4,19 +4,20 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
 func TestEither(t *testing.T) {
 	testCases := []struct {
 		name     string
-		matchers []Filter
+		matchers []vlatte.Filter
 		expected bool
 	}{
-		{"left true", []Filter{StrictEqual("test"), Contain("qa")}, true},
-		{"right true", []Filter{StrictEqual("qa"), Contain("tes")}, true},
-		{"both true", []Filter{StrictEqual("test"), Contain("te")}, true},
-		{"both false", []Filter{StrictEqual("qa"), Contain("dev")}, false},
+		{"left true", []vlatte.Filter{StrictEqual("test"), Contain("qa")}, true},
+		{"right true", []vlatte.Filter{StrictEqual("qa"), Contain("tes")}, true},
+		{"both true", []vlatte.Filter{StrictEqual("test"), Contain("te")}, true},
+		{"both false", []vlatte.Filter{StrictEqual("qa"), Contain("dev")}, false},
 	}
 
 	for _, tc := range testCases {

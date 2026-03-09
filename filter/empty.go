@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
@@ -11,17 +12,17 @@ import (
 type emptyMatcher struct {
 }
 
-func (m *emptyMatcher) Match(v any) (Result, error) {
+func (m *emptyMatcher) Match(v any) (vlatte.Result, error) {
 	if v == nil {
-		return Result{Pass: true}, nil
+		return vlatte.Result{Pass: true}, nil
 	}
 
 	result, err := Len(0).Match(v)
 	if err != nil {
-		return Result{}, fmt.Errorf("empty: %w", err)
+		return vlatte.Result{}, fmt.Errorf("empty: %w", err)
 	}
 
-	return Result{result.Pass, strings.Join([]string{"Empty(", mfmt.Stringify(v), ")"}, "")}, nil
+	return vlatte.Result{result.Pass, strings.Join([]string{"Empty(", mfmt.Stringify(v), ")"}, "")}, nil
 }
 
 func (m *emptyMatcher) Describe() descriptor.Descriptor {
@@ -29,6 +30,6 @@ func (m *emptyMatcher) Describe() descriptor.Descriptor {
 }
 
 // Empty passes if the incoming request value is empty or has zero value.
-func Empty() Filter {
+func Empty() vlatte.Filter {
 	return &emptyMatcher{}
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -11,18 +12,18 @@ type equalIgnoreCaseMatcher struct {
 	expected string
 }
 
-func (m *equalIgnoreCaseMatcher) Match(v any) (Result, error) {
+func (m *equalIgnoreCaseMatcher) Match(v any) (vlatte.Result, error) {
 	txt := ""
 	if v != nil {
 		var ok bool
 		txt, ok = v.(string)
 		if !ok {
-			return Result{}, fmt.Errorf("eqi: value must be a string. got: %T", v)
+			return vlatte.Result{}, fmt.Errorf("eqi: value must be a string. got: %T", v)
 		}
 	}
 
 	if strings.EqualFold(m.expected, txt) {
-		return Result{Pass: true}, nil
+		return vlatte.Result{Pass: true}, nil
 	}
 
 	return mismatch(strings.Join([]string{"Eqi(", m.expected, ") Got: ", txt}, "")), nil
@@ -33,18 +34,18 @@ func (m *equalIgnoreCaseMatcher) Describe() descriptor.Descriptor {
 }
 
 // EqualIgnoreCase compares the expected value with the incoming request value ignoring the case.
-func EqualIgnoreCase(expected string) Filter {
+func EqualIgnoreCase(expected string) vlatte.Filter {
 	return &equalIgnoreCaseMatcher{expected: expected}
 }
 
 // EqualIgnoreCasef compares the expected value with the incoming request value ignoring the case.
 // This is short-hand to format the expected value.
-func EqualIgnoreCasef(format string, a ...any) Filter {
+func EqualIgnoreCasef(format string, a ...any) vlatte.Filter {
 	return EqualIgnoreCase(fmt.Sprintf(format, a...))
 }
 
 // Eqi is an alias to EqualIgnoreCase.
 // It compares the expected value with the incoming request value ignoring the case.
-func Eqi(expected string) Filter {
+func Eqi(expected string) vlatte.Filter {
 	return &equalIgnoreCaseMatcher{expected: expected}
 }

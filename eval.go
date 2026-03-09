@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-
-	"github.com/caffeine-projects/vlatte/filter"
 )
 
 var _ fmt.Stringer = (*Eval[any])(nil)
@@ -34,7 +32,7 @@ type Eval[TIn any] struct {
 	Target int
 
 	// Matcher associated with this [Eval].
-	Matcher filter.Filter
+	Matcher Filter
 
 	// Selector will extract the [http.Request] or a specific field of it and feed it to the associated [filter.Matcher].
 	Selector Selector[TIn]
@@ -46,7 +44,7 @@ func (e *Eval[TIn]) String() string {
 }
 
 // Match evaluates the input against the matcher of this [Eval].
-func (e *Eval[TIn]) Match(ctx context.Context, in TIn) (result filter.Result, err error) {
+func (e *Eval[TIn]) Match(ctx context.Context, in TIn) (result Result, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("%w: Match: type: %T %v", ErrMatchPanicked, e.Matcher, r)

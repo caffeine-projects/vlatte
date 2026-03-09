@@ -5,14 +5,15 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 type urlPathMatcher struct {
-	matcher Filter
+	matcher vlatte.Filter
 }
 
-func (m *urlPathMatcher) Match(v any) (Result, error) {
+func (m *urlPathMatcher) Match(v any) (vlatte.Result, error) {
 	var value string
 
 	switch e := v.(type) {
@@ -23,31 +24,31 @@ func (m *urlPathMatcher) Match(v any) (Result, error) {
 	case string:
 		u, err := url.Parse(e)
 		if err != nil {
-			return Result{}, fmt.Errorf("urlpath: error parsing url: %w", err)
+			return vlatte.Result{}, fmt.Errorf("urlpath: error parsing url: %w", err)
 		}
 
 		value = u.Path
 	case fmt.Stringer:
 		u, err := url.Parse(e.String())
 		if err != nil {
-			return Result{}, fmt.Errorf("urlpath: error parsing url: %w", err)
+			return vlatte.Result{}, fmt.Errorf("urlpath: error parsing url: %w", err)
 		}
 
 		value = u.Path
 	default:
-		return Result{}, fmt.Errorf("urlpath: it only accepts the types: *url.URL | url.URL | string. got: %T", v)
+		return vlatte.Result{}, fmt.Errorf("urlpath: it only accepts the types: *url.URL | url.URL | string. got: %T", v)
 	}
 
 	res, err := m.matcher.Match(value)
 	if err != nil {
-		return Result{}, fmt.Errorf("urlpath: %w", err)
+		return vlatte.Result{}, fmt.Errorf("urlpath: %w", err)
 	}
 
 	if res.Pass {
-		return Result{Pass: true}, nil
+		return vlatte.Result{Pass: true}, nil
 	}
 
-	return Result{Message: strings.Join([]string{"URLPath(", value, ") ", res.Message}, "")}, nil
+	return vlatte.Result{Message: strings.Join([]string{"URLPath(", value, ") ", res.Message}, "")}, nil
 }
 
 func (m *urlPathMatcher) Describe() descriptor.Descriptor {
@@ -56,18 +57,18 @@ func (m *urlPathMatcher) Describe() descriptor.Descriptor {
 
 // URLPath compares the URL path with the expected value and matches if they are equal.
 // Comparison is case-insensitive.
-func URLPath(expected string) Filter {
+func URLPath(expected string) vlatte.Filter {
 	return URLPathMatch(GlobMatch(expected))
 }
 
 // URLPathf compares the URL path with the expected value and matches if they are equal.
 // The expected value will be formatted according to the given format specifier.
 // Comparison is case-insensitive.
-func URLPathf(format string, a ...any) Filter {
+func URLPathf(format string, a ...any) vlatte.Filter {
 	return URLPathMatch(GlobMatch(fmt.Sprintf(format, a...)))
 }
 
 // URLPathMatch applies the provided matcher to the URL path.
-func URLPathMatch(matcher Filter) Filter {
+func URLPathMatch(matcher vlatte.Filter) vlatte.Filter {
 	return &urlPathMatcher{matcher: matcher}
 }

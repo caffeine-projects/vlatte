@@ -4,27 +4,28 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 type bothMatcher struct {
-	first  Filter
-	second Filter
+	first  vlatte.Filter
+	second vlatte.Filter
 }
 
-func (m *bothMatcher) Match(value any) (Result, error) {
+func (m *bothMatcher) Match(value any) (vlatte.Result, error) {
 	r1, err := m.first.Match(value)
 	if err != nil {
-		return Result{}, fmt.Errorf("both: first: %w", err)
+		return vlatte.Result{}, fmt.Errorf("both: first: %w", err)
 	}
 
 	r2, err := m.second.Match(value)
 	if err != nil {
-		return Result{}, fmt.Errorf("both: first: %w", err)
+		return vlatte.Result{}, fmt.Errorf("both: first: %w", err)
 	}
 
 	if r1.Pass && r2.Pass {
-		return Result{Pass: true}, nil
+		return vlatte.Result{Pass: true}, nil
 	}
 
 	message := ""
@@ -39,7 +40,7 @@ func (m *bothMatcher) Match(value any) (Result, error) {
 		message += r2.Message
 	}
 
-	return Result{Message: strings.Join([]string{"Both() ", message}, "")}, nil
+	return vlatte.Result{Message: strings.Join([]string{"Both() ", message}, "")}, nil
 }
 
 func (m *bothMatcher) Describe() descriptor.Descriptor {
@@ -47,6 +48,6 @@ func (m *bothMatcher) Describe() descriptor.Descriptor {
 }
 
 // Both passes when both the given matchers pass.
-func Both(first Filter, second Filter) Filter {
+func Both(first vlatte.Filter, second vlatte.Filter) vlatte.Filter {
 	return &bothMatcher{first: first, second: second}
 }

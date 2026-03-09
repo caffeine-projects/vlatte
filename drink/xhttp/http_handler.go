@@ -13,7 +13,6 @@ import (
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/httprec"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/viewdata"
-	"github.com/caffeine-projects/vlatte/filter"
 )
 
 var ErrTemplateDataKeyExists = fmt.Errorf("http: template data key already exists")
@@ -168,7 +167,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// run matcher events after we sent the mock.
 	// some matcher might need to keep state.
 	for i, exp := range mock.expectations {
-		if stateful, ok := exp.Matcher.(filter.Stateful); ok {
+		if stateful, ok := exp.Matcher.(vlatte.Stateful); ok {
 			if err = stateful.SetState(); err != nil {
 				h.lifecycle.OnWarning(reqValues,
 					fmt.Errorf("http: after mock served event: matcher[%d] %w", i, err))

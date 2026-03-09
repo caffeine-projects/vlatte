@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
@@ -13,7 +14,7 @@ type equalJSONMatcher struct {
 	expected any
 }
 
-func (m *equalJSONMatcher) Match(v any) (Result, error) {
+func (m *equalJSONMatcher) Match(v any) (vlatte.Result, error) {
 	var expJSON []byte
 	var err error
 
@@ -23,14 +24,14 @@ func (m *equalJSONMatcher) Match(v any) (Result, error) {
 	default:
 		expJSON, err = json.Marshal(m.expected)
 		if err != nil {
-			return Result{}, fmt.Errorf("equal_json: %w", err)
+			return vlatte.Result{}, fmt.Errorf("equal_json: %w", err)
 		}
 	}
 
 	var exp any
 	err = json.Unmarshal(expJSON, &exp)
 	if err != nil {
-		return Result{}, fmt.Errorf("equal_json: %w", err)
+		return vlatte.Result{}, fmt.Errorf("equal_json: %w", err)
 	}
 
 	switch vv := v.(type) {
@@ -38,19 +39,19 @@ func (m *equalJSONMatcher) Match(v any) (Result, error) {
 		b := new(any)
 		err = json.Unmarshal([]byte(vv), b)
 		if err != nil {
-			return Result{}, fmt.Errorf("equal_json: %w", err)
+			return vlatte.Result{}, fmt.Errorf("equal_json: %w", err)
 		}
 
 		if equalValues(*b, exp, false) {
-			return Result{Pass: true}, nil
+			return vlatte.Result{Pass: true}, nil
 		}
 	default:
 		if equalValues(v, exp, false) {
-			return Result{Pass: true}, nil
+			return vlatte.Result{Pass: true}, nil
 		}
 	}
 
-	return Result{
+	return vlatte.Result{
 		Message: strings.Join([]string{"EqualJSON(", mfmt.Stringify(v), ") Got: ", string(expJSON)}, ""),
 	}, nil
 }
@@ -60,11 +61,11 @@ func (m *equalJSONMatcher) Describe() descriptor.Descriptor {
 }
 
 // EqualJSON matches JSON values.
-func EqualJSON(expected any) Filter {
+func EqualJSON(expected any) vlatte.Filter {
 	return &equalJSONMatcher{expected: expected}
 }
 
 // Eqj matches JSON values.
-func Eqj(expected any) Filter {
+func Eqj(expected any) vlatte.Filter {
 	return &equalJSONMatcher{expected: expected}
 }

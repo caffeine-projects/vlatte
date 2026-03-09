@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/mconv"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
@@ -13,17 +14,17 @@ type lessMatcher struct {
 	expected float64
 }
 
-func (m *lessMatcher) Match(v any) (Result, error) {
+func (m *lessMatcher) Match(v any) (vlatte.Result, error) {
 	vv, err := mconv.ConvToFloat64(v)
 	if err != nil {
-		return Result{}, fmt.Errorf("lt: type %T is not supported. value must be compatible with float64. %w", v, err)
+		return vlatte.Result{}, fmt.Errorf("lt: type %T is not supported. value must be compatible with float64. %w", v, err)
 	}
 
 	if vv < m.expected {
-		return Result{Pass: true}, nil
+		return vlatte.Result{Pass: true}, nil
 	}
 
-	return Result{
+	return vlatte.Result{
 		Message: strings.Join([]string{"Lt(", mfmt.Stringify(m.expected), ") Value is ", mfmt.Stringify(v)}, ""),
 	}, nil
 }
@@ -33,11 +34,11 @@ func (m *lessMatcher) Describe() descriptor.Descriptor {
 }
 
 // LessThan passes if the incoming request value is lower than the given value.
-func LessThan(expected float64) Filter {
+func LessThan(expected float64) vlatte.Filter {
 	return &lessMatcher{expected: expected}
 }
 
 // Lt passes if the incoming request value is lower than the given value.
-func Lt(expected float64) Filter {
+func Lt(expected float64) vlatte.Filter {
 	return &lessMatcher{expected: expected}
 }

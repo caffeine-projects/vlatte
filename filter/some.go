@@ -5,15 +5,16 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 type someMatcher struct {
-	matcher Filter
+	matcher vlatte.Filter
 }
 
-func (m *someMatcher) Match(v any) (Result, error) {
+func (m *someMatcher) Match(v any) (vlatte.Result, error) {
 	if v == nil {
 		return mismatch("Some() Expected some values to match but got nil"), nil
 	}
@@ -21,7 +22,7 @@ func (m *someMatcher) Match(v any) (Result, error) {
 	typeOfV := reflect.TypeOf(v)
 	kind := typeOfV.Kind()
 	if kind != reflect.Slice && kind != reflect.Array {
-		return Result{}, fmt.Errorf("some: matcher only works with slices. got: %v", typeOfV)
+		return vlatte.Result{}, fmt.Errorf("some: matcher only works with slices. got: %v", typeOfV)
 	}
 
 	vv := reflect.ValueOf(v)
@@ -35,17 +36,17 @@ func (m *someMatcher) Match(v any) (Result, error) {
 	for i := 0; i < length; i++ {
 		res, err := m.matcher.Match(vv.Index(i).Interface())
 		if err != nil {
-			return Result{}, fmt.Errorf("some: %w", err)
+			return vlatte.Result{}, fmt.Errorf("some: %w", err)
 		}
 
 		if res.Pass {
-			return Result{Pass: true}, nil
+			return vlatte.Result{Pass: true}, nil
 		}
 
 		messages = append(messages, res.Message)
 	}
 
-	return Result{
+	return vlatte.Result{
 		Message: fmt.Sprintf(
 			"Some()\n%s",
 			mfmt.Indent(strings.Join(messages, "\n")),
@@ -58,6 +59,6 @@ func (m *someMatcher) Describe() descriptor.Descriptor {
 }
 
 // Some will use the given matcher to test whether at least one element in the request value passes.
-func Some(matcher Filter) Filter {
+func Some(matcher vlatte.Filter) vlatte.Filter {
 	return &someMatcher{matcher: matcher}
 }

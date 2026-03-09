@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 type truthyMatcher struct {
 }
 
-func (m *truthyMatcher) Match(v any) (Result, error) {
+func (m *truthyMatcher) Match(v any) (vlatte.Result, error) {
 	var b bool
 	var err error
 
@@ -24,14 +25,14 @@ func (m *truthyMatcher) Match(v any) (Result, error) {
 	}
 
 	if err != nil {
-		return Result{}, fmt.Errorf("truthy: error parsing value to bool")
+		return vlatte.Result{}, fmt.Errorf("truthy: error parsing value to bool")
 	}
 
 	if !b {
-		return Result{Message: "Truthy() Expected true but it is actually false"}, nil
+		return vlatte.Result{Message: "Truthy() Expected true but it is actually false"}, nil
 	}
 
-	return Result{Pass: true}, nil
+	return vlatte.Result{Pass: true}, nil
 }
 
 func (m *truthyMatcher) Describe() descriptor.Descriptor {
@@ -39,6 +40,6 @@ func (m *truthyMatcher) Describe() descriptor.Descriptor {
 }
 
 // Truthy passes if the request value is true.
-func Truthy() Filter {
+func Truthy() vlatte.Filter {
 	return &truthyMatcher{}
 }

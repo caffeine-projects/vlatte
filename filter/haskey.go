@@ -7,6 +7,7 @@ import (
 	"github.com/ohler55/ojg/jp"
 	"github.com/ohler55/ojg/oj"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -15,14 +16,14 @@ type hasKeyMatcher struct {
 	expr jp.Expr
 }
 
-func (m *hasKeyMatcher) Match(v any) (Result, error) {
+func (m *hasKeyMatcher) Match(v any) (vlatte.Result, error) {
 	var results []any
 
 	switch vv := v.(type) {
 	case string:
 		data, err := oj.ParseString(vv)
 		if err != nil {
-			return Result{}, fmt.Errorf("has_key: %s: error parsing incoming json: %w", m.path, err)
+			return vlatte.Result{}, fmt.Errorf("has_key: %s: error parsing incoming json: %w", m.path, err)
 		}
 
 		results = m.expr.Get(data)
@@ -32,12 +33,12 @@ func (m *hasKeyMatcher) Match(v any) (Result, error) {
 
 	size := len(results)
 	if size == 0 || (size == 1 && results[0] == nil) {
-		return Result{
+		return vlatte.Result{
 			Message: strings.Join([]string{"HasKey(", m.path, ") Is not present"}, ""),
 		}, nil
 	}
 
-	return Result{Pass: true}, nil
+	return vlatte.Result{Pass: true}, nil
 }
 
 func (m *hasKeyMatcher) Describe() descriptor.Descriptor {
@@ -50,7 +51,7 @@ func (m *hasKeyMatcher) Describe() descriptor.Descriptor {
 //	JSON: { "name": "test" }
 //	HasKey("name") will pass
 //	HasKey("address.street") will not pass.
-func HasKey(path string) Filter {
+func HasKey(path string) vlatte.Filter {
 	x, err := jp.ParseString(path)
 	if err != nil {
 		panic(fmt.Errorf("the json path expression %s is invalid: %w", path, err))

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/mconv"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
@@ -13,10 +14,10 @@ type lessOrEqualMatcher struct {
 	expected float64
 }
 
-func (m *lessOrEqualMatcher) Match(v any) (Result, error) {
+func (m *lessOrEqualMatcher) Match(v any) (vlatte.Result, error) {
 	vv, err := mconv.ConvToFloat64(v)
 	if err != nil {
-		return Result{}, fmt.Errorf(
+		return vlatte.Result{}, fmt.Errorf(
 			"lte: type %T is not supported. value must be compatible with float64. %w",
 			v,
 			err,
@@ -24,10 +25,10 @@ func (m *lessOrEqualMatcher) Match(v any) (Result, error) {
 	}
 
 	if vv <= m.expected {
-		return Result{Pass: true}, nil
+		return vlatte.Result{Pass: true}, nil
 	}
 
-	return Result{
+	return vlatte.Result{
 			Message: strings.
 				Join([]string{"Lte(", mfmt.Stringify(m.expected), ") Value is ", mfmt.Stringify(v)}, "")},
 		nil
@@ -38,11 +39,11 @@ func (m *lessOrEqualMatcher) Describe() descriptor.Descriptor {
 }
 
 // LessThanOrEqual passes if the incoming request value is lower than or equal to the given value.
-func LessThanOrEqual(expected float64) Filter {
+func LessThanOrEqual(expected float64) vlatte.Filter {
 	return &lessOrEqualMatcher{expected: expected}
 }
 
 // Lte passes if the incoming request value is lower than or equal to the given value.
-func Lte(expected float64) Filter {
+func Lte(expected float64) vlatte.Filter {
 	return &lessOrEqualMatcher{expected: expected}
 }

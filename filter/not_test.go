@@ -3,13 +3,14 @@ package filter
 import (
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNot(t *testing.T) {
 	tcs := []struct {
 		name     string
-		matcher  Filter
+		matcher  vlatte.Filter
 		expected bool
 	}{
 		{"is not equal", StrictEqual("dev"), true},

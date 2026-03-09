@@ -31,7 +31,7 @@ func ServerStreamMethod(method string) *ServerStreamMockBuilder {
 	return b
 }
 
-func (b *ServerStreamMockBuilder) Header(key string, m filter.Filter) *ServerStreamMockBuilder {
+func (b *ServerStreamMockBuilder) Header(key string, m vlatte.Filter) *ServerStreamMockBuilder {
 	b.m.streamExpectations = append(
 		b.m.streamExpectations,
 		&vlatte.Eval[*StreamValueSelectorIn]{
@@ -43,7 +43,7 @@ func (b *ServerStreamMockBuilder) Header(key string, m filter.Filter) *ServerStr
 	return b
 }
 
-func (b *ServerStreamMockBuilder) Field(path string, m filter.Filter) *ServerStreamMockBuilder {
+func (b *ServerStreamMockBuilder) Field(path string, m vlatte.Filter) *ServerStreamMockBuilder {
 	b.m.streamExpectations = append(
 		b.m.streamExpectations,
 		&vlatte.Eval[*StreamValueSelectorIn]{

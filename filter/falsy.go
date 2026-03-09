@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
 type falsyMatcher struct {
 }
 
-func (m *falsyMatcher) Match(v any) (Result, error) {
+func (m *falsyMatcher) Match(v any) (vlatte.Result, error) {
 	var b bool
 	var err error
 
@@ -24,14 +25,14 @@ func (m *falsyMatcher) Match(v any) (Result, error) {
 	}
 
 	if err != nil {
-		return Result{}, fmt.Errorf("falsy: error parsing value to bool")
+		return vlatte.Result{}, fmt.Errorf("falsy: error parsing value to bool")
 	}
 
 	if b {
-		return Result{Message: "Falsy() Expected false but it is actually true"}, nil
+		return vlatte.Result{Message: "Falsy() Expected false but it is actually true"}, nil
 	}
 
-	return Result{Pass: true}, nil
+	return vlatte.Result{Pass: true}, nil
 }
 
 func (m *falsyMatcher) Describe() descriptor.Descriptor {
@@ -39,6 +40,6 @@ func (m *falsyMatcher) Describe() descriptor.Descriptor {
 }
 
 // Falsy checks if the incoming request value is false.
-func Falsy() Filter {
+func Falsy() vlatte.Filter {
 	return &falsyMatcher{}
 }

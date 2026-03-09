@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -14,12 +14,12 @@ type repeatMatcher struct {
 	hits int64
 }
 
-func (m *repeatMatcher) Match(_ any) (filter.Result, error) {
+func (m *repeatMatcher) Match(_ any) (vlatte.Result, error) {
 	if atomic.LoadInt64(&m.hits) < m.max {
-		return filter.Result{Pass: true}, nil
+		return vlatte.Result{Pass: true}, nil
 	}
 
-	return filter.Result{
+	return vlatte.Result{
 		Message: strings.Join([]string{"Repeat(", strconv.FormatInt(m.max, 10), ") Reached the max matched requests for this mock"}, ""),
 	}, nil
 }
@@ -34,6 +34,6 @@ func (m *repeatMatcher) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("repeat", m.max)
 }
 
-func Repeat(times int64) filter.Filter {
+func Repeat(times int64) vlatte.Filter {
 	return &repeatMatcher{max: times}
 }

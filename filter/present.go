@@ -3,6 +3,7 @@ package filter
 import (
 	"reflect"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/mfmt"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
@@ -10,9 +11,9 @@ import (
 type bePresentMatcher struct {
 }
 
-func (m *bePresentMatcher) Match(v any) (Result, error) {
+func (m *bePresentMatcher) Match(v any) (vlatte.Result, error) {
 	if v == nil {
-		return Result{}, nil
+		return vlatte.Result{}, nil
 	}
 
 	val := reflect.ValueOf(v)
@@ -23,16 +24,16 @@ func (m *bePresentMatcher) Match(v any) (Result, error) {
 			return success(), nil
 		}
 
-		return Result{Message: "Present() Expected value to be present. Got: " + mfmt.Stringify(v)}, nil
+		return vlatte.Result{Message: "Present() Expected value to be present. Got: " + mfmt.Stringify(v)}, nil
 	case reflect.Pointer:
 		if !val.IsNil() {
 			return success(), nil
 		}
 
-		return Result{Message: "Present() Expected value to be present. Got: " + mfmt.Stringify(v)}, nil
+		return vlatte.Result{Message: "Present() Expected value to be present. Got: " + mfmt.Stringify(v)}, nil
 	}
 
-	return Result{Pass: true}, nil
+	return vlatte.Result{Pass: true}, nil
 }
 
 func (m *bePresentMatcher) Describe() descriptor.Descriptor {
@@ -40,6 +41,6 @@ func (m *bePresentMatcher) Describe() descriptor.Descriptor {
 }
 
 // Present checks if the incoming request value contains a value that is not nil or the zero value for the argument type.
-func Present() Filter {
+func Present() vlatte.Filter {
 	return &bePresentMatcher{}
 }

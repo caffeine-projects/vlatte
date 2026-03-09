@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -12,7 +13,7 @@ type itemsMatchMatcher struct {
 	expected any
 }
 
-func (m *itemsMatchMatcher) Match(v any) (Result, error) {
+func (m *itemsMatchMatcher) Match(v any) (vlatte.Result, error) {
 	a := reflect.ValueOf(v)
 	b := reflect.ValueOf(m.expected)
 
@@ -20,7 +21,7 @@ func (m *itemsMatchMatcher) Match(v any) (Result, error) {
 	bLen := b.Len()
 
 	if aLen != bLen {
-		return Result{
+		return vlatte.Result{
 			Message: strings.
 				Join([]string{"ItemsMatch() Expected value len to be ", strconv.Itoa(aLen), ". Got: ", strconv.Itoa(bLen)}, "")}, nil
 	}
@@ -59,10 +60,10 @@ func (m *itemsMatchMatcher) Match(v any) (Result, error) {
 	}
 
 	if len(extraA) == 0 && len(extraB) == 0 {
-		return Result{Pass: true}, nil
+		return vlatte.Result{Pass: true}, nil
 	}
 
-	return Result{Message: "ItemsMatch() Items doesn't match"}, nil
+	return vlatte.Result{Message: "ItemsMatch() Items doesn't match"}, nil
 }
 
 func (m *itemsMatchMatcher) Describe() descriptor.Descriptor {
@@ -70,6 +71,6 @@ func (m *itemsMatchMatcher) Describe() descriptor.Descriptor {
 }
 
 // ItemsMatch if the given array items match with the incoming request value array.
-func ItemsMatch(items any) Filter {
+func ItemsMatch(items any) vlatte.Filter {
 	return &itemsMatchMatcher{expected: items}
 }

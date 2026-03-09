@@ -7,7 +7,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter"
 )
 
 type Interceptors struct {
@@ -37,7 +36,7 @@ type GRPCMock struct {
 
 	steps []vlatte.Step
 
-	after              []filter.Stateful
+	after              []vlatte.Stateful
 	unaryExpectations  []*vlatte.Eval[*UnaryValueSelectorIn]
 	streamExpectations []*vlatte.Eval[*StreamValueSelectorIn]
 }
@@ -45,7 +44,7 @@ type GRPCMock struct {
 func newMock() *GRPCMock {
 	return &GRPCMock{
 		id:      uuid.New().String(),
-		after:   make([]filter.Stateful, 0),
+		after:   make([]vlatte.Stateful, 0),
 		enabled: true,
 
 		OnCompleteList: make([]vlatte.EventConfig, 0),
