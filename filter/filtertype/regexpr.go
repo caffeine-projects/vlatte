@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -17,7 +18,8 @@ type RegExp struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *RegExp) Match(v any) (bool, error) {
+func (m *RegExp) Match(arg vlatte.FilterArg) (bool, error) {
+	v := arg.Value()
 	txt, ok := v.(string)
 	if !ok {
 		return Error(fmt.Errorf("regexp: it only works with string values. got: %T", v))

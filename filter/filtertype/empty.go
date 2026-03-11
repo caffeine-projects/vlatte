@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
@@ -12,13 +13,14 @@ import (
 type Empty struct{}
 
 // Match implements vlatte.Filter.
-func (m *Empty) Match(v any) (bool, error) {
+func (m *Empty) Match(arg vlatte.FilterArg) (bool, error) {
+	v := arg.Value()
 	if v == nil {
 		return Success()
 	}
 
 	lenMatcher := &Len{Length: 0}
-	ok, err := lenMatcher.Match(v)
+	ok, err := lenMatcher.Match(arg)
 	if err != nil {
 		return Error(fmt.Errorf("empty: %w", err))
 	}

@@ -14,13 +14,13 @@ type Both struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Both) Match(value any) (bool, error) {
-	r1OK, err := m.First.Match(value)
+func (m *Both) Match(arg vlatte.FilterArg) (bool, error) {
+	r1OK, err := m.First.Match(arg)
 	if err != nil {
 		return Error(fmt.Errorf("both: first: %w", err))
 	}
 
-	r2OK, err := m.Second.Match(value)
+	r2OK, err := m.Second.Match(arg)
 	if err != nil {
 		return Error(fmt.Errorf("both: second: %w", err))
 	}

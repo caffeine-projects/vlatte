@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -15,7 +16,7 @@ type Repeat struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Repeat) Match(_ any) (bool, error) {
+func (m *Repeat) Match(_ vlatte.FilterArg) (bool, error) {
 	if atomic.LoadInt64(&m.hits) < m.Max {
 		return true, nil
 	}

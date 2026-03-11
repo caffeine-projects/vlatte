@@ -3,6 +3,7 @@ package filter
 import (
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,9 +29,9 @@ func TestEqualIgnoreCase(t *testing.T) {
 			var err error
 
 			if len(tc.expectedValueArgs) > 0 {
-				ok, err = EqualIgnoreCasef(tc.expectedValue, tc.expectedValueArgs...).Match(tc.matchValue)
+				ok, err = EqualIgnoreCasef(tc.expectedValue, tc.expectedValueArgs...).Match(vlatte.NewFilterArg(t.Context(), tc.matchValue))
 			} else {
-				ok, err = EQI(tc.expectedValue).Match(tc.matchValue)
+				ok, err = EQI(tc.expectedValue).Match(vlatte.NewFilterArg(t.Context(), tc.matchValue))
 			}
 
 			require.NoError(t, err)

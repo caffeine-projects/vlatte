@@ -3,6 +3,7 @@ package filter
 import (
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,7 +22,7 @@ func TestLen_String(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := Len(tc.size).Match(tc.value)
+			ok, err := Len(tc.size).Match(vlatte.NewFilterArg(t.Context(), tc.value))
 
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)

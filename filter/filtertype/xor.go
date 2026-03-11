@@ -14,13 +14,13 @@ type Xor struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Xor) Match(v any) (bool, error) {
-	aOK, err := m.First.Match(v)
+func (m *Xor) Match(arg vlatte.FilterArg) (bool, error) {
+	aOK, err := m.First.Match(arg)
 	if err != nil {
 		return Error(fmt.Errorf("xor: first: %w", err))
 	}
 
-	bOK, err := m.Second.Match(v)
+	bOK, err := m.Second.Match(arg)
 	if err != nil {
 		return Error(fmt.Errorf("xor: second: %w", err))
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -11,19 +12,19 @@ func TestXor(t *testing.T) {
 	m := XOR(Contain("dev"), Contain("test"))
 
 	t.Run("should return true when left condition matches", func(t *testing.T) {
-		ok, err := m.Match("dev")
+		ok, err := m.Match(vlatte.NewFilterArg(t.Context(),"dev"))
 		assert.Nil(t, err)
 		assert.True(t, ok)
 	})
 
 	t.Run("should return true right condition matches", func(t *testing.T) {
-		ok, err := m.Match("test")
+		ok, err := m.Match(vlatte.NewFilterArg(t.Context(),"test"))
 		assert.Nil(t, err)
 		assert.True(t, ok)
 	})
 
 	t.Run("should return false both condition matches", func(t *testing.T) {
-		ok, err := m.Match("dev-test")
+		ok, err := m.Match(vlatte.NewFilterArg(t.Context(),"dev-test"))
 		assert.Nil(t, err)
 		assert.False(t, ok)
 	})
@@ -35,7 +36,7 @@ func TestXorError(t *testing.T) {
 			return false, fmt.Errorf("fail")
 		}))
 
-		ok, err := m.Match("dev")
+		ok, err := m.Match(vlatte.NewFilterArg(t.Context(),"dev"))
 
 		assert.Error(t, err)
 		assert.False(t, ok)
@@ -48,7 +49,7 @@ func TestXorError(t *testing.T) {
 			}),
 			Contain("dev"))
 
-		ok, err := m.Match("dev")
+		ok, err := m.Match(vlatte.NewFilterArg(t.Context(),"dev"))
 
 		assert.Error(t, err)
 		assert.False(t, ok)
@@ -63,7 +64,7 @@ func TestXorError(t *testing.T) {
 				return false, fmt.Errorf("fail second")
 			}))
 
-		ok, err := m.Match("nothing")
+		ok, err := m.Match(vlatte.NewFilterArg(t.Context(),"nothing"))
 
 		assert.Error(t, err)
 		assert.False(t, ok)

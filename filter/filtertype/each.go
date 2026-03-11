@@ -14,7 +14,8 @@ type Each struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Each) Match(v any) (bool, error) {
+func (m *Each) Match(arg vlatte.FilterArg) (bool, error) {
+	v := arg.Value()
 	var val = reflect.ValueOf(v)
 	var valType = reflect.TypeOf(v).Kind()
 
@@ -24,7 +25,7 @@ func (m *Each) Match(v any) (bool, error) {
 
 		for iterator.Next() {
 			mv := iterator.Value().Interface()
-			ok, err := m.Matcher.Match(mv)
+			ok, err := m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), mv))
 			if err != nil {
 				return Error(fmt.Errorf("each: %w", err))
 			}
@@ -39,7 +40,7 @@ func (m *Each) Match(v any) (bool, error) {
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < val.Len(); i++ {
 			entry := val.Index(i).Interface()
-			ok, err := m.Matcher.Match(entry)
+			ok, err := m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), entry))
 			if err != nil {
 				return Error(fmt.Errorf("each: %w", err))
 			}

@@ -4,25 +4,29 @@ import "context"
 
 // Filter matches values.
 type Filter interface {
-	Match(v any) (bool, error)
+	Match(arg FilterArg) (bool, error)
 }
 
-type FilterArgs struct {
+type FilterArg struct {
 	ctx context.Context
 	v   any
 }
 
-func (a *FilterArgs) Context() context.Context {
+func (a *FilterArg) Context() context.Context {
 	return a.ctx
 }
 
-func (a *FilterArgs) Value() any {
+func (a *FilterArg) Value() any {
 	return a.v
 }
 
-type FilterFunc func(v any) (bool, error)
+func NewFilterArg(ctx context.Context, v any) FilterArg {
+	return FilterArg{ctx: ctx, v: v}
+}
 
-func (f FilterFunc) Match(v any) (bool, error) { return f(v) }
+type FilterFunc func(arg FilterArg) (bool, error)
+
+func (f FilterFunc) Match(arg FilterArg) (bool, error) { return f(arg) }
 
 // Stateful describes a matcher that has post processes that need to be executed
 // after the matched mock is served. Dedicated for stateful matchers.

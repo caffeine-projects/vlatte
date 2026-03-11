@@ -13,7 +13,7 @@ type AllOf struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *AllOf) Match(v any) (ok bool, err error) {
+func (m *AllOf) Match(arg vlatte.FilterArg) (ok bool, err error) {
 	var idx int
 	defer func() {
 		if recovery := recover(); recovery != nil {
@@ -24,7 +24,7 @@ func (m *AllOf) Match(v any) (ok bool, err error) {
 	var failed bool
 	for i, matcher := range m.Matchers {
 		idx = i
-		res, err := matcher.Match(v)
+		res, err := matcher.Match(arg)
 		if err != nil {
 			return false, fmt.Errorf("all: %d: %w", i, err)
 		}

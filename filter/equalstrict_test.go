@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
@@ -48,12 +49,12 @@ func TestStrictEqual(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := StrictEqual(tc.value).Match(tc.valueToCompare)
+			ok, err := StrictEqual(tc.value).Match(vlatte.NewFilterArg(t.Context(), tc.valueToCompare))
 
 			require.NoError(t, err)
 			require.Equal(t, tc.result, ok)
 
-			ok, err = EQS(tc.valueToCompare).Match(tc.value)
+			ok, err = EQS(tc.valueToCompare).Match(vlatte.NewFilterArg(t.Context(), tc.value))
 
 			require.NoError(t, err)
 			require.Equal(t, tc.result, ok)
@@ -62,7 +63,7 @@ func TestStrictEqual(t *testing.T) {
 }
 
 func TestStrictEqualf(t *testing.T) {
-	ok, err := StrictEqualf("hello %s %d", "world", 10).Match("hello world 10")
+	ok, err := StrictEqualf("hello %s %d", "world", 10).Match(vlatte.NewFilterArg(t.Context(), "hello world 10"))
 	require.NoError(t, err)
 	require.True(t, ok)
 }

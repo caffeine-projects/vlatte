@@ -13,8 +13,8 @@ type Not struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Not) Match(v any) (bool, error) {
-	ok, err := m.Matcher.Match(v)
+func (m *Not) Match(arg vlatte.FilterArg) (bool, error) {
+	ok, err := m.Matcher.Match(arg)
 	if err != nil {
 		return Error(fmt.Errorf("not: %w", err))
 	}

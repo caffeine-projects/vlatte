@@ -3,6 +3,7 @@ package filter
 import (
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,7 +37,7 @@ func TestHasKey(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.key, func(t *testing.T) {
-			ok, err := HasKey(tc.key).Match(m)
+			ok, err := HasKey(tc.key).Match(vlatte.NewFilterArg(t.Context(), m))
 			require.Equal(t, tc.expected, ok)
 			require.Nil(t, err)
 		})

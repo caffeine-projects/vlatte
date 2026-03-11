@@ -23,7 +23,7 @@ func TestBothMatcher(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := Both(tc.matchers[0], tc.matchers[1]).Match("test")
+			ok, err := Both(tc.matchers[0], tc.matchers[1]).Match(vlatte.NewFilterArg(t.Context(), "test"))
 			require.Nil(t, err)
 			require.Equal(t, tc.expected, ok)
 		})
@@ -35,7 +35,7 @@ func TestBothMatcherErr(t *testing.T) {
 		Function(func(_ any) (bool, error) {
 			return false, fmt.Errorf("fail")
 		}),
-		Contain("qa")).Match("test")
+		Contain("qa")).Match(vlatte.NewFilterArg(t.Context(), "test"))
 
 	require.Error(t, err)
 	require.False(t, ok)

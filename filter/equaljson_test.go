@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,7 +54,7 @@ func TestToEqualJSON(t *testing.T) {
 
 	for i, tc := range testCases {
 		t.Run(strconv.FormatInt(int64(i), 10), func(t *testing.T) {
-			ok, err := EqualJSON(tc.a).Match(tc.b)
+			ok, err := EqualJSON(tc.a).Match(vlatte.NewFilterArg(t.Context(), tc.b))
 
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
@@ -63,7 +64,7 @@ func TestToEqualJSON(t *testing.T) {
 
 func TestEqualJSON_Errors(t *testing.T) {
 	ch := make(chan struct{})
-	ok, err := EQJ(ch).Match(map[string]interface{}{"ok": true, "name": "dev"})
+	ok, err := EQJ(ch).Match(vlatte.NewFilterArg(t.Context(), map[string]interface{}{"ok": true, "name": "dev"}))
 
 	require.Error(t, err)
 	require.False(t, ok)

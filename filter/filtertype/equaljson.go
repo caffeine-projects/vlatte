@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
 	"github.com/caffeine-projects/vlatte/filter/internal/equalutil"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
@@ -16,7 +17,8 @@ type EqualJSON struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *EqualJSON) Match(v any) (bool, error) {
+func (m *EqualJSON) Match(arg vlatte.FilterArg) (bool, error) {
+	v := arg.Value()
 	var expJSON []byte
 	var err error
 

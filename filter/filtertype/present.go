@@ -3,6 +3,7 @@ package filtertype
 import (
 	"reflect"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
@@ -11,7 +12,8 @@ import (
 type BePresent struct{}
 
 // Match implements vlatte.Filter.
-func (m *BePresent) Match(v any) (bool, error) {
+func (m *BePresent) Match(arg vlatte.FilterArg) (bool, error) {
+	v := arg.Value()
 	if v == nil {
 		return Mismatch("Present() value is nil")
 	}

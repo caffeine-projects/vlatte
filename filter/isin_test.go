@@ -3,6 +3,7 @@ package filter
 import (
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,7 +24,7 @@ func TestIsIn(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := IsIn(tc.items).Match(tc.value)
+			ok, err := IsIn(tc.items).Match(vlatte.NewFilterArg(t.Context(), tc.value))
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
 		})
@@ -31,7 +32,7 @@ func TestIsIn(t *testing.T) {
 }
 
 func TestInInWithInvalidItems(t *testing.T) {
-	ok, err := IsIn(true).Match(true)
+	ok, err := IsIn(true).Match(vlatte.NewFilterArg(t.Context(), true))
 	require.Error(t, err)
 	require.False(t, ok)
 }

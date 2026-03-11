@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -76,12 +77,12 @@ func TestEqual(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := Equal(tc.value).Match(tc.valueToCompare)
+			ok, err := Equal(tc.value).Match(vlatte.NewFilterArg(t.Context(), tc.valueToCompare))
 
 			assert.NoError(t, err)
 			assert.Equal(t, tc.result, ok)
 
-			ok, err = Eq(tc.valueToCompare).Match(tc.value)
+			ok, err = Eq(tc.valueToCompare).Match(vlatte.NewFilterArg(t.Context(), tc.value))
 
 			assert.NoError(t, err)
 			assert.Equal(t, tc.result, ok)
@@ -104,7 +105,7 @@ func TestEqualf(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := Equalf(tc.format, tc.args...).Match(tc.value)
+			ok, err := Equalf(tc.format, tc.args...).Match(vlatte.NewFilterArg(t.Context(), tc.value))
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
 		})

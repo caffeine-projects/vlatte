@@ -3,6 +3,7 @@ package filter
 import (
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,7 +18,7 @@ func TestHasSuffix(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.value, func(t *testing.T) {
-			ok, err := HasSuffix(tc.value).Match("hello world")
+			ok, err := HasSuffix(tc.value).Match(vlatte.NewFilterArg(t.Context(), "hello world"))
 
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
@@ -14,7 +15,8 @@ type LessOrEqual struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *LessOrEqual) Match(v any) (bool, error) {
+func (m *LessOrEqual) Match(arg vlatte.FilterArg) (bool, error) {
+	v := arg.Value()
 	vv, err := anyconv.ToFloat64(v)
 	if err != nil {
 		return Error(fmt.Errorf(

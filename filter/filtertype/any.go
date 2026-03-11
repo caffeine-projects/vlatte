@@ -13,7 +13,7 @@ type AnyOf struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *AnyOf) Match(v any) (ok bool, e error) {
+func (m *AnyOf) Match(arg vlatte.FilterArg) (ok bool, e error) {
 	var idx int
 	defer func() {
 		if recovery := recover(); recovery != nil {
@@ -23,7 +23,7 @@ func (m *AnyOf) Match(v any) (ok bool, e error) {
 
 	for i, matcher := range m.Matchers {
 		idx = i
-		result, err := matcher.Match(v)
+		result, err := matcher.Match(arg)
 		if err != nil {
 			return false, fmt.Errorf("any: %d: %w", i, err)
 		}

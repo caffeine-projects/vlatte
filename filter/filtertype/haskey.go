@@ -7,6 +7,7 @@ import (
 	"github.com/ohler55/ojg/jp"
 	"github.com/ohler55/ojg/oj"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -17,7 +18,8 @@ type HasKey struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *HasKey) Match(v any) (bool, error) {
+func (m *HasKey) Match(arg vlatte.FilterArg) (bool, error) {
+	v := arg.Value()
 	var results []any
 
 	switch vv := v.(type) {

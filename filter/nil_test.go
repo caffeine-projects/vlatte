@@ -3,6 +3,7 @@ package filter
 import (
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,7 +22,7 @@ func TestNil(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := Nil().Match(tc.value)
+			ok, err := Nil().Match(vlatte.NewFilterArg(t.Context(), tc.value))
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
 		})

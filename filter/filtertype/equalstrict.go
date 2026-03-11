@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
@@ -14,7 +15,8 @@ type EqualStrict struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *EqualStrict) Match(v any) (bool, error) {
+func (m *EqualStrict) Match(arg vlatte.FilterArg) (bool, error) {
+	v := arg.Value()
 	if reflect.DeepEqual(m.Expected, v) {
 		return Success()
 	}

@@ -56,7 +56,7 @@ func (e *Eval[TIn]) Match(ctx context.Context, in TIn) (ok bool, err error) {
 		val = e.Selector(ctx, in)
 	}
 
-	return e.Matcher.Match(val)
+	return e.Matcher.Match(NewFilterArg(ctx, val))
 }
 
 // GetEvals is a function that returns a list of evaluators of a given [Bean].

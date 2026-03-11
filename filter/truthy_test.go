@@ -3,6 +3,7 @@ package filter
 import (
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,7 +25,7 @@ func TestTruthy(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := Truthy().Match(tc.value)
+			ok, err := Truthy().Match(vlatte.NewFilterArg(t.Context(), tc.value))
 
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
@@ -33,7 +34,7 @@ func TestTruthy(t *testing.T) {
 }
 
 func TestTruthyInvalidSyntax(t *testing.T) {
-	ok, err := Truthy().Match("y")
+	ok, err := Truthy().Match(vlatte.NewFilterArg(t.Context(), "y"))
 
 	require.Error(t, err)
 	require.False(t, ok)

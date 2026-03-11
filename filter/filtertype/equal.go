@@ -3,6 +3,7 @@ package filtertype
 import (
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
 	"github.com/caffeine-projects/vlatte/filter/internal/equalutil"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
@@ -14,7 +15,8 @@ type Equal struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Equal) Match(v any) (bool, error) {
+func (m *Equal) Match(arg vlatte.FilterArg) (bool, error) {
+	v := arg.Value()
 	if equalutil.EqualValues(m.Expected, v, true) {
 		return Success()
 	}

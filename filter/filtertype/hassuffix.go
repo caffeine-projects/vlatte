@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -13,7 +14,8 @@ type HasSuffix struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *HasSuffix) Match(v any) (bool, error) {
+func (m *HasSuffix) Match(arg vlatte.FilterArg) (bool, error) {
+	v := arg.Value()
 	txt, ok := v.(string)
 	if !ok {
 		return Error(fmt.Errorf("has_suffix: it only works with string type. got %T", v))

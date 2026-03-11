@@ -14,13 +14,13 @@ type Either struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Either) Match(v any) (bool, error) {
-	r1OK, err := m.First.Match(v)
+func (m *Either) Match(arg vlatte.FilterArg) (bool, error) {
+	r1OK, err := m.First.Match(arg)
 	if err != nil {
 		return Error(fmt.Errorf("either: first: %w", err))
 	}
 
-	r2OK, err := m.Second.Match(v)
+	r2OK, err := m.Second.Match(arg)
 	if err != nil {
 		return Error(fmt.Errorf("either: second: %w", err))
 	}

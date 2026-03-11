@@ -58,7 +58,7 @@ func TestJSONPath(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := JSONPath(tc.path, tc.matcher).Match(_json)
+			ok, err := JSONPath(tc.path, tc.matcher).Match(vlatte.NewFilterArg(t.Context(), _json))
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
 		})
@@ -78,7 +78,7 @@ func TestJSONPathMatcherMatchErrors(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := JSONPath(tc.path, tc.matcher).Match(_json)
+			ok, err := JSONPath(tc.path, tc.matcher).Match(vlatte.NewFilterArg(t.Context(), _json))
 			require.NoError(t, err)
 			require.False(t, ok)
 		})
@@ -98,7 +98,7 @@ func TestJSONPathMatcherInvalidPaths(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			require.Panics(t, func() {
-				_, _ = JSONPath(tc.path, tc.matcher).Match(_json)
+				_, _ = JSONPath(tc.path, tc.matcher).Match(vlatte.NewFilterArg(t.Context(), _json))
 			})
 		})
 	}

@@ -20,7 +20,8 @@ type JSONPath struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *JSONPath) Match(v any) (bool, error) {
+func (m *JSONPath) Match(arg vlatte.FilterArg) (bool, error) {
+	v := arg.Value()
 	var results []any
 
 	switch vv := v.(type) {
@@ -43,11 +44,11 @@ func (m *JSONPath) Match(v any) (bool, error) {
 	size := len(results)
 	switch size {
 	case 0:
-		ok, err = m.Matcher.Match(nil)
+		ok, err = m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), nil))
 	case 1:
-		ok, err = m.Matcher.Match(results[0])
+		ok, err = m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), results[0]))
 	default:
-		ok, err = m.Matcher.Match(results)
+		ok, err = m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), results))
 	}
 
 	if err != nil {

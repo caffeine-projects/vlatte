@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/equalutil"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
@@ -14,7 +15,8 @@ type IsContainedIn struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *IsContainedIn) Match(v any) (bool, error) {
+func (m *IsContainedIn) Match(arg vlatte.FilterArg) (bool, error) {
+	v := arg.Value()
 	typeOfItems := reflect.TypeOf(m.Items)
 	kind := typeOfItems.Kind()
 	if kind != reflect.Slice && kind != reflect.Array {

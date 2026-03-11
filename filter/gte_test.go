@@ -3,6 +3,7 @@ package filter
 import (
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,7 +25,7 @@ func TestGreaterOrEqual(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := GreaterThanOrEqual(tc.expected).Match(tc.value)
+			ok, err := GreaterThanOrEqual(tc.expected).Match(vlatte.NewFilterArg(t.Context(), tc.value))
 
 			require.NoError(t, err)
 			require.Equal(t, tc.result, ok)
@@ -33,7 +34,7 @@ func TestGreaterOrEqual(t *testing.T) {
 }
 
 func TestGreaterOrEqualUnhandledType(t *testing.T) {
-	ok, err := GTE(10).Match(true)
+	ok, err := GTE(10).Match(vlatte.NewFilterArg(t.Context(), true))
 
 	require.Error(t, err)
 	require.False(t, ok)

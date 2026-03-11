@@ -3,11 +3,12 @@ package filter
 import (
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAnything(t *testing.T) {
-	ok, err := Anything().Match("")
+	ok, err := Anything().Match(vlatte.NewFilterArg(t.Context(), ""))
 	require.NoError(t, err)
 	require.True(t, ok)
 }

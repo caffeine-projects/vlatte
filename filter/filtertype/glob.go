@@ -6,6 +6,7 @@ import (
 
 	"github.com/ryanuber/go-glob"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -15,7 +16,8 @@ type Glob struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Glob) Match(v any) (bool, error) {
+func (m *Glob) Match(arg vlatte.FilterArg) (bool, error) {
+	v := arg.Value()
 	text, ok := v.(string)
 	if !ok {
 		return Error(fmt.Errorf("glob: it only works with string types. got %T", v))
