@@ -24,7 +24,7 @@ func TestLess(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, _, err := LessThan(tc.expected).Match(tc.value)
+			ok, err := LessThan(tc.expected).Match(tc.value)
 
 			require.NoError(t, err)
 			require.Equal(t, tc.result, ok)
@@ -33,7 +33,7 @@ func TestLess(t *testing.T) {
 }
 
 func TestLessUnhandledType(t *testing.T) {
-	ok, _, err := LessThan(10).Match(true)
+	ok, err := LessThan(10).Match(true)
 
 	require.Error(t, err)
 	require.False(t, ok)

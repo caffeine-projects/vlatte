@@ -13,7 +13,7 @@ type Peek struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Peek) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Peek) Match(v any) (bool, error) {
 	err := m.Action(v)
 	if err != nil {
 		return Error(fmt.Errorf("peek: %w", err))

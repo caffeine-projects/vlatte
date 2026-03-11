@@ -13,8 +13,8 @@ type Not struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Not) Match(v any) (bool, vlatte.Reason, error) {
-	ok, reason, err := m.Matcher.Match(v)
+func (m *Not) Match(v any) (bool, error) {
+	ok, err := m.Matcher.Match(v)
 	if err != nil {
 		return Error(fmt.Errorf("not: %w", err))
 	}
@@ -23,7 +23,7 @@ func (m *Not) Match(v any) (bool, vlatte.Reason, error) {
 		return Success()
 	}
 
-	return Mismatch(fmt.Sprintf("!(%s)", reason))
+	return Mismatch("Not() inner matcher matched")
 }
 
 // Describe implements descriptor.SelfDescriptive.

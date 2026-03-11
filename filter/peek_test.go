@@ -10,7 +10,7 @@ import (
 func TestPeek(t *testing.T) {
 	t.Run("should return peek error", func(t *testing.T) {
 		actionErr := fmt.Errorf("action failed")
-		ok, _, err := Peek(StrictEqual("test"), func(_ any) error { return actionErr }).Match("test")
+		ok, err := Peek(StrictEqual("test"), func(_ any) error { return actionErr }).Match("test")
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), actionErr.Error())
@@ -19,7 +19,7 @@ func TestPeek(t *testing.T) {
 
 	t.Run("should execute action before returning provided matcher expected", func(t *testing.T) {
 		c := ""
-		ok, _, err := Peek(StrictEqual("test"), func(v any) error { c = v.(string); return nil }).Match("test")
+		ok, err := Peek(StrictEqual("test"), func(v any) error { c = v.(string); return nil }).Match("test")
 
 		require.NoError(t, err)
 		require.True(t, ok)

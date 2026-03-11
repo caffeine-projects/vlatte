@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -12,7 +11,7 @@ import (
 type Truthy struct{}
 
 // Match implements vlatte.Filter.
-func (m *Truthy) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Truthy) Match(v any) (bool, error) {
 	var b bool
 	var err error
 

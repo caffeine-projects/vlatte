@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/equalutil"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
@@ -16,7 +15,7 @@ type ItemsMatch struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *ItemsMatch) Match(v any) (bool, vlatte.Reason, error) {
+func (m *ItemsMatch) Match(v any) (bool, error) {
 	a := reflect.ValueOf(v)
 	b := reflect.ValueOf(m.Expected)
 

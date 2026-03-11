@@ -14,13 +14,13 @@ type LowerCase struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *LowerCase) Match(v any) (bool, vlatte.Reason, error) {
+func (m *LowerCase) Match(v any) (bool, error) {
 	txt, ok := v.(string)
 	if !ok {
 		return Error(fmt.Errorf("lower: type %T is not supported. accepted types: string", v))
 	}
 
-	result, _, err := m.Matcher.Match(strings.ToLower(txt))
+	result, err := m.Matcher.Match(strings.ToLower(txt))
 	if err != nil {
 		return Error(fmt.Errorf("lower: %w", err))
 	}

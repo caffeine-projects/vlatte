@@ -21,7 +21,7 @@ func TestNil(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			ok, _, err := Nil().Match(tc.value)
+			ok, err := Nil().Match(tc.value)
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
 		})

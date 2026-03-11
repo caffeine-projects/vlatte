@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -14,7 +13,7 @@ type EqualIgnoreCase struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *EqualIgnoreCase) Match(v any) (bool, vlatte.Reason, error) {
+func (m *EqualIgnoreCase) Match(v any) (bool, error) {
 	txt := ""
 	if v != nil {
 		var ok bool

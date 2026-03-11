@@ -15,7 +15,7 @@ type URLPath struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *URLPath) Match(v any) (bool, vlatte.Reason, error) {
+func (m *URLPath) Match(v any) (bool, error) {
 	var value string
 
 	switch e := v.(type) {
@@ -41,7 +41,7 @@ func (m *URLPath) Match(v any) (bool, vlatte.Reason, error) {
 		return Error(fmt.Errorf("urlpath: it only accepts the types: *url.URL | url.URL | string. got: %T", v))
 	}
 
-	ok, _, err := m.Matcher.Match(value)
+	ok, err := m.Matcher.Match(value)
 	if err != nil {
 		return Error(fmt.Errorf("urlpath: %w", err))
 	}

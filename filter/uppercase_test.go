@@ -7,7 +7,7 @@ import (
 )
 
 func TestToUpperCase(t *testing.T) {
-	ok, _, err := ToUpper(StrictEqual("TEST")).Match("tesT")
+	ok, err := ToUpper(StrictEqual("TEST")).Match("tesT")
 
 	require.NoError(t, err)
 	require.True(t, ok)

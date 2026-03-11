@@ -2,11 +2,8 @@ package filtertype
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal/filterfmt"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -16,7 +13,7 @@ type AllOf struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *AllOf) Match(v any) (ok bool, reason vlatte.Reason, err error) {
+func (m *AllOf) Match(v any) (ok bool, err error) {
 	var idx int
 	defer func() {
 		if recovery := recover(); recovery != nil {
@@ -24,28 +21,21 @@ func (m *AllOf) Match(v any) (ok bool, reason vlatte.Reason, err error) {
 		}
 	}()
 
-	mismatches := make([]string, 0, len(m.Matchers))
-
+	var failed bool
 	for i, matcher := range m.Matchers {
 		idx = i
-		res, r, err := matcher.Match(v)
+		res, err := matcher.Match(v)
 		if err != nil {
-			return Error(fmt.Errorf("all: %d: %w", i, err))
+			return false, fmt.Errorf("all: %d: %w", i, err)
 		}
-
 		if !res {
-			mismatches = append(mismatches, string(r))
+			failed = true
 		}
 	}
-
-	if len(mismatches) == 0 {
-		return Success()
+	if failed {
+		return Mismatch("All() one or more matchers failed")
 	}
-
-	return Mismatch(strings.Join(
-		[]string{"All(", strconv.Itoa(len(m.Matchers)), ")\n", filterfmt.Indent(strings.Join(mismatches, "\n"))},
-		"",
-	))
+	return Success()
 }
 
 // Describe implements descriptor.SelfDescriptive.

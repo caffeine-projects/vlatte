@@ -9,7 +9,7 @@ import (
 
 func TestAnyOf(t *testing.T) {
 	t.Run("should return true if any of the given matchers returns true", func(t *testing.T) {
-		ok, _, err := Any(
+		ok, err := Any(
 			StrictEqual("test"),
 			EqualIgnoreCase("dev"),
 			ToLower(StrictEqual("TEST")),
@@ -20,7 +20,7 @@ func TestAnyOf(t *testing.T) {
 	})
 
 	t.Run("should return false if all of the given matchers returns false", func(t *testing.T) {
-		ok, _, err := Any(
+		ok, err := Any(
 			StrictEqual("abc"),
 			EqualIgnoreCase("def"),
 			ToLower(StrictEqual("TEST")),
@@ -31,7 +31,7 @@ func TestAnyOf(t *testing.T) {
 	})
 
 	t.Run("should return error and false when any error occurs", func(t *testing.T) {
-		ok, _, err := Any(
+		ok, err := Any(
 			StrictEqual("dev"),
 			ToUpper(StrictEqual("none")),
 			Function(func(v any) (bool, error) {

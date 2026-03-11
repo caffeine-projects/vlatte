@@ -44,7 +44,7 @@ func (e *Eval[TIn]) String() string {
 }
 
 // Match evaluates the input against the matcher of this [Eval].
-func (e *Eval[TIn]) Match(ctx context.Context, in TIn) (ok bool, reason Reason, err error) {
+func (e *Eval[TIn]) Match(ctx context.Context, in TIn) (ok bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("%w: Match: type: %T %v", ErrMatchPanicked, e.Matcher, r)
@@ -95,7 +95,7 @@ type Evaluators[M Bean, TIn any] []*Eval[TIn]
 // Normally this function is used together with [Mocks.Find]
 func (e Evaluators[M, TIn]) Eval(ctx context.Context, in TIn) (bool, error) {
 	for i, eval := range e {
-		ok, _, err := eval.Match(ctx, in)
+		ok, err := eval.Match(ctx, in)
 		if err != nil {
 			return false, fmt.Errorf("eval[%d]: %s. reason: %w", i, eval.String(), err)
 		}

@@ -24,12 +24,12 @@ func TestURLPath(t *testing.T) {
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
-			ok, _, err := URLPath(tt.path).Match(u)
+			ok, err := URLPath(tt.path).Match(u)
 
 			assert.Nil(t, err)
 			assert.Equal(t, tt.expected, ok)
 
-			ok, _, err = URLPathMatch(Contain(tt.path)).Match(u)
+			ok, err = URLPathMatch(Contain(tt.path)).Match(u)
 
 			assert.Nil(t, err)
 			assert.Equal(t, tt.expected, ok)
@@ -37,7 +37,7 @@ func TestURLPath(t *testing.T) {
 	}
 
 	t.Run("should return error when providing a type that is not handled by URLPath", func(t *testing.T) {
-		ok, _, err := URLPath("/test/hello").Match(10)
+		ok, err := URLPath("/test/hello").Match(10)
 		require.Error(t, err)
 		require.False(t, ok)
 	})

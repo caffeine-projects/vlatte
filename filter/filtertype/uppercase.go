@@ -14,13 +14,13 @@ type UpperCase struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *UpperCase) Match(v any) (bool, vlatte.Reason, error) {
+func (m *UpperCase) Match(v any) (bool, error) {
 	txt, ok := v.(string)
 	if !ok {
 		return Error(fmt.Errorf("upper: type %T is not supported. accepted types: string", v))
 	}
 
-	result, _, err := m.Matcher.Match(strings.ToUpper(txt))
+	result, err := m.Matcher.Match(strings.ToUpper(txt))
 	if err != nil {
 		return Error(fmt.Errorf("upper: %w", err))
 	}

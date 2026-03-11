@@ -19,7 +19,7 @@ func TestNot(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			ok, _, err := Not(tc.matcher).Match("test")
+			ok, err := Not(tc.matcher).Match("test")
 
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)

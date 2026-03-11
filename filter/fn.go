@@ -8,17 +8,17 @@ import (
 
 // Function creates an anonymous Matcher using the given function.
 func Function(fn func(v any) (bool, error)) vlatte.FilterFunc {
-	return func(v any) (bool, vlatte.Reason, error) {
+	return func(v any) (bool, error) {
 		pass, err := fn(v)
 		if err != nil {
-			return false, ReasonError, fmt.Errorf("fn: matcher: %w", err)
+			return false, fmt.Errorf("fn: matcher: %w", err)
 		}
 
 		if pass {
-			return true, ReasonNone, nil
+			return true, nil
 		}
 
-		return false, vlatte.Reason("F() Wrapped predicate did not match"), nil
+		return false, nil
 	}
 }
 

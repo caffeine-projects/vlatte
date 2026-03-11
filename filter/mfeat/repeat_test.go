@@ -9,22 +9,22 @@ import (
 func TestRepeat(t *testing.T) {
 	rep := Repeat(2)
 
-	ok, _, err := rep.Match(nil)
+	ok, err := rep.Match(nil)
 	assert.NoError(t, rep.SetState())
 	assert.NoError(t, err)
 	assert.True(t, ok)
 
-	ok, _, err = rep.Match(nil)
+	ok, err = rep.Match(nil)
 	assert.NoError(t, rep.SetState())
 	assert.NoError(t, err)
 	assert.True(t, ok)
 
-	ok, _, err = rep.Match(nil)
+	ok, err = rep.Match(nil)
 	assert.NoError(t, rep.SetState())
 	assert.NoError(t, err)
 	assert.False(t, ok)
 
-	ok, _, err = rep.Match(nil)
+	ok, err = rep.Match(nil)
 	assert.NoError(t, rep.SetState())
 	assert.NoError(t, err)
 	assert.False(t, ok)

@@ -3,10 +3,8 @@ package filtertype
 import (
 	"fmt"
 	"reflect"
-	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal/filterfmt"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -16,7 +14,7 @@ type Some struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Some) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Some) Match(v any) (bool, error) {
 	if v == nil {
 		return Mismatch("Some() Expected some values to match but got nil")
 	}
@@ -32,11 +30,8 @@ func (m *Some) Match(v any) (bool, vlatte.Reason, error) {
 		return Mismatch("Some() Expected some values to match but got zero")
 	}
 
-	length := vv.Len()
-	messages := make([]string, 0, length)
-
-	for i := 0; i < length; i++ {
-		ok, reason, err := m.Matcher.Match(vv.Index(i).Interface())
+	for i := 0; i < vv.Len(); i++ {
+		ok, err := m.Matcher.Match(vv.Index(i).Interface())
 		if err != nil {
 			return Error(fmt.Errorf("some: %w", err))
 		}
@@ -44,14 +39,9 @@ func (m *Some) Match(v any) (bool, vlatte.Reason, error) {
 		if ok {
 			return Success()
 		}
-
-		messages = append(messages, string(reason))
 	}
 
-	return Mismatch(fmt.Sprintf(
-		"Some()\n%s",
-		filterfmt.Indent(strings.Join(messages, "\n")),
-	))
+	return Mismatch("Some() no element matched")
 }
 
 // Describe implements descriptor.SelfDescriptive.

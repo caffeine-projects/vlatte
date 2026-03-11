@@ -5,7 +5,6 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -16,16 +15,16 @@ type Repeat struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Repeat) Match(_ any) (bool, vlatte.Reason, error) {
+func (m *Repeat) Match(_ any) (bool, error) {
 	if atomic.LoadInt64(&m.hits) < m.Max {
-		return true, vlatte.Reason(""), nil
+		return true, nil
 	}
 
-	return false, vlatte.Reason(strings.Join([]string{
+	return Mismatch(strings.Join([]string{
 		"Repeat(",
 		strconv.FormatInt(m.Max, 10),
 		") Reached the max matched requests for this mock",
-	}, "")), nil
+	}, ""))
 }
 
 // SetState implements vlatte.Stateful.

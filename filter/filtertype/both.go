@@ -2,7 +2,6 @@ package filtertype
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
@@ -15,31 +14,22 @@ type Both struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Both) Match(value any) (bool, vlatte.Reason, error) {
-	r1OK, r1Reason, err := m.First.Match(value)
+func (m *Both) Match(value any) (bool, error) {
+	r1OK, err := m.First.Match(value)
 	if err != nil {
 		return Error(fmt.Errorf("both: first: %w", err))
 	}
 
-	r2OK, r2Reason, err := m.Second.Match(value)
+	r2OK, err := m.Second.Match(value)
 	if err != nil {
-		return Error(fmt.Errorf("both: first: %w", err))
+		return Error(fmt.Errorf("both: second: %w", err))
 	}
 
 	if r1OK && r2OK {
 		return Success()
 	}
 
-	parts := []string{}
-	if !r1OK {
-		parts = append(parts, string(r1Reason))
-	}
-
-	if !r2OK {
-		parts = append(parts, string(r2Reason))
-	}
-
-	return Mismatch(strings.Join([]string{"Both()", strings.Join(parts, " - ")}, " "))
+	return Mismatch("Both() one or both did not match")
 }
 
 // Describe implements descriptor.SelfDescriptive.

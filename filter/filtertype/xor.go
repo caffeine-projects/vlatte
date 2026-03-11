@@ -2,7 +2,6 @@ package filtertype
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
@@ -15,13 +14,13 @@ type Xor struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Xor) Match(v any) (bool, vlatte.Reason, error) {
-	aOK, aReason, err := m.First.Match(v)
+func (m *Xor) Match(v any) (bool, error) {
+	aOK, err := m.First.Match(v)
 	if err != nil {
 		return Error(fmt.Errorf("xor: first: %w", err))
 	}
 
-	bOK, bReason, err := m.Second.Match(v)
+	bOK, err := m.Second.Match(v)
 	if err != nil {
 		return Error(fmt.Errorf("xor: second: %w", err))
 	}
@@ -30,15 +29,7 @@ func (m *Xor) Match(v any) (bool, vlatte.Reason, error) {
 		return Success()
 	}
 
-	var parts []string
-	if !aOK {
-		parts = append(parts, string(aReason))
-	}
-	if !bOK {
-		parts = append(parts, string(bReason))
-	}
-
-	return Mismatch(strings.Join([]string{"XOR()", strings.Join(parts, " - ")}, " "))
+	return Mismatch("XOR() both matched or both failed")
 }
 
 // Describe implements descriptor.SelfDescriptive.

@@ -3,10 +3,8 @@ package filtertype
 import (
 	"fmt"
 	"reflect"
-	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -16,7 +14,7 @@ type Each struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Each) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Each) Match(v any) (bool, error) {
 	var val = reflect.ValueOf(v)
 	var valType = reflect.TypeOf(v).Kind()
 
@@ -26,20 +24,13 @@ func (m *Each) Match(v any) (bool, vlatte.Reason, error) {
 
 		for iterator.Next() {
 			mv := iterator.Value().Interface()
-			ok, reason, err := m.Matcher.Match(mv)
+			ok, err := m.Matcher.Match(mv)
 			if err != nil {
 				return Error(fmt.Errorf("each: %w", err))
 			}
 
 			if !ok {
-				return false, vlatte.Reason(strings.Join(
-					[]string{
-						"Each(",
-						anyconv.Stringify(iterator.Key().Interface()), ":", anyconv.Stringify(mv),
-						") ", string(reason),
-					},
-					"",
-				)), nil
+				return Mismatch("Each() item did not match")
 			}
 		}
 
@@ -48,18 +39,13 @@ func (m *Each) Match(v any) (bool, vlatte.Reason, error) {
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < val.Len(); i++ {
 			entry := val.Index(i).Interface()
-			ok, reason, err := m.Matcher.Match(entry)
+			ok, err := m.Matcher.Match(entry)
 			if err != nil {
 				return Error(fmt.Errorf("each: %w", err))
 			}
 
 			if !ok {
-				return false, vlatte.Reason(strings.Join(
-					[]string{
-						"Each(", anyconv.Stringify(entry), ") ", string(reason),
-					},
-					"",
-				)), nil
+				return Mismatch("Each() item did not match")
 			}
 		}
 

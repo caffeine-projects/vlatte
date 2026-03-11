@@ -14,13 +14,13 @@ type Trim struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Trim) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Trim) Match(v any) (bool, error) {
 	txt, ok := v.(string)
 	if !ok {
 		return Error(fmt.Errorf("trim: type %T is not supported. accepted types: string", v))
 	}
 
-	result, _, err := m.Matcher.Match(strings.TrimSpace(txt))
+	result, err := m.Matcher.Match(strings.TrimSpace(txt))
 	if err != nil {
 		return Error(fmt.Errorf("trim: %w", err))
 	}

@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
 	"github.com/caffeine-projects/vlatte/filter/internal/equalutil"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
@@ -17,7 +16,7 @@ type Contains struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Contains) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Contains) Match(v any) (bool, error) {
 	var eValue = reflect.ValueOf(m.Expected)
 	var vValue = reflect.ValueOf(v)
 	var vType = reflect.TypeOf(v)

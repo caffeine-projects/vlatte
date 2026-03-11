@@ -24,7 +24,7 @@ func TestFalsy(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, _, err := Falsy().Match(tc.value)
+			ok, err := Falsy().Match(tc.value)
 
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
@@ -33,7 +33,7 @@ func TestFalsy(t *testing.T) {
 }
 
 func TestFalsyInvalidSyntax(t *testing.T) {
-	ok, _, err := Truthy().Match("y")
+	ok, err := Truthy().Match("y")
 
 	require.Error(t, err)
 	require.False(t, ok)

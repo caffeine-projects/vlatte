@@ -55,7 +55,7 @@ func TestContains(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, _, err := Contain(tc.expected).Match(tc.value)
+			ok, err := Contain(tc.expected).Match(tc.value)
 			assert.Nil(t, err)
 			assert.Equal(t, tc.result, ok)
 		})
@@ -63,12 +63,12 @@ func TestContains(t *testing.T) {
 }
 
 func TestContainf(t *testing.T) {
-	ok, _, err := Containf("%s", "qa").Match("dev and qa")
+	ok, err := Containf("%s", "qa").Match("dev and qa")
 	assert.Nil(t, err)
 	assert.True(t, ok)
 }
 
 func TestContainNilValue(t *testing.T) {
-	_, _, err := Contain("any").Match(nil)
+	_, err := Contain("any").Match(nil)
 	require.Error(t, err)
 }

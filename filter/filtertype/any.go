@@ -2,11 +2,8 @@ package filtertype
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/filter/internal/filterfmt"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -16,7 +13,7 @@ type AnyOf struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *AnyOf) Match(v any) (ok bool, reason vlatte.Reason, e error) {
+func (m *AnyOf) Match(v any) (ok bool, e error) {
 	var idx int
 	defer func() {
 		if recovery := recover(); recovery != nil {
@@ -24,27 +21,19 @@ func (m *AnyOf) Match(v any) (ok bool, reason vlatte.Reason, e error) {
 		}
 	}()
 
-	mismatches := make([]string, 0, len(m.Matchers))
-
 	for i, matcher := range m.Matchers {
 		idx = i
-		result, r, err := matcher.Match(v)
+		result, err := matcher.Match(v)
 		if err != nil {
-			return Error(fmt.Errorf("any: %d: %w", i, err))
+			return false, fmt.Errorf("any: %d: %w", i, err)
 		}
 
-		if !result {
-			mismatches = append(mismatches, string(r))
-			continue
+		if result {
+			return Success()
 		}
-
-		return Success()
 	}
 
-	return Mismatch(strings.Join(
-		[]string{"Any(", strconv.Itoa(len(m.Matchers)), ")\n", filterfmt.Indent(strings.Join(mismatches, "\n"))},
-		"",
-	))
+	return Mismatch("Any() none matched")
 }
 
 // Describe implements descriptor.SelfDescriptive.

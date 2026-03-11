@@ -3,7 +3,6 @@ package filtertype
 import (
 	"fmt"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -16,7 +15,7 @@ type Scenario struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Scenario) Match(_ any) (bool, vlatte.Reason, error) {
+func (m *Scenario) Match(_ any) (bool, error) {
 	if m.RequiredState == ScenarioStateStarted {
 		scenarioRmu.Lock()
 		m.Store.createNewIfNeeded(m.Name)
@@ -27,19 +26,19 @@ func (m *Scenario) Match(_ any) (bool, vlatte.Reason, error) {
 	scn, ok := m.Store.fetchByName(m.Name)
 	scenarioRmu.RUnlock()
 	if !ok {
-		return true, vlatte.Reason(""), nil
+		return true, nil
 	}
 
 	if scn.state == m.RequiredState {
-		return true, vlatte.Reason(""), nil
+		return true, nil
 	}
 
-	return false, vlatte.Reason(fmt.Sprintf(
+	return Mismatch(fmt.Sprintf(
 		"Scenario(%s): Required state: %s. Actual: %s",
 		scn.name,
 		m.RequiredState,
 		scn.state,
-	)), nil
+	))
 }
 
 // SetState implements vlatte.Stateful.

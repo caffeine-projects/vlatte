@@ -23,7 +23,7 @@ func TestIsIn(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			ok, _, err := IsIn(tc.items).Match(tc.value)
+			ok, err := IsIn(tc.items).Match(tc.value)
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
 		})
@@ -31,7 +31,7 @@ func TestIsIn(t *testing.T) {
 }
 
 func TestInInWithInvalidItems(t *testing.T) {
-	ok, _, err := IsIn(true).Match(true)
+	ok, err := IsIn(true).Match(true)
 	require.Error(t, err)
 	require.False(t, ok)
 }

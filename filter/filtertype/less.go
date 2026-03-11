@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter/internal/anyconv"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
@@ -15,7 +14,7 @@ type Less struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Less) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Less) Match(v any) (bool, error) {
 	vv, err := anyconv.ToFloat64(v)
 	if err != nil {
 		return Error(fmt.Errorf("lt: type %T is not supported. value must be compatible with float64. %w", v, err))

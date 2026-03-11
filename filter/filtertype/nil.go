@@ -1,7 +1,6 @@
 package filtertype
 
 import (
-	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -9,7 +8,7 @@ import (
 type Nil struct{}
 
 // Match implements vlatte.Filter.
-func (m *Nil) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Nil) Match(v any) (bool, error) {
 	if v == nil {
 		return Success()
 	}

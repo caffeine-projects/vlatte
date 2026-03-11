@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
@@ -15,7 +14,7 @@ type Len struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Len) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Len) Match(v any) (bool, error) {
 	value := reflect.ValueOf(v)
 	actual := value.Len()
 	if actual == m.Length {

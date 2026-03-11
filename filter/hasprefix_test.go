@@ -17,7 +17,7 @@ func TestHasPrefix(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.value, func(t *testing.T) {
-			ok, _, err := HasPrefix(tc.value).Match("hello world")
+			ok, err := HasPrefix(tc.value).Match("hello world")
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
 		})

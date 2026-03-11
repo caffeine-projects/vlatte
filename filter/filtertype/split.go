@@ -15,13 +15,13 @@ type Split struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Split) Match(v any) (bool, vlatte.Reason, error) {
+func (m *Split) Match(v any) (bool, error) {
 	txt, ok := v.(string)
 	if !ok {
 		return Error(fmt.Errorf("split: type %T is not supported. accepted types: string", v))
 	}
 
-	result, _, err := m.Matcher.Match(strings.Split(txt, m.Separator))
+	result, err := m.Matcher.Match(strings.Split(txt, m.Separator))
 	if err != nil {
 		return Error(fmt.Errorf("split: %w", err))
 	}

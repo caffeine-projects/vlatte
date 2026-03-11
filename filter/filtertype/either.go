@@ -2,7 +2,6 @@ package filtertype
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
@@ -15,13 +14,13 @@ type Either struct {
 }
 
 // Match implements vlatte.Filter.
-func (m *Either) Match(v any) (bool, vlatte.Reason, error) {
-	r1OK, r1Reason, err := m.First.Match(v)
+func (m *Either) Match(v any) (bool, error) {
+	r1OK, err := m.First.Match(v)
 	if err != nil {
 		return Error(fmt.Errorf("either: first: %w", err))
 	}
 
-	r2OK, r2Reason, err := m.Second.Match(v)
+	r2OK, err := m.Second.Match(v)
 	if err != nil {
 		return Error(fmt.Errorf("either: second: %w", err))
 	}
@@ -30,15 +29,7 @@ func (m *Either) Match(v any) (bool, vlatte.Reason, error) {
 		return Success()
 	}
 
-	parts := []string{}
-	if !r1OK {
-		parts = append(parts, string(r1Reason))
-	}
-	if !r2OK {
-		parts = append(parts, string(r2Reason))
-	}
-
-	return Mismatch(strings.Join([]string{"Either()", strings.Join(parts, " - ")}, " "))
+	return Mismatch("Either() neither matched")
 }
 
 // Describe implements descriptor.SelfDescriptive.
