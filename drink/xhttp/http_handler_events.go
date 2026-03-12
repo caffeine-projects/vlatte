@@ -23,7 +23,7 @@ var (
 type mockHTTPLifecycle interface {
 	OnRequest(*RequestValues)
 	OnMatch(*RequestValues, *Response)
-	OnNoMatch(*RequestValues, *vlatte.Results)
+	OnNoMatch(*RequestValues)
 	OnWarning(*RequestValues, error)
 	OnError(*RequestValues, error)
 }
@@ -51,8 +51,8 @@ func (h *builtInMockHTTPLifecycle) OnRequest(r *RequestValues) {
 		req.Any("header", redactedHeader)
 	}
 
-	if h.app.config.LogVerbosity >= vlatte.LogBody && len(r.RawBody) > 0 {
-		req.Bytes("body", r.RawBody)
+	if h.app.config.LogVerbosity >= vlatte.LogBody && len(r.RawBodyBytes) > 0 {
+		req.Bytes("body", r.RawBodyBytes)
 	}
 
 	evt.Dict("request", req)
@@ -66,7 +66,7 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *Response) {
 
 	evt := h.app.logger.Info().
 		Str("url", r.URL.String()).
-		Dur("elapsed", time.Since(r.StartedAt))
+		Dur("elapsed", time.Since(r.StartedAtTime))
 
 	dict := zerolog.Dict().Str("id", r.Mock.ID())
 	if r.Mock.Name() != "" {
@@ -100,7 +100,7 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *Response) {
 	evt.Msgf("<--- REQUEST MATCHED %s %s", r.RawRequest.Method, r.URL.Path)
 }
 
-func (h *builtInMockHTTPLifecycle) OnNoMatch(r *RequestValues, d *vlatte.Results) {
+func (h *builtInMockHTTPLifecycle) OnNoMatch(r *RequestValues) {
 	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
 		return
 	}
@@ -155,7 +155,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnRequest(rv *RequestValues) {
 
 	fmt.Fprintf(buf, "%s %s ---> %s %s\n%s %s",
 		h.cz.BrightBlue(h.cz.Bold("REQUEST RECEIVED")),
-		rv.StartedAt.Format(time.RFC3339),
+		rv.StartedAtTime.Format(time.RFC3339),
 		h.cz.Blue(rv.RawRequest.Method),
 		h.cz.Blue(rv.URL.Path),
 		rv.RawRequest.Method,
@@ -170,11 +170,11 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnRequest(rv *RequestValues) {
 		fmt.Fprintf(buf, "%s", redactedHeader)
 	}
 
-	if h.app.config.LogVerbosity >= vlatte.LogBody && len(rv.RawBody) > 0 {
+	if h.app.config.LogVerbosity >= vlatte.LogBody && len(rv.RawBodyBytes) > 0 {
 		buf.WriteString("\n")
 		buf.WriteString(h.cz.Blue("Body: "))
 
-		fmt.Fprintf(buf, "%v", string(rv.RawBody))
+		fmt.Fprintf(buf, "%v", string(rv.RawBodyBytes))
 	}
 
 	buf.WriteString("\n\n")
@@ -202,7 +202,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Resp
 	buf.WriteString(rv.Mock.ID() + " " + rv.Mock.Name())
 	buf.WriteString("\n")
 	buf.WriteString(h.cz.Green("Took(ms): "))
-	buf.WriteString(strconv.FormatInt(time.Since(rv.StartedAt).Milliseconds(), 10))
+	buf.WriteString(strconv.FormatInt(time.Since(rv.StartedAtTime).Milliseconds(), 10))
 	buf.WriteString("\n")
 	buf.WriteString(h.cz.Green("Status: "))
 	buf.WriteString(strconv.FormatInt(int64(s.StatusCode), 10))
@@ -235,10 +235,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Resp
 	buf.WriteTo(h.out)
 }
 
-func (h *builtInDescriptiveMockHTTPLifecycle) OnNoMatch(
-	reqValues *RequestValues,
-	d *vlatte.Results,
-) {
+func (h *builtInDescriptiveMockHTTPLifecycle) OnNoMatch(reqValues *RequestValues) {
 	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
 		return
 	}

@@ -10,9 +10,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/rs/zerolog"
+
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/configutil"
-	"github.com/rs/zerolog"
 )
 
 var _ vlatte.EventListener[vlatte.OnComplete] = (*WebHook)(nil)

@@ -5,10 +5,52 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/httpval"
 )
+
+var _ vlatte.ReqParser[*http.Request, *HTTPMockApp] = (*HTTPReqParser)(nil)
+
+type HTTPReqParser struct{}
+
+func (p *HTTPReqParser) Parse(r *http.Request, options *HTTPMockApp) (vlatte.Req[*http.Request], []byte, error) {
+	return parseRequest(r, options)
+}
+
+func parseRequest(r *http.Request, options *HTTPMockApp) (*RequestValues, []byte, error) {
+	parsedURL, urlSegments := parseURL(r, options.URL())
+	parsedBody, rawBody, err := parseRequestBody(options, r)
+	req := &RequestValues{
+		ReqID:           uuid.New().String(),
+		StartedAtTime:   time.Now(),
+		RawRequest:      r,
+		URL:             parsedURL,
+		URLPathSegments: urlSegments,
+		RawBodyBytes:    rawBody,
+		ParsedBodyData:  parsedBody,
+		App:             options,
+		Mock:            nil,
+		Data:            nil,
+	}
+	return req, rawBody, err
+}
+
+// parseURL returns the full request URL (with base) and path segments.
+func parseURL(r *http.Request, baseURL string) (*url.URL, []string) {
+	reqPath := r.URL.Path
+	if len(r.URL.RawQuery) > 0 {
+		reqPath += "?" + r.URL.RawQuery
+	}
+	parsedURL, _ := url.Parse(baseURL + reqPath)
+	segments := strings.FieldsFunc(reqPath, func(c rune) bool { return c == '/' })
+	return parsedURL, segments
+}
 
 // RequestBodyParser parses the request body if CanParse returns true.
 // Multiple implementations of RequestBodyParser can be provided via configuration.

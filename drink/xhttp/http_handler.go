@@ -4,9 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
-	"strings"
-	"time"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/httpval"
@@ -45,15 +42,12 @@ func newMockHandler(
 func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.app.config.DebugFn("req", r)
 
-	parsedURL, urlSegments := h.parseURL(r)
-	parsedBody, rawBody, err := parseRequestBody(h.app, r)
-	reqValues := &RequestValues{time.Now(), r, parsedURL, urlSegments, nil, nil, h.app, nil, nil}
+	parser := &HTTPReqParser{}
+	req, rawBody, err := parser.Parse(r, h.app)
+	reqValues := req.(*RequestValues)
 	if err != nil {
 		h.lifecycle.OnWarning(reqValues, fmt.Errorf("request_body_parser: %w", err))
 	}
-
-	reqValues.RawBody = rawBody
-	reqValues.ParsedBody = parsedBody
 
 	h.lifecycle.OnRequest(reqValues)
 
@@ -63,8 +57,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := &vlatte.Results{Buf: make([]string, 0)}
-	selectorInput := &HTTPValueSelectorInput{r, parsedURL, r.URL.Query(), r.Form, parsedBody}
+	selectorInput := &HTTPValueSelectorInput{r, reqValues.URL, r.URL.Query(), r.Form, reqValues.ParsedBodyData}
 
 	mocks := vlatte.Mocks[*HTTPMock, *HTTPValueSelectorInput](beans)
 	mock, matched, err := mocks.Find(r.Context(), selectorInput, func(m *HTTPMock) vlatte.Evaluators[*HTTPMock, *HTTPValueSelectorInput] { return m.expectations })
@@ -76,7 +69,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// lets check if we need to proxy and record this request.
 	if !matched {
 		if h.app.proxy == nil {
-			h.onNoMatches(w, reqValues, results)
+			h.onNoMatches(w, reqValues)
 			return
 		}
 
@@ -95,7 +88,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			h.app.rec.dispatch(r, parsedURL, rawBody, res)
+			h.app.rec.dispatch(r, reqValues.URL, rawBody, res)
 		}
 
 		return
@@ -203,12 +196,12 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// when proxy is enabled, recording happens some steps before
 	// so, we need to record here only if proxy is disabled.
 	if h.app.IsRecording() && h.app.config.Proxy == nil {
-		h.app.rec.dispatch(r, parsedURL, rawBody, res)
+		h.app.rec.dispatch(r, reqValues.URL, rawBody, res)
 	}
 }
 
-func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, desc *vlatte.Results) {
-	defer h.lifecycle.OnNoMatch(r, desc)
+func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues) {
+	defer h.lifecycle.OnNoMatch(r)
 
 	buf := bufpool.Get()
 	buf.Reset()
@@ -235,17 +228,6 @@ func (h *mockHandler) onError(w http.ResponseWriter, r *RequestValues, err error
 	w.Write([]byte(err.Error()))
 }
 
-func (h *mockHandler) parseURL(r *http.Request) (*url.URL, []string) {
-	reqPath := r.URL.Path
-	if len(r.URL.RawQuery) > 0 {
-		reqPath += "?" + r.URL.RawQuery
-	}
-
-	parsedURL, _ := url.Parse(h.app.URL() + reqPath)
-
-	return parsedURL, strings.FieldsFunc(reqPath, func(c rune) bool { return c == '/' })
-}
-
 func locals(r *RequestValues, provided map[string]any, ext any, data any) *viewdata.Data {
 	cookies := make(map[string]*http.Cookie, len(r.RawRequest.Cookies()))
 	for _, cookie := range r.RawRequest.Cookies() {
@@ -253,8 +235,8 @@ func locals(r *RequestValues, provided map[string]any, ext any, data any) *viewd
 	}
 
 	body := (*viewdata.Body)(nil)
-	if len(r.RawBody) > 0 {
-		body = viewdata.NewBody(r.RawRequest.Method, r.RawBody, r.ParsedBody)
+	if len(r.RawBodyBytes) > 0 {
+		body = viewdata.NewBody(r.RawRequest.Method, r.RawBodyBytes, r.ParsedBodyData)
 	}
 
 	req := &viewdata.Request{

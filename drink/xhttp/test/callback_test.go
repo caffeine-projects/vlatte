@@ -36,7 +36,7 @@ func TestCallbacks(t *testing.T) {
 				require.NotNil(t, cinput.Response())
 				require.Equal(t, http.MethodPost, cinput.Request().RawRequest.Method)
 				require.Equal(t, "/test", cinput.Request().URL.Path)
-				require.Equal(t, "hi", cinput.Request().ParsedBody.(string))
+				require.Equal(t, "hi", cinput.Request().ParsedBodyData.(string))
 
 				spy = true
 

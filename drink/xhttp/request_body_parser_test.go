@@ -95,8 +95,8 @@ func TestRequestBodyParsers_Parse(t *testing.T) {
 func TestRequestBodyParser_Limit(t *testing.T) {
 	m := New(Setup().MaxBodyParsingLimit(5))
 	m.MustBrew(Postf("/test").Body(Eq("hello")).Reply(Func(func(w http.ResponseWriter, rv *RequestValues) (*Response, error) {
-		require.Equal(t, "hello", rv.ParsedBody.(string))
-		return &Response{StatusCode: http.StatusOK, Body: []byte(rv.ParsedBody.(string))}, nil
+		require.Equal(t, "hello", rv.ParsedBodyData.(string))
+		return &Response{StatusCode: http.StatusOK, Body: []byte(rv.ParsedBodyData.(string))}, nil
 	})))
 	m.MustStart()
 

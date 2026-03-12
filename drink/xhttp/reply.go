@@ -31,6 +31,11 @@ func (rf ReplyFunc) Build(w http.ResponseWriter, r *RequestValues) (*Response, e
 	return rf(w, r)
 }
 
+type ReplyInput struct {
+	RequestValues *RequestValues
+	Writer        http.ResponseWriter
+}
+
 type replyOnBeforeBuild interface {
 	beforeBuild(app *HTTPMockApp) error
 }

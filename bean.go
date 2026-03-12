@@ -3,8 +3,6 @@ package vlatte
 import (
 	"context"
 	"iter"
-
-	"github.com/caffeine-projects/vlatte/internal/encutil"
 )
 
 type Bean interface {
@@ -42,24 +40,4 @@ type Canister[T Bean] interface {
 
 	Toss(ctx context.Context, ids ...string) error
 	Empty(ctx context.Context) error
-}
-
-type Results struct {
-	Buf []string
-}
-
-func (d *Results) Append(v string) {
-	d.Buf = append(d.Buf, v)
-}
-
-func (d *Results) AppendList(sep string, v ...string) {
-	d.Buf = append(d.Buf, encutil.Join(sep, v...))
-}
-
-func (d *Results) Len() int {
-	return len(d.Buf)
-}
-
-func (d *Results) String() string {
-	return encutil.Join("\n", d.Buf...)
 }
