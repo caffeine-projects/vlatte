@@ -1,13 +1,16 @@
 package xhttp
 
 import (
+	"context"
 	"io"
-	"net/http"
 	"os"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
+
+var _ vlatte.Replier[ReplyInput, *Response] = (*ReplyEcho)(nil)
 
 type ReplyEcho struct {
 	stdoutLog bool
@@ -22,14 +25,15 @@ func (e *ReplyEcho) Log() *ReplyEcho {
 	return e
 }
 
-func (e *ReplyEcho) Build(w http.ResponseWriter, r *RequestValues) (*Response, error) {
-	w.Header().Add(httpval.HeaderContentType, httpval.MIMETextPlainCharsetUTF8)
+// Reply implements vlatte.Replier[ReplyInput, *Response].
+func (e *ReplyEcho) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
+	input.Writer.Header().Add(httpval.HeaderContentType, httpval.MIMETextPlainCharsetUTF8)
 
 	if e.stdoutLog {
-		return nil, r.RawRequest.Write(io.MultiWriter(w, os.Stdout))
+		return nil, input.RequestValues.RawRequest.Write(io.MultiWriter(input.Writer, os.Stdout))
 	}
 
-	return nil, r.RawRequest.Write(w)
+	return nil, input.RequestValues.RawRequest.Write(input.Writer)
 }
 
 func (e *ReplyEcho) Describe() descriptor.Descriptor {

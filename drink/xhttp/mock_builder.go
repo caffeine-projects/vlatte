@@ -405,10 +405,9 @@ func (b *HTTPMockBuilder) Map(mapper Mapper) *HTTPMockBuilder {
 	return b
 }
 
-// Reply defines a response mock to be served if this mock matches a request.
-func (b *HTTPMockBuilder) Reply(rep Reply) *HTTPMockBuilder {
+// Reply sets the replier to be used when this mock matches a request.
+func (b *HTTPMockBuilder) Reply(rep vlatte.Replier[ReplyInput, *Response]) *HTTPMockBuilder {
 	b.mock.Reply = rep
-
 	return b
 }
 

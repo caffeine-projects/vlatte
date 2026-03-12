@@ -1,6 +1,7 @@
 package xhttp
 
 import (
+	"context"
 	"math/rand"
 	"net/http"
 	"testing"
@@ -12,6 +13,7 @@ import (
 func TestRandomReplies(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
 	rv := &RequestValues{RawRequest: req, URL: req.URL, App: New()}
+	input := ReplyInput{RequestValues: rv, Writer: nil}
 	statuses := []int{
 		http.StatusOK, http.StatusInternalServerError, http.StatusCreated, http.StatusBadRequest}
 
@@ -21,7 +23,7 @@ func TestRandomReplies(t *testing.T) {
 			OK(),
 			Created()).
 			Add(InternalServerError()).
-			Build(nil, rv)
+			Reply(context.Background(), input)
 
 		contains := false
 		for _, status := range statuses {
@@ -48,6 +50,7 @@ func TestRandWithCustom(t *testing.T) {
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
+	input := ReplyInput{RequestValues: rv, Writer: nil}
 	for i := 0; i < 5000; i++ {
 		res, err := RandWith(
 			r,
@@ -55,7 +58,7 @@ func TestRandWithCustom(t *testing.T) {
 			OK(),
 			Created(),
 			InternalServerError(),
-		).Build(nil, rv)
+		).Reply(context.Background(), input)
 
 		contains := false
 		for _, status := range statuses {

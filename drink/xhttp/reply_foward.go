@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-var _ Reply = (*ProxyReply)(nil)
+var _ vlatte.Replier[ReplyInput, *Response] = (*ProxyReply)(nil)
 
 var _forbiddenHeaders = []string{
 	"Connection",
@@ -147,8 +148,12 @@ func (r *ProxyReply) SSLVerify(v bool) *ProxyReply {
 	return r
 }
 
-// Build builds a Reply based on the ProxyReply configuration.
-func (r *ProxyReply) Build(_ http.ResponseWriter, req *RequestValues) (*Response, error) {
+// Reply implements vlatte.Replier[ReplyInput, *Response].
+func (r *ProxyReply) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
+	return r.build(input.RequestValues)
+}
+
+func (r *ProxyReply) build(req *RequestValues) (*Response, error) {
 	path := req.RawRequest.URL.Path
 
 	if r.trimPrefix != "" {

@@ -130,7 +130,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w = &topResponseWriter{vlatte.Flow(r.Context(), &vlatte.Sink{W: w}, mock.Steps()), w}
 	}
 
-	res, err := mock.Reply.Build(w, reqValues)
+	res, err := mock.Reply.Reply(r.Context(), ReplyInput{RequestValues: reqValues, Writer: w})
 	if err != nil {
 		h.onError(w, reqValues, fmt.Errorf(
 			"http: error building reply for request=%s source=%s. %w",

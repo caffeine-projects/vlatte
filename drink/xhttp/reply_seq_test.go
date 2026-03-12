@@ -1,6 +1,7 @@
 package xhttp
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"testing"
@@ -18,25 +19,26 @@ func TestSequentialReply(t *testing.T) {
 
 		req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
+		input := ReplyInput{RequestValues: rv, Writer: nil}
 		builder := Seq(InternalServerError(), BadRequest(), OK(), NotFound())
 
-		res, err := builder.Build(nil, rv)
+		res, err := builder.Reply(context.Background(), input)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusInternalServerError, res.StatusCode)
 
-		res, err = builder.Build(nil, rv)
+		res, err = builder.Reply(context.Background(), input)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, res.StatusCode)
 
-		res, err = builder.Build(nil, rv)
+		res, err = builder.Reply(context.Background(), input)
 		assert.Nil(t, err)
 		assert.Equal(t, http.StatusOK, res.StatusCode)
 
-		res, err = builder.Build(nil, rv)
+		res, err = builder.Reply(context.Background(), input)
 		assert.Nil(t, err)
 		assert.Equal(t, http.StatusNotFound, res.StatusCode)
 
-		_, err = builder.Build(nil, rv)
+		_, err = builder.Reply(context.Background(), input)
 		assert.NotNil(t, err)
 	})
 
@@ -46,14 +48,14 @@ func TestSequentialReply(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		require.NoError(t, err)
-
+		input := ReplyInput{RequestValues: rv, Writer: nil}
 		builder := Seq().Add(OK()).OnSequenceEnded(NotFound())
 
-		res, err := builder.Build(nil, rv)
+		res, err := builder.Reply(context.Background(), input)
 		assert.Nil(t, err)
 		assert.Equal(t, http.StatusOK, res.StatusCode)
 
-		res, err = builder.Build(nil, rv)
+		res, err = builder.Reply(context.Background(), input)
 		assert.Nil(t, err)
 		assert.Equal(t, http.StatusNotFound, res.StatusCode)
 	})
@@ -62,7 +64,7 @@ func TestSequentialReply(t *testing.T) {
 func TestSequentialReplyShouldReturnErrorWhenSequenceDoesNotContainReplies(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
 	rv := &RequestValues{RawRequest: req, URL: req.URL}
-	res, err := Seq().Build(nil, rv)
+	res, err := Seq().Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 	assert.Nil(t, res)
 	assert.NotNil(t, err)
 }
@@ -85,10 +87,11 @@ func TestSeqRace(t *testing.T) {
 	jobs := 3
 	wg := sync.WaitGroup{}
 
+	input := ReplyInput{RequestValues: rv, Writer: nil}
 	for i := 0; i < jobs; i++ {
 		wg.Add(1)
 		go func(index int) {
-			res, err := builder.Build(nil, rv)
+			res, err := builder.Reply(context.Background(), input)
 			require.NoError(t, err)
 			require.True(t, res.StatusCode != StatusNoMatch)
 
@@ -99,7 +102,7 @@ func TestSeqRace(t *testing.T) {
 		builder.totalHits()
 	}
 
-	res, err := builder.Build(nil, rv)
+	res, err := builder.Reply(context.Background(), input)
 	require.NoError(t, err)
 	require.True(t, res.StatusCode != StatusNoMatch)
 

@@ -1,23 +1,33 @@
 package xhttp
 
 import (
+	"context"
 	"net/http"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
-// -- Function Reply
+var _ vlatte.Replier[ReplyInput, *Response] = (*ReplyFunc)(nil)
 
-// Func returns a FunctionReply that builds a response using the given function.
-func Func(fn func(http.ResponseWriter, *RequestValues) (*Response, error)) ReplyFunc {
-	return func(w http.ResponseWriter, r *RequestValues) (*Response, error) {
-		return fn(w, r)
-	}
+// ReplyFunc is a replier that builds a response using the given function.
+type ReplyFunc struct {
+	fn func(http.ResponseWriter, *RequestValues) (*Response, error)
 }
 
-// -- HTTP Handler Reply
+// Reply implements vlatte.Replier[ReplyInput, *Response].
+func (r *ReplyFunc) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
+	return r.fn(input.Writer, input.RequestValues)
+}
 
-func Handler(h http.HandlerFunc) ReplyFunc {
-	return func(w http.ResponseWriter, r *RequestValues) (*Response, error) {
+// Func returns a Replier that builds a response using the given function.
+func Func(fn func(http.ResponseWriter, *RequestValues) (*Response, error)) *ReplyFunc {
+	return &ReplyFunc{fn: fn}
+}
+
+// Handler returns a Replier that delegates to the given http.HandlerFunc.
+func Handler(h http.HandlerFunc) *ReplyFunc {
+	return Func(func(w http.ResponseWriter, r *RequestValues) (*Response, error) {
 		h(w, r.RawRequest)
 		return nil, nil
-	}
+	})
 }

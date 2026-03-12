@@ -1,50 +1,49 @@
 package xhttp
 
 import (
+	"context"
 	"errors"
 	"math/rand"
-	"net/http"
 	"sync"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-var _ Reply = (*RandomReply)(nil)
+var _ vlatte.Replier[ReplyInput, *Response] = (*RandomReply)(nil)
 var _randomMu sync.Mutex
 
-// RandomReply configures a Reply that serves random HTTP responses.
+// RandomReply configures a Replier that serves random HTTP responses.
 type RandomReply struct {
-	replies []Reply
+	replies []vlatte.Replier[ReplyInput, *Response]
 	random  *rand.Rand
 	seed    int64
 	seeded  bool
 }
 
 // Rand initializes a new RandomReply.
-func Rand(reply ...Reply) *RandomReply {
+func Rand(reply ...vlatte.Replier[ReplyInput, *Response]) *RandomReply {
 	return &RandomReply{
 		replies: reply,
 	}
 }
 
 // RandWith creates a new RandomReply with a custom *rand.Rand.
-func RandWith(random *rand.Rand, reply ...Reply) *RandomReply {
+func RandWith(random *rand.Rand, reply ...vlatte.Replier[ReplyInput, *Response]) *RandomReply {
 	r := Rand(reply...)
 	r.random = random
-
 	return r
 }
 
 // RandWithSeed creates a new RandomReply with a custom *rand.Rand using the given seed.
-func RandWithSeed(seed int64, reply ...Reply) *RandomReply {
+func RandWithSeed(seed int64, reply ...vlatte.Replier[ReplyInput, *Response]) *RandomReply {
 	r := RandWith(rand.New(rand.NewSource(seed)), reply...)
 	r.seed = seed
-
 	return r
 }
 
-// Add adds a new Reply to the random list.
-func (rep *RandomReply) Add(reply ...Reply) *RandomReply {
+// Add adds a new Replier to the random list.
+func (rep *RandomReply) Add(reply ...vlatte.Replier[ReplyInput, *Response]) *RandomReply {
 	rep.replies = append(rep.replies, reply...)
 	return rep
 }
@@ -58,21 +57,17 @@ func (rep *RandomReply) beforeBuild(_ *HTTPMockApp) error {
 	return nil
 }
 
-// Build builds a response randomly based on previously added replies.
-func (rep *RandomReply) Build(w http.ResponseWriter, r *RequestValues) (*Response, error) {
+// Reply implements vlatte.Replier[ReplyInput, *Response].
+func (rep *RandomReply) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
 	_randomMu.Lock()
 	defer _randomMu.Unlock()
-
 	var index int
 	if rep.random == nil {
-		index = r.App.random.Intn(len(rep.replies))
+		index = input.RequestValues.App.random.Intn(len(rep.replies))
 	} else {
 		index = rep.random.Intn(len(rep.replies))
 	}
-
-	reply := rep.replies[index]
-
-	return reply.Build(w, r)
+	return rep.replies[index].Reply(ctx, input)
 }
 
 func (rep *RandomReply) Describe() descriptor.Descriptor {

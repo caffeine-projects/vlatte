@@ -2,6 +2,7 @@ package xhttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -37,6 +38,7 @@ func TestReplyFactories(t *testing.T) {
 
 func TestReply(t *testing.T) {
 	rv := &RequestValues{RawRequest: _req, URL: _req.URL}
+	input := ReplyInput{RequestValues: rv, Writer: nil}
 	res, err := NewReply().
 		Status(http.StatusCreated).
 		Header("test", "dev").
@@ -45,7 +47,7 @@ func TestReply(t *testing.T) {
 		Cookie(&http.Cookie{Name: "cookie_test"}).
 		ExpireCookie(&http.Cookie{Name: "cookie_test_remove"}).
 		Body([]byte("hi")).
-		Build(nil, rv)
+		Reply(context.Background(), input)
 
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, res.StatusCode)
@@ -63,7 +65,7 @@ func TestStdReplyBodyString(t *testing.T) {
 	res, err := NewReply().
 		Status(http.StatusCreated).
 		PlainText("text").
-		Build(nil, rv)
+		Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 	require.NoError(t, err)
 	require.Equal(t, "text", string(res.Body))
@@ -88,7 +90,7 @@ func TestStdReplyBodyJSON(t *testing.T) {
 		res, err := NewReply().
 			Status(http.StatusCreated).
 			BodyJSON(model).
-			Build(nil, rv)
+			Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		assert.NoError(t, err)
 
@@ -103,7 +105,7 @@ func TestStdReplyBodyJSON(t *testing.T) {
 		res, err := NewReply().
 			Status(http.StatusCreated).
 			BodyJSON(make(chan int)).
-			Build(nil, rv)
+			Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		assert.Nil(t, res)
 		assert.NotNil(t, err)
@@ -119,7 +121,7 @@ func TestStdReplyBodyReader(t *testing.T) {
 	res, err := NewReply().
 		Status(http.StatusCreated).
 		BodyReader(buf).
-		Build(nil, rv)
+		Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 	assert.NoError(t, err)
 	assert.Equal(t, "hello\nworld\n", string(res.Body))

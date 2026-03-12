@@ -114,7 +114,7 @@ type HTTPMock struct {
 	expectations []*vlatte.Eval[*HTTPValueSelectorInput]
 	ext          any
 
-	Reply Reply
+	Reply vlatte.Replier[ReplyInput, *Response]
 
 	// Mappers stores response mappers associated with this Mock.
 	Mappers []Mapper

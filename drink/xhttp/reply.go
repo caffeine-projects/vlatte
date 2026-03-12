@@ -2,6 +2,7 @@ package xhttp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,21 +17,9 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-var _ Reply = (*StdReply)(nil)
+var _ vlatte.Replier[ReplyInput, *Response] = (*StdReply)(nil)
 
-// Reply defines the contract to set up an HTTP replier.
-type Reply interface {
-	// Build returns an HTTP response MockedResponse to be served; after the HTTP request was matched.
-	// Return a nil MockedResponse if the HTTP response was rendered inside the Build function.
-	Build(w http.ResponseWriter, r *RequestValues) (*Response, error)
-}
-
-type ReplyFunc func(w http.ResponseWriter, r *RequestValues) (*Response, error)
-
-func (rf ReplyFunc) Build(w http.ResponseWriter, r *RequestValues) (*Response, error) {
-	return rf(w, r)
-}
-
+// ReplyInput is the input passed to Replier.Reply for HTTP.
 type ReplyInput struct {
 	RequestValues *RequestValues
 	Writer        http.ResponseWriter
@@ -376,13 +365,12 @@ func (rep *StdReply) beforeBuild(app *HTTPMockApp) error {
 	return nil
 }
 
-// Build builds a MockedResponse based on StdReply definition.
-func (rep *StdReply) Build(w http.ResponseWriter, r *RequestValues) (res *Response, err error) {
-	res, err = rep.build(w, r)
+// Reply implements vlatte.Replier[ReplyInput, *Response].
+func (rep *StdReply) Reply(ctx context.Context, input ReplyInput) (res *Response, err error) {
+	res, err = rep.build(input.Writer, input.RequestValues)
 	if err != nil {
 		return nil, fmt.Errorf("reply: %w", err)
 	}
-
 	return res, nil
 }
 

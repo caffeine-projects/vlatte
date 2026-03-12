@@ -56,10 +56,6 @@ type StreamResponse[T any] struct {
 	StreamType StreamType
 }
 
-type ServerStreamReply interface {
-	Build(ctx context.Context, values *StreamRequestValues) error
-}
-
 type BuiltInServerStreamReply[T any] struct {
 	response *StreamResponse[T]
 }
@@ -86,7 +82,16 @@ func (r *BuiltInServerStreamReply[T]) JSON(reader io.Reader) *BuiltInServerStrea
 	return r
 }
 
-func (r *BuiltInServerStreamReply[T]) Build(ctx context.Context, values *StreamRequestValues) error {
+// Reply implements vlatte.Replier[*StreamRequestValues, any].
+func (r *BuiltInServerStreamReply[T]) Reply(ctx context.Context, values *StreamRequestValues) (any, error) {
+	err := r.build(ctx, values)
+	if err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+func (r *BuiltInServerStreamReply[T]) build(ctx context.Context, values *StreamRequestValues) error {
 	err := grpc.SendHeader(ctx, r.response.Header)
 	if err != nil {
 		return err
@@ -187,17 +192,18 @@ func (in *Interceptors) StreamInterceptor(
 		return status.Error(codes.NotFound, "stream: request was not matched with any mock")
 	}
 
-	reply, ok := mock.Reply.(ServerStreamReply)
-	if !ok {
+	replier, ok := mock.Reply.(vlatte.Replier[*StreamRequestValues, any])
+	if !ok || replier == nil {
 		return status.Errorf(
 			codes.Unknown,
-			"stream: mock %s must implement an server stream reply: got %T",
+			"stream: mock %s reply must implement Replier[*StreamRequestValues, any]: got %T",
 			mock.getRef(),
 			mock.Reply,
 		)
 	}
 
-	err = reply.Build(stream.Context(), &StreamRequestValues{rawBody, stream, info, in.app})
+	values := &StreamRequestValues{rawBody, stream, info, in.app}
+	_, err = replier.Reply(stream.Context(), values)
 	if err != nil {
 		return fmt.Errorf("stream: failed to reply: %w", err)
 	}

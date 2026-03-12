@@ -61,12 +61,13 @@ func (in *Interceptors) UnaryInterceptor(
 		return nil, interceptError("unary: request was not matched with any mock")
 	}
 
-	reply, ok := mock.Reply.(UnaryReply)
-	if !ok {
-		return nil, interceptError("unary: mock %s must implement an unary reply: got %T", mock.getRef(), mock.Reply)
+	replier, ok := mock.Reply.(vlatte.Replier[*UnaryRequestValues, any])
+	if !ok || replier == nil {
+		return nil, interceptError("unary: mock %s reply must implement Replier[*UnaryRequestValues, any]: got %T", mock.getRef(), mock.Reply)
 	}
 
-	res, err := reply.Build(ctx, &UnaryRequestValues{reqMsg, info, rawBody, in.app})
+	rv := &UnaryRequestValues{reqMsg, info, rawBody, in.app}
+	res, err := replier.Reply(ctx, rv)
 	if err != nil {
 		return nil, err
 	}
@@ -76,9 +77,7 @@ func (in *Interceptors) UnaryInterceptor(
 	return res, nil
 }
 
-type UnaryReply interface {
-	Build(ctx context.Context, rv *UnaryRequestValues) (any, error)
-}
+var _ vlatte.Replier[*UnaryRequestValues, any] = (*BuiltInUnaryReply)(nil)
 
 type BuiltInUnaryReply struct {
 	response *UnaryResponse
@@ -111,7 +110,8 @@ func (u *BuiltInUnaryReply) Message(msg any) *BuiltInUnaryReply {
 	return u
 }
 
-func (u *BuiltInUnaryReply) Build(ctx context.Context, _ *UnaryRequestValues) (any, error) {
+// Reply implements vlatte.Replier[*UnaryRequestValues, any].
+func (u *BuiltInUnaryReply) Reply(ctx context.Context, _ *UnaryRequestValues) (any, error) {
 	err := grpc.SendHeader(ctx, u.response.Header)
 	if err != nil {
 		return nil, err

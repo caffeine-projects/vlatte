@@ -54,7 +54,7 @@ func (b *UnaryMockBuilder) Field(path string, m vlatte.Filter) *UnaryMockBuilder
 	return b
 }
 
-func (b *UnaryMockBuilder) Reply(r UnaryReply) *UnaryMockBuilder {
+func (b *UnaryMockBuilder) Reply(r vlatte.Replier[*UnaryRequestValues, any]) *UnaryMockBuilder {
 	b.m.Reply = r
 	return b
 }

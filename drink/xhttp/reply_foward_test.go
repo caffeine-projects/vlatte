@@ -53,7 +53,7 @@ func TestForward(t *testing.T) {
 			Header("x-res", "response").
 			Headers(h)
 		require.NoError(t, reply.beforeBuild(New()))
-		res, err := reply.Build(nil, rv)
+		res, err := reply.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusCreated, res.StatusCode)
@@ -82,7 +82,7 @@ func TestForward(t *testing.T) {
 		u, _ := url.Parse(dest.URL)
 		forward := From(u)
 		require.NoError(t, forward.beforeBuild(New()))
-		res, err := forward.Build(nil, rv)
+		res, err := forward.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -115,7 +115,7 @@ func TestForward(t *testing.T) {
 		u, _ := url.Parse(dest.URL)
 		forward := From(u)
 		require.NoError(t, forward.beforeBuild(New()))
-		res, err := forward.Build(nil, rv)
+		res, err := forward.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 		require.NoError(t, err)
 
 		g, err := res.Gunzip()
@@ -137,7 +137,7 @@ func TestForward(t *testing.T) {
 
 		forward := From(dest.URL)
 		require.NoError(t, forward.beforeBuild(New()))
-		res, err := forward.Build(nil, rv)
+		res, err := forward.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusNoContent, res.StatusCode)
@@ -158,7 +158,7 @@ func TestForward(t *testing.T) {
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		reply := From(dest.URL).TrimPrefix("/path/test")
 		require.NoError(t, reply.beforeBuild(New()))
-		res, err := reply.Build(nil, rv)
+		res, err := reply.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		assert.NoError(t, err)
 		assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -178,7 +178,7 @@ func TestForward(t *testing.T) {
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		reply := From(dest.URL).TrimSuffix("/example")
 		require.NoError(t, reply.beforeBuild(New()))
-		res, err := reply.Build(nil, rv)
+		res, err := reply.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		assert.NoError(t, err)
 		assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -215,7 +215,7 @@ func TestForward(t *testing.T) {
 		reply := From(dest.URL).
 			Timeout(100 * time.Millisecond)
 		require.NoError(t, reply.beforeBuild(New()))
-		res, err := reply.Build(nil, rv)
+		res, err := reply.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		require.Error(t, err)
 		require.Nil(t, res)

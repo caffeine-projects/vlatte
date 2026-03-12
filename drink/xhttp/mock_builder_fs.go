@@ -199,7 +199,7 @@ func (b *mockBuilderFromBytes) Grind(app *HTTPMockApp) (mock *HTTPMock, err erro
 // buildReply expects a sub instance of viper.Viper, containing the response definition.
 // Fields should not be accessed using "response.", given that the argument v already contains only the
 // response.* fields.
-func buildReply(vi *viper.Viper) (Reply, error) {
+func buildReply(vi *viper.Viper) (vlatte.Replier[ReplyInput, *Response], error) {
 	vi.SetDefault(_resStatus, http.StatusOK)
 	vi.SetDefault(_resTemplateEnabled, false)
 
@@ -543,7 +543,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 	// Begin Response
 	// --
 
-	var rep Reply
+	var rep vlatte.Replier[ReplyInput, *Response]
 
 	if vi.IsSet(_fResponse) {
 		rep, err = buildReply(vi.Sub(_fResponse))

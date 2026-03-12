@@ -1,6 +1,7 @@
 package xhttp
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,7 +17,7 @@ func TestFunctionReply(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
 	rv := &RequestValues{RawRequest: r, URL: r.URL}
 	replier := Func(fn)
-	res, err := replier.Build(nil, rv)
+	res, err := replier.Reply(context.Background(), ReplyInput{Writer: nil, RequestValues: rv})
 
 	assert.Nil(t, err)
 	assert.Equal(t, res.StatusCode, http.StatusAccepted)
@@ -32,7 +33,7 @@ func TestHandlerReply(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	replier := Handler(fn)
-	res, err := replier.Build(w, rv)
+	res, err := replier.Reply(context.Background(), ReplyInput{Writer: w, RequestValues: rv})
 
 	assert.NoError(t, err)
 	assert.Nil(t, res)

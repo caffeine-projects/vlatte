@@ -54,7 +54,7 @@ func (b *ServerStreamMockBuilder) Field(path string, m vlatte.Filter) *ServerStr
 	return b
 }
 
-func (b *ServerStreamMockBuilder) Reply(r ServerStreamReply) *ServerStreamMockBuilder {
+func (b *ServerStreamMockBuilder) Reply(r vlatte.Replier[*StreamRequestValues, any]) *ServerStreamMockBuilder {
 	b.m.Reply = r
 	return b
 }
