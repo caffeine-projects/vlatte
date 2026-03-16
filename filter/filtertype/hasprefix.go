@@ -13,6 +13,9 @@ type HasPrefix struct {
 	Prefix string
 }
 
+// Name implements vlatte.Filter.
+func (m *HasPrefix) Name() string { return "HasPrefix" }
+
 // Match implements vlatte.Filter.
 func (m *HasPrefix) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

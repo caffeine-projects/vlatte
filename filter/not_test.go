@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,7 +20,7 @@ func TestNot(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := Not(tc.matcher).Match(vlatte.NewFilterArg(t.Context(), "test"))
+			ok, err := Not(tc.matcher).Match(vlatte.NewFilterArg(t.Context(), explain.New(), "test"))
 
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)

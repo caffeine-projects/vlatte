@@ -17,6 +17,9 @@ type HasKey struct {
 	Expr jp.Expr
 }
 
+// Name implements vlatte.Filter.
+func (m *HasKey) Name() string { return "HasKey" }
+
 // Match implements vlatte.Filter.
 func (m *HasKey) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

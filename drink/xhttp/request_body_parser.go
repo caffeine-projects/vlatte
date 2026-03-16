@@ -15,7 +15,7 @@ import (
 	"github.com/caffeine-projects/vlatte/drink/xhttp/httpval"
 )
 
-var _ vlatte.ReqParser[*http.Request, *HTTPMockApp] = (*HTTPReqParser)(nil)
+var _ vlatte.RequestParser[*http.Request, *HTTPMockApp] = (*HTTPReqParser)(nil)
 
 type HTTPReqParser struct{}
 

@@ -15,6 +15,9 @@ type Glob struct {
 	Pattern string
 }
 
+// Name implements vlatte.Filter.
+func (m *Glob) Name() string { return "Glob" }
+
 // Match implements vlatte.Filter.
 func (m *Glob) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

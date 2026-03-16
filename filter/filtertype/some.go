@@ -13,6 +13,9 @@ type Some struct {
 	Matcher vlatte.Filter
 }
 
+// Name implements vlatte.Filter.
+func (m *Some) Name() string { return "Some" }
+
 // Match implements vlatte.Filter.
 func (m *Some) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()
@@ -32,7 +35,7 @@ func (m *Some) Match(arg vlatte.FilterArg) (bool, error) {
 	}
 
 	for i := 0; i < vv.Len(); i++ {
-		ok, err := m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), vv.Index(i).Interface()))
+		ok, err := m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), arg.Explain(), vv.Index(i).Interface()))
 		if err != nil {
 			return Error(fmt.Errorf("some: %w", err))
 		}

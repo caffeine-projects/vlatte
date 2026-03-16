@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,7 +35,7 @@ func TestItem(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(strconv.Itoa(tc.index), func(t *testing.T) {
-			ok, err := Item(tc.index, tc.matcher).Match(vlatte.NewFilterArg(t.Context(), v))
+			ok, err := Item(tc.index, tc.matcher).Match(vlatte.NewFilterArg(t.Context(), explain.New(), v))
 
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
@@ -43,13 +44,13 @@ func TestItem(t *testing.T) {
 }
 
 func TestItemInvalidIndex(t *testing.T) {
-	ok, err := Item(-1, Equal("dev")).Match(vlatte.NewFilterArg(t.Context(), []string{"dev"}))
+	ok, err := Item(-1, Equal("dev")).Match(vlatte.NewFilterArg(t.Context(), explain.New(), []string{"dev"}))
 	require.Error(t, err)
 	require.False(t, ok)
 }
 
 func TestInvalidType(t *testing.T) {
-	ok, err := Item(0, Equal("dev")).Match(vlatte.NewFilterArg(t.Context(), true))
+	ok, err := Item(0, Equal("dev")).Match(vlatte.NewFilterArg(t.Context(), explain.New(), true))
 	require.Error(t, err)
 	require.False(t, ok)
 }

@@ -8,6 +8,9 @@ import (
 // Anything is a matcher that always passes.
 type Anything struct{}
 
+// Name implements vlatte.Filter.
+func (m *Anything) Name() string { return "Anything" }
+
 // Match implements vlatte.Filter.
 func (m *Anything) Match(_ vlatte.FilterArg) (bool, error) {
 	return Success()

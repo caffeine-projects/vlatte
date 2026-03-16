@@ -11,6 +11,9 @@ import (
 // Truthy passes when the value is true.
 type Truthy struct{}
 
+// Name implements vlatte.Filter.
+func (m *Truthy) Name() string { return "Truthy" }
+
 // Match implements vlatte.Filter.
 func (m *Truthy) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

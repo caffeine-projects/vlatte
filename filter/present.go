@@ -5,6 +5,6 @@ import (
 )
 
 // Present matches when the value is present (non-zero).
-func Present() *filtertype.BePresent {
-	return &filtertype.BePresent{}
+func Present() *filtertype.Present {
+	return &filtertype.Present{}
 }

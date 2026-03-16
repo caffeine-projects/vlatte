@@ -13,6 +13,9 @@ type HasSuffix struct {
 	Suffix string
 }
 
+// Name implements vlatte.Filter.
+func (m *HasSuffix) Name() string { return "HasSuffix" }
+
 // Match implements vlatte.Filter.
 func (m *HasSuffix) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

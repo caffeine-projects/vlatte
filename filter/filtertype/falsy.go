@@ -11,6 +11,9 @@ import (
 // Falsy passes when the value is false.
 type Falsy struct{}
 
+// Name implements vlatte.Filter.
+func (m *Falsy) Name() string { return "Falsy" }
+
 // Match implements vlatte.Filter.
 func (m *Falsy) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

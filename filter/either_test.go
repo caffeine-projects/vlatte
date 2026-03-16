@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,7 +24,7 @@ func TestEither(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := Either(tc.matchers[0], tc.matchers[1]).Match(vlatte.NewFilterArg(t.Context(), "test"))
+			ok, err := Either(tc.matchers[0], tc.matchers[1]).Match(vlatte.NewFilterArg(t.Context(), explain.New(), "test"))
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
 		})
@@ -35,7 +36,7 @@ func TestEitherLeftErr(t *testing.T) {
 		Function(func(_ any) (bool, error) {
 			return false, fmt.Errorf("fail")
 		}),
-		Contain("qa")).Match(vlatte.NewFilterArg(t.Context(), "test"))
+		Contain("qa")).Match(vlatte.NewFilterArg(t.Context(), explain.New(), "test"))
 
 	require.Error(t, err)
 	require.False(t, ok)
@@ -46,7 +47,7 @@ func TestEitherRightErr(t *testing.T) {
 		Contain("qa"),
 		Function(func(_ any) (bool, error) {
 			return false, fmt.Errorf("fail")
-		})).Match(vlatte.NewFilterArg(t.Context(), "test"))
+		})).Match(vlatte.NewFilterArg(t.Context(), explain.New(), "test"))
 
 	require.Error(t, err)
 	require.False(t, ok)

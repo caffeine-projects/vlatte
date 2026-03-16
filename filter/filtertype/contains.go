@@ -16,6 +16,9 @@ type Contains struct {
 	Expected any
 }
 
+// Name implements vlatte.Filter.
+func (m *Contains) Name() string { return "Contains" }
+
 // Match implements vlatte.Filter.
 func (m *Contains) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

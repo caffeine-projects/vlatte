@@ -13,6 +13,9 @@ type Either struct {
 	Second vlatte.Filter
 }
 
+// Name implements vlatte.Filter.
+func (m *Either) Name() string { return "Either" }
+
 // Match implements vlatte.Filter.
 func (m *Either) Match(arg vlatte.FilterArg) (bool, error) {
 	r1OK, err := m.First.Match(arg)

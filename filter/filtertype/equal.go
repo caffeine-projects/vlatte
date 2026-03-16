@@ -14,6 +14,9 @@ type Equal struct {
 	Expected any
 }
 
+// Name implements vlatte.Filter.
+func (m *Equal) Name() string { return "Equal" }
+
 // Match implements vlatte.Filter.
 func (m *Equal) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

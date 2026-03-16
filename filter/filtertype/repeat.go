@@ -15,6 +15,9 @@ type Repeat struct {
 	hits int64
 }
 
+// Name implements vlatte.Filter.
+func (m *Repeat) Name() string { return "Repeat" }
+
 // Match implements vlatte.Filter.
 func (m *Repeat) Match(_ vlatte.FilterArg) (bool, error) {
 	if atomic.LoadInt64(&m.hits) < m.Max {

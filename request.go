@@ -10,6 +10,6 @@ type Req[R any] interface {
 	ParsedBody() any
 }
 
-type ReqParser[R any, O any] interface {
+type RequestParser[R any, O any] interface {
 	Parse(r R, options O) (Req[R], []byte, error)
 }

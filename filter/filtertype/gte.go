@@ -14,6 +14,9 @@ type GreaterOrEqual struct {
 	Expected float64
 }
 
+// Name implements vlatte.Filter.
+func (m *GreaterOrEqual) Name() string { return "GreaterOrEqual" }
+
 // Match implements vlatte.Filter.
 func (m *GreaterOrEqual) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

@@ -13,6 +13,9 @@ type EqualIgnoreCase struct {
 	Expected string
 }
 
+// Name implements vlatte.Filter.
+func (m *EqualIgnoreCase) Name() string { return "EqualIgnoreCase" }
+
 // Match implements vlatte.Filter.
 func (m *EqualIgnoreCase) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

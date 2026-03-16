@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,7 +44,7 @@ func TestGlob(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.pattern, func(t *testing.T) {
-			ok, err := GlobMatch(tc.pattern).Match(vlatte.NewFilterArg(t.Context(), tc.value))
+			ok, err := GlobMatch(tc.pattern).Match(vlatte.NewFilterArg(t.Context(), explain.New(), tc.value))
 
 			require.NoError(t, err)
 			require.Equal(t, tc.expectedResult, ok)

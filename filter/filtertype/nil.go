@@ -5,11 +5,14 @@ import (
 	"github.com/caffeine-projects/vlatte/shelf/descriptor"
 )
 
-// Nil passes when the value is nil.
-type Nil struct{}
+// IsNil passes when the value is nil.
+type IsNil struct{}
+
+// Name implements vlatte.Filter.
+func (m *IsNil) Name() string { return "Nil" }
 
 // Match implements vlatte.Filter.
-func (m *Nil) Match(arg vlatte.FilterArg) (bool, error) {
+func (m *IsNil) Match(arg vlatte.FilterArg) (bool, error) {
 	if arg.Value() == nil {
 		return Success()
 	}
@@ -18,6 +21,6 @@ func (m *Nil) Match(arg vlatte.FilterArg) (bool, error) {
 }
 
 // Describe implements descriptor.SelfDescriptive.
-func (m *Nil) Describe() descriptor.Descriptor {
+func (m *IsNil) Describe() descriptor.Descriptor {
 	return descriptor.KeyOnly("nil")
 }

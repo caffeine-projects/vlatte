@@ -17,6 +17,9 @@ type RegExp struct {
 	mu         sync.Mutex
 }
 
+// Name implements vlatte.Filter.
+func (m *RegExp) Name() string { return "RegExp" }
+
 // Match implements vlatte.Filter.
 func (m *RegExp) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

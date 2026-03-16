@@ -19,7 +19,6 @@ func JSONPath(path string, matcher vlatte.Filter) *filtertype.JSONPath {
 		Path:    path,
 		Expr:    x,
 		Matcher: matcher,
-		Name:    "JSONPath",
 	}
 }
 
@@ -33,6 +32,5 @@ func Field(path string, matcher vlatte.Filter) *filtertype.JSONPath {
 		Path:    path,
 		Expr:    x,
 		Matcher: matcher,
-		Name:    "Field",
 	}
 }

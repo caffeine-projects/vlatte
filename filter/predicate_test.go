@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -13,13 +14,13 @@ func TestPredicate(t *testing.T) {
 	})
 
 	t.Run("pass", func(t *testing.T) {
-		ok, err := m.Match(vlatte.NewFilterArg(t.Context(), "ok"))
+		ok, err := m.Match(vlatte.NewFilterArg(t.Context(), explain.New(), "ok"))
 		require.NoError(t, err)
 		require.True(t, ok)
 	})
 
 	t.Run("no pass", func(t *testing.T) {
-		ok, err := m.Match(vlatte.NewFilterArg(t.Context(), "nok"))
+		ok, err := m.Match(vlatte.NewFilterArg(t.Context(), explain.New(), "nok"))
 		require.NoError(t, err)
 		require.False(t, ok)
 	})

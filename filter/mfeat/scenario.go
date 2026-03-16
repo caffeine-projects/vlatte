@@ -21,6 +21,6 @@ func Scenario(store *ScenarioStore, name, requiredState, newState string) *filte
 		Store:         store,
 		RequiredState: requiredState,
 		NewState:      newState,
-		Name:          name,
+		ScenarioName:  name,
 	}
 }

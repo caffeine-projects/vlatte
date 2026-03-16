@@ -12,6 +12,9 @@ type AllOf struct {
 	Matchers []vlatte.Filter
 }
 
+// Name implements vlatte.Filter.
+func (m *AllOf) Name() string { return "AllOf" }
+
 // Match implements vlatte.Filter.
 func (m *AllOf) Match(arg vlatte.FilterArg) (ok bool, err error) {
 	var idx int

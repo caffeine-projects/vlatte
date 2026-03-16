@@ -15,6 +15,9 @@ type ItemsMatch struct {
 	Expected any
 }
 
+// Name implements vlatte.Filter.
+func (m *ItemsMatch) Name() string { return "ItemsMatch" }
+
 // Match implements vlatte.Filter.
 func (m *ItemsMatch) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

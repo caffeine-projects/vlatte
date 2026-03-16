@@ -13,6 +13,9 @@ type Trim struct {
 	Matcher vlatte.Filter
 }
 
+// Name implements vlatte.Filter.
+func (m *Trim) Name() string { return "Trim" }
+
 // Match implements vlatte.Filter.
 func (m *Trim) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()
@@ -21,7 +24,7 @@ func (m *Trim) Match(arg vlatte.FilterArg) (bool, error) {
 		return Error(fmt.Errorf("trim: type %T is not supported. accepted types: string", v))
 	}
 
-	result, err := m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), strings.TrimSpace(txt)))
+	result, err := m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), arg.Explain(), strings.TrimSpace(txt)))
 	if err != nil {
 		return Error(fmt.Errorf("trim: %w", err))
 	}

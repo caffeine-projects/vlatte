@@ -5,6 +5,6 @@ import (
 )
 
 // IsIn matches when the value is contained in the given items (slice or map keys).
-func IsIn(items any) *filtertype.IsContainedIn {
-	return &filtertype.IsContainedIn{Items: items}
+func IsIn(items any) *filtertype.IsIn {
+	return &filtertype.IsIn{Items: items}
 }

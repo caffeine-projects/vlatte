@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,7 +19,7 @@ func TestHasPrefix(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.value, func(t *testing.T) {
-			ok, err := HasPrefix(tc.value).Match(vlatte.NewFilterArg(t.Context(), "hello world"))
+			ok, err := HasPrefix(tc.value).Match(vlatte.NewFilterArg(t.Context(), explain.New(), "hello world"))
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
 		})

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -56,7 +57,7 @@ func TestContains(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := Contain(tc.expected).Match(vlatte.NewFilterArg(t.Context(), tc.value))
+			ok, err := Contain(tc.expected).Match(vlatte.NewFilterArg(t.Context(), explain.New(), tc.value))
 			assert.Nil(t, err)
 			assert.Equal(t, tc.result, ok)
 		})
@@ -64,12 +65,12 @@ func TestContains(t *testing.T) {
 }
 
 func TestContainf(t *testing.T) {
-	ok, err := Containf("%s", "qa").Match(vlatte.NewFilterArg(t.Context(), "dev and qa"))
+	ok, err := Containf("%s", "qa").Match(vlatte.NewFilterArg(t.Context(), explain.New(), "dev and qa"))
 	assert.Nil(t, err)
 	assert.True(t, ok)
 }
 
 func TestContainNilValue(t *testing.T) {
-	_, err := Contain("any").Match(vlatte.NewFilterArg(t.Context(), nil))
+	_, err := Contain("any").Match(vlatte.NewFilterArg(t.Context(), explain.New(), nil))
 	require.Error(t, err)
 }

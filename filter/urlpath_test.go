@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,12 +26,12 @@ func TestURLPath(t *testing.T) {
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
-			ok, err := URLPath(tt.path).Match(vlatte.NewFilterArg(t.Context(), tt.value))
+			ok, err := URLPath(tt.path).Match(vlatte.NewFilterArg(t.Context(), explain.New(), tt.value))
 
 			assert.Nil(t, err)
 			assert.Equal(t, tt.expected, ok)
 
-			ok, err = URLPathMatch(Contain(tt.path)).Match(vlatte.NewFilterArg(t.Context(), tt.value))
+			ok, err = URLPathMatch(Contain(tt.path)).Match(vlatte.NewFilterArg(t.Context(), explain.New(), tt.value))
 
 			assert.Nil(t, err)
 			assert.Equal(t, tt.expected, ok)
@@ -38,7 +39,7 @@ func TestURLPath(t *testing.T) {
 	}
 
 	t.Run("should return error when providing a type that is not handled by URLPath", func(t *testing.T) {
-		ok, err := URLPath("/test/hello").Match(vlatte.NewFilterArg(t.Context(), 10))
+		ok, err := URLPath("/test/hello").Match(vlatte.NewFilterArg(t.Context(), explain.New(), 10))
 		require.Error(t, err)
 		require.False(t, ok)
 	})

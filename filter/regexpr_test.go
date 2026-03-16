@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,7 +22,7 @@ func TestRegExpMatches(t *testing.T) {
 
 	for i, tc := range tcs {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			ok, err := RegExpr(tc.expression).Match(vlatte.NewFilterArg(t.Context(), tc.value))
+			ok, err := RegExpr(tc.expression).Match(vlatte.NewFilterArg(t.Context(), explain.New(), tc.value))
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
 		})

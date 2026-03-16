@@ -12,6 +12,9 @@ type Not struct {
 	Matcher vlatte.Filter
 }
 
+// Name implements vlatte.Filter.
+func (m *Not) Name() string { return "Not" }
+
 // Match implements vlatte.Filter.
 func (m *Not) Match(arg vlatte.FilterArg) (bool, error) {
 	ok, err := m.Matcher.Match(arg)

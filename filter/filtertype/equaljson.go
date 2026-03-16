@@ -16,6 +16,9 @@ type EqualJSON struct {
 	Expected any
 }
 
+// Name implements vlatte.Filter.
+func (m *EqualJSON) Name() string { return "EqualJSON" }
+
 // Match implements vlatte.Filter.
 func (m *EqualJSON) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

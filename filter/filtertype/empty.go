@@ -12,6 +12,9 @@ import (
 // Empty passes when the value is empty or has zero length.
 type Empty struct{}
 
+// Name implements vlatte.Filter.
+func (m *Empty) Name() string { return "Empty" }
+
 // Match implements vlatte.Filter.
 func (m *Empty) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

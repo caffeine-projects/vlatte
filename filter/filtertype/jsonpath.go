@@ -16,8 +16,10 @@ type JSONPath struct {
 	Path    string
 	Expr    jp.Expr
 	Matcher vlatte.Filter
-	Name    string
 }
+
+// Name implements vlatte.Filter.
+func (m *JSONPath) Name() string { return "JSONPath" }
 
 // Match implements vlatte.Filter.
 func (m *JSONPath) Match(arg vlatte.FilterArg) (bool, error) {
@@ -44,11 +46,11 @@ func (m *JSONPath) Match(arg vlatte.FilterArg) (bool, error) {
 	size := len(results)
 	switch size {
 	case 0:
-		ok, err = m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), nil))
+		ok, err = m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), arg.Explain(), nil))
 	case 1:
-		ok, err = m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), results[0]))
+		ok, err = m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), arg.Explain(), results[0]))
 	default:
-		ok, err = m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), results))
+		ok, err = m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), arg.Explain(), results))
 	}
 
 	if err != nil {

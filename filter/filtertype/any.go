@@ -12,6 +12,9 @@ type AnyOf struct {
 	Matchers []vlatte.Filter
 }
 
+// Name implements vlatte.Filter.
+func (m *AnyOf) Name() string { return "AnyOf" }
+
 // Match implements vlatte.Filter.
 func (m *AnyOf) Match(arg vlatte.FilterArg) (ok bool, e error) {
 	var idx int

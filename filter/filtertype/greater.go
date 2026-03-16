@@ -14,6 +14,9 @@ type Greater struct {
 	Expected float64
 }
 
+// Name implements vlatte.Filter.
+func (m *Greater) Name() string { return "Greater" }
+
 // Match implements vlatte.Filter.
 func (m *Greater) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

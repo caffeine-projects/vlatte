@@ -12,6 +12,9 @@ type Peek struct {
 	Action  func(v any) error
 }
 
+// Name implements vlatte.Filter.
+func (m *Peek) Name() string { return "Peek" }
+
 // Match implements vlatte.Filter.
 func (m *Peek) Match(arg vlatte.FilterArg) (bool, error) {
 	err := m.Action(arg.Value())

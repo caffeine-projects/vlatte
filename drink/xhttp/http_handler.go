@@ -10,6 +10,7 @@ import (
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/httprec"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/viewdata"
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 )
 
 var ErrTemplateDataKeyExists = fmt.Errorf("http: template data key already exists")
@@ -59,8 +60,9 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	selectorInput := &HTTPValueSelectorInput{r, reqValues.URL, r.URL.Query(), r.Form, reqValues.ParsedBodyData}
 
+	sub := explain.New()
 	mocks := vlatte.Mocks[*HTTPMock, *HTTPValueSelectorInput](beans)
-	mock, matched, err := mocks.Find(r.Context(), selectorInput, func(m *HTTPMock) vlatte.Evaluators[*HTTPMock, *HTTPValueSelectorInput] { return m.expectations })
+	mock, matched, err := mocks.Find(r.Context(), sub, selectorInput, func(m *HTTPMock) vlatte.Evaluators[*HTTPMock, *HTTPValueSelectorInput] { return m.expectations })
 	if err != nil {
 		h.lifecycle.OnError(reqValues, fmt.Errorf("http: error finding eligible mocks for request. %w", err))
 	}

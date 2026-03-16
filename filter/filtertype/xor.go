@@ -13,6 +13,9 @@ type Xor struct {
 	Second vlatte.Filter
 }
 
+// Name implements vlatte.Filter.
+func (m *Xor) Name() string { return "Xor" }
+
 // Match implements vlatte.Filter.
 func (m *Xor) Match(arg vlatte.FilterArg) (bool, error) {
 	aOK, err := m.First.Match(arg)

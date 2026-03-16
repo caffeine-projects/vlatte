@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 )
 
 type GRPCStreamMock struct {
@@ -166,7 +167,7 @@ func ServerStream[T proto.Message]() *BuiltInServerStreamReply[T] {
 }
 
 func (in *Interceptors) StreamInterceptor(
-	reqMsg interface{},
+	reqMsg any,
 	stream grpc.ServerStream,
 	info *grpc.StreamServerInfo,
 	_ grpc.StreamHandler,
@@ -182,8 +183,9 @@ func (in *Interceptors) StreamInterceptor(
 	}
 
 	rawBody := string(b)
+	sub := explain.New()
 	mocks := vlatte.Mocks[*GRPCMock, *StreamValueSelectorIn](em)
-	mock, pass, err := mocks.Find(stream.Context(), &StreamValueSelectorIn{rawBody, info}, func(m *GRPCMock) vlatte.Evaluators[*GRPCMock, *StreamValueSelectorIn] { return m.streamExpectations })
+	mock, pass, err := mocks.Find(stream.Context(), sub, &StreamValueSelectorIn{rawBody, info}, func(m *GRPCMock) vlatte.Evaluators[*GRPCMock, *StreamValueSelectorIn] { return m.streamExpectations })
 	if err != nil {
 		return status.Error(codes.Internal, fmt.Errorf("stream: error finding mock for request: %w", err).Error())
 	}

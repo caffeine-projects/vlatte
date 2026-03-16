@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +26,7 @@ func TestFalsy(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := Falsy().Match(vlatte.NewFilterArg(t.Context(), tc.value))
+			ok, err := Falsy().Match(vlatte.NewFilterArg(t.Context(), explain.New(), tc.value))
 
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, ok)
@@ -34,7 +35,7 @@ func TestFalsy(t *testing.T) {
 }
 
 func TestFalsyInvalidSyntax(t *testing.T) {
-	ok, err := Truthy().Match(vlatte.NewFilterArg(t.Context(), "y"))
+	ok, err := Truthy().Match(vlatte.NewFilterArg(t.Context(), explain.New(), "y"))
 
 	require.Error(t, err)
 	require.False(t, ok)

@@ -16,6 +16,9 @@ type Item struct {
 	Matcher vlatte.Filter
 }
 
+// Name implements vlatte.Filter.
+func (m *Item) Name() string { return "Item" }
+
 // Match implements vlatte.Filter.
 func (m *Item) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()
@@ -34,7 +37,7 @@ func (m *Item) Match(arg vlatte.FilterArg) (bool, error) {
 		return Mismatch(strings.Join([]string{"Item(", strconv.Itoa(m.Index), ") Empty array"}, ""))
 	}
 
-	ok, err := m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), vv.Index(m.Index).Interface()))
+	ok, err := m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), arg.Explain(), vv.Index(m.Index).Interface()))
 	if err != nil {
 		return Error(fmt.Errorf("item: %d: %w", m.Index, err))
 	}

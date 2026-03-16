@@ -1,28 +1,37 @@
 package explain
 
-func New() *Block {
-	return &Block{Name: "root"}
-}
+var noop = &Block{Name: "noop"}
 
 type Block struct {
-	Name   string
-	Items  []BlockItem
-	Child  *Block
-	Parent *Block
+	Name     string
+	Items    []Item
+	Children []*Block
+	Parent   *Block
+}
+
+func New() *Block {
+	return &Block{Name: "root"}
 }
 
 func (b *Block) Root() bool {
 	return b.Parent == nil
 }
 
-func (b *Block) Sub() *Block {
-	if b.Child == nil {
-		b.Child = &Block{Parent: b}
+func (b *Block) Sub(name string) *Block {
+	if b == nil {
+		return noop
 	}
 
-	return b.Child
+	child := &Block{Parent: b, Name: name}
+	b.Children = append(b.Children, child)
+
+	return child
 }
 
-type BlockItem struct {
+func (b *Block) AddMessage(message string) {
+	b.Items = append(b.Items, Item{Message: message})
+}
+
+type Item struct {
 	Message string
 }

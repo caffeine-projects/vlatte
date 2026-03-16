@@ -13,6 +13,9 @@ type Both struct {
 	Second vlatte.Filter
 }
 
+// Name implements vlatte.Filter.
+func (m *Both) Name() string { return "Both" }
+
 // Match implements vlatte.Filter.
 func (m *Both) Match(arg vlatte.FilterArg) (bool, error) {
 	r1OK, err := m.First.Match(arg)

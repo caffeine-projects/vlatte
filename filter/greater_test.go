@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +26,7 @@ func TestGreater(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := GreaterThan(tc.expected).Match(vlatte.NewFilterArg(t.Context(), tc.value))
+			ok, err := GreaterThan(tc.expected).Match(vlatte.NewFilterArg(t.Context(), explain.New(), tc.value))
 
 			require.NoError(t, err)
 			require.Equal(t, tc.result, ok)
@@ -34,7 +35,7 @@ func TestGreater(t *testing.T) {
 }
 
 func TestGreaterUnhandledType(t *testing.T) {
-	ok, err := GT(10).Match(vlatte.NewFilterArg(t.Context(), true))
+	ok, err := GT(10).Match(vlatte.NewFilterArg(t.Context(), explain.New(), true))
 
 	require.Error(t, err)
 	require.False(t, ok)

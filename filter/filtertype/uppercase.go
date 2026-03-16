@@ -13,6 +13,9 @@ type UpperCase struct {
 	Matcher vlatte.Filter
 }
 
+// Name implements vlatte.Filter.
+func (m *UpperCase) Name() string { return "UpperCase" }
+
 // Match implements vlatte.Filter.
 func (m *UpperCase) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()
@@ -21,7 +24,7 @@ func (m *UpperCase) Match(arg vlatte.FilterArg) (bool, error) {
 		return Error(fmt.Errorf("upper: type %T is not supported. accepted types: string", v))
 	}
 
-	result, err := m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), strings.ToUpper(txt)))
+	result, err := m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), arg.Explain(), strings.ToUpper(txt)))
 	if err != nil {
 		return Error(fmt.Errorf("upper: %w", err))
 	}

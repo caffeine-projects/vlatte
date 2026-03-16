@@ -14,6 +14,9 @@ type Split struct {
 	Matcher   vlatte.Filter
 }
 
+// Name implements vlatte.Filter.
+func (m *Split) Name() string { return "Split" }
+
 // Match implements vlatte.Filter.
 func (m *Split) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()
@@ -22,7 +25,7 @@ func (m *Split) Match(arg vlatte.FilterArg) (bool, error) {
 		return Error(fmt.Errorf("split: type %T is not supported. accepted types: string", v))
 	}
 
-	result, err := m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), strings.Split(txt, m.Separator)))
+	result, err := m.Matcher.Match(vlatte.NewFilterArg(arg.Context(), arg.Explain(), strings.Split(txt, m.Separator)))
 	if err != nil {
 		return Error(fmt.Errorf("split: %w", err))
 	}

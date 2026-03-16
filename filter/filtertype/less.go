@@ -14,6 +14,9 @@ type Less struct {
 	Expected float64
 }
 
+// Name implements vlatte.Filter.
+func (m *Less) Name() string { return "Less" }
+
 // Match implements vlatte.Filter.
 func (m *Less) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

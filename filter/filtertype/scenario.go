@@ -12,19 +12,22 @@ type Scenario struct {
 	Store         *ScenarioStore
 	RequiredState string
 	NewState      string
-	Name          string
+	ScenarioName  string
 }
+
+// Name implements vlatte.Filter.
+func (m *Scenario) Name() string { return "Scenario" }
 
 // Match implements vlatte.Filter.
 func (m *Scenario) Match(_ vlatte.FilterArg) (bool, error) {
 	if m.RequiredState == ScenarioStateStarted {
 		scenarioRmu.Lock()
-		m.Store.createNewIfNeeded(m.Name)
+		m.Store.createNewIfNeeded(m.ScenarioName)
 		scenarioRmu.Unlock()
 	}
 
 	scenarioRmu.RLock()
-	scn, ok := m.Store.fetchByName(m.Name)
+	scn, ok := m.Store.fetchByName(m.ScenarioName)
 	scenarioRmu.RUnlock()
 	if !ok {
 		return true, nil
@@ -36,7 +39,7 @@ func (m *Scenario) Match(_ vlatte.FilterArg) (bool, error) {
 
 	return Mismatch(fmt.Sprintf(
 		"Scenario(%s): Required state: %s. Actual: %s",
-		scn.name,
+		m.ScenarioName,
 		m.RequiredState,
 		scn.state,
 	))
@@ -45,7 +48,7 @@ func (m *Scenario) Match(_ vlatte.FilterArg) (bool, error) {
 // SetState implements vlatte.Stateful.
 func (m *Scenario) SetState() error {
 	scenarioRmu.RLock()
-	scn, ok := m.Store.fetchByName(m.Name)
+	scn, ok := m.Store.fetchByName(m.ScenarioName)
 	scenarioRmu.RUnlock()
 	if !ok {
 		return nil
@@ -63,7 +66,7 @@ func (m *Scenario) SetState() error {
 // Describe implements descriptor.SelfDescriptive.
 func (m *Scenario) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("scenario", map[string]any{
-		"name":           m.Name,
+		"name":           m.ScenarioName,
 		"required_state": m.RequiredState,
 		"new_state":      m.NewState,
 	})

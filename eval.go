@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 )
 
 var _ fmt.Stringer = (*Eval[any])(nil)
 
 var ErrMatchPanicked = errors.New("mock: panic")
-var ErrMatching = errors.New("mock: matcher")
+var ErrMatching = errors.New("mock: matching")
 
 // Selector selects a value from the parameter input.
 // The return value could be the input itself or a specific field of it.
@@ -44,7 +46,7 @@ func (e *Eval[TIn]) String() string {
 }
 
 // Match evaluates the input against the matcher of this [Eval].
-func (e *Eval[TIn]) Match(ctx context.Context, in TIn) (ok bool, err error) {
+func (e *Eval[TIn]) Match(ctx context.Context, sub *explain.Block, in TIn) (ok bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("%w: Match: type: %T %v", ErrMatchPanicked, e.Matcher, r)
@@ -56,7 +58,7 @@ func (e *Eval[TIn]) Match(ctx context.Context, in TIn) (ok bool, err error) {
 		val = e.Selector(ctx, in)
 	}
 
-	return e.Matcher.Match(NewFilterArg(ctx, val))
+	return e.Matcher.Match(NewFilterArg(ctx, sub.Sub(e.Matcher.Name()), val))
 }
 
 // GetEvals is a function that returns a list of evaluators of a given [Bean].
@@ -68,13 +70,19 @@ type GetEvals[M Bean, TIn any] func(m M) Evaluators[M, TIn]
 type Mocks[M Bean, TIn any] iter.Seq[M]
 
 // Find tries to find an exact match in the mocks.
-func (mocks Mocks[M, TIn]) Find(ctx context.Context, in TIn, evals GetEvals[M, TIn]) (M, bool, error) {
+// It returns the mock that matched and a boolean indicating if a match was found.
+func (mocks Mocks[M, TIn]) Find(
+	ctx context.Context,
+	sub *explain.Block,
+	in TIn,
+	evals GetEvals[M, TIn],
+) (M, bool, error) {
 	i := 0
 	for mock := range mocks {
-		ok, err := evals(mock).Eval(ctx, in)
+		ok, err := evals(mock).Eval(ctx, sub, in)
 		if err != nil {
 			var nothing M
-			return nothing, false, fmt.Errorf("%w: error at mock[%d] %s. reason: %w", ErrMatching, i, mock.String(), err)
+			return nothing, false, fmt.Errorf("%w: mock[%d][%s]: %w", ErrMatching, i, mock.String(), err)
 		}
 
 		if ok {
@@ -93,11 +101,11 @@ type Evaluators[M Bean, TIn any] []*Eval[TIn]
 
 // Eval evaluates the input against all evaluators from a single [Bean].
 // Normally this function is used together with [Mocks.Find]
-func (e Evaluators[M, TIn]) Eval(ctx context.Context, in TIn) (bool, error) {
+func (e Evaluators[M, TIn]) Eval(ctx context.Context, sub *explain.Block, in TIn) (bool, error) {
 	for i, eval := range e {
-		ok, err := eval.Match(ctx, in)
+		ok, err := eval.Match(ctx, sub, in)
 		if err != nil {
-			return false, fmt.Errorf("eval[%d]: %s. reason: %w", i, eval.String(), err)
+			return false, fmt.Errorf("eval[%d][%s]: %w", i, eval.String(), err)
 		}
 
 		if !ok {

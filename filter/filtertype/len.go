@@ -14,6 +14,9 @@ type Len struct {
 	Length int
 }
 
+// Name implements vlatte.Filter.
+func (m *Len) Name() string { return "Len" }
+
 // Match implements vlatte.Filter.
 func (m *Len) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()

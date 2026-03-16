@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/shelf/explain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,7 +16,7 @@ func TestAllOf(t *testing.T) {
 			EqualIgnoreCase("TEST"),
 			ToUpper(StrictEqual("TEST")),
 			Contain("tes")).
-			Match(vlatte.NewFilterArg(t.Context(), "test"))
+			Match(vlatte.NewFilterArg(t.Context(), explain.New(), "test"))
 		require.NoError(t, err)
 		require.True(t, ok)
 	})
@@ -26,7 +27,7 @@ func TestAllOf(t *testing.T) {
 			EqualIgnoreCase("dev"),
 			ToUpper(StrictEqual("TEST")),
 			Contain("tes")).
-			Match(vlatte.NewFilterArg(t.Context(), "test"))
+			Match(vlatte.NewFilterArg(t.Context(), explain.New(), "test"))
 		require.NoError(t, err)
 		require.False(t, ok)
 	})
@@ -37,7 +38,7 @@ func TestAllOf(t *testing.T) {
 			EqualIgnoreCase("qa"),
 			ToUpper(StrictEqual("none")),
 			Contain("blah")).
-			Match(vlatte.NewFilterArg(t.Context(), "test"))
+			Match(vlatte.NewFilterArg(t.Context(), explain.New(), "test"))
 		require.NoError(t, err)
 		require.False(t, ok)
 	})
@@ -50,7 +51,7 @@ func TestAllOf(t *testing.T) {
 			Function(func(v any) (bool, error) {
 				return false, errors.New("boom")
 			})).
-			Match(vlatte.NewFilterArg(t.Context(), "test"))
+			Match(vlatte.NewFilterArg(t.Context(), explain.New(), "test"))
 		require.Error(t, err)
 		require.False(t, ok)
 	})
