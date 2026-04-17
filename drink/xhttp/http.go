@@ -47,7 +47,7 @@ type HTTPMockApp struct {
 	*vlatte.Boilerplate[*HTTPMock, *HTTPMockApp]
 
 	config             *Config
-	server             vlatte.Server[*HTTPMockApp]
+	server             vlatte.Server
 	storage            vlatte.Canister[*HTTPMock]
 	scenarioStore      *mfeat.ScenarioStore
 	cancel             context.CancelFunc
@@ -152,10 +152,10 @@ func New(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
 		handler = conf.HandlerDecorator(handler)
 	}
 
-	server := conf.Server
+	factory := conf.ServerFactory
 
-	if server == nil {
-		server = newServer()
+	if factory == nil {
+		factory = newServerFactory()
 	}
 
 	internalLoaders := 1
@@ -164,7 +164,6 @@ func New(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
 	loaders = append(loaders, conf.Loaders...)
 
 	app.Boilerplate = vlatte.NewBaseApp(app, repository)
-	app.server = server
 	app.storage = repository
 	app.scenarioStore = mfeat.NewScenarioStore()
 	app.params = params
@@ -176,10 +175,12 @@ func New(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
 	app.colorizer = colors
 	app.admin = &Admin{app: app, repo: repository}
 
-	err := server.Setup(app, handler)
+	server, err := factory.Server(ServerFactoryConfig{App: app, Handler: handler})
 	if err != nil {
-		panic(fmt.Errorf("server: setup failed. %w", err))
+		panic(fmt.Errorf("server: factory failed to build server. %w", err))
 	}
+
+	app.server = server
 
 	return app
 }
@@ -254,7 +255,7 @@ func (app *HTTPMockApp) Config() *Config {
 }
 
 // Server returns the Server implementation being used by this application.
-func (app *HTTPMockApp) Server() vlatte.Server[*HTTPMockApp] {
+func (app *HTTPMockApp) Server() vlatte.Server {
 	return app.server
 }
 

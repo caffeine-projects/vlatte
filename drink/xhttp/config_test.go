@@ -29,12 +29,20 @@ func (p testBodyParser) Parse(body []byte, _ *http.Request) (any, error) {
 	return strconv.Atoi(string(body))
 }
 
-type customTestServer struct {
-	decorated vlatte.Server[*HTTPMockApp]
+type customTestServerFactory struct {
+	decorated vlatte.ServerFactory[ServerFactoryConfig]
 }
 
-func (s *customTestServer) Setup(app *HTTPMockApp, handler http.Handler) error {
-	return s.decorated.Setup(app, handler)
+func (f *customTestServerFactory) Server(config ServerFactoryConfig) (vlatte.Server, error) {
+	srv, err := f.decorated.Server(config)
+	if err != nil {
+		return nil, err
+	}
+	return &customTestServer{decorated: srv}, nil
+}
+
+type customTestServer struct {
+	decorated vlatte.Server
 }
 
 func (s *customTestServer) Start() error {
@@ -129,7 +137,7 @@ func TestConfig(t *testing.T) {
 	})
 
 	t.Run("configure custom server", func(t *testing.T) {
-		m := New(Setup().Server(&customTestServer{decorated: newServer()}))
+		m := New(Setup().ServerFactory(&customTestServerFactory{decorated: newServerFactory()}))
 		t.Cleanup(func() { m.Close() })
 		m.MustStart()
 
@@ -162,7 +170,7 @@ func TestConfigBuilder(t *testing.T) {
 		NoBodyParsing().
 		Middlewares().
 		CORS(&cors.DefaultConfig).
-		Server(&httpTestServer{}).
+		ServerFactory(&httpTestServerFactory{}).
 		HandlerDecorator(func(handler http.Handler) http.Handler { return handler }).
 		LogVerbosity(vlatte.LogBasic).
 		LogLevel(vlatte.LogLevelInfo).

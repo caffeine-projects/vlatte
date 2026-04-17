@@ -13,22 +13,39 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-var _ vlatte.Server[*HTTPMockApp] = (*httpTestServer)(nil)
+var (
+	_ vlatte.Server                              = (*httpTestServer)(nil)
+	_ vlatte.ServerFactory[ServerFactoryConfig] = (*httpTestServerFactory)(nil)
+)
+
+// ServerFactoryConfig bundles the inputs a ServerFactory needs to build a Server
+// for an HTTPMockApp instance.
+type ServerFactoryConfig struct {
+	App     *HTTPMockApp
+	Handler http.Handler
+}
 
 type httpTestServer struct {
-	app       *HTTPMockApp
-	handler   http.Handler
-	server    *httptest.Server
-	info      *vlatte.ServerInfo
-	needSetup bool
-	rwMutex   sync.RWMutex
+	server  *httptest.Server
+	info    *vlatte.ServerInfo
+	rwMutex sync.RWMutex
 }
 
-func newServer() vlatte.Server[*HTTPMockApp] {
-	return &httpTestServer{info: &vlatte.ServerInfo{}}
+type httpTestServerFactory struct{}
+
+func newServerFactory() vlatte.ServerFactory[ServerFactoryConfig] {
+	return &httpTestServerFactory{}
 }
 
-func (s *httpTestServer) Setup(app *HTTPMockApp, handler http.Handler) error {
+func (f *httpTestServerFactory) Server(config ServerFactoryConfig) (vlatte.Server, error) {
+	s := &httpTestServer{info: &vlatte.ServerInfo{}}
+	if err := s.setup(config.App, config.Handler); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *httpTestServer) setup(app *HTTPMockApp, handler http.Handler) error {
 	admPath := app.config.AdminPath
 	if !strings.HasPrefix(admPath, "/") {
 		admPath = "/" + admPath
@@ -38,8 +55,6 @@ func (s *httpTestServer) Setup(app *HTTPMockApp, handler http.Handler) error {
 	r.Mount(admPath, app.admin.Init())
 	r.Handle("/*", handler)
 
-	s.app = app
-	s.handler = handler
 	s.server = httptest.NewUnstartedServer(r)
 
 	if app.config.Addr != "" {
@@ -80,11 +95,6 @@ func (s *httpTestServer) Setup(app *HTTPMockApp, handler http.Handler) error {
 }
 
 func (s *httpTestServer) Start() error {
-	err := s.beforeStart()
-	if err != nil {
-		return err
-	}
-
 	s.server.Start()
 	s.info.URL = s.server.URL
 
@@ -92,11 +102,6 @@ func (s *httpTestServer) Start() error {
 }
 
 func (s *httpTestServer) StartTLS() error {
-	err := s.beforeStart()
-	if err != nil {
-		return err
-	}
-
 	s.server.EnableHTTP2 = true
 	s.server.StartTLS()
 	s.info.URL = s.server.URL
@@ -110,19 +115,12 @@ func (s *httpTestServer) Close() error {
 
 	s.server.CloseClientConnections()
 	s.server.Close()
-	s.needSetup = true
+
+	s.server.URL = ""
 
 	return nil
 }
 
 func (s *httpTestServer) Info() *vlatte.ServerInfo {
 	return s.info
-}
-
-func (s *httpTestServer) beforeStart() error {
-	if s.needSetup {
-		return s.Setup(s.app, s.handler)
-	}
-
-	return nil
 }

@@ -1,14 +1,10 @@
 package vlatte
 
-import "net/http"
-
 type ServerInfo struct {
 	URL string
 }
 
-type Server[A any] interface {
-	Setup(app A, handler http.Handler) error
-
+type Server interface {
 	Start() error
 
 	StartTLS() error
@@ -16,4 +12,8 @@ type Server[A any] interface {
 	Close() error
 
 	Info() *ServerInfo
+}
+
+type ServerFactory[C any] interface {
+	Server(config C) (Server, error)
 }

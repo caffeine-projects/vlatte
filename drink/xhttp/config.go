@@ -57,7 +57,7 @@ type Config struct {
 	NoBodyParsing                  bool
 	Middlewares                    []func(http.Handler) http.Handler
 	CORS                           *cors.Config
-	Server                         vlatte.Server[*HTTPMockApp]
+	ServerFactory                  vlatte.ServerFactory[ServerFactoryConfig]
 	HandlerDecorator               func(handler http.Handler) http.Handler
 	MockFileSearchPatterns         []string
 	Loaders                        []Loader
@@ -125,7 +125,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.NoBodyParsing = c.NoBodyParsing
 	conf.Middlewares = c.Middlewares
 	conf.CORS = c.CORS
-	conf.Server = c.Server
+	conf.ServerFactory = c.ServerFactory
 	conf.HandlerDecorator = c.HandlerDecorator
 	conf.MockFileSearchPatterns = c.MockFileSearchPatterns
 	conf.Loaders = c.Loaders
@@ -251,9 +251,10 @@ func (cb *ConfigBuilder) CORS(options ...cors.Configurer) *ConfigBuilder {
 	return cb
 }
 
-// Server configures a custom HTTP mock Server.
-func (cb *ConfigBuilder) Server(srv vlatte.Server[*HTTPMockApp]) *ConfigBuilder {
-	cb.conf.Server = srv
+// ServerFactory configures a custom ServerFactory used to build the underlying
+// HTTP mock Server for an HTTPMockApp instance.
+func (cb *ConfigBuilder) ServerFactory(factory vlatte.ServerFactory[ServerFactoryConfig]) *ConfigBuilder {
+	cb.conf.ServerFactory = factory
 	return cb
 }
 
