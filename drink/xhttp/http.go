@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/cors"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/mid"
@@ -63,7 +64,7 @@ type HTTPMockApp struct {
 	logger             *zerolog.Logger
 	startOnce          sync.Once
 	random             *rand.Rand
-	admin              *Admin
+	admin              *admin.Admin[*HTTPMock]
 }
 
 // New creates a new HTTPMockApp mock server with the given configurations.
@@ -173,7 +174,12 @@ func New(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
 	app.requestBodyParsers = parsers
 	app.extensions = make(map[string]vlatte.Extension)
 	app.colorizer = colors
-	app.admin = &Admin{app: app, repo: repository}
+	app.admin = admin.New(
+		repository,
+		vlatte.MockBuilderFunc[*HTTPMock](func(content []byte, ext string) (*HTTPMock, error) {
+			return BuildMockFromBytes(app, Request(), content, ext, false)
+		}),
+	)
 
 	server, err := factory.Server(ServerFactoryConfig{App: app, Handler: handler})
 	if err != nil {

@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	_ vlatte.Server                              = (*httpTestServer)(nil)
+	_ vlatte.Server                             = (*httpTestServer)(nil)
 	_ vlatte.ServerFactory[ServerFactoryConfig] = (*httpTestServerFactory)(nil)
 )
 
@@ -26,6 +26,8 @@ type ServerFactoryConfig struct {
 }
 
 type httpTestServer struct {
+	app     *HTTPMockApp
+	handler http.Handler
 	server  *httptest.Server
 	info    *vlatte.ServerInfo
 	rwMutex sync.RWMutex
@@ -38,34 +40,36 @@ func newServerFactory() vlatte.ServerFactory[ServerFactoryConfig] {
 }
 
 func (f *httpTestServerFactory) Server(config ServerFactoryConfig) (vlatte.Server, error) {
-	s := &httpTestServer{info: &vlatte.ServerInfo{}}
-	if err := s.setup(config.App, config.Handler); err != nil {
-		return nil, err
+	s := &httpTestServer{
+		app:     config.App,
+		handler: config.Handler,
+		info:    &vlatte.ServerInfo{},
 	}
 	return s, nil
 }
 
-func (s *httpTestServer) setup(app *HTTPMockApp, handler http.Handler) error {
-	admPath := app.config.AdminPath
+// build creates a fresh unstarted httptest.Server each time it is called.
+// httptest.Server instances are not reusable after Close, so a new one must
+// be constructed for every Start/StartTLS cycle.
+func (s *httpTestServer) build() error {
+	admPath := s.app.config.AdminPath
 	if !strings.HasPrefix(admPath, "/") {
 		admPath = "/" + admPath
 	}
 
 	r := chi.NewRouter()
-	r.Mount(admPath, app.admin.Init())
-	r.Handle("/*", handler)
+	r.Mount(admPath, s.app.admin.Init())
+	r.Handle("/*", s.handler)
 
 	s.server = httptest.NewUnstartedServer(r)
 
-	if app.config.Addr != "" {
-		addr := app.config.Addr
-		_, err := strconv.Atoi(addr)
-		if err == nil {
+	if s.app.config.Addr != "" {
+		addr := s.app.config.Addr
+		if _, err := strconv.Atoi(addr); err == nil {
 			addr = ":" + addr
 		}
 
-		err = s.server.Listener.Close()
-		if err != nil {
+		if err := s.server.Listener.Close(); err != nil {
 			return err
 		}
 
@@ -77,24 +81,31 @@ func (s *httpTestServer) setup(app *HTTPMockApp, handler http.Handler) error {
 		s.server.Listener = listener
 	}
 
-	if app.config.TLSConfig != nil {
-		s.server.TLS = app.config.TLSConfig
-		s.server.EnableHTTP2 = app.config.UseHTTP2
+	if s.app.config.TLSConfig != nil {
+		s.server.TLS = s.app.config.TLSConfig
+		s.server.EnableHTTP2 = s.app.config.UseHTTP2
 	} else {
-		s.server.TLS = &tls.Config{Certificates: app.config.TLSCertificates}
+		s.server.TLS = &tls.Config{Certificates: s.app.config.TLSCertificates}
 
-		if app.config.TLSClientCAs != nil {
-			s.server.TLS.ClientCAs = app.config.TLSClientCAs
+		if s.app.config.TLSClientCAs != nil {
+			s.server.TLS.ClientCAs = s.app.config.TLSClientCAs
 			s.server.TLS.ClientAuth = tls.RequireAndVerifyClientCert
 		}
 
-		s.server.EnableHTTP2 = app.config.UseHTTP2
+		s.server.EnableHTTP2 = s.app.config.UseHTTP2
 	}
 
 	return nil
 }
 
 func (s *httpTestServer) Start() error {
+	s.rwMutex.Lock()
+	defer s.rwMutex.Unlock()
+
+	if err := s.build(); err != nil {
+		return err
+	}
+
 	s.server.Start()
 	s.info.URL = s.server.URL
 
@@ -102,6 +113,13 @@ func (s *httpTestServer) Start() error {
 }
 
 func (s *httpTestServer) StartTLS() error {
+	s.rwMutex.Lock()
+	defer s.rwMutex.Unlock()
+
+	if err := s.build(); err != nil {
+		return err
+	}
+
 	s.server.EnableHTTP2 = true
 	s.server.StartTLS()
 	s.info.URL = s.server.URL
@@ -113,10 +131,14 @@ func (s *httpTestServer) Close() error {
 	s.rwMutex.Lock()
 	defer s.rwMutex.Unlock()
 
+	if s.server == nil {
+		return nil
+	}
+
 	s.server.CloseClientConnections()
 	s.server.Close()
-
-	s.server.URL = ""
+	s.server = nil
+	s.info.URL = ""
 
 	return nil
 }
