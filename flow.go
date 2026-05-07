@@ -60,7 +60,12 @@ func Flow(ctx context.Context, sink Step, steps []Step) Next {
 }
 
 func (p *pipeline) Next(b []byte) (n int, err error) {
-	return p.steps[p.index].Handle(p.ctx, b, &pipeline{p.ctx, p.steps, p.index + 1})
+	if p.index >= len(p.steps) {
+		return 0, io.EOF
+	}
+	i := p.index
+	p.index++
+	return p.steps[i].Handle(p.ctx, b, p)
 }
 
 // Sink is the final [Step] that writes the final output to the underlying [io.Writer].
@@ -72,7 +77,8 @@ func (s *Sink) Handle(_ context.Context, b []byte, _ Next) (int, error) {
 }
 
 // Write makes [Sink] compatible with the [io.Writer] interface.
-// When used outside a pipeline, context.Background() is used.
+// When called directly (outside a pipeline), context.Background() is used —
+// cancellation and deadlines are not propagated. Drive the pipeline through [Next] to preserve context.
 func (s *Sink) Write(p []byte) (n int, err error) {
 	return s.Handle(context.Background(), p, nil)
 }

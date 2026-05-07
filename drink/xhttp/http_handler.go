@@ -128,8 +128,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		<-ctxTimeout.Done()
 	}
 
-	if len(mock.Steps()) > 0 {
-		w = &topResponseWriter{vlatte.Flow(r.Context(), &vlatte.Sink{W: w}, mock.Steps()), w}
+	if steps := mock.Steps(); len(steps) > 0 {
+		w = &topResponseWriter{vlatte.Flow(r.Context(), &vlatte.Sink{W: w}, steps), w}
 	}
 
 	res, err := mock.Reply.Reply(r.Context(), ReplyInput{RequestValues: reqValues, Writer: w})
