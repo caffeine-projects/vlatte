@@ -58,7 +58,7 @@ func (m *EqualJSON) Match(arg vlatte.FilterArg) (bool, error) {
 		}
 	}
 
-	return Mismatch(strings.Join([]string{"EqualJSON(", anyconv.Stringify(v), ") Got: ", string(expJSON)}, ""))
+	return Mismatch(strings.Join([]string{"EqualJSON(", string(expJSON), ") Got: ", anyconv.Stringify(v)}, ""))
 }
 
 // Describe implements descriptor.SelfDescriptive.

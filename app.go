@@ -141,7 +141,7 @@ func (app *Boilerplate[TM, A]) AssertCalled(t TestingT) bool {
 
 	for i, mug := range app.tray.Mugs() {
 		if mug.Pending() {
-			buf.WriteString(fmt.Sprintf("   Scope %d\n", i))
+			fmt.Fprintf(&buf, "   Scope %d\n", i)
 			pending := mug.ListPending()
 			size += len(pending)
 
@@ -177,7 +177,7 @@ func (app *Boilerplate[TM, A]) AssertNotCalled(t TestingT) bool {
 
 	for i, mug := range app.tray.Mugs() {
 		if !mug.Pending() {
-			buf.WriteString(fmt.Sprintf("   Scope %d\n", i))
+			fmt.Fprintf(&buf, "   Scope %d\n", i)
 			called := mug.ListCalled()
 			size += len(called)
 

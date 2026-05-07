@@ -7,6 +7,30 @@ import (
 
 // EqualValues reports whether expected and actual are equal, optionally with lenient type conversion.
 func EqualValues(expected, actual any, lenient bool) bool {
+	// Fast paths for the most common scalar types, avoiding reflect.DeepEqual overhead.
+	switch e := expected.(type) {
+	case string:
+		if a, ok := actual.(string); ok {
+			return e == a
+		}
+	case int:
+		if a, ok := actual.(int); ok {
+			return e == a
+		}
+	case int64:
+		if a, ok := actual.(int64); ok {
+			return e == a
+		}
+	case float64:
+		if a, ok := actual.(float64); ok {
+			return e == a
+		}
+	case bool:
+		if a, ok := actual.(bool); ok {
+			return e == a
+		}
+	}
+
 	if reflect.DeepEqual(expected, actual) {
 		return true
 	}
@@ -116,13 +140,21 @@ func laxEq(aKind, bKind reflect.Kind, aValue, bValue reflect.Value, lenient bool
 
 			return EqualValues(a, bValue.Bool(), lenient)
 
-		case reflect.Int, reflect.Int32, reflect.Int64:
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 			a, err := strconv.ParseInt(aValue.String(), 10, 64)
 			if err != nil {
 				return false
 			}
 
 			return EqualValues(a, bValue.Int(), lenient)
+
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			a, err := strconv.ParseUint(aValue.String(), 10, 64)
+			if err != nil {
+				return false
+			}
+
+			return EqualValues(a, bValue.Uint(), lenient)
 		}
 	}
 

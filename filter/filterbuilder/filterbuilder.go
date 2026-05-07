@@ -257,7 +257,7 @@ func discoverAndBuild(key string, args any) (ma vlatte.Filter, err error) {
 		num, err := getFloat64(args)
 		if err != nil {
 			return nil,
-				fmt.Errorf("[%s, %s] expects an numeric argument. got=%d", _mGreater, _mGreaterAlias, args)
+				fmt.Errorf("[%s, %s] expects an numeric argument. got=%v", _mGreater, _mGreaterAlias, args)
 		}
 
 		return filter.GreaterThan(num), nil
@@ -266,7 +266,7 @@ func discoverAndBuild(key string, args any) (ma vlatte.Filter, err error) {
 		num, err := getFloat64(args)
 		if err != nil {
 			return nil,
-				fmt.Errorf("[%s, %s] expects an numeric argument. got=%d", _mGreaterThanOrEqual, _mGreaterThanOrEqualAlias, args)
+				fmt.Errorf("[%s, %s] expects an numeric argument. got=%v", _mGreaterThanOrEqual, _mGreaterThanOrEqualAlias, args)
 		}
 
 		return filter.GreaterThanOrEqual(num), nil
@@ -401,7 +401,7 @@ func discoverAndBuild(key string, args any) (ma vlatte.Filter, err error) {
 		num, err := getFloat64(args)
 		if err != nil {
 			return nil,
-				fmt.Errorf("[%s, %s] expects an numeric argument. got=%d", _mGreater, _mLessThanAlias, args)
+				fmt.Errorf("[%s, %s] expects an numeric argument. got=%v", _mLessThan, _mLessThanAlias, args)
 		}
 
 		return filter.LessThan(num), nil
@@ -410,7 +410,7 @@ func discoverAndBuild(key string, args any) (ma vlatte.Filter, err error) {
 		num, err := getFloat64(args)
 		if err != nil {
 			return nil,
-				fmt.Errorf("[%s, %s] expects an numeric argument. got=%d", _mGreaterThanOrEqual, _mLessThanOrEqualAlias, args)
+				fmt.Errorf("[%s, %s] expects an numeric argument. got=%v", _mLessThanOrEqual, _mLessThanOrEqualAlias, args)
 		}
 
 		return filter.LessThanOrEqual(num), nil
@@ -455,13 +455,13 @@ func discoverAndBuild(key string, args any) (ma vlatte.Filter, err error) {
 
 		if len(a) != 2 {
 			return nil,
-				fmt.Errorf("[%s] expects two arguments. 1: Matcher, 2: Separator. got=%d", _mSplit, len(a))
+				fmt.Errorf("[%s] expects two arguments. 1: Separator, 2: Matcher. got=%d", _mSplit, len(a))
 		}
 
 		separator, ok := a[0].(string)
 		if !ok {
 			return nil,
-				fmt.Errorf("[%s] second parameter must be a string. got=%v", _mSplit, a[1])
+				fmt.Errorf("[%s] first parameter must be a string. got=%v", _mSplit, a[0])
 		}
 
 		m, err := BuildMatcher(a[1])

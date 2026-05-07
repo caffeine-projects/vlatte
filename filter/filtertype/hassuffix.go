@@ -28,7 +28,7 @@ func (m *HasSuffix) Match(arg vlatte.FilterArg) (bool, error) {
 		return Success()
 	}
 
-	return Mismatch(strings.Join([]string{"HasSuffix(", m.Suffix, ") Prefix is not present. Got: ", txt}, ""))
+	return Mismatch(strings.Join([]string{"HasSuffix(", m.Suffix, ") Suffix is not present. Got: ", txt}, ""))
 }
 
 // Describe implements descriptor.SelfDescriptive.

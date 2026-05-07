@@ -13,8 +13,9 @@ import (
 // RegExp passes when the regular expression matches the value.
 type RegExp struct {
 	Expression string
+	once       sync.Once
 	rg         *regexp.Regexp
-	mu         sync.Mutex
+	compileErr error
 }
 
 // Name implements vlatte.Filter.
@@ -28,18 +29,17 @@ func (m *RegExp) Match(arg vlatte.FilterArg) (bool, error) {
 		return Error(fmt.Errorf("regexp: it only works with string values. got: %T", v))
 	}
 
-	if m.rg == nil {
-		m.mu.Lock()
-		if m.rg == nil {
-			r, err := regexp.Compile(m.Expression)
-			if err != nil {
-				m.mu.Unlock()
-				return Error(fmt.Errorf("regexp: error compiling expression %s. %w", m.Expression, err))
-			}
-
-			m.rg = r
+	m.once.Do(func() {
+		r, err := regexp.Compile(m.Expression)
+		if err != nil {
+			m.compileErr = err
+			return
 		}
-		m.mu.Unlock()
+		m.rg = r
+	})
+
+	if m.compileErr != nil {
+		return Error(fmt.Errorf("regexp: error compiling expression %s. %w", m.Expression, m.compileErr))
 	}
 
 	match := m.rg.Match([]byte(txt))

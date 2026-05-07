@@ -73,6 +73,14 @@ func TestEqual(t *testing.T) {
 			[]any{"dev", "test", []any{100, 10, 2, map[string]any{"name": "test", "active": true, "sub": map[string]any{"text": "hello", "num": 100.50}, "level1": []float64{10, 20.5}}}},
 			true,
 		},
+		{"string with uint8", "10", uint8(10), true},
+		{"string with uint16", "10", uint16(10), true},
+		{"string with uint32", "10", uint32(10), true},
+		{"string with uint64", "10", uint64(10), true},
+		{"string with int8", "10", int8(10), true},
+		{"string with int16", "10", int16(10), true},
+		{"string with uint8 (no match)", "11", uint8(10), false},
+		{"string with int8 (no match)", "0", int8(10), false},
 	}
 
 	for _, tc := range testCases {

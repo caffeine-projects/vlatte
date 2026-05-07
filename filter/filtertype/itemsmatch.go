@@ -29,7 +29,7 @@ func (m *ItemsMatch) Match(arg vlatte.FilterArg) (bool, error) {
 
 	if aLen != bLen {
 		return Mismatch(strings.Join(
-			[]string{"ItemsMatch() Expected value len to be ", strconv.Itoa(aLen), ". Got: ", strconv.Itoa(bLen)},
+			[]string{"ItemsMatch() Expected value len to be ", strconv.Itoa(bLen), ". Got: ", strconv.Itoa(aLen)},
 			"",
 		))
 	}

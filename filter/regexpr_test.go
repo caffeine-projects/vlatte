@@ -28,3 +28,36 @@ func TestRegExpMatches(t *testing.T) {
 		})
 	}
 }
+
+func TestRegExpInvalidExpression(t *testing.T) {
+	ok, err := RegExpr("[invalid").Match(vlatte.NewFilterArg(t.Context(), explain.New(), "anything"))
+	require.Error(t, err)
+	require.False(t, ok)
+}
+
+func TestRegExpNonStringValue(t *testing.T) {
+	ok, err := RegExpr(".*").Match(vlatte.NewFilterArg(t.Context(), explain.New(), 42))
+	require.Error(t, err)
+	require.False(t, ok)
+}
+
+func TestRegExpConcurrent(t *testing.T) {
+	m := RegExpr(`^\d+$`)
+	const goroutines = 50
+
+	results := make(chan bool, goroutines)
+	for range goroutines {
+		go func() {
+			ok, err := m.Match(vlatte.NewFilterArg(t.Context(), explain.New(), "123"))
+			if err != nil {
+				results <- false
+				return
+			}
+			results <- ok
+		}()
+	}
+
+	for range goroutines {
+		require.True(t, <-results)
+	}
+}

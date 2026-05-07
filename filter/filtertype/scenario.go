@@ -20,20 +20,27 @@ func (m *Scenario) Name() string { return "Scenario" }
 
 // Match implements vlatte.Filter.
 func (m *Scenario) Match(_ vlatte.FilterArg) (bool, error) {
+	store := m.Store
+
 	if m.RequiredState == ScenarioStateStarted {
-		scenarioRmu.Lock()
-		m.Store.createNewIfNeeded(m.ScenarioName)
-		scenarioRmu.Unlock()
+		store.mu.Lock()
+		store.createNewIfNeeded(m.ScenarioName)
+		store.mu.Unlock()
 	}
 
-	scenarioRmu.RLock()
-	scn, ok := m.Store.fetchByName(m.ScenarioName)
-	scenarioRmu.RUnlock()
+	store.mu.RLock()
+	scn, ok := store.fetchByName(m.ScenarioName)
+	var currentState string
+	if ok {
+		currentState = scn.state
+	}
+	store.mu.RUnlock()
+
 	if !ok {
 		return true, nil
 	}
 
-	if scn.state == m.RequiredState {
+	if currentState == m.RequiredState {
 		return true, nil
 	}
 
@@ -41,25 +48,26 @@ func (m *Scenario) Match(_ vlatte.FilterArg) (bool, error) {
 		"Scenario(%s): Required state: %s. Actual: %s",
 		m.ScenarioName,
 		m.RequiredState,
-		scn.state,
+		currentState,
 	))
 }
 
 // SetState implements vlatte.Stateful.
 func (m *Scenario) SetState() error {
-	scenarioRmu.RLock()
-	scn, ok := m.Store.fetchByName(m.ScenarioName)
-	scenarioRmu.RUnlock()
+	if m.NewState == "" {
+		return nil
+	}
+
+	store := m.Store
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	scn, ok := store.fetchByName(m.ScenarioName)
 	if !ok {
 		return nil
 	}
 
-	if m.NewState != "" {
-		scenarioRmu.Lock()
-		scn.state = m.NewState
-		scenarioRmu.Unlock()
-	}
-
+	scn.state = m.NewState
 	return nil
 }
 
