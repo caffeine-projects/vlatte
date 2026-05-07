@@ -21,9 +21,9 @@ func TestExternalResponseBodies(t *testing.T) {
 		mock *xhttp.HTTPMockBuilder
 		body string
 	}{
-		{m.Getf("/test").
+		{xhttp.Getf("/test").
 			Reply(xhttp.OK().BodyFile("./testdata/external_body/01.txt")), "hello world\n"},
-		{m.Getf("/test").
+		{xhttp.Getf("/test").
 			Reply(xhttp.OK().Gzip().BodyFile("./testdata/external_body/01.txt")), "hello world\n"},
 	}
 

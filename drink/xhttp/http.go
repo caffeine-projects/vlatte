@@ -21,7 +21,6 @@ import (
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/mid"
 	"github.com/caffeine-projects/vlatte/drink/xhttp/internal/mid/recover"
-	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/filter/mfeat"
 	"github.com/caffeine-projects/vlatte/shelf/kv"
 	"github.com/caffeine-projects/vlatte/shelf/kv/kvmem"
@@ -377,76 +376,6 @@ func (app *HTTPMockApp) DescribeConfig() string {
 	buf.WriteString("\n")
 
 	return buf.String()
-}
-
-// --
-// Mock Builder Initializers
-// --
-
-// AnyMethod creates a new empty Builder.
-func (app *HTTPMockApp) AnyMethod() *HTTPMockBuilder {
-	b := &HTTPMockBuilder{mock: NewMock()}
-	return b.MethodMatches(filter.Anything())
-}
-
-// Get initializes a mock for GET method.
-func (app *HTTPMockApp) Get(m vlatte.Filter) *HTTPMockBuilder {
-	return Request().URL(m).Method(http.MethodGet)
-}
-
-// Getf initializes a mock for GET method.
-func (app *HTTPMockApp) Getf(path string, a ...any) *HTTPMockBuilder {
-	return Request().URLPathf(path, a...).Method(http.MethodGet)
-}
-
-// Post initializes a mock for Post method.
-func (app *HTTPMockApp) Post(m vlatte.Filter) *HTTPMockBuilder {
-	return Request().URL(m).Method(http.MethodPost)
-}
-
-// Postf initializes a mock for Post method.
-func (app *HTTPMockApp) Postf(path string, a ...any) *HTTPMockBuilder {
-	return Request().URLPathf(path, a...).Method(http.MethodPost)
-}
-
-// Put inits a mock for Put method.
-func (app *HTTPMockApp) Put(m vlatte.Filter) *HTTPMockBuilder {
-	return Request().URL(m).Method(http.MethodPut)
-}
-
-// Putf initializes a mock for Put method.
-func (app *HTTPMockApp) Putf(path string, a ...any) *HTTPMockBuilder {
-	return Request().URLPathf(path, a...).Method(http.MethodPut)
-}
-
-// Patch initializes a mock for Patch method.
-func (app *HTTPMockApp) Patch(u vlatte.Filter) *HTTPMockBuilder {
-	return Request().URL(u).Method(http.MethodPatch)
-}
-
-// Patchf initializes a mock for Patch method.
-func (app *HTTPMockApp) Patchf(path string, a ...any) *HTTPMockBuilder {
-	return Request().URLPathf(path, a...).Method(http.MethodPatch)
-}
-
-// Delete initializes a mock for Delete method.
-func (app *HTTPMockApp) Delete(m vlatte.Filter) *HTTPMockBuilder {
-	return Request().URL(m).Method(http.MethodDelete)
-}
-
-// Deletef initializes a mock for Delete method.
-func (app *HTTPMockApp) Deletef(path string, a ...any) *HTTPMockBuilder {
-	return Request().URLPathf(path, a...).Method(http.MethodDelete)
-}
-
-// Head initializes a mock for Head method.
-func (app *HTTPMockApp) Head(m vlatte.Filter) *HTTPMockBuilder {
-	return Request().URL(m).Method(http.MethodHead)
-}
-
-// Headf initializes a mock for Head method.
-func (app *HTTPMockApp) Headf(path string, a ...any) *HTTPMockBuilder {
-	return Request().URLPathf(path, a...).Method(http.MethodHead)
 }
 
 // --
