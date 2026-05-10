@@ -33,22 +33,13 @@ const (
 
 // Admin is a transport-agnostic admin API for managing mocks stored in a
 // [vlatte.Canister].
-//
-// The bean type B must be comparable so the admin can tell a "not found"
-// (zero value) response apart from a real bean returned by the canister.
-type Admin[B interface {
-	vlatte.Bean
-	comparable
-}] struct {
+type Admin[B vlatte.Bean] struct {
 	repo    vlatte.Canister[B]
 	builder vlatte.MockBuilder[B]
 }
 
 // New creates an [Admin] bound to the given repo and mock builder.
-func New[B interface {
-	vlatte.Bean
-	comparable
-}](repo vlatte.Canister[B], builder vlatte.MockBuilder[B]) *Admin[B] {
+func New[B vlatte.Bean](repo vlatte.Canister[B], builder vlatte.MockBuilder[B]) *Admin[B] {
 	return &Admin[B]{repo: repo, builder: builder}
 }
 
@@ -121,14 +112,12 @@ func (a *Admin[B]) add(w http.ResponseWriter, r *http.Request) {
 func (a *Admin[B]) get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	mock, err := a.repo.Pick(r.Context(), id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if errors.Is(err, vlatte.ErrNotFound) {
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-
-	var zero B
-	if mock == zero {
-		http.Error(w, "not found", http.StatusNotFound)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 

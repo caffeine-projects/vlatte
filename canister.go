@@ -2,10 +2,14 @@ package vlatte
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"sort"
 	"sync"
 )
+
+// ErrNotFound is returned by [Canister.Pick] when no bean with the given ID exists.
+var ErrNotFound = errors.New("canister: bean not found")
 
 type Jar[B Bean] struct {
 	beans []B
@@ -57,7 +61,7 @@ func (s *Jar[B]) Pick(_ context.Context, id string) (B, error) {
 	}
 
 	var result B
-	return result, nil
+	return result, ErrNotFound
 }
 
 func (s *Jar[B]) PickAll(_ context.Context) ([]B, error) {
