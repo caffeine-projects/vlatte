@@ -3,5 +3,5 @@ package vlatte
 type OnComplete interface {
 	EventArgs
 
-	Bean() Bean
+	Mock() Mock
 }

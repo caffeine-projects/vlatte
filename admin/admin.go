@@ -1,5 +1,5 @@
 // Package admin provides a transport-agnostic admin API for managing mocks
-// stored in a [vlatte.Canister]. It exposes an [http.Handler] that can be
+// stored in a [vlatte.Store]. It exposes an [http.Handler] that can be
 // mounted by any mock server that speaks HTTP for its control plane — HTTP,
 // gRPC and future transports alike.
 package admin
@@ -32,14 +32,14 @@ const (
 )
 
 // Admin is a transport-agnostic admin API for managing mocks stored in a
-// [vlatte.Canister].
-type Admin[B vlatte.Bean] struct {
-	repo    vlatte.Canister[B]
+// [vlatte.Store].
+type Admin[B vlatte.Mock] struct {
+	repo    vlatte.Store[B]
 	builder vlatte.MockBuilder[B]
 }
 
 // New creates an [Admin] bound to the given repo and mock builder.
-func New[B vlatte.Bean](repo vlatte.Canister[B], builder vlatte.MockBuilder[B]) *Admin[B] {
+func New[B vlatte.Mock](repo vlatte.Store[B], builder vlatte.MockBuilder[B]) *Admin[B] {
 	return &Admin[B]{repo: repo, builder: builder}
 }
 

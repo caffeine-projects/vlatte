@@ -122,15 +122,15 @@ func NewEventRunner(listeners *Listener, global *Events) *EventRunner {
 	return &EventRunner{Listeners: listeners, Global: global}
 }
 
-func (r *EventRunner) OnComplete(ctx context.Context, bean Bean, argsFn func(EventConfig) OnComplete) error {
+func (r *EventRunner) OnComplete(ctx context.Context, mock Mock, argsFn func(EventConfig) OnComplete) error {
 	for _, v := range r.Global.OnComplete {
 		if err := r.Listeners.OnComplete.Run(ctx, v.Name, argsFn(v)); err != nil {
 			return err
 		}
 	}
 
-	for _, def := range bean.Events().OnComplete {
-		if !bean.Events().OnComplete.Has(def.Name) {
+	for _, def := range mock.Events().OnComplete {
+		if !mock.Events().OnComplete.Has(def.Name) {
 			return fmt.Errorf("event %s not found", def.Name)
 		}
 

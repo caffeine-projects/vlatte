@@ -11,8 +11,8 @@ type CallbackInput interface {
 	// Example: if HTTP mock is being used, it will return "http".
 	Kind() Kind
 
-	// Bean is the matched [Bean] for the current request.
-	Bean() Bean
+	// Mock is the matched [Mock] for the current request.
+	Mock() Mock
 }
 
 // Callback defines the contract for a simple action that will be executed after serving a mocked response.

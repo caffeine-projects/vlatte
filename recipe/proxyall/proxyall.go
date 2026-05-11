@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/drink/xhttp"
+	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 	"github.com/caffeine-projects/vlatte/filter"
 )
 
@@ -21,9 +21,9 @@ type Config struct {
 
 func New(config Config) vlatte.Recipe[*xhttp.HTTPMock, *xhttp.HTTPMockApp] {
 	return vlatte.
-		RecipeFunc[*xhttp.HTTPMock, *xhttp.HTTPMockApp](func(ctx context.Context, pouch *vlatte.Pouch[*xhttp.HTTPMock, *xhttp.HTTPMockApp]) error {
+		RecipeFunc[*xhttp.HTTPMock, *xhttp.HTTPMockApp](func(ctx context.Context, input *vlatte.RecipeInput[*xhttp.HTTPMock, *xhttp.HTTPMockApp]) error {
 
-		_, err := pouch.Drink.Brew(xhttp.Request().
+		_, err := input.Flavor.Mock(xhttp.Request().
 			MethodMatches(filter.Anything()).
 			Priority(10).
 			Reply(xhttp.From(config.Target).

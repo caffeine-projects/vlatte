@@ -2,16 +2,16 @@ package vlatte
 
 import "context"
 
-type Recipe[B Bean, A MockApp[B]] interface {
-	Prep(ctx context.Context, pouch *Pouch[B, A]) error
+type Recipe[B Mock, A MockApp[B]] interface {
+	Prep(ctx context.Context, input *RecipeInput[B, A]) error
 }
 
-type Pouch[B Bean, A MockApp[B]] struct {
-	Drink Drink[B, A]
+type RecipeInput[B Mock, A MockApp[B]] struct {
+	Flavor Flavor[B, A]
 }
 
-type RecipeFunc[B Bean, A MockApp[B]] func(ctx context.Context, pouch *Pouch[B, A]) error
+type RecipeFunc[B Mock, A MockApp[B]] func(ctx context.Context, input *RecipeInput[B, A]) error
 
-func (f RecipeFunc[B, A]) Prep(ctx context.Context, pouch *Pouch[B, A]) error {
-	return f(ctx, pouch)
+func (f RecipeFunc[B, A]) Prep(ctx context.Context, input *RecipeInput[B, A]) error {
+	return f(ctx, input)
 }
