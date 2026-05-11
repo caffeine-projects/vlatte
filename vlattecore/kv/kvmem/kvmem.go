@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/caffeine-projects/vlatte/shelf/kv"
+	"github.com/caffeine-projects/vlatte/vlattecore/kv"
 )
 
 var _ kv.KV = (*memKV)(nil)

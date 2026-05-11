@@ -3,7 +3,7 @@ package vlatte
 import (
 	"context"
 
-	"github.com/caffeine-projects/vlatte/shelf/explain"
+	"github.com/caffeine-projects/vlatte/vlattecore/explain"
 )
 
 var _ Filter = (*fnDelegate)(nil)

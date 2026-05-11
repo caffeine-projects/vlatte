@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/vlattecore/descriptor"
 )
 
 // Len passes when the value's length equals the expected length.

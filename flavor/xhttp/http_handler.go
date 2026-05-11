@@ -10,7 +10,7 @@ import (
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/httprec"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/viewdata"
-	"github.com/caffeine-projects/vlatte/shelf/explain"
+	"github.com/caffeine-projects/vlatte/vlattecore/explain"
 )
 
 var ErrTemplateDataKeyExists = fmt.Errorf("http: template data key already exists")

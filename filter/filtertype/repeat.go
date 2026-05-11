@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/vlattecore/descriptor"
 )
 
 // Repeat passes until the max number of matches is reached (stateful).

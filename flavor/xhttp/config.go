@@ -13,7 +13,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/cors"
-	"github.com/caffeine-projects/vlatte/shelf/kv"
+	"github.com/caffeine-projects/vlatte/vlattecore/kv"
 )
 
 // Defaults

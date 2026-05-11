@@ -5,7 +5,7 @@ import (
 	"reflect"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/vlattecore/descriptor"
 )
 
 // Each applies the inner matcher to all items of the value (map/slice).

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/caffeine-projects/vlatte/flavor/xhttp"
-	"github.com/caffeine-projects/vlatte/shelf/kv/kvmem"
+	"github.com/caffeine-projects/vlatte/vlattecore/kv/kvmem"
 
 	"github.com/stretchr/testify/require"
 )

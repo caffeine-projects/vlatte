@@ -7,7 +7,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter"
-	"github.com/caffeine-projects/vlatte/shelf/explain"
+	"github.com/caffeine-projects/vlatte/vlattecore/explain"
 )
 
 var _ vlatte.Mock = (*bean)(nil)

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/vlattecore/descriptor"
 )
 
 var _ vlatte.Replier[ReplyInput, *Response] = (*ProxyReply)(nil)

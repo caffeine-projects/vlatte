@@ -16,7 +16,7 @@ import (
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/cors"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/filter"
-	"github.com/caffeine-projects/vlatte/shelf/kv/kvmem"
+	"github.com/caffeine-projects/vlatte/vlattecore/kv/kvmem"
 )
 
 type testBodyParser struct{}

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"iter"
 
-	"github.com/caffeine-projects/vlatte/shelf/explain"
+	"github.com/caffeine-projects/vlatte/vlattecore/explain"
 )
 
 var _ fmt.Stringer = (*Eval[any])(nil)

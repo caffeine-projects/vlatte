@@ -2,7 +2,7 @@ package filtertype
 
 import (
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/vlattecore/descriptor"
 )
 
 // Describe returns the descriptor for the given filter, or a default for non-self-descriptive filters.

@@ -22,8 +22,8 @@ import (
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/mid"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/mid/recover"
 	"github.com/caffeine-projects/vlatte/filter/mfeat"
-	"github.com/caffeine-projects/vlatte/shelf/kv"
-	"github.com/caffeine-projects/vlatte/shelf/kv/kvmem"
+	"github.com/caffeine-projects/vlatte/vlattecore/kv"
+	"github.com/caffeine-projects/vlatte/vlattecore/kv/kvmem"
 )
 
 var (

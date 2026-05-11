@@ -8,7 +8,7 @@ import (
 	"github.com/ohler55/ojg/oj"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/vlattecore/descriptor"
 )
 
 // HasKey passes if the JSON key at the given path is present.

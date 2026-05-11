@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/explain"
+	"github.com/caffeine-projects/vlatte/vlattecore/explain"
 )
 
 type UnaryValueSelector func(ctx context.Context, in *UnaryValueSelectorIn) any

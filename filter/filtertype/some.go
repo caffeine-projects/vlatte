@@ -5,7 +5,7 @@ import (
 	"reflect"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/vlattecore/descriptor"
 )
 
 // Some passes when at least one element matches the inner matcher.

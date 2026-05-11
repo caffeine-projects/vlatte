@@ -9,7 +9,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/caffeine-projects/vlatte/shelf/kv"
+	"github.com/caffeine-projects/vlatte/vlattecore/kv"
 )
 
 // C is the interface for common mock server configuration.

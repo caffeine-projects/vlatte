@@ -2,7 +2,7 @@ package filtertype
 
 import (
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/vlattecore/descriptor"
 )
 
 // Anything is a matcher that always passes.

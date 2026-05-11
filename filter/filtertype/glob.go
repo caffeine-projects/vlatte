@@ -7,7 +7,7 @@ import (
 	"github.com/ryanuber/go-glob"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/shelf/descriptor"
+	"github.com/caffeine-projects/vlatte/vlattecore/descriptor"
 )
 
 // Glob passes when the value matches the glob pattern.
