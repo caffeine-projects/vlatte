@@ -112,3 +112,18 @@ func (app *GRPCMockApp) Addr() string {
 func (app *GRPCMockApp) Close() {
 	app.cancel()
 }
+
+type grpcFlavor struct {
+	opts []vlatte.Configurer[*Config]
+}
+
+// Flavor returns a factory for use with [vlatte.New].
+//
+//	m, err := vlatte.New(xgrpc.Flavor())
+func Flavor(opts ...vlatte.Configurer[*Config]) vlatte.FlavorFactory[*GRPCMock, *GRPCMockApp] {
+	return &grpcFlavor{opts: opts}
+}
+
+func (f *grpcFlavor) Create(_ context.Context) *GRPCMockApp {
+	return New(f.opts...)
+}

@@ -427,3 +427,19 @@ func (app *HTTPMockApp) getLog(conf *Config) *zerolog.Logger {
 	log := c.Logger()
 	return &log
 }
+
+type httpFlavor struct {
+	opts []vlatte.Configurer[*Config]
+}
+
+// Flavor returns a factory for use with [vlatte.New].
+//
+//	m, err := vlatte.New(xhttp.Flavor())
+//	m, err := vlatte.New(xhttp.Flavor(xhttp.Setup().CORS()))
+func Flavor(opts ...vlatte.Configurer[*Config]) vlatte.FlavorFactory[*HTTPMock, *HTTPMockApp] {
+	return &httpFlavor{opts: opts}
+}
+
+func (f *httpFlavor) Create(_ context.Context) *HTTPMockApp {
+	return New(f.opts...)
+}
