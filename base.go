@@ -7,19 +7,12 @@ import (
 	"sync"
 )
 
-type MockApp[TM Mock] interface {
-	Hits() int64
-	Enable()
-	Disable()
-	Clean(ctx context.Context) error
-}
-
-type Base[TM Mock, A MockApp[TM]] struct {
+type Base[TM Mock, A any] struct {
 	registry *Registry[TM, A]
 	mu       sync.RWMutex
 }
 
-func NewBase[TM Mock, A MockApp[TM]](app A, repo Store[TM]) *Base[TM, A] {
+func NewBase[TM Mock, A any](app A, repo Store[TM]) *Base[TM, A] {
 	return &Base[TM, A]{registry: &Registry[TM, A]{flavor: app, store: repo}}
 }
 

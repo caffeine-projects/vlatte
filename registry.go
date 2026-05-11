@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-type Registry[B Mock, A MockApp[B]] struct {
+type Registry[B Mock, A any] struct {
 	mu     sync.RWMutex
 	flavor A
 	store  Store[B]

@@ -13,7 +13,6 @@ import (
 )
 
 var (
-	_ vlatte.MockApp[*GRPCMock]              = (*GRPCMockApp)(nil)
 	_ vlatte.Flavor[*GRPCMock, *GRPCMockApp] = (*GRPCMockApp)(nil)
 )
 

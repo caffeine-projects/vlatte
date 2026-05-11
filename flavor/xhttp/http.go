@@ -27,7 +27,6 @@ import (
 )
 
 var (
-	_ vlatte.MockApp[*HTTPMock]              = (*HTTPMockApp)(nil)
 	_ vlatte.Flavor[*HTTPMock, *HTTPMockApp] = (*HTTPMockApp)(nil)
 )
 

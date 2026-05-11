@@ -26,7 +26,7 @@ type Mock interface {
 }
 
 // Builder describes a Mock builder.
-type Builder[B Mock, TMockApp MockApp[B]] interface {
+type Builder[B Mock, TMockApp any] interface {
 	Build(app TMockApp) (B, error)
 }
 
