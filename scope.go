@@ -2,6 +2,7 @@ package vlatte
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 )
@@ -258,4 +259,47 @@ func (s *Scope[B]) AssertNumberOfCalls(t TestingT, expected int64) bool {
 	t.Errorf("\nExpected %d matched request hits.\nGot %d", expected, hits)
 
 	return false
+}
+
+// Scopes is a collection of Scope instances with coordinated add and retrieval.
+type Scopes[B Mock, A any] struct {
+	mu     sync.RWMutex
+	flavor A
+	store  Store[B]
+	list   []*Scope[B]
+}
+
+func (s *Scopes[B, A]) Add(builders ...Builder[B, A]) (*Scope[B], error) {
+	ground := make([]B, len(builders))
+
+	for i, b := range builders {
+		built, err := b.Build(s.flavor)
+		if err != nil {
+			return nil, fmt.Errorf("server: error adding mock at index %d.\n%w", i, err)
+		}
+
+		if err := s.store.Store(context.Background(), built); err != nil {
+			return nil, err
+		}
+
+		ground[i] = built
+	}
+
+	scope := NewScope(ground, s.store)
+
+	s.mu.Lock()
+	s.list = append(s.list, scope)
+	s.mu.Unlock()
+
+	return scope, nil
+}
+
+func (s *Scopes[B, A]) All() []*Scope[B] {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	ret := make([]*Scope[B], len(s.list))
+	copy(ret, s.list)
+
+	return ret
 }
