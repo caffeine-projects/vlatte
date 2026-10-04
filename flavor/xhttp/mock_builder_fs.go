@@ -695,7 +695,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 		}
 
 		if vi.IsSet(_fResponseProxyTrimSuffix) {
-			proxy.TrimPrefix(vi.GetString(_fResponseProxyTrimSuffix))
+			proxy.TrimSuffix(vi.GetString(_fResponseProxyTrimSuffix))
 		}
 
 		if vi.IsSet(_fResponseProxyTimeout) {
