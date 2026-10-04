@@ -60,7 +60,7 @@ func (in *Interceptors) UnaryInterceptor(
 	}
 
 	if !pass {
-		return nil, interceptError("unary: request was not matched with any mock")
+		return nil, status.Error(codes.NotFound, "unary: request was not matched with any mock")
 	}
 
 	replier, ok := mock.Reply.(vlatte.Replier[*UnaryRequestValues, any])

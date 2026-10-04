@@ -11,7 +11,9 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 
 	pb "github.com/caffeine-projects/vlatte/flavor/xgrpc/internal/protobuf"
 )
@@ -113,4 +115,25 @@ func TestServerOptionsAreApplied(t *testing.T) {
 			require.Equal(t, int32(1), calls.Load())
 		})
 	}
+}
+
+func TestUnmatchedCallsReturnNotFound(t *testing.T) {
+	m := New(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	client := pb.NewTestServiceClient(conn)
+
+	// Calls no mock matches get NotFound, unary and streaming alike. Internal stays reserved for real errors.
+	_, err = client.Greetings(context.Background(), &pb.HiReq{Message: "hi"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	stream, err := client.List(context.Background(), &pb.ListReq{})
+	require.NoError(t, err)
+	_, err = stream.Recv()
+	require.Equal(t, codes.NotFound, status.Code(err))
 }
