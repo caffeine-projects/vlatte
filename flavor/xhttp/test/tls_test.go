@@ -128,6 +128,16 @@ func TestTLSMutual(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusAccepted, res.StatusCode)
 	require.Equal(t, "accepted", string(b))
+
+	// Mutual TLS: a client that trusts the server but has no certificate must be refused.
+	noCertClient := &http.Client{
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: certPool}},
+	}
+	res, err = noCertClient.Get(target.URL("/test"))
+	if err == nil {
+		_ = res.Body.Close()
+	}
+	require.Error(t, err)
 }
 
 func TestTLSMutualWithProxy(t *testing.T) {
