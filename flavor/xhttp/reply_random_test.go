@@ -2,10 +2,13 @@ package xhttp
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"math/rand"
 	"net/http"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -80,6 +83,46 @@ func TestRandomReply_PreparesNestedReplies(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	require.Equal(t, "GET", string(b))
+}
+
+func TestRandomReply_DescribeIncludesSeed(t *testing.T) {
+	b, err := json.Marshal(RandWithSeed(42, OK()).Describe())
+
+	require.NoError(t, err)
+	require.Contains(t, string(b), `"seed":42`)
+}
+
+func TestRandomReply_RepliesConcurrently(t *testing.T) {
+	var inFlight sync.WaitGroup
+	inFlight.Add(2)
+	both := make(chan struct{})
+	go func() { inFlight.Wait(); close(both) }()
+
+	// Each inner reply waits until both are running: replies served one at a time never get there.
+	inner := Func(func(http.ResponseWriter, *RequestValues) (*Response, error) {
+		inFlight.Done()
+		select {
+		case <-both:
+			return &Response{StatusCode: http.StatusOK}, nil
+		case <-time.After(2 * time.Second):
+			return nil, errors.New("random replies were served one at a time")
+		}
+	})
+	rep := RandWithSeed(1, inner)
+
+	req, _ := http.NewRequest(http.MethodGet, "http://localhost", nil)
+	input := ReplyInput{RequestValues: &RequestValues{RawRequest: req, URL: req.URL}}
+
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := rep.Reply(context.Background(), input)
+			errs <- err
+		}()
+	}
+
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
 }
 
 func TestRandomReplyValidate(t *testing.T) {

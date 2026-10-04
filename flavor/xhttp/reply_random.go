@@ -41,6 +41,7 @@ func RandWith(random *rand.Rand, reply ...vlatte.Replier[ReplyInput, *Response])
 func RandWithSeed(seed int64, reply ...vlatte.Replier[ReplyInput, *Response]) *RandomReply {
 	r := RandWith(rand.New(rand.NewSource(seed)), reply...)
 	r.seed = seed
+	r.seeded = true
 	return r
 }
 
@@ -67,14 +68,16 @@ func (rep *RandomReply) beforeBuild(app *HTTPMockApp) error {
 
 // Reply implements vlatte.Replier[ReplyInput, *Response].
 func (rep *RandomReply) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
+	// The lock guards the shared *rand.Rand only; the chosen reply runs without it.
 	_randomMu.Lock()
-	defer _randomMu.Unlock()
 	var index int
 	if rep.random == nil {
 		index = input.RequestValues.App.random.Intn(len(rep.replies))
 	} else {
 		index = rep.random.Intn(len(rep.replies))
 	}
+	_randomMu.Unlock()
+
 	return rep.replies[index].Reply(ctx, input)
 }
 
