@@ -107,7 +107,7 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "print version info",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(xhttp.Version)
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), version())
 		},
 	}
 }

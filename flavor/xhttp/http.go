@@ -28,10 +28,6 @@ import (
 
 var _ vlatte.Flavor[*HTTPMock, *HTTPMockApp] = (*HTTPMockApp)(nil)
 
-const (
-	Version = "1.0.0"
-)
-
 // StatusNoMatch describes an HTTP response where no Mock was found.
 //
 // It uses http.StatusTeapot to reduce the chance of using the same
