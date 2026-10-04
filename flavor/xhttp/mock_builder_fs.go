@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -183,12 +182,7 @@ func (b *mockBuilderFromFile) build(app *HTTPMockApp) (mock *HTTPMock, err error
 		return nil, fmt.Errorf("file %s does not exist", b.filename)
 	}
 
-	file, err := os.Open(b.filename)
-	if err != nil {
-		return nil, err
-	}
-
-	content, err := io.ReadAll(file)
+	content, err := os.ReadFile(b.filename)
 	if err != nil {
 		return nil, err
 	}
