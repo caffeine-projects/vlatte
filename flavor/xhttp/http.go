@@ -173,7 +173,7 @@ func New(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
 	app.admin = admin.New(
 		repository,
 		vlatte.MockBuilderFunc[*HTTPMock](func(content []byte, ext string) (*HTTPMock, error) {
-			return BuildMockFromBytes(app, Request(), content, ext, false)
+			return buildAdminMock(app, content, ext)
 		}),
 	)
 

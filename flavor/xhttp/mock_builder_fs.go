@@ -226,6 +226,18 @@ func (b *mockBuilderFromBytes) Build(app *HTTPMockApp) (mock *HTTPMock, err erro
 	return mock, nil
 }
 
+// buildAdminMock builds a mock definition received by the admin API.
+// Like the builders above, it turns panics caused by malformed definitions into errors.
+func buildAdminMock(app *HTTPMockApp, content []byte, ext string) (mock *HTTPMock, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("mock: error building mock from byte array. panic: %v", r)
+		}
+	}()
+
+	return BuildMockFromBytes(app, Request(), content, ext, false)
+}
+
 // buildReply expects a sub instance of viper.Viper, containing the response definition.
 // Fields should not be accessed using "response.", given that the argument v already contains only the
 // response.* fields.
