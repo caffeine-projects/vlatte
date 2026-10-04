@@ -79,7 +79,12 @@ func (f recordConfigFunc) Apply(config *RecordConfig) error {
 
 // Apply allows using RecordConfig as RecordConfigurer.
 func (r *RecordConfig) Apply(opts *RecordConfig) error {
-	extension := strings.TrimPrefix(opts.SaveFileType, ".")
+	fileType := r.SaveFileType
+	if fileType == "" {
+		fileType = opts.SaveFileType
+	}
+
+	extension := strings.TrimPrefix(fileType, ".")
 	found := false
 	for _, ext := range viper.SupportedExts {
 		if strings.EqualFold(extension, ext) {

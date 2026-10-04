@@ -17,12 +17,21 @@ import (
 )
 
 func TestRecordConfigApply(t *testing.T) {
-	conf := &RecordConfig{}
+	// The receiver holds the user's settings; Apply copies them onto the config being built.
+	target := defaultRecordConfig()
+	require.NoError(t, (&RecordConfig{SaveFileType: "yaml"}).Apply(target))
+	require.Equal(t, "yaml", target.SaveFileType)
 
-	require.Error(t, conf.Apply(&RecordConfig{}), "no extension defined")
-	require.Error(t, conf.Apply(&RecordConfig{SaveFileType: ".test"}), "unsupported extension")
-	require.NoError(t, conf.Apply(&RecordConfig{SaveFileType: ".json"}), "should accept extension with dot prefix")
-	require.NoError(t, conf.Apply(&RecordConfig{SaveFileType: "json"}), "should accept extension without dot prefix")
+	target = defaultRecordConfig()
+	require.NoError(t, (&RecordConfig{SaveFileType: ".yaml"}).Apply(target), "should accept extension with dot prefix")
+	require.Equal(t, "yaml", target.SaveFileType)
+
+	target = defaultRecordConfig()
+	require.NoError(t, (&RecordConfig{}).Apply(target), "should keep the target file type when none is set")
+	require.Equal(t, "json", target.SaveFileType)
+
+	require.Error(t, (&RecordConfig{SaveFileType: ".test"}).Apply(defaultRecordConfig()), "unsupported extension")
+	require.Error(t, (&RecordConfig{}).Apply(&RecordConfig{}), "no extension defined")
 }
 
 func TestRecordingWithWebProxy(t *testing.T) {
