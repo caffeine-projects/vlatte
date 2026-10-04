@@ -183,3 +183,15 @@ func TestBuildMatcher_Empty(t *testing.T) {
 	assert.True(t, match(t, m, ""))
 	assert.False(t, match(t, m, "nonempty"))
 }
+
+// Invalid JSON paths come from mock files and the admin API: they must be reported, not panic.
+
+func TestBuildMatcher_JSONPathInvalidPathReturnsError(t *testing.T) {
+	_, err := BuildMatcher([]any{"jsonpath", "$[", []any{"eq", "x"}})
+	require.ErrorContains(t, err, "$[")
+}
+
+func TestBuildMatcher_HasKeyInvalidPathReturnsError(t *testing.T) {
+	_, err := BuildMatcher([]any{"haskey", "$["})
+	require.ErrorContains(t, err, "$[")
+}
