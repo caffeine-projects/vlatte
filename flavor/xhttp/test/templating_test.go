@@ -47,9 +47,6 @@ func TestTemplating(t *testing.T) {
 }
 
 func TestTemplating_BodyFilename(t *testing.T) {
-	t.Log("templating needs rework")
-	t.SkipNow()
-
 	m := xhttp.New()
 	m.MustStart()
 	defer m.Close()
