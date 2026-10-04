@@ -39,6 +39,10 @@ cov: ## run tests and generate coverage report
 	@go test -v -race -coverpkg=./... -coverprofile=out/coverage.out ./...
 	@go tool cover -html=out/coverage.out -o out/coverage.html
 
+.PHONY: build
+build: ## build the vlatte CLI into bin/
+	@go build -o bin/vlatte ./cmd/vlatte
+
 .PHONY: deps
 deps: ## dependencies
 	@go mod download
