@@ -17,12 +17,12 @@ var _ vlatte.Flavor[*GRPCMock, *GRPCMockApp] = (*GRPCMockApp)(nil)
 type GRPCMockApp struct {
 	*vlatte.Base[*GRPCMock, *GRPCMockApp]
 
-	cancel  context.CancelFunc
 	server  *grpc.Server
 	config  *Config
 	logger  *zerolog.Logger
 	addr    string
 	storage vlatte.Store[*GRPCMock]
+	served  chan struct{}
 }
 
 type ServerInfo struct {
@@ -71,20 +71,16 @@ func (app *GRPCMockApp) Start() error {
 		return fmt.Errorf("server: Start: failed to create listener: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
 	app.addr = lis.Addr().String()
-	app.cancel = cancel
+	app.served = make(chan struct{})
 
-	go func() {
-		if err = app.server.Serve(lis); err != nil && errors.Is(err, http.ErrServerClosed) {
+	go func(served chan struct{}) {
+		defer close(served)
+
+		if err := app.server.Serve(lis); err != nil && errors.Is(err, http.ErrServerClosed) {
 			app.logger.Warn().Err(err).Msg("server: Start: error listening")
 		}
-	}()
-
-	go func() {
-		<-ctx.Done()
-		app.server.GracefulStop()
-	}()
+	}(app.served)
 
 	return nil
 }
@@ -106,8 +102,14 @@ func (app *GRPCMockApp) Addr() string {
 	return app.addr
 }
 
+// Close stops the server, waiting for calls in flight to finish. It does nothing if the server was never started.
 func (app *GRPCMockApp) Close() {
-	app.cancel()
+	if app.served == nil {
+		return
+	}
+
+	app.server.GracefulStop()
+	<-app.served
 }
 
 type grpcFlavor struct {
