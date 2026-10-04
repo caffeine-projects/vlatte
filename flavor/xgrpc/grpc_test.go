@@ -15,7 +15,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/caffeine-projects/vlatte/filter"
 	pb "github.com/caffeine-projects/vlatte/flavor/xgrpc/internal/protobuf"
 )
 
@@ -148,4 +150,33 @@ func TestDefaultAddrIsLoopback(t *testing.T) {
 	require.NoError(t, err)
 	// Binding every interface exposes the mock to the network and triggers firewall prompts on macOS.
 	require.Equal(t, "127.0.0.1", host)
+}
+
+func TestServerStream_MatchesRequestFields(t *testing.T) {
+	m := New(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(ServerStreamMethod("List").
+		Field("message", filter.Eq("hi")).
+		Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})))
+
+	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	client := pb.NewTestServiceClient(conn)
+
+	// Field matchers read the request message: a matching request is served...
+	stream, err := client.List(context.Background(), &pb.ListReq{Message: "hi"})
+	require.NoError(t, err)
+	item, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, "a", item.GetKey())
+
+	// ...and a request with another value is not.
+	stream, err = client.List(context.Background(), &pb.ListReq{Message: "other"})
+	require.NoError(t, err)
+	_, err = stream.Recv()
+	require.Equal(t, codes.NotFound, status.Code(err))
 }
