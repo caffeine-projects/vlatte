@@ -47,7 +47,7 @@ func parseURL(r *http.Request, baseURL string) (*url.URL, []string) {
 		reqPath += "?" + r.URL.RawQuery
 	}
 	parsedURL, _ := url.Parse(baseURL + reqPath)
-	segments := strings.FieldsFunc(reqPath, func(c rune) bool { return c == '/' })
+	segments := strings.FieldsFunc(r.URL.Path, func(c rune) bool { return c == '/' })
 	return parsedURL, segments
 }
 

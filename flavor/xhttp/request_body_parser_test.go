@@ -110,3 +110,14 @@ func TestRequestBodyParser_Limit(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusOK, res.StatusCode)
 }
+
+func TestParseURL_SegmentsExcludeQuery(t *testing.T) {
+	r, err := http.NewRequest(http.MethodGet, "http://localhost/a/b?x=1", nil)
+	require.NoError(t, err)
+
+	u, segments := parseURL(r, "http://localhost")
+
+	// Path segments come from the path only; the query stays in the full URL.
+	require.Equal(t, []string{"a", "b"}, segments)
+	require.Equal(t, "x=1", u.RawQuery)
+}
