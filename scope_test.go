@@ -11,7 +11,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp"
-	"github.com/caffeine-projects/vlatte/flavor/xhttp/test/testmock"
+	"github.com/caffeine-projects/vlatte/internal/testmock"
 )
 
 func TestCup(t *testing.T) {
