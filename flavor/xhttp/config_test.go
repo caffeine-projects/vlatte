@@ -2,8 +2,8 @@ package xhttp
 
 import (
 	"crypto/tls"
+	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -65,10 +65,10 @@ func TestConfig(t *testing.T) {
 	client := &http.Client{}
 
 	t.Run("should run server with the custom given address", func(t *testing.T) {
-		addr := os.Getenv("TEST_CUSTOM_ADDR")
-		if addr == "" {
-			addr = "127.0.0.1:3000"
-		}
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		addr := l.Addr().String()
+		require.NoError(t, l.Close())
 
 		m := New(Setup().Addr(addr))
 		t.Cleanup(func() { m.Close() })

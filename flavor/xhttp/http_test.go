@@ -3,7 +3,6 @@ package xhttp
 import (
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -394,27 +393,10 @@ func TestMochaConcurrentRequests(t *testing.T) {
 }
 
 func TestSettingOnlyPort(t *testing.T) {
-	randomPort := func() int {
-		l, err := net.Listen("tcp", ":0")
-		require.NoError(t, err)
-		require.NoError(t, l.Close())
+	// Binding a custom address is covered by TestConfig; Port must produce a port-only address.
+	m := New(Setup().Port(12345))
 
-		return l.Addr().(*net.TCPAddr).Port
-	}
-
-	port := randomPort()
-	m := New(Setup().Port(port))
-	t.Cleanup(func() { m.Close() })
-	m.MustStart()
-	m.MustMock(Getf("/test").Reply(OK()))
-
-	hc := &http.Client{}
-	res, err := hc.Get(m.URL("/test"))
-
-	require.NoError(t, err)
-	require.NoError(t, res.Body.Close())
-	require.Equal(t, http.StatusOK, res.StatusCode)
-	require.Contains(t, m.URL(), strconv.FormatInt(int64(port), 10))
+	require.Equal(t, ":12345", m.Config().Addr)
 }
 
 func TestMocha_Server(t *testing.T) {
