@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -74,6 +75,34 @@ func TestProxyTLS(t *testing.T) {
 	require.Equal(t, http.StatusCreated, res.StatusCode)
 
 	proxyScope.AssertCalled(t)
+	targetScope.AssertCalled(t)
+}
+
+func TestProxyTunnelsHTTPSTargets(t *testing.T) {
+	proxySrv := New(Setup().Proxy())
+	t.Cleanup(func() { proxySrv.Close() })
+	proxySrv.MustStart()
+
+	targetSrv := New()
+	t.Cleanup(func() { targetSrv.Close() })
+	targetSrv.MustStartTLS()
+	targetScope := targetSrv.MustMock(Get(URLPath("/secure")).Reply(OK()))
+
+	proxyURL, _ := url.Parse(proxySrv.URL())
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+	t.Cleanup(client.CloseIdleConnections)
+
+	// An https target makes the client open a CONNECT tunnel through the proxy.
+	res, err := client.Get(targetSrv.URL() + "/secure")
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
 	targetScope.AssertCalled(t)
 }
 

@@ -100,6 +100,15 @@ func (p *reverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) {
+	// Dial before hijacking: once the connection is hijacked, w can no longer report errors.
+	out, err := net.DialTimeout("tcp", r.Host, 5*time.Second)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+
+	defer out.Close()
+
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "proxy: hijacking is not supported", http.StatusInternalServerError)
@@ -109,23 +118,20 @@ func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) {
 	in, _, err := hijacker.Hijack()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
 	}
 
 	defer in.Close()
 
-	out, err := net.DialTimeout("tcp", r.Host, 5*time.Second)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+	// WriteHeader has no effect on a hijacked connection, so the tunnel response is written directly.
+	if _, err = io.WriteString(in, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
+		p.logger.Error().Err(err).Str("url", r.URL.String()).Msg("proxy: error establishing tunnel")
 		return
 	}
 
-	defer out.Close()
-
-	w.WriteHeader(http.StatusOK)
-
 	errCh := make(chan error, 2)
 	cp := func(dst io.WriteCloser, src io.ReadCloser) {
-		_, err = io.Copy(dst, src)
+		_, err := io.Copy(dst, src)
 		errCh <- err
 	}
 
