@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/rs/zerolog"
@@ -46,10 +47,13 @@ func New(config ...vlatte.Configurer[*Config]) *GRPCMockApp {
 
 	store := vlatte.NewStore[*GRPCMock]()
 	in := &Interceptors{app: app}
-	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(in.UnaryInterceptor),
-		grpc.StreamInterceptor(in.StreamInterceptor),
+	// User options come first: the mock interceptors never call the next handler, so they must run last.
+	// Chain* is used because the plain interceptor options can only be set once.
+	opts := append(slices.Clone(conf.ServerOptions),
+		grpc.ChainUnaryInterceptor(in.UnaryInterceptor),
+		grpc.ChainStreamInterceptor(in.StreamInterceptor),
 	)
+	srv := grpc.NewServer(opts...)
 
 	if conf.ServiceDesc != nil && conf.Service != nil {
 		srv.RegisterService(conf.ServiceDesc, conf.Service)

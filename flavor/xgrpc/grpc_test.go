@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -81,4 +82,35 @@ func TestServeErrorsAreLogged(t *testing.T) {
 	m.Close()
 
 	require.Contains(t, buf.String(), grpc.ErrServerStopped.Error())
+}
+
+func TestServerOptionsAreApplied(t *testing.T) {
+	var calls atomic.Int32
+	count := func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		calls.Add(1)
+		return handler(ctx, req)
+	}
+
+	for name, opt := range map[string]grpc.ServerOption{
+		"chained interceptor": grpc.ChainUnaryInterceptor(count),
+		"plain interceptor":   grpc.UnaryInterceptor(count),
+	} {
+		t.Run(name, func(t *testing.T) {
+			calls.Store(0)
+			m := New(Setup().ServerOptions(opt))
+			pb.RegisterTestServiceServer(m.Server(), pb.UnimplementedTestServiceServer{})
+			m.MustStart()
+			t.Cleanup(m.Close)
+			m.MustMock(UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{Message: "bye"})))
+
+			conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = conn.Close() })
+
+			_, err = pb.NewTestServiceClient(conn).Greetings(context.Background(), &pb.HiReq{Message: "hi"})
+			require.NoError(t, err)
+			// Server options from the configuration, like user interceptors, must be applied.
+			require.Equal(t, int32(1), calls.Load())
+		})
+	}
 }
