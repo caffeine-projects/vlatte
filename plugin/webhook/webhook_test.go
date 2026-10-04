@@ -326,8 +326,6 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 }
 
 func TestWebHook_FileSetup(t *testing.T) {
-	t.Skip("skipped until templating is fixed")
-
 	name := "webhook"
 	target := xhttp.New(xhttp.Setup())
 	target.MustStart()
@@ -380,7 +378,8 @@ func TestWebHook_InvalidFiles(t *testing.T) {
 			defer m.Close()
 
 			mock, err := m.Mock(xhttp.FromFile(tc.filename))
-			require.Error(t, err)
+			// The error must come from the on_complete definition itself, not from on_complete being unknown.
+			require.ErrorContains(t, err, "/on_complete")
 			require.Nil(t, mock)
 		})
 	}
