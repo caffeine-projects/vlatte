@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"slices"
 	"sync"
@@ -49,7 +49,7 @@ func TestRandWithCustom(t *testing.T) {
 		http.StatusOK, http.StatusInternalServerError, http.StatusCreated, http.StatusBadRequest,
 	}
 
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	r := rand.New(rand.NewPCG(1, 2))
 
 	input := ReplyInput{RequestValues: rv, Writer: nil}
 	for range 5000 {

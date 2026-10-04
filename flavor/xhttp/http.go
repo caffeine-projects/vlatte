@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -54,7 +53,6 @@ type HTTPMockApp struct {
 	colorizer          *gchalk.Builder
 	logger             *zerolog.Logger
 	startOnce          sync.Once
-	random             *rand.Rand
 	admin              *admin.Admin[*HTTPMock]
 	closeIdleConns     []func()
 }
@@ -65,7 +63,6 @@ type HTTPMockApp struct {
 // If no port is set, it will start the server on localhost using a random port.
 func New(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
 	app := &HTTPMockApp{}
-	app.random = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	conf := defaultConfig()
 

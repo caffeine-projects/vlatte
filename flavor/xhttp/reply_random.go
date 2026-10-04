@@ -3,7 +3,7 @@ package xhttp
 import (
 	"context"
 	"errors"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 
 	"github.com/caffeine-projects/vlatte"
@@ -30,16 +30,16 @@ func Rand(reply ...vlatte.Replier[ReplyInput, *Response]) *RandomReply {
 	}
 }
 
-// RandWith creates a new RandomReply with a custom *rand.Rand.
+// RandWith creates a new RandomReply that picks replies with the given *rand.Rand.
 func RandWith(random *rand.Rand, reply ...vlatte.Replier[ReplyInput, *Response]) *RandomReply {
 	r := Rand(reply...)
 	r.random = random
 	return r
 }
 
-// RandWithSeed creates a new RandomReply with a custom *rand.Rand using the given seed.
+// RandWithSeed creates a new RandomReply that picks replies in a sequence reproducible by the given seed.
 func RandWithSeed(seed int64, reply ...vlatte.Replier[ReplyInput, *Response]) *RandomReply {
-	r := RandWith(rand.New(rand.NewSource(seed)), reply...)
+	r := RandWith(rand.New(rand.NewPCG(uint64(seed), 0)), reply...)
 	r.seed = seed
 	r.seeded = true
 	return r
@@ -68,15 +68,16 @@ func (rep *RandomReply) beforeBuild(app *HTTPMockApp) error {
 
 // Reply implements vlatte.Replier[ReplyInput, *Response].
 func (rep *RandomReply) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
-	// The lock guards the shared *rand.Rand only; the chosen reply runs without it.
-	_randomMu.Lock()
 	var index int
 	if rep.random == nil {
-		index = input.RequestValues.App.random.Intn(len(rep.replies))
+		index = rand.IntN(len(rep.replies))
 	} else {
-		index = rep.random.Intn(len(rep.replies))
+		// A *rand.Rand is not safe for concurrent use and callers may share one between replies.
+		// The lock guards it only; the chosen reply runs without it.
+		_randomMu.Lock()
+		index = rep.random.IntN(len(rep.replies))
+		_randomMu.Unlock()
 	}
-	_randomMu.Unlock()
 
 	return rep.replies[index].Reply(ctx, input)
 }

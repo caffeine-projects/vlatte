@@ -2,7 +2,7 @@ package vlatte
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"time"
 )
 
@@ -18,7 +18,7 @@ func UniformDistribution(min, max int64) Delay {
 	}
 
 	return func() time.Duration {
-		return time.Duration(rand.Int63n(max-min+1)+min) * time.Millisecond
+		return time.Duration(rand.Int64N(max-min+1)+min) * time.Millisecond
 	}
 }
 
@@ -29,7 +29,7 @@ func Jitter(avg time.Duration, deviation float64) Delay {
 	}
 
 	return func() time.Duration {
-		jitter := time.Duration(rand.Int63n(int64(maxDeviation)))
+		jitter := time.Duration(rand.Int64N(int64(maxDeviation)))
 
 		return avg + jitter - (maxDeviation / 2)
 	}

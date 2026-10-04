@@ -2,6 +2,7 @@ package test
 
 import (
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/caffeine-projects/vlatte/flavor/xhttp"
@@ -9,27 +10,25 @@ import (
 )
 
 func TestRandom_SetupFromFileWithSeed(t *testing.T) {
-	m := xhttp.New()
-	m.MustStart()
+	serve := func() []int {
+		m := xhttp.New()
+		m.MustStart()
+		defer m.Close()
 
-	defer m.Close()
+		m.MustMock(xhttp.FromFile("testdata/response_random/rand_01.yaml"))
 
-	m.MustMock(xhttp.FromFile("testdata/response_random/rand_01.yaml"))
+		statuses := make([]int, 0, 20)
+		for range 20 {
+			res, err := http.Get(m.URL("/test"))
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			statuses = append(statuses, res.StatusCode)
+		}
+		return statuses
+	}
 
-	req, _ := http.NewRequest(http.MethodGet, m.URL()+"/test", nil)
-
-	res, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	require.NoError(t, res.Body.Close())
-	require.Equal(t, http.StatusBadRequest, res.StatusCode)
-
-	res, err = http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	require.NoError(t, res.Body.Close())
-	require.Equal(t, http.StatusOK, res.StatusCode)
-
-	res, err = http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	require.NoError(t, res.Body.Close())
-	require.Equal(t, http.StatusBadRequest, res.StatusCode)
+	// A seed makes the sequence reproducible across servers, while it still varies between requests.
+	first := serve()
+	require.Equal(t, first, serve())
+	require.True(t, slices.ContainsFunc(first, func(s int) bool { return s != first[0] }), "seeded replies never varied: %v", first)
 }
