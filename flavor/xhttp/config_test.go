@@ -1,13 +1,16 @@
 package xhttp
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"text/template"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
@@ -225,4 +228,37 @@ func TestLogLevelString(t *testing.T) {
 	require.Equal(t, vlatte.LogBasic.String(), "basic")
 	require.Equal(t, vlatte.LogHeader.String(), "header")
 	require.Equal(t, vlatte.LogBody.String(), "body")
+}
+
+func TestNew_ZeroValueConfig(t *testing.T) {
+	// A Config built by hand leaves unset fields at zero values; the server must still answer unmatched requests.
+	m := New(&Config{})
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	res, err := http.Get(m.URL("/nothing"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+}
+
+func TestGlobalEventsAreApplied(t *testing.T) {
+	var fired atomic.Int32
+	setup := Setup().OnCompleteListener("count", vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
+		fired.Add(1)
+		return nil
+	}))
+	setup.Base().GlobalEvents(&vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "count"}}})
+
+	m := New(setup)
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/event").Reply(OK()))
+
+	res, err := http.Get(m.URL("/event"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	// Global on_complete events run for every matched request, after the response is written.
+	require.Eventually(t, func() bool { return fired.Load() == 1 }, 5*time.Second, 10*time.Millisecond)
 }

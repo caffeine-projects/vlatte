@@ -85,6 +85,10 @@ func New(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
 		conf.DebugFn = func(_ string, _ any) {}
 	}
 
+	if conf.RequestWasNotMatchedStatusCode == 0 {
+		conf.RequestWasNotMatchedStatusCode = StatusNoMatch
+	}
+
 	app.config = conf
 	app.logger = app.getLog(conf)
 
@@ -135,7 +139,7 @@ func New(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
 		lifecycle = newBuiltInMockHTTPLifecycle(app)
 	}
 
-	eventRunner := &vlatte.EventRunner{Listeners: app.config.Listeners, Global: app.config.GlobalEvents}
+	eventRunner := vlatte.NewEventRunner(app.config.Listeners, app.config.GlobalEvents)
 	handler := mid.Compose(middlewares...).Root(newMockHandler(app, lifecycle, conf.TemplateDataProviders, eventRunner))
 
 	if conf.HandlerDecorator != nil {

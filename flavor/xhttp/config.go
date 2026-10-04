@@ -114,6 +114,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Debug = c.Debug
 	conf.Colors = c.Colors
 	conf.Listeners = c.Listeners
+	conf.GlobalEvents = c.GlobalEvents
 	conf.Template = c.Template
 	conf.TemplateDataProviders = c.TemplateDataProviders
 	conf.DebugFn = c.DebugFn
