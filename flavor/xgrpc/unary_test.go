@@ -30,6 +30,7 @@ func TestUnary(t *testing.T) {
 	ctx = metadata.AppendToOutgoingContext(ctx, "h1", "v1")
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
 
 	client := pb.NewTestServiceClient(conn)
 	header := make(metadata.MD)

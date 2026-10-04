@@ -33,6 +33,7 @@ func TestServerStreaming(t *testing.T) {
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
 
 	client := pb.NewTestServiceClient(conn)
 	res, err := client.List(ctx, &pb.ListReq{})
@@ -95,6 +96,7 @@ func TestServerStream_MessageReader(t *testing.T) {
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
 
 	client := pb.NewTestServiceClient(conn)
 	res, err := client.List(ctx, &pb.ListReq{})
