@@ -24,6 +24,16 @@ func TestUniformDistribution(t *testing.T) {
 	require.GreaterOrEqual(t, duration.Milliseconds(), min)
 }
 
+func TestUniformDistributionRejectsInvertedRange(t *testing.T) {
+	// An inverted range is a setup mistake: fail when the delay is created, not on every request.
+	require.Panics(t, func() { UniformDistribution(300, 100) })
+}
+
+func TestJitterWithoutDeviation(t *testing.T) {
+	// Zero deviation means no jitter.
+	require.Equal(t, 300*time.Millisecond, Jitter(300*time.Millisecond, 0)())
+}
+
 func TestJitter(t *testing.T) {
 	avg := 300 * time.Millisecond
 	deviation := float64(15) // total spread: values fall within avg ± 7.5%
