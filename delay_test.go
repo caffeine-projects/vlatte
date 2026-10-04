@@ -1,7 +1,6 @@
 package vlatte
 
 import (
-	"math"
 	"testing"
 	"time"
 
@@ -26,38 +25,21 @@ func TestUniformDistribution(t *testing.T) {
 }
 
 func TestJitter(t *testing.T) {
-	deviation := float64(15)
-	jitter := Jitter(300*time.Millisecond, deviation)
+	avg := 300 * time.Millisecond
+	deviation := float64(15) // total spread: values fall within avg ± 7.5%
+	jitter := Jitter(avg, deviation)
 
-	deviations := make([]int64, 10)
-	durations := make([]time.Duration, 10)
-	durations[0] = jitter()
-	durations[1] = jitter()
-	durations[2] = jitter()
-	durations[3] = jitter()
-	durations[4] = jitter()
-	durations[5] = jitter()
-	durations[6] = jitter()
-	durations[7] = jitter()
-	durations[8] = jitter()
-	durations[9] = jitter()
+	spread := time.Duration(float64(avg) * deviation / 100)
+	low, high := avg-spread/2, avg+spread/2
+	seen := make(map[time.Duration]struct{})
 
-	total := time.Duration(0)
-	for _, d := range durations {
-		total += d
+	for range 1000 {
+		d := jitter()
+		require.GreaterOrEqual(t, d, low)
+		require.Less(t, d, high)
+		seen[d] = struct{}{}
 	}
 
-	mean := total / 10
-	totalDeviation := int64(0)
-
-	for i, d := range durations {
-		dev := math.Abs(float64(d - mean))
-		deviations[i] = int64(dev)
-		totalDeviation += int64(dev)
-	}
-
-	avgDeviation := totalDeviation / 10
-	deviationPercentage := (float64(avgDeviation) / float64(mean)) * 100
-
-	require.LessOrEqual(t, deviationPercentage, deviation)
+	// A constant delay would also stay within bounds: jitter must vary.
+	require.Greater(t, len(seen), 1)
 }
