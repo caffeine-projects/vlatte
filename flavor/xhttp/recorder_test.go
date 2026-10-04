@@ -1,7 +1,6 @@
 package xhttp
 
 import (
-	"context"
 	"crypto/tls"
 	"encoding/json"
 	"io"
@@ -10,7 +9,6 @@ import (
 	"os"
 	"path"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -82,15 +80,14 @@ func TestRecordingWithWebProxy(t *testing.T) {
 	scope1.AssertCalled(t)
 	scope2.AssertCalled(t)
 
-	time.Sleep(2 * time.Second)
+	// Close waits for in-flight handlers and for the recorder to write every file.
+	p.Close()
+	m.Close()
 
 	entries, err := os.ReadDir(dir)
 
 	require.NoError(t, err)
 	require.Len(t, entries, 2)
-
-	p.Close()
-	m.Close()
 
 	// Creating a new server that will use the recorded mocks
 
@@ -184,15 +181,14 @@ func TestRecordingWithWebProxy_CustomRootDir(t *testing.T) {
 	scope1.AssertCalled(t)
 	scope2.AssertCalled(t)
 
-	time.Sleep(2 * time.Second)
+	// Close waits for in-flight handlers and for the recorder to write every file.
+	p.Close()
+	m.Close()
 
 	entries, err := os.ReadDir(actualDir)
 
 	require.NoError(t, err)
 	require.Len(t, entries, 2)
-
-	p.Close()
-	m.Close()
 
 	// Creating a new server that will use the recorded mocks
 
@@ -230,9 +226,6 @@ func TestRecordingWithWebProxy_CustomRootDir(t *testing.T) {
 
 func TestRecordSaveResponseBodyToFile(t *testing.T) {
 	dir := t.TempDir()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
 	file, err := os.Open(path.Join("testdata/recorder/customers.json"))
 	require.NoError(t, err)
 
@@ -296,15 +289,14 @@ func TestRecordSaveResponseBodyToFile(t *testing.T) {
 	recorderScope.AssertCalled(t)
 	targetScope.AssertCalled(t)
 
-	<-ctx.Done()
+	// Close waits for in-flight handlers and for the recorder to write every file.
+	rec.Close()
+	target.Close()
 
 	entries, err := os.ReadDir(dir)
 
 	require.NoError(t, err)
 	require.Len(t, entries, 7)
-
-	rec.Close()
-	target.Close()
 
 	// Creating a new server that will use the recorded mocks
 
@@ -352,9 +344,6 @@ func TestRecordSaveResponseBodyToFile(t *testing.T) {
 
 func TestRecordEmbeddedResponseBodiesYAML(t *testing.T) {
 	dir := t.TempDir()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
 	file, err := os.Open(path.Join("testdata/recorder/customers.json"))
 	require.NoError(t, err)
 
@@ -419,15 +408,14 @@ func TestRecordEmbeddedResponseBodiesYAML(t *testing.T) {
 	recorderScope.AssertCalled(t)
 	targetScope.AssertCalled(t)
 
-	<-ctx.Done()
+	// Close waits for in-flight handlers and for the recorder to write every file.
+	rec.Close()
+	target.Close()
 
 	entries, err := os.ReadDir(dir)
 
 	require.NoError(t, err)
 	assert.Len(t, entries, 4)
-
-	rec.Close()
-	target.Close()
 
 	// Creating a new server that will use the recorded mocks
 
@@ -473,9 +461,6 @@ func TestRecordEmbeddedResponseBodiesYAML(t *testing.T) {
 
 func TestRecordTargetTLS(t *testing.T) {
 	dir := t.TempDir()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
 	file, err := os.Open(path.Join("testdata/recorder/customers.json"))
 	require.NoError(t, err)
 
@@ -539,15 +524,14 @@ func TestRecordTargetTLS(t *testing.T) {
 	recorderScope.AssertCalled(t)
 	targetScope.AssertCalled(t)
 
-	<-ctx.Done()
+	// Close waits for in-flight handlers and for the recorder to write every file.
+	recorder.Close()
+	target.Close()
 
 	entries, err := os.ReadDir(dir)
 
 	require.NoError(t, err)
 	assert.Len(t, entries, 4)
-
-	recorder.Close()
-	target.Close()
 
 	// Creating a new server that will use the recorded mocks
 
@@ -593,9 +577,6 @@ func TestRecordTargetTLS(t *testing.T) {
 
 func TestRecordTLSClient(t *testing.T) {
 	dir := t.TempDir()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
 	file, err := os.Open(path.Join("testdata/recorder/customers.json"))
 	require.NoError(t, err)
 
@@ -661,15 +642,14 @@ func TestRecordTLSClient(t *testing.T) {
 	recorderScope.AssertCalled(t)
 	targetScope.AssertCalled(t)
 
-	<-ctx.Done()
+	// Close waits for in-flight handlers and for the recorder to write every file.
+	recorder.Close()
+	target.Close()
 
 	entries, err := os.ReadDir(dir)
 
 	require.NoError(t, err)
 	assert.Len(t, entries, 4)
-
-	recorder.Close()
-	target.Close()
 
 	// Creating a new server that will use the recorded mocks
 
@@ -713,12 +693,8 @@ func TestRecordTLSClient(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, res.StatusCode)
 }
 
-// TODO: flaky
 func TestRecordBothTLS(t *testing.T) {
 	dir := t.TempDir()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
 	file, err := os.Open(path.Join("testdata/recorder/customers.json"))
 	require.NoError(t, err)
 
@@ -784,15 +760,14 @@ func TestRecordBothTLS(t *testing.T) {
 	recorderScope.AssertCalled(t)
 	targetScope.AssertCalled(t)
 
-	<-ctx.Done()
+	// Close waits for in-flight handlers and for the recorder to write every file.
+	recorder.Close()
+	target.Close()
 
 	entries, err := os.ReadDir(dir)
 
 	require.NoError(t, err)
 	assert.Len(t, entries, 4)
-
-	recorder.Close()
-	target.Close()
 
 	// Creating a new server that will use the recorded mocks
 
