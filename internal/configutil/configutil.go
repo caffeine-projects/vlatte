@@ -63,8 +63,17 @@ func (r *ConfigUtil) Bool(k string, d bool) bool {
 
 func (r *ConfigUtil) StrMap(k string) map[string]string {
 	if v, ok := r.m[k]; ok {
-		if m, ok := v.(map[string]string); ok {
+		switch m := v.(type) {
+		case map[string]string:
 			return m
+		case map[string]any:
+			// maps decoded from mock files hold values as any
+			sm := make(map[string]string, len(m))
+			for key, val := range m {
+				sm[key] = fmt.Sprint(val)
+			}
+
+			return sm
 		}
 	}
 
