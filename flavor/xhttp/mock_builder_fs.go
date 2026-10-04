@@ -2,7 +2,6 @@ package xhttp
 
 import (
 	"bytes"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/caffeine-projects/vlatte"
+	httpschema "github.com/caffeine-projects/vlatte/etc/http"
 	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/filter/filterbuilder"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/bufpool"
@@ -98,8 +98,7 @@ const (
 	_resEncoding        = "encoding"
 )
 
-//go:embed schema.json
-var _mockJSONSchema []byte
+var _mockJSONSchema = httpschema.Schema
 
 // _mockJSONSchemaURL identifies the embedded schema. It is not a file path, so error messages
 // don't depend on the working directory.
