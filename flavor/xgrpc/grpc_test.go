@@ -1,11 +1,13 @@
 package xgrpc
 
 import (
+	"bytes"
 	"context"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -65,4 +67,18 @@ func TestClose_WaitsForInFlightCalls(t *testing.T) {
 	release()
 	require.NoError(t, <-callDone)
 	<-closed
+}
+
+func TestServeErrorsAreLogged(t *testing.T) {
+	var buf bytes.Buffer
+	logger := zerolog.New(&buf)
+	m := New(Setup().Logger(&logger))
+	m.MustStart()
+	m.Close()
+
+	// A gRPC server cannot be restarted: Serve fails, and the failure must be logged instead of swallowed.
+	require.NoError(t, m.Start())
+	m.Close()
+
+	require.Contains(t, buf.String(), grpc.ErrServerStopped.Error())
 }

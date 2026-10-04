@@ -1,6 +1,7 @@
 package xgrpc
 
 import (
+	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 )
 
@@ -9,6 +10,7 @@ type Config struct {
 	ServiceDesc   *grpc.ServiceDesc
 	ServerOptions []grpc.ServerOption
 	Addr          string
+	Logger        *zerolog.Logger
 }
 
 func (c *Config) Apply(conf *Config) error {
@@ -16,6 +18,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.ServiceDesc = c.ServiceDesc
 	conf.ServerOptions = c.ServerOptions
 	conf.Addr = c.Addr
+	conf.Logger = c.Logger
 
 	return nil
 }
@@ -41,6 +44,12 @@ func (cb *ConfigBuilder) Service(sd *grpc.ServiceDesc, service any) *ConfigBuild
 
 func (cb *ConfigBuilder) ServerOptions(options ...grpc.ServerOption) *ConfigBuilder {
 	cb.conf.ServerOptions = options
+	return cb
+}
+
+// Logger sets the logger used by the mock GRPC server. Defaults to a logger writing to the standard output.
+func (cb *ConfigBuilder) Logger(logger *zerolog.Logger) *ConfigBuilder {
+	cb.conf.Logger = logger
 	return cb
 }
 

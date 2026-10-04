@@ -2,10 +2,9 @@ package xgrpc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
-	"net/http"
+	"os"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/rs/zerolog"
@@ -60,6 +59,12 @@ func New(config ...vlatte.Configurer[*Config]) *GRPCMockApp {
 	app.storage = store
 	app.config = conf
 	app.server = srv
+	app.logger = conf.Logger
+
+	if app.logger == nil {
+		l := zerolog.New(os.Stdout).With().Timestamp().Logger()
+		app.logger = &l
+	}
 
 	return app
 }
@@ -77,8 +82,9 @@ func (app *GRPCMockApp) Start() error {
 	go func(served chan struct{}) {
 		defer close(served)
 
-		if err := app.server.Serve(lis); err != nil && errors.Is(err, http.ErrServerClosed) {
-			app.logger.Warn().Err(err).Msg("server: Start: error listening")
+		// Serve returns nil after GracefulStop, so any error is a real failure.
+		if err := app.server.Serve(lis); err != nil {
+			app.logger.Error().Err(err).Msg("server: error serving")
 		}
 	}(app.served)
 
