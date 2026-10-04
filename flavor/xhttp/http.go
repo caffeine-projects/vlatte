@@ -61,6 +61,7 @@ type HTTPMockApp struct {
 	startOnce          sync.Once
 	random             *rand.Rand
 	admin              *admin.Admin[*HTTPMock]
+	closeIdleConns     []func()
 }
 
 // New creates a new HTTPMockApp mock server with the given configurations.
@@ -295,6 +296,22 @@ func (app *HTTPMockApp) Close() {
 	if app.rec != nil {
 		app.rec.stop()
 	}
+
+	app.rwMutex.RLock()
+	closeIdleConns := app.closeIdleConns
+	app.rwMutex.RUnlock()
+
+	for _, closeIdle := range closeIdleConns {
+		closeIdle()
+	}
+}
+
+// closeIdleConnsOnClose registers fn to release idle outbound connections when the app closes.
+func (app *HTTPMockApp) closeIdleConnsOnClose(fn func()) {
+	app.rwMutex.Lock()
+	defer app.rwMutex.Unlock()
+
+	app.closeIdleConns = append(app.closeIdleConns, fn)
 }
 
 // IsRecording checks if mock recording is enabled.

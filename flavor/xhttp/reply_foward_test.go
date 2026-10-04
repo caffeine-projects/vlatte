@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -318,4 +319,38 @@ func TestForward(t *testing.T) {
 		require.Equal(t, http.StatusOK, res.StatusCode)
 		require.Equal(t, "hi", string(b))
 	})
+}
+
+func TestProxyReply_ClosesTargetConnectionsOnClose(t *testing.T) {
+	closed := make(chan struct{}, 1)
+	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	target.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateClosed {
+			select {
+			case closed <- struct{}{}:
+			default:
+			}
+		}
+	}
+	target.Start()
+	t.Cleanup(target.Close)
+
+	m := New()
+	m.MustStart()
+	m.MustMock(Getf("/p").Reply(From(target.URL)))
+
+	res, err := http.Get(m.URL("/p"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	m.Close()
+
+	// The proxy reply's connection to the target must not outlive the mock server.
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("connection to the proxy target was left open")
+	}
 }

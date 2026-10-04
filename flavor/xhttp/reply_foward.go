@@ -249,6 +249,8 @@ func (r *ProxyReply) beforeBuild(app *HTTPMockApp) error {
 		r.httpClient.CheckRedirect = noFollow
 	}
 
+	app.closeIdleConnsOnClose(r.httpClient.CloseIdleConnections)
+
 	return nil
 }
 
