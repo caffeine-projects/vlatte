@@ -11,7 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jwalton/gchalk"
+	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
@@ -50,7 +51,6 @@ type HTTPMockApp struct {
 	proxy              *reverseProxy
 	extensions         map[string]vlatte.Extension
 	data               map[string]any
-	colorizer          *gchalk.Builder
 	logger             *zerolog.Logger
 	startOnce          sync.Once
 	admin              *admin.Admin[*HTTPMock]
@@ -90,11 +90,6 @@ func New(config ...vlatte.Configurer[*Config]) (*HTTPMockApp, error) {
 	app.config = conf
 	app.logger = app.getLog(conf)
 
-	colors := gchalk.New()
-	if !conf.Colors {
-		colors.SetLevel(gchalk.LevelNone)
-	}
-
 	repository := vlatte.NewStore[*HTTPMock]()
 
 	parsers := make([]RequestBodyParser, 0, len(conf.RequestBodyParsers)+3)
@@ -132,7 +127,10 @@ func New(config ...vlatte.Configurer[*Config]) (*HTTPMockApp, error) {
 
 	var lifecycle mockHTTPLifecycle
 	if conf.Debug {
-		lifecycle = newBuiltInDescriptiveMockHTTPLifecycle(app, colors, os.Stdout)
+		fd := os.Stdout.Fd()
+		colors := ansi(colorsEnabled(conf.Colors, isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)))
+		// On Windows consoles, colorable translates the escape codes.
+		lifecycle = newBuiltInDescriptiveMockHTTPLifecycle(app, colors, colorable.NewColorable(os.Stdout))
 	} else {
 		lifecycle = newBuiltInMockHTTPLifecycle(app)
 	}
@@ -164,7 +162,6 @@ func New(config ...vlatte.Configurer[*Config]) (*HTTPMockApp, error) {
 	app.proxy = p
 	app.requestBodyParsers = parsers
 	app.extensions = make(map[string]vlatte.Extension)
-	app.colorizer = colors
 	app.admin = admin.New(
 		repository,
 		vlatte.MockBuilderFunc[*HTTPMock](func(content []byte, ext string) (*HTTPMock, error) {
