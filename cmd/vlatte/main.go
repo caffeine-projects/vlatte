@@ -17,15 +17,14 @@ import (
 )
 
 const (
-	_dockerHostEnv    = "DZ_DOCKER_HOST"
-	_gitRepository    = "https://github.com/vitorsalgado/mocha"
-	_usage            = "dz"
+	_dockerHostEnv    = "VLATTE_DOCKER_HOST"
+	_gitRepository    = "https://github.com/caffeine-projects/vlatte"
+	_usage            = "vlatte"
 	_shortDescription = "Build Mock APIs in Go"
-	_example          = `  dz --addr=:3000
-  dz --proxy
-  dz --proxy --record
-  dz
-  dz
+	_example          = `  vlatte
+  vlatte --addr=:3000
+  vlatte --proxy
+  vlatte --proxy --record
 `
 )
 

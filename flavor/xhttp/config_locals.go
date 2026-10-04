@@ -17,9 +17,9 @@ import (
 
 const (
 	// DefaultConfigFileName is the default configuration filename.
-	DefaultConfigFileName = ".moairc"
+	DefaultConfigFileName = ".vlatterc"
 	// EnvPrefix is the standard prefix that should be present in all environment variables used by this application.
-	EnvPrefix = "MOAI"
+	EnvPrefix = "VLATTE"
 )
 
 // DefaultConfigDirectories is the default configuration directories used to lookup for a configuration file.
@@ -79,7 +79,7 @@ type localConfigurer struct {
 }
 
 // UseLocals enables lookup for local configuration files using standard naming conventions.
-// It will look up for a file named ".moairc.(json|toml|yaml|yml|properties|props|prop|hcl|tfvars|dotenv|env|ini)"
+// It will look up for a file named ".vlatterc.(json|toml|yaml|yml|properties|props|prop|hcl|tfvars|dotenv|env|ini)"
 // in the directories "." and "testdata".
 func UseLocals() vlatte.Configurer[*Config] {
 	return &localConfigurer{filename: DefaultConfigFileName, paths: DefaultConfigDirectories}
