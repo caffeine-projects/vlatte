@@ -69,12 +69,12 @@ func TestSequentialReplyShouldReturnErrorWhenSequenceDoesNotContainReplies(t *te
 }
 
 func TestSequentialReply_PreparesNestedReplies(t *testing.T) {
-	target := New()
+	target := MustNew()
 	target.MustStart()
 	t.Cleanup(target.Close)
 	target.MustMock(Getf("/seq").Reply(Accepted()))
 
-	m := New()
+	m := MustNew()
 	m.MustStart()
 	t.Cleanup(m.Close)
 	// From creates its HTTP client in beforeBuild: Seq must prepare every reply it holds.

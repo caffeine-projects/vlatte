@@ -29,19 +29,21 @@ type ServerInfo struct {
 	Addr string
 }
 
-func New(config ...vlatte.Configurer[*Config]) *GRPCMockApp {
+// New creates a new GRPCMockApp mock server with the given configurations.
+// It returns an error if a configuration fails to apply.
+func New(config ...vlatte.Configurer[*Config]) (*GRPCMockApp, error) {
 	app := &GRPCMockApp{}
 	conf := defaultConfig()
 
 	for i, configurer := range config {
 		err := configurer.Apply(conf)
 		if err != nil {
-			panic(fmt.Errorf(
+			return nil, fmt.Errorf(
 				"server: error applying configuration at index %d with type %T\n%w",
 				i,
 				configurer,
 				err,
-			))
+			)
 		}
 	}
 
@@ -68,6 +70,16 @@ func New(config ...vlatte.Configurer[*Config]) *GRPCMockApp {
 	if app.logger == nil {
 		l := zerolog.New(os.Stdout).With().Timestamp().Logger()
 		app.logger = &l
+	}
+
+	return app, nil
+}
+
+// MustNew is like New but panics if any error occurs.
+func MustNew(config ...vlatte.Configurer[*Config]) *GRPCMockApp {
+	app, err := New(config...)
+	if err != nil {
+		panic(err)
 	}
 
 	return app
@@ -133,6 +145,6 @@ func Flavor(opts ...vlatte.Configurer[*Config]) vlatte.FlavorFactory[*GRPCMock, 
 	return &grpcFlavor{opts: opts}
 }
 
-func (f *grpcFlavor) Create(_ context.Context) *GRPCMockApp {
+func (f *grpcFlavor) Create(_ context.Context) (*GRPCMockApp, error) {
 	return New(f.opts...)
 }

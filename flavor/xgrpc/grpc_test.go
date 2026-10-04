@@ -3,6 +3,7 @@ package xgrpc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -33,11 +34,11 @@ func (r *blockingUnaryReply) Reply(_ context.Context, _ *UnaryRequestValues) (an
 }
 
 func TestClose_BeforeStart(t *testing.T) {
-	require.NotPanics(t, New().Close)
+	require.NotPanics(t, MustNew().Close)
 }
 
 func TestClose_WaitsForInFlightCalls(t *testing.T) {
-	m := New()
+	m := MustNew()
 	pb.RegisterTestServiceServer(m.Server(), pb.UnimplementedTestServiceServer{})
 	m.MustStart()
 
@@ -78,7 +79,7 @@ func TestClose_WaitsForInFlightCalls(t *testing.T) {
 func TestServeErrorsAreLogged(t *testing.T) {
 	var buf bytes.Buffer
 	logger := zerolog.New(&buf)
-	m := New(Setup().Logger(&logger))
+	m := MustNew(Setup().Logger(&logger))
 	m.MustStart()
 	m.Close()
 
@@ -102,7 +103,7 @@ func TestServerOptionsAreApplied(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			calls.Store(0)
-			m := New(Setup().ServerOptions(opt))
+			m := MustNew(Setup().ServerOptions(opt))
 			pb.RegisterTestServiceServer(m.Server(), pb.UnimplementedTestServiceServer{})
 			m.MustStart()
 			t.Cleanup(m.Close)
@@ -121,7 +122,7 @@ func TestServerOptionsAreApplied(t *testing.T) {
 }
 
 func TestUnmatchedCallsReturnNotFound(t *testing.T) {
-	m := New(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
+	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -142,7 +143,7 @@ func TestUnmatchedCallsReturnNotFound(t *testing.T) {
 }
 
 func TestDefaultAddrIsLoopback(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -153,7 +154,7 @@ func TestDefaultAddrIsLoopback(t *testing.T) {
 }
 
 func TestServerStream_MatchesRequestFields(t *testing.T) {
-	m := New(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
+	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -179,4 +180,15 @@ func TestServerStream_MatchesRequestFields(t *testing.T) {
 	require.NoError(t, err)
 	_, err = stream.Recv()
 	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+type failingConfigurer struct{}
+
+func (failingConfigurer) Apply(*Config) error { return errors.New("bad config") }
+
+func TestNew_ReturnsErrors(t *testing.T) {
+	_, err := New(failingConfigurer{})
+	require.ErrorContains(t, err, "bad config")
+
+	require.Panics(t, func() { MustNew(failingConfigurer{}) })
 }

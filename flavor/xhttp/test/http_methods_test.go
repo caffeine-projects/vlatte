@@ -14,7 +14,7 @@ import (
 func TestHTTPMethods(t *testing.T) {
 	client := &http.Client{}
 
-	m := New()
+	m := MustNew()
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 

@@ -15,7 +15,7 @@ import (
 
 func TestFormUrlEncoded(t *testing.T) {
 	httpClient := &http.Client{}
-	m := xhttp.New()
+	m := xhttp.MustNew()
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 
@@ -39,7 +39,7 @@ func TestFormUrlEncoded(t *testing.T) {
 }
 
 func TestFormUrlEncoded_InvalidFieldValues(t *testing.T) {
-	m := xhttp.New()
+	m := xhttp.MustNew()
 	t.Cleanup(func() { m.Close() })
 	scoped, err := m.Mock(xhttp.FromFile("testdata/form_url_encoded/01_invalid.yaml"))
 
@@ -49,7 +49,7 @@ func TestFormUrlEncoded_InvalidFieldValues(t *testing.T) {
 
 func TestFormUrlEncoded_FromFileMock(t *testing.T) {
 	httpClient := &http.Client{}
-	m := xhttp.New()
+	m := xhttp.MustNew()
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 

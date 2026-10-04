@@ -6,5 +6,5 @@ import (
 )
 
 func HTTP(options ...vlatte.Configurer[*xhttp.Config]) *xhttp.HTTPMockApp {
-	return xhttp.New(options...)
+	return xhttp.MustNew(options...)
 }

@@ -10,7 +10,7 @@ import (
 )
 
 func TestRepeat(t *testing.T) {
-	m := xhttp.New()
+	m := xhttp.MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -41,7 +41,7 @@ func TestRepeat(t *testing.T) {
 }
 
 func TestRepeat_Once(t *testing.T) {
-	m := xhttp.New()
+	m := xhttp.MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -60,7 +60,7 @@ func TestRepeat_Once(t *testing.T) {
 }
 
 func TestRepeat_FileSetup(t *testing.T) {
-	m := xhttp.New()
+	m := xhttp.MustNew()
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustMock(xhttp.FromFile("testdata/repeat/1_repeat.yaml"))

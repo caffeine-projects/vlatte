@@ -17,7 +17,7 @@ import (
 
 func TestRandomReplies(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
-	rv := &RequestValues{RawRequest: req, URL: req.URL, App: New()}
+	rv := &RequestValues{RawRequest: req, URL: req.URL, App: MustNew()}
 	input := ReplyInput{RequestValues: rv, Writer: nil}
 	statuses := []int{
 		http.StatusOK, http.StatusInternalServerError, http.StatusCreated, http.StatusBadRequest,
@@ -44,7 +44,7 @@ func TestShouldReturnErrorWhenRandomDoesNotContainReplies(t *testing.T) {
 
 func TestRandWithCustom(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
-	rv := &RequestValues{RawRequest: req, URL: req.URL, App: New()}
+	rv := &RequestValues{RawRequest: req, URL: req.URL, App: MustNew()}
 	statuses := []int{
 		http.StatusOK, http.StatusInternalServerError, http.StatusCreated, http.StatusBadRequest,
 	}
@@ -69,7 +69,7 @@ func TestRandWithCustom(t *testing.T) {
 }
 
 func TestRandomReply_PreparesNestedReplies(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 	t.Cleanup(m.Close)
 	// Body templates are parsed in beforeBuild: Rand must prepare every reply it holds.

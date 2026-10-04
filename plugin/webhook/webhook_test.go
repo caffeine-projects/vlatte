@@ -30,7 +30,7 @@ const (
 func TestWebHook_Run(t *testing.T) {
 	name := "webhook"
 	key := "test_key"
-	target := xhttp.New(xhttp.Setup().Silent())
+	target := xhttp.MustNew(xhttp.Setup().Silent())
 	target.MustStart()
 	defer target.Close()
 
@@ -160,7 +160,7 @@ func TestWebHook_Run(t *testing.T) {
 			wh, err := webhook.New(tc.options...)
 			require.NoError(t, err)
 
-			m := xhttp.New(xhttp.Setup().Silent().OnCompleteListener(name, wh))
+			m := xhttp.MustNew(xhttp.Setup().Silent().OnCompleteListener(name, wh))
 			m.MustStart()
 			defer m.Close()
 			defer target.Clean(t.Context())
@@ -196,7 +196,7 @@ func TestWebHook_TLS(t *testing.T) {
 	certPool := x509.NewCertPool()
 	certPool.AppendCertsFromPEM(caCert)
 
-	whSrv := xhttp.New(xhttp.Setup().Silent().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
+	whSrv := xhttp.MustNew(xhttp.Setup().Silent().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
 	whSrv.MustStartTLS()
 	defer whSrv.Close()
 
@@ -214,7 +214,7 @@ func TestWebHook_TLS(t *testing.T) {
 	}))
 	require.NoError(t, err)
 
-	m := xhttp.New(xhttp.Setup().
+	m := xhttp.MustNew(xhttp.Setup().
 		Silent().
 		TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile).
 		OnCompleteListener(name, wh))
@@ -253,7 +253,7 @@ func TestWebHook_TLS(t *testing.T) {
 
 func TestWebHook_FaultTarget(t *testing.T) {
 	name := "webhook"
-	target := xhttp.New()
+	target := xhttp.MustNew()
 	target.MustStart()
 	defer target.Close()
 
@@ -264,7 +264,7 @@ func TestWebHook_FaultTarget(t *testing.T) {
 	// The target never answers in time: the webhook call fails, but the mocked response must still be served.
 	wh, err := webhook.New(webhook.WithRoundTripper(&http.Transport{ResponseHeaderTimeout: 100 * time.Millisecond}))
 	require.NoError(t, err)
-	m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
+	m := xhttp.MustNew(xhttp.Setup().OnCompleteListener(name, wh))
 	m.MustStart()
 	defer m.Close()
 
@@ -293,7 +293,7 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 	testCases := []any{make(chan struct{}), nil}
 
 	whSrv := xhttp.
-		New(xhttp.Setup().HTTPClient(func() *http.Client {
+		MustNew(xhttp.Setup().HTTPClient(func() *http.Client {
 			return client
 		}))
 	whSrv.MustStart()
@@ -304,7 +304,7 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
+	m := xhttp.MustNew(xhttp.Setup().OnCompleteListener(name, wh))
 	m.MustStart()
 	defer m.Close()
 
@@ -327,7 +327,7 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 
 func TestWebHook_FileSetup(t *testing.T) {
 	name := "webhook"
-	target := xhttp.New(xhttp.Setup())
+	target := xhttp.MustNew(xhttp.Setup())
 	target.MustStart()
 	defer target.Close()
 
@@ -341,7 +341,7 @@ func TestWebHook_FileSetup(t *testing.T) {
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
+	m := xhttp.MustNew(xhttp.Setup().OnCompleteListener(name, wh))
 	m.SetData(map[string]any{"webhook_target": target.URL("/fs/hook")})
 	m.MustStart()
 	defer m.Close()
@@ -374,7 +374,7 @@ func TestWebHook_InvalidFiles(t *testing.T) {
 			wh, err := webhook.New()
 			require.NoError(t, err)
 
-			m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
+			m := xhttp.MustNew(xhttp.Setup().OnCompleteListener(name, wh))
 			defer m.Close()
 
 			mock, err := m.Mock(xhttp.FromFile(tc.filename))
@@ -398,7 +398,7 @@ func TestWebHook_DefaultTransportHasTimeouts(t *testing.T) {
 
 func TestWebHook_Timeout(t *testing.T) {
 	name := "webhook"
-	target := xhttp.New()
+	target := xhttp.MustNew()
 	target.MustStart()
 	defer target.Close()
 
@@ -408,7 +408,7 @@ func TestWebHook_Timeout(t *testing.T) {
 
 	wh, err := webhook.New(webhook.WithTimeout(100 * time.Millisecond))
 	require.NoError(t, err)
-	m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
+	m := xhttp.MustNew(xhttp.Setup().OnCompleteListener(name, wh))
 	m.MustStart()
 	defer m.Close()
 

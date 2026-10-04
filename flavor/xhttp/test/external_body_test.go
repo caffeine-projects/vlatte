@@ -11,7 +11,7 @@ import (
 )
 
 func TestExternalResponseBodies(t *testing.T) {
-	m := xhttp.New()
+	m := xhttp.MustNew()
 	m.MustStart()
 
 	defer m.Close()

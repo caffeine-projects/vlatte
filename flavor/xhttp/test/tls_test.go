@@ -41,7 +41,7 @@ func TestTLS(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := New(tc.config)
+			m := MustNew(tc.config)
 			t.Cleanup(func() { m.Close() })
 			m.MustStartTLS()
 
@@ -70,7 +70,7 @@ func TestTLS_FileSetup(t *testing.T) {
 	client := &http.Client{
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 	}
-	m := New(UseConfig("testdata/tls/tls_app.yaml"))
+	m := MustNew(UseConfig("testdata/tls/tls_app.yaml"))
 	t.Cleanup(func() { m.Close() })
 	m.MustStartTLS()
 
@@ -113,7 +113,7 @@ func TestTLSMutual(t *testing.T) {
 		},
 	}
 
-	target := New(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
+	target := MustNew(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
 	t.Cleanup(func() { target.Close() })
 	target.MustStartTLS()
 	target.MustMock(Getf("/test").Reply(Accepted().PlainText("accepted")))
@@ -159,12 +159,12 @@ func TestTLSMutualWithProxy(t *testing.T) {
 		},
 	}
 
-	target := New(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
+	target := MustNew(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
 	t.Cleanup(func() { target.Close() })
 	target.MustStartTLS()
 	target.MustMock(Getf("/test").Reply(Accepted().PlainText("accepted")))
 
-	m := New(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
+	m := MustNew(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
 	t.Cleanup(func() { m.Close() })
 	m.MustStartTLS()
 	m.MustMock(Get(URLPath("/test")).
@@ -204,12 +204,12 @@ func TestTLSMutualWithProxy_FileSetup(t *testing.T) {
 		},
 	}
 
-	target := New(UseConfig("testdata/tls/tls_ca_target.yaml"))
+	target := MustNew(UseConfig("testdata/tls/tls_ca_target.yaml"))
 	t.Cleanup(func() { target.Close() })
 	target.MustStartTLS()
 	target.MustMock(Getf("/test").Reply(Accepted().PlainText("accepted")))
 
-	m := New(UseConfig("testdata/tls/tls_ca.yaml"))
+	m := MustNew(UseConfig("testdata/tls/tls_ca.yaml"))
 	t.Cleanup(func() { m.Close() })
 	m.MustStartTLS()
 	m.MustMock(Get(URLPath("/test")).

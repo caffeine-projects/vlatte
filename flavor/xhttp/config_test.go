@@ -73,7 +73,7 @@ func TestConfig(t *testing.T) {
 		addr := l.Addr().String()
 		require.NoError(t, l.Close())
 
-		m := New(Setup().Addr(addr))
+		m := MustNew(Setup().Addr(addr))
 		t.Cleanup(func() { m.Close() })
 		m.MustStart()
 
@@ -91,7 +91,7 @@ func TestConfig(t *testing.T) {
 	})
 
 	t.Run("request body parsers from config should take precedence", func(t *testing.T) {
-		m := New(Setup().RequestBodyParsers(&testBodyParser{}))
+		m := MustNew(Setup().RequestBodyParsers(&testBodyParser{}))
 		t.Cleanup(func() { m.Close() })
 		m.MustStart()
 
@@ -122,7 +122,7 @@ func TestConfig(t *testing.T) {
 				})
 		}
 
-		m := New(Setup().Middlewares(middleware))
+		m := MustNew(Setup().Middlewares(middleware))
 		t.Cleanup(func() { m.Close() })
 		m.MustStart()
 
@@ -140,7 +140,7 @@ func TestConfig(t *testing.T) {
 	})
 
 	t.Run("configure custom server", func(t *testing.T) {
-		m := New(Setup().ServerFactory(&customTestServerFactory{decorated: newServerFactory()}))
+		m := MustNew(Setup().ServerFactory(&customTestServerFactory{decorated: newServerFactory()}))
 		t.Cleanup(func() { m.Close() })
 		m.MustStart()
 
@@ -163,7 +163,7 @@ func TestConfigBuilder(t *testing.T) {
 	customLogger := zerolog.Nop()
 	tlsConfig := &tls.Config{InsecureSkipVerify: true}
 
-	m := New(Setup().
+	m := MustNew(Setup().
 		Name(nm).
 		Addr(addr).
 		RootDir("test_root_dir").
@@ -232,7 +232,7 @@ func TestLogLevelString(t *testing.T) {
 
 func TestNew_ZeroValueConfig(t *testing.T) {
 	// A Config built by hand leaves unset fields at zero values; the server must still answer unmatched requests.
-	m := New(&Config{})
+	m := MustNew(&Config{})
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -250,7 +250,7 @@ func TestGlobalEventsAreApplied(t *testing.T) {
 	}))
 	setup.Base().GlobalEvents(&vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "count"}}})
 
-	m := New(setup)
+	m := MustNew(setup)
 	m.MustStart()
 	t.Cleanup(m.Close)
 	m.MustMock(Getf("/event").Reply(OK()))

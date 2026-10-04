@@ -18,12 +18,12 @@ import (
 )
 
 func TestProxy(t *testing.T) {
-	proxySrv := New(Setup().Proxy())
+	proxySrv := MustNew(Setup().Proxy())
 	t.Cleanup(func() { proxySrv.Close() })
 	proxySrv.MustStart()
 	proxyScope := proxySrv.MustMock(Get(URLPath("/test")).Reply(Accepted()))
 
-	targetSrv := New()
+	targetSrv := MustNew()
 	t.Cleanup(func() { targetSrv.Close() })
 	targetSrv.MustStart()
 	targetScope := targetSrv.MustMock(Get(URLPath("/other")).Reply(Created()))
@@ -47,12 +47,12 @@ func TestProxy(t *testing.T) {
 }
 
 func TestProxyTLS(t *testing.T) {
-	proxySrv := New(Setup().Proxy(&ProxyConfig{SSLVerify: false}))
+	proxySrv := MustNew(Setup().Proxy(&ProxyConfig{SSLVerify: false}))
 	t.Cleanup(func() { proxySrv.Close() })
 	proxySrv.MustStartTLS()
 	proxyScope := proxySrv.MustMock(Get(URLPath("/test")).Reply(Accepted()))
 
-	targetSrv := New()
+	targetSrv := MustNew()
 	t.Cleanup(func() { targetSrv.Close() })
 	targetSrv.MustStart()
 	targetScope := targetSrv.MustMock(Get(URLPath("/other")).Reply(Created()))
@@ -79,11 +79,11 @@ func TestProxyTLS(t *testing.T) {
 }
 
 func TestProxyTunnelsHTTPSTargets(t *testing.T) {
-	proxySrv := New(Setup().Proxy())
+	proxySrv := MustNew(Setup().Proxy())
 	t.Cleanup(func() { proxySrv.Close() })
 	proxySrv.MustStart()
 
-	targetSrv := New()
+	targetSrv := MustNew()
 	t.Cleanup(func() { targetSrv.Close() })
 	targetSrv.MustStartTLS()
 	targetScope := targetSrv.MustMock(Get(URLPath("/secure")).Reply(OK()))
@@ -118,14 +118,14 @@ func TestProxyTLS_CustomCert(t *testing.T) {
 
 	transport := &http.Transport{TLSClientConfig: &tls.Config{Certificates: []tls.Certificate{cert}}}
 
-	proxySrv := New(
+	proxySrv := MustNew(
 		Setup().
 			Proxy(&ProxyConfig{SSLVerify: true, Transport: transport}).TLSCertKeyPair(_tlsCertFile, _tlsKeyFile))
 	t.Cleanup(func() { proxySrv.Close() })
 	proxySrv.MustStartTLS()
 	proxyScope := proxySrv.MustMock(Get(URLPath("/test")).Reply(Accepted()))
 
-	targetSrv := New(Setup().TLSCertKeyPair(_tlsCertFile, _tlsKeyFile))
+	targetSrv := MustNew(Setup().TLSCertKeyPair(_tlsCertFile, _tlsKeyFile))
 	t.Cleanup(func() { targetSrv.Close() })
 	targetSrv.MustStart()
 	targetScope := targetSrv.MustMock(Get(URLPath("/other")).Reply(Created()))
@@ -152,17 +152,17 @@ func TestProxyTLS_CustomCert(t *testing.T) {
 }
 
 func TestProxyViaAnotherProxy(t *testing.T) {
-	p := New(Setup().Proxy())
+	p := MustNew(Setup().Proxy())
 	t.Cleanup(func() { p.Close() })
 	p.MustStart()
 	scope1 := p.MustMock(Get(URLPath("/test")).Reply(Accepted()))
 
-	v := New(Setup().Proxy(&ProxyConfig{Via: p.URL()}))
+	v := MustNew(Setup().Proxy(&ProxyConfig{Via: p.URL()}))
 	t.Cleanup(func() { v.Close() })
 	v.MustStart()
 	scope2 := v.MustMock(Get(URLPath("/unknown")).Reply(NoContent()))
 
-	m := New()
+	m := MustNew()
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustMock(Get(URLPath("/other")).Reply(Created()))

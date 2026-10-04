@@ -11,7 +11,7 @@ import (
 
 func TestCORS(t *testing.T) {
 	client := &http.Client{}
-	m := xhttp.New(xhttp.Setup().CORS())
+	m := xhttp.MustNew(xhttp.Setup().CORS())
 	m.MustStart()
 
 	defer m.Close()

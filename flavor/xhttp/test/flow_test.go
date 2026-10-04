@@ -19,7 +19,7 @@ func (in *TestStep) Handle(_ context.Context, p []byte, next vlatte.Next) (n int
 }
 
 func TestFlow(t *testing.T) {
-	m := xhttp.New(xhttp.Setup().LogVerbosity(vlatte.LogBody))
+	m := xhttp.MustNew(xhttp.Setup().LogVerbosity(vlatte.LogBody))
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 

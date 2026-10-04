@@ -50,7 +50,7 @@ func TestScenarios(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := xhttp.New()
+			m := xhttp.MustNew()
 			t.Cleanup(func() { m.Close() })
 			m.MustStart()
 

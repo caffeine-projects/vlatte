@@ -79,7 +79,7 @@ func TestScope(t *testing.T) {
 	})
 
 	t.Run("should only consider enabled store", func(t *testing.T) {
-		m := xhttp.New()
+		m := xhttp.MustNew()
 		m.MustStart()
 
 		defer m.Close()

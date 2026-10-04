@@ -9,7 +9,7 @@ import (
 )
 
 func TestAdmin_AddMockWithContentType(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -29,7 +29,7 @@ func TestAdmin_AddMockWithContentType(t *testing.T) {
 }
 
 func TestAdmin_MalformedMockIsBadRequest(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 	t.Cleanup(m.Close)
 

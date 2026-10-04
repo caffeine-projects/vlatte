@@ -20,7 +20,7 @@ import (
 )
 
 func TestServerStreaming(t *testing.T) {
-	m := New(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
+	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
 	defer m.Close()
 	m.MustStart()
 
@@ -75,7 +75,7 @@ func TestServerStreaming(t *testing.T) {
 }
 
 func TestServerStream_MessageReader(t *testing.T) {
-	m := New(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
+	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
 	defer m.Close()
 	m.MustStart()
 

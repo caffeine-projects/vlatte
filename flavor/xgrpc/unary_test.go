@@ -14,7 +14,7 @@ import (
 )
 
 func TestUnary(t *testing.T) {
-	m := New()
+	m := MustNew()
 	defer m.Close()
 	pb.RegisterTestServiceServer(m.Server(), pb.UnimplementedTestServiceServer{})
 	m.MustStart()

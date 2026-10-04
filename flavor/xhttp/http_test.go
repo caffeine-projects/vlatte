@@ -1,6 +1,7 @@
 package xhttp
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,7 +29,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestHTTPMockApp(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -63,7 +64,7 @@ func TestResponseMapperModifyingResponse(t *testing.T) {
 	err := kv.Set(t.Context(), k, []byte(v))
 	require.NoError(t, err)
 
-	m := New(Setup().Parameters(kv))
+	m := MustNew(Setup().Parameters(kv))
 	m.MustStart()
 
 	defer m.Close()
@@ -92,7 +93,7 @@ func TestResponseMapperModifyingResponse(t *testing.T) {
 }
 
 func TestErrors(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -113,7 +114,7 @@ func TestErrors(t *testing.T) {
 }
 
 func TestHTTPMockAppAssertions(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -142,7 +143,7 @@ func TestHTTPMockAppAssertions(t *testing.T) {
 }
 
 func TestHTTPMockAppEnableDisable(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -187,7 +188,7 @@ func TestHTTPMockAppEnableDisable(t *testing.T) {
 }
 
 func TestHTTPMockAppSilently(t *testing.T) {
-	m := New(Setup().LogVerbosity(vlatte.LogBasic).LogLevel(vlatte.LogLevelNone))
+	m := MustNew(Setup().LogVerbosity(vlatte.LogBasic).LogLevel(vlatte.LogLevelNone))
 	m.MustStart()
 
 	defer m.Close()
@@ -212,7 +213,7 @@ func TestHTTPMockAppSilently(t *testing.T) {
 }
 
 func TestSchemeMatching(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -232,7 +233,7 @@ func TestSchemeMatching(t *testing.T) {
 }
 
 func TestHTTPMockAppNoReply(t *testing.T) {
-	m := New()
+	m := MustNew()
 
 	scoped, err := m.Mock(Get(URLPath("/test")))
 	require.Nil(t, scoped)
@@ -240,7 +241,7 @@ func TestHTTPMockAppNoReply(t *testing.T) {
 }
 
 func TestHTTPMockAppNoMatchers(t *testing.T) {
-	m := New()
+	m := MustNew()
 
 	scoped, err := m.Mock(Request())
 	require.Nil(t, scoped)
@@ -248,7 +249,7 @@ func TestHTTPMockAppNoMatchers(t *testing.T) {
 }
 
 func TestHTTPMockApp_RequestMatches(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -283,7 +284,7 @@ func TestHTTPMockApp_RequestMatches(t *testing.T) {
 }
 
 func TestHTTPMockAppConcurrency(t *testing.T) {
-	m := New()
+	m := MustNew()
 	jobs := 10
 	wg := sync.WaitGroup{}
 
@@ -328,7 +329,7 @@ func TestHTTPMockAppConcurrentRequests(t *testing.T) {
 	wg := sync.WaitGroup{}
 	httpClient := &http.Client{}
 
-	m := New()
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -407,7 +408,7 @@ func TestDefaultLoggerIncludesServerName(t *testing.T) {
 }
 
 func TestURL_InvalidPathPanicsInsteadOfExiting(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -417,15 +418,35 @@ func TestURL_InvalidPathPanicsInsteadOfExiting(t *testing.T) {
 
 func TestSettingOnlyPort(t *testing.T) {
 	// Binding a custom address is covered by TestConfig; Port must produce a port-only address.
-	m := New(Setup().Port(12345))
+	m := MustNew(Setup().Port(12345))
 
 	require.Equal(t, ":12345", m.Config().Addr)
 }
 
 func TestHTTPMockApp_Server(t *testing.T) {
-	m := New()
+	m := MustNew()
 	srv := m.Server()
 
 	require.NotNil(t, srv)
 	require.IsType(t, &httpTestServer{}, srv)
+}
+
+type failingConfigurer struct{}
+
+func (failingConfigurer) Apply(*Config) error { return errors.New("bad config") }
+
+type failingServerFactory struct{}
+
+func (failingServerFactory) Server(ServerFactoryConfig) (vlatte.Server, error) {
+	return nil, errors.New("no server")
+}
+
+func TestNew_ReturnsErrors(t *testing.T) {
+	_, err := New(failingConfigurer{})
+	require.ErrorContains(t, err, "bad config")
+
+	_, err = New(Setup().ServerFactory(failingServerFactory{}))
+	require.ErrorContains(t, err, "no server")
+
+	require.Panics(t, func() { MustNew(failingConfigurer{}) })
 }

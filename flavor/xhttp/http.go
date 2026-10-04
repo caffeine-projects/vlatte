@@ -61,7 +61,8 @@ type HTTPMockApp struct {
 // Parameter config accepts a Config or a ConfigBuilder implementation.
 // If no configuration is provided, a default one will be used.
 // If no port is set, it will start the server on localhost using a random port.
-func New(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
+// It returns an error if a configuration fails to apply or the server cannot be built.
+func New(config ...vlatte.Configurer[*Config]) (*HTTPMockApp, error) {
 	app := &HTTPMockApp{}
 
 	conf := defaultConfig()
@@ -69,12 +70,12 @@ func New(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
 	for i, configurer := range config {
 		err := configurer.Apply(conf)
 		if err != nil {
-			panic(fmt.Errorf(
+			return nil, fmt.Errorf(
 				"server: error applying configuration at index %d with type %T\n%w",
 				i,
 				configurer,
 				err,
-			))
+			)
 		}
 	}
 
@@ -173,10 +174,20 @@ func New(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
 
 	server, err := factory.Server(ServerFactoryConfig{App: app, Handler: handler})
 	if err != nil {
-		panic(fmt.Errorf("server: factory failed to build server. %w", err))
+		return nil, fmt.Errorf("server: factory failed to build server. %w", err)
 	}
 
 	app.server = server
+
+	return app, nil
+}
+
+// MustNew is like New but panics if any error occurs.
+func MustNew(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
+	app, err := New(config...)
+	if err != nil {
+		panic(err)
+	}
 
 	return app
 }
@@ -446,6 +457,6 @@ func Flavor(opts ...vlatte.Configurer[*Config]) vlatte.FlavorFactory[*HTTPMock, 
 	return &httpFlavor{opts: opts}
 }
 
-func (f *httpFlavor) Create(_ context.Context) *HTTPMockApp {
+func (f *httpFlavor) Create(_ context.Context) (*HTTPMockApp, error) {
 	return New(f.opts...)
 }

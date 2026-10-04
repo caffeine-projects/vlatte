@@ -32,7 +32,7 @@ func TestProxiedReplies(t *testing.T) {
 
 	defer dest.Close()
 
-	m := xhttp.New()
+	m := xhttp.MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -63,13 +63,13 @@ func TestProxiedReplies(t *testing.T) {
 }
 
 func TestProxiedReplyMockFileTrimSuffix(t *testing.T) {
-	target := xhttp.New()
+	target := xhttp.MustNew()
 	target.MustStart()
 	defer target.Close()
 
 	targetScoped := target.MustMock(xhttp.Getf("/items").Reply(xhttp.OK()))
 
-	m := xhttp.New()
+	m := xhttp.MustNew()
 	m.MustStart()
 	defer m.Close()
 
@@ -86,7 +86,7 @@ func TestProxiedReplyMockFileTrimSuffix(t *testing.T) {
 }
 
 func TestProxiedReplyMockFileWithTemplate(t *testing.T) {
-	target := xhttp.New()
+	target := xhttp.MustNew()
 	target.MustStart()
 	defer target.Close()
 
@@ -96,7 +96,7 @@ func TestProxiedReplyMockFileWithTemplate(t *testing.T) {
 			Header("del", Not(Present())).
 			Reply(xhttp.OK().PlainText("done")))
 
-	m := xhttp.New()
+	m := xhttp.MustNew()
 	m.MustStart()
 	defer m.Close()
 

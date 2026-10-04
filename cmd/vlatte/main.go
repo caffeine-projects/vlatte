@@ -70,7 +70,7 @@ func run(ctx context.Context, custom ...vlatte.Configurer[*xhttp.Config]) {
 		configurers = append(configurers, &dockerConfigurer{})
 	}
 
-	m := xhttp.New(configurers...)
+	m := xhttp.MustNew(configurers...)
 
 	rootCmd := &cobra.Command{
 		Use:     _usage,

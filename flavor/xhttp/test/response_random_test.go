@@ -11,7 +11,7 @@ import (
 
 func TestRandom_SetupFromFileWithSeed(t *testing.T) {
 	serve := func() []int {
-		m := xhttp.New()
+		m := xhttp.MustNew()
 		m.MustStart()
 		defer m.Close()
 

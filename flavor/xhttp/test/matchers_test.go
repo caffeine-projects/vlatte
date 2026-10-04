@@ -49,7 +49,7 @@ func TestMatcherCombinations(t *testing.T) {
 	}
 
 	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
-	m := New()
+	m := MustNew()
 
 	sHTTP := m.MustMock(FromFile("testdata/matchers/01_matchers.yaml"))
 	sHTTPS := m.MustMock(FromFile("testdata/matchers/02_matchers.yaml"))
@@ -129,7 +129,7 @@ func TestMatcherCombinations(t *testing.T) {
 	require.True(t, vlatte.Times(t, sHTTP, 1))
 	require.True(t, vlatte.Times(t, sHTTPS, 1))
 
-	m = New()
+	m = MustNew()
 	m.MustStart()
 	defer m.Close()
 
@@ -145,7 +145,7 @@ func TestMatcherCombinations(t *testing.T) {
 }
 
 func TestMatchers_MultipleMethods(t *testing.T) {
-	m := New()
+	m := MustNew()
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustMock(FromFile("testdata/matchers/03_url_template.yaml"))
@@ -172,7 +172,7 @@ func TestMatchers_MultipleMethods(t *testing.T) {
 }
 
 func TestMatchers_URLMatchRegex(t *testing.T) {
-	m := New()
+	m := MustNew()
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustMock(FromFile("testdata/matchers/04_url_match.yaml"))
@@ -192,7 +192,7 @@ func TestMatchers_URLMatchRegex(t *testing.T) {
 }
 
 func TestMatchers_URLCustomMatcher(t *testing.T) {
-	m := New()
+	m := MustNew()
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustMock(FromFile("testdata/matchers/05_url_custom_matcher.yaml"))
@@ -212,7 +212,7 @@ func TestMatchers_URLCustomMatcher(t *testing.T) {
 }
 
 func TestMatchers_PathCustomMatcher(t *testing.T) {
-	m := New()
+	m := MustNew()
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustMock(FromFile("testdata/matchers/06_path_custom_matcher.yaml"))
@@ -232,7 +232,7 @@ func TestMatchers_PathCustomMatcher(t *testing.T) {
 }
 
 func TestMatchers_URLFragment(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 	m.MustMock(Getf("/test").URLFragmentf("contacts").Reply(OK().BodyText("hello world")))
 
@@ -266,7 +266,7 @@ func TestMatchers_URLFragment(t *testing.T) {
 }
 
 func TestMatchers_NoReply_ShouldReturn200ByDefault(t *testing.T) {
-	m := New()
+	m := MustNew()
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 	m.MustMock(FromFile("testdata/matchers/07_no_reply.yaml"))
