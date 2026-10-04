@@ -14,7 +14,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/testmock"
 )
 
-func TestCup(t *testing.T) {
+func TestScope(t *testing.T) {
 	newTestMock := func() *xhttp.HTTPMock {
 		return xhttp.NewMock()
 	}
@@ -26,21 +26,21 @@ func TestCup(t *testing.T) {
 	repo := vlatte.NewStore[*xhttp.HTTPMock]()
 	repo.Store(context.Background(), m1, m2, m3)
 
-	cup := vlatte.NewScope([]*xhttp.HTTPMock{m1, m2, m3}, repo)
+	scope := vlatte.NewScope([]*xhttp.HTTPMock{m1, m2, m3}, repo)
 
-	require.Equal(t, 3, len(cup.Mocks()))
+	require.Equal(t, 3, len(scope.Mocks()))
 
-	require.Equal(t, m1, cup.Mock(m1.ID()))
-	require.Nil(t, cup.Mock("unknown"))
+	require.Equal(t, m1, scope.Mock(m1.ID()))
+	require.Nil(t, scope.Mock("unknown"))
 
 	t.Run("should not return done when there is still pending mocks", func(t *testing.T) {
 		ft := testmock.NewFakeT()
 
-		require.False(t, cup.Called())
-		require.Equal(t, 3, len(cup.ListPending()))
-		require.True(t, cup.Pending())
+		require.False(t, scope.Called())
+		require.Equal(t, 3, len(scope.ListPending()))
+		require.True(t, scope.Pending())
 
-		cup.AssertCalled(ft)
+		scope.AssertCalled(ft)
 		ft.AssertNumberOfCalls(t, "Errorf", 1)
 	})
 
@@ -49,33 +49,33 @@ func TestCup(t *testing.T) {
 
 		m1.Inc()
 
-		require.False(t, cup.Called())
-		cup.AssertCalled(ft)
+		require.False(t, scope.Called())
+		scope.AssertCalled(ft)
 
 		m2.Inc()
 		m3.Inc()
 
 		ft.AssertNumberOfCalls(t, "Errorf", 1)
-		require.True(t, cup.AssertCalled(t))
-		require.True(t, cup.Called())
-		require.True(t, vlatte.Times(t, cup, 3))
-		require.False(t, vlatte.Times(ft, cup, 1))
-		require.Equal(t, 0, len(cup.ListPending()))
-		require.False(t, cup.Pending())
+		require.True(t, scope.AssertCalled(t))
+		require.True(t, scope.Called())
+		require.True(t, vlatte.Times(t, scope, 3))
+		require.False(t, vlatte.Times(ft, scope, 1))
+		require.Equal(t, 0, len(scope.ListPending()))
+		require.False(t, scope.Pending())
 	})
 
 	t.Run("should return total hits from store", func(t *testing.T) {
-		require.EqualValues(t, 3, cup.Hits())
-		vlatte.Times(t, cup, 3)
+		require.EqualValues(t, 3, scope.Hits())
+		vlatte.Times(t, scope, 3)
 	})
 
 	t.Run("should clean all store associated with NewScope when calling .Clear()", func(t *testing.T) {
-		err := cup.Clear(context.Background())
+		err := scope.Clear(context.Background())
 		require.NoError(t, err)
 
-		require.Equal(t, 0, len(cup.ListPending()))
-		require.True(t, vlatte.Times(t, cup, 0))
-		require.False(t, cup.Pending())
+		require.Equal(t, 0, len(scope.ListPending()))
+		require.True(t, vlatte.Times(t, scope, 0))
+		require.False(t, scope.Pending())
 	})
 
 	t.Run("should only consider enabled store", func(t *testing.T) {
@@ -174,10 +174,10 @@ func TestScopedDelete(t *testing.T) {
 	err := store.Store(t.Context(), m1, m2, m3)
 	require.NoError(t, err)
 
-	cup := vlatte.NewScope([]*xhttp.HTTPMock{m1, m2, m3}, store)
+	scope := vlatte.NewScope([]*xhttp.HTTPMock{m1, m2, m3}, store)
 
-	require.NoError(t, cup.Delete(t.Context(), m1.ID()))
-	require.NoError(t, cup.Delete(t.Context(), "unknown"))
+	require.NoError(t, scope.Delete(t.Context(), m1.ID()))
+	require.NoError(t, scope.Delete(t.Context(), "unknown"))
 
-	require.Nil(t, cup.Mock(m1.ID()))
+	require.Nil(t, scope.Mock(m1.ID()))
 }

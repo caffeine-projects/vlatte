@@ -51,7 +51,7 @@ func (f MockBuilderFunc[B]) BuildFromBytes(content []byte, extension string) (B,
 type Store[T Mock] interface {
 	List(ctx context.Context) (iter.Seq[T], error)
 
-	Store(ctx context.Context, bean ...T) error
+	Store(ctx context.Context, mocks ...T) error
 
 	Pick(ctx context.Context, id string) (T, error)
 	PickAll(ctx context.Context) ([]T, error)

@@ -27,7 +27,7 @@ func TestMain(m *testing.M) {
 	)
 }
 
-func TestMocha(t *testing.T) {
+func TestHTTPMockApp(t *testing.T) {
 	m := New()
 	m.MustStart()
 
@@ -112,7 +112,7 @@ func TestErrors(t *testing.T) {
 	require.Equal(t, StatusNoMatch, res.StatusCode)
 }
 
-func TestMochaAssertions(t *testing.T) {
+func TestHTTPMockAppAssertions(t *testing.T) {
 	m := New()
 	m.MustStart()
 
@@ -141,7 +141,7 @@ func TestMochaAssertions(t *testing.T) {
 	require.EqualValues(t, 1, m.Hits())
 }
 
-func TestMochaEnableDisable(t *testing.T) {
+func TestHTTPMockAppEnableDisable(t *testing.T) {
 	m := New()
 	m.MustStart()
 
@@ -186,7 +186,7 @@ func TestMochaEnableDisable(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 }
 
-func TestMochaSilently(t *testing.T) {
+func TestHTTPMockAppSilently(t *testing.T) {
 	m := New(Setup().LogVerbosity(vlatte.LogBasic).LogLevel(vlatte.LogLevelNone))
 	m.MustStart()
 
@@ -231,7 +231,7 @@ func TestSchemeMatching(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 }
 
-func TestMochaNoReply(t *testing.T) {
+func TestHTTPMockAppNoReply(t *testing.T) {
 	m := New()
 
 	scoped, err := m.Mock(Get(URLPath("/test")))
@@ -239,7 +239,7 @@ func TestMochaNoReply(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestMochaNoMatchers(t *testing.T) {
+func TestHTTPMockAppNoMatchers(t *testing.T) {
 	m := New()
 
 	scoped, err := m.Mock(Request())
@@ -247,7 +247,7 @@ func TestMochaNoMatchers(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestMocha_RequestMatches(t *testing.T) {
+func TestHTTPMockApp_RequestMatches(t *testing.T) {
 	m := New()
 	m.MustStart()
 
@@ -282,7 +282,7 @@ func TestMocha_RequestMatches(t *testing.T) {
 	require.Equal(t, StatusNoMatch, res.StatusCode)
 }
 
-func TestMochaConcurrency(t *testing.T) {
+func TestHTTPMockAppConcurrency(t *testing.T) {
 	m := New()
 	jobs := 10
 	wg := sync.WaitGroup{}
@@ -323,7 +323,7 @@ func TestMochaConcurrency(t *testing.T) {
 	t.Log("done")
 }
 
-func TestMochaConcurrentRequests(t *testing.T) {
+func TestHTTPMockAppConcurrentRequests(t *testing.T) {
 	jobs := 20
 	wg := sync.WaitGroup{}
 	httpClient := &http.Client{}
@@ -422,7 +422,7 @@ func TestSettingOnlyPort(t *testing.T) {
 	require.Equal(t, ":12345", m.Config().Addr)
 }
 
-func TestMocha_Server(t *testing.T) {
+func TestHTTPMockApp_Server(t *testing.T) {
 	m := New()
 	srv := m.Server()
 

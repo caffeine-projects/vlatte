@@ -52,7 +52,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.lifecycle.OnRequest(reqValues)
 
-	beans, err := h.app.storage.List(r.Context())
+	stored, err := h.app.storage.List(r.Context())
 	if err != nil {
 		h.lifecycle.OnError(reqValues, fmt.Errorf("http: error finding eligible mocks for request. %w", err))
 		return
@@ -61,7 +61,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	selectorInput := &HTTPValueSelectorInput{r, reqValues.URL, r.URL.Query(), r.Form, reqValues.ParsedBodyData}
 
 	sub := explain.New()
-	mocks := vlatte.Mocks[*HTTPMock, *HTTPValueSelectorInput](beans)
+	mocks := vlatte.Mocks[*HTTPMock, *HTTPValueSelectorInput](stored)
 	mock, matched, err := mocks.Find(r.Context(), sub, selectorInput, func(m *HTTPMock) vlatte.Evaluators[*HTTPMock, *HTTPValueSelectorInput] { return m.expectations })
 	if err != nil {
 		h.lifecycle.OnError(reqValues, fmt.Errorf("http: error finding eligible mocks for request. %w", err))
