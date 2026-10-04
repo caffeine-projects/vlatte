@@ -22,9 +22,9 @@ func (m *Contains) Name() string { return "Contains" }
 // Match implements vlatte.Filter.
 func (m *Contains) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()
-	var eValue = reflect.ValueOf(m.Expected)
-	var vValue = reflect.ValueOf(v)
-	var vType = reflect.TypeOf(v)
+	eValue := reflect.ValueOf(m.Expected)
+	vValue := reflect.ValueOf(v)
+	vType := reflect.TypeOf(v)
 	if vType == nil {
 		return Error(errors.New("contains: unknown typeof value"))
 	}
@@ -39,7 +39,7 @@ func (m *Contains) Match(arg vlatte.FilterArg) (bool, error) {
 
 	case reflect.Map:
 		keys := vValue.MapKeys()
-		for i := 0; i < len(keys); i++ {
+		for i := range keys {
 			if equalutil.EqualValues(keys[i].Interface(), m.Expected, false) {
 				return Success()
 			}

@@ -12,8 +12,7 @@ import (
 
 var _ vlatte.Mock = (*bean)(nil)
 
-type bean struct {
-}
+type bean struct{}
 
 func (b *bean) ID() string                   { return "" }
 func (b *bean) Called() bool                 { return false }

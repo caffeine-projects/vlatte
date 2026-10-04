@@ -28,7 +28,6 @@ func TestExternalResponseBodies(t *testing.T) {
 	}
 
 	for i, tc := range cases {
-		tc := tc
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			m.MustMock(tc.mock)
 

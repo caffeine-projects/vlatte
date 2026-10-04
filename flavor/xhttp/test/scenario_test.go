@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 	. "github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 )
 
 func TestScenarios(t *testing.T) {
@@ -19,7 +19,8 @@ func TestScenarios(t *testing.T) {
 		s2   vlatte.Builder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
 		s3   vlatte.Builder[*xhttp.HTTPMock, *xhttp.HTTPMockApp]
 	}{
-		{"code",
+		{
+			"code",
 			xhttp.Get(URLPath("/1")).
 				StartScenario("code").
 				ScenarioStateWillBe("step2").
@@ -36,16 +37,18 @@ func TestScenarios(t *testing.T) {
 				ScenarioStateIs("step3").
 				ScenarioStateWillBe("step4").
 				Name("step-3").
-				Reply(xhttp.OK().PlainText("step3"))},
+				Reply(xhttp.OK().PlainText("step3")),
+		},
 
-		{"file",
+		{
+			"file",
 			xhttp.FromFile("testdata/scenario/step_1.yaml"),
 			xhttp.FromFile("testdata/scenario/step_2.yaml"),
-			xhttp.FromFile("testdata/scenario/step_3.yaml")},
+			xhttp.FromFile("testdata/scenario/step_3.yaml"),
+		},
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			m := xhttp.New()
 			t.Cleanup(func() { m.Close() })

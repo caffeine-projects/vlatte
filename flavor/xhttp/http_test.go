@@ -13,10 +13,9 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/flavor/xhttp/test/testmock"
 	. "github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/flavor/xhttp/test/testmock"
 	"github.com/caffeine-projects/vlatte/vlattecore/kv/kvmem"
-	
 )
 
 func TestMain(m *testing.M) {
@@ -287,7 +286,7 @@ func TestMochaConcurrency(t *testing.T) {
 	jobs := 10
 	wg := sync.WaitGroup{}
 
-	for i := 0; i < jobs; i++ {
+	for i := range jobs {
 		wg.Add(1)
 		go func(index int) {
 			m.MustMock(Getf("%s", "/test--"+strconv.FormatInt(int64(index), 10)).Reply(OK()))
@@ -333,7 +332,7 @@ func TestMochaConcurrentRequests(t *testing.T) {
 
 	defer m.Close()
 
-	for i := 0; i < jobs; i++ {
+	for i := range jobs {
 		wg.Add(1)
 		go func(index int) {
 			num := strconv.FormatInt(int64(index), 10)
@@ -367,7 +366,7 @@ func TestMochaConcurrentRequests(t *testing.T) {
 			require.NoError(t, res.Body.Close())
 			require.Equal(t, http.StatusBadRequest, res.StatusCode)
 
-			for n := 0; n < 50; n++ {
+			for range 50 {
 				res, err = httpClient.Get(m.URL() + "/rand--" + num)
 				require.NoError(t, err)
 				require.NoError(t, res.Body.Close())

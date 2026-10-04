@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/caffeine-projects/vlatte/flavor/xhttp/httpval"
 	. "github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/flavor/xhttp/httpval"
 )
 
 func TestRequestBodyParsers_CanParse(t *testing.T) {
@@ -48,7 +48,6 @@ func TestRequestBodyParsers_CanParse(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.expected, tc.parser.CanParse(tc.contentType, tc.req))
 		})
@@ -82,7 +81,6 @@ func TestRequestBodyParsers_Parse(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			b, err := tc.parser.Parse(tc.body, tc.req)
 

@@ -127,7 +127,7 @@ func TestServerStream_MessageReader(t *testing.T) {
 	<-ctx.Done()
 
 	require.Len(t, items, 2)
-	require.Equal(t, m1, items[0])
-	require.Equal(t, m2, items[1])
+	require.True(t, proto.Equal(m1, items[0]))
+	require.True(t, proto.Equal(m2, items[1]))
 	require.True(t, scope.AssertCalled(t))
 }

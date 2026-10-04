@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 	"github.com/stretchr/testify/require"
 )
 

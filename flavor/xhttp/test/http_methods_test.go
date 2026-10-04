@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	. "github.com/caffeine-projects/vlatte/flavor/xhttp"
 	. "github.com/caffeine-projects/vlatte/filter"
+	. "github.com/caffeine-projects/vlatte/flavor/xhttp"
 )
 
 func TestHTTPMethods(t *testing.T) {
@@ -58,7 +58,6 @@ func TestHTTPMethods(t *testing.T) {
 	}
 
 	for i, tc := range testCases {
-		tc := tc
 		t.Run(fmt.Sprintf("%d_%s", i, tc.method), func(t *testing.T) {
 			m.MustMock(tc.mock.Reply(Status(tc.status)))
 

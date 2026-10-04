@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 	. "github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,7 +33,7 @@ func TestSequenceReplies(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusOK, res.StatusCode)
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		res, err = http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
@@ -64,7 +64,7 @@ func TestSequenceRepliesOnSequenceEndsSet(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusOK, res.StatusCode)
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		res, err = http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
@@ -114,7 +114,7 @@ func TestSequence_SetupFromFile(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusBadRequest, res.StatusCode)
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		res, err = http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())

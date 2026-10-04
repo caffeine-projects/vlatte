@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	. "github.com/caffeine-projects/vlatte/flavor/xhttp"
 	. "github.com/caffeine-projects/vlatte/filter"
+	. "github.com/caffeine-projects/vlatte/flavor/xhttp"
 )
 
 func TestPriority(t *testing.T) {
@@ -29,7 +29,7 @@ func TestPriority(t *testing.T) {
 		Priority(100).
 		Reply(Created()))
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		res, err := http.Get(m.URL() + "/test")
 
 		require.NoError(t, err)
@@ -65,7 +65,6 @@ func TestPriority_DefaultIsZero(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.url, func(t *testing.T) {
 			res, err := httpClient.Get(m.URL() + tc.url)
 
@@ -101,7 +100,6 @@ func TestPriority_LowestShouldBeServed(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.url, func(t *testing.T) {
 			res, err := httpClient.Get(m.URL() + tc.url)
 

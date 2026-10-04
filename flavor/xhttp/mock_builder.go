@@ -7,9 +7,9 @@ import (
 	"net/http"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/flavor/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/filter/mfeat"
+	"github.com/caffeine-projects/vlatte/flavor/xhttp/httpval"
 )
 
 var _ vlatte.Builder[*HTTPMock, *HTTPMockApp] = (*HTTPMockBuilder)(nil)
@@ -470,7 +470,8 @@ func (b *HTTPMockBuilder) appendExpectation(e *vlatte.Eval[*HTTPValueSelectorInp
 // Request Values Selectors
 // --
 
-func selectScheme(_ context.Context, r *HTTPValueSelectorInput) any      { return r.URL.Scheme }
+func selectScheme(_ context.Context, r *HTTPValueSelectorInput) any { return r.URL.Scheme }
+
 func selectMethod(_ context.Context, r *HTTPValueSelectorInput) any      { return r.RawRequest.Method }
 func selectURL(_ context.Context, r *HTTPValueSelectorInput) any         { return r.URL.String() }
 func selectURLPath(_ context.Context, r *HTTPValueSelectorInput) any     { return r.URL.Path }
@@ -478,9 +479,11 @@ func selectURLFragment(_ context.Context, r *HTTPValueSelectorInput) any { retur
 func selectHeader(k string) vlatte.Selector[*HTTPValueSelectorInput] {
 	return func(_ context.Context, r *HTTPValueSelectorInput) any { return r.RawRequest.Header.Get(k) }
 }
+
 func selectQuery(k string) vlatte.Selector[*HTTPValueSelectorInput] {
 	return func(_ context.Context, r *HTTPValueSelectorInput) any { return r.Query.Get(k) }
 }
+
 func selectQueries(k string) vlatte.Selector[*HTTPValueSelectorInput] {
 	return func(_ context.Context, r *HTTPValueSelectorInput) any { return r.Query[k] }
 }

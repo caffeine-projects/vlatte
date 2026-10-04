@@ -22,10 +22,8 @@ const (
 	EnvPrefix = "MOAI"
 )
 
-var (
-	// DefaultConfigDirectories is the default configuration directories used to lookup for a configuration file.
-	DefaultConfigDirectories = []string{".", "testdata"}
-)
+// DefaultConfigDirectories is the default configuration directories used to lookup for a configuration file.
+var DefaultConfigDirectories = []string{".", "testdata"}
 
 const (
 	_kName              = "name"

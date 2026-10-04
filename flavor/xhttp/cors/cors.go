@@ -2,6 +2,7 @@ package cors
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -62,7 +63,8 @@ type ConfigBuilder struct {
 func CORS() *ConfigBuilder {
 	return &ConfigBuilder{
 		origins: make([]string, 0),
-		options: &Config{SuccessStatusCode: http.StatusNoContent}}
+		options: &Config{SuccessStatusCode: http.StatusNoContent},
+	}
 }
 
 // SuccessStatusCode sets a custom status code returned on CORS Options request.
@@ -212,14 +214,7 @@ func configureOrigin(options *Config, r *http.Request, w http.ResponseWriter) {
 	// received a list of origins
 	// will check if the request origin is within the provided array and use it as the allowed origin
 	origin := r.Header.Get("origin")
-	allowed := false
-
-	for _, o := range origins {
-		if origin == o {
-			allowed = true
-			break
-		}
-	}
+	allowed := slices.Contains(origins, origin)
 
 	if allowed {
 		w.Header().Add(httpval.HeaderAccessControlAllowOrigin, origin)

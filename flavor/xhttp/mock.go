@@ -6,8 +6,7 @@ import (
 	"net/url"
 	"sync"
 	"sync/atomic"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter"
@@ -15,8 +14,10 @@ import (
 	"github.com/caffeine-projects/vlatte/vlattecore/kv"
 )
 
-var _ vlatte.Mock = (*HTTPMock)(nil)
-var _ vlatte.CallbackInput = (*HTTPCallbackInput)(nil)
+var (
+	_ vlatte.Mock          = (*HTTPMock)(nil)
+	_ vlatte.CallbackInput = (*HTTPCallbackInput)(nil)
+)
 
 type HTTPCallbackInput struct {
 	m   *HTTPMock
@@ -275,7 +276,7 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 					}
 
 					all := filter.All(matchers...)
-					keys[e.Key] = (vlatte.Filter(all)).(descriptor.SelfDescriptive).Describe()
+					keys[e.Key] = vlatte.Filter(all).(descriptor.SelfDescriptive).Describe()
 				}
 			}
 
@@ -296,7 +297,7 @@ func (m *HTTPMock) Describe() descriptor.Descriptor {
 			}
 
 			all := filter.All(matchers...)
-			request[target.FieldName()] = (vlatte.Filter(all)).(descriptor.SelfDescriptive).Describe()
+			request[target.FieldName()] = vlatte.Filter(all).(descriptor.SelfDescriptive).Describe()
 
 		default:
 			for _, e := range expectations {

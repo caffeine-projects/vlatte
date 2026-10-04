@@ -9,9 +9,11 @@ import (
 
 var _ json.Marshaler = (*Descriptor)(nil)
 
-var ErrKeyEmpty = errors.New("descriptor: key is empty")
-var ErrSpecNotValidType = errors.New("descriptor: spec is not a valid type")
-var ErrKeyAlreadyExists = errors.New("descriptor: key already exists")
+var (
+	ErrKeyEmpty         = errors.New("descriptor: key is empty")
+	ErrSpecNotValidType = errors.New("descriptor: spec is not a valid type")
+	ErrKeyAlreadyExists = errors.New("descriptor: key already exists")
+)
 
 // SelfDescriptive is an interface that allows a type to describe itself.
 type SelfDescriptive interface {

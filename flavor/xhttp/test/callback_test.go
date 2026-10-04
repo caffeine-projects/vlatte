@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte/filter"
 )
 
 func TestCallbacks(t *testing.T) {

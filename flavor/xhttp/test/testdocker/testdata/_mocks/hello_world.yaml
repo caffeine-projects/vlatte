@@ -1,8 +1,0 @@
-request:
-  path: /hello
-
-response:
-  status: 200
-  body: "world"
-  header:
-    content-type: text/plain

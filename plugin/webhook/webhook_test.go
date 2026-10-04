@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	. "github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 	. "github.com/caffeine-projects/vlatte/flavor/xhttp/httpval"
-	. "github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/plugin/webhook"
 )
 
@@ -41,7 +41,8 @@ func TestWebHook_Run(t *testing.T) {
 		options       []webhook.Option
 		expectedCalls int64
 	}{
-		{"basic with default method",
+		{
+			"basic with default method",
 			xhttp.Getf("/third_party/hook").
 				Reply(xhttp.OK()),
 			webhook.Options().
@@ -50,7 +51,8 @@ func TestWebHook_Run(t *testing.T) {
 			nil,
 			1,
 		},
-		{"complex",
+		{
+			"complex",
 			xhttp.Postf("/third_party/hook").
 				Headerf("X-Key", "%s", key).
 				Headerf(HeaderContentType, MIMETextPlain).
@@ -66,7 +68,8 @@ func TestWebHook_Run(t *testing.T) {
 			nil,
 			1,
 		},
-		{"no body",
+		{
+			"no body",
 			xhttp.Postf("/third_party/hook").
 				Headerf("X-Key", "%s", key).
 				Headerf(HeaderContentType, MIMETextPlain).
@@ -80,7 +83,8 @@ func TestWebHook_Run(t *testing.T) {
 			nil,
 			1,
 		},
-		{"bad request from target",
+		{
+			"bad request from target",
 			xhttp.Postf("/third_party/hook").
 				Headerf(HeaderContentType, MIMETextPlain).
 				Reply(xhttp.BadRequest()),
@@ -92,7 +96,8 @@ func TestWebHook_Run(t *testing.T) {
 			nil,
 			1,
 		},
-		{"transform",
+		{
+			"transform",
 			xhttp.Putf("/third_party/hook/transformed").
 				Headerf(HeaderContentType, MIMETextPlain).
 				Body(Eq("hello world")).
@@ -108,10 +113,12 @@ func TestWebHook_Run(t *testing.T) {
 					webhookArgs.Method = http.MethodPut
 					webhookArgs.Body = "hello world"
 					return nil
-				})},
+				}),
+			},
 			1,
 		},
-		{"transform with error",
+		{
+			"transform with error",
 			xhttp.Getf("/third_party/hook/transformed").
 				Reply(xhttp.BadRequest()),
 			webhook.Options().
@@ -121,10 +128,12 @@ func TestWebHook_Run(t *testing.T) {
 			[]webhook.Option{
 				webhook.WithTransform(func(_ context.Context, args vlatte.OnComplete, webhookArgs *webhook.Args) error {
 					return errors.New("boom")
-				})},
+				}),
+			},
 			0,
 		},
-		{"malformed url",
+		{
+			"malformed url",
 			xhttp.Postf("/third_party/hook").
 				Reply(xhttp.OK()),
 			webhook.Options().
@@ -134,7 +143,8 @@ func TestWebHook_Run(t *testing.T) {
 			nil,
 			0,
 		},
-		{"unable to build http request",
+		{
+			"unable to build http request",
 			xhttp.Postf("/third_party/hook").Reply(xhttp.OK()),
 			webhook.Options().
 				URL(target.URL("/third_party/hook")).
@@ -226,7 +236,8 @@ func TestWebHook_TLS(t *testing.T) {
 			TLSClientConfig: &tls.Config{
 				Certificates: []tls.Certificate{cert},
 				RootCAs:      certPool,
-			}},
+			},
+		},
 	}
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, m.URL("/test"), nil)
 	require.NoError(t, err)
@@ -317,7 +328,6 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 	defer m.Close()
 
 	for i, tc := range testCases {
-		tc := tc
 		t.Run(strconv.FormatInt(int64(i), 10), func(t *testing.T) {
 			m.MustMock(xhttp.Getf("/test").
 				OnCompleteEvent(vlatte.EventConfig{Name: name, Parameters: tc}).
@@ -381,7 +391,6 @@ func TestWebHook_InvalidFiles(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			wh, err := webhook.New()
 			require.NoError(t, err)

@@ -16,13 +16,13 @@ func TestToEqualJSON(t *testing.T) {
 		expected bool
 	}{
 		{
-			map[string]interface{}{"ok": true, "name": "dev"},
-			map[string]interface{}{"ok": true, "name": "dev"},
+			map[string]any{"ok": true, "name": "dev"},
+			map[string]any{"ok": true, "name": "dev"},
 			true,
 		},
 		{
-			map[string]interface{}{"ok": true, "name": "dev"},
-			map[string]interface{}{"nok": true, "name": "dev"},
+			map[string]any{"ok": true, "name": "dev"},
+			map[string]any{"nok": true, "name": "dev"},
 			false,
 		},
 
@@ -65,7 +65,7 @@ func TestToEqualJSON(t *testing.T) {
 
 func TestEqualJSON_Errors(t *testing.T) {
 	ch := make(chan struct{})
-	ok, err := EQJ(ch).Match(vlatte.NewFilterArg(t.Context(), explain.New(), map[string]interface{}{"ok": true, "name": "dev"}))
+	ok, err := EQJ(ch).Match(vlatte.NewFilterArg(t.Context(), explain.New(), map[string]any{"ok": true, "name": "dev"}))
 
 	require.Error(t, err)
 	require.False(t, ok)

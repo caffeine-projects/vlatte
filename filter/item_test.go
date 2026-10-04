@@ -33,7 +33,6 @@ func TestItem(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(strconv.Itoa(tc.index), func(t *testing.T) {
 			ok, err := Item(tc.index, tc.matcher).Match(vlatte.NewFilterArg(t.Context(), explain.New(), v))
 

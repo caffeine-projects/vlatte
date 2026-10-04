@@ -19,8 +19,8 @@ func (m *Each) Name() string { return "Each" }
 // Match implements vlatte.Filter.
 func (m *Each) Match(arg vlatte.FilterArg) (bool, error) {
 	v := arg.Value()
-	var val = reflect.ValueOf(v)
-	var valType = reflect.TypeOf(v).Kind()
+	val := reflect.ValueOf(v)
+	valType := reflect.TypeOf(v).Kind()
 
 	switch valType {
 	case reflect.Map:

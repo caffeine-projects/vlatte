@@ -8,9 +8,11 @@ import (
 	"io"
 )
 
-var _ io.Writer = (*Sink)(nil)
-var _ Step = (*Sink)(nil)
-var _ Step = (StepFunc(nil))
+var (
+	_ io.Writer = (*Sink)(nil)
+	_ Step      = (*Sink)(nil)
+	_ Step      = StepFunc(nil)
+)
 
 // Next represents the continuation of a pipeline from the current [Step].
 // It is used to advance to the next processing [Step] in the flow.

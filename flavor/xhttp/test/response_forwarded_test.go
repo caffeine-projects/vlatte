@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	. "github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/httpval"
-	. "github.com/caffeine-projects/vlatte/filter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

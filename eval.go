@@ -11,8 +11,10 @@ import (
 
 var _ fmt.Stringer = (*Eval[any])(nil)
 
-var ErrMatchPanicked = errors.New("mock: panic")
-var ErrMatching = errors.New("mock: matching")
+var (
+	ErrMatchPanicked = errors.New("mock: panic")
+	ErrMatching      = errors.New("mock: matching")
+)
 
 // Selector selects a value from the parameter input.
 // The return value could be the input itself or a specific field of it.

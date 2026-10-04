@@ -3,8 +3,7 @@ package xgrpc
 import (
 	"sync"
 	"sync/atomic"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/caffeine-projects/vlatte"
 )

@@ -98,7 +98,7 @@ func buildMatcherFromArray(possibleMatcher any) (vlatte.Filter, error) {
 		return nil, fmt.Errorf("definition must be a string or an array in the format: [\"<MATCHER_NAME>\", ARG_1, ARG_2...]")
 	}
 
-	mk, ok := val.Index(0).Interface().(string)
+	mk, ok := reflect.TypeAssert[string](val.Index(0))
 	if !ok {
 		return nil, fmt.Errorf(
 			"first index of a matcher definition must be the matcher name. eg.: [\"<MATCHER_NAME>\", ARGUMENTS...]. got: %v",

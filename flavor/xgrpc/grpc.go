@@ -12,9 +12,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-var (
-	_ vlatte.Flavor[*GRPCMock, *GRPCMockApp] = (*GRPCMockApp)(nil)
-)
+var _ vlatte.Flavor[*GRPCMock, *GRPCMockApp] = (*GRPCMockApp)(nil)
 
 type GRPCMockApp struct {
 	*vlatte.Base[*GRPCMock, *GRPCMockApp]

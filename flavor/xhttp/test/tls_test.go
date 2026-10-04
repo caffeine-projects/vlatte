@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	. "github.com/caffeine-projects/vlatte/flavor/xhttp"
 	. "github.com/caffeine-projects/vlatte/filter"
+	. "github.com/caffeine-projects/vlatte/flavor/xhttp"
 )
 
 const (
@@ -40,7 +40,6 @@ func TestTLS(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			m := New(tc.config)
 			t.Cleanup(func() { m.Close() })
@@ -110,7 +109,8 @@ func TestTLSMutual(t *testing.T) {
 				Certificates: []tls.Certificate{cert},
 				RootCAs:      certPool,
 				ClientAuth:   tls.RequireAndVerifyClientCert,
-			}},
+			},
+		},
 	}
 
 	target := New(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
@@ -145,7 +145,8 @@ func TestTLSMutualWithProxy(t *testing.T) {
 			TLSClientConfig: &tls.Config{
 				Certificates: []tls.Certificate{cert},
 				RootCAs:      certPool,
-			}},
+			},
+		},
 	}
 
 	target := New(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
@@ -189,7 +190,8 @@ func TestTLSMutualWithProxy_FileSetup(t *testing.T) {
 			TLSClientConfig: &tls.Config{
 				Certificates: []tls.Certificate{cert},
 				RootCAs:      certPool,
-			}},
+			},
+		},
 	}
 
 	target := New(UseConfig("testdata/tls/tls_ca_target.yaml"))

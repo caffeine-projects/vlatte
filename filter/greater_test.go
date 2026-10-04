@@ -24,7 +24,6 @@ func TestGreater(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			ok, err := GreaterThan(tc.expected).Match(vlatte.NewFilterArg(t.Context(), explain.New(), tc.value))
 

@@ -42,7 +42,6 @@ func TestGlob(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.pattern, func(t *testing.T) {
 			ok, err := GlobMatch(tc.pattern).Match(vlatte.NewFilterArg(t.Context(), explain.New(), tc.value))
 

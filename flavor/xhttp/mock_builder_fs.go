@@ -3,6 +3,7 @@ package xhttp
 import (
 	"bytes"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,16 +11,17 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/spf13/viper"
-	"github.com/xeipuuv/gojsonschema"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/filter/filterbuilder"
+	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/bufpool"
 )
 
 var (
@@ -99,20 +101,49 @@ const (
 //go:embed schema.json
 var _mockJSONSchema []byte
 
+// _mockJSONSchemaURL identifies the embedded schema. It is not a file path, so error messages
+// don't depend on the working directory.
+const _mockJSONSchemaURL = "mem://vlatte/mock.schema.json"
+
+var _mockSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(_mockJSONSchema))
+	if err != nil {
+		return nil, err
+	}
+
+	c := jsonschema.NewCompiler()
+	c.DefaultDraft(jsonschema.Draft2020)
+
+	if err = c.AddResource(_mockJSONSchemaURL, doc); err != nil {
+		return nil, err
+	}
+
+	return c.Compile(_mockJSONSchemaURL)
+})
+
 type jsonSchemaValidationErr struct {
-	results []gojsonschema.ResultError
+	err *jsonschema.ValidationError
 }
 
 func (e jsonSchemaValidationErr) Error() string {
-	buf := strings.Builder{}
-	buf.WriteString("mock definition did not pass the schema validation:\n")
-	for _, result := range e.results {
-		buf.WriteString(" ")
-		buf.WriteString(result.String())
-		buf.WriteString("\n")
+	return "mock definition did not pass the schema validation:\n" + e.err.Error()
+}
+
+func validateMockSchema(doc any) error {
+	schema, err := _mockSchema()
+	if err != nil {
+		return fmt.Errorf("failed to compile the mock definition schema: %w", err)
 	}
 
-	return buf.String()
+	if err = schema.Validate(doc); err != nil {
+		if ve, ok := errors.AsType[*jsonschema.ValidationError](err); ok {
+			return &jsonSchemaValidationErr{ve}
+		}
+
+		return fmt.Errorf("mock definition did not pass the schema validation: %w", err)
+	}
+
+	return nil
 }
 
 type mockBuilderFromFile struct {
@@ -298,17 +329,15 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 		buf = bytes.NewBuffer(content)
 	}
 
-	loader := gojsonschema.NewBytesLoader(_mockJSONSchema)
 	validated := false
 	if ext == "json" {
-		doc := gojsonschema.NewBytesLoader(buf.Bytes())
-		result, err := gojsonschema.Validate(loader, doc)
+		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(buf.Bytes()))
 		if err != nil {
 			return nil, fmt.Errorf("mock definition did not pass the schema validation: %w", err)
 		}
 
-		if len(result.Errors()) > 0 {
-			return nil, &jsonSchemaValidationErr{result.Errors()}
+		if err = validateMockSchema(doc); err != nil {
+			return nil, err
 		}
 
 		validated = true
@@ -326,14 +355,19 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 	}
 
 	if !validated {
-		doc := gojsonschema.NewGoLoader(vi.AllSettings())
-		result, err := gojsonschema.Validate(loader, doc)
+		// Round-trip through JSON so the Go values decoded by viper become plain JSON values.
+		b, err := json.Marshal(vi.AllSettings())
 		if err != nil {
 			return nil, fmt.Errorf("mock definition did not pass the schema validation: %w", err)
 		}
 
-		if len(result.Errors()) > 0 {
-			return nil, &jsonSchemaValidationErr{result.Errors()}
+		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
+		if err != nil {
+			return nil, fmt.Errorf("mock definition did not pass the schema validation: %w", err)
+		}
+
+		if err = validateMockSchema(doc); err != nil {
+			return nil, err
 		}
 	}
 
@@ -364,7 +398,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 
 	if vi.IsSet(_fDelay) {
 		var duration time.Duration
-		var delay = vi.Get(_fDelay)
+		delay := vi.Get(_fDelay)
 
 		switch v := delay.(type) {
 		case string:

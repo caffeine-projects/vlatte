@@ -12,9 +12,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte"
 	. "github.com/caffeine-projects/vlatte/flavor/xhttp"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte"
 )
 
 func TestMatcherCombinations(t *testing.T) {
@@ -32,7 +32,7 @@ func TestMatcherCombinations(t *testing.T) {
 		Plans      []int    `json:"plans,omitempty"`
 		Acronym    string   `json:"acronym,omitempty"`
 		Title      string   `json:"title,omitempty"`
-		Addr       addr     `json:"addr,omitempty"`
+		Addr       addr     `json:"addr"`
 		CheckIn    bool     `json:"check_in,omitempty"`
 		Activities string   `json:"activities,omitempty"`
 		Department string   `json:"department,omitempty"`

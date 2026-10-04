@@ -61,6 +61,7 @@ type textTmpl struct {
 func (t *textTmpl) Name() string {
 	return t.tmpl.Name()
 }
+
 func (t *textTmpl) Parse(text string) (Template, error) {
 	if _, err := t.tmpl.Parse(text); err != nil {
 		return nil, err

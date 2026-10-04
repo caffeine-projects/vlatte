@@ -5,8 +5,10 @@ import (
 	"fmt"
 )
 
-var ErrNotPresent = errors.New("key not present")
-var ErrTypeMismatch = errors.New("type mismatch for value")
+var (
+	ErrNotPresent   = errors.New("key not present")
+	ErrTypeMismatch = errors.New("type mismatch for value")
+)
 
 type ConfigUtil struct {
 	m map[string]any

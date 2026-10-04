@@ -32,7 +32,7 @@ func TestCLI(t *testing.T) {
 		attempts := 0
 		success := false
 
-		for i := 0; i < max; i++ {
+		for range max {
 			res, err := http.Get("http://localhost:" + portTxt)
 			if err != nil || res.StatusCode == sc {
 				success = true
@@ -53,7 +53,6 @@ func TestCLI(t *testing.T) {
 		if !success {
 			t.FailNow()
 		}
-
 	}
 
 	request()
@@ -79,7 +78,7 @@ func TestDockerCLI(t *testing.T) {
 		attempts := 0
 		success := false
 
-		for i := 0; i < max; i++ {
+		for range max {
 			res, err := http.Get("http://localhost:8080")
 
 			if err == nil && res.StatusCode == sc {
@@ -100,7 +99,6 @@ func TestDockerCLI(t *testing.T) {
 		if !success {
 			t.FailNow()
 		}
-
 	}
 
 	request()

@@ -16,13 +16,11 @@ func TestRace(t *testing.T) {
 	jobs := 10
 	wg := sync.WaitGroup{}
 
-	for i := 0; i < jobs; i++ {
-		wg.Add(1)
-		go func() {
+	for range jobs {
+		wg.Go(func() {
 			m.Inc()
 			m.Hits()
-			wg.Done()
-		}()
+		})
 
 		m.Inc()
 	}

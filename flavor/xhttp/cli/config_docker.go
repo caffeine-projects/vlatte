@@ -7,8 +7,7 @@ import (
 	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 )
 
-type dockerConfigurer struct {
-}
+type dockerConfigurer struct{}
 
 func (c *dockerConfigurer) Apply(conf *xhttp.Config) error {
 	host := strings.TrimSpace(os.Getenv(_dockerHostEnv))

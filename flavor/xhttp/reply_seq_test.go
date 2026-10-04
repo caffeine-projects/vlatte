@@ -88,7 +88,7 @@ func TestSeqRace(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	input := ReplyInput{RequestValues: rv, Writer: nil}
-	for i := 0; i < jobs; i++ {
+	for i := range jobs {
 		wg.Add(1)
 		go func(index int) {
 			res, err := builder.Reply(context.Background(), input)

@@ -74,7 +74,7 @@ func EqualValues(expected, actual any, lenient bool) bool {
 			return false
 		}
 
-		for i := 0; i < aLen; i++ {
+		for i := range aLen {
 			a := actualValue.Index(i).Interface()
 			b := expectedValue.Index(i).Interface()
 

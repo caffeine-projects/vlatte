@@ -18,8 +18,10 @@ import (
 
 var _ vlatte.EventListener[vlatte.OnComplete] = (*WebHook)(nil)
 
-var ErrBadArg = errors.New("webhook: bad argument")
-var ErrRenderingTemplate = errors.New("webhook: rendering error")
+var (
+	ErrBadArg            = errors.New("webhook: bad argument")
+	ErrRenderingTemplate = errors.New("webhook: rendering error")
+)
 
 type Option func(*WebHook) error
 
@@ -165,7 +167,7 @@ type Args struct {
 }
 
 func ArgsFromMap(m map[string]any) (*Args, error) {
-	var r = configutil.New(m)
+	r := configutil.New(m)
 	var err error
 
 	if err = r.Either("url", "url_template"); err != nil {

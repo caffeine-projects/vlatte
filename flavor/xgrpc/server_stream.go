@@ -107,7 +107,7 @@ func (r *BuiltInServerStreamReply[T]) build(ctx context.Context, values *StreamR
 	case io.Reader:
 		scan := bufio.NewScanner(s)
 		msgType := reflect.New(reflect.TypeOf(r.response.MsgType).Elem())
-		msg, ok := msgType.Interface().(proto.Message)
+		msg, ok := reflect.TypeAssert[proto.Message](msgType)
 		if !ok {
 			return fmt.Errorf("server_stream: io.Reader must provide proto messages")
 		}

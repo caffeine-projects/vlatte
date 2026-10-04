@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	. "github.com/caffeine-projects/vlatte/flavor/xhttp"
 	"github.com/caffeine-projects/vlatte/filter"
+	. "github.com/caffeine-projects/vlatte/flavor/xhttp"
 )
 
 func TestResponseDelay(t *testing.T) {
@@ -57,7 +57,6 @@ func TestResponseDelay_SetupFromFile(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 

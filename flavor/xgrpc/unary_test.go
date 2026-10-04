@@ -9,8 +9,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
-	pb "github.com/caffeine-projects/vlatte/flavor/xgrpc/internal/protobuf"
 	. "github.com/caffeine-projects/vlatte/filter"
+	pb "github.com/caffeine-projects/vlatte/flavor/xgrpc/internal/protobuf"
 )
 
 func TestUnary(t *testing.T) {

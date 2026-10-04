@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	. "github.com/caffeine-projects/vlatte/filter"
 	. "github.com/caffeine-projects/vlatte/flavor/xhttp"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/httpval"
-	. "github.com/caffeine-projects/vlatte/filter"
 )
 
 func TestPostJSON(t *testing.T) {
@@ -97,8 +97,8 @@ func TestPostJSON(t *testing.T) {
 
 		defer m.Close()
 
-		data1 := map[string]interface{}{"ok": true, "name": "dev"}
-		data2 := map[string]interface{}{"ok": true, "name": "dev"}
+		data1 := map[string]any{"ok": true, "name": "dev"}
+		data2 := map[string]any{"ok": true, "name": "dev"}
 
 		scoped := m.MustMock(Post(URLPath("/test")).
 			Header("test", StrictEqual("hello")).
@@ -130,7 +130,7 @@ func TestPostJSON(t *testing.T) {
 
 		defer m.Close()
 
-		toMatch := map[string]interface{}{"name": "dev", "ok": true}
+		toMatch := map[string]any{"name": "dev", "ok": true}
 		data := model{Name: "dev", OK: true}
 
 		scoped := m.MustMock(Post(URLPath("/test")).
@@ -158,8 +158,8 @@ func TestPostJSON(t *testing.T) {
 
 		defer m.Close()
 
-		body := map[string]interface{}{"ok": true, "name": "dev"}
-		exp := map[string]interface{}{"ok": false, "name": "qa"}
+		body := map[string]any{"ok": true, "name": "dev"}
+		exp := map[string]any{"ok": false, "name": "qa"}
 
 		scoped := m.MustMock(Post(URLPath("/test")).
 			Header("test", StrictEqual("hello")).
@@ -292,7 +292,6 @@ func TestSimpleJSONValues(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			scoped := m.MustMock(Postf("/test").Body(JSONPath("$", Eq(tc.value))).Reply(Status(tc.status)))
 

@@ -22,7 +22,6 @@ func TestEither(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			ok, err := Either(tc.matchers[0], tc.matchers[1]).Match(vlatte.NewFilterArg(t.Context(), explain.New(), "test"))
 			require.NoError(t, err)

@@ -5,6 +5,8 @@ run:
 linters:
   disable:
     - errcheck
+  enable:
+    - modernize
   exclusions:
     generated: lax
     presets:

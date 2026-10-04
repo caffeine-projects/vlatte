@@ -55,7 +55,7 @@ func TestRace(t *testing.T) {
 	jobs := 10
 	wg := sync.WaitGroup{}
 
-	for i := 0; i < jobs; i++ {
+	for i := range jobs {
 		wg.Add(1)
 
 		key := "key--" + strconv.FormatInt(int64(i), 10)

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"golang.org/x/net/http2"
 
 	. "github.com/caffeine-projects/vlatte/flavor/xhttp"
 )
@@ -23,12 +22,16 @@ func TestHTTP2(t *testing.T) {
 
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM(caCert)
-	client := &http.Client{
-		Transport: &http2.Transport{TLSClientConfig: &tls.Config{
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
 			RootCAs:      caCertPool,
 			Certificates: []tls.Certificate{cert},
-		}},
+		},
+		Protocols: new(http.Protocols),
 	}
+	tr.Protocols.SetHTTP2(true)
+	t.Cleanup(tr.CloseIdleConnections)
+	client := &http.Client{Transport: tr}
 
 	m := New(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
 	t.Cleanup(func() { m.Close() })

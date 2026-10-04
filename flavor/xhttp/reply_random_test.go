@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -15,9 +16,10 @@ func TestRandomReplies(t *testing.T) {
 	rv := &RequestValues{RawRequest: req, URL: req.URL, App: New()}
 	input := ReplyInput{RequestValues: rv, Writer: nil}
 	statuses := []int{
-		http.StatusOK, http.StatusInternalServerError, http.StatusCreated, http.StatusBadRequest}
+		http.StatusOK, http.StatusInternalServerError, http.StatusCreated, http.StatusBadRequest,
+	}
 
-	for i := 0; i < 5000; i++ {
+	for range 5000 {
 		res, err := Rand(
 			BadRequest(),
 			OK(),
@@ -25,13 +27,7 @@ func TestRandomReplies(t *testing.T) {
 			Add(InternalServerError()).
 			Reply(context.Background(), input)
 
-		contains := false
-		for _, status := range statuses {
-			if status == res.StatusCode {
-				contains = true
-				break
-			}
-		}
+		contains := slices.Contains(statuses, res.StatusCode)
 
 		require.Nil(t, err)
 		require.True(t, contains)
@@ -46,12 +42,13 @@ func TestRandWithCustom(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
 	rv := &RequestValues{RawRequest: req, URL: req.URL, App: New()}
 	statuses := []int{
-		http.StatusOK, http.StatusInternalServerError, http.StatusCreated, http.StatusBadRequest}
+		http.StatusOK, http.StatusInternalServerError, http.StatusCreated, http.StatusBadRequest,
+	}
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	input := ReplyInput{RequestValues: rv, Writer: nil}
-	for i := 0; i < 5000; i++ {
+	for range 5000 {
 		res, err := RandWith(
 			r,
 			BadRequest(),
@@ -60,13 +57,7 @@ func TestRandWithCustom(t *testing.T) {
 			InternalServerError(),
 		).Reply(context.Background(), input)
 
-		contains := false
-		for _, status := range statuses {
-			if status == res.StatusCode {
-				contains = true
-				break
-			}
-		}
+		contains := slices.Contains(statuses, res.StatusCode)
 
 		require.Nil(t, err)
 		require.True(t, contains)

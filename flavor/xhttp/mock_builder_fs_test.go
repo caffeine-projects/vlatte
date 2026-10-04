@@ -10,8 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type customMockFileHandler struct {
-}
+type customMockFileHandler struct{}
 
 func (p *customMockFileHandler) Handle(v map[string]any, b *HTTPMockBuilder) error {
 	custom := v["custom"]
@@ -61,7 +60,6 @@ func TestBuilderFs_FromBytes(t *testing.T) {
 	httpClient := &http.Client{}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.filename, func(t *testing.T) {
 			m := New()
 			m.MustStart()
@@ -110,6 +108,7 @@ func TestBuilderFs_InvalidSchemaValid(t *testing.T) {
 	filenames := []string{
 		"testdata/builder_fs/invalid_schema/1_invalid_schema.yaml",
 		"testdata/builder_fs/invalid_schema/2_no_request.yaml",
+		"testdata/builder_fs/invalid_schema/3_invalid_schema.json",
 	}
 
 	for _, filename := range filenames {

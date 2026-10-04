@@ -1,14 +1,16 @@
 package test
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/go-jsonnet"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/require"
-	"github.com/xeipuuv/gojsonschema"
 )
 
 func TestJSONNet(t *testing.T) {
@@ -32,11 +34,19 @@ func TestJSONNet(t *testing.T) {
 	b, err = io.ReadAll(fschema)
 	require.NoError(t, err)
 
-	schema := gojsonschema.NewBytesLoader(b)
-	results, err := gojsonschema.Validate(schema, gojsonschema.NewStringLoader(j))
-
+	schemaDoc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
 	require.NoError(t, err)
-	require.Empty(t, results.Errors())
+
+	c := jsonschema.NewCompiler()
+	c.DefaultDraft(jsonschema.Draft2020)
+	require.NoError(t, c.AddResource("mem://vlatte/http.schema.json", schemaDoc))
+
+	schema, err := c.Compile("mem://vlatte/http.schema.json")
+	require.NoError(t, err)
+
+	doc, err := jsonschema.UnmarshalJSON(strings.NewReader(j))
+	require.NoError(t, err)
+	require.NoError(t, schema.Validate(doc))
 
 	fmt.Println(j)
 }

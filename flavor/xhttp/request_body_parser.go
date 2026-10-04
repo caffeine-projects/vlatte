@@ -8,8 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/httpval"

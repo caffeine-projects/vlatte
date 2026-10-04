@@ -17,7 +17,6 @@ func TestRecover(t *testing.T) {
 	}
 
 	ts := httptest.NewServer(New(func(_ error) {
-
 	}, http.StatusInternalServerError).Recover(http.HandlerFunc(fn)))
 	defer ts.Close()
 

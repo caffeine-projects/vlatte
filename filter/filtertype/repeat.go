@@ -12,7 +12,7 @@ import (
 // Repeat passes until the max number of matches is reached (stateful).
 type Repeat struct {
 	Max  int64
-	hits int64
+	hits atomic.Int64
 }
 
 // Name implements vlatte.Filter.
@@ -20,7 +20,7 @@ func (m *Repeat) Name() string { return "Repeat" }
 
 // Match implements vlatte.Filter.
 func (m *Repeat) Match(_ vlatte.FilterArg) (bool, error) {
-	if atomic.LoadInt64(&m.hits) < m.Max {
+	if m.hits.Load() < m.Max {
 		return true, nil
 	}
 
@@ -33,7 +33,7 @@ func (m *Repeat) Match(_ vlatte.FilterArg) (bool, error) {
 
 // SetState implements vlatte.Stateful.
 func (m *Repeat) SetState() error {
-	atomic.AddInt64(&m.hits, 1)
+	m.hits.Add(1)
 	return nil
 }
 

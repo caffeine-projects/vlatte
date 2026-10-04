@@ -17,18 +17,16 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/admin"
+	"github.com/caffeine-projects/vlatte/filter/mfeat"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/cors"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/mid"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/mid/recover"
-	"github.com/caffeine-projects/vlatte/filter/mfeat"
 	"github.com/caffeine-projects/vlatte/vlattecore/kv"
 	"github.com/caffeine-projects/vlatte/vlattecore/kv/kvmem"
 )
 
-var (
-	_ vlatte.Flavor[*HTTPMock, *HTTPMockApp] = (*HTTPMockApp)(nil)
-)
+var _ vlatte.Flavor[*HTTPMock, *HTTPMockApp] = (*HTTPMockApp)(nil)
 
 const (
 	Version = "1.0.0"
@@ -280,7 +278,6 @@ func (app *HTTPMockApp) Reload() error {
 // It panics if any error occurs.
 func (app *HTTPMockApp) MustReload() {
 	err := app.Reload()
-
 	if err != nil {
 		panic(fmt.Errorf("server: error reloading mock definitions. %w", err))
 	}

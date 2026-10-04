@@ -37,7 +37,7 @@ type UnaryResponse struct {
 
 func (in *Interceptors) UnaryInterceptor(
 	ctx context.Context,
-	reqMsg interface{},
+	reqMsg any,
 	info *grpc.UnaryServerInfo,
 	_ grpc.UnaryHandler,
 ) (any, error) {

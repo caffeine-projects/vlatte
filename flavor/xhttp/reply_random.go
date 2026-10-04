@@ -10,8 +10,10 @@ import (
 	"github.com/caffeine-projects/vlatte/vlattecore/descriptor"
 )
 
-var _ vlatte.Replier[ReplyInput, *Response] = (*RandomReply)(nil)
-var _randomMu sync.Mutex
+var (
+	_         vlatte.Replier[ReplyInput, *Response] = (*RandomReply)(nil)
+	_randomMu sync.Mutex
+)
 
 // RandomReply configures a Replier that serves random HTTP responses.
 type RandomReply struct {

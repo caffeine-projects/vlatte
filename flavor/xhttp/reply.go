@@ -381,7 +381,7 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Respon
 
 	response := rep.response
 	hasTemplate := rep.teType&_teBody != 0 || rep.teType&_teBodyFilename != 0 || len(rep.headerWithTemplate) > 0
-	tmplData := (any)(nil)
+	tmplData := any(nil)
 	if hasTemplate {
 		tmplData = r.Data
 	}

@@ -24,30 +24,61 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
 
+    # The exact go.mod version: golangci-lint supports only Go versions up to the one it was
+    # built with, and type-checking against the minimum supported Go catches too-new APIs.
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
         go-version-file: 'go.mod'
-        cache: true
 
-    - name: Deps
-      run: make deps
+    - name: Check go.mod
+      run: go mod tidy -diff
+
+    - name: Check formatting
+      run: |
+        unformatted="$(go tool gofumpt -l .)"
+        if [ -n "$unformatted" ]; then
+          echo "::error::files not formatted with gofumpt (run 'make fmt'):"
+          echo "$unformatted"
+          exit 1
+        fi
 
     - name: Lint
-      uses: golangci/golangci-lint-action@v8
+      uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
       with:
-        version: v2.12.2
+        version: v2.14.0 # keep in sync with GOLANGCI_LINT_VERSION in the Makefile
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Set up Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: 'stable'
 
     - name: Test
       run: make testci
 
+    # Dependabot-triggered runs get no Actions secrets.
     - name: Coverage
-      uses: codecov/codecov-action@v5
+      if: github.actor != 'dependabot[bot]'
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./coverage.txt
+        disable_search: true

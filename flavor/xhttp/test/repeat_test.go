@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -67,7 +67,7 @@ func TestRepeat_FileSetup(t *testing.T) {
 
 	httpClient := &http.Client{}
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		res, err := httpClient.Get(m.URL("test"))
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())

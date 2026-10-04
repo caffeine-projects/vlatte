@@ -48,7 +48,7 @@ func main() {
 		log.Fatalf("failed to encode certificate to PEM")
 	}
 
-	if err = os.WriteFile("cert.pem", pemCert, 0644); err != nil {
+	if err = os.WriteFile("cert.pem", pemCert, 0o644); err != nil {
 		log.Fatalf("error writing the cert to file: %v", err)
 	}
 
@@ -62,7 +62,7 @@ func main() {
 		log.Fatalf("failed to encode key to PEM")
 	}
 
-	if err = os.WriteFile("key.pem", pemKey, 0600); err != nil {
+	if err = os.WriteFile("key.pem", pemKey, 0o600); err != nil {
 		log.Fatalf("error writing the key: %v", err)
 	}
 }

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/httpval"
-	"github.com/caffeine-projects/vlatte/filter"
-	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
 )
 
@@ -126,7 +126,6 @@ func TestFormUrlEncoded_FromFileMock(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			req, _ := http.NewRequest(http.MethodPost, m.URL()+"/test", strings.NewReader(tc.data().Encode()))
 			req.Header.Add(httpval.HeaderContentType, httpval.MIMEFormURLEncoded)

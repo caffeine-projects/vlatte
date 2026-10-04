@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/jwalton/gchalk"
-	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/bufpool"
@@ -44,7 +43,7 @@ func (h *builtInMockHTTPLifecycle) OnRequest(r *RequestValues) {
 	}
 
 	evt := h.app.logger.Info().Str("url", r.URL.String())
-	req := zerolog.Dict()
+	req := evt.CreateDict()
 
 	if h.app.config.LogVerbosity >= vlatte.LogHeader {
 		redactedHeader := redactHeader(r.RawRequest.Header, h.app.config.HeaderNamesToRedact)
@@ -68,12 +67,12 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *Response) {
 		Str("url", r.URL.String()).
 		Dur("elapsed", time.Since(r.StartedAtTime))
 
-	dict := zerolog.Dict().Str("id", r.Mock.ID())
+	dict := evt.CreateDict().Str("id", r.Mock.ID())
 	if r.Mock.Name() != "" {
 		dict.Str("name", r.Mock.Name())
 	}
 
-	res := zerolog.Dict().Int("status", s.StatusCode)
+	res := evt.CreateDict().Int("status", s.StatusCode)
 
 	if h.app.config.LogVerbosity >= vlatte.LogHeader {
 		redactedHeader := redactHeader(s.Header, h.app.config.HeaderNamesToRedact)
