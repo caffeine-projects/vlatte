@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -50,6 +51,7 @@ type Config struct {
 
 	// HTTP-specific fields
 	Addr                           string
+	Listener                       net.Listener
 	UseHTTP2                       bool
 	RequestWasNotMatchedStatusCode int
 	RequestBodyParsers             []RequestBodyParser
@@ -119,6 +121,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.TemplateDataProviders = c.TemplateDataProviders
 	conf.DebugFn = c.DebugFn
 	conf.Addr = c.Addr
+	conf.Listener = c.Listener
 	conf.UseHTTP2 = c.UseHTTP2
 	conf.RequestWasNotMatchedStatusCode = c.RequestWasNotMatchedStatusCode
 	conf.RequestBodyParsers = c.RequestBodyParsers
@@ -192,6 +195,13 @@ func (cb *ConfigBuilder) Name(name string) *ConfigBuilder {
 // Addr sets a custom address for the mock HTTP server.
 func (cb *ConfigBuilder) Addr(addr string) *ConfigBuilder {
 	cb.conf.Addr = addr
+	return cb
+}
+
+// Listener sets an already bound listener for the mock HTTP server to serve instead of listening on Addr.
+// The server closes it on Close, so a later start listens again on its address.
+func (cb *ConfigBuilder) Listener(l net.Listener) *ConfigBuilder {
+	cb.conf.Listener = l
 	return cb
 }
 

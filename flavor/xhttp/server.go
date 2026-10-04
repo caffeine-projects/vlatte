@@ -26,11 +26,12 @@ type ServerFactoryConfig struct {
 }
 
 type httpTestServer struct {
-	app     *HTTPMockApp
-	handler http.Handler
-	server  *httptest.Server
-	info    *vlatte.ServerInfo
-	rwMutex sync.RWMutex
+	app      *HTTPMockApp
+	handler  http.Handler
+	server   *httptest.Server
+	info     *vlatte.ServerInfo
+	listener net.Listener // the configured Listener, until a start serves it
+	rwMutex  sync.RWMutex
 }
 
 type httpTestServerFactory struct{}
@@ -41,9 +42,10 @@ func newServerFactory() vlatte.ServerFactory[ServerFactoryConfig] {
 
 func (f *httpTestServerFactory) Server(config ServerFactoryConfig) (vlatte.Server, error) {
 	s := &httpTestServer{
-		app:     config.App,
-		handler: config.Handler,
-		info:    &vlatte.ServerInfo{},
+		app:      config.App,
+		handler:  config.Handler,
+		info:     &vlatte.ServerInfo{},
+		listener: config.App.config.Listener,
 	}
 	return s, nil
 }
@@ -63,8 +65,19 @@ func (s *httpTestServer) build() error {
 
 	s.server = httptest.NewUnstartedServer(r)
 
-	if s.app.config.Addr != "" {
-		addr := s.app.config.Addr
+	addr := s.app.config.Addr
+	if l := s.app.config.Listener; l != nil {
+		// Close closes a configured Listener, so only the first start serves it. Later starts listen on its address.
+		addr = l.Addr().String()
+	}
+
+	if s.listener != nil {
+		if err := s.server.Listener.Close(); err != nil {
+			return err
+		}
+
+		s.server.Listener, s.listener = s.listener, nil
+	} else if addr != "" {
 		if _, err := strconv.Atoi(addr); err == nil {
 			addr = ":" + addr
 		}

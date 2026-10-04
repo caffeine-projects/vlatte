@@ -192,3 +192,22 @@ func TestNew_ReturnsErrors(t *testing.T) {
 
 	require.Panics(t, func() { MustNew(failingConfigurer{}) })
 }
+
+func TestListener(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}).Listener(l))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	// The server serves the given listener instead of listening on Addr.
+	require.Equal(t, l.Addr().String(), m.Addr())
+
+	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	_, err = pb.NewTestServiceClient(conn).Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+}

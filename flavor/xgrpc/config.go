@@ -1,6 +1,8 @@
 package xgrpc
 
 import (
+	"net"
+
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 )
@@ -10,6 +12,7 @@ type Config struct {
 	ServiceDesc   *grpc.ServiceDesc
 	ServerOptions []grpc.ServerOption
 	Addr          string
+	Listener      net.Listener
 	Logger        *zerolog.Logger
 }
 
@@ -18,6 +21,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.ServiceDesc = c.ServiceDesc
 	conf.ServerOptions = c.ServerOptions
 	conf.Addr = c.Addr
+	conf.Listener = c.Listener
 	conf.Logger = c.Logger
 
 	return nil
@@ -56,6 +60,13 @@ func (cb *ConfigBuilder) Logger(logger *zerolog.Logger) *ConfigBuilder {
 // Addr sets a custom address for the mock GRPC server.
 func (cb *ConfigBuilder) Addr(addr string) *ConfigBuilder {
 	cb.conf.Addr = addr
+	return cb
+}
+
+// Listener sets an already bound listener for the mock GRPC server to serve instead of listening on Addr.
+// The server closes it on Close.
+func (cb *ConfigBuilder) Listener(l net.Listener) *ConfigBuilder {
+	cb.conf.Listener = l
 	return cb
 }
 

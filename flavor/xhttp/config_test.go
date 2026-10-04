@@ -262,3 +262,47 @@ func TestGlobalEventsAreApplied(t *testing.T) {
 	// Global on_complete events run for every matched request, after the response is written.
 	require.Eventually(t, func() bool { return fired.Load() == 1 }, 5*time.Second, 10*time.Millisecond)
 }
+
+// acceptCounter counts the connections accepted through a listener.
+type acceptCounter struct {
+	net.Listener
+	accepted atomic.Int32
+}
+
+func (l *acceptCounter) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err == nil {
+		l.accepted.Add(1)
+	}
+	return c, err
+}
+
+func TestListener(t *testing.T) {
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	l := &acceptCounter{Listener: inner}
+
+	m := MustNew(Setup().Listener(l))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/test").Reply(OK()))
+
+	get := func() {
+		t.Helper()
+		res, err := http.Get(m.URL("/test"))
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, http.StatusOK, res.StatusCode)
+	}
+
+	// The server serves the given listener itself, so its port is never free for another process to take.
+	get()
+	require.Equal(t, "http://"+inner.Addr().String(), m.URL())
+	require.Positive(t, l.accepted.Load())
+
+	// Close closes the listener: a restart listens again on its address.
+	m.Close()
+	m.MustStart()
+	get()
+	require.Equal(t, "http://"+inner.Addr().String(), m.URL())
+}

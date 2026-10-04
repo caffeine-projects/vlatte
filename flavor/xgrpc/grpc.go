@@ -87,9 +87,13 @@ func MustNew(config ...vlatte.Configurer[*Config]) *GRPCMockApp {
 
 // Start starts the mock server.
 func (app *GRPCMockApp) Start() error {
-	lis, err := net.Listen("tcp", app.config.Addr)
-	if err != nil {
-		return fmt.Errorf("server: Start: failed to create listener: %w", err)
+	lis := app.config.Listener
+	if lis == nil {
+		var err error
+		lis, err = net.Listen("tcp", app.config.Addr)
+		if err != nil {
+			return fmt.Errorf("server: Start: failed to create listener: %w", err)
+		}
 	}
 
 	app.addr = lis.Addr().String()
