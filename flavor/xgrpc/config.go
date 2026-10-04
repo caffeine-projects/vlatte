@@ -24,7 +24,7 @@ func (c *Config) Apply(conf *Config) error {
 }
 
 func defaultConfig() *Config {
-	return &Config{}
+	return &Config{Addr: "127.0.0.1:0"}
 }
 
 type ConfigBuilder struct {

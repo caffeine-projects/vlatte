@@ -3,6 +3,7 @@ package xgrpc
 import (
 	"bytes"
 	"context"
+	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -136,4 +137,15 @@ func TestUnmatchedCallsReturnNotFound(t *testing.T) {
 	require.NoError(t, err)
 	_, err = stream.Recv()
 	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+func TestDefaultAddrIsLoopback(t *testing.T) {
+	m := New()
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	host, _, err := net.SplitHostPort(m.Addr())
+	require.NoError(t, err)
+	// Binding every interface exposes the mock to the network and triggers firewall prompts on macOS.
+	require.Equal(t, "127.0.0.1", host)
 }
