@@ -387,6 +387,15 @@ func TestMochaConcurrentRequests(t *testing.T) {
 	require.EqualValues(t, 54*jobs, m.Hits())
 }
 
+func TestURL_InvalidPathPanicsInsteadOfExiting(t *testing.T) {
+	m := New()
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	// Path elements must already be escaped, so "50%" is invalid. A library must not exit the process.
+	require.Panics(t, func() { m.URL("50%") })
+}
+
 func TestSettingOnlyPort(t *testing.T) {
 	// Binding a custom address is covered by TestConfig; Port must produce a port-only address.
 	m := New(Setup().Port(12345))

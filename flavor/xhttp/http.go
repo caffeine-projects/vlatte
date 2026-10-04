@@ -239,8 +239,8 @@ func (app *HTTPMockApp) URL(paths ...string) string {
 
 	u, err := url.JoinPath(app.server.Info().URL, paths...)
 	if err != nil {
-		app.logger.Fatal().Err(err).
-			Msgf("server: building server url with path elements %s", paths)
+		// A library must not exit the process: panic so the caller (usually a test) reports it.
+		panic(fmt.Errorf("server: building server url with path elements %s: %w", paths, err))
 	}
 
 	return u
