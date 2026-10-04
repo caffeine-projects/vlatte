@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -62,14 +61,10 @@ func TestCLI(t *testing.T) {
 
 func TestDockerCLI(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(func() {
-		cancel()
-		_ = os.Unsetenv(_dockerHostEnv)
-	})
+	t.Cleanup(func() { cancel() })
+	t.Setenv(_dockerHostEnv, "localhost")
 
 	sc := http.StatusTeapot
-
-	require.NoError(t, os.Setenv(_dockerHostEnv, "localhost"))
 
 	go run(ctx)
 
