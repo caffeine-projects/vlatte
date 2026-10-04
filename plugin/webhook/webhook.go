@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -108,13 +110,42 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		method = http.MethodGet
 	}
 
-	u, err := url.Parse(webhookArgs.URL)
+	// Templates render with the data of the request that completed the mock.
+	var data any
+	if kit := args.Kit(); kit != nil {
+		data = kit.Data()
+	}
+
+	rawURL := webhookArgs.URL
+	if webhookArgs.URLTemplate != "" {
+		var err error
+		if rawURL, err = render("url_template", webhookArgs.URLTemplate, data); err != nil {
+			return err
+		}
+	}
+
+	u, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("webhook: error parsing %s: %w", webhookArgs.URL, err)
+		return fmt.Errorf("webhook: error parsing %s: %w", rawURL, err)
 	}
 
 	var body io.Reader
-	if len(webhookArgs.Body) > 0 {
+	switch {
+	case webhookArgs.BodyTemplate != "":
+		b, err := render("body_template", webhookArgs.BodyTemplate, data)
+		if err != nil {
+			return err
+		}
+
+		body = strings.NewReader(b)
+	case webhookArgs.BodyFile != "":
+		b, err := os.ReadFile(webhookArgs.BodyFile)
+		if err != nil {
+			return fmt.Errorf("webhook: error reading body_file %s: %w", webhookArgs.BodyFile, err)
+		}
+
+		body = bytes.NewReader(b)
+	case len(webhookArgs.Body) > 0:
 		body = strings.NewReader(webhookArgs.Body)
 	}
 
@@ -134,6 +165,15 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 	for k, v := range webhookArgs.Header {
 		req.Header.Set(k, v)
+	}
+
+	for k, v := range webhookArgs.HeaderTemplate {
+		rendered, err := render("header_template "+k, v, data)
+		if err != nil {
+			return err
+		}
+
+		req.Header.Set(k, rendered)
 	}
 
 	res, err := w.RoundTripper.RoundTrip(req)
@@ -167,6 +207,8 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 // Args configures a WebHook HTTP request.
 // It is parsed from the parameters in the event config (e.g. mock definition).
+// URLTemplate, the HeaderTemplate values and BodyTemplate are Go templates,
+// rendered with the data of the request that completed the mock.
 type Args struct {
 	URL            string
 	URLTemplate    string
@@ -174,6 +216,7 @@ type Args struct {
 	Header         map[string]string
 	HeaderTemplate map[string]string
 	Body           string
+	BodyTemplate   string
 	BodyFile       string
 	LogLevel       int
 }
@@ -192,14 +235,31 @@ func ArgsFromMap(m map[string]any) (*Args, error) {
 
 	args := new(Args)
 	args.URL = r.Str("url", "")
+	args.URLTemplate = r.Str("url_template", "")
 	args.Method = r.Str("method", "")
 	args.Header = r.StrMap("header")
 	args.HeaderTemplate = r.StrMap("header_template")
 	args.Body = r.Str("body", "")
+	args.BodyTemplate = r.Str("body_template", "")
 	args.BodyFile = r.Str("body_file", "")
 	args.LogLevel = r.Int("log_level", int(zerolog.ErrorLevel))
 
 	return args, nil
+}
+
+// render executes text as a Go template with the given data.
+func render(name, text string, data any) (string, error) {
+	t, err := template.New(name).Parse(text)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrRenderingTemplate, err)
+	}
+
+	var b strings.Builder
+	if err = t.Execute(&b, data); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrRenderingTemplate, err)
+	}
+
+	return b.String(), nil
 }
 
 func errorBadArg(cause error) error {
