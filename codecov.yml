@@ -1,0 +1,3 @@
+
+ignore:
+  - "flavor/xhttp/test/internal/testcert" # test-only certificate generator
