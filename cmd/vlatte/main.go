@@ -60,6 +60,11 @@ func run(ctx context.Context, custom ...vlatte.Configurer[*xhttp.Config]) {
 
 	configurers = append(configurers, xhttp.UseLocals())
 
+	fileExists := func(path string) bool { _, err := os.Stat(path); return err == nil }
+	for _, warning := range legacyWarnings(os.Environ(), xhttp.DefaultConfigDirectories, fileExists) {
+		_, _ = fmt.Fprintln(os.Stderr, "warning:", warning)
+	}
+
 	_, exists := os.LookupEnv(_dockerHostEnv)
 	if exists {
 		configurers = append(configurers, &dockerConfigurer{})
