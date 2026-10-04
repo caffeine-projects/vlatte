@@ -91,7 +91,7 @@ func TestRequestBodyParsers_Parse(t *testing.T) {
 }
 
 func TestRequestBodyParser_Limit(t *testing.T) {
-	m := New(Setup().MaxBodyParsingLimit(5))
+	m := MustNew(Setup().MaxBodyParsingLimit(5))
 	m.MustMock(Postf("/test").Body(Eq("hello")).Reply(Func(func(w http.ResponseWriter, rv *RequestValues) (*Response, error) {
 		require.Equal(t, "hello", rv.ParsedBodyData.(string))
 		return &Response{StatusCode: http.StatusOK, Body: []byte(rv.ParsedBodyData.(string))}, nil
@@ -109,4 +109,15 @@ func TestRequestBodyParser_Limit(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func TestParseURL_SegmentsExcludeQuery(t *testing.T) {
+	r, err := http.NewRequest(http.MethodGet, "http://localhost/a/b?x=1", nil)
+	require.NoError(t, err)
+
+	u, segments := parseURL(r, "http://localhost")
+
+	// Path segments come from the path only; the query stays in the full URL.
+	require.Equal(t, []string{"a", "b"}, segments)
+	require.Equal(t, "x=1", u.RawQuery)
 }

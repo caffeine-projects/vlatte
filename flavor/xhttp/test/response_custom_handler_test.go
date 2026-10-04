@@ -21,7 +21,7 @@ func TestHandlerReply(t *testing.T) {
 		w.Write([]byte(msg))
 	}
 
-	m := xhttp.New()
+	m := xhttp.MustNew()
 	m.MustStart()
 
 	defer m.Close()

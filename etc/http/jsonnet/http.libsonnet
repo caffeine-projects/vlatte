@@ -2,7 +2,7 @@ local header = import './http_header.libsonnet';
 local mediaTypes = import './http_media_types.libsonnet';
 local method = import './http_method.libsonnet';
 local statuses = import './http_status.libsonnet';
-local dz = import './internal/internal.libsonnet';
+local internal = import './internal/internal.libsonnet';
 local scheme = import './scheme.libsonnet';
 
 (scheme) +
@@ -12,7 +12,7 @@ local scheme = import './scheme.libsonnet';
 (statuses) +
 
 {
-  mock(v):: dz.merge(v),
+  mock(v):: internal.merge(v),
 
   id(id):: { id: id },
   name(n):: { name: n },
@@ -23,7 +23,7 @@ local scheme = import './scheme.libsonnet';
   repeat(r):: { [if !std.isNumber(r) then error 'repeat must be a number' else 'repeat']: r },
   scenario(name, requiredState='', newState=''):: { scenario: { name: name, [if std.isString(requiredState) && !std.isEmpty(requiredState) then 'required_state']: requiredState, [if std.isString(newState) && !std.isEmpty(newState) then 'new_state']: newState } },
 
-  request(fields):: { request: dz.merge(fields) },
+  request(fields):: { request: internal.merge(fields) },
   req: {
     scheme(matcher):: { scheme: matcher },
     isHTTP():: self.scheme(scheme.SchemeHTTP),
@@ -49,7 +49,7 @@ local scheme = import './scheme.libsonnet';
     body(matcher):: { body: matcher },
   },
 
-  response(v):: { response: dz.merge(v) },
+  response(v):: { response: internal.merge(v) },
   res: {
     status(code):: { status: code },
     ok():: self.status(statuses.StatusOK),
@@ -61,14 +61,14 @@ local scheme = import './scheme.libsonnet';
     encoding(e):: { encoding: e },
     gzip():: self.encoding('gzip'),
 
-    sequence(list):: { response_sequence: dz.merge(list) },
+    sequence(list):: { response_sequence: internal.merge(list) },
     seq: {
       afterEnded(reply): { after_ended: reply },
     },
   },
 
   postAction(name, parameters=null):: { name: name, [if std.type(parameters) != 'null' then 'parameters']: parameters },
-  postActions(actions):: { [if !std.isArray(actions) then error 'postActions expects an array of post actions' else 'post_actions']: actions },
+  postActions(actions):: { [if !std.isArray(actions) then error 'postActions expects an array of post actions' else 'on_complete']: actions },
 
   ext(v):: { ext: v },
 }

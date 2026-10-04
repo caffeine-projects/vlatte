@@ -1,0 +1,7 @@
+request:
+  path: /items.json
+  method: GET
+
+proxy:
+  target: '{{ .Data.target }}'
+  trim_suffix: .json

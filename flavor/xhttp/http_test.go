@@ -1,20 +1,22 @@
 package xhttp
 
 import (
+	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
 	"github.com/caffeine-projects/vlatte"
 	. "github.com/caffeine-projects/vlatte/filter"
-	"github.com/caffeine-projects/vlatte/flavor/xhttp/test/testmock"
+	"github.com/caffeine-projects/vlatte/internal/testmock"
 	"github.com/caffeine-projects/vlatte/vlattecore/kv/kvmem"
 )
 
@@ -26,8 +28,8 @@ func TestMain(m *testing.M) {
 	)
 }
 
-func TestMocha(t *testing.T) {
-	m := New()
+func TestHTTPMockApp(t *testing.T) {
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -62,7 +64,7 @@ func TestResponseMapperModifyingResponse(t *testing.T) {
 	err := kv.Set(t.Context(), k, []byte(v))
 	require.NoError(t, err)
 
-	m := New(Setup().Parameters(kv))
+	m := MustNew(Setup().Parameters(kv))
 	m.MustStart()
 
 	defer m.Close()
@@ -91,7 +93,7 @@ func TestResponseMapperModifyingResponse(t *testing.T) {
 }
 
 func TestErrors(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -111,8 +113,8 @@ func TestErrors(t *testing.T) {
 	require.Equal(t, StatusNoMatch, res.StatusCode)
 }
 
-func TestMochaAssertions(t *testing.T) {
-	m := New()
+func TestHTTPMockAppAssertions(t *testing.T) {
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -140,8 +142,8 @@ func TestMochaAssertions(t *testing.T) {
 	require.EqualValues(t, 1, m.Hits())
 }
 
-func TestMochaEnableDisable(t *testing.T) {
-	m := New()
+func TestHTTPMockAppEnableDisable(t *testing.T) {
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -185,8 +187,8 @@ func TestMochaEnableDisable(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 }
 
-func TestMochaSilently(t *testing.T) {
-	m := New(Setup().LogVerbosity(vlatte.LogBasic).LogLevel(vlatte.LogLevelNone))
+func TestHTTPMockAppSilently(t *testing.T) {
+	m := MustNew(Setup().LogVerbosity(vlatte.LogBasic).LogLevel(vlatte.LogLevelNone))
 	m.MustStart()
 
 	defer m.Close()
@@ -211,7 +213,7 @@ func TestMochaSilently(t *testing.T) {
 }
 
 func TestSchemeMatching(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -230,24 +232,24 @@ func TestSchemeMatching(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 }
 
-func TestMochaNoReply(t *testing.T) {
-	m := New()
+func TestHTTPMockAppNoReply(t *testing.T) {
+	m := MustNew()
 
 	scoped, err := m.Mock(Get(URLPath("/test")))
 	require.Nil(t, scoped)
 	require.Error(t, err)
 }
 
-func TestMochaNoMatchers(t *testing.T) {
-	m := New()
+func TestHTTPMockAppNoMatchers(t *testing.T) {
+	m := MustNew()
 
 	scoped, err := m.Mock(Request())
 	require.Nil(t, scoped)
 	require.Error(t, err)
 }
 
-func TestMocha_RequestMatches(t *testing.T) {
-	m := New()
+func TestHTTPMockApp_RequestMatches(t *testing.T) {
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -281,8 +283,8 @@ func TestMocha_RequestMatches(t *testing.T) {
 	require.Equal(t, StatusNoMatch, res.StatusCode)
 }
 
-func TestMochaConcurrency(t *testing.T) {
-	m := New()
+func TestHTTPMockAppConcurrency(t *testing.T) {
+	m := MustNew()
 	jobs := 10
 	wg := sync.WaitGroup{}
 
@@ -322,55 +324,51 @@ func TestMochaConcurrency(t *testing.T) {
 	t.Log("done")
 }
 
-func TestMochaConcurrentRequests(t *testing.T) {
+func TestHTTPMockAppConcurrentRequests(t *testing.T) {
 	jobs := 20
 	wg := sync.WaitGroup{}
 	httpClient := &http.Client{}
 
-	m := New()
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
 
+	// get must not stop the goroutine with require: FailNow is only valid on the test goroutine.
+	get := func(path string) int {
+		res, err := httpClient.Get(m.URL() + path)
+		if !assert.NoError(t, err) {
+			return 0
+		}
+
+		assert.NoError(t, res.Body.Close())
+
+		return res.StatusCode
+	}
+
 	for i := range jobs {
-		wg.Add(1)
-		go func(index int) {
-			num := strconv.FormatInt(int64(index), 10)
+		wg.Go(func() {
+			num := strconv.FormatInt(int64(i), 10)
 
 			scope1 := m.MustMock(Getf("%s", "/test--"+num).Reply(OK()))
 			scope2 := m.MustMock(Getf("%s", "/concurrency--"+num).Reply(Accepted()))
 			scope3 := m.MustMock(Getf("%s", "/seq--"+num).Reply(Seq(OK(), BadRequest())))
 			scope4 := m.MustMock(Getf("%s", "/rand--"+num).Reply(Rand(Accepted(), InternalServerError())))
 
-			res, err := httpClient.Get(m.URL() + "/test--" + num)
-			require.NoError(t, err)
-			require.NoError(t, res.Body.Close())
-			require.Equal(t, http.StatusOK, res.StatusCode)
+			assert.Equal(t, http.StatusOK, get("/test--"+num))
 
 			m.MustMock(Getf("%s", "/test-after--"+num).Reply(BadRequest()))
 
-			res, err = httpClient.Get(m.URL() + "/concurrency--" + num)
-			require.NoError(t, err)
-			require.NoError(t, res.Body.Close())
-			require.Equal(t, http.StatusAccepted, res.StatusCode)
+			assert.Equal(t, http.StatusAccepted, get("/concurrency--"+num))
 
 			m.MustMock(Getf("%s", "/concurrency-after--"+num).Reply(InternalServerError()))
 
-			res, err = httpClient.Get(m.URL() + "/seq--" + num)
-			require.NoError(t, err)
-			require.NoError(t, res.Body.Close())
-			require.Equal(t, http.StatusOK, res.StatusCode)
-
-			res, err = httpClient.Get(m.URL() + "/seq--" + num)
-			require.NoError(t, err)
-			require.NoError(t, res.Body.Close())
-			require.Equal(t, http.StatusBadRequest, res.StatusCode)
+			assert.Equal(t, http.StatusOK, get("/seq--"+num))
+			assert.Equal(t, http.StatusBadRequest, get("/seq--"+num))
 
 			for range 50 {
-				res, err = httpClient.Get(m.URL() + "/rand--" + num)
-				require.NoError(t, err)
-				require.NoError(t, res.Body.Close())
-				require.True(t, res.StatusCode == http.StatusAccepted || res.StatusCode == http.StatusInternalServerError)
+				code := get("/rand--" + num)
+				assert.True(t, code == http.StatusAccepted || code == http.StatusInternalServerError)
 			}
 
 			scope1.AssertCalled(t)
@@ -383,9 +381,7 @@ func TestMochaConcurrentRequests(t *testing.T) {
 			vlatte.Times(t, scope4, 50)
 
 			m.MustMock(Getf("%s", "/test-final--"+num).Reply(PartialContent()))
-
-			wg.Done()
-		}(i)
+		})
 	}
 
 	wg.Wait()
@@ -393,34 +389,64 @@ func TestMochaConcurrentRequests(t *testing.T) {
 	require.EqualValues(t, 54*jobs, m.Hits())
 }
 
-func TestSettingOnlyPort(t *testing.T) {
-	randomPort := func() int {
-		l, err := net.Listen("tcp", ":0")
-		require.NoError(t, err)
-		require.NoError(t, l.Close())
-
-		return l.Addr().(*net.TCPAddr).Port
-	}
-
-	port := randomPort()
-	m := New(Setup().Port(port))
-	t.Cleanup(func() { m.Close() })
-	m.MustStart()
-	m.MustMock(Getf("/test").Reply(OK()))
-
-	hc := &http.Client{}
-	res, err := hc.Get(m.URL("/test"))
-
+func TestDefaultLoggerIncludesServerName(t *testing.T) {
+	r, w, err := os.Pipe()
 	require.NoError(t, err)
-	require.NoError(t, res.Body.Close())
-	require.Equal(t, http.StatusOK, res.StatusCode)
-	require.Contains(t, m.URL(), strconv.FormatInt(int64(port), 10))
+
+	stdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = stdout })
+
+	log := (&HTTPMockApp{}).getLog(&Config{Name: "srv"})
+	log.Info().Msg("hello")
+	require.NoError(t, w.Close())
+
+	b, err := io.ReadAll(r)
+	require.NoError(t, err)
+	// Log lines must name the server, so the logs of several mock servers can be told apart.
+	require.Contains(t, string(b), `"server":"srv"`)
 }
 
-func TestMocha_Server(t *testing.T) {
-	m := New()
+func TestURL_InvalidPathPanicsInsteadOfExiting(t *testing.T) {
+	m := MustNew()
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	// Path elements must already be escaped, so "50%" is invalid. A library must not exit the process.
+	require.Panics(t, func() { m.URL("50%") })
+}
+
+func TestSettingOnlyPort(t *testing.T) {
+	// Binding a custom address is covered by TestConfig; Port must produce a port-only address.
+	m := MustNew(Setup().Port(12345))
+
+	require.Equal(t, ":12345", m.Config().Addr)
+}
+
+func TestHTTPMockApp_Server(t *testing.T) {
+	m := MustNew()
 	srv := m.Server()
 
 	require.NotNil(t, srv)
 	require.IsType(t, &httpTestServer{}, srv)
+}
+
+type failingConfigurer struct{}
+
+func (failingConfigurer) Apply(*Config) error { return errors.New("bad config") }
+
+type failingServerFactory struct{}
+
+func (failingServerFactory) Server(ServerFactoryConfig) (vlatte.Server, error) {
+	return nil, errors.New("no server")
+}
+
+func TestNew_ReturnsErrors(t *testing.T) {
+	_, err := New(failingConfigurer{})
+	require.ErrorContains(t, err, "bad config")
+
+	_, err = New(Setup().ServerFactory(failingServerFactory{}))
+	require.ErrorContains(t, err, "no server")
+
+	require.Panics(t, func() { MustNew(failingConfigurer{}) })
 }

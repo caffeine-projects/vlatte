@@ -25,12 +25,13 @@ const (
 	_tlsCertFile       = "./testdata/cert/cert.pem"
 	_tlsKeyFile        = "./testdata/cert/key.pem"
 	_tlsClientCertFile = "./testdata/cert/cert_client.pem"
+	_tlsClientKeyFile  = "./testdata/cert/key_client.pem"
 )
 
 func TestWebHook_Run(t *testing.T) {
 	name := "webhook"
 	key := "test_key"
-	target := xhttp.New(xhttp.Setup().Silent())
+	target := xhttp.MustNew(xhttp.Setup().Silent())
 	target.MustStart()
 	defer target.Close()
 
@@ -160,7 +161,7 @@ func TestWebHook_Run(t *testing.T) {
 			wh, err := webhook.New(tc.options...)
 			require.NoError(t, err)
 
-			m := xhttp.New(xhttp.Setup().Silent().OnCompleteListener(name, wh))
+			m := xhttp.MustNew(xhttp.Setup().Silent().OnCompleteListener(name, wh))
 			m.MustStart()
 			defer m.Close()
 			defer target.Clean(t.Context())
@@ -187,16 +188,16 @@ func TestWebHook_Run(t *testing.T) {
 func TestWebHook_TLS(t *testing.T) {
 	name := "webhook"
 	key := "test_key"
-	cert, err := tls.LoadX509KeyPair(_tlsCertFile, _tlsKeyFile)
+	cert, err := tls.LoadX509KeyPair(_tlsClientCertFile, _tlsClientKeyFile)
 	require.NoError(t, err)
 
-	caCert, err := os.ReadFile(filepath.Clean(_tlsClientCertFile))
+	caCert, err := os.ReadFile(filepath.Clean(_tlsCertFile))
 	require.NoError(t, err)
 
 	certPool := x509.NewCertPool()
 	certPool.AppendCertsFromPEM(caCert)
 
-	whSrv := xhttp.New(xhttp.Setup().Silent().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
+	whSrv := xhttp.MustNew(xhttp.Setup().Silent().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
 	whSrv.MustStartTLS()
 	defer whSrv.Close()
 
@@ -214,7 +215,7 @@ func TestWebHook_TLS(t *testing.T) {
 	}))
 	require.NoError(t, err)
 
-	m := xhttp.New(xhttp.Setup().
+	m := xhttp.MustNew(xhttp.Setup().
 		Silent().
 		TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile).
 		OnCompleteListener(name, wh))
@@ -253,7 +254,7 @@ func TestWebHook_TLS(t *testing.T) {
 
 func TestWebHook_FaultTarget(t *testing.T) {
 	name := "webhook"
-	target := xhttp.New()
+	target := xhttp.MustNew()
 	target.MustStart()
 	defer target.Close()
 
@@ -261,9 +262,10 @@ func TestWebHook_FaultTarget(t *testing.T) {
 		Delay(vlatte.Latency(1 * time.Minute)).
 		Reply(xhttp.OK().PlainText("hello")))
 
-	wh, err := webhook.New()
+	// The target never answers in time: the webhook call fails, but the mocked response must still be served.
+	wh, err := webhook.New(webhook.WithRoundTripper(&http.Transport{ResponseHeaderTimeout: 100 * time.Millisecond}))
 	require.NoError(t, err)
-	m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
+	m := xhttp.MustNew(xhttp.Setup().OnCompleteListener(name, wh))
 	m.MustStart()
 	defer m.Close()
 
@@ -275,26 +277,6 @@ func TestWebHook_FaultTarget(t *testing.T) {
 		Reply(xhttp.NoContent()))
 
 	client := &http.Client{}
-	timeout := 2 * time.Second
-	exit := make(chan struct{}, 1)
-	ti := time.AfterFunc(timeout, func() { exit <- struct{}{} })
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-
-	defer cancel()
-	defer ti.Stop()
-
-	go func() {
-		for {
-			select {
-			case <-exit:
-				return
-			case <-ctx.Done():
-				target.Close()
-				return
-			}
-		}
-	}()
-
 	ctxReq, cancelReq := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelReq()
 
@@ -312,7 +294,7 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 	testCases := []any{make(chan struct{}), nil}
 
 	whSrv := xhttp.
-		New(xhttp.Setup().HTTPClient(func() *http.Client {
+		MustNew(xhttp.Setup().HTTPClient(func() *http.Client {
 			return client
 		}))
 	whSrv.MustStart()
@@ -323,7 +305,7 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
+	m := xhttp.MustNew(xhttp.Setup().OnCompleteListener(name, wh))
 	m.MustStart()
 	defer m.Close()
 
@@ -345,10 +327,8 @@ func TestWebHook_InvalidArgs(t *testing.T) {
 }
 
 func TestWebHook_FileSetup(t *testing.T) {
-	t.Skip("skipped until templating is fixed")
-
 	name := "webhook"
-	target := xhttp.New(xhttp.Setup())
+	target := xhttp.MustNew(xhttp.Setup())
 	target.MustStart()
 	defer target.Close()
 
@@ -362,7 +342,7 @@ func TestWebHook_FileSetup(t *testing.T) {
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
+	m := xhttp.MustNew(xhttp.Setup().OnCompleteListener(name, wh))
 	m.SetData(map[string]any{"webhook_target": target.URL("/fs/hook")})
 	m.MustStart()
 	defer m.Close()
@@ -395,12 +375,132 @@ func TestWebHook_InvalidFiles(t *testing.T) {
 			wh, err := webhook.New()
 			require.NoError(t, err)
 
-			m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
+			m := xhttp.MustNew(xhttp.Setup().OnCompleteListener(name, wh))
 			defer m.Close()
 
 			mock, err := m.Mock(xhttp.FromFile(tc.filename))
-			require.Error(t, err)
+			// The error must come from the on_complete definition itself, not from on_complete being unknown.
+			require.ErrorContains(t, err, "/on_complete")
 			require.Nil(t, mock)
 		})
 	}
+}
+
+func TestWebHook_DefaultTransportHasTimeouts(t *testing.T) {
+	wh, err := webhook.New()
+	require.NoError(t, err)
+
+	tr, ok := wh.RoundTripper.(*http.Transport)
+	require.True(t, ok)
+	// A bare http.Transport has no dial or TLS handshake timeouts: a stuck target could block forever.
+	require.NotNil(t, tr.DialContext)
+	require.NotZero(t, tr.TLSHandshakeTimeout)
+}
+
+func TestWebHook_Timeout(t *testing.T) {
+	name := "webhook"
+	target := xhttp.MustNew()
+	target.MustStart()
+	defer target.Close()
+
+	target.MustMock(xhttp.Getf("/hook/slow").
+		Delay(vlatte.Latency(1 * time.Minute)).
+		Reply(xhttp.OK()))
+
+	wh, err := webhook.New(webhook.WithTimeout(100 * time.Millisecond))
+	require.NoError(t, err)
+	m := xhttp.MustNew(xhttp.Setup().OnCompleteListener(name, wh))
+	m.MustStart()
+	defer m.Close()
+
+	m.MustMock(xhttp.Getf("/test").
+		OnCompleteEvent(webhook.Options().
+			URL(target.URL("/hook/slow")).
+			Method(http.MethodGet).
+			Build(name)).
+		Reply(xhttp.NoContent()))
+
+	// Without the webhook timeout, the slow target would hold the mocked response past the client timeout.
+	client := &http.Client{Timeout: 10 * time.Second}
+	res, err := client.Get(m.URL("/test"))
+
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusNoContent, res.StatusCode)
+}
+
+func TestWebHook_Templates(t *testing.T) {
+	name := "webhook"
+	target := xhttp.MustNew(xhttp.Setup().Silent())
+	target.MustStart()
+	defer target.Close()
+
+	// Templates render with the request that completed the mock: PUT /orders/42.
+	testCases := []struct {
+		name       string
+		targetMock *xhttp.HTTPMockBuilder
+		parameters map[string]any
+	}{
+		{
+			"url_template",
+			xhttp.Postf("/hooks/42").Reply(xhttp.OK()),
+			map[string]any{"method": "POST", "url_template": target.URL() + "/hooks/{{ index .Request.URLPathSegments 1 }}"},
+		},
+		{
+			"header_template",
+			xhttp.Postf("/hooks").Headerf("X-Method", "PUT").Reply(xhttp.OK()),
+			map[string]any{"method": "POST", "url": target.URL("/hooks"), "header_template": map[string]any{"X-Method": "{{ .Request.Method }}"}},
+		},
+		{
+			"body_template",
+			xhttp.Postf("/hooks").Body(Eq("order 42")).Reply(xhttp.OK()),
+			map[string]any{"method": "POST", "url": target.URL("/hooks"), "body_template": "order {{ index .Request.URLPathSegments 1 }}"},
+		},
+		{
+			"body_file",
+			xhttp.Postf("/hooks").Body(Eq("from a file\n")).Reply(xhttp.OK()),
+			map[string]any{"method": "POST", "url": target.URL("/hooks"), "body_file": "testdata/hook_body.txt"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			wh, err := webhook.New()
+			require.NoError(t, err)
+
+			m := xhttp.MustNew(xhttp.Setup().Silent().OnCompleteListener(name, wh))
+			m.MustStart()
+			defer m.Close()
+			defer target.Clean(t.Context())
+
+			target.MustMock(tc.targetMock)
+			m.MustMock(xhttp.Putf("/orders/42").
+				OnCompleteEvent(vlatte.EventConfig{Name: name, Parameters: tc.parameters}).
+				Reply(xhttp.NoContent()))
+
+			req, _ := http.NewRequest(http.MethodPut, m.URL("/orders/42"), nil)
+			res, err := http.DefaultClient.Do(req)
+
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, http.StatusNoContent, res.StatusCode)
+			require.True(t, target.AssertNumberOfCalls(t, 1))
+		})
+	}
+}
+
+// onComplete is a minimal event to call WebHook.Run directly.
+type onComplete struct{ params vlatte.Parameters }
+
+func (e onComplete) Kind() vlatte.Kind             { return vlatte.KindHTTP }
+func (e onComplete) Kit() vlatte.Kit               { return nil }
+func (e onComplete) Parameters() vlatte.Parameters { return e.params }
+func (e onComplete) Mock() vlatte.Mock             { return nil }
+
+func TestWebHook_TemplateErrors(t *testing.T) {
+	wh, err := webhook.New()
+	require.NoError(t, err)
+
+	err = wh.Run(t.Context(), onComplete{params: map[string]any{"url_template": "http://localhost/{{ .Nope"}})
+	require.ErrorIs(t, err, webhook.ErrRenderingTemplate)
 }

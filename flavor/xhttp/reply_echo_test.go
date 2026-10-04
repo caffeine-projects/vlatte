@@ -12,7 +12,7 @@ import (
 )
 
 func TestReplyEcho(t *testing.T) {
-	m := New()
+	m := MustNew()
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 

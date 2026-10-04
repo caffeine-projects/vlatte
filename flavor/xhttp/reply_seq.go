@@ -37,13 +37,19 @@ func (r *SequentialReply) Add(reply ...vlatte.Replier[ReplyInput, *Response]) *S
 	return r
 }
 
-func (r *SequentialReply) beforeBuild(_ *HTTPMockApp) error {
+func (r *SequentialReply) beforeBuild(app *HTTPMockApp) error {
 	size := len(r.replies)
 	if size == 0 {
 		return fmt.Errorf("reply_sequence: you need to set at least one response when using multiple sequential reply")
 	}
 
-	return nil
+	for _, reply := range r.replies {
+		if err := prepareReply(reply, app); err != nil {
+			return err
+		}
+	}
+
+	return prepareReply(r.replyAfterSequenceEnded, app)
 }
 
 // Reply implements vlatte.Replier[ReplyInput, *Response].

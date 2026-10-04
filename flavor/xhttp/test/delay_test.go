@@ -14,7 +14,7 @@ import (
 )
 
 func TestResponseDelay(t *testing.T) {
-	m := New()
+	m := MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -41,7 +41,7 @@ func TestResponseDelay_SetupFromFile(t *testing.T) {
 	t.Parallel()
 
 	httpClient := &http.Client{}
-	m := New()
+	m := MustNew()
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 
@@ -51,9 +51,9 @@ func TestResponseDelay_SetupFromFile(t *testing.T) {
 		path     string
 		delay    time.Duration
 	}{
-		{"duration string format", "testdata/delay/1_delay_duration_format.yaml", "/duration_string_format", 1 * time.Second},
-		{"duration number", "testdata/delay/2_delay_number.yaml", "/duration_number", 1 * time.Second},
-		{"duration float", "testdata/delay/3_delay_float.yaml", "/duration_float", time.Duration(1000.50 * float64(time.Millisecond))},
+		{"duration string format", "testdata/delay/1_delay_duration_format.yaml", "/duration_string_format", 100 * time.Millisecond},
+		{"duration number", "testdata/delay/2_delay_number.yaml", "/duration_number", 100 * time.Millisecond},
+		{"duration float", "testdata/delay/3_delay_float.yaml", "/duration_float", time.Duration(100.50 * float64(time.Millisecond))},
 	}
 
 	for _, tc := range testCases {

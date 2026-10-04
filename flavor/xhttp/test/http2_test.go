@@ -14,10 +14,10 @@ import (
 )
 
 func TestHTTP2(t *testing.T) {
-	cert, err := tls.LoadX509KeyPair(_tlsCertFile, _tlsKeyFile)
+	cert, err := tls.LoadX509KeyPair(_tlsClientCertFile, _tlsClientKeyFile)
 	require.NoError(t, err)
 
-	caCert, err := os.ReadFile(_tlsClientCertFile)
+	caCert, err := os.ReadFile(_tlsCertFile)
 	require.NoError(t, err)
 
 	caCertPool := x509.NewCertPool()
@@ -33,7 +33,7 @@ func TestHTTP2(t *testing.T) {
 	t.Cleanup(tr.CloseIdleConnections)
 	client := &http.Client{Transport: tr}
 
-	m := New(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
+	m := MustNew(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
 	t.Cleanup(func() { m.Close() })
 	m.MustStartTLS()
 	m.MustMock(Getf("/test").Reply(OK().PlainText("hello world")))

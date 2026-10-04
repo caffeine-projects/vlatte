@@ -10,25 +10,25 @@ import (
 	"github.com/caffeine-projects/vlatte/vlattecore/explain"
 )
 
-var _ vlatte.Mock = (*bean)(nil)
+var _ vlatte.Mock = (*testMock)(nil)
 
-type bean struct{}
+type testMock struct{}
 
-func (b *bean) ID() string                   { return "" }
-func (b *bean) Called() bool                 { return false }
-func (b *bean) Callbacks() []vlatte.Callback { return nil }
-func (b *bean) Name() string                 { return "" }
-func (b *bean) Priority() int                { return 0 }
-func (b *bean) Origin() string               { return "" }
-func (b *bean) Ext() any                     { return nil }
-func (b *bean) Inc()                         {}
-func (b *bean) Hits() int64                  { return 0 }
-func (b *bean) Enabled() bool                { return false }
-func (b *bean) Enable()                      {}
-func (b *bean) Disable()                     {}
-func (b *bean) Events() vlatte.Events        { return vlatte.Events{} }
-func (b *bean) Steps() []vlatte.Step         { return nil }
-func (b *bean) String() string               { return "" }
+func (b *testMock) ID() string                   { return "" }
+func (b *testMock) Called() bool                 { return false }
+func (b *testMock) Callbacks() []vlatte.Callback { return nil }
+func (b *testMock) Name() string                 { return "" }
+func (b *testMock) Priority() int                { return 0 }
+func (b *testMock) Origin() string               { return "" }
+func (b *testMock) Ext() any                     { return nil }
+func (b *testMock) Inc()                         {}
+func (b *testMock) Hits() int64                  { return 0 }
+func (b *testMock) Enabled() bool                { return false }
+func (b *testMock) Enable()                      {}
+func (b *testMock) Disable()                     {}
+func (b *testMock) Events() vlatte.Events        { return vlatte.Events{} }
+func (b *testMock) Steps() []vlatte.Step         { return nil }
+func (b *testMock) String() string               { return "" }
 
 func TestEval(t *testing.T) {
 	makeFilter := func(name, label string) vlatte.Filter {
@@ -56,6 +56,6 @@ func TestEval(t *testing.T) {
 	explainer := explain.New()
 	sub := explainer.Sub("matchers")
 
-	evals := vlatte.Evaluators[*bean, any]{&ev1, &ev2}
+	evals := vlatte.Evaluators[*testMock, any]{&ev1, &ev2}
 	evals.Eval(t.Context(), sub, nil)
 }

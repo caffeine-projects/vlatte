@@ -14,7 +14,7 @@ import (
 )
 
 func TestUnary(t *testing.T) {
-	m := New()
+	m := MustNew()
 	defer m.Close()
 	pb.RegisterTestServiceServer(m.Server(), pb.UnimplementedTestServiceServer{})
 	m.MustStart()
@@ -30,6 +30,7 @@ func TestUnary(t *testing.T) {
 	ctx = metadata.AppendToOutgoingContext(ctx, "h1", "v1")
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
 
 	client := pb.NewTestServiceClient(conn)
 	header := make(metadata.MD)

@@ -1,4 +1,4 @@
-delay: 1000
+delay: 100
 
 request:
   path: /duration_number

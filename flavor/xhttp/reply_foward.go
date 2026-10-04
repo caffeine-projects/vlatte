@@ -71,7 +71,8 @@ func From[T FromTypes](target T) *ProxyReply {
 	}
 }
 
-// NoFollow disables following redirects.
+// NoFollow has no effect and is kept for compatibility: a ProxyReply never follows redirects.
+// Redirect responses from the target are passed to the client unchanged.
 func (r *ProxyReply) NoFollow() *ProxyReply {
 	r.noFollow = true
 	return r
@@ -247,6 +248,8 @@ func (r *ProxyReply) beforeBuild(app *HTTPMockApp) error {
 	if r.noFollow {
 		r.httpClient.CheckRedirect = noFollow
 	}
+
+	app.closeIdleConnsOnClose(r.httpClient.CloseIdleConnections)
 
 	return nil
 }

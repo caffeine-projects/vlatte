@@ -10,13 +10,13 @@ import (
 var _ Inspector[Mock] = (*Scope[Mock])(nil)
 
 type entry[B Mock] struct {
-	bean B
+	mock B
 }
 
 func indexByID[B Mock](mocks []B) map[string]entry[B] {
 	m := make(map[string]entry[B], len(mocks))
 	for _, b := range mocks {
-		m[b.ID()] = entry[B]{bean: b}
+		m[b.ID()] = entry[B]{mock: b}
 	}
 
 	return m
@@ -42,7 +42,7 @@ func (s *Scope[B]) Mock(id string) B {
 	defer s.mu.RUnlock()
 
 	b := s.index[id]
-	return b.bean
+	return b.mock
 }
 
 // Mocks returns all Mock instances kept in this Scope.
@@ -54,7 +54,7 @@ func (s *Scope[B]) Mocks() []B {
 	i := 0
 
 	for _, m := range s.index {
-		mocks[i] = m.bean
+		mocks[i] = m.mock
 		i++
 	}
 
@@ -67,7 +67,7 @@ func (s *Scope[B]) IDs() []string {
 
 	ids := make([]string, 0, len(s.index))
 	for _, id := range s.index {
-		ids = append(ids, id.bean.ID())
+		ids = append(ids, id.mock.ID())
 	}
 
 	return ids
@@ -89,8 +89,8 @@ func (s *Scope[B]) ListPending() []B {
 	mocks := make([]B, 0, len(s.index))
 
 	for _, m := range s.index {
-		if !m.bean.Called() {
-			mocks = append(mocks, m.bean)
+		if !m.mock.Called() {
+			mocks = append(mocks, m.mock)
 		}
 	}
 
@@ -105,8 +105,8 @@ func (s *Scope[B]) ListCalled() []B {
 	mocks := make([]B, 0, len(s.index))
 
 	for _, m := range s.index {
-		if m.bean.Called() {
-			mocks = append(mocks, m.bean)
+		if m.mock.Called() {
+			mocks = append(mocks, m.mock)
 		}
 	}
 

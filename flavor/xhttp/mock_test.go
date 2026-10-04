@@ -57,7 +57,7 @@ func TestMock(t *testing.T) {
 }
 
 func TestMock_MarshalJSON(t *testing.T) {
-	app := New()
+	app := MustNew()
 	builder := Request().
 		Header("accept", Eq("test")).
 		Once().

@@ -17,15 +17,14 @@ import (
 )
 
 const (
-	_dockerHostEnv    = "DZ_DOCKER_HOST"
-	_gitRepository    = "https://github.com/vitorsalgado/mocha"
-	_usage            = "dz"
+	_dockerHostEnv    = "VLATTE_DOCKER_HOST"
+	_gitRepository    = "https://github.com/caffeine-projects/vlatte"
+	_usage            = "vlatte"
 	_shortDescription = "Build Mock APIs in Go"
-	_example          = `  dz --addr=:3000
-  dz --proxy
-  dz --proxy --record
-  dz
-  dz
+	_example          = `  vlatte
+  vlatte --addr=:3000
+  vlatte --proxy
+  vlatte --proxy --record
 `
 )
 
@@ -61,12 +60,17 @@ func run(ctx context.Context, custom ...vlatte.Configurer[*xhttp.Config]) {
 
 	configurers = append(configurers, xhttp.UseLocals())
 
+	fileExists := func(path string) bool { _, err := os.Stat(path); return err == nil }
+	for _, warning := range legacyWarnings(os.Environ(), xhttp.DefaultConfigDirectories, fileExists) {
+		_, _ = fmt.Fprintln(os.Stderr, "warning:", warning)
+	}
+
 	_, exists := os.LookupEnv(_dockerHostEnv)
 	if exists {
 		configurers = append(configurers, &dockerConfigurer{})
 	}
 
-	m := xhttp.New(configurers...)
+	m := xhttp.MustNew(configurers...)
 
 	rootCmd := &cobra.Command{
 		Use:     _usage,
@@ -75,7 +79,11 @@ func run(ctx context.Context, custom ...vlatte.Configurer[*xhttp.Config]) {
 		Args:    cobra.MinimumNArgs(0),
 		Example: _example,
 		Run: func(cmd *cobra.Command, args []string) {
-			m.MustStart()
+			if m.Config().UseHTTPS {
+				m.MustStartTLS()
+			} else {
+				m.MustStart()
+			}
 
 			fmt.Println(_banner)
 			fmt.Println(m.DescribeConfig())
@@ -103,7 +111,7 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "print version info",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(xhttp.Version)
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), version())
 		},
 	}
 }

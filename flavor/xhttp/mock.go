@@ -10,8 +10,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/filter"
+	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/viewdata"
 	"github.com/caffeine-projects/vlatte/vlattecore/descriptor"
-	"github.com/caffeine-projects/vlatte/vlattecore/kv"
 )
 
 var (
@@ -55,12 +55,12 @@ type MockFileHandler interface {
 
 // mockFileData represents the data that is passed to Mock files during template parsing.
 type mockFileData struct {
-	params  kv.KV
+	params  *viewdata.Parameters
 	data    map[string]any
 	baseURL string
 }
 
-func (t *mockFileData) Parameters() kv.KV {
+func (t *mockFileData) Parameters() *viewdata.Parameters {
 	return t.params
 }
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -19,7 +20,7 @@ import (
 )
 
 func TestServerStreaming(t *testing.T) {
-	m := New(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
+	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
 	defer m.Close()
 	m.MustStart()
 
@@ -32,6 +33,7 @@ func TestServerStreaming(t *testing.T) {
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
 
 	client := pb.NewTestServiceClient(conn)
 	res, err := client.List(ctx, &pb.ListReq{})
@@ -53,8 +55,9 @@ func TestServerStreaming(t *testing.T) {
 					return
 				}
 
-				require.Fail(t, err.Error())
+				assert.Fail(t, err.Error())
 				cancel()
+				return
 			}
 
 			mu.Lock()
@@ -72,7 +75,7 @@ func TestServerStreaming(t *testing.T) {
 }
 
 func TestServerStream_MessageReader(t *testing.T) {
-	m := New(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
+	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
 	defer m.Close()
 	m.MustStart()
 
@@ -93,6 +96,7 @@ func TestServerStream_MessageReader(t *testing.T) {
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
 
 	client := pb.NewTestServiceClient(conn)
 	res, err := client.List(ctx, &pb.ListReq{})
@@ -114,8 +118,9 @@ func TestServerStream_MessageReader(t *testing.T) {
 					return
 				}
 
-				require.Fail(t, err.Error())
+				assert.Fail(t, err.Error())
 				cancel()
+				return
 			}
 
 			mu.Lock()

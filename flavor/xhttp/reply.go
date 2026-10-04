@@ -14,6 +14,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/bufpool"
+	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/viewdata"
 	"github.com/caffeine-projects/vlatte/vlattecore/descriptor"
 )
 
@@ -27,6 +28,15 @@ type ReplyInput struct {
 
 type replyOnBeforeBuild interface {
 	beforeBuild(app *HTTPMockApp) error
+}
+
+// prepareReply runs beforeBuild on replies that need it. Replies holding other replies use it for their children.
+func prepareReply(reply vlatte.Replier[ReplyInput, *Response], app *HTTPMockApp) error {
+	if rb, ok := reply.(replyOnBeforeBuild); ok {
+		return rb.beforeBuild(app)
+	}
+
+	return nil
 }
 
 // StdReply holds the configuration on how the MockedResponse should be built.
@@ -384,6 +394,9 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Respon
 	tmplData := any(nil)
 	if hasTemplate {
 		tmplData = r.Data
+		if d, ok := r.Data.(*viewdata.Data); ok {
+			tmplData = d.WithExtra(rep.teData)
+		}
 	}
 
 	if len(rep.headerWithTemplate) > 0 {
@@ -402,9 +415,12 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Respon
 			return nil, err
 		}
 
-		h := http.Header(mimeHeader)
-		for k, v := range h {
-			rep.HeaderArr(k, v...)
+		// Rendered values belong to this response only, so they go into a copy of the reply headers.
+		response.Header = response.Header.Clone()
+		for k, values := range mimeHeader {
+			for _, v := range values {
+				response.Header.Add(k, v)
+			}
 		}
 	}
 

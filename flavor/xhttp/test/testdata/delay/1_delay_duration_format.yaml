@@ -1,4 +1,4 @@
-delay: 1s
+delay: 100ms
 
 request:
   path: /duration_string_format

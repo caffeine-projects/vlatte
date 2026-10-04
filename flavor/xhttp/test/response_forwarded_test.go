@@ -32,7 +32,7 @@ func TestProxiedReplies(t *testing.T) {
 
 	defer dest.Close()
 
-	m := xhttp.New()
+	m := xhttp.MustNew()
 	m.MustStart()
 
 	defer m.Close()
@@ -62,8 +62,31 @@ func TestProxiedReplies(t *testing.T) {
 	assert.Equal(t, "hello world", string(b))
 }
 
+func TestProxiedReplyMockFileTrimSuffix(t *testing.T) {
+	target := xhttp.MustNew()
+	target.MustStart()
+	defer target.Close()
+
+	targetScoped := target.MustMock(xhttp.Getf("/items").Reply(xhttp.OK()))
+
+	m := xhttp.MustNew()
+	m.MustStart()
+	defer m.Close()
+
+	m.SetData(map[string]any{"target": target.URL()})
+	m.MustMock(xhttp.FromFile("testdata/response_forwarded/trim_suffix.yaml"))
+
+	res, err := http.Get(m.URL("/items.json"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	// trim_suffix removes ".json" before forwarding, so the target is called with /items.
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.True(t, targetScoped.AssertCalled(t))
+}
+
 func TestProxiedReplyMockFileWithTemplate(t *testing.T) {
-	target := xhttp.New()
+	target := xhttp.MustNew()
 	target.MustStart()
 	defer target.Close()
 
@@ -73,7 +96,7 @@ func TestProxiedReplyMockFileWithTemplate(t *testing.T) {
 			Header("del", Not(Present())).
 			Reply(xhttp.OK().PlainText("done")))
 
-	m := xhttp.New()
+	m := xhttp.MustNew()
 	m.MustStart()
 	defer m.Close()
 

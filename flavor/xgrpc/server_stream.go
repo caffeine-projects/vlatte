@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -15,6 +16,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/vlattecore/explain"
@@ -159,6 +162,42 @@ func (r *BuiltInServerStreamReply[T]) decode(b []byte, m proto.Message) error {
 	return fmt.Errorf("stream: unexpected stream type %d", r.response.StreamType)
 }
 
+// receiveRequest reads the request message of a server streaming call.
+// Stream interceptors do not receive it: their first argument is the service implementation.
+func receiveRequest(stream grpc.ServerStream, info *grpc.StreamServerInfo) (proto.Message, error) {
+	svc, method, ok := strings.Cut(strings.TrimPrefix(info.FullMethod, "/"), "/")
+	if !ok {
+		return nil, fmt.Errorf("unexpected method name %q", info.FullMethod)
+	}
+
+	desc, err := protoregistry.GlobalFiles.FindDescriptorByName(protoreflect.FullName(svc))
+	if err != nil {
+		return nil, err
+	}
+
+	sd, ok := desc.(protoreflect.ServiceDescriptor)
+	if !ok {
+		return nil, fmt.Errorf("%s is not a service", svc)
+	}
+
+	md := sd.Methods().ByName(protoreflect.Name(method))
+	if md == nil {
+		return nil, fmt.Errorf("method %s not found in service %s", method, svc)
+	}
+
+	mt, err := protoregistry.GlobalTypes.FindMessageByName(md.Input().FullName())
+	if err != nil {
+		return nil, err
+	}
+
+	msg := mt.New().Interface()
+	if err = stream.RecvMsg(msg); err != nil {
+		return nil, err
+	}
+
+	return msg, nil
+}
+
 func ServerStream[T proto.Message]() *BuiltInServerStreamReply[T] {
 	return &BuiltInServerStreamReply[T]{response: &StreamResponse[T]{
 		Header:  make(metadata.MD),
@@ -167,11 +206,16 @@ func ServerStream[T proto.Message]() *BuiltInServerStreamReply[T] {
 }
 
 func (in *Interceptors) StreamInterceptor(
-	reqMsg any,
+	_ any,
 	stream grpc.ServerStream,
 	info *grpc.StreamServerInfo,
 	_ grpc.StreamHandler,
 ) error {
+	reqMsg, err := receiveRequest(stream, info)
+	if err != nil {
+		return interceptError("stream: error reading the request message. %w", err)
+	}
+
 	b, err := json.Marshal(reqMsg)
 	if err != nil {
 		return err

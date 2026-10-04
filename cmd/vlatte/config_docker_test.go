@@ -1,15 +1,15 @@
 package main
 
 import (
-	"os"
 	"testing"
 
 	"github.com/caffeine-projects/vlatte/flavor/xhttp"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestConfigDockerDefaultHTTPHost(t *testing.T) {
+	t.Setenv(_dockerHostEnv, "")
+
 	config := &xhttp.Config{}
 	conf := &dockerConfigurer{}
 	err := conf.Apply(config)
@@ -20,6 +20,8 @@ func TestConfigDockerDefaultHTTPHost(t *testing.T) {
 }
 
 func TestConfigDockerDefaultHTTPsHost(t *testing.T) {
+	t.Setenv(_dockerHostEnv, "")
+
 	config := &xhttp.Config{}
 	config.UseHTTPS = true
 
@@ -32,11 +34,7 @@ func TestConfigDockerDefaultHTTPsHost(t *testing.T) {
 }
 
 func TestConfigDockerHostDefined(t *testing.T) {
-	t.Cleanup(func() {
-		_ = os.Unsetenv(_dockerHostEnv)
-	})
-
-	require.NoError(t, os.Setenv(_dockerHostEnv, "example.org"))
+	t.Setenv(_dockerHostEnv, "example.org")
 
 	config := &xhttp.Config{}
 	conf := &dockerConfigurer{}
@@ -48,11 +46,7 @@ func TestConfigDockerHostDefined(t *testing.T) {
 }
 
 func TestConfigDockerHostDefinedWithDots(t *testing.T) {
-	t.Cleanup(func() {
-		_ = os.Unsetenv(_dockerHostEnv)
-	})
-
-	require.NoError(t, os.Setenv(_dockerHostEnv, "example.org:"))
+	t.Setenv(_dockerHostEnv, "example.org:")
 
 	config := &xhttp.Config{}
 	conf := &dockerConfigurer{}

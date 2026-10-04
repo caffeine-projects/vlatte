@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -52,7 +53,7 @@ func TestForward(t *testing.T) {
 			RemoveProxyHeaders("x-to-be-removed").
 			Header("x-res", "response").
 			Headers(h)
-		require.NoError(t, reply.beforeBuild(New()))
+		require.NoError(t, reply.beforeBuild(MustNew()))
 		res, err := reply.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		require.NoError(t, err)
@@ -67,7 +68,7 @@ func TestForward(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 
 			b, err := io.ReadAll(r.Body)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 
 			w.Write(b)
 		}))
@@ -81,7 +82,7 @@ func TestForward(t *testing.T) {
 
 		u, _ := url.Parse(dest.URL)
 		forward := From(u)
-		require.NoError(t, forward.beforeBuild(New()))
+		require.NoError(t, forward.beforeBuild(MustNew()))
 		res, err := forward.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		require.NoError(t, err)
@@ -96,7 +97,7 @@ func TestForward(t *testing.T) {
 			w.Header().Add(httpval.HeaderContentType, "application/json")
 
 			b, err := io.ReadAll(r.Body)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 
 			ww := gzip.NewWriter(w)
 
@@ -114,7 +115,7 @@ func TestForward(t *testing.T) {
 
 		u, _ := url.Parse(dest.URL)
 		forward := From(u)
-		require.NoError(t, forward.beforeBuild(New()))
+		require.NoError(t, forward.beforeBuild(MustNew()))
 		res, err := forward.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 		require.NoError(t, err)
 
@@ -136,7 +137,7 @@ func TestForward(t *testing.T) {
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 
 		forward := From(dest.URL)
-		require.NoError(t, forward.beforeBuild(New()))
+		require.NoError(t, forward.beforeBuild(MustNew()))
 		res, err := forward.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		require.NoError(t, err)
@@ -157,7 +158,7 @@ func TestForward(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080/path/test/example?filter=all", nil)
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		reply := From(dest.URL).TrimPrefix("/path/test")
-		require.NoError(t, reply.beforeBuild(New()))
+		require.NoError(t, reply.beforeBuild(MustNew()))
 		res, err := reply.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		assert.NoError(t, err)
@@ -177,7 +178,7 @@ func TestForward(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080/path/test/example?filter=all", nil)
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		reply := From(dest.URL).TrimSuffix("/example")
-		require.NoError(t, reply.beforeBuild(New()))
+		require.NoError(t, reply.beforeBuild(MustNew()))
 		res, err := reply.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		assert.NoError(t, err)
@@ -198,11 +199,15 @@ func TestForward(t *testing.T) {
 		assert.Equal(t, From(addr).target.String(), addr)
 	})
 
-	t.Run("should forward and respond basic GET", func(t *testing.T) {
+	t.Run("should time out when the target is slower than the timeout", func(t *testing.T) {
 		dest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "/path/test/example", r.URL.Path)
 
-			<-time.After(500 * time.Millisecond)
+			// Wait until the reply gives up; the cap keeps a regression from hanging the test.
+			select {
+			case <-r.Context().Done():
+			case <-time.After(5 * time.Second):
+			}
 
 			w.WriteHeader(http.StatusCreated)
 			w.Write([]byte("hello world"))
@@ -213,8 +218,8 @@ func TestForward(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080/path/test/example", nil)
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		reply := From(dest.URL).
-			Timeout(100 * time.Millisecond)
-		require.NoError(t, reply.beforeBuild(New()))
+			Timeout(20 * time.Millisecond)
+		require.NoError(t, reply.beforeBuild(MustNew()))
 		res, err := reply.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		require.Error(t, err)
@@ -222,12 +227,12 @@ func TestForward(t *testing.T) {
 	})
 
 	t.Run("should follow redirects when using default configs", func(t *testing.T) {
-		target := New()
+		target := MustNew()
 		target.MustStart()
 
 		defer target.Close()
 
-		m := New()
+		m := MustNew()
 		m.MustStart()
 
 		defer m.Close()
@@ -248,12 +253,12 @@ func TestForward(t *testing.T) {
 	})
 
 	t.Run("should NOT follow redirects when it is disabled", func(t *testing.T) {
-		target := New()
+		target := MustNew()
 		target.MustStart()
 
 		defer target.Close()
 
-		m := New()
+		m := MustNew()
 		m.MustStart()
 
 		defer m.Close()
@@ -275,11 +280,11 @@ func TestForward(t *testing.T) {
 	})
 
 	t.Run("tls", func(t *testing.T) {
-		target := New()
+		target := MustNew()
 		t.Cleanup(func() { target.Close() })
 		target.MustStartTLS()
 
-		m := New()
+		m := MustNew()
 		t.Cleanup(func() { m.Close() })
 		m.MustStart()
 
@@ -314,4 +319,38 @@ func TestForward(t *testing.T) {
 		require.Equal(t, http.StatusOK, res.StatusCode)
 		require.Equal(t, "hi", string(b))
 	})
+}
+
+func TestProxyReply_ClosesTargetConnectionsOnClose(t *testing.T) {
+	closed := make(chan struct{}, 1)
+	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	target.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateClosed {
+			select {
+			case closed <- struct{}{}:
+			default:
+			}
+		}
+	}
+	target.Start()
+	t.Cleanup(target.Close)
+
+	m := MustNew()
+	m.MustStart()
+	m.MustMock(Getf("/p").Reply(From(target.URL)))
+
+	res, err := http.Get(m.URL("/p"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	m.Close()
+
+	// The proxy reply's connection to the target must not outlive the mock server.
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("connection to the proxy target was left open")
+	}
 }

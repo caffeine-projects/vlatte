@@ -12,24 +12,24 @@ import (
 var ErrNotFound = errors.New("store: mock not found")
 
 type MemoryStore[B Mock] struct {
-	beans []B
+	mocks []B
 	mu    sync.RWMutex
 }
 
 func NewStore[B Mock]() Store[B] {
-	return &MemoryStore[B]{beans: make([]B, 0)}
+	return &MemoryStore[B]{mocks: make([]B, 0)}
 }
 
 func (s *MemoryStore[B]) List(ctx context.Context) (iter.Seq[B], error) {
 	s.mu.RLock()
-	beans := make([]B, len(s.beans))
-	copy(beans, s.beans)
+	mocks := make([]B, len(s.mocks))
+	copy(mocks, s.mocks)
 	s.mu.RUnlock()
 
 	return func(yield func(B) bool) {
-		for _, bean := range beans {
-			if bean.Enabled() {
-				if !yield(bean) {
+		for _, mock := range mocks {
+			if mock.Enabled() {
+				if !yield(mock) {
 					break
 				}
 			}
@@ -37,14 +37,14 @@ func (s *MemoryStore[B]) List(ctx context.Context) (iter.Seq[B], error) {
 	}, nil
 }
 
-func (s *MemoryStore[B]) Store(_ context.Context, beans ...B) error {
+func (s *MemoryStore[B]) Store(_ context.Context, mocks ...B) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.beans = append(s.beans, beans...)
+	s.mocks = append(s.mocks, mocks...)
 
-	sort.SliceStable(s.beans, func(a, b int) bool {
-		return s.beans[a].Priority() < s.beans[b].Priority()
+	sort.SliceStable(s.mocks, func(a, b int) bool {
+		return s.mocks[a].Priority() < s.mocks[b].Priority()
 	})
 
 	return nil
@@ -54,9 +54,9 @@ func (s *MemoryStore[B]) Pick(_ context.Context, id string) (B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	for _, bean := range s.beans {
-		if bean.ID() == id {
-			return bean, nil
+	for _, mock := range s.mocks {
+		if mock.ID() == id {
+			return mock, nil
 		}
 	}
 
@@ -68,8 +68,8 @@ func (s *MemoryStore[B]) PickAll(_ context.Context) ([]B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	ret := make([]B, len(s.beans))
-	copy(ret, s.beans)
+	ret := make([]B, len(s.mocks))
+	copy(ret, s.mocks)
 
 	return ret, nil
 }
@@ -83,14 +83,14 @@ func (s *MemoryStore[B]) Delete(_ context.Context, ids ...string) error {
 		idSet[id] = struct{}{}
 	}
 
-	newBeans := s.beans[:0]
-	for _, bean := range s.beans {
-		if _, found := idSet[bean.ID()]; !found {
-			newBeans = append(newBeans, bean)
+	kept := s.mocks[:0]
+	for _, mock := range s.mocks {
+		if _, found := idSet[mock.ID()]; !found {
+			kept = append(kept, mock)
 		}
 	}
 
-	s.beans = newBeans
+	s.mocks = kept
 
 	return nil
 }
@@ -99,7 +99,7 @@ func (s *MemoryStore[B]) Clear(_ context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.beans = make([]B, 0)
+	s.mocks = make([]B, 0)
 
 	return nil
 }

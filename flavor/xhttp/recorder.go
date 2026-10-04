@@ -79,7 +79,12 @@ func (f recordConfigFunc) Apply(config *RecordConfig) error {
 
 // Apply allows using RecordConfig as RecordConfigurer.
 func (r *RecordConfig) Apply(opts *RecordConfig) error {
-	extension := strings.TrimPrefix(opts.SaveFileType, ".")
+	fileType := r.SaveFileType
+	if fileType == "" {
+		fileType = opts.SaveFileType
+	}
+
+	extension := strings.TrimPrefix(fileType, ".")
 	found := false
 	for _, ext := range viper.SupportedExts {
 		if strings.EqualFold(extension, ext) {
@@ -190,6 +195,14 @@ func (r *recorder) isActive() bool {
 }
 
 func (r *recorder) dispatch(req *http.Request, parsedURL *url.URL, rawReqBody []byte, res *Response) {
+	// stop holds r.mu while it signals the worker, so checking and sending under r.mu is atomic.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.active.Load() {
+		return
+	}
+
 	r.in <- recArgs{
 		request:  recRequest{parsedURL.RequestURI(), req.Method, req.Header.Clone(), req.URL.Query(), rawReqBody},
 		response: recResponse{res.StatusCode, res.Header.Clone(), res.Body},
@@ -251,6 +264,10 @@ func (r *recorder) process(arg recArgs) error {
 	saveDir := r.config.SaveDir
 	if !path.IsAbs(saveDir) {
 		saveDir = path.Join(r.rootDir, saveDir)
+	}
+
+	if err := os.MkdirAll(saveDir, 0o755); err != nil {
+		return err
 	}
 
 	name := fmt.Sprintf("%s-%s", arg.request.method, nm)

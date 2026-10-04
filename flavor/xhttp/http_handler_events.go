@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jwalton/gchalk"
-
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/bufpool"
 )
@@ -135,11 +133,11 @@ func (h *builtInMockHTTPLifecycle) OnError(r *RequestValues, err error) {
 
 type builtInDescriptiveMockHTTPLifecycle struct {
 	app *HTTPMockApp
-	cz  *gchalk.Builder
+	cz  ansi
 	out io.Writer
 }
 
-func newBuiltInDescriptiveMockHTTPLifecycle(app *HTTPMockApp, cz *gchalk.Builder, out io.Writer) *builtInDescriptiveMockHTTPLifecycle {
+func newBuiltInDescriptiveMockHTTPLifecycle(app *HTTPMockApp, cz ansi, out io.Writer) *builtInDescriptiveMockHTTPLifecycle {
 	return &builtInDescriptiveMockHTTPLifecycle{app, cz, out}
 }
 

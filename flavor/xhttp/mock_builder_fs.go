@@ -2,11 +2,10 @@ package xhttp
 
 import (
 	"bytes"
-	_ "embed"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,9 +18,11 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/caffeine-projects/vlatte"
+	httpschema "github.com/caffeine-projects/vlatte/etc/http"
 	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/filter/filterbuilder"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/bufpool"
+	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/viewdata"
 )
 
 var (
@@ -98,8 +99,7 @@ const (
 	_resEncoding        = "encoding"
 )
 
-//go:embed schema.json
-var _mockJSONSchema []byte
+var _mockJSONSchema = httpschema.Schema
 
 // _mockJSONSchemaURL identifies the embedded schema. It is not a file path, so error messages
 // don't depend on the working directory.
@@ -184,12 +184,7 @@ func (b *mockBuilderFromFile) build(app *HTTPMockApp) (mock *HTTPMock, err error
 		return nil, fmt.Errorf("file %s does not exist", b.filename)
 	}
 
-	file, err := os.Open(b.filename)
-	if err != nil {
-		return nil, err
-	}
-
-	content, err := io.ReadAll(file)
+	content, err := os.ReadFile(b.filename)
 	if err != nil {
 		return nil, err
 	}
@@ -225,6 +220,18 @@ func (b *mockBuilderFromBytes) Build(app *HTTPMockApp) (mock *HTTPMock, err erro
 	}
 
 	return mock, nil
+}
+
+// buildAdminMock builds a mock definition received by the admin API.
+// Like the builders above, it turns panics caused by malformed definitions into errors.
+func buildAdminMock(app *HTTPMockApp, content []byte, ext string) (mock *HTTPMock, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("mock: error building mock from byte array. panic: %v", r)
+		}
+	}()
+
+	return BuildMockFromBytes(app, Request(), content, ext, false)
 }
 
 // buildReply expects a sub instance of viper.Viper, containing the response definition.
@@ -315,7 +322,8 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 			return nil, err
 		}
 
-		d := &mockFileData{app.params, app.Data(), app.URL()}
+		// Mock files load outside any request, so parameters are read without one.
+		d := &mockFileData{viewdata.NewParameters(context.Background(), app.params), app.Data(), app.URL()}
 		buf = bufpool.Get()
 		buf.Reset()
 
@@ -684,7 +692,7 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 		}
 
 		if vi.IsSet(_fResponseProxyTrimSuffix) {
-			proxy.TrimPrefix(vi.GetString(_fResponseProxyTrimSuffix))
+			proxy.TrimSuffix(vi.GetString(_fResponseProxyTrimSuffix))
 		}
 
 		if vi.IsSet(_fResponseProxyTimeout) {

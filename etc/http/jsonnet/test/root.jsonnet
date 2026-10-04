@@ -1,12 +1,12 @@
-local dz = import '../http.libsonnet';
+local vlatte = import '../http.libsonnet';
 local m = import '../matchers.libsonnet';
 
-local req = dz.req;
+local req = vlatte.req;
 
-dz.mock([
-  dz.repeat(10),
-  dz.scenario('scenario_test'),
-  dz.request([
+vlatte.mock([
+  vlatte.repeat(10),
+  vlatte.scenario('scenario_test'),
+  vlatte.request([
     req.scheme('http'),
     req.method('post'),
     req.header('hello', m.eq('world')),
@@ -15,5 +15,5 @@ dz.mock([
     req.header('complex', m.all([m.eq('test'), m.present()])),
     req.query('filter', m.both(m.eq('test'), m.present())),
   ]),
-  dz.postActions([dz.postAction('pa', { name: 'test' }), dz.postAction('no_args'), dz.postAction('basic', 'dev')]),
+  vlatte.postActions([vlatte.postAction('pa', { name: 'test' }), vlatte.postAction('no_args'), vlatte.postAction('basic', 'dev')]),
 ])

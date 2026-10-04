@@ -10,4 +10,4 @@ response:
     message: '{{`{{ .Extra.message }}`}}'
   template:
     data:
-      Message: hi
+      message: hi

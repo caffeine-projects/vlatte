@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,7 +41,7 @@ func TestSequentialReply(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
-	t.Run("should return replies based configure sequence and return error when over", func(t *testing.T) {
+	t.Run("should return the configured reply when the sequence has ended", func(t *testing.T) {
 		t.Parallel()
 
 		req, err := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
@@ -69,6 +68,27 @@ func TestSequentialReplyShouldReturnErrorWhenSequenceDoesNotContainReplies(t *te
 	assert.NotNil(t, err)
 }
 
+func TestSequentialReply_PreparesNestedReplies(t *testing.T) {
+	target := MustNew()
+	target.MustStart()
+	t.Cleanup(target.Close)
+	target.MustMock(Getf("/seq").Reply(Accepted()))
+
+	m := MustNew()
+	m.MustStart()
+	t.Cleanup(m.Close)
+	// From creates its HTTP client in beforeBuild: Seq must prepare every reply it holds.
+	m.MustMock(Getf("/seq").Reply(Seq(From(target.URL())).OnSequenceEnded(From(target.URL()))))
+
+	// The second request is served by the reply set with OnSequenceEnded.
+	for range 2 {
+		res, err := http.Get(m.URL("/seq"))
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, http.StatusAccepted, res.StatusCode)
+	}
+}
+
 func TestSequentialReplyValidate(t *testing.T) {
 	seq := Seq()
 
@@ -88,16 +108,15 @@ func TestSeqRace(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	input := ReplyInput{RequestValues: rv, Writer: nil}
-	for i := range jobs {
-		wg.Add(1)
-		go func(index int) {
+	for range jobs {
+		wg.Go(func() {
 			res, err := builder.Reply(context.Background(), input)
-			require.NoError(t, err)
-			require.True(t, res.StatusCode != StatusNoMatch)
+			if assert.NoError(t, err) {
+				assert.True(t, res.StatusCode != StatusNoMatch)
+			}
 
 			builder.totalHits()
-			wg.Done()
-		}(i)
+		})
 
 		builder.totalHits()
 	}
@@ -108,9 +127,6 @@ func TestSeqRace(t *testing.T) {
 
 	builder.totalHits()
 
-	require.Eventually(t, func() bool {
-		wg.Wait()
-		return true
-	}, 1*time.Second, 100*time.Millisecond)
+	wg.Wait()
 	require.Equal(t, 4, builder.totalHits())
 }

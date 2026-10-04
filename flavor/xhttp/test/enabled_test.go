@@ -10,7 +10,7 @@ import (
 
 func TestEnabledDisabledMocks(t *testing.T) {
 	httpClient := &http.Client{}
-	m := xhttp.New(xhttp.Setup().MockFilePatterns("testdata/enabled/*.yaml"))
+	m := xhttp.MustNew(xhttp.Setup().MockFilePatterns("testdata/enabled/*.yaml"))
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 

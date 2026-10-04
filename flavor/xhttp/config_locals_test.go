@@ -23,10 +23,10 @@ func TestLocalsUsingDifferentExtensions(t *testing.T) {
 		name     string
 		filename string
 	}{
-		{".json", ".01_moairc.test.json"},
-		{".yaml", ".02_moairc.test.yaml"},
-		{".yml", ".02_moairc.test.yml"},
-		{".properties", ".03_moairc.test.properties"},
+		{".json", ".01_vlatterc.test.json"},
+		{".yaml", ".02_vlatterc.test.yaml"},
+		{".yml", ".02_vlatterc.test.yml"},
+		{".properties", ".03_vlatterc.test.properties"},
 	}
 
 	for _, tc := range testCases {

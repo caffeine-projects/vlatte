@@ -1,13 +1,16 @@
 package xhttp
 
 import (
+	"context"
 	"crypto/tls"
+	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"text/template"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
@@ -65,12 +68,12 @@ func TestConfig(t *testing.T) {
 	client := &http.Client{}
 
 	t.Run("should run server with the custom given address", func(t *testing.T) {
-		addr := os.Getenv("TEST_CUSTOM_ADDR")
-		if addr == "" {
-			addr = "127.0.0.1:3000"
-		}
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		addr := l.Addr().String()
+		require.NoError(t, l.Close())
 
-		m := New(Setup().Addr(addr))
+		m := MustNew(Setup().Addr(addr))
 		t.Cleanup(func() { m.Close() })
 		m.MustStart()
 
@@ -88,7 +91,7 @@ func TestConfig(t *testing.T) {
 	})
 
 	t.Run("request body parsers from config should take precedence", func(t *testing.T) {
-		m := New(Setup().RequestBodyParsers(&testBodyParser{}))
+		m := MustNew(Setup().RequestBodyParsers(&testBodyParser{}))
 		t.Cleanup(func() { m.Close() })
 		m.MustStart()
 
@@ -119,7 +122,7 @@ func TestConfig(t *testing.T) {
 				})
 		}
 
-		m := New(Setup().Middlewares(middleware))
+		m := MustNew(Setup().Middlewares(middleware))
 		t.Cleanup(func() { m.Close() })
 		m.MustStart()
 
@@ -137,7 +140,7 @@ func TestConfig(t *testing.T) {
 	})
 
 	t.Run("configure custom server", func(t *testing.T) {
-		m := New(Setup().ServerFactory(&customTestServerFactory{decorated: newServerFactory()}))
+		m := MustNew(Setup().ServerFactory(&customTestServerFactory{decorated: newServerFactory()}))
 		t.Cleanup(func() { m.Close() })
 		m.MustStart()
 
@@ -160,7 +163,7 @@ func TestConfigBuilder(t *testing.T) {
 	customLogger := zerolog.Nop()
 	tlsConfig := &tls.Config{InsecureSkipVerify: true}
 
-	m := New(Setup().
+	m := MustNew(Setup().
 		Name(nm).
 		Addr(addr).
 		RootDir("test_root_dir").
@@ -225,4 +228,81 @@ func TestLogLevelString(t *testing.T) {
 	require.Equal(t, vlatte.LogBasic.String(), "basic")
 	require.Equal(t, vlatte.LogHeader.String(), "header")
 	require.Equal(t, vlatte.LogBody.String(), "body")
+}
+
+func TestNew_ZeroValueConfig(t *testing.T) {
+	// A Config built by hand leaves unset fields at zero values; the server must still answer unmatched requests.
+	m := MustNew(&Config{})
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	res, err := http.Get(m.URL("/nothing"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+}
+
+func TestGlobalEventsAreApplied(t *testing.T) {
+	var fired atomic.Int32
+	setup := Setup().OnCompleteListener("count", vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
+		fired.Add(1)
+		return nil
+	}))
+	setup.Base().GlobalEvents(&vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "count"}}})
+
+	m := MustNew(setup)
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/event").Reply(OK()))
+
+	res, err := http.Get(m.URL("/event"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	// Global on_complete events run for every matched request, after the response is written.
+	require.Eventually(t, func() bool { return fired.Load() == 1 }, 5*time.Second, 10*time.Millisecond)
+}
+
+// acceptCounter counts the connections accepted through a listener.
+type acceptCounter struct {
+	net.Listener
+	accepted atomic.Int32
+}
+
+func (l *acceptCounter) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err == nil {
+		l.accepted.Add(1)
+	}
+	return c, err
+}
+
+func TestListener(t *testing.T) {
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	l := &acceptCounter{Listener: inner}
+
+	m := MustNew(Setup().Listener(l))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/test").Reply(OK()))
+
+	get := func() {
+		t.Helper()
+		res, err := http.Get(m.URL("/test"))
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, http.StatusOK, res.StatusCode)
+	}
+
+	// The server serves the given listener itself, so its port is never free for another process to take.
+	get()
+	require.Equal(t, "http://"+inner.Addr().String(), m.URL())
+	require.Positive(t, l.accepted.Load())
+
+	// Close closes the listener: a restart listens again on its address.
+	m.Close()
+	m.MustStart()
+	get()
+	require.Equal(t, "http://"+inner.Addr().String(), m.URL())
 }

@@ -6,12 +6,13 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestFileLoader_Load(t *testing.T) {
-	app := New(Setup().MockFilePatterns("testdata/loader/load/*mock.json", "testdata/loader/load/*.json"))
+	app := MustNew(Setup().MockFilePatterns("testdata/loader/load/*mock.json", "testdata/loader/load/*.json"))
 	loader := &fileLoader{}
 
 	err := loader.Load(app)
@@ -25,16 +26,23 @@ func TestFileLoader_Load(t *testing.T) {
 }
 
 func TestFileLoader_LoadWithError(t *testing.T) {
-	app := New(Setup().MockFilePatterns("testdata/loader/invalid/*.json"))
+	// More than one invalid file: Load must still return the error instead of hanging.
+	app := MustNew(Setup().MockFilePatterns("testdata/loader/invalid/*.json"))
 	loader := &fileLoader{}
 
-	err := loader.Load(app)
+	done := make(chan error, 1)
+	go func() { done <- loader.Load(app) }()
 
-	require.Error(t, err)
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Load did not return")
+	}
 }
 
 func TestFileLoader(t *testing.T) {
-	app := New(Setup().MockFilePatterns("testdata/loader/*.mock.*"))
+	app := MustNew(Setup().MockFilePatterns("testdata/loader/*.mock.*"))
 	app.MustStart()
 
 	defer app.Close()
