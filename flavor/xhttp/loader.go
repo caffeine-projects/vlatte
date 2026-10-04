@@ -1,7 +1,6 @@
 package xhttp
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -38,69 +37,12 @@ func (l *fileLoader) Load(app *HTTPMockApp) error {
 		}
 	}
 
-	if len(filenames) == 0 {
-		return nil
-	}
-
-	type errContainer struct {
-		err error
-	}
-
-	cont := &errContainer{}
-	ch := make(chan string, len(filenames))
-	wg := sync.WaitGroup{}
-	once := sync.Once{}
-	w := 5
-	ctx, cancel := context.WithCancel(context.Background())
-
-	if len(filenames) < w {
-		w = len(filenames)
-	}
-
-	for i := 0; i < w; i++ {
-		go func(c *errContainer) {
-			for {
-				select {
-				case filename, ok := <-ch:
-					if !ok {
-						return
-					}
-
-					fn := func(filename string, c *errContainer) error {
-						_, err := app.Mock(FromFile(filename))
-						if err != nil {
-							return fmt.Errorf("loader: error adding mock.\n%w", err)
-						}
-
-						return nil
-					}
-
-					err := fn(filename, c)
-					if err != nil {
-						once.Do(func() {
-							c.err = err
-							wg.Done()
-							cancel()
-						})
-					} else {
-						wg.Done()
-					}
-
-				case <-ctx.Done():
-					return
-				}
-			}
-		}(cont)
-	}
-
+	// Mocks are added one at a time: adding a mock holds the application lock anyway.
 	for filename := range filenames {
-		wg.Add(1)
-		ch <- filename
+		if _, err := app.Mock(FromFile(filename)); err != nil {
+			return fmt.Errorf("loader: error adding mock.\n%w", err)
+		}
 	}
 
-	wg.Wait()
-	cancel()
-	close(ch)
-
-	return cont.err
+	return nil
 }
