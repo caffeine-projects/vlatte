@@ -41,7 +41,7 @@ func TestSequentialReply(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
-	t.Run("should return replies based configure sequence and return error when over", func(t *testing.T) {
+	t.Run("should return the configured reply when the sequence has ended", func(t *testing.T) {
 		t.Parallel()
 
 		req, err := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)

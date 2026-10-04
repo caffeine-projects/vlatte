@@ -198,11 +198,15 @@ func TestForward(t *testing.T) {
 		assert.Equal(t, From(addr).target.String(), addr)
 	})
 
-	t.Run("should forward and respond basic GET", func(t *testing.T) {
+	t.Run("should time out when the target is slower than the timeout", func(t *testing.T) {
 		dest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "/path/test/example", r.URL.Path)
 
-			<-time.After(500 * time.Millisecond)
+			// Wait until the reply gives up; the cap keeps a regression from hanging the test.
+			select {
+			case <-r.Context().Done():
+			case <-time.After(5 * time.Second):
+			}
 
 			w.WriteHeader(http.StatusCreated)
 			w.Write([]byte("hello world"))
@@ -213,7 +217,7 @@ func TestForward(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080/path/test/example", nil)
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		reply := From(dest.URL).
-			Timeout(100 * time.Millisecond)
+			Timeout(20 * time.Millisecond)
 		require.NoError(t, reply.beforeBuild(New()))
 		res, err := reply.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
 
