@@ -47,7 +47,6 @@ type HTTPMockApp struct {
 	server             vlatte.Server
 	storage            vlatte.Store[*HTTPMock]
 	scenarioStore      *mfeat.ScenarioStore
-	cancel             context.CancelFunc
 	requestBodyParsers []RequestBodyParser
 	params             kv.KV
 	loaders            []Loader
@@ -71,9 +70,6 @@ type HTTPMockApp struct {
 func New(config ...vlatte.Configurer[*Config]) *HTTPMockApp {
 	app := &HTTPMockApp{}
 	app.random = rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	_, cancel := context.WithCancel(context.Background())
-	app.cancel = cancel
 
 	conf := defaultConfig()
 
@@ -286,8 +282,6 @@ func (app *HTTPMockApp) MustReload() {
 
 // Close closes the mock server.
 func (app *HTTPMockApp) Close() {
-	app.cancel()
-
 	err := app.server.Close()
 	if err != nil {
 		app.logger.Debug().Err(err).Msg("server: Close: error closing server")
