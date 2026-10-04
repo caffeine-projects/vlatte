@@ -25,6 +25,7 @@ const (
 	_tlsCertFile       = "./testdata/cert/cert.pem"
 	_tlsKeyFile        = "./testdata/cert/key.pem"
 	_tlsClientCertFile = "./testdata/cert/cert_client.pem"
+	_tlsClientKeyFile  = "./testdata/cert/key_client.pem"
 )
 
 func TestWebHook_Run(t *testing.T) {
@@ -187,10 +188,10 @@ func TestWebHook_Run(t *testing.T) {
 func TestWebHook_TLS(t *testing.T) {
 	name := "webhook"
 	key := "test_key"
-	cert, err := tls.LoadX509KeyPair(_tlsCertFile, _tlsKeyFile)
+	cert, err := tls.LoadX509KeyPair(_tlsClientCertFile, _tlsClientKeyFile)
 	require.NoError(t, err)
 
-	caCert, err := os.ReadFile(filepath.Clean(_tlsClientCertFile))
+	caCert, err := os.ReadFile(filepath.Clean(_tlsCertFile))
 	require.NoError(t, err)
 
 	certPool := x509.NewCertPool()

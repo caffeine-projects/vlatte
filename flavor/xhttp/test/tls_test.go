@@ -20,6 +20,7 @@ const (
 	_tlsCertFile       = "testdata/cert/cert.pem"
 	_tlsKeyFile        = "testdata/cert/key.pem"
 	_tlsClientCertFile = "testdata/cert/cert_client.pem"
+	_tlsClientKeyFile  = "testdata/cert/key_client.pem"
 )
 
 func TestTLS(t *testing.T) {
@@ -94,10 +95,10 @@ func TestTLS_FileSetup(t *testing.T) {
 }
 
 func TestTLSMutual(t *testing.T) {
-	cert, err := tls.LoadX509KeyPair(_tlsCertFile, _tlsKeyFile)
+	cert, err := tls.LoadX509KeyPair(_tlsClientCertFile, _tlsClientKeyFile)
 	require.NoError(t, err)
 
-	caCert, err := os.ReadFile(filepath.Clean(_tlsClientCertFile))
+	caCert, err := os.ReadFile(filepath.Clean(_tlsCertFile))
 	require.NoError(t, err)
 
 	certPool := x509.NewCertPool()
@@ -138,13 +139,25 @@ func TestTLSMutual(t *testing.T) {
 		_ = res.Body.Close()
 	}
 	require.Error(t, err)
+
+	// Only certificates the client CAs trust are accepted: the server's own certificate is not one of them.
+	serverCert, err := tls.LoadX509KeyPair(_tlsCertFile, _tlsKeyFile)
+	require.NoError(t, err)
+	wrongCertClient := &http.Client{
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{Certificates: []tls.Certificate{serverCert}, RootCAs: certPool}},
+	}
+	res, err = wrongCertClient.Get(target.URL("/test"))
+	if err == nil {
+		_ = res.Body.Close()
+	}
+	require.Error(t, err)
 }
 
 func TestTLSMutualWithProxy(t *testing.T) {
 	cert, err := tls.LoadX509KeyPair(_tlsCertFile, _tlsKeyFile)
 	require.NoError(t, err)
 
-	caCert, err := os.ReadFile(filepath.Clean(_tlsClientCertFile))
+	caCert, err := os.ReadFile(filepath.Clean(_tlsCertFile))
 	require.NoError(t, err)
 
 	certPool := x509.NewCertPool()
@@ -159,12 +172,14 @@ func TestTLSMutualWithProxy(t *testing.T) {
 		},
 	}
 
-	target := MustNew(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
+	// The forward reply connects with the server's certificate and verifies the target with the client CAs,
+	// so every hop shares one identity.
+	target := MustNew(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsCertFile))
 	t.Cleanup(func() { target.Close() })
 	target.MustStartTLS()
 	target.MustMock(Getf("/test").Reply(Accepted().PlainText("accepted")))
 
-	m := MustNew(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsClientCertFile))
+	m := MustNew(Setup().TLSMutual(_tlsCertFile, _tlsKeyFile, _tlsCertFile))
 	t.Cleanup(func() { m.Close() })
 	m.MustStartTLS()
 	m.MustMock(Get(URLPath("/test")).
@@ -189,7 +204,7 @@ func TestTLSMutualWithProxy_FileSetup(t *testing.T) {
 	cert, err := tls.LoadX509KeyPair(_tlsCertFile, _tlsKeyFile)
 	require.NoError(t, err)
 
-	caCert, err := os.ReadFile(filepath.Clean(_tlsClientCertFile))
+	caCert, err := os.ReadFile(filepath.Clean(_tlsCertFile))
 	require.NoError(t, err)
 
 	certPool := x509.NewCertPool()
@@ -204,6 +219,7 @@ func TestTLSMutualWithProxy_FileSetup(t *testing.T) {
 		},
 	}
 
+	// Both servers share one identity, as in TestTLSMutualWithProxy.
 	target := MustNew(UseConfig("testdata/tls/tls_ca_target.yaml"))
 	t.Cleanup(func() { target.Close() })
 	target.MustStartTLS()

@@ -1,4 +1,4 @@
 tls:
   cert: testdata/cert/cert.pem
   key: testdata/cert/key.pem
-  ca: testdata/cert/cert_client.pem
+  ca: testdata/cert/cert.pem

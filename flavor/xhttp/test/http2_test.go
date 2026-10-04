@@ -14,10 +14,10 @@ import (
 )
 
 func TestHTTP2(t *testing.T) {
-	cert, err := tls.LoadX509KeyPair(_tlsCertFile, _tlsKeyFile)
+	cert, err := tls.LoadX509KeyPair(_tlsClientCertFile, _tlsClientKeyFile)
 	require.NoError(t, err)
 
-	caCert, err := os.ReadFile(_tlsClientCertFile)
+	caCert, err := os.ReadFile(_tlsCertFile)
 	require.NoError(t, err)
 
 	caCertPool := x509.NewCertPool()
