@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -88,16 +87,15 @@ func TestSeqRace(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	input := ReplyInput{RequestValues: rv, Writer: nil}
-	for i := range jobs {
-		wg.Add(1)
-		go func(index int) {
+	for range jobs {
+		wg.Go(func() {
 			res, err := builder.Reply(context.Background(), input)
-			require.NoError(t, err)
-			require.True(t, res.StatusCode != StatusNoMatch)
+			if assert.NoError(t, err) {
+				assert.True(t, res.StatusCode != StatusNoMatch)
+			}
 
 			builder.totalHits()
-			wg.Done()
-		}(i)
+		})
 
 		builder.totalHits()
 	}
@@ -108,9 +106,6 @@ func TestSeqRace(t *testing.T) {
 
 	builder.totalHits()
 
-	require.Eventually(t, func() bool {
-		wg.Wait()
-		return true
-	}, 1*time.Second, 100*time.Millisecond)
+	wg.Wait()
 	require.Equal(t, 4, builder.totalHits())
 }

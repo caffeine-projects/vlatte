@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -331,45 +332,41 @@ func TestMochaConcurrentRequests(t *testing.T) {
 
 	defer m.Close()
 
+	// get must not stop the goroutine with require: FailNow is only valid on the test goroutine.
+	get := func(path string) int {
+		res, err := httpClient.Get(m.URL() + path)
+		if !assert.NoError(t, err) {
+			return 0
+		}
+
+		assert.NoError(t, res.Body.Close())
+
+		return res.StatusCode
+	}
+
 	for i := range jobs {
-		wg.Add(1)
-		go func(index int) {
-			num := strconv.FormatInt(int64(index), 10)
+		wg.Go(func() {
+			num := strconv.FormatInt(int64(i), 10)
 
 			scope1 := m.MustMock(Getf("%s", "/test--"+num).Reply(OK()))
 			scope2 := m.MustMock(Getf("%s", "/concurrency--"+num).Reply(Accepted()))
 			scope3 := m.MustMock(Getf("%s", "/seq--"+num).Reply(Seq(OK(), BadRequest())))
 			scope4 := m.MustMock(Getf("%s", "/rand--"+num).Reply(Rand(Accepted(), InternalServerError())))
 
-			res, err := httpClient.Get(m.URL() + "/test--" + num)
-			require.NoError(t, err)
-			require.NoError(t, res.Body.Close())
-			require.Equal(t, http.StatusOK, res.StatusCode)
+			assert.Equal(t, http.StatusOK, get("/test--"+num))
 
 			m.MustMock(Getf("%s", "/test-after--"+num).Reply(BadRequest()))
 
-			res, err = httpClient.Get(m.URL() + "/concurrency--" + num)
-			require.NoError(t, err)
-			require.NoError(t, res.Body.Close())
-			require.Equal(t, http.StatusAccepted, res.StatusCode)
+			assert.Equal(t, http.StatusAccepted, get("/concurrency--"+num))
 
 			m.MustMock(Getf("%s", "/concurrency-after--"+num).Reply(InternalServerError()))
 
-			res, err = httpClient.Get(m.URL() + "/seq--" + num)
-			require.NoError(t, err)
-			require.NoError(t, res.Body.Close())
-			require.Equal(t, http.StatusOK, res.StatusCode)
-
-			res, err = httpClient.Get(m.URL() + "/seq--" + num)
-			require.NoError(t, err)
-			require.NoError(t, res.Body.Close())
-			require.Equal(t, http.StatusBadRequest, res.StatusCode)
+			assert.Equal(t, http.StatusOK, get("/seq--"+num))
+			assert.Equal(t, http.StatusBadRequest, get("/seq--"+num))
 
 			for range 50 {
-				res, err = httpClient.Get(m.URL() + "/rand--" + num)
-				require.NoError(t, err)
-				require.NoError(t, res.Body.Close())
-				require.True(t, res.StatusCode == http.StatusAccepted || res.StatusCode == http.StatusInternalServerError)
+				code := get("/rand--" + num)
+				assert.True(t, code == http.StatusAccepted || code == http.StatusInternalServerError)
 			}
 
 			scope1.AssertCalled(t)
@@ -382,9 +379,7 @@ func TestMochaConcurrentRequests(t *testing.T) {
 			vlatte.Times(t, scope4, 50)
 
 			m.MustMock(Getf("%s", "/test-final--"+num).Reply(PartialContent()))
-
-			wg.Done()
-		}(i)
+		})
 	}
 
 	wg.Wait()

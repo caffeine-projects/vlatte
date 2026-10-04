@@ -67,7 +67,7 @@ func TestForward(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 
 			b, err := io.ReadAll(r.Body)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 
 			w.Write(b)
 		}))
@@ -96,7 +96,7 @@ func TestForward(t *testing.T) {
 			w.Header().Add(httpval.HeaderContentType, "application/json")
 
 			b, err := io.ReadAll(r.Body)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 
 			ww := gzip.NewWriter(w)
 

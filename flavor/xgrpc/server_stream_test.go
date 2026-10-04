@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -53,8 +54,9 @@ func TestServerStreaming(t *testing.T) {
 					return
 				}
 
-				require.Fail(t, err.Error())
+				assert.Fail(t, err.Error())
 				cancel()
+				return
 			}
 
 			mu.Lock()
@@ -114,8 +116,9 @@ func TestServerStream_MessageReader(t *testing.T) {
 					return
 				}
 
-				require.Fail(t, err.Error())
+				assert.Fail(t, err.Error())
 				cancel()
+				return
 			}
 
 			mu.Lock()
