@@ -50,10 +50,16 @@ func (rep *RandomReply) Add(reply ...vlatte.Replier[ReplyInput, *Response]) *Ran
 	return rep
 }
 
-func (rep *RandomReply) beforeBuild(_ *HTTPMockApp) error {
+func (rep *RandomReply) beforeBuild(app *HTTPMockApp) error {
 	size := len(rep.replies)
 	if size == 0 {
 		return errors.New("reply_random: you need to set at least one response when using random reply")
+	}
+
+	for _, reply := range rep.replies {
+		if err := prepareReply(reply, app); err != nil {
+			return err
+		}
 	}
 
 	return nil

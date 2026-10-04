@@ -68,6 +68,27 @@ func TestSequentialReplyShouldReturnErrorWhenSequenceDoesNotContainReplies(t *te
 	assert.NotNil(t, err)
 }
 
+func TestSequentialReply_PreparesNestedReplies(t *testing.T) {
+	target := New()
+	target.MustStart()
+	t.Cleanup(target.Close)
+	target.MustMock(Getf("/seq").Reply(Accepted()))
+
+	m := New()
+	m.MustStart()
+	t.Cleanup(m.Close)
+	// From creates its HTTP client in beforeBuild: Seq must prepare every reply it holds.
+	m.MustMock(Getf("/seq").Reply(Seq(From(target.URL())).OnSequenceEnded(From(target.URL()))))
+
+	// The second request is served by the reply set with OnSequenceEnded.
+	for range 2 {
+		res, err := http.Get(m.URL("/seq"))
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, http.StatusAccepted, res.StatusCode)
+	}
+}
+
 func TestSequentialReplyValidate(t *testing.T) {
 	seq := Seq()
 

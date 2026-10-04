@@ -2,6 +2,7 @@ package xhttp
 
 import (
 	"context"
+	"io"
 	"math/rand"
 	"net/http"
 	"slices"
@@ -62,6 +63,23 @@ func TestRandWithCustom(t *testing.T) {
 		require.Nil(t, err)
 		require.True(t, contains)
 	}
+}
+
+func TestRandomReply_PreparesNestedReplies(t *testing.T) {
+	m := New()
+	m.MustStart()
+	t.Cleanup(m.Close)
+	// Body templates are parsed in beforeBuild: Rand must prepare every reply it holds.
+	m.MustMock(Getf("/rand").Reply(Rand(OK().BodyTemplate("{{ .Request.Method }}"))))
+
+	res, err := http.Get(m.URL("/rand"))
+	require.NoError(t, err)
+
+	b, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "GET", string(b))
 }
 
 func TestRandomReplyValidate(t *testing.T) {

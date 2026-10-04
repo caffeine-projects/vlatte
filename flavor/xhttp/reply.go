@@ -29,6 +29,15 @@ type replyOnBeforeBuild interface {
 	beforeBuild(app *HTTPMockApp) error
 }
 
+// prepareReply runs beforeBuild on replies that need it. Replies holding other replies use it for their children.
+func prepareReply(reply vlatte.Replier[ReplyInput, *Response], app *HTTPMockApp) error {
+	if rb, ok := reply.(replyOnBeforeBuild); ok {
+		return rb.beforeBuild(app)
+	}
+
+	return nil
+}
+
 // StdReply holds the configuration on how the MockedResponse should be built.
 type StdReply struct {
 	response             Response
