@@ -130,7 +130,7 @@ func (r *EventRunner) OnComplete(ctx context.Context, mock Mock, argsFn func(Eve
 	}
 
 	for _, def := range mock.Events().OnComplete {
-		if !mock.Events().OnComplete.Has(def.Name) {
+		if !r.Listeners.OnComplete.Has(def.Name) {
 			return fmt.Errorf("event %s not found", def.Name)
 		}
 
