@@ -10,6 +10,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -74,11 +75,13 @@ func (a *Admin[B]) extension(r *http.Request) (string, error) {
 		return "", ErrUnsupportedContentType
 	}
 
-	if _, ok := SupportedExtensions[extension[0]]; !ok {
+	// mime returns extensions with a leading dot, e.g. ".json".
+	ext := strings.TrimPrefix(extension[0], ".")
+	if _, ok := SupportedExtensions[ext]; !ok {
 		return "", ErrUnsupportedContentType
 	}
 
-	return extension[0], nil
+	return ext, nil
 }
 
 func (a *Admin[B]) add(w http.ResponseWriter, r *http.Request) {
