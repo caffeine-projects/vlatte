@@ -36,6 +36,24 @@ func TestRecordConfigApply(t *testing.T) {
 	require.Error(t, (&RecordConfig{}).Apply(&RecordConfig{}), "no extension defined")
 }
 
+func TestRecorder_CreatesSaveDir(t *testing.T) {
+	dir := path.Join(t.TempDir(), "nested", "recorded")
+	m := New(Setup().Record(RecordDir(dir)))
+	m.MustStart()
+	m.MustMock(Getf("/rec").Reply(OK()))
+
+	res, err := http.Get(m.URL("/rec"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	// Close waits for the recorder to write every file.
+	m.Close()
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+}
+
 func TestStopRecordingWithoutRecorder(t *testing.T) {
 	m := New()
 

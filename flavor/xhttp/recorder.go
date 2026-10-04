@@ -266,6 +266,10 @@ func (r *recorder) process(arg recArgs) error {
 		saveDir = path.Join(r.rootDir, saveDir)
 	}
 
+	if err := os.MkdirAll(saveDir, 0o755); err != nil {
+		return err
+	}
+
 	name := fmt.Sprintf("%s-%s", arg.request.method, nm)
 	mockFile := path.Join(saveDir, fmt.Sprintf("%s.mock.%s", name, r.config.SaveFileType))
 
