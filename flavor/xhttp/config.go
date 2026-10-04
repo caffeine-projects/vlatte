@@ -29,7 +29,6 @@ type Config struct {
 	// Common fields (vlatte.C)
 	Name                  string
 	AdminPath             string
-	AdminEnabled          bool
 	RootDir               string
 	TLSConfig             *tls.Config
 	TLSCertificates       []tls.Certificate
@@ -75,7 +74,6 @@ var _ vlatte.C = (*Config)(nil)
 
 func (c *Config) SetName(v string)                        { c.Name = v }
 func (c *Config) SetAdminPath(v string)                   { c.AdminPath = v }
-func (c *Config) SetAdminEnabled(v bool)                  { c.AdminEnabled = v }
 func (c *Config) SetRootDir(v string)                     { c.RootDir = v }
 func (c *Config) SetTLSConfig(v *tls.Config)              { c.TLSConfig = v }
 func (c *Config) SetTLSCertificates(v []tls.Certificate)  { c.TLSCertificates = v }
@@ -101,7 +99,6 @@ func (c *Config) SetDebugFn(v vlatte.DebugFn) { c.DebugFn = v }
 func (c *Config) Apply(conf *Config) error {
 	conf.Name = c.Name
 	conf.AdminPath = c.AdminPath
-	conf.AdminEnabled = c.AdminEnabled
 	conf.RootDir = c.RootDir
 	conf.TLSConfig = c.TLSConfig
 	conf.TLSCertificates = c.TLSCertificates
@@ -437,12 +434,6 @@ func (cb *ConfigBuilder) DebugFn(dfn vlatte.DebugFn) *ConfigBuilder {
 // AdminPath sets the Admin path.
 func (cb *ConfigBuilder) AdminPath(path string) *ConfigBuilder {
 	cb.base.AdminPath(path)
-	return cb
-}
-
-// AdminEnabled enable/disable Admin endpoints.
-func (cb *ConfigBuilder) AdminEnabled(v bool) *ConfigBuilder {
-	cb.base.AdminEnabled(v)
 	return cb
 }
 

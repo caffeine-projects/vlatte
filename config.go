@@ -17,7 +17,6 @@ import (
 type C interface {
 	SetName(string)
 	SetAdminPath(string)
-	SetAdminEnabled(bool)
 	SetRootDir(string)
 	SetTLSConfig(*tls.Config)
 	SetTLSCertificates([]tls.Certificate)
@@ -76,12 +75,6 @@ func (cb *CB) Name(name string) *CB {
 // AdminPath sets the admin API path.
 func (cb *CB) AdminPath(path string) *CB {
 	cb.conf.SetAdminPath(path)
-	return cb
-}
-
-// AdminEnabled enables or disables the admin endpoints.
-func (cb *CB) AdminEnabled(v bool) *CB {
-	cb.conf.SetAdminEnabled(v)
 	return cb
 }
 
