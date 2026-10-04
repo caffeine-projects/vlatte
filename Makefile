@@ -15,7 +15,11 @@ test: ## run tests
 
 .PHONY: testfail
 testfail: ## run tests and print the name of failed ones
-	@go test -timeout 60000ms -race -v ./... | tee /dev/stderr | rg FAIL: | sed 's/^--- FAIL: //' | sed 's/ ([[:digit:]]*.[[:digit:]]*s)//'
+	@log=$$(mktemp) && st=$$(mktemp) || exit 1; \
+	{ go test -timeout 60000ms -race -v ./... 2>&1; echo $$? >"$$st"; } | tee "$$log"; \
+	status=$$(cat "$$st"); \
+	grep -E '^[[:space:]]*--- FAIL: ' "$$log" | sed -E 's/^[[:space:]]*--- FAIL: ([^ ]+).*/\1/'; \
+	rm -f "$$log" "$$st"; exit $$status
 
 .PHONY: testci
 testci: ## run tests with a focus on ci
@@ -31,7 +35,7 @@ bench: ## run benchmarks
 
 .PHONY: cov
 cov: ## run tests and generate coverage report
-	@mkdir -p ./out
+	@set -e; mkdir -p ./out
 	@go test -v -race -coverpkg=./... -coverprofile=out/coverage.out ./...
 	@go tool cover -html=out/coverage.out -o out/coverage.html
 
