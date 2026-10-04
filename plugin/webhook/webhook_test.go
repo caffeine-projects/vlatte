@@ -384,3 +384,46 @@ func TestWebHook_InvalidFiles(t *testing.T) {
 		})
 	}
 }
+
+func TestWebHook_DefaultTransportHasTimeouts(t *testing.T) {
+	wh, err := webhook.New()
+	require.NoError(t, err)
+
+	tr, ok := wh.RoundTripper.(*http.Transport)
+	require.True(t, ok)
+	// A bare http.Transport has no dial or TLS handshake timeouts: a stuck target could block forever.
+	require.NotNil(t, tr.DialContext)
+	require.NotZero(t, tr.TLSHandshakeTimeout)
+}
+
+func TestWebHook_Timeout(t *testing.T) {
+	name := "webhook"
+	target := xhttp.New()
+	target.MustStart()
+	defer target.Close()
+
+	target.MustMock(xhttp.Getf("/hook/slow").
+		Delay(vlatte.Latency(1 * time.Minute)).
+		Reply(xhttp.OK()))
+
+	wh, err := webhook.New(webhook.WithTimeout(100 * time.Millisecond))
+	require.NoError(t, err)
+	m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
+	m.MustStart()
+	defer m.Close()
+
+	m.MustMock(xhttp.Getf("/test").
+		OnCompleteEvent(webhook.Options().
+			URL(target.URL("/hook/slow")).
+			Method(http.MethodGet).
+			Build(name)).
+		Reply(xhttp.NoContent()))
+
+	// Without the webhook timeout, the slow target would hold the mocked response past the client timeout.
+	client := &http.Client{Timeout: 10 * time.Second}
+	res, err := client.Get(m.URL("/test"))
+
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusNoContent, res.StatusCode)
+}

@@ -3,6 +3,7 @@ package webhook
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/rs/zerolog"
 )
@@ -21,6 +22,15 @@ func WithTransform(transform Transform) Option {
 func WithRoundTripper(roundTripper http.RoundTripper) Option {
 	return func(w *WebHook) error {
 		w.RoundTripper = roundTripper
+		return nil
+	}
+}
+
+// WithTimeout returns an [Option] that limits how long a [WebHook] request may take.
+// Defaults to 10 seconds.
+func WithTimeout(timeout time.Duration) Option {
+	return func(w *WebHook) error {
+		w.Timeout = timeout
 		return nil
 	}
 }

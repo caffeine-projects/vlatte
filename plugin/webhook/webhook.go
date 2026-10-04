@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -36,7 +37,10 @@ type WebHook struct {
 	Transform    Transform
 	Logger       *zerolog.Logger
 	LogLevel     zerolog.Level
+	Timeout      time.Duration
 }
+
+const _defaultTimeout = 10 * time.Second
 
 // New creates a new WebHook instance.
 func New(options ...Option) (*WebHook, error) {
@@ -49,7 +53,12 @@ func New(options ...Option) (*WebHook, error) {
 	}
 
 	if w.RoundTripper == nil {
-		w.RoundTripper = &http.Transport{}
+		// A clone keeps the default dial, TLS handshake and idle timeouts.
+		w.RoundTripper = http.DefaultTransport.(*http.Transport).Clone()
+	}
+
+	if w.Timeout == 0 {
+		w.Timeout = _defaultTimeout
 	}
 
 	if w.Transform == nil {
@@ -114,6 +123,9 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		Str("url", txtURL).
 		Str("kind", args.Kind().String()).
 		Msg(fmt.Sprintf("---> WEBHOOK REQUEST RECEIVED %s %s", method, u.Path))
+
+	ctx, cancel := context.WithTimeout(ctx, w.Timeout)
+	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, method, txtURL, body)
 	if err != nil {
