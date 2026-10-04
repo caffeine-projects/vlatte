@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"net/http"
 	"os"
@@ -32,6 +33,42 @@ func TestCLI(t *testing.T) {
 	// Connection errors mean it is not up yet: they are retried, never counted as success.
 	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		res, err := http.Get("http://" + addr)
+		if !assert.NoError(c, err) {
+			return
+		}
+
+		_ = res.Body.Close()
+		assert.Equal(c, xhttp.StatusNoMatch, res.StatusCode)
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
+type httpsConfigurer struct{ addr string }
+
+func (c httpsConfigurer) Apply(conf *xhttp.Config) error {
+	conf.Addr = c.addr
+	conf.UseHTTPS = true
+	return nil
+}
+
+func TestCLI_HTTPS(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	t.Setenv(_dockerHostEnv, "")
+	require.NoError(t, os.Unsetenv(_dockerHostEnv))
+
+	port, err := getRandomPort()
+	require.NoError(t, err)
+
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+	go run(ctx, httpsConfigurer{addr: addr})
+
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	t.Cleanup(client.CloseIdleConnections)
+
+	// With HTTPS enabled, the CLI must serve over TLS.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res, err := client.Get("https://" + addr)
 		if !assert.NoError(c, err) {
 			return
 		}

@@ -75,7 +75,11 @@ func run(ctx context.Context, custom ...vlatte.Configurer[*xhttp.Config]) {
 		Args:    cobra.MinimumNArgs(0),
 		Example: _example,
 		Run: func(cmd *cobra.Command, args []string) {
-			m.MustStart()
+			if m.Config().UseHTTPS {
+				m.MustStartTLS()
+			} else {
+				m.MustStart()
+			}
 
 			fmt.Println(_banner)
 			fmt.Println(m.DescribeConfig())
