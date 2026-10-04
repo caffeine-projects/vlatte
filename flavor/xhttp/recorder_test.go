@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,6 +34,34 @@ func TestRecordConfigApply(t *testing.T) {
 
 	require.Error(t, (&RecordConfig{SaveFileType: ".test"}).Apply(defaultRecordConfig()), "unsupported extension")
 	require.Error(t, (&RecordConfig{}).Apply(&RecordConfig{}), "no extension defined")
+}
+
+func TestStopRecordingWithoutRecorder(t *testing.T) {
+	m := New()
+
+	require.NotPanics(t, m.StopRecording)
+}
+
+func TestRecorder_DispatchAfterStopDoesNotBlock(t *testing.T) {
+	m := New(Setup().Record(RecordDir(t.TempDir())))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.StopRecording()
+
+	// A request can still be in flight when recording stops; handing it to the recorder must not block.
+	req := httptest.NewRequest(http.MethodGet, "/late", nil)
+	done := make(chan struct{})
+	go func() {
+		m.rec.dispatch(req, req.URL, nil, &Response{StatusCode: http.StatusOK})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatch blocked after the recorder was stopped")
+	}
 }
 
 func TestRecordingWithWebProxy(t *testing.T) {

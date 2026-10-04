@@ -195,6 +195,14 @@ func (r *recorder) isActive() bool {
 }
 
 func (r *recorder) dispatch(req *http.Request, parsedURL *url.URL, rawReqBody []byte, res *Response) {
+	// stop holds r.mu while it signals the worker, so checking and sending under r.mu is atomic.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.active.Load() {
+		return
+	}
+
 	r.in <- recArgs{
 		request:  recRequest{parsedURL.RequestURI(), req.Method, req.Header.Clone(), req.URL.Query(), rawReqBody},
 		response: recResponse{res.StatusCode, res.Header.Clone(), res.Body},

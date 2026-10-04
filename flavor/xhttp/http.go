@@ -303,7 +303,9 @@ func (app *HTTPMockApp) IsRecording() bool {
 }
 
 func (app *HTTPMockApp) StopRecording() {
-	app.rec.stop()
+	if app.rec != nil {
+		app.rec.stop()
+	}
 }
 
 func (app *HTTPMockApp) RegisterExtension(extension vlatte.Extension) error {
