@@ -261,7 +261,8 @@ func TestWebHook_FaultTarget(t *testing.T) {
 		Delay(vlatte.Latency(1 * time.Minute)).
 		Reply(xhttp.OK().PlainText("hello")))
 
-	wh, err := webhook.New()
+	// The target never answers in time: the webhook call fails, but the mocked response must still be served.
+	wh, err := webhook.New(webhook.WithRoundTripper(&http.Transport{ResponseHeaderTimeout: 100 * time.Millisecond}))
 	require.NoError(t, err)
 	m := xhttp.New(xhttp.Setup().OnCompleteListener(name, wh))
 	m.MustStart()
@@ -275,26 +276,6 @@ func TestWebHook_FaultTarget(t *testing.T) {
 		Reply(xhttp.NoContent()))
 
 	client := &http.Client{}
-	timeout := 2 * time.Second
-	exit := make(chan struct{}, 1)
-	ti := time.AfterFunc(timeout, func() { exit <- struct{}{} })
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-
-	defer cancel()
-	defer ti.Stop()
-
-	go func() {
-		for {
-			select {
-			case <-exit:
-				return
-			case <-ctx.Done():
-				target.Close()
-				return
-			}
-		}
-	}()
-
 	ctxReq, cancelReq := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelReq()
 
