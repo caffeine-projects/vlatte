@@ -419,7 +419,7 @@ func (app *HTTPMockApp) getLog(conf *Config) *zerolog.Logger {
 
 	c := zerolog.New(output).Level(zerolog.Level(conf.LogLevel)).With().Timestamp()
 	if conf.Name != "" {
-		c.Str("server", conf.Name)
+		c = c.Str("server", conf.Name)
 	}
 
 	log := c.Logger()

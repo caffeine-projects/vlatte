@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"testing"
@@ -385,6 +386,24 @@ func TestMochaConcurrentRequests(t *testing.T) {
 	wg.Wait()
 
 	require.EqualValues(t, 54*jobs, m.Hits())
+}
+
+func TestDefaultLoggerIncludesServerName(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+
+	stdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = stdout })
+
+	log := (&HTTPMockApp{}).getLog(&Config{Name: "srv"})
+	log.Info().Msg("hello")
+	require.NoError(t, w.Close())
+
+	b, err := io.ReadAll(r)
+	require.NoError(t, err)
+	// Log lines must name the server, so the logs of several mock servers can be told apart.
+	require.Contains(t, string(b), `"server":"srv"`)
 }
 
 func TestURL_InvalidPathPanicsInsteadOfExiting(t *testing.T) {
