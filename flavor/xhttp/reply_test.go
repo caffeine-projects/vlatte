@@ -126,3 +126,18 @@ func TestStdReplyBodyReader(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "hello\nworld\n", string(res.Body))
 }
+
+func TestHeaderTemplate_RendersPerResponse(t *testing.T) {
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/header").Reply(OK().HeaderTemplate("x-method", "{{ .Request.Method }}")))
+
+	// Rendered values belong to one response: they must not pile up on the reply across requests.
+	for range 2 {
+		res, err := http.Get(m.URL("/header"))
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, []string{"GET"}, res.Header.Values("x-method"))
+	}
+}

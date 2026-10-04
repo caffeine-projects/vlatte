@@ -411,9 +411,12 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Respon
 			return nil, err
 		}
 
-		h := http.Header(mimeHeader)
-		for k, v := range h {
-			rep.HeaderArr(k, v...)
+		// Rendered values belong to this response only, so they go into a copy of the reply headers.
+		response.Header = response.Header.Clone()
+		for k, values := range mimeHeader {
+			for _, v := range values {
+				response.Header.Add(k, v)
+			}
 		}
 	}
 
