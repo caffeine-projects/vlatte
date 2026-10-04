@@ -2,6 +2,7 @@ package xhttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"github.com/caffeine-projects/vlatte/filter"
 	"github.com/caffeine-projects/vlatte/filter/filterbuilder"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/bufpool"
+	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/viewdata"
 )
 
 var (
@@ -320,7 +322,8 @@ func BuildMockFromBytes(app *HTTPMockApp, builder *HTTPMockBuilder, content []by
 			return nil, err
 		}
 
-		d := &mockFileData{app.params, app.Data(), app.URL()}
+		// Mock files load outside any request, so parameters are read without one.
+		d := &mockFileData{viewdata.NewParameters(context.Background(), app.params), app.Data(), app.URL()}
 		buf = bufpool.Get()
 		buf.Reset()
 

@@ -12,12 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TODO: rework templating implementation.
-
 func TestTemplating(t *testing.T) {
-	t.Log("templating needs rework")
-	t.SkipNow()
-
 	kv := kvmem.New()
 	m := xhttp.MustNew(xhttp.Setup().Parameters(kv))
 	m.MustStart()
@@ -69,9 +64,6 @@ func TestTemplating_BodyFilename(t *testing.T) {
 }
 
 func TestTemplating_BodyFilename_BodyTemplate(t *testing.T) {
-	t.Log("templating needs rework")
-	t.SkipNow()
-
 	kv := kvmem.New()
 	m := xhttp.MustNew(xhttp.Setup().Parameters(kv))
 	m.MustStart()
@@ -98,9 +90,6 @@ func TestTemplating_BodyFilename_BodyTemplate(t *testing.T) {
 }
 
 func TestTemplating_Header(t *testing.T) {
-	t.Log("templating needs rework")
-	t.SkipNow()
-
 	kv := kvmem.New()
 	m := xhttp.MustNew(xhttp.Setup().Parameters(kv))
 	m.MustStart()
@@ -127,9 +116,6 @@ func TestTemplating_Header(t *testing.T) {
 }
 
 func TestTemplating_All(t *testing.T) {
-	t.Log("templating needs rework")
-	t.SkipNow()
-
 	kv := kvmem.New()
 	m := xhttp.MustNew(xhttp.Setup().Parameters(kv))
 	m.MustStart()

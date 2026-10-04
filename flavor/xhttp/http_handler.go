@@ -115,7 +115,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	locals := locals(reqValues, d, mock.Ext(), nil)
+	locals := locals(reqValues, d, viewdata.NewParameters(r.Context(), h.app.params))
 	kit := &Kit{template: h.app.config.Template, data: locals}
 
 	reqValues.Data = locals
@@ -230,7 +230,7 @@ func (h *mockHandler) onError(w http.ResponseWriter, r *RequestValues, err error
 	w.Write([]byte(err.Error()))
 }
 
-func locals(r *RequestValues, provided map[string]any, ext any, data any) *viewdata.Data {
+func locals(r *RequestValues, provided map[string]any, params *viewdata.Parameters) *viewdata.Data {
 	cookies := make(map[string]*http.Cookie, len(r.RawRequest.Cookies()))
 	for _, cookie := range r.RawRequest.Cookies() {
 		cookies[cookie.Name] = cookie
@@ -250,5 +250,5 @@ func locals(r *RequestValues, provided map[string]any, ext any, data any) *viewd
 		Body:            body,
 	}
 
-	return viewdata.New(req, provided, ext, data)
+	return viewdata.New(req, provided, params)
 }

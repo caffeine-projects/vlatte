@@ -14,6 +14,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/httpval"
 	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/bufpool"
+	"github.com/caffeine-projects/vlatte/flavor/xhttp/internal/viewdata"
 	"github.com/caffeine-projects/vlatte/vlattecore/descriptor"
 )
 
@@ -393,6 +394,9 @@ func (rep *StdReply) build(_ http.ResponseWriter, r *RequestValues) (res *Respon
 	tmplData := any(nil)
 	if hasTemplate {
 		tmplData = r.Data
+		if d, ok := r.Data.(*viewdata.Data); ok {
+			tmplData = d.WithExtra(rep.teData)
+		}
 	}
 
 	if len(rep.headerWithTemplate) > 0 {
