@@ -60,6 +60,7 @@ func TestRecordingWithWebProxy(t *testing.T) {
 
 	u, _ := url.Parse(p.URL())
 	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(u)}}
+	t.Cleanup(client.CloseIdleConnections)
 
 	req, _ := http.NewRequest(http.MethodGet, m.URL()+"/test", nil)
 	res, err := client.Do(req)
@@ -161,6 +162,7 @@ func TestRecordingWithWebProxy_CustomRootDir(t *testing.T) {
 
 	u, _ := url.Parse(p.URL())
 	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(u)}}
+	t.Cleanup(client.CloseIdleConnections)
 
 	req, _ := http.NewRequest(http.MethodGet, m.URL()+"/test", nil)
 	res, err := client.Do(req)
@@ -605,6 +607,7 @@ func TestRecordTLSClient(t *testing.T) {
 	httpClient := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}}
+	t.Cleanup(httpClient.CloseIdleConnections)
 
 	res, err := httpClient.Get(recorder.URL() + "/customers")
 	require.NoError(t, err)
@@ -723,6 +726,7 @@ func TestRecordBothTLS(t *testing.T) {
 	httpClient := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}}
+	t.Cleanup(httpClient.CloseIdleConnections)
 
 	res, err := httpClient.Get(recorder.URL() + "/customers")
 	require.NoError(t, err)
