@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/kv"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -180,7 +179,7 @@ func TestConfigBuilder(t *testing.T) {
 		Logger(&customLogger).
 		UseDescriptiveLogger().
 		RedactHeader("header-1", "HEADER-2", "hEaDeR-3").
-		Parameters(kv.NewMemory()).
+		Parameters(vlatte.NewMemoryKV()).
 		MockFilePatterns("test", "dev").
 		Loader(&fileLoader{}).
 		MockFileHandlers(&customMockFileHandler{}).
@@ -206,7 +205,7 @@ func TestConfigBuilder(t *testing.T) {
 	require.False(t, conf.LogPretty)
 	require.Equal(t, &customLogger, conf.Logger)
 	require.Equal(t, int64(100), conf.LogBodyMaxSize)
-	require.Equal(t, kv.NewMemory(), conf.Parameters)
+	require.Equal(t, vlatte.NewMemoryKV(), conf.Parameters)
 	require.Equal(t, []string{"test", "dev"}, conf.MockFileSearchPatterns)
 	require.True(t, conf.Debug)
 	require.Len(t, conf.HeaderNamesToRedact, 3)

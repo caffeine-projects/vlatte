@@ -1,9 +1,24 @@
-package kv
+package vlatte
 
 import (
 	"context"
 	"sync"
 )
+
+// KV defines a contract for a generic parameters repository.
+type KV interface {
+	// Get returns the parameter by its key.
+	Get(ctx context.Context, k string) ([]byte, error)
+
+	// Has checks if a parameter with the given key exists.
+	Has(ctx context.Context, k string) (bool, error)
+
+	// Set sets a parameter.
+	Set(ctx context.Context, k string, v []byte) error
+
+	// Del removes a parameter by its key.
+	Del(ctx context.Context, k string) error
+}
 
 var _ KV = (*memKV)(nil)
 
@@ -12,8 +27,8 @@ type memKV struct {
 	mu   sync.RWMutex
 }
 
-// NewMemory returns a KV that keeps the parameters in memory.
-func NewMemory() KV {
+// NewMemoryKV returns a KV that keeps the parameters in memory.
+func NewMemoryKV() KV {
 	return &memKV{data: make(map[string][]byte)}
 }
 

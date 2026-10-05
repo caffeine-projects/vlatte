@@ -18,7 +18,6 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
-	"github.com/caffeine-projects/vlatte/kv"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid/recover"
@@ -45,7 +44,7 @@ type Server struct {
 	storage            vlatte.Store[*Mock]
 	scenarioStore      *mfeat.ScenarioStore
 	requestBodyParsers []RequestBodyParser
-	params             kv.KV
+	params             vlatte.KV
 	loaders            []Loader
 	rec                *recorder
 	rwMutex            sync.RWMutex
@@ -109,11 +108,11 @@ func New(config ...Option) (*Server, error) {
 
 	middlewares = append(middlewares, conf.Middlewares...)
 
-	var params kv.KV
+	var params vlatte.KV
 	if conf.Parameters != nil {
 		params = conf.Parameters
 	} else {
-		params = kv.NewMemory()
+		params = vlatte.NewMemoryKV()
 	}
 
 	var rec *recorder
@@ -262,7 +261,7 @@ func (app *Server) URL(paths ...string) string {
 }
 
 // Parameters returns Params instance associated with this application.
-func (app *Server) Parameters() kv.KV {
+func (app *Server) Parameters() vlatte.KV {
 	return app.params
 }
 

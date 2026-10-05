@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caffeine-projects/vlatte/kv"
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestTemplating(t *testing.T) {
-	params := kv.NewMemory()
+	params := vlatte.NewMemoryKV()
 	m := mockhttp.MustNew(mockhttp.Setup().Parameters(params))
 	m.MustStart()
 	defer m.Close()
@@ -64,7 +64,7 @@ func TestTemplating_BodyFilename(t *testing.T) {
 }
 
 func TestTemplating_BodyFilename_BodyTemplate(t *testing.T) {
-	params := kv.NewMemory()
+	params := vlatte.NewMemoryKV()
 	m := mockhttp.MustNew(mockhttp.Setup().Parameters(params))
 	m.MustStart()
 	defer m.Close()
@@ -90,7 +90,7 @@ func TestTemplating_BodyFilename_BodyTemplate(t *testing.T) {
 }
 
 func TestTemplating_Header(t *testing.T) {
-	params := kv.NewMemory()
+	params := vlatte.NewMemoryKV()
 	m := mockhttp.MustNew(mockhttp.Setup().Parameters(params))
 	m.MustStart()
 	defer m.Close()
@@ -116,7 +116,7 @@ func TestTemplating_Header(t *testing.T) {
 }
 
 func TestTemplating_All(t *testing.T) {
-	params := kv.NewMemory()
+	params := vlatte.NewMemoryKV()
 	m := mockhttp.MustNew(mockhttp.Setup().Parameters(params))
 	m.MustStart()
 	defer m.Close()

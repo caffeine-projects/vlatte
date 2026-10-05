@@ -15,7 +15,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/kv"
 )
 
 // Defaults
@@ -33,7 +32,7 @@ type Config struct {
 	TLSConfig             *tls.Config
 	TLSCertificates       []tls.Certificate
 	TLSClientCAs          *x509.CertPool
-	Parameters            kv.KV
+	Parameters            vlatte.KV
 	TemplateFunctions     template.FuncMap
 	Logger                *zerolog.Logger
 	LogVerbosity          vlatte.LogVerbosity
@@ -305,7 +304,7 @@ func (cb *ConfigBuilder) RedactHeader(names ...string) *ConfigBuilder {
 }
 
 // Parameters sets a custom reply parameters store.
-func (cb *ConfigBuilder) Parameters(params kv.KV) *ConfigBuilder {
+func (cb *ConfigBuilder) Parameters(params vlatte.KV) *ConfigBuilder {
 	cb.conf.Parameters = params
 	return cb
 }
