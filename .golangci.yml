@@ -6,7 +6,94 @@ linters:
   disable:
     - errcheck
   enable:
+    - depguard
+    - embeddedstructfieldcheck
+    - errname
+    - errorlint
+    - forcetypeassert
+    - funcorder
+    - gochecknoinits
+    - goprintffuncname
     - modernize
+    - musttag
+    - perfsprint
+    - prealloc
+    - predeclared
+    - recvcheck
+    - revive
+  settings:
+    depguard:
+      rules:
+        json:
+          deny:
+            - pkg: encoding/json$
+              desc: use encoding/json/v2
+        logging:
+          deny:
+            - pkg: log/slog
+              desc: use zerolog
+            - pkg: github.com/rs/zerolog/log$
+              desc: no global logger; inject *zerolog.Logger
+        viper:
+          # file globs match absolute paths, hence the **/ prefix
+          files:
+            - $all
+            - "!**/cmd/vlatte/main.go"
+            - "!**/mockhttp/mock_builder_fs.go"
+            - "!**/mockhttp/recorder.go"
+          deny:
+            - pkg: github.com/spf13/viper
+              desc: frozen to these 3 files until the config rework
+    embeddedstructfieldcheck:
+      forbid-mutex: true
+    musttag:
+      # musttag only knows encoding/json v1 by default
+      functions:
+        - name: encoding/json/v2.Marshal
+          tag: json
+          arg-pos: 0
+        - name: encoding/json/v2.MarshalWrite
+          tag: json
+          arg-pos: 1
+        - name: encoding/json/v2.MarshalEncode
+          tag: json
+          arg-pos: 1
+        - name: encoding/json/v2.Unmarshal
+          tag: json
+          arg-pos: 1
+        - name: encoding/json/v2.UnmarshalRead
+          tag: json
+          arg-pos: 1
+        - name: encoding/json/v2.UnmarshalDecode
+          tag: json
+          arg-pos: 1
+    perfsprint:
+      integer-format: true
+      int-conversion: true
+      bool-format: true
+      error-format: true
+      string-format: false
+      hex-format: false
+      concat-loop: false
+    revive:
+      rules:
+        - name: redefines-builtin-id
+        - name: deep-exit
+        - name: enforce-map-style
+          arguments:
+            - make
+        - name: var-declaration
+        - name: indent-error-flow
+        - name: superfluous-else
+        - name: early-return
+        - name: error-naming
+        - name: error-strings
+        - name: errorf
+        - name: receiver-naming
+        - name: time-naming
+        - name: context-as-argument
+        - name: struct-tag
+        - name: import-alias-naming
   exclusions:
     generated: lax
     presets:
@@ -14,6 +101,10 @@ linters:
       - common-false-positives
       - legacy
       - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - forcetypeassert
     paths:
       - third_party$
       - builtin$

@@ -1,7 +1,7 @@
 package match
 
 import (
-	"fmt"
+	"errors"
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
@@ -32,7 +32,7 @@ func TestEither(t *testing.T) {
 func TestEitherLeftErr(t *testing.T) {
 	ok, err := Either(
 		Function(func(_ any) (bool, error) {
-			return false, fmt.Errorf("fail")
+			return false, errors.New("fail")
 		}),
 		Contain("qa")).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), "test"))
 
@@ -44,7 +44,7 @@ func TestEitherRightErr(t *testing.T) {
 	ok, err := Either(
 		Contain("qa"),
 		Function(func(_ any) (bool, error) {
-			return false, fmt.Errorf("fail")
+			return false, errors.New("fail")
 		})).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), "test"))
 
 	require.Error(t, err)

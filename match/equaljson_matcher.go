@@ -1,7 +1,8 @@
 package match
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"fmt"
 	"strings"
 
@@ -44,7 +45,8 @@ func (m *equalJSONMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	switch vv := v.(type) {
 	case string:
 		b := new(any)
-		err = json.Unmarshal([]byte(vv), b)
+		// Parse incoming values leniently: a mock should accept what a real server would.
+		err = json.Unmarshal([]byte(vv), b, jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true))
 		if err != nil {
 			return failure(fmt.Errorf("equal_json: %w", err))
 		}

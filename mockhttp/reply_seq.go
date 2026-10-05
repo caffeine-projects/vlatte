@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -34,21 +35,6 @@ func (r *SequentialReply) OnSequenceEnded(reply Replier) *SequentialReply {
 func (r *SequentialReply) Add(reply ...Replier) *SequentialReply {
 	r.replies = append(r.replies, reply...)
 	return r
-}
-
-func (r *SequentialReply) beforeBuild(app *Server) error {
-	size := len(r.replies)
-	if size == 0 {
-		return fmt.Errorf("reply_sequence: you need to set at least one response when using multiple sequential reply")
-	}
-
-	for _, reply := range r.replies {
-		if err := prepareReply(reply, app); err != nil {
-			return err
-		}
-	}
-
-	return prepareReply(r.replyAfterSequenceEnded, app)
 }
 
 // Reply implements vlatte.Replier[ReplyInput, *Response].
@@ -89,6 +75,21 @@ func (r *SequentialReply) Describe() descriptor.Descriptor {
 	}
 
 	return descriptor.New("response_sequence", desc)
+}
+
+func (r *SequentialReply) beforeBuild(app *Server) error {
+	size := len(r.replies)
+	if size == 0 {
+		return errors.New("reply_sequence: you need to set at least one response when using multiple sequential reply")
+	}
+
+	for _, reply := range r.replies {
+		if err := prepareReply(reply, app); err != nil {
+			return err
+		}
+	}
+
+	return prepareReply(r.replyAfterSequenceEnded, app)
 }
 
 func (r *SequentialReply) totalHits() int {

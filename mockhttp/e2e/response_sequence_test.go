@@ -1,7 +1,7 @@
 package e2e
 
 import (
-	"encoding/json"
+	json "encoding/json/v2"
 	"io"
 	"net/http"
 	"testing"
@@ -74,9 +74,9 @@ func TestSequenceRepliesOnSequenceEndsSet(t *testing.T) {
 
 func TestSequence_SetupFromFile(t *testing.T) {
 	type response struct {
-		Ok   bool    `json:"ok,omitempty"`
+		Ok   bool    `json:"ok,omitzero"`
 		Type string  `json:"type,omitempty"`
-		Num  float64 `json:"num,omitempty"`
+		Num  float64 `json:"num,omitzero"`
 	}
 
 	m := mockhttp.MustNew()

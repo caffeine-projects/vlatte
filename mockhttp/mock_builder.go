@@ -336,7 +336,14 @@ func (b *Builder) RequestMatches(predicate func(r *http.Request) (bool, error)) 
 	b.appendExpectation(&expectation{
 		Target:   int(matchingScopeNone),
 		Selector: selectRawRequest,
-		Matcher:  match.Function(func(v any) (bool, error) { return predicate(v.(*http.Request)) }),
+		Matcher: match.Function(func(v any) (bool, error) {
+			r, ok := v.(*http.Request)
+			if !ok {
+				return false, fmt.Errorf("mock: request matcher got %T, want *http.Request", v)
+			}
+
+			return predicate(r)
+		}),
 	})
 
 	return b

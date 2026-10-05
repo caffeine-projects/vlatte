@@ -270,6 +270,7 @@ func TestGlobalEventsAreApplied(t *testing.T) {
 // acceptCounter counts the connections accepted through a listener.
 type acceptCounter struct {
 	net.Listener
+
 	accepted atomic.Int32
 }
 

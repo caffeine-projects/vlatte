@@ -101,7 +101,7 @@ func TestErrors(t *testing.T) {
 		Get(match.URLPath("/test2")).
 			Header("test", match.Function(
 				func(_ any) (bool, error) {
-					return false, fmt.Errorf("failed")
+					return false, errors.New("failed")
 				})).
 			Reply(OK()))
 

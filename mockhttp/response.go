@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"net/http"
 	"sync"
@@ -101,7 +102,11 @@ func (r *Response) Render(w http.ResponseWriter) error {
 func (r *Response) encode(w io.Writer, reader io.Reader) (n int64, err error) {
 	switch r.Encoding {
 	case "gzip":
-		gz := gzipper.Get().(*gzip.Writer)
+		gz, ok := gzipper.Get().(*gzip.Writer)
+		if !ok {
+			gz = gzip.NewWriter(nil)
+		}
+
 		gz.Reset(w)
 
 		defer func() {
@@ -116,7 +121,11 @@ func (r *Response) encode(w io.Writer, reader io.Reader) (n int64, err error) {
 }
 
 func responseFromWriter(w http.ResponseWriter) (*Response, error) {
-	rw := w.(*httprec.HTTPRec)
+	rw, ok := w.(*httprec.HTTPRec)
+	if !ok {
+		return nil, fmt.Errorf("mock: response writer is %T, want *httprec.HTTPRec", w)
+	}
+
 	result := rw.Result()
 
 	body, err := io.ReadAll(result.Body)

@@ -20,7 +20,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid"
-	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid/recover"
+	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid/recovery"
 )
 
 var _ vlatte.Flavor[*Mock, *Server] = (*Server)(nil)
@@ -100,11 +100,11 @@ func New(config ...Option) (*Server, error) {
 	parsers = append(parsers, conf.RequestBodyParsers...)
 	parsers = append(parsers, &plainTextParser{}, &formURLEncodedParser{}, &noopParser{})
 
-	recovery := recover.New(func(err error) { app.logger.Error().Err(err).Msg(err.Error()) },
+	recoverer := recovery.New(func(err error) { app.logger.Error().Err(err).Msg(err.Error()) },
 		conf.RequestWasNotMatchedStatusCode)
 
 	middlewares := make([]func(handler http.Handler) http.Handler, 0)
-	middlewares = append(middlewares, recovery.Recover)
+	middlewares = append(middlewares, recoverer.Recover)
 
 	if conf.CORS != nil {
 		middlewares = append(middlewares, corsMiddleware(conf.CORS))
@@ -321,14 +321,6 @@ func (app *Server) Close() {
 	}
 }
 
-// closeIdleConnsOnClose registers fn to release idle outbound connections when the app closes.
-func (app *Server) closeIdleConnsOnClose(fn func()) {
-	app.rwMutex.Lock()
-	defer app.rwMutex.Unlock()
-
-	app.closeIdleConns = append(app.closeIdleConns, fn)
-}
-
 // IsRecording checks if mock recording is enabled.
 func (app *Server) IsRecording() bool {
 	return app.rec != nil && app.rec.isActive()
@@ -389,6 +381,14 @@ func (app *Server) DescribeConfig() string {
 	buf.WriteString("\n")
 
 	return buf.String()
+}
+
+// closeIdleConnsOnClose registers fn to release idle outbound connections when the app closes.
+func (app *Server) closeIdleConnsOnClose(fn func()) {
+	app.rwMutex.Lock()
+	defer app.rwMutex.Unlock()
+
+	app.closeIdleConns = append(app.closeIdleConns, fn)
 }
 
 // --

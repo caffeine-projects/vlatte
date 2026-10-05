@@ -12,13 +12,13 @@ func Latency(latency time.Duration) Delay {
 	return func() time.Duration { return latency }
 }
 
-func UniformDistribution(min, max int64) Delay {
-	if max < min {
-		panic(fmt.Sprintf("delay: uniform distribution max (%d) must not be lower than min (%d)", max, min))
+func UniformDistribution(minMillis, maxMillis int64) Delay {
+	if maxMillis < minMillis {
+		panic(fmt.Sprintf("delay: uniform distribution max (%d) must not be lower than min (%d)", maxMillis, minMillis))
 	}
 
 	return func() time.Duration {
-		return time.Duration(rand.Int64N(max-min+1)+min) * time.Millisecond
+		return time.Duration(rand.Int64N(maxMillis-minMillis+1)+minMillis) * time.Millisecond
 	}
 }
 

@@ -5,7 +5,8 @@
 package admin
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"errors"
 	"io"
 	"mime"
@@ -131,7 +132,7 @@ func (a *Admin[B]) get(w http.ResponseWriter, r *http.Request) {
 		payload = d.Describe()
 	}
 
-	if err := json.NewEncoder(w).Encode(payload); err != nil {
+	if err := json.MarshalEncode(jsontext.NewEncoder(w), payload, json.Deterministic(true)); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

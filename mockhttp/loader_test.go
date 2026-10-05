@@ -2,7 +2,7 @@ package mockhttp
 
 import (
 	"context"
-	"encoding/json"
+	json "encoding/json/v2"
 	"io"
 	"net/http"
 	"testing"
@@ -72,7 +72,7 @@ func TestFileLoader(t *testing.T) {
 	require.NoError(t, err)
 
 	body := make([]map[string]any, 0)
-	err = json.NewDecoder(res.Body).Decode(&body)
+	err = json.UnmarshalRead(res.Body, &body)
 	res.Body.Close()
 
 	require.NoError(t, err)

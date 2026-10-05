@@ -3,7 +3,7 @@ package e2e
 import (
 	"bytes"
 	"crypto/tls"
-	"encoding/json"
+	json "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,7 +19,7 @@ import (
 func TestMatcherCombinations(t *testing.T) {
 	type addr struct {
 		Str     string  `json:"str,omitempty"`
-		Number  int     `json:"number,omitempty"`
+		Number  int     `json:"number,omitzero"`
 		Country *string `json:"country"`
 	}
 
@@ -27,24 +27,24 @@ func TestMatcherCombinations(t *testing.T) {
 		Name       string   `json:"name,omitempty"`
 		Hobbies    []string `json:"hobbies,omitempty"`
 		Job        string   `json:"job,omitempty"`
-		Active     bool     `json:"active,omitempty"`
+		Active     bool     `json:"active,omitzero"`
 		Plans      []int    `json:"plans,omitempty"`
 		Acronym    string   `json:"acronym,omitempty"`
 		Title      string   `json:"title,omitempty"`
 		Addr       addr     `json:"addr"`
-		CheckIn    bool     `json:"check_in,omitempty"`
+		CheckIn    bool     `json:"check_in,omitzero"`
 		Activities string   `json:"activities,omitempty"`
 		Department string   `json:"department,omitempty"`
 		Place      string   `json:"place,omitempty"`
 		Numbers    []int    `json:"numbers,omitempty"`
 
-		Days int `json:"days,omitempty"`
+		Days int `json:"days,omitzero"`
 	}
 
 	type response struct {
-		Ok   bool    `json:"ok,omitempty"`
+		Ok   bool    `json:"ok,omitzero"`
 		Type string  `json:"type,omitempty"`
-		Num  float64 `json:"num,omitempty"`
+		Num  float64 `json:"num,omitzero"`
 	}
 
 	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
@@ -75,7 +75,7 @@ func TestMatcherCombinations(t *testing.T) {
 		}
 
 		buf := new(bytes.Buffer)
-		err := json.NewEncoder(buf).Encode(body)
+		err := json.MarshalWrite(buf, body)
 		require.NoError(t, err)
 
 		qry := url.Values{}

@@ -69,3 +69,24 @@ func TestEqualJSON_Errors(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, ok)
 }
+
+func TestEqualJSON_ParsesIncomingValuesLeniently(t *testing.T) {
+	// A mock stands in for a real server, so it must not reject request bodies a lenient server accepts.
+	testCases := []struct {
+		name     string
+		expected string
+		value    string
+	}{
+		{"duplicate keys, last one wins", `{"name":"dev"}`, `{"name":"qa","name":"dev"}`},
+		{"invalid UTF-8 becomes U+FFFD", `{"name":"dev�"}`, "{\"name\":\"dev\xff\"}"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, err := EqualJSON(tc.expected).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), tc.value))
+
+			require.NoError(t, err)
+			require.True(t, ok)
+		})
+	}
+}

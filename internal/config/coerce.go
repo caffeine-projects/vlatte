@@ -1,7 +1,7 @@
 package config
 
 import (
-	"encoding/json"
+	json "encoding/json/v2"
 	"fmt"
 	"math"
 	"strconv"
@@ -218,7 +218,7 @@ func rawText(raw any) string {
 		return "null"
 	}
 
-	b, err := json.Marshal(raw)
+	b, err := json.Marshal(raw, json.Deterministic(true))
 	if err != nil {
 		return fmt.Sprint(raw)
 	}

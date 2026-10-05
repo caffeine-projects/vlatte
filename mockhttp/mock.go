@@ -267,7 +267,9 @@ func (m *Mock) Describe() descriptor.Descriptor {
 					}
 
 					all := match.All(matchers...)
-					keys[e.Key] = vlatte.Matcher(all).(descriptor.SelfDescriptive).Describe()
+					if sd, ok := vlatte.Matcher(all).(descriptor.SelfDescriptive); ok {
+						keys[e.Key] = sd.Describe()
+					}
 				}
 			}
 
@@ -288,7 +290,9 @@ func (m *Mock) Describe() descriptor.Descriptor {
 			}
 
 			all := match.All(matchers...)
-			request[target.FieldName()] = vlatte.Matcher(all).(descriptor.SelfDescriptive).Describe()
+			if sd, ok := vlatte.Matcher(all).(descriptor.SelfDescriptive); ok {
+				request[target.FieldName()] = sd.Describe()
+			}
 
 		default:
 			for _, e := range expectations {

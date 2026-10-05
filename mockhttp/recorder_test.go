@@ -2,7 +2,7 @@ package mockhttp
 
 import (
 	"crypto/tls"
-	"encoding/json"
+	json "encoding/json/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -291,7 +291,7 @@ func TestRecordSaveResponseBodyToFile(t *testing.T) {
 	defer file.Close()
 
 	data := make([]map[string]any, 0)
-	err = json.NewDecoder(file).Decode(&data)
+	err = json.UnmarshalRead(file, &data)
 	require.NoError(t, err)
 
 	target := MustNew(Setup().Name("target"))
@@ -317,7 +317,7 @@ func TestRecordSaveResponseBodyToFile(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 
 	b := make([]map[string]any, 0)
-	err = json.NewDecoder(res.Body).Decode(&b)
+	err = json.UnmarshalRead(res.Body, &b)
 	require.NoError(t, err)
 	require.Equal(t, data, b)
 
@@ -332,7 +332,7 @@ func TestRecordSaveResponseBodyToFile(t *testing.T) {
 	require.NoError(t, err)
 
 	b2 := make(map[string]any)
-	err = json.NewDecoder(res.Body).Decode(&b2)
+	err = json.UnmarshalRead(res.Body, &b2)
 	require.NoError(t, err)
 
 	res.Body.Close()
@@ -387,7 +387,7 @@ func TestRecordSaveResponseBodyToFile(t *testing.T) {
 	require.NoError(t, err)
 
 	rb2 := make(map[string]any)
-	err = json.NewDecoder(res.Body).Decode(&rb2)
+	err = json.UnmarshalRead(res.Body, &rb2)
 	require.NoError(t, err)
 
 	res.Body.Close()
@@ -409,7 +409,7 @@ func TestRecordEmbeddedResponseBodiesYAML(t *testing.T) {
 	defer file.Close()
 
 	data := make([]map[string]any, 0)
-	err = json.NewDecoder(file).Decode(&data)
+	err = json.UnmarshalRead(file, &data)
 	require.NoError(t, err)
 
 	target := MustNew(Setup().Name("target"))
@@ -436,7 +436,7 @@ func TestRecordEmbeddedResponseBodiesYAML(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 
 	b := make([]map[string]any, 0)
-	err = json.NewDecoder(res.Body).Decode(&b)
+	err = json.UnmarshalRead(res.Body, &b)
 	require.NoError(t, err)
 	require.Equal(t, data, b)
 
@@ -453,7 +453,7 @@ func TestRecordEmbeddedResponseBodiesYAML(t *testing.T) {
 	defer res.Body.Close()
 
 	b2 := make(map[string]any)
-	err = json.NewDecoder(res.Body).Decode(&b2)
+	err = json.UnmarshalRead(res.Body, &b2)
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -491,7 +491,7 @@ func TestRecordEmbeddedResponseBodiesYAML(t *testing.T) {
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 
 	rb := make([]map[string]any, 0)
-	err = json.NewDecoder(res.Body).Decode(&rb)
+	err = json.UnmarshalRead(res.Body, &rb)
 	require.NoError(t, err)
 	assert.Equal(t, data, rb)
 
@@ -506,7 +506,7 @@ func TestRecordEmbeddedResponseBodiesYAML(t *testing.T) {
 	defer res.Body.Close()
 
 	rb2 := make(map[string]any)
-	err = json.NewDecoder(res.Body).Decode(&rb2)
+	err = json.UnmarshalRead(res.Body, &rb2)
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -526,7 +526,7 @@ func TestRecordTargetTLS(t *testing.T) {
 	defer file.Close()
 
 	data := make([]map[string]any, 0)
-	err = json.NewDecoder(file).Decode(&data)
+	err = json.UnmarshalRead(file, &data)
 	require.NoError(t, err)
 
 	target := MustNew(Setup().Name("target"))
@@ -552,7 +552,7 @@ func TestRecordTargetTLS(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 
 	b := make([]map[string]any, 0)
-	err = json.NewDecoder(res.Body).Decode(&b)
+	err = json.UnmarshalRead(res.Body, &b)
 	require.NoError(t, err)
 	require.Equal(t, data, b)
 
@@ -569,7 +569,7 @@ func TestRecordTargetTLS(t *testing.T) {
 	defer res.Body.Close()
 
 	b2 := make(map[string]any)
-	err = json.NewDecoder(res.Body).Decode(&b2)
+	err = json.UnmarshalRead(res.Body, &b2)
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -607,7 +607,7 @@ func TestRecordTargetTLS(t *testing.T) {
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 
 	rb := make([]map[string]any, 0)
-	err = json.NewDecoder(res.Body).Decode(&rb)
+	err = json.UnmarshalRead(res.Body, &rb)
 	require.NoError(t, err)
 	assert.Equal(t, data, rb)
 
@@ -622,7 +622,7 @@ func TestRecordTargetTLS(t *testing.T) {
 	defer res.Body.Close()
 
 	rb2 := make(map[string]any)
-	err = json.NewDecoder(res.Body).Decode(&rb2)
+	err = json.UnmarshalRead(res.Body, &rb2)
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -642,7 +642,7 @@ func TestRecordTLSClient(t *testing.T) {
 	defer file.Close()
 
 	data := make([]map[string]any, 0)
-	err = json.NewDecoder(file).Decode(&data)
+	err = json.UnmarshalRead(file, &data)
 	require.NoError(t, err)
 
 	target := MustNew(Setup().Name("target"))
@@ -671,7 +671,7 @@ func TestRecordTLSClient(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 
 	b := make([]map[string]any, 0)
-	err = json.NewDecoder(res.Body).Decode(&b)
+	err = json.UnmarshalRead(res.Body, &b)
 	require.NoError(t, err)
 	require.Equal(t, data, b)
 
@@ -688,7 +688,7 @@ func TestRecordTLSClient(t *testing.T) {
 	defer res.Body.Close()
 
 	b2 := make(map[string]any)
-	err = json.NewDecoder(res.Body).Decode(&b2)
+	err = json.UnmarshalRead(res.Body, &b2)
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -726,7 +726,7 @@ func TestRecordTLSClient(t *testing.T) {
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 
 	rb := make([]map[string]any, 0)
-	err = json.NewDecoder(res.Body).Decode(&rb)
+	err = json.UnmarshalRead(res.Body, &rb)
 	require.NoError(t, err)
 	assert.Equal(t, data, rb)
 
@@ -741,7 +741,7 @@ func TestRecordTLSClient(t *testing.T) {
 	defer res.Body.Close()
 
 	rb2 := make(map[string]any)
-	err = json.NewDecoder(res.Body).Decode(&rb2)
+	err = json.UnmarshalRead(res.Body, &rb2)
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -761,7 +761,7 @@ func TestRecordBothTLS(t *testing.T) {
 	defer file.Close()
 
 	data := make([]map[string]any, 0)
-	err = json.NewDecoder(file).Decode(&data)
+	err = json.UnmarshalRead(file, &data)
 	require.NoError(t, err)
 
 	target := MustNew(Setup().Name("target"))
@@ -790,7 +790,7 @@ func TestRecordBothTLS(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 
 	b := make([]map[string]any, 0)
-	err = json.NewDecoder(res.Body).Decode(&b)
+	err = json.UnmarshalRead(res.Body, &b)
 	require.NoError(t, err)
 	require.Equal(t, data, b)
 
@@ -807,7 +807,7 @@ func TestRecordBothTLS(t *testing.T) {
 	defer res.Body.Close()
 
 	b2 := make(map[string]any)
-	err = json.NewDecoder(res.Body).Decode(&b2)
+	err = json.UnmarshalRead(res.Body, &b2)
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -845,7 +845,7 @@ func TestRecordBothTLS(t *testing.T) {
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 
 	rb := make([]map[string]any, 0)
-	err = json.NewDecoder(res.Body).Decode(&rb)
+	err = json.UnmarshalRead(res.Body, &rb)
 	require.NoError(t, err)
 	assert.Equal(t, data, rb)
 
@@ -860,7 +860,7 @@ func TestRecordBothTLS(t *testing.T) {
 	defer res.Body.Close()
 
 	rb2 := make(map[string]any)
-	err = json.NewDecoder(res.Body).Decode(&rb2)
+	err = json.UnmarshalRead(res.Body, &rb2)
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)

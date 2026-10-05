@@ -153,6 +153,24 @@ func (r *ProxyReply) Reply(ctx context.Context, input ReplyInput) (*Response, er
 	return r.build(input.RequestValues)
 }
 
+func noFollow(_ *http.Request, _ []*http.Request) error {
+	return http.ErrUseLastResponse
+}
+
+func (r *ProxyReply) Describe() descriptor.Descriptor {
+	return descriptor.New("proxy", map[string]any{
+		"target":         r.target.String(),
+		"forward_header": r.proxyHeaders,
+		"header":         r.headers,
+		"remove_headers": r.proxyHeadersToRemove,
+		"trim_prefix":    r.trimPrefix,
+		"trim_suffix":    r.trimSuffix,
+		"timeout":        r.timeout.String(),
+		"ssl_verify":     r.sslVerify,
+		"no_follow":      r.noFollow,
+	})
+}
+
 func (r *ProxyReply) build(req *RequestValues) (*Response, error) {
 	path := req.RawRequest.URL.Path
 
@@ -251,22 +269,4 @@ func (r *ProxyReply) beforeBuild(app *Server) error {
 	app.closeIdleConnsOnClose(r.httpClient.CloseIdleConnections)
 
 	return nil
-}
-
-func noFollow(_ *http.Request, _ []*http.Request) error {
-	return http.ErrUseLastResponse
-}
-
-func (r *ProxyReply) Describe() descriptor.Descriptor {
-	return descriptor.New("proxy", map[string]any{
-		"target":         r.target.String(),
-		"forward_header": r.proxyHeaders,
-		"header":         r.headers,
-		"remove_headers": r.proxyHeadersToRemove,
-		"trim_prefix":    r.trimPrefix,
-		"trim_suffix":    r.trimSuffix,
-		"timeout":        r.timeout.String(),
-		"ssl_verify":     r.sslVerify,
-		"no_follow":      r.noFollow,
-	})
 }

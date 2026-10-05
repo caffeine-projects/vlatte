@@ -50,21 +50,6 @@ func (rep *RandomReply) Add(reply ...Replier) *RandomReply {
 	return rep
 }
 
-func (rep *RandomReply) beforeBuild(app *Server) error {
-	size := len(rep.replies)
-	if size == 0 {
-		return errors.New("reply_random: you need to set at least one response when using random reply")
-	}
-
-	for _, reply := range rep.replies {
-		if err := prepareReply(reply, app); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // Reply implements vlatte.Replier[ReplyInput, *Response].
 func (rep *RandomReply) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
 	var index int
@@ -95,4 +80,19 @@ func (rep *RandomReply) Describe() descriptor.Descriptor {
 	}
 
 	return descriptor.New("response_random", desc)
+}
+
+func (rep *RandomReply) beforeBuild(app *Server) error {
+	size := len(rep.replies)
+	if size == 0 {
+		return errors.New("reply_random: you need to set at least one response when using random reply")
+	}
+
+	for _, reply := range rep.replies {
+		if err := prepareReply(reply, app); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

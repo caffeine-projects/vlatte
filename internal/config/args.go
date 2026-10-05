@@ -35,7 +35,8 @@ func (s *argsSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 	for name, f := range c.byFlag {
 		record := func(raw string) error {
 			if i, ok := lists[f.key]; ok {
-				entries[i].raw = entries[i].raw.(string) + "," + raw
+				prev, _ := entries[i].raw.(string) // list entries always hold the raw string
+				entries[i].raw = prev + "," + raw
 				return nil
 			}
 

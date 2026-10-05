@@ -15,13 +15,13 @@ func TestLatency(t *testing.T) {
 }
 
 func TestUniformDistribution(t *testing.T) {
-	min := int64(100)
-	max := int64(300)
+	minMillis := int64(100)
+	maxMillis := int64(300)
 
-	duration := UniformDistribution(min, max)()
+	duration := UniformDistribution(minMillis, maxMillis)()
 
-	require.LessOrEqual(t, duration.Milliseconds(), max)
-	require.GreaterOrEqual(t, duration.Milliseconds(), min)
+	require.LessOrEqual(t, duration.Milliseconds(), maxMillis)
+	require.GreaterOrEqual(t, duration.Milliseconds(), minMillis)
 }
 
 func TestUniformDistributionRejectsInvertedRange(t *testing.T) {

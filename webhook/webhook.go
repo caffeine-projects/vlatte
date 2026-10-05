@@ -56,7 +56,11 @@ func New(options ...Option) (*WebHook, error) {
 
 	if w.RoundTripper == nil {
 		// A clone keeps the default dial, TLS handshake and idle timeouts.
-		w.RoundTripper = http.DefaultTransport.(*http.Transport).Clone()
+		// If another package replaced the default transport with a different type, share it as is.
+		w.RoundTripper = http.DefaultTransport
+		if t, ok := http.DefaultTransport.(*http.Transport); ok {
+			w.RoundTripper = t.Clone()
+		}
 	}
 
 	if w.Timeout == 0 {
@@ -85,19 +89,20 @@ func New(options ...Option) (*WebHook, error) {
 // Run implements vlatte.EventListener[vlatte.OnComplete]. It parses the event parameters and performs the HTTP request.
 func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 	if args.Parameters() == nil {
-		return fmt.Errorf("webhook: arguments must not be nil")
+		return errors.New("webhook: arguments must not be nil")
 	}
 
 	rawArgs := args.Parameters()
 	webhookArgs, ok := rawArgs.(*Args)
 	if !ok {
-		if m, ok := rawArgs.(map[string]any); ok {
-			var err error
-			if webhookArgs, err = ArgsFromMap(m); err != nil {
-				return fmt.Errorf("webhook: error decoding args: %w", err)
-			}
-		} else {
-			return fmt.Errorf("webhook: arguments must be *Args or map[string]any")
+		m, ok := rawArgs.(map[string]any)
+		if !ok {
+			return errors.New("webhook: arguments must be *Args or map[string]any")
+		}
+
+		var err error
+		if webhookArgs, err = ArgsFromMap(m); err != nil {
+			return fmt.Errorf("webhook: error decoding args: %w", err)
 		}
 	}
 

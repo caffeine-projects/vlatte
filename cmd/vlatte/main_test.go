@@ -112,11 +112,11 @@ func TestDockerCLI(t *testing.T) {
 	go run(ctx, nil, io.Discard, io.Discard)
 
 	request := func() {
-		max := 5
+		maxAttempts := 5
 		attempts := 0
 		success := false
 
-		for range max {
+		for range maxAttempts {
 			res, err := http.Get("http://localhost:8080")
 
 			if err == nil && res.StatusCode == sc {
@@ -125,7 +125,7 @@ func TestDockerCLI(t *testing.T) {
 				break
 			}
 
-			if attempts == max {
+			if attempts == maxAttempts {
 				t.FailNow()
 			}
 

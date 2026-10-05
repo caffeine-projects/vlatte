@@ -2,7 +2,7 @@ package mockgrpc
 
 import (
 	"context"
-	"encoding/json"
+	json "encoding/json/v2"
 	"fmt"
 
 	"google.golang.org/grpc"
@@ -38,7 +38,8 @@ func (in *interceptors) UnaryInterceptor(
 	info *grpc.UnaryServerInfo,
 	_ grpc.UnaryHandler,
 ) (any, error) {
-	b, err := json.Marshal(reqMsg)
+	// Proto3 treats zero values as unset, so leave them out as protojson does.
+	b, err := json.Marshal(reqMsg, json.OmitZeroStructFields(true), json.Deterministic(true))
 	if err != nil {
 		return nil, err
 	}

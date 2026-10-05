@@ -283,8 +283,8 @@ func (cb *ConfigBuilder) LogPretty(v bool) *ConfigBuilder {
 }
 
 // LogBodyMaxSize sets the max size of the response body to be logged.
-func (cb *ConfigBuilder) LogBodyMaxSize(max int64) *ConfigBuilder {
-	cb.conf.LogBodyMaxSize = max
+func (cb *ConfigBuilder) LogBodyMaxSize(size int64) *ConfigBuilder {
+	cb.conf.LogBodyMaxSize = size
 	return cb
 }
 

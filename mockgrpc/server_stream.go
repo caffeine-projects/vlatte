@@ -3,7 +3,8 @@ package mockgrpc
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	json "encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -101,7 +102,7 @@ func (r *StreamReply[T]) build(ctx context.Context, values *StreamRequestValues)
 		msgType := reflect.New(reflect.TypeOf(r.response.MsgType).Elem())
 		msg, ok := reflect.TypeAssert[proto.Message](msgType)
 		if !ok {
-			return fmt.Errorf("server_stream: io.Reader must provide proto messages")
+			return errors.New("server_stream: io.Reader must provide proto messages")
 		}
 
 		for scan.Scan() {
@@ -205,7 +206,8 @@ func (in *interceptors) StreamInterceptor(
 		return interceptError("stream: error reading the request message. %w", err)
 	}
 
-	b, err := json.Marshal(reqMsg)
+	// Proto3 treats zero values as unset, so leave them out as protojson does.
+	b, err := json.Marshal(reqMsg, json.OmitZeroStructFields(true), json.Deterministic(true))
 	if err != nil {
 		return err
 	}

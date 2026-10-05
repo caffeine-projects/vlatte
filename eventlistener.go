@@ -2,12 +2,13 @@ package vlatte
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
 )
 
-var ErrEventAlreadyRegistered = fmt.Errorf("vlatte: event already registered")
+var ErrEventAlreadyRegistered = errors.New("vlatte: event already registered")
 
 // EventArgs is the common argument type for all events.
 // Event-specific interfaces (e.g. OnComplete) extend this.

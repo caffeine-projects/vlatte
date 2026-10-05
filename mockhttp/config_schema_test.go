@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -74,7 +75,7 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"debug":                {[]string{"--debug"}, func(t *testing.T, c *Config) { require.True(t, c.Debug) }},
 		"tls-cert":             {tlsArgs, func(t *testing.T, c *Config) { require.Len(t, c.TLSCertificates, 1) }},
 		"tls-key":              {tlsArgs, func(t *testing.T, c *Config) { require.Len(t, c.TLSCertificates, 1) }},
-		"tls-ca":               {append(tlsArgs, "--tls-ca", _testClientCertFile), func(t *testing.T, c *Config) { require.NotNil(t, c.TLSClientCAs) }},
+		"tls-ca":               {slices.Concat(tlsArgs, []string{"--tls-ca", _testClientCertFile}), func(t *testing.T, c *Config) { require.NotNil(t, c.TLSClientCAs) }},
 		"log-level":            {[]string{"--log-level", "warn"}, func(t *testing.T, c *Config) { require.Equal(t, vlatte.LogLevelWarn, c.LogLevel) }},
 		"log-verbosity":        {[]string{"--log-verbosity", "body"}, func(t *testing.T, c *Config) { require.Equal(t, vlatte.LogBody, c.LogVerbosity) }},
 		"log-max-body-size":    {[]string{"--log-max-body-size", "1024"}, func(t *testing.T, c *Config) { require.Equal(t, int64(1024), c.LogBodyMaxSize) }},

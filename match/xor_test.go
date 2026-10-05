@@ -1,7 +1,7 @@
 package match
 
 import (
-	"fmt"
+	"errors"
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
@@ -33,7 +33,7 @@ func TestXor(t *testing.T) {
 func TestXorError(t *testing.T) {
 	t.Run("should return error from right matcher", func(t *testing.T) {
 		m := XOR(Contain("dev"), Function(func(_ any) (bool, error) {
-			return false, fmt.Errorf("fail")
+			return false, errors.New("fail")
 		}))
 
 		ok, err := m.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), "dev"))
@@ -45,7 +45,7 @@ func TestXorError(t *testing.T) {
 	t.Run("should return error from left matcher", func(t *testing.T) {
 		m := XOR(
 			Function(func(_ any) (bool, error) {
-				return false, fmt.Errorf("fail")
+				return false, errors.New("fail")
 			}),
 			Contain("dev"))
 
@@ -58,10 +58,10 @@ func TestXorError(t *testing.T) {
 	t.Run("should return error when both matchers fails", func(t *testing.T) {
 		m := XOR(
 			Function(func(_ any) (bool, error) {
-				return false, fmt.Errorf("fail first")
+				return false, errors.New("fail first")
 			}),
 			Function(func(_ any) (bool, error) {
-				return false, fmt.Errorf("fail second")
+				return false, errors.New("fail second")
 			}))
 
 		ok, err := m.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), "nothing"))

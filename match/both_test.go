@@ -1,7 +1,7 @@
 package match
 
 import (
-	"fmt"
+	"errors"
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
@@ -32,7 +32,7 @@ func TestBothMatcher(t *testing.T) {
 func TestBothMatcherErr(t *testing.T) {
 	ok, err := Both(
 		Function(func(_ any) (bool, error) {
-			return false, fmt.Errorf("fail")
+			return false, errors.New("fail")
 		}),
 		Contain("qa")).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), "test"))
 

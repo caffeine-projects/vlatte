@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -11,7 +12,7 @@ import (
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
 
-var ErrTemplateDataKeyExists = fmt.Errorf("http: template data key already exists")
+var ErrTemplateDataKeyExists = errors.New("http: template data key already exists")
 
 type topResponseWriter struct {
 	next vlatte.Next

@@ -3,7 +3,7 @@ package mockhttp
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -28,7 +28,7 @@ import (
 var (
 	_ vlatte.Builder[*Mock, *Server] = (*mockBuilderFromFile)(nil)
 	_ vlatte.Builder[*Mock, *Server] = (*mockBuilderFromBytes)(nil)
-	_ error                          = (*jsonSchemaValidationErr)(nil)
+	_ error                          = (*jsonSchemaValidationError)(nil)
 )
 
 const (
@@ -121,11 +121,11 @@ var _mockSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
 	return c.Compile(_mockJSONSchemaURL)
 })
 
-type jsonSchemaValidationErr struct {
+type jsonSchemaValidationError struct {
 	err *jsonschema.ValidationError
 }
 
-func (e jsonSchemaValidationErr) Error() string {
+func (e jsonSchemaValidationError) Error() string {
 	return "mock definition did not pass the schema validation:\n" + e.err.Error()
 }
 
@@ -137,7 +137,7 @@ func validateMockSchema(doc any) error {
 
 	if err = schema.Validate(doc); err != nil {
 		if ve, ok := errors.AsType[*jsonschema.ValidationError](err); ok {
-			return &jsonSchemaValidationErr{ve}
+			return &jsonSchemaValidationError{ve}
 		}
 
 		return fmt.Errorf("mock definition did not pass the schema validation: %w", err)
@@ -250,7 +250,12 @@ func buildReply(vi *viper.Viper) (vlatte.Replier[ReplyInput, *Response], error) 
 			res.Header(k, vv)
 		case []any:
 			for _, h := range vv {
-				res.Header(k, h.(string))
+				s, ok := h.(string)
+				if !ok {
+					return nil, fmt.Errorf("[%s.%s] expected a string. got: %T", _resHeader, k, h)
+				}
+
+				res.Header(k, s)
 			}
 		}
 	}
@@ -261,7 +266,12 @@ func buildReply(vi *viper.Viper) (vlatte.Replier[ReplyInput, *Response], error) 
 			res.HeaderTemplate(k, vv)
 		case []any:
 			for _, h := range vv {
-				res.HeaderTemplate(k, h.(string))
+				s, ok := h.(string)
+				if !ok {
+					return nil, fmt.Errorf("[%s.%s] expected a string. got: %T", _resHeaderTemplate, k, h)
+				}
+
+				res.HeaderTemplate(k, s)
 			}
 		}
 	}
@@ -272,7 +282,12 @@ func buildReply(vi *viper.Viper) (vlatte.Replier[ReplyInput, *Response], error) 
 			res.Trailer(k, vv)
 		case []any:
 			for _, h := range vv {
-				res.Trailer(k, h.(string))
+				s, ok := h.(string)
+				if !ok {
+					return nil, fmt.Errorf("[%s.%s] expected a string. got: %T", _resTrailer, k, h)
+				}
+
+				res.Trailer(k, s)
 			}
 		}
 	}
@@ -438,8 +453,13 @@ func BuildMockFromBytes(app *Server, builder *Builder, content []byte, ext strin
 				return nil, fmt.Errorf("[on_complete][%d] expected an object. got: %T", i, item)
 			}
 
+			name, ok := obj[_fOnCompleteName].(string)
+			if !ok {
+				return nil, fmt.Errorf("[on_complete][%d].%s expected a string. got: %T", i, _fOnCompleteName, obj[_fOnCompleteName])
+			}
+
 			builder.OnCompleteEvent(vlatte.EventConfig{
-				Name:       obj[_fOnCompleteName].(string),
+				Name:       name,
 				Parameters: obj[_fOnCompleteParams],
 			})
 		}
@@ -611,8 +631,13 @@ func BuildMockFromBytes(app *Server, builder *Builder, content []byte, ext strin
 		}
 
 		for i, r := range entries {
+			m, ok := r.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("[%s[%d]] expected an object. got: %T", _fResponseRandomEntries, i, r)
+			}
+
 			sub := viper.New()
-			err = sub.MergeConfigMap(r.(map[string]any))
+			err = sub.MergeConfigMap(m)
 			if err != nil {
 				return nil,
 					fmt.Errorf("[response_random.responses[%d]] error building random response.\n%w", i, err)
@@ -651,8 +676,13 @@ func BuildMockFromBytes(app *Server, builder *Builder, content []byte, ext strin
 		}
 
 		for i, r := range entries {
+			m, ok := r.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("[%s[%d]] expected an object. got: %T", _fResponseSequenceEntries, i, r)
+			}
+
 			sub := viper.New()
-			err = sub.MergeConfigMap(r.(map[string]any))
+			err = sub.MergeConfigMap(m)
 			if err != nil {
 				return nil, err
 			}
@@ -751,7 +781,7 @@ func validateResponseDefinitions(vi *viper.Viper) error {
 	}
 
 	if val > 1 {
-		return fmt.Errorf("more than one response definition set")
+		return errors.New("more than one response definition set")
 	}
 
 	return nil

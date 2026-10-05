@@ -2,7 +2,7 @@ package e2e
 
 import (
 	"bytes"
-	"encoding/json"
+	json "encoding/json/v2"
 	"net/http"
 	"strings"
 	"testing"
@@ -50,7 +50,7 @@ func TestPostJSON(t *testing.T) {
 			Reply(mockhttp.OK()))
 
 		buf := new(bytes.Buffer)
-		require.NoError(t, json.NewEncoder(buf).Encode(&jsonTestModel{Name: "dev", OK: true}))
+		require.NoError(t, json.MarshalWrite(buf, &jsonTestModel{Name: "dev", OK: true}))
 		req, _ := http.NewRequest(http.MethodPost, m.URL()+"/test", buf)
 		req.Header.Add("test", "hello")
 		req.Header.Add(mockhttp.HeaderContentType, mockhttp.MIMEApplicationJSON)
@@ -77,7 +77,7 @@ func TestPostJSON(t *testing.T) {
 			Reply(mockhttp.OK()))
 
 		buf := new(bytes.Buffer)
-		require.NoError(t, json.NewEncoder(buf).Encode(data))
+		require.NoError(t, json.MarshalWrite(buf, data))
 		req, _ := http.NewRequest(http.MethodPost, m.URL()+"/test", buf)
 		req.Header.Add("test", "hello")
 		req.Header.Add(mockhttp.HeaderContentType, mockhttp.MIMEApplicationJSON)
@@ -105,7 +105,7 @@ func TestPostJSON(t *testing.T) {
 			Reply(mockhttp.OK()))
 
 		buf := new(bytes.Buffer)
-		require.NoError(t, json.NewEncoder(buf).Encode(data2))
+		require.NoError(t, json.MarshalWrite(buf, data2))
 		req, _ := http.NewRequest(http.MethodPost, m.URL()+"/test", buf)
 		req.Header.Add("test", "hello")
 		req.Header.Add(mockhttp.HeaderContentType, mockhttp.MIMEApplicationJSON)
@@ -138,7 +138,7 @@ func TestPostJSON(t *testing.T) {
 			Reply(mockhttp.OK()))
 
 		buf := new(bytes.Buffer)
-		require.NoError(t, json.NewEncoder(buf).Encode(data))
+		require.NoError(t, json.MarshalWrite(buf, data))
 		req, _ := http.NewRequest(http.MethodPost, m.URL()+"/test", buf)
 		req.Header.Add("test", "hello")
 		req.Header.Add(mockhttp.HeaderContentType, mockhttp.MIMEApplicationJSON)
@@ -166,7 +166,7 @@ func TestPostJSON(t *testing.T) {
 			Reply(mockhttp.OK()))
 
 		buf := new(bytes.Buffer)
-		require.NoError(t, json.NewEncoder(buf).Encode(body))
+		require.NoError(t, json.MarshalWrite(buf, body))
 		req, _ := http.NewRequest(http.MethodPost, m.URL()+"/test", buf)
 		req.Header.Add("test", "hello")
 		req.Header.Add(mockhttp.HeaderContentType, mockhttp.MIMEApplicationJSON)
@@ -258,7 +258,7 @@ func TestPostJSON(t *testing.T) {
 			Reply(mockhttp.OK()))
 
 		buf := new(bytes.Buffer)
-		require.NoError(t, json.NewEncoder(buf).Encode(body))
+		require.NoError(t, json.MarshalWrite(buf, body))
 		req, _ := http.NewRequest(http.MethodPost, m.URL()+"/test", buf)
 		req.Header.Add("test", "hello")
 		req.Header.Add(mockhttp.HeaderContentType, mockhttp.MIMEApplicationJSON)
@@ -295,7 +295,7 @@ func TestSimpleJSONValues(t *testing.T) {
 			scoped := m.MustMock(mockhttp.Postf("/test").Body(match.JSONPath("$", match.Eq(tc.value))).Reply(mockhttp.Status(tc.status)))
 
 			buf := new(bytes.Buffer)
-			require.NoError(t, json.NewEncoder(buf).Encode(tc.value))
+			require.NoError(t, json.MarshalWrite(buf, tc.value))
 			req, _ := http.NewRequest(http.MethodPost, m.URL()+"/test", buf)
 			req.Header.Add(mockhttp.HeaderContentType, mockhttp.MIMEApplicationJSON)
 
@@ -352,7 +352,7 @@ func TestJSONResponse(t *testing.T) {
 
 	var body payload
 
-	require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
+	require.NoError(t, json.UnmarshalRead(res.Body, &body))
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 	assert.Equal(t, p, &body)
 }

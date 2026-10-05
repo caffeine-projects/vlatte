@@ -1,7 +1,7 @@
 package match
 
 import (
-	"fmt"
+	"errors"
 	"strconv"
 
 	"github.com/caffeine-projects/vlatte"
@@ -30,7 +30,7 @@ func (m *truthyMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	}
 
 	if err != nil {
-		return failure(fmt.Errorf("truthy: error parsing value to bool"))
+		return failure(errors.New("truthy: error parsing value to bool"))
 	}
 
 	if !b {

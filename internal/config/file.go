@@ -2,7 +2,8 @@ package config
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -119,8 +120,8 @@ func (s *fileSource) read(c *catalog, path, requestedBy string) ([]entry, []Prob
 		}
 
 		if err := json.Unmarshal(data, &doc); err != nil {
-			if se, ok := errors.AsType[*json.SyntaxError](err); ok {
-				line, col := position(data, se.Offset)
+			if se, ok := errors.AsType[*jsontext.SyntacticError](err); ok {
+				line, col := position(data, se.ByteOffset)
 				origin = fmt.Sprintf("file %s:%d:%d", path, line, col)
 			}
 
@@ -223,9 +224,9 @@ func nested(key string) string {
 }
 
 // position converts the offset of a JSON syntax error to a 1-based line and column.
-// The offset counts the offending byte, so the byte itself is at offset-1.
+// The offset is the 0-based index of the offending byte.
 func position(data []byte, offset int64) (line, col int) {
-	before := data[:min(max(int(offset)-1, 0), len(data))]
+	before := data[:min(max(int(offset), 0), len(data))]
 	line = bytes.Count(before, []byte("\n")) + 1
 	col = len(before) - bytes.LastIndexByte(before, '\n')
 

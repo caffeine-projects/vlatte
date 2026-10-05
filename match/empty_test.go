@@ -22,7 +22,7 @@ func TestIsEmpty(t *testing.T) {
 	assert.True(t, resYes)
 	assert.False(t, resNo)
 
-	resYes, err = Empty().Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), map[string]string{}))
+	resYes, err = Empty().Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), make(map[string]string)))
 	assert.Nil(t, err)
 	resNo, err = Empty().Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), map[string]string{"k": "v"}))
 	assert.Nil(t, err)

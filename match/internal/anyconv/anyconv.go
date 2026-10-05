@@ -1,6 +1,7 @@
 package anyconv
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -58,6 +59,6 @@ func ToFloat64(v any) (float64, error) {
 	case int64:
 		return float64(e), nil
 	default:
-		return 0, fmt.Errorf("value cannot be parsed to float64")
+		return 0, errors.New("value cannot be parsed to float64")
 	}
 }

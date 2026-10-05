@@ -70,6 +70,55 @@ func (f *httptestBackendFactory) NewBackend(config BackendConfig) (Backend, erro
 	return s, nil
 }
 
+func (s *httptestBackend) Start() error {
+	s.rwMutex.Lock()
+	defer s.rwMutex.Unlock()
+
+	if err := s.build(); err != nil {
+		return err
+	}
+
+	s.server.Start()
+	s.info.Store(&BackendInfo{URL: s.server.URL})
+
+	return nil
+}
+
+func (s *httptestBackend) StartTLS() error {
+	s.rwMutex.Lock()
+	defer s.rwMutex.Unlock()
+
+	if err := s.build(); err != nil {
+		return err
+	}
+
+	s.server.EnableHTTP2 = true
+	s.server.StartTLS()
+	s.info.Store(&BackendInfo{URL: s.server.URL})
+
+	return nil
+}
+
+func (s *httptestBackend) Close() error {
+	s.rwMutex.Lock()
+	defer s.rwMutex.Unlock()
+
+	if s.server == nil {
+		return nil
+	}
+
+	s.server.CloseClientConnections()
+	s.server.Close()
+	s.server = nil
+	s.info.Store(&BackendInfo{})
+
+	return nil
+}
+
+func (s *httptestBackend) Info() *BackendInfo {
+	return s.info.Load()
+}
+
 // build creates a fresh unstarted httptest.Server each time it is called.
 // httptest.Server instances are not reusable after Close, so a new one must
 // be constructed for every Start/StartTLS cycle.
@@ -129,53 +178,4 @@ func (s *httptestBackend) build() error {
 	}
 
 	return nil
-}
-
-func (s *httptestBackend) Start() error {
-	s.rwMutex.Lock()
-	defer s.rwMutex.Unlock()
-
-	if err := s.build(); err != nil {
-		return err
-	}
-
-	s.server.Start()
-	s.info.Store(&BackendInfo{URL: s.server.URL})
-
-	return nil
-}
-
-func (s *httptestBackend) StartTLS() error {
-	s.rwMutex.Lock()
-	defer s.rwMutex.Unlock()
-
-	if err := s.build(); err != nil {
-		return err
-	}
-
-	s.server.EnableHTTP2 = true
-	s.server.StartTLS()
-	s.info.Store(&BackendInfo{URL: s.server.URL})
-
-	return nil
-}
-
-func (s *httptestBackend) Close() error {
-	s.rwMutex.Lock()
-	defer s.rwMutex.Unlock()
-
-	if s.server == nil {
-		return nil
-	}
-
-	s.server.CloseClientConnections()
-	s.server.Close()
-	s.server = nil
-	s.info.Store(&BackendInfo{})
-
-	return nil
-}
-
-func (s *httptestBackend) Info() *BackendInfo {
-	return s.info.Load()
 }

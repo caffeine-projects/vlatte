@@ -8,11 +8,15 @@ import (
 const maxBufSize = 1 << 16
 
 var bufPool = &sync.Pool{
-	New: func() any { return bytes.NewBuffer(make([]byte, 0, 500)) },
+	New: func() any { return newBuffer() },
 }
 
 func Get() *bytes.Buffer {
-	return bufPool.Get().(*bytes.Buffer)
+	if b, ok := bufPool.Get().(*bytes.Buffer); ok {
+		return b
+	}
+
+	return newBuffer()
 }
 
 func Put(b *bytes.Buffer) {
@@ -21,4 +25,8 @@ func Put(b *bytes.Buffer) {
 	}
 
 	bufPool.Put(b)
+}
+
+func newBuffer() *bytes.Buffer {
+	return bytes.NewBuffer(make([]byte, 0, 500))
 }

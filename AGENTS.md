@@ -2,6 +2,18 @@
 
 Guidance for AI tools (e.g. Cursor, Copilot, or other assistants) working in this repo.
 
+## Skills
+
+Skills live in `.agents/skills/` (add new ones there; `.claude/skills` is a link). Third-party skills keep their upstream LICENSE; `.agents/README.md` lists sources.
+
+For any Go change:
+- `vlatte-conventions`: this project's rules.
+- `use-modern-go`: Go idioms for the version in `go.mod`. Run its `list` step before editing.
+- `uber-go-style`: Uber Go Style Guide, for style and design choices.
+
+When they disagree: `vlatte-conventions` > `use-modern-go` > `uber-go-style` > nearby code. This applies to lines you write or change. Flag older code; do not rewrite it.
+If `use-modern-go` cannot run (e.g. no network on first install), say so and continue; `make lint` still flags old idioms.
+
 ## Generated documentation
 
 When generating documentation—for example from assessments, analyses, or summaries—place it under:
@@ -9,6 +21,7 @@ When generating documentation—for example from assessments, analyses, or summa
 - **`docs/.ai`**
 
 Examples: assessment write-ups, flow analyses, design notes. Keep human-authored docs elsewhere (e.g. `docs/` root or other subdirs); use `docs/.ai` specifically for AI-generated content so it’s easy to find and optional to commit.
+Files under `.agents/` are agent tooling, not generated docs; keep them there.
 
 ## Output
 
@@ -38,13 +51,14 @@ Test: would a senior engineer say this is overcomplicated? If yes, simplify.
 
 Touch only what you must. Clean up only your own mess.
 Do not “improve” adjacent code, comments, or formatting.
-Do not refactor what is not broken. Match existing style.
+Do not refactor what is not broken. Match existing style; for Go idioms see Rule 11.
 
 ## Rule 4 — Goal-Driven Execution
 
 Define success criteria. Loop until verified.
-Do not follow steps. Define success and iterate.
+Do not follow steps blindly. Define success and iterate.
 Strong success criteria let you loop independently.
+Done means: `go tool gofumpt -l .` prints nothing, and `make lint` and `make test` pass.
 
 ## Rule 5 — Use the model only for judgment calls
 
@@ -59,7 +73,7 @@ Say so when you are looping. Do not silently retry.
 
 ## Rule 7 — Surface conflicts, do not average them
 
-If two patterns contradict, pick one (more recent / more tested).
+If two patterns contradict, pick one: the Skills precedence first, else the more recent / more tested.
 Explain why. Flag the other for cleanup.
 Do not blend conflicting patterns.
 
@@ -82,6 +96,7 @@ If you lose track, stop and restate.
 ## Rule 11 — Match the codebase’s conventions, even if you disagree
 
 Conformance beats taste inside the codebase.
+Conventions are what this file, `vlatte-conventions`, and the lint config define. Older Go idioms in nearby code are not conventions.
 If you genuinely think a convention is harmful, surface it. Do not fork silently.
 
 ## Rule 12 — Fail loud

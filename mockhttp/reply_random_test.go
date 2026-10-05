@@ -2,7 +2,6 @@ package mockhttp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"math/rand/v2"
@@ -86,7 +85,7 @@ func TestRandomReply_PreparesNestedReplies(t *testing.T) {
 }
 
 func TestRandomReply_DescribeIncludesSeed(t *testing.T) {
-	b, err := json.Marshal(RandWithSeed(42, OK()).Describe())
+	b, err := RandWithSeed(42, OK()).Describe().MarshalJSON()
 
 	require.NoError(t, err)
 	require.Contains(t, string(b), `"seed":42`)

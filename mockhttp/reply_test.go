@@ -3,7 +3,7 @@ package mockhttp
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	json "encoding/json/v2"
 	"net/http"
 	"testing"
 
@@ -110,6 +110,35 @@ func TestStdReplyBodyJSON(t *testing.T) {
 		assert.Nil(t, res)
 		assert.NotNil(t, err)
 	})
+}
+
+func TestStdReplyBodyJSON_StableOutput(t *testing.T) {
+	// Clients and snapshot tests compare reply bodies byte by byte, so the encoding must not vary:
+	// nil slices encode as [] (encoding/json/v2) and map keys are sorted.
+	rv := &RequestValues{RawRequest: _req, URL: _req.URL}
+	testCases := []struct {
+		name string
+		data any
+		want string
+	}{
+		{"nil slice", struct {
+			Items []string `json:"items"`
+		}{}, `{"items":[]}`},
+		{
+			"map keys sorted",
+			map[string]int{"h": 8, "c": 3, "f": 6, "a": 1, "g": 7, "b": 2, "e": 5, "d": 4},
+			`{"a":1,"b":2,"c":3,"d":4,"e":5,"f":6,"g":7,"h":8}`,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := NewReply().BodyJSON(tc.data).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
+
+			require.NoError(t, err)
+			require.Equal(t, tc.want, string(res.Body))
+		})
+	}
 }
 
 func TestStdReplyBodyReader(t *testing.T) {

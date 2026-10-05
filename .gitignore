@@ -34,7 +34,8 @@ coverage.html
 test-report.out
 
 # AI
-.claude/
+.claude/*
+!.claude/skills
 CLAUDE.local.md
 
 # Project

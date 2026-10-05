@@ -3,7 +3,7 @@ package mockhttp
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	json "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -234,7 +234,7 @@ func (rep *Reply) BodyText(text string) *Reply {
 
 // BodyJSON defines the response body encoding the given value using json.Encoder.
 func (rep *Reply) BodyJSON(data any) *Reply {
-	b, err := json.Marshal(data)
+	b, err := json.Marshal(data, json.Deterministic(true))
 	if err != nil {
 		rep.delayedErr = err
 		return rep
@@ -310,6 +310,55 @@ func (rep *Reply) Gzip() *Reply {
 	return rep
 }
 
+// Reply implements vlatte.Replier[ReplyInput, *Response].
+func (rep *Reply) Reply(ctx context.Context, input ReplyInput) (res *Response, err error) {
+	res, err = rep.build(input.Writer, input.RequestValues)
+	if err != nil {
+		return nil, fmt.Errorf("reply: %w", err)
+	}
+	return res, nil
+}
+
+func (rep *Reply) Describe() descriptor.Descriptor {
+	headers := rep.response.Header.Clone()
+	for _, cookie := range rep.response.Cookies {
+		headers.Add("Set-Cookie", cookie.String())
+	}
+
+	response := map[string]any{"status": rep.response.StatusCode}
+
+	if len(headers) > 0 {
+		response["header"] = headers
+	}
+
+	if len(rep.response.Trailer) > 0 {
+		response["trailers"] = rep.response.Trailer.Clone()
+	}
+
+	if len(rep.response.Encoding) > 0 {
+		response["encoding"] = rep.response.Encoding
+	}
+
+	if len(rep.bodyFilename) > 0 {
+		response["body_file"] = rep.bodyFilename
+	} else if rep.response.Body != nil {
+		response["body"] = string(rep.response.Body)
+	}
+
+	switch rep.bodyType {
+	case _bodyTemplate:
+		tmpl := map[string]any{"enabled": true}
+
+		if rep.teData != nil {
+			tmpl["data"] = rep.teData
+		}
+
+		response["template"] = tmpl
+	}
+
+	return descriptor.New("response", response)
+}
+
 func (rep *Reply) beforeBuild(app *Server) error {
 	if rep.delayedErr != nil {
 		return rep.delayedErr
@@ -372,15 +421,6 @@ func (rep *Reply) beforeBuild(app *Server) error {
 	}
 
 	return nil
-}
-
-// Reply implements vlatte.Replier[ReplyInput, *Response].
-func (rep *Reply) Reply(ctx context.Context, input ReplyInput) (res *Response, err error) {
-	res, err = rep.build(input.Writer, input.RequestValues)
-	if err != nil {
-		return nil, fmt.Errorf("reply: %w", err)
-	}
-	return res, nil
 }
 
 func (rep *Reply) build(_ http.ResponseWriter, r *RequestValues) (res *Response, err error) {
@@ -506,44 +546,4 @@ func (rep *Reply) build(_ http.ResponseWriter, r *RequestValues) (res *Response,
 	}
 
 	return &response, nil
-}
-
-func (rep *Reply) Describe() descriptor.Descriptor {
-	headers := rep.response.Header.Clone()
-	for _, cookie := range rep.response.Cookies {
-		headers.Add("Set-Cookie", cookie.String())
-	}
-
-	response := map[string]any{"status": rep.response.StatusCode}
-
-	if len(headers) > 0 {
-		response["header"] = headers
-	}
-
-	if len(rep.response.Trailer) > 0 {
-		response["trailers"] = rep.response.Trailer.Clone()
-	}
-
-	if len(rep.response.Encoding) > 0 {
-		response["encoding"] = rep.response.Encoding
-	}
-
-	if len(rep.bodyFilename) > 0 {
-		response["body_file"] = rep.bodyFilename
-	} else if rep.response.Body != nil {
-		response["body"] = string(rep.response.Body)
-	}
-
-	switch rep.bodyType {
-	case _bodyTemplate:
-		tmpl := map[string]any{"enabled": true}
-
-		if rep.teData != nil {
-			tmpl["data"] = rep.teData
-		}
-
-		response["template"] = tmpl
-	}
-
-	return descriptor.New("response", response)
 }

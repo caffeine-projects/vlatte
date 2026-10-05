@@ -2,7 +2,7 @@
 package descriptor
 
 import (
-	"encoding/json"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 )
@@ -196,7 +196,7 @@ func (d Descriptor) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 
-	return json.Marshal(m)
+	return json.Marshal(m, json.Deterministic(true))
 }
 
 func IsSelfDescriptive(v any) (Descriptor, bool) {

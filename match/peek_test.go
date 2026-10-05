@@ -1,7 +1,7 @@
 package match
 
 import (
-	"fmt"
+	"errors"
 	"testing"
 
 	"github.com/caffeine-projects/vlatte"
@@ -10,7 +10,7 @@ import (
 
 func TestPeek(t *testing.T) {
 	t.Run("should return peek error", func(t *testing.T) {
-		actionErr := fmt.Errorf("action failed")
+		actionErr := errors.New("action failed")
 		ok, err := Peek(StrictEqual("test"), func(_ any) error { return actionErr }).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), "test"))
 
 		require.Error(t, err)

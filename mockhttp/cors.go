@@ -147,14 +147,14 @@ func corsMiddleware(options *CORSConfig) func(http.Handler) http.Handler {
 				w.Header().Add(HeaderContentLength, "0")
 
 				w.WriteHeader(options.SuccessStatusCode)
-			} else {
-				configureOrigin(options, r, w)
-				configureCredentials(options, w)
-				configureExposedHeaders(options, w)
-
-				next.ServeHTTP(w, r)
 				return
 			}
+
+			configureOrigin(options, r, w)
+			configureCredentials(options, w)
+			configureExposedHeaders(options, w)
+
+			next.ServeHTTP(w, r)
 		})
 	}
 }

@@ -2,6 +2,7 @@
 package filterbuilder
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -66,7 +67,7 @@ const (
 func TryBuildMatcher(possibleMatcher any) (m vlatte.Matcher, err error) {
 	val := reflect.ValueOf(possibleMatcher)
 	if possibleMatcher == nil || !val.IsValid() {
-		return nil, fmt.Errorf("definition must be a string or an array in the format: [\"<MATCHER_NAME>\", ARG_1, ARG_2...]")
+		return nil, errors.New("definition must be a string or an array in the format: [\"<MATCHER_NAME>\", ARG_1, ARG_2...]")
 	}
 
 	switch val.Kind() {
@@ -81,7 +82,7 @@ func TryBuildMatcher(possibleMatcher any) (m vlatte.Matcher, err error) {
 func BuildMatcher(possibleMatcher any) (m vlatte.Matcher, err error) {
 	val := reflect.ValueOf(possibleMatcher)
 	if possibleMatcher == nil || !val.IsValid() {
-		return nil, fmt.Errorf("definition must be a string or an array in the format: [\"<MATCHER_NAME>\", ARG_1, ARG_2...]")
+		return nil, errors.New("definition must be a string or an array in the format: [\"<MATCHER_NAME>\", ARG_1, ARG_2...]")
 	}
 
 	switch val.Kind() {
@@ -95,7 +96,7 @@ func BuildMatcher(possibleMatcher any) (m vlatte.Matcher, err error) {
 func buildMatcherFromArray(possibleMatcher any) (vlatte.Matcher, error) {
 	val := reflect.ValueOf(possibleMatcher)
 	if val.Len() == 0 {
-		return nil, fmt.Errorf("definition must be a string or an array in the format: [\"<MATCHER_NAME>\", ARG_1, ARG_2...]")
+		return nil, errors.New("definition must be a string or an array in the format: [\"<MATCHER_NAME>\", ARG_1, ARG_2...]")
 	}
 
 	mk, ok := reflect.TypeAssert[string](val.Index(0))
@@ -132,7 +133,7 @@ func extractMultipleMatchers(v any) ([]vlatte.Matcher, error) {
 		case reflect.Slice, reflect.Array:
 			mat, err = buildMatcherFromArray(entry)
 		case reflect.String:
-			mat, err = discoverAndBuild(entry.(string), nil)
+			mat, err = discoverAndBuild(reflect.ValueOf(entry).String(), nil)
 		}
 
 		if err != nil {
