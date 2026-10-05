@@ -513,13 +513,10 @@ func applyTLS(c *Config, certFile, keyFile, clientCertFile string) error {
 	}
 
 	if len(clientCertFile) > 0 {
-		cc, err := os.ReadFile(filepath.Clean(clientCertFile))
+		cp, err := loadCertPool(clientCertFile)
 		if err != nil {
 			return err
 		}
-
-		cp := x509.NewCertPool()
-		cp.AppendCertsFromPEM(cc)
 
 		c.TLSClientCAs = cp
 	}
@@ -527,4 +524,20 @@ func applyTLS(c *Config, certFile, keyFile, clientCertFile string) error {
 	c.TLSCertificates = []tls.Certificate{cert}
 
 	return nil
+}
+
+// loadCertPool reads the PEM certificates in file.
+// A file without any is an error: an empty pool would reject every client certificate.
+func loadCertPool(file string) (*x509.CertPool, error) {
+	pem, err := os.ReadFile(filepath.Clean(file))
+	if err != nil {
+		return nil, err
+	}
+
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("%s has no PEM certificates", file)
+	}
+
+	return pool, nil
 }

@@ -221,6 +221,13 @@ func TestConfigBuilder(t *testing.T) {
 	require.NotNil(t, conf.TLSClientCAs)
 }
 
+func TestConfigBuilder_TLSMutualNeedsCACertificates(t *testing.T) {
+	// An empty client CA pool would start a server that rejects every client.
+	_, err := New(Setup().TLSMutual(_testCertFile, _testKeyFile, _testKeyFile))
+
+	require.ErrorContains(t, err, _testKeyFile+" has no PEM certificates")
+}
+
 func TestLogLevelString(t *testing.T) {
 	require.Equal(t, vlatte.LogBasic.String(), "basic")
 	require.Equal(t, vlatte.LogHeader.String(), "header")

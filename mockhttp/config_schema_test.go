@@ -355,18 +355,76 @@ func TestConfigSources_Hazards(t *testing.T) {
 		require.Contains(t, err.Error(), `proxy.via="http://user:xxxxx@proxy:port"`)
 		require.Contains(t, err.Error(), `unexpected argument "http://user:xxxxx@proxy:3128"`)
 	})
+}
 
-	t.Run("a certificate needs its key", func(t *testing.T) {
-		_, err := loadConfig(t, Setup(), ConfigArgs([]string{"--tls-cert", _testCertFile}))
+func TestConfigSources_TLSFiles(t *testing.T) {
+	// Each TLS problem names the setting to fix. A CA file without certificates must fail here:
+	// the server would start, then reject every client.
+	wd, err := os.Getwd()
+	require.NoError(t, err)
 
-		require.Equal(t, []config.Problem{{
-			Code:    config.CodeMissingValue,
-			Origin:  "flag --tls-cert",
-			Key:     "tls.key",
-			Message: "tls.cert is set but tls.key is not",
-			Hint:    "set both",
-		}}, configProblems(t, err))
-	})
+	hint := "relative paths start at " + wd
+	absent := filepath.Join(t.TempDir(), "absent.pem") // an absolute path needs no hint
+
+	tests := []struct {
+		name string
+		args []string
+		want []config.Problem
+	}{
+		{
+			name: "a certificate needs its key",
+			args: []string{"--tls-cert", _testCertFile},
+			want: []config.Problem{{
+				Code: config.CodeMissingValue, Origin: "flag --tls-cert", Key: "tls.key",
+				Message: "tls.cert is set but tls.key is not", Hint: "set both",
+			}},
+		},
+		{
+			name: "a key needs its certificate",
+			args: []string{"--tls-key", _testKeyFile},
+			want: []config.Problem{{
+				Code: config.CodeMissingValue, Origin: "flag --tls-key", Key: "tls.cert",
+				Message: "tls.key is set but tls.cert is not", Hint: "set both",
+			}},
+		},
+		{
+			name: "client CAs need the server's certificate and key",
+			args: []string{"--tls-ca", _testClientCertFile},
+			want: []config.Problem{{
+				Code: config.CodeMissingValue, Origin: "flag --tls-ca", Key: "tls.cert",
+				Message: "tls.ca is set but tls.cert and tls.key are not", Hint: "mutual TLS needs the server's certificate and key too",
+			}},
+		},
+		{
+			name: "client CAs without certificates",
+			args: []string{"--tls-cert", _testCertFile, "--tls-key", _testKeyFile, "--tls-ca", _testKeyFile},
+			want: []config.Problem{{
+				Code: config.CodeInvalidValue, Origin: "flag --tls-ca", Key: "tls.ca", Value: _testKeyFile,
+				Message: "can't load the client CAs: " + _testKeyFile + " has no PEM certificates", Hint: hint,
+			}},
+		},
+		{
+			name: "every file that can't be loaded",
+			args: []string{"--tls-cert", "missing.pem", "--tls-key", "missing.pem", "--tls-ca", absent},
+			want: []config.Problem{
+				{
+					Code: config.CodeInvalidValue, Origin: "flag --tls-cert", Key: "tls.cert", Value: "missing.pem",
+					Message: "can't load the certificate and key: open missing.pem: no such file or directory", Hint: hint,
+				},
+				{
+					Code: config.CodeInvalidValue, Origin: "flag --tls-ca", Key: "tls.ca", Value: absent,
+					Message: "can't load the client CAs: open " + absent + ": no such file or directory",
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := loadConfig(t, Setup(), ConfigArgs(tc.args))
+			require.Equal(t, tc.want, configProblems(t, err))
+		})
+	}
 }
 
 func TestConfigSources_ErrorListsEveryProblemWithItsOrigin(t *testing.T) {

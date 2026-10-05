@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -142,20 +143,35 @@ func loadTLSFiles(conf *Config, values map[string]config.Value) []config.Problem
 		}}
 	}
 
-	if err := applyTLS(conf, cert.Str, key.Str, ca.Str); err != nil {
-		p := config.Problem{
-			Code: config.CodeInvalidValue, Origin: cert.Origin, Key: "tls.cert", Value: cert.Str,
-			Message: "can't load the TLS files: " + err.Error(),
-		}
-
-		if wd, err := os.Getwd(); err == nil {
-			p.Hint = "relative paths start at " + wd
-		}
-
-		return []config.Problem{p}
+	var problems []config.Problem
+	if err := applyTLS(conf, cert.Str, key.Str, ""); err != nil {
+		problems = append(problems, tlsFileProblem(cert, "can't load the certificate and key", err))
 	}
 
-	return nil
+	if hasCA {
+		pool, err := loadCertPool(ca.Str)
+		if err != nil {
+			return append(problems, tlsFileProblem(ca, "can't load the client CAs", err))
+		}
+
+		conf.TLSClientCAs = pool
+	}
+
+	return problems
+}
+
+// tlsFileProblem reports a TLS file that can't be loaded as a problem of the setting that named it.
+func tlsFileProblem(v config.Value, what string, err error) config.Problem {
+	p := config.Problem{
+		Code: config.CodeInvalidValue, Origin: v.Origin, Key: v.Key, Value: v.Str,
+		Message: what + ": " + err.Error(),
+	}
+
+	if wd, err := os.Getwd(); err == nil && !filepath.IsAbs(v.Str) {
+		p.Hint = "relative paths start at " + wd
+	}
+
+	return p
 }
 
 type field = config.Field[Config]
