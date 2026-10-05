@@ -68,11 +68,13 @@ func (s *argsSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 
 	var problems []Problem
 	for i, arg := range rest {
+		// A URL meant for a bool flag, as in "--proxy http://user:password@host", ends up here.
+		shown := display(arg)
 		p := Problem{
 			Code:    CodeUnexpectedArgument,
 			Origin:  "args",
-			Value:   arg,
-			Message: fmt.Sprintf("unexpected argument %q: only flags are accepted", arg),
+			Value:   shown,
+			Message: fmt.Sprintf("unexpected argument %q: only flags are accepted", shown),
 		}
 
 		// "--cors false" sets cors and leaves "false" behind.

@@ -87,6 +87,16 @@ func TestArgs_Problems(t *testing.T) {
 			args: []string{"--", "--debug"},
 			want: []Problem{{Code: CodeUnexpectedArgument, Origin: "args", Value: "--debug", Message: `unexpected argument "--debug": only flags are accepted`}},
 		},
+		{
+			name: "a URL meant for a bool flag keeps its password hidden",
+			args: []string{"--debug", "http://user:secret@proxy"},
+			want: []Problem{{
+				Code:    CodeUnexpectedArgument,
+				Origin:  "args",
+				Value:   "http://user:xxxxx@proxy",
+				Message: `unexpected argument "http://user:xxxxx@proxy": only flags are accepted`,
+			}},
+		},
 	}
 
 	for _, tc := range tests {

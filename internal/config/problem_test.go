@@ -28,7 +28,22 @@ func TestSuggest(t *testing.T) {
 }
 
 func TestDisplay_HidesURLPasswords(t *testing.T) {
-	require.Equal(t, "http://user:xxxxx@proxy:3128", display("http://user:secret@proxy:3128"))
-	require.Equal(t, "http://user@proxy:3128", display("http://user@proxy:3128"))
-	require.Equal(t, "not a url ::", display("not a url ::"))
+	// Values reach messages because they are invalid: a password must stay hidden even in a URL that doesn't parse.
+	tests := []struct {
+		name, value, want string
+	}{
+		{"valid URL", "http://user:secret@proxy:3128", "http://user:xxxxx@proxy:3128"},
+		{"user without a password", "http://user@proxy:3128", "http://user@proxy:3128"},
+		{"not a URL", "not a url ::", "not a url ::"},
+		{"invalid escape", "http://user:p%zz@proxy:3128", "http://user:xxxxx@proxy:3128"},
+		{"invalid port", "http://user:secret@proxy:port", "http://user:xxxxx@proxy:port"},
+		{"no scheme", "user:secret@proxy:3128", "user:xxxxx@proxy:3128"},
+		{"unescaped @ in the password", "http://user:p@ss@proxy:3128", "http://user:xxxxx@proxy:3128"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, display(tc.value))
+		})
+	}
 }

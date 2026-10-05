@@ -3,7 +3,6 @@ package config
 import (
 	"cmp"
 	"fmt"
-	"net/url"
 	"slices"
 	"strings"
 )
@@ -117,15 +116,23 @@ func distance(a, b string) int {
 }
 
 // display hides the password of a URL, such as a proxy URL, before it goes into a message.
+// It doesn't parse the URL: a value in a message is often invalid, and its password must stay hidden too.
+// The password follows the user name, after the scheme if there is one, up to the last @.
 func display(s string) string {
-	u, err := url.Parse(s)
-	if err != nil || u.User == nil {
+	at := strings.LastIndex(s, "@")
+	if at < 0 {
 		return s
 	}
 
-	if _, ok := u.User.Password(); !ok {
+	start := 0
+	if i := strings.Index(s[:at], "://"); i >= 0 {
+		start = i + len("://")
+	}
+
+	colon := strings.Index(s[start:at], ":")
+	if colon < 0 {
 		return s
 	}
 
-	return u.Redacted()
+	return s[:start+colon+1] + "xxxxx" + s[at:]
 }

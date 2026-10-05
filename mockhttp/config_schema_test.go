@@ -344,6 +344,18 @@ func TestConfigSources_Hazards(t *testing.T) {
 		require.Equal(t, "record.file_type", problems[1].Key)
 	})
 
+	t.Run("a proxy password never reaches the error, even in an invalid URL", func(t *testing.T) {
+		t.Setenv("VLATTE_PROXY_VIA", "http://user:secret@proxy:port")
+
+		// --proxy is a bool, so the URL after it is an unexpected argument.
+		_, err := loadConfig(t, Setup(), ConfigEnv(), ConfigArgs([]string{"--proxy", "http://user:secret@proxy:3128"}))
+
+		require.Len(t, configProblems(t, err), 2)
+		require.NotContains(t, err.Error(), "secret")
+		require.Contains(t, err.Error(), `proxy.via="http://user:xxxxx@proxy:port"`)
+		require.Contains(t, err.Error(), `unexpected argument "http://user:xxxxx@proxy:3128"`)
+	})
+
 	t.Run("a certificate needs its key", func(t *testing.T) {
 		_, err := loadConfig(t, Setup(), ConfigArgs([]string{"--tls-cert", _testCertFile}))
 
