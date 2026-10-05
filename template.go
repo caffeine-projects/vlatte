@@ -13,15 +13,6 @@ type Template interface {
 	ExecuteTemplate(wr io.Writer, name string, data any) error
 }
 
-type TemplateDataProviderInput interface {
-	Templating() Template
-}
-
-type TemplateDataProvider interface {
-	Key() string
-	Data(in TemplateDataProviderInput) (any, error)
-}
-
 func TemplateHTML(tmpl *htmltemplate.Template) Template {
 	return &htmlTmpl{tmpl: tmpl}
 }

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caffeine-projects/vlatte/flavor/xhttp"
+	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +27,7 @@ func TestCLI(t *testing.T) {
 	require.NoError(t, err)
 
 	addr := "127.0.0.1:" + strconv.Itoa(port)
-	go run(ctx, xhttp.Setup().Addr(addr))
+	go run(ctx, mockhttp.Setup().Addr(addr))
 
 	// A running server answers requests no mock matches with StatusNoMatch.
 	// Connection errors mean it is not up yet: they are retried, never counted as success.
@@ -38,13 +38,13 @@ func TestCLI(t *testing.T) {
 		}
 
 		_ = res.Body.Close()
-		assert.Equal(c, xhttp.StatusNoMatch, res.StatusCode)
+		assert.Equal(c, mockhttp.StatusNoMatch, res.StatusCode)
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
 type httpsConfigurer struct{ addr string }
 
-func (c httpsConfigurer) Apply(conf *xhttp.Config) error {
+func (c httpsConfigurer) Apply(conf *mockhttp.Config) error {
 	conf.Addr = c.addr
 	conf.UseHTTPS = true
 	return nil
@@ -74,7 +74,7 @@ func TestCLI_HTTPS(t *testing.T) {
 		}
 
 		_ = res.Body.Close()
-		assert.Equal(c, xhttp.StatusNoMatch, res.StatusCode)
+		assert.Equal(c, mockhttp.StatusNoMatch, res.StatusCode)
 	}, 10*time.Second, 100*time.Millisecond)
 }
 

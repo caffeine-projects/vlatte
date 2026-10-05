@@ -1,0 +1,16 @@
+package match
+
+import (
+	"github.com/caffeine-projects/vlatte"
+
+	"github.com/ohler55/ojg/jp"
+)
+
+// HasKey matches when the value (map or struct) has the given key/path.
+func HasKey(path string) vlatte.Matcher {
+	x, err := jp.ParseString(path)
+	if err != nil {
+		panic(err)
+	}
+	return &hasKeyMatcher{Path: path, Expr: x}
+}

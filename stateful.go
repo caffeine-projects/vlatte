@@ -5,7 +5,3 @@ package vlatte
 type Stateful interface {
 	SetState() error
 }
-
-type State interface {
-	Kind() Kind
-}

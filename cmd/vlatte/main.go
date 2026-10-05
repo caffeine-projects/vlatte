@@ -11,7 +11,7 @@ import (
 	"syscall"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/flavor/xhttp"
+	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -52,16 +52,16 @@ func main() {
 	run(ctx) // should block
 }
 
-func run(ctx context.Context, custom ...vlatte.Configurer[*xhttp.Config]) {
-	configurers := make([]vlatte.Configurer[*xhttp.Config], 0)
+func run(ctx context.Context, custom ...vlatte.Configurer[*mockhttp.Config]) {
+	configurers := make([]vlatte.Configurer[*mockhttp.Config], 0)
 	if len(custom) > 0 {
 		configurers = append(configurers, custom...)
 	}
 
-	configurers = append(configurers, xhttp.UseLocals())
+	configurers = append(configurers, mockhttp.UseLocals())
 
 	fileExists := func(path string) bool { _, err := os.Stat(path); return err == nil }
-	for _, warning := range legacyWarnings(os.Environ(), xhttp.DefaultConfigDirectories, fileExists) {
+	for _, warning := range legacyWarnings(os.Environ(), mockhttp.DefaultConfigDirectories, fileExists) {
 		_, _ = fmt.Fprintln(os.Stderr, "warning:", warning)
 	}
 
@@ -70,7 +70,7 @@ func run(ctx context.Context, custom ...vlatte.Configurer[*xhttp.Config]) {
 		configurers = append(configurers, &dockerConfigurer{})
 	}
 
-	m := xhttp.MustNew(configurers...)
+	m := mockhttp.MustNew(configurers...)
 
 	rootCmd := &cobra.Command{
 		Use:     _usage,

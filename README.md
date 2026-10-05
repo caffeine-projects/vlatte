@@ -26,15 +26,15 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/caffeine-projects/vlatte/flavor/xhttp"
+	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
 func TestHello(t *testing.T) {
-	m := xhttp.MustNew()
+	m := mockhttp.MustNew()
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	scoped := m.MustMock(xhttp.Getf("/hello").Reply(xhttp.OK().PlainText("hello world")))
+	scoped := m.MustMock(mockhttp.Getf("/hello").Reply(mockhttp.OK().PlainText("hello world")))
 
 	res, err := http.Get(m.URL("/hello"))
 	if err != nil {
@@ -54,11 +54,29 @@ func TestHello(t *testing.T) {
 }
 ```
 
-`xhttp.New` does the same as `MustNew` but returns an error instead of panicking. Pass `xhttp.Setup()` to either one to configure the server: its address, TLS, CORS, proxying or recording, for example. The `xgrpc` package offers the same for gRPC services.
+`mockhttp.New` does the same as `MustNew` but returns an error instead of panicking. Pass `mockhttp.Setup()` to either one to configure the server: its address, TLS, CORS, proxying or recording, for example. The `mockgrpc` package offers the same for gRPC services.
+
+## Packages
+
+| Package | What it's for |
+|---|---|
+| `mockhttp` | HTTP mock servers |
+| `mockgrpc` | gRPC mock servers |
+| `match` | Request matchers, such as `match.Equal`, `match.JSONPath` and `match.All` |
+| `webhook` | Calling a URL after a mock is served |
+| `recipe/<protocol>/<recipe>` | Recipes that prepare a server, such as `recipe/http/proxyall` |
+| `vlatte` | The types every mock server shares |
+
+A recipe prepares a server through `Prep`. This one forwards every request that no mock matches:
+
+```go
+m := mockhttp.MustNew()
+err := m.Prep(ctx, proxyall.New(proxyall.Config{Target: "https://api.example.com"}))
+```
 
 ## Mock files
 
-Mocks can also live in YAML or JSON files. On start, the server loads the files matching `testdata/_mocks/*mock.yaml` and `testdata/_mocks/*mock.yml`. Change the patterns with `Setup().MockFilePatterns(...)`, or load a single file with `m.MustMock(xhttp.FromFile(path))`.
+Mocks can also live in YAML or JSON files. On start, the server loads the files matching `testdata/_mocks/*mock.yaml` and `testdata/_mocks/*mock.yml`. Change the patterns with `Setup().MockFilePatterns(...)`, or load a single file with `m.MustMock(mockhttp.FromFile(path))`.
 
 ```yaml
 # testdata/_mocks/hello_mock.yaml
@@ -73,7 +91,7 @@ response:
   body: hello world
 ```
 
-[`etc/http/http.schema.json`](etc/http/http.schema.json) describes the format, so editors can validate mock files.
+[`mockhttp/schema/http.schema.json`](mockhttp/schema/http.schema.json) describes the format, so editors can validate mock files.
 
 ## CLI
 

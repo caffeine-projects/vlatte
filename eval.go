@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-
-	"github.com/caffeine-projects/vlatte/vlattecore/explain"
 )
 
 var _ fmt.Stringer = (*Eval[any])(nil)
@@ -36,9 +34,9 @@ type Eval[TIn any] struct {
 	Target int
 
 	// Matcher associated with this [Eval].
-	Matcher Filter
+	Matcher Matcher
 
-	// Selector will extract the [http.Request] or a specific field of it and feed it to the associated [filter.Matcher].
+	// Selector will extract the [http.Request] or a specific field of it and feed it to the associated [Matcher].
 	Selector Selector[TIn]
 }
 
@@ -48,7 +46,7 @@ func (e *Eval[TIn]) String() string {
 }
 
 // Match evaluates the input against the matcher of this [Eval].
-func (e *Eval[TIn]) Match(ctx context.Context, sub *explain.Block, in TIn) (ok bool, err error) {
+func (e *Eval[TIn]) Match(ctx context.Context, sub *Explanation, in TIn) (ok bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("%w: Match: type: %T %v", ErrMatchPanicked, e.Matcher, r)
@@ -60,7 +58,7 @@ func (e *Eval[TIn]) Match(ctx context.Context, sub *explain.Block, in TIn) (ok b
 		val = e.Selector(ctx, in)
 	}
 
-	return e.Matcher.Match(NewFilterArg(ctx, sub.Sub(e.Matcher.Name()), val))
+	return e.Matcher.Match(NewMatcherArg(ctx, sub.Sub(e.Matcher.Name()), val))
 }
 
 // GetEvals is a function that returns a list of evaluators of a given [Mock].
@@ -75,7 +73,7 @@ type Mocks[M Mock, TIn any] iter.Seq[M]
 // It returns the mock that matched and a boolean indicating if a match was found.
 func (mocks Mocks[M, TIn]) Find(
 	ctx context.Context,
-	sub *explain.Block,
+	sub *Explanation,
 	in TIn,
 	evals GetEvals[M, TIn],
 ) (M, bool, error) {
@@ -103,7 +101,7 @@ type Evaluators[M Mock, TIn any] []*Eval[TIn]
 
 // Eval evaluates the input against all evaluators from a single [Mock].
 // Normally this function is used together with [Mocks.Find]
-func (e Evaluators[M, TIn]) Eval(ctx context.Context, sub *explain.Block, in TIn) (bool, error) {
+func (e Evaluators[M, TIn]) Eval(ctx context.Context, sub *Explanation, in TIn) (bool, error) {
 	for i, eval := range e {
 		ok, err := eval.Match(ctx, sub, in)
 		if err != nil {

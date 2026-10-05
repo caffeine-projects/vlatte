@@ -5,23 +5,18 @@ import (
 	"iter"
 )
 
+// Mock is what the core needs from a protocol's mock: identity, ordering, state, hits and events.
+// Protocol packages add what only they use, such as callbacks or steps, on their own mock types.
 type Mock interface {
 	ID() string
 	Name() string
 	Priority() int
-	Origin() string
-	Ext() any
-	Inc()
 	Hits() int64
 	Called() bool
 	Enabled() bool
 	Enable()
 	Disable()
-
 	Events() Events
-	Callbacks() []Callback
-	Steps() []Step
-
 	String() string
 }
 

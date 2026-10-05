@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/flavor/xhttp"
+	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
 // Names used by earlier versions of the CLI. They are no longer read.
@@ -29,7 +29,7 @@ func legacyWarnings(environ []string, dirs []string, exists func(path string) bo
 		case name == _legacyDockerHostEnv:
 			warnings = append(warnings, fmt.Sprintf("environment variable %s is no longer read: use %s", name, _dockerHostEnv))
 		case strings.HasPrefix(name, _legacyEnvPrefix):
-			renamed := xhttp.EnvPrefix + "_" + strings.TrimPrefix(name, _legacyEnvPrefix)
+			renamed := mockhttp.EnvPrefix + "_" + strings.TrimPrefix(name, _legacyEnvPrefix)
 			warnings = append(warnings, fmt.Sprintf("environment variable %s is no longer read: use %s", name, renamed))
 		}
 	}
@@ -38,7 +38,7 @@ func legacyWarnings(environ []string, dirs []string, exists func(path string) bo
 		for _, ext := range _legacyConfigExts {
 			legacy := filepath.Join(dir, _legacyConfigFileName+"."+ext)
 			if exists(legacy) {
-				renamed := filepath.Join(dir, xhttp.DefaultConfigFileName+"."+ext)
+				renamed := filepath.Join(dir, mockhttp.DefaultConfigFileName+"."+ext)
 				warnings = append(warnings, fmt.Sprintf("config file %s is no longer read: rename it to %s", legacy, renamed))
 			}
 		}

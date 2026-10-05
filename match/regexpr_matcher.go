@@ -1,0 +1,56 @@
+package match
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+	"sync"
+
+	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
+)
+
+// regExpMatcher passes when the regular expression matches the value.
+type regExpMatcher struct {
+	Expression string
+	once       sync.Once
+	rg         *regexp.Regexp
+	compileErr error
+}
+
+// Name implements vlatte.Matcher.
+func (m *regExpMatcher) Name() string { return "RegExp" }
+
+// Match implements vlatte.Matcher.
+func (m *regExpMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
+	v := arg.Value()
+	txt, ok := v.(string)
+	if !ok {
+		return failure(fmt.Errorf("regexp: it only works with string values. got: %T", v))
+	}
+
+	m.once.Do(func() {
+		r, err := regexp.Compile(m.Expression)
+		if err != nil {
+			m.compileErr = err
+			return
+		}
+		m.rg = r
+	})
+
+	if m.compileErr != nil {
+		return failure(fmt.Errorf("regexp: error compiling expression %s. %w", m.Expression, m.compileErr))
+	}
+
+	match := m.rg.Match([]byte(txt))
+	if match {
+		return success()
+	}
+
+	return mismatch(strings.Join([]string{"Match(", m.Expression, ") Expression did not match. Got: ", txt}, ""))
+}
+
+// Describe implements descriptor.SelfDescriptive.
+func (m *regExpMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("regexp", m.Expression)
+}

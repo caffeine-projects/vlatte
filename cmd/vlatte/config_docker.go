@@ -4,12 +4,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/flavor/xhttp"
+	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
 type dockerConfigurer struct{}
 
-func (c *dockerConfigurer) Apply(conf *xhttp.Config) error {
+func (c *dockerConfigurer) Apply(conf *mockhttp.Config) error {
 	host := strings.TrimSpace(os.Getenv(_dockerHostEnv))
 	if host == "" {
 		host = "0.0.0.0:"

@@ -3,14 +3,14 @@ package main
 import (
 	"testing"
 
-	"github.com/caffeine-projects/vlatte/flavor/xhttp"
+	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestConfigDockerDefaultHTTPHost(t *testing.T) {
 	t.Setenv(_dockerHostEnv, "")
 
-	config := &xhttp.Config{}
+	config := &mockhttp.Config{}
 	conf := &dockerConfigurer{}
 	err := conf.Apply(config)
 
@@ -22,7 +22,7 @@ func TestConfigDockerDefaultHTTPHost(t *testing.T) {
 func TestConfigDockerDefaultHTTPsHost(t *testing.T) {
 	t.Setenv(_dockerHostEnv, "")
 
-	config := &xhttp.Config{}
+	config := &mockhttp.Config{}
 	config.UseHTTPS = true
 
 	conf := &dockerConfigurer{}
@@ -36,7 +36,7 @@ func TestConfigDockerDefaultHTTPsHost(t *testing.T) {
 func TestConfigDockerHostDefined(t *testing.T) {
 	t.Setenv(_dockerHostEnv, "example.org")
 
-	config := &xhttp.Config{}
+	config := &mockhttp.Config{}
 	conf := &dockerConfigurer{}
 	err := conf.Apply(config)
 
@@ -48,7 +48,7 @@ func TestConfigDockerHostDefined(t *testing.T) {
 func TestConfigDockerHostDefinedWithDots(t *testing.T) {
 	t.Setenv(_dockerHostEnv, "example.org:")
 
-	config := &xhttp.Config{}
+	config := &mockhttp.Config{}
 	conf := &dockerConfigurer{}
 	err := conf.Apply(config)
 

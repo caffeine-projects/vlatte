@@ -1,0 +1,249 @@
+package mockgrpc
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"reflect"
+	"strings"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/encoding/prototext"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
+
+	"github.com/caffeine-projects/vlatte"
+)
+
+type StreamValueSelectorIn struct {
+	RequestMessage any
+	Info           *grpc.StreamServerInfo
+}
+
+type StreamRequestValues struct {
+	RequestMessage any
+	ServerStream   grpc.ServerStream
+	Info           *grpc.StreamServerInfo
+	App            *Server
+}
+
+type StreamType int
+
+const (
+	StreamTypeJSON StreamType = iota
+	StreamTypeText
+)
+
+type StreamResponse[T any] struct {
+	Header     metadata.MD
+	Trailer    metadata.MD
+	MsgType    T
+	Stream     any
+	StreamType StreamType
+}
+
+type StreamReply[T any] struct {
+	response *StreamResponse[T]
+}
+
+func (r *StreamReply[T]) Messages(arr []proto.Message) *StreamReply[T] {
+	r.response.Stream = arr
+	return r
+}
+
+func (r *StreamReply[T]) AnyMessages(arr []any) *StreamReply[T] {
+	r.response.Stream = arr
+	return r
+}
+
+func (r *StreamReply[T]) Text(reader io.Reader) *StreamReply[T] {
+	r.response.Stream = reader
+	r.response.StreamType = StreamTypeText
+	return r
+}
+
+func (r *StreamReply[T]) JSON(reader io.Reader) *StreamReply[T] {
+	r.response.Stream = reader
+	r.response.StreamType = StreamTypeJSON
+	return r
+}
+
+// Reply implements vlatte.Replier[*StreamRequestValues, any].
+func (r *StreamReply[T]) Reply(ctx context.Context, values *StreamRequestValues) (any, error) {
+	err := r.build(ctx, values)
+	if err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+func (r *StreamReply[T]) build(ctx context.Context, values *StreamRequestValues) error {
+	err := grpc.SendHeader(ctx, r.response.Header)
+	if err != nil {
+		return err
+	}
+
+	err = grpc.SetTrailer(ctx, r.response.Trailer)
+	if err != nil {
+		return err
+	}
+
+	switch s := r.response.Stream.(type) {
+	case io.Reader:
+		scan := bufio.NewScanner(s)
+		msgType := reflect.New(reflect.TypeOf(r.response.MsgType).Elem())
+		msg, ok := reflect.TypeAssert[proto.Message](msgType)
+		if !ok {
+			return fmt.Errorf("server_stream: io.Reader must provide proto messages")
+		}
+
+		for scan.Scan() {
+			err := r.decode(scan.Bytes(), msg)
+			if err != nil {
+				return err
+			}
+
+			err = values.ServerStream.SendMsg(msg)
+			if err != nil {
+				return err
+			}
+		}
+
+	default:
+		t := reflect.TypeOf(s)
+		switch t.Kind() {
+		case reflect.Array, reflect.Slice:
+			v := reflect.ValueOf(s)
+			for i := 0; i < v.Len(); i++ {
+				err := values.ServerStream.SendMsg(v.Index(i).Interface())
+				if err != nil {
+					return err
+				}
+			}
+
+		default:
+			return status.Errorf(
+				codes.Internal,
+				"stream: reply stream type %T is not allowed. expected: io.Reader | array/slice",
+				s,
+			)
+		}
+	}
+
+	return nil
+}
+
+func (r *StreamReply[T]) decode(b []byte, m proto.Message) error {
+	switch r.response.StreamType {
+	case StreamTypeText:
+		return prototext.Unmarshal(b, m)
+	case StreamTypeJSON:
+		return protojson.Unmarshal(b, m)
+	}
+
+	return fmt.Errorf("stream: unexpected stream type %d", r.response.StreamType)
+}
+
+// receiveRequest reads the request message of a server streaming call.
+// Stream interceptors do not receive it: their first argument is the service implementation.
+func receiveRequest(stream grpc.ServerStream, info *grpc.StreamServerInfo) (proto.Message, error) {
+	svc, method, ok := strings.Cut(strings.TrimPrefix(info.FullMethod, "/"), "/")
+	if !ok {
+		return nil, fmt.Errorf("unexpected method name %q", info.FullMethod)
+	}
+
+	desc, err := protoregistry.GlobalFiles.FindDescriptorByName(protoreflect.FullName(svc))
+	if err != nil {
+		return nil, err
+	}
+
+	sd, ok := desc.(protoreflect.ServiceDescriptor)
+	if !ok {
+		return nil, fmt.Errorf("%s is not a service", svc)
+	}
+
+	md := sd.Methods().ByName(protoreflect.Name(method))
+	if md == nil {
+		return nil, fmt.Errorf("method %s not found in service %s", method, svc)
+	}
+
+	mt, err := protoregistry.GlobalTypes.FindMessageByName(md.Input().FullName())
+	if err != nil {
+		return nil, err
+	}
+
+	msg := mt.New().Interface()
+	if err = stream.RecvMsg(msg); err != nil {
+		return nil, err
+	}
+
+	return msg, nil
+}
+
+func ServerStream[T proto.Message]() *StreamReply[T] {
+	return &StreamReply[T]{response: &StreamResponse[T]{
+		Header:  make(metadata.MD),
+		Trailer: make(metadata.MD),
+	}}
+}
+
+func (in *interceptors) StreamInterceptor(
+	_ any,
+	stream grpc.ServerStream,
+	info *grpc.StreamServerInfo,
+	_ grpc.StreamHandler,
+) error {
+	reqMsg, err := receiveRequest(stream, info)
+	if err != nil {
+		return interceptError("stream: error reading the request message. %w", err)
+	}
+
+	b, err := json.Marshal(reqMsg)
+	if err != nil {
+		return err
+	}
+
+	em, err := in.app.storage.List(stream.Context())
+	if err != nil {
+		return interceptError("http: error finding eligible mocks for request. %w", err)
+	}
+
+	rawBody := string(b)
+	sub := vlatte.NewExplanation()
+	mocks := vlatte.Mocks[*Mock, *StreamValueSelectorIn](em)
+	mock, pass, err := mocks.Find(stream.Context(), sub, &StreamValueSelectorIn{rawBody, info}, func(m *Mock) vlatte.Evaluators[*Mock, *StreamValueSelectorIn] { return m.streamExpectations })
+	if err != nil {
+		return status.Error(codes.Internal, fmt.Errorf("stream: error finding mock for request: %w", err).Error())
+	}
+
+	if !pass {
+		return status.Error(codes.NotFound, "stream: request was not matched with any mock")
+	}
+
+	replier, ok := mock.Reply.(vlatte.Replier[*StreamRequestValues, any])
+	if !ok || replier == nil {
+		return status.Errorf(
+			codes.Unknown,
+			"stream: mock %s reply must implement Replier[*StreamRequestValues, any]: got %T",
+			mock.getRef(),
+			mock.Reply,
+		)
+	}
+
+	values := &StreamRequestValues{rawBody, stream, info, in.app}
+	_, err = replier.Reply(stream.Context(), values)
+	if err != nil {
+		return fmt.Errorf("stream: failed to reply: %w", err)
+	}
+
+	mock.Inc()
+
+	return nil
+}
