@@ -384,7 +384,7 @@ func (b *Builder) OnCompleteEvent(cfg vlatte.EventConfig) *Builder {
 	return b
 }
 
-func (b *Builder) Step(steps ...Step) *Builder {
+func (b *Builder) Step(steps ...vlatte.Step) *Builder {
 	b.mock.steps = append(b.mock.steps, steps...)
 
 	return b

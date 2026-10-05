@@ -3,17 +3,20 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 
-	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
 const (
@@ -26,6 +29,7 @@ const (
   vlatte --proxy
   vlatte --proxy --record
 `
+	_helpHint = "Run 'vlatte --help' to list flags, environment variables and file keys."
 )
 
 var (
@@ -40,70 +44,210 @@ For more information, visit: %s`,
 		strings.Join(viper.SupportedExts, ", "),
 		_gitRepository,
 	)
-
-	locker sync.Mutex
 )
 
 func main() {
-	ctx := context.Background()
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	defer cancel()
-
-	run(ctx) // should block
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	cancel()
+	os.Exit(code)
 }
 
-func run(ctx context.Context, custom ...vlatte.Configurer[*mockhttp.Config]) {
-	configurers := make([]vlatte.Configurer[*mockhttp.Config], 0)
-	if len(custom) > 0 {
-		configurers = append(configurers, custom...)
-	}
+// run executes the command line in args and returns the exit code:
+// 0 on success, 2 for invalid settings or usage, and 1 for other errors.
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	code := 0
 
-	configurers = append(configurers, mockhttp.UseLocals())
-
-	fileExists := func(path string) bool { _, err := os.Stat(path); return err == nil }
-	for _, warning := range legacyWarnings(os.Environ(), mockhttp.DefaultConfigDirectories, fileExists) {
-		_, _ = fmt.Fprintln(os.Stderr, "warning:", warning)
-	}
-
-	_, exists := os.LookupEnv(_dockerHostEnv)
-	if exists {
-		configurers = append(configurers, &dockerConfigurer{})
-	}
-
-	m := mockhttp.MustNew(configurers...)
-
-	rootCmd := &cobra.Command{
+	root := &cobra.Command{
 		Use:     _usage,
 		Short:   _shortDescription,
 		Long:    _description,
-		Args:    cobra.MinimumNArgs(0),
 		Example: _example,
-		Run: func(cmd *cobra.Command, args []string) {
-			if m.Config().UseHTTPS {
-				m.MustStartTLS()
-			} else {
-				m.MustStart()
+		// The config args source parses the flags, so they behave the same here and in the library.
+		// cobra only knows them for shell completion.
+		DisableFlagParsing:         true,
+		Args:                       cobra.ArbitraryArgs,
+		SilenceUsage:               true,
+		SilenceErrors:              true,
+		SuggestionsMinimumDistance: 2,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// The server takes no arguments, so a leading word is a mistyped command.
+			if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+				return unknownCommand(cmd, args[0])
 			}
 
-			fmt.Println(_banner)
-			fmt.Println(m.DescribeConfig())
+			code = serve(ctx, cmd, args, stdout, stderr)
 
-			<-ctx.Done()
-
-			m.Close()
+			return nil
 		},
 	}
 
-	rootCmd.AddCommand(versionCmd())
+	defaultHelp := root.HelpFunc()
+	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if cmd != root {
+			defaultHelp(cmd, args)
+			return
+		}
 
-	locker.Lock()
-	defer locker.Unlock()
+		printHelp(root, cmd.OutOrStdout())
+	})
 
-	err := rootCmd.Execute()
-	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	registerCompletions(root)
+	root.AddCommand(versionCmd())
+
+	// cobra reads os.Args when the args are nil.
+	if args == nil {
+		args = []string{}
 	}
+
+	root.SetArgs(args)
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+
+	if err := root.ExecuteContext(ctx); err != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n%s\n", err, _helpHint)
+		return 2
+	}
+
+	return code
+}
+
+// serve runs the mock server configured by args until ctx is done.
+func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stderr io.Writer) int {
+	m, err := mockhttp.New(mockhttp.Setup().ConfigSources(mockhttp.DefaultConfigSources(args)...))
+	if errors.Is(err, flag.ErrHelp) {
+		printHelp(cmd, stdout)
+		return 0
+	}
+
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+
+		if _, ok := errors.AsType[*config.Error](err); ok {
+			_, _ = fmt.Fprintln(stderr, _helpHint)
+			return 2
+		}
+
+		return 1
+	}
+
+	// The docker address wins over every source, and its port depends on the final https setting.
+	if _, ok := os.LookupEnv(_dockerHostEnv); ok {
+		_ = (&dockerConfigurer{}).Apply(m.Config())
+	}
+
+	if m.Config().UseHTTPS {
+		err = m.StartTLS()
+	} else {
+		err = m.Start()
+	}
+
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	defer m.Close()
+
+	_, _ = fmt.Fprintln(stdout, _banner)
+	_, _ = fmt.Fprintln(stdout, m.DescribeConfig())
+
+	<-ctx.Done()
+
+	return 0
+}
+
+// printHelp describes the server command: its usage, commands, and every setting with the ways to set it.
+func printHelp(root *cobra.Command, w io.Writer) {
+	var commands strings.Builder
+	for _, cmd := range root.Commands() {
+		if cmd.IsAvailableCommand() {
+			_, _ = fmt.Fprintf(&commands, "  %-11s %s\n", cmd.Name(), cmd.Short)
+		}
+	}
+
+	_, _ = fmt.Fprintf(w, `%s
+
+Usage:
+  %s [flags]
+  %s [command]
+
+Commands:
+%s
+Examples:
+%s
+Settings apply in this order, each overriding the ones before: defaults, the %s.{json,yaml,yml} file
+in %s, %s_* environment variables, then flags. Setting a key of the cors, proxy or record section
+turns the section on.
+
+Settings:
+%s`,
+		root.Long, root.Use, root.Use, commands.String(), root.Example,
+		mockhttp.DefaultConfigFileName, strings.Join(mockhttp.DefaultConfigDirectories, " or "), mockhttp.EnvPrefix,
+		mockhttp.ConfigUsage())
+}
+
+// registerCompletions declares the server flags to cobra, which completes their names.
+// The bool ones take no value, so cobra can tell flag values from commands.
+// cobra leaves flag values to commands that parse their own flags, so the allowed ones are completed here.
+func registerCompletions(cmd *cobra.Command) {
+	flags := cmd.Flags()
+	values := make(map[string][]string)
+
+	for _, f := range mockhttp.ConfigFlags() {
+		if f.Bool {
+			flags.BoolP(f.Name, f.Shorthand, false, f.Usage)
+		} else {
+			flags.StringP(f.Name, f.Shorthand, "", f.Usage)
+		}
+
+		if len(f.Values) > 0 {
+			values[f.Name] = f.Values
+		}
+	}
+
+	cmd.ValidArgsFunction = func(_ *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		return completeFlagValue(values, args, toComplete)
+	}
+}
+
+// completeFlagValue completes the value of a flag with allowed values, as in "--log-level <TAB>" or "--log-level=<TAB>".
+// Other values fall back to the shell's file completion, which suits paths.
+func completeFlagValue(values map[string][]string, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+	var name, prefix string
+
+	switch flagName, value, ok := strings.Cut(toComplete, "="); {
+	case ok && strings.HasPrefix(flagName, "-"):
+		name, prefix, toComplete = strings.TrimLeft(flagName, "-"), flagName+"=", value
+	case strings.HasPrefix(toComplete, "-"):
+		// cobra completes flag names.
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	case len(args) > 0 && strings.HasPrefix(args[len(args)-1], "-"):
+		name = strings.TrimLeft(args[len(args)-1], "-")
+	}
+
+	allowed, ok := values[name]
+	if !ok {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+
+	var completions []cobra.Completion
+	for _, v := range allowed {
+		if strings.HasPrefix(v, toComplete) {
+			completions = append(completions, prefix+v)
+		}
+	}
+
+	return completions, cobra.ShellCompDirectiveNoFileComp
+}
+
+func unknownCommand(cmd *cobra.Command, name string) error {
+	msg := fmt.Sprintf("unknown command %q for %q", name, cmd.CommandPath())
+	if suggestions := cmd.SuggestionsFor(name); len(suggestions) > 0 {
+		msg += "\n\nDid you mean this?\n\t" + strings.Join(suggestions, "\n\t")
+	}
+
+	return errors.New(msg)
 }
 
 func versionCmd() *cobra.Command {

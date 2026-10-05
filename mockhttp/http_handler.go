@@ -14,7 +14,7 @@ import (
 var ErrTemplateDataKeyExists = fmt.Errorf("http: template data key already exists")
 
 type topResponseWriter struct {
-	next Next
+	next vlatte.Next
 	rw   http.ResponseWriter
 }
 
@@ -125,7 +125,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if steps := mock.Steps(); len(steps) > 0 {
-		w = &topResponseWriter{Flow(r.Context(), &Sink{W: w}, steps), w}
+		w = &topResponseWriter{vlatte.Flow(r.Context(), &vlatte.Sink{W: w}, steps), w}
 	}
 
 	res, err := mock.Reply.Reply(r.Context(), ReplyInput{RequestValues: reqValues, Writer: w})

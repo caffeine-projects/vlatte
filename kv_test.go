@@ -1,4 +1,4 @@
-package kv
+package vlatte
 
 import (
 	"strconv"
@@ -10,7 +10,7 @@ import (
 )
 
 func TestKV(t *testing.T) {
-	params := NewMemory()
+	params := NewMemoryKV()
 	key1 := "k1"
 	val1 := "test"
 	key2 := "k2"
@@ -50,8 +50,8 @@ func TestKV(t *testing.T) {
 	require.False(t, h1)
 }
 
-func TestRace(t *testing.T) {
-	params := NewMemory()
+func TestKVRace(t *testing.T) {
+	params := NewMemoryKV()
 	jobs := 10
 	wg := sync.WaitGroup{}
 

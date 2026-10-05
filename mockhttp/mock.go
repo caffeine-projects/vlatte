@@ -122,7 +122,7 @@ type Mock struct {
 
 	CallbackList []vlatte.Callback
 
-	steps []Step
+	steps []vlatte.Step
 }
 
 // NewMock returns a new Mock with default values set.
@@ -134,7 +134,7 @@ func NewMock() *Mock {
 
 		OnCompleteList: make([]vlatte.EventConfig, 0),
 		CallbackList:   make([]vlatte.Callback, 0),
-		steps:          make([]Step, 0),
+		steps:          make([]vlatte.Step, 0),
 		Mappers:        make([]Mapper, 0),
 	}
 }
@@ -206,7 +206,7 @@ func (m *Mock) Callbacks() []vlatte.Callback {
 	return m.CallbackList
 }
 
-func (m *Mock) Steps() []Step {
+func (m *Mock) Steps() []vlatte.Step {
 	return m.steps
 }
 

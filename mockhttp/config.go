@@ -15,7 +15,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/kv"
 )
 
 // Defaults
@@ -33,7 +32,7 @@ type Config struct {
 	TLSConfig             *tls.Config
 	TLSCertificates       []tls.Certificate
 	TLSClientCAs          *x509.CertPool
-	Parameters            kv.KV
+	Parameters            vlatte.KV
 	TemplateFunctions     template.FuncMap
 	Logger                *zerolog.Logger
 	LogVerbosity          vlatte.LogVerbosity
@@ -47,6 +46,11 @@ type Config struct {
 	Template              vlatte.Template
 	TemplateDataProviders []TemplateDataProvider
 	DebugFn               DebugFn
+
+	// ConfigSources lists where settings are read from after code, lowest precedence first.
+	// Nil reads DefaultConfigSources(nil): the config file, then VLATTE_* environment variables.
+	// An empty, non-nil slice reads nothing, so only code and defaults apply.
+	ConfigSources []ConfigSource
 
 	// HTTP-specific fields
 	Addr                           string
@@ -92,6 +96,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Template = c.Template
 	conf.TemplateDataProviders = c.TemplateDataProviders
 	conf.DebugFn = c.DebugFn
+	conf.ConfigSources = c.ConfigSources
 	conf.Addr = c.Addr
 	conf.Listener = c.Listener
 	conf.UseHTTP2 = c.UseHTTP2
@@ -305,7 +310,7 @@ func (cb *ConfigBuilder) RedactHeader(names ...string) *ConfigBuilder {
 }
 
 // Parameters sets a custom reply parameters store.
-func (cb *ConfigBuilder) Parameters(params kv.KV) *ConfigBuilder {
+func (cb *ConfigBuilder) Parameters(params vlatte.KV) *ConfigBuilder {
 	cb.conf.Parameters = params
 	return cb
 }
@@ -431,6 +436,19 @@ func (cb *ConfigBuilder) DebugFn(dfn DebugFn) *ConfigBuilder {
 	return cb
 }
 
+// ConfigSources sets where settings are read from after code, lowest precedence first,
+// replacing DefaultConfigSources. With no arguments, only code and defaults apply.
+// A Setup() or Config applied later resets it, since they copy every field.
+func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
+	if sources == nil {
+		sources = []ConfigSource{}
+	}
+
+	cb.conf.ConfigSources = sources
+
+	return cb
+}
+
 // AdminPath sets the Admin path.
 func (cb *ConfigBuilder) AdminPath(path string) *ConfigBuilder {
 	cb.conf.AdminPath = path
@@ -495,13 +513,10 @@ func applyTLS(c *Config, certFile, keyFile, clientCertFile string) error {
 	}
 
 	if len(clientCertFile) > 0 {
-		cc, err := os.ReadFile(filepath.Clean(clientCertFile))
+		cp, err := loadCertPool(clientCertFile)
 		if err != nil {
 			return err
 		}
-
-		cp := x509.NewCertPool()
-		cp.AppendCertsFromPEM(cc)
 
 		c.TLSClientCAs = cp
 	}
@@ -509,4 +524,20 @@ func applyTLS(c *Config, certFile, keyFile, clientCertFile string) error {
 	c.TLSCertificates = []tls.Certificate{cert}
 
 	return nil
+}
+
+// loadCertPool reads the PEM certificates in file.
+// A file without any is an error: an empty pool would reject every client certificate.
+func loadCertPool(file string) (*x509.CertPool, error) {
+	pem, err := os.ReadFile(filepath.Clean(file))
+	if err != nil {
+		return nil, err
+	}
+
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("%s has no PEM certificates", file)
+	}
+
+	return pool, nil
 }

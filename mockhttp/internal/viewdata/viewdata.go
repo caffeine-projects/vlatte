@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/caffeine-projects/vlatte/kv"
+	"github.com/caffeine-projects/vlatte"
 )
 
 func New(r *Request, provided map[string]any, params *Parameters) *Data {
@@ -33,10 +33,10 @@ func (d *Data) WithExtra(extra any) *Data {
 // Parameters gives templates the app parameters as text: {{ .Parameters.Get "key" }}.
 type Parameters struct {
 	ctx context.Context
-	kv  kv.KV
+	kv  vlatte.KV
 }
 
-func NewParameters(ctx context.Context, kv kv.KV) *Parameters {
+func NewParameters(ctx context.Context, kv vlatte.KV) *Parameters {
 	return &Parameters{ctx: ctx, kv: kv}
 }
 

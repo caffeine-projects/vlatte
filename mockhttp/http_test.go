@@ -16,7 +16,6 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/testmock"
-	"github.com/caffeine-projects/vlatte/kv"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -60,7 +59,7 @@ func TestResponseMapperModifyingResponse(t *testing.T) {
 	const k = "key"
 	const v = "test-ok"
 
-	params := kv.NewMemory()
+	params := vlatte.NewMemoryKV()
 	err := params.Set(t.Context(), k, []byte(v))
 	require.NoError(t, err)
 

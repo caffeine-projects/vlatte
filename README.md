@@ -93,6 +93,46 @@ response:
 
 [`mockhttp/schema/http.schema.json`](mockhttp/schema/http.schema.json) describes the format, so editors can validate mock files.
 
+## Configuration
+
+A server's settings come from these sources, each overriding the ones before it:
+
+1. Defaults.
+2. Code: the options passed to `mockhttp.New`, such as `mockhttp.Setup().Addr(":8080")`.
+3. A `.vlatterc.json`, `.vlatterc.yaml` or `.vlatterc.yml` file in the working directory or in `testdata`. `--config` or `VLATTE_CONFIG` names another file.
+4. `VLATTE_*` environment variables.
+5. Command-line flags, for the `vlatte` command.
+
+Each setting has a key that its variable and flag derive from: `log.level` is `log: {level: debug}` in a file, `VLATTE_LOG_LEVEL=debug` and `--log-level=debug`. `vlatte --help` lists every setting.
+
+```yaml
+# .vlatterc.yaml
+addr: ":8080"
+log:
+  level: debug
+proxy:
+  timeout: 1.5s # or milliseconds: 1500
+cors: true
+```
+
+Setting a key of a section (`cors`, `proxy` or `record`) turns the section on, and `false` turns it off.
+
+Unknown keys, flags and `VLATTE_*` variables are errors, except `VLATTE_DOCKER_HOST`. A server that can't load its settings reports every problem at once:
+
+```
+server: error loading configuration sources
+config: 2 problems
+  env VLATTE_LOGLEVEL: unknown_key: VLATTE_LOGLEVEL is not a known setting; did you mean VLATTE_LOG_LEVEL?
+  file .vlatterc.yaml: invalid_value: proxy.timeout="10x" is not a duration; use milliseconds (1500) or a Go duration (1.5s)
+```
+
+Servers in tests read the file and the environment too. Pick the sources with `ConfigSources`, or pass none to use code only:
+
+```go
+m := mockhttp.MustNew(mockhttp.Setup().ConfigSources())
+m = mockhttp.MustNew(mockhttp.Setup().ConfigSources(mockhttp.ConfigFile("testdata/server.yaml")))
+```
+
 ## CLI
 
 `vlatte` serves the mock files under `testdata/_mocks` in the working directory:
@@ -102,7 +142,7 @@ vlatte --addr=127.0.0.1:8080
 curl http://127.0.0.1:8080/hello
 ```
 
-Without `--addr`, it listens on a random port and prints the URL. Options can also come from `VLATTE_`-prefixed environment variables, such as `VLATTE_ADDR`, or from a `.vlatterc.yaml` file in the working directory or in `testdata`. Run `vlatte --help` to list them.
+Without `--addr`, it listens on a random port and prints the URL. Settings can also come from a `.vlatterc` file or `VLATTE_*` environment variables; see [Configuration](#configuration). Run `vlatte --help` to list them, and `vlatte completion --help` to set up shell completion.
 
 While it runs, `POST /__admin/mocks` adds a mock sent in the request body, for example as JSON:
 

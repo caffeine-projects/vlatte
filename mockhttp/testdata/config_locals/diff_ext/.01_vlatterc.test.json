@@ -19,8 +19,5 @@
     "response_headers": [ "header3", "header4" ],
     "save_dir": "nowhere",
     "save_body_to_file": true
-  },
-  "forward": {
-    "target": "https://www.example.org"
   }
 }
