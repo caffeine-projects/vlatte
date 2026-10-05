@@ -11,4 +11,8 @@
 //
 // Use [github.com/caffeine-projects/vlatte/match] to match headers, query parameters or bodies.
 // Mocks can also come from YAML or JSON files; see [FromFile] and [ConfigBuilder.MockFilePatterns].
+//
+// Settings come from code, then from a .vlatterc.json, .vlatterc.yaml or .vlatterc.yml file and VLATTE_*
+// environment variables, each overriding the one before. [ConfigBuilder.ConfigSources] picks the sources,
+// and [ConfigUsage] lists every setting.
 package mockhttp

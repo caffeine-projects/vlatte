@@ -71,7 +71,7 @@ func TestTLS_FileSetup(t *testing.T) {
 	client := &http.Client{
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 	}
-	m := mockhttp.MustNew(mockhttp.UseConfig("testdata/tls/tls_app.yaml"))
+	m := mockhttp.MustNew(mockhttp.Setup().ConfigSources(mockhttp.ConfigFile("testdata/tls/tls_app.yaml")))
 	t.Cleanup(func() { m.Close() })
 	m.MustStartTLS()
 
@@ -92,6 +92,11 @@ func TestTLS_FileSetup(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, "hello+world", string(b))
 	require.True(t, scoped.Called())
+
+	// Without the file's certificate, httptest serves its own: the client skips verification, so check which one it got.
+	want, err := tls.LoadX509KeyPair("testdata/tls/srv.crt", "testdata/tls/srv.key")
+	require.NoError(t, err)
+	require.Equal(t, want.Certificate[0], res.TLS.PeerCertificates[0].Raw)
 }
 
 func TestTLSMutual(t *testing.T) {
@@ -220,12 +225,12 @@ func TestTLSMutualWithProxy_FileSetup(t *testing.T) {
 	}
 
 	// Both servers share one identity, as in TestTLSMutualWithProxy.
-	target := mockhttp.MustNew(mockhttp.UseConfig("testdata/tls/tls_ca_target.yaml"))
+	target := mockhttp.MustNew(mockhttp.Setup().ConfigSources(mockhttp.ConfigFile("testdata/tls/tls_ca_target.yaml")))
 	t.Cleanup(func() { target.Close() })
 	target.MustStartTLS()
 	target.MustMock(mockhttp.Getf("/test").Reply(mockhttp.Accepted().PlainText("accepted")))
 
-	m := mockhttp.MustNew(mockhttp.UseConfig("testdata/tls/tls_ca.yaml"))
+	m := mockhttp.MustNew(mockhttp.Setup().ConfigSources(mockhttp.ConfigFile("testdata/tls/tls_ca.yaml")))
 	t.Cleanup(func() { m.Close() })
 	m.MustStartTLS()
 	m.MustMock(mockhttp.Get(match.URLPath("/test")).

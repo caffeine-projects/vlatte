@@ -47,6 +47,11 @@ type Config struct {
 	TemplateDataProviders []TemplateDataProvider
 	DebugFn               DebugFn
 
+	// ConfigSources lists where settings are read from after code, lowest precedence first.
+	// Nil reads DefaultConfigSources(nil): the config file, then VLATTE_* environment variables.
+	// An empty, non-nil slice reads nothing, so only code and defaults apply.
+	ConfigSources []ConfigSource
+
 	// HTTP-specific fields
 	Addr                           string
 	Listener                       net.Listener
@@ -91,6 +96,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Template = c.Template
 	conf.TemplateDataProviders = c.TemplateDataProviders
 	conf.DebugFn = c.DebugFn
+	conf.ConfigSources = c.ConfigSources
 	conf.Addr = c.Addr
 	conf.Listener = c.Listener
 	conf.UseHTTP2 = c.UseHTTP2
@@ -427,6 +433,19 @@ func (cb *ConfigBuilder) TLSClientCAs(pool *x509.CertPool) *ConfigBuilder {
 // DebugFn sets the debug function.
 func (cb *ConfigBuilder) DebugFn(dfn DebugFn) *ConfigBuilder {
 	cb.conf.DebugFn = dfn
+	return cb
+}
+
+// ConfigSources sets where settings are read from after code, lowest precedence first,
+// replacing DefaultConfigSources. With no arguments, only code and defaults apply.
+// A Setup() or Config applied later resets it, since they copy every field.
+func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
+	if sources == nil {
+		sources = []ConfigSource{}
+	}
+
+	cb.conf.ConfigSources = sources
+
 	return cb
 }
 

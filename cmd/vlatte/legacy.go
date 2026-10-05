@@ -37,9 +37,18 @@ func legacyWarnings(environ []string, dirs []string, exists func(path string) bo
 	for _, dir := range dirs {
 		for _, ext := range _legacyConfigExts {
 			legacy := filepath.Join(dir, _legacyConfigFileName+"."+ext)
-			if exists(legacy) {
+			if !exists(legacy) {
+				continue
+			}
+
+			switch ext {
+			case "json", "yaml", "yml":
 				renamed := filepath.Join(dir, mockhttp.DefaultConfigFileName+"."+ext)
 				warnings = append(warnings, fmt.Sprintf("config file %s is no longer read: rename it to %s", legacy, renamed))
+			default:
+				// Config files are JSON or YAML only.
+				converted := filepath.Join(dir, mockhttp.DefaultConfigFileName+".yaml")
+				warnings = append(warnings, fmt.Sprintf("config file %s is no longer read: convert it to %s", legacy, converted))
 			}
 		}
 	}

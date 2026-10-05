@@ -1,0 +1,303 @@
+// Package config loads settings from files, environment variables and command-line arguments
+// into a configuration struct, following a schema that names, types and documents every setting.
+//
+// Problems are collected, not returned one at a time: Load reports every invalid setting it finds,
+// each with where it came from and how to fix it.
+package config
+
+import (
+	"fmt"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+)
+
+// Kind is the type of a setting's value.
+type Kind uint8
+
+// Kinds of setting values.
+const (
+	// String accepts any scalar. Numbers and bools written in files are formatted.
+	String Kind = iota
+	// Bool accepts true or false, or strconv.ParseBool syntax in text.
+	Bool
+	// Int accepts an integer. With Choices, it also accepts the name of a choice.
+	Int
+	// Duration accepts integer milliseconds or a Go duration, such as 1.5s.
+	Duration
+	// List accepts a list in files, or a comma-separated string.
+	List
+)
+
+func (k Kind) String() string {
+	switch k {
+	case String:
+		return "string"
+	case Bool:
+		return "bool"
+	case Int:
+		return "int"
+	case Duration:
+		return "duration"
+	case List:
+		return "list"
+	default:
+		return fmt.Sprintf("Kind(%d)", uint8(k))
+	}
+}
+
+// Choice names an allowed value of an Int setting.
+type Choice struct {
+	Name  string
+	Value int64
+}
+
+// Field declares a setting of a T.
+type Field[T any] struct {
+	// Key is the dotted, snake_case path of the setting, such as "log.level".
+	// It is the nested key in files. Env and flag names derive from it.
+	Key string
+	// Short is an optional one-letter flag alias.
+	Short string
+	// Usage describes the setting in help text.
+	Usage string
+	// Default is the default value as help text shows it. It is not applied.
+	Default string
+	// Kind is the type of the value.
+	Kind Kind
+	// Choices lists the allowed values of an Int setting. Inputs may use their names.
+	Choices []Choice
+	// Set validates the value and applies it to dst. Its error becomes a problem of the value.
+	// A nil Set leaves the value to the caller, which reads it from Load's result.
+	Set func(dst *T, v Value) error
+}
+
+// Value is a setting's value, converted to its Kind.
+type Value struct {
+	Key    string // the setting's key
+	Origin string // where the value came from, such as "env VLATTE_ADDR" or "flag --addr"
+	Raw    string // the value as written
+
+	Str  string
+	Bool bool
+	Int  int64
+	Dur  time.Duration
+	List []string
+}
+
+// Flag describes the command-line flag of a setting.
+type Flag struct {
+	Name      string   // long name without dashes, such as "log-level"
+	Shorthand string   // one-letter alias, or ""
+	Usage     string   // the setting's usage
+	Bool      bool     // the flag takes no value
+	Values    []string // names of the allowed values
+}
+
+type field struct {
+	key, short, usage, def string
+	kind                   Kind
+	choices                []Choice
+	flag                   string // derived flag name, such as "log-level"
+	env                    string // derived environment variable name without prefix, such as "LOG_LEVEL"
+	section                bool   // a Bool key that other keys nest under, such as "cors"
+}
+
+// catalog is the view of a schema that sources use. It doesn't depend on the target type.
+type catalog struct {
+	fields []*field
+	byKey  map[string]*field
+	byFlag map[string]*field // long names and shorthands
+	groups map[string]bool   // prefixes with no key of their own, such as "log"
+}
+
+// Schema holds the settings of a T, in the order they were declared.
+type Schema[T any] struct {
+	catalog
+
+	sets map[string]func(*T, Value) error
+}
+
+var (
+	_keySegment = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	_flagName   = strings.NewReplacer(".", "-", "_", "-")
+)
+
+// NewSchema builds a schema from fields.
+// It panics when a key, flag or environment variable name is invalid or used twice, since fields are declared in code.
+func NewSchema[T any](fields ...Field[T]) *Schema[T] {
+	s := &Schema[T]{sets: make(map[string]func(*T, Value) error, len(fields))}
+	s.byKey = make(map[string]*field, len(fields))
+	s.byFlag = make(map[string]*field, len(fields))
+	s.groups = make(map[string]bool)
+	envs := make(map[string]string, len(fields))
+
+	for _, decl := range fields {
+		for segment := range strings.SplitSeq(decl.Key, ".") {
+			if !_keySegment.MatchString(segment) {
+				panic(fmt.Sprintf("config: invalid key %q: use dotted snake_case, such as log.level", decl.Key))
+			}
+		}
+
+		if _, ok := s.byKey[decl.Key]; ok {
+			panic(fmt.Sprintf("config: key %q is declared twice", decl.Key))
+		}
+
+		if len(decl.Choices) > 0 && decl.Kind != Int {
+			panic(fmt.Sprintf("config: key %q has choices, but only Int settings can", decl.Key))
+		}
+
+		if len(decl.Short) > 1 {
+			panic(fmt.Sprintf("config: short flag %q of key %q must be one letter", decl.Short, decl.Key))
+		}
+
+		f := &field{
+			key:     decl.Key,
+			short:   decl.Short,
+			usage:   decl.Usage,
+			def:     decl.Default,
+			kind:    decl.Kind,
+			choices: decl.Choices,
+			flag:    _flagName.Replace(decl.Key),
+			env:     strings.ToUpper(strings.ReplaceAll(decl.Key, ".", "_")),
+		}
+
+		for _, name := range []string{f.flag, f.short} {
+			if name == "" {
+				continue
+			}
+
+			if name == "h" || name == "help" {
+				panic(fmt.Sprintf("config: key %q can't use flag %q: it asks for help", decl.Key, name))
+			}
+
+			if other, ok := s.byFlag[name]; ok {
+				panic(fmt.Sprintf("config: keys %q and %q both use flag %q", other.key, decl.Key, name))
+			}
+
+			s.byFlag[name] = f
+		}
+
+		if other, ok := envs[f.env]; ok {
+			panic(fmt.Sprintf("config: keys %q and %q both use environment variable suffix %q", other, decl.Key, f.env))
+		}
+
+		envs[f.env] = decl.Key
+
+		s.fields = append(s.fields, f)
+		s.byKey[decl.Key] = f
+
+		if decl.Set != nil {
+			s.sets[decl.Key] = decl.Set
+		}
+	}
+
+	// Every prefix of a key is either a section (a Bool key) or a group (no key of its own).
+	for _, f := range s.fields {
+		parts := strings.Split(f.key, ".")
+		for i := 1; i < len(parts); i++ {
+			prefix := strings.Join(parts[:i], ".")
+			parent, ok := s.byKey[prefix]
+
+			switch {
+			case !ok:
+				s.groups[prefix] = true
+			case parent.kind == Bool:
+				parent.section = true
+			default:
+				panic(fmt.Sprintf("config: key %q nests under %q, which is not a bool", f.key, prefix))
+			}
+		}
+	}
+
+	return s
+}
+
+// Flags lists the command-line flags of the settings, in declaration order.
+func (c *catalog) Flags() []Flag {
+	flags := make([]Flag, 0, len(c.fields))
+	for _, f := range c.fields {
+		flag := Flag{Name: f.flag, Shorthand: f.short, Usage: f.usage, Bool: f.kind == Bool}
+		for _, choice := range f.choices {
+			flag.Values = append(flag.Values, choice.Name)
+		}
+
+		flags = append(flags, flag)
+	}
+
+	return flags
+}
+
+// Usage describes every setting: its flag, environment variable, file key, allowed values and default.
+func (c *catalog) Usage(envPrefix string) string {
+	var b strings.Builder
+
+	for _, f := range c.fields {
+		b.WriteString("  ")
+		if f.short != "" {
+			fmt.Fprintf(&b, "-%s, ", f.short)
+		}
+
+		fmt.Fprintf(&b, "--%s", f.flag)
+
+		switch {
+		case f.kind == Bool:
+		case len(f.choices) > 0:
+			b.WriteString(" name")
+		default:
+			fmt.Fprintf(&b, " %s", f.kind)
+		}
+
+		fmt.Fprintf(&b, "\n        %s", f.usage)
+		if len(f.choices) > 0 {
+			fmt.Fprintf(&b, " One of: %s.", choiceList(f.choices))
+		}
+
+		if f.def != "" {
+			fmt.Fprintf(&b, " Default: %s.", f.def)
+		}
+
+		fmt.Fprintf(&b, "\n        env %s_%s, file key %s\n", envPrefix, f.env, f.key)
+	}
+
+	return b.String()
+}
+
+// keys lists every key and group, for suggestions.
+func (c *catalog) keys() []string {
+	keys := make([]string, 0, len(c.fields)+len(c.groups))
+	for _, f := range c.fields {
+		keys = append(keys, f.key)
+	}
+
+	for group := range c.groups {
+		keys = append(keys, group)
+	}
+
+	slices.Sort(keys)
+
+	return keys
+}
+
+// children lists the names of the keys right under prefix.
+func (c *catalog) children(prefix string) []string {
+	var names []string
+	for _, f := range c.fields {
+		name, ok := strings.CutPrefix(f.key, prefix+".")
+		if ok && !strings.Contains(name, ".") {
+			names = append(names, name)
+		}
+	}
+
+	return names
+}
+
+func choiceList(choices []Choice) string {
+	names := make([]string, 0, len(choices))
+	for _, choice := range choices {
+		names = append(names, fmt.Sprintf("%s (%d)", choice.Name, choice.Value))
+	}
+
+	return strings.Join(names, ", ")
+}

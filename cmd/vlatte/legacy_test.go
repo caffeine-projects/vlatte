@@ -21,6 +21,17 @@ func TestLegacyWarnings(t *testing.T) {
 	}, warnings)
 }
 
+func TestLegacyWarnings_FormatsNoLongerRead(t *testing.T) {
+	// Config files are JSON or YAML now: renaming a TOML file would not be enough.
+	exists := func(path string) bool { return path == filepath.Join(".", ".moairc.toml") }
+
+	warnings := legacyWarnings(nil, []string{"."}, exists)
+
+	require.Equal(t, []string{
+		"config file .moairc.toml is no longer read: convert it to .vlatterc.yaml",
+	}, warnings)
+}
+
 func TestLegacyWarnings_NoLegacySettings(t *testing.T) {
 	warnings := legacyWarnings([]string{"VLATTE_ADDR=:4000"}, []string{"."}, func(string) bool { return false })
 

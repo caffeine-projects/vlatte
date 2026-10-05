@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -47,8 +48,8 @@ type httptestBackend struct {
 	app      *Server
 	handler  http.Handler
 	server   *httptest.Server
-	info     *BackendInfo
-	listener net.Listener // the configured Listener, until a start serves it
+	info     atomic.Pointer[BackendInfo] // read by requests while a start may replace it
+	listener net.Listener                // the configured Listener, until a start serves it
 	rwMutex  sync.RWMutex
 }
 
@@ -62,9 +63,10 @@ func (f *httptestBackendFactory) NewBackend(config BackendConfig) (Backend, erro
 	s := &httptestBackend{
 		app:      config.App,
 		handler:  config.Handler,
-		info:     &BackendInfo{},
 		listener: config.App.config.Listener,
 	}
+	s.info.Store(&BackendInfo{})
+
 	return s, nil
 }
 
@@ -138,7 +140,7 @@ func (s *httptestBackend) Start() error {
 	}
 
 	s.server.Start()
-	s.info.URL = s.server.URL
+	s.info.Store(&BackendInfo{URL: s.server.URL})
 
 	return nil
 }
@@ -153,7 +155,7 @@ func (s *httptestBackend) StartTLS() error {
 
 	s.server.EnableHTTP2 = true
 	s.server.StartTLS()
-	s.info.URL = s.server.URL
+	s.info.Store(&BackendInfo{URL: s.server.URL})
 
 	return nil
 }
@@ -169,11 +171,11 @@ func (s *httptestBackend) Close() error {
 	s.server.CloseClientConnections()
 	s.server.Close()
 	s.server = nil
-	s.info.URL = ""
+	s.info.Store(&BackendInfo{})
 
 	return nil
 }
 
 func (s *httptestBackend) Info() *BackendInfo {
-	return s.info
+	return s.info.Load()
 }

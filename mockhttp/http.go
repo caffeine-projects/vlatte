@@ -79,6 +79,10 @@ func New(config ...Option) (*Server, error) {
 		}
 	}
 
+	if err := loadConfigSources(conf); err != nil {
+		return nil, fmt.Errorf("server: error loading configuration sources\n%w", err)
+	}
+
 	if conf.DebugFn == nil {
 		conf.DebugFn = func(_ string, _ any) {}
 	}
