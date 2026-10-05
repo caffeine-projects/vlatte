@@ -128,7 +128,7 @@ func TestNewSchema_DerivesNamesFromKeys(t *testing.T) {
 	require.Same(t, s.byKey["name"], s.byFlag["n"], "shorthands resolve to their key")
 	require.True(t, s.byKey["feature"].section, "a bool key with nested keys is a section")
 	require.False(t, s.byKey["debug"].section)
-	require.True(t, s.groups["log"], "a prefix without a key of its own is a group")
+	require.Contains(t, s.groups, "log", "a prefix without a key of its own is a group")
 }
 
 func TestNewSchema_PanicsOnBadDeclarations(t *testing.T) {

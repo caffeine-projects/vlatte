@@ -108,8 +108,8 @@ type field struct {
 type catalog struct {
 	fields []*field
 	byKey  map[string]*field
-	byFlag map[string]*field // long names and shorthands
-	groups map[string]bool   // prefixes with no key of their own, such as "log"
+	byFlag map[string]*field   // long names and shorthands
+	groups map[string]struct{} // prefixes with no key of their own, such as "log"
 }
 
 // Schema holds the settings of a T, in the order they were declared.
@@ -130,7 +130,7 @@ func NewSchema[T any](fields ...Field[T]) *Schema[T] {
 	s := &Schema[T]{sets: make(map[string]func(*T, Value) error, len(fields))}
 	s.byKey = make(map[string]*field, len(fields))
 	s.byFlag = make(map[string]*field, len(fields))
-	s.groups = make(map[string]bool)
+	s.groups = make(map[string]struct{})
 
 	for _, decl := range fields {
 		for segment := range strings.SplitSeq(decl.Key, ".") {
@@ -197,7 +197,7 @@ func NewSchema[T any](fields ...Field[T]) *Schema[T] {
 
 			switch {
 			case !ok:
-				s.groups[prefix] = true
+				s.groups[prefix] = struct{}{}
 			case parent.kind == Bool:
 				parent.section = true
 			default:

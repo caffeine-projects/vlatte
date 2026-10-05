@@ -21,12 +21,12 @@ func Env(prefix string, reserved ...string) Source {
 }
 
 func (s *envSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
-	known := make(map[string]bool, len(c.fields))
+	known := make(map[string]struct{}, len(c.fields))
 
 	var entries []entry
 	for _, f := range c.fields {
 		name := s.prefix + "_" + f.env
-		known[name] = true
+		known[name] = struct{}{}
 
 		if raw := os.Getenv(name); raw != "" {
 			entries = append(entries, entry{key: f.key, raw: raw, origin: "env " + name})
@@ -38,7 +38,7 @@ func (s *envSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 	var problems []Problem
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
-		if !strings.HasPrefix(name, s.prefix+"_") || known[name] || slices.Contains(s.reserved, name) {
+		if _, found := known[name]; found || !strings.HasPrefix(name, s.prefix+"_") || slices.Contains(s.reserved, name) {
 			continue
 		}
 

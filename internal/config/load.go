@@ -86,7 +86,7 @@ func (s *Schema[T]) apply(dst *T, entries []entry, values map[string]Value) []Pr
 	}
 
 	// Turning a section off while setting one of its keys in the same source is contradictory.
-	conflicts := make(map[string]bool)
+	conflicts := make(map[string]struct{})
 	for _, toggle := range converted {
 		if !s.byKey[toggle.Key].section || toggle.Bool {
 			continue
@@ -102,7 +102,7 @@ func (s *Schema[T]) apply(dst *T, entries []entry, values map[string]Value) []Pr
 					Message: fmt.Sprintf("%s is false, but %s sets %s in the same source", toggle.Key, v.Origin, v.Key),
 					Hint:    "remove one of them",
 				})
-				conflicts[toggle.Key] = true
+				conflicts[toggle.Key] = struct{}{}
 
 				break
 			}
@@ -135,7 +135,7 @@ func (s *Schema[T]) apply(dst *T, entries []entry, values map[string]Value) []Pr
 }
 
 // inConflict reports whether key is a conflicting section or one of its keys.
-func inConflict(key string, conflicts map[string]bool) bool {
+func inConflict(key string, conflicts map[string]struct{}) bool {
 	for section := range conflicts {
 		if key == section || strings.HasPrefix(key, section+".") {
 			return true

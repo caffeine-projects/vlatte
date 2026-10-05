@@ -165,6 +165,7 @@ func (w *walker) walk(settings map[string]any, prefix string) {
 		}
 
 		f := w.byKey[key]
+		_, group := w.groups[key]
 
 		switch {
 		case strings.Contains(name, "."):
@@ -183,7 +184,7 @@ func (w *walker) walk(settings map[string]any, prefix string) {
 			w.entries = append(w.entries, entry{key: key, raw: raw, origin: w.origin})
 		case f != nil:
 			w.entries = append(w.entries, entry{key: key, raw: raw, origin: w.origin})
-		case w.groups[key]:
+		case group:
 			obj, ok := raw.(map[string]any)
 			if !ok {
 				w.problem(CodeInvalidValue, key, fmt.Sprintf("%s must be an object, not %s", key, describe(raw)),
