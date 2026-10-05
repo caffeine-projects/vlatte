@@ -30,7 +30,9 @@ func TestSuggest(t *testing.T) {
 func TestDisplay_HidesURLPasswords(t *testing.T) {
 	// Values reach messages because they are invalid: a password must stay hidden even in a URL that doesn't parse.
 	tests := []struct {
-		name, value, want string
+		name  string
+		value string
+		want  string
 	}{
 		{"valid URL", "http://user:secret@proxy:3128", "http://user:xxxxx@proxy:3128"},
 		{"user without a password", "http://user@proxy:3128", "http://user@proxy:3128"},

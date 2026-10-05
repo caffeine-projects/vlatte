@@ -96,12 +96,15 @@ type Flag struct {
 }
 
 type field struct {
-	key, short, usage, def string
-	kind                   Kind
-	choices                []Choice
-	flag                   string // derived flag name, such as "log-level"
-	env                    string // derived environment variable name without prefix, such as "LOG_LEVEL"
-	section                bool   // a Bool key that other keys nest under, such as "cors"
+	key     string
+	short   string
+	usage   string
+	def     string
+	kind    Kind
+	choices []Choice
+	flag    string // derived flag name, such as "log-level"
+	env     string // derived environment variable name without prefix, such as "LOG_LEVEL"
+	section bool   // a Bool key that other keys nest under, such as "cors"
 }
 
 // catalog is the view of a schema that sources use. It doesn't depend on the target type.

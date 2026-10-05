@@ -110,7 +110,9 @@ func TestNewSchema_DerivesNamesFromKeys(t *testing.T) {
 	s := testSchema()
 
 	tests := []struct {
-		key, flag, env string
+		key  string
+		flag string
+		env  string
 	}{
 		{"name", "name", "NAME"},
 		{"log.level", "log-level", "LOG_LEVEL"},
