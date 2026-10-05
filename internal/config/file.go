@@ -233,14 +233,9 @@ func position(data []byte, offset int64) (line, col int) {
 
 // relativeHint says where relative paths start, since files are looked up from the working directory.
 func relativeHint(path string) string {
-	if filepath.IsAbs(path) {
-		return ""
+	if wd, err := os.Getwd(); err == nil && !filepath.IsAbs(path) {
+		return "relative paths start at " + wd
 	}
 
-	wd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-
-	return "relative paths start at " + wd
+	return ""
 }

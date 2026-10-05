@@ -203,9 +203,6 @@ func registerCompletions(cmd *cobra.Command) {
 
 		if len(f.Values) > 0 {
 			values[f.Name] = f.Values
-			if f.Shorthand != "" {
-				values[f.Shorthand] = f.Values
-			}
 		}
 	}
 

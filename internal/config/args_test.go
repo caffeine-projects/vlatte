@@ -97,6 +97,11 @@ func TestArgs_Problems(t *testing.T) {
 				Message: `unexpected argument "http://user:xxxxx@proxy": only flags are accepted`,
 			}},
 		},
+		{
+			name: "bad flag syntax",
+			args: []string{"---name", "api"},
+			want: []Problem{{Code: CodeParseError, Origin: "args", Message: "bad flag syntax: ---name"}},
+		},
 	}
 
 	for _, tc := range tests {

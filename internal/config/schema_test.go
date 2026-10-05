@@ -143,7 +143,7 @@ func TestNewSchema_PanicsOnBadDeclarations(t *testing.T) {
 		{"uppercase key", []Field[testConfig]{{Key: "Name"}}, `invalid key "Name"`},
 		{"empty segment", []Field[testConfig]{{Key: "log..level"}}, `invalid key "log..level"`},
 		{"duplicate key", []Field[testConfig]{{Key: "a"}, {Key: "a"}}, `key "a" is declared twice`},
-		{"flag collision", []Field[testConfig]{{Key: "a.b_c"}, {Key: "a_b.c"}}, `both use flag "a-b-c"`},
+		{"flag and env collision", []Field[testConfig]{{Key: "a.b_c"}, {Key: "a_b.c"}}, `both use flag "a-b-c"`},
 		{"short collision", []Field[testConfig]{{Key: "a", Short: "x"}, {Key: "b", Short: "x"}}, `both use flag "x"`},
 		{"help flag", []Field[testConfig]{{Key: "help"}}, `can't use flag "help"`},
 		{"help shorthand", []Field[testConfig]{{Key: "hosts", Short: "h"}}, `can't use flag "h"`},
@@ -162,6 +162,15 @@ func TestNewSchema_PanicsOnBadDeclarations(t *testing.T) {
 
 			NewSchema(tc.fields...)
 		})
+	}
+}
+
+func TestKind_String(t *testing.T) {
+	// Help shows the kind of each value, as in "--name string".
+	kinds := map[Kind]string{String: "string", Bool: "bool", Int: "int", Duration: "duration", List: "list", Kind(9): "Kind(9)"}
+
+	for kind, want := range kinds {
+		require.Equal(t, want, kind.String())
 	}
 }
 

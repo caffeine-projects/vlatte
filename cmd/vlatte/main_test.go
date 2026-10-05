@@ -162,6 +162,18 @@ func TestRun_Help(t *testing.T) {
 	}
 }
 
+func TestRun_SubcommandHelp(t *testing.T) {
+	// The settings list belongs to the server command: subcommands keep cobra's help.
+	for _, args := range [][]string{{"help", "version"}, {"version", "--help"}} {
+		var out bytes.Buffer
+		require.Equal(t, 0, run(context.Background(), args, &out, io.Discard), args)
+
+		help := out.String()
+		require.Contains(t, help, "vlatte version [flags]", args)
+		require.NotContains(t, help, "--log-level", args)
+	}
+}
+
 func TestRun_Version(t *testing.T) {
 	var out bytes.Buffer
 
@@ -198,6 +210,11 @@ func TestRun_Completion(t *testing.T) {
 	require.True(t, complete("--log-level", "")["info"], "log levels complete by name")
 	require.True(t, complete("--log-level=in")["--log-level=info"])
 	require.Equal(t, map[string]bool{"debug": true}, complete("--log-level", "de"), "only matching values")
+
+	// Flags without allowed values, such as --config, leave their values to the shell's file completion.
+	var paths bytes.Buffer
+	require.Equal(t, 0, run(context.Background(), []string{"__complete", "--config", ""}, &paths, io.Discard))
+	require.Equal(t, ":0\n", paths.String(), "no completions, and directive 0: ShellCompDirectiveDefault")
 
 	var script bytes.Buffer
 	require.Equal(t, 0, run(context.Background(), []string{"completion", "zsh"}, &script, io.Discard))

@@ -241,6 +241,8 @@ func describe(raw any) string {
 		return "a list"
 	case map[string]any:
 		return "an object"
+	case map[any]any:
+		return "an object with non-string keys"
 	default:
 		return fmt.Sprintf("a %T", raw)
 	}

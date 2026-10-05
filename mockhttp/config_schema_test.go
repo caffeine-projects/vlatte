@@ -427,6 +427,75 @@ func TestConfigSources_TLSFiles(t *testing.T) {
 	}
 }
 
+func TestConfigSources_ValueChecks(t *testing.T) {
+	// Sources accept every value the server can use, and reject the rest with what they expect.
+	viaFile := writeConfigFile(t, t.TempDir(), "via.yaml", "proxy:\n  via: http://proxy:3128\n")
+
+	tests := []struct {
+		name    string
+		setup   *ConfigBuilder
+		sources []ConfigSource
+		check   func(t *testing.T, c *Config)
+		problem string // message of the only problem
+	}{
+		{
+			name:    "a bare port, which the server listens on as :port",
+			sources: []ConfigSource{ConfigArgs([]string{"--addr", "8080"})},
+			check:   func(t *testing.T, c *Config) { require.Equal(t, "8080", c.Addr) },
+		},
+		{
+			name:    "an empty address, which picks a random port, over code",
+			setup:   Setup().Addr(":8080"),
+			sources: []ConfigSource{ConfigArgs([]string{"--addr="})},
+			check:   func(t *testing.T, c *Config) { require.Empty(t, c.Addr) },
+		},
+		{
+			name:    "an address without a port",
+			sources: []ConfigSource{ConfigArgs([]string{"--addr", "localhost"})},
+			problem: `addr="localhost": expected host:port, :port or a port number`,
+		},
+		{
+			name:    "a negative body size",
+			sources: []ConfigSource{ConfigArgs([]string{"--log-max-body-size=-1"})},
+			problem: `log.max_body_size="-1": expected 0 or more`,
+		},
+		{
+			name:    "a max age below -1",
+			sources: []ConfigSource{ConfigArgs([]string{"--cors-max-age=-2"})},
+			problem: `cors.max_age="-2": expected -1 or more`,
+		},
+		{
+			name:    "an empty proxy via, which clears one from a lower source",
+			sources: []ConfigSource{ConfigFile(viaFile), ConfigArgs([]string{"--proxy-via="})},
+			check: func(t *testing.T, c *Config) {
+				require.NotNil(t, c.Proxy)
+				require.Empty(t, c.Proxy.Via)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			setup := tc.setup
+			if setup == nil {
+				setup = Setup()
+			}
+
+			c, err := loadConfig(t, setup, tc.sources...)
+			if tc.problem != "" {
+				problems := configProblems(t, err)
+				require.Len(t, problems, 1)
+				require.Equal(t, tc.problem, problems[0].Message)
+
+				return
+			}
+
+			require.NoError(t, err)
+			tc.check(t, c)
+		})
+	}
+}
+
 func TestConfigSources_ErrorListsEveryProblemWithItsOrigin(t *testing.T) {
 	// One run must show every problem of every source, each with where it came from and how to fix it.
 	path := writeConfigFile(t, t.TempDir(), "settings.json", `{"cors": {"allowed_origins": "*"}, "log": {"level": "verbose"}}`)
@@ -457,4 +526,5 @@ func TestConfigUsage_ListsEverySetting(t *testing.T) {
 
 	require.Contains(t, usage, "file key log.max_body_size")
 	require.Contains(t, usage, "Default: info.")
+	require.Equal(t, "42", choiceName(_logLevels, 42), "a default without a name shows its number")
 }

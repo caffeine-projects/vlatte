@@ -137,6 +137,24 @@ func TestFile_Problems(t *testing.T) {
 			doc:  `[1, 2]`,
 			want: []Problem{{Code: CodeParseError, Message: "a config file holds an object of settings, not a list"}},
 		},
+		{
+			name: "group set to a bool",
+			file: "f.yaml",
+			doc:  "log: true\n",
+			want: []Problem{{Code: CodeInvalidValue, Key: "log", Message: "log must be an object, not a bool", Hint: "its keys are level, timeout"}},
+		},
+		{
+			name: "text at the top",
+			file: "g.yaml",
+			doc:  "name\n",
+			want: []Problem{{Code: CodeParseError, Message: "a config file holds an object of settings, not a string"}},
+		},
+		{
+			name: "keys that aren't text",
+			file: "h.yaml",
+			doc:  "1: a\n",
+			want: []Problem{{Code: CodeParseError, Message: "a config file holds an object of settings, not an object with non-string keys"}},
+		},
 	}
 
 	for _, tc := range tests {
@@ -199,6 +217,31 @@ func TestFile_ExplicitPath(t *testing.T) {
 			Message: `config file "` + path + `" is not JSON or YAML`,
 			Hint:    "use a .json, .yaml or .yml file",
 		}}, requireProblems(t, err))
+	})
+}
+
+func TestFile_ReadErrors(t *testing.T) {
+	// A path that exists but can't be read is reported, never skipped: skipping would drop the user's settings.
+	dir := t.TempDir()
+
+	t.Run("a lookup dir that is a file", func(t *testing.T) {
+		notDir := writeFile(t, dir, "not-a-dir", "")
+		_, _, err := loadFile(t, File("config", ".app", notDir))
+
+		p := requireProblems(t, err)[0]
+		require.Equal(t, CodeReadError, p.Code)
+		require.Equal(t, "file "+notDir, p.Origin)
+	})
+
+	t.Run("a config file that is a dir", func(t *testing.T) {
+		path := filepath.Join(dir, "conf.yaml")
+		require.NoError(t, os.Mkdir(path, 0o700))
+
+		_, _, err := loadFile(t, File("config", path))
+
+		p := requireProblems(t, err)[0]
+		require.Equal(t, CodeReadError, p.Code)
+		require.Equal(t, "file "+path, p.Origin)
 	})
 }
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ func TestCoerce(t *testing.T) {
 		raw     any
 		want    Value
 		problem string
+		shown   string // the value as the problem shows it, when it matters
 	}{
 		{name: "string", key: "name", raw: "api", want: Value{Str: "api"}},
 		{name: "string from a number", key: "name", raw: 8080, want: Value{Str: "8080"}},
@@ -25,6 +27,10 @@ func TestCoerce(t *testing.T) {
 		{name: "string from a bool", key: "name", raw: true, want: Value{Str: "true"}},
 		{name: "string from null", key: "name", raw: nil, problem: "name must be a string, not null"},
 		{name: "string from a list", key: "name", raw: []any{"a"}, problem: "name must be a string, not a list"},
+		// yaml v3 decodes integers above math.MaxInt64 as uint64, and on 32-bit platforms those above math.MaxInt32 as int64.
+		{name: "string from a 64-bit number", key: "name", raw: int64(8080), want: Value{Str: "8080"}},
+		{name: "string from a number above int64", key: "name", raw: uint64(math.MaxUint64), want: Value{Str: "18446744073709551615"}},
+		{name: "string from another type", key: "name", raw: time.Time{}, problem: "name must be a string, not a time.Time"},
 
 		{name: "bool", key: "debug", raw: true, want: Value{Bool: true}},
 		{name: "bool from text", key: "debug", raw: "false", want: Value{Bool: false}},
@@ -37,6 +43,9 @@ func TestCoerce(t *testing.T) {
 		{name: "int from text", key: "port", raw: " 150 ", want: Value{Int: 150}},
 		{name: "int from a fraction", key: "port", raw: 1.5, problem: `port="1.5" is not an integer`},
 		{name: "int from bad text", key: "port", raw: "eighty", problem: `port="eighty" is not an integer`},
+		{name: "int from a 64-bit number", key: "port", raw: int64(80), want: Value{Int: 80}},
+		{name: "int above int64", key: "port", raw: uint64(math.MaxUint64), problem: `port="18446744073709551615" is not an integer`},
+		{name: "int from a bool", key: "port", raw: true, problem: `port="true" is not an integer`},
 
 		{name: "choice by name", key: "log.level", raw: "info", want: Value{Int: 1}},
 		{name: "choice by name in any case", key: "log.level", raw: "INFO", want: Value{Int: 1}},
@@ -44,6 +53,7 @@ func TestCoerce(t *testing.T) {
 		{name: "choice by number text", key: "log.level", raw: "1", want: Value{Int: 1}},
 		{name: "unlisted number", key: "log.level", raw: 5, problem: `log.level="5" is not an allowed value`},
 		{name: "unlisted name", key: "log.level", raw: "verbose", problem: `log.level="verbose" is not an allowed value`},
+		{name: "choice from a fraction", key: "log.level", raw: 1.5, problem: `log.level="1.5" is not an allowed value`},
 
 		{name: "duration in milliseconds", key: "log.timeout", raw: 1500, want: Value{Dur: 1500 * time.Millisecond}},
 		{name: "duration from a JSON number", key: "log.timeout", raw: float64(250), want: Value{Dur: 250 * time.Millisecond}},
@@ -58,6 +68,12 @@ func TestCoerce(t *testing.T) {
 		{name: "list from one scalar", key: "tags", raw: 5, want: Value{List: []string{"5"}}},
 		{name: "list of lists", key: "tags", raw: []any{[]any{"a"}}, problem: "tags must be a list or a comma-separated string, not a list"},
 		{name: "list from an object", key: "tags", raw: map[string]any{"a": 1}, problem: "tags must be a list or a comma-separated string, not an object"},
+		{
+			name: "list from an object with non-string keys", key: "tags", raw: map[any]any{1: "a"},
+			problem: "tags must be a list or a comma-separated string, not an object with non-string keys",
+		},
+		// YAML's .inf decodes as infinity, which JSON can't write.
+		{name: "string from a list JSON can't write", key: "name", raw: []any{math.Inf(1)}, problem: "name must be a string, not a list", shown: "[+Inf]"},
 	}
 
 	for _, tc := range tests {
@@ -70,6 +86,10 @@ func TestCoerce(t *testing.T) {
 				require.Equal(t, "file a.json", p.Origin)
 				require.Equal(t, tc.key, p.Key)
 				require.Equal(t, tc.problem, p.Message)
+
+				if tc.shown != "" {
+					require.Equal(t, tc.shown, p.Value)
+				}
 
 				return
 			}

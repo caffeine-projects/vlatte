@@ -131,7 +131,6 @@ func NewSchema[T any](fields ...Field[T]) *Schema[T] {
 	s.byKey = make(map[string]*field, len(fields))
 	s.byFlag = make(map[string]*field, len(fields))
 	s.groups = make(map[string]bool)
-	envs := make(map[string]string, len(fields))
 
 	for _, decl := range fields {
 		for segment := range strings.SplitSeq(decl.Key, ".") {
@@ -163,6 +162,8 @@ func NewSchema[T any](fields ...Field[T]) *Schema[T] {
 			env:     strings.ToUpper(strings.ReplaceAll(decl.Key, ".", "_")),
 		}
 
+		// Two keys can't share an environment variable without sharing a flag: both names turn "." and "_"
+		// into one character. So this check covers environment variables too.
 		for _, name := range []string{f.flag, f.short} {
 			if name == "" {
 				continue
@@ -178,12 +179,6 @@ func NewSchema[T any](fields ...Field[T]) *Schema[T] {
 
 			s.byFlag[name] = f
 		}
-
-		if other, ok := envs[f.env]; ok {
-			panic(fmt.Sprintf("config: keys %q and %q both use environment variable suffix %q", other, decl.Key, f.env))
-		}
-
-		envs[f.env] = decl.Key
 
 		s.fields = append(s.fields, f)
 		s.byKey[decl.Key] = f
