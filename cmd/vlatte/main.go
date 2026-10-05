@@ -114,11 +114,6 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 // serve runs the mock server configured by args until ctx is done.
 func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stderr io.Writer) int {
-	fileExists := func(path string) bool { _, err := os.Stat(path); return err == nil }
-	for _, warning := range legacyWarnings(os.Environ(), mockhttp.DefaultConfigDirectories, fileExists) {
-		_, _ = fmt.Fprintln(stderr, "warning:", warning)
-	}
-
 	m, err := mockhttp.New(mockhttp.Setup().ConfigSources(mockhttp.DefaultConfigSources(args)...))
 	if errors.Is(err, flag.ErrHelp) {
 		printHelp(cmd, stdout)
