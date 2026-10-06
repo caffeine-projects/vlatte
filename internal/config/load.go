@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -46,7 +47,7 @@ func (s *Schema[T]) Load(dst *T, sources []Source) (map[string]Value, error) {
 
 	values := make(map[string]Value)
 	for _, entries := range layers {
-		problems = append(problems, s.apply(dst, entries, values)...)
+		problems = append(problems, s.apply(dst, entries, values, "")...)
 	}
 
 	if len(problems) > 0 {
@@ -71,67 +72,85 @@ func find(layers [][]entry, key string) (entry, bool) {
 }
 
 // apply converts the entries of one source and applies them in order, recording the values it applied.
-func (s *Schema[T]) apply(dst *T, entries []entry, values map[string]Value) []Problem {
+// prefix is the key the entries sit under, such as "response", or empty for a document.
+func (s *Schema[T]) apply(dst *T, entries []entry, values map[string]Value, prefix string) []Problem {
 	var problems []Problem
 
-	converted := make([]Value, 0, len(entries))
+	// Lookups use the schema key of each value; problems and messages use the key users see.
+	type setting struct {
+		f *field
+		v Value
+	}
+
+	converted := make([]setting, 0, len(entries))
 	for _, e := range entries {
-		v, p := coerce(s.byKey[e.key], e)
+		f := s.byKey[e.key]
+
+		v, p := coerce(f, e, under(prefix, e.key))
 		if p != nil {
 			problems = append(problems, *p)
 			continue
 		}
 
-		converted = append(converted, v)
+		converted = append(converted, setting{f: f, v: v})
 	}
 
 	// Turning a section off while setting one of its keys in the same source is contradictory.
 	conflicts := make(map[string]struct{})
 	for _, toggle := range converted {
-		if !s.byKey[toggle.Key].section || toggle.Bool {
+		if !toggle.f.section || toggle.v.Bool {
 			continue
 		}
 
-		for _, v := range converted {
-			if strings.HasPrefix(v.Key, toggle.Key+".") {
+		for _, other := range converted {
+			if strings.HasPrefix(other.f.key, toggle.f.key+".") {
 				problems = append(problems, Problem{
 					Code:    CodeConflict,
-					Origin:  toggle.Origin,
-					Key:     toggle.Key,
-					Value:   toggle.Raw,
-					Message: fmt.Sprintf("%s is false, but %s sets %s in the same source", toggle.Key, v.Origin, v.Key),
+					Origin:  toggle.v.Origin,
+					Key:     toggle.v.Key,
+					Value:   toggle.v.Raw,
+					Message: fmt.Sprintf("%s is false, but %s sets %s in the same source", toggle.v.Key, other.v.Origin, other.v.Key),
 					Hint:    "remove one of them",
 				})
-				conflicts[toggle.Key] = struct{}{}
+				conflicts[toggle.f.key] = struct{}{}
 
 				break
 			}
 		}
 	}
 
-	for _, v := range converted {
-		if inConflict(v.Key, conflicts) {
+	for _, c := range converted {
+		if inConflict(c.f.key, conflicts) {
 			continue
 		}
 
-		if set := s.sets[v.Key]; set != nil {
-			if err := set(dst, v); err != nil {
-				problems = append(problems, Problem{
-					Code:    CodeInvalidValue,
-					Origin:  v.Origin,
-					Key:     v.Key,
-					Value:   display(v.Raw),
-					Message: fmt.Sprintf("%s=%q: %v", v.Key, display(v.Raw), err),
-				})
-
+		if set := s.sets[c.f.key]; set != nil {
+			if err := set(dst, c.v); err != nil {
+				problems = append(problems, problemsOf(c.v, err)...)
 				continue
 			}
 		}
 
-		values[v.Key] = v
+		values[c.f.key] = c.v
 	}
 
 	return problems
+}
+
+// problemsOf turns the error a Set returned for v into problems. An *Error, such as one from Decode,
+// keeps its own problems; any other error is a problem of v.
+func problemsOf(v Value, err error) []Problem {
+	if nested, ok := errors.AsType[*Error](err); ok {
+		return nested.Problems
+	}
+
+	return []Problem{{
+		Code:    CodeInvalidValue,
+		Origin:  v.Origin,
+		Key:     v.Key,
+		Value:   display(v.Raw),
+		Message: fmt.Sprintf("%s=%q: %v", v.Key, display(v.Raw), err),
+	}}
 }
 
 // inConflict reports whether key is a conflicting section or one of its keys.

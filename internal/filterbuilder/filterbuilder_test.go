@@ -194,3 +194,22 @@ func TestBuildMatcher_HasKeyInvalidPathReturnsError(t *testing.T) {
 	_, err := BuildMatcher([]any{"haskey", "$["})
 	require.ErrorContains(t, err, "$[")
 }
+
+// F21: a multi-matcher entry that names no matcher was a nil matcher: no error at load, then a failure or a panic
+// on every request. It must be reported when the mock is built.
+func TestBuildMatcher_MultiMatcherEntryMustBeAMatcher(t *testing.T) {
+	for _, spec := range [][]any{
+		{"all", []any{true}},
+		{"any", []any{int64(5), "anything"}},
+		{"both", "anything", nil},
+		{"either", map[string]any{"a": int64(1)}, "anything"},
+		{"xor", "anything", 1.5},
+	} {
+		_, err := BuildMatcher(spec)
+		require.ErrorContains(t, err, "a matcher is a name or a definition", "%v", spec)
+	}
+
+	m, err := BuildMatcher([]any{"all", []any{"present", []any{"equal", "x"}}})
+	require.NoError(t, err)
+	assert.True(t, matches(t, m, "x"))
+}

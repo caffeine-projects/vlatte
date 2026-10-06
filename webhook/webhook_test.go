@@ -379,7 +379,7 @@ func TestWebHook_InvalidFiles(t *testing.T) {
 
 			mock, err := m.Mock(mockhttp.FromFile(tc.filename))
 			// The error must come from the on_complete definition itself, not from on_complete being unknown.
-			require.ErrorContains(t, err, "/on_complete")
+			require.ErrorContains(t, err, "invalid_value: on_complete")
 			require.Nil(t, mock)
 		})
 	}

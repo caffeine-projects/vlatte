@@ -43,12 +43,12 @@ func (i *CallbackInput) Response() *Response {
 // Mapper is the function definition to be used to map a Mock response MockedResponse before serving it.
 type Mapper func(requestValues *RequestValues, res *Response) error
 
-// MockFileHandler defines a custom Mock file configuration handler.
-// It lets users define custom fields on mock configuration files that could be handled by a MockFileHandler instance.
-// It is also possible to change how built-in fields are handled.
+// MockFileHandler reads the ext object of mock files, so users can add settings of their own to mock files.
 type MockFileHandler interface {
-	// Handle handles a Mock configuration file.
-	//  Parameter fields
+	// Handle reads fields, the ext object of a mock file, and sets the mock through b.
+	// Keys are as written. Objects are map[string]any and lists []any; whole numbers that fit int64 are int64,
+	// and other numbers float64, from JSON and YAML alike.
+	// An error is a problem of the mock file's ext key.
 	Handle(fields map[string]any, b *Builder) error
 }
 

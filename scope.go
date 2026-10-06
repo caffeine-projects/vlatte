@@ -2,6 +2,7 @@ package vlatte
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -269,23 +270,32 @@ type Scopes[B Mock, A any] struct {
 	list   []*Scope[B]
 }
 
+// Add builds every builder, then stores the mocks in one call and returns their scope.
+// It stores nothing when a builder fails, and reports every failing builder by index,
+// or when the store refuses the mocks, for example over an ID already in use.
 func (s *Scopes[B, A]) Add(builders ...Builder[B, A]) (*Scope[B], error) {
-	ground := make([]B, len(builders))
+	built := make([]B, 0, len(builders))
 
+	var errs []error
 	for i, b := range builders {
-		built, err := b.Build(s.flavor)
+		mock, err := b.Build(s.flavor)
 		if err != nil {
-			return nil, fmt.Errorf("server: error adding mock at index %d.\n%w", i, err)
+			errs = append(errs, fmt.Errorf("server: mock %d: %w", i, err))
+			continue
 		}
 
-		if err := s.store.Store(context.Background(), built); err != nil {
-			return nil, err
-		}
-
-		ground[i] = built
+		built = append(built, mock)
 	}
 
-	scope := NewScope(ground, s.store)
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+
+	if err := s.store.Store(context.Background(), built...); err != nil {
+		return nil, fmt.Errorf("server: %w", err)
+	}
+
+	scope := NewScope(built, s.store)
 
 	s.mu.Lock()
 	s.list = append(s.list, scope)

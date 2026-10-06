@@ -2,15 +2,19 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "",
   "title": "Mock Definition",
-  "description": "Describes an HTTP mock definition.",
+  "description": "Describes an HTTP mock definition. The decoder in mockhttp/mock_schema.go is the reference; tests keep this schema in step with it.",
   "type": "object",
   "properties": {
-    "id": { "type": "string" },
+    "id": {
+      "description": "ID of the mock, in place of a generated one.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._~-]+$"
+    },
     "name": { "type": "string" },
-    "priority": { "type": "integer" },
+    "priority": { "description": "Mocks with a lower priority are matched first.", "type": "integer" },
     "enabled": { "type": "boolean" },
-    "delay": { "oneOf": [ { "type": "string" }, { "type": "number" } ] },
-    "repeat": { "type": "integer" },
+    "delay": { "$ref": "#/$defs/duration" },
+    "repeat": { "type": "integer", "minimum": 1 },
     "scenario": {
       "type": "object",
       "properties": {
@@ -18,6 +22,7 @@
         "required_state": { "type": "string" },
         "new_state": { "type": "string" }
       },
+      "required": [ "name" ],
       "additionalProperties": false
     },
     "on_complete": { "type": "array", "items": { "$ref": "#/$defs/on_complete_event" } },
@@ -28,20 +33,26 @@
         "method": { "$ref": "#/$defs/matcher" },
         "path": { "$ref": "#/$defs/matcher" },
         "url": { "$ref": "#/$defs/matcher" },
-        "url_match": { "$ref": "#/$defs/matcher" },
+        "url_match": { "type": "string", "format": "regex" },
         "query": { "$ref": "#/$defs/keyed_matcher" },
         "queries": { "$ref": "#/$defs/keyed_matcher" },
         "header": { "$ref": "#/$defs/keyed_matcher" },
         "form_url_encoded": { "$ref": "#/$defs/keyed_matcher" },
         "body": { "$ref": "#/$defs/matcher" }
       },
-      "additionalProperties": false
+      "minProperties": 1,
+      "additionalProperties": false,
+      "allOf": [
+        { "not": { "required": [ "url", "url_match" ] } },
+        { "not": { "required": [ "url", "path" ] } },
+        { "not": { "required": [ "url_match", "path" ] } }
+      ]
     },
     "response": { "$ref": "#/$defs/reply" },
     "response_sequence": {
       "type": "object",
       "properties": {
-        "responses": { "type": "array", "items": { "$ref": "#/$defs/reply" } },
+        "responses": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/reply" } },
         "after_ended": { "$ref": "#/$defs/reply" }
       },
       "required": [ "responses" ],
@@ -50,7 +61,7 @@
     "response_random": {
       "type": "object",
       "properties": {
-        "responses": { "type": "array", "items": { "$ref": "#/$defs/reply" } },
+        "responses": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/reply" } },
         "seed": { "type": "integer" }
       },
       "required": [ "responses" ],
@@ -59,25 +70,40 @@
     "proxy": {
       "type": "object",
       "properties": {
-        "target": { "type": "string" },
+        "target": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9+.-]*://[^/]+" },
         "forward_header": { "$ref": "#/$defs/header_map" },
         "header": { "$ref": "#/$defs/header_map" },
-        "remove_headers": { "type": "array", "items": { "type": "string" } },
+        "remove_headers": {
+          "oneOf": [ { "type": "array", "items": { "type": "string" } }, { "type": "string" } ]
+        },
         "trim_prefix": { "type": "string" },
         "trim_suffix": { "type": "string" },
-        "timeout": { "oneOf": [ { "type": "string" }, { "type": "number" } ] },
+        "timeout": { "$ref": "#/$defs/duration" },
         "ssl_verify": { "type": "boolean" },
         "no_follow": { "type": "boolean" }
       },
       "required": [ "target" ],
       "additionalProperties": false
     },
-    "ext": { "type": "object" }
+    "ext": { "description": "Settings for the MockFileHandlers of the server.", "type": "object" }
   },
   "required": [ "request" ],
   "additionalProperties": false,
+  "allOf": [
+    { "not": { "required": [ "response", "response_sequence" ] } },
+    { "not": { "required": [ "response", "response_random" ] } },
+    { "not": { "required": [ "response", "proxy" ] } },
+    { "not": { "required": [ "response_sequence", "response_random" ] } },
+    { "not": { "required": [ "response_sequence", "proxy" ] } },
+    { "not": { "required": [ "response_random", "proxy" ] } }
+  ],
   "$defs": {
+    "duration": {
+      "description": "Milliseconds, or a Go duration such as 1.5s.",
+      "oneOf": [ { "type": "string" }, { "type": "integer", "minimum": 0 } ]
+    },
     "matcher": {
+      "description": "Text, compared as is, or a matcher list such as [\"contains\", \"x\"].",
       "oneOf": [
         { "type": "string" },
         { "type": "array", "minItems": 1 }
@@ -92,20 +118,24 @@
     "reply": {
       "type": "object",
       "properties": {
-        "status": { "type": "integer" },
+        "status": { "type": "integer", "minimum": 100, "maximum": 599 },
         "header": { "$ref": "#/$defs/header_map" },
-        "header_template":  { "$ref": "#/$defs/header_map" },
-        "body": { },
-        "body_file": { "type": "string" },
+        "header_template": { "$ref": "#/$defs/header_map" },
+        "trailer": { "$ref": "#/$defs/header_map" },
+        "body": { "description": "Text as is; anything else as JSON.", "not": { "type": "null" } },
+        "body_file": { "description": "Relative paths start at the mock file's directory.", "type": "string", "minLength": 1 },
         "template": {
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" },
             "data": { "oneOf": [ { "type": "object" }, { "type": "array" } ] }
-          }
+          },
+          "additionalProperties": false
         },
-        "encoding": { "type": "string" }
-      }
+        "encoding": { "enum": [ "gzip" ] }
+      },
+      "additionalProperties": false,
+      "not": { "required": [ "body", "body_file" ] }
     },
     "on_complete_event": {
       "type": "object",
@@ -115,12 +145,6 @@
       },
       "additionalProperties": false,
       "required": [ "name" ]
-    },
-    "string_map": {
-      "type": "object",
-      "patternProperties": {
-        "^.*$": { "type": "string" }
-      }
     },
     "header_map": {
       "type": "object",

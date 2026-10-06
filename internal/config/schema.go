@@ -28,6 +28,9 @@ const (
 	Duration
 	// List accepts a list in files, or a comma-separated string.
 	List
+	// Any accepts any value as decoded, unchecked: a Set decodes it, for example a nested object with Decode.
+	// Env and args give it their text.
+	Any
 )
 
 func (k Kind) String() string {
@@ -42,6 +45,8 @@ func (k Kind) String() string {
 		return "duration"
 	case List:
 		return "list"
+	case Any:
+		return "any"
 	default:
 		return fmt.Sprintf("Kind(%d)", uint8(k))
 	}
@@ -84,6 +89,8 @@ type Value struct {
 	Int  int64
 	Dur  time.Duration
 	List []string
+	// Any is the value of an Any setting, as decoded: nil, bool, string, int64, float64, []any or map[string]any.
+	Any any
 }
 
 // Flag describes the command-line flag of a setting.
@@ -262,8 +269,8 @@ func (c *catalog) Usage(envPrefix string) string {
 	return b.String()
 }
 
-// keys lists every key and group, for suggestions.
-func (c *catalog) keys() []string {
+// Keys lists every key and group, sorted, such as "log" and "log.level".
+func (c *catalog) Keys() []string {
 	keys := make([]string, 0, len(c.fields)+len(c.groups))
 	for _, f := range c.fields {
 		keys = append(keys, f.key)
@@ -278,12 +285,24 @@ func (c *catalog) keys() []string {
 	return keys
 }
 
-// children lists the names of the keys right under prefix.
+// children lists the names right under prefix, of keys and groups, in declaration order.
+// An empty prefix lists the top-level names.
 func (c *catalog) children(prefix string) []string {
 	var names []string
+	seen := make(map[string]struct{})
+
 	for _, f := range c.fields {
-		name, ok := strings.CutPrefix(f.key, prefix+".")
-		if ok && !strings.Contains(name, ".") {
+		rest := f.key
+		if prefix != "" {
+			var ok bool
+			if rest, ok = strings.CutPrefix(f.key, prefix+"."); !ok {
+				continue
+			}
+		}
+
+		name, _, _ := strings.Cut(rest, ".")
+		if _, dup := seen[name]; !dup {
+			seen[name] = struct{}{}
 			names = append(names, name)
 		}
 	}

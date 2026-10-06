@@ -128,12 +128,14 @@ func extractMultipleMatchers(v any) ([]vlatte.Matcher, error) {
 		var mat vlatte.Matcher
 		var err error
 
-		eType := reflect.TypeOf(entry)
-		switch eType.Kind() {
+		// An entry that names no matcher would leave a nil matcher, which fails or panics on every request.
+		switch kind := reflect.ValueOf(entry).Kind(); kind {
 		case reflect.Slice, reflect.Array:
 			mat, err = buildMatcherFromArray(entry)
 		case reflect.String:
 			mat, err = discoverAndBuild(reflect.ValueOf(entry).String(), nil)
+		default:
+			err = fmt.Errorf("a matcher is a name or a definition such as [\"equal\", 1], not %v", entry)
 		}
 
 		if err != nil {

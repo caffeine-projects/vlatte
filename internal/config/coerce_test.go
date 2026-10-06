@@ -78,7 +78,7 @@ func TestCoerce(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			v, p := coerce(s.byKey[tc.key], entry{key: tc.key, raw: tc.raw, origin: "file a.json"})
+			v, p := coerce(s.byKey[tc.key], entry{key: tc.key, raw: tc.raw, origin: "file a.json"}, tc.key)
 
 			if tc.problem != "" {
 				require.NotNil(t, p)
@@ -110,9 +110,9 @@ func TestCoerce_HintsListTheAllowedValues(t *testing.T) {
 	// A rejected value must say what would be accepted, so the fix doesn't need the docs.
 	s := testSchema()
 
-	_, p := coerce(s.byKey["log.level"], entry{key: "log.level", raw: "verbose", origin: "env APP_LOG_LEVEL"})
+	_, p := coerce(s.byKey["log.level"], entry{key: "log.level", raw: "verbose", origin: "env APP_LOG_LEVEL"}, "log.level")
 	require.Equal(t, "use one of: debug (0), info (1)", p.Hint)
 
-	_, p = coerce(s.byKey["log.timeout"], entry{key: "log.timeout", raw: "10x", origin: "env APP_LOG_TIMEOUT"})
+	_, p = coerce(s.byKey["log.timeout"], entry{key: "log.timeout", raw: "10x", origin: "env APP_LOG_TIMEOUT"}, "log.timeout")
 	require.Equal(t, "use milliseconds (1500) or a Go duration (1.5s)", p.Hint)
 }

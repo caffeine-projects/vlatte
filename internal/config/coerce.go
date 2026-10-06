@@ -9,17 +9,17 @@ import (
 	"time"
 )
 
-// coerce converts the raw value of e to the kind of f.
+// coerce converts the raw value of e to the kind of f. key is the key users see, such as "response.status".
 // Text from env and args is parsed; values decoded from files are checked, and their scalars are lenient.
-func coerce(f *field, e entry) (Value, *Problem) {
-	v := Value{Key: f.key, Origin: e.origin, Raw: rawText(e.raw)}
+func coerce(f *field, e entry, key string) (Value, *Problem) {
+	v := Value{Key: key, Origin: e.origin, Raw: rawText(e.raw)}
 	shown := display(v.Raw)
 
 	invalid := func(message, hint string) (Value, *Problem) {
 		return Value{}, &Problem{
 			Code:    CodeInvalidValue,
 			Origin:  e.origin,
-			Key:     f.key,
+			Key:     key,
 			Value:   shown,
 			Message: message,
 			Hint:    hint,
@@ -30,7 +30,7 @@ func coerce(f *field, e entry) (Value, *Problem) {
 	case String:
 		s, ok := scalarText(e.raw)
 		if !ok {
-			return invalid(fmt.Sprintf("%s must be a string, not %s", f.key, describe(e.raw)), "")
+			return invalid(fmt.Sprintf("%s must be a string, not %s", key, Describe(e.raw)), "")
 		}
 
 		v.Str = s
@@ -42,12 +42,12 @@ func coerce(f *field, e entry) (Value, *Problem) {
 		case string:
 			b, err := strconv.ParseBool(strings.TrimSpace(raw))
 			if err != nil {
-				return invalid(fmt.Sprintf("%s=%q is not a bool", f.key, shown), "use true or false")
+				return invalid(fmt.Sprintf("%s=%q is not a bool", key, shown), "use true or false")
 			}
 
 			v.Bool = b
 		default:
-			return invalid(fmt.Sprintf("%s must be true or false, not %s", f.key, describe(e.raw)), "")
+			return invalid(fmt.Sprintf("%s must be true or false, not %s", key, Describe(e.raw)), "")
 		}
 
 	case Int:
@@ -60,18 +60,18 @@ func coerce(f *field, e entry) (Value, *Problem) {
 		case ok && (len(f.choices) == 0 || hasChoice(f.choices, n)):
 			v.Int = n
 		case len(f.choices) > 0:
-			return invalid(fmt.Sprintf("%s=%q is not an allowed value", f.key, shown), "use one of: "+choiceList(f.choices))
+			return invalid(fmt.Sprintf("%s=%q is not an allowed value", key, shown), "use one of: "+choiceList(f.choices))
 		default:
-			return invalid(fmt.Sprintf("%s=%q is not an integer", f.key, shown), "")
+			return invalid(fmt.Sprintf("%s=%q is not an integer", key, shown), "")
 		}
 
 	case Duration:
 		d, ok := duration(e.raw)
 		switch {
 		case !ok:
-			return invalid(fmt.Sprintf("%s=%q is not a duration", f.key, shown), "use milliseconds (1500) or a Go duration (1.5s)")
+			return invalid(fmt.Sprintf("%s=%q is not a duration", key, shown), "use milliseconds (1500) or a Go duration (1.5s)")
 		case d < 0:
-			return invalid(fmt.Sprintf("%s=%q is negative", f.key, shown), "use 0 or more")
+			return invalid(fmt.Sprintf("%s=%q is negative", key, shown), "use 0 or more")
 		}
 
 		v.Dur = d
@@ -79,10 +79,13 @@ func coerce(f *field, e entry) (Value, *Problem) {
 	case List:
 		l, ok := list(e.raw)
 		if !ok {
-			return invalid(fmt.Sprintf("%s must be a list or a comma-separated string, not %s", f.key, describe(e.raw)), "")
+			return invalid(fmt.Sprintf("%s must be a list or a comma-separated string, not %s", key, Describe(e.raw)), "")
 		}
 
 		v.List = l
+
+	case Any:
+		v.Any = e.raw
 	}
 
 	return v, nil
@@ -226,8 +229,8 @@ func rawText(raw any) string {
 	return string(b)
 }
 
-// describe names the type of a decoded value, for messages.
-func describe(raw any) string {
+// Describe names the type of a decoded value for messages, such as "a list" or "an object".
+func Describe(raw any) string {
 	switch raw.(type) {
 	case nil:
 		return "null"

@@ -13,7 +13,6 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/mockhttp"
@@ -37,11 +36,11 @@ var (
 	_banner      string
 	_description = fmt.Sprintf(`%s
 Flexible HTTP mocking tool for Go.
-Supported mock file extensions: %s
+Mock file formats: %s
 
 For more information, visit: %s`,
 		_banner,
-		strings.Join(viper.SupportedExts, ", "),
+		strings.Join(mockhttp.MockFileFormats(), ", "),
 		_gitRepository,
 	)
 )

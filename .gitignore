@@ -28,6 +28,8 @@ go.work.sum
 .DS_Store
 
 # Tests
+# rapid writes failfiles here; turn each failure into a named regression test instead
+**/testdata/rapid/
 coverage.txt
 coverage.out
 coverage.html

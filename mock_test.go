@@ -13,14 +13,20 @@ var fakeMockSeq atomic.Int64
 
 // fakeMock is a protocol-free vlatte.Mock, so core tests don't depend on a protocol package.
 type fakeMock struct {
-	id      string
-	hits    atomic.Int64
-	enabled atomic.Bool
-	events  vlatte.Events
+	id       string
+	priority int
+	hits     atomic.Int64
+	enabled  atomic.Bool
+	events   vlatte.Events
 }
 
 func newFakeMock() *fakeMock {
-	m := &fakeMock{id: "mock-" + strconv.FormatInt(fakeMockSeq.Add(1), 10)}
+	return newFakeMockWith("mock-"+strconv.FormatInt(fakeMockSeq.Add(1), 10), 0)
+}
+
+// newFakeMockWith returns an enabled fake mock with the given ID and priority.
+func newFakeMockWith(id string, priority int) *fakeMock {
+	m := &fakeMock{id: id, priority: priority}
 	m.enabled.Store(true)
 
 	return m
@@ -28,7 +34,7 @@ func newFakeMock() *fakeMock {
 
 func (m *fakeMock) ID() string            { return m.id }
 func (m *fakeMock) Name() string          { return m.id }
-func (m *fakeMock) Priority() int         { return 0 }
+func (m *fakeMock) Priority() int         { return m.priority }
 func (m *fakeMock) Hits() int64           { return m.hits.Load() }
 func (m *fakeMock) Called() bool          { return m.hits.Load() > 0 }
 func (m *fakeMock) Enabled() bool         { return m.enabled.Load() }

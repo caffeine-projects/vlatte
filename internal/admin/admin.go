@@ -105,7 +105,13 @@ func (a *Admin[B]) add(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := a.repo.Store(r.Context(), mock); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		status := http.StatusInternalServerError
+		if errors.Is(err, vlatte.ErrDuplicateID) {
+			status = http.StatusConflict
+		}
+
+		http.Error(w, err.Error(), status)
+
 		return
 	}
 

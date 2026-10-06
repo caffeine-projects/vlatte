@@ -1,15 +1,22 @@
 package vlatte
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"iter"
-	"sort"
+	"slices"
 	"sync"
 )
 
-// ErrNotFound is returned by [Store.Pick] when no mock with the given ID exists.
-var ErrNotFound = errors.New("store: mock not found")
+var (
+	// ErrNotFound is returned by [Store.Pick] when no mock with the given ID exists.
+	ErrNotFound = errors.New("store: mock not found")
+
+	// ErrDuplicateID is returned by [Store.Store] when the ID of a mock is already stored, or repeated in the call.
+	ErrDuplicateID = errors.New("store: mock id already in use")
+)
 
 type MemoryStore[B Mock] struct {
 	mocks []B
@@ -37,14 +44,29 @@ func (s *MemoryStore[B]) List(ctx context.Context) (iter.Seq[B], error) {
 	}, nil
 }
 
+// Store adds mocks, ordered by priority and then by when they were stored.
+// It stores none of them when an ID is already stored or repeated in the call.
 func (s *MemoryStore[B]) Store(_ context.Context, mocks ...B) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	ids := make(map[string]struct{}, len(s.mocks)+len(mocks))
+	for _, mock := range s.mocks {
+		ids[mock.ID()] = struct{}{}
+	}
+
+	for _, mock := range mocks {
+		if _, taken := ids[mock.ID()]; taken {
+			return fmt.Errorf("%w: %q", ErrDuplicateID, mock.ID())
+		}
+
+		ids[mock.ID()] = struct{}{}
+	}
+
 	s.mocks = append(s.mocks, mocks...)
 
-	sort.SliceStable(s.mocks, func(a, b int) bool {
-		return s.mocks[a].Priority() < s.mocks[b].Priority()
+	slices.SortStableFunc(s.mocks, func(a, b B) int {
+		return cmp.Compare(a.Priority(), b.Priority())
 	})
 
 	return nil

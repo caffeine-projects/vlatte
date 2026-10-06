@@ -46,6 +46,8 @@ func (f MockBuilderFunc[B]) BuildFromBytes(content []byte, extension string) (B,
 type Store[T Mock] interface {
 	List(ctx context.Context) (iter.Seq[T], error)
 
+	// Store adds mocks. It fails with ErrDuplicateID, storing none of them,
+	// when an ID is already stored or repeated in the call.
 	Store(ctx context.Context, mocks ...T) error
 
 	Pick(ctx context.Context, id string) (T, error)

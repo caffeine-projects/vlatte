@@ -35,15 +35,9 @@ linters:
             - pkg: github.com/rs/zerolog/log$
               desc: no global logger; inject *zerolog.Logger
         viper:
-          # file globs match absolute paths, hence the **/ prefix
-          files:
-            - $all
-            - "!**/cmd/vlatte/main.go"
-            - "!**/mockhttp/mock_builder_fs.go"
-            - "!**/mockhttp/recorder.go"
           deny:
             - pkg: github.com/spf13/viper
-              desc: frozen to these 3 files until the config rework
+              desc: settings and mock files load through internal/config
     embeddedstructfieldcheck:
       forbid-mutex: true
     musttag:

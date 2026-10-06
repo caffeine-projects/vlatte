@@ -150,10 +150,17 @@ func TestFile_Problems(t *testing.T) {
 			want: []Problem{{Code: CodeParseError, Message: "a config file holds an object of settings, not a string"}},
 		},
 		{
-			name: "keys that aren't text",
+			// YAML keys are text, as in JSON: a number key is an unknown setting, not a decoding failure.
+			name: "number keys are text",
 			file: "h.yaml",
 			doc:  "1: a\n",
-			want: []Problem{{Code: CodeParseError, Message: "a config file holds an object of settings, not an object with non-string keys"}},
+			want: []Problem{{Code: CodeUnknownKey, Key: "1", Message: "1 is not a known setting"}},
+		},
+		{
+			name: "keys that aren't text",
+			file: "i.yaml",
+			doc:  "[a, b]: c\n",
+			want: []Problem{{Code: CodeParseError, Message: "yaml: line 1: a mapping key must be text"}},
 		},
 	}
 

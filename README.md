@@ -76,10 +76,14 @@ err := m.Prep(ctx, proxyall.New(proxyall.Config{Target: "https://api.example.com
 
 ## Mock files
 
-Mocks can also live in YAML or JSON files. On start, the server loads the files matching `testdata/_mocks/*mock.yaml` and `testdata/_mocks/*mock.yml`. Change the patterns with `Setup().MockFilePatterns(...)`, or load a single file with `m.MustMock(mockhttp.FromFile(path))`.
+Mocks can also live in YAML or JSON files (`.json`, `.yaml` or `.yml`).
+- **On start,** the server loads the files matching `testdata/_mocks/*mock.yaml` and `testdata/_mocks/*mock.yml`, in name order. Change the patterns with `Setup().MockFilePatterns(...)`.
+- **To load one file,** use `m.MustMock(mockhttp.FromFile(path))`.
+- **`m.Reload()`** replaces the mocks of the files with what they hold now.
 
 ```yaml
 # testdata/_mocks/hello_mock.yaml
+id: hello            # optional: names the mock, as in the admin API's /mocks/hello
 request:
   method: GET
   path: /hello
@@ -88,10 +92,24 @@ response:
   status: 200
   header:
     content-type: text/plain
-  body: hello world
+  body_file: hello.txt   # relative to this file
 ```
 
 [`mockhttp/schema/http.schema.json`](mockhttp/schema/http.schema.json) describes the format, so editors can validate mock files.
+
+**Durations.** `delay` and `proxy.timeout` take milliseconds (`1500`) or a Go duration (`1.5s`).
+
+**Keys.** Keys are kept as written, so a query name like `userId` matches `userId` only.
+
+**Templates.** A mock file is a Go template first. It can read the server's parameters, data and URL, as in `{{ .URL "/callback" }}`. So a template of the reply must be escaped: ``{{`{{ .Request.Method }}`}}``.
+
+**Errors.** A file with problems isn't loaded. The error lists every problem with its key and a fix:
+
+```
+mock: 2 problems
+  file testdata/_mocks/users_mock.yaml: unknown_key: response.stauts is not a known setting; did you mean response.status?
+  file testdata/_mocks/users_mock.yaml: conflict: proxy is set with response; keep one of them
+```
 
 ## Configuration
 

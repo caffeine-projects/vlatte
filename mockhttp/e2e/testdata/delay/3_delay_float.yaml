@@ -1,4 +1,4 @@
-delay: 100.50
+delay: 100.5ms
 
 request:
   path: /duration_float
