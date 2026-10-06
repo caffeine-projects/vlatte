@@ -2,8 +2,13 @@ package vlatte_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
@@ -94,4 +99,129 @@ func TestScopedDelete(t *testing.T) {
 	require.NoError(t, scope.Delete(t.Context(), "unknown"))
 
 	require.Nil(t, scope.Mock(m1.ID()))
+}
+
+func TestScope_DeleteOnlyOwnMocks(t *testing.T) {
+	// A scope that deleted another scope's mock by ID would break that scope's assertions and cleanup.
+	store := vlatte.NewStore[*fakeMock]()
+	a, b := newFakeMockWith("a", 0), newFakeMockWith("b", 0)
+	require.NoError(t, store.Store(t.Context(), a, b))
+
+	scopeA := vlatte.NewScope([]*fakeMock{a}, store)
+	scopeB := vlatte.NewScope([]*fakeMock{b}, store)
+
+	require.NoError(t, scopeA.Delete(t.Context(), "b", "unknown"))
+
+	all, _ := store.PickAll(t.Context())
+	require.True(t, sameMocks([]*fakeMock{a, b}, all), "b belongs to another scope")
+	require.Same(t, b, scopeB.Mock("b"))
+
+	require.NoError(t, scopeA.Delete(t.Context(), "a"))
+
+	all, _ = store.PickAll(t.Context())
+	require.True(t, sameMocks([]*fakeMock{b}, all))
+	require.Nil(t, scopeA.Mock("a"))
+}
+
+func TestScope_DeleteKeepsANewerMockWithTheID(t *testing.T) {
+	// A mock can leave the store without its scope, and its ID can then name a new mock:
+	// the new mock isn't the old scope's to delete.
+	store := vlatte.NewStore[*fakeMock]()
+	old := newFakeMockWith("users", 0)
+	require.NoError(t, store.Store(t.Context(), old))
+
+	scope := vlatte.NewScope([]*fakeMock{old}, store)
+
+	require.NoError(t, store.Delete(t.Context(), "users"))
+
+	newer := newFakeMockWith("users", 0)
+	require.NoError(t, store.Store(t.Context(), newer))
+
+	require.NoError(t, scope.Clear(t.Context()))
+
+	got, err := store.Pick(t.Context(), "users")
+	require.NoError(t, err)
+	require.Same(t, newer, got)
+	require.Empty(t, scope.Mocks(), "the scope lets go of its own mock either way")
+}
+
+func TestScope_DeleteReportsStoreErrors(t *testing.T) {
+	// A store that can't tell which mock it holds, or can't delete it, leaves the scope as it was.
+	for name, store := range map[string]*brokenStore{
+		"pick":   newBrokenStore(errors.New("store down"), nil),
+		"delete": newBrokenStore(nil, errors.New("store down")),
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := newFakeMockWith("a", 0)
+			require.NoError(t, store.Store(t.Context(), m))
+
+			scope := vlatte.NewScope([]*fakeMock{m}, store)
+
+			require.EqualError(t, scope.Clear(t.Context()), "store down")
+			require.Same(t, m, scope.Mock("a"))
+		})
+	}
+}
+
+func TestScope_AssertNotCalled(t *testing.T) {
+	// Not called means no mock was called: one called mock fails it, and a scope without mocks passes it.
+	tests := []struct {
+		name   string
+		mocks  int
+		called int
+		want   bool
+	}{
+		{name: "no mocks", mocks: 0, called: 0, want: true},
+		{name: "none called", mocks: 2, called: 0, want: true},
+		{name: "one of two called", mocks: 2, called: 1, want: false},
+		{name: "all called", mocks: 2, called: 2, want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mocks := make([]*fakeMock, 0, tc.mocks)
+			for range tc.mocks {
+				mocks = append(mocks, newFakeMock())
+			}
+
+			for _, m := range mocks[:tc.called] {
+				m.hit()
+			}
+
+			ft := testmock.NewFakeT()
+			scope := vlatte.NewScope(mocks, vlatte.NewStore[*fakeMock]())
+
+			require.Equal(t, tc.want, scope.AssertNotCalled(ft))
+
+			if tc.want {
+				ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
+				return
+			}
+
+			report := errorText(t, ft)
+			require.Contains(t, report, strconv.Itoa(tc.called)+" Mocks were called")
+
+			for i, m := range mocks {
+				require.Equal(t, i < tc.called, strings.Contains(report, "["+m.ID()+"]"), "only called mocks are named")
+			}
+		})
+	}
+}
+
+// errorText returns the message of the one Errorf call ft received.
+func errorText(t *testing.T, ft *testmock.FakeT) string {
+	t.Helper()
+
+	var calls []mock.Call
+	for _, call := range ft.Calls {
+		if call.Method == "Errorf" {
+			calls = append(calls, call)
+		}
+	}
+
+	require.Len(t, calls, 1)
+
+	args, _ := calls[0].Arguments.Get(1).([]any)
+
+	return fmt.Sprintf(calls[0].Arguments.String(0), args...)
 }

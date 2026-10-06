@@ -32,7 +32,7 @@ func TestMatcherCombinations(t *testing.T) {
 		Acronym    string   `json:"acronym,omitempty"`
 		Title      string   `json:"title,omitempty"`
 		Addr       addr     `json:"addr"`
-		CheckIn    bool     `json:"check_in,omitzero"`
+		CheckIn    bool     `json:"check_in"` // sent when false: falsy doesn't match a missing field
 		Activities string   `json:"activities,omitempty"`
 		Department string   `json:"department,omitempty"`
 		Place      string   `json:"place,omitempty"`

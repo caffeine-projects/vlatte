@@ -1,18 +1,17 @@
 package match
 
 import (
-	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
-	"github.com/caffeine-projects/vlatte/match/internal/equalutil"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
-// itemsMatchMatcher passes when the value slice has the same elements as expected (order-independent).
+// itemsMatchMatcher passes when the value is a list holding the expected items, in any order.
 type itemsMatchMatcher struct {
-	Expected any
+	Expected []any
 }
 
 // Name implements vlatte.Matcher.
@@ -20,58 +19,68 @@ func (m *itemsMatchMatcher) Name() string { return "ItemsMatch" }
 
 // Match implements vlatte.Matcher.
 func (m *itemsMatchMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
-	v := arg.Value()
-	a := reflect.ValueOf(v)
-	b := reflect.ValueOf(m.Expected)
+	items, ok := value.List(arg.Value())
+	if !ok {
+		return mismatch("ItemsMatch() Value is not a list")
+	}
 
-	aLen := a.Len()
-	bLen := b.Len()
-
-	if aLen != bLen {
+	if len(items) != len(m.Expected) {
 		return mismatch(strings.Join(
-			[]string{"ItemsMatch() Expected value len to be ", strconv.Itoa(bLen), ". Got: ", strconv.Itoa(aLen)},
+			[]string{"ItemsMatch() Expected value len to be ", strconv.Itoa(len(m.Expected)), ". Got: ", strconv.Itoa(len(items))},
 			"",
 		))
 	}
 
-	var extraA, extraB []any
+	if !pairUp(m.Expected, items) {
+		return mismatch("ItemsMatch() Items doesn't match")
+	}
 
-	visited := make([]bool, bLen)
+	return success()
+}
 
-	for i := range aLen {
-		element := a.Index(i).Interface()
-		found := false
+// pairUp reports whether every item of want pairs with an item of got of its own, equal to it.
+// Equal isn't transitive, as "1.0" and "1" both equal 1 but not each other, so a greedy pairing could miss one
+// that exists: this finds a maximum matching instead, with augmenting paths.
+func pairUp(want, got []any) bool {
+	equal := make([][]bool, len(want))
+	for w := range want {
+		equal[w] = make([]bool, len(got))
+		for g := range got {
+			equal[w][g] = value.Equal(want[w], got[g])
+		}
+	}
 
-		for j := range bLen {
-			if visited[j] {
+	pair := make([]int, len(got)) // the item of want each item of got is paired with, or -1
+	for g := range pair {
+		pair[g] = -1
+	}
+
+	var augment func(w int, seen []bool) bool
+
+	augment = func(w int, seen []bool) bool {
+		for g := range got {
+			if seen[g] || !equal[w][g] {
 				continue
 			}
 
-			if equalutil.EqualValues(b.Index(j).Interface(), element, false) {
-				visited[j] = true
-				found = true
-				break
+			seen[g] = true
+
+			if pair[g] < 0 || augment(pair[g], seen) {
+				pair[g] = w
+				return true
 			}
 		}
 
-		if !found {
-			extraA = append(extraA, element)
+		return false
+	}
+
+	for w := range want {
+		if !augment(w, make([]bool, len(got))) {
+			return false
 		}
 	}
 
-	for j := range bLen {
-		if visited[j] {
-			continue
-		}
-
-		extraB = append(extraB, b.Index(j).Interface())
-	}
-
-	if len(extraA) == 0 && len(extraB) == 0 {
-		return success()
-	}
-
-	return mismatch("ItemsMatch() Items doesn't match")
+	return true
 }
 
 // Describe implements descriptor.SelfDescriptive.

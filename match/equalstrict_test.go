@@ -43,7 +43,11 @@ func TestStrictEqual(t *testing.T) {
 		{"struct (diff one field)", model{name: "test", year: 2022, value: 100.255, timestamp: timestamp, active: true, job: nil}, model{name: "test", year: 2022, value: 100.255, timestamp: timestamp, active: true, job: &job}, false},
 		{"struct (pinter and non-pointer", &model{name: "test", year: 2022, value: 100.255, timestamp: timestamp, active: true, job: nil}, model{name: "test", year: 2022, value: 100.255, timestamp: timestamp, active: true, job: nil}, false},
 		{"struct (two pointers)", &model{name: "test", year: 2022, value: 100.255, timestamp: timestamp, active: true, job: nil}, &model{name: "test", year: 2022, value: 100.255, timestamp: timestamp, active: true, job: nil}, true},
-		{"diff types", []any{"dev", "test"}, []string{"dev", "test"}, false},
+		{"lists compare by items, whatever their Go types", []any{"dev", "test"}, []string{"dev", "test"}, true},
+		{"numbers compare by value: a file's 1.0 is the integer 1", int64(1), 1.0, true},
+		{"text is never a number", "1", 1, false},
+		{"text is never a bool", "t", true, false},
+		{"a number is never a bool", 1, true, false},
 	}
 
 	for _, tc := range testCases {

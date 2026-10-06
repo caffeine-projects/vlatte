@@ -4,7 +4,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-// Each applies the given matcher on all items of the incoming request value.
+// Each matches a list whose items, or an object whose members, all match matcher; other values don't match.
 func Each(matcher vlatte.Matcher) vlatte.Matcher {
 	return &eachMatcher{Matcher: matcher}
 }

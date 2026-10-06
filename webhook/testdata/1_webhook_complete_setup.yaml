@@ -15,5 +15,3 @@ on_complete:
         dev: ok
         content-type: application/json
       body: '{"task": "done"}'
-      ssl_verify: false
-      log_level: -1

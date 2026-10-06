@@ -6,6 +6,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 // upperCaseMatcher uppercases the value and matches with the inner matcher.
@@ -19,9 +20,9 @@ func (m *upperCaseMatcher) Name() string { return "UpperCase" }
 // Match implements vlatte.Matcher.
 func (m *upperCaseMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
-	txt, ok := v.(string)
+	txt, ok := value.Text(v)
 	if !ok {
-		return failure(fmt.Errorf("upper: type %T is not supported. accepted types: string", v))
+		return mismatch("Upper() Value is not text")
 	}
 
 	result, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), strings.ToUpper(txt)))

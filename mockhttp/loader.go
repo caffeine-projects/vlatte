@@ -51,7 +51,7 @@ func (l *fileLoader) Load(app *Server) error {
 
 	// A reload replaces the mocks of the last load, so edited and removed files take effect.
 	if l.scope != nil {
-		if err := l.scope.Clear(context.Background()); err != nil {
+		if err := app.Unmock(context.Background(), l.scope); err != nil {
 			return fmt.Errorf("loader: %w", err)
 		}
 

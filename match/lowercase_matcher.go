@@ -6,6 +6,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 // lowerCaseMatcher lowercases the value and matches with the inner matcher.
@@ -19,9 +20,9 @@ func (m *lowerCaseMatcher) Name() string { return "LowerCase" }
 // Match implements vlatte.Matcher.
 func (m *lowerCaseMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
-	txt, ok := v.(string)
+	txt, ok := value.Text(v)
 	if !ok {
-		return failure(fmt.Errorf("lower: type %T is not supported. accepted types: string", v))
+		return mismatch("Lower() Value is not text")
 	}
 
 	result, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), strings.ToLower(txt)))

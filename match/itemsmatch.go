@@ -4,7 +4,8 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-// ItemsMatch matches when the value slice has the same elements as expected (order-independent).
-func ItemsMatch(items any) vlatte.Matcher {
-	return &itemsMatchMatcher{Expected: items}
+// ItemsMatch matches a list holding items in any order: each item of the list equals its own item of items,
+// by Equal's rule.
+func ItemsMatch[T any](items []T) vlatte.Matcher {
+	return &itemsMatchMatcher{Expected: anys(items)}
 }

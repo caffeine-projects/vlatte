@@ -12,7 +12,7 @@
     },
     "name": { "type": "string" },
     "priority": { "description": "Mocks with a lower priority are matched first.", "type": "integer" },
-    "enabled": { "type": "boolean" },
+    "enabled": { "$ref": "#/$defs/bool" },
     "delay": { "$ref": "#/$defs/duration" },
     "repeat": { "type": "integer", "minimum": 1 },
     "scenario": {
@@ -73,14 +73,12 @@
         "target": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9+.-]*://[^/]+" },
         "forward_header": { "$ref": "#/$defs/header_map" },
         "header": { "$ref": "#/$defs/header_map" },
-        "remove_headers": {
-          "oneOf": [ { "type": "array", "items": { "type": "string" } }, { "type": "string" } ]
-        },
+        "remove_headers": { "type": "array", "items": { "type": "string" } },
         "trim_prefix": { "type": "string" },
         "trim_suffix": { "type": "string" },
         "timeout": { "$ref": "#/$defs/duration" },
-        "ssl_verify": { "type": "boolean" },
-        "no_follow": { "type": "boolean" }
+        "ssl_verify": { "$ref": "#/$defs/bool" },
+        "no_follow": { "$ref": "#/$defs/bool" }
       },
       "required": [ "target" ],
       "additionalProperties": false
@@ -99,11 +97,21 @@
   ],
   "$defs": {
     "duration": {
-      "description": "Milliseconds, or a Go duration such as 1.5s.",
-      "oneOf": [ { "type": "string" }, { "type": "integer", "minimum": 0 } ]
+      "description": "Whole milliseconds, or an unsigned Go duration such as 1.5s.",
+      "oneOf": [
+        { "type": "integer", "minimum": 0, "maximum": 9223372036854 },
+        { "type": "string", "pattern": "^(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+)$" }
+      ]
+    },
+    "bool": {
+      "description": "A bool, or what Go's strconv.ParseBool reads: 1, t, T, TRUE, true, True and their false forms, or the number 1 or 0.",
+      "oneOf": [
+        { "type": "boolean" },
+        { "enum": [ 0, 1, "1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False" ] }
+      ]
     },
     "matcher": {
-      "description": "Text, compared as is, or a matcher list such as [\"contains\", \"x\"].",
+      "description": "A string, compared as is, or a matcher list such as [\"contains\", \"x\"].",
       "oneOf": [
         { "type": "string" },
         { "type": "array", "minItems": 1 }
@@ -127,7 +135,7 @@
         "template": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
+            "enabled": { "$ref": "#/$defs/bool" },
             "data": { "oneOf": [ { "type": "object" }, { "type": "array" } ] }
           },
           "additionalProperties": false

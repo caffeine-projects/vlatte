@@ -489,12 +489,15 @@ func TestWebHook_Templates(t *testing.T) {
 }
 
 // onComplete is a minimal event to call WebHook.Run directly.
-type onComplete struct{ params vlatte.Parameters }
+type onComplete struct {
+	params vlatte.Parameters
+	mock   vlatte.Mock
+}
 
 func (e onComplete) Kind() vlatte.Kind             { return mockhttp.Kind }
 func (e onComplete) Kit() vlatte.Kit               { return nil }
 func (e onComplete) Parameters() vlatte.Parameters { return e.params }
-func (e onComplete) Mock() vlatte.Mock             { return nil }
+func (e onComplete) Mock() vlatte.Mock             { return e.mock }
 
 func TestWebHook_TemplateErrors(t *testing.T) {
 	wh, err := webhook.New()

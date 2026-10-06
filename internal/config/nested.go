@@ -13,7 +13,7 @@ import (
 func (s *Schema[T]) Decode(dst *T, v Value) error {
 	obj, ok := v.Any.(map[string]any)
 	if !ok {
-		return &Error{Problems: []Problem{shapeProblem(v, "an object")}}
+		return &Error{Problems: []Problem{mismatch(v.Key, v.Origin, v.Any, "an object")}}
 	}
 
 	w := walker{catalog: &s.catalog, origin: v.Origin, outer: v.Key}
@@ -34,7 +34,7 @@ func (s *Schema[T]) Decode(dst *T, v Value) error {
 func Items(v Value, fn func(item Value) error) error {
 	list, ok := v.Any.([]any)
 	if !ok {
-		return &Error{Problems: []Problem{shapeProblem(v, "a list")}}
+		return &Error{Problems: []Problem{mismatch(v.Key, v.Origin, v.Any, "a list")}}
 	}
 
 	var problems []Problem
@@ -55,7 +55,7 @@ func Items(v Value, fn func(item Value) error) error {
 func Members(v Value, fn func(name string, member Value) error) error {
 	obj, ok := v.Any.(map[string]any)
 	if !ok {
-		return &Error{Problems: []Problem{shapeProblem(v, "an object")}}
+		return &Error{Problems: []Problem{mismatch(v.Key, v.Origin, v.Any, "an object")}}
 	}
 
 	var problems []Problem
@@ -82,15 +82,12 @@ func Invalid(v Value, message, hint string) error {
 	}}}
 }
 
-// shapeProblem says that v holds a value of the wrong shape, where want, such as "a list", is expected.
-func shapeProblem(v Value, want string) Problem {
-	return Problem{
-		Code:    CodeInvalidValue,
-		Origin:  v.Origin,
-		Key:     v.Key,
-		Value:   display(v.Raw),
-		Message: fmt.Sprintf("%s must be %s, not %s", v.Key, want, Describe(v.Any)),
-	}
+// Mismatch returns an *Error with the invalid_value problem of v, which holds a value of a type the setting doesn't
+// take, worded as every such problem is: "<key> must be <want>, not <a number>". takes lists the kinds the setting
+// takes, which pick the hint: a number or a bool where a String is taken is to be quoted, an integer in quotes
+// where an Int is taken is not, and text where a List is taken is to be written as a list.
+func Mismatch(v Value, want string, takes ...Kind) error {
+	return &Error{Problems: []Problem{mismatch(v.Key, v.Origin, v.Any, want, takes...)}}
 }
 
 // asError returns problems as an *Error, or nil when there are none.

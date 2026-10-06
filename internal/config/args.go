@@ -44,7 +44,7 @@ func (s *argsSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 				lists[f.key] = len(entries)
 			}
 
-			entries = append(entries, entry{key: f.key, raw: raw, origin: "flag " + dashed(name)})
+			entries = append(entries, entry{key: f.key, raw: raw, text: true, origin: "flag " + dashed(name)})
 
 			return nil
 		}

@@ -133,7 +133,7 @@ func (doc mockDoc) build(app *Server) (*Mock, error) {
 	}
 
 	if !parseFailed(problems) {
-		problems = append(problems, def.check(doc.origin)...)
+		problems = append(problems, def.check(doc.origin, problems)...)
 	}
 
 	if len(problems) > 0 {

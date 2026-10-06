@@ -2,13 +2,15 @@ package match
 
 import (
 	"fmt"
-	"reflect"
+	"maps"
+	"slices"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
-// eachMatcher applies the inner matcher to all items of the value (map/slice).
+// eachMatcher applies the inner matcher to every item of a list, or every member of an object.
 type eachMatcher struct {
 	Matcher vlatte.Matcher
 }
@@ -19,44 +21,29 @@ func (m *eachMatcher) Name() string { return "Each" }
 // Match implements vlatte.Matcher.
 func (m *eachMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
-	val := reflect.ValueOf(v)
-	valType := reflect.TypeOf(v).Kind()
 
-	switch valType {
-	case reflect.Map:
-		iterator := val.MapRange()
-
-		for iterator.Next() {
-			mv := iterator.Value().Interface()
-			ok, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), mv))
-			if err != nil {
-				return failure(fmt.Errorf("each: %w", err))
-			}
-
-			if !ok {
-				return mismatch("Each() item did not match")
-			}
+	items, ok := value.List(v)
+	if !ok {
+		members, isObject := value.Object(v)
+		if !isObject {
+			return mismatch("Each() Value is not a list or an object")
 		}
 
-		return success()
-
-	case reflect.Slice, reflect.Array:
-		for i := 0; i < val.Len(); i++ {
-			entry := val.Index(i).Interface()
-			ok, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), entry))
-			if err != nil {
-				return failure(fmt.Errorf("each: %w", err))
-			}
-
-			if !ok {
-				return mismatch("Each() item did not match")
-			}
-		}
-
-		return success()
+		items = slices.Collect(maps.Values(members))
 	}
 
-	return failure(fmt.Errorf("type %s is not supported. accepted types: map, array", valType.String()))
+	for _, item := range items {
+		ok, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), item))
+		if err != nil {
+			return failure(fmt.Errorf("each: %w", err))
+		}
+
+		if !ok {
+			return mismatch("Each() item did not match")
+		}
+	}
+
+	return success()
 }
 
 // Describe implements descriptor.SelfDescriptive.

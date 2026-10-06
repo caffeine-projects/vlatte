@@ -69,9 +69,12 @@ func TestDecode_Errors(t *testing.T) {
 		{"json with two values", ".json", `{} {}`, "a document holds one value, not more"},
 		{"json number out of range", ".json", `{"n": 1e400}`, "number 1e400 is out of range"},
 		{"json duplicate names", ".json", `{"a": 1, "a": 2}`, `duplicate object member name "a"`},
+		{"json syntax in a list", ".json", `[1, nul]`, `invalid character ']' in literal null`},
+		{"json syntax in an object in a list", ".json", `[{"a": }]`, "jsontext: missing value after object name"},
 		{"yaml syntax", ".yaml", "a: [1, 2\n", "yaml: line"},
 		{"yaml duplicate keys", ".yaml", "a: 1\na: 2\n", `mapping key "a" already defined`},
 		{"yaml list as a key", ".yaml", "? [a, b]\n: c\n", "yaml: line 1: a mapping key must be text"},
+		{"yaml list as a key of a nested object", ".yaml", "a:\n  b: {[1]: x}\n", "yaml: line 2: a mapping key must be text"},
 		{"yaml alias to a number as a key", ".yaml", "a: &n 1\n*n : b\n", "a mapping key must be text"},
 	}
 

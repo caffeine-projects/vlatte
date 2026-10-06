@@ -1,15 +1,15 @@
 package match
 
 import (
-	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
-// lenMatcher passes when the value's length equals the expected length.
+// lenMatcher passes when the value's length, by value.Len, equals the expected length.
 type lenMatcher struct {
 	Length int
 }
@@ -19,17 +19,12 @@ func (m *lenMatcher) Name() string { return "Len" }
 
 // Match implements vlatte.Matcher.
 func (m *lenMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
-	v := arg.Value()
-	value := reflect.ValueOf(v)
-	actual := value.Len()
-	if actual == m.Length {
+	n, ok := value.Len(arg.Value())
+	if ok && n == m.Length {
 		return success()
 	}
 
-	return mismatch(strings.Join(
-		[]string{"Len(", strconv.Itoa(m.Length), ") Got: ", strconv.Itoa(actual)},
-		"",
-	))
+	return mismatch(strings.Join([]string{"Len(", strconv.Itoa(m.Length), ") Got: ", strconv.Itoa(n)}, ""))
 }
 
 // Describe implements descriptor.SelfDescriptive.

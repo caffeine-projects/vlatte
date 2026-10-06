@@ -6,9 +6,11 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/require"
@@ -16,6 +18,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
 // http.schema.json is for editors: the decoder doesn't read it. These tests keep the two in step.
@@ -162,4 +165,190 @@ func TestJSONSchema_AcceptsTheFixturesTheDecoderAccepts(t *testing.T) {
 func TestMockFileFormats_AdminAcceptsTheSame(t *testing.T) {
 	// A mock file in any format can be posted to the admin API, and nothing else can.
 	require.ElementsMatch(t, MockFileFormats(), slices.Collect(maps.Keys(admin.SupportedExtensions)))
+}
+
+// _scalarKeys places a value at each key of the mock format that takes a scalar kind, in a document that is
+// valid with the key's valid value.
+var _scalarKeys = []struct {
+	key   string
+	valid any
+	doc   func(v any) map[string]any
+}{
+	{"id", "users", topLevel("id")},
+	{"name", "users", topLevel("name")},
+	{"priority", int64(1), topLevel("priority")},
+	{"enabled", true, topLevel("enabled")},
+	{"delay", "1s", topLevel("delay")},
+	{"repeat", int64(2), topLevel("repeat")},
+	{"scenario.name", "s", func(v any) map[string]any {
+		return withRequest(map[string]any{"scenario": map[string]any{"name": v}})
+	}},
+	{"scenario.required_state", "a", func(v any) map[string]any {
+		return withRequest(map[string]any{"scenario": map[string]any{"name": "s", "required_state": v}})
+	}},
+	{"scenario.new_state", "b", func(v any) map[string]any {
+		return withRequest(map[string]any{"scenario": map[string]any{"name": "s", "new_state": v}})
+	}},
+	{"request.url_match", "x", func(v any) map[string]any { return map[string]any{"request": map[string]any{"url_match": v}} }},
+	{"response.status", int64(200), inReply("status")},
+	{"response.body_file", "b.txt", inReply("body_file")},
+	{"response.encoding", "gzip", inReply("encoding")},
+	{"response.template.enabled", true, func(v any) map[string]any {
+		return withRequest(map[string]any{"response": map[string]any{"template": map[string]any{"enabled": v}}})
+	}},
+	{"response_random.seed", int64(1), func(v any) map[string]any {
+		return withRequest(map[string]any{"response_random": map[string]any{"responses": []any{make(map[string]any)}, "seed": v}})
+	}},
+	{"proxy.target", "http://a", func(v any) map[string]any { return withRequest(map[string]any{"proxy": map[string]any{"target": v}}) }},
+	{"proxy.remove_headers", []any{"a"}, inProxy("remove_headers")},
+	{"proxy.trim_prefix", "/a", inProxy("trim_prefix")},
+	{"proxy.trim_suffix", "/b", inProxy("trim_suffix")},
+	{"proxy.timeout", int64(10), inProxy("timeout")},
+	{"proxy.ssl_verify", true, inProxy("ssl_verify")},
+	{"proxy.no_follow", true, inProxy("no_follow")},
+	{"on_complete.name", "hook", func(v any) map[string]any {
+		return withRequest(map[string]any{"on_complete": []any{map[string]any{"name": v}}})
+	}},
+}
+
+func withRequest(doc map[string]any) map[string]any {
+	doc["request"] = map[string]any{"path": "/x"}
+	return doc
+}
+
+func topLevel(key string) func(v any) map[string]any {
+	return func(v any) map[string]any { return withRequest(map[string]any{key: v}) }
+}
+
+func inReply(key string) func(v any) map[string]any {
+	return func(v any) map[string]any { return withRequest(map[string]any{"response": map[string]any{key: v}}) }
+}
+
+func inProxy(key string) func(v any) map[string]any {
+	return func(v any) map[string]any {
+		return withRequest(map[string]any{"proxy": map[string]any{"target": "http://a", key: v}})
+	}
+}
+
+// _substitutes are values of every class, and text that reads as other kinds, put in place of a valid value.
+var _substitutes = []any{
+	nil, true, "true", "t", "yes", int64(0), int64(1), int64(5), "5", 1.5, "1.5s",
+	[]any{},
+	[]any{"a"},
+	[]any{int64(1)},
+	make(map[string]any),
+}
+
+func TestJSONSchema_ScalarTypesAgreeWithTheDecoder(t *testing.T) {
+	// M16: for every key that takes a scalar kind, the editor schema accepts a value exactly when the decoder does,
+	// so an editor never marks a working mock file as wrong, nor misses a value the decoder rejects (Codex review:
+	// the decoder took name: 123, which editors reject).
+	schema, _ := loadJSONSchema(t)
+
+	setup := Setup().Silent().OnCompleteListener("hook", stop)
+	for _, v := range _substitutes {
+		if s, ok := v.(string); ok {
+			setup.OnCompleteListener(s, stop)
+		}
+	}
+
+	m := MustNew(setup)
+
+	covered := make([]string, 0, len(_scalarKeys))
+	for _, row := range _scalarKeys {
+		covered = append(covered, row.key)
+
+		for i, v := range append([]any{row.valid}, _substitutes...) {
+			doc := row.doc(v)
+
+			data, err := config.Encode(doc, "json")
+			require.NoError(t, err)
+
+			_, decodeErr := mockDoc{origin: "doc", format: "json", data: data}.build(m)
+			schemaErr := schema.Validate(instance(t, doc))
+
+			require.Equal(t, decodeErr == nil, schemaErr == nil, "%s: %#v\ndecoder: %v\nschema: %v", row.key, v, decodeErr, schemaErr)
+
+			if i == 0 {
+				require.NoError(t, decodeErr, "%s takes %#v", row.key, v)
+			}
+		}
+	}
+
+	// Every key of a scalar kind has a row.
+	var scalar []string
+	for prefix, keys := range map[string]func() ([]string, func(string) (config.Kind, bool)){
+		"":                 func() ([]string, func(string) (config.Kind, bool)) { return _mockSchema.Keys(), _mockSchema.KindOf },
+		"response.":        func() ([]string, func(string) (config.Kind, bool)) { return _replySchema.Keys(), _replySchema.KindOf },
+		"response_random.": func() ([]string, func(string) (config.Kind, bool)) { return _randomSchema.Keys(), _randomSchema.KindOf },
+		"response_sequence.": func() ([]string, func(string) (config.Kind, bool)) {
+			return _sequenceSchema.Keys(), _sequenceSchema.KindOf
+		},
+		"proxy.":       func() ([]string, func(string) (config.Kind, bool)) { return _proxySchema.Keys(), _proxySchema.KindOf },
+		"on_complete.": func() ([]string, func(string) (config.Kind, bool)) { return _eventSchema.Keys(), _eventSchema.KindOf },
+	} {
+		all, kindOf := keys()
+		for _, key := range all {
+			if kind, ok := kindOf(key); ok && kind != config.Any {
+				scalar = append(scalar, prefix+key)
+			}
+		}
+	}
+
+	require.ElementsMatch(t, scalar, covered)
+}
+
+// genDurationText draws strings near Go's duration syntax: one or more components, signs, odd units and forms
+// such as 1. and .5. Values stay small, so none overflows a time.Duration.
+func genDurationText() *rapid.Generator[string] {
+	component := rapid.Custom(func(t *rapid.T) string {
+		number := rapid.OneOf(
+			rapid.StringMatching(`[0-9]{1,3}`),
+			rapid.StringMatching(`[0-9]{1,3}\.[0-9]{0,2}`),
+			rapid.StringMatching(`\.[0-9]{1,2}`),
+			rapid.Just("."),
+		).Draw(t, "number")
+
+		unit := rapid.SampledFrom([]string{"ns", "us", "µs", "μs", "ms", "s", "m", "h", "", "x", "mss", " s", "S"}).Draw(t, "unit")
+
+		return number + unit
+	})
+
+	return rapid.OneOf(
+		rapid.Custom(func(t *rapid.T) string {
+			sign := rapid.SampledFrom([]string{"", "", "", "+", "-"}).Draw(t, "sign")
+			return sign + strings.Join(rapid.SliceOfN(component, 1, 3).Draw(t, "components"), "")
+		}),
+		rapid.SampledFrom([]string{"0", "00", "-0", "+0", "", ".s", "1.s", "0s"}),
+	)
+}
+
+func TestPropJSONSchema_DurationPattern(t *testing.T) {
+	// M17: the editor's duration pattern, the decoder and time.ParseDuration agree on every string:
+	// it is an unsigned Go duration, or it is wrong for all three.
+	_, raw := loadJSONSchema(t)
+
+	defs, _ := raw["$defs"].(map[string]any)
+	duration, _ := defs["duration"].(map[string]any)
+	forms, _ := duration["oneOf"].([]any)
+	text, _ := forms[1].(map[string]any)
+	source, _ := text["pattern"].(string)
+	pattern := regexp.MustCompile(source)
+
+	m := MustNew(Setup().Silent())
+
+	rapid.Check(t, func(t *rapid.T) {
+		s := genDurationText().Draw(t, "duration")
+
+		_, err := time.ParseDuration(s)
+		want := err == nil && !strings.HasPrefix(s, "+") && !strings.HasPrefix(s, "-")
+
+		require.Equal(t, want, pattern.MatchString(s), "pattern on %q", s)
+
+		data, err := config.Encode(withRequest(map[string]any{"delay": s}), "json")
+		require.NoError(t, err)
+
+		_, err = mockDoc{origin: "doc", format: "json", data: data}.build(m)
+		require.Equal(t, want, err == nil, "decoder on %q: %v", s, err)
+	})
 }

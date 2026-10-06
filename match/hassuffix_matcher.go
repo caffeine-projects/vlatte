@@ -1,11 +1,11 @@
 package match
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 // hasSuffixMatcher passes when the value ends with the given suffix.
@@ -19,9 +19,9 @@ func (m *hasSuffixMatcher) Name() string { return "HasSuffix" }
 // Match implements vlatte.Matcher.
 func (m *hasSuffixMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
-	txt, ok := v.(string)
+	txt, ok := value.Text(v)
 	if !ok {
-		return failure(fmt.Errorf("has_suffix: it only works with string type. got %T", v))
+		return mismatch("HasSuffix() Value is not text")
 	}
 
 	if strings.HasSuffix(txt, m.Suffix) {

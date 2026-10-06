@@ -5,11 +5,11 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/match/internal/anyconv"
-	"github.com/caffeine-projects/vlatte/match/internal/equalutil"
 )
 
-// equalMatcher passes when the value equals the expected value (lenient comparison).
+// equalMatcher passes when the value equals the expected value, by value.Equal.
 type equalMatcher struct {
 	Expected any
 }
@@ -20,7 +20,8 @@ func (m *equalMatcher) Name() string { return "Equal" }
 // Match implements vlatte.Matcher.
 func (m *equalMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
-	if equalutil.EqualValues(m.Expected, v, true) {
+
+	if value.Equal(m.Expected, v) {
 		return success()
 	}
 

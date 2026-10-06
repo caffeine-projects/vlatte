@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
@@ -51,6 +52,8 @@ func genExchange() *rapid.Generator[exchange] {
 		}
 
 		if ex.method == "POST" || ex.method == "PUT" || ex.method == "PATCH" {
+			// Request bodies are UTF-8 text: JSON can't hold the body matcher of one that isn't,
+			// which TestRecorder_LogsWhatItCantRecord pins.
 			body := genToken().Draw(t, "request body")
 			ex.body = &body
 		}
@@ -281,33 +284,92 @@ func TestRecorder_Formats(t *testing.T) {
 }
 
 func TestRecorder_LogsWhatItCantRecord(t *testing.T) {
-	// A response the recorder can't write is logged, and leaves no broken recording behind.
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set(HeaderContentEncoding, "gzip")
-		w.Write([]byte("not gzip"))
-	}))
-	t.Cleanup(target.Close)
-
+	// An exchange the recorder can't write is logged with its cause, and leaves no broken recording behind.
+	// The test waits for the recorder's own error: another error log, or a server closed first, proves nothing.
 	notADir := filepath.Join(t.TempDir(), "file")
 	require.NoError(t, os.WriteFile(notADir, nil, 0o600))
 
-	for name, dir := range map[string]string{
-		"a body that isn't gzip":    t.TempDir(),
-		"a directory it can't make": filepath.Join(notADir, "sub"),
-	} {
-		t.Run(name, func(t *testing.T) {
+	notUTF8 := string([]byte{0xff, 0xfe})
+
+	// A gzip stream without the checksum and size that end it: its header reads, its data doesn't.
+	var gz bytes.Buffer
+
+	w := gzip.NewWriter(&gz)
+	_, err := w.Write([]byte("a body that gzip compresses"))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	brokenOff := gz.Bytes()[:gz.Len()-8]
+
+	tests := []struct {
+		name  string
+		dir   func(t *testing.T) string
+		reply *Reply
+		body  *string // a request body, sent with POST
+		cause string
+	}{
+		{
+			name: "a body that isn't gzip",
+			dir:  func(t *testing.T) string { return t.TempDir() },
+			// Longer than a gzip header, so the reader gets to check it.
+			reply: OK().Header(HeaderContentEncoding, "gzip").PlainText("plain text, not gzip"),
+			cause: "gzip: invalid header",
+		},
+		{
+			name:  "a gzip stream that breaks off",
+			dir:   func(t *testing.T) string { return t.TempDir() },
+			reply: OK().Header(HeaderContentEncoding, "gzip").Body(brokenOff),
+			cause: "unexpected EOF",
+		},
+		{
+			name:  "a directory it can't make",
+			dir:   func(*testing.T) string { return filepath.Join(notADir, "sub") },
+			reply: OK().PlainText("ok"),
+			cause: "not a directory",
+		},
+		{
+			name: "a body file it can't write",
+			dir: func(t *testing.T) string {
+				// A body that isn't UTF-8 goes to a file of its own, named after the request.
+				dir := t.TempDir()
+				require.NoError(t, os.Mkdir(filepath.Join(dir, "GET-x--response-body.bin"), 0o755))
+
+				return dir
+			},
+			reply: OK().Body([]byte(notUTF8)),
+			cause: "is a directory",
+		},
+		{
+			// JSON strings hold UTF-8 only, so the body matcher of this request can't be written as JSON.
+			name:  "a request body JSON can't hold",
+			dir:   func(t *testing.T) string { return t.TempDir() },
+			reply: OK().PlainText("ok"),
+			body:  &notUTF8,
+			cause: "invalid UTF-8",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := tc.dir(t)
 			logs := &logBuffer{}
 			logger := zerolog.New(logs)
 
 			rec := MustNew(Setup().Logger(&logger).Record(RecordDir(dir)))
 			rec.MustStart()
-			rec.MustMock(AnyMethod().Reply(From(target.URL)))
+			t.Cleanup(rec.Close)
+			rec.MustMock(AnyMethod().Reply(tc.reply))
 
 			// The client asks for gzip itself, so it gets the body as sent.
-			send(t, rec.URL(), requestSpec{method: http.MethodGet, path: "/x", header: http.Header{"Accept-Encoding": {"gzip"}}})
-			rec.Close()
+			req := requestSpec{method: http.MethodGet, path: "/x", header: http.Header{"Accept-Encoding": {"gzip"}}}
+			if tc.body != nil {
+				req.method, req.body = http.MethodPost, tc.body
+			}
 
-			require.Contains(t, logs.String(), `"level":"error"`)
+			send(t, rec.URL(), req)
+
+			require.Eventually(t, func() bool { return strings.Contains(logs.String(), tc.cause) }, 5*time.Second, 10*time.Millisecond,
+				"the recorder logs why it couldn't record")
 
 			files, err := filepath.Glob(filepath.Join(dir, "*.mock.*"))
 			require.NoError(t, err)

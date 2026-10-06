@@ -111,8 +111,9 @@ func (parser *formURLEncodedParser) CanParse(content string, _ *http.Request) bo
 }
 
 func (parser *formURLEncodedParser) Parse(_ []byte, r *http.Request) (any, error) {
+	// PostForm is the body's form: Form would add the query.
 	err := r.ParseForm()
-	return r.Form, err
+	return r.PostForm, err
 }
 
 // plainTextParser parses requests with content type header containing "text/plain"

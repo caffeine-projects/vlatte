@@ -2,14 +2,12 @@ package config
 
 import (
 	"bytes"
-	"encoding/json/jsontext"
-	"errors"
 	"fmt"
-	"io"
 	"math"
-	"strconv"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 // _maxExactInt is the largest whole number every float64 below it holds exactly.
@@ -20,8 +18,8 @@ func isFormat(ext string) bool {
 	return ext == ".json" || ext == ".yaml" || ext == ".yml"
 }
 
-// decode parses data, a JSON or YAML document chosen by ext, into one data model for both formats:
-// objects are map[string]any, lists []any, whole numbers that fit int64 are int64 and other numbers float64.
+// decode parses data, a JSON or YAML document chosen by ext, into the data model of package value, one for both
+// formats: objects are map[string]any, lists []any, whole numbers that fit int64 are int64, other numbers float64.
 // YAML timestamps and mapping keys keep their text, as they would in JSON.
 // An empty document decodes to nil.
 func decode(data []byte, ext string) (any, error) {
@@ -30,12 +28,7 @@ func decode(data []byte, ext string) (any, error) {
 			return nil, nil
 		}
 
-		doc, err := decodeJSON(data)
-		if err != nil {
-			return nil, err
-		}
-
-		return normalize(doc), nil
+		return value.DecodeJSON(data)
 	}
 
 	var node yaml.Node
@@ -95,100 +88,6 @@ func retag(n *yaml.Node) error {
 	return nil
 }
 
-// decodeJSON parses a JSON document token by token, so an integer keeps all its digits as an int64:
-// decoded as a float64, one above 2^53 would change.
-func decodeJSON(data []byte) (any, error) {
-	dec := jsontext.NewDecoder(bytes.NewReader(data))
-
-	doc, err := readJSON(dec)
-	if err != nil {
-		return nil, err
-	}
-
-	// A document holds one value.
-	offset := dec.InputOffset()
-	if _, err := dec.ReadToken(); !errors.Is(err, io.EOF) {
-		if err != nil {
-			return nil, err
-		}
-
-		return nil, &jsontext.SyntacticError{ByteOffset: offset, Err: errors.New("a document holds one value, not more")}
-	}
-
-	return doc, nil
-}
-
-// readJSON reads the next value of dec.
-func readJSON(dec *jsontext.Decoder) (any, error) {
-	tok, err := dec.ReadToken()
-	if err != nil {
-		return nil, err
-	}
-
-	switch tok.Kind() {
-	case jsontext.KindNull:
-		return nil, nil
-	case jsontext.KindFalse, jsontext.KindTrue:
-		return tok.Bool(), nil
-	case jsontext.KindString:
-		return tok.String(), nil
-	case jsontext.KindNumber:
-		return number(tok.String())
-	case jsontext.KindBeginArray:
-		list := make([]any, 0)
-		for dec.PeekKind() != jsontext.KindEndArray {
-			v, err := readJSON(dec)
-			if err != nil {
-				return nil, err
-			}
-
-			list = append(list, v)
-		}
-
-		_, err := dec.ReadToken()
-
-		return list, err
-	case jsontext.KindBeginObject:
-		obj := make(map[string]any)
-		for dec.PeekKind() != jsontext.KindEndObject {
-			tok, err := dec.ReadToken()
-			if err != nil {
-				return nil, err
-			}
-
-			// A token is only valid until the next read.
-			name := tok.String()
-
-			v, err := readJSON(dec)
-			if err != nil {
-				return nil, err
-			}
-
-			obj[name] = v
-		}
-
-		_, err := dec.ReadToken()
-
-		return obj, err
-	default:
-		return nil, fmt.Errorf("jsontext: unexpected %s", tok.Kind())
-	}
-}
-
-// number reads a JSON number: an integer as int64 when it fits, anything else as float64.
-func number(text string) (any, error) {
-	if n, err := strconv.ParseInt(text, 10, 64); err == nil {
-		return n, nil
-	}
-
-	f, err := strconv.ParseFloat(text, 64)
-	if err != nil {
-		return nil, fmt.Errorf("number %s is out of range", text)
-	}
-
-	return f, nil
-}
-
 // normalize turns whole numbers of a decoded document into int64 when they fit, and the rest into float64,
 // so a number means the same in JSON and YAML.
 func normalize(v any) any {
@@ -204,11 +103,7 @@ func normalize(v any) any {
 	case int:
 		return int64(x)
 	case uint64:
-		// YAML gives uint64 only above math.MaxInt64.
-		if x <= math.MaxInt64 {
-			return int64(x)
-		}
-
+		// YAML gives uint64 only above math.MaxInt64, where JSON gives a float64.
 		return float64(x)
 	case float64:
 		// Every whole float64 in [-2^63, 2^63) is an int64.

@@ -89,6 +89,7 @@ type selectorInput struct {
 
 	Query url.Values
 
+	// Form is the form of a form body, without the query: http.Request.PostForm.
 	Form url.Values
 
 	// ParsedBody is the parsed http.Request body.

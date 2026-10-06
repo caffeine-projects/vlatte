@@ -1,17 +1,16 @@
 package match
 
 import (
-	"errors"
-	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/match/internal/anyconv"
-	"github.com/caffeine-projects/vlatte/match/internal/equalutil"
 )
 
-// containsMatcher passes when the expected value is contained in the incoming value.
+// containsMatcher passes when the value holds the expected value: text, an item of a list or a key of an object.
 type containsMatcher struct {
 	Expected any
 }
@@ -22,44 +21,36 @@ func (m *containsMatcher) Name() string { return "Contains" }
 // Match implements vlatte.Matcher.
 func (m *containsMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
-	eValue := reflect.ValueOf(m.Expected)
-	vValue := reflect.ValueOf(v)
-	vType := reflect.TypeOf(v)
-	if vType == nil {
-		return failure(errors.New("contains: unknown typeof value"))
+
+	if m.holds(v) {
+		return success()
 	}
 
-	switch vType.Kind() {
-	case reflect.String:
-		if pass := strings.Contains(vValue.String(), eValue.String()); pass {
-			return success()
-		}
-
-		goto ret
-
-	case reflect.Map:
-		keys := vValue.MapKeys()
-		for i := range keys {
-			if equalutil.EqualValues(keys[i].Interface(), m.Expected, false) {
-				return success()
-			}
-		}
-
-		goto ret
-
-	case reflect.Slice, reflect.Array:
-		for i := 0; i < vValue.Len(); i++ {
-			if equalutil.EqualValues(vValue.Index(i).Interface(), eValue.Interface(), false) {
-				return success()
-			}
-		}
-	}
-
-ret:
 	return mismatch(strings.Join([]string{"Contain(", anyconv.Stringify(m.Expected), ") Got: ", anyconv.Stringify(v)}, ""))
 }
 
 // Describe implements descriptor.SelfDescriptive.
 func (m *containsMatcher) Describe() descriptor.Descriptor {
 	return descriptor.SingleArg("contains", m.Expected)
+}
+
+func (m *containsMatcher) holds(v any) bool {
+	if text, ok := value.Text(v); ok {
+		expected, isText := value.Text(m.Expected)
+		return isText && strings.Contains(text, expected)
+	}
+
+	if items, ok := value.List(v); ok {
+		return slices.ContainsFunc(items, func(item any) bool { return value.Equal(item, m.Expected) })
+	}
+
+	if members, ok := value.Object(v); ok {
+		for key := range members {
+			if value.Equal(key, m.Expected) {
+				return true
+			}
+		}
+	}
+
+	return false
 }

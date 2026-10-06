@@ -6,8 +6,9 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-// Equal asserts that the given expectation is equal to the incoming request value.
-// It considers equivalent value. Eg.: float64(10) is equal to int(10).
+// Equal matches a value equal to expected, by the rule in the package doc: numbers by their exact value whatever
+// their Go types, text read as a number or a bool when compared with one, lists item by item.
+// So Equal(10) matches 10.0, an int64 10 and the query value "10", but not "010".
 func Equal(expected any) vlatte.Matcher {
 	return &equalMatcher{Expected: expected}
 }

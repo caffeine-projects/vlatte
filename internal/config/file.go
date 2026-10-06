@@ -35,7 +35,7 @@ func (s *fileSource) load(c *catalog, higher lookup) ([]entry, []Problem, error)
 	}
 
 	if e, ok := higher(s.pathKey); ok && s.pathKey != "" {
-		path, _ := scalarText(e.raw)
+		path, _ := e.raw.(string) // text from env or args: a file can't name another
 		return s.read(c, path, e.origin)
 	}
 
@@ -184,8 +184,9 @@ func (w *walker) walk(settings map[string]any, prefix string) {
 		case group:
 			obj, ok := raw.(map[string]any)
 			if !ok {
-				w.problem(CodeInvalidValue, key, fmt.Sprintf("%s must be an object, not %s", w.full(key), Describe(raw)),
-					"its keys are "+strings.Join(w.children(key), ", "))
+				p := mismatch(w.full(key), w.origin, raw, "an object")
+				p.Hint = "its keys are " + strings.Join(w.children(key), ", ")
+				w.problems = append(w.problems, p)
 
 				continue
 			}

@@ -20,6 +20,11 @@ func TestFalsy(t *testing.T) {
 		{"string (txt)", "t", false},
 		{"int", 0, true},
 		{"int (2)", 1, false},
+		// Falsy used to match every JSON number, since int64 and float64 read as false.
+		{"JSON integer 0", int64(0), true},
+		{"JSON integer 1", int64(1), false},
+		{"JSON number 2.5", 2.5, false},
+		{"nil is neither true nor false", nil, false},
 	}
 
 	for _, tc := range testCases {
@@ -33,8 +38,10 @@ func TestFalsy(t *testing.T) {
 }
 
 func TestFalsyInvalidSyntax(t *testing.T) {
-	ok, err := Truthy().Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), "y"))
-
-	require.Error(t, err)
-	require.False(t, ok)
+	// A value ParseBool can't read is neither true nor false, and isn't an error.
+	for _, v := range []any{"y", nil, int64(2), []any{}} {
+		ok, err := Falsy().Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), v))
+		require.NoError(t, err)
+		require.False(t, ok)
+	}
 }

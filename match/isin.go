@@ -4,7 +4,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-// IsIn matches when the value is contained in the given items (slice or map keys).
-func IsIn(items any) vlatte.Matcher {
-	return &isInMatcher{Items: items}
+// IsIn matches a value equal to one of items, by Equal's rule, so IsIn([]int{1, 2}) matches the query value "2".
+func IsIn[T any](items []T) vlatte.Matcher {
+	return &isInMatcher{Items: anys(items)}
 }

@@ -539,7 +539,9 @@ func selectQueries(k string) vlatte.Selector[*selectorInput] {
 	return func(_ context.Context, r *selectorInput) any { return r.Query[k] }
 }
 func selectBody(_ context.Context, r *selectorInput) any { return r.ParsedBody }
+
+// selectFormField selects a field of a form body. Only the body counts: http.Request.Form also holds the query.
 func selectFormField(k string) vlatte.Selector[*selectorInput] {
-	return func(_ context.Context, r *selectorInput) any { return r.RawRequest.Form.Get(k) }
+	return func(_ context.Context, r *selectorInput) any { return r.Form.Get(k) }
 }
 func selectRawRequest(_ context.Context, r *selectorInput) any { return r.RawRequest }

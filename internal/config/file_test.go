@@ -123,7 +123,7 @@ func TestFile_Problems(t *testing.T) {
 			name: "group that isn't an object",
 			file: "c.yaml",
 			doc:  "log: 5\n",
-			want: []Problem{{Code: CodeInvalidValue, Key: "log", Message: "log must be an object, not a number", Hint: "its keys are level, timeout"}},
+			want: []Problem{{Code: CodeInvalidValue, Key: "log", Value: "5", Message: "log must be an object, not a number", Hint: "its keys are level, timeout"}},
 		},
 		{
 			name: "path key inside a file",
@@ -141,7 +141,7 @@ func TestFile_Problems(t *testing.T) {
 			name: "group set to a bool",
 			file: "f.yaml",
 			doc:  "log: true\n",
-			want: []Problem{{Code: CodeInvalidValue, Key: "log", Message: "log must be an object, not a bool", Hint: "its keys are level, timeout"}},
+			want: []Problem{{Code: CodeInvalidValue, Key: "log", Value: "true", Message: "log must be an object, not a bool", Hint: "its keys are level, timeout"}},
 		},
 		{
 			name: "text at the top",

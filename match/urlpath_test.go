@@ -37,9 +37,11 @@ func TestURLPath(t *testing.T) {
 		})
 	}
 
-	t.Run("should return error when providing a type that is not handled by URLPath", func(t *testing.T) {
-		ok, err := URLPath("/test/hello").Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), 10))
-		require.Error(t, err)
-		require.False(t, ok)
+	t.Run("a value that isn't a URL doesn't match", func(t *testing.T) {
+		for _, v := range []any{10, nil, "%zz"} {
+			ok, err := URLPath("/test/hello").Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), v))
+			require.NoError(t, err)
+			require.False(t, ok)
+		}
 	})
 }

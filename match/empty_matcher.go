@@ -1,15 +1,15 @@
 package match
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/match/internal/anyconv"
 )
 
-// emptyMatcher passes when the value is empty or has zero length.
+// emptyMatcher passes when the value is nil, or has no length, by value.Len.
 type emptyMatcher struct{}
 
 // Name implements vlatte.Matcher.
@@ -22,13 +22,7 @@ func (m *emptyMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	zeroLen := &lenMatcher{Length: 0}
-	ok, err := zeroLen.Match(arg)
-	if err != nil {
-		return failure(fmt.Errorf("empty: %w", err))
-	}
-
-	if ok {
+	if n, ok := value.Len(v); ok && n == 0 {
 		return success()
 	}
 

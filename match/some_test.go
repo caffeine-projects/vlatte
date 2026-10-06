@@ -33,10 +33,20 @@ func TestSome(t *testing.T) {
 }
 
 func TestSomeErr(t *testing.T) {
+	// An error of user code in the inner matcher still stops the search, as it is a bug to fix.
 	ok, err := Some(Function(func(_ any) (bool, error) {
 		return false, errors.New("boom")
-	})).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), true))
+	})).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), []any{true}))
 
-	require.Error(t, err)
+	require.EqualError(t, err, "some: fn: matcher: boom")
 	require.False(t, ok)
+}
+
+func TestSome_ValuesThatArentLists(t *testing.T) {
+	// A value that isn't a list doesn't match, and isn't an error.
+	for _, v := range []any{true, nil, "abc", map[string]any{"a": 1}} {
+		ok, err := Some(Anything()).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), v))
+		require.NoError(t, err)
+		require.False(t, ok)
+	}
 }

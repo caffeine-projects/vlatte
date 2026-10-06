@@ -1,11 +1,11 @@
 package match
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 // hasPrefixMatcher passes if the value starts with the given prefix.
@@ -19,9 +19,9 @@ func (m *hasPrefixMatcher) Name() string { return "HasPrefix" }
 // Match implements vlatte.Matcher.
 func (m *hasPrefixMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
-	txt, ok := v.(string)
+	txt, ok := value.Text(v)
 	if !ok {
-		return failure(fmt.Errorf("has_prefix: it only works with string type. got %T", v))
+		return mismatch("HasPrefix() Value is not text")
 	}
 	if strings.HasPrefix(txt, m.Prefix) {
 		return success()

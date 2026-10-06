@@ -4,7 +4,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-// Empty matches when the value is empty (slice, map, or string).
+// Empty matches nil, and text, a list or an object of no items; other values don't match.
 func Empty() vlatte.Matcher {
 	return &emptyMatcher{}
 }

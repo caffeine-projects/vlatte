@@ -1,21 +1,18 @@
 package match
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 // regExpMatcher passes when the regular expression matches the value.
 type regExpMatcher struct {
 	Expression string
-	once       sync.Once
 	rg         *regexp.Regexp
-	compileErr error
 }
 
 // Name implements vlatte.Matcher.
@@ -23,27 +20,12 @@ func (m *regExpMatcher) Name() string { return "RegExp" }
 
 // Match implements vlatte.Matcher.
 func (m *regExpMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
-	v := arg.Value()
-	txt, ok := v.(string)
+	txt, ok := value.Text(arg.Value())
 	if !ok {
-		return failure(fmt.Errorf("regexp: it only works with string values. got: %T", v))
+		return mismatch("Match() Value is not text")
 	}
 
-	m.once.Do(func() {
-		r, err := regexp.Compile(m.Expression)
-		if err != nil {
-			m.compileErr = err
-			return
-		}
-		m.rg = r
-	})
-
-	if m.compileErr != nil {
-		return failure(fmt.Errorf("regexp: error compiling expression %s. %w", m.Expression, m.compileErr))
-	}
-
-	match := m.rg.Match([]byte(txt))
-	if match {
+	if m.rg.MatchString(txt) {
 		return success()
 	}
 

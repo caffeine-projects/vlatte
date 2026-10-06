@@ -2,6 +2,8 @@ package mockhttp
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -10,11 +12,13 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/testmock"
 )
 
 // mockFileSpec is a mock file of a directory model.
@@ -147,9 +151,10 @@ func TestFileLoaderMachine(t *testing.T) {
 
 		defer m.Close()
 
-		m.MustMock(Getf("/code").Reply(OK().PlainText("code")))
+		code := m.MustMock(Getf("/code").Reply(OK().PlainText("code")))
 
 		files := make(map[string]mockFileSpec)
+		loaded := 0 // file mocks the last load stored
 
 		t.Repeat(map[string]func(*rapid.T){
 			"write": func(t *rapid.T) {
@@ -171,6 +176,11 @@ func TestFileLoaderMachine(t *testing.T) {
 				name := rapid.SampledFrom(slices.Sorted(maps.Keys(files))).Draw(t, "name")
 				require.NoError(t, os.Remove(filepath.Join(dir, name)))
 				delete(files, name)
+			},
+			"delete from code": func(t *rapid.T) {
+				// A scope deletes only its own mocks: the file mocks are the loader's.
+				id := rapid.SampledFrom(ids).Draw(t, "id")
+				require.NoError(t, code.Delete(context.Background(), id))
 			},
 			"reload": func(t *rapid.T) {
 				err := m.Reload()
@@ -199,12 +209,18 @@ func TestFileLoaderMachine(t *testing.T) {
 					}
 
 					require.Len(t, all, 1, "only the code mock")
+
+					loaded = 0
 				case duplicate:
 					require.ErrorIs(t, err, vlatte.ErrDuplicateID)
 					require.Len(t, all, 1, "only the code mock")
+
+					loaded = 0
 				default:
 					require.NoError(t, err)
 					require.Len(t, all, 1+len(files))
+
+					loaded = len(files)
 
 					var origins []string
 					for _, mock := range all {
@@ -229,6 +245,13 @@ func TestFileLoaderMachine(t *testing.T) {
 				_, body := get(t, m, "/code")
 				require.Equal(t, "code", body)
 			},
+			"": func(t *rapid.T) {
+				all, _ := m.storage.PickAll(context.Background())
+				require.Len(t, all, 1+loaded, "the code mock and the file mocks of the last load")
+
+				// Reloads leave no scope behind that the assertions would count.
+				require.Equal(t, len(m.ListCalled()) == 0, m.AssertNotCalled(testmock.NewFakeT()))
+			},
 		})
 	})
 }
@@ -240,4 +263,88 @@ func TestFileLoader_BadPattern(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	require.ErrorContains(t, err, "loader: pattern [: syntax error in pattern")
+}
+
+func TestFileLoader_ReloadKeepsAssertNotCalled(t *testing.T) {
+	// Codex review: each reload left the emptied scope of the last load behind, and AssertNotCalled counted an
+	// empty scope as called. Now only a request to a mock fails it, and the report names only that mock.
+	dir := t.TempDir()
+	writeMockFile(t, dir, "a.mock.yaml", mockFileSpec{id: "file"})
+
+	m := MustNew(Setup().Silent().MockFilePatterns(filepath.Join(dir, "*.mock.*")))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/code").Reply(OK()))
+
+	require.NoError(t, m.Reload())
+	require.NoError(t, m.Reload())
+
+	ft := testmock.NewFakeT()
+	require.True(t, m.AssertNotCalled(ft))
+	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
+
+	get(t, m, "/f")
+
+	ft = testmock.NewFakeT()
+	require.False(t, m.AssertNotCalled(ft))
+	ft.AssertNumberOfCalls(t, "Errorf", 1)
+
+	call := ft.Calls[slices.IndexFunc(ft.Calls, func(c mock.Call) bool { return c.Method == "Errorf" })]
+	args, _ := call.Arguments.Get(1).([]any)
+	report := fmt.Sprintf(call.Arguments.String(0), args...)
+
+	require.Contains(t, report, "1 Mock(s) were called")
+	require.Contains(t, report, "[file]")
+}
+
+func TestFileLoader_OtherScopesCantDeleteFileMocks(t *testing.T) {
+	// Codex review: any scope deleted any ID, so a code scope could remove a file mock and leave the loader holding
+	// an ID that a later mock could take, and that the next reload would then delete.
+	dir := t.TempDir()
+	writeMockFile(t, dir, "a.mock.yaml", mockFileSpec{id: "users"})
+
+	m := MustNew(Setup().Silent().MockFilePatterns(filepath.Join(dir, "*.mock.*")))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	code := m.MustMock(Getf("/code").Reply(OK()))
+	require.NoError(t, code.Delete(t.Context(), "users"))
+
+	_, body := get(t, m, "/f")
+	require.Equal(t, "a.mock.yaml", body)
+
+	require.NoError(t, m.Reload())
+
+	_, body = get(t, m, "/f")
+	require.Equal(t, "a.mock.yaml", body)
+}
+
+// pickFailingStore is a store that can't tell which mock it holds, as a remote store that is down.
+type pickFailingStore struct {
+	*vlatte.MemoryStore[*Mock]
+}
+
+func (pickFailingStore) Pick(context.Context, string) (*Mock, error) {
+	return nil, errors.New("store down")
+}
+
+func TestFileLoader_ReportsMocksItCantRemove(t *testing.T) {
+	// A reload that can't remove the mocks of its last load adds no new ones next to them.
+	dir := t.TempDir()
+	writeMockFile(t, dir, "a.mock.yaml", mockFileSpec{})
+
+	m := MustNew(Setup().Silent().MockFilePatterns(filepath.Join(dir, "*.mock.*")))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	stale, err := Getf("/stale").Reply(OK()).Build(m)
+	require.NoError(t, err)
+
+	l := &fileLoader{scope: vlatte.NewScope([]*Mock{stale}, vlatte.Store[*Mock](pickFailingStore{new(vlatte.MemoryStore[*Mock])}))}
+	require.EqualError(t, l.Load(m), "loader: store down")
+
+	all, _ := m.storage.PickAll(t.Context())
+	require.Len(t, all, 1, "only the mock of the first start")
+	require.NotNil(t, l.scope, "the loader keeps its scope, to remove it next time")
 }

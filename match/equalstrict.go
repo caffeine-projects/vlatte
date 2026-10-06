@@ -6,7 +6,8 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-// StrictEqual strictly compares the expected value with incoming request values.
+// StrictEqual matches a value equal to expected without reading text, as Equal does otherwise:
+// text never equals a number or a bool. Numbers still compare by their exact value, and lists by their items.
 func StrictEqual(expected any) vlatte.Matcher {
 	return &equalStrictMatcher{Expected: expected}
 }

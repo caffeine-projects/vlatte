@@ -186,7 +186,7 @@ var _mockSchema = config.NewSchema(
 		Set:   func(d *mockDef, v config.Value) error { return setURL(&d.request, v) },
 	},
 	mockField{
-		Key: "request.url_match", Kind: config.Any, Usage: "Regular expression the full URL must match.",
+		Key: "request.url_match", Kind: config.String, Usage: "Regular expression the full URL must match.",
 		Set: func(d *mockDef, v config.Value) error { return setURLMatch(&d.request, v) },
 	},
 	mockField{
@@ -279,7 +279,7 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error {
 			obj, ok := v.Any.(map[string]any)
 			if !ok {
-				return config.Invalid(v, fmt.Sprintf("%s must be an object, not %s", v.Key, config.Describe(v.Any)), "")
+				return config.Mismatch(v, "an object")
 			}
 
 			d.ext = obj
@@ -342,15 +342,15 @@ var _replySchema = config.NewSchema(
 				r.data, r.hasData = v.Any, true
 				return nil
 			default:
-				return config.Invalid(v, fmt.Sprintf("%s must be an object or a list, not %s", v.Key, config.Describe(v.Any)), "")
+				return config.Mismatch(v, "an object or a list")
 			}
 		},
 	},
 	replyField{
 		Key: "encoding", Kind: config.String, Usage: "Encoding of the body: gzip.",
 		Set: func(r *replyDef, v config.Value) error {
-			if !strings.EqualFold(v.Str, "gzip") {
-				return config.Invalid(v, fmt.Sprintf("%s=%q is not a supported encoding", v.Key, v.Str), "use gzip")
+			if v.Str != "gzip" {
+				return config.Invalid(v, fmt.Sprintf("%s must be gzip, not %q", v.Key, v.Str), "")
 			}
 
 			r.gzip = true
@@ -452,8 +452,9 @@ func newReplyDef() *replyDef {
 	return &replyDef{status: 200}
 }
 
-// check reports the problems between keys of a decoded document that came from origin.
-func (d *mockDef) check(origin string) []config.Problem {
+// check reports the problems between keys of a decoded document that came from origin. found are the problems
+// decoding already found: a request key that failed to decode still counts as a matcher.
+func (d *mockDef) check(origin string, found []config.Problem) []config.Problem {
 	var set []string
 	for i, present := range []bool{d.reply != nil, d.sequence != nil, d.random != nil, d.proxy != nil} {
 		if present {
@@ -472,7 +473,11 @@ func (d *mockDef) check(origin string) []config.Problem {
 
 	problems = append(problems, conflicts(origin, "request", urlKeys)...)
 
-	if len(d.request.keys) == 0 {
+	requestFailed := slices.ContainsFunc(found, func(p config.Problem) bool {
+		return p.Key == "request" || strings.HasPrefix(p.Key, "request.")
+	})
+
+	if len(d.request.keys) == 0 && !requestFailed {
 		problems = append(problems, config.Problem{
 			Code: config.CodeMissingValue, Origin: origin, Key: "request",
 			Message: "request sets no matcher", Hint: `to match every request, write request: {path: "*"}`,
@@ -517,7 +522,7 @@ func under(prefix, key string) string {
 }
 
 // withRequired adds a missing_value problem for key, under v.Key, to the result of decoding v when present is false.
-// A v that isn't an object already has its problem.
+// A v that isn't an object, or a key whose value failed to decode, already has its problem.
 func withRequired(err error, present bool, v config.Value, key string) error {
 	if _, isObject := v.Any.(map[string]any); present || !isObject {
 		return err
@@ -528,9 +533,14 @@ func withRequired(err error, present bool, v config.Value, key string) error {
 		problems = cfgErr.Problems
 	}
 
+	full := v.Key + "." + key
+	if slices.ContainsFunc(problems, func(p config.Problem) bool { return p.Key == full }) {
+		return err
+	}
+
 	return &config.Error{Problems: append(problems, config.Problem{
-		Code: config.CodeMissingValue, Origin: v.Origin, Key: v.Key + "." + key,
-		Message: fmt.Sprintf("%s.%s is required", v.Key, key),
+		Code: config.CodeMissingValue, Origin: v.Origin, Key: full,
+		Message: full + " is required",
 	})}
 }
 
@@ -588,7 +598,7 @@ func setEvents(events *[]vlatte.EventConfig, v config.Value) error {
 	})
 }
 
-// headerValues decodes an object of header values: text, or a list of text, each.
+// headerValues decodes an object of header values: a string, or a list of strings, each.
 func headerValues(v config.Value, dst *[]headerValue) error {
 	return config.Members(v, func(name string, m config.Value) error {
 		switch x := m.Any.(type) {
@@ -596,18 +606,24 @@ func headerValues(v config.Value, dst *[]headerValue) error {
 			*dst = append(*dst, headerValue{name: name, value: x})
 		case []any:
 			values := make([]headerValue, 0, len(x))
-			for _, e := range x {
-				s, ok := e.(string)
+
+			err := config.Items(m, func(item config.Value) error {
+				s, ok := item.Any.(string)
 				if !ok {
-					return notText(m, fmt.Sprintf("%s must be text or a list of text, not a list holding %s", m.Key, config.Describe(e)))
+					return config.Mismatch(item, "a string", config.String)
 				}
 
 				values = append(values, headerValue{name: name, value: s})
+
+				return nil
+			})
+			if err != nil {
+				return err
 			}
 
 			*dst = append(*dst, values...)
 		default:
-			return notText(m, fmt.Sprintf("%s must be text or a list of text, not %s", m.Key, config.Describe(m.Any)))
+			return config.Mismatch(m, "a string or a list of strings", config.String)
 		}
 
 		return nil
@@ -647,12 +663,7 @@ func sameHeader(v config.Value) error {
 	return nil
 }
 
-// notText reports a value where text is expected, suggesting quotes, since YAML reads 10 or true as a number or a bool.
-func notText(v config.Value, message string) error {
-	return config.Invalid(v, message, "quote numbers and bools to write them as text")
-}
-
-// matcherOf builds the matcher of a value: text, compared as is, or a matcher list such as [contains, x].
+// matcherOf builds the matcher of a value: a string, compared as is, or a matcher list such as [contains, x].
 func matcherOf(v config.Value) (vlatte.Matcher, error) {
 	switch x := v.Any.(type) {
 	case string:
@@ -664,7 +675,7 @@ func matcherOf(v config.Value) (vlatte.Matcher, error) {
 
 		return filterbuilder.TryBuildMatcher(x)
 	default:
-		return nil, notText(v, fmt.Sprintf("%s must be text or a matcher list, such as [equal, x], not %s", v.Key, config.Describe(v.Any)))
+		return nil, config.Mismatch(v, "a string or a matcher list, such as [equal, x]", config.String)
 	}
 }
 
@@ -759,13 +770,9 @@ func setURLMatch(r *requestDef, v config.Value) error {
 	r.keys = append(r.keys, "url_match")
 	r.url = withURL(r.url)
 
-	s, ok := v.Any.(string)
-	if !ok {
-		return config.Invalid(v, fmt.Sprintf("%s must be a regular expression, not %s", v.Key, config.Describe(v.Any)), "")
-	}
-
+	s := v.Str
 	if _, err := regexp.Compile(s); err != nil {
-		return config.Invalid(v, fmt.Sprintf("%s=%q is not a regular expression: %v", v.Key, s, err), "")
+		return config.Invalid(v, fmt.Sprintf("%s must be a regular expression, not %q", v.Key, s), err.Error())
 	}
 
 	r.url["url_match"] = func(b *Builder) { b.URL(match.RegExpr(s)) }

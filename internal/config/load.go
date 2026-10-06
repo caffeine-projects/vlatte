@@ -10,7 +10,8 @@ import (
 // entry is a raw value a source found for a key.
 type entry struct {
 	key    string
-	raw    any    // text from env and args; a decoded value from files
+	raw    any    // a value decoded from a document, or text from env and args
+	text   bool   // raw is text from env or args, which coerce parses
 	origin string // such as "env VLATTE_ADDR", "flag --addr" or "file .vlatterc.json"
 }
 
@@ -86,9 +87,9 @@ func (s *Schema[T]) apply(dst *T, entries []entry, values map[string]Value, pref
 	for _, e := range entries {
 		f := s.byKey[e.key]
 
-		v, p := coerce(f, e, under(prefix, e.key))
-		if p != nil {
-			problems = append(problems, *p)
+		v, found := coerce(f, e, under(prefix, e.key))
+		if len(found) > 0 {
+			problems = append(problems, found...)
 			continue
 		}
 

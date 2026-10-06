@@ -16,7 +16,11 @@ func TestIsIn(t *testing.T) {
 	}{
 		{"numbers", []any{10, 20, 30}, 20, true},
 		{"string", []any{"10", "20", "30"}, "20", true},
-		{"string -- number", []any{"10", "20", "30"}, 20, false},
+		{"text items read as numbers, as Equal reads them", []any{"10", "20", "30"}, 20, true},
+		{"a query value reads as a number", []any{1, 2}, "2", true},
+		{"text that isn't a JSON number", []any{1, 2}, "02", false},
+		{"no truncation", []any{1, 2}, 1.5, false},
+		{"no rune of a number", []any{49}, "1", false},
 		{"mixed", []any{"city", 100, true, false, 2000, "all", "test"}, "test", true},
 		{"mixed", []any{"city", 100, true, false, 2000, "all", "test"}, "dev", false},
 		{"mixed", []any{"city", 100, true, false, 2000, "all", "test"}, true, true},
@@ -29,10 +33,4 @@ func TestIsIn(t *testing.T) {
 			require.Equal(t, tc.expected, ok)
 		})
 	}
-}
-
-func TestInInWithInvalidItems(t *testing.T) {
-	ok, err := IsIn(true).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), true))
-	require.Error(t, err)
-	require.False(t, ok)
 }

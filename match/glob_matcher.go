@@ -1,13 +1,13 @@
 package match
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/ryanuber/go-glob"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 // globMatcher passes when the value matches the glob pattern.
@@ -21,9 +21,9 @@ func (m *globMatcher) Name() string { return "Glob" }
 // Match implements vlatte.Matcher.
 func (m *globMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
-	text, ok := v.(string)
+	text, ok := value.Text(v)
 	if !ok {
-		return failure(fmt.Errorf("glob: it only works with string types. got %T", v))
+		return mismatch("Glob() Value is not text")
 	}
 
 	if glob.Glob(m.Pattern, text) {

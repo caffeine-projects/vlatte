@@ -37,6 +37,14 @@ func (app *Base[TM, A]) MustMock(builders ...Builder[TM, A]) *Scope[TM] {
 	return scope
 }
 
+// Unmock deletes the mocks of scope and stops tracking it, so Hits, the mock lists and the assertions leave it out.
+func (app *Base[TM, A]) Unmock(ctx context.Context, scope *Scope[TM]) error {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	return app.scopes.Remove(ctx, scope)
+}
+
 // Hits returns the total matched request hits.
 func (app *Base[TM, A]) Hits() int64 {
 	hits := int64(0)
@@ -149,21 +157,23 @@ func (app *Base[TM, A]) AssertNotCalled(t TestingT) bool {
 	buf := strings.Builder{}
 
 	for i, scope := range app.scopes.All() {
-		if !scope.Pending() {
-			fmt.Fprintf(&buf, "   Scope %d\n", i)
-			called := scope.ListCalled()
-			size += len(called)
-
-			for _, p := range called {
-				buf.WriteString("    Mock [")
-				buf.WriteString(p.ID())
-				buf.WriteString("] ")
-				buf.WriteString(p.Name())
-				buf.WriteString("\n")
-			}
-
-			result = false
+		called := scope.ListCalled()
+		if len(called) == 0 {
+			continue
 		}
+
+		fmt.Fprintf(&buf, "   Scope %d\n", i)
+		size += len(called)
+
+		for _, p := range called {
+			buf.WriteString("    Mock [")
+			buf.WriteString(p.ID())
+			buf.WriteString("] ")
+			buf.WriteString(p.Name())
+			buf.WriteString("\n")
+		}
+
+		result = false
 	}
 
 	if !result {

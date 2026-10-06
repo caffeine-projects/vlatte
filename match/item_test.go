@@ -42,13 +42,15 @@ func TestItem(t *testing.T) {
 }
 
 func TestItemInvalidIndex(t *testing.T) {
-	ok, err := Item(-1, Equal("dev")).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), []string{"dev"}))
-	require.Error(t, err)
-	require.False(t, ok)
+	// A negative index is a mistake in code; mock files catch it when they load.
+	require.PanicsWithError(t, "match: item: the index must be 0 or more, not -1", func() { Item(-1, Equal("dev")) })
 }
 
-func TestInvalidType(t *testing.T) {
-	ok, err := Item(0, Equal("dev")).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), true))
-	require.Error(t, err)
-	require.False(t, ok)
+func TestItem_ValuesWithoutTheItem(t *testing.T) {
+	// A value that isn't a list, or has no item at the index, doesn't match: it used to panic past the end.
+	for _, v := range []any{true, nil, "dev", []string{}, []string{"a"}} {
+		ok, err := Item(1, Equal("dev")).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), v))
+		require.NoError(t, err)
+		require.False(t, ok)
+	}
 }

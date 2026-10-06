@@ -102,7 +102,7 @@ func TestDecode_NestedProblems(t *testing.T) {
 		{
 			name: "a group that isn't an object in a list item",
 			doc:  "items: [{meta: 5}]\n",
-			want: []Problem{{Code: CodeInvalidValue, Key: "items[0].meta", Message: "items[0].meta must be an object, not a number", Hint: "its keys are data"}},
+			want: []Problem{{Code: CodeInvalidValue, Key: "items[0].meta", Value: "5", Message: "items[0].meta must be an object, not a number", Hint: "its keys are data"}},
 		},
 		{
 			name: "an invalid value in a list item",
@@ -112,7 +112,7 @@ func TestDecode_NestedProblems(t *testing.T) {
 		{
 			name: "a wrong kind in a nested object",
 			doc:  "item: {size: big}\n",
-			want: []Problem{{Code: CodeInvalidValue, Key: "item.size", Value: "big", Message: `item.size="big" is not an integer`}},
+			want: []Problem{{Code: CodeInvalidValue, Key: "item.size", Value: "big", Message: "item.size must be an integer, not a string"}},
 		},
 		{
 			name: "a member error names the member as written",
@@ -128,7 +128,7 @@ func TestDecode_NestedProblems(t *testing.T) {
 			name: "every problem is reported, sorted by key",
 			doc:  "items: [{size: -1}, {nmae: b}]\ncount: x\nlabels: {a: 1}\n",
 			want: []Problem{
-				{Code: CodeInvalidValue, Key: "count", Value: "x", Message: `count="x" is not an integer`},
+				{Code: CodeInvalidValue, Key: "count", Value: "x", Message: "count must be an integer, not a string"},
 				{Code: CodeInvalidValue, Key: "items[0].size", Value: "-1", Message: `items[0].size="-1": must be 0 or more`},
 				{Code: CodeUnknownKey, Key: "items[1].nmae", Message: "items[1].nmae is not a known setting", Hint: "did you mean items[1].name?"},
 				{Code: CodeInvalidValue, Key: "labels.a", Value: "1", Message: `labels.a="1": must be text, not a number`},
@@ -293,7 +293,8 @@ func requireSameSet(t require.TestingT, want []string, err error) {
 }
 
 func TestPropNested_CoercionIsTheSameInEverySource(t *testing.T) {
-	// C8: a value means the same in a file, an env var and a flag.
+	// C8: a value means the same in a file, an env var and a flag, when the file writes it with its type:
+	// numbers and bools bare, text in quotes.
 	outer := t
 
 	load := func(t *rapid.T, key, fileValue, text string) []nestedDoc {
@@ -333,9 +334,29 @@ func TestPropNested_CoercionIsTheSameInEverySource(t *testing.T) {
 			require.Equal(t, n, d.Count)
 		}
 
+		flag := rapid.SampledFrom([]string{"true", "false", "1", "0", "t", "F", "TRUE"}).Draw(t, "on")
+		want, _ := strconv.ParseBool(flag)
+
+		for _, d := range load(t, "on", strconv.Quote(flag), flag) {
+			require.Equal(t, want, d.On, "a bool reads as strconv.ParseBool reads it, in every source")
+		}
+
 		scalar := rapid.SampledFrom([]string{"12", "-3", "true", "false", "1.5"}).Draw(t, "title")
-		for _, d := range load(t, "title", scalar, scalar) {
-			require.Equal(t, scalar, d.Title, "a scalar where text is expected is its text")
+		for _, d := range load(t, "title", strconv.Quote(scalar), scalar) {
+			require.Equal(t, scalar, d.Title, "text in quotes is a string in every source")
+		}
+
+		// Unquoted, a document holds a number or a bool, which a string setting doesn't take.
+		for _, src := range []Source{
+			Bytes("yaml", "yaml", fmt.Appendf(nil, "title: %s\n", scalar)),
+			Bytes("json", "json", fmt.Appendf(nil, `{"title": %s}`, scalar)),
+		} {
+			_, _, err := loadNested(src)
+
+			problems := requireProblems(t, err)
+			require.Len(t, problems, 1)
+			require.Regexp(t, `^title must be a string, not a (number|bool)$`, problems[0].Message)
+			require.Equal(t, "write it in quotes: "+strconv.Quote(scalar), problems[0].Hint)
 		}
 	})
 }

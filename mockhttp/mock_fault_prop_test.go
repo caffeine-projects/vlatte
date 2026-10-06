@@ -58,6 +58,9 @@ var _mockFaults = []mockFault{
 		doc["scenario"] = map[string]any{"required_state": "a"}
 	}},
 	{"ext", config.CodeInvalidValue, "ext", func(doc map[string]any) { doc["ext"] = []any{int64(1)} }},
+	{"name", config.CodeInvalidValue, "name", func(doc map[string]any) { doc["name"] = int64(123) }},
+	{"priority", config.CodeInvalidValue, "priority", func(doc map[string]any) { doc["priority"] = "5" }},
+	{"enabled", config.CodeInvalidValue, "enabled", func(doc map[string]any) { doc["enabled"] = "yes" }},
 }
 
 // sub returns the object under key, creating it.

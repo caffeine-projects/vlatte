@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -161,13 +162,34 @@ func (s *Scope[B]) Hits() int64 {
 	return total
 }
 
-// Delete removes mocks by ID, as long as they are scoped by this instance.
+// Delete removes the mocks of this scope with the given IDs from the store. IDs of other mocks are ignored.
+// A mock that left the store some other way stays out, even when its ID now names another mock:
+// mocks are told apart by identity, so Mock implementations must be comparable, as pointers are.
 func (s *Scope[B]) Delete(ctx context.Context, ids ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := s.store.Delete(ctx, ids...); err != nil {
-		return err
+	owned := make([]string, 0, len(ids))
+	for _, id := range ids {
+		e, ok := s.index[id]
+		if !ok {
+			continue
+		}
+
+		stored, err := s.store.Pick(ctx, id)
+		switch {
+		case errors.Is(err, ErrNotFound):
+		case err != nil:
+			return err
+		case any(stored) == any(e.mock):
+			owned = append(owned, id)
+		}
+	}
+
+	if len(owned) > 0 {
+		if err := s.store.Delete(ctx, owned...); err != nil {
+			return err
+		}
 	}
 
 	for _, id := range ids {
@@ -225,12 +247,12 @@ func (s *Scope[B]) AssertCalled(t TestingT) bool {
 func (s *Scope[B]) AssertNotCalled(t TestingT) bool {
 	t.Helper()
 
-	if s.Pending() {
+	called := s.ListCalled()
+	if len(called) == 0 {
 		return true
 	}
 
 	b := strings.Builder{}
-	called := s.ListCalled()
 	size := len(called)
 
 	for _, p := range called {
@@ -302,6 +324,19 @@ func (s *Scopes[B, A]) Add(builders ...Builder[B, A]) (*Scope[B], error) {
 	s.mu.Unlock()
 
 	return scope, nil
+}
+
+// Remove deletes the mocks of scope and stops tracking it.
+func (s *Scopes[B, A]) Remove(ctx context.Context, scope *Scope[B]) error {
+	if err := scope.Clear(ctx); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.list = slices.DeleteFunc(s.list, func(e *Scope[B]) bool { return e == scope })
+	s.mu.Unlock()
+
+	return nil
 }
 
 func (s *Scopes[B, A]) All() []*Scope[B] {

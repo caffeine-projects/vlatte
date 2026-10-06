@@ -290,7 +290,6 @@ func TestConfigSources_Defaults(t *testing.T) {
 
 func TestConfigSources_FileFormatsAgree(t *testing.T) {
 	// The same settings in JSON, YAML and YML must give the same server.
-	// max_age is quoted in the fixtures: files may quote numbers.
 	want := &Config{
 		Name: "test_api",
 		Addr: ":8080",
@@ -508,9 +507,9 @@ func TestConfigSources_ErrorListsEveryProblemWithItsOrigin(t *testing.T) {
 	want := `server: error loading configuration sources
 config: 5 problems
   env VLATTE_LOGLEVEL: unknown_key: VLATTE_LOGLEVEL is not a known setting; did you mean VLATTE_LOG_LEVEL?
-  env VLATTE_PROXY_TIMEOUT: invalid_value: proxy.timeout="10x" is not a duration; use milliseconds (1500) or a Go duration (1.5s)
+  env VLATTE_PROXY_TIMEOUT: invalid_value: proxy.timeout must be milliseconds or a Go duration, not "10x"; such as 1500 or 1.5s
   file ` + path + `: unknown_key: cors.allowed_origins is not a known setting; did you mean cors.allowed_origin?
-  file ` + path + `: invalid_value: log.level="verbose" is not an allowed value; use one of: trace (-1), debug (0), info (1), warn (2), error (3), fatal (4), panic (5), none (6), disabled (7)
+  file ` + path + `: invalid_value: log.level must be one of trace, debug, info, warn, error, fatal, panic, none or disabled, not "verbose"
   flag --tls-cert: missing_value: tls.cert is set but tls.key is not; set both`
 
 	require.EqualError(t, err, want)
