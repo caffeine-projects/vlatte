@@ -221,15 +221,24 @@ func TestConfigSources_ConfigFlagAndEnvPickTheFile(t *testing.T) {
 }
 
 func TestConfigSources_OnlyJSONAndYAMLFiles(t *testing.T) {
-	// B11: formats viper couldn't decode were advertised and silently ignored.
+	// B11: formats viper couldn't decode were advertised and silently ignored. A file named outright must be JSON
+	// or YAML; a lookup counts only those, so an editor backup next to .vlatterc.json can't make it ambiguous.
 	_, err := loadConfig(t, Setup(), ConfigFile("testdata/config_locals/diff_ext/.03_vlatterc.test.properties"))
 	require.Equal(t, config.CodeUnsupportedFormat, configProblems(t, err)[0].Code)
 
 	dir := t.TempDir()
-	writeConfigFile(t, dir, ".vlatterc.toml", "name = 'api'\n")
+	writeConfigFile(t, dir, ".vlatterc.toml", "name = 'toml'\n")
+	writeConfigFile(t, dir, ".vlatterc.json~", `{"name": "backup"}`)
 
-	_, err = loadConfig(t, Setup(), ConfigFile(DefaultConfigFileName, dir))
-	require.Equal(t, config.CodeUnsupportedFormat, configProblems(t, err)[0].Code, "a lookup must not skip an old format")
+	c, err := loadConfig(t, Setup(), ConfigFile(DefaultConfigFileName, dir))
+	require.NoError(t, err)
+	require.Empty(t, c.Name, "neither file counts")
+
+	writeConfigFile(t, dir, ".vlatterc.json", `{"name": "api"}`)
+
+	c, err = loadConfig(t, Setup(), ConfigFile(DefaultConfigFileName, dir))
+	require.NoError(t, err)
+	require.Equal(t, "api", c.Name)
 }
 
 func TestConfigSources_Precedence(t *testing.T) {

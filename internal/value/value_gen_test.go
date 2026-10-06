@@ -46,8 +46,8 @@ func genNumberText() *rapid.Generator[string] {
 	)
 }
 
-// textNumber is what ParseNumber should read s as: the grammar, then an exact integer, or the nearest float64,
-// kept as an int64 when whole.
+// textNumber is what ParseNumber should read s as: the grammar, then a whole number that fits an int64, exactly,
+// however it is written, or the nearest float64, kept as an int64 when whole.
 func textNumber(s string) (any, bool) {
 	if !_jsonNumber.MatchString(s) {
 		return nil, false
@@ -58,10 +58,8 @@ func textNumber(s string) (any, bool) {
 		return nil, false
 	}
 
-	if !strings.ContainsAny(s, ".eE") {
-		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
-			return n, true
-		}
+	if r, ok := exactRat(s); ok && r.IsInt() && r.Num().IsInt64() {
+		return r.Num().Int64(), true
 	}
 
 	if f == math.Trunc(f) && f >= -(1<<63) && f < 1<<63 {
@@ -69,6 +67,90 @@ func textNumber(s string) (any, bool) {
 	}
 
 	return f, true
+}
+
+// exactRat reads s, a number in the JSON grammar, as its exact value. It refuses exponents beyond ±10000,
+// whose powers of ten would take big.Rat too long.
+func exactRat(s string) (*big.Rat, bool) {
+	if i := strings.IndexAny(s, "eE"); i >= 0 {
+		if e, err := strconv.Atoi(s[i+1:]); err != nil || e > 10000 || e < -10000 {
+			return nil, false
+		}
+	}
+
+	return new(big.Rat).SetString(s)
+}
+
+// genSpelling draws a way to write n in the JSON number grammar: as its digits, with a zero fraction, or as a
+// mantissa and an exponent, the mantissa with trailing zeros, the exponent with leading ones.
+func genSpelling(n int64) *rapid.Generator[string] {
+	return rapid.Custom(func(t *rapid.T) string {
+		digits, negative := strings.CutPrefix(strconv.FormatInt(n, 10), "-")
+
+		sign := ""
+		if negative {
+			sign = "-"
+		}
+
+		// n is the mantissa times 10^shift: a positive shift moves the point left, a negative one appends zeros.
+		lowest := -2
+		if n == 0 {
+			lowest = 0 // 00 isn't a number
+		}
+
+		shift := rapid.IntRange(lowest, len(digits)+2).Draw(t, "shift")
+
+		var mantissa string
+
+		switch {
+		case shift < 0:
+			mantissa = digits + strings.Repeat("0", -shift)
+		case shift == 0:
+			mantissa = digits
+		case shift < len(digits):
+			mantissa = digits[:len(digits)-shift] + "." + digits[len(digits)-shift:]
+		default:
+			mantissa = "0." + strings.Repeat("0", shift-len(digits)) + digits
+		}
+
+		if zeros := rapid.IntRange(0, 2).Draw(t, "trailing zeros"); zeros > 0 {
+			if !strings.Contains(mantissa, ".") {
+				mantissa += "."
+			}
+
+			mantissa += strings.Repeat("0", zeros)
+		}
+
+		if shift == 0 && rapid.Bool().Draw(t, "no exponent") {
+			return sign + mantissa
+		}
+
+		exponent := strconv.Itoa(shift)
+		if shift >= 0 {
+			exponent = rapid.SampledFrom([]string{"", "+"}).Draw(t, "exponent sign") + exponent
+		}
+
+		padding := strings.Repeat("0", rapid.IntRange(0, 2).Draw(t, "exponent zeros"))
+		if rest, ok := strings.CutPrefix(exponent, "-"); ok {
+			exponent = "-" + padding + rest
+		} else if rest, ok := strings.CutPrefix(exponent, "+"); ok {
+			exponent = "+" + padding + rest
+		} else {
+			exponent = padding + exponent
+		}
+
+		return sign + mantissa + rapid.SampledFrom([]string{"e", "E"}).Draw(t, "e") + exponent
+	})
+}
+
+// genWideInt64 draws an int64, often beyond 2^53, where a float64 no longer holds every integer.
+func genWideInt64() *rapid.Generator[int64] {
+	return rapid.OneOf(
+		rapid.Int64(),
+		rapid.Int64Range(1<<53, math.MaxInt64),
+		rapid.Int64Range(math.MinInt64, -(1<<53)),
+		rapid.SampledFrom([]int64{0, 1 << 53, 1<<53 + 1, math.MaxInt64, math.MinInt64, 9007199254740993}),
+	)
 }
 
 // genGoNumber draws a number of any Go type, often near the edges where converting between types loses value.

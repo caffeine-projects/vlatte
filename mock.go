@@ -50,6 +50,13 @@ type Store[T Mock] interface {
 	// when an ID is already stored or repeated in the call.
 	Store(ctx context.Context, mocks ...T) error
 
+	// Replace removes the mocks of old it holds and stores mocks, in one step: a reader finds the mocks of old or
+	// the new ones, never neither. Mocks are told apart by identity, so a mock of old that left the store stays out,
+	// even when its ID now names another mock; Mock implementations must be comparable, as pointers are.
+	// It fails with ErrDuplicateID, changing nothing, when an ID of mocks is held by a mock it keeps,
+	// or repeated in the call.
+	Replace(ctx context.Context, old []T, mocks ...T) error
+
 	Pick(ctx context.Context, id string) (T, error)
 	PickAll(ctx context.Context) ([]T, error)
 

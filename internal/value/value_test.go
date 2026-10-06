@@ -45,6 +45,16 @@ func TestParseNumber(t *testing.T) {
 		{"-9223372036854775808", int64(math.MinInt64)},
 		{"9223372036854775808", float64(1 << 63)},
 		{"1e308", 1e308},
+		// An integer keeps every digit however it is written: read as a float64 first, these were 9007199254740992.
+		{"9.007199254740993e15", int64(9007199254740993)},
+		{"9007199254740993.0", int64(9007199254740993)},
+		{"90071992547409930e-1", int64(9007199254740993)},
+		{"9.223372036854775807e18", int64(math.MaxInt64)},
+		{"-9.223372036854775808e18", int64(math.MinInt64)},
+		{"9.223372036854775808e18", float64(1 << 63)},
+		{"1e0000000000000000000005", int64(100000)},
+		{"0e99999999999999999999", int64(0)},
+		{"1e-99999999999999999999", int64(0)},
 	}
 
 	for _, tc := range valid {
@@ -59,6 +69,42 @@ func TestParseNumber(t *testing.T) {
 	} {
 		_, ok := ParseNumber(text)
 		require.False(t, ok, "%q isn't a JSON number", text)
+	}
+}
+
+func TestParseInteger(t *testing.T) {
+	// Whole numbers keep every digit, in the JSON grammar and in what YAML floats add to it.
+	valid := []struct {
+		text string
+		want int64
+	}{
+		{"5", 5},
+		{"-5", -5},
+		{"+5", 5},
+		{"007", 7},
+		{"5.", 5},
+		{".5e1", 5},
+		{"-0.0", 0},
+		{"0e99999999999999999999", 0},
+		{"1e0000000000000000000005", 100000},
+		{"9.007199254740993e15", 9007199254740993},
+		{"92233720368547758070e-1", math.MaxInt64},
+		{"-9.223372036854775808E+18", math.MinInt64},
+	}
+
+	for _, tc := range valid {
+		got, ok := ParseInteger(tc.text)
+		require.True(t, ok, tc.text)
+		require.Equal(t, tc.want, got, tc.text)
+	}
+
+	for _, text := range []string{
+		"", "-", "+", ".", "e5", "1e", "1e+", "+-5", "--5", "1.2.3", "1_000", "0x10", "١", " 5",
+		"1.5", "1e-1", "1e19", "9223372036854775808", "-9223372036854775809", "1e99999999999999999999",
+		"1e-99999999999999999999",
+	} {
+		_, ok := ParseInteger(text)
+		require.False(t, ok, "%q", text)
 	}
 }
 
@@ -187,6 +233,8 @@ func TestEqualAndSame(t *testing.T) {
 		{"NaN equals nothing", nan, nan, false, false},
 		{"infinities are equal", math.Inf(1), math.Inf(1), true, true},
 		{"integers keep every digit", "9007199254740993", int64(9007199254740993), true, false},
+		{"however they are written", "9.007199254740993e15", int64(9007199254740993), true, false},
+		{"so they aren't the float64 nearest them", "9.007199254740993e15", int64(9007199254740992), false, false},
 		{"above 2^53 a float is not the next integer", float64(1 << 53), int64(1<<53 + 1), false, false},
 		{"text beyond int64 reads as a float", uint64(math.MaxUint64), "18446744073709551615", false, false},
 		{"a float32 keeps its own value", float32(0.1), 0.1, false, false},

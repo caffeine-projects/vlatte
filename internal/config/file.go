@@ -22,9 +22,10 @@ type fileSource struct {
 // File reads settings from a JSON or YAML file, chosen by its extension: .json, .yaml or .yml.
 //
 // With no dirs, path is the file to read, and it must exist.
-// With dirs, path is a base name, such as ".vlatterc": the first dir that holds path with an extension
-// is read, and finding none is fine. A higher-precedence source that sets pathKey, such as a --config flag,
-// replaces that lookup with the file it names.
+// With dirs, path is a base name, such as ".vlatterc": the first dir that holds path with a .json, .yaml or .yml
+// extension, in any case, is read, and finding none is fine. Other files named after path, such as editor backups,
+// are ignored. A higher-precedence source that sets pathKey, such as a --config flag, replaces that lookup with
+// the file it names.
 func File(pathKey, path string, dirs ...string) Source {
 	return &fileSource{pathKey: pathKey, path: path, dirs: dirs}
 }
@@ -63,7 +64,7 @@ func (s *fileSource) load(c *catalog, higher lookup) ([]entry, []Problem, error)
 	return nil, nil, nil
 }
 
-// find lists the files in dir named after the base name plus an extension.
+// find lists the files in dir named after the base name plus the extension of a document format.
 func (s *fileSource) find(dir string) ([]string, error) {
 	files, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -77,7 +78,9 @@ func (s *fileSource) find(dir string) ([]string, error) {
 	var matches []string
 	for _, file := range files {
 		name := file.Name()
-		if !file.IsDir() && strings.TrimSuffix(name, filepath.Ext(name)) == s.path {
+		ext := filepath.Ext(name)
+
+		if !file.IsDir() && isFormat(strings.ToLower(ext)) && strings.TrimSuffix(name, ext) == s.path {
 			matches = append(matches, name)
 		}
 	}

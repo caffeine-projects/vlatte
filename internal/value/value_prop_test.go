@@ -11,8 +11,9 @@ import (
 )
 
 func TestPropParseNumber_Grammar(t *testing.T) {
-	// V1: text is a number iff the JSON grammar allows it and its value fits a float64;
-	// then an integer keeps every digit, and anything else is the nearest float64, an int64 when whole.
+	// V1: text is a number iff the JSON grammar allows it and its value fits a float64; then a whole number that
+	// fits an int64 keeps every digit, however it is written, and anything else is the nearest float64, an int64
+	// when whole.
 	rapid.Check(t, func(t *rapid.T) {
 		s := genNumberText().Draw(t, "text")
 
@@ -21,6 +22,29 @@ func TestPropParseNumber_Grammar(t *testing.T) {
 
 		require.Equal(t, wantOK, ok, "%q", s)
 		require.Equal(t, want, got, "%q", s)
+	})
+}
+
+func TestPropParseNumber_IntegersAnySpelling(t *testing.T) {
+	// V10: an integer keeps every digit however it is written. Read as a float64 first, 9.007199254740993e15 and
+	// 9007199254740993.0 were 9007199254740992, so an integer key, an order bound or Equal took the wrong number.
+	rapid.Check(t, func(t *rapid.T) {
+		n := genWideInt64().Draw(t, "n")
+		s := genSpelling(n).Draw(t, "spelling")
+
+		got, ok := ParseNumber(s)
+		require.True(t, ok, s)
+		require.Equal(t, n, got, s)
+
+		doc, err := DecodeJSON([]byte(s))
+		require.NoError(t, err)
+		require.Equal(t, n, doc, s)
+
+		require.True(t, Equal(s, n), s)
+
+		if n < math.MaxInt64 {
+			require.False(t, Equal(s, n+1), s)
+		}
 	})
 }
 
@@ -156,7 +180,7 @@ func boolOracle(v any) (bool, bool) {
 
 func FuzzParseNumber(f *testing.F) {
 	// V7: any text reads as a number only in the JSON grammar, without panicking.
-	for _, s := range []string{"0", "-0", "1.5e3", "01", "+1", "1_000", "Inf", "9007199254740993", "1e400", ""} {
+	for _, s := range []string{"0", "-0", "1.5e3", "01", "+1", "1_000", "Inf", "9007199254740993", "1e400", "", "9.007199254740993e15", "0e99999999999999999999"} {
 		f.Add(s)
 	}
 
@@ -174,6 +198,11 @@ func FuzzParseNumber(f *testing.F) {
 			require.False(t, math.IsInf(x, 0) || math.IsNaN(x), "%q", s)
 		default:
 			t.Fatalf("%q read as a %T", s, n)
+		}
+
+		// A whole number that fits an int64 is exactly it.
+		if r, ok := exactRat(s); ok && r.IsInt() && r.Num().IsInt64() {
+			require.Equal(t, r.Num().Int64(), n, "%q", s)
 		}
 	})
 }

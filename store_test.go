@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -45,15 +47,70 @@ func TestMemoryStore_RejectsDuplicateIDs(t *testing.T) {
 	require.Equal(t, []string{"a"}, ids(all))
 }
 
+func TestMemoryStore_ReplaceIsAtomic(t *testing.T) {
+	// A reload swaps the mocks of the files while requests are served: a request that found neither set
+	// would get no mock at all.
+	ctx := t.Context()
+	store := vlatte.NewStore[*fakeMock]()
+
+	var sets [2][]*fakeMock
+	for i := range sets {
+		for _, id := range _storeIDs {
+			sets[i] = append(sets[i], newFakeMockWith(id, 0))
+		}
+	}
+
+	require.NoError(t, store.Store(ctx, sets[0]...))
+
+	var (
+		wg    sync.WaitGroup
+		done  atomic.Bool
+		reads atomic.Int64
+		torn  atomic.Int64
+	)
+
+	for range 4 {
+		wg.Go(func() {
+			for !done.Load() {
+				listed, _ := store.List(ctx)
+				found := slices.Collect(listed)
+
+				if !sameMocks(sets[0], found) && !sameMocks(sets[1], found) {
+					torn.Add(1)
+				}
+
+				reads.Add(1)
+			}
+		})
+	}
+
+	for i := range 2000 {
+		require.NoError(t, store.Replace(ctx, sets[i%2], sets[(i+1)%2]...))
+	}
+
+	done.Store(true)
+	wg.Wait()
+
+	require.Positive(t, reads.Load())
+	require.Zero(t, torn.Load(), "reads that found neither set, or a mix")
+}
+
 // storeEntry is the model of a stored mock: its order is by priority, then by when it was stored.
 type storeEntry struct {
 	mock *fakeMock
 	seq  int
 }
 
+// genStoreMock draws a mock whose ID comes from _storeIDs.
+func genStoreMock() *rapid.Generator[*fakeMock] {
+	return rapid.Custom(func(t *rapid.T) *fakeMock {
+		return newFakeMockWith(rapid.SampledFrom(_storeIDs).Draw(t, "id"), rapid.IntRange(-2, 2).Draw(t, "priority"))
+	})
+}
+
 func TestMemoryStoreMachine(t *testing.T) {
-	// S1: the store behaves like a model: unique IDs, refused batches leave it unchanged,
-	// and mocks are ordered by priority, then by when they were stored.
+	// S1: the store behaves like a model: unique IDs, refused batches leave it unchanged, a replacement removes
+	// only the very mocks it names, and mocks are ordered by priority, then by when they were stored.
 	rapid.Check(t, func(t *rapid.T) {
 		ctx := context.Background()
 		store := vlatte.NewStore[*fakeMock]()
@@ -67,9 +124,7 @@ func TestMemoryStoreMachine(t *testing.T) {
 
 		t.Repeat(map[string]func(*rapid.T){
 			"store": func(t *rapid.T) {
-				batch := rapid.SliceOfN(rapid.Custom(func(t *rapid.T) *fakeMock {
-					return newFakeMockWith(rapid.SampledFrom(_storeIDs).Draw(t, "id"), rapid.IntRange(-2, 2).Draw(t, "priority"))
-				}), 1, 3).Draw(t, "batch")
+				batch := rapid.SliceOfN(genStoreMock(), 1, 3).Draw(t, "batch")
 
 				duplicate := false
 				seen := make(map[string]bool)
@@ -87,6 +142,48 @@ func TestMemoryStoreMachine(t *testing.T) {
 
 				require.NoError(t, err)
 
+				for _, m := range batch {
+					seq++
+					model = append(model, storeEntry{mock: m, seq: seq})
+				}
+			},
+			"replace": func(t *rapid.T) {
+				var old []*fakeMock
+				for _, e := range model {
+					if rapid.Bool().Draw(t, "replaced") {
+						old = append(old, e.mock)
+					}
+				}
+
+				// A mock that left the store may share its ID with a stored one, which the store must keep.
+				if rapid.Bool().Draw(t, "stale") {
+					old = append(old, newFakeMockWith(rapid.SampledFrom(_storeIDs).Draw(t, "stale id"), 0))
+				}
+
+				batch := rapid.SliceOfN(genStoreMock(), 0, 3).Draw(t, "batch")
+
+				taken := make(map[string]bool)
+				for _, e := range model {
+					if !slices.Contains(old, e.mock) {
+						taken[e.mock.ID()] = true
+					}
+				}
+
+				duplicate := false
+				for _, m := range batch {
+					duplicate = duplicate || taken[m.ID()]
+					taken[m.ID()] = true
+				}
+
+				err := store.Replace(ctx, old, batch...)
+				if duplicate {
+					require.ErrorIs(t, err, vlatte.ErrDuplicateID)
+					return
+				}
+
+				require.NoError(t, err)
+
+				model = slices.DeleteFunc(model, func(e storeEntry) bool { return slices.Contains(old, e.mock) })
 				for _, m := range batch {
 					seq++
 					model = append(model, storeEntry{mock: m, seq: seq})

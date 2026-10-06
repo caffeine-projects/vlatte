@@ -9,10 +9,12 @@
 package value
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
 	"strconv"
+	"strings"
 )
 
 // Bool reads v as a bool the way strconv.ParseBool reads text: text as written, with no trimming;
@@ -42,8 +44,9 @@ func boolOf(k kept) (b, ok bool) {
 }
 
 // ParseNumber reads text written in the JSON number grammar, -?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?,
-// the way documents read numbers: an integer that fits an int64 keeps every digit, and any other number is the
-// nearest float64, kept as an int64 when that is whole, so 5, 5.0 and 5e0 are one number.
+// the way documents read numbers: an integer that fits an int64 keeps every digit, however it is written, so
+// 9007199254740993, 9007199254740993.0 and 9.007199254740993e15 are one number; any other number is the nearest
+// float64, kept as an int64 when that is whole.
 // Other text, such as +1, 01, .5, 1_000, Inf or text with spaces, isn't a number, and neither are numbers
 // beyond float64, such as 1e400.
 func ParseNumber(s string) (any, bool) {
@@ -52,6 +55,54 @@ func ParseNumber(s string) (any, bool) {
 	}
 
 	n, err := number(s, false)
+
+	return n, err == nil
+}
+
+// ParseInteger reads s, a decimal number, when its value is a whole number that fits an int64, with every digit:
+// read as a float64 first, 9.007199254740993e15 would be 9007199254740992. It takes the JSON number grammar, and
+// what YAML floats add to it: a leading + or zeros, and a point with no digits on one side, as in .5e1 or 5.
+// ok is false for other text, and for numbers that aren't whole or don't fit.
+func ParseInteger(s string) (int64, bool) {
+	sign := ""
+	if rest, ok := strings.CutPrefix(s, "-"); ok {
+		sign, s = "-", rest
+	} else {
+		s = strings.TrimPrefix(s, "+")
+	}
+
+	mantissa, exponent := s, "0"
+	if i := strings.IndexAny(s, "eE"); i >= 0 {
+		mantissa, exponent = s[:i], s[i+1:]
+	}
+
+	whole, fraction, _ := strings.Cut(mantissa, ".")
+	digits := whole + fraction
+
+	e, err := strconv.Atoi(exponent)
+	if digits == "" || strings.Trim(digits, "0123456789") != "" || (err != nil && !errors.Is(err, strconv.ErrRange)) {
+		return 0, false
+	}
+
+	digits = strings.TrimLeft(digits, "0")
+	if digits == "" {
+		return 0, true
+	}
+
+	// The value is digits × 10^(e - len(fraction)). Far enough from 0, e makes it too large to fit, or leaves
+	// a fraction; this bound also keeps the shift below from overflowing.
+	if err != nil || e > 19+len(fraction) || e < -len(digits) {
+		return 0, false
+	}
+
+	trimmed := strings.TrimRight(digits, "0")
+
+	shift := e - len(fraction) + len(digits) - len(trimmed)
+	if shift < 0 || len(trimmed)+shift > 19 {
+		return 0, false
+	}
+
+	n, err := strconv.ParseInt(sign+trimmed+strings.Repeat("0", shift), 10, 64)
 
 	return n, err == nil
 }
@@ -109,6 +160,10 @@ func isDigit(c byte) bool {
 // or ±Inf when lenient.
 func number(text string, lenient bool) (any, error) {
 	if n, err := strconv.ParseInt(text, 10, 64); err == nil {
+		return n, nil
+	}
+
+	if n, ok := ParseInteger(text); ok {
 		return n, nil
 	}
 

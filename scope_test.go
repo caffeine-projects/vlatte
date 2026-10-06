@@ -145,6 +145,23 @@ func TestScope_DeleteKeepsANewerMockWithTheID(t *testing.T) {
 	require.Empty(t, scope.Mocks(), "the scope lets go of its own mock either way")
 }
 
+func TestScope_DeleteLetsGoOfAMockTheStoreLost(t *testing.T) {
+	// A mock that left the store is no longer there to delete; the scope lets go of it all the same.
+	store := vlatte.NewStore[*fakeMock]()
+	gone, kept := newFakeMockWith("gone", 0), newFakeMockWith("kept", 0)
+	require.NoError(t, store.Store(t.Context(), gone, kept))
+
+	scope := vlatte.NewScope([]*fakeMock{gone, kept}, store)
+	require.NoError(t, store.Delete(t.Context(), "gone"))
+
+	require.NoError(t, scope.Delete(t.Context(), "gone"))
+	require.Nil(t, scope.Mock("gone"))
+	require.Same(t, kept, scope.Mock("kept"))
+
+	all, _ := store.PickAll(t.Context())
+	require.True(t, sameMocks([]*fakeMock{kept}, all))
+}
+
 func TestScope_DeleteReportsStoreErrors(t *testing.T) {
 	// A store that can't tell which mock it holds, or can't delete it, leaves the scope as it was.
 	for name, store := range map[string]*brokenStore{

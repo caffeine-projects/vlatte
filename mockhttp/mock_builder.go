@@ -118,8 +118,8 @@ func (b *Builder) Name(name string) *Builder {
 	return b
 }
 
-// Priority sets the priority of the mock.
-// A higher priority will take precedence during request matching.
+// Priority sets the priority of the mock. Mocks with a lower priority are matched first;
+// mocks of equal priority, in the order they were added.
 func (b *Builder) Priority(p int) *Builder {
 	b.mock.priority = p
 

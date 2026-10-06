@@ -20,9 +20,9 @@ type modelScope struct {
 
 func TestScopesMachine(t *testing.T) {
 	// S3: a scope only removes the mocks it holds, while the store still holds them, and the server's assertions
-	// and hits describe exactly the mocks of the scopes it tracks, whatever mix of adds, hits, deletes, clears,
-	// unmocks, cleans and evictions happens. An eviction removes a mock behind its scope's back and may give its ID
-	// to a new mock, which no other scope may then delete.
+	// and hits describe exactly the mocks of the scopes it tracks, whatever mix of adds, remocks, hits, deletes,
+	// clears, unmocks, cleans and evictions happens. An eviction removes a mock behind its scope's back and may give
+	// its ID to a new mock, which no other scope may then delete. An add or a remock happens in full or not at all.
 	ctx := t.Context()
 
 	rapid.Check(t, func(t *rapid.T) {
@@ -73,35 +73,58 @@ func TestScopesMachine(t *testing.T) {
 			return ids
 		}
 
+		builders := func(t *rapid.T) []fakeBuilder {
+			return rapid.SliceOfN(rapid.Custom(func(t *rapid.T) fakeBuilder {
+				if rapid.IntRange(0, 5).Draw(t, "fails") == 0 {
+					return fakeBuilder{err: errors.New("bad")}
+				}
+
+				return fakeBuilder{mock: newFakeMockWith(rapid.SampledFrom(_storeIDs).Draw(t, "id"), 0)}
+			}), 0, 3).Draw(t, "builders")
+		}
+
+		// build gives the builders as arguments, and whether they add their mocks: none fails,
+		// and no ID repeats or is taken.
+		build := func(builders []fakeBuilder, taken map[string]bool) ([]vlatte.Builder[*fakeMock, struct{}], bool) {
+			ok := true
+			args := make([]vlatte.Builder[*fakeMock, struct{}], 0, len(builders))
+
+			for _, b := range builders {
+				args = append(args, b)
+
+				if b.err != nil {
+					ok = false
+					continue
+				}
+
+				ok = ok && !taken[b.mock.ID()]
+				taken[b.mock.ID()] = true
+			}
+
+			return args, ok
+		}
+
+		// added models the scope of builders that added their mocks.
+		added := func(scope *vlatte.Scope[*fakeMock], builders []fakeBuilder) *modelScope {
+			s := &modelScope{scope: scope}
+			for _, b := range builders {
+				s.mocks = append(s.mocks, b.mock)
+				stored = append(stored, b.mock)
+			}
+
+			return s
+		}
+
 		t.Repeat(map[string]func(*rapid.T){
 			"add": func(t *rapid.T) {
-				builders := rapid.SliceOfN(rapid.Custom(func(t *rapid.T) fakeBuilder {
-					if rapid.IntRange(0, 5).Draw(t, "fails") == 0 {
-						return fakeBuilder{err: errors.New("bad")}
-					}
+				drawn := builders(t)
 
-					return fakeBuilder{mock: newFakeMockWith(rapid.SampledFrom(_storeIDs).Draw(t, "id"), 0)}
-				}), 0, 3).Draw(t, "builders")
-
-				taken := make(map[string]bool, len(stored)+len(builders))
+				taken := make(map[string]bool, len(stored)+len(drawn))
 				for _, m := range stored {
 					taken[m.ID()] = true
 				}
 
-				ok := true
-				args := make([]vlatte.Builder[*fakeMock, struct{}], 0, len(builders))
-
-				for _, b := range builders {
-					args = append(args, b)
-
-					if b.err != nil {
-						ok = false
-						continue
-					}
-
-					ok = ok && !taken[b.mock.ID()]
-					taken[b.mock.ID()] = true
-				}
+				args, ok := build(drawn, taken)
 
 				scope, err := app.Mock(args...)
 				if !ok {
@@ -113,13 +136,35 @@ func TestScopesMachine(t *testing.T) {
 
 				require.NoError(t, err)
 
-				s := &modelScope{scope: scope}
-				for _, b := range builders {
-					s.mocks = append(s.mocks, b.mock)
-					stored = append(stored, b.mock)
+				scopes = append(scopes, added(scope, drawn))
+			},
+			"remock": func(t *rapid.T) {
+				s := pick(t)
+				drawn := builders(t)
+
+				// The mocks of s that the store still holds give their IDs up.
+				taken := make(map[string]bool, len(stored)+len(drawn))
+				for _, m := range stored {
+					if !slices.Contains(s.mocks, m) {
+						taken[m.ID()] = true
+					}
 				}
 
-				scopes = append(scopes, s)
+				args, ok := build(drawn, taken)
+
+				scope, err := app.Remock(ctx, s.scope, args...)
+				if !ok {
+					require.Error(t, err)
+					require.Nil(t, scope)
+
+					return
+				}
+
+				require.NoError(t, err)
+				release(s, own(s))
+				require.Empty(t, s.scope.Mocks())
+
+				scopes[slices.Index(scopes, s)] = added(scope, drawn)
 			},
 			"hit": func(t *rapid.T) {
 				all := tracked()

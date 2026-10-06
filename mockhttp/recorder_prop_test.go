@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"bytes"
 	"compress/gzip"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,10 +14,13 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
+
+	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
 // exchange is a request and the response a target gives it.
@@ -25,6 +29,7 @@ type exchange struct {
 	path      string
 	query     url.Values
 	accept    string
+	reqType   string // the request's content type, which names nothing in the recording
 	body      *string
 	status    int
 	resHeader map[string]string
@@ -36,11 +41,12 @@ type exchange struct {
 func genExchange() *rapid.Generator[exchange] {
 	return rapid.Custom(func(t *rapid.T) exchange {
 		ex := exchange{
-			method: rapid.SampledFrom(_genMethods).Draw(t, "method"),
-			path:   "/" + strings.Join(rapid.SliceOfN(rapid.StringMatching(`[A-Za-z0-9-]{1,6}`), 1, 3).Draw(t, "path"), "/"),
-			query:  make(url.Values),
-			accept: genToken().Draw(t, "accept"),
-			status: rapid.SampledFrom(_genStatuses).Draw(t, "status"),
+			method:  rapid.SampledFrom(_genMethods).Draw(t, "method"),
+			path:    "/" + strings.Join(rapid.SliceOfN(rapid.StringMatching(`[A-Za-z0-9-]{1,6}`), 1, 3).Draw(t, "path"), "/"),
+			query:   make(url.Values),
+			accept:  genToken().Draw(t, "accept"),
+			reqType: rapid.SampledFrom([]string{"", MIMEApplicationJSON, "image/png"}).Draw(t, "request content type"),
+			status:  rapid.SampledFrom(_genStatuses).Draw(t, "status"),
 			resHeader: map[string]string{
 				"Content-Type":  rapid.SampledFrom([]string{"text/plain; charset=utf-8", "application/json", "application/octet-stream"}).Draw(t, "content type"),
 				"Cache-Control": genToken().Draw(t, "cache control"),
@@ -74,6 +80,10 @@ func genExchange() *rapid.Generator[exchange] {
 
 func (ex exchange) request() requestSpec {
 	req := requestSpec{method: ex.method, path: ex.path, query: ex.query, header: http.Header{"Accept": {ex.accept}}, body: ex.body}
+	if ex.reqType != "" {
+		req.header.Set(HeaderContentType, ex.reqType)
+	}
+
 	return req
 }
 
@@ -186,6 +196,25 @@ func (rt *roundTrip) requireRoundTrip(t require.TestingT, ex exchange, format st
 	require.NoError(t, err)
 	require.Len(t, files, 1, "one recording; server logs:\n%s", rt.logs)
 
+	// The recording holds the body as it reads, in a file named after the response's content type when it goes to
+	// one, and records gzip as encoding, which compresses it again and sets Content-Encoding when it replays.
+	reply := recordedReply(t, files[0])
+	require.Equal(t, ex.gzip, reply.gzip, "encoding")
+
+	for _, h := range reply.header {
+		require.False(t, strings.EqualFold(h.name, HeaderContentEncoding), "Content-Encoding is recorded as encoding")
+	}
+
+	require.Equal(t, len(ex.resBody) > 0 && (toFile || !utf8.Valid(ex.resBody)), reply.bodyFile != "", "a body file")
+
+	if reply.bodyFile != "" {
+		require.Equal(t, bodyFileExt(ex.resHeader[HeaderContentType]), filepath.Ext(reply.bodyFile))
+
+		b, err := os.ReadFile(filepath.Join(dir, reply.bodyFile))
+		require.NoError(t, err)
+		require.Equal(t, ex.resBody, b, "the body file holds the body as it reads")
+	}
+
 	// The replay server loads the recording and its body files, which replace the last ones.
 	clearDir(t, rt.replayDir)
 
@@ -203,6 +232,7 @@ func (rt *roundTrip) requireRoundTrip(t require.TestingT, ex exchange, format st
 	replayed, replayedBody := send(t, rt.replay.URL(), ex.request())
 	require.Equal(t, original.StatusCode, replayed.StatusCode, "status")
 	require.Equal(t, originalBody, replayedBody, "body")
+	require.Equal(t, original.Uncompressed, replayed.Uncompressed, "compressed as the target compressed it")
 
 	for _, h := range []string{"Content-Type", "Cache-Control"} {
 		require.Equal(t, original.Header.Get(h), replayed.Header.Get(h), h)
@@ -213,6 +243,30 @@ func (rt *roundTrip) requireRoundTrip(t require.TestingT, ex exchange, format st
 
 	res, _ := send(t, rt.replay.URL(), other)
 	require.Equal(t, StatusNoMatch, res.StatusCode, "another path")
+}
+
+// recordedReply reads the reply of a recorded mock file.
+func recordedReply(t require.TestingT, path string) *replyDef {
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	def := newMockDef()
+	_, err = _mockSchema.Load(&def, []config.Source{config.Bytes(path, strings.TrimPrefix(filepath.Ext(path), "."), data)})
+	require.NoError(t, err)
+	require.NotNil(t, def.reply)
+
+	return def.reply
+}
+
+// bodyFileExt is the extension of the file the recorder writes a response body to: the extension of the response's
+// content type, or .bin.
+func bodyFileExt(contentType string) string {
+	mediaType, _, _ := strings.Cut(contentType, ";")
+	if ext, _ := mime.ExtensionsByType(strings.TrimSpace(mediaType)); len(ext) > 0 {
+		return ext[0]
+	}
+
+	return ".bin"
 }
 
 func TestPropRecorder_RoundTrip(t *testing.T) {
@@ -273,6 +327,101 @@ func TestRecorder_Regressions(t *testing.T) {
 	}
 }
 
+func TestRecorder_BodyFiles(t *testing.T) {
+	// A body file was named after the request's content type, so a JSON response to a GET was saved as .bin, and an
+	// image sent back to a POST as text; a gzip body went to the file still compressed, under that name.
+	const plain = `{"a": 1}`
+
+	var gz bytes.Buffer
+
+	w := gzip.NewWriter(&gz)
+	_, err := w.Write([]byte(plain))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	image := []byte("\x89PNG\r\n\x1a\n")
+	text := "a request body"
+
+	tests := []struct {
+		name  string
+		req   requestSpec
+		reply *Reply
+		ext   string
+		body  []byte
+		gzip  bool
+	}{
+		{
+			name:  "a JSON response to a GET without a content type",
+			req:   requestSpec{method: http.MethodGet, path: "/a"},
+			reply: OK().Header(HeaderContentType, MIMEApplicationCharsetUTF8).Body([]byte(plain)),
+			ext:   ".json",
+			body:  []byte(plain),
+		},
+		{
+			name:  "an image sent back to a POST of text",
+			req:   requestSpec{method: http.MethodPost, path: "/a", body: &text},
+			reply: OK().Header(HeaderContentType, "image/png").Body(image),
+			ext:   ".png",
+			body:  image,
+		},
+		{
+			name:  "a response without a content type",
+			req:   requestSpec{method: http.MethodGet, path: "/a"},
+			reply: OK().Body([]byte(plain)),
+			ext:   ".bin",
+			body:  []byte(plain),
+		},
+		{
+			name:  "a gzip JSON response",
+			req:   requestSpec{method: http.MethodGet, path: "/a"},
+			reply: OK().Header(HeaderContentType, MIMEApplicationJSON).Header(HeaderContentEncoding, "gzip").Body(gz.Bytes()),
+			ext:   ".json",
+			body:  []byte(plain),
+			gzip:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			rec := MustNew(Setup().Silent().Record(RecordDir(dir), RecordResponseBodyToFile(true)))
+			rec.MustStart()
+			t.Cleanup(rec.Close)
+			rec.MustMock(AnyMethod().Reply(tc.reply))
+
+			original, originalBody := send(t, rec.URL(), tc.req)
+			rec.StopRecording()
+
+			mocks, err := filepath.Glob(filepath.Join(dir, "*.mock.json"))
+			require.NoError(t, err)
+			require.Len(t, mocks, 1)
+
+			reply := recordedReply(t, mocks[0])
+			require.Equal(t, tc.ext, filepath.Ext(reply.bodyFile), reply.bodyFile)
+
+			b, err := os.ReadFile(filepath.Join(dir, reply.bodyFile))
+			require.NoError(t, err)
+			require.Equal(t, tc.body, b, "the body as it reads")
+
+			require.Equal(t, tc.gzip, reply.gzip, "encoding")
+
+			for _, h := range reply.header {
+				require.False(t, strings.EqualFold(h.name, HeaderContentEncoding), "Content-Encoding is recorded as encoding")
+			}
+
+			replay := MustNew(Setup().Silent().MockFilePatterns(filepath.Join(dir, "*.mock.json")))
+			replay.MustStart()
+			t.Cleanup(replay.Close)
+
+			replayed, replayedBody := send(t, replay.URL(), tc.req)
+			require.Equal(t, originalBody, replayedBody)
+			require.Equal(t, tc.gzip, replayed.Uncompressed, "compressed again when it replays")
+			require.Equal(t, original.Uncompressed, replayed.Uncompressed)
+		})
+	}
+}
+
 func TestRecorder_Formats(t *testing.T) {
 	// Recordings are mock files, so they use the formats mock files can: any other fails when the server is created.
 	_, err := New(Setup().Record(RecordExtension("toml")))
@@ -330,7 +479,8 @@ func TestRecorder_LogsWhatItCantRecord(t *testing.T) {
 		{
 			name: "a body file it can't write",
 			dir: func(t *testing.T) string {
-				// A body that isn't UTF-8 goes to a file of its own, named after the request.
+				// A body that isn't UTF-8 goes to a file of its own, named after the request, and .bin without a
+				// content type.
 				dir := t.TempDir()
 				require.NoError(t, os.Mkdir(filepath.Join(dir, "GET-x--response-body.bin"), 0o755))
 

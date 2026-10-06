@@ -47,12 +47,34 @@ func (s *MemoryStore[B]) List(ctx context.Context) (iter.Seq[B], error) {
 // Store adds mocks, ordered by priority and then by when they were stored.
 // It stores none of them when an ID is already stored or repeated in the call.
 func (s *MemoryStore[B]) Store(_ context.Context, mocks ...B) error {
+	return s.swap(func(B) bool { return false }, mocks)
+}
+
+// Replace removes the mocks of old it holds, the very instances, and stores mocks, in one step.
+// It changes nothing when an ID of mocks is held by a mock it keeps, or repeated in the call.
+func (s *MemoryStore[B]) Replace(_ context.Context, old []B, mocks ...B) error {
+	gone := make(map[any]struct{}, len(old))
+	for _, mock := range old {
+		gone[mock] = struct{}{}
+	}
+
+	return s.swap(func(mock B) bool {
+		_, ok := gone[mock]
+		return ok
+	}, mocks)
+}
+
+// swap removes the mocks drop reports and adds mocks, in one step, ordered by priority and then by when they were
+// stored. It changes nothing when an ID of mocks is held by a mock it keeps, or repeated in the call.
+func (s *MemoryStore[B]) swap(drop func(B) bool, mocks []B) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	ids := make(map[string]struct{}, len(s.mocks)+len(mocks))
 	for _, mock := range s.mocks {
-		ids[mock.ID()] = struct{}{}
+		if !drop(mock) {
+			ids[mock.ID()] = struct{}{}
+		}
 	}
 
 	for _, mock := range mocks {
@@ -63,7 +85,8 @@ func (s *MemoryStore[B]) Store(_ context.Context, mocks ...B) error {
 		ids[mock.ID()] = struct{}{}
 	}
 
-	s.mocks = append(s.mocks, mocks...)
+	// Only now: deleting in place changes the stored mocks, which a refused call must leave alone.
+	s.mocks = append(slices.DeleteFunc(s.mocks, drop), mocks...)
 
 	slices.SortStableFunc(s.mocks, func(a, b B) int {
 		return cmp.Compare(a.Priority(), b.Priority())
@@ -97,24 +120,15 @@ func (s *MemoryStore[B]) PickAll(_ context.Context) ([]B, error) {
 }
 
 func (s *MemoryStore[B]) Delete(_ context.Context, ids ...string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	idSet := make(map[string]struct{}, len(ids))
+	gone := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
-		idSet[id] = struct{}{}
+		gone[id] = struct{}{}
 	}
 
-	kept := s.mocks[:0]
-	for _, mock := range s.mocks {
-		if _, found := idSet[mock.ID()]; !found {
-			kept = append(kept, mock)
-		}
-	}
-
-	s.mocks = kept
-
-	return nil
+	return s.swap(func(mock B) bool {
+		_, ok := gone[mock.ID()]
+		return ok
+	}, nil)
 }
 
 func (s *MemoryStore[B]) Clear(_ context.Context) error {

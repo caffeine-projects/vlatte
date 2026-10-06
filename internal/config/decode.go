@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 
@@ -52,7 +54,8 @@ func decode(data []byte, ext string) (any, error) {
 	return normalize(doc), nil
 }
 
-// retag makes timestamps and mapping keys decode as text, as JSON would give them.
+// retag makes timestamps and mapping keys decode as text, as JSON would give them, and floats that are whole numbers
+// that fit an int64 decode as those integers, with every digit, as JSON reads them.
 // A YAML 1.1 merge key (<<) keeps its meaning. A key that isn't text, such as a list, is an error.
 func retag(n *yaml.Node) error {
 	switch n.Kind {
@@ -80,8 +83,18 @@ func retag(n *yaml.Node) error {
 			}
 		}
 	case yaml.ScalarNode:
-		if n.ShortTag() == "!!timestamp" {
+		switch n.ShortTag() {
+		case "!!timestamp":
 			n.Tag = "!!str"
+		case "!!float":
+			// Decoded as a float64 first, 9.007199254740993e15 would lose its last digit. YAML reads numbers without
+			// their underscores, and integers with its own rules: !!float 0777 is 511, so those keep their text.
+			plain := strings.ReplaceAll(n.Value, "_", "")
+			if _, err := strconv.ParseInt(plain, 0, 64); err == nil {
+				n.Tag = "!!int"
+			} else if i, ok := value.ParseInteger(plain); ok {
+				n.Tag, n.Value = "!!int", strconv.FormatInt(i, 10)
+			}
 		}
 	}
 

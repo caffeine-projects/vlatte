@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,6 +45,23 @@ func TestDecode_DataModel(t *testing.T) {
 		{"json integer beyond int64 is a float", ".json", `{"n": 100000000000000000000}`, map[string]any{"n": 1e20}},
 		{"yaml integer beyond int64 is a float", ".yaml", "n: 100000000000000000000\n", map[string]any{"n": 1e20}},
 		{"json whole number written as a float", ".json", `{"n": 1e16}`, map[string]any{"n": int64(1e16)}},
+		// A whole number written with a fraction or an exponent keeps every digit too: read as a float64 first,
+		// these were 9007199254740992.
+		{"json exponent-form integer is exact", ".json", `{"n": 9.007199254740993e15}`, map[string]any{"n": int64(9007199254740993)}},
+		{"yaml exponent-form integer is exact", ".yaml", "n: 9.007199254740993e15\n", map[string]any{"n": int64(9007199254740993)}},
+		{"yaml float spellings of an integer are exact", ".yaml", "a: 9_007_199_254_740_993.0\nb: +9.007199254740993E+15\nc: .5e1\n", map[string]any{
+			"a": int64(9007199254740993), "b": int64(9007199254740993), "c": int64(5),
+		}},
+		{"yaml explicit float reads integers as yaml does", ".yaml", "a: !!float 0777\nb: !!float 0x1F\nc: !!float 9007199254740993\n", map[string]any{
+			"a": int64(511), "b": int64(31), "c": int64(9007199254740993),
+		}},
+		{"yaml alias to an exponent-form integer is exact", ".yaml", "a: &n 9.007199254740993e15\nb: *n\n", map[string]any{
+			"a": int64(9007199254740993), "b": int64(9007199254740993),
+		}},
+		{"yaml fraction stays a float", ".yaml", "n: !!float 2.5\n", map[string]any{"n": 2.5}},
+		// A fraction is the nearest float64, so one that rounds to a whole number reads as that integer.
+		{"json fraction that rounds to a whole number", ".json", `{"n": 4503599627370496.5}`, map[string]any{"n": int64(4503599627370496)}},
+		{"yaml fraction that rounds to a whole number", ".yaml", "n: 4503599627370496.5\n", map[string]any{"n": int64(4503599627370496)}},
 		{"yaml uint beyond int64 is a float", ".yaml", "n: 18446744073709551615\n", map[string]any{"n": float64(math.MaxUint64)}},
 		{"empty json", ".json", " \n", nil},
 		{"empty yaml", ".yaml", "", nil},
@@ -137,6 +155,11 @@ func TestEncode_JSON(t *testing.T) {
 	require.Equal(t, "{\n  \"a\": \"x\",\n  \"b\": [\n    1,\n    2.5\n  ]\n}\n", string(b))
 }
 
+func TestEncode_YAML(t *testing.T) {
+	b := encodeAs(t, map[string]any{"a": true, "b": 2.5, "c": int64(1)}, "yaml")
+	require.Equal(t, "a: true\nb: 2.5\nc: 1\n", string(b))
+}
+
 func TestEncode_UnknownFormat(t *testing.T) {
 	_, err := Encode(make(map[string]any), "toml")
 	require.EqualError(t, err, `config: format "toml" is not JSON or YAML`)
@@ -177,25 +200,47 @@ func TestPropDecode_TimestampsAndKeysStayText(t *testing.T) {
 }
 
 func TestPropDecode_WholeNumbersAreInt64(t *testing.T) {
-	// C4: integers are exact int64 in JSON and YAML; a whole number written with a fraction is an int64 too,
-	// when its float64 is exact; other numbers keep their exact float64.
+	// C4: integers are exact int64 in JSON and YAML, however they are written: with a fraction or an exponent, one
+	// beyond 2^53 used to lose its last digit to float64. Other numbers keep their exact float64.
 	rapid.Check(t, func(t *rapid.T) {
 		n := rapid.Int64().Draw(t, "integer")
-		w := rapid.Int64Range(-_maxExactInt, _maxExactInt).Draw(t, "whole")
+		w := rapid.OneOf(rapid.Int64(), rapid.Int64Range(_maxExactInt, math.MaxInt64)).Draw(t, "whole")
 		f := genFraction().Draw(t, "fraction")
 		text := strconv.FormatFloat(f, 'g', -1, 64)
+
+		tenths := strconv.FormatInt(w, 10) + "0e-1"
+		if w == 0 {
+			tenths = "0e-1"
+		}
 
 		for _, doc := range []struct {
 			ext  string
 			data string
 		}{
-			{".json", fmt.Sprintf(`{"a": %d, "b": %d.0, "c": %s}`, n, w, text)},
-			{".yaml", fmt.Sprintf("a: %d\nb: %d.0\nc: %s\n", n, w, text)},
+			{".json", fmt.Sprintf(`{"a": %d, "b": %d.0, "c": %s, "d": %s, "e": %s}`, n, w, text, scientific(w), tenths)},
+			{".yaml", fmt.Sprintf("a: %d\nb: %d.0\nc: %s\nd: %s\ne: %s\n", n, w, text, scientific(w), tenths)},
 		} {
 			got := decodeAs(t, []byte(doc.data), doc.ext)
-			require.Equal(t, map[string]any{"a": n, "b": w, "c": f}, got, doc.ext)
+			require.Equal(t, map[string]any{"a": n, "b": w, "c": f, "d": w, "e": w}, got, doc.ext)
 		}
 	})
+}
+
+// scientific writes n with one digit before the point and an exponent, as in 9.007199254740993e+15.
+func scientific(n int64) string {
+	digits, negative := strings.CutPrefix(strconv.FormatInt(n, 10), "-")
+
+	sign := ""
+	if negative {
+		sign = "-"
+	}
+
+	mantissa := digits[:1]
+	if len(digits) > 1 {
+		mantissa += "." + digits[1:]
+	}
+
+	return sign + mantissa + "e+" + strconv.Itoa(len(digits)-1)
 }
 
 func FuzzDecode(f *testing.F) {

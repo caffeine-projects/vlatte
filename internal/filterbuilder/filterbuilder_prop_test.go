@@ -47,6 +47,7 @@ func TestBuildMatcher_ChecksArguments(t *testing.T) {
 		{[]any{"jsonpath", int64(1), "anything"}, "jsonpath takes a JSON path first, not a number"},
 		{[]any{"both", "anything"}, "both takes 2 matchers, not 1"},
 		{[]any{"all", []any{}}, "all takes 1 matcher or more, not 0"},
+		{[]any{"all", []any{[]any{"nope"}}}, `all: matcher 0: unknown matcher "nope"`},
 		{[]any{"not", int64(1)}, `not: a matcher is a name or a definition such as ["equal", 1], not a number`},
 		{[]any{int64(1), "x"}, `a matcher spec names its matcher first, as in ["equal", 1], not a number`},
 		{[]any{"nope"}, `unknown matcher "nope"`},
@@ -68,6 +69,14 @@ func TestBuildMatcher_ChecksArguments(t *testing.T) {
 		_, err := BuildMatcher(tc.spec)
 		require.EqualError(t, err, tc.err, "%v", tc.spec)
 	}
+}
+
+func TestBuildMatcher_URLPathTakesAPattern(t *testing.T) {
+	// [urlpath, pattern] globs the path; [urlpath, matcher], as descriptions write it, matches the path itself.
+	m, err := BuildMatcher([]any{"urlpath", "/a/*"})
+	require.NoError(t, err)
+	require.True(t, matches(t, m, "/a/b"))
+	require.False(t, matches(t, m, "/b"))
 }
 
 func TestBuildMatcher_EqualTakesNull(t *testing.T) {

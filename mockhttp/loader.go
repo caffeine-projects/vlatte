@@ -11,7 +11,8 @@ import (
 )
 
 // Loader loads mocks from outside the code, such as mock files.
-// Load runs on the first Start and on every Reload, so it replaces the mocks its last run added.
+// Load runs on the first Start and on every Reload, so it replaces the mocks its last run added,
+// which Server.Remock does in one step.
 type Loader interface {
 	Load(app *Server) error
 }
@@ -25,7 +26,8 @@ type fileLoader struct {
 }
 
 // Load adds the mocks of every matching file, in file name order, so mocks of equal priority match in that order.
-// It adds all of them or, when a file has problems, none, and reports every file with problems.
+// A reload swaps them for the mocks of the last load in one step, so a request finds one set or the other.
+// When a file has problems, Load changes nothing and reports every file with problems.
 func (l *fileLoader) Load(app *Server) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -49,16 +51,7 @@ func (l *fileLoader) Load(app *Server) error {
 
 	slices.Sort(files)
 
-	// A reload replaces the mocks of the last load, so edited and removed files take effect.
-	if l.scope != nil {
-		if err := app.Unmock(context.Background(), l.scope); err != nil {
-			return fmt.Errorf("loader: %w", err)
-		}
-
-		l.scope = nil
-	}
-
-	if len(files) == 0 {
+	if len(files) == 0 && l.scope == nil {
 		return nil
 	}
 
@@ -67,7 +60,8 @@ func (l *fileLoader) Load(app *Server) error {
 		builders = append(builders, FromFile(file))
 	}
 
-	scope, err := app.Mock(builders...)
+	// A reload replaces the mocks of the last load, so edited and removed files take effect.
+	scope, err := app.Remock(context.Background(), l.scope, builders...)
 	if err != nil {
 		return fmt.Errorf("loader: %w", err)
 	}

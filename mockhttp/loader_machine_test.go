@@ -2,7 +2,6 @@ package mockhttp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -10,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -135,8 +136,8 @@ func TestFileLoader_ReloadReplacesFileMocks(t *testing.T) {
 
 func TestFileLoaderMachine(t *testing.T) {
 	// M13: whatever is done to the mock files, a reload leaves exactly the mocks of the files on disk,
-	// matching in priority then name order; a failed one leaves no file mock and names every bad file;
-	// mocks added in code are never touched.
+	// matching in priority then name order; a failed one names every bad file and changes nothing, so the mocks
+	// of the last good load still serve; mocks added in code are never touched.
 	names := []string{"a.mock.yaml", "b.mock.json", "c.mock.yaml", "d.mock.yml"}
 	ids := []string{"", "", "x", "y"}
 
@@ -154,7 +155,7 @@ func TestFileLoaderMachine(t *testing.T) {
 		code := m.MustMock(Getf("/code").Reply(OK().PlainText("code")))
 
 		files := make(map[string]mockFileSpec)
-		loaded := 0 // file mocks the last load stored
+		live := make(map[string]mockFileSpec) // the files of the last good load
 
 		t.Repeat(map[string]func(*rapid.T){
 			"write": func(t *rapid.T) {
@@ -200,54 +201,46 @@ func TestFileLoaderMachine(t *testing.T) {
 					taken[spec.id] = spec.id != ""
 				}
 
-				all, _ := m.storage.PickAll(context.Background())
-
 				switch {
 				case len(bad) > 0:
 					for _, name := range bad {
 						require.ErrorContains(t, err, "file "+filepath.Join(dir, name)+":")
 					}
-
-					require.Len(t, all, 1, "only the code mock")
-
-					loaded = 0
 				case duplicate:
 					require.ErrorIs(t, err, vlatte.ErrDuplicateID)
-					require.Len(t, all, 1, "only the code mock")
-
-					loaded = 0
 				default:
 					require.NoError(t, err)
-					require.Len(t, all, 1+len(files))
 
-					loaded = len(files)
+					live = maps.Clone(files)
+				}
 
-					var origins []string
-					for _, mock := range all {
-						if mock.Origin() != "" {
-							origins = append(origins, filepath.Base(mock.Origin()))
-						}
+				all, _ := m.storage.PickAll(context.Background())
+				require.Len(t, all, 1+len(live))
+
+				var origins []string
+				for _, mock := range all {
+					if mock.Origin() != "" {
+						origins = append(origins, filepath.Base(mock.Origin()))
 					}
+				}
 
-					require.ElementsMatch(t, slices.Collect(maps.Keys(files)), origins)
+				require.ElementsMatch(t, slices.Collect(maps.Keys(live)), origins)
 
-					status, body := get(t, m, "/f")
-					if len(files) == 0 {
-						require.Equal(t, StatusNoMatch, status)
-						break
-					}
-
+				status, body := get(t, m, "/f")
+				if len(live) == 0 {
+					require.Equal(t, StatusNoMatch, status)
+				} else {
 					// The lowest priority wins; then the first name.
-					want := slices.MinFunc(slices.Sorted(maps.Keys(files)), func(a, b string) int { return files[a].priority - files[b].priority })
+					want := slices.MinFunc(slices.Sorted(maps.Keys(live)), func(a, b string) int { return live[a].priority - live[b].priority })
 					require.Equal(t, want, body)
 				}
 
-				_, body := get(t, m, "/code")
+				_, body = get(t, m, "/code")
 				require.Equal(t, "code", body)
 			},
 			"": func(t *rapid.T) {
 				all, _ := m.storage.PickAll(context.Background())
-				require.Len(t, all, 1+loaded, "the code mock and the file mocks of the last load")
+				require.Len(t, all, 1+len(live), "the code mock and the file mocks of the last good load")
 
 				// Reloads leave no scope behind that the assertions would count.
 				require.Equal(t, len(m.ListCalled()) == 0, m.AssertNotCalled(testmock.NewFakeT()))
@@ -320,31 +313,114 @@ func TestFileLoader_OtherScopesCantDeleteFileMocks(t *testing.T) {
 	require.Equal(t, "a.mock.yaml", body)
 }
 
-// pickFailingStore is a store that can't tell which mock it holds, as a remote store that is down.
-type pickFailingStore struct {
-	*vlatte.MemoryStore[*Mock]
+func TestFileLoader_FailedReloadKeepsTheLastMocks(t *testing.T) {
+	// A reload removed the mocks of the last load before it built the new ones, so a bad edit left a running server
+	// with no file mock until a later load succeeded.
+	tests := []struct {
+		name  string
+		spoil func(t *testing.T, dir string)
+		err   string
+	}{
+		{
+			name:  "a file with problems",
+			spoil: func(t *testing.T, dir string) { writeMockFile(t, dir, "a.mock.yaml", mockFileSpec{bad: true}) },
+			err:   "a.mock.yaml: unknown_key: response.stauts",
+		},
+		{
+			name: "two files with one id",
+			spoil: func(t *testing.T, dir string) {
+				writeMockFile(t, dir, "a.mock.yaml", mockFileSpec{id: "same"})
+				writeMockFile(t, dir, "b.mock.json", mockFileSpec{id: "same"})
+			},
+			err: `loader: server: store: mock id already in use: "same"`,
+		},
+		{
+			name: "a backup the pattern matches",
+			spoil: func(t *testing.T, dir string) {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "a.mock.yaml~"), []byte("request: {path: /f}\n"), 0o600))
+			},
+			err: "a.mock.yaml~: unsupported_format",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeMockFile(t, dir, "a.mock.yaml", mockFileSpec{})
+
+			m := MustNew(Setup().Silent().MockFilePatterns(filepath.Join(dir, "*.mock.*")))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			_, body := get(t, m, "/f")
+			require.Equal(t, "a.mock.yaml", body)
+
+			tc.spoil(t, dir)
+			require.ErrorContains(t, m.Reload(), tc.err)
+
+			// The mocks of the last load still serve, and the assertions still count them.
+			_, body = get(t, m, "/f")
+			require.Equal(t, "a.mock.yaml", body)
+			require.Len(t, m.ListCalled(), 1)
+			require.Equal(t, int64(2), m.Hits())
+
+			// The next good reload applies the edit.
+			clearDir(t, dir)
+			writeMockFile(t, dir, "b.mock.json", mockFileSpec{})
+			require.NoError(t, m.Reload())
+
+			_, body = get(t, m, "/f")
+			require.Equal(t, "b.mock.json", body)
+		})
+	}
 }
 
-func (pickFailingStore) Pick(context.Context, string) (*Mock, error) {
-	return nil, errors.New("store down")
-}
-
-func TestFileLoader_ReportsMocksItCantRemove(t *testing.T) {
-	// A reload that can't remove the mocks of its last load adds no new ones next to them.
+func TestFileLoader_ReloadNeverDropsFileMocks(t *testing.T) {
+	// A reload removed the mocks of the last load, then built and added the new ones:
+	// a request in between found no mock at all.
 	dir := t.TempDir()
-	writeMockFile(t, dir, "a.mock.yaml", mockFileSpec{})
+	writeMockFile(t, dir, "a.mock.yaml", mockFileSpec{id: "f"})
 
 	m := MustNew(Setup().Silent().MockFilePatterns(filepath.Join(dir, "*.mock.*")))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	stale, err := Getf("/stale").Reply(OK()).Build(m)
-	require.NoError(t, err)
+	var (
+		wg       sync.WaitGroup
+		done     atomic.Bool
+		requests atomic.Int64
+		missed   atomic.Int64
+	)
 
-	l := &fileLoader{scope: vlatte.NewScope([]*Mock{stale}, vlatte.Store[*Mock](pickFailingStore{new(vlatte.MemoryStore[*Mock])}))}
-	require.EqualError(t, l.Load(m), "loader: store down")
+	for range 4 {
+		wg.Go(func() {
+			for !done.Load() {
+				res, err := http.Get(m.URL() + "/f")
+				if err != nil {
+					continue
+				}
 
-	all, _ := m.storage.PickAll(t.Context())
-	require.Len(t, all, 1, "only the mock of the first start")
-	require.NotNil(t, l.scope, "the loader keeps its scope, to remove it next time")
+				_, _ = io.Copy(io.Discard, res.Body)
+				_ = res.Body.Close()
+
+				if res.StatusCode == StatusNoMatch {
+					missed.Add(1)
+				}
+
+				requests.Add(1)
+			}
+		})
+	}
+
+	for i := range 100 {
+		// Each reload replaces the mock with another of the same id.
+		writeMockFile(t, dir, "a.mock.yaml", mockFileSpec{id: "f", priority: i % 2})
+		require.NoError(t, m.Reload())
+	}
+
+	done.Store(true)
+	wg.Wait()
+
+	require.Positive(t, requests.Load())
+	require.Zero(t, missed.Load(), "requests that found no file mock")
 }

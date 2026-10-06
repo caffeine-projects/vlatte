@@ -253,9 +253,6 @@ func (r *recorder) process(arg recArgs) error {
 		requestBodyHash = hex.EncodeToString(h.Sum(nil))
 	}
 
-	contentType, _, _ := strings.Cut(arg.request.header.Get(HeaderContentType), ";")
-	contentType = strings.TrimSpace(contentType)
-
 	nm := strings.ReplaceAll(arg.request.uri, " ", "-")
 	nm = strings.TrimPrefix(_regexNoSpecialCharacters.ReplaceAllString(nm, "-"), "-")
 	if requestBodyHash != "" {
@@ -275,10 +272,8 @@ func (r *recorder) process(arg recArgs) error {
 	mockFile := filepath.Join(saveDir, fmt.Sprintf("%s.mock.%s", name, r.config.SaveFileType))
 
 	if len(arg.response.body) > 0 {
-		gzipped := arg.response.header.Get(HeaderContentEncoding) == "gzip"
-
 		body := arg.response.body
-		if gzipped {
+		if arg.response.header.Get(HeaderContentEncoding) == "gzip" {
 			gz, err := gzip.NewReader(bytes.NewReader(arg.response.body))
 			if err != nil {
 				return err
@@ -289,18 +284,30 @@ func (r *recorder) process(arg recArgs) error {
 			if body, err = io.ReadAll(gz); err != nil {
 				return err
 			}
+
+			// The recording holds the body as it reads, which encoding compresses again when it replays.
+			// encoding also sets Content-Encoding; recorded too, it would repeat.
+			response["encoding"] = "gzip"
+
+			for h := range responseHeaders {
+				if strings.EqualFold(h, HeaderContentEncoding) {
+					delete(responseHeaders, h)
+				}
+			}
 		}
 
-		// A mock file is text, so a body that isn't goes to a file of its own, as recorded.
+		// A mock file is text, so a body that isn't goes to a file of its own, named after its content type.
 		if r.config.SaveResponseBodyToFile || !utf8.Valid(body) {
+			contentType, _, _ := strings.Cut(arg.response.header.Get(HeaderContentType), ";")
+
 			bodyFile := name + "--response-body"
-			if ext, _ := mime.ExtensionsByType(contentType); len(ext) > 0 {
+			if ext, _ := mime.ExtensionsByType(strings.TrimSpace(contentType)); len(ext) > 0 {
 				bodyFile += ext[0]
 			} else {
 				bodyFile += ".bin"
 			}
 
-			if err := os.WriteFile(filepath.Join(saveDir, bodyFile), arg.response.body, 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(saveDir, bodyFile), body, 0o644); err != nil {
 				return err
 			}
 
@@ -308,16 +315,6 @@ func (r *recorder) process(arg recArgs) error {
 			response["body_file"] = bodyFile
 		} else {
 			response["body"] = string(body)
-			if gzipped {
-				// encoding sets Content-Encoding when the body is compressed again; recorded too, it would repeat.
-				response["encoding"] = "gzip"
-
-				for h := range responseHeaders {
-					if strings.EqualFold(h, HeaderContentEncoding) {
-						delete(responseHeaders, h)
-					}
-				}
-			}
 		}
 	}
 

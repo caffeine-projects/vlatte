@@ -48,12 +48,13 @@ func (m *fakeMock) String() string        { return m.id }
 // hit records a served request, as a protocol server does after a mock matches.
 func (m *fakeMock) hit() { m.hits.Add(1) }
 
-// brokenStore is a memory store whose Pick or Delete fails, for the error paths of scopes.
+// brokenStore is a memory store whose Pick, Delete or Replace fails, for the error paths of scopes.
 type brokenStore struct {
 	*vlatte.MemoryStore[*fakeMock]
 
-	pickErr   error
-	deleteErr error
+	pickErr    error
+	deleteErr  error
+	replaceErr error
 }
 
 func newBrokenStore(pickErr, deleteErr error) *brokenStore {
@@ -74,6 +75,14 @@ func (s *brokenStore) Delete(ctx context.Context, ids ...string) error {
 	}
 
 	return s.MemoryStore.Delete(ctx, ids...)
+}
+
+func (s *brokenStore) Replace(ctx context.Context, old []*fakeMock, mocks ...*fakeMock) error {
+	if s.replaceErr != nil {
+		return s.replaceErr
+	}
+
+	return s.MemoryStore.Replace(ctx, old, mocks...)
 }
 
 // sameMocks reports whether got holds exactly the instances of want, in any order: mocks are told apart by identity.

@@ -79,7 +79,7 @@ err := m.Prep(ctx, proxyall.New(proxyall.Config{Target: "https://api.example.com
 Mocks can also live in YAML or JSON files (`.json`, `.yaml` or `.yml`).
 - **On start,** the server loads the files matching `testdata/_mocks/*mock.yaml` and `testdata/_mocks/*mock.yml`, in name order. Change the patterns with `Setup().MockFilePatterns(...)`.
 - **To load one file,** use `m.MustMock(mockhttp.FromFile(path))`.
-- **`m.Reload()`** replaces the mocks of the files with what they hold now.
+- **`m.Reload()`** replaces the mocks of the files with what they hold now, in one step. When a file has problems, it returns them and the mocks stay as they were.
 
 ```yaml
 # testdata/_mocks/hello_mock.yaml

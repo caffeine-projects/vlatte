@@ -92,6 +92,7 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"bad url", "request: {url: 'http://a b'}\n", []want{{config.CodeInvalidValue, "request.url", "is not a URL", ""}}},
 		{"url_match as a list", "request: {url_match: [equal, x]}\n", []want{{config.CodeInvalidValue, "request.url_match", "request.url_match must be a string, not a list", ""}}},
 		{"url_match that doesn't compile", "request: {url_match: '('}\n", []want{{config.CodeInvalidValue, "request.url_match", `request.url_match must be a regular expression, not "("`, "error parsing regexp"}}},
+		{"url matcher that doesn't build", "request: {url: [regex, '(']}\n", []want{{config.CodeInvalidValue, "request.url", "regex takes a regular expression", ""}}},
 		{"url and path", "request: {url: /x, path: /y}\n", []want{{config.CodeConflict, "request.path", "request.path is set with request.url", "keep one of them"}}},
 		{"url, url_match and path", "request: {url: /x, url_match: x, path: /y}\n", []want{
 			{config.CodeConflict, "request.url_match", "is set with request.url", ""},
@@ -397,6 +398,25 @@ func TestMockFile_FormFieldsComeFromTheBody(t *testing.T) {
 	require.Equal(t, http.StatusOK, post("", "H=x&A=-"))
 	require.Equal(t, StatusNoMatch, post("H=x", "A=-"), "H is in the query, not in the form")
 	require.Equal(t, StatusNoMatch, post("A=-", "H=x"), "A is in the query, not in the form")
+}
+
+func TestMockFile_ServesTrailers(t *testing.T) {
+	// A trailer of a mock file reaches the client after the body.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(FromBytes([]byte("request: {path: /t}\nresponse:\n  body: ok\n  trailer: {X-End: done}\n"), "yaml"))
+
+	res, err := http.Get(m.URL() + "/t")
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	require.Equal(t, "ok", string(body))
+	require.Equal(t, "done", res.Trailer.Get("X-End"))
 }
 
 func TestMockFile_ProxyKeys(t *testing.T) {

@@ -289,6 +289,7 @@ func (app *Server) Logger() *zerolog.Logger {
 
 // Reload loads the mocks of external sources, such as mock files, again.
 // Each loader replaces the mocks it added before; mocks added in code are kept.
+// Mock files are swapped in one step, and stay as they were when a file has problems.
 func (app *Server) Reload() error {
 	return app.load()
 }
