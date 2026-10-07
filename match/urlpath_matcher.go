@@ -7,6 +7,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 // urlPathMatcher applies the inner matcher to the URL path of the value.
@@ -19,33 +20,12 @@ func (m *urlPathMatcher) Name() string { return "URLPath" }
 
 // Match implements vlatte.Matcher.
 func (m *urlPathMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
-	v := arg.Value()
-	var value string
-
-	switch e := v.(type) {
-	case *url.URL:
-		value = e.Path
-	case url.URL:
-		value = e.Path
-	case string:
-		u, err := url.Parse(e)
-		if err != nil {
-			return failure(fmt.Errorf("urlpath: error parsing url: %w", err))
-		}
-
-		value = u.Path
-	case fmt.Stringer:
-		u, err := url.Parse(e.String())
-		if err != nil {
-			return failure(fmt.Errorf("urlpath: error parsing url: %w", err))
-		}
-
-		value = u.Path
-	default:
-		return failure(fmt.Errorf("urlpath: it only accepts the types: *url.URL | url.URL | string. got: %T", v))
+	path, ok := urlPath(arg.Value())
+	if !ok {
+		return mismatch("URLPath() Value is not a URL")
 	}
 
-	ok, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), value))
+	ok, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), path))
 	if err != nil {
 		return failure(fmt.Errorf("urlpath: %w", err))
 	}
@@ -54,7 +34,31 @@ func (m *urlPathMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"URLPath(", value, ")"}, ""))
+	return mismatch(strings.Join([]string{"URLPath(", path, ")"}, ""))
+}
+
+// urlPath returns the path of a URL: a *url.URL or url.URL, text that parses as one, or a value whose String does.
+func urlPath(v any) (string, bool) {
+	switch e := v.(type) {
+	case *url.URL:
+		return e.Path, true
+	case url.URL:
+		return e.Path, true
+	case fmt.Stringer:
+		v = e.String()
+	}
+
+	text, ok := value.Text(v)
+	if !ok {
+		return "", false
+	}
+
+	u, err := url.Parse(text)
+	if err != nil {
+		return "", false
+	}
+
+	return u.Path, true
 }
 
 // Describe implements descriptor.SelfDescriptive.

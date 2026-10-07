@@ -15,7 +15,10 @@ func TestEqualIgnoreCase(t *testing.T) {
 		matchValue        any
 		expected          bool
 	}{
-		{"nil value (empty)", "", nil, nil, true},
+		// An absent value isn't empty text, as nil isn't false.
+		{"nil isn't empty text", "", nil, nil, false},
+		{"bytes are text", "TesT", nil, []byte("test"), true},
+		{"a number isn't text", "1", nil, 1, false},
 		{"nil value", "test", nil, nil, false},
 		{"diff case", "TesT", nil, "test", true},
 		{"equal values", "test", nil, "test", true},

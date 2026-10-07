@@ -4,12 +4,13 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-// GreaterThanOrEqual passes if the value is greater than or equal to the given value.
-func GreaterThanOrEqual(expected float64) vlatte.Matcher {
+// GreaterThanOrEqual matches a number, or text that reads as one, greater than or equal to expected.
+// Numbers compare by their exact value, whatever their Go types; other values don't match.
+func GreaterThanOrEqual[N Number](expected N) vlatte.Matcher {
 	return &greaterOrEqualMatcher{Expected: expected}
 }
 
 // GTE is an alias for GreaterThanOrEqual.
-func GTE(expected float64) vlatte.Matcher {
-	return &greaterOrEqualMatcher{Expected: expected}
+func GTE[N Number](expected N) vlatte.Matcher {
+	return GreaterThanOrEqual(expected)
 }

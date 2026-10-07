@@ -64,6 +64,31 @@ func TestJSONPath(t *testing.T) {
 	}
 }
 
+func TestJSONPath_ReadsBodiesAsDocumentsAre(t *testing.T) {
+	// A body is read the way mock files are: a decimal is the float64 nearest to it, as in the file, and an integer
+	// keeps every digit. ojg's own reader adds the fraction separately, which can differ in the last bit.
+	for body, m := range map[string]vlatte.Matcher{
+		`{"x": 0.3}`:                Equal(0.3),
+		`{"x": 2.675}`:              Equal(2.675),
+		`{"x": 9007199254740993}`:   Equal(int64(9007199254740993)),
+		`{"x": 1.0}`:                StrictEqual(int64(1)),
+		`{"x": "a", "x": "b"}`:      Equal("b"),
+		"{\"x\": [1, 2], \"y\": 3}": Len(2),
+	} {
+		ok, err := JSONPath("$.x", m).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), body))
+		require.NoError(t, err)
+		require.True(t, ok, body)
+	}
+
+	ok, err := JSONPath("$.x", Equal(int64(1))).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), []byte(`{"x": 1}`)))
+	require.NoError(t, err)
+	require.True(t, ok, "a body of another content type arrives as bytes")
+
+	ok, err = JSONPath("$.x", Anything()).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), "{"))
+	require.NoError(t, err)
+	require.False(t, ok, "a body that isn't JSON doesn't match")
+}
+
 func TestJSONPathMatcherMatchErrors(t *testing.T) {
 	testCases := []struct {
 		name    string

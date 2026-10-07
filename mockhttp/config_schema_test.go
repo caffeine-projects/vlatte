@@ -221,15 +221,24 @@ func TestConfigSources_ConfigFlagAndEnvPickTheFile(t *testing.T) {
 }
 
 func TestConfigSources_OnlyJSONAndYAMLFiles(t *testing.T) {
-	// B11: formats viper couldn't decode were advertised and silently ignored.
+	// B11: formats viper couldn't decode were advertised and silently ignored. A file named outright must be JSON
+	// or YAML; a lookup counts only those, so an editor backup next to .vlatterc.json can't make it ambiguous.
 	_, err := loadConfig(t, Setup(), ConfigFile("testdata/config_locals/diff_ext/.03_vlatterc.test.properties"))
 	require.Equal(t, config.CodeUnsupportedFormat, configProblems(t, err)[0].Code)
 
 	dir := t.TempDir()
-	writeConfigFile(t, dir, ".vlatterc.toml", "name = 'api'\n")
+	writeConfigFile(t, dir, ".vlatterc.toml", "name = 'toml'\n")
+	writeConfigFile(t, dir, ".vlatterc.json~", `{"name": "backup"}`)
 
-	_, err = loadConfig(t, Setup(), ConfigFile(DefaultConfigFileName, dir))
-	require.Equal(t, config.CodeUnsupportedFormat, configProblems(t, err)[0].Code, "a lookup must not skip an old format")
+	c, err := loadConfig(t, Setup(), ConfigFile(DefaultConfigFileName, dir))
+	require.NoError(t, err)
+	require.Empty(t, c.Name, "neither file counts")
+
+	writeConfigFile(t, dir, ".vlatterc.json", `{"name": "api"}`)
+
+	c, err = loadConfig(t, Setup(), ConfigFile(DefaultConfigFileName, dir))
+	require.NoError(t, err)
+	require.Equal(t, "api", c.Name)
 }
 
 func TestConfigSources_Precedence(t *testing.T) {
@@ -290,7 +299,6 @@ func TestConfigSources_Defaults(t *testing.T) {
 
 func TestConfigSources_FileFormatsAgree(t *testing.T) {
 	// The same settings in JSON, YAML and YML must give the same server.
-	// max_age is quoted in the fixtures: files may quote numbers.
 	want := &Config{
 		Name: "test_api",
 		Addr: ":8080",
@@ -508,9 +516,9 @@ func TestConfigSources_ErrorListsEveryProblemWithItsOrigin(t *testing.T) {
 	want := `server: error loading configuration sources
 config: 5 problems
   env VLATTE_LOGLEVEL: unknown_key: VLATTE_LOGLEVEL is not a known setting; did you mean VLATTE_LOG_LEVEL?
-  env VLATTE_PROXY_TIMEOUT: invalid_value: proxy.timeout="10x" is not a duration; use milliseconds (1500) or a Go duration (1.5s)
+  env VLATTE_PROXY_TIMEOUT: invalid_value: proxy.timeout must be milliseconds or a Go duration, not "10x"; such as 1500 or 1.5s
   file ` + path + `: unknown_key: cors.allowed_origins is not a known setting; did you mean cors.allowed_origin?
-  file ` + path + `: invalid_value: log.level="verbose" is not an allowed value; use one of: trace (-1), debug (0), info (1), warn (2), error (3), fatal (4), panic (5), none (6), disabled (7)
+  file ` + path + `: invalid_value: log.level must be one of trace, debug, info, warn, error, fatal, panic, none or disabled, not "verbose"
   flag --tls-cert: missing_value: tls.cert is set but tls.key is not; set both`
 
 	require.EqualError(t, err, want)

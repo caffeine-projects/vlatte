@@ -16,18 +16,24 @@ import (
 // Kind is the type of a setting's value.
 type Kind uint8
 
-// Kinds of setting values.
+// Kinds of setting values. A value in a document must have the type of its kind: nothing is converted,
+// except that bools read everywhere the way strconv.ParseBool reads text. Env and args give text, which is parsed.
 const (
-	// String accepts any scalar. Numbers and bools written in files are formatted.
+	// String takes a string.
 	String Kind = iota
-	// Bool accepts true or false, or strconv.ParseBool syntax in text.
+	// Bool takes what strconv.ParseBool reads: a bool, text such as true, 1 or f, or the number 1 or 0.
 	Bool
-	// Int accepts an integer. With Choices, it also accepts the name of a choice.
+	// Int takes a whole number that fits an int64. Text gives it in the JSON number grammar, so 5 and 5.0,
+	// but not +5 or 05. With Choices, it takes only the name of a choice, in any case.
 	Int
-	// Duration accepts integer milliseconds or a Go duration, such as 1.5s.
+	// Duration takes whole milliseconds from 0, or an unsigned Go duration, such as 1.5s.
+	// Text that is a number is milliseconds.
 	Duration
-	// List accepts a list in files, or a comma-separated string.
+	// List takes a list of strings. Text gives comma-separated items, and a repeated flag adds to them.
 	List
+	// Any takes any value as decoded, unchecked: a Set decodes it, for example a nested object with Decode.
+	// Env and args give it their text.
+	Any
 )
 
 func (k Kind) String() string {
@@ -42,6 +48,8 @@ func (k Kind) String() string {
 		return "duration"
 	case List:
 		return "list"
+	case Any:
+		return "any"
 	default:
 		return fmt.Sprintf("Kind(%d)", uint8(k))
 	}
@@ -66,7 +74,7 @@ type Field[T any] struct {
 	Default string
 	// Kind is the type of the value.
 	Kind Kind
-	// Choices lists the allowed values of an Int setting. Inputs may use their names.
+	// Choices lists the allowed values of an Int setting. Inputs give their names, in any case.
 	Choices []Choice
 	// Set validates the value and applies it to dst. Its error becomes a problem of the value.
 	// A nil Set leaves the value to the caller, which reads it from Load's result.
@@ -84,6 +92,8 @@ type Value struct {
 	Int  int64
 	Dur  time.Duration
 	List []string
+	// Any is the value of an Any setting, as decoded: nil, bool, string, int64, float64, []any or map[string]any.
+	Any any
 }
 
 // Flag describes the command-line flag of a setting.
@@ -249,7 +259,7 @@ func (c *catalog) Usage(envPrefix string) string {
 
 		fmt.Fprintf(&b, "\n        %s", f.usage)
 		if len(f.choices) > 0 {
-			fmt.Fprintf(&b, " One of: %s.", choiceList(f.choices))
+			fmt.Fprintf(&b, " One of: %s.", strings.Join(choiceNames(f.choices), ", "))
 		}
 
 		if f.def != "" {
@@ -262,8 +272,8 @@ func (c *catalog) Usage(envPrefix string) string {
 	return b.String()
 }
 
-// keys lists every key and group, for suggestions.
-func (c *catalog) keys() []string {
+// Keys lists every key and group, sorted, such as "log" and "log.level".
+func (c *catalog) Keys() []string {
 	keys := make([]string, 0, len(c.fields)+len(c.groups))
 	for _, f := range c.fields {
 		keys = append(keys, f.key)
@@ -278,24 +288,37 @@ func (c *catalog) keys() []string {
 	return keys
 }
 
-// children lists the names of the keys right under prefix.
+// KindOf returns the kind of the setting key, or false when there is no such setting.
+func (c *catalog) KindOf(key string) (Kind, bool) {
+	f, ok := c.byKey[key]
+	if !ok {
+		return 0, false
+	}
+
+	return f.kind, true
+}
+
+// children lists the names right under prefix, of keys and groups, in declaration order.
+// An empty prefix lists the top-level names.
 func (c *catalog) children(prefix string) []string {
 	var names []string
+	seen := make(map[string]struct{})
+
 	for _, f := range c.fields {
-		name, ok := strings.CutPrefix(f.key, prefix+".")
-		if ok && !strings.Contains(name, ".") {
+		rest := f.key
+		if prefix != "" {
+			var ok bool
+			if rest, ok = strings.CutPrefix(f.key, prefix+"."); !ok {
+				continue
+			}
+		}
+
+		name, _, _ := strings.Cut(rest, ".")
+		if _, dup := seen[name]; !dup {
+			seen[name] = struct{}{}
 			names = append(names, name)
 		}
 	}
 
 	return names
-}
-
-func choiceList(choices []Choice) string {
-	names := make([]string, 0, len(choices))
-	for _, choice := range choices {
-		names = append(names, fmt.Sprintf("%s (%d)", choice.Name, choice.Value))
-	}
-
-	return strings.Join(names, ", ")
 }

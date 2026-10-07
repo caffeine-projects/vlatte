@@ -33,8 +33,8 @@ func TestAdmin_MalformedMockIsBadRequest(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	// Trailer values must be strings. The schema does not cover trailer, so only the builder rejects this.
-	body := `{"request":{"method":"GET","path":"/x"},"response":{"status":200,"trailer":{"x":[1]}}}`
+	// A malformed mock is the client's mistake: a 400, not a dropped connection or a server error.
+	body := `{"request":{"method":"GET","path":"/x"},"response":{"stauts":200}}`
 	res, err := http.Post(m.URL(m.Config().AdminPath, "mocks"), "", strings.NewReader(body))
 
 	require.NoError(t, err)

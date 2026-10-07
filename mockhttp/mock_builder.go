@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
@@ -18,6 +19,9 @@ var (
 	ErrNoExpectations = errors.New("mock: at least 1 request matcher must be set")
 	ErrNoReplies      = errors.New("mock: no reply set. Use .Reply() or any equivalent to set the expected mock response")
 )
+
+// errMockID says what an ID may hold. IDs name mocks in admin API paths, such as /mocks/{id}.
+var errMockID = errors.New("an id holds only letters, digits, '.', '_', '~' and '-'")
 
 // Builder is a default builder for Mock.
 type Builder struct {
@@ -98,6 +102,14 @@ func Headf(path string, a ...any) *Builder {
 	return Request().URLPathf(path, a...).Method(http.MethodHead)
 }
 
+// ID sets the ID of the mock, such as "users-get", in place of a generated one.
+// An ID holds only letters, digits, '.', '_', '~' and '-', and a server holds one mock per ID.
+func (b *Builder) ID(id string) *Builder {
+	b.mock.id = id
+
+	return b
+}
+
 // Name defines a name for the mock.
 // Useful for debugging.
 func (b *Builder) Name(name string) *Builder {
@@ -106,8 +118,8 @@ func (b *Builder) Name(name string) *Builder {
 	return b
 }
 
-// Priority sets the priority of the mock.
-// A higher priority will take precedence during request matching.
+// Priority sets the priority of the mock. Mocks with a lower priority are matched first;
+// mocks of equal priority, in the order they were added.
 func (b *Builder) Priority(p int) *Builder {
 	b.mock.priority = p
 
@@ -446,6 +458,10 @@ func (b *Builder) SetSource(src string) *Builder {
 // Build builds a Mock with previously configured parameters.
 // Used internally by Server.
 func (b *Builder) Build(app *Server) (*Mock, error) {
+	if err := checkMockID(b.mock.id); err != nil {
+		return nil, fmt.Errorf("mock: id %q: %w", b.mock.id, err)
+	}
+
 	if len(b.mock.expectations) == 0 {
 		return nil, ErrNoExpectations
 	}
@@ -481,6 +497,26 @@ func (b *Builder) appendExpectation(e *vlatte.Eval[*selectorInput]) {
 	b.mock.expectations = append(b.mock.expectations, e)
 }
 
+// checkMockID accepts the IDs a mock can have: letters, digits, '.', '_', '~' and '-', the characters
+// a URL path needs no escaping for.
+func checkMockID(id string) error {
+	if id == "" || strings.ContainsFunc(id, notIDRune) {
+		return errMockID
+	}
+
+	return nil
+}
+
+// notIDRune reports whether r can't be part of a mock ID.
+func notIDRune(r rune) bool {
+	switch {
+	case 'a' <= r && r <= 'z', 'A' <= r && r <= 'Z', '0' <= r && r <= '9':
+		return false
+	default:
+		return !strings.ContainsRune("._~-", r)
+	}
+}
+
 // --
 // Request Values Selectors
 // --
@@ -503,7 +539,9 @@ func selectQueries(k string) vlatte.Selector[*selectorInput] {
 	return func(_ context.Context, r *selectorInput) any { return r.Query[k] }
 }
 func selectBody(_ context.Context, r *selectorInput) any { return r.ParsedBody }
+
+// selectFormField selects a field of a form body. Only the body counts: http.Request.Form also holds the query.
 func selectFormField(k string) vlatte.Selector[*selectorInput] {
-	return func(_ context.Context, r *selectorInput) any { return r.RawRequest.Form.Get(k) }
+	return func(_ context.Context, r *selectorInput) any { return r.Form.Get(k) }
 }
 func selectRawRequest(_ context.Context, r *selectorInput) any { return r.RawRequest }

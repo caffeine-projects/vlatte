@@ -1,11 +1,14 @@
 package match
 
 import (
+	json "encoding/json/v2"
+	"errors"
 	"strconv"
 	"testing"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 func TestToEqualJSON(t *testing.T) {
@@ -62,12 +65,39 @@ func TestToEqualJSON(t *testing.T) {
 	}
 }
 
-func TestEqualJSON_Errors(t *testing.T) {
-	ch := make(chan struct{})
-	ok, err := EQJ(ch).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), map[string]any{"ok": true, "name": "dev"}))
+func TestEqualJSON_PanicsOnWhatIsntJSON(t *testing.T) {
+	// An expectation that isn't JSON is a mistake in code; mock files catch it when they load.
+	// json/v2 words its errors at random, with "cannot" or "unable to", so only the error's type is checked.
+	err, ok := panicOf(func() { EQJ(make(chan struct{})) }).(error)
+	require.True(t, ok)
+	require.ErrorContains(t, err, "match: eqj: json: ")
 
-	require.Error(t, err)
-	require.False(t, ok)
+	_, isSemantic := errors.AsType[*json.SemanticError](err)
+	require.True(t, isSemantic)
+
+	require.Panics(t, func() { EqualJSON(`{"a": `) })
+}
+
+func TestEqualJSON_ValuesThatArentJSON(t *testing.T) {
+	// A request value that isn't JSON doesn't match, and isn't an error.
+	for _, v := range []any{"{", make(chan int), "x"} {
+		ok, err := EqualJSON(`{"a": 1}`).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), v))
+		require.NoError(t, err)
+		require.False(t, ok)
+	}
+}
+
+func TestEqualJSON_NumbersByValue(t *testing.T) {
+	// A file's 1.0 decodes to the integer 1, and a body's 1.0 is the same JSON number: they must match.
+	for _, body := range []string{`{"n": 1.0}`, `{"n": 1}`, `{"n": 1e0}`} {
+		ok, err := EqualJSON(map[string]any{"n": int64(1)}).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), body))
+		require.NoError(t, err)
+		require.True(t, ok, body)
+	}
+
+	ok, err := EqualJSON(`{"n": "1"}`).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), `{"n": 1}`))
+	require.NoError(t, err)
+	require.False(t, ok, "JSON text is not a JSON number")
 }
 
 func TestEqualJSON_ParsesIncomingValuesLeniently(t *testing.T) {
@@ -89,4 +119,13 @@ func TestEqualJSON_ParsesIncomingValuesLeniently(t *testing.T) {
 			require.True(t, ok)
 		})
 	}
+}
+
+// panicOf returns the value fn panics with, or nil.
+func panicOf(fn func()) (v any) {
+	defer func() { v = recover() }()
+
+	fn()
+
+	return nil
 }

@@ -2,12 +2,16 @@ package vlatte
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 )
 
 var _ Inspector[Mock] = (*Scope[Mock])(nil)
+
+var errNotTracked = errors.New("server: the scope to replace isn't tracked: it was replaced or unmocked, or is another server's")
 
 type entry[B Mock] struct {
 	mock B
@@ -160,13 +164,34 @@ func (s *Scope[B]) Hits() int64 {
 	return total
 }
 
-// Delete removes mocks by ID, as long as they are scoped by this instance.
+// Delete removes the mocks of this scope with the given IDs from the store. IDs of other mocks are ignored.
+// A mock that left the store some other way stays out, even when its ID now names another mock:
+// mocks are told apart by identity, so Mock implementations must be comparable, as pointers are.
 func (s *Scope[B]) Delete(ctx context.Context, ids ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := s.store.Delete(ctx, ids...); err != nil {
-		return err
+	owned := make([]string, 0, len(ids))
+	for _, id := range ids {
+		e, ok := s.index[id]
+		if !ok {
+			continue
+		}
+
+		stored, err := s.store.Pick(ctx, id)
+		switch {
+		case errors.Is(err, ErrNotFound):
+		case err != nil:
+			return err
+		case any(stored) == any(e.mock):
+			owned = append(owned, id)
+		}
+	}
+
+	if len(owned) > 0 {
+		if err := s.store.Delete(ctx, owned...); err != nil {
+			return err
+		}
 	}
 
 	for _, id := range ids {
@@ -179,20 +204,6 @@ func (s *Scope[B]) Delete(ctx context.Context, ids ...string) error {
 // Clear removes all scoped Mock instances.
 func (s *Scope[B]) Clear(ctx context.Context) error {
 	return s.Delete(ctx, s.IDs()...)
-}
-
-func (s *Scope[B]) Sync(ctx context.Context) error {
-	s.mu.RLock()
-	mocks := s.Mocks()
-	b := make([]B, len(mocks))
-	copy(b, mocks)
-	s.mu.RUnlock()
-
-	if err := s.store.Store(ctx, b...); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 // AssertCalled reports an error if there are still pending Mock instances.
@@ -224,12 +235,12 @@ func (s *Scope[B]) AssertCalled(t TestingT) bool {
 func (s *Scope[B]) AssertNotCalled(t TestingT) bool {
 	t.Helper()
 
-	if s.Pending() {
+	called := s.ListCalled()
+	if len(called) == 0 {
 		return true
 	}
 
 	b := strings.Builder{}
-	called := s.ListCalled()
 	size := len(called)
 
 	for _, p := range called {
@@ -261,6 +272,26 @@ func (s *Scope[B]) AssertNumberOfCalls(t TestingT, expected int64) bool {
 	return false
 }
 
+// replace swaps the mocks of this scope that the store still holds for mocks, in one step, and empties the scope.
+func (s *Scope[B]) replace(ctx context.Context, mocks []B) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Read under the lock already held: Mocks would take the read lock, which isn't reentrant.
+	own := make([]B, 0, len(s.index))
+	for _, e := range s.index {
+		own = append(own, e.mock)
+	}
+
+	if err := s.store.Replace(ctx, own, mocks...); err != nil {
+		return err
+	}
+
+	clear(s.index)
+
+	return nil
+}
+
 // Scopes is a collection of Scope instances with coordinated add and retrieval.
 type Scopes[B Mock, A any] struct {
 	mu     sync.RWMutex
@@ -269,29 +300,76 @@ type Scopes[B Mock, A any] struct {
 	list   []*Scope[B]
 }
 
+// Add builds every builder, then stores the mocks in one call and returns their scope.
+// It stores nothing when a builder fails, and reports every failing builder by index,
+// or when the store refuses the mocks, for example over an ID already in use.
 func (s *Scopes[B, A]) Add(builders ...Builder[B, A]) (*Scope[B], error) {
-	ground := make([]B, len(builders))
+	return s.Replace(context.Background(), nil, builders...)
+}
 
-	for i, b := range builders {
-		built, err := b.Build(s.flavor)
-		if err != nil {
-			return nil, fmt.Errorf("server: error adding mock at index %d.\n%w", i, err)
-		}
-
-		if err := s.store.Store(context.Background(), built); err != nil {
-			return nil, err
-		}
-
-		ground[i] = built
+// Replace builds every builder, then swaps the mocks for those of old in one step, so a reader finds the mocks of
+// old or the new ones, never neither, and returns their scope, which takes the place of old. With a nil old, it adds
+// the mocks, as Add does. It changes nothing when old isn't tracked, when a builder fails, reporting every failing
+// builder by index, or when the store refuses the mocks, for example over an ID in use outside old.
+// Once replaced, old holds no mocks.
+func (s *Scopes[B, A]) Replace(ctx context.Context, old *Scope[B], builders ...Builder[B, A]) (*Scope[B], error) {
+	if old != nil && !slices.Contains(s.All(), old) {
+		return nil, errNotTracked
 	}
 
-	scope := NewScope(ground, s.store)
+	built := make([]B, 0, len(builders))
 
+	var errs []error
+	for i, b := range builders {
+		mock, err := b.Build(s.flavor)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("server: mock %d: %w", i, err))
+			continue
+		}
+
+		built = append(built, mock)
+	}
+
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+
+	var err error
+	if old == nil {
+		err = s.store.Store(ctx, built...)
+	} else {
+		err = old.replace(ctx, built)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("server: %w", err)
+	}
+
+	scope := NewScope(built, s.store)
+
+	// In the place of old, so the scopes keep their numbers in reports, and nothing reading them finds neither.
 	s.mu.Lock()
-	s.list = append(s.list, scope)
+	if i := slices.Index(s.list, old); i >= 0 {
+		s.list[i] = scope
+	} else {
+		s.list = append(s.list, scope)
+	}
 	s.mu.Unlock()
 
 	return scope, nil
+}
+
+// Remove deletes the mocks of scope and stops tracking it.
+func (s *Scopes[B, A]) Remove(ctx context.Context, scope *Scope[B]) error {
+	if err := scope.Clear(ctx); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.list = slices.DeleteFunc(s.list, func(e *Scope[B]) bool { return e == scope })
+	s.mu.Unlock()
+
+	return nil
 }
 
 func (s *Scopes[B, A]) All() []*Scope[B] {

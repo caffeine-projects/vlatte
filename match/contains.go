@@ -6,7 +6,8 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-// Contain passes when the expected value is contained in the incoming value.
+// Contain matches text holding expected, when expected is text; a list holding an item equal to expected, by Equal's
+// rule; or an object holding a key equal to expected.
 func Contain(expected any) vlatte.Matcher {
 	return &containsMatcher{Expected: expected}
 }

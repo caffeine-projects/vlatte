@@ -14,3 +14,13 @@ func mismatch(message string) (bool, error) {
 func failure(err error) (bool, error) {
 	return false, err
 }
+
+// anys copies items into a []any.
+func anys[T any](items []T) []any {
+	out := make([]any, len(items))
+	for i, item := range items {
+		out[i] = item
+	}
+
+	return out
+}

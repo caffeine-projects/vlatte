@@ -29,15 +29,19 @@ func TestRegExpMatches(t *testing.T) {
 }
 
 func TestRegExpInvalidExpression(t *testing.T) {
-	ok, err := RegExpr("[invalid").Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), "anything"))
-	require.Error(t, err)
-	require.False(t, ok)
+	// A pattern that doesn't compile is a mistake in code, found when the matcher is made, not on each request.
+	require.PanicsWithValue(t, "regexp: Compile(`[invalid`): error parsing regexp: missing closing ]: `[invalid`", func() { RegExpr("[invalid") })
 }
 
 func TestRegExpNonStringValue(t *testing.T) {
+	// A value that isn't text doesn't match, and isn't an error.
 	ok, err := RegExpr(".*").Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), 42))
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.False(t, ok)
+
+	ok, err = RegExpr("^4").Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), []byte("42")))
+	require.NoError(t, err)
+	require.True(t, ok, "bytes are text")
 }
 
 func TestRegExpConcurrent(t *testing.T) {

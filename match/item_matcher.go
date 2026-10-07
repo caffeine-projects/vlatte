@@ -2,15 +2,15 @@ package match
 
 import (
 	"fmt"
-	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
-// itemMatcher matches a specific array/slice item with the inner matcher.
+// itemMatcher applies the inner matcher to the item of a list at an index.
 type itemMatcher struct {
 	Index   int
 	Matcher vlatte.Matcher
@@ -21,23 +21,12 @@ func (m *itemMatcher) Name() string { return "Item" }
 
 // Match implements vlatte.Matcher.
 func (m *itemMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
-	v := arg.Value()
-	if m.Index < 0 {
-		return failure(fmt.Errorf("item: index must greater or equal to 0. got %d", m.Index))
+	items, isList := value.List(arg.Value())
+	if !isList || m.Index >= len(items) {
+		return mismatch(strings.Join([]string{"Item(", strconv.Itoa(m.Index), ") No such item"}, ""))
 	}
 
-	typeOfV := reflect.TypeOf(v)
-	kind := typeOfV.Kind()
-	if kind != reflect.Slice && kind != reflect.Array {
-		return failure(fmt.Errorf("item: %d: it only works with slices. got: %T", m.Index, v))
-	}
-
-	vv := reflect.ValueOf(v)
-	if vv.Len() == 0 {
-		return mismatch(strings.Join([]string{"Item(", strconv.Itoa(m.Index), ") Empty array"}, ""))
-	}
-
-	ok, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), vv.Index(m.Index).Interface()))
+	ok, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), items[m.Index]))
 	if err != nil {
 		return failure(fmt.Errorf("item: %d: %w", m.Index, err))
 	}

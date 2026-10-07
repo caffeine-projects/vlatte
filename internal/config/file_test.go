@@ -3,10 +3,13 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 )
 
 func writeFile(t *testing.T, dir, name, content string) string {
@@ -123,7 +126,7 @@ func TestFile_Problems(t *testing.T) {
 			name: "group that isn't an object",
 			file: "c.yaml",
 			doc:  "log: 5\n",
-			want: []Problem{{Code: CodeInvalidValue, Key: "log", Message: "log must be an object, not a number", Hint: "its keys are level, timeout"}},
+			want: []Problem{{Code: CodeInvalidValue, Key: "log", Value: "5", Message: "log must be an object, not a number", Hint: "its keys are level, timeout"}},
 		},
 		{
 			name: "path key inside a file",
@@ -141,7 +144,7 @@ func TestFile_Problems(t *testing.T) {
 			name: "group set to a bool",
 			file: "f.yaml",
 			doc:  "log: true\n",
-			want: []Problem{{Code: CodeInvalidValue, Key: "log", Message: "log must be an object, not a bool", Hint: "its keys are level, timeout"}},
+			want: []Problem{{Code: CodeInvalidValue, Key: "log", Value: "true", Message: "log must be an object, not a bool", Hint: "its keys are level, timeout"}},
 		},
 		{
 			name: "text at the top",
@@ -150,10 +153,17 @@ func TestFile_Problems(t *testing.T) {
 			want: []Problem{{Code: CodeParseError, Message: "a config file holds an object of settings, not a string"}},
 		},
 		{
-			name: "keys that aren't text",
+			// YAML keys are text, as in JSON: a number key is an unknown setting, not a decoding failure.
+			name: "number keys are text",
 			file: "h.yaml",
 			doc:  "1: a\n",
-			want: []Problem{{Code: CodeParseError, Message: "a config file holds an object of settings, not an object with non-string keys"}},
+			want: []Problem{{Code: CodeUnknownKey, Key: "1", Message: "1 is not a known setting"}},
+		},
+		{
+			name: "keys that aren't text",
+			file: "i.yaml",
+			doc:  "[a, b]: c\n",
+			want: []Problem{{Code: CodeParseError, Message: "yaml: line 1: a mapping key must be text"}},
 		},
 	}
 
@@ -283,16 +293,84 @@ func TestFile_Lookup(t *testing.T) {
 		}}, requireProblems(t, err))
 	})
 
-	t.Run("an unsupported format is not skipped", func(t *testing.T) {
-		// A .toml file used to load; ignoring it silently would drop the user's settings.
+	t.Run("only JSON and YAML files count", func(t *testing.T) {
+		// Any extension counted, so an editor backup such as .app.json~ made the lookup ambiguous next to .app.json,
+		// and alone failed it as a format that isn't JSON or YAML.
 		dir := t.TempDir()
-		path := writeFile(t, dir, ".app.toml", "name = 'api'\n")
+		writeFile(t, dir, ".app.json", `{"name": "json"}`)
 
-		_, _, err := loadFile(t, File("config", ".app", dir))
+		for _, other := range []string{".app.json~", ".app.bak", ".app.toml", ".app.yaml.orig"} {
+			writeFile(t, dir, other, "name = 'other'\n")
+		}
 
-		p := requireProblems(t, err)[0]
-		require.Equal(t, CodeUnsupportedFormat, p.Code)
-		require.Equal(t, "file "+path, p.Origin)
+		c, _, err := loadFile(t, File("config", ".app", dir))
+		require.NoError(t, err)
+		require.Equal(t, "json", c.Name)
+
+		others := t.TempDir()
+		writeFile(t, others, ".app.toml", "name = 'api'\n")
+		writeFile(t, others, ".app.yaml~", "name: backup\n")
+
+		c, values, err := loadFile(t, File("config", ".app", others))
+		require.NoError(t, err)
+		require.Empty(t, values)
+		require.Equal(t, testConfig{}, c)
+
+		upper := t.TempDir()
+		writeFile(t, upper, ".app.YML", "name: upper\n")
+
+		c, _, err = loadFile(t, File("config", ".app", upper))
+		require.NoError(t, err)
+		require.Equal(t, "upper", c.Name)
+	})
+}
+
+func TestPropFile_Lookup(t *testing.T) {
+	// C13: a lookup counts exactly the files named after the base name with a .json, .yaml or .yml extension, in
+	// any case: none loads nothing, one loads that file, and more are ambiguous, naming exactly those.
+	exts := []string{".json", ".yaml", ".yml", ".JSON", ".Yaml", ".json~", ".yaml~", ".bak", ".toml", ".orig", ".swp", ".json.bak", ""}
+
+	rapid.Check(t, func(t *rapid.T) {
+		dir, err := os.MkdirTemp("", "lookup")
+		require.NoError(t, err)
+
+		defer os.RemoveAll(dir)
+
+		// Distinct in any case: a file system may not tell .app.json from .app.JSON.
+		names := rapid.SliceOfNDistinct(rapid.Custom(func(t *rapid.T) string {
+			return rapid.SampledFrom([]string{".app", ".ap", "app", ".app.x"}).Draw(t, "base") + rapid.SampledFrom(exts).Draw(t, "ext")
+		}), 0, 5, strings.ToLower).Draw(t, "names")
+
+		var candidates []string
+
+		for _, name := range names {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(`{"name": "`+name+`"}`), 0o600))
+
+			if ext, ok := strings.CutPrefix(name, ".app."); ok && slices.Contains([]string{"json", "yaml", "yml"}, strings.ToLower(ext)) {
+				candidates = append(candidates, name)
+			}
+		}
+
+		slices.Sort(candidates)
+
+		var c testConfig
+		_, err = testSchema().Load(&c, []Source{File("config", ".app", dir)})
+
+		switch len(candidates) {
+		case 0:
+			require.NoError(t, err)
+			require.Equal(t, testConfig{}, c)
+		case 1:
+			require.NoError(t, err)
+			require.Equal(t, candidates[0], c.Name)
+		default:
+			require.Equal(t, []Problem{{
+				Code:    CodeFileAmbiguous,
+				Origin:  "file " + dir,
+				Message: "found " + strings.Join(candidates, " and ") + " in " + dir,
+				Hint:    "keep only one of them",
+			}}, requireProblems(t, err))
+		}
 	})
 }
 

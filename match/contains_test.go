@@ -68,7 +68,39 @@ func TestContainf(t *testing.T) {
 	assert.True(t, ok)
 }
 
-func TestContainNilValue(t *testing.T) {
-	_, err := Contain("any").Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), nil))
-	require.Error(t, err)
+func TestContain_ValuesItCantHold(t *testing.T) {
+	// A value that holds nothing, or holds text when expected isn't text, doesn't match, and isn't an error:
+	// an error would stop the search for a mock.
+	for _, tc := range []struct {
+		expected any
+		value    any
+	}{
+		{"any", nil},
+		{5, "a5b"},
+		{"5", 5},
+		{"a", true},
+	} {
+		ok, err := Contain(tc.expected).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), tc.value))
+		require.NoError(t, err)
+		require.False(t, ok, "%#v in %#v", tc.expected, tc.value)
+	}
+}
+
+func TestContain_ReadsItemsAsEqualDoes(t *testing.T) {
+	// Items and keys compare by Equal's rule: query values hold numbers, and no number holds the rune of its value.
+	for _, tc := range []struct {
+		expected any
+		value    any
+		want     bool
+	}{
+		{1, []string{"1", "2"}, true},
+		{49, []string{"1"}, false},
+		{1, []float64{1.9}, false},
+		{1, map[string]any{"1": true}, true},
+		{"a", []byte("cat"), true},
+	} {
+		ok, err := Contain(tc.expected).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), tc.value))
+		require.NoError(t, err)
+		require.Equal(t, tc.want, ok, "%#v in %#v", tc.expected, tc.value)
+	}
 }

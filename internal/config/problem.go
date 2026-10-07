@@ -44,6 +44,8 @@ func (p Problem) String() string {
 
 // Error lists every problem found while loading settings.
 type Error struct {
+	// Scope starts the message, such as "mock". Empty means "config".
+	Scope    string
 	Problems []Problem
 }
 
@@ -53,7 +55,7 @@ func (e *Error) Error() string {
 	sortProblems(problems)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "config: %d problem", len(problems))
+	fmt.Fprintf(&b, "%s: %d problem", cmp.Or(e.Scope, "config"), len(problems))
 	if len(problems) != 1 {
 		b.WriteString("s")
 	}

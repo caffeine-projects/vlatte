@@ -39,7 +39,11 @@ func TestEachMapNotPass(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestEachInvalidValueType(t *testing.T) {
-	_, err := Each(Anything()).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), "hello"))
-	require.Error(t, err)
+func TestEach_ValuesThatArentListsOrObjects(t *testing.T) {
+	// A value Each can't take doesn't match, and isn't an error: an error would stop the search for a mock.
+	for _, v := range []any{"hello", nil, 5} {
+		ok, err := Each(Anything()).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), v))
+		require.NoError(t, err)
+		require.False(t, ok)
+	}
 }

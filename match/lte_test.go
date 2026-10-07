@@ -34,8 +34,10 @@ func TestOrEqualLess(t *testing.T) {
 }
 
 func TestLessOrEqualUnhandledType(t *testing.T) {
-	ok, err := LTE(10).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), true))
-
-	require.Error(t, err)
-	require.False(t, ok)
+	// A value that isn't a number doesn't match, and isn't an error: an error would stop the search for a mock.
+	for _, v := range []any{true, nil, "ten", []any{11}} {
+		ok, err := LTE(10).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), v))
+		require.NoError(t, err)
+		require.False(t, ok)
+	}
 }

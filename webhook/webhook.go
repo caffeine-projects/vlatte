@@ -16,7 +16,8 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/configutil"
+	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 var _ vlatte.EventListener[vlatte.OnComplete] = (*WebHook)(nil)
@@ -101,8 +102,8 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		}
 
 		var err error
-		if webhookArgs, err = ArgsFromMap(m); err != nil {
-			return fmt.Errorf("webhook: error decoding args: %w", err)
+		if webhookArgs, err = argsFromMap(m, originOf(args)); err != nil {
+			return err
 		}
 	}
 
@@ -223,33 +224,137 @@ type Args struct {
 	Body           string
 	BodyTemplate   string
 	BodyFile       string
-	LogLevel       int
 }
 
+type argsField = config.Field[Args]
+
+// _argsSchema declares the parameters of a webhook event, the way a mock file's on_complete writes them.
+var _argsSchema = config.NewSchema(
+	argsField{
+		Key: "url", Kind: config.String, Usage: "URL to send the request to.",
+		Set: func(a *Args, v config.Value) error { a.URL = v.Str; return nil },
+	},
+	argsField{
+		Key: "url_template", Kind: config.String, Usage: "URL to send the request to, as a Go template.",
+		Set: func(a *Args, v config.Value) error { a.URLTemplate = v.Str; return nil },
+	},
+	argsField{
+		Key: "method", Kind: config.String, Usage: "Method of the request. Empty means GET.",
+		Set: func(a *Args, v config.Value) error { a.Method = v.Str; return nil },
+	},
+	argsField{
+		Key: "header", Kind: config.Any, Usage: "Headers of the request, by name.",
+		Set: func(a *Args, v config.Value) error { return headerOf(v, &a.Header) },
+	},
+	argsField{
+		Key: "header_template", Kind: config.Any, Usage: "Headers of the request whose values are Go templates, by name.",
+		Set: func(a *Args, v config.Value) error { return headerOf(v, &a.HeaderTemplate) },
+	},
+	argsField{
+		Key: "body", Kind: config.String, Usage: "Body of the request.",
+		Set: func(a *Args, v config.Value) error { a.Body = v.Str; return nil },
+	},
+	argsField{
+		Key: "body_template", Kind: config.String, Usage: "Body of the request, as a Go template.",
+		Set: func(a *Args, v config.Value) error { a.BodyTemplate = v.Str; return nil },
+	},
+	argsField{
+		Key: "body_file", Kind: config.String, Usage: "File to read the body of the request from.",
+		Set: func(a *Args, v config.Value) error { a.BodyFile = v.Str; return nil },
+	},
+)
+
+// _exclusive lists the sets of parameters of which only one can be set.
+var _exclusive = [][]string{{"url", "url_template"}, {"body", "body_file", "body_template"}}
+
+// ArgsFromMap decodes the parameters of a webhook event, as a mock file's on_complete writes them:
+//   - url, or url_template, a Go template: a string;
+//   - method: a string, GET when empty;
+//   - header and header_template, whose values are Go templates: objects of strings;
+//   - body, body_template, a Go template, or body_file: a string.
+//
+// As in mock files, each value must have its type, and other keys are errors. A map built in code means what its
+// JSON means, so a map[string]string or an int is fine where its JSON is. The error wraps ErrBadArg and lists
+// every problem.
 func ArgsFromMap(m map[string]any) (*Args, error) {
-	r := configutil.New(m)
-	var err error
+	return argsFromMap(m, "on_complete")
+}
 
-	if err = r.Either("url", "url_template"); err != nil {
-		return nil, errorBadArg(err)
-	}
-
-	if err = r.OneOf("body", "body_file", "body_template"); err != nil {
+// argsFromMap decodes the parameters m, which came from origin, such as "mock users", for problems.
+func argsFromMap(m map[string]any, origin string) (*Args, error) {
+	doc, err := value.ViaJSON(m)
+	if err != nil {
 		return nil, errorBadArg(err)
 	}
 
 	args := new(Args)
-	args.URL = r.Str("url", "")
-	args.URLTemplate = r.Str("url_template", "")
-	args.Method = r.Str("method", "")
-	args.Header = r.StrMap("header")
-	args.HeaderTemplate = r.StrMap("header_template")
-	args.Body = r.Str("body", "")
-	args.BodyTemplate = r.Str("body_template", "")
-	args.BodyFile = r.Str("body_file", "")
-	args.LogLevel = r.Int("log_level", int(zerolog.ErrorLevel))
+	err = _argsSchema.Decode(args, config.Value{Key: "parameters", Origin: origin, Any: doc})
 
-	return args, nil
+	problems := conflicts(doc, origin)
+	if err == nil && len(problems) == 0 {
+		return args, nil
+	}
+
+	if cfgErr, ok := errors.AsType[*config.Error](err); ok {
+		problems = append(cfgErr.Problems, problems...)
+	}
+
+	return nil, errorBadArg(&config.Error{Scope: "parameters", Problems: problems})
+}
+
+// conflicts reports each parameter of an exclusive set after the first one set: only one of them can be.
+func conflicts(doc any, origin string) []config.Problem {
+	params, _ := doc.(map[string]any)
+
+	var problems []config.Problem
+	for _, set := range _exclusive {
+		first := ""
+		for _, key := range set {
+			if _, ok := params[key]; !ok {
+				continue
+			}
+
+			if first == "" {
+				first = key
+				continue
+			}
+
+			problems = append(problems, config.Problem{
+				Code: config.CodeConflict, Origin: origin, Key: "parameters." + key,
+				Message: fmt.Sprintf("parameters.%s is set with parameters.%s", key, first), Hint: "keep one of them",
+			})
+		}
+	}
+
+	return problems
+}
+
+// headerOf decodes an object of header values, each a string.
+func headerOf(v config.Value, dst *map[string]string) error {
+	header := make(map[string]string)
+	err := config.Members(v, func(name string, member config.Value) error {
+		s, ok := member.Any.(string)
+		if !ok {
+			return config.Mismatch(member, "a string", config.String)
+		}
+
+		header[name] = s
+
+		return nil
+	})
+
+	*dst = header
+
+	return err
+}
+
+// originOf names where the parameters of an event come from, for problems: the mock that completed.
+func originOf(args vlatte.OnComplete) string {
+	if mock := args.Mock(); mock != nil {
+		return "mock " + mock.ID()
+	}
+
+	return "on_complete"
 }
 
 // render executes text as a Go template with the given data.

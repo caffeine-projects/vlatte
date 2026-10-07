@@ -1,11 +1,9 @@
 package match
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/ohler55/ojg/jp"
-	"github.com/ohler55/ojg/oj"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
@@ -22,20 +20,12 @@ func (m *hasKeyMatcher) Name() string { return "HasKey" }
 
 // Match implements vlatte.Matcher.
 func (m *hasKeyMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
-	v := arg.Value()
-	var results []any
-
-	switch vv := v.(type) {
-	case string:
-		data, err := oj.ParseString(vv)
-		if err != nil {
-			return failure(fmt.Errorf("has_key: %s: error parsing incoming json: %w", m.Path, err))
-		}
-
-		results = m.Expr.Get(data)
-	default:
-		results = m.Expr.Get(vv)
+	doc, ok := jsonDoc(arg.Value())
+	if !ok {
+		return mismatch(strings.Join([]string{"HasKey(", m.Path, ") Value is not JSON"}, ""))
 	}
+
+	results := m.Expr.Get(doc)
 
 	size := len(results)
 	if size == 0 || (size == 1 && results[0] == nil) {

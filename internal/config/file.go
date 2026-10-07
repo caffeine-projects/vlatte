@@ -3,7 +3,6 @@ package config
 import (
 	"bytes"
 	"encoding/json/jsontext"
-	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -12,8 +11,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-
-	"go.yaml.in/yaml/v3"
 )
 
 type fileSource struct {
@@ -25,9 +22,10 @@ type fileSource struct {
 // File reads settings from a JSON or YAML file, chosen by its extension: .json, .yaml or .yml.
 //
 // With no dirs, path is the file to read, and it must exist.
-// With dirs, path is a base name, such as ".vlatterc": the first dir that holds path with an extension
-// is read, and finding none is fine. A higher-precedence source that sets pathKey, such as a --config flag,
-// replaces that lookup with the file it names.
+// With dirs, path is a base name, such as ".vlatterc": the first dir that holds path with a .json, .yaml or .yml
+// extension, in any case, is read, and finding none is fine. Other files named after path, such as editor backups,
+// are ignored. A higher-precedence source that sets pathKey, such as a --config flag, replaces that lookup with
+// the file it names.
 func File(pathKey, path string, dirs ...string) Source {
 	return &fileSource{pathKey: pathKey, path: path, dirs: dirs}
 }
@@ -38,7 +36,7 @@ func (s *fileSource) load(c *catalog, higher lookup) ([]entry, []Problem, error)
 	}
 
 	if e, ok := higher(s.pathKey); ok && s.pathKey != "" {
-		path, _ := scalarText(e.raw)
+		path, _ := e.raw.(string) // text from env or args: a file can't name another
 		return s.read(c, path, e.origin)
 	}
 
@@ -66,7 +64,7 @@ func (s *fileSource) load(c *catalog, higher lookup) ([]entry, []Problem, error)
 	return nil, nil, nil
 }
 
-// find lists the files in dir named after the base name plus an extension.
+// find lists the files in dir named after the base name plus the extension of a document format.
 func (s *fileSource) find(dir string) ([]string, error) {
 	files, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -80,7 +78,9 @@ func (s *fileSource) find(dir string) ([]string, error) {
 	var matches []string
 	for _, file := range files {
 		name := file.Name()
-		if !file.IsDir() && strings.TrimSuffix(name, filepath.Ext(name)) == s.path {
+		ext := filepath.Ext(name)
+
+		if !file.IsDir() && isFormat(strings.ToLower(ext)) && strings.TrimSuffix(name, ext) == s.path {
 			matches = append(matches, name)
 		}
 	}
@@ -96,7 +96,7 @@ func (s *fileSource) read(c *catalog, path, requestedBy string) ([]entry, []Prob
 	}
 
 	ext := strings.ToLower(filepath.Ext(path))
-	if ext != ".json" && ext != ".yaml" && ext != ".yml" {
+	if !isFormat(ext) {
 		return fail(CodeUnsupportedFormat, fmt.Sprintf("config file %q is not JSON or YAML", path), "use a .json, .yaml or .yml file")
 	}
 
@@ -113,22 +113,20 @@ func (s *fileSource) read(c *catalog, path, requestedBy string) ([]entry, []Prob
 		return fail(CodeReadError, err.Error(), "")
 	}
 
-	var doc any
-	if ext == ".json" {
-		if len(bytes.TrimSpace(data)) == 0 {
-			return nil, nil, nil
+	return walkDoc(c, data, ext, origin, s.pathKey, "a config file")
+}
+
+// walkDoc decodes data, a document in the format of ext, and turns its settings into entries.
+// noun names the document in the problem of a document that isn't an object, such as "a config file".
+func walkDoc(c *catalog, data []byte, ext, origin, pathKey, noun string) ([]entry, []Problem, error) {
+	doc, err := decode(data, ext)
+	if err != nil {
+		if se, ok := errors.AsType[*jsontext.SyntacticError](err); ok {
+			line, col := position(data, se.ByteOffset)
+			origin = fmt.Sprintf("%s:%d:%d", origin, line, col)
 		}
 
-		if err := json.Unmarshal(data, &doc); err != nil {
-			if se, ok := errors.AsType[*jsontext.SyntacticError](err); ok {
-				line, col := position(data, se.ByteOffset)
-				origin = fmt.Sprintf("file %s:%d:%d", path, line, col)
-			}
-
-			return fail(CodeParseError, err.Error(), "")
-		}
-	} else if err := yaml.Unmarshal(data, &doc); err != nil {
-		return fail(CodeParseError, err.Error(), "")
+		return nil, []Problem{{Code: CodeParseError, Origin: origin, Message: err.Error()}}, nil
 	}
 
 	if doc == nil {
@@ -137,10 +135,10 @@ func (s *fileSource) read(c *catalog, path, requestedBy string) ([]entry, []Prob
 
 	settings, ok := doc.(map[string]any)
 	if !ok {
-		return fail(CodeParseError, "a config file holds an object of settings, not "+describe(doc), "")
+		return nil, []Problem{{Code: CodeParseError, Origin: origin, Message: noun + " holds an object of settings, not " + Describe(doc)}}, nil
 	}
 
-	w := walker{catalog: c, origin: origin, pathKey: s.pathKey}
+	w := walker{catalog: c, origin: origin, pathKey: pathKey}
 	w.walk(settings, "")
 
 	return w.entries, w.problems, nil
@@ -152,6 +150,7 @@ type walker struct {
 
 	origin   string
 	pathKey  string
+	outer    string // the key of the object being walked, such as "response"; empty for a document
 	entries  []entry
 	problems []Problem
 }
@@ -170,9 +169,9 @@ func (w *walker) walk(settings map[string]any, prefix string) {
 
 		switch {
 		case strings.Contains(name, "."):
-			w.problem(CodeUnknownKey, key, key+" is written as a dotted key", "nest it: "+nested(key))
+			w.problem(CodeUnknownKey, key, w.full(key)+" is written as a dotted key", "nest it: "+nested(key))
 		case f != nil && key == w.pathKey:
-			w.problem(CodeNotAllowed, key, key+" can't be set inside a config file", "set it with a flag or an environment variable")
+			w.problem(CodeNotAllowed, key, w.full(key)+" can't be set inside a config file", "set it with a flag or an environment variable")
 		case f != nil && f.section:
 			if obj, ok := raw.(map[string]any); ok {
 				// An object turns the section on, with its keys or its defaults.
@@ -188,8 +187,9 @@ func (w *walker) walk(settings map[string]any, prefix string) {
 		case group:
 			obj, ok := raw.(map[string]any)
 			if !ok {
-				w.problem(CodeInvalidValue, key, fmt.Sprintf("%s must be an object, not %s", key, describe(raw)),
-					"its keys are "+strings.Join(w.children(key), ", "))
+				p := mismatch(w.full(key), w.origin, raw, "an object")
+				p.Hint = "its keys are " + strings.Join(w.children(key), ", ")
+				w.problems = append(w.problems, p)
 
 				continue
 			}
@@ -197,19 +197,37 @@ func (w *walker) walk(settings map[string]any, prefix string) {
 			w.walk(obj, key)
 		default:
 			hint := ""
-			if near := suggest(key, w.keys()); near != "" {
-				hint = "did you mean " + near + "?"
-			} else if prefix != "" {
-				hint = "the keys under " + prefix + " are " + strings.Join(w.children(prefix), ", ")
+			if near := suggest(key, w.Keys()); near != "" {
+				hint = "did you mean " + w.full(near) + "?"
+			} else if prefix != "" || w.outer != "" {
+				hint = "the keys under " + w.full(prefix) + " are " + strings.Join(w.children(prefix), ", ")
 			}
 
-			w.problem(CodeUnknownKey, key, key+" is not a known setting", hint)
+			w.problem(CodeUnknownKey, key, w.full(key)+" is not a known setting", hint)
 		}
 	}
 }
 
+// problem records a problem of key, a key of the schema.
 func (w *walker) problem(code, key, message, hint string) {
-	w.problems = append(w.problems, Problem{Code: code, Origin: w.origin, Key: key, Message: message, Hint: hint})
+	w.problems = append(w.problems, Problem{Code: code, Origin: w.origin, Key: w.full(key), Message: message, Hint: hint})
+}
+
+// full writes key, a key of the schema, as the key users see: under the key of the object being walked.
+func (w *walker) full(key string) string {
+	return under(w.outer, key)
+}
+
+// under writes key under prefix: under("response", "status") is "response.status".
+func under(prefix, key string) string {
+	switch {
+	case prefix == "":
+		return key
+	case key == "":
+		return prefix
+	default:
+		return prefix + "." + key
+	}
 }
 
 // nested writes a dotted key as nested objects: log.level becomes "log: {level: ...}".

@@ -6,6 +6,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 // trimMatcher trims spaces and matches with the inner matcher.
@@ -19,9 +20,9 @@ func (m *trimMatcher) Name() string { return "Trim" }
 // Match implements vlatte.Matcher.
 func (m *trimMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
-	txt, ok := v.(string)
+	txt, ok := value.Text(v)
 	if !ok {
-		return failure(fmt.Errorf("trim: type %T is not supported. accepted types: string", v))
+		return mismatch("Trim() Value is not text")
 	}
 
 	result, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), strings.TrimSpace(txt)))

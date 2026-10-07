@@ -11,14 +11,16 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/rs/zerolog"
-	"github.com/spf13/viper"
+
+	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
 var _ RecordConfigurer = (*RecordConfig)(nil)
@@ -53,9 +55,7 @@ type RecordConfig struct {
 	// SaveDir defines the directory to save the recorded mocks.
 	SaveDir string
 
-	// SaveFileType defines the content type and extension to save the recorded mock.
-	// It uses viper.Viper to save the mock files, so it will accept the same values that viper supports.
-	// Defaults to json.
+	// SaveFileType is the format of the recorded mock files: json, yaml or yml. Defaults to json.
 	SaveFileType string
 
 	// SaveResponseBodyToFile defines if the recorded body should be saved to a separate file.
@@ -82,21 +82,9 @@ func (r *RecordConfig) Apply(opts *RecordConfig) error {
 		fileType = opts.SaveFileType
 	}
 
-	extension := strings.TrimPrefix(fileType, ".")
-	found := false
-	for _, ext := range viper.SupportedExts {
-		if strings.EqualFold(extension, ext) {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return fmt.Errorf(
-			"recorder: recorded mock file extension \"%s\" is not supported. supported values: %s",
-			extension,
-			strings.Join(viper.SupportedExts, ", "),
-		)
+	extension, err := recordFormat(fileType)
+	if err != nil {
+		return err
 	}
 
 	opts.SaveFileType = extension
@@ -125,7 +113,8 @@ type recArgs struct {
 }
 
 type recRequest struct {
-	uri    string
+	uri    string // names the file
+	path   string // matches the request: decoded, without the query, which query matches
 	method string
 	header http.Header
 	query  url.Values
@@ -138,8 +127,27 @@ type recResponse struct {
 	body   []byte
 }
 
-func newRecorder(app *Server, config *RecordConfig) *recorder {
-	return &recorder{config: config, logger: app.logger, rootDir: app.config.RootDir, close: make(chan struct{})}
+// newRecorder checks the format of the recorded files, whatever set it, then returns a recorder.
+func newRecorder(app *Server, conf *RecordConfig) (*recorder, error) {
+	format, err := recordFormat(conf.SaveFileType)
+	if err != nil {
+		return nil, err
+	}
+
+	conf.SaveFileType = format
+
+	return &recorder{config: conf, logger: app.logger, rootDir: app.config.RootDir, close: make(chan struct{})}, nil
+}
+
+// recordFormat normalizes the format of recorded mock files, such as ".YAML", and checks that mock files can use it.
+func recordFormat(fileType string) (string, error) {
+	format, ok := mockFileFormat(fileType)
+	if !ok {
+		return "", fmt.Errorf("recorder: recorded mock file format %q is not supported: use %s",
+			fileType, strings.Join(MockFileFormats(), ", "))
+	}
+
+	return format, nil
 }
 
 func (r *recorder) start() {
@@ -202,55 +210,47 @@ func (r *recorder) dispatch(req *http.Request, parsedURL *url.URL, rawReqBody []
 	}
 
 	r.in <- recArgs{
-		request:  recRequest{parsedURL.RequestURI(), req.Method, req.Header.Clone(), req.URL.Query(), rawReqBody},
+		request:  recRequest{parsedURL.RequestURI(), parsedURL.Path, req.Method, req.Header.Clone(), req.URL.Query(), rawReqBody},
 		response: recResponse{res.StatusCode, res.Header.Clone(), res.Body},
 	}
 }
 
+// process writes the mock file of a recorded request and response.
 func (r *recorder) process(arg recArgs) error {
-	v := viper.New()
+	request := map[string]any{"path": arg.request.path, "method": arg.request.method}
+	response := map[string]any{"status": int64(arg.response.status)}
 
-	v.Set(_fRequestURLPath, arg.request.uri)
-	v.Set(_fRequestMethod, arg.request.method)
-
-	requestHeaders := make(map[string]string, len(arg.request.header))
-	responseHeaders := make(map[string]string, len(arg.response.header))
-	query := make(map[string]string, len(arg.request.query))
-	hasResBody := len(arg.response.body) > 0
-	requestBodyHash := ""
-
+	requestHeaders := make(map[string]any, len(r.config.RequestHeaders))
 	for _, h := range r.config.RequestHeaders {
-		headerValue := arg.request.header.Get(h)
-		if headerValue != "" {
-			requestHeaders[h] = headerValue
+		if v := arg.request.header.Get(h); v != "" {
+			requestHeaders[h] = v
 		}
 	}
 
+	// Content-Length isn't recorded: the replaying server computes it for the body it sends,
+	// which differs from the recorded one when it compresses the body again.
+	responseHeaders := make(map[string]any, len(r.config.ResponseHeaders))
 	for _, h := range r.config.ResponseHeaders {
-		headerValue := arg.response.header.Get(h)
-		if headerValue != "" {
-			responseHeaders[h] = headerValue
+		if v := arg.response.header.Get(h); v != "" && !strings.EqualFold(h, HeaderContentLength) {
+			responseHeaders[h] = v
 		}
 	}
 
+	query := make(map[string]any, len(arg.request.query))
 	for k := range arg.request.query {
 		query[k] = arg.request.query.Get(k)
 	}
 
-	v.Set(_fRequestQuery, query)
-	v.Set(_fRequestHeader, requestHeaders)
+	request["query"] = query
+	request["header"] = requestHeaders
 
+	requestBodyHash := ""
 	if len(arg.request.body) > 0 {
-		v.Set(_fRequestBody, []string{"equal", string(arg.request.body)})
+		request["body"] = []any{"equal", string(arg.request.body)}
 
 		h := fnv.New64()
 		h.Write(arg.request.body)
 		requestBodyHash = hex.EncodeToString(h.Sum(nil))
-	}
-
-	contentType := arg.request.header.Get(HeaderContentType)
-	if strings.Contains(contentType, ";") {
-		contentType = strings.TrimSpace(contentType[:strings.Index(contentType, ";")])
 	}
 
 	nm := strings.ReplaceAll(arg.request.uri, " ", "-")
@@ -260,8 +260,8 @@ func (r *recorder) process(arg recArgs) error {
 	}
 
 	saveDir := r.config.SaveDir
-	if !path.IsAbs(saveDir) {
-		saveDir = path.Join(r.rootDir, saveDir)
+	if !filepath.IsAbs(saveDir) {
+		saveDir = filepath.Join(r.rootDir, saveDir)
 	}
 
 	if err := os.MkdirAll(saveDir, 0o755); err != nil {
@@ -269,82 +269,66 @@ func (r *recorder) process(arg recArgs) error {
 	}
 
 	name := fmt.Sprintf("%s-%s", arg.request.method, nm)
-	mockFile := path.Join(saveDir, fmt.Sprintf("%s.mock.%s", name, r.config.SaveFileType))
+	mockFile := filepath.Join(saveDir, fmt.Sprintf("%s.mock.%s", name, r.config.SaveFileType))
 
-	if hasResBody {
-		if r.config.SaveResponseBodyToFile {
+	if len(arg.response.body) > 0 {
+		body := arg.response.body
+		if arg.response.header.Get(HeaderContentEncoding) == "gzip" {
+			gz, err := gzip.NewReader(bytes.NewReader(arg.response.body))
+			if err != nil {
+				return err
+			}
+
+			defer gz.Close()
+
+			if body, err = io.ReadAll(gz); err != nil {
+				return err
+			}
+
+			// The recording holds the body as it reads, which encoding compresses again when it replays.
+			// encoding also sets Content-Encoding; recorded too, it would repeat.
+			response["encoding"] = "gzip"
+
+			for h := range responseHeaders {
+				if strings.EqualFold(h, HeaderContentEncoding) {
+					delete(responseHeaders, h)
+				}
+			}
+		}
+
+		// A mock file is text, so a body that isn't goes to a file of its own, named after its content type.
+		if r.config.SaveResponseBodyToFile || !utf8.Valid(body) {
+			contentType, _, _ := strings.Cut(arg.response.header.Get(HeaderContentType), ";")
+
 			bodyFile := name + "--response-body"
-			ext, _ := mime.ExtensionsByType(contentType)
-
-			if len(ext) > 0 {
+			if ext, _ := mime.ExtensionsByType(strings.TrimSpace(contentType)); len(ext) > 0 {
 				bodyFile += ext[0]
 			} else {
 				bodyFile += ".bin"
 			}
 
-			bodyFilename := path.Join(saveDir, bodyFile)
-			b, err := os.Create(bodyFilename)
-			if err != nil {
+			if err := os.WriteFile(filepath.Join(saveDir, bodyFile), body, 0o644); err != nil {
 				return err
 			}
 
-			defer b.Close()
-
-			// encoding := arg.response.header.Get(HeaderContentEncoding)
-			// switch encoding {
-			// case "gzip":
-			// 	gz, err := gzip.NewReader(bytes.NewReader(arg.response.body))
-			// 	if err != nil {
-			// 		return err
-			// 	}
-
-			// 	defer gz.Close()
-
-			// 	_, err = io.Copy(b, gz)
-			// 	if err != nil {
-			// 		return err
-			// 	}
-
-			// 	v.Set(_fResponseEncoding, "gzip")
-			// default:
-			// 	b.Write(arg.response.body)
-			// }
-
-			b.Write(arg.response.body)
-
-			v.Set(_fResponseBodyFile, bodyFilename)
-
+			// The body file sits next to the mock file, which is where a relative body_file opens from.
+			response["body_file"] = bodyFile
 		} else {
-			encoding := arg.response.header.Get(HeaderContentEncoding)
-			switch encoding {
-			case "gzip":
-				gz, err := gzip.NewReader(bytes.NewReader(arg.response.body))
-				if err != nil {
-					return err
-				}
-
-				defer gz.Close()
-
-				b, err := io.ReadAll(gz)
-				if err != nil {
-					return err
-				}
-
-				v.Set(_fResponseBody, string(b))
-				v.Set(_fResponseEncoding, "gzip")
-			default:
-				v.Set(_fResponseBody, string(arg.response.body))
-			}
+			response["body"] = string(body)
 		}
 	}
 
-	v.Set(_fResponseStatus, arg.response.status)
-	v.Set(_fResponseHeader, responseHeaders)
+	response["header"] = responseHeaders
 
-	v.AddConfigPath(saveDir)
-	v.SetConfigType(r.config.SaveFileType)
+	data, err := config.Encode(map[string]any{"request": request, "response": response}, r.config.SaveFileType)
+	if err != nil {
+		return err
+	}
 
-	return v.WriteConfigAs(mockFile)
+	// A mock file is a Go template first, so each {{ of the recording is written as an action that prints it.
+	data = bytes.ReplaceAll(data, []byte("{{"), []byte("{{`{{`}}"))
+
+	return os.WriteFile(mockFile, data, 0o644)
 }
 
 //
@@ -366,9 +350,7 @@ func RecordDir(dir string) RecordConfigurer {
 	return recordConfigFunc(func(c *RecordConfig) { c.SaveDir = dir })
 }
 
-// RecordExtension defines the extension to save the recorded mock.
-// It uses viper.Viper to save the mock files, so it will accept the same values that viper supports.
-// Defaults to .json.
+// RecordExtension sets the format of the recorded mock files: json, yaml or yml. Defaults to json.
 func RecordExtension(ext string) RecordConfigurer {
 	return recordConfigFunc(func(c *RecordConfig) { c.SaveFileType = ext })
 }

@@ -13,7 +13,13 @@ type layer []entry
 
 func (l layer) load(*catalog, lookup) ([]entry, []Problem, error) { return l, nil, nil }
 
-func requireProblems(t *testing.T, err error) []Problem {
+// helperT is a test that can mark helpers: a *testing.T or a *rapid.T.
+type helperT interface {
+	require.TestingT
+	Helper()
+}
+
+func requireProblems(t helperT, err error) []Problem {
 	t.Helper()
 
 	cfgErr, ok := errors.AsType[*Error](err)
@@ -27,9 +33,9 @@ func TestLoad_LaterSourcesOverrideEarlierOnes(t *testing.T) {
 	// and keys no later source sets keep the earlier value.
 	var c testConfig
 	values, err := testSchema().Load(&c, []Source{
-		layer{{key: "name", raw: "from-file", origin: "file a.yaml"}, {key: "port", raw: 1, origin: "file a.yaml"}},
-		layer{{key: "name", raw: "from-env", origin: "env APP_NAME"}},
-		layer{{key: "name", raw: "from-flag", origin: "flag --name"}},
+		layer{{key: "name", raw: "from-file", origin: "file a.yaml"}, {key: "port", raw: int64(1), origin: "file a.yaml"}},
+		layer{{key: "name", raw: "from-env", text: true, origin: "env APP_NAME"}},
+		layer{{key: "name", raw: "from-flag", text: true, origin: "flag --name"}},
 	})
 
 	require.NoError(t, err)
@@ -45,20 +51,20 @@ func TestLoad_ReportsEveryProblemAtOnce(t *testing.T) {
 	var c testConfig
 	_, err := testSchema().Load(&c, []Source{
 		layer{{key: "port", raw: "eighty", origin: "file a.yaml"}},
-		layer{{key: "port", raw: "70000", origin: "env APP_PORT"}, {key: "debug", raw: "maybe", origin: "env APP_DEBUG"}},
+		layer{{key: "port", raw: "70000", text: true, origin: "env APP_PORT"}, {key: "debug", raw: "maybe", text: true, origin: "env APP_DEBUG"}},
 	})
 
 	require.Len(t, requireProblems(t, err), 3)
 	require.Equal(t, `config: 3 problems
-  env APP_DEBUG: invalid_value: debug="maybe" is not a bool; use true or false
+  env APP_DEBUG: invalid_value: debug must be true or false, not "maybe"
   env APP_PORT: invalid_value: port="70000": must be 65535 or less
-  file a.yaml: invalid_value: port="eighty" is not an integer`, err.Error())
+  file a.yaml: invalid_value: port must be an integer, not a string`, err.Error())
 }
 
 func TestLoad_Sections(t *testing.T) {
 	t.Run("a key turns its section on with defaults", func(t *testing.T) {
 		var c testConfig
-		_, err := testSchema().Load(&c, []Source{layer{{key: "feature.size", raw: 5, origin: "file a.yaml"}}})
+		_, err := testSchema().Load(&c, []Source{layer{{key: "feature.size", raw: int64(5), origin: "file a.yaml"}}})
 
 		require.NoError(t, err)
 		require.Equal(t, &testFeature{Size: 5, Mode: "fast"}, c.Feature)
@@ -67,8 +73,8 @@ func TestLoad_Sections(t *testing.T) {
 	t.Run("a later source turns it off", func(t *testing.T) {
 		var c testConfig
 		_, err := testSchema().Load(&c, []Source{
-			layer{{key: "feature.size", raw: 5, origin: "file a.yaml"}},
-			layer{{key: "feature", raw: "false", origin: "flag --feature"}},
+			layer{{key: "feature.size", raw: int64(5), origin: "file a.yaml"}},
+			layer{{key: "feature", raw: "false", text: true, origin: "flag --feature"}},
 		})
 
 		require.NoError(t, err)
@@ -78,8 +84,8 @@ func TestLoad_Sections(t *testing.T) {
 	t.Run("a later key turns it back on", func(t *testing.T) {
 		var c testConfig
 		_, err := testSchema().Load(&c, []Source{
-			layer{{key: "feature", raw: "false", origin: "env APP_FEATURE"}},
-			layer{{key: "feature.mode", raw: "slow", origin: "flag --feature-mode"}},
+			layer{{key: "feature", raw: "false", text: true, origin: "env APP_FEATURE"}},
+			layer{{key: "feature.mode", raw: "slow", text: true, origin: "flag --feature-mode"}},
 		})
 
 		require.NoError(t, err)
@@ -97,8 +103,8 @@ func TestLoad_Sections(t *testing.T) {
 	t.Run("off and a key in the same source conflict", func(t *testing.T) {
 		c := testConfig{Feature: &testFeature{Size: 1, Mode: "code"}}
 		_, err := testSchema().Load(&c, []Source{layer{
-			{key: "feature", raw: "false", origin: "flag --feature"},
-			{key: "feature.size", raw: "3", origin: "flag --feature-size"},
+			{key: "feature", raw: "false", text: true, origin: "flag --feature"},
+			{key: "feature.size", raw: "3", text: true, origin: "flag --feature-size"},
 		}})
 
 		problems := requireProblems(t, err)
@@ -117,7 +123,7 @@ func TestLoad_Sections(t *testing.T) {
 func TestLoad_SetErrorsHidePasswords(t *testing.T) {
 	// Proxy URLs can carry credentials; errors end up in logs and terminals.
 	var c testConfig
-	_, err := testSchema().Load(&c, []Source{layer{{key: "proxy_url", raw: "ftp://user:secret@proxy", origin: "env APP_PROXY_URL"}}})
+	_, err := testSchema().Load(&c, []Source{layer{{key: "proxy_url", raw: "ftp://user:secret@proxy", text: true, origin: "env APP_PROXY_URL"}}})
 
 	problems := requireProblems(t, err)
 	require.Equal(t, `proxy_url="ftp://user:xxxxx@proxy": must be an http URL`, problems[0].Message)
@@ -139,8 +145,8 @@ func TestLoad_KeysWithoutSetAreReturned(t *testing.T) {
 	// Keys like a config path have no field: callers read their winning value from the result.
 	var c testConfig
 	values, err := testSchema().Load(&c, []Source{
-		layer{{key: "config", raw: "a.yaml", origin: "env APP_CONFIG"}},
-		layer{{key: "config", raw: "b.yaml", origin: "flag --config"}},
+		layer{{key: "config", raw: "a.yaml", text: true, origin: "env APP_CONFIG"}},
+		layer{{key: "config", raw: "b.yaml", text: true, origin: "flag --config"}},
 	})
 
 	require.NoError(t, err)

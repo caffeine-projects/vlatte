@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	json "encoding/json/v2"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"os"
+	"path/filepath"
 	"text/template"
 
 	"github.com/caffeine-projects/vlatte"
@@ -44,6 +46,7 @@ type Reply struct {
 	bodyType             bodyType
 	bodyEncoding         bodyEncoding
 	bodyFilename         string
+	bodyFileDir          string // a relative body file opens from here, such as a mock file's dir; "" is the working directory
 	teType               teType
 	headerWithTemplate   http.Header
 	headerTemplate       vlatte.Template
@@ -484,7 +487,8 @@ func (rep *Reply) build(_ http.ResponseWriter, r *RequestValues) (res *Response,
 			return nil, err
 		}
 
-		response.Body = buf.Bytes()
+		// The buffer returns to the pool before the response renders, so the body must not share its bytes.
+		response.Body = bytes.Clone(buf.Bytes())
 
 	case _bodyFile:
 		defer func() {
@@ -509,6 +513,10 @@ func (rep *Reply) build(_ http.ResponseWriter, r *RequestValues) (res *Response,
 			}
 
 			filename = buf.String()
+		}
+
+		if rep.bodyFileDir != "" && !filepath.IsAbs(filename) {
+			filename = filepath.Join(rep.bodyFileDir, filename)
 		}
 
 		file, err := os.Open(filename)
@@ -537,7 +545,7 @@ func (rep *Reply) build(_ http.ResponseWriter, r *RequestValues) (res *Response,
 				return nil, err
 			}
 
-			response.Body = buf.Bytes()
+			response.Body = bytes.Clone(buf.Bytes())
 		} else {
 			response.BodyCloser = file
 		}

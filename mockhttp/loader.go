@@ -1,48 +1,72 @@
 package mockhttp
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sync"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
-// Loader is the interface that defines custom Mock loaders.
-// Usually, it is used to load external mocks, like from the file system.
+// Loader loads mocks from outside the code, such as mock files.
+// Load runs on the first Start and on every Reload, so it replaces the mocks its last run added,
+// which Server.Remock does in one step.
 type Loader interface {
 	Load(app *Server) error
 }
 
 var _ Loader = (*fileLoader)(nil)
 
+// fileLoader loads the mock files matching the server's search patterns.
 type fileLoader struct {
-	rwMutex sync.RWMutex
+	mu    sync.Mutex
+	scope *Scope // the mocks of the last load
 }
 
+// Load adds the mocks of every matching file, in file name order, so mocks of equal priority match in that order.
+// A reload swaps them for the mocks of the last load in one step, so a request finds one set or the other.
+// When a file has problems, Load changes nothing and reports every file with problems.
 func (l *fileLoader) Load(app *Server) error {
-	l.rwMutex.Lock()
-	defer l.rwMutex.Unlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
-	filenames := make(map[string]struct{})
+	seen := make(map[string]struct{})
 
+	var files []string
 	for _, pattern := range app.config.MockFileSearchPatterns {
-		m, err := filepath.Glob(filepath.Join(app.config.RootDir, pattern))
+		matches, err := filepath.Glob(filepath.Join(app.config.RootDir, pattern))
 		if err != nil {
-			return fmt.Errorf("loader: error searching mocks with the glob pattern %s.\n%w", pattern, err)
+			return fmt.Errorf("loader: pattern %s: %w", pattern, err)
 		}
 
-		for _, s := range m {
-			if _, ok := filenames[s]; !ok {
-				filenames[s] = struct{}{}
+		for _, file := range matches {
+			if _, ok := seen[file]; !ok {
+				seen[file] = struct{}{}
+				files = append(files, file)
 			}
 		}
 	}
 
-	// Mocks are added one at a time: adding a mock holds the application lock anyway.
-	for filename := range filenames {
-		if _, err := app.Mock(FromFile(filename)); err != nil {
-			return fmt.Errorf("loader: error adding mock.\n%w", err)
-		}
+	slices.Sort(files)
+
+	if len(files) == 0 && l.scope == nil {
+		return nil
 	}
+
+	builders := make([]vlatte.Builder[*Mock, *Server], 0, len(files))
+	for _, file := range files {
+		builders = append(builders, FromFile(file))
+	}
+
+	// A reload replaces the mocks of the last load, so edited and removed files take effect.
+	scope, err := app.Remock(context.Background(), l.scope, builders...)
+	if err != nil {
+		return fmt.Errorf("loader: %w", err)
+	}
+
+	l.scope = scope
 
 	return nil
 }

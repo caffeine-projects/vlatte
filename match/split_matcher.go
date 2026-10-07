@@ -6,6 +6,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 // splitMatcher splits the value by separator and matches with the inner matcher.
@@ -20,9 +21,9 @@ func (m *splitMatcher) Name() string { return "Split" }
 // Match implements vlatte.Matcher.
 func (m *splitMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
-	txt, ok := v.(string)
+	txt, ok := value.Text(v)
 	if !ok {
-		return failure(fmt.Errorf("split: type %T is not supported. accepted types: string", v))
+		return mismatch("Split() Value is not text")
 	}
 
 	result, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), strings.Split(txt, m.Separator)))

@@ -1,17 +1,17 @@
 package match
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/match/internal/anyconv"
 )
 
-// greaterOrEqualMatcher passes if the value is greater than or equal to the expected value.
+// greaterOrEqualMatcher passes if the value is greater than or equal to the expected value, by value.Compare.
 type greaterOrEqualMatcher struct {
-	Expected float64
+	Expected any
 }
 
 // Name implements vlatte.Matcher.
@@ -20,16 +20,8 @@ func (m *greaterOrEqualMatcher) Name() string { return "GreaterOrEqual" }
 // Match implements vlatte.Matcher.
 func (m *greaterOrEqualMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
-	vv, err := anyconv.ToFloat64(v)
-	if err != nil {
-		return failure(fmt.Errorf(
-			"gte: type %T is not supported. the value must be compatible with float64. %w",
-			v,
-			err,
-		))
-	}
 
-	if vv >= m.Expected {
+	if c, ok := value.Compare(v, m.Expected); ok && c >= 0 {
 		return success()
 	}
 

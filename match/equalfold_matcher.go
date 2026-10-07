@@ -1,11 +1,11 @@
 package match
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 // equalIgnoreCaseMatcher passes when the string value equals expected ignoring case.
@@ -18,14 +18,9 @@ func (m *equalIgnoreCaseMatcher) Name() string { return "EqualIgnoreCase" }
 
 // Match implements vlatte.Matcher.
 func (m *equalIgnoreCaseMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
-	v := arg.Value()
-	txt := ""
-	if v != nil {
-		var ok bool
-		txt, ok = v.(string)
-		if !ok {
-			return failure(fmt.Errorf("eqi: value must be a string. got: %T", v))
-		}
+	txt, ok := value.Text(arg.Value())
+	if !ok {
+		return mismatch("Eqi() Value is not text")
 	}
 
 	if strings.EqualFold(m.Expected, txt) {

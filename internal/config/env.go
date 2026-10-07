@@ -29,7 +29,7 @@ func (s *envSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 		known[name] = struct{}{}
 
 		if raw := os.Getenv(name); raw != "" {
-			entries = append(entries, entry{key: f.key, raw: raw, origin: "env " + name})
+			entries = append(entries, entry{key: f.key, raw: raw, text: true, origin: "env " + name})
 		}
 	}
 

@@ -55,7 +55,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	input := &selectorInput{r, reqValues.URL, r.URL.Query(), r.Form, reqValues.ParsedBodyData}
+	input := &selectorInput{r, reqValues.URL, r.URL.Query(), r.PostForm, reqValues.ParsedBodyData}
 
 	sub := vlatte.NewExplanation()
 	mocks := vlatte.Mocks[*Mock, *selectorInput](stored)

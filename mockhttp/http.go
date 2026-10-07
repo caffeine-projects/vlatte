@@ -121,7 +121,10 @@ func New(config ...Option) (*Server, error) {
 
 	var rec *recorder
 	if conf.Record != nil {
-		rec = newRecorder(app, conf.Record)
+		var err error
+		if rec, err = newRecorder(app, conf.Record); err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
 	}
 
 	var p *reverseProxy
@@ -284,10 +287,10 @@ func (app *Server) Logger() *zerolog.Logger {
 	return app.logger
 }
 
-// Reload reloads mocks from external sources, like the filesystem.
-// Coded mocks will be kept.
+// Reload loads the mocks of external sources, such as mock files, again.
+// Each loader replaces the mocks it added before; mocks added in code are kept.
+// Mock files are swapped in one step, and stay as they were when a file has problems.
 func (app *Server) Reload() error {
-	// app.storage.DeleteExternal()
 	return app.load()
 }
 

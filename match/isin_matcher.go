@@ -2,16 +2,16 @@ package match
 
 import (
 	"fmt"
-	"reflect"
+	"slices"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
-	"github.com/caffeine-projects/vlatte/match/internal/equalutil"
+	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
-// isInMatcher passes when the value is contained in the items slice.
+// isInMatcher passes when the value equals one of the items.
 type isInMatcher struct {
-	Items any
+	Items []any
 }
 
 // Name implements vlatte.Matcher.
@@ -20,25 +20,12 @@ func (m *isInMatcher) Name() string { return "IsIn" }
 // Match implements vlatte.Matcher.
 func (m *isInMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
-	typeOfItems := reflect.TypeOf(m.Items)
-	kind := typeOfItems.Kind()
-	if kind != reflect.Slice && kind != reflect.Array {
-		return failure(fmt.Errorf("is_in: it only works with slices. got: %v", typeOfItems))
+
+	if slices.ContainsFunc(m.Items, func(item any) bool { return value.Equal(item, v) }) {
+		return success()
 	}
 
-	valueOf := reflect.ValueOf(m.Items)
-
-	for i := 0; i < valueOf.Len(); i++ {
-		if equalutil.EqualValues(v, valueOf.Index(i).Interface(), false) {
-			return success()
-		}
-	}
-
-	return mismatch(fmt.Sprintf(
-		"IsIn() Value %v is not contained in %v",
-		v,
-		m.Items,
-	))
+	return mismatch(fmt.Sprintf("IsIn() Value %v is not contained in %v", v, m.Items))
 }
 
 // Describe implements descriptor.SelfDescriptive.

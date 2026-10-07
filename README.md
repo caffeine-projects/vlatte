@@ -76,10 +76,14 @@ err := m.Prep(ctx, proxyall.New(proxyall.Config{Target: "https://api.example.com
 
 ## Mock files
 
-Mocks can also live in YAML or JSON files. On start, the server loads the files matching `testdata/_mocks/*mock.yaml` and `testdata/_mocks/*mock.yml`. Change the patterns with `Setup().MockFilePatterns(...)`, or load a single file with `m.MustMock(mockhttp.FromFile(path))`.
+Mocks can also live in YAML or JSON files (`.json`, `.yaml` or `.yml`).
+- **On start,** the server loads the files matching `testdata/_mocks/*mock.yaml` and `testdata/_mocks/*mock.yml`, in name order. Change the patterns with `Setup().MockFilePatterns(...)`.
+- **To load one file,** use `m.MustMock(mockhttp.FromFile(path))`.
+- **`m.Reload()`** replaces the mocks of the files with what they hold now, in one step. When a file has problems, it returns them and the mocks stay as they were.
 
 ```yaml
 # testdata/_mocks/hello_mock.yaml
+id: hello            # optional: names the mock, as in the admin API's /mocks/hello
 request:
   method: GET
   path: /hello
@@ -88,10 +92,33 @@ response:
   status: 200
   header:
     content-type: text/plain
-  body: hello world
+  body_file: hello.txt   # relative to this file
 ```
 
 [`mockhttp/schema/http.schema.json`](mockhttp/schema/http.schema.json) describes the format, so editors can validate mock files.
+
+**Types.** Each key takes one type, as the schema says. Write text in quotes where a string goes, as in `name: "123"`, and numbers bare, as in `priority: 10`. Bools read the way Go's `strconv.ParseBool` reads them, so `true`, `"true"`, `t` and `1` are all true. A value of the wrong type is an error that says how to write it.
+
+**Durations.** `delay` and `proxy.timeout` take whole milliseconds (`1500`) or a Go duration (`1.5s`). `"1500"` in quotes is neither.
+
+**Matching.** Most of a request is text: its path, query, headers and form values. A matcher reads that text as the type it compares with:
+- `[equal, 10]` and `[isIn, [10, 20]]` match `?page=10`;
+- `[gt, 18]` matches `?age=30`;
+- `[equal, true]` matches `?debug=1`.
+
+No other reading happens: `[equal, 10]` doesn't match `010`. The [match package docs](match/doc.go) state the rule.
+
+**Keys.** Keys are kept as written, so a query name like `userId` matches `userId` only.
+
+**Templates.** A mock file is a Go template first. It can read the server's parameters, data and URL, as in `{{ .URL "/callback" }}`. So a template of the reply must be escaped: ``{{`{{ .Request.Method }}`}}``.
+
+**Errors.** A file with problems isn't loaded. The error lists every problem with its key and a fix:
+
+```
+mock: 2 problems
+  file testdata/_mocks/users_mock.yaml: unknown_key: response.stauts is not a known setting; did you mean response.status?
+  file testdata/_mocks/users_mock.yaml: conflict: proxy is set with response; keep one of them
+```
 
 ## Configuration
 
@@ -104,6 +131,13 @@ A server's settings come from these sources, each overriding the ones before it:
 5. Command-line flags, for the `vlatte` command.
 
 Each setting has a key that its variable and flag derive from: `log.level` is `log: {level: debug}` in a file, `VLATTE_LOG_LEVEL=debug` and `--log-level=debug`. `vlatte --help` lists every setting.
+
+In a file, each setting has its type, as in mock files: `addr: ":8080"` in quotes, `max_age: 150` bare, and a list as a list. Environment variables and flags are text:
+- bools read as `strconv.ParseBool` reads them;
+- numbers are written in the JSON number grammar;
+- lists are comma-separated.
+
+`log.level` and `log.verbosity` take a name, in any case, such as `info`.
 
 ```yaml
 # .vlatterc.yaml
@@ -123,7 +157,7 @@ Unknown keys, flags and `VLATTE_*` variables are errors, except `VLATTE_DOCKER_H
 server: error loading configuration sources
 config: 2 problems
   env VLATTE_LOGLEVEL: unknown_key: VLATTE_LOGLEVEL is not a known setting; did you mean VLATTE_LOG_LEVEL?
-  file .vlatterc.yaml: invalid_value: proxy.timeout="10x" is not a duration; use milliseconds (1500) or a Go duration (1.5s)
+  file .vlatterc.yaml: invalid_value: proxy.timeout must be milliseconds or a Go duration, not "10x"; such as 1500 or 1.5s
 ```
 
 Servers in tests read the file and the environment too. Pick the sources with `ConfigSources`, or pass none to use code only:

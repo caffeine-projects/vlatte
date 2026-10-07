@@ -169,7 +169,9 @@ func TestNewSchema_PanicsOnBadDeclarations(t *testing.T) {
 
 func TestKind_String(t *testing.T) {
 	// Help shows the kind of each value, as in "--name string".
-	kinds := map[Kind]string{String: "string", Bool: "bool", Int: "int", Duration: "duration", List: "list", Kind(9): "Kind(9)"}
+	kinds := map[Kind]string{
+		String: "string", Bool: "bool", Int: "int", Duration: "duration", List: "list", Any: "any", Kind(9): "Kind(9)",
+	}
 
 	for kind, want := range kinds {
 		require.Equal(t, want, kind.String())
@@ -204,7 +206,7 @@ func TestUsage_ShowsEveryWayToSetAKey(t *testing.T) {
         Debug.
         env APP_DEBUG, file key debug
   --log-level name
-        Level. One of: debug (0), info (1). Default: info.
+        Level. One of: debug, info. Default: info.
         env APP_LOG_LEVEL, file key log.level
   --log-timeout duration
         Timeout.
