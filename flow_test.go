@@ -1,6 +1,7 @@
 package vlatte
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -42,4 +43,23 @@ func TestFlow(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(expected), n)
 	require.True(t, w.AssertCalled(t, "Write", expected))
+}
+
+func TestFlow_LeavesTheStepsAlone(t *testing.T) {
+	// D1: a mock's steps are shared by its requests. Flow appended its sink to them, so with spare capacity a second
+	// pipeline's sink replaced the first one's, and one request wrote into another's response.
+	steps := make([]Step, 1, 2)
+	steps[0] = StepFunc(func(_ context.Context, p []byte, next Next) (int, error) { return next.Next(p) })
+
+	var first, second bytes.Buffer
+	a := Flow(t.Context(), &Sink{W: &first}, steps)
+	b := Flow(t.Context(), &Sink{W: &second}, steps)
+
+	_, err := a.Next([]byte("a"))
+	require.NoError(t, err)
+	_, err = b.Next([]byte("b"))
+	require.NoError(t, err)
+
+	require.Equal(t, "a", first.String())
+	require.Equal(t, "b", second.String())
 }

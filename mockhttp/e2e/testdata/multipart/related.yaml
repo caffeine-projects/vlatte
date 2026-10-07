@@ -1,0 +1,23 @@
+# A multipart/related reply: a JSON root part and an image, gzipped.
+request:
+  method: GET
+  path: /related
+
+response:
+  status: 200
+  encoding: gzip
+  multipart:
+    type: related
+    params:
+      type: application/json
+      start: "<root>"
+    parts:
+      - header:
+          content-id: "<root>"
+        body:
+          id: 1
+          logo: cid:logo
+      - header:
+          content-id: "<logo>"
+        filename: logo.png
+        body_file: avatar.png

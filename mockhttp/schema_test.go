@@ -19,6 +19,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/mpart"
 )
 
 // http.schema.json is for editors: the decoder doesn't read it. These tests keep the two in step.
@@ -93,6 +94,9 @@ func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 	require.Equal(t, _randomSchema.Keys(), keys(props(raw)["response_random"]), "response_random")
 	require.Equal(t, _proxySchema.Keys(), keys(props(raw)["proxy"]), "proxy")
 	require.Equal(t, _eventSchema.Keys(), keys(defs["on_complete_event"]), "on_complete")
+	require.Equal(t, _filePatternSchema.Keys(), keys(defs["file_pattern"]), "form_file")
+	require.Equal(t, mpart.SpecSchema.Keys(), keys(defs["multipart"]), "multipart")
+	require.Equal(t, mpart.PartSchema.Keys(), keys(defs["multipart_part"]), "multipart part")
 }
 
 func TestPropJSONSchema_AgreesWithTheDecoder(t *testing.T) {
@@ -100,7 +104,7 @@ func TestPropJSONSchema_AgreesWithTheDecoder(t *testing.T) {
 	// The arguments of matchers are the decoder's alone.
 	schema, _ := loadJSONSchema(t)
 
-	expressible := slices.DeleteFunc(slices.Clone(_mockFaults), func(f mockFault) bool { return f.area == "matcher" })
+	expressible := slices.DeleteFunc(slices.Clone(_mockFaults), schemaBlind)
 
 	rapid.Check(t, func(t *rapid.T) {
 		doc := genMock("http://localhost:8080").Draw(t, "mock").doc()
@@ -148,7 +152,8 @@ func TestJSONSchema_AcceptsTheFixturesTheDecoderAccepts(t *testing.T) {
 			continue // a template, valid once rendered
 		}
 
-		if _, err := (mockDoc{origin: file, format: format, data: data}).build(m); err != nil {
+		// dir, as FromFile sets it: without it, fixtures with relative files would be skipped as wrong.
+		if _, err := (mockDoc{origin: file, format: format, dir: filepath.Dir(file), data: data}).build(m); err != nil {
 			continue // wrong on purpose, or not a mock file
 		}
 
@@ -209,6 +214,32 @@ var _scalarKeys = []struct {
 	{"on_complete.name", "hook", func(v any) map[string]any {
 		return withRequest(map[string]any{"on_complete": []any{map[string]any{"name": v}}})
 	}},
+	{"request.form_file.f.every", true, func(v any) map[string]any {
+		return map[string]any{"request": map[string]any{"form_file": map[string]any{"f": map[string]any{"every": v}}}}
+	}},
+	{"response.multipart.type", "mixed", inMultipart(func(v any) map[string]any {
+		return map[string]any{"type": v, "parts": []any{map[string]any{"body": "x"}}}
+	})},
+	{"response.multipart.boundary", "b0", inMultipart(func(v any) map[string]any {
+		return map[string]any{"type": "mixed", "boundary": v, "parts": []any{map[string]any{"body": "x"}}}
+	})},
+	{"response.multipart.parts[0].name", "a", inPart("name")},
+	{"response.multipart.parts[0].filename", "a.png", inPart("filename")},
+	{"response.multipart.parts[0].content_type", "image/png", inPart("content_type")},
+	{"response.multipart.parts[0].body_file", "a.png", inPart("body_file")},
+	{"response.multipart.parts[0].delay", "1s", inPart("delay")},
+}
+
+func inMultipart(multipart func(v any) map[string]any) func(v any) map[string]any {
+	return func(v any) map[string]any {
+		return withRequest(map[string]any{"response": map[string]any{"multipart": multipart(v)}})
+	}
+}
+
+func inPart(key string) func(v any) map[string]any {
+	return inMultipart(func(v any) map[string]any {
+		return map[string]any{"type": "mixed", "parts": []any{map[string]any{key: v}}}
+	})
 }
 
 func withRequest(doc map[string]any) map[string]any {
@@ -286,9 +317,24 @@ func TestJSONSchema_ScalarTypesAgreeWithTheDecoder(t *testing.T) {
 		},
 		"proxy.":       func() ([]string, func(string) (config.Kind, bool)) { return _proxySchema.Keys(), _proxySchema.KindOf },
 		"on_complete.": func() ([]string, func(string) (config.Kind, bool)) { return _eventSchema.Keys(), _eventSchema.KindOf },
+		"request.form_file.f.": func() ([]string, func(string) (config.Kind, bool)) {
+			return _filePatternSchema.Keys(), _filePatternSchema.KindOf
+		},
+		"response.multipart.": func() ([]string, func(string) (config.Kind, bool)) {
+			return mpart.SpecSchema.Keys(), mpart.SpecSchema.KindOf
+		},
+		"response.multipart.parts[0].": func() ([]string, func(string) (config.Kind, bool)) {
+			return mpart.PartSchema.Keys(), mpart.PartSchema.KindOf
+		},
 	} {
 		all, kindOf := keys()
 		for _, key := range all {
+			// A pattern's body_file must name a file that exists, which no JSON Schema can check: the rule table
+			// pins its type, and the fault catalogue its file_not_found.
+			if prefix+key == "request.form_file.f.body_file" {
+				continue
+			}
+
 			if kind, ok := kindOf(key); ok && kind != config.Any {
 				scalar = append(scalar, prefix+key)
 			}

@@ -36,6 +36,12 @@ func (b *ArgsBuilder) Body(body string) *ArgsBuilder {
 	return b
 }
 
+// Multipart sets a multipart body for the WebHook, such as one built with mockhttp.MultipartForm.
+func (b *ArgsBuilder) Multipart(body MultipartBody) *ArgsBuilder {
+	b.input.Multipart = body
+	return b
+}
+
 // Build builds the vlatte.EventConfig required to set up a WebHook for a mock (on-complete event).
 func (b *ArgsBuilder) Build(name string) vlatte.EventConfig {
 	return vlatte.EventConfig{Name: name, Parameters: b.input}

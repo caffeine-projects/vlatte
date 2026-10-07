@@ -4,7 +4,11 @@ import (
 	"bytes"
 	"context"
 	json "encoding/json/v2"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -168,5 +172,74 @@ func TestHeaderTemplate_RendersPerResponse(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
 		require.Equal(t, []string{"GET"}, res.Header.Values("x-method"))
+	}
+}
+
+func TestReply_TheLastBodySetterWins(t *testing.T) {
+	// D3: body setters didn't reset the body kind, so BodyFile(x).BodyText(y) served the file, and
+	// BodyTemplate(x).BodyFile(f) served the file as a template. Flags were added with +=, so BodyTemplate twice set
+	// the filename flag instead and left the template unparsed.
+	file := filepath.Join(t.TempDir(), "body.txt")
+	require.NoError(t, os.WriteFile(file, []byte("file {{ .Request.Method }}"), 0o600))
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	tests := []struct {
+		name  string
+		reply *Reply
+		want  string
+	}{
+		{"file then text", OK().BodyFile(file).BodyText("text"), "text"},
+		{"text then file", OK().BodyText("text").BodyFile(file), "file {{ .Request.Method }}"},
+		{"template then file", OK().BodyTemplate("t {{ .Request.Method }}").BodyFile(file), "file {{ .Request.Method }}"},
+		{"templated file then bytes", OK().BodyFileWithTemplate(file).Body([]byte("bytes")), "bytes"},
+		{"file then templated file", OK().BodyFile(file).BodyFileWithTemplate(file), "file GET"},
+		{"template twice", OK().BodyTemplate("a").BodyTemplate("b {{ .Request.Method }}"), "b GET"},
+		{"failed JSON then text", OK().BodyJSON(func() {}).BodyText("text"), "text"},
+	}
+
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m.MustMock(Getf("/%d", i).Reply(tc.reply))
+
+			res, err := http.Get(m.URL("/" + strconv.Itoa(i)))
+			require.NoError(t, err)
+
+			b, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+
+			require.Equal(t, http.StatusOK, res.StatusCode)
+			require.Equal(t, tc.want, string(b))
+		})
+	}
+}
+
+func TestReply_DescribesTheBodyInForce(t *testing.T) {
+	// D3: Describe showed a body_file an earlier setter left. D12: it never showed the content of a template, so admin
+	// GET output of a templated reply didn't load back.
+	tests := []struct {
+		name  string
+		reply *Reply
+		want  map[string]any
+	}{
+		{"file then text", OK().BodyFile("f.txt").BodyText("text"), map[string]any{"status": 200, "body": "text"}},
+		{"text then file", OK().BodyText("text").BodyFile("f.txt"), map[string]any{"status": 200, "body_file": "f.txt"}},
+		{
+			"template", OK().BodyTemplate("t {{ .X }}"),
+			map[string]any{"status": 200, "body": "t {{ .X }}", "template": map[string]any{"enabled": true}},
+		},
+		{
+			"templated file", OK().BodyFileWithTemplate("f.txt"),
+			map[string]any{"status": 200, "body_file": "f.txt", "template": map[string]any{"enabled": true}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.reply.Describe().Props)
+		})
 	}
 }

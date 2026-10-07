@@ -121,6 +121,7 @@ func (doc mockDoc) build(app *Server) (*Mock, error) {
 	}
 
 	def := newMockDef()
+	def.dir = doc.dir
 
 	var problems []config.Problem
 	if _, err := _mockSchema.Load(&def, []config.Source{config.Bytes(doc.origin, doc.format, data)}); err != nil {

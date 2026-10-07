@@ -29,6 +29,7 @@ type Builder struct {
 	scenario              string
 	scenarioNewState      string
 	scenarioRequiredState string
+	err                   error // the first error of a method that can't return one, such as FormFile's
 }
 
 // Request creates a new empty Builder.
@@ -253,9 +254,17 @@ func (b *Builder) Headerf(name string, value string, a ...any) *Builder {
 	return b.Header(name, match.StrictEqual(fmt.Sprintf(value, a...)))
 }
 
-// ContentType sets a matcher that will pass if the HTTP request content type is equal to given value.
+// ContentType matches the Content-Type of the request, ignoring case. A value without parameters matches the media
+// type alone, whatever parameters the request has, such as the boundary of a multipart form:
+// ContentType("multipart/form-data") matches "multipart/form-data; boundary=x". A value with parameters matches the
+// whole header.
 func (b *Builder) ContentType(value string, a ...any) *Builder {
-	return b.Header(HeaderContentType, match.EQI(fmt.Sprintf(value, a...)))
+	v := fmt.Sprintf(value, a...)
+	if strings.Contains(v, ";") {
+		return b.Header(HeaderContentType, match.EQI(v))
+	}
+
+	return b.Header(HeaderContentType, match.Split(";", match.Item(0, match.Trim(match.EQI(v)))))
 }
 
 // Query defines a matcher to a specific query.
@@ -311,7 +320,8 @@ func (b *Builder) Body(matcherList ...vlatte.Matcher) *Builder {
 	return b
 }
 
-// FormField defines a matcher for a specific form field by its key.
+// FormField defines a matcher for a field of the body's form, urlencoded or multipart, by its name.
+// It reads the field as http.Request.PostFormValue does: its first value, and never the query.
 func (b *Builder) FormField(name string, m vlatte.Matcher) *Builder {
 	b.appendExpectation(&expectation{
 		Target:   int(matchingScopeFormField),
@@ -458,6 +468,10 @@ func (b *Builder) SetSource(src string) *Builder {
 // Build builds a Mock with previously configured parameters.
 // Used internally by Server.
 func (b *Builder) Build(app *Server) (*Mock, error) {
+	if b.err != nil {
+		return nil, fmt.Errorf("mock: %w", b.err)
+	}
+
 	if err := checkMockID(b.mock.id); err != nil {
 		return nil, fmt.Errorf("mock: id %q: %w", b.mock.id, err)
 	}

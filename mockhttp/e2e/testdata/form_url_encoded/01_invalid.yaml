@@ -1,5 +1,5 @@
 request:
-  form_url_encoded:
+  form:
     name: "nice name"
     address: "berlin+germany"
     active: true

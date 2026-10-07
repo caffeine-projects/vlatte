@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	json "encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/mpart"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
@@ -55,6 +57,8 @@ type Reply struct {
 	bodyTemplate         vlatte.Template
 	teData               any
 	encoded              bool
+	multipart            *Multipart
+	multipartEncoder     *mpart.Encoder
 
 	delayedErr error
 }
@@ -65,6 +69,7 @@ const (
 	_bodyDefault bodyType = iota
 	_bodyTemplate
 	_bodyFile
+	_bodyMultipart
 )
 
 type bodyEncoding int
@@ -178,7 +183,7 @@ func (rep *Reply) HeaderArr(key string, values ...string) *Reply {
 // HeaderTemplate adds a header that can have its value changed using templates.
 func (rep *Reply) HeaderTemplate(key, value string) *Reply {
 	rep.headerWithTemplate.Add(key, value)
-	rep.teType += _teHeader
+	rep.teType |= _teHeader
 	return rep
 }
 
@@ -187,7 +192,7 @@ func (rep *Reply) HeaderArrTemplate(key string, values ...string) *Reply {
 	for _, value := range values {
 		rep.HeaderTemplate(key, value)
 	}
-	rep.teType += _teHeader
+
 	return rep
 }
 
@@ -224,19 +229,23 @@ func (rep *Reply) ExpireCookie(cookie *http.Cookie) *Reply {
 }
 
 // Body defines the response body using a []byte.
+// Like every body setter, it replaces the body an earlier one set.
 func (rep *Reply) Body(value []byte) *Reply {
+	rep.body(_bodyDefault)
 	rep.response.Body = value
+
 	return rep
 }
 
 // BodyText defines the response body using a string.
 func (rep *Reply) BodyText(text string) *Reply {
-	rep.response.Body = []byte(text)
-	return rep
+	return rep.Body([]byte(text))
 }
 
 // BodyJSON defines the response body encoding the given value using json.Encoder.
 func (rep *Reply) BodyJSON(data any) *Reply {
+	rep.body(_bodyDefault)
+
 	b, err := json.Marshal(data, json.Deterministic(true))
 	if err != nil {
 		rep.delayedErr = err
@@ -250,6 +259,8 @@ func (rep *Reply) BodyJSON(data any) *Reply {
 
 // BodyReader defines the response body using the given io.Reader.
 func (rep *Reply) BodyReader(reader io.Reader) *Reply {
+	rep.body(_bodyDefault)
+
 	b, err := io.ReadAll(reader)
 	if err != nil {
 		rep.delayedErr = err
@@ -262,9 +273,9 @@ func (rep *Reply) BodyReader(reader io.Reader) *Reply {
 
 // BodyFile loads the body content from the given filename.
 func (rep *Reply) BodyFile(filename string) *Reply {
+	rep.body(_bodyFile)
 	rep.bodyFilename = filename
-	rep.bodyType = _bodyFile
-	rep.teType += _teBodyFilename
+	rep.teType |= _teBodyFilename
 
 	return rep
 }
@@ -273,18 +284,27 @@ func (rep *Reply) BodyFile(filename string) *Reply {
 // The parameter content must be the actual template content that should be parsed and rendered.
 // Use BodyFileWithTemplate function to load the template from a file.
 func (rep *Reply) BodyTemplate(content string) *Reply {
+	rep.body(_bodyTemplate)
 	rep.bodyTemplateContent = content
-	rep.bodyType = _bodyTemplate
-	rep.teType += _teBody
+	rep.teType |= _teBody
 
 	return rep
 }
 
 // BodyFileWithTemplate loads the body content from the given filename.
 func (rep *Reply) BodyFileWithTemplate(filename string) *Reply {
+	rep.body(_bodyFile)
 	rep.bodyFilename = filename
-	rep.bodyType = _bodyFile
-	rep.teType = _teBodyFilename | _teBody
+	rep.teType |= _teBodyFilename | _teBody
+
+	return rep
+}
+
+// Multipart defines the response body as a multipart body. The body sets the Content-Type, with its boundary:
+// setting a Content-Type too, with Header or HeaderTemplate, makes building the mock fail.
+func (rep *Reply) Multipart(mp *Multipart) *Reply {
+	rep.body(_bodyMultipart)
+	rep.multipart = mp
 
 	return rep
 }
@@ -342,14 +362,20 @@ func (rep *Reply) Describe() descriptor.Descriptor {
 		response["encoding"] = rep.response.Encoding
 	}
 
-	if len(rep.bodyFilename) > 0 {
+	switch rep.bodyType {
+	case _bodyFile:
 		response["body_file"] = rep.bodyFilename
-	} else if rep.response.Body != nil {
-		response["body"] = string(rep.response.Body)
+	case _bodyTemplate:
+		response["body"] = rep.bodyTemplateContent
+	case _bodyMultipart:
+		response["multipart"] = rep.multipart.spec.Doc()
+	default:
+		if rep.response.Body != nil {
+			response["body"] = string(rep.response.Body)
+		}
 	}
 
-	switch rep.bodyType {
-	case _bodyTemplate:
+	if rep.teType&_teBody != 0 || rep.bodyType == _bodyMultipart && rep.multipart.spec.Templated {
 		tmpl := map[string]any{"enabled": true}
 
 		if rep.teData != nil {
@@ -362,9 +388,26 @@ func (rep *Reply) Describe() descriptor.Descriptor {
 	return descriptor.New("response", response)
 }
 
+// body sets the kind of body of the reply, and drops what an earlier body setter left: the last one wins.
+func (rep *Reply) body(kind bodyType) {
+	rep.bodyType = kind
+	rep.response.Body = nil
+	rep.bodyFilename = ""
+	rep.bodyTemplateContent = ""
+	rep.teType &^= _teBody | _teBodyFilename
+	rep.delayedErr = nil
+	rep.multipart = nil
+}
+
 func (rep *Reply) beforeBuild(app *Server) error {
 	if rep.delayedErr != nil {
 		return rep.delayedErr
+	}
+
+	if rep.bodyType == _bodyMultipart {
+		if err := rep.compileMultipart(); err != nil {
+			return err
+		}
 	}
 
 	if rep.teType&_teBodyFilename == _teBodyFilename {
@@ -426,13 +469,34 @@ func (rep *Reply) beforeBuild(app *Server) error {
 	return nil
 }
 
+// compileMultipart checks the multipart body and compiles it, once per build: the boundary drawn here is the one of
+// every response the mock serves.
+func (rep *Reply) compileMultipart() error {
+	if rep.response.Header.Get(HeaderContentType) != "" || rep.headerWithTemplate.Get(HeaderContentType) != "" {
+		return errors.New("reply: a multipart body sets the Content-Type: remove the Content-Type header")
+	}
+
+	spec := rep.multipart.spec
+	spec.Dir = rep.bodyFileDir
+
+	e, err := mpart.Compile(&spec)
+	if err != nil {
+		return fmt.Errorf("reply: %w", err)
+	}
+
+	rep.multipartEncoder = e
+
+	return nil
+}
+
 func (rep *Reply) build(_ http.ResponseWriter, r *RequestValues) (res *Response, err error) {
 	if rep.delayedErr != nil {
 		return nil, rep.delayedErr
 	}
 
 	response := rep.response
-	hasTemplate := rep.teType&_teBody != 0 || rep.teType&_teBodyFilename != 0 || len(rep.headerWithTemplate) > 0
+	hasTemplate := rep.teType&_teBody != 0 || rep.teType&_teBodyFilename != 0 || len(rep.headerWithTemplate) > 0 ||
+		rep.bodyType == _bodyMultipart
 	tmplData := any(nil)
 	if hasTemplate {
 		tmplData = r.Data
@@ -467,6 +531,18 @@ func (rep *Reply) build(_ http.ResponseWriter, r *RequestValues) (res *Response,
 	}
 
 	switch rep.bodyType {
+	case _bodyMultipart:
+		body, pauses, err := rep.multipartEncoder.Encode(tmplData)
+		if err != nil {
+			return nil, err
+		}
+
+		// The reply's headers are shared by its responses, so the Content-Type goes into a copy.
+		response.Header = response.Header.Clone()
+		response.Header.Set(HeaderContentType, rep.multipartEncoder.ContentType())
+		response.Body = body
+		response.pauses = pauses
+
 	case _bodyTemplate:
 		defer func() {
 			if recovered := recover(); recovered != nil {

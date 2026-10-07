@@ -45,7 +45,7 @@ local scheme = import './scheme.libsonnet';
     header(key, matcher):: { header: { [key]: matcher } },
     query(key, matcher):: { query: { [key]: matcher } },
     queries(key, matcher):: { queries: { [key]: matcher } },
-    formURLEncoded(key, matcher):: { form_url_encoded: { [key]: matcher } },
+    form(key, matcher):: { form: { [key]: matcher } },
     body(matcher):: { body: matcher },
   },
 

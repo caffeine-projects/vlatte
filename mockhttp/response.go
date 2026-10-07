@@ -3,11 +3,15 @@ package mockhttp
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
+	"github.com/caffeine-projects/vlatte/internal/mpart"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/httprec"
 )
@@ -24,6 +28,9 @@ type Response struct {
 	BodyCloser   io.ReadCloser
 	BodyFilename string
 	Encoding     string
+
+	// pauses are where a streamed body waits, such as before the parts of a multipart body with delays.
+	pauses []mpart.Pause
 }
 
 func newResponse() *Response {
@@ -42,7 +49,14 @@ func (r *Response) Gunzip() ([]byte, error) {
 	return io.ReadAll(gz)
 }
 
-func (r *Response) Render(w http.ResponseWriter) error {
+// Render writes the response to w. ctx is the request's: a streamed body stops waiting when it ends.
+// An error comes after the status and headers are sent, so it can't change the response.
+func (r *Response) Render(ctx context.Context, w http.ResponseWriter) error {
+	return r.render(ctx, w, wait)
+}
+
+// render writes the response to w, and waits with wait where a streamed body pauses.
+func (r *Response) render(ctx context.Context, w http.ResponseWriter, wait func(context.Context, time.Duration) error) error {
 	for k, vv := range r.Header {
 		for _, v := range vv {
 			w.Header().Add(k, v)
@@ -59,7 +73,11 @@ func (r *Response) Render(w http.ResponseWriter) error {
 
 	w.WriteHeader(r.StatusCode)
 
-	if len(r.Body) > 0 {
+	if len(r.Body) > 0 && len(r.pauses) > 0 {
+		if err := r.stream(ctx, w, wait); err != nil {
+			return err
+		}
+	} else if len(r.Body) > 0 {
 		if len(r.Encoding) > 0 {
 			buf := bufpool.Get()
 			buf.Reset()
@@ -97,6 +115,84 @@ func (r *Response) Render(w http.ResponseWriter) error {
 	}
 
 	return nil
+}
+
+// stream writes the body in segments, and waits at each pause before the bytes after it. A segment is flushed before
+// the wait, through gzip when the body is encoded, so the client reads it meanwhile. A pause past the end of the body,
+// which a Mapper may shorten, waits at its end.
+func (r *Response) stream(ctx context.Context, w http.ResponseWriter, wait func(context.Context, time.Duration) error) error {
+	rc := http.NewResponseController(w)
+
+	out := io.Writer(w)
+
+	var gz *gzip.Writer
+	if r.Encoding == "gzip" {
+		var ok bool
+		if gz, ok = gzipper.Get().(*gzip.Writer); !ok {
+			gz = gzip.NewWriter(nil)
+		}
+
+		gz.Reset(w)
+		defer gzipper.Put(gz)
+
+		out = gz
+	}
+
+	flush := func() error {
+		if gz != nil {
+			if err := gz.Flush(); err != nil {
+				return err
+			}
+		}
+
+		if err := rc.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return err
+		}
+
+		return nil
+	}
+
+	written := 0
+	for _, p := range r.pauses {
+		if at := min(p.At, len(r.Body)); at > written {
+			if _, err := out.Write(r.Body[written:at]); err != nil {
+				return err
+			}
+
+			written = at
+		}
+
+		if err := flush(); err != nil {
+			return err
+		}
+
+		if err := wait(ctx, p.Delay); err != nil {
+			return err
+		}
+	}
+
+	if _, err := out.Write(r.Body[written:]); err != nil {
+		return err
+	}
+
+	if gz != nil {
+		return gz.Close()
+	}
+
+	return nil
+}
+
+// wait waits for d, or until ctx ends.
+func wait(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 func (r *Response) encode(w io.Writer, reader io.Reader) (n int64, err error) {

@@ -99,10 +99,25 @@ func TestMockSchema_Rules(t *testing.T) {
 			{config.CodeConflict, "request.path", "is set with request.url", ""},
 		}},
 		{"query value as a number", "request: {query: {page: 1}}\n", []want{{config.CodeInvalidValue, "request.query.page", "must be a string or a matcher list", `write it in quotes: "1"`}}},
-		{"form value as a bool", "request: {form_url_encoded: {active: true}}\n", []want{{config.CodeInvalidValue, "request.form_url_encoded.active", "not a bool", `write it in quotes: "true"`}}},
+		{"form value as a bool", "request: {form: {active: true}}\n", []want{{config.CodeInvalidValue, "request.form.active", "not a bool", `write it in quotes: "true"`}}},
 		{"header map as a list", "request: {header: [a]}\n", []want{{config.CodeInvalidValue, "request.header", "must be an object, not a list", ""}}},
 		// Found by TestPropMockFile_ServesItsModel: no request could match both, so the mock never matched.
 		{"two names of one header", "request: {header: {X-Id: a, x-id: b}}\n", []want{{config.CodeConflict, "request.header.x-id", "name the same header", "header names ignore case"}}},
+		{"form_file as a list", "request: {form_file: [a]}\n", []want{{config.CodeInvalidValue, "request.form_file", "must be an object, not a list", ""}}},
+		{"file pattern as text", "request: {form_file: {avatar: a.png}}\n", []want{{config.CodeInvalidValue, "request.form_file.avatar", "must be an object, not a string", ""}}},
+		{"file pattern key with a typo", "request: {form_file: {avatar: {filname: a.png}}}\n", []want{{config.CodeUnknownKey, "request.form_file.avatar.filname", "not a known setting", "did you mean request.form_file.avatar.filename?"}}},
+		{"filename as a number", "request: {form_file: {avatar: {filename: 1}}}\n", []want{{config.CodeInvalidValue, "request.form_file.avatar.filename", "must be a string or a matcher list", `write it in quotes: "1"`}}},
+		{"file body and body_file", "request: {form_file: {avatar: {body: x, body_file: a.png}}}\n", []want{{config.CodeConflict, "request.form_file.avatar.body_file", "request.form_file.avatar.body_file is set with request.form_file.avatar.body", "keep one of them"}}},
+		{"file body_file that doesn't exist", "request: {form_file: {avatar: {body_file: no-such-file.png}}}\n", []want{{config.CodeFileNotFound, "request.form_file.avatar.body_file", `"no-such-file.png" does not exist`, "relative paths start at the mock file's directory"}}},
+		{"empty file body_file", "request: {form_file: {avatar: {body_file: ''}}}\n", []want{{config.CodeInvalidValue, "request.form_file.avatar.body_file", "expected a file name", ""}}},
+		{"file body_file that is a directory", "request: {form_file: {avatar: {body_file: .}}}\n", []want{{config.CodeReadError, "request.form_file.avatar.body_file", "is a directory", ""}}},
+		{"file body and body_file, and a typo", "request: {form_file: {avatar: {body: x, body_file: a.png, filname: b}}}\n", []want{
+			{config.CodeConflict, "request.form_file.avatar.body_file", "is set with request.form_file.avatar.body", "keep one of them"},
+			{config.CodeUnknownKey, "request.form_file.avatar.filname", "not a known setting", "did you mean request.form_file.avatar.filename?"},
+		}},
+		{"file every as text", "request: {form_file: {avatar: {every: maybe}}}\n", []want{{config.CodeInvalidValue, "request.form_file.avatar.every", `must be true or false, not "maybe"`, ""}}},
+		{"two names of one file header", "request: {form_file: {avatar: {header: {X-Id: a, x-id: b}}}}\n", []want{{config.CodeConflict, "request.form_file.avatar.header.x-id", "name the same header", "header names ignore case"}}},
+		{"bad pattern in a list", "request: {form_file: {avatar: [{}, {every: x}]}}\n", []want{{config.CodeInvalidValue, "request.form_file.avatar[1].every", "must be true or false", ""}}},
 		{"body as an object", "request: {body: {a: 1}}\n", []want{{config.CodeInvalidValue, "request.body", "must be a string or a matcher list", ""}}},
 		{"matcher without its argument", "request: {header: {X-Id: [gt]}}\n", []want{{config.CodeInvalidValue, "request.header.X-Id", "gt", ""}}},
 		{"multi-matcher entry that isn't a matcher", "request: {body: [all, [true]]}\n", []want{{config.CodeInvalidValue, "request.body", "a matcher is a name or a definition", ""}}},
@@ -120,6 +135,15 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"body and body_file", ok + "response: {body: x, body_file: y.txt}\n", []want{{config.CodeConflict, "response.body_file", "response.body_file is set with response.body", ""}}},
 		{"empty body_file", ok + "response: {body_file: ''}\n", []want{{config.CodeInvalidValue, "response.body_file", "expected a file name", ""}}},
 		{"template data as a number", ok + "response: {template: {data: 5}}\n", []want{{config.CodeInvalidValue, "response.template.data", "must be an object or a list", ""}}},
+		{"multipart as text", ok + "response: {multipart: x}\n", []want{{config.CodeInvalidValue, "response.multipart", "must be an object, not a string", ""}}},
+		{"multipart and body", ok + "response: {body: x, multipart: {type: mixed, parts: [{}]}}\n", []want{{config.CodeConflict, "response.multipart", "response.multipart is set with response.body", "keep one of them"}}},
+		{"multipart and body_file", ok + "response: {body_file: a.txt, multipart: {type: mixed, parts: [{}]}}\n", []want{{config.CodeConflict, "response.multipart", "response.multipart is set with response.body_file", ""}}},
+		{"multipart and a Content-Type header", ok + "response: {header: {content-type: text/plain}, multipart: {type: mixed, parts: [{}]}}\n", []want{{config.CodeConflict, "response.header.content-type", "response.header.content-type is set with response.multipart", "a multipart body sets the Content-Type: remove the header"}}},
+		{"multipart and a Content-Type header template", ok + "response: {header_template: {Content-Type: x}, multipart: {type: mixed, parts: [{}]}}\n", []want{{config.CodeConflict, "response.header_template.Content-Type", "is set with response.multipart", ""}}},
+		{"multipart without a type", ok + "response: {multipart: {parts: [{}]}}\n", []want{{config.CodeMissingValue, "response.multipart.type", "response.multipart.type is required", "name the subtype"}}},
+		{"multipart without parts", ok + "response: {multipart: {type: mixed}}\n", []want{{config.CodeMissingValue, "response.multipart.parts", "response.multipart.parts is required", "add at least one part"}}},
+		{"form-data part without a name", ok + "response: {multipart: {type: form-data, parts: [{body: x}]}}\n", []want{{config.CodeMissingValue, "response.multipart.parts[0].name", "is required in a form-data part", ""}}},
+		{"multipart in a sequence", ok + "response_sequence: {responses: [{multipart: {type: 'multipart/mixed', parts: [{}]}}]}\n", []want{{config.CodeInvalidValue, "response_sequence.responses[0].multipart.type", `must be a subtype, not "multipart/mixed"`, "write the subtype only"}}},
 		{"template that isn't an object", ok + "response: {template: 5}\n", []want{{config.CodeInvalidValue, "response.template", "must be an object", "its keys are enabled, data"}}},
 		{"unsupported encoding", ok + "response: {encoding: br}\n", []want{{config.CodeInvalidValue, "response.encoding", `response.encoding must be gzip, not "br"`, ""}}},
 		{"encoding in capitals", ok + "response: {encoding: GZIP}\n", []want{{config.CodeInvalidValue, "response.encoding", `response.encoding must be gzip, not "GZIP"`, ""}}},
@@ -188,6 +212,32 @@ func TestMockSchema_ErrorText(t *testing.T) {
   bytes: invalid_value: request.query.page must be a string or a matcher list, such as [equal, x], not a number; write it in quotes: "1"
   bytes: conflict: response.body_file is set with response.body; keep one of them
   bytes: unknown_key: response.stauts is not a known setting; did you mean response.status?`)
+}
+
+func TestMockSchema_FormsAndMultipartErrorText(t *testing.T) {
+	// Golden: the words of the form_file and multipart problems, as a user reads them, sorted by key.
+	_, err := decodeDoc(MustNew(Setup().Silent()), `
+request:
+  path: /upload
+  form_file:
+    avatar: {filname: a.png, every: maybe}
+response:
+  body: x
+  header: {Content-Type: text/plain}
+  multipart:
+    type: multipart/mixed
+    parts:
+      - header: {X-N: "a\nb"}
+        delay: -5
+`)
+	require.EqualError(t, err, `mock: 7 problems
+  doc: invalid_value: request.form_file.avatar.every must be true or false, not "maybe"
+  doc: unknown_key: request.form_file.avatar.filname is not a known setting; did you mean request.form_file.avatar.filename?
+  doc: conflict: response.header.Content-Type is set with response.multipart; a multipart body sets the Content-Type: remove the header
+  doc: conflict: response.multipart is set with response.body; keep one of them
+  doc: invalid_value: response.multipart.parts[0].delay must be 0 or more, not -5
+  doc: invalid_value: response.multipart.parts[0].header.X-N holds a line break
+  doc: invalid_value: response.multipart.type must be a subtype, not "multipart/mixed"; write the subtype only, such as mixed`)
 }
 
 func TestMockSchema_ReadProblems(t *testing.T) {
@@ -385,7 +435,7 @@ func TestMockFile_FormFieldsComeFromTheBody(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(FromBytes([]byte("request:\n  method: POST\n  path: /form\n  form_url_encoded: {H: [present], A: '-'}\n"), "yaml"))
+	m.MustMock(FromBytes([]byte("request:\n  method: POST\n  path: /form\n  form: {H: [present], A: '-'}\n"), "yaml"))
 
 	post := func(query, form string) int {
 		res, err := http.Post(m.URL()+"/form?"+query, MIMEFormURLEncoded, strings.NewReader(form))

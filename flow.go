@@ -3,6 +3,7 @@ package vlatte
 import (
 	"context"
 	"io"
+	"slices"
 )
 
 var (
@@ -54,8 +55,10 @@ type pipeline struct {
 // Flow creates a new pipeline from a [context.Context] and a slice of [Step]s.
 // The context is passed to every step's Handle and is typically the request context,
 // so steps can respect client disconnect or timeouts.
+// A pipeline passes one buffer through the steps, once. steps is not modified.
 func Flow(ctx context.Context, sink Step, steps []Step) Next {
-	return &pipeline{ctx: ctx, steps: append(steps, sink)}
+	// The sink goes into a copy: steps may be shared, such as a mock's steps across concurrent requests.
+	return &pipeline{ctx: ctx, steps: slices.Concat(steps, []Step{sink})}
 }
 
 func (p *pipeline) Next(b []byte) (n int, err error) {

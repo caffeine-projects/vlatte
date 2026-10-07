@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -31,6 +32,7 @@ type exchange struct {
 	accept    string
 	reqType   string // the request's content type, which names nothing in the recording
 	body      *string
+	form      *formModel // a multipart form body, in place of body
 	status    int
 	resHeader map[string]string
 	resBody   []byte
@@ -58,10 +60,16 @@ func genExchange() *rapid.Generator[exchange] {
 		}
 
 		if ex.method == "POST" || ex.method == "PUT" || ex.method == "PATCH" {
-			// Request bodies are UTF-8 text: JSON can't hold the body matcher of one that isn't,
-			// which TestRecorder_LogsWhatItCantRecord pins.
-			body := genToken().Draw(t, "request body")
-			ex.body = &body
+			if rapid.Bool().Draw(t, "multipart form") {
+				// A form records as its fields and files, binary ones to body files: it holds any bytes.
+				form := genForm().Draw(t, "form")
+				ex.form, ex.reqType = &form, ""
+			} else {
+				// Other request bodies are UTF-8 text: JSON can't hold the body matcher of one that isn't,
+				// which TestRecorder_LogsWhatItCantRecord pins.
+				body := genToken().Draw(t, "request body")
+				ex.body = &body
+			}
 		}
 
 		switch rapid.IntRange(0, 2).Draw(t, "response body") {
@@ -82,6 +90,14 @@ func (ex exchange) request() requestSpec {
 	req := requestSpec{method: ex.method, path: ex.path, query: ex.query, header: http.Header{"Accept": {ex.accept}}, body: ex.body}
 	if ex.reqType != "" {
 		req.header.Set(HeaderContentType, ex.reqType)
+	}
+
+	if ex.form != nil {
+		// send writes the form under a fresh boundary each time.
+		req.multipart, req.files, req.form = true, ex.form.files, make(url.Values)
+		for _, f := range ex.form.fields {
+			req.form.Add(f.name, f.value)
+		}
 	}
 
 	return req
@@ -250,7 +266,9 @@ func recordedReply(t require.TestingT, path string) *replyDef {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
+	// The directory, as FromFile sets it: a recorded form compares its binary files with files next to it.
 	def := newMockDef()
+	def.dir = filepath.Dir(path)
 	_, err = _mockSchema.Load(&def, []config.Source{config.Bytes(path, strings.TrimPrefix(filepath.Ext(path), "."), data)})
 	require.NoError(t, err)
 	require.NotNil(t, def.reply)
@@ -296,10 +314,23 @@ func TestRecorder_Regressions(t *testing.T) {
 		return ex
 	}
 
+	upload := func(form formModel) exchange {
+		ex := text(exchange{form: &form})
+		ex.method = http.MethodPost
+
+		return ex
+	}
+
 	tests := []struct {
 		name string
 		ex   exchange
 	}{
+		// Found by TestPropRecorder_FormsRoundTrip: files of fields whose names read the same once made safe for a
+		// file name, such as " " and ".", went to one body file, and the last one written won.
+		{"files of fields with the same safe name replay", upload(formModel{files: []formFile{
+			{field: " ", filename: "a", contentType: "application/json", body: []byte{0xff, '1'}},
+			{field: ".", filename: "b", contentType: "application/json", body: []byte{0xff, '2'}},
+		}})},
 		// F19: the recorded path held the query, which never matched on replay.
 		{"a request with a query replays", text(exchange{query: url.Values{"userId": {"7"}}, resBody: []byte("ok")})},
 		// Found by TestPropRecorder_RoundTrip: a body that isn't text couldn't be written in a mock file.
@@ -526,4 +557,77 @@ func TestRecorder_LogsWhatItCantRecord(t *testing.T) {
 			require.Empty(t, files)
 		})
 	}
+}
+
+func TestPropRecorder_FormsRoundTrip(t *testing.T) {
+	// M23: a recorded multipart form replays whatever boundary the replayed request has: it records its fields and
+	// files, not its bytes. The same upload, sent twice under two boundaries, records to one file; files that aren't
+	// UTF-8 text go to body files; several files of a field record as a list; and a file with another byte doesn't
+	// replay.
+	target, current := newTarget(t)
+	rt := newRoundTrip(t, target.URL)
+
+	rapid.Check(t, func(t *rapid.T) {
+		ex := genExchange().Draw(t, "exchange")
+		form := genForm().Draw(t, "form")
+		// Each recorded pattern pins its filename, so a changed byte fails even when two files have the same content.
+		for _, filename := range []string{"a.bin", "b.bin"}[:rapid.IntRange(1, 2).Draw(t, "uploads")] {
+			form.files = append(form.files, formFile{field: "upload", filename: filename, body: genFileBody().Draw(t, "upload")})
+		}
+
+		// 418 is the no-match status too: the replies must tell the two apart.
+		ex.method, ex.form, ex.body, ex.reqType, ex.status = http.MethodPost, &form, nil, "", http.StatusOK
+		current.Store(&ex)
+
+		format := rapid.SampledFrom(MockFileFormats()).Draw(t, "format")
+		rec, dir := rt.recorder(t, format, false)
+
+		send(t, rec.URL(), ex.request())
+		send(t, rec.URL(), ex.request())
+		rec.StopRecording()
+
+		mocks, err := filepath.Glob(filepath.Join(dir, "*.mock."+format))
+		require.NoError(t, err)
+		require.Len(t, mocks, 1, "one upload, one recording; server logs:\n%s", rt.logs)
+
+		entries, err := os.ReadDir(dir)
+		require.NoError(t, err)
+
+		contents := make(map[string]bool, len(entries))
+		for _, e := range entries {
+			b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			require.NoError(t, err)
+
+			contents[string(b)] = true
+		}
+
+		for _, f := range form.files {
+			if !utf8.Valid(f.body) {
+				require.True(t, contents[string(f.body)], "file %s of %s goes to a body file", f.filename, f.field)
+			}
+		}
+
+		clearDir(t, rt.replayDir)
+
+		for _, e := range entries {
+			b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(filepath.Join(rt.replayDir, e.Name()), b, 0o600))
+		}
+
+		require.NoError(t, rt.replay.Reload(), "the recording loads")
+
+		replayed, _ := send(t, rt.replay.URL(), ex.request())
+		require.Equal(t, ex.status, replayed.StatusCode, "the same form, under another boundary")
+
+		changed := ex
+		changedForm := form
+		changedForm.files = slices.Clone(form.files)
+		last := len(changedForm.files) - 1
+		changedForm.files[last].body = append(slices.Clone(changedForm.files[last].body), '~')
+		changed.form = &changedForm
+
+		res, _ := send(t, rt.replay.URL(), changed.request())
+		require.Equal(t, StatusNoMatch, res.StatusCode, "a file with another byte")
+	})
 }

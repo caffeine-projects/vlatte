@@ -61,6 +61,56 @@ var _mockFaults = []mockFault{
 	{"name", config.CodeInvalidValue, "name", func(doc map[string]any) { doc["name"] = int64(123) }},
 	{"priority", config.CodeInvalidValue, "priority", func(doc map[string]any) { doc["priority"] = "5" }},
 	{"enabled", config.CodeInvalidValue, "enabled", func(doc map[string]any) { doc["enabled"] = "yes" }},
+	// The form_file faults share an area: one sets the whole form_file, which would hide the others.
+	{"form_file", config.CodeInvalidValue, "request.form_file", func(doc map[string]any) { sub(doc, "request")["form_file"] = []any{} }},
+	{"form_file", config.CodeUnknownKey, "request.form_file.avatar.filname", func(doc map[string]any) {
+		sub(doc, "request")["form_file"] = map[string]any{"avatar": map[string]any{"filname": "a.png"}}
+	}},
+	{"form_file", config.CodeConflict, "request.form_file.avatar.body_file", func(doc map[string]any) {
+		sub(doc, "request")["form_file"] = map[string]any{"avatar": map[string]any{"body": "x", "body_file": "a.png"}}
+	}},
+	{"form_file", config.CodeFileNotFound, "request.form_file.avatar.body_file", func(doc map[string]any) {
+		sub(doc, "request")["form_file"] = map[string]any{"avatar": map[string]any{"body_file": "testdata/no-such-file.png"}}
+	}},
+	{"form_file", config.CodeInvalidValue, "request.form_file.avatar[1].every", func(doc map[string]any) {
+		sub(doc, "request")["form_file"] = map[string]any{"avatar": []any{make(map[string]any), map[string]any{"every": "x"}}}
+	}},
+	// The multipart faults share an area: each sets response.multipart and drops the body it would conflict with.
+	{"multipart", config.CodeInvalidValue, "response.multipart.type", func(doc map[string]any) { withMultipart(doc)["type"] = "multipart/mixed" }},
+	{"multipart", config.CodeMissingValue, "response.multipart.type", func(doc map[string]any) { delete(withMultipart(doc), "type") }},
+	{"multipart", config.CodeInvalidValue, "response.multipart.boundary", func(doc map[string]any) { withMultipart(doc)["boundary"] = "a b " }},
+	{"multipart", config.CodeNotAllowed, "response.multipart.params.boundary", func(doc map[string]any) {
+		withMultipart(doc)["params"] = map[string]any{"boundary": "x"}
+	}},
+	{"multipart", config.CodeInvalidValue, "response.multipart.parts", func(doc map[string]any) { withMultipart(doc)["parts"] = []any{} }},
+	{"multipart", config.CodeMissingValue, "response.multipart.parts[0].name", func(doc map[string]any) { withMultipart(doc)["type"] = "form-data" }},
+	{"multipart", config.CodeUnknownKey, "response.multipart.parts[0].nmae", func(doc map[string]any) {
+		withMultipart(doc)["parts"] = []any{map[string]any{"nmae": "x"}}
+	}},
+	{"multipart", config.CodeInvalidValue, "response.multipart.parts[0].delay", func(doc map[string]any) {
+		withMultipart(doc)["parts"] = []any{map[string]any{"delay": int64(-5)}}
+	}},
+	{"multipart", config.CodeConflict, "response.multipart", func(doc map[string]any) {
+		withMultipart(doc)
+		sub(doc, "response")["body"] = "x"
+	}},
+}
+
+// withMultipart replaces the body of the response with a multipart body, and returns the multipart object.
+func withMultipart(doc map[string]any) map[string]any {
+	response := sub(doc, "response")
+	delete(response, "body")
+
+	multipart := map[string]any{"type": "mixed", "parts": []any{map[string]any{"body": "x"}}}
+	response["multipart"] = multipart
+
+	return multipart
+}
+
+// schemaBlind reports the faults the editor schema can't express: matcher arguments are the decoder's alone, and
+// no JSON Schema can tell whether a file exists.
+func schemaBlind(f mockFault) bool {
+	return f.area == "matcher" || f.code == config.CodeFileNotFound
 }
 
 // sub returns the object under key, creating it.

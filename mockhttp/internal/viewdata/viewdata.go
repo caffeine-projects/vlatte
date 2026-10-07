@@ -3,6 +3,7 @@ package viewdata
 import (
 	"context"
 	"encoding/base64"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 
@@ -54,6 +55,12 @@ type Request struct {
 	Header          http.Header
 	Cookies         map[string]*http.Cookie
 	Body            *Body
+
+	// PostForm holds the text fields of a form body, urlencoded or multipart: {{ .Request.PostForm.Get "name" }}.
+	PostForm url.Values
+
+	// MultipartForm is the multipart form of the body, as http.Request.ParseMultipartForm left it, or nil.
+	MultipartForm *multipart.Form
 }
 
 // Cookie returns the named cookie, like http.Request.Cookie.
@@ -63,6 +70,20 @@ func (r *Request) Cookie(name string) (*http.Cookie, error) {
 	}
 
 	return nil, http.ErrNoCookie
+}
+
+// FormFile returns the first file of the field key of a multipart form, as http.Request.FormFile picks it, or nil:
+// {{ with .Request.FormFile "avatar" }}{{ .Filename }}{{ end }}.
+func (r *Request) FormFile(key string) *multipart.FileHeader {
+	if r.MultipartForm == nil {
+		return nil
+	}
+
+	if files := r.MultipartForm.File[key]; len(files) > 0 {
+		return files[0]
+	}
+
+	return nil
 }
 
 func (r *Request) HasBody() bool {

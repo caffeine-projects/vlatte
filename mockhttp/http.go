@@ -96,9 +96,9 @@ func New(config ...Option) (*Server, error) {
 
 	repository := vlatte.NewStore[*Mock]()
 
-	parsers := make([]RequestBodyParser, 0, len(conf.RequestBodyParsers)+3)
+	parsers := make([]RequestBodyParser, 0, len(conf.RequestBodyParsers)+4)
 	parsers = append(parsers, conf.RequestBodyParsers...)
-	parsers = append(parsers, &plainTextParser{}, &formURLEncodedParser{}, &noopParser{})
+	parsers = append(parsers, &plainTextParser{}, &formURLEncodedParser{}, &multipartFormParser{}, &noopParser{})
 
 	recoverer := recovery.New(func(err error) { app.logger.Error().Err(err).Msg(err.Error()) },
 		conf.RequestWasNotMatchedStatusCode)

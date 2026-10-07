@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 
 	"github.com/caffeine-projects/vlatte"
@@ -14,14 +15,28 @@ import (
 
 var ErrTemplateDataKeyExists = errors.New("http: template data key already exists")
 
+// topResponseWriter passes every write of a reply through the steps of its mock, then to rw.
 type topResponseWriter struct {
-	next vlatte.Next
-	rw   http.ResponseWriter
+	ctx   context.Context
+	steps []vlatte.Step
+	rw    http.ResponseWriter
 }
 
-func (w *topResponseWriter) Header() http.Header         { return w.rw.Header() }
-func (w *topResponseWriter) Write(p []byte) (int, error) { return w.next.Next(p) }
-func (w *topResponseWriter) WriteHeader(statusCode int)  { w.rw.WriteHeader(statusCode) }
+func (w *topResponseWriter) Header() http.Header        { return w.rw.Header() }
+func (w *topResponseWriter) WriteHeader(statusCode int) { w.rw.WriteHeader(statusCode) }
+
+// Write runs a pipeline of the steps per write, since a pipeline passes one buffer once.
+// The steps may change the bytes they pass on, so Write reports len(p) written, as io.Writer requires.
+func (w *topResponseWriter) Write(p []byte) (int, error) {
+	if _, err := vlatte.Flow(w.ctx, &vlatte.Sink{W: w.rw}, w.steps).Next(p); err != nil {
+		return 0, err
+	}
+
+	return len(p), nil
+}
+
+// Unwrap returns the response writer, so http.ResponseController can flush it.
+func (w *topResponseWriter) Unwrap() http.ResponseWriter { return w.rw }
 
 type mockHandler struct {
 	app                   *Server
@@ -47,6 +62,12 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.lifecycle.OnWarning(reqValues, fmt.Errorf("request_body_parser: %w", err))
 	}
 
+	// net/http removes the temporary files of the request it made, and r may be a copy of it, such as chi makes.
+	// Forms parse in memory, so this is a safeguard.
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+
 	h.lifecycle.OnRequest(reqValues)
 
 	stored, err := h.app.storage.List(r.Context())
@@ -55,7 +76,14 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	input := &selectorInput{r, reqValues.URL, r.URL.Query(), r.PostForm, reqValues.ParsedBodyData}
+	input := &selectorInput{
+		RawRequest: r,
+		URL:        reqValues.URL,
+		Query:      r.URL.Query(),
+		Form:       r.PostForm,
+		Files:      formFiles(r),
+		ParsedBody: reqValues.ParsedBodyData,
+	}
 
 	sub := vlatte.NewExplanation()
 	mocks := vlatte.Mocks[*Mock, *selectorInput](stored)
@@ -126,7 +154,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if steps := mock.Steps(); len(steps) > 0 {
-		w = &topResponseWriter{vlatte.Flow(r.Context(), &vlatte.Sink{W: w}, steps), w}
+		w = &topResponseWriter{ctx: r.Context(), steps: steps, rw: w}
 	}
 
 	res, err := mock.Reply.Reply(r.Context(), ReplyInput{RequestValues: reqValues, Writer: w})
@@ -148,9 +176,15 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if err := res.Render(w); err != nil {
-			h.onError(w, reqValues, fmt.Errorf("http: error rendering response. %w", err))
-			return
+		// The status and headers are sent by now, so an error can't become the response: it is logged, and the
+		// mock counts as served. A client that went away is a warning.
+		if err := res.Render(r.Context(), w); err != nil {
+			err = fmt.Errorf("http: rendering response: %w", err)
+			if r.Context().Err() != nil {
+				h.lifecycle.OnWarning(reqValues, err)
+			} else {
+				h.lifecycle.OnError(reqValues, err)
+			}
 		}
 	}
 
@@ -245,7 +279,18 @@ func locals(r *RequestValues, provided map[string]any, params *viewdata.Paramete
 		Header:          r.RawRequest.Header.Clone(),
 		Cookies:         cookies,
 		Body:            body,
+		PostForm:        r.RawRequest.PostForm,
+		MultipartForm:   r.RawRequest.MultipartForm,
 	}
 
 	return viewdata.New(req, provided, params)
+}
+
+// formFiles returns the files of r's multipart form, by field name, or nil when r has none.
+func formFiles(r *http.Request) map[string][]*multipart.FileHeader {
+	if r.MultipartForm == nil {
+		return nil
+	}
+
+	return r.MultipartForm.File
 }

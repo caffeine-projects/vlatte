@@ -3,9 +3,12 @@ package mockhttp
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -14,6 +17,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/filterbuilder"
+	"github.com/caffeine-projects/vlatte/internal/mpart"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -21,12 +25,13 @@ import (
 // into the *Def types below; mockDoc.build checks them, then applies them to a Builder.
 
 type (
-	mockField     = config.Field[mockDef]
-	replyField    = config.Field[replyDef]
-	sequenceField = config.Field[sequenceDef]
-	randomField   = config.Field[randomDef]
-	proxyField    = config.Field[proxyDef]
-	eventField    = config.Field[vlatte.EventConfig]
+	mockField        = config.Field[mockDef]
+	filePatternField = config.Field[filePatternDef]
+	replyField       = config.Field[replyDef]
+	sequenceField    = config.Field[sequenceDef]
+	randomField      = config.Field[randomDef]
+	proxyField       = config.Field[proxyDef]
+	eventField       = config.Field[vlatte.EventConfig]
 )
 
 // mockDef is a decoded mock file: what its keys set, before it is applied to a Builder.
@@ -46,6 +51,7 @@ type mockDef struct {
 	random   *randomDef
 	proxy    *proxyDef
 	ext      map[string]any
+	dir      string // where relative files open from: the mock file's directory; "" is the working directory
 }
 
 type scenarioDef struct {
@@ -57,15 +63,23 @@ type scenarioDef struct {
 
 // requestDef holds the request matchers, as Builder calls, and the keys that set them.
 type requestDef struct {
-	keys    []string
-	scheme  func(*Builder)
-	method  func(*Builder)
-	url     map[string]func(*Builder) // by key: url, url_match or path; only one may be set
-	query   []func(*Builder)
-	queries []func(*Builder)
-	header  []func(*Builder)
-	form    []func(*Builder)
-	body    func(*Builder)
+	keys     []string
+	scheme   func(*Builder)
+	method   func(*Builder)
+	url      map[string]func(*Builder) // by key: url, url_match or path; only one may be set
+	query    []func(*Builder)
+	queries  []func(*Builder)
+	header   []func(*Builder)
+	form     []func(*Builder)
+	formFile []func(*Builder)
+	body     func(*Builder)
+}
+
+// filePatternDef is a decoded form_file pattern.
+type filePatternDef struct {
+	pattern  *FilePattern
+	hasBody  bool
+	bodyFile string
 }
 
 type replyDef struct {
@@ -80,6 +94,7 @@ type replyDef struct {
 	data           any
 	hasData        bool
 	gzip           bool
+	multipart      *mpart.Spec
 }
 
 type headerValue struct {
@@ -225,10 +240,18 @@ var _mockSchema = config.NewSchema(
 		},
 	},
 	mockField{
-		Key: "request.form_url_encoded", Kind: config.Any, Usage: "Form fields to match, by name: text or a matcher list each.",
+		Key: "request.form", Kind: config.Any, Usage: "Fields of a urlencoded or multipart form body to match, by name: text or a matcher list each.",
 		Set: func(d *mockDef, v config.Value) error {
-			d.request.keys = append(d.request.keys, "form_url_encoded")
+			d.request.keys = append(d.request.keys, "form")
 			return matchEach(v, &d.request.form, func(b *Builder, name string, m vlatte.Matcher) { b.FormField(name, m) })
+		},
+	},
+	mockField{
+		Key: "request.form_file", Kind: config.Any,
+		Usage: "Files of a multipart form body to match, by field name: a pattern, or a list of patterns, each.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.request.keys = append(d.request.keys, "form_file")
+			return decodeFormFiles(d, v)
 		},
 	},
 	mockField{
@@ -289,6 +312,60 @@ var _mockSchema = config.NewSchema(
 	},
 )
 
+var _filePatternSchema = config.NewSchema(
+	filePatternField{
+		Key: "filename", Kind: config.Any, Usage: "File name to match, as Go reads it: its base. Text or a matcher list.",
+		Set: func(d *filePatternDef, v config.Value) error { return withMatcher(v, d.pattern.Filename) },
+	},
+	filePatternField{
+		Key: "content_type", Kind: config.Any,
+		Usage: "Media type to match: in lower case, without parameters, or empty when absent. Text or a matcher list.",
+		Set:   func(d *filePatternDef, v config.Value) error { return withMatcher(v, d.pattern.ContentType) },
+	},
+	filePatternField{
+		Key: "header", Kind: config.Any, Usage: "Headers of the file's part to match, by name: text or a matcher list each.",
+		Set: func(d *filePatternDef, v config.Value) error {
+			if err := sameHeader(v); err != nil {
+				return err
+			}
+
+			return config.Members(v, func(name string, member config.Value) error {
+				return withMatcher(member, func(m vlatte.Matcher) *FilePattern { return d.pattern.Header(name, m) })
+			})
+		},
+	},
+	filePatternField{
+		Key: "body", Kind: config.Any, Usage: "Content to match, as text: text or a matcher list.",
+		Set: func(d *filePatternDef, v config.Value) error {
+			d.hasBody = true
+			return withMatcher(v, func(m vlatte.Matcher) *FilePattern { return d.pattern.Body(m) })
+		},
+	},
+	filePatternField{
+		Key: "body_file", Kind: config.String,
+		Usage: "File the content must equal. Relative paths start at the mock file's directory.",
+		Set: func(d *filePatternDef, v config.Value) error {
+			if v.Str == "" {
+				return errors.New("expected a file name")
+			}
+
+			d.bodyFile = v.Str
+
+			return nil
+		},
+	},
+	filePatternField{
+		Key: "every", Kind: config.Bool, Usage: "Match when every file of the field matches, rather than some file.",
+		Set: func(d *filePatternDef, v config.Value) error {
+			if v.Bool {
+				d.pattern.Every()
+			}
+
+			return nil
+		},
+	},
+)
+
 var _replySchema = config.NewSchema(
 	replyField{
 		Key: "status", Kind: config.Int, Default: "200", Usage: "Status code.",
@@ -328,6 +405,16 @@ var _replySchema = config.NewSchema(
 			r.bodyFile = v.Str
 
 			return nil
+		},
+	},
+	replyField{
+		Key: "multipart", Kind: config.Any,
+		Usage: "Multipart body: type, boundary, params and parts. It sets the Content-Type, with its boundary.",
+		Set: func(r *replyDef, v config.Value) error {
+			spec, err := mpart.Decode(v)
+			r.multipart = spec
+
+			return err
 		},
 	},
 	replyField{
@@ -547,16 +634,44 @@ func withRequired(err error, present bool, v config.Value, key string) error {
 // decodeReply decodes a reply object into r and checks it.
 func decodeReply(r *replyDef, v config.Value) error {
 	err := _replySchema.Decode(r, v)
-	if r.hasBody && r.bodyFile != "" {
-		var problems []config.Problem
-		if cfgErr, ok := errors.AsType[*config.Error](err); ok {
-			problems = cfgErr.Problems
-		}
 
-		return &config.Error{Problems: append(problems, conflicts(v.Origin, v.Key, []string{"body", "body_file"})...)}
+	obj, _ := v.Any.(map[string]any)
+
+	var bodies []string
+	for _, key := range []string{"body", "body_file", "multipart"} {
+		if _, ok := obj[key]; ok {
+			bodies = append(bodies, key)
+		}
 	}
 
-	return err
+	problems := conflicts(v.Origin, v.Key, bodies)
+
+	// A multipart body sets the Content-Type, with its boundary.
+	if _, ok := obj["multipart"]; ok {
+		for _, headers := range []string{"header", "header_template"} {
+			names, _ := obj[headers].(map[string]any)
+			for _, name := range slices.Sorted(maps.Keys(names)) {
+				if http.CanonicalHeaderKey(name) == HeaderContentType {
+					key := v.Key + "." + headers + "." + name
+					problems = append(problems, config.Problem{
+						Code: config.CodeConflict, Origin: v.Origin, Key: key,
+						Message: key + " is set with " + v.Key + ".multipart",
+						Hint:    "a multipart body sets the Content-Type: remove the header",
+					})
+				}
+			}
+		}
+	}
+
+	if len(problems) == 0 {
+		return err
+	}
+
+	if cfgErr, ok := errors.AsType[*config.Error](err); ok {
+		problems = append(cfgErr.Problems, problems...)
+	}
+
+	return &config.Error{Problems: problems}
 }
 
 // decodeReplies decodes a non-empty list of reply objects.
@@ -575,6 +690,75 @@ func decodeReplies(replies *[]*replyDef, v config.Value) error {
 
 		return nil
 	})
+}
+
+// decodeFormFiles decodes request.form_file: by field name, a pattern, or a list of patterns.
+func decodeFormFiles(d *mockDef, v config.Value) error {
+	return config.Members(v, func(field string, member config.Value) error {
+		if _, isList := member.Any.([]any); isList {
+			return config.Items(member, func(item config.Value) error { return decodeFilePattern(d, field, item) })
+		}
+
+		return decodeFilePattern(d, field, member)
+	})
+}
+
+// decodeFilePattern decodes a pattern of the files of field, and reads its body_file.
+func decodeFilePattern(d *mockDef, field string, v config.Value) error {
+	def := filePatternDef{pattern: FileWith()}
+
+	err := _filePatternSchema.Decode(&def, v)
+	if def.hasBody && def.bodyFile != "" {
+		var problems []config.Problem
+		if cfgErr, ok := errors.AsType[*config.Error](err); ok {
+			problems = cfgErr.Problems
+		}
+
+		return &config.Error{Problems: append(problems, conflicts(v.Origin, v.Key, []string{"body", "body_file"})...)}
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if def.bodyFile != "" {
+		path := def.bodyFile
+		if d.dir != "" && !filepath.IsAbs(path) {
+			path = filepath.Join(d.dir, path)
+		}
+
+		b, err := os.ReadFile(path)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return &config.Error{Problems: []config.Problem{{
+				Code: config.CodeFileNotFound, Origin: v.Origin, Key: v.Key + ".body_file",
+				Message: fmt.Sprintf("%s.body_file %q does not exist", v.Key, path),
+				Hint:    "relative paths start at the mock file's directory",
+			}}}
+		case err != nil:
+			return &config.Error{Problems: []config.Problem{{
+				Code: config.CodeReadError, Origin: v.Origin, Key: v.Key + ".body_file", Message: err.Error(),
+			}}}
+		}
+
+		def.pattern.bodyFileBytes(def.bodyFile, b)
+	}
+
+	d.request.formFile = append(d.request.formFile, func(b *Builder) { b.FormFile(field, def.pattern) })
+
+	return nil
+}
+
+// withMatcher calls set with the matcher of a value: text, compared as is, or a matcher list.
+func withMatcher(v config.Value, set func(vlatte.Matcher) *FilePattern) error {
+	m, err := matcherOf(v)
+	if err != nil {
+		return err
+	}
+
+	set(m)
+
+	return nil
 }
 
 // setEvents decodes a list of on_complete events, each naming its listener.
@@ -833,7 +1017,7 @@ func (r *requestDef) apply(b *Builder) {
 		}
 	}
 
-	for _, sets := range [][]func(*Builder){r.query, r.queries, r.header, r.form} {
+	for _, sets := range [][]func(*Builder){r.query, r.queries, r.header, r.form, r.formFile} {
 		for _, set := range sets {
 			set(b)
 		}
@@ -902,6 +1086,11 @@ func (r *replyDef) build(dir string) *Reply {
 	}
 
 	switch {
+	case r.multipart != nil:
+		spec := *r.multipart
+		spec.Templated = templated
+		rep.bodyFileDir = dir
+		rep.Multipart(&Multipart{spec: spec})
 	case r.bodyFile != "":
 		rep.bodyFileDir = dir
 		if templated {

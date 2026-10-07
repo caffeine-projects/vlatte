@@ -2,14 +2,19 @@ package mockhttp
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 	"uuid"
 )
+
+// errFormCut says a multipart form body was cut short, as MaxBodyParsingLimit does.
+var errFormCut = errors.New("multipart: the body has no close delimiter: it was cut short")
 
 func parseRequest(r *http.Request, options *Server) (*RequestValues, []byte, error) {
 	parsedURL, urlSegments := parseURL(r, options.URL())
@@ -103,17 +108,53 @@ func parseRequestBody(app *Server, r *http.Request) (parsedBody any, rawBody []b
 	return nil, nil, nil
 }
 
-// jsonBodyParser parses requests with content type header containing "application/x-www-form-urlencoded"
+// formURLEncodedParser parses requests with content type header containing "application/x-www-form-urlencoded"
 type formURLEncodedParser struct{}
 
 func (parser *formURLEncodedParser) CanParse(content string, _ *http.Request) bool {
 	return strings.Contains(content, MIMEFormURLEncoded)
 }
 
-func (parser *formURLEncodedParser) Parse(_ []byte, r *http.Request) (any, error) {
+func (parser *formURLEncodedParser) Parse(body []byte, r *http.Request) (any, error) {
+	defer restoreBody(r, body)
+
 	// PostForm is the body's form: Form would add the query.
 	err := r.ParseForm()
 	return r.PostForm, err
+}
+
+// multipartFormParser parses multipart/form-data bodies with http.Request.ParseMultipartForm: the text fields go to
+// r.PostForm, as for urlencoded forms, and the files to r.MultipartForm.
+type multipartFormParser struct{}
+
+func (parser *multipartFormParser) CanParse(content string, _ *http.Request) bool {
+	mediaType, _, err := mime.ParseMediaType(content)
+	return err == nil && mediaType == MIMEMultipartForm
+}
+
+func (parser *multipartFormParser) Parse(body []byte, r *http.Request) (any, error) {
+	defer restoreBody(r, body)
+
+	// multipart.Reader.ReadForm takes a body cut right after a delimiter line, or inside the headers of a part, for a
+	// whole one, and keeps the parts before the cut. Only a whole body has its close delimiter: without it, the form
+	// keeps no field, rather than some of them.
+	_, params, _ := mime.ParseMediaType(r.Header.Get(HeaderContentType))
+	if !bytes.Contains(body, []byte("--"+params["boundary"]+"--")) {
+		return nil, errFormCut
+	}
+
+	// The body is in memory already, so its files can stay there too: none goes to a temporary file.
+	if err := r.ParseMultipartForm(int64(len(body))); err != nil {
+		return nil, err
+	}
+
+	return r.PostForm, nil
+}
+
+// restoreBody puts body back into r.Body, which parsing a form reads to the end: proxy, forward and echo replies
+// send r.Body.
+func restoreBody(r *http.Request, body []byte) {
+	r.Body = io.NopCloser(bytes.NewReader(body))
 }
 
 // plainTextParser parses requests with content type header containing "text/plain"

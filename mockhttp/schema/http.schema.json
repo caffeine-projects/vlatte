@@ -37,7 +37,19 @@
         "query": { "$ref": "#/$defs/keyed_matcher" },
         "queries": { "$ref": "#/$defs/keyed_matcher" },
         "header": { "$ref": "#/$defs/keyed_matcher" },
-        "form_url_encoded": { "$ref": "#/$defs/keyed_matcher" },
+        "form": { "description": "Fields of a urlencoded or multipart form body, by name.", "$ref": "#/$defs/keyed_matcher" },
+        "form_file": {
+          "description": "Files of a multipart form body, by field name: a pattern, or a list of patterns, each met by some file of the field.",
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "oneOf": [
+                { "$ref": "#/$defs/file_pattern" },
+                { "type": "array", "items": { "$ref": "#/$defs/file_pattern" } }
+              ]
+            }
+          }
+        },
         "body": { "$ref": "#/$defs/matcher" }
       },
       "minProperties": 1,
@@ -123,6 +135,20 @@
         "^.*$": { "$ref": "#/$defs/matcher" }
       }
     },
+    "file_pattern": {
+      "description": "What a file of a multipart form must have. {} matches any file.",
+      "type": "object",
+      "properties": {
+        "filename": { "description": "The file's name, as Go reads it: its base.", "$ref": "#/$defs/matcher" },
+        "content_type": { "description": "The media type: in lower case, without parameters, or empty when absent.", "$ref": "#/$defs/matcher" },
+        "header": { "description": "Headers of the file's part.", "$ref": "#/$defs/keyed_matcher" },
+        "body": { "description": "The content, as text.", "$ref": "#/$defs/matcher" },
+        "body_file": { "description": "A file the content must equal. Relative paths start at the mock file's directory.", "type": "string", "minLength": 1 },
+        "every": { "description": "Match when every file of the field matches, rather than some file.", "$ref": "#/$defs/bool" }
+      },
+      "additionalProperties": false,
+      "not": { "required": [ "body", "body_file" ] }
+    },
     "reply": {
       "type": "object",
       "properties": {
@@ -132,6 +158,7 @@
         "trailer": { "$ref": "#/$defs/header_map" },
         "body": { "description": "Text as is; anything else as JSON.", "not": { "type": "null" } },
         "body_file": { "description": "Relative paths start at the mock file's directory.", "type": "string", "minLength": 1 },
+        "multipart": { "$ref": "#/$defs/multipart" },
         "template": {
           "type": "object",
           "properties": {
@@ -141,6 +168,43 @@
           "additionalProperties": false
         },
         "encoding": { "enum": [ "gzip" ] }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        { "not": { "required": [ "body", "body_file" ] } },
+        { "not": { "required": [ "body", "multipart" ] } },
+        { "not": { "required": [ "body_file", "multipart" ] } }
+      ]
+    },
+    "multipart": {
+      "description": "A multipart body, written with Go's multipart writer. It sets the Content-Type, with its boundary.",
+      "type": "object",
+      "properties": {
+        "type": { "description": "The subtype only, such as form-data, mixed, related or x-mixed-replace.", "type": "string", "pattern": "^[!#$%&'*+.^_`|~{}0-9A-Za-z-]+$" },
+        "boundary": { "description": "1 to 70 letters, digits or '()+_,-./:=? characters, not ending in a space. Random when left out.", "type": "string", "pattern": "^[0-9A-Za-z'()+_,./:=? -]{0,69}[0-9A-Za-z'()+_,./:=?-]$" },
+        "params": {
+          "description": "More parameters of the Content-Type, such as type and start.",
+          "type": "object",
+          "propertyNames": { "pattern": "^[!#$%&'*+.^_`|~{}0-9A-Za-z-]+$", "not": { "pattern": "^[Bb][Oo][Uu][Nn][Dd][Aa][Rr][Yy]$" } },
+          "additionalProperties": { "type": "string" }
+        },
+        "parts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/multipart_part" } }
+      },
+      "required": [ "type", "parts" ],
+      "additionalProperties": false,
+      "if": { "properties": { "type": { "const": "form-data" } }, "required": [ "type" ] },
+      "then": { "properties": { "parts": { "items": { "required": [ "name" ] } } } }
+    },
+    "multipart_part": {
+      "type": "object",
+      "properties": {
+        "name": { "description": "Name of the part, in its Content-Disposition: required in form-data.", "type": "string" },
+        "filename": { "type": "string" },
+        "content_type": { "description": "JSON bodies default to application/json, and parts with a filename to application/octet-stream.", "type": "string" },
+        "header": { "$ref": "#/$defs/header_map" },
+        "body": { "description": "Text as is; anything else as JSON.", "not": { "type": "null" } },
+        "body_file": { "description": "Read at each reply. Relative paths start at the mock file's directory.", "type": "string", "minLength": 1 },
+        "delay": { "description": "How long a reply waits before writing the part.", "$ref": "#/$defs/duration" }
       },
       "additionalProperties": false,
       "not": { "required": [ "body", "body_file" ] }

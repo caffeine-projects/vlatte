@@ -48,7 +48,7 @@ func TestArgsFromMap_ReportsEveryProblem(t *testing.T) {
   on_complete: conflict: parameters.body_file is set with parameters.body; keep one of them
   on_complete: invalid_value: parameters.header.X must be a string, not a number; write it in quotes: "1"
   on_complete: unknown_key: parameters.log_level is not a known setting; `+
-		`the keys under parameters are url, url_template, method, header, header_template, body, body_template, body_file
+		`the keys under parameters are url, url_template, method, header, header_template, body, body_template, body_file, multipart, multipart_template
   on_complete: invalid_value: parameters.method must be a string, not a number; write it in quotes: "5"
   on_complete: conflict: parameters.url_template is set with parameters.url; keep one of them`)
 }
@@ -73,9 +73,12 @@ func TestWebHook_RunNamesTheMockOfBadParameters(t *testing.T) {
 	require.ErrorContains(t, err, "mock users: unknown_key: parameters.log_level")
 }
 
-// takes reports whether the parameter key takes v: strings, and objects of strings for headers.
+// takes reports whether the parameter key takes v: strings, and objects of strings for headers. A multipart object
+// needs a type and parts, which no drawn value has.
 func takes(key string, v any) bool {
 	switch key {
+	case "multipart", "multipart_template":
+		return false
 	case "header", "header_template":
 		switch m := v.(type) {
 		case map[string]string:
@@ -102,7 +105,10 @@ func takes(key string, v any) bool {
 func TestPropArgsFromMap_Types(t *testing.T) {
 	// W1: a parameter is taken exactly when it has its type, as in mock files: strings, and objects of strings for
 	// headers, whatever Go types code builds them with. Keys the webhook doesn't read are never taken.
-	keys := []string{"url", "url_template", "method", "body", "body_template", "body_file", "header", "header_template", "log_level", "ssl_verify"}
+	keys := []string{
+		"url", "url_template", "method", "body", "body_template", "body_file", "header", "header_template",
+		"multipart", "multipart_template", "log_level", "ssl_verify",
+	}
 	values := []any{
 		nil, true, "x", "", 5, int64(5), 1.5, float32(0.5),
 		[]string{"a"},
