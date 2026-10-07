@@ -1,0 +1,18 @@
+# A camera-like stream: each frame comes after its delay, flushed, so a client shows it at once.
+request:
+  method: GET
+  path: /stream
+
+response:
+  status: 200
+  multipart:
+    type: x-mixed-replace
+    parts:
+      - content_type: text/plain
+        body: frame 1
+      - content_type: text/plain
+        body: frame 2
+        delay: 300ms
+      - content_type: text/plain
+        body: frame 3
+        delay: 300ms

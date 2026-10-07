@@ -1,0 +1,18 @@
+# A browser-like upload: a text field and a file, which must be avatar.png byte for byte.
+request:
+  method: POST
+  path: /upload
+  form:
+    title: Holiday
+  form_file:
+    avatar:
+      filename: avatar.png
+      content_type: image/png
+      body_file: avatar.png
+
+response:
+  status: 201
+  header:
+    content-type: application/json
+  body:
+    id: 1

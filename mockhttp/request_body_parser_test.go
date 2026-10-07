@@ -15,6 +15,7 @@ import (
 func TestRequestBodyParsers_CanParse(t *testing.T) {
 	formParser := &formURLEncodedParser{}
 	textParser := &plainTextParser{}
+	multipartParser := &multipartFormParser{}
 	noop := &noopParser{}
 
 	newReq := func(header map[string]string) *http.Request {
@@ -44,6 +45,17 @@ func TestRequestBodyParsers_CanParse(t *testing.T) {
 		{"Text: should parse JSON as text", MIMEApplicationJSON, textParser, newReq(map[string]string{HeaderContentType: MIMEApplicationJSON}), true},
 
 		{"Noop: should always parse", MIMETextPlain, noop, newReq(map[string]string{HeaderContentType: MIMETextPlain}), true},
+
+		// Parsers compare media types: a multipart boundary may hold one, quoted, and a type may only start alike.
+		{"Form: not a multipart form whose boundary names it", `multipart/form-data; boundary="application/x-www-form-urlencoded"`, formParser, newReq(nil), false},
+		{"Text: not a multipart form whose boundary names JSON", `multipart/form-data; boundary="application/json"`, textParser, newReq(nil), false},
+		{"Text: not a multipart form whose boundary names text", `multipart/form-data; boundary="text/plain"`, textParser, newReq(nil), false},
+		{"Multipart: a boundary that names a media type", `multipart/form-data; boundary="text/plain"`, multipartParser, newReq(nil), true},
+		{"Text: media types ignore case", "Text/Plain; charset=UTF-8", textParser, newReq(nil), true},
+		{"Text: JSON in any case", "Application/JSON", textParser, newReq(nil), true},
+		{"Text: not a type that only starts alike", "text/plaintext", textParser, newReq(nil), false},
+		{"Text: not a JSON lookalike", "application/json-patch+json", textParser, newReq(nil), false},
+		{"Form: a malformed parameter keeps the media type", MIMEFormURLEncoded + "; charset", formParser, newReq(nil), true},
 	}
 
 	for _, tc := range testCases {

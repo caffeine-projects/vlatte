@@ -28,6 +28,8 @@ func genKey() *rapid.Generator[string] {
 
 func TestPropMockFile_KeysKeepTheirText(t *testing.T) {
 	// M8 (B6): keys reach templates, ext handlers and listeners exactly as written.
+	t.Parallel()
+
 	handler := &capturingHandler{}
 	params := make(chan any, 1)
 	capture := vlatte.EventFunc[vlatte.OnComplete](func(_ context.Context, args vlatte.OnComplete) error {
@@ -130,6 +132,8 @@ func writeFile(t require.TestingT, name, content string) {
 
 func TestPropAdmin_AddsMocksByID(t *testing.T) {
 	// M15: a mock posted to the admin API is stored under its id and served; posting the id again is a conflict.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)

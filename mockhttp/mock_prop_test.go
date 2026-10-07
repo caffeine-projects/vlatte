@@ -1,12 +1,18 @@
 package mockhttp
 
 import (
+	"bytes"
 	"context"
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +45,17 @@ func send(t require.TestingT, base string, req requestSpec) (*http.Response, []b
 	contentType := ""
 
 	switch {
+	case req.multipart:
+		form := formModel{files: req.files}
+		for _, k := range slices.Sorted(maps.Keys(req.form)) {
+			for _, v := range req.form[k] {
+				form.fields = append(form.fields, formField{name: k, value: v})
+			}
+		}
+
+		var b []byte
+		contentType, b = form.encode(t)
+		body = bytes.NewReader(b)
 	case req.form != nil:
 		body = strings.NewReader(req.form.Encode())
 		contentType = MIMEFormURLEncoded
@@ -100,6 +117,15 @@ func replyDiff(want replyModel, method string, res *http.Response, body []byte) 
 	}
 
 	switch {
+	case want.multipart != nil:
+		mediaType, _, err := mime.ParseMediaType(res.Header.Get(HeaderContentType))
+		if err != nil || mediaType != "multipart/"+strings.ToLower(want.multipart.subtype) {
+			return fmt.Sprintf("content type %q, want multipart/%s", res.Header.Get(HeaderContentType), want.multipart.subtype)
+		}
+
+		if got := readMultipartParts(res.Header.Get(HeaderContentType), body); !reflect.DeepEqual(got, want.multipart.want()) {
+			return fmt.Sprintf("multipart parts %v, want %v", got, want.multipart.want())
+		}
 	case want.text != nil:
 		if string(body) != *want.text {
 			return fmt.Sprintf("body %q, want %q", body, *want.text)
@@ -134,6 +160,10 @@ func slicesEqual(a, b []string) bool {
 func TestPropMockFile_ServesItsModel(t *testing.T) {
 	// M2: a mock file means what it says. A request built to match gets the modeled replies, in order and
 	// within repeat; a request that differs in any one matched part gets the no-match status.
+	// M18: that holds for multipart forms too: their fields, and the filename, content type and content of a file,
+	// whatever boundary the client picks.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -195,6 +225,8 @@ func TestPropMockFile_ServesItsModel(t *testing.T) {
 
 func TestPropMockFile_FormatsBuildTheSameMock(t *testing.T) {
 	// M1: the same mock written as JSON and as YAML builds the same mock.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -220,6 +252,8 @@ func TestPropMockFile_FormatsBuildTheSameMock(t *testing.T) {
 
 func TestPropMockFile_BuildIsRepeatable(t *testing.T) {
 	// M5: a builder builds a new mock each time, equal to the last, with its own state.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 
 	rapid.Check(t, func(t *rapid.T) {
@@ -243,6 +277,8 @@ func TestPropMockFile_BuildIsRepeatable(t *testing.T) {
 
 func TestPropMockFile_DurationsAreTheSameEverywhere(t *testing.T) {
 	// M6: delay and proxy.timeout read the same value the same way: integers are milliseconds (C2).
+	t.Parallel()
+
 	rapid.Check(t, func(t *rapid.T) {
 		var raw any = rapid.Int64Range(0, 1<<40).Draw(t, "ms")
 		if rapid.Bool().Draw(t, "as a Go duration") {
@@ -269,6 +305,8 @@ func TestPropMockFile_DurationsAreTheSameEverywhere(t *testing.T) {
 
 func TestPropMockFile_IDRule(t *testing.T) {
 	// M7: a file's id is accepted iff it follows the rule, and becomes the mock's ID exactly.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 
 	rapid.Check(t, func(t *rapid.T) {
@@ -291,6 +329,8 @@ func TestPropMockFile_IDRule(t *testing.T) {
 
 func TestPropMockFile_TemplatesLeavePlainDocumentsAlone(t *testing.T) {
 	// M9: a document without template actions builds the same mock with or without the template pass.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 
 	rapid.Check(t, func(t *rapid.T) {
@@ -315,3 +355,32 @@ var errListener = errors.New("listener stopped")
 
 // stop is a listener that never runs: a mock needs its on_complete listeners registered.
 var stop = vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return errListener })
+
+// readMultipartParts reads the parts of a multipart body as a client does, or nil when it doesn't read.
+func readMultipartParts(contentType string, body []byte) []readPart {
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return nil
+	}
+
+	var parts []readPart
+
+	r := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	for {
+		part, err := r.NextRawPart()
+		if errors.Is(err, io.EOF) {
+			return parts
+		}
+
+		if err != nil {
+			return nil
+		}
+
+		b, err := io.ReadAll(part)
+		if err != nil {
+			return nil
+		}
+
+		parts = append(parts, readPart{header: part.Header, body: string(b)})
+	}
+}

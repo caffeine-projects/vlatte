@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -136,7 +137,78 @@ type requestModel struct {
 	header    map[string]matcherModel
 	query     map[string]matcherModel
 	form      map[string]matcherModel
+	multipart bool                      // the form is sent as multipart/form-data, with files
+	files     map[string]fileFieldModel // form_file patterns, by field name
 	body      *matcherModel
+}
+
+// fileFieldModel is a form_file pattern of a model: what the file of its field must have.
+type fileFieldModel struct {
+	filename    *matcherModel
+	contentType string // "" when the pattern has no content_type
+	body        *matcherModel
+}
+
+func genFileField() *rapid.Generator[fileFieldModel] {
+	return rapid.Custom(func(t *rapid.T) fileFieldModel {
+		var f fileFieldModel
+		if rapid.Bool().Draw(t, "has filename") {
+			f.filename = new(genMatcher().Draw(t, "filename"))
+		}
+
+		if rapid.Bool().Draw(t, "has content type") {
+			f.contentType = rapid.SampledFrom([]string{"image/png", "text/plain"}).Draw(t, "content type")
+		}
+
+		if rapid.Bool().Draw(t, "has file body") {
+			f.body = new(genMatcher().Draw(t, "file body"))
+		}
+
+		return f
+	})
+}
+
+// spec is the pattern in a mock file.
+func (f fileFieldModel) spec() map[string]any {
+	spec := make(map[string]any)
+	if f.filename != nil {
+		spec["filename"] = f.filename.spec
+	}
+
+	if f.contentType != "" {
+		spec["content_type"] = f.contentType
+	}
+
+	if f.body != nil {
+		spec["body"] = f.body.spec
+	}
+
+	return spec
+}
+
+// matchingFile draws a file of field that the pattern matches.
+func (f fileFieldModel) matchingFile(t *rapid.T, field string) formFile {
+	file := formFile{
+		field:       field,
+		filename:    genToken().Draw(t, "any filename"),
+		contentType: rapid.SampledFrom(_genFileTypes).Draw(t, "any content type"),
+		body:        []byte(genToken().Draw(t, "any file body")),
+	}
+
+	if f.filename != nil {
+		file.filename = f.filename.sample(t, true)
+	}
+
+	if f.contentType != "" {
+		// The media type is compared in lower case and without parameters.
+		file.contentType = rapid.SampledFrom([]string{f.contentType, strings.ToUpper(f.contentType), f.contentType + "; q=1"}).Draw(t, "content type form")
+	}
+
+	if f.body != nil {
+		file.body = []byte(f.body.sample(t, true))
+	}
+
+	return file
 }
 
 func genRequest(baseURL string) *rapid.Generator[requestModel] {
@@ -144,10 +216,22 @@ func genRequest(baseURL string) *rapid.Generator[requestModel] {
 		r := requestModel{doc: make(map[string]any)}
 		r.path = "/" + strings.Join(rapid.SliceOfN(rapid.StringMatching(`[a-z0-9-]{1,6}`), 1, 3).Draw(t, "path"), "/")
 
-		withBody := rapid.IntRange(0, 2).Draw(t, "body kind") // 0 none, 1 form, 2 text
-		if withBody == 1 {
+		withBody := rapid.IntRange(0, 3).Draw(t, "body kind") // 0 none, 1 form, 2 text, 3 multipart form
+		if withBody == 1 || withBody == 3 && rapid.Bool().Draw(t, "multipart has fields") {
 			r.form = rapid.MapOfN(rapid.StringMatching(`[A-Za-z][A-Za-z0-9_]{0,6}`), genMatcher(), 1, 2).Draw(t, "form")
-			r.doc["form_url_encoded"] = specs(r.form)
+			r.doc["form"] = specs(r.form)
+		}
+
+		if withBody == 3 {
+			r.multipart = true
+			r.files = rapid.MapOfN(rapid.StringMatching(`[A-Za-z][A-Za-z0-9_]{0,6}`), genFileField(), 1, 2).Draw(t, "files")
+
+			files := make(map[string]any, len(r.files))
+			for field, f := range r.files {
+				files[field] = f.spec()
+			}
+
+			r.doc["form_file"] = files
 		}
 
 		if withBody == 2 {
@@ -239,13 +323,15 @@ func toAny[E any](s []E) []any {
 
 // requestSpec is a request to send.
 type requestSpec struct {
-	method string
-	path   string
-	query  url.Values
-	header http.Header
-	form   url.Values
-	body   *string
-	what   string // what the request changes from a matching one, for failure messages
+	method    string
+	path      string
+	query     url.Values
+	header    http.Header
+	form      url.Values
+	multipart bool       // send form and files as multipart/form-data
+	files     []formFile // files of a multipart form
+	body      *string
+	what      string // what the request changes from a matching one, for failure messages
 }
 
 // matching draws a request the mock matches.
@@ -258,7 +344,7 @@ func (r requestModel) matching(t *rapid.T) requestSpec {
 		what:   "matching",
 	}
 
-	if r.body != nil || r.form != nil {
+	if r.body != nil || r.form != nil || r.multipart {
 		req.method = http.MethodPost
 	}
 
@@ -283,6 +369,17 @@ func (r requestModel) matching(t *rapid.T) requestSpec {
 		}
 	}
 
+	if r.multipart {
+		req.multipart = true
+		if req.form == nil {
+			req.form = make(url.Values)
+		}
+
+		for _, field := range slices.Sorted(maps.Keys(r.files)) {
+			req.files = append(req.files, r.files[field].matchingFile(t, field))
+		}
+	}
+
 	if r.body != nil {
 		body := r.body.sample(t, true)
 		req.body = &body
@@ -295,7 +392,7 @@ func (r requestModel) matching(t *rapid.T) requestSpec {
 func (r requestModel) mismatches(t *rapid.T) []requestSpec {
 	var out []requestSpec
 
-	if r.hasMethod && r.body == nil && r.form == nil && len(r.methods) < len(_genMethods) {
+	if r.hasMethod && r.body == nil && r.form == nil && !r.multipart && len(r.methods) < len(_genMethods) {
 		req := r.matching(t)
 		req.method = rapid.SampledFrom(slices.DeleteFunc(slices.Clone(_genMethods), func(m string) bool {
 			return slices.Contains(r.methods, m)
@@ -357,6 +454,46 @@ func (r requestModel) mismatches(t *rapid.T) []requestSpec {
 		out = append(out, req)
 	}
 
+	out = append(out, r.fileMismatches(t)...)
+
+	return out
+}
+
+// fileMismatches draws requests whose file of one field misses one condition of its pattern, or is gone.
+func (r requestModel) fileMismatches(t *rapid.T) []requestSpec {
+	var out []requestSpec
+
+	for i, field := range slices.Sorted(maps.Keys(r.files)) {
+		f := r.files[field]
+
+		change := func(what string, edit func(file *formFile)) {
+			req := r.matching(t)
+			edit(&req.files[i])
+			req.what = "file " + field + " " + what
+			out = append(out, req)
+		}
+
+		if f.filename != nil {
+			// A file without a name is a field to Go: the field then has no file, which doesn't match either.
+			change("filename", func(file *formFile) { file.filename = f.filename.sample(t, false) })
+		}
+
+		if f.contentType != "" {
+			change("content type", func(file *formFile) {
+				file.contentType = map[string]string{"image/png": "text/plain", "text/plain": "image/png"}[f.contentType]
+			})
+		}
+
+		if f.body != nil {
+			change("body", func(file *formFile) { file.body = []byte(f.body.sample(t, false)) })
+		}
+
+		req := r.matching(t)
+		req.files = slices.Delete(req.files, i, i+1)
+		req.what = "file " + field + " gone"
+		out = append(out, req)
+	}
+
 	return out
 }
 
@@ -381,6 +518,8 @@ type replyModel struct {
 	hasJSON  bool
 	data     *string // a body rendering .Extra.name, set to this value
 	gzip     bool
+
+	multipart *multipartReplyModel // a multipart body
 }
 
 func genReply() *rapid.Generator[replyModel] {
@@ -424,7 +563,7 @@ func genReply() *rapid.Generator[replyModel] {
 			r.doc["trailer"] = map[string]any{"X-End": v}
 		}
 
-		switch rapid.IntRange(0, 3).Draw(t, "body") {
+		switch rapid.IntRange(0, 4).Draw(t, "body") {
 		case 1:
 			text := rapid.String().Draw(t, "text")
 			r.text = &text
@@ -438,6 +577,23 @@ func genReply() *rapid.Generator[replyModel] {
 			r.data = &v
 			r.doc["body"] = "{{ .Extra.name }}"
 			r.doc["template"] = map[string]any{"data": map[string]any{"name": v}}
+		case 4:
+			mp := genMultipartReply().Draw(t, "multipart")
+			mp.gzip = false // the reply's own encoding gzips it
+
+			// A mock file's string body is text, so the file has no byte bodies: they would render as templates.
+			for i := range mp.parts {
+				if mp.parts[i].kind == "bytes" {
+					mp.parts[i].kind = "text"
+				}
+			}
+
+			r.multipart = &mp
+			r.doc["multipart"] = mp.doc()
+
+			if mp.templated {
+				r.doc["template"] = map[string]any{"data": map[string]any{"v": mp.extra}}
+			}
 		}
 
 		if rapid.Bool().Draw(t, "gzip") {

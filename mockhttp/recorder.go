@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"maps"
 	"mime"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -119,6 +121,20 @@ type recRequest struct {
 	header http.Header
 	query  url.Values
 	body   []byte
+	form   *recForm // the multipart form of the body, when it parsed as one
+}
+
+// recForm is the multipart form of a recorded request, as the server parsed it.
+type recForm struct {
+	values url.Values
+	files  map[string][]recFile
+}
+
+// recFile is a file of a recorded form.
+type recFile struct {
+	filename    string
+	contentType string // its media type
+	content     []byte
 }
 
 type recResponse struct {
@@ -210,9 +226,35 @@ func (r *recorder) dispatch(req *http.Request, parsedURL *url.URL, rawReqBody []
 	}
 
 	r.in <- recArgs{
-		request:  recRequest{parsedURL.RequestURI(), parsedURL.Path, req.Method, req.Header.Clone(), req.URL.Query(), rawReqBody},
+		request:  recRequest{parsedURL.RequestURI(), parsedURL.Path, req.Method, req.Header.Clone(), req.URL.Query(), rawReqBody, formOf(req)},
 		response: recResponse{res.StatusCode, res.Header.Clone(), res.Body},
 	}
+}
+
+// formOf copies the multipart form a request parsed, or returns nil when it has none. It runs before the handler
+// returns, while the form's files are there.
+func formOf(req *http.Request) *recForm {
+	if req.MultipartForm == nil {
+		return nil
+	}
+
+	form := &recForm{values: req.PostForm.Clone(), files: make(map[string][]recFile, len(req.MultipartForm.File))}
+	for field, files := range req.MultipartForm.File {
+		for _, fh := range files {
+			content, err := fileContent(fh)
+			if err != nil {
+				return nil // recorded as the raw body it came as
+			}
+
+			form.files[field] = append(form.files[field], recFile{
+				filename:    fh.Filename,
+				contentType: mediaType(fh.Header.Get(HeaderContentType)),
+				content:     []byte(content),
+			})
+		}
+	}
+
+	return form
 }
 
 // process writes the mock file of a recorded request and response.
@@ -220,9 +262,20 @@ func (r *recorder) process(arg recArgs) error {
 	request := map[string]any{"path": arg.request.path, "method": arg.request.method}
 	response := map[string]any{"status": int64(arg.response.status)}
 
+	form := arg.request.form
+
 	requestHeaders := make(map[string]any, len(r.config.RequestHeaders))
 	for _, h := range r.config.RequestHeaders {
-		if v := arg.request.header.Get(h); v != "" {
+		v := arg.request.header.Get(h)
+
+		switch {
+		case v == "":
+		case form != nil && strings.EqualFold(h, HeaderContentType):
+			// A form's boundary changes with every request, and so does its length: a recorded form matches any, by
+			// its media type, as Builder.ContentType(MIMEMultipartForm) does. A document holds int64, not int.
+			requestHeaders[h] = []any{"split", ";", []any{"item", int64(0), []any{"trim", []any{"eqi", MIMEMultipartForm}}}}
+		case form != nil && strings.EqualFold(h, HeaderContentLength):
+		default:
 			requestHeaders[h] = v
 		}
 	}
@@ -245,7 +298,11 @@ func (r *recorder) process(arg recArgs) error {
 	request["header"] = requestHeaders
 
 	requestBodyHash := ""
-	if len(arg.request.body) > 0 {
+
+	switch {
+	case form != nil:
+		requestBodyHash = form.hash()
+	case len(arg.request.body) > 0:
 		request["body"] = []any{"equal", string(arg.request.body)}
 
 		h := fnv.New64()
@@ -270,6 +327,12 @@ func (r *recorder) process(arg recArgs) error {
 
 	name := fmt.Sprintf("%s-%s", arg.request.method, nm)
 	mockFile := filepath.Join(saveDir, fmt.Sprintf("%s.mock.%s", name, r.config.SaveFileType))
+
+	if form != nil {
+		if err := form.record(request, saveDir, name); err != nil {
+			return err
+		}
+	}
 
 	if len(arg.response.body) > 0 {
 		body := arg.response.body
@@ -298,14 +361,7 @@ func (r *recorder) process(arg recArgs) error {
 
 		// A mock file is text, so a body that isn't goes to a file of its own, named after its content type.
 		if r.config.SaveResponseBodyToFile || !utf8.Valid(body) {
-			contentType, _, _ := strings.Cut(arg.response.header.Get(HeaderContentType), ";")
-
-			bodyFile := name + "--response-body"
-			if ext, _ := mime.ExtensionsByType(strings.TrimSpace(contentType)); len(ext) > 0 {
-				bodyFile += ext[0]
-			} else {
-				bodyFile += ".bin"
-			}
+			bodyFile := name + "--response-body" + extensionOf(arg.response.header.Get(HeaderContentType))
 
 			if err := os.WriteFile(filepath.Join(saveDir, bodyFile), body, 0o644); err != nil {
 				return err
@@ -329,6 +385,93 @@ func (r *recorder) process(arg recArgs) error {
 	data = bytes.ReplaceAll(data, []byte("{{"), []byte("{{`{{`}}"))
 
 	return os.WriteFile(mockFile, data, 0o644)
+}
+
+// hash hashes the form, its fields and files sorted, so an upload records to one file whatever its boundary.
+func (f *recForm) hash() string {
+	h := fnv.New64()
+
+	for _, k := range slices.Sorted(maps.Keys(f.values)) {
+		fmt.Fprintf(h, "%q=%q;", k, f.values[k])
+	}
+
+	for _, k := range slices.Sorted(maps.Keys(f.files)) {
+		for _, file := range f.files[k] {
+			fmt.Fprintf(h, "%q:%q,%q,%d:", k, file.filename, file.contentType, len(file.content))
+			h.Write(file.content)
+		}
+	}
+
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// record writes the form into a recorded request: its fields, by their first value, as FormField reads them, and its
+// files as form_file patterns. A file that isn't UTF-8 text goes to a file of its own next to the mock file, which
+// the pattern compares with as its body_file.
+func (f *recForm) record(request map[string]any, saveDir, name string) error {
+	if len(f.values) > 0 {
+		fields := make(map[string]any, len(f.values))
+		for k := range f.values {
+			fields[k] = f.values.Get(k)
+		}
+
+		request["form"] = fields
+	}
+
+	if len(f.files) == 0 {
+		return nil
+	}
+
+	// Body files are numbered across the form: names of fields such as " " and "." read the same once made safe for
+	// a file name.
+	bodyFiles := 0
+
+	files := make(map[string]any, len(f.files))
+	for _, field := range slices.Sorted(maps.Keys(f.files)) {
+		patterns := make([]any, 0, len(f.files[field]))
+
+		for _, file := range f.files[field] {
+			pattern := map[string]any{"filename": file.filename}
+			if file.contentType != "" {
+				pattern["content_type"] = file.contentType
+			}
+
+			if utf8.Valid(file.content) {
+				pattern["body"] = []any{"equal", string(file.content)}
+			} else {
+				bodyFile := fmt.Sprintf("%s--%s-%d%s", name, _regexNoSpecialCharacters.ReplaceAllString(strings.ToLower(field), "-"), bodyFiles,
+					extensionOf(file.contentType))
+				if err := os.WriteFile(filepath.Join(saveDir, bodyFile), file.content, 0o644); err != nil {
+					return err
+				}
+
+				bodyFiles++
+				pattern["body_file"] = bodyFile
+			}
+
+			patterns = append(patterns, pattern)
+		}
+
+		if len(patterns) == 1 {
+			files[field] = patterns[0]
+		} else {
+			files[field] = patterns
+		}
+	}
+
+	request["form_file"] = files
+
+	return nil
+}
+
+// extensionOf returns the extension of a file for a content type, or .bin.
+func extensionOf(contentType string) string {
+	mediaType, _, _ := strings.Cut(contentType, ";")
+	if ext, _ := mime.ExtensionsByType(strings.TrimSpace(mediaType)); len(ext) > 0 {
+		return ext[0]
+	}
+
+	return ".bin"
 }
 
 //

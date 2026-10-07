@@ -1,0 +1,15 @@
+# Multipart replies in a sequence.
+request:
+  method: GET
+  path: /sequence
+
+response_sequence:
+  responses:
+    - multipart:
+        type: mixed
+        parts:
+          - body: first
+    - multipart:
+        type: mixed
+        parts:
+          - body: second

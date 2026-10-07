@@ -10,6 +10,8 @@
 //	m.MustMock(mockhttp.Getf("/hello").Reply(mockhttp.OK().PlainText("hello world")))
 //
 // Use [github.com/caffeine-projects/vlatte/match] to match headers, query parameters or bodies.
+// [Builder.FormField] and [Builder.FormFile] match the fields and files of forms, as net/http parses them, and
+// [Reply.Multipart] replies with multipart bodies, streamed part by part when parts have delays.
 // Mocks can also come from YAML or JSON files; see [FromFile] and [ConfigBuilder.MockFilePatterns].
 //
 // Settings come from code, then from a .vlatterc.json, .vlatterc.yaml or .vlatterc.yml file and VLATTE_*

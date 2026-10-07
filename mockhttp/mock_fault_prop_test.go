@@ -61,6 +61,62 @@ var _mockFaults = []mockFault{
 	{"name", config.CodeInvalidValue, "name", func(doc map[string]any) { doc["name"] = int64(123) }},
 	{"priority", config.CodeInvalidValue, "priority", func(doc map[string]any) { doc["priority"] = "5" }},
 	{"enabled", config.CodeInvalidValue, "enabled", func(doc map[string]any) { doc["enabled"] = "yes" }},
+	// The form_file faults share an area: one sets the whole form_file, which would hide the others.
+	{"form_file", config.CodeInvalidValue, "request.form_file", func(doc map[string]any) { sub(doc, "request")["form_file"] = []any{} }},
+	{"form_file", config.CodeUnknownKey, "request.form_file.avatar.filname", func(doc map[string]any) {
+		sub(doc, "request")["form_file"] = map[string]any{"avatar": map[string]any{"filname": "a.png"}}
+	}},
+	{"form_file", config.CodeConflict, "request.form_file.avatar.body_file", func(doc map[string]any) {
+		sub(doc, "request")["form_file"] = map[string]any{"avatar": map[string]any{"body": "x", "body_file": "a.png"}}
+	}},
+	{"form_file", config.CodeFileNotFound, "request.form_file.avatar.body_file", func(doc map[string]any) {
+		sub(doc, "request")["form_file"] = map[string]any{"avatar": map[string]any{"body_file": "testdata/no-such-file.png"}}
+	}},
+	{"form_file", config.CodeInvalidValue, "request.form_file.avatar[1].every", func(doc map[string]any) {
+		sub(doc, "request")["form_file"] = map[string]any{"avatar": []any{make(map[string]any), map[string]any{"every": "x"}}}
+	}},
+	// The multipart faults share an area: each sets response.multipart and drops the body it would conflict with.
+	{"multipart", config.CodeInvalidValue, "response.multipart.type", func(doc map[string]any) { withMultipart(doc)["type"] = "multipart/mixed" }},
+	{"multipart", config.CodeMissingValue, "response.multipart.type", func(doc map[string]any) { delete(withMultipart(doc), "type") }},
+	{"multipart", config.CodeInvalidValue, "response.multipart.boundary", func(doc map[string]any) { withMultipart(doc)["boundary"] = "a b " }},
+	{"multipart", config.CodeNotAllowed, "response.multipart.params.boundary", func(doc map[string]any) {
+		withMultipart(doc)["params"] = map[string]any{"boundary": "x"}
+	}},
+	{"multipart", config.CodeInvalidValue, "response.multipart.parts", func(doc map[string]any) { withMultipart(doc)["parts"] = []any{} }},
+	// Subtypes ignore case, in the decoder and in the editor schema.
+	{"multipart", config.CodeMissingValue, "response.multipart.parts[0].name", func(doc map[string]any) { withMultipart(doc)["type"] = "Form-Data" }},
+	{"multipart", config.CodeUnknownKey, "response.multipart.parts[0].nmae", func(doc map[string]any) {
+		withMultipart(doc)["parts"] = []any{map[string]any{"nmae": "x"}}
+	}},
+	{"multipart", config.CodeInvalidValue, "response.multipart.parts[0].delay", func(doc map[string]any) {
+		withMultipart(doc)["parts"] = []any{map[string]any{"delay": int64(-5)}}
+	}},
+	{"multipart", config.CodeConflict, "response.multipart", func(doc map[string]any) {
+		withMultipart(doc)
+		sub(doc, "response")["body"] = "x"
+	}},
+	{"multipart", config.CodeInvalidValue, "response.multipart.parts[0].body", func(doc map[string]any) {
+		multipart := withMultipart(doc)
+		multipart["boundary"] = "b"
+		multipart["parts"] = []any{map[string]any{"body": "a\n--b"}}
+	}},
+}
+
+// withMultipart replaces the body of the response with a multipart body, and returns the multipart object.
+func withMultipart(doc map[string]any) map[string]any {
+	response := sub(doc, "response")
+	delete(response, "body")
+
+	multipart := map[string]any{"type": "mixed", "parts": []any{map[string]any{"body": "x"}}}
+	response["multipart"] = multipart
+
+	return multipart
+}
+
+// schemaBlind reports the faults the editor schema can't express: matcher arguments are the decoder's alone, and no
+// JSON Schema can tell whether a file exists, or whether a line of a body starts with the boundary.
+func schemaBlind(f mockFault) bool {
+	return f.area == "matcher" || f.code == config.CodeFileNotFound || f.key == "response.multipart.parts[0].body"
 }
 
 // sub returns the object under key, creating it.
@@ -76,6 +132,8 @@ func sub(doc map[string]any, key string) map[string]any {
 
 func TestPropMockFile_EveryFaultIsReported(t *testing.T) {
 	// M3: each fault is reported once, with its code and key, and nothing else is: a file is fixed in one pass.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 
 	rapid.Check(t, func(t *rapid.T) {
@@ -196,6 +254,8 @@ func (b *logBuffer) String() string {
 func TestPropMockFile_MutationsNeverPanic(t *testing.T) {
 	// M4: whatever a document turns into, building it gives a mock or a list of problems, never a panic;
 	// and a mock built from it never panics serving a request.
+	t.Parallel()
+
 	logs := &logBuffer{}
 	logger := zerolog.New(logs)
 

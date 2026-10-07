@@ -1,0 +1,17 @@
+# A templated part that echoes the uploaded file. A mock file is a Go template first, so the reply's template is
+# escaped.
+request:
+  method: POST
+  path: /echo
+  form_file:
+    avatar: {}
+
+response:
+  status: 200
+  template:
+    enabled: true
+  multipart:
+    type: mixed
+    parts:
+      - content_type: text/plain
+        body: '{{`{{ with .Request.FormFile "avatar" }}{{ .Filename }}: {{ .Size }} bytes{{ end }}`}}'

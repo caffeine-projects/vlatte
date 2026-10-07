@@ -90,6 +90,17 @@ func Mismatch(v Value, want string, takes ...Kind) error {
 	return &Error{Problems: []Problem{mismatch(v.Key, v.Origin, v.Any, want, takes...)}}
 }
 
+// ProblemsOf returns the problems of err, which Decode or a Set returned for v: none for nil, the problems of an
+// *Error, and one problem of v for any other error. A caller adding problems of its own merges them, and drops no
+// error.
+func ProblemsOf(v Value, err error) []Problem {
+	if err == nil {
+		return nil
+	}
+
+	return problemsOf(v, err)
+}
+
 // asError returns problems as an *Error, or nil when there are none.
 func asError(problems []Problem) error {
 	if len(problems) == 0 {

@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"sync"
@@ -89,8 +90,11 @@ type selectorInput struct {
 
 	Query url.Values
 
-	// Form is the form of a form body, without the query: http.Request.PostForm.
+	// Form is the form of a form body, urlencoded or multipart, without the query: http.Request.PostForm.
 	Form url.Values
+
+	// Files are the files of a multipart form body, by field name: http.Request.MultipartForm.File.
+	Files map[string][]*multipart.FileHeader
 
 	// ParsedBody is the parsed http.Request body.
 	ParsedBody any
@@ -276,6 +280,24 @@ func (m *Mock) Describe() descriptor.Descriptor {
 
 			request[target.FieldName()] = keys
 
+		case matchingScopeFormFile:
+			// One pattern of a field is an object, and several a list, in the order they were added.
+			files := make(map[string]any)
+			for _, e := range expectations {
+				desc := describeMatcher(e.Matcher)
+
+				switch prev := files[e.Key].(type) {
+				case nil:
+					files[e.Key] = desc
+				case []any:
+					files[e.Key] = append(prev, desc)
+				default:
+					files[e.Key] = []any{prev, desc}
+				}
+			}
+
+			request[target.FieldName()] = files
+
 		case matchingScopeScheme, matchingScopeURL, matchingScopeURLPath, matchingScopeBody:
 			if len(expectations) == 1 {
 				if sd, ok := expectations[0].Matcher.(descriptor.SelfDescriptive); ok {
@@ -348,6 +370,7 @@ const (
 	matchingScopeQueries
 	matchingScopeBody
 	matchingScopeFormField
+	matchingScopeFormFile
 	matchingScopeScenario
 )
 
@@ -370,37 +393,12 @@ func (t matchingScope) FieldName() string {
 	case matchingScopeBody:
 		return "body"
 	case matchingScopeFormField:
-		return "form_url_encoded"
+		return "form"
+	case matchingScopeFormFile:
+		return "form_file"
 	case matchingScopeScenario:
 		return "scenario"
 	default:
 		return ""
-	}
-}
-
-func (t matchingScope) String() string {
-	switch t {
-	case matchingScopeNone:
-		return "Req"
-	case matchingScopeScheme:
-		return "Scheme"
-	case matchingScopeMethod:
-		return "Method"
-	case matchingScopeURL:
-		return "URL"
-	case matchingScopeURLPath:
-		return "URLPath"
-	case matchingScopeHeader:
-		return "Header"
-	case matchingScopeQuery, matchingScopeQueries:
-		return "Query"
-	case matchingScopeBody:
-		return "Body"
-	case matchingScopeFormField:
-		return "Form"
-	case matchingScopeScenario:
-		return "Scenario"
-	default:
-		return "Req"
 	}
 }
