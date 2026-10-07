@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"text/template"
@@ -105,7 +106,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		}
 
 		var err error
-		if webhookArgs, err = argsFromMap(m, originOf(args)); err != nil {
+		if webhookArgs, err = argsFromMap(m, originOf(args), dirOf(args)); err != nil {
 			return err
 		}
 	}
@@ -162,7 +163,12 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 		body = strings.NewReader(b)
 	case webhookArgs.BodyFile != "":
-		b, err := os.ReadFile(webhookArgs.BodyFile)
+		name := webhookArgs.BodyFile
+		if webhookArgs.dir != "" && !filepath.IsAbs(name) {
+			name = filepath.Join(webhookArgs.dir, name)
+		}
+
+		b, err := os.ReadFile(name)
 		if err != nil {
 			return fmt.Errorf("webhook: error reading body_file %s: %w", webhookArgs.BodyFile, err)
 		}
@@ -252,6 +258,8 @@ type Args struct {
 
 	// Multipart is a multipart body, such as one built with mockhttp.MultipartForm. It sets the Content-Type.
 	Multipart MultipartBody
+
+	dir string // where relative files open from: the mock file's directory; "" is the working directory
 }
 
 // MultipartBody is a multipart body for a webhook, such as one built with mockhttp.MultipartForm.
@@ -294,8 +302,9 @@ var _argsSchema = config.NewSchema(
 		Set: func(a *Args, v config.Value) error { a.BodyTemplate = v.Str; return nil },
 	},
 	argsField{
-		Key: "body_file", Kind: config.String, Usage: "File to read the body of the request from.",
-		Set: func(a *Args, v config.Value) error { a.BodyFile = v.Str; return nil },
+		Key: "body_file", Kind: config.String,
+		Usage: "File to read the body of the request from. Relative paths start at the mock file's directory.",
+		Set:   func(a *Args, v config.Value) error { a.BodyFile = v.Str; return nil },
 	},
 	argsField{
 		Key: "multipart", Kind: config.Any, Usage: "Multipart body of the request: type, boundary, params and parts.",
@@ -321,17 +330,18 @@ var _exclusive = [][]string{{"url", "url_template"}, {"body", "body_file", "body
 // JSON means, so a map[string]string or an int is fine where its JSON is. The error wraps ErrBadArg and lists
 // every problem.
 func ArgsFromMap(m map[string]any) (*Args, error) {
-	return argsFromMap(m, "on_complete")
+	return argsFromMap(m, "on_complete", "")
 }
 
-// argsFromMap decodes the parameters m, which came from origin, such as "mock users", for problems.
-func argsFromMap(m map[string]any, origin string) (*Args, error) {
+// argsFromMap decodes the parameters m, which came from origin, such as "mock users", for problems. Their relative
+// files open from dir; "" is the working directory.
+func argsFromMap(m map[string]any, origin, dir string) (*Args, error) {
 	doc, err := value.ViaJSON(m)
 	if err != nil {
 		return nil, errorBadArg(err)
 	}
 
-	args := new(Args)
+	args := &Args{dir: dir}
 	err = _argsSchema.Decode(args, config.Value{Key: "parameters", Origin: origin, Any: doc})
 
 	problems := conflicts(doc, origin)
@@ -402,12 +412,7 @@ func setMultipart(a *Args, v config.Value, templated bool) error {
 		return err
 	}
 
-	var problems []config.Problem
-	if cfgErr, ok := errors.AsType[*config.Error](err); ok {
-		problems = cfgErr.Problems
-	} else if err != nil {
-		return err
-	}
+	problems := config.ProblemsOf(v, err)
 
 	for i, p := range spec.Parts {
 		if p.Delay > 0 {
@@ -424,6 +429,7 @@ func setMultipart(a *Args, v config.Value, templated bool) error {
 	}
 
 	spec.Templated = templated
+	spec.Dir = a.dir
 	a.Multipart = &multipartParams{spec: spec}
 
 	return nil
@@ -480,6 +486,16 @@ func headerOf(v config.Value, dst *map[string]string) error {
 }
 
 // originOf names where the parameters of an event come from, for problems: the mock that completed.
+// dirOf returns where the relative files of the event's parameters open from, as mockhttp's OnComplete says: the
+// directory of the mock file that defines the event, or "" for the working directory.
+func dirOf(args vlatte.OnComplete) string {
+	if d, ok := args.(interface{ Dir() string }); ok {
+		return d.Dir()
+	}
+
+	return ""
+}
+
 func originOf(args vlatte.OnComplete) string {
 	if mock := args.Mock(); mock != nil {
 		return "mock " + mock.ID()

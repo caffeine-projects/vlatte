@@ -11,6 +11,7 @@ type OnComplete struct {
 	res  *Response
 	kit  vlatte.Kit
 	args vlatte.Parameters
+	dir  string
 }
 
 func (i *OnComplete) Kind() vlatte.Kind {
@@ -35,4 +36,10 @@ func (i *OnComplete) Request() *RequestValues {
 
 func (i *OnComplete) Response() *Response {
 	return i.res
+}
+
+// Dir is where relative files of the event's parameters open from: the directory of the mock file that defines the
+// event, or "" for the working directory, as for events defined in Go and global events.
+func (i *OnComplete) Dir() string {
+	return i.dir
 }

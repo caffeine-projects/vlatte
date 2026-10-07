@@ -157,6 +157,19 @@ func TestDecode_NotAnObject(t *testing.T) {
 		requireProblems(t, err))
 }
 
+func TestProblemsOf(t *testing.T) {
+	// A caller that adds problems of its own to a decoder's merges them through ProblemsOf, and loses none: an
+	// *Error's problems are its own, wrapped or not, and any other error is a problem of the value.
+	v := Value{Key: "m.body", Origin: "o", Raw: "x", Any: "x"}
+	nested := &Error{Problems: []Problem{{Code: CodeConflict, Origin: "o", Key: "m.a"}}}
+
+	require.Nil(t, ProblemsOf(v, nil))
+	require.Equal(t, nested.Problems, ProblemsOf(v, nested))
+	require.Equal(t, nested.Problems, ProblemsOf(v, fmt.Errorf("wrapped: %w", nested)))
+	require.Equal(t, []Problem{{Code: CodeInvalidValue, Origin: "o", Key: "m.body", Value: "x", Message: `m.body="x": boom`}},
+		ProblemsOf(v, errors.New("boom")))
+}
+
 func TestPropNested_FormatsLoadAlike(t *testing.T) {
 	// C5: a document written as JSON and as YAML loads into the same struct and values; only origins differ.
 	rapid.Check(t, func(t *rapid.T) {

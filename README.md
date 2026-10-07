@@ -122,7 +122,7 @@ mock: 2 problems
 
 ## Forms and multipart
 
-Go's `net/http` parses request bodies: `ParseForm` reads urlencoded forms and `ParseMultipartForm` reads `multipart/form-data`.
+Go's `net/http` parses request bodies: `ParseForm` reads urlencoded forms and `ParseMultipartForm` reads `multipart/form-data`. Bodies are parsed by their media type, in any case: `text/plain` and `application/json` as text, and the two form types as forms.
 
 **Fields.** `FormField` (file key `form`) reads a field of either encoding, as `http.Request.PostFormValue` does: its first value, and never the query.
 
@@ -200,11 +200,12 @@ response:
 **Webhooks** send multipart bodies too:
 - the `multipart` parameter takes the same object, and `multipart_template` makes its text a template;
 - Go uses `webhook.Options().Multipart(mockhttp.MultipartForm(...))`;
-- a webhook sends its body at once, so its parts can't have delays.
+- a webhook sends its body at once, so its parts can't have delays;
+- relative body files open from the mock file's directory, as in replies: a whole `body_file` and a part's alike.
 
 **Templates** read forms: `{{ .Request.PostForm.Get "title" }}` and `{{ with .Request.FormFile "avatar" }}{{ .Filename }}{{ end }}`.
 
-**Recording** writes a recorded upload as `form` and `form_file` patterns, so it replays whatever boundary the next client picks. Files that aren't UTF-8 text go to files next to the recording.
+**Recording** writes a recorded upload as `form` and `form_file` patterns, so it replays whatever boundary the next client picks. Files that aren't UTF-8 text go to files next to the recording. A replay matches the recorded fields and files, as `FormField` and `FormFile` do: more fields or files still match.
 
 ## Configuration
 

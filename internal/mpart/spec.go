@@ -3,6 +3,7 @@
 package mpart
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"maps"
@@ -56,8 +57,8 @@ type Header struct {
 }
 
 // Issue is a problem of a Spec. Path names where it is, as a mock file names its keys: "boundary" or
-// "parts[1].name"; "" is the spec itself. Message follows the path: "parts[1].name is required in a form-data part".
-// A conflict names the other path in With instead.
+// "parts[1].name". Message follows the path: "parts[1].name is required in a form-data part". A conflict names the
+// other path in With instead.
 type Issue struct {
 	Code    string // a config problem code, such as invalid_value
 	Path    string
@@ -86,16 +87,13 @@ func (i Issue) Text(prefix string) string {
 	return strings.TrimSpace(under(prefix, i.Path) + " " + message)
 }
 
-// under returns path under prefix: "prefix.path", or one of them when the other is "".
+// under returns path under prefix: "prefix.path", or path when prefix is "".
 func under(prefix, path string) string {
-	switch {
-	case prefix == "":
+	if prefix == "" {
 		return path
-	case path == "":
-		return prefix
-	default:
-		return prefix + "." + path
 	}
+
+	return prefix + "." + path
 }
 
 // Check returns the issues of s: what makes it a body that can't be written, or not as asked.
@@ -115,10 +113,13 @@ func (s *Spec) Check() []Issue {
 		add(config.CodeInvalidValue, "type", fmt.Sprintf("must be a token, such as mixed, not %q", s.Subtype), "")
 	}
 
-	if s.Boundary != "" {
-		if err := multipart.NewWriter(io.Discard).SetBoundary(s.Boundary); err != nil {
+	boundary := s.Boundary
+	if boundary != "" {
+		if err := multipart.NewWriter(io.Discard).SetBoundary(boundary); err != nil {
 			add(config.CodeInvalidValue, "boundary",
-				fmt.Sprintf("must be 1 to 70 letters, digits or '()+_,-./:=? characters, not ending in a space, not %q", s.Boundary), "")
+				fmt.Sprintf("must be 1 to 70 letters, digits or '()+_,-./:=? characters, not ending in a space, not %q", boundary), "")
+
+			boundary = ""
 		}
 	}
 
@@ -136,7 +137,15 @@ func (s *Spec) Check() []Issue {
 	}
 
 	for i, p := range s.Parts {
-		issues = append(issues, p.check(fmt.Sprintf("parts[%d]", i), s.Subtype == "form-data")...)
+		path := fmt.Sprintf("parts[%d]", i)
+		issues = append(issues, p.check(path, s.formData())...)
+
+		// A body that is known now is checked now; a template or a file is checked when it is written.
+		static := p.File == "" && (p.Kind != BodyText || !s.Templated)
+		if boundary != "" && static && startsALine(p.Body, boundary) {
+			add(config.CodeInvalidValue, path+".body", fmt.Sprintf("has a line that starts with the boundary %q, which would end the part there", boundary),
+				"choose another boundary, or leave it out for a random one")
+		}
 	}
 
 	return issues
@@ -216,6 +225,11 @@ func (s *Spec) Doc() map[string]any {
 	return doc
 }
 
+// formData reports whether the body is multipart/form-data. Subtypes ignore case.
+func (s *Spec) formData() bool {
+	return strings.EqualFold(s.Subtype, "form-data")
+}
+
 // doc returns the part as a mock file writes it.
 func (p *PartSpec) doc() map[string]any {
 	doc := make(map[string]any)
@@ -277,6 +291,13 @@ func (p *PartSpec) hasHeader(name string) bool {
 	}
 
 	return false
+}
+
+// startsALine reports whether a line of body starts with "--" and the boundary, as a delimiter line does: a reader
+// would end the part there. RFC 2046 keeps such lines out of bodies; "--" and the boundary within a line are fine.
+func startsALine(body []byte, boundary string) bool {
+	delimiter := []byte("--" + boundary)
+	return bytes.HasPrefix(body, delimiter) || bytes.Contains(body, append([]byte("\n"), delimiter...))
 }
 
 // isToken reports whether s is an HTTP token, as header names are.

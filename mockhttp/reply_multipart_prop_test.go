@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -39,7 +40,7 @@ type replyPartModel struct {
 func genMultipartReply() *rapid.Generator[multipartReplyModel] {
 	return rapid.Custom(func(t *rapid.T) multipartReplyModel {
 		m := multipartReplyModel{
-			subtype:   rapid.SampledFrom([]string{"form-data", "mixed", "related", "x-mixed-replace"}).Draw(t, "subtype"),
+			subtype:   rapid.SampledFrom([]string{"form-data", "Form-Data", "mixed", "related", "x-mixed-replace"}).Draw(t, "subtype"),
 			gzip:      rapid.Bool().Draw(t, "gzip"),
 			templated: rapid.Bool().Draw(t, "templated"),
 			extra:     genToken().Draw(t, "extra"),
@@ -51,7 +52,7 @@ func genMultipartReply() *rapid.Generator[multipartReplyModel] {
 
 		for range rapid.IntRange(1, 5).Draw(t, "parts") {
 			p := replyPartModel{kind: rapid.SampledFrom([]string{"bytes", "text", "json"}).Draw(t, "kind")}
-			if m.subtype == "form-data" || rapid.Bool().Draw(t, "has name") {
+			if strings.EqualFold(m.subtype, "form-data") || rapid.Bool().Draw(t, "has name") {
 				p.name = genToken().Draw(t, "name")
 			}
 
@@ -165,7 +166,7 @@ func (m multipartReplyModel) want() []readPart {
 		header := make(map[string][]string)
 
 		switch {
-		case m.subtype == "form-data":
+		case strings.EqualFold(m.subtype, "form-data"):
 			header["Content-Disposition"] = []string{disposition("form-data", p.name, p.filename)}
 		case p.name != "" || p.filename != "":
 			header["Content-Disposition"] = []string{disposition("attachment", p.name, p.filename)}
@@ -238,7 +239,7 @@ func TestPropReplyMultipart_ServesItsModel(t *testing.T) {
 			require.Equal(t, model.gzip, res.Uncompressed, "gzip")
 
 			mediaType, boundary, parts := readMultipart(t, res.Header.Get(HeaderContentType), body)
-			require.Equal(t, "multipart/"+model.subtype, mediaType)
+			require.Equal(t, "multipart/"+strings.ToLower(model.subtype), mediaType)
 			require.Equal(t, model.want(), parts, "reply %d", i)
 
 			if model.boundary != "" {

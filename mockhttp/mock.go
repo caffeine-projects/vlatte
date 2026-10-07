@@ -402,32 +402,3 @@ func (t matchingScope) FieldName() string {
 		return ""
 	}
 }
-
-func (t matchingScope) String() string {
-	switch t {
-	case matchingScopeNone:
-		return "Req"
-	case matchingScopeScheme:
-		return "Scheme"
-	case matchingScopeMethod:
-		return "Method"
-	case matchingScopeURL:
-		return "URL"
-	case matchingScopeURLPath:
-		return "URLPath"
-	case matchingScopeHeader:
-		return "Header"
-	case matchingScopeQuery, matchingScopeQueries:
-		return "Query"
-	case matchingScopeBody:
-		return "Body"
-	case matchingScopeFormField:
-		return "Form"
-	case matchingScopeFormFile:
-		return "FormFile"
-	case matchingScopeScenario:
-		return "Scenario"
-	default:
-		return "Req"
-	}
-}

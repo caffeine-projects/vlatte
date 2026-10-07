@@ -43,6 +43,8 @@ func TestDecode_Rules(t *testing.T) {
 		{"part as text", `{"type": "mixed", "parts": ["x"]}`, []want{{config.CodeInvalidValue, "m.parts[0]", "must be an object, not a string", ""}}},
 		{"part key with a typo", `{"type": "mixed", "parts": [{"nmae": "x"}]}`, []want{{config.CodeUnknownKey, "m.parts[0].nmae", "not a known setting", "did you mean m.parts[0].name?"}}},
 		{"form-data part without a name", `{"type": "form-data", "parts": [{"name": "a"}, {"body": "x"}]}`, []want{{config.CodeMissingValue, "m.parts[1].name", "m.parts[1].name is required in a form-data part", "name the form field"}}},
+		{"form-data in capitals, a part without a name", `{"type": "FORM-DATA", "parts": [{"body": "x"}]}`, []want{{config.CodeMissingValue, "m.parts[0].name", "is required in a form-data part", "name the form field"}}},
+		{"a line of a body that starts with the boundary", `{"type": "mixed", "boundary": "b", "parts": [{"body": "a"}, {"body": "a\n--b c"}]}`, []want{{config.CodeInvalidValue, "m.parts[1].body", `m.parts[1].body has a line that starts with the boundary "b"`, "choose another boundary"}}},
 		{"name as a number", `{"type": "form-data", "parts": [{"name": 1}]}`, []want{{config.CodeInvalidValue, "m.parts[0].name", "must be a string, not a number", ""}}},
 		{"null body", `{"type": "mixed", "parts": [{"body": null}]}`, []want{{config.CodeInvalidValue, "m.parts[0].body", "m.parts[0].body is null", `write "" for an empty body`}}},
 		{"body and body_file", `{"type": "mixed", "parts": [{"body": "x", "body_file": "x.bin"}]}`, []want{{config.CodeConflict, "m.parts[0].body_file", "m.parts[0].body_file is set with m.parts[0].body", "keep one of them"}}},
@@ -56,6 +58,7 @@ func TestDecode_Rules(t *testing.T) {
 		{"header as a number", `{"type": "mixed", "parts": [{"header": {"X-A": 1}}]}`, []want{{config.CodeInvalidValue, "m.parts[0].header.X-A", "must be a string or a list of strings", `write it in quotes: "1"`}}},
 		{"header list with a number", `{"type": "mixed", "parts": [{"header": {"X-A": ["a", 1]}}]}`, []want{{config.CodeInvalidValue, "m.parts[0].header.X-A[1]", "must be a string, not a number", ""}}},
 		{"header name that isn't a token", `{"type": "mixed", "parts": [{"header": {"a b": "x"}}]}`, []want{{config.CodeInvalidValue, "m.parts[0].header.a b", "is not a header name", ""}}},
+		{"header without a name", `{"type": "mixed", "parts": [{"header": {"": "x"}}]}`, []want{{config.CodeInvalidValue, "m.parts[0].header.", "is not a header name", ""}}},
 		{"header with a line break", `{"type": "mixed", "parts": [{"header": {"X-A": "a\r\nX-B: b"}}]}`, []want{{config.CodeInvalidValue, "m.parts[0].header.X-A", "holds a line break", ""}}},
 		{"content type with a line break", `{"type": "mixed", "parts": [{"content_type": "a/b\nX: y"}]}`, []want{{config.CodeInvalidValue, "m.parts[0].content_type", "holds a line break", ""}}},
 		{"content_type and a Content-Type header", `{"type": "mixed", "parts": [{"content_type": "a/b", "header": {"content-type": "c/d"}}]}`, []want{{config.CodeConflict, "m.parts[0].header.content-type", "m.parts[0].header.content-type is set with m.parts[0].content_type", "keep one of them"}}},
@@ -91,7 +94,7 @@ func TestDecode_AValidObject(t *testing.T) {
 	doc, err := value.DecodeJSON([]byte(`{
 		"type": "related", "boundary": "b0", "params": {"type": "application/json", "start": "<root>"},
 		"parts": [
-			{"header": {"Content-Id": "<root>", "X-A": ["1", "2"]}, "body": {"id": 1}},
+			{"header": {"Content-Id": "<root>", "X-A": ["1", "2", "3"]}, "body": {"id": 1}},
 			{"name": "report", "filename": "r.pdf", "content_type": "application/pdf", "body_file": "r.pdf", "delay": "500ms"},
 			{"body": "text"}
 		]}`))
@@ -105,9 +108,12 @@ func TestDecode_AValidObject(t *testing.T) {
 		Boundary: "b0",
 		Params:   map[string]string{"type": "application/json", "start": "<root>"},
 		Parts: []*PartSpec{
-			{Header: []Header{{Name: "Content-Id", Value: "<root>"}, {Name: "X-A", Value: "1"}, {Name: "X-A", Value: "2"}}, Body: []byte(`{"id":1}`), Kind: BodyJSON},
+			{Header: []Header{{Name: "Content-Id", Value: "<root>"}, {Name: "X-A", Value: "1"}, {Name: "X-A", Value: "2"}, {Name: "X-A", Value: "3"}}, Body: []byte(`{"id":1}`), Kind: BodyJSON},
 			{Name: "report", Filename: "r.pdf", ContentType: "application/pdf", File: "r.pdf", Delay: 500_000_000},
 			{Body: []byte("text"), Kind: BodyText},
 		},
 	}, s)
+
+	// Doc writes back what Decode read, so admin GET output loads again.
+	require.Equal(t, doc, s.Doc())
 }

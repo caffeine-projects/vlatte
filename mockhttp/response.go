@@ -118,8 +118,8 @@ func (r *Response) render(ctx context.Context, w http.ResponseWriter, wait func(
 }
 
 // stream writes the body in segments, and waits at each pause before the bytes after it. A segment is flushed before
-// the wait, through gzip when the body is encoded, so the client reads it meanwhile. A pause past the end of the body,
-// which a Mapper may shorten, waits at its end.
+// the wait, through gzip when the body is encoded, so the client reads it meanwhile, and so is the last one. A pause
+// past the end of the body, which a Mapper may shorten, waits at its end.
 func (r *Response) stream(ctx context.Context, w http.ResponseWriter, wait func(context.Context, time.Duration) error) error {
 	rc := http.NewResponseController(w)
 
@@ -127,12 +127,7 @@ func (r *Response) stream(ctx context.Context, w http.ResponseWriter, wait func(
 
 	var gz *gzip.Writer
 	if r.Encoding == "gzip" {
-		var ok bool
-		if gz, ok = gzipper.Get().(*gzip.Writer); !ok {
-			gz = gzip.NewWriter(nil)
-		}
-
-		gz.Reset(w)
+		gz = gzipWriter(w)
 		defer gzipper.Put(gz)
 
 		out = gz
@@ -175,11 +170,13 @@ func (r *Response) stream(ctx context.Context, w http.ResponseWriter, wait func(
 		return err
 	}
 
+	// The last part goes out now, not when the handler returns after on_complete events. A failed Close keeps its
+	// error, which flush returns.
 	if gz != nil {
-		return gz.Close()
+		_ = gz.Close()
 	}
 
-	return nil
+	return flush()
 }
 
 // wait waits for d, or until ctx ends.
@@ -198,12 +195,7 @@ func wait(ctx context.Context, d time.Duration) error {
 func (r *Response) encode(w io.Writer, reader io.Reader) (n int64, err error) {
 	switch r.Encoding {
 	case "gzip":
-		gz, ok := gzipper.Get().(*gzip.Writer)
-		if !ok {
-			gz = gzip.NewWriter(nil)
-		}
-
-		gz.Reset(w)
+		gz := gzipWriter(w)
 
 		defer func() {
 			gz.Close()
@@ -214,6 +206,14 @@ func (r *Response) encode(w io.Writer, reader io.Reader) (n int64, err error) {
 	}
 
 	return 0, nil
+}
+
+// gzipWriter takes a gzip writer from the pool, which holds only *gzip.Writer, and points it at w.
+func gzipWriter(w io.Writer) *gzip.Writer {
+	gz, _ := gzipper.Get().(*gzip.Writer)
+	gz.Reset(w)
+
+	return gz
 }
 
 func responseFromWriter(w http.ResponseWriter) (*Response, error) {

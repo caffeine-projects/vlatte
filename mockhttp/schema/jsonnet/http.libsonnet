@@ -46,6 +46,7 @@ local scheme = import './scheme.libsonnet';
     query(key, matcher):: { query: { [key]: matcher } },
     queries(key, matcher):: { queries: { [key]: matcher } },
     form(key, matcher):: { form: { [key]: matcher } },
+    formFile(field, pattern):: { form_file: { [field]: pattern } },
     body(matcher):: { body: matcher },
   },
 
@@ -58,6 +59,7 @@ local scheme = import './scheme.libsonnet';
     headerTemplate(map):: { header: map },
     body(b):: { body: b },
     bodyFile(f):: { body_file: f },
+    multipart(spec):: { multipart: spec },
     encoding(e):: { encoding: e },
     gzip():: self.encoding('gzip'),
 

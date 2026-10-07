@@ -127,6 +127,19 @@ func stdlibForm(contentType string, body []byte) (*http.Request, error) {
 	return r, r.ParseMultipartForm(int64(len(body)))
 }
 
+// goneFiles parses a form to temporary files and removes them, as net/http does once the request is done: its files
+// can't be opened any more.
+func goneFiles(t require.TestingT, form formModel) *http.Request {
+	contentType, body := form.encode(t)
+
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	r.Header.Set(HeaderContentType, contentType)
+	require.NoError(t, r.ParseMultipartForm(0)) // no memory for files: each goes to a temporary file
+	require.NoError(t, r.MultipartForm.RemoveAll())
+
+	return r
+}
+
 // post sends a body and reads the whole response.
 func post(t require.TestingT, url, contentType string, body []byte) (*http.Response, []byte) {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))

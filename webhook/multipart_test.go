@@ -3,9 +3,12 @@ package webhook_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -122,6 +125,7 @@ func TestWebHook_MultipartErrors(t *testing.T) {
 		{"a template that doesn't parse", brokenTemplate, "webhook: multipart body: multipart: parts[0]: body: template: body:1: unclosed action"},
 		{"a Content-Type header", &webhook.Args{URL: "http://localhost", Header: map[string]string{"content-type": "x"}, Multipart: mockhttp.MultipartMixed(mockhttp.NewPart())}, "webhook: a multipart body sets the Content-Type: remove the Content-Type header"},
 		{"a body that can't be written", &webhook.Args{URL: "http://localhost", Multipart: mockhttp.MultipartForm(mockhttp.NewPart())}, "webhook: multipart body: multipart: parts[0].name is required in a form-data part; name the form field"},
+		{"a Go part with a delay", &webhook.Args{URL: "http://localhost", Multipart: mockhttp.MultipartMixed(mockhttp.NewPart().Delay(time.Second))}, "webhook: multipart body: multipart: parts[0].delay can't be set: a body written at once doesn't pause; delays apply to replies only"},
 	}
 
 	for _, tc := range tests {
@@ -129,6 +133,72 @@ func TestWebHook_MultipartErrors(t *testing.T) {
 			require.EqualError(t, wh.Run(t.Context(), onComplete{params: tc.args}), tc.want)
 		})
 	}
+}
+
+func TestWebHook_RelativeFilesOpenFromTheMockFile(t *testing.T) {
+	// A mock file's webhooks open relative files from the mock file's directory, as its replies do, wherever the
+	// server runs: a whole body_file and a multipart part's alike. A document given as bytes has no directory, and
+	// opens them from the working directory, as global events do, whatever mock they complete.
+	got := make(chan string, 3)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got <- r.URL.Path + " " + string(b)
+	}))
+	t.Cleanup(target.Close)
+
+	wh, err := webhook.New()
+	require.NoError(t, err)
+
+	global := vlatte.EventConfig{Name: "webhook", Parameters: map[string]any{"method": "POST", "url": target.URL + "/global", "body_file": "body.txt"}}
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().OnCompleteListener("webhook", wh).
+		GlobalEvents(&vlatte.Events{OnComplete: vlatte.EventConfigs{global}}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	doc := fmt.Sprintf(`
+request: {method: PUT, path: /orders/42}
+response: {status: 204}
+on_complete:
+  - {name: webhook, parameters: {method: POST, url: "%[1]s/whole", body_file: body.txt}}
+  - {name: webhook, parameters: {method: POST, url: "%[1]s/part", multipart: {type: mixed, boundary: b, parts: [{body_file: part.txt}]}}}
+`, target.URL)
+
+	mocks := t.TempDir()
+	write(t, filepath.Join(mocks, "body.txt"), "body")
+	write(t, filepath.Join(mocks, "part.txt"), "part")
+	write(t, filepath.Join(mocks, "hook.mock.yaml"), doc)
+
+	t.Chdir(t.TempDir())
+	write(t, "body.txt", "cwd body")
+	write(t, "part.txt", "cwd part")
+
+	run := func(b vlatte.Builder[*mockhttp.Mock, *mockhttp.Server]) []string {
+		scope := m.MustMock(b)
+		defer scope.Clear(context.Background())
+
+		req, err := http.NewRequest(http.MethodPut, m.URL("/orders/42"), nil)
+		require.NoError(t, err)
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		sent := []string{<-got, <-got, <-got}
+		slices.Sort(sent)
+
+		return sent
+	}
+
+	require.Equal(t, []string{"/global cwd body", "/part --b\r\n\r\npart\r\n--b--\r\n", "/whole body"},
+		run(mockhttp.FromFile(filepath.Join(mocks, "hook.mock.yaml"))), "from the mock file's directory")
+	require.Equal(t, []string{"/global cwd body", "/part --b\r\n\r\ncwd part\r\n--b--\r\n", "/whole cwd body"},
+		run(mockhttp.FromBytes([]byte(doc), "yaml")), "from the working directory")
+}
+
+func write(t *testing.T, name, content string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(name, []byte(content), 0o600))
 }
 
 // received is a multipart form as a webhook target parsed it.

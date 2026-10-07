@@ -218,7 +218,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Context(),
 		mock,
 		func(cfg vlatte.EventConfig) vlatte.OnComplete {
-			return &OnComplete{m: mock, req: reqValues, res: res, kit: kit, args: cfg.Parameters}
+			return &OnComplete{m: mock, req: reqValues, res: res, kit: kit, args: cfg.Parameters, dir: cfg.Dir}
 		},
 	); err != nil {
 		h.lifecycle.OnWarning(reqValues, fmt.Errorf("on_complete: %w", err))

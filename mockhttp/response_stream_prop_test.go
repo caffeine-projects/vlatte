@@ -121,6 +121,7 @@ func TestPropStream_EachPauseFollowsAFlush(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, len(pauses), waits)
 		require.Equal(t, string(body), string(ew.readable(t, gzipped)))
+		require.Equal(t, "flush", ew.events[len(ew.events)-1], "the last part goes out now, not when the handler returns")
 	})
 }
 
@@ -179,6 +180,8 @@ func TestStream_ErrorsEndIt(t *testing.T) {
 		{"the rest", "", &failingWriter{failWrite: 3}, "broken pipe"},
 		{"a flush", "", &failingWriter{failFlush: true}, "flush failed"},
 		{"a gzipped segment", "gzip", &failingWriter{failWrite: 1}, "broken pipe"},
+		// gzip writes its header first, and holds the segment until it is flushed.
+		{"a gzipped segment, when it is flushed", "gzip", &failingWriter{failWrite: 2}, "broken pipe"},
 		{"a gzipped flush", "gzip", &failingWriter{failFlush: true}, "flush failed"},
 	}
 

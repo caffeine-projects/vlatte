@@ -42,15 +42,17 @@ func contentOf(t require.TestingT, s *Spec, p *PartSpec) []byte {
 	return b
 }
 
-// collides reports the first part whose body holds the boundary, or -1.
-func collides(t require.TestingT, s *Spec, boundary string) int {
-	for i, p := range s.Parts {
-		if bytes.Contains(contentOf(t, s, p), []byte("--"+boundary)) {
-			return i
-		}
-	}
+// lineStarts reports whether a line of b starts with "--" and the boundary. RFC 2046 keeps such lines out of
+// bodies, for a reader takes them for delimiters. It is the oracle of the encoder's check, written apart from it.
+func lineStarts(b []byte, boundary string) bool {
+	return slices.ContainsFunc(bytes.Split(b, []byte("\n")), func(line []byte) bool {
+		return bytes.HasPrefix(line, []byte("--"+boundary))
+	})
+}
 
-	return -1
+// collides reports the first part with a line that starts with the boundary, or -1.
+func collides(t require.TestingT, s *Spec, boundary string) int {
+	return slices.IndexFunc(s.Parts, func(p *PartSpec) bool { return lineStarts(contentOf(t, s, p), boundary) })
 }
 
 // wantContentType is the Content-Type a part is written with: the one set, else a default.
@@ -100,8 +102,8 @@ func TestPropEncode_GoReadsTheSpec(t *testing.T) {
 		}
 
 		body, _, err := e.Encode(nil)
-		if collides(t, s, boundary) >= 0 {
-			require.ErrorContains(t, err, "holds the boundary", "MP2")
+		if i := collides(t, s, boundary); i >= 0 {
+			require.ErrorContains(t, err, fmt.Sprintf("multipart: parts[%d]: a line of the body starts with the boundary", i), "MP2")
 			return
 		}
 
@@ -118,7 +120,7 @@ func TestPropEncode_GoReadsTheSpec(t *testing.T) {
 
 			kind, disposition, _ := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
 			switch {
-			case s.Subtype == "form-data":
+			case strings.EqualFold(s.Subtype, "form-data"):
 				require.Equal(t, "form-data", kind)
 			case p.Name != "" || p.Filename != "":
 				require.Equal(t, "attachment", kind)
@@ -140,7 +142,7 @@ func TestPropEncode_GoReadsTheSpec(t *testing.T) {
 		_, err = r.NextRawPart()
 		require.ErrorIs(t, err, io.EOF)
 
-		if s.Subtype == "form-data" {
+		if strings.EqualFold(s.Subtype, "form-data") {
 			requireForm(t, s, e.ContentType(), body)
 		}
 	})
@@ -184,25 +186,47 @@ func requireForm(t require.TestingT, s *Spec, contentType string, body []byte) {
 	require.Equal(t, files, got)
 }
 
-func TestPropEncode_ABodyHoldingTheBoundaryFails(t *testing.T) {
-	// MP2: a body can't hold its boundary: a reader would end the part there. Encode fails, naming the first part
-	// whose body holds it.
+func TestPropEncode_ALineStartingWithTheBoundaryFails(t *testing.T) {
+	// MP2: a line of a body can't start with the boundary, for a reader would end the part there; "--" and the
+	// boundary within a line are fine. A body known when the spec is checked fails the check, so a mock with it
+	// doesn't build; a body file fails when it is written. Either way, the error names the first such part.
 	dir := t.TempDir()
 
 	rapid.Check(t, func(t *rapid.T) {
 		s := genSpec(dir).Draw(t, "spec")
 		s.Boundary = genBoundary().Draw(t, "boundary")
 
-		p := s.Parts[rapid.IntRange(0, len(s.Parts)-1).Draw(t, "part")]
-		at := rapid.IntRange(0, len(p.Body)).Draw(t, "at")
-		p.Body = slices.Concat(p.Body[:at], []byte("--"+s.Boundary), p.Body[at:])
-		p.File = ""
+		i := rapid.IntRange(0, len(s.Parts)-1).Draw(t, "part")
+		content := contentOf(t, s, s.Parts[i])
+		at := rapid.IntRange(0, len(content)).Draw(t, "at")
+		before := rapid.SampledFrom([]string{"", "x", "\n", "\r\n"}).Draw(t, "before")
+		content = slices.Concat(content[:at], []byte(before+"--"+s.Boundary), content[at:])
+
+		p := s.Parts[i]
+		if rapid.Bool().Draw(t, "in a file") {
+			p.File = fmt.Sprintf("mp2-%d.bin", i)
+			require.NoError(t, os.WriteFile(filepath.Join(dir, p.File), content, 0o600))
+		} else {
+			p.File, p.Body, p.Kind = "", content, BodyBytes
+		}
+
+		static := slices.IndexFunc(s.Parts, func(p *PartSpec) bool { return p.File == "" && lineStarts(p.Body, s.Boundary) })
 
 		e, err := Compile(s)
+		if static >= 0 {
+			require.ErrorContains(t, err, fmt.Sprintf("multipart: parts[%d].body has a line that starts with the boundary", static))
+			return
+		}
+
 		require.NoError(t, err)
 
 		_, _, err = e.Encode(nil)
-		require.ErrorContains(t, err, fmt.Sprintf("multipart: parts[%d]: the body holds the boundary", collides(t, s, s.Boundary)))
+		if first := collides(t, s, s.Boundary); first >= 0 {
+			require.ErrorContains(t, err, fmt.Sprintf("multipart: parts[%d]: a line of the body starts with the boundary", first))
+			return
+		}
+
+		require.NoError(t, err)
 	})
 }
 
@@ -296,13 +320,25 @@ func TestPropEncode_TemplatesAreTheText(t *testing.T) {
 			return text
 		}
 
+		written := func(p *PartSpec) []byte {
+			if p.Kind == BodyText && p.File == "" {
+				return []byte(render(string(p.Body)))
+			}
+
+			return contentOf(t, s, p)
+		}
+
+		if s.Boundary != "" && slices.ContainsFunc(s.Parts, func(p *PartSpec) bool { return lineStarts(written(p), s.Boundary) }) {
+			return // MP2
+		}
+
 		e, err := Compile(s)
 		require.NoError(t, err)
 
 		_, params, err := mime.ParseMediaType(e.ContentType())
 		require.NoError(t, err)
 
-		if collides(t, s, params["boundary"]) >= 0 {
+		if slices.ContainsFunc(s.Parts, func(p *PartSpec) bool { return lineStarts(written(p), params["boundary"]) }) {
 			return // MP2
 		}
 
@@ -359,6 +395,11 @@ func TestPropDecode_ReadsWhatDocWrites(t *testing.T) {
 		require.NoError(t, err)
 
 		got, err := Decode(config.Value{Key: "multipart", Origin: "doc", Any: read})
+		if slices.ContainsFunc(s.Parts, func(p *PartSpec) bool { return p.File == "" && lineStarts(p.Body, s.Boundary) }) {
+			require.ErrorContains(t, err, "has a line that starts with the boundary", "MP2")
+			return
+		}
+
 		require.NoError(t, err)
 
 		got.Dir = s.Dir

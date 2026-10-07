@@ -1,7 +1,9 @@
 package mockhttp
 
 import (
+	"bytes"
 	json "encoding/json/v2"
+	"fmt"
 	"slices"
 	"time"
 
@@ -31,6 +33,7 @@ func NewMultipart(subtype string, parts ...*Part) *Multipart {
 	for i, p := range parts {
 		spec := p.spec
 		spec.Header = slices.Clone(p.spec.Header)
+		spec.Body = bytes.Clone(p.spec.Body)
 		mp.spec.Parts[i] = &spec
 	}
 
@@ -63,8 +66,13 @@ func (mp *Multipart) Template() *Multipart {
 }
 
 // Encode writes the whole body, with data for its templates, under a boundary drawn now when none is set. It
-// returns the body's Content-Type and bytes. Part delays apply to replies only.
+// returns the body's Content-Type and bytes. A body written at once can't pause, so a part with a delay is an error:
+// delays apply to replies only.
 func (mp *Multipart) Encode(data any) (contentType string, body []byte, err error) {
+	if i := slices.IndexFunc(mp.spec.Parts, func(p *mpart.PartSpec) bool { return p.Delay > 0 }); i >= 0 {
+		return "", nil, fmt.Errorf("multipart: parts[%d].delay can't be set: a body written at once doesn't pause; delays apply to replies only", i)
+	}
+
 	e, err := mpart.Compile(&mp.spec)
 	if err != nil {
 		return "", nil, err

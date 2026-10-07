@@ -152,16 +152,7 @@ func Decode(v config.Value) (*Spec, error) {
 		return nil, err
 	}
 
-	var problems []config.Problem
-	if err != nil {
-		cfgErr, ok := errors.AsType[*config.Error](err)
-		if !ok {
-			return nil, err
-		}
-
-		problems = cfgErr.Problems
-	}
-
+	problems := config.ProblemsOf(v, err)
 	if _, ok := obj["parts"]; !ok {
 		problems = append(problems, config.Problem{
 			Code: config.CodeMissingValue, Origin: v.Origin, Key: v.Key + ".parts",
@@ -196,12 +187,7 @@ func decodePart(v config.Value) (*PartSpec, error) {
 		return d.part, err
 	}
 
-	var problems []config.Problem
-	if cfgErr, ok := errors.AsType[*config.Error](err); ok {
-		problems = cfgErr.Problems
-	}
-
-	return d.part, &config.Error{Problems: append(problems, config.Problem{
+	return d.part, &config.Error{Problems: append(config.ProblemsOf(v, err), config.Problem{
 		Code: config.CodeConflict, Origin: v.Origin, Key: v.Key + ".body_file",
 		Message: fmt.Sprintf("%s.body_file is set with %s.body", v.Key, v.Key), Hint: "keep one of them",
 	})}

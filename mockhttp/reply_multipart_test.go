@@ -152,8 +152,8 @@ func TestReplyMultipart_Templates(t *testing.T) {
 }
 
 func TestReplyMultipart_ATemplateThatRendersTheBoundaryFails(t *testing.T) {
-	// A part's text can render its boundary, where a reader would end the part. The response fails, naming the part,
-	// instead of serving a body that reads back as other parts.
+	// A part's text can render a line that starts with its boundary, where a reader would end the part. The response
+	// fails, naming the part, instead of serving a body that reads back as other parts. Within a line, it's fine.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -162,12 +162,12 @@ func TestReplyMultipart_ATemplateThatRendersTheBoundaryFails(t *testing.T) {
 		NewPart().BodyText(`{{ .Request.URL.Query.Get "q" }}`),
 	).Boundary("b").Template())))
 
-	res, _ := fetch(t, m.URL("/echo?q=ok"))
+	res, _ := fetch(t, m.URL("/echo?q=a--b"))
 	require.Equal(t, http.StatusOK, res.StatusCode)
 
 	res, body := fetch(t, m.URL("/echo?q=--b"))
 	require.Equal(t, StatusNoMatch, res.StatusCode)
-	require.Contains(t, string(body), `multipart: parts[0]: the body holds the boundary "b", so the part would end there`)
+	require.Contains(t, string(body), `multipart: parts[0]: a line of the body starts with the boundary "b", which would end the part there`)
 }
 
 func TestReplyMultipart_Gzip(t *testing.T) {
@@ -260,6 +260,26 @@ func TestMultipart_Encode(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "1", r.PostForm.Get("a"))
 	require.Equal(t, "f.txt", r.MultipartForm.File["f"][0].Filename)
+}
+
+func TestMultipart_EncodeCantPause(t *testing.T) {
+	// A body written at once, as a webhook or a test sends it, can't pause: a part with a delay is an error, not a
+	// delay dropped without a word.
+	_, _, err := MultipartMixed(NewPart().BodyText("a"), NewPart().BodyText("b").Delay(time.Second)).Encode(nil)
+	require.EqualError(t, err, "multipart: parts[1].delay can't be set: a body written at once doesn't pause; delays apply to replies only")
+}
+
+func TestMultipart_PartsAreCopied(t *testing.T) {
+	// NewMultipart copies its parts, their bodies too: a caller that reuses its buffer doesn't change the bodies
+	// written later, such as a webhook's at each send.
+	buf := []byte("first")
+	mp := MultipartMixed(NewPart().Body(buf)).Boundary("b")
+
+	copy(buf, "later")
+
+	_, body, err := mp.Encode(nil)
+	require.NoError(t, err)
+	require.Contains(t, string(body), "\r\n\r\nfirst\r\n")
 }
 
 // fetch sends a GET and reads the whole response.

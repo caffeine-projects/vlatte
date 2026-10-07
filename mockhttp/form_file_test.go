@@ -186,6 +186,17 @@ func TestFormFile_Describe(t *testing.T) {
 	}, request["form_file"])
 }
 
+func TestFormFile_AFileThatCantBeReadFailsTheMatch(t *testing.T) {
+	// A file that can't be read, such as a temporary file already removed, fails the match and says why, rather than
+	// passing for an empty file.
+	r := goneFiles(t, formModel{files: []formFile{{field: "f", filename: "a.txt", body: []byte("hello")}}})
+
+	m := &fileMatcher{pattern: *FileWith().Body(match.StrictEqual("hello"))}
+	ok, err := m.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), r.MultipartForm.File["f"]))
+	require.False(t, ok)
+	require.ErrorContains(t, err, "form_file: reading a.txt: ")
+}
+
 func TestFormFile_MatcherErrorsStopTheSearch(t *testing.T) {
 	// A matcher of user code that fails stops the search, as anywhere else, naming the condition.
 	logs := &logBuffer{}

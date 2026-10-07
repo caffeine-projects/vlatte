@@ -35,6 +35,10 @@ func (f EventFunc[T]) Run(ctx context.Context, args T) error {
 type EventConfig struct {
 	Name       string
 	Parameters Parameters
+
+	// Dir is where relative files of the parameters open from, such as the directory of the mock file that defines
+	// the event. "" is the working directory.
+	Dir string
 }
 
 type EventConfigs []EventConfig

@@ -6,6 +6,8 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,6 +32,41 @@ func TestEncode_HeaderValuesLoseOuterSpaces(t *testing.T) {
 
 	_, err = io.ReadAll(part)
 	require.NoError(t, err)
+}
+
+func TestEncode_FormDataInAnyCase(t *testing.T) {
+	// Subtypes ignore case: Form-Data parts are form-data parts, which net/http reads as the form's fields and files.
+	// Written as attachments, they would be dropped.
+	e, err := Compile(&Spec{Subtype: "Form-Data", Parts: []*PartSpec{
+		{Name: "title", Body: []byte("Holiday"), Kind: BodyText},
+		{Name: "photo", Filename: "a.png", Body: []byte("PNG")},
+	}})
+	require.NoError(t, err)
+
+	body, _, err := e.Encode(nil)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", e.ContentType())
+	require.NoError(t, req.ParseMultipartForm(int64(len(body))))
+	require.Equal(t, "Holiday", req.PostFormValue("title"))
+	require.Equal(t, "a.png", req.MultipartForm.File["photo"][0].Filename)
+}
+
+func TestEncode_TheBoundaryWithinALine(t *testing.T) {
+	// A delimiter starts a line, so "--" and the boundary within a line don't end a part: the body reads back whole.
+	e, err := Compile(&Spec{Subtype: "mixed", Boundary: "b", Parts: []*PartSpec{{Body: []byte("a--b c\r\nd --b--"), Kind: BodyText}}})
+	require.NoError(t, err)
+
+	body, _, err := e.Encode(nil)
+	require.NoError(t, err)
+
+	part, err := multipart.NewReader(bytes.NewReader(body), "b").NextRawPart()
+	require.NoError(t, err)
+
+	got, err := io.ReadAll(part)
+	require.NoError(t, err)
+	require.Equal(t, "a--b c\r\nd --b--", string(got))
 }
 
 func TestEncode_TemplatedBodyFileName(t *testing.T) {

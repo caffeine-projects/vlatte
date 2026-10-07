@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -63,7 +64,8 @@ func TestSteps_ServeABodyFileLargerThanOneWrite(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/file").Step(appendStep("")).Reply(OK().BodyFile(file)))
+	// The reply's headers reach the client through the steps too.
+	m.MustMock(Getf("/file").Step(appendStep("")).Reply(OK().Header("X-Id", "7").BodyFile(file)))
 
 	res, err := http.Get(m.URL("/file"))
 	require.NoError(t, err)
@@ -73,7 +75,26 @@ func TestSteps_ServeABodyFileLargerThanOneWrite(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 
 	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "7", res.Header.Get("X-Id"))
 	require.Equal(t, body, got)
+}
+
+// failingStep is a step that fails every write.
+type failingStep struct{}
+
+func (failingStep) Handle(context.Context, []byte, vlatte.Next) (int, error) {
+	return 0, errors.New("step: failed")
+}
+
+func TestTopResponseWriter_AFailingStepFailsTheWrite(t *testing.T) {
+	// A write a step fails writes nothing, and says why: io.Copy and Render stop there.
+	rec := httptest.NewRecorder()
+	w := &topResponseWriter{ctx: t.Context(), steps: []vlatte.Step{failingStep{}}, rw: rec}
+
+	n, err := w.Write([]byte("a"))
+	require.EqualError(t, err, "step: failed")
+	require.Zero(t, n)
+	require.Empty(t, rec.Body.String())
 }
 
 func TestSteps_ConcurrentRequestsKeepTheirOwnResponse(t *testing.T) {

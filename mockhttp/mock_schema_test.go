@@ -142,6 +142,8 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"multipart and a Content-Type header template", ok + "response: {header_template: {Content-Type: x}, multipart: {type: mixed, parts: [{}]}}\n", []want{{config.CodeConflict, "response.header_template.Content-Type", "is set with response.multipart", ""}}},
 		{"multipart without a type", ok + "response: {multipart: {parts: [{}]}}\n", []want{{config.CodeMissingValue, "response.multipart.type", "response.multipart.type is required", "name the subtype"}}},
 		{"multipart without parts", ok + "response: {multipart: {type: mixed}}\n", []want{{config.CodeMissingValue, "response.multipart.parts", "response.multipart.parts is required", "add at least one part"}}},
+		// json/v2 words the rest of the message at random: "cannot" or "unable to".
+		{"part body JSON can't write", ok + "response: {multipart: {type: mixed, parts: [{body: .nan}]}}\n", []want{{config.CodeInvalidValue, "response.multipart.parts[0].body", `response.multipart.parts[0].body="NaN": json: `, ""}}},
 		{"form-data part without a name", ok + "response: {multipart: {type: form-data, parts: [{body: x}]}}\n", []want{{config.CodeMissingValue, "response.multipart.parts[0].name", "is required in a form-data part", ""}}},
 		{"multipart in a sequence", ok + "response_sequence: {responses: [{multipart: {type: 'multipart/mixed', parts: [{}]}}]}\n", []want{{config.CodeInvalidValue, "response_sequence.responses[0].multipart.type", `must be a subtype, not "multipart/mixed"`, "write the subtype only"}}},
 		{"template that isn't an object", ok + "response: {template: 5}\n", []want{{config.CodeInvalidValue, "response.template", "must be an object", "its keys are enabled, data"}}},

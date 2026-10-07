@@ -125,10 +125,11 @@ func TestPropForms_BrokenBodiesNeverMatchAPartialForm(t *testing.T) {
 
 		defer scope.Clear(context.Background())
 
-		// The oracle is net/http's parse, except that a body without its close delimiter keeps no field:
-		// ReadForm keeps the parts before some cuts (TestForms_ACutFormKeepsNoField).
+		// The oracle is net/http's parse, except that a body without a line that starts with its close delimiter
+		// keeps no field: ReadForm keeps the parts before some cuts (TestForms_ACutFormKeepsNoField).
 		r, parseErr := stdlibForm(contentType, body)
-		if !bytes.Contains(body, []byte("--"+boundaryOf(t, contentType)+"--")) {
+		closing := []byte("--" + boundaryOf(t, contentType) + "--")
+		if !slices.ContainsFunc(bytes.Split(body, []byte("\n")), func(line []byte) bool { return bytes.HasPrefix(line, closing) }) {
 			parseErr = errFormCut
 		}
 

@@ -192,7 +192,7 @@
       },
       "required": [ "type", "parts" ],
       "additionalProperties": false,
-      "if": { "properties": { "type": { "const": "form-data" } }, "required": [ "type" ] },
+      "if": { "properties": { "type": { "pattern": "^[Ff][Oo][Rr][Mm]-[Dd][Aa][Tt][Aa]$" } }, "required": [ "type" ] },
       "then": { "properties": { "parts": { "items": { "required": [ "name" ] } } } }
     },
     "multipart_part": {

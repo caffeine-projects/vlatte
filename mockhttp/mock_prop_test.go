@@ -119,7 +119,7 @@ func replyDiff(want replyModel, method string, res *http.Response, body []byte) 
 	switch {
 	case want.multipart != nil:
 		mediaType, _, err := mime.ParseMediaType(res.Header.Get(HeaderContentType))
-		if err != nil || mediaType != "multipart/"+want.multipart.subtype {
+		if err != nil || mediaType != "multipart/"+strings.ToLower(want.multipart.subtype) {
 			return fmt.Sprintf("content type %q, want multipart/%s", res.Header.Get(HeaderContentType), want.multipart.subtype)
 		}
 

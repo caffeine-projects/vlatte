@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"bytes"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -181,6 +182,107 @@ func TestForms_ACutFormKeepsNoField(t *testing.T) {
 	r, err := stdlibForm(contentType, body[:cuts[0].at])
 	require.NoError(t, err)
 	require.Equal(t, "1", r.PostForm.Get("a"), "Go keeps the field before a cut after a delimiter line")
+}
+
+func TestForms_ACutFormWithItsDelimiterInAPart(t *testing.T) {
+	// The content of a part may hold "--b--": within a line it isn't a delimiter, and Go's reader of a CRLF body
+	// skips it after a bare LF too. A body cut after it, inside the headers of a later part, is still cut. A body
+	// shorter than its Content-Length is cut; without a length, a body is whole only when the close delimiter starts a
+	// line. Either way it keeps no field.
+	tests := []struct {
+		name    string
+		value   string
+		chunked bool
+	}{
+		{"within a line", "x--b--y", false},
+		{"within a line, chunked", "x--b--y", true},
+		{"after a bare LF", "x\n--b--\ny", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+
+			w := multipart.NewWriter(&buf)
+			require.NoError(t, w.SetBoundary("b"))
+			require.NoError(t, w.WriteField("a", tc.value))
+
+			fw, err := w.CreateFormFile("f", "f.bin")
+			require.NoError(t, err)
+
+			_, err = fw.Write([]byte("file"))
+			require.NoError(t, err)
+			require.NoError(t, w.Close())
+
+			body := buf.Bytes()
+			cut := bytes.Index(body, []byte("filename")) // inside the headers of the file part
+
+			// Go keeps the field before such a cut.
+			r, err := stdlibForm(w.FormDataContentType(), body[:cut])
+			require.NoError(t, err)
+			require.Equal(t, tc.value, r.PostForm.Get("a"))
+
+			logs := &logBuffer{}
+			logger := zerolog.New(logs)
+
+			m := MustNew(Setup().Logger(&logger).MaxBodyParsingLimit(int64(cut)))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(Postf("/form").FormField("a", match.StrictEqual(tc.value)).Reply(OK()))
+
+			var reader io.Reader = bytes.NewReader(body)
+			if tc.chunked {
+				reader = io.MultiReader(reader) // the client can't know the length, so it sends the body chunked
+			}
+
+			req, err := http.NewRequest(http.MethodPost, m.URL("/form"), reader)
+			require.NoError(t, err)
+			req.Header.Set(HeaderContentType, w.FormDataContentType())
+
+			res, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, StatusNoMatch, res.StatusCode)
+			require.Contains(t, logs.String(), "request_body_parser")
+		})
+	}
+}
+
+func TestForms_ABoundaryThatNamesAMediaType(t *testing.T) {
+	// A boundary may hold a media type, quoted. The text and urlencoded parsers took such a form for theirs when they
+	// read the Content-Type as text, and it had no fields and no files.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scoped := m.MustMock(Postf("/upload").
+		FormField("title", match.StrictEqual("Holiday")).
+		FormFile("photo", FileWith().Filename(match.Equal("a.png"))).
+		Reply(OK()))
+
+	boundaries := []string{MIMEApplicationJSON, MIMETextPlain, MIMEFormURLEncoded}
+	for _, boundary := range boundaries {
+		t.Run(boundary, func(t *testing.T) {
+			var body bytes.Buffer
+
+			w := multipart.NewWriter(&body)
+			require.NoError(t, w.SetBoundary(boundary))
+			require.NoError(t, w.WriteField("title", "Holiday"))
+
+			fw, err := w.CreateFormFile("photo", "a.png")
+			require.NoError(t, err)
+
+			_, err = fw.Write([]byte("PNG"))
+			require.NoError(t, err)
+			require.NoError(t, w.Close())
+
+			res, _ := post(t, m.URL("/upload"), w.FormDataContentType(), body.Bytes())
+			require.Equal(t, http.StatusOK, res.StatusCode, "Content-Type: %s", w.FormDataContentType())
+		})
+	}
+
+	scoped.AssertNumberOfCalls(t, int64(len(boundaries)))
 }
 
 func TestBuilder_ContentTypeIgnoresParameters(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 )
 
 // errFormCut says a multipart form body was cut short, as MaxBodyParsingLimit does.
-var errFormCut = errors.New("multipart: the body has no close delimiter: it was cut short")
+var errFormCut = errors.New("multipart: the body was cut short: it is shorter than its Content-Length, or has no close delimiter")
 
 func parseRequest(r *http.Request, options *Server) (*RequestValues, []byte, error) {
 	parsedURL, urlSegments := parseURL(r, options.URL())
@@ -108,11 +108,11 @@ func parseRequestBody(app *Server, r *http.Request) (parsedBody any, rawBody []b
 	return nil, nil, nil
 }
 
-// formURLEncodedParser parses requests with content type header containing "application/x-www-form-urlencoded"
+// formURLEncodedParser parses requests whose media type is application/x-www-form-urlencoded.
 type formURLEncodedParser struct{}
 
 func (parser *formURLEncodedParser) CanParse(content string, _ *http.Request) bool {
-	return strings.Contains(content, MIMEFormURLEncoded)
+	return mediaType(content) == MIMEFormURLEncoded
 }
 
 func (parser *formURLEncodedParser) Parse(body []byte, r *http.Request) (any, error) {
@@ -136,10 +136,10 @@ func (parser *multipartFormParser) Parse(body []byte, r *http.Request) (any, err
 	defer restoreBody(r, body)
 
 	// multipart.Reader.ReadForm takes a body cut right after a delimiter line, or inside the headers of a part, for a
-	// whole one, and keeps the parts before the cut. Only a whole body has its close delimiter: without it, the form
-	// keeps no field, rather than some of them.
+	// whole one, and keeps the parts before the cut. A body MaxBodyParsingLimit cut is shorter than its
+	// Content-Length, and only a whole body has its close delimiter: a cut form keeps no field, rather than some.
 	_, params, _ := mime.ParseMediaType(r.Header.Get(HeaderContentType))
-	if !bytes.Contains(body, []byte("--"+params["boundary"]+"--")) {
+	if r.ContentLength > int64(len(body)) || !closes(body, params["boundary"]) {
 		return nil, errFormCut
 	}
 
@@ -151,17 +151,25 @@ func (parser *multipartFormParser) Parse(body []byte, r *http.Request) (any, err
 	return r.PostForm, nil
 }
 
+// closes reports whether body has the close delimiter of boundary at the start of a line, as a whole multipart body
+// has. Within a line, "--boundary--" is content.
+func closes(body []byte, boundary string) bool {
+	delimiter := []byte("--" + boundary + "--")
+	return bytes.HasPrefix(body, delimiter) || bytes.Contains(body, append([]byte("\n"), delimiter...))
+}
+
 // restoreBody puts body back into r.Body, which parsing a form reads to the end: proxy, forward and echo replies
 // send r.Body.
 func restoreBody(r *http.Request, body []byte) {
 	r.Body = io.NopCloser(bytes.NewReader(body))
 }
 
-// plainTextParser parses requests with content type header containing "text/plain"
+// plainTextParser parses requests whose media type is text/plain or application/json, as text.
 type plainTextParser struct{}
 
 func (parser *plainTextParser) CanParse(content string, _ *http.Request) bool {
-	return strings.Contains(content, MIMETextPlain) || strings.Contains(content, MIMEApplicationJSON)
+	t := mediaType(content)
+	return t == MIMETextPlain || t == MIMEApplicationJSON
 }
 
 func (parser *plainTextParser) Parse(body []byte, _ *http.Request) (any, error) {

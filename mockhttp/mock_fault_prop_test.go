@@ -83,7 +83,8 @@ var _mockFaults = []mockFault{
 		withMultipart(doc)["params"] = map[string]any{"boundary": "x"}
 	}},
 	{"multipart", config.CodeInvalidValue, "response.multipart.parts", func(doc map[string]any) { withMultipart(doc)["parts"] = []any{} }},
-	{"multipart", config.CodeMissingValue, "response.multipart.parts[0].name", func(doc map[string]any) { withMultipart(doc)["type"] = "form-data" }},
+	// Subtypes ignore case, in the decoder and in the editor schema.
+	{"multipart", config.CodeMissingValue, "response.multipart.parts[0].name", func(doc map[string]any) { withMultipart(doc)["type"] = "Form-Data" }},
 	{"multipart", config.CodeUnknownKey, "response.multipart.parts[0].nmae", func(doc map[string]any) {
 		withMultipart(doc)["parts"] = []any{map[string]any{"nmae": "x"}}
 	}},
@@ -93,6 +94,11 @@ var _mockFaults = []mockFault{
 	{"multipart", config.CodeConflict, "response.multipart", func(doc map[string]any) {
 		withMultipart(doc)
 		sub(doc, "response")["body"] = "x"
+	}},
+	{"multipart", config.CodeInvalidValue, "response.multipart.parts[0].body", func(doc map[string]any) {
+		multipart := withMultipart(doc)
+		multipart["boundary"] = "b"
+		multipart["parts"] = []any{map[string]any{"body": "a\n--b"}}
 	}},
 }
 
@@ -107,10 +113,10 @@ func withMultipart(doc map[string]any) map[string]any {
 	return multipart
 }
 
-// schemaBlind reports the faults the editor schema can't express: matcher arguments are the decoder's alone, and
-// no JSON Schema can tell whether a file exists.
+// schemaBlind reports the faults the editor schema can't express: matcher arguments are the decoder's alone, and no
+// JSON Schema can tell whether a file exists, or whether a line of a body starts with the boundary.
 func schemaBlind(f mockFault) bool {
-	return f.area == "matcher" || f.code == config.CodeFileNotFound
+	return f.area == "matcher" || f.code == config.CodeFileNotFound || f.key == "response.multipart.parts[0].body"
 }
 
 // sub returns the object under key, creating it.

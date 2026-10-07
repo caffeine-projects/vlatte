@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"pgregory.net/rapid"
 )
 
-// _genSubtypes are the subtypes specs draw, besides random tokens.
-var _genSubtypes = []string{"form-data", "mixed", "related", "alternative", "x-mixed-replace"}
+// _genSubtypes are the subtypes specs draw, besides random tokens. Subtypes ignore case.
+var _genSubtypes = []string{"form-data", "Form-Data", "FORM-DATA", "mixed", "related", "alternative", "x-mixed-replace"}
 
 // genBoundary draws a boundary that Writer.SetBoundary takes: 1 to 70 of its characters, not ending in a space.
 func genBoundary() *rapid.Generator[string] {
@@ -144,7 +146,12 @@ func genSpec(dir string) *rapid.Generator[*Spec] {
 		}
 
 		for i := range rapid.IntRange(1, 8).Draw(t, "parts") {
-			s.Parts = append(s.Parts, genPart(s.Subtype == "form-data", dir, i).Draw(t, "part"))
+			s.Parts = append(s.Parts, genPart(strings.EqualFold(s.Subtype, "form-data"), dir, i).Draw(t, "part"))
+		}
+
+		// A body with a line that starts with the boundary doesn't check clean: MP2 covers it.
+		if slices.ContainsFunc(s.Parts, func(p *PartSpec) bool { return p.File == "" && lineStarts(p.Body, s.Boundary) }) {
+			s.Boundary = ""
 		}
 
 		return s

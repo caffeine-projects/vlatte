@@ -271,8 +271,9 @@ func (r *recorder) process(arg recArgs) error {
 		switch {
 		case v == "":
 		case form != nil && strings.EqualFold(h, HeaderContentType):
-			// A form's boundary changes with every request, and so does its length: a recorded form matches any.
-			requestHeaders[h] = []any{"hasPrefix", MIMEMultipartForm + ";"}
+			// A form's boundary changes with every request, and so does its length: a recorded form matches any, by
+			// its media type, as Builder.ContentType(MIMEMultipartForm) does. A document holds int64, not int.
+			requestHeaders[h] = []any{"split", ";", []any{"item", int64(0), []any{"trim", []any{"eqi", MIMEMultipartForm}}}}
 		case form != nil && strings.EqualFold(h, HeaderContentLength):
 		default:
 			requestHeaders[h] = v

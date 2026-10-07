@@ -360,6 +360,54 @@ func TestRecorder_Regressions(t *testing.T) {
 	}
 }
 
+func TestRecorder_AFormMatchesByMediaType(t *testing.T) {
+	// A recorded upload matches the media type of a Content-Type, as Builder.ContentType does: its case, the spaces
+	// around it and the boundary don't matter, as they don't to a server.
+	dir := t.TempDir()
+
+	rec := MustNew(Setup().Silent().Record(RecordDir(dir)))
+	rec.MustStart()
+	t.Cleanup(rec.Close)
+	rec.MustMock(AnyMethod().Reply(OK()))
+
+	send(t, rec.URL(), requestSpec{method: http.MethodPost, path: "/x", multipart: true, form: url.Values{"a": {"1"}}})
+	rec.StopRecording()
+
+	files, err := filepath.Glob(filepath.Join(dir, "*.mock.*"))
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+
+	replay := MustNew(Setup().Silent())
+	replay.MustStart()
+	t.Cleanup(replay.Close)
+	replay.MustMock(FromFile(files[0]))
+
+	contentType, body := formModel{fields: []formField{{name: "a", value: "1"}}}.encode(t)
+	boundary := boundaryOf(t, contentType)
+
+	tests := []struct {
+		contentType string
+		status      int
+	}{
+		{"Multipart/Form-Data; boundary=" + boundary, http.StatusOK},
+		{"multipart/form-data ; boundary=" + boundary, http.StatusOK},
+		{"multipart/mixed; boundary=" + boundary, StatusNoMatch},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.contentType, func(t *testing.T) {
+			res, _ := post(t, replay.URL("/x"), tc.contentType, body)
+			require.Equal(t, tc.status, res.StatusCode)
+		})
+	}
+}
+
+func TestRecorder_AFormWithFilesItCantReadKeepsItsBody(t *testing.T) {
+	// A form whose files can't be read, such as temporary files already removed, isn't recorded as a form: the
+	// recording keeps the body the request came with.
+	require.Nil(t, formOf(goneFiles(t, formModel{files: []formFile{{field: "f", filename: "a.txt", body: []byte("x")}}})))
+}
+
 func TestRecorder_BodyFiles(t *testing.T) {
 	// A body file was named after the request's content type, so a JSON response to a GET was saved as .bin, and an
 	// image sent back to a POST as text; a gzip body went to the file still compressed, under that name.
@@ -483,13 +531,32 @@ func TestRecorder_LogsWhatItCantRecord(t *testing.T) {
 
 	brokenOff := gz.Bytes()[:gz.Len()-8]
 
+	// A file that isn't UTF-8 goes to a body file named after the request, its form and the field.
+	binaryForm := formModel{files: []formFile{{field: "f", filename: "f.bin", body: []byte{0xff, 0xfe}}}}
+
 	tests := []struct {
 		name  string
 		dir   func(t *testing.T) string
 		reply *Reply
-		body  *string // a request body, sent with POST
+		body  *string    // a request body, sent with POST
+		form  *formModel // a multipart form, sent with POST
 		cause string
 	}{
+		{
+			name: "a form body file it can't write",
+			dir: func(t *testing.T) string {
+				r, err := stdlibForm(binaryForm.encode(t))
+				require.NoError(t, err)
+
+				dir := t.TempDir()
+				require.NoError(t, os.Mkdir(filepath.Join(dir, "POST-x--"+formOf(r).hash()+"--f-0.bin"), 0o755))
+
+				return dir
+			},
+			reply: OK().PlainText("ok"),
+			form:  &binaryForm,
+			cause: "is a directory",
+		},
 		{
 			name: "a body that isn't gzip",
 			dir:  func(t *testing.T) string { return t.TempDir() },
@@ -547,6 +614,10 @@ func TestRecorder_LogsWhatItCantRecord(t *testing.T) {
 			req := requestSpec{method: http.MethodGet, path: "/x", header: http.Header{"Accept-Encoding": {"gzip"}}}
 			if tc.body != nil {
 				req.method, req.body = http.MethodPost, tc.body
+			}
+
+			if tc.form != nil {
+				req.method, req.multipart, req.files = http.MethodPost, true, tc.form.files
 			}
 
 			send(t, rec.URL(), req)

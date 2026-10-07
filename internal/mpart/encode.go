@@ -28,7 +28,7 @@ type Pause struct {
 
 // Encoder writes the body of a Spec. It is safe for concurrent use.
 type Encoder struct {
-	subtype     string
+	formData    bool
 	boundary    string
 	contentType string
 	dir         string
@@ -74,7 +74,7 @@ func Compile(s *Spec) (*Encoder, error) {
 		return nil, errors.New("multipart: " + strings.Join(texts, "; "))
 	}
 
-	e := &Encoder{subtype: s.Subtype, boundary: s.Boundary, dir: s.Dir, parts: make([]compiledPart, len(s.Parts))}
+	e := &Encoder{formData: s.formData(), boundary: s.Boundary, dir: s.Dir, parts: make([]compiledPart, len(s.Parts))}
 	if e.boundary == "" {
 		e.boundary = multipart.NewWriter(io.Discard).Boundary()
 	}
@@ -147,17 +147,16 @@ func (e *Encoder) ContentType() string {
 func (e *Encoder) Encode(data any) ([]byte, []Pause, error) {
 	var buf bytes.Buffer
 
+	// The writer only fails when writing does, and writes to a bytes.Buffer don't. Compile checked the boundary.
 	w := multipart.NewWriter(&buf)
-	if err := w.SetBoundary(e.boundary); err != nil {
-		return nil, nil, fmt.Errorf("multipart: %w", err)
-	}
+	_ = w.SetBoundary(e.boundary)
 
 	var pauses []Pause
 
 	for i := range e.parts {
 		p := &e.parts[i]
 
-		header, err := p.headers(data, e.subtype == "form-data")
+		header, err := p.headers(data, e.formData)
 		if err != nil {
 			return nil, nil, fmt.Errorf("multipart: parts[%d]: %w", i, err)
 		}
@@ -167,8 +166,8 @@ func (e *Encoder) Encode(data any) ([]byte, []Pause, error) {
 			return nil, nil, fmt.Errorf("multipart: parts[%d]: %w", i, err)
 		}
 
-		if bytes.Contains(body, []byte("--"+e.boundary)) {
-			return nil, nil, fmt.Errorf("multipart: parts[%d]: the body holds the boundary %q, so the part would end there", i, e.boundary)
+		if startsALine(body, e.boundary) {
+			return nil, nil, fmt.Errorf("multipart: parts[%d]: a line of the body starts with the boundary %q, which would end the part there", i, e.boundary)
 		}
 
 		// CreatePart writes the delimiter line, "--boundary" after a line break unless it is the first part.
@@ -177,23 +176,15 @@ func (e *Encoder) Encode(data any) ([]byte, []Pause, error) {
 			at += len("\r\n")
 		}
 
-		pw, err := w.CreatePart(header)
-		if err != nil {
-			return nil, nil, fmt.Errorf("multipart: parts[%d]: %w", i, err)
-		}
-
+		pw, _ := w.CreatePart(header)
 		if p.delay > 0 {
 			pauses = append(pauses, Pause{At: at, Delay: p.delay})
 		}
 
-		if _, err := pw.Write(body); err != nil {
-			return nil, nil, fmt.Errorf("multipart: parts[%d]: %w", i, err)
-		}
+		_, _ = pw.Write(body)
 	}
 
-	if err := w.Close(); err != nil {
-		return nil, nil, fmt.Errorf("multipart: %w", err)
-	}
+	_ = w.Close()
 
 	return buf.Bytes(), pauses, nil
 }

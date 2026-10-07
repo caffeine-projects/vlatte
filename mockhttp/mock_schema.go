@@ -178,7 +178,7 @@ var _mockSchema = config.NewSchema(
 	},
 	mockField{
 		Key: "on_complete", Kind: config.Any, Usage: "Events to run after the mock replies: a list of {name, parameters}.",
-		Set: func(d *mockDef, v config.Value) error { return setEvents(&d.events, v) },
+		Set: func(d *mockDef, v config.Value) error { return setEvents(&d.events, d.dir, v) },
 	},
 	mockField{
 		Key: "request.scheme", Kind: config.Any, Usage: "Scheme to match: text, or a matcher list.",
@@ -709,12 +709,7 @@ func decodeFilePattern(d *mockDef, field string, v config.Value) error {
 
 	err := _filePatternSchema.Decode(&def, v)
 	if def.hasBody && def.bodyFile != "" {
-		var problems []config.Problem
-		if cfgErr, ok := errors.AsType[*config.Error](err); ok {
-			problems = cfgErr.Problems
-		}
-
-		return &config.Error{Problems: append(problems, conflicts(v.Origin, v.Key, []string{"body", "body_file"})...)}
+		return &config.Error{Problems: append(config.ProblemsOf(v, err), conflicts(v.Origin, v.Key, []string{"body", "body_file"})...)}
 	}
 
 	if err != nil {
@@ -762,9 +757,9 @@ func withMatcher(v config.Value, set func(vlatte.Matcher) *FilePattern) error {
 }
 
 // setEvents decodes a list of on_complete events, each naming its listener.
-func setEvents(events *[]vlatte.EventConfig, v config.Value) error {
+func setEvents(events *[]vlatte.EventConfig, dir string, v config.Value) error {
 	return config.Items(v, func(item config.Value) error {
-		var e vlatte.EventConfig
+		e := vlatte.EventConfig{Dir: dir}
 		if err := _eventSchema.Decode(&e, item); err != nil {
 			return err
 		}
