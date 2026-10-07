@@ -33,6 +33,8 @@ func TestBuilder_ID(t *testing.T) {
 
 func TestPropBuilder_IDRule(t *testing.T) {
 	// M7: an ID is accepted iff it follows the rule, and it is kept exactly as given.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 
 	rapid.Check(t, func(t *rapid.T) {

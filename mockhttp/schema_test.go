@@ -102,6 +102,8 @@ func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 func TestPropJSONSchema_AgreesWithTheDecoder(t *testing.T) {
 	// M11: the editor schema accepts every mock the decoder builds, and rejects the faults it can express.
 	// The arguments of matchers are the decoder's alone.
+	t.Parallel()
+
 	schema, _ := loadJSONSchema(t)
 
 	expressible := slices.DeleteFunc(slices.Clone(_mockFaults), schemaBlind)
@@ -372,6 +374,8 @@ func genDurationText() *rapid.Generator[string] {
 func TestPropJSONSchema_DurationPattern(t *testing.T) {
 	// M17: the editor's duration pattern, the decoder and time.ParseDuration agree on every string:
 	// it is an unsigned Go duration, or it is wrong for all three.
+	t.Parallel()
+
 	_, raw := loadJSONSchema(t)
 
 	defs, _ := raw["$defs"].(map[string]any)

@@ -162,6 +162,8 @@ func TestPropMockFile_ServesItsModel(t *testing.T) {
 	// within repeat; a request that differs in any one matched part gets the no-match status.
 	// M18: that holds for multipart forms too: their fields, and the filename, content type and content of a file,
 	// whatever boundary the client picks.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -223,6 +225,8 @@ func TestPropMockFile_ServesItsModel(t *testing.T) {
 
 func TestPropMockFile_FormatsBuildTheSameMock(t *testing.T) {
 	// M1: the same mock written as JSON and as YAML builds the same mock.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -248,6 +252,8 @@ func TestPropMockFile_FormatsBuildTheSameMock(t *testing.T) {
 
 func TestPropMockFile_BuildIsRepeatable(t *testing.T) {
 	// M5: a builder builds a new mock each time, equal to the last, with its own state.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 
 	rapid.Check(t, func(t *rapid.T) {
@@ -271,6 +277,8 @@ func TestPropMockFile_BuildIsRepeatable(t *testing.T) {
 
 func TestPropMockFile_DurationsAreTheSameEverywhere(t *testing.T) {
 	// M6: delay and proxy.timeout read the same value the same way: integers are milliseconds (C2).
+	t.Parallel()
+
 	rapid.Check(t, func(t *rapid.T) {
 		var raw any = rapid.Int64Range(0, 1<<40).Draw(t, "ms")
 		if rapid.Bool().Draw(t, "as a Go duration") {
@@ -297,6 +305,8 @@ func TestPropMockFile_DurationsAreTheSameEverywhere(t *testing.T) {
 
 func TestPropMockFile_IDRule(t *testing.T) {
 	// M7: a file's id is accepted iff it follows the rule, and becomes the mock's ID exactly.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 
 	rapid.Check(t, func(t *rapid.T) {
@@ -319,6 +329,8 @@ func TestPropMockFile_IDRule(t *testing.T) {
 
 func TestPropMockFile_TemplatesLeavePlainDocumentsAlone(t *testing.T) {
 	// M9: a document without template actions builds the same mock with or without the template pass.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 
 	rapid.Check(t, func(t *rapid.T) {

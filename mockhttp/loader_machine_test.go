@@ -138,6 +138,8 @@ func TestFileLoaderMachine(t *testing.T) {
 	// M13: whatever is done to the mock files, a reload leaves exactly the mocks of the files on disk,
 	// matching in priority then name order; a failed one names every bad file and changes nothing, so the mocks
 	// of the last good load still serve; mocks added in code are never touched.
+	t.Parallel()
+
 	names := []string{"a.mock.yaml", "b.mock.json", "c.mock.yaml", "d.mock.yml"}
 	ids := []string{"", "", "x", "y"}
 

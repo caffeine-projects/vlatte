@@ -211,6 +211,8 @@ func disposition(kind, name, filename string) string {
 func TestPropReplyMultipart_ServesItsModel(t *testing.T) {
 	// M20: a multipart reply serves its model through the server: its subtype, boundary and parts, gzip and
 	// templates included, in Seq too. Its responses are the same bytes each time: the boundary is drawn once.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -281,6 +283,8 @@ func withoutID(t require.TestingT, m *Mock) map[string]any {
 func TestPropMultipart_GoAndFilesDescribeTheSame(t *testing.T) {
 	// M22: a form_file pattern and a multipart reply built with the Go API and from a mock file describe the same,
 	// and what the admin API's GET shows posts back as a mock that describes the same again.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -348,6 +352,8 @@ func TestPropMultipart_GoAndFilesDescribeTheSame(t *testing.T) {
 func TestPropJSONSchema_MultipartPatterns(t *testing.T) {
 	// M26: the editor schema's patterns for a multipart type, boundary and parameter name accept a string exactly
 	// when the decoder does, through mime.FormatMediaType and multipart.Writer.SetBoundary.
+	t.Parallel()
+
 	schema, _ := loadJSONSchema(t)
 	m := MustNew(Setup().Silent())
 

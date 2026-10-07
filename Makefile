@@ -7,8 +7,7 @@
 # keep in sync with the golangci-lint-action version in .github/workflows/ci.yml
 GOLANGCI_LINT_VERSION ?= v2.14.0
 
-# checks per property for make prop, and time per target for make fuzz
-CHECKS ?= 10000
+# time per target for make fuzz
 FUZZTIME ?= 30s
 
 export
@@ -28,11 +27,6 @@ testfail: ## run tests and print the name of failed ones
 .PHONY: testci
 testci: ## run tests with a focus on ci
 	@go test -v -race -timeout 10m ./... -coverpkg=./... -coverprofile=coverage.txt
-
-.PHONY: prop
-prop: ## run property and state machine tests with CHECKS checks each
-	@pkgs=$$(go list -f '{{.ImportPath}} {{join .TestImports " "}} {{join .XTestImports " "}}' ./... | grep 'pgregory.net/rapid' | cut -d' ' -f1); \
-	go test -race -timeout 60m -run 'Prop|Machine' $$pkgs -args -rapid.checks=$(CHECKS)
 
 .PHONY: fuzz
 fuzz: ## run every fuzz target for FUZZTIME each

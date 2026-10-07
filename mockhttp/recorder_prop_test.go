@@ -290,6 +290,8 @@ func bodyFileExt(contentType string) string {
 func TestPropRecorder_RoundTrip(t *testing.T) {
 	// M12: a recording replays what it recorded, in every format: the recorded mock matches the original request,
 	// query included, and not another path, and answers with the same status, recorded headers and body.
+	t.Parallel()
+
 	target, current := newTarget(t)
 	rt := newRoundTrip(t, target.URL)
 
@@ -564,6 +566,8 @@ func TestPropRecorder_FormsRoundTrip(t *testing.T) {
 	// files, not its bytes. The same upload, sent twice under two boundaries, records to one file; files that aren't
 	// UTF-8 text go to body files; several files of a field record as a list; and a file with another byte doesn't
 	// replay.
+	t.Parallel()
+
 	target, current := newTarget(t)
 	rt := newRoundTrip(t, target.URL)
 

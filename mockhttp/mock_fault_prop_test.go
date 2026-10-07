@@ -126,6 +126,8 @@ func sub(doc map[string]any, key string) map[string]any {
 
 func TestPropMockFile_EveryFaultIsReported(t *testing.T) {
 	// M3: each fault is reported once, with its code and key, and nothing else is: a file is fixed in one pass.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 
 	rapid.Check(t, func(t *rapid.T) {
@@ -246,6 +248,8 @@ func (b *logBuffer) String() string {
 func TestPropMockFile_MutationsNeverPanic(t *testing.T) {
 	// M4: whatever a document turns into, building it gives a mock or a list of problems, never a panic;
 	// and a mock built from it never panics serving a request.
+	t.Parallel()
+
 	logs := &logBuffer{}
 	logger := zerolog.New(logs)
 

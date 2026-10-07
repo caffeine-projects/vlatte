@@ -22,6 +22,8 @@ import (
 func TestPropForms_TemplatesReadTheForm(t *testing.T) {
 	// M24: a reply template reads the form as net/http parsed it: .Request.PostForm holds the text fields, and
 	// .Request.FormFile the first file of a field, as http.Request.FormFile picks it.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -87,6 +89,8 @@ func TestPropForms_BrokenBodiesNeverMatchAPartialForm(t *testing.T) {
 	// M25: a form body that is cut short or corrupted is matched on what net/http parses, all or nothing: a field
 	// read before the damage never matches once the body fails to parse. The search goes on to the catch-all, a
 	// warning says why, and nothing panics.
+	t.Parallel()
+
 	logs := &logBuffer{}
 	logger := zerolog.New(logs)
 
@@ -271,6 +275,8 @@ func TestPropFormFile_SomeOrEveryFileMatches(t *testing.T) {
 	// M19: FormFile matches iff some file of the field has every condition of the pattern, or, with Every, the field
 	// has a file and all of its files do. Files of other fields never count. A pattern means the same in Go and in a
 	// mock file.
+	t.Parallel()
+
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
