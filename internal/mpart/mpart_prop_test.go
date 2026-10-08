@@ -85,7 +85,7 @@ func TestPropEncode_GoReadsTheSpec(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		s := genSpec(dir).Draw(t, "spec")
 
-		e, err := Compile(s)
+		e, err := Compile(s, _engine)
 		require.NoError(t, err)
 
 		mediaType, params, err := mime.ParseMediaType(e.ContentType())
@@ -212,7 +212,7 @@ func TestPropEncode_ALineStartingWithTheBoundaryFails(t *testing.T) {
 
 		static := slices.IndexFunc(s.Parts, func(p *PartSpec) bool { return p.File == "" && lineStarts(p.Body, s.Boundary) })
 
-		e, err := Compile(s)
+		e, err := Compile(s, _engine)
 		if static >= 0 {
 			require.ErrorContains(t, err, fmt.Sprintf("multipart: parts[%d].body has a line that starts with the boundary", static))
 			return
@@ -238,7 +238,7 @@ func TestPropEncode_PausesFollowTheirDelimiterLine(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		s := genSpec(dir).Draw(t, "spec")
 
-		e, err := Compile(s)
+		e, err := Compile(s, _engine)
 		require.NoError(t, err)
 
 		_, params, err := mime.ParseMediaType(e.ContentType())
@@ -332,7 +332,7 @@ func TestPropEncode_TemplatesAreTheText(t *testing.T) {
 			return // MP2
 		}
 
-		e, err := Compile(s)
+		e, err := Compile(s, _engine)
 		require.NoError(t, err)
 
 		_, params, err := mime.ParseMediaType(e.ContentType())
@@ -405,10 +405,10 @@ func TestPropDecode_ReadsWhatDocWrites(t *testing.T) {
 		got.Dir = s.Dir
 		require.Equal(t, s.Doc(), got.Doc())
 
-		want, err := Compile(s)
+		want, err := Compile(s, _engine)
 		require.NoError(t, err)
 
-		decoded, err := Compile(got)
+		decoded, err := Compile(got, _engine)
 		require.NoError(t, err)
 
 		wantBody, wantPauses, wantErr := want.Encode(nil)

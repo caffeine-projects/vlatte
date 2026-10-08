@@ -13,13 +13,9 @@ import (
 )
 
 func TestTemplating(t *testing.T) {
-	params := vlatte.NewMemoryKV()
-	m := mockhttp.MustNew(mockhttp.Setup().Parameters(params))
+	m := mockhttp.MustNew()
 	m.MustStart()
 	defer m.Close()
-
-	err := params.Set(t.Context(), "test", []byte("hi"))
-	require.NoError(t, err)
 
 	m.MustMock(mockhttp.FromFile("testdata/templating/templating_01.yaml"))
 

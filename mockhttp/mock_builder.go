@@ -498,10 +498,17 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		})
 	}
 
-	for i, def := range b.mock.Events().OnComplete {
+	for i, def := range b.mock.OnCompleteList {
 		if app.config.Listeners == nil || !app.config.Listeners.OnComplete.Has(def.Name) {
 			return nil, fmt.Errorf("mock: on_complete listener %s at index %d is not registered", def.Name, i)
 		}
+
+		params, err := app.config.Listeners.OnComplete.Prepare(def, app.config.TemplateEngine)
+		if err != nil {
+			return nil, fmt.Errorf("mock: on_complete listener %s at index %d: %w", def.Name, i, err)
+		}
+
+		b.mock.OnCompleteList[i].Parameters = params
 	}
 
 	return b.mock, nil

@@ -381,9 +381,6 @@ func (r *recorder) process(arg recArgs) error {
 		return err
 	}
 
-	// A mock file is a Go template first, so each {{ of the recording is written as an action that prints it.
-	data = bytes.ReplaceAll(data, []byte("{{"), []byte("{{`{{`}}"))
-
 	return os.WriteFile(mockFile, data, 0o644)
 }
 

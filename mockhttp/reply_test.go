@@ -235,11 +235,48 @@ func TestReply_DescribesTheBodyInForce(t *testing.T) {
 			"templated file", OK().BodyFileWithTemplate("f.txt"),
 			map[string]any{"status": 200, "body_file": "f.txt", "template": map[string]any{"enabled": true}},
 		},
+		{
+			// Header templates read the data too, but the body stays text.
+			"header templates and data", OK().HeaderTemplate("X-Name", "{{ .Extra.name }}").SetTemplateData(map[string]any{"name": "a"}).BodyText("{{ text }}"),
+			map[string]any{
+				"status":          200,
+				"header_template": http.Header{"X-Name": {"{{ .Extra.name }}"}},
+				"body":            "{{ text }}",
+				"template":        map[string]any{"data": map[string]any{"name": "a"}},
+			},
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, tc.reply.Describe().Props)
 		})
+	}
+}
+
+func TestReply_DescriptionLoadsBack(t *testing.T) {
+	// The admin API shows a mock with Describe and loads it back: the header templates, the data they read, and a
+	// body that is text stay as they were.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	reply := OK().
+		HeaderTemplate("X-Name", "{{ .Extra.name }}").
+		SetTemplateData(map[string]any{"name": "ana"}).
+		BodyText("{{ not a template }}")
+
+	m.MustMock(Getf("/a").Reply(reply))
+
+	doc, err := json.Marshal(map[string]any{"request": map[string]any{"path": "/b"}, "response": reply.Describe().Props})
+	require.NoError(t, err)
+
+	m.MustMock(FromBytes(doc, "json"))
+
+	for _, path := range []string{"/a", "/b"} {
+		res, body := fetch(t, m.URL(path))
+		require.Equal(t, http.StatusOK, res.StatusCode, path)
+		require.Equal(t, "ana", res.Header.Get("X-Name"), path)
+		require.Equal(t, "{{ not a template }}", string(body), path)
 	}
 }

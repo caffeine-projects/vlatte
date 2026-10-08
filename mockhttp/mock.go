@@ -11,7 +11,6 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match"
-	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
 
 var (
@@ -51,34 +50,6 @@ type MockFileHandler interface {
 	// and other numbers float64, from JSON and YAML alike.
 	// An error is a problem of the mock file's ext key.
 	Handle(fields map[string]any, b *Builder) error
-}
-
-// mockFileData represents the data that is passed to Mock files during template parsing.
-type mockFileData struct {
-	params  *viewdata.Parameters
-	data    map[string]any
-	baseURL string
-}
-
-func (t *mockFileData) Parameters() *viewdata.Parameters {
-	return t.params
-}
-
-func (t *mockFileData) Data() map[string]any {
-	return t.data
-}
-
-func (t *mockFileData) URL(paths ...string) string {
-	if len(paths) == 0 {
-		return t.baseURL
-	}
-
-	u, err := url.JoinPath(t.baseURL, paths...)
-	if err != nil {
-		return ""
-	}
-
-	return u
 }
 
 type selectorInput struct {

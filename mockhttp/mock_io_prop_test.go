@@ -50,7 +50,7 @@ func TestPropMockFile_KeysKeepTheirText(t *testing.T) {
 			"request": map[string]any{"path": reqPath},
 			"response": map[string]any{
 				"body":     "{{ index .Extra " + strconv.Quote(key) + " }}",
-				"template": map[string]any{"data": map[string]any{key: value}},
+				"template": map[string]any{"enabled": true, "data": map[string]any{key: value}},
 			},
 			"ext":         map[string]any{key: value},
 			"on_complete": []any{map[string]any{"name": "capture", "parameters": map[string]any{key: value}}},

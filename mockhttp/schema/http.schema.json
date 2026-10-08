@@ -154,16 +154,16 @@
       "properties": {
         "status": { "type": "integer", "minimum": 100, "maximum": 599 },
         "header": { "$ref": "#/$defs/header_map" },
-        "header_template": { "$ref": "#/$defs/header_map" },
+        "header_template": { "description": "Headers whose values are templates.", "$ref": "#/$defs/header_map" },
         "trailer": { "$ref": "#/$defs/header_map" },
         "body": { "description": "Text as is; anything else as JSON.", "not": { "type": "null" } },
-        "body_file": { "description": "Relative paths start at the mock file's directory.", "type": "string", "minLength": 1 },
+        "body_file": { "description": "Relative paths start at the mock file's directory. The name is a template: one rendered from the request must stay inside that directory.", "type": "string", "minLength": 1 },
         "multipart": { "$ref": "#/$defs/multipart" },
         "template": {
           "type": "object",
           "properties": {
-            "enabled": { "$ref": "#/$defs/bool" },
-            "data": { "oneOf": [ { "type": "object" }, { "type": "array" } ] }
+            "enabled": { "description": "Render the body as a template: a text body, the content of body_file, or the text of multipart parts.", "$ref": "#/$defs/bool" },
+            "data": { "description": "Data the reply's templates read as .Extra.", "oneOf": [ { "type": "object" }, { "type": "array" } ] }
           },
           "additionalProperties": false
         },

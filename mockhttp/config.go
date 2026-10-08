@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"text/template"
 
 	"github.com/rs/zerolog"
 
@@ -33,7 +32,6 @@ type Config struct {
 	TLSCertificates       []tls.Certificate
 	TLSClientCAs          *x509.CertPool
 	Parameters            vlatte.KV
-	TemplateFunctions     template.FuncMap
 	Logger                *zerolog.Logger
 	LogVerbosity          vlatte.LogVerbosity
 	LogLevel              vlatte.LogLevel
@@ -43,9 +41,11 @@ type Config struct {
 	Colors                bool
 	Listeners             *vlatte.Listener
 	GlobalEvents          *vlatte.Events
-	Template              vlatte.Template
 	TemplateDataProviders []TemplateDataProvider
 	DebugFn               DebugFn
+
+	// TemplateEngine compiles every template of the server's mocks. Nil uses a vlatte.GoTemplateEngine.
+	TemplateEngine vlatte.TemplateEngine
 
 	// ConfigSources lists where settings are read from after code, lowest precedence first.
 	// Nil reads DefaultConfigSources(nil): the config file, then VLATTE_* environment variables.
@@ -83,7 +83,6 @@ func (c *Config) Apply(conf *Config) error {
 	conf.TLSCertificates = c.TLSCertificates
 	conf.TLSClientCAs = c.TLSClientCAs
 	conf.Parameters = c.Parameters
-	conf.TemplateFunctions = c.TemplateFunctions
 	conf.Logger = c.Logger
 	conf.LogVerbosity = c.LogVerbosity
 	conf.LogLevel = c.LogLevel
@@ -93,7 +92,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Colors = c.Colors
 	conf.Listeners = c.Listeners
 	conf.GlobalEvents = c.GlobalEvents
-	conf.Template = c.Template
+	conf.TemplateEngine = c.TemplateEngine
 	conf.TemplateDataProviders = c.TemplateDataProviders
 	conf.DebugFn = c.DebugFn
 	conf.ConfigSources = c.ConfigSources
@@ -362,12 +361,6 @@ func (cb *ConfigBuilder) MockFileHandlers(handlers ...MockFileHandler) *ConfigBu
 	return cb
 }
 
-// TemplateEngineFunctions sets custom functions to be used in templates.
-func (cb *ConfigBuilder) TemplateEngineFunctions(fm template.FuncMap) *ConfigBuilder {
-	cb.conf.TemplateFunctions = fm
-	return cb
-}
-
 // HTTPClient sets a custom http.Client factory.
 // Internal components that require an HTTP client will use this factory,
 // instead of using the default implementation.
@@ -455,9 +448,11 @@ func (cb *ConfigBuilder) AdminPath(path string) *ConfigBuilder {
 	return cb
 }
 
-// Template sets the template template.
-func (cb *ConfigBuilder) Template(t vlatte.Template) *ConfigBuilder {
-	cb.conf.Template = t
+// TemplateEngine sets the engine that compiles every template of the server's mocks: reply bodies, headers and body
+// file names, multipart parts, and the parameters of events such as webhooks. Without one, the server uses a
+// vlatte.GoTemplateEngine. To give Go templates more functions, set one made with vlatte.WithTemplateFuncs.
+func (cb *ConfigBuilder) TemplateEngine(e vlatte.TemplateEngine) *ConfigBuilder {
+	cb.conf.TemplateEngine = e
 	return cb
 }
 

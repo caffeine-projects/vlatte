@@ -19,7 +19,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
-// decodeDoc builds a YAML mock document for app, without the template pass, as the admin API does.
+// decodeDoc builds a YAML mock document for app, as the admin API does.
 func decodeDoc(app *Server, doc string) (*Mock, error) {
 	return mockDoc{origin: "doc", format: "yaml", data: []byte(doc)}.build(app)
 }
@@ -135,6 +135,7 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"body and body_file", ok + "response: {body: x, body_file: y.txt}\n", []want{{config.CodeConflict, "response.body_file", "response.body_file is set with response.body", ""}}},
 		{"empty body_file", ok + "response: {body_file: ''}\n", []want{{config.CodeInvalidValue, "response.body_file", "expected a file name", ""}}},
 		{"template data as a number", ok + "response: {template: {data: 5}}\n", []want{{config.CodeInvalidValue, "response.template.data", "must be an object or a list", ""}}},
+		{"templated JSON body", ok + "response: {body: {a: 1}, template: {enabled: true}}\n", []want{{config.CodeConflict, "response.template.enabled", "response.template.enabled is set with response.body, which isn't text", "write the body as a string"}}},
 		{"multipart as text", ok + "response: {multipart: x}\n", []want{{config.CodeInvalidValue, "response.multipart", "must be an object, not a string", ""}}},
 		{"multipart and body", ok + "response: {body: x, multipart: {type: mixed, parts: [{}]}}\n", []want{{config.CodeConflict, "response.multipart", "response.multipart is set with response.body", "keep one of them"}}},
 		{"multipart and body_file", ok + "response: {body_file: a.txt, multipart: {type: mixed, parts: [{}]}}\n", []want{{config.CodeConflict, "response.multipart", "response.multipart is set with response.body_file", ""}}},
@@ -275,12 +276,15 @@ func TestMockSchema_ReadProblems(t *testing.T) {
 		require.Contains(t, problems[0].Hint, "relative paths start at")
 	})
 
-	t.Run("template error says how to escape reply templates", func(t *testing.T) {
-		_, err := FromBytes([]byte("request: {path: /x}\nresponse: {body: '{{ .Request.Method }}'}\n"), "yaml").Build(m)
-		problems := mockProblems(t, err)
+	t.Run("a reply template that doesn't compile fails the mock", func(t *testing.T) {
+		// Templates compile when the mock is built, so a broken one fails the file, not each request.
+		doc := "request: {path: /x}\nresponse: {body: '{{ .Request.Method', template: {enabled: true}}\n"
+		_, err := FromBytes([]byte(doc), "yaml").Build(m)
 
-		require.Equal(t, config.CodeParseError, problems[0].Code)
-		require.Contains(t, problems[0].Hint, "{{`{{ .Request.Method }}`}}")
+		problems := mockProblems(t, err)
+		require.Len(t, problems, 1)
+		require.Equal(t, config.CodeInvalidValue, problems[0].Code)
+		require.Equal(t, "reply: template: body:1: unclosed action", problems[0].Message)
 	})
 
 	t.Run("an unregistered listener", func(t *testing.T) {
@@ -532,12 +536,17 @@ func TestMockSchema_MoreReadProblems(t *testing.T) {
 		require.Equal(t, config.CodeReadError, mockProblems(t, err)[0].Code)
 	})
 
-	t.Run("a template that doesn't parse", func(t *testing.T) {
-		_, err := FromBytes([]byte("request: {path: '{{ .URL'}\n"), "yaml").Build(m)
+	t.Run("{{ is text outside templates", func(t *testing.T) {
+		// A mock file is data: only template settings compile, so a body without template.enabled keeps its {{.
+		srv := MustNew(Setup().Silent())
+		srv.MustStart()
+		t.Cleanup(srv.Close)
 
-		problems := mockProblems(t, err)
-		require.Equal(t, config.CodeParseError, problems[0].Code)
-		require.Contains(t, problems[0].Message, "template")
+		srv.MustMock(FromBytes([]byte("request: {path: /x}\nresponse: {body: '{{ .Request.Method }}'}\n"), "yaml"))
+
+		status, body := get(t, srv, "/x")
+		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, "{{ .Request.Method }}", body)
 	})
 
 	t.Run("a missing absolute path needs no hint", func(t *testing.T) {

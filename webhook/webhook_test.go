@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
@@ -288,39 +287,32 @@ func TestWebHook_FaultTarget(t *testing.T) {
 }
 
 func TestWebHook_InvalidArgs(t *testing.T) {
+	// Parameters that are neither *Args nor a map fail the mock when it is built, not each request after it.
 	name := "webhook"
-	client := &http.Client{}
-	testCases := []any{make(chan struct{}), nil}
-
-	whSrv := mockhttp.
-		MustNew(mockhttp.Setup().HTTPClient(func() *http.Client {
-			return client
-		}))
-	whSrv.MustStart()
-	defer whSrv.Close()
-
-	whSrv.MustMock(mockhttp.Getf("/hook").Reply(mockhttp.OK()))
 
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := mockhttp.MustNew(mockhttp.Setup().OnCompleteListener(name, wh))
-	m.MustStart()
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().OnCompleteListener(name, wh))
 	defer m.Close()
 
-	for i, tc := range testCases {
-		t.Run(strconv.FormatInt(int64(i), 10), func(t *testing.T) {
-			m.MustMock(mockhttp.Getf("/test").
-				OnCompleteEvent(vlatte.EventConfig{Name: name, Parameters: tc}).
+	testCases := []struct {
+		name   string
+		params vlatte.Parameters
+		want   string
+	}{
+		{"another type", make(chan struct{}), "webhook: arguments must be *Args or map[string]any"},
+		{"nil", nil, "webhook: arguments must not be nil"},
+		{"nil *Args", (*webhook.Args)(nil), "webhook: arguments must not be nil"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := m.Mock(mockhttp.Getf("/test").
+				OnCompleteEvent(vlatte.EventConfig{Name: name, Parameters: tc.params}).
 				Reply(mockhttp.NoContent()))
 
-			res, err := client.Get(m.URL("/test"))
-
-			require.NoError(t, err)
-			require.NoError(t, res.Body.Close())
-			require.Equal(t, http.StatusNoContent, res.StatusCode)
-
-			m.Clean(t.Context())
+			require.ErrorContains(t, err, "mock: on_complete listener webhook at index 0: "+tc.want)
 		})
 	}
 }

@@ -10,18 +10,32 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-func New(r *Request, provided map[string]any, params *Parameters) *Data {
-	return &Data{Request: r, Provided: provided, Parameters: params}
+// Data is what templates render with: the dot of a Go template, and the context of any other engine.
+type Data struct {
+	// Request is the request being served.
+	Request *Request
+
+	// Provided holds the data of the server's template data providers, by key: {{ .Provided.user }}.
+	Provided map[string]any
+
+	// Parameters reads the server's parameters: {{ .Parameters.Get "key" }}.
+	Parameters *Parameters
+
+	// Server describes the mock server.
+	Server *Server
+
+	// Data is the data of the server, set with its SetData: {{ .Data.target }}.
+	Data map[string]any
+
+	// Extra is the template data of the reply being rendered: a mock file's template.data. Other templates, such as
+	// a webhook's, don't have it.
+	Extra any
 }
 
-// Data is the data used in templates during rendering.
-type Data struct {
-	Request    *Request
-	Provided   map[string]any
-	Parameters *Parameters
-	// Extra is the template data of the reply being rendered.
-	Extra any
-	Data  any
+// Server describes the mock server to templates.
+type Server struct {
+	// URL is the base URL of the server, such as http://127.0.0.1:8080: {{ .Server.URL }}/callback.
+	URL string
 }
 
 // WithExtra returns a copy of d with the given template data.
@@ -47,14 +61,24 @@ func (p *Parameters) Get(key string) (string, error) {
 	return string(b), err
 }
 
+// Request is the request being served.
 type Request struct {
-	ID              string
-	Method          string
-	URL             *url.URL
+	// ID identifies the request, as the ID of its mockhttp.RequestValues.
+	ID     string
+	Method string
+
+	// URL is the request URL, on the server's base URL.
+	URL *url.URL
+
+	// URLPathSegments are the segments of the URL path: /users/1 is [users 1].
 	URLPathSegments []string
 	Header          http.Header
-	Cookies         map[string]*http.Cookie
-	Body            *Body
+
+	// Cookies holds the cookies of the request, by name.
+	Cookies map[string]*http.Cookie
+
+	// Body is the body of the request, or nil when it has none: see HasBody.
+	Body *Body
 
 	// PostForm holds the text fields of a form body, urlencoded or multipart: {{ .Request.PostForm.Get "name" }}.
 	PostForm url.Values

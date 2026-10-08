@@ -9,11 +9,11 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/textproto"
-	"os"
-	"path/filepath"
 	"strings"
-	"text/template"
 	"time"
+
+	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 )
 
 // _quoteEscaper escapes the name and filename of a Content-Disposition as multipart.FileContentDisposition does.
@@ -56,15 +56,20 @@ type compiledHeader struct {
 // text is a text of a part: a template, or the text itself.
 type text struct {
 	raw  string
-	tmpl *template.Template
+	tmpl vlatte.Template
 }
 
-// Compile checks s, parses its templates and draws a boundary when s has none. The Encoder copies s: changing s
-// afterwards doesn't change it.
+// Compile checks s, compiles its templates with engine and draws a boundary when s has none. The Encoder copies s:
+// changing s afterwards doesn't change it.
 //
-// When s is templated, its text is Go templates: names, filenames, content types, header values, text bodies, and
-// body file names. Byte and JSON bodies, and the content of body files, are written as they are.
-func Compile(s *Spec) (*Encoder, error) {
+// When s is templated, its text is templates: names, filenames, content types, header values, text bodies, and
+// body file names. Byte and JSON bodies, and the content of body files, are written as they are. engine can be nil
+// when s isn't templated.
+func Compile(s *Spec, engine vlatte.TemplateEngine) (*Encoder, error) {
+	if s.Templated && engine == nil {
+		return nil, errors.New("multipart: a templated body needs a template engine")
+	}
+
 	if issues := s.Check(); len(issues) > 0 {
 		texts := make([]string, len(issues))
 		for i, issue := range issues {
@@ -87,8 +92,12 @@ func Compile(s *Spec) (*Encoder, error) {
 	params["boundary"] = e.boundary
 	e.contentType = mime.FormatMediaType("multipart/"+s.Subtype, params)
 
+	if !s.Templated {
+		engine = nil
+	}
+
 	for i, p := range s.Parts {
-		part, err := compilePart(p, s.Templated)
+		part, err := compilePart(p, engine)
 		if err != nil {
 			return nil, fmt.Errorf("multipart: parts[%d]: %w", i, err)
 		}
@@ -99,13 +108,14 @@ func Compile(s *Spec) (*Encoder, error) {
 	return e, nil
 }
 
-func compilePart(p *PartSpec, templated bool) (compiledPart, error) {
+// compilePart compiles the texts of p with engine, or keeps them as text when engine is nil.
+func compilePart(p *PartSpec, engine vlatte.TemplateEngine) (compiledPart, error) {
 	var err error
 
 	parse := func(field, s string) text {
 		t := text{raw: s}
-		if templated && err == nil {
-			if t.tmpl, err = template.New(field).Parse(s); err != nil {
+		if engine != nil && err == nil {
+			if t.tmpl, err = engine.Compile(field, s); err != nil {
 				err = fmt.Errorf("%s: %w", field, err)
 			}
 		}
@@ -245,7 +255,8 @@ func (p *compiledPart) headers(data any, formData bool) (textproto.MIMEHeader, e
 	return h, nil
 }
 
-// content returns the body of the part: its text, rendered, its bytes, or the content of its file.
+// content returns the body of the part: its text, rendered, its bytes, or the content of its file. A file name
+// rendered from data must stay inside dir: see bodyfile.Open.
 func (p *compiledPart) content(data any, dir string) ([]byte, error) {
 	if p.hasFile {
 		name, err := p.file.render(data)
@@ -253,11 +264,14 @@ func (p *compiledPart) content(data any, dir string) ([]byte, error) {
 			return nil, err
 		}
 
-		if dir != "" && !filepath.IsAbs(name) {
-			name = filepath.Join(dir, name)
+		f, err := bodyfile.Open(dir, p.file.raw, name)
+		if err != nil {
+			return nil, err
 		}
 
-		return os.ReadFile(name)
+		defer f.Close()
+
+		return io.ReadAll(f)
 	}
 
 	s, err := p.body.render(data)

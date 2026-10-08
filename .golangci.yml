@@ -38,6 +38,14 @@ linters:
           deny:
             - pkg: github.com/spf13/viper
               desc: settings and mock files load through internal/config
+        templates:
+          files:
+            - "!**/go_template*.go"
+          deny:
+            - pkg: text/template
+              desc: compile templates with the server's vlatte.TemplateEngine; only vlatte's Go engine uses text/template
+            - pkg: html/template
+              desc: vlatte renders bodies, headers, URLs and file names, which html/template would escape for HTML
     embeddedstructfieldcheck:
       forbid-mutex: true
     musttag:

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"text/template"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -159,6 +158,7 @@ func TestConfigBuilder(t *testing.T) {
 	nm := "test"
 	customLogger := zerolog.Nop()
 	tlsConfig := &tls.Config{InsecureSkipVerify: true}
+	engine := vlatte.MustNewGoTemplateEngine()
 
 	m := MustNew(Setup().
 		Name(nm).
@@ -183,7 +183,7 @@ func TestConfigBuilder(t *testing.T) {
 		MockFilePatterns("test", "dev").
 		Loader(&fileLoader{}).
 		MockFileHandlers(&customMockFileHandler{}).
-		TemplateEngineFunctions(template.FuncMap{"trim": strings.TrimSpace}).
+		TemplateEngine(engine).
 		Proxy(&ProxyConfig{}, &ProxyConfig{}).
 		TLSConfig(tlsConfig).
 		TLSCertKeyPair("e2e/testdata/cert/cert.pem", "e2e/testdata/cert/key.pem").
@@ -214,7 +214,7 @@ func TestConfigBuilder(t *testing.T) {
 	require.Equal(t, conf.HeaderNamesToRedact["header-3"], struct{}{})
 	require.Len(t, conf.Loaders, 1)
 	require.Len(t, conf.MockFileHandlers, 1)
-	require.Len(t, conf.TemplateFunctions, 1)
+	require.Same(t, engine, conf.TemplateEngine)
 	require.NotNil(t, conf.Proxy)
 	require.Equal(t, tlsConfig, conf.TLSConfig)
 	require.NotNil(t, conf.TLSCertificates)

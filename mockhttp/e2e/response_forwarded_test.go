@@ -1,10 +1,12 @@
 package e2e
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -72,8 +74,7 @@ func TestProxiedReplyMockFileTrimSuffix(t *testing.T) {
 	m.MustStart()
 	defer m.Close()
 
-	m.SetData(map[string]any{"target": target.URL()})
-	m.MustMock(mockhttp.FromFile("testdata/response_forwarded/trim_suffix.yaml"))
+	m.MustMock(mockhttp.FromBytes(forwardingTo(t, "testdata/response_forwarded/trim_suffix.yaml", target.URL()), "yaml"))
 
 	res, err := http.Get(m.URL("/items.json"))
 	require.NoError(t, err)
@@ -84,7 +85,7 @@ func TestProxiedReplyMockFileTrimSuffix(t *testing.T) {
 	require.True(t, targetScoped.AssertCalled(t))
 }
 
-func TestProxiedReplyMockFileWithTemplate(t *testing.T) {
+func TestProxiedReplyMockFile(t *testing.T) {
 	target := mockhttp.MustNew()
 	target.MustStart()
 	defer target.Close()
@@ -99,11 +100,7 @@ func TestProxiedReplyMockFileWithTemplate(t *testing.T) {
 	m.MustStart()
 	defer m.Close()
 
-	data := make(map[string]any)
-	data["target"] = target.URL()
-	m.SetData(data)
-
-	scoped := m.MustMock(mockhttp.FromFile("testdata/response_forwarded/proxied_response.yaml"))
+	scoped := m.MustMock(mockhttp.FromBytes(forwardingTo(t, "testdata/response_forwarded/proxied_response.yaml", target.URL()), "yaml"))
 	httpClient := &http.Client{}
 
 	req, _ := http.NewRequest(http.MethodPost, m.URL()+"/test", strings.NewReader("hello world"))
@@ -121,4 +118,15 @@ func TestProxiedReplyMockFileWithTemplate(t *testing.T) {
 	require.Equal(t, "done", string(b))
 	require.True(t, targetScoped.AssertCalled(t))
 	require.True(t, scoped.AssertCalled(t))
+}
+
+// forwardingTo reads a mock file that forwards to http://target.invalid, and points it at target instead. A mock
+// file is data, so a value known only when the test runs goes in before the file is built.
+func forwardingTo(t *testing.T, file, target string) []byte {
+	t.Helper()
+
+	doc, err := os.ReadFile(file)
+	require.NoError(t, err)
+
+	return bytes.ReplaceAll(doc, []byte("http://target.invalid"), []byte(target))
 }

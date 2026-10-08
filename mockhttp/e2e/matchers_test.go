@@ -147,22 +147,22 @@ func TestMatchers_MultipleMethods(t *testing.T) {
 	m := mockhttp.MustNew()
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
-	m.MustMock(mockhttp.FromFile("testdata/matchers/03_url_template.yaml"))
+	m.MustMock(mockhttp.FromFile("testdata/matchers/03_multiple_methods.yaml"))
 
 	client := &http.Client{}
-	res, err := client.Get(m.URL("/test?q=none"))
+	res, err := client.Get(m.URL() + "/test?q=none")
 
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusNoContent, res.StatusCode)
 
-	res, err = client.Post(m.URL("/test?q=none"), mockhttp.MIMETextPlain, nil)
+	res, err = client.Post(m.URL()+"/test?q=none", mockhttp.MIMETextPlain, nil)
 
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusNoContent, res.StatusCode)
 
-	req, _ := http.NewRequest(http.MethodPut, m.URL("/test?q=none"), nil)
+	req, _ := http.NewRequest(http.MethodPut, m.URL()+"/test?q=none", nil)
 	res, err = client.Do(req)
 
 	require.NoError(t, err)

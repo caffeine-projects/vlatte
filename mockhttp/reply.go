@@ -1,21 +1,19 @@
 package mockhttp
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
-	"net/textproto"
-	"os"
-	"path/filepath"
-	"text/template"
+	"slices"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
@@ -44,23 +42,32 @@ func prepareReply(reply Replier, app *Server) error {
 
 // Reply holds the configuration on how the MockedResponse should be built.
 type Reply struct {
-	response             Response
-	bodyType             bodyType
-	bodyEncoding         bodyEncoding
-	bodyFilename         string
-	bodyFileDir          string // a relative body file opens from here, such as a mock file's dir; "" is the working directory
-	teType               teType
-	headerWithTemplate   http.Header
-	headerTemplate       vlatte.Template
-	bodyTemplateContent  string
+	response            Response
+	bodyType            bodyType
+	bodyEncoding        bodyEncoding
+	bodyFilename        string
+	bodyFileDir         string // a relative body file opens from here, such as a mock file's dir; "" is the working directory
+	teType              teType
+	headerWithTemplate  http.Header
+	bodyTemplateContent string
+	teData              any
+	encoded             bool
+	multipart           *Multipart
+	multipartEncoder    *mpart.Encoder
+
+	// beforeBuild compiles these with the template engine of the server.
+	engine               vlatte.TemplateEngine // compiles the content of a templated body file, read at each reply
+	headerTemplates      []headerTemplate
 	bodyFilenameTemplate vlatte.Template
 	bodyTemplate         vlatte.Template
-	teData               any
-	encoded              bool
-	multipart            *Multipart
-	multipartEncoder     *mpart.Encoder
 
 	delayedErr error
+}
+
+// headerTemplate is a header value that is a template.
+type headerTemplate struct {
+	name string
+	tmpl vlatte.Template
 }
 
 type bodyType int
@@ -375,13 +382,21 @@ func (rep *Reply) Describe() descriptor.Descriptor {
 		}
 	}
 
+	if len(rep.headerWithTemplate) > 0 {
+		response["header_template"] = rep.headerWithTemplate.Clone()
+	}
+
+	// template.enabled says the body is a template; template.data is what every template of the reply reads.
+	tmpl := make(map[string]any, 2)
 	if rep.teType&_teBody != 0 || rep.bodyType == _bodyMultipart && rep.multipart.spec.Templated {
-		tmpl := map[string]any{"enabled": true}
+		tmpl["enabled"] = true
+	}
 
-		if rep.teData != nil {
-			tmpl["data"] = rep.teData
-		}
+	if rep.teData != nil {
+		tmpl["data"] = rep.teData
+	}
 
+	if len(tmpl) > 0 {
 		response["template"] = tmpl
 	}
 
@@ -404,55 +419,20 @@ func (rep *Reply) beforeBuild(app *Server) error {
 		return rep.delayedErr
 	}
 
+	// Only a reply with templates needs the engine: replies are also prepared outside a server, in tests.
+	var engine vlatte.TemplateEngine
+	if rep.hasTemplates() {
+		engine = app.config.TemplateEngine
+	}
+
 	if rep.bodyType == _bodyMultipart {
-		if err := rep.compileMultipart(); err != nil {
+		if err := rep.compileMultipart(engine); err != nil {
 			return err
 		}
 	}
 
-	if rep.teType&_teBodyFilename == _teBodyFilename {
-		var err error
-		tmpl := template.New("")
-		if tmpl, err = tmpl.Parse(rep.bodyFilename); err != nil {
-			return err
-		}
-
-		rep.bodyFilenameTemplate = vlatte.TemplateText(tmpl)
-	}
-
-	if rep.teType&_teBody == _teBody {
-		var err error
-		tmpl := template.New("")
-		if tmpl, err = tmpl.Parse(rep.bodyTemplateContent); err != nil {
-			return err
-		}
-
-		rep.bodyTemplate = vlatte.TemplateText(tmpl)
-	}
-
-	if len(rep.headerWithTemplate) > 0 {
-		buf := bufpool.Get()
-		buf.Reset()
-		defer bufpool.Put(buf)
-
-		err := rep.headerWithTemplate.Write(buf)
-		if err != nil {
-			return err
-		}
-
-		var tmpl vlatte.Template
-		if app.config.Template == nil {
-			tmpl = vlatte.TemplateText(template.New(""))
-		} else {
-			tmpl = app.config.Template
-		}
-
-		tmpl, err = tmpl.Parse(buf.String() + "\r\n")
-		if err != nil {
-			return err
-		}
-
-		rep.headerTemplate = tmpl
+	if err := rep.compileTemplates(engine); err != nil {
+		return fmt.Errorf("reply: %w", err)
 	}
 
 	if rep.encoded {
@@ -469,9 +449,52 @@ func (rep *Reply) beforeBuild(app *Server) error {
 	return nil
 }
 
-// compileMultipart checks the multipart body and compiles it, once per build: the boundary drawn here is the one of
-// every response the mock serves.
-func (rep *Reply) compileMultipart() error {
+// hasTemplates reports whether the reply has templates: a body, a body file name, header values or the text of a
+// multipart body.
+func (rep *Reply) hasTemplates() bool {
+	return rep.teType&(_teBody|_teBodyFilename) != 0 || len(rep.headerWithTemplate) > 0 ||
+		rep.bodyType == _bodyMultipart && rep.multipart.spec.Templated
+}
+
+// compileTemplates compiles the body, the body file name and each header value with engine, replacing what an
+// earlier build compiled. Header values compile one by one, by name, so a value can't spill into another header.
+func (rep *Reply) compileTemplates(engine vlatte.TemplateEngine) error {
+	rep.engine = engine
+	rep.bodyTemplate = nil
+	rep.bodyFilenameTemplate = nil
+	rep.headerTemplates = nil
+
+	var err error
+
+	if rep.teType&_teBodyFilename != 0 {
+		if rep.bodyFilenameTemplate, err = engine.Compile("body_file", rep.bodyFilename); err != nil {
+			return err
+		}
+	}
+
+	if rep.bodyType == _bodyTemplate {
+		if rep.bodyTemplate, err = engine.Compile("body", rep.bodyTemplateContent); err != nil {
+			return err
+		}
+	}
+
+	for _, name := range slices.Sorted(maps.Keys(rep.headerWithTemplate)) {
+		for _, value := range rep.headerWithTemplate[name] {
+			tmpl, err := engine.Compile("header."+name, value)
+			if err != nil {
+				return err
+			}
+
+			rep.headerTemplates = append(rep.headerTemplates, headerTemplate{name: name, tmpl: tmpl})
+		}
+	}
+
+	return nil
+}
+
+// compileMultipart checks the multipart body and compiles it with engine, once per build: the boundary drawn here is
+// the one of every response the mock serves.
+func (rep *Reply) compileMultipart(engine vlatte.TemplateEngine) error {
 	if rep.response.Header.Get(HeaderContentType) != "" || rep.headerWithTemplate.Get(HeaderContentType) != "" {
 		return errors.New("reply: a multipart body sets the Content-Type: remove the Content-Type header")
 	}
@@ -479,7 +502,7 @@ func (rep *Reply) compileMultipart() error {
 	spec := rep.multipart.spec
 	spec.Dir = rep.bodyFileDir
 
-	e, err := mpart.Compile(&spec)
+	e, err := mpart.Compile(&spec, engine)
 	if err != nil {
 		return fmt.Errorf("reply: %w", err)
 	}
@@ -489,50 +512,43 @@ func (rep *Reply) compileMultipart() error {
 	return nil
 }
 
-func (rep *Reply) build(_ http.ResponseWriter, r *RequestValues) (res *Response, err error) {
+func (rep *Reply) build(_ http.ResponseWriter, r *RequestValues) (*Response, error) {
 	if rep.delayedErr != nil {
 		return nil, rep.delayedErr
 	}
 
 	response := rep.response
-	hasTemplate := rep.teType&_teBody != 0 || rep.teType&_teBodyFilename != 0 || len(rep.headerWithTemplate) > 0 ||
-		rep.bodyType == _bodyMultipart
-	tmplData := any(nil)
-	if hasTemplate {
-		tmplData = r.Data
+
+	var data any
+	if rep.hasTemplates() {
+		data = r.Data
 		if d, ok := r.Data.(*viewdata.Data); ok {
-			tmplData = d.WithExtra(rep.teData)
+			data = d.WithExtra(rep.teData)
 		}
 	}
 
-	if len(rep.headerWithTemplate) > 0 {
-		buf := bufpool.Get()
-		buf.Reset()
-		defer bufpool.Put(buf)
-
-		err = rep.headerTemplate.Execute(buf, tmplData)
-		if err != nil {
-			return nil, err
-		}
-
-		tp := textproto.NewReader(bufio.NewReader(buf))
-		mimeHeader, err := tp.ReadMIMEHeader()
-		if err != nil {
-			return nil, err
-		}
-
+	if len(rep.headerTemplates) > 0 {
 		// Rendered values belong to this response only, so they go into a copy of the reply headers.
 		response.Header = response.Header.Clone()
-		for k, values := range mimeHeader {
-			for _, v := range values {
-				response.Header.Add(k, v)
+
+		for _, h := range rep.headerTemplates {
+			value, err := execute(h.tmpl, data)
+			if err != nil {
+				return nil, err
 			}
+
+			// A line break would end the header there, and what follows would read as another one.
+			if bytes.ContainsAny(value, "\r\n") {
+				return nil, fmt.Errorf("header.%s holds a line break", h.name)
+			}
+
+			response.Header.Add(h.name, string(value))
 		}
 	}
 
 	switch rep.bodyType {
 	case _bodyMultipart:
-		body, pauses, err := rep.multipartEncoder.Encode(tmplData)
+		body, pauses, err := rep.multipartEncoder.Encode(data)
 		if err != nil {
 			return nil, err
 		}
@@ -544,90 +560,77 @@ func (rep *Reply) build(_ http.ResponseWriter, r *RequestValues) (res *Response,
 		response.pauses = pauses
 
 	case _bodyTemplate:
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				err = fmt.Errorf(
-					"panic parsing body template. reason=%v",
-					recovered,
-				)
-			}
-		}()
-
-		buf := bufpool.Get()
-		buf.Reset()
-
-		defer bufpool.Put(buf)
-
-		err = rep.bodyTemplate.Execute(buf, tmplData)
+		body, err := execute(rep.bodyTemplate, data)
 		if err != nil {
 			return nil, err
 		}
 
-		// The buffer returns to the pool before the response renders, so the body must not share its bytes.
-		response.Body = bytes.Clone(buf.Bytes())
+		response.Body = body
 
 	case _bodyFile:
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				err = fmt.Errorf(
-					"panic loading body from %s. reason=%v",
-					rep.bodyFilename,
-					recovered,
-				)
-			}
-		}()
-		buf := bufpool.Get()
-		buf.Reset()
-
-		defer bufpool.Put(buf)
-
-		filename := rep.bodyFilename
-		if rep.teType&_teBodyFilename == _teBodyFilename {
-			err = rep.bodyFilenameTemplate.Execute(buf, tmplData)
-			if err != nil {
-				return nil, err
-			}
-
-			filename = buf.String()
-		}
-
-		if rep.bodyFileDir != "" && !filepath.IsAbs(filename) {
-			filename = filepath.Join(rep.bodyFileDir, filename)
-		}
-
-		file, err := os.Open(filename)
-		if err != nil {
+		if err := rep.openBodyFile(&response, data); err != nil {
 			return nil, err
 		}
-
-		if rep.teType&_teBody == _teBody {
-			defer file.Close()
-
-			buf.Reset()
-
-			b, err := io.ReadAll(file)
-			if err != nil {
-				return nil, err
-			}
-
-			tmpl := template.New("")
-			t, err := tmpl.Parse(string(b))
-			if err != nil {
-				return nil, err
-			}
-
-			err = t.Execute(buf, tmplData)
-			if err != nil {
-				return nil, err
-			}
-
-			response.Body = bytes.Clone(buf.Bytes())
-		} else {
-			response.BodyCloser = file
-		}
-
-		response.BodyFilename = filename
 	}
 
 	return &response, nil
+}
+
+// openBodyFile sets the body of response to the body file: streamed from the file as it is, or rendered when its
+// content is a template. The file name is a template too, and the part of it rendered from data must stay inside
+// the directory written before it: see bodyfile.Open.
+func (rep *Reply) openBodyFile(response *Response, data any) error {
+	filename := rep.bodyFilename
+	if rep.bodyFilenameTemplate != nil {
+		name, err := execute(rep.bodyFilenameTemplate, data)
+		if err != nil {
+			return err
+		}
+
+		filename = string(name)
+	}
+
+	file, err := bodyfile.Open(rep.bodyFileDir, rep.bodyFilename, filename)
+	if err != nil {
+		return err
+	}
+
+	response.BodyFilename = file.Name()
+
+	if rep.teType&_teBody == 0 {
+		response.BodyCloser = file
+		return nil
+	}
+
+	defer file.Close()
+
+	// The name can change with each request, so the content compiles when it is read.
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return err
+	}
+
+	tmpl, err := rep.engine.Compile(filename, string(content))
+	if err != nil {
+		return err
+	}
+
+	response.Body, err = execute(tmpl, data)
+
+	return err
+}
+
+// execute renders t with data. The bytes are the caller's: the pooled buffer goes back before the response is
+// written, so the bytes can't be the buffer's.
+func execute(t vlatte.Template, data any) ([]byte, error) {
+	buf := bufpool.Get()
+	buf.Reset()
+
+	defer bufpool.Put(buf)
+
+	if err := t.Execute(buf, data); err != nil {
+		return nil, err
+	}
+
+	return bytes.Clone(buf.Bytes()), nil
 }

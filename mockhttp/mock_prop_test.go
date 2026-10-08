@@ -327,30 +327,6 @@ func TestPropMockFile_IDRule(t *testing.T) {
 	})
 }
 
-func TestPropMockFile_TemplatesLeavePlainDocumentsAlone(t *testing.T) {
-	// M9: a document without template actions builds the same mock with or without the template pass.
-	t.Parallel()
-
-	m := MustNew(Setup().Silent())
-
-	rapid.Check(t, func(t *rapid.T) {
-		doc := genMock("http://localhost").Draw(t, "mock").doc()
-		doc["id"] = "same"
-
-		data := encodeMock(t, doc, "yaml")
-		if strings.Contains(string(data), "{{") {
-			t.Skip("the document holds template actions")
-		}
-
-		plain, err := mockDoc{origin: "doc", format: "yaml", data: data}.build(m)
-		require.NoError(t, err)
-		templated, err := FromBytes(data, "yaml").Build(m)
-		require.NoError(t, err)
-
-		require.Equal(t, describe(t, plain), describe(t, templated))
-	})
-}
-
 var errListener = errors.New("listener stopped")
 
 // stop is a listener that never runs: a mock needs its on_complete listeners registered.

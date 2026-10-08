@@ -24,7 +24,7 @@ type Spec struct {
 	Boundary  string            // "" draws a random one
 	Params    map[string]string // more parameters of the Content-Type, such as type and start for related
 	Parts     []*PartSpec
-	Templated bool   // the text of the parts is Go templates: see Compile
+	Templated bool   // the text of the parts is templates: see Compile
 	Dir       string // where relative body files open from; "" is the working directory
 }
 

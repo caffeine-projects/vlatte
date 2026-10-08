@@ -5,9 +5,9 @@ request:
 response:
   status: 200
   header_template:
-    test: '{{`{{ .Parameters.Get "test" }}`}}'
-    ctx: '{{`{{ .Parameters.Get "context" }}`}}'
-    message: '{{`{{ .Extra.message }}`}}'
+    test: '{{ .Parameters.Get "test" }}'
+    ctx: '{{ .Parameters.Get "context" }}'
+    message: '{{ .Extra.message }}'
   template:
     data:
       message: hi

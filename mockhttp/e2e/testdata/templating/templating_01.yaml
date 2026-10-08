@@ -1,17 +1,15 @@
 request:
   path: /test/templating
   method: POST
-  body: 'hello world -> {{ .Parameters.Get "test" }}'
+  body: 'hello world -> hi'
 
 response:
   status: 200
   body: >
-    {{
-    `{{ .Extra.mode }} --> {{ .Extra.lang }} --> {{ .Request.Method }} --> {{ .Request.Header.Get "template" }}
+    {{ .Extra.mode }} --> {{ .Extra.lang }} --> {{ .Request.Method }} --> {{ .Request.Header.Get "template" }}
     {{ (.Request.Cookie "cookie_test").Value }}
     Path 0 {{ index .Request.URLPathSegments 0 }}
-    Path 1 {{ index .Request.URLPathSegments 1 -}}`
-    }}
+    Path 1 {{ index .Request.URLPathSegments 1 -}}
   template:
     enabled: true
     data:
