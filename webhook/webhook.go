@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -205,6 +206,13 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		rendered, err := render(engine, "header_template "+k, v, data)
 		if err != nil {
 			return err
+		}
+
+		// As in replies: the value goes without the spaces and line breaks around it, and a line break inside, which
+		// would end the header there, fails here, whatever the RoundTripper would do with it.
+		rendered = textproto.TrimString(rendered)
+		if strings.ContainsAny(rendered, "\r\n") {
+			return fmt.Errorf("webhook: header_template %s holds a line break", k)
 		}
 
 		req.Header.Set(k, rendered)

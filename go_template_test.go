@@ -54,6 +54,9 @@ func TestGoTemplateEngine_MissingKeys(t *testing.T) {
 	t.Run("an unknown mode is an error", func(t *testing.T) {
 		_, err := NewGoTemplateEngine(WithMissingKey("strict"))
 		require.ErrorContains(t, err, `missing key mode "strict"`)
+
+		// MustNewGoTemplateEngine panics with that error.
+		require.PanicsWithError(t, err.Error(), func() { MustNewGoTemplateEngine(WithMissingKey("strict")) })
 	})
 }
 

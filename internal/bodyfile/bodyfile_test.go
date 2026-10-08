@@ -39,6 +39,8 @@ func TestOpen(t *testing.T) {
 		{name: "a rendered name opens in its written directory", source: "sub/{{ .Name }}", file: "sub/in.txt", want: "sub"},
 		{name: "a rendered name can't leave its written directory", source: "sub/{{ .Name }}", file: "sub/../in.txt"},
 		{name: "a written absolute directory holds a rendered name", source: filepath.Join(root, "{{ .Name }}"), file: outside, want: "out"},
+		// The root is what the author wrote, even when it's the whole file system.
+		{name: "a written root holds a rendered absolute name", source: "/{{ .Name }}", file: outside, want: "out"},
 		// A template copies the text before its first action, so a rendered name starts with what was written.
 		{name: "a rendered name can't climb out of a written absolute directory", source: filepath.Join(dir, "{{ .Name }}"), file: dir + string(filepath.Separator) + filepath.Join("..", "out.txt")},
 		{name: "a written .. is the author's", source: "../{{ .Name }}", file: "../out.txt", want: "out"},

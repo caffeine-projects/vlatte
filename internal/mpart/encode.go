@@ -216,6 +216,10 @@ func (p *compiledPart) headers(data any, formData bool) (textproto.MIMEHeader, e
 		return nil, err
 	}
 
+	// Like net/http when it writes a header, values go without the spaces and line breaks around them, such as the
+	// line break that ends a YAML block scalar. A line break inside would end the header there.
+	contentType = textproto.TrimString(contentType)
+
 	h := make(textproto.MIMEHeader)
 
 	for _, header := range p.header {
@@ -224,6 +228,7 @@ func (p *compiledPart) headers(data any, formData bool) (textproto.MIMEHeader, e
 			return nil, err
 		}
 
+		v = textproto.TrimString(v)
 		if strings.ContainsAny(v, "\r\n") {
 			return nil, fmt.Errorf("header.%s holds a line break", header.name)
 		}

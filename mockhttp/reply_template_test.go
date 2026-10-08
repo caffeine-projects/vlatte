@@ -58,6 +58,23 @@ func TestReplyTemplates_HeaderValuesCantAddHeaders(t *testing.T) {
 	require.Equal(t, "a", res.Header.Get("X-Echo"))
 }
 
+func TestReplyTemplates_HeaderValuesLoseTheLineBreaksAround(t *testing.T) {
+	// A YAML block scalar ends its value with a line break. A header value goes without the spaces and line breaks
+	// around it, as net/http writes headers, so only a line break inside fails.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/go").Reply(OK().HeaderTemplate("X-A", " {{ .Request.Method }}\n")))
+	m.MustMock(FromBytes([]byte("request: {path: /file}\nresponse:\n  status: 200\n  header_template:\n    X-A: >\n      {{ .Request.Method }}\n"), "yaml"))
+
+	for _, path := range []string{"/go", "/file"} {
+		res, body := fetch(t, m.URL(path))
+		require.Equal(t, http.StatusOK, res.StatusCode, "%s: %s", path, body)
+		require.Equal(t, "GET", res.Header.Get("X-A"), path)
+	}
+}
+
 func TestReplyTemplates_EachReplyHasItsOwnHeaderTemplates(t *testing.T) {
 	// With a template set on the server, every reply's header templates used to parse into that one template: the
 	// last mock's header won for all mocks. Replies compile their own with the server's engine.
@@ -149,4 +166,48 @@ func TestReplyTemplates_MissingKeysAreErrors(t *testing.T) {
 	status, body := get(t, m, "/x")
 	require.Equal(t, StatusNoMatch, status)
 	require.Contains(t, body, `map has no entry for key "nmae"`)
+}
+
+func TestReplyTemplates_RequestErrors(t *testing.T) {
+	// What fails at a request, rendering a template or reading a body file, answers with the error instead of a
+	// response with a part missing.
+	root := t.TempDir()
+	dir := filepath.Join(root, "files")
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "broken.txt"), []byte("{{ .X"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "secret.txt"), []byte("the secret"), 0o600))
+
+	f := `{{ .Request.URL.Query.Get "f" }}`
+	noData := make(map[string]any)
+
+	tests := []struct {
+		name  string
+		reply *Reply
+		query string
+		want  string
+	}{
+		{"a header that fails", OK().SetTemplateData(noData).HeaderTemplate("X-A", "{{ .Extra.nmae }}"), "", `template: header.X-A:1:9: executing "header.X-A" at <.Extra.nmae>: map has no entry for key "nmae"`},
+		{"a body file name that fails", OK().SetTemplateData(noData).BodyFile("{{ .Extra.nmae }}.txt"), "", `template: body_file:1:9: executing "body_file" at <.Extra.nmae>: map has no entry for key "nmae"`},
+		{"a body file name rendered out of its directory", OK().BodyFile(filepath.Join(dir, f)), "?f=../secret.txt", "../secret.txt"},
+		{"a body file that is gone", OK().BodyFile(filepath.Join(dir, "gone.txt")), "", "gone.txt"},
+		{"a body file name that names a directory", OK().BodyFileWithTemplate(filepath.Join(dir, f)), "?f=sub", "is a directory"},
+		{"body file content that doesn't compile", OK().BodyFileWithTemplate(filepath.Join(dir, "broken.txt")), "", "broken.txt:1: unclosed action"},
+	}
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	for i, tc := range tests {
+		m.MustMock(Getf("/%d", i).Reply(tc.reply))
+	}
+
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			status, body := get(t, m, "/"+strconv.Itoa(i)+tc.query)
+			require.Equal(t, StatusNoMatch, status, body)
+			require.Contains(t, body, tc.want)
+			require.NotContains(t, body, "the secret")
+		})
+	}
 }

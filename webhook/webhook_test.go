@@ -484,12 +484,31 @@ func TestWebHook_Templates(t *testing.T) {
 type onComplete struct {
 	params vlatte.Parameters
 	mock   vlatte.Mock
+	kit    vlatte.Kit
 }
 
 func (e onComplete) Kind() vlatte.Kind             { return mockhttp.Kind }
-func (e onComplete) Kit() vlatte.Kit               { return nil }
+func (e onComplete) Kit() vlatte.Kit               { return e.kit }
 func (e onComplete) Parameters() vlatte.Parameters { return e.params }
 func (e onComplete) Mock() vlatte.Mock             { return e.mock }
+
+// kit is the Kit of a server without a template engine: templates render with data.
+type kit struct {
+	data any
+}
+
+func (k kit) TemplateEngine() vlatte.TemplateEngine { return nil }
+func (k kit) Data() any                             { return k.data }
+
+// sent is a RoundTripper that keeps the request it is given and answers 200.
+type sent struct {
+	req *http.Request
+}
+
+func (s *sent) RoundTrip(req *http.Request) (*http.Response, error) {
+	s.req = req
+	return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: req}, nil
+}
 
 func TestWebHook_TemplateErrors(t *testing.T) {
 	wh, err := webhook.New()
@@ -497,4 +516,38 @@ func TestWebHook_TemplateErrors(t *testing.T) {
 
 	err = wh.Run(t.Context(), onComplete{params: map[string]any{"url_template": "http://localhost/{{ .Nope"}})
 	require.ErrorIs(t, err, webhook.ErrRenderingTemplate)
+}
+
+func TestWebHook_KitWithoutAnEngine(t *testing.T) {
+	// A Kit without a template engine renders the event's templates with Go templates, and the Kit's data.
+	rt := &sent{}
+	wh, err := webhook.New(webhook.WithRoundTripper(rt))
+	require.NoError(t, err)
+
+	err = wh.Run(t.Context(), onComplete{params: map[string]any{"url_template": "http://hooks.test/{{ .id }}"}, kit: kit{data: map[string]any{"id": "42"}}})
+	require.NoError(t, err)
+	require.Equal(t, "/42", rt.req.URL.Path)
+}
+
+func TestWebHook_HeaderTemplateValues(t *testing.T) {
+	// As in replies: a rendered header value goes without the line breaks around it, such as the one a YAML block
+	// scalar ends with, and a line break inside fails the send before the request is made, whatever the RoundTripper
+	// would do with it.
+	rt := &sent{}
+	wh, err := webhook.New(webhook.WithRoundTripper(rt))
+	require.NoError(t, err)
+
+	send := func(v string) error {
+		return wh.Run(t.Context(), onComplete{
+			params: map[string]any{"url": "http://hooks.test", "header_template": map[string]any{"X-A": "{{ .v }}"}},
+			kit:    kit{data: map[string]any{"v": v}},
+		})
+	}
+
+	require.NoError(t, send("GET\n"))
+	require.Equal(t, []string{"GET"}, rt.req.Header.Values("X-A"))
+
+	rt.req = nil
+	require.EqualError(t, send("a\nX-B: b"), "webhook: header_template X-A holds a line break")
+	require.Nil(t, rt.req)
 }

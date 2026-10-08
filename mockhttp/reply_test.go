@@ -175,6 +175,14 @@ func TestHeaderTemplate_RendersPerResponse(t *testing.T) {
 	}
 }
 
+func TestReply_GzipPreparedTwiceHasOneContentEncoding(t *testing.T) {
+	// A reply can serve several mocks, and each mock's build prepares it: the Content-Encoding goes in once.
+	rep := OK().Gzip()
+	require.NoError(t, rep.beforeBuild(nil))
+	require.NoError(t, rep.beforeBuild(nil))
+	require.Equal(t, []string{"gzip"}, rep.response.Header.Values(HeaderContentEncoding))
+}
+
 func TestReply_TheLastBodySetterWins(t *testing.T) {
 	// D3: body setters didn't reset the body kind, so BodyFile(x).BodyText(y) served the file, and
 	// BodyTemplate(x).BodyFile(f) served the file as a template. Flags were added with +=, so BodyTemplate twice set

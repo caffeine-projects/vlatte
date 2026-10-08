@@ -171,7 +171,9 @@ func (p *PartSpec) check(path string, formData bool) []Issue {
 		add(config.CodeMissingValue, ".name", "is required in a form-data part", "name the form field")
 	}
 
-	if strings.ContainsAny(p.ContentType, "\r\n") {
+	// Header values are written without the spaces and line breaks around them, so only a line break inside counts.
+	// This is the text as written: a template that renders a line break fails when the body is written.
+	if strings.ContainsAny(textproto.TrimString(p.ContentType), "\r\n") {
 		add(config.CodeInvalidValue, ".content_type", "holds a line break", "")
 	}
 
@@ -185,7 +187,7 @@ func (p *PartSpec) check(path string, formData bool) []Issue {
 		switch canonical := textproto.CanonicalMIMEHeaderKey(h.Name); {
 		case !isToken(h.Name):
 			add(config.CodeInvalidValue, at, "is not a header name", "")
-		case strings.ContainsAny(h.Value, "\r\n"):
+		case strings.ContainsAny(textproto.TrimString(h.Value), "\r\n"):
 			add(config.CodeInvalidValue, at, "holds a line break", "")
 		case canonical == "Content-Type" && p.ContentType != "":
 			conflict(at, ".content_type")

@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 func TestTemplateData_RequestAndServer(t *testing.T) {
@@ -41,6 +43,34 @@ func TestTemplateData_RequestAndServer(t *testing.T) {
 
 	require.NotEqual(t, id, next, "each request has its own ID")
 	require.Equal(t, next+" "+m.URL()+" second", body)
+}
+
+func TestTemplateData_Parameters(t *testing.T) {
+	// A parameter that isn't set fails the request, as a missing map key does, so a typo doesn't render as an empty
+	// value. Has reads a parameter that may be missing.
+	params := vlatte.NewMemoryKV()
+	require.NoError(t, params.Set(t.Context(), "set", []byte("v")))
+	require.NoError(t, params.Set(t.Context(), "empty", nil))
+
+	m := MustNew(Setup().Silent().Parameters(params))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/get").Reply(OK().BodyTemplate(`[{{ .Parameters.Get "set" }}][{{ .Parameters.Get "empty" }}]`)))
+	m.MustMock(Getf("/typo").Reply(OK().BodyTemplate(`{{ .Parameters.Get "sett" }}`)))
+	m.MustMock(Getf("/has").Reply(OK().BodyTemplate(`{{ if .Parameters.Has "set" }}set{{ end }} {{ if .Parameters.Has "sett" }}sett{{ else }}no sett{{ end }}`)))
+
+	status, body := get(t, m, "/get")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, "[v][]", body)
+
+	status, body = get(t, m, "/typo")
+	require.Equal(t, StatusNoMatch, status)
+	require.Contains(t, body, `parameters: no parameter "sett"`)
+
+	status, body = get(t, m, "/has")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, "set no sett", body)
 }
 
 func TestServer_SetDataWhileServing(t *testing.T) {

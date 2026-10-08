@@ -267,6 +267,23 @@ func TestGlobalEventsAreApplied(t *testing.T) {
 	require.Eventually(t, func() bool { return fired.Load() == 1 }, 5*time.Second, 10*time.Millisecond)
 }
 
+func TestGlobalEventsMustNameARegisteredListener(t *testing.T) {
+	// As a mock's events, a global event must name a registered listener: with a typo in the name, it would never
+	// run, and nothing would say so.
+	global := &vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "nobody"}}}
+	somebody := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
+
+	for name, setup := range map[string]*ConfigBuilder{
+		"other listeners":   Setup().OnCompleteListener("somebody", somebody),
+		"no listener store": Setup().EventListeners(nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := New(setup.Silent().GlobalEvents(global))
+			require.EqualError(t, err, "server: global on_complete listener nobody at index 0 is not registered")
+		})
+	}
+}
+
 // acceptCounter counts the connections accepted through a listener.
 type acceptCounter struct {
 	net.Listener

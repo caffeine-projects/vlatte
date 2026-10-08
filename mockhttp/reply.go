@@ -9,6 +9,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/textproto"
 	"slices"
 
 	"github.com/caffeine-projects/vlatte"
@@ -537,7 +538,10 @@ func (rep *Reply) build(_ http.ResponseWriter, r *RequestValues) (*Response, err
 				return nil, err
 			}
 
-			// A line break would end the header there, and what follows would read as another one.
+			// Like net/http when it writes a header, the value goes without the spaces and line breaks around it, such
+			// as the line break that ends a YAML block scalar. A line break inside would end the header there, and what
+			// follows would read as another one.
+			value = textproto.TrimBytes(value)
 			if bytes.ContainsAny(value, "\r\n") {
 				return nil, fmt.Errorf("header.%s holds a line break", h.name)
 			}

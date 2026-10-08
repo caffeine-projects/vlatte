@@ -160,7 +160,7 @@ m.MustMock(mockhttp.Postf("/users").Reply(mockhttp.Created().
 | `.Request.Body.String`, `.Request.Body.Content`, `.Request.HasBody` | The body. JSON bodies are text: read their fields with `fromJson`. |
 | `.Request.Cookie "name"`, `.Request.PostForm.Get "f"`, `.Request.FormFile "f"` | Cookies and forms. |
 | `.Server.URL` | The server's base URL. |
-| `.Parameters.Get "key"` | The server's parameters. |
+| `.Parameters.Get "key"`, `.Parameters.Has "key"` | The server's parameters. |
 | `.Data` | The map set with `m.SetData`. |
 | `.Provided.<key>` | What `Setup().TemplateDataProviders(...)` provide. |
 | `.Extra` | The reply's `template.data`, or `SetTemplateData` in Go. Webhooks don't have it. |
@@ -172,13 +172,15 @@ engine := vlatte.MustNewGoTemplateEngine(vlatte.WithTemplateFuncs(map[string]any
 m := mockhttp.MustNew(mockhttp.Setup().TemplateEngine(engine))
 ```
 
-**Missing keys** are errors. `{{ .Extra.nmae }}` fails the request and names the key, instead of writing `<no value>`. Read an optional key with `index`, as in `{{ with index .Extra "nick" }}{{ . }}{{ end }}`, or change the rule with `vlatte.WithMissingKey`.
+**Missing keys** are errors. `{{ .Extra.nmae }}` fails the request and names the key, instead of writing `<no value>`, and so does `.Parameters.Get` of a parameter that isn't set. Read an optional key with `index`, as in `{{ with index .Extra "nick" }}{{ . }}{{ end }}`, and an optional parameter with `.Parameters.Has` first. `vlatte.WithMissingKey` changes the rule for map keys.
 
 **Escaping.** Templates are Go's `text/template`, so a body can be any format and nothing is escaped for you. Write JSON values with `toJson`, and use `html` or `urlquery` where they fit.
 
 **Errors.** Templates compile when the mock is built, so one that doesn't compile fails the mock. A body file whose content is a template compiles when a request reads it, since its name can depend on the request. A template that fails at a request answers with the no-match status and the error.
 
 **File names.** A body file name rendered from the request stays inside the directory written before the template: `files/{{ .Request.URL.Query.Get "f" }}` opens files in `files` only, and refuses `../` or an absolute path from the request.
+
+**Header values** are written without the spaces and line breaks around them, as `net/http` writes headers, so a YAML block scalar works. A line break inside a rendered value fails the reply, or the webhook, so the request can't add a header.
 
 **Webhooks** compile their templates when the mock is built, and render them each time they run, with the data of the request that completed the mock.
 

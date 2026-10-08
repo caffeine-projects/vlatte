@@ -94,12 +94,8 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	if conf.TemplateEngine == nil {
-		engine, err := vlatte.NewGoTemplateEngine()
-		if err != nil {
-			return nil, fmt.Errorf("server: %w", err)
-		}
-
-		conf.TemplateEngine = engine
+		// Without options, it can't fail.
+		conf.TemplateEngine = vlatte.MustNewGoTemplateEngine()
 	}
 
 	if err := checkProviderKeys(conf.TemplateDataProviders); err != nil {
@@ -217,14 +213,19 @@ func MustNew(config ...Option) *Server {
 }
 
 // prepareGlobalEvents returns the global events of conf with their parameters as their listeners prepare them, without
-// changing conf's: see vlatte.EventPreparer.
+// changing conf's: see vlatte.EventPreparer. Like a mock's events, each must name a registered listener: an event
+// that names none would never run.
 func prepareGlobalEvents(conf *Config) (*vlatte.Events, error) {
-	if conf.GlobalEvents == nil || conf.Listeners == nil {
+	if conf.GlobalEvents == nil {
 		return conf.GlobalEvents, nil
 	}
 
 	events := &vlatte.Events{OnComplete: slices.Clone(conf.GlobalEvents.OnComplete)}
 	for i, def := range events.OnComplete {
+		if conf.Listeners == nil || !conf.Listeners.OnComplete.Has(def.Name) {
+			return nil, fmt.Errorf("server: global on_complete listener %s at index %d is not registered", def.Name, i)
+		}
+
 		params, err := conf.Listeners.OnComplete.Prepare(def, conf.TemplateEngine)
 		if err != nil {
 			return nil, fmt.Errorf("server: global on_complete listener %s at index %d: %w", def.Name, i, err)

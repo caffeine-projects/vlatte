@@ -39,6 +39,30 @@ func TestEncode_HeaderValuesLoseOuterSpaces(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestEncode_HeaderValuesLoseTheLineBreaksAround(t *testing.T) {
+	// A YAML block scalar ends its value with a line break. Header values and content types are written without the
+	// spaces and line breaks around them, as net/http writes headers, so only a line break inside fails
+	// (TestEncode_Errors).
+	tests := []struct {
+		name string
+		spec *Spec
+	}{
+		{"as written", &Spec{Subtype: "mixed", Boundary: "b", Parts: []*PartSpec{{ContentType: "text/plain\n", Header: []Header{{Name: "X-A", Value: "v\n"}}}}}},
+		{"as rendered", &Spec{Subtype: "mixed", Boundary: "b", Templated: true, Parts: []*PartSpec{{ContentType: "{{ .CT }}\n", Header: []Header{{Name: "X-A", Value: "{{ .V }}\n"}}}}}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e, err := Compile(tc.spec, _engine)
+			require.NoError(t, err)
+
+			body, _, err := e.Encode(map[string]any{"CT": "text/plain", "V": "v"})
+			require.NoError(t, err)
+			require.Equal(t, "--b\r\nContent-Type: text/plain\r\nX-A: v\r\n\r\n\r\n--b--\r\n", string(body))
+		})
+	}
+}
+
 func TestEncode_FormDataInAnyCase(t *testing.T) {
 	// Subtypes ignore case: Form-Data parts are form-data parts, which net/http reads as the form's fields and files.
 	// Written as attachments, they would be dropped.
