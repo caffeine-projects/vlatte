@@ -50,3 +50,13 @@ func TestJSONNet(t *testing.T) {
 
 	fmt.Println(j)
 }
+
+func TestJSONNet_HeaderTemplate(t *testing.T) {
+	// headerTemplate writes header_template: a header map would send the template text as it is.
+	vm := jsonnet.MakeVM()
+
+	j, err := vm.EvaluateAnonymousSnippet("header_template.jsonnet",
+		"(import '../http.libsonnet').res.headerTemplate({ 'X-Method': '{{ .Request.Method }}' })")
+	require.NoError(t, err)
+	require.JSONEq(t, `{"header_template": {"X-Method": "{{ .Request.Method }}"}}`, j)
+}

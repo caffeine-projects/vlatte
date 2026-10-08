@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
 )
 
@@ -57,23 +58,26 @@ func (mp *Multipart) Param(name, value string) *Multipart {
 	return mp
 }
 
-// Template makes the text of the parts Go templates, rendered with the data of each reply: their names, filenames,
-// content types, header values, text bodies and body file names. Byte and JSON bodies, and the content of body
-// files, are written as they are.
+// Template makes the text of the parts templates, compiled with the template engine of the server and rendered with
+// the data of each reply: their names, filenames, content types, header values, text bodies and body file names.
+// Byte and JSON bodies, and the content of body files, are written as they are.
 func (mp *Multipart) Template() *Multipart {
 	mp.spec.Templated = true
 	return mp
 }
 
-// Encode writes the whole body, with data for its templates, under a boundary drawn now when none is set. It
-// returns the body's Content-Type and bytes. A body written at once can't pause, so a part with a delay is an error:
-// delays apply to replies only.
-func (mp *Multipart) Encode(data any) (contentType string, body []byte, err error) {
-	if i := slices.IndexFunc(mp.spec.Parts, func(p *mpart.PartSpec) bool { return p.Delay > 0 }); i >= 0 {
-		return "", nil, fmt.Errorf("multipart: parts[%d].delay can't be set: a body written at once doesn't pause; delays apply to replies only", i)
-	}
+// Check checks the body and compiles its templates with engine, as Encode does, without writing it: a webhook checks
+// its body when its mock is built.
+func (mp *Multipart) Check(engine vlatte.TemplateEngine) error {
+	_, err := mp.compile(engine)
+	return err
+}
 
-	e, err := mpart.Compile(&mp.spec)
+// Encode writes the whole body, with its templates compiled with engine and rendered with data, under a boundary
+// drawn now when none is set. It returns the body's Content-Type and bytes. engine can be nil when the body isn't
+// templated. A body written at once can't pause, so a part with a delay is an error: delays apply to replies only.
+func (mp *Multipart) Encode(engine vlatte.TemplateEngine, data any) (contentType string, body []byte, err error) {
+	e, err := mp.compile(engine)
 	if err != nil {
 		return "", nil, err
 	}
@@ -81,6 +85,15 @@ func (mp *Multipart) Encode(data any) (contentType string, body []byte, err erro
 	body, _, err = e.Encode(data)
 
 	return e.ContentType(), body, err
+}
+
+// compile compiles the body with engine for writing it at once.
+func (mp *Multipart) compile(engine vlatte.TemplateEngine) (*mpart.Encoder, error) {
+	if i := slices.IndexFunc(mp.spec.Parts, func(p *mpart.PartSpec) bool { return p.Delay > 0 }); i >= 0 {
+		return nil, fmt.Errorf("multipart: parts[%d].delay can't be set: a body written at once doesn't pause; delays apply to replies only", i)
+	}
+
+	return mpart.Compile(&mp.spec, engine)
 }
 
 // Part is a part of a multipart body. Start one with NewPart.

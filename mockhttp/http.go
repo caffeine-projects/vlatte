@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -91,6 +93,15 @@ func New(config ...Option) (*Server, error) {
 		conf.RequestWasNotMatchedStatusCode = StatusNoMatch
 	}
 
+	if conf.TemplateEngine == nil {
+		// Without options, it can't fail.
+		conf.TemplateEngine = vlatte.MustNewGoTemplateEngine()
+	}
+
+	if err := checkProviderKeys(conf.TemplateDataProviders); err != nil {
+		return nil, err
+	}
+
 	app.config = conf
 	app.logger = app.getLog(conf)
 
@@ -142,7 +153,12 @@ func New(config ...Option) (*Server, error) {
 		lifecycle = newBuiltInMockHTTPLifecycle(app)
 	}
 
-	eventRunner := vlatte.NewEventRunner(app.config.Listeners, app.config.GlobalEvents)
+	globalEvents, err := prepareGlobalEvents(conf)
+	if err != nil {
+		return nil, err
+	}
+
+	eventRunner := vlatte.NewEventRunner(app.config.Listeners, globalEvents)
 	handler := mid.Compose(middlewares...).Root(newMockHandler(app, lifecycle, conf.TemplateDataProviders, eventRunner))
 
 	if conf.HandlerDecorator != nil {
@@ -194,6 +210,31 @@ func MustNew(config ...Option) *Server {
 	}
 
 	return app
+}
+
+// prepareGlobalEvents returns the global events of conf with their parameters as their listeners prepare them, without
+// changing conf's: see vlatte.EventPreparer. Like a mock's events, each must name a registered listener: an event
+// that names none would never run.
+func prepareGlobalEvents(conf *Config) (*vlatte.Events, error) {
+	if conf.GlobalEvents == nil {
+		return conf.GlobalEvents, nil
+	}
+
+	events := &vlatte.Events{OnComplete: slices.Clone(conf.GlobalEvents.OnComplete)}
+	for i, def := range events.OnComplete {
+		if conf.Listeners == nil || !conf.Listeners.OnComplete.Has(def.Name) {
+			return nil, fmt.Errorf("server: global on_complete listener %s at index %d is not registered", def.Name, i)
+		}
+
+		params, err := conf.Listeners.OnComplete.Prepare(def, conf.TemplateEngine)
+		if err != nil {
+			return nil, fmt.Errorf("server: global on_complete listener %s at index %d: %w", def.Name, i, err)
+		}
+
+		events.OnComplete[i].Parameters = params
+	}
+
+	return events, nil
 }
 
 // Prep runs the given recipes on this mock server, in order.
@@ -335,13 +376,21 @@ func (app *Server) StopRecording() {
 	}
 }
 
-// SetData sets the data to be used as template data during mock configurations parsing.
+// SetData sets the data templates read as .Data, such as the URL of another server: {{ .Data.target }}. The server
+// keeps a copy of the map, and requests read the data in force when they arrive.
 func (app *Server) SetData(data map[string]any) {
+	data = maps.Clone(data)
+
+	app.rwMutex.Lock()
 	app.data = data
+	app.rwMutex.Unlock()
 }
 
-// Data returns the template data associated to this instance.
+// Data returns the data templates read as .Data. Requests read the map, so don't change it: set new data instead.
 func (app *Server) Data() map[string]any {
+	app.rwMutex.RLock()
+	defer app.rwMutex.RUnlock()
+
 	return app.data
 }
 

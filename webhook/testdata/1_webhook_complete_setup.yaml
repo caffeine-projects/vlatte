@@ -8,7 +8,7 @@ response:
 on_complete:
   - name: webhook
     parameters:
-      url: {{ .Data.webhook_target }}
+      url_template: '{{ .Data.webhook_target }}'
       method: POST
       header:
         hello: world

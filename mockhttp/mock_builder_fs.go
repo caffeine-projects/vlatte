@@ -1,8 +1,6 @@
 package mockhttp
 
 import (
-	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,20 +8,15 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"text/template"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
-	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
 
 var (
 	_ vlatte.Builder[*Mock, *Server] = (*fileBuilder)(nil)
 	_ vlatte.Builder[*Mock, *Server] = (*bytesBuilder)(nil)
 )
-
-// _templateHint says how to keep a reply template in a mock file, which is itself a template.
-const _templateHint = "mock files are Go templates: write a reply template as {{`{{ .Request.Method }}`}}"
 
 // MockFileFormats lists the formats of mock files and recordings, as file extensions without the dot.
 func MockFileFormats() []string {
@@ -42,8 +35,8 @@ type fileBuilder struct {
 
 // FromFile builds a mock from a JSON or YAML file, chosen by its extension: .json, .yaml or .yml.
 //
-// The file is a Go template first: it can read the server's parameters, data and URL, as in {{ .URL "/callback" }}.
-// So a template of the reply must be escaped, as in {{`{{ .Request.Method }}`}}.
+// The file is data: only the settings that are templates, such as a templated reply body, are compiled, with the
+// template engine of the server. Templates read the server's parameters, data and URL when a request arrives.
 // A relative body_file opens from the file's directory.
 // When the file has problems, the error is a list of every one, each with its key and a hint.
 func FromFile(path string) vlatte.Builder[*Mock, *Server] {
@@ -72,7 +65,7 @@ func (b *fileBuilder) Build(app *Server) (*Mock, error) {
 		return nil, fail(config.Problem{Code: config.CodeReadError, Origin: origin, Message: err.Error()})
 	}
 
-	doc := mockDoc{origin: origin, source: b.path, format: format, dir: filepath.Dir(b.path), data: data, template: true}
+	doc := mockDoc{origin: origin, source: b.path, format: format, dir: filepath.Dir(b.path), data: data}
 
 	return doc.build(app)
 }
@@ -83,48 +76,37 @@ type bytesBuilder struct {
 }
 
 // FromBytes builds a mock from a JSON or YAML document. format is json, yaml or yml.
-// Like a mock file, the document is a Go template first; see FromFile.
+// Like a mock file, the document is data; see FromFile.
 // A relative body_file opens from the working directory.
 func FromBytes(data []byte, format string) vlatte.Builder[*Mock, *Server] {
 	return &bytesBuilder{data: data, format: format}
 }
 
 func (b *bytesBuilder) Build(app *Server) (*Mock, error) {
-	return mockDoc{origin: "bytes", format: b.format, data: b.data, template: true}.build(app)
+	return mockDoc{origin: "bytes", format: b.format, data: b.data}.build(app)
 }
 
-// buildAdminMock builds a mock posted to the admin API. Its body is not a template.
+// buildAdminMock builds a mock posted to the admin API.
 func buildAdminMock(app *Server, content []byte, format string) (*Mock, error) {
 	return mockDoc{origin: "admin request", format: format, data: content}.build(app)
 }
 
 // mockDoc is a mock definition document and where it came from.
 type mockDoc struct {
-	origin   string // where problems point, such as "file mocks/users.yaml"
-	source   string // the mock's source, a file path; empty for other documents
-	format   string // json, yaml or yml
-	dir      string // where a relative body_file opens from; empty is the working directory
-	data     []byte
-	template bool // run the document through text/template first
+	origin string // where problems point, such as "file mocks/users.yaml"
+	source string // the mock's source, a file path; empty for other documents
+	format string // json, yaml or yml
+	dir    string // where a relative body_file opens from; empty is the working directory
+	data   []byte
 }
 
 // build turns the document into a mock for app. Every failure is a *config.Error listing each problem.
 func (doc mockDoc) build(app *Server) (*Mock, error) {
-	data := doc.data
-	if doc.template {
-		rendered, err := renderMockFile(app, data)
-		if err != nil {
-			return nil, fail(config.Problem{Code: config.CodeParseError, Origin: doc.origin, Message: err.Error(), Hint: _templateHint})
-		}
-
-		data = rendered
-	}
-
 	def := newMockDef()
 	def.dir = doc.dir
 
 	var problems []config.Problem
-	if _, err := _mockSchema.Load(&def, []config.Source{config.Bytes(doc.origin, doc.format, data)}); err != nil {
+	if _, err := _mockSchema.Load(&def, []config.Source{config.Bytes(doc.origin, doc.format, doc.data)}); err != nil {
 		cfgErr, ok := errors.AsType[*config.Error](err)
 		if !ok {
 			return nil, err
@@ -181,25 +163,6 @@ func parseFailed(problems []config.Problem) bool {
 // fail returns the problems of a mock document as an error.
 func fail(problems ...config.Problem) error {
 	return &config.Error{Scope: "mock", Problems: problems}
-}
-
-// renderMockFile runs a mock document through text/template with the server's parameters, data and URL,
-// so one file can adapt to where it runs.
-func renderMockFile(app *Server, data []byte) ([]byte, error) {
-	tmpl, err := template.New("").Parse(string(data))
-	if err != nil {
-		return nil, err
-	}
-
-	// Mock files load outside any request, so parameters are read without one.
-	view := &mockFileData{viewdata.NewParameters(context.Background(), app.params), app.Data(), app.URL()}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, view); err != nil {
-		return nil, err
-	}
-
-	return buf.Bytes(), nil
 }
 
 // workingDirHint says where a relative path starts.

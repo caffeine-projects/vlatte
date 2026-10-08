@@ -56,7 +56,7 @@ local scheme = import './scheme.libsonnet';
     ok():: self.status(statuses.StatusOK),
 
     header(map):: { header: map },
-    headerTemplate(map):: { header: map },
+    headerTemplate(map):: { header_template: map },
     body(b):: { body: b },
     bodyFile(f):: { body_file: f },
     multipart(spec):: { multipart: spec },

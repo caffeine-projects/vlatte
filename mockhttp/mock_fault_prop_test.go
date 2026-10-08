@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 
@@ -325,19 +324,13 @@ func FuzzMockDoc(f *testing.F) {
 		data, err := os.ReadFile(path)
 		require.NoError(f, err)
 
-		f.Add(data, format, true)
-		f.Add(data, format, false)
+		f.Add(data, format)
 	}
 
 	m := MustNew(Setup().Silent().OnCompleteListener("webhook", stop))
 
-	f.Fuzz(func(t *testing.T, data []byte, format string, template bool) {
-		if template && strings.Contains(string(data), "range") {
-			// A template can loop as long as it wants: mock files are trusted code, run as written.
-			t.Skip("a template loop")
-		}
-
-		_, err := mockDoc{origin: "fuzz", format: format, data: data, template: template}.build(m)
+	f.Fuzz(func(t *testing.T, data []byte, format string) {
+		_, err := mockDoc{origin: "fuzz", format: format, data: data}.build(m)
 		if err == nil {
 			return
 		}

@@ -150,10 +150,6 @@ func TestJSONSchema_AcceptsTheFixturesTheDecoderAccepts(t *testing.T) {
 		data, err := os.ReadFile(file)
 		require.NoError(t, err)
 
-		if strings.Contains(string(data), "{{") {
-			continue // a template, valid once rendered
-		}
-
 		// dir, as FromFile sets it: without it, fixtures with relative files would be skipped as wrong.
 		if _, err := (mockDoc{origin: file, format: format, dir: filepath.Dir(file), data: data}).build(m); err != nil {
 			continue // wrong on purpose, or not a mock file

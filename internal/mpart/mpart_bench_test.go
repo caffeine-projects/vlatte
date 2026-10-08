@@ -12,7 +12,7 @@ func BenchmarkEncode(b *testing.B) {
 		s.Parts = append(s.Parts, &PartSpec{Name: "p", ContentType: "application/octet-stream", Body: bytes.Repeat([]byte("x"), 4<<10)})
 	}
 
-	e, err := Compile(s)
+	e, err := Compile(s, _engine)
 	if err != nil {
 		b.Fatal(err)
 	}

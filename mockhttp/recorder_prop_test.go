@@ -340,7 +340,8 @@ func TestRecorder_Regressions(t *testing.T) {
 		// F22, found by TestPropRecorder_RoundTrip: the recorded Content-Length was replayed
 		// over a body compressed again, at another level.
 		{"a body gzipped by the target replays", text(exchange{resBody: []byte("A"), gzip: true, level: gzip.BestCompression})},
-		// Found by TestPropRecorder_RoundTrip: a mock file is a Go template first, so {{ in a recording broke its load.
+		// Found by TestPropRecorder_RoundTrip when mock files were Go templates first: {{ in a recording broke its load.
+		// Mock files are data now, and recordings are written as they are.
 		{"a body with template delimiters replays as is", text(exchange{
 			query:   url.Values{"q": {"{{"}},
 			resBody: []byte("{{ .Request.Method }} {{`{{`}} {{{ }}"),

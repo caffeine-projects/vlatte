@@ -90,6 +90,15 @@ func TestDecode_Rules(t *testing.T) {
 	}
 }
 
+func TestDecode_ALineBreakAroundAHeaderValue(t *testing.T) {
+	// A YAML block scalar ends its value with a line break, which isn't written: only a line break inside is a problem.
+	doc, err := value.DecodeJSON([]byte(`{"type": "mixed", "parts": [{"content_type": "a/b\n", "header": {"X-A": "{{ .V }}\n"}}]}`))
+	require.NoError(t, err)
+
+	_, err = Decode(config.Value{Key: "m", Origin: "doc", Any: doc})
+	require.NoError(t, err)
+}
+
 func TestDecode_AValidObject(t *testing.T) {
 	doc, err := value.DecodeJSON([]byte(`{
 		"type": "related", "boundary": "b0", "params": {"type": "application/json", "start": "<root>"},

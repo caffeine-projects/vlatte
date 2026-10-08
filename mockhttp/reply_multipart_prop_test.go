@@ -114,7 +114,12 @@ func (m multipartReplyModel) reply() *Reply {
 		mp.Template()
 	}
 
-	rep := OK().SetTemplateData(map[string]any{"v": m.extra}).Multipart(mp)
+	// Data goes with templates only, as in the model's mock file.
+	rep := OK().Multipart(mp)
+	if m.templated {
+		rep.SetTemplateData(map[string]any{"v": m.extra})
+	}
+
 	if m.gzip {
 		rep.Gzip()
 	}
@@ -309,7 +314,7 @@ func TestPropMultipart_GoAndFilesDescribeTheSame(t *testing.T) {
 
 		response := map[string]any{"status": int64(200), "multipart": reply.doc()}
 		if reply.templated {
-			response["template"] = map[string]any{"data": map[string]any{"v": reply.extra}}
+			response["template"] = map[string]any{"enabled": true, "data": map[string]any{"v": reply.extra}}
 		}
 
 		doc := map[string]any{

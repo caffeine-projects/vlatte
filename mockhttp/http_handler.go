@@ -2,7 +2,6 @@ package mockhttp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -12,8 +11,6 @@ import (
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/httprec"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
-
-var ErrTemplateDataKeyExists = errors.New("http: template data key already exists")
 
 // topResponseWriter passes every write of a reply through the steps of its mock, then to rw.
 type topResponseWriter struct {
@@ -121,30 +118,26 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Template data providers see the mock that matched.
+	reqValues.Mock = mock
+
 	d := make(map[string]any, len(h.templateDataProviders))
-	sdpIn := &TemplateDataProviderInput{r: reqValues, s: h.app.config.Template}
+	sdpIn := &TemplateDataProviderInput{r: reqValues}
 
-	if len(h.templateDataProviders) > 0 {
-		for _, sdp := range h.templateDataProviders {
-			if _, ok := d[sdp.Key()]; ok {
-				h.lifecycle.OnWarning(reqValues, fmt.Errorf("%w: key=%s provider=%T", ErrTemplateDataKeyExists, sdp.Key(), sdp))
-			}
-
-			dd, err := sdp.Data(sdpIn)
-			if err != nil {
-				h.lifecycle.OnError(reqValues, fmt.Errorf("http: error getting template data provider. %w", err))
-				return
-			}
-
-			d[sdp.Key()] = dd
+	for _, sdp := range h.templateDataProviders {
+		dd, err := sdp.Data(sdpIn)
+		if err != nil {
+			h.onError(w, reqValues, fmt.Errorf("http: template data provider %s: %w", sdp.Key(), err))
+			return
 		}
+
+		d[sdp.Key()] = dd
 	}
 
 	locals := locals(reqValues, d, viewdata.NewParameters(r.Context(), h.app.params))
-	kit := &Kit{template: h.app.config.Template, data: locals}
+	kit := &Kit{engine: h.app.config.TemplateEngine, data: locals}
 
 	reqValues.Data = locals
-	reqValues.Mock = mock
 
 	if mock.Delay != nil {
 		ctxTimeout, cancel := context.WithTimeout(r.Context(), mock.Delay())
@@ -273,6 +266,7 @@ func locals(r *RequestValues, provided map[string]any, params *viewdata.Paramete
 	}
 
 	req := &viewdata.Request{
+		ID:              r.ReqID,
 		Method:          r.RawRequest.Method,
 		URL:             r.URL,
 		URLPathSegments: r.URLPathSegments,
@@ -283,7 +277,13 @@ func locals(r *RequestValues, provided map[string]any, params *viewdata.Paramete
 		MultipartForm:   r.RawRequest.MultipartForm,
 	}
 
-	return viewdata.New(req, provided, params)
+	return &viewdata.Data{
+		Request:    req,
+		Provided:   provided,
+		Parameters: params,
+		Server:     &viewdata.Server{URL: r.App.URL()},
+		Data:       r.App.Data(),
+	}
 }
 
 // formFiles returns the files of r's multipart form, by field name, or nil when r has none.

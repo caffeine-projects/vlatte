@@ -13,11 +13,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte"
 )
+
+// _engine compiles the templates of the specs under test.
+var _engine = vlatte.MustNewGoTemplateEngine()
 
 func TestEncode_HeaderValuesLoseOuterSpaces(t *testing.T) {
 	// genHeaderValue draws no space at either end of a value: a reader trims them, as HTTP header values are.
-	e, err := Compile(&Spec{Subtype: "mixed", Parts: []*PartSpec{{Header: []Header{{Name: "X-A", Value: " a "}}}}})
+	e, err := Compile(&Spec{Subtype: "mixed", Parts: []*PartSpec{{Header: []Header{{Name: "X-A", Value: " a "}}}}}, _engine)
 	require.NoError(t, err)
 
 	body, _, err := e.Encode(nil)
@@ -34,13 +39,37 @@ func TestEncode_HeaderValuesLoseOuterSpaces(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestEncode_HeaderValuesLoseTheLineBreaksAround(t *testing.T) {
+	// A YAML block scalar ends its value with a line break. Header values and content types are written without the
+	// spaces and line breaks around them, as net/http writes headers, so only a line break inside fails
+	// (TestEncode_Errors).
+	tests := []struct {
+		name string
+		spec *Spec
+	}{
+		{"as written", &Spec{Subtype: "mixed", Boundary: "b", Parts: []*PartSpec{{ContentType: "text/plain\n", Header: []Header{{Name: "X-A", Value: "v\n"}}}}}},
+		{"as rendered", &Spec{Subtype: "mixed", Boundary: "b", Templated: true, Parts: []*PartSpec{{ContentType: "{{ .CT }}\n", Header: []Header{{Name: "X-A", Value: "{{ .V }}\n"}}}}}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e, err := Compile(tc.spec, _engine)
+			require.NoError(t, err)
+
+			body, _, err := e.Encode(map[string]any{"CT": "text/plain", "V": "v"})
+			require.NoError(t, err)
+			require.Equal(t, "--b\r\nContent-Type: text/plain\r\nX-A: v\r\n\r\n\r\n--b--\r\n", string(body))
+		})
+	}
+}
+
 func TestEncode_FormDataInAnyCase(t *testing.T) {
 	// Subtypes ignore case: Form-Data parts are form-data parts, which net/http reads as the form's fields and files.
 	// Written as attachments, they would be dropped.
 	e, err := Compile(&Spec{Subtype: "Form-Data", Parts: []*PartSpec{
 		{Name: "title", Body: []byte("Holiday"), Kind: BodyText},
 		{Name: "photo", Filename: "a.png", Body: []byte("PNG")},
-	}})
+	}}, _engine)
 	require.NoError(t, err)
 
 	body, _, err := e.Encode(nil)
@@ -55,7 +84,7 @@ func TestEncode_FormDataInAnyCase(t *testing.T) {
 
 func TestEncode_TheBoundaryWithinALine(t *testing.T) {
 	// A delimiter starts a line, so "--" and the boundary within a line don't end a part: the body reads back whole.
-	e, err := Compile(&Spec{Subtype: "mixed", Boundary: "b", Parts: []*PartSpec{{Body: []byte("a--b c\r\nd --b--"), Kind: BodyText}}})
+	e, err := Compile(&Spec{Subtype: "mixed", Boundary: "b", Parts: []*PartSpec{{Body: []byte("a--b c\r\nd --b--"), Kind: BodyText}}}, _engine)
 	require.NoError(t, err)
 
 	body, _, err := e.Encode(nil)
@@ -74,12 +103,46 @@ func TestEncode_TemplatedBodyFileName(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("{{ .Name }} as is"), 0o600))
 
-	e, err := Compile(&Spec{Subtype: "mixed", Templated: true, Dir: dir, Parts: []*PartSpec{{File: "{{ .Name }}.txt"}}})
+	e, err := Compile(&Spec{Subtype: "mixed", Templated: true, Dir: dir, Parts: []*PartSpec{{File: "{{ .Name }}.txt"}}}, _engine)
 	require.NoError(t, err)
 
 	body, _, err := e.Encode(map[string]any{"Name": "a"})
 	require.NoError(t, err)
 	require.Contains(t, string(body), "\r\n\r\n{{ .Name }} as is\r\n")
+}
+
+func TestEncode_TemplatedBodyFileNamesStayInTheDir(t *testing.T) {
+	// A body file name rendered from data, such as the request, can't reach out of the spec's directory. A name
+	// written in the spec is the author's, so it opens as it is.
+	root := t.TempDir()
+	dir := filepath.Join(root, "mocks")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "in.txt"), []byte("in"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "out.txt"), []byte("out"), 0o600))
+
+	encode := func(templated bool, file string, data any) (string, error) {
+		e, err := Compile(&Spec{Subtype: "mixed", Templated: templated, Dir: dir, Parts: []*PartSpec{{File: file}}}, _engine)
+		require.NoError(t, err)
+
+		body, _, err := e.Encode(data)
+
+		return string(body), err
+	}
+
+	body, err := encode(true, "{{ .Name }}", map[string]any{"Name": "in.txt"})
+	require.NoError(t, err)
+	require.Contains(t, body, "\r\n\r\nin\r\n")
+
+	for _, name := range []string{"../out.txt", filepath.Join(root, "out.txt")} {
+		_, err = encode(true, "{{ .Name }}", map[string]any{"Name": name})
+		require.ErrorContains(t, err, "multipart: parts[0]: ", name)
+	}
+
+	for _, templated := range []bool{false, true} {
+		body, err = encode(templated, "../out.txt", nil)
+		require.NoError(t, err)
+		require.Contains(t, body, "\r\n\r\nout\r\n")
+	}
 }
 
 func TestEncode_Errors(t *testing.T) {
@@ -104,7 +167,7 @@ func TestEncode_Errors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			e, err := Compile(tc.spec)
+			e, err := Compile(tc.spec, _engine)
 			require.NoError(t, err)
 
 			_, _, err = e.Encode(tc.data)
@@ -115,12 +178,16 @@ func TestEncode_Errors(t *testing.T) {
 
 func TestCompile_Errors(t *testing.T) {
 	// Compile reports every issue of the spec, and template syntax errors, naming where they are.
-	_, err := Compile(&Spec{Subtype: "form-data", Boundary: "a ", Parts: []*PartSpec{{Err: errors.New("json: cannot marshal")}}})
+	_, err := Compile(&Spec{Subtype: "form-data", Boundary: "a ", Parts: []*PartSpec{{Err: errors.New("json: cannot marshal")}}}, _engine)
 	require.EqualError(t, err, "multipart: boundary must be 1 to 70 letters, digits or '()+_,-./:=? characters, not ending in a space, not \"a \"; "+
 		"parts[0].body json: cannot marshal; parts[0].name is required in a form-data part; name the form field")
 
-	_, err = Compile(&Spec{Subtype: "mixed", Templated: true, Parts: []*PartSpec{{Filename: "{{ .A"}}})
+	_, err = Compile(&Spec{Subtype: "mixed", Templated: true, Parts: []*PartSpec{{Filename: "{{ .A"}}}, _engine)
 	require.ErrorContains(t, err, "multipart: parts[0]: filename: template: filename:1: ")
+
+	// Templates compile with the engine of the server: without one, a templated spec can't compile.
+	_, err = Compile(&Spec{Subtype: "mixed", Templated: true, Parts: []*PartSpec{{Name: "n"}}}, nil)
+	require.EqualError(t, err, "multipart: a templated body needs a template engine")
 }
 
 func TestEncode_ContentTypeParameters(t *testing.T) {
@@ -129,14 +196,14 @@ func TestEncode_ContentTypeParameters(t *testing.T) {
 		Subtype: "related", Boundary: "b0",
 		Params: map[string]string{"type": "application/xop+xml", "start": "<root>", "start-info": "text/xml"},
 		Parts:  []*PartSpec{{Body: []byte("x")}},
-	})
+	}, _engine)
 	require.NoError(t, err)
 	require.Equal(t, `multipart/related; boundary=b0; start="<root>"; start-info="text/xml"; type="application/xop+xml"`, e.ContentType())
 }
 
 func TestEncode_DispositionOutsideForms(t *testing.T) {
 	// Outside form-data, a name or a filename makes an attachment; a part with neither has no disposition.
-	e, err := Compile(&Spec{Subtype: "mixed", Boundary: "b", Parts: []*PartSpec{{Name: "n"}, {Filename: `a"b.txt`}, {}}})
+	e, err := Compile(&Spec{Subtype: "mixed", Boundary: "b", Parts: []*PartSpec{{Name: "n"}, {Filename: `a"b.txt`}, {}}}, _engine)
 	require.NoError(t, err)
 
 	body, _, err := e.Encode(nil)

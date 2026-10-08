@@ -4,7 +4,7 @@ request:
   body: "hello world"
 
 proxy:
-  target: '{{ .Data.target }}'
+  target: http://target.invalid
   forward_header:
     test: ok
   header:

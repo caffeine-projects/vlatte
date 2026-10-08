@@ -13,6 +13,7 @@ tool mvdan.cc/gofumpt
 require (
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/google/go-jsonnet v0.22.0
+	github.com/mailgun/raymond/v2 v2.0.48
 	github.com/mattn/go-colorable v0.1.15
 	github.com/mattn/go-isatty v0.0.24
 	github.com/ohler55/ojg v1.28.7
@@ -30,6 +31,7 @@ require (
 
 require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect

@@ -1,70 +1,24 @@
 package vlatte
 
-import (
-	htmltemplate "html/template"
-	"io"
-	texttemplate "text/template"
-)
+import "io"
 
+// TemplateEngine compiles templates: the bodies, headers and body file names of replies, the parts of multipart
+// bodies, and the parameters of events, such as webhooks. A server compiles all of them with one engine.
+//
+// Templates compile when a mock is built, so one that doesn't compile fails the mock rather than a request. A body
+// file whose content is a template compiles when a request reads it, since its name can depend on the request, so
+// Compile must be safe for concurrent use.
+//
+// GoTemplateEngine is the engine vlatte ships, and the default. Another engine, such as one for Handlebars, plugs in
+// by implementing this interface.
+type TemplateEngine interface {
+	// Compile parses text. name says which template it is in errors, such as "body" or "header.X-Id".
+	Compile(name, text string) (Template, error)
+}
+
+// Template is a compiled template.
 type Template interface {
-	Name() string
-	Parse(text string) (Template, error)
-	Execute(wr io.Writer, data any) error
-	ExecuteTemplate(wr io.Writer, name string, data any) error
-}
-
-func TemplateHTML(tmpl *htmltemplate.Template) Template {
-	return &htmlTmpl{tmpl: tmpl}
-}
-
-func TemplateText(tmpl *texttemplate.Template) Template {
-	return &textTmpl{tmpl: tmpl}
-}
-
-type htmlTmpl struct {
-	tmpl *htmltemplate.Template
-}
-
-func (h *htmlTmpl) Name() string {
-	return h.tmpl.Name()
-}
-
-func (h *htmlTmpl) Parse(text string) (Template, error) {
-	if _, err := h.tmpl.Parse(text); err != nil {
-		return nil, err
-	}
-
-	return h, nil
-}
-
-func (h *htmlTmpl) Execute(wr io.Writer, data any) error {
-	return h.tmpl.Execute(wr, data)
-}
-
-func (h *htmlTmpl) ExecuteTemplate(wr io.Writer, name string, data any) error {
-	return h.tmpl.ExecuteTemplate(wr, name, data)
-}
-
-type textTmpl struct {
-	tmpl *texttemplate.Template
-}
-
-func (t *textTmpl) Name() string {
-	return t.tmpl.Name()
-}
-
-func (t *textTmpl) Parse(text string) (Template, error) {
-	if _, err := t.tmpl.Parse(text); err != nil {
-		return nil, err
-	}
-
-	return t, nil
-}
-
-func (t *textTmpl) Execute(wr io.Writer, data any) error {
-	return t.tmpl.Execute(wr, data)
-}
-
-func (t *textTmpl) ExecuteTemplate(wr io.Writer, name string, data any) error {
-	return t.tmpl.ExecuteTemplate(wr, name, data)
+	// Execute writes the template applied to data to w. A mock executes its templates for every request it serves,
+	// so Execute must be safe for concurrent use.
+	Execute(w io.Writer, data any) error
 }

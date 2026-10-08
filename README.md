@@ -65,7 +65,7 @@ func TestHello(t *testing.T) {
 | `match` | Request matchers, such as `match.Equal`, `match.JSONPath` and `match.All` |
 | `webhook` | Calling a URL after a mock is served |
 | `recipe/<protocol>/<recipe>` | Recipes that prepare a server, such as `recipe/http/proxyall` |
-| `vlatte` | The types every mock server shares |
+| `vlatte` | The types every mock server shares, and the Go template engine |
 
 A recipe prepares a server through `Prep`. This one forwards every request that no mock matches:
 
@@ -110,7 +110,7 @@ No other reading happens: `[equal, 10]` doesn't match `010`. The [match package 
 
 **Keys.** Keys are kept as written, so a query name like `userId` matches `userId` only.
 
-**Templates.** A mock file is a Go template first. It can read the server's parameters, data and URL, as in `{{ .URL "/callback" }}`. So a template of the reply must be escaped: ``{{`{{ .Request.Method }}`}}``.
+**Templates.** A mock file is plain JSON or YAML. Only the settings that are templates, such as a templated body, render: see [Templates](#templates).
 
 **Errors.** A file with problems isn't loaded. The error lists every problem with its key and a fix:
 
@@ -119,6 +119,84 @@ mock: 2 problems
   file testdata/_mocks/users_mock.yaml: unknown_key: response.stauts is not a known setting; did you mean response.status?
   file testdata/_mocks/users_mock.yaml: conflict: proxy is set with response; keep one of them
 ```
+
+## Templates
+
+Replies can render parts of the response from the request: header values, the body, and the name or content of a body file. So can multipart parts and webhooks.
+
+```yaml
+request:
+  method: POST
+  path: /users
+
+response:
+  status: 201
+  header_template:
+    location: '/users/{{ .Request.Header.Get "X-User-Id" }}'
+  body: '{"id": {{ uuid | toJson }}, "name": {{ (fromJson .Request.Body.String).name | toJson }}}'
+  template:
+    enabled: true
+```
+
+In Go:
+
+```go
+m.MustMock(mockhttp.Postf("/users").Reply(mockhttp.Created().
+	HeaderTemplate("Location", `/users/{{ .Request.Header.Get "X-User-Id" }}`).
+	BodyTemplate(`{"id": {{ uuid | toJson }}}`)))
+```
+
+**What is a template.** Nothing else renders: `{{` anywhere else is text.
+- `header_template` values (`HeaderTemplate`).
+- With `template.enabled`: a text `body` (`BodyTemplate`), the content of a `body_file` (`BodyFileWithTemplate`), and the text of `multipart` parts (`Template()`).
+- `body_file` names, always. The content of the file is written as it is unless `template.enabled` is set.
+- Webhook parameters: `url_template`, `header_template`, `body_template` and `multipart_template`.
+
+**Data.** Templates read:
+
+| Field | What it holds |
+|---|---|
+| `.Request.Method`, `.Request.URL`, `.Request.URLPathSegments`, `.Request.Header`, `.Request.ID` | The request. `index .Request.URLPathSegments 0` is the first segment of the path. |
+| `.Request.Body.String`, `.Request.Body.Content`, `.Request.HasBody` | The body. JSON bodies are text: read their fields with `fromJson`. |
+| `.Request.Cookie "name"`, `.Request.PostForm.Get "f"`, `.Request.FormFile "f"` | Cookies and forms. |
+| `.Server.URL` | The server's base URL. |
+| `.Parameters.Get "key"`, `.Parameters.Has "key"` | The server's parameters. |
+| `.Data` | The map set with `m.SetData`. |
+| `.Provided.<key>` | What `Setup().TemplateDataProviders(...)` provide. |
+| `.Extra` | The reply's `template.data`, or `SetTemplateData` in Go. Webhooks don't have it. |
+
+**Functions.** Besides those of Go templates, such as `index`, `printf`, `html` and `urlquery`: `toJson`, `fromJson`, `uuid`, `now`, `base64Encode` and `base64Decode`. Add your own to the engine:
+
+```go
+engine := vlatte.MustNewGoTemplateEngine(vlatte.WithTemplateFuncs(map[string]any{"upper": strings.ToUpper}))
+m := mockhttp.MustNew(mockhttp.Setup().TemplateEngine(engine))
+```
+
+**Missing keys** are errors. `{{ .Extra.nmae }}` fails the request and names the key, instead of writing `<no value>`, and so does `.Parameters.Get` of a parameter that isn't set. Read an optional key with `index`, as in `{{ with index .Extra "nick" }}{{ . }}{{ end }}`, and an optional parameter with `.Parameters.Has` first. `vlatte.WithMissingKey` changes the rule for map keys.
+
+**Escaping.** Templates are Go's `text/template`, so a body can be any format and nothing is escaped for you. Write JSON values with `toJson`, and use `html` or `urlquery` where they fit.
+
+**Errors.** Templates compile when the mock is built, so one that doesn't compile fails the mock. A body file whose content is a template compiles when a request reads it, since its name can depend on the request. A template that fails at a request answers with the no-match status and the error.
+
+**File names.** A body file name rendered from the request stays inside the directory written before the template: `files/{{ .Request.URL.Query.Get "f" }}` opens files in `files` only, and refuses `../` or an absolute path from the request.
+
+**Header values** are written without the spaces and line breaks around them, as `net/http` writes headers, so a YAML block scalar works. A line break inside a rendered value fails the reply, or the webhook, so the request can't add a header.
+
+**Webhooks** compile their templates when the mock is built, and render them each time they run, with the data of the request that completed the mock.
+
+**Other engines.** A server compiles all its templates with one `vlatte.TemplateEngine`. vlatte ships `vlatte.GoTemplateEngine`; another engine, such as one for Handlebars, plugs in by implementing two methods:
+
+```go
+type TemplateEngine interface {
+	Compile(name, text string) (Template, error)
+}
+
+type Template interface {
+	Execute(w io.Writer, data any) error // safe for concurrent use
+}
+```
+
+Pass it with `Setup().TemplateEngine(e)`. Templates then use its syntax everywhere, mock files included, as in `{{Request.Method}}` for Handlebars. [`template_handlebars_test.go`](mockhttp/e2e/template_handlebars_test.go) wraps [raymond](https://github.com/mailgun/raymond) in a few lines. Other engines read the same fields, maps and methods without arguments; methods with arguments, such as `.Parameters.Get "key"`, are Go template syntax.
 
 ## Forms and multipart
 

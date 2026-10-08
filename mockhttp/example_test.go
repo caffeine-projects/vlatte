@@ -49,7 +49,7 @@ func Example_multipart() {
 	contentType, body, err := mockhttp.MultipartForm(
 		mockhttp.NewPart().Name("title").BodyText("Holiday"),
 		mockhttp.NewPart().Name("photo").Filename("me.png").Body([]byte("PNG")),
-	).Encode(nil)
+	).Encode(nil, nil)
 	if err != nil {
 		panic(err)
 	}

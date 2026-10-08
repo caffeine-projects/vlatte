@@ -1,5 +1,7 @@
 request:
-  url: '{{ .URL }}/test?q=none'
+  path: /test
+  query:
+    q: none
   method:
     - isIn
     - - GET

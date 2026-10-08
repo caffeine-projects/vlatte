@@ -376,7 +376,7 @@ var _replySchema = config.NewSchema(
 		Set: func(r *replyDef, v config.Value) error { return headerValues(v, &r.header) },
 	},
 	replyField{
-		Key: "header_template", Kind: config.Any, Usage: "Headers whose values are Go templates, by name.",
+		Key: "header_template", Kind: config.Any, Usage: "Headers whose values are templates, by name.",
 		Set: func(r *replyDef, v config.Value) error { return headerValues(v, &r.headerTemplate) },
 	},
 	replyField{
@@ -418,11 +418,11 @@ var _replySchema = config.NewSchema(
 		},
 	},
 	replyField{
-		Key: "template.enabled", Kind: config.Bool, Usage: "Render the body as a Go template.",
+		Key: "template.enabled", Kind: config.Bool, Usage: "Render the body as a template: a text body, the content of body_file, or the text of multipart parts.",
 		Set: func(r *replyDef, v config.Value) error { r.templated = v.Bool; return nil },
 	},
 	replyField{
-		Key: "template.data", Kind: config.Any, Usage: "Data templates read as .Extra; setting it renders the body as a template.",
+		Key: "template.data", Kind: config.Any, Usage: "Data the reply's templates read as .Extra.",
 		Set: func(r *replyDef, v config.Value) error {
 			switch v.Any.(type) {
 			case map[string]any, []any:
@@ -645,6 +645,16 @@ func decodeReply(r *replyDef, v config.Value) error {
 	}
 
 	problems := conflicts(v.Origin, v.Key, bodies)
+
+	// A template is text: a JSON body would be written as it is, with nothing rendered.
+	if _, isText := r.body.(string); r.templated && r.hasBody && !isText {
+		key := v.Key + ".template.enabled"
+		problems = append(problems, config.Problem{
+			Code: config.CodeConflict, Origin: v.Origin, Key: key,
+			Message: key + " is set with " + v.Key + ".body, which isn't text",
+			Hint:    "write the body as a string to render it as a template",
+		})
+	}
 
 	// A multipart body sets the Content-Type, with its boundary.
 	if _, ok := obj["multipart"]; ok {
@@ -1075,7 +1085,7 @@ func (r *replyDef) build(dir string) *Reply {
 		rep.Gzip()
 	}
 
-	templated := r.templated || r.hasData
+	templated := r.templated
 	if r.hasData {
 		rep.SetTemplateData(r.data)
 	}

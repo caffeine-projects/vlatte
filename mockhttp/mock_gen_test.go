@@ -576,7 +576,7 @@ func genReply() *rapid.Generator[replyModel] {
 			v := genToken().Draw(t, "data")
 			r.data = &v
 			r.doc["body"] = "{{ .Extra.name }}"
-			r.doc["template"] = map[string]any{"data": map[string]any{"name": v}}
+			r.doc["template"] = map[string]any{"enabled": true, "data": map[string]any{"name": v}}
 		case 4:
 			mp := genMultipartReply().Draw(t, "multipart")
 			mp.gzip = false // the reply's own encoding gzips it
@@ -592,7 +592,7 @@ func genReply() *rapid.Generator[replyModel] {
 			r.doc["multipart"] = mp.doc()
 
 			if mp.templated {
-				r.doc["template"] = map[string]any{"data": map[string]any{"v": mp.extra}}
+				r.doc["template"] = map[string]any{"enabled": true, "data": map[string]any{"v": mp.extra}}
 			}
 		}
 

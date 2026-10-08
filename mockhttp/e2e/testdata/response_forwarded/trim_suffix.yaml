@@ -3,5 +3,5 @@ request:
   method: GET
 
 proxy:
-  target: '{{ .Data.target }}'
+  target: http://target.invalid
   trim_suffix: .json

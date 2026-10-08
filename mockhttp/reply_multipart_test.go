@@ -219,7 +219,7 @@ func TestReplyMultipart_LastBodySetterWins(t *testing.T) {
 	require.Equal(t, "text", string(body))
 
 	// Part body setters too.
-	_, b, err := MultipartMixed(NewPart().BodyFile("no-such-file").BodyText("text")).Encode(nil)
+	_, b, err := MultipartMixed(NewPart().BodyFile("no-such-file").BodyText("text")).Encode(nil, nil)
 	require.NoError(t, err)
 	require.Contains(t, string(b), "\r\n\r\ntext\r\n")
 }
@@ -253,7 +253,7 @@ func TestReplyMultipart_Describe(t *testing.T) {
 
 func TestMultipart_Encode(t *testing.T) {
 	// Encode writes the body a webhook sends, or a test posts: the same as a reply's.
-	contentType, body, err := MultipartForm(NewPart().Name("a").BodyText("1"), NewPart().Name("f").Filename("f.txt").BodyText("x")).Encode(nil)
+	contentType, body, err := MultipartForm(NewPart().Name("a").BodyText("1"), NewPart().Name("f").Filename("f.txt").BodyText("x")).Encode(nil, nil)
 	require.NoError(t, err)
 
 	r, err := stdlibForm(contentType, body)
@@ -265,7 +265,7 @@ func TestMultipart_Encode(t *testing.T) {
 func TestMultipart_EncodeCantPause(t *testing.T) {
 	// A body written at once, as a webhook or a test sends it, can't pause: a part with a delay is an error, not a
 	// delay dropped without a word.
-	_, _, err := MultipartMixed(NewPart().BodyText("a"), NewPart().BodyText("b").Delay(time.Second)).Encode(nil)
+	_, _, err := MultipartMixed(NewPart().BodyText("a"), NewPart().BodyText("b").Delay(time.Second)).Encode(nil, nil)
 	require.EqualError(t, err, "multipart: parts[1].delay can't be set: a body written at once doesn't pause; delays apply to replies only")
 }
 
@@ -277,7 +277,7 @@ func TestMultipart_PartsAreCopied(t *testing.T) {
 
 	copy(buf, "later")
 
-	_, body, err := mp.Encode(nil)
+	_, body, err := mp.Encode(nil, nil)
 	require.NoError(t, err)
 	require.Contains(t, string(body), "\r\n\r\nfirst\r\n")
 }

@@ -8,12 +8,12 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -24,12 +24,18 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
-var _ vlatte.EventListener[vlatte.OnComplete] = (*WebHook)(nil)
+var (
+	_ vlatte.EventListener[vlatte.OnComplete] = (*WebHook)(nil)
+	_ vlatte.EventPreparer                    = (*WebHook)(nil)
+)
 
 var (
 	ErrBadArg            = errors.New("webhook: bad argument")
 	ErrRenderingTemplate = errors.New("webhook: rendering error")
 )
+
+// _defaultEngine compiles the templates of a webhook run without a Kit, such as one called directly.
+var _defaultEngine = vlatte.MustNewGoTemplateEngine()
 
 type Option func(*WebHook) error
 
@@ -91,24 +97,28 @@ func New(options ...Option) (*WebHook, error) {
 	return w, nil
 }
 
-// Run implements vlatte.EventListener[vlatte.OnComplete]. It parses the event parameters and performs the HTTP request.
-func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
-	if args.Parameters() == nil {
-		return errors.New("webhook: arguments must not be nil")
+// Prepare implements vlatte.EventPreparer. It decodes the parameters of a mock's webhook and compiles their templates
+// with the server's engine, so a mistake fails the mock when it is built instead of each send. Run receives the
+// decoded *Args.
+func (w *WebHook) Prepare(cfg vlatte.EventConfig, engine vlatte.TemplateEngine) (vlatte.Parameters, error) {
+	args, err := argsOf(cfg.Parameters, "on_complete", cfg.Dir)
+	if err != nil {
+		return nil, err
 	}
 
-	rawArgs := args.Parameters()
-	webhookArgs, ok := rawArgs.(*Args)
-	if !ok {
-		m, ok := rawArgs.(map[string]any)
-		if !ok {
-			return errors.New("webhook: arguments must be *Args or map[string]any")
-		}
+	if err := args.check(engine); err != nil {
+		return nil, err
+	}
 
-		var err error
-		if webhookArgs, err = argsFromMap(m, originOf(args), dirOf(args)); err != nil {
-			return err
-		}
+	return args, nil
+}
+
+// Run implements vlatte.EventListener[vlatte.OnComplete]. It parses the event parameters and performs the HTTP request.
+func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
+	// Each run has its own copy of the parameters, so a Transform changes only this request.
+	webhookArgs, err := argsOf(args.Parameters(), originOf(args), dirOf(args))
+	if err != nil {
+		return err
 	}
 
 	if err := w.Transform(ctx, args, webhookArgs); err != nil {
@@ -120,16 +130,12 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		method = http.MethodGet
 	}
 
-	// Templates render with the data of the request that completed the mock.
-	var data any
-	if kit := args.Kit(); kit != nil {
-		data = kit.Data()
-	}
+	engine, data := templating(args)
 
 	rawURL := webhookArgs.URL
 	if webhookArgs.URLTemplate != "" {
 		var err error
-		if rawURL, err = render("url_template", webhookArgs.URLTemplate, data); err != nil {
+		if rawURL, err = render(engine, "url_template", webhookArgs.URLTemplate, data); err != nil {
 			return err
 		}
 	}
@@ -149,14 +155,14 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 	switch {
 	case webhookArgs.Multipart != nil:
-		ct, b, err := webhookArgs.Multipart.Encode(data)
+		ct, b, err := webhookArgs.Multipart.Encode(engine, data)
 		if err != nil {
 			return fmt.Errorf("webhook: multipart body: %w", err)
 		}
 
 		body, contentType = bytes.NewReader(b), ct
 	case webhookArgs.BodyTemplate != "":
-		b, err := render("body_template", webhookArgs.BodyTemplate, data)
+		b, err := render(engine, "body_template", webhookArgs.BodyTemplate, data)
 		if err != nil {
 			return err
 		}
@@ -197,9 +203,16 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 	}
 
 	for k, v := range webhookArgs.HeaderTemplate {
-		rendered, err := render("header_template "+k, v, data)
+		rendered, err := render(engine, "header_template "+k, v, data)
 		if err != nil {
 			return err
+		}
+
+		// As in replies: the value goes without the spaces and line breaks around it, and a line break inside, which
+		// would end the header there, fails here, whatever the RoundTripper would do with it.
+		rendered = textproto.TrimString(rendered)
+		if strings.ContainsAny(rendered, "\r\n") {
+			return fmt.Errorf("webhook: header_template %s holds a line break", k)
 		}
 
 		req.Header.Set(k, rendered)
@@ -244,8 +257,8 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 // Args configures a WebHook HTTP request.
 // It is parsed from the parameters in the event config (e.g. mock definition).
-// URLTemplate, the HeaderTemplate values and BodyTemplate are Go templates,
-// rendered with the data of the request that completed the mock.
+// URLTemplate, the HeaderTemplate values and BodyTemplate are templates, compiled with the template engine of the
+// server and rendered with the data of the request that completed the mock.
 type Args struct {
 	URL            string
 	URLTemplate    string
@@ -262,11 +275,60 @@ type Args struct {
 	dir string // where relative files open from: the mock file's directory; "" is the working directory
 }
 
+// clone returns a copy of a, with copies of its maps. Multipart is shared: writing a body doesn't change it.
+func (a *Args) clone() *Args {
+	c := *a
+	c.Header = maps.Clone(a.Header)
+	c.HeaderTemplate = maps.Clone(a.HeaderTemplate)
+
+	return &c
+}
+
+// check compiles the templates of a with engine, under the names Run renders them with, without rendering them.
+func (a *Args) check(engine vlatte.TemplateEngine) error {
+	compile := func(name, text string) error {
+		if text == "" {
+			return nil
+		}
+
+		if _, err := engine.Compile(name, text); err != nil {
+			return fmt.Errorf("%w: %w", ErrRenderingTemplate, err)
+		}
+
+		return nil
+	}
+
+	if err := compile("url_template", a.URLTemplate); err != nil {
+		return err
+	}
+
+	if err := compile("body_template", a.BodyTemplate); err != nil {
+		return err
+	}
+
+	for _, k := range slices.Sorted(maps.Keys(a.HeaderTemplate)) {
+		if err := compile("header_template "+k, a.HeaderTemplate[k]); err != nil {
+			return err
+		}
+	}
+
+	if a.Multipart != nil {
+		if err := a.Multipart.Check(engine); err != nil {
+			return fmt.Errorf("webhook: multipart body: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // MultipartBody is a multipart body for a webhook, such as one built with mockhttp.MultipartForm.
 type MultipartBody interface {
-	// Encode writes the body, with data for its templates: the data of the request that completed the mock.
-	// It returns the body's Content-Type and bytes.
-	Encode(data any) (contentType string, body []byte, err error)
+	// Check checks the body and compiles its templates with engine, without writing it.
+	Check(engine vlatte.TemplateEngine) error
+
+	// Encode writes the body, with its templates compiled with engine and rendered with data: the data of the request
+	// that completed the mock. It returns the body's Content-Type and bytes.
+	Encode(engine vlatte.TemplateEngine, data any) (contentType string, body []byte, err error)
 }
 
 type argsField = config.Field[Args]
@@ -278,7 +340,7 @@ var _argsSchema = config.NewSchema(
 		Set: func(a *Args, v config.Value) error { a.URL = v.Str; return nil },
 	},
 	argsField{
-		Key: "url_template", Kind: config.String, Usage: "URL to send the request to, as a Go template.",
+		Key: "url_template", Kind: config.String, Usage: "URL to send the request to, as a template.",
 		Set: func(a *Args, v config.Value) error { a.URLTemplate = v.Str; return nil },
 	},
 	argsField{
@@ -290,7 +352,7 @@ var _argsSchema = config.NewSchema(
 		Set: func(a *Args, v config.Value) error { return headerOf(v, &a.Header) },
 	},
 	argsField{
-		Key: "header_template", Kind: config.Any, Usage: "Headers of the request whose values are Go templates, by name.",
+		Key: "header_template", Kind: config.Any, Usage: "Headers of the request whose values are templates, by name.",
 		Set: func(a *Args, v config.Value) error { return headerOf(v, &a.HeaderTemplate) },
 	},
 	argsField{
@@ -298,7 +360,7 @@ var _argsSchema = config.NewSchema(
 		Set: func(a *Args, v config.Value) error { a.Body = v.Str; return nil },
 	},
 	argsField{
-		Key: "body_template", Kind: config.String, Usage: "Body of the request, as a Go template.",
+		Key: "body_template", Kind: config.String, Usage: "Body of the request, as a template.",
 		Set: func(a *Args, v config.Value) error { a.BodyTemplate = v.Str; return nil },
 	},
 	argsField{
@@ -312,7 +374,7 @@ var _argsSchema = config.NewSchema(
 	},
 	argsField{
 		Key: "multipart_template", Kind: config.Any,
-		Usage: "Multipart body whose text is Go templates: names, filenames, content types, header values, text bodies and body file names.",
+		Usage: "Multipart body whose text is templates: names, filenames, content types, header values, text bodies and body file names.",
 		Set:   func(a *Args, v config.Value) error { return setMultipart(a, v, true) },
 	},
 )
@@ -320,11 +382,30 @@ var _argsSchema = config.NewSchema(
 // _exclusive lists the sets of parameters of which only one can be set.
 var _exclusive = [][]string{{"url", "url_template"}, {"body", "body_file", "body_template", "multipart", "multipart_template"}}
 
+// argsOf returns the parameters of an event as *Args: a copy of *Args, so a Transform can't change them for later
+// events, or a map decoded, whose problems name origin and whose relative files open from dir.
+func argsOf(params vlatte.Parameters, origin, dir string) (*Args, error) {
+	switch p := params.(type) {
+	case nil:
+		return nil, errors.New("webhook: arguments must not be nil")
+	case *Args:
+		if p == nil {
+			return nil, errors.New("webhook: arguments must not be nil")
+		}
+
+		return p.clone(), nil
+	case map[string]any:
+		return argsFromMap(p, origin, dir)
+	default:
+		return nil, errors.New("webhook: arguments must be *Args or map[string]any")
+	}
+}
+
 // ArgsFromMap decodes the parameters of a webhook event, as a mock file's on_complete writes them:
-//   - url, or url_template, a Go template: a string;
+//   - url, or url_template, a template: a string;
 //   - method: a string, GET when empty;
-//   - header and header_template, whose values are Go templates: objects of strings;
-//   - body, body_template, a Go template, or body_file: a string.
+//   - header and header_template, whose values are templates: objects of strings;
+//   - body, body_template, a template, or body_file: a string.
 //
 // As in mock files, each value must have its type, and other keys are errors. A map built in code means what its
 // JSON means, so a map[string]string or an int is fine where its JSON is. The error wraps ErrBadArg and lists
@@ -440,9 +521,15 @@ type multipartParams struct {
 	spec *mpart.Spec
 }
 
+// Check implements MultipartBody.
+func (m *multipartParams) Check(engine vlatte.TemplateEngine) error {
+	_, err := mpart.Compile(m.spec, engine)
+	return err
+}
+
 // Encode implements MultipartBody.
-func (m *multipartParams) Encode(data any) (string, []byte, error) {
-	e, err := mpart.Compile(m.spec)
+func (m *multipartParams) Encode(engine vlatte.TemplateEngine, data any) (string, []byte, error) {
+	e, err := mpart.Compile(m.spec, engine)
 	if err != nil {
 		return "", nil, err
 	}
@@ -504,9 +591,25 @@ func originOf(args vlatte.OnComplete) string {
 	return "on_complete"
 }
 
-// render executes text as a Go template with the given data.
-func render(name, text string, data any) (string, error) {
-	t, err := template.New(name).Parse(text)
+// templating returns what the templates of an event compile and render with: the engine of the server and the data
+// of the request that completed the mock. Without a Kit, they compile with a vlatte.GoTemplateEngine and no data.
+func templating(args vlatte.OnComplete) (vlatte.TemplateEngine, any) {
+	kit := args.Kit()
+	if kit == nil {
+		return _defaultEngine, nil
+	}
+
+	engine := kit.TemplateEngine()
+	if engine == nil {
+		engine = _defaultEngine
+	}
+
+	return engine, kit.Data()
+}
+
+// render compiles text with engine and executes it with data.
+func render(engine vlatte.TemplateEngine, name, text string, data any) (string, error) {
+	t, err := engine.Compile(name, text)
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrRenderingTemplate, err)
 	}
