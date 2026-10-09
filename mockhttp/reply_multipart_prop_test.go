@@ -226,7 +226,7 @@ func TestPropReplyMultipart_ServesItsModel(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		models := rapid.SliceOfN(genMultipartReply(), 1, 2).Draw(t, "replies")
 
-		var reply Replier = models[0].reply()
+		var reply ReplierFactory = models[0].reply()
 		if len(models) > 1 {
 			reply = Seq().Add(models[0].reply()).Add(models[1].reply())
 		}

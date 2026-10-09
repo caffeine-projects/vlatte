@@ -1,9 +1,9 @@
 package mockgrpc
 
 import (
+	"iter"
 	"sync"
 	"sync/atomic"
-	"uuid"
 
 	"github.com/caffeine-projects/vlatte"
 )
@@ -21,16 +21,22 @@ type Mock struct {
 	hits     atomic.Int64
 	enabled  bool
 
-	Reply any
+	unaryReply  UnaryReplier  // set on a unary mock only
+	streamReply StreamReplier // set on a server streaming mock only
 
 	unaryExpectations  []*vlatte.Eval[*UnaryValueSelectorIn]
 	streamExpectations []*vlatte.Eval[*StreamValueSelectorIn]
 }
 
-func newMock() *Mock {
-	return &Mock{
-		id:      uuid.New().String(),
-		enabled: true,
+// ofKind yields the mocks for which is reports true. A mock has matchers for its own kind of call only, and no
+// matchers match every call: each call is matched against the mocks of its kind.
+func ofKind(mocks iter.Seq[*Mock], is func(*Mock) bool) iter.Seq[*Mock] {
+	return func(yield func(*Mock) bool) {
+		for m := range mocks {
+			if is(m) && !yield(m) {
+				return
+			}
+		}
 	}
 }
 
@@ -90,12 +96,4 @@ func (m *Mock) Events() vlatte.Events {
 
 func (m *Mock) String() string {
 	return ""
-}
-
-func (m *Mock) getRef() string {
-	if len(m.Name()) == 0 {
-		return m.ID()
-	}
-
-	return m.Name()
 }

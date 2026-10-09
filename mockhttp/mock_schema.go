@@ -1033,7 +1033,7 @@ func (r *requestDef) apply(b *Builder) {
 	}
 }
 
-func (d *mockDef) replier(dir string) Replier {
+func (d *mockDef) replier(dir string) ReplierFactory {
 	switch {
 	case d.reply != nil:
 		return d.reply.build(dir)

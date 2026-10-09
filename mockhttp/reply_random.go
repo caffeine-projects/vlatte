@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"sync"
 
@@ -10,60 +11,48 @@ import (
 )
 
 var (
-	_         Replier = (*RandomReply)(nil)
+	_         ReplierFactory = (*RandomReply)(nil)
+	_         Replier        = (*randomReplier)(nil)
 	_randomMu sync.Mutex
 )
 
-// RandomReply configures a Replier that serves random HTTP responses.
+// RandomReply configures replies served at random, one per request. It is a ReplierFactory: each mock built with it
+// picks from replies of its own.
 type RandomReply struct {
-	replies []Replier
-	random  *rand.Rand
+	replies []ReplierFactory
+	random  *rand.Rand // from RandWith: every mock built with the reply picks with it
 	seed    int64
 	seeded  bool
 }
 
 // Rand initializes a new RandomReply.
-func Rand(reply ...Replier) *RandomReply {
+func Rand(reply ...ReplierFactory) *RandomReply {
 	return &RandomReply{
 		replies: reply,
 	}
 }
 
-// RandWith creates a new RandomReply that picks replies with the given *rand.Rand.
-func RandWith(random *rand.Rand, reply ...Replier) *RandomReply {
+// RandWith creates a new RandomReply that picks replies with the given *rand.Rand. Every mock built with the reply
+// picks with it.
+func RandWith(random *rand.Rand, reply ...ReplierFactory) *RandomReply {
 	r := Rand(reply...)
 	r.random = random
 	return r
 }
 
-// RandWithSeed creates a new RandomReply that picks replies in a sequence reproducible by the given seed.
-func RandWithSeed(seed int64, reply ...Replier) *RandomReply {
-	r := RandWith(rand.New(rand.NewPCG(uint64(seed), 0)), reply...)
+// RandWithSeed creates a new RandomReply that picks replies in a sequence reproducible by the given seed. Each mock
+// built with the reply picks with a generator of its own, from the seed, so each one picks in the same order.
+func RandWithSeed(seed int64, reply ...ReplierFactory) *RandomReply {
+	r := Rand(reply...)
 	r.seed = seed
 	r.seeded = true
 	return r
 }
 
 // Add adds a new Replier to the random list.
-func (rep *RandomReply) Add(reply ...Replier) *RandomReply {
+func (rep *RandomReply) Add(reply ...ReplierFactory) *RandomReply {
 	rep.replies = append(rep.replies, reply...)
 	return rep
-}
-
-// Reply implements vlatte.Replier[ReplyInput, *Response].
-func (rep *RandomReply) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
-	var index int
-	if rep.random == nil {
-		index = rand.IntN(len(rep.replies))
-	} else {
-		// A *rand.Rand is not safe for concurrent use and callers may share one between replies.
-		// The lock guards it only; the chosen reply runs without it.
-		_randomMu.Lock()
-		index = rep.random.IntN(len(rep.replies))
-		_randomMu.Unlock()
-	}
-
-	return rep.replies[index].Reply(ctx, input)
 }
 
 func (rep *RandomReply) Describe() descriptor.Descriptor {
@@ -82,17 +71,51 @@ func (rep *RandomReply) Describe() descriptor.Descriptor {
 	return descriptor.New("response_random", desc)
 }
 
-func (rep *RandomReply) beforeBuild(app *Server) error {
-	size := len(rep.replies)
-	if size == 0 {
-		return errors.New("reply_random: you need to set at least one response when using random reply")
+// NewReplier implements ReplierFactory. It makes the Replier of each reply, so each mock picks from replies of its own.
+func (rep *RandomReply) NewReplier(app *Server) (Replier, error) {
+	if len(rep.replies) == 0 {
+		return nil, errors.New("reply_random: you need to set at least one response when using random reply")
 	}
 
-	for _, reply := range rep.replies {
-		if err := prepareReply(reply, app); err != nil {
-			return err
+	r := &randomReplier{replies: make([]Replier, len(rep.replies)), random: rep.random}
+	if rep.seeded {
+		r.random = rand.New(rand.NewPCG(uint64(rep.seed), 0))
+	}
+
+	for i, f := range rep.replies {
+		if f == nil {
+			return nil, fmt.Errorf("reply_random: response %d is nil", i)
 		}
+
+		reply, err := newReplier(f, app)
+		if err != nil {
+			return nil, fmt.Errorf("reply_random: response %d: %w", i, err)
+		}
+
+		r.replies[i] = reply
 	}
 
-	return nil
+	return r, nil
+}
+
+// randomReplier serves one of its replies at random, for one mock.
+type randomReplier struct {
+	replies []Replier
+	random  *rand.Rand // nil picks with the global generator
+}
+
+// Reply implements Replier.
+func (r *randomReplier) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
+	var index int
+	if r.random == nil {
+		index = rand.IntN(len(r.replies))
+	} else {
+		// A *rand.Rand is not safe for concurrent use, and the mocks of a RandWith reply share one.
+		// The lock guards it only; the chosen reply runs without it.
+		_randomMu.Lock()
+		index = r.random.IntN(len(r.replies))
+		_randomMu.Unlock()
+	}
+
+	return r.replies[index].Reply(ctx, input)
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -53,6 +54,27 @@ func (r *Response) Gunzip() ([]byte, error) {
 // An error comes after the status and headers are sent, so it can't change the response.
 func (r *Response) Render(ctx context.Context, w http.ResponseWriter) error {
 	return r.render(ctx, w, wait)
+}
+
+// clone returns a copy of r with a Header, Trailer and Cookies of its own, each cookie a copy too. The Body bytes are
+// shared: replace them, don't change them in place.
+func (r *Response) clone() Response {
+	c := *r
+	c.Header = r.Header.Clone()
+	c.Trailer = r.Trailer.Clone()
+	c.Cookies = slices.Clone(r.Cookies)
+
+	for i, cookie := range c.Cookies {
+		if cookie == nil { // a nil cookie renders nothing, so keep it rather than panic
+			continue
+		}
+
+		own := *cookie
+		own.Unparsed = slices.Clone(cookie.Unparsed)
+		c.Cookies[i] = &own
+	}
+
+	return c
 }
 
 // render writes the response to w, and waits with wait where a streamed body pauses.

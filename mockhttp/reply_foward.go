@@ -3,17 +3,22 @@ package mockhttp
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
-var _ Replier = (*ProxyReply)(nil)
+var (
+	_ ReplierFactory = (*ProxyReply)(nil)
+	_ Replier        = (*proxyReplier)(nil)
+)
 
 var _forbiddenHeaders = []string{
 	"Connection",
@@ -31,7 +36,8 @@ const _defaultTimeout = 30 * time.Second
 type FromTypes interface{ string | *url.URL }
 
 // ProxyReply represents a response stub that will be the response "proxied" from the specified target.
-// Use From to init a new ProxyReply.
+// Use From to init a new ProxyReply. It is a ReplierFactory: each mock built with it gets a proxy of its own, with an
+// HTTP client of its own.
 type ProxyReply struct {
 	target               *url.URL
 	headers              http.Header
@@ -42,7 +48,6 @@ type ProxyReply struct {
 	timeout              time.Duration
 	noFollow             bool
 	sslVerify            bool
-	httpClient           *http.Client
 }
 
 // From creates a ProxyReply with the given target.
@@ -55,7 +60,7 @@ func From[T FromTypes](target T) *ProxyReply {
 
 		u, err = url.Parse(e)
 		if err != nil {
-			panic(fmt.Errorf("reply_proxy: unable to parse URL %s. reason=%w", e, err))
+			panic(fmt.Errorf("reply_proxy: target: %w", err))
 		}
 	case *url.URL:
 		u = e
@@ -148,11 +153,6 @@ func (r *ProxyReply) SSLVerify(v bool) *ProxyReply {
 	return r
 }
 
-// Reply implements vlatte.Replier[ReplyInput, *Response].
-func (r *ProxyReply) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
-	return r.build(input.RequestValues)
-}
-
 func noFollow(_ *http.Request, _ []*http.Request) error {
 	return http.ErrUseLastResponse
 }
@@ -160,9 +160,9 @@ func noFollow(_ *http.Request, _ []*http.Request) error {
 func (r *ProxyReply) Describe() descriptor.Descriptor {
 	return descriptor.New("proxy", map[string]any{
 		"target":         r.target.String(),
-		"forward_header": r.proxyHeaders,
-		"header":         r.headers,
-		"remove_headers": r.proxyHeadersToRemove,
+		"forward_header": r.proxyHeaders.Clone(),
+		"header":         r.headers.Clone(),
+		"remove_headers": slices.Clone(r.proxyHeadersToRemove),
 		"trim_prefix":    r.trimPrefix,
 		"trim_suffix":    r.trimSuffix,
 		"timeout":        r.timeout.String(),
@@ -171,39 +171,101 @@ func (r *ProxyReply) Describe() descriptor.Descriptor {
 	})
 }
 
-func (r *ProxyReply) build(req *RequestValues) (*Response, error) {
+// NewReplier implements ReplierFactory. Each mock gets a proxy of its own: copies of the target and the headers, and an
+// HTTP client of its own. With Config.HTTPClientFactory, the client is a copy of the one the factory returns, which can
+// be a client it shares, such as http.DefaultClient.
+func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
+	p := &proxyReplier{
+		target:               r.target.Clone(),
+		headers:              r.headers.Clone(),
+		proxyHeaders:         r.proxyHeaders.Clone(),
+		proxyHeadersToRemove: slices.Clone(r.proxyHeadersToRemove),
+		trimPrefix:           r.trimPrefix,
+		trimSuffix:           r.trimSuffix,
+		timeout:              r.timeout,
+	}
+
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: !r.sslVerify,
+		RootCAs:            app.config.TLSClientCAs,
+		Certificates:       app.config.TLSCertificates,
+	}
+
+	if app.config.HTTPClientFactory == nil {
+		p.client = &http.Client{Transport: &http.Transport{DisableCompression: true, TLSClientConfig: tlsConfig}}
+	} else {
+		client := app.config.HTTPClientFactory()
+		if client == nil {
+			return nil, errors.New("reply_proxy: the HTTP client factory returned no client")
+		}
+
+		// A copy: the factory can return a client it shares, and the lines below change the client.
+		p.client = new(*client)
+	}
+
+	if p.client.Transport == nil {
+		p.client.Transport = &http.Transport{TLSClientConfig: tlsConfig, DisableCompression: true}
+	}
+
+	if r.noFollow {
+		p.client.CheckRedirect = noFollow
+	}
+
+	app.closeIdleConnsOnClose(p.client.CloseIdleConnections)
+
+	return p, nil
+}
+
+// proxyReplier sends the requests of one mock to the target, and replies with the response of the target.
+type proxyReplier struct {
+	target               *url.URL
+	headers              http.Header
+	proxyHeaders         http.Header
+	proxyHeadersToRemove []string
+	trimPrefix           string
+	trimSuffix           string
+	timeout              time.Duration
+	client               *http.Client
+}
+
+// Reply implements Replier.
+func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, error) {
+	return p.build(input.RequestValues)
+}
+
+func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 	path := req.RawRequest.URL.Path
 
-	if r.trimPrefix != "" {
-		path = strings.TrimPrefix(path, r.trimPrefix)
+	if p.trimPrefix != "" {
+		path = strings.TrimPrefix(path, p.trimPrefix)
 	}
 
-	if r.trimSuffix != "" {
-		path = strings.TrimSuffix(path, r.trimSuffix)
+	if p.trimSuffix != "" {
+		path = strings.TrimSuffix(path, p.trimSuffix)
 	}
 
-	req.RawRequest.URL.Host = r.target.Host
-	req.RawRequest.URL.Scheme = r.target.Scheme
+	req.RawRequest.URL.Host = p.target.Host
+	req.RawRequest.URL.Scheme = p.target.Scheme
 	req.RawRequest.URL.Path = path
-	req.RawRequest.Host = r.target.Host
+	req.RawRequest.Host = p.target.Host
 	req.RawRequest.RequestURI = ""
 
-	for _, h := range r.proxyHeadersToRemove {
+	for _, h := range p.proxyHeadersToRemove {
 		req.RawRequest.Header.Del(h)
 	}
 
-	for key, values := range r.proxyHeaders {
+	for key, values := range p.proxyHeaders {
 		for _, value := range values {
 			req.RawRequest.Header.Add(key, value)
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(req.RawRequest.Context(), r.timeout)
+	ctx, cancel := context.WithTimeout(req.RawRequest.Context(), p.timeout)
 	defer cancel()
 
-	res, err := r.httpClient.Transport.RoundTrip(req.RawRequest.WithContext(ctx))
+	res, err := p.client.Transport.RoundTrip(req.RawRequest.WithContext(ctx))
 	if err != nil {
-		return nil, fmt.Errorf("reply_proxy: error calling target server %s. reason=%w", r.target.String(), err)
+		return nil, fmt.Errorf("reply_proxy: calling the target %s: %w", p.target, err)
 	}
 
 	defer res.Body.Close()
@@ -220,7 +282,7 @@ func (r *ProxyReply) build(req *RequestValues) (*Response, error) {
 		}
 	}
 
-	for key, values := range r.headers {
+	for key, values := range p.headers {
 		for _, value := range values {
 			stub.Header.Add(key, value)
 		}
@@ -243,30 +305,4 @@ func (r *ProxyReply) build(req *RequestValues) (*Response, error) {
 	}
 
 	return stub, nil
-}
-
-func (r *ProxyReply) beforeBuild(app *Server) error {
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: !r.sslVerify,
-		RootCAs:            app.config.TLSClientCAs,
-		Certificates:       app.config.TLSCertificates,
-	}
-
-	if app.config.HTTPClientFactory == nil {
-		r.httpClient = &http.Client{Transport: &http.Transport{DisableCompression: true, TLSClientConfig: tlsConfig}}
-	} else {
-		r.httpClient = app.config.HTTPClientFactory()
-	}
-
-	if r.httpClient.Transport == nil {
-		r.httpClient.Transport = &http.Transport{TLSClientConfig: tlsConfig, DisableCompression: true}
-	}
-
-	if r.noFollow {
-		r.httpClient.CheckRedirect = noFollow
-	}
-
-	app.closeIdleConnsOnClose(r.httpClient.CloseIdleConnections)
-
-	return nil
 }

@@ -20,8 +20,12 @@ type (
 	// Option configures a Server. Both Config and ConfigBuilder are options.
 	Option = vlatte.Configurer[*Config]
 
-	// Replier builds the response of a mock. Reply, EchoReply and ProxyReply are repliers.
+	// Replier builds the response of a mock. Each mock has its own, made by a ReplierFactory.
 	Replier = vlatte.Replier[ReplyInput, *Response]
+
+	// ReplierFactory makes the Replier of each mock: see [vlatte.ReplierFactory]. Reply, SequentialReply, RandomReply,
+	// ProxyReply, FuncReply and EchoReply are factories, and Shared turns any Replier into one.
+	ReplierFactory = vlatte.ReplierFactory[ReplyInput, *Response, *Server]
 
 	// Recipe prepares a Server, for example by adding a set of mocks; see [Server.Prep].
 	Recipe = vlatte.Recipe[*Mock, *Server]

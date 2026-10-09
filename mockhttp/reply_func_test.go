@@ -1,7 +1,6 @@
 package mockhttp
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,8 +15,7 @@ func TestFunctionReply(t *testing.T) {
 
 	r := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
 	rv := &RequestValues{RawRequest: r, URL: r.URL}
-	replier := Func(fn)
-	res, err := replier.Reply(context.Background(), ReplyInput{Writer: nil, RequestValues: rv})
+	res, err := replierOf(t, Func(fn)).Reply(t.Context(), ReplyInput{Writer: nil, RequestValues: rv})
 
 	assert.Nil(t, err)
 	assert.Equal(t, res.StatusCode, http.StatusAccepted)
@@ -32,8 +30,7 @@ func TestHandlerReply(t *testing.T) {
 	rv := &RequestValues{RawRequest: r, URL: r.URL}
 	w := httptest.NewRecorder()
 
-	replier := Handler(fn)
-	res, err := replier.Reply(context.Background(), ReplyInput{Writer: w, RequestValues: rv})
+	res, err := replierOf(t, Handler(fn)).Reply(t.Context(), ReplyInput{Writer: w, RequestValues: rv})
 
 	assert.NoError(t, err)
 	assert.Nil(t, res)

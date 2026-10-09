@@ -1,15 +1,24 @@
 package mockhttp
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
+
+	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match"
 )
 
 // _idOracle is the ID rule written independently of checkMockID: the characters a URL path needs no escaping for.
@@ -48,6 +57,172 @@ func TestPropBuilder_IDRule(t *testing.T) {
 			require.ErrorIs(t, err, errMockID)
 		}
 	})
+}
+
+// mapsOnly is an on_complete listener whose Prepare takes the parameters as mock files write them, a map, and returns a
+// value of its own, as the webhook does: given what it returned, it fails.
+type mapsOnly struct{}
+
+func (mapsOnly) Prepare(cfg vlatte.EventConfig, _ vlatte.TemplateEngine) (vlatte.Parameters, error) {
+	if _, ok := cfg.Parameters.(map[string]any); !ok {
+		return nil, fmt.Errorf("maps_only: parameters are %T, not a map", cfg.Parameters)
+	}
+
+	return "prepared", nil
+}
+
+func (mapsOnly) Run(context.Context, vlatte.OnComplete) error { return nil }
+
+func TestBuilder_OneBuilderOnTwoServers(t *testing.T) {
+	// #23: Build returned the builder's own mock and wrote the prepared event parameters back into the builder, so a
+	// second server served the very same mock, and its listener's Prepare got the first build's output. Each build is
+	// a new mock now, and the builder stays as it was written.
+	newServer := func() *Server {
+		s := MustNew(Setup().Silent().OnCompleteListener("audit", mapsOnly{}))
+		s.MustStart()
+		t.Cleanup(s.Close)
+
+		return s
+	}
+
+	written := map[string]any{"url": "http://audit.test"}
+	b := Getf("/orders").OnCompleteEvent(vlatte.EventConfig{Name: "audit", Parameters: written}).Once().Reply(OK())
+
+	s1, s2 := newServer(), newServer()
+	first := s1.MustMock(b).Mocks()[0]
+	second := s2.MustMock(b).Mocks()[0]
+
+	require.NotSame(t, first, second)
+	require.NotEqual(t, first.ID(), second.ID())
+	require.Equal(t, written, b.spec.events[0].Parameters, "the builder keeps what was written")
+	require.Equal(t, "prepared", second.Events().OnComplete[0].Parameters, "each mock has its own prepared parameters")
+	require.Len(t, b.spec.expectations, 2, "path and method: Once and building add nothing to the builder")
+
+	status, _ := get(t, s1, "/orders")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, int64(1), first.Hits())
+	require.Zero(t, second.Hits(), "hits are per mock")
+
+	// Each mock counts its own Once.
+	status, _ = get(t, s2, "/orders")
+	require.Equal(t, http.StatusOK, status, "s2 serves its one request")
+
+	status, _ = get(t, s1, "/orders")
+	require.Equal(t, StatusNoMatch, status, "s1 served its one request")
+}
+
+func TestBuilder_EachMockCountsItsOwnTimes(t *testing.T) {
+	// Times was a matcher the builder held, so every mock built from the builder shared one count: a Once builder,
+	// served and then remocked, made a mock that never matched, while its hits said 0. Each mock counts its own now.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	b := Getf("/once").Once().Reply(OK())
+	scope := m.MustMock(b)
+
+	status, _ := get(t, m, "/once")
+	require.Equal(t, http.StatusOK, status)
+
+	status, _ = get(t, m, "/once")
+	require.Equal(t, StatusNoMatch, status, "served once")
+
+	_, err := m.Remock(t.Context(), scope, b)
+	require.NoError(t, err)
+
+	status, _ = get(t, m, "/once")
+	require.Equal(t, http.StatusOK, status, "the new mock counts from zero")
+}
+
+func TestBuilder_Times(t *testing.T) {
+	// Times is a setting of the builder, as Name is: it takes 1 or more, as repeat does in mock files, and the last
+	// call wins. As matchers, Times(0) made a mock that never matched, and two calls both applied.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	_, err := Getf("/never").Times(0).Reply(OK()).Build(m)
+	require.EqualError(t, err, "mock: times 0: expected 1 or more")
+
+	m.MustMock(Getf("/last").Times(2).Times(3).Reply(OK()))
+
+	for i := range 3 {
+		status, _ := get(t, m, "/last")
+		require.Equal(t, http.StatusOK, status, "request %d", i+1)
+	}
+
+	status, _ := get(t, m, "/last")
+	require.Equal(t, StatusNoMatch, status, "served 3")
+}
+
+func TestBuilder_ScenarioAdvancesPerServer(t *testing.T) {
+	// Build binds the scenario matcher to the server's scenario store and adds it to the mock it makes: a builder
+	// used on two servers runs the scenario on each, and building adds no matcher to the builder.
+	b := Getf("/pay").StartScenario("checkout").ScenarioStateWillBe("paid").Reply(OK())
+
+	s1, s2 := MustNew(Setup().Silent()), MustNew(Setup().Silent())
+	for _, s := range []*Server{s1, s2} {
+		s.MustStart()
+		t.Cleanup(s.Close)
+		s.MustMock(b)
+	}
+
+	require.Len(t, b.spec.expectations, 2, "path and method only")
+
+	status, _ := get(t, s1, "/pay")
+	require.Equal(t, http.StatusOK, status)
+
+	status, _ = get(t, s1, "/pay")
+	require.Equal(t, StatusNoMatch, status, "the scenario of s1 moved on to paid")
+
+	status, _ = get(t, s2, "/pay")
+	require.Equal(t, http.StatusOK, status, "the scenario of s2 is still where it started")
+}
+
+func TestBuilder_AddedTwiceToOneServer(t *testing.T) {
+	// A builder without an ID gets a new one at each build, so it can be added to a server more than once. With an
+	// ID, a server still holds one mock per ID.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	b := Getf("/twice").Reply(OK())
+	scope := m.MustMock(b, b)
+	require.Len(t, scope.IDs(), 2)
+
+	named := Getf("/named").ID("named").Reply(OK())
+	_, err := m.Mock(named, named)
+	require.ErrorIs(t, err, vlatte.ErrDuplicateID)
+
+	status, _ := get(t, m, "/twice")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, int64(1), scope.Hits())
+
+	// Remocking with the same builder serves a new mock, from zero hits.
+	scope, err = m.Remock(t.Context(), scope, b)
+	require.NoError(t, err)
+	require.Zero(t, scope.Hits())
+}
+
+func TestBuilder_ChangesAfterMockReachOnlyLaterMocks(t *testing.T) {
+	// A served mock is the builder as it was when the mock was built: what the builder gets afterwards goes only into
+	// the mocks built afterwards. Before, the builder held the served mock, so Enabled(false) disabled it.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	b := Getf("/v").Reply(OK())
+	served := m.MustMock(b).Mocks()[0]
+
+	b.Enabled(false).Header("X-Later", match.Eq("yes"))
+
+	require.True(t, served.Enabled())
+	status, _ := get(t, m, "/v")
+	require.Equal(t, http.StatusOK, status, "the served mock has no X-Later matcher")
+
+	later := m.MustMock(b).Mocks()[0]
+	require.False(t, later.Enabled())
+	require.Len(t, later.spec.expectations, 3)
 }
 
 func TestReply_BodyFileDir(t *testing.T) {
@@ -114,4 +289,56 @@ func TestReply_TemplatedBodyKeepsItsBytes(t *testing.T) {
 			require.Equal(t, want, string(b), path)
 		}
 	}
+}
+
+func TestBuilder_BuildsAtTheSameTimeOnManyServers(t *testing.T) {
+	// Building only reads the builder and its reply, so one builder can be built for many servers at once.
+	b := Getf("/same").
+		StartScenario("concurrent").
+		Reply(OK().BodyTemplate(`{{ .Request.Method }}`).HeaderTemplate("X-Id", `{{ .Request.ID }}`).Gzip())
+
+	servers := make([]*Server, 4)
+	for i := range servers {
+		servers[i] = MustNew(Setup().Silent())
+		servers[i].MustStart()
+		t.Cleanup(servers[i].Close)
+	}
+
+	var wg sync.WaitGroup
+	for _, s := range servers {
+		wg.Go(func() {
+			_, err := s.Mock(b)
+			assert.NoError(t, err)
+		})
+	}
+
+	wg.Wait()
+
+	for _, s := range servers {
+		status, body := get(t, s, "/same")
+		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, "GET", body)
+	}
+}
+
+func TestBuilder_DelayFunc(t *testing.T) {
+	// DelayFunc picks the delay before each response, so a delay such as Jitter varies from one response to the next.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	var picks atomic.Int64
+	m.MustMock(Getf("/d").
+		DelayFunc(func() time.Duration {
+			picks.Add(1)
+			return time.Millisecond
+		}).
+		Reply(OK()))
+
+	for range 2 {
+		status, _ := get(t, m, "/d")
+		require.Equal(t, http.StatusOK, status)
+	}
+
+	require.Equal(t, int64(2), picks.Load())
 }

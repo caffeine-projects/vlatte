@@ -4,9 +4,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"slices"
 	"sync"
 	"sync/atomic"
-	"uuid"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
@@ -41,6 +41,8 @@ func (i *CallbackInput) Response() *Response {
 }
 
 // Mapper is the function definition to be used to map a Mock response MockedResponse before serving it.
+// The response is the mapper's to change, but for its Body bytes, which other responses of the mock can share: replace
+// them, don't change them in place.
 type Mapper func(requestValues *RequestValues, res *Response) error
 
 // MockFileHandler reads the ext object of mock files, so users can add settings of their own to mock files.
@@ -73,62 +75,59 @@ type selectorInput struct {
 
 type expectation = vlatte.Eval[*selectorInput]
 
-// Mock holds metadata and expectations to be matched against HTTP requests in order to serve mocked responses.
-// This is the core entity of this project, and most features work based on it.
-type Mock struct {
-	mu sync.RWMutex
-
+// mockSpec is what a Builder sets and its mocks serve. Build gives each mock a copy of its own: see clone.
+type mockSpec struct {
 	id           string
 	name         string
 	priority     int
 	origin       string
-	hits         atomic.Int64
-	enabled      bool
-	expectations []*vlatte.Eval[*selectorInput]
-
-	Reply Replier
-
-	// Mappers stores response mappers associated with this Mock.
-	Mappers []Mapper
-
-	// Delay sets the duration to delay serving the mocked response.
-	Delay vlatte.Delay
-
-	OnCompleteList []vlatte.EventConfig
-
-	CallbackList []vlatte.Callback
-
-	steps []vlatte.Step
+	expectations []*expectation
+	mappers      []Mapper
+	delay        vlatte.Delay
+	events       []vlatte.EventConfig
+	callbacks    []vlatte.Callback
+	steps        []vlatte.Step
 }
 
-// NewMock returns a new Mock with default values set.
-func NewMock() *Mock {
-	return &Mock{
-		id:           uuid.New().String(),
-		expectations: make([]*vlatte.Eval[*selectorInput], 0),
-		enabled:      true,
+// clone returns a copy of s that shares no slice with it, so changing one doesn't change the other.
+// A new slice field must be cloned here too.
+func (s mockSpec) clone() mockSpec {
+	s.expectations = slices.Clone(s.expectations)
+	s.mappers = slices.Clone(s.mappers)
+	s.events = slices.Clone(s.events)
+	s.callbacks = slices.Clone(s.callbacks)
+	s.steps = slices.Clone(s.steps)
 
-		OnCompleteList: make([]vlatte.EventConfig, 0),
-		CallbackList:   make([]vlatte.Callback, 0),
-		steps:          make([]vlatte.Step, 0),
-		Mappers:        make([]Mapper, 0),
-	}
+	return s
+}
+
+// Mock holds metadata and expectations to be matched against HTTP requests in order to serve mocked responses.
+// This is the core entity of this project, and most features work based on it.
+// A Builder makes it; afterwards only its enabled state and hits change.
+type Mock struct {
+	mu sync.RWMutex
+
+	spec      mockSpec
+	reply     Replier               // made for this mock by the ReplierFactory of its builder
+	replyDesc descriptor.Descriptor // the description of that factory, as it was when the mock was built
+	enabled   bool
+	hits      atomic.Int64
 }
 
 func (m *Mock) ID() string {
-	return m.id
+	return m.spec.id
 }
 
 func (m *Mock) Name() string {
-	return m.name
+	return m.spec.name
 }
 
 func (m *Mock) Priority() int {
-	return m.priority
+	return m.spec.priority
 }
 
 func (m *Mock) Origin() string {
-	return m.origin
+	return m.spec.origin
 }
 
 func (m *Mock) Enabled() bool {
@@ -175,15 +174,15 @@ func (m *Mock) Switch(state bool) {
 }
 
 func (m *Mock) Events() vlatte.Events {
-	return vlatte.Events{OnComplete: m.OnCompleteList}
+	return vlatte.Events{OnComplete: m.spec.events}
 }
 
 func (m *Mock) Callbacks() []vlatte.Callback {
-	return m.CallbackList
+	return m.spec.callbacks
 }
 
 func (m *Mock) Steps() []vlatte.Step {
-	return m.steps
+	return m.spec.steps
 }
 
 func (m *Mock) String() string {
@@ -192,7 +191,7 @@ func (m *Mock) String() string {
 }
 
 func (m *Mock) Describe() descriptor.Descriptor {
-	mockExpectations := m.expectations
+	mockExpectations := m.spec.expectations
 	data := make(map[string]any)
 	request := make(map[string]any)
 	counters := make(map[matchingScope]int)
@@ -313,12 +312,9 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		data["request"] = request
 	}
 
-	if m.Reply != nil {
-		if sd, ok := m.Reply.(descriptor.SelfDescriptive); ok {
-			if desc := sd.Describe(); desc.IsMap() {
-				desc.Merge(data)
-			}
-		}
+	// The reply as it was when the mock was built: changing it afterwards changes only the mocks built afterwards.
+	if m.replyDesc.IsMap() {
+		m.replyDesc.Merge(data)
 	}
 
 	return descriptor.Root(data)

@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/match"
 )
@@ -23,24 +25,31 @@ var (
 // errMockID says what an ID may hold. IDs name mocks in admin API paths, such as /mocks/{id}.
 var errMockID = errors.New("an id holds only letters, digits, '.', '_', '~' and '-'")
 
-// Builder is a default builder for Mock.
+// Builder describes a mock. Build makes a new Mock from it each time, for the given server, and leaves the builder as
+// it was: one builder can be added to many servers, or more than once to one, and changing it after Mock changes only
+// the mocks built afterwards.
+//
+// Mocks built from one builder share what it holds: its matchers, mappers, callbacks, steps and delay. Each has its
+// own ID (unless set with ID), hits, count of Times and Once, enabled state, scenario binding and Replier.
 type Builder struct {
-	mock                  *Mock
+	spec                  mockSpec
+	reply                 ReplierFactory
+	enabled               bool
+	times                 int64 // the requests each mock built serves, set with Times; 0 is no limit
 	scenario              string
 	scenarioNewState      string
 	scenarioRequiredState string
-	err                   error // the first error of a method that can't return one, such as FormFile's
+	err                   error // the first error of a method that can't return one, such as FormFile's or ID's
 }
 
 // Request creates a new empty Builder.
 func Request() *Builder {
-	return &Builder{mock: NewMock()}
+	return &Builder{enabled: true}
 }
 
 // AnyMethod creates a new empty Builder.
 func AnyMethod() *Builder {
-	b := &Builder{mock: NewMock()}
-	return b.MethodMatches(match.Anything())
+	return Request().MethodMatches(match.Anything())
 }
 
 // Get initializes a mock for GET method.
@@ -103,10 +112,14 @@ func Headf(path string, a ...any) *Builder {
 	return Request().URLPathf(path, a...).Method(http.MethodHead)
 }
 
-// ID sets the ID of the mock, such as "users-get", in place of a generated one.
+// ID sets the ID of the mock, such as "users-get". Without one, each mock built gets a generated ID.
 // An ID holds only letters, digits, '.', '_', '~' and '-', and a server holds one mock per ID.
 func (b *Builder) ID(id string) *Builder {
-	b.mock.id = id
+	if err := checkMockID(id); err != nil && b.err == nil {
+		b.err = fmt.Errorf("id %q: %w", id, err)
+	}
+
+	b.spec.id = id
 
 	return b
 }
@@ -114,7 +127,7 @@ func (b *Builder) ID(id string) *Builder {
 // Name defines a name for the mock.
 // Useful for debugging.
 func (b *Builder) Name(name string) *Builder {
-	b.mock.name = name
+	b.spec.name = name
 
 	return b
 }
@@ -122,7 +135,7 @@ func (b *Builder) Name(name string) *Builder {
 // Priority sets the priority of the mock. Mocks with a lower priority are matched first;
 // mocks of equal priority, in the order they were added.
 func (b *Builder) Priority(p int) *Builder {
-	b.mock.priority = p
+	b.spec.priority = p
 
 	return b
 }
@@ -338,17 +351,19 @@ func (b *Builder) FormFieldf(field string, value string, a ...any) *Builder {
 	return b.FormField(field, match.StrictEqual(fmt.Sprintf(value, a...)))
 }
 
-// Times defines the total times that a mock should be served if the request matches.
+// Times sets how many requests each mock built from the builder serves: 1 or more. Each mock counts its own, so a mock
+// built again, as Remock does, starts from zero. The last call wins.
 func (b *Builder) Times(times int64) *Builder {
-	b.appendExpectation(&expectation{
-		Target:  int(matchingScopeNone),
-		Matcher: mfeat.Repeat(times),
-	})
+	if times < 1 && b.err == nil {
+		b.err = fmt.Errorf("times %d: expected 1 or more", times)
+	}
+
+	b.times = times
 
 	return b
 }
 
-// Once defines that a mock should be served only one time.
+// Once sets that each mock built from the builder serves one request.
 func (b *Builder) Once() *Builder {
 	return b.Times(1)
 }
@@ -402,26 +417,26 @@ func (b *Builder) ScenarioStateWillBe(newState string) *Builder {
 
 // Callback adds a callback that will be executed after the mocked response is served.
 func (b *Builder) Callback(callback vlatte.Callback) *Builder {
-	b.mock.CallbackList = append(b.mock.CallbackList, callback)
+	b.spec.callbacks = append(b.spec.callbacks, callback)
 
 	return b
 }
 
 // OnCompleteEvent adds an on-complete event to the mock.
 func (b *Builder) OnCompleteEvent(cfg vlatte.EventConfig) *Builder {
-	b.mock.OnCompleteList = append(b.mock.OnCompleteList, cfg)
+	b.spec.events = append(b.spec.events, cfg)
 	return b
 }
 
 func (b *Builder) Step(steps ...vlatte.Step) *Builder {
-	b.mock.steps = append(b.mock.steps, steps...)
+	b.spec.steps = append(b.spec.steps, steps...)
 
 	return b
 }
 
 // Delay waits for the given duration before serving the mocked response.
 func (b *Builder) Delay(duration time.Duration) *Builder {
-	b.mock.Delay = vlatte.Latency(duration)
+	b.spec.delay = vlatte.Latency(duration)
 
 	return b
 }
@@ -429,7 +444,7 @@ func (b *Builder) Delay(duration time.Duration) *Builder {
 // DelayFunc sets a function that picks the delay before each mocked response,
 // such as [vlatte.Jitter] or [vlatte.UniformDistribution].
 func (b *Builder) DelayFunc(delay vlatte.Delay) *Builder {
-	b.mock.Delay = delay
+	b.spec.delay = delay
 
 	return b
 }
@@ -437,21 +452,23 @@ func (b *Builder) DelayFunc(delay vlatte.Delay) *Builder {
 // Map adds a Mapper that allows modifying the response after it was built.
 // Multiple mappers can be added.
 func (b *Builder) Map(mapper Mapper) *Builder {
-	b.mock.Mappers = append(b.mock.Mappers, mapper)
+	b.spec.mappers = append(b.spec.mappers, mapper)
 
 	return b
 }
 
-// Reply sets the replier to be used when this mock matches a request.
-func (b *Builder) Reply(rep Replier) *Builder {
-	b.mock.Reply = rep
+// Reply sets what the mock replies with. Build asks f for a new Replier for each mock, so f can serve many mocks.
+// Reply, SequentialReply, RandomReply, ProxyReply, FuncReply and EchoReply are factories, and Shared turns any Replier
+// into one.
+func (b *Builder) Reply(f ReplierFactory) *Builder {
+	b.reply = f
 	return b
 }
 
-// Enabled define if the Mock will be enabled or disabled.
-// All mocks are enabled by default.
+// Enabled sets whether the mocks built afterwards start enabled. All mocks are enabled by default.
+// A mock already built changes through its Scope.
 func (b *Builder) Enabled(enabled bool) *Builder {
-	b.mock.Switch(enabled)
+	b.enabled = enabled
 
 	return b
 }
@@ -460,45 +477,51 @@ func (b *Builder) Enabled(enabled bool) *Builder {
 // This could be a filename or any relevant information about the source of the Mock.
 // This is mostly used internally.
 func (b *Builder) SetSource(src string) *Builder {
-	b.mock.origin = src
+	b.spec.origin = src
 
 	return b
 }
 
-// Build builds a Mock with previously configured parameters.
+// Build makes a new Mock for app from the builder, and leaves the builder as it was.
 // Used internally by Server.
 func (b *Builder) Build(app *Server) (*Mock, error) {
 	if b.err != nil {
 		return nil, fmt.Errorf("mock: %w", b.err)
 	}
 
-	if err := checkMockID(b.mock.id); err != nil {
-		return nil, fmt.Errorf("mock: id %q: %w", b.mock.id, err)
-	}
-
-	if len(b.mock.expectations) == 0 {
+	// Times counts here as it did when it was a matcher of the builder: a mock limited only by Times, such as a mock
+	// file with repeat and no request keys, still builds.
+	if len(b.spec.expectations) == 0 && b.times == 0 {
 		return nil, ErrNoExpectations
 	}
 
-	if b.mock.Reply == nil {
+	if b.reply == nil {
 		return nil, ErrNoReplies
 	}
 
-	if r, ok := b.mock.Reply.(replyOnBeforeBuild); ok {
-		err := r.beforeBuild(app)
-		if err != nil {
-			return nil, err
-		}
+	spec := b.spec.clone()
+	if spec.id == "" {
+		spec.id = uuid.New().String()
+	}
+
+	// The matchers that keep state for one mock are made for it: Times counts the requests of this mock only, and the
+	// scenario runs in the store of app.
+	if b.times > 0 {
+		spec.expectations = append(spec.expectations, &expectation{
+			Target:  int(matchingScopeNone),
+			Matcher: mfeat.Repeat(b.times),
+		})
 	}
 
 	if b.scenario != "" {
-		b.appendExpectation(&expectation{
+		spec.expectations = append(spec.expectations, &expectation{
 			Target:  int(matchingScopeScenario),
 			Matcher: mfeat.Scenario(app.scenarioStore, b.scenario, b.scenarioRequiredState, b.scenarioNewState),
 		})
 	}
 
-	for i, def := range b.mock.OnCompleteList {
+	// As prepareGlobalEvents does: the prepared parameters go into the mock's copy, never into the builder.
+	for i, def := range spec.events {
 		if app.config.Listeners == nil || !app.config.Listeners.OnComplete.Has(def.Name) {
 			return nil, fmt.Errorf("mock: on_complete listener %s at index %d is not registered", def.Name, i)
 		}
@@ -508,14 +531,22 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 			return nil, fmt.Errorf("mock: on_complete listener %s at index %d: %w", def.Name, i, err)
 		}
 
-		b.mock.OnCompleteList[i].Parameters = params
+		spec.events[i].Parameters = params
 	}
 
-	return b.mock, nil
+	// Last, so a failure above makes nothing for the mock, such as the HTTP client of a proxy.
+	reply, err := newReplier(b.reply, app)
+	if err != nil {
+		return nil, err
+	}
+
+	desc, _ := descriptor.IsSelfDescriptive(b.reply)
+
+	return &Mock{spec: spec, reply: reply, replyDesc: desc, enabled: b.enabled}, nil
 }
 
 func (b *Builder) appendExpectation(e *vlatte.Eval[*selectorInput]) {
-	b.mock.expectations = append(b.mock.expectations, e)
+	b.spec.expectations = append(b.spec.expectations, e)
 }
 
 // checkMockID accepts the IDs a mock can have: letters, digits, '.', '_', '~' and '-', the characters

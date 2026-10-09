@@ -13,6 +13,11 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
+var (
+	_ UnaryReplierFactory = (*UnaryReply)(nil)
+	_ UnaryReplier        = (*unaryReplier)(nil)
+)
+
 type UnaryValueSelectorIn struct {
 	RequestMessage any
 	Info           *grpc.UnaryServerInfo
@@ -51,7 +56,7 @@ func (in *interceptors) UnaryInterceptor(
 
 	rawBody := string(b)
 	sub := vlatte.NewExplanation()
-	mocks := vlatte.Mocks[*Mock, *UnaryValueSelectorIn](em)
+	mocks := vlatte.Mocks[*Mock, *UnaryValueSelectorIn](ofKind(em, func(m *Mock) bool { return m.unaryReply != nil }))
 	mock, pass, err := mocks.Find(ctx, sub, &UnaryValueSelectorIn{rawBody, info}, func(m *Mock) vlatte.Evaluators[*Mock, *UnaryValueSelectorIn] { return m.unaryExpectations })
 	if err != nil {
 		return nil, status.Error(codes.Internal, fmt.Errorf("unary: error finding mock for request: %w", err).Error())
@@ -61,13 +66,8 @@ func (in *interceptors) UnaryInterceptor(
 		return nil, status.Error(codes.NotFound, "unary: request was not matched with any mock")
 	}
 
-	replier, ok := mock.Reply.(vlatte.Replier[*UnaryRequestValues, any])
-	if !ok || replier == nil {
-		return nil, interceptError("unary: mock %s reply must implement Replier[*UnaryRequestValues, any]: got %T", mock.getRef(), mock.Reply)
-	}
-
 	rv := &UnaryRequestValues{reqMsg, info, rawBody, in.app}
-	res, err := replier.Reply(ctx, rv)
+	res, err := mock.unaryReply.Reply(ctx, rv)
 	if err != nil {
 		return nil, err
 	}
@@ -77,8 +77,9 @@ func (in *interceptors) UnaryInterceptor(
 	return res, nil
 }
 
-var _ vlatte.Replier[*UnaryRequestValues, any] = (*UnaryReply)(nil)
-
+// UnaryReply describes the reply of a unary mock: its header, trailer, and message or status. It is a
+// UnaryReplierFactory: each mock built with it gets a replier of its own, so changing it after Mock changes only the
+// mocks built afterwards. It keeps the message it is given without copying it: don't change it afterwards.
 type UnaryReply struct {
 	response *UnaryResponse
 }
@@ -110,21 +111,37 @@ func (u *UnaryReply) Message(msg any) *UnaryReply {
 	return u
 }
 
-// Reply implements vlatte.Replier[*UnaryRequestValues, any].
-func (u *UnaryReply) Reply(ctx context.Context, _ *UnaryRequestValues) (any, error) {
-	err := grpc.SendHeader(ctx, u.response.Header)
+// NewReplier implements UnaryReplierFactory. The replier has a header and trailer of its own.
+func (u *UnaryReply) NewReplier(*Server) (UnaryReplier, error) {
+	return &unaryReplier{response: UnaryResponse{
+		Header:  u.response.Header.Copy(),
+		Trailer: u.response.Trailer.Copy(),
+		Message: u.response.Message,
+		Status:  u.response.Status,
+	}}, nil
+}
+
+// unaryReplier serves the calls of one unary mock. UnaryReply.NewReplier makes it, and calls only read it: gRPC sends
+// the header and trailer without writing into them.
+type unaryReplier struct {
+	response UnaryResponse
+}
+
+// Reply implements UnaryReplier.
+func (r *unaryReplier) Reply(ctx context.Context, _ *UnaryRequestValues) (any, error) {
+	err := grpc.SendHeader(ctx, r.response.Header)
 	if err != nil {
 		return nil, err
 	}
 
-	err = grpc.SetTrailer(ctx, u.response.Trailer)
+	err = grpc.SetTrailer(ctx, r.response.Trailer)
 	if err != nil {
 		return nil, err
 	}
 
-	if u.response.Status != nil {
-		return nil, u.response.Status.Err()
+	if r.response.Status != nil {
+		return nil, r.response.Status.Err()
 	}
 
-	return u.response.Message, nil
+	return r.response.Message, nil
 }

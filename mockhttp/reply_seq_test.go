@@ -2,9 +2,11 @@ package mockhttp
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,7 +21,7 @@ func TestSequentialReply(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		input := ReplyInput{RequestValues: rv, Writer: nil}
-		builder := Seq(InternalServerError(), BadRequest(), OK(), NotFound())
+		builder := replierOf(t, Seq(InternalServerError(), BadRequest(), OK(), NotFound()))
 
 		res, err := builder.Reply(context.Background(), input)
 		require.NoError(t, err)
@@ -48,7 +50,7 @@ func TestSequentialReply(t *testing.T) {
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		require.NoError(t, err)
 		input := ReplyInput{RequestValues: rv, Writer: nil}
-		builder := Seq().Add(OK()).OnSequenceEnded(NotFound())
+		builder := replierOf(t, Seq().Add(OK()).OnSequenceEnded(NotFound()))
 
 		res, err := builder.Reply(context.Background(), input)
 		assert.Nil(t, err)
@@ -61,10 +63,8 @@ func TestSequentialReply(t *testing.T) {
 }
 
 func TestSequentialReplyShouldReturnErrorWhenSequenceDoesNotContainReplies(t *testing.T) {
-	req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
-	rv := &RequestValues{RawRequest: req, URL: req.URL}
-	res, err := Seq().Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
-	assert.Nil(t, res)
+	r, err := Seq().NewReplier(nil)
+	assert.Nil(t, r)
 	assert.NotNil(t, err)
 }
 
@@ -77,7 +77,7 @@ func TestSequentialReply_PreparesNestedReplies(t *testing.T) {
 	m := MustNew()
 	m.MustStart()
 	t.Cleanup(m.Close)
-	// From creates its HTTP client in beforeBuild: Seq must prepare every reply it holds.
+	// From creates its HTTP client in NewReplier: Seq must make the Replier of every reply it holds.
 	m.MustMock(Getf("/seq").Reply(Seq(From(target.URL())).OnSequenceEnded(From(target.URL()))))
 
 	// The second request is served by the reply set with OnSequenceEnded.
@@ -92,17 +92,24 @@ func TestSequentialReply_PreparesNestedReplies(t *testing.T) {
 func TestSequentialReplyValidate(t *testing.T) {
 	seq := Seq()
 
-	require.Error(t, seq.beforeBuild(nil))
+	_, err := seq.NewReplier(nil)
+	require.Error(t, err)
 
 	seq.Add(OK())
 
-	require.NoError(t, seq.beforeBuild(nil))
+	_, err = seq.NewReplier(nil)
+	require.NoError(t, err)
+
+	// A nil reply fails the build and says where, rather than panic.
+	_, err = seq.Add(nil).NewReplier(nil)
+	require.EqualError(t, err, "reply_sequence: response 1 is nil")
 }
 
 func TestSeqRace(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
 	rv := &RequestValues{RawRequest: req, URL: req.URL}
-	builder := Seq(InternalServerError(), BadRequest(), OK(), NotFound())
+	builder, ok := replierOf(t, Seq(InternalServerError(), BadRequest(), OK(), NotFound())).(*sequenceReplier)
+	require.True(t, ok)
 
 	jobs := 3
 	wg := sync.WaitGroup{}
@@ -129,4 +136,65 @@ func TestSeqRace(t *testing.T) {
 
 	wg.Wait()
 	require.Equal(t, 4, builder.totalHits())
+}
+
+func TestSequentialReply_RepliesConcurrently(t *testing.T) {
+	// The sequence held its lock while a reply ran, so a slow reply, such as a proxy's, held up every request of the
+	// mock behind it. Only taking the next reply is locked now.
+	var inFlight sync.WaitGroup
+	inFlight.Add(2)
+	both := make(chan struct{})
+	go func() { inFlight.Wait(); close(both) }()
+
+	// Each step waits until both are running: steps served one at a time never get there.
+	inner := Func(func(http.ResponseWriter, *RequestValues) (*Response, error) {
+		inFlight.Done()
+		select {
+		case <-both:
+			return &Response{StatusCode: http.StatusOK}, nil
+		case <-time.After(2 * time.Second):
+			return nil, errors.New("sequence replies were served one at a time")
+		}
+	})
+	rep := replierOf(t, Seq(inner, inner))
+
+	req, _ := http.NewRequest(http.MethodGet, "http://localhost", nil)
+	input := ReplyInput{RequestValues: &RequestValues{RawRequest: req, URL: req.URL}}
+
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := rep.Reply(t.Context(), input)
+			errs <- err
+		}()
+	}
+
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+}
+
+func TestSequentialReply_EachMockRunsItsOwnSequence(t *testing.T) {
+	// #23: a sequence shared by two mocks had one position, so each mock skipped what the other served. Each mock
+	// runs the sequence on its own now, from the first reply.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	seq := Seq(OK(), NotFound())
+	m.MustMock(Getf("/a").Reply(seq), Getf("/b").Reply(seq))
+
+	steps := []struct {
+		path   string
+		status int
+	}{
+		{path: "/a", status: http.StatusOK},
+		{path: "/b", status: http.StatusOK},
+		{path: "/a", status: http.StatusNotFound},
+		{path: "/b", status: http.StatusNotFound},
+	}
+
+	for _, s := range steps {
+		status, _ := get(t, m, s.path)
+		require.Equal(t, s.status, status, s.path)
+	}
 }

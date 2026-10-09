@@ -2,6 +2,8 @@ package mockgrpc
 
 import (
 	"context"
+	"slices"
+	"uuid"
 
 	"google.golang.org/grpc/metadata"
 
@@ -11,14 +13,17 @@ import (
 
 var _ vlatte.Builder[*Mock, *Server] = (*UnaryBuilder)(nil)
 
+// UnaryBuilder describes a mock. Build makes a new Mock from it each time, and leaves the builder as it was. The
+// mocks built from one builder share its matchers; each gets a replier of its own from the reply.
 type UnaryBuilder struct {
-	m *Mock
+	expectations []*vlatte.Eval[*UnaryValueSelectorIn]
+	reply        UnaryReplierFactory
 }
 
 func UnaryMethod(method string) *UnaryBuilder {
-	b := &UnaryBuilder{m: newMock()}
-	b.m.unaryExpectations = append(
-		b.m.unaryExpectations,
+	b := &UnaryBuilder{}
+	b.expectations = append(
+		b.expectations,
 		&vlatte.Eval[*UnaryValueSelectorIn]{
 			Matcher:  match.Contain(method),
 			Selector: unarySelectMethod,
@@ -29,8 +34,8 @@ func UnaryMethod(method string) *UnaryBuilder {
 }
 
 func (b *UnaryBuilder) Header(key string, m vlatte.Matcher) *UnaryBuilder {
-	b.m.unaryExpectations = append(
-		b.m.unaryExpectations,
+	b.expectations = append(
+		b.expectations,
 		&vlatte.Eval[*UnaryValueSelectorIn]{
 			Matcher:  m,
 			Selector: unarySelectHeader(key),
@@ -41,8 +46,8 @@ func (b *UnaryBuilder) Header(key string, m vlatte.Matcher) *UnaryBuilder {
 }
 
 func (b *UnaryBuilder) Field(path string, m vlatte.Matcher) *UnaryBuilder {
-	b.m.unaryExpectations = append(
-		b.m.unaryExpectations,
+	b.expectations = append(
+		b.expectations,
 		&vlatte.Eval[*UnaryValueSelectorIn]{
 			Matcher:  match.Field(path, m),
 			Selector: unarySelectBody,
@@ -51,13 +56,26 @@ func (b *UnaryBuilder) Field(path string, m vlatte.Matcher) *UnaryBuilder {
 	return b
 }
 
-func (b *UnaryBuilder) Reply(r vlatte.Replier[*UnaryRequestValues, any]) *UnaryBuilder {
-	b.m.Reply = r
+// Reply sets what the mock replies with. Build asks f for a new replier for each mock, so f can serve many mocks.
+func (b *UnaryBuilder) Reply(f UnaryReplierFactory) *UnaryBuilder {
+	b.reply = f
 	return b
 }
 
-func (b *UnaryBuilder) Build(_ *Server) (*Mock, error) {
-	return b.m, nil
+// Build makes a new Mock for app from the builder, with an ID and a replier of its own, and leaves the builder as it
+// was.
+func (b *UnaryBuilder) Build(app *Server) (*Mock, error) {
+	reply, err := newReplier(b.reply, app)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Mock{
+		id:                uuid.New().String(),
+		enabled:           true,
+		unaryReply:        reply,
+		unaryExpectations: slices.Clone(b.expectations),
+	}, nil
 }
 
 func unarySelectMethod(_ context.Context, r *UnaryValueSelectorIn) any {

@@ -8,14 +8,30 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 var _req, _ = http.NewRequest(http.MethodGet, "http://localhost:8080", nil)
+
+// replierOf makes the Replier that a mock built with f would serve, on a server with default settings.
+func replierOf(t *testing.T, f ReplierFactory) Replier {
+	t.Helper()
+
+	r, err := f.NewReplier(MustNew(Setup().Silent()))
+	require.NoError(t, err)
+
+	return r
+}
 
 func TestReplyFactories(t *testing.T) {
 	assert.Equal(t, http.StatusOK, Status(http.StatusOK).response.StatusCode)
@@ -43,15 +59,16 @@ func TestReplyFactories(t *testing.T) {
 func TestReply(t *testing.T) {
 	rv := &RequestValues{RawRequest: _req, URL: _req.URL}
 	input := ReplyInput{RequestValues: rv, Writer: nil}
-	res, err := NewReply().
+	rep := NewReply().
 		Status(http.StatusCreated).
 		Header("test", "dev").
 		Header("test", "qa").
 		Header("hello", "world").
 		Cookie(&http.Cookie{Name: "cookie_test"}).
 		ExpireCookie(&http.Cookie{Name: "cookie_test_remove"}).
-		Body([]byte("hi")).
-		Reply(context.Background(), input)
+		Body([]byte("hi"))
+
+	res, err := replierOf(t, rep).Reply(t.Context(), input)
 
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, res.StatusCode)
@@ -66,10 +83,8 @@ func TestReply(t *testing.T) {
 
 func TestStdReplyBodyString(t *testing.T) {
 	rv := &RequestValues{RawRequest: _req, URL: _req.URL}
-	res, err := NewReply().
-		Status(http.StatusCreated).
-		PlainText("text").
-		Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
+	rep := NewReply().Status(http.StatusCreated).PlainText("text")
+	res, err := replierOf(t, rep).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
 
 	require.NoError(t, err)
 	require.Equal(t, "text", string(res.Body))
@@ -91,10 +106,8 @@ func TestStdReplyBodyJSON(t *testing.T) {
 			Active: true,
 		}
 
-		res, err := NewReply().
-			Status(http.StatusCreated).
-			BodyJSON(model).
-			Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
+		rep := NewReply().Status(http.StatusCreated).BodyJSON(model)
+		res, err := replierOf(t, rep).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		assert.NoError(t, err)
 
@@ -105,13 +118,10 @@ func TestStdReplyBodyJSON(t *testing.T) {
 		assert.Equal(t, model, b)
 	})
 
-	t.Run("should report conversion error", func(t *testing.T) {
-		res, err := NewReply().
-			Status(http.StatusCreated).
-			BodyJSON(make(chan int)).
-			Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
+	t.Run("should report conversion error when the mock is built", func(t *testing.T) {
+		r, err := NewReply().Status(http.StatusCreated).BodyJSON(make(chan int)).NewReplier(MustNew(Setup().Silent()))
 
-		assert.Nil(t, res)
+		assert.Nil(t, r)
 		assert.NotNil(t, err)
 	})
 }
@@ -137,7 +147,7 @@ func TestStdReplyBodyJSON_StableOutput(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := NewReply().BodyJSON(tc.data).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
+			res, err := replierOf(t, NewReply().BodyJSON(tc.data)).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
 
 			require.NoError(t, err)
 			require.Equal(t, tc.want, string(res.Body))
@@ -151,10 +161,8 @@ func TestStdReplyBodyReader(t *testing.T) {
 	buf.WriteString("world\n")
 
 	rv := &RequestValues{RawRequest: _req, URL: _req.URL}
-	res, err := NewReply().
-		Status(http.StatusCreated).
-		BodyReader(buf).
-		Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
+	rep := NewReply().Status(http.StatusCreated).BodyReader(buf)
+	res, err := replierOf(t, rep).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
 
 	assert.NoError(t, err)
 	assert.Equal(t, "hello\nworld\n", string(res.Body))
@@ -175,12 +183,23 @@ func TestHeaderTemplate_RendersPerResponse(t *testing.T) {
 	}
 }
 
-func TestReply_GzipPreparedTwiceHasOneContentEncoding(t *testing.T) {
-	// A reply can serve several mocks, and each mock's build prepares it: the Content-Encoding goes in once.
-	rep := OK().Gzip()
-	require.NoError(t, rep.beforeBuild(nil))
-	require.NoError(t, rep.beforeBuild(nil))
-	require.Equal(t, []string{"gzip"}, rep.response.Header.Values(HeaderContentEncoding))
+func TestReply_GzipLeavesTheReplyAsItWas(t *testing.T) {
+	// A Reply serves many mocks: each Replier made from it sets the Content-Encoding once, the Reply itself gets none,
+	// and it still describes itself as gzip. Set, not Add: a Content-Encoding written with Header goes in once too.
+	for _, rep := range []*Reply{OK().Gzip(), OK().Header(HeaderContentEncoding, "gzip").Gzip()} {
+		written := slices.Clone(rep.response.Header.Values(HeaderContentEncoding))
+
+		for range 2 {
+			r, ok := replierOf(t, rep).(*responseReplier)
+			require.True(t, ok)
+			require.Equal(t, []string{"gzip"}, r.response.Header.Values(HeaderContentEncoding))
+			require.Equal(t, "gzip", r.response.Encoding)
+		}
+
+		require.Equal(t, written, rep.response.Header.Values(HeaderContentEncoding), "the Reply keeps what was written")
+		require.Empty(t, rep.response.Encoding)
+		require.Equal(t, "gzip", rep.Describe().Props.(map[string]any)["encoding"])
+	}
 }
 
 func TestReply_TheLastBodySetterWins(t *testing.T) {
@@ -287,4 +306,252 @@ func TestReply_DescriptionLoadsBack(t *testing.T) {
 		require.Equal(t, "ana", res.Header.Get("X-Name"), path)
 		require.Equal(t, "{{ not a template }}", string(body), path)
 	}
+}
+
+func TestReply_SharedReplyKeepsServingWhileMocksBuild(t *testing.T) {
+	// #23: building a mock compiled templates into the reply it was given, so a request to one mock could read a
+	// template that another build had just reset: 418s, missing headers and data races. Building now only reads the
+	// reply, and each mock serves a Replier of its own.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	ok := OK().BodyTemplate(`{{ .Request.Method }}`).HeaderTemplate("X-Id", `{{ .Request.ID }}`)
+	m.MustMock(Getf("/a").Reply(ok))
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for range 20 {
+				res, err := http.Get(m.URL("/a"))
+				if !assert.NoError(t, err) {
+					return
+				}
+
+				body, err := io.ReadAll(res.Body)
+				assert.NoError(t, err)
+				assert.NoError(t, res.Body.Close())
+
+				assert.Equal(t, http.StatusOK, res.StatusCode)
+				assert.Equal(t, "GET", string(body))
+				assert.NotEmpty(t, res.Header.Get("X-Id"))
+			}
+		})
+	}
+
+	for i := range 50 {
+		m.MustMock(Getf("/b%d", i).Reply(ok))
+	}
+
+	wg.Wait()
+}
+
+func TestReply_EachServerCompilesWithItsOwnEngine(t *testing.T) {
+	// #23: a reply shared by two servers was compiled in place, so the last server to build won: the first server
+	// rendered with the template engine of the second, and when a build failed, the first server answered 418.
+	newServer := func(shout func(string) string) *Server {
+		engine := vlatte.MustNewGoTemplateEngine(vlatte.WithTemplateFuncs(map[string]any{"shout": shout}))
+		s := MustNew(Setup().Silent().TemplateEngine(engine))
+		s.MustStart()
+		t.Cleanup(s.Close)
+
+		return s
+	}
+
+	loud := OK().BodyTemplate(`{{ shout .Request.Method }}`)
+	upper, lower := newServer(strings.ToUpper), newServer(strings.ToLower)
+	upper.MustMock(Getf("/a").Reply(loud))
+	lower.MustMock(Getf("/a").Reply(loud))
+
+	_, err := MustNew(Setup().Silent()).Mock(Getf("/a").Reply(loud))
+	require.ErrorContains(t, err, `function "shout" not defined`, "the default engine has no shout")
+
+	_, body := get(t, upper, "/a")
+	require.Equal(t, "GET", body)
+
+	_, body = get(t, lower, "/a")
+	require.Equal(t, "get", body)
+}
+
+func TestReply_ChangesAfterMockReachOnlyLaterMocks(t *testing.T) {
+	// A mock serves the Replier made from the reply when the mock was built. Changing the reply afterwards, even while
+	// the mock serves, changes only the mocks built afterwards, and the first keeps describing the reply it serves.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	rep := OK().PlainText("v1")
+	served := m.MustMock(Getf("/v1").Reply(rep)).Mocks()[0]
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		rep.Status(http.StatusInternalServerError).
+			Header("X-Later", "yes").
+			HeaderTemplate("X-Method", "{{ .Request.Method }}").
+			Gzip()
+	})
+
+	for range 20 {
+		res, body := fetch(t, m.URL("/v1"))
+		require.Equal(t, http.StatusOK, res.StatusCode)
+		require.Equal(t, "v1", string(body))
+		require.Empty(t, res.Header.Get("X-Later"))
+		require.Empty(t, res.Header.Get("X-Method"))
+	}
+
+	wg.Wait()
+
+	described := served.Describe().Props.(map[string]any)["response"].(map[string]any)
+	require.Equal(t, http.StatusOK, described["status"])
+	require.NotContains(t, described, "encoding")
+
+	m.MustMock(Getf("/v2").Reply(rep))
+
+	res, body := fetch(t, m.URL("/v2"))
+	require.Equal(t, http.StatusInternalServerError, res.StatusCode)
+	require.Equal(t, "v1", string(body))
+	require.Equal(t, "yes", res.Header.Get("X-Later"))
+	require.Equal(t, "GET", res.Header.Get("X-Method"))
+}
+
+// flaky serves fail on every nth request of its mock, and ok on the others. It is a ReplierFactory of its own that
+// holds built-in replies, as Seq and Rand do.
+type flaky struct {
+	every int64
+	ok    ReplierFactory
+	fail  ReplierFactory
+}
+
+func (f flaky) NewReplier(app *Server) (Replier, error) {
+	ok, err := f.ok.NewReplier(app)
+	if err != nil {
+		return nil, err
+	}
+
+	fail, err := f.fail.NewReplier(app)
+	if err != nil {
+		return nil, err
+	}
+
+	return &flakyReplier{every: f.every, ok: ok, fail: fail}, nil
+}
+
+type flakyReplier struct {
+	every int64
+	n     atomic.Int64
+	ok    Replier
+	fail  Replier
+}
+
+func (r *flakyReplier) Reply(ctx context.Context, in ReplyInput) (*Response, error) {
+	if r.n.Add(1)%r.every == 0 {
+		return r.fail.Reply(ctx, in)
+	}
+
+	return r.ok.Reply(ctx, in)
+}
+
+func TestReply_CustomFactoryHoldsBuiltInReplies(t *testing.T) {
+	// A factory of one's own can hold built-in replies: making their Repliers in its NewReplier compiles their
+	// templates with the engine of the server, and each mock gets a count of its own. Before, a custom replier holding
+	// a *Reply never had it prepared, so its templates were nil.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	f := flaky{every: 2, ok: OK().BodyTemplate(`{{ .Request.Method }}`), fail: ServiceUnavailable()}
+	m.MustMock(Getf("/a").Reply(f), Getf("/b").Reply(f))
+
+	steps := []struct {
+		path   string
+		status int
+		body   string
+	}{
+		{path: "/a", status: http.StatusOK, body: "GET"},
+		{path: "/b", status: http.StatusOK, body: "GET"},
+		{path: "/a", status: http.StatusServiceUnavailable},
+		{path: "/b", status: http.StatusServiceUnavailable},
+	}
+
+	for _, s := range steps {
+		status, body := get(t, m, s.path)
+		require.Equal(t, s.status, status, s.path)
+		require.Equal(t, s.body, body, s.path)
+	}
+}
+
+func TestReply_EachResponseOwnsWhatMappersChange(t *testing.T) {
+	// A response shared the header map and the cookies of its reply, so a mapper that set a header or changed a cookie
+	// wrote into the reply: the change showed up again on later responses, requests at the same time raced, and a
+	// changed cookie was the very one given to Cookie.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	cookie := &http.Cookie{Name: "reply", Value: "yes"}
+	m.MustMock(Getf("/mapped").
+		Map(func(_ *RequestValues, res *Response) error {
+			res.Header.Add("X-Mapped", "yes")
+			res.Cookies[0].Value += "-mapped"
+			res.Cookies = append(res.Cookies, &http.Cookie{Name: "mapped", Value: "yes"})
+
+			return nil
+		}).
+		Reply(OK().Cookie(cookie)))
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for range 10 {
+				res, err := http.Get(m.URL("/mapped"))
+				if !assert.NoError(t, err) {
+					return
+				}
+
+				assert.NoError(t, res.Body.Close())
+				assert.Equal(t, []string{"yes"}, res.Header.Values("X-Mapped"))
+
+				cookies := make(map[string]string)
+				for _, c := range res.Cookies() {
+					cookies[c.Name] = c.Value
+				}
+
+				assert.Equal(t, map[string]string{"reply": "yes-mapped", "mapped": "yes"}, cookies)
+			}
+		})
+	}
+
+	wg.Wait()
+
+	require.Equal(t, "yes", cookie.Value, "the cookie given to Cookie stays as it was")
+}
+
+func TestReply_ExpireCookieLeavesTheCookieAsItWas(t *testing.T) {
+	// ExpireCookie set MaxAge on the cookie it was given, so it expired that cookie for every reply that held it.
+	cookie := &http.Cookie{Name: "session", Value: "a"}
+	kept := OK().Cookie(cookie)
+	expired := OK().ExpireCookie(cookie)
+
+	require.Zero(t, cookie.MaxAge, "the given cookie stays as it was")
+	require.Zero(t, kept.response.Cookies[0].MaxAge)
+	require.Equal(t, -1, expired.response.Cookies[0].MaxAge)
+}
+
+func TestReply_NilCookieRendersNothing(t *testing.T) {
+	// Each response copies the cookies of its reply. A nil cookie renders nothing, so it is kept rather than copied: the
+	// build doesn't panic, and the other cookies are served.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/c").Reply(OK().Cookie(nil).Cookie(&http.Cookie{Name: "a", Value: "1"})))
+
+	res, err := http.Get(m.URL("/c"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	cookies := res.Cookies()
+	require.Len(t, cookies, 1)
+	require.Equal(t, "a=1", cookies[0].String())
 }
