@@ -12,7 +12,7 @@ import (
 )
 
 func TestRace(t *testing.T) {
-	m := NewMock()
+	m := &Mock{}
 	jobs := 10
 	wg := sync.WaitGroup{}
 
@@ -35,7 +35,8 @@ func TestRace(t *testing.T) {
 }
 
 func TestMock(t *testing.T) {
-	m := NewMock()
+	m, err := Getf("/mock").Reply(OK()).Build(MustNew(Setup().Silent()))
+	require.NoError(t, err)
 
 	t.Run("should init enabled", func(t *testing.T) {
 		assert.True(t, m.Enabled())

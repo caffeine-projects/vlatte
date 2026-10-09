@@ -3,7 +3,6 @@ package mockgrpc
 import (
 	"sync"
 	"sync/atomic"
-	"uuid"
 
 	"github.com/caffeine-projects/vlatte"
 )
@@ -21,17 +20,10 @@ type Mock struct {
 	hits     atomic.Int64
 	enabled  bool
 
-	Reply any
+	reply any
 
 	unaryExpectations  []*vlatte.Eval[*UnaryValueSelectorIn]
 	streamExpectations []*vlatte.Eval[*StreamValueSelectorIn]
-}
-
-func newMock() *Mock {
-	return &Mock{
-		id:      uuid.New().String(),
-		enabled: true,
-	}
 }
 
 func (m *Mock) ID() string {

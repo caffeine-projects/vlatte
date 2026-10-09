@@ -84,7 +84,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	sub := vlatte.NewExplanation()
 	mocks := vlatte.Mocks[*Mock, *selectorInput](stored)
-	mock, matched, err := mocks.Find(r.Context(), sub, input, func(m *Mock) vlatte.Evaluators[*Mock, *selectorInput] { return m.expectations })
+	mock, matched, err := mocks.Find(r.Context(), sub, input, func(m *Mock) vlatte.Evaluators[*Mock, *selectorInput] { return m.spec.expectations })
 	if err != nil {
 		h.lifecycle.OnError(reqValues, fmt.Errorf("http: error finding eligible mocks for request. %w", err))
 	}
@@ -139,8 +139,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	reqValues.Data = locals
 
-	if mock.Delay != nil {
-		ctxTimeout, cancel := context.WithTimeout(r.Context(), mock.Delay())
+	if mock.spec.delay != nil {
+		ctxTimeout, cancel := context.WithTimeout(r.Context(), mock.spec.delay())
 		defer cancel()
 
 		<-ctxTimeout.Done()
@@ -150,7 +150,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w = &topResponseWriter{ctx: r.Context(), steps: steps, rw: w}
 	}
 
-	res, err := mock.Reply.Reply(r.Context(), ReplyInput{RequestValues: reqValues, Writer: w})
+	res, err := mock.reply.Reply(r.Context(), ReplyInput{RequestValues: reqValues, Writer: w})
 	if err != nil {
 		h.onError(w, reqValues, fmt.Errorf(
 			"http: error building reply for request=%s source=%s. %w",
@@ -162,7 +162,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if res != nil {
-		for i, mapper := range mock.Mappers {
+		for i, mapper := range mock.spec.mappers {
 			if err = mapper(reqValues, res); err != nil {
 				h.onError(w, reqValues, fmt.Errorf("http: error with response mapper at index %d. %w", i, err))
 				return
@@ -185,7 +185,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// run matcher events after we sent the mock.
 	// some matcher might need to keep state.
-	for i, exp := range mock.expectations {
+	for i, exp := range mock.spec.expectations {
 		if stateful, ok := exp.Matcher.(vlatte.Stateful); ok {
 			if err = stateful.SetState(); err != nil {
 				h.lifecycle.OnWarning(reqValues,

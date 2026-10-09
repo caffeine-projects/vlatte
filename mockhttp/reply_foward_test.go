@@ -52,8 +52,7 @@ func TestForward(t *testing.T) {
 			RemoveProxyHeaders("x-to-be-removed").
 			Header("x-res", "response").
 			Headers(h)
-		require.NoError(t, reply.beforeBuild(MustNew()))
-		res, err := reply.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
+		res, err := replierOf(t, reply).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusCreated, res.StatusCode)
@@ -81,8 +80,7 @@ func TestForward(t *testing.T) {
 
 		u, _ := url.Parse(dest.URL)
 		forward := From(u)
-		require.NoError(t, forward.beforeBuild(MustNew()))
-		res, err := forward.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
+		res, err := replierOf(t, forward).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -114,8 +112,7 @@ func TestForward(t *testing.T) {
 
 		u, _ := url.Parse(dest.URL)
 		forward := From(u)
-		require.NoError(t, forward.beforeBuild(MustNew()))
-		res, err := forward.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
+		res, err := replierOf(t, forward).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
 		require.NoError(t, err)
 
 		g, err := res.Gunzip()
@@ -136,8 +133,7 @@ func TestForward(t *testing.T) {
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 
 		forward := From(dest.URL)
-		require.NoError(t, forward.beforeBuild(MustNew()))
-		res, err := forward.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
+		res, err := replierOf(t, forward).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusNoContent, res.StatusCode)
@@ -157,8 +153,7 @@ func TestForward(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080/path/test/example?filter=all", nil)
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		reply := From(dest.URL).TrimPrefix("/path/test")
-		require.NoError(t, reply.beforeBuild(MustNew()))
-		res, err := reply.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
+		res, err := replierOf(t, reply).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		assert.NoError(t, err)
 		assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -177,8 +172,7 @@ func TestForward(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080/path/test/example?filter=all", nil)
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		reply := From(dest.URL).TrimSuffix("/example")
-		require.NoError(t, reply.beforeBuild(MustNew()))
-		res, err := reply.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
+		res, err := replierOf(t, reply).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		assert.NoError(t, err)
 		assert.Equal(t, http.StatusOK, res.StatusCode)
@@ -218,8 +212,7 @@ func TestForward(t *testing.T) {
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 		reply := From(dest.URL).
 			Timeout(20 * time.Millisecond)
-		require.NoError(t, reply.beforeBuild(MustNew()))
-		res, err := reply.Reply(context.Background(), ReplyInput{RequestValues: rv, Writer: nil})
+		res, err := replierOf(t, reply).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
 
 		require.Error(t, err)
 		require.Nil(t, res)
@@ -352,4 +345,46 @@ func TestProxyReply_ClosesTargetConnectionsOnClose(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("connection to the proxy target was left open")
 	}
+}
+
+func TestProxyReply_LeavesTheFactoryClientAsItWas(t *testing.T) {
+	// Building a proxy mock set the Transport, with TLS verification off, and CheckRedirect on the client that the
+	// HTTPClient factory returned, which can be a client it shares, such as http.DefaultClient. The mock gets a copy.
+	shared := &http.Client{}
+	m := MustNew(Setup().Silent().HTTPClient(func() *http.Client { return shared }))
+	t.Cleanup(m.Close)
+
+	_, err := AnyMethod().Reply(From("http://localhost").NoFollow()).Build(m)
+	require.NoError(t, err)
+
+	require.Nil(t, shared.Transport)
+	require.Nil(t, shared.CheckRedirect)
+}
+
+func TestProxyReply_FactoryWithoutClientFailsTheBuild(t *testing.T) {
+	// The proxy copied the client the HTTPClient factory returned without checking it, so a factory that returned nil
+	// made Mock panic, which only Must functions may do.
+	m := MustNew(Setup().Silent().HTTPClient(func() *http.Client { return nil }))
+	t.Cleanup(m.Close)
+
+	_, err := AnyMethod().Reply(From("http://localhost")).Build(m)
+	require.EqualError(t, err, "reply_proxy: the HTTP client factory returned no client")
+}
+
+func TestProxyReply_MockDescribesTheProxyAsBuilt(t *testing.T) {
+	// A mock keeps the description of its reply from when it was built, so the description can't share the maps that
+	// the setters of the reply change.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	rep := From("http://localhost").ForwardHeader("X-Fwd", "a")
+	mock, err := AnyMethod().Reply(rep).Build(m)
+	require.NoError(t, err)
+
+	rep.ForwardHeader("X-Fwd", "b").Header("X-Res", "c").RemoveProxyHeaders("X-Drop")
+
+	proxy := mock.Describe().Props.(map[string]any)["proxy"].(map[string]any)
+	require.Equal(t, http.Header{"X-Fwd": {"a"}}, proxy["forward_header"])
+	require.Empty(t, proxy["header"])
+	require.Empty(t, proxy["remove_headers"])
 }

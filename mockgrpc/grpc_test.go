@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -25,6 +26,11 @@ import (
 type blockingUnaryReply struct {
 	entered chan struct{}
 	release chan struct{}
+}
+
+// NewReplier gives every mock this reply itself: the test waits on its channels.
+func (r *blockingUnaryReply) NewReplier(*Server) (UnaryReplier, error) {
+	return r, nil
 }
 
 func (r *blockingUnaryReply) Reply(_ context.Context, _ *UnaryRequestValues) (any, error) {
@@ -210,4 +216,58 @@ func TestListener(t *testing.T) {
 
 	_, err = pb.NewTestServiceClient(conn).Greetings(t.Context(), &pb.HiReq{Message: "hi"})
 	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+func TestUnaryBuilder_OneBuilderOnTwoServers(t *testing.T) {
+	// Build returned the builder's own mock, so two servers served one mock, with one hit count and one ID. Each build
+	// is a new mock now, with a replier of its own.
+	b := UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{Message: "hi"}))
+
+	servers := make([]*Server, 2)
+	mocks := make([]*Mock, 2)
+
+	for i := range servers {
+		s := MustNew()
+		pb.RegisterTestServiceServer(s, pb.UnimplementedTestServiceServer{})
+		s.MustStart()
+		t.Cleanup(s.Close)
+
+		servers[i] = s
+		mocks[i] = s.MustMock(b).Mocks()[0]
+	}
+
+	require.NotSame(t, mocks[0], mocks[1])
+	require.NotEqual(t, mocks[0].ID(), mocks[1].ID())
+
+	conn, err := grpc.NewClient(servers[0].Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	_, err = pb.NewTestServiceClient(conn).Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.NoError(t, err)
+
+	require.Equal(t, int64(1), mocks[0].Hits())
+	require.Zero(t, mocks[1].Hits(), "hits are per mock")
+}
+
+// noReplier is a reply factory that makes no replier.
+type noReplier struct{}
+
+func (noReplier) NewReplier(*Server) (UnaryReplier, error) { return nil, nil }
+
+func TestBuilder_ReplyErrors(t *testing.T) {
+	// Build stored the reply as given, so a mock without a reply was added and failed every call, and a stream whose
+	// reader failed streamed nothing, without an error. Build makes the replier of the mock now, and those fail it.
+	m := MustNew()
+
+	_, err := UnaryMethod("Greetings").Build(m)
+	require.EqualError(t, err, "mock: no reply set: use Reply")
+
+	_, err = UnaryMethod("Greetings").Reply(noReplier{}).Build(m)
+	require.EqualError(t, err, "reply: the factory made no replier")
+
+	_, err = ServerStreamMethod("List").
+		Reply(ServerStream[*pb.ListItem]().JSON(iotest.ErrReader(errors.New("boom")))).
+		Build(m)
+	require.EqualError(t, err, "stream: reading the messages: boom")
 }

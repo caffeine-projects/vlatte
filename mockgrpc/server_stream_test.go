@@ -136,3 +136,42 @@ func TestServerStream_MessageReader(t *testing.T) {
 	require.True(t, proto.Equal(m2, items[1]))
 	require.True(t, scope.AssertCalled(t))
 }
+
+// listKeys calls List and returns the keys of the items it streams, in order.
+func listKeys(t *testing.T, client pb.TestServiceClient) []string {
+	t.Helper()
+
+	stream, err := client.List(t.Context(), &pb.ListReq{})
+	require.NoError(t, err)
+
+	keys := make([]string, 0)
+	for {
+		item, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return keys
+		}
+
+		require.NoError(t, err)
+		keys = append(keys, item.Key)
+	}
+}
+
+func TestServerStream_ReaderStreamsOnEveryCall(t *testing.T) {
+	// #27: the reply kept the reader and scanned it at each call, so the first call read it to the end, and every later
+	// call streamed nothing and still ended with OK. The reply reads the reader once, when it is given.
+	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(ServerStreamMethod("List").Reply(
+		ServerStream[*pb.ListItem]().JSON(strings.NewReader("{\"key\":\"a\"}\n{\"key\":\"b\"}\n"))))
+
+	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	client := pb.NewTestServiceClient(conn)
+	for i := range 2 {
+		require.Equal(t, []string{"a", "b"}, listKeys(t, client), "call %d", i+1)
+	}
+}

@@ -358,7 +358,7 @@ func TestMockFile_BuildIsRepeatable(t *testing.T) {
 
 	require.NotSame(t, first, second)
 	require.NotEqual(t, first.ID(), second.ID())
-	require.Len(t, second.expectations, len(first.expectations))
+	require.Len(t, second.spec.expectations, len(first.spec.expectations))
 	require.Equal(t, strings.Count(describe(t, first), "\""), strings.Count(describe(t, second), "\""))
 }
 
@@ -414,7 +414,7 @@ func TestMockFile_Regressions(t *testing.T) {
 		mock, err := decodeDoc(m, "request: {path: /x}\nproxy: {target: 'http://localhost', timeout: 1500}\n")
 		require.NoError(t, err)
 
-		proxy, ok := mock.Reply.(*ProxyReply)
+		proxy, ok := mock.reply.(*proxyReplier)
 		require.True(t, ok)
 		require.Equal(t, 1500*time.Millisecond, proxy.timeout)
 	})
@@ -505,10 +505,10 @@ proxy:
 	scope, err := m.Mock(FromBytes([]byte(doc), "yaml"))
 	require.NoError(t, err)
 
-	proxy, ok := scope.Mocks()[0].Reply.(*ProxyReply)
+	proxy, ok := scope.Mocks()[0].reply.(*proxyReplier)
 	require.True(t, ok)
 	require.Equal(t, 1500*time.Millisecond, proxy.timeout)
-	require.True(t, proxy.noFollow)
+	require.NotNil(t, proxy.client.CheckRedirect, "no_follow")
 
 	req, err := http.NewRequest(http.MethodGet, m.URL("/api/users.json"), nil)
 	require.NoError(t, err)

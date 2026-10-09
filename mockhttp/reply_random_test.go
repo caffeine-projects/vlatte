@@ -1,7 +1,6 @@
 package mockhttp
 
 import (
-	"context"
 	"errors"
 	"io"
 	"math/rand/v2"
@@ -22,13 +21,10 @@ func TestRandomReplies(t *testing.T) {
 		http.StatusOK, http.StatusInternalServerError, http.StatusCreated, http.StatusBadRequest,
 	}
 
+	replier := replierOf(t, Rand(BadRequest(), OK(), Created()).Add(InternalServerError()))
+
 	for range 5000 {
-		res, err := Rand(
-			BadRequest(),
-			OK(),
-			Created()).
-			Add(InternalServerError()).
-			Reply(context.Background(), input)
+		res, err := replier.Reply(t.Context(), input)
 
 		contains := slices.Contains(statuses, res.StatusCode)
 
@@ -38,7 +34,8 @@ func TestRandomReplies(t *testing.T) {
 }
 
 func TestShouldReturnErrorWhenRandomDoesNotContainReplies(t *testing.T) {
-	require.Error(t, Rand().beforeBuild(nil))
+	_, err := Rand().NewReplier(nil)
+	require.Error(t, err)
 }
 
 func TestRandWithCustom(t *testing.T) {
@@ -51,14 +48,10 @@ func TestRandWithCustom(t *testing.T) {
 	r := rand.New(rand.NewPCG(1, 2))
 
 	input := ReplyInput{RequestValues: rv, Writer: nil}
+	replier := replierOf(t, RandWith(r, BadRequest(), OK(), Created(), InternalServerError()))
+
 	for range 5000 {
-		res, err := RandWith(
-			r,
-			BadRequest(),
-			OK(),
-			Created(),
-			InternalServerError(),
-		).Reply(context.Background(), input)
+		res, err := replier.Reply(t.Context(), input)
 
 		contains := slices.Contains(statuses, res.StatusCode)
 
@@ -71,7 +64,7 @@ func TestRandomReply_PreparesNestedReplies(t *testing.T) {
 	m := MustNew()
 	m.MustStart()
 	t.Cleanup(m.Close)
-	// Body templates are parsed in beforeBuild: Rand must prepare every reply it holds.
+	// Body templates compile in NewReplier: Rand must make the Replier of every reply it holds.
 	m.MustMock(Getf("/rand").Reply(Rand(OK().BodyTemplate("{{ .Request.Method }}"))))
 
 	res, err := http.Get(m.URL("/rand"))
@@ -107,7 +100,7 @@ func TestRandomReply_RepliesConcurrently(t *testing.T) {
 			return nil, errors.New("random replies were served one at a time")
 		}
 	})
-	rep := RandWithSeed(1, inner)
+	rep := replierOf(t, RandWithSeed(1, inner))
 
 	req, _ := http.NewRequest(http.MethodGet, "http://localhost", nil)
 	input := ReplyInput{RequestValues: &RequestValues{RawRequest: req, URL: req.URL}}
@@ -115,7 +108,7 @@ func TestRandomReply_RepliesConcurrently(t *testing.T) {
 	errs := make(chan error, 2)
 	for range 2 {
 		go func() {
-			_, err := rep.Reply(context.Background(), input)
+			_, err := rep.Reply(t.Context(), input)
 			errs <- err
 		}()
 	}
@@ -127,9 +120,37 @@ func TestRandomReply_RepliesConcurrently(t *testing.T) {
 func TestRandomReplyValidate(t *testing.T) {
 	r := Rand()
 
-	require.Error(t, r.beforeBuild(nil))
+	_, err := r.NewReplier(nil)
+	require.Error(t, err)
 
 	r.Add(OK())
 
-	require.NoError(t, r.beforeBuild(nil))
+	_, err = r.NewReplier(nil)
+	require.NoError(t, err)
+}
+
+func TestRandomReply_SeededPicksInTheSameOrderOnEachServer(t *testing.T) {
+	// A seeded reply gives each mock a generator of its own, from the seed, so two servers serving it pick in the same
+	// order, whatever the other serves. Before, their mocks drew from one generator.
+	rep := RandWithSeed(7, OK(), Created(), Accepted(), NoContent())
+
+	s1, s2 := MustNew(Setup().Silent()), MustNew(Setup().Silent())
+	for _, s := range []*Server{s1, s2} {
+		s.MustStart()
+		t.Cleanup(s.Close)
+		s.MustMock(Getf("/r").Reply(rep))
+	}
+
+	first := make([]int, 0, 10)
+	second := make([]int, 0, 10)
+
+	for range 10 {
+		status, _ := get(t, s1, "/r")
+		first = append(first, status)
+
+		status, _ = get(t, s2, "/r")
+		second = append(second, status)
+	}
+
+	require.Equal(t, first, second)
 }

@@ -20,7 +20,8 @@ type Mock interface {
 	String() string
 }
 
-// Builder describes a Mock builder.
+// Builder describes a Mock builder. Build returns a new mock on each call and must not change the builder, so a builder
+// can be built for several servers, or more than once for one.
 type Builder[B Mock, TMockApp any] interface {
 	Build(app TMockApp) (B, error)
 }

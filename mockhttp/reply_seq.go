@@ -5,57 +5,37 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
-var _ Replier = (*SequentialReply)(nil)
+var (
+	_ ReplierFactory = (*SequentialReply)(nil)
+	_ Replier        = (*sequenceReplier)(nil)
+)
 
-// SequentialReply configures a sequence of repliers to be used after a Mock is matched.
+// SequentialReply configures a sequence of replies, served one per request, in order, then the one set with
+// OnSequenceEnded. It is a ReplierFactory: each mock built with it runs the sequence on its own, from the first reply.
 type SequentialReply struct {
-	replyAfterSequenceEnded Replier
-	replies                 []Replier
-	hits                    int32
-	rwMutex                 sync.RWMutex
+	replyAfterSequenceEnded ReplierFactory
+	replies                 []ReplierFactory
 }
 
 // Seq creates a new SequentialReply.
-func Seq(reply ...Replier) *SequentialReply {
+func Seq(reply ...ReplierFactory) *SequentialReply {
 	return &SequentialReply{replies: reply}
 }
 
 // OnSequenceEnded sets a replier to be used once the sequence is over.
-func (r *SequentialReply) OnSequenceEnded(reply Replier) *SequentialReply {
+func (r *SequentialReply) OnSequenceEnded(reply ReplierFactory) *SequentialReply {
 	r.replyAfterSequenceEnded = reply
 	return r
 }
 
 // Add adds a new replier to the sequence.
-func (r *SequentialReply) Add(reply ...Replier) *SequentialReply {
+func (r *SequentialReply) Add(reply ...ReplierFactory) *SequentialReply {
 	r.replies = append(r.replies, reply...)
 	return r
-}
-
-// Reply implements vlatte.Replier[ReplyInput, *Response].
-func (r *SequentialReply) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
-	r.rwMutex.Lock()
-	defer r.rwMutex.Unlock()
-	size := int32(len(r.replies))
-	var reply Replier
-	if r.hits < size && r.hits >= 0 {
-		reply = r.replies[r.hits]
-	}
-	if reply == nil {
-		if r.replyAfterSequenceEnded != nil {
-			return r.replyAfterSequenceEnded.Reply(ctx, input)
-		}
-		return nil, fmt.Errorf(
-			"reply_sequence: unable to obtain a response, and no default response was set. request number=%d, sequence size=%d",
-			r.hits, size)
-	}
-	atomic.AddInt32(&r.hits, 1)
-	return reply.Reply(ctx, input)
 }
 
 func (r *SequentialReply) Describe() descriptor.Descriptor {
@@ -77,24 +57,78 @@ func (r *SequentialReply) Describe() descriptor.Descriptor {
 	return descriptor.New("response_sequence", desc)
 }
 
-func (r *SequentialReply) beforeBuild(app *Server) error {
-	size := len(r.replies)
-	if size == 0 {
-		return errors.New("reply_sequence: you need to set at least one response when using multiple sequential reply")
+// NewReplier implements ReplierFactory. It makes the Replier of each reply of the sequence, so each mock has replies
+// and a place in the sequence of its own.
+func (r *SequentialReply) NewReplier(app *Server) (Replier, error) {
+	if len(r.replies) == 0 {
+		return nil, errors.New("reply_sequence: you need to set at least one response when using multiple sequential reply")
 	}
 
-	for _, reply := range r.replies {
-		if err := prepareReply(reply, app); err != nil {
-			return err
+	s := &sequenceReplier{replies: make([]Replier, len(r.replies))}
+	for i, f := range r.replies {
+		if f == nil {
+			return nil, fmt.Errorf("reply_sequence: response %d is nil", i)
 		}
+
+		reply, err := newReplier(f, app)
+		if err != nil {
+			return nil, fmt.Errorf("reply_sequence: response %d: %w", i, err)
+		}
+
+		s.replies[i] = reply
 	}
 
-	return prepareReply(r.replyAfterSequenceEnded, app)
+	if r.replyAfterSequenceEnded != nil {
+		after, err := newReplier(r.replyAfterSequenceEnded, app)
+		if err != nil {
+			return nil, fmt.Errorf("reply_sequence: after_ended: %w", err)
+		}
+
+		s.after = after
+	}
+
+	return s, nil
 }
 
-func (r *SequentialReply) totalHits() int {
-	r.rwMutex.RLock()
-	defer r.rwMutex.RUnlock()
+// sequenceReplier serves its replies in order, one per request, for one mock, then after, when set.
+type sequenceReplier struct {
+	mu      sync.Mutex
+	replies []Replier
+	after   Replier
+	hits    int
+}
 
-	return int(r.hits)
+// Reply implements Replier. Only taking the next reply is locked: the replies run at the same time, as those of any
+// mock do.
+func (s *sequenceReplier) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
+	reply := s.next()
+	if reply == nil {
+		return nil, fmt.Errorf(
+			"reply_sequence: unable to obtain a response, and no default response was set. request number=%d, sequence size=%d",
+			s.totalHits(), len(s.replies))
+	}
+
+	return reply.Reply(ctx, input)
+}
+
+// next takes the reply of the next request: the next one of the sequence, then after, which can be nil.
+func (s *sequenceReplier) next() Replier {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.hits < len(s.replies) {
+		reply := s.replies[s.hits]
+		s.hits++
+
+		return reply
+	}
+
+	return s.after
+}
+
+func (s *sequenceReplier) totalHits() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.hits
 }

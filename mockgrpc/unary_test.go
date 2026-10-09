@@ -2,6 +2,7 @@ package mockgrpc
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -43,4 +44,53 @@ func TestUnary(t *testing.T) {
 	require.Equal(t, 1, trailer.Len())
 	require.Equal(t, []string{"tv1", "tv2"}, trailer.Get("tk1"))
 	require.Equal(t, "bye", res.Message)
+}
+
+func TestUnaryReply_ChangesAfterMockReachOnlyLaterMocks(t *testing.T) {
+	// #27: a mock served the reply it was given, so a header added to the reply afterwards went out on the calls of
+	// that mock, and raced with them. Each mock gets a replier of its own now: the change reaches only the mocks built
+	// afterwards.
+	m := MustNew()
+	pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	reply := Unary().Header("x-a", "1").Message(&pb.HiRes{Message: "hi"})
+	b := UnaryMethod("Greetings").Reply(reply)
+	scope := m.MustMock(b)
+
+	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	client := pb.NewTestServiceClient(conn)
+	greet := func() metadata.MD {
+		header := make(metadata.MD)
+		_, err := client.Greetings(t.Context(), &pb.HiReq{Message: "hi"}, grpc.Header(&header))
+		require.NoError(t, err)
+
+		return header
+	}
+
+	// Changed after Mock, and again while the mock serves.
+	reply.Header("x-b", "2")
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 10 {
+			reply.Header("x-b", "2")
+		}
+	})
+
+	for range 10 {
+		header := greet()
+		require.Equal(t, []string{"1"}, header.Get("x-a"))
+		require.Empty(t, header.Get("x-b"), "the served mock has no x-b")
+	}
+
+	wg.Wait()
+
+	_, err = m.Remock(t.Context(), scope, b)
+	require.NoError(t, err)
+	require.NotEmpty(t, greet().Get("x-b"), "a mock built afterwards has it")
 }
