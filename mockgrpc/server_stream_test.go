@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -174,4 +175,22 @@ func TestServerStream_ReaderStreamsOnEveryCall(t *testing.T) {
 	for i := range 2 {
 		require.Equal(t, []string{"a", "b"}, listKeys(t, client), "call %d", i+1)
 	}
+}
+
+func TestServerStream_LastStreamSetterWins(t *testing.T) {
+	// A stream setter replaces what an earlier one set, its read error included: a reply whose reader failed, then given
+	// messages, builds and streams the messages.
+	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(ServerStreamMethod("List").Reply(ServerStream[*pb.ListItem]().
+		JSON(iotest.ErrReader(errors.New("boom"))).
+		AnyMessages([]any{&pb.ListItem{Key: "a"}})))
+
+	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	require.Equal(t, []string{"a"}, listKeys(t, pb.NewTestServiceClient(conn)))
 }

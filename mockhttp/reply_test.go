@@ -536,3 +536,22 @@ func TestReply_ExpireCookieLeavesTheCookieAsItWas(t *testing.T) {
 	require.Zero(t, kept.response.Cookies[0].MaxAge)
 	require.Equal(t, -1, expired.response.Cookies[0].MaxAge)
 }
+
+func TestReply_NilCookieRendersNothing(t *testing.T) {
+	// Each response copies the cookies of its reply. A nil cookie renders nothing, so it is kept rather than copied: the
+	// build doesn't panic, and the other cookies are served.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/c").Reply(OK().Cookie(nil).Cookie(&http.Cookie{Name: "a", Value: "1"})))
+
+	res, err := http.Get(m.URL("/c"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	cookies := res.Cookies()
+	require.Len(t, cookies, 1)
+	require.Equal(t, "a=1", cookies[0].String())
+}

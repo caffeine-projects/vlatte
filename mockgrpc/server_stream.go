@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	json "encoding/json/v2"
-	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -48,7 +47,7 @@ const (
 	StreamTypeText
 )
 
-type StreamResponse[T any] struct {
+type StreamResponse[T proto.Message] struct {
 	Header     metadata.MD
 	Trailer    metadata.MD
 	MsgType    T
@@ -59,7 +58,7 @@ type StreamResponse[T any] struct {
 // StreamReply describes the reply of a server streaming mock: its header, trailer and messages. It is a
 // StreamReplierFactory: each mock built with it gets a replier of its own, so changing it after Mock changes only the
 // mocks built afterwards. It keeps the message slices it is given without copying them: don't change them afterwards.
-type StreamReply[T any] struct {
+type StreamReply[T proto.Message] struct {
 	response *StreamResponse[T]
 	err      error // from reading the reader given to Text or JSON; NewReplier returns it
 }
@@ -115,7 +114,7 @@ func (r *StreamReply[T]) read(reader io.Reader, t StreamType) *StreamReply[T] {
 
 // streamReplier serves the calls of one server streaming mock. StreamReply.NewReplier makes it, and calls only read it:
 // gRPC sends the header and trailer without writing into them.
-type streamReplier[T any] struct {
+type streamReplier[T proto.Message] struct {
 	response StreamResponse[T]
 }
 
@@ -142,11 +141,7 @@ func (r *streamReplier[T]) build(ctx context.Context, values *StreamRequestValue
 	switch s := r.response.Stream.(type) {
 	case []byte: // the messages of Text or JSON, one per line
 		scan := bufio.NewScanner(bytes.NewReader(s))
-		msgType := reflect.New(reflect.TypeOf(r.response.MsgType).Elem())
-		msg, ok := reflect.TypeAssert[proto.Message](msgType)
-		if !ok {
-			return errors.New("server_stream: text and JSON streams need a proto message type")
-		}
+		msg := r.response.MsgType.ProtoReflect().New().Interface() // MsgType is the zero T, a nil message
 
 		for scan.Scan() {
 			err := r.decode(scan.Bytes(), msg)
@@ -262,7 +257,7 @@ func (in *interceptors) StreamInterceptor(
 
 	rawBody := string(b)
 	sub := vlatte.NewExplanation()
-	mocks := vlatte.Mocks[*Mock, *StreamValueSelectorIn](em)
+	mocks := vlatte.Mocks[*Mock, *StreamValueSelectorIn](ofKind(em, func(m *Mock) bool { return m.streamReply != nil }))
 	mock, pass, err := mocks.Find(stream.Context(), sub, &StreamValueSelectorIn{rawBody, info}, func(m *Mock) vlatte.Evaluators[*Mock, *StreamValueSelectorIn] { return m.streamExpectations })
 	if err != nil {
 		return status.Error(codes.Internal, fmt.Errorf("stream: error finding mock for request: %w", err).Error())
@@ -272,18 +267,8 @@ func (in *interceptors) StreamInterceptor(
 		return status.Error(codes.NotFound, "stream: request was not matched with any mock")
 	}
 
-	replier, ok := mock.reply.(vlatte.Replier[*StreamRequestValues, any])
-	if !ok || replier == nil {
-		return status.Errorf(
-			codes.Unknown,
-			"stream: mock %s reply must implement Replier[*StreamRequestValues, any]: got %T",
-			mock.getRef(),
-			mock.reply,
-		)
-	}
-
 	values := &StreamRequestValues{rawBody, stream, info, in.app}
-	_, err = replier.Reply(stream.Context(), values)
+	_, err = mock.streamReply.Reply(stream.Context(), values)
 	if err != nil {
 		return fmt.Errorf("stream: failed to reply: %w", err)
 	}

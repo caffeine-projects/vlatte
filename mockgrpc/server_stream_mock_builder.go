@@ -73,7 +73,7 @@ func (b *StreamBuilder) Build(app *Server) (*Mock, error) {
 	return &Mock{
 		id:                 uuid.New().String(),
 		enabled:            true,
-		reply:              reply,
+		streamReply:        reply,
 		streamExpectations: slices.Clone(b.expectations),
 	}, nil
 }

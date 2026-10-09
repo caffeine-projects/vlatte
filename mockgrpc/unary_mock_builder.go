@@ -73,7 +73,7 @@ func (b *UnaryBuilder) Build(app *Server) (*Mock, error) {
 	return &Mock{
 		id:                uuid.New().String(),
 		enabled:           true,
-		reply:             reply,
+		unaryReply:        reply,
 		unaryExpectations: slices.Clone(b.expectations),
 	}, nil
 }

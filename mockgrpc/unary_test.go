@@ -7,8 +7,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
@@ -93,4 +95,28 @@ func TestUnaryReply_ChangesAfterMockReachOnlyLaterMocks(t *testing.T) {
 	_, err = m.Remock(t.Context(), scope, b)
 	require.NoError(t, err)
 	require.NotEmpty(t, greet().Get("x-b"), "a mock built afterwards has it")
+}
+
+func TestUnaryReply_Status(t *testing.T) {
+	// A reply with a status fails the call with that status, after sending the header.
+	m := MustNew()
+	pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(UnaryMethod("Greetings").
+		Reply(Unary().Header("k", "v").Status(status.New(codes.PermissionDenied, "denied"))))
+
+	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	header := make(metadata.MD)
+	_, err = pb.NewTestServiceClient(conn).Greetings(t.Context(), &pb.HiReq{Message: "hi"}, grpc.Header(&header))
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "a gRPC status: %v", err)
+	require.Equal(t, codes.PermissionDenied, st.Code())
+	require.Equal(t, "denied", st.Message())
+	require.Equal(t, []string{"v"}, header.Get("k"))
 }

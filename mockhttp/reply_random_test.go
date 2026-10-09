@@ -127,6 +127,10 @@ func TestRandomReplyValidate(t *testing.T) {
 
 	_, err = r.NewReplier(nil)
 	require.NoError(t, err)
+
+	// A nil reply fails the build and says where, rather than panic.
+	_, err = r.Add(nil).NewReplier(nil)
+	require.EqualError(t, err, "reply_random: response 1 is nil")
 }
 
 func TestRandomReply_SeededPicksInTheSameOrderOnEachServer(t *testing.T) {

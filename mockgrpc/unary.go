@@ -56,7 +56,7 @@ func (in *interceptors) UnaryInterceptor(
 
 	rawBody := string(b)
 	sub := vlatte.NewExplanation()
-	mocks := vlatte.Mocks[*Mock, *UnaryValueSelectorIn](em)
+	mocks := vlatte.Mocks[*Mock, *UnaryValueSelectorIn](ofKind(em, func(m *Mock) bool { return m.unaryReply != nil }))
 	mock, pass, err := mocks.Find(ctx, sub, &UnaryValueSelectorIn{rawBody, info}, func(m *Mock) vlatte.Evaluators[*Mock, *UnaryValueSelectorIn] { return m.unaryExpectations })
 	if err != nil {
 		return nil, status.Error(codes.Internal, fmt.Errorf("unary: error finding mock for request: %w", err).Error())
@@ -66,13 +66,8 @@ func (in *interceptors) UnaryInterceptor(
 		return nil, status.Error(codes.NotFound, "unary: request was not matched with any mock")
 	}
 
-	replier, ok := mock.reply.(vlatte.Replier[*UnaryRequestValues, any])
-	if !ok || replier == nil {
-		return nil, interceptError("unary: mock %s reply must implement Replier[*UnaryRequestValues, any]: got %T", mock.getRef(), mock.reply)
-	}
-
 	rv := &UnaryRequestValues{reqMsg, info, rawBody, in.app}
-	res, err := replier.Reply(ctx, rv)
+	res, err := mock.unaryReply.Reply(ctx, rv)
 	if err != nil {
 		return nil, err
 	}

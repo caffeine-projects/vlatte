@@ -99,6 +99,10 @@ func TestSequentialReplyValidate(t *testing.T) {
 
 	_, err = seq.NewReplier(nil)
 	require.NoError(t, err)
+
+	// A nil reply fails the build and says where, rather than panic.
+	_, err = seq.Add(nil).NewReplier(nil)
+	require.EqualError(t, err, "reply_sequence: response 1 is nil")
 }
 
 func TestSeqRace(t *testing.T) {

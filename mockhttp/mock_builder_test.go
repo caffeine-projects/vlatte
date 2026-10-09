@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -317,4 +319,26 @@ func TestBuilder_BuildsAtTheSameTimeOnManyServers(t *testing.T) {
 		require.Equal(t, http.StatusOK, status)
 		require.Equal(t, "GET", body)
 	}
+}
+
+func TestBuilder_DelayFunc(t *testing.T) {
+	// DelayFunc picks the delay before each response, so a delay such as Jitter varies from one response to the next.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	var picks atomic.Int64
+	m.MustMock(Getf("/d").
+		DelayFunc(func() time.Duration {
+			picks.Add(1)
+			return time.Millisecond
+		}).
+		Reply(OK()))
+
+	for range 2 {
+		status, _ := get(t, m, "/d")
+		require.Equal(t, http.StatusOK, status)
+	}
+
+	require.Equal(t, int64(2), picks.Load())
 }

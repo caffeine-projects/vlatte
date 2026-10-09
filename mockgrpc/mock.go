@@ -1,6 +1,7 @@
 package mockgrpc
 
 import (
+	"iter"
 	"sync"
 	"sync/atomic"
 
@@ -20,10 +21,23 @@ type Mock struct {
 	hits     atomic.Int64
 	enabled  bool
 
-	reply any
+	unaryReply  UnaryReplier  // set on a unary mock only
+	streamReply StreamReplier // set on a server streaming mock only
 
 	unaryExpectations  []*vlatte.Eval[*UnaryValueSelectorIn]
 	streamExpectations []*vlatte.Eval[*StreamValueSelectorIn]
+}
+
+// ofKind yields the mocks for which is reports true. A mock has matchers for its own kind of call only, and no
+// matchers match every call: each call is matched against the mocks of its kind.
+func ofKind(mocks iter.Seq[*Mock], is func(*Mock) bool) iter.Seq[*Mock] {
+	return func(yield func(*Mock) bool) {
+		for m := range mocks {
+			if is(m) && !yield(m) {
+				return
+			}
+		}
+	}
 }
 
 func (m *Mock) ID() string {
@@ -82,12 +96,4 @@ func (m *Mock) Events() vlatte.Events {
 
 func (m *Mock) String() string {
 	return ""
-}
-
-func (m *Mock) getRef() string {
-	if len(m.Name()) == 0 {
-		return m.ID()
-	}
-
-	return m.Name()
 }
