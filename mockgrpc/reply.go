@@ -1,10 +1,13 @@
 package mockgrpc
 
 import (
+	"context"
 	"errors"
-	"fmt"
+	"strings"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/caffeine-projects/vlatte"
@@ -14,6 +17,9 @@ var (
 	errNoReply   = errors.New("mock: no reply set: use Reply")
 	errNoReplier = errors.New("reply: the factory made no replier")
 )
+
+// _failureKey is vlatte.FailureHeader as a metadata key, which gRPC wants lowercase.
+var _failureKey = strings.ToLower(vlatte.FailureHeader)
 
 // newReplier asks f for the replier of a mock of app. A missing reply, or a factory that makes no replier, fails the
 // build: before, the mock was added and failed every call.
@@ -34,6 +40,19 @@ func newReplier[I any](f vlatte.ReplierFactory[I, any, *Server], app *Server) (v
 	return r, nil
 }
 
-func interceptError(format string, a ...any) error {
-	return status.Error(codes.Internal, fmt.Errorf(format, a...).Error())
+// fail answers a call the server failed to serve, or no mock matched: it adds failure, a vlatte.Failure* value, to
+// the trailer of the call, so a client tells the answer from a mock's, and returns a status error with code c.
+func fail(ctx context.Context, failure string, c codes.Code, format string, a ...any) error {
+	_ = grpc.SetTrailer(ctx, metadata.Pairs(_failureKey, failure))
+	return status.Errorf(c, format, a...)
+}
+
+// replyError is the answer to a call whose mock replied err. An error with a gRPC status is the mock's answer, such
+// as a status set with UnaryReply.Status, so it is returned as is. Any other error is a failure of the reply.
+func replyError(ctx context.Context, scope string, mock *Mock, err error) error {
+	if _, ok := status.FromError(err); ok {
+		return err
+	}
+
+	return fail(ctx, vlatte.FailureReply, codes.Internal, "%s: %s: reply: %v", scope, mock, err)
 }

@@ -244,6 +244,11 @@ func TestRun_UsageErrors(t *testing.T) {
 			args: []string{"-no-match-status-code", "99"},
 			want: []string{`no_match_status_code="99": expected an HTTP status code from 100 to 599`},
 		},
+		{
+			name: "error status code out of range",
+			args: []string{"--error-status-code", "99"},
+			want: []string{`error_status_code="99": expected an HTTP status code from 100 to 599`},
+		},
 	}
 
 	for _, tc := range tests {

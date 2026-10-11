@@ -110,6 +110,7 @@ func TestErrors(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.False(t, scoped.Called())
 	require.Equal(t, StatusNoMatch, res.StatusCode)
+	require.Equal(t, vlatte.FailureMatch, res.Header.Get(HeaderXVlatteError), "a failing matcher is not a missing mock")
 }
 
 func TestHTTPMockAppAssertions(t *testing.T) {

@@ -73,3 +73,16 @@ func TestMock_MarshalJSON(t *testing.T) {
 
 	fmt.Println(string(b))
 }
+
+func TestMock_String(t *testing.T) {
+	// Failure bodies and matching errors name a mock with String, so it must read the same as assertion messages.
+	m := MustNew(Setup().Silent())
+
+	named, err := Getf("/").ID("a").Name("users").Reply(OK()).Build(m)
+	require.NoError(t, err)
+	require.Equal(t, "Mock [a] users", named.String())
+
+	unnamed, err := Getf("/").ID("b").Reply(OK()).Build(m)
+	require.NoError(t, err)
+	require.Equal(t, "Mock [b]", unnamed.String())
+}

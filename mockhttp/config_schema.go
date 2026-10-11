@@ -232,6 +232,14 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			},
 		},
 		field{
+			Key: "error_status_code", Kind: config.Int, Default: strconv.Itoa(d.ErrorStatusCode),
+			Usage: "Status code of the response when serving a request fails, such as a reply that fails.",
+			Set: func(c *Config, v config.Value) error {
+				c.ErrorStatusCode = int(v.Int)
+				return checkStatus(v.Int)
+			},
+		},
+		field{
 			Key: "https", Kind: config.Bool, Usage: "Serve HTTPS instead of HTTP. Only the vlatte command reads it.",
 			Set: func(c *Config, v config.Value) error { c.UseHTTPS = v.Bool; return nil },
 		},

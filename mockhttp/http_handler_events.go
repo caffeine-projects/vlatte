@@ -123,10 +123,20 @@ func (h *builtInMockHTTPLifecycle) OnError(r *RequestValues, err error) {
 		return
 	}
 
-	h.app.logger.Error().
+	evt := h.app.logger.Error().
 		Err(err).
-		Str("url", r.URL.String()).
-		Msgf("<--- ERROR %s %s", r.RawRequest.Method, r.URL.Path)
+		Str("url", r.URL.String())
+
+	if r.Mock != nil {
+		dict := evt.CreateDict().Str("id", r.Mock.ID())
+		if r.Mock.Name() != "" {
+			dict.Str("name", r.Mock.Name())
+		}
+
+		evt.Dict("mock", dict)
+	}
+
+	evt.Msgf("<--- ERROR %s %s", r.RawRequest.Method, r.URL.Path)
 }
 
 // Descriptive Logger
@@ -270,13 +280,19 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnError(r *RequestValues, err erro
 		return
 	}
 
-	fmt.Fprintf(h.out, "%s %s <--- %s %s\n%s %s\n%s: %v\n\n",
+	mock := ""
+	if r.Mock != nil {
+		mock = h.cz.Bold("Mock: ") + r.Mock.ID() + " " + r.Mock.Name() + "\n"
+	}
+
+	fmt.Fprintf(h.out, "%s %s <--- %s %s\n%s %s\n%s%s: %v\n\n",
 		h.cz.BrightRed(h.cz.Bold("ERROR")),
 		time.Now().Format(time.RFC3339),
 		h.cz.Red(r.RawRequest.Method),
 		h.cz.Red(r.URL.Path),
 		r.RawRequest.Method,
 		r.URL.String(),
+		mock,
 		h.cz.Red(h.cz.Bold("Error")),
 		err,
 	)

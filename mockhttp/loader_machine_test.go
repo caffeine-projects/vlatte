@@ -64,6 +64,18 @@ func get(t require.TestingT, m *Server, path string) (int, string) {
 	return res.StatusCode, string(b)
 }
 
+// getFull is get, plus the response header.
+func getFull(t require.TestingT, m *Server, path string) (int, http.Header, string) {
+	res, err := http.Get(m.URL() + path)
+	require.NoError(t, err)
+
+	b, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	return res.StatusCode, res.Header, string(b)
+}
+
 func TestFileLoader_LoadsInNameOrder(t *testing.T) {
 	// F16: mocks of equal priority match in file name order, not in the random order of a map.
 	dir := t.TempDir()

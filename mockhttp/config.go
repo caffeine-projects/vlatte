@@ -57,6 +57,7 @@ type Config struct {
 	Listener                       net.Listener
 	UseHTTP2                       bool
 	RequestWasNotMatchedStatusCode int
+	ErrorStatusCode                int
 	RequestBodyParsers             []RequestBodyParser
 	MaxBodyParsingLimit            int64
 	NoBodyParsing                  bool
@@ -100,6 +101,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Listener = c.Listener
 	conf.UseHTTP2 = c.UseHTTP2
 	conf.RequestWasNotMatchedStatusCode = c.RequestWasNotMatchedStatusCode
+	conf.ErrorStatusCode = c.ErrorStatusCode
 	conf.RequestBodyParsers = c.RequestBodyParsers
 	conf.MaxBodyParsingLimit = c.MaxBodyParsingLimit
 	conf.NoBodyParsing = c.NoBodyParsing
@@ -135,6 +137,7 @@ type ConfigBuilder struct {
 func defaultConfig() *Config {
 	c := &Config{
 		RequestWasNotMatchedStatusCode: StatusNoMatch,
+		ErrorStatusCode:                StatusNoMatch,
 		MockFileSearchPatterns:         ConfigMockFilePattern,
 		RequestBodyParsers:             make([]RequestBodyParser, 0),
 		Middlewares:                    make([]func(http.Handler) http.Handler, 0),
@@ -198,6 +201,13 @@ func (cb *ConfigBuilder) RootDir(rootDir string) *ConfigBuilder {
 // MockNotFoundStatusCode defines the status code to be used when no mock matches with an HTTP request.
 func (cb *ConfigBuilder) MockNotFoundStatusCode(code int) *ConfigBuilder {
 	cb.conf.RequestWasNotMatchedStatusCode = code
+	return cb
+}
+
+// ErrorStatusCode defines the status code of a response vlatte makes when serving a request fails, such as a reply
+// that fails. It defaults to StatusNoMatch, as no-match does: the X-Vlatte-Error header tells them apart.
+func (cb *ConfigBuilder) ErrorStatusCode(code int) *ConfigBuilder {
+	cb.conf.ErrorStatusCode = code
 	return cb
 }
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -185,9 +186,9 @@ func (m *Mock) Steps() []vlatte.Step {
 	return m.spec.steps
 }
 
+// String names the mock as "Mock [id] name", as assertion messages do.
 func (m *Mock) String() string {
-	// TODO: implement me.
-	return ""
+	return strings.TrimSpace("Mock [" + m.ID() + "] " + m.Name())
 }
 
 func (m *Mock) Describe() descriptor.Descriptor {

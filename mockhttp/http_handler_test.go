@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match"
 )
 
 // appendStep appends its text to every buffer it passes on.
@@ -193,4 +195,154 @@ func TestHandler_AClientLeavingAStreamIsAWarning(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond, "logs: %s", logs)
 	require.NotContains(t, logs.String(), `"level":"error"`)
 	require.True(t, scoped.Called())
+}
+
+func TestHandler_FailuresAreToldApartFromNoMatch(t *testing.T) {
+	// Issue #17: a mock that matched and failed answered as if no mock matched, with a body blaming matching.
+	// Both keep the 418, so neither looks like a mock's answer, and X-Vlatte-Error says which one it was.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").ID("file-mock").Name("missing file").SetSource("mocks/x.yaml").
+		Reply(OK().BodyFile("missing.txt")))
+
+	status, header, body := getFull(t, m, "/x")
+	require.Equal(t, StatusNoMatch, status, body)
+	require.Equal(t, vlatte.FailureReply, header.Get(HeaderXVlatteError))
+	require.True(t, strings.HasPrefix(body, "REPLY FAILED\nGET "+m.URL("/x")+"\n"), body)
+	require.Contains(t, body, "\nMock [file-mock] missing file\nSource: mocks/x.yaml\n", "the body names the mock")
+	require.Contains(t, body, "missing.txt", "and the error")
+
+	status, header, body = getFull(t, m, "/nothing")
+	require.Equal(t, StatusNoMatch, status)
+	require.Equal(t, vlatte.FailureNoMatch, header.Get(HeaderXVlatteError))
+	require.True(t, strings.HasPrefix(body, "REQUEST DID NOT MATCH\n"), body)
+}
+
+func TestHandler_ErrorStatusCodeIsItsOwnSetting(t *testing.T) {
+	// A user who wants failures apart from no-match by status alone sets the error status; no-match keeps its own.
+	m := MustNew(Setup().Silent().ErrorStatusCode(http.StatusInternalServerError))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").Reply(OK().BodyFile("missing.txt")))
+
+	status, _ := get(t, m, "/x")
+	require.Equal(t, http.StatusInternalServerError, status)
+
+	status, _ = get(t, m, "/nothing")
+	require.Equal(t, StatusNoMatch, status)
+}
+
+func TestHandler_FailuresSkipTheStepsOfTheMock(t *testing.T) {
+	// The steps of a mock change its answer. A failure is vlatte's answer, so the steps must not change it.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").Step(appendStep("<step>")).Reply(OK().BodyFile("missing.txt")))
+	m.MustMock(Getf("/mapper").Step(appendStep("<step>")).Reply(OK()).
+		Map(func(*RequestValues, *Response) error { return errors.New("mapper failed") }))
+
+	for _, path := range []string{"/x", "/mapper"} {
+		status, header, body := getFull(t, m, path)
+		require.Equal(t, StatusNoMatch, status, body)
+		require.Equal(t, vlatte.FailureReply, header.Get(HeaderXVlatteError))
+		require.NotContains(t, body, "<step>")
+	}
+}
+
+// failingStore is a store whose List fails.
+type failingStore struct {
+	*vlatte.MemoryStore[*Mock]
+}
+
+func (failingStore) List(context.Context) (iter.Seq[*Mock], error) {
+	return nil, errors.New("store down")
+}
+
+func TestHandler_StoreAndMatcherErrorsAreFailures(t *testing.T) {
+	// A store that failed answered an empty 200, and a matcher that failed answered as if no mock matched.
+	// Both are failures to find a mock, so a test can't mistake them for a mock's answer or for a missing mock.
+	t.Run("store", func(t *testing.T) {
+		m := MustNew(Setup().Silent())
+		m.storage = failingStore{vlatte.NewStore[*Mock]().(*vlatte.MemoryStore[*Mock])}
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		status, header, body := getFull(t, m, "/x")
+		require.Equal(t, StatusNoMatch, status)
+		require.Equal(t, vlatte.FailureMatch, header.Get(HeaderXVlatteError))
+		require.True(t, strings.HasPrefix(body, "MATCHING FAILED\n"), body)
+		require.Contains(t, body, "store down")
+	})
+
+	t.Run("matcher", func(t *testing.T) {
+		m := MustNew(Setup().Silent())
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		scoped := m.MustMock(Getf("/x").ID("broken").Header("test", match.Function(
+			func(any) (bool, error) { return false, errors.New("matcher failed") })).Reply(OK()))
+
+		status, header, body := getFull(t, m, "/x")
+		require.Equal(t, StatusNoMatch, status)
+		require.Equal(t, vlatte.FailureMatch, header.Get(HeaderXVlatteError))
+		require.Contains(t, body, "Mock [broken]", "the error names the mock whose matcher failed")
+		require.Contains(t, body, "matcher failed")
+		require.False(t, scoped.Called())
+	})
+}
+
+func TestHandler_APanicIsAFailure(t *testing.T) {
+	// A panicking reply answers the error status with the panic failure, and the server keeps serving.
+	m := MustNew(Setup().Silent().ErrorStatusCode(http.StatusInternalServerError))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/panic").Reply(Func(func(http.ResponseWriter, *RequestValues) (*Response, error) {
+		panic("boom")
+	})))
+	m.MustMock(Getf("/ok").Reply(OK()))
+
+	status, header, body := getFull(t, m, "/panic")
+	require.Equal(t, http.StatusInternalServerError, status)
+	require.Equal(t, vlatte.FailurePanic, header.Get(HeaderXVlatteError))
+	require.Contains(t, body, "boom")
+
+	status, _ = get(t, m, "/ok")
+	require.Equal(t, http.StatusOK, status)
+}
+
+func TestLifecycle_ErrorLogsNameTheMock(t *testing.T) {
+	// In a server with many mocks, the log is how a failure is traced to its mock.
+	t.Run("structured", func(t *testing.T) {
+		logs := &logBuffer{}
+		logger := zerolog.New(logs)
+
+		m := MustNew(Setup().Logger(&logger))
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		m.MustMock(Getf("/x").ID("file-mock").Name("missing file").Reply(OK().BodyFile("missing.txt")))
+
+		get(t, m, "/x")
+		require.Contains(t, logs.String(), `"mock":{"id":"file-mock","name":"missing file"}`)
+	})
+
+	t.Run("descriptive", func(t *testing.T) {
+		// New writes the descriptive log to stdout, so the test builds it with a buffer.
+		m := MustNew()
+		var out bytes.Buffer
+		lifecycle := newBuiltInDescriptiveMockHTTPLifecycle(m, ansi(false), &out)
+
+		mock, err := Getf("/x").ID("a").Name("users").Reply(OK()).Build(m)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		lifecycle.OnError(&RequestValues{RawRequest: req, URL: req.URL, Mock: mock}, errors.New("boom"))
+		require.Contains(t, out.String(), "Mock: a users\n")
+		require.Contains(t, out.String(), "Error: boom")
+	})
 }

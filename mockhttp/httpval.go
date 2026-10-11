@@ -1,5 +1,7 @@
 package mockhttp
 
+import "github.com/caffeine-projects/vlatte"
+
 const _charsetUTF8 = "charset=UTF-8"
 
 // Header names, for building and matching mocks.
@@ -52,6 +54,9 @@ const (
 	HeaderContentSecurityPolicyReportOnly = "Content-Security-Policy-Report-Only"
 	HeaderXCSRFToken                      = "X-CSRF-Token"
 	HeaderReferrerPolicy                  = "Referrer-Policy"
+
+	// HeaderXVlatteError says why vlatte, and not a mock, answered a request: one of the vlatte.Failure* values.
+	HeaderXVlatteError = vlatte.FailureHeader
 )
 
 // MIME types, for building and matching mocks.

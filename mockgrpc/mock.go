@@ -2,6 +2,7 @@ package mockgrpc
 
 import (
 	"iter"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -94,6 +95,7 @@ func (m *Mock) Events() vlatte.Events {
 	return vlatte.Events{}
 }
 
+// String names the mock as "Mock [id] name", as assertion messages do.
 func (m *Mock) String() string {
-	return ""
+	return strings.TrimSpace("Mock [" + m.ID() + "] " + m.Name())
 }

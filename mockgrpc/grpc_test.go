@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -140,13 +141,17 @@ func TestUnmatchedCallsReturnNotFound(t *testing.T) {
 	client := pb.NewTestServiceClient(conn)
 
 	// Calls no mock matches get NotFound, unary and streaming alike. Internal stays reserved for real errors.
-	_, err = client.Greetings(context.Background(), &pb.HiReq{Message: "hi"})
+	// A mock can answer NotFound too, so the failure trailer says the server answered, not a mock.
+	var trailer metadata.MD
+	_, err = client.Greetings(context.Background(), &pb.HiReq{Message: "hi"}, grpc.Trailer(&trailer))
 	require.Equal(t, codes.NotFound, status.Code(err))
+	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.FailureHeader))
 
 	stream, err := client.List(context.Background(), &pb.ListReq{})
 	require.NoError(t, err)
 	_, err = stream.Recv()
 	require.Equal(t, codes.NotFound, status.Code(err))
+	require.Equal(t, []string{vlatte.FailureNoMatch}, stream.Trailer().Get(vlatte.FailureHeader))
 }
 
 func TestDefaultAddrIsLoopback(t *testing.T) {

@@ -32,6 +32,7 @@ var _ vlatte.Flavor[*Mock, *Server] = (*Server)(nil)
 // It uses http.StatusTeapot to reduce the chance of using the same
 // expected response from the actual server being mocked.
 // Basically, every request that doesn't match against a Mock, will have a response with http.StatusTeapot.
+// It is also the default status of a failure, such as a reply that fails: see Config.ErrorStatusCode.
 const StatusNoMatch = http.StatusTeapot
 
 // Kind identifies HTTP mocks in protocol-neutral code, such as event listeners and callbacks.
@@ -93,6 +94,10 @@ func New(config ...Option) (*Server, error) {
 		conf.RequestWasNotMatchedStatusCode = StatusNoMatch
 	}
 
+	if conf.ErrorStatusCode == 0 {
+		conf.ErrorStatusCode = StatusNoMatch
+	}
+
 	if conf.TemplateEngine == nil {
 		// Without options, it can't fail.
 		conf.TemplateEngine = vlatte.MustNewGoTemplateEngine()
@@ -112,7 +117,7 @@ func New(config ...Option) (*Server, error) {
 	parsers = append(parsers, &plainTextParser{}, &formURLEncodedParser{}, &multipartFormParser{}, &noopParser{})
 
 	recoverer := recovery.New(func(err error) { app.logger.Error().Err(err).Msg(err.Error()) },
-		conf.RequestWasNotMatchedStatusCode)
+		conf.ErrorStatusCode, http.Header{HeaderXVlatteError: {vlatte.FailurePanic}})
 
 	middlewares := make([]func(handler http.Handler) http.Handler, 0)
 	middlewares = append(middlewares, recoverer.Recover)

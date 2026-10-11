@@ -77,19 +77,16 @@ func (mocks Mocks[M, TIn]) Find(
 	in TIn,
 	evals GetEvals[M, TIn],
 ) (M, bool, error) {
-	i := 0
 	for mock := range mocks {
 		ok, err := evals(mock).Eval(ctx, sub, in)
 		if err != nil {
 			var nothing M
-			return nothing, false, fmt.Errorf("%w: mock[%d][%s]: %w", ErrMatching, i, mock.String(), err)
+			return nothing, false, fmt.Errorf("%w: %s: %w", ErrMatching, mock.String(), err)
 		}
 
 		if ok {
 			return mock, true, nil
 		}
-
-		i++
 	}
 
 	var nothing M

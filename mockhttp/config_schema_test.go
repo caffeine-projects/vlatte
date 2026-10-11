@@ -70,6 +70,7 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 			require.Equal(t, []string{"a/*.yaml", "b/*.yaml"}, c.MockFileSearchPatterns)
 		}},
 		"no-match-status-code": {[]string{"--no-match-status-code", "404"}, func(t *testing.T, c *Config) { require.Equal(t, 404, c.RequestWasNotMatchedStatusCode) }},
+		"error-status-code":    {[]string{"--error-status-code", "500"}, func(t *testing.T, c *Config) { require.Equal(t, 500, c.ErrorStatusCode) }},
 		"https":                {[]string{"--https"}, func(t *testing.T, c *Config) { require.True(t, c.UseHTTPS) }},
 		"colors":               {[]string{"--colors=false"}, func(t *testing.T, c *Config) { require.False(t, c.Colors) }},
 		"debug":                {[]string{"--debug"}, func(t *testing.T, c *Config) { require.True(t, c.Debug) }},

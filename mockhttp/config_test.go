@@ -165,6 +165,7 @@ func TestConfigBuilder(t *testing.T) {
 		Addr(addr).
 		RootDir("test_root_dir").
 		MockNotFoundStatusCode(http.StatusNotFound).
+		ErrorStatusCode(http.StatusInternalServerError).
 		RequestBodyParsers(&plainTextParser{}).
 		MaxBodyParsingLimit(10).
 		NoBodyParsing().
@@ -194,6 +195,7 @@ func TestConfigBuilder(t *testing.T) {
 	require.Equal(t, addr, conf.Addr)
 	require.Equal(t, "test_root_dir", conf.RootDir)
 	require.Equal(t, http.StatusNotFound, conf.RequestWasNotMatchedStatusCode)
+	require.Equal(t, http.StatusInternalServerError, conf.ErrorStatusCode)
 	require.Len(t, conf.RequestBodyParsers, 1)
 	require.EqualValues(t, conf.MaxBodyParsingLimit, 10)
 	require.True(t, conf.NoBodyParsing)
@@ -235,12 +237,20 @@ func TestLogLevelString(t *testing.T) {
 }
 
 func TestNew_ZeroValueConfig(t *testing.T) {
-	// A Config built by hand leaves unset fields at zero values; the server must still answer unmatched requests.
+	// A Config built by hand leaves unset fields at zero values; the server must still answer unmatched requests,
+	// and failures, with a status a client can read.
 	m := MustNew(&Config{})
 	m.MustStart()
 	t.Cleanup(m.Close)
 
+	m.MustMock(Getf("/x").Reply(OK().BodyFile("missing.txt")))
+
 	res, err := http.Get(m.URL("/nothing"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+
+	res, err = http.Get(m.URL("/x"))
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, StatusNoMatch, res.StatusCode)

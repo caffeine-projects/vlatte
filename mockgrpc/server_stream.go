@@ -239,38 +239,40 @@ func (in *interceptors) StreamInterceptor(
 	info *grpc.StreamServerInfo,
 	_ grpc.StreamHandler,
 ) error {
+	ctx := stream.Context()
+
 	reqMsg, err := receiveRequest(stream, info)
 	if err != nil {
-		return interceptError("stream: error reading the request message. %w", err)
+		return fail(ctx, vlatte.FailureMatch, codes.Internal, "stream: reading the request message: %v", err)
 	}
 
 	// Proto3 treats zero values as unset, so leave them out as protojson does.
 	b, err := json.Marshal(reqMsg, json.OmitZeroStructFields(true), json.Deterministic(true))
 	if err != nil {
-		return err
+		return fail(ctx, vlatte.FailureMatch, codes.Internal, "stream: encoding the request message: %v", err)
 	}
 
-	em, err := in.app.storage.List(stream.Context())
+	em, err := in.app.storage.List(ctx)
 	if err != nil {
-		return interceptError("http: error finding eligible mocks for request. %w", err)
+		return fail(ctx, vlatte.FailureMatch, codes.Internal, "stream: listing mocks: %v", err)
 	}
 
 	rawBody := string(b)
 	sub := vlatte.NewExplanation()
 	mocks := vlatte.Mocks[*Mock, *StreamValueSelectorIn](ofKind(em, func(m *Mock) bool { return m.streamReply != nil }))
-	mock, pass, err := mocks.Find(stream.Context(), sub, &StreamValueSelectorIn{rawBody, info}, func(m *Mock) vlatte.Evaluators[*Mock, *StreamValueSelectorIn] { return m.streamExpectations })
+	mock, pass, err := mocks.Find(ctx, sub, &StreamValueSelectorIn{rawBody, info}, func(m *Mock) vlatte.Evaluators[*Mock, *StreamValueSelectorIn] { return m.streamExpectations })
 	if err != nil {
-		return status.Error(codes.Internal, fmt.Errorf("stream: error finding mock for request: %w", err).Error())
+		return fail(ctx, vlatte.FailureMatch, codes.Internal, "stream: finding a mock: %v", err)
 	}
 
 	if !pass {
-		return status.Error(codes.NotFound, "stream: request was not matched with any mock")
+		return fail(ctx, vlatte.FailureNoMatch, codes.NotFound, "stream: request was not matched with any mock")
 	}
 
 	values := &StreamRequestValues{rawBody, stream, info, in.app}
-	_, err = mock.streamReply.Reply(stream.Context(), values)
+	_, err = mock.streamReply.Reply(ctx, values)
 	if err != nil {
-		return fmt.Errorf("stream: failed to reply: %w", err)
+		return replyError(ctx, "stream", mock, err)
 	}
 
 	mock.Inc()

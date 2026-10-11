@@ -143,8 +143,9 @@ func TestTemplateDataProviders(t *testing.T) {
 		}})
 		m.MustMock(Getf("/user").Reply(OK().BodyTemplate(`{{ .Provided.user }}`)))
 
-		status, body := get(t, m, "/user")
+		status, header, body := getFull(t, m, "/user")
 		require.Equal(t, StatusNoMatch, status)
+		require.Equal(t, vlatte.FailureReply, header.Get(HeaderXVlatteError))
 		require.Contains(t, body, "http: template data provider user: user service down")
 	})
 

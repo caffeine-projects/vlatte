@@ -163,8 +163,9 @@ func TestReplyTemplates_MissingKeysAreErrors(t *testing.T) {
 
 	m.MustMock(Getf("/x").Reply(OK().SetTemplateData(map[string]any{"name": "a"}).BodyTemplate("{{ .Extra.nmae }}")))
 
-	status, body := get(t, m, "/x")
+	status, header, body := getFull(t, m, "/x")
 	require.Equal(t, StatusNoMatch, status)
+	require.Equal(t, vlatte.FailureReply, header.Get(HeaderXVlatteError))
 	require.Contains(t, body, `map has no entry for key "nmae"`)
 }
 
@@ -204,8 +205,9 @@ func TestReplyTemplates_RequestErrors(t *testing.T) {
 
 	for i, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			status, body := get(t, m, "/"+strconv.Itoa(i)+tc.query)
+			status, header, body := getFull(t, m, "/"+strconv.Itoa(i)+tc.query)
 			require.Equal(t, StatusNoMatch, status, body)
+			require.Equal(t, vlatte.FailureReply, header.Get(HeaderXVlatteError))
 			require.Contains(t, body, tc.want)
 			require.NotContains(t, body, "the secret")
 		})

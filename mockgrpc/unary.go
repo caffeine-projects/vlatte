@@ -3,7 +3,6 @@ package mockgrpc
 import (
 	"context"
 	json "encoding/json/v2"
-	"fmt"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -46,12 +45,12 @@ func (in *interceptors) UnaryInterceptor(
 	// Proto3 treats zero values as unset, so leave them out as protojson does.
 	b, err := json.Marshal(reqMsg, json.OmitZeroStructFields(true), json.Deterministic(true))
 	if err != nil {
-		return nil, err
+		return nil, fail(ctx, vlatte.FailureMatch, codes.Internal, "unary: encoding the request message: %v", err)
 	}
 
 	em, err := in.app.storage.List(ctx)
 	if err != nil {
-		return nil, interceptError("http: error finding eligible mocks for request. %w", err)
+		return nil, fail(ctx, vlatte.FailureMatch, codes.Internal, "unary: listing mocks: %v", err)
 	}
 
 	rawBody := string(b)
@@ -59,17 +58,17 @@ func (in *interceptors) UnaryInterceptor(
 	mocks := vlatte.Mocks[*Mock, *UnaryValueSelectorIn](ofKind(em, func(m *Mock) bool { return m.unaryReply != nil }))
 	mock, pass, err := mocks.Find(ctx, sub, &UnaryValueSelectorIn{rawBody, info}, func(m *Mock) vlatte.Evaluators[*Mock, *UnaryValueSelectorIn] { return m.unaryExpectations })
 	if err != nil {
-		return nil, status.Error(codes.Internal, fmt.Errorf("unary: error finding mock for request: %w", err).Error())
+		return nil, fail(ctx, vlatte.FailureMatch, codes.Internal, "unary: finding a mock: %v", err)
 	}
 
 	if !pass {
-		return nil, status.Error(codes.NotFound, "unary: request was not matched with any mock")
+		return nil, fail(ctx, vlatte.FailureNoMatch, codes.NotFound, "unary: request was not matched with any mock")
 	}
 
 	rv := &UnaryRequestValues{reqMsg, info, rawBody, in.app}
 	res, err := mock.unaryReply.Reply(ctx, rv)
 	if err != nil {
-		return nil, err
+		return nil, replyError(ctx, "unary", mock, err)
 	}
 
 	mock.Inc()

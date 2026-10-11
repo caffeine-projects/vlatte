@@ -69,7 +69,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	stored, err := h.app.storage.List(r.Context())
 	if err != nil {
-		h.lifecycle.OnError(reqValues, fmt.Errorf("http: error finding eligible mocks for request. %w", err))
+		h.onError(w, reqValues, vlatte.FailureMatch, fmt.Errorf("http: listing mocks: %w", err))
 		return
 	}
 
@@ -86,7 +86,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	mocks := vlatte.Mocks[*Mock, *selectorInput](stored)
 	mock, matched, err := mocks.Find(r.Context(), sub, input, func(m *Mock) vlatte.Evaluators[*Mock, *selectorInput] { return m.spec.expectations })
 	if err != nil {
-		h.lifecycle.OnError(reqValues, fmt.Errorf("http: error finding eligible mocks for request. %w", err))
+		h.onError(w, reqValues, vlatte.FailureMatch, fmt.Errorf("http: finding a mock: %w", err))
+		return
 	}
 
 	// no mocks matched with the incoming request
@@ -106,9 +107,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.app.proxy.ServeHTTP(w, r)
 
 		if h.app.IsRecording() {
+			// The proxy sent the response already, so an error can only be logged.
 			res, err := responseFromWriter(w)
 			if err != nil {
-				h.onError(w, reqValues, err)
+				h.lifecycle.OnError(reqValues, fmt.Errorf("http: recording the proxied response: %w", err))
 				return
 			}
 
@@ -127,7 +129,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, sdp := range h.templateDataProviders {
 		dd, err := sdp.Data(sdpIn)
 		if err != nil {
-			h.onError(w, reqValues, fmt.Errorf("http: template data provider %s: %w", sdp.Key(), err))
+			h.onError(w, reqValues, vlatte.FailureReply, fmt.Errorf("http: template data provider %s: %w", sdp.Key(), err))
 			return
 		}
 
@@ -146,25 +148,22 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		<-ctxTimeout.Done()
 	}
 
+	// A failure is vlatte's answer, not the mock's, so it skips the steps of the mock.
+	rw := w
 	if steps := mock.Steps(); len(steps) > 0 {
 		w = &topResponseWriter{ctx: r.Context(), steps: steps, rw: w}
 	}
 
 	res, err := mock.reply.Reply(r.Context(), ReplyInput{RequestValues: reqValues, Writer: w})
 	if err != nil {
-		h.onError(w, reqValues, fmt.Errorf(
-			"http: error building reply for request=%s source=%s. %w",
-			reqValues.URL.Path,
-			mock.Origin(),
-			err,
-		))
+		h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: %w", err))
 		return
 	}
 
 	if res != nil {
 		for i, mapper := range mock.spec.mappers {
 			if err = mapper(reqValues, res); err != nil {
-				h.onError(w, reqValues, fmt.Errorf("http: error with response mapper at index %d. %w", i, err))
+				h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: response mapper at index %d: %w", i, err))
 				return
 			}
 		}
@@ -240,18 +239,52 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues) {
 	buf.WriteString("\n\n")
 
 	w.Header().Add(HeaderContentType, MIMETextPlainCharsetUTF8)
+	w.Header().Set(HeaderXVlatteError, vlatte.FailureNoMatch)
 	w.WriteHeader(h.app.config.RequestWasNotMatchedStatusCode)
 
 	buf.WriteTo(w)
 }
 
-func (h *mockHandler) onError(w http.ResponseWriter, r *RequestValues, err error) {
+// onError answers a request whose serving failed, with the error status, so a client tells it from a mock's answer.
+// failure is a vlatte.Failure* value. The body names the mock that matched, if one did, and the error.
+// A replier that wrote its status before failing keeps it: the error is logged anyway.
+func (h *mockHandler) onError(w http.ResponseWriter, r *RequestValues, failure string, err error) {
 	defer h.lifecycle.OnError(r, err)
 
-	w.Header().Add(HeaderContentType, MIMETextPlainCharsetUTF8)
-	w.WriteHeader(h.app.config.RequestWasNotMatchedStatusCode)
-	w.Write([]byte("ERROR DURING REQUEST MATCHING\n"))
-	w.Write([]byte(err.Error()))
+	buf := bufpool.Get()
+	buf.Reset()
+	defer bufpool.Put(buf)
+
+	if failure == vlatte.FailureReply {
+		buf.WriteString("REPLY FAILED\n")
+	} else {
+		buf.WriteString("MATCHING FAILED\n")
+	}
+
+	buf.WriteString(r.RawRequest.Method)
+	buf.WriteString(" ")
+	buf.WriteString(r.URL.String())
+	buf.WriteString("\n")
+
+	if r.Mock != nil {
+		buf.WriteString(r.Mock.String())
+		buf.WriteString("\n")
+
+		if origin := r.Mock.Origin(); origin != "" {
+			buf.WriteString("Source: ")
+			buf.WriteString(origin)
+			buf.WriteString("\n")
+		}
+	}
+
+	buf.WriteString("\n")
+	buf.WriteString(err.Error())
+
+	w.Header().Set(HeaderContentType, MIMETextPlainCharsetUTF8)
+	w.Header().Set(HeaderXVlatteError, failure)
+	w.WriteHeader(h.app.config.ErrorStatusCode)
+
+	buf.WriteTo(w)
 }
 
 func locals(r *RequestValues, provided map[string]any, params *viewdata.Parameters) *viewdata.Data {

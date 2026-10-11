@@ -49,10 +49,11 @@ func New(config ...Option) (*Server, error) {
 	store := vlatte.NewStore[*Mock]()
 	in := &interceptors{app: app}
 	// User options come first: the mock interceptors never call the next handler, so they must run last.
+	// The recovery interceptors run just before them, so a panic serving a mock answers the call.
 	// Chain* is used because the plain interceptor options can only be set once.
 	opts := append(slices.Clone(conf.ServerOptions),
-		grpc.ChainUnaryInterceptor(in.UnaryInterceptor),
-		grpc.ChainStreamInterceptor(in.StreamInterceptor),
+		grpc.ChainUnaryInterceptor(in.recoverUnary, in.UnaryInterceptor),
+		grpc.ChainStreamInterceptor(in.recoverStream, in.StreamInterceptor),
 	)
 	srv := grpc.NewServer(opts...)
 

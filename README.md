@@ -176,7 +176,7 @@ m := mockhttp.MustNew(mockhttp.Setup().TemplateEngine(engine))
 
 **Escaping.** Templates are Go's `text/template`, so a body can be any format and nothing is escaped for you. Write JSON values with `toJson`, and use `html` or `urlquery` where they fit.
 
-**Errors.** Templates compile when the mock is built, so one that doesn't compile fails the mock. A body file whose content is a template compiles when a request reads it, since its name can depend on the request. A template that fails at a request answers with the no-match status and the error.
+**Errors.** Templates compile when the mock is built, so one that doesn't compile fails the mock. A body file whose content is a template compiles when a request reads it, since its name can depend on the request. A template that fails at a request answers as a [failure](#failures): the error status, `X-Vlatte-Error: reply`, and a body that names the mock and the error.
 
 **File names.** A body file name rendered from the request stays inside the directory written before the template: `files/{{ .Request.URL.Query.Get "f" }}` opens files in `files` only, and refuses `../` or an absolute path from the request.
 
@@ -284,6 +284,27 @@ response:
 **Templates** read forms: `{{ .Request.PostForm.Get "title" }}` and `{{ with .Request.FormFile "avatar" }}{{ .Filename }}{{ end }}`.
 
 **Recording** writes a recorded upload as `form` and `form_file` patterns, so it replays whatever boundary the next client picks. Files that aren't UTF-8 text go to files next to the recording. A replay matches the recorded fields and files, as `FormField` and `FormFile` do: more fields or files still match.
+
+## Failures
+
+When no mock matches, or serving a request fails, the server answers itself. It sends `418 I'm a teapot`, a status a real server rarely sends, so the answer never looks like a mock's, and the `X-Vlatte-Error` header says why:
+
+| `X-Vlatte-Error` | Why |
+|---|---|
+| `no-match` | No mock matched the request. |
+| `match` | Finding a mock failed: a matcher, or the store, returned an error. |
+| `reply` | A mock matched, and its reply failed: a template, a body file, a template data provider or a response mapper. |
+| `panic` | Serving the request panicked. |
+
+The body says the same in text, and names the mock and the error. A test checks the header:
+
+```go
+require.Equal(t, vlatte.FailureReply, res.Header.Get(vlatte.FailureHeader))
+```
+
+The status of `no-match` is `no_match_status_code`, and the status of the others is `error_status_code`. Both default to 418.
+
+A gRPC server answers `NotFound` when no mock matches, and `Internal` when serving a call fails, with the same values in the `x-vlatte-error` trailer. A mock that answers with a status, as `Unary().Status(...)` does, gets no trailer: that status is its answer.
 
 ## Configuration
 
