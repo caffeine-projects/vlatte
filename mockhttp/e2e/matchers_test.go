@@ -231,37 +231,90 @@ func TestMatchers_PathCustomMatcher(t *testing.T) {
 }
 
 func TestMatchers_URLFragment(t *testing.T) {
-	m := mockhttp.MustNew()
+	// The fragment is what follows a "#" of the request target, after the query. An escaped "%23" is part of the path.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
 	m.MustStart()
-	m.MustMock(mockhttp.Getf("/test").URLFragmentf("contacts").Reply(mockhttp.OK().BodyText("hello world")))
+	t.Cleanup(m.Close)
 
-	t.Cleanup(func() { m.Close() })
+	// The mock matches any path, so each request misses on its fragment only.
+	m.MustMock(mockhttp.Request().URLFragmentf("contacts").Reply(mockhttp.OK()))
 
-	// no fragment
-	client := &http.Client{}
-	res, err := client.Get(m.URL("/test"))
+	tests := []struct {
+		give       string
+		wantStatus int
+	}{
+		{give: "/test", wantStatus: mockhttp.StatusNoMatch},
+		{give: "/test#wrong-value", wantStatus: mockhttp.StatusNoMatch},
+		{give: "/test%23contacts", wantStatus: mockhttp.StatusNoMatch},
+		{give: "/test#contacts", wantStatus: http.StatusOK},
+		{give: "/test?q=1#contacts", wantStatus: http.StatusOK},
+	}
 
+	for _, tt := range tests {
+		t.Run(tt.give, func(t *testing.T) {
+			res, body := getTarget(t, m, tt.give)
+			require.Equal(t, tt.wantStatus, res.StatusCode, string(body))
+		})
+	}
+}
+
+func TestMatchers_URLFragmentFromAMockFile(t *testing.T) {
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.FromFile("testdata/matchers/08_url_fragment.yaml"))
+
+	res, body := getTarget(t, m, "/test#contacts")
+	require.Equal(t, http.StatusNoContent, res.StatusCode, string(body))
+
+	res, body = getTarget(t, m, "/test#other")
+	require.Equal(t, mockhttp.StatusNoMatch, res.StatusCode, string(body))
+}
+
+func TestMatchers_QueryLeavesTheFragmentOut(t *testing.T) {
+	// Go's server leaves a "#" in the query it reads: q would be "1#contacts".
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.Getf("/test").Queryf("q", "1").Reply(mockhttp.OK()))
+
+	res, body := getTarget(t, m, "/test?q=1#contacts")
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+}
+
+func TestMatchers_AMiddlewareSeesThePathWithoutTheFragment(t *testing.T) {
+	// The fragment leaves the path before any middleware runs, so a middleware that rewrites the path keeps both.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Middlewares(func(h http.Handler) http.Handler {
+		return http.StripPrefix("/api", h)
+	}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.Getf("/users").URLFragmentf("top").Reply(mockhttp.OK()))
+
+	res, body := getTarget(t, m, "/api/users#top")
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+}
+
+// getTarget sends a GET with target as the request target, as is, and reads the whole response: Go's http.Client
+// doesn't send a URL's fragment.
+func getTarget(t *testing.T, m *mockhttp.Server, target string) (*http.Response, []byte) {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodGet, m.URL(), nil)
 	require.NoError(t, err)
-	require.NoError(t, res.Body.Close())
-	require.Equal(t, mockhttp.StatusNoMatch, res.StatusCode)
+	req.URL.Opaque = target
 
-	// wrong fragment
-	client = &http.Client{}
-	res, err = client.Get(m.URL("/test#wrong-value"))
-
-	require.NoError(t, err)
-	require.NoError(t, res.Body.Close())
-	require.Equal(t, mockhttp.StatusNoMatch, res.StatusCode)
-
-	// the right fragment value
-	res, err = client.Get(m.URL("/test#contacts"))
+	res, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 
 	b, err := io.ReadAll(res.Body)
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-	require.Equal(t, http.StatusOK, res.StatusCode)
-	require.Equal(t, "hello world", string(b))
+
+	return res, b
 }
 
 func TestMatchers_NoReply_ShouldReturn200ByDefault(t *testing.T) {

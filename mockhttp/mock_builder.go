@@ -219,7 +219,7 @@ func (b *Builder) URLf(format string, a ...any) *Builder {
 // URLPath defines a matcher to be applied to the url.URL path.
 func (b *Builder) URLPath(m vlatte.Matcher) *Builder {
 	b.appendExpectation(&expectation{
-		Target:   int(matchingScopeURL),
+		Target:   int(matchingScopeURLPath),
 		Selector: selectURLPath,
 		Matcher:  m,
 	})
@@ -233,10 +233,12 @@ func (b *Builder) URLPathf(format string, a ...any) *Builder {
 	return b.URLPath(match.GlobMatch(fmt.Sprintf(format, a...)))
 }
 
-// URLPath defines a matcher to be applied to the url.URL path.
+// URLFragment defines a matcher to be applied to the URL fragment: the decoded text after a "#" in the request
+// target. An escaped "%23" is part of the path. Go's http.Client doesn't send fragments: a request with URL.Opaque
+// set to the path and fragment, such as "/users#top", does.
 func (b *Builder) URLFragment(m vlatte.Matcher) *Builder {
 	b.appendExpectation(&expectation{
-		Target:   int(matchingScopeURL),
+		Target:   int(matchingScopeURLFragment),
 		Selector: selectURLFragment,
 		Matcher:  m,
 	})
@@ -244,7 +246,7 @@ func (b *Builder) URLFragment(m vlatte.Matcher) *Builder {
 	return b
 }
 
-// URLPathf sets a Matcher that compares the http.Request url.URL path with the given value, ignoring the case.
+// URLFragmentf sets a Matcher that compares the URL fragment with the given value, as a glob.
 // The expected value will be formatted with the provided format specifier.
 func (b *Builder) URLFragmentf(format string, a ...any) *Builder {
 	return b.URLFragment(match.GlobMatch(fmt.Sprintf(format, a...)))

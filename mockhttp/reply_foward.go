@@ -234,19 +234,22 @@ func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, er
 }
 
 func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
-	path := req.RawRequest.URL.Path
+	path, rawPath := req.RawRequest.URL.Path, req.RawRequest.URL.RawPath
 
 	if p.trimPrefix != "" {
 		path = strings.TrimPrefix(path, p.trimPrefix)
+		rawPath = strings.TrimPrefix(rawPath, p.trimPrefix)
 	}
 
 	if p.trimSuffix != "" {
 		path = strings.TrimSuffix(path, p.trimSuffix)
+		rawPath = strings.TrimSuffix(rawPath, p.trimSuffix)
 	}
 
 	req.RawRequest.URL.Host = p.target.Host
 	req.RawRequest.URL.Scheme = p.target.Scheme
-	req.RawRequest.URL.Path = path
+	// RawPath keeps escapes such as "%2F". When a trim didn't cut it as it cut Path, EscapedPath ignores it.
+	req.RawRequest.URL.Path, req.RawRequest.URL.RawPath = path, rawPath
 	req.RawRequest.Host = p.target.Host
 	req.RawRequest.RequestURI = ""
 

@@ -34,6 +34,7 @@
         "path": { "$ref": "#/$defs/matcher" },
         "url": { "$ref": "#/$defs/matcher" },
         "url_match": { "type": "string", "format": "regex" },
+        "fragment": { "description": "URL fragment: the text after a \"#\" of the request target. Only clients that write a \"#\" into the request target send one.", "$ref": "#/$defs/matcher" },
         "query": { "$ref": "#/$defs/keyed_matcher" },
         "queries": { "$ref": "#/$defs/keyed_matcher" },
         "header": { "$ref": "#/$defs/keyed_matcher" },

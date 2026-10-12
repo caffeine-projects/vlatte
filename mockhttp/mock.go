@@ -207,6 +207,17 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		expectationsByTarget[t] = append(expectationsByTarget[t], v)
 	}
 
+	// A mock file matches the URL with url or path, not both: with url matchers, the path matchers go in url, as
+	// urlpath matchers, which apply them to the path of the URL.
+	if paths := expectationsByTarget[matchingScopeURLPath]; len(paths) > 0 && len(expectationsByTarget[matchingScopeURL]) > 0 {
+		for _, e := range paths {
+			expectationsByTarget[matchingScopeURL] = append(expectationsByTarget[matchingScopeURL],
+				&expectation{Target: int(matchingScopeURL), Matcher: match.URLPathMatch(e.Matcher)})
+		}
+
+		delete(expectationsByTarget, matchingScopeURLPath)
+	}
+
 	for target, expectations := range expectationsByTarget {
 		switch target {
 		case matchingScopeQuery, matchingScopeQueries, matchingScopeHeader, matchingScopeFormField:
@@ -269,7 +280,8 @@ func (m *Mock) Describe() descriptor.Descriptor {
 
 			request[target.FieldName()] = files
 
-		case matchingScopeScheme, matchingScopeURL, matchingScopeURLPath, matchingScopeBody:
+		case matchingScopeScheme, matchingScopeMethod, matchingScopeURL, matchingScopeURLPath, matchingScopeURLFragment,
+			matchingScopeBody:
 			if len(expectations) == 1 {
 				if sd, ok := expectations[0].Matcher.(descriptor.SelfDescriptive); ok {
 					request[target.FieldName()] = sd.Describe()
@@ -340,6 +352,7 @@ const (
 	matchingScopeFormField
 	matchingScopeFormFile
 	matchingScopeScenario
+	matchingScopeURLFragment
 )
 
 func (t matchingScope) FieldName() string {
@@ -366,6 +379,8 @@ func (t matchingScope) FieldName() string {
 		return "form_file"
 	case matchingScopeScenario:
 		return "scenario"
+	case matchingScopeURLFragment:
+		return "fragment"
 	default:
 		return ""
 	}

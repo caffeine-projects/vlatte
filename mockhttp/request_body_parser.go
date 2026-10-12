@@ -34,15 +34,64 @@ func parseRequest(r *http.Request, options *Server) (*RequestValues, []byte, err
 	return req, rawBody, err
 }
 
-// parseURL returns the full request URL (with base) and path segments.
+// parseURL returns the request URL, on the server's base URL, and its path segments. The path stays escaped as the
+// client sent it: decoded, "%3F" and "%23" would start a query or a fragment.
 func parseURL(r *http.Request, baseURL string) (*url.URL, []string) {
-	reqPath := r.URL.Path
-	if len(r.URL.RawQuery) > 0 {
-		reqPath += "?" + r.URL.RawQuery
+	// The scheme and host are the server's. A target's user info, opaque part and empty query ("/a?") are left out.
+	u := &url.URL{
+		Path:        r.URL.Path,
+		RawPath:     r.URL.RawPath,
+		RawQuery:    r.URL.RawQuery,
+		Fragment:    r.URL.Fragment,
+		RawFragment: r.URL.RawFragment,
 	}
-	parsedURL, _ := url.Parse(baseURL + reqPath)
-	segments := strings.FieldsFunc(r.URL.Path, func(c rune) bool { return c == '/' })
-	return parsedURL, segments
+	if base, err := url.Parse(baseURL); err == nil {
+		u.Scheme, u.Host = base.Scheme, base.Host
+	}
+
+	return u, pathSegments(u)
+}
+
+// pathSegments returns the segments of u's path, each decoded: an escaped "/" stays in its segment, so /files/a%2Fb
+// is [files a/b].
+func pathSegments(u *url.URL) []string {
+	segments := strings.FieldsFunc(u.EscapedPath(), func(c rune) bool { return c == '/' })
+	for i, s := range segments {
+		if d, err := url.PathUnescape(s); err == nil {
+			segments[i] = d
+		}
+	}
+
+	return segments
+}
+
+// withFragment moves the fragment of the request target into r.URL.Fragment, before any other handler sees the
+// request. Go's server reads no fragment: it leaves a "#" and what follows in r.URL's path or query. So the target is
+// parsed again without its fragment, as Go's server parses targets. A CONNECT target is a host, not a URL.
+func withFragment(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		target, fragment, ok := strings.Cut(r.RequestURI, "#")
+		if !ok || r.Method == http.MethodConnect {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		u, err := url.ParseRequestURI(target)
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// url.Parse sets Fragment and RawFragment as for any URL. A fragment that doesn't decode is dropped.
+		if f, err := url.Parse("#" + fragment); err == nil {
+			u.Fragment, u.RawFragment = f.Fragment, f.RawFragment
+		}
+
+		// As http.StripPrefix does: a shallow copy with its own URL.
+		r2 := new(*r)
+		r2.URL = u
+		next.ServeHTTP(w, r2)
+	})
 }
 
 // RequestBodyParser parses the request body if CanParse returns true.

@@ -178,6 +178,40 @@ func TestForward(t *testing.T) {
 		assert.Equal(t, http.StatusOK, res.StatusCode)
 	})
 
+	t.Run("should keep escaped slashes when trimming the URL", func(t *testing.T) {
+		// "%2F" is a "/" within a segment, not a separator: forwarded as "/", it names another path.
+		dest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(r.RequestURI))
+		}))
+
+		defer dest.Close()
+
+		tests := []struct {
+			name      string
+			giveReply *ProxyReply
+			givePath  string
+			want      string
+		}{
+			{name: "prefix", giveReply: From(dest.URL).TrimPrefix("/api"), givePath: "/api/a%2Fb", want: "/a%2Fb"},
+			{name: "suffix", giveReply: From(dest.URL).TrimSuffix("/x"), givePath: "/a%2Fb/x", want: "/a%2Fb"},
+			// The escaped path holds "/a%20b", which the prefix doesn't cut: the path goes as Path escapes it.
+			{name: "prefix escaped otherwise", giveReply: From(dest.URL).TrimPrefix("/a b"), givePath: "/a%20b/c%2Fd", want: "/c/d"},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				req, err := http.NewRequest(http.MethodGet, "http://localhost:8080"+tt.givePath, nil)
+				require.NoError(t, err)
+
+				rv := &RequestValues{RawRequest: req, URL: req.URL}
+				res, err := replierOf(t, tt.giveReply).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
+
+				require.NoError(t, err)
+				require.Equal(t, tt.want, string(res.Body))
+			})
+		}
+	})
+
 	t.Run("should panic if the given raw target cannot be parsed to a URL", func(t *testing.T) {
 		assert.Panics(t, func() {
 			From(" https://fail test  ")

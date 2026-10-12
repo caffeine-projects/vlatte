@@ -54,3 +54,37 @@ func TestSimilarRequestURLPaths(t *testing.T) {
 
 	vlatte.Times(t, scope, 5)
 }
+
+func TestRequestURL_AnEscapedQuestionMarkIsPartOfThePath(t *testing.T) {
+	// "%3F" is a "?" within the path: the request has no query, and the mock for /test doesn't match it.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(
+		mockhttp.Getf("/test").Reply(mockhttp.OK().BodyTemplate("query={{ .Request.URL.RawQuery }}")),
+		mockhttp.Getf("/test?q=none").Reply(mockhttp.OK().
+			BodyTemplate("path={{ .Request.URL.Path }} query={{ .Request.URL.RawQuery }}")))
+
+	res, body := getTarget(t, m, "/test%3Fq=none")
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+	require.Equal(t, "path=/test?q=none query=", string(body))
+
+	res, body = getTarget(t, m, "/test?q=none")
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+	require.Equal(t, "query=q=none", string(body))
+}
+
+func TestRequestURL_AnEscapedSlashStaysInItsSegment(t *testing.T) {
+	// "%2F" is a "/" within a segment: /files/a%2Fb has two segments, files and a/b.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.Getf("/files/*").Reply(mockhttp.OK().
+		BodyTemplate("{{ len .Request.URLPathSegments }} {{ index .Request.URLPathSegments 1 }}")))
+
+	res, body := getTarget(t, m, "/files/a%2Fb")
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+	require.Equal(t, "2 a/b", string(body))
+}

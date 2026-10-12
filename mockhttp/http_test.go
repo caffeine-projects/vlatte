@@ -416,6 +416,48 @@ func TestURL_InvalidPathPanicsInsteadOfExiting(t *testing.T) {
 	require.Panics(t, func() { m.URL("50%") })
 }
 
+func TestURL_TheLastElementKeepsItsQueryAndFragment(t *testing.T) {
+	// In a URL, a "?" starts the query and a "#" the fragment. Escaped into the path, as url.JoinPath does, they make
+	// a request for another path, with no query.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	tests := []struct {
+		give []string
+		want string
+	}{
+		{give: []string{"/test"}, want: "/test"},
+		{give: []string{"/test?q=none"}, want: "/test?q=none"},
+		{give: []string{"/test#contacts"}, want: "/test#contacts"},
+		{give: []string{"/users", "1?active=true#top"}, want: "/users/1?active=true#top"},
+		{give: []string{"/users", "?active=true"}, want: "/users?active=true"},
+		{give: []string{"/users/?active=true"}, want: "/users/?active=true"},
+		// Escaped, a "?" is part of the path.
+		{give: []string{"/test%3Fq=none"}, want: "/test%3Fq=none"},
+		// Only the last element has a query: before it, a "?" is part of the path.
+		{give: []string{"/a?b", "c"}, want: "/a%3Fb/c"},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.give), func(t *testing.T) {
+			require.Equal(t, m.URL()+tt.want, m.URL(tt.give...))
+		})
+	}
+}
+
+func TestURL_LeavesThePathsItIsGiven(t *testing.T) {
+	// URL(paths...) shares the caller's slice: cutting the query off the last element must not change it.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	paths := []string{"/users", "1?active=true"}
+	m.URL(paths...)
+
+	require.Equal(t, []string{"/users", "1?active=true"}, paths)
+}
+
 func TestSettingOnlyPort(t *testing.T) {
 	// Binding a custom address is covered by TestConfig; Port must produce a port-only address.
 	m := MustNew(Setup().Port(12345))

@@ -67,6 +67,7 @@ type requestDef struct {
 	scheme   func(*Builder)
 	method   func(*Builder)
 	url      map[string]func(*Builder) // by key: url, url_match or path; only one may be set
+	fragment func(*Builder)
 	query    []func(*Builder)
 	queries  []func(*Builder)
 	header   []func(*Builder)
@@ -212,6 +213,16 @@ var _mockSchema = config.NewSchema(
 
 			return matchText(v, func(s string) { d.request.url["path"] = func(b *Builder) { b.URL(match.URLPath(s)) } },
 				func(m vlatte.Matcher) { d.request.url["path"] = func(b *Builder) { b.URLPath(m) } })
+		},
+	},
+	mockField{
+		Key: "request.fragment", Kind: config.Any,
+		Usage: `URL fragment to match: a glob, or a matcher list. Only clients that write a "#" into the request target send one.`,
+		Set: func(d *mockDef, v config.Value) error {
+			d.request.keys = append(d.request.keys, "fragment")
+
+			return matchText(v, func(s string) { d.request.fragment = func(b *Builder) { b.URLFragment(match.GlobMatch(s)) } },
+				func(m vlatte.Matcher) { d.request.fragment = func(b *Builder) { b.URLFragment(m) } })
 		},
 	},
 	mockField{
@@ -1020,6 +1031,10 @@ func (r *requestDef) apply(b *Builder) {
 		if set, ok := r.url[k]; ok {
 			set(b)
 		}
+	}
+
+	if r.fragment != nil {
+		r.fragment(b)
 	}
 
 	for _, sets := range [][]func(*Builder){r.query, r.queries, r.header, r.form, r.formFile} {

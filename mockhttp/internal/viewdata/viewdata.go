@@ -88,7 +88,8 @@ type Request struct {
 	// URL is the request URL, on the server's base URL.
 	URL *url.URL
 
-	// URLPathSegments are the segments of the URL path: /users/1 is [users 1].
+	// URLPathSegments are the segments of the URL path, each decoded: /users/1 is [users 1], and /files/a%2Fb is
+	// [files a/b].
 	URLPathSegments []string
 	Header          http.Header
 

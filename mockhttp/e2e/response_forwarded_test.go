@@ -130,3 +130,21 @@ func forwardingTo(t *testing.T, file, target string) []byte {
 
 	return bytes.ReplaceAll(doc, []byte("http://target.invalid"), []byte(target))
 }
+
+func TestProxiedReplies_TheFragmentStaysHere(t *testing.T) {
+	// HTTP requests carry no fragment: forwarded, /test#contacts goes as /test, not as the path "/test#contacts".
+	dest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(r.RequestURI))
+	}))
+	t.Cleanup(dest.Close)
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.Request().URLFragmentf("contacts").Reply(mockhttp.From(dest.URL)))
+
+	res, body := getTarget(t, m, "/test#contacts")
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+	require.Equal(t, "/test", string(body))
+}
