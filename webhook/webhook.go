@@ -190,10 +190,8 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		logger = loggerOf(args)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
-	if err != nil {
-		return fmt.Errorf("webhook: %w", err)
-	}
+	// With a context, only a bad method or URL fails it, and validate and checkURL checked both.
+	req, _ := http.NewRequestWithContext(ctx, method, u.String(), body)
 
 	for k, v := range webhookArgs.Header {
 		req.Header.Set(k, v)
