@@ -328,7 +328,6 @@ func TestWebHook_TransformChangesOneSend(t *testing.T) {
 	}
 
 	wg.Wait()
-	m.WaitEvents()
 
 	require.True(t, target.AssertNumberOfCalls(t, 10))
 	require.Empty(t, args.Header["X-Seen"], "the mock's parameters stay as they were given")

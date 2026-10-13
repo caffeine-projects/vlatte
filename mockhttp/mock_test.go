@@ -217,7 +217,5 @@ func TestMock_ADescriptionKeepsTheEvents(t *testing.T) {
 
 	status, _ := get(t, m, "/x")
 	require.Equal(t, http.StatusNoContent, status)
-
-	m.WaitEvents()
 	require.ElementsMatch(t, []vlatte.Parameters{map[string]any{"k": "v"}, nil}, []vlatte.Parameters{<-got, <-got})
 }

@@ -23,8 +23,7 @@ import (
 	"github.com/caffeine-projects/vlatte/webhook"
 )
 
-// complete serves PUT /orders/42 on a server with the webhook, with parameters as its on_complete event, and waits
-// for the webhook, which is sent after the response.
+// complete serves PUT /orders/42 on a server with the webhook, with parameters as its on_complete event.
 func complete(t *testing.T, parameters vlatte.Parameters) {
 	t.Helper()
 
@@ -46,8 +45,6 @@ func complete(t *testing.T, parameters vlatte.Parameters) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusNoContent, res.StatusCode)
-
-	m.WaitEvents()
 }
 
 func TestWebHook_MultipartBodies(t *testing.T) {

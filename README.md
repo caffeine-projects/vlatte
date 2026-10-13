@@ -339,23 +339,22 @@ m.MustMock(mockhttp.Postf("/orders").
 | `method` | The method, in any case. Empty means `GET`. |
 | `header`, `header_template` | Headers by name, each a string. Names ignore case, so a name is set once. |
 | `body`, `body_template`, `body_file`, `multipart`, `multipart_template` | The body, one of them at most. Multipart bodies are as in [replies](#forms-and-multipart). |
-| `delay` | How long to wait after the response before sending. |
+| `delay` | How long to wait before sending, once the mock replied. The response waits for it too. |
 
 Templates render with the data of the request that completed the mock: see [Templates](#templates). A mistake, such as a missing URL, two bodies or a template that doesn't compile, fails the mock when it is built.
 
-**When they run.** Webhooks are sent after the response, in the background, each on its own: the client doesn't wait for them, and a slow or failing webhook holds up no other. A webhook's `delay` counts from the response. A test waits for them before it checks what they sent:
+**When they run.** Webhooks are sent once the mock has replied, each on its own, and the response ends when they all have: a slow or failing webhook holds up no other, and a test checks what they sent right after the call:
 
 ```go
 // callbacks is a mock server standing for the client the webhook calls back.
 res, err := http.Post(m.URL("/orders"), "application/json", strings.NewReader(`{"id": 42}`))
 // ...
-m.WaitEvents()
 callbacks.AssertCalled(t)
 ```
 
-`m.Close()` cancels the webhooks still waiting, for their delay or for their target. `WaitEvents` first lets them finish.
+A webhook's `delay` counts from the reply, so it holds the response too. A reply that flushes its response early, such as a multipart stream with delays, can reach the client before its webhooks are done. `m.Close()` cancels the webhooks still waiting, for their delay or for their target.
 
-**Failures.** A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning. The timeout is 10 seconds: `webhook.WithTimeout` changes it in Go, and the `webhook.timeout` setting for the `vlatte` command, where 0 means 10 seconds, unlike `proxy.timeout`.
+**Failures.** A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning. The timeout is 10 seconds: `webhook.WithTimeout` changes it in Go, and the `webhook.timeout` setting for the `vlatte` command, where 0 means 10 seconds, unlike `proxy.timeout`. A response waits for a webhook at most its delay plus the timeout.
 
 **Logs.** Webhooks log each request and its answer with the server's logger, so `Setup().Silent()` silences them too. `webhook.WithLogger` gives them a logger of their own.
 

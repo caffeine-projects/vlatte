@@ -59,7 +59,7 @@ type Server struct {
 	admin          *admin.Admin[*Mock]
 	closeIdleConns []func()
 
-	// events runs the on_complete events of the mocks in the background, after their responses.
+	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
 	events *vlatte.EventRunner
 }
 
@@ -374,15 +374,15 @@ func (app *Server) MustReload() {
 }
 
 // Close closes the mock server. It cancels the on_complete events still running, such as a webhook waiting for its
-// delay, and waits for them to return: WaitEvents first lets them finish.
+// delay or its target, so the requests waiting for them end, and waits for those requests.
 func (app *Server) Close() {
+	// The backend waits for the requests it serves, and they wait for their events: cancel the events first.
+	app.events.Close()
+
 	err := app.server.Close()
 	if err != nil {
 		app.logger.Debug().Err(err).Msg("server: Close: error closing server")
 	}
-
-	// The backend waited for the requests it served, so no event starts now.
-	app.events.Close()
 
 	if app.rec != nil {
 		app.rec.stop()
@@ -395,13 +395,6 @@ func (app *Server) Close() {
 	for _, closeIdle := range closeIdleConns {
 		closeIdle()
 	}
-}
-
-// WaitEvents waits for the on_complete events running in the background, such as webhooks, and for the requests
-// being served whose mocks have events. Events run after the response, so a test calls WaitEvents before checking
-// what a webhook sent.
-func (app *Server) WaitEvents() {
-	app.events.Wait()
 }
 
 // IsRecording checks if mock recording is enabled.

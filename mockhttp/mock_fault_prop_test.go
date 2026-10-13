@@ -299,8 +299,6 @@ func TestPropMockFile_MutationsNeverPanic(t *testing.T) {
 
 		send(t, m.URL(), req)
 
-		// The events run after the response: a panic of theirs would be logged after it.
-		m.WaitEvents()
 		require.NotContains(t, logs.String(), "panic", "serving %v", doc)
 	})
 

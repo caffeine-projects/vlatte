@@ -340,8 +340,8 @@ func TestCLI_ServesMockFilesWithWebhooks(t *testing.T) {
 	select {
 	case hook := <-got:
 		require.Equal(t, "POST /hook paid", hook)
-	case <-time.After(10 * time.Second):
-		t.Fatal("the webhook never reached the target")
+	default:
+		t.Fatal("the response came before the webhook")
 	}
 
 	require.Equal(t, 0, stop(), "a stopped server exits cleanly")
@@ -364,6 +364,14 @@ func TestCLI_WebhookTimeout(t *testing.T) {
 	start(t, "--addr", addr, "--mock-files", writeWebhookMock(t, target.URL+"/hook"), "--log-level", "disabled",
 		"--webhook-timeout", "100ms")
 	getOrders(t, addr)
+
+	// The response waits for the webhook, which webhook.timeout ends: the 10s default would hold it past the client's
+	// timeout.
+	client := &http.Client{Timeout: 5 * time.Second}
+	res, err := client.Get("http://" + addr + "/orders")
+	require.NoError(t, err, "the response waited past the webhook's 100ms timeout")
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusAccepted, res.StatusCode)
 
 	select {
 	case <-canceled:

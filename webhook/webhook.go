@@ -48,7 +48,7 @@ type Transform func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Ar
 
 // WebHook is an automated HTTP request sent when an on-complete event is fired.
 // Register it with [vlatte.Listener.OnComplete] (e.g. via mockhttp.Setup().OnCompleteListener(name, wh)).
-// mockhttp sends it after the response, in the background: tests call the server's WaitEvents before checking it.
+// mockhttp sends it once the mock replied, and the response waits for it: a test checks the target right after.
 //
 // It logs each send and its answer at info level, with Logger, or else with the logger of the event: mockhttp gives
 // the server's. A send fails when the target can't be reached in Timeout, or answers with a status outside 2xx; a
@@ -299,8 +299,8 @@ type Args struct {
 	// Multipart is a multipart body, such as one built with mockhttp.MultipartForm. It sets the Content-Type.
 	Multipart MultipartBody
 
-	// Delay is how long the webhook waits after the response before it sends the request. The WebHook's timeout
-	// counts from the send.
+	// Delay is how long the webhook waits, once the mock replied, before it sends the request. The response waits for
+	// it too. The WebHook's timeout counts from the send.
 	Delay time.Duration
 
 	dir string // where relative files open from: the mock file's directory; "" is the working directory
@@ -490,7 +490,7 @@ var _argsSchema = config.NewSchema(
 		Set:   func(a *Args, v config.Value) error { return setMultipart(a, v, true) },
 	},
 	argsField{
-		Key: "delay", Kind: config.Duration, Usage: "How long to wait after the response before sending: milliseconds or a Go duration (1.5s).",
+		Key: "delay", Kind: config.Duration, Usage: "How long to wait before sending, once the mock replied; the response waits for it too: milliseconds or a Go duration (1.5s).",
 		Set: func(a *Args, v config.Value) error { a.Delay = v.Dur; return nil },
 	},
 )

@@ -40,7 +40,8 @@ func (b *ArgsBuilder) Body(body string) *ArgsBuilder {
 	return b
 }
 
-// Delay sets how long the WebHook waits after the response before it sends the request.
+// Delay sets how long the WebHook waits, once the mock replied, before it sends the request. The response waits for
+// it too.
 func (b *ArgsBuilder) Delay(d time.Duration) *ArgsBuilder {
 	b.input.Delay = d
 	return b

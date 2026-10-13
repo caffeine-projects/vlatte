@@ -273,8 +273,7 @@ func TestGlobalEventsAreApplied(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 
-	// Global on_complete events run for every matched request, after the response.
-	m.WaitEvents()
+	// Global on_complete events run for every matched request, and the response waits for them.
 	require.Equal(t, int32(1), fired.Load())
 }
 

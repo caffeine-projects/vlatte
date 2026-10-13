@@ -68,18 +68,27 @@ func mockWith(names ...string) *fakeMock {
 	return m
 }
 
-func TestEventRunner_EachEventRunsOnItsOwn(t *testing.T) {
-	// #15: events ran one after the other, inside the handler, and the first error skipped the rest: a failing global
-	// webhook stopped the mock's own. Each runs in a goroutine of its own now: a blocked event holds none of the others,
-	// and a failing one skips none.
+func TestEventRunner_RunsEachEventOnItsOwnAndWaitsForAll(t *testing.T) {
+	// Events ran one after the other, and the first error skipped the rest: a failing global webhook stopped the
+	// mock's own. Each runs in a goroutine of its own now, so none holds up or skips another, and OnComplete returns
+	// once they all have: the response waits for them, and a test checks what they did right after it.
 	synctest.Test(t, func(t *testing.T) {
-		unblock := make(chan struct{})
 		var ran sync.Map
+		ping, pong := make(chan struct{}), make(chan struct{})
 
+		// ping and pong wait for each other: one after the other, they would never end.
 		listeners := vlatte.NewListener()
-		register(t, listeners, "blocked", func(context.Context, vlatte.OnComplete) error {
-			<-unblock
-			ran.Store("blocked", true)
+		register(t, listeners, "ping", func(context.Context, vlatte.OnComplete) error {
+			close(ping)
+			<-pong
+			ran.Store("ping", true)
+
+			return nil
+		})
+		register(t, listeners, "pong", func(context.Context, vlatte.OnComplete) error {
+			close(pong)
+			<-ping
+			ran.Store("pong", true)
 
 			return nil
 		})
@@ -87,37 +96,35 @@ func TestEventRunner_EachEventRunsOnItsOwn(t *testing.T) {
 			ran.Store("failing", true)
 			return errors.New("target down")
 		})
-		register(t, listeners, "mock's", func(context.Context, vlatte.OnComplete) error {
-			ran.Store("mock's", true)
+		register(t, listeners, "slow", func(context.Context, vlatte.OnComplete) error {
+			time.Sleep(time.Second)
+			ran.Store("slow", true)
+
 			return nil
 		})
 
-		global := &vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "blocked"}, {Name: "failing"}}}
+		global := &vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "failing"}, {Name: "ping"}}}
 		runner := vlatte.NewEventRunner(listeners, global)
-		mock := mockWith("mock's")
+		mock := mockWith("pong", "slow")
 
 		var got reported
+		start := time.Now()
 		runner.OnComplete(mock, argsOf(mock), got.add)
 
-		synctest.Wait()
-		_, failed := ran.Load("failing")
-		_, own := ran.Load("mock's")
-		_, blocked := ran.Load("blocked")
-		require.True(t, failed && own, "the blocked event holds none of the others")
-		require.False(t, blocked)
-		require.Equal(t, []string{"global on_complete listener failing at index 1: target down"}, got.all())
+		require.Equal(t, time.Second, time.Since(start), "OnComplete returned with the slowest event")
+		for _, name := range []string{"ping", "pong", "failing", "slow"} {
+			_, ok := ran.Load(name)
+			require.True(t, ok, name)
+		}
 
-		close(unblock)
-		runner.Wait()
-
-		_, blocked = ran.Load("blocked")
-		require.True(t, blocked)
+		require.Equal(t, []string{"global on_complete listener failing at index 0: target down"}, got.all())
 	})
 }
 
 func TestEventRunner_ReportsUnregisteredNamesAndPanics(t *testing.T) {
-	// A listener's panic was caught by the server's recovery while listeners ran in its handler: in a goroutine, it
-	// would end the process. It's reported with its stack now, as an unregistered name is, and the other events run.
+	// A listener's panic was caught by the server's recovery while listeners ran on the handler's goroutine: in a
+	// goroutine of its own, it would end the process. It's reported with its stack now, as an unregistered name is, and
+	// the other events run.
 	synctest.Test(t, func(t *testing.T) {
 		var ran atomic.Bool
 
@@ -133,7 +140,6 @@ func TestEventRunner_ReportsUnregisteredNamesAndPanics(t *testing.T) {
 
 		var got reported
 		runner.OnComplete(mock, argsOf(mock), got.add)
-		runner.Wait()
 
 		errs := got.all()
 		require.Len(t, errs, 2)
@@ -144,66 +150,16 @@ func TestEventRunner_ReportsUnregisteredNamesAndPanics(t *testing.T) {
 	})
 }
 
-func TestEventRunner_WaitWaitsForEventsAndHolds(t *testing.T) {
-	// A response can reach the client before its handler starts the events, so a request holds the runner until then:
-	// Wait mustn't return between the response and the start of its events.
+func TestEventRunner_CloseCancelsTheEventsRunning(t *testing.T) {
+	// Close cancels the events running, such as a webhook waiting for a slow target, so the requests waiting for them
+	// end, and a server closes at once. A closed runner runs nothing until Open, which a restarted server calls.
 	synctest.Test(t, func(t *testing.T) {
-		var ran atomic.Bool
-
-		listeners := vlatte.NewListener()
-		register(t, listeners, "hook", func(context.Context, vlatte.OnComplete) error {
-			time.Sleep(time.Second)
-			ran.Store(true)
-
-			return nil
-		})
-
-		runner := vlatte.NewEventRunner(listeners, nil)
-		runner.Wait() // nothing counted
-
-		// A mock without events holds nothing.
-		runner.Hold(mockWith())
-		runner.Wait()
-
-		mock := mockWith("hook")
-		release := runner.Hold(mock)
-
-		waited := make(chan struct{})
-		go func() {
-			runner.Wait()
-			close(waited)
-		}()
-
-		synctest.Wait()
-		select {
-		case <-waited:
-			t.Fatal("Wait returned while a request held the runner")
-		default:
-		}
-
-		start := time.Now()
-		runner.OnComplete(mock, argsOf(mock), func(err error) { t.Error(err) })
-		release()
-		release() // a second release changes nothing
-
-		<-waited
-		require.True(t, ran.Load(), "Wait returned after the event")
-		require.Equal(t, time.Second, time.Since(start))
-	})
-}
-
-func TestEventRunner_CloseCancelsAndWaits(t *testing.T) {
-	// Close cancels the events running, such as a webhook waiting for a slow target, and waits for them, so a server
-	// closes at once. A closed runner starts nothing until Open, which a restarted server calls.
-	synctest.Test(t, func(t *testing.T) {
-		var started, late atomic.Int32
+		var late atomic.Int32
 		var argsCtx, listenerCtx context.Context
 
 		listeners := vlatte.NewListener()
 		register(t, listeners, "waits", func(ctx context.Context, _ vlatte.OnComplete) error {
-			started.Add(1)
 			<-ctx.Done()
-
 			return ctx.Err()
 		})
 		register(t, listeners, "counts", func(ctx context.Context, _ vlatte.OnComplete) error {
@@ -217,18 +173,26 @@ func TestEventRunner_CloseCancelsAndWaits(t *testing.T) {
 		waits := mockWith("waits")
 
 		var got reported
-		runner.OnComplete(waits, argsOf(waits), got.add)
+		done := make(chan struct{})
+		go func() {
+			runner.OnComplete(waits, argsOf(waits), got.add)
+			close(done)
+		}()
+
 		synctest.Wait()
-		require.Equal(t, int32(1), started.Load())
+		select {
+		case <-done:
+			t.Fatal("OnComplete returned before its event")
+		default:
+		}
 
 		runner.Close()
+		<-done
 		require.Empty(t, got.all(), "an event Close canceled isn't a failure")
 
 		counts := mockWith("counts")
 		runner.OnComplete(counts, argsOf(counts), got.add)
-		runner.Hold(counts)()
-		runner.Wait()
-		require.Zero(t, late.Load(), "a closed runner starts nothing")
+		require.Zero(t, late.Load(), "a closed runner runs nothing")
 
 		runner.Close() // twice is fine
 		runner.Open()
@@ -240,9 +204,8 @@ func TestEventRunner_CloseCancelsAndWaits(t *testing.T) {
 		}
 
 		runner.OnComplete(counts, argsFn, got.add)
-		runner.Wait()
 
-		require.Equal(t, int32(1), late.Load(), "an open runner starts events again")
+		require.Equal(t, int32(1), late.Load(), "an open runner runs events again")
 		require.Empty(t, got.all(), "with a live context")
 		require.Same(t, argsCtx, listenerCtx, "argsFn gets the context the listener gets")
 	})

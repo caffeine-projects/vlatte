@@ -154,10 +154,6 @@ func TestWebHook_Run(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
 			require.Equal(t, http.StatusNoContent, res.StatusCode)
-
-			// The webhook is sent after the response. Before the target is checked, and cleaned for the next case, it
-			// has been sent, or not.
-			m.WaitEvents()
 			require.True(t, target.AssertNumberOfCalls(t, tc.expectedCalls))
 			require.True(t, m.AssertNumberOfCalls(t, 1))
 		})
@@ -227,27 +223,18 @@ func TestWebHook_TLS(t *testing.T) {
 
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusNoContent, res.StatusCode)
-
-	m.WaitEvents()
 	require.True(t, whSrv.AssertNumberOfCalls(t, 1))
 	require.True(t, m.AssertNumberOfCalls(t, 1))
 }
 
-func TestWebHook_DoesNotDelayTheResponse(t *testing.T) {
-	// #15: the webhook was sent inside the handler, so the client waited for the target, up to the webhook timeout. The
-	// response comes first now, and the webhook after it.
-	unblock := make(chan struct{})
-	got := make(chan string, 1)
-	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		select {
-		case <-unblock:
-		case <-r.Context().Done(): // the webhook canceled, when the test fails first
-			return
-		}
-
-		got <- r.Method + " " + r.URL.Path
-	}))
+func TestWebHook_TheTargetHasTheWebhookWhenTheResponseComes(t *testing.T) {
+	// A test checks a webhook's target right after the response, with no wait of its own: the response waits for its
+	// webhooks, even to a slow target.
+	target := mockhttp.MustNew(mockhttp.Setup().Silent())
+	target.MustStart()
 	t.Cleanup(target.Close)
+
+	target.MustMock(mockhttp.Postf("/hook").Delay(100 * time.Millisecond).Reply(mockhttp.NoContent()))
 
 	wh, err := webhook.New()
 	require.NoError(t, err)
@@ -257,18 +244,15 @@ func TestWebHook_DoesNotDelayTheResponse(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	m.MustMock(mockhttp.Getf("/test").
-		OnCompleteEvent(webhook.Options().URL(target.URL + "/hook").Method(http.MethodPost).Build("webhook")).
-		Reply(mockhttp.NoContent()))
+		OnCompleteEvent(webhook.Options().URL(target.URL("/hook")).Method(http.MethodPost).Build("webhook")).
+		Reply(mockhttp.Accepted()))
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	res, err := client.Get(m.URL("/test"))
-	require.NoError(t, err, "the response doesn't wait for the target, which never answers until the end")
+	res, err := http.Get(m.URL("/test"))
+	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-	require.Equal(t, http.StatusNoContent, res.StatusCode)
+	require.Equal(t, http.StatusAccepted, res.StatusCode)
 
-	close(unblock)
-	m.WaitEvents()
-	require.Equal(t, "POST /hook", <-got)
+	require.True(t, target.AssertNumberOfCalls(t, 1))
 }
 
 func TestWebHook_InvalidArgs(t *testing.T) {
@@ -332,8 +316,6 @@ func TestWebHook_FileSetup(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusAccepted, res.StatusCode)
-
-	m.WaitEvents()
 	require.True(t, target.AssertNumberOfCalls(t, 1))
 	require.True(t, m.AssertNumberOfCalls(t, 1))
 }
@@ -452,8 +434,6 @@ func TestWebHook_Templates(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
 			require.Equal(t, http.StatusNoContent, res.StatusCode)
-
-			m.WaitEvents()
 			require.True(t, target.AssertNumberOfCalls(t, 1))
 		})
 	}
@@ -685,8 +665,6 @@ func TestWebHook_LogsWithTheServerLogger(t *testing.T) {
 	res, err := http.Get(m.URL("/x"))
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-
-	m.WaitEvents()
 	require.Contains(t, out.String(), "<--- WEBHOOK GET /server")
 }
 
@@ -720,8 +698,8 @@ func (c *clocked) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func TestWebHook_Delay(t *testing.T) {
-	// A delay holds the send, as real webhooks often come some time after the response: it counts from the start of
-	// the send, and the timeout from the request, after it. A context that ends during the delay sends nothing.
+	// A delay holds the send, as real webhooks often come some time after what triggers them: it counts from the start
+	// of the send, and the timeout from the request, after it. A context that ends during the delay sends nothing.
 	t.Run("sent after the delay", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			rt := &clocked{}
@@ -768,7 +746,8 @@ func TestWebHook_Delay(t *testing.T) {
 }
 
 func TestWebHook_DelayFromAMock(t *testing.T) {
-	// The delay of a mock's webhook holds the webhook, not the response.
+	// The delay of a mock's webhook holds the webhook, and so the response, which waits for its webhooks: the target
+	// has the webhook when the response comes, the delay after the request.
 	got := make(chan time.Time, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { got <- time.Now() }))
 	t.Cleanup(target.Close)
@@ -784,14 +763,18 @@ func TestWebHook_DelayFromAMock(t *testing.T) {
 		OnCompleteEvent(webhook.Options().URL(target.URL).Delay(200 * time.Millisecond).Build("webhook")).
 		Reply(mockhttp.NoContent()))
 
+	start := time.Now()
+
 	res, err := http.Get(m.URL("/x"))
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 
-	answered := time.Now()
-
-	m.WaitEvents()
-	require.GreaterOrEqual(t, (<-got).Sub(answered), 150*time.Millisecond, "the webhook came after its delay")
+	select {
+	case sent := <-got:
+		require.GreaterOrEqual(t, sent.Sub(start), 200*time.Millisecond, "the webhook came after its delay")
+	default:
+		t.Fatal("the response came before the webhook")
+	}
 }
 
 func TestArgs_ADescriptionDecodesBack(t *testing.T) {
@@ -895,8 +878,6 @@ func TestWebHook_ADescribedMockSendsTheSameWebhook(t *testing.T) {
 				require.NoError(t, err)
 				require.NoError(t, res.Body.Close())
 				require.Equal(t, http.StatusNoContent, res.StatusCode)
-
-				m.WaitEvents()
 
 				desc, ok := scope.Mock("orders").Describe().Props.(map[string]any)
 				require.True(t, ok)
