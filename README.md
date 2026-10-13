@@ -99,7 +99,7 @@ response:
 
 **Types.** Each key takes one type, as the schema says. Write text in quotes where a string goes, as in `name: "123"`, and numbers bare, as in `priority: 10`. Bools read the way Go's `strconv.ParseBool` reads them, so `true`, `"true"`, `t` and `1` are all true. A value of the wrong type is an error that says how to write it.
 
-**Durations.** `delay` and `proxy.timeout` take whole milliseconds (`1500`) or a Go duration (`1.5s`). `"1500"` in quotes is neither.
+**Durations.** `delay`, `proxy.timeout` and the `delay` of a [webhook](#webhooks) take whole milliseconds (`1500`) or a Go duration (`1.5s`). `"1500"` in quotes is neither.
 
 **Matching.** Most of a request is text: its path, query, headers and form values. A matcher reads that text as the type it compares with:
 - `[equal, 10]` and `[isIn, [10, 20]]` match `?page=10`;
@@ -285,6 +285,80 @@ response:
 
 **Recording** writes a recorded upload as `form` and `form_file` patterns, so it replays whatever boundary the next client picks. Files that aren't UTF-8 text go to files next to the recording. A replay matches the recorded fields and files, as `FormField` and `FormFile` do: more fields or files still match.
 
+## Webhooks
+
+A webhook is a request a mock sends after it replies, as a payment API calls back to say an order was paid. The `webhook` package sends them, as an `on_complete` listener of the server.
+
+**Registering.** A mock names its listener, so the server registers one under that name first. The `vlatte` command registers a webhook as `webhook`. In Go:
+
+```go
+wh, err := webhook.New()
+m := mockhttp.MustNew(mockhttp.Setup().OnCompleteListener("webhook", wh))
+```
+
+A mock that names a listener the server doesn't have fails to build, and so does a server given two listeners of one name.
+
+```yaml
+request:
+  method: POST
+  path: /orders
+
+response:
+  status: 202
+
+on_complete:
+  - name: webhook
+    parameters:
+      method: POST
+      url_template: '{{ .Data.callback }}/orders/{{ (fromJson .Request.Body.String).id }}'
+      header:
+        content-type: application/json
+      body: '{"status": "paid"}'
+      delay: 500ms
+```
+
+In Go:
+
+```go
+m.MustMock(mockhttp.Postf("/orders").
+	OnCompleteEvent(webhook.Options().
+		URL(callback).
+		Method(http.MethodPost).
+		Header("Content-Type", "application/json").
+		Body(`{"status": "paid"}`).
+		Delay(500 * time.Millisecond).
+		Build("webhook")).
+	Reply(mockhttp.Accepted()))
+```
+
+**Parameters.**
+
+| Parameter | What it sets |
+|---|---|
+| `url` or `url_template` | Where the request goes: an absolute `http` or `https` URL. One of them is required. |
+| `method` | The method, in any case. Empty means `GET`. |
+| `header`, `header_template` | Headers by name, each a string. Names ignore case, so a name is set once. |
+| `body`, `body_template`, `body_file`, `multipart`, `multipart_template` | The body, one of them at most. Multipart bodies are as in [replies](#forms-and-multipart). |
+| `delay` | How long to wait after the response before sending. |
+
+Templates render with the data of the request that completed the mock: see [Templates](#templates). A mistake, such as a missing URL, two bodies or a template that doesn't compile, fails the mock when it is built.
+
+**When they run.** Webhooks are sent after the response, in the background, each on its own: the client doesn't wait for them, and a slow or failing webhook holds up no other. A webhook's `delay` counts from the response. A test waits for them before it checks what they sent:
+
+```go
+// callbacks is a mock server standing for the client the webhook calls back.
+res, err := http.Post(m.URL("/orders"), "application/json", strings.NewReader(`{"id": 42}`))
+// ...
+m.WaitEvents()
+callbacks.AssertCalled(t)
+```
+
+`m.Close()` cancels the webhooks still waiting, for their delay or for their target. `WaitEvents` first lets them finish.
+
+**Failures.** A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning. The timeout is 10 seconds: `webhook.WithTimeout` changes it in Go, and the `webhook.timeout` setting for the `vlatte` command, where 0 means 10 seconds, unlike `proxy.timeout`.
+
+**Logs.** Webhooks log each request and its answer with the server's logger, so `Setup().Silent()` silences them too. `webhook.WithLogger` gives them a logger of their own.
+
 ## Failures
 
 When no mock matches, or serving a request fails, the server answers itself. It sends `418 I'm a teapot`, a status a real server rarely sends, so the answer never looks like a mock's, and the `X-Vlatte-Error` header says why:
@@ -363,6 +437,8 @@ curl http://127.0.0.1:8080/hello
 ```
 
 Without `--addr`, it listens on a random port and prints the URL. Settings can also come from a `.vlatterc` file or `VLATTE_*` environment variables; see [Configuration](#configuration). Run `vlatte --help` to list them, and `vlatte completion --help` to set up shell completion.
+
+Mock files can send [webhooks](#webhooks): the CLI registers the `webhook` listener, and `--webhook-timeout` bounds each request.
 
 While it runs, `POST /__admin/mocks` adds a mock sent in the request body, for example as JSON:
 

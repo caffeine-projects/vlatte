@@ -1,4 +1,6 @@
-// Package webhook provides functionality for configuring and working with webhooks.
+// Package webhook sends webhooks: HTTP requests a mock makes after it replies. A WebHook is an on_complete listener:
+// register it under the name mocks give, as with mockhttp.Setup().OnCompleteListener("webhook", wh). The vlatte
+// command registers one as webhook. Its parameters are Args, or a map as mock files write them: see ArgsFromMap.
 package webhook
 
 import (
