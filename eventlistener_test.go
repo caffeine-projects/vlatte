@@ -109,7 +109,7 @@ func TestEventRunner_RunsEachEventOnItsOwnAndWaitsForAll(t *testing.T) {
 
 		var got reported
 		start := time.Now()
-		runner.OnComplete(mock, argsOf(mock), got.add)
+		runner.OnComplete(t.Context(), mock, argsOf(mock), got.add)
 
 		require.Equal(t, time.Second, time.Since(start), "OnComplete returned with the slowest event")
 		for _, name := range []string{"ping", "pong", "failing", "slow"} {
@@ -139,7 +139,7 @@ func TestEventRunner_ReportsUnregisteredNamesAndPanics(t *testing.T) {
 		mock := mockWith("panics", "nobody", "runs")
 
 		var got reported
-		runner.OnComplete(mock, argsOf(mock), got.add)
+		runner.OnComplete(t.Context(), mock, argsOf(mock), got.add)
 
 		errs := got.all()
 		require.Len(t, errs, 2)
@@ -175,7 +175,7 @@ func TestEventRunner_CloseCancelsTheEventsRunning(t *testing.T) {
 		var got reported
 		done := make(chan struct{})
 		go func() {
-			runner.OnComplete(waits, argsOf(waits), got.add)
+			runner.OnComplete(t.Context(), waits, argsOf(waits), got.add)
 			close(done)
 		}()
 
@@ -191,7 +191,7 @@ func TestEventRunner_CloseCancelsTheEventsRunning(t *testing.T) {
 		require.Empty(t, got.all(), "an event Close canceled isn't a failure")
 
 		counts := mockWith("counts")
-		runner.OnComplete(counts, argsOf(counts), got.add)
+		runner.OnComplete(t.Context(), counts, argsOf(counts), got.add)
 		require.Zero(t, late.Load(), "a closed runner runs nothing")
 
 		runner.Close() // twice is fine
@@ -203,10 +203,38 @@ func TestEventRunner_CloseCancelsTheEventsRunning(t *testing.T) {
 			return completed{mock: counts, params: cfg.Parameters}
 		}
 
-		runner.OnComplete(counts, argsFn, got.add)
+		runner.OnComplete(t.Context(), counts, argsFn, got.add)
 
 		require.Equal(t, int32(1), late.Load(), "an open runner runs events again")
 		require.Empty(t, got.all(), "with a live context")
 		require.Same(t, argsCtx, listenerCtx, "argsFn gets the context the listener gets")
+	})
+}
+
+func TestEventRunner_EventsKeepTheValuesOfTheRequestContext(t *testing.T) {
+	// Events ran with a context of their own, without the values of the request's, such as a trace a middleware put
+	// there. They get its values now, but not its end: a client that leaves cancels none of them.
+	synctest.Test(t, func(t *testing.T) {
+		type traceKey struct{}
+
+		var trace any
+		var ctxErr error
+
+		listeners := vlatte.NewListener()
+		register(t, listeners, "reads", func(ctx context.Context, _ vlatte.OnComplete) error {
+			trace, ctxErr = ctx.Value(traceKey{}), ctx.Err()
+			return nil
+		})
+
+		runner := vlatte.NewEventRunner(listeners, nil)
+		mock := mockWith("reads")
+
+		ctx, leave := context.WithCancel(context.WithValue(t.Context(), traceKey{}, "trace-1"))
+		leave() // the client left before the events ran
+
+		runner.OnComplete(ctx, mock, argsOf(mock), func(err error) { t.Error(err) })
+
+		require.Equal(t, "trace-1", trace)
+		require.NoError(t, ctxErr, "the client leaving cancels no event")
 	})
 }

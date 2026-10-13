@@ -146,7 +146,7 @@ type EventRunner struct {
 	Global    *Events
 
 	mu     sync.Mutex
-	ctx    context.Context    // the context of the events, made by the first one, canceled by Close
+	ctx    context.Context    // made by the first request; Close cancels it, and so the events
 	cancel context.CancelFunc // cancels ctx
 	closed bool               // set by Close, cleared by Open: a closed runner runs nothing
 }
@@ -164,14 +164,21 @@ func NewEventRunner(listeners *Listener, global *Events) *EventRunner {
 
 // OnComplete runs the on_complete events of mock, global events first, each in a goroutine of its own, and returns
 // once they all have: an event neither waits for nor stops another, and the request waits for them all, so a test
-// checks what they did right after the response. Each listener runs with what argsFn returns and a context that Close
-// cancels, which argsFn gets too. onErr gets the error, or the panic, of each event that fails, unless Close canceled
-// it, worded like the errors of mocks that name a listener that isn't registered. A closed runner runs nothing.
-func (r *EventRunner) OnComplete(mock Mock, argsFn func(ctx context.Context, cfg EventConfig) OnComplete, onErr func(err error)) {
-	ctx, ok := r.context()
+// checks what they did right after the response. Each listener runs with what argsFn returns and a context with the
+// values of ctx, the request's, such as a trace: the client leaving doesn't end it, and Close does. argsFn gets it
+// too. onErr gets the error, or the panic, of each event that fails, unless Close canceled it, worded like the errors
+// of mocks that name a listener that isn't registered. A closed runner runs nothing.
+func (r *EventRunner) OnComplete(ctx context.Context, mock Mock, argsFn func(ctx context.Context, cfg EventConfig) OnComplete, onErr func(err error)) {
+	closing, ok := r.context()
 	if !ok {
 		return
 	}
+
+	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancel()
+
+	stop := context.AfterFunc(closing, cancel)
+	defer stop()
 
 	var wg sync.WaitGroup
 
@@ -207,7 +214,7 @@ func (r *EventRunner) Open() {
 	r.mu.Unlock()
 }
 
-// context returns the context of the events. A closed runner has none.
+// context returns the context Close cancels. A closed runner has none.
 func (r *EventRunner) context() (context.Context, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -604,3 +604,66 @@ func TestHandler_EventsOutliveTheClient(t *testing.T) {
 		t.Fatal("the event never saw the client leave")
 	}
 }
+
+type tenantKey struct{}
+
+// tenantKV is a parameter store scoped to the tenant of each request: a read without one fails.
+type tenantKV struct {
+	vlatte.KV
+}
+
+func (kv tenantKV) Get(ctx context.Context, k string) ([]byte, error) {
+	if ctx.Value(tenantKey{}) == nil {
+		return nil, errors.New("no tenant")
+	}
+
+	return kv.KV.Get(ctx, k)
+}
+
+func TestHandler_EventsSeeTheValuesOfTheRequestContext(t *testing.T) {
+	// Middlewares put request-scoped values in the request's context, such as a trace or a tenant, which listeners and
+	// parameter stores read: the events of the request see them.
+	kv := tenantKV{vlatte.NewMemoryKV()}
+	require.NoError(t, kv.Set(t.Context(), "target", []byte("api")))
+
+	type seen struct {
+		tenant   any
+		rendered string
+	}
+
+	got := make(chan seen, 1)
+
+	m := MustNew(Setup().Silent().Parameters(kv).
+		Middlewares(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), tenantKey{}, "acme")))
+			})
+		}).
+		OnCompleteListener("reads", vlatte.EventFunc[vlatte.OnComplete](func(ctx context.Context, e vlatte.OnComplete) error {
+			var b strings.Builder
+
+			tmpl, err := e.Kit().TemplateEngine().Compile("target", `{{ .Parameters.Get "target" }}`)
+			if err == nil {
+				err = tmpl.Execute(&b, e.Kit().Data())
+			}
+
+			if err != nil {
+				b.WriteString(err.Error())
+			}
+
+			got <- seen{tenant: ctx.Value(tenantKey{}), rendered: b.String()}
+
+			return nil
+		})))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "reads"}).Reply(NoContent()))
+
+	status, _ := get(t, m, "/x")
+	require.Equal(t, http.StatusNoContent, status)
+
+	s := <-got
+	require.Equal(t, "acme", s.tenant)
+	require.Equal(t, "api", s.rendered)
+}
