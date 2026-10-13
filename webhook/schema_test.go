@@ -50,15 +50,17 @@ func TestJSONSchema_WebhookParametersAreTheDecodersKeys(t *testing.T) {
 }
 
 func TestJSONSchema_AcceptsWhatPrepareAccepts(t *testing.T) {
-	// An editor marks a webhook's parameters as wrong exactly when building its mock fails. Header names equal but for
-	// case are the decoder's alone: JSON Schema can't compare property names that way.
+	// An editor marks a webhook's parameters as wrong when building its mock fails, but for what only building the mock
+	// finds: header names equal but for case, as JSON Schema can't compare property names that way, and the syntax of a
+	// url past its scheme and host, which a pattern can't check as url.Parse does.
 	schema, _ := loadSchema(t)
 	engine := vlatte.MustNewGoTemplateEngine()
 	multipart := map[string]any{"type": "mixed", "parts": []any{map[string]any{"body": "a"}}}
 
 	tests := []struct {
-		name   string
-		params map[string]any
+		name        string
+		params      map[string]any
+		prepareOnly bool // building the mock rejects it, and JSON Schema can't tell
 	}{
 		{name: "a url", params: map[string]any{"url": "http://hooks.test/x"}},
 		{name: "every kind of key", params: map[string]any{
@@ -80,6 +82,13 @@ func TestJSONSchema_AcceptsWhatPrepareAccepts(t *testing.T) {
 		{name: "a list as a header value", params: map[string]any{"url": "http://hooks.test", "header": map[string]any{"X-A": []any{"1"}}}},
 		{name: "a negative delay", params: map[string]any{"url": "http://hooks.test", "delay": -1}},
 		{name: "a key that doesn't exist", params: map[string]any{"url": "http://hooks.test", "urll": "x"}},
+		{name: "an uppercase scheme", params: map[string]any{"url": "HTTP://hooks.test"}},
+		{name: "a mixed-case scheme", params: map[string]any{"url": "Https://hooks.test/x"}},
+		{name: "a host with an unclosed bracket", params: map[string]any{"url": "http://[::1"}, prepareOnly: true},
+		{name: "a port that isn't a number", params: map[string]any{"url": "http://hooks.test:port"}, prepareOnly: true},
+		{name: "header names equal but for case", params: map[string]any{
+			"url": "http://hooks.test", "header": map[string]any{"X-A": "1", "x-a": "2"},
+		}, prepareOnly: true},
 	}
 
 	for _, tc := range tests {
@@ -97,6 +106,13 @@ func TestJSONSchema_AcceptsWhatPrepareAccepts(t *testing.T) {
 			require.NoError(t, err)
 
 			schemaErr := schema.Validate(instance)
+			if tc.prepareOnly {
+				require.Error(t, prepareErr)
+				require.NoError(t, schemaErr)
+
+				return
+			}
+
 			require.Equal(t, prepareErr == nil, schemaErr == nil, "Prepare: %v\nschema: %v", prepareErr, schemaErr)
 		})
 	}

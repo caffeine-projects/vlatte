@@ -225,7 +225,7 @@
       "description": "The request a webhook sends after the mock replies: one of url and url_template, and one body at most.",
       "type": "object",
       "properties": {
-        "url": { "description": "An absolute http or https URL.", "type": "string", "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^/?#]" },
+        "url": { "description": "An absolute http or https URL. Editors check its scheme and that a host follows; building the mock checks the rest.", "type": "string", "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^/?#]" },
         "url_template": { "description": "The URL, as a template.", "type": "string", "minLength": 1 },
         "method": { "description": "The method, in any case. Empty means GET.", "type": "string", "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]*$" },
         "header": { "$ref": "#/$defs/webhook_header" },
