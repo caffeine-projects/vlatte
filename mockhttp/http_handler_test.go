@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"bytes"
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"io"
 	"iter"
@@ -348,6 +349,42 @@ func TestLifecycle_ErrorLogsNameTheMock(t *testing.T) {
 	})
 }
 
+func TestLifecycle_TheRequestLogTimesTheEvents(t *testing.T) {
+	// The request log was written before the events ran, so its elapsed time left them out, though the response waits
+	// for them: a webhook that took a second logged a request of a millisecond.
+	logs := &logBuffer{}
+	logger := zerolog.New(logs)
+
+	m := MustNew(Setup().Logger(&logger).OnCompleteListener("slow", vlatte.EventFunc[vlatte.OnComplete](
+		func(context.Context, vlatte.OnComplete) error {
+			time.Sleep(100 * time.Millisecond)
+			return nil
+		})))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "slow"}).Reply(NoContent()))
+
+	status, _ := get(t, m, "/x")
+	require.Equal(t, http.StatusNoContent, status)
+
+	var matched []float64
+	for line := range strings.Lines(logs.String()) {
+		var entry struct {
+			Message string  `json:"message"`
+			Elapsed float64 `json:"elapsed"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(line), &entry), line)
+
+		if strings.HasPrefix(entry.Message, "<--- REQUEST MATCHED") {
+			matched = append(matched, entry.Elapsed)
+		}
+	}
+
+	require.Len(t, matched, 1)
+	require.GreaterOrEqual(t, matched[0], 100.0, "the elapsed time, in milliseconds, counts the events")
+}
+
 func TestHandler_TheResponseWaitsForTheEvents(t *testing.T) {
 	// A test checks what the events of a mock did, such as a webhook's call, right after the response, with no wait of
 	// its own: the response waits for them, global ones too.
@@ -458,7 +495,7 @@ func TestHandler_CloseCancelsTheEventsRunning(t *testing.T) {
 
 func TestHandler_EventsRunWhenTheRequestLogPanics(t *testing.T) {
 	// Handler replies return no response, and the request log reads it (#24): it panics, after the reply. The events
-	// run anyway, before the response ends. Silent() would skip the request log.
+	// run before the request log, so they run anyway. Silent() would skip the request log.
 	var ran atomic.Bool
 	logger := zerolog.New(io.Discard)
 

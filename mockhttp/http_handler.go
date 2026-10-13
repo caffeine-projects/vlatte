@@ -206,9 +206,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The handler waits for the events, so the response ends after them: a test checks what they did right after it.
-	// Deferred, they run after the request log and the recording read res, which a listener could change, even when one
-	// of them panics.
-	defer h.runner.OnComplete(
+	// They run before the request log, so its elapsed time counts them, and they run even when it panics.
+	h.runner.OnComplete(
 		mock,
 		func(ctx context.Context, cfg vlatte.EventConfig) vlatte.OnComplete {
 			// The request's context ends when the client leaves: templates read the parameters with the event's.
