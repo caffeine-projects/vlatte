@@ -45,11 +45,14 @@ type Transform func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Ar
 
 // WebHook is an automated HTTP request sent when an on-complete event is fired.
 // Register it with [vlatte.Listener.OnComplete] (e.g. via mockhttp.Setup().OnCompleteListener(name, wh)).
+//
+// It logs each send and its answer at info level, with Logger, or else with the logger of the event: mockhttp gives
+// the server's. A send fails when the target can't be reached in Timeout, or answers with a status outside 2xx; a
+// redirect isn't followed. A zero WebHook sends with http.DefaultTransport and a 10s timeout.
 type WebHook struct {
 	RoundTripper http.RoundTripper
 	Transform    Transform
 	Logger       *zerolog.Logger
-	LogLevel     zerolog.Level
 	Timeout      time.Duration
 }
 
@@ -57,7 +60,7 @@ const _defaultTimeout = 10 * time.Second
 
 // New creates a new WebHook instance.
 func New(options ...Option) (*WebHook, error) {
-	w := &WebHook{LogLevel: zerolog.Disabled}
+	w := &WebHook{}
 
 	for i, opt := range options {
 		if err := opt(w); err != nil {
@@ -72,26 +75,6 @@ func New(options ...Option) (*WebHook, error) {
 		if t, ok := http.DefaultTransport.(*http.Transport); ok {
 			w.RoundTripper = t.Clone()
 		}
-	}
-
-	if w.Timeout == 0 {
-		w.Timeout = _defaultTimeout
-	}
-
-	if w.Transform == nil {
-		w.Transform = func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Args) error { return nil }
-	}
-
-	if w.Logger == nil {
-		var wio io.Writer
-		if w.LogLevel == zerolog.Disabled {
-			wio = io.Discard
-		} else {
-			wio = os.Stdout
-		}
-
-		l := zerolog.New(wio).Level(w.LogLevel)
-		w.Logger = &l
 	}
 
 	return w, nil
@@ -134,8 +117,10 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		webhookArgs.HeaderTemplate = make(map[string]string)
 	}
 
-	if err := w.Transform(ctx, args, webhookArgs); err != nil {
-		return fmt.Errorf("webhook: failed to Transform args: %w", err)
+	if w.Transform != nil {
+		if err := w.Transform(ctx, args, webhookArgs); err != nil {
+			return fmt.Errorf("webhook: failed to Transform args: %w", err)
+		}
 	}
 
 	// The parameters were checked when the mock was built; a Transform may have changed them since.
@@ -143,7 +128,8 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		return err
 	}
 
-	method := webhookArgs.Method
+	// Request methods match in any case, as in mock files: method: post sends POST.
+	method := strings.ToUpper(webhookArgs.Method)
 	if len(method) == 0 {
 		method = http.MethodGet
 	}
@@ -200,18 +186,29 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		body = strings.NewReader(webhookArgs.Body)
 	}
 
-	txtURL := u.String()
-	w.Logger.Info().
-		Str("url", txtURL).
-		Str("kind", args.Kind().String()).
-		Msg(fmt.Sprintf("---> WEBHOOK REQUEST RECEIVED %s %s", method, u.Path))
+	logger := w.Logger
+	if logger == nil {
+		logger = loggerOf(args)
+	}
 
-	ctx, cancel := context.WithTimeout(ctx, w.Timeout)
+	// The URL may hold a password: logs and errors show it redacted.
+	redacted := u.Redacted()
+	logger.Info().
+		Str("url", redacted).
+		Str("kind", args.Kind().String()).
+		Msgf("---> WEBHOOK REQUEST %s %s", method, u.Path)
+
+	timeout := w.Timeout
+	if timeout <= 0 {
+		timeout = _defaultTimeout
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, method, txtURL, body)
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
-		return err
+		return fmt.Errorf("webhook: %w", err)
 	}
 
 	for k, v := range webhookArgs.Header {
@@ -239,31 +236,35 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		req.Header.Set("Content-Type", contentType)
 	}
 
-	res, err := w.RoundTripper.RoundTrip(req)
-	if err != nil {
-		w.Logger.Err(err).
-			Str("url", txtURL).
-			Str("kind", args.Kind().String()).
-			Msg(fmt.Sprintf("<--- WEBHOOK: %s %s", method, u.Path))
+	// As http.Client does: the user and password of the URL go as Basic auth, unless a header sets Authorization.
+	if u.User != nil && req.Header.Get("Authorization") == "" {
+		password, _ := u.User.Password()
+		req.SetBasicAuth(u.User.Username(), password)
+	}
 
-		return fmt.Errorf("webhook: request failed: %w", err)
+	roundTripper := w.RoundTripper
+	if roundTripper == nil {
+		roundTripper = http.DefaultTransport
+	}
+
+	// The caller logs the errors: logging them here too would log each twice.
+	res, err := roundTripper.RoundTrip(req)
+	if err != nil {
+		return fmt.Errorf("webhook: %s %s: request failed: %w", method, redacted, err)
 	}
 
 	defer res.Body.Close()
 
-	msg := fmt.Sprintf("<--- WEBHOOK %s %s", method, u.Path)
-	child := w.Logger.With().
-		Str("url", txtURL).
-		Str("kind", args.Kind().String()).
-		Int("status", res.StatusCode).
-		Logger()
-
-	if res.StatusCode >= http.StatusBadRequest {
-		child.Warn().Msg(msg)
-		return nil
+	// A redirect isn't followed, as a POST would turn into a GET: like an error, it's an answer the target must fix.
+	if res.StatusCode < 200 || res.StatusCode > 299 {
+		return fmt.Errorf("webhook: %s %s: the target answered %s", method, redacted, res.Status)
 	}
 
-	child.Info().Msg(msg)
+	logger.Info().
+		Str("url", redacted).
+		Str("kind", args.Kind().String()).
+		Int("status", res.StatusCode).
+		Msgf("<--- WEBHOOK %s %s", method, u.Path)
 
 	return nil
 }
@@ -656,6 +657,19 @@ func dirOf(args vlatte.OnComplete) string {
 	}
 
 	return ""
+}
+
+// loggerOf returns the logger the event gives, as mockhttp's OnComplete gives the server's, or one that logs nothing.
+func loggerOf(args vlatte.OnComplete) *zerolog.Logger {
+	if l, ok := args.(interface{ Logger() *zerolog.Logger }); ok {
+		if logger := l.Logger(); logger != nil {
+			return logger
+		}
+	}
+
+	nop := zerolog.Nop()
+
+	return &nop
 }
 
 // originOf names where the parameters of an event come from, for problems: the mock that completed.

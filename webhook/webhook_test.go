@@ -1,16 +1,23 @@
 package webhook_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
@@ -464,12 +471,52 @@ type onComplete struct {
 	params vlatte.Parameters
 	mock   vlatte.Mock
 	kit    vlatte.Kit
+	logger *zerolog.Logger
 }
 
 func (e onComplete) Kind() vlatte.Kind             { return mockhttp.Kind }
 func (e onComplete) Kit() vlatte.Kit               { return e.kit }
 func (e onComplete) Parameters() vlatte.Parameters { return e.params }
 func (e onComplete) Mock() vlatte.Mock             { return e.mock }
+func (e onComplete) Logger() *zerolog.Logger       { return e.logger }
+
+// answer is a RoundTripper that keeps the requests it is given and answers each with status and a body.
+type answer struct {
+	status int
+	reqs   []*http.Request
+}
+
+func (a *answer) RoundTrip(req *http.Request) (*http.Response, error) {
+	a.reqs = append(a.reqs, req)
+
+	return &http.Response{
+		StatusCode: a.status,
+		Status:     strconv.Itoa(a.status) + " " + http.StatusText(a.status),
+		Header:     http.Header{"Location": {"/elsewhere"}},
+		Body:       io.NopCloser(strings.NewReader("answer")),
+		Request:    req,
+	}, nil
+}
+
+// logs collects log lines, safe for the goroutines of a server.
+type logs struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *logs) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.buf.Write(p)
+}
+
+func (l *logs) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.buf.String()
+}
 
 // kit is the Kit of a server without a template engine: templates render with data.
 type kit struct {
@@ -529,4 +576,141 @@ func TestWebHook_HeaderTemplateValues(t *testing.T) {
 	rt.req = nil
 	require.EqualError(t, send("a\nX-B: b"), "webhook: header_template X-A holds a line break")
 	require.Nil(t, rt.req)
+}
+
+func TestWebHook_AnAnswerOutside2xxFailsTheSend(t *testing.T) {
+	// A target's 4xx or 5xx was only a warning of the webhook's own logger, which discarded it by default, and a
+	// redirect counted as a success. Each fails the send now, and the server logs it; a redirect isn't followed, since a
+	// POST would turn into a GET.
+	tests := []struct {
+		status int
+		want   string
+	}{
+		{status: http.StatusOK},
+		{status: http.StatusNoContent},
+		{status: http.StatusFound, want: "webhook: POST http://hooks.test/x: the target answered 302 Found"},
+		{status: http.StatusBadRequest, want: "webhook: POST http://hooks.test/x: the target answered 400 Bad Request"},
+		{status: http.StatusInternalServerError, want: "webhook: POST http://hooks.test/x: the target answered 500 Internal Server Error"},
+	}
+
+	for _, tc := range tests {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			rt := &answer{status: tc.status}
+			wh, err := webhook.New(webhook.WithRoundTripper(rt))
+			require.NoError(t, err)
+
+			err = wh.Run(t.Context(), onComplete{params: map[string]any{"method": "POST", "url": "http://hooks.test/x"}})
+			if tc.want == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tc.want)
+			}
+
+			require.Len(t, rt.reqs, 1, "one request, a redirect included")
+		})
+	}
+}
+
+func TestWebHook_SendsWhatTheURLAndMethodSay(t *testing.T) {
+	// method: post went out as "post", though request methods match in any case, and the user and password of a URL
+	// were never sent: RoundTrip, unlike http.Client, doesn't send them as Basic auth.
+	rt := &sent{}
+	wh, err := webhook.New(webhook.WithRoundTripper(rt))
+	require.NoError(t, err)
+
+	require.NoError(t, wh.Run(t.Context(), onComplete{params: map[string]any{"method": "post", "url": "http://user:pa%20ss@hooks.test/x"}}))
+	require.Equal(t, http.MethodPost, rt.req.Method)
+
+	user, password, ok := rt.req.BasicAuth()
+	require.True(t, ok)
+	require.Equal(t, "user", user)
+	require.Equal(t, "pa ss", password)
+
+	// As with http.Client, an Authorization header wins.
+	params := map[string]any{"url": "http://user:pass@hooks.test/x", "header": map[string]any{"Authorization": "Bearer t"}}
+	require.NoError(t, wh.Run(t.Context(), onComplete{params: params}))
+	require.Equal(t, "Bearer t", rt.req.Header.Get("Authorization"))
+}
+
+func TestWebHook_LogsEachSendOnce(t *testing.T) {
+	// A failed send was logged by the webhook, then returned to the server, which logged it again. The webhook logs
+	// the send and its answer at info level now, and returns failures for the server to log. Logs keep a URL's
+	// password out.
+	tests := []struct {
+		status int
+		want   []string
+	}{
+		{status: http.StatusOK, want: []string{"---> WEBHOOK REQUEST GET /x", "<--- WEBHOOK GET /x"}},
+		{status: http.StatusInternalServerError, want: []string{"---> WEBHOOK REQUEST GET /x"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			out := &logs{}
+			logger := zerolog.New(out)
+
+			wh, err := webhook.New(webhook.WithRoundTripper(&answer{status: tc.status}), webhook.WithLogger(&logger))
+			require.NoError(t, err)
+
+			_ = wh.Run(t.Context(), onComplete{params: map[string]any{"url": "http://user:secret@hooks.test/x"}})
+
+			lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+			require.Len(t, lines, len(tc.want), out.String())
+
+			for i, want := range tc.want {
+				require.Contains(t, lines[i], `"level":"info"`)
+				require.Contains(t, lines[i], want)
+				require.Contains(t, lines[i], `"url":"http://user:xxxxx@hooks.test/x"`)
+			}
+
+			require.NotContains(t, out.String(), "secret")
+		})
+	}
+}
+
+func TestWebHook_LogsWithTheServerLogger(t *testing.T) {
+	// Without WithLogger, webhooks logged nothing, or wrote to stdout with WithLogLevel, whatever the server's logger
+	// and Silent() said. They log with the logger of their event now: the server's, in mockhttp.
+	out := &logs{}
+	logger := zerolog.New(out)
+
+	rt := &sent{}
+	wh, err := webhook.New(webhook.WithRoundTripper(rt))
+	require.NoError(t, err)
+
+	require.NoError(t, wh.Run(t.Context(), onComplete{params: map[string]any{"url": "http://hooks.test/direct"}, logger: &logger}))
+	require.Contains(t, out.String(), "<--- WEBHOOK GET /direct")
+
+	m := mockhttp.MustNew(mockhttp.Setup().Logger(&logger).OnCompleteListener("webhook", wh))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.Getf("/x").
+		OnCompleteEvent(vlatte.EventConfig{Name: "webhook", Parameters: map[string]any{"url": "http://hooks.test/server"}}).
+		Reply(mockhttp.NoContent()))
+
+	res, err := http.Get(m.URL("/x"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	require.Contains(t, out.String(), "<--- WEBHOOK GET /server")
+}
+
+func TestWebHook_AZeroWebHookSends(t *testing.T) {
+	// A WebHook built without New panicked: it had no Transform, RoundTripper or Logger, and no timeout.
+	got := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got <- r.Method + " " + r.URL.Path
+	}))
+	t.Cleanup(target.Close)
+
+	var wh webhook.WebHook
+	require.NoError(t, wh.Run(t.Context(), onComplete{params: map[string]any{"method": "POST", "url": target.URL + "/x"}}))
+	require.Equal(t, "POST /x", <-got)
+}
+
+func TestWithTimeout_RejectsANegativeTimeout(t *testing.T) {
+	// A negative timeout made every send fail at once.
+	_, err := webhook.New(webhook.WithTimeout(-time.Second))
+	require.EqualError(t, err, "webhook: error applying option at index 0. reason: negative timeout -1s")
 }
