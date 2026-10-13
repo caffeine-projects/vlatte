@@ -879,23 +879,59 @@ func TestWebHook_ADescribedMockSendsTheSameWebhook(t *testing.T) {
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
+	orders := func(event vlatte.EventConfig) vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
+		return mockhttp.Getf("/orders").ID("orders").OnCompleteEvent(event).Reply(mockhttp.NoContent())
+	}
+
+	// mockFile writes a mock whose webhook has parameters to a directory of its own, with files, which relative body
+	// files open from: a description loaded back has no directory.
+	mockFile := func(parameters string, files map[string]string) vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
+		dir := t.TempDir()
+		for name, content := range files {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
+		}
+
+		doc := "id: orders\nrequest: {method: GET, path: /orders}\nresponse: {status: 204}\n" +
+			"on_complete:\n  - name: webhook\n    parameters: " + parameters + "\n"
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "orders.yaml"), []byte(doc), 0o600))
+
+		return mockhttp.FromFile(filepath.Join(dir, "orders.yaml"))
+	}
+
 	tests := []struct {
-		name  string
-		event vlatte.EventConfig
+		name string
+		mock vlatte.Builder[*mockhttp.Mock, *mockhttp.Server]
 	}{
 		{
-			name:  "built in Go",
-			event: webhook.Options().URL(target.URL+"/go").Method("post").Header("X-A", "go").Body("paid").Delay(time.Millisecond).Build("webhook"),
+			name: "built in Go",
+			mock: orders(webhook.Options().URL(target.URL+"/go").Method("post").Header("X-A", "go").Body("paid").Delay(time.Millisecond).Build("webhook")),
 		},
 		{
 			name: "from a map, with templates",
-			event: vlatte.EventConfig{Name: "webhook", Parameters: map[string]any{
+			mock: orders(vlatte.EventConfig{Name: "webhook", Parameters: map[string]any{
 				"method": "PUT", "url_template": target.URL + "/{{ .Request.Method }}",
 				"header_template": map[string]any{"X-A": "{{ index .Request.URLPathSegments 0 }}"},
 				"multipart_template": map[string]any{
 					"type": "mixed", "boundary": "b", "parts": []any{map[string]any{"body": "{{ .Request.Method }}"}},
 				},
-			}},
+			}}),
+		},
+		{
+			name: "from a mock file, with a body file",
+			mock: mockFile("{method: POST, url: "+strconv.Quote(target.URL+"/file")+", body_file: hook.txt}",
+				map[string]string{"hook.txt": "paid"}),
+		},
+		{
+			name: "from a mock file, with a part's body file",
+			mock: mockFile("{method: POST, url: "+strconv.Quote(target.URL+"/part")+
+				", multipart: {type: mixed, boundary: b, parts: [{body_file: part.txt}]}}",
+				map[string]string{"part.txt": "receipt"}),
+		},
+		{
+			name: "from a mock file, with a part's body file named by a template",
+			mock: mockFile("{method: POST, url: "+strconv.Quote(target.URL+"/template")+
+				", multipart_template: {type: mixed, boundary: b, parts: [{body_file: '{{ index .Request.URLPathSegments 0 }}.txt'}]}}",
+				map[string]string{"orders.txt": "receipt"}),
 		},
 	}
 
@@ -916,10 +952,17 @@ func TestWebHook_ADescribedMockSendsTheSameWebhook(t *testing.T) {
 				desc, ok := scope.Mock("orders").Describe().Props.(map[string]any)
 				require.True(t, ok)
 
-				return <-got, desc
+				var sent string
+				select {
+				case sent = <-got:
+				default:
+					t.Fatal("the target had no webhook when the response came")
+				}
+
+				return sent, desc
 			}
 
-			sent, desc := send(mockhttp.Getf("/orders").ID("orders").OnCompleteEvent(tc.event).Reply(mockhttp.NoContent()))
+			sent, desc := send(tc.mock)
 			require.Contains(t, desc, "on_complete")
 
 			doc, err := json.Marshal(desc)

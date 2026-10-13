@@ -175,12 +175,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 		body = strings.NewReader(b)
 	case webhookArgs.BodyFile != "":
-		name := webhookArgs.BodyFile
-		if webhookArgs.dir != "" && !filepath.IsAbs(name) {
-			name = filepath.Join(webhookArgs.dir, name)
-		}
-
-		b, err := os.ReadFile(name)
+		b, err := os.ReadFile(bodyFilePath(webhookArgs.dir, webhookArgs.BodyFile))
 		if err != nil {
 			return fmt.Errorf("webhook: error reading body_file %s: %w", webhookArgs.BodyFile, err)
 		}
@@ -307,14 +302,15 @@ type Args struct {
 }
 
 // Describe implements descriptor.SelfDescriptive: the parameters as a mock file writes them, the ones set only, so the
-// description of a mock, such as the admin API gives, loads back with the same webhook. A multipart body is described
-// when it describes itself, as mockhttp's do.
+// description of a mock, such as the admin API gives, loads back with the same webhook. A relative body file is joined
+// to the mock file's directory, which a description loaded back doesn't have. A multipart body is described when it
+// describes itself, as mockhttp's do.
 func (a *Args) Describe() descriptor.Descriptor {
 	params := make(map[string]any)
 
 	for key, value := range map[string]string{
 		"url": a.URL, "url_template": a.URLTemplate, "method": a.Method,
-		"body": a.Body, "body_template": a.BodyTemplate, "body_file": a.BodyFile,
+		"body": a.Body, "body_template": a.BodyTemplate, "body_file": bodyFilePath(a.dir, a.BodyFile),
 	} {
 		if value != "" {
 			params[key] = value
@@ -685,13 +681,22 @@ func (m *multipartParams) Encode(engine vlatte.TemplateEngine, data any) (string
 }
 
 // describeMultipart describes a multipart body as the parameters of a mock file write it: under multipart_template
-// when its text is templates, else under multipart.
+// when its text is templates, else under multipart. The relative body files of its parts are joined to its directory.
 func describeMultipart(spec *mpart.Spec) descriptor.Descriptor {
-	if spec.Templated {
-		return descriptor.New("multipart_template", spec.Doc())
+	resolved := *spec
+	resolved.Parts = make([]*mpart.PartSpec, len(spec.Parts))
+
+	for i, part := range spec.Parts {
+		p := *part
+		p.File = bodyFilePath(spec.Dir, p.File)
+		resolved.Parts[i] = &p
 	}
 
-	return descriptor.New("multipart", spec.Doc())
+	if spec.Templated {
+		return descriptor.New("multipart_template", resolved.Doc())
+	}
+
+	return descriptor.New("multipart", resolved.Doc())
 }
 
 // countSet counts the values that are set: non-empty strings and true bools.
@@ -792,6 +797,17 @@ func checkURL(raw string) error {
 	}
 
 	return nil
+}
+
+// bodyFilePath returns the body file name joined to dir, where a relative name opens from, such as the mock file's
+// directory: it opens the same file from the working directory, as a description loaded back opens it. The name stays
+// as it is, since it can be a template.
+func bodyFilePath(dir, name string) string {
+	if dir == "" || name == "" || filepath.IsAbs(name) {
+		return name
+	}
+
+	return filepath.Clean(dir) + string(filepath.Separator) + name
 }
 
 // wait waits for d, or until ctx ends, as mockhttp waits for the delay of a multipart part.
