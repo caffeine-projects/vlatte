@@ -234,16 +234,21 @@ func TestWithFragment_MovesTheFragmentOutOfThePathAndQuery(t *testing.T) {
 	}
 }
 
-func TestWithFragment_PassesARequestWithoutAFragmentOn(t *testing.T) {
-	// A request with no "#" in its target reaches the handlers as it came: the same request.
+func TestWithFragment_PassesOnRequestsItLeavesAlone(t *testing.T) {
+	// A request with no fragment to move reaches the handlers as it came: the same request.
 	connect := httptest.NewRequest(http.MethodConnect, "example.com:443", nil)
 	// A CONNECT target is a host, so a "#" in it starts no fragment. HTTP/2 doesn't check the authority it comes in.
 	connect.RequestURI = "example.com:443#x"
+
+	// The server rejects a target that doesn't parse. Should one come anyway, its fragment is not worth dropping it.
+	unparsed := httptest.NewRequest(http.MethodGet, "/a", nil)
+	unparsed.RequestURI = "/a%zz#x"
 
 	for _, r := range []*http.Request{
 		httptest.NewRequest(http.MethodGet, "/test%23contacts", nil),
 		httptest.NewRequest(http.MethodGet, "/a/b?x=1", nil),
 		connect,
+		unparsed,
 	} {
 		t.Run(r.RequestURI, func(t *testing.T) {
 			require.Same(t, r, passThrough(t, r))
