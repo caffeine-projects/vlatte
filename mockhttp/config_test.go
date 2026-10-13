@@ -294,6 +294,84 @@ func TestGlobalEventsMustNameARegisteredListener(t *testing.T) {
 	}
 }
 
+func TestOnCompleteListener_ANameRegisteredTwiceFailsNew(t *testing.T) {
+	// #18: the error of Register was dropped, so the second listener of a name never ran, without a word. Every name
+	// registered twice fails New now, naming the listener, whether the registry is the builder's or a shared one.
+	nop := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
+
+	shared := vlatte.NewListener()
+	require.NoError(t, shared.OnComplete.Register("audit", nop))
+
+	_, err := New(Setup().Silent().
+		OnCompleteListener("hook", nop).
+		OnCompleteListener("hook", nop).
+		OnCompleteListener("audit", nop).
+		EventListeners(shared))
+
+	require.ErrorIs(t, err, vlatte.ErrEventAlreadyRegistered)
+	require.ErrorContains(t, err, "config: on_complete listener hook: vlatte: event already registered")
+	require.ErrorContains(t, err, "config: on_complete listener audit: vlatte: event already registered")
+}
+
+func TestEventListeners_KeepsTheListenersRegisteredBefore(t *testing.T) {
+	// EventListeners replaced the registry, so the listeners registered before it were dropped, without a word, and a
+	// listener registered after EventListeners(nil) panicked. In any order, every listener is registered now.
+	tests := []struct {
+		name  string
+		setup func(l vlatte.EventListener[vlatte.OnComplete]) *ConfigBuilder
+	}{
+		{
+			name: "a shared registry set after",
+			setup: func(l vlatte.EventListener[vlatte.OnComplete]) *ConfigBuilder {
+				return Setup().OnCompleteListener("hook", l).EventListeners(vlatte.NewListener())
+			},
+		},
+		{
+			name: "a shared registry set before",
+			setup: func(l vlatte.EventListener[vlatte.OnComplete]) *ConfigBuilder {
+				return Setup().EventListeners(vlatte.NewListener()).OnCompleteListener("hook", l)
+			},
+		},
+		{
+			name: "no registry set after",
+			setup: func(l vlatte.EventListener[vlatte.OnComplete]) *ConfigBuilder {
+				return Setup().OnCompleteListener("hook", l).EventListeners(nil)
+			},
+		},
+		{
+			name: "no registry set before",
+			setup: func(l vlatte.EventListener[vlatte.OnComplete]) *ConfigBuilder {
+				return Setup().EventListeners(nil).OnCompleteListener("hook", l)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ran := make(chan struct{}, 1)
+			l := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
+				ran <- struct{}{}
+				return nil
+			})
+
+			m := MustNew(tc.setup(l).Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "hook"}).Reply(NoContent()))
+
+			status, _ := get(t, m, "/x")
+			require.Equal(t, http.StatusNoContent, status)
+
+			select {
+			case <-ran:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the listener never ran")
+			}
+		})
+	}
+}
+
 // acceptCounter counts the connections accepted through a listener.
 type acceptCounter struct {
 	net.Listener

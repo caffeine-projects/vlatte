@@ -75,7 +75,8 @@ func NewEventRegistry[T EventArgs]() *EventRegistry[T] {
 	}
 }
 
-// Register adds or replaces a listener for the given name.
+// Register adds a listener under name. A name already registered keeps its listener: Register fails with
+// ErrEventAlreadyRegistered.
 func (r *EventRegistry[T]) Register(name string, evt EventListener[T]) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

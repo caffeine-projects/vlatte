@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -132,6 +133,18 @@ type ConfigBuilder struct {
 	tlsCertificateFs       string
 	tlsKeyFs               string
 	tlsClientCertificateFs string
+
+	// onComplete keeps the listeners OnCompleteListener registered, so EventListeners registers them in its registry.
+	onComplete []namedListener
+
+	// err fails Apply, with every listener that couldn't be registered.
+	err error
+}
+
+// namedListener is an on-complete event listener and the name it is registered under.
+type namedListener struct {
+	name     string
+	listener vlatte.EventListener[vlatte.OnComplete]
 }
 
 func defaultConfig() *Config {
@@ -405,9 +418,12 @@ func (cb *ConfigBuilder) TLSMutual(certFile, keyFile, clientCert string) *Config
 	return cb
 }
 
-// OnCompleteListener registers an on-complete event listener by name.
+// OnCompleteListener registers an on-complete event listener by name. A name registered twice fails the server's
+// New, with vlatte.ErrEventAlreadyRegistered.
 func (cb *ConfigBuilder) OnCompleteListener(name string, listener vlatte.EventListener[vlatte.OnComplete]) *ConfigBuilder {
-	cb.conf.Listeners.OnComplete.Register(name, listener)
+	cb.onComplete = append(cb.onComplete, namedListener{name: name, listener: listener})
+	cb.register(name, listener)
+
 	return cb
 }
 
@@ -417,9 +433,14 @@ func (cb *ConfigBuilder) GlobalEvents(events *vlatte.Events) *ConfigBuilder {
 	return cb
 }
 
-// EventListeners sets the registry of named event listeners.
+// EventListeners sets the registry of named event listeners, such as one several servers share. The listeners
+// registered with OnCompleteListener before are registered in it too, so none is dropped.
 func (cb *ConfigBuilder) EventListeners(listeners *vlatte.Listener) *ConfigBuilder {
 	cb.conf.Listeners = listeners
+	for _, l := range cb.onComplete {
+		cb.register(l.name, l.listener)
+	}
+
 	return cb
 }
 
@@ -476,6 +497,10 @@ func (cb *ConfigBuilder) TemplateDataProviders(sdp []TemplateDataProvider) *Conf
 
 // Apply builds a new Config with previously configured values.
 func (cb *ConfigBuilder) Apply(conf *Config) error {
+	if cb.err != nil {
+		return cb.err
+	}
+
 	if len(cb.recorderConf) > 0 {
 		recordConfig := defaultRecordConfig()
 		for _, option := range cb.recorderConf {
@@ -509,6 +534,18 @@ func (cb *ConfigBuilder) Apply(conf *Config) error {
 	}
 
 	return cb.conf.Apply(conf)
+}
+
+// register adds listener to the registry of the config, made when there is none. A name the registry has already
+// joins its error to the one Apply returns.
+func (cb *ConfigBuilder) register(name string, listener vlatte.EventListener[vlatte.OnComplete]) {
+	if cb.conf.Listeners == nil {
+		cb.conf.Listeners = vlatte.NewListener()
+	}
+
+	if err := cb.conf.Listeners.OnComplete.Register(name, listener); err != nil {
+		cb.err = errors.Join(cb.err, fmt.Errorf("config: on_complete listener %s: %w", name, err))
+	}
 }
 
 // applyTLS loads TLS material from the given files and configures TLS on c.
