@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	json "encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -791,4 +792,126 @@ func TestWebHook_DelayFromAMock(t *testing.T) {
 
 	m.WaitEvents()
 	require.GreaterOrEqual(t, (<-got).Sub(answered), 150*time.Millisecond, "the webhook came after its delay")
+}
+
+func TestArgs_ADescriptionDecodesBack(t *testing.T) {
+	// A mock's description holds its webhook's parameters as a mock file writes them, the ones set only: decoded, they
+	// are the same parameters.
+	tests := []struct {
+		name string
+		args *webhook.Args
+	}{
+		{
+			name: "text keys",
+			args: &webhook.Args{
+				URL: "http://hooks.test/x", Method: "POST", Header: map[string]string{"X-A": "1"},
+				HeaderTemplate: map[string]string{"X-B": "{{ .Request.Method }}"}, BodyTemplate: "{{ .Request.URL }}",
+				Delay: 1500 * time.Millisecond,
+			},
+		},
+		{
+			name: "a url_template and a body file",
+			args: &webhook.Args{URLTemplate: "http://hooks.test/{{ .Request.Method }}", BodyFile: "testdata/hook_body.txt"},
+		},
+		{
+			name: "a body",
+			args: &webhook.Args{URL: "http://hooks.test", Body: "paid"},
+		},
+		{
+			name: "a multipart body",
+			args: &webhook.Args{URL: "http://hooks.test", Multipart: mockhttp.MultipartMixed(mockhttp.NewPart().BodyText("a")).Boundary("b")},
+		},
+		{
+			name: "a multipart body whose text is templates",
+			args: &webhook.Args{
+				URL:       "http://hooks.test",
+				Multipart: mockhttp.MultipartForm(mockhttp.NewPart().Name("n").BodyText("{{ .X }}")).Template(),
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			desc, ok := tc.args.Describe().Props.(map[string]any)
+			require.True(t, ok)
+
+			decoded, err := webhook.ArgsFromMap(desc)
+			require.NoError(t, err)
+			require.Equal(t, desc, decoded.Describe().Props, "the description decodes to parameters described the same")
+
+			if tc.args.Multipart == nil {
+				require.Equal(t, tc.args, decoded)
+			}
+		})
+	}
+
+	_, templated := (&webhook.Args{Multipart: mockhttp.MultipartMixed().Template()}).Describe().Props.(map[string]any)["multipart_template"]
+	require.True(t, templated, "a body whose text is templates goes under multipart_template")
+}
+
+func TestWebHook_ADescribedMockSendsTheSameWebhook(t *testing.T) {
+	// Mock.Describe dropped on_complete events: a mock that went out of the admin API and back in lost its webhooks.
+	// Described and loaded back, a mock sends the same webhook.
+	got := make(chan string, 4)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got <- r.Method + " " + r.URL.Path + " " + r.Header.Get("X-A") + " " + string(b)
+	}))
+	t.Cleanup(target.Close)
+
+	wh, err := webhook.New()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name  string
+		event vlatte.EventConfig
+	}{
+		{
+			name:  "built in Go",
+			event: webhook.Options().URL(target.URL+"/go").Method("post").Header("X-A", "go").Body("paid").Delay(time.Millisecond).Build("webhook"),
+		},
+		{
+			name: "from a map, with templates",
+			event: vlatte.EventConfig{Name: "webhook", Parameters: map[string]any{
+				"method": "PUT", "url_template": target.URL + "/{{ .Request.Method }}",
+				"header_template": map[string]any{"X-A": "{{ index .Request.URLPathSegments 0 }}"},
+				"multipart_template": map[string]any{
+					"type": "mixed", "boundary": "b", "parts": []any{map[string]any{"body": "{{ .Request.Method }}"}},
+				},
+			}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			send := func(b vlatte.Builder[*mockhttp.Mock, *mockhttp.Server]) (string, map[string]any) {
+				m := mockhttp.MustNew(mockhttp.Setup().Silent().OnCompleteListener("webhook", wh))
+				m.MustStart()
+				defer m.Close()
+
+				scope := m.MustMock(b)
+
+				res, err := http.Get(m.URL("/orders"))
+				require.NoError(t, err)
+				require.NoError(t, res.Body.Close())
+				require.Equal(t, http.StatusNoContent, res.StatusCode)
+
+				m.WaitEvents()
+
+				desc, ok := scope.Mock("orders").Describe().Props.(map[string]any)
+				require.True(t, ok)
+
+				return <-got, desc
+			}
+
+			sent, desc := send(mockhttp.Getf("/orders").ID("orders").OnCompleteEvent(tc.event).Reply(mockhttp.NoContent()))
+			require.Contains(t, desc, "on_complete")
+
+			doc, err := json.Marshal(desc)
+			require.NoError(t, err)
+
+			again, _ := send(mockhttp.FromBytes(doc, "json"))
+			require.Equal(t, sent, again)
+		})
+	}
 }

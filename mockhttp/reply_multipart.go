@@ -8,8 +8,11 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
 )
+
+var _ descriptor.SelfDescriptive = (*Multipart)(nil)
 
 // Multipart is a multipart body, for a reply or a webhook: its subtype, boundary and parts, written with
 // mime/multipart.Writer. Start one with MultipartForm, MultipartMixed or NewMultipart.
@@ -64,6 +67,16 @@ func (mp *Multipart) Param(name, value string) *Multipart {
 func (mp *Multipart) Template() *Multipart {
 	mp.spec.Templated = true
 	return mp
+}
+
+// Describe implements descriptor.SelfDescriptive, as the parameters of a webhook write the body: under multipart, or
+// multipart_template when its text is templates. A reply describes its body itself.
+func (mp *Multipart) Describe() descriptor.Descriptor {
+	if mp.spec.Templated {
+		return descriptor.New("multipart_template", mp.spec.Doc())
+	}
+
+	return descriptor.New("multipart", mp.spec.Doc())
 }
 
 // Check checks the body and compiles its templates with engine, as Encode does, without writing it: a webhook checks

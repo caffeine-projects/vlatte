@@ -19,6 +19,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
 	"github.com/caffeine-projects/vlatte/internal/value"
@@ -27,6 +28,8 @@ import (
 var (
 	_ vlatte.EventListener[vlatte.OnComplete] = (*WebHook)(nil)
 	_ vlatte.EventPreparer                    = (*WebHook)(nil)
+	_ descriptor.SelfDescriptive              = (*Args)(nil)
+	_ descriptor.SelfDescriptive              = (*multipartParams)(nil)
 )
 
 var (
@@ -301,6 +304,41 @@ type Args struct {
 	Delay time.Duration
 
 	dir string // where relative files open from: the mock file's directory; "" is the working directory
+}
+
+// Describe implements descriptor.SelfDescriptive: the parameters as a mock file writes them, the ones set only, so the
+// description of a mock, such as the admin API gives, loads back with the same webhook. A multipart body is described
+// when it describes itself, as mockhttp's do.
+func (a *Args) Describe() descriptor.Descriptor {
+	params := make(map[string]any)
+
+	for key, value := range map[string]string{
+		"url": a.URL, "url_template": a.URLTemplate, "method": a.Method,
+		"body": a.Body, "body_template": a.BodyTemplate, "body_file": a.BodyFile,
+	} {
+		if value != "" {
+			params[key] = value
+		}
+	}
+
+	if len(a.Header) > 0 {
+		params["header"] = maps.Clone(a.Header)
+	}
+
+	if len(a.HeaderTemplate) > 0 {
+		params["header_template"] = maps.Clone(a.HeaderTemplate)
+	}
+
+	if body, ok := a.Multipart.(descriptor.SelfDescriptive); ok {
+		d := body.Describe()
+		params[d.Key] = d.Props
+	}
+
+	if a.Delay > 0 {
+		params["delay"] = a.Delay.String()
+	}
+
+	return descriptor.New("parameters", params)
 }
 
 // clone returns a copy of a, with copies of its maps. Multipart is shared: writing a body doesn't change it.
@@ -629,6 +667,11 @@ func (m *multipartParams) Check(engine vlatte.TemplateEngine) error {
 	return err
 }
 
+// Describe implements descriptor.SelfDescriptive: the body as the parameters of a mock file write it.
+func (m *multipartParams) Describe() descriptor.Descriptor {
+	return describeMultipart(m.spec)
+}
+
 // Encode implements MultipartBody.
 func (m *multipartParams) Encode(engine vlatte.TemplateEngine, data any) (string, []byte, error) {
 	e, err := mpart.Compile(m.spec, engine)
@@ -639,6 +682,16 @@ func (m *multipartParams) Encode(engine vlatte.TemplateEngine, data any) (string
 	b, _, err := e.Encode(data)
 
 	return e.ContentType(), b, err
+}
+
+// describeMultipart describes a multipart body as the parameters of a mock file write it: under multipart_template
+// when its text is templates, else under multipart.
+func describeMultipart(spec *mpart.Spec) descriptor.Descriptor {
+	if spec.Templated {
+		return descriptor.New("multipart_template", spec.Doc())
+	}
+
+	return descriptor.New("multipart", spec.Doc())
 }
 
 // countSet counts the values that are set: non-empty strings and true bools.
