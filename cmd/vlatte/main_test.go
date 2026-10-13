@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -284,4 +287,62 @@ func TestRun_AllowsTheDockerHostVariable(t *testing.T) {
 
 	require.NoError(t, (&dockerConfigurer{}).Apply(m.Config()))
 	require.Equal(t, "127.0.0.1:8080", m.Config().Addr)
+}
+
+// writeWebhookMock writes a mock file for GET /orders, which answers 202 and sends a webhook to url, into a new
+// directory, and returns the pattern of its mock files.
+func writeWebhookMock(t *testing.T, url string) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	mock := fmt.Sprintf(`
+request: {method: GET, path: /orders}
+response: {status: 202}
+on_complete:
+  - name: webhook
+    parameters: {method: POST, url: %q, body: paid}
+`, url)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "orders.mock.yaml"), []byte(mock), 0o600))
+
+	return filepath.Join(dir, "*.yaml")
+}
+
+// getOrders gets /orders from the CLI listening on addr, once it is up.
+func getOrders(t *testing.T, addr string) {
+	t.Helper()
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res, err := http.Get("http://" + addr + "/orders")
+		if !assert.NoError(c, err) {
+			return
+		}
+
+		_ = res.Body.Close()
+		assert.Equal(c, http.StatusAccepted, res.StatusCode)
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
+func TestCLI_ServesMockFilesWithWebhooks(t *testing.T) {
+	// #16: the CLI registered no on_complete listener, so a mock file with a webhook failed to load, and the CLI exited.
+	withoutDockerHost(t)
+
+	got := make(chan string, 4)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got <- r.Method + " " + r.URL.Path + " " + string(b)
+	}))
+	t.Cleanup(target.Close)
+
+	addr := randomAddr(t)
+	stop := start(t, "--addr", addr, "--mock-files", writeWebhookMock(t, target.URL+"/hook"), "--log-level", "disabled")
+	getOrders(t, addr)
+
+	select {
+	case hook := <-got:
+		require.Equal(t, "POST /hook paid", hook)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the webhook never reached the target")
+	}
+
+	require.Equal(t, 0, stop(), "a stopped server exits cleanly")
 }
