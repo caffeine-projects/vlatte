@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -48,72 +49,65 @@ func TestWebHook_Run(t *testing.T) {
 		expectedCalls int64
 	}{
 		{
-			"basic with default method",
-			mockhttp.Getf("/third_party/hook").
-				Reply(mockhttp.OK()),
-			webhook.Options().
-				URL(target.URL("/third_party/hook")).
-				Build(name),
-			nil,
-			1,
+			name:          "basic with default method",
+			targetMock:    mockhttp.Getf("/third_party/hook").Reply(mockhttp.OK()),
+			webhookDef:    webhook.Options().URL(target.URL("/third_party/hook")).Build(name),
+			expectedCalls: 1,
 		},
 		{
-			"complex",
-			mockhttp.Postf("/third_party/hook").
+			name: "complex",
+			targetMock: mockhttp.Postf("/third_party/hook").
 				Headerf("X-Key", "%s", key).
 				Headerf(mockhttp.HeaderContentType, mockhttp.MIMETextPlain).
 				Body(match.Eq("hi")).
 				Reply(mockhttp.OK().PlainText("bye")),
-			webhook.Options().
+			webhookDef: webhook.Options().
 				URL(target.URL("/third_party/hook")).
 				Method(http.MethodPost).
 				Header("X-Key", key).
 				Header(mockhttp.HeaderContentType, mockhttp.MIMETextPlain).
 				Body("hi").
 				Build(name),
-			nil,
-			1,
+			expectedCalls: 1,
 		},
 		{
-			"no body",
-			mockhttp.Postf("/third_party/hook").
+			name: "no body",
+			targetMock: mockhttp.Postf("/third_party/hook").
 				Headerf("X-Key", "%s", key).
 				Headerf(mockhttp.HeaderContentType, mockhttp.MIMETextPlain).
 				Reply(mockhttp.OK().PlainText("bye")),
-			webhook.Options().
+			webhookDef: webhook.Options().
 				URL(target.URL("/third_party/hook")).
 				Method(http.MethodPost).
 				Header("X-Key", key).
 				Header(mockhttp.HeaderContentType, mockhttp.MIMETextPlain).
 				Build(name),
-			nil,
-			1,
+			expectedCalls: 1,
 		},
 		{
-			"bad request from target",
-			mockhttp.Postf("/third_party/hook").
+			name: "bad request from target",
+			targetMock: mockhttp.Postf("/third_party/hook").
 				Headerf(mockhttp.HeaderContentType, mockhttp.MIMETextPlain).
 				Reply(mockhttp.BadRequest()),
-			webhook.Options().
+			webhookDef: webhook.Options().
 				URL(target.URL("/third_party/hook")).
 				Method(http.MethodPost).
 				Header(mockhttp.HeaderContentType, mockhttp.MIMETextPlain).
 				Build(name),
-			nil,
-			1,
+			expectedCalls: 1,
 		},
 		{
-			"transform",
-			mockhttp.Putf("/third_party/hook/transformed").
+			name: "transform",
+			targetMock: mockhttp.Putf("/third_party/hook/transformed").
 				Headerf(mockhttp.HeaderContentType, mockhttp.MIMETextPlain).
 				Body(match.Eq("hello world")).
 				Reply(mockhttp.BadRequest()),
-			webhook.Options().
+			webhookDef: webhook.Options().
 				URL(target.URL("/third_party/hook")).
 				Method(http.MethodPost).
 				Header(mockhttp.HeaderContentType, mockhttp.MIMETextPlain).
 				Build(name),
-			[]webhook.Option{
+			options: []webhook.Option{
 				webhook.WithTransform(func(_ context.Context, args vlatte.OnComplete, webhookArgs *webhook.Args) error {
 					webhookArgs.URL += "/transformed"
 					webhookArgs.Method = http.MethodPut
@@ -121,22 +115,18 @@ func TestWebHook_Run(t *testing.T) {
 					return nil
 				}),
 			},
-			1,
+			expectedCalls: 1,
 		},
 		{
-			"transform with error",
-			mockhttp.Getf("/third_party/hook/transformed").
-				Reply(mockhttp.BadRequest()),
-			webhook.Options().
-				URL(target.URL("/third_party/hook")).
-				Method(http.MethodGet).
-				Build(name),
-			[]webhook.Option{
+			name:       "transform with error",
+			targetMock: mockhttp.Getf("/third_party/hook/transformed").Reply(mockhttp.BadRequest()),
+			webhookDef: webhook.Options().URL(target.URL("/third_party/hook")).Method(http.MethodGet).Build(name),
+			options: []webhook.Option{
 				webhook.WithTransform(func(_ context.Context, args vlatte.OnComplete, webhookArgs *webhook.Args) error {
 					return errors.New("boom")
 				}),
 			},
-			0,
+			expectedCalls: 0,
 		},
 	}
 
@@ -163,6 +153,10 @@ func TestWebHook_Run(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
 			require.Equal(t, http.StatusNoContent, res.StatusCode)
+
+			// The webhook is sent after the response. Before the target is checked, and cleaned for the next case, it
+			// has been sent, or not.
+			m.WaitEvents()
 			require.True(t, target.AssertNumberOfCalls(t, tc.expectedCalls))
 			require.True(t, m.AssertNumberOfCalls(t, 1))
 		})
@@ -232,44 +226,48 @@ func TestWebHook_TLS(t *testing.T) {
 
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusNoContent, res.StatusCode)
+
+	m.WaitEvents()
 	require.True(t, whSrv.AssertNumberOfCalls(t, 1))
 	require.True(t, m.AssertNumberOfCalls(t, 1))
 }
 
-func TestWebHook_FaultTarget(t *testing.T) {
-	name := "webhook"
-	target := mockhttp.MustNew()
-	target.MustStart()
-	defer target.Close()
+func TestWebHook_DoesNotDelayTheResponse(t *testing.T) {
+	// #15: the webhook was sent inside the handler, so the client waited for the target, up to the webhook timeout. The
+	// response comes first now, and the webhook after it.
+	unblock := make(chan struct{})
+	got := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-unblock:
+		case <-r.Context().Done(): // the webhook canceled, when the test fails first
+			return
+		}
 
-	target.MustMock(mockhttp.Getf("/hook/fault").
-		Delay(1 * time.Minute).
-		Reply(mockhttp.OK().PlainText("hello")))
+		got <- r.Method + " " + r.URL.Path
+	}))
+	t.Cleanup(target.Close)
 
-	// The target never answers in time: the webhook call fails, but the mocked response must still be served.
-	wh, err := webhook.New(webhook.WithRoundTripper(&http.Transport{ResponseHeaderTimeout: 100 * time.Millisecond}))
+	wh, err := webhook.New()
 	require.NoError(t, err)
-	m := mockhttp.MustNew(mockhttp.Setup().OnCompleteListener(name, wh))
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().OnCompleteListener("webhook", wh))
 	m.MustStart()
-	defer m.Close()
+	t.Cleanup(m.Close)
 
 	m.MustMock(mockhttp.Getf("/test").
-		OnCompleteEvent(webhook.Options().
-			URL(target.URL("/hook/fault")).
-			Method(http.MethodGet).
-			Build(name)).
+		OnCompleteEvent(webhook.Options().URL(target.URL + "/hook").Method(http.MethodPost).Build("webhook")).
 		Reply(mockhttp.NoContent()))
 
-	client := &http.Client{}
-	ctxReq, cancelReq := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancelReq()
-
-	req, _ := http.NewRequestWithContext(ctxReq, http.MethodGet, m.URL("/test"), nil)
-	res, err := client.Do(req)
-
-	require.NoError(t, err)
+	client := &http.Client{Timeout: 5 * time.Second}
+	res, err := client.Get(m.URL("/test"))
+	require.NoError(t, err, "the response doesn't wait for the target, which never answers until the end")
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusNoContent, res.StatusCode)
+
+	close(unblock)
+	m.WaitEvents()
+	require.Equal(t, "POST /hook", <-got)
 }
 
 func TestWebHook_InvalidArgs(t *testing.T) {
@@ -333,6 +331,8 @@ func TestWebHook_FileSetup(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusAccepted, res.StatusCode)
+
+	m.WaitEvents()
 	require.True(t, target.AssertNumberOfCalls(t, 1))
 	require.True(t, m.AssertNumberOfCalls(t, 1))
 }
@@ -375,35 +375,25 @@ func TestWebHook_DefaultTransportHasTimeouts(t *testing.T) {
 }
 
 func TestWebHook_Timeout(t *testing.T) {
-	name := "webhook"
-	target := mockhttp.MustNew()
-	target.MustStart()
-	defer target.Close()
+	// The timeout bounds a send: a target that never answers fails it after exactly the timeout.
+	synctest.Test(t, func(t *testing.T) {
+		wh, err := webhook.New(webhook.WithRoundTripper(silent{}), webhook.WithTimeout(time.Minute))
+		require.NoError(t, err)
 
-	target.MustMock(mockhttp.Getf("/hook/slow").
-		Delay(1 * time.Minute).
-		Reply(mockhttp.OK()))
+		start := time.Now()
+		err = wh.Run(t.Context(), onComplete{params: map[string]any{"url": "http://hooks.test/slow"}})
 
-	wh, err := webhook.New(webhook.WithTimeout(100 * time.Millisecond))
-	require.NoError(t, err)
-	m := mockhttp.MustNew(mockhttp.Setup().OnCompleteListener(name, wh))
-	m.MustStart()
-	defer m.Close()
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Equal(t, time.Minute, time.Since(start))
+	})
+}
 
-	m.MustMock(mockhttp.Getf("/test").
-		OnCompleteEvent(webhook.Options().
-			URL(target.URL("/hook/slow")).
-			Method(http.MethodGet).
-			Build(name)).
-		Reply(mockhttp.NoContent()))
+// silent is a RoundTripper whose target never answers: it returns when the request's context ends.
+type silent struct{}
 
-	// Without the webhook timeout, the slow target would hold the mocked response past the client timeout.
-	client := &http.Client{Timeout: 10 * time.Second}
-	res, err := client.Get(m.URL("/test"))
-
-	require.NoError(t, err)
-	require.NoError(t, res.Body.Close())
-	require.Equal(t, http.StatusNoContent, res.StatusCode)
+func (silent) RoundTrip(req *http.Request) (*http.Response, error) {
+	<-req.Context().Done()
+	return nil, req.Context().Err()
 }
 
 func TestWebHook_Templates(t *testing.T) {
@@ -461,6 +451,8 @@ func TestWebHook_Templates(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
 			require.Equal(t, http.StatusNoContent, res.StatusCode)
+
+			m.WaitEvents()
 			require.True(t, target.AssertNumberOfCalls(t, 1))
 		})
 	}
@@ -693,6 +685,7 @@ func TestWebHook_LogsWithTheServerLogger(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 
+	m.WaitEvents()
 	require.Contains(t, out.String(), "<--- WEBHOOK GET /server")
 }
 

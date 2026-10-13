@@ -123,6 +123,11 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Template data providers see the mock that matched.
 	reqValues.Mock = mock
 
+	// A response can reach the client before the handler returns, such as a stream it flushed: the hold keeps WaitEvents
+	// from returning before the events of this request start, last.
+	release := h.runner.Hold(mock)
+	defer release()
+
 	d := make(map[string]any, len(h.templateDataProviders))
 	sdpIn := &TemplateDataProviderInput{r: reqValues}
 
@@ -137,7 +142,6 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	locals := locals(reqValues, d, viewdata.NewParameters(r.Context(), h.app.params))
-	kit := &Kit{engine: h.app.config.TemplateEngine, data: locals}
 
 	reqValues.Data = locals
 
@@ -206,15 +210,20 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err = h.runner.OnComplete(
-		r.Context(),
+	// The events run in the background, so the response doesn't wait for them. Deferred, they start after the request
+	// log and the recording read res, which a listener could change, even when one of them panics, and before release.
+	defer h.runner.OnComplete(
 		mock,
-		func(cfg vlatte.EventConfig) vlatte.OnComplete {
+		func(ctx context.Context, cfg vlatte.EventConfig) vlatte.OnComplete {
+			// The request's context ends with the handler: templates read the parameters with the event's.
+			data := *locals
+			data.Parameters = viewdata.NewParameters(ctx, h.app.params)
+			kit := &Kit{engine: h.app.config.TemplateEngine, data: &data}
+
 			return &OnComplete{m: mock, req: reqValues, res: res, kit: kit, args: cfg.Parameters, dir: cfg.Dir, logger: h.app.logger}
 		},
-	); err != nil {
-		h.lifecycle.OnWarning(reqValues, fmt.Errorf("on_complete: %w", err))
-	}
+		func(err error) { h.lifecycle.OnWarning(reqValues, err) },
+	)
 
 	h.lifecycle.OnMatch(reqValues, res)
 

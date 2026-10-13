@@ -273,8 +273,9 @@ func TestGlobalEventsAreApplied(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 
-	// Global on_complete events run for every matched request, after the response is written.
-	require.Eventually(t, func() bool { return fired.Load() == 1 }, 5*time.Second, 10*time.Millisecond)
+	// Global on_complete events run for every matched request, after the response.
+	m.WaitEvents()
+	require.Equal(t, int32(1), fired.Load())
 }
 
 func TestGlobalEventsMustNameARegisteredListener(t *testing.T) {

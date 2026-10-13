@@ -8,7 +8,10 @@ import (
 
 var _ vlatte.OnComplete = (*OnComplete)(nil)
 
-// OnComplete implements vlatte.OnComplete for HTTP mocks.
+// OnComplete implements vlatte.OnComplete for HTTP mocks. Listeners get it after the response, in the background, so
+// it's read-only, and the request has ended: read the request from Request, not from RawRequest.Body or the request's
+// context. Uploaded files are there when the built-in body parsers parsed them, in memory; files a custom parser
+// wrote to disk are gone.
 type OnComplete struct {
 	m      *Mock
 	req    *RequestValues

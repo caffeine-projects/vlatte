@@ -192,7 +192,7 @@ func (r *Response) stream(ctx context.Context, w http.ResponseWriter, wait func(
 		return err
 	}
 
-	// The last part goes out now, not when the handler returns after on_complete events. A failed Close keeps its
+	// The last part goes out now, not when the handler returns after callbacks. A failed Close keeps its
 	// error, which flush returns.
 	if gz != nil {
 		_ = gz.Close()

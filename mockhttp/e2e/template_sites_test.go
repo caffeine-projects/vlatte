@@ -127,7 +127,8 @@ func checkTemplateSites(t *testing.T, engine vlatte.TemplateEngine, tmpl, want s
 		}
 	}
 
-	// Each webhook ran for both bodies.
+	// Each webhook ran for both bodies, after their responses.
+	m.WaitEvents()
 	require.True(t, hook.AssertNumberOfCalls(t, 2))
 	require.True(t, hookPart.AssertNumberOfCalls(t, 2))
 }

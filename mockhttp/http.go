@@ -58,6 +58,9 @@ type Server struct {
 	startOnce      sync.Once
 	admin          *admin.Admin[*Mock]
 	closeIdleConns []func()
+
+	// events runs the on_complete events of the mocks in the background, after their responses.
+	events *vlatte.EventRunner
 }
 
 // New creates a new HTTP mock Server with the given configurations.
@@ -192,6 +195,7 @@ func New(config ...Option) (*Server, error) {
 	app.rec = rec
 	app.proxy = p
 	app.requestBodyParsers = parsers
+	app.events = eventRunner
 
 	app.admin = admin.New(
 		repository,
@@ -264,6 +268,9 @@ func (app *Server) Name() string {
 
 // Start starts the mock server.
 func (app *Server) Start() error {
+	// A server closed before runs events again.
+	app.events.Open()
+
 	err := app.server.Start()
 	if err != nil {
 		return err
@@ -283,6 +290,9 @@ func (app *Server) MustStart() {
 
 // StartTLS starts TLS on a mock server.
 func (app *Server) StartTLS() error {
+	// A server closed before runs events again.
+	app.events.Open()
+
 	err := app.server.StartTLS()
 	if err != nil {
 		return err
@@ -363,12 +373,16 @@ func (app *Server) MustReload() {
 	}
 }
 
-// Close closes the mock server.
+// Close closes the mock server. It cancels the on_complete events still running, such as a webhook waiting for its
+// delay, and waits for them to return: WaitEvents first lets them finish.
 func (app *Server) Close() {
 	err := app.server.Close()
 	if err != nil {
 		app.logger.Debug().Err(err).Msg("server: Close: error closing server")
 	}
+
+	// The backend waited for the requests it served, so no event starts now.
+	app.events.Close()
 
 	if app.rec != nil {
 		app.rec.stop()
@@ -381,6 +395,13 @@ func (app *Server) Close() {
 	for _, closeIdle := range closeIdleConns {
 		closeIdle()
 	}
+}
+
+// WaitEvents waits for the on_complete events running in the background, such as webhooks, and for the requests
+// being served whose mocks have events. Events run after the response, so a test calls WaitEvents before checking
+// what a webhook sent.
+func (app *Server) WaitEvents() {
+	app.events.Wait()
 }
 
 // IsRecording checks if mock recording is enabled.

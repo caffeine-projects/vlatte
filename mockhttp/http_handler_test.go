@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -345,4 +346,223 @@ func TestLifecycle_ErrorLogsNameTheMock(t *testing.T) {
 		require.Contains(t, out.String(), "Mock: a users\n")
 		require.Contains(t, out.String(), "Error: boom")
 	})
+}
+
+func TestHandler_EventsRunAfterTheResponse(t *testing.T) {
+	// #15: on_complete listeners ran inside the handler, so the client waited for every webhook, up to its timeout, and
+	// a client that went away canceled them. They run after the response now, with a context the request doesn't end,
+	// and WaitEvents waits for them.
+	unblock := make(chan struct{})
+	ctxErr := make(chan error, 1)
+
+	m := MustNew(Setup().Silent().OnCompleteListener("blocks", vlatte.EventFunc[vlatte.OnComplete](
+		func(ctx context.Context, _ vlatte.OnComplete) error {
+			select {
+			case <-unblock:
+			case <-ctx.Done(): // Close, when the test fails first
+			}
+
+			ctxErr <- ctx.Err()
+
+			return nil
+		})))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "blocks"}).Reply(NoContent()))
+
+	status, _ := get(t, m, "/x")
+	require.Equal(t, http.StatusNoContent, status, "the response came while the listener was blocked")
+
+	close(unblock)
+	m.WaitEvents()
+
+	select {
+	case err := <-ctxErr:
+		require.NoError(t, err, "the end of the request doesn't cancel its events")
+	default:
+		t.Fatal("WaitEvents returned before the listener")
+	}
+}
+
+func TestHandler_CloseCancelsTheEventsRunning(t *testing.T) {
+	// Close stops the events still running, such as a webhook waiting on a slow target, instead of waiting for them,
+	// and waits for them to return. A restarted server runs events again.
+	started := make(chan struct{})
+	canceled := make(chan error, 1)
+	var counted atomic.Int32
+
+	m := MustNew(Setup().Silent().
+		OnCompleteListener("waits", vlatte.EventFunc[vlatte.OnComplete](func(ctx context.Context, _ vlatte.OnComplete) error {
+			close(started)
+			<-ctx.Done()
+			canceled <- ctx.Err()
+
+			return ctx.Err()
+		})).
+		OnCompleteListener("counts", vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
+			counted.Add(1)
+			return nil
+		})))
+	m.MustStart()
+
+	m.MustMock(
+		Getf("/waits").OnCompleteEvent(vlatte.EventConfig{Name: "waits"}).Reply(NoContent()),
+		Getf("/counts").OnCompleteEvent(vlatte.EventConfig{Name: "counts"}).Reply(NoContent()),
+	)
+
+	status, _ := get(t, m, "/waits")
+	require.Equal(t, http.StatusNoContent, status)
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the event never started")
+	}
+
+	m.Close()
+
+	select {
+	case err := <-canceled:
+		require.ErrorIs(t, err, context.Canceled)
+	default:
+		t.Fatal("Close returned before the event it canceled")
+	}
+
+	m.WaitEvents() // a closed server has none
+
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	status, _ = get(t, m, "/counts")
+	require.Equal(t, http.StatusNoContent, status)
+
+	m.WaitEvents()
+	require.Equal(t, int32(1), counted.Load())
+}
+
+func TestHandler_WaitEventsWaitsForAResponseSentEarly(t *testing.T) {
+	// A reply can send its whole response before the handler returns, as a flushed stream does: the client has it
+	// before the events start. WaitEvents waits for them still. Handler replies also make the request log panic (#24):
+	// the events run anyway.
+	proceed := make(chan struct{})
+	var ran atomic.Bool
+
+	m := MustNew(Setup().Silent().OnCompleteListener("hook", vlatte.EventFunc[vlatte.OnComplete](
+		func(context.Context, vlatte.OnComplete) error {
+			ran.Store(true)
+			return nil
+		})))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	// Last in, first out: the reply ends before the server closes, when the test fails first.
+	t.Cleanup(sync.OnceFunc(func() { close(proceed) }))
+
+	m.MustMock(Getf("/early").
+		OnCompleteEvent(vlatte.EventConfig{Name: "hook"}).
+		Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set(HeaderContentLength, "2")
+			_, _ = w.Write([]byte("ok"))
+			_ = http.NewResponseController(w).Flush()
+
+			<-proceed
+		})))
+
+	status, body := get(t, m, "/early")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "ok", body)
+
+	waited := make(chan struct{})
+	go func() {
+		m.WaitEvents()
+		close(waited)
+	}()
+
+	select {
+	case <-waited:
+		t.Fatal("WaitEvents returned before the events of a request whose response the client has")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	select {
+	case proceed <- struct{}{}:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the reply never waited")
+	}
+
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitEvents never returned")
+	}
+
+	require.True(t, ran.Load())
+}
+
+// cancelableKV is a parameter store that fails once its context is done, as a remote store does.
+type cancelableKV struct {
+	vlatte.KV
+}
+
+func (kv cancelableKV) Get(ctx context.Context, k string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	return kv.KV.Get(ctx, k)
+}
+
+func TestHandler_EventTemplatesReadParametersAfterTheResponse(t *testing.T) {
+	// The template data of events read the parameters with the context of the request, which ends with the handler:
+	// once events ran after the response, a store that honors its context failed every webhook template using them.
+	kv := cancelableKV{vlatte.NewMemoryKV()}
+	require.NoError(t, kv.Set(t.Context(), "target", []byte("api")))
+
+	proceed := make(chan struct{})
+	rendered := make(chan string, 1)
+
+	m := MustNew(Setup().Silent().Parameters(kv).OnCompleteListener("renders", vlatte.EventFunc[vlatte.OnComplete](
+		func(ctx context.Context, e vlatte.OnComplete) error {
+			select {
+			case <-proceed:
+			case <-ctx.Done(): // Close, when the test fails first
+				return ctx.Err()
+			}
+
+			var b strings.Builder
+
+			tmpl, err := e.Kit().TemplateEngine().Compile("target", `{{ .Parameters.Get "target" }}`)
+			if err == nil {
+				err = tmpl.Execute(&b, e.Kit().Data())
+			}
+
+			if err != nil {
+				b.WriteString(err.Error())
+			}
+
+			rendered <- b.String()
+
+			return err
+		})))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "renders"}).Reply(NoContent()))
+
+	// The response is complete once the handler returned, and net/http canceled the request's context.
+	client := &http.Client{Timeout: 5 * time.Second}
+	res, err := client.Get(m.URL("/x"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	close(proceed)
+	m.WaitEvents()
+
+	select {
+	case got := <-rendered:
+		require.Equal(t, "api", got)
+	default:
+		t.Fatal("WaitEvents returned before the listener")
+	}
 }

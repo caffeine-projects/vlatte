@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"slices"
 	"sync"
 )
@@ -138,9 +139,18 @@ func NewListener() *Listener {
 	}
 }
 
+// EventRunner runs the events of mocks, such as on_complete ones, in the background, each in a goroutine of its own,
+// and tracks them, so a server can wait for them, and cancel them when it closes.
 type EventRunner struct {
 	Listeners *Listener
 	Global    *Events
+
+	mu      sync.Mutex
+	running int                // the events running and the requests holding the runner
+	idle    chan struct{}      // closed when running drops to 0
+	ctx     context.Context    // the context of the events, made by the first one, canceled by Close
+	cancel  context.CancelFunc // cancels ctx
+	closed  bool               // set by Close, cleared by Open: a closed runner starts nothing
 }
 
 func NewEventRunner(listeners *Listener, global *Events) *EventRunner {
@@ -154,22 +164,131 @@ func NewEventRunner(listeners *Listener, global *Events) *EventRunner {
 	return &EventRunner{Listeners: listeners, Global: global}
 }
 
-func (r *EventRunner) OnComplete(ctx context.Context, mock Mock, argsFn func(EventConfig) OnComplete) error {
-	for _, v := range r.Global.OnComplete {
-		if err := r.Listeners.OnComplete.Run(ctx, v.Name, argsFn(v)); err != nil {
-			return err
-		}
+// OnComplete starts the on_complete events of mock in the background, global events first, each in a goroutine of its
+// own: the response doesn't wait for them, and an event neither waits for nor stops another. Each listener runs with
+// what argsFn returns and a context that Close cancels, which argsFn gets too. onErr gets the error, or the panic, of
+// each event that fails, unless Close canceled it, worded like the errors of mocks that name a listener that isn't
+// registered. A closed runner starts nothing.
+func (r *EventRunner) OnComplete(mock Mock, argsFn func(ctx context.Context, cfg EventConfig) OnComplete, onErr func(err error)) {
+	for i, def := range r.Global.OnComplete {
+		r.start("global on_complete listener", i, def, argsFn, onErr)
 	}
 
-	for _, def := range mock.Events().OnComplete {
+	for i, def := range mock.Events().OnComplete {
+		r.start("on_complete listener", i, def, argsFn, onErr)
+	}
+}
+
+// Hold counts a request whose mock has events, its own or global ones, until release, so Wait waits for the request:
+// release after starting its events. A response can reach the client before its handler returns, as a flushed stream
+// does, and Wait mustn't return before the events of a request whose response a client has. A mock without events,
+// or a closed runner, holds nothing.
+func (r *EventRunner) Hold(mock Mock) (release func()) {
+	if len(r.Global.OnComplete) == 0 && len(mock.Events().OnComplete) == 0 {
+		return func() {}
+	}
+
+	if _, ok := r.add(); !ok {
+		return func() {}
+	}
+
+	return sync.OnceFunc(r.done)
+}
+
+// Wait waits until no event runs and no request holds the runner. Requests can keep coming meanwhile, unlike with a
+// sync.WaitGroup, which can't wait while it counts from 0 again.
+func (r *EventRunner) Wait() {
+	r.mu.Lock()
+	idle := r.idle
+	r.mu.Unlock()
+
+	if idle != nil {
+		<-idle
+	}
+}
+
+// Close cancels the context of the events running, waits for them to return, and starts no event until Open.
+func (r *EventRunner) Close() {
+	r.mu.Lock()
+	r.closed = true
+	if r.cancel != nil {
+		r.cancel()
+	}
+	r.mu.Unlock()
+
+	r.Wait()
+
+	r.mu.Lock()
+	r.ctx, r.cancel = nil, nil
+	r.mu.Unlock()
+}
+
+// Open lets a runner that Close closed start events again, with a new context.
+func (r *EventRunner) Open() {
+	r.mu.Lock()
+	r.closed = false
+	r.mu.Unlock()
+}
+
+// add counts an event or a hold, and returns the context of the events. A closed runner counts nothing.
+func (r *EventRunner) add() (context.Context, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return nil, false
+	}
+
+	if r.ctx == nil {
+		r.ctx, r.cancel = context.WithCancel(context.Background())
+	}
+
+	if r.running == 0 {
+		r.idle = make(chan struct{})
+	}
+
+	r.running++
+
+	return r.ctx, true
+}
+
+// done uncounts an event or a hold, and wakes Wait when nothing is left.
+func (r *EventRunner) done() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.running--; r.running == 0 {
+		close(r.idle)
+	}
+}
+
+// start runs the listener of def, at index i of the events that scope names, in a goroutine of its own.
+func (r *EventRunner) start(scope string, i int, def EventConfig, argsFn func(context.Context, EventConfig) OnComplete, onErr func(error)) {
+	ctx, ok := r.add()
+	if !ok {
+		return
+	}
+
+	go func() {
+		defer r.done()
+
+		name := fmt.Sprintf("%s %s at index %d", scope, def.Name, i)
+
+		// A listener's panic, which the server's recovery caught when listeners ran in its handler, would end the
+		// process here.
+		defer func() {
+			if p := recover(); p != nil {
+				onErr(fmt.Errorf("%s: panic: %v\n%s", name, p, debug.Stack()))
+			}
+		}()
+
 		if !r.Listeners.OnComplete.Has(def.Name) {
-			return fmt.Errorf("event %s not found", def.Name)
+			onErr(fmt.Errorf("%s is not registered", name))
+			return
 		}
 
-		if err := r.Listeners.OnComplete.Run(ctx, def.Name, argsFn(def)); err != nil {
-			return err
+		if err := r.Listeners.OnComplete.Run(ctx, def.Name, argsFn(ctx, def)); err != nil && ctx.Err() == nil {
+			onErr(fmt.Errorf("%s: %w", name, err))
 		}
-	}
-
-	return nil
+	}()
 }

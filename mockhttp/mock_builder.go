@@ -424,7 +424,8 @@ func (b *Builder) Callback(callback vlatte.Callback) *Builder {
 	return b
 }
 
-// OnCompleteEvent adds an on-complete event to the mock.
+// OnCompleteEvent adds an on-complete event to the mock. It runs after the mock replies, in the background: the
+// response doesn't wait for it, and Server.WaitEvents does.
 func (b *Builder) OnCompleteEvent(cfg vlatte.EventConfig) *Builder {
 	b.spec.events = append(b.spec.events, cfg)
 	return b

@@ -45,6 +45,7 @@ type Transform func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Ar
 
 // WebHook is an automated HTTP request sent when an on-complete event is fired.
 // Register it with [vlatte.Listener.OnComplete] (e.g. via mockhttp.Setup().OnCompleteListener(name, wh)).
+// mockhttp sends it after the response, in the background: tests call the server's WaitEvents before checking it.
 //
 // It logs each send and its answer at info level, with Logger, or else with the logger of the event: mockhttp gives
 // the server's. A send fails when the target can't be reached in Timeout, or answers with a status outside 2xx; a
