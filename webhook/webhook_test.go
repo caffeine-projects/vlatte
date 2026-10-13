@@ -346,6 +346,40 @@ func TestWebHook_InvalidFiles(t *testing.T) {
 	}
 }
 
+func TestWebHook_AStreamedReplyEndsAfterItsWebhooks(t *testing.T) {
+	// A streamed reply sends its status and headers before its webhooks are done, so the call returns early, but its
+	// body ends after them: a test that reads the body to its end checks the target right after.
+	target := mockhttp.MustNew(mockhttp.Setup().Silent())
+	target.MustStart()
+	t.Cleanup(target.Close)
+
+	target.MustMock(mockhttp.Postf("/hook").Delay(100 * time.Millisecond).Reply(mockhttp.NoContent()))
+
+	wh, err := webhook.New()
+	require.NoError(t, err)
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().OnCompleteListener("webhook", wh))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.Getf("/stream").
+		OnCompleteEvent(webhook.Options().URL(target.URL("/hook")).Method(http.MethodPost).Build("webhook")).
+		Reply(mockhttp.OK().Multipart(mockhttp.MultipartMixed(
+			mockhttp.NewPart().ContentType("text/plain").BodyText("frame 1"),
+			mockhttp.NewPart().ContentType("text/plain").BodyText("frame 2").Delay(50*time.Millisecond),
+		))))
+
+	res, err := http.Get(m.URL("/stream"))
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Contains(t, string(body), "frame 2")
+
+	require.True(t, target.AssertNumberOfCalls(t, 1))
+}
+
 func TestWebHook_DefaultTransportHasTimeouts(t *testing.T) {
 	wh, err := webhook.New()
 	require.NoError(t, err)

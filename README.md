@@ -352,7 +352,7 @@ res, err := http.Post(m.URL("/orders"), "application/json", strings.NewReader(`{
 callbacks.AssertCalled(t)
 ```
 
-A webhook's `delay` counts from the reply, so it holds the response too. A reply that flushes its response early, such as a multipart stream with delays, can reach the client before its webhooks are done. `m.Close()` cancels the webhooks still waiting, for their delay or for their target.
+A webhook's `delay` counts from the reply, so it holds the response too. A reply that streams its parts, or a body over a few KB, sends its status and headers before its webhooks are done, so the call returns early; the body still ends after them, unless the mock sets `Content-Length` itself. Read the body to its end, as `io.ReadAll` does, before checking what they sent. `m.Close()` cancels the webhooks still waiting, for their delay or for their target.
 
 **Failures.** A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning. The timeout is 10 seconds: `webhook.WithTimeout` changes it in Go, and the `webhook.timeout` setting for the `vlatte` command, where 0 means 10 seconds, unlike `proxy.timeout`. A response waits for a webhook at most its delay plus the timeout.
 
