@@ -42,6 +42,7 @@ local scheme = import './scheme.libsonnet';
     path(matcher):: { path: matcher },
     url(matcher):: { url: matcher },
     urlMatch(matcher):: { url_match: matcher },
+    fragment(matcher):: { fragment: matcher },
     header(key, matcher):: { header: { [key]: matcher } },
     query(key, matcher):: { query: { [key]: matcher } },
     queries(key, matcher):: { queries: { [key]: matcher } },

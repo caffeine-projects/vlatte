@@ -170,6 +170,9 @@ func New(config ...Option) (*Server, error) {
 		handler = conf.HandlerDecorator(handler)
 	}
 
+	// Outermost: the decorator and the middlewares see the fragment in r.URL too.
+	handler = withFragment(handler)
+
 	factory := conf.BackendFactory
 
 	if factory == nil {
@@ -297,20 +300,30 @@ func (app *Server) MustStartTLS() {
 	}
 }
 
-// URL returns the base URL string for the mock server.
-// If parameter paths is provided, it will be concatenated with the server base URL.
+// URL returns the base URL of the mock server. With paths, it joins them to it as path elements, with url.JoinPath:
+// URL("/users", "1") is <base>/users/1, and "%3F" is a "?" in the path. A "?" or "#" in the last element starts the
+// query or the fragment, which are appended as given, so they must already be escaped:
+// URL("/users/1?active=true#top"). Go's http.Client doesn't send the fragment.
 func (app *Server) URL(paths ...string) string {
 	if len(paths) == 0 {
 		return app.server.Info().URL
 	}
 
-	u, err := url.JoinPath(app.server.Info().URL, paths...)
+	// url.JoinPath would escape "?" and "#" into the path: cut the query and the fragment off first.
+	elems := slices.Clone(paths)
+	last := len(elems) - 1
+	var rest string
+	if i := strings.IndexAny(elems[last], "?#"); i >= 0 {
+		elems[last], rest = elems[last][:i], elems[last][i:]
+	}
+
+	u, err := url.JoinPath(app.server.Info().URL, elems...)
 	if err != nil {
 		// A library must not exit the process: panic so the caller (usually a test) reports it.
 		panic(fmt.Errorf("server: building server url with path elements %s: %w", paths, err))
 	}
 
-	return u
+	return u + rest
 }
 
 // Parameters returns Params instance associated with this application.

@@ -21,8 +21,8 @@ type RequestValues struct {
 	// URL is the full request url.URL, including scheme, host, port.
 	URL *url.URL
 
-	// URLPathSegments stores path segments.
-	// Eg.: /test/100 -> []string{"test", "100"}
+	// URLPathSegments stores path segments, each decoded: an escaped "/" stays in its segment.
+	// Eg.: /test/100 -> []string{"test", "100"}, and /files/a%2Fb -> []string{"files", "a/b"}
 	URLPathSegments []string
 
 	// RawBodyBytes is the HTTP request body bytes.

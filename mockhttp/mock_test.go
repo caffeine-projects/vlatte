@@ -1,7 +1,11 @@
 package mockhttp
 
 import (
+	json "encoding/json/v2"
 	"fmt"
+	"maps"
+	"net/http"
+	"slices"
 	"sync"
 	"testing"
 
@@ -85,4 +89,95 @@ func TestMock_String(t *testing.T) {
 	unnamed, err := Getf("/").ID("b").Reply(OK()).Build(m)
 	require.NoError(t, err)
 	require.Equal(t, "Mock [b]", unnamed.String())
+}
+
+func TestMock_ADescribedMockLoadsBackAndMatchesTheSame(t *testing.T) {
+	// The description of a mock is a mock file, as the admin API shows and takes it. Loaded back, it must match the
+	// same requests: a matcher of the method must not get lost, nor one of the path or fragment turn into one of the
+	// whole URL.
+	tests := []struct {
+		name        string
+		give        *Builder
+		wantKeys    []string
+		wantMatch   []string
+		wantNoMatch []string
+	}{
+		{
+			name:        "path",
+			give:        Getf("/test"),
+			wantKeys:    []string{"method", "path"},
+			wantMatch:   []string{"/test"},
+			wantNoMatch: []string{"/other"},
+		},
+		{
+			// The requests are GETs.
+			name:        "method",
+			give:        Postf("/test"),
+			wantKeys:    []string{"method", "path"},
+			wantMatch:   []string{},
+			wantNoMatch: []string{"/test"},
+		},
+		{
+			name:        "path and fragment",
+			give:        Getf("/test").URLFragmentf("contacts"),
+			wantKeys:    []string{"fragment", "method", "path"},
+			wantMatch:   []string{"/test#contacts"},
+			wantNoMatch: []string{"/test#other", "/test"},
+		},
+		{
+			// A mock file has url or path, not both: the path matcher goes in url.
+			name:        "url and path",
+			give:        Request().URL(match.Contain("test")).URLPathf("/test"),
+			wantKeys:    []string{"url"},
+			wantMatch:   []string{"/test"},
+			wantNoMatch: []string{"/x/test", "/other"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			built := MustNew(Setup().Silent())
+			built.MustStart()
+			t.Cleanup(built.Close)
+
+			desc, err := built.MustMock(tt.give.Reply(OK())).Mocks()[0].MarshalJSON()
+			require.NoError(t, err)
+
+			var doc map[string]any
+			require.NoError(t, json.Unmarshal(desc, &doc))
+			request, _ := doc["request"].(map[string]any)
+			require.Equal(t, tt.wantKeys, slices.Sorted(maps.Keys(request)), string(desc))
+
+			loaded := MustNew(Setup().Silent())
+			loaded.MustStart()
+			t.Cleanup(loaded.Close)
+			loaded.MustMock(FromBytes(desc, "json"))
+
+			for _, target := range tt.wantMatch {
+				require.Equal(t, http.StatusOK, getTarget(t, built, target), target)
+				require.Equal(t, http.StatusOK, getTarget(t, loaded, target), "loaded: %s: %s", target, desc)
+			}
+
+			for _, target := range tt.wantNoMatch {
+				require.Equal(t, StatusNoMatch, getTarget(t, built, target), target)
+				require.Equal(t, StatusNoMatch, getTarget(t, loaded, target), "loaded: %s: %s", target, desc)
+			}
+		})
+	}
+}
+
+// getTarget sends a GET with target as the request target, as is, and returns the status: Go's http.Client doesn't
+// send a URL's fragment.
+func getTarget(t *testing.T, m *Server, target string) int {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodGet, m.URL(), nil)
+	require.NoError(t, err)
+	req.URL.Opaque = target
+
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	return res.StatusCode
 }

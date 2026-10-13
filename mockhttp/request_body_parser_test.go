@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -131,4 +132,149 @@ func TestParseURL_SegmentsExcludeQuery(t *testing.T) {
 	// Path segments come from the path only; the query stays in the full URL.
 	require.Equal(t, []string{"a", "b"}, segments)
 	require.Equal(t, "x=1", u.RawQuery)
+}
+
+func TestParseURL_KeepsThePathAsSent(t *testing.T) {
+	// Decoded, an escaped "?" or "#" would start a query or a fragment, an escaped "/" would split its segment, and an
+	// escaped "%" would be decoded twice.
+	tests := []struct {
+		giveMethod   string
+		giveTarget   string
+		wantURL      string
+		wantPath     string
+		wantQuery    string
+		wantSegments []string
+	}{
+		{
+			giveMethod: http.MethodGet, giveTarget: "/test%3Fq=none",
+			wantURL: "http://localhost/test%3Fq=none", wantPath: "/test?q=none", wantSegments: []string{"test?q=none"},
+		},
+		{
+			giveMethod: http.MethodGet, giveTarget: "/test%23contacts",
+			wantURL: "http://localhost/test%23contacts", wantPath: "/test#contacts", wantSegments: []string{"test#contacts"},
+		},
+		{
+			giveMethod: http.MethodGet, giveTarget: "/a/b%2Fc",
+			wantURL: "http://localhost/a/b%2Fc", wantPath: "/a/b/c", wantSegments: []string{"a", "b/c"},
+		},
+		{
+			giveMethod: http.MethodGet, giveTarget: "/files/a%20b",
+			wantURL: "http://localhost/files/a%20b", wantPath: "/files/a b", wantSegments: []string{"files", "a b"},
+		},
+		{
+			giveMethod: http.MethodGet, giveTarget: "/a%2541",
+			wantURL: "http://localhost/a%2541", wantPath: "/a%41", wantSegments: []string{"a%41"},
+		},
+		{
+			giveMethod: http.MethodGet, giveTarget: "/50%25",
+			wantURL: "http://localhost/50%25", wantPath: "/50%", wantSegments: []string{"50%"},
+		},
+		{
+			giveMethod: http.MethodGet, giveTarget: "*",
+			wantURL: "http://localhost/*", wantPath: "*", wantSegments: []string{"*"},
+		},
+		{
+			giveMethod: http.MethodGet, giveTarget: "/a/b?x=1",
+			wantURL: "http://localhost/a/b?x=1", wantPath: "/a/b", wantQuery: "x=1", wantSegments: []string{"a", "b"},
+		},
+		// An empty query is no query.
+		{
+			giveMethod: http.MethodGet, giveTarget: "/test?",
+			wantURL: "http://localhost/test", wantPath: "/test", wantSegments: []string{"test"},
+		},
+		// A CONNECT target is a host: the URL is the server's.
+		{
+			giveMethod: http.MethodConnect, giveTarget: "example.com:443",
+			wantURL: "http://localhost", wantSegments: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.giveMethod+" "+tt.giveTarget, func(t *testing.T) {
+			u, segments := parseURL(httptest.NewRequest(tt.giveMethod, tt.giveTarget, nil), "http://localhost")
+
+			require.Equal(t, tt.wantURL, u.String())
+			require.Equal(t, tt.wantPath, u.Path)
+			require.Equal(t, tt.wantQuery, u.RawQuery)
+			require.Equal(t, tt.wantSegments, segments)
+		})
+	}
+}
+
+func TestWithFragment_MovesTheFragmentOutOfThePathAndQuery(t *testing.T) {
+	// Go's server reads no fragment: it leaves a "#" and what follows in r.URL's path, or in its query, where q would
+	// be "1#contacts".
+	tests := []struct {
+		giveTarget   string
+		wantPath     string
+		wantQuery    string
+		wantFragment string
+	}{
+		{giveTarget: "/test#contacts", wantPath: "/test", wantFragment: "contacts"},
+		{giveTarget: "/test?q=1#contacts", wantPath: "/test", wantQuery: "q=1", wantFragment: "contacts"},
+		// The first "#" starts the fragment, even before a "?".
+		{giveTarget: "/a#b?c", wantPath: "/a", wantFragment: "b?c"},
+		// A fragment that doesn't decode is left out, and the query still ends at its "#".
+		{giveTarget: "/t?q=1#%zz", wantPath: "/t", wantQuery: "q=1"},
+		{giveTarget: "/t#a%20b", wantPath: "/t", wantFragment: "a b"},
+		// Parsed as any URL, rather than as a request target, "//double" would be a host.
+		{giveTarget: "//double#f", wantPath: "//double", wantFragment: "f"},
+		{giveTarget: "http://example.com/p?q=1#f", wantPath: "/p", wantQuery: "q=1", wantFragment: "f"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.giveTarget, func(t *testing.T) {
+			got := passThrough(t, httptest.NewRequest(http.MethodGet, tt.giveTarget, nil))
+
+			require.Equal(t, tt.wantPath, got.URL.Path)
+			require.Equal(t, tt.wantQuery, got.URL.RawQuery)
+			require.Equal(t, tt.wantFragment, got.URL.Fragment)
+			require.Equal(t, tt.giveTarget, got.RequestURI)
+		})
+	}
+}
+
+func TestWithFragment_PassesOnRequestsItLeavesAlone(t *testing.T) {
+	// A request with no fragment to move reaches the handlers as it came: the same request.
+	connect := httptest.NewRequest(http.MethodConnect, "example.com:443", nil)
+	// A CONNECT target is a host, so a "#" in it starts no fragment. HTTP/2 doesn't check the authority it comes in.
+	connect.RequestURI = "example.com:443#x"
+
+	// The server rejects a target that doesn't parse. Should one come anyway, its fragment is not worth dropping it.
+	unparsed := httptest.NewRequest(http.MethodGet, "/a", nil)
+	unparsed.RequestURI = "/a%zz#x"
+
+	for _, r := range []*http.Request{
+		httptest.NewRequest(http.MethodGet, "/test%23contacts", nil),
+		httptest.NewRequest(http.MethodGet, "/a/b?x=1", nil),
+		connect,
+		unparsed,
+	} {
+		t.Run(r.RequestURI, func(t *testing.T) {
+			require.Same(t, r, passThrough(t, r))
+		})
+	}
+}
+
+// passThrough returns the request withFragment hands to the next handler.
+func passThrough(t *testing.T, r *http.Request) *http.Request {
+	t.Helper()
+
+	var got *http.Request
+	withFragment(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = r })).
+		ServeHTTP(httptest.NewRecorder(), r)
+	require.NotNil(t, got)
+
+	return got
+}
+
+func TestParseURL_KeepsTheFragment(t *testing.T) {
+	// The server never fills in r.URL.Fragment: withFragment does, from the request target.
+	r, err := http.NewRequest(http.MethodGet, "http://localhost/t#top", nil)
+	require.NoError(t, err)
+
+	u, _ := parseURL(r, "http://localhost")
+
+	require.Equal(t, "top", u.Fragment)
+	require.Equal(t, "http://localhost/t#top", u.String())
 }

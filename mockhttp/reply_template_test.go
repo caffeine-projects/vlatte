@@ -169,6 +169,26 @@ func TestReplyTemplates_MissingKeysAreErrors(t *testing.T) {
 	require.Contains(t, body, `map has no entry for key "nmae"`)
 }
 
+func TestReplyTemplates_ADecodedSegmentStaysInItsDirectory(t *testing.T) {
+	// Path segments are decoded, so "..%2Fsecret.txt" is one segment, "../secret.txt": a body file name rendered from
+	// a segment must stay in its directory, as one rendered from a query does.
+	root := t.TempDir()
+	dir := filepath.Join(root, "files")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "secret.txt"), []byte("the secret"), 0o600))
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/files/*").Reply(OK().BodyFile(filepath.Join(dir, "{{ index .Request.URLPathSegments 1 }}"))))
+
+	status, header, body := getFull(t, m, "/files/..%2Fsecret.txt")
+	require.Equal(t, StatusNoMatch, status, body)
+	require.Equal(t, vlatte.FailureReply, header.Get(HeaderXVlatteError))
+	require.NotContains(t, body, "the secret")
+}
+
 func TestReplyTemplates_RequestErrors(t *testing.T) {
 	// What fails at a request, rendering a template or reading a body file, answers with the error instead of a
 	// response with a part missing.

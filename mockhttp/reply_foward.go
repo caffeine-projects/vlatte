@@ -234,19 +234,28 @@ func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, er
 }
 
 func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
-	path := req.RawRequest.URL.Path
+	// The trims match the decoded path and cut the escaped path at the same place, so escapes such as "%2F" stay.
+	path, escaped := req.RawRequest.URL.Path, req.RawRequest.URL.EscapedPath()
 
-	if p.trimPrefix != "" {
-		path = strings.TrimPrefix(path, p.trimPrefix)
+	if rest, ok := strings.CutPrefix(path, p.trimPrefix); ok {
+		escaped = escaped[escapedIndex(escaped, len(p.trimPrefix)):]
+		path = rest
 	}
 
-	if p.trimSuffix != "" {
-		path = strings.TrimSuffix(path, p.trimSuffix)
+	if rest, ok := strings.CutSuffix(path, p.trimSuffix); ok {
+		escaped = escaped[:escapedIndex(escaped, len(rest))]
+		path = rest
+	}
+
+	// The "/" that starts the path came from an escape, as in "/api%2Fv1" cut by "/api": sent as "%2Fv1", the target
+	// would not start with "/". The path goes as Path escapes it.
+	if strings.HasPrefix(path, "/") && !strings.HasPrefix(escaped, "/") {
+		escaped = ""
 	}
 
 	req.RawRequest.URL.Host = p.target.Host
 	req.RawRequest.URL.Scheme = p.target.Scheme
-	req.RawRequest.URL.Path = path
+	req.RawRequest.URL.Path, req.RawRequest.URL.RawPath = path, escaped
 	req.RawRequest.Host = p.target.Host
 	req.RawRequest.RequestURI = ""
 
@@ -305,4 +314,19 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 	}
 
 	return stub, nil
+}
+
+// escapedIndex returns the index in escaped, a validly escaped path, where its first n decoded bytes end. Each "%"
+// starts an escape: three bytes that decode to one.
+func escapedIndex(escaped string, n int) int {
+	i := 0
+	for range n {
+		if escaped[i] == '%' {
+			i += 3
+		} else {
+			i++
+		}
+	}
+
+	return i
 }

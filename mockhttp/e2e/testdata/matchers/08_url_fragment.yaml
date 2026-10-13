@@ -1,0 +1,6 @@
+request:
+  path: /test
+  fragment: contacts
+
+response:
+  status: 204
