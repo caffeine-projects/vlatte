@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -140,6 +141,18 @@ func TestWebHook_PrepareFailsTheMock(t *testing.T) {
 			params:   map[string]any{"url": "http://user:secret@hooks.test/%zz"},
 			sentinel: webhook.ErrBadArg,
 			want:     `webhook: bad argument: url: invalid URL escape "%zz"`,
+		},
+		{
+			name:     "a negative delay",
+			params:   map[string]any{"url": "http://localhost", "delay": -1},
+			sentinel: webhook.ErrBadArg,
+			want:     "invalid_value: parameters.delay must be 0 or more",
+		},
+		{
+			name:     "a negative delay in Go",
+			params:   &webhook.Args{URL: "http://localhost", Delay: -time.Second},
+			sentinel: webhook.ErrBadArg,
+			want:     "webhook: bad argument: delay -1s is negative",
 		},
 		{
 			name:     "a method that isn't one",

@@ -707,3 +707,88 @@ func TestWithTimeout_RejectsANegativeTimeout(t *testing.T) {
 	_, err := webhook.New(webhook.WithTimeout(-time.Second))
 	require.EqualError(t, err, "webhook: error applying option at index 0. reason: negative timeout -1s")
 }
+
+// clocked is a RoundTripper that keeps when it was called, and answers 204.
+type clocked struct {
+	at []time.Time
+}
+
+func (c *clocked) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.at = append(c.at, time.Now())
+	return &http.Response{StatusCode: http.StatusNoContent, Status: "204 No Content", Body: http.NoBody, Request: req}, nil
+}
+
+func TestWebHook_Delay(t *testing.T) {
+	// A delay holds the send, as real webhooks often come some time after the response: it counts from the start of
+	// the send, and the timeout from the request, after it. A context that ends during the delay sends nothing.
+	t.Run("sent after the delay", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			rt := &clocked{}
+			wh, err := webhook.New(webhook.WithRoundTripper(rt))
+			require.NoError(t, err)
+
+			start := time.Now()
+			require.NoError(t, wh.Run(t.Context(), onComplete{params: map[string]any{"url": "http://hooks.test", "delay": "1.5s"}}))
+
+			require.Len(t, rt.at, 1)
+			require.Equal(t, 1500*time.Millisecond, rt.at[0].Sub(start))
+		})
+	})
+
+	t.Run("the timeout counts from the send", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			wh, err := webhook.New(webhook.WithRoundTripper(silent{}), webhook.WithTimeout(time.Second))
+			require.NoError(t, err)
+
+			start := time.Now()
+			err = wh.Run(t.Context(), onComplete{params: &webhook.Args{URL: "http://hooks.test", Delay: 2 * time.Second}})
+
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.Equal(t, 3*time.Second, time.Since(start), "the delay, then the timeout")
+		})
+	})
+
+	t.Run("a context that ends during the delay sends nothing", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			rt := &clocked{}
+			wh, err := webhook.New(webhook.WithRoundTripper(rt))
+			require.NoError(t, err)
+
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+
+			err = wh.Run(ctx, onComplete{params: map[string]any{"url": "http://hooks.test", "delay": "1m"}})
+
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.EqualError(t, err, "webhook: GET http://hooks.test: waiting for the delay of 1m0s: context deadline exceeded")
+			require.Empty(t, rt.at)
+		})
+	})
+}
+
+func TestWebHook_DelayFromAMock(t *testing.T) {
+	// The delay of a mock's webhook holds the webhook, not the response.
+	got := make(chan time.Time, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { got <- time.Now() }))
+	t.Cleanup(target.Close)
+
+	wh, err := webhook.New()
+	require.NoError(t, err)
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().OnCompleteListener("webhook", wh))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.Getf("/x").
+		OnCompleteEvent(webhook.Options().URL(target.URL).Delay(200 * time.Millisecond).Build("webhook")).
+		Reply(mockhttp.NoContent()))
+
+	res, err := http.Get(m.URL("/x"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	answered := time.Now()
+
+	m.WaitEvents()
+	require.GreaterOrEqual(t, (<-got).Sub(answered), 150*time.Millisecond, "the webhook came after its delay")
+}

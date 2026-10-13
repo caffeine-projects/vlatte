@@ -192,21 +192,6 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		logger = loggerOf(args)
 	}
 
-	// The URL may hold a password: logs and errors show it redacted.
-	redacted := u.Redacted()
-	logger.Info().
-		Str("url", redacted).
-		Str("kind", args.Kind().String()).
-		Msgf("---> WEBHOOK REQUEST %s %s", method, u.Path)
-
-	timeout := w.Timeout
-	if timeout <= 0 {
-		timeout = _defaultTimeout
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
 		return fmt.Errorf("webhook: %w", err)
@@ -243,13 +228,37 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		req.SetBasicAuth(u.User.Username(), password)
 	}
 
+	// The URL may hold a password: logs and errors show it redacted.
+	redacted := u.Redacted()
+
+	// Everything renders before the delay, so a mistake shows without waiting for it.
+	if webhookArgs.Delay > 0 {
+		if err := wait(ctx, webhookArgs.Delay); err != nil {
+			return fmt.Errorf("webhook: %s %s: waiting for the delay of %s: %w", method, redacted, webhookArgs.Delay, err)
+		}
+	}
+
+	logger.Info().
+		Str("url", redacted).
+		Str("kind", args.Kind().String()).
+		Msgf("---> WEBHOOK REQUEST %s %s", method, u.Path)
+
+	// The timeout counts from the send, after the delay.
+	timeout := w.Timeout
+	if timeout <= 0 {
+		timeout = _defaultTimeout
+	}
+
+	sendCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	roundTripper := w.RoundTripper
 	if roundTripper == nil {
 		roundTripper = http.DefaultTransport
 	}
 
 	// The caller logs the errors: logging them here too would log each twice.
-	res, err := roundTripper.RoundTrip(req)
+	res, err := roundTripper.RoundTrip(req.WithContext(sendCtx))
 	if err != nil {
 		return fmt.Errorf("webhook: %s %s: request failed: %w", method, redacted, err)
 	}
@@ -286,6 +295,10 @@ type Args struct {
 
 	// Multipart is a multipart body, such as one built with mockhttp.MultipartForm. It sets the Content-Type.
 	Multipart MultipartBody
+
+	// Delay is how long the webhook waits after the response before it sends the request. The WebHook's timeout
+	// counts from the send.
+	Delay time.Duration
 
 	dir string // where relative files open from: the mock file's directory; "" is the working directory
 }
@@ -337,8 +350,8 @@ func (a *Args) check(engine vlatte.TemplateEngine) error {
 }
 
 // validate checks what a request needs, and what decoding a map can't check for Args built in Go: one of URL and
-// URLTemplate, a URL a request can go to, a valid method, one body at most, a Content-Type only from a multipart body,
-// and each header once, as header names ignore case.
+// URLTemplate, a URL a request can go to, a valid method, one body at most, a delay of 0 or more, a Content-Type only
+// from a multipart body, and each header once, as header names ignore case.
 func (a *Args) validate() error {
 	switch {
 	case a.URL == "" && a.URLTemplate == "":
@@ -357,6 +370,10 @@ func (a *Args) validate() error {
 
 	if countSet(a.Body, a.BodyTemplate, a.BodyFile)+countSet(a.Multipart != nil) > 1 {
 		return errorBadArg(errors.New("more than one body is set: keep one of Body, BodyTemplate, BodyFile and Multipart"))
+	}
+
+	if a.Delay < 0 {
+		return errorBadArg(fmt.Errorf("delay %s is negative", a.Delay))
 	}
 
 	names := make(map[string]string, len(a.Header)+len(a.HeaderTemplate))
@@ -434,6 +451,10 @@ var _argsSchema = config.NewSchema(
 		Usage: "Multipart body whose text is templates: names, filenames, content types, header values, text bodies and body file names.",
 		Set:   func(a *Args, v config.Value) error { return setMultipart(a, v, true) },
 	},
+	argsField{
+		Key: "delay", Kind: config.Duration, Usage: "How long to wait after the response before sending: milliseconds or a Go duration (1.5s).",
+		Set: func(a *Args, v config.Value) error { a.Delay = v.Dur; return nil },
+	},
 )
 
 // _exclusive lists the sets of parameters of which only one can be set.
@@ -462,9 +483,12 @@ func argsOf(params vlatte.Parameters, origin, dir string) (*Args, error) {
 //   - url, or url_template, a template: a string;
 //   - method: a string, GET when empty;
 //   - header and header_template, whose values are templates: objects of strings;
-//   - body, body_template, a template, or body_file: a string.
+//   - one body: body, body_template, a template, or body_file, a string; or multipart, or multipart_template, whose
+//     text is templates: an object with the type, boundary, params and parts of the body;
+//   - delay: milliseconds, or a Go duration such as 1.5s.
 //
-// As in mock files, each value must have its type, and other keys are errors. A map built in code means what its
+// As in mock files, each value must have its type, and other keys are errors. The webhook's checks of what a request
+// needs, such as one of url and url_template, come when the mock is built. A map built in code means what its
 // JSON means, so a map[string]string or an int is fine where its JSON is. The error wraps ErrBadArg and lists
 // every problem.
 func ArgsFromMap(m map[string]any) (*Args, error) {
@@ -715,6 +739,19 @@ func checkURL(raw string) error {
 	}
 
 	return nil
+}
+
+// wait waits for d, or until ctx ends, as mockhttp waits for the delay of a multipart part.
+func wait(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 // render compiles text with engine and executes it with data.

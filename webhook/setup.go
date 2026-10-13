@@ -1,6 +1,10 @@
 package webhook
 
-import "github.com/caffeine-projects/vlatte"
+import (
+	"time"
+
+	"github.com/caffeine-projects/vlatte"
+)
 
 // ArgsBuilder provides a convenient way to configure a WebHook for a mock.
 type ArgsBuilder struct {
@@ -33,6 +37,12 @@ func (b *ArgsBuilder) Header(k, v string) *ArgsBuilder {
 // Body sets the HTTP request body of the WebHook.
 func (b *ArgsBuilder) Body(body string) *ArgsBuilder {
 	b.input.Body = body
+	return b
+}
+
+// Delay sets how long the WebHook waits after the response before it sends the request.
+func (b *ArgsBuilder) Delay(d time.Duration) *ArgsBuilder {
+	b.input.Delay = d
 	return b
 }
 
