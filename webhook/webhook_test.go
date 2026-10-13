@@ -131,27 +131,6 @@ func TestWebHook_Run(t *testing.T) {
 			},
 			0,
 		},
-		{
-			"malformed url",
-			mockhttp.Postf("/third_party/hook").
-				Reply(mockhttp.OK()),
-			webhook.Options().
-				URL(" -   " + string(rune(0x7f))).
-				Method(http.MethodPost).
-				Build(name),
-			nil,
-			0,
-		},
-		{
-			"unable to build http request",
-			mockhttp.Postf("/third_party/hook").Reply(mockhttp.OK()),
-			webhook.Options().
-				URL(target.URL("/third_party/hook")).
-				Method("ghjk%&^*()").
-				Build(name),
-			nil,
-			0,
-		},
 	}
 
 	for _, tc := range testCases {

@@ -185,7 +185,7 @@ func (p *PartSpec) check(path string, formData bool) []Issue {
 		at := ".header." + h.Name
 
 		switch canonical := textproto.CanonicalMIMEHeaderKey(h.Name); {
-		case !isToken(h.Name):
+		case !IsToken(h.Name):
 			add(config.CodeInvalidValue, at, "is not a header name", "")
 		case strings.ContainsAny(textproto.TrimString(h.Value), "\r\n"):
 			add(config.CodeInvalidValue, at, "holds a line break", "")
@@ -302,8 +302,8 @@ func startsALine(body []byte, boundary string) bool {
 	return bytes.HasPrefix(body, delimiter) || bytes.Contains(body, append([]byte("\n"), delimiter...))
 }
 
-// isToken reports whether s is an HTTP token, as header names are.
-func isToken(s string) bool {
+// IsToken reports whether s is an HTTP token, as header names and methods are.
+func IsToken(s string) bool {
 	if s == "" {
 		return false
 	}

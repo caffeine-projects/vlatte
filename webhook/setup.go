@@ -7,7 +7,7 @@ type ArgsBuilder struct {
 	input *Args
 }
 
-// Options creates a new Builder to configure a WebHook for a mock.
+// Options starts an ArgsBuilder to configure a WebHook for a mock.
 func Options() *ArgsBuilder {
 	return &ArgsBuilder{input: &Args{Header: make(map[string]string)}}
 }
@@ -42,7 +42,8 @@ func (b *ArgsBuilder) Multipart(body MultipartBody) *ArgsBuilder {
 	return b
 }
 
-// Build builds the vlatte.EventConfig required to set up a WebHook for a mock (on-complete event).
+// Build builds the vlatte.EventConfig required to set up a WebHook for a mock (on-complete event). The config gets a
+// copy of the parameters, so changing the builder afterwards changes only the configs built afterwards.
 func (b *ArgsBuilder) Build(name string) vlatte.EventConfig {
-	return vlatte.EventConfig{Name: name, Parameters: b.input}
+	return vlatte.EventConfig{Name: name, Parameters: b.input.clone()}
 }

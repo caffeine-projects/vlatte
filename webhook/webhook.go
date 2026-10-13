@@ -97,12 +97,16 @@ func New(options ...Option) (*WebHook, error) {
 	return w, nil
 }
 
-// Prepare implements vlatte.EventPreparer. It decodes the parameters of a mock's webhook and compiles their templates
-// with the server's engine, so a mistake fails the mock when it is built instead of each send. Run receives the
-// decoded *Args.
+// Prepare implements vlatte.EventPreparer. It decodes the parameters of a mock's webhook, checks them, and compiles
+// their templates with the server's engine, so a mistake fails the mock when it is built instead of each send. Run
+// receives the decoded *Args.
 func (w *WebHook) Prepare(cfg vlatte.EventConfig, engine vlatte.TemplateEngine) (vlatte.Parameters, error) {
 	args, err := argsOf(cfg.Parameters, "on_complete", cfg.Dir)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := args.validate(); err != nil {
 		return nil, err
 	}
 
@@ -121,8 +125,22 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		return err
 	}
 
+	// A Transform can add headers, whether the parameters have some or not.
+	if webhookArgs.Header == nil {
+		webhookArgs.Header = make(map[string]string)
+	}
+
+	if webhookArgs.HeaderTemplate == nil {
+		webhookArgs.HeaderTemplate = make(map[string]string)
+	}
+
 	if err := w.Transform(ctx, args, webhookArgs); err != nil {
 		return fmt.Errorf("webhook: failed to Transform args: %w", err)
+	}
+
+	// The parameters were checked when the mock was built; a Transform may have changed them since.
+	if err := webhookArgs.validate(); err != nil {
+		return err
 	}
 
 	method := webhookArgs.Method
@@ -138,16 +156,14 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		if rawURL, err = render(engine, "url_template", webhookArgs.URLTemplate, data); err != nil {
 			return err
 		}
+
+		if err := checkURL(rawURL); err != nil {
+			return fmt.Errorf("webhook: url_template: %w", err)
+		}
 	}
 
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return fmt.Errorf("webhook: error parsing %s: %w", rawURL, err)
-	}
-
-	if bodies := countSet(webhookArgs.Body, webhookArgs.BodyTemplate, webhookArgs.BodyFile) + countSet(webhookArgs.Multipart != nil); bodies > 1 {
-		return errors.New("webhook: more than one body is set: keep one of Body, BodyTemplate, BodyFile and Multipart")
-	}
+	// validate and checkURL parsed it already.
+	u, _ := url.Parse(rawURL)
 
 	var body io.Reader
 
@@ -218,11 +234,8 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		req.Header.Set(k, rendered)
 	}
 
+	// validate made sure no header sets it.
 	if contentType != "" {
-		if req.Header.Get("Content-Type") != "" {
-			return errors.New("webhook: a multipart body sets the Content-Type: remove the Content-Type header")
-		}
-
 		req.Header.Set("Content-Type", contentType)
 	}
 
@@ -316,6 +329,48 @@ func (a *Args) check(engine vlatte.TemplateEngine) error {
 		if err := a.Multipart.Check(engine); err != nil {
 			return fmt.Errorf("webhook: multipart body: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// validate checks what a request needs, and what decoding a map can't check for Args built in Go: one of URL and
+// URLTemplate, a URL a request can go to, a valid method, one body at most, a Content-Type only from a multipart body,
+// and each header once, as header names ignore case.
+func (a *Args) validate() error {
+	switch {
+	case a.URL == "" && a.URLTemplate == "":
+		return errorBadArg(errors.New("one of url and url_template is required"))
+	case a.URL != "" && a.URLTemplate != "":
+		return errorBadArg(errors.New("url and url_template are both set: keep one of them"))
+	case a.URL != "":
+		if err := checkURL(a.URL); err != nil {
+			return errorBadArg(fmt.Errorf("url: %w", err))
+		}
+	}
+
+	if a.Method != "" && !mpart.IsToken(a.Method) {
+		return errorBadArg(fmt.Errorf("method %q is not an HTTP method", a.Method))
+	}
+
+	if countSet(a.Body, a.BodyTemplate, a.BodyFile)+countSet(a.Multipart != nil) > 1 {
+		return errorBadArg(errors.New("more than one body is set: keep one of Body, BodyTemplate, BodyFile and Multipart"))
+	}
+
+	names := make(map[string]string, len(a.Header)+len(a.HeaderTemplate))
+	for _, header := range []map[string]string{a.Header, a.HeaderTemplate} {
+		for _, name := range slices.Sorted(maps.Keys(header)) {
+			key := textproto.CanonicalMIMEHeaderKey(name)
+			if other, ok := names[key]; ok {
+				return errorBadArg(fmt.Errorf("headers %s and %s are one header: keep one of them", other, name))
+			}
+
+			names[key] = name
+		}
+	}
+
+	if _, ok := names["Content-Type"]; ok && a.Multipart != nil {
+		return errorBadArg(errors.New("a multipart body sets the Content-Type: remove the Content-Type header"))
 	}
 
 	return nil
@@ -461,6 +516,27 @@ func conflicts(doc any, origin string) []config.Problem {
 		}
 	}
 
+	// Header names ignore case: a name set twice, in either map, is one header with one value.
+	names := make(map[string]string)
+	for _, headers := range []string{"header", "header_template"} {
+		header, _ := params[headers].(map[string]any)
+		for _, name := range slices.Sorted(maps.Keys(header)) {
+			key := "parameters." + headers + "." + name
+			canonical := textproto.CanonicalMIMEHeaderKey(name)
+
+			if other, ok := names[canonical]; ok {
+				problems = append(problems, config.Problem{
+					Code: config.CodeConflict, Origin: origin, Key: key,
+					Message: key + " is set with " + other, Hint: "header names ignore case: keep one of them",
+				})
+
+				continue
+			}
+
+			names[canonical] = key
+		}
+	}
+
 	// A multipart body sets the Content-Type, with its boundary.
 	for _, multipart := range []string{"multipart", "multipart_template"} {
 		if _, ok := params[multipart]; !ok {
@@ -572,7 +648,6 @@ func headerOf(v config.Value, dst *map[string]string) error {
 	return err
 }
 
-// originOf names where the parameters of an event come from, for problems: the mock that completed.
 // dirOf returns where the relative files of the event's parameters open from, as mockhttp's OnComplete says: the
 // directory of the mock file that defines the event, or "" for the working directory.
 func dirOf(args vlatte.OnComplete) string {
@@ -583,6 +658,7 @@ func dirOf(args vlatte.OnComplete) string {
 	return ""
 }
 
+// originOf names where the parameters of an event come from, for problems: the mock that completed.
 func originOf(args vlatte.OnComplete) string {
 	if mock := args.Mock(); mock != nil {
 		return "mock " + mock.ID()
@@ -605,6 +681,25 @@ func templating(args vlatte.OnComplete) (vlatte.TemplateEngine, any) {
 	}
 
 	return engine, kit.Data()
+}
+
+// checkURL checks that raw is an absolute http or https URL with a host. Its errors show the URL without its
+// password, as a *url.Error, which prints the whole URL, wouldn't.
+func checkURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		if urlErr, ok := errors.AsType[*url.Error](err); ok {
+			err = urlErr.Err
+		}
+
+		return err
+	}
+
+	if u.Scheme != "http" && u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("%s is not an absolute http or https URL", u.Redacted())
+	}
+
+	return nil
 }
 
 // render compiles text with engine and executes it with data.

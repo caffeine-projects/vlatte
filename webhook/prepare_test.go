@@ -68,6 +68,85 @@ func TestWebHook_PrepareFailsTheMock(t *testing.T) {
 			sentinel: webhook.ErrBadArg,
 			want:     "urll",
 		},
+		// #21: a webhook without a URL built, then failed every send with "unsupported protocol scheme".
+		{
+			name:     "no url",
+			params:   map[string]any{"method": "POST"},
+			sentinel: webhook.ErrBadArg,
+			want:     "webhook: bad argument: one of url and url_template is required",
+		},
+		{
+			name:     "no url in Go",
+			params:   &webhook.Args{Method: "POST"},
+			sentinel: webhook.ErrBadArg,
+			want:     "webhook: bad argument: one of url and url_template is required",
+		},
+		// Args built in Go have no decoder: the rules of mock files are checked when the mock builds, not at each send.
+		{
+			name:     "url and url_template in Go",
+			params:   &webhook.Args{URL: "http://localhost", URLTemplate: "http://{{ .X }}"},
+			sentinel: webhook.ErrBadArg,
+			want:     "webhook: bad argument: url and url_template are both set: keep one of them",
+		},
+		{
+			name:     "two bodies in Go",
+			params:   &webhook.Args{URL: "http://localhost", Body: "x", BodyFile: "x.txt"},
+			sentinel: webhook.ErrBadArg,
+			want:     "webhook: bad argument: more than one body is set",
+		},
+		{
+			name: "a multipart body and a Content-Type header in Go",
+			params: &webhook.Args{
+				URL: "http://localhost", HeaderTemplate: map[string]string{"content-type": "x"},
+				Multipart: mockhttp.MultipartMixed(mockhttp.NewPart()),
+			},
+			sentinel: webhook.ErrBadArg,
+			want:     "webhook: bad argument: a multipart body sets the Content-Type: remove the Content-Type header",
+		},
+		// Header names ignore case: the same header twice had one of its values, at random.
+		{
+			name:     "a header in header and header_template",
+			params:   map[string]any{"url": "http://localhost", "header": map[string]any{"X-A": "1"}, "header_template": map[string]any{"x-a": "2"}},
+			sentinel: webhook.ErrBadArg,
+			want:     "conflict: parameters.header_template.x-a is set with parameters.header.X-A; header names ignore case: keep one of them",
+		},
+		{
+			name:     "a header twice in Go",
+			params:   &webhook.Args{URL: "http://localhost", Header: map[string]string{"x-a": "1", "X-A": "2"}},
+			sentinel: webhook.ErrBadArg,
+			want:     "webhook: bad argument: headers X-A and x-a are one header: keep one of them",
+		},
+		// A URL or a method a request can't use failed every send.
+		{
+			name:     "a relative url",
+			params:   map[string]any{"url": "/hooks"},
+			sentinel: webhook.ErrBadArg,
+			want:     "webhook: bad argument: url: /hooks is not an absolute http or https URL",
+		},
+		{
+			name:     "an ftp url, with a password",
+			params:   map[string]any{"url": "ftp://user:secret@files.test/hooks"},
+			sentinel: webhook.ErrBadArg,
+			want:     "webhook: bad argument: url: ftp://user:xxxxx@files.test/hooks is not an absolute http or https URL",
+		},
+		{
+			name:     "a url that doesn't parse",
+			params:   map[string]any{"url": " -   " + string(rune(0x7f))},
+			sentinel: webhook.ErrBadArg,
+			want:     "webhook: bad argument: url: net/url: invalid control character in URL",
+		},
+		{
+			name:     "a url with a password that doesn't parse",
+			params:   map[string]any{"url": "http://user:secret@hooks.test/%zz"},
+			sentinel: webhook.ErrBadArg,
+			want:     `webhook: bad argument: url: invalid URL escape "%zz"`,
+		},
+		{
+			name:     "a method that isn't one",
+			params:   map[string]any{"url": "http://localhost", "method": "ghjk%&^*()"},
+			sentinel: webhook.ErrBadArg,
+			want:     `webhook: bad argument: method "ghjk%&^*()" is not an HTTP method`,
+		},
 	}
 
 	for _, tc := range tests {
@@ -78,12 +157,87 @@ func TestWebHook_PrepareFailsTheMock(t *testing.T) {
 
 			require.ErrorContains(t, err, "mock: on_complete listener webhook at index 0: ")
 			require.ErrorContains(t, err, tc.want)
+			require.NotContains(t, err.Error(), "secret", "a URL's password stays out of errors")
 
 			if tc.sentinel != nil {
 				require.ErrorIs(t, err, tc.sentinel)
 			}
 		})
 	}
+}
+
+func TestWebHook_TransformCanAddHeaders(t *testing.T) {
+	// Parameters without headers had nil header maps, and a Transform that added a header panicked.
+	rt := &sent{}
+	wh, err := webhook.New(webhook.WithRoundTripper(rt), webhook.WithTransform(func(_ context.Context, _ vlatte.OnComplete, a *webhook.Args) error {
+		a.Header["X-A"] = "a"
+		a.HeaderTemplate["X-B"] = "{{ .b }}"
+
+		return nil
+	}))
+	require.NoError(t, err)
+
+	for _, params := range []vlatte.Parameters{map[string]any{"url": "http://hooks.test"}, &webhook.Args{URL: "http://hooks.test"}} {
+		rt.req = nil
+		require.NoError(t, wh.Run(t.Context(), onComplete{params: params, kit: kit{data: map[string]any{"b": "b"}}}))
+		require.Equal(t, "a", rt.req.Header.Get("X-A"))
+		require.Equal(t, "b", rt.req.Header.Get("X-B"))
+	}
+}
+
+func TestWebHook_RunChecksWhatTheSendUses(t *testing.T) {
+	// The mock's parameters were checked when it was built; what a Transform or a url_template makes of them is
+	// checked before the send.
+	tests := []struct {
+		name      string
+		params    vlatte.Parameters
+		transform webhook.Transform
+		want      string
+	}{
+		{
+			name:   "a url_template that renders a relative URL",
+			params: map[string]any{"url_template": "{{ .path }}"},
+			want:   "webhook: url_template: /hooks is not an absolute http or https URL",
+		},
+		{
+			name:   "a Transform that removes the URL",
+			params: &webhook.Args{URL: "http://hooks.test"},
+			transform: func(_ context.Context, _ vlatte.OnComplete, a *webhook.Args) error {
+				a.URL = ""
+				return nil
+			},
+			want: "webhook: bad argument: one of url and url_template is required",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := &sent{}
+			options := []webhook.Option{webhook.WithRoundTripper(rt)}
+			if tc.transform != nil {
+				options = append(options, webhook.WithTransform(tc.transform))
+			}
+
+			wh, err := webhook.New(options...)
+			require.NoError(t, err)
+
+			err = wh.Run(t.Context(), onComplete{params: tc.params, kit: kit{data: map[string]any{"path": "/hooks"}}})
+			require.EqualError(t, err, tc.want)
+			require.Nil(t, rt.req, "nothing is sent")
+		})
+	}
+}
+
+func TestArgsBuilder_EachConfigHasItsOwnArgs(t *testing.T) {
+	// Build gave every config the builder's own *Args: changing the builder changed the configs built before.
+	b := webhook.Options().URL("http://a.test").Header("X-A", "1")
+	first := b.Build("webhook")
+
+	b.URL("http://b.test").Header("X-A", "2")
+	second := b.Build("webhook")
+
+	require.Equal(t, &webhook.Args{URL: "http://a.test", Header: map[string]string{"X-A": "1"}}, first.Parameters)
+	require.Equal(t, &webhook.Args{URL: "http://b.test", Header: map[string]string{"X-A": "2"}}, second.Parameters)
 }
 
 func TestWebHook_PrepareFailsAMockFile(t *testing.T) {
