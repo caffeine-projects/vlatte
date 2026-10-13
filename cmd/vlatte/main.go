@@ -136,6 +136,9 @@ func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stder
 		return 1
 	}
 
+	// Settings load in New, and webhooks run once the server starts.
+	wh.Timeout = m.Config().WebhookTimeout
+
 	// The docker address wins over every source, and its port depends on the final https setting.
 	if _, ok := os.LookupEnv(_dockerHostEnv); ok {
 		_ = (&dockerConfigurer{}).Apply(m.Config())

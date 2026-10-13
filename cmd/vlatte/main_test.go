@@ -346,3 +346,28 @@ func TestCLI_ServesMockFilesWithWebhooks(t *testing.T) {
 
 	require.Equal(t, 0, stop(), "a stopped server exits cleanly")
 }
+
+func TestCLI_WebhookTimeout(t *testing.T) {
+	// webhook.timeout bounds the webhooks of the CLI, which wait 10s for an answer by default.
+	withoutDockerHost(t)
+
+	canceled := make(chan struct{}, 4)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		// net/http sees the client leave once the body is read: then the request's context ends.
+		_, _ = io.ReadAll(r.Body)
+		<-r.Context().Done()
+		canceled <- struct{}{}
+	}))
+	t.Cleanup(target.Close)
+
+	addr := randomAddr(t)
+	start(t, "--addr", addr, "--mock-files", writeWebhookMock(t, target.URL+"/hook"), "--log-level", "disabled",
+		"--webhook-timeout", "100ms")
+	getOrders(t, addr)
+
+	select {
+	case <-canceled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the webhook waited past its 100ms timeout")
+	}
+}

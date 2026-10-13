@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -74,6 +75,10 @@ type Config struct {
 	HTTPClientFactory              func() *http.Client
 	HeaderNamesToRedact            map[string]struct{}
 	UseHTTPS                       bool
+
+	// WebhookTimeout is how long a webhook of the vlatte command waits for its answer, from the setting
+	// webhook.timeout. 0 uses the webhook's default, 10s. Only the vlatte command reads it.
+	WebhookTimeout time.Duration
 }
 
 // Apply copies the current Config struct values to the given Config parameter.
@@ -115,6 +120,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Proxy = c.Proxy
 	conf.Record = c.Record
 	conf.UseHTTPS = c.UseHTTPS
+	conf.WebhookTimeout = c.WebhookTimeout
 	conf.MockFileHandlers = c.MockFileHandlers
 	conf.HTTPClientFactory = c.HTTPClientFactory
 	conf.HeaderNamesToRedact = c.HeaderNamesToRedact
