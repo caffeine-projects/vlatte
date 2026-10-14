@@ -213,11 +213,58 @@
     "on_complete_event": {
       "type": "object",
       "properties": {
-        "name": { "type": "string" },
+        "name": { "description": "Name of a listener registered with Setup().OnCompleteListener. The vlatte command registers webhook.", "type": "string", "examples": [ "webhook" ] },
         "parameters": { }
       },
       "additionalProperties": false,
-      "required": [ "name" ]
+      "required": [ "name" ],
+      "if": { "properties": { "name": { "const": "webhook" } }, "required": [ "name" ] },
+      "then": { "properties": { "parameters": { "$ref": "#/$defs/webhook_parameters" } }, "required": [ "parameters" ] }
+    },
+    "webhook_parameters": {
+      "description": "The request a webhook sends after the mock replies: one of url and url_template, and one body at most.",
+      "type": "object",
+      "properties": {
+        "url": { "description": "An absolute http or https URL. Editors check its scheme and that a host follows; building the mock checks the rest.", "type": "string", "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^/?#]" },
+        "url_template": { "description": "The URL, as a template.", "type": "string", "minLength": 1 },
+        "method": { "description": "The method, in any case. Empty means GET.", "type": "string", "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]*$" },
+        "header": { "$ref": "#/$defs/webhook_header" },
+        "header_template": { "description": "Headers whose values are templates.", "$ref": "#/$defs/webhook_header" },
+        "body": { "type": "string" },
+        "body_template": { "description": "The body, as a template.", "type": "string" },
+        "body_file": { "description": "A file to send as the body. Relative paths start at the mock file's directory.", "type": "string" },
+        "multipart": { "description": "A multipart body, as response.multipart. It's sent at once, so its parts can't have delays.", "$ref": "#/$defs/multipart" },
+        "multipart_template": { "description": "A multipart body whose text is templates.", "$ref": "#/$defs/multipart" },
+        "delay": { "description": "How long to wait before sending, once the mock replied. The response waits for it too.", "$ref": "#/$defs/duration" }
+      },
+      "additionalProperties": false,
+      "oneOf": [ { "required": [ "url" ] }, { "required": [ "url_template" ] } ],
+      "allOf": [
+        { "not": { "required": [ "body", "body_template" ] } },
+        { "not": { "required": [ "body", "body_file" ] } },
+        { "not": { "required": [ "body", "multipart" ] } },
+        { "not": { "required": [ "body", "multipart_template" ] } },
+        { "not": { "required": [ "body_template", "body_file" ] } },
+        { "not": { "required": [ "body_template", "multipart" ] } },
+        { "not": { "required": [ "body_template", "multipart_template" ] } },
+        { "not": { "required": [ "body_file", "multipart" ] } },
+        { "not": { "required": [ "body_file", "multipart_template" ] } },
+        { "not": { "required": [ "multipart", "multipart_template" ] } },
+        {
+          "if": { "anyOf": [ { "required": [ "multipart" ] }, { "required": [ "multipart_template" ] } ] },
+          "then": {
+            "properties": {
+              "header": { "propertyNames": { "not": { "pattern": "^[Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Tt][Yy][Pp][Ee]$" } } },
+              "header_template": { "propertyNames": { "not": { "pattern": "^[Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Tt][Yy][Pp][Ee]$" } } }
+            }
+          }
+        }
+      ]
+    },
+    "webhook_header": {
+      "description": "Headers by name, each value a string. Names ignore case: a name can be set once.",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
     },
     "header_map": {
       "type": "object",

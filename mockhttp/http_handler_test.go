@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"bytes"
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"io"
 	"iter"
@@ -14,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -345,4 +347,323 @@ func TestLifecycle_ErrorLogsNameTheMock(t *testing.T) {
 		require.Contains(t, out.String(), "Mock: a users\n")
 		require.Contains(t, out.String(), "Error: boom")
 	})
+}
+
+func TestLifecycle_TheRequestLogTimesTheEvents(t *testing.T) {
+	// The request log was written before the events ran, so its elapsed time left them out, though the response waits
+	// for them: a webhook that took a second logged a request of a millisecond.
+	logs := &logBuffer{}
+	logger := zerolog.New(logs)
+
+	m := MustNew(Setup().Logger(&logger).OnCompleteListener("slow", vlatte.EventFunc[vlatte.OnComplete](
+		func(context.Context, vlatte.OnComplete) error {
+			time.Sleep(100 * time.Millisecond)
+			return nil
+		})))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "slow"}).Reply(NoContent()))
+
+	status, _ := get(t, m, "/x")
+	require.Equal(t, http.StatusNoContent, status)
+
+	var matched []float64
+	for line := range strings.Lines(logs.String()) {
+		var entry struct {
+			Message string  `json:"message"`
+			Elapsed float64 `json:"elapsed"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(line), &entry), line)
+
+		if strings.HasPrefix(entry.Message, "<--- REQUEST MATCHED") {
+			matched = append(matched, entry.Elapsed)
+		}
+	}
+
+	require.Len(t, matched, 1)
+	require.GreaterOrEqual(t, matched[0], 100.0, "the elapsed time, in milliseconds, counts the events")
+}
+
+func TestHandler_TheResponseWaitsForTheEvents(t *testing.T) {
+	// A test checks what the events of a mock did, such as a webhook's call, right after the response, with no wait of
+	// its own: the response waits for them, global ones too.
+	var done atomic.Int32
+	slow := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
+		time.Sleep(50 * time.Millisecond)
+		done.Add(1)
+
+		return nil
+	})
+
+	m := MustNew(Setup().Silent().
+		OnCompleteListener("slow", slow).
+		GlobalEvents(&vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "slow"}}}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "slow"}).Reply(NoContent()))
+
+	status, _ := get(t, m, "/x")
+	require.Equal(t, http.StatusNoContent, status)
+	require.Equal(t, int32(2), done.Load(), "the response came once every event was done")
+}
+
+func TestHandler_CloseCancelsTheEventsRunning(t *testing.T) {
+	// Close stops the events still running, such as a webhook waiting on a slow target, instead of waiting for them:
+	// the requests waiting for them end, and the server closes at once. A restarted server runs events again.
+	started := make(chan struct{})
+	release := make(chan struct{})
+	canceled := make(chan error, 1)
+	var counted atomic.Int32
+
+	m := MustNew(Setup().Silent().
+		OnCompleteListener("waits", vlatte.EventFunc[vlatte.OnComplete](func(ctx context.Context, _ vlatte.OnComplete) error {
+			close(started)
+
+			select {
+			case <-ctx.Done():
+			case <-release: // the test failed first
+			}
+
+			canceled <- ctx.Err()
+
+			return ctx.Err()
+		})).
+		OnCompleteListener("counts", vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
+			counted.Add(1)
+			return nil
+		})))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	// Last in, first out: the event ends before the server closes, when the test fails first.
+	t.Cleanup(func() { close(release) })
+
+	m.MustMock(
+		Getf("/waits").OnCompleteEvent(vlatte.EventConfig{Name: "waits"}).Reply(NoContent()),
+		Getf("/counts").OnCompleteEvent(vlatte.EventConfig{Name: "counts"}).Reply(NoContent()),
+	)
+
+	// The client waits for the event, in a goroutine of its own. Close closes its connection, so it gets no response.
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+
+		if res, err := http.Get(m.URL("/waits")); err == nil {
+			_ = res.Body.Close()
+		}
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the event never started")
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		m.Close()
+	}()
+
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close waited for the event instead of canceling it")
+	}
+
+	select {
+	case err := <-canceled:
+		require.ErrorIs(t, err, context.Canceled)
+	default:
+		t.Fatal("Close returned before the event it canceled")
+	}
+
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request waiting for the event never ended")
+	}
+
+	m.MustStart()
+
+	status, _ := get(t, m, "/counts")
+	require.Equal(t, http.StatusNoContent, status)
+	require.Equal(t, int32(1), counted.Load(), "a restarted server runs events again")
+}
+
+func TestHandler_EventsRunWhenTheRequestLogPanics(t *testing.T) {
+	// Handler replies return no response, and the request log reads it (#24): it panics, after the reply. The events
+	// run before the request log, so they run anyway. Silent() would skip the request log.
+	var ran atomic.Bool
+	logger := zerolog.New(io.Discard)
+
+	m := MustNew(Setup().Logger(&logger).OnCompleteListener("hook", vlatte.EventFunc[vlatte.OnComplete](
+		func(context.Context, vlatte.OnComplete) error {
+			ran.Store(true)
+			return nil
+		})))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").
+		OnCompleteEvent(vlatte.EventConfig{Name: "hook"}).
+		Reply(Handler(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })))
+
+	status, _ := get(t, m, "/x")
+	require.Equal(t, http.StatusOK, status)
+	require.True(t, ran.Load(), "the event ran before the response ended")
+}
+
+// cancelableKV is a parameter store that fails once its context is done, as a remote store does.
+type cancelableKV struct {
+	vlatte.KV
+}
+
+func (kv cancelableKV) Get(ctx context.Context, k string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	return kv.KV.Get(ctx, k)
+}
+
+func TestHandler_EventsOutliveTheClient(t *testing.T) {
+	// A client that leaves, as one that times out does, ends the context of its request, not the events of the
+	// request: they run with a context of their own, and their templates read the parameters with it, through a store
+	// that fails once its context is done.
+	kv := cancelableKV{vlatte.NewMemoryKV()}
+	require.NoError(t, kv.Set(t.Context(), "target", []byte("api")))
+
+	started := make(chan struct{})
+	rendered := make(chan string, 1)
+
+	m := MustNew(Setup().Silent().Parameters(kv).OnCompleteListener("renders", vlatte.EventFunc[vlatte.OnComplete](
+		func(ctx context.Context, e vlatte.OnComplete) error {
+			close(started)
+
+			select {
+			case <-e.(*OnComplete).Request().RawRequest.Context().Done():
+			case <-ctx.Done(): // Close, when the test fails first
+				return ctx.Err()
+			}
+
+			var b strings.Builder
+
+			tmpl, err := e.Kit().TemplateEngine().Compile("target", `{{ .Parameters.Get "target" }}`)
+			if err == nil {
+				err = tmpl.Execute(&b, e.Kit().Data())
+			}
+
+			if err == nil {
+				err = ctx.Err()
+			}
+
+			if err != nil {
+				b.WriteString(err.Error())
+			}
+
+			rendered <- b.String()
+
+			return err
+		})))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "renders"}).Reply(NoContent()))
+
+	ctx, leave := context.WithCancel(t.Context())
+	defer leave()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL("/x"), nil)
+	require.NoError(t, err)
+
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+
+		if res, err := http.DefaultClient.Do(req); err == nil {
+			_ = res.Body.Close()
+		}
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the event never started")
+	}
+
+	leave()
+	<-ended
+
+	select {
+	case got := <-rendered:
+		require.Equal(t, "api", got)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the event never saw the client leave")
+	}
+}
+
+type tenantKey struct{}
+
+// tenantKV is a parameter store scoped to the tenant of each request: a read without one fails.
+type tenantKV struct {
+	vlatte.KV
+}
+
+func (kv tenantKV) Get(ctx context.Context, k string) ([]byte, error) {
+	if ctx.Value(tenantKey{}) == nil {
+		return nil, errors.New("no tenant")
+	}
+
+	return kv.KV.Get(ctx, k)
+}
+
+func TestHandler_EventsSeeTheValuesOfTheRequestContext(t *testing.T) {
+	// Middlewares put request-scoped values in the request's context, such as a trace or a tenant, which listeners and
+	// parameter stores read: the events of the request see them.
+	kv := tenantKV{vlatte.NewMemoryKV()}
+	require.NoError(t, kv.Set(t.Context(), "target", []byte("api")))
+
+	type seen struct {
+		tenant   any
+		rendered string
+	}
+
+	got := make(chan seen, 1)
+
+	m := MustNew(Setup().Silent().Parameters(kv).
+		Middlewares(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), tenantKey{}, "acme")))
+			})
+		}).
+		OnCompleteListener("reads", vlatte.EventFunc[vlatte.OnComplete](func(ctx context.Context, e vlatte.OnComplete) error {
+			var b strings.Builder
+
+			tmpl, err := e.Kit().TemplateEngine().Compile("target", `{{ .Parameters.Get "target" }}`)
+			if err == nil {
+				err = tmpl.Execute(&b, e.Kit().Data())
+			}
+
+			if err != nil {
+				b.WriteString(err.Error())
+			}
+
+			got <- seen{tenant: ctx.Value(tenantKey{}), rendered: b.String()}
+
+			return nil
+		})))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "reads"}).Reply(NoContent()))
+
+	status, _ := get(t, m, "/x")
+	require.Equal(t, http.StatusNoContent, status)
+
+	s := <-got
+	require.Equal(t, "acme", s.tenant)
+	require.Equal(t, "api", s.rendered)
 }

@@ -137,7 +137,6 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	locals := locals(reqValues, d, viewdata.NewParameters(r.Context(), h.app.params))
-	kit := &Kit{engine: h.app.config.TemplateEngine, data: locals}
 
 	reqValues.Data = locals
 
@@ -206,15 +205,21 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err = h.runner.OnComplete(
+	// The handler waits for the events, so the response ends after them: a test checks what they did right after it.
+	// They run before the request log, so its elapsed time counts them, and they run even when it panics.
+	h.runner.OnComplete(
 		r.Context(),
 		mock,
-		func(cfg vlatte.EventConfig) vlatte.OnComplete {
-			return &OnComplete{m: mock, req: reqValues, res: res, kit: kit, args: cfg.Parameters, dir: cfg.Dir}
+		func(ctx context.Context, cfg vlatte.EventConfig) vlatte.OnComplete {
+			// The request's context ends when the client leaves: templates read the parameters with the event's.
+			data := *locals
+			data.Parameters = viewdata.NewParameters(ctx, h.app.params)
+			kit := &Kit{engine: h.app.config.TemplateEngine, data: &data}
+
+			return &OnComplete{m: mock, req: reqValues, res: res, kit: kit, args: cfg.Parameters, dir: cfg.Dir, logger: h.app.logger}
 		},
-	); err != nil {
-		h.lifecycle.OnWarning(reqValues, fmt.Errorf("on_complete: %w", err))
-	}
+		func(err error) { h.lifecycle.OnWarning(reqValues, err) },
+	)
 
 	h.lifecycle.OnMatch(reqValues, res)
 

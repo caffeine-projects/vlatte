@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"context"
 	json "encoding/json/v2"
 	"fmt"
 	"maps"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -180,4 +182,40 @@ func getTarget(t *testing.T, m *Server, target string) int {
 	require.NoError(t, res.Body.Close())
 
 	return res.StatusCode
+}
+
+func TestMock_ADescriptionKeepsTheEvents(t *testing.T) {
+	// The description of a mock dropped its on_complete events: an admin GET, then POST, of a mock lost its webhooks.
+	// It keeps them now, with their parameters as a mock file writes them, and loads back with the same events.
+	got := make(chan vlatte.Parameters, 2)
+	capture := vlatte.EventFunc[vlatte.OnComplete](func(_ context.Context, e vlatte.OnComplete) error {
+		got <- e.Parameters()
+		return nil
+	})
+
+	m := MustNew(Setup().Silent().OnCompleteListener("capture", capture))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scope := m.MustMock(Getf("/x").ID("x").
+		OnCompleteEvent(vlatte.EventConfig{Name: "capture", Parameters: map[string]any{"k": "v"}}).
+		OnCompleteEvent(vlatte.EventConfig{Name: "capture"}).
+		Reply(NoContent()))
+
+	desc, ok := scope.Mock("x").Describe().Props.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, []any{
+		map[string]any{"name": "capture", "parameters": map[string]any{"k": "v"}},
+		map[string]any{"name": "capture"},
+	}, desc["on_complete"])
+
+	doc, err := json.Marshal(desc)
+	require.NoError(t, err)
+
+	require.NoError(t, m.Clean(t.Context()))
+	m.MustMock(FromBytes(doc, "json"))
+
+	status, _ := get(t, m, "/x")
+	require.Equal(t, http.StatusNoContent, status)
+	require.ElementsMatch(t, []vlatte.Parameters{map[string]any{"k": "v"}, nil}, []vlatte.Parameters{<-got, <-got})
 }

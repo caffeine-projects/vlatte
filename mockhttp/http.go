@@ -58,6 +58,9 @@ type Server struct {
 	startOnce      sync.Once
 	admin          *admin.Admin[*Mock]
 	closeIdleConns []func()
+
+	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
+	events *vlatte.EventRunner
 }
 
 // New creates a new HTTP mock Server with the given configurations.
@@ -192,6 +195,7 @@ func New(config ...Option) (*Server, error) {
 	app.rec = rec
 	app.proxy = p
 	app.requestBodyParsers = parsers
+	app.events = eventRunner
 
 	app.admin = admin.New(
 		repository,
@@ -264,6 +268,9 @@ func (app *Server) Name() string {
 
 // Start starts the mock server.
 func (app *Server) Start() error {
+	// A server closed before runs events again.
+	app.events.Open()
+
 	err := app.server.Start()
 	if err != nil {
 		return err
@@ -283,6 +290,9 @@ func (app *Server) MustStart() {
 
 // StartTLS starts TLS on a mock server.
 func (app *Server) StartTLS() error {
+	// A server closed before runs events again.
+	app.events.Open()
+
 	err := app.server.StartTLS()
 	if err != nil {
 		return err
@@ -363,8 +373,12 @@ func (app *Server) MustReload() {
 	}
 }
 
-// Close closes the mock server.
+// Close closes the mock server. It cancels the on_complete events still running, such as a webhook waiting for its
+// delay or its target, so the requests waiting for them end, and waits for those requests.
 func (app *Server) Close() {
+	// The backend waits for the requests it serves, and they wait for their events: cancel the events first.
+	app.events.Close()
+
 	err := app.server.Close()
 	if err != nil {
 		app.logger.Debug().Err(err).Msg("server: Close: error closing server")

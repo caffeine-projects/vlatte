@@ -2,6 +2,7 @@ package test
 
 import (
 	"bytes"
+	json "encoding/json/v2"
 	"fmt"
 	"io"
 	"os"
@@ -26,12 +27,18 @@ func TestJSONNet(t *testing.T) {
 	j, err := vm.EvaluateAnonymousSnippet("root.jsonnet", string(b))
 	require.NoError(t, err)
 
-	fschema, err := os.Open("../../http.schema.json")
+	doc, err := jsonschema.UnmarshalJSON(strings.NewReader(j))
 	require.NoError(t, err)
+	require.NoError(t, compileSchema(t).Validate(doc))
 
-	defer fschema.Close()
+	fmt.Println(j)
+}
 
-	b, err = io.ReadAll(fschema)
+// compileSchema compiles the JSON schema of mock files.
+func compileSchema(t *testing.T) *jsonschema.Schema {
+	t.Helper()
+
+	b, err := os.ReadFile("../../http.schema.json")
 	require.NoError(t, err)
 
 	schemaDoc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
@@ -44,11 +51,49 @@ func TestJSONNet(t *testing.T) {
 	schema, err := c.Compile("mem://vlatte/http.schema.json")
 	require.NoError(t, err)
 
+	return schema
+}
+
+func TestJSONNet_Webhook(t *testing.T) {
+	// post_actions.libsonnet had a webhook() that wrote an empty object, and nothing imported it. webhook writes an
+	// on_complete event of the webhook listener, whose parameters the schema checks.
+	vm := jsonnet.MakeVM()
+	schema := compileSchema(t)
+
+	mock := func(params string) string {
+		return "local v = import '../http.libsonnet'; " +
+			"v.mock([v.request([v.req.get()]), v.response([v.res.ok()]), v.postActions([v.webhook(" + params + ")])])"
+	}
+
+	j, err := vm.EvaluateAnonymousSnippet("webhook.jsonnet", mock("{ url: 'http://localhost:8080/hook', delay: '1s' }"))
+	require.NoError(t, err)
+	require.JSONEq(t, `[{"name": "webhook", "parameters": {"url": "http://localhost:8080/hook", "delay": "1s"}}]`,
+		onCompleteOf(t, j))
+
 	doc, err := jsonschema.UnmarshalJSON(strings.NewReader(j))
 	require.NoError(t, err)
 	require.NoError(t, schema.Validate(doc))
 
-	fmt.Println(j)
+	// A webhook needs a URL.
+	j, err = vm.EvaluateAnonymousSnippet("webhook.jsonnet", mock("{ method: 'POST' }"))
+	require.NoError(t, err)
+
+	doc, err = jsonschema.UnmarshalJSON(strings.NewReader(j))
+	require.NoError(t, err)
+	require.Error(t, schema.Validate(doc))
+}
+
+// onCompleteOf returns the on_complete of the mock document j, as JSON.
+func onCompleteOf(t *testing.T, j string) string {
+	t.Helper()
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal([]byte(j), &doc))
+
+	b, err := json.Marshal(doc["on_complete"])
+	require.NoError(t, err)
+
+	return string(b)
 }
 
 func TestJSONNet_HeaderTemplate(t *testing.T) {

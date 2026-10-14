@@ -409,6 +409,12 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return nil
 			},
 		},
+		field{
+			Key: "webhook.timeout", Kind: config.Duration,
+			Usage: "How long a webhook of the vlatte command waits for its answer: milliseconds or a Go duration (1.5s). " +
+				"0 uses 10s. Only the vlatte command reads it.",
+			Set: func(c *Config, v config.Value) error { c.WebhookTimeout = v.Dur; return nil },
+		},
 	)
 })
 

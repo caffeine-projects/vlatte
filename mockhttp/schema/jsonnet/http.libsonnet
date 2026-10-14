@@ -71,6 +71,7 @@ local scheme = import './scheme.libsonnet';
   },
 
   postAction(name, parameters=null):: { name: name, [if std.type(parameters) != 'null' then 'parameters']: parameters },
+  webhook(parameters):: self.postAction('webhook', parameters),
   postActions(actions):: { [if !std.isArray(actions) then error 'postActions expects an array of post actions' else 'on_complete']: actions },
 
   ext(v):: { ext: v },

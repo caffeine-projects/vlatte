@@ -22,5 +22,10 @@ vlatte.mock([
     res.ok(),
     res.multipart({ type: 'mixed', boundary: 'b', parts: [{ content_type: 'text/plain', body: 'saved' }] }),
   ]),
-  vlatte.postActions([vlatte.postAction('pa', { name: 'test' }), vlatte.postAction('no_args'), vlatte.postAction('basic', 'dev')]),
+  vlatte.postActions([
+    vlatte.postAction('pa', { name: 'test' }),
+    vlatte.postAction('no_args'),
+    vlatte.postAction('basic', 'dev'),
+    vlatte.webhook({ url: 'http://localhost:8080/hook', method: 'POST', body: 'saved', delay: '1s' }),
+  ]),
 ])

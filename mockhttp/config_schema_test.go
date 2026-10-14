@@ -109,6 +109,7 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 			[]string{"--record-save-body-to-file"}, func(t *testing.T, c *Config) { require.True(t, c.Record.SaveResponseBodyToFile) },
 		},
 		"record-file-type": {[]string{"--record-file-type", ".yaml"}, func(t *testing.T, c *Config) { require.Equal(t, "yaml", c.Record.SaveFileType) }},
+		"webhook-timeout":  {[]string{"--webhook-timeout", "1.5s"}, func(t *testing.T, c *Config) { require.Equal(t, 1500*time.Millisecond, c.WebhookTimeout) }},
 	}
 
 	flags := ConfigFlags()

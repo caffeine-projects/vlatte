@@ -2,6 +2,7 @@ package webhook_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
@@ -18,6 +19,7 @@ func TestArgsFromMap(t *testing.T) {
 		"header":          map[string]string{"A": "1"},
 		"header_template": map[string]any{"B": "{{ .X }}"},
 		"body_template":   "x",
+		"delay":           "1.5s",
 	})
 
 	require.NoError(t, err)
@@ -27,6 +29,7 @@ func TestArgsFromMap(t *testing.T) {
 		Header:         map[string]string{"A": "1"},
 		HeaderTemplate: map[string]string{"B": "{{ .X }}"},
 		BodyTemplate:   "x",
+		Delay:          1500 * time.Millisecond,
 	}, args)
 }
 
@@ -48,7 +51,7 @@ func TestArgsFromMap_ReportsEveryProblem(t *testing.T) {
   on_complete: conflict: parameters.body_file is set with parameters.body; keep one of them
   on_complete: invalid_value: parameters.header.X must be a string, not a number; write it in quotes: "1"
   on_complete: unknown_key: parameters.log_level is not a known setting; `+
-		`the keys under parameters are url, url_template, method, header, header_template, body, body_template, body_file, multipart, multipart_template
+		`the keys under parameters are url, url_template, method, header, header_template, body, body_template, body_file, multipart, multipart_template, delay
   on_complete: invalid_value: parameters.method must be a string, not a number; write it in quotes: "5"
   on_complete: conflict: parameters.url_template is set with parameters.url; keep one of them`)
 }
@@ -94,6 +97,14 @@ func takes(key string, v any) bool {
 		}
 
 		return false
+	case "delay":
+		// Whole milliseconds from 0, or a Go duration, which no drawn string is.
+		switch v.(type) {
+		case int, int64:
+			return true
+		}
+
+		return false
 	case "log_level", "ssl_verify":
 		return false
 	default:
@@ -107,7 +118,7 @@ func TestPropArgsFromMap_Types(t *testing.T) {
 	// headers, whatever Go types code builds them with. Keys the webhook doesn't read are never taken.
 	keys := []string{
 		"url", "url_template", "method", "body", "body_template", "body_file", "header", "header_template",
-		"multipart", "multipart_template", "log_level", "ssl_verify",
+		"multipart", "multipart_template", "delay", "log_level", "ssl_verify",
 	}
 	values := []any{
 		nil, true, "x", "", 5, int64(5), 1.5, float32(0.5),
@@ -137,9 +148,12 @@ func TestPropArgsFromMap_Types(t *testing.T) {
 		got := map[string]any{
 			"url": args.URL, "url_template": args.URLTemplate, "method": args.Method, "body": args.Body,
 			"body_template": args.BodyTemplate, "body_file": args.BodyFile, "header": args.Header, "header_template": args.HeaderTemplate,
+			"delay": args.Delay,
 		}
 
 		switch x := v.(type) {
+		case int, int64:
+			require.Equal(t, 5*time.Millisecond, got[key], "the drawn numbers are 5: milliseconds")
 		case string:
 			require.Equal(t, x, got[key])
 		case map[string]string:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"slices"
 	"sync"
 )
@@ -75,7 +76,8 @@ func NewEventRegistry[T EventArgs]() *EventRegistry[T] {
 	}
 }
 
-// Register adds or replaces a listener for the given name.
+// Register adds a listener under name. A name already registered keeps its listener: Register fails with
+// ErrEventAlreadyRegistered.
 func (r *EventRegistry[T]) Register(name string, evt EventListener[T]) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -137,9 +139,16 @@ func NewListener() *Listener {
 	}
 }
 
+// EventRunner runs the events of mocks, such as on_complete ones, each in a goroutine of its own, and cancels them
+// when its server closes.
 type EventRunner struct {
 	Listeners *Listener
 	Global    *Events
+
+	mu     sync.Mutex
+	ctx    context.Context    // made by the first request; Close cancels it, and so the events
+	cancel context.CancelFunc // cancels ctx
+	closed bool               // set by Close, cleared by Open: a closed runner runs nothing
 }
 
 func NewEventRunner(listeners *Listener, global *Events) *EventRunner {
@@ -153,22 +162,92 @@ func NewEventRunner(listeners *Listener, global *Events) *EventRunner {
 	return &EventRunner{Listeners: listeners, Global: global}
 }
 
-func (r *EventRunner) OnComplete(ctx context.Context, mock Mock, argsFn func(EventConfig) OnComplete) error {
-	for _, v := range r.Global.OnComplete {
-		if err := r.Listeners.OnComplete.Run(ctx, v.Name, argsFn(v)); err != nil {
-			return err
-		}
+// OnComplete runs the on_complete events of mock, global events first, each in a goroutine of its own, and returns
+// once they all have: an event neither waits for nor stops another, and the request waits for them all, so a test
+// checks what they did right after the response. Each listener runs with what argsFn returns and a context with the
+// values of ctx, the request's, such as a trace: the client leaving doesn't end it, and Close does. argsFn gets it
+// too. onErr gets the error, or the panic, of each event that fails, unless Close canceled it, worded like the errors
+// of mocks that name a listener that isn't registered. A closed runner runs nothing.
+func (r *EventRunner) OnComplete(ctx context.Context, mock Mock, argsFn func(ctx context.Context, cfg EventConfig) OnComplete, onErr func(err error)) {
+	closing, ok := r.context()
+	if !ok {
+		return
 	}
 
-	for _, def := range mock.Events().OnComplete {
-		if !r.Listeners.OnComplete.Has(def.Name) {
-			return fmt.Errorf("event %s not found", def.Name)
-		}
+	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancel()
 
-		if err := r.Listeners.OnComplete.Run(ctx, def.Name, argsFn(def)); err != nil {
-			return err
-		}
+	stop := context.AfterFunc(closing, cancel)
+	defer stop()
+
+	var wg sync.WaitGroup
+
+	for i, def := range r.Global.OnComplete {
+		wg.Go(func() { r.run(ctx, "global on_complete listener", i, def, argsFn, onErr) })
 	}
 
-	return nil
+	for i, def := range mock.Events().OnComplete {
+		wg.Go(func() { r.run(ctx, "on_complete listener", i, def, argsFn, onErr) })
+	}
+
+	wg.Wait()
+}
+
+// Close cancels the context of the events running, so the requests waiting for them end, and runs no event until
+// Open.
+func (r *EventRunner) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.closed = true
+	if r.cancel != nil {
+		r.cancel()
+	}
+
+	r.ctx, r.cancel = nil, nil
+}
+
+// Open lets a runner that Close closed run events again, with a new context.
+func (r *EventRunner) Open() {
+	r.mu.Lock()
+	r.closed = false
+	r.mu.Unlock()
+}
+
+// context returns the context Close cancels. A closed runner has none.
+func (r *EventRunner) context() (context.Context, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return nil, false
+	}
+
+	if r.ctx == nil {
+		r.ctx, r.cancel = context.WithCancel(context.Background())
+	}
+
+	return r.ctx, true
+}
+
+// run runs the listener of def, at index i of the events that scope names.
+func (r *EventRunner) run(ctx context.Context, scope string, i int, def EventConfig, argsFn func(context.Context, EventConfig) OnComplete, onErr func(error)) {
+	name := fmt.Sprintf("%s %s at index %d", scope, def.Name, i)
+
+	// A listener's panic, which the server's recovery caught when listeners ran on the handler's goroutine, would end
+	// the process in a goroutine of its own.
+	defer func() {
+		if p := recover(); p != nil {
+			onErr(fmt.Errorf("%s: panic: %v\n%s", name, p, debug.Stack()))
+		}
+	}()
+
+	if !r.Listeners.OnComplete.Has(def.Name) {
+		onErr(fmt.Errorf("%s is not registered", name))
+		return
+	}
+
+	if err := r.Listeners.OnComplete.Run(ctx, def.Name, argsFn(ctx, def)); err != nil && ctx.Err() == nil {
+		onErr(fmt.Errorf("%s: %w", name, err))
+	}
 }

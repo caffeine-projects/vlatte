@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -284,4 +287,95 @@ func TestRun_AllowsTheDockerHostVariable(t *testing.T) {
 
 	require.NoError(t, (&dockerConfigurer{}).Apply(m.Config()))
 	require.Equal(t, "127.0.0.1:8080", m.Config().Addr)
+}
+
+// writeWebhookMock writes a mock file for GET /orders, which answers 202 and sends a webhook to url, into a new
+// directory, and returns the pattern of its mock files.
+func writeWebhookMock(t *testing.T, url string) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	mock := fmt.Sprintf(`
+request: {method: GET, path: /orders}
+response: {status: 202}
+on_complete:
+  - name: webhook
+    parameters: {method: POST, url: %q, body: paid}
+`, url)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "orders.mock.yaml"), []byte(mock), 0o600))
+
+	return filepath.Join(dir, "*.yaml")
+}
+
+// getOrders gets /orders from the CLI listening on addr, once it is up.
+func getOrders(t *testing.T, addr string) {
+	t.Helper()
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res, err := http.Get("http://" + addr + "/orders")
+		if !assert.NoError(c, err) {
+			return
+		}
+
+		_ = res.Body.Close()
+		assert.Equal(c, http.StatusAccepted, res.StatusCode)
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
+func TestCLI_ServesMockFilesWithWebhooks(t *testing.T) {
+	// #16: the CLI registered no on_complete listener, so a mock file with a webhook failed to load, and the CLI exited.
+	withoutDockerHost(t)
+
+	got := make(chan string, 4)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got <- r.Method + " " + r.URL.Path + " " + string(b)
+	}))
+	t.Cleanup(target.Close)
+
+	addr := randomAddr(t)
+	stop := start(t, "--addr", addr, "--mock-files", writeWebhookMock(t, target.URL+"/hook"), "--log-level", "disabled")
+	getOrders(t, addr)
+
+	select {
+	case hook := <-got:
+		require.Equal(t, "POST /hook paid", hook)
+	default:
+		t.Fatal("the response came before the webhook")
+	}
+
+	require.Equal(t, 0, stop(), "a stopped server exits cleanly")
+}
+
+func TestCLI_WebhookTimeout(t *testing.T) {
+	// webhook.timeout bounds the webhooks of the CLI, which wait 10s for an answer by default.
+	withoutDockerHost(t)
+
+	canceled := make(chan struct{}, 4)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		// net/http sees the client leave once the body is read: then the request's context ends.
+		_, _ = io.ReadAll(r.Body)
+		<-r.Context().Done()
+		canceled <- struct{}{}
+	}))
+	t.Cleanup(target.Close)
+
+	addr := randomAddr(t)
+	start(t, "--addr", addr, "--mock-files", writeWebhookMock(t, target.URL+"/hook"), "--log-level", "disabled",
+		"--webhook-timeout", "100ms")
+	getOrders(t, addr)
+
+	// The response waits for the webhook, which webhook.timeout ends: the 10s default would hold it past the client's
+	// timeout.
+	client := &http.Client{Timeout: 5 * time.Second}
+	res, err := client.Get("http://" + addr + "/orders")
+	require.NoError(t, err, "the response waited past the webhook's 100ms timeout")
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusAccepted, res.StatusCode)
+
+	select {
+	case <-canceled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the webhook waited past its 100ms timeout")
+	}
 }

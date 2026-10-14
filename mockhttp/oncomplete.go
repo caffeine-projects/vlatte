@@ -1,17 +1,25 @@
 package mockhttp
 
-import "github.com/caffeine-projects/vlatte"
+import (
+	"github.com/rs/zerolog"
+
+	"github.com/caffeine-projects/vlatte"
+)
 
 var _ vlatte.OnComplete = (*OnComplete)(nil)
 
-// OnComplete implements vlatte.OnComplete for HTTP mocks.
+// OnComplete implements vlatte.OnComplete for HTTP mocks. Listeners get it once the mock replied, and the response
+// waits for them. It's read-only: the listeners of a request run at the same time. The request's body was read: read
+// it from Request, not from RawRequest.Body. Listeners use the context they get: it has the request's values, and the
+// client leaving doesn't end it, as it ends the request's.
 type OnComplete struct {
-	m    *Mock
-	req  *RequestValues
-	res  *Response
-	kit  vlatte.Kit
-	args vlatte.Parameters
-	dir  string
+	m      *Mock
+	req    *RequestValues
+	res    *Response
+	kit    vlatte.Kit
+	args   vlatte.Parameters
+	dir    string
+	logger *zerolog.Logger
 }
 
 func (i *OnComplete) Kind() vlatte.Kind {
@@ -42,4 +50,9 @@ func (i *OnComplete) Response() *Response {
 // event, or "" for the working directory, as for events defined in Go and global events.
 func (i *OnComplete) Dir() string {
 	return i.dir
+}
+
+// Logger is the server's logger, so listeners such as webhooks log where the server does, and as little.
+func (i *OnComplete) Logger() *zerolog.Logger {
+	return i.logger
 }

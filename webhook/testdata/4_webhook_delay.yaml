@@ -1,0 +1,14 @@
+request:
+  method: GET
+  path: /orders
+
+response:
+  status: 202
+
+on_complete:
+  - name: webhook
+    parameters:
+      url: http://localhost:9/hook
+      method: POST
+      body: '{"status": "paid"}'
+      delay: 1.5s

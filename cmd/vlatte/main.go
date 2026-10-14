@@ -16,6 +16,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/mockhttp"
+	"github.com/caffeine-projects/vlatte/webhook"
 )
 
 const (
@@ -113,7 +114,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 // serve runs the mock server configured by args until ctx is done.
 func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stderr io.Writer) int {
-	m, err := mockhttp.New(mockhttp.Setup().ConfigSources(mockhttp.DefaultConfigSources(args)...))
+	// Mock files name their on_complete listeners: webhook sends their webhooks, logging with the server's logger.
+	wh := &webhook.WebHook{}
+
+	m, err := mockhttp.New(mockhttp.Setup().
+		ConfigSources(mockhttp.DefaultConfigSources(args)...).
+		OnCompleteListener("webhook", wh))
 	if errors.Is(err, flag.ErrHelp) {
 		printHelp(cmd, stdout)
 		return 0
@@ -129,6 +135,9 @@ func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stder
 
 		return 1
 	}
+
+	// Settings load in New, and webhooks run once the server starts.
+	wh.Timeout = m.Config().WebhookTimeout
 
 	// The docker address wins over every source, and its port depends on the final https setting.
 	if _, ok := os.LookupEnv(_dockerHostEnv); ok {

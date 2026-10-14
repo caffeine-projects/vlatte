@@ -19,6 +19,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
 	"github.com/caffeine-projects/vlatte/internal/value"
@@ -27,6 +28,8 @@ import (
 var (
 	_ vlatte.EventListener[vlatte.OnComplete] = (*WebHook)(nil)
 	_ vlatte.EventPreparer                    = (*WebHook)(nil)
+	_ descriptor.SelfDescriptive              = (*Args)(nil)
+	_ descriptor.SelfDescriptive              = (*multipartParams)(nil)
 )
 
 var (
@@ -45,11 +48,15 @@ type Transform func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Ar
 
 // WebHook is an automated HTTP request sent when an on-complete event is fired.
 // Register it with [vlatte.Listener.OnComplete] (e.g. via mockhttp.Setup().OnCompleteListener(name, wh)).
+// mockhttp sends it once the mock replied, and the response waits for it: a test checks the target right after.
+//
+// It logs each send and its answer at info level, with Logger, or else with the logger of the event: mockhttp gives
+// the server's. A send fails when the target can't be reached in Timeout, or answers with a status outside 2xx; a
+// redirect isn't followed. A zero WebHook sends with http.DefaultTransport and a 10s timeout.
 type WebHook struct {
 	RoundTripper http.RoundTripper
 	Transform    Transform
 	Logger       *zerolog.Logger
-	LogLevel     zerolog.Level
 	Timeout      time.Duration
 }
 
@@ -57,7 +64,7 @@ const _defaultTimeout = 10 * time.Second
 
 // New creates a new WebHook instance.
 func New(options ...Option) (*WebHook, error) {
-	w := &WebHook{LogLevel: zerolog.Disabled}
+	w := &WebHook{}
 
 	for i, opt := range options {
 		if err := opt(w); err != nil {
@@ -74,35 +81,19 @@ func New(options ...Option) (*WebHook, error) {
 		}
 	}
 
-	if w.Timeout == 0 {
-		w.Timeout = _defaultTimeout
-	}
-
-	if w.Transform == nil {
-		w.Transform = func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Args) error { return nil }
-	}
-
-	if w.Logger == nil {
-		var wio io.Writer
-		if w.LogLevel == zerolog.Disabled {
-			wio = io.Discard
-		} else {
-			wio = os.Stdout
-		}
-
-		l := zerolog.New(wio).Level(w.LogLevel)
-		w.Logger = &l
-	}
-
 	return w, nil
 }
 
-// Prepare implements vlatte.EventPreparer. It decodes the parameters of a mock's webhook and compiles their templates
-// with the server's engine, so a mistake fails the mock when it is built instead of each send. Run receives the
-// decoded *Args.
+// Prepare implements vlatte.EventPreparer. It decodes the parameters of a mock's webhook, checks them, and compiles
+// their templates with the server's engine, so a mistake fails the mock when it is built instead of each send. Run
+// receives the decoded *Args.
 func (w *WebHook) Prepare(cfg vlatte.EventConfig, engine vlatte.TemplateEngine) (vlatte.Parameters, error) {
 	args, err := argsOf(cfg.Parameters, "on_complete", cfg.Dir)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := args.validate(); err != nil {
 		return nil, err
 	}
 
@@ -121,11 +112,28 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		return err
 	}
 
-	if err := w.Transform(ctx, args, webhookArgs); err != nil {
-		return fmt.Errorf("webhook: failed to Transform args: %w", err)
+	// A Transform can add headers, whether the parameters have some or not.
+	if webhookArgs.Header == nil {
+		webhookArgs.Header = make(map[string]string)
 	}
 
-	method := webhookArgs.Method
+	if webhookArgs.HeaderTemplate == nil {
+		webhookArgs.HeaderTemplate = make(map[string]string)
+	}
+
+	if w.Transform != nil {
+		if err := w.Transform(ctx, args, webhookArgs); err != nil {
+			return fmt.Errorf("webhook: failed to Transform args: %w", err)
+		}
+	}
+
+	// The parameters were checked when the mock was built; a Transform may have changed them since.
+	if err := webhookArgs.validate(); err != nil {
+		return err
+	}
+
+	// Request methods match in any case, as in mock files: method: post sends POST.
+	method := strings.ToUpper(webhookArgs.Method)
 	if len(method) == 0 {
 		method = http.MethodGet
 	}
@@ -138,16 +146,14 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		if rawURL, err = render(engine, "url_template", webhookArgs.URLTemplate, data); err != nil {
 			return err
 		}
+
+		if err := checkURL(rawURL); err != nil {
+			return fmt.Errorf("webhook: url_template: %w", err)
+		}
 	}
 
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return fmt.Errorf("webhook: error parsing %s: %w", rawURL, err)
-	}
-
-	if bodies := countSet(webhookArgs.Body, webhookArgs.BodyTemplate, webhookArgs.BodyFile) + countSet(webhookArgs.Multipart != nil); bodies > 1 {
-		return errors.New("webhook: more than one body is set: keep one of Body, BodyTemplate, BodyFile and Multipart")
-	}
+	// validate and checkURL parsed it already.
+	u, _ := url.Parse(rawURL)
 
 	var body io.Reader
 
@@ -169,12 +175,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 		body = strings.NewReader(b)
 	case webhookArgs.BodyFile != "":
-		name := webhookArgs.BodyFile
-		if webhookArgs.dir != "" && !filepath.IsAbs(name) {
-			name = filepath.Join(webhookArgs.dir, name)
-		}
-
-		b, err := os.ReadFile(name)
+		b, err := os.ReadFile(bodyFilePath(webhookArgs.dir, webhookArgs.BodyFile))
 		if err != nil {
 			return fmt.Errorf("webhook: error reading body_file %s: %w", webhookArgs.BodyFile, err)
 		}
@@ -184,19 +185,13 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		body = strings.NewReader(webhookArgs.Body)
 	}
 
-	txtURL := u.String()
-	w.Logger.Info().
-		Str("url", txtURL).
-		Str("kind", args.Kind().String()).
-		Msg(fmt.Sprintf("---> WEBHOOK REQUEST RECEIVED %s %s", method, u.Path))
-
-	ctx, cancel := context.WithTimeout(ctx, w.Timeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, method, txtURL, body)
-	if err != nil {
-		return err
+	logger := w.Logger
+	if logger == nil {
+		logger = loggerOf(args)
 	}
+
+	// With a context, only a bad method or URL fails it, and validate and checkURL checked both.
+	req, _ := http.NewRequestWithContext(ctx, method, u.String(), body)
 
 	for k, v := range webhookArgs.Header {
 		req.Header.Set(k, v)
@@ -218,39 +213,64 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		req.Header.Set(k, rendered)
 	}
 
+	// validate made sure no header sets it.
 	if contentType != "" {
-		if req.Header.Get("Content-Type") != "" {
-			return errors.New("webhook: a multipart body sets the Content-Type: remove the Content-Type header")
-		}
-
 		req.Header.Set("Content-Type", contentType)
 	}
 
-	res, err := w.RoundTripper.RoundTrip(req)
-	if err != nil {
-		w.Logger.Err(err).
-			Str("url", txtURL).
-			Str("kind", args.Kind().String()).
-			Msg(fmt.Sprintf("<--- WEBHOOK: %s %s", method, u.Path))
+	// As http.Client does: the user and password of the URL go as Basic auth, unless a header sets Authorization.
+	if u.User != nil && req.Header.Get("Authorization") == "" {
+		password, _ := u.User.Password()
+		req.SetBasicAuth(u.User.Username(), password)
+	}
 
-		return fmt.Errorf("webhook: request failed: %w", err)
+	// The URL may hold a password: logs and errors show it redacted.
+	redacted := u.Redacted()
+
+	// Everything renders before the delay, so a mistake shows without waiting for it.
+	if webhookArgs.Delay > 0 {
+		if err := wait(ctx, webhookArgs.Delay); err != nil {
+			return fmt.Errorf("webhook: %s %s: waiting for the delay of %s: %w", method, redacted, webhookArgs.Delay, err)
+		}
+	}
+
+	logger.Info().
+		Str("url", redacted).
+		Str("kind", args.Kind().String()).
+		Msgf("---> WEBHOOK REQUEST %s %s", method, u.Path)
+
+	// The timeout counts from the send, after the delay.
+	timeout := w.Timeout
+	if timeout <= 0 {
+		timeout = _defaultTimeout
+	}
+
+	sendCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	roundTripper := w.RoundTripper
+	if roundTripper == nil {
+		roundTripper = http.DefaultTransport
+	}
+
+	// The caller logs the errors: logging them here too would log each twice.
+	res, err := roundTripper.RoundTrip(req.WithContext(sendCtx))
+	if err != nil {
+		return fmt.Errorf("webhook: %s %s: request failed: %w", method, redacted, err)
 	}
 
 	defer res.Body.Close()
 
-	msg := fmt.Sprintf("<--- WEBHOOK %s %s", method, u.Path)
-	child := w.Logger.With().
-		Str("url", txtURL).
-		Str("kind", args.Kind().String()).
-		Int("status", res.StatusCode).
-		Logger()
-
-	if res.StatusCode >= http.StatusBadRequest {
-		child.Warn().Msg(msg)
-		return nil
+	// A redirect isn't followed, as a POST would turn into a GET: like an error, it's an answer the target must fix.
+	if res.StatusCode < 200 || res.StatusCode > 299 {
+		return fmt.Errorf("webhook: %s %s: the target answered %s", method, redacted, res.Status)
 	}
 
-	child.Info().Msg(msg)
+	logger.Info().
+		Str("url", redacted).
+		Str("kind", args.Kind().String()).
+		Int("status", res.StatusCode).
+		Msgf("<--- WEBHOOK %s %s", method, u.Path)
 
 	return nil
 }
@@ -272,7 +292,47 @@ type Args struct {
 	// Multipart is a multipart body, such as one built with mockhttp.MultipartForm. It sets the Content-Type.
 	Multipart MultipartBody
 
+	// Delay is how long the webhook waits, once the mock replied, before it sends the request. The response waits for
+	// it too. The WebHook's timeout counts from the send.
+	Delay time.Duration
+
 	dir string // where relative files open from: the mock file's directory; "" is the working directory
+}
+
+// Describe implements descriptor.SelfDescriptive: the parameters as a mock file writes them, the ones set only, so the
+// description of a mock, such as the admin API gives, loads back with the same webhook. A relative body file is joined
+// to the mock file's directory, which a description loaded back doesn't have. A multipart body is described when it
+// describes itself, as mockhttp's do.
+func (a *Args) Describe() descriptor.Descriptor {
+	params := make(map[string]any)
+
+	for key, value := range map[string]string{
+		"url": a.URL, "url_template": a.URLTemplate, "method": a.Method,
+		"body": a.Body, "body_template": a.BodyTemplate, "body_file": bodyFilePath(a.dir, a.BodyFile),
+	} {
+		if value != "" {
+			params[key] = value
+		}
+	}
+
+	if len(a.Header) > 0 {
+		params["header"] = maps.Clone(a.Header)
+	}
+
+	if len(a.HeaderTemplate) > 0 {
+		params["header_template"] = maps.Clone(a.HeaderTemplate)
+	}
+
+	if body, ok := a.Multipart.(descriptor.SelfDescriptive); ok {
+		d := body.Describe()
+		params[d.Key] = d.Props
+	}
+
+	if a.Delay > 0 {
+		params["delay"] = a.Delay.String()
+	}
+
+	return descriptor.New("parameters", params)
 }
 
 // clone returns a copy of a, with copies of its maps. Multipart is shared: writing a body doesn't change it.
@@ -316,6 +376,52 @@ func (a *Args) check(engine vlatte.TemplateEngine) error {
 		if err := a.Multipart.Check(engine); err != nil {
 			return fmt.Errorf("webhook: multipart body: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// validate checks what a request needs, and what decoding a map can't check for Args built in Go: one of URL and
+// URLTemplate, a URL a request can go to, a valid method, one body at most, a delay of 0 or more, a Content-Type only
+// from a multipart body, and each header once, as header names ignore case.
+func (a *Args) validate() error {
+	switch {
+	case a.URL == "" && a.URLTemplate == "":
+		return errorBadArg(errors.New("one of url and url_template is required"))
+	case a.URL != "" && a.URLTemplate != "":
+		return errorBadArg(errors.New("url and url_template are both set: keep one of them"))
+	case a.URL != "":
+		if err := checkURL(a.URL); err != nil {
+			return errorBadArg(fmt.Errorf("url: %w", err))
+		}
+	}
+
+	if a.Method != "" && !mpart.IsToken(a.Method) {
+		return errorBadArg(fmt.Errorf("method %q is not an HTTP method", a.Method))
+	}
+
+	if countSet(a.Body, a.BodyTemplate, a.BodyFile)+countSet(a.Multipart != nil) > 1 {
+		return errorBadArg(errors.New("more than one body is set: keep one of Body, BodyTemplate, BodyFile and Multipart"))
+	}
+
+	if a.Delay < 0 {
+		return errorBadArg(fmt.Errorf("delay %s is negative", a.Delay))
+	}
+
+	names := make(map[string]string, len(a.Header)+len(a.HeaderTemplate))
+	for _, header := range []map[string]string{a.Header, a.HeaderTemplate} {
+		for _, name := range slices.Sorted(maps.Keys(header)) {
+			key := textproto.CanonicalMIMEHeaderKey(name)
+			if other, ok := names[key]; ok {
+				return errorBadArg(fmt.Errorf("headers %s and %s are one header: keep one of them", other, name))
+			}
+
+			names[key] = name
+		}
+	}
+
+	if _, ok := names["Content-Type"]; ok && a.Multipart != nil {
+		return errorBadArg(errors.New("a multipart body sets the Content-Type: remove the Content-Type header"))
 	}
 
 	return nil
@@ -377,6 +483,10 @@ var _argsSchema = config.NewSchema(
 		Usage: "Multipart body whose text is templates: names, filenames, content types, header values, text bodies and body file names.",
 		Set:   func(a *Args, v config.Value) error { return setMultipart(a, v, true) },
 	},
+	argsField{
+		Key: "delay", Kind: config.Duration, Usage: "How long to wait before sending, once the mock replied; the response waits for it too: milliseconds or a Go duration (1.5s).",
+		Set: func(a *Args, v config.Value) error { a.Delay = v.Dur; return nil },
+	},
 )
 
 // _exclusive lists the sets of parameters of which only one can be set.
@@ -405,9 +515,12 @@ func argsOf(params vlatte.Parameters, origin, dir string) (*Args, error) {
 //   - url, or url_template, a template: a string;
 //   - method: a string, GET when empty;
 //   - header and header_template, whose values are templates: objects of strings;
-//   - body, body_template, a template, or body_file: a string.
+//   - one body: body, body_template, a template, or body_file, a string; or multipart, or multipart_template, whose
+//     text is templates: an object with the type, boundary, params and parts of the body;
+//   - delay: milliseconds, or a Go duration such as 1.5s.
 //
-// As in mock files, each value must have its type, and other keys are errors. A map built in code means what its
+// As in mock files, each value must have its type, and other keys are errors. The webhook's checks of what a request
+// needs, such as one of url and url_template, come when the mock is built. A map built in code means what its
 // JSON means, so a map[string]string or an int is fine where its JSON is. The error wraps ErrBadArg and lists
 // every problem.
 func ArgsFromMap(m map[string]any) (*Args, error) {
@@ -458,6 +571,27 @@ func conflicts(doc any, origin string) []config.Problem {
 				Code: config.CodeConflict, Origin: origin, Key: "parameters." + key,
 				Message: fmt.Sprintf("parameters.%s is set with parameters.%s", key, first), Hint: "keep one of them",
 			})
+		}
+	}
+
+	// Header names ignore case: a name set twice, in either map, is one header with one value.
+	names := make(map[string]string)
+	for _, headers := range []string{"header", "header_template"} {
+		header, _ := params[headers].(map[string]any)
+		for _, name := range slices.Sorted(maps.Keys(header)) {
+			key := "parameters." + headers + "." + name
+			canonical := textproto.CanonicalMIMEHeaderKey(name)
+
+			if other, ok := names[canonical]; ok {
+				problems = append(problems, config.Problem{
+					Code: config.CodeConflict, Origin: origin, Key: key,
+					Message: key + " is set with " + other, Hint: "header names ignore case: keep one of them",
+				})
+
+				continue
+			}
+
+			names[canonical] = key
 		}
 	}
 
@@ -527,6 +661,11 @@ func (m *multipartParams) Check(engine vlatte.TemplateEngine) error {
 	return err
 }
 
+// Describe implements descriptor.SelfDescriptive: the body as the parameters of a mock file write it.
+func (m *multipartParams) Describe() descriptor.Descriptor {
+	return describeMultipart(m.spec)
+}
+
 // Encode implements MultipartBody.
 func (m *multipartParams) Encode(engine vlatte.TemplateEngine, data any) (string, []byte, error) {
 	e, err := mpart.Compile(m.spec, engine)
@@ -537,6 +676,25 @@ func (m *multipartParams) Encode(engine vlatte.TemplateEngine, data any) (string
 	b, _, err := e.Encode(data)
 
 	return e.ContentType(), b, err
+}
+
+// describeMultipart describes a multipart body as the parameters of a mock file write it: under multipart_template
+// when its text is templates, else under multipart. The relative body files of its parts are joined to its directory.
+func describeMultipart(spec *mpart.Spec) descriptor.Descriptor {
+	resolved := *spec
+	resolved.Parts = make([]*mpart.PartSpec, len(spec.Parts))
+
+	for i, part := range spec.Parts {
+		p := *part
+		p.File = bodyFilePath(spec.Dir, p.File)
+		resolved.Parts[i] = &p
+	}
+
+	if spec.Templated {
+		return descriptor.New("multipart_template", resolved.Doc())
+	}
+
+	return descriptor.New("multipart", resolved.Doc())
 }
 
 // countSet counts the values that are set: non-empty strings and true bools.
@@ -572,7 +730,6 @@ func headerOf(v config.Value, dst *map[string]string) error {
 	return err
 }
 
-// originOf names where the parameters of an event come from, for problems: the mock that completed.
 // dirOf returns where the relative files of the event's parameters open from, as mockhttp's OnComplete says: the
 // directory of the mock file that defines the event, or "" for the working directory.
 func dirOf(args vlatte.OnComplete) string {
@@ -583,6 +740,20 @@ func dirOf(args vlatte.OnComplete) string {
 	return ""
 }
 
+// loggerOf returns the logger the event gives, as mockhttp's OnComplete gives the server's, or one that logs nothing.
+func loggerOf(args vlatte.OnComplete) *zerolog.Logger {
+	if l, ok := args.(interface{ Logger() *zerolog.Logger }); ok {
+		if logger := l.Logger(); logger != nil {
+			return logger
+		}
+	}
+
+	nop := zerolog.Nop()
+
+	return &nop
+}
+
+// originOf names where the parameters of an event come from, for problems: the mock that completed.
 func originOf(args vlatte.OnComplete) string {
 	if mock := args.Mock(); mock != nil {
 		return "mock " + mock.ID()
@@ -605,6 +776,49 @@ func templating(args vlatte.OnComplete) (vlatte.TemplateEngine, any) {
 	}
 
 	return engine, kit.Data()
+}
+
+// checkURL checks that raw is an absolute http or https URL with a host. Its errors show the URL without its
+// password, as a *url.Error, which prints the whole URL, wouldn't.
+func checkURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		if urlErr, ok := errors.AsType[*url.Error](err); ok {
+			err = urlErr.Err
+		}
+
+		return err
+	}
+
+	if u.Scheme != "http" && u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("%s is not an absolute http or https URL", u.Redacted())
+	}
+
+	return nil
+}
+
+// bodyFilePath returns the body file name joined to dir, where a relative name opens from, such as the mock file's
+// directory: it opens the same file from the working directory, as a description loaded back opens it. The name stays
+// as it is, since it can be a template.
+func bodyFilePath(dir, name string) string {
+	if dir == "" || name == "" || filepath.IsAbs(name) {
+		return name
+	}
+
+	return filepath.Clean(dir) + string(filepath.Separator) + name
+}
+
+// wait waits for d, or until ctx ends, as mockhttp waits for the delay of a multipart part.
+func wait(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 // render compiles text with engine and executes it with data.

@@ -330,7 +330,32 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		m.replyDesc.Merge(data)
 	}
 
+	if events := describeEvents(m.spec.events); len(events) > 0 {
+		data["on_complete"] = events
+	}
+
 	return descriptor.Root(data)
+}
+
+// describeEvents describes events as a mock file writes them. Parameters that describe themselves, as a webhook's do,
+// give their description; others, such as the maps of mock files, go as they are.
+func describeEvents(events []vlatte.EventConfig) []any {
+	described := make([]any, 0, len(events))
+	for _, e := range events {
+		event := map[string]any{"name": e.Name}
+
+		switch p := e.Parameters.(type) {
+		case nil:
+		case descriptor.SelfDescriptive:
+			event["parameters"] = p.Describe().Props
+		default:
+			event["parameters"] = p
+		}
+
+		described = append(described, event)
+	}
+
+	return described
 }
 
 func (m *Mock) MarshalJSON() ([]byte, error) {
