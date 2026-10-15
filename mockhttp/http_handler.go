@@ -159,7 +159,26 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Render closes the body it sends. A response that isn't rendered, after a failing mapper or a panic, still
+	// closes its body here: a proxy's would keep its connection, and a body file its file.
+	defer func() {
+		if res != nil && res.BodyCloser != nil {
+			res.BodyCloser.Close()
+		}
+	}()
+
+	// The recorder records the matched response from Body, as mappers read it.
+	recorded := h.app.IsRecording() && h.app.config.Proxy == nil
+
 	if res != nil {
+		// A streamed body, such as a proxy's, is read whole for mappers and the recorder.
+		if (len(mock.spec.mappers) > 0 || recorded) && len(res.Body) == 0 {
+			if err = res.readBody(); err != nil {
+				h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: reading the response body: %w", err))
+				return
+			}
+		}
+
 		for i, mapper := range mock.spec.mappers {
 			if err = mapper(reqValues, res); err != nil {
 				h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: response mapper at index %d: %w", i, err))
@@ -225,7 +244,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// when proxy is enabled, recording happens some steps before
 	// so, we need to record here only if proxy is disabled.
-	if h.app.IsRecording() && h.app.config.Proxy == nil {
+	if recorded {
 		h.app.rec.dispatch(r, reqValues.URL, rawBody, res)
 	}
 }

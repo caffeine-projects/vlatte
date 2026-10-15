@@ -19,7 +19,12 @@ var (
 	_ ReplierFactory = (*ProxyReply)(nil)
 	_ Replier        = (*proxyReplier)(nil)
 	_ io.Closer      = (*proxyReplier)(nil)
+	_ io.ReadCloser  = (*targetBody)(nil)
+	_ keptBody       = (*targetBody)(nil)
 )
+
+// errNoHeaders ends a call to a target that didn't send its response headers within the proxy's timeout.
+var errNoHeaders = errors.New("reply_proxy: no response headers in time")
 
 var _forbiddenHeaders = []string{
 	"Connection",
@@ -34,6 +39,10 @@ var _forbiddenHeaders = []string{
 
 const (
 	_defaultTimeout = 30 * time.Second
+
+	// _keptBodyLimit bounds how much of a target's body a proxy keeps, for the request log, callbacks and events,
+	// while it streams to the client: a larger body isn't kept.
+	_keptBodyLimit = 1 << 20
 
 	// _idleConnTimeout closes a connection to the target that stays idle, as the forward proxy does. A request still
 	// being served when its mock leaves returns its connection afterwards: it closes then, at the latest.
@@ -133,8 +142,8 @@ func (r *ProxyReply) TrimSuffix(suffix string) *ProxyReply {
 	return r
 }
 
-// Timeout sets the timeout for the target HTTP request.
-// Defaults to 30s.
+// Timeout sets how long to wait for the response headers of the target. The body then streams to the client as the
+// target sends it, for as long as the client waits. 0 waits forever. Defaults to 30s.
 func (r *ProxyReply) Timeout(timeout time.Duration) *ProxyReply {
 	r.timeout = timeout
 	return r
@@ -169,6 +178,10 @@ func (r *ProxyReply) Describe() descriptor.Descriptor {
 // transport of its own. With Config.HTTPClientFactory, it sends through the Transport of the client the factory
 // returns, which can be shared, such as http.DefaultClient's: a client without one gets a transport of its own.
 func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
+	if r.timeout < 0 {
+		return nil, fmt.Errorf("reply_proxy: timeout must be 0 or more, not %s", r.timeout)
+	}
+
 	p := &proxyReplier{
 		target:               r.target.Clone(),
 		headers:              r.headers.Clone(),
@@ -269,15 +282,32 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(req.RawRequest.Context(), p.timeout)
-	defer cancel()
+	// The timeout covers the wait for the response headers. The call ends when its body is closed.
+	ctx, cancel := context.WithCancelCause(req.RawRequest.Context())
 
-	res, err := p.roundTripper.RoundTrip(req.RawRequest.WithContext(ctx))
-	if err != nil {
-		return nil, fmt.Errorf("reply_proxy: calling the target %s: %w", p.target, err)
+	var timer *time.Timer
+	if p.timeout > 0 {
+		timer = time.AfterFunc(p.timeout, func() { cancel(errNoHeaders) })
 	}
 
-	defer res.Body.Close()
+	res, err := p.roundTripper.RoundTrip(req.RawRequest.WithContext(ctx))
+
+	// The timer fired, or is firing: whatever RoundTrip returned, the call is over. Cancelling here, before reading
+	// anything, doesn't wait for the timer's own cancel.
+	if timer != nil && !timer.Stop() {
+		cancel(errNoHeaders)
+
+		if err == nil {
+			res.Body.Close()
+		}
+
+		return nil, fmt.Errorf("reply_proxy: calling the target %s: no response headers within %s", p.target, p.timeout)
+	}
+
+	if err != nil {
+		cancel(nil)
+		return nil, fmt.Errorf("reply_proxy: calling the target %s: %w", p.target, err)
+	}
 
 	stub := newResponse()
 
@@ -298,22 +328,63 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 	}
 
 	stub.StatusCode = res.StatusCode
+	stub.BodyCloser = &targetBody{ReadCloser: res.Body, cancel: cancel}
 
-	b, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, err
+	// A body of unknown length, or an event stream, goes to the client part by part, as the target sends it. Other
+	// bodies fill the server's buffer, which sends them as it fills.
+	stub.flush = res.ContentLength < 0 || mediaType(res.Header.Get(HeaderContentType)) == "text/event-stream"
+
+	// The target's trailers: the keys it announced now, and their values once its body is read to the end.
+	if res.Trailer == nil {
+		res.Trailer = make(http.Header)
 	}
 
-	stub.Body = b
-	stub.Trailer = make(http.Header, len(res.Trailer))
-
-	for key, values := range res.Trailer {
-		for _, value := range values {
-			stub.Trailer.Add(key, value)
-		}
-	}
+	stub.Trailer = res.Trailer
 
 	return stub, nil
+}
+
+// targetBody is the body of a target's response, which streams to the client. It keeps what it reads, up to
+// _keptBodyLimit, and closing it ends the call to the target.
+type targetBody struct {
+	io.ReadCloser
+
+	cancel context.CancelCauseFunc
+	kept   []byte
+	over   bool // read more than it keeps
+	eof    bool
+}
+
+// Read reads the body, and keeps what it read.
+func (b *targetBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+
+	switch {
+	case b.over:
+	case len(b.kept)+n > _keptBodyLimit:
+		b.over, b.kept = true, nil
+	default:
+		b.kept = append(b.kept, p[:n]...)
+	}
+
+	if errors.Is(err, io.EOF) {
+		b.eof = true
+	}
+
+	return n, err
+}
+
+// Close closes the body and ends the call to the target.
+func (b *targetBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.cancel(nil)
+
+	return err
+}
+
+// Kept returns the body, once read to its end, when it fits in _keptBodyLimit.
+func (b *targetBody) Kept() ([]byte, bool) {
+	return b.kept, b.eof && !b.over
 }
 
 // escapedIndex returns the index in escaped, a validly escaped path, where its first n decoded bytes end. Each "%"

@@ -453,7 +453,8 @@ func (b *Builder) DelayFunc(delay vlatte.Delay) *Builder {
 }
 
 // Map adds a Mapper that allows modifying the response after it was built.
-// Multiple mappers can be added.
+// Multiple mappers can be added. A mapper finds the body in Body: one that streams, such as a proxy's, is read whole
+// for it first.
 func (b *Builder) Map(mapper Mapper) *Builder {
 	b.spec.mappers = append(b.spec.mappers, mapper)
 

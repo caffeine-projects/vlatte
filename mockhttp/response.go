@@ -17,7 +17,17 @@ import (
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/httprec"
 )
 
-var gzipper = &sync.Pool{New: func() any { return gzip.NewWriter(nil) }}
+var (
+	_ io.Writer = flushingWriter{}
+
+	gzipper = &sync.Pool{New: func() any { return gzip.NewWriter(nil) }}
+)
+
+// keptBody is a streamed body that keeps what it sent: once rendered, the response holds it in Body again, for the
+// request log, callbacks and events.
+type keptBody interface {
+	Kept() ([]byte, bool)
+}
 
 // Response defines the HTTP response that will be served once a Mock is matched with an HTTP Request.
 type Response struct {
@@ -32,6 +42,9 @@ type Response struct {
 
 	// pauses are where a streamed body waits, such as before the parts of a multipart body with delays.
 	pauses []mpart.Pause
+
+	// flush sends each part of BodyCloser to the client as soon as it's read, as a proxy does with a target's body.
+	flush bool
 }
 
 func newResponse() *Response {
@@ -79,14 +92,32 @@ func (r *Response) clone() Response {
 
 // render writes the response to w, and waits with wait where a streamed body pauses.
 func (r *Response) render(ctx context.Context, w http.ResponseWriter, wait func(context.Context, time.Duration) error) error {
+	// Closed whatever the body sent: a mapper can set Body on a response that came with a BodyCloser. Once rendered,
+	// a streamed body that kept what it sent is Body again.
+	if body := r.BodyCloser; body != nil {
+		defer func() {
+			body.Close()
+			r.BodyCloser = nil
+
+			if kb, ok := body.(keptBody); ok && len(r.Body) == 0 {
+				if b, ok := kb.Kept(); ok {
+					r.Body = b
+				}
+			}
+		}()
+	}
+
 	for k, vv := range r.Header {
 		for _, v := range vv {
 			w.Header().Add(k, v)
 		}
 	}
 
+	// A streamed body, such as a proxy's, can bring trailers it didn't announce: they are sent too, below.
+	announced := make(map[string]struct{}, len(r.Trailer))
 	for k := range r.Trailer {
 		w.Header().Add(HeaderTrailer, k)
+		announced[k] = struct{}{}
 	}
 
 	for _, cookie := range r.Cookies {
@@ -117,23 +148,71 @@ func (r *Response) render(ctx context.Context, w http.ResponseWriter, wait func(
 			w.Write(r.Body)
 		}
 	} else if r.BodyCloser != nil {
-		defer r.BodyCloser.Close()
-
 		if len(r.Encoding) > 0 {
 			if _, err := r.encode(w, r.BodyCloser); err != nil {
 				return err
 			}
 		} else {
-			if _, err := io.Copy(w, r.BodyCloser); err != nil {
+			out := io.Writer(w)
+			if r.flush {
+				out = flushingWriter{w: w, rc: http.NewResponseController(w)}
+			}
+
+			if _, err := io.Copy(out, r.BodyCloser); err != nil {
 				return err
 			}
 		}
 	}
 
 	for k, v := range r.Trailer {
-		for _, vv := range v {
-			w.Header().Add(k, vv)
+		name := k
+		if _, ok := announced[k]; !ok {
+			name = http.TrailerPrefix + k
 		}
+
+		for _, vv := range v {
+			w.Header().Add(name, vv)
+		}
+	}
+
+	return nil
+}
+
+// readBody reads a streamed body, from BodyCloser, into Body, and closes it. The server measures Body as it sends it,
+// so a Content-Length that came with the stream goes: whoever reads Body can change it.
+func (r *Response) readBody() error {
+	if r.BodyCloser == nil {
+		return nil
+	}
+
+	defer r.BodyCloser.Close()
+
+	b, err := io.ReadAll(r.BodyCloser)
+	r.Body, r.BodyCloser = b, nil
+	r.Header.Del(HeaderContentLength)
+
+	return err
+}
+
+// flushingWriter flushes w after every write, so a streamed body reaches the client as it comes.
+type flushingWriter struct {
+	w  io.Writer
+	rc *http.ResponseController
+}
+
+func (f flushingWriter) Write(p []byte) (int, error) {
+	n, err := f.w.Write(p)
+	if err != nil {
+		return n, err
+	}
+
+	return n, flushTo(f.rc)
+}
+
+// flushTo flushes rc, when its writer can flush: one that can't, such as a recorder, sends everything at the end.
+func flushTo(rc *http.ResponseController) error {
+	if err := rc.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
 	}
 
 	return nil
@@ -162,11 +241,7 @@ func (r *Response) stream(ctx context.Context, w http.ResponseWriter, wait func(
 			}
 		}
 
-		if err := rc.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
-			return err
-		}
-
-		return nil
+		return flushTo(rc)
 	}
 
 	written := 0

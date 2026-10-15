@@ -517,8 +517,9 @@ var _proxySchema = config.NewSchema(
 		Set: func(p *proxyDef, v config.Value) error { p.trimSuffix = v.Str; return nil },
 	},
 	proxyField{
-		Key: "timeout", Kind: config.Duration, Usage: "How long to wait for the target: milliseconds or a Go duration (1.5s).",
-		Set: func(p *proxyDef, v config.Value) error { p.timeout, p.hasTimeout = v.Dur, true; return nil },
+		Key: "timeout", Kind: config.Duration,
+		Usage: "How long to wait for the target's response headers: milliseconds or a Go duration (1.5s). 0 waits forever.",
+		Set:   func(p *proxyDef, v config.Value) error { p.timeout, p.hasTimeout = v.Dur, true; return nil },
 	},
 	proxyField{
 		Key: "ssl_verify", Kind: config.Bool, Usage: "Verify the TLS certificate of the target.",
