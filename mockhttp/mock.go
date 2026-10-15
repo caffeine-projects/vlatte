@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 
 var (
 	_ vlatte.Mock          = (*Mock)(nil)
+	_ io.Closer            = (*Mock)(nil)
 	_ vlatte.CallbackInput = (*CallbackInput)(nil)
 )
 
@@ -111,12 +113,28 @@ type Mock struct {
 	spec      mockSpec
 	reply     Replier               // made for this mock by the ReplierFactory of its builder
 	replyDesc descriptor.Descriptor // the description of that factory, as it was when the mock was built
+	closer    io.Closer             // what releases the reply, when the mock owns it; nil otherwise
+	closeOnce sync.Once
 	enabled   bool
 	hits      atomic.Int64
 }
 
 func (m *Mock) ID() string {
 	return m.spec.id
+}
+
+// Close releases what the mock's reply holds, such as the idle connections of a proxy's HTTP client. The store closes
+// a mock when it leaves the server, and Server.Close closes the mocks still stored. Only the first call does anything.
+func (m *Mock) Close() error {
+	var err error
+
+	m.closeOnce.Do(func() {
+		if m.closer != nil {
+			err = m.closer.Close()
+		}
+	})
+
+	return err
 }
 
 func (m *Mock) Name() string {

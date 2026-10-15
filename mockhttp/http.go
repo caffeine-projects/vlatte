@@ -53,11 +53,10 @@ type Server struct {
 	rwMutex            sync.RWMutex
 	proxy              *reverseProxy
 
-	data           map[string]any
-	logger         *zerolog.Logger
-	startOnce      sync.Once
-	admin          *admin.Admin[*Mock]
-	closeIdleConns []func()
+	data      map[string]any
+	logger    *zerolog.Logger
+	startOnce sync.Once
+	admin     *admin.Admin[*Mock]
 
 	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
 	events *vlatte.EventRunner
@@ -388,12 +387,16 @@ func (app *Server) Close() {
 		app.rec.stop()
 	}
 
-	app.rwMutex.RLock()
-	closeIdleConns := app.closeIdleConns
-	app.rwMutex.RUnlock()
+	// The mocks stay stored, so assertions still read them after Close: they release what they hold.
+	mocks, _ := app.storage.PickAll(context.Background())
+	for _, mock := range mocks {
+		if err := mock.Close(); err != nil {
+			app.logger.Warn().Err(err).Msgf("server: Close: closing mock %s", mock.ID())
+		}
+	}
 
-	for _, closeIdle := range closeIdleConns {
-		closeIdle()
+	if app.proxy != nil {
+		app.proxy.close()
 	}
 }
 
@@ -465,14 +468,6 @@ func (app *Server) DescribeConfig() string {
 	buf.WriteString("\n")
 
 	return buf.String()
-}
-
-// closeIdleConnsOnClose registers fn to release idle outbound connections when the app closes.
-func (app *Server) closeIdleConnsOnClose(fn func()) {
-	app.rwMutex.Lock()
-	defer app.rwMutex.Unlock()
-
-	app.closeIdleConns = append(app.closeIdleConns, fn)
 }
 
 // --

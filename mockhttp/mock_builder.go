@@ -545,7 +545,7 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 
 	desc, _ := descriptor.IsSelfDescriptive(b.reply)
 
-	return &Mock{spec: spec, reply: reply, replyDesc: desc, enabled: b.enabled}, nil
+	return &Mock{spec: spec, reply: reply, replyDesc: desc, closer: owned(b.reply, reply), enabled: b.enabled}, nil
 }
 
 func (b *Builder) appendExpectation(e *vlatte.Eval[*selectorInput]) {

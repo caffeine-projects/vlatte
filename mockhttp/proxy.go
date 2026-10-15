@@ -53,11 +53,10 @@ var _defaultProxyConfig = ProxyConfig{Timeout: 10 * time.Second, SSLVerify: fals
 type reverseProxy struct {
 	logger       *zerolog.Logger
 	roundTripper http.RoundTripper
+	transport    *http.Transport // roundTripper, when the proxy made it
 }
 
 func newProxy(log *zerolog.Logger, config *Config) *reverseProxy {
-	var roundTripper http.RoundTripper
-
 	if config.Proxy.Transport == nil {
 		transport := &http.Transport{
 			TLSClientConfig: &tls.Config{
@@ -81,12 +80,10 @@ func newProxy(log *zerolog.Logger, config *Config) *reverseProxy {
 		transport.ExpectContinueTimeout = 1 * time.Second
 		transport.ResponseHeaderTimeout = config.Proxy.Timeout
 
-		roundTripper = transport
-	} else {
-		roundTripper = config.Proxy.Transport
+		return &reverseProxy{logger: log, roundTripper: transport, transport: transport}
 	}
 
-	return &reverseProxy{log, roundTripper}
+	return &reverseProxy{logger: log, roundTripper: config.Proxy.Transport}
 }
 
 func (p *reverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +91,13 @@ func (p *reverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.handleTunneling(w, r)
 	} else {
 		p.handleHTTP(w, r)
+	}
+}
+
+// close releases the idle connections of the transport the proxy made. A ProxyConfig.Transport is the caller's.
+func (p *reverseProxy) close() {
+	if p.transport != nil {
+		p.transport.CloseIdleConnections()
 	}
 }
 

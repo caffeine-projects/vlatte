@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/caffeine-projects/vlatte/descriptor"
@@ -12,6 +13,7 @@ import (
 var (
 	_ ReplierFactory = (*SequentialReply)(nil)
 	_ Replier        = (*sequenceReplier)(nil)
+	_ io.Closer      = (*sequenceReplier)(nil)
 )
 
 // SequentialReply configures a sequence of replies, served one per request, in order, then the one set with
@@ -67,24 +69,29 @@ func (r *SequentialReply) NewReplier(app *Server) (Replier, error) {
 	s := &sequenceReplier{replies: make([]Replier, len(r.replies))}
 	for i, f := range r.replies {
 		if f == nil {
+			s.Close()
 			return nil, fmt.Errorf("reply_sequence: response %d is nil", i)
 		}
 
 		reply, err := newReplier(f, app)
 		if err != nil {
+			s.Close()
 			return nil, fmt.Errorf("reply_sequence: response %d: %w", i, err)
 		}
 
 		s.replies[i] = reply
+		s.own(f, reply)
 	}
 
 	if r.replyAfterSequenceEnded != nil {
 		after, err := newReplier(r.replyAfterSequenceEnded, app)
 		if err != nil {
+			s.Close()
 			return nil, fmt.Errorf("reply_sequence: after_ended: %w", err)
 		}
 
 		s.after = after
+		s.own(r.replyAfterSequenceEnded, after)
 	}
 
 	return s, nil
@@ -96,6 +103,7 @@ type sequenceReplier struct {
 	replies []Replier
 	after   Replier
 	hits    int
+	closers []io.Closer // of the replies it owns
 }
 
 // Reply implements Replier. Only taking the next reply is locked: the replies run at the same time, as those of any
@@ -111,6 +119,11 @@ func (s *sequenceReplier) Reply(ctx context.Context, input ReplyInput) (*Respons
 	return reply.Reply(ctx, input)
 }
 
+// Close releases the replies the sequence owns.
+func (s *sequenceReplier) Close() error {
+	return closeAll(s.closers)
+}
+
 // next takes the reply of the next request: the next one of the sequence, then after, which can be nil.
 func (s *sequenceReplier) next() Replier {
 	s.mu.Lock()
@@ -124,6 +137,13 @@ func (s *sequenceReplier) next() Replier {
 	}
 
 	return s.after
+}
+
+// own keeps what releases reply, which f made, when the sequence owns it.
+func (s *sequenceReplier) own(f ReplierFactory, reply Replier) {
+	if c := owned(f, reply); c != nil {
+		s.closers = append(s.closers, c)
+	}
 }
 
 func (s *sequenceReplier) totalHits() int {

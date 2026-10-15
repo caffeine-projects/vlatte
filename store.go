@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"slices"
 	"sync"
@@ -65,8 +66,21 @@ func (s *MemoryStore[B]) Replace(_ context.Context, old []B, mocks ...B) error {
 }
 
 // swap removes the mocks drop reports and adds mocks, in one step, ordered by priority and then by when they were
-// stored. It changes nothing when an ID of mocks is held by a mock it keeps, or repeated in the call.
+// stored. It changes nothing when an ID of mocks is held by a mock it keeps, or repeated in the call. Once the store
+// is unlocked, it closes the mocks it removed, unless it added them back.
 func (s *MemoryStore[B]) swap(drop func(B) bool, mocks []B) error {
+	gone, err := s.exchange(drop, mocks)
+	if err != nil {
+		return err
+	}
+
+	closeMocks(gone)
+
+	return nil
+}
+
+// exchange is swap under the lock. It returns the mocks it removed and didn't add back.
+func (s *MemoryStore[B]) exchange(drop func(B) bool, mocks []B) ([]B, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -79,20 +93,37 @@ func (s *MemoryStore[B]) swap(drop func(B) bool, mocks []B) error {
 
 	for _, mock := range mocks {
 		if _, taken := ids[mock.ID()]; taken {
-			return fmt.Errorf("%w: %q", ErrDuplicateID, mock.ID())
+			return nil, fmt.Errorf("%w: %q", ErrDuplicateID, mock.ID())
 		}
 
 		ids[mock.ID()] = struct{}{}
 	}
 
+	added := make(map[any]struct{}, len(mocks))
+	for _, mock := range mocks {
+		added[mock] = struct{}{}
+	}
+
 	// Only now: deleting in place changes the stored mocks, which a refused call must leave alone.
-	s.mocks = append(slices.DeleteFunc(s.mocks, drop), mocks...)
+	var gone []B
+
+	s.mocks = append(slices.DeleteFunc(s.mocks, func(mock B) bool {
+		if !drop(mock) {
+			return false
+		}
+
+		if _, back := added[mock]; !back {
+			gone = append(gone, mock)
+		}
+
+		return true
+	}), mocks...)
 
 	slices.SortStableFunc(s.mocks, func(a, b B) int {
 		return cmp.Compare(a.Priority(), b.Priority())
 	})
 
-	return nil
+	return gone, nil
 }
 
 func (s *MemoryStore[B]) Pick(_ context.Context, id string) (B, error) {
@@ -131,11 +162,24 @@ func (s *MemoryStore[B]) Delete(_ context.Context, ids ...string) error {
 	}, nil)
 }
 
+// Clear removes every mock, and closes them once the store is unlocked.
 func (s *MemoryStore[B]) Clear(_ context.Context) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	gone := s.mocks
 	s.mocks = make([]B, 0)
+	s.mu.Unlock()
+
+	closeMocks(gone)
 
 	return nil
+}
+
+// closeMocks closes the mocks that implement io.Closer. A mock that failed to close has left already: there is no one
+// to report the error to, so closing is the mock's to get right.
+func closeMocks[B Mock](mocks []B) {
+	for _, mock := range mocks {
+		if c, ok := any(mock).(io.Closer); ok {
+			_ = c.Close()
+		}
+	}
 }

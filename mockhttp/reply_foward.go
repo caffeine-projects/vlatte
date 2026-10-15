@@ -18,6 +18,7 @@ import (
 var (
 	_ ReplierFactory = (*ProxyReply)(nil)
 	_ Replier        = (*proxyReplier)(nil)
+	_ io.Closer      = (*proxyReplier)(nil)
 )
 
 var _forbiddenHeaders = []string{
@@ -31,13 +32,19 @@ var _forbiddenHeaders = []string{
 	"Upgrade",
 }
 
-const _defaultTimeout = 30 * time.Second
+const (
+	_defaultTimeout = 30 * time.Second
+
+	// _idleConnTimeout closes a connection to the target that stays idle, as the forward proxy does. A request still
+	// being served when its mock leaves returns its connection afterwards: it closes then, at the latest.
+	_idleConnTimeout = 15 * time.Second
+)
 
 type FromTypes interface{ string | *url.URL }
 
 // ProxyReply represents a response stub that will be the response "proxied" from the specified target.
 // Use From to init a new ProxyReply. It is a ReplierFactory: each mock built with it gets a proxy of its own, with an
-// HTTP client of its own.
+// HTTP client of its own, whose idle connections close when the mock leaves the server or the server closes.
 type ProxyReply struct {
 	target               *url.URL
 	headers              http.Header
@@ -158,9 +165,9 @@ func (r *ProxyReply) Describe() descriptor.Descriptor {
 	})
 }
 
-// NewReplier implements ReplierFactory. Each mock gets a proxy of its own: copies of the target and the headers, and an
-// HTTP client of its own. With Config.HTTPClientFactory, the client is a copy of the one the factory returns, which can
-// be a client it shares, such as http.DefaultClient.
+// NewReplier implements ReplierFactory. Each mock gets a proxy of its own: copies of the target and the headers, and a
+// transport of its own. With Config.HTTPClientFactory, it sends through the Transport of the client the factory
+// returns, which can be shared, such as http.DefaultClient's: a client without one gets a transport of its own.
 func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 	p := &proxyReplier{
 		target:               r.target.Clone(),
@@ -172,29 +179,28 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 		timeout:              r.timeout,
 	}
 
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: !r.sslVerify,
-		RootCAs:            app.config.TLSClientCAs,
-		Certificates:       app.config.TLSCertificates,
-	}
-
-	if app.config.HTTPClientFactory == nil {
-		p.client = &http.Client{Transport: &http.Transport{DisableCompression: true, TLSClientConfig: tlsConfig}}
-	} else {
-		client := app.config.HTTPClientFactory()
+	if factory := app.config.HTTPClientFactory; factory != nil {
+		client := factory()
 		if client == nil {
 			return nil, errors.New("reply_proxy: the HTTP client factory returned no client")
 		}
 
-		// A copy: the factory can return a client it shares, and the lines below change the client.
-		p.client = new(*client)
+		// The transport of a factory's client is the factory's: it can be shared, so the proxy never closes it.
+		p.roundTripper = client.Transport
 	}
 
-	if p.client.Transport == nil {
-		p.client.Transport = &http.Transport{TLSClientConfig: tlsConfig, DisableCompression: true}
+	if p.roundTripper == nil {
+		p.transport = &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: !r.sslVerify,
+				RootCAs:            app.config.TLSClientCAs,
+				Certificates:       app.config.TLSCertificates,
+			},
+			DisableCompression: true,
+			IdleConnTimeout:    _idleConnTimeout,
+		}
+		p.roundTripper = p.transport
 	}
-
-	app.closeIdleConnsOnClose(p.client.CloseIdleConnections)
 
 	return p, nil
 }
@@ -208,12 +214,23 @@ type proxyReplier struct {
 	trimPrefix           string
 	trimSuffix           string
 	timeout              time.Duration
-	client               *http.Client
+	roundTripper         http.RoundTripper
+	transport            *http.Transport // roundTripper, when the proxy made it
 }
 
 // Reply implements Replier.
 func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, error) {
 	return p.build(input.RequestValues)
+}
+
+// Close releases the idle connections to the target, when the proxy made the transport that holds them. The transport
+// stays usable: a request that was being served when the mock left still gets its answer.
+func (p *proxyReplier) Close() error {
+	if p.transport != nil {
+		p.transport.CloseIdleConnections()
+	}
+
+	return nil
 }
 
 func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
@@ -255,7 +272,7 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 	ctx, cancel := context.WithTimeout(req.RawRequest.Context(), p.timeout)
 	defer cancel()
 
-	res, err := p.client.Transport.RoundTrip(req.RawRequest.WithContext(ctx))
+	res, err := p.roundTripper.RoundTrip(req.RawRequest.WithContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("reply_proxy: calling the target %s: %w", p.target, err)
 	}

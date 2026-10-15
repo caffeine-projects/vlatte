@@ -393,9 +393,10 @@ func (cb *ConfigBuilder) MockFileHandlers(handlers ...MockFileHandler) *ConfigBu
 
 // HTTPClient sets a custom http.Client factory.
 // Internal components that require an HTTP client will use this factory,
-// instead of using the default implementation. Each proxy mock, made with From, uses a copy of a client the factory
-// returns, so the factory can return a client it shares, such as http.DefaultClient. A client with a Transport keeps
-// it, so the TLS client settings of the server don't apply to it.
+// instead of using the default implementation. Each proxy mock, made with From, sends through the Transport of a client
+// the factory returns, so the factory can return a client it shares, such as http.DefaultClient. The server's TLS
+// client settings don't apply to that Transport, and the server never closes its connections. A client without a
+// Transport gets one of the server's, closed when its mock leaves.
 func (cb *ConfigBuilder) HTTPClient(f func() *http.Client) *ConfigBuilder {
 	cb.conf.HTTPClientFactory = f
 	return cb
