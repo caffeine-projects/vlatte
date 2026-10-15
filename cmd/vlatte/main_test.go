@@ -379,3 +379,67 @@ func TestCLI_WebhookTimeout(t *testing.T) {
 		t.Fatal("the webhook waited past its 100ms timeout")
 	}
 }
+
+func TestCLI_RecordsThenPlaysBack(t *testing.T) {
+	// --record --record-target records the target's answers until the CLI stops, into testdata/_mocks_recorded. A
+	// later run serves them, without the target: the default mock files include them.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"page":%q}`, r.URL.Query().Get("page"))
+	}))
+	t.Cleanup(target.Close)
+
+	get := func(c require.TestingT, url string) (int, string) {
+		res, err := http.Get(url)
+		require.NoError(c, err)
+
+		defer res.Body.Close()
+
+		b, err := io.ReadAll(res.Body)
+		require.NoError(c, err)
+
+		return res.StatusCode, string(b)
+	}
+
+	addr := randomAddr(t)
+	stop := start(t, "--addr", addr, "--record", "--record-target", target.URL, "--log-level", "disabled")
+
+	// Until the recording starts, no mock answers.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res, err := http.Get("http://" + addr + "/items?page=2")
+		if !assert.NoError(c, err) {
+			return
+		}
+
+		_ = res.Body.Close()
+		assert.Equal(c, http.StatusOK, res.StatusCode)
+	}, 10*time.Second, 100*time.Millisecond)
+
+	require.Equal(t, 0, stop(), "a stopped server exits cleanly")
+
+	files, err := filepath.Glob(filepath.Join("testdata", "_mocks_recorded", "*.mock.json"))
+	require.NoError(t, err)
+	require.Len(t, files, 1, "the CLI wrote the recording when it stopped")
+
+	target.Close()
+
+	addr = randomAddr(t)
+	start(t, "--addr", addr, "--log-level", "disabled")
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res, err := http.Get("http://" + addr)
+		if assert.NoError(c, err) {
+			_ = res.Body.Close()
+		}
+	}, 10*time.Second, 100*time.Millisecond)
+
+	status, body := get(t, "http://"+addr+"/items?page=2")
+	require.Equal(t, http.StatusOK, status)
+	require.JSONEq(t, `{"page":"2"}`, body)
+
+	status, _ = get(t, "http://"+addr+"/items?page=3")
+	require.Equal(t, mockhttp.StatusNoMatch, status, "a request the recording didn't take")
+}

@@ -61,9 +61,12 @@ type Server struct {
 	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
 	events *vlatte.EventRunner
 
-	// recording is the recording requests are captured for, if any. recordMu orders its starts.
+	// recording is the recording requests are captured for, if any. recordMu orders its starts, and guards played:
+	// the directory of the last recording StopRecording ended, whose recordings files loads with the mock files.
 	recording atomic.Pointer[recording]
 	recordMu  sync.Mutex
+	played    string
+	files     *fileLoader
 }
 
 // New creates a new HTTP mock Server with the given configurations.
@@ -187,8 +190,9 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	internalLoaders := 1
+	files := &fileLoader{}
 	loaders := make([]Loader, 0, len(conf.Loaders)+internalLoaders)
-	loaders = append(loaders, &fileLoader{})
+	loaders = append(loaders, files)
 	loaders = append(loaders, conf.Loaders...)
 
 	app.Base = vlatte.NewBase(app, repository)
@@ -196,6 +200,7 @@ func New(config ...Option) (*Server, error) {
 	app.scenarioStore = mfeat.NewScenarioStore()
 	app.params = params
 	app.loaders = loaders
+	app.files = files
 	app.proxy = p
 	app.requestBodyParsers = parsers
 	app.events = eventRunner
@@ -388,8 +393,8 @@ func (app *Server) Close() {
 		app.logger.Debug().Err(err).Msg("server: Close: error closing server")
 	}
 
-	// The recording logged each call it couldn't record.
-	_, _ = app.StopRecording(context.Background())
+	// The recording logged each call it couldn't record. The server closes: it serves nothing more.
+	_, _ = app.stopRecording(context.Background(), false)
 
 	// The mocks stay stored, so assertions still read them after Close: they release what they hold.
 	mocks, _ := app.storage.PickAll(context.Background())

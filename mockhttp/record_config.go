@@ -246,6 +246,18 @@ func (r *RecordConfig) dir(root string) string {
 	return filepath.Join(root, r.Dir)
 }
 
+// recordedMockFiles returns the glob patterns of the mock files a recording writes into dir.
+func recordedMockFiles(dir string) []string {
+	formats := MockFileFormats()
+
+	patterns := make([]string, len(formats))
+	for i, format := range formats {
+		patterns[i] = dir + "/*.mock." + format
+	}
+
+	return patterns
+}
+
 //
 // Recording Configuration Functions.
 //

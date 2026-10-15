@@ -2,9 +2,13 @@ package mockhttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/caffeine-projects/vlatte"
@@ -19,15 +23,17 @@ type Loader interface {
 
 var _ Loader = (*fileLoader)(nil)
 
-// fileLoader loads the mock files matching the server's search patterns.
+// fileLoader loads the mock files matching the server's search patterns, and those of the directories of its
+// recordings.
 type fileLoader struct {
 	mu    sync.Mutex
 	scope *Scope // the mocks of the last load
 }
 
-// Load adds the mocks of every matching file, in file name order, so mocks of equal priority match in that order.
-// A reload swaps them for the mocks of the last load in one step, so a request finds one set or the other.
-// When a file has problems, Load changes nothing and reports every file with problems.
+// Load adds the mocks of every matching file, and of every mock file of the recording directories, in file name order,
+// so mocks of equal priority match in that order. A reload swaps them for the mocks of the last load in one step, so a
+// request finds one set or the other. When a file has problems, Load changes nothing and reports every file with
+// problems.
 func (l *fileLoader) Load(app *Server) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -35,6 +41,21 @@ func (l *fileLoader) Load(app *Server) error {
 	seen := make(map[string]struct{})
 
 	var files []string
+
+	// A relative and an absolute pattern, or a pattern and a recording directory, can name one file under two
+	// names: it loads once.
+	add := func(file string) {
+		key, err := filepath.Abs(file)
+		if err != nil {
+			key = file
+		}
+
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			files = append(files, file)
+		}
+	}
+
 	for _, pattern := range app.config.MockFileSearchPatterns {
 		glob := pattern
 		if !filepath.IsAbs(glob) {
@@ -47,15 +68,23 @@ func (l *fileLoader) Load(app *Server) error {
 		}
 
 		for _, file := range matches {
-			// A relative and an absolute pattern can match one file under two names: it loads once.
-			key, err := filepath.Abs(file)
-			if err != nil {
-				key = file
-			}
+			add(file)
+		}
+	}
 
-			if _, ok := seen[key]; !ok {
-				seen[key] = struct{}{}
-				files = append(files, file)
+	for _, dir := range app.recordDirs() {
+		entries, err := os.ReadDir(dir)
+
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			continue
+		case err != nil:
+			return fmt.Errorf("loader: recordings %s: %w", dir, err)
+		}
+
+		for _, e := range entries {
+			if !e.IsDir() && isMockFile(e.Name()) {
+				add(filepath.Join(dir, e.Name()))
 			}
 		}
 	}
@@ -80,4 +109,15 @@ func (l *fileLoader) Load(app *Server) error {
 	l.scope = scope
 
 	return nil
+}
+
+// isMockFile reports whether a file is named as recordings name mock files: <name>.mock.<format>.
+func isMockFile(name string) bool {
+	for _, format := range MockFileFormats() {
+		if strings.HasSuffix(name, ".mock."+format) {
+			return true
+		}
+	}
+
+	return false
 }

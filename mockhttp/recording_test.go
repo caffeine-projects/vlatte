@@ -490,7 +490,7 @@ func TestRecording_DirStartsAtRootDir(t *testing.T) {
 	require.Len(t, recordedMocks(t, filepath.Join(root, "rec")), 1, "a relative directory starts at the root")
 
 	require.NoError(t, m.StartRecording(RecordDir(abs)))
-	do(t, http.MethodGet, m.URL("/a"), nil, nil)
+	do(t, http.MethodGet, m.URL("/b"), nil, nil)
 	stopRecording(t, m)
 	require.Len(t, recordedMocks(t, abs), 1, "an absolute one is used as it is")
 }

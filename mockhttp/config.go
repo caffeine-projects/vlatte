@@ -20,8 +20,9 @@ import (
 
 // Defaults
 var (
-	// ConfigMockFilePattern is the default filename glob pattern to search for local mock files.
-	ConfigMockFilePattern = []string{"testdata/_mocks/*mock.yaml", "testdata/_mocks/*mock.yml"}
+	// ConfigMockFilePattern is the default filename glob pattern to search for local mock files: the recordings of the
+	// default record directory too.
+	ConfigMockFilePattern = append([]string{"testdata/_mocks/*mock.yaml", "testdata/_mocks/*mock.yml"}, recordedMockFiles(_defaultRecordDir)...)
 )
 
 // Config holds the configuration of an HTTP mock Server.

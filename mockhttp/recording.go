@@ -15,6 +15,8 @@ type recording struct {
 	session *vlatte.RecordSession[*recordedCall, RecordedRequest, RecordedResponse]
 	codec   *recordCodec
 	conf    *RecordConfig
+	dir     string
+	served  chan struct{}                            // closed once the StopRecording that ended it serves what it recorded
 	filter  vlatte.Evaluators[*Mock, *selectorInput] // the requests it takes
 	target  Replier                                  // sends the requests it takes to the server it records, if any
 }
@@ -41,25 +43,13 @@ func (app *Server) StartRecording(options ...RecordConfigurer) error {
 	return app.startRecording(conf)
 }
 
-// StopRecording stops the recording, waits until it wrote what it took, and returns what it wrote. When ctx ends
-// first, it returns ctx's error, and the recording goes on writing: a later StopRecording waits again. It returns
-// vlatte.ErrNotRecording when there is no recording. The error joins the calls and mocks that couldn't be recorded.
+// StopRecording stops the recording, waits until it wrote what it took, and returns what it wrote. The server then
+// serves the recordings: its mock files load again, with the recording's directory, so the hits of file mocks count
+// from 0. When ctx ends first, it returns ctx's error, and the recording goes on writing: a later StopRecording waits
+// again. It returns vlatte.ErrNotRecording when there is no recording. The error joins the calls and mocks that
+// couldn't be recorded, and a failure to serve the recordings, such as a mock ID they share with a mock file.
 func (app *Server) StopRecording(ctx context.Context) (*vlatte.RecordResult, error) {
-	rec := app.recording.Load()
-	if rec == nil {
-		return nil, vlatte.ErrNotRecording
-	}
-
-	res, err := rec.session.Stop(ctx)
-	if res == nil {
-		return nil, err
-	}
-
-	if app.recording.CompareAndSwap(rec, nil) {
-		rec.close()
-	}
-
-	return res, err
+	return app.stopRecording(ctx, true)
 }
 
 // RecordingStatus counts the calls of the recording, or returns a zero status when there is none.
@@ -92,7 +82,13 @@ func (app *Server) startRecording(conf *RecordConfig) error {
 		}
 	}
 
-	rec := &recording{codec: newRecordCodec(conf, app.logger), conf: conf, filter: conf.filter()}
+	rec := &recording{
+		codec:  newRecordCodec(conf, app.logger),
+		conf:   conf,
+		dir:    conf.dir(app.config.RootDir),
+		served: make(chan struct{}),
+		filter: conf.filter(),
+	}
 
 	if conf.Target != "" {
 		target, err := From(conf.Target).SSLVerify(conf.SSLVerify).NewReplier(app)
@@ -104,7 +100,7 @@ func (app *Server) startRecording(conf *RecordConfig) error {
 	}
 
 	session, err := vlatte.NewRecordSession(rec.codec, vlatte.RecordOptions[RecordedRequest, RecordedResponse]{
-		Dir:           conf.dir(app.config.RootDir),
+		Dir:           rec.dir,
 		Format:        conf.Format,
 		Repeats:       conf.Repeats,
 		BodyFiles:     conf.BodyFiles,
@@ -122,6 +118,79 @@ func (app *Server) startRecording(conf *RecordConfig) error {
 	app.recording.Store(rec)
 
 	return nil
+}
+
+// stopRecording stops the recording, and serves what it recorded when play is set.
+func (app *Server) stopRecording(ctx context.Context, play bool) (*vlatte.RecordResult, error) {
+	rec := app.recording.Load()
+	if rec == nil {
+		return nil, vlatte.ErrNotRecording
+	}
+
+	res, err := rec.session.Stop(ctx)
+	if res == nil {
+		return nil, err
+	}
+
+	// Another StopRecording ended it at the same time: this one returns once that one serves the recordings, so
+	// both return when they are served, and Close doesn't close the mocks before they load.
+	if !app.recording.CompareAndSwap(rec, nil) {
+		select {
+		case <-rec.served:
+			return res, err
+		case <-ctx.Done():
+			return res, ctx.Err()
+		}
+	}
+
+	defer close(rec.served)
+
+	rec.close()
+
+	if play && len(res.Recordings) > 0 {
+		if playErr := app.play(rec.dir); playErr != nil {
+			err = errors.Join(err, fmt.Errorf("recorder: serving the recordings: %w", playErr))
+		}
+	}
+
+	return res, err
+}
+
+// play serves the recordings of dir with the mock files, which load again. When they fail to load, the server
+// serves what it served before.
+func (app *Server) play(dir string) error {
+	app.recordMu.Lock()
+	last := app.played
+	app.played = dir
+	app.recordMu.Unlock()
+
+	if err := app.files.Load(app); err != nil {
+		app.recordMu.Lock()
+		app.played = last
+		app.recordMu.Unlock()
+
+		return err
+	}
+
+	return nil
+}
+
+// recordDirs returns the directories whose recordings the server serves: the one its config records into, and the
+// one of the last recording StopRecording ended.
+func (app *Server) recordDirs() []string {
+	dirs := make([]string, 0, 2)
+	if app.config.Record != nil {
+		dirs = append(dirs, app.config.Record.dir(app.config.RootDir))
+	}
+
+	app.recordMu.Lock()
+	defer app.recordMu.Unlock()
+
+	if app.played != "" {
+		dirs = append(dirs, app.played)
+	}
+
+	return dirs
 }
 
 // startConfiguredRecording starts the recording the server's config sets, unless one already runs, such as one
