@@ -614,6 +614,9 @@ func TestRecordSession_WritesAtomically(t *testing.T) {
 	stale := filepath.Join(dir, ".rec-123.tmp")
 	require.NoError(t, os.WriteFile(stale, []byte("half"), 0o600))
 
+	old := time.Now().Add(-2 * time.Hour)
+	require.NoError(t, os.Chtimes(stale, old, old))
+
 	s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{Dir: dir})
 	require.NoFileExists(t, stale, "a recording that ended unexpectedly left it")
 
@@ -652,6 +655,17 @@ func TestRecordSession_WritesAtomically(t *testing.T) {
 
 	require.Zero(t, partial.Load())
 	require.Empty(t, tempsIn(t, dir))
+}
+
+func TestRecordSession_LeavesTheFilesAnotherRecordingWrites(t *testing.T) {
+	// A temporary file a recording just made may be another recording's, still being written into the directory:
+	// a new recording leaves it.
+	dir := t.TempDir()
+	live := filepath.Join(dir, ".rec-456.tmp")
+	require.NoError(t, os.WriteFile(live, []byte("being written"), 0o600))
+
+	newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{Dir: dir})
+	require.FileExists(t, live)
 }
 
 func TestRecordSession_StopHonorsItsContext(t *testing.T) {
@@ -938,27 +952,116 @@ func BenchmarkRecordBody_Keep(b *testing.B) {
 
 func TestRecordSession_RetriesWhatTheDiskFailed(t *testing.T) {
 	// A write the disk fails is tried again at the next flush: a passing failure doesn't lose the mock. It counts as one
-	// failure, however many flushes fail.
+	// failure while it lasts, however many flushes fail, and none once the mock is written.
 	synctest.Test(t, func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "rec")
 		s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{Dir: dir})
 
+		// A file where the directory goes: no write can go in.
 		require.NoError(t, os.RemoveAll(dir))
+		require.NoError(t, os.WriteFile(dir, nil, 0o600))
 		s.Record(kvCall{key: "a", value: "1"}, 1)
 
-		time.Sleep(time.Second) // flushes, which fail: the directory is gone
+		time.Sleep(time.Second)
 		require.Equal(t, int64(1), s.Status().Failed)
 		require.Zero(t, s.Status().Mocks)
 
-		require.NoError(t, os.MkdirAll(dir, 0o755))
+		require.NoError(t, os.Remove(dir))
 		time.Sleep(time.Second) // the next flush writes it
 
 		res, err := s.Stop(t.Context())
-		require.ErrorContains(t, err, "no such file or directory")
+		require.NoError(t, err, "the mock was written in the end")
 		require.Len(t, res.Recordings, 1)
-		require.Equal(t, int64(1), res.Status.Failed)
+		require.Zero(t, res.Status.Failed)
 		require.FileExists(t, res.Recordings[0].File)
 	})
+}
+
+func TestRecordSession_RecreatesItsDirectory(t *testing.T) {
+	// A directory removed while the recording runs comes back with the next mock.
+	dir := filepath.Join(t.TempDir(), "rec")
+	s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{Dir: dir})
+
+	require.NoError(t, os.RemoveAll(dir))
+	s.Record(kvCall{key: "a", value: "1"}, 1)
+
+	res, err := s.Stop(t.Context())
+	require.NoError(t, err)
+	require.FileExists(t, res.Recordings[0].File)
+}
+
+func TestRecordSession_ReplacesItsMockInAnotherFormat(t *testing.T) {
+	// A request recorded again into the same directory in another format replaces its mock: one ID, one file.
+	dir := t.TempDir()
+
+	for _, format := range []string{"json", "yaml"} {
+		s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{Dir: dir, Format: format})
+		s.Record(kvCall{key: "a", value: format}, 1)
+
+		_, err := s.Stop(t.Context())
+		require.NoError(t, err)
+	}
+
+	mocks, err := filepath.Glob(filepath.Join(dir, "*.mock.*"))
+	require.NoError(t, err)
+	require.Len(t, mocks, 1)
+	require.Equal(t, ".yaml", filepath.Ext(mocks[0]))
+
+	data, err := os.ReadFile(mocks[0])
+	require.NoError(t, err)
+	require.Contains(t, string(data), "value: yaml")
+}
+
+func TestRecordSession_EqualAnswersWriteTheMockOnce(t *testing.T) {
+	// A request answered the same every time, such as a health check, doesn't change its mock: it is written once.
+	synctest.Test(t, func(t *testing.T) {
+		var writes atomic.Int64
+
+		count := func(*kvMock) error {
+			writes.Add(1)
+			return nil
+		}
+
+		s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{Transforms: []func(*kvMock) error{count}})
+
+		for range 3 {
+			s.Record(kvCall{key: "health", value: "up"}, 1)
+			time.Sleep(time.Second)
+		}
+
+		require.Equal(t, int64(1), writes.Load())
+
+		s.Record(kvCall{key: "health", value: "down"}, 1)
+
+		res, err := s.Stop(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, int64(2), writes.Load(), "another answer changes it")
+		require.Equal(t, []string{"up", "up", "up", "down"}, valuesOf(t, res.Recordings[0].File))
+	})
+}
+
+func TestRecordSession_EqualBodiesKeepOneFile(t *testing.T) {
+	// Equal bodies are one file, whether their answers are the same or not: copies don't pile up while the mock
+	// waits to be written, even for a mock a transform refuses until the end.
+	refuse := func(*kvMock) error { return errors.New("not now") }
+
+	codec := &kvCodec{}
+	dir := t.TempDir()
+	s := newSession(t, codec, vlatte.RecordOptions[kvRequest, kvResponse]{
+		Dir: dir, MaxInlineBody: 4, Transforms: []func(*kvMock) error{refuse},
+	})
+
+	for i := range 20 {
+		body := s.NewBody()
+		body.Keep([]byte("the same spooled body"))
+		body.Close()
+
+		// The same answer ten times, then ten answers that differ, with the same body.
+		s.Record(kvCall{key: "download", value: strconv.Itoa(max(i, 10)), body: body}, 1)
+	}
+
+	require.Eventually(t, func() bool { return codec.responses.Load() == 20 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return len(tempsIn(t, dir)) <= 1 }, 5*time.Second, time.Millisecond)
 }
 
 func TestRecordSession_AFailingMockCountsOnce(t *testing.T) {
@@ -1005,6 +1108,30 @@ func TestRecordSession_KeepsAtMostAThousandResponses(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1000, res.Recordings[0].Responses)
 	require.Equal(t, 1, strings.Count(logs.String(), "later ones aren't recorded"))
+
+	t.Run("the same answer many times counts too", func(t *testing.T) {
+		// A run of the same answer is one response until another comes: it then takes its places, when the other
+		// fits after them. The run alone answers the same, forever.
+		for _, tc := range []struct {
+			ups  int
+			want []string
+		}{
+			{10, append(slices.Repeat([]string{"up"}, 10), "down")},
+			{1500, []string{"up"}},
+		} {
+			s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{})
+
+			for range tc.ups {
+				s.Record(kvCall{key: "poll", value: "up"}, 1)
+			}
+
+			s.Record(kvCall{key: "poll", value: "down"}, 1)
+
+			res, err := s.Stop(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, tc.want, valuesOf(t, res.Recordings[0].File), "%d ups", tc.ups)
+		}
+	})
 }
 
 func TestMustNewRecordSession(t *testing.T) {

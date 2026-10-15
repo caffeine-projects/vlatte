@@ -43,6 +43,10 @@ const (
 	_maxResponses = 1000
 
 	_dropLogInterval = time.Second
+
+	// _staleTemp is how old a temporary file of a directory must be for a new recording to remove it: younger ones
+	// may be another recording's, still being written.
+	_staleTemp = time.Hour
 )
 
 // RecordSession records the calls of a protocol as mock files, off the request path. Record queues a call and returns
@@ -319,6 +323,13 @@ func (s *RecordSession[X, Q, S]) add(x X) {
 	if err != nil {
 		files.discard()
 		discard(x)
+
+		// A call still being captured when the recording stopped isn't recorded, as Stop says: it didn't fail.
+		if errors.Is(err, errBodyStopped) {
+			s.logger.Debug().Str("call", name).Msg("recorder: not recorded: the recording stopped during the call")
+			return
+		}
+
 		s.fail(fmt.Errorf("recorder: %s: %w", name, err))
 	}
 }
@@ -352,21 +363,24 @@ func (s *RecordSession[X, Q, S]) addResponse(x X, name string, request []byte, f
 		s.order = append(s.order, g)
 	}
 
-	if g.full() {
+	changed, kept := g.add(response)
+	if !kept && !g.warned {
+		g.warned = true
+		s.logger.Warn().Str("mock", g.id).Msgf("recorder: the mock has %d responses: later ones aren't recorded", _maxResponses)
+	}
+
+	if changed {
+		s.dirty[g] = struct{}{}
+	}
+
+	if !kept {
 		files.discard()
 		discard(x)
-
-		if !g.warned {
-			g.warned = true
-			s.logger.Warn().Str("mock", g.id).Msgf("recorder: the mock has %d responses: later ones aren't recorded", _maxResponses)
-		}
 
 		return nil
 	}
 
-	g.add(response)
-	g.pending = append(g.pending, files.pending...)
-	s.dirty[g] = struct{}{}
+	g.keep(files)
 
 	return nil
 }
@@ -374,6 +388,11 @@ func (s *RecordSession[X, Q, S]) addResponse(x X, name string, request []byte, f
 // flush writes the mocks that changed since the last flush. A mock the disk failed to take stays to write at the next
 // flush; one that can't be encoded, such as one a transform refuses, waits for its request to come again.
 func (s *RecordSession[X, Q, S]) flush() {
+	// The directory may have gone, such as removed while the recording ran.
+	if len(s.dirty) > 0 {
+		_ = os.MkdirAll(s.opts.Dir, 0o755)
+	}
+
 	for g := range s.dirty {
 		if !s.write(g) {
 			delete(s.dirty, g)
@@ -400,8 +419,12 @@ func (s *RecordSession[X, Q, S]) write(g *recordGroup) (retry bool) {
 			g.bodyFiles = append(g.bodyFiles, p.name)
 		}
 
+		// What was written is the file's: the bytes go.
+		g.pending[0] = pendingFile{}
 		g.pending = g.pending[1:]
 	}
+
+	g.pending = nil
 
 	file := filepath.Join(s.opts.Dir, g.id+".mock."+s.format)
 	if err := writeAtomic(s.opts.Dir, file, data); err != nil {
@@ -409,7 +432,14 @@ func (s *RecordSession[X, Q, S]) write(g *recordGroup) (retry bool) {
 		return true
 	}
 
-	g.file, g.title, g.failing = file, name, false
+	removeOtherFormats(file)
+
+	g.file, g.title = file, name
+
+	if g.failing {
+		g.failing, g.err = false, nil
+		s.failed.Add(-1)
+	}
 
 	if !g.written {
 		g.written = true
@@ -494,17 +524,22 @@ func (s *RecordSession[X, Q, S]) dropUnwritten() {
 	}
 }
 
-// failMock counts a mock that couldn't be written once, until it is written.
+// failMock counts a mock that couldn't be written once, until it is written: then it doesn't count anymore. Stop
+// returns the last error of each mock that still fails.
 func (s *RecordSession[X, Q, S]) failMock(g *recordGroup, err error) {
+	g.err = err
+
 	if g.failing {
 		s.logger.Debug().Err(err).Msg("recorder: not recorded, again")
 		return
 	}
 
 	g.failing = true
-	s.fail(err)
+	s.failed.Add(1)
+	s.logger.Error().Err(err).Msg("recorder: not recorded")
 }
 
+// fail counts a call that couldn't be recorded.
 func (s *RecordSession[X, Q, S]) fail(err error) {
 	s.failed.Add(1)
 	s.logger.Error().Err(err).Msg("recorder: not recorded")
@@ -549,9 +584,20 @@ func (s *RecordSession[X, Q, S]) result() *RecordResult {
 }
 
 func (s *RecordSession[X, Q, S]) err() error {
-	errs := slices.Clone(s.errs)
-	if s.more > 0 {
-		errs = append(errs, fmt.Errorf("recorder: %d more failures", s.more))
+	errs, more := slices.Clone(s.errs), s.more
+
+	for _, g := range s.order {
+		switch {
+		case !g.failing:
+		case len(errs) < _maxRecordErrors:
+			errs = append(errs, g.err)
+		default:
+			more++
+		}
+	}
+
+	if more > 0 {
+		errs = append(errs, fmt.Errorf("recorder: %d more failures", more))
 	}
 
 	return errors.Join(errs...)
@@ -575,33 +621,59 @@ type recordGroup struct {
 	file      string
 	bodyFiles []string
 	written   bool
-	failing   bool // its last write failed
-	warned    bool // it has _maxResponses responses
+	failing   bool  // its last write failed
+	err       error // why it failed
+	warned    bool  // it has _maxResponses responses
 }
 
-// full reports whether the mock has as many responses as it keeps.
-func (g *recordGroup) full() bool {
-	return g.repeats == 0 && len(g.responses) >= _maxResponses
-}
-
-// add adds a response. Equal responses stay one, until another comes: then each takes its place in the sequence.
-func (g *recordGroup) add(response []byte) {
+// add adds a response, and reports whether the mock file changes, and whether the mock keeps the response: it keeps
+// _maxResponses at most. Equal responses stay one, until another comes: then each takes its place in the sequence,
+// when the other one fits after them.
+func (g *recordGroup) add(response []byte) (changed, kept bool) {
 	switch {
 	case len(g.responses) == 0:
 		g.responses, g.repeats = [][]byte{response}, 1
+		return true, true
 	case g.repeats > 0 && bytes.Equal(response, g.responses[0]):
 		g.repeats++
+		return false, true
+	case g.repeats >= _maxResponses:
+		return false, false
 	case g.repeats > 0:
 		first := g.responses[0]
 		for range g.repeats - 1 {
 			g.responses = append(g.responses, first)
 		}
 
-		g.responses = append(g.responses, response)
 		g.repeats = 0
-	default:
-		g.responses = append(g.responses, response)
 	}
+
+	if len(g.responses) >= _maxResponses {
+		return false, false
+	}
+
+	g.responses = append(g.responses, response)
+
+	return true, true
+}
+
+// keep adds the body files of a response to those to write. A file of a name it has, written or not, holds the same
+// content: its copy goes.
+func (g *recordGroup) keep(files *RecordFiles) {
+	for _, p := range files.pending {
+		known := slices.Contains(g.bodyFiles, p.name) || slices.ContainsFunc(g.pending, func(q pendingFile) bool {
+			return q.name == p.name
+		})
+
+		switch {
+		case !known:
+			g.pending = append(g.pending, p)
+		case p.temp != "":
+			os.Remove(p.temp)
+		}
+	}
+
+	files.pending = nil
 }
 
 // discard discards x when it can be: a call the session doesn't record.
@@ -628,15 +700,32 @@ func writeAtomic(dir, file string, data []byte) error {
 		err = closeErr
 	}
 
-	if err != nil {
-		os.Remove(f.Name())
-		return err
+	if err == nil {
+		err = os.Rename(f.Name(), file)
 	}
 
-	return os.Rename(f.Name(), file)
+	if err != nil {
+		os.Remove(f.Name())
+	}
+
+	return err
 }
 
-// removeStaleTemps removes the temporary files a recording that ended unexpectedly left in dir.
+// removeOtherFormats removes the mock files file replaces in other formats, such as a.mock.yaml for a.mock.json: one
+// request has one ID, which one mock holds.
+func removeOtherFormats(file string) {
+	base := strings.TrimSuffix(file, filepath.Ext(file))
+
+	others, _ := filepath.Glob(base + ".*")
+	for _, other := range others {
+		if _, ok := config.Format(filepath.Ext(other)); ok && other != file {
+			os.Remove(other)
+		}
+	}
+}
+
+// removeStaleTemps removes the temporary files a recording that ended unexpectedly left in dir: those older than
+// _staleTemp.
 func removeStaleTemps(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -644,7 +733,12 @@ func removeStaleTemps(dir string) {
 	}
 
 	for _, e := range entries {
-		if name := e.Name(); strings.HasPrefix(name, ".rec-") && strings.HasSuffix(name, ".tmp") {
+		name := e.Name()
+		if !strings.HasPrefix(name, ".rec-") || !strings.HasSuffix(name, ".tmp") {
+			continue
+		}
+
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > _staleTemp {
 			os.Remove(filepath.Join(dir, name))
 		}
 	}

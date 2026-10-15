@@ -273,6 +273,62 @@ func TestRecordBody_States(t *testing.T) {
 	})
 }
 
+// bodyCall is a call of a protocol whose answer is a body only.
+type bodyCall struct {
+	body *RecordBody
+}
+
+type bodyCodec struct{}
+
+func (bodyCodec) Name(bodyCall) string { return "GET /a" }
+
+func (bodyCodec) Request(bodyCall, *RecordFiles) (string, error) { return "a", nil }
+
+func (bodyCodec) Response(x bodyCall, _ *RecordFiles) (string, error) {
+	if err := x.body.Err(); err != nil {
+		return "", err
+	}
+
+	b, _ := x.body.Bytes()
+
+	return string(b), nil
+}
+
+func (bodyCodec) Mock(m *RecordedMock[string, string]) any {
+	return map[string]any{"id": m.ID, "responses": m.Responses}
+}
+
+func TestRecordSession_CallsTheStopCaughtArentFailures(t *testing.T) {
+	// Stop drops the bodies still being captured, then stops taking calls: a call that ends in between is taken, and
+	// isn't recorded, as Stop says. It didn't fail.
+	s := MustNewRecordSession[bodyCall](bodyCodec{}, RecordOptions[string, string]{Dir: t.TempDir(), Format: "json"})
+
+	body := s.NewBody()
+	body.Keep([]byte("partial"))
+
+	s.files.stop() // what Stop does first
+	body.Close()
+	require.True(t, s.Record(bodyCall{body: body}, 1), "the recording still takes calls")
+
+	res, err := s.Stop(t.Context())
+	require.NoError(t, err)
+	require.Zero(t, res.Status.Failed)
+	require.Empty(t, res.Recordings)
+}
+
+func TestWriteAtomic_LeavesNoTemporaryFile(t *testing.T) {
+	// A write that fails, here because a directory is in the way, removes the temporary file it wrote.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "a.mock.json")
+	require.NoError(t, os.MkdirAll(filepath.Join(target, "in the way"), 0o755))
+
+	require.Error(t, writeAtomic(dir, target, []byte("{}")))
+
+	temps, err := filepath.Glob(filepath.Join(dir, _tempPattern))
+	require.NoError(t, err)
+	require.Empty(t, temps)
+}
+
 func TestRecordFiles_SharesEqualBodies(t *testing.T) {
 	d := newTestDir(t, 4, 1<<40)
 	files := &RecordFiles{dir: d, slug: "x"}
