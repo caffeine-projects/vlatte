@@ -215,7 +215,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Set:   func(c *Config, v config.Value) error { c.Addr = v.Str; return checkAddr(v.Str) },
 		},
 		field{
-			Key: "root_dir", Kind: config.String, Usage: "Directory that relative recording paths start at.",
+			Key: "root_dir", Kind: config.String, Usage: "Directory that relative mock file patterns and recording paths start at.",
 			Set: func(c *Config, v config.Value) error { c.RootDir = v.Str; return nil },
 		},
 		field{

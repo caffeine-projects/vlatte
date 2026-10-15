@@ -211,7 +211,8 @@ func (cb *ConfigBuilder) Port(port int) *ConfigBuilder {
 	return cb
 }
 
-// RootDir defines the root directory.
+// RootDir sets the directory that relative mock file patterns and recording paths start at. Absolute ones are used
+// as they are.
 func (cb *ConfigBuilder) RootDir(rootDir string) *ConfigBuilder {
 	cb.conf.RootDir = rootDir
 	return cb

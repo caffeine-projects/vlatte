@@ -94,6 +94,73 @@ func TestFileLoader_LoadsInNameOrder(t *testing.T) {
 	}
 }
 
+func TestFileLoader_RootDirStartsRelativePatternsOnly(t *testing.T) {
+	// #20: root_dir was joined to every pattern, so an absolute pattern pointed under root_dir and loaded nothing,
+	// silently. An absolute pattern names its files as written; root_dir starts the relative ones.
+	dir := t.TempDir()
+	other := t.TempDir()
+	writeMockFile(t, dir, "a.mock.yaml", mockFileSpec{})
+
+	tests := []struct {
+		name    string
+		rootDir string
+		pattern string
+		want    int
+	}{
+		{
+			name:    "absolute pattern",
+			rootDir: "",
+			pattern: filepath.Join(dir, "*.mock.yaml"),
+			want:    http.StatusOK,
+		},
+		{
+			name:    "absolute pattern, root_dir elsewhere",
+			rootDir: other,
+			pattern: filepath.Join(dir, "*.mock.yaml"),
+			want:    http.StatusOK,
+		},
+		{
+			name:    "relative pattern under root_dir",
+			rootDir: dir,
+			pattern: "*.mock.yaml",
+			want:    http.StatusOK,
+		},
+		{
+			name:    "relative pattern, root_dir without the file",
+			rootDir: other,
+			pattern: "*.mock.yaml",
+			want:    http.StatusTeapot,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := MustNew(Setup().Silent().RootDir(tc.rootDir).MockFilePatterns(tc.pattern))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			status, _ := get(t, m, "/f")
+			require.Equal(t, tc.want, status)
+		})
+	}
+}
+
+func TestFileLoader_LoadsAFileOnceWhicheverPatternsNameIt(t *testing.T) {
+	// A relative pattern and an absolute one name the same file under two paths. It loads once: twice, its ID would
+	// be in use, and the load would fail.
+	dir := t.TempDir()
+	writeMockFile(t, dir, "a.mock.yaml", mockFileSpec{id: "a"})
+	t.Chdir(dir)
+
+	m := MustNew(Setup().Silent().MockFilePatterns("*.mock.yaml", filepath.Join(dir, "*.mock.yaml")))
+	require.NoError(t, m.Start())
+	t.Cleanup(m.Close)
+
+	all, err := m.storage.PickAll(context.Background())
+	require.NoError(t, err)
+	require.Len(t, all, 1)
+}
+
 func TestFileLoader_ReportsEveryBadFile(t *testing.T) {
 	// A load fixes every file in one pass, and adds nothing until all of them are fixed.
 	dir := t.TempDir()

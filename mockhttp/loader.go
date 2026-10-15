@@ -36,14 +36,25 @@ func (l *fileLoader) Load(app *Server) error {
 
 	var files []string
 	for _, pattern := range app.config.MockFileSearchPatterns {
-		matches, err := filepath.Glob(filepath.Join(app.config.RootDir, pattern))
+		glob := pattern
+		if !filepath.IsAbs(glob) {
+			glob = filepath.Join(app.config.RootDir, glob)
+		}
+
+		matches, err := filepath.Glob(glob)
 		if err != nil {
 			return fmt.Errorf("loader: pattern %s: %w", pattern, err)
 		}
 
 		for _, file := range matches {
-			if _, ok := seen[file]; !ok {
-				seen[file] = struct{}{}
+			// A relative and an absolute pattern can match one file under two names: it loads once.
+			key, err := filepath.Abs(file)
+			if err != nil {
+				key = file
+			}
+
+			if _, ok := seen[key]; !ok {
+				seen[key] = struct{}{}
 				files = append(files, file)
 			}
 		}
