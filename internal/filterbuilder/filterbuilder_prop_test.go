@@ -94,6 +94,7 @@ func TestBuildMatcher_LoadsWhatMatchersDescribe(t *testing.T) {
 		match.Item(0, match.Equal("a")), match.Field("$.a", match.Truthy()), match.Split(",", match.Len(2)),
 		match.Both(match.Present(), match.Not(match.Nil())), match.All(match.HasPrefix("a"), match.HasSuffix("b")),
 		match.EqualJSON(`{"a": 1}`), match.StrictEqual(int64(1)), match.URLPath("/a/*"),
+		match.RequestURI("/items?page=2&a=%2F"),
 	} {
 		desc, ok := descriptor.IsSelfDescriptive(m)
 		require.True(t, ok)
@@ -115,7 +116,8 @@ var _allowed = map[string][]int{
 	"equal": {1}, "eqs": {1}, "contains": {1}, "eqj": {1}, "isin": {1}, "itemsmatch": {1}, "eqi": {1}, "glob": {1},
 	"hasprefix": {1}, "hassuffix": {1}, "regex": {1}, "haskey": {1}, "gt": {1}, "gte": {1}, "lt": {1}, "lte": {1},
 	"len": {1}, "each": {1}, "some": {1}, "not": {1}, "trim": {1}, "lowercase": {1}, "uppercase": {1}, "urlpath": {1},
-	"item": {2}, "jsonpath": {2}, "split": {2}, "both": {1, 2}, "either": {1, 2}, "xor": {1, 2}, "all": {1, 2, 3}, "any": {1, 2, 3},
+	"requesturi": {1},
+	"item":       {2}, "jsonpath": {2}, "split": {2}, "both": {1, 2}, "either": {1, 2}, "xor": {1, 2}, "all": {1, 2, 3}, "any": {1, 2, 3},
 }
 
 // genArg draws an argument of a spec: values of every class, matcher names and specs, and numbers at the edges.

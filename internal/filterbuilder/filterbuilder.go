@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -60,6 +61,7 @@ const (
 	_mNil                     = "nil"
 	_mRegex                   = "regex"
 	_mRegexAlias              = "regexp" // the name match.RegExpr describes itself with
+	_mRequestURI              = "requesturi"
 	_mSome                    = "some"
 	_mNot                     = "not"
 	_mPresent                 = "present"
@@ -150,6 +152,20 @@ func build(name string, args []any) (vlatte.Matcher, error) {
 		return s.text("a regular expression", match.RegExpr, func(pattern string) error {
 			_, err := regexp.Compile(pattern)
 			return err
+		})
+	case _mRequestURI:
+		return s.text("a URL", match.RequestURI, func(uri string) error {
+			u, err := url.Parse(uri)
+			if err != nil {
+				return err
+			}
+
+			// A request's path starts at "/": a relative one that doesn't would never match.
+			if !u.IsAbs() && !strings.HasPrefix(uri, "/") {
+				return errors.New("its path must start with /")
+			}
+
+			return nil
 		})
 	case _mHasKey:
 		return s.text("a JSON path", match.HasKey, func(path string) error {

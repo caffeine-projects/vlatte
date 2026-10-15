@@ -2,12 +2,10 @@ package match
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
-	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 // urlPathMatcher applies the inner matcher to the URL path of the value.
@@ -39,22 +37,8 @@ func (m *urlPathMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 
 // urlPath returns the path of a URL: a *url.URL or url.URL, text that parses as one, or a value whose String does.
 func urlPath(v any) (string, bool) {
-	switch e := v.(type) {
-	case *url.URL:
-		return e.Path, true
-	case url.URL:
-		return e.Path, true
-	case fmt.Stringer:
-		v = e.String()
-	}
-
-	text, ok := value.Text(v)
+	u, ok := toURL(v)
 	if !ok {
-		return "", false
-	}
-
-	u, err := url.Parse(text)
-	if err != nil {
 		return "", false
 	}
 

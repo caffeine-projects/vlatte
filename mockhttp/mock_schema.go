@@ -197,8 +197,9 @@ var _mockSchema = config.NewSchema(
 	},
 	mockField{
 		Key: "request.url", Kind: config.Any,
-		Usage: "URL to match: an absolute URL, compared ignoring case; a relative one, whose path is a glob; or a matcher list.",
-		Set:   func(d *mockDef, v config.Value) error { return setURL(&d.request, v) },
+		Usage: "URL to match: an absolute URL, compared ignoring case; a relative one, such as /items?page=2, " +
+			"whose path and query must be the same, the parameters in any order, each with its values in order; or a matcher list.",
+		Set: func(d *mockDef, v config.Value) error { return setURL(&d.request, v) },
 	},
 	mockField{
 		Key: "request.url_match", Kind: config.String, Usage: "Regular expression the full URL must match.",
@@ -955,9 +956,22 @@ func setURL(r *requestDef, v config.Value) error {
 
 	if u.IsAbs() {
 		r.url["url"] = func(b *Builder) { b.URL(match.EqualIgnoreCase(s)) }
-	} else {
-		r.url["url"] = func(b *Builder) { b.URL(match.URLPath(u.Path)) }
+		return nil
 	}
+
+	// A relative URL names the path and query a request must have: the path starts with "/". It is exact, so a "*"
+	// in its path, which was a glob, would match only itself.
+	if !strings.HasPrefix(s, "/") {
+		return config.Invalid(v, fmt.Sprintf("%s=%q must be an absolute URL, or start with /", v.Key, s),
+			"to match the path with a glob, use path instead")
+	}
+
+	if path, _, _ := strings.Cut(s, "?"); strings.Contains(path, "*") {
+		return config.Invalid(v, fmt.Sprintf("%s=%q has a * in its path, which matches exactly", v.Key, s),
+			"to match the path with a glob, use path; for a literal *, write %2A")
+	}
+
+	r.url["url"] = func(b *Builder) { b.URL(match.RequestURI(s)) }
 
 	return nil
 }
