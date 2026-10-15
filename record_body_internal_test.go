@@ -3,6 +3,7 @@ package vlatte
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ func newTestDir(t *testing.T, maxInline, maxBody int64) *recordDir {
 		maxBody:   maxBody,
 		logger:    &nop,
 		live:      make(map[*RecordBody]struct{}),
+		done:      make(chan struct{}),
 	}
 }
 
@@ -38,14 +40,33 @@ func (f slowFile) Write(p []byte) (int, error) {
 	return f.File.Write(p)
 }
 
+// spoolOn has the bodies of the test spool to files that open opens.
+func spoolOn(t *testing.T, open func(dir string) (spoolFile, error)) {
+	t.Helper()
+
+	before := _openSpool
+	_openSpool = open
+
+	t.Cleanup(func() { _openSpool = before })
+}
+
+// waitAtMost has the bodies of the test wait d at most for the disk.
+func waitAtMost(t *testing.T, d time.Duration) {
+	t.Helper()
+
+	before := _spoolWait
+	_spoolWait = d
+
+	t.Cleanup(func() { _spoolWait = before })
+}
+
 func TestRecordBody_DropsWhenTheDiskFallsBehind(t *testing.T) {
-	// #33: a response must not wait for its recording. When the disk falls behind the body, the body is dropped,
-	// and Keep returns at once all along: the sender never waits for the disk.
+	// #33: a response waits for its recording a bounded time only. A disk that falls further behind the body than
+	// _spoolWait drops it, and the sender goes on at its own pace.
 	release := make(chan struct{})
 	opened := make(chan string, 1)
 
-	open := _openSpool
-	_openSpool = func(dir string) (spoolFile, error) {
+	spoolOn(t, func(dir string) (spoolFile, error) {
 		f, err := os.CreateTemp(dir, _tempPattern)
 		if err != nil {
 			return nil, err
@@ -54,9 +75,9 @@ func TestRecordBody_DropsWhenTheDiskFallsBehind(t *testing.T) {
 		opened <- f.Name()
 
 		return slowFile{File: f, release: release}, nil
-	}
+	})
 
-	t.Cleanup(func() { _openSpool = open })
+	waitAtMost(t, 50*time.Millisecond)
 
 	d := newTestDir(t, 1024, 1<<40)
 	b := d.newBody()
@@ -68,7 +89,9 @@ func TestRecordBody_DropsWhenTheDiskFallsBehind(t *testing.T) {
 		b.Keep(chunk)
 	}
 
-	require.Less(t, time.Since(start), time.Second, "Keep waited for the disk")
+	elapsed := time.Since(start)
+	require.GreaterOrEqual(t, elapsed, _spoolWait, "the sender waited for the disk")
+	require.Less(t, elapsed, _spoolWait+2*time.Second, "the sender waited longer than _spoolWait")
 	require.ErrorIs(t, b.Err(), errDiskTooSlow)
 
 	close(release)
@@ -76,6 +99,101 @@ func TestRecordBody_DropsWhenTheDiskFallsBehind(t *testing.T) {
 	d.spools.Wait()
 
 	require.NoFileExists(t, <-opened, "the file of a dropped body is removed")
+}
+
+// pacedFile is a disk that takes a while for each write.
+type pacedFile struct {
+	*os.File
+
+	pace time.Duration
+}
+
+func (f pacedFile) Write(p []byte) (int, error) {
+	time.Sleep(f.pace)
+	return f.File.Write(p)
+}
+
+func TestRecordBody_WaitsForASlowDisk(t *testing.T) {
+	// A sender faster than the disk goes at the disk's pace: the body is kept whole.
+	spoolOn(t, func(dir string) (spoolFile, error) {
+		f, err := os.CreateTemp(dir, _tempPattern)
+		if err != nil {
+			return nil, err
+		}
+
+		return pacedFile{File: f, pace: time.Millisecond}, nil
+	})
+
+	d := newTestDir(t, 1024, 1<<40)
+	b := d.newBody()
+
+	content := make([]byte, 4*_spoolQueue*_spoolChunk)
+	for i := range content {
+		content[i] = byte(i)
+	}
+
+	for chunk := range slices.Chunk(content, 16<<10) {
+		b.Keep(chunk)
+	}
+
+	b.Close()
+	require.NoError(t, b.Err())
+
+	files := &RecordFiles{dir: d, slug: "x"}
+	name, err := files.PlaceSpooled(b, ".bin")
+	require.NoError(t, err)
+
+	kept, err := os.ReadFile(files.pending[0].temp)
+	require.NoError(t, err)
+	require.Equal(t, content, kept)
+
+	files.discard()
+	require.NoFileExists(t, filepath.Join(d.dir, name))
+}
+
+func TestRecordBody_StopReleasesABodyWaitingForTheDisk(t *testing.T) {
+	// A recording that stops doesn't wait for a body that waits for the disk: the body is dropped, and its sender
+	// goes on.
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	spoolOn(t, func(dir string) (spoolFile, error) {
+		f, err := os.CreateTemp(dir, _tempPattern)
+		if err != nil {
+			return nil, err
+		}
+
+		return slowFile{File: f, release: release}, nil
+	})
+
+	waitAtMost(t, time.Minute)
+
+	d := newTestDir(t, 1024, 1<<40)
+	b := d.newBody()
+
+	sent := make(chan struct{})
+
+	go func() {
+		defer close(sent)
+
+		chunk := make([]byte, 64<<10)
+		for range 2 * (_spoolQueue * _spoolChunk) / len(chunk) {
+			b.Keep(chunk)
+		}
+	}()
+
+	// The queue holds 2 MiB: the sender fills it at once, then waits for the disk.
+	time.Sleep(100 * time.Millisecond)
+
+	d.stop()
+
+	select {
+	case <-sent:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sender still waits for the disk")
+	}
+
+	require.ErrorIs(t, b.Err(), errBodyStopped)
 }
 
 func TestRecordBody_FileThatCantBeCreated(t *testing.T) {

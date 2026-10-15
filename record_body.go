@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/rs/zerolog"
@@ -17,9 +18,9 @@ const (
 	// _spoolChunk is the size of the chunks a body hands to its spool goroutine: small writes fill one first.
 	_spoolChunk = 32 << 10
 
-	// _spoolQueue is how many chunks wait for the disk before the body stops keeping: 8 MiB, room for the file to be
-	// created and for a fast sender, such as a local one.
-	_spoolQueue = 256
+	// _spoolQueue is how many chunks wait for the disk before the sender waits for it: 2 MiB, room for the file to
+	// be created and for the disk to catch up.
+	_spoolQueue = 64
 
 	// _tempPattern names the files being written: never *.mock.*, so loading mock files skips them.
 	_tempPattern = ".rec-*.tmp"
@@ -37,6 +38,10 @@ var (
 	errBodyInMemory  = errors.New("recorder: the body stayed in memory: place its bytes")
 	errBodyPlaced    = errors.New("recorder: the body was placed already")
 )
+
+// _spoolWait is how long a body waits for the disk in all, beyond which it isn't kept: a sender faster than the disk,
+// such as a local one, goes at the disk's pace that long at most. Tests shorten it.
+var _spoolWait = time.Second
 
 // _chunks recycles the chunks a body copies what it spools into.
 var _chunks = sync.Pool{New: func() any {
@@ -77,6 +82,7 @@ type recordDir struct {
 	mu      sync.Mutex
 	live    map[*RecordBody]struct{} // bodies still being captured
 	stopped bool
+	done    chan struct{} // closed when stopped: a body waiting for the disk gives up
 }
 
 // newBody returns a body to capture into. Once the recording stopped, the body keeps nothing.
@@ -104,7 +110,11 @@ func (d *recordDir) stop() {
 		live = append(live, b)
 	}
 
-	d.stopped = true
+	if !d.stopped {
+		d.stopped = true
+		close(d.done)
+	}
+
 	d.mu.Unlock()
 
 	for _, b := range live {
@@ -207,22 +217,26 @@ func (sp *spool) drop() {
 }
 
 // RecordBody captures a body as it is sent. It keeps it in memory up to MaxInlineBody. Past that, a goroutine of its
-// own writes it to a file of the recording's directory, so neither the disk nor the size of the body holds the sender
-// up. A body the disk falls behind, or larger than MaxBodySize, isn't kept: its call isn't recorded, and Err says why.
+// own writes it to a file of the recording's directory, so the size of the body never holds memory. A sender faster
+// than the disk waits for it, a second in all at most: a body the disk falls further behind, or larger than
+// MaxBodySize, isn't kept. Its call isn't recorded, and Err says why.
 type RecordBody struct {
 	dir *recordDir
 
-	mu    sync.Mutex
-	state bodyState
-	err   error
-	mem   []byte
-	size  int64
-	spool *spool
-	chunk []byte // the chunk being filled, once spooling
+	mu     sync.Mutex
+	state  bodyState
+	err    error
+	mem    []byte
+	size   int64
+	spool  *spool
+	chunk  []byte        // the chunk being filled, once spooling
+	waited time.Duration // how long the sender waited for the disk
+	timer  *time.Timer
 }
 
-// Keep keeps p, the next bytes of the body. It never waits for the disk. It does nothing once the body is closed or
-// dropped. p is the caller's again when Keep returns.
+// Keep keeps p, the next bytes of the body. It waits for the disk only when the body goes to its file faster than the
+// disk takes it, as the type says. It does nothing once the body is closed or dropped. p is the caller's again when
+// Keep returns.
 func (b *RecordBody) Keep(p []byte) {
 	if len(p) == 0 {
 		return
@@ -330,8 +344,8 @@ func (b *RecordBody) Err() error {
 	return nil
 }
 
-// sendLocked hands the chunk being filled to the spool goroutine. When the disk is that far behind, the body is
-// dropped: the sender never waits for it.
+// sendLocked hands the chunk being filled to the spool goroutine. When the disk is behind, the sender waits for it,
+// until the body waited _spoolWait in all: then, or when the recording stops, the body is dropped.
 func (b *RecordBody) sendLocked() bool {
 	chunk := b.chunk
 	b.chunk = nil
@@ -340,11 +354,36 @@ func (b *RecordBody) sendLocked() bool {
 	case b.spool.chunks <- chunk:
 		return true
 	default:
-		putChunk(chunk)
-		b.dropLocked(errDiskTooSlow)
-
-		return false
 	}
+
+	err := errDiskTooSlow
+
+	if left := _spoolWait - b.waited; left > 0 {
+		if b.timer == nil {
+			b.timer = time.NewTimer(left)
+		} else {
+			b.timer.Reset(left)
+		}
+
+		start := time.Now()
+
+		select {
+		case b.spool.chunks <- chunk:
+			b.timer.Stop()
+			b.waited += time.Since(start)
+
+			return true
+		case <-b.dir.done:
+			b.timer.Stop()
+			err = errBodyStopped
+		case <-b.timer.C:
+		}
+	}
+
+	putChunk(chunk)
+	b.dropLocked(err)
+
+	return false
 }
 
 func (b *RecordBody) drop(err error) {

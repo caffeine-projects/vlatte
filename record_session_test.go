@@ -471,6 +471,7 @@ func TestRecordSession_Transforms(t *testing.T) {
 
 		r := res.Recordings[0]
 		require.NotEqual(t, "renamed", r.ID)
+		require.Equal(t, "changed", r.Name, "the result names the mock as its file does")
 		doc := readMock(t, r.File)
 		require.Equal(t, r.ID, doc["id"])
 		require.Equal(t, "changed", doc["name"])

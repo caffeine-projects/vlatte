@@ -129,6 +129,7 @@ func NewRecordSession[X, Q, S any](c RecordCodec[X, Q, S], o RecordOptions[Q, S]
 			bodyFiles: o.BodyFiles,
 			logger:    logger,
 			live:      make(map[*RecordBody]struct{}),
+			done:      make(chan struct{}),
 		},
 		wake:   make(chan struct{}, 1),
 		done:   make(chan struct{}),
@@ -382,7 +383,7 @@ func (s *RecordSession[X, Q, S]) flush() {
 
 // write writes the mock of g: its body files, then its mock file. It reports whether to try again: the disk failed.
 func (s *RecordSession[X, Q, S]) write(g *recordGroup) (retry bool) {
-	data, err := s.encode(g)
+	data, name, err := s.encode(g)
 	if err != nil {
 		s.failMock(g, fmt.Errorf("recorder: %s: %w", g.id, err))
 		return false
@@ -408,7 +409,7 @@ func (s *RecordSession[X, Q, S]) write(g *recordGroup) (retry bool) {
 		return true
 	}
 
-	g.file, g.failing = file, false
+	g.file, g.title, g.failing = file, name, false
 
 	if !g.written {
 		g.written = true
@@ -418,9 +419,10 @@ func (s *RecordSession[X, Q, S]) write(g *recordGroup) (retry bool) {
 	return false
 }
 
-// encode returns the mock file of g: its request and responses decoded afresh, so a transform changes this write
-// only, run through the transforms, written by the codec, then in the format of the recording.
-func (s *RecordSession[X, Q, S]) encode(g *recordGroup) (data []byte, err error) {
+// encode returns the mock file of g, and the name it has there: its request and responses decoded afresh, so a
+// transform changes this write only, run through the transforms, written by the codec, then in the format of the
+// recording.
+func (s *RecordSession[X, Q, S]) encode(g *recordGroup) (data []byte, name string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic: %v", r)
@@ -429,18 +431,18 @@ func (s *RecordSession[X, Q, S]) encode(g *recordGroup) (data []byte, err error)
 
 	m := &RecordedMock[Q, S]{ID: g.id, Name: g.name, Responses: make([]S, len(g.responses))}
 	if err := json.Unmarshal(g.request, &m.Request); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	for i, r := range g.responses {
 		if err := json.Unmarshal(r, &m.Responses[i]); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
 
 	for i, transform := range s.opts.Transforms {
 		if err := transform(m); err != nil {
-			return nil, fmt.Errorf("transform %d: %w", i, err)
+			return nil, "", fmt.Errorf("transform %d: %w", i, err)
 		}
 	}
 
@@ -448,10 +450,12 @@ func (s *RecordSession[X, Q, S]) encode(g *recordGroup) (data []byte, err error)
 
 	doc, err := value.ViaJSON(s.codec.Mock(m))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	return config.Encode(doc, s.format)
+	data, err = config.Encode(doc, s.format)
+
+	return data, m.Name, err
 }
 
 // writeBody writes a body file. A file of that name holds the same content: it is named after it.
@@ -534,7 +538,7 @@ func (s *RecordSession[X, Q, S]) result() *RecordResult {
 
 		res.Recordings = append(res.Recordings, Recording{
 			ID:        g.id,
-			Name:      g.name,
+			Name:      g.title,
 			File:      g.file,
 			BodyFiles: slices.Clone(g.bodyFiles),
 			Responses: len(g.responses),
@@ -563,6 +567,7 @@ type queuedCall[X any] struct {
 type recordGroup struct {
 	id        string
 	name      string
+	title     string   // the name its mock file has, which a transform may change
 	request   []byte   // the request section, as JSON
 	responses [][]byte // the response sections, as JSON, in order; one while they are all the same
 	repeats   int      // how many times the one response came, while they are all the same
