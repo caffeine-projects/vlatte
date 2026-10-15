@@ -170,15 +170,13 @@ func (r *RecordConfig) check() error {
 		return fmt.Errorf("recorder: filter: %w", r.Filter.err)
 	}
 
-	for _, list := range []struct {
-		what  string
-		items []string
-	}{{"method", r.Methods}, {"path", r.Paths}} {
-		for i, item := range list.items {
-			if list.items[i] = strings.TrimSpace(item); list.items[i] == "" {
-				return fmt.Errorf("recorder: %s %d is empty", list.what, i)
-			}
-		}
+	var err error
+	if r.Methods, err = trimmed("method", r.Methods); err != nil {
+		return err
+	}
+
+	if r.Paths, err = trimmed("path", r.Paths); err != nil {
+		return err
 	}
 
 	if r.Target != "" {
@@ -188,6 +186,22 @@ func (r *RecordConfig) check() error {
 	}
 
 	return nil
+}
+
+// trimmed returns items without the spaces around them, in a slice of its own: the caller's may be shared.
+func trimmed(what string, items []string) ([]string, error) {
+	if items == nil {
+		return nil, nil
+	}
+
+	out := make([]string, len(items))
+	for i, item := range items {
+		if out[i] = strings.TrimSpace(item); out[i] == "" {
+			return nil, fmt.Errorf("recorder: %s %d is empty", what, i)
+		}
+	}
+
+	return out, nil
 }
 
 // filter returns the matchers of the requests the recording takes: its methods, its paths and its filter's.

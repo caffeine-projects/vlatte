@@ -162,6 +162,25 @@ func TestPlayback_AFileLoadsOnce(t *testing.T) {
 	t.Cleanup(missing.Close)
 }
 
+func TestPlayback_ALinkedDirectoryLoadsOnce(t *testing.T) {
+	// The patterns name the recordings through a link to the record directory: each file loads once.
+	_, target := answering(t, "recorded")
+	dir := t.TempDir()
+
+	link := filepath.Join(t.TempDir(), "link")
+	require.NoError(t, os.Symlink(dir, link))
+
+	m := MustNew(Setup().Silent().MockFilePatterns(filepath.Join(link, "*.mock.json")).Record(RecordDir(dir), RecordTarget(target)))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	do(t, http.MethodGet, m.URL("/a"), nil, nil)
+	stopRecording(t, m)
+
+	_, body := do(t, http.MethodGet, m.URL("/a"), nil, nil)
+	require.Equal(t, "recorded /a", string(body))
+}
+
 func TestPlayback_RecordingsThatShareAnIDWithAMockFile(t *testing.T) {
 	// The same request recorded into two directories the server serves has one ID twice: StopRecording reports it,
 	// with what it recorded, and the server serves the mocks it had.

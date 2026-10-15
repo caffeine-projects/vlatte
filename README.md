@@ -112,7 +112,7 @@ No other reading happens: `[equal, 10]` doesn't match `010`. The [match package 
 
 **URLs.** `url: /items?page=2` matches that path and query exactly: the same parameters, in any order, each with its values in order, so `/items` and `/items?page=2&sort=asc` don't match. Path segments compare decoded, so `%41` is `A`, but `%2F` isn't `/`. A relative `url` with a `*` in its path is an error: match a path with a glob through `path: /items/*`, and parameters one by one through `query`. For a literal `*`, write `%2A`. An absolute `url`, such as `https://api.example.com/items`, compares as text ignoring case.
 
-**Proxy replies.** A `proxy` reply (`From` in Go) answers with what its target answers, and streams the body as the target sends it, trailers included. Its `timeout` bounds the wait for the target's response headers only, 30 seconds by default; 0 waits forever. A mock with response mappers reads the whole body first, so they see it in `Body`.
+**Proxy replies.** A `proxy` reply (`From` in Go) answers with what its target answers, and streams the body as the target sends it, trailers included. Its `timeout` bounds the wait for the target's response headers, connecting and sending the request included, 30 seconds by default; 0 waits forever. The body has no time limit. A mock with response mappers reads the whole body first, so they see it in `Body`.
 
 **Templates.** A mock file is plain JSON or YAML. Only the settings that are templates, such as a templated body, render: see [Templates](#templates).
 
@@ -395,11 +395,11 @@ mockhttp.RecordFilter(mockhttp.Request().Header("X-Record", match.Equal("yes")))
 A filter that fails takes nothing: the request is served as usual, and the failure is logged.
 
 **Playback.**
-- `StopRecording` waits until every call it took is written, then serves the recordings: the mock files load again, with the recording's directory, so the hits of file mocks count from 0. When `ctx` ends first, it returns ctx's error, and the recording keeps writing: another `StopRecording` waits for it again, and serves it.
+- `StopRecording` waits until every call it took is written, then serves the recordings: the mock files load again, with the recording's directory, so the hits of file mocks count from 0. When `ctx` ends first, it returns ctx's error, and the recording keeps writing: another `StopRecording` waits for it again, and serves it. A `StartRecording` once it wrote everything ends it without serving it.
 - A server started later serves them too. The default mock file patterns include `testdata/_mocks_recorded`, and a server serves the recordings of its `record.dir`.
 - A server serves the recordings of the last recording `StopRecording` ended, not those of earlier ones in other directories. The same request recorded into two directories a server serves has one ID twice: `StopRecording` reports it, and the server serves what it served before.
 - A mock that proxies every request needs a priority number above 0 to let the recordings answer first: `AnyMethod().Priority(10).Reply(From(target))`.
-- A recording answers its request before any proxy, so a later recording without a target doesn't record that request again: it records what is new. A recording with a target records every request it takes. A `Reload` while recording serves what is recorded so far.
+- A recording answers its request before any proxy, so a later recording without a target doesn't record that request again: it records what is new. A recording with a target records every request it takes.
 
 **What a recording matches.** A recording answers the request it recorded, and no other:
 

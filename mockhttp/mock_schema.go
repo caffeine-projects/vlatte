@@ -519,8 +519,9 @@ var _proxySchema = config.NewSchema(
 	},
 	proxyField{
 		Key: "timeout", Kind: config.Duration,
-		Usage: "How long to wait for the target's response headers: milliseconds or a Go duration (1.5s). 0 waits forever.",
-		Set:   func(p *proxyDef, v config.Value) error { p.timeout, p.hasTimeout = v.Dur, true; return nil },
+		Usage: "How long to wait for the target's response headers, connecting and sending the request included: " +
+			"milliseconds or a Go duration (1.5s). 0 waits forever.",
+		Set: func(p *proxyDef, v config.Value) error { p.timeout, p.hasTimeout = v.Dur, true; return nil },
 	},
 	proxyField{
 		Key: "ssl_verify", Kind: config.Bool, Usage: "Verify the TLS certificate of the target.",
@@ -949,29 +950,36 @@ func setURL(r *requestDef, v config.Value) error {
 		return nil
 	}
 
+	// A relative URL names the path and query a request must have: the path starts with "/", and reads as a server
+	// reads a request target. It is exact, so a "*" in its path, which was a glob, would match only itself.
+	if strings.HasPrefix(s, "/") {
+		target, _, _ := strings.Cut(s, "#")
+		if path, _, _ := strings.Cut(target, "?"); strings.Contains(path, "*") {
+			return config.Invalid(v, fmt.Sprintf("%s=%q has a * in its path, which matches exactly", v.Key, s),
+				"to match the path with a glob, use path; for a literal *, write %2A")
+		}
+
+		m, err := filterbuilder.BuildMatcher([]any{"requesturi", s})
+		if err != nil {
+			return config.Invalid(v, fmt.Sprintf("%s=%q is not a URL: %v", v.Key, s, err), "")
+		}
+
+		r.url["url"] = func(b *Builder) { b.URL(m) }
+
+		return nil
+	}
+
 	u, err := url.Parse(s)
 	if err != nil {
 		return config.Invalid(v, fmt.Sprintf("%s=%q is not a URL: %v", v.Key, s, err), "")
 	}
 
-	if u.IsAbs() {
-		r.url["url"] = func(b *Builder) { b.URL(match.EqualIgnoreCase(s)) }
-		return nil
-	}
-
-	// A relative URL names the path and query a request must have: the path starts with "/". It is exact, so a "*"
-	// in its path, which was a glob, would match only itself.
-	if !strings.HasPrefix(s, "/") {
+	if !u.IsAbs() {
 		return config.Invalid(v, fmt.Sprintf("%s=%q must be an absolute URL, or start with /", v.Key, s),
 			"to match the path with a glob, use path instead")
 	}
 
-	if path, _, _ := strings.Cut(s, "?"); strings.Contains(path, "*") {
-		return config.Invalid(v, fmt.Sprintf("%s=%q has a * in its path, which matches exactly", v.Key, s),
-			"to match the path with a glob, use path; for a literal *, write %2A")
-	}
-
-	r.url["url"] = func(b *Builder) { b.URL(match.RequestURI(s)) }
+	r.url["url"] = func(b *Builder) { b.URL(match.EqualIgnoreCase(s)) }
 
 	return nil
 }

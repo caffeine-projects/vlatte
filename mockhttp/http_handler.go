@@ -78,7 +78,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// A recording captures the request as it came, and the answer as the client gets it. A CONNECT opens a tunnel,
 	// which answers nothing. A recording with a target sends it what it takes, before any mock.
 	var capture *captureWriter
-	if rec := h.app.recording.Load(); rec != nil && r.Method != http.MethodConnect && rec.takes(r.Context(), input) {
+	if rec := h.app.recording.Load(); rec != nil && !rec.stopping.Load() && r.Method != http.MethodConnect && rec.takes(r.Context(), input) {
 		capture = rec.capture(w, reqValues, rawBody, parseErr)
 		w = capture
 
@@ -256,16 +256,22 @@ func (h *mockHandler) serveTarget(w http.ResponseWriter, r *RequestValues, targe
 }
 
 // render sends res, and has the capture, if any, record it once the client got it whole. The status and headers are
-// sent by now, so an error can't become the response: it is logged, as a warning when the client went away.
+// sent by now, so an error can't become the response: it is logged, as a warning when the client went away. A proxied
+// answer whose body broke off cuts the client's connection, as a proxy does, so the client doesn't take part of the
+// target's body for all of it.
 func (h *mockHandler) render(w http.ResponseWriter, r *RequestValues, res *Response, capture *captureWriter) {
 	ctx := r.RawRequest.Context()
 
 	if err := res.Render(ctx, w); err != nil {
 		err = fmt.Errorf("http: rendering response: %w", err)
 
-		if ctx.Err() != nil {
+		switch {
+		case ctx.Err() != nil:
 			h.lifecycle.OnWarning(r, err)
-		} else {
+		case res.proxied:
+			h.lifecycle.OnError(r, err)
+			panic(http.ErrAbortHandler)
+		default:
 			h.lifecycle.OnError(r, err)
 		}
 

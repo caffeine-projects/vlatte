@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"io"
 	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -92,6 +94,9 @@ func TestCanonicalURL(t *testing.T) {
 		{"//double", "//double"},
 		{"/items?a=1;b=2", "/items?a=1;b=2"},
 		{"/items?a=%zz", "/items?a=%zz"},
+		{"/files/*", "/files/%2A"},
+		{"/files/%2a", "/files/%2A"},
+		{"//a:b/c", "//a:b/c"},
 	}
 
 	for _, tc := range tests {
@@ -114,6 +119,7 @@ func FuzzCanonicalURL(f *testing.F) {
 	// URL with, the way the server reads it. Written again, it doesn't change.
 	for _, seed := range []string{
 		"/items?b=2&a=1", "/a%2Fb", "/%41", "//double", "/a;b,c", "/x?a=1;b=2", "/caf%C3%A9?q=%E2%9C%93", "/a+b?c=d+e", "/?",
+		"/files/*", "/files/%2A", "//a:b/c", "//a%20b/c", "//[x",
 	} {
 		f.Add(seed)
 	}
@@ -138,6 +144,8 @@ func FuzzCanonicalURL(f *testing.F) {
 		ok, err := match.RequestURI(canonical).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), served.String()))
 		require.NoError(t, err)
 		require.True(t, ok, "%q doesn't match %q", canonical, target)
+
+		require.NoError(t, setURL(&requestDef{}, config.Value{Key: "request.url", Any: canonical}), "a mock file takes %q", canonical)
 
 		again, err := url.ParseRequestURI(canonical)
 		require.NoError(t, err)
@@ -420,6 +428,18 @@ func TestRecording_RequestSection(t *testing.T) {
 			match: []sentRequest{{method: http.MethodPost, target: "/j", header: http.Header{HeaderContentType: {"application/json"}}, body: []byte(`{}`)}},
 		},
 		{
+			// A form's boundary changes with each client: the Content-Type the recording names matches its media type,
+			// though the recording can't read the body, here larger than MaxInlineBody.
+			name:    "a Content-Type the recording names, beside a body it can't read",
+			options: []RecordConfigurer{RecordRequestHeaders("Content-Type"), RecordMaxInlineBody(16)},
+			request: multipartRequest(upload),
+			want: RecordedRequest{
+				Method: http.MethodPost, URL: "/upload",
+				Header: map[string]MatcherSpec{HeaderContentType: contentType(MIMEMultipartForm)},
+			},
+			match: []sentRequest{multipartRequest(upload)},
+		},
+		{
 			name:    "a header the recording names that isn't UTF-8 text",
 			options: []RecordConfigurer{RecordRequestHeaders("X-Bin")},
 			request: sentRequest{target: "/h", header: http.Header{"X-Bin": {"\xff"}}},
@@ -492,6 +512,56 @@ func TestRecording_RecordsTheRequestAsItCame(t *testing.T) {
 	request := onlyMock(t, dir).Request
 	require.Equal(t, MatcherSpec{"equal", "original"}, request.Body)
 	require.Equal(t, MatcherSpec{"equal", "a"}, request.Header["Accept"])
+}
+
+func TestRecording_AStatusAMockFileCantHold(t *testing.T) {
+	// A status past 599, which Go sends and reads, can't be in a mock file: the call isn't recorded, so the
+	// directory still loads, and the recording says why.
+	target := newTarget(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/profile" {
+			w.WriteHeader(999)
+		}
+
+		_, _ = io.WriteString(w, "ok")
+	})
+
+	m, dir := recordingServer(t, target.URL)
+
+	do(t, http.MethodGet, m.URL("/profile"), nil, nil)
+	do(t, http.MethodGet, m.URL("/ok"), nil, nil)
+
+	res, err := m.StopRecording(t.Context())
+	require.ErrorContains(t, err, "recorder: status 999 can't be in a mock file")
+	require.Len(t, res.Recordings, 1)
+	require.Equal(t, "GET /ok", res.Recordings[0].Name)
+
+	_, body := do(t, http.MethodGet, replayServer(t, dir).URL("/ok"), nil, nil)
+	require.Equal(t, "ok", string(body))
+}
+
+func TestRecording_AHEADKeepsItsContentLength(t *testing.T) {
+	// A HEAD answer says the length of a body it doesn't have, which the server can't measure: it is recorded.
+	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(HeaderContentLength, "1234")
+	})
+
+	m, dir := recordingServer(t, target.URL)
+
+	original, _ := do(t, http.MethodHead, m.URL("/file"), nil, nil)
+	require.Equal(t, int64(1234), original.ContentLength)
+
+	stopRecording(t, m)
+	require.Equal(t, []string{"1234"}, onlyMock(t, dir).Response.Header["Content-Length"])
+
+	replayed, _ := do(t, http.MethodHead, replayServer(t, dir).URL("/file"), nil, nil)
+	require.Equal(t, int64(1234), replayed.ContentLength)
+}
+
+func TestGunzip_TheLargestLimit(t *testing.T) {
+	// A body larger than the limit is told by one byte more: the largest limit has none more.
+	decoded, ok := gunzip(gzipped(t, []byte("text")), math.MaxInt64)
+	require.True(t, ok)
+	require.Equal(t, "text", string(decoded))
 }
 
 func TestRecordCodec_MethodsMatchIgnoringCase(t *testing.T) {

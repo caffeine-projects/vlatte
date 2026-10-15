@@ -43,9 +43,13 @@ func (l *fileLoader) Load(app *Server) error {
 	var files []string
 
 	// A relative and an absolute pattern, or a pattern and a recording directory, can name one file under two
-	// names: it loads once.
+	// names, links included: it loads once.
 	add := func(file string) {
 		key, err := filepath.Abs(file)
+		if err == nil {
+			key, err = filepath.EvalSymlinks(key)
+		}
+
 		if err != nil {
 			key = file
 		}

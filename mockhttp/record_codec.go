@@ -6,7 +6,9 @@ import (
 	"compress/gzip"
 	json "encoding/json/v2"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -22,6 +24,10 @@ import (
 )
 
 var _ vlatte.RecordCodec[*recordedCall, RecordedRequest, RecordedResponse] = (*recordCodec)(nil)
+
+// _segmentEscaper escapes what a path segment can hold that a path escaped as a whole doesn't: "/", and "*", a glob
+// in a mock file.
+var _segmentEscaper = strings.NewReplacer("/", "%2F", "*", "%2A")
 
 // errQueryNotUTF8 refuses a call whose query can't be written in a mock file.
 var errQueryNotUTF8 = errors.New("recorder: the query doesn't parse, and isn't UTF-8 text")
@@ -174,29 +180,41 @@ func (c *recordCodec) Request(x *recordedCall, files *vlatte.RecordFiles) (Recor
 			q.Header[name] = MatcherSpec{"not", "present"}
 		case !utf8.ValidString(v):
 			c.logger.Warn().Str("call", c.Name(x)).Msgf("recorder: the recording matches any %s: its value isn't UTF-8 text", name)
+		case name == HeaderContentType:
+			// Its parameters, such as the boundary of a form, change with each client: the media type stays.
+			if spec := mediaTypeMatcher(v); spec != nil {
+				q.Header[name] = spec
+			}
 		default:
 			q.Header[name] = MatcherSpec{"equal", v}
 		}
 	}
 
-	// The type of a body is how the server reads it: the body matches for its media type only. A Content-Type the
-	// recording names gives way to it.
+	// The type of a body is how the server reads it: the body matches for its media type only.
 	if len(q.Body) > 0 && q.Body[0] != "empty" {
-		contentType := x.header.Get(HeaderContentType)
-		media, _, _ := strings.Cut(contentType, ";")
-		media = strings.ToLower(strings.TrimSpace(media))
+		delete(q.Header, HeaderContentType)
 
-		switch {
-		case contentType == "":
+		if contentType := x.header.Get(HeaderContentType); contentType == "" {
 			q.Header[HeaderContentType] = MatcherSpec{"not", "present"}
-		case utf8.ValidString(media):
-			q.Header[HeaderContentType] = MatcherSpec{"split", ";", []any{"item", 0, []any{"trim", []any{"eqi", media}}}}
-		default:
-			delete(q.Header, HeaderContentType)
+		} else if spec := mediaTypeMatcher(contentType); spec != nil {
+			q.Header[HeaderContentType] = spec
 		}
 	}
 
 	return q, nil
+}
+
+// mediaTypeMatcher returns the matcher of the media type of a Content-Type, whatever its parameters, as
+// Builder.ContentType makes it, or nil when it isn't UTF-8 text.
+func mediaTypeMatcher(contentType string) MatcherSpec {
+	media, _, _ := strings.Cut(contentType, ";")
+	media = strings.ToLower(strings.TrimSpace(media))
+
+	if !utf8.ValidString(media) {
+		return nil
+	}
+
+	return MatcherSpec{"split", ";", []any{"item", 0, []any{"trim", []any{"eqi", media}}}}
 }
 
 // Response writes what x answered: its status, headers, trailers and body, as the client got them. A gzip body that
@@ -205,6 +223,10 @@ func (c *recordCodec) Request(x *recordedCall, files *vlatte.RecordFiles) (Recor
 func (c *recordCodec) Response(x *recordedCall, files *vlatte.RecordFiles) (RecordedResponse, error) {
 	if err := x.resBody.Err(); err != nil {
 		return RecordedResponse{}, err
+	}
+
+	if x.status < 100 || x.status > 599 {
+		return RecordedResponse{}, fmt.Errorf("recorder: status %d can't be in a mock file: it takes 100 to 599", x.status)
 	}
 
 	s := RecordedResponse{Status: x.status, Header: c.header(x, x.resHeader), Trailer: c.header(x, x.trailer)}
@@ -384,13 +406,14 @@ func (c *recordCodec) multipart(x *recordedCall, contentType string, files *vlat
 }
 
 // header returns the headers of x's response that a recording keeps, under their canonical names: those the server
-// doesn't set, and the recording doesn't leave out. A value that isn't UTF-8 text is left out.
+// doesn't set, and the recording doesn't leave out. The Content-Length of a HEAD answer, which has no body for the
+// server to measure, is kept. A value that isn't UTF-8 text is left out.
 func (c *recordCodec) header(x *recordedCall, h http.Header) map[string][]string {
 	out := make(map[string][]string, len(h))
 
 	for k, values := range h {
 		name := http.CanonicalHeaderKey(k)
-		if _, skip := c.skip[name]; skip {
+		if _, skip := c.skip[name]; skip && (!strings.EqualFold(name, HeaderContentLength) || x.method != http.MethodHead) {
 			continue
 		}
 
@@ -408,9 +431,9 @@ func (c *recordCodec) header(x *recordedCall, h http.Header) map[string][]string
 }
 
 // canonicalURL writes the path and query of u one way, so requests a recording can't tell apart are recorded alike.
-// Each path segment is decoded, then escaped as a path escapes it, with a "/" in a segment as %2F. The query is
-// sorted by name, each name with its values in order. A query that doesn't parse is kept as it came, which is how
-// match.RequestURI compares it.
+// Each path segment is decoded, then escaped as a path escapes it, with a "/" in a segment as %2F, and a "*" as %2A, so
+// a mock file reads it as no glob. The query is sorted by name, each name with its values in order. A query that
+// doesn't parse is kept as it came, which is how match.RequestURI compares it.
 func canonicalURL(u *url.URL) (string, error) {
 	path := u.EscapedPath()
 	if path == "" {
@@ -420,7 +443,7 @@ func canonicalURL(u *url.URL) (string, error) {
 	segments := strings.Split(path, "/")
 	for i, s := range segments {
 		if decoded, err := url.PathUnescape(s); err == nil {
-			segments[i] = strings.ReplaceAll((&url.URL{Path: decoded}).EscapedPath(), "/", "%2F")
+			segments[i] = _segmentEscaper.Replace((&url.URL{Path: decoded}).EscapedPath())
 		}
 	}
 
@@ -451,7 +474,13 @@ func gunzip(body []byte, limit int64) ([]byte, bool) {
 
 	defer gz.Close()
 
-	decoded, err := io.ReadAll(io.LimitReader(gz, limit+1))
+	// One byte more tells a body that doesn't fit.
+	read := limit
+	if read < math.MaxInt64 {
+		read++
+	}
+
+	decoded, err := io.ReadAll(io.LimitReader(gz, read))
 	if err != nil || int64(len(decoded)) > limit {
 		return nil, false
 	}

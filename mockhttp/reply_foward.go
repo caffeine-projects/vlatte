@@ -142,8 +142,9 @@ func (r *ProxyReply) TrimSuffix(suffix string) *ProxyReply {
 	return r
 }
 
-// Timeout sets how long to wait for the response headers of the target. The body then streams to the client as the
-// target sends it, for as long as the client waits. 0 waits forever. Defaults to 30s.
+// Timeout sets how long to wait for the response headers of the target, from the call: connecting and sending the
+// request count too. The body then streams to the client as the target sends it, for as long as the client waits.
+// 0 waits forever. Defaults to 30s.
 func (r *ProxyReply) Timeout(timeout time.Duration) *ProxyReply {
 	r.timeout = timeout
 	return r

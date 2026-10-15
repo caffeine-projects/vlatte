@@ -204,21 +204,25 @@ func (c *captureWriter) Flush() {
 }
 
 // FlushError flushes the response to the client, as http.ResponseController does. A flush sends the status and
-// headers.
+// headers, when the writer can flush.
 func (c *captureWriter) FlushError() error {
-	if !c.wrote {
+	err := http.NewResponseController(c.rw).Flush()
+	if err == nil && !c.wrote {
 		c.start(http.StatusOK)
 	}
 
-	return http.NewResponseController(c.rw).Flush()
+	return err
 }
 
 // Hijack implements http.Hijacker. A connection taken over, such as by an upgrade, isn't recorded.
 func (c *captureWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	c.hijacked = true
-	c.drop()
+	conn, rw, err := http.NewResponseController(c.rw).Hijack()
+	if err == nil {
+		c.hijacked = true
+		c.drop()
+	}
 
-	return http.NewResponseController(c.rw).Hijack()
+	return conn, rw, err
 }
 
 // ReadFrom implements io.ReaderFrom, so copying a body, such as a proxy's, reuses a buffer.

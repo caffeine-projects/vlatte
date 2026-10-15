@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/caffeine-projects/vlatte/webhook"
@@ -166,6 +167,12 @@ func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stder
 	_, _ = fmt.Fprintln(stdout, m.DescribeConfig())
 
 	<-ctx.Done()
+
+	// A recording writes what it took: a call or a mock it couldn't record fails the run.
+	if _, err := m.StopRecording(context.Background()); err != nil && !errors.Is(err, vlatte.ErrNotRecording) {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
 
 	return 0
 }

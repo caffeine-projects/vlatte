@@ -145,8 +145,9 @@ func (r *Response) render(ctx context.Context, w http.ResponseWriter, wait func(
 			}
 
 			bufpool.Put(buf)
-		} else {
-			w.Write(r.Body)
+		} else if _, err := w.Write(r.Body); err != nil && !errors.Is(err, http.ErrBodyNotAllowed) {
+			// A status without a body, such as 204, refuses it: the client gets the answer all the same.
+			return err
 		}
 	} else if r.BodyCloser != nil {
 		if len(r.Encoding) > 0 {

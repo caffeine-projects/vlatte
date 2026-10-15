@@ -365,3 +365,32 @@ func TestCaptureWriter_KeepsOnlyAnswersItRecords(t *testing.T) {
 		c.end()
 	}
 }
+
+func TestCaptureWriter_AWriterThatCantHijackOrFlush(t *testing.T) {
+	// A writer that can't take over the connection, or flush, as an HTTP/2 one or a test recorder: the answer goes on,
+	// and is recorded as it is sent.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+	require.NoError(t, m.StartRecording(RecordDir(t.TempDir()), RecordIncludeMocked(true)))
+
+	r := httptest.NewRequest(http.MethodGet, "/r", nil)
+	rv, raw, err := parseRequest(r, m)
+	require.NoError(t, err)
+
+	c := m.recording.Load().capture(&discardWriter{header: make(http.Header)}, rv, raw, nil)
+
+	_, _, err = c.Hijack()
+	require.Error(t, err)
+
+	require.Error(t, c.FlushError())
+	c.WriteHeader(http.StatusCreated)
+
+	_, err = c.Write([]byte("body"))
+	require.NoError(t, err)
+
+	require.False(t, c.hijacked, "the connection wasn't taken over")
+	require.Equal(t, http.StatusCreated, c.call.status, "the flush sent nothing")
+	require.Equal(t, int64(4), c.call.resBody.Len())
+
+	c.end()
+}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 
 	"github.com/caffeine-projects/vlatte"
 )
@@ -19,6 +20,9 @@ type recording struct {
 	served  chan struct{}                            // closed once the StopRecording that ended it serves what it recorded
 	filter  vlatte.Evaluators[*Mock, *selectorInput] // the requests it takes
 	target  Replier                                  // sends the requests it takes to the server it records, if any
+
+	// stopping is set once a StopRecording starts: the recording takes no more requests, though it still writes.
+	stopping atomic.Bool
 }
 
 // StartRecording starts recording what the server proxies as mock files, which answer the same requests the same way:
@@ -69,17 +73,22 @@ func (app *Server) IsRecording() bool {
 
 // startRecording starts a recording with conf, checked. A recording that stopped, and wrote everything, gives way.
 func (app *Server) startRecording(conf *RecordConfig) error {
-	app.recordMu.Lock()
-	defer app.recordMu.Unlock()
-
-	// A recording that wrote everything, whose StopRecording gave up waiting, gives way: it releases its target.
+	// A recording that wrote everything, whose StopRecording gave up waiting, ends here, unserved, as a stop ends it.
 	if old := app.recording.Load(); old != nil {
 		select {
 		case <-old.session.Done():
-			old.close()
+			_, _ = app.end(context.Background(), old, false)
 		default:
 			return vlatte.ErrRecording
 		}
+	}
+
+	app.recordMu.Lock()
+	defer app.recordMu.Unlock()
+
+	// Another start came first.
+	if app.recording.Load() != nil {
+		return vlatte.ErrRecording
 	}
 
 	rec := &recording{
@@ -127,13 +136,20 @@ func (app *Server) stopRecording(ctx context.Context, play bool) (*vlatte.Record
 		return nil, vlatte.ErrNotRecording
 	}
 
+	return app.end(ctx, rec, play)
+}
+
+// end stops rec, and serves what it recorded when play is set. Only here does a recording end.
+func (app *Server) end(ctx context.Context, rec *recording, play bool) (*vlatte.RecordResult, error) {
+	rec.stopping.Store(true)
+
 	res, err := rec.session.Stop(ctx)
 	if res == nil {
 		return nil, err
 	}
 
-	// Another StopRecording ended it at the same time: this one returns once that one serves the recordings, so
-	// both return when they are served, and Close doesn't close the mocks before they load.
+	// Another call ended it at the same time: this one returns once that one serves the recordings, so both return
+	// when they are served, and Close doesn't close the mocks before they load.
 	if !app.recording.CompareAndSwap(rec, nil) {
 		select {
 		case <-rec.served:

@@ -730,3 +730,28 @@ func TestProxyReply_NegativeTimeoutFailsTheBuild(t *testing.T) {
 	_, err := m.Mock(Getf("/p").Reply(From("http://localhost").Timeout(-time.Second)))
 	require.ErrorContains(t, err, "reply_proxy: timeout must be 0 or more, not -1s")
 }
+
+func TestProxyReply_ABodyThatBreaksOffCutsTheConnection(t *testing.T) {
+	// The target's body streams: once the status is sent, a target that breaks off can't turn it into a failure.
+	// The client's connection is cut, so it doesn't take part of the body for all of it, and the mock didn't serve.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "first part;")
+		http.NewResponseController(w).Flush()
+		panic(http.ErrAbortHandler)
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scoped := m.MustMock(Getf("/p").Reply(From(target.URL)))
+
+	res, err := http.Get(m.URL("/p"))
+	require.NoError(t, err)
+
+	_, err = io.ReadAll(res.Body)
+	require.Error(t, err)
+	require.NoError(t, res.Body.Close())
+	require.False(t, scoped.Called())
+}

@@ -443,3 +443,38 @@ func TestCLI_RecordsThenPlaysBack(t *testing.T) {
 	status, _ = get(t, "http://"+addr+"/items?page=3")
 	require.Equal(t, mockhttp.StatusNoMatch, status, "a request the recording didn't take")
 }
+
+func TestCLI_ARecordingThatFailsFailsTheRun(t *testing.T) {
+	// A call the recording couldn't record, here a status no mock file holds, makes the run fail when it stops.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(999) }))
+	t.Cleanup(target.Close)
+
+	addr := randomAddr(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var stderr bytes.Buffer
+
+	done := make(chan int, 1)
+	go func() {
+		done <- run(ctx, []string{"--addr", addr, "--record", "--record-target", target.URL, "--log-level", "disabled"}, io.Discard, &stderr)
+	}()
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res, err := http.Get("http://" + addr + "/profile")
+		if !assert.NoError(c, err) {
+			return
+		}
+
+		_ = res.Body.Close()
+		assert.Equal(c, 999, res.StatusCode)
+	}, 10*time.Second, 100*time.Millisecond)
+
+	cancel()
+	require.Equal(t, 1, <-done)
+	require.Contains(t, stderr.String(), "status 999")
+}

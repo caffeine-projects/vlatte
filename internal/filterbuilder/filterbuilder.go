@@ -154,19 +154,7 @@ func build(name string, args []any) (vlatte.Matcher, error) {
 			return err
 		})
 	case _mRequestURI:
-		return s.text("a URL", match.RequestURI, func(uri string) error {
-			u, err := url.Parse(uri)
-			if err != nil {
-				return err
-			}
-
-			// A request's path starts at "/": a relative one that doesn't would never match.
-			if !u.IsAbs() && !strings.HasPrefix(uri, "/") {
-				return errors.New("its path must start with /")
-			}
-
-			return nil
-		})
+		return s.text("a URL", match.RequestURI, checkRequestURI)
 	case _mHasKey:
 		return s.text("a JSON path", match.HasKey, func(path string) error {
 			_, err := jp.ParseString(path)
@@ -567,4 +555,30 @@ func plural(n int, noun string) string {
 	default:
 		return fmt.Sprintf("%d %ss", n, noun)
 	}
+}
+
+// checkRequestURI checks a URL as match.RequestURI reads it. One that starts with "/" is a request target, whose path
+// a "//" starts, as a server reads it, not a host. Another must be absolute: a request's path starts at "/", so a
+// relative one that doesn't would never match.
+func checkRequestURI(uri string) error {
+	if !strings.HasPrefix(uri, "/") {
+		u, err := url.Parse(uri)
+		if err == nil && !u.IsAbs() {
+			err = errors.New("its path must start with /")
+		}
+
+		return err
+	}
+
+	target, fragment, hasFragment := strings.Cut(uri, "#")
+	if _, err := url.ParseRequestURI(target); err != nil {
+		return err
+	}
+
+	if hasFragment {
+		_, err := url.Parse("#" + fragment)
+		return err
+	}
+
+	return nil
 }

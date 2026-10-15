@@ -208,23 +208,37 @@ func TestRecording_ATargetItCantReach(t *testing.T) {
 }
 
 func TestRecording_ATargetThatBreaksOff(t *testing.T) {
-	// An answer the target cut short reaches the client cut short, and isn't recorded.
-	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set(HeaderContentLength, "100")
-		_, _ = io.WriteString(w, "only part of it")
-	})
-	dir := t.TempDir()
+	// An answer the target cut short reaches the client cut short, whether it said its length or not, and isn't
+	// recorded.
+	for name, answer := range map[string]http.HandlerFunc{
+		"with a Content-Length": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set(HeaderContentLength, "100")
+			_, _ = io.WriteString(w, "only part of it")
+		},
+		"in chunks": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, "only part of it")
+			http.NewResponseController(w).Flush()
+			panic(http.ErrAbortHandler)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			target := newTarget(t, answer)
+			dir := t.TempDir()
 
-	m := mockedServer(t, Setup().Silent())
-	require.NoError(t, m.StartRecording(RecordDir(dir), RecordTarget(target.URL)))
+			m := mockedServer(t, Setup().Silent())
+			require.NoError(t, m.StartRecording(RecordDir(dir), RecordTarget(target.URL)))
 
-	if res, err := _rawClient.Get(m.URL("/a")); err == nil {
-		_, _ = io.Copy(io.Discard, res.Body)
-		_ = res.Body.Close()
+			res, err := _rawClient.Get(m.URL("/a"))
+			if err == nil {
+				_, err = io.ReadAll(res.Body)
+				_ = res.Body.Close()
+			}
+
+			require.Error(t, err, "the client knows the answer broke off")
+			require.Empty(t, stopRecording(t, m).Recordings)
+			require.Empty(t, recordedMocks(t, dir))
+		})
 	}
-
-	require.Empty(t, stopRecording(t, m).Recordings)
-	require.Empty(t, recordedMocks(t, dir))
 }
 
 func TestRecording_ATargetsRedirectIsPassedOn(t *testing.T) {

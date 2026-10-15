@@ -15,12 +15,15 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
 
@@ -472,6 +475,146 @@ func TestRecordConfig_Compose(t *testing.T) {
 	require.Empty(t, m.Config().Record.RequestHeaders)
 }
 
+func TestRecording_OptionsLeaveTheCallersListsAsTheyAre(t *testing.T) {
+	// The recording trims the methods and paths it takes into lists of its own: a list of the caller, which other
+	// recordings may share, stays as it was.
+	paths := []string{" /v1/* "}
+	methods := []string{" get "}
+
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	require.NoError(t, m.StartRecording(RecordDir(t.TempDir()), RecordPaths(paths...), RecordMethods(methods...)))
+	require.Equal(t, []string{" /v1/* "}, paths)
+	require.Equal(t, []string{" get "}, methods)
+}
+
+func TestRecording_StopAndStartAtOnce(t *testing.T) {
+	// A StopRecording and a StartRecording at the same time: whichever ends the old recording, the stop returns, and
+	// the start starts once the old one is done.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	dir := t.TempDir()
+
+	for range 300 {
+		require.NoError(t, m.StartRecording(RecordDir(dir)))
+
+		var wg sync.WaitGroup
+
+		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			_, err := m.StopRecording(ctx)
+			assert.NotErrorIs(t, err, context.DeadlineExceeded, "the stop waited for a recording no one ends")
+		})
+
+		wg.Go(func() {
+			for m.StartRecording(RecordDir(dir)) != nil {
+				runtime.Gosched()
+			}
+		})
+
+		wg.Wait()
+
+		_, err := m.StopRecording(t.Context())
+		require.NoError(t, err)
+	}
+}
+
+func TestRecording_TwoStartsAfterARecordingThatGaveWay(t *testing.T) {
+	// A recording whose StopRecording gave up, and that wrote everything since: two StartRecording at once end it
+	// once, and one starts. The other doesn't stop the one that started.
+	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") })
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	dir := t.TempDir()
+
+	for range 50 {
+		release := make(chan struct{})
+
+		require.NoError(t, m.StartRecording(RecordDir(dir), RecordTarget(target.URL), RecordTransform(func(*RecordedMock) error {
+			<-release
+			return nil
+		})))
+		do(t, http.MethodGet, m.URL("/a"), nil, nil)
+
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+		_, err := m.StopRecording(ctx)
+		cancel()
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+
+		close(release)
+		<-m.recording.Load().session.Done()
+
+		errs := make(chan error, 2)
+
+		var wg sync.WaitGroup
+		for range 2 {
+			wg.Go(func() { errs <- m.StartRecording(RecordDir(dir)) })
+		}
+
+		wg.Wait()
+		close(errs)
+
+		started := 0
+		for err := range errs {
+			if err == nil {
+				started++
+			} else {
+				require.ErrorIs(t, err, vlatte.ErrRecording)
+			}
+		}
+
+		require.Equal(t, 1, started)
+		require.True(t, m.IsRecording(), "the recording that started still runs")
+
+		_, err = m.StopRecording(t.Context())
+		require.NoError(t, err)
+	}
+}
+
+func TestRecording_ATimedOutStopTakesNoMoreRequests(t *testing.T) {
+	// A recording whose StopRecording gave up waiting still writes, but takes no more requests: they go to the
+	// mocks, not to its target.
+	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "target") })
+
+	release := make(chan struct{})
+	t.Cleanup(closeOnce(release))
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/a").Reply(OK().PlainText("mock")))
+
+	require.NoError(t, m.StartRecording(RecordDir(t.TempDir()), RecordTarget(target.URL), RecordTransform(func(*RecordedMock) error {
+		<-release
+		return nil
+	})))
+
+	_, body := do(t, http.MethodGet, m.URL("/a"), nil, nil)
+	require.Equal(t, "target", string(body))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := m.StopRecording(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	_, body = do(t, http.MethodGet, m.URL("/a"), nil, nil)
+	require.Equal(t, "mock", string(body))
+
+	// The recording finishes before its directory goes.
+	close(release)
+
+	_, err = m.StopRecording(t.Context())
+	require.NoError(t, err)
+}
+
 func TestRecording_DirStartsAtRootDir(t *testing.T) {
 	root := t.TempDir()
 	abs := t.TempDir()
@@ -690,6 +833,39 @@ func TestRecording_AClientThatLeavesIsNotRecorded(t *testing.T) {
 	_, err = conn.Read(make([]byte, 1))
 	require.NoError(t, err)
 	require.NoError(t, conn.Close())
+
+	// The mock counts the request once it answered it, after the recording took it, or not.
+	require.Eventually(t, func() bool { return m.Hits() == 1 }, 10*time.Second, 10*time.Millisecond)
+
+	require.Empty(t, stopRecording(t, m).Recordings)
+	require.Empty(t, recordedMocks(t, dir))
+}
+
+func TestRecording_AStepThatFailsIsNotRecorded(t *testing.T) {
+	// A step that fails before the body goes out leaves the client without it: it isn't recorded either.
+	dir := t.TempDir()
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/slow").Step(vlatte.StepFunc(func(ctx context.Context, _ []byte, _ vlatte.Next) (int, error) {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	})).Reply(OK().PlainText("hello")))
+
+	require.NoError(t, m.StartRecording(RecordDir(dir), RecordIncludeMocked(true)))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL("/slow"), nil)
+	require.NoError(t, err)
+
+	if res, err := http.DefaultClient.Do(req); err == nil {
+		_, _ = io.Copy(io.Discard, res.Body)
+		_ = res.Body.Close()
+	}
 
 	// The mock counts the request once it answered it, after the recording took it, or not.
 	require.Eventually(t, func() bool { return m.Hits() == 1 }, 10*time.Second, 10*time.Millisecond)
