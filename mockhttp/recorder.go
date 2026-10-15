@@ -225,6 +225,12 @@ func (r *recorder) dispatch(req *http.Request, parsedURL *url.URL, rawReqBody []
 		return
 	}
 
+	// A reply that writes its own response, such as Echo or Handler, returns none: there is nothing to record.
+	if res == nil {
+		r.logger.Warn().Msgf("recorder: %s %s: the reply wrote its own response, which isn't recorded", req.Method, parsedURL.Path)
+		return
+	}
+
 	r.in <- recArgs{
 		request:  recRequest{parsedURL.RequestURI(), parsedURL.Path, req.Method, req.Header.Clone(), req.URL.Query(), rawReqBody, formOf(req)},
 		response: recResponse{res.StatusCode, res.Header.Clone(), res.Body},

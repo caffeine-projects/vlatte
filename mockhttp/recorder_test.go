@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -52,6 +53,29 @@ func TestRecorder_CreatesSaveDir(t *testing.T) {
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
+}
+
+func TestRecorder_RepliesWithoutAResponseAreSkippedAndLogged(t *testing.T) {
+	// Echo and Handler replies return no response, and dispatch read it (#24). They aren't recorded, and the log
+	// says why, instead of a panic in the request log.
+	dir := t.TempDir()
+	logs := &logBuffer{}
+	logger := zerolog.New(logs)
+
+	m := MustNew(Setup().Logger(&logger).Record(RecordDir(dir)))
+	m.MustStart()
+	m.MustMock(Getf("/echo").Reply(Echo()))
+
+	status, _ := get(t, m, "/echo")
+	require.Equal(t, http.StatusOK, status)
+
+	m.Close()
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+	require.Contains(t, logs.String(), "recorder: GET /echo: the reply wrote its own response, which isn't recorded")
+	require.NotContains(t, logs.String(), "panic")
 }
 
 func TestStopRecordingWithoutRecorder(t *testing.T) {

@@ -83,7 +83,6 @@ func TestForms_ForwardAndEchoSendTheWholeBody(t *testing.T) {
 	}))
 	t.Cleanup(target.Close)
 
-	// Silent: an echo reply returns no *Response, and logging it dereferences nil (D9).
 	m := MustNew(Setup().Silent().Proxy())
 	m.MustStart()
 	t.Cleanup(m.Close)

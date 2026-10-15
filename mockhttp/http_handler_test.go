@@ -493,11 +493,12 @@ func TestHandler_CloseCancelsTheEventsRunning(t *testing.T) {
 	require.Equal(t, int32(1), counted.Load(), "a restarted server runs events again")
 }
 
-func TestHandler_EventsRunWhenTheRequestLogPanics(t *testing.T) {
-	// Handler replies return no response, and the request log reads it (#24): it panics, after the reply. The events
-	// run before the request log, so they run anyway. Silent() would skip the request log.
+func TestHandler_EventsRunForRepliesWithoutAResponse(t *testing.T) {
+	// Handler replies return no response. The events of their mock run all the same, and the request log, which read
+	// the response and panicked (#24), logs the match. Silent() would skip the request log.
 	var ran atomic.Bool
-	logger := zerolog.New(io.Discard)
+	logs := &logBuffer{}
+	logger := zerolog.New(logs)
 
 	m := MustNew(Setup().Logger(&logger).OnCompleteListener("hook", vlatte.EventFunc[vlatte.OnComplete](
 		func(context.Context, vlatte.OnComplete) error {
@@ -514,6 +515,86 @@ func TestHandler_EventsRunWhenTheRequestLogPanics(t *testing.T) {
 	status, _ := get(t, m, "/x")
 	require.Equal(t, http.StatusOK, status)
 	require.True(t, ran.Load(), "the event ran before the response ended")
+	require.Contains(t, logs.String(), "REQUEST MATCHED GET /x")
+	require.NotContains(t, logs.String(), "panic")
+}
+
+func TestLifecycle_RepliesWithoutAResponseAreLogged(t *testing.T) {
+	// #24: Echo, Handler and a Func that returns no response write their own response. Both request logs read that
+	// response and panicked on every such request: the recovery middleware tried to answer 418 after the reply had
+	// answered, and the log held a stack trace instead of the match.
+	replies := []struct {
+		name  string
+		reply ReplierFactory
+		want  int
+	}{
+		{
+			name:  "echo",
+			reply: Echo(),
+			want:  http.StatusOK,
+		},
+		{
+			name:  "handler",
+			reply: Handler(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusCreated) }),
+			want:  http.StatusCreated,
+		},
+		{
+			name: "func without a response",
+			reply: Func(func(w http.ResponseWriter, _ *RequestValues) (*Response, error) {
+				w.WriteHeader(http.StatusAccepted)
+				return nil, nil
+			}),
+			want: http.StatusAccepted,
+		},
+	}
+
+	for _, rc := range replies {
+		t.Run("structured/"+rc.name, func(t *testing.T) {
+			logs := &logBuffer{}
+			logger := zerolog.New(logs)
+
+			m := MustNew(Setup().Logger(&logger).LogVerbosity(vlatte.LogBody))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(Getf("/x").ID("x").Reply(rc.reply))
+
+			status, _ := get(t, m, "/x")
+			require.Equal(t, rc.want, status)
+			require.Contains(t, logs.String(), "REQUEST MATCHED GET /x")
+			require.Contains(t, logs.String(), `"mock":{"id":"x"}`)
+			require.NotContains(t, logs.String(), "panic")
+		})
+	}
+
+	for _, rc := range replies {
+		t.Run("descriptive/"+rc.name, func(t *testing.T) {
+			// The descriptive log, and the recovery middleware's, go to os.Stdout, which the server takes when it's made.
+			r, w, err := os.Pipe()
+			require.NoError(t, err)
+
+			stdout := os.Stdout
+			os.Stdout = w
+			m := MustNew(Setup().UseDescriptiveLogger().Colors(false).LogVerbosity(vlatte.LogBody))
+			os.Stdout = stdout
+
+			m.MustStart()
+			m.MustMock(Getf("/x").ID("x").Reply(rc.reply))
+
+			status, _ := get(t, m, "/x")
+			require.Equal(t, rc.want, status)
+
+			m.Close()
+			require.NoError(t, w.Close())
+
+			out, err := io.ReadAll(r)
+			require.NoError(t, err)
+			require.Contains(t, string(out), "REQUEST MATCHED")
+			require.Contains(t, string(out), "Mock: x")
+			require.NotContains(t, string(out), "Status:")
+			require.NotContains(t, string(out), "panic")
+		})
+	}
 }
 
 // cancelableKV is a parameter store that fails once its context is done, as a remote store does.
