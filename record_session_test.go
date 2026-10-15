@@ -324,7 +324,8 @@ func TestRecordSession_DropsOverBudget(t *testing.T) {
 }
 
 func TestRecordSession_StopDrainsEveryAcceptedCall(t *testing.T) {
-	// Every call Record took is written, and none twice, even when Stop runs while calls come in.
+	// Every call Record took is written, and none twice, even when Stop runs while calls come in. Each sender has a
+	// request of its own, whose 200 calls stay under the responses a mock keeps.
 	s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{})
 
 	var (
@@ -335,7 +336,7 @@ func TestRecordSession_StopDrainsEveryAcceptedCall(t *testing.T) {
 	for g := range 64 {
 		wg.Go(func() {
 			for i := range 200 {
-				if s.Record(kvCall{key: strconv.Itoa(i % 7), value: fmt.Sprintf("%d-%d", g, i)}, 64) {
+				if s.Record(kvCall{key: strconv.Itoa(g), value: fmt.Sprintf("%d-%d", g, i)}, 64) {
 					accepted.Add(1)
 				}
 			}
