@@ -463,7 +463,8 @@ func (b *Builder) Map(mapper Mapper) *Builder {
 
 // Reply sets what the mock replies with. Build asks f for a new Replier for each mock, so f can serve many mocks.
 // Reply, SequentialReply, RandomReply, ProxyReply, FuncReply and EchoReply are factories, and Shared turns any Replier
-// into one.
+// into one. The mock owns the Replier f makes: when it implements io.Closer, the mock closes it when it leaves the
+// server. A Replier that Shared gives to many mocks is never closed by them.
 func (b *Builder) Reply(f ReplierFactory) *Builder {
 	b.reply = f
 	return b
