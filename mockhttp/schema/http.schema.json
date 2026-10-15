@@ -90,8 +90,7 @@
         "trim_prefix": { "type": "string" },
         "trim_suffix": { "type": "string" },
         "timeout": { "$ref": "#/$defs/duration" },
-        "ssl_verify": { "$ref": "#/$defs/bool" },
-        "no_follow": { "$ref": "#/$defs/bool" }
+        "ssl_verify": { "$ref": "#/$defs/bool" }
       },
       "required": [ "target" ],
       "additionalProperties": false

@@ -283,7 +283,8 @@ func TestForward(t *testing.T) {
 		redirectScope.AssertCalled(t)
 	})
 
-	t.Run("should NOT follow redirects when it is disabled", func(t *testing.T) {
+	t.Run("passes a redirect of the target to a client that doesn't follow it", func(t *testing.T) {
+		// A proxy sends with Transport.RoundTrip, which never follows redirects: the client gets the target's 301.
 		target := MustNew()
 		target.MustStart()
 
@@ -296,9 +297,9 @@ func TestForward(t *testing.T) {
 
 		redirectScope := target.MustMock(Getf("/redirected").Reply(Accepted()))
 		proxyScope := target.MustMock(Getf("/proxy").Reply(MovedPermanently(target.URL() + "/redirected")))
-		scoped := m.MustMock(Getf("/proxy").Reply(From(target.URL()).NoFollow()))
+		scoped := m.MustMock(Getf("/proxy").Reply(From(target.URL())))
 
-		httpClient := &http.Client{CheckRedirect: noFollow}
+		httpClient := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 		res, err := httpClient.Get(m.URL() + "/proxy")
 
 		require.NoError(t, err)
@@ -387,17 +388,16 @@ func TestProxyReply_ClosesTargetConnectionsOnClose(t *testing.T) {
 }
 
 func TestProxyReply_LeavesTheFactoryClientAsItWas(t *testing.T) {
-	// Building a proxy mock set the Transport, with TLS verification off, and CheckRedirect on the client that the
-	// HTTPClient factory returned, which can be a client it shares, such as http.DefaultClient. The mock gets a copy.
+	// Building a proxy mock set the Transport, with TLS verification off, on the client that the HTTPClient factory
+	// returned, which can be a client it shares, such as http.DefaultClient. The mock gets a copy.
 	shared := &http.Client{}
 	m := MustNew(Setup().Silent().HTTPClient(func() *http.Client { return shared }))
 	t.Cleanup(m.Close)
 
-	_, err := AnyMethod().Reply(From("http://localhost").NoFollow()).Build(m)
+	_, err := AnyMethod().Reply(From("http://localhost")).Build(m)
 	require.NoError(t, err)
 
 	require.Nil(t, shared.Transport)
-	require.Nil(t, shared.CheckRedirect)
 }
 
 func TestProxyReply_FactoryWithoutClientFailsTheBuild(t *testing.T) {

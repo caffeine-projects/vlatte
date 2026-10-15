@@ -124,6 +124,8 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"unknown top-level key", ok + "requset: {}\n", []want{{config.CodeUnknownKey, "requset", "not a known setting", "did you mean request?"}}},
 		{"dotted key", "request.path: /x\nrequest: {method: GET}\n", []want{{config.CodeUnknownKey, "request.path", "written as a dotted key", "nest it"}}},
 		{"response and proxy", ok + "response: {status: 200}\nproxy: {target: 'http://a'}\n", []want{{config.CodeConflict, "proxy", "proxy is set with response", "keep one of them"}}},
+		// A proxy never follows redirects, so the setting that claimed to turn that off is gone.
+		{"proxy no_follow", ok + "proxy: {target: 'http://a', no_follow: true}\n", []want{{config.CodeUnknownKey, "proxy.no_follow", "not a known setting", ""}}},
 		{"response that isn't an object", ok + "response: 5\n", []want{{config.CodeInvalidValue, "response", "must be an object, not a number", ""}}},
 		{"response key with a typo", ok + "response: {stauts: 201}\n", []want{{config.CodeUnknownKey, "response.stauts", "not a known setting", "did you mean response.status?"}}},
 		{"response key with no near match", ok + "response: {colour: red}\n", []want{{config.CodeUnknownKey, "response.colour", "", "the keys under response are status, header"}}},
@@ -500,7 +502,6 @@ proxy:
   trim_suffix: .json
   timeout: 1500
   ssl_verify: false
-  no_follow: true
 `
 	scope, err := m.Mock(FromBytes([]byte(doc), "yaml"))
 	require.NoError(t, err)
@@ -508,7 +509,6 @@ proxy:
 	proxy, ok := scope.Mocks()[0].reply.(*proxyReplier)
 	require.True(t, ok)
 	require.Equal(t, 1500*time.Millisecond, proxy.timeout)
-	require.NotNil(t, proxy.client.CheckRedirect, "no_follow")
 
 	req, err := http.NewRequest(http.MethodGet, m.URL("/api/users.json"), nil)
 	require.NoError(t, err)

@@ -127,7 +127,6 @@ type proxyDef struct {
 	hasTimeout    bool
 	sslVerify     bool
 	hasSSLVerify  bool
-	noFollow      bool
 	hasTarget     bool
 }
 
@@ -524,10 +523,6 @@ var _proxySchema = config.NewSchema(
 	proxyField{
 		Key: "ssl_verify", Kind: config.Bool, Usage: "Verify the TLS certificate of the target.",
 		Set: func(p *proxyDef, v config.Value) error { p.sslVerify, p.hasSSLVerify = v.Bool, true; return nil },
-	},
-	proxyField{
-		Key: "no_follow", Kind: config.Bool, Usage: "Don't follow redirects of the target.",
-		Set: func(p *proxyDef, v config.Value) error { p.noFollow = v.Bool; return nil },
 	},
 )
 
@@ -1162,10 +1157,6 @@ func (p *proxyDef) build() *ProxyReply {
 
 	if p.hasSSLVerify {
 		proxy.SSLVerify(p.sslVerify)
-	}
-
-	if p.noFollow {
-		proxy.NoFollow()
 	}
 
 	return proxy

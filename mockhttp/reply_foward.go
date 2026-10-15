@@ -46,7 +46,6 @@ type ProxyReply struct {
 	trimPrefix           string
 	trimSuffix           string
 	timeout              time.Duration
-	noFollow             bool
 	sslVerify            bool
 }
 
@@ -73,13 +72,6 @@ func From[T FromTypes](target T) *ProxyReply {
 		proxyHeadersToRemove: make([]string, 0),
 		timeout:              _defaultTimeout,
 	}
-}
-
-// NoFollow has no effect and is kept for compatibility: a ProxyReply never follows redirects.
-// Redirect responses from the target are passed to the client unchanged.
-func (r *ProxyReply) NoFollow() *ProxyReply {
-	r.noFollow = true
-	return r
 }
 
 // Header sets an extra response header that will be set after the proxy target replies.
@@ -153,10 +145,6 @@ func (r *ProxyReply) SSLVerify(v bool) *ProxyReply {
 	return r
 }
 
-func noFollow(_ *http.Request, _ []*http.Request) error {
-	return http.ErrUseLastResponse
-}
-
 func (r *ProxyReply) Describe() descriptor.Descriptor {
 	return descriptor.New("proxy", map[string]any{
 		"target":         r.target.String(),
@@ -167,7 +155,6 @@ func (r *ProxyReply) Describe() descriptor.Descriptor {
 		"trim_suffix":    r.trimSuffix,
 		"timeout":        r.timeout.String(),
 		"ssl_verify":     r.sslVerify,
-		"no_follow":      r.noFollow,
 	})
 }
 
@@ -205,10 +192,6 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 
 	if p.client.Transport == nil {
 		p.client.Transport = &http.Transport{TLSClientConfig: tlsConfig, DisableCompression: true}
-	}
-
-	if r.noFollow {
-		p.client.CheckRedirect = noFollow
 	}
 
 	app.closeIdleConnsOnClose(p.client.CloseIdleConnections)
