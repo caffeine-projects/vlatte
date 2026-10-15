@@ -117,6 +117,11 @@ func distance(a, b string) int {
 	return prev[len(b)]
 }
 
+// Display hides the password of a URL, such as a proxy URL, before it goes into a message: see display.
+func Display(s string) string {
+	return display(s)
+}
+
 // display hides the password of a URL, such as a proxy URL, before it goes into a message.
 // It doesn't parse the URL: a value in a message is often invalid, and its password must stay hidden too.
 // The password follows the user name, after the scheme if there is one, up to the last @.

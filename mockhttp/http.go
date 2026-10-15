@@ -453,6 +453,12 @@ func (app *Server) DescribeConfig() string {
 		buf.WriteString("Recording: ")
 		buf.WriteString(app.config.Record.dir(app.config.RootDir))
 		buf.WriteString("\n")
+
+		if target := app.config.Record.Target; target != "" {
+			buf.WriteString("Recording Target: ")
+			buf.WriteString(target)
+			buf.WriteString("\n")
+		}
 	}
 
 	buf.WriteString("\n")

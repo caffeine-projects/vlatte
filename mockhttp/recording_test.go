@@ -25,6 +25,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match"
 )
 
 // newTarget starts a server for recordings to proxy to.
@@ -347,6 +348,16 @@ func TestRecording_BadSettings(t *testing.T) {
 			options: []RecordConfigurer{RecordDir("")},
 			err:     "recorder: no directory to record into",
 		},
+		{
+			name:    "an empty method",
+			options: []RecordConfigurer{RecordMethods("GET", " ")},
+			err:     "recorder: method 1 is empty",
+		},
+		{
+			name:    "an empty path",
+			options: []RecordConfigurer{RecordPaths("")},
+			err:     "recorder: path 0 is empty",
+		},
 	}
 
 	for _, tc := range tests {
@@ -380,10 +391,23 @@ func TestRecording_BadSettings(t *testing.T) {
 		require.False(t, m.IsRecording())
 	})
 
-	t.Run("the format is written as mock files name it", func(t *testing.T) {
-		m, err := New(Setup().Silent().Record(RecordFormat(".YAML"), RecordDir(t.TempDir())))
+	t.Run("the format is written as mock files name it, and lists without spaces", func(t *testing.T) {
+		m, err := New(Setup().Silent().Record(RecordFormat(".YAML"), RecordDir(t.TempDir()), RecordMethods(" post "), RecordPaths(" /v1/* ")))
 		require.NoError(t, err)
 		require.Equal(t, "yaml", m.Config().Record.Format)
+		require.Equal(t, []string{"post"}, m.Config().Record.Methods)
+		require.Equal(t, []string{"/v1/*"}, m.Config().Record.Paths)
+	})
+
+	t.Run("a filter that fails after New fails the start", func(t *testing.T) {
+		filter := Request()
+
+		m := MustNew(Setup().Silent().Record(RecordDir(t.TempDir()), RecordFilter(filter)))
+		t.Cleanup(m.Close)
+
+		filter.FormFile("f", FileWith().BodyFile("missing.bin"))
+		require.ErrorContains(t, m.Start(), "recorder: filter: form_file f")
+		require.False(t, m.IsRecording())
 	})
 }
 
@@ -402,20 +426,30 @@ func TestRecordConfig_Compose(t *testing.T) {
 		}
 	}
 
+	filter := Request().Header("X-A", match.Equal("1"))
+
 	c := defaultRecordConfig()
 	for _, option := range []RecordConfigurer{
 		RecordDir("a"),
 		RecordRequestHeaders("Accept"),
+		RecordMethods("GET"),
 		RecordTransform(transform("first")),
-		&RecordConfig{Format: "yaml", MaxBodySize: -1, Transforms: []func(*RecordedMock) error{transform("second")}},
+		&RecordConfig{
+			Format: "yaml", Target: "https://api.example.com", MaxBodySize: -1, Paths: []string{"/v1/*"},
+			Transforms: []func(*RecordedMock) error{transform("second")},
+		},
 		RecordTransform(transform("third")),
-		&RecordConfig{IncludeMocked: true},
+		&RecordConfig{IncludeMocked: true, Filter: filter},
 	} {
 		require.NoError(t, option.Apply(c))
 	}
 
 	require.Equal(t, "a", c.Dir)
 	require.Equal(t, "yaml", c.Format)
+	require.Equal(t, "https://api.example.com", c.Target)
+	require.Equal(t, []string{"GET"}, c.Methods, "a config without methods keeps them")
+	require.Equal(t, []string{"/v1/*"}, c.Paths)
+	require.Same(t, filter, c.Filter)
 	require.Equal(t, []string{"Accept"}, c.RequestHeaders, "a config without headers keeps them")
 	require.Equal(t, int64(-1), c.MaxBodySize)
 	require.Equal(t, int64(_defaultMaxInlineBody), c.MaxInlineBody)

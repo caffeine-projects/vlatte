@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/caffeine-projects/vlatte"
 )
@@ -14,6 +15,8 @@ type recording struct {
 	session *vlatte.RecordSession[*recordedCall, RecordedRequest, RecordedResponse]
 	codec   *recordCodec
 	conf    *RecordConfig
+	filter  vlatte.Evaluators[*Mock, *selectorInput] // the requests it takes
+	target  Replier                                  // sends the requests it takes to the server it records, if any
 }
 
 // StartRecording starts recording what the server proxies as mock files, which answer the same requests the same way:
@@ -52,7 +55,9 @@ func (app *Server) StopRecording(ctx context.Context) (*vlatte.RecordResult, err
 		return nil, err
 	}
 
-	app.recording.CompareAndSwap(rec, nil)
+	if app.recording.CompareAndSwap(rec, nil) {
+		rec.close()
+	}
 
 	return res, err
 }
@@ -77,45 +82,86 @@ func (app *Server) startRecording(conf *RecordConfig) error {
 	app.recordMu.Lock()
 	defer app.recordMu.Unlock()
 
-	if rec := app.recording.Load(); rec != nil {
+	// A recording that wrote everything, whose StopRecording gave up waiting, gives way: it releases its target.
+	if old := app.recording.Load(); old != nil {
 		select {
-		case <-rec.session.Done():
+		case <-old.session.Done():
+			old.close()
 		default:
 			return vlatte.ErrRecording
 		}
 	}
 
-	codec := newRecordCodec(conf, app.logger)
+	rec := &recording{codec: newRecordCodec(conf, app.logger), conf: conf, filter: conf.filter()}
 
-	session, err := vlatte.NewRecordSession(codec, vlatte.RecordOptions[RecordedRequest, RecordedResponse]{
+	if conf.Target != "" {
+		target, err := From(conf.Target).SSLVerify(conf.SSLVerify).NewReplier(app)
+		if err != nil {
+			return fmt.Errorf("recorder: target: %w", err)
+		}
+
+		rec.target = target
+	}
+
+	session, err := vlatte.NewRecordSession(rec.codec, vlatte.RecordOptions[RecordedRequest, RecordedResponse]{
 		Dir:           conf.dir(app.config.RootDir),
 		Format:        conf.Format,
 		Repeats:       conf.Repeats,
 		BodyFiles:     conf.BodyFiles,
-		MaxInlineBody: codec.maxInline,
+		MaxInlineBody: rec.codec.maxInline,
 		MaxBodySize:   cmp.Or(conf.MaxBodySize, _defaultMaxBodySize),
 		Transforms:    conf.Transforms,
 		Logger:        app.logger,
 	})
 	if err != nil {
+		rec.close()
 		return err
 	}
 
-	app.recording.Store(&recording{session: session, codec: codec, conf: conf})
+	rec.session = session
+	app.recording.Store(rec)
 
 	return nil
 }
 
 // startConfiguredRecording starts the recording the server's config sets, unless one already runs, such as one
-// StartRecording started before the server.
+// StartRecording started before the server. The config is checked again: its filter may have changed since.
 func (app *Server) startConfiguredRecording() error {
 	if app.config.Record == nil {
 		return nil
 	}
 
-	if err := app.startRecording(app.config.Record.clone()); err != nil && !errors.Is(err, vlatte.ErrRecording) {
+	conf := app.config.Record.clone()
+	if err := conf.check(); err != nil {
+		return err
+	}
+
+	if err := app.startRecording(conf); err != nil && !errors.Is(err, vlatte.ErrRecording) {
 		return err
 	}
 
 	return nil
+}
+
+// takes reports whether the recording takes the call of in: whether it matches the recording's filters. A filter
+// that fails takes nothing, which is logged: the request is served all the same.
+func (rec *recording) takes(ctx context.Context, in *selectorInput) bool {
+	if len(rec.filter) == 0 {
+		return true
+	}
+
+	ok, err := rec.filter.Eval(ctx, vlatte.NewExplanation(), in)
+	if err != nil {
+		rec.codec.logger.Warn().Err(err).Str("url", in.URL.String()).Msg("recorder: a filter failed: the call isn't recorded")
+		return false
+	}
+
+	return ok
+}
+
+// close releases the connections to the server the recording recorded.
+func (rec *recording) close() {
+	if c, ok := rec.target.(io.Closer); ok {
+		_ = c.Close()
+	}
 }

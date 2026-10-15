@@ -28,6 +28,7 @@ const (
   vlatte --addr=:3000
   vlatte --proxy
   vlatte --proxy --record
+  vlatte --record --record-target=https://api.example.com
 `
 	_helpHint = "Run 'vlatte --help' to list flags, environment variables and file keys."
 )

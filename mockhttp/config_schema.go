@@ -391,6 +391,40 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			},
 		},
 		field{
+			Key: "record.target", Kind: config.String,
+			Usage: "Server to record, such as https://api.example.com: the requests the recording takes go to it, before any mock.",
+			Set: func(c *Config, v config.Value) error {
+				section(&c.Record, *defaultRecordConfig()).Target = v.Str
+				if v.Str == "" {
+					return nil
+				}
+
+				return checkRecordTarget(v.Str)
+			},
+		},
+		field{
+			Key: "record.ssl_verify", Kind: config.Bool, Usage: "Verify the TLS certificate of record.target.",
+			Set: func(c *Config, v config.Value) error {
+				section(&c.Record, *defaultRecordConfig()).SSLVerify = v.Bool
+				return nil
+			},
+		},
+		field{
+			Key: "record.methods", Kind: config.List, Usage: "Methods of the requests the recording takes. Empty takes every method.",
+			Set: func(c *Config, v config.Value) error {
+				section(&c.Record, *defaultRecordConfig()).Methods = v.List
+				return nil
+			},
+		},
+		field{
+			Key: "record.paths", Kind: config.List,
+			Usage: "Glob patterns of the paths of the requests the recording takes, such as /v1/*, where * matches / too. Empty takes every path.",
+			Set: func(c *Config, v config.Value) error {
+				section(&c.Record, *defaultRecordConfig()).Paths = v.List
+				return nil
+			},
+		},
+		field{
 			Key: "record.request_headers", Kind: config.List,
 			Usage: "Request headers recordings match: the first value each had, or its absence.",
 			Set: func(c *Config, v config.Value) error {

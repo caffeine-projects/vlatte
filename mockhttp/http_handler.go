@@ -66,22 +66,6 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.lifecycle.OnRequest(reqValues)
 
-	// A recording captures the request as it came, and the answer as the client gets it. A CONNECT opens a tunnel,
-	// which answers nothing.
-	var capture *captureWriter
-	if rec := h.app.recording.Load(); rec != nil && r.Method != http.MethodConnect {
-		capture = rec.capture(w, reqValues, rawBody, parseErr)
-		w = capture
-
-		defer capture.end()
-	}
-
-	stored, err := h.app.storage.List(r.Context())
-	if err != nil {
-		h.onError(w, reqValues, vlatte.FailureMatch, fmt.Errorf("http: listing mocks: %w", err))
-		return
-	}
-
 	input := &selectorInput{
 		RawRequest: r,
 		URL:        reqValues.URL,
@@ -89,6 +73,27 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Form:       r.PostForm,
 		Files:      formFiles(r),
 		ParsedBody: reqValues.ParsedBodyData,
+	}
+
+	// A recording captures the request as it came, and the answer as the client gets it. A CONNECT opens a tunnel,
+	// which answers nothing. A recording with a target sends it what it takes, before any mock.
+	var capture *captureWriter
+	if rec := h.app.recording.Load(); rec != nil && r.Method != http.MethodConnect && rec.takes(r.Context(), input) {
+		capture = rec.capture(w, reqValues, rawBody, parseErr)
+		w = capture
+
+		defer capture.end()
+
+		if rec.target != nil {
+			h.serveTarget(w, reqValues, rec.target, capture)
+			return
+		}
+	}
+
+	stored, err := h.app.storage.List(r.Context())
+	if err != nil {
+		h.onError(w, reqValues, vlatte.FailureMatch, fmt.Errorf("http: listing mocks: %w", err))
+		return
 	}
 
 	sub := vlatte.NewExplanation()
@@ -169,8 +174,6 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		capture.answeredBy(res != nil && res.proxied)
 	}
 
-	sent := true
-
 	if res != nil {
 		// A streamed body, such as a proxy's, is read whole for mappers.
 		if len(mock.spec.mappers) > 0 && len(res.Body) == 0 {
@@ -187,22 +190,9 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// The status and headers are sent by now, so an error can't become the response: it is logged, and the
-		// mock counts as served. A client that went away is a warning.
-		if err := res.Render(r.Context(), w); err != nil {
-			sent = false
-			err = fmt.Errorf("http: rendering response: %w", err)
-
-			if r.Context().Err() != nil {
-				h.lifecycle.OnWarning(reqValues, err)
-			} else {
-				h.lifecycle.OnError(reqValues, err)
-			}
-		}
-	}
-
-	// Only a whole answer is recorded.
-	if capture != nil && sent {
+		// The mock counts as served, whatever happens to the answer once its status and headers are sent.
+		h.render(w, reqValues, res, capture)
+	} else if capture != nil {
 		capture.record()
 	}
 
@@ -249,6 +239,42 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	h.lifecycle.OnMatch(reqValues, res)
+}
+
+// serveTarget answers with the server a recording records, and has the capture record its answer.
+func (h *mockHandler) serveTarget(w http.ResponseWriter, r *RequestValues, target Replier, capture *captureWriter) {
+	ctx := r.RawRequest.Context()
+
+	res, err := target.Reply(ctx, ReplyInput{RequestValues: r, Writer: w})
+	if err != nil {
+		h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: recording: %w", err))
+		return
+	}
+
+	capture.answeredBy(true)
+	h.render(w, r, res, capture)
+}
+
+// render sends res, and has the capture, if any, record it once the client got it whole. The status and headers are
+// sent by now, so an error can't become the response: it is logged, as a warning when the client went away.
+func (h *mockHandler) render(w http.ResponseWriter, r *RequestValues, res *Response, capture *captureWriter) {
+	ctx := r.RawRequest.Context()
+
+	if err := res.Render(ctx, w); err != nil {
+		err = fmt.Errorf("http: rendering response: %w", err)
+
+		if ctx.Err() != nil {
+			h.lifecycle.OnWarning(r, err)
+		} else {
+			h.lifecycle.OnError(r, err)
+		}
+
+		return
+	}
+
+	if capture != nil {
+		capture.record()
+	}
 }
 
 func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues) {

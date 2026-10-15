@@ -100,6 +100,17 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"record":           {[]string{"--record"}, func(t *testing.T, c *Config) { require.Equal(t, defaultRecordConfig(), c.Record) }},
 		"record-dir":       {[]string{"--record-dir", "out"}, func(t *testing.T, c *Config) { require.Equal(t, "out", c.Record.Dir) }},
 		"record-format":    {[]string{"--record-format", ".YAML"}, func(t *testing.T, c *Config) { require.Equal(t, "yaml", c.Record.Format) }},
+		"record-target": {
+			[]string{"--record-target", "https://api.example.com"},
+			func(t *testing.T, c *Config) { require.Equal(t, "https://api.example.com", c.Record.Target) },
+		},
+		"record-ssl-verify": {[]string{"--record-ssl-verify"}, func(t *testing.T, c *Config) { require.True(t, c.Record.SSLVerify) }},
+		"record-methods": {
+			[]string{"--record-methods", "GET,post"}, func(t *testing.T, c *Config) { require.Equal(t, []string{"GET", "post"}, c.Record.Methods) },
+		},
+		"record-paths": {
+			[]string{"--record-paths", "/v1/*,/v2/*"}, func(t *testing.T, c *Config) { require.Equal(t, []string{"/v1/*", "/v2/*"}, c.Record.Paths) },
+		},
 		"record-request-headers": {
 			[]string{"--record-request-headers", "accept"}, func(t *testing.T, c *Config) { require.Equal(t, []string{"accept"}, c.Record.RequestHeaders) },
 		},
@@ -360,12 +371,16 @@ func TestConfigSources_Hazards(t *testing.T) {
 	})
 
 	t.Run("bad values are problems, not panics", func(t *testing.T) {
-		_, err := loadConfig(t, Setup(), ConfigArgs([]string{"--proxy-via", "::not a url", "--record-format", "exe"}))
+		_, err := loadConfig(t, Setup(), ConfigArgs([]string{
+			"--proxy-via", "::not a url", "--record-format", "exe", "--record-target", "https://api.example.com/v1",
+		}))
 
 		problems := configProblems(t, err)
-		require.Len(t, problems, 2)
+		require.Len(t, problems, 3)
 		require.Equal(t, "proxy.via", problems[0].Key)
 		require.Equal(t, "record.format", problems[1].Key)
+		require.Equal(t, "record.target", problems[2].Key)
+		require.Contains(t, problems[2].Message, "expected no path, query or fragment")
 	})
 
 	t.Run("a proxy password never reaches the error, even in an invalid URL", func(t *testing.T) {

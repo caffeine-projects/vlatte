@@ -4,12 +4,14 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/match"
 )
 
 var _ RecordConfigurer = (*RecordConfig)(nil)
@@ -30,6 +32,25 @@ type RecordConfig struct {
 
 	// Format is the format of the recorded mock files: json, yaml or yml. Defaults to json.
 	Format string
+
+	// Target is the server to record: the requests the recording takes go to it, before any mock, and its answers are
+	// recorded. It is an absolute http or https URL without a path, query or fragment, such as
+	// https://api.example.com. Without one, the recording takes what the forward proxy and proxy replies answer.
+	Target string
+
+	// Methods are the methods of the requests the recording takes, in any case. None takes every method.
+	Methods []string
+
+	// Paths are glob patterns of the paths of the requests the recording takes, such as /v1/*, where * matches a "/"
+	// too. None takes every path.
+	Paths []string
+
+	// Filter is a request pattern the requests the recording takes must match, made with Request(), such as
+	// Request().Header("X-Record", match.Equal("yes")). The recording uses its request matchers only.
+	Filter *Builder
+
+	// SSLVerify verifies the TLS certificate of the Target.
+	SSLVerify bool
 
 	// RequestHeaders are the request headers a recording matches: the first value each had, or its absence. A
 	// recording matches no other header.
@@ -87,6 +108,9 @@ func defaultRecordConfig() *RecordConfig {
 func (r *RecordConfig) Apply(c *RecordConfig) error {
 	c.Dir = cmp.Or(r.Dir, c.Dir)
 	c.Format = cmp.Or(r.Format, c.Format)
+	c.Target = cmp.Or(r.Target, c.Target)
+	c.Filter = cmp.Or(r.Filter, c.Filter)
+	c.SSLVerify = c.SSLVerify || r.SSLVerify
 	c.BodyFiles = c.BodyFiles || r.BodyFiles
 	c.MaxInlineBody = cmp.Or(r.MaxInlineBody, c.MaxInlineBody)
 	c.MaxBodySize = cmp.Or(r.MaxBodySize, c.MaxBodySize)
@@ -102,6 +126,14 @@ func (r *RecordConfig) Apply(c *RecordConfig) error {
 		c.ExcludeResponseHeaders = slices.Clone(r.ExcludeResponseHeaders)
 	}
 
+	if r.Methods != nil {
+		c.Methods = slices.Clone(r.Methods)
+	}
+
+	if r.Paths != nil {
+		c.Paths = slices.Clone(r.Paths)
+	}
+
 	return nil
 }
 
@@ -110,12 +142,15 @@ func (r *RecordConfig) clone() *RecordConfig {
 	c := *r
 	c.RequestHeaders = slices.Clone(r.RequestHeaders)
 	c.ExcludeResponseHeaders = slices.Clone(r.ExcludeResponseHeaders)
+	c.Methods = slices.Clone(r.Methods)
+	c.Paths = slices.Clone(r.Paths)
 	c.Transforms = slices.Clone(r.Transforms)
 
 	return &c
 }
 
-// check checks the settings, and writes the format as mock files name it, such as yaml for .YAML.
+// check checks the settings, and writes them as the recording reads them: the format as mock files name it, such as
+// yaml for .YAML, and the methods and paths without the spaces around them.
 func (r *RecordConfig) check() error {
 	format, ok := config.Format(r.Format)
 	if !ok {
@@ -131,9 +166,75 @@ func (r *RecordConfig) check() error {
 		return fmt.Errorf("recorder: repeats %d is not vlatte.RecordSequence or vlatte.RecordFirst", r.Repeats)
 	case r.MaxInlineBody < 0:
 		return fmt.Errorf("recorder: MaxInlineBody must be 0 or more, not %d", r.MaxInlineBody)
+	case r.Filter != nil && r.Filter.err != nil:
+		return fmt.Errorf("recorder: filter: %w", r.Filter.err)
+	}
+
+	for _, list := range []struct {
+		what  string
+		items []string
+	}{{"method", r.Methods}, {"path", r.Paths}} {
+		for i, item := range list.items {
+			if list.items[i] = strings.TrimSpace(item); list.items[i] == "" {
+				return fmt.Errorf("recorder: %s %d is empty", list.what, i)
+			}
+		}
+	}
+
+	if r.Target != "" {
+		if err := checkRecordTarget(r.Target); err != nil {
+			return fmt.Errorf("recorder: target %q: %w", config.Display(r.Target), err)
+		}
 	}
 
 	return nil
+}
+
+// filter returns the matchers of the requests the recording takes: its methods, its paths and its filter's.
+func (r *RecordConfig) filter() vlatte.Evaluators[*Mock, *selectorInput] {
+	b := Request()
+
+	if len(r.Methods) > 0 {
+		methods := make([]vlatte.Matcher, len(r.Methods))
+		for i, m := range r.Methods {
+			methods[i] = match.EqualIgnoreCase(m)
+		}
+
+		b.MethodMatches(match.Any(methods...))
+	}
+
+	if len(r.Paths) > 0 {
+		globs := make([]vlatte.Matcher, len(r.Paths))
+		for i, p := range r.Paths {
+			globs[i] = match.GlobMatch(p)
+		}
+
+		b.URLPath(match.Any(globs...))
+	}
+
+	evals := b.spec.expectations
+	if r.Filter != nil {
+		evals = append(evals, r.Filter.spec.expectations...)
+	}
+
+	return evals
+}
+
+// checkRecordTarget checks the URL of a server to record: an absolute http or https URL, without the parts the
+// requests it gets have of their own: a path, a query, a fragment, and credentials.
+func checkRecordTarget(target string) error {
+	u, err := url.Parse(target)
+
+	switch {
+	case err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "":
+		return errors.New("expected an absolute http or https URL, such as https://api.example.com")
+	case (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
+		return errors.New("expected no path, query or fragment: the requests recorded keep theirs")
+	case u.User != nil:
+		return errors.New("expected no user info: the requests recorded keep their credentials")
+	default:
+		return nil
+	}
 }
 
 // dir returns the directory of the recordings: Dir, from root when it is relative.
@@ -167,6 +268,33 @@ func RecordRequestHeaders(names ...string) RecordConfigurer {
 // RecordExcludeResponseHeaders sets the response headers recordings leave out, in any case.
 func RecordExcludeResponseHeaders(names ...string) RecordConfigurer {
 	return recordConfigFunc(func(c *RecordConfig) { c.ExcludeResponseHeaders = names })
+}
+
+// RecordTarget sets the server to record. See RecordConfig.Target.
+func RecordTarget(target string) RecordConfigurer {
+	return recordConfigFunc(func(c *RecordConfig) { c.Target = target })
+}
+
+// RecordMethods sets the methods of the requests the recording takes, in any case.
+func RecordMethods(methods ...string) RecordConfigurer {
+	return recordConfigFunc(func(c *RecordConfig) { c.Methods = methods })
+}
+
+// RecordPaths sets glob patterns of the paths of the requests the recording takes, such as /v1/*, where * matches a
+// "/" too.
+func RecordPaths(globs ...string) RecordConfigurer {
+	return recordConfigFunc(func(c *RecordConfig) { c.Paths = globs })
+}
+
+// RecordFilter sets a request pattern the requests the recording takes must match, made with Request(). See
+// RecordConfig.Filter.
+func RecordFilter(filter *Builder) RecordConfigurer {
+	return recordConfigFunc(func(c *RecordConfig) { c.Filter = filter })
+}
+
+// RecordSSLVerify sets whether the TLS certificate of the target is verified.
+func RecordSSLVerify(v bool) RecordConfigurer {
+	return recordConfigFunc(func(c *RecordConfig) { c.SSLVerify = v })
 }
 
 // RecordBodyFiles sets whether every response body goes to a file of its own, instead of inline.
