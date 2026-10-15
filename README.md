@@ -77,7 +77,7 @@ err := m.Prep(ctx, proxyall.New(proxyall.Config{Target: "https://api.example.com
 ## Mock files
 
 Mocks can also live in YAML or JSON files (`.json`, `.yaml` or `.yml`).
-- **On start,** the server loads the files matching `testdata/_mocks/*mock.yaml` and `testdata/_mocks/*mock.yml`, in name order. Change the patterns with `Setup().MockFilePatterns(...)`.
+- **On start,** the server loads the files matching `testdata/_mocks/*mock.yaml` and `testdata/_mocks/*mock.yml`, and the [recordings](#recording-and-playback) in `testdata/_mocks_recorded`, in name order. Change the patterns with `Setup().MockFilePatterns(...)`.
 - **To load one file,** use `m.MustMock(mockhttp.FromFile(path))`.
 - **`m.Reload()`** replaces the mocks of the files with what they hold now, in one step. When a file has problems, it returns them and the mocks stay as they were.
 
@@ -109,6 +109,10 @@ response:
 No other reading happens: `[equal, 10]` doesn't match `010`. The [match package docs](match/doc.go) state the rule.
 
 **Keys.** Keys are kept as written, so a query name like `userId` matches `userId` only.
+
+**URLs.** `url: /items?page=2` matches that path and query exactly: the same parameters, in any order, each with its values in order, so `/items` and `/items?page=2&sort=asc` don't match. Path segments compare decoded, so `%41` is `A`, but `%2F` isn't `/`. A relative `url` with a `*` in its path is an error: match a path with a glob through `path: /items/*`, and parameters one by one through `query`. For a literal `*`, write `%2A`. An absolute `url`, such as `https://api.example.com/items`, compares as text ignoring case.
+
+**Proxy replies.** A `proxy` reply (`From` in Go) answers with what its target answers, and streams the body as the target sends it, trailers included. Its `timeout` bounds the wait for the target's response headers only, 30 seconds by default; 0 waits forever. A mock with response mappers reads the whole body first, so they see it in `Body`.
 
 **Templates.** A mock file is plain JSON or YAML. Only the settings that are templates, such as a templated body, render: see [Templates](#templates).
 
@@ -283,7 +287,7 @@ response:
 
 **Templates** read forms: `{{ .Request.PostForm.Get "title" }}` and `{{ with .Request.FormFile "avatar" }}{{ .Filename }}{{ end }}`.
 
-**Recording** writes a recorded upload as `form` and `form_file` patterns, so it replays whatever boundary the next client picks. Files that aren't UTF-8 text go to files next to the recording. A replay matches the recorded fields and files, as `FormField` and `FormFile` do: more fields or files still match.
+**Recording** matches a recorded upload by all its text fields, each with its values in order, and its files by `form_file` patterns, so it replays whatever boundary the next client picks. Files that aren't UTF-8 text go to files next to the recording. An upload with another field doesn't match; one with more files still does. See [Recording and playback](#recording-and-playback).
 
 ## Webhooks
 
@@ -358,6 +362,92 @@ A webhook's `delay` counts from the reply, so it holds the response too. A reply
 
 **Logs.** Webhooks log each request and its answer with the server's logger, so `Setup().Silent()` silences them too. `webhook.WithLogger` gives them a logger of their own.
 
+## Recording and playback
+
+A server records what it proxies as mock files, then answers the same requests the same way, without the service.
+
+```go
+m := mockhttp.MustNew()
+m.MustStart()
+t.Cleanup(m.Close)
+
+err := m.StartRecording(
+	mockhttp.RecordDir("testdata/recorded"),
+	mockhttp.RecordTarget("https://api.example.com"),
+	mockhttp.RecordPaths("/v1/*"),
+)
+// ... requests to m.URL("/v1/...") reach the target, and are recorded ...
+
+res, err := m.StopRecording(ctx) // writes the mock files, then serves them
+```
+
+**What is recorded.**
+- With a target, the requests the recording takes go to the target before any mock, and its answers are recorded. The others go to the mocks, as usual.
+- Without one, the recording takes what the server proxies: the forward proxy (`Setup().Proxy()`) and proxy replies (`From`, the `proxy` key). A mock's own answer is recorded only with `RecordIncludeMocked(true)`.
+- Only an answer the client got whole is recorded. The failures vlatte answers, such as a target it can't reach, aren't.
+
+**Filters.** `RecordMethods`, in any case, and `RecordPaths` choose the requests the recording takes. A path is a glob whose `*` matches `/` too, so `/v1/*` takes `/v1/a/b`. `RecordFilter` takes any request pattern, made as a mock is:
+
+```go
+mockhttp.RecordFilter(mockhttp.Request().Header("X-Record", match.Equal("yes")))
+```
+
+A filter that fails takes nothing: the request is served as usual, and the failure is logged.
+
+**Playback.**
+- `StopRecording` waits until every call it took is written, then serves the recordings: the mock files load again, with the recording's directory, so the hits of file mocks count from 0. When `ctx` ends first, it returns ctx's error, and the recording keeps writing: another `StopRecording` waits for it again, and serves it.
+- A server started later serves them too. The default mock file patterns include `testdata/_mocks_recorded`, and a server serves the recordings of its `record.dir`.
+- A server serves the recordings of the last recording `StopRecording` ended, not those of earlier ones in other directories. The same request recorded into two directories a server serves has one ID twice: `StopRecording` reports it, and the server serves what it served before.
+- A mock that proxies every request needs a priority number above 0 to let the recordings answer first: `AnyMethod().Priority(10).Reply(From(target))`.
+- A recording answers its request before any proxy, so a later recording without a target doesn't record that request again: it records what is new. A recording with a target records every request it takes. A `Reload` while recording serves what is recorded so far.
+
+**What a recording matches.** A recording answers the request it recorded, and no other:
+
+| Part | Matched |
+|---|---|
+| Method | Ignoring case. |
+| Path and query | As `url` matches: `url: /items?page=2`. |
+| Headers | Those `RecordRequestHeaders` names, by their first value, or their absence. No other header. |
+| Body | A JSON body as JSON, whatever its spacing and member order. A urlencoded or multipart form by all its text fields. Other text as it is, and no body as none. The media type of the `Content-Type` too. |
+| Files of a form | By name, content type and content, as `form_file` patterns. |
+
+Calls a recording can't tell apart are one mock, whose answers play in turn, then the last one again. The same answer every time is one. `RecordRepeats(vlatte.RecordFirst)` keeps the first answer only.
+
+A recording doesn't match what it can't read, and then takes any body: one that isn't UTF-8 text, or is larger than `MaxInlineBody`, or that `MaxBodyParsingLimit` cut, or that a parser of the server's config read, or the urlencoded form of a request other than POST, PUT and PATCH, which Go doesn't read. The forward proxy's host isn't recorded: one path on two hosts is one mock.
+
+**What it answers.** The status, the headers but those the server sets (`Date`, `Content-Length` and the hop-by-hop ones), the trailers, and the body as the client got it, after the steps of the mock.
+- A text body up to `MaxInlineBody`, 1 MiB by default, is written in the mock file. Other bodies go to files next to it, named after their content, so equal bodies share a file. `RecordBodyFiles(true)` writes every body to a file.
+- A gzip body that fits in `MaxInlineBody` decoded is recorded decoded, with `encoding: gzip`, and compressed again when it is served. Other encoded bodies are kept as sent, with their `Content-Encoding`.
+- A larger body goes to a file as it streams, so it never sits in memory whole. When the disk is slower than the sender, the answer waits for it, a second in all at most. Past that, or past `MaxBodySize`, 1 GiB by default, the call isn't recorded, and the client still gets every byte.
+- A body file plays back streamed, without a `Content-Length`.
+- `RecordExcludeResponseHeaders` leaves headers out, such as `Set-Cookie`. `RecordTransform` changes each recording, as Go values, before it is written:
+
+```go
+mockhttp.RecordTransform(func(r *mockhttp.RecordedMock) error {
+	for i := range r.Responses {
+		delete(r.Responses[i].Header, "Set-Cookie")
+	}
+	return nil
+})
+```
+
+**Files.** A recording writes a mock file named after its request, such as `GET-items-page-2-<hash>.mock.json`, or `.yaml` or `.yml` with `RecordFormat`, into its directory: `testdata/_mocks_recorded` by default, from `root_dir`. A mock file appears whole, or not at all.
+
+**Status.** `RecordingStatus` counts the calls taken, the mocks written, and the calls dropped or that failed. A response never waits for the calls before it to be written: when too many wait, the next ones are dropped and counted.
+
+**Settings.** `Setup().Record(...)` records from each start to close, and so does the `record` section of the config:
+
+```yaml
+# .vlatterc.yaml
+record:
+  target: https://api.example.com
+  paths: ["/v1/*"]
+  request_headers: [Accept]
+  exclude_response_headers: [Set-Cookie]
+```
+
+The target's TLS certificate isn't verified, as proxy replies don't verify theirs by default: `record.ssl_verify` verifies it. `vlatte --help` lists every `record` setting.
+
 ## Failures
 
 When no mock matches, or serving a request fails, the server answers itself. It sends `418 I'm a teapot`, a status a real server rarely sends, so the answer never looks like a mock's, and the `X-Vlatte-Error` header says why:
@@ -410,6 +500,8 @@ cors: true
 
 Setting a key of a section (`cors`, `proxy` or `record`) turns the section on, and `false` turns it off.
 
+`root_dir` is the directory that relative mock file patterns and record directories start at. Absolute ones are used as they are.
+
 Unknown keys, flags and `VLATTE_*` variables are errors, except `VLATTE_DOCKER_HOST`. A server that can't load its settings reports every problem at once:
 
 ```
@@ -438,6 +530,14 @@ curl http://127.0.0.1:8080/hello
 Without `--addr`, it listens on a random port and prints the URL. Settings can also come from a `.vlatterc` file or `VLATTE_*` environment variables; see [Configuration](#configuration). Run `vlatte --help` to list them, and `vlatte completion --help` to set up shell completion.
 
 Mock files can send [webhooks](#webhooks): the CLI registers the `webhook` listener, and `--webhook-timeout` bounds each request.
+
+It [records](#recording-and-playback) a service until it stops, and serves the recordings on the next run:
+
+```sh
+vlatte --record --record-target=https://api.example.com --record-paths='/v1/*'
+# Ctrl-C writes the recordings into testdata/_mocks_recorded; another Ctrl-C quits at once
+vlatte
+```
 
 While it runs, `POST /__admin/mocks` adds a mock sent in the request body, for example as JSON:
 
