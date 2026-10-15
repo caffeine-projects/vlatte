@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
@@ -25,8 +24,7 @@ func MockFileFormats() []string {
 
 // mockFileFormat normalizes a format or an extension, such as ".YAML", and reports whether mock files can use it.
 func mockFileFormat(format string) (string, bool) {
-	f := strings.ToLower(strings.TrimPrefix(format, "."))
-	return f, slices.Contains(MockFileFormats(), f)
+	return config.Format(format)
 }
 
 type fileBuilder struct {

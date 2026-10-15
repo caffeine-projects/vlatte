@@ -20,6 +20,12 @@ func isFormat(ext string) bool {
 	return ext == ".json" || ext == ".yaml" || ext == ".yml"
 }
 
+// Format normalizes the format of a document, such as ".YAML", and reports whether it is JSON or YAML.
+func Format(format string) (string, bool) {
+	f := strings.ToLower(strings.TrimPrefix(format, "."))
+	return f, isFormat("." + f)
+}
+
 // decode parses data, a JSON or YAML document chosen by ext, into the data model of package value, one for both
 // formats: objects are map[string]any, lists []any, whole numbers that fit int64 are int64, other numbers float64.
 // YAML timestamps and mapping keys keep their text, as they would in JSON.
