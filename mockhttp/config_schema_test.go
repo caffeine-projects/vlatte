@@ -98,18 +98,29 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"proxy-timeout":    {[]string{"--proxy-timeout", "1500"}, func(t *testing.T, c *Config) { require.Equal(t, 1500*time.Millisecond, c.Proxy.Timeout) }},
 		"proxy-ssl-verify": {[]string{"--proxy-ssl-verify"}, func(t *testing.T, c *Config) { require.True(t, c.Proxy.SSLVerify) }},
 		"record":           {[]string{"--record"}, func(t *testing.T, c *Config) { require.Equal(t, defaultRecordConfig(), c.Record) }},
+		"record-dir":       {[]string{"--record-dir", "out"}, func(t *testing.T, c *Config) { require.Equal(t, "out", c.Record.Dir) }},
+		"record-format":    {[]string{"--record-format", ".YAML"}, func(t *testing.T, c *Config) { require.Equal(t, "yaml", c.Record.Format) }},
 		"record-request-headers": {
 			[]string{"--record-request-headers", "accept"}, func(t *testing.T, c *Config) { require.Equal(t, []string{"accept"}, c.Record.RequestHeaders) },
 		},
-		"record-response-headers": {
-			[]string{"--record-response-headers", "link"}, func(t *testing.T, c *Config) { require.Equal(t, []string{"link"}, c.Record.ResponseHeaders) },
+		"record-exclude-response-headers": {
+			[]string{"--record-exclude-response-headers", "set-cookie"},
+			func(t *testing.T, c *Config) {
+				require.Equal(t, []string{"set-cookie"}, c.Record.ExcludeResponseHeaders)
+			},
 		},
-		"record-save-dir": {[]string{"--record-save-dir", "out"}, func(t *testing.T, c *Config) { require.Equal(t, "out", c.Record.SaveDir) }},
-		"record-save-body-to-file": {
-			[]string{"--record-save-body-to-file"}, func(t *testing.T, c *Config) { require.True(t, c.Record.SaveResponseBodyToFile) },
+		"record-body-files": {[]string{"--record-body-files"}, func(t *testing.T, c *Config) { require.True(t, c.Record.BodyFiles) }},
+		"record-max-inline-body": {
+			[]string{"--record-max-inline-body", "4096"}, func(t *testing.T, c *Config) { require.Equal(t, int64(4096), c.Record.MaxInlineBody) },
 		},
-		"record-file-type": {[]string{"--record-file-type", ".yaml"}, func(t *testing.T, c *Config) { require.Equal(t, "yaml", c.Record.SaveFileType) }},
-		"webhook-timeout":  {[]string{"--webhook-timeout", "1.5s"}, func(t *testing.T, c *Config) { require.Equal(t, 1500*time.Millisecond, c.WebhookTimeout) }},
+		"record-max-body-size": {
+			[]string{"--record-max-body-size", "-1"}, func(t *testing.T, c *Config) { require.Equal(t, int64(-1), c.Record.MaxBodySize) },
+		},
+		"record-repeats": {
+			[]string{"--record-repeats", "first"}, func(t *testing.T, c *Config) { require.Equal(t, vlatte.RecordFirst, c.Record.Repeats) },
+		},
+		"record-include-mocked": {[]string{"--record-include-mocked"}, func(t *testing.T, c *Config) { require.True(t, c.Record.IncludeMocked) }},
+		"webhook-timeout":       {[]string{"--webhook-timeout", "1.5s"}, func(t *testing.T, c *Config) { require.Equal(t, 1500*time.Millisecond, c.WebhookTimeout) }},
 	}
 
 	flags := ConfigFlags()
@@ -315,11 +326,13 @@ func TestConfigSources_FileFormatsAgree(t *testing.T) {
 		},
 		Proxy: &ProxyConfig{Via: "https://proxy.org/test", Timeout: 5 * time.Second},
 		Record: &RecordConfig{
+			Dir:                    "nowhere",
+			Format:                 "json",
 			RequestHeaders:         []string{"header1", "header2"},
-			ResponseHeaders:        []string{"header3", "header4"},
-			SaveDir:                "nowhere",
-			SaveFileType:           "json",
-			SaveResponseBodyToFile: true,
+			ExcludeResponseHeaders: []string{"header3", "header4"},
+			BodyFiles:              true,
+			MaxInlineBody:          _defaultMaxInlineBody,
+			MaxBodySize:            _defaultMaxBodySize,
 		},
 	}
 
@@ -347,12 +360,12 @@ func TestConfigSources_Hazards(t *testing.T) {
 	})
 
 	t.Run("bad values are problems, not panics", func(t *testing.T) {
-		_, err := loadConfig(t, Setup(), ConfigArgs([]string{"--proxy-via", "::not a url", "--record-file-type", "exe"}))
+		_, err := loadConfig(t, Setup(), ConfigArgs([]string{"--proxy-via", "::not a url", "--record-format", "exe"}))
 
 		problems := configProblems(t, err)
 		require.Len(t, problems, 2)
 		require.Equal(t, "proxy.via", problems[0].Key)
-		require.Equal(t, "record.file_type", problems[1].Key)
+		require.Equal(t, "record.format", problems[1].Key)
 	})
 
 	t.Run("a proxy password never reaches the error, even in an invalid URL", func(t *testing.T) {

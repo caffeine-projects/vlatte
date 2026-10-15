@@ -2,9 +2,12 @@ package mockhttp_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockhttp"
@@ -70,4 +73,69 @@ func Example_multipart() {
 	// Output:
 	// 201 multipart/mixed; boundary=b
 	// "--b\r\nContent-Type: text/plain\r\n\r\nsaved\r\n--b--\r\n"
+}
+
+func ExampleServer_StartRecording() {
+	// A target answers, and the server records what it proxies to it.
+	target := mockhttp.MustNew(mockhttp.Setup().Silent())
+	target.MustStart()
+	defer target.Close()
+	target.MustMock(mockhttp.Getf("/items").Reply(mockhttp.OK().JSON(map[string]any{"items": []int{1, 2}})))
+
+	dir, err := os.MkdirTemp("", "recordings")
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(dir)
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	defer m.Close()
+	m.MustMock(mockhttp.AnyMethod().Reply(mockhttp.From(target.URL())))
+
+	if err := m.StartRecording(mockhttp.RecordDir(dir), mockhttp.RecordTransform(func(r *mockhttp.RecordedMock) error {
+		r.Name = "the items"
+		return nil
+	})); err != nil {
+		panic(err)
+	}
+
+	res, err := http.Get(m.URL("/items?page=2"))
+	if err != nil {
+		panic(err)
+	}
+	res.Body.Close()
+
+	// The recordings are written once StopRecording returns.
+	recorded, err := m.StopRecording(context.Background())
+	if err != nil {
+		panic(err)
+	}
+
+	for _, r := range recorded.Recordings {
+		fmt.Println(r.Name, filepath.Base(r.File))
+	}
+
+	// A server that loads the recordings answers without the target.
+	target.Close()
+
+	replay := mockhttp.MustNew(mockhttp.Setup().Silent().MockFilePatterns(filepath.Join(dir, "*.mock.json")))
+	replay.MustStart()
+	defer replay.Close()
+
+	res, err = http.Get(replay.URL("/items?page=2"))
+	if err != nil {
+		panic(err)
+	}
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(res.StatusCode, string(body))
+	// Output:
+	// the items GET-items-page-2-a59dfd52f96e8038.mock.json
+	// 200 {"items":[1,2]}
 }

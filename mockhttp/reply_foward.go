@@ -329,6 +329,7 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 
 	stub.StatusCode = res.StatusCode
 	stub.BodyCloser = &targetBody{ReadCloser: res.Body, cancel: cancel}
+	stub.proxied = true
 
 	// A body of unknown length, or an event stream, goes to the client part by part, as the target sends it. Other
 	// bodies fill the server's buffer, which sends them as it fills.

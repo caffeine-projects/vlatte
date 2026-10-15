@@ -16,8 +16,8 @@ record:
   request_headers:
     - header1
     - header2
-  response_headers:
+  exclude_response_headers:
     - header3
     - header4
-  save_dir: nowhere
-  save_body_to_file: true
+  dir: nowhere
+  body_files: true

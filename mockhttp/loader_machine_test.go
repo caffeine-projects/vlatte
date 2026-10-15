@@ -505,3 +505,13 @@ func TestFileLoader_ReloadNeverDropsFileMocks(t *testing.T) {
 	require.Positive(t, requests.Load())
 	require.Zero(t, missed.Load(), "requests that found no file mock")
 }
+
+// clearDir removes everything dir holds.
+func clearDir(t require.TestingT, dir string) {
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+
+	for _, e := range entries {
+		require.NoError(t, os.RemoveAll(filepath.Join(dir, e.Name())))
+	}
+}

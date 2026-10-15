@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mattn/go-colorable"
@@ -49,7 +50,6 @@ type Server struct {
 	requestBodyParsers []RequestBodyParser
 	params             vlatte.KV
 	loaders            []Loader
-	rec                *recorder
 	rwMutex            sync.RWMutex
 	proxy              *reverseProxy
 
@@ -60,6 +60,10 @@ type Server struct {
 
 	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
 	events *vlatte.EventRunner
+
+	// recording is the recording requests are captured for, if any. recordMu orders its starts.
+	recording atomic.Pointer[recording]
+	recordMu  sync.Mutex
 }
 
 // New creates a new HTTP mock Server with the given configurations.
@@ -137,12 +141,13 @@ func New(config ...Option) (*Server, error) {
 		params = vlatte.NewMemoryKV()
 	}
 
-	var rec *recorder
 	if conf.Record != nil {
-		var err error
-		if rec, err = newRecorder(app, conf.Record); err != nil {
+		record := conf.Record.clone()
+		if err := record.check(); err != nil {
 			return nil, fmt.Errorf("server: %w", err)
 		}
+
+		conf.Record = record
 	}
 
 	var p *reverseProxy
@@ -191,7 +196,6 @@ func New(config ...Option) (*Server, error) {
 	app.scenarioStore = mfeat.NewScenarioStore()
 	app.params = params
 	app.loaders = loaders
-	app.rec = rec
 	app.proxy = p
 	app.requestBodyParsers = parsers
 	app.events = eventRunner
@@ -373,7 +377,8 @@ func (app *Server) MustReload() {
 }
 
 // Close closes the mock server. It cancels the on_complete events still running, such as a webhook waiting for its
-// delay or its target, so the requests waiting for them end, and waits for those requests.
+// delay or its target, so the requests waiting for them end, and waits for those requests. It stops the recording,
+// and waits until it wrote what it took.
 func (app *Server) Close() {
 	// The backend waits for the requests it serves, and they wait for their events: cancel the events first.
 	app.events.Close()
@@ -383,9 +388,8 @@ func (app *Server) Close() {
 		app.logger.Debug().Err(err).Msg("server: Close: error closing server")
 	}
 
-	if app.rec != nil {
-		app.rec.stop()
-	}
+	// The recording logged each call it couldn't record.
+	_, _ = app.StopRecording(context.Background())
 
 	// The mocks stay stored, so assertions still read them after Close: they release what they hold.
 	mocks, _ := app.storage.PickAll(context.Background())
@@ -397,17 +401,6 @@ func (app *Server) Close() {
 
 	if app.proxy != nil {
 		app.proxy.close()
-	}
-}
-
-// IsRecording checks if mock recording is enabled.
-func (app *Server) IsRecording() bool {
-	return app.rec != nil && app.rec.isActive()
-}
-
-func (app *Server) StopRecording() {
-	if app.rec != nil {
-		app.rec.stop()
 	}
 }
 
@@ -458,7 +451,7 @@ func (app *Server) DescribeConfig() string {
 
 	if app.config.Record != nil {
 		buf.WriteString("Recording: ")
-		buf.WriteString(app.config.Record.SaveDir)
+		buf.WriteString(app.config.Record.dir(app.config.RootDir))
 		buf.WriteString("\n")
 	}
 
@@ -474,6 +467,8 @@ func (app *Server) DescribeConfig() string {
 // Internals
 // --
 
+// onStart loads the mocks on the first start, then starts the recording the config sets: each start records until
+// the server closes, or StopRecording ends the recording.
 func (app *Server) onStart() (err error) {
 	app.startOnce.Do(func() { err = app.load() })
 
@@ -481,11 +476,7 @@ func (app *Server) onStart() (err error) {
 		return err
 	}
 
-	if app.rec != nil {
-		app.rec.start()
-	}
-
-	return nil
+	return app.startConfiguredRecording()
 }
 
 func (app *Server) load() error {

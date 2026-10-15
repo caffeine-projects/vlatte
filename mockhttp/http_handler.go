@@ -8,7 +8,6 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
-	"github.com/caffeine-projects/vlatte/mockhttp/internal/httprec"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
 
@@ -54,9 +53,9 @@ func newMockHandler(
 func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.app.config.DebugFn("req", r)
 
-	reqValues, rawBody, err := parseRequest(r, h.app)
-	if err != nil {
-		h.lifecycle.OnWarning(reqValues, fmt.Errorf("request_body_parser: %w", err))
+	reqValues, rawBody, parseErr := parseRequest(r, h.app)
+	if parseErr != nil {
+		h.lifecycle.OnWarning(reqValues, fmt.Errorf("request_body_parser: %w", parseErr))
 	}
 
 	// net/http removes the temporary files of the request it made, and r may be a copy of it, such as chi makes.
@@ -66,6 +65,16 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.lifecycle.OnRequest(reqValues)
+
+	// A recording captures the request as it came, and the answer as the client gets it. A CONNECT opens a tunnel,
+	// which answers nothing.
+	var capture *captureWriter
+	if rec := h.app.recording.Load(); rec != nil && r.Method != http.MethodConnect {
+		capture = rec.capture(w, reqValues, rawBody, parseErr)
+		w = capture
+
+		defer capture.end()
+	}
 
 	stored, err := h.app.storage.List(r.Context())
 	if err != nil {
@@ -90,31 +99,19 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// no mocks matched with the incoming request
-	// lets check if we need to proxy and record this request.
+	// A request no mock matches goes to its host, when the server is a proxy.
 	if !matched {
 		if h.app.proxy == nil {
 			h.onNoMatches(w, reqValues)
 			return
 		}
 
-		// checking if we should record writes to later record mocks.
-		if h.app.IsRecording() {
-			w = httprec.Wrap(w)
+		if capture != nil {
+			capture.answeredBy(true)
 		}
 
-		// proxying non-matched requests.
-		h.app.proxy.ServeHTTP(w, r)
-
-		if h.app.IsRecording() {
-			// The proxy sent the response already, so an error can only be logged.
-			res, err := responseFromWriter(w)
-			if err != nil {
-				h.lifecycle.OnError(reqValues, fmt.Errorf("http: recording the proxied response: %w", err))
-				return
-			}
-
-			h.app.rec.dispatch(r, reqValues.URL, rawBody, res)
+		if err := h.app.proxy.serve(w, r); err == nil && capture != nil {
+			capture.record()
 		}
 
 		return
@@ -167,12 +164,16 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// The recorder records the matched response from Body, as mappers read it.
-	recorded := h.app.IsRecording() && h.app.config.Proxy == nil
+	// A reply that writes its own response, such as Echo, returns none: it is the mock's.
+	if capture != nil {
+		capture.answeredBy(res != nil && res.proxied)
+	}
+
+	sent := true
 
 	if res != nil {
-		// A streamed body, such as a proxy's, is read whole for mappers and the recorder.
-		if (len(mock.spec.mappers) > 0 || recorded) && len(res.Body) == 0 {
+		// A streamed body, such as a proxy's, is read whole for mappers.
+		if len(mock.spec.mappers) > 0 && len(res.Body) == 0 {
 			if err = res.readBody(); err != nil {
 				h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: reading the response body: %w", err))
 				return
@@ -189,13 +190,20 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// The status and headers are sent by now, so an error can't become the response: it is logged, and the
 		// mock counts as served. A client that went away is a warning.
 		if err := res.Render(r.Context(), w); err != nil {
+			sent = false
 			err = fmt.Errorf("http: rendering response: %w", err)
+
 			if r.Context().Err() != nil {
 				h.lifecycle.OnWarning(reqValues, err)
 			} else {
 				h.lifecycle.OnError(reqValues, err)
 			}
 		}
+	}
+
+	// Only a whole answer is recorded.
+	if capture != nil && sent {
+		capture.record()
 	}
 
 	mock.Inc()
@@ -241,12 +249,6 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	h.lifecycle.OnMatch(reqValues, res)
-
-	// when proxy is enabled, recording happens some steps before
-	// so, we need to record here only if proxy is disabled.
-	if recorded {
-		h.app.rec.dispatch(r, reqValues.URL, rawBody, res)
-	}
 }
 
 func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues) {

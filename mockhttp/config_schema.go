@@ -188,6 +188,11 @@ var _logLevels = []config.Choice{
 	{Name: "disabled", Value: int64(zerolog.Disabled)},
 }
 
+var _recordRepeats = []config.Choice{
+	{Name: "sequence", Value: int64(vlatte.RecordSequence)},
+	{Name: "first", Value: int64(vlatte.RecordFirst)},
+}
+
 var _logVerbosities = []config.Choice{
 	{Name: vlatte.LogBasic.String(), Value: int64(vlatte.LogBasic)},
 	{Name: vlatte.LogHeader.String(), Value: int64(vlatte.LogHeader)},
@@ -360,52 +365,82 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			},
 		},
 		field{
-			Key: "record", Kind: config.Bool, Usage: "Save requests and their responses as mock files.",
+			Key: "record", Kind: config.Bool, Usage: "Record proxied requests and their responses as mock files, from start to close.",
 			Set: func(c *Config, v config.Value) error { toggle(&c.Record, *defaultRecordConfig(), v.Bool); return nil },
 		},
 		field{
-			Key: "record.request_headers", Kind: config.List, Default: strings.Join(rec.RequestHeaders, ","),
-			Usage: "Request headers to record.",
+			Key: "record.dir", Kind: config.String, Default: rec.Dir,
+			Usage: "Directory of the recordings. Relative paths start at root_dir.",
+			Set: func(c *Config, v config.Value) error {
+				section(&c.Record, *defaultRecordConfig()).Dir = v.Str
+				return nil
+			},
+		},
+		field{
+			Key: "record.format", Kind: config.String, Default: rec.Format,
+			Usage: "Format of the recorded mock files: " + strings.Join(MockFileFormats(), ", ") + ".",
+			Set: func(c *Config, v config.Value) error {
+				format, ok := config.Format(v.Str)
+				if !ok {
+					return fmt.Errorf("expected one of %s", strings.Join(MockFileFormats(), ", "))
+				}
+
+				section(&c.Record, *defaultRecordConfig()).Format = format
+
+				return nil
+			},
+		},
+		field{
+			Key: "record.request_headers", Kind: config.List,
+			Usage: "Request headers recordings match: the first value each had, or its absence.",
 			Set: func(c *Config, v config.Value) error {
 				section(&c.Record, *defaultRecordConfig()).RequestHeaders = v.List
 				return nil
 			},
 		},
 		field{
-			Key: "record.response_headers", Kind: config.List, Default: strings.Join(rec.ResponseHeaders, ","),
-			Usage: "Response headers to record.",
+			Key: "record.exclude_response_headers", Kind: config.List, Usage: "Response headers recordings leave out.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).ResponseHeaders = v.List
+				section(&c.Record, *defaultRecordConfig()).ExcludeResponseHeaders = v.List
 				return nil
 			},
 		},
 		field{
-			Key: "record.save_dir", Kind: config.String, Default: rec.SaveDir,
-			Usage: "Directory of the recorded mock files. Relative paths start at root_dir.",
+			Key: "record.body_files", Kind: config.Bool, Usage: "Write each recorded response body to a file of its own, instead of inline.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).SaveDir = v.Str
+				section(&c.Record, *defaultRecordConfig()).BodyFiles = v.Bool
 				return nil
 			},
 		},
 		field{
-			Key: "record.save_body_to_file", Kind: config.Bool, Usage: "Save each recorded response body to a file of its own.",
+			Key: "record.max_inline_body", Kind: config.Int, Default: strconv.FormatInt(rec.MaxInlineBody, 10),
+			Usage: "Bytes of a body kept in memory while it is recorded: a larger one goes to a file as it streams. " +
+				"Text bodies kept in memory are written inline. 0 uses the default.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).SaveResponseBodyToFile = v.Bool
+				section(&c.Record, *defaultRecordConfig()).MaxInlineBody = v.Int
+				return checkMin(v.Int, 0)
+			},
+		},
+		field{
+			Key: "record.max_body_size", Kind: config.Int, Default: strconv.FormatInt(rec.MaxBodySize, 10),
+			Usage: "Calls with a larger response body, in bytes, aren't recorded. 0 uses the default; a negative value means no limit.",
+			Set: func(c *Config, v config.Value) error {
+				section(&c.Record, *defaultRecordConfig()).MaxBodySize = v.Int
 				return nil
 			},
 		},
 		field{
-			Key: "record.file_type", Kind: config.String, Default: rec.SaveFileType,
-			Usage: "Format of the recorded mock files, such as json or yaml.",
+			Key: "record.repeats", Kind: config.Int, Choices: _recordRepeats, Default: choiceName(_recordRepeats, int64(rec.Repeats)),
+			Usage: "What a recording keeps of a request that comes again: every response, in order, or the first one.",
 			Set: func(c *Config, v config.Value) error {
-				// RecordConfig.Apply validates and normalizes the format; apply it to a scratch copy.
-				scratch := defaultRecordConfig()
-				if err := (&RecordConfig{SaveFileType: v.Str}).Apply(scratch); err != nil {
-					return err
-				}
-
-				section(&c.Record, *defaultRecordConfig()).SaveFileType = scratch.SaveFileType
-
+				section(&c.Record, *defaultRecordConfig()).Repeats = vlatte.RecordRepeats(v.Int)
+				return nil
+			},
+		},
+		field{
+			Key: "record.include_mocked", Kind: config.Bool, Usage: "Record the answers of mocks too, not only proxied ones.",
+			Set: func(c *Config, v config.Value) error {
+				section(&c.Record, *defaultRecordConfig()).IncludeMocked = v.Bool
 				return nil
 			},
 		},

@@ -39,6 +39,9 @@ type RequestValues struct {
 	Mock *Mock
 
 	Data any
+
+	// bodyParser is the parser that read the body, or nil.
+	bodyParser RequestBodyParser
 }
 
 // Accessors for the fields above.

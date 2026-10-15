@@ -5,7 +5,6 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/caffeine-projects/vlatte/internal/mpart"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
-	"github.com/caffeine-projects/vlatte/mockhttp/internal/httprec"
 )
 
 var (
@@ -45,6 +43,9 @@ type Response struct {
 
 	// flush sends each part of BodyCloser to the client as soon as it's read, as a proxy does with a target's body.
 	flush bool
+
+	// proxied is set on the response of a target, which recordings keep.
+	proxied bool
 }
 
 func newResponse() *Response {
@@ -311,41 +312,4 @@ func gzipWriter(w io.Writer) *gzip.Writer {
 	gz.Reset(w)
 
 	return gz
-}
-
-func responseFromWriter(w http.ResponseWriter) (*Response, error) {
-	rw, ok := w.(*httprec.HTTPRec)
-	if !ok {
-		return nil, fmt.Errorf("mock: response writer is %T, want *httprec.HTTPRec", w)
-	}
-
-	result := rw.Result()
-
-	body, err := io.ReadAll(result.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	defer result.Body.Close()
-
-	if len(w.Header()) != len(result.Header) {
-		for k, v := range w.Header() {
-			if result.Header.Get(k) == "" {
-				for _, vv := range v {
-					result.Header.Add(k, vv)
-				}
-			}
-		}
-	}
-
-	res := new(Response)
-	res.StatusCode = result.StatusCode
-	res.Header = result.Header.Clone()
-	res.Cookies = result.Cookies()
-
-	if len(body) > 0 {
-		res.Body = body
-	}
-
-	return res, nil
 }
