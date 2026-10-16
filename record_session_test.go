@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -300,8 +301,11 @@ func TestRecordSession_RecordNeverBlocks(t *testing.T) {
 func TestRecordSession_DropsOverBudget(t *testing.T) {
 	// Calls waiting to be written hold memory: past the budget, calls are dropped and counted, never queued without
 	// bound. A call is taken whatever its size when nothing waits, so the budget can't refuse every call.
+	var logs syncBuffer
+	logger := zerolog.New(&logs)
+
 	codec := &kvCodec{block: make(chan struct{})}
-	s := newSession(t, codec, vlatte.RecordOptions[kvRequest, kvResponse]{})
+	s := newSession(t, codec, vlatte.RecordOptions[kvRequest, kvResponse]{Logger: &logger})
 	release := blockWorker(t, codec)
 
 	var discarded atomic.Int64
@@ -313,14 +317,16 @@ func TestRecordSession_DropsOverBudget(t *testing.T) {
 
 	require.True(t, s.Record(kvCall{key: "huge", value: "2"}, 1<<40), "nothing waits: taken whatever its size")
 	require.False(t, s.Record(kvCall{key: "over", value: "3", discarded: &discarded}, 1))
-	require.Equal(t, int64(1), discarded.Load())
+	require.False(t, s.Record(kvCall{key: "over", value: "4", discarded: &discarded}, 1))
+	require.Equal(t, int64(2), discarded.Load())
 
 	release()
 
 	res, err := s.Stop(t.Context())
 	require.NoError(t, err)
-	require.Equal(t, int64(1), res.Status.Dropped)
+	require.Equal(t, int64(2), res.Status.Dropped)
 	require.Len(t, res.Recordings, 2)
+	require.Equal(t, 1, strings.Count(logs.String(), "dropping calls"), "drops are logged once a second at most")
 }
 
 func TestRecordSession_StopDrainsEveryAcceptedCall(t *testing.T) {
@@ -601,6 +607,64 @@ func TestRecordSession_CapsTheErrorsItReturns(t *testing.T) {
 	_, err := s.Stop(t.Context())
 	require.ErrorContains(t, err, "recorder: 5 more failures")
 	require.Len(t, strings.Split(err.Error(), "\n"), 11)
+}
+
+func TestRecordSession_CapsTheMockErrorsItReturns(t *testing.T) {
+	// Mocks that fail count past the errors Stop returns too, as calls do.
+	refuse := func(*kvMock) error { return errors.New("no") }
+	s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{Transforms: []func(*kvMock) error{refuse}})
+
+	for i := range 12 {
+		s.Record(kvCall{key: strconv.Itoa(i)}, 1)
+	}
+
+	res, err := s.Stop(t.Context())
+	require.ErrorContains(t, err, "recorder: 2 more failures")
+	require.Len(t, strings.Split(err.Error(), "\n"), 11)
+	require.Equal(t, int64(12), res.Status.Failed)
+}
+
+// looseCodec answers with values JSON can't hold: a response that is NaN, for the key nan, and a mock file that is a
+// channel, for the key chan.
+type looseCodec struct{}
+
+func (looseCodec) Name(x kvCall) string { return "GET /" + x.key }
+
+func (looseCodec) Request(x kvCall, _ *vlatte.RecordFiles) (kvRequest, error) {
+	return kvRequest{Key: x.key}, nil
+}
+
+func (looseCodec) Response(x kvCall, _ *vlatte.RecordFiles) (float64, error) {
+	if x.key == "nan" {
+		return math.NaN(), nil
+	}
+
+	return 1, nil
+}
+
+func (looseCodec) Mock(m *vlatte.RecordedMock[kvRequest, float64]) any {
+	if m.Request.Key == "chan" {
+		return make(chan int)
+	}
+
+	return map[string]any{"id": m.ID, "responses": m.Responses}
+}
+
+func TestRecordSession_WhatJSONCantHoldFailsItsCallOnly(t *testing.T) {
+	// A codec that returns what JSON can't hold fails its call, or its mock: the others are recorded.
+	s, err := vlatte.NewRecordSession[kvCall](looseCodec{}, vlatte.RecordOptions[kvRequest, float64]{Dir: t.TempDir(), Format: "json"})
+	require.NoError(t, err)
+
+	s.Record(kvCall{key: "nan"}, 1)
+	s.Record(kvCall{key: "chan"}, 1)
+	s.Record(kvCall{key: "ok"}, 1)
+
+	res, err := s.Stop(t.Context())
+	require.ErrorContains(t, err, "recorder: GET /nan:")
+	require.ErrorContains(t, err, "recorder: GET-chan-")
+	require.Len(t, res.Recordings, 1)
+	require.Equal(t, "GET /ok", res.Recordings[0].Name)
+	require.Equal(t, int64(2), res.Status.Failed)
 }
 
 func TestRecordSession_WritesDocuments(t *testing.T) {
@@ -1005,6 +1069,61 @@ func TestRecordSession_RetriesWhatTheDiskFailed(t *testing.T) {
 		require.Zero(t, res.Status.Failed)
 		require.FileExists(t, res.Recordings[0].File)
 	})
+}
+
+func TestRecordSession_RetriesABodyFileTheDiskFailed(t *testing.T) {
+	// A body file the disk fails to take is tried again at the next flush, with its mock, which waits for it.
+	synctest.Test(t, func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "rec")
+		s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{Dir: dir})
+
+		// A file where the directory goes: no write can go in.
+		require.NoError(t, os.RemoveAll(dir))
+		require.NoError(t, os.WriteFile(dir, nil, 0o600))
+
+		body := s.NewBody()
+		body.Keep([]byte{0xff, 0xfe}) // not text: a body file
+		body.Close()
+		s.Record(kvCall{key: "a", value: "1", body: body}, 2)
+
+		time.Sleep(time.Second)
+		require.Equal(t, int64(1), s.Status().Failed)
+		require.Zero(t, s.Status().Mocks)
+
+		require.NoError(t, os.Remove(dir))
+		time.Sleep(time.Second) // the next flush writes them
+
+		res, err := s.Stop(t.Context())
+		require.NoError(t, err)
+		require.Len(t, res.Recordings, 1)
+		require.Len(t, res.Recordings[0].BodyFiles, 1)
+		require.FileExists(t, filepath.Join(dir, res.Recordings[0].BodyFiles[0]))
+		require.Zero(t, res.Status.Failed)
+	})
+}
+
+func TestRecordSession_KeepsABodyFileOnDisk(t *testing.T) {
+	// A request recorded again into the same directory finds its body file there: the file is named after its content,
+	// so it stays as it is, and the copy goes.
+	dir := t.TempDir()
+
+	for range 2 {
+		s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{Dir: dir, MaxInlineBody: 4})
+
+		body := s.NewBody()
+		body.Keep([]byte("a spooled body"))
+		body.Close()
+		s.Record(kvCall{key: "a", value: "1", body: body}, 0)
+
+		res, err := s.Stop(t.Context())
+		require.NoError(t, err)
+		require.Len(t, res.Recordings[0].BodyFiles, 1)
+	}
+
+	files, err := filepath.Glob(filepath.Join(dir, "GET-a-*.bin"))
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	require.Empty(t, tempsIn(t, dir))
 }
 
 func TestRecordSession_RecreatesItsDirectory(t *testing.T) {

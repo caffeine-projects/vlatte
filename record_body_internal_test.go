@@ -196,6 +196,78 @@ func TestRecordBody_StopReleasesABodyWaitingForTheDisk(t *testing.T) {
 	require.ErrorIs(t, b.Err(), errBodyStopped)
 }
 
+// stuckFile is a disk whose writes wait until released, and that says when the first one starts.
+type stuckFile struct {
+	*os.File
+
+	writing chan<- struct{}
+	release <-chan struct{}
+}
+
+func (f stuckFile) Write(p []byte) (int, error) {
+	select {
+	case f.writing <- struct{}{}:
+	default:
+	}
+
+	<-f.release
+
+	return f.File.Write(p)
+}
+
+func TestRecordBody_ACloseTheDiskCantTake(t *testing.T) {
+	// The last bytes of a body go to the disk when it is closed: a disk too far behind to take them drops the body,
+	// as it would any other bytes.
+	writing := make(chan struct{}, 1)
+	release := make(chan struct{})
+
+	spoolOn(t, func(dir string) (spoolFile, error) {
+		f, err := os.CreateTemp(dir, _tempPattern)
+		if err != nil {
+			return nil, err
+		}
+
+		return stuckFile{File: f, writing: writing, release: release}, nil
+	})
+
+	waitAtMost(t, 50*time.Millisecond)
+
+	d := newTestDir(t, 1, 1<<40)
+	b := d.newBody()
+
+	// One chunk goes to the disk, which takes its time: the queue then holds _spoolQueue, and a few bytes stay.
+	b.Keep(make([]byte, _spoolChunk))
+	<-writing
+	b.Keep(make([]byte, _spoolQueue*_spoolChunk+10))
+	require.NoError(t, b.Err(), "the queue took every chunk")
+
+	b.Close()
+	require.ErrorIs(t, b.Err(), errDiskTooSlow)
+
+	close(release)
+	d.spools.Wait()
+
+	temps, err := filepath.Glob(filepath.Join(d.dir, _tempPattern))
+	require.NoError(t, err)
+	require.Empty(t, temps, "the file of a dropped body is removed")
+}
+
+func TestRecordBody_DiscardAfterItsFileIsWritten(t *testing.T) {
+	// A call the recording refuses discards its body: a body whose file is written already loses it then.
+	d := newTestDir(t, 4, 1<<40)
+
+	b := d.newBody()
+	b.Keep([]byte("a spooled body"))
+	b.Close()
+
+	<-b.spool.done
+	temp := b.spool.temp
+	require.FileExists(t, temp)
+
+	b.Discard()
+	require.NoFileExists(t, temp)
+}
+
 func TestRecordBody_FileThatCantBeCreated(t *testing.T) {
 	d := newTestDir(t, 8, 1<<40)
 	d.dir = filepath.Join(d.dir, "missing")
@@ -248,6 +320,18 @@ func TestRecordBody_States(t *testing.T) {
 
 		_, err := (&RecordFiles{dir: d, slug: "x"}).PlaceSpooled(b, ".bin")
 		require.ErrorIs(t, err, errBodyInMemory)
+	})
+
+	t.Run("a dropped body says why it can't be placed", func(t *testing.T) {
+		d := newTestDir(t, 4, 1<<40)
+		b := d.newBody()
+		b.Keep([]byte("spooled body"))
+		b.Discard()
+
+		_, err := (&RecordFiles{dir: d, slug: "x"}).PlaceSpooled(b, ".bin")
+		require.ErrorIs(t, err, errBodyDiscarded)
+
+		d.spools.Wait()
 	})
 
 	t.Run("a placed body is the recording's", func(t *testing.T) {
@@ -418,6 +502,29 @@ func TestRecordFiles_SharesEqualBodies(t *testing.T) {
 	require.Equal(t, a, b)
 	require.NotEqual(t, a, c)
 	require.Len(t, files.pending, 2)
+}
+
+func TestRecordFiles_SharesEqualSpooledBodies(t *testing.T) {
+	// Two bodies of one call with the same content are one file: the copy goes.
+	d := newTestDir(t, 4, 1<<40)
+	files := &RecordFiles{dir: d, slug: "x"}
+
+	for range 2 {
+		b := d.newBody()
+		b.Keep([]byte("same content"))
+		b.Close()
+
+		_, err := files.PlaceSpooled(b, ".bin")
+		require.NoError(t, err)
+	}
+
+	require.Len(t, files.pending, 1)
+
+	temps, err := filepath.Glob(filepath.Join(d.dir, _tempPattern))
+	require.NoError(t, err)
+	require.Equal(t, []string{files.pending[0].temp}, temps)
+
+	files.discard()
 }
 
 func TestCleanExt(t *testing.T) {
