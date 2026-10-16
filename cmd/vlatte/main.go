@@ -49,13 +49,14 @@ For more information, visit: %s`,
 )
 
 func main() {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
-	// A signal closes the server, which then writes what it recorded: another signal ends the process at once.
-	context.AfterFunc(ctx, cancel)
+	// A signal closes the server, which then writes what it recorded: stop gives the signals back, so another one ends
+	// the process at once.
+	context.AfterFunc(ctx, stop)
 
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
-	cancel()
+	stop()
 	os.Exit(code)
 }
 
