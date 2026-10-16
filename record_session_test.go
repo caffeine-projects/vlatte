@@ -530,6 +530,35 @@ func TestRecordSession_Transforms(t *testing.T) {
 		require.Equal(t, "GET /ok", res.Recordings[0].Name)
 		require.Equal(t, int64(2), res.Status.Failed)
 	})
+
+	t.Run("transforms that leave no response skip the mock", func(t *testing.T) {
+		// A mock without a response would answer what its protocol answers by default, not what was recorded.
+		empty := func(m *kvMock) error {
+			if m.Request.Key == "emptied" {
+				m.Responses = nil
+			}
+
+			return nil
+		}
+
+		dir := t.TempDir()
+		s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{
+			Dir:        dir,
+			Transforms: []func(*kvMock) error{empty},
+		})
+		s.Record(kvCall{key: "emptied", value: "1"}, 1)
+		s.Record(kvCall{key: "ok", value: "2"}, 1)
+
+		res, err := s.Stop(t.Context())
+		require.ErrorContains(t, err, "the transforms left no response")
+		require.Len(t, res.Recordings, 1)
+		require.Equal(t, "GET /ok", res.Recordings[0].Name)
+		require.Equal(t, int64(1), res.Status.Failed)
+
+		files, err := filepath.Glob(filepath.Join(dir, "GET-emptied-*"))
+		require.NoError(t, err)
+		require.Empty(t, files)
+	})
 }
 
 func TestRecordSession_FailingCallsAreTheirsOnly(t *testing.T) {

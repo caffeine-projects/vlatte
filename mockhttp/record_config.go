@@ -79,7 +79,8 @@ type RecordConfig struct {
 	// forward proxy and of proxy replies, such as From.
 	IncludeMocked bool
 
-	// Transforms change each recording before it is written, in order. A transform that fails skips the recording.
+	// Transforms change each recording before it is written, in order. A transform that fails skips the recording,
+	// and so do transforms that leave it no response.
 	Transforms []func(*RecordedMock) error
 }
 

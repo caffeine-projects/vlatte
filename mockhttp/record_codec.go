@@ -285,11 +285,9 @@ func (c *recordCodec) Response(x *recordedCall, files *vlatte.RecordFiles) (Reco
 func (c *recordCodec) Mock(m *RecordedMock) any {
 	doc := recordedMockFile{ID: m.ID, Name: m.Name, Request: m.Request}
 
-	switch len(m.Responses) {
-	case 0:
-	case 1:
+	if len(m.Responses) == 1 {
 		doc.Response = &m.Responses[0]
-	default:
+	} else {
 		doc.Sequence = &recordedSequence{Responses: m.Responses, AfterEnded: m.Responses[len(m.Responses)-1]}
 	}
 

@@ -481,6 +481,11 @@ func (s *RecordSession[X, Q, S]) encode(g *recordGroup) (data []byte, name strin
 		}
 	}
 
+	// A mock without a response would answer what its protocol answers by default, not what was recorded.
+	if len(m.Responses) == 0 {
+		return nil, "", errors.New("the transforms left no response")
+	}
+
 	m.ID = g.id
 
 	doc, err := value.ViaJSON(s.codec.Mock(m))

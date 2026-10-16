@@ -40,7 +40,8 @@ type RecordCodec[X, Q, S any] interface {
 	// Response returns what x answered. files places the bodies it holds.
 	Response(x X, files *RecordFiles) (S, error)
 
-	// Mock returns the mock file of m: a value written as JSON, then as the format of the recording.
+	// Mock returns the mock file of m, which has one response at least: a value written as JSON, then as the format of
+	// the recording.
 	Mock(m *RecordedMock[Q, S]) any
 }
 
@@ -74,7 +75,8 @@ type RecordOptions[Q, S any] struct {
 	// value means no limit.
 	MaxBodySize int64
 
-	// Transforms change each mock before it is written, in order. A transform that fails skips the mock.
+	// Transforms change each mock before it is written, in order. A transform that fails skips the mock, and so do
+	// transforms that leave it no response.
 	Transforms []func(*RecordedMock[Q, S]) error
 
 	Logger *zerolog.Logger
