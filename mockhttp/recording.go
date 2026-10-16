@@ -154,8 +154,9 @@ func (app *Server) stopRecording(ctx context.Context, play bool) (*vlatte.Record
 }
 
 // end stops rec. Only here does a recording end: the first call past the stop ends it, and serves what it recorded
-// when a StopRecording asked for it, unless mayServe is false, as for Close. The others return once it is served, so
-// they return when it is, and Close doesn't close the mocks while they load.
+// when a StopRecording asked for it, unless mayServe is false, as for Close. The others wait until it is served: a
+// StopRecording returns with the recordings served, or why they aren't, and Close doesn't close the mocks while they
+// load.
 func (app *Server) end(ctx context.Context, rec *recording, mayServe bool) (*vlatte.RecordResult, error) {
 	rec.stopping.Store(true)
 
