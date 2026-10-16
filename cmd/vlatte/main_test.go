@@ -429,18 +429,14 @@ func TestCLI_RecordsThenPlaysBack(t *testing.T) {
 	addr = randomAddr(t)
 	start(t, "--addr", addr, "--log-level", "disabled")
 
+	// The server answers before it loads the mock files (#54): wait until the recording answers.
 	require.EventuallyWithT(t, func(c *assert.CollectT) {
-		res, err := http.Get("http://" + addr)
-		if assert.NoError(c, err) {
-			_ = res.Body.Close()
-		}
+		status, body := get(c, "http://"+addr+"/items?page=2")
+		assert.Equal(c, http.StatusOK, status)
+		assert.JSONEq(c, `{"page":"2"}`, body)
 	}, 10*time.Second, 100*time.Millisecond)
 
-	status, body := get(t, "http://"+addr+"/items?page=2")
-	require.Equal(t, http.StatusOK, status)
-	require.JSONEq(t, `{"page":"2"}`, body)
-
-	status, _ = get(t, "http://"+addr+"/items?page=3")
+	status, _ := get(t, "http://"+addr+"/items?page=3")
 	require.Equal(t, mockhttp.StatusNoMatch, status, "a request the recording didn't take")
 }
 
