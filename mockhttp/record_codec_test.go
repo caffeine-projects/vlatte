@@ -486,6 +486,66 @@ func TestRecording_RequestSection(t *testing.T) {
 	}
 }
 
+func TestRecordCodec_BodiesTheServerWouldntRead(t *testing.T) {
+	// The server reads no such body, so recordings don't meet them: still, what a recording can't read, it doesn't
+	// match. A Content-Type it can't write matches any.
+	nop := zerolog.Nop()
+	c := newRecordCodec(defaultRecordConfig(), &nop)
+
+	call := func(contentType, body string) *recordedCall {
+		return &recordedCall{
+			method:   http.MethodPost,
+			url:      &url.URL{Path: "/r"},
+			header:   http.Header{HeaderContentType: {contentType}},
+			body:     []byte(body),
+			bodyMode: bodyKept,
+		}
+	}
+
+	tests := []struct {
+		name string
+		call *recordedCall
+		want RecordedRequest
+	}{
+		{
+			name: "a Content-Type that isn't UTF-8 text",
+			call: call("text/plain\xff", "hi"),
+			want: RecordedRequest{Method: http.MethodPost, URL: "/r", Body: MatcherSpec{"equal", "hi"}},
+		},
+		{
+			name: "a form that doesn't parse",
+			call: call(MIMEFormURLEncoded, "a=%zz"),
+			want: RecordedRequest{Method: http.MethodPost, URL: "/r"},
+		},
+		{
+			name: "a multipart form without a boundary",
+			call: call(MIMEMultipartForm, "--x\r\n"),
+			want: RecordedRequest{Method: http.MethodPost, URL: "/r"},
+		},
+		{
+			name: "a multipart form that doesn't parse",
+			call: call(MIMEMultipartForm+"; boundary=x", "not a form"),
+			want: RecordedRequest{Method: http.MethodPost, URL: "/r"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			q, err := c.Request(tc.call, nil)
+			require.NoError(t, err)
+			require.JSONEq(t, jsonOf(t, tc.want), jsonOf(t, q))
+		})
+	}
+
+	t.Run("a query neither parsed nor UTF-8 text fails the call", func(t *testing.T) {
+		x := &recordedCall{method: http.MethodGet, url: &url.URL{Path: "/r", RawQuery: "a=%zz;\xff"}, header: make(http.Header)}
+
+		_, err := c.Request(x, nil)
+		require.ErrorIs(t, err, errQueryNotUTF8)
+		require.Equal(t, "GET /r", c.Name(x), "the mock is named after the path")
+	})
+}
+
 func TestRecording_RecordsTheRequestAsItCame(t *testing.T) {
 	// A mapper runs before the answer is recorded, and can change the request: the recording keeps it as it came.
 	dir := t.TempDir()

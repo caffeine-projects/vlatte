@@ -211,12 +211,13 @@ func (c *recordCodec) Request(x *recordedCall, files *vlatte.RecordFiles) (Recor
 // mediaTypeMatcher returns the matcher of the media type of a Content-Type, whatever its parameters, as
 // Builder.ContentType makes it, or nil when it isn't UTF-8 text.
 func mediaTypeMatcher(contentType string) MatcherSpec {
+	// Before ToLower, which writes what isn't UTF-8 as U+FFFD.
 	media, _, _ := strings.Cut(contentType, ";")
-	media = strings.ToLower(strings.TrimSpace(media))
-
 	if !utf8.ValidString(media) {
 		return nil
 	}
+
+	media = strings.ToLower(strings.TrimSpace(media))
 
 	return MatcherSpec{"split", ";", []any{"item", 0, []any{"trim", []any{"eqi", media}}}}
 }
