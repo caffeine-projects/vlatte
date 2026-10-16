@@ -92,6 +92,8 @@ func NewRecordSession[X, Q, S any](c RecordCodec[X, Q, S], o RecordOptions[Q, S]
 		return nil, fmt.Errorf("recorder: format %q is not json, yaml or yml", o.Format)
 	}
 
+	o.Repeats = cmp.Or(o.Repeats, RecordSequence)
+
 	switch {
 	case o.Dir == "":
 		return nil, errors.New("recorder: no directory to record into")

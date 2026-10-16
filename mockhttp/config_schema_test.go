@@ -344,6 +344,7 @@ func TestConfigSources_FileFormatsAgree(t *testing.T) {
 			BodyFiles:              true,
 			MaxInlineBody:          _defaultMaxInlineBody,
 			MaxBodySize:            _defaultMaxBodySize,
+			Repeats:                vlatte.RecordSequence,
 		},
 	}
 

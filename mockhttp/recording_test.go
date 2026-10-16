@@ -475,6 +475,27 @@ func TestRecordConfig_Compose(t *testing.T) {
 	require.Empty(t, m.Config().Record.RequestHeaders)
 }
 
+func TestRecordConfig_SetsEitherRepeats(t *testing.T) {
+	// A config given as an option sets the repeats it names, the default ones too, and keeps them when it names none.
+	c := defaultRecordConfig()
+
+	require.NoError(t, (&RecordConfig{Repeats: vlatte.RecordFirst}).Apply(c))
+	require.Equal(t, vlatte.RecordFirst, c.Repeats)
+
+	require.NoError(t, (&RecordConfig{}).Apply(c))
+	require.Equal(t, vlatte.RecordFirst, c.Repeats, "a config without repeats keeps them")
+
+	require.NoError(t, (&RecordConfig{Repeats: vlatte.RecordSequence}).Apply(c))
+	require.Equal(t, vlatte.RecordSequence, c.Repeats)
+
+	// A recording started over a server's config of RecordFirst.
+	m := MustNew(Setup().Silent().Record(RecordDir(t.TempDir()), RecordRepeats(vlatte.RecordFirst)))
+	t.Cleanup(m.Close)
+
+	require.NoError(t, m.StartRecording(&RecordConfig{Repeats: vlatte.RecordSequence}))
+	require.Equal(t, vlatte.RecordSequence, m.recording.Load().conf.Repeats)
+}
+
 func TestRecording_OptionsLeaveTheCallersListsAsTheyAre(t *testing.T) {
 	// The recording trims the methods and paths it takes into lists of its own: a list of the caller, which other
 	// recordings may share, stays as it was.

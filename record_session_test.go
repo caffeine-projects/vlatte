@@ -401,6 +401,7 @@ func TestRecordSession_Repeats(t *testing.T) {
 		{name: "two responses", repeats: vlatte.RecordSequence, values: []string{"A", "B"}, want: []string{"A", "B"}, wantResponses: 2},
 		{name: "the same responses before another", repeats: vlatte.RecordSequence, values: []string{"A", "A", "B"}, want: []string{"A", "A", "B"}, wantResponses: 3},
 		{name: "one coming back", repeats: vlatte.RecordSequence, values: []string{"A", "B", "A"}, want: []string{"A", "B", "A"}, wantResponses: 3},
+		{name: "none set keeps them in sequence", values: []string{"A", "B"}, want: []string{"A", "B"}, wantResponses: 2},
 		// The repeats are ignored before their responses are read: Response runs once.
 		{name: "first only", repeats: vlatte.RecordFirst, values: []string{"A", "B", "C"}, want: []string{"A"}, wantResponses: 1},
 	}

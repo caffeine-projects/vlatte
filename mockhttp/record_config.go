@@ -73,6 +73,7 @@ type RecordConfig struct {
 	MaxBodySize int64
 
 	// Repeats is what a recording keeps of a request that comes again: every response, in order, or the first one.
+	// Defaults to vlatte.RecordSequence.
 	Repeats vlatte.RecordRepeats
 
 	// IncludeMocked records the answers of mocks too. Without it, only proxied answers are recorded: those of the
@@ -102,10 +103,12 @@ func defaultRecordConfig() *RecordConfig {
 		Format:        _defaultRecordFormat,
 		MaxInlineBody: _defaultMaxInlineBody,
 		MaxBodySize:   _defaultMaxBodySize,
+		Repeats:       vlatte.RecordSequence,
 	}
 }
 
-// Apply sets the fields of r that aren't zero on c, and adds r's Transforms to c's, so configs compose.
+// Apply sets the fields of r that aren't zero on c, and adds r's Transforms to c's, so configs compose. A config
+// turns no setting off: options such as RecordBodyFiles(false) do.
 func (r *RecordConfig) Apply(c *RecordConfig) error {
 	c.Dir = cmp.Or(r.Dir, c.Dir)
 	c.Format = cmp.Or(r.Format, c.Format)
@@ -151,7 +154,7 @@ func (r *RecordConfig) clone() *RecordConfig {
 }
 
 // check checks the settings, and writes them as the recording reads them: the format as mock files name it, such as
-// yaml for .YAML, and the methods and paths without the spaces around them.
+// yaml for .YAML, the default repeats for none, and the methods and paths without the spaces around them.
 func (r *RecordConfig) check() error {
 	format, ok := config.Format(r.Format)
 	if !ok {
@@ -159,6 +162,7 @@ func (r *RecordConfig) check() error {
 	}
 
 	r.Format = format
+	r.Repeats = cmp.Or(r.Repeats, vlatte.RecordSequence)
 
 	switch {
 	case r.Dir == "":

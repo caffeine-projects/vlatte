@@ -19,8 +19,8 @@ type RecordRepeats int
 
 const (
 	// RecordSequence keeps every response, in the order they came: the mock replies with them in turn, then with the
-	// last one again. When every response is the same, it keeps one.
-	RecordSequence RecordRepeats = iota
+	// last one again. When every response is the same, it keeps one. It is the default, which zero means.
+	RecordSequence RecordRepeats = iota + 1
 
 	// RecordFirst keeps the first response only.
 	RecordFirst
@@ -62,6 +62,7 @@ type RecordOptions[Q, S any] struct {
 	// Format is the format of the mock files: json, yaml or yml.
 	Format string
 
+	// Repeats is what the recording keeps of a request that comes again. 0 means RecordSequence.
 	Repeats RecordRepeats
 
 	// BodyFiles writes every body to a file of its own, instead of inline in the mock file.
