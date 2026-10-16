@@ -597,6 +597,65 @@ func TestLifecycle_RepliesWithoutAResponseAreLogged(t *testing.T) {
 	}
 }
 
+func TestLifecycle_LogsWhatTheVerbosityAsksFor(t *testing.T) {
+	// Both request logs print the parts of the response the verbosity names: the headers and trailers, then the body.
+	// The descriptive log doesn't print an encoded body.
+	mocks := func(m *Server) {
+		m.MustMock(
+			Getf("/plain").Reply(OK().Header("X-Head", "h").Trailer("X-Tail", "t").PlainText("plain body")),
+			Getf("/zipped").Reply(OK().PlainText("zipped body").Gzip()),
+		)
+	}
+
+	t.Run("structured", func(t *testing.T) {
+		logs := &logBuffer{}
+		logger := zerolog.New(logs)
+
+		m := MustNew(Setup().Logger(&logger).LogVerbosity(vlatte.LogBody))
+		m.MustStart()
+		t.Cleanup(m.Close)
+		mocks(m)
+
+		get(t, m, "/plain")
+		get(t, m, "/zipped")
+
+		out := logs.String()
+		require.Contains(t, out, `"X-Head":["h"]`)
+		require.Contains(t, out, `"trailer":{"X-Tail":["t"]}`)
+		require.Contains(t, out, `"body":"plain body"`)
+		require.Contains(t, out, `"encoding":"gzip"`)
+	})
+
+	t.Run("descriptive", func(t *testing.T) {
+		// The descriptive log goes to os.Stdout, which the server takes when it's made.
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+
+		stdout := os.Stdout
+		os.Stdout = w
+		m := MustNew(Setup().UseDescriptiveLogger().Colors(false).LogVerbosity(vlatte.LogBody))
+		os.Stdout = stdout
+
+		m.MustStart()
+		mocks(m)
+
+		get(t, m, "/plain")
+		get(t, m, "/zipped")
+
+		m.Close()
+		require.NoError(t, w.Close())
+
+		out, err := io.ReadAll(r)
+		require.NoError(t, err)
+		require.Contains(t, string(out), "Headers: ")
+		require.Contains(t, string(out), "X-Head")
+		require.Contains(t, string(out), "Trailers: ")
+		require.Contains(t, string(out), "X-Tail")
+		require.Contains(t, string(out), "Body: plain body")
+		require.Contains(t, string(out), "Body: <encoded body omitted>")
+	})
+}
+
 // cancelableKV is a parameter store that fails once its context is done, as a remote store does.
 type cancelableKV struct {
 	vlatte.KV

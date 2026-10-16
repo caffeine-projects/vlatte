@@ -97,6 +97,7 @@ func TestMockSchema_Rules(t *testing.T) {
 		// A relative url is exact, so a glob or a bare name in it would never match: path takes globs.
 		{"relative url without its /", "request: {url: 'items?page=2'}\n", []want{{config.CodeInvalidValue, "request.url", `"items?page=2" must be an absolute URL, or start with /`, "use path instead"}}},
 		// A relative url was a glob: written as one, it would match only itself.
+		{"relative url with a bad escape", "request: {url: '/a%zz'}\n", []want{{config.CodeInvalidValue, "request.url", `request.url="/a%zz" is not a URL`, ""}}},
 		{"relative url with a glob", "request: {url: '/users/*'}\n", []want{{config.CodeInvalidValue, "request.url", `"/users/*" has a * in its path`, "for a literal *, write %2A"}}},
 		{"url, url_match and path", "request: {url: /x, url_match: x, path: /y}\n", []want{
 			{config.CodeConflict, "request.url_match", "is set with request.url", ""},

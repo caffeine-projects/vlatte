@@ -133,6 +133,22 @@ func TestRecording_LeavesOutTheHeadersSetBeforeTheHandler(t *testing.T) {
 	}, onlyMock(t, dir).Response.Header)
 }
 
+func TestRecording_ATrailerNeverSentIsntRecorded(t *testing.T) {
+	// A trailer announced, and never sent, isn't part of the answer.
+	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(HeaderTrailer, "X-Sum, X-Never")
+		_, _ = io.WriteString(w, "body")
+		w.Header().Set("X-Sum", "1")
+	})
+
+	m, dir := recordingServer(t, target.URL)
+
+	do(t, http.MethodGet, m.URL("/r"), nil, nil)
+	stopRecording(t, m)
+
+	require.Equal(t, map[string][]string{"X-Sum": {"1"}}, onlyMock(t, dir).Response.Trailer)
+}
+
 func TestRecording_Trailers(t *testing.T) {
 	// The trailers a client gets are recorded: those announced, and those named with http.TrailerPrefix, with every
 	// value. A target's trailers come through a proxy reply the same way.

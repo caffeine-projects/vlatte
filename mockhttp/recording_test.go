@@ -394,6 +394,30 @@ func TestRecording_BadSettings(t *testing.T) {
 		require.False(t, m.IsRecording())
 	})
 
+	t.Run("a target the server makes no client for fails the start", func(t *testing.T) {
+		noClient := func() *http.Client { return nil }
+		const want = "recorder: target: reply_proxy: the HTTP client factory returned no client"
+
+		m := MustNew(Setup().Silent().HTTPClient(noClient))
+		t.Cleanup(m.Close)
+
+		require.EqualError(t, m.StartRecording(RecordDir(t.TempDir()), RecordTarget("https://api.example.com")), want)
+		require.False(t, m.IsRecording())
+
+		configured := MustNew(Setup().Silent().HTTPClient(noClient).Record(RecordDir(t.TempDir()), RecordTarget("https://api.example.com")))
+		t.Cleanup(configured.Close)
+
+		require.ErrorContains(t, configured.Start(), want)
+		require.False(t, configured.IsRecording())
+	})
+
+	t.Run("a directory that is a file fails the start", func(t *testing.T) {
+		m := MustNew(Setup().Silent().Record(RecordDir(notADir)))
+		t.Cleanup(m.Close)
+
+		require.ErrorContains(t, m.Start(), "loader: recordings "+notADir)
+	})
+
 	t.Run("the format is written as mock files name it, and lists without spaces", func(t *testing.T) {
 		m, err := New(Setup().Silent().Record(RecordFormat(".YAML"), RecordDir(t.TempDir()), RecordMethods(" post "), RecordPaths(" /v1/* ")))
 		require.NoError(t, err)
@@ -473,6 +497,26 @@ func TestRecordConfig_Compose(t *testing.T) {
 	require.NoError(t, m.StartRecording(RecordTransform(transform("more")), RecordRequestHeaders("X-A")))
 	require.Len(t, m.Config().Record.Transforms, 1)
 	require.Empty(t, m.Config().Record.RequestHeaders)
+}
+
+func TestRecordConfig_ApplyCopiesTheLists(t *testing.T) {
+	// A config given as an option sets its lists as copies: the caller's lists stay the caller's.
+	option := &RecordConfig{
+		Methods:                []string{"GET"},
+		Paths:                  []string{"/v1/*"},
+		RequestHeaders:         []string{"Accept"},
+		ExcludeResponseHeaders: []string{"Set-Cookie"},
+	}
+
+	c := defaultRecordConfig()
+	require.NoError(t, option.Apply(c))
+
+	option.Methods[0], option.Paths[0], option.RequestHeaders[0], option.ExcludeResponseHeaders[0] = "x", "x", "x", "x"
+
+	require.Equal(t, []string{"GET"}, c.Methods)
+	require.Equal(t, []string{"/v1/*"}, c.Paths)
+	require.Equal(t, []string{"Accept"}, c.RequestHeaders)
+	require.Equal(t, []string{"Set-Cookie"}, c.ExcludeResponseHeaders)
 }
 
 func TestRecordConfig_SetsEitherRepeats(t *testing.T) {
@@ -843,6 +887,38 @@ func TestRecording_ForwardProxy(t *testing.T) {
 	require.Equal(t, "host /items", mock.Response.Body)
 }
 
+func TestRecording_AHostThatBreaksOffIsNotRecorded(t *testing.T) {
+	// The forward proxy passes on what the host sends: a body the host cuts short isn't its answer, and isn't recorded.
+	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(HeaderContentLength, "100")
+		_, _ = io.WriteString(w, "part of it")
+		http.NewResponseController(w).Flush()
+		panic(http.ErrAbortHandler)
+	})
+
+	m := MustNew(Setup().Silent().Proxy())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	require.NoError(t, m.StartRecording(RecordDir(t.TempDir())))
+
+	proxyURL, err := url.Parse(m.URL())
+	require.NoError(t, err)
+
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	t.Cleanup(client.CloseIdleConnections)
+
+	res, err := client.Get(target.URL + "/cut")
+	require.NoError(t, err)
+
+	_, err = io.ReadAll(res.Body)
+	require.Error(t, err, "the client doesn't take part of the body for all of it")
+	require.NoError(t, res.Body.Close())
+
+	result := stopRecording(t, m)
+	require.Empty(t, result.Recordings)
+	require.Zero(t, result.Status.Calls)
+}
+
 func TestRecording_FailedAnswersAreNotRecorded(t *testing.T) {
 	// Only an answer the client got whole is recorded: vlatte's own answers to a failure aren't.
 	gone := httptest.NewServer(http.NotFoundHandler())
@@ -1042,6 +1118,56 @@ func TestRecording_HijackedConnectionsAreNotRecorded(t *testing.T) {
 	require.Equal(t, "raw", string(body))
 
 	require.Empty(t, stopRecording(t, m).Recordings)
+}
+
+func TestRecording_HandlersKeepTheWriterFeatures(t *testing.T) {
+	// A handler gets the features of the server's writer while it is recorded: it flushes, and sets deadlines.
+	dir := t.TempDir()
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/h").Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(time.Minute)); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		_, _ = io.WriteString(w, "first, ")
+		w.(http.Flusher).Flush()
+		_, _ = io.WriteString(w, "last")
+	})))
+
+	require.NoError(t, m.StartRecording(RecordDir(dir), RecordIncludeMocked(true)))
+
+	res, body := do(t, http.MethodGet, m.URL("/h"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+	require.Equal(t, "first, last", string(body))
+
+	stopRecording(t, m)
+	require.Equal(t, "first, last", onlyMock(t, dir).Response.Body)
+}
+
+func TestRecording_ADiskThatFailsLosesTheRecordingNotTheAnswer(t *testing.T) {
+	// A body that goes to a file as it streams, on a disk that refuses it, isn't recorded: the client still gets every
+	// byte of it.
+	big := bytes.Repeat([]byte("0123456789"), 4<<10)
+	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(big) })
+
+	m, dir := recordingServer(t, target.URL, RecordMaxInlineBody(1<<10))
+
+	// A file where the directory goes: the body has nowhere to go.
+	require.NoError(t, os.RemoveAll(dir))
+	require.NoError(t, os.WriteFile(dir, nil, 0o600))
+
+	_, body := do(t, http.MethodGet, m.URL("/big"), nil, nil)
+	require.Equal(t, big, body)
+
+	res, err := m.StopRecording(t.Context())
+	require.ErrorContains(t, err, "recorder: GET /big:")
+	require.Empty(t, res.Recordings)
+	require.Equal(t, int64(1), res.Status.Failed)
 }
 
 func TestRecording_StreamingAnswersStillStream(t *testing.T) {

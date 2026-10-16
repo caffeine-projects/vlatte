@@ -112,6 +112,13 @@ func TestCanonicalURL(t *testing.T) {
 		_, err := canonicalURL(&url.URL{Path: "/a", RawQuery: "a=1;\xff"})
 		require.ErrorIs(t, err, errQueryNotUTF8)
 	})
+
+	t.Run("an empty path is the root, as in a request", func(t *testing.T) {
+		// A forward proxy reads http://host?a=1 with no path.
+		got, err := canonicalURL(&url.URL{RawQuery: "a=1"})
+		require.NoError(t, err)
+		require.Equal(t, "/?a=1", got)
+	})
 }
 
 func FuzzCanonicalURL(f *testing.F) {
@@ -315,6 +322,43 @@ func TestRecording_RequestSection(t *testing.T) {
 			request: sentRequest{method: http.MethodDelete, target: "/f", header: formType, body: []byte("a=1")},
 			want:    RecordedRequest{Method: http.MethodDelete, URL: "/f"},
 			match:   []sentRequest{{method: http.MethodDelete, target: "/f", header: formType, body: []byte("a=2")}},
+		},
+		{
+			// The server doesn't read it either: it serves the request all the same.
+			name:    "a form that doesn't parse",
+			request: sentRequest{method: http.MethodPost, target: "/f", header: formType, body: []byte("a=%zz")},
+			want:    RecordedRequest{Method: http.MethodPost, URL: "/f"},
+			match:   []sentRequest{{method: http.MethodPost, target: "/f", header: formType, body: []byte("a=1")}},
+		},
+		{
+			name:    "a form name that isn't UTF-8 text",
+			request: sentRequest{method: http.MethodPost, target: "/f", header: formType, body: []byte("%ff=1")},
+			want:    RecordedRequest{Method: http.MethodPost, URL: "/f"},
+			match:   []sentRequest{{method: http.MethodPost, target: "/f", header: formType, body: []byte("a=1")}},
+		},
+		{
+			name:    "a form value that isn't UTF-8 text",
+			request: sentRequest{method: http.MethodPost, target: "/f", header: formType, body: []byte("a=%ff")},
+			want:    RecordedRequest{Method: http.MethodPost, URL: "/f"},
+		},
+		{
+			name:    "a multipart field that isn't UTF-8 text",
+			request: multipartRequest(formModel{fields: []formField{{name: "x", value: "\xff"}}}),
+			want:    RecordedRequest{Method: http.MethodPost, URL: "/upload"},
+			match:   []sentRequest{multipartRequest(formModel{fields: []formField{{name: "x", value: "1"}}})},
+		},
+		{
+			name: "a form file whose name isn't UTF-8 text isn't matched, and the others are",
+			request: multipartRequest(formModel{files: []formFile{
+				{field: "f", filename: "\xff.txt", contentType: MIMETextPlain, body: []byte("a")},
+				{field: "g", filename: "b.txt", contentType: MIMETextPlain, body: []byte("b")},
+			}}),
+			want: RecordedRequest{
+				Method: http.MethodPost, URL: "/upload",
+				Header:   map[string]MatcherSpec{HeaderContentType: contentType(MIMEMultipartForm)},
+				Body:     MatcherSpec{"equal", make(map[string]any)},
+				FormFile: map[string][]RecordedFile{"g": {{Filename: "b.txt", ContentType: MIMETextPlain, Body: MatcherSpec{"equal", "b"}}}},
+			},
 		},
 		{
 			name:    "a multipart form",
@@ -709,6 +753,12 @@ func TestRecording_ResponseSection(t *testing.T) {
 				Header: map[string][]string{HeaderContentType: {MIMETextPlain}, "Set-Cookie": {"a=1", "b=2"}, "X-Multi": {"2", "1"}},
 				Body:   "hi",
 			},
+		},
+		{
+			name:  "a header value that isn't UTF-8 text is left out",
+			reply: write(http.StatusOK, http.Header{"X-Bin": {"\xff"}, "X-Keep": {"1"}}, nil),
+			want:  RecordedResponse{Status: http.StatusOK, Header: map[string][]string{"X-Keep": {"1"}}},
+			left:  []string{"X-Bin"},
 		},
 		{
 			name:  "a redirect",

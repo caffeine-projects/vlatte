@@ -505,6 +505,15 @@ func TestConfigSources_ValueChecks(t *testing.T) {
 			problem: `cors.max_age="-2": expected -1 or more`,
 		},
 		{
+			name:    "an empty record target, which clears one from code",
+			setup:   Setup().Record(RecordTarget("https://api.example.com")),
+			sources: []ConfigSource{ConfigArgs([]string{"--record-target="})},
+			check: func(t *testing.T, c *Config) {
+				require.NotNil(t, c.Record)
+				require.Empty(t, c.Record.Target)
+			},
+		},
+		{
 			name:    "an empty proxy via, which clears one from a lower source",
 			sources: []ConfigSource{ConfigFile(viaFile), ConfigArgs([]string{"--proxy-via="})},
 			check: func(t *testing.T, c *Config) {

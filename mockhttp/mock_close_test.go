@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -66,6 +67,27 @@ type closingReply struct {
 
 func (f closingReply) NewReplier(*Server) (Replier, error) {
 	return closingReplier(f), nil
+}
+
+// brokenReply makes a replier that fails to close, as one whose connections are gone already.
+type brokenReply struct {
+	err error
+}
+
+func (f brokenReply) NewReplier(*Server) (Replier, error) {
+	return brokenReplier(f), nil
+}
+
+type brokenReplier struct {
+	err error
+}
+
+func (brokenReplier) Reply(context.Context, ReplyInput) (*Response, error) {
+	return &Response{StatusCode: http.StatusNoContent, Header: make(http.Header)}, nil
+}
+
+func (r brokenReplier) Close() error {
+	return r.err
 }
 
 // failingReply makes no replier.
@@ -281,6 +303,21 @@ func TestCompositeReplies_CloseTheRepliesTheyOwn(t *testing.T) {
 			require.Equal(t, int64(1), closes.Load())
 		})
 	}
+}
+
+func TestServer_CloseLogsTheRepliesThatFailToClose(t *testing.T) {
+	// A mock whose replies fail to close is done all the same: Close logs why, for each of them.
+	logs := &logBuffer{}
+	logger := zerolog.New(logs)
+
+	m := MustNew(Setup().Logger(&logger))
+	m.MustStart()
+	m.MustMock(Getf("/x").ID("x").Reply(Seq(brokenReply{errors.New("first gone")}, brokenReply{errors.New("second gone")})))
+
+	m.Close()
+	require.Contains(t, logs.String(), "server: Close: closing mock x")
+	require.Contains(t, logs.String(), "first gone")
+	require.Contains(t, logs.String(), "second gone")
 }
 
 func TestMock_ClosesItsReplyOnce(t *testing.T) {

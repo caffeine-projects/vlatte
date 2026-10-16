@@ -731,6 +731,30 @@ func TestProxyReply_NegativeTimeoutFailsTheBuild(t *testing.T) {
 	require.ErrorContains(t, err, "reply_proxy: timeout must be 0 or more, not -1s")
 }
 
+func TestProxyReply_AMapperOfABodyThatBreaksOffFails(t *testing.T) {
+	// A mapper reads the whole body of the target before anything is sent: a body that breaks off fails the reply,
+	// and the client gets the failure's answer.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(HeaderContentLength, "100")
+		_, _ = io.WriteString(w, "first part;")
+		http.NewResponseController(w).Flush()
+		panic(http.ErrAbortHandler)
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scoped := m.MustMock(Getf("/p").Map(func(*RequestValues, *Response) error { return nil }).Reply(From(target.URL)))
+
+	res, body := do(t, http.MethodGet, m.URL("/p"), nil, nil)
+	require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderXVlatteError))
+	require.Contains(t, string(body), "http: reading the response body")
+	require.False(t, scoped.Called())
+}
+
 func TestProxyReply_ABodyThatBreaksOffCutsTheConnection(t *testing.T) {
 	// The target's body streams: once the status is sent, a target that breaks off can't turn it into a failure.
 	// The client's connection is cut, so it doesn't take part of the body for all of it, and the mock didn't serve.

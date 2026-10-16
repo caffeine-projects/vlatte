@@ -60,6 +60,7 @@ func TestRequestURI(t *testing.T) {
 		{name: "a relative value", expected: "/x?a=1", value: "/x?a=1", want: true},
 		{name: "a path that starts with //", expected: "//a/b", value: "http://h//a/b", want: true},
 		{name: "a path that starts with // is not a host", expected: "//a/b", value: "http://h/b", want: false},
+		{name: "a request query that doesn't parse", expected: "/x?a=1", value: "/x?a=%zz", want: false},
 	}
 
 	for _, tc := range tests {
@@ -69,7 +70,7 @@ func TestRequestURI(t *testing.T) {
 	}
 
 	t.Run("a value that isn't a URL doesn't match", func(t *testing.T) {
-		for _, v := range []any{nil, 10, "%zz", (*url.URL)(nil), []string{"/x"}} {
+		for _, v := range []any{nil, 10, "%zz", "/%zz", "/x#%zz", (*url.URL)(nil), []string{"/x"}} {
 			require.False(t, requestURIMatches(t, "/x", v), "%#v", v)
 		}
 	})

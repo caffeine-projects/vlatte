@@ -1,6 +1,7 @@
 package filterbuilder
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -220,5 +221,10 @@ func TestBuildMatcher_RequestURINeedsAPathFromTheRoot(t *testing.T) {
 	for _, ok := range []string{"/items?page=2", "http://h/items?page=2", "//a/b"} {
 		_, err := BuildMatcher([]any{"requesturi", ok})
 		require.NoError(t, err, ok)
+	}
+
+	for _, bad := range []string{"/a%zz", "/a#%zz"} {
+		_, err := BuildMatcher([]any{"requesturi", bad})
+		require.ErrorContains(t, err, fmt.Sprintf("requesturi takes a URL, not %q", bad))
 	}
 }
