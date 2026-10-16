@@ -102,7 +102,8 @@ func (d *recordDir) newBody() *RecordBody {
 	return b
 }
 
-// stop drops the bodies still being captured: their calls end after the recording.
+// stop drops the bodies still being captured: their calls end after the recording. A body whose call ended since it
+// listed them is whole: its call may be recorded already.
 func (d *recordDir) stop() {
 	d.mu.Lock()
 	live := make([]*RecordBody, 0, len(d.live))
@@ -118,7 +119,7 @@ func (d *recordDir) stop() {
 	d.mu.Unlock()
 
 	for _, b := range live {
-		b.drop(errBodyStopped)
+		b.stopCapture()
 	}
 }
 
@@ -391,6 +392,16 @@ func (b *RecordBody) drop(err error) {
 	defer b.mu.Unlock()
 
 	b.dropLocked(err)
+}
+
+// stopCapture drops the body when it is still being captured, as the recording stops.
+func (b *RecordBody) stopCapture() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.state == bodyCapturing {
+		b.dropLocked(errBodyStopped)
+	}
 }
 
 // dropLocked drops the body. Its file, if any, is removed once its goroutine is done.

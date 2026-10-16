@@ -316,6 +316,84 @@ func TestRecordSession_CallsTheStopCaughtArentFailures(t *testing.T) {
 	require.Empty(t, res.Recordings)
 }
 
+func TestRecordSession_RecordsACallThatEndsAsItStops(t *testing.T) {
+	// Stop lists the bodies being captured, then drops them: a call that ends in between has its whole body, and the
+	// recording took it. It is recorded.
+	s := MustNewRecordSession[bodyCall](bodyCodec{}, RecordOptions[string, string]{Dir: t.TempDir(), Format: "json"})
+
+	body := s.NewBody()
+	body.Keep([]byte("whole"))
+	body.Close()
+
+	// As Stop listed it, before the call ended.
+	s.files.mu.Lock()
+	s.files.live[body] = struct{}{}
+	s.files.mu.Unlock()
+
+	s.files.stop() // what Stop does first
+	require.True(t, s.Record(bodyCall{body: body}, 1), "the recording still takes calls")
+
+	res, err := s.Stop(t.Context())
+	require.NoError(t, err)
+	require.Len(t, res.Recordings, 1)
+	require.Zero(t, res.Status.Failed)
+}
+
+func TestRecordDir_StopLeavesTheBodiesOfCallsThatEnded(t *testing.T) {
+	// A body whose call ended after Stop listed the bodies being captured stays whole, in memory or in its file.
+	const content = "the whole body"
+
+	tests := []struct {
+		name    string
+		spooled bool
+	}{
+		{
+			name: "in memory",
+		},
+		{
+			name:    "spooled",
+			spooled: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			maxInline := int64(1024)
+			if tc.spooled {
+				maxInline = 4
+			}
+
+			d := newTestDir(t, maxInline, 1<<40)
+
+			b := d.newBody()
+			b.Keep([]byte(content))
+			b.Close()
+
+			// As Stop listed it, before the call ended.
+			d.live[b] = struct{}{}
+			d.stop()
+
+			require.NoError(t, b.Err())
+
+			data, inMemory := b.Bytes()
+			require.Equal(t, !tc.spooled, inMemory)
+
+			if tc.spooled {
+				files := &RecordFiles{dir: d, slug: "x"}
+				_, err := files.PlaceSpooled(b, ".txt")
+				require.NoError(t, err)
+
+				data, err = os.ReadFile(files.pending[0].temp)
+				require.NoError(t, err)
+
+				files.discard()
+			}
+
+			require.Equal(t, content, string(data))
+		})
+	}
+}
+
 func TestWriteAtomic_LeavesNoTemporaryFile(t *testing.T) {
 	// A write that fails, here because a directory is in the way, removes the temporary file it wrote.
 	dir := t.TempDir()
