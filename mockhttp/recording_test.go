@@ -599,6 +599,64 @@ func TestRecording_TwoStartsAfterARecordingThatGaveWay(t *testing.T) {
 	}
 }
 
+func TestRecording_AStartServesARecordingWhoseStopGaveUp(t *testing.T) {
+	// A StopRecording asks for the recordings to be served: when it gives up waiting, the StartRecording that ends the
+	// recording later serves them. A StopRecording that the start came before returns once they are served.
+	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") })
+
+	release := make(chan struct{})
+	t.Cleanup(closeOnce(release))
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	require.NoError(t, m.StartRecording(RecordDir(t.TempDir()), RecordTarget(target.URL), RecordTransform(func(*RecordedMock) error {
+		<-release
+		return nil
+	})))
+
+	do(t, http.MethodGet, m.URL("/a"), nil, nil)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := m.StopRecording(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	old := m.recording.Load()
+	close(release)
+	<-old.session.Done()
+
+	require.NoError(t, m.StartRecording(RecordDir(t.TempDir())))
+
+	res, body := do(t, http.MethodGet, m.URL("/a"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "ok", string(body), "the recording answers: no mock or target would")
+
+	// The end of a StopRecording that got past its stop after the start.
+	stopped, err := m.end(t.Context(), old, true)
+	require.NoError(t, err)
+	require.Len(t, stopped.Recordings, 1)
+}
+
+func TestRecording_AStopThatCloseCameBeforeSaysSo(t *testing.T) {
+	// A StopRecording that Close comes before can't serve the recordings: it says so, rather than reporting success.
+	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") })
+	m, _ := recordingServer(t, target.URL)
+
+	do(t, http.MethodGet, m.URL("/a"), nil, nil)
+
+	rec := m.recording.Load()
+	rec.serve.Store(true) // what the StopRecording does first
+
+	_, _ = m.end(t.Context(), rec, false) // Close ends it
+
+	_, err := m.end(t.Context(), rec, true) // then the StopRecording gets past its stop
+	require.EqualError(t, err, "recorder: the server closed before serving the recordings")
+	require.False(t, m.IsRecording())
+}
+
 func TestRecording_ATimedOutStopTakesNoMoreRequests(t *testing.T) {
 	// A recording whose StopRecording gave up waiting still writes, but takes no more requests: they go to the
 	// mocks, not to its target.

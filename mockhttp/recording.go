@@ -17,12 +17,21 @@ type recording struct {
 	codec   *recordCodec
 	conf    *RecordConfig
 	dir     string
-	served  chan struct{}                            // closed once the StopRecording that ended it serves what it recorded
+	served  chan struct{}                            // closed once the call that ended it served what it recorded, or not
 	filter  vlatte.Evaluators[*Mock, *selectorInput] // the requests it takes
 	target  Replier                                  // sends the requests it takes to the server it records, if any
 
-	// stopping is set once a StopRecording starts: the recording takes no more requests, though it still writes.
+	// stopping is set once a call stops it: the recording takes no more requests, though it still writes.
 	stopping atomic.Bool
+
+	// serve is set once a StopRecording asks for what it recorded to be served: the call that ends it serves it.
+	serve atomic.Bool
+
+	// ended elects the call that ends it, of those that stop it.
+	ended atomic.Bool
+
+	// playErr is why what it recorded isn't served. It is set before served is closed.
+	playErr error
 }
 
 // StartRecording starts recording what the server proxies as mock files, which answer the same requests the same way:
@@ -50,8 +59,9 @@ func (app *Server) StartRecording(options ...RecordConfigurer) error {
 // StopRecording stops the recording, waits until it wrote what it took, and returns what it wrote. The server then
 // serves the recordings: its mock files load again, with the recording's directory, so the hits of file mocks count
 // from 0. When ctx ends first, it returns ctx's error, and the recording goes on writing: a later StopRecording waits
-// again. It returns vlatte.ErrNotRecording when there is no recording. The error joins the calls and mocks that
-// couldn't be recorded, and a failure to serve the recordings, such as a mock ID they share with a mock file.
+// again, and a StartRecording once it wrote everything ends it. Either serves it. It returns vlatte.ErrNotRecording
+// when there is no recording. The error joins the calls and mocks that couldn't be recorded, and why the recordings
+// aren't served, such as a mock ID they share with a mock file, or the server closing first.
 func (app *Server) StopRecording(ctx context.Context) (*vlatte.RecordResult, error) {
 	return app.stopRecording(ctx, true)
 }
@@ -73,11 +83,11 @@ func (app *Server) IsRecording() bool {
 
 // startRecording starts a recording with conf, checked. A recording that stopped, and wrote everything, gives way.
 func (app *Server) startRecording(conf *RecordConfig) error {
-	// A recording that wrote everything, whose StopRecording gave up waiting, ends here, unserved, as a stop ends it.
+	// A recording that wrote everything, whose StopRecording gave up waiting, ends here, and is served as it asked.
 	if old := app.recording.Load(); old != nil {
 		select {
 		case <-old.session.Done():
-			_, _ = app.end(context.Background(), old, false)
+			_, _ = app.end(context.Background(), old, true)
 		default:
 			return vlatte.ErrRecording
 		}
@@ -129,18 +139,24 @@ func (app *Server) startRecording(conf *RecordConfig) error {
 	return nil
 }
 
-// stopRecording stops the recording, and serves what it recorded when play is set.
+// stopRecording stops the recording, and serves what it recorded when play is set; Close doesn't.
 func (app *Server) stopRecording(ctx context.Context, play bool) (*vlatte.RecordResult, error) {
 	rec := app.recording.Load()
 	if rec == nil {
 		return nil, vlatte.ErrNotRecording
 	}
 
+	if play {
+		rec.serve.Store(true)
+	}
+
 	return app.end(ctx, rec, play)
 }
 
-// end stops rec, and serves what it recorded when play is set. Only here does a recording end.
-func (app *Server) end(ctx context.Context, rec *recording, play bool) (*vlatte.RecordResult, error) {
+// end stops rec. Only here does a recording end: the first call past the stop ends it, and serves what it recorded
+// when a StopRecording asked for it, unless mayServe is false, as for Close. The others return once it is served, so
+// they return when it is, and Close doesn't close the mocks while they load.
+func (app *Server) end(ctx context.Context, rec *recording, mayServe bool) (*vlatte.RecordResult, error) {
 	rec.stopping.Store(true)
 
 	res, err := rec.session.Stop(ctx)
@@ -148,28 +164,41 @@ func (app *Server) end(ctx context.Context, rec *recording, play bool) (*vlatte.
 		return nil, err
 	}
 
-	// Another call ended it at the same time: this one returns once that one serves the recordings, so both return
-	// when they are served, and Close doesn't close the mocks before they load.
-	if !app.recording.CompareAndSwap(rec, nil) {
+	if !rec.ended.CompareAndSwap(false, true) {
+		// Served goes first when ctx ended too.
 		select {
 		case <-rec.served:
-			return res, err
 		case <-ctx.Done():
-			return res, ctx.Err()
+			select {
+			case <-rec.served:
+			default:
+				return res, ctx.Err()
+			}
 		}
-	}
 
-	defer close(rec.served)
+		return res, errors.Join(err, rec.playErr)
+	}
 
 	rec.close()
 
-	if play && len(res.Recordings) > 0 {
+	switch {
+	case len(res.Recordings) == 0:
+	case !mayServe:
+		rec.playErr = errors.New("recorder: the server closed before serving the recordings")
+	case rec.serve.Load():
 		if playErr := app.play(rec.dir); playErr != nil {
-			err = errors.Join(err, fmt.Errorf("recorder: serving the recordings: %w", playErr))
+			rec.playErr = fmt.Errorf("recorder: serving the recordings: %w", playErr)
+
+			// No caller may wait for it, such as when a StartRecording ends a recording whose stop gave up.
+			app.logger.Error().Err(rec.playErr).Msg("recorder: the recordings aren't served")
 		}
 	}
 
-	return res, err
+	// Only now: a call that comes meanwhile finds the recording, and waits until it is served.
+	app.recording.CompareAndSwap(rec, nil)
+	close(rec.served)
+
+	return res, errors.Join(err, rec.playErr)
 }
 
 // play serves the recordings of dir with the mock files, which load again. When they fail to load, the server

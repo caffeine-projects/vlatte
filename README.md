@@ -395,7 +395,7 @@ mockhttp.RecordFilter(mockhttp.Request().Header("X-Record", match.Equal("yes")))
 A filter that fails takes nothing: the request is served as usual, and the failure is logged.
 
 **Playback.**
-- `StopRecording` waits until every call it took is written, then serves the recordings: the mock files load again, with the recording's directory, so the hits of file mocks count from 0. When `ctx` ends first, it returns ctx's error, and the recording keeps writing: another `StopRecording` waits for it again, and serves it. A `StartRecording` once it wrote everything ends it without serving it.
+- `StopRecording` waits until every call it took is written, then serves the recordings: the mock files load again, with the recording's directory, so the hits of file mocks count from 0. When `ctx` ends first, it returns ctx's error, and the recording keeps writing: another `StopRecording` waits for it again, and a `StartRecording` once it wrote everything ends it. Either serves it. A `StopRecording` that `Close` cuts short says the recordings aren't served.
 - A server started later serves them too. The default mock file patterns include `testdata/_mocks_recorded`, and a server serves the recordings of its `record.dir`.
 - A server serves the recordings of the last recording `StopRecording` ended, not those of earlier ones in other directories. The same request recorded into two directories a server serves has one ID twice: `StopRecording` reports it, and the server serves what it served before.
 - A mock that proxies every request needs a priority number above 0 to let the recordings answer first: `AnyMethod().Priority(10).Reply(From(target))`.
