@@ -1092,6 +1092,58 @@ func TestRecordSession_AFailingMockCountsOnce(t *testing.T) {
 	})
 }
 
+func TestRecordSession_RetriesAFailedMockWhenItsRequestComesAgain(t *testing.T) {
+	// A mock a transform refused for a while is written when its request comes again: even with the same answer, or
+	// with one RecordFirst ignores.
+	tests := []struct {
+		name    string
+		repeats vlatte.RecordRepeats
+	}{
+		{
+			name:    "sequence",
+			repeats: vlatte.RecordSequence,
+		},
+		{
+			name:    "first",
+			repeats: vlatte.RecordFirst,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var refuse atomic.Bool
+				refuse.Store(true)
+
+				transform := func(*kvMock) error {
+					if refuse.Load() {
+						return errors.New("not yet")
+					}
+
+					return nil
+				}
+
+				s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{
+					Repeats:    tc.repeats,
+					Transforms: []func(*kvMock) error{transform},
+				})
+
+				s.Record(kvCall{key: "a", value: "1"}, 1)
+				time.Sleep(time.Second) // a flush fails
+				require.Equal(t, int64(1), s.Status().Failed)
+
+				refuse.Store(false)
+				s.Record(kvCall{key: "a", value: "1"}, 1)
+
+				res, err := s.Stop(t.Context())
+				require.NoError(t, err)
+				require.Len(t, res.Recordings, 1)
+				require.Zero(t, res.Status.Failed)
+			})
+		})
+	}
+}
+
 func TestRecordSession_KeepsAtMostAThousandResponses(t *testing.T) {
 	// A request whose answer keeps changing, such as a clock, would grow its mock without end: a mock keeps 1000
 	// responses, and says once that it drops the later ones.

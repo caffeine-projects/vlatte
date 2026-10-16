@@ -334,13 +334,18 @@ func (s *RecordSession[X, Q, S]) add(x X) {
 	}
 }
 
-// addResponse adds the response of x to the mock of request. A repeat that RecordFirst ignores adds nothing.
+// addResponse adds the response of x to the mock of request. A repeat that RecordFirst ignores adds nothing. A mock
+// that failed to be written is written again at the next flush, whatever its request answers this time.
 func (s *RecordSession[X, Q, S]) addResponse(x X, name string, request []byte, files *RecordFiles) error {
 	sum := sha256.Sum256(request)
 	key := hex.EncodeToString(sum[:])
 
 	g, seen := s.groups[key]
 	if seen && s.opts.Repeats == RecordFirst {
+		if g.failing {
+			s.dirty[g] = struct{}{}
+		}
+
 		files.discard()
 		discard(x)
 
@@ -369,7 +374,7 @@ func (s *RecordSession[X, Q, S]) addResponse(x X, name string, request []byte, f
 		s.logger.Warn().Str("mock", g.id).Msgf("recorder: the mock has %d responses: later ones aren't recorded", _maxResponses)
 	}
 
-	if changed {
+	if changed || g.failing {
 		s.dirty[g] = struct{}{}
 	}
 
