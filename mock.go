@@ -10,6 +10,9 @@ import (
 //
 // A mock that holds something to release, such as the connections of an HTTP client, implements io.Closer: the store
 // closes it when it leaves, and a builder's mock that never makes it into the store is closed too.
+//
+// A store tells mocks apart by identity, as when it replaces the very mocks it was given: a mock is a pointer, or
+// another type Go can compare, never a struct holding a slice, a map or a func.
 type Mock interface {
 	ID() string
 	Name() string

@@ -454,7 +454,7 @@ type pendingFile struct {
 
 // Place returns where body goes. It goes inline when text is true and the recording neither writes every body to a
 // file nor finds body longer than MaxInlineBody; otherwise to a file next to the mock file, whose name it returns, and
-// which ext ends, such as ".json".
+// which ext ends, such as ".json". Place keeps body until the mock is written: the caller doesn't change it after.
 func (f *RecordFiles) Place(body []byte, text bool, ext string) (name string, inline bool) {
 	if text && !f.dir.bodyFiles && int64(len(body)) <= f.dir.maxInline {
 		return "", true
