@@ -417,7 +417,7 @@ A recording doesn't match what it can't read, and then takes any body: one that 
 
 **What it answers.** The status, the headers but those the server sets (`Date`, `Content-Length` and the hop-by-hop ones), the trailers, and the body as the client got it, after the steps of the mock.
 - A text body up to `MaxInlineBody`, 1 MiB by default, is written in the mock file. Other bodies go to files next to it, named after their content, so equal bodies share a file. `RecordBodyFiles(true)` writes every body to a file.
-- A gzip body that fits in `MaxInlineBody` decoded is recorded decoded, with `encoding: gzip`, and compressed again when it is served. Other encoded bodies are kept as sent, with their `Content-Encoding`.
+- A gzip body that fits in `MaxInlineBody` decoded is recorded decoded, with `encoding: gzip`, and compressed again when it is served, into bytes that may differ. So a gzip body with a header or trailer that holds for its bytes, a strong `ETag`, `Content-MD5`, `Digest`, `Content-Digest`, `Repr-Digest` or `Content-Range`, is kept as sent, as are other encoded bodies, with their `Content-Encoding`.
 - A larger body goes to a file as it streams, so it never sits in memory whole. When the disk is slower than the sender, the answer waits for it, a second in all at most. Past that, or past `MaxBodySize`, 1 GiB by default, the call isn't recorded, and the client still gets every byte.
 - A body file plays back streamed, without a `Content-Length`.
 - `RecordExcludeResponseHeaders` leaves headers out, such as `Set-Cookie`. `RecordTransform` changes each recording, as Go values, before it is written:

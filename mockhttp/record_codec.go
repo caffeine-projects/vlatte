@@ -56,6 +56,10 @@ var _bodyExtensions = map[string]string{
 	"text/yaml":              ".yaml",
 }
 
+// _sentBytesHeaders hold for the bytes of a body as sent: a gzip body decoded, then compressed again when it is
+// served, would no longer match them. A strong ETag does too; a weak one holds for any encoding of the content.
+var _sentBytesHeaders = []string{"Content-MD5", "Digest", "Content-Digest", "Repr-Digest", "Content-Range"}
+
 // MatcherSpec is a matcher as mock files write it, such as ["eqj", "{...}"] or ["not", "present"].
 type MatcherSpec []any
 
@@ -218,8 +222,9 @@ func mediaTypeMatcher(contentType string) MatcherSpec {
 }
 
 // Response writes what x answered: its status, headers, trailers and body, as the client got them. A gzip body that
-// stayed in memory is recorded decoded, with encoding gzip, so it reads in the mock file. Other encoded bodies, and
-// bodies that went to a file while they were captured, are kept as they were sent, with their Content-Encoding.
+// stayed in memory is recorded decoded, with encoding gzip, so it reads in the mock file, unless a header holds for
+// its bytes as sent, such as a strong ETag or a digest. Other encoded bodies, and bodies that went to a file while
+// they were captured, are kept as they were sent, with their Content-Encoding.
 func (c *recordCodec) Response(x *recordedCall, files *vlatte.RecordFiles) (RecordedResponse, error) {
 	if err := x.resBody.Err(); err != nil {
 		return RecordedResponse{}, err
@@ -258,7 +263,7 @@ func (c *recordCodec) Response(x *recordedCall, files *vlatte.RecordFiles) (Reco
 		return s, nil
 	}
 
-	if encoding == "gzip" {
+	if encoding == "gzip" && !holdsSentBytes(s) {
 		if decoded, ok := gunzip(body, c.maxInline); ok {
 			body, encoding, s.Encoding = decoded, "", "gzip"
 
@@ -461,6 +466,24 @@ func canonicalURL(u *url.URL) (string, error) {
 	default:
 		return target + "?" + u.RawQuery, nil
 	}
+}
+
+// holdsSentBytes reports whether a header or trailer of s holds for the bytes of its body as sent: a strong ETag, a
+// digest of them, or the range they are of.
+func holdsSentBytes(s RecordedResponse) bool {
+	for _, h := range []http.Header{s.Header, s.Trailer} {
+		if etag := h.Get("ETag"); etag != "" && !strings.HasPrefix(etag, "W/") {
+			return true
+		}
+
+		for _, name := range _sentBytesHeaders {
+			if h.Get(name) != "" {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // gunzip decodes a gzip body that decodes whole within limit bytes.

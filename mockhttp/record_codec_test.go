@@ -753,6 +753,66 @@ func TestRecording_ResponseSection(t *testing.T) {
 			file: gzipped(t, ten),
 		},
 		{
+			name:  "a gzip body with a strong ETag is kept as sent",
+			reply: write(http.StatusOK, http.Header{HeaderContentEncoding: {"gzip"}, "Etag": {`"v1"`}}, gzipped(t, []byte("text"))),
+			want: RecordedResponse{
+				Status:   http.StatusOK,
+				Header:   map[string][]string{HeaderContentEncoding: {"gzip"}, "Etag": {`"v1"`}},
+				BodyFile: bodyFileName("GET-r", gzipped(t, []byte("text")), ".bin"),
+			},
+			file: gzipped(t, []byte("text")),
+		},
+		{
+			name:  "a gzip body with a weak ETag is recorded decoded",
+			reply: write(http.StatusOK, http.Header{HeaderContentEncoding: {"gzip"}, "Etag": {`W/"v1"`}}, gzipped(t, []byte("text"))),
+			want:  RecordedResponse{Status: http.StatusOK, Header: map[string][]string{"Etag": {`W/"v1"`}}, Body: "text", Encoding: "gzip"},
+		},
+		{
+			name:    "a gzip body whose ETag the recording leaves out is recorded decoded",
+			options: []RecordConfigurer{RecordExcludeResponseHeaders("etag")},
+			reply:   write(http.StatusOK, http.Header{HeaderContentEncoding: {"gzip"}, "Etag": {`"v1"`}}, gzipped(t, []byte("text"))),
+			want:    RecordedResponse{Status: http.StatusOK, Body: "text", Encoding: "gzip"},
+			left:    []string{"Etag"},
+		},
+		{
+			name:  "a gzip body with a digest is kept as sent",
+			reply: write(http.StatusOK, http.Header{HeaderContentEncoding: {"gzip"}, "Content-Md5": {"q1w2e3=="}}, gzipped(t, []byte("text"))),
+			want: RecordedResponse{
+				Status:   http.StatusOK,
+				Header:   map[string][]string{HeaderContentEncoding: {"gzip"}, "Content-Md5": {"q1w2e3=="}},
+				BodyFile: bodyFileName("GET-r", gzipped(t, []byte("text")), ".bin"),
+			},
+			file: gzipped(t, []byte("text")),
+		},
+		{
+			name: "a gzip body with a digest trailer is kept as sent",
+			reply: Handler(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set(HeaderTrailer, "Content-Digest")
+				w.Header().Set(HeaderContentEncoding, "gzip")
+
+				_, _ = w.Write(gzipped(t, []byte("text")))
+
+				w.Header().Set("Content-Digest", "sha-256=:q1w2e3=:")
+			}),
+			want: RecordedResponse{
+				Status:   http.StatusOK,
+				Header:   map[string][]string{HeaderContentEncoding: {"gzip"}},
+				Trailer:  map[string][]string{"Content-Digest": {"sha-256=:q1w2e3=:"}},
+				BodyFile: bodyFileName("GET-r", gzipped(t, []byte("text")), ".bin"),
+			},
+			file: gzipped(t, []byte("text")),
+		},
+		{
+			name:  "a range of a gzip body is kept as sent",
+			reply: write(http.StatusPartialContent, http.Header{HeaderContentEncoding: {"gzip"}, "Content-Range": {"bytes 0-23/24"}}, gzipped(t, []byte("text"))),
+			want: RecordedResponse{
+				Status:   http.StatusPartialContent,
+				Header:   map[string][]string{HeaderContentEncoding: {"gzip"}, "Content-Range": {"bytes 0-23/24"}},
+				BodyFile: bodyFileName("GET-r", gzipped(t, []byte("text")), ".bin"),
+			},
+			file: gzipped(t, []byte("text")),
+		},
+		{
 			name:    "every body to a file",
 			options: []RecordConfigurer{RecordBodyFiles(true)},
 			reply:   OK().Header(HeaderContentType, MIMEApplicationJSON).Body([]byte(`{"a":1}`)),
@@ -810,6 +870,10 @@ func TestRecording_ResponseSection(t *testing.T) {
 
 			replayed, replayedBody := do(t, method, replayServer(t, dir).URL("/r"), nil, nil)
 			requireSameAnswer(t, original, replayed, originalBody, replayedBody)
+
+			if tc.file != nil {
+				require.Equal(t, originalBody, replayedBody, "a body file plays back the bytes as sent")
+			}
 		})
 	}
 }
