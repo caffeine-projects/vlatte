@@ -435,7 +435,7 @@ mockhttp.RecordTransform(func(r *mockhttp.RecordedMock) error {
 
 **Status.** `RecordingStatus` counts the calls taken, the mocks written, and the calls dropped or that failed. A response never waits for the calls before it to be written: when too many wait, the next ones are dropped and counted.
 
-**Settings.** `Setup().Record(...)` records from each start to close, and so does the `record` section of the config:
+**Settings.** `Setup().Record(...)` records from start to close, and so does the `record` section of the config:
 
 ```yaml
 # .vlatterc.yaml

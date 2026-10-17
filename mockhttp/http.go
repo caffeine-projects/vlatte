@@ -56,6 +56,7 @@ type Server struct {
 	data      map[string]any
 	logger    *zerolog.Logger
 	startOnce sync.Once
+	closed    atomic.Bool // set by Close: a closed server doesn't start again
 	admin     *admin.Admin[*Mock]
 
 	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
@@ -274,10 +275,11 @@ func (app *Server) Name() string {
 	return app.config.Name
 }
 
-// Start starts the mock server.
+// Start starts the mock server. A closed server doesn't start again: Start returns http.ErrServerClosed.
 func (app *Server) Start() error {
-	// A server closed before runs events again.
-	app.events.Open()
+	if app.closed.Load() {
+		return http.ErrServerClosed
+	}
 
 	err := app.server.Start()
 	if err != nil {
@@ -296,10 +298,11 @@ func (app *Server) MustStart() {
 	}
 }
 
-// StartTLS starts TLS on a mock server.
+// StartTLS starts TLS on a mock server. A closed server doesn't start again: StartTLS returns http.ErrServerClosed.
 func (app *Server) StartTLS() error {
-	// A server closed before runs events again.
-	app.events.Open()
+	if app.closed.Load() {
+		return http.ErrServerClosed
+	}
 
 	err := app.server.StartTLS()
 	if err != nil {
@@ -383,8 +386,10 @@ func (app *Server) MustReload() {
 
 // Close closes the mock server. It cancels the on_complete events still running, such as a webhook waiting for its
 // delay or its target, so the requests waiting for them end, and waits for those requests. It stops the recording,
-// and waits until it wrote what it took.
+// and waits until it wrote what it took. A closed server doesn't start again.
 func (app *Server) Close() {
+	app.closed.Store(true)
+
 	// The backend waits for the requests it serves, and they wait for their events: cancel the events first.
 	app.events.Close()
 
@@ -478,8 +483,8 @@ func (app *Server) DescribeConfig() string {
 // Internals
 // --
 
-// onStart loads the mocks on the first start, then starts the recording the config sets: each start records until
-// the server closes, or StopRecording ends the recording.
+// onStart loads the mocks once, then starts the recording the config sets, which records until the server closes, or
+// StopRecording ends it.
 func (app *Server) onStart() (err error) {
 	app.startOnce.Do(func() { err = app.load() })
 

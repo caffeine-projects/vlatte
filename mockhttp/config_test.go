@@ -410,9 +410,9 @@ func TestListener(t *testing.T) {
 	require.Equal(t, "http://"+inner.Addr().String(), m.URL())
 	require.Positive(t, l.accepted.Load())
 
-	// Close closes the listener: a restart listens again on its address.
+	// Close closes the listener.
 	m.Close()
-	m.MustStart()
-	get()
-	require.Equal(t, "http://"+inner.Addr().String(), m.URL())
+
+	_, err = inner.Accept()
+	require.ErrorIs(t, err, net.ErrClosed)
 }

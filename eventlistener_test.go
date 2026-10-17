@@ -152,9 +152,9 @@ func TestEventRunner_ReportsUnregisteredNamesAndPanics(t *testing.T) {
 
 func TestEventRunner_CloseCancelsTheEventsRunning(t *testing.T) {
 	// Close cancels the events running, such as a webhook waiting for a slow target, so the requests waiting for them
-	// end, and a server closes at once. A closed runner runs nothing until Open, which a restarted server calls.
+	// end, and a server closes at once. A closed runner runs nothing after.
 	synctest.Test(t, func(t *testing.T) {
-		var late atomic.Int32
+		var counted atomic.Int32
 		var argsCtx, listenerCtx context.Context
 
 		listeners := vlatte.NewListener()
@@ -163,16 +163,28 @@ func TestEventRunner_CloseCancelsTheEventsRunning(t *testing.T) {
 			return ctx.Err()
 		})
 		register(t, listeners, "counts", func(ctx context.Context, _ vlatte.OnComplete) error {
-			late.Add(1)
+			counted.Add(1)
 			listenerCtx = ctx
 
 			return ctx.Err()
 		})
 
 		runner := vlatte.NewEventRunner(listeners, nil)
-		waits := mockWith("waits")
+		counts := mockWith("counts")
 
 		var got reported
+		argsFn := func(ctx context.Context, cfg vlatte.EventConfig) vlatte.OnComplete {
+			argsCtx = ctx
+			return completed{mock: counts, params: cfg.Parameters}
+		}
+
+		runner.OnComplete(t.Context(), counts, argsFn, got.add)
+
+		require.Equal(t, int32(1), counted.Load(), "an open runner runs events")
+		require.Empty(t, got.all(), "with a live context")
+		require.Same(t, argsCtx, listenerCtx, "argsFn gets the context the listener gets")
+
+		waits := mockWith("waits")
 		done := make(chan struct{})
 		go func() {
 			runner.OnComplete(t.Context(), waits, argsOf(waits), got.add)
@@ -190,24 +202,10 @@ func TestEventRunner_CloseCancelsTheEventsRunning(t *testing.T) {
 		<-done
 		require.Empty(t, got.all(), "an event Close canceled isn't a failure")
 
-		counts := mockWith("counts")
 		runner.OnComplete(t.Context(), counts, argsOf(counts), got.add)
-		require.Zero(t, late.Load(), "a closed runner runs nothing")
+		require.Equal(t, int32(1), counted.Load(), "a closed runner runs nothing")
 
 		runner.Close() // twice is fine
-		runner.Open()
-		runner.Open() // twice is fine
-
-		argsFn := func(ctx context.Context, cfg vlatte.EventConfig) vlatte.OnComplete {
-			argsCtx = ctx
-			return completed{mock: counts, params: cfg.Parameters}
-		}
-
-		runner.OnComplete(t.Context(), counts, argsFn, got.add)
-
-		require.Equal(t, int32(1), late.Load(), "an open runner runs events again")
-		require.Empty(t, got.all(), "with a live context")
-		require.Same(t, argsCtx, listenerCtx, "argsFn gets the context the listener gets")
 	})
 }
 

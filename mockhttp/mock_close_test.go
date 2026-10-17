@@ -337,6 +337,31 @@ func TestMock_ClosesItsReplyOnce(t *testing.T) {
 	require.Equal(t, int64(1), closes.Load(), "closed once")
 }
 
+func TestServer_AClosedServerDoesntStartAgain(t *testing.T) {
+	// Close released what the mocks hold for good: a closed server doesn't start again, even one that never started.
+	for name, start := range map[string]func(*Server) error{
+		"Start":    (*Server).Start,
+		"StartTLS": (*Server).StartTLS,
+	} {
+		t.Run(name+" after a start", func(t *testing.T) {
+			m := MustNew(Setup().Silent())
+			m.MustStart()
+			m.Close()
+
+			require.ErrorIs(t, start(m), http.ErrServerClosed)
+			require.Empty(t, m.URL(), "nothing listens")
+		})
+
+		t.Run(name+" before any start", func(t *testing.T) {
+			m := MustNew(Setup().Silent())
+			m.Close()
+
+			require.ErrorIs(t, start(m), http.ErrServerClosed)
+			require.Empty(t, m.URL(), "nothing listens")
+		})
+	}
+}
+
 func TestServer_CloseReleasesTheForwardProxyConnections(t *testing.T) {
 	// #26: the transport of the forward proxy was never closed: its connections to the targets outlived the server.
 	target, open := countingTarget(t)

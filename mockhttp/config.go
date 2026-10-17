@@ -199,7 +199,7 @@ func (cb *ConfigBuilder) Addr(addr string) *ConfigBuilder {
 }
 
 // Listener sets an already bound listener for the mock HTTP server to serve instead of listening on Addr.
-// The server closes it on Close, so a later start listens again on its address.
+// The server closes it on Close.
 func (cb *ConfigBuilder) Listener(l net.Listener) *ConfigBuilder {
 	cb.conf.Listener = l
 	return cb

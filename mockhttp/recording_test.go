@@ -279,9 +279,9 @@ func TestRecording_ConfiguredRecordsFromStartToClose(t *testing.T) {
 	require.False(t, m.IsRecording())
 }
 
-func TestRecording_ConfiguredRecordsEachStart(t *testing.T) {
-	// The recording the config sets runs from each start to close: StopRecording ends it until the next start, which
-	// a reload isn't.
+func TestRecording_ConfiguredRunsFromStartToClose(t *testing.T) {
+	// The recording the config sets runs from start to close, unless StopRecording ends it first: a reload doesn't
+	// start it again.
 	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") })
 	dir := t.TempDir()
 
@@ -289,19 +289,16 @@ func TestRecording_ConfiguredRecordsEachStart(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 	m.MustMock(AnyMethod().Reply(From(target.URL)))
+	require.True(t, m.IsRecording())
 
 	stopRecording(t, m)
 	require.NoError(t, m.Reload())
-	require.False(t, m.IsRecording())
-
-	m.Close()
-	m.MustStart()
-	require.True(t, m.IsRecording(), "a restart records again")
+	require.False(t, m.IsRecording(), "a reload doesn't start it again")
 
 	do(t, http.MethodGet, m.URL("/a"), nil, nil)
 	m.Close()
 
-	require.Len(t, recordedMocks(t, dir), 1)
+	require.Empty(t, recordedMocks(t, dir), "a call after the stop isn't recorded")
 }
 
 func TestRecording_StartedBeforeTheServer(t *testing.T) {

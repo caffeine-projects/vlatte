@@ -411,11 +411,10 @@ func TestHandler_TheResponseWaitsForTheEvents(t *testing.T) {
 
 func TestHandler_CloseCancelsTheEventsRunning(t *testing.T) {
 	// Close stops the events still running, such as a webhook waiting on a slow target, instead of waiting for them:
-	// the requests waiting for them end, and the server closes at once. A restarted server runs events again.
+	// the requests waiting for them end, and the server closes at once.
 	started := make(chan struct{})
 	release := make(chan struct{})
 	canceled := make(chan error, 1)
-	var counted atomic.Int32
 
 	m := MustNew(Setup().Silent().
 		OnCompleteListener("waits", vlatte.EventFunc[vlatte.OnComplete](func(ctx context.Context, _ vlatte.OnComplete) error {
@@ -429,10 +428,6 @@ func TestHandler_CloseCancelsTheEventsRunning(t *testing.T) {
 			canceled <- ctx.Err()
 
 			return ctx.Err()
-		})).
-		OnCompleteListener("counts", vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
-			counted.Add(1)
-			return nil
 		})))
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -440,10 +435,7 @@ func TestHandler_CloseCancelsTheEventsRunning(t *testing.T) {
 	// Last in, first out: the event ends before the server closes, when the test fails first.
 	t.Cleanup(func() { close(release) })
 
-	m.MustMock(
-		Getf("/waits").OnCompleteEvent(vlatte.EventConfig{Name: "waits"}).Reply(NoContent()),
-		Getf("/counts").OnCompleteEvent(vlatte.EventConfig{Name: "counts"}).Reply(NoContent()),
-	)
+	m.MustMock(Getf("/waits").OnCompleteEvent(vlatte.EventConfig{Name: "waits"}).Reply(NoContent()))
 
 	// The client waits for the event, in a goroutine of its own. Close closes its connection, so it gets no response.
 	ended := make(chan struct{})
@@ -485,12 +477,6 @@ func TestHandler_CloseCancelsTheEventsRunning(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the request waiting for the event never ended")
 	}
-
-	m.MustStart()
-
-	status, _ := get(t, m, "/counts")
-	require.Equal(t, http.StatusNoContent, status)
-	require.Equal(t, int32(1), counted.Load(), "a restarted server runs events again")
 }
 
 func TestHandler_EventsRunForRepliesWithoutAResponse(t *testing.T) {
