@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -473,4 +474,70 @@ func TestCLI_ARecordingThatFailsFailsTheRun(t *testing.T) {
 	cancel()
 	require.Equal(t, 1, <-done)
 	require.Contains(t, stderr.String(), "status 999")
+}
+
+func TestCLI_RecordingsItCantServeDontFailTheRun(t *testing.T) {
+	// A recording moved to the mock files, then recorded again to refresh it, has the ID of a mock file: the exiting
+	// server can't serve it. Every call was recorded, so the run succeeds, and says why the recording isn't served.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	// Each answer of the target is its own, so a test tells the target's from the mock file's.
+	var answers atomic.Int64
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, answers.Add(1))
+	}))
+	t.Cleanup(target.Close)
+
+	// record runs the CLI until the target gave want, which the recording took, and returns the exit code and stderr.
+	record := func(want string) (int, string) {
+		addr := randomAddr(t)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		var stderr bytes.Buffer
+
+		done := make(chan int, 1)
+		go func() {
+			done <- run(ctx, []string{"--addr", addr, "--record", "--record-target", target.URL, "--log-level", "disabled"}, io.Discard, &stderr)
+		}()
+
+		require.EventuallyWithT(t, func(c *assert.CollectT) {
+			res, err := http.Get("http://" + addr + "/items")
+			if !assert.NoError(c, err) {
+				return
+			}
+
+			defer res.Body.Close()
+
+			body, err := io.ReadAll(res.Body)
+			assert.NoError(c, err)
+			assert.Equal(c, want, string(body))
+		}, 10*time.Second, 100*time.Millisecond)
+
+		cancel()
+
+		return <-done, stderr.String()
+	}
+
+	code, _ := record("1")
+	require.Equal(t, 0, code)
+
+	files, err := filepath.Glob(filepath.Join("testdata", "_mocks_recorded", "*.mock.json"))
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+
+	// JSON is YAML too: the default patterns load the .yaml files of testdata/_mocks.
+	data, err := os.ReadFile(files[0])
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join("testdata", "_mocks"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join("testdata", "_mocks", "items.mock.yaml"), data, 0o600))
+	require.NoError(t, os.Remove(files[0]))
+
+	code, stderr := record("2")
+	require.Equal(t, 0, code, "every call was recorded")
+	require.Contains(t, stderr, "mock id already in use", "why the recording isn't served")
+	require.FileExists(t, files[0], "the recording was written again")
 }

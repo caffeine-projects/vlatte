@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -15,9 +16,18 @@ import (
 // _maxExactInt is the largest whole number every float64 below it holds exactly.
 const _maxExactInt = 1 << 53
 
+// _formats are the formats documents can be written in, as Format names them.
+var _formats = []string{"json", "yaml", "yml"}
+
+// Formats returns the formats documents can be written in, as Format names them.
+func Formats() []string {
+	return slices.Clone(_formats)
+}
+
 // isFormat reports whether ext, such as ".yaml", names a format documents can be written in.
 func isFormat(ext string) bool {
-	return ext == ".json" || ext == ".yaml" || ext == ".yml"
+	f, ok := strings.CutPrefix(ext, ".")
+	return ok && slices.Contains(_formats, f)
 }
 
 // Format normalizes the format of a document, such as ".YAML", and reports whether it is JSON or YAML.

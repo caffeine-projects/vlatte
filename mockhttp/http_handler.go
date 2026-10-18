@@ -241,7 +241,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.lifecycle.OnMatch(reqValues, res)
 }
 
-// serveTarget answers with the server a recording records, and has the capture record its answer.
+// serveTarget answers with the server a recording records, has the capture record its answer, and logs it: no mock
+// answers, so no OnMatch does.
 func (h *mockHandler) serveTarget(w http.ResponseWriter, r *RequestValues, target Replier, capture *captureWriter) {
 	ctx := r.RawRequest.Context()
 
@@ -253,6 +254,7 @@ func (h *mockHandler) serveTarget(w http.ResponseWriter, r *RequestValues, targe
 
 	capture.answeredBy(true)
 	h.render(w, r, res, capture)
+	h.lifecycle.OnProxied(r, res)
 }
 
 // render sends res, and has the capture, if any, record it once the client got it whole. The status and headers are

@@ -20,9 +20,13 @@ var (
 	_ mockHTTPLifecycle = (*builtInDescriptiveMockHTTPLifecycle)(nil)
 )
 
+// _redacted stands for the values of a header that the logs and the recordings hide.
+const _redacted = "<redacted>"
+
 type mockHTTPLifecycle interface {
 	OnRequest(*RequestValues)
 	OnMatch(*RequestValues, *Response)
+	OnProxied(*RequestValues, *Response)
 	OnNoMatch(*RequestValues)
 	OnWarning(*RequestValues, error)
 	OnError(*RequestValues, error)
@@ -81,6 +85,19 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *Response) {
 	}
 
 	evt.Msgf("<--- REQUEST MATCHED %s %s", r.RawRequest.Method, r.URL.Path)
+}
+
+// OnProxied logs a call that a proxy answered, without a mock, such as the target of a recording.
+func (h *builtInMockHTTPLifecycle) OnProxied(r *RequestValues, s *Response) {
+	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
+		return
+	}
+
+	h.app.logger.Info().
+		Str("url", r.URL.String()).
+		Dur("elapsed", time.Since(r.StartedAtTime)).
+		Dict("response", h.responseDict(s)).
+		Msgf("<--- REQUEST PROXIED %s %s", r.RawRequest.Method, r.URL.Path)
 }
 
 func (h *builtInMockHTTPLifecycle) OnNoMatch(r *RequestValues) {
@@ -232,6 +249,31 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Resp
 	buf.WriteTo(h.out)
 }
 
+// OnProxied prints a call that a proxy answered, without a mock, such as the target of a recording.
+func (h *builtInDescriptiveMockHTTPLifecycle) OnProxied(rv *RequestValues, s *Response) {
+	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
+		return
+	}
+
+	buf := bufpool.Get()
+	buf.Reset()
+	defer bufpool.Put(buf)
+
+	fmt.Fprintf(buf, "%s %s <--- %s %s\n%s ",
+		h.cz.BrightGreen(h.cz.Bold("REQUEST PROXIED")),
+		time.Now().Format(time.RFC3339),
+		h.cz.Green(rv.RawRequest.Method),
+		h.cz.Green(rv.URL.Path),
+		rv.RawRequest.Method)
+	buf.WriteString(rv.URL.String())
+	buf.WriteString("\n")
+	buf.WriteString(h.cz.Green("Took(ms): "))
+	buf.WriteString(strconv.FormatInt(time.Since(rv.StartedAtTime).Milliseconds(), 10))
+	h.writeResponse(buf, s)
+	buf.WriteString("\n")
+	buf.WriteTo(h.out)
+}
+
 func (h *builtInDescriptiveMockHTTPLifecycle) OnNoMatch(reqValues *RequestValues) {
 	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
 		return
@@ -327,7 +369,7 @@ func redactHeader(h http.Header, toRedact map[string]struct{}) http.Header {
 	redacted := h.Clone()
 	for k := range h {
 		if _, ok := toRedact[strings.ToLower(k)]; ok {
-			redacted.Set(k, "<redacted>")
+			redacted.Set(k, _redacted)
 		}
 	}
 

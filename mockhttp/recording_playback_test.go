@@ -327,6 +327,8 @@ func TestPropRecording_RecordStopReplay(t *testing.T) {
 			RecordRequestHeaders("Accept"),
 			RecordFormat(rapid.SampledFrom(MockFileFormats()).Draw(rt, "format")),
 			RecordMaxInlineBody(rapid.SampledFrom([]int64{0, 16}).Draw(rt, "max inline body")),
+			// Every header the target sent, its cookies too.
+			RecordExcludeResponseHeaders(),
 		))
 
 		header, body := c.wire(rt)

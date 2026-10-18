@@ -403,9 +403,10 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			},
 		},
 		field{
-			Key: "record.ssl_verify", Kind: config.Bool, Usage: "Verify the TLS certificate of record.target.",
+			Key: "record.skip_ssl_verify", Kind: config.Bool,
+			Usage: "Skip the verification of the TLS certificate of record.target, such as for a self-signed one.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).SSLVerify = v.Bool
+				section(&c.Record, *defaultRecordConfig()).SkipSSLVerify = v.Bool
 				return nil
 			},
 		},
@@ -433,7 +434,8 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			},
 		},
 		field{
-			Key: "record.exclude_response_headers", Kind: config.List, Usage: "Response headers recordings leave out.",
+			Key: "record.exclude_response_headers", Kind: config.List, Default: strings.Join(rec.ExcludeResponseHeaders, ","),
+			Usage: "Response headers recordings leave out. A list replaces the default; an empty one keeps every header.",
 			Set: func(c *Config, v config.Value) error {
 				section(&c.Record, *defaultRecordConfig()).ExcludeResponseHeaders = v.List
 				return nil

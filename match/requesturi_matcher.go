@@ -70,9 +70,10 @@ func newRequestTarget(u *url.URL) requestTarget {
 }
 
 // matches reports whether u has the path and query of t, and its fragment when t has one. The path goes first: it
-// tells most requests apart, without parsing their query.
+// tells most requests apart, without parsing their query. A URL without a path, such as the target of a CONNECT or
+// mailto:x, names no request target: it matches none.
 func (t requestTarget) matches(u *url.URL) bool {
-	if !sameSegments(t.segments, escapedPath(u)) {
+	if !sameSegments(t.segments, u.EscapedPath()) {
 		return false
 	}
 
@@ -94,7 +95,8 @@ func (t requestTarget) matches(u *url.URL) bool {
 	return maps.EqualFunc(t.query, got, slices.Equal)
 }
 
-// escapedPath is the path of u, escaped, and "/" when empty, as in a request.
+// escapedPath is the path of an expected URL, escaped, and "/" when empty: http://h names the root, as a request to it
+// does.
 func escapedPath(u *url.URL) string {
 	if path := u.EscapedPath(); path != "" {
 		return path

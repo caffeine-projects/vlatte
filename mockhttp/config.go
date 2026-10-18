@@ -330,7 +330,8 @@ func (cb *ConfigBuilder) Colors(v bool) *ConfigBuilder {
 	return cb
 }
 
-// RedactHeader redacts the given HTTP header names in logs.
+// RedactHeader hides the values of the given HTTP headers in logs and recordings. A recording writes <redacted> for
+// the values of a response header, and matches a request header that RecordRequestHeaders names by its presence.
 func (cb *ConfigBuilder) RedactHeader(names ...string) *ConfigBuilder {
 	for _, name := range names {
 		cb.conf.HeaderNamesToRedact[strings.ToLower(name)] = struct{}{}

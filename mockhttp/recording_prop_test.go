@@ -346,6 +346,8 @@ func TestPropRecording_RoundTrip(t *testing.T) {
 			RecordBodyFiles(rapid.Bool().Draw(rt, "body files")),
 			RecordMaxInlineBody(rapid.SampledFrom([]int64{0, 16}).Draw(rt, "max inline body")),
 			RecordRequestHeaders("Accept"),
+			// Every header the target sent, its cookies too.
+			RecordExcludeResponseHeaders(),
 		}
 
 		require.NoError(rt, rec.StartRecording(options...))

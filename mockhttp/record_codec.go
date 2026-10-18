@@ -121,13 +121,17 @@ type recordedSequence struct {
 type recordCodec struct {
 	headers   []string            // the request headers recordings match, canonical
 	skip      map[string]struct{} // the response headers recordings leave out, canonical
+	redact    map[string]struct{} // the headers whose values recordings hide, in lower case, as Config holds them
 	maxInline int64
 	logger    *zerolog.Logger
 }
 
-func newRecordCodec(conf *RecordConfig, logger *zerolog.Logger) *recordCodec {
+// newRecordCodec returns the codec of a recording with conf, which hides the values of the headers redact names, as
+// the request log does.
+func newRecordCodec(conf *RecordConfig, redact map[string]struct{}, logger *zerolog.Logger) *recordCodec {
 	c := &recordCodec{
 		skip:      make(map[string]struct{}, len(_forbiddenHeaders)+2+len(conf.ExcludeResponseHeaders)),
+		redact:    redact,
 		maxInline: cmp.Or(conf.MaxInlineBody, _defaultMaxInlineBody),
 		logger:    logger,
 	}
@@ -182,6 +186,9 @@ func (c *recordCodec) Request(x *recordedCall, files *vlatte.RecordFiles) (Recor
 		case v == "":
 			// Header.Get reads an empty header as a missing one.
 			q.Header[name] = MatcherSpec{"not", "present"}
+		case c.redacted(name):
+			// Its value is a secret, such as a token: the recording matches that it came, not what it was.
+			q.Header[name] = MatcherSpec{"present"}
 		case !utf8.ValidString(v):
 			c.logger.Warn().Str("call", c.Name(x)).Msgf("recorder: the recording matches any %s: its value isn't UTF-8 text", name)
 		case name == HeaderContentType:
@@ -411,13 +418,22 @@ func (c *recordCodec) multipart(x *recordedCall, contentType string, files *vlat
 
 // header returns the headers of x's response that a recording keeps, under their canonical names: those the server
 // doesn't set, and the recording doesn't leave out. The Content-Length of a HEAD answer, which has no body for the
-// server to measure, is kept. A value that isn't UTF-8 text is left out.
+// server to measure, is kept. A value that isn't UTF-8 text is left out, and a redacted header has one value that
+// stands for its values.
 func (c *recordCodec) header(x *recordedCall, h http.Header) map[string][]string {
 	out := make(map[string][]string, len(h))
 
 	for k, values := range h {
 		name := http.CanonicalHeaderKey(k)
 		if _, skip := c.skip[name]; skip && (!strings.EqualFold(name, HeaderContentLength) || x.method != http.MethodHead) {
+			continue
+		}
+
+		if c.redacted(name) {
+			if len(values) > 0 {
+				out[name] = []string{_redacted}
+			}
+
 			continue
 		}
 
@@ -432,6 +448,12 @@ func (c *recordCodec) header(x *recordedCall, h http.Header) map[string][]string
 	}
 
 	return out
+}
+
+// redacted reports whether recordings hide the values of the header name.
+func (c *recordCodec) redacted(name string) bool {
+	_, ok := c.redact[strings.ToLower(name)]
+	return ok
 }
 
 // canonicalURL writes the path and query of u one way, so requests a recording can't tell apart are recorded alike.

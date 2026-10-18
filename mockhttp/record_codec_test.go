@@ -534,7 +534,7 @@ func TestRecordCodec_BodiesTheServerWouldntRead(t *testing.T) {
 	// The server reads no such body, so recordings don't meet them: still, what a recording can't read, it doesn't
 	// match. A Content-Type it can't write matches any.
 	nop := zerolog.Nop()
-	c := newRecordCodec(defaultRecordConfig(), &nop)
+	c := newRecordCodec(defaultRecordConfig(), nil, &nop)
 
 	call := func(contentType, body string) *recordedCall {
 		return &recordedCall{
@@ -672,7 +672,7 @@ func TestRecordCodec_MethodsMatchIgnoringCase(t *testing.T) {
 	// A method matches ignoring case, so calls that differ in case are one request: the default backend answers 405
 	// to them, other backends pass them on.
 	nop := zerolog.Nop()
-	c := newRecordCodec(defaultRecordConfig(), &nop)
+	c := newRecordCodec(defaultRecordConfig(), nil, &nop)
 
 	x := &recordedCall{method: "purge", url: &url.URL{Path: "/p"}, header: make(http.Header)}
 
@@ -744,7 +744,8 @@ func TestRecording_ResponseSection(t *testing.T) {
 		left    []string // headers the recording leaves out, which the replay doesn't send
 	}{
 		{
-			name: "a status and every header value, in order",
+			name:    "a status and every header value, in order",
+			options: []RecordConfigurer{RecordExcludeResponseHeaders()},
 			reply: write(http.StatusCreated, http.Header{
 				HeaderContentType: {MIMETextPlain}, "Set-Cookie": {"a=1", "b=2"}, "X-Multi": {"2", "1"},
 			}, []byte("hi")),
@@ -776,6 +777,20 @@ func TestRecording_ResponseSection(t *testing.T) {
 			reply:   write(http.StatusOK, http.Header{"Set-Cookie": {"a=1"}, "X-Keep": {"1"}}, nil),
 			want:    RecordedResponse{Status: http.StatusOK, Header: map[string][]string{"X-Keep": {"1"}}},
 			left:    []string{"Set-Cookie"},
+		},
+		{
+			// A cookie is the service's session: mock files, often committed, don't keep it unless asked.
+			name:  "a cookie is left out by default",
+			reply: write(http.StatusOK, http.Header{"Set-Cookie": {"session=secret"}, "X-Keep": {"1"}}, nil),
+			want:  RecordedResponse{Status: http.StatusOK, Header: map[string][]string{"X-Keep": {"1"}}},
+			left:  []string{"Set-Cookie"},
+		},
+		{
+			name:    "headers to leave out replace the default",
+			options: []RecordConfigurer{RecordExcludeResponseHeaders("x-drop")},
+			reply:   write(http.StatusOK, http.Header{"Set-Cookie": {"a=1"}, "X-Drop": {"1"}}, nil),
+			want:    RecordedResponse{Status: http.StatusOK, Header: map[string][]string{"Set-Cookie": {"a=1"}}},
+			left:    []string{"X-Drop"},
 		},
 		{
 			name:  "a gzip body is recorded decoded",
@@ -986,6 +1001,40 @@ func TestRecording_ResponseSection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRecording_HidesTheValuesOfRedactedHeaders(t *testing.T) {
+	// The headers the server's config redacts hold secrets, such as tokens: the request log hides their values, and
+	// so do the mock files, often committed. A redacted request header still matches, by its presence.
+	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Token", "TOKEN-SECRET")
+		_, _ = io.WriteString(w, "ok")
+	})
+
+	m := MustNew(Setup().Silent().RedactHeader("Authorization", "x-token"))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	dir := t.TempDir()
+	require.NoError(t, m.StartRecording(RecordDir(dir), RecordTarget(target.URL), RecordRequestHeaders("Authorization")))
+
+	do(t, http.MethodGet, m.URL("/me"), http.Header{"Authorization": {"Bearer AUTH-SECRET"}}, nil)
+
+	data, err := os.ReadFile(stopRecording(t, m).Recordings[0].File)
+	require.NoError(t, err)
+	require.NotContains(t, string(data), "SECRET")
+
+	mock := onlyMock(t, dir)
+	require.Equal(t, []string{_redacted}, mock.Response.Header["X-Token"])
+	require.Equal(t, MatcherSpec{"present"}, mock.Request.Header["Authorization"])
+
+	replay := replayServer(t, dir)
+
+	_, body := do(t, http.MethodGet, replay.URL("/me"), http.Header{"Authorization": {"Bearer another"}}, nil)
+	require.Equal(t, "ok", string(body), "any value matches")
+
+	res, _ := do(t, http.MethodGet, replay.URL("/me"), nil, nil)
+	require.Equal(t, StatusNoMatch, res.StatusCode, "no header doesn't")
 }
 
 // requireSameAnswer requires a replayed answer to be the original one: the same status, headers, trailers and body,

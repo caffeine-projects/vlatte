@@ -49,14 +49,17 @@ type RecordConfig struct {
 	// Request().Header("X-Record", match.Equal("yes")). The recording uses its request matchers only.
 	Filter *Builder
 
-	// SSLVerify verifies the TLS certificate of the Target.
-	SSLVerify bool
+	// SkipSSLVerify skips the verification of the Target's TLS certificate, such as for a self-signed one. A recording
+	// sends the target its requests, credentials included, so it verifies the target by default.
+	SkipSSLVerify bool
 
-	// RequestHeaders are the request headers a recording matches: the first value each had, or its absence. A
-	// recording matches no other header.
+	// RequestHeaders are the request headers a recording matches: the first value each had, or its absence. One that
+	// ConfigBuilder.RedactHeader names matches by its presence, so its value isn't written. A recording matches no
+	// other header.
 	RequestHeaders []string
 
-	// ExcludeResponseHeaders are the response headers a recording leaves out, in any case, such as Set-Cookie.
+	// ExcludeResponseHeaders are the response headers a recording leaves out, in any case. Defaults to Set-Cookie, so
+	// mock files hold no session of the service. A list replaces the default.
 	ExcludeResponseHeaders []string
 
 	// BodyFiles writes every response body to a file of its own, next to the mock file, instead of inline.
@@ -99,11 +102,12 @@ func (f recordConfigFunc) Apply(c *RecordConfig) error {
 
 func defaultRecordConfig() *RecordConfig {
 	return &RecordConfig{
-		Dir:           _defaultRecordDir,
-		Format:        _defaultRecordFormat,
-		MaxInlineBody: _defaultMaxInlineBody,
-		MaxBodySize:   _defaultMaxBodySize,
-		Repeats:       vlatte.RecordSequence,
+		Dir:                    _defaultRecordDir,
+		Format:                 _defaultRecordFormat,
+		ExcludeResponseHeaders: []string{"Set-Cookie"},
+		MaxInlineBody:          _defaultMaxInlineBody,
+		MaxBodySize:            _defaultMaxBodySize,
+		Repeats:                vlatte.RecordSequence,
 	}
 }
 
@@ -114,7 +118,7 @@ func (r *RecordConfig) Apply(c *RecordConfig) error {
 	c.Format = cmp.Or(r.Format, c.Format)
 	c.Target = cmp.Or(r.Target, c.Target)
 	c.Filter = cmp.Or(r.Filter, c.Filter)
-	c.SSLVerify = c.SSLVerify || r.SSLVerify
+	c.SkipSSLVerify = c.SkipSSLVerify || r.SkipSSLVerify
 	c.BodyFiles = c.BodyFiles || r.BodyFiles
 	c.MaxInlineBody = cmp.Or(r.MaxInlineBody, c.MaxInlineBody)
 	c.MaxBodySize = cmp.Or(r.MaxBodySize, c.MaxBodySize)
@@ -296,7 +300,8 @@ func RecordRequestHeaders(names ...string) RecordConfigurer {
 	return recordConfigFunc(func(c *RecordConfig) { c.RequestHeaders = names })
 }
 
-// RecordExcludeResponseHeaders sets the response headers recordings leave out, in any case.
+// RecordExcludeResponseHeaders sets the response headers recordings leave out, in any case, in place of the default
+// Set-Cookie. With no names, recordings keep every response header.
 func RecordExcludeResponseHeaders(names ...string) RecordConfigurer {
 	return recordConfigFunc(func(c *RecordConfig) { c.ExcludeResponseHeaders = names })
 }
@@ -323,9 +328,10 @@ func RecordFilter(filter *Builder) RecordConfigurer {
 	return recordConfigFunc(func(c *RecordConfig) { c.Filter = filter })
 }
 
-// RecordSSLVerify sets whether the TLS certificate of the target is verified.
-func RecordSSLVerify(v bool) RecordConfigurer {
-	return recordConfigFunc(func(c *RecordConfig) { c.SSLVerify = v })
+// RecordSkipSSLVerify sets whether the verification of the target's TLS certificate is skipped. See
+// RecordConfig.SkipSSLVerify.
+func RecordSkipSSLVerify(v bool) RecordConfigurer {
+	return recordConfigFunc(func(c *RecordConfig) { c.SkipSSLVerify = v })
 }
 
 // RecordBodyFiles sets whether every response body goes to a file of its own, instead of inline.

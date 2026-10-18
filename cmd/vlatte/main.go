@@ -169,10 +169,15 @@ func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stder
 
 	<-ctx.Done()
 
-	// A recording writes what it took: a call or a mock it couldn't record fails the run.
-	if _, err := m.StopRecording(context.Background()); err != nil && !errors.Is(err, vlatte.ErrNotRecording) {
+	// A recording writes what it took: a call or a mock it couldn't record fails the run. Serving the recordings can
+	// fail too, such as for a mock ID a mock file holds: the server is exiting, so that is only reported.
+	res, err := m.StopRecording(context.Background())
+	if err != nil && !errors.Is(err, vlatte.ErrNotRecording) {
 		_, _ = fmt.Fprintln(stderr, err)
-		return 1
+
+		if res == nil || res.Status.Failed > 0 {
+			return 1
+		}
 	}
 
 	return 0

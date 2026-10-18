@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -260,24 +261,24 @@ func TestRecording_ATargetsRedirectIsPassedOn(t *testing.T) {
 }
 
 func TestRecording_ATLSTarget(t *testing.T) {
-	// A target serving TLS with a certificate no one signed, as test servers do, is recorded, unless the recording
-	// verifies its certificate.
+	// A recording sends its target the requests it takes, credentials included: it verifies the target's certificate,
+	// so a certificate no one signed, as test servers have, fails the call. Skipping the verification records it.
 	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "secure") }))
 	t.Cleanup(target.Close)
 
 	m := mockedServer(t, Setup().Silent())
 	require.NoError(t, m.StartRecording(RecordDir(t.TempDir()), RecordTarget(target.URL)))
 
-	_, body := do(t, http.MethodGet, m.URL("/a"), nil, nil)
-	require.Equal(t, "secure", string(body))
-	require.Len(t, stopRecording(t, m).Recordings, 1)
-
-	require.NoError(t, m.StartRecording(RecordDir(t.TempDir()), RecordTarget(target.URL), RecordSSLVerify(true)))
-
 	res, body := do(t, http.MethodGet, m.URL("/a"), nil, nil)
 	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderXVlatteError))
 	require.Contains(t, string(body), "certificate")
 	require.Empty(t, stopRecording(t, m).Recordings)
+
+	require.NoError(t, m.StartRecording(RecordDir(t.TempDir()), RecordTarget(target.URL), RecordSkipSSLVerify(true)))
+
+	_, body = do(t, http.MethodGet, m.URL("/a"), nil, nil)
+	require.Equal(t, "secure", string(body))
+	require.Len(t, stopRecording(t, m).Recordings, 1)
 }
 
 func TestRecording_TargetConnectionsCloseAtStop(t *testing.T) {
@@ -393,4 +394,52 @@ func TestRecording_DescribeConfigNamesTheTarget(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	require.Contains(t, m.DescribeConfig(), "Recording: rec\nRecording Target: https://api.example.com\n")
+}
+
+func TestRecording_LogsTheAnswersOfItsTarget(t *testing.T) {
+	// No mock answers a call its target answers: the request log still says how the call ended, with the answer.
+	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "from the target") })
+
+	t.Run("structured", func(t *testing.T) {
+		logs := &logBuffer{}
+		logger := zerolog.New(logs)
+
+		m := MustNew(Setup().Logger(&logger).LogVerbosity(vlatte.LogBody))
+		m.MustStart()
+		t.Cleanup(m.Close)
+		require.NoError(t, m.StartRecording(RecordDir(t.TempDir()), RecordTarget(target.URL)))
+
+		do(t, http.MethodGet, m.URL("/a"), nil, nil)
+		stopRecording(t, m)
+
+		require.Contains(t, logs.String(), "REQUEST PROXIED GET /a")
+		require.Contains(t, logs.String(), `"status":200`)
+		require.Contains(t, logs.String(), "from the target")
+	})
+
+	t.Run("descriptive", func(t *testing.T) {
+		// The descriptive log goes to os.Stdout, which the server takes when it's made.
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+
+		stdout := os.Stdout
+		os.Stdout = w
+		m := MustNew(Setup().UseDescriptiveLogger().Colors(false).LogVerbosity(vlatte.LogBody))
+		os.Stdout = stdout
+
+		m.MustStart()
+		require.NoError(t, m.StartRecording(RecordDir(t.TempDir()), RecordTarget(target.URL)))
+
+		do(t, http.MethodGet, m.URL("/a"), nil, nil)
+		stopRecording(t, m)
+
+		m.Close()
+		require.NoError(t, w.Close())
+
+		out, err := io.ReadAll(r)
+		require.NoError(t, err)
+		require.Contains(t, string(out), "REQUEST PROXIED")
+		require.Contains(t, string(out), "Status: 200")
+		require.Contains(t, string(out), "from the target")
+	})
 }

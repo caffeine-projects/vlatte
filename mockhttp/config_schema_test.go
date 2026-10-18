@@ -104,7 +104,9 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 			[]string{"--record-target", "https://api.example.com"},
 			func(t *testing.T, c *Config) { require.Equal(t, "https://api.example.com", c.Record.Target) },
 		},
-		"record-ssl-verify": {[]string{"--record-ssl-verify"}, func(t *testing.T, c *Config) { require.True(t, c.Record.SSLVerify) }},
+		"record-skip-ssl-verify": {
+			[]string{"--record-skip-ssl-verify"}, func(t *testing.T, c *Config) { require.True(t, c.Record.SkipSSLVerify) },
+		},
 		"record-methods": {
 			[]string{"--record-methods", "GET,post"}, func(t *testing.T, c *Config) { require.Equal(t, []string{"GET", "post"}, c.Record.Methods) },
 		},

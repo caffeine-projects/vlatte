@@ -566,6 +566,25 @@ func TestRecordSession_Transforms(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, files)
 	})
+
+	t.Run("the result counts the responses the file holds", func(t *testing.T) {
+		// Responses says how many responses the mock replies with: those the transforms left.
+		first := func(m *kvMock) error {
+			m.Responses = m.Responses[:1]
+			return nil
+		}
+
+		s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{
+			Transforms: []func(*kvMock) error{first},
+		})
+		s.Record(kvCall{key: "a", value: "1"}, 1)
+		s.Record(kvCall{key: "a", value: "2"}, 1)
+
+		res, err := s.Stop(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, []string{"1"}, valuesOf(t, res.Recordings[0].File))
+		require.Equal(t, 1, res.Recordings[0].Responses)
+	})
 }
 
 func TestRecordSession_FailingCallsAreTheirsOnly(t *testing.T) {
@@ -1140,25 +1159,30 @@ func TestRecordSession_RecreatesItsDirectory(t *testing.T) {
 }
 
 func TestRecordSession_ReplacesItsMockInAnotherFormat(t *testing.T) {
-	// A request recorded again into the same directory in another format replaces its mock: one ID, one file.
-	dir := t.TempDir()
+	// A request recorded again into the same directory in another format replaces its mock: one ID, one file. So does
+	// a directory whose name a glob reads as a pattern, such as rec[1]: two files of one ID wouldn't load.
+	for _, name := range []string{"rec", "rec[1]"} {
+		t.Run(name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), name)
 
-	for _, format := range []string{"json", "yaml"} {
-		s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{Dir: dir, Format: format})
-		s.Record(kvCall{key: "a", value: format}, 1)
+			for _, format := range []string{"json", "yaml"} {
+				s := newSession(t, &kvCodec{}, vlatte.RecordOptions[kvRequest, kvResponse]{Dir: dir, Format: format})
+				s.Record(kvCall{key: "a", value: format}, 1)
 
-		_, err := s.Stop(t.Context())
-		require.NoError(t, err)
+				_, err := s.Stop(t.Context())
+				require.NoError(t, err)
+			}
+
+			entries, err := os.ReadDir(dir)
+			require.NoError(t, err)
+			require.Len(t, entries, 1, "one mock file")
+			require.Equal(t, ".yaml", filepath.Ext(entries[0].Name()))
+
+			data, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+			require.NoError(t, err)
+			require.Contains(t, string(data), "value: yaml")
+		})
 	}
-
-	mocks, err := filepath.Glob(filepath.Join(dir, "*.mock.*"))
-	require.NoError(t, err)
-	require.Len(t, mocks, 1)
-	require.Equal(t, ".yaml", filepath.Ext(mocks[0]))
-
-	data, err := os.ReadFile(mocks[0])
-	require.NoError(t, err)
-	require.Contains(t, string(data), "value: yaml")
 }
 
 func TestRecordSession_EqualAnswersWriteTheMockOnce(t *testing.T) {

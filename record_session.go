@@ -409,7 +409,7 @@ func (s *RecordSession[X, Q, S]) flush() {
 
 // write writes the mock of g: its body files, then its mock file. It reports whether to try again: the disk failed.
 func (s *RecordSession[X, Q, S]) write(g *recordGroup) (retry bool) {
-	data, name, err := s.encode(g)
+	data, name, responses, err := s.encode(g)
 	if err != nil {
 		s.failMock(g, fmt.Errorf("recorder: %s: %w", g.id, err))
 		return false
@@ -441,7 +441,7 @@ func (s *RecordSession[X, Q, S]) write(g *recordGroup) (retry bool) {
 
 	removeOtherFormats(file)
 
-	g.file, g.title = file, name
+	g.file, g.title, g.count = file, name, responses
 
 	if g.failing {
 		g.failing, g.err = false, nil
@@ -456,10 +456,10 @@ func (s *RecordSession[X, Q, S]) write(g *recordGroup) (retry bool) {
 	return false
 }
 
-// encode returns the mock file of g, and the name it has there: its request and responses decoded afresh, so a
-// transform changes this write only, run through the transforms, written by the codec, then in the format of the
-// recording.
-func (s *RecordSession[X, Q, S]) encode(g *recordGroup) (data []byte, name string, err error) {
+// encode returns the mock file of g, the name it has there, and how many responses it holds: its request and responses
+// decoded afresh, so a transform changes this write only, run through the transforms, written by the codec, then in
+// the format of the recording.
+func (s *RecordSession[X, Q, S]) encode(g *recordGroup) (data []byte, name string, responses int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic: %v", r)
@@ -468,36 +468,36 @@ func (s *RecordSession[X, Q, S]) encode(g *recordGroup) (data []byte, name strin
 
 	m := &RecordedMock[Q, S]{ID: g.id, Name: g.name, Responses: make([]S, len(g.responses))}
 	if err := json.Unmarshal(g.request, &m.Request); err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 
 	for i, r := range g.responses {
 		if err := json.Unmarshal(r, &m.Responses[i]); err != nil {
-			return nil, "", err
+			return nil, "", 0, err
 		}
 	}
 
 	for i, transform := range s.opts.Transforms {
 		if err := transform(m); err != nil {
-			return nil, "", fmt.Errorf("transform %d: %w", i, err)
+			return nil, "", 0, fmt.Errorf("transform %d: %w", i, err)
 		}
 	}
 
 	// A mock without a response would answer what its protocol answers by default, not what was recorded.
 	if len(m.Responses) == 0 {
-		return nil, "", errors.New("the transforms left no response")
+		return nil, "", 0, errors.New("the transforms left no response")
 	}
 
 	m.ID = g.id
 
 	doc, err := value.ViaJSON(s.codec.Mock(m))
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 
 	data, err = config.Encode(doc, s.format)
 
-	return data, m.Name, err
+	return data, m.Name, len(m.Responses), err
 }
 
 // writeBody writes a body file. A file of that name holds the same content: it is named after it.
@@ -588,7 +588,7 @@ func (s *RecordSession[X, Q, S]) result() *RecordResult {
 			Name:      g.title,
 			File:      g.file,
 			BodyFiles: slices.Clone(g.bodyFiles),
-			Responses: len(g.responses),
+			Responses: g.count,
 		})
 	}
 
@@ -631,6 +631,7 @@ type recordGroup struct {
 	repeats   int      // how many times the one response came, while they are all the same
 	pending   []pendingFile
 	file      string
+	count     int // the responses its mock file holds, which a transform may change
 	bodyFiles []string
 	written   bool
 	failing   bool  // its last write failed
@@ -724,13 +725,12 @@ func writeAtomic(dir, file string, data []byte) error {
 }
 
 // removeOtherFormats removes the mock files file replaces in other formats, such as a.mock.yaml for a.mock.json: one
-// request has one ID, which one mock holds.
+// request has one ID, which one mock holds. It names them, never globs: a directory such as rec[1] reads as a pattern.
 func removeOtherFormats(file string) {
 	base := strings.TrimSuffix(file, filepath.Ext(file))
 
-	others, _ := filepath.Glob(base + ".*")
-	for _, other := range others {
-		if _, ok := config.Format(filepath.Ext(other)); ok && other != file {
+	for _, format := range config.Formats() {
+		if other := base + "." + format; other != file {
 			os.Remove(other)
 		}
 	}

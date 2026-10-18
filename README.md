@@ -407,7 +407,7 @@ A filter that fails takes nothing: the request is served as usual, and the failu
 |---|---|
 | Method | Ignoring case. |
 | Path and query | As `url` matches: `url: /items?page=2`. |
-| Headers | Those `RecordRequestHeaders` names, by their first value, or their absence. No other header. |
+| Headers | Those `RecordRequestHeaders` names, by their first value, or their absence. A redacted one by its presence. No other header. |
 | Body | A JSON body as JSON, whatever its spacing and member order. A urlencoded or multipart form by all its text fields. Other text as it is, and no body as none. The media type of the `Content-Type` too. |
 | Files of a form | By name, content type and content, as `form_file` patterns. |
 
@@ -415,21 +415,23 @@ Calls a recording can't tell apart are one mock, whose answers play in turn, the
 
 A recording doesn't match what it can't read, and then takes any body: one that isn't UTF-8 text, or is larger than `MaxInlineBody`, or that `MaxBodyParsingLimit` cut, or that a parser of the server's config read, or the urlencoded form of a request other than POST, PUT and PATCH, which Go doesn't read. The forward proxy's host isn't recorded: one path on two hosts is one mock.
 
-**What it answers.** The status, the headers but those the server sets (`Date`, `Content-Length` and the hop-by-hop ones), the trailers, and the body as the client got it, after the steps of the mock.
+**What it answers.** The status, the headers but those the server sets (`Date`, `Content-Length` and the hop-by-hop ones) and `Set-Cookie`, the trailers, and the body as the client got it, after the steps of the mock.
 - A text body up to `MaxInlineBody`, 1 MiB by default, is written in the mock file. Other bodies go to files next to it, named after their content, so equal bodies share a file. `RecordBodyFiles(true)` writes every body to a file.
 - A gzip body that fits in `MaxInlineBody` decoded is recorded decoded, with `encoding: gzip`, and compressed again when it is served, into bytes that may differ. So a gzip body with a header or trailer that holds for its bytes, a strong `ETag`, `Content-MD5`, `Digest`, `Content-Digest`, `Repr-Digest` or `Content-Range`, is kept as sent, as are other encoded bodies, with their `Content-Encoding`.
 - A larger body goes to a file as it streams, so it never sits in memory whole. When the disk is slower than the sender, the answer waits for it, a second in all at most. Past that, or past `MaxBodySize`, 1 GiB by default, the call isn't recorded, and the client still gets every byte.
 - A body file plays back streamed, without a `Content-Length`.
-- `RecordExcludeResponseHeaders` leaves headers out, such as `Set-Cookie`. `RecordTransform` changes each recording, as Go values, before it is written:
+- `RecordExcludeResponseHeaders` sets the headers left out, in place of `Set-Cookie`: name it among them to keep leaving it out, or name none to keep every header. `RecordTransform` changes each recording, as Go values, before it is written:
 
 ```go
 mockhttp.RecordTransform(func(r *mockhttp.RecordedMock) error {
 	for i := range r.Responses {
-		delete(r.Responses[i].Header, "Set-Cookie")
+		delete(r.Responses[i].Header, "X-Request-Id")
 	}
 	return nil
 })
 ```
+
+**Secrets.** Mock files are plain text, and often committed: review them first. They hold the request bodies recordings match, such as a password or a `client_secret`, the values of the headers `RecordRequestHeaders` names, the response headers and bodies, such as tokens, and the query, in the URL and in the file name. `Set-Cookie` is left out by default. The headers `Setup().RedactHeader(...)` names keep their values out too: a response header is written `<redacted>`, and a request header matches by its presence. `RecordTransform` hides the rest.
 
 **Files.** A recording writes a mock file named after its request, such as `GET-items-page-2-<hash>.mock.json`, or `.yaml` or `.yml` with `RecordFormat`, into its directory: `testdata/_mocks_recorded` by default, from `root_dir`. A mock file appears whole, or not at all.
 
@@ -443,10 +445,10 @@ record:
   target: https://api.example.com
   paths: ["/v1/*"]
   request_headers: [Accept]
-  exclude_response_headers: [Set-Cookie]
+  exclude_response_headers: [Set-Cookie, X-Request-Id]
 ```
 
-The target's TLS certificate isn't verified, as proxy replies don't verify theirs by default: `record.ssl_verify` verifies it. `vlatte --help` lists every `record` setting.
+The target's TLS certificate is verified: a recording sends the target its requests, credentials included. `record.skip_ssl_verify`, or `RecordSkipSSLVerify(true)`, skips it, such as for a self-signed certificate. `vlatte --help` lists every `record` setting.
 
 ## Failures
 

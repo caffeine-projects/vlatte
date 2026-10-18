@@ -102,7 +102,7 @@ func (app *Server) startRecording(conf *RecordConfig) error {
 	}
 
 	rec := &recording{
-		codec:  newRecordCodec(conf, app.logger),
+		codec:  newRecordCodec(conf, app.config.HeaderNamesToRedact, app.logger),
 		conf:   conf,
 		dir:    conf.dir(app.config.RootDir),
 		served: make(chan struct{}),
@@ -110,7 +110,7 @@ func (app *Server) startRecording(conf *RecordConfig) error {
 	}
 
 	if conf.Target != "" {
-		target, err := From(conf.Target).SSLVerify(conf.SSLVerify).NewReplier(app)
+		target, err := From(conf.Target).SSLVerify(!conf.SkipSSLVerify).NewReplier(app)
 		if err != nil {
 			return fmt.Errorf("recorder: target: %w", err)
 		}

@@ -61,6 +61,10 @@ func TestRequestURI(t *testing.T) {
 		{name: "a path that starts with //", expected: "//a/b", value: "http://h//a/b", want: true},
 		{name: "a path that starts with // is not a host", expected: "//a/b", value: "http://h/b", want: false},
 		{name: "a request query that doesn't parse", expected: "/x?a=1", value: "/x?a=%zz", want: false},
+		// A server reads a CONNECT to a host as a URL without a path: a mock of the root mustn't answer a tunnel.
+		{name: "a URL without a path has no request target", expected: "/", value: "http://h", want: false},
+		{name: "an opaque URL has no request target", expected: "/", value: "mailto:x", want: false},
+		{name: "an expected URL without a path is the root", expected: "http://h", value: "http://h/", want: true},
 	}
 
 	for _, tc := range tests {
@@ -167,10 +171,10 @@ func FuzzRequestURI(f *testing.F) {
 		_, err := m.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), value))
 		require.NoError(t, err)
 
-		// A URL matches what RequestURI reads of itself, as the target of a request: one that starts with "/". An
-		// opaque URL, such as mailto:x, has none.
+		// A URL matches what RequestURI reads of itself, as the target of a request: one whose path starts with "/". A
+		// URL without a path, such as mailto:x, has none.
 		u, err := url.Parse(value)
-		if err == nil && u.Opaque == "" && u.Fragment == "" && u.RawFragment == "" && strings.HasPrefix(u.RequestURI(), "/") {
+		if err == nil && u.Fragment == "" && u.RawFragment == "" && strings.HasPrefix(u.EscapedPath(), "/") {
 			same := RequestURI(u.RequestURI())
 			ok, err := same.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), u))
 			require.NoError(t, err)
