@@ -1146,3 +1146,45 @@ func TestProxyReply_RefusesDotSegments(t *testing.T) {
 
 	require.Zero(t, calls.Load(), "the target got a path with a dot segment")
 }
+
+func TestProxyReply_ATargetWithCredentialsIsVerified(t *testing.T) {
+	// A target's credentials go to whoever answers for its host: without verifying its certificate, that may be anyone
+	// on the way. Over https, a target with credentials fails the build unless the proxy verifies its certificate, or
+	// a transport of the caller's, which decides that, sends to it. Over http they go in cleartext, as to local targets.
+	got := make(chan string, 1)
+	target := httptest.NewTLSServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got <- r.Header.Get(HeaderAuthorization)
+	}))
+	t.Cleanup(target.Close)
+
+	withCredentials, err := url.Parse(target.URL)
+	require.NoError(t, err)
+	withCredentials.User = url.UserPassword("user", "secret")
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	t.Run("unverified", func(t *testing.T) {
+		_, err := AnyMethod().Reply(From(withCredentials.String())).Build(m)
+		require.EqualError(t, err, fmt.Sprintf("reply_proxy: target %q has credentials: verify its certificate with SSLVerify(true), ssl_verify in mock files, or a Transport of yours", withCredentials.Redacted()))
+	})
+
+	t.Run("verified", func(t *testing.T) {
+		_, err := AnyMethod().Reply(From(withCredentials.String()).SSLVerify(true)).Build(m)
+		require.NoError(t, err)
+	})
+
+	t.Run("through a transport of the caller's", func(t *testing.T) {
+		m.MustMock(Getf("/p").Reply(From(withCredentials.String()).Transport(target.Client().Transport)))
+
+		status, _ := get(t, m, "/p")
+		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, "Basic dXNlcjpzZWNyZXQ=", <-got, "user:secret")
+	})
+
+	t.Run("over http", func(t *testing.T) {
+		_, err := AnyMethod().Reply(From("http://user:secret@127.0.0.1:1")).Build(m)
+		require.NoError(t, err)
+	})
+}

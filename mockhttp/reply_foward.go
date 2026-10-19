@@ -176,7 +176,8 @@ func (r *ProxyReply) SkipSSLVerify() *ProxyReply {
 }
 
 // SSLVerify sets whether the target's TLS certificate is verified. It isn't by default, so a target with a
-// self-signed certificate answers: set it for a target that gets credentials.
+// self-signed certificate answers. An https target with credentials, such as https://user:pass@api, needs it, or a
+// Transport of yours: the build of the mock fails otherwise.
 func (r *ProxyReply) SSLVerify(v bool) *ProxyReply {
 	r.sslVerify = v
 	return r
@@ -225,6 +226,11 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 	}
 
 	if p.roundTripper == nil {
+		// Credentials go to whoever answers for the target's host: over https, verifying its certificate makes it the target.
+		if t := r.target; t.User != nil && t.Scheme == "https" && !r.sslVerify {
+			return nil, fmt.Errorf("reply_proxy: target %q has credentials: verify its certificate with SSLVerify(true), ssl_verify in mock files, or a Transport of yours", t.Redacted())
+		}
+
 		p.transport = &http.Transport{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: !r.sslVerify,
