@@ -53,11 +53,11 @@ type Server struct {
 	rwMutex            sync.RWMutex
 	proxy              *reverseProxy
 
-	data      map[string]any
-	logger    *zerolog.Logger
-	startOnce sync.Once
-	closed    atomic.Bool // set by Close: a closed server doesn't start again
-	admin     *admin.Admin[*Mock]
+	data    map[string]any
+	logger  *zerolog.Logger
+	started atomic.Bool // set by the first start: a server starts once
+	closed  atomic.Bool // set by Close: a closed server doesn't start again
+	admin   *admin.Admin[*Mock]
 
 	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
 	events *vlatte.EventRunner
@@ -276,8 +276,9 @@ func (app *Server) Name() string {
 }
 
 // Start starts the mock server. It listens, so loaders can read URL, loads the mocks and starts the recording the
-// config sets, then serves: the first request finds them. A closed server doesn't start again: Start returns
-// http.ErrServerClosed. A start that fails to listen, load or serve closes the server, so nothing listens.
+// config sets, then serves: the first request finds them. A server starts once: Start returns vlatte.ErrStarted once it
+// started, and http.ErrServerClosed once it closed. A start that fails to listen, load or serve closes the server, so
+// nothing listens.
 func (app *Server) Start() error {
 	return app.start(app.server.Listen)
 }
@@ -467,12 +468,16 @@ func (app *Server) DescribeConfig() string {
 // Internals
 // --
 
-// start starts the server with listen, the backend's Listen or ListenTLS. The backend listens first, so loaders
+// start starts the server once with listen, the backend's Listen or ListenTLS. The backend listens first, so loaders
 // can read URL, and serves once the mocks loaded and the recording started. A start that fails, or that a Close
 // overtook, closes the server.
 func (app *Server) start(listen func() error) error {
 	if app.closed.Load() {
 		return http.ErrServerClosed
+	}
+
+	if !app.started.CompareAndSwap(false, true) {
+		return vlatte.ErrStarted
 	}
 
 	err := listen()
@@ -496,12 +501,10 @@ func (app *Server) start(listen func() error) error {
 	return nil
 }
 
-// onStart loads the mocks once, then starts the recording the config sets, which records until the server closes, or
+// onStart loads the mocks, then starts the recording the config sets, which records until the server closes, or
 // StopRecording ends it.
-func (app *Server) onStart() (err error) {
-	app.startOnce.Do(func() { err = app.load() })
-
-	if err != nil {
+func (app *Server) onStart() error {
+	if err := app.load(); err != nil {
 		return err
 	}
 

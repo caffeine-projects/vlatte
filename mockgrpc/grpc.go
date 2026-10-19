@@ -27,6 +27,7 @@ type Server struct {
 	addr    string
 	storage vlatte.Store[*Mock]
 	served  chan struct{}
+	started atomic.Bool // set by the first start: a server starts once
 	closed  atomic.Bool // set by Close: a closed server doesn't start again
 }
 
@@ -99,10 +100,15 @@ func (app *Server) Prep(ctx context.Context, recipes ...Recipe) error {
 	return nil
 }
 
-// Start starts the mock server. A closed server doesn't start again: Start fails with grpc.ErrServerStopped.
+// Start starts the mock server. A server starts once: Start fails with vlatte.ErrStarted once it started, and with
+// grpc.ErrServerStopped once it closed. A start that fails to listen closes the server.
 func (app *Server) Start() error {
 	if app.closed.Load() {
 		return fmt.Errorf("server: Start: %w", grpc.ErrServerStopped)
+	}
+
+	if !app.started.CompareAndSwap(false, true) {
+		return fmt.Errorf("server: Start: %w", vlatte.ErrStarted)
 	}
 
 	lis := app.config.Listener
@@ -110,6 +116,7 @@ func (app *Server) Start() error {
 		var err error
 		lis, err = net.Listen("tcp", app.config.Addr)
 		if err != nil {
+			app.Close()
 			return fmt.Errorf("server: Start: failed to create listener: %w", err)
 		}
 	}

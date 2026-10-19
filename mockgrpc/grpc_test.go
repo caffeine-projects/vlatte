@@ -64,6 +64,31 @@ func TestServer_AClosedServerDoesntStartAgain(t *testing.T) {
 	})
 }
 
+func TestServer_StartsOnce(t *testing.T) {
+	// A second Start served a second listener and moved Addr: a server starts once, as the HTTP one does.
+	m := MustNew()
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	first := m.Addr()
+
+	require.ErrorIs(t, m.Start(), vlatte.ErrStarted)
+	require.Equal(t, first, m.Addr(), "the server serves where it started")
+}
+
+func TestServer_AStartThatFailsClosesTheServer(t *testing.T) {
+	// As the HTTP server does, a start that fails closes the server: it doesn't start again.
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = taken.Close() })
+
+	m := MustNew(Setup().Addr(taken.Addr().String()))
+	t.Cleanup(m.Close)
+
+	require.ErrorContains(t, m.Start(), "failed to create listener")
+	require.ErrorIs(t, m.Start(), grpc.ErrServerStopped)
+}
+
 func TestClose_WaitsForInFlightCalls(t *testing.T) {
 	m := MustNew()
 	pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})

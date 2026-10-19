@@ -637,3 +637,29 @@ func TestServer_ACloseDuringTheStartStopsIt(t *testing.T) {
 	require.Empty(t, m.URL())
 	requireRefused(t, l.Addr().String(), "a closed server serves nothing")
 }
+
+func TestServer_StartsOnce(t *testing.T) {
+	// #54: a second Start built a second backend on a new address, and Close closed only that one: the first kept
+	// serving. A server starts once.
+	for name, start := range map[string]func(*Server) error{
+		"Start":    (*Server).Start,
+		"StartTLS": (*Server).StartTLS,
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := MustNew(Setup().Silent())
+			t.Cleanup(m.Close)
+
+			require.NoError(t, start(m))
+			first := m.URL()
+
+			require.ErrorIs(t, start(m), vlatte.ErrStarted)
+			require.Equal(t, first, m.URL(), "the server serves where it started")
+
+			u, err := url.Parse(first)
+			require.NoError(t, err)
+
+			m.Close()
+			requireRefused(t, u.Host, "Close leaves nothing serving")
+		})
+	}
+}
