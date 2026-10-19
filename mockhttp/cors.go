@@ -90,14 +90,14 @@ func (b *CORSConfigBuilder) AllowCredentials(allow bool) *CORSConfigBuilder {
 	return b
 }
 
-// ExposeHeaders sets "Access-Control-Expose-Header" misc.Header
+// ExposeHeaders sets the header "Access-Control-Expose-Headers".
 func (b *CORSConfigBuilder) ExposeHeaders(headers ...string) *CORSConfigBuilder {
 	b.options.ExposeHeaders = strings.Join(headers, ",")
 	return b
 }
 
 // AllowedHeaders sets the allowed headers.
-// It will set the header "Access-Control-Allow-Header".
+// It will set the header "Access-Control-Allow-Headers".
 func (b *CORSConfigBuilder) AllowedHeaders(headers ...string) *CORSConfigBuilder {
 	b.options.AllowedHeaders = strings.Join(headers, ",")
 	return b
@@ -211,7 +211,7 @@ func configureOrigin(options *CORSConfig, r *http.Request, w http.ResponseWriter
 
 	// received a list of origins
 	// will check if the request origin is within the provided array and use it as the allowed origin
-	origin := r.Header.Get("origin")
+	origin := r.Header.Get(HeaderOrigin)
 	allowed := slices.Contains(origins, origin)
 
 	if allowed {
