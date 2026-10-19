@@ -1055,3 +1055,32 @@ func TestProxyReply_ATargetThatIsNoHTTPURLFailsTheBuild(t *testing.T) {
 		require.PanicsWithError(t, "reply_proxy: target: nil URL", func() { From((*url.URL)(nil)) })
 	})
 }
+
+func TestProxyReply_SendsTheClientTrailers(t *testing.T) {
+	// A client's trailers come after its body, and the server sets them on the request once it reads the body to its
+	// end. The request sent to the target is a copy: one made before the end, with a body the server read only part of,
+	// had trailers without values.
+	got := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		got <- r.Trailer.Get("X-Sum")
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent().MaxBodyParsingLimit(4))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Postf("/p").Reply(From(target.URL)))
+
+	// A reader of unknown length goes chunked, with the trailers after it.
+	req, err := http.NewRequest(http.MethodPost, m.URL("/p"), io.MultiReader(strings.NewReader("0123456789")))
+	require.NoError(t, err)
+	req.Trailer = http.Header{"X-Sum": {"abc"}}
+
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "abc", <-got)
+}

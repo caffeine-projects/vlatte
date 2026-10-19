@@ -312,6 +312,9 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 	out.Host = p.target.Host
 	out.RequestURI = ""
 
+	// The server sets the client's trailers on its request once it reads the body to the end, after this copy.
+	out.Trailer = req.RawRequest.Trailer
+
 	// The target's query comes first too.
 	switch {
 	case out.URL.RawQuery == "":
