@@ -1123,8 +1123,8 @@ func TestProxyReply_SendsTheTargetHostAsIs(t *testing.T) {
 
 func TestProxyReply_RefusesDotSegments(t *testing.T) {
 	// The target's path comes first, so ".." would climb out of it: /../../admin after http://api/v1 is /admin to a
-	// target that resolves dot segments. The proxy refuses them however they are written: plain, escaped, or with an
-	// escaped "/" that a target decodes before resolving.
+	// target that resolves dot segments. The proxy refuses them however they are written: plain, escaped, with an
+	// escaped "/" that a target decodes before resolving, with parameters, or before a backslash.
 	var calls atomic.Int64
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	t.Cleanup(target.Close)
@@ -1135,7 +1135,8 @@ func TestProxyReply_RefusesDotSegments(t *testing.T) {
 
 	m.MustMock(AnyMethod().Reply(From(target.URL + "/api/v1")))
 
-	for _, path := range []string{"/../../admin", "/%2e%2e/%2e%2e/admin", "/..%2F..%2Fadmin", "/./admin"} {
+	// Some targets read more as a dot segment: one with parameters, "..;", or split on a backslash, as Windows does.
+	for _, path := range []string{"/../../admin", "/%2e%2e/%2e%2e/admin", "/..%2F..%2Fadmin", "/./admin", "/..;/..;/admin", "/..%5C..%5Cadmin"} {
 		t.Run(path, func(t *testing.T) {
 			res, body := do(t, http.MethodGet, m.URL()+path, nil, nil)
 			require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
