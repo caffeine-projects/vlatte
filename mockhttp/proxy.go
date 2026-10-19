@@ -19,7 +19,8 @@ var _ ProxyConfigurer = (*ProxyConfig)(nil)
 // ProxyConfig configures a proxy.
 type ProxyConfig struct {
 	// Via sets a URL to route the request via another proxy server, with the transport the proxy makes. Its credentials
-	// go in its URL: a client's Proxy-Authorization is for this proxy, and doesn't go on.
+	// go in its URL: a client's Proxy-Authorization is for this proxy, and doesn't go on. Over https, set SSLVerify too,
+	// so they go to that proxy only.
 	Via string
 
 	// Timeout bounds the wait for the response headers of the host, with the transport the proxy makes.
