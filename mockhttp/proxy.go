@@ -18,7 +18,8 @@ var _ ProxyConfigurer = (*ProxyConfig)(nil)
 
 // ProxyConfig configures a proxy.
 type ProxyConfig struct {
-	// Via sets a URL to route the request via another proxy server, with the transport the proxy makes.
+	// Via sets a URL to route the request via another proxy server, with the transport the proxy makes. Its credentials
+	// go in its URL: a client's Proxy-Authorization is for this proxy, and doesn't go on.
 	Via string
 
 	// Timeout bounds the wait for the response headers of the host, with the transport the proxy makes.
@@ -154,9 +155,15 @@ func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) e
 }
 
 func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) error {
-	r.Header.Del(HeaderConnection)
+	// The host gets a copy, without the hop-by-hop headers of the client's connection, and its "Connection: close". The
+	// server sets the client's trailers on r once it reads the body to the end, after the copy.
+	out := r.Clone(r.Context())
+	out.RequestURI = ""
+	out.Close = false
+	out.Trailer = r.Trailer
+	removeRequestHopByHop(out.Header)
 
-	res, err := p.roundTripper.RoundTrip(r)
+	res, err := p.roundTripper.RoundTrip(out)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return err
@@ -164,6 +171,7 @@ func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) error 
 
 	defer res.Body.Close()
 
+	removeHopByHop(res.Header)
 	dropCORSHeaders(w, res.Header)
 
 	for k, vv := range res.Header {
