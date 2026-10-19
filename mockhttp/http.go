@@ -275,18 +275,11 @@ func (app *Server) Name() string {
 	return app.config.Name
 }
 
-// Start starts the mock server. A closed server doesn't start again: Start returns http.ErrServerClosed.
+// Start starts the mock server. It listens, so loaders can read URL, loads the mocks and starts the recording the
+// config sets, then serves: the first request finds them. A closed server doesn't start again: Start returns
+// http.ErrServerClosed. A start that fails to listen, load or serve closes the server, so nothing listens.
 func (app *Server) Start() error {
-	if app.closed.Load() {
-		return http.ErrServerClosed
-	}
-
-	err := app.server.Start()
-	if err != nil {
-		return err
-	}
-
-	return app.onStart()
+	return app.start(app.server.Listen)
 }
 
 // MustStart starts the mock server.
@@ -298,18 +291,9 @@ func (app *Server) MustStart() {
 	}
 }
 
-// StartTLS starts TLS on a mock server. A closed server doesn't start again: StartTLS returns http.ErrServerClosed.
+// StartTLS starts the mock server with TLS, as Start does.
 func (app *Server) StartTLS() error {
-	if app.closed.Load() {
-		return http.ErrServerClosed
-	}
-
-	err := app.server.StartTLS()
-	if err != nil {
-		return err
-	}
-
-	return app.onStart()
+	return app.start(app.server.ListenTLS)
 }
 
 // MustStartTLS starts TLS on a mock server.
@@ -482,6 +466,35 @@ func (app *Server) DescribeConfig() string {
 // --
 // Internals
 // --
+
+// start starts the server with listen, the backend's Listen or ListenTLS. The backend listens first, so loaders
+// can read URL, and serves once the mocks loaded and the recording started. A start that fails, or that a Close
+// overtook, closes the server.
+func (app *Server) start(listen func() error) error {
+	if app.closed.Load() {
+		return http.ErrServerClosed
+	}
+
+	err := listen()
+	if err == nil {
+		err = app.onStart()
+	}
+
+	if err == nil && app.closed.Load() {
+		err = http.ErrServerClosed
+	}
+
+	if err == nil {
+		err = app.server.Serve()
+	}
+
+	if err != nil {
+		app.Close()
+		return err
+	}
+
+	return nil
+}
 
 // onStart loads the mocks once, then starts the recording the config sets, which records until the server closes, or
 // StopRecording ends it.

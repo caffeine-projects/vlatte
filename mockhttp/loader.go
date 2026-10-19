@@ -16,7 +16,8 @@ import (
 
 // Loader loads mocks from outside the code, such as mock files.
 // Load runs on the first Start and on every Reload, so it replaces the mocks its last run added,
-// which Server.Remock does in one step.
+// which Server.Remock does in one step. At Start, the server listens already, so URL is set, and serves once the loaders
+// return.
 type Loader interface {
 	Load(app *Server) error
 }

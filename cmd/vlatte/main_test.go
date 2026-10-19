@@ -323,6 +323,28 @@ func getOrders(t *testing.T, addr string) {
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
+// firstAnswer gets url once the CLI listens, and returns the first answer it got: connection errors mean the CLI isn't
+// up yet, and are retried. Any answer counts, so the test sees what the first request got.
+func firstAnswer(t *testing.T, url string) (int, string) {
+	t.Helper()
+
+	var res *http.Response
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		r, err := http.Get(url)
+		if assert.NoError(c, err) {
+			res = r
+		}
+	}, 10*time.Second, 100*time.Millisecond)
+
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+
+	return res.StatusCode, string(body)
+}
+
 func TestCLI_ServesMockFilesWithWebhooks(t *testing.T) {
 	// #16: the CLI registered no on_complete listener, so a mock file with a webhook failed to load, and the CLI exited.
 	withoutDockerHost(t)
@@ -393,31 +415,13 @@ func TestCLI_RecordsThenPlaysBack(t *testing.T) {
 	}))
 	t.Cleanup(target.Close)
 
-	get := func(c require.TestingT, url string) (int, string) {
-		res, err := http.Get(url)
-		require.NoError(c, err)
-
-		defer res.Body.Close()
-
-		b, err := io.ReadAll(res.Body)
-		require.NoError(c, err)
-
-		return res.StatusCode, string(b)
-	}
-
 	addr := randomAddr(t)
 	stop := start(t, "--addr", addr, "--record", "--record-target", target.URL, "--log-level", "disabled")
 
-	// Until the recording starts, no mock answers.
-	require.EventuallyWithT(t, func(c *assert.CollectT) {
-		res, err := http.Get("http://" + addr + "/items?page=2")
-		if !assert.NoError(c, err) {
-			return
-		}
-
-		_ = res.Body.Close()
-		assert.Equal(c, http.StatusOK, res.StatusCode)
-	}, 10*time.Second, 100*time.Millisecond)
+	// The recording starts before the CLI serves (#54): the first request gets the target's answer.
+	status, body := firstAnswer(t, "http://"+addr+"/items?page=2")
+	require.Equal(t, http.StatusOK, status)
+	require.JSONEq(t, `{"page":"2"}`, body)
 
 	require.Equal(t, 0, stop(), "a stopped server exits cleanly")
 
@@ -430,15 +434,33 @@ func TestCLI_RecordsThenPlaysBack(t *testing.T) {
 	addr = randomAddr(t)
 	start(t, "--addr", addr, "--log-level", "disabled")
 
-	// The server answers before it loads the mock files (#54): wait until the recording answers.
-	require.EventuallyWithT(t, func(c *assert.CollectT) {
-		status, body := get(c, "http://"+addr+"/items?page=2")
-		assert.Equal(c, http.StatusOK, status)
-		assert.JSONEq(c, `{"page":"2"}`, body)
-	}, 10*time.Second, 100*time.Millisecond)
+	// The mock files load before the CLI serves (#54): the first request gets the recording.
+	status, body = firstAnswer(t, "http://"+addr+"/items?page=2")
+	require.Equal(t, http.StatusOK, status)
+	require.JSONEq(t, `{"page":"2"}`, body)
 
-	status, _ := get(t, "http://"+addr+"/items?page=3")
+	status, _ = firstAnswer(t, "http://"+addr+"/items?page=3")
 	require.Equal(t, mockhttp.StatusNoMatch, status, "a request the recording didn't take")
+}
+
+func TestCLI_AStartThatFailsLeavesNothingListening(t *testing.T) {
+	// #54: a mock file that didn't load failed the run, but the server went on listening, without mocks.
+	withoutDockerHost(t)
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.mock.yaml"), []byte("request: {method: GET, path: /x}\nresponse: {stauts: 200}\n"), 0o600))
+
+	addr := randomAddr(t)
+
+	var stderr bytes.Buffer
+
+	code := run(context.Background(), []string{"--addr", addr, "--mock-files", filepath.Join(dir, "*.yaml"), "--log-level", "disabled"}, io.Discard, &stderr)
+	require.Equal(t, 1, code)
+	require.Contains(t, stderr.String(), "unknown_key: response.stauts")
+
+	l, err := net.Listen("tcp", addr)
+	require.NoError(t, err, "the run left nothing listening on its address")
+	require.NoError(t, l.Close())
 }
 
 func TestCLI_ARecordingThatFailsFailsTheRun(t *testing.T) {

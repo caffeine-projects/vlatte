@@ -21,10 +21,13 @@ type BackendInfo struct {
 	URL string
 }
 
-// Backend is the HTTP server that serves a mock server's handler.
+// Backend is the HTTP server that serves a mock server's handler. A mock server starts it in two steps: Listen or
+// ListenTLS binds its address, so Info has its URL, while the server loads its mocks and starts its recording; then
+// Serve answers the connections, those that came meanwhile included. It starts once.
 type Backend interface {
-	Start() error
-	StartTLS() error
+	Listen() error
+	ListenTLS() error
+	Serve() error
 	Close() error
 	Info() *BackendInfo
 }
@@ -48,6 +51,7 @@ type httptestBackend struct {
 	server   *httptest.Server
 	info     atomic.Pointer[BackendInfo] // read by requests while a start may replace it
 	listener net.Listener                // the configured Listener, until a start serves it
+	tls      bool                        // set by ListenTLS: Serve serves TLS
 	rwMutex  sync.RWMutex
 }
 
@@ -68,7 +72,7 @@ func (f *httptestBackendFactory) NewBackend(config BackendConfig) (Backend, erro
 	return s, nil
 }
 
-func (s *httptestBackend) Start() error {
+func (s *httptestBackend) Listen() error {
 	s.rwMutex.Lock()
 	defer s.rwMutex.Unlock()
 
@@ -76,13 +80,12 @@ func (s *httptestBackend) Start() error {
 		return err
 	}
 
-	s.server.Start()
-	s.info.Store(&BackendInfo{URL: s.server.URL})
+	s.info.Store(&BackendInfo{URL: "http://" + s.server.Listener.Addr().String()})
 
 	return nil
 }
 
-func (s *httptestBackend) StartTLS() error {
+func (s *httptestBackend) ListenTLS() error {
 	s.rwMutex.Lock()
 	defer s.rwMutex.Unlock()
 
@@ -90,9 +93,27 @@ func (s *httptestBackend) StartTLS() error {
 		return err
 	}
 
+	s.tls = true
 	s.server.EnableHTTP2 = true
-	s.server.StartTLS()
-	s.info.Store(&BackendInfo{URL: s.server.URL})
+	s.info.Store(&BackendInfo{URL: "https://" + s.server.Listener.Addr().String()})
+
+	return nil
+}
+
+// Serve serves what Listen or ListenTLS bound. It returns http.ErrServerClosed when Close came first.
+func (s *httptestBackend) Serve() error {
+	s.rwMutex.Lock()
+	defer s.rwMutex.Unlock()
+
+	if s.server == nil {
+		return http.ErrServerClosed
+	}
+
+	if s.tls {
+		s.server.StartTLS()
+	} else {
+		s.server.Start()
+	}
 
 	return nil
 }

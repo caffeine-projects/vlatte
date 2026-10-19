@@ -1,14 +1,18 @@
 package mockhttp
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -491,4 +495,145 @@ func TestNew_ReturnsErrors(t *testing.T) {
 	require.ErrorContains(t, err, "no server")
 
 	require.Panics(t, func() { MustNew(failingConfigurer{}) })
+}
+
+// loaderFunc is a Loader that runs a function, such as one that is slow, fails, or closes the server.
+type loaderFunc func(app *Server) error
+
+func (f loaderFunc) Load(app *Server) error { return f(app) }
+
+var errLoad = errors.New("a mock file that doesn't load")
+
+// startWhileRequested starts a server built with setup while a client sends it a GET of path: the client connects
+// once the server listens, before the mocks load, and the mocks of builders load after it sent the request. It returns
+// the answer the client got.
+func startWhileRequested(t *testing.T, setup *ConfigBuilder, path string, builders ...vlatte.Builder[*Mock, *Server]) (*Server, *http.Response, string) {
+	t.Helper()
+
+	handled := make(chan struct{}, 1)
+
+	var conn net.Conn
+
+	m := MustNew(setup.
+		Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				select {
+				case handled <- struct{}{}:
+				default:
+				}
+
+				next.ServeHTTP(w, r)
+			})
+		}).
+		Loader(loaderFunc(func(app *Server) error {
+			// Loaders run on the goroutine that called Start: here, the test's.
+			u, err := url.Parse(app.URL())
+			require.NoError(t, err, "the server listens before its loaders run, so they can read URL")
+
+			conn, err = net.Dial("tcp", u.Host)
+			require.NoError(t, err)
+			require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+
+			_, err = fmt.Fprintf(conn, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", path, u.Host)
+			require.NoError(t, err)
+
+			// Showing the server doesn't serve takes a wait: a server that serves takes the request well within it.
+			select {
+			case <-handled:
+				t.Error("the server served a request before it loaded its mocks")
+			case <-time.After(100 * time.Millisecond):
+			}
+
+			_, err = app.Mock(builders...)
+
+			return err
+		})))
+	t.Cleanup(m.Close)
+
+	require.NoError(t, m.Start())
+	t.Cleanup(func() { _ = conn.Close() })
+
+	res, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	require.NoError(t, err)
+
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+
+	return m, res, string(body)
+}
+
+// requireRefused fails the test when addr accepts a connection.
+func requireRefused(t *testing.T, addr, msg string) {
+	t.Helper()
+
+	conn, err := net.DialTimeout("tcp", addr, time.Second)
+	if err == nil {
+		_ = conn.Close()
+	}
+
+	require.Error(t, err, msg)
+}
+
+func TestServer_ARequestThatComesWhileTheServerStartsGetsTheMockFiles(t *testing.T) {
+	// #54: the server served before its loaders ran, so a client that connected as soon as the port opened, such as a
+	// health check, got the no-match answer though a mock file matched its request.
+	_, res, _ := startWhileRequested(t, Setup().Silent(), "/ping", Getf("/ping").Reply(OK()))
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func TestServer_ARequestThatComesWhileTheServerStartsIsRecorded(t *testing.T) {
+	// #54: the recording the config sets started after the server served, so with --record a request that came first
+	// got the no-match answer instead of the target's, and wasn't recorded.
+	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "target") })
+	dir := t.TempDir()
+
+	m, res, body := startWhileRequested(t, Setup().Silent().Record(RecordDir(dir), RecordTarget(target.URL)), "/a")
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "target", body)
+
+	m.Close()
+	require.Len(t, recordedMocks(t, dir), 1, "Close writes what the recording took")
+}
+
+func TestServer_AStartThatFailsClosesTheServer(t *testing.T) {
+	// #54: a start whose mocks failed to load returned the error with the server still serving, without mocks, and
+	// the CLI exited without closing it. A start that fails leaves nothing listening.
+	for name, start := range map[string]func(*Server) error{
+		"Start":    (*Server).Start,
+		"StartTLS": (*Server).StartTLS,
+	} {
+		t.Run(name, func(t *testing.T) {
+			l, err := net.Listen("tcp", "127.0.0.1:0")
+			require.NoError(t, err)
+
+			m := MustNew(Setup().Silent().Listener(l).Loader(loaderFunc(func(*Server) error { return errLoad })))
+			t.Cleanup(m.Close)
+
+			require.ErrorIs(t, start(m), errLoad)
+			require.Empty(t, m.URL())
+			requireRefused(t, l.Addr().String(), "a start that fails leaves nothing listening")
+
+			require.ErrorIs(t, start(m), http.ErrServerClosed, "a start that fails closes the server")
+		})
+	}
+}
+
+func TestServer_ACloseDuringTheStartStopsIt(t *testing.T) {
+	// A Close that comes while the server loads its mocks wins: the start fails, and nothing serves.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	m := MustNew(Setup().Silent().Listener(l).Loader(loaderFunc(func(app *Server) error {
+		app.Close()
+		return nil
+	})))
+	t.Cleanup(m.Close)
+
+	require.ErrorIs(t, m.Start(), http.ErrServerClosed)
+	require.Empty(t, m.URL())
+	requireRefused(t, l.Addr().String(), "a closed server serves nothing")
 }
