@@ -13,7 +13,7 @@ tool mvdan.cc/gofumpt
 require (
 	github.com/google/go-jsonnet v0.22.0
 	github.com/mailgun/raymond/v2 v2.0.48
-	github.com/mattn/go-colorable v0.1.15
+	github.com/mattn/go-colorable v0.1.16
 	github.com/mattn/go-isatty v0.0.24
 	github.com/ohler55/ojg v1.28.7
 	github.com/rs/zerolog v1.35.1
