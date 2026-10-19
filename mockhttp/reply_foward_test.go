@@ -1025,6 +1025,7 @@ func TestProxyReply_AHopByHopForwardHeaderFailsTheBuild(t *testing.T) {
 		{name: "Connection", reply: From("http://localhost").ForwardHeader(HeaderConnection, "Upgrade"), want: "Connection"},
 		{name: "Upgrade", reply: From("http://localhost").ProxyHeaders(http.Header{HeaderUpgrade: {"websocket"}}), want: "Upgrade"},
 		{name: "in any case", reply: From("http://localhost").ForwardHeader("proxy-authorization", "Basic cHJveHk6c2VjcmV0"), want: "Proxy-Authorization"},
+		{name: "Te other than trailers", reply: From("http://localhost").ForwardHeader("Te", "gzip"), want: "Te"},
 	}
 
 	for _, tt := range tests {
@@ -1037,6 +1038,23 @@ func TestProxyReply_AHopByHopForwardHeaderFailsTheBuild(t *testing.T) {
 	t.Run("a mock file", func(t *testing.T) {
 		_, err := m.Mock(FromBytes([]byte("request:\n  path: /p\nproxy:\n  target: http://localhost\n  forward_header: {Connection: Upgrade}\n"), "yaml"))
 		require.ErrorContains(t, err, `reply_proxy: forward header "Connection" is hop-by-hop`)
+	})
+
+	t.Run("Te: trailers goes on", func(t *testing.T) {
+		// The one hop-by-hop header a proxy sends on, as for a client's: HTTP/2 and gRPC targets need it.
+		got := make(chan string, 1)
+		target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got <- r.Header.Get("Te") }))
+		t.Cleanup(target.Close)
+
+		m := MustNew(Setup().Silent())
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		m.MustMock(Getf("/p").Reply(From(target.URL).ForwardHeader("Te", "trailers")))
+
+		status, _ := get(t, m, "/p")
+		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, "trailers", <-got)
 	})
 }
 

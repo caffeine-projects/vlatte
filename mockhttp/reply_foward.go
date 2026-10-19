@@ -117,14 +117,14 @@ func (r *ProxyReply) Headers(header http.Header) *ProxyReply {
 }
 
 // ForwardHeader sets an extra header to be sent to the proxy target. A hop-by-hop header, such as Connection or
-// Upgrade, fails the build of the mock: a proxy doesn't send it on.
+// Upgrade, fails the build of the mock: a proxy doesn't send it on. "Te: trailers" is the exception.
 func (r *ProxyReply) ForwardHeader(key, value string) *ProxyReply {
 	r.proxyHeaders.Add(key, value)
 	return r
 }
 
 // ProxyHeaders sets extra headers to be sent to the proxy target. A hop-by-hop header, such as Connection or Upgrade,
-// fails the build of the mock: a proxy doesn't send it on.
+// fails the build of the mock: a proxy doesn't send it on. "Te: trailers" is the exception.
 func (r *ProxyReply) ProxyHeaders(header http.Header) *ProxyReply {
 	for k, v := range header {
 		for _, vv := range v {
@@ -207,8 +207,10 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 		return nil, fmt.Errorf("reply_proxy: target %q: expected an absolute http or https URL, such as http://api.local:8080", t.Redacted())
 	}
 
-	for name := range r.proxyHeaders {
-		if slices.ContainsFunc(_forbiddenHeaders, func(h string) bool { return strings.EqualFold(h, name) }) {
+	for name, values := range r.proxyHeaders {
+		// "Te: trailers" is the one hop-by-hop header a proxy sends on, as for a client's.
+		trailers := strings.EqualFold(name, "Te") && !slices.ContainsFunc(values, func(v string) bool { return !strings.EqualFold(v, "trailers") })
+		if !trailers && slices.ContainsFunc(_forbiddenHeaders, func(h string) bool { return strings.EqualFold(h, name) }) {
 			return nil, fmt.Errorf("reply_proxy: forward header %q is hop-by-hop: a proxy doesn't send it on", name)
 		}
 	}
