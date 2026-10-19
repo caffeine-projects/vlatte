@@ -141,11 +141,15 @@ func parseRequestBody(app *Server, r *http.Request) (parsedBody any, rawBody []b
 	parsing := io.NopCloser(bytes.NewReader(read))
 	r.Body = parsing
 
-	// A parser that replaced the body, such as with the body it decoded, keeps it.
+	// A parser that replaced the body, such as with the body it decoded, keeps it. The replacement can't read rest,
+	// which no parser sees: rest closes here, as rereadBody closes it otherwise.
 	defer func() {
 		if r.Body == parsing {
 			r.Body = rereadBody{Reader: io.MultiReader(bytes.NewReader(read), rest), Closer: rest}
+			return
 		}
+
+		rest.Close()
 	}()
 
 	if err != nil {
