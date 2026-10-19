@@ -47,7 +47,7 @@ func (h *builtInMockHTTPLifecycle) OnRequest(r *RequestValues) {
 		return
 	}
 
-	evt := h.app.logger.Info().Str("url", r.URL.String())
+	evt := h.app.logger.Info().Str("url", r.URL.String()).Str("request_id", r.ReqID)
 	req := evt.CreateDict()
 
 	if h.app.config.LogVerbosity >= vlatte.LogHeader {
@@ -70,6 +70,7 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *Response) {
 
 	evt := h.app.logger.Info().
 		Str("url", r.URL.String()).
+		Str("request_id", r.ReqID).
 		Dur("elapsed", time.Since(r.StartedAtTime))
 
 	dict := evt.CreateDict().Str("id", r.Mock.ID())
@@ -95,6 +96,7 @@ func (h *builtInMockHTTPLifecycle) OnProxied(r *RequestValues, s *Response) {
 
 	h.app.logger.Info().
 		Str("url", r.URL.String()).
+		Str("request_id", r.ReqID).
 		Dur("elapsed", time.Since(r.StartedAtTime)).
 		Dict("response", h.responseDict(s)).
 		Msgf("<--- REQUEST PROXIED %s %s", r.RawRequest.Method, r.URL.Path)
@@ -105,7 +107,7 @@ func (h *builtInMockHTTPLifecycle) OnNoMatch(r *RequestValues) {
 		return
 	}
 
-	evt := h.app.logger.Warn().Str("url", r.URL.String())
+	evt := h.app.logger.Warn().Str("url", r.URL.String()).Str("request_id", r.ReqID)
 
 	evt.Msgf("<--- REQUEST DID NOT MATCH %s %s", r.RawRequest.Method, r.URL.Path)
 }
@@ -118,6 +120,7 @@ func (h *builtInMockHTTPLifecycle) OnWarning(r *RequestValues, err error) {
 	h.app.logger.Warn().
 		Err(err).
 		Str("url", r.URL.String()).
+		Str("request_id", r.ReqID).
 		Msgf("<--- WARNING %s %s", r.RawRequest.Method, r.URL.Path)
 }
 
@@ -128,7 +131,8 @@ func (h *builtInMockHTTPLifecycle) OnError(r *RequestValues, err error) {
 
 	evt := h.app.logger.Error().
 		Err(err).
-		Str("url", r.URL.String())
+		Str("url", r.URL.String()).
+		Str("request_id", r.ReqID)
 
 	if r.Mock != nil {
 		dict := evt.CreateDict().Str("id", r.Mock.ID())
@@ -189,13 +193,15 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnRequest(rv *RequestValues) {
 	buf.Reset()
 	defer bufpool.Put(buf)
 
-	fmt.Fprintf(buf, "%s %s ---> %s %s\n%s %s",
+	fmt.Fprintf(buf, "%s %s ---> %s %s\n%s %s\n%s%s",
 		h.cz.BrightBlue(h.cz.Bold("REQUEST RECEIVED")),
 		rv.StartedAtTime.Format(time.RFC3339),
 		h.cz.Blue(rv.RawRequest.Method),
 		h.cz.Blue(rv.URL.Path),
 		rv.RawRequest.Method,
-		rv.URL)
+		rv.URL,
+		h.cz.Bold("Request ID: "),
+		rv.ReqID)
 
 	if h.app.config.LogVerbosity >= vlatte.LogHeader && len(rv.RawRequest.Header) > 0 {
 		redactedHeader := redactHeader(rv.RawRequest.Header, h.app.config.HeaderNamesToRedact)
@@ -234,6 +240,9 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Resp
 		rv.RawRequest.Method)
 	buf.WriteString(rv.URL.String())
 	buf.WriteString("\n")
+	buf.WriteString(h.cz.Bold("Request ID: "))
+	buf.WriteString(rv.ReqID)
+	buf.WriteString("\n")
 	buf.WriteString(h.cz.Bold("Mock: "))
 	buf.WriteString(rv.Mock.ID() + " " + rv.Mock.Name())
 	buf.WriteString("\n")
@@ -267,6 +276,9 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnProxied(rv *RequestValues, s *Re
 		rv.RawRequest.Method)
 	buf.WriteString(rv.URL.String())
 	buf.WriteString("\n")
+	buf.WriteString(h.cz.Bold("Request ID: "))
+	buf.WriteString(rv.ReqID)
+	buf.WriteString("\n")
 	buf.WriteString(h.cz.Green("Took(ms): "))
 	buf.WriteString(strconv.FormatInt(time.Since(rv.StartedAtTime).Milliseconds(), 10))
 	h.writeResponse(buf, s)
@@ -279,13 +291,15 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnNoMatch(reqValues *RequestValues
 		return
 	}
 
-	fmt.Fprintf(h.out, "%s %s <--- %s %s\n%s %s\n",
+	fmt.Fprintf(h.out, "%s %s <--- %s %s\n%s %s\n%s%s\n",
 		h.cz.BrightYellow(h.cz.Bold("REQUEST DID NOT MATCH")),
 		time.Now().Format(time.RFC3339),
 		h.cz.Yellow(reqValues.RawRequest.Method),
 		h.cz.Yellow(reqValues.URL.Path),
 		reqValues.RawRequest.Method,
-		reqValues.URL.String())
+		reqValues.URL.String(),
+		h.cz.Bold("Request ID: "),
+		reqValues.ReqID)
 
 	h.out.Write([]byte("\n"))
 }
@@ -295,13 +309,15 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnWarning(r *RequestValues, err er
 		return
 	}
 
-	fmt.Fprintf(h.out, "\n%s %s <--- %s %s\n%s %s\n%s: %v\n\n",
+	fmt.Fprintf(h.out, "\n%s %s <--- %s %s\n%s %s\n%s%s\n%s: %v\n\n",
 		h.cz.BrightRed(h.cz.Bold("WARNING")),
 		time.Now().Format(time.RFC3339),
 		h.cz.Red(r.RawRequest.Method),
 		h.cz.Red(r.URL.Path),
 		r.RawRequest.Method,
 		r.URL.String(),
+		h.cz.Bold("Request ID: "),
+		r.ReqID,
 		h.cz.Red(h.cz.Bold("Error")),
 		err,
 	)
@@ -317,13 +333,15 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnError(r *RequestValues, err erro
 		mock = h.cz.Bold("Mock: ") + r.Mock.ID() + " " + r.Mock.Name() + "\n"
 	}
 
-	fmt.Fprintf(h.out, "%s %s <--- %s %s\n%s %s\n%s%s: %v\n\n",
+	fmt.Fprintf(h.out, "%s %s <--- %s %s\n%s %s\n%s%s\n%s%s: %v\n\n",
 		h.cz.BrightRed(h.cz.Bold("ERROR")),
 		time.Now().Format(time.RFC3339),
 		h.cz.Red(r.RawRequest.Method),
 		h.cz.Red(r.URL.Path),
 		r.RawRequest.Method,
 		r.URL.String(),
+		h.cz.Bold("Request ID: "),
+		r.ReqID,
 		mock,
 		h.cz.Red(h.cz.Bold("Error")),
 		err,

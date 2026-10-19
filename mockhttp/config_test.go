@@ -169,6 +169,7 @@ func TestConfigBuilder(t *testing.T) {
 		RequestBodyParsers(&plainTextParser{}).
 		MaxBodyParsingLimit(10).
 		NoBodyParsing().
+		NoDebugHeaders().
 		Use().
 		CORS(&DefaultCORSConfig).
 		BackendFactory(&httptestBackendFactory{}).
@@ -199,6 +200,7 @@ func TestConfigBuilder(t *testing.T) {
 	require.Len(t, conf.RequestBodyParsers, 1)
 	require.EqualValues(t, conf.MaxBodyParsingLimit, 10)
 	require.True(t, conf.NoBodyParsing)
+	require.True(t, conf.NoDebugHeaders)
 	require.Len(t, conf.Middlewares, 0)
 	require.Equal(t, &DefaultCORSConfig, conf.CORS)
 	require.NotNil(t, conf.HandlerDecorator)
@@ -443,7 +445,7 @@ func TestUse_MiddlewaresRunInTheOrderTheyAreAdded(t *testing.T) {
 }
 
 func TestUse_APanicInAMiddlewareIsRecovered(t *testing.T) {
-	// A middleware that panics fails only its request, with the error status and X-Vlatte-Error telling it was a
+	// A middleware that panics fails only its request, with the error status and VLatte-Error telling it was a
 	// panic: the server goes on serving.
 	var panicked atomic.Bool
 
@@ -465,7 +467,7 @@ func TestUse_APanicInAMiddlewareIsRecovered(t *testing.T) {
 
 	res, _ := do(t, http.MethodGet, m.URL("/p"), nil, nil)
 	require.Equal(t, http.StatusInternalServerError, res.StatusCode)
-	require.Equal(t, vlatte.FailurePanic, res.Header.Get(HeaderXVlatteError))
+	require.Equal(t, vlatte.FailurePanic, res.Header.Get(HeaderVlatteError))
 
 	res, _ = do(t, http.MethodGet, m.URL("/p"), nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode)

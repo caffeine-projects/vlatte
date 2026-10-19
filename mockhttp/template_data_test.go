@@ -145,7 +145,7 @@ func TestTemplateDataProviders(t *testing.T) {
 
 		status, header, body := getFull(t, m, "/user")
 		require.Equal(t, StatusNoMatch, status)
-		require.Equal(t, vlatte.FailureReply, header.Get(HeaderXVlatteError))
+		require.Equal(t, vlatte.FailureReply, header.Get(HeaderVlatteError))
 		require.Contains(t, body, "http: template data provider user: user service down")
 	})
 

@@ -55,9 +55,19 @@ const (
 	HeaderXCSRFToken                      = "X-CSRF-Token"
 	HeaderReferrerPolicy                  = "Referrer-Policy"
 
-	// HeaderXVlatteError says why vlatte, and not a mock, answered a request: one of the vlatte.Failure* values.
-	HeaderXVlatteError = vlatte.FailureHeader
+	// HeaderVlatteError says why vlatte, and not a mock, answered a request: one of the vlatte.Failure* values.
+	HeaderVlatteError = vlatte.FailureHeader
 )
+
+// _debugHeaders are the headers a server adds to its answers unless Config.NoDebugHeaders is set.
+var _debugHeaders = []string{
+	vlatte.MatchedMockIDHeader,
+	vlatte.MatchedMockNameHeader,
+	vlatte.MatchedMockHitsHeader,
+	vlatte.MatchedMockSourceHeader,
+	vlatte.RequestIDHeader,
+	vlatte.ProxiedHeader,
+}
 
 // MIME types, for building and matching mocks.
 const (

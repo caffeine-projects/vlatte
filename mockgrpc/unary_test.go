@@ -17,7 +17,8 @@ import (
 )
 
 func TestUnary(t *testing.T) {
-	m := MustNew()
+	// The test counts the mock's own header keys, so the debug ones are off.
+	m := MustNew(Setup().NoDebugHeaders())
 	defer m.Close()
 	pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})
 	m.MustStart()

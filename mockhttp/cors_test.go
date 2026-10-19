@@ -120,7 +120,7 @@ func TestCORS_Preflight(t *testing.T) {
 		res := preflight(t, corsServer(t, &CORSConfig{AllowedOrigin: "*"}), "https://example.org")
 
 		require.Equal(t, http.StatusNoContent, res.StatusCode)
-		require.NotContains(t, res.Header, "X-Vlatte-Error")
+		require.Empty(t, res.Header.Get(HeaderVlatteError))
 	})
 }
 

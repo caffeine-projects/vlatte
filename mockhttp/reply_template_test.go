@@ -165,7 +165,7 @@ func TestReplyTemplates_MissingKeysAreErrors(t *testing.T) {
 
 	status, header, body := getFull(t, m, "/x")
 	require.Equal(t, StatusNoMatch, status)
-	require.Equal(t, vlatte.FailureReply, header.Get(HeaderXVlatteError))
+	require.Equal(t, vlatte.FailureReply, header.Get(HeaderVlatteError))
 	require.Contains(t, body, `map has no entry for key "nmae"`)
 }
 
@@ -185,7 +185,7 @@ func TestReplyTemplates_ADecodedSegmentStaysInItsDirectory(t *testing.T) {
 
 	status, header, body := getFull(t, m, "/files/..%2Fsecret.txt")
 	require.Equal(t, StatusNoMatch, status, body)
-	require.Equal(t, vlatte.FailureReply, header.Get(HeaderXVlatteError))
+	require.Equal(t, vlatte.FailureReply, header.Get(HeaderVlatteError))
 	require.NotContains(t, body, "the secret")
 }
 
@@ -227,7 +227,7 @@ func TestReplyTemplates_RequestErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			status, header, body := getFull(t, m, "/"+strconv.Itoa(i)+tc.query)
 			require.Equal(t, StatusNoMatch, status, body)
-			require.Equal(t, vlatte.FailureReply, header.Get(HeaderXVlatteError))
+			require.Equal(t, vlatte.FailureReply, header.Get(HeaderVlatteError))
 			require.Contains(t, body, tc.want)
 			require.NotContains(t, body, "the secret")
 		})

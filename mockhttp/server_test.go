@@ -71,7 +71,7 @@ func TestServer_MethodMatchesIgnoringCase(t *testing.T) {
 }
 
 func TestServer_AnUnmatchedMethodGetsTheNoMatchStatus(t *testing.T) {
-	// A method no mock matches is a no-match like any other: the server's no-match status and X-Vlatte-Error tell it
+	// A method no mock matches is a no-match like any other: the server's no-match status and VLatte-Error tell it
 	// apart from a 405 a mock replies with.
 	tests := []struct {
 		name       string
@@ -101,7 +101,7 @@ func TestServer_AnUnmatchedMethodGetsTheNoMatchStatus(t *testing.T) {
 			res, _ := do(t, "PURGE", m.URL("/p"), nil, nil)
 
 			require.Equal(t, tt.wantStatus, res.StatusCode)
-			require.Equal(t, vlatte.FailureNoMatch, res.Header.Get(HeaderXVlatteError))
+			require.Equal(t, vlatte.FailureNoMatch, res.Header.Get(HeaderVlatteError))
 			vlatte.NotCalled(t, scope)
 		})
 	}
@@ -211,7 +211,7 @@ func TestServer_CustomAdminPath(t *testing.T) {
 
 			res, _ = do(t, http.MethodGet, m.URL("/__admin/ping"), nil, nil)
 			require.Equal(t, StatusNoMatch, res.StatusCode)
-			require.Equal(t, vlatte.FailureNoMatch, res.Header.Get(HeaderXVlatteError))
+			require.Equal(t, vlatte.FailureNoMatch, res.Header.Get(HeaderVlatteError))
 		})
 	}
 }

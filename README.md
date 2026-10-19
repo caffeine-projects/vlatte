@@ -180,7 +180,7 @@ m := mockhttp.MustNew(mockhttp.Setup().TemplateEngine(engine))
 
 **Escaping.** Templates are Go's `text/template`, so a body can be any format and nothing is escaped for you. Write JSON values with `toJson`, and use `html` or `urlquery` where they fit.
 
-**Errors.** Templates compile when the mock is built, so one that doesn't compile fails the mock. A body file whose content is a template compiles when a request reads it, since its name can depend on the request. A template that fails at a request answers as a [failure](#failures): the error status, `X-Vlatte-Error: reply`, and a body that names the mock and the error.
+**Errors.** Templates compile when the mock is built, so one that doesn't compile fails the mock. A body file whose content is a template compiles when a request reads it, since its name can depend on the request. A template that fails at a request answers as a [failure](#failures): the error status, `VLatte-Error: reply`, and a body that names the mock and the error.
 
 **File names.** A body file name rendered from the request stays inside the directory written before the template: `files/{{ .Request.URL.Query.Get "f" }}` opens files in `files` only, and refuses `../` or an absolute path from the request.
 
@@ -452,9 +452,9 @@ The target's TLS certificate is verified: a recording sends the target its reque
 
 ## Failures
 
-When no mock matches, or serving a request fails, the server answers itself. It sends `418 I'm a teapot`, a status a real server rarely sends, so the answer never looks like a mock's, and the `X-Vlatte-Error` header says why:
+When no mock matches, or serving a request fails, the server answers itself. It sends `418 I'm a teapot`, a status a real server rarely sends, so the answer never looks like a mock's, and the `VLatte-Error` header says why:
 
-| `X-Vlatte-Error` | Why |
+| `VLatte-Error` | Why |
 |---|---|
 | `no-match` | No mock matched the request. |
 | `match` | Finding a mock failed: a matcher, or the store, returned an error. |
@@ -469,7 +469,32 @@ require.Equal(t, vlatte.FailureReply, res.Header.Get(vlatte.FailureHeader))
 
 The status of `no-match` is `no_match_status_code`, and the status of the others is `error_status_code`. Both default to 418.
 
-A gRPC server answers `NotFound` when no mock matches, and `Internal` when serving a call fails, with the same values in the `x-vlatte-error` trailer. A mock that answers with a status, as `Unary().Status(...)` does, gets no trailer: that status is its answer.
+A gRPC server answers `NotFound` when no mock matches, and `Internal` when serving a call fails, with the same values in the `vlatte-error` trailer. A mock that answers with a status, as `Unary().Status(...)` does, gets no trailer: that status is its answer.
+
+## Debug headers
+
+Each answer says how the server served it, in `VLatte-*` headers:
+
+| Header | Value |
+|---|---|
+| `VLatte-Matched-Mock-Id` | The ID of the mock that matched. |
+| `VLatte-Matched-Mock-Name` | Its name, when it has one. |
+| `VLatte-Matched-Mock-Hits` | Its hits, this request included. |
+| `VLatte-Matched-Mock-Source` | The file it was loaded from, when it was loaded from one. |
+| `VLatte-Request-Id` | The ID of the request: `.Request.ID` in templates, `request_id` in the logs. Every answer has it, failures and no-match included. |
+| `VLatte-Proxied` | `true` when a real service answered instead of a mock: a mock that replies with `From(...)`, a proxy passing on a request no mock matches, or the target of a recording. |
+
+A failure keeps the headers of the mock that matched before it failed. Hits count once the answer is sent, so two requests served at the same time can show the same number. A test checks them like any header:
+
+```go
+require.Equal(t, "users-get", res.Header.Get(vlatte.MatchedMockIDHeader))
+```
+
+Header names don't depend on case: Go sends `Vlatte-Matched-Mock-Id`, and HTTP/2 sends them in lower case. Recordings leave the debug headers out.
+
+`debug_headers: false` turns them all off, as do `VLATTE_DEBUG_HEADERS=false`, `--debug-headers=false` and `mockhttp.Setup().NoDebugHeaders()`. `VLatte-Error` stays: it is not a debug header.
+
+A gRPC server sends `vlatte-matched-mock-id`, `vlatte-matched-mock-name` and `vlatte-matched-mock-hits` as header metadata, with a mock's message or status. `Name(...)` on a mock builder sets the name. `mockgrpc.Setup().NoDebugHeaders()` turns them off.
 
 ## Configuration
 

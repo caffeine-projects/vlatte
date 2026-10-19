@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
@@ -54,6 +55,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.app.config.DebugFn("req", r)
 
 	reqValues, rawBody, parseErr := parseRequest(r, h.app)
+	h.debugHeader(w, vlatte.RequestIDHeader, reqValues.ReqID)
+
 	if parseErr != nil {
 		h.lifecycle.OnWarning(reqValues, fmt.Errorf("request_body_parser: %w", parseErr))
 	}
@@ -115,6 +118,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			capture.answeredBy(true)
 		}
 
+		h.debugHeader(w, vlatte.ProxiedHeader, "true")
+
 		if err := h.app.proxy.serve(w, r); err == nil && capture != nil {
 			capture.record()
 		}
@@ -124,6 +129,12 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Template data providers see the mock that matched.
 	reqValues.Mock = mock
+
+	// The hits count this request, which Inc counts once the answer is sent.
+	h.debugHeader(w, vlatte.MatchedMockIDHeader, mock.ID())
+	h.debugHeader(w, vlatte.MatchedMockNameHeader, mock.Name())
+	h.debugHeader(w, vlatte.MatchedMockHitsHeader, strconv.FormatInt(mock.Hits()+1, 10))
+	h.debugHeader(w, vlatte.MatchedMockSourceHeader, mock.Origin())
 
 	d := make(map[string]any, len(h.templateDataProviders))
 	sdpIn := &TemplateDataProviderInput{r: reqValues}
@@ -190,6 +201,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		if res.proxied {
+			h.debugHeader(w, vlatte.ProxiedHeader, "true")
+		}
+
 		// The mock counts as served, whatever happens to the answer once its status and headers are sent.
 		h.render(w, reqValues, res, capture)
 	} else if capture != nil {
@@ -253,8 +268,18 @@ func (h *mockHandler) serveTarget(w http.ResponseWriter, r *RequestValues, targe
 	}
 
 	capture.answeredBy(true)
+	h.debugHeader(w, vlatte.ProxiedHeader, "true")
 	h.render(w, r, res, capture)
 	h.lifecycle.OnProxied(r, res)
+}
+
+// debugHeader sets the debug header key to value, unless the server's debug headers are off or value is empty.
+func (h *mockHandler) debugHeader(w http.ResponseWriter, key, value string) {
+	if h.app.config.NoDebugHeaders || value == "" {
+		return
+	}
+
+	w.Header().Set(key, value)
 }
 
 // render sends res, and has the capture, if any, record it once the client got it whole. The status and headers are
@@ -299,7 +324,7 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues) {
 	buf.WriteString("\n\n")
 
 	w.Header().Add(HeaderContentType, MIMETextPlainCharsetUTF8)
-	w.Header().Set(HeaderXVlatteError, vlatte.FailureNoMatch)
+	w.Header().Set(HeaderVlatteError, vlatte.FailureNoMatch)
 	w.WriteHeader(h.app.config.RequestWasNotMatchedStatusCode)
 
 	buf.WriteTo(w)
@@ -341,7 +366,7 @@ func (h *mockHandler) onError(w http.ResponseWriter, r *RequestValues, failure s
 	buf.WriteString(err.Error())
 
 	w.Header().Set(HeaderContentType, MIMETextPlainCharsetUTF8)
-	w.Header().Set(HeaderXVlatteError, failure)
+	w.Header().Set(HeaderVlatteError, failure)
 	w.WriteHeader(h.app.config.ErrorStatusCode)
 
 	buf.WriteTo(w)

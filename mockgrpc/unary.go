@@ -65,6 +65,11 @@ func (in *interceptors) UnaryInterceptor(
 		return nil, fail(ctx, vlatte.FailureNoMatch, codes.NotFound, "unary: request was not matched with any mock")
 	}
 
+	// The header goes out with the reply's own, or with its status.
+	if !in.app.config.NoDebugHeaders {
+		_ = grpc.SetHeader(ctx, debugHeader(mock))
+	}
+
 	rv := &UnaryRequestValues{reqMsg, info, rawBody, in.app}
 	res, err := mock.unaryReply.Reply(ctx, rv)
 	if err != nil {

@@ -14,6 +14,9 @@ type Config struct {
 	Addr          string
 	Listener      net.Listener
 	Logger        *zerolog.Logger
+
+	// NoDebugHeaders turns off the debug header metadata, such as vlatte-matched-mock-id, of the server's answers.
+	NoDebugHeaders bool
 }
 
 func (c *Config) Apply(conf *Config) error {
@@ -23,6 +26,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Addr = c.Addr
 	conf.Listener = c.Listener
 	conf.Logger = c.Logger
+	conf.NoDebugHeaders = c.NoDebugHeaders
 
 	return nil
 }
@@ -67,6 +71,13 @@ func (cb *ConfigBuilder) Addr(addr string) *ConfigBuilder {
 // The server closes it on Close.
 func (cb *ConfigBuilder) Listener(l net.Listener) *ConfigBuilder {
 	cb.conf.Listener = l
+	return cb
+}
+
+// NoDebugHeaders turns off the debug header metadata, such as vlatte-matched-mock-id, that the server adds to its
+// answers. The vlatte-error trailer stays: it tells the server's own answers from a mock's.
+func (cb *ConfigBuilder) NoDebugHeaders() *ConfigBuilder {
+	cb.conf.NoDebugHeaders = true
 	return cb
 }
 

@@ -133,6 +133,27 @@ func TestRecording_LeavesOutTheHeadersSetBeforeTheHandler(t *testing.T) {
 	}, onlyMock(t, dir).Response.Header)
 }
 
+func TestRecording_LeavesOutTheDebugHeaders(t *testing.T) {
+	// The debug headers say which mock served the recorded answer: a replay that sent them would name a mock that isn't
+	// there, next to its own.
+	dir := t.TempDir()
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/r").ID("original").Name("original").SetSource("mocks/r.yaml").Reply(OK().Header("X-Reply", "1")))
+
+	require.NoError(t, m.StartRecording(RecordDir(dir), RecordIncludeMocked(true)))
+
+	res, _ := do(t, http.MethodGet, m.URL("/r"), nil, nil)
+	require.Equal(t, "original", res.Header.Get(vlatte.MatchedMockIDHeader), "the answer had them")
+
+	stopRecording(t, m)
+
+	require.Equal(t, map[string][]string{"X-Reply": {"1"}}, onlyMock(t, dir).Response.Header)
+}
+
 func TestRecording_KeepsTheCORSHeadersOfTheReply(t *testing.T) {
 	// A reply that sends a CORS header answers CORS by itself: the header is the answer's, even with the value the
 	// server's CORS would send.

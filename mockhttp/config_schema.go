@@ -256,6 +256,11 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Key: "debug", Kind: config.Bool, Usage: "Print descriptive logs for each request, instead of structured ones.",
 			Set: func(c *Config, v config.Value) error { c.Debug = v.Bool; return nil },
 		},
+		field{
+			Key: "debug_headers", Kind: config.Bool, Default: strconv.FormatBool(!d.NoDebugHeaders),
+			Usage: "Add debug headers, such as VLatte-Matched-Mock-Id, to each answer. VLatte-Error stays either way.",
+			Set:   func(c *Config, v config.Value) error { c.NoDebugHeaders = !v.Bool; return nil },
+		},
 		field{Key: "tls.cert", Kind: config.String, Usage: "TLS certificate file. Requires tls.key."},
 		field{Key: "tls.key", Kind: config.String, Usage: "TLS private key file. Requires tls.cert."},
 		field{

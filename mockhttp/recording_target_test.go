@@ -203,7 +203,7 @@ func TestRecording_ATargetItCantReach(t *testing.T) {
 
 	res, _ := do(t, http.MethodGet, m.URL("/a"), nil, nil)
 	require.Equal(t, StatusNoMatch, res.StatusCode)
-	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderXVlatteError))
+	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
 
 	require.Empty(t, stopRecording(t, m).Recordings)
 }
@@ -270,7 +270,7 @@ func TestRecording_ATLSTarget(t *testing.T) {
 	require.NoError(t, m.StartRecording(RecordDir(t.TempDir()), RecordTarget(target.URL)))
 
 	res, body := do(t, http.MethodGet, m.URL("/a"), nil, nil)
-	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderXVlatteError))
+	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
 	require.Contains(t, string(body), "certificate")
 	require.Empty(t, stopRecording(t, m).Recordings)
 

@@ -64,6 +64,7 @@ type Config struct {
 	RequestBodyParsers             []RequestBodyParser
 	MaxBodyParsingLimit            int64
 	NoBodyParsing                  bool
+	NoDebugHeaders                 bool
 	Middlewares                    []func(http.Handler) http.Handler
 	CORS                           *CORSConfig
 	BackendFactory                 BackendFactory
@@ -112,6 +113,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.RequestBodyParsers = c.RequestBodyParsers
 	conf.MaxBodyParsingLimit = c.MaxBodyParsingLimit
 	conf.NoBodyParsing = c.NoBodyParsing
+	conf.NoDebugHeaders = c.NoDebugHeaders
 	conf.Middlewares = c.Middlewares
 	conf.CORS = c.CORS
 	conf.BackendFactory = c.BackendFactory
@@ -226,7 +228,7 @@ func (cb *ConfigBuilder) MockNotFoundStatusCode(code int) *ConfigBuilder {
 }
 
 // ErrorStatusCode defines the status code of a response vlatte makes when serving a request fails, such as a reply
-// that fails. It defaults to StatusNoMatch, as no-match does: the X-Vlatte-Error header tells them apart.
+// that fails. It defaults to StatusNoMatch, as no-match does: the VLatte-Error header tells them apart.
 func (cb *ConfigBuilder) ErrorStatusCode(code int) *ConfigBuilder {
 	cb.conf.ErrorStatusCode = code
 	return cb
@@ -241,6 +243,13 @@ func (cb *ConfigBuilder) RequestBodyParsers(bp ...RequestBodyParser) *ConfigBuil
 // NoBodyParsing disables request body parsing.
 func (cb *ConfigBuilder) NoBodyParsing() *ConfigBuilder {
 	cb.conf.NoBodyParsing = true
+	return cb
+}
+
+// NoDebugHeaders turns off the debug headers, such as VLatte-Matched-Mock-Id, that the server adds to its answers.
+// VLatte-Error stays: it tells the server's own answers from a mock's.
+func (cb *ConfigBuilder) NoDebugHeaders() *ConfigBuilder {
+	cb.conf.NoDebugHeaders = true
 	return cb
 }
 

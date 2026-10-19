@@ -130,7 +130,7 @@ type recordCodec struct {
 // the request log does.
 func newRecordCodec(conf *RecordConfig, redact map[string]struct{}, logger *zerolog.Logger) *recordCodec {
 	c := &recordCodec{
-		skip:      make(map[string]struct{}, len(_forbiddenHeaders)+2+len(conf.ExcludeResponseHeaders)),
+		skip:      make(map[string]struct{}, len(_forbiddenHeaders)+2+len(_debugHeaders)+len(conf.ExcludeResponseHeaders)),
 		redact:    redact,
 		maxInline: cmp.Or(conf.MaxInlineBody, _defaultMaxInlineBody),
 		logger:    logger,
@@ -142,8 +142,9 @@ func newRecordCodec(conf *RecordConfig, redact map[string]struct{}, logger *zero
 		}
 	}
 
-	// The server measures and dates each response it sends.
-	for _, names := range [][]string{_forbiddenHeaders, {HeaderContentLength, "Date"}, conf.ExcludeResponseHeaders} {
+	// The server measures and dates each response it sends, and tells how it served it in the debug headers.
+	skipped := [][]string{_forbiddenHeaders, {HeaderContentLength, "Date"}, _debugHeaders, conf.ExcludeResponseHeaders}
+	for _, names := range skipped {
 		for _, name := range names {
 			c.skip[http.CanonicalHeaderKey(name)] = struct{}{}
 		}

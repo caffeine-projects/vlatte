@@ -3,6 +3,7 @@ package mockgrpc
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -45,6 +46,21 @@ func newReplier[I any](f vlatte.ReplierFactory[I, any, *Server], app *Server) (v
 func fail(ctx context.Context, failure string, c codes.Code, format string, a ...any) error {
 	_ = grpc.SetTrailer(ctx, metadata.Pairs(_failureKey, failure))
 	return status.Errorf(c, format, a...)
+}
+
+// debugHeader is the header metadata naming mock, the mock that matched a call: its ID, its hits, this call included,
+// and its name, when it has one. Inc counts the call once it is answered.
+func debugHeader(mock *Mock) metadata.MD {
+	md := metadata.Pairs(
+		vlatte.MatchedMockIDHeader, mock.ID(),
+		vlatte.MatchedMockHitsHeader, strconv.FormatInt(mock.Hits()+1, 10),
+	)
+
+	if name := mock.Name(); name != "" {
+		md.Set(vlatte.MatchedMockNameHeader, name)
+	}
+
+	return md
 }
 
 // replyError is the answer to a call whose mock replied err. An error with a gRPC status is the mock's answer, such

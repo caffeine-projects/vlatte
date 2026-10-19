@@ -74,6 +74,7 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"https":                {[]string{"--https"}, func(t *testing.T, c *Config) { require.True(t, c.UseHTTPS) }},
 		"colors":               {[]string{"--colors=false"}, func(t *testing.T, c *Config) { require.False(t, c.Colors) }},
 		"debug":                {[]string{"--debug"}, func(t *testing.T, c *Config) { require.True(t, c.Debug) }},
+		"debug-headers":        {[]string{"--debug-headers=false"}, func(t *testing.T, c *Config) { require.True(t, c.NoDebugHeaders) }},
 		"tls-cert":             {tlsArgs, func(t *testing.T, c *Config) { require.Len(t, c.TLSCertificates, 1) }},
 		"tls-key":              {tlsArgs, func(t *testing.T, c *Config) { require.Len(t, c.TLSCertificates, 1) }},
 		"tls-ca":               {slices.Concat(tlsArgs, []string{"--tls-ca", _testClientCertFile}), func(t *testing.T, c *Config) { require.NotNil(t, c.TLSClientCAs) }},

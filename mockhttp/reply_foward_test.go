@@ -750,7 +750,7 @@ func TestProxyReply_AMapperOfABodyThatBreaksOffFails(t *testing.T) {
 
 	res, body := do(t, http.MethodGet, m.URL("/p"), nil, nil)
 	require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
-	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderXVlatteError))
+	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
 	require.Contains(t, string(body), "http: reading the response body")
 	require.False(t, scoped.Called())
 }

@@ -16,6 +16,7 @@ var _ vlatte.Builder[*Mock, *Server] = (*StreamBuilder)(nil)
 // StreamBuilder describes a mock. Build makes a new Mock from it each time, and leaves the builder as it was. The
 // mocks built from one builder share its matchers; each gets a replier of its own from the reply.
 type StreamBuilder struct {
+	name         string
 	expectations []*vlatte.Eval[*StreamValueSelectorIn]
 	reply        StreamReplierFactory
 }
@@ -56,6 +57,13 @@ func (b *StreamBuilder) Field(path string, m vlatte.Matcher) *StreamBuilder {
 	return b
 }
 
+// Name defines a name for the mock.
+// Useful for debugging.
+func (b *StreamBuilder) Name(name string) *StreamBuilder {
+	b.name = name
+	return b
+}
+
 // Reply sets what the mock replies with. Build asks f for a new replier for each mock, so f can serve many mocks.
 func (b *StreamBuilder) Reply(f StreamReplierFactory) *StreamBuilder {
 	b.reply = f
@@ -72,6 +80,7 @@ func (b *StreamBuilder) Build(app *Server) (*Mock, error) {
 
 	return &Mock{
 		id:                 uuid.New().String(),
+		name:               b.name,
 		enabled:            true,
 		streamReply:        reply,
 		streamExpectations: slices.Clone(b.expectations),

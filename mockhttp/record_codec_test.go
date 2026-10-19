@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -1060,14 +1061,15 @@ func requireSameAnswer(t require.TestingT, original, replayed *http.Response, or
 	require.Equal(t, originalBody, replayedBody, "body")
 }
 
-// answerHeader returns the headers of an answer but those a server sets itself, and those of the connection. A gzip
-// encoding is written in lower case when it is played back.
+// answerHeader returns the headers of an answer but those a server sets itself, and those of the connection. The debug
+// headers say which server or mock answered, not what the answer was. A gzip encoding is written in lower case when it
+// is played back.
 func answerHeader(h http.Header) http.Header {
 	h = h.Clone()
 	h.Del("Date")
 	h.Del(HeaderContentLength)
 
-	for _, name := range _forbiddenHeaders {
+	for _, name := range slices.Concat(_forbiddenHeaders, _debugHeaders) {
 		h.Del(name)
 	}
 

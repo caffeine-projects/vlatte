@@ -269,6 +269,11 @@ func (in *interceptors) StreamInterceptor(
 		return fail(ctx, vlatte.FailureNoMatch, codes.NotFound, "stream: request was not matched with any mock")
 	}
 
+	// The header goes out with the reply's own, or with its status.
+	if !in.app.config.NoDebugHeaders {
+		_ = grpc.SetHeader(ctx, debugHeader(mock))
+	}
+
 	values := &StreamRequestValues{rawBody, stream, info, in.app}
 	_, err = mock.streamReply.Reply(ctx, values)
 	if err != nil {
