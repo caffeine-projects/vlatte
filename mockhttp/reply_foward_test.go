@@ -913,6 +913,7 @@ func TestProxyReply_SendsThePathTheTargetExpects(t *testing.T) {
 		{name: "the target's path and the root", target: "/api", path: "/", want: "/api/"},
 		{name: "the target's path and a path trimmed to nothing", target: "/api", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/svc") }, path: "/svc", want: "/api"},
 		{name: "the target's escaped path", target: "/a%2Fb", path: "/c", want: "/a%2Fb/c"},
+		{name: "the target's path and a suffix", target: "/api", reply: func(r *ProxyReply) *ProxyReply { return r.TrimSuffix(".json") }, path: "/users.json", want: "/api/users"},
 		{name: "the target's query", target: "/api?k=1", path: "/users", want: "/api/users?k=1"},
 		{name: "both queries", target: "?k=1", path: "/users?q=2", want: "/users?k=1&q=2"},
 	}
@@ -1083,4 +1084,38 @@ func TestProxyReply_SendsTheClientTrailers(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	require.Equal(t, "abc", <-got)
+}
+
+// sentTransport is a transport of the caller's that keeps the request it is given, and answers 204 without sending it.
+type sentTransport struct {
+	sent chan *http.Request
+}
+
+func (s sentTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	s.sent <- r
+	return &http.Response{StatusCode: http.StatusNoContent, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
+}
+
+func TestProxyReply_SendsTheTargetHostAsIs(t *testing.T) {
+	// The request goes to the target's host as the URL names it, an IPv6 address in brackets included. The target's
+	// user info goes as Basic auth, never in the host.
+	rt := sentTransport{sent: make(chan *http.Request, 1)}
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/users").Reply(From("http://user:secret@[::1]:8080/api").Transport(rt)))
+
+	status, _ := get(t, m, "/users")
+	require.Equal(t, http.StatusNoContent, status)
+
+	sent := <-rt.sent
+	require.Equal(t, "http://[::1]:8080/api/users", sent.URL.String())
+	require.Equal(t, "[::1]:8080", sent.Host)
+
+	user, password, ok := sent.BasicAuth()
+	require.True(t, ok)
+	require.Equal(t, "user", user)
+	require.Equal(t, "secret", password)
 }

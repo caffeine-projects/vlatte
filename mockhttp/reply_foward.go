@@ -269,59 +269,19 @@ func (p *proxyReplier) Close() error {
 }
 
 func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
-	// The trims match the decoded path and cut the escaped path at the same place, so escapes such as "%2F" stay.
-	path, escaped := req.RawRequest.URL.Path, req.RawRequest.URL.EscapedPath()
-
-	if rest, ok := strings.CutPrefix(path, p.trimPrefix); ok {
-		escaped = escaped[escapedIndex(escaped, len(p.trimPrefix)):]
-		path = rest
-	}
-
-	if rest, ok := strings.CutSuffix(path, p.trimSuffix); ok {
-		escaped = escaped[:escapedIndex(escaped, len(rest))]
-		path = rest
-	}
-
-	// What the trims leave starts with "/", unless they left nothing: "/api/users" cut by "/api/" goes as "/users". A
-	// "/" that came from an escape, as in "/api%2Fv1" cut by "/api", goes as "/": sent as "%2Fv1", the target would
-	// not start with "/". The escapes after it stay.
-	switch {
-	case path == "":
-	case !strings.HasPrefix(path, "/"):
-		path, escaped = "/"+path, "/"+escaped
-	case !strings.HasPrefix(escaped, "/"):
-		escaped = "/" + escaped[len("%2F"):]
-	}
-
-	// The target's path comes first, with one "/" between them.
-	base, baseEscaped := p.target.Path, p.target.EscapedPath()
-	if path != "" && strings.HasSuffix(baseEscaped, "/") {
-		base, baseEscaped = base[:len(base)-1], baseEscaped[:len(baseEscaped)-1]
-	}
-
-	path, escaped = cmp.Or(base+path, "/"), cmp.Or(baseEscaped+escaped, "/")
+	target := p.forwardURL(req.RawRequest.URL)
 
 	// The timeout covers the wait for the response headers. The call ends when its body is closed.
 	ctx, cancel := context.WithCancelCause(req.RawRequest.Context())
 
 	// The target gets a copy: what runs after the reply, such as callbacks and events, sees the request as it came.
 	out := req.RawRequest.Clone(ctx)
-	out.URL.Host = p.target.Host
-	out.URL.Scheme = p.target.Scheme
-	out.URL.Path, out.URL.RawPath = path, escaped
+	out.URL = target
 	out.Host = p.target.Host
 	out.RequestURI = ""
 
 	// The server sets the client's trailers on its request once it reads the body to the end, after this copy.
 	out.Trailer = req.RawRequest.Trailer
-
-	// The target's query comes first too.
-	switch {
-	case out.URL.RawQuery == "":
-		out.URL.RawQuery = p.target.RawQuery
-	case p.target.RawQuery != "":
-		out.URL.RawQuery = p.target.RawQuery + "&" + out.URL.RawQuery
-	}
 
 	// The client's hop-by-hop headers, and its "Connection: close", are about its connection to the server.
 	out.Close = false
@@ -399,6 +359,57 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 	stub.Trailer = res.Trailer
 
 	return stub, nil
+}
+
+// forwardURL returns the URL a request to in goes to: the target's, with the path of in after the target's path, once
+// trimmed, and the query of in after the target's query.
+func (p *proxyReplier) forwardURL(in *url.URL) *url.URL {
+	// The trims match the decoded path and cut the escaped path at the same place, so escapes such as "%2F" stay.
+	path, escaped := in.Path, in.EscapedPath()
+
+	if rest, ok := strings.CutPrefix(path, p.trimPrefix); ok {
+		escaped = escaped[escapedIndex(escaped, len(p.trimPrefix)):]
+		path = rest
+	}
+
+	if rest, ok := strings.CutSuffix(path, p.trimSuffix); ok {
+		escaped = escaped[:escapedIndex(escaped, len(rest))]
+		path = rest
+	}
+
+	// What the trims leave starts with "/", unless they left nothing: "/api/users" cut by "/api/" goes as "/users". A
+	// "/" that came from an escape, as in "/api%2Fv1" cut by "/api", goes as "/": sent as "%2Fv1", the target would
+	// not start with "/". The escapes after it stay.
+	switch {
+	case path == "":
+	case !strings.HasPrefix(path, "/"):
+		path, escaped = "/"+path, "/"+escaped
+	case !strings.HasPrefix(escaped, "/"):
+		escaped = "/" + escaped[len("%2F"):]
+	}
+
+	// The target's path comes first, with one "/" between them.
+	base, baseEscaped := p.target.Path, p.target.EscapedPath()
+	if path != "" && strings.HasSuffix(baseEscaped, "/") {
+		base, baseEscaped = base[:len(base)-1], baseEscaped[:len(baseEscaped)-1]
+	}
+
+	// The target's query comes first too.
+	query := in.RawQuery
+	switch {
+	case query == "":
+		query = p.target.RawQuery
+	case p.target.RawQuery != "":
+		query = p.target.RawQuery + "&" + query
+	}
+
+	return &url.URL{
+		Scheme:   p.target.Scheme,
+		Host:     p.target.Host,
+		Path:     cmp.Or(base+path, "/"),
+		RawPath:  cmp.Or(baseEscaped+escaped, "/"),
+		RawQuery: query,
+	}
 }
 
 // targetBody is the body of a target's response, which streams to the client. It keeps what it reads, up to
