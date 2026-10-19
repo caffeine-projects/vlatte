@@ -251,9 +251,9 @@ func (cb *ConfigBuilder) MaxBodyParsingLimit(n int64) *ConfigBuilder {
 	return cb
 }
 
-// Middlewares adds custom middlewares to the mock server.
-// Use this to add custom request interceptors.
-func (cb *ConfigBuilder) Middlewares(fn ...func(handler http.Handler) http.Handler) *ConfigBuilder {
+// Use adds middlewares that wrap the mock handler, to intercept requests. They run in the order they are added, across
+// calls.
+func (cb *ConfigBuilder) Use(fn ...func(handler http.Handler) http.Handler) *ConfigBuilder {
 	cb.conf.Middlewares = append(cb.conf.Middlewares, fn...)
 	return cb
 }

@@ -13,8 +13,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
 )
@@ -47,18 +45,17 @@ func New[B vlatte.Mock](repo vlatte.Store[B], builder vlatte.MockBuilder[B]) *Ad
 
 // Init wires the admin routes and returns the resulting [http.Handler].
 func (a *Admin[B]) Init() http.Handler {
-	r := chi.NewRouter()
+	mux := http.NewServeMux()
 
-	r.Get("/ping", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /ping", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("pong"))
 	})
 
-	r.Route("/mocks", func(r chi.Router) {
-		r.Get("/{id}", a.get)
-		r.Post("/", a.add)
-	})
+	mux.HandleFunc("GET /mocks/{id}", a.get)
+	mux.HandleFunc("POST /mocks", a.add)
+	mux.HandleFunc("POST /mocks/{$}", a.add)
 
-	return r
+	return mux
 }
 
 func (a *Admin[B]) extension(r *http.Request) (string, error) {
@@ -120,7 +117,7 @@ func (a *Admin[B]) add(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Admin[B]) get(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := r.PathValue("id")
 	mock, err := a.repo.Pick(r.Context(), id)
 	if errors.Is(err, vlatte.ErrNotFound) {
 		http.Error(w, "not found", http.StatusNotFound)

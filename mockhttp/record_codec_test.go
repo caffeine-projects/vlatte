@@ -669,8 +669,7 @@ func TestGunzip_TheLargestLimit(t *testing.T) {
 }
 
 func TestRecordCodec_MethodsMatchIgnoringCase(t *testing.T) {
-	// A method matches ignoring case, so calls that differ in case are one request: the default backend answers 405
-	// to them, other backends pass them on.
+	// A method matches ignoring case, so calls that differ in case are one request.
 	nop := zerolog.Nop()
 	c := newRecordCodec(defaultRecordConfig(), nil, &nop)
 

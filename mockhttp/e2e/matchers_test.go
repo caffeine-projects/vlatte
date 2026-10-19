@@ -290,7 +290,7 @@ func TestMatchers_QueryLeavesTheFragmentOut(t *testing.T) {
 
 func TestMatchers_AMiddlewareSeesThePathWithoutTheFragment(t *testing.T) {
 	// The fragment leaves the path before any middleware runs, so a middleware that rewrites the path keeps both.
-	m := mockhttp.MustNew(mockhttp.Setup().Silent().Middlewares(func(h http.Handler) http.Handler {
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Use(func(h http.Handler) http.Handler {
 		return http.StripPrefix("/api", h)
 	}))
 	m.MustStart()

@@ -9,8 +9,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-
-	"github.com/go-chi/chi/v5"
 )
 
 var (
@@ -123,16 +121,18 @@ func (s *httptestBackend) Info() *BackendInfo {
 // httptest.Server instances are not reusable after Close, so a new one must
 // be constructed for every Start/StartTLS cycle.
 func (s *httptestBackend) build() error {
-	admPath := s.app.config.AdminPath
-	if !strings.HasPrefix(admPath, "/") {
-		admPath = "/" + admPath
-	}
+	admPath := "/" + strings.Trim(s.app.config.AdminPath, "/")
+	admin := http.StripPrefix(admPath, s.app.admin.Init())
 
-	r := chi.NewRouter()
-	r.Mount(admPath, s.app.admin.Init())
-	r.Handle("/*", s.handler)
+	s.server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only the admin API is routed. Every other request, whatever its method, reaches the mock handler.
+		if strings.HasPrefix(r.URL.Path, admPath+"/") {
+			admin.ServeHTTP(w, r)
+			return
+		}
 
-	s.server = httptest.NewUnstartedServer(r)
+		s.handler.ServeHTTP(w, r)
+	}))
 
 	addr := s.app.config.Addr
 	if l := s.app.config.Listener; l != nil {
