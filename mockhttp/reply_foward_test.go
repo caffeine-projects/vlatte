@@ -906,3 +906,51 @@ func TestProxyReply_LeavesHopByHopHeadersOut(t *testing.T) {
 	require.Empty(t, res.Header.Values("X-Target-Hop"), "the client got a header the target's Connection named")
 	require.Equal(t, "kept", res.Header.Get("X-Target-End"))
 }
+
+func TestProxyReply_SendsThePathTheTargetExpects(t *testing.T) {
+	// The target's path and query come first, as the base of an API, such as http://api/v1. The trims cut the request
+	// path before it is joined. What is sent always starts with "/": "GET users" is no request a target accepts. An
+	// escaped "/" names another path than "/": it stays escaped.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.RequestURI)
+	}))
+	t.Cleanup(target.Close)
+
+	tests := []struct {
+		name   string
+		target string
+		reply  func(*ProxyReply) *ProxyReply
+		path   string
+		want   string
+	}{
+		{name: "a prefix with its slash", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/api/") }, path: "/api/users", want: "/users"},
+		{name: "a prefix before escaped slashes", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/api") }, path: "/api%2Fv1%2Fx", want: "/v1%2Fx"},
+		{name: "a path trimmed to nothing", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/svc") }, path: "/svc", want: "/"},
+		{name: "the target's path", target: "/api", path: "/users", want: "/api/users"},
+		{name: "the target's path ending with a slash", target: "/api/", path: "/users", want: "/api/users"},
+		{name: "the target's path and the root", target: "/api", path: "/", want: "/api/"},
+		{name: "the target's path and a path trimmed to nothing", target: "/api", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/svc") }, path: "/svc", want: "/api"},
+		{name: "the target's escaped path", target: "/a%2Fb", path: "/c", want: "/a%2Fb/c"},
+		{name: "the target's query", target: "/api?k=1", path: "/users", want: "/api/users?k=1"},
+		{name: "both queries", target: "?k=1", path: "/users?q=2", want: "/users?k=1&q=2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reply := From(target.URL + tt.target)
+			if tt.reply != nil {
+				reply = tt.reply(reply)
+			}
+
+			m := MustNew(Setup().Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(AnyMethod().Reply(reply))
+
+			status, body := get(t, m, tt.path)
+			require.Equal(t, http.StatusOK, status, body)
+			require.Equal(t, tt.want, body)
+		})
+	}
+}

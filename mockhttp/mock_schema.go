@@ -485,7 +485,7 @@ var _randomSchema = config.NewSchema(
 
 var _proxySchema = config.NewSchema(
 	proxyField{
-		Key: "target", Kind: config.String, Usage: "URL of the server to forward requests to.",
+		Key: "target", Kind: config.String, Usage: "URL of the server to forward requests to. Its path and query come before the request's.",
 		Set: func(p *proxyDef, v config.Value) error {
 			p.target, p.hasTarget = v.Str, true
 
@@ -510,11 +510,11 @@ var _proxySchema = config.NewSchema(
 		Set: func(p *proxyDef, v config.Value) error { p.removeHeaders = v.List; return nil },
 	},
 	proxyField{
-		Key: "trim_prefix", Kind: config.String, Usage: "Prefix removed from the forwarded path.",
+		Key: "trim_prefix", Kind: config.String, Usage: "Prefix removed from the request path, before the target's path is added.",
 		Set: func(p *proxyDef, v config.Value) error { p.trimPrefix = v.Str; return nil },
 	},
 	proxyField{
-		Key: "trim_suffix", Kind: config.String, Usage: "Suffix removed from the forwarded path.",
+		Key: "trim_suffix", Kind: config.String, Usage: "Suffix removed from the request path, before the target's path is added.",
 		Set: func(p *proxyDef, v config.Value) error { p.trimSuffix = v.Str; return nil },
 	},
 	proxyField{

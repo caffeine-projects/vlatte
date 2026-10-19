@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -65,7 +66,8 @@ type ProxyReply struct {
 	sslVerify            bool
 }
 
-// From creates a ProxyReply with the given target.
+// From creates a ProxyReply with the given target. The target's path and query come before the request's: with
+// http://api/v1?tenant=a, a request to /users?page=2 goes to http://api/v1/users?tenant=a&page=2.
 func From[T FromTypes](target T) *ProxyReply {
 	u := &url.URL{}
 
@@ -130,13 +132,14 @@ func (r *ProxyReply) RemoveProxyHeaders(header ...string) *ProxyReply {
 	return r
 }
 
-// TrimPrefix removes the given prefix from the URL before proxying the request.
+// TrimPrefix removes the given prefix from the request path, before the target's path is added. It trims text, not
+// segments: "/api" turns "/apiary" into "/ary".
 func (r *ProxyReply) TrimPrefix(prefix string) *ProxyReply {
 	r.trimPrefix = prefix
 	return r
 }
 
-// TrimSuffix removes the given suffix from the URL before proxying the request.
+// TrimSuffix removes the given suffix from the request path, before the target's path is added.
 func (r *ProxyReply) TrimSuffix(suffix string) *ProxyReply {
 	r.trimSuffix = suffix
 	return r
@@ -261,11 +264,24 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 		path = rest
 	}
 
-	// The "/" that starts the path came from an escape, as in "/api%2Fv1" cut by "/api": sent as "%2Fv1", the target
-	// would not start with "/". The path goes as Path escapes it.
-	if strings.HasPrefix(path, "/") && !strings.HasPrefix(escaped, "/") {
-		escaped = ""
+	// What the trims leave starts with "/", unless they left nothing: "/api/users" cut by "/api/" goes as "/users". A
+	// "/" that came from an escape, as in "/api%2Fv1" cut by "/api", goes as "/": sent as "%2Fv1", the target would
+	// not start with "/". The escapes after it stay.
+	switch {
+	case path == "":
+	case !strings.HasPrefix(path, "/"):
+		path, escaped = "/"+path, "/"+escaped
+	case !strings.HasPrefix(escaped, "/"):
+		escaped = "/" + escaped[len("%2F"):]
 	}
+
+	// The target's path comes first, with one "/" between them.
+	base, baseEscaped := p.target.Path, p.target.EscapedPath()
+	if path != "" && strings.HasSuffix(baseEscaped, "/") {
+		base, baseEscaped = base[:len(base)-1], baseEscaped[:len(baseEscaped)-1]
+	}
+
+	path, escaped = cmp.Or(base+path, "/"), cmp.Or(baseEscaped+escaped, "/")
 
 	// The timeout covers the wait for the response headers. The call ends when its body is closed.
 	ctx, cancel := context.WithCancelCause(req.RawRequest.Context())
@@ -277,6 +293,14 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 	out.URL.Path, out.URL.RawPath = path, escaped
 	out.Host = p.target.Host
 	out.RequestURI = ""
+
+	// The target's query comes first too.
+	switch {
+	case out.URL.RawQuery == "":
+		out.URL.RawQuery = p.target.RawQuery
+	case p.target.RawQuery != "":
+		out.URL.RawQuery = p.target.RawQuery + "&" + out.URL.RawQuery
+	}
 
 	// The client's hop-by-hop headers, and its "Connection: close", are about its connection to the server.
 	out.Close = false
