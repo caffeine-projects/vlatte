@@ -768,7 +768,7 @@ func TestRecording_ResponseSection(t *testing.T) {
 		},
 		{
 			name:  "headers the server sets",
-			reply: write(http.StatusOK, http.Header{"Date": {"today"}, HeaderContentLength: {"2"}, "Keep-Alive": {"timeout=5"}}, []byte("hi")),
+			reply: write(http.StatusOK, http.Header{"Date": {"today"}, HeaderContentLength: {"2"}, "Keep-Alive": {"timeout=5"}, "Proxy-Connection": {"keep-alive"}}, []byte("hi")),
 			want:  RecordedResponse{Status: http.StatusOK, Body: "hi"},
 		},
 		{

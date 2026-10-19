@@ -32,6 +32,7 @@ var _forbiddenHeaders = []string{
 	"Keep-Alive",
 	"Proxy-Authenticate",
 	"Proxy-Authorization",
+	"Proxy-Connection",
 	"TE",
 	"Trailer",
 	"Transfer-Encoding",
@@ -313,7 +314,7 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 
 	// The client's hop-by-hop headers, and its "Connection: close", are about its connection to the server.
 	out.Close = false
-	removeHopByHop(out.Header)
+	removeRequestHopByHop(out.Header)
 
 	for _, h := range p.proxyHeadersToRemove {
 		out.Header.Del(h)
@@ -433,15 +434,7 @@ func (b *targetBody) Kept() ([]byte, bool) {
 }
 
 // removeHopByHop removes the hop-by-hop headers from h: the ones its Connection header names, and _forbiddenHeaders.
-// A Te that accepts trailers stays as "Te: trailers", which HTTP/2 and gRPC targets need.
 func removeHopByHop(h http.Header) {
-	trailers := false
-	for _, v := range h.Values("Te") {
-		for token := range strings.SplitSeq(v, ",") {
-			trailers = trailers || strings.EqualFold(strings.TrimSpace(token), "trailers")
-		}
-	}
-
 	for _, v := range h.Values(HeaderConnection) {
 		for name := range strings.SplitSeq(v, ",") {
 			if name = strings.TrimSpace(name); name != "" {
@@ -453,6 +446,19 @@ func removeHopByHop(h http.Header) {
 	for _, name := range _forbiddenHeaders {
 		h.Del(name)
 	}
+}
+
+// removeRequestHopByHop removes the hop-by-hop headers from h, the header of a request that goes on. A Te that accepts
+// trailers stays as "Te: trailers", which HTTP/2 and gRPC targets need.
+func removeRequestHopByHop(h http.Header) {
+	trailers := false
+	for _, v := range h.Values("Te") {
+		for token := range strings.SplitSeq(v, ",") {
+			trailers = trailers || strings.EqualFold(strings.TrimSpace(token), "trailers")
+		}
+	}
+
+	removeHopByHop(h)
 
 	if trailers {
 		h.Set("Te", "trailers")

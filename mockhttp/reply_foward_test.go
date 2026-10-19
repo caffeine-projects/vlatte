@@ -834,7 +834,8 @@ func TestProxyReply_LeavesHopByHopHeadersOut(t *testing.T) {
 	// Hop-by-hop headers are about one connection: the client's to the mock server, or the target's to the proxy.
 	// Passed on, the client's "Connection: close" closed the proxy's connection to the target after each call,
 	// Proxy-Authorization gave the target credentials meant for a proxy, and an Upgrade or a Connection token makes
-	// Go's HTTP/2 client refuse the request. "Te: trailers" goes on: HTTP/2 and gRPC targets need it.
+	// Go's HTTP/2 client refuse the request. A request's "Te: trailers" goes on: HTTP/2 and gRPC targets need it. Te is
+	// a request header: a target's goes no further.
 	type forwarded struct {
 		header http.Header
 		close  bool
@@ -846,6 +847,7 @@ func TestProxyReply_LeavesHopByHopHeadersOut(t *testing.T) {
 
 		w.Header().Set(HeaderConnection, "X-Target-Hop")
 		w.Header().Set("X-Target-Hop", "1")
+		w.Header().Set("Te", "trailers")
 		w.Header().Set("X-Target-End", "kept")
 	}))
 	t.Cleanup(target.Close)
@@ -862,6 +864,7 @@ func TestProxyReply_LeavesHopByHopHeadersOut(t *testing.T) {
 	req.Header.Set("X-Client-Hop", "1")
 	req.Header.Set("Keep-Alive", "timeout=5")
 	req.Header.Set("Proxy-Authorization", "Basic cHJveHk6c2VjcmV0")
+	req.Header.Set("Proxy-Connection", "keep-alive")
 	req.Header.Set(HeaderUpgrade, "websocket")
 	req.Header.Set("Te", "trailers")
 	req.Header.Set("X-Client-End", "kept")
@@ -874,7 +877,7 @@ func TestProxyReply_LeavesHopByHopHeadersOut(t *testing.T) {
 	f := <-got
 	require.False(t, f.close, "the client's Connection: close is for its own connection")
 
-	for _, name := range []string{HeaderConnection, "X-Client-Hop", "Keep-Alive", "Proxy-Authorization", HeaderUpgrade} {
+	for _, name := range []string{HeaderConnection, "X-Client-Hop", "Keep-Alive", "Proxy-Authorization", "Proxy-Connection", HeaderUpgrade} {
 		require.Empty(t, f.header.Values(name), "the target got %s", name)
 	}
 
@@ -882,6 +885,7 @@ func TestProxyReply_LeavesHopByHopHeadersOut(t *testing.T) {
 	require.Equal(t, "kept", f.header.Get("X-Client-End"))
 
 	require.Empty(t, res.Header.Values("X-Target-Hop"), "the client got a header the target's Connection named")
+	require.Empty(t, res.Header.Values("Te"), "the client got the target's Te")
 	require.Equal(t, "kept", res.Header.Get("X-Target-End"))
 }
 
