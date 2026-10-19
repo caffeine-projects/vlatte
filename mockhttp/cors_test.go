@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -60,7 +61,7 @@ func TestCORS_Preflight(t *testing.T) {
 		require.Equal(t, []string{DefaultCORSConfig.AllowedMethods}, res.Header["Access-Control-Allow-Methods"])
 		require.Equal(t, []string{"X-Custom"}, res.Header["Access-Control-Allow-Headers"])
 		require.NotContains(t, res.Header, "Access-Control-Allow-Header")
-		require.Contains(t, varies(res), "Access-Control-Request-Headers")
+		require.Subset(t, varies(res), []string{"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers"})
 		require.NotContains(t, varies(res), "Access-Control-Request-Header")
 		require.Empty(t, res.Header["X-Mock"], "a preflight is the server's to answer")
 	})
@@ -84,6 +85,20 @@ func TestCORS_Preflight(t *testing.T) {
 		require.NotContains(t, res.Header, "Access-Control-Allow-Headers")
 	})
 
+	t.Run("* allows the method and the headers a preflight asks for", func(t *testing.T) {
+		// Browsers read * as a name for requests with credentials, and never as Authorization.
+		m := corsServer(t, CORS().AllowCredentials(true).AllowMethods("*").AllowedHeaders("*"))
+
+		res, _ := do(t, http.MethodOptions, m.URL("/a"), http.Header{
+			"Origin":                         {"https://example.org"},
+			"Access-Control-Request-Method":  {http.MethodPatch},
+			"Access-Control-Request-Headers": {"authorization,x-custom"},
+		}, nil)
+
+		require.Equal(t, []string{http.MethodPatch}, res.Header["Access-Control-Allow-Methods"])
+		require.Equal(t, []string{"authorization,x-custom"}, res.Header["Access-Control-Allow-Headers"])
+	})
+
 	t.Run("max age says how long browsers may cache the preflight", func(t *testing.T) {
 		res := preflight(t, corsServer(t, CORS().MaxAge(600)), "https://example.org")
 		require.Equal(t, []string{"600"}, res.Header["Access-Control-Max-Age"])
@@ -98,6 +113,13 @@ func TestCORS_Preflight(t *testing.T) {
 
 		require.Equal(t, http.StatusBadRequest, res.StatusCode)
 		require.Equal(t, []string{"*"}, res.Header["Access-Control-Allow-Origin"])
+	})
+
+	t.Run("a config without a status code answers 204", func(t *testing.T) {
+		res := preflight(t, corsServer(t, &CORSConfig{AllowedOrigin: "*"}), "https://example.org")
+
+		require.Equal(t, http.StatusNoContent, res.StatusCode)
+		require.NotContains(t, res.Header, "X-Vlatte-Error")
 	})
 }
 
@@ -115,13 +137,84 @@ func TestCORS_Request(t *testing.T) {
 		require.NotContains(t, res.Header, "Access-Control-Expose-Header")
 	})
 
-	t.Run("an empty allowed origin allows none", func(t *testing.T) {
-		m := corsServer(t, CORS().AllowOrigin(""))
+	t.Run("an OPTIONS request that isn't a preflight goes to the mocks", func(t *testing.T) {
+		// A preflight has an origin and the method it asks for. An API answers other OPTIONS requests itself.
+		tests := []struct {
+			name   string
+			header http.Header
+		}{
+			{"without Access-Control-Request-Method", http.Header{"Origin": {"https://example.org"}}},
+			{"without Origin", http.Header{"Access-Control-Request-Method": {http.MethodPut}}},
+		}
 
-		res, _ := do(t, http.MethodGet, m.URL("/a"), http.Header{"Origin": {"https://example.org"}}, nil)
+		m := corsServer(t)
 
-		require.Equal(t, http.StatusOK, res.StatusCode)
-		require.NotContains(t, res.Header, "Access-Control-Allow-Origin")
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				res, _ := do(t, http.MethodOptions, m.URL("/a"), tt.header, nil)
+
+				require.Equal(t, http.StatusOK, res.StatusCode)
+				require.Equal(t, []string{"1"}, res.Header["X-Mock"])
+				require.Equal(t, []string{"*"}, res.Header["Access-Control-Allow-Origin"])
+				require.NotContains(t, res.Header, "Access-Control-Allow-Methods")
+			})
+		}
+	})
+}
+
+func TestCORS_Origin(t *testing.T) {
+	// Browsers take one allowed origin, or *. The answer depends on the origin, so caches must keep the answers of
+	// different origins apart: it varies by Origin, even when the origin isn't allowed.
+	tests := []struct {
+		name    string
+		allowed string
+		origin  string
+		want    []string
+		varies  bool
+	}{
+		{"any", "*", "https://a.org", []string{"*"}, true},
+		{"the one allowed", "https://a.org", "https://a.org", []string{"https://a.org"}, true},
+		{"one of a list with blanks", "https://a.org, https://b.org", "https://b.org", []string{"https://b.org"}, true},
+		{"one not in the list", "https://a.org, https://b.org", "https://evil.org", nil, true},
+		{"one not allowed", "https://a.org", "https://evil.org", nil, true},
+		{"no origin", "https://a.org,https://b.org", "", nil, true},
+		{"none allowed", "", "https://a.org", nil, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := corsServer(t, &CORSConfig{AllowedOrigin: tt.allowed})
+
+			header := http.Header{}
+			if tt.origin != "" {
+				header.Set("Origin", tt.origin)
+			}
+
+			res, _ := do(t, http.MethodGet, m.URL("/a"), header, nil)
+			answers := []*http.Response{res}
+
+			if tt.origin != "" {
+				answers = append(answers, preflight(t, m, tt.origin))
+			}
+
+			for _, res := range answers {
+				require.Equal(t, tt.want, res.Header["Access-Control-Allow-Origin"], res.Request.Method)
+				require.Equal(t, tt.varies, slices.Contains(varies(res), "Origin"), res.Request.Method)
+			}
+		})
+	}
+
+	t.Run("any origin with credentials is the request's", func(t *testing.T) {
+		// Browsers refuse * for requests with credentials, such as cookies.
+		m := corsServer(t, CORS().AllowCredentials(true))
+
+		res, _ := do(t, http.MethodGet, m.URL("/a"), http.Header{"Origin": {"https://a.org"}}, nil)
+
+		for _, res := range []*http.Response{res, preflight(t, m, "https://a.org")} {
+			require.Equal(t, []string{"https://a.org"}, res.Header["Access-Control-Allow-Origin"], res.Request.Method)
+			require.Equal(t, []string{"true"}, res.Header["Access-Control-Allow-Credentials"], res.Request.Method)
+			require.Contains(t, varies(res), "Origin", res.Request.Method)
+		}
 	})
 }
 

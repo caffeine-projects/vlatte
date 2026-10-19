@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"cmp"
 	"net/http"
 	"slices"
 	"strconv"
@@ -9,12 +10,27 @@ import (
 
 // CORSConfig represents the possible options to configure CORS.
 type CORSConfig struct {
-	AllowedOrigin     string
-	AllowCredentials  bool
-	AllowedMethods    string
-	AllowedHeaders    string
-	ExposeHeaders     string
-	MaxAge            int
+	// AllowedOrigin lists the allowed origins, comma-separated. * allows any. Browsers refuse * for requests with
+	// credentials, so with AllowCredentials the origin of the request is allowed instead.
+	AllowedOrigin    string
+	AllowCredentials bool
+
+	// AllowedMethods lists the allowed methods, comma-separated. * allows the method a preflight request asks for.
+	AllowedMethods string
+
+	// AllowedHeaders lists the allowed headers, comma-separated. Empty, or *, allows the headers a preflight request
+	// asks for.
+	AllowedHeaders string
+
+	// ExposeHeaders lists the headers browsers let scripts read, comma-separated. Browsers read * as a header name
+	// for requests with credentials.
+	ExposeHeaders string
+
+	// MaxAge is how many seconds browsers may cache the answer to a preflight request. -1 sends none.
+	MaxAge int
+
+	// SuccessStatusCode is the status of the answer to a preflight request, 204 when 0. Browsers fail a preflight
+	// answered with a status other than 2xx.
 	SuccessStatusCode int
 }
 
@@ -124,42 +140,53 @@ func corsMiddleware(options *CORSConfig) func(http.Handler) http.Handler {
 		options = &DefaultCORSConfig
 	}
 
+	// Read once, and never written: options can be DefaultCORSConfig itself.
+	origins := allowedOrigins(options.AllowedOrigin)
+	status := cmp.Or(options.SuccessStatusCode, http.StatusNoContent)
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// preflight request
-			if r.Method == http.MethodOptions {
-				configureOrigin(options, r, w)
-				configureCredentials(options, w)
-				configureExposedHeaders(options, w)
-				configureMethods(options, w)
-				configureMaxAge(options, w)
-				configureHeaders(options, w, r)
-
-				w.Header().Add(HeaderVary, HeaderAccessControlRequestHeaders)
-				w.Header().Add(HeaderContentLength, "0")
-
-				w.WriteHeader(options.SuccessStatusCode)
-				return
-			}
-
-			configureOrigin(options, r, w)
+			configureOrigin(options, origins, r, w)
 			configureCredentials(options, w)
 			configureExposedHeaders(options, w)
 
-			next.ServeHTTP(w, r)
+			// A preflight request asks whether a browser may send a request, and is answered here. Other requests,
+			// OPTIONS ones too, go to the mocks.
+			if !isPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			configureMethods(options, w, r)
+			configureMaxAge(options, w)
+			configureHeaders(options, w, r)
+
+			w.Header().Add(HeaderVary, HeaderAccessControlRequestMethod)
+			w.Header().Add(HeaderVary, HeaderAccessControlRequestHeaders)
+			w.Header().Add(HeaderContentLength, "0")
+
+			w.WriteHeader(status)
 		})
 	}
 }
 
+// isPreflight reports whether r is a CORS preflight request: an OPTIONS request with the origin of a browser and the
+// method of the request it wants to send.
+func isPreflight(r *http.Request) bool {
+	return r.Method == http.MethodOptions && r.Header.Get(HeaderOrigin) != "" &&
+		r.Header.Get(HeaderAccessControlRequestMethod) != ""
+}
+
+// configureHeaders allows the headers set, or else the headers the preflight request asks for. Browsers read * as any
+// header only for requests without credentials, and never as Authorization, so * allows the headers asked for too.
 func configureHeaders(options *CORSConfig, w http.ResponseWriter, r *http.Request) {
-	// when allowed headers aren't specified, use values from header access-control-request-headers
-	if options.AllowedHeaders != "" {
-		w.Header().Add(HeaderAccessControlAllowHeaders, options.AllowedHeaders)
-	} else {
-		hs := r.Header.Get(HeaderAccessControlRequestHeaders)
-		if strings.TrimSpace(hs) != "" {
-			w.Header().Add(HeaderAccessControlAllowHeaders, hs)
-		}
+	headers := options.AllowedHeaders
+	if h := strings.TrimSpace(headers); h == "" || h == "*" {
+		headers = strings.TrimSpace(r.Header.Get(HeaderAccessControlRequestHeaders))
+	}
+
+	if headers != "" {
+		w.Header().Add(HeaderAccessControlAllowHeaders, headers)
 	}
 }
 
@@ -169,9 +196,16 @@ func configureMaxAge(options *CORSConfig, w http.ResponseWriter) {
 	}
 }
 
-func configureMethods(options *CORSConfig, w http.ResponseWriter) {
-	if len(options.AllowedMethods) > 0 {
-		w.Header().Add(HeaderAccessControlAllowMethods, options.AllowedMethods)
+// configureMethods allows the methods set. Browsers read * as any method only for requests without credentials, so *
+// allows the method the preflight request asks for.
+func configureMethods(options *CORSConfig, w http.ResponseWriter, r *http.Request) {
+	methods := options.AllowedMethods
+	if strings.TrimSpace(methods) == "*" {
+		methods = r.Header.Get(HeaderAccessControlRequestMethod)
+	}
+
+	if methods != "" {
+		w.Header().Add(HeaderAccessControlAllowMethods, methods)
 	}
 }
 
@@ -187,27 +221,36 @@ func configureCredentials(options *CORSConfig, w http.ResponseWriter) {
 	}
 }
 
-func configureOrigin(options *CORSConfig, r *http.Request, w http.ResponseWriter) {
-	if options.AllowedOrigin == "" {
+// configureOrigin allows the origin of r when it is one of origins. Browsers take one origin, or *, but refuse * for
+// requests with credentials: the origin of r is allowed instead. The answer depends on the origin of r, so it varies by
+// Origin even when the origin isn't allowed: a cache must not give the answer for one origin to another.
+func configureOrigin(options *CORSConfig, origins []string, r *http.Request, w http.ResponseWriter) {
+	if len(origins) == 0 {
 		return
 	}
 
-	origins := strings.Split(options.AllowedOrigin, ",")
-	size := len(origins)
+	w.Header().Add(HeaderVary, HeaderOrigin)
 
-	if size == 1 {
-		w.Header().Add(HeaderAccessControlAllowOrigin, options.AllowedOrigin)
-		w.Header().Add(HeaderVary, HeaderOrigin)
-		return
-	}
-
-	// received a list of origins
-	// will check if the request origin is within the provided array and use it as the allowed origin
 	origin := r.Header.Get(HeaderOrigin)
-	allowed := slices.Contains(origins, origin)
+	anyOrigin := slices.Contains(origins, "*")
 
-	if allowed {
+	switch {
+	case anyOrigin && !options.AllowCredentials:
+		w.Header().Add(HeaderAccessControlAllowOrigin, "*")
+	case origin != "" && (anyOrigin || slices.Contains(origins, origin)):
 		w.Header().Add(HeaderAccessControlAllowOrigin, origin)
-		w.Header().Add(HeaderVary, HeaderOrigin)
 	}
+}
+
+// allowedOrigins lists the comma-separated origins of allowed, without blanks.
+func allowedOrigins(allowed string) []string {
+	var origins []string
+
+	for origin := range strings.SplitSeq(allowed, ",") {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			origins = append(origins, origin)
+		}
+	}
+
+	return origins
 }

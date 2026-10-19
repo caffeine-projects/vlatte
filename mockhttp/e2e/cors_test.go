@@ -13,10 +13,9 @@ func TestCORS(t *testing.T) {
 	// A browser sends a cross-origin PUT with a custom header only after a preflight allows it, and lets scripts read
 	// only the headers exposed to them. Header names are literals: browsers look for the names of the Fetch standard.
 	m := mockhttp.MustNew(mockhttp.Setup().Silent().CORS(&mockhttp.CORSConfig{
-		AllowedOrigin:     "*",
-		ExposeHeaders:     "X-Id",
-		AllowedMethods:    "GET,PUT",
-		SuccessStatusCode: http.StatusNoContent,
+		AllowedOrigin:  "*",
+		ExposeHeaders:  "X-Id",
+		AllowedMethods: "GET,PUT",
 	}))
 	m.MustStart()
 

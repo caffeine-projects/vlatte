@@ -286,14 +286,15 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		},
 		field{
 			Key: "cors.allowed_origin", Kind: config.String, Default: DefaultCORSConfig.AllowedOrigin,
-			Usage: "Allowed origins, comma-separated.",
+			Usage: "Allowed origins, comma-separated. * allows any.",
 			Set: func(c *Config, v config.Value) error {
 				section(&c.CORS, DefaultCORSConfig).AllowedOrigin = v.Str
 				return nil
 			},
 		},
 		field{
-			Key: "cors.allow_credentials", Kind: config.Bool, Usage: "Send Access-Control-Allow-Credentials: true.",
+			Key: "cors.allow_credentials", Kind: config.Bool,
+			Usage: "Send Access-Control-Allow-Credentials: true. With *, the origin of the request is allowed.",
 			Set: func(c *Config, v config.Value) error {
 				section(&c.CORS, DefaultCORSConfig).AllowCredentials = v.Bool
 				return nil
@@ -301,7 +302,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		},
 		field{
 			Key: "cors.allowed_methods", Kind: config.String, Default: DefaultCORSConfig.AllowedMethods,
-			Usage: "Allowed methods, comma-separated.",
+			Usage: "Allowed methods, comma-separated. * allows the method a preflight request asks for.",
 			Set: func(c *Config, v config.Value) error {
 				section(&c.CORS, DefaultCORSConfig).AllowedMethods = v.Str
 				return nil
@@ -309,7 +310,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		},
 		field{
 			Key: "cors.allowed_headers", Kind: config.String,
-			Usage: "Allowed headers, comma-separated. Empty allows the headers a preflight request asks for.",
+			Usage: "Allowed headers, comma-separated. Empty or * allows the headers a preflight request asks for.",
 			Set: func(c *Config, v config.Value) error {
 				section(&c.CORS, DefaultCORSConfig).AllowedHeaders = v.Str
 				return nil
@@ -332,7 +333,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		},
 		field{
 			Key: "cors.success_status_code", Kind: config.Int, Default: strconv.Itoa(DefaultCORSConfig.SuccessStatusCode),
-			Usage: "Status code of the response to a successful preflight request.",
+			Usage: "Status code of the response to a preflight request. Browsers fail a preflight answered with a status other than 2xx.",
 			Set: func(c *Config, v config.Value) error {
 				section(&c.CORS, DefaultCORSConfig).SuccessStatusCode = int(v.Int)
 				return checkStatus(v.Int)
