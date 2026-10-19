@@ -118,7 +118,7 @@ func TestConfig(t *testing.T) {
 				})
 		}
 
-		m := MustNew(Setup().Middlewares(middleware))
+		m := MustNew(Setup().Use(middleware))
 		t.Cleanup(func() { m.Close() })
 		m.MustStart()
 
@@ -169,7 +169,7 @@ func TestConfigBuilder(t *testing.T) {
 		RequestBodyParsers(&plainTextParser{}).
 		MaxBodyParsingLimit(10).
 		NoBodyParsing().
-		Middlewares().
+		Use().
 		CORS(&DefaultCORSConfig).
 		BackendFactory(&httptestBackendFactory{}).
 		HandlerDecorator(func(handler http.Handler) http.Handler { return handler }).
@@ -415,4 +415,77 @@ func TestListener(t *testing.T) {
 
 	_, err = inner.Accept()
 	require.ErrorIs(t, err, net.ErrClosed)
+}
+
+func TestUse_MiddlewaresRunInTheOrderTheyAreAdded(t *testing.T) {
+	// A middleware may depend on one before it, such as auth on a request ID: middlewares run in the order they are
+	// added, and a later Use adds to the ones before it instead of replacing them.
+	mark := func(name string) func(http.Handler) http.Handler {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Add("X-Order", name)
+				next.ServeHTTP(w, r)
+			})
+		}
+	}
+
+	m := MustNew(Setup().Silent().Use(mark("a"), mark("b")).Use(mark("c")))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scope := m.MustMock(Getf("/p").Reply(OK()))
+
+	res, _ := do(t, http.MethodGet, m.URL("/p"), nil, nil)
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, []string{"a", "b", "c"}, res.Header.Values("X-Order"))
+	vlatte.Times(t, scope, 1)
+}
+
+func TestUse_APanicInAMiddlewareIsRecovered(t *testing.T) {
+	// A middleware that panics fails only its request, with the error status and X-Vlatte-Error telling it was a
+	// panic: the server goes on serving.
+	var panicked atomic.Bool
+
+	panicOnce := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if panicked.CompareAndSwap(false, true) {
+				panic("middleware failed")
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	m := MustNew(Setup().Silent().ErrorStatusCode(http.StatusInternalServerError).Use(panicOnce))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/p").Reply(OK()))
+
+	res, _ := do(t, http.MethodGet, m.URL("/p"), nil, nil)
+	require.Equal(t, http.StatusInternalServerError, res.StatusCode)
+	require.Equal(t, vlatte.FailurePanic, res.Header.Get(HeaderXVlatteError))
+
+	res, _ = do(t, http.MethodGet, m.URL("/p"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func TestUse_MiddlewaresSeeEveryMethod(t *testing.T) {
+	// Middlewares intercept every request the mocks get, extension methods included.
+	m := MustNew(Setup().Silent().Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Seen-Method", r.Method)
+			next.ServeHTTP(w, r)
+		})
+	}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Request().Method("PURGE").URLPathf("/p").Reply(Accepted()))
+
+	res, _ := do(t, "PURGE", m.URL("/p"), nil, nil)
+
+	require.Equal(t, http.StatusAccepted, res.StatusCode)
+	require.Equal(t, "PURGE", res.Header.Get("X-Seen-Method"))
 }

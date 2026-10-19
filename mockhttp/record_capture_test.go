@@ -109,7 +109,7 @@ func TestRecording_LeavesOutTheHeadersSetBeforeTheHandler(t *testing.T) {
 		})
 	}
 
-	m := MustNew(Setup().Silent().CORS().Middlewares(addVary))
+	m := MustNew(Setup().Silent().CORS().Use(addVary))
 	m.MustStart()
 	t.Cleanup(m.Close)
 

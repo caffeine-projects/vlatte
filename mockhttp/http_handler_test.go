@@ -760,7 +760,7 @@ func TestHandler_EventsSeeTheValuesOfTheRequestContext(t *testing.T) {
 	got := make(chan seen, 1)
 
 	m := MustNew(Setup().Silent().Parameters(kv).
-		Middlewares(func(next http.Handler) http.Handler {
+		Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), tenantKey{}, "acme")))
 			})
