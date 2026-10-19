@@ -58,8 +58,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.lifecycle.OnWarning(reqValues, fmt.Errorf("request_body_parser: %w", parseErr))
 	}
 
-	// net/http removes the temporary files of the request it made, and r may be a copy of it, such as chi makes.
-	// Forms parse in memory, so this is a safeguard.
+	// net/http removes the temporary files of the request it made, and r may be a copy of it, such as a middleware
+	// makes. Forms parse in memory, so this is a safeguard.
 	if r.MultipartForm != nil {
 		defer r.MultipartForm.RemoveAll()
 	}

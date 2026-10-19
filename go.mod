@@ -11,7 +11,6 @@ ignore (
 tool mvdan.cc/gofumpt
 
 require (
-	github.com/go-chi/chi/v5 v5.3.2
 	github.com/google/go-jsonnet v0.22.0
 	github.com/mailgun/raymond/v2 v2.0.48
 	github.com/mattn/go-colorable v0.1.15
