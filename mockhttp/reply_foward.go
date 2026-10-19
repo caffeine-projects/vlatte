@@ -424,11 +424,12 @@ func (p *proxyReplier) forwardURL(in *url.URL) (*url.URL, error) {
 	}
 
 	return &url.URL{
-		Scheme:   p.target.Scheme,
-		Host:     p.target.Host,
-		Path:     cmp.Or(base+path, "/"),
-		RawPath:  cmp.Or(baseEscaped+escaped, "/"),
-		RawQuery: query,
+		Scheme:     p.target.Scheme,
+		Host:       p.target.Host,
+		Path:       cmp.Or(base+path, "/"),
+		RawPath:    cmp.Or(baseEscaped+escaped, "/"),
+		RawQuery:   query,
+		ForceQuery: in.ForceQuery,
 	}, nil
 }
 

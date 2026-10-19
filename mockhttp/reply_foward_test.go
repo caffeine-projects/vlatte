@@ -917,6 +917,7 @@ func TestProxyReply_SendsThePathTheTargetExpects(t *testing.T) {
 		{name: "the target's path and a suffix", target: "/api", reply: func(r *ProxyReply) *ProxyReply { return r.TrimSuffix(".json") }, path: "/users.json", want: "/api/users"},
 		{name: "the target's query", target: "/api?k=1", path: "/users", want: "/api/users?k=1"},
 		{name: "both queries", target: "?k=1", path: "/users?q=2", want: "/users?k=1&q=2"},
+		{name: "an empty query", target: "/api", path: "/users?", want: "/api/users?"},
 	}
 
 	for _, tt := range tests {
