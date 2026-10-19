@@ -267,31 +267,33 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 		escaped = ""
 	}
 
-	req.RawRequest.URL.Host = p.target.Host
-	req.RawRequest.URL.Scheme = p.target.Scheme
-	req.RawRequest.URL.Path, req.RawRequest.URL.RawPath = path, escaped
-	req.RawRequest.Host = p.target.Host
-	req.RawRequest.RequestURI = ""
+	// The timeout covers the wait for the response headers. The call ends when its body is closed.
+	ctx, cancel := context.WithCancelCause(req.RawRequest.Context())
+
+	// The target gets a copy: what runs after the reply, such as callbacks and events, sees the request as it came.
+	out := req.RawRequest.Clone(ctx)
+	out.URL.Host = p.target.Host
+	out.URL.Scheme = p.target.Scheme
+	out.URL.Path, out.URL.RawPath = path, escaped
+	out.Host = p.target.Host
+	out.RequestURI = ""
 
 	for _, h := range p.proxyHeadersToRemove {
-		req.RawRequest.Header.Del(h)
+		out.Header.Del(h)
 	}
 
 	for key, values := range p.proxyHeaders {
 		for _, value := range values {
-			req.RawRequest.Header.Add(key, value)
+			out.Header.Add(key, value)
 		}
 	}
-
-	// The timeout covers the wait for the response headers. The call ends when its body is closed.
-	ctx, cancel := context.WithCancelCause(req.RawRequest.Context())
 
 	var timer *time.Timer
 	if p.timeout > 0 {
 		timer = time.AfterFunc(p.timeout, func() { cancel(errNoHeaders) })
 	}
 
-	res, err := p.roundTripper.RoundTrip(req.RawRequest.WithContext(ctx))
+	res, err := p.roundTripper.RoundTrip(out)
 
 	// The timer fired, or is firing: whatever RoundTrip returned, the call is over. Cancelling here, before reading
 	// anything, doesn't wait for the timer's own cancel.

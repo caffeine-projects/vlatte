@@ -779,3 +779,75 @@ func TestProxyReply_ABodyThatBreaksOffCutsTheConnection(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.False(t, scoped.Called())
 }
+
+func TestProxyReply_LeavesTheClientRequestAsItCame(t *testing.T) {
+	// #43: the proxy rewrote the client's request in place to send it to the target, so what ran after the reply,
+	// such as mappers, callbacks and on_complete listeners, saw the target's URL and the forwarded headers instead of
+	// what the client sent. Only the request sent to the target is the target's.
+	type sight struct {
+		who           string
+		path          string
+		host          string
+		added         string
+		authorization string
+	}
+
+	look := func(who string, r *http.Request) sight {
+		return sight{
+			who:           who,
+			path:          r.URL.Path,
+			host:          r.Host,
+			added:         r.Header.Get("X-Added"),
+			authorization: r.Header.Get(HeaderAuthorization),
+		}
+	}
+
+	forwarded := make(chan sight, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		forwarded <- look("target", r)
+	}))
+	t.Cleanup(target.Close)
+
+	seen := make(chan sight, 3)
+	listener := vlatte.EventFunc[vlatte.OnComplete](func(_ context.Context, e vlatte.OnComplete) error {
+		seen <- look("listener", e.(*OnComplete).Request().RawRequest)
+		return nil
+	})
+
+	m := MustNew(Setup().Silent().OnCompleteListener("look", listener))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/api/p").
+		Map(func(rv *RequestValues, _ *Response) error {
+			seen <- look("mapper", rv.RawRequest)
+			return nil
+		}).
+		Callback(func(_ context.Context, in vlatte.CallbackInput) error {
+			seen <- look("callback", in.(*CallbackInput).Request().RawRequest)
+			return nil
+		}).
+		OnCompleteEvent(vlatte.EventConfig{Name: "look"}).
+		Reply(From(target.URL).
+			TrimPrefix("/api").
+			ProxyHeaders(http.Header{"X-Added": {"1"}}).
+			RemoveProxyHeaders(HeaderAuthorization)))
+
+	req, err := http.NewRequest(http.MethodGet, m.URL("/api/p"), nil)
+	require.NoError(t, err)
+	req.Header.Set(HeaderAuthorization, "Bearer client")
+
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	targetURL, err := url.Parse(target.URL)
+	require.NoError(t, err)
+
+	require.Equal(t, sight{who: "target", path: "/p", host: targetURL.Host, added: "1"}, <-forwarded)
+
+	for _, who := range []string{"mapper", "callback", "listener"} {
+		require.Equal(t, sight{who: who, path: "/api/p", host: req.URL.Host, authorization: "Bearer client"}, <-seen)
+	}
+}
