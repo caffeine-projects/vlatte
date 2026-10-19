@@ -51,30 +51,28 @@ var DefaultCORSConfig = CORSConfig{
 	SuccessStatusCode: http.StatusNoContent,
 }
 
-// CORSConfigBuilder facilitates building CORS options.
+// CORSConfigBuilder facilitates building CORS options. It sets only the options it is given: the others keep the
+// values they have, such as the ones of DefaultCORSConfig.
 type CORSConfigBuilder struct {
-	options *CORSConfig
 	origins []string
+	set     []func(opts *CORSConfig)
 }
 
 // CORS initializes a CORSConfig builder for a fluent configuration.
 func CORS() *CORSConfigBuilder {
-	return &CORSConfigBuilder{
-		origins: make([]string, 0),
-		options: &CORSConfig{SuccessStatusCode: http.StatusNoContent},
-	}
+	return &CORSConfigBuilder{}
 }
 
 // SuccessStatusCode sets a custom status code returned on CORS Options request.
 // If none is specified, the default status code is http.StatusNoContent.
 func (b *CORSConfigBuilder) SuccessStatusCode(code int) *CORSConfigBuilder {
-	b.options.SuccessStatusCode = code
+	b.set = append(b.set, func(opts *CORSConfig) { opts.SuccessStatusCode = code })
 	return b
 }
 
 // MaxAge sets CORS max age.
 func (b *CORSConfigBuilder) MaxAge(maxAge int) *CORSConfigBuilder {
-	b.options.MaxAge = maxAge
+	b.set = append(b.set, func(opts *CORSConfig) { opts.MaxAge = maxAge })
 	return b
 }
 
@@ -86,45 +84,39 @@ func (b *CORSConfigBuilder) AllowOrigin(origin ...string) *CORSConfigBuilder {
 
 // AllowCredentials sets "Access-Control-Allow-Credentials" misc.Header
 func (b *CORSConfigBuilder) AllowCredentials(allow bool) *CORSConfigBuilder {
-	b.options.AllowCredentials = allow
+	b.set = append(b.set, func(opts *CORSConfig) { opts.AllowCredentials = allow })
 	return b
 }
 
 // ExposeHeaders sets the header "Access-Control-Expose-Headers".
 func (b *CORSConfigBuilder) ExposeHeaders(headers ...string) *CORSConfigBuilder {
-	b.options.ExposeHeaders = strings.Join(headers, ",")
+	b.set = append(b.set, func(opts *CORSConfig) { opts.ExposeHeaders = strings.Join(headers, ",") })
 	return b
 }
 
 // AllowedHeaders sets the allowed headers.
 // It will set the header "Access-Control-Allow-Headers".
 func (b *CORSConfigBuilder) AllowedHeaders(headers ...string) *CORSConfigBuilder {
-	b.options.AllowedHeaders = strings.Join(headers, ",")
+	b.set = append(b.set, func(opts *CORSConfig) { opts.AllowedHeaders = strings.Join(headers, ",") })
 	return b
 }
 
 // AllowMethods sets the allowed HTTP methods.
 // The header "Access-Control-Allow-Methods" will be used.
 func (b *CORSConfigBuilder) AllowMethods(methods ...string) *CORSConfigBuilder {
-	b.options.AllowedMethods = strings.Join(methods, ",")
+	b.set = append(b.set, func(opts *CORSConfig) { opts.AllowedMethods = strings.Join(methods, ",") })
 	return b
 }
 
-// Apply builds CORS configurations based on previous settings set via the builder.
+// Apply sets the options given to the builder on opts.
 func (b *CORSConfigBuilder) Apply(opts *CORSConfig) {
-	b.build().Apply(opts)
-}
-
-func (b *CORSConfigBuilder) build() *CORSConfig {
-	if len(b.origins) > 0 {
-		if len(b.origins) == 1 {
-			b.options.AllowedOrigin = b.origins[0]
-		} else {
-			b.options.AllowedOrigin = strings.Join(b.origins, ",")
-		}
+	for _, set := range b.set {
+		set(opts)
 	}
 
-	return b.options
+	if len(b.origins) > 0 {
+		opts.AllowedOrigin = strings.Join(b.origins, ",")
+	}
 }
 
 func corsMiddleware(options *CORSConfig) func(http.Handler) http.Handler {
