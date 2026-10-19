@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -142,4 +143,36 @@ func TestForwardProxy_LeavesHopByHopHeadersOut(t *testing.T) {
 	require.Equal(t, "kept", res.Header.Get("X-Target-End"))
 
 	require.Equal(t, "close, X-Client-Hop", (<-after).Get(HeaderConnection), "the client's request stays as it came")
+}
+
+func TestForwardProxy_SendsTheClientTrailers(t *testing.T) {
+	// A client's trailers come after its body, and the server sets them on the request once it reads the body to its
+	// end: the copy the host gets, made before, has them all the same, for a body the server read only part of too.
+	got := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		got <- r.Trailer.Get("X-Sum")
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent().MaxBodyParsingLimit(4).Proxy())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	proxyURL, err := url.Parse(m.URL())
+	require.NoError(t, err)
+
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	t.Cleanup(transport.CloseIdleConnections)
+
+	// A reader of unknown length goes chunked, with the trailers after it.
+	req, err := http.NewRequest(http.MethodPost, target.URL+"/x", io.MultiReader(strings.NewReader("0123456789")))
+	require.NoError(t, err)
+	req.Trailer = http.Header{"X-Sum": {"abc"}}
+
+	res, err := (&http.Client{Transport: transport}).Do(req)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "abc", <-got)
 }
