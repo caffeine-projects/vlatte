@@ -1,6 +1,12 @@
 package vlatte
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrStarted is returned when a server that started starts again: a server starts once.
+var ErrStarted = errors.New("server: already started")
 
 // Flavor is the interface all mock flavor implementations must satisfy.
 // It covers both mock registration and lifecycle management.

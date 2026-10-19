@@ -44,12 +44,16 @@ type customTestBackend struct {
 	decorated Backend
 }
 
-func (s *customTestBackend) Start() error {
-	return s.decorated.Start()
+func (s *customTestBackend) Listen() error {
+	return s.decorated.Listen()
 }
 
-func (s *customTestBackend) StartTLS() error {
-	return s.decorated.StartTLS()
+func (s *customTestBackend) ListenTLS() error {
+	return s.decorated.ListenTLS()
+}
+
+func (s *customTestBackend) Serve() error {
+	return s.decorated.Serve()
 }
 
 func (s *customTestBackend) Close() error {
