@@ -248,7 +248,16 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			data.Parameters = viewdata.NewParameters(ctx, h.app.params)
 			kit := &Kit{engine: h.app.config.TemplateEngine, data: &data}
 
-			return &OnComplete{m: mock, req: reqValues, res: res, kit: kit, args: cfg.Parameters, dir: cfg.Dir, logger: h.app.logger}
+			return &OnComplete{
+				m:         mock,
+				req:       reqValues,
+				res:       res,
+				kit:       kit,
+				args:      cfg.Parameters,
+				dir:       cfg.Dir,
+				logger:    h.app.logger,
+				transport: h.app.config.Transport,
+			}
 		},
 		func(err error) { h.lifecycle.OnWarning(reqValues, err) },
 	)

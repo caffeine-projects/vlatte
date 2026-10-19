@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -380,17 +381,6 @@ func TestWebHook_AStreamedReplyEndsAfterItsWebhooks(t *testing.T) {
 	require.True(t, target.AssertNumberOfCalls(t, 1))
 }
 
-func TestWebHook_DefaultTransportHasTimeouts(t *testing.T) {
-	wh, err := webhook.New()
-	require.NoError(t, err)
-
-	tr, ok := wh.RoundTripper.(*http.Transport)
-	require.True(t, ok)
-	// A bare http.Transport has no dial or TLS handshake timeouts: a stuck target could block forever.
-	require.NotNil(t, tr.DialContext)
-	require.NotZero(t, tr.TLSHandshakeTimeout)
-}
-
 func TestWebHook_Timeout(t *testing.T) {
 	// The timeout bounds a send: a target that never answers fails it after exactly the timeout.
 	synctest.Test(t, func(t *testing.T) {
@@ -700,6 +690,89 @@ func TestWebHook_LogsWithTheServerLogger(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Contains(t, out.String(), "<--- WEBHOOK GET /server")
+}
+
+// carrier is a transport of the caller's: it counts the webhooks it carries, and sends them on.
+type carrier struct {
+	inner *http.Transport
+	calls atomic.Int64
+}
+
+func newCarrier(t *testing.T) *carrier {
+	t.Helper()
+
+	inner := &http.Transport{}
+	t.Cleanup(inner.CloseIdleConnections)
+
+	return &carrier{inner: inner}
+}
+
+func (c *carrier) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.calls.Add(1)
+	return c.inner.RoundTrip(r)
+}
+
+func TestWebHook_SendsThroughTheServerTransport(t *testing.T) {
+	// The server's transport carries what it sends, its webhooks included, such as through a client certificate or a
+	// proxy of the caller's network. A webhook's own transport goes first. With neither, it sends all the same.
+	var hooks atomic.Int64
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hooks.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(target.Close)
+
+	tests := []struct {
+		name       string
+		server     bool
+		own        bool
+		wantServer int64
+		wantOwn    int64
+	}{
+		{name: "the server's", server: true, wantServer: 1},
+		{name: "its own first", server: true, own: true, wantOwn: 1},
+		{name: "neither"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, own := newCarrier(t), newCarrier(t)
+
+			var options []webhook.Option
+			if tt.own {
+				options = append(options, webhook.WithRoundTripper(own))
+			}
+
+			wh, err := webhook.New(options...)
+			require.NoError(t, err)
+
+			setup := mockhttp.Setup().Silent().OnCompleteListener("webhook", wh)
+			if tt.server {
+				setup = setup.Transport(server)
+			}
+
+			m := mockhttp.MustNew(setup)
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(mockhttp.Getf("/test").
+				OnCompleteEvent(webhook.Options().URL(target.URL + "/hook").Method(http.MethodPost).Build("webhook")).
+				Reply(mockhttp.NoContent()))
+
+			before := hooks.Load()
+
+			res, err := http.Get(m.URL("/test"))
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, http.StatusNoContent, res.StatusCode)
+
+			// The response waits for its webhooks.
+			require.Equal(t, before+1, hooks.Load(), "the webhook reached its target")
+			require.Equal(t, tt.wantServer, server.calls.Load())
+			require.Equal(t, tt.wantOwn, own.calls.Load())
+		})
+	}
 }
 
 func TestWebHook_AZeroWebHookSends(t *testing.T) {

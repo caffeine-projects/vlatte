@@ -77,14 +77,15 @@ type Config struct {
 	HeaderNamesToRedact            map[string]struct{}
 	UseHTTPS                       bool
 
-	// Transport sends what the server sends: the requests of proxy replies, of the recording target and of the forward
-	// proxy. Each takes its own transport first, when it has one: ProxyReply.Transport, RecordConfig.Transport or
-	// ProxyConfig.Transport. For upstreams with different needs, give each its own, or pass one that picks a transport
-	// by req.URL.Host. It is the caller's: the server never closes it.
+	// Transport sends what the server sends: the requests of proxy replies, of the recording target, of the forward
+	// proxy and of webhooks. Each takes its own transport first, when it has one: ProxyReply.Transport,
+	// RecordConfig.Transport, ProxyConfig.Transport or webhook.WithRoundTripper. For upstreams with different needs,
+	// give each its own, or pass one that picks a transport by req.URL.Host. It is the caller's: the server never
+	// closes it.
 	//
-	// Nil leaves each to a transport it makes. Only those follow the server's TLS client certificates and CAs,
-	// SSLVerify, RecordConfig.SkipSSLVerify and the forward proxy's Via and Timeout. The forward proxy's CONNECT
-	// tunnels dial their host, whatever the transport.
+	// Nil leaves each to a transport it makes, and webhooks to http.DefaultTransport. Only the transports the server
+	// makes follow its TLS client certificates and CAs, SSLVerify, RecordConfig.SkipSSLVerify and the forward proxy's
+	// Via and Timeout. The forward proxy's CONNECT tunnels dial their host, whatever the transport.
 	Transport http.RoundTripper
 
 	// WebhookTimeout is how long a webhook of the vlatte command waits for its answer, from the setting
