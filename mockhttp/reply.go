@@ -49,6 +49,30 @@ func newReplier(f ReplierFactory, app *Server) (Replier, error) {
 	return r, nil
 }
 
+// owned returns what releases r, the Replier f made, when the mock that holds r leaves: r itself when it implements
+// io.Closer, and nil when it doesn't, or when f gives the same Replier to every mock, as Shared does.
+func owned(f ReplierFactory, r Replier) io.Closer {
+	if _, ok := f.(sharedFactory); ok {
+		return nil
+	}
+
+	c, _ := r.(io.Closer)
+
+	return c
+}
+
+// closeAll closes cs, all of them, and returns their errors joined.
+func closeAll(cs []io.Closer) error {
+	var errs []error
+	for _, c := range cs {
+		if err := c.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
 // Reply describes the response of a mock: its status, headers, trailers, cookies and body, any of them templates.
 // It is a ReplierFactory: each mock built with it gets a Replier of its own, compiled with the template engine of its
 // server, so a Reply can serve many mocks and servers, and changing it after Mock changes only the mocks built

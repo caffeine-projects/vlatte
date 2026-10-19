@@ -45,6 +45,25 @@ func TestClose_BeforeStart(t *testing.T) {
 	require.NotPanics(t, MustNew().Close)
 }
 
+func TestServer_AClosedServerDoesntStartAgain(t *testing.T) {
+	// A closed server doesn't start again, even one that never started.
+	t.Run("after a start", func(t *testing.T) {
+		m := MustNew()
+		m.MustStart()
+		m.Close()
+
+		require.ErrorIs(t, m.Start(), grpc.ErrServerStopped)
+	})
+
+	t.Run("before any start", func(t *testing.T) {
+		m := MustNew()
+		m.Close()
+
+		require.ErrorIs(t, m.Start(), grpc.ErrServerStopped)
+		require.Empty(t, m.Addr(), "nothing listens")
+	})
+}
+
 func TestClose_WaitsForInFlightCalls(t *testing.T) {
 	m := MustNew()
 	pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})
@@ -84,18 +103,37 @@ func TestClose_WaitsForInFlightCalls(t *testing.T) {
 	<-closed
 }
 
+var errAccept = errors.New("accept failed")
+
+// failingListener fails every Accept, which ends Serve.
+type failingListener struct {
+	net.Listener
+}
+
+func (failingListener) Accept() (net.Conn, error) {
+	return nil, errAccept
+}
+
 func TestServeErrorsAreLogged(t *testing.T) {
+	// A listener that fails ends Serve: the failure must be logged instead of swallowed.
 	var buf bytes.Buffer
 	logger := zerolog.New(&buf)
-	m := MustNew(Setup().Logger(&logger))
+
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	m := MustNew(Setup().Logger(&logger).Listener(failingListener{Listener: inner}))
 	m.MustStart()
-	m.Close()
+	t.Cleanup(m.Close)
 
-	// A gRPC server cannot be restarted: Serve fails, and the failure must be logged instead of swallowed.
-	require.NoError(t, m.Start())
-	m.Close()
+	// Close first would stop the server before Serve, which then fails for that instead.
+	select {
+	case <-m.served:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve kept going after its listener failed")
+	}
 
-	require.Contains(t, buf.String(), grpc.ErrServerStopped.Error())
+	require.Contains(t, buf.String(), errAccept.Error())
 }
 
 func TestServerOptionsAreApplied(t *testing.T) {

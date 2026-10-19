@@ -94,6 +94,11 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"url_match that doesn't compile", "request: {url_match: '('}\n", []want{{config.CodeInvalidValue, "request.url_match", `request.url_match must be a regular expression, not "("`, "error parsing regexp"}}},
 		{"url matcher that doesn't build", "request: {url: [regex, '(']}\n", []want{{config.CodeInvalidValue, "request.url", "regex takes a regular expression", ""}}},
 		{"url and path", "request: {url: /x, path: /y}\n", []want{{config.CodeConflict, "request.path", "request.path is set with request.url", "keep one of them"}}},
+		// A relative url is exact, so a glob or a bare name in it would never match: path takes globs.
+		{"relative url without its /", "request: {url: 'items?page=2'}\n", []want{{config.CodeInvalidValue, "request.url", `"items?page=2" must be an absolute URL, or start with /`, "use path instead"}}},
+		// A relative url was a glob: written as one, it would match only itself.
+		{"relative url with a bad escape", "request: {url: '/a%zz'}\n", []want{{config.CodeInvalidValue, "request.url", `request.url="/a%zz" is not a URL`, ""}}},
+		{"relative url with a glob", "request: {url: '/users/*'}\n", []want{{config.CodeInvalidValue, "request.url", `"/users/*" has a * in its path`, "for a literal *, write %2A"}}},
 		{"url, url_match and path", "request: {url: /x, url_match: x, path: /y}\n", []want{
 			{config.CodeConflict, "request.url_match", "is set with request.url", ""},
 			{config.CodeConflict, "request.path", "is set with request.url", ""},
@@ -124,6 +129,8 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"unknown top-level key", ok + "requset: {}\n", []want{{config.CodeUnknownKey, "requset", "not a known setting", "did you mean request?"}}},
 		{"dotted key", "request.path: /x\nrequest: {method: GET}\n", []want{{config.CodeUnknownKey, "request.path", "written as a dotted key", "nest it"}}},
 		{"response and proxy", ok + "response: {status: 200}\nproxy: {target: 'http://a'}\n", []want{{config.CodeConflict, "proxy", "proxy is set with response", "keep one of them"}}},
+		// A proxy never follows redirects, so the setting that claimed to turn that off is gone.
+		{"proxy no_follow", ok + "proxy: {target: 'http://a', no_follow: true}\n", []want{{config.CodeUnknownKey, "proxy.no_follow", "not a known setting", ""}}},
 		{"response that isn't an object", ok + "response: 5\n", []want{{config.CodeInvalidValue, "response", "must be an object, not a number", ""}}},
 		{"response key with a typo", ok + "response: {stauts: 201}\n", []want{{config.CodeUnknownKey, "response.stauts", "not a known setting", "did you mean response.status?"}}},
 		{"response key with no near match", ok + "response: {colour: red}\n", []want{{config.CodeUnknownKey, "response.colour", "", "the keys under response are status, header"}}},
@@ -500,7 +507,6 @@ proxy:
   trim_suffix: .json
   timeout: 1500
   ssl_verify: false
-  no_follow: true
 `
 	scope, err := m.Mock(FromBytes([]byte(doc), "yaml"))
 	require.NoError(t, err)
@@ -508,7 +514,6 @@ proxy:
 	proxy, ok := scope.Mocks()[0].reply.(*proxyReplier)
 	require.True(t, ok)
 	require.Equal(t, 1500*time.Millisecond, proxy.timeout)
-	require.NotNil(t, proxy.client.CheckRedirect, "no_follow")
 
 	req, err := http.NewRequest(http.MethodGet, m.URL("/api/users.json"), nil)
 	require.NoError(t, err)
@@ -556,4 +561,44 @@ func TestMockSchema_MoreReadProblems(t *testing.T) {
 		require.Equal(t, config.CodeFileNotFound, problems[0].Code)
 		require.Empty(t, problems[0].Hint)
 	})
+}
+
+func TestMockFile_RelativeURLIsExact(t *testing.T) {
+	// A relative url was a glob of the path, and its query was ignored: /items answered /items?page=2, and a mock
+	// file for one page answered them all. It names the exact path and query now.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(
+		FromBytes([]byte("request: {url: '/items?page=2&sort=asc'}\nresponse: {status: 200, body: page 2}\n"), "yaml"),
+		FromBytes([]byte("request: {url: /items}\nresponse: {status: 200, body: all}\n"), "yaml"),
+		FromBytes([]byte("request: {url: '/files/%2A?q=*'}\nresponse: {status: 200, body: star}\n"), "yaml"),
+	)
+
+	tests := []struct {
+		target string
+		status int
+		body   string
+	}{
+		{target: "/items?page=2&sort=asc", status: http.StatusOK, body: "page 2"},
+		{target: "/items?sort=asc&page=2", status: http.StatusOK, body: "page 2"},
+		{target: "/items", status: http.StatusOK, body: "all"},
+		{target: "/items?page=3&sort=asc", status: StatusNoMatch},
+		{target: "/items?page=2", status: StatusNoMatch},
+		{target: "/items?page=2&sort=asc&x=1", status: StatusNoMatch},
+		{target: "/items/", status: StatusNoMatch},
+		{target: "/files/*?q=*", status: http.StatusOK, body: "star"},
+		{target: "/files/%2A?q=*", status: http.StatusOK, body: "star"},
+		{target: "/files/a?q=*", status: StatusNoMatch},
+	}
+
+	for _, tc := range tests {
+		status, body := get(t, m, tc.target)
+		require.Equal(t, tc.status, status, tc.target)
+
+		if tc.status == http.StatusOK {
+			require.Equal(t, tc.body, body, tc.target)
+		}
+	}
 }

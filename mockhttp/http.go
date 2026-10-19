@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mattn/go-colorable"
@@ -49,18 +50,24 @@ type Server struct {
 	requestBodyParsers []RequestBodyParser
 	params             vlatte.KV
 	loaders            []Loader
-	rec                *recorder
 	rwMutex            sync.RWMutex
 	proxy              *reverseProxy
 
-	data           map[string]any
-	logger         *zerolog.Logger
-	startOnce      sync.Once
-	admin          *admin.Admin[*Mock]
-	closeIdleConns []func()
+	data      map[string]any
+	logger    *zerolog.Logger
+	startOnce sync.Once
+	closed    atomic.Bool // set by Close: a closed server doesn't start again
+	admin     *admin.Admin[*Mock]
 
 	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
 	events *vlatte.EventRunner
+
+	// recording is the recording requests are captured for, if any. recordMu orders its starts, and guards played:
+	// the directory of the last recording StopRecording ended, whose recordings files loads with the mock files.
+	recording atomic.Pointer[recording]
+	recordMu  sync.Mutex
+	played    string
+	files     *fileLoader
 }
 
 // New creates a new HTTP mock Server with the given configurations.
@@ -138,12 +145,13 @@ func New(config ...Option) (*Server, error) {
 		params = vlatte.NewMemoryKV()
 	}
 
-	var rec *recorder
 	if conf.Record != nil {
-		var err error
-		if rec, err = newRecorder(app, conf.Record); err != nil {
+		record := conf.Record.clone()
+		if err := record.check(); err != nil {
 			return nil, fmt.Errorf("server: %w", err)
 		}
+
+		conf.Record = record
 	}
 
 	var p *reverseProxy
@@ -183,8 +191,9 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	internalLoaders := 1
+	files := &fileLoader{}
 	loaders := make([]Loader, 0, len(conf.Loaders)+internalLoaders)
-	loaders = append(loaders, &fileLoader{})
+	loaders = append(loaders, files)
 	loaders = append(loaders, conf.Loaders...)
 
 	app.Base = vlatte.NewBase(app, repository)
@@ -192,7 +201,7 @@ func New(config ...Option) (*Server, error) {
 	app.scenarioStore = mfeat.NewScenarioStore()
 	app.params = params
 	app.loaders = loaders
-	app.rec = rec
+	app.files = files
 	app.proxy = p
 	app.requestBodyParsers = parsers
 	app.events = eventRunner
@@ -266,10 +275,11 @@ func (app *Server) Name() string {
 	return app.config.Name
 }
 
-// Start starts the mock server.
+// Start starts the mock server. A closed server doesn't start again: Start returns http.ErrServerClosed.
 func (app *Server) Start() error {
-	// A server closed before runs events again.
-	app.events.Open()
+	if app.closed.Load() {
+		return http.ErrServerClosed
+	}
 
 	err := app.server.Start()
 	if err != nil {
@@ -288,10 +298,11 @@ func (app *Server) MustStart() {
 	}
 }
 
-// StartTLS starts TLS on a mock server.
+// StartTLS starts TLS on a mock server. A closed server doesn't start again: StartTLS returns http.ErrServerClosed.
 func (app *Server) StartTLS() error {
-	// A server closed before runs events again.
-	app.events.Open()
+	if app.closed.Load() {
+		return http.ErrServerClosed
+	}
 
 	err := app.server.StartTLS()
 	if err != nil {
@@ -374,8 +385,11 @@ func (app *Server) MustReload() {
 }
 
 // Close closes the mock server. It cancels the on_complete events still running, such as a webhook waiting for its
-// delay or its target, so the requests waiting for them end, and waits for those requests.
+// delay or its target, so the requests waiting for them end, and waits for those requests. It stops the recording,
+// and waits until it wrote what it took. A closed server doesn't start again.
 func (app *Server) Close() {
+	app.closed.Store(true)
+
 	// The backend waits for the requests it serves, and they wait for their events: cancel the events first.
 	app.events.Close()
 
@@ -384,27 +398,19 @@ func (app *Server) Close() {
 		app.logger.Debug().Err(err).Msg("server: Close: error closing server")
 	}
 
-	if app.rec != nil {
-		app.rec.stop()
+	// The recording logged each call it couldn't record. The server closes: it serves nothing more.
+	_, _ = app.stopRecording(context.Background(), false)
+
+	// The mocks stay stored, so assertions still read them after Close: they release what they hold.
+	mocks, _ := app.storage.PickAll(context.Background())
+	for _, mock := range mocks {
+		if err := mock.Close(); err != nil {
+			app.logger.Warn().Err(err).Msgf("server: Close: closing mock %s", mock.ID())
+		}
 	}
 
-	app.rwMutex.RLock()
-	closeIdleConns := app.closeIdleConns
-	app.rwMutex.RUnlock()
-
-	for _, closeIdle := range closeIdleConns {
-		closeIdle()
-	}
-}
-
-// IsRecording checks if mock recording is enabled.
-func (app *Server) IsRecording() bool {
-	return app.rec != nil && app.rec.isActive()
-}
-
-func (app *Server) StopRecording() {
-	if app.rec != nil {
-		app.rec.stop()
+	if app.proxy != nil {
+		app.proxy.close()
 	}
 }
 
@@ -455,8 +461,14 @@ func (app *Server) DescribeConfig() string {
 
 	if app.config.Record != nil {
 		buf.WriteString("Recording: ")
-		buf.WriteString(app.config.Record.SaveDir)
+		buf.WriteString(app.config.Record.dir(app.config.RootDir))
 		buf.WriteString("\n")
+
+		if target := app.config.Record.Target; target != "" {
+			buf.WriteString("Recording Target: ")
+			buf.WriteString(target)
+			buf.WriteString("\n")
+		}
 	}
 
 	buf.WriteString("\n")
@@ -467,18 +479,12 @@ func (app *Server) DescribeConfig() string {
 	return buf.String()
 }
 
-// closeIdleConnsOnClose registers fn to release idle outbound connections when the app closes.
-func (app *Server) closeIdleConnsOnClose(fn func()) {
-	app.rwMutex.Lock()
-	defer app.rwMutex.Unlock()
-
-	app.closeIdleConns = append(app.closeIdleConns, fn)
-}
-
 // --
 // Internals
 // --
 
+// onStart loads the mocks once, then starts the recording the config sets, which records until the server closes, or
+// StopRecording ends it.
 func (app *Server) onStart() (err error) {
 	app.startOnce.Do(func() { err = app.load() })
 
@@ -486,11 +492,7 @@ func (app *Server) onStart() (err error) {
 		return err
 	}
 
-	if app.rec != nil {
-		app.rec.start()
-	}
-
-	return nil
+	return app.startConfiguredRecording()
 }
 
 func (app *Server) load() error {

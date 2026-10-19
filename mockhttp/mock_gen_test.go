@@ -240,7 +240,9 @@ func genRequest(baseURL string) *rapid.Generator[requestModel] {
 			r.doc["body"] = body.spec
 		}
 
-		absolute := false
+		// A URL as text names the query too, so it goes without query matchers: an absolute one is compared with the
+		// whole request URL, and a relative one with its path and query.
+		wholeURL := false
 
 		switch rapid.IntRange(0, 5).Draw(t, "url kind") {
 		case 0:
@@ -249,17 +251,17 @@ func genRequest(baseURL string) *rapid.Generator[requestModel] {
 			r.doc["path"] = []any{"equal", r.path}
 		case 2:
 			r.doc["url"] = r.path
+			wholeURL = true
 		case 3:
-			// An absolute URL is compared with the whole request URL, query included, so it goes without a query.
 			r.doc["url"] = strings.ToUpper(baseURL[:4]) + baseURL[4:] + r.path
-			absolute = true
+			wholeURL = true
 		case 4:
 			r.doc["url"] = []any{"urlPath", r.path}
 		default:
 			r.doc["url_match"] = `^http://[^/]+` + regexp.QuoteMeta(r.path) + `(\?.*)?$`
 		}
 
-		if !absolute && rapid.Bool().Draw(t, "has query") {
+		if !wholeURL && rapid.Bool().Draw(t, "has query") {
 			// Mixed-case names: query names are case-sensitive, so their case must survive decoding.
 			r.query = rapid.MapOfN(rapid.StringMatching(`[A-Za-z][A-Za-z0-9_]{0,6}`), genMatcher(), 1, 2).Draw(t, "query")
 			r.doc["query"] = specs(r.query)

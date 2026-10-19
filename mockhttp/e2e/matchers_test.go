@@ -49,9 +49,13 @@ func TestMatcherCombinations(t *testing.T) {
 
 	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
 	m := mockhttp.MustNew()
+	ms := mockhttp.MustNew()
 
+	// Both servers hold both mocks, which differ only in the scheme they take: each request matches its scheme's.
 	sHTTP := m.MustMock(mockhttp.FromFile("testdata/matchers/01_matchers.yaml"))
-	sHTTPS := m.MustMock(mockhttp.FromFile("testdata/matchers/02_matchers.yaml"))
+	httpsOnHTTP := m.MustMock(mockhttp.FromFile("testdata/matchers/02_matchers.yaml"))
+	httpOnHTTPS := ms.MustMock(mockhttp.FromFile("testdata/matchers/01_matchers.yaml"))
+	sHTTPS := ms.MustMock(mockhttp.FromFile("testdata/matchers/02_matchers.yaml"))
 
 	actAndAssert := func(baseURL string) {
 		body := &model{
@@ -116,17 +120,17 @@ func TestMatcherCombinations(t *testing.T) {
 	}
 
 	m.MustStart()
-	u := m.URL()
-	actAndAssert(u)
+	actAndAssert(m.URL())
 	m.Close()
 
-	m.MustStartTLS()
-	u = m.URL()
-	actAndAssert(u)
-	m.Close()
+	ms.MustStartTLS()
+	actAndAssert(ms.URL())
+	ms.Close()
 
 	require.True(t, vlatte.Times(t, sHTTP, 1))
 	require.True(t, vlatte.Times(t, sHTTPS, 1))
+	require.True(t, vlatte.NotCalled(t, httpsOnHTTP))
+	require.True(t, vlatte.NotCalled(t, httpOnHTTPS))
 
 	m = mockhttp.MustNew()
 	m.MustStart()

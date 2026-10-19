@@ -24,7 +24,7 @@ func BenchmarkMultipartForm(b *testing.B) {
 		r := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
 		r.Header.Set(HeaderContentType, contentType)
 
-		if _, _, err := parseRequestBody(app, r); err != nil {
+		if _, _, _, err := parseRequestBody(app, r); err != nil {
 			b.Fatal(err)
 		}
 	}

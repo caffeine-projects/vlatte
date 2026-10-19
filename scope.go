@@ -330,7 +330,10 @@ func (s *Scopes[B, A]) Replace(ctx context.Context, old *Scope[B], builders ...B
 		built = append(built, mock)
 	}
 
+	// The mocks built never reach the store when another fails, or when the store refuses them: nothing else would
+	// close them.
 	if len(errs) > 0 {
+		s.closeBuilt(ctx, built)
 		return nil, errors.Join(errs...)
 	}
 
@@ -342,6 +345,7 @@ func (s *Scopes[B, A]) Replace(ctx context.Context, old *Scope[B], builders ...B
 	}
 
 	if err != nil {
+		s.closeBuilt(ctx, built)
 		return nil, fmt.Errorf("server: %w", err)
 	}
 
@@ -380,4 +384,16 @@ func (s *Scopes[B, A]) All() []*Scope[B] {
 	copy(ret, s.list)
 
 	return ret
+}
+
+// closeBuilt closes the mocks a call built and couldn't store. A builder that returns a mock the store holds, which
+// Builder forbids, gets it back open: it still serves.
+func (s *Scopes[B, A]) closeBuilt(ctx context.Context, built []B) {
+	for _, mock := range built {
+		if stored, err := s.store.Pick(ctx, mock.ID()); err == nil && any(stored) == any(mock) {
+			continue
+		}
+
+		closeMocks([]B{mock})
+	}
 }

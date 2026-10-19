@@ -453,7 +453,8 @@ func (b *Builder) DelayFunc(delay vlatte.Delay) *Builder {
 }
 
 // Map adds a Mapper that allows modifying the response after it was built.
-// Multiple mappers can be added.
+// Multiple mappers can be added. A mapper finds the body in Body: one that streams, such as a proxy's, is read whole
+// for it first.
 func (b *Builder) Map(mapper Mapper) *Builder {
 	b.spec.mappers = append(b.spec.mappers, mapper)
 
@@ -462,7 +463,8 @@ func (b *Builder) Map(mapper Mapper) *Builder {
 
 // Reply sets what the mock replies with. Build asks f for a new Replier for each mock, so f can serve many mocks.
 // Reply, SequentialReply, RandomReply, ProxyReply, FuncReply and EchoReply are factories, and Shared turns any Replier
-// into one.
+// into one. The mock owns the Replier f makes: when it implements io.Closer, the mock closes it when it leaves the
+// server. A Replier that Shared gives to many mocks is never closed by them.
 func (b *Builder) Reply(f ReplierFactory) *Builder {
 	b.reply = f
 	return b
@@ -545,7 +547,7 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 
 	desc, _ := descriptor.IsSelfDescriptive(b.reply)
 
-	return &Mock{spec: spec, reply: reply, replyDesc: desc, enabled: b.enabled}, nil
+	return &Mock{spec: spec, reply: reply, replyDesc: desc, closer: owned(b.reply, reply), enabled: b.enabled}, nil
 }
 
 func (b *Builder) appendExpectation(e *vlatte.Eval[*selectorInput]) {

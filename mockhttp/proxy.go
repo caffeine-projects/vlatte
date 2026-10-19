@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -53,11 +54,10 @@ var _defaultProxyConfig = ProxyConfig{Timeout: 10 * time.Second, SSLVerify: fals
 type reverseProxy struct {
 	logger       *zerolog.Logger
 	roundTripper http.RoundTripper
+	transport    *http.Transport // roundTripper, when the proxy made it
 }
 
 func newProxy(log *zerolog.Logger, config *Config) *reverseProxy {
-	var roundTripper http.RoundTripper
-
 	if config.Proxy.Transport == nil {
 		transport := &http.Transport{
 			TLSClientConfig: &tls.Config{
@@ -81,28 +81,35 @@ func newProxy(log *zerolog.Logger, config *Config) *reverseProxy {
 		transport.ExpectContinueTimeout = 1 * time.Second
 		transport.ResponseHeaderTimeout = config.Proxy.Timeout
 
-		roundTripper = transport
-	} else {
-		roundTripper = config.Proxy.Transport
+		return &reverseProxy{logger: log, roundTripper: transport, transport: transport}
 	}
 
-	return &reverseProxy{log, roundTripper}
+	return &reverseProxy{logger: log, roundTripper: config.Proxy.Transport}
 }
 
-func (p *reverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// serve sends r to its host and answers with the host's response, or opens a tunnel for a CONNECT. It returns an
+// error when the client didn't get the host's whole answer.
+func (p *reverseProxy) serve(w http.ResponseWriter, r *http.Request) error {
 	if r.Method == http.MethodConnect {
-		p.handleTunneling(w, r)
-	} else {
-		p.handleHTTP(w, r)
+		return p.handleTunneling(w, r)
+	}
+
+	return p.handleHTTP(w, r)
+}
+
+// close releases the idle connections of the transport the proxy made. A ProxyConfig.Transport is the caller's.
+func (p *reverseProxy) close() {
+	if p.transport != nil {
+		p.transport.CloseIdleConnections()
 	}
 }
 
-func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) {
+func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) error {
 	// Dial before hijacking: once the connection is hijacked, w can no longer report errors.
 	out, err := net.DialTimeout("tcp", r.Host, 5*time.Second)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
+		return err
 	}
 
 	defer out.Close()
@@ -110,13 +117,13 @@ func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) {
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "proxy: hijacking is not supported", http.StatusInternalServerError)
-		return
+		return errors.New("proxy: hijacking is not supported")
 	}
 
 	in, _, err := hijacker.Hijack()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
+		return err
 	}
 
 	defer in.Close()
@@ -124,7 +131,7 @@ func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) {
 	// WriteHeader has no effect on a hijacked connection, so the tunnel response is written directly.
 	if _, err = io.WriteString(in, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
 		p.logger.Error().Err(err).Str("url", r.URL.String()).Msg("proxy: error establishing tunnel")
-		return
+		return err
 	}
 
 	errCh := make(chan error, 2)
@@ -143,15 +150,17 @@ func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) {
 			Str("method", r.Method).
 			Msg("proxy: error writing response")
 	}
+
+	return err
 }
 
-func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
+func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) error {
 	r.Header.Del(HeaderConnection)
 
 	res, err := p.roundTripper.RoundTrip(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
+		return err
 	}
 
 	defer res.Body.Close()
@@ -171,6 +180,8 @@ func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			Str("method", r.Method).
 			Str("status", res.Status).
 			Msg("proxy: error copying response body")
+
+		return err
 	}
 
 	for k, vv := range res.Trailer {
@@ -178,4 +189,6 @@ func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add(k, v)
 		}
 	}
+
+	return nil
 }

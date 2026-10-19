@@ -148,7 +148,7 @@ type EventRunner struct {
 	mu     sync.Mutex
 	ctx    context.Context    // made by the first request; Close cancels it, and so the events
 	cancel context.CancelFunc // cancels ctx
-	closed bool               // set by Close, cleared by Open: a closed runner runs nothing
+	closed bool               // set by Close: a closed runner runs nothing
 }
 
 func NewEventRunner(listeners *Listener, global *Events) *EventRunner {
@@ -193,8 +193,7 @@ func (r *EventRunner) OnComplete(ctx context.Context, mock Mock, argsFn func(ctx
 	wg.Wait()
 }
 
-// Close cancels the context of the events running, so the requests waiting for them end, and runs no event until
-// Open.
+// Close cancels the context of the events running, so the requests waiting for them end, and runs no event after.
 func (r *EventRunner) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -205,13 +204,6 @@ func (r *EventRunner) Close() {
 	}
 
 	r.ctx, r.cancel = nil, nil
-}
-
-// Open lets a runner that Close closed run events again, with a new context.
-func (r *EventRunner) Open() {
-	r.mu.Lock()
-	r.closed = false
-	r.mu.Unlock()
 }
 
 // context returns the context Close cancels. A closed runner has none.

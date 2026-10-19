@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -378,4 +379,165 @@ func TestCLI_WebhookTimeout(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the webhook waited past its 100ms timeout")
 	}
+}
+
+func TestCLI_RecordsThenPlaysBack(t *testing.T) {
+	// --record --record-target records the target's answers until the CLI stops, into testdata/_mocks_recorded. A
+	// later run serves them, without the target: the default mock files include them.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"page":%q}`, r.URL.Query().Get("page"))
+	}))
+	t.Cleanup(target.Close)
+
+	get := func(c require.TestingT, url string) (int, string) {
+		res, err := http.Get(url)
+		require.NoError(c, err)
+
+		defer res.Body.Close()
+
+		b, err := io.ReadAll(res.Body)
+		require.NoError(c, err)
+
+		return res.StatusCode, string(b)
+	}
+
+	addr := randomAddr(t)
+	stop := start(t, "--addr", addr, "--record", "--record-target", target.URL, "--log-level", "disabled")
+
+	// Until the recording starts, no mock answers.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res, err := http.Get("http://" + addr + "/items?page=2")
+		if !assert.NoError(c, err) {
+			return
+		}
+
+		_ = res.Body.Close()
+		assert.Equal(c, http.StatusOK, res.StatusCode)
+	}, 10*time.Second, 100*time.Millisecond)
+
+	require.Equal(t, 0, stop(), "a stopped server exits cleanly")
+
+	files, err := filepath.Glob(filepath.Join("testdata", "_mocks_recorded", "*.mock.json"))
+	require.NoError(t, err)
+	require.Len(t, files, 1, "the CLI wrote the recording when it stopped")
+
+	target.Close()
+
+	addr = randomAddr(t)
+	start(t, "--addr", addr, "--log-level", "disabled")
+
+	// The server answers before it loads the mock files (#54): wait until the recording answers.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		status, body := get(c, "http://"+addr+"/items?page=2")
+		assert.Equal(c, http.StatusOK, status)
+		assert.JSONEq(c, `{"page":"2"}`, body)
+	}, 10*time.Second, 100*time.Millisecond)
+
+	status, _ := get(t, "http://"+addr+"/items?page=3")
+	require.Equal(t, mockhttp.StatusNoMatch, status, "a request the recording didn't take")
+}
+
+func TestCLI_ARecordingThatFailsFailsTheRun(t *testing.T) {
+	// A call the recording couldn't record, here a status no mock file holds, makes the run fail when it stops.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(999) }))
+	t.Cleanup(target.Close)
+
+	addr := randomAddr(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var stderr bytes.Buffer
+
+	done := make(chan int, 1)
+	go func() {
+		done <- run(ctx, []string{"--addr", addr, "--record", "--record-target", target.URL, "--log-level", "disabled"}, io.Discard, &stderr)
+	}()
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res, err := http.Get("http://" + addr + "/profile")
+		if !assert.NoError(c, err) {
+			return
+		}
+
+		_ = res.Body.Close()
+		assert.Equal(c, 999, res.StatusCode)
+	}, 10*time.Second, 100*time.Millisecond)
+
+	cancel()
+	require.Equal(t, 1, <-done)
+	require.Contains(t, stderr.String(), "status 999")
+}
+
+func TestCLI_RecordingsItCantServeDontFailTheRun(t *testing.T) {
+	// A recording moved to the mock files, then recorded again to refresh it, has the ID of a mock file: the exiting
+	// server can't serve it. Every call was recorded, so the run succeeds, and says why the recording isn't served.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	// Each answer of the target is its own, so a test tells the target's from the mock file's.
+	var answers atomic.Int64
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, answers.Add(1))
+	}))
+	t.Cleanup(target.Close)
+
+	// record runs the CLI until the target gave want, which the recording took, and returns the exit code and stderr.
+	record := func(want string) (int, string) {
+		addr := randomAddr(t)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		var stderr bytes.Buffer
+
+		done := make(chan int, 1)
+		go func() {
+			done <- run(ctx, []string{"--addr", addr, "--record", "--record-target", target.URL, "--log-level", "disabled"}, io.Discard, &stderr)
+		}()
+
+		require.EventuallyWithT(t, func(c *assert.CollectT) {
+			res, err := http.Get("http://" + addr + "/items")
+			if !assert.NoError(c, err) {
+				return
+			}
+
+			defer res.Body.Close()
+
+			body, err := io.ReadAll(res.Body)
+			assert.NoError(c, err)
+			assert.Equal(c, want, string(body))
+		}, 10*time.Second, 100*time.Millisecond)
+
+		cancel()
+
+		return <-done, stderr.String()
+	}
+
+	code, _ := record("1")
+	require.Equal(t, 0, code)
+
+	files, err := filepath.Glob(filepath.Join("testdata", "_mocks_recorded", "*.mock.json"))
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+
+	// JSON is YAML too: the default patterns load the .yaml files of testdata/_mocks.
+	data, err := os.ReadFile(files[0])
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join("testdata", "_mocks"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join("testdata", "_mocks", "items.mock.yaml"), data, 0o600))
+	require.NoError(t, os.Remove(files[0]))
+
+	code, stderr := record("2")
+	require.Equal(t, 0, code, "every call was recorded")
+	require.Contains(t, stderr, "mock id already in use", "why the recording isn't served")
+	require.FileExists(t, files[0], "the recording was written again")
 }

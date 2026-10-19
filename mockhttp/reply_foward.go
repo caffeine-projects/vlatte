@@ -18,7 +18,13 @@ import (
 var (
 	_ ReplierFactory = (*ProxyReply)(nil)
 	_ Replier        = (*proxyReplier)(nil)
+	_ io.Closer      = (*proxyReplier)(nil)
+	_ io.ReadCloser  = (*targetBody)(nil)
+	_ keptBody       = (*targetBody)(nil)
 )
+
+// errNoHeaders ends a call to a target that didn't send its response headers within the proxy's timeout.
+var errNoHeaders = errors.New("reply_proxy: no response headers in time")
 
 var _forbiddenHeaders = []string{
 	"Connection",
@@ -31,13 +37,23 @@ var _forbiddenHeaders = []string{
 	"Upgrade",
 }
 
-const _defaultTimeout = 30 * time.Second
+const (
+	_defaultTimeout = 30 * time.Second
+
+	// _keptBodyLimit bounds how much of a target's body a proxy keeps, for the request log, callbacks and events,
+	// while it streams to the client: a larger body isn't kept.
+	_keptBodyLimit = 1 << 20
+
+	// _idleConnTimeout closes a connection to the target that stays idle, as the forward proxy does. A request still
+	// being served when its mock leaves returns its connection afterwards: it closes then, at the latest.
+	_idleConnTimeout = 15 * time.Second
+)
 
 type FromTypes interface{ string | *url.URL }
 
 // ProxyReply represents a response stub that will be the response "proxied" from the specified target.
 // Use From to init a new ProxyReply. It is a ReplierFactory: each mock built with it gets a proxy of its own, with an
-// HTTP client of its own.
+// HTTP client of its own, whose idle connections close when the mock leaves the server or the server closes.
 type ProxyReply struct {
 	target               *url.URL
 	headers              http.Header
@@ -46,7 +62,6 @@ type ProxyReply struct {
 	trimPrefix           string
 	trimSuffix           string
 	timeout              time.Duration
-	noFollow             bool
 	sslVerify            bool
 }
 
@@ -73,13 +88,6 @@ func From[T FromTypes](target T) *ProxyReply {
 		proxyHeadersToRemove: make([]string, 0),
 		timeout:              _defaultTimeout,
 	}
-}
-
-// NoFollow has no effect and is kept for compatibility: a ProxyReply never follows redirects.
-// Redirect responses from the target are passed to the client unchanged.
-func (r *ProxyReply) NoFollow() *ProxyReply {
-	r.noFollow = true
-	return r
 }
 
 // Header sets an extra response header that will be set after the proxy target replies.
@@ -134,8 +142,9 @@ func (r *ProxyReply) TrimSuffix(suffix string) *ProxyReply {
 	return r
 }
 
-// Timeout sets the timeout for the target HTTP request.
-// Defaults to 30s.
+// Timeout sets how long to wait for the response headers of the target, from the call: connecting and sending the
+// request count too. The body then streams to the client as the target sends it, for as long as the client waits.
+// 0 waits forever. Defaults to 30s.
 func (r *ProxyReply) Timeout(timeout time.Duration) *ProxyReply {
 	r.timeout = timeout
 	return r
@@ -153,10 +162,6 @@ func (r *ProxyReply) SSLVerify(v bool) *ProxyReply {
 	return r
 }
 
-func noFollow(_ *http.Request, _ []*http.Request) error {
-	return http.ErrUseLastResponse
-}
-
 func (r *ProxyReply) Describe() descriptor.Descriptor {
 	return descriptor.New("proxy", map[string]any{
 		"target":         r.target.String(),
@@ -167,14 +172,17 @@ func (r *ProxyReply) Describe() descriptor.Descriptor {
 		"trim_suffix":    r.trimSuffix,
 		"timeout":        r.timeout.String(),
 		"ssl_verify":     r.sslVerify,
-		"no_follow":      r.noFollow,
 	})
 }
 
-// NewReplier implements ReplierFactory. Each mock gets a proxy of its own: copies of the target and the headers, and an
-// HTTP client of its own. With Config.HTTPClientFactory, the client is a copy of the one the factory returns, which can
-// be a client it shares, such as http.DefaultClient.
+// NewReplier implements ReplierFactory. Each mock gets a proxy of its own: copies of the target and the headers, and a
+// transport of its own. With Config.HTTPClientFactory, it sends through the Transport of the client the factory
+// returns, which can be shared, such as http.DefaultClient's: a client without one gets a transport of its own.
 func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
+	if r.timeout < 0 {
+		return nil, fmt.Errorf("reply_proxy: timeout must be 0 or more, not %s", r.timeout)
+	}
+
 	p := &proxyReplier{
 		target:               r.target.Clone(),
 		headers:              r.headers.Clone(),
@@ -185,33 +193,28 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 		timeout:              r.timeout,
 	}
 
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: !r.sslVerify,
-		RootCAs:            app.config.TLSClientCAs,
-		Certificates:       app.config.TLSCertificates,
-	}
-
-	if app.config.HTTPClientFactory == nil {
-		p.client = &http.Client{Transport: &http.Transport{DisableCompression: true, TLSClientConfig: tlsConfig}}
-	} else {
-		client := app.config.HTTPClientFactory()
+	if factory := app.config.HTTPClientFactory; factory != nil {
+		client := factory()
 		if client == nil {
 			return nil, errors.New("reply_proxy: the HTTP client factory returned no client")
 		}
 
-		// A copy: the factory can return a client it shares, and the lines below change the client.
-		p.client = new(*client)
+		// The transport of a factory's client is the factory's: it can be shared, so the proxy never closes it.
+		p.roundTripper = client.Transport
 	}
 
-	if p.client.Transport == nil {
-		p.client.Transport = &http.Transport{TLSClientConfig: tlsConfig, DisableCompression: true}
+	if p.roundTripper == nil {
+		p.transport = &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: !r.sslVerify,
+				RootCAs:            app.config.TLSClientCAs,
+				Certificates:       app.config.TLSCertificates,
+			},
+			DisableCompression: true,
+			IdleConnTimeout:    _idleConnTimeout,
+		}
+		p.roundTripper = p.transport
 	}
-
-	if r.noFollow {
-		p.client.CheckRedirect = noFollow
-	}
-
-	app.closeIdleConnsOnClose(p.client.CloseIdleConnections)
 
 	return p, nil
 }
@@ -225,12 +228,23 @@ type proxyReplier struct {
 	trimPrefix           string
 	trimSuffix           string
 	timeout              time.Duration
-	client               *http.Client
+	roundTripper         http.RoundTripper
+	transport            *http.Transport // roundTripper, when the proxy made it
 }
 
 // Reply implements Replier.
 func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, error) {
 	return p.build(input.RequestValues)
+}
+
+// Close releases the idle connections to the target, when the proxy made the transport that holds them. The transport
+// stays usable: a request that was being served when the mock left still gets its answer.
+func (p *proxyReplier) Close() error {
+	if p.transport != nil {
+		p.transport.CloseIdleConnections()
+	}
+
+	return nil
 }
 
 func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
@@ -269,15 +283,32 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(req.RawRequest.Context(), p.timeout)
-	defer cancel()
+	// The timeout covers the wait for the response headers. The call ends when its body is closed.
+	ctx, cancel := context.WithCancelCause(req.RawRequest.Context())
 
-	res, err := p.client.Transport.RoundTrip(req.RawRequest.WithContext(ctx))
-	if err != nil {
-		return nil, fmt.Errorf("reply_proxy: calling the target %s: %w", p.target, err)
+	var timer *time.Timer
+	if p.timeout > 0 {
+		timer = time.AfterFunc(p.timeout, func() { cancel(errNoHeaders) })
 	}
 
-	defer res.Body.Close()
+	res, err := p.roundTripper.RoundTrip(req.RawRequest.WithContext(ctx))
+
+	// The timer fired, or is firing: whatever RoundTrip returned, the call is over. Cancelling here, before reading
+	// anything, doesn't wait for the timer's own cancel.
+	if timer != nil && !timer.Stop() {
+		cancel(errNoHeaders)
+
+		if err == nil {
+			res.Body.Close()
+		}
+
+		return nil, fmt.Errorf("reply_proxy: calling the target %s: no response headers within %s", p.target, p.timeout)
+	}
+
+	if err != nil {
+		cancel(nil)
+		return nil, fmt.Errorf("reply_proxy: calling the target %s: %w", p.target, err)
+	}
 
 	stub := newResponse()
 
@@ -298,22 +329,64 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 	}
 
 	stub.StatusCode = res.StatusCode
+	stub.BodyCloser = &targetBody{ReadCloser: res.Body, cancel: cancel}
+	stub.proxied = true
 
-	b, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, err
+	// A body of unknown length, or an event stream, goes to the client part by part, as the target sends it. Other
+	// bodies fill the server's buffer, which sends them as it fills.
+	stub.flush = res.ContentLength < 0 || mediaType(res.Header.Get(HeaderContentType)) == "text/event-stream"
+
+	// The target's trailers: the keys it announced now, and their values once its body is read to the end.
+	if res.Trailer == nil {
+		res.Trailer = make(http.Header)
 	}
 
-	stub.Body = b
-	stub.Trailer = make(http.Header, len(res.Trailer))
-
-	for key, values := range res.Trailer {
-		for _, value := range values {
-			stub.Trailer.Add(key, value)
-		}
-	}
+	stub.Trailer = res.Trailer
 
 	return stub, nil
+}
+
+// targetBody is the body of a target's response, which streams to the client. It keeps what it reads, up to
+// _keptBodyLimit, and closing it ends the call to the target.
+type targetBody struct {
+	io.ReadCloser
+
+	cancel context.CancelCauseFunc
+	kept   []byte
+	over   bool // read more than it keeps
+	eof    bool
+}
+
+// Read reads the body, and keeps what it read.
+func (b *targetBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+
+	switch {
+	case b.over:
+	case len(b.kept)+n > _keptBodyLimit:
+		b.over, b.kept = true, nil
+	default:
+		b.kept = append(b.kept, p[:n]...)
+	}
+
+	if errors.Is(err, io.EOF) {
+		b.eof = true
+	}
+
+	return n, err
+}
+
+// Close closes the body and ends the call to the target.
+func (b *targetBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.cancel(nil)
+
+	return err
+}
+
+// Kept returns the body, once read to its end, when it fits in _keptBodyLimit.
+func (b *targetBody) Kept() ([]byte, bool) {
+	return b.kept, b.eof && !b.over
 }
 
 // escapedIndex returns the index in escaped, a validly escaped path, where its first n decoded bytes end. Each "%"

@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"slices"
+	"sync/atomic"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/rs/zerolog"
@@ -26,6 +27,7 @@ type Server struct {
 	addr    string
 	storage vlatte.Store[*Mock]
 	served  chan struct{}
+	closed  atomic.Bool // set by Close: a closed server doesn't start again
 }
 
 // New creates a new gRPC mock Server with the given configurations.
@@ -97,8 +99,12 @@ func (app *Server) Prep(ctx context.Context, recipes ...Recipe) error {
 	return nil
 }
 
-// Start starts the mock server.
+// Start starts the mock server. A closed server doesn't start again: Start fails with grpc.ErrServerStopped.
 func (app *Server) Start() error {
+	if app.closed.Load() {
+		return fmt.Errorf("server: Start: %w", grpc.ErrServerStopped)
+	}
+
 	lis := app.config.Listener
 	if lis == nil {
 		var err error
@@ -151,8 +157,11 @@ func (app *Server) Addr() string {
 	return app.addr
 }
 
-// Close stops the server, waiting for calls in flight to finish. It does nothing if the server was never started.
+// Close stops the server, waiting for calls in flight to finish. A closed server doesn't start again, even one that
+// never started.
 func (app *Server) Close() {
+	app.closed.Store(true)
+
 	if app.served == nil {
 		return
 	}

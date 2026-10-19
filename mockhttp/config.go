@@ -20,8 +20,9 @@ import (
 
 // Defaults
 var (
-	// ConfigMockFilePattern is the default filename glob pattern to search for local mock files.
-	ConfigMockFilePattern = []string{"testdata/_mocks/*mock.yaml", "testdata/_mocks/*mock.yml"}
+	// ConfigMockFilePattern is the default filename glob pattern to search for local mock files: the recordings of the
+	// default record directory too.
+	ConfigMockFilePattern = append([]string{"testdata/_mocks/*mock.yaml", "testdata/_mocks/*mock.yml"}, recordedMockFiles(_defaultRecordDir)...)
 )
 
 // Config holds the configuration of an HTTP mock Server.
@@ -198,7 +199,7 @@ func (cb *ConfigBuilder) Addr(addr string) *ConfigBuilder {
 }
 
 // Listener sets an already bound listener for the mock HTTP server to serve instead of listening on Addr.
-// The server closes it on Close, so a later start listens again on its address.
+// The server closes it on Close.
 func (cb *ConfigBuilder) Listener(l net.Listener) *ConfigBuilder {
 	cb.conf.Listener = l
 	return cb
@@ -211,7 +212,8 @@ func (cb *ConfigBuilder) Port(port int) *ConfigBuilder {
 	return cb
 }
 
-// RootDir defines the root directory.
+// RootDir sets the directory that relative mock file patterns and recording paths start at. Absolute ones are used
+// as they are.
 func (cb *ConfigBuilder) RootDir(rootDir string) *ConfigBuilder {
 	cb.conf.RootDir = rootDir
 	return cb
@@ -328,7 +330,8 @@ func (cb *ConfigBuilder) Colors(v bool) *ConfigBuilder {
 	return cb
 }
 
-// RedactHeader redacts the given HTTP header names in logs.
+// RedactHeader hides the values of the given HTTP headers in logs and recordings. A recording writes <redacted> for
+// the values of a response header, and matches a request header that RecordRequestHeaders names by its presence.
 func (cb *ConfigBuilder) RedactHeader(names ...string) *ConfigBuilder {
 	for _, name := range names {
 		cb.conf.HeaderNamesToRedact[strings.ToLower(name)] = struct{}{}
@@ -392,9 +395,10 @@ func (cb *ConfigBuilder) MockFileHandlers(handlers ...MockFileHandler) *ConfigBu
 
 // HTTPClient sets a custom http.Client factory.
 // Internal components that require an HTTP client will use this factory,
-// instead of using the default implementation. Each proxy mock, made with From, uses a copy of a client the factory
-// returns, so the factory can return a client it shares, such as http.DefaultClient. A client with a Transport keeps
-// it, so the TLS client settings of the server don't apply to it.
+// instead of using the default implementation. Each proxy mock, made with From, sends through the Transport of a client
+// the factory returns, so the factory can return a client it shares, such as http.DefaultClient. The server's TLS
+// client settings don't apply to that Transport, and the server never closes its connections. A client without a
+// Transport gets one of the server's, closed when its mock leaves.
 func (cb *ConfigBuilder) HTTPClient(f func() *http.Client) *ConfigBuilder {
 	cb.conf.HTTPClientFactory = f
 	return cb

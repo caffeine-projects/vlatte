@@ -127,7 +127,6 @@ type proxyDef struct {
 	hasTimeout    bool
 	sslVerify     bool
 	hasSSLVerify  bool
-	noFollow      bool
 	hasTarget     bool
 }
 
@@ -198,8 +197,9 @@ var _mockSchema = config.NewSchema(
 	},
 	mockField{
 		Key: "request.url", Kind: config.Any,
-		Usage: "URL to match: an absolute URL, compared ignoring case; a relative one, whose path is a glob; or a matcher list.",
-		Set:   func(d *mockDef, v config.Value) error { return setURL(&d.request, v) },
+		Usage: "URL to match: an absolute URL, compared ignoring case; a relative one, such as /items?page=2, " +
+			"whose path and query must be the same, the parameters in any order, each with its values in order; or a matcher list.",
+		Set: func(d *mockDef, v config.Value) error { return setURL(&d.request, v) },
 	},
 	mockField{
 		Key: "request.url_match", Kind: config.String, Usage: "Regular expression the full URL must match.",
@@ -518,16 +518,14 @@ var _proxySchema = config.NewSchema(
 		Set: func(p *proxyDef, v config.Value) error { p.trimSuffix = v.Str; return nil },
 	},
 	proxyField{
-		Key: "timeout", Kind: config.Duration, Usage: "How long to wait for the target: milliseconds or a Go duration (1.5s).",
+		Key: "timeout", Kind: config.Duration,
+		Usage: "How long to wait for the target's response headers, connecting and sending the request included: " +
+			"milliseconds or a Go duration (1.5s). 0 waits forever.",
 		Set: func(p *proxyDef, v config.Value) error { p.timeout, p.hasTimeout = v.Dur, true; return nil },
 	},
 	proxyField{
 		Key: "ssl_verify", Kind: config.Bool, Usage: "Verify the TLS certificate of the target.",
 		Set: func(p *proxyDef, v config.Value) error { p.sslVerify, p.hasSSLVerify = v.Bool, true; return nil },
-	},
-	proxyField{
-		Key: "no_follow", Kind: config.Bool, Usage: "Don't follow redirects of the target.",
-		Set: func(p *proxyDef, v config.Value) error { p.noFollow = v.Bool; return nil },
 	},
 )
 
@@ -952,16 +950,36 @@ func setURL(r *requestDef, v config.Value) error {
 		return nil
 	}
 
+	// A relative URL names the path and query a request must have: the path starts with "/", and reads as a server
+	// reads a request target. It is exact, so a "*" in its path, which was a glob, would match only itself.
+	if strings.HasPrefix(s, "/") {
+		target, _, _ := strings.Cut(s, "#")
+		if path, _, _ := strings.Cut(target, "?"); strings.Contains(path, "*") {
+			return config.Invalid(v, fmt.Sprintf("%s=%q has a * in its path, which matches exactly", v.Key, s),
+				"to match the path with a glob, use path; for a literal *, write %2A")
+		}
+
+		m, err := filterbuilder.BuildMatcher([]any{"requesturi", s})
+		if err != nil {
+			return config.Invalid(v, fmt.Sprintf("%s=%q is not a URL: %v", v.Key, s, err), "")
+		}
+
+		r.url["url"] = func(b *Builder) { b.URL(m) }
+
+		return nil
+	}
+
 	u, err := url.Parse(s)
 	if err != nil {
 		return config.Invalid(v, fmt.Sprintf("%s=%q is not a URL: %v", v.Key, s, err), "")
 	}
 
-	if u.IsAbs() {
-		r.url["url"] = func(b *Builder) { b.URL(match.EqualIgnoreCase(s)) }
-	} else {
-		r.url["url"] = func(b *Builder) { b.URL(match.URLPath(u.Path)) }
+	if !u.IsAbs() {
+		return config.Invalid(v, fmt.Sprintf("%s=%q must be an absolute URL, or start with /", v.Key, s),
+			"to match the path with a glob, use path instead")
 	}
+
+	r.url["url"] = func(b *Builder) { b.URL(match.EqualIgnoreCase(s)) }
 
 	return nil
 }
@@ -1162,10 +1180,6 @@ func (p *proxyDef) build() *ProxyReply {
 
 	if p.hasSSLVerify {
 		proxy.SSLVerify(p.sslVerify)
-	}
-
-	if p.noFollow {
-		proxy.NoFollow()
 	}
 
 	return proxy

@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/caffeine-projects/vlatte/webhook"
@@ -28,6 +29,7 @@ const (
   vlatte --addr=:3000
   vlatte --proxy
   vlatte --proxy --record
+  vlatte --record --record-target=https://api.example.com
 `
 	_helpHint = "Run 'vlatte --help' to list flags, environment variables and file keys."
 )
@@ -47,9 +49,14 @@ For more information, visit: %s`,
 )
 
 func main() {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+
+	// A signal closes the server, which then writes what it recorded: stop gives the signals back, so another one ends
+	// the process at once.
+	context.AfterFunc(ctx, stop)
+
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
-	cancel()
+	stop()
 	os.Exit(code)
 }
 
@@ -161,6 +168,17 @@ func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stder
 	_, _ = fmt.Fprintln(stdout, m.DescribeConfig())
 
 	<-ctx.Done()
+
+	// A recording writes what it took: a call or a mock it couldn't record fails the run. Serving the recordings can
+	// fail too, such as for a mock ID a mock file holds: the server is exiting, so that is only reported.
+	res, err := m.StopRecording(context.Background())
+	if err != nil && !errors.Is(err, vlatte.ErrNotRecording) {
+		_, _ = fmt.Fprintln(stderr, err)
+
+		if res == nil || res.Status.Failed > 0 {
+			return 1
+		}
+	}
 
 	return 0
 }

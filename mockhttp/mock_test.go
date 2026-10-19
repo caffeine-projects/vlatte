@@ -127,6 +127,14 @@ func TestMock_ADescribedMockLoadsBackAndMatchesTheSame(t *testing.T) {
 			wantNoMatch: []string{"/test#other", "/test"},
 		},
 		{
+			// A relative url names the exact path and query: it describes as requestURI and loads back as it.
+			name:        "exact url",
+			give:        Request().URL(match.RequestURI("/items?page=2")),
+			wantKeys:    []string{"url"},
+			wantMatch:   []string{"/items?page=2"},
+			wantNoMatch: []string{"/items", "/items?page=2&x=1", "/items?page=3"},
+		},
+		{
 			// A mock file has url or path, not both: the path matcher goes in url.
 			name:        "url and path",
 			give:        Request().URL(match.Contain("test")).URLPathf("/test"),

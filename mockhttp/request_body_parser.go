@@ -18,7 +18,7 @@ var errFormCut = errors.New("multipart: the body was cut short: it is shorter th
 
 func parseRequest(r *http.Request, options *Server) (*RequestValues, []byte, error) {
 	parsedURL, urlSegments := parseURL(r, options.URL())
-	parsedBody, rawBody, err := parseRequestBody(options, r)
+	parsedBody, rawBody, parser, err := parseRequestBody(options, r)
 	req := &RequestValues{
 		ReqID:           uuid.New().String(),
 		StartedAtTime:   time.Now(),
@@ -30,6 +30,7 @@ func parseRequest(r *http.Request, options *Server) (*RequestValues, []byte, err
 		App:             options,
 		Mock:            nil,
 		Data:            nil,
+		bodyParser:      parser,
 	}
 	return req, rawBody, err
 }
@@ -105,11 +106,11 @@ type RequestBodyParser interface {
 	Parse(body []byte, r *http.Request) (any, error)
 }
 
-// parseRequestBody tests given parsers until it finds one that can parse the request body.
+// parseRequestBody tests given parsers until it finds one that can parse the request body, and returns it too.
 // The user provided RequestBodyParser takes precedence.
-func parseRequestBody(app *Server, r *http.Request) (parsedBody any, rawBody []byte, err error) {
+func parseRequestBody(app *Server, r *http.Request) (parsedBody any, rawBody []byte, parser RequestBodyParser, err error) {
 	if app.config.NoBodyParsing {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
@@ -133,11 +134,11 @@ func parseRequestBody(app *Server, r *http.Request) (parsedBody any, rawBody []b
 	r.Body = io.NopCloser(bytes.NewBuffer(rawBody))
 
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if len(rawBody) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	contentType := r.Header.Get(HeaderContentType)
@@ -146,15 +147,15 @@ func parseRequestBody(app *Server, r *http.Request) (parsedBody any, rawBody []b
 		if parser.CanParse(contentType, r) {
 			parsedBody, err = parser.Parse(rawBody, r)
 			if err != nil {
-				return nil, rawBody,
+				return nil, rawBody, parser,
 					fmt.Errorf("%T failed: %w", parser, err)
 			}
 
-			return parsedBody, rawBody, nil
+			return parsedBody, rawBody, parser, nil
 		}
 	}
 
-	return nil, nil, nil
+	return nil, nil, nil, nil
 }
 
 // formURLEncodedParser parses requests whose media type is application/x-www-form-urlencoded.

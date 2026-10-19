@@ -20,6 +20,7 @@ type fakeMock struct {
 	hits     atomic.Int64
 	enabled  atomic.Bool
 	events   vlatte.Events
+	closed   atomic.Int64
 }
 
 func newFakeMock() *fakeMock {
@@ -44,6 +45,12 @@ func (m *fakeMock) Enable()               { m.enabled.Store(true) }
 func (m *fakeMock) Disable()              { m.enabled.Store(false) }
 func (m *fakeMock) Events() vlatte.Events { return m.events }
 func (m *fakeMock) String() string        { return m.id }
+
+// Close counts the times the mock was closed, so tests can check it happens once, when the mock leaves.
+func (m *fakeMock) Close() error {
+	m.closed.Add(1)
+	return nil
+}
 
 // hit records a served request, as a protocol server does after a mock matches.
 func (m *fakeMock) hit() { m.hits.Add(1) }

@@ -32,7 +32,7 @@
         "scheme": { "$ref": "#/$defs/matcher" },
         "method": { "$ref": "#/$defs/matcher" },
         "path": { "$ref": "#/$defs/matcher" },
-        "url": { "$ref": "#/$defs/matcher" },
+        "url": { "description": "URL: an absolute one, compared ignoring case; a relative one, such as /items?page=2, whose path and query must be the same, the parameters in any order, each with its values in order; or a matcher list.", "$ref": "#/$defs/matcher" },
         "url_match": { "type": "string", "format": "regex" },
         "fragment": { "description": "URL fragment: the text after a \"#\" of the request target. Only clients that write a \"#\" into the request target send one.", "$ref": "#/$defs/matcher" },
         "query": { "$ref": "#/$defs/keyed_matcher" },
@@ -90,8 +90,7 @@
         "trim_prefix": { "type": "string" },
         "trim_suffix": { "type": "string" },
         "timeout": { "$ref": "#/$defs/duration" },
-        "ssl_verify": { "$ref": "#/$defs/bool" },
-        "no_follow": { "$ref": "#/$defs/bool" }
+        "ssl_verify": { "$ref": "#/$defs/bool" }
       },
       "required": [ "target" ],
       "additionalProperties": false

@@ -411,11 +411,10 @@ func TestHandler_TheResponseWaitsForTheEvents(t *testing.T) {
 
 func TestHandler_CloseCancelsTheEventsRunning(t *testing.T) {
 	// Close stops the events still running, such as a webhook waiting on a slow target, instead of waiting for them:
-	// the requests waiting for them end, and the server closes at once. A restarted server runs events again.
+	// the requests waiting for them end, and the server closes at once.
 	started := make(chan struct{})
 	release := make(chan struct{})
 	canceled := make(chan error, 1)
-	var counted atomic.Int32
 
 	m := MustNew(Setup().Silent().
 		OnCompleteListener("waits", vlatte.EventFunc[vlatte.OnComplete](func(ctx context.Context, _ vlatte.OnComplete) error {
@@ -429,10 +428,6 @@ func TestHandler_CloseCancelsTheEventsRunning(t *testing.T) {
 			canceled <- ctx.Err()
 
 			return ctx.Err()
-		})).
-		OnCompleteListener("counts", vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
-			counted.Add(1)
-			return nil
 		})))
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -440,10 +435,7 @@ func TestHandler_CloseCancelsTheEventsRunning(t *testing.T) {
 	// Last in, first out: the event ends before the server closes, when the test fails first.
 	t.Cleanup(func() { close(release) })
 
-	m.MustMock(
-		Getf("/waits").OnCompleteEvent(vlatte.EventConfig{Name: "waits"}).Reply(NoContent()),
-		Getf("/counts").OnCompleteEvent(vlatte.EventConfig{Name: "counts"}).Reply(NoContent()),
-	)
+	m.MustMock(Getf("/waits").OnCompleteEvent(vlatte.EventConfig{Name: "waits"}).Reply(NoContent()))
 
 	// The client waits for the event, in a goroutine of its own. Close closes its connection, so it gets no response.
 	ended := make(chan struct{})
@@ -485,19 +477,14 @@ func TestHandler_CloseCancelsTheEventsRunning(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the request waiting for the event never ended")
 	}
-
-	m.MustStart()
-
-	status, _ := get(t, m, "/counts")
-	require.Equal(t, http.StatusNoContent, status)
-	require.Equal(t, int32(1), counted.Load(), "a restarted server runs events again")
 }
 
-func TestHandler_EventsRunWhenTheRequestLogPanics(t *testing.T) {
-	// Handler replies return no response, and the request log reads it (#24): it panics, after the reply. The events
-	// run before the request log, so they run anyway. Silent() would skip the request log.
+func TestHandler_EventsRunForRepliesWithoutAResponse(t *testing.T) {
+	// Handler replies return no response. The events of their mock run all the same, and the request log, which read
+	// the response and panicked (#24), logs the match. Silent() would skip the request log.
 	var ran atomic.Bool
-	logger := zerolog.New(io.Discard)
+	logs := &logBuffer{}
+	logger := zerolog.New(logs)
 
 	m := MustNew(Setup().Logger(&logger).OnCompleteListener("hook", vlatte.EventFunc[vlatte.OnComplete](
 		func(context.Context, vlatte.OnComplete) error {
@@ -514,6 +501,145 @@ func TestHandler_EventsRunWhenTheRequestLogPanics(t *testing.T) {
 	status, _ := get(t, m, "/x")
 	require.Equal(t, http.StatusOK, status)
 	require.True(t, ran.Load(), "the event ran before the response ended")
+	require.Contains(t, logs.String(), "REQUEST MATCHED GET /x")
+	require.NotContains(t, logs.String(), "panic")
+}
+
+func TestLifecycle_RepliesWithoutAResponseAreLogged(t *testing.T) {
+	// #24: Echo, Handler and a Func that returns no response write their own response. Both request logs read that
+	// response and panicked on every such request: the recovery middleware tried to answer 418 after the reply had
+	// answered, and the log held a stack trace instead of the match.
+	replies := []struct {
+		name  string
+		reply ReplierFactory
+		want  int
+	}{
+		{
+			name:  "echo",
+			reply: Echo(),
+			want:  http.StatusOK,
+		},
+		{
+			name:  "handler",
+			reply: Handler(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusCreated) }),
+			want:  http.StatusCreated,
+		},
+		{
+			name: "func without a response",
+			reply: Func(func(w http.ResponseWriter, _ *RequestValues) (*Response, error) {
+				w.WriteHeader(http.StatusAccepted)
+				return nil, nil
+			}),
+			want: http.StatusAccepted,
+		},
+	}
+
+	for _, rc := range replies {
+		t.Run("structured/"+rc.name, func(t *testing.T) {
+			logs := &logBuffer{}
+			logger := zerolog.New(logs)
+
+			m := MustNew(Setup().Logger(&logger).LogVerbosity(vlatte.LogBody))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(Getf("/x").ID("x").Reply(rc.reply))
+
+			status, _ := get(t, m, "/x")
+			require.Equal(t, rc.want, status)
+			require.Contains(t, logs.String(), "REQUEST MATCHED GET /x")
+			require.Contains(t, logs.String(), `"mock":{"id":"x"}`)
+			require.NotContains(t, logs.String(), "panic")
+		})
+	}
+
+	for _, rc := range replies {
+		t.Run("descriptive/"+rc.name, func(t *testing.T) {
+			// The descriptive log, and the recovery middleware's, go to os.Stdout, which the server takes when it's made.
+			r, w, err := os.Pipe()
+			require.NoError(t, err)
+
+			stdout := os.Stdout
+			os.Stdout = w
+			m := MustNew(Setup().UseDescriptiveLogger().Colors(false).LogVerbosity(vlatte.LogBody))
+			os.Stdout = stdout
+
+			m.MustStart()
+			m.MustMock(Getf("/x").ID("x").Reply(rc.reply))
+
+			status, _ := get(t, m, "/x")
+			require.Equal(t, rc.want, status)
+
+			m.Close()
+			require.NoError(t, w.Close())
+
+			out, err := io.ReadAll(r)
+			require.NoError(t, err)
+			require.Contains(t, string(out), "REQUEST MATCHED")
+			require.Contains(t, string(out), "Mock: x")
+			require.NotContains(t, string(out), "Status:")
+			require.NotContains(t, string(out), "panic")
+		})
+	}
+}
+
+func TestLifecycle_LogsWhatTheVerbosityAsksFor(t *testing.T) {
+	// Both request logs print the parts of the response the verbosity names: the headers and trailers, then the body.
+	// The descriptive log doesn't print an encoded body.
+	mocks := func(m *Server) {
+		m.MustMock(
+			Getf("/plain").Reply(OK().Header("X-Head", "h").Trailer("X-Tail", "t").PlainText("plain body")),
+			Getf("/zipped").Reply(OK().PlainText("zipped body").Gzip()),
+		)
+	}
+
+	t.Run("structured", func(t *testing.T) {
+		logs := &logBuffer{}
+		logger := zerolog.New(logs)
+
+		m := MustNew(Setup().Logger(&logger).LogVerbosity(vlatte.LogBody))
+		m.MustStart()
+		t.Cleanup(m.Close)
+		mocks(m)
+
+		get(t, m, "/plain")
+		get(t, m, "/zipped")
+
+		out := logs.String()
+		require.Contains(t, out, `"X-Head":["h"]`)
+		require.Contains(t, out, `"trailer":{"X-Tail":["t"]}`)
+		require.Contains(t, out, `"body":"plain body"`)
+		require.Contains(t, out, `"encoding":"gzip"`)
+	})
+
+	t.Run("descriptive", func(t *testing.T) {
+		// The descriptive log goes to os.Stdout, which the server takes when it's made.
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+
+		stdout := os.Stdout
+		os.Stdout = w
+		m := MustNew(Setup().UseDescriptiveLogger().Colors(false).LogVerbosity(vlatte.LogBody))
+		os.Stdout = stdout
+
+		m.MustStart()
+		mocks(m)
+
+		get(t, m, "/plain")
+		get(t, m, "/zipped")
+
+		m.Close()
+		require.NoError(t, w.Close())
+
+		out, err := io.ReadAll(r)
+		require.NoError(t, err)
+		require.Contains(t, string(out), "Headers: ")
+		require.Contains(t, string(out), "X-Head")
+		require.Contains(t, string(out), "Trailers: ")
+		require.Contains(t, string(out), "X-Tail")
+		require.Contains(t, string(out), "Body: plain body")
+		require.Contains(t, string(out), "Body: <encoded body omitted>")
+	})
 }
 
 // cancelableKV is a parameter store that fails once its context is done, as a remote store does.

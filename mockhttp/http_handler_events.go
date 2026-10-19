@@ -1,12 +1,15 @@
 package mockhttp
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
@@ -17,9 +20,13 @@ var (
 	_ mockHTTPLifecycle = (*builtInDescriptiveMockHTTPLifecycle)(nil)
 )
 
+// _redacted stands for the values of a header that the logs and the recordings hide.
+const _redacted = "<redacted>"
+
 type mockHTTPLifecycle interface {
 	OnRequest(*RequestValues)
 	OnMatch(*RequestValues, *Response)
+	OnProxied(*RequestValues, *Response)
 	OnNoMatch(*RequestValues)
 	OnWarning(*RequestValues, error)
 	OnError(*RequestValues, error)
@@ -70,31 +77,27 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *Response) {
 		dict.Str("name", r.Mock.Name())
 	}
 
-	res := evt.CreateDict().Int("status", s.StatusCode)
-
-	if h.app.config.LogVerbosity >= vlatte.LogHeader {
-		redactedHeader := redactHeader(s.Header, h.app.config.HeaderNamesToRedact)
-		res.Any("header", redactedHeader)
-
-		if len(s.Trailer) > 0 {
-			redactedTrailer := redactHeader(s.Trailer, h.app.config.HeaderNamesToRedact)
-			res.Any("trailer", redactedTrailer)
-		}
-	}
-
-	bodyLen := int64(len(s.Body))
-	if h.app.config.LogVerbosity >= vlatte.LogBody && bodyLen > 0 &&
-		(h.app.config.LogBodyMaxSize == 0 || bodyLen <= h.app.config.LogBodyMaxSize) {
-		res.Bytes("body", s.Body)
-		if s.Encoding != "" {
-			res.Str("encoding", s.Encoding)
-		}
-	}
-
 	evt.Dict("mock", dict)
-	evt.Dict("response", res)
+
+	// A reply that writes its own response, such as Echo or Handler, returns none: there are no response fields.
+	if s != nil {
+		evt.Dict("response", h.responseDict(s))
+	}
 
 	evt.Msgf("<--- REQUEST MATCHED %s %s", r.RawRequest.Method, r.URL.Path)
+}
+
+// OnProxied logs a call that a proxy answered, without a mock, such as the target of a recording.
+func (h *builtInMockHTTPLifecycle) OnProxied(r *RequestValues, s *Response) {
+	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
+		return
+	}
+
+	h.app.logger.Info().
+		Str("url", r.URL.String()).
+		Dur("elapsed", time.Since(r.StartedAtTime)).
+		Dict("response", h.responseDict(s)).
+		Msgf("<--- REQUEST PROXIED %s %s", r.RawRequest.Method, r.URL.Path)
 }
 
 func (h *builtInMockHTTPLifecycle) OnNoMatch(r *RequestValues) {
@@ -137,6 +140,32 @@ func (h *builtInMockHTTPLifecycle) OnError(r *RequestValues, err error) {
 	}
 
 	evt.Msgf("<--- ERROR %s %s", r.RawRequest.Method, r.URL.Path)
+}
+
+// responseDict holds the fields of s the verbosity logs.
+func (h *builtInMockHTTPLifecycle) responseDict(s *Response) *zerolog.Event {
+	res := zerolog.Dict().Int("status", s.StatusCode)
+
+	if h.app.config.LogVerbosity >= vlatte.LogHeader {
+		redactedHeader := redactHeader(s.Header, h.app.config.HeaderNamesToRedact)
+		res.Any("header", redactedHeader)
+
+		if len(s.Trailer) > 0 {
+			redactedTrailer := redactHeader(s.Trailer, h.app.config.HeaderNamesToRedact)
+			res.Any("trailer", redactedTrailer)
+		}
+	}
+
+	bodyLen := int64(len(s.Body))
+	if h.app.config.LogVerbosity >= vlatte.LogBody && bodyLen > 0 &&
+		(h.app.config.LogBodyMaxSize == 0 || bodyLen <= h.app.config.LogBodyMaxSize) {
+		res.Bytes("body", s.Body)
+		if s.Encoding != "" {
+			res.Str("encoding", s.Encoding)
+		}
+	}
+
+	return res
 }
 
 // Descriptive Logger
@@ -210,34 +239,37 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Resp
 	buf.WriteString("\n")
 	buf.WriteString(h.cz.Green("Took(ms): "))
 	buf.WriteString(strconv.FormatInt(time.Since(rv.StartedAtTime).Milliseconds(), 10))
+
+	// A reply that writes its own response, such as Echo or Handler, returns none: there is no response to print.
+	if s != nil {
+		h.writeResponse(buf, s)
+	}
+
 	buf.WriteString("\n")
-	buf.WriteString(h.cz.Green("Status: "))
-	buf.WriteString(strconv.FormatInt(int64(s.StatusCode), 10))
+	buf.WriteTo(h.out)
+}
 
-	if h.app.config.LogVerbosity >= vlatte.LogHeader && len(s.Header) > 0 {
-		buf.WriteString("\n")
-		buf.WriteString(h.cz.Green("Headers: "))
-		fmt.Fprintf(buf, "%s", redactHeader(s.Header, h.app.config.HeaderNamesToRedact))
-
-		if len(s.Trailer) > 0 {
-			buf.WriteString("\n")
-			buf.WriteString(h.cz.Green("Trailers: "))
-			fmt.Fprintf(buf, "%s", redactHeader(s.Trailer, h.app.config.HeaderNamesToRedact))
-		}
+// OnProxied prints a call that a proxy answered, without a mock, such as the target of a recording.
+func (h *builtInDescriptiveMockHTTPLifecycle) OnProxied(rv *RequestValues, s *Response) {
+	if h.app.config.LogLevel == vlatte.LogLevelDisabled {
+		return
 	}
 
-	bodyLen := int64(len(s.Body))
-	if h.app.config.LogVerbosity >= vlatte.LogBody && bodyLen > 0 &&
-		(h.app.config.LogBodyMaxSize == 0 || bodyLen <= h.app.config.LogBodyMaxSize) {
-		buf.WriteString("\n")
-		buf.WriteString(h.cz.Green("Body: "))
-		if s.Encoding == "" {
-			buf.WriteString(string(s.Body))
-		} else {
-			buf.WriteString("<encoded body omitted>")
-		}
-	}
+	buf := bufpool.Get()
+	buf.Reset()
+	defer bufpool.Put(buf)
 
+	fmt.Fprintf(buf, "%s %s <--- %s %s\n%s ",
+		h.cz.BrightGreen(h.cz.Bold("REQUEST PROXIED")),
+		time.Now().Format(time.RFC3339),
+		h.cz.Green(rv.RawRequest.Method),
+		h.cz.Green(rv.URL.Path),
+		rv.RawRequest.Method)
+	buf.WriteString(rv.URL.String())
+	buf.WriteString("\n")
+	buf.WriteString(h.cz.Green("Took(ms): "))
+	buf.WriteString(strconv.FormatInt(time.Since(rv.StartedAtTime).Milliseconds(), 10))
+	h.writeResponse(buf, s)
 	buf.WriteString("\n")
 	buf.WriteTo(h.out)
 }
@@ -298,6 +330,37 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnError(r *RequestValues, err erro
 	)
 }
 
+// writeResponse prints the fields of s the verbosity logs.
+func (h *builtInDescriptiveMockHTTPLifecycle) writeResponse(buf *bytes.Buffer, s *Response) {
+	buf.WriteString("\n")
+	buf.WriteString(h.cz.Green("Status: "))
+	buf.WriteString(strconv.FormatInt(int64(s.StatusCode), 10))
+
+	if h.app.config.LogVerbosity >= vlatte.LogHeader && len(s.Header) > 0 {
+		buf.WriteString("\n")
+		buf.WriteString(h.cz.Green("Headers: "))
+		fmt.Fprintf(buf, "%s", redactHeader(s.Header, h.app.config.HeaderNamesToRedact))
+
+		if len(s.Trailer) > 0 {
+			buf.WriteString("\n")
+			buf.WriteString(h.cz.Green("Trailers: "))
+			fmt.Fprintf(buf, "%s", redactHeader(s.Trailer, h.app.config.HeaderNamesToRedact))
+		}
+	}
+
+	bodyLen := int64(len(s.Body))
+	if h.app.config.LogVerbosity >= vlatte.LogBody && bodyLen > 0 &&
+		(h.app.config.LogBodyMaxSize == 0 || bodyLen <= h.app.config.LogBodyMaxSize) {
+		buf.WriteString("\n")
+		buf.WriteString(h.cz.Green("Body: "))
+		if s.Encoding == "" {
+			buf.WriteString(string(s.Body))
+		} else {
+			buf.WriteString("<encoded body omitted>")
+		}
+	}
+}
+
 func redactHeader(h http.Header, toRedact map[string]struct{}) http.Header {
 	if len(toRedact) == 0 {
 		return h
@@ -306,7 +369,7 @@ func redactHeader(h http.Header, toRedact map[string]struct{}) http.Header {
 	redacted := h.Clone()
 	for k := range h {
 		if _, ok := toRedact[strings.ToLower(k)]; ok {
-			redacted.Set(k, "<redacted>")
+			redacted.Set(k, _redacted)
 		}
 	}
 

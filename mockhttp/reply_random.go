@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"sync"
 
@@ -13,6 +14,7 @@ import (
 var (
 	_         ReplierFactory = (*RandomReply)(nil)
 	_         Replier        = (*randomReplier)(nil)
+	_         io.Closer      = (*randomReplier)(nil)
 	_randomMu sync.Mutex
 )
 
@@ -84,15 +86,20 @@ func (rep *RandomReply) NewReplier(app *Server) (Replier, error) {
 
 	for i, f := range rep.replies {
 		if f == nil {
+			r.Close()
 			return nil, fmt.Errorf("reply_random: response %d is nil", i)
 		}
 
 		reply, err := newReplier(f, app)
 		if err != nil {
+			r.Close()
 			return nil, fmt.Errorf("reply_random: response %d: %w", i, err)
 		}
 
 		r.replies[i] = reply
+		if c := owned(f, reply); c != nil {
+			r.closers = append(r.closers, c)
+		}
 	}
 
 	return r, nil
@@ -101,7 +108,8 @@ func (rep *RandomReply) NewReplier(app *Server) (Replier, error) {
 // randomReplier serves one of its replies at random, for one mock.
 type randomReplier struct {
 	replies []Replier
-	random  *rand.Rand // nil picks with the global generator
+	random  *rand.Rand  // nil picks with the global generator
+	closers []io.Closer // of the replies it owns
 }
 
 // Reply implements Replier.
@@ -118,4 +126,9 @@ func (r *randomReplier) Reply(ctx context.Context, input ReplyInput) (*Response,
 	}
 
 	return r.replies[index].Reply(ctx, input)
+}
+
+// Close releases the replies it owns.
+func (r *randomReplier) Close() error {
+	return closeAll(r.closers)
 }

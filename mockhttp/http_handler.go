@@ -8,7 +8,6 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
-	"github.com/caffeine-projects/vlatte/mockhttp/internal/httprec"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
 
@@ -54,9 +53,9 @@ func newMockHandler(
 func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.app.config.DebugFn("req", r)
 
-	reqValues, rawBody, err := parseRequest(r, h.app)
-	if err != nil {
-		h.lifecycle.OnWarning(reqValues, fmt.Errorf("request_body_parser: %w", err))
+	reqValues, rawBody, parseErr := parseRequest(r, h.app)
+	if parseErr != nil {
+		h.lifecycle.OnWarning(reqValues, fmt.Errorf("request_body_parser: %w", parseErr))
 	}
 
 	// net/http removes the temporary files of the request it made, and r may be a copy of it, such as chi makes.
@@ -67,12 +66,6 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.lifecycle.OnRequest(reqValues)
 
-	stored, err := h.app.storage.List(r.Context())
-	if err != nil {
-		h.onError(w, reqValues, vlatte.FailureMatch, fmt.Errorf("http: listing mocks: %w", err))
-		return
-	}
-
 	input := &selectorInput{
 		RawRequest: r,
 		URL:        reqValues.URL,
@@ -80,6 +73,27 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Form:       r.PostForm,
 		Files:      formFiles(r),
 		ParsedBody: reqValues.ParsedBodyData,
+	}
+
+	// A recording captures the request as it came, and the answer as the client gets it. A CONNECT opens a tunnel,
+	// which answers nothing. A recording with a target sends it what it takes, before any mock.
+	var capture *captureWriter
+	if rec := h.app.recording.Load(); rec != nil && !rec.stopping.Load() && r.Method != http.MethodConnect && rec.takes(r.Context(), input) {
+		capture = rec.capture(w, reqValues, rawBody, parseErr)
+		w = capture
+
+		defer capture.end()
+
+		if rec.target != nil {
+			h.serveTarget(w, reqValues, rec.target, capture)
+			return
+		}
+	}
+
+	stored, err := h.app.storage.List(r.Context())
+	if err != nil {
+		h.onError(w, reqValues, vlatte.FailureMatch, fmt.Errorf("http: listing mocks: %w", err))
+		return
 	}
 
 	sub := vlatte.NewExplanation()
@@ -90,31 +104,19 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// no mocks matched with the incoming request
-	// lets check if we need to proxy and record this request.
+	// A request no mock matches goes to its host, when the server is a proxy.
 	if !matched {
 		if h.app.proxy == nil {
 			h.onNoMatches(w, reqValues)
 			return
 		}
 
-		// checking if we should record writes to later record mocks.
-		if h.app.IsRecording() {
-			w = httprec.Wrap(w)
+		if capture != nil {
+			capture.answeredBy(true)
 		}
 
-		// proxying non-matched requests.
-		h.app.proxy.ServeHTTP(w, r)
-
-		if h.app.IsRecording() {
-			// The proxy sent the response already, so an error can only be logged.
-			res, err := responseFromWriter(w)
-			if err != nil {
-				h.lifecycle.OnError(reqValues, fmt.Errorf("http: recording the proxied response: %w", err))
-				return
-			}
-
-			h.app.rec.dispatch(r, reqValues.URL, rawBody, res)
+		if err := h.app.proxy.serve(w, r); err == nil && capture != nil {
+			capture.record()
 		}
 
 		return
@@ -159,7 +161,28 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Render closes the body it sends. A response that isn't rendered, after a failing mapper or a panic, still
+	// closes its body here: a proxy's would keep its connection, and a body file its file.
+	defer func() {
+		if res != nil && res.BodyCloser != nil {
+			res.BodyCloser.Close()
+		}
+	}()
+
+	// A reply that writes its own response, such as Echo, returns none: it is the mock's.
+	if capture != nil {
+		capture.answeredBy(res != nil && res.proxied)
+	}
+
 	if res != nil {
+		// A streamed body, such as a proxy's, is read whole for mappers.
+		if len(mock.spec.mappers) > 0 && len(res.Body) == 0 {
+			if err = res.readBody(); err != nil {
+				h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: reading the response body: %w", err))
+				return
+			}
+		}
+
 		for i, mapper := range mock.spec.mappers {
 			if err = mapper(reqValues, res); err != nil {
 				h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: response mapper at index %d: %w", i, err))
@@ -167,16 +190,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// The status and headers are sent by now, so an error can't become the response: it is logged, and the
-		// mock counts as served. A client that went away is a warning.
-		if err := res.Render(r.Context(), w); err != nil {
-			err = fmt.Errorf("http: rendering response: %w", err)
-			if r.Context().Err() != nil {
-				h.lifecycle.OnWarning(reqValues, err)
-			} else {
-				h.lifecycle.OnError(reqValues, err)
-			}
-		}
+		// The mock counts as served, whatever happens to the answer once its status and headers are sent.
+		h.render(w, reqValues, res, capture)
+	} else if capture != nil {
+		capture.record()
 	}
 
 	mock.Inc()
@@ -206,7 +223,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The handler waits for the events, so the response ends after them: a test checks what they did right after it.
-	// They run before the request log, so its elapsed time counts them, and they run even when it panics.
+	// They run before the request log, so its elapsed time counts them.
 	h.runner.OnComplete(
 		r.Context(),
 		mock,
@@ -222,11 +239,49 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	h.lifecycle.OnMatch(reqValues, res)
+}
 
-	// when proxy is enabled, recording happens some steps before
-	// so, we need to record here only if proxy is disabled.
-	if h.app.IsRecording() && h.app.config.Proxy == nil {
-		h.app.rec.dispatch(r, reqValues.URL, rawBody, res)
+// serveTarget answers with the server a recording records, has the capture record its answer, and logs it: no mock
+// answers, so no OnMatch does.
+func (h *mockHandler) serveTarget(w http.ResponseWriter, r *RequestValues, target Replier, capture *captureWriter) {
+	ctx := r.RawRequest.Context()
+
+	res, err := target.Reply(ctx, ReplyInput{RequestValues: r, Writer: w})
+	if err != nil {
+		h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: recording: %w", err))
+		return
+	}
+
+	capture.answeredBy(true)
+	h.render(w, r, res, capture)
+	h.lifecycle.OnProxied(r, res)
+}
+
+// render sends res, and has the capture, if any, record it once the client got it whole. The status and headers are
+// sent by now, so an error can't become the response: it is logged, as a warning when the client went away. A proxied
+// answer whose body broke off cuts the client's connection, as a proxy does, so the client doesn't take part of the
+// target's body for all of it.
+func (h *mockHandler) render(w http.ResponseWriter, r *RequestValues, res *Response, capture *captureWriter) {
+	ctx := r.RawRequest.Context()
+
+	if err := res.Render(ctx, w); err != nil {
+		err = fmt.Errorf("http: rendering response: %w", err)
+
+		switch {
+		case ctx.Err() != nil:
+			h.lifecycle.OnWarning(r, err)
+		case res.proxied:
+			h.lifecycle.OnError(r, err)
+			panic(http.ErrAbortHandler)
+		default:
+			h.lifecycle.OnError(r, err)
+		}
+
+		return
+	}
+
+	if capture != nil {
+		capture.record()
 	}
 }
 

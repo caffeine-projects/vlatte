@@ -7,6 +7,12 @@ import (
 
 // Mock is what the core needs from a protocol's mock: identity, ordering, state, hits and events.
 // Protocol packages add what only they use, such as callbacks or steps, on their own mock types.
+//
+// A mock that holds something to release, such as the connections of an HTTP client, implements io.Closer: the store
+// closes it when it leaves, and a builder's mock that never makes it into the store is closed too.
+//
+// A store tells mocks apart by identity, as when it replaces the very mocks it was given: a mock is a pointer, or
+// another type Go can compare, never a struct holding a slice, a map or a func.
 type Mock interface {
 	ID() string
 	Name() string
@@ -44,6 +50,8 @@ func (f MockBuilderFunc[B]) BuildFromBytes(content []byte, extension string) (B,
 	return f(content, extension)
 }
 
+// Store holds the mocks of a server. Replace, Delete and Clear close the mocks they remove that implement io.Closer,
+// once the store is unlocked; a mock Replace stores again stays open.
 type Store[T Mock] interface {
 	List(ctx context.Context) (iter.Seq[T], error)
 

@@ -111,11 +111,14 @@ func genStoreMock() *rapid.Generator[*fakeMock] {
 func TestMemoryStoreMachine(t *testing.T) {
 	// S1: the store behaves like a model: unique IDs, refused batches leave it unchanged, a replacement removes
 	// only the very mocks it names, and mocks are ordered by priority, then by when they were stored.
+	// #26: a mock is closed exactly once, exactly when it leaves the store; a mock the store never took isn't.
 	rapid.Check(t, func(t *rapid.T) {
 		ctx := context.Background()
 		store := vlatte.NewStore[*fakeMock]()
 
 		var model []storeEntry
+		var given []*fakeMock // every mock a call was given, stored or not
+		var left []*fakeMock  // every mock that was stored and left
 		seq := 0
 
 		find := func(id string) int {
@@ -133,6 +136,8 @@ func TestMemoryStoreMachine(t *testing.T) {
 					duplicate = duplicate || seen[m.ID()] || find(m.ID()) >= 0
 					seen[m.ID()] = true
 				}
+
+				given = append(given, batch...)
 
 				err := store.Store(ctx, batch...)
 				if duplicate {
@@ -175,6 +180,9 @@ func TestMemoryStoreMachine(t *testing.T) {
 					taken[m.ID()] = true
 				}
 
+				given = append(given, old...)
+				given = append(given, batch...)
+
 				err := store.Replace(ctx, old, batch...)
 				if duplicate {
 					require.ErrorIs(t, err, vlatte.ErrDuplicateID)
@@ -182,6 +190,12 @@ func TestMemoryStoreMachine(t *testing.T) {
 				}
 
 				require.NoError(t, err)
+
+				for _, e := range model {
+					if slices.Contains(old, e.mock) {
+						left = append(left, e.mock)
+					}
+				}
 
 				model = slices.DeleteFunc(model, func(e storeEntry) bool { return slices.Contains(old, e.mock) })
 				for _, m := range batch {
@@ -193,10 +207,21 @@ func TestMemoryStoreMachine(t *testing.T) {
 				gone := rapid.SliceOfN(rapid.SampledFrom(_storeIDs), 1, 3).Draw(t, "ids")
 				require.NoError(t, store.Delete(ctx, gone...))
 
+				for _, e := range model {
+					if slices.Contains(gone, e.mock.ID()) {
+						left = append(left, e.mock)
+					}
+				}
+
 				model = slices.DeleteFunc(model, func(e storeEntry) bool { return slices.Contains(gone, e.mock.ID()) })
 			},
 			"clear": func(t *rapid.T) {
 				require.NoError(t, store.Clear(ctx))
+
+				for _, e := range model {
+					left = append(left, e.mock)
+				}
+
 				model = nil
 			},
 			"toggle": func(t *rapid.T) {
@@ -245,8 +270,136 @@ func TestMemoryStoreMachine(t *testing.T) {
 				listed, err := store.List(ctx)
 				require.NoError(t, err)
 				require.Equal(t, wantEnabled, nilIfEmpty(ids(slices.Collect(listed))))
+
+				// Stored mocks are open; the others were closed once if they ever were stored, and never otherwise.
+				stored := make(map[*fakeMock]bool, len(model))
+				for _, e := range model {
+					stored[e.mock] = true
+				}
+
+				for _, m := range given {
+					switch {
+					case stored[m]:
+						require.Zero(t, m.closed.Load(), "%s is stored, yet closed", m.ID())
+					case slices.Contains(left, m):
+						require.Equal(t, int64(1), m.closed.Load(), "%s left the store", m.ID())
+					default:
+						require.Zero(t, m.closed.Load(), "%s was never stored, yet closed", m.ID())
+					}
+				}
 			},
 		})
+	})
+}
+
+func TestMemoryStore_RefusedCallsCloseNothing(t *testing.T) {
+	// #26: a refused call changes nothing, so every mock it named stays as it was: stored ones open, and the
+	// caller's new ones its own to close.
+	ctx := t.Context()
+	store := vlatte.NewStore[*fakeMock]()
+
+	a := newFakeMockWith("a", 0)
+	require.NoError(t, store.Store(ctx, a))
+
+	dup := newFakeMockWith("a", 0)
+	require.ErrorIs(t, store.Store(ctx, dup), vlatte.ErrDuplicateID)
+
+	b := newFakeMockWith("b", 0)
+	require.ErrorIs(t, store.Replace(ctx, nil, b, newFakeMockWith("b", 0)), vlatte.ErrDuplicateID)
+
+	for _, m := range []*fakeMock{a, dup, b} {
+		require.Zero(t, m.closed.Load(), m.ID())
+	}
+}
+
+func TestMemoryStore_ReplaceKeepsOpenWhatItAddsBack(t *testing.T) {
+	// A replacement that names a mock in old and adds it back keeps serving it: closing it would cut a mock that
+	// stays in the store.
+	ctx := t.Context()
+	store := vlatte.NewStore[*fakeMock]()
+
+	kept := newFakeMockWith("kept", 0)
+	gone := newFakeMockWith("gone", 0)
+	require.NoError(t, store.Store(ctx, kept, gone))
+
+	require.NoError(t, store.Replace(ctx, []*fakeMock{kept, gone}, kept))
+
+	require.Zero(t, kept.closed.Load(), "added back")
+	require.Equal(t, int64(1), gone.closed.Load())
+}
+
+func TestMemoryStore_DeleteAndClearCloseWhatLeaves(t *testing.T) {
+	ctx := t.Context()
+	store := vlatte.NewStore[*fakeMock]()
+
+	a, b, c := newFakeMockWith("a", 0), newFakeMockWith("b", 0), newFakeMockWith("c", 0)
+	require.NoError(t, store.Store(ctx, a, b, c))
+
+	require.NoError(t, store.Delete(ctx, "a", "missing"))
+	require.Equal(t, int64(1), a.closed.Load())
+	require.Zero(t, b.closed.Load())
+
+	require.NoError(t, store.Clear(ctx))
+	require.Equal(t, int64(1), a.closed.Load(), "left once")
+	require.Equal(t, int64(1), b.closed.Load())
+	require.Equal(t, int64(1), c.closed.Load())
+}
+
+func TestScopesReplace_ClosesBuiltMocksItCantStore(t *testing.T) {
+	// #26: a mock built for a call that fails never reaches the store, so nothing else would close it. A proxy mock
+	// among them would keep its HTTP client and its connections.
+	t.Run("another builder fails", func(t *testing.T) {
+		app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock]())
+		built := newFakeMockWith("built", 0)
+
+		_, err := app.Mock(fakeBuilder{mock: built}, fakeBuilder{err: errors.New("bad")})
+		require.Error(t, err)
+		require.Equal(t, int64(1), built.closed.Load())
+	})
+
+	t.Run("the store refuses them", func(t *testing.T) {
+		app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock]())
+		held := newFakeMockWith("a", 0)
+		_, err := app.Mock(fakeBuilder{mock: held})
+		require.NoError(t, err)
+
+		built := newFakeMockWith("a", 0)
+		_, err = app.Mock(fakeBuilder{mock: built})
+		require.ErrorIs(t, err, vlatte.ErrDuplicateID)
+
+		require.Equal(t, int64(1), built.closed.Load())
+		require.Zero(t, held.closed.Load(), "the stored mock keeps serving")
+	})
+
+	t.Run("a builder that returns a stored mock gets it back open", func(t *testing.T) {
+		// Builder forbids returning a mock it returned before, but a mock that still serves must not be closed by
+		// the call the store refused.
+		app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock]())
+		held := newFakeMockWith("a", 0)
+		b := fakeBuilder{mock: held}
+
+		_, err := app.Mock(b)
+		require.NoError(t, err)
+
+		_, err = app.Mock(b)
+		require.ErrorIs(t, err, vlatte.ErrDuplicateID)
+		require.Zero(t, held.closed.Load())
+	})
+
+	t.Run("a remock closes the mocks it replaces", func(t *testing.T) {
+		app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock]())
+		first := newFakeMockWith("a", 0)
+		scope, err := app.Mock(fakeBuilder{mock: first})
+		require.NoError(t, err)
+
+		second := newFakeMockWith("a", 0)
+		scope, err = app.Remock(t.Context(), scope, fakeBuilder{mock: second})
+		require.NoError(t, err)
+		require.Equal(t, int64(1), first.closed.Load())
+		require.Zero(t, second.closed.Load())
+
+		require.NoError(t, app.Unmock(t.Context(), scope))
+		require.Equal(t, int64(1), second.closed.Load())
 	})
 }
 

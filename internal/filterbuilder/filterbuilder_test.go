@@ -1,6 +1,7 @@
 package filterbuilder
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -210,4 +211,20 @@ func TestBuildMatcher_MultiMatcherEntryMustBeAMatcher(t *testing.T) {
 	m, err := BuildMatcher([]any{"all", []any{"present", []any{"equal", "x"}}})
 	require.NoError(t, err)
 	assert.True(t, matches(t, m, "x"))
+}
+
+func TestBuildMatcher_RequestURINeedsAPathFromTheRoot(t *testing.T) {
+	// A request's path starts at "/": a relative target that doesn't would never match, and no load would say why.
+	_, err := BuildMatcher([]any{"requestURI", "items?page=2"})
+	require.ErrorContains(t, err, `requestURI takes a URL, not "items?page=2": its path must start with /`)
+
+	for _, ok := range []string{"/items?page=2", "http://h/items?page=2", "//a/b"} {
+		_, err := BuildMatcher([]any{"requesturi", ok})
+		require.NoError(t, err, ok)
+	}
+
+	for _, bad := range []string{"/a%zz", "/a#%zz"} {
+		_, err := BuildMatcher([]any{"requesturi", bad})
+		require.ErrorContains(t, err, fmt.Sprintf("requesturi takes a URL, not %q", bad))
+	}
 }
