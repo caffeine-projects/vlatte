@@ -498,7 +498,7 @@ var _proxySchema = config.NewSchema(
 		},
 	},
 	proxyField{
-		Key: "forward_header", Kind: config.Any, Usage: "Headers added to the forwarded request, by name.",
+		Key: "forward_header", Kind: config.Any, Usage: "Headers added to the forwarded request, by name. Hop-by-hop ones, such as Connection, fail the mock.",
 		Set: func(p *proxyDef, v config.Value) error { return headerValues(v, &p.forwardHeader) },
 	},
 	proxyField{

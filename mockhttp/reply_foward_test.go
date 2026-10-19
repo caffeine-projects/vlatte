@@ -1008,6 +1008,36 @@ func TestProxyReply_KeepsTheTargetPasswordToItself(t *testing.T) {
 	require.Equal(t, "http://user:xxxxx@127.0.0.1:1", proxy["target"])
 }
 
+func TestProxyReply_AHopByHopForwardHeaderFailsTheBuild(t *testing.T) {
+	// A forward header can't put back what the proxy leaves out of every request: a hop-by-hop header is about one
+	// connection, and "Connection: Upgrade" or "Upgrade: websocket" asks for a protocol switch no proxy reply can pass
+	// on. The build says so, rather than the proxy dropping the header without a word.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	tests := []struct {
+		name  string
+		reply *ProxyReply
+		want  string
+	}{
+		{name: "Connection", reply: From("http://localhost").ForwardHeader(HeaderConnection, "Upgrade"), want: "Connection"},
+		{name: "Upgrade", reply: From("http://localhost").ProxyHeaders(http.Header{HeaderUpgrade: {"websocket"}}), want: "Upgrade"},
+		{name: "in any case", reply: From("http://localhost").ForwardHeader("proxy-authorization", "Basic cHJveHk6c2VjcmV0"), want: "Proxy-Authorization"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := AnyMethod().Reply(tt.reply).Build(m)
+			require.EqualError(t, err, fmt.Sprintf("reply_proxy: forward header %q is hop-by-hop: a proxy doesn't send it on", tt.want))
+		})
+	}
+
+	t.Run("a mock file", func(t *testing.T) {
+		_, err := m.Mock(FromBytes([]byte("request:\n  path: /p\nproxy:\n  target: http://localhost\n  forward_header: {Connection: Upgrade}\n"), "yaml"))
+		require.ErrorContains(t, err, `reply_proxy: forward header "Connection" is hop-by-hop`)
+	})
+}
+
 func TestProxyReply_ATargetThatIsNoHTTPURLFailsTheBuild(t *testing.T) {
 	// A target without a scheme or a host, such as localhost:8080, which parses with "localhost" as its scheme, built
 	// a mock that failed every request with "unsupported protocol scheme": the build says what is wrong instead.

@@ -116,13 +116,15 @@ func (r *ProxyReply) Headers(header http.Header) *ProxyReply {
 	return r
 }
 
-// ForwardHeader sets an extra header to be sent to the proxy target.
+// ForwardHeader sets an extra header to be sent to the proxy target. A hop-by-hop header, such as Connection or
+// Upgrade, fails the build of the mock: a proxy doesn't send it on.
 func (r *ProxyReply) ForwardHeader(key, value string) *ProxyReply {
 	r.proxyHeaders.Add(key, value)
 	return r
 }
 
-// ProxyHeaders sets extra headers to be sent to the proxy target.
+// ProxyHeaders sets extra headers to be sent to the proxy target. A hop-by-hop header, such as Connection or Upgrade,
+// fails the build of the mock: a proxy doesn't send it on.
 func (r *ProxyReply) ProxyHeaders(header http.Header) *ProxyReply {
 	for k, v := range header {
 		for _, vv := range v {
@@ -202,6 +204,12 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 
 	if t := r.target; (t.Scheme != "http" && t.Scheme != "https") || t.Host == "" {
 		return nil, fmt.Errorf("reply_proxy: target %q: expected an absolute http or https URL, such as http://api.local:8080", t.Redacted())
+	}
+
+	for name := range r.proxyHeaders {
+		if slices.ContainsFunc(_forbiddenHeaders, func(h string) bool { return strings.EqualFold(h, name) }) {
+			return nil, fmt.Errorf("reply_proxy: forward header %q is hop-by-hop: a proxy doesn't send it on", name)
+		}
 	}
 
 	p := &proxyReplier{
