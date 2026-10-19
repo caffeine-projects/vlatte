@@ -269,7 +269,10 @@ func (p *proxyReplier) Close() error {
 }
 
 func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
-	target := p.forwardURL(req.RawRequest.URL)
+	target, err := p.forwardURL(req.RawRequest.URL)
+	if err != nil {
+		return nil, err
+	}
 
 	// The timeout covers the wait for the response headers. The call ends when its body is closed.
 	ctx, cancel := context.WithCancelCause(req.RawRequest.Context())
@@ -363,7 +366,7 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 
 // forwardURL returns the URL a request to in goes to: the target's, with the path of in after the target's path, once
 // trimmed, and the query of in after the target's query.
-func (p *proxyReplier) forwardURL(in *url.URL) *url.URL {
+func (p *proxyReplier) forwardURL(in *url.URL) (*url.URL, error) {
 	// The trims match the decoded path and cut the escaped path at the same place, so escapes such as "%2F" stay.
 	path, escaped := in.Path, in.EscapedPath()
 
@@ -375,6 +378,14 @@ func (p *proxyReplier) forwardURL(in *url.URL) *url.URL {
 	if rest, ok := strings.CutSuffix(path, p.trimSuffix); ok {
 		escaped = escaped[:escapedIndex(escaped, len(rest))]
 		path = rest
+	}
+
+	// A "." or ".." segment could climb out of the target's path, for a target that resolves them. The decoded path
+	// counts, so escapes such as "%2e%2e" and "..%2F" do too.
+	for segment := range strings.SplitSeq(path, "/") {
+		if segment == "." || segment == ".." {
+			return nil, fmt.Errorf(`reply_proxy: path %q has a "." or ".." segment, which could leave the target's path`, in.EscapedPath())
+		}
 	}
 
 	// What the trims leave starts with "/", unless they left nothing: "/api/users" cut by "/api/" goes as "/users". A
@@ -409,7 +420,7 @@ func (p *proxyReplier) forwardURL(in *url.URL) *url.URL {
 		Path:     cmp.Or(base+path, "/"),
 		RawPath:  cmp.Or(baseEscaped+escaped, "/"),
 		RawQuery: query,
-	}
+	}, nil
 }
 
 // targetBody is the body of a target's response, which streams to the client. It keeps what it reads, up to

@@ -46,11 +46,16 @@ type bodyModel struct {
 	form        *formModel
 }
 
+// genSegment draws a path segment a proxy sends on: never "." or "..", which could leave the target's path.
+func genSegment() *rapid.Generator[string] {
+	return genToken().Filter(func(s string) bool { return s != "." && s != ".." })
+}
+
 func genCall() *rapid.Generator[callModel] {
 	return rapid.Custom(func(t *rapid.T) callModel {
 		c := callModel{
 			method: rapid.SampledFrom(_genMethods).Draw(t, "method"),
-			path:   "/" + strings.Join(rapid.SliceOfN(genToken(), 1, 3).Draw(t, "path"), "/"),
+			path:   "/" + strings.Join(rapid.SliceOfN(genSegment(), 1, 3).Draw(t, "path"), "/"),
 			status: rapid.SampledFrom(_genStatuses).Draw(t, "status"),
 			header: make(http.Header),
 		}

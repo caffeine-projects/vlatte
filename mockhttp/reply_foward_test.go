@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1118,4 +1119,30 @@ func TestProxyReply_SendsTheTargetHostAsIs(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "user", user)
 	require.Equal(t, "secret", password)
+}
+
+func TestProxyReply_RefusesDotSegments(t *testing.T) {
+	// The target's path comes first, so ".." would climb out of it: /../../admin after http://api/v1 is /admin to a
+	// target that resolves dot segments. The proxy refuses them however they are written: plain, escaped, or with an
+	// escaped "/" that a target decodes before resolving.
+	var calls atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(AnyMethod().Reply(From(target.URL + "/api/v1")))
+
+	for _, path := range []string{"/../../admin", "/%2e%2e/%2e%2e/admin", "/..%2F..%2Fadmin", "/./admin"} {
+		t.Run(path, func(t *testing.T) {
+			res, body := do(t, http.MethodGet, m.URL()+path, nil, nil)
+			require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+			require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
+			require.Contains(t, string(body), `has a "." or ".." segment`)
+		})
+	}
+
+	require.Zero(t, calls.Load(), "the target got a path with a dot segment")
 }
