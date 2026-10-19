@@ -502,7 +502,7 @@ func TestRecording_RequestSection(t *testing.T) {
 
 			dir := t.TempDir()
 
-			// A mock answers, so what a proxy can't forward, such as a body the server cut, is recorded too.
+			// A mock answers, so the calls are recorded without a target, whatever the server read of their bodies.
 			m := MustNew(setup().Silent())
 			m.MustStart()
 			t.Cleanup(m.Close)

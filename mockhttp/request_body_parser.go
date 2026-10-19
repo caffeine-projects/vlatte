@@ -13,6 +13,8 @@ import (
 	"uuid"
 )
 
+var _ io.ReadCloser = rereadBody{}
+
 // errFormCut says a multipart form body was cut short, as MaxBodyParsingLimit does.
 var errFormCut = errors.New("multipart: the body was cut short: it is shorter than its Content-Length, or has no close delimiter")
 
@@ -121,17 +123,30 @@ func parseRequestBody(app *Server, r *http.Request) (parsedBody any, rawBody []b
 		return
 	}
 
+	// The limit bounds what the parsers read, not what replies that forward the request send, such as proxies and
+	// Echo: once the parsers are done, r.Body is the bytes read, then the rest, which nothing read.
+	rest := r.Body
+
 	var reader io.Reader
 	if app.config.MaxBodyParsingLimit > 0 {
-		reader = io.LimitReader(r.Body, app.config.MaxBodyParsingLimit)
+		reader = io.LimitReader(rest, app.config.MaxBodyParsingLimit)
 	} else {
-		reader = r.Body
+		reader = rest
 	}
 
 	rawBody, err = io.ReadAll(reader)
 
-	r.Body.Close()
-	r.Body = io.NopCloser(bytes.NewBuffer(rawBody))
+	// The returns below can clear rawBody before the deferred call runs.
+	read := rawBody
+	parsing := io.NopCloser(bytes.NewReader(read))
+	r.Body = parsing
+
+	// A parser that replaced the body, such as with the body it decoded, keeps it.
+	defer func() {
+		if r.Body == parsing {
+			r.Body = rereadBody{Reader: io.MultiReader(bytes.NewReader(read), rest), Closer: rest}
+		}
+	}()
 
 	if err != nil {
 		return nil, nil, nil, err
@@ -165,9 +180,7 @@ func (parser *formURLEncodedParser) CanParse(content string, _ *http.Request) bo
 	return mediaType(content) == MIMEFormURLEncoded
 }
 
-func (parser *formURLEncodedParser) Parse(body []byte, r *http.Request) (any, error) {
-	defer restoreBody(r, body)
-
+func (parser *formURLEncodedParser) Parse(_ []byte, r *http.Request) (any, error) {
 	// PostForm is the body's form: Form would add the query.
 	err := r.ParseForm()
 	return r.PostForm, err
@@ -183,8 +196,6 @@ func (parser *multipartFormParser) CanParse(content string, _ *http.Request) boo
 }
 
 func (parser *multipartFormParser) Parse(body []byte, r *http.Request) (any, error) {
-	defer restoreBody(r, body)
-
 	// multipart.Reader.ReadForm takes a body cut right after a delimiter line, or inside the headers of a part, for a
 	// whole one, and keeps the parts before the cut. A body MaxBodyParsingLimit cut is shorter than its
 	// Content-Length, and only a whole body has its close delimiter: a cut form keeps no field, rather than some.
@@ -208,10 +219,11 @@ func closes(body []byte, boundary string) bool {
 	return bytes.HasPrefix(body, delimiter) || bytes.Contains(body, append([]byte("\n"), delimiter...))
 }
 
-// restoreBody puts body back into r.Body, which parsing a form reads to the end: proxy, forward and echo replies
-// send r.Body.
-func restoreBody(r *http.Request, body []byte) {
-	r.Body = io.NopCloser(bytes.NewReader(body))
+// rereadBody is the body of a request the server read the start of: the bytes it read, then the rest. Closing it
+// closes the request's body.
+type rereadBody struct {
+	io.Reader
+	io.Closer
 }
 
 // plainTextParser parses requests whose media type is text/plain or application/json, as text.
