@@ -133,6 +133,27 @@ func TestRecording_LeavesOutTheHeadersSetBeforeTheHandler(t *testing.T) {
 	}, onlyMock(t, dir).Response.Header)
 }
 
+func TestRecording_KeepsTheCORSHeadersOfTheReply(t *testing.T) {
+	// A reply that sends a CORS header answers CORS by itself: the header is the answer's, even with the value the
+	// server's CORS would send.
+	dir := t.TempDir()
+
+	m := MustNew(Setup().Silent().CORS())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/r").Reply(OK().Header("Access-Control-Allow-Origin", "*")))
+
+	require.NoError(t, m.StartRecording(RecordDir(dir), RecordIncludeMocked(true)))
+
+	res, _ := do(t, http.MethodGet, m.URL("/r"), http.Header{"Origin": {"https://example.org"}}, nil)
+	require.Equal(t, []string{"*"}, res.Header["Access-Control-Allow-Origin"])
+
+	stopRecording(t, m)
+
+	require.Equal(t, []string{"*"}, onlyMock(t, dir).Response.Header["Access-Control-Allow-Origin"])
+}
+
 func TestRecording_ATrailerNeverSentIsntRecorded(t *testing.T) {
 	// A trailer announced, and never sent, isn't part of the answer.
 	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) {

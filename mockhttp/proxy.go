@@ -165,6 +165,8 @@ func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) error 
 
 	defer res.Body.Close()
 
+	dropCORSHeaders(w, res.Header)
+
 	for k, vv := range res.Header {
 		for _, v := range vv {
 			w.Header().Add(k, v)

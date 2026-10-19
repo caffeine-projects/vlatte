@@ -1,6 +1,8 @@
 package mockhttp
 
 import (
+	"cmp"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -9,12 +11,27 @@ import (
 
 // CORSConfig represents the possible options to configure CORS.
 type CORSConfig struct {
-	AllowedOrigin     string
-	AllowCredentials  bool
-	AllowedMethods    string
-	AllowedHeaders    string
-	ExposeHeaders     string
-	MaxAge            int
+	// AllowedOrigin lists the allowed origins, comma-separated. * allows any. Browsers refuse * for requests with
+	// credentials, so with AllowCredentials the origin of the request is allowed instead.
+	AllowedOrigin    string
+	AllowCredentials bool
+
+	// AllowedMethods lists the allowed methods, comma-separated. * allows the method a preflight request asks for.
+	AllowedMethods string
+
+	// AllowedHeaders lists the allowed headers, comma-separated. Empty, or *, allows the headers a preflight request
+	// asks for.
+	AllowedHeaders string
+
+	// ExposeHeaders lists the headers browsers let scripts read, comma-separated. Browsers read * as a header name
+	// for requests with credentials.
+	ExposeHeaders string
+
+	// MaxAge is how many seconds browsers may cache the answer to a preflight request. -1 sends none.
+	MaxAge int
+
+	// SuccessStatusCode is the status of the answer to a preflight request, 204 when 0. Browsers fail a preflight
+	// answered with a status other than 2xx.
 	SuccessStatusCode int
 }
 
@@ -51,30 +68,28 @@ var DefaultCORSConfig = CORSConfig{
 	SuccessStatusCode: http.StatusNoContent,
 }
 
-// CORSConfigBuilder facilitates building CORS options.
+// CORSConfigBuilder facilitates building CORS options. It sets only the options it is given: the others keep the
+// values they have, such as the ones of DefaultCORSConfig.
 type CORSConfigBuilder struct {
-	options *CORSConfig
 	origins []string
+	set     []func(opts *CORSConfig)
 }
 
 // CORS initializes a CORSConfig builder for a fluent configuration.
 func CORS() *CORSConfigBuilder {
-	return &CORSConfigBuilder{
-		origins: make([]string, 0),
-		options: &CORSConfig{SuccessStatusCode: http.StatusNoContent},
-	}
+	return &CORSConfigBuilder{}
 }
 
 // SuccessStatusCode sets a custom status code returned on CORS Options request.
 // If none is specified, the default status code is http.StatusNoContent.
 func (b *CORSConfigBuilder) SuccessStatusCode(code int) *CORSConfigBuilder {
-	b.options.SuccessStatusCode = code
+	b.set = append(b.set, func(opts *CORSConfig) { opts.SuccessStatusCode = code })
 	return b
 }
 
 // MaxAge sets CORS max age.
 func (b *CORSConfigBuilder) MaxAge(maxAge int) *CORSConfigBuilder {
-	b.options.MaxAge = maxAge
+	b.set = append(b.set, func(opts *CORSConfig) { opts.MaxAge = maxAge })
 	return b
 }
 
@@ -86,45 +101,39 @@ func (b *CORSConfigBuilder) AllowOrigin(origin ...string) *CORSConfigBuilder {
 
 // AllowCredentials sets "Access-Control-Allow-Credentials" misc.Header
 func (b *CORSConfigBuilder) AllowCredentials(allow bool) *CORSConfigBuilder {
-	b.options.AllowCredentials = allow
+	b.set = append(b.set, func(opts *CORSConfig) { opts.AllowCredentials = allow })
 	return b
 }
 
-// ExposeHeaders sets "Access-Control-Expose-Header" misc.Header
+// ExposeHeaders sets the header "Access-Control-Expose-Headers".
 func (b *CORSConfigBuilder) ExposeHeaders(headers ...string) *CORSConfigBuilder {
-	b.options.ExposeHeaders = strings.Join(headers, ",")
+	b.set = append(b.set, func(opts *CORSConfig) { opts.ExposeHeaders = strings.Join(headers, ",") })
 	return b
 }
 
 // AllowedHeaders sets the allowed headers.
-// It will set the header "Access-Control-Allow-Header".
+// It will set the header "Access-Control-Allow-Headers".
 func (b *CORSConfigBuilder) AllowedHeaders(headers ...string) *CORSConfigBuilder {
-	b.options.AllowedHeaders = strings.Join(headers, ",")
+	b.set = append(b.set, func(opts *CORSConfig) { opts.AllowedHeaders = strings.Join(headers, ",") })
 	return b
 }
 
 // AllowMethods sets the allowed HTTP methods.
 // The header "Access-Control-Allow-Methods" will be used.
 func (b *CORSConfigBuilder) AllowMethods(methods ...string) *CORSConfigBuilder {
-	b.options.AllowedMethods = strings.Join(methods, ",")
+	b.set = append(b.set, func(opts *CORSConfig) { opts.AllowedMethods = strings.Join(methods, ",") })
 	return b
 }
 
-// Apply builds CORS configurations based on previous settings set via the builder.
+// Apply sets the options given to the builder on opts.
 func (b *CORSConfigBuilder) Apply(opts *CORSConfig) {
-	b.build().Apply(opts)
-}
-
-func (b *CORSConfigBuilder) build() *CORSConfig {
-	if len(b.origins) > 0 {
-		if len(b.origins) == 1 {
-			b.options.AllowedOrigin = b.origins[0]
-		} else {
-			b.options.AllowedOrigin = strings.Join(b.origins, ",")
-		}
+	for _, set := range b.set {
+		set(opts)
 	}
 
-	return b.options
+	if len(b.origins) > 0 {
+		opts.AllowedOrigin = strings.Join(b.origins, ",")
+	}
 }
 
 func corsMiddleware(options *CORSConfig) func(http.Handler) http.Handler {
@@ -132,42 +141,53 @@ func corsMiddleware(options *CORSConfig) func(http.Handler) http.Handler {
 		options = &DefaultCORSConfig
 	}
 
+	// Read once, and never written: options can be DefaultCORSConfig itself.
+	origins := allowedOrigins(options.AllowedOrigin)
+	status := cmp.Or(options.SuccessStatusCode, http.StatusNoContent)
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// preflight request
-			if r.Method == http.MethodOptions {
-				configureOrigin(options, r, w)
-				configureCredentials(options, w)
-				configureExposedHeaders(options, w)
-				configureMethods(options, w)
-				configureMaxAge(options, w)
-				configureHeaders(options, w, r)
-
-				w.Header().Add(HeaderVary, HeaderAccessControlRequestHeaders)
-				w.Header().Add(HeaderContentLength, "0")
-
-				w.WriteHeader(options.SuccessStatusCode)
-				return
-			}
-
-			configureOrigin(options, r, w)
+			configureOrigin(options, origins, r, w)
 			configureCredentials(options, w)
 			configureExposedHeaders(options, w)
 
-			next.ServeHTTP(w, r)
+			// A preflight request asks whether a browser may send a request, and is answered here. Other requests,
+			// OPTIONS ones too, go to the mocks.
+			if !isPreflight(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			configureMethods(options, w, r)
+			configureMaxAge(options, w)
+			configureHeaders(options, w, r)
+
+			w.Header().Add(HeaderVary, HeaderAccessControlRequestMethod)
+			w.Header().Add(HeaderVary, HeaderAccessControlRequestHeaders)
+			w.Header().Add(HeaderContentLength, "0")
+
+			w.WriteHeader(status)
 		})
 	}
 }
 
+// isPreflight reports whether r is a CORS preflight request: an OPTIONS request with the origin of a browser and the
+// method of the request it wants to send.
+func isPreflight(r *http.Request) bool {
+	return r.Method == http.MethodOptions && r.Header.Get(HeaderOrigin) != "" &&
+		r.Header.Get(HeaderAccessControlRequestMethod) != ""
+}
+
+// configureHeaders allows the headers set, or else the headers the preflight request asks for. Browsers read * as any
+// header only for requests without credentials, and never as Authorization, so * allows the headers asked for too.
 func configureHeaders(options *CORSConfig, w http.ResponseWriter, r *http.Request) {
-	// when allowed headers aren't specified, use values from header access-control-request-headers
-	if options.AllowedHeaders != "" {
-		w.Header().Add(HeaderAccessControlAllowHeaders, options.AllowedHeaders)
-	} else {
-		hs := r.Header.Get(HeaderAccessControlRequestHeaders)
-		if strings.TrimSpace(hs) != "" {
-			w.Header().Add(HeaderAccessControlAllowHeaders, hs)
-		}
+	headers := options.AllowedHeaders
+	if h := strings.TrimSpace(headers); h == "" || h == "*" {
+		headers = strings.TrimSpace(r.Header.Get(HeaderAccessControlRequestHeaders))
+	}
+
+	if headers != "" {
+		w.Header().Add(HeaderAccessControlAllowHeaders, headers)
 	}
 }
 
@@ -177,9 +197,16 @@ func configureMaxAge(options *CORSConfig, w http.ResponseWriter) {
 	}
 }
 
-func configureMethods(options *CORSConfig, w http.ResponseWriter) {
-	if len(options.AllowedMethods) > 0 {
-		w.Header().Add(HeaderAccessControlAllowMethods, options.AllowedMethods)
+// configureMethods allows the methods set. Browsers read * as any method only for requests without credentials, so *
+// allows the method the preflight request asks for.
+func configureMethods(options *CORSConfig, w http.ResponseWriter, r *http.Request) {
+	methods := options.AllowedMethods
+	if strings.TrimSpace(methods) == "*" {
+		methods = r.Header.Get(HeaderAccessControlRequestMethod)
+	}
+
+	if methods != "" {
+		w.Header().Add(HeaderAccessControlAllowMethods, methods)
 	}
 }
 
@@ -195,27 +222,59 @@ func configureCredentials(options *CORSConfig, w http.ResponseWriter) {
 	}
 }
 
-func configureOrigin(options *CORSConfig, r *http.Request, w http.ResponseWriter) {
-	if options.AllowedOrigin == "" {
+// configureOrigin allows the origin of r when it is one of origins. Browsers take one origin, or *, but refuse * for
+// requests with credentials: the origin of r is allowed instead. The answer depends on the origin of r, so it varies by
+// Origin even when the origin isn't allowed: a cache must not give the answer for one origin to another.
+func configureOrigin(options *CORSConfig, origins []string, r *http.Request, w http.ResponseWriter) {
+	if len(origins) == 0 {
 		return
 	}
 
-	origins := strings.Split(options.AllowedOrigin, ",")
-	size := len(origins)
+	w.Header().Add(HeaderVary, HeaderOrigin)
 
-	if size == 1 {
-		w.Header().Add(HeaderAccessControlAllowOrigin, options.AllowedOrigin)
-		w.Header().Add(HeaderVary, HeaderOrigin)
-		return
-	}
+	origin := r.Header.Get(HeaderOrigin)
+	anyOrigin := slices.Contains(origins, "*")
 
-	// received a list of origins
-	// will check if the request origin is within the provided array and use it as the allowed origin
-	origin := r.Header.Get("origin")
-	allowed := slices.Contains(origins, origin)
-
-	if allowed {
+	switch {
+	case anyOrigin && !options.AllowCredentials:
+		w.Header().Add(HeaderAccessControlAllowOrigin, "*")
+	case origin != "" && (anyOrigin || slices.Contains(origins, origin)):
 		w.Header().Add(HeaderAccessControlAllowOrigin, origin)
-		w.Header().Add(HeaderVary, HeaderOrigin)
 	}
+}
+
+// allowedOrigins lists the comma-separated origins of allowed, without blanks.
+func allowedOrigins(allowed string) []string {
+	var origins []string
+
+	for origin := range strings.SplitSeq(allowed, ",") {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			origins = append(origins, origin)
+		}
+	}
+
+	return origins
+}
+
+// dropCORSHeaders removes the CORS headers set on w, such as by the CORS middleware, when h, the headers of the answer
+// written to w, has one: an answer that sends a CORS header answers CORS by itself. Browsers refuse a CORS header sent
+// twice, and an origin of * with credentials.
+func dropCORSHeaders(w http.ResponseWriter, h http.Header) {
+	for name := range h {
+		if isCORSHeader(name, nil) {
+			maps.DeleteFunc(w.Header(), isCORSHeader)
+
+			// A recording leaves out the headers set before the answer, as the server's: these are the answer's.
+			if c := captureWriterOf(w); c != nil {
+				maps.DeleteFunc(c.before, isCORSHeader)
+			}
+
+			return
+		}
+	}
+}
+
+// isCORSHeader reports whether name is the name of a CORS response header. It fits maps.DeleteFunc.
+func isCORSHeader(name string, _ []string) bool {
+	return strings.HasPrefix(http.CanonicalHeaderKey(name), "Access-Control-")
 }

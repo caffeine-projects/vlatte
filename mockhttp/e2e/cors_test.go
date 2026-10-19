@@ -4,32 +4,51 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/caffeine-projects/vlatte/match"
-	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
 func TestCORS(t *testing.T) {
-	client := &http.Client{}
-	m := mockhttp.MustNew(mockhttp.Setup().CORS())
+	// A browser sends a cross-origin PUT with a custom header only after a preflight allows it, and lets scripts read
+	// only the headers exposed to them. Header names are literals: browsers look for the names of the Fetch standard.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().CORS(&mockhttp.CORSConfig{
+		AllowedOrigin:  "*",
+		ExposeHeaders:  "X-Id",
+		AllowedMethods: "GET,PUT",
+	}))
 	m.MustStart()
 
 	defer m.Close()
 
-	m.MustMock(mockhttp.Get(match.URLPath("/test")).
-		Reply(mockhttp.OK()))
+	m.MustMock(mockhttp.AnyMethod().Reply(mockhttp.OK().Header("X-Id", "42")))
 
-	corsReq, _ := http.NewRequest(http.MethodOptions, m.URL()+"/test", nil)
-	res, err := client.Do(corsReq)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodOptions, m.URL("/a"), nil)
+	require.NoError(t, err)
+	req.Header.Set("Origin", "https://example.org")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPut)
+	req.Header.Set("Access-Control-Request-Headers", "X-Custom")
 
+	res, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
+
 	require.Equal(t, http.StatusNoContent, res.StatusCode)
+	require.Equal(t, []string{"*"}, res.Header["Access-Control-Allow-Origin"])
+	require.Equal(t, []string{"GET,PUT"}, res.Header["Access-Control-Allow-Methods"])
+	require.Equal(t, []string{"X-Custom"}, res.Header["Access-Control-Allow-Headers"])
 
-	req, _ := http.NewRequest(http.MethodGet, m.URL()+"/test", nil)
-	res, err = client.Do(req)
+	req, err = http.NewRequestWithContext(t.Context(), http.MethodPut, m.URL("/a"), nil)
+	require.NoError(t, err)
+	req.Header.Set("Origin", "https://example.org")
+	req.Header.Set("X-Custom", "1")
 
+	res, err = http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
+
 	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, []string{"*"}, res.Header["Access-Control-Allow-Origin"])
+	require.Equal(t, []string{"X-Id"}, res.Header["Access-Control-Expose-Headers"])
+	require.Equal(t, []string{"42"}, res.Header["X-Id"])
 }

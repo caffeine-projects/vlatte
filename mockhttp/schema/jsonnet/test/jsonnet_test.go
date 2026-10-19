@@ -105,3 +105,28 @@ func TestJSONNet_HeaderTemplate(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{"header_template": {"X-Method": "{{ .Request.Method }}"}}`, j)
 }
+
+func TestJSONNet_HeaderNames(t *testing.T) {
+	// Mocks written in jsonnet name CORS headers with these: browsers look for the names of the Fetch standard.
+	vm := jsonnet.MakeVM()
+
+	j, err := vm.EvaluateAnonymousSnippet("header.jsonnet", "import '../http_header.libsonnet'")
+	require.NoError(t, err)
+
+	var names map[string]string
+	require.NoError(t, json.Unmarshal([]byte(j), &names))
+
+	for constant, name := range map[string]string{
+		"HeaderContentLength":                 "Content-Length",
+		"HeaderAccessControlRequestMethod":    "Access-Control-Request-Method",
+		"HeaderAccessControlRequestHeaders":   "Access-Control-Request-Headers",
+		"HeaderAccessControlAllowOrigin":      "Access-Control-Allow-Origin",
+		"HeaderAccessControlAllowMethods":     "Access-Control-Allow-Methods",
+		"HeaderAccessControlAllowHeaders":     "Access-Control-Allow-Headers",
+		"HeaderAccessControlAllowCredentials": "Access-Control-Allow-Credentials",
+		"HeaderAccessControlExposeHeaders":    "Access-Control-Expose-Headers",
+		"HeaderAccessControlMaxAge":           "Access-Control-Max-Age",
+	} {
+		require.Equal(t, name, names[constant], constant)
+	}
+}
