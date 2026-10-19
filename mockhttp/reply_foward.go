@@ -53,10 +53,12 @@ const (
 type FromTypes interface{ string | *url.URL }
 
 // ProxyReply represents a response stub that will be the response "proxied" from the specified target.
-// Use From to init a new ProxyReply. It is a ReplierFactory: each mock built with it gets a proxy of its own, with an
-// HTTP client of its own, whose idle connections close when the mock leaves the server or the server closes.
+// Use From to init a new ProxyReply. It is a ReplierFactory: each mock built with it gets a proxy of its own. It sends
+// through the reply's Transport, or else the server's Config.Transport, or else a transport of its own, whose idle
+// connections close when the mock leaves the server or the server closes.
 type ProxyReply struct {
 	target               *url.URL
+	transport            http.RoundTripper
 	headers              http.Header
 	proxyHeaders         http.Header
 	proxyHeadersToRemove []string
@@ -157,6 +159,13 @@ func (r *ProxyReply) Timeout(timeout time.Duration) *ProxyReply {
 	return r
 }
 
+// Transport sets the transport that sends the requests to the target, in place of the server's Config.Transport. It is
+// the caller's: the proxy never closes it, and SSLVerify doesn't apply to it.
+func (r *ProxyReply) Transport(rt http.RoundTripper) *ProxyReply {
+	r.transport = rt
+	return r
+}
+
 // SkipSSLVerify skips the verification of the target's TLS certificate, as a ProxyReply does unless SSLVerify(true).
 func (r *ProxyReply) SkipSSLVerify() *ProxyReply {
 	r.sslVerify = false
@@ -183,9 +192,8 @@ func (r *ProxyReply) Describe() descriptor.Descriptor {
 	})
 }
 
-// NewReplier implements ReplierFactory. Each mock gets a proxy of its own: copies of the target and the headers, and a
-// transport of its own. With Config.HTTPClientFactory, it sends through the Transport of the client the factory
-// returns, which can be shared, such as http.DefaultClient's: a client without one gets a transport of its own.
+// NewReplier implements ReplierFactory. Each mock gets a proxy of its own: copies of the target and the headers, and,
+// without the reply's Transport or the server's, a transport of its own.
 func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 	if r.timeout < 0 {
 		return nil, fmt.Errorf("reply_proxy: timeout must be 0 or more, not %s", r.timeout)
@@ -203,16 +211,8 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 		trimPrefix:           r.trimPrefix,
 		trimSuffix:           r.trimSuffix,
 		timeout:              r.timeout,
-	}
-
-	if factory := app.config.HTTPClientFactory; factory != nil {
-		client := factory()
-		if client == nil {
-			return nil, errors.New("reply_proxy: the HTTP client factory returned no client")
-		}
-
-		// The transport of a factory's client is the factory's: it can be shared, so the proxy never closes it.
-		p.roundTripper = client.Transport
+		// A transport of the caller's can be shared: the proxy never closes it.
+		roundTripper: cmp.Or(r.transport, app.config.Transport),
 	}
 
 	if p.roundTripper == nil {

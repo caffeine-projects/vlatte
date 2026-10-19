@@ -112,7 +112,7 @@ No other reading happens: `[equal, 10]` doesn't match `010`. The [match package 
 
 **URLs.** `url: /items?page=2` matches that path and query exactly: the same parameters, in any order, each with its values in order, so `/items` and `/items?page=2&sort=asc` don't match. Path segments compare decoded, so `%41` is `A`, but `%2F` isn't `/`. A relative `url` with a `*` in its path is an error: match a path with a glob through `path: /items/*`, and parameters one by one through `query`. For a literal `*`, write `%2A`. An absolute `url`, such as `https://api.example.com/items`, compares as text ignoring case.
 
-**Proxy replies.** A `proxy` reply (`From` in Go) answers with what its target answers, and streams the body as the target sends it, trailers included. The target's path and query come before the request's: with `target: http://api.local/v1?tenant=a`, a request to `/users?page=2` goes to `http://api.local/v1/users?tenant=a&page=2`. `trim_prefix` and `trim_suffix` cut the request path first. The target's TLS certificate isn't verified unless `ssl_verify: true`, so a target with a self-signed certificate answers: set it for a target that gets credentials. Its `timeout` bounds the wait for the target's response headers, connecting and sending the request included, 30 seconds by default; 0 waits forever. The body has no time limit. A mock with response mappers reads the whole body first, so they see it in `Body`.
+**Proxy replies.** A `proxy` reply (`From` in Go) answers with what its target answers, and streams the body as the target sends it, trailers included. The target's path and query come before the request's: with `target: http://api.local/v1?tenant=a`, a request to `/users?page=2` goes to `http://api.local/v1/users?tenant=a&page=2`. `trim_prefix` and `trim_suffix` cut the request path first. The target's TLS certificate isn't verified unless `ssl_verify: true`, so a target with a self-signed certificate answers: set it for a target that gets credentials. In Go, `From(target).Transport(rt)` sends through a transport of yours, such as one with a client certificate, and `Setup().Transport(rt)` sets one for every proxy reply, the recording target and the forward proxy. Its `timeout` bounds the wait for the target's response headers, connecting and sending the request included, 30 seconds by default; 0 waits forever. The body has no time limit. A mock with response mappers reads the whole body first, so they see it in `Body`.
 
 **Templates.** A mock file is plain JSON or YAML. Only the settings that are templates, such as a templated body, render: see [Templates](#templates).
 
@@ -448,7 +448,7 @@ record:
   exclude_response_headers: [Set-Cookie, X-Request-Id]
 ```
 
-The target's TLS certificate is verified: a recording sends the target its requests, credentials included. `record.skip_ssl_verify`, or `RecordSkipSSLVerify(true)`, skips it, such as for a self-signed certificate. `vlatte --help` lists every `record` setting.
+The target's TLS certificate is verified: a recording sends the target its requests, credentials included. `record.skip_ssl_verify`, or `RecordSkipSSLVerify(true)`, skips it, such as for a self-signed certificate. In Go, `RecordTransport(rt)` sends through a transport of yours instead, such as one that trusts the target's CA, and `skip_ssl_verify` doesn't apply to it. `vlatte --help` lists every `record` setting.
 
 ## Failures
 

@@ -391,23 +391,6 @@ func TestRecording_BadSettings(t *testing.T) {
 		require.False(t, m.IsRecording())
 	})
 
-	t.Run("a target the server makes no client for fails the start", func(t *testing.T) {
-		noClient := func() *http.Client { return nil }
-		const want = "recorder: target: reply_proxy: the HTTP client factory returned no client"
-
-		m := MustNew(Setup().Silent().HTTPClient(noClient))
-		t.Cleanup(m.Close)
-
-		require.EqualError(t, m.StartRecording(RecordDir(t.TempDir()), RecordTarget("https://api.example.com")), want)
-		require.False(t, m.IsRecording())
-
-		configured := MustNew(Setup().Silent().HTTPClient(noClient).Record(RecordDir(t.TempDir()), RecordTarget("https://api.example.com")))
-		t.Cleanup(configured.Close)
-
-		require.ErrorContains(t, configured.Start(), want)
-		require.False(t, configured.IsRecording())
-	})
-
 	t.Run("a directory that is a file fails the start", func(t *testing.T) {
 		m := MustNew(Setup().Silent().Record(RecordDir(notADir)))
 		t.Cleanup(m.Close)

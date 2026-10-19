@@ -401,29 +401,6 @@ func TestProxyReply_ClosesTargetConnectionsOnClose(t *testing.T) {
 	}
 }
 
-func TestProxyReply_LeavesTheFactoryClientAsItWas(t *testing.T) {
-	// Building a proxy mock set the Transport, with TLS verification off, on the client that the HTTPClient factory
-	// returned, which can be a client it shares, such as http.DefaultClient. The mock gets a copy.
-	shared := &http.Client{}
-	m := MustNew(Setup().Silent().HTTPClient(func() *http.Client { return shared }))
-	t.Cleanup(m.Close)
-
-	_, err := AnyMethod().Reply(From("http://localhost")).Build(m)
-	require.NoError(t, err)
-
-	require.Nil(t, shared.Transport)
-}
-
-func TestProxyReply_FactoryWithoutClientFailsTheBuild(t *testing.T) {
-	// The proxy copied the client the HTTPClient factory returned without checking it, so a factory that returned nil
-	// made Mock panic, which only Must functions may do.
-	m := MustNew(Setup().Silent().HTTPClient(func() *http.Client { return nil }))
-	t.Cleanup(m.Close)
-
-	_, err := AnyMethod().Reply(From("http://localhost")).Build(m)
-	require.EqualError(t, err, "reply_proxy: the HTTP client factory returned no client")
-}
-
 func TestProxyReply_MockDescribesTheProxyAsBuilt(t *testing.T) {
 	// A mock keeps the description of its reply from when it was built, so the description can't share the maps that
 	// the setters of the reply change.
