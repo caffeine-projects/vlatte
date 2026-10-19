@@ -145,6 +145,7 @@ func TestRequestBodyParser_ForwardsTheWholeBodyPastTheLimit(t *testing.T) {
 	m.MustMock(
 		Postf("/forward").Body(match.Eq("0123")).Reply(From(target.URL)),
 		Postf("/echo").Body(match.Eq("0123")).Reply(Echo()),
+		Postf("/form").Reply(From(target.URL)),
 	)
 
 	proxyURL, err := url.Parse(m.URL())
@@ -200,6 +201,15 @@ func TestRequestBodyParser_ForwardsTheWholeBodyPastTheLimit(t *testing.T) {
 		status, echoed := send(t, http.DefaultClient, m.URL("/echo"), false)
 		require.Equal(t, http.StatusOK, status)
 		require.True(t, strings.HasSuffix(echoed, "\r\n\r\n"+body), "the echo ends with the whole body: %q", echoed)
+	})
+
+	t.Run("From, a multipart form", func(t *testing.T) {
+		// The multipart parser refuses a form the limit cut: the form goes on whole all the same.
+		contentType, form := formModel{fields: []formField{{name: "a", value: "1"}}}.encode(t)
+
+		res, _ := post(t, m.URL("/form"), contentType, form)
+		require.Equal(t, http.StatusOK, res.StatusCode)
+		require.Equal(t, string(form), <-got)
 	})
 }
 
