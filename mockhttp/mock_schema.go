@@ -524,7 +524,7 @@ var _proxySchema = config.NewSchema(
 		Set: func(p *proxyDef, v config.Value) error { p.timeout, p.hasTimeout = v.Dur, true; return nil },
 	},
 	proxyField{
-		Key: "ssl_verify", Kind: config.Bool, Usage: "Verify the TLS certificate of the target.",
+		Key: "ssl_verify", Kind: config.Bool, Usage: "Verify the TLS certificate of the target. Off by default.",
 		Set: func(p *proxyDef, v config.Value) error { p.sslVerify, p.hasSSLVerify = v.Bool, true; return nil },
 	},
 )

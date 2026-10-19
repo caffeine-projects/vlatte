@@ -69,7 +69,7 @@ type ProxyReply struct {
 // From creates a ProxyReply with the given target. The target's path and query come before the request's: with
 // http://api/v1?tenant=a, a request to /users?page=2 goes to http://api/v1/users?tenant=a&page=2.
 func From[T FromTypes](target T) *ProxyReply {
-	u := &url.URL{}
+	var u *url.URL
 
 	switch e := any(target).(type) {
 	case string:
@@ -80,7 +80,11 @@ func From[T FromTypes](target T) *ProxyReply {
 			panic(fmt.Errorf("reply_proxy: target: %w", err))
 		}
 	case *url.URL:
-		u = e
+		if e == nil {
+			panic(errors.New("reply_proxy: target: nil URL"))
+		}
+
+		u = e.Clone()
 	}
 
 	return &ProxyReply{
@@ -153,13 +157,14 @@ func (r *ProxyReply) Timeout(timeout time.Duration) *ProxyReply {
 	return r
 }
 
-// SkipSSLVerify skips server certificate verification.
+// SkipSSLVerify skips the verification of the target's TLS certificate, as a ProxyReply does unless SSLVerify(true).
 func (r *ProxyReply) SkipSSLVerify() *ProxyReply {
 	r.sslVerify = false
 	return r
 }
 
-// SSLVerify sets if the client should verify server certificate.
+// SSLVerify sets whether the target's TLS certificate is verified. It isn't by default, so a target with a
+// self-signed certificate answers: set it for a target that gets credentials.
 func (r *ProxyReply) SSLVerify(v bool) *ProxyReply {
 	r.sslVerify = v
 	return r
@@ -167,7 +172,7 @@ func (r *ProxyReply) SSLVerify(v bool) *ProxyReply {
 
 func (r *ProxyReply) Describe() descriptor.Descriptor {
 	return descriptor.New("proxy", map[string]any{
-		"target":         r.target.String(),
+		"target":         r.target.Redacted(),
 		"forward_header": r.proxyHeaders.Clone(),
 		"header":         r.headers.Clone(),
 		"remove_headers": slices.Clone(r.proxyHeadersToRemove),
@@ -184,6 +189,10 @@ func (r *ProxyReply) Describe() descriptor.Descriptor {
 func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 	if r.timeout < 0 {
 		return nil, fmt.Errorf("reply_proxy: timeout must be 0 or more, not %s", r.timeout)
+	}
+
+	if t := r.target; (t.Scheme != "http" && t.Scheme != "https") || t.Host == "" {
+		return nil, fmt.Errorf("reply_proxy: target %q: expected an absolute http or https URL, such as http://api.local:8080", t.Redacted())
 	}
 
 	p := &proxyReplier{
@@ -316,6 +325,12 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 		}
 	}
 
+	// As http.Client does, the target's user info goes as Basic auth, unless the request has an Authorization.
+	if user := p.target.User; user != nil && out.Header.Get(HeaderAuthorization) == "" {
+		password, _ := user.Password()
+		out.SetBasicAuth(user.Username(), password)
+	}
+
 	var timer *time.Timer
 	if p.timeout > 0 {
 		timer = time.AfterFunc(p.timeout, func() { cancel(errNoHeaders) })
@@ -332,12 +347,12 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 			res.Body.Close()
 		}
 
-		return nil, fmt.Errorf("reply_proxy: calling the target %s: no response headers within %s", p.target, p.timeout)
+		return nil, fmt.Errorf("reply_proxy: calling the target %s: no response headers within %s", p.target.Redacted(), p.timeout)
 	}
 
 	if err != nil {
 		cancel(nil)
-		return nil, fmt.Errorf("reply_proxy: calling the target %s: %w", p.target, err)
+		return nil, fmt.Errorf("reply_proxy: calling the target %s: %w", p.target.Redacted(), err)
 	}
 
 	stub := newResponse()

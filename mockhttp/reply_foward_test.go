@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -953,4 +954,93 @@ func TestProxyReply_SendsThePathTheTargetExpects(t *testing.T) {
 			require.Equal(t, tt.want, body)
 		})
 	}
+}
+
+func TestProxyReply_SendsTheTargetCredentials(t *testing.T) {
+	// A transport sends no user info of a URL, so a target such as http://user:pass@api got no credentials, and
+	// answered 401 without saying why. As http.Client does, they go as Basic auth, unless the request has its own
+	// Authorization.
+	got := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got <- r.Header.Get(HeaderAuthorization)
+	}))
+	t.Cleanup(target.Close)
+
+	withCredentials, err := url.Parse(target.URL)
+	require.NoError(t, err)
+	withCredentials.User = url.UserPassword("user", "secret")
+
+	basic := (&http.Request{Header: http.Header{}})
+	basic.SetBasicAuth("user", "secret")
+
+	tests := []struct {
+		name          string
+		reply         *ProxyReply
+		authorization string
+		want          string
+	}{
+		{name: "the target's", reply: From(withCredentials.String()), want: basic.Header.Get(HeaderAuthorization)},
+		{name: "the client's first", reply: From(withCredentials.String()), authorization: "Bearer client", want: "Bearer client"},
+		{name: "the target's, without the client's", reply: From(withCredentials.String()).RemoveProxyHeaders(HeaderAuthorization), authorization: "Bearer client", want: basic.Header.Get(HeaderAuthorization)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := MustNew(Setup().Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(Getf("/p").Reply(tt.reply))
+
+			req, err := http.NewRequest(http.MethodGet, m.URL("/p"), nil)
+			require.NoError(t, err)
+
+			if tt.authorization != "" {
+				req.Header.Set(HeaderAuthorization, tt.authorization)
+			}
+
+			res, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, http.StatusOK, res.StatusCode)
+			require.Equal(t, tt.want, <-got)
+		})
+	}
+}
+
+func TestProxyReply_KeepsTheTargetPasswordToItself(t *testing.T) {
+	// The target's URL went whole into the mock's description, and into the error a failing call answers the client
+	// with and logs: the password of a target with credentials with it.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	// Nothing listens on port 1: the call fails.
+	scoped := m.MustMock(Getf("/p").Reply(From("http://user:secret@127.0.0.1:1")))
+
+	status, body := get(t, m, "/p")
+	require.Equal(t, m.Config().ErrorStatusCode, status)
+	require.Contains(t, body, "reply_proxy: calling the target http://user:xxxxx@127.0.0.1:1")
+	require.NotContains(t, body, "secret")
+
+	proxy := scoped.Mocks()[0].Describe().Props.(map[string]any)["proxy"].(map[string]any)
+	require.Equal(t, "http://user:xxxxx@127.0.0.1:1", proxy["target"])
+}
+
+func TestProxyReply_ATargetThatIsNoHTTPURLFailsTheBuild(t *testing.T) {
+	// A target without a scheme or a host, such as localhost:8080, which parses with "localhost" as its scheme, built
+	// a mock that failed every request with "unsupported protocol scheme": the build says what is wrong instead.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	for _, target := range []string{"", "localhost:8080", "/api", "ftp://files.local"} {
+		t.Run(target, func(t *testing.T) {
+			_, err := AnyMethod().Reply(From(target)).Build(m)
+			require.EqualError(t, err, fmt.Sprintf("reply_proxy: target %q: expected an absolute http or https URL, such as http://api.local:8080", target))
+		})
+	}
+
+	t.Run("nil", func(t *testing.T) {
+		require.PanicsWithError(t, "reply_proxy: target: nil URL", func() { From((*url.URL)(nil)) })
+	})
 }
