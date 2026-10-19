@@ -286,17 +286,9 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 	ctx, cancel := context.WithCancelCause(req.RawRequest.Context())
 
 	// The target gets a copy: what runs after the reply, such as callbacks and events, sees the request as it came.
-	out := req.RawRequest.Clone(ctx)
+	out := forwardRequest(ctx, req.RawRequest)
 	out.URL = target
 	out.Host = p.target.Host
-	out.RequestURI = ""
-
-	// The server sets the client's trailers on its request once it reads the body to the end, after this copy.
-	out.Trailer = req.RawRequest.Trailer
-
-	// The client's hop-by-hop headers, and its "Connection: close", are about its connection to the server.
-	out.Close = false
-	removeRequestHopByHop(out.Header)
 
 	for _, h := range p.proxyHeadersToRemove {
 		out.Header.Del(h)
@@ -474,6 +466,19 @@ func (b *targetBody) Close() error {
 // Kept returns the body, once read to its end, when it fits in _keptBodyLimit.
 func (b *targetBody) Kept() ([]byte, bool) {
 	return b.kept, b.eof && !b.over
+}
+
+// forwardRequest returns the copy of r a proxy sends on, with ctx, without the hop-by-hop headers of the client's
+// connection, nor its "Connection: close". The copy shares the trailers of r, which the server sets on r once it reads
+// the body to the end.
+func forwardRequest(ctx context.Context, r *http.Request) *http.Request {
+	out := r.Clone(ctx)
+	out.RequestURI = ""
+	out.Close = false
+	out.Trailer = r.Trailer
+	removeRequestHopByHop(out.Header)
+
+	return out
 }
 
 // removeHopByHop removes the hop-by-hop headers from h: the ones its Connection header names, and _forbiddenHeaders.

@@ -155,15 +155,8 @@ func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) e
 }
 
 func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) error {
-	// The host gets a copy, without the hop-by-hop headers of the client's connection, and its "Connection: close". The
-	// server sets the client's trailers on r once it reads the body to the end, after the copy.
-	out := r.Clone(r.Context())
-	out.RequestURI = ""
-	out.Close = false
-	out.Trailer = r.Trailer
-	removeRequestHopByHop(out.Header)
-
-	res, err := p.roundTripper.RoundTrip(out)
+	// The host gets a copy: the middlewares that read r after the proxy see the request as it came.
+	res, err := p.roundTripper.RoundTrip(forwardRequest(r.Context(), r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return err
