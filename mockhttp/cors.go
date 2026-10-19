@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"cmp"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -253,4 +254,27 @@ func allowedOrigins(allowed string) []string {
 	}
 
 	return origins
+}
+
+// dropCORSHeaders removes the CORS headers set on w, such as by the CORS middleware, when h, the headers of the answer
+// written to w, has one: an answer that sends a CORS header answers CORS by itself. Browsers refuse a CORS header sent
+// twice, and an origin of * with credentials.
+func dropCORSHeaders(w http.ResponseWriter, h http.Header) {
+	for name := range h {
+		if isCORSHeader(name, nil) {
+			maps.DeleteFunc(w.Header(), isCORSHeader)
+
+			// A recording leaves out the headers set before the answer, as the server's: these are the answer's.
+			if c := captureWriterOf(w); c != nil {
+				maps.DeleteFunc(c.before, isCORSHeader)
+			}
+
+			return
+		}
+	}
+}
+
+// isCORSHeader reports whether name is the name of a CORS response header. It fits maps.DeleteFunc.
+func isCORSHeader(name string, _ []string) bool {
+	return strings.HasPrefix(http.CanonicalHeaderKey(name), "Access-Control-")
 }

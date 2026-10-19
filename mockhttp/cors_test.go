@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -239,5 +240,73 @@ func TestCORS_Builder(t *testing.T) {
 
 		require.Equal(t, []string{"true"}, res.Header["Access-Control-Allow-Credentials"])
 		require.Equal(t, []string{"60"}, res.Header["Access-Control-Max-Age"])
+	})
+}
+
+func TestCORS_AnswerHeaders(t *testing.T) {
+	// Browsers refuse a CORS header sent twice, and * with credentials: an answer that sends CORS headers answers CORS
+	// by itself, and the server's aren't sent with it.
+	origin := http.Header{"Origin": {"https://a.org"}}
+
+	// target answers with CORS headers of its own, as a proxied API would.
+	target := newTarget(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "https://a.org")
+	})
+
+	t.Run("a mock's CORS headers replace the server's", func(t *testing.T) {
+		m := MustNew(Setup().Silent().CORS(CORS().AllowCredentials(true).ExposeHeaders("X-Id")))
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		m.MustMock(Getf("/own").Reply(OK().Header("Access-Control-Allow-Origin", "*")))
+		m.MustMock(Getf("/none").Reply(OK()))
+
+		res, _ := do(t, http.MethodGet, m.URL("/own"), origin, nil)
+
+		require.Equal(t, []string{"*"}, res.Header["Access-Control-Allow-Origin"])
+		require.NotContains(t, res.Header, "Access-Control-Allow-Credentials")
+		require.NotContains(t, res.Header, "Access-Control-Expose-Headers")
+
+		res, _ = do(t, http.MethodGet, m.URL("/none"), origin, nil)
+
+		require.Equal(t, []string{"https://a.org"}, res.Header["Access-Control-Allow-Origin"])
+		require.Equal(t, []string{"true"}, res.Header["Access-Control-Allow-Credentials"])
+		require.Equal(t, []string{"X-Id"}, res.Header["Access-Control-Expose-Headers"])
+	})
+
+	t.Run("a forwarded answer's CORS headers replace the server's", func(t *testing.T) {
+		m := MustNew(Setup().Silent().CORS())
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		m.MustMock(AnyMethod().Reply(From(target.URL)))
+
+		res, _ := do(t, http.MethodGet, m.URL("/a"), origin, nil)
+
+		require.Equal(t, http.StatusOK, res.StatusCode)
+		require.Equal(t, []string{"https://a.org"}, res.Header["Access-Control-Allow-Origin"])
+	})
+
+	t.Run("a proxied answer's CORS headers replace the server's", func(t *testing.T) {
+		m := MustNew(Setup().Silent().Proxy().CORS())
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		proxyURL, err := url.Parse(m.URL())
+		require.NoError(t, err)
+
+		client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+		t.Cleanup(client.CloseIdleConnections)
+
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target.URL, nil)
+		require.NoError(t, err)
+		req.Header = origin.Clone()
+
+		res, err := client.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		require.Equal(t, http.StatusOK, res.StatusCode)
+		require.Equal(t, []string{"https://a.org"}, res.Header["Access-Control-Allow-Origin"])
 	})
 }

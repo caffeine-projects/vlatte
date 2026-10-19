@@ -258,7 +258,9 @@ func (cb *ConfigBuilder) Use(fn ...func(handler http.Handler) http.Handler) *Con
 	return cb
 }
 
-// CORS configures CORS for the mock server.
+// CORS configures CORS for the mock server. An answer that sends a CORS header, such as a proxied one, answers CORS by
+// itself: the server's CORS headers aren't sent with it. A Handler reply writes its answer on top of the server's CORS
+// headers: it should Set its CORS headers, or Del the server's.
 func (cb *ConfigBuilder) CORS(options ...CORSConfigurer) *ConfigBuilder {
 	opts := DefaultCORSConfig
 	for _, option := range options {

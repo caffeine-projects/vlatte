@@ -108,6 +108,8 @@ func (r *Response) render(ctx context.Context, w http.ResponseWriter, wait func(
 		}()
 	}
 
+	dropCORSHeaders(w, r.Header)
+
 	for k, vv := range r.Header {
 		for _, v := range vv {
 			w.Header().Add(k, v)
