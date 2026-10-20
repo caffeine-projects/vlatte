@@ -1660,3 +1660,56 @@ func TestProxyReply_ATimedOutAnswerThatComesAnywayIsClosed(t *testing.T) {
 		t.Fatal("the late answer's body is still open")
 	}
 }
+
+// roundTripFunc is a transport of a func.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestProxyReply_ABodyReadWholeCanBeSentAgain(t *testing.T) {
+	// #69: the forwarded request had no GetBody, so its transport couldn't send its body again when a kept-alive
+	// connection to the target turned out closed, as it does for replayable requests, such as with an Idempotency-Key.
+	// The server reads a body under MaxBodyParsingLimit whole anyway: it can be read again. A larger one can't.
+	target := okTarget(t)
+
+	// The transport runs on the server's goroutine: it reports what it got, for the test to check.
+	replayed := make(chan string, 1)
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.GetBody == nil {
+			replayed <- "<no GetBody>"
+			return http.DefaultTransport.RoundTrip(r)
+		}
+
+		body, err := r.GetBody()
+		if err != nil {
+			replayed <- "<GetBody failed>"
+			return nil, err
+		}
+
+		b, err := io.ReadAll(body)
+		replayed <- string(b)
+
+		if err != nil {
+			return nil, err
+		}
+
+		return http.DefaultTransport.RoundTrip(r)
+	})
+
+	m := MustNew(Setup().Silent().MaxBodyParsingLimit(8))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Postf("/p").Reply(From(target.URL).Transport(transport)))
+
+	for body, want := range map[string]string{"short": "short", "longer than 8": "<no GetBody>"} {
+		req, err := http.NewRequest(http.MethodPost, m.URL("/p"), strings.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Idempotency-Key", "k")
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, http.StatusOK, res.StatusCode)
+		require.Equal(t, want, <-replayed, body)
+	}
+}
