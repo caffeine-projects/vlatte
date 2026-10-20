@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
@@ -202,6 +203,7 @@ func (p *PartSpec) check(path string, formData bool) []Issue {
 }
 
 // Doc returns s as a mock file writes it: the object Decode reads. A byte body is written as text, the same bytes.
+// The relative body files of its parts are joined to its directory, so they open from the working directory.
 func (s *Spec) Doc() map[string]any {
 	doc := map[string]any{"type": s.Subtype}
 	if s.Boundary != "" {
@@ -219,7 +221,7 @@ func (s *Spec) Doc() map[string]any {
 
 	parts := make([]any, len(s.Parts))
 	for i, p := range s.Parts {
-		parts[i] = p.doc()
+		parts[i] = p.doc(s.Dir)
 	}
 
 	doc["parts"] = parts
@@ -232,11 +234,14 @@ func (s *Spec) formData() bool {
 	return strings.EqualFold(s.Subtype, "form-data")
 }
 
-// doc returns the part as a mock file writes it.
-func (p *PartSpec) doc() map[string]any {
+// doc returns the part as a mock file writes it, its relative body file joined to dir.
+func (p *PartSpec) doc(dir string) map[string]any {
 	doc := make(map[string]any)
 
-	for key, v := range map[string]string{"name": p.Name, "filename": p.Filename, "content_type": p.ContentType, "body_file": p.File} {
+	fields := map[string]string{
+		"name": p.Name, "filename": p.Filename, "content_type": p.ContentType, "body_file": bodyfile.Path(dir, p.File),
+	}
+	for key, v := range fields {
 		if v != "" {
 			doc[key] = v
 		}

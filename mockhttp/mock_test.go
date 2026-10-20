@@ -1,11 +1,14 @@
 package mockhttp
 
 import (
+	"bytes"
 	"context"
 	json "encoding/json/v2"
 	"fmt"
 	"maps"
+	"mime/multipart"
 	"net/http"
+	"os"
 	"slices"
 	"sync"
 	"testing"
@@ -226,4 +229,81 @@ func TestMock_ADescriptionKeepsTheEvents(t *testing.T) {
 	status, _ := get(t, m, "/x")
 	require.Equal(t, http.StatusNoContent, status)
 	require.ElementsMatch(t, []vlatte.Parameters{map[string]any{"k": "v"}, nil}, []vlatte.Parameters{<-got, <-got})
+}
+
+func TestMock_ADescriptionOpensTheSameBodyFiles(t *testing.T) {
+	// A relative body_file opens from the mock file's directory. Its description must name the file so that it opens
+	// from the working directory, where a description posted back, or loaded with FromBytes, opens it (#38): it named
+	// the file as written, so the mock loaded back failed, or sent another file.
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.Mkdir("mocks", 0o700))
+
+	files := map[string]string{
+		"mocks/hello.yaml": "id: hello\nrequest: {method: GET, path: /hello}\nresponse: {status: 200, body_file: hello.txt}\n",
+		"mocks/multi.yaml": "id: multi\nrequest: {method: GET, path: /multi}\nresponse:\n  status: 200\n" +
+			"  multipart: {type: mixed, boundary: b, parts: [{content_type: text/plain, body_file: part.txt}]}\n",
+		"mocks/upload.yaml": "id: upload\nrequest: {method: POST, path: /upload, form_file: {doc: {body_file: doc.txt}}}\n" +
+			"response: {status: 201}\n",
+		"mocks/hello.txt": "hello from a file",
+		"mocks/part.txt":  "a part from a file",
+		"mocks/doc.txt":   "an upload",
+	}
+	for name, content := range files {
+		require.NoError(t, os.WriteFile(name, []byte(content), 0o600))
+	}
+
+	get := func(path string) func(*testing.T, *Server) (int, string) {
+		return func(t *testing.T, m *Server) (int, string) {
+			res, b := fetch(t, m.URL(path))
+			return res.StatusCode, string(b)
+		}
+	}
+
+	upload := func(t *testing.T, m *Server) (int, string) {
+		var body bytes.Buffer
+		w := multipart.NewWriter(&body)
+		part, err := w.CreateFormFile("doc", "doc.txt")
+		require.NoError(t, err)
+		_, err = part.Write([]byte("an upload"))
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+
+		res, b := post(t, m.URL("/upload"), w.FormDataContentType(), body.Bytes())
+
+		return res.StatusCode, string(b)
+	}
+
+	tests := []struct {
+		file       string
+		send       func(*testing.T, *Server) (int, string)
+		wantStatus int
+		wantBody   string
+	}{
+		{file: "mocks/hello.yaml", send: get("/hello"), wantStatus: http.StatusOK, wantBody: "hello from a file"},
+		{file: "mocks/multi.yaml", send: get("/multi"), wantStatus: http.StatusOK, wantBody: "a part from a file"},
+		{file: "mocks/upload.yaml", send: upload, wantStatus: http.StatusCreated},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			m := MustNew(Setup().Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			scope := m.MustMock(FromFile(tt.file))
+			status, body := tt.send(t, m)
+			require.Equal(t, tt.wantStatus, status, "from the file")
+			require.Contains(t, body, tt.wantBody, "from the file")
+
+			desc, err := scope.Mocks()[0].MarshalJSON()
+			require.NoError(t, err)
+
+			require.NoError(t, m.Unmock(t.Context(), scope))
+			m.MustMock(FromBytes(desc, "json"))
+
+			status, body = tt.send(t, m)
+			require.Equal(t, tt.wantStatus, status, "loaded back: %s", desc)
+			require.Contains(t, body, tt.wantBody, "loaded back: %s", desc)
+		})
+	}
 }
