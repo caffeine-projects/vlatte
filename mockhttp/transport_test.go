@@ -214,16 +214,44 @@ func TestTransport_ASettingTheCallersTransportWouldIgnoreFails(t *testing.T) {
 
 func TestTransport_ADescribedProxyReplyLoadsBackWithTheCallersTransport(t *testing.T) {
 	// A description that always held ssl_verify, the reply's default included, loaded back as a mock that set it, which
-	// a server with a transport of the caller's refuses: it is described only when it was set.
-	target := okTarget(t)
+	// a server with a transport of the caller's refuses: it is described only when it was set. What it holds loads back
+	// as the same reply: the target as written, with its query, the trim and the timeout.
+	paths := make(chan string, 2)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths <- r.URL.RequestURI()
+		_, _ = io.WriteString(w, "ok")
+	}))
+	t.Cleanup(target.Close)
 
-	m := MustNew(Setup().Silent().Transport(newCountingTransport(t)))
+	transport := newCountingTransport(t)
+
+	m := MustNew(Setup().Silent().Transport(transport))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	scope := m.MustMock(Getf("/p").Reply(From(target.URL)))
-	proxy := scope.Mocks()[0].Describe().Props.(map[string]any)["proxy"].(map[string]any)
+	scope := m.MustMock(Getf("/api/p").Reply(From(target.URL + "/v1?key=secret").TrimPrefix("/api").Timeout(2 * time.Second)))
+	described := scope.Mocks()[0]
+
+	proxy := described.Describe().Props.(map[string]any)["proxy"].(map[string]any)
 	require.NotContains(t, proxy, "ssl_verify")
+
+	status, body := get(t, m, "/api/p")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "ok", body)
+
+	sent := <-paths
+
+	content, err := described.MarshalJSON()
+	require.NoError(t, err)
+	require.NoError(t, m.Clean(t.Context()))
+
+	m.MustMock(FromBytes(content, "json"))
+
+	status, body = get(t, m, "/api/p")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, "ok", body)
+	require.Equal(t, sent, <-paths, "the loaded mock sent another request")
+	require.Equal(t, int64(2), transport.calls.Load(), "the caller's transport didn't carry both")
 
 	verified, err := AnyMethod().Reply(From(target.URL).SSLVerify(true)).Build(MustNew(Setup().Silent()))
 	require.NoError(t, err)
@@ -434,4 +462,18 @@ func TestTransport_GoesThroughTheProxyOfTheEnvironment(t *testing.T) {
 		default:
 		}
 	})
+}
+
+func TestTransport_ARecordingSetToSkipVerifyingFailsWithTheCallersTransport(t *testing.T) {
+	// #67: record.skip_ssl_verify from the settings, with a transport of the caller's, which decides on its own whether
+	// it verifies, fails the start of the server, as the Go option does.
+	target := okTarget(t)
+
+	m, err := New(Setup().Silent().Transport(newCountingTransport(t)).ConfigSources(ConfigArgs([]string{
+		"--record-target", target.URL, "--record-skip-ssl-verify", "--record-dir", t.TempDir(),
+	})))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+
+	require.ErrorContains(t, m.Start(), "skip_ssl_verify has no effect with a transport of the caller's")
 }

@@ -1127,3 +1127,42 @@ func TestForwardProxy_ATunnelThatBreaksIsAWarning(t *testing.T) {
 		})
 	}
 }
+
+func TestForwardProxy_VerifiesTheHostsWhenAsked(t *testing.T) {
+	// A request in absolute form for an https host is sent on over TLS by the proxy. With ssl_verify, a host whose
+	// certificate the server doesn't trust fails it; without, the default, it goes through.
+	host := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "host")
+	}))
+	t.Cleanup(host.Close)
+
+	for _, verify := range []bool{true, false} {
+		t.Run(fmt.Sprint("ssl_verify ", verify), func(t *testing.T) {
+			m := MustNew(Setup().Silent().Proxy(&ProxyConfig{SSLVerify: verify}))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			conn, err := net.Dial("tcp", hostOf(t, m))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = conn.Close() })
+			require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+
+			_, err = fmt.Fprintf(conn, "GET %s/x HTTP/1.1\r\nHost: %s\r\n\r\n", host.URL, host.Listener.Addr())
+			require.NoError(t, err)
+
+			res, err := http.ReadResponse(bufio.NewReader(conn), nil)
+			require.NoError(t, err)
+
+			body, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+
+			if verify {
+				require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+				require.Contains(t, string(body), "certificate")
+			} else {
+				require.Equal(t, http.StatusOK, res.StatusCode)
+				require.Equal(t, "host", string(body))
+			}
+		})
+	}
+}
