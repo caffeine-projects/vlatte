@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"bufio"
 	"cmp"
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -12,24 +13,29 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"math/big"
 	"net"
 	"net/http"
-	"slices"
+	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"github.com/caffeine-projects/vlatte"
 )
 
 var _ net.Listener = (*oneConnListener)(nil)
 
 const (
-	// _handshakeTimeout bounds the start of an intercepted connection: the client's first bytes, and its TLS handshake.
+	// _firstBytesWait is how long an intercepted connection waits for the client to start TLS. A client that sends
+	// nothing in that time waits for its host to speak first, as an SSH client does: it goes to the host.
+	_firstBytesWait = 2 * time.Second
+
+	// _handshakeTimeout bounds the TLS handshake of an intercepted connection.
 	_handshakeTimeout = 10 * time.Second
+
+	// _maxLeaves bounds how many certificates of hosts an interceptor keeps: a client can ask for any name.
+	_maxLeaves = 1024
 
 	// _caValidity is how long a CA the server makes for interception is valid.
 	_caValidity = 365 * 24 * time.Hour
@@ -44,6 +50,7 @@ const (
 // interceptor makes the certificates of the hosts the forward proxy intercepts, signed by its CA, which clients trust.
 type interceptor struct {
 	ca     *x509.Certificate
+	chain  [][]byte // the CA's certificates, which follow each host's: an intermediate CA's chain too
 	caKey  crypto.Signer
 	key    *ecdsa.PrivateKey // of every host's certificate: making one per host would slow the handshakes
 	mu     sync.Mutex
@@ -64,7 +71,8 @@ func newInterceptor(ca *tls.Certificate) (*interceptor, error) {
 		}
 	}
 
-	if !cert.IsCA || cert.KeyUsage&x509.KeyUsageCertSign == 0 {
+	// A certificate without key usages, as openssl makes, may sign: x509 lets it.
+	if !cert.IsCA || (cert.KeyUsage != 0 && cert.KeyUsage&x509.KeyUsageCertSign == 0) {
 		return nil, fmt.Errorf("proxy: the certificate of %q is no CA's: it can't sign certificates", cert.Subject.CommonName)
 	}
 
@@ -78,7 +86,7 @@ func newInterceptor(ca *tls.Certificate) (*interceptor, error) {
 		return nil, fmt.Errorf("proxy: making the key of the hosts' certificates: %w", err)
 	}
 
-	return &interceptor{ca: cert, caKey: signer, key: key, leaves: make(map[string]*tls.Certificate)}, nil
+	return &interceptor{ca: cert, chain: ca.Certificate, caKey: signer, key: key, leaves: make(map[string]*tls.Certificate)}, nil
 }
 
 // certificate returns the certificate of host, a name or an IP address, signed by the CA. It makes it once, and again
@@ -87,8 +95,10 @@ func (i *interceptor) certificate(host string) (*tls.Certificate, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
+	// A certificate is renewed before it ends, unless it ends with the CA, which no renewal outlives.
 	now := time.Now()
-	if leaf, ok := i.leaves[host]; ok && now.Before(leaf.Leaf.NotAfter.Add(-_leafRenewal)) {
+	if leaf, ok := i.leaves[host]; ok && now.Before(leaf.Leaf.NotAfter) &&
+		(now.Before(leaf.Leaf.NotAfter.Add(-_leafRenewal)) || leaf.Leaf.NotAfter.Equal(i.ca.NotAfter)) {
 		return leaf, nil
 	}
 
@@ -127,7 +137,12 @@ func (i *interceptor) certificate(host string) (*tls.Certificate, error) {
 		return nil, err
 	}
 
-	cert := &tls.Certificate{Certificate: [][]byte{der, i.ca.Raw}, PrivateKey: i.key, Leaf: leaf}
+	cert := &tls.Certificate{Certificate: append([][]byte{der}, i.chain...), PrivateKey: i.key, Leaf: leaf}
+
+	if len(i.leaves) >= _maxLeaves {
+		clear(i.leaves)
+	}
+
 	i.leaves[host] = cert
 
 	return cert, nil
@@ -172,55 +187,53 @@ func newCA() (*tls.Certificate, error) {
 // intercept answers a CONNECT no mock matched on the client's connection, which it takes over. A client that starts
 // TLS gets a certificate for the host the CONNECT names, signed by the proxy's CA, and its requests are served by the
 // server, as requests in absolute form for that host: mocks answer them, recordings record them, and the forward
-// proxy sends the rest on to the host. A client that doesn't start TLS goes to the host through a tunnel.
+// proxy sends the rest on to the host. A client that doesn't start TLS goes to the host through a tunnel, as does one
+// whose host speaks first, such as an SSH server: it sends nothing for _firstBytesWait.
 func (h *mockHandler) intercept(w http.ResponseWriter, r *RequestValues) {
 	req := r.RawRequest
 
-	client, err := hijack(w)
-	if err != nil {
-		h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: proxy: intercepting a CONNECT needs an HTTP/1.1 connection, "+
-			"and a response writer that can hijack it, or that unwraps to one that can: %w", err))
-
+	client, ok := h.openConnect(w, r)
+	if !ok {
 		return
 	}
 
-	// A connection that switches protocols within is the switch's: the server tracks it, and closes it.
-	owned := true
+	// Once the connection is taken over, a failed read on it, such as when the client doesn't speak first, ends the
+	// request's context: what follows has a context of its own, with the request's values.
+	ctx := context.WithoutCancel(req.Context())
+
+	// A connection that switches protocols within is the switch's: it closes it.
+	switched := false
 	defer func() {
-		if owned {
-			client.Close()
+		if switched {
+			h.app.tunnels.remove(client)
+		} else {
+			h.closeConnect(client)
 		}
 	}()
 
-	// The server is closing.
-	if !h.app.tunnels.add(client) {
-		return
-	}
-
-	defer h.app.tunnels.remove(client)
-
-	if _, err := io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
-		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: answering the CONNECT to %s: %w", req.Host, err))
-		return
-	}
-
-	// The client speaks first. A TLS one starts with a handshake record, of type 22, within the time a handshake gets.
-	_ = client.SetReadDeadline(time.Now().Add(_handshakeTimeout))
+	// A TLS client speaks first, with a handshake record, of type 22.
+	_ = client.SetReadDeadline(time.Now().Add(_firstBytesWait))
 
 	in := bufio.NewReader(client)
-
 	first, err := in.Peek(1)
-	if err != nil {
-		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: reading the intercepted connection to %s: %w", req.Host, err))
-		return
-	}
+
+	_ = client.SetReadDeadline(time.Time{})
 
 	conn := &bufferedConn{Conn: client, r: in}
 
-	if first[0] != 0x16 {
-		_ = client.SetReadDeadline(time.Time{})
-		h.tunnelTo(conn, r)
+	switch {
+	case errors.Is(err, os.ErrDeadlineExceeded) || (err == nil && first[0] != 0x16):
+		upstream, err := h.dialHost(ctx, req)
+		if err != nil {
+			h.lifecycle.OnWarning(r, fmt.Errorf("http: %w", err))
+			return
+		}
 
+		h.tunnel(conn, upstream, r)
+
+		return
+	case err != nil:
+		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: reading the intercepted connection to %s: %w", req.Host, err))
 		return
 	}
 
@@ -236,18 +249,19 @@ func (h *mockHandler) intercept(w http.ResponseWriter, r *RequestValues) {
 		NextProtos: []string{"http/1.1"},
 	})
 
-	if err := tlsConn.Handshake(); err != nil {
+	handshake, cancel := context.WithTimeout(ctx, _handshakeTimeout)
+	err = tlsConn.HandshakeContext(handshake)
+
+	cancel()
+
+	if err != nil {
 		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: intercepting the TLS connection to %s: %w", req.Host, err))
 		return
 	}
 
-	_ = client.SetReadDeadline(time.Time{})
+	h.logConnect(r)
 
-	opened := newResponse()
-	opened.StatusCode = http.StatusOK
-	h.lifecycle.OnProxied(r, opened)
-
-	owned = !h.serveIntercepted(tlsConn, req.Host)
+	switched = h.serveIntercepted(tlsConn, req.Host)
 }
 
 // serveIntercepted serves the requests of conn, an intercepted TLS connection to authority, with the server's
@@ -280,56 +294,32 @@ func (h *mockHandler) serveIntercepted(conn *tls.Conn, authority string) bool {
 		},
 	}
 
-	_ = srv.Serve(&oneConnListener{conn: conn})
+	l := &oneConnListener{conn: conn}
+	_ = srv.Serve(l)
+
+	// A server that failed before it took the connection never serves it.
+	if !l.accepted.Load() {
+		return false
+	}
+
 	<-done
 
 	return switched
 }
 
-// tunnelTo dials the host of r, a CONNECT, and pipes client, a connection already answered, to it.
-func (h *mockHandler) tunnelTo(client net.Conn, r *RequestValues) {
-	req := r.RawRequest
-	via := append(slices.Clone(req.Header.Values(_viaHeader)), h.app.id)
-
-	upstream, err := h.app.proxy.dial(req.Context(), req.Host, via)
-	if err != nil {
-		h.lifecycle.OnWarning(r, fmt.Errorf("http: %w", err))
-		return
-	}
-
-	defer upstream.Close()
-
-	if !h.app.tunnels.add(upstream) {
-		return
-	}
-
-	defer h.app.tunnels.remove(upstream)
-
-	opened := newResponse()
-	opened.StatusCode = http.StatusOK
-	h.lifecycle.OnProxied(r, opened)
-
-	if err := pipe(client, upstream); err != nil {
-		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: tunnel to %s: %w", req.Host, err))
-	}
-}
-
 // oneConnListener is the listener of one connection, accepted already: its first Accept returns it, and the next
 // ones fail, so the server that serves it doesn't wait for more.
 type oneConnListener struct {
-	conn net.Conn
-	once sync.Once
+	conn     net.Conn
+	accepted atomic.Bool
 }
 
 func (l *oneConnListener) Accept() (net.Conn, error) {
-	var conn net.Conn
-	l.once.Do(func() { conn = l.conn })
-
-	if conn == nil {
+	if l.accepted.Swap(true) {
 		return nil, net.ErrClosed
 	}
 
-	return conn, nil
+	return l.conn, nil
 }
 
 func (l *oneConnListener) Close() error   { return nil }

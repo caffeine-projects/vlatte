@@ -1927,7 +1927,9 @@ func TestForwardProxy_InterceptsWithTheCAItIsGiven(t *testing.T) {
 	_, err = New(Setup().Silent().Proxy(&ProxyConfig{Intercept: true, CA: &leaf}))
 	require.ErrorContains(t, err, "is no CA's: it can't sign certificates")
 
-	require.Nil(t, MustNew(Setup().Silent().Proxy()).ProxyCA(), "a proxy that doesn't intercept has no CA")
+	plain := MustNew(Setup().Silent().Proxy())
+	t.Cleanup(plain.Close)
+	require.Nil(t, plain.ProxyCA(), "a proxy that doesn't intercept has no CA")
 }
 
 func TestForwardProxy_InterceptionPipesWhatIsntTLS(t *testing.T) {
@@ -2012,4 +2014,77 @@ func TestForwardProxy_InterceptedConnectionsSwitchProtocols(t *testing.T) {
 	line, err := br.ReadString('\n')
 	require.NoError(t, err)
 	require.Equal(t, "switched within\n", line)
+}
+
+func TestForwardProxy_InterceptionTunnelsAHostThatSpeaksFirst(t *testing.T) {
+	// A client of a protocol whose server speaks first, such as SSH or SMTP, waits for its host: an interception that
+	// waited for the client's first bytes closed the connection after its handshake timeout. It goes to the host.
+	host := tcpHost(t, func(conn net.Conn) {
+		_, _ = io.WriteString(conn, "banner\n")
+		echoConn(conn)
+	})
+
+	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	conn, br := openTunnel(t, hostOf(t, m), host, "")
+
+	line, err := br.ReadString('\n')
+	require.NoError(t, err)
+	require.Equal(t, "banner\n", line)
+
+	_, err = io.WriteString(conn, "after the banner\n")
+	require.NoError(t, err)
+
+	line, err = br.ReadString('\n')
+	require.NoError(t, err)
+	require.Equal(t, "after the banner\n", line)
+}
+
+func TestForwardProxy_CloseWaitsForInterceptedRequests(t *testing.T) {
+	// The backend doesn't wait for the requests of an intercepted connection, which its own server serves: Close ran on
+	// while they were served, and closed their mocks and recording under them. It waits for them.
+	entered, release := make(chan struct{}), make(chan struct{})
+
+	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true}))
+	m.MustStart()
+	m.MustMock(Getf("/slow").
+		Callback(func(context.Context, vlatte.CallbackInput) error {
+			close(entered)
+			<-release
+
+			return nil
+		}).
+		Reply(OK()))
+
+	client := interceptClient(t, m)
+
+	go func() {
+		if res, err := client.Get("https://api.local/slow"); err == nil {
+			_ = res.Body.Close()
+		}
+	}()
+
+	<-entered
+
+	closed := make(chan struct{})
+	go func() {
+		m.Close()
+		close(closed)
+	}()
+
+	select {
+	case <-closed:
+		t.Fatal("Close returned while an intercepted request was served")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close didn't return once the intercepted request was served")
+	}
 }

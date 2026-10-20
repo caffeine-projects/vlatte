@@ -672,3 +672,15 @@ func TestConfigSources_InterceptionNeedsACA(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigSources_TheCAOfAProxyTurnedOffLeavesItOff(t *testing.T) {
+	// Loading the CA's files turned the forward proxy on again, after a later source turned it off.
+	dir := t.TempDir()
+	caCert, caKey := writeTestCA(t, dir)
+	file := writeConfigFile(t, dir, "settings.yaml",
+		"proxy:\n  intercept: true\n  ca_cert: "+caCert+"\n  ca_key: "+caKey+"\n")
+
+	c, err := loadConfig(t, Setup(), ConfigFile(file), ConfigArgs([]string{"--proxy=false"}))
+	require.NoError(t, err)
+	require.Nil(t, c.Proxy)
+}

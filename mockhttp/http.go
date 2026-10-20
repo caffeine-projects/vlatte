@@ -417,6 +417,10 @@ func (app *Server) Close() {
 		app.logger.Debug().Err(err).Msg("server: Close: error closing server")
 	}
 
+	// The backend doesn't track the connections it handed over to tunnels, nor wait for their handlers, such as the
+	// requests of intercepted connections: they end before the recording and the mocks do.
+	app.tunnels.closeAll()
+
 	// The recording logged each call it couldn't record. The server closes: it serves nothing more.
 	_, _ = app.stopRecording(context.Background(), false)
 
@@ -435,9 +439,6 @@ func (app *Server) Close() {
 	if closer, ok := app.proxyAll.(io.Closer); ok {
 		_ = closer.Close()
 	}
-
-	// The backend doesn't track the connections it handed over to tunnels.
-	app.tunnels.closeAll()
 
 	app.webhooks.CloseIdleConnections()
 }

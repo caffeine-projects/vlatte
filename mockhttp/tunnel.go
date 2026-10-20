@@ -20,14 +20,17 @@ import (
 var _ net.Conn = (*bufferedConn)(nil)
 
 // tunnels holds the connections of the open tunnels, CONNECT ones and those of protocol switches. The server doesn't
-// track a connection once it is hijacked, so Server.Close closes them.
+// track a connection once it is hijacked, nor wait for its handler, so Server.Close closes them, and waits for each add
+// to be removed.
 type tunnels struct {
 	mu     sync.Mutex
 	conns  map[io.Closer]struct{}
 	closed bool
+	open   sync.WaitGroup // an add that wasn't removed yet
 }
 
-// add tracks conns until remove. It reports false, and tracks nothing, once closeAll ran: the caller closes them.
+// add tracks conns until a remove of them. It reports false, and tracks nothing, once closeAll ran: the caller closes
+// them.
 func (t *tunnels) add(conns ...io.Closer) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -35,6 +38,8 @@ func (t *tunnels) add(conns ...io.Closer) bool {
 	if t.closed {
 		return false
 	}
+
+	t.open.Add(1)
 
 	if t.conns == nil {
 		t.conns = make(map[io.Closer]struct{})
@@ -47,7 +52,7 @@ func (t *tunnels) add(conns ...io.Closer) bool {
 	return true
 }
 
-// remove stops tracking conns.
+// remove stops tracking conns, which one add tracked.
 func (t *tunnels) remove(conns ...io.Closer) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -55,12 +60,14 @@ func (t *tunnels) remove(conns ...io.Closer) {
 	for _, c := range conns {
 		delete(t.conns, c)
 	}
+
+	t.open.Done()
 }
 
-// closeAll closes the connections it tracks, and those added later.
+// closeAll closes the connections it tracks, and those added later, and waits until the handlers that added them
+// removed them.
 func (t *tunnels) closeAll() {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 
 	t.closed = true
 
@@ -69,6 +76,9 @@ func (t *tunnels) closeAll() {
 	}
 
 	clear(t.conns)
+	t.mu.Unlock()
+
+	t.open.Wait()
 }
 
 // bufferedConn is a connection whose first bytes were read into r already, such as by an HTTP parser: it reads them

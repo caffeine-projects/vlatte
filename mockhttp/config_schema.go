@@ -526,6 +526,11 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 // loadProxyCA loads the CA of proxy.ca_cert and proxy.ca_key. Interception from the settings needs one: clients must
 // trust the CA, and one the server makes lives only as long as the server.
 func loadProxyCA(conf *Config, values map[string]config.Value) []config.Problem {
+	// A source that turned the forward proxy off, such as --proxy=false, leaves it off.
+	if conf.Proxy == nil {
+		return nil
+	}
+
 	cert, hasCert := values["proxy.ca_cert"]
 	key, hasKey := values["proxy.ca_key"]
 	intercept, hasIntercept := values["proxy.intercept"]
@@ -547,8 +552,8 @@ func loadProxyCA(conf *Config, values map[string]config.Value) []config.Problem 
 			return []config.Problem{tlsFileProblem(cert, "can't load the CA's certificate and key", err)}
 		}
 
-		section(&conf.Proxy, _defaultProxyConfig).CA = &ca
-	case hasIntercept && intercept.Bool && (conf.Proxy == nil || conf.Proxy.CA == nil):
+		conf.Proxy.CA = &ca
+	case hasIntercept && intercept.Bool && conf.Proxy.CA == nil:
 		return []config.Problem{{
 			Code: config.CodeMissingValue, Origin: intercept.Origin, Key: "proxy.ca_cert",
 			Message: "proxy.intercept is set but proxy.ca_cert and proxy.ca_key are not",
