@@ -15,7 +15,7 @@ import (
 // The Transform function allows customization of request data before sending.
 func WithTransform(transform Transform) Option {
 	return func(w *WebHook) error {
-		w.Transform = transform
+		w.transform = transform
 		return nil
 	}
 }
@@ -24,20 +24,21 @@ func WithTransform(transform Transform) Option {
 // such as the server's transport mockhttp gives.
 func WithRoundTripper(roundTripper http.RoundTripper) Option {
 	return func(w *WebHook) error {
-		w.RoundTripper = roundTripper
+		w.roundTripper = roundTripper
 		return nil
 	}
 }
 
 // WithTimeout returns an [Option] that limits how long a [WebHook] request may take, from sending it to its answer.
-// Defaults to 10 seconds, which 0 keeps. A negative timeout is an error.
+// It wins over the event's, such as the server's Config.WebhookTimeout mockhttp gives. 0 keeps the event's, or else
+// 10 seconds. A negative timeout is an error.
 func WithTimeout(timeout time.Duration) Option {
 	return func(w *WebHook) error {
 		if timeout < 0 {
 			return fmt.Errorf("negative timeout %s", timeout)
 		}
 
-		w.Timeout = timeout
+		w.timeout = timeout
 
 		return nil
 	}
@@ -47,7 +48,7 @@ func WithTimeout(timeout time.Duration) Option {
 // logs with the logger of its event: mockhttp gives the server's, so Setup().Silent() silences webhooks too.
 func WithLogger(logger *zerolog.Logger) Option {
 	return func(w *WebHook) error {
-		w.Logger = logger
+		w.logger = logger
 		return nil
 	}
 }

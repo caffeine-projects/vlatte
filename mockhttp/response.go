@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 )
@@ -67,7 +68,7 @@ func (r *Response) Gunzip() ([]byte, error) {
 // Render writes the response to w. ctx is the request's: a streamed body stops waiting when it ends.
 // An error comes after the status and headers are sent, so it can't change the response.
 func (r *Response) Render(ctx context.Context, w http.ResponseWriter) error {
-	return r.render(ctx, w, wait)
+	return r.render(ctx, w, httpx.Wait)
 }
 
 // clone returns a copy of r with a Header, Trailer and Cookies of its own, each cookie a copy too. The Body bytes are
@@ -278,19 +279,6 @@ func (r *Response) stream(ctx context.Context, w http.ResponseWriter, wait func(
 	}
 
 	return flush()
-}
-
-// wait waits for d, or until ctx ends.
-func wait(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
 }
 
 func (r *Response) encode(w io.Writer, reader io.Reader) (n int64, err error) {

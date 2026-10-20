@@ -302,7 +302,7 @@ m := mockhttp.MustNew(mockhttp.Setup().OnCompleteListener("webhook", wh))
 
 A mock that names a listener the server doesn't have fails to build, and so does a server given two listeners of one name.
 
-A webhook sends through `webhook.WithRoundTripper`, or else the server's `Setup().Transport`, or else `http.DefaultTransport`.
+A webhook sends through `webhook.WithRoundTripper`, or else the server's `Setup().Transport`, or else a transport the server makes for webhooks, whose idle connections `m.Close()` closes.
 
 ```yaml
 request:
@@ -337,6 +337,8 @@ m.MustMock(mockhttp.Postf("/orders").
 	Reply(mockhttp.Accepted()))
 ```
 
+`URLTemplate`, `HeaderTemplate`, `BodyTemplate` and `BodyFile` set the parameters of the same names. A multipart body whose text is templates is `Multipart(mockhttp.MultipartForm(...).Template())`.
+
 **Parameters.**
 
 | Parameter | What it sets |
@@ -360,7 +362,7 @@ callbacks.AssertCalled(t)
 
 A webhook's `delay` counts from the reply, so it holds the response too. A reply that streams its parts, or a body over a few KB, sends its status and headers before its webhooks are done, so the call returns early; the body still ends after them, unless the mock sets `Content-Length` itself. Read the body to its end, as `io.ReadAll` does, before checking what they sent. `m.Close()` cancels the webhooks still waiting, for their delay or for their target.
 
-**Failures.** A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning. The timeout is 10 seconds: `webhook.WithTimeout` changes it in Go, and the `webhook.timeout` setting for the `vlatte` command, where 0 means 10 seconds, unlike `proxy.timeout`. A response waits for a webhook at most its delay plus the timeout.
+**Failures.** A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning. The timeout is 10 seconds: `webhook.WithTimeout` changes it for one webhook, and the server's `webhook.timeout` setting (`Config.WebhookTimeout`) for webhooks without one, where 0 means 10 seconds, unlike `proxy.timeout`. A webhook reads up to 256 KiB of the answer, so its connection carries the next one. A response waits for a webhook at most its delay plus the timeout.
 
 **Logs.** Webhooks log each request and its answer with the server's logger, so `Setup().Silent()` silences them too. `webhook.WithLogger` gives them a logger of their own.
 

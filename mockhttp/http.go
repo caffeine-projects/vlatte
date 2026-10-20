@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -61,6 +62,10 @@ type Server struct {
 
 	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
 	events *vlatte.EventRunner
+
+	// webhooks is the transport the server gives webhooks when its config has none. Close closes its idle connections,
+	// so they don't outlive the server.
+	webhooks *http.Transport
 
 	// recording is the recording requests are captured for, if any. recordMu orders its starts, and guards played:
 	// the directory of the last recording StopRecording ended, whose recordings files loads with the mock files.
@@ -205,6 +210,7 @@ func New(config ...Option) (*Server, error) {
 	app.proxy = p
 	app.requestBodyParsers = parsers
 	app.events = eventRunner
+	app.webhooks = newWebhookTransport()
 
 	app.admin = admin.New(
 		repository,
@@ -371,7 +377,8 @@ func (app *Server) MustReload() {
 
 // Close closes the mock server. It cancels the on_complete events still running, such as a webhook waiting for its
 // delay or its target, so the requests waiting for them end, and waits for those requests. It stops the recording,
-// and waits until it wrote what it took. A closed server doesn't start again.
+// and waits until it wrote what it took. It closes the idle connections of the transports it made, such as the one of
+// webhooks. A closed server doesn't start again.
 func (app *Server) Close() {
 	app.closed.Store(true)
 
@@ -397,6 +404,8 @@ func (app *Server) Close() {
 	if app.proxy != nil {
 		app.proxy.close()
 	}
+
+	app.webhooks.CloseIdleConnections()
 }
 
 // SetData sets the data templates read as .Data, such as the URL of another server: {{ .Data.target }}. The server
@@ -467,6 +476,34 @@ func (app *Server) DescribeConfig() string {
 // --
 // Internals
 // --
+
+// webhookTransport returns the transport webhooks send through when they have none of their own: Config.Transport,
+// which is the caller's, or else the one the server made, which Close closes.
+func (app *Server) webhookTransport() http.RoundTripper {
+	if app.config.Transport != nil {
+		return app.config.Transport
+	}
+
+	return app.webhooks
+}
+
+// newWebhookTransport returns the transport a server gives webhooks when its config has none. It is the server's:
+// Close closes its idle connections. It has the limits of http.DefaultTransport, built here rather than copied, as a
+// program may have replaced http.DefaultTransport.
+func newWebhookTransport() *http.Transport {
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+}
 
 // start starts the server once with listen, the backend's Listen or ListenTLS. The backend listens first, so loaders
 // can read URL, and serves once the mocks loaded and the recording started. A start that fails, or that a Close
