@@ -67,11 +67,11 @@ func TestHello(t *testing.T) {
 | `recipe/<protocol>/<recipe>` | Recipes that prepare a server, such as `recipe/http/proxyall` |
 | `vlatte` | The types every mock server shares, and the Go template engine |
 
-A recipe prepares a server through `Prep`. This one forwards every request that no mock matches:
+A recipe prepares a server through `Prep`. This one forwards every request that no mock matches, with the options of the proxy reply it takes:
 
 ```go
 m := mockhttp.MustNew()
-err := m.Prep(ctx, proxyall.New(proxyall.Config{Target: "https://api.example.com"}))
+err := m.Prep(ctx, proxyall.New(mockhttp.From("https://api.example.com").Timeout(5*time.Second)))
 ```
 
 ## Mock files

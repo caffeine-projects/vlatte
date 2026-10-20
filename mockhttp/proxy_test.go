@@ -1545,3 +1545,47 @@ func TestForwardProxy_ATunnelDialsWithinTheTransportsLimits(t *testing.T) {
 		require.Contains(t, body, "proxy: opening a tunnel to "+host+" through https://"+via)
 	})
 }
+
+func TestProxyAll_AnswersWhatNoOtherMockMatches(t *testing.T) {
+	// As WireMock's proxy-all, ProxyAll proxies what no other mock matches: it comes last, whatever the priority of
+	// the others. It leaves the forward proxy's requests alone, which name their host: a request in absolute form goes
+	// to its host, and a CONNECT opens its tunnel.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "target "+r.URL.Path)
+	}))
+	t.Cleanup(target.Close)
+
+	host := okTarget(t)
+	echo := tcpHost(t, echoConn)
+
+	m := MustNew(Setup().Silent().Proxy())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(
+		ProxyAll(From(target.URL)),
+		Getf("/mocked").Priority(1000).Reply(OK().PlainText("mock")),
+	)
+
+	_, body := get(t, m, "/mocked")
+	require.Equal(t, "mock", body)
+
+	_, body = get(t, m, "/other")
+	require.Equal(t, "target /other", body)
+
+	res, err := proxyClient(t, m).Get(host.URL + "/x")
+	require.NoError(t, err)
+
+	b, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, "ok", string(b), "the forward proxy's request went to the proxy-all target")
+
+	conn, br := openTunnel(t, hostOf(t, m), echo, "")
+
+	_, err = io.WriteString(conn, "tunnel\n")
+	require.NoError(t, err)
+
+	line, err := br.ReadString('\n')
+	require.NoError(t, err)
+	require.Equal(t, "tunnel\n", line)
+}

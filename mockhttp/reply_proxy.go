@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -75,6 +76,18 @@ func From[T FromTypes](target T) *ProxyReply {
 		removeRequestHeaders: make([]string, 0),
 		timeout:              _defaultTimeout,
 	}
+}
+
+// ProxyAll returns a mock that answers the requests no other mock matches with reply, as WireMock's proxy-all does: it
+// matches any method and path, and comes last, at the priority math.MaxInt. It leaves alone what the forward proxy
+// sends on to its host, CONNECTs and requests in absolute form, which name it.
+func ProxyAll(reply *ProxyReply) *Builder {
+	return AnyMethod().
+		Priority(math.MaxInt).
+		RequestMatches(func(r *http.Request) (bool, error) {
+			return r.Method != http.MethodConnect && r.URL.Host == "", nil
+		}).
+		Reply(reply)
 }
 
 // Header adds a value to a response header, which replaces the target's values of that name.
