@@ -464,7 +464,7 @@ m.MustStart()
 fmt.Println(m.AdminURL()) // http://127.0.0.1:8081
 ```
 
-From settings, `admin: true` turns it on, and `admin.addr` (`--admin-addr`, `VLATTE_ADMIN_ADDR`) sets its address.
+From settings, `admin: true` turns it on, and `admin.addr` (`--admin-addr`, `VLATTE_ADMIN_ADDR`) sets its address. A gRPC server serves the same admin API with `mockgrpc.Setup().Admin(addr)`: what gRPC mocks can't do, such as being added from a mock file, answers `501`.
 
 | Route | What it does |
 |---|---|

@@ -4,14 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"slices"
 	"sync"
+	"time"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
+
+	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 )
 
 var (
@@ -26,6 +32,8 @@ type Server struct {
 	config  *Config
 	logger  *zerolog.Logger
 	storage vlatte.Store[*Mock]
+	admin   *admin.Server   // nil without Config.Admin
+	events  *handler.Events // the admin API's; nil without it
 
 	mu      sync.Mutex // orders Start and Close, which a Close overlapping a Start would otherwise outrun
 	addr    string
@@ -73,9 +81,34 @@ func New(config ...Option) (*Server, error) {
 	app.server = srv
 	app.logger = conf.Logger
 
+	// The admin API streams the log lines of a logger the server builds, not those of one it was given.
+	var logs *handler.Logs
 	if app.logger == nil {
-		l := zerolog.New(os.Stdout).With().Timestamp().Logger()
+		var out io.Writer = os.Stdout
+		if conf.Admin != nil {
+			logs = handler.NewLogs()
+			out = zerolog.MultiLevelWriter(os.Stdout, logs)
+		}
+
+		l := zerolog.New(out).With().Timestamp().Logger()
 		app.logger = &l
+	}
+
+	if conf.Admin != nil {
+		app.events = handler.NewEvents()
+
+		var err error
+		app.admin, err = admin.New(
+			admin.Addr(conf.Admin.Addr),
+			admin.Info("grpc", app.Addr),
+			admin.Logger(app.logger),
+			admin.Mocks[*Mock](store, nil),
+			admin.Events(app.events),
+			admin.Logs(logs),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
 	}
 
 	return app, nil
@@ -130,6 +163,17 @@ func (app *Server) Start() error {
 	}
 
 	app.addr = lis.Addr().String()
+
+	if app.admin != nil {
+		if err := app.admin.Start(); err != nil {
+			_ = lis.Close()
+			app.addr = ""
+			app.closed = true
+
+			return fmt.Errorf("server: Start: %w", err)
+		}
+	}
+
 	app.served = make(chan struct{})
 
 	go func(served chan struct{}) {
@@ -169,6 +213,16 @@ func (app *Server) RegisterService(desc *grpc.ServiceDesc, impl any) {
 	app.server.RegisterService(desc, impl)
 }
 
+// AdminURL returns the base URL of the admin API, or "" when the server serves none, or hasn't started: see
+// ConfigBuilder.Admin.
+func (app *Server) AdminURL() string {
+	if app.admin == nil {
+		return ""
+	}
+
+	return app.admin.URL()
+}
+
 func (app *Server) Addr() string {
 	app.mu.Lock()
 	defer app.mu.Unlock()
@@ -176,13 +230,19 @@ func (app *Server) Addr() string {
 	return app.addr
 }
 
-// Close stops the server, waiting for calls in flight to finish. A closed server doesn't start again, even one that
-// never started.
+// Close stops the server, waiting for calls in flight to finish. It closes the admin API first, which waits for the
+// operations it serves. A closed server doesn't start again, even one that never started.
 func (app *Server) Close() {
 	app.mu.Lock()
 	app.closed = true
 	served := app.served
 	app.mu.Unlock()
+
+	if app.admin != nil {
+		if err := app.admin.Close(); err != nil {
+			app.logger.Debug().Err(err).Msg("server: Close: closing the admin API")
+		}
+	}
 
 	if served == nil {
 		return
@@ -190,4 +250,34 @@ func (app *Server) Close() {
 
 	app.server.GracefulStop()
 	<-served
+}
+
+// publish sends an event of kind, of a call of target, a full method, to the admin API's clients: mock, the mock that
+// matched, if one did, and err, what failed, if anything. Nothing is published without the admin API.
+func (app *Server) publish(kind, target string, mock *Mock, err error) {
+	if app.events == nil {
+		return
+	}
+
+	e := handler.Event{Type: kind, Time: time.Now(), Target: target}
+	if mock != nil {
+		e.MockID = mock.ID()
+	}
+
+	if err != nil {
+		e.Message = err.Error()
+	}
+
+	app.events.Publish(e)
+}
+
+// publishReply publishes the call of target whose mock replied err: an error with a gRPC status is the mock's answer,
+// as replyError tells, and any other a failure.
+func (app *Server) publishReply(target string, mock *Mock, err error) {
+	if _, ok := status.FromError(err); ok {
+		app.publish(handler.EventMatched, target, mock, nil)
+		return
+	}
+
+	app.publish(handler.EventError, target, mock, err)
 }

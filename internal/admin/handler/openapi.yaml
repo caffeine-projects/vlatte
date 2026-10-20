@@ -502,7 +502,9 @@ components:
           examples: [http, grpc]
         url:
           type: string
-          description: The URL the mock server serves its mocks at.
+          description: |
+            Where the mock server serves its mocks: its URL, such as `http://127.0.0.1:8080`, or its address for gRPC,
+            such as `127.0.0.1:50051`.
     Mock:
       type: object
       description: |

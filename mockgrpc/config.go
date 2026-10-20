@@ -17,6 +17,16 @@ type Config struct {
 
 	// NoDebugHeaders turns off the debug header metadata, such as vlatte-matched-mock-id, of the server's answers.
 	NoDebugHeaders bool
+
+	// Admin serves the admin API, on an HTTP server of its own. Nil serves none.
+	Admin *AdminConfig
+}
+
+// AdminConfig configures the admin API of a server: a RESTful HTTP server of its own, the same as HTTP mock servers
+// have. The operations gRPC mocks can't do, such as adding mocks from documents, answer 501.
+type AdminConfig struct {
+	// Addr is the address the admin API listens on: host:port, :port or a port. Empty is a random local port.
+	Addr string
 }
 
 func (c *Config) Apply(conf *Config) error {
@@ -27,6 +37,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Listener = c.Listener
 	conf.Logger = c.Logger
 	conf.NoDebugHeaders = c.NoDebugHeaders
+	conf.Admin = c.Admin
 
 	return nil
 }
@@ -83,4 +94,11 @@ func (cb *ConfigBuilder) NoDebugHeaders() *ConfigBuilder {
 
 func (cb *ConfigBuilder) Apply(conf *Config) error {
 	return cb.conf.Apply(conf)
+}
+
+// Admin serves the admin API, on an HTTP server of its own at addr: host:port, :port or a port. Empty is a random
+// local port. Server.AdminURL returns where it listens.
+func (cb *ConfigBuilder) Admin(addr string) *ConfigBuilder {
+	cb.conf.Admin = &AdminConfig{Addr: addr}
+	return cb
 }
