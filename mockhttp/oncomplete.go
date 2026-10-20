@@ -1,6 +1,8 @@
 package mockhttp
 
 import (
+	"net/http"
+
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
@@ -13,13 +15,14 @@ var _ vlatte.OnComplete = (*OnComplete)(nil)
 // it from Request, not from RawRequest.Body. Listeners use the context they get: it has the request's values, and the
 // client leaving doesn't end it, as it ends the request's.
 type OnComplete struct {
-	m      *Mock
-	req    *RequestValues
-	res    *Response
-	kit    vlatte.Kit
-	args   vlatte.Parameters
-	dir    string
-	logger *zerolog.Logger
+	m         *Mock
+	req       *RequestValues
+	res       *Response
+	kit       vlatte.Kit
+	args      vlatte.Parameters
+	dir       string
+	logger    *zerolog.Logger
+	transport http.RoundTripper
 }
 
 func (i *OnComplete) Kind() vlatte.Kind {
@@ -55,4 +58,10 @@ func (i *OnComplete) Dir() string {
 // Logger is the server's logger, so listeners such as webhooks log where the server does, and as little.
 func (i *OnComplete) Logger() *zerolog.Logger {
 	return i.logger
+}
+
+// Transport is the server's Config.Transport, or nil, so listeners such as webhooks send through it when they have
+// none of their own.
+func (i *OnComplete) Transport() http.RoundTripper {
+	return i.transport
 }

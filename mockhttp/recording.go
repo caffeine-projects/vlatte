@@ -110,7 +110,7 @@ func (app *Server) startRecording(conf *RecordConfig) error {
 	}
 
 	if conf.Target != "" {
-		target, err := From(conf.Target).SSLVerify(!conf.SkipSSLVerify).NewReplier(app)
+		target, err := From(conf.Target).SSLVerify(!conf.SkipSSLVerify).Transport(conf.Transport).NewReplier(app)
 		if err != nil {
 			return fmt.Errorf("recorder: target: %w", err)
 		}

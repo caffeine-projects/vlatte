@@ -281,6 +281,20 @@ func TestRecording_ATLSTarget(t *testing.T) {
 	require.Len(t, stopRecording(t, m).Recordings, 1)
 }
 
+func TestRecording_ATLSTargetThroughItsOwnTransport(t *testing.T) {
+	// Skipping the verification of a target with a private certificate also trusts whoever answers in its place. A
+	// transport that trusts the target's CA records it with the verification on.
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "secure") }))
+	t.Cleanup(target.Close)
+
+	m := mockedServer(t, Setup().Silent())
+	require.NoError(t, m.StartRecording(RecordDir(t.TempDir()), RecordTarget(target.URL), RecordTransport(target.Client().Transport)))
+
+	_, body := do(t, http.MethodGet, m.URL("/a"), nil, nil)
+	require.Equal(t, "secure", string(body))
+	require.Len(t, stopRecording(t, m).Recordings, 1)
+}
+
 func TestRecording_TargetConnectionsCloseAtStop(t *testing.T) {
 	// A recording releases its connections to the target when it stops, and the next one can record another target.
 	var closed atomic.Int64

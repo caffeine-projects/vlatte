@@ -97,11 +97,28 @@ func (failingReply) NewReplier(*Server) (Replier, error) {
 	return nil, errors.New("no replier")
 }
 
-// countingTransport is a transport the caller shares, which a proxy must leave open.
+// countingTransport is a transport the caller shares, which a proxy must leave open. It counts the calls it carries,
+// and the times it was asked to close its idle connections.
 type countingTransport struct {
 	http.RoundTripper
 
+	calls  atomic.Int64
 	closes atomic.Int64
+}
+
+// newCountingTransport returns a countingTransport that sends the calls it carries on.
+func newCountingTransport(t *testing.T) *countingTransport {
+	t.Helper()
+
+	inner := &http.Transport{}
+	t.Cleanup(inner.CloseIdleConnections)
+
+	return &countingTransport{RoundTripper: inner}
+}
+
+func (c *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.calls.Add(1)
+	return c.RoundTripper.RoundTrip(r)
 }
 
 func (c *countingTransport) CloseIdleConnections() {
@@ -184,28 +201,45 @@ func TestProxyReply_ReleasesItsConnectionsWhenItLeaves(t *testing.T) {
 	})
 }
 
-func TestProxyReply_LeavesTheFactoryTransportOpen(t *testing.T) {
-	// A factory's client can carry a transport the caller shares, such as http.DefaultTransport: closing its idle
-	// connections when a mock leaves would cut them for everyone else using it.
-	target, _ := countingTarget(t)
+func TestProxyReply_LeavesTheCallersTransportOpen(t *testing.T) {
+	// A transport of the caller's can be one it shares, such as http.DefaultTransport: closing its idle connections
+	// when a mock leaves would cut them for everyone else using it.
+	tests := []struct {
+		name  string
+		setup func(shared http.RoundTripper) *ConfigBuilder
+		reply func(target string, shared http.RoundTripper) *ProxyReply
+	}{
+		{
+			name:  "the server's",
+			setup: func(shared http.RoundTripper) *ConfigBuilder { return Setup().Transport(shared) },
+			reply: func(target string, _ http.RoundTripper) *ProxyReply { return From(target) },
+		},
+		{
+			name:  "the reply's",
+			setup: func(http.RoundTripper) *ConfigBuilder { return Setup() },
+			reply: func(target string, shared http.RoundTripper) *ProxyReply { return From(target).Transport(shared) },
+		},
+	}
 
-	inner := &http.Transport{}
-	t.Cleanup(inner.CloseIdleConnections)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target, _ := countingTarget(t)
+			shared := newCountingTransport(t)
 
-	shared := &countingTransport{RoundTripper: inner}
+			m := MustNew(tt.setup(shared).Silent())
+			m.MustStart()
 
-	m := MustNew(Setup().Silent().HTTPClient(func() *http.Client { return &http.Client{Transport: shared} }))
-	m.MustStart()
+			scope := m.MustMock(Getf("/p").Reply(tt.reply(target.URL, shared)))
 
-	scope := m.MustMock(Getf("/p").Reply(From(target.URL)))
+			status, _ := get(t, m, "/p")
+			require.Equal(t, http.StatusOK, status)
 
-	status, _ := get(t, m, "/p")
-	require.Equal(t, http.StatusOK, status)
+			require.NoError(t, m.Unmock(t.Context(), scope))
+			m.Close()
 
-	require.NoError(t, m.Unmock(t.Context(), scope))
-	m.Close()
-
-	require.Zero(t, shared.closes.Load())
+			require.Zero(t, shared.closes.Load())
+		})
+	}
 }
 
 func TestShared_IsNotClosedWithItsMocks(t *testing.T) {
@@ -386,7 +420,7 @@ func TestServer_CloseReleasesTheForwardProxyConnections(t *testing.T) {
 }
 
 func TestServer_CloseLeavesTheCallersProxyTransportOpen(t *testing.T) {
-	// A ProxyConfig.Transport is the caller's, as a factory's client is.
+	// A ProxyConfig.Transport is the caller's, as Config.Transport is.
 	target, _ := countingTarget(t)
 
 	inner := &http.Transport{}

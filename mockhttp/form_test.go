@@ -75,7 +75,7 @@ func TestForms_LineBreaksInNamesArriveEscaped(t *testing.T) {
 
 func TestForms_ForwardAndEchoSendTheWholeBody(t *testing.T) {
 	// D6: parsing a form reads r.Body to the end, and the proxy, forward and echo replies send r.Body, so they sent
-	// an empty body. Both parsers put the body back.
+	// an empty body. The server puts the whole body back once the parsers are done.
 	got := make(chan []byte, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)

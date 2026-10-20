@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -121,6 +122,123 @@ func TestRequestBodyParser_Limit(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func TestRequestBodyParser_ForwardsTheWholeBodyPastTheLimit(t *testing.T) {
+	// #41: the server kept only the MaxBodyParsingLimit bytes it parsed, so replies that forward the request sent a
+	// cut body: the transport refused one with a Content-Length, and a chunked one reached the target short. The limit
+	// bounds what the matchers see, not what is forwarded.
+	const body = "0123456789"
+
+	got := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got <- string(b)
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent().MaxBodyParsingLimit(4).Proxy())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	// The matchers see the first 4 bytes only: a mock that answers saw the cut body.
+	m.MustMock(
+		Postf("/forward").Body(match.Eq("0123")).Reply(From(target.URL)),
+		Postf("/echo").Body(match.Eq("0123")).Reply(Echo()),
+		Postf("/form").Reply(From(target.URL)),
+	)
+
+	proxyURL, err := url.Parse(m.URL())
+	require.NoError(t, err)
+
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	t.Cleanup(transport.CloseIdleConnections)
+
+	viaProxy := &http.Client{Transport: transport}
+
+	send := func(t *testing.T, client *http.Client, url string, chunked bool) (int, string) {
+		t.Helper()
+
+		var r io.Reader = strings.NewReader(body)
+		if chunked {
+			// A reader of unknown length goes chunked.
+			r = io.MultiReader(r)
+		}
+
+		req, err := http.NewRequest(http.MethodPost, url, r)
+		require.NoError(t, err)
+		req.Header.Set(HeaderContentType, MIMETextPlain)
+
+		res, err := client.Do(req)
+		require.NoError(t, err)
+
+		b, err := readAll(res)
+		require.NoError(t, err)
+
+		return res.StatusCode, string(b)
+	}
+
+	for _, chunked := range []bool{false, true} {
+		name := "with a Content-Length"
+		if chunked {
+			name = "chunked"
+		}
+
+		t.Run("From, "+name, func(t *testing.T) {
+			status, _ := send(t, http.DefaultClient, m.URL("/forward"), chunked)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, body, <-got)
+		})
+
+		t.Run("forward proxy, "+name, func(t *testing.T) {
+			status, _ := send(t, viaProxy, target.URL+"/upload", chunked)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, body, <-got)
+		})
+	}
+
+	t.Run("Echo, with a Content-Length", func(t *testing.T) {
+		status, echoed := send(t, http.DefaultClient, m.URL("/echo"), false)
+		require.Equal(t, http.StatusOK, status)
+		require.True(t, strings.HasSuffix(echoed, "\r\n\r\n"+body), "the echo ends with the whole body: %q", echoed)
+	})
+
+	t.Run("From, a multipart form", func(t *testing.T) {
+		// The multipart parser refuses a form the limit cut: the form goes on whole all the same.
+		contentType, form := formModel{fields: []formField{{name: "a", value: "1"}}}.encode(t)
+
+		res, _ := post(t, m.URL("/form"), contentType, form)
+		require.Equal(t, http.StatusOK, res.StatusCode)
+		require.Equal(t, string(form), <-got)
+	})
+}
+
+// replacingParser parses its media type by replacing the request's body with body, as a parser that decodes it would.
+type replacingParser struct {
+	body string
+}
+
+func (p replacingParser) CanParse(content string, _ *http.Request) bool {
+	return content == "application/x-replaced"
+}
+
+func (p replacingParser) Parse(_ []byte, r *http.Request) (any, error) {
+	r.Body = io.NopCloser(strings.NewReader(p.body))
+	return p.body, nil
+}
+
+func TestRequestBodyParser_KeepsTheBodyAParserReplaced(t *testing.T) {
+	// A parser can replace the request's body, such as with the body it decoded: replies that forward the request, such
+	// as Echo, send it. Only a body the parsers left as it was gets the rest the server didn't read put back.
+	m := MustNew(Setup().Silent().RequestBodyParsers(replacingParser{body: "xyz"}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Postf("/echo").Reply(Echo()))
+
+	res, echoed := post(t, m.URL("/echo"), "application/x-replaced", []byte("abc"))
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.True(t, strings.HasSuffix(string(echoed), "\r\n\r\nxyz"), "the echo ends with the parser's body: %q", echoed)
 }
 
 func TestParseURL_SegmentsExcludeQuery(t *testing.T) {

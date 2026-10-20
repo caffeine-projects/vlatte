@@ -1,15 +1,18 @@
 package mockhttp
 
 import (
+	"cmp"
 	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -400,29 +403,6 @@ func TestProxyReply_ClosesTargetConnectionsOnClose(t *testing.T) {
 	}
 }
 
-func TestProxyReply_LeavesTheFactoryClientAsItWas(t *testing.T) {
-	// Building a proxy mock set the Transport, with TLS verification off, on the client that the HTTPClient factory
-	// returned, which can be a client it shares, such as http.DefaultClient. The mock gets a copy.
-	shared := &http.Client{}
-	m := MustNew(Setup().Silent().HTTPClient(func() *http.Client { return shared }))
-	t.Cleanup(m.Close)
-
-	_, err := AnyMethod().Reply(From("http://localhost")).Build(m)
-	require.NoError(t, err)
-
-	require.Nil(t, shared.Transport)
-}
-
-func TestProxyReply_FactoryWithoutClientFailsTheBuild(t *testing.T) {
-	// The proxy copied the client the HTTPClient factory returned without checking it, so a factory that returned nil
-	// made Mock panic, which only Must functions may do.
-	m := MustNew(Setup().Silent().HTTPClient(func() *http.Client { return nil }))
-	t.Cleanup(m.Close)
-
-	_, err := AnyMethod().Reply(From("http://localhost")).Build(m)
-	require.EqualError(t, err, "reply_proxy: the HTTP client factory returned no client")
-}
-
 func TestProxyReply_MockDescribesTheProxyAsBuilt(t *testing.T) {
 	// A mock keeps the description of its reply from when it was built, so the description can't share the maps that
 	// the setters of the reply change.
@@ -778,4 +758,467 @@ func TestProxyReply_ABodyThatBreaksOffCutsTheConnection(t *testing.T) {
 	require.Error(t, err)
 	require.NoError(t, res.Body.Close())
 	require.False(t, scoped.Called())
+}
+
+func TestProxyReply_LeavesTheClientRequestAsItCame(t *testing.T) {
+	// #43: the proxy rewrote the client's request in place to send it to the target, so what ran after the reply,
+	// such as mappers, callbacks and on_complete listeners, saw the target's URL and the forwarded headers instead of
+	// what the client sent. Only the request sent to the target is the target's.
+	type sight struct {
+		who           string
+		path          string
+		host          string
+		added         string
+		authorization string
+	}
+
+	look := func(who string, r *http.Request) sight {
+		return sight{
+			who:           who,
+			path:          r.URL.Path,
+			host:          r.Host,
+			added:         r.Header.Get("X-Added"),
+			authorization: r.Header.Get(HeaderAuthorization),
+		}
+	}
+
+	forwarded := make(chan sight, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		forwarded <- look("target", r)
+	}))
+	t.Cleanup(target.Close)
+
+	seen := make(chan sight, 3)
+	listener := vlatte.EventFunc[vlatte.OnComplete](func(_ context.Context, e vlatte.OnComplete) error {
+		seen <- look("listener", e.(*OnComplete).Request().RawRequest)
+		return nil
+	})
+
+	m := MustNew(Setup().Silent().OnCompleteListener("look", listener))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/api/p").
+		Map(func(rv *RequestValues, _ *Response) error {
+			seen <- look("mapper", rv.RawRequest)
+			return nil
+		}).
+		Callback(func(_ context.Context, in vlatte.CallbackInput) error {
+			seen <- look("callback", in.(*CallbackInput).Request().RawRequest)
+			return nil
+		}).
+		OnCompleteEvent(vlatte.EventConfig{Name: "look"}).
+		Reply(From(target.URL).
+			TrimPrefix("/api").
+			ProxyHeaders(http.Header{"X-Added": {"1"}}).
+			RemoveProxyHeaders(HeaderAuthorization)))
+
+	req, err := http.NewRequest(http.MethodGet, m.URL("/api/p"), nil)
+	require.NoError(t, err)
+	req.Header.Set(HeaderAuthorization, "Bearer client")
+
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	targetURL, err := url.Parse(target.URL)
+	require.NoError(t, err)
+
+	require.Equal(t, sight{who: "target", path: "/p", host: targetURL.Host, added: "1"}, <-forwarded)
+
+	for _, who := range []string{"mapper", "callback", "listener"} {
+		require.Equal(t, sight{who: who, path: "/api/p", host: req.URL.Host, authorization: "Bearer client"}, <-seen)
+	}
+}
+
+func TestProxyReply_LeavesHopByHopHeadersOut(t *testing.T) {
+	// Hop-by-hop headers are about one connection: the client's to the mock server, or the target's to the proxy.
+	// Passed on, the client's "Connection: close" closed the proxy's connection to the target after each call,
+	// Proxy-Authorization gave the target credentials meant for a proxy, and an Upgrade or a Connection token makes
+	// Go's HTTP/2 client refuse the request. A request's "Te: trailers" goes on: HTTP/2 and gRPC targets need it. Te is
+	// a request header: a target's goes no further.
+	type forwarded struct {
+		header http.Header
+		close  bool
+	}
+
+	got := make(chan forwarded, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- forwarded{header: r.Header.Clone(), close: r.Close}
+
+		w.Header().Set(HeaderConnection, "X-Target-Hop")
+		w.Header().Set("X-Target-Hop", "1")
+		w.Header().Set("Te", "trailers")
+		w.Header().Set("X-Target-End", "kept")
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/p").Reply(From(target.URL)))
+
+	req, err := http.NewRequest(http.MethodGet, m.URL("/p"), nil)
+	require.NoError(t, err)
+	req.Header.Set(HeaderConnection, "close, X-Client-Hop")
+	req.Header.Set("X-Client-Hop", "1")
+	req.Header.Set("Keep-Alive", "timeout=5")
+	req.Header.Set("Proxy-Authorization", "Basic cHJveHk6c2VjcmV0")
+	req.Header.Set("Proxy-Connection", "keep-alive")
+	req.Header.Set(HeaderUpgrade, "websocket")
+	req.Header.Set("Te", "trailers")
+	req.Header.Set("X-Client-End", "kept")
+
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	f := <-got
+	require.False(t, f.close, "the client's Connection: close is for its own connection")
+
+	for _, name := range []string{HeaderConnection, "X-Client-Hop", "Keep-Alive", "Proxy-Authorization", "Proxy-Connection", HeaderUpgrade} {
+		require.Empty(t, f.header.Values(name), "the target got %s", name)
+	}
+
+	require.Equal(t, "trailers", f.header.Get("Te"))
+	require.Equal(t, "kept", f.header.Get("X-Client-End"))
+
+	require.Empty(t, res.Header.Values("X-Target-Hop"), "the client got a header the target's Connection named")
+	require.Empty(t, res.Header.Values("Te"), "the client got the target's Te")
+	require.Equal(t, "kept", res.Header.Get("X-Target-End"))
+}
+
+func TestProxyReply_SendsThePathTheTargetExpects(t *testing.T) {
+	// The target's path and query come first, as the base of an API, such as http://api/v1. The trims cut the request
+	// path before it is joined. What is sent always starts with "/": "GET users" is no request a target accepts. An
+	// escaped "/" names another path than "/": it stays escaped.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.RequestURI)
+	}))
+	t.Cleanup(target.Close)
+
+	tests := []struct {
+		name   string
+		target string
+		reply  func(*ProxyReply) *ProxyReply
+		path   string
+		want   string
+	}{
+		{name: "a prefix with its slash", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/api/") }, path: "/api/users", want: "/users"},
+		{name: "a prefix before escaped slashes", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/api") }, path: "/api%2Fv1%2Fx", want: "/v1%2Fx"},
+		{name: "a path trimmed to nothing", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/svc") }, path: "/svc", want: "/"},
+		{name: "the target's path", target: "/api", path: "/users", want: "/api/users"},
+		{name: "the target's path ending with a slash", target: "/api/", path: "/users", want: "/api/users"},
+		{name: "the target's path and the root", target: "/api", path: "/", want: "/api/"},
+		{name: "the target's path and a path trimmed to nothing", target: "/api", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/svc") }, path: "/svc", want: "/api"},
+		{name: "the target's escaped path", target: "/a%2Fb", path: "/c", want: "/a%2Fb/c"},
+		{name: "the target's path and a suffix", target: "/api", reply: func(r *ProxyReply) *ProxyReply { return r.TrimSuffix(".json") }, path: "/users.json", want: "/api/users"},
+		{name: "the target's query", target: "/api?k=1", path: "/users", want: "/api/users?k=1"},
+		{name: "both queries", target: "?k=1", path: "/users?q=2", want: "/users?k=1&q=2"},
+		{name: "an empty query", target: "/api", path: "/users?", want: "/api/users?"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reply := From(target.URL + tt.target)
+			if tt.reply != nil {
+				reply = tt.reply(reply)
+			}
+
+			m := MustNew(Setup().Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(AnyMethod().Reply(reply))
+
+			status, body := get(t, m, tt.path)
+			require.Equal(t, http.StatusOK, status, body)
+			require.Equal(t, tt.want, body)
+		})
+	}
+}
+
+func TestProxyReply_SendsTheTargetCredentials(t *testing.T) {
+	// A transport sends no user info of a URL, so a target such as http://user:pass@api got no credentials, and
+	// answered 401 without saying why. As http.Client does, they go as Basic auth, unless the request has its own
+	// Authorization.
+	got := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got <- r.Header.Get(HeaderAuthorization)
+	}))
+	t.Cleanup(target.Close)
+
+	withCredentials, err := url.Parse(target.URL)
+	require.NoError(t, err)
+	withCredentials.User = url.UserPassword("user", "secret")
+
+	basic := (&http.Request{Header: http.Header{}})
+	basic.SetBasicAuth("user", "secret")
+
+	tests := []struct {
+		name          string
+		reply         *ProxyReply
+		authorization string
+		want          string
+	}{
+		{name: "the target's", reply: From(withCredentials.String()), want: basic.Header.Get(HeaderAuthorization)},
+		{name: "the client's first", reply: From(withCredentials.String()), authorization: "Bearer client", want: "Bearer client"},
+		{name: "the target's, without the client's", reply: From(withCredentials.String()).RemoveProxyHeaders(HeaderAuthorization), authorization: "Bearer client", want: basic.Header.Get(HeaderAuthorization)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := MustNew(Setup().Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(Getf("/p").Reply(tt.reply))
+
+			req, err := http.NewRequest(http.MethodGet, m.URL("/p"), nil)
+			require.NoError(t, err)
+
+			if tt.authorization != "" {
+				req.Header.Set(HeaderAuthorization, tt.authorization)
+			}
+
+			res, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, http.StatusOK, res.StatusCode)
+			require.Equal(t, tt.want, <-got)
+		})
+	}
+}
+
+func TestProxyReply_KeepsTheTargetPasswordToItself(t *testing.T) {
+	// The target's URL went whole into the mock's description, and into the error a failing call answers the client
+	// with and logs: the password of a target with credentials with it.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	// Nothing listens on port 1: the call fails.
+	scoped := m.MustMock(Getf("/p").Reply(From("http://user:secret@127.0.0.1:1")))
+
+	status, body := get(t, m, "/p")
+	require.Equal(t, m.Config().ErrorStatusCode, status)
+	require.Contains(t, body, "reply_proxy: calling the target http://user:xxxxx@127.0.0.1:1")
+	require.NotContains(t, body, "secret")
+
+	proxy := scoped.Mocks()[0].Describe().Props.(map[string]any)["proxy"].(map[string]any)
+	require.Equal(t, "http://user:xxxxx@127.0.0.1:1", proxy["target"])
+}
+
+func TestProxyReply_AHopByHopForwardHeaderFailsTheBuild(t *testing.T) {
+	// A forward header can't put back what the proxy leaves out of every request: a hop-by-hop header is about one
+	// connection, and "Connection: Upgrade" or "Upgrade: websocket" asks for a protocol switch no proxy reply can pass
+	// on. The build says so, rather than the proxy dropping the header without a word.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	tests := []struct {
+		name  string
+		reply *ProxyReply
+		want  string
+	}{
+		{name: "Connection", reply: From("http://localhost").ForwardHeader(HeaderConnection, "Upgrade"), want: "Connection"},
+		{name: "Upgrade", reply: From("http://localhost").ProxyHeaders(http.Header{HeaderUpgrade: {"websocket"}}), want: "Upgrade"},
+		{name: "in any case", reply: From("http://localhost").ForwardHeader("proxy-authorization", "Basic cHJveHk6c2VjcmV0"), want: "Proxy-Authorization"},
+		{name: "Te other than trailers", reply: From("http://localhost").ForwardHeader("Te", "gzip"), want: "Te"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := AnyMethod().Reply(tt.reply).Build(m)
+			require.EqualError(t, err, fmt.Sprintf("reply_proxy: forward header %q is hop-by-hop: a proxy doesn't send it on", tt.want))
+		})
+	}
+
+	t.Run("a mock file", func(t *testing.T) {
+		_, err := m.Mock(FromBytes([]byte("request:\n  path: /p\nproxy:\n  target: http://localhost\n  forward_header: {Connection: Upgrade}\n"), "yaml"))
+		require.ErrorContains(t, err, `reply_proxy: forward header "Connection" is hop-by-hop`)
+	})
+
+	t.Run("Te: trailers goes on", func(t *testing.T) {
+		// The one hop-by-hop header a proxy sends on, as for a client's: HTTP/2 and gRPC targets need it.
+		got := make(chan string, 1)
+		target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got <- r.Header.Get("Te") }))
+		t.Cleanup(target.Close)
+
+		m := MustNew(Setup().Silent())
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		m.MustMock(Getf("/p").Reply(From(target.URL).ForwardHeader("Te", "trailers")))
+
+		status, _ := get(t, m, "/p")
+		require.Equal(t, http.StatusOK, status)
+		require.Equal(t, "trailers", <-got)
+	})
+}
+
+func TestProxyReply_ATargetThatIsNoHTTPURLFailsTheBuild(t *testing.T) {
+	// A target without a scheme or a host, such as localhost:8080, which parses with "localhost" as its scheme, built
+	// a mock that failed every request with "unsupported protocol scheme": the build says what is wrong instead.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	for _, target := range []string{"", "localhost:8080", "/api", "ftp://files.local"} {
+		t.Run(target, func(t *testing.T) {
+			_, err := AnyMethod().Reply(From(target)).Build(m)
+			require.EqualError(t, err, fmt.Sprintf("reply_proxy: target %q: expected an absolute http or https URL, such as http://api.local:8080", target))
+		})
+	}
+
+	t.Run("nil", func(t *testing.T) {
+		require.PanicsWithError(t, "reply_proxy: target: nil URL", func() { From((*url.URL)(nil)) })
+	})
+}
+
+func TestProxyReply_SendsTheClientTrailers(t *testing.T) {
+	// A client's trailers come after its body, and the server sets them on the request once it reads the body to its
+	// end. The request sent to the target is a copy: one made before the end, with a body the server read only part of,
+	// had trailers without values.
+	got := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		got <- r.Trailer.Get("X-Sum")
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent().MaxBodyParsingLimit(4))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Postf("/p").Reply(From(target.URL)))
+
+	// A reader of unknown length goes chunked, with the trailers after it.
+	req, err := http.NewRequest(http.MethodPost, m.URL("/p"), io.MultiReader(strings.NewReader("0123456789")))
+	require.NoError(t, err)
+	req.Trailer = http.Header{"X-Sum": {"abc"}}
+
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "abc", <-got)
+}
+
+// sentTransport is a transport of the caller's that keeps the request it is given, and answers 204 without sending it.
+type sentTransport struct {
+	sent chan *http.Request
+}
+
+func (s sentTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	s.sent <- r
+	return &http.Response{StatusCode: http.StatusNoContent, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
+}
+
+func TestProxyReply_SendsTheTargetHostAsIs(t *testing.T) {
+	// The request goes to the target's host as the URL names it, an IPv6 address in brackets included. The target's
+	// user info goes as Basic auth, never in the host.
+	rt := sentTransport{sent: make(chan *http.Request, 1)}
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/users").Reply(From("http://user:secret@[::1]:8080/api").Transport(rt)))
+
+	status, _ := get(t, m, "/users")
+	require.Equal(t, http.StatusNoContent, status)
+
+	sent := <-rt.sent
+	require.Equal(t, "http://[::1]:8080/api/users", sent.URL.String())
+	require.Equal(t, "[::1]:8080", sent.Host)
+
+	user, password, ok := sent.BasicAuth()
+	require.True(t, ok)
+	require.Equal(t, "user", user)
+	require.Equal(t, "secret", password)
+}
+
+func TestProxyReply_RefusesDotSegments(t *testing.T) {
+	// The target's path comes first, so ".." would climb out of it: /../../admin after http://api/v1 is /admin to a
+	// target that resolves dot segments. The proxy refuses them however they are written: plain, escaped, with an
+	// escaped "/" that a target decodes before resolving, with parameters, or before a backslash. A target without a
+	// path has nothing to leave: the path goes as the client sent it, the user's liberty.
+	var calls atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(AnyMethod().Reply(From(target.URL + "/api/v1")))
+
+	// Some targets read more as a dot segment: one with parameters, "..;", or split on a backslash, as Windows does.
+	for _, path := range []string{"/../../admin", "/%2e%2e/%2e%2e/admin", "/..%2F..%2Fadmin", "/./admin", "/..;/..;/admin", "/..%5C..%5Cadmin"} {
+		t.Run(path, func(t *testing.T) {
+			res, body := do(t, http.MethodGet, m.URL()+path, nil, nil)
+			require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+			require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
+			require.Contains(t, string(body), `has a "." or ".." segment`)
+		})
+	}
+
+	require.Zero(t, calls.Load(), "the target got a path with a dot segment")
+
+	echo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, r.RequestURI) }))
+	t.Cleanup(echo.Close)
+
+	// A target path of "/" is none: the join leaves it out too.
+	for _, path := range []string{"", "/"} {
+		t.Run("a target without a path: "+cmp.Or(path, "none"), func(t *testing.T) {
+			m := MustNew(Setup().Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(AnyMethod().Reply(From(echo.URL + path)))
+
+			status, body := get(t, m, "/../admin")
+			require.Equal(t, http.StatusOK, status, body)
+			require.Equal(t, "/../admin", body)
+		})
+	}
+}
+
+func TestProxyReply_SendsTheTargetCredentialsOverTLS(t *testing.T) {
+	// Whether a target with credentials gets its certificate verified is the user's call: by default it isn't, as for
+	// any target, so one with a self-signed certificate gets them. A transport of the caller's decides for itself.
+	got := make(chan string, 1)
+	target := httptest.NewTLSServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got <- r.Header.Get(HeaderAuthorization)
+	}))
+	t.Cleanup(target.Close)
+
+	withCredentials, err := url.Parse(target.URL)
+	require.NoError(t, err)
+	withCredentials.User = url.UserPassword("user", "secret")
+
+	tests := []struct {
+		name  string
+		reply *ProxyReply
+	}{
+		{name: "by default", reply: From(withCredentials.String())},
+		{name: "through a transport of the caller's", reply: From(withCredentials.String()).Transport(target.Client().Transport)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := MustNew(Setup().Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(Getf("/p").Reply(tt.reply))
+
+			status, _ := get(t, m, "/p")
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, "Basic dXNlcjpzZWNyZXQ=", <-got, "user:secret")
+		})
+	}
 }

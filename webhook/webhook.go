@@ -51,8 +51,9 @@ type Transform func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Ar
 // mockhttp sends it once the mock replied, and the response waits for it: a test checks the target right after.
 //
 // It logs each send and its answer at info level, with Logger, or else with the logger of the event: mockhttp gives
-// the server's. A send fails when the target can't be reached in Timeout, or answers with a status outside 2xx; a
-// redirect isn't followed. A zero WebHook sends with http.DefaultTransport and a 10s timeout.
+// the server's. It sends with RoundTripper, or else with the transport of the event: mockhttp gives the server's
+// Config.Transport, or else http.DefaultTransport. A send fails when the target can't be reached in Timeout, or answers
+// with a status outside 2xx; a redirect isn't followed. A zero WebHook has a 10s timeout.
 type WebHook struct {
 	RoundTripper http.RoundTripper
 	Transform    Transform
@@ -69,15 +70,6 @@ func New(options ...Option) (*WebHook, error) {
 	for i, opt := range options {
 		if err := opt(w); err != nil {
 			return nil, fmt.Errorf("webhook: error applying option at index %d. reason: %w", i, err)
-		}
-	}
-
-	if w.RoundTripper == nil {
-		// A clone keeps the default dial, TLS handshake and idle timeouts.
-		// If another package replaced the default transport with a different type, share it as is.
-		w.RoundTripper = http.DefaultTransport
-		if t, ok := http.DefaultTransport.(*http.Transport); ok {
-			w.RoundTripper = t.Clone()
 		}
 	}
 
@@ -250,7 +242,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 	roundTripper := w.RoundTripper
 	if roundTripper == nil {
-		roundTripper = http.DefaultTransport
+		roundTripper = transportOf(args)
 	}
 
 	// The caller logs the errors: logging them here too would log each twice.
@@ -738,6 +730,18 @@ func dirOf(args vlatte.OnComplete) string {
 	}
 
 	return ""
+}
+
+// transportOf returns the transport the event gives, as mockhttp's OnComplete gives the server's, or
+// http.DefaultTransport.
+func transportOf(args vlatte.OnComplete) http.RoundTripper {
+	if t, ok := args.(interface{ Transport() http.RoundTripper }); ok {
+		if rt := t.Transport(); rt != nil {
+			return rt
+		}
+	}
+
+	return http.DefaultTransport
 }
 
 // loggerOf returns the logger the event gives, as mockhttp's OnComplete gives the server's, or one that logs nothing.

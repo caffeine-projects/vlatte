@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"path/filepath"
 	"slices"
@@ -50,8 +51,12 @@ type RecordConfig struct {
 	Filter *Builder
 
 	// SkipSSLVerify skips the verification of the Target's TLS certificate, such as for a self-signed one. A recording
-	// sends the target its requests, credentials included, so it verifies the target by default.
+	// sends the target its requests, credentials included, so the transport it makes verifies the target by default.
 	SkipSSLVerify bool
+
+	// Transport sends the requests to the Target, in place of the server's Config.Transport, such as one that trusts
+	// the target's private CA. It is the caller's: the recording never closes it, and SkipSSLVerify doesn't apply to it.
+	Transport http.RoundTripper
 
 	// RequestHeaders are the request headers a recording matches: the first value each had, or its absence. One that
 	// ConfigBuilder.RedactHeader names matches by its presence, so its value isn't written. A recording matches no
@@ -119,6 +124,7 @@ func (r *RecordConfig) Apply(c *RecordConfig) error {
 	c.Target = cmp.Or(r.Target, c.Target)
 	c.Filter = cmp.Or(r.Filter, c.Filter)
 	c.SkipSSLVerify = c.SkipSSLVerify || r.SkipSSLVerify
+	c.Transport = cmp.Or(r.Transport, c.Transport)
 	c.BodyFiles = c.BodyFiles || r.BodyFiles
 	c.MaxInlineBody = cmp.Or(r.MaxInlineBody, c.MaxInlineBody)
 	c.MaxBodySize = cmp.Or(r.MaxBodySize, c.MaxBodySize)
@@ -332,6 +338,11 @@ func RecordFilter(filter *Builder) RecordConfigurer {
 // RecordConfig.SkipSSLVerify.
 func RecordSkipSSLVerify(v bool) RecordConfigurer {
 	return recordConfigFunc(func(c *RecordConfig) { c.SkipSSLVerify = v })
+}
+
+// RecordTransport sets the transport that sends the requests to the target. See RecordConfig.Transport.
+func RecordTransport(rt http.RoundTripper) RecordConfigurer {
+	return recordConfigFunc(func(c *RecordConfig) { c.Transport = rt })
 }
 
 // RecordBodyFiles sets whether every response body goes to a file of its own, instead of inline.

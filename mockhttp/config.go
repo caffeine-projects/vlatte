@@ -74,9 +74,19 @@ type Config struct {
 	Proxy                          *ProxyConfig
 	Record                         *RecordConfig
 	MockFileHandlers               []MockFileHandler
-	HTTPClientFactory              func() *http.Client
 	HeaderNamesToRedact            map[string]struct{}
 	UseHTTPS                       bool
+
+	// Transport sends what the server sends: the requests of proxy replies, of the recording target, of the forward
+	// proxy and of webhooks. Each takes its own transport first, when it has one: ProxyReply.Transport,
+	// RecordConfig.Transport, ProxyConfig.Transport or webhook.WithRoundTripper. For upstreams with different needs,
+	// give each its own, or pass one that picks a transport by req.URL.Host. It is the caller's: the server never
+	// closes it.
+	//
+	// Nil leaves each to a transport it makes, and webhooks to http.DefaultTransport. Only the transports the server
+	// makes follow its TLS client certificates and CAs, SSLVerify, RecordConfig.SkipSSLVerify and the forward proxy's
+	// Via and Timeout. The forward proxy's CONNECT tunnels dial their host, whatever the transport.
+	Transport http.RoundTripper
 
 	// WebhookTimeout is how long a webhook of the vlatte command waits for its answer, from the setting
 	// webhook.timeout. 0 uses the webhook's default, 10s. Only the vlatte command reads it.
@@ -125,7 +135,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.UseHTTPS = c.UseHTTPS
 	conf.WebhookTimeout = c.WebhookTimeout
 	conf.MockFileHandlers = c.MockFileHandlers
-	conf.HTTPClientFactory = c.HTTPClientFactory
+	conf.Transport = c.Transport
 	conf.HeaderNamesToRedact = c.HeaderNamesToRedact
 
 	return nil
@@ -404,14 +414,9 @@ func (cb *ConfigBuilder) MockFileHandlers(handlers ...MockFileHandler) *ConfigBu
 	return cb
 }
 
-// HTTPClient sets a custom http.Client factory.
-// Internal components that require an HTTP client will use this factory,
-// instead of using the default implementation. Each proxy mock, made with From, sends through the Transport of a client
-// the factory returns, so the factory can return a client it shares, such as http.DefaultClient. The server's TLS
-// client settings don't apply to that Transport, and the server never closes its connections. A client without a
-// Transport gets one of the server's, closed when its mock leaves.
-func (cb *ConfigBuilder) HTTPClient(f func() *http.Client) *ConfigBuilder {
-	cb.conf.HTTPClientFactory = f
+// Transport sets the transport of what the server sends. See Config.Transport.
+func (cb *ConfigBuilder) Transport(rt http.RoundTripper) *ConfigBuilder {
+	cb.conf.Transport = rt
 	return cb
 }
 

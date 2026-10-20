@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"cmp"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -17,20 +18,19 @@ var _ ProxyConfigurer = (*ProxyConfig)(nil)
 
 // ProxyConfig configures a proxy.
 type ProxyConfig struct {
-	// Via sets a URL to route the request via another proxy server.
-	// Via is only valid when Transport configuration is not set.
+	// Via sets a URL to route the request via another proxy server, with the transport the proxy makes. Its credentials
+	// go in its URL: a client's Proxy-Authorization is for this proxy, and doesn't go on. Over https, set SSLVerify too,
+	// so they go to that proxy only.
 	Via string
 
-	// Timeout is the timeout used when calling the proxy client.
+	// Timeout bounds the wait for the response headers of the host, with the transport the proxy makes.
 	Timeout time.Duration
 
-	// SSLVerify enable/disable server certificate verification.
+	// SSLVerify enable/disable server certificate verification, with the transport the proxy makes.
 	SSLVerify bool
 
-	// Transport sets a custom http.RoundTripper.
-	// Target config will be ignored. Set it manually in your http.RoundTripper implementation.
-	// If none is provided, a default one will be used.
-	// You need to set a Target and a custom Via in your custom http.RoundTripper.
+	// Transport sends the requests the proxy passes on, in place of the server's Config.Transport. It is the caller's:
+	// the server never closes it. With neither, the proxy makes a transport, which Via, Timeout and SSLVerify shape.
 	Transport http.RoundTripper
 }
 
@@ -58,7 +58,8 @@ type reverseProxy struct {
 }
 
 func newProxy(log *zerolog.Logger, config *Config) *reverseProxy {
-	if config.Proxy.Transport == nil {
+	rt := cmp.Or(config.Proxy.Transport, config.Transport)
+	if rt == nil {
 		transport := &http.Transport{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: !config.Proxy.SSLVerify,
@@ -84,7 +85,7 @@ func newProxy(log *zerolog.Logger, config *Config) *reverseProxy {
 		return &reverseProxy{logger: log, roundTripper: transport, transport: transport}
 	}
 
-	return &reverseProxy{logger: log, roundTripper: config.Proxy.Transport}
+	return &reverseProxy{logger: log, roundTripper: rt}
 }
 
 // serve sends r to its host and answers with the host's response, or opens a tunnel for a CONNECT. It returns an
@@ -155,9 +156,8 @@ func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) e
 }
 
 func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) error {
-	r.Header.Del(HeaderConnection)
-
-	res, err := p.roundTripper.RoundTrip(r)
+	// The host gets a copy: the middlewares that read r after the proxy see the request as it came.
+	res, err := p.roundTripper.RoundTrip(forwardRequest(r.Context(), r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return err
@@ -165,6 +165,7 @@ func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) error 
 
 	defer res.Body.Close()
 
+	removeHopByHop(res.Header)
 	dropCORSHeaders(w, res.Header)
 
 	for k, vv := range res.Header {

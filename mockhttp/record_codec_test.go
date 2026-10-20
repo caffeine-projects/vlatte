@@ -502,7 +502,7 @@ func TestRecording_RequestSection(t *testing.T) {
 
 			dir := t.TempDir()
 
-			// A mock answers, so what a proxy can't forward, such as a body the server cut, is recorded too.
+			// A mock answers, so the calls are recorded without a target, whatever the server read of their bodies.
 			m := MustNew(setup().Silent())
 			m.MustStart()
 			t.Cleanup(m.Close)
@@ -768,7 +768,7 @@ func TestRecording_ResponseSection(t *testing.T) {
 		},
 		{
 			name:  "headers the server sets",
-			reply: write(http.StatusOK, http.Header{"Date": {"today"}, HeaderContentLength: {"2"}, "Keep-Alive": {"timeout=5"}}, []byte("hi")),
+			reply: write(http.StatusOK, http.Header{"Date": {"today"}, HeaderContentLength: {"2"}, "Keep-Alive": {"timeout=5"}, "Proxy-Connection": {"keep-alive"}}, []byte("hi")),
 			want:  RecordedResponse{Status: http.StatusOK, Body: "hi"},
 		},
 		{
