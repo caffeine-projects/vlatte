@@ -629,7 +629,7 @@ vlatte --record --record-target=https://api.example.com --record-paths='/v1/*'
 vlatte
 ```
 
-With `--admin`, it serves the [admin API](#admin-api) too, on an address of its own, which it prints. `POST /mocks` adds a mock sent in the request body, for example as JSON:
+It serves the [admin API](#admin-api) too, on an address of its own, which it prints: a random local port unless `--admin-addr` sets one, and `--admin=false` turns it off. With `VLATTE_DOCKER_HOST` set, it listens on port 8081 of that host, as the mocks do on 8080. `POST /mocks` adds a mock sent in the request body, for example as JSON:
 
 ```sh
 vlatte --addr=127.0.0.1:8080 --admin-addr=127.0.0.1:8081

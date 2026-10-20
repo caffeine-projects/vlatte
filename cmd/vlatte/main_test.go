@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -562,4 +563,88 @@ func TestCLI_RecordingsItCantServeDontFailTheRun(t *testing.T) {
 	require.Equal(t, 0, code, "every call was recorded")
 	require.Contains(t, stderr, "mock id already in use", "why the recording isn't served")
 	require.FileExists(t, files[0], "the recording was written again")
+}
+
+// lockedBuffer is a bytes.Buffer the CLI writes to while the test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
+}
+
+func TestCLI_ServesTheAdminAPI(t *testing.T) {
+	// The command serves the admin API on its own address, and prints it, so a user can add mocks while it runs.
+	withoutDockerHost(t)
+
+	addr := randomAddr(t)
+
+	var stdout lockedBuffer
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	go func() { done <- run(ctx, []string{"--addr", addr, "--log-level", "disabled"}, &stdout, io.Discard) }()
+	t.Cleanup(func() { cancel(); <-done })
+
+	var adminURL string
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		_, after, ok := strings.Cut(stdout.String(), "Admin API: ")
+		if assert.True(c, ok) {
+			adminURL, _, _ = strings.Cut(after, "\n")
+		}
+	}, 5*time.Second, 10*time.Millisecond)
+
+	require.True(t, strings.HasPrefix(adminURL, "http://127.0.0.1:"), adminURL)
+
+	res, err := http.Post(adminURL+"/mocks", "application/yaml",
+		strings.NewReader("request: {method: GET, path: /added}\nresponse: {status: 201}\n"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+
+	status, _ := firstAnswer(t, "http://"+addr+"/added")
+	require.Equal(t, http.StatusCreated, status)
+}
+
+func TestCLI_AdminSettings(t *testing.T) {
+	// --admin-addr moves the admin API, and --admin=false turns it off: settings apply after the command's default.
+	withoutDockerHost(t)
+
+	t.Run("an address", func(t *testing.T) {
+		admin := randomAddr(t)
+		start(t, "--addr", randomAddr(t), "--admin-addr", admin, "--log-level", "disabled")
+
+		status, body := firstAnswer(t, "http://"+admin+"/health")
+		require.Equal(t, http.StatusOK, status)
+		require.Contains(t, body, `"kind": "http"`)
+	})
+
+	t.Run("off", func(t *testing.T) {
+		addr := randomAddr(t)
+
+		var stdout lockedBuffer
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan int, 1)
+		go func() {
+			done <- run(ctx, []string{"--addr", addr, "--admin=false", "--log-level", "disabled"}, &stdout, io.Discard)
+		}()
+		t.Cleanup(func() { cancel(); <-done })
+
+		require.EventuallyWithT(t, func(c *assert.CollectT) {
+			assert.Contains(c, stdout.String(), "Listening: ")
+		}, 5*time.Second, 10*time.Millisecond)
+
+		require.NotContains(t, stdout.String(), "Admin API")
+	})
 }

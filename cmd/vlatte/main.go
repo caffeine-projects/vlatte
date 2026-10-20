@@ -30,6 +30,7 @@ const (
   vlatte --proxy
   vlatte --proxy --record
   vlatte --record --record-target=https://api.example.com
+  vlatte --admin-addr=127.0.0.1:8081
 `
 	_helpHint = "Run 'vlatte --help' to list flags, environment variables and file keys."
 )
@@ -124,7 +125,9 @@ func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stder
 	// Mock files name their on_complete listeners: webhook sends their webhooks, logging with the server's logger.
 	wh := &webhook.WebHook{}
 
+	// The command serves the admin API, unless settings turn it off: they apply after code.
 	m, err := mockhttp.New(mockhttp.Setup().
+		Admin(adminAddr()).
 		ConfigSources(mockhttp.DefaultConfigSources(args)...).
 		OnCompleteListener("webhook", wh))
 	if errors.Is(err, flag.ErrHelp) {
@@ -203,8 +206,8 @@ Commands:
 Examples:
 %s
 Settings apply in this order, each overriding the ones before: defaults, the %s.{json,yaml,yml} file
-in %s, %s_* environment variables, then flags. Setting a key of the cors, proxy or record section
-turns the section on.
+in %s, %s_* environment variables, then flags. Setting a key of the cors, proxy, record or admin
+section turns the section on. The admin API is on, on a random local port: --admin=false turns it off.
 
 Settings:
 %s`,
