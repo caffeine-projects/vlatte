@@ -15,6 +15,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 )
 
 const (
@@ -398,8 +399,8 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		},
 		{
 			Key: "webhook.timeout", Kind: config.Duration,
-			Usage: "How long a webhook of the vlatte command waits for its answer: milliseconds or a Go duration (1.5s). " +
-				"0 uses 10s. Only the vlatte command reads it.",
+			Usage: "How long a webhook without a timeout of its own waits for its answer: milliseconds or a Go duration " +
+				"(1.5s). 0 uses " + httpx.DefaultWebhookTimeout.String() + ".",
 			Set: func(c *Config, v config.Value) error { c.WebhookTimeout = v.Dur; return nil },
 		},
 	}

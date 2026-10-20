@@ -83,13 +83,14 @@ type Config struct {
 	// give each its own, or pass one that picks a transport by req.URL.Host. It is the caller's: the server never
 	// closes it.
 	//
-	// Nil leaves each to a transport it makes, and webhooks to http.DefaultTransport. Only the transports the server
-	// makes follow its TLS client certificates and CAs, SSLVerify, RecordConfig.SkipSSLVerify and the forward proxy's
-	// Via and Timeout. The forward proxy's CONNECT tunnels dial their host, whatever the transport.
+	// Nil leaves each to a transport it makes, and closes with the server. Only the transports it makes for proxy
+	// replies, the recording target and the forward proxy follow its TLS client certificates and CAs, SSLVerify,
+	// RecordConfig.SkipSSLVerify and the forward proxy's Via and Timeout: the one of webhooks has the settings of
+	// http.DefaultTransport. The forward proxy's CONNECT tunnels dial their host, whatever the transport.
 	Transport http.RoundTripper
 
-	// WebhookTimeout is how long a webhook of the vlatte command waits for its answer, from the setting
-	// webhook.timeout. 0 uses the webhook's default, 10s. Only the vlatte command reads it.
+	// WebhookTimeout is how long a webhook waits for its answer, from the setting webhook.timeout, unless the webhook
+	// has a timeout of its own, as webhook.WithTimeout gives. 0 uses the webhook's default, 10s.
 	WebhookTimeout time.Duration
 }
 
@@ -160,10 +161,14 @@ type ConfigBuilder struct {
 	tlsKeyFs               string
 	tlsClientCertificateFs string
 
-	// onComplete keeps the listeners OnCompleteListener registered, so EventListeners registers them in its registry.
+	// onComplete keeps the listeners of OnCompleteListener. Apply registers them in a registry of each config's own,
+	// unless EventListeners gave a shared one: they are registered in it as soon as both are known.
 	onComplete []namedListener
 
-	// err fails Apply, with every listener that couldn't be registered.
+	// shared is set by EventListeners with a registry: the configs Apply builds share it.
+	shared bool
+
+	// err fails Apply, with every listener the shared registry couldn't register.
 	err error
 }
 
@@ -450,11 +455,14 @@ func (cb *ConfigBuilder) TLSMutual(certFile, keyFile, clientCert string) *Config
 	return cb
 }
 
-// OnCompleteListener registers an on-complete event listener by name. A name registered twice fails the server's
-// New, with vlatte.ErrEventAlreadyRegistered.
+// OnCompleteListener registers an on-complete event listener by name, for the servers built from the builder from then
+// on: a server built before doesn't get it. A name registered twice fails the server's New, with
+// vlatte.ErrEventAlreadyRegistered.
 func (cb *ConfigBuilder) OnCompleteListener(name string, listener vlatte.EventListener[vlatte.OnComplete]) *ConfigBuilder {
 	cb.onComplete = append(cb.onComplete, namedListener{name: name, listener: listener})
-	cb.register(name, listener)
+	if cb.shared {
+		cb.register(name, listener)
+	}
 
 	return cb
 }
@@ -466,11 +474,16 @@ func (cb *ConfigBuilder) GlobalEvents(events *vlatte.Events) *ConfigBuilder {
 }
 
 // EventListeners sets the registry of named event listeners, such as one several servers share. The listeners
-// registered with OnCompleteListener before are registered in it too, so none is dropped.
+// registered with OnCompleteListener, before or after, are registered in it too, so none is dropped. Nil gives each
+// server a registry of its own again.
 func (cb *ConfigBuilder) EventListeners(listeners *vlatte.Listener) *ConfigBuilder {
 	cb.conf.Listeners = listeners
-	for _, l := range cb.onComplete {
-		cb.register(l.name, l.listener)
+	cb.shared = listeners != nil
+
+	if cb.shared {
+		for _, l := range cb.onComplete {
+			cb.register(l.name, l.listener)
+		}
 	}
 
 	return cb
@@ -558,27 +571,44 @@ func (cb *ConfigBuilder) Apply(conf *Config) error {
 		cb.conf.Proxy = &proxyConfig
 	}
 
-	if len(cb.tlsCertificateFs) == 0 && len(cb.tlsKeyFs) == 0 {
-		return cb.conf.Apply(conf)
+	// Without a shared registry, each config gets one of its own: a listener registered later doesn't reach the
+	// servers built before.
+	listeners := cb.conf.Listeners
+	if !cb.shared {
+		listeners = vlatte.NewListener()
+		if err := registerAll(listeners, cb.onComplete); err != nil {
+			return err
+		}
 	}
 
-	if err := applyTLS(cb.conf, cb.tlsCertificateFs, cb.tlsKeyFs, cb.tlsClientCertificateFs); err != nil {
-		return fmt.Errorf("config: failed to build TLS config: %w", err)
+	if len(cb.tlsCertificateFs) > 0 || len(cb.tlsKeyFs) > 0 {
+		if err := applyTLS(cb.conf, cb.tlsCertificateFs, cb.tlsKeyFs, cb.tlsClientCertificateFs); err != nil {
+			return fmt.Errorf("config: failed to build TLS config: %w", err)
+		}
 	}
 
-	return cb.conf.Apply(conf)
+	err := cb.conf.Apply(conf)
+	conf.Listeners = listeners
+
+	return err
 }
 
-// register adds listener to the registry of the config, made when there is none. A name the registry has already
-// joins its error to the one Apply returns.
+// register adds listener to the shared registry. A name the registry has already joins its error to the one Apply
+// returns.
 func (cb *ConfigBuilder) register(name string, listener vlatte.EventListener[vlatte.OnComplete]) {
-	if cb.conf.Listeners == nil {
-		cb.conf.Listeners = vlatte.NewListener()
+	cb.err = errors.Join(cb.err, registerAll(cb.conf.Listeners, []namedListener{{name: name, listener: listener}}))
+}
+
+// registerAll adds each listener to registry, and returns the errors of the names it has already.
+func registerAll(registry *vlatte.Listener, listeners []namedListener) error {
+	var errs error
+	for _, l := range listeners {
+		if err := registry.OnComplete.Register(l.name, l.listener); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("config: on_complete listener %s: %w", l.name, err))
+		}
 	}
 
-	if err := cb.conf.Listeners.OnComplete.Register(name, listener); err != nil {
-		cb.err = errors.Join(cb.err, fmt.Errorf("config: on_complete listener %s: %w", name, err))
-	}
+	return errs
 }
 
 // applyTLS loads TLS material from the given files and configures TLS on c.

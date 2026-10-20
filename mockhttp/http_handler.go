@@ -256,7 +256,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				args:      cfg.Parameters,
 				dir:       cfg.Dir,
 				logger:    h.app.logger,
-				transport: h.app.config.Transport,
+				transport: h.app.webhookTransport(),
+				timeout:   h.app.config.WebhookTimeout,
 			}
 		},
 		func(err error) { h.lifecycle.OnWarning(reqValues, err) },

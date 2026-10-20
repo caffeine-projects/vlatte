@@ -16,6 +16,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -186,7 +187,7 @@ func (p *PartSpec) check(path string, formData bool) []Issue {
 		at := ".header." + h.Name
 
 		switch canonical := textproto.CanonicalMIMEHeaderKey(h.Name); {
-		case !IsToken(h.Name):
+		case !httpx.IsToken(h.Name):
 			add(config.CodeInvalidValue, at, "is not a header name", "")
 		case strings.ContainsAny(textproto.TrimString(h.Value), "\r\n"):
 			add(config.CodeInvalidValue, at, "holds a line break", "")
@@ -305,19 +306,4 @@ func (p *PartSpec) hasHeader(name string) bool {
 func startsALine(body []byte, boundary string) bool {
 	delimiter := []byte("--" + boundary)
 	return bytes.HasPrefix(body, delimiter) || bytes.Contains(body, append([]byte("\n"), delimiter...))
-}
-
-// IsToken reports whether s is an HTTP token, as header names and methods are.
-func IsToken(s string) bool {
-	if s == "" {
-		return false
-	}
-
-	for _, c := range []byte(s) {
-		if c <= ' ' || c >= 0x7f || strings.IndexByte(`()<>@,;:\"/[]?={}`, c) >= 0 {
-			return false
-		}
-	}
-
-	return true
 }

@@ -122,7 +122,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 // serve runs the mock server configured by args until ctx is done.
 func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stderr io.Writer) int {
-	// Mock files name their on_complete listeners: webhook sends their webhooks, logging with the server's logger.
+	// Mock files name their on_complete listeners: webhook sends their webhooks, logging with the server's logger and
+	// waiting for their answers as long as the server's webhook.timeout setting says.
 	wh := &webhook.WebHook{}
 
 	// The command serves the admin API, unless settings turn it off: they apply after code.
@@ -145,9 +146,6 @@ func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stder
 
 		return 1
 	}
-
-	// Settings load in New, and webhooks run once the server starts.
-	wh.Timeout = m.Config().WebhookTimeout
 
 	// The docker address wins over every source, and its port depends on the final https setting.
 	if _, ok := os.LookupEnv(_dockerHostEnv); ok {

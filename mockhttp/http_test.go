@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -662,4 +664,61 @@ func TestServer_StartsOnce(t *testing.T) {
 			requireRefused(t, u.Host, "Close leaves nothing serving")
 		})
 	}
+}
+
+func TestServer_WebhookTransportShakesHandsWithinItsLimit(t *testing.T) {
+	// The webhook transport the server makes had no TLS handshake timeout, so a webhook whose timeout is above
+	// http.DefaultTransport's 10s waited for the whole of it on a target that never shakes hands.
+	synctest.Test(t, func(t *testing.T) {
+		m := MustNew(Setup().Silent())
+		defer m.Close()
+
+		var targets []net.Conn
+		defer func() {
+			for _, c := range targets {
+				_ = c.Close()
+			}
+		}()
+
+		// The target's end of each connection is never read: the client's hello never gets an answer. A proxy of the
+		// environment would be sent a CONNECT first, which never gets one either.
+		m.webhooks.Proxy = nil
+		m.webhooks.DialContext = func(context.Context, string, string) (net.Conn, error) {
+			target, client := net.Pipe()
+			targets = append(targets, target)
+
+			return client, nil
+		}
+
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://hooks.test/", nil)
+		require.NoError(t, err)
+
+		start := time.Now()
+		_, err = m.webhookTransport().RoundTrip(req)
+
+		require.ErrorContains(t, err, "TLS handshake timeout")
+		require.Equal(t, 10*time.Second, time.Since(start))
+	})
+}
+
+func TestServer_WebhookTransportHasTheDefaultLimits(t *testing.T) {
+	// The webhook transport is the server's, so Close closes its idle connections, and it has the limits webhooks had
+	// on http.DefaultTransport: it kept idle connections 15s, and had no dial timeout. The dialer's own timeout can't
+	// be seen from here: a dialer must be set.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	want := http.DefaultTransport.(*http.Transport)
+	got := m.webhooks
+
+	require.Equal(t, want.IdleConnTimeout, got.IdleConnTimeout)
+	require.Equal(t, want.MaxIdleConns, got.MaxIdleConns)
+	require.Equal(t, want.TLSHandshakeTimeout, got.TLSHandshakeTimeout)
+	require.Equal(t, want.ExpectContinueTimeout, got.ExpectContinueTimeout)
+	require.Equal(t, want.ForceAttemptHTTP2, got.ForceAttemptHTTP2)
+	require.NotNil(t, got.Proxy)
+	require.NotNil(t, got.DialContext)
 }
