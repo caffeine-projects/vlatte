@@ -23,10 +23,34 @@ var _ net.Conn = (*bufferedConn)(nil)
 // track a connection once it is hijacked, nor wait for its handler, so Server.Close closes them, and waits for each add
 // to be removed.
 type tunnels struct {
-	mu     sync.Mutex
-	conns  map[io.Closer]struct{}
-	closed bool
-	open   sync.WaitGroup // an add that wasn't removed yet
+	mu      sync.Mutex
+	conns   map[io.Closer]struct{}
+	closed  bool
+	open    sync.WaitGroup // an add that wasn't removed yet
+	closing chan struct{}  // closed by closeAll
+}
+
+// bind returns ctx, ended by closeAll too, and a func that releases it.
+func (t *tunnels) bind(ctx context.Context) (context.Context, context.CancelFunc) {
+	t.mu.Lock()
+	if t.closing == nil {
+		t.closing = make(chan struct{})
+	}
+
+	closing := t.closing
+	t.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(ctx)
+
+	go func() {
+		select {
+		case <-closing:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	return ctx, cancel
 }
 
 // add tracks conns until a remove of them. It reports false, and tracks nothing, once closeAll ran: the caller closes
@@ -69,7 +93,15 @@ func (t *tunnels) remove(conns ...io.Closer) {
 func (t *tunnels) closeAll() {
 	t.mu.Lock()
 
-	t.closed = true
+	if t.closing == nil {
+		t.closing = make(chan struct{})
+	}
+
+	// Server.Close may run more than once.
+	if !t.closed {
+		t.closed = true
+		close(t.closing)
+	}
 
 	for c := range t.conns {
 		_ = c.Close()

@@ -2088,3 +2088,38 @@ func TestForwardProxy_CloseWaitsForInterceptedRequests(t *testing.T) {
 		t.Fatal("Close didn't return once the intercepted request was served")
 	}
 }
+
+func TestForwardProxy_InterceptionTunnelsClientsThatSpeakOnlyHTTP2(t *testing.T) {
+	// The interception serves HTTP/1.1: a client that offers only h2, such as a gRPC one, failed its handshake. It goes
+	// to the host through a tunnel, and gets the host's own certificate and protocol. A client that offers HTTP/1.1
+	// too is intercepted.
+	target := httptest.NewUnstartedServer(http.NotFoundHandler())
+	target.EnableHTTP2 = true
+	target.StartTLS()
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	roots := x509.NewCertPool()
+	roots.AddCert(target.Certificate())
+	roots.AddCert(m.ProxyCA())
+
+	for protocols, want := range map[string]struct {
+		protocol string
+		issuer   string
+	}{
+		"h2":          {"h2", target.Certificate().Issuer.String()},
+		"h2,http/1.1": {"http/1.1", m.ProxyCA().Subject.String()},
+	} {
+		conn, _ := openTunnel(t, hostOf(t, m), target.Listener.Addr().String(), "")
+
+		client := tls.Client(conn, &tls.Config{RootCAs: roots, ServerName: "127.0.0.1", NextProtos: strings.Split(protocols, ",")})
+		require.NoError(t, client.Handshake(), protocols)
+
+		state := client.ConnectionState()
+		require.Equal(t, want.protocol, state.NegotiatedProtocol, protocols)
+		require.Equal(t, want.issuer, state.PeerCertificates[0].Issuer.String(), protocols)
+	}
+}

@@ -396,8 +396,12 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		field{
 			Key: "proxy.ca_cert", Kind: config.String,
 			Usage: "Certificate file of the CA that signs the certificates proxy.intercept serves, which clients must trust. Requires proxy.ca_key.",
+			Set:   func(c *Config, _ config.Value) error { section(&c.Proxy, _defaultProxyConfig); return nil },
 		},
-		field{Key: "proxy.ca_key", Kind: config.String, Usage: "Private key file of proxy.ca_cert. Requires proxy.ca_cert."},
+		field{
+			Key: "proxy.ca_key", Kind: config.String, Usage: "Private key file of proxy.ca_cert. Requires proxy.ca_cert.",
+			Set: func(c *Config, _ config.Value) error { section(&c.Proxy, _defaultProxyConfig); return nil },
+		},
 		field{
 			Key: "record", Kind: config.Bool, Usage: "Record proxied requests and their responses as mock files, from start to close.",
 			Set: func(c *Config, v config.Value) error { toggle(&c.Record, *defaultRecordConfig(), v.Bool); return nil },

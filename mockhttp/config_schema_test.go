@@ -684,3 +684,20 @@ func TestConfigSources_TheCAOfAProxyTurnedOffLeavesItOff(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, c.Proxy)
 }
+
+func TestConfigSources_TheCAKeysTurnTheProxyOn(t *testing.T) {
+	// As any key of a section, proxy.ca_cert and proxy.ca_key turn the forward proxy on, and a CA file that doesn't
+	// load is a problem, not a setting left out.
+	dir := t.TempDir()
+	caCert, caKey := writeTestCA(t, dir)
+
+	c, err := loadConfig(t, Setup(), ConfigFile(DefaultConfigFileName, t.TempDir()),
+		ConfigArgs([]string{"--proxy-ca-cert", caCert, "--proxy-ca-key", caKey}))
+	require.NoError(t, err)
+	require.NotNil(t, c.Proxy)
+	require.NotNil(t, c.Proxy.CA)
+
+	_, err = loadConfig(t, Setup(), ConfigFile(DefaultConfigFileName, t.TempDir()),
+		ConfigArgs([]string{"--proxy-ca-cert", filepath.Join(dir, "missing.pem"), "--proxy-ca-key", caKey}))
+	require.ErrorContains(t, err, "can't load the CA's certificate and key")
+}

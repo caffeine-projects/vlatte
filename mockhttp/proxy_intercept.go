@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"bufio"
+	"bytes"
 	"cmp"
 	"context"
 	"crypto"
@@ -13,18 +14,26 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-var _ net.Listener = (*oneConnListener)(nil)
+var (
+	_ net.Listener = (*oneConnListener)(nil)
+	_ net.Conn     = (*recordConn)(nil)
+)
+
+// errHelloRead stops the handshake that reads a ClientHello for peekALPN.
+var errHelloRead = errors.New("proxy: the ClientHello was read")
 
 const (
 	// _firstBytesWait is how long an intercepted connection waits for the client to start TLS. A client that sends
@@ -36,6 +45,9 @@ const (
 
 	// _maxLeaves bounds how many certificates of hosts an interceptor keeps: a client can ask for any name.
 	_maxLeaves = 1024
+
+	// _maxRecord is the size of a TLS record at most, its header included, so a ClientHello's fits in a peek.
+	_maxRecord = 5 + 1<<14 + 2048
 
 	// _caValidity is how long a CA the server makes for interception is valid.
 	_caValidity = 365 * 24 * time.Hour
@@ -198,8 +210,9 @@ func (h *mockHandler) intercept(w http.ResponseWriter, r *RequestValues) {
 	}
 
 	// Once the connection is taken over, a failed read on it, such as when the client doesn't speak first, ends the
-	// request's context: what follows has a context of its own, with the request's values.
-	ctx := context.WithoutCancel(req.Context())
+	// request's context: what follows has a context of its own, with the request's values, which Close ends.
+	ctx, cancel := h.app.tunnels.bind(context.WithoutCancel(req.Context()))
+	defer cancel()
 
 	// A connection that switches protocols within is the switch's: it closes it.
 	switched := false
@@ -214,7 +227,7 @@ func (h *mockHandler) intercept(w http.ResponseWriter, r *RequestValues) {
 	// A TLS client speaks first, with a handshake record, of type 22.
 	_ = client.SetReadDeadline(time.Now().Add(_firstBytesWait))
 
-	in := bufio.NewReader(client)
+	in := bufio.NewReaderSize(client, _maxRecord)
 	first, err := in.Peek(1)
 
 	_ = client.SetReadDeadline(time.Time{})
@@ -234,6 +247,20 @@ func (h *mockHandler) intercept(w http.ResponseWriter, r *RequestValues) {
 		return
 	case err != nil:
 		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: reading the intercepted connection to %s: %w", req.Host, err))
+		return
+	}
+
+	// A client that can't speak HTTP/1.1, such as a gRPC one, which offers only h2, goes to the host through a tunnel:
+	// the interception serves HTTP/1.1.
+	if protocols, err := peekALPN(in); err == nil && len(protocols) > 0 && !slices.Contains(protocols, "http/1.1") {
+		upstream, err := h.dialHost(ctx, req)
+		if err != nil {
+			h.lifecycle.OnWarning(r, fmt.Errorf("http: %w", err))
+			return
+		}
+
+		h.tunnel(conn, upstream, r)
+
 		return
 	}
 
@@ -306,6 +333,52 @@ func (h *mockHandler) serveIntercepted(conn *tls.Conn, authority string) bool {
 
 	return switched
 }
+
+// peekALPN returns the protocols the TLS ClientHello that in starts with offers by ALPN, and leaves the ClientHello to
+// be read. crypto/tls reads it, from a copy of the record that holds it, up to where a server picks its config.
+func peekALPN(in *bufio.Reader) ([]string, error) {
+	header, err := in.Peek(5)
+	if err != nil {
+		return nil, err
+	}
+
+	record, err := in.Peek(5 + (int(header[3])<<8 | int(header[4])))
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		protocols []string
+		read      bool
+	)
+
+	_ = tls.Server(&recordConn{r: bytes.NewReader(record)}, &tls.Config{
+		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			protocols, read = slices.Clone(hello.SupportedProtos), true
+			return nil, errHelloRead
+		},
+	}).Handshake()
+
+	if !read {
+		return nil, errors.New("proxy: no TLS ClientHello in the first record")
+	}
+
+	return protocols, nil
+}
+
+// recordConn is a connection that reads r, such as a copy of a TLS record, and drops what is written to it.
+type recordConn struct {
+	r io.Reader
+}
+
+func (c *recordConn) Read(p []byte) (int, error)       { return c.r.Read(p) }
+func (c *recordConn) Write(p []byte) (int, error)      { return len(p), nil }
+func (c *recordConn) Close() error                     { return nil }
+func (c *recordConn) LocalAddr() net.Addr              { return &net.TCPAddr{} }
+func (c *recordConn) RemoteAddr() net.Addr             { return &net.TCPAddr{} }
+func (c *recordConn) SetDeadline(time.Time) error      { return nil }
+func (c *recordConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *recordConn) SetWriteDeadline(time.Time) error { return nil }
 
 // oneConnListener is the listener of one connection, accepted already: its first Accept returns it, and the next
 // ones fail, so the server that serves it doesn't wait for more.
