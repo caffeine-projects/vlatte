@@ -19,7 +19,7 @@ var (
 
 // MockFileFormats lists the formats of mock files and recordings, as file extensions without the dot.
 func MockFileFormats() []string {
-	return []string{"json", "yaml", "yml"}
+	return config.Formats()
 }
 
 // mockFileFormat normalizes a format or an extension, such as ".YAML", and reports whether mock files can use it.

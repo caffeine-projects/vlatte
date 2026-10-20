@@ -11,18 +11,14 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
-// SupportedExtensions lists the content extensions the admin API accepts
-// when a mock definition is submitted to it.
-var SupportedExtensions = map[string]struct{}{"json": {}, "yaml": {}, "yml": {}}
-
 // ErrUnsupportedContentType is returned when a request carries a Content-Type
-// that does not map to one of the [SupportedExtensions].
+// that does not map to a mock file format.
 var ErrUnsupportedContentType = errors.New("admin: unsupported content type")
 
 const (
@@ -74,8 +70,8 @@ func (a *Admin[B]) extension(r *http.Request) (string, error) {
 	}
 
 	// mime returns extensions with a leading dot, e.g. ".json".
-	ext := strings.TrimPrefix(extension[0], ".")
-	if _, ok := SupportedExtensions[ext]; !ok {
+	ext, ok := config.Format(extension[0])
+	if !ok {
 		return "", ErrUnsupportedContentType
 	}
 

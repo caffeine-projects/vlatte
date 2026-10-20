@@ -3,7 +3,6 @@ package mockhttp
 import (
 	"bytes"
 	json "encoding/json/v2"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,7 +16,6 @@ import (
 	"go.yaml.in/yaml/v3"
 	"pgregory.net/rapid"
 
-	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
 )
@@ -163,11 +161,6 @@ func TestJSONSchema_AcceptsTheFixturesTheDecoderAccepts(t *testing.T) {
 	}
 
 	require.Greater(t, checked, 20, "the fixtures are checked")
-}
-
-func TestMockFileFormats_AdminAcceptsTheSame(t *testing.T) {
-	// A mock file in any format can be posted to the admin API, and nothing else can.
-	require.ElementsMatch(t, MockFileFormats(), slices.Collect(maps.Keys(admin.SupportedExtensions)))
 }
 
 // _scalarKeys places a value at each key of the mock format that takes a scalar kind, in a document that is
