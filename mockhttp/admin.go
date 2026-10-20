@@ -282,24 +282,78 @@ func fromDir(dir string) (string, error) {
 	return rel, nil
 }
 
-// relocate makes the relative body files a description names, from the working directory, open from the directory
-// toWD leads from: it puts toWD before them. The names stay as they are otherwise, since they can be templates.
+// relocate makes the relative body files of doc, a mock's description, which open from the working directory, open
+// from the directory toWD leads from to it: it puts toWD before them. The names stay as they are otherwise, since they
+// can be templates. Only the files of the mock file format move: those of replies and their multipart parts, of form
+// file patterns, and of webhooks. Other keys may be named body_file too, such as in a template's data or another
+// listener's parameters, and stay as they are.
 func relocate(doc any, toWD string) {
-	switch v := doc.(type) {
-	case map[string]any:
-		for key, item := range v {
-			if name, ok := item.(string); ok && key == "body_file" && toWD != "" && name != "" && !filepath.IsAbs(name) {
-				v[key] = toWD + string(filepath.Separator) + name
-				continue
-			}
+	mock, ok := doc.(map[string]any)
+	if !ok || toWD == "" {
+		return
+	}
 
-			relocate(item, toWD)
-		}
-	case []any:
-		for _, item := range v {
-			relocate(item, toWD)
+	replies := []any{mock["response"]}
+	if seq, ok := mock["response_sequence"].(map[string]any); ok {
+		replies = append(replies, listItems(seq["responses"])...)
+		replies = append(replies, seq["after_ended"])
+	}
+
+	if random, ok := mock["response_random"].(map[string]any); ok {
+		replies = append(replies, listItems(random["responses"])...)
+	}
+
+	for _, reply := range replies {
+		relocateFile(reply, toWD)
+		relocateParts(reply, "multipart", toWD)
+	}
+
+	if req, ok := mock["request"].(map[string]any); ok {
+		files, _ := req["form_file"].(map[string]any)
+		for _, pattern := range files {
+			relocateFile(pattern, toWD)
+
+			for _, p := range listItems(pattern) {
+				relocateFile(p, toWD)
+			}
 		}
 	}
+
+	// The mock file format reads the parameters of webhook only: other listeners read theirs as they will.
+	for _, item := range listItems(mock["on_complete"]) {
+		event, _ := item.(map[string]any)
+		if event["name"] != "webhook" {
+			continue
+		}
+
+		relocateFile(event["parameters"], toWD)
+		relocateParts(event["parameters"], "multipart", toWD)
+		relocateParts(event["parameters"], "multipart_template", toWD)
+	}
+}
+
+// relocateParts relocates the body files of the parts of the multipart body of obj under key, as relocate does.
+func relocateParts(obj any, key, toWD string) {
+	m, _ := obj.(map[string]any)
+	multipart, _ := m[key].(map[string]any)
+
+	for _, part := range listItems(multipart["parts"]) {
+		relocateFile(part, toWD)
+	}
+}
+
+// relocateFile relocates the body_file of obj, an object, when it names a relative file, as relocate does.
+func relocateFile(obj any, toWD string) {
+	m, _ := obj.(map[string]any)
+	if name, ok := m["body_file"].(string); ok && name != "" && !filepath.IsAbs(name) {
+		m["body_file"] = toWD + string(filepath.Separator) + name
+	}
+}
+
+// listItems returns the items of v, when it is a list.
+func listItems(v any) []any {
+	list, _ := v.([]any)
+	return list
 }
 
 // writeAtomically writes data to path through a temporary file of its directory, renamed into place: a reader finds the

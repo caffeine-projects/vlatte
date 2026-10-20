@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	json "encoding/json/v2"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
 // adminServer starts a server with its admin API, and the given setup.
@@ -66,6 +68,16 @@ func streamEvents(t *testing.T, m *Server, n int, send func()) map[any]map[strin
 	require.Len(t, byType, n, "events: %v", byType)
 
 	return byType
+}
+
+// object returns v, which must be an object of a document.
+func object(t *testing.T, v any) map[string]any {
+	t.Helper()
+
+	m, ok := v.(map[string]any)
+	require.True(t, ok, "%v is no object", v)
+
+	return m
 }
 
 func TestAdmin_AddedMocksAreServed(t *testing.T) {
@@ -336,6 +348,79 @@ func TestAdmin_SavedMocksOutliveTheServer(t *testing.T) {
 
 	res, _ = do(t, http.MethodGet, next.URL("/code"), nil, nil)
 	require.Equal(t, StatusNoMatch, res.StatusCode, "mocks added in code aren't saved")
+}
+
+func TestAdmin_SaveMovesOnlyTheBodyFilesTheServerOpens(t *testing.T) {
+	// A saved mock file names its body files from its own directory. A key named body_file elsewhere, such as in a
+	// template's data or another listener's parameters, isn't a file the server opens: it is saved as it was given.
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.Mkdir("bodies", 0o700))
+	require.NoError(t, os.WriteFile("bodies/hello.txt", []byte("hello from a file"), 0o600))
+
+	nop := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
+	m := adminServer(t, Setup().OnCompleteListener("audit", nop))
+
+	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil, []byte(`{
+		"id": "hello",
+		"request": {"method": "GET", "path": "/hello"},
+		"response": {"status": 200, "body_file": "bodies/hello.txt", "template": {"data": {"body_file": "not-a-file"}}},
+		"on_complete": [{"name": "audit", "parameters": {"body_file": "audit.log"}}]
+	}`))
+	require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
+
+	res, body = do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+
+	data, err := os.ReadFile("testdata/_mocks/hello.mock.yaml")
+	require.NoError(t, err)
+
+	doc, err := config.Parse(data, "yaml")
+	require.NoError(t, err)
+
+	saved := object(t, doc)
+	response := object(t, saved["response"])
+	require.Equal(t, "../../bodies/hello.txt", response["body_file"])
+	require.Equal(t, "not-a-file", object(t, object(t, response["template"])["data"])["body_file"])
+
+	events, _ := saved["on_complete"].([]any)
+	require.Len(t, events, 1)
+	require.Equal(t, "audit.log", object(t, object(t, events[0])["parameters"])["body_file"])
+
+	_, body = do(t, http.MethodGet, m.URL("/hello"), nil, nil)
+	require.Equal(t, "hello from a file", string(body), "served from its file")
+}
+
+func TestRelocate_MovesTheBodyFilesOfTheMockFileFormatOnly(t *testing.T) {
+	// The mock file format opens the body files of replies and their multipart parts, of form file patterns and of
+	// webhooks: those move. A body_file anywhere else isn't one of its files, and stays.
+	const doc = `{
+		"request": {"form_file": {"one": {"body_file": %[1]q}, "many": [{"body_file": %[1]q}]}},
+		"response": {
+			"body_file": %[1]q,
+			"multipart": {"parts": [{"body_file": %[1]q}]},
+			"template": {"data": {"body_file": "kept"}}
+		},
+		"response_sequence": {"responses": [{"body_file": %[1]q}], "after_ended": {"body_file": %[1]q}},
+		"response_random": {"responses": [{"body_file": %[1]q}]},
+		"on_complete": [
+			{"name": "webhook", "parameters": {
+				"body_file": %[1]q,
+				"multipart": {"parts": [{"body_file": %[1]q}]},
+				"multipart_template": {"parts": [{"body_file": %[1]q}]}
+			}},
+			{"name": "audit", "parameters": {"body_file": "kept"}}
+		],
+		"ext": {"body_file": "kept"}
+	}`
+
+	up := filepath.Join("..", "..")
+
+	var got, want any
+	require.NoError(t, json.Unmarshal(fmt.Appendf(nil, doc, "body.txt"), &got))
+	require.NoError(t, json.Unmarshal(fmt.Appendf(nil, doc, filepath.Join(up, "body.txt")), &want))
+
+	relocate(got, up)
+	require.Equal(t, want, got)
 }
 
 func TestAdmin_SaveWritesNothingWhenAMockCantBeSaved(t *testing.T) {
