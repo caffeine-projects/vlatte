@@ -204,7 +204,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 	d := defaultConfig()
 	rec := defaultRecordConfig()
 
-	return config.NewSchema(
+	return config.NewSchema(withProxyAll(
 		field{
 			Key: _keyConfigFile, Short: "c", Kind: config.String,
 			Usage: fmt.Sprintf("Config file to load, instead of looking up %s.{json,yaml,yml} in %s.",
@@ -492,8 +492,32 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				"(1.5s). 0 uses " + httpx.DefaultWebhookTimeout.String() + ".",
 			Set: func(c *Config, v config.Value) error { c.WebhookTimeout = v.Dur; return nil },
 		},
-	)
+	)...)
 })
+
+// withProxyAll returns fields with those of proxy_all after them: a section with the keys of a mock file's proxy,
+// whose reply answers the requests no mock matches, as ProxyAll does. The keys that take an object, request_header and
+// header, are left out: flags and variables can't give one. Code mocks ProxyAll with them.
+func withProxyAll(fields ...field) []field {
+	fields = append(fields, field{
+		Key: "proxy_all", Kind: config.Bool,
+		Usage: "Proxy the requests no mock matches to proxy_all.target, with a mock that comes last, as ProxyAll does.",
+		Set:   func(c *Config, v config.Value) error { toggle(&c.proxyAll, proxyDef{}, v.Bool); return nil },
+	})
+
+	for _, pf := range _proxyFields {
+		if pf.Kind == config.Any {
+			continue
+		}
+
+		fields = append(fields, field{
+			Key: "proxy_all." + pf.Key, Kind: pf.Kind, Usage: pf.Usage,
+			Set: func(c *Config, v config.Value) error { return pf.Set(section(&c.proxyAll, proxyDef{}), v) },
+		})
+	}
+
+	return fields
+}
 
 // section returns *p, creating it as a copy of def when nil, so def itself is never modified.
 func section[S any](p **S, def S) *S {

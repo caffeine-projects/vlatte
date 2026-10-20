@@ -1589,3 +1589,40 @@ func TestProxyAll_AnswersWhatNoOtherMockMatches(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "tunnel\n", line)
 }
+
+func TestProxyAll_FromTheSettings(t *testing.T) {
+	// WireMock's --proxy-all: the setting proxy_all takes the keys of a mock file's proxy, and the server mocks it with
+	// ProxyAll when it starts, so it comes after every mock, and Reload keeps it.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "target "+r.URL.Path)
+	}))
+	t.Cleanup(target.Close)
+
+	settings := writeConfigFile(t, t.TempDir(), "settings.yaml",
+		"proxy_all:\n  target: '"+target.URL+"?key=secret'\n  trim_prefix: /api\n  timeout: 2s\n")
+
+	m := MustNew(Setup().Silent().ConfigSources(ConfigFile(settings)))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/api/mocked").Reply(OK().PlainText("mock")))
+
+	_, body := get(t, m, "/api/mocked")
+	require.Equal(t, "mock", body)
+
+	_, body = get(t, m, "/api/users")
+	require.Equal(t, "target /users", body)
+
+	require.NoError(t, m.Reload())
+
+	_, body = get(t, m, "/api/users")
+	require.Equal(t, "target /users", body, "Reload dropped proxy_all")
+
+	require.Contains(t, m.DescribeConfig(), "Proxy All: "+target.URL+"?key=xxxxx")
+}
+
+func TestProxyAll_TheSettingsNeedATarget(t *testing.T) {
+	settings := writeConfigFile(t, t.TempDir(), "settings.yaml", "proxy_all:\n  trim_prefix: /api\n")
+
+	_, err := New(Setup().Silent().ConfigSources(ConfigFile(settings)))
+	require.ErrorContains(t, err, "server: proxy_all.target is required")
+}

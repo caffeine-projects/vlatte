@@ -485,8 +485,9 @@ var _randomSchema = config.NewSchema(
 	},
 )
 
-var _proxySchema = config.NewSchema(
-	proxyField{
+// _proxyFields declare the keys of a proxy reply: those of a mock file's proxy, and of the server's proxy_all.
+var _proxyFields = []proxyField{
+	{
 		Key: "target", Kind: config.String, Usage: "URL of the server to forward requests to. Its path and query come before the request's.",
 		Set: func(p *proxyDef, v config.Value) error {
 			p.target, p.hasTarget = v.Str, true
@@ -496,46 +497,48 @@ var _proxySchema = config.NewSchema(
 			return err
 		},
 	},
-	proxyField{
+	{
 		Key: "request_header", Kind: config.Any, Usage: "Headers of the forwarded request, by name, in place of the client's. Hop-by-hop ones, such as Connection, fail the mock, except Te: trailers.",
 		Set: func(p *proxyDef, v config.Value) error { return headerValues(v, &p.requestHeader) },
 	},
-	proxyField{
+	{
 		Key: "header", Kind: config.Any, Usage: "Headers of the response, by name, in place of the target's.",
 		Set: func(p *proxyDef, v config.Value) error { return headerValues(v, &p.header) },
 	},
-	proxyField{
+	{
 		Key: "remove_request_headers", Kind: config.List, Usage: "Headers removed from the forwarded request.",
 		Set: func(p *proxyDef, v config.Value) error { p.removeRequestHeaders = v.List; return nil },
 	},
-	proxyField{
+	{
 		Key: "trim_prefix", Kind: config.String, Usage: "Prefix of whole segments removed from the request path, before the target's path is added.",
 		Set: func(p *proxyDef, v config.Value) error { p.trimPrefix = v.Str; return nil },
 	},
-	proxyField{
+	{
 		Key: "trim_suffix", Kind: config.String, Usage: "Text removed from the end of the request path, such as an extension, before the target's path is added.",
 		Set: func(p *proxyDef, v config.Value) error { p.trimSuffix = v.Str; return nil },
 	},
-	proxyField{
+	{
 		Key: "timeout", Kind: config.Duration,
 		Usage: "How long to wait for the target's response headers, connecting and sending the request included: " +
 			"milliseconds or a Go duration (1.5s). 0 waits forever.",
 		Set: func(p *proxyDef, v config.Value) error { p.timeout, p.hasTimeout = v.Dur, true; return nil },
 	},
-	proxyField{
+	{
 		Key: "ssl_verify", Kind: config.Bool, Usage: "Verify the TLS certificate of the target. Off by default.",
 		Set: func(p *proxyDef, v config.Value) error { p.sslVerify, p.hasSSLVerify = v.Bool, true; return nil },
 	},
-	proxyField{
+	{
 		Key: "x_forwarded", Kind: config.Bool,
 		Usage: "Set X-Forwarded-For, X-Forwarded-Host and X-Forwarded-Proto on the forwarded request, with the client's address, host and scheme.",
 		Set:   func(p *proxyDef, v config.Value) error { p.xForwarded = v.Bool; return nil },
 	},
-	proxyField{
+	{
 		Key: "preserve_host", Kind: config.Bool, Usage: "Send the target the Host the client asked for, in place of the target's.",
 		Set: func(p *proxyDef, v config.Value) error { p.preserveHost = v.Bool; return nil },
 	},
-)
+}
+
+var _proxySchema = config.NewSchema(_proxyFields...)
 
 var _eventSchema = config.NewSchema(
 	eventField{

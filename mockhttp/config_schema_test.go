@@ -58,6 +58,11 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 	fromFile := writeConfigFile(t, t.TempDir(), "settings.json", `{"name": "from-file"}`)
 	tlsArgs := []string{"--tls-cert", _testCertFile, "--tls-key", _testKeyFile}
 
+	// proxy_all needs its target.
+	withTarget := func(args ...string) []string {
+		return append([]string{"--proxy-all-target", "https://api.example.com"}, args...)
+	}
+
 	tests := map[string]struct {
 		args  []string
 		check func(t *testing.T, c *Config)
@@ -98,9 +103,27 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"proxy-via":        {[]string{"--proxy-via", "http://proxy:3128"}, func(t *testing.T, c *Config) { require.Equal(t, "http://proxy:3128", c.Proxy.Via) }},
 		"proxy-timeout":    {[]string{"--proxy-timeout", "1500"}, func(t *testing.T, c *Config) { require.Equal(t, 1500*time.Millisecond, c.Proxy.Timeout) }},
 		"proxy-ssl-verify": {[]string{"--proxy-ssl-verify"}, func(t *testing.T, c *Config) { require.True(t, c.Proxy.SSLVerify) }},
-		"record":           {[]string{"--record"}, func(t *testing.T, c *Config) { require.Equal(t, defaultRecordConfig(), c.Record) }},
-		"record-dir":       {[]string{"--record-dir", "out"}, func(t *testing.T, c *Config) { require.Equal(t, "out", c.Record.Dir) }},
-		"record-format":    {[]string{"--record-format", ".YAML"}, func(t *testing.T, c *Config) { require.Equal(t, "yaml", c.Record.Format) }},
+		"proxy-all":        {withTarget("--proxy-all"), func(t *testing.T, c *Config) { require.True(t, c.proxyAll.hasTarget) }},
+		"proxy-all-target": {
+			[]string{"--proxy-all-target", "https://api.example.com"}, func(t *testing.T, c *Config) { require.Equal(t, "https://api.example.com", c.proxyAll.target) },
+		},
+		"proxy-all-remove-request-headers": {
+			withTarget("--proxy-all-remove-request-headers", "x-a,x-b"),
+			func(t *testing.T, c *Config) {
+				require.Equal(t, []string{"x-a", "x-b"}, c.proxyAll.removeRequestHeaders)
+			},
+		},
+		"proxy-all-trim-prefix": {withTarget("--proxy-all-trim-prefix", "/api"), func(t *testing.T, c *Config) { require.Equal(t, "/api", c.proxyAll.trimPrefix) }},
+		"proxy-all-trim-suffix": {withTarget("--proxy-all-trim-suffix", ".json"), func(t *testing.T, c *Config) { require.Equal(t, ".json", c.proxyAll.trimSuffix) }},
+		"proxy-all-timeout": {
+			withTarget("--proxy-all-timeout", "1.5s"), func(t *testing.T, c *Config) { require.Equal(t, 1500*time.Millisecond, c.proxyAll.timeout) },
+		},
+		"proxy-all-ssl-verify":    {withTarget("--proxy-all-ssl-verify"), func(t *testing.T, c *Config) { require.True(t, c.proxyAll.sslVerify) }},
+		"proxy-all-x-forwarded":   {withTarget("--proxy-all-x-forwarded"), func(t *testing.T, c *Config) { require.True(t, c.proxyAll.xForwarded) }},
+		"proxy-all-preserve-host": {withTarget("--proxy-all-preserve-host"), func(t *testing.T, c *Config) { require.True(t, c.proxyAll.preserveHost) }},
+		"record":                  {[]string{"--record"}, func(t *testing.T, c *Config) { require.Equal(t, defaultRecordConfig(), c.Record) }},
+		"record-dir":              {[]string{"--record-dir", "out"}, func(t *testing.T, c *Config) { require.Equal(t, "out", c.Record.Dir) }},
+		"record-format":           {[]string{"--record-format", ".YAML"}, func(t *testing.T, c *Config) { require.Equal(t, "yaml", c.Record.Format) }},
 		"record-target": {
 			[]string{"--record-target", "https://api.example.com"},
 			func(t *testing.T, c *Config) { require.Equal(t, "https://api.example.com", c.Record.Target) },

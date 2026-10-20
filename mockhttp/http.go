@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -106,6 +107,10 @@ func New(config ...Option) (*Server, error) {
 
 	if err := loadConfigSources(conf); err != nil {
 		return nil, fmt.Errorf("server: error loading configuration sources\n%w", err)
+	}
+
+	if conf.proxyAll != nil && !conf.proxyAll.hasTarget {
+		return nil, errors.New("server: proxy_all.target is required: the URL of the server to proxy the requests no mock matches to")
 	}
 
 	if conf.DebugFn == nil {
@@ -466,6 +471,14 @@ func (app *Server) DescribeConfig() string {
 		buf.WriteString("\n")
 	}
 
+	if def := app.config.proxyAll; def != nil {
+		if target, err := checkTargetURL(def.target); err == nil {
+			buf.WriteString("Proxy All: ")
+			buf.WriteString(displayURL(target))
+			buf.WriteString("\n")
+		}
+	}
+
 	if app.config.Record != nil {
 		buf.WriteString("Recording: ")
 		buf.WriteString(app.config.Record.dir(app.config.RootDir))
@@ -558,7 +571,25 @@ func (app *Server) onStart() error {
 		return err
 	}
 
+	if err := app.mockProxyAll(); err != nil {
+		return err
+	}
+
 	return app.startConfiguredRecording()
+}
+
+// mockProxyAll mocks the setting proxy_all, if set, with ProxyAll: a mock added once, as in code, which Reload keeps.
+func (app *Server) mockProxyAll() error {
+	def := app.config.proxyAll
+	if def == nil {
+		return nil
+	}
+
+	if _, err := app.Mock(ProxyAll(def.build()).Name("proxy_all")); err != nil {
+		return fmt.Errorf("server: proxy_all: %w", err)
+	}
+
+	return nil
 }
 
 func (app *Server) load() error {

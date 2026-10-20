@@ -391,6 +391,8 @@ The three share one engine, and answer alike:
 
 The target's TLS certificate isn't verified unless `ssl_verify: true`, so a target with a self-signed certificate answers. Set it for a target that gets credentials, such as `https://user:pass@api.local`, whose user info goes as Basic auth: over `http`, it goes in cleartext. `ssl_verify` also decides whether the certificate of an `https` proxy on the way, from `HTTPS_PROXY`, is verified.
 
+**Proxy all.** `ProxyAll(From(target))` in Go mocks what no other mock matches with a proxy reply, as WireMock's `--proxy-all` does: it matches any method and path, and comes last, at priority `math.MaxInt`. It leaves alone what the forward proxy sends on, `CONNECT`s and requests in absolute form. The `proxyall` recipe mocks it, and so does the `proxy_all` setting, with the keys of a mock file's `proxy` but `request_header` and `header`, which flags and variables can't give: `vlatte --proxy-all-target=https://api.example.com`. The server mocks the setting when it starts, and `Reload` keeps it.
+
 **Forward proxy.** A client sends its requests to the server in absolute form, `GET http://api.local/users`, and opens a tunnel with `CONNECT` for an `https` URL. A mock that matches the request answers it; mocks match the path and ignore the host. A request no mock matches goes to its host. A request in origin form, `GET /users`, names no host: no mock matching it, it gets the no-match answer. `proxy.timeout` is the timeout, and `proxy.ssl_verify` verifies the certificates of the hosts, and of an `https` proxy on the way, `proxy.via` or the one of `HTTPS_PROXY`: none is verified by default. `proxy.via` sends the requests through another proxy, an `http`, `https`, `socks5` or `socks5h` URL whose user info goes as its credentials: a client's `Proxy-Authorization` is for vlatte, and doesn't go on.
 
 A `CONNECT` no mock matches opens a tunnel to its host, through `proxy.via` or the proxy of the environment, if any, within `proxy.timeout`, and the log shows that it opened. What goes through a tunnel, such as a TLS connection, isn't read: mocks don't see it. Each side of a tunnel ends what it sends on its own, and the tunnel closes once both did, or once the server closes. A tunnel needs HTTP/1.1, and a response writer that can hijack its connection: a middleware's writer must unwrap, with `Unwrap() http.ResponseWriter`, to the server's.
@@ -562,7 +564,7 @@ proxy:
 cors: true
 ```
 
-Setting a key of a section (`cors`, `proxy` or `record`) turns the section on, and `false` turns it off.
+Setting a key of a section (`cors`, `proxy`, `proxy_all` or `record`) turns the section on, and `false` turns it off.
 
 `root_dir` is the directory that relative mock file patterns and record directories start at. Absolute ones are used as they are.
 

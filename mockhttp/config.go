@@ -95,6 +95,10 @@ type Config struct {
 	// WebhookTimeout is how long a webhook waits for its answer, from the setting webhook.timeout, unless the webhook
 	// has a timeout of its own, as webhook.WithTimeout gives. 0 uses the webhook's default, 10s.
 	WebhookTimeout time.Duration
+
+	// proxyAll is the proxy reply of the setting proxy_all, which the server mocks with ProxyAll when it starts. Code
+	// mocks ProxyAll itself.
+	proxyAll *proxyDef
 }
 
 // Apply copies the current Config struct values to the given Config parameter.
@@ -141,6 +145,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.MockFileHandlers = c.MockFileHandlers
 	conf.Transport = c.Transport
 	conf.HeaderNamesToRedact = c.HeaderNamesToRedact
+	conf.proxyAll = c.proxyAll
 
 	return nil
 }
