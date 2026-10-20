@@ -1166,3 +1166,132 @@ func TestForwardProxy_VerifiesTheHostsWhenAsked(t *testing.T) {
 		})
 	}
 }
+
+// switchingTarget starts a target that switches to protocol when asked to switch to "echo", then writes back what it
+// reads.
+func switchingTarget(t *testing.T, protocol string) *httptest.Server {
+	t.Helper()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if upgradeType(r.Header) != "echo" {
+			http.Error(w, "expected a switch to echo", http.StatusBadRequest)
+			return
+		}
+
+		conn, rw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+
+		defer conn.Close()
+
+		_, _ = fmt.Fprintf(rw, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: %s\r\nX-Target: yes\r\n\r\n", protocol)
+		_ = rw.Flush()
+		_, _ = io.Copy(conn, rw)
+	}))
+	t.Cleanup(target.Close)
+
+	return target
+}
+
+// switchThrough sends a request for target, a path or an absolute URL, that asks to switch to "echo", to m, and returns
+// the connection, the reader of what comes back past the answer, and the answer.
+func switchThrough(t *testing.T, m *Server, target string) (net.Conn, *bufio.Reader, *http.Response) {
+	t.Helper()
+
+	conn, err := net.Dial("tcp", hostOf(t, m))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+
+	_, err = fmt.Fprintf(conn, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n", target, hostOf(t, m))
+	require.NoError(t, err)
+
+	br := bufio.NewReader(conn)
+
+	res, err := http.ReadResponse(br, &http.Request{Method: http.MethodGet})
+	require.NoError(t, err)
+
+	return conn, br, res
+}
+
+func TestProxy_PassesProtocolSwitchesOn(t *testing.T) {
+	// #69: a request that asks to switch protocols, as a WebSocket handshake does, lost its Upgrade and Connection,
+	// which are hop-by-hop, and a 101 couldn't go back to the client. Proxy replies and the forward proxy pass the
+	// switch on, then pipe the client's connection to the target's. The mock counts the call once the switch is done,
+	// while the connection stays open.
+	target := switchingTarget(t, "echo")
+
+	m := MustNew(Setup().Silent().Proxy())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	scoped := m.MustMock(Getf("/ws").Reply(From(target.URL)))
+
+	for name, path := range map[string]string{"a proxy reply": "/ws", "the forward proxy": target.URL + "/forward"} {
+		t.Run(name, func(t *testing.T) {
+			conn, br, res := switchThrough(t, m, path)
+
+			require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
+			require.Equal(t, "echo", res.Header.Get(HeaderUpgrade))
+			require.Equal(t, "yes", res.Header.Get("X-Target"))
+			require.Equal(t, "true", res.Header.Get(vlatte.ProxiedHeader))
+			require.NotEmpty(t, res.Header.Get(vlatte.RequestIDHeader))
+
+			_, err := io.WriteString(conn, "switched\n")
+			require.NoError(t, err)
+
+			line, err := br.ReadString('\n')
+			require.NoError(t, err)
+			require.Equal(t, "switched\n", line)
+		})
+	}
+
+	require.Equal(t, int64(1), scoped.Hits(), "the mock counts the call while its connection is open")
+}
+
+func TestProxy_AProtocolSwitchTheMockCantFollowFails(t *testing.T) {
+	// Steps and response mappers change a body: a connection that switched protocols has none, so a mock with them
+	// fails the switch, rather than pass it on unchanged. A target that switches to another protocol than the client
+	// asked for fails too.
+	echo := switchingTarget(t, "echo")
+	other := switchingTarget(t, "other")
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(
+		Getf("/steps").Step(appendStep("!")).Reply(From(echo.URL)),
+		Getf("/mapped").Map(func(*RequestValues, *Response) error { return nil }).Reply(From(echo.URL)),
+		Getf("/other").Reply(From(other.URL)),
+	)
+
+	for path, want := range map[string]string{
+		"/steps":  "the mock's steps and response mappers can't apply to the connection",
+		"/mapped": "the mock's steps and response mappers can't apply to the connection",
+		"/other":  `switched to the protocol "other", not "echo"`,
+	} {
+		_, _, res := switchThrough(t, m, path)
+
+		body, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode, path)
+		require.Contains(t, string(body), want, path)
+	}
+}
+
+func TestProxy_CloseEndsConnectionsThatSwitchedProtocols(t *testing.T) {
+	// The server doesn't track a connection it handed over: Close ends those that switched protocols too.
+	target := switchingTarget(t, "echo")
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	m.MustMock(Getf("/ws").Reply(From(target.URL)))
+
+	_, br, res := switchThrough(t, m, "/ws")
+	require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
+
+	m.Close()
+
+	_, err := br.ReadString('\n')
+	require.ErrorIs(t, err, io.EOF, "the connection is still open")
+}

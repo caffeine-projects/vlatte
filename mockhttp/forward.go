@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"golang.org/x/net/http/httpguts"
 )
 
 var (
@@ -97,6 +99,12 @@ func (u *upstream) send(out *http.Request, display string) (*Response, error) {
 		return nil, fmt.Errorf("calling the target %s: %w", display, err)
 	}
 
+	if res.StatusCode == http.StatusSwitchingProtocols {
+		// The connection is the proxy's now: the call's context no longer bounds it.
+		cancel(nil)
+		return switched(res, upgradeType(out.Header), display)
+	}
+
 	removeHopByHop(res.Header)
 	maps.DeleteFunc(res.Header, isVlatteHeader)
 
@@ -123,6 +131,49 @@ func (u *upstream) send(out *http.Request, display string) (*Response, error) {
 	stub.Trailer = res.Trailer
 
 	return stub, nil
+}
+
+// switched returns res, the answer of a server that switched protocols, as asked for in asked, with the connection to
+// the server, which the proxy pipes to the client's. A server that switched to another protocol, or a transport that
+// gives no connection, fails it.
+func switched(res *http.Response, asked, display string) (*Response, error) {
+	conn, ok := res.Body.(io.ReadWriteCloser)
+	if !ok {
+		res.Body.Close()
+		return nil, fmt.Errorf("the target %s switched protocols, and the transport gave no connection to it", display)
+	}
+
+	if got := upgradeType(res.Header); asked == "" || !strings.EqualFold(got, asked) {
+		conn.Close()
+		return nil, fmt.Errorf("the target %s switched to the protocol %q, not %q", display, got, asked)
+	}
+
+	protocol := res.Header.Get(HeaderUpgrade)
+
+	removeHopByHop(res.Header)
+	maps.DeleteFunc(res.Header, isVlatteHeader)
+
+	// The switch is about both connections, the target's and the client's: the client gets it too.
+	res.Header.Set(HeaderConnection, "Upgrade")
+	res.Header.Set(HeaderUpgrade, protocol)
+
+	stub := newResponse()
+	stub.StatusCode = res.StatusCode
+	stub.Header = res.Header
+	stub.upgrade = conn
+	stub.proxied = true
+
+	return stub, nil
+}
+
+// upgradeType returns the protocol h, the header of a request or a response, asks to switch to, or "" when it asks
+// for none: its Connection holds "upgrade", and its Upgrade names the protocol.
+func upgradeType(h http.Header) string {
+	if !httpguts.HeaderValuesContainsToken(h[HeaderConnection], "upgrade") {
+		return ""
+	}
+
+	return h.Get(HeaderUpgrade)
 }
 
 // close releases the idle connections of the transport the server made, if it did. The transport stays usable: a
@@ -186,9 +237,10 @@ func keepBody(res *Response, keep bool) {
 }
 
 // forwardRequest returns the copy of r a proxy sends on, with ctx, without the hop-by-hop headers of the client's
-// connection, nor its "Connection: close", and with id, the ID of the server, added to its VLatte-Via. A request whose
-// VLatte-Via holds id _maxPasses times is in a loop: it fails. The copy shares the trailers of r, which the server
-// sets on r once it reads the body to the end.
+// connection, nor its "Connection: close", and with id, the ID of the server, added to its VLatte-Via. A request that
+// asks to switch protocols, such as to a WebSocket, keeps asking. A request whose VLatte-Via holds id _maxPasses times
+// is in a loop: it fails. The copy shares the trailers of r, which the server sets on r once it reads the body to the
+// end.
 func forwardRequest(ctx context.Context, r *http.Request, id string) (*http.Request, error) {
 	if looped(r.Header, id) {
 		return nil, errProxyLoop
@@ -198,7 +250,15 @@ func forwardRequest(ctx context.Context, r *http.Request, id string) (*http.Requ
 	out.RequestURI = ""
 	out.Close = false
 	out.Trailer = r.Trailer
+
+	protocol := upgradeType(out.Header)
 	removeRequestHopByHop(out.Header)
+
+	if protocol != "" {
+		out.Header.Set(HeaderConnection, "Upgrade")
+		out.Header.Set(HeaderUpgrade, protocol)
+	}
+
 	out.Header.Add(_viaHeader, id)
 
 	return out, nil

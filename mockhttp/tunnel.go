@@ -19,16 +19,16 @@ import (
 
 var _ net.Conn = (*bufferedConn)(nil)
 
-// tunnels holds the connections of the open tunnels. The server doesn't track a connection once it is hijacked, so
-// Server.Close closes them.
+// tunnels holds the connections of the open tunnels, CONNECT ones and those of protocol switches. The server doesn't
+// track a connection once it is hijacked, so Server.Close closes them.
 type tunnels struct {
 	mu     sync.Mutex
-	conns  map[net.Conn]struct{}
+	conns  map[io.Closer]struct{}
 	closed bool
 }
 
 // add tracks conns until remove. It reports false, and tracks nothing, once closeAll ran: the caller closes them.
-func (t *tunnels) add(conns ...net.Conn) bool {
+func (t *tunnels) add(conns ...io.Closer) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -37,7 +37,7 @@ func (t *tunnels) add(conns ...net.Conn) bool {
 	}
 
 	if t.conns == nil {
-		t.conns = make(map[net.Conn]struct{})
+		t.conns = make(map[io.Closer]struct{})
 	}
 
 	for _, c := range conns {
@@ -48,7 +48,7 @@ func (t *tunnels) add(conns ...net.Conn) bool {
 }
 
 // remove stops tracking conns.
-func (t *tunnels) remove(conns ...net.Conn) {
+func (t *tunnels) remove(conns ...io.Closer) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -83,7 +83,8 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }
 
-// CloseWrite ends what goes out on the connection, so the peer reads to its end, and leaves what comes in open.
+// CloseWrite ends what goes out on the connection, so the peer reads to its end, and leaves what comes in open. A
+// connection that can't is closed.
 func (c *bufferedConn) CloseWrite() error {
 	return closeWrite(c.Conn)
 }
@@ -103,9 +104,9 @@ func hijack(w http.ResponseWriter) (net.Conn, error) {
 // pipe copies client to upstream and upstream to client until both directions end. A side that ends what it sends has
 // the other side read to an end, so the other direction goes on until its own end. A side that breaks off ends both:
 // the other direction has nowhere to go. It returns the first error that isn't the end of a connection.
-func pipe(client, upstream net.Conn) error {
+func pipe(client, upstream io.ReadWriteCloser) error {
 	errs := make(chan error, 2)
-	copyTo := func(dst, src net.Conn) {
+	copyTo := func(dst, src io.ReadWriteCloser) {
 		_, err := io.Copy(dst, src)
 		if err != nil {
 			_ = dst.Close()
@@ -131,9 +132,11 @@ func pipe(client, upstream net.Conn) error {
 }
 
 // closeWrite ends what goes out on c, and leaves what comes in open, when c can: a connection that can't is closed.
-func closeWrite(c net.Conn) error {
+func closeWrite(c io.ReadWriteCloser) error {
 	if cw, ok := c.(interface{ CloseWrite() error }); ok {
-		return cw.CloseWrite()
+		if err := cw.CloseWrite(); err == nil {
+			return nil
+		}
 	}
 
 	return c.Close()
