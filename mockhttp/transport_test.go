@@ -273,3 +273,26 @@ func TestForwardProxy_PassesCompressedBodiesAsTheyCome(t *testing.T) {
 	require.Equal(t, "gzip", res.Header.Get("Content-Encoding"))
 	require.Equal(t, compressed, body)
 }
+
+func TestForwardProxy_AViaWithoutAPortTakesItsSchemesDefault(t *testing.T) {
+	// A Via that names no port is reached on its scheme's default one, as http.Transport does: a SOCKS5 Via on 1080.
+	tests := []struct {
+		via  string
+		want string
+	}{
+		{via: "http://proxy.local", want: "proxy.local:80"},
+		{via: "https://proxy.local", want: "proxy.local:443"},
+		{via: "socks5://proxy.local", want: "proxy.local:1080"},
+		{via: "socks5h://proxy.local", want: "proxy.local:1080"},
+		{via: "http://proxy.local:3128", want: "proxy.local:3128"},
+		{via: "http://[::1]", want: "[::1]:80"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.via, func(t *testing.T) {
+			u, err := parseVia(tt.via)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, viaAddr(u))
+		})
+	}
+}

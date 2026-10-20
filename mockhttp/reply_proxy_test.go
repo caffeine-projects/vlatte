@@ -1584,3 +1584,79 @@ func TestTargetBody_KeepsNothingUnlessToldTo(t *testing.T) {
 		}
 	}
 }
+
+func TestProxyReply_AClientThatLeavesDuringTheCallIsNoError(t *testing.T) {
+	// #62: a client that left while the target was still to answer ended the proxy's call, which failed, and was
+	// logged as an error. Nothing failed but the client's wait: the log warns, and the client gets nothing.
+	called := make(chan struct{}, 1)
+	release := make(chan struct{})
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called <- struct{}{}
+		<-release
+	}))
+	t.Cleanup(target.Close)
+	t.Cleanup(func() { close(release) })
+
+	logs := &lockedBuffer{}
+	logger := zerolog.New(logs)
+
+	m := MustNew(Setup().Logger(&logger).LogPretty(false))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/p").Reply(From(target.URL)))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL("/p"), nil)
+	require.NoError(t, err)
+
+	go func() {
+		<-called
+		cancel()
+	}()
+
+	_, err = http.DefaultClient.Do(req)
+	require.ErrorIs(t, err, context.Canceled)
+
+	require.Eventually(t, func() bool { return strings.Contains(logs.String(), `"level":"warn"`) },
+		2*time.Second, 10*time.Millisecond)
+	require.Contains(t, logs.String(), "calling the target "+target.URL+": context canceled")
+	require.NotContains(t, logs.String(), `"level":"error"`)
+}
+
+// lateTransport answers once the request's context ended, as a transport that doesn't heed it may, with a body that
+// reports its close.
+type lateTransport struct {
+	closed chan struct{}
+}
+
+func (rt lateTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	<-r.Context().Done()
+
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       closeSignal{Reader: strings.NewReader("late"), closed: rt.closed},
+		Request:    r,
+	}, nil
+}
+
+func TestProxyReply_ATimedOutAnswerThatComesAnywayIsClosed(t *testing.T) {
+	// A transport of the caller's may answer after the timeout ended the call: the client gets the timeout, and the
+	// late answer's body is closed, or its connection stays taken.
+	closed := make(chan struct{})
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/p").Reply(From("http://target.local").Transport(lateTransport{closed: closed}).Timeout(50 * time.Millisecond)))
+
+	status, body := get(t, m, "/p")
+	require.Equal(t, m.Config().ErrorStatusCode, status)
+	require.Contains(t, body, "calling the target http://target.local: no response headers within 50ms")
+
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the late answer's body is still open")
+	}
+}

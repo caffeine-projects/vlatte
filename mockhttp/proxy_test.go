@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -645,15 +646,16 @@ func TestForwardProxy_LogsTheTunnelsItOpens(t *testing.T) {
 	require.Contains(t, logs.String(), `"status":200`)
 }
 
-// socks5Host starts a SOCKS5 proxy without authentication, which sends the address of each connection it opens to
-// dialed.
-func socks5Host(t *testing.T, dialed chan<- string) string {
+// socks5Host starts a SOCKS5 proxy, which sends the address of each connection it opens to dialed. With user, it
+// takes only that user's name and password; without, it takes no authentication.
+func socks5Host(t *testing.T, dialed chan<- string, user *url.Userinfo) string {
 	t.Helper()
 
 	return tcpHost(t, func(conn net.Conn) {
 		br := bufio.NewReader(conn)
 
-		// The greeting: the version, then the methods the client offers. No authentication is method 0.
+		// The greeting: the version, then the methods the client offers. No authentication is method 0, and a name
+		// and a password method 2.
 		greeting := make([]byte, 2)
 		if _, err := io.ReadFull(br, greeting); err != nil {
 			return
@@ -663,7 +665,30 @@ func socks5Host(t *testing.T, dialed chan<- string) string {
 			return
 		}
 
-		_, _ = conn.Write([]byte{5, 0})
+		if user == nil {
+			_, _ = conn.Write([]byte{5, 0})
+		} else {
+			_, _ = conn.Write([]byte{5, 2})
+
+			// RFC 1929: the version, then the name and the password, each after its length.
+			head := make([]byte, 2)
+			if _, err := io.ReadFull(br, head); err != nil {
+				return
+			}
+
+			name := make([]byte, head[1])
+			_, _ = io.ReadFull(br, name)
+			n, _ := br.ReadByte()
+			password := make([]byte, n)
+			_, _ = io.ReadFull(br, password)
+
+			if want, _ := user.Password(); string(name) != user.Username() || string(password) != want {
+				_, _ = conn.Write([]byte{1, 1})
+				return
+			}
+
+			_, _ = conn.Write([]byte{1, 0})
+		}
 
 		// The request: the version, the command, a reserved byte, then the address and the port.
 		head := make([]byte, 4)
@@ -721,7 +746,7 @@ func TestForwardProxy_GoesThroughASOCKS5Via(t *testing.T) {
 	echo := tcpHost(t, echoConn)
 
 	dialed := make(chan string, 2)
-	via := socks5Host(t, dialed)
+	via := socks5Host(t, dialed, nil)
 
 	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Via: "socks5://" + via}))
 	m.MustStart()
@@ -756,7 +781,7 @@ func TestForwardProxy_ATunnelThroughSOCKS5LetsEachSideFinish(t *testing.T) {
 	})
 
 	dialed := make(chan string, 1)
-	via := socks5Host(t, dialed)
+	via := socks5Host(t, dialed, nil)
 
 	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Via: "socks5://" + via}))
 	m.MustStart()
@@ -772,4 +797,333 @@ func TestForwardProxy_ATunnelThroughSOCKS5LetsEachSideFinish(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, `got "question"`, string(answer))
 	require.Equal(t, host, <-dialed)
+}
+
+func TestForwardProxy_GoesThroughASOCKS5ViaWithCredentials(t *testing.T) {
+	// A socks5 Via's user info is its credentials: the tunnel opens with the right ones, and fails, saying why, with
+	// others.
+	echo := tcpHost(t, echoConn)
+
+	dialed := make(chan string, 1)
+	via := socks5Host(t, dialed, url.UserPassword("user", "pass"))
+
+	t.Run("the right ones", func(t *testing.T) {
+		m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Via: "socks5://user:pass@" + via}))
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		conn, br := openTunnel(t, hostOf(t, m), echo, "")
+
+		_, err := io.WriteString(conn, "authenticated\n")
+		require.NoError(t, err)
+
+		line, err := br.ReadString('\n')
+		require.NoError(t, err)
+		require.Equal(t, "authenticated\n", line)
+		require.Equal(t, echo, <-dialed)
+	})
+
+	t.Run("others", func(t *testing.T) {
+		m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Via: "socks5://user:wrong@" + via}))
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		res, body := connect(t, m, echo)
+		require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+		require.Contains(t, body, "through socks5://user:xxxxx@"+via)
+		require.Contains(t, body, "authentication failed")
+		require.NotContains(t, body, "wrong", "the error shows the password")
+	})
+}
+
+// connect sends a CONNECT to host through m, and returns its answer, which isn't a 200, and the answer's body.
+func connect(t *testing.T, m *Server, host string) (*http.Response, string) {
+	t.Helper()
+
+	conn, err := net.Dial("tcp", hostOf(t, m))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+
+	_, err = fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", host, host)
+	require.NoError(t, err)
+
+	res, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodConnect})
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+
+	return res, string(body)
+}
+
+// closedAddr returns the address of a TCP server that is gone: dialing it is refused.
+func closedAddr(t *testing.T) string {
+	t.Helper()
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	addr := l.Addr().String()
+	require.NoError(t, l.Close())
+
+	return addr
+}
+
+func TestForwardProxy_AViaThatFailsFailsTheTunnel(t *testing.T) {
+	// A tunnel through a Via that fails to open one isn't opened: the client gets the server's answer to a failure,
+	// which names the Via and says what went wrong, within the proxy's timeout when the Via never answers.
+	host := tcpHost(t, echoConn)
+
+	tests := []struct {
+		name string
+		via  string
+		want string
+	}{
+		{name: "a Via that is down", via: "http://" + closedAddr(t), want: "connection refused"},
+		{name: "a socks5 Via that is down", via: "socks5://" + closedAddr(t), want: "connection refused"},
+		{
+			name: "a Via that never answers",
+			via:  "http://" + tcpHost(t, func(conn net.Conn) { _, _ = io.Copy(io.Discard, conn) }),
+			want: "i/o timeout",
+		},
+		{
+			name: "a Via that drops the CONNECT",
+			via: "http://" + tcpHost(t, func(conn net.Conn) {
+				_, _ = http.ReadRequest(bufio.NewReader(conn))
+			}),
+			want: "EOF",
+		},
+		{
+			name: "an https Via that doesn't speak TLS",
+			via: "https://" + tcpHost(t, func(conn net.Conn) {
+				_, _ = io.WriteString(conn, "HTTP/1.1 400 Bad Request\r\n\r\n")
+				_, _ = io.Copy(io.Discard, conn)
+			}),
+			want: "tls: ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Via: tt.via, Timeout: 300 * time.Millisecond}))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			res, body := connect(t, m, host)
+			require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+			require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
+			require.Contains(t, body, "proxy: opening a tunnel to "+host+" through "+tt.via)
+			require.Contains(t, body, tt.want)
+		})
+	}
+}
+
+func TestForwardProxy_ATunnelGoesThroughAnHTTPSVia(t *testing.T) {
+	// An https Via is spoken to over TLS, verified as the proxy's ssl_verify says: the CONNECT and the tunnel go
+	// through that connection.
+	host := tcpHost(t, echoConn)
+
+	via := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream, err := net.Dial("tcp", r.Host)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		defer upstream.Close()
+
+		conn, rw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+
+		defer conn.Close()
+
+		_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\n\r\n")
+
+		go func() {
+			_, _ = io.Copy(upstream, rw)
+			_ = upstream.(*net.TCPConn).CloseWrite()
+		}()
+
+		_, _ = io.Copy(conn, upstream)
+	}))
+	t.Cleanup(via.Close)
+
+	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Via: via.URL}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	conn, br := openTunnel(t, hostOf(t, m), host, "")
+
+	_, err := io.WriteString(conn, "over tls\n")
+	require.NoError(t, err)
+
+	line, err := br.ReadString('\n')
+	require.NoError(t, err)
+	require.Equal(t, "over tls\n", line)
+}
+
+func TestForwardProxy_ARequestThroughItselfFails(t *testing.T) {
+	// A Via that is the server itself sent each request in absolute form back to the server, which sent it on again,
+	// without end. The request that comes back too often fails as a loop, and the client gets that answer.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	m := MustNew(Setup().Silent().Listener(l).Proxy(&ProxyConfig{Via: "http://" + l.Addr().String()}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	res, err := proxyClient(t, m).Get("http://example.com/x")
+	require.NoError(t, err, "the request went round without end")
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+	require.Contains(t, string(body), errProxyLoop.Error())
+}
+
+func TestForwardProxy_AConnectWhileTheServerClosesOpensNoTunnel(t *testing.T) {
+	// A CONNECT that comes while the server closes would open a tunnel that Close no longer ends: its connections are
+	// closed instead, the client's without an answer.
+	hostClosed := make(chan struct{})
+	host := tcpHost(t, func(conn net.Conn) {
+		_, _ = io.Copy(io.Discard, conn)
+		close(hostClosed)
+	})
+
+	m := MustNew(Setup().Silent().Proxy())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	// What Close does once the server stops taking requests.
+	m.tunnels.closeAll()
+
+	conn, err := net.Dial("tcp", hostOf(t, m))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+
+	_, err = fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", host, host)
+	require.NoError(t, err)
+
+	got, err := io.ReadAll(conn)
+	require.NoError(t, err)
+	require.Empty(t, got, "the client got an answer")
+
+	select {
+	case <-hostClosed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the host's connection stayed open")
+	}
+}
+
+var errBroken = errors.New("broken")
+
+// brokenConn is a connection whose reads, or writes, fail with errBroken, as those of a connection that broke do.
+type brokenConn struct {
+	net.Conn
+
+	reads  bool
+	writes bool
+}
+
+func (c *brokenConn) Read(p []byte) (int, error) {
+	if c.reads {
+		return 0, errBroken
+	}
+
+	return c.Conn.Read(p)
+}
+
+func (c *brokenConn) Write(p []byte) (int, error) {
+	if c.writes {
+		return 0, errBroken
+	}
+
+	return c.Conn.Write(p)
+}
+
+// breakingWriter is the writer of a middleware, which hands its connection over as a brokenConn.
+type breakingWriter struct {
+	http.ResponseWriter
+
+	reads  bool
+	writes bool
+}
+
+func (w breakingWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, _, err := http.NewResponseController(w.ResponseWriter).Hijack()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	broken := &brokenConn{Conn: conn, reads: w.reads, writes: w.writes}
+
+	return broken, bufio.NewReadWriter(bufio.NewReader(broken), bufio.NewWriter(broken)), nil
+}
+
+// breaking returns a middleware whose connections, once handed over, break: their reads fail, or their writes.
+func breaking(reads, writes bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(breakingWriter{ResponseWriter: w, reads: reads, writes: writes}, r)
+		})
+	}
+}
+
+func TestForwardProxy_ATunnelThatBreaksIsAWarning(t *testing.T) {
+	// A client's connection that breaks once it is handed over to a tunnel can't get the server's answer to a
+	// failure: the log warns, saying why, and both connections close.
+	tests := []struct {
+		name   string
+		reads  bool
+		writes bool
+		want   string
+	}{
+		{name: "before the answer", writes: true, want: "http: proxy: answering the CONNECT to %s: "},
+		{name: "within the tunnel", reads: true, want: "http: proxy: tunnel to %s: "},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hostClosed := make(chan struct{})
+			host := tcpHost(t, func(conn net.Conn) {
+				_, _ = io.Copy(io.Discard, conn)
+				close(hostClosed)
+			})
+
+			logs := &lockedBuffer{}
+			logger := zerolog.New(logs)
+
+			m := MustNew(Setup().Logger(&logger).LogPretty(false).Proxy().Use(breaking(tt.reads, tt.writes)))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			conn, err := net.Dial("tcp", hostOf(t, m))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = conn.Close() })
+			require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+
+			_, err = fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", host, host)
+			require.NoError(t, err)
+
+			_, err = io.ReadAll(conn)
+			require.NoError(t, err, "the client's connection stayed open")
+
+			select {
+			case <-hostClosed:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the host's connection stayed open")
+			}
+
+			// The error of a copy names the connections: it is the cause that counts.
+			require.Eventually(t, func() bool {
+				return strings.Contains(logs.String(), fmt.Sprintf(tt.want, host)) && strings.Contains(logs.String(), "broken")
+			}, 2*time.Second, 10*time.Millisecond)
+			require.Contains(t, logs.String(), `"level":"warn"`)
+		})
+	}
 }
