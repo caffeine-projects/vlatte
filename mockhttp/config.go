@@ -96,8 +96,8 @@ type Config struct {
 	// has a timeout of its own, as webhook.WithTimeout gives. 0 uses the webhook's default, 10s.
 	WebhookTimeout time.Duration
 
-	// proxyAll is the proxy reply of the setting proxy_all, which the server mocks with ProxyAll when it starts. Code
-	// mocks ProxyAll itself.
+	// proxyAll is the proxy reply of the setting proxy_all, which answers the requests no mock matches, without a
+	// mock: see Server.proxyAll. Code mocks ProxyAll itself.
 	proxyAll *proxyDef
 }
 
