@@ -18,6 +18,7 @@ import (
 var (
 	_ mockHTTPLifecycle = (*builtInMockHTTPLifecycle)(nil)
 	_ mockHTTPLifecycle = (*builtInDescriptiveMockHTTPLifecycle)(nil)
+	_ mockHTTPLifecycle = lifecycles(nil)
 )
 
 // _redacted stands for the values of a header that the logs and the recordings hide.
@@ -30,6 +31,45 @@ type mockHTTPLifecycle interface {
 	OnNoMatch(*RequestValues)
 	OnWarning(*RequestValues, error)
 	OnError(*RequestValues, error)
+}
+
+// lifecycles runs each lifecycle, in order: the server's log, then the admin API's events.
+type lifecycles []mockHTTPLifecycle
+
+func (ls lifecycles) OnRequest(r *RequestValues) {
+	for _, l := range ls {
+		l.OnRequest(r)
+	}
+}
+
+func (ls lifecycles) OnMatch(r *RequestValues, res *Response) {
+	for _, l := range ls {
+		l.OnMatch(r, res)
+	}
+}
+
+func (ls lifecycles) OnProxied(r *RequestValues, res *Response) {
+	for _, l := range ls {
+		l.OnProxied(r, res)
+	}
+}
+
+func (ls lifecycles) OnNoMatch(r *RequestValues) {
+	for _, l := range ls {
+		l.OnNoMatch(r)
+	}
+}
+
+func (ls lifecycles) OnWarning(r *RequestValues, err error) {
+	for _, l := range ls {
+		l.OnWarning(r, err)
+	}
+}
+
+func (ls lifecycles) OnError(r *RequestValues, err error) {
+	for _, l := range ls {
+		l.OnError(r, err)
+	}
 }
 
 // Standard HTTP Lifecycle

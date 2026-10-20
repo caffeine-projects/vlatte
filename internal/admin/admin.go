@@ -55,6 +55,7 @@ var _routes = []struct {
 	{pattern: "PUT /scenarios/{name}", lacking: "keep scenarios"},
 	{pattern: "DELETE /scenarios", lacking: "keep scenarios"},
 	{pattern: "POST /reset"},
+	{pattern: "GET /events", lacking: "stream its events"},
 }
 
 var errNoMocks = errors.New("admin: no mock store: pass the Mocks option")
@@ -69,6 +70,7 @@ type Server struct {
 	files     handler.Files
 	scenarios handler.Scenarios
 	reset     func(files handler.Files, scenarios handler.Scenarios) http.Handler
+	streams   []func() // end the streams of Server-Sent Events routes
 	handler   http.Handler
 
 	mu      sync.Mutex // orders Start, Close and the requests that start as Close runs
@@ -145,6 +147,14 @@ func Scenarios(scenarios handler.Scenarios) Option {
 		s.routes["GET /scenarios"] = handler.ListScenarios(scenarios)
 		s.routes["PUT /scenarios/{name}"] = handler.SetScenario(scenarios)
 		s.routes["DELETE /scenarios"] = handler.ResetScenarios(scenarios)
+	}
+}
+
+// Events sets the events of the mock server, which GET /events streams.
+func Events(events *handler.Events) Option {
+	return func(s *Server) {
+		s.routes["GET /events"] = handler.EventStream(events)
+		s.streams = append(s.streams, events.Close)
 	}
 }
 
@@ -262,6 +272,11 @@ func (s *Server) Close() error {
 
 	if srv == nil {
 		return nil
+	}
+
+	// Streams never end on their own: end them, so the requests that read them do.
+	for _, end := range s.streams {
+		end()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), _shutdownTimeout)

@@ -375,6 +375,28 @@ paths:
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "409": { $ref: "#/components/responses/DuplicateID" }
         "500": { $ref: "#/components/responses/LoadFailed" }
+  /events:
+    get:
+      tags: [Server]
+      operationId: streamEvents
+      summary: Follow what the server serves
+      description: |
+        Streams what the mock server serves, as it happens, as Server-Sent Events: each event's type is the `type` of
+        its data, a JSON `Event`. Nothing is kept: a client gets the events that come while it listens, and one that
+        falls behind misses some. It is no journal of requests.
+      responses:
+        "200":
+          description: The stream of events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "Server-Sent Events, such as `event: matched` then `data: {\"type\": \"matched\", ...}`."
+              example: |
+                event: matched
+                data: {"method":"GET","mock_id":"hello","request_id":"7f3a","status":200,"target":"/hello","time":"2026-10-20T12:00:00Z","type":"matched"}
+
+        "501": { $ref: "#/components/responses/NotSupported" }
   /scenarios:
     get:
       tags: [Scenarios]
@@ -509,6 +531,38 @@ components:
         enabled:
           type: boolean
           description: Whether the mock matches requests.
+      additionalProperties: false
+    Event:
+      type: object
+      description: Something that happened on the mock server, the data of an event of `GET /events`.
+      required: [type, time]
+      properties:
+        type:
+          type: string
+          enum: [matched, unmatched, proxied, warning, error]
+          description: |
+            `matched`: a mock answered a request. `unmatched`: no mock matched it. `proxied`: the server proxied it.
+            `warning`: something went wrong without failing the request, such as a webhook. `error`: it failed.
+        time:
+          type: string
+          format: date-time
+        request_id:
+          type: string
+        method:
+          type: string
+          description: The method of the request, such as `GET`.
+        target:
+          type: string
+          description: What the request asked for, such as the URL of an HTTP request.
+        mock_id:
+          type: string
+          description: The mock that matched, if one did.
+        status:
+          type: integer
+          description: The status of the answer, when there was one.
+        message:
+          type: string
+          description: What went wrong.
       additionalProperties: false
     SaveSettings:
       type: object

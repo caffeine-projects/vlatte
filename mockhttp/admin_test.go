@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"bufio"
 	json "encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
@@ -346,4 +347,49 @@ func TestAdmin_ResetsTheServer(t *testing.T) {
 		res, _ = do(t, http.MethodGet, m.URL(path), nil, nil)
 		require.Equal(t, want, res.StatusCode, path)
 	}
+}
+
+func TestAdmin_StreamsWhatTheServerServes(t *testing.T) {
+	// A client follows the requests the mocks answer, and those no mock matched, as they come: to see why a test's
+	// request missed, without a journal of requests.
+	m := adminServer(t, Setup())
+	m.MustMock(Getf("/hello").ID("hello").Reply(OK()))
+
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, m.AdminURL()+"/events", nil)
+	require.NoError(t, err)
+
+	res, err := http.DefaultClient.Do(r)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = res.Body.Close() })
+	require.Equal(t, "text/event-stream", res.Header.Get(HeaderContentType))
+
+	do(t, http.MethodGet, m.URL("/hello"), nil, nil)
+	do(t, http.MethodPost, m.URL("/nope"), nil, nil)
+
+	lines := bufio.NewScanner(res.Body)
+	var data []map[string]any
+
+	for len(data) < 2 && lines.Scan() {
+		line, ok := strings.CutPrefix(lines.Text(), "data: ")
+		if !ok {
+			continue
+		}
+
+		var e map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &e))
+		data = append(data, e)
+	}
+
+	// A request's event can come after the next request's answer: they are told apart by type, not order.
+	require.Len(t, data, 2)
+	byType := map[any]map[string]any{data[0]["type"]: data[0], data[1]["type"]: data[1]}
+
+	matched := byType["matched"]
+	require.Equal(t, "hello", matched["mock_id"])
+	require.Equal(t, float64(http.StatusOK), matched["status"])
+	require.Equal(t, "GET", matched["method"])
+
+	unmatched := byType["unmatched"]
+	require.Equal(t, "POST", unmatched["method"])
+	require.Contains(t, unmatched["target"], "/nope")
 }

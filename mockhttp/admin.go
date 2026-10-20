@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/config"
@@ -15,9 +16,10 @@ import (
 )
 
 var (
-	_ handler.Recorder = adminRecorder{}
-	_ handler.Files    = adminFiles{}
-	_ RecordConfigurer = recordDoc{}
+	_ handler.Recorder  = adminRecorder{}
+	_ handler.Files     = adminFiles{}
+	_ RecordConfigurer  = recordDoc{}
+	_ mockHTTPLifecycle = adminEvents{}
 )
 
 const (
@@ -26,6 +28,62 @@ const (
 	_defaultSaveDir    = "testdata/_mocks"
 	_defaultSaveFormat = "yaml"
 )
+
+// withAdminEvents adds the admin API's events to lifecycle, when the server serves the admin API: no event is
+// published without it.
+func withAdminEvents(conf *Config, lifecycle mockHTTPLifecycle) (*handler.Events, mockHTTPLifecycle) {
+	if conf.Admin == nil {
+		return nil, lifecycle
+	}
+
+	events := handler.NewEvents()
+
+	return events, lifecycles{lifecycle, adminEvents{events}}
+}
+
+// adminEvents publishes what the server serves to the admin API's events, which GET /events streams.
+type adminEvents struct {
+	events *handler.Events
+}
+
+func (a adminEvents) OnRequest(*RequestValues) {}
+
+func (a adminEvents) OnMatch(r *RequestValues, res *Response) {
+	a.publish(handler.EventMatched, r, res, nil)
+}
+
+func (a adminEvents) OnProxied(r *RequestValues, res *Response) {
+	a.publish(handler.EventProxied, r, res, nil)
+}
+
+func (a adminEvents) OnNoMatch(r *RequestValues) {
+	a.publish(handler.EventUnmatched, r, nil, nil)
+}
+
+func (a adminEvents) OnWarning(r *RequestValues, err error) {
+	a.publish(handler.EventWarning, r, nil, err)
+}
+
+func (a adminEvents) OnError(r *RequestValues, err error) {
+	a.publish(handler.EventError, r, nil, err)
+}
+
+func (a adminEvents) publish(kind string, r *RequestValues, res *Response, err error) {
+	e := handler.Event{Type: kind, Time: time.Now(), RequestID: r.ReqID, Method: r.RawRequest.Method, Target: r.URL.String()}
+	if r.Mock != nil {
+		e.MockID = r.Mock.ID()
+	}
+
+	if res != nil {
+		e.Status = res.StatusCode
+	}
+
+	if err != nil {
+		e.Message = err.Error()
+	}
+
+	a.events.Publish(e)
+}
 
 // adminRecorder lets the admin API record: it starts recordings with the settings of a document.
 type adminRecorder struct {

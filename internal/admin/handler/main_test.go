@@ -229,6 +229,14 @@ func conforms(t *testing.T, res *http.Response, body, schema string) map[string]
 		format = "yaml"
 	}
 
+	return conformsAs(t, body, format, schema)
+}
+
+// conformsAs checks that body, a document in format, is what the OpenAPI document's schema name documents, and
+// returns it as a document.
+func conformsAs(t *testing.T, body, format, schema string) map[string]any {
+	t.Helper()
+
 	doc, err := config.Parse([]byte(body), format)
 	require.NoError(t, err, body)
 

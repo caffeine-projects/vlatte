@@ -171,6 +171,8 @@ func New(config ...Option) (*Server, error) {
 		lifecycle = newBuiltInMockHTTPLifecycle(app)
 	}
 
+	events, lifecycle := withAdminEvents(conf, lifecycle)
+
 	globalEvents, err := prepareGlobalEvents(conf)
 	if err != nil {
 		return nil, err
@@ -219,6 +221,7 @@ func New(config ...Option) (*Server, error) {
 			admin.Files(adminFiles{app}),
 			admin.Recorder(adminRecorder{app}),
 			admin.Scenarios(app.scenarioStore),
+			admin.Events(events),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("server: %w", err)
