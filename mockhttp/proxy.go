@@ -32,7 +32,8 @@ type ProxyConfig struct {
 	// Timeout has 0.
 	Timeout time.Duration
 
-	// SSLVerify enable/disable server certificate verification, with the transport the proxy makes.
+	// SSLVerify sets whether the transport the proxy makes, and the tunnels, verify the TLS certificates of the hosts,
+	// and of an https proxy on the way, Via or the one of the environment. They aren't verified by default.
 	SSLVerify bool
 
 	// Transport sends the requests the proxy passes on, in place of the server's Config.Transport. It is the caller's:

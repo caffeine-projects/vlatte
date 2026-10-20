@@ -172,8 +172,9 @@ func (r *ProxyReply) SkipSSLVerify() *ProxyReply {
 	return r
 }
 
-// SSLVerify sets whether the target's TLS certificate is verified. It isn't by default, so a target with a
-// self-signed certificate answers: set it for a target that gets credentials, such as https://user:pass@api.
+// SSLVerify sets whether the target's TLS certificate is verified, and the certificate of an https proxy on the way,
+// from HTTPS_PROXY. They aren't by default, so a target with a self-signed certificate answers: set it for a target
+// that gets credentials, such as https://user:pass@api.
 func (r *ProxyReply) SSLVerify(v bool) *ProxyReply {
 	r.sslVerify, r.sslVerifySet = v, true
 	return r
