@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -25,7 +26,10 @@ type ProxyConfig struct {
 	Via string
 
 	// Timeout bounds the wait for the response headers of the host, connecting and sending the request included, with
-	// any transport. 0 waits forever. Defaults to 30s, as for proxy replies.
+	// any transport, and the opening of a tunnel. 0 sets no bound of its own: the transport the proxy makes, and the
+	// tunnels, still give up connecting after 30s, and a TLS handshake after 10s. Setup().Proxy() and the settings
+	// default it to 30s, as for proxy replies, but a ProxyConfig given to Setup().Proxy sets every field: one without
+	// Timeout has 0.
 	Timeout time.Duration
 
 	// SSLVerify enable/disable server certificate verification, with the transport the proxy makes.
@@ -61,7 +65,9 @@ var _defaultProxyConfig = ProxyConfig{Timeout: _defaultTimeout, SSLVerify: false
 type forwardProxy struct {
 	upstream
 
-	id string // of the server: see Server.id
+	id               string        // of the server: see Server.id
+	dialer           *net.Dialer   // of the tunnels, to their hosts or to the proxy on the way
+	handshakeTimeout time.Duration // bounds the TLS handshake of a tunnel with an https proxy on the way
 }
 
 // newProxy returns the forward proxy of conf. Via and SSLVerify shape the transport the proxy makes, so they fail it
@@ -82,12 +88,25 @@ func newProxy(id string, conf *Config) (*forwardProxy, error) {
 				"ProxyConfig.Transport or Config.Transport: verify the hosts with that transport, or leave ssl_verify out")
 		}
 
-		return &forwardProxy{rt: rt, timeout: conf.Proxy.Timeout, id: id}, nil
+		return &forwardProxy{
+			rt:               rt,
+			timeout:          conf.Proxy.Timeout,
+			id:               id,
+			dialer:           newDialer(),
+			handshakeTimeout: _tlsHandshakeTimeout,
+		}, nil
 	}
 
 	transport := newTransport(conf, conf.Proxy.SSLVerify, via)
 
-	return &forwardProxy{rt: transport, owned: transport, timeout: conf.Proxy.Timeout, id: id}, nil
+	return &forwardProxy{
+		rt:               transport,
+		owned:            transport,
+		timeout:          conf.Proxy.Timeout,
+		id:               id,
+		dialer:           newDialer(),
+		handshakeTimeout: _tlsHandshakeTimeout,
+	}, nil
 }
 
 // Reply implements Replier: it sends the request, in absolute form, to its host, and answers with the host's response.

@@ -16,6 +16,19 @@ import (
 // leaves returns its connection afterwards: it closes then, at the latest.
 const _idleConnTimeout = 15 * time.Second
 
+const (
+	// _dialTimeout bounds connecting to an upstream, or to a proxy on the way, as http.DefaultTransport does.
+	_dialTimeout = 30 * time.Second
+
+	// _tlsHandshakeTimeout bounds a TLS handshake with an upstream, or with an https proxy on the way.
+	_tlsHandshakeTimeout = 10 * time.Second
+)
+
+// newDialer returns a dialer of the connections the server opens to its upstreams, and to the proxies on the way.
+func newDialer() *net.Dialer {
+	return &net.Dialer{Timeout: _dialTimeout, KeepAlive: 30 * time.Second}
+}
+
 // newTransport returns a transport the server makes for its upstreams: the targets of proxy replies and of the
 // recording, and the hosts of the forward proxy. It dials and shakes hands within the limits of http.DefaultTransport,
 // and goes through via, when set, or else through the proxy of the environment (HTTP_PROXY, HTTPS_PROXY and NO_PROXY),
@@ -30,17 +43,15 @@ func newTransport(conf *Config, verify bool, via *url.URL) *http.Transport {
 		proxy = func(r *http.Request) (*url.URL, error) { return env(r.URL) }
 	}
 
-	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
-
 	return &http.Transport{
 		Proxy:       proxy,
-		DialContext: dialer.DialContext,
+		DialContext: newDialer().DialContext,
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: !verify,
 			RootCAs:            conf.TLSClientCAs,
 			Certificates:       conf.TLSCertificates,
 		},
-		TLSHandshakeTimeout:   10 * time.Second,
+		TLSHandshakeTimeout:   _tlsHandshakeTimeout,
 		ExpectContinueTimeout: time.Second,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       _idleConnTimeout,

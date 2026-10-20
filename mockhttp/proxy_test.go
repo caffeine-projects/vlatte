@@ -1509,3 +1509,39 @@ func TestProxy_ASwitchedConnectionThatBreaksIsAWarning(t *testing.T) {
 		})
 	}
 }
+
+func TestForwardProxy_ATunnelDialsWithinTheTransportsLimits(t *testing.T) {
+	// A ProxyConfig without Timeout has 0, which bounded nothing in a tunnel: it dialed its host, or its Via, with no
+	// limit but the system's, a couple of minutes, and waited on an https Via's handshake for ever. Tunnels dial
+	// within the limits of the transport the proxy makes, 30s to connect and 10s for a handshake, which the test
+	// shortens.
+	host := tcpHost(t, echoConn)
+
+	t.Run("connecting", func(t *testing.T) {
+		m := MustNew(Setup().Silent().Proxy(&ProxyConfig{}))
+		m.proxy.dialer.Timeout = time.Nanosecond
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		res, body := connect(t, m, host)
+		require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+		require.Contains(t, body, "proxy: opening a tunnel to "+host)
+		require.Contains(t, body, "i/o timeout")
+	})
+
+	t.Run("an https Via's handshake", func(t *testing.T) {
+		via := tcpHost(t, func(conn net.Conn) {
+			_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+			_, _ = io.Copy(io.Discard, conn)
+		})
+
+		m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Via: "https://" + via}))
+		m.proxy.handshakeTimeout = 100 * time.Millisecond
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		res, body := connect(t, m, host)
+		require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+		require.Contains(t, body, "proxy: opening a tunnel to "+host+" through https://"+via)
+	})
+}

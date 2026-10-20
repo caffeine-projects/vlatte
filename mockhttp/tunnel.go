@@ -142,7 +142,8 @@ func closeWrite(c io.ReadWriteCloser) error {
 	return c.Close()
 }
 
-// dial opens a connection to host, the host:port of a CONNECT, for a tunnel, within the proxy's timeout. It goes
+// dial opens a connection to host, the host:port of a CONNECT, for a tunnel, within the proxy's timeout, and within the
+// limits of the transport the proxy makes: to connect, and for a TLS handshake with an https proxy on the way. It goes
 // through the proxy that the transport the proxy made picks for host, Via or the proxy of the environment, with a
 // CONNECT of its own, which carries via, the VLatte-Via of the request. Without one, or with a transport of the
 // caller's, it dials host.
@@ -162,10 +163,8 @@ func (p *forwardProxy) dial(ctx context.Context, host string, via []string) (net
 		}
 	}
 
-	var dialer net.Dialer
-
 	if proxyURL == nil {
-		conn, err := dialer.DialContext(ctx, "tcp", host)
+		conn, err := p.dialer.DialContext(ctx, "tcp", host)
 		if err != nil {
 			return nil, fmt.Errorf("proxy: opening a tunnel to %s: %w", host, err)
 		}
@@ -173,7 +172,7 @@ func (p *forwardProxy) dial(ctx context.Context, host string, via []string) (net
 		return conn, nil
 	}
 
-	conn, err := p.dialVia(ctx, &dialer, proxyURL, host, via)
+	conn, err := p.dialVia(ctx, proxyURL, host, via)
 	if err != nil {
 		return nil, fmt.Errorf("proxy: opening a tunnel to %s through %s: %w", host, displayURL(proxyURL), err)
 	}
@@ -183,14 +182,14 @@ func (p *forwardProxy) dial(ctx context.Context, host string, via []string) (net
 
 // dialVia opens a connection to host through the proxy at proxyURL: a SOCKS5 one, or an http or https one, with a
 // CONNECT.
-func (p *forwardProxy) dialVia(ctx context.Context, dialer *net.Dialer, proxyURL *url.URL, host string, via []string) (net.Conn, error) {
+func (p *forwardProxy) dialVia(ctx context.Context, proxyURL *url.URL, host string, via []string) (net.Conn, error) {
 	addr := viaAddr(proxyURL)
 
 	if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
-		return dialSOCKS5(ctx, dialer, addr, proxyURL.User, host)
+		return dialSOCKS5(ctx, p.dialer, addr, proxyURL.User, host)
 	}
 
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	conn, err := p.dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
@@ -203,8 +202,13 @@ func (p *forwardProxy) dialVia(ctx context.Context, dialer *net.Dialer, proxyURL
 		cfg := p.owned.TLSClientConfig.Clone()
 		cfg.ServerName = proxyURL.Hostname()
 
+		handshake, cancel := context.WithTimeout(ctx, p.handshakeTimeout)
 		tlsConn := tls.Client(conn, cfg)
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
+		err := tlsConn.HandshakeContext(handshake)
+
+		cancel()
+
+		if err != nil {
 			_ = conn.Close()
 			return nil, err
 		}
