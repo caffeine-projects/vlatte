@@ -1369,3 +1369,143 @@ func TestProxy_ASwitchedConnectionFlowsWhileCallbacksRun(t *testing.T) {
 	require.NoError(t, err, "nothing went through while the callback ran")
 	require.Equal(t, "while the callback runs\n", line)
 }
+
+// endingSwitchTarget starts a target that switches to echo and writes back what it reads: ended closes once the
+// connection that switched ends.
+func endingSwitchTarget(t *testing.T) (*httptest.Server, <-chan struct{}) {
+	t.Helper()
+
+	ended := make(chan struct{})
+
+	var once sync.Once
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		conn, rw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+
+		defer once.Do(func() { close(ended) })
+		defer conn.Close()
+
+		_, _ = io.WriteString(rw, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n")
+		_ = rw.Flush()
+		_, _ = io.Copy(conn, rw)
+	}))
+	t.Cleanup(target.Close)
+
+	return target, ended
+}
+
+// requireEnded fails t unless ended closes soon.
+func requireEnded(t *testing.T, ended <-chan struct{}, msg string) {
+	t.Helper()
+
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal(msg)
+	}
+}
+
+func TestProxy_ASwitchThatCantTakeTheConnectionOverFails(t *testing.T) {
+	// A target that switched protocols has its connection piped to the client's, which the server must take over:
+	// behind a writer that can't hand it over, the client gets the server's answer to a failure, saying why, and the
+	// target's connection closes, through a proxy reply as through the forward proxy.
+	for name, path := range map[string]func(target string) string{
+		"a proxy reply":     func(string) string { return "/ws" },
+		"the forward proxy": func(target string) string { return target + "/forward" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			target, ended := endingSwitchTarget(t)
+
+			m := MustNew(Setup().Silent().Proxy().Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { next.ServeHTTP(opaqueWriter{w}, r) })
+			}))
+			m.MustStart()
+			t.Cleanup(m.Close)
+			m.MustMock(Getf("/ws").Reply(From(target.URL)))
+
+			_, _, res := switchThrough(t, m, path(target.URL))
+
+			body, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+			require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+			require.Contains(t, string(body), "switching protocols needs an HTTP/1.1 connection, and a response writer that can hijack it")
+			requireEnded(t, ended, "the target's connection stayed open")
+		})
+	}
+}
+
+func TestProxy_ASwitchWhileTheServerClosesIsDropped(t *testing.T) {
+	// A switch that comes while the server closes would pipe connections that Close no longer ends: both are closed
+	// instead, the client's without an answer.
+	target, ended := endingSwitchTarget(t)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/ws").Reply(From(target.URL)))
+
+	// What Close does once the server stops taking requests.
+	m.tunnels.closeAll()
+
+	conn, err := net.Dial("tcp", hostOf(t, m))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+
+	_, err = fmt.Fprintf(conn, "GET /ws HTTP/1.1\r\nHost: %s\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n", hostOf(t, m))
+	require.NoError(t, err)
+
+	got, err := io.ReadAll(conn)
+	require.NoError(t, err)
+	require.Empty(t, got, "the client got an answer")
+	requireEnded(t, ended, "the target's connection stayed open")
+}
+
+func TestProxy_ASwitchedConnectionThatBreaksIsAWarning(t *testing.T) {
+	// A client's connection that breaks once the server took it over can't get the server's answer to a failure: the
+	// log warns, saying why, and the target's connection closes.
+	tests := []struct {
+		name   string
+		reads  bool
+		writes bool
+		want   string
+	}{
+		{name: "before the 101", writes: true, want: "http: answering the switch of protocols: "},
+		{name: "once switched", reads: true, want: "http: connection that switched protocols: "},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target, ended := endingSwitchTarget(t)
+
+			logs := &lockedBuffer{}
+			logger := zerolog.New(logs)
+
+			m := MustNew(Setup().Logger(&logger).LogPretty(false).Use(breaking(tt.reads, tt.writes)))
+			m.MustStart()
+			t.Cleanup(m.Close)
+			m.MustMock(Getf("/ws").Reply(From(target.URL)))
+
+			conn, err := net.Dial("tcp", hostOf(t, m))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = conn.Close() })
+			require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+
+			_, err = fmt.Fprintf(conn, "GET /ws HTTP/1.1\r\nHost: %s\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n", hostOf(t, m))
+			require.NoError(t, err)
+
+			_, err = io.ReadAll(conn)
+			require.NoError(t, err, "the client's connection stayed open")
+			requireEnded(t, ended, "the target's connection stayed open")
+
+			// The error of a copy names the connections: it is the cause that counts.
+			require.Eventually(t, func() bool {
+				return strings.Contains(logs.String(), tt.want) && strings.Contains(logs.String(), "broken")
+			}, 2*time.Second, 10*time.Millisecond)
+			require.Contains(t, logs.String(), `"level":"warn"`)
+		})
+	}
+}

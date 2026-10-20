@@ -1675,7 +1675,8 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 func TestProxyReply_ABodyReadWholeCanBeSentAgain(t *testing.T) {
 	// #69: the forwarded request had no GetBody, so its transport couldn't send its body again when a kept-alive
 	// connection to the target turned out closed, as it does for replayable requests, such as with an Idempotency-Key.
-	// The server reads a body under MaxBodyParsingLimit whole anyway: it can be read again. A larger one can't.
+	// The server reads a body under MaxBodyParsingLimit whole anyway: it can be read again, an empty one too. A larger
+	// one can't.
 	target := okTarget(t)
 
 	// The transport runs on the server's goroutine: it reports what it got, for the test to check.
@@ -1707,7 +1708,7 @@ func TestProxyReply_ABodyReadWholeCanBeSentAgain(t *testing.T) {
 	t.Cleanup(m.Close)
 	m.MustMock(Postf("/p").Reply(From(target.URL).Transport(transport)))
 
-	for body, want := range map[string]string{"short": "short", "longer than 8": "<no GetBody>"} {
+	for body, want := range map[string]string{"short": "short", "": "", "longer than 8": "<no GetBody>"} {
 		req, err := http.NewRequest(http.MethodPost, m.URL("/p"), strings.NewReader(body))
 		require.NoError(t, err)
 		req.Header.Set("Idempotency-Key", "k")
@@ -1817,4 +1818,30 @@ func TestProxyReply_AnEmptyBodyGoesOnAsNone(t *testing.T) {
 	s := <-got
 	require.Zero(t, s.length)
 	require.Empty(t, s.encoding)
+}
+
+func TestProxyReply_ASwitchWithoutAConnectionFails(t *testing.T) {
+	// A transport of the caller's may answer a switch of protocols with a 101 whose body isn't the connection to the
+	// target: there is nothing to pipe the client's connection to, and the client gets the server's answer to a
+	// failure, saying why.
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusSwitchingProtocols,
+			Header:     http.Header{HeaderConnection: {"Upgrade"}, HeaderUpgrade: {"echo"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+			Request:    r,
+		}, nil
+	})
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/ws").Reply(From("http://target.local").Transport(transport)))
+
+	_, _, res := switchThrough(t, m, "/ws")
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+	require.Contains(t, string(body), "the target http://target.local switched protocols, and the transport gave no connection to it")
 }
