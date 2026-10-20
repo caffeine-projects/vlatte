@@ -1914,8 +1914,7 @@ func TestForwardProxy_InterceptsHTTPS(t *testing.T) {
 func TestForwardProxy_InterceptsWithTheCAItIsGiven(t *testing.T) {
 	// A CA of the caller's signs the hosts' certificates, as for clients that trust it already. A certificate that is no
 	// CA's fails New.
-	ca, err := newCA()
-	require.NoError(t, err)
+	ca := signedCA(t, "the caller's CA", x509.KeyUsageCertSign, nil)
 
 	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true, CA: ca}))
 	t.Cleanup(m.Close)

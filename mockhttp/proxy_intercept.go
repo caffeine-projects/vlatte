@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -93,6 +92,11 @@ func newInterceptor(ca *tls.Certificate) (*interceptor, error) {
 		return nil, errors.New("proxy: the CA's private key can't sign")
 	}
 
+	// Another key than the certificate's would sign certificates no client verifies: every handshake would fail.
+	if pub, ok := signer.Public().(interface{ Equal(crypto.PublicKey) bool }); !ok || !pub.Equal(cert.PublicKey) {
+		return nil, fmt.Errorf("proxy: the CA's private key isn't the key of its certificate, of %q", cert.Subject.CommonName)
+	}
+
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("proxy: making the key of the hosts' certificates: %w", err)
@@ -114,23 +118,18 @@ func (i *interceptor) certificate(host string) (*tls.Certificate, error) {
 		return leaf, nil
 	}
 
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return nil, err
-	}
-
 	notAfter := now.Add(_leafValidity)
 	if i.ca.NotAfter.Before(notAfter) {
 		notAfter = i.ca.NotAfter
 	}
 
+	// CreateCertificate makes the serial number of a template without one.
 	template := &x509.Certificate{
-		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: host},
-		NotBefore:    now.Add(-time.Hour),
-		NotAfter:     notAfter,
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		Subject:     pkix.Name{CommonName: host},
+		NotBefore:   now.Add(-time.Hour),
+		NotAfter:    notAfter,
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
 
 	if ip := net.ParseIP(host); ip != nil {
@@ -160,21 +159,16 @@ func (i *interceptor) certificate(host string) (*tls.Certificate, error) {
 	return cert, nil
 }
 
-// newCA returns a CA of its own for a forward proxy that intercepts, valid for _caValidity.
+// newCA returns a CA of its own for a forward proxy that intercepts, valid for _caValidity, without its Leaf, which
+// newInterceptor parses.
 func newCA() (*tls.Certificate, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
 	}
 
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return nil, err
-	}
-
 	now := time.Now()
 	template := &x509.Certificate{
-		SerialNumber:          serial,
 		Subject:               pkix.Name{CommonName: "vlatte proxy CA", Organization: []string{"vlatte"}},
 		NotBefore:             now.Add(-time.Hour),
 		NotAfter:              now.Add(_caValidity),
@@ -188,12 +182,7 @@ func newCA() (*tls.Certificate, error) {
 		return nil, err
 	}
 
-	cert, err := x509.ParseCertificate(der)
-	if err != nil {
-		return nil, err
-	}
-
-	return &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: cert}, nil
+	return &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, nil
 }
 
 // intercept answers a CONNECT no mock matched on the client's connection, which it takes over. A client that starts
