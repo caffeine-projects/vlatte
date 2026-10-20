@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,8 +20,9 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-func TestForwardProxy_AConnectItCantDialGets503(t *testing.T) {
-	// A tunnel to a host the proxy can't reach isn't opened: the client gets the proxy's answer instead.
+func TestForwardProxy_AConnectItCantDialGetsTheFailureAnswer(t *testing.T) {
+	// A tunnel to a host the proxy can't reach isn't opened: the client gets the server's answer to a failure instead,
+	// as for a request the proxy can't send on.
 	closed := httptest.NewServer(http.NotFoundHandler())
 	addr := closed.Listener.Addr().String()
 	closed.Close()
@@ -42,7 +44,8 @@ func TestForwardProxy_AConnectItCantDialGets503(t *testing.T) {
 	res, err := http.ReadResponse(bufio.NewReader(conn), nil)
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-	require.Equal(t, http.StatusServiceUnavailable, res.StatusCode)
+	require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
 }
 
 func TestForwardProxy_AMockOfTheRootLeavesTunnelsAlone(t *testing.T) {
@@ -339,4 +342,304 @@ func TestForwardProxy_TimesOutWithTheCallersTransport(t *testing.T) {
 
 	require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
 	require.Contains(t, string(body), "no response headers within 50ms")
+}
+
+// tcpHost starts a TCP server that serves each connection with serve, until the test ends.
+func tcpHost(t *testing.T, serve func(net.Conn)) string {
+	t.Helper()
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+
+	t.Cleanup(func() {
+		_ = l.Close()
+		wg.Wait()
+	})
+
+	wg.Go(func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+
+			wg.Go(func() {
+				defer conn.Close()
+				serve(conn)
+			})
+		}
+	})
+
+	return l.Addr().String()
+}
+
+// echoConn writes back what it reads, until the connection ends.
+func echoConn(conn net.Conn) {
+	_, _ = io.Copy(conn, conn)
+}
+
+// openTunnel sends a CONNECT to host through the proxy at proxyAddr, with ahead right after it, and returns the
+// connection and the reader of what comes back, past the proxy's answer, which must be 200.
+func openTunnel(t *testing.T, proxyAddr, host, ahead string) (net.Conn, *bufio.Reader) {
+	t.Helper()
+
+	conn, err := net.Dial("tcp", proxyAddr)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+
+	_, err = fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n%s", host, host, ahead)
+	require.NoError(t, err)
+
+	br := bufio.NewReader(conn)
+
+	res, err := http.ReadResponse(br, &http.Request{Method: http.MethodConnect})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	return conn, br
+}
+
+// hostOf returns the host:port of m.
+func hostOf(t *testing.T, m *Server) string {
+	t.Helper()
+
+	u, err := url.Parse(m.URL())
+	require.NoError(t, err)
+
+	return u.Host
+}
+
+func TestForwardProxy_ATunnelGetsWhatTheClientSentAhead(t *testing.T) {
+	// A client may send its first bytes right behind its CONNECT, before the answer. The server read them with the
+	// request, and the tunnel dropped them with the reader it got from Hijack: the host never got them.
+	host := tcpHost(t, echoConn)
+
+	m := MustNew(Setup().Silent().Proxy())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	_, br := openTunnel(t, hostOf(t, m), host, "sent ahead\n")
+
+	line, err := br.ReadString('\n')
+	require.NoError(t, err, "the host didn't get the bytes the client sent ahead")
+	require.Equal(t, "sent ahead\n", line)
+}
+
+func TestForwardProxy_ATunnelLetsEachSideFinish(t *testing.T) {
+	// A tunnel closed both connections once one side ended what it sent: a host that answers after the client's end,
+	// as a request-and-reply protocol over a half-closed connection does, had its answer cut. Each side ends its own
+	// direction, and the tunnel closes once both did.
+	host := tcpHost(t, func(conn net.Conn) {
+		got, _ := io.ReadAll(conn)
+		_, _ = fmt.Fprintf(conn, "got %q", got)
+	})
+
+	m := MustNew(Setup().Silent().Proxy())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	conn, br := openTunnel(t, hostOf(t, m), host, "")
+
+	_, err := io.WriteString(conn, "question")
+	require.NoError(t, err)
+	require.NoError(t, conn.(*net.TCPConn).CloseWrite())
+
+	answer, err := io.ReadAll(br)
+	require.NoError(t, err)
+	require.Equal(t, `got "question"`, string(answer))
+}
+
+func TestForwardProxy_CloseEndsTheOpenTunnels(t *testing.T) {
+	// The server doesn't track a connection it hands over to a tunnel: tunnels went on after Close, and so did their
+	// goroutines.
+	host := tcpHost(t, echoConn)
+
+	m := MustNew(Setup().Silent().Proxy())
+	m.MustStart()
+
+	conn, br := openTunnel(t, hostOf(t, m), host, "")
+
+	_, err := io.WriteString(conn, "ping\n")
+	require.NoError(t, err)
+
+	line, err := br.ReadString('\n')
+	require.NoError(t, err)
+	require.Equal(t, "ping\n", line)
+
+	m.Close()
+
+	_, err = br.ReadString('\n')
+	require.ErrorIs(t, err, io.EOF, "the tunnel is still open")
+}
+
+func TestForwardProxy_ATunnelGoesThroughVia(t *testing.T) {
+	// A CONNECT dialed its host, past Via: on a network that reaches hosts through a proxy only, tunnels failed. It
+	// goes through Via, with Via's credentials, as the requests the proxy sends on do.
+	host := tcpHost(t, echoConn)
+
+	connects := make(chan *http.Request, 1)
+	via := tcpHost(t, func(conn net.Conn) {
+		br := bufio.NewReader(conn)
+
+		req, err := http.ReadRequest(br)
+		if err != nil {
+			return
+		}
+
+		connects <- req
+
+		upstream, err := net.Dial("tcp", req.Host)
+		if err != nil {
+			return
+		}
+
+		defer upstream.Close()
+
+		_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\n\r\n")
+
+		go func() {
+			_, _ = io.Copy(upstream, br)
+			_ = upstream.(*net.TCPConn).CloseWrite()
+		}()
+
+		_, _ = io.Copy(conn, upstream)
+	})
+
+	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Via: "http://user:pass@" + via}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	conn, br := openTunnel(t, hostOf(t, m), host, "")
+
+	_, err := io.WriteString(conn, "through via\n")
+	require.NoError(t, err)
+
+	line, err := br.ReadString('\n')
+	require.NoError(t, err)
+	require.Equal(t, "through via\n", line)
+
+	var req *http.Request
+	select {
+	case req = <-connects:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tunnel didn't go through Via")
+	}
+
+	require.Equal(t, http.MethodConnect, req.Method)
+	require.Equal(t, host, req.Host)
+	require.Equal(t, "Basic dXNlcjpwYXNz", req.Header.Get("Proxy-Authorization"))
+}
+
+func TestForwardProxy_ATunnelThroughItselfFails(t *testing.T) {
+	// A Via that is the server itself sent each CONNECT back to the server, which sent it on again, without end. The
+	// CONNECT that comes back fails as a loop, and so does the one the client sent.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	m := MustNew(Setup().Silent().Listener(l).Proxy(&ProxyConfig{Via: "http://" + l.Addr().String()}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	conn, err := net.Dial("tcp", hostOf(t, m))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+
+	_, err = io.WriteString(conn, "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")
+	require.NoError(t, err)
+
+	res, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	require.NoError(t, err, "the CONNECT went round without end")
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+	require.Contains(t, string(body), "the proxy answered the CONNECT with 418")
+}
+
+// unwrappingWriter is the writer of a middleware, which unwraps to the writer it wraps.
+type unwrappingWriter struct {
+	http.ResponseWriter
+}
+
+func (w unwrappingWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// opaqueWriter is the writer of a middleware, which doesn't unwrap.
+type opaqueWriter struct {
+	http.ResponseWriter
+}
+
+func TestForwardProxy_ATunnelOpensBehindAWriterThatUnwraps(t *testing.T) {
+	// #40: a CONNECT took its connection over with w.(http.Hijacker), so behind a middleware that wraps the writer,
+	// every tunnel failed with 500 "hijacking is not supported". It opens through a writer that unwraps to one that
+	// can, as http.ResponseController does. Behind one that can't, the client gets an answer that says why.
+	host := tcpHost(t, echoConn)
+
+	wrapped := func(wrap func(http.ResponseWriter) http.ResponseWriter) *Server {
+		m := MustNew(Setup().Silent().Proxy().Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { next.ServeHTTP(wrap(w), r) })
+		}))
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		return m
+	}
+
+	t.Run("a writer that unwraps", func(t *testing.T) {
+		m := wrapped(func(w http.ResponseWriter) http.ResponseWriter { return unwrappingWriter{w} })
+
+		conn, br := openTunnel(t, hostOf(t, m), host, "")
+
+		_, err := io.WriteString(conn, "wrapped\n")
+		require.NoError(t, err)
+
+		line, err := br.ReadString('\n')
+		require.NoError(t, err)
+		require.Equal(t, "wrapped\n", line)
+	})
+
+	t.Run("a writer that doesn't", func(t *testing.T) {
+		m := wrapped(func(w http.ResponseWriter) http.ResponseWriter { return opaqueWriter{w} })
+
+		conn, err := net.Dial("tcp", hostOf(t, m))
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = conn.Close() })
+
+		_, err = fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", host, host)
+		require.NoError(t, err)
+
+		res, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodConnect})
+		require.NoError(t, err)
+
+		body, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+		require.Contains(t, string(body), "a tunnel needs an HTTP/1.1 connection, and a response writer that can hijack it")
+	})
+}
+
+func TestForwardProxy_LogsTheTunnelsItOpens(t *testing.T) {
+	// #40: a CONNECT was logged when it came, and never again.
+	host := tcpHost(t, echoConn)
+
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs)
+
+	m := MustNew(Setup().Logger(&logger).LogPretty(false).Proxy())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	conn, br := openTunnel(t, hostOf(t, m), host, "")
+
+	_, err := io.WriteString(conn, "logged\n")
+	require.NoError(t, err)
+
+	_, err = br.ReadString('\n')
+	require.NoError(t, err)
+
+	require.Contains(t, logs.String(), "<--- REQUEST PROXIED CONNECT")
+	require.Contains(t, logs.String(), `"status":200`)
 }

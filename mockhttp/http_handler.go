@@ -3,8 +3,10 @@ package mockhttp
 import (
 	"context"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/caffeine-projects/vlatte"
@@ -114,8 +116,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case h.app.proxy == nil:
 			h.onNoMatches(w, reqValues)
 		case r.Method == http.MethodConnect:
-			h.debugHeader(w, vlatte.ProxiedHeader, "true")
-			h.app.proxy.tunnel(w, r)
+			h.connect(w, reqValues)
 		case r.URL.Host == "":
 			h.onNoMatches(w, reqValues)
 		default:
@@ -282,6 +283,59 @@ func (h *mockHandler) serveUpstream(w http.ResponseWriter, r *RequestValues, ups
 	h.debugHeader(w, vlatte.ProxiedHeader, "true")
 	h.render(w, r, res, capture)
 	h.lifecycle.OnProxied(r, res)
+}
+
+// connect opens a tunnel to the host of r, a CONNECT no mock matched, and pipes the client's connection to it until
+// both sides end, or the server closes. A tunnel that can't open gets the server's answer to a failure.
+func (h *mockHandler) connect(w http.ResponseWriter, r *RequestValues) {
+	req := r.RawRequest
+
+	if cameBack(req.Header, h.app.id) {
+		h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: %w", errProxyLoop))
+		return
+	}
+
+	// The host is dialed before the client's connection is hijacked: once it is, w can't answer a failure.
+	via := append(slices.Clone(req.Header.Values(_viaHeader)), h.app.id)
+
+	upstream, err := h.app.proxy.dial(req.Context(), req.Host, via)
+	if err != nil {
+		h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: %w", err))
+		return
+	}
+
+	defer upstream.Close()
+
+	client, err := hijack(w)
+	if err != nil {
+		h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: proxy: a tunnel needs an HTTP/1.1 connection, "+
+			"and a response writer that can hijack it, or that unwraps to one that can: %w", err))
+
+		return
+	}
+
+	defer client.Close()
+
+	// The server is closing.
+	if !h.app.tunnels.add(client, upstream) {
+		return
+	}
+
+	defer h.app.tunnels.remove(client, upstream)
+
+	// WriteHeader has no effect on a hijacked connection: the answer goes on the connection itself.
+	if _, err := io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
+		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: answering the CONNECT to %s: %w", req.Host, err))
+		return
+	}
+
+	opened := newResponse()
+	opened.StatusCode = http.StatusOK
+	h.lifecycle.OnProxied(r, opened)
+
+	if err := pipe(client, upstream); err != nil {
+		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: tunnel to %s: %w", req.Host, err))
+	}
 }
 
 // debugHeader sets the debug header key to value, unless the server's debug headers are off or value is empty.

@@ -173,12 +173,8 @@ func (b *targetBody) Kept() ([]byte, bool) {
 // VLatte-Via holds id already came back to the server: it fails. The copy shares the trailers of r, which the server
 // sets on r once it reads the body to the end.
 func forwardRequest(ctx context.Context, r *http.Request, id string) (*http.Request, error) {
-	for _, v := range r.Header.Values(_viaHeader) {
-		for seen := range strings.SplitSeq(v, ",") {
-			if strings.TrimSpace(seen) == id {
-				return nil, errProxyLoop
-			}
-		}
+	if cameBack(r.Header, id) {
+		return nil, errProxyLoop
 	}
 
 	out := r.Clone(ctx)

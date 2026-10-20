@@ -5,12 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net"
 	"net/http"
 	"time"
-
-	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
@@ -37,7 +33,9 @@ type ProxyConfig struct {
 
 	// Transport sends the requests the proxy passes on, in place of the server's Config.Transport. It is the caller's:
 	// the server never closes it. With neither, the proxy makes a transport, which Via, Timeout and SSLVerify shape:
-	// Via and SSLVerify fail New with a transport of the caller's, which would ignore them.
+	// Via and SSLVerify fail New with a transport of the caller's, which would ignore them. The tunnels of CONNECT
+	// requests go through the proxy the transport the proxy makes picks, Via or the proxy of the environment, and dial
+	// their hosts with a transport of the caller's.
 	Transport http.RoundTripper
 }
 
@@ -59,17 +57,16 @@ func (p *ProxyConfig) Apply(c *ProxyConfig) error {
 var _defaultProxyConfig = ProxyConfig{Timeout: _defaultTimeout, SSLVerify: false}
 
 // forwardProxy sends the requests no mock matches to their hosts: it answers a request in absolute form, which names
-// its host, with the host's response, and opens a tunnel to the host of a CONNECT.
+// its host, with the host's response, and dials the host of a CONNECT for a tunnel.
 type forwardProxy struct {
 	upstream
 
-	id     string // of the server: see Server.id
-	logger *zerolog.Logger
+	id string // of the server: see Server.id
 }
 
 // newProxy returns the forward proxy of conf. Via and SSLVerify shape the transport the proxy makes, so they fail it
 // with a transport of the caller's, which would ignore them.
-func newProxy(id string, log *zerolog.Logger, conf *Config) (*forwardProxy, error) {
+func newProxy(id string, conf *Config) (*forwardProxy, error) {
 	via, err := parseVia(conf.Proxy.Via)
 	if err != nil {
 		return nil, fmt.Errorf("proxy: via %q: %w", config.Display(conf.Proxy.Via), err)
@@ -85,12 +82,12 @@ func newProxy(id string, log *zerolog.Logger, conf *Config) (*forwardProxy, erro
 				"ProxyConfig.Transport or Config.Transport: verify the hosts with that transport, or leave ssl_verify out")
 		}
 
-		return &forwardProxy{rt: rt, timeout: conf.Proxy.Timeout, id: id, logger: log}, nil
+		return &forwardProxy{rt: rt, timeout: conf.Proxy.Timeout, id: id}, nil
 	}
 
 	transport := newTransport(conf, conf.Proxy.SSLVerify, via)
 
-	return &forwardProxy{rt: transport, owned: transport, timeout: conf.Proxy.Timeout, id: id, logger: log}, nil
+	return &forwardProxy{rt: transport, owned: transport, timeout: conf.Proxy.Timeout, id: id}, nil
 }
 
 // Reply implements Replier: it sends the request, in absolute form, to its host, and answers with the host's response.
@@ -109,55 +106,4 @@ func (p *forwardProxy) Reply(_ context.Context, input ReplyInput) (*Response, er
 	}
 
 	return res, nil
-}
-
-// tunnel opens a tunnel to the host of r, a CONNECT. It returns an error when the tunnel didn't open, or broke off.
-func (p *forwardProxy) tunnel(w http.ResponseWriter, r *http.Request) error {
-	// Dial before hijacking: once the connection is hijacked, w can no longer report errors.
-	out, err := net.DialTimeout("tcp", r.Host, 5*time.Second)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return err
-	}
-
-	defer out.Close()
-
-	hijacker, ok := w.(http.Hijacker)
-	if !ok {
-		http.Error(w, "proxy: hijacking is not supported", http.StatusInternalServerError)
-		return errors.New("proxy: hijacking is not supported")
-	}
-
-	in, _, err := hijacker.Hijack()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return err
-	}
-
-	defer in.Close()
-
-	// WriteHeader has no effect on a hijacked connection, so the tunnel response is written directly.
-	if _, err = io.WriteString(in, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
-		p.logger.Error().Err(err).Str("url", r.URL.String()).Msg("proxy: error establishing tunnel")
-		return err
-	}
-
-	errCh := make(chan error, 2)
-	cp := func(dst io.WriteCloser, src io.ReadCloser) {
-		_, err := io.Copy(dst, src)
-		errCh <- err
-	}
-
-	go cp(out, in)
-	go cp(in, out)
-
-	err = <-errCh
-	if err != nil {
-		p.logger.Error().Err(err).
-			Str("url", r.URL.String()).
-			Str("method", r.Method).
-			Msg("proxy: error writing response")
-	}
-
-	return err
 }
