@@ -8,9 +8,18 @@ import (
 
 // Reset removes the mocks the admin API added, loads the mock files again, saved ones included, and starts every
 // scenario over: POST /reset. Mocks added in code stay as they are. A server without mock files, or scenarios, skips
-// them.
+// them. The files load first: when they fail to, nothing changes.
 func Reset[M vlatte.Mock](store vlatte.Store[M], files Files, scenarios Scenarios) http.Handler {
 	return negotiated(func(w http.ResponseWriter, r *http.Request) {
+		// A reload swaps in what the files hold in one step, a file's mock in place of an admin mock of its id, or
+		// nothing at all.
+		if files != nil {
+			if err := files.Reload(); err != nil {
+				fail(w, r, loadError(err))
+				return
+			}
+		}
+
 		mocks, err := store.PickAll(r.Context())
 		if err != nil {
 			fail(w, r, err)
@@ -27,13 +36,6 @@ func Reset[M vlatte.Mock](store vlatte.Store[M], files Files, scenarios Scenario
 		if err := store.Replace(r.Context(), added); err != nil {
 			fail(w, r, err)
 			return
-		}
-
-		if files != nil {
-			if err := files.Reload(); err != nil {
-				fail(w, r, loadError(err))
-				return
-			}
 		}
 
 		if scenarios != nil {

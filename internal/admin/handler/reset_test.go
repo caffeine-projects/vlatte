@@ -50,9 +50,21 @@ func TestReset_WithoutFilesOrScenarios(t *testing.T) {
 }
 
 func TestReset_FilesThatFailToLoad(t *testing.T) {
-	url := serve(t, newStore(t), admin.Files(&fakeFiles{err: errors.New("loader: pattern [: syntax error in pattern")}))
+	// The files load first: when they fail to, the reset changes nothing, so the admin API's mocks still serve, open,
+	// and the scenarios stay where they were. It removed and closed them, and a retry couldn't bring them back.
+	added := newFake("added")
+	added.origin = handler.Origin
+	store := newStore(t, added)
+	scenarios := mfeat.NewScenarioStore()
+	scenarios.SetScenario("checkout", "paid")
+
+	files := &fakeFiles{err: errors.New("loader: pattern [: syntax error in pattern")}
+	url := serve(t, store, admin.Files(files), admin.Scenarios(scenarios))
 
 	res, body := send(t, request{method: http.MethodPost, url: url + "/reset"})
 
 	problem(t, res, body, http.StatusInternalServerError, "load_failed")
+	require.Equal(t, []string{"added"}, ids(t, store))
+	require.Zero(t, added.closed.Load())
+	require.Equal(t, map[string]string{"checkout": "paid"}, scenarios.Scenarios())
 }

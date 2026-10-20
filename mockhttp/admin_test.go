@@ -465,3 +465,26 @@ func TestAdmin_NoLogStreamForALoggerItWasGiven(t *testing.T) {
 	res, _ := do(t, http.MethodGet, m.AdminURL()+"/logs", nil, nil)
 	require.Equal(t, http.StatusNotImplemented, res.StatusCode)
 }
+
+func TestAdmin_ResetPutsBackTheFilesMock(t *testing.T) {
+	// A mock file's mock the admin API replaced comes back from its file on reset: the file's mock takes the place of
+	// the admin API's in one step, and none of the admin API's stays.
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "x.yaml"),
+		[]byte("id: x\nrequest: {method: GET, path: /x}\nresponse: {status: 200, body: from a file}\n"), 0o600))
+
+	m := adminServer(t, Setup().MockFilePatterns(filepath.Join(dir, "*.yaml")))
+
+	res, body := do(t, http.MethodPut, m.AdminURL()+"/mocks/x", nil,
+		[]byte(`{"id": "x", "request": {"method": "GET", "path": "/x"}, "response": {"status": 200, "body": "from the admin API"}}`))
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+
+	res, body = do(t, http.MethodPost, m.AdminURL()+"/reset", nil, nil)
+	require.Equal(t, http.StatusNoContent, res.StatusCode, string(body))
+
+	_, body = do(t, http.MethodGet, m.URL("/x"), nil, nil)
+	require.Equal(t, "from a file", string(body))
+
+	_, body = do(t, http.MethodGet, m.AdminURL()+"/mocks", nil, nil)
+	require.NotContains(t, string(body), `"origin": "admin"`)
+}
