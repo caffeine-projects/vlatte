@@ -1740,3 +1740,84 @@ func TestProxyAll_GivenAnotherReplyDescribesThatReply(t *testing.T) {
 	require.NotContains(t, desc, "proxy_all")
 	require.Contains(t, desc, "response")
 }
+
+func TestProxyAll_TheSettingsFailWhatTheCallersTransportWouldIgnore(t *testing.T) {
+	// #67: proxy_all.ssl_verify, with a transport of the caller's, which decides on its own whether it verifies, fails
+	// New, as a mock's ssl_verify fails the mock.
+	_, err := New(Setup().Silent().Transport(newCountingTransport(t)).ConfigSources(ConfigArgs([]string{
+		"--proxy-all-target", "http://target.local", "--proxy-all-ssl-verify",
+	})))
+	require.ErrorContains(t, err, "server: proxy_all: ")
+	require.ErrorContains(t, err, "ssl_verify has no effect with a transport of the caller's")
+}
+
+func TestProxyAll_TheSettingsShapeTheRequest(t *testing.T) {
+	// The setting proxy_all takes the keys of a mock file's proxy that flags and variables can give: the target gets
+	// the request without the headers to remove, trimmed, with the client's details and the Host it asked for. Its
+	// target can come from the environment.
+	type sent struct {
+		host   string
+		path   string
+		header http.Header
+	}
+
+	got := make(chan sent, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got <- sent{host: r.Host, path: r.URL.Path, header: r.Header.Clone()}
+	}))
+	t.Cleanup(target.Close)
+
+	settings := writeConfigFile(t, t.TempDir(), "settings.yaml", "proxy_all:\n"+
+		"  remove_request_headers: [X-Removed]\n  trim_prefix: /api\n  x_forwarded: true\n  preserve_host: true\n")
+	t.Setenv("VLATTE_PROXY_ALL_TARGET", target.URL)
+
+	m := MustNew(Setup().Silent().ConfigSources(ConfigFile(settings), ConfigEnv()))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	req, err := http.NewRequest(http.MethodGet, m.URL("/api/x"), nil)
+	require.NoError(t, err)
+	req.Header.Set("X-Removed", "r")
+
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	s := <-got
+	require.Equal(t, hostOf(t, m), s.host)
+	require.Equal(t, "/x", s.path)
+	require.Empty(t, s.header.Get("X-Removed"))
+	require.Equal(t, hostOf(t, m), s.header.Get("X-Forwarded-Host"))
+	require.Equal(t, "127.0.0.1", s.header.Get("X-Forwarded-For"))
+}
+
+func TestProxyAll_PassesProtocolSwitchesOn(t *testing.T) {
+	// A switch of protocols that no mock matches goes to the proxy-all target, as through any proxy reply, whether a
+	// ProxyAll mock or the setting proxy_all answers it.
+	target := switchingTarget(t, "echo")
+
+	for name, m := range map[string]*Server{
+		"a ProxyAll mock": MustNew(Setup().Silent()),
+		"the setting":     MustNew(Setup().Silent().ConfigSources(ConfigArgs([]string{"--proxy-all-target", target.URL}))),
+	} {
+		t.Run(name, func(t *testing.T) {
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			if name == "a ProxyAll mock" {
+				m.MustMock(ProxyAll(From(target.URL)))
+			}
+
+			conn, br, res := switchThrough(t, m, "/ws")
+			require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
+
+			_, err := io.WriteString(conn, "switched\n")
+			require.NoError(t, err)
+
+			line, err := br.ReadString('\n')
+			require.NoError(t, err)
+			require.Equal(t, "switched\n", line)
+		})
+	}
+}

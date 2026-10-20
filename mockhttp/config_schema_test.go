@@ -388,6 +388,25 @@ func TestConfigSources_FileFormatsAgree(t *testing.T) {
 }
 
 func TestConfigSources_Hazards(t *testing.T) {
+	t.Run("another server's proxy_all is never modified", func(t *testing.T) {
+		// A server made from another's Config loads its sources onto a copy of its proxy_all: the other server keeps
+		// its own settings.
+		first, err := New(Setup().Silent().ConfigSources(ConfigArgs([]string{
+			"--proxy-all-target", "http://first.local", "--proxy-all-remove-request-headers", "X-A",
+		})))
+		require.NoError(t, err)
+
+		conf := *first.Config()
+		conf.ConfigSources = []ConfigSource{ConfigArgs([]string{"--proxy-all-target", "http://second.local"})}
+
+		second, err := New(&conf)
+		require.NoError(t, err)
+
+		require.Equal(t, "http://first.local", first.Config().proxyAll.target)
+		require.Equal(t, "http://second.local", second.Config().proxyAll.target)
+		require.Equal(t, []string{"X-A"}, second.Config().proxyAll.removeRequestHeaders, "the rest stays as the other's")
+	})
+
 	t.Run("a shared CORS struct is never modified", func(t *testing.T) {
 		before := DefaultCORSConfig
 		t.Setenv("VLATTE_CORS_MAX_AGE", "60")
