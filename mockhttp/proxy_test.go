@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -72,6 +73,44 @@ func TestForwardProxy_AMockOfTheRootLeavesTunnelsAlone(t *testing.T) {
 
 	_, body = do(t, http.MethodGet, m.URL("/"), nil, nil)
 	require.Equal(t, "the mock", string(body), "the mock answers the root")
+}
+
+func TestForwardProxy_LogsWhatItAnswers(t *testing.T) {
+	// No mock answers what the proxy passes on: the request log still says how each call ended, with the host's status,
+	// or with the error when the host can't be reached.
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(host.Close)
+
+	down := httptest.NewServer(http.NotFoundHandler())
+	down.Close()
+
+	logs := &logBuffer{}
+	logger := zerolog.New(logs)
+
+	m := MustNew(Setup().Logger(&logger).Proxy())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	proxyURL, err := url.Parse(m.URL())
+	require.NoError(t, err)
+
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	t.Cleanup(transport.CloseIdleConnections)
+
+	client := &http.Client{Transport: transport}
+
+	for _, target := range []string{host.URL + "/up", down.URL + "/down"} {
+		res, err := client.Get(target)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+	}
+
+	require.Contains(t, logs.String(), "REQUEST PROXIED GET /up")
+	require.Contains(t, logs.String(), `"status":202`)
+	require.Contains(t, logs.String(), "ERROR GET /down")
+	require.Contains(t, logs.String(), "http: proxying: ")
 }
 
 func TestForwardProxy_LeavesHopByHopHeadersOut(t *testing.T) {

@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"time"
-
-	"github.com/rs/zerolog"
 )
 
 var _ ProxyConfigurer = (*ProxyConfig)(nil)
@@ -52,12 +50,11 @@ func (p *ProxyConfig) Apply(c *ProxyConfig) error {
 var _defaultProxyConfig = ProxyConfig{Timeout: 10 * time.Second, SSLVerify: false}
 
 type reverseProxy struct {
-	logger       *zerolog.Logger
 	roundTripper http.RoundTripper
 	transport    *http.Transport // roundTripper, when the proxy made it
 }
 
-func newProxy(log *zerolog.Logger, config *Config) *reverseProxy {
+func newProxy(config *Config) *reverseProxy {
 	rt := cmp.Or(config.Proxy.Transport, config.Transport)
 	if rt == nil {
 		transport := &http.Transport{
@@ -82,15 +79,15 @@ func newProxy(log *zerolog.Logger, config *Config) *reverseProxy {
 		transport.ExpectContinueTimeout = 1 * time.Second
 		transport.ResponseHeaderTimeout = config.Proxy.Timeout
 
-		return &reverseProxy{logger: log, roundTripper: transport, transport: transport}
+		return &reverseProxy{roundTripper: transport, transport: transport}
 	}
 
-	return &reverseProxy{logger: log, roundTripper: rt}
+	return &reverseProxy{roundTripper: rt}
 }
 
-// serve sends r to its host and answers with the host's response, or opens a tunnel for a CONNECT. It returns an
-// error when the client didn't get the host's whole answer.
-func (p *reverseProxy) serve(w http.ResponseWriter, r *http.Request) error {
+// serve sends r to its host and answers with the host's response, or opens a tunnel for a CONNECT. It returns the
+// status and headers the client got, or an error when the client didn't get the host's whole answer.
+func (p *reverseProxy) serve(w http.ResponseWriter, r *http.Request) (*Response, error) {
 	if r.Method == http.MethodConnect {
 		return p.handleTunneling(w, r)
 	}
@@ -105,12 +102,12 @@ func (p *reverseProxy) close() {
 	}
 }
 
-func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) error {
+func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) (*Response, error) {
 	// Dial before hijacking: once the connection is hijacked, w can no longer report errors.
 	out, err := net.DialTimeout("tcp", r.Host, 5*time.Second)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return err
+		return nil, err
 	}
 
 	defer out.Close()
@@ -118,21 +115,20 @@ func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) e
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "proxy: hijacking is not supported", http.StatusInternalServerError)
-		return errors.New("proxy: hijacking is not supported")
+		return nil, errors.New("proxy: hijacking is not supported")
 	}
 
 	in, _, err := hijacker.Hijack()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return err
+		return nil, err
 	}
 
 	defer in.Close()
 
 	// WriteHeader has no effect on a hijacked connection, so the tunnel response is written directly.
 	if _, err = io.WriteString(in, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
-		p.logger.Error().Err(err).Str("url", r.URL.String()).Msg("proxy: error establishing tunnel")
-		return err
+		return nil, fmt.Errorf("proxy: establishing the tunnel: %w", err)
 	}
 
 	errCh := make(chan error, 2)
@@ -144,23 +140,19 @@ func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) e
 	go cp(out, in)
 	go cp(in, out)
 
-	err = <-errCh
-	if err != nil {
-		p.logger.Error().Err(err).
-			Str("url", r.URL.String()).
-			Str("method", r.Method).
-			Msg("proxy: error writing response")
+	if err = <-errCh; err != nil {
+		return nil, fmt.Errorf("proxy: tunnel: %w", err)
 	}
 
-	return err
+	return &Response{StatusCode: http.StatusOK}, nil
 }
 
-func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) error {
+func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) (*Response, error) {
 	// The host gets a copy: the middlewares that read r after the proxy see the request as it came.
 	res, err := p.roundTripper.RoundTrip(forwardRequest(r.Context(), r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return err
+		return nil, err
 	}
 
 	defer res.Body.Close()
@@ -176,15 +168,8 @@ func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) error 
 
 	w.WriteHeader(res.StatusCode)
 
-	_, err = io.Copy(w, res.Body)
-	if err != nil {
-		p.logger.Error().Err(err).
-			Str("url", r.URL.String()).
-			Str("method", r.Method).
-			Str("status", res.Status).
-			Msg("proxy: error copying response body")
-
-		return err
+	if _, err = io.Copy(w, res.Body); err != nil {
+		return nil, fmt.Errorf("proxy: copying the body of a %d response: %w", res.StatusCode, err)
 	}
 
 	for k, vv := range res.Trailer {
@@ -193,5 +178,5 @@ func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) error 
 		}
 	}
 
-	return nil
+	return &Response{StatusCode: res.StatusCode, Header: res.Header, Trailer: res.Trailer}, nil
 }

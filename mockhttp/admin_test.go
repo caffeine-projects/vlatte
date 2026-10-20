@@ -2,13 +2,16 @@ package mockhttp
 
 import (
 	"bufio"
+	"context"
 	json "encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
@@ -25,6 +28,44 @@ func adminServer(t *testing.T, setup *ConfigBuilder) *Server {
 	t.Cleanup(m.Close)
 
 	return m
+}
+
+// streamEvents follows the admin API's events of m while send sends n requests of n types of event, and returns the
+// events by type. A request's event can come after the next request's answer: they are told apart by type, not order.
+// It waits 5 seconds at most, so a missing event fails the test rather than hangs it.
+func streamEvents(t *testing.T, m *Server, n int, send func()) map[any]map[string]any {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, m.AdminURL()+"/events", nil)
+	require.NoError(t, err)
+
+	res, err := http.DefaultClient.Do(r)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = res.Body.Close() })
+	require.Equal(t, "text/event-stream", res.Header.Get(HeaderContentType))
+
+	send()
+
+	lines := bufio.NewScanner(res.Body)
+	byType := make(map[any]map[string]any)
+
+	for len(byType) < n && lines.Scan() {
+		line, ok := strings.CutPrefix(lines.Text(), "data: ")
+		if !ok {
+			continue
+		}
+
+		var e map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &e))
+		byType[e["type"]] = e
+	}
+
+	require.Len(t, byType, n, "events: %v", byType)
+
+	return byType
 }
 
 func TestAdmin_AddedMocksAreServed(t *testing.T) {
@@ -387,34 +428,10 @@ func TestAdmin_StreamsWhatTheServerServes(t *testing.T) {
 	m := adminServer(t, Setup())
 	m.MustMock(Getf("/hello").ID("hello").Reply(OK()))
 
-	r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, m.AdminURL()+"/events", nil)
-	require.NoError(t, err)
-
-	res, err := http.DefaultClient.Do(r)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = res.Body.Close() })
-	require.Equal(t, "text/event-stream", res.Header.Get(HeaderContentType))
-
-	do(t, http.MethodGet, m.URL("/hello"), nil, nil)
-	do(t, http.MethodPost, m.URL("/nope"), nil, nil)
-
-	lines := bufio.NewScanner(res.Body)
-	var data []map[string]any
-
-	for len(data) < 2 && lines.Scan() {
-		line, ok := strings.CutPrefix(lines.Text(), "data: ")
-		if !ok {
-			continue
-		}
-
-		var e map[string]any
-		require.NoError(t, json.Unmarshal([]byte(line), &e))
-		data = append(data, e)
-	}
-
-	// A request's event can come after the next request's answer: they are told apart by type, not order.
-	require.Len(t, data, 2)
-	byType := map[any]map[string]any{data[0]["type"]: data[0], data[1]["type"]: data[1]}
+	byType := streamEvents(t, m, 2, func() {
+		do(t, http.MethodGet, m.URL("/hello"), nil, nil)
+		do(t, http.MethodPost, m.URL("/nope"), nil, nil)
+	})
 
 	matched := byType["matched"]
 	require.Equal(t, "hello", matched["mock_id"])
@@ -424,6 +441,44 @@ func TestAdmin_StreamsWhatTheServerServes(t *testing.T) {
 	unmatched := byType["unmatched"]
 	require.Equal(t, "POST", unmatched["method"])
 	require.Contains(t, unmatched["target"], "/nope")
+}
+
+func TestAdmin_StreamsWhatTheProxyServes(t *testing.T) {
+	// A request no mock matches goes to its host when the server is a proxy: a client follows it with the host's status,
+	// and follows the error when the host can't be reached, as for the requests the mocks answer.
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(host.Close)
+
+	down := httptest.NewServer(http.NotFoundHandler())
+	down.Close()
+
+	m := adminServer(t, Setup().Proxy())
+
+	proxyURL, err := url.Parse(m.URL())
+	require.NoError(t, err)
+
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	t.Cleanup(transport.CloseIdleConnections)
+
+	client := &http.Client{Transport: transport}
+
+	byType := streamEvents(t, m, 2, func() {
+		for _, target := range []string{host.URL + "/up", down.URL + "/down"} {
+			res, err := client.Get(target)
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+		}
+	})
+
+	proxied := byType["proxied"]
+	require.Equal(t, float64(http.StatusAccepted), proxied["status"])
+	require.Contains(t, proxied["target"], "/up")
+
+	failed := byType["error"]
+	require.Contains(t, failed["target"], "/down")
+	require.Contains(t, failed["message"], "proxying")
 }
 
 func TestAdmin_StreamsTheLog(t *testing.T) {

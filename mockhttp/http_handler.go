@@ -120,9 +120,18 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		h.debugHeader(w, vlatte.ProxiedHeader, "true")
 
-		if err := h.app.proxy.serve(w, r); err == nil && capture != nil {
+		// The proxy has answered by now, so an error is only reported.
+		res, err := h.app.proxy.serve(w, r)
+		if err != nil {
+			h.lifecycle.OnError(reqValues, fmt.Errorf("http: proxying: %w", err))
+			return
+		}
+
+		if capture != nil {
 			capture.record()
 		}
+
+		h.lifecycle.OnProxied(reqValues, res)
 
 		return
 	}
