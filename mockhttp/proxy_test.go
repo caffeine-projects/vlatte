@@ -746,3 +746,30 @@ func TestForwardProxy_GoesThroughASOCKS5Via(t *testing.T) {
 	require.Equal(t, "through socks\n", line)
 	require.Equal(t, echo, <-dialed)
 }
+
+func TestForwardProxy_ATunnelThroughSOCKS5LetsEachSideFinish(t *testing.T) {
+	// A SOCKS5 connection can't end only what it sends, so a tunnel through a socks5 Via closed it whole when the
+	// client ended its side, and cut the host's answer. The connection beneath ends its side instead.
+	host := tcpHost(t, func(conn net.Conn) {
+		got, _ := io.ReadAll(conn)
+		_, _ = fmt.Fprintf(conn, "got %q", got)
+	})
+
+	dialed := make(chan string, 1)
+	via := socks5Host(t, dialed)
+
+	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Via: "socks5://" + via}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	conn, br := openTunnel(t, hostOf(t, m), host, "")
+
+	_, err := io.WriteString(conn, "question")
+	require.NoError(t, err)
+	require.NoError(t, conn.(*net.TCPConn).CloseWrite())
+
+	answer, err := io.ReadAll(br)
+	require.NoError(t, err)
+	require.Equal(t, `got "question"`, string(answer))
+	require.Equal(t, host, <-dialed)
+}

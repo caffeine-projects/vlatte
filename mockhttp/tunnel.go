@@ -252,9 +252,14 @@ func (p *forwardProxy) dialVia(ctx context.Context, dialer *net.Dialer, proxyURL
 	}
 
 	// The deadline of the handshakes doesn't bound the tunnel.
-	if !stop() || conn.SetDeadline(time.Time{}) != nil {
+	if !stop() {
 		_ = conn.Close()
 		return nil, context.Cause(ctx)
+	}
+
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		_ = conn.Close()
+		return nil, err
 	}
 
 	return &bufferedConn{Conn: conn, r: br}, nil
@@ -268,7 +273,10 @@ func dialSOCKS5(ctx context.Context, dialer *net.Dialer, addr string, user *url.
 		auth = &netproxy.Auth{User: user.Username(), Password: password}
 	}
 
-	d, err := netproxy.SOCKS5("tcp", addr, auth, dialer)
+	// The connection the SOCKS5 one wraps can end what it sends, which the SOCKS5 one can't: a tunnel needs it to.
+	forward := &keepingDialer{dialer: dialer}
+
+	d, err := netproxy.SOCKS5("tcp", addr, auth, forward)
 	if err != nil {
 		return nil, err
 	}
@@ -278,5 +286,39 @@ func dialSOCKS5(ctx context.Context, dialer *net.Dialer, addr string, user *url.
 		return nil, errors.New("the SOCKS5 dialer doesn't take a context")
 	}
 
-	return cd.DialContext(ctx, "tcp", host)
+	conn, err := cd.DialContext(ctx, "tcp", host)
+	if err != nil {
+		return nil, err
+	}
+
+	return &halfClosingConn{Conn: conn, raw: forward.conn}, nil
+}
+
+// keepingDialer dials with dialer, and keeps the connection it dialed last.
+type keepingDialer struct {
+	dialer *net.Dialer
+	conn   net.Conn
+}
+
+func (d *keepingDialer) Dial(network, addr string) (net.Conn, error) {
+	return d.DialContext(context.Background(), network, addr)
+}
+
+func (d *keepingDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	conn, err := d.dialer.DialContext(ctx, network, addr)
+	d.conn = conn
+
+	return conn, err
+}
+
+// halfClosingConn is a connection over raw, such as a SOCKS5 one, which ends what it sends by ending raw's.
+type halfClosingConn struct {
+	net.Conn
+
+	raw net.Conn
+}
+
+// CloseWrite ends what goes out on raw, and leaves what comes in open.
+func (c *halfClosingConn) CloseWrite() error {
+	return closeWrite(c.raw)
 }
