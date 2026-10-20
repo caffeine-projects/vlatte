@@ -54,6 +54,7 @@ func (p *ProxyConfig) Apply(c *ProxyConfig) error {
 var _defaultProxyConfig = ProxyConfig{Timeout: 10 * time.Second, SSLVerify: false}
 
 type reverseProxy struct {
+	id           string // of the server: see Server.id
 	logger       *zerolog.Logger
 	roundTripper http.RoundTripper
 	transport    *http.Transport // roundTripper, when the proxy made it
@@ -61,7 +62,7 @@ type reverseProxy struct {
 
 // newProxy returns the forward proxy of conf. Via and SSLVerify shape the transport the proxy makes, so they fail it
 // with a transport of the caller's, which would ignore them.
-func newProxy(log *zerolog.Logger, conf *Config) (*reverseProxy, error) {
+func newProxy(id string, log *zerolog.Logger, conf *Config) (*reverseProxy, error) {
 	via, err := parseVia(conf.Proxy.Via)
 	if err != nil {
 		return nil, fmt.Errorf("proxy: via %q: %w", config.Display(conf.Proxy.Via), err)
@@ -77,13 +78,13 @@ func newProxy(log *zerolog.Logger, conf *Config) (*reverseProxy, error) {
 				"ProxyConfig.Transport or Config.Transport: verify the hosts with that transport, or leave ssl_verify out")
 		}
 
-		return &reverseProxy{logger: log, roundTripper: rt}, nil
+		return &reverseProxy{id: id, logger: log, roundTripper: rt}, nil
 	}
 
 	transport := newTransport(conf, conf.Proxy.SSLVerify, via)
 	transport.ResponseHeaderTimeout = conf.Proxy.Timeout
 
-	return &reverseProxy{logger: log, roundTripper: transport, transport: transport}, nil
+	return &reverseProxy{id: id, logger: log, roundTripper: transport, transport: transport}, nil
 }
 
 // serve sends r to its host and answers with the host's response, or opens a tunnel for a CONNECT. It returns an
@@ -155,7 +156,13 @@ func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) e
 
 func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) error {
 	// The host gets a copy: the middlewares that read r after the proxy see the request as it came.
-	res, err := p.roundTripper.RoundTrip(forwardRequest(r.Context(), r))
+	out, err := forwardRequest(r.Context(), r, p.id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return err
+	}
+
+	res, err := p.roundTripper.RoundTrip(out)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return err

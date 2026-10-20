@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"bytes"
 	"cmp"
 	"compress/gzip"
 	"context"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -993,23 +995,101 @@ func TestProxyReply_SendsTheTargetCredentials(t *testing.T) {
 	}
 }
 
-func TestProxyReply_KeepsTheTargetPasswordToItself(t *testing.T) {
-	// The target's URL went whole into the mock's description, and into the error a failing call answers the client
-	// with and logs: the password of a target with credentials with it.
-	m := MustNew(Setup().Silent())
+func TestProxyReply_KeepsTheTargetCredentialsOutOfErrorsAndLogs(t *testing.T) {
+	// #65: the target's URL went whole into the error a failing call answers the client with and logs, with the
+	// password of its user info, and the values of its query, such as the API key of APIs that take one there. Both
+	// are hidden. The mock's description keeps the target as it was set, so it loads back as the same mock (#42): the
+	// admin API that serves it is as trusted as the mock files.
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs)
+
+	m := MustNew(Setup().Logger(&logger).LogPretty(false))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
 	// Nothing listens on port 1: the call fails.
-	scoped := m.MustMock(Getf("/p").Reply(From("http://user:secret@127.0.0.1:1")))
+	const target = "http://user:secret@127.0.0.1:1/v1?api_key=SECRET-KEY&flag&page=2"
+	scoped := m.MustMock(Getf("/p").Reply(From(target)))
 
 	status, body := get(t, m, "/p")
 	require.Equal(t, m.Config().ErrorStatusCode, status)
-	require.Contains(t, body, "reply_proxy: calling the target http://user:xxxxx@127.0.0.1:1")
-	require.NotContains(t, body, "secret")
+	require.Contains(t, body, "reply_proxy: calling the target http://user:xxxxx@127.0.0.1:1/v1?api_key=xxxxx&flag&page=xxxxx")
+
+	for name, out := range map[string]string{"the answer": body, "the log": logs.String()} {
+		require.NotContains(t, out, "secret", "%s holds the password", name)
+		require.NotContains(t, out, "SECRET-KEY", "%s holds the API key", name)
+	}
 
 	proxy := scoped.Mocks()[0].Describe().Props.(map[string]any)["proxy"].(map[string]any)
-	require.Equal(t, "http://user:xxxxx@127.0.0.1:1", proxy["target"])
+	require.Equal(t, target, proxy["target"])
+}
+
+func TestProxyReply_AnswersWithTheProxysDebugHeadersOnly(t *testing.T) {
+	// #60: a target that is a vlatte server sends its own VLatte-* debug headers, which went on to the client with the
+	// proxy's: two values for each, and the target's alone with NoDebugHeaders, as if they were the proxy's.
+	target := MustNew(Setup().Silent())
+	target.MustStart()
+	t.Cleanup(target.Close)
+	target.MustMock(Getf("/p").Reply(OK()))
+
+	for _, noDebugHeaders := range []bool{false, true} {
+		t.Run(fmt.Sprintf("NoDebugHeaders=%t", noDebugHeaders), func(t *testing.T) {
+			setup := Setup().Silent()
+			if noDebugHeaders {
+				setup.NoDebugHeaders()
+			}
+
+			m := MustNew(setup)
+			m.MustStart()
+			t.Cleanup(m.Close)
+			scoped := m.MustMock(Getf("/p").Reply(From(target.URL())))
+
+			status, header, _ := getFull(t, m, "/p")
+			require.Equal(t, http.StatusOK, status)
+
+			for _, name := range []string{vlatte.RequestIDHeader, vlatte.MatchedMockIDHeader, vlatte.ProxiedHeader} {
+				if noDebugHeaders {
+					require.Empty(t, header.Values(name), name)
+				} else {
+					require.Len(t, header.Values(name), 1, name)
+				}
+			}
+
+			if !noDebugHeaders {
+				require.Equal(t, scoped.Mocks()[0].ID(), header.Get(vlatte.MatchedMockIDHeader), "the proxy's mock")
+			}
+		})
+	}
+}
+
+func TestProxyReply_ARequestThatComesBackFails(t *testing.T) {
+	// A proxy reply whose target is its own server sent each request back to itself, which sent it on again, until the
+	// server ran out of connections. The request that comes back fails as a loop: the client gets that failure.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/loop").Reply(From(m.URL())))
+
+	status, body := get(t, m, "/loop")
+	require.Equal(t, m.Config().ErrorStatusCode, status)
+	require.Contains(t, body, "proxy loop: the request came back to this server")
+
+	// A chain of servers isn't a loop: each sends the request on once.
+	last := MustNew(Setup().Silent())
+	last.MustStart()
+	t.Cleanup(last.Close)
+	last.MustMock(Getf("/chain").Reply(OK().PlainText("end")))
+
+	middle := MustNew(Setup().Silent())
+	middle.MustStart()
+	t.Cleanup(middle.Close)
+	middle.MustMock(Getf("/chain").Reply(From(last.URL())))
+
+	m.MustMock(Getf("/chain").Reply(From(middle.URL())))
+
+	status, body = get(t, m, "/chain")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, "end", body)
 }
 
 func TestProxyReply_AHopByHopForwardHeaderFailsTheBuild(t *testing.T) {

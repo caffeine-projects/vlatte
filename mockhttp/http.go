@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"uuid"
 
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
@@ -54,6 +55,9 @@ type Server struct {
 	rwMutex            sync.RWMutex
 	proxy              *reverseProxy
 
+	// id tells the requests this server sends on, in their VLatte-Via, so one that comes back fails as a proxy loop.
+	id string
+
 	data    map[string]any
 	logger  *zerolog.Logger
 	started atomic.Bool // set by the first start: a server starts once
@@ -81,7 +85,7 @@ type Server struct {
 // If no port is set, it will start the server on localhost using a random port.
 // It returns an error if a configuration fails to apply or the server cannot be built.
 func New(config ...Option) (*Server, error) {
-	app := &Server{}
+	app := &Server{id: uuid.New().String()}
 
 	conf := defaultConfig()
 
@@ -162,7 +166,7 @@ func New(config ...Option) (*Server, error) {
 	var p *reverseProxy
 	if conf.Proxy != nil {
 		var err error
-		if p, err = newProxy(app.Logger(), conf); err != nil {
+		if p, err = newProxy(app.id, app.Logger(), conf); err != nil {
 			return nil, fmt.Errorf("server: %w", err)
 		}
 	}
