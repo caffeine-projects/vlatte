@@ -1,0 +1,9 @@
+request:
+  path: /api/items
+  method: GET
+
+proxy:
+  target: http://target.invalid
+  trim_prefix: /api
+  x_forwarded: true
+  preserve_host: true

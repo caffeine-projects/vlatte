@@ -1845,3 +1845,57 @@ func TestProxyReply_ASwitchWithoutAConnectionFails(t *testing.T) {
 	require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
 	require.Contains(t, string(body), "the target http://target.local switched protocols, and the transport gave no connection to it")
 }
+
+func TestProxyReply_ADescribedReplyLoadsBackAsTheSame(t *testing.T) {
+	// A proxy reply's description loads back as the same reply: the target gets the same request from the mock it
+	// loads as from the one described, with its trim, its request headers, and the client's details and host.
+	type sent struct {
+		host   string
+		uri    string
+		header http.Header
+	}
+
+	got := make(chan sent, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got <- sent{host: r.Host, uri: r.RequestURI, header: r.Header.Clone()}
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scope := m.MustMock(Getf("/api/items").Reply(From(target.URL).
+		TrimPrefix("/api").
+		RequestHeader("X-Added", "a").
+		RemoveRequestHeaders("X-Removed").
+		XForwarded().
+		PreserveHost()))
+
+	call := func() sent {
+		req, err := http.NewRequest(http.MethodGet, m.URL("/api/items"), nil)
+		require.NoError(t, err)
+		req.Header.Set("X-Removed", "r")
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, http.StatusOK, res.StatusCode)
+
+		return <-got
+	}
+
+	described := call()
+	require.Equal(t, "/items", described.uri)
+	require.Equal(t, hostOf(t, m), described.host)
+	require.Equal(t, "a", described.header.Get("X-Added"))
+	require.Empty(t, described.header.Get("X-Removed"))
+	require.Equal(t, hostOf(t, m), described.header.Get("X-Forwarded-Host"))
+
+	content, err := scope.Mocks()[0].MarshalJSON()
+	require.NoError(t, err)
+	require.NoError(t, m.Clean(t.Context()))
+	m.MustMock(FromBytes(content, "json"))
+
+	require.Equal(t, described, call(), "the loaded mock sent another request")
+}
