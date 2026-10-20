@@ -2,11 +2,12 @@ package mockgrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"slices"
-	"sync/atomic"
+	"sync"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/rs/zerolog"
@@ -24,11 +25,13 @@ type Server struct {
 	server  *grpc.Server
 	config  *Config
 	logger  *zerolog.Logger
-	addr    string
 	storage vlatte.Store[*Mock]
+
+	mu      sync.Mutex // orders Start and Close, which a Close overlapping a Start would otherwise outrun
+	addr    string
 	served  chan struct{}
-	started atomic.Bool // set by the first start: a server starts once
-	closed  atomic.Bool // set by Close: a closed server doesn't start again
+	started bool // set by the first start: a server starts once
+	closed  bool // set by Close: a closed server doesn't start again
 }
 
 // New creates a new gRPC mock Server with the given configurations.
@@ -103,20 +106,25 @@ func (app *Server) Prep(ctx context.Context, recipes ...Recipe) error {
 // Start starts the mock server. A server starts once: Start fails with vlatte.ErrStarted once it started, and with
 // grpc.ErrServerStopped once it closed. A start that fails to listen closes the server.
 func (app *Server) Start() error {
-	if app.closed.Load() {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if app.closed {
 		return fmt.Errorf("server: Start: %w", grpc.ErrServerStopped)
 	}
 
-	if !app.started.CompareAndSwap(false, true) {
+	if app.started {
 		return fmt.Errorf("server: Start: %w", vlatte.ErrStarted)
 	}
+
+	app.started = true
 
 	lis := app.config.Listener
 	if lis == nil {
 		var err error
 		lis, err = net.Listen("tcp", app.config.Addr)
 		if err != nil {
-			app.Close()
+			app.closed = true
 			return fmt.Errorf("server: Start: failed to create listener: %w", err)
 		}
 	}
@@ -127,8 +135,9 @@ func (app *Server) Start() error {
 	go func(served chan struct{}) {
 		defer close(served)
 
-		// Serve returns nil after GracefulStop, so any error is a real failure.
-		if err := app.server.Serve(lis); err != nil {
+		// Serve returns nil after GracefulStop, so any error is a real failure, but one: a Close that came between
+		// this start and Serve stops the server first, and Serve then refuses to begin.
+		if err := app.server.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			app.logger.Error().Err(err).Msg("server: error serving")
 		}
 	}(app.served)
@@ -161,18 +170,24 @@ func (app *Server) RegisterService(desc *grpc.ServiceDesc, impl any) {
 }
 
 func (app *Server) Addr() string {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
 	return app.addr
 }
 
 // Close stops the server, waiting for calls in flight to finish. A closed server doesn't start again, even one that
 // never started.
 func (app *Server) Close() {
-	app.closed.Store(true)
+	app.mu.Lock()
+	app.closed = true
+	served := app.served
+	app.mu.Unlock()
 
-	if app.served == nil {
+	if served == nil {
 		return
 	}
 
 	app.server.GracefulStop()
-	<-app.served
+	<-served
 }

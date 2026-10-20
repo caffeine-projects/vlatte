@@ -89,6 +89,32 @@ func TestServer_AStartThatFailsClosesTheServer(t *testing.T) {
 	require.ErrorIs(t, m.Start(), grpc.ErrServerStopped)
 }
 
+func TestServer_ACloseThatOverlapsStartLeavesNothingServing(t *testing.T) {
+	// A Close that came while Start listened found nothing started and returned, then Start served (#57): once Close
+	// returns, nothing listens, whatever Start was doing.
+	for i := range 200 {
+		m := MustNew()
+
+		started := make(chan error, 1)
+		go func() { started <- m.Start() }()
+
+		// Let Start get going, so Close may come while it listens.
+		time.Sleep(time.Duration(i%50) * time.Microsecond)
+		m.Close()
+
+		if err := <-started; err != nil {
+			require.ErrorIs(t, err, grpc.ErrServerStopped, "iteration %d", i)
+			continue
+		}
+
+		conn, err := net.DialTimeout("tcp", m.Addr(), time.Second)
+		if err == nil {
+			_ = conn.Close()
+			t.Fatalf("iteration %d: after Close, %s still accepts connections", i, m.Addr())
+		}
+	}
+}
+
 func TestClose_WaitsForInFlightCalls(t *testing.T) {
 	m := MustNew()
 	pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})
