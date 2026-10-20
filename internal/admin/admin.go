@@ -56,6 +56,7 @@ var _routes = []struct {
 	{pattern: "DELETE /scenarios", lacking: "keep scenarios"},
 	{pattern: "POST /reset"},
 	{pattern: "GET /events", lacking: "stream its events"},
+	{pattern: "GET /logs", lacking: "stream its logs"},
 }
 
 var errNoMocks = errors.New("admin: no mock store: pass the Mocks option")
@@ -155,6 +156,19 @@ func Events(events *handler.Events) Option {
 	return func(s *Server) {
 		s.routes["GET /events"] = handler.EventStream(events)
 		s.streams = append(s.streams, events.Close)
+	}
+}
+
+// Logs sets the log lines of the mock server, which GET /logs streams. Nil streams none, such as for a server that
+// logs through a logger it was given.
+func Logs(logs *handler.Logs) Option {
+	return func(s *Server) {
+		if logs == nil {
+			return
+		}
+
+		s.routes["GET /logs"] = handler.LogStream(logs)
+		s.streams = append(s.streams, logs.Close)
 	}
 }
 

@@ -397,6 +397,27 @@ paths:
                 data: {"method":"GET","mock_id":"hello","request_id":"7f3a","status":200,"target":"/hello","time":"2026-10-20T12:00:00Z","type":"matched"}
 
         "501": { $ref: "#/components/responses/NotSupported" }
+  /logs:
+    get:
+      tags: [Server]
+      operationId: streamLogs
+      summary: Follow the server's log
+      description: |
+        Streams the log lines of the mock server, as it writes them, as Server-Sent Events of type `log`: each one's
+        data is a JSON log line. Nothing is kept. A server that logs through a logger it was given streams none.
+      responses:
+        "200":
+          description: The stream of log lines.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "Server-Sent Events: `event: log` then `data: {\"level\": \"info\", ...}`."
+              example: |
+                event: log
+                data: {"level":"info","url":"/hello","time":"2026-10-20T12:00:00Z","message":"---> REQUEST RECEIVED GET /hello"}
+
+        "501": { $ref: "#/components/responses/NotSupported" }
   /scenarios:
     get:
       tags: [Scenarios]

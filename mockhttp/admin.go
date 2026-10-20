@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -28,6 +29,18 @@ const (
 	_defaultSaveDir    = "testdata/_mocks"
 	_defaultSaveFormat = "yaml"
 )
+
+// adminLogs returns the admin API's logs, and the writer the server's logger writes them through, when the server
+// serves the admin API and builds its logger: a logger it was given writes where it was told to.
+func adminLogs(conf *Config) (*handler.Logs, io.Writer) {
+	if conf.Admin == nil || conf.Logger != nil {
+		return nil, nil
+	}
+
+	logs := handler.NewLogs()
+
+	return logs, logs
+}
 
 // withAdminEvents adds the admin API's events to lifecycle, when the server serves the admin API: no event is
 // published without it.

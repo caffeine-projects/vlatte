@@ -120,7 +120,8 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	app.config = conf
-	app.logger = app.getLog(conf)
+	logs, tee := adminLogs(conf)
+	app.logger = app.getLog(conf, tee)
 
 	repository := vlatte.NewStore[*Mock]()
 
@@ -222,6 +223,7 @@ func New(config ...Option) (*Server, error) {
 			admin.Recorder(adminRecorder{app}),
 			admin.Scenarios(app.scenarioStore),
 			admin.Events(events),
+			admin.Logs(logs),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("server: %w", err)
@@ -564,7 +566,8 @@ func (app *Server) load() error {
 	return nil
 }
 
-func (app *Server) getLog(conf *Config) *zerolog.Logger {
+// getLog returns the logger of conf, or builds one that writes to the standard output, and to tee unless it is nil.
+func (app *Server) getLog(conf *Config, tee io.Writer) *zerolog.Logger {
 	if conf.Logger != nil {
 		return conf.Logger
 	}
@@ -574,6 +577,10 @@ func (app *Server) getLog(conf *Config) *zerolog.Logger {
 		output = zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
 	} else {
 		output = os.Stdout
+	}
+
+	if tee != nil {
+		output = zerolog.MultiLevelWriter(output, tee)
 	}
 
 	c := zerolog.New(output).Level(zerolog.Level(conf.LogLevel)).With().Timestamp()

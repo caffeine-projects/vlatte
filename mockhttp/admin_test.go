@@ -10,7 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 // adminServer starts a server with its admin API, and the given setup.
@@ -392,4 +395,44 @@ func TestAdmin_StreamsWhatTheServerServes(t *testing.T) {
 	unmatched := byType["unmatched"]
 	require.Equal(t, "POST", unmatched["method"])
 	require.Contains(t, unmatched["target"], "/nope")
+}
+
+func TestAdmin_StreamsTheLog(t *testing.T) {
+	// The log lines the server writes reach the admin API's clients too, such as for a server in a container.
+	m := MustNew(Setup().Admin("").LogLevel(vlatte.LogLevelInfo))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, m.AdminURL()+"/logs", nil)
+	require.NoError(t, err)
+
+	res, err := http.DefaultClient.Do(r)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = res.Body.Close() })
+
+	do(t, http.MethodGet, m.URL("/logged"), nil, nil)
+
+	lines := bufio.NewScanner(res.Body)
+	for lines.Scan() {
+		if line, ok := strings.CutPrefix(lines.Text(), "data: "); ok && strings.Contains(line, "/logged") {
+			var entry map[string]any
+			require.NoError(t, json.Unmarshal([]byte(line), &entry), line)
+			require.Equal(t, "info", entry["level"])
+
+			return
+		}
+	}
+
+	t.Fatal("no log line of the request")
+}
+
+func TestAdmin_NoLogStreamForALoggerItWasGiven(t *testing.T) {
+	// A logger the server was given writes where it was told to: the admin API doesn't take its lines.
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin("").Logger(&logger))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	res, _ := do(t, http.MethodGet, m.AdminURL()+"/logs", nil, nil)
+	require.Equal(t, http.StatusNotImplemented, res.StatusCode)
 }
