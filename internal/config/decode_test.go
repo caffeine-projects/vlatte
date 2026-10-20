@@ -165,6 +165,21 @@ func TestEncode_UnknownFormat(t *testing.T) {
 	require.EqualError(t, err, `config: format "toml" is not JSON or YAML`)
 }
 
+func TestParse(t *testing.T) {
+	// Parse reads documents for code outside this package, such as the admin API's: both formats give one data model.
+	fromJSON, err := Parse([]byte(`{"a": [1, "x"]}`), "json")
+	require.NoError(t, err)
+
+	fromYAML, err := Parse([]byte("a: [1, x]\n"), ".YML")
+	require.NoError(t, err)
+
+	require.Equal(t, map[string]any{"a": []any{int64(1), "x"}}, fromJSON)
+	require.Equal(t, fromJSON, fromYAML)
+
+	_, err = Parse([]byte("a = 1"), "toml")
+	require.EqualError(t, err, `config: format "toml" is not JSON or YAML`)
+}
+
 func TestPropDecode_TimestampsAndKeysStayText(t *testing.T) {
 	// C3: unquoted YAML timestamps and scalar keys keep their exact text, wherever they are.
 	timestamp := rapid.Custom(func(t *rapid.T) string {

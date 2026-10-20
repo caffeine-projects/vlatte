@@ -1,0 +1,448 @@
+openapi: 3.1.0
+info:
+  title: vlatte admin API
+  version: "1"
+  summary: Manage a vlatte mock server while it runs.
+  description: |
+    The admin API of a vlatte mock server. It is an HTTP server of its own, on its own address, the same for mock
+    servers of every protocol: an operation the server's protocol can't do answers `501` with the code `not_supported`.
+
+    **Formats.** Bodies are JSON or YAML: send `Content-Type: application/json`, the default, or `application/yaml`.
+    Answers follow `Accept`: JSON by default, YAML when it is preferred. `Accept` that takes neither is `406`.
+
+    **Errors.** Every error is an RFC 9457 problem document, `application/problem+json` or `application/problem+yaml`,
+    with a stable `code`. Problems of a mock or a body list each in `problems`.
+
+    **Safety.** The admin API has no authentication: it listens on a local address unless told otherwise. Browsers'
+    cross-site requests that change state are refused with `403`.
+  license:
+    name: MIT
+    url: https://github.com/caffeine-projects/vlatte/blob/main/LICENSE
+tags:
+  - name: Server
+    description: The admin API and the mock server it manages.
+  - name: Mocks
+    description: The mocks the server serves, from files, code and this API.
+paths:
+  /health:
+    get:
+      tags: [Server]
+      operationId: getHealth
+      summary: Check the admin API
+      description: Answers once the admin API serves, with the kind of the mock server and the URL of its mocks.
+      responses:
+        "200":
+          description: The admin API serves.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/Health" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+  /openapi:
+    get:
+      tags: [Server]
+      operationId: getOpenAPI
+      summary: Get this document
+      description: This OpenAPI document, in JSON or YAML as `Accept` asks.
+      responses:
+        "200":
+          description: The OpenAPI document.
+          content:
+            application/json:
+              schema: { type: object }
+            application/yaml:
+              schema: { type: object }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+  /docs:
+    get:
+      tags: [Server]
+      operationId: getDocs
+      summary: Read this document
+      description: A page that renders this document. It loads its renderer, Scalar, from a CDN.
+      responses:
+        "200":
+          description: The page.
+          content:
+            text/html:
+              schema: { type: string }
+  /mocks:
+    get:
+      tags: [Mocks]
+      operationId: listMocks
+      summary: List mocks
+      description: Every mock, enabled or not, in the order mocks match requests.
+      responses:
+        "200":
+          description: The mocks.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MockList" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/MockList" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+    post:
+      tags: [Mocks]
+      operationId: addMock
+      summary: Add a mock
+      description: |
+        Adds the mock of the body, a mock file. Without an `id`, the mock gets a new one. An `id` in use is a `409`:
+        replace that mock with `PUT /mocks/{id}`. A relative `body_file` opens from the server's working directory.
+      requestBody: { $ref: "#/components/requestBodies/Mock" }
+      responses:
+        "201":
+          description: The mock was added.
+          headers:
+            Location:
+              description: Where the mock is, such as `/mocks/hello`.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/DuplicateID" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    delete:
+      tags: [Mocks]
+      operationId: removeAllMocks
+      summary: Remove every mock
+      description: Removes every mock, of files and code too. `POST /mocks/reload` loads the mock files again.
+      responses:
+        "204":
+          description: The server has no mocks.
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+  /mocks/validate:
+    post:
+      tags: [Mocks]
+      operationId: validateMock
+      summary: Check a mock without adding it
+      description: Builds the mock of the body as `POST /mocks` would, and answers the same, without adding it.
+      requestBody: { $ref: "#/components/requestBodies/Mock" }
+      responses:
+        "200":
+          description: The mock would be added.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/DuplicateID" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /mocks/reload:
+    post:
+      tags: [Mocks]
+      operationId: reloadMocks
+      summary: Load the mock files again
+      description: |
+        Swaps the mocks of the mock files for what the files define now, in one step. A mock added through this API
+        gives way to a mock file's mock with its id. When a file has problems, nothing changes.
+      responses:
+        "204":
+          description: The mock files were loaded.
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/DuplicateID" }
+        "500": { $ref: "#/components/responses/LoadFailed" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /mocks/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The id of the mock.
+        schema: { type: string, pattern: "^[A-Za-z0-9._~-]+$" }
+    get:
+      tags: [Mocks]
+      operationId: getMock
+      summary: Get a mock
+      description: The mock as a mock file describes it, which `PUT` and `POST` take back.
+      responses:
+        "200":
+          description: The mock.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Mock" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/Mock" }
+        "404": { $ref: "#/components/responses/MockNotFound" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "500": { $ref: "#/components/responses/DescribeFailed" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    put:
+      tags: [Mocks]
+      operationId: replaceMock
+      summary: Replace a mock
+      description: |
+        Swaps the mock for the mock of the body in one step, so a request finds one or the other. The body's `id` must
+        be the path's. A mock replaced this way gives way to a mock file's mock with its id on the next reload.
+      requestBody: { $ref: "#/components/requestBodies/Mock" }
+      responses:
+        "200":
+          description: The mock was replaced.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "404": { $ref: "#/components/responses/MockNotFound" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    patch:
+      tags: [Mocks]
+      operationId: updateMock
+      summary: Enable or disable a mock
+      description: A disabled mock matches no request until it is enabled again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MockChange" }
+          application/yaml:
+            schema: { $ref: "#/components/schemas/MockChange" }
+      responses:
+        "200":
+          description: The mock, changed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "404": { $ref: "#/components/responses/MockNotFound" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+    delete:
+      tags: [Mocks]
+      operationId: removeMock
+      summary: Remove a mock
+      responses:
+        "204":
+          description: The mock was removed.
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "404": { $ref: "#/components/responses/MockNotFound" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+components:
+  requestBodies:
+    Mock:
+      required: true
+      description: A mock file, in JSON or YAML.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Mock" }
+        application/yaml:
+          schema: { $ref: "#/components/schemas/Mock" }
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+        kind:
+          type: string
+          description: The protocol of the mock server.
+          examples: [http, grpc]
+        url:
+          type: string
+          description: The URL the mock server serves its mocks at.
+    Mock:
+      type: object
+      description: |
+        A mock file. For HTTP mock servers, `mockhttp/schema/http.schema.json` in the vlatte repository describes it.
+      properties:
+        id:
+          type: string
+          pattern: "^[A-Za-z0-9._~-]+$"
+      additionalProperties: true
+      examples:
+        - id: hello
+          request: { method: GET, path: /hello }
+          response: { status: 200, body: hello }
+    MockSummary:
+      type: object
+      description: The state of a mock.
+      required: [id, priority, enabled, hits]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        priority:
+          type: integer
+          description: Mocks of lower priority match first.
+        enabled:
+          type: boolean
+          description: Whether the mock matches requests.
+        hits:
+          type: integer
+          description: How many requests the mock answered.
+        origin:
+          type: string
+          description: Where the mock came from, such as a mock file's path, or `admin` for this API.
+      additionalProperties: false
+    MockList:
+      type: object
+      required: [mocks]
+      properties:
+        mocks:
+          type: array
+          items: { $ref: "#/components/schemas/MockSummary" }
+      additionalProperties: false
+    MockChange:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether the mock matches requests.
+      additionalProperties: false
+    Problem:
+      type: object
+      description: An RFC 9457 problem document. Its type is `about:blank`, so `title` is the status's phrase.
+      required: [status, title, code, detail, instance]
+      properties:
+        status:
+          type: integer
+        title:
+          type: string
+        code:
+          type: string
+          description: What went wrong, as a stable code clients can act on.
+          enum:
+            - invalid_body
+            - id_mismatch
+            - cross_origin
+            - mock_not_found
+            - route_not_found
+            - method_not_allowed
+            - not_acceptable
+            - duplicate_id
+            - body_too_large
+            - unsupported_media_type
+            - describe_failed
+            - load_failed
+            - internal
+            - not_supported
+        detail:
+          type: string
+          description: What went wrong in this request.
+        instance:
+          type: string
+          description: The path of the request.
+        problems:
+          type: array
+          description: The problems of a mock, a body or a mock file, one by one.
+          items: { $ref: "#/components/schemas/ProblemItem" }
+      additionalProperties: false
+    ProblemItem:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: A stable code, such as `unknown_key`, `invalid_value` or `parse_error`.
+        origin:
+          type: string
+          description: Where the problem is, such as `admin request` or a mock file.
+        key:
+          type: string
+          description: The key with the problem, such as `response.status`.
+        value:
+          type: string
+          description: The value with the problem.
+        message:
+          type: string
+        hint:
+          type: string
+          description: How to fix it.
+      additionalProperties: false
+  responses:
+    InvalidBody:
+      description: "`invalid_body`: the mock or the body has problems, or `id_mismatch`: the body's id isn't the path's."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    CrossOrigin:
+      description: "`cross_origin`: a browser's cross-site request can't change the server."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    MockNotFound:
+      description: "`mock_not_found`: no mock has the id."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotAcceptable:
+      description: "`not_acceptable`: `Accept` takes neither JSON nor YAML. Always JSON."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    DuplicateID:
+      description: "`duplicate_id`: a mock has the id already."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    BodyTooLarge:
+      description: "`body_too_large`: the body is over 10 MiB."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    UnsupportedMediaType:
+      description: "`unsupported_media_type`: the body is neither JSON nor YAML. `Accept` lists what is."
+      headers:
+        Accept:
+          schema: { type: string }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    DescribeFailed:
+      description: "`describe_failed`: the mock can't be described as a mock file, such as one with a binary body."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    LoadFailed:
+      description: "`load_failed`: the mock files have problems, listed in `problems`. Nothing changed."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotSupported:
+      description: "`not_supported`: the mock server's protocol can't do this."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }

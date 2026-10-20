@@ -134,7 +134,7 @@ func TestPropAdmin_AddsMocksByID(t *testing.T) {
 	// M15: a mock posted to the admin API is stored under its id and served; posting the id again is a conflict.
 	t.Parallel()
 
-	m := MustNew(Setup().Silent())
+	m := MustNew(Setup().Silent().Admin(""))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -151,7 +151,7 @@ func TestPropAdmin_AddsMocksByID(t *testing.T) {
 		require.NoError(t, err)
 
 		post := func() int {
-			res, err := http.Post(m.URL(m.Config().AdminPath, "mocks"), MIMEApplicationJSON, strings.NewReader(string(body)))
+			res, err := http.Post(m.AdminURL()+"/mocks", MIMEApplicationJSON, strings.NewReader(string(body)))
 			require.NoError(t, err)
 			require.NoError(t, res.Body.Close())
 
@@ -166,7 +166,7 @@ func TestPropAdmin_AddsMocksByID(t *testing.T) {
 
 		defer m.storage.Delete(context.Background(), model.id)
 
-		res, err := http.Get(m.URL(m.Config().AdminPath, "mocks", model.id))
+		res, err := http.Get(m.AdminURL() + "/mocks/" + model.id)
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
 		require.Equal(t, http.StatusOK, res.StatusCode)

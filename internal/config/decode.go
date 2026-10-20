@@ -36,6 +36,17 @@ func Format(format string) (string, bool) {
 	return f, isFormat("." + f)
 }
 
+// Parse parses data, a document in format, json, yaml or yml as Format takes it, into the data model of package value,
+// as decode does.
+func Parse(data []byte, format string) (any, error) {
+	f, ok := Format(format)
+	if !ok {
+		return nil, fmt.Errorf("config: format %q is not JSON or YAML", format)
+	}
+
+	return decode(data, "."+f)
+}
+
 // decode parses data, a JSON or YAML document chosen by ext, into the data model of package value, one for both
 // formats: objects are map[string]any, lists []any, whole numbers that fit int64 are int64, other numbers float64.
 // YAML timestamps and mapping keys keep their text, as they would in JSON.

@@ -29,7 +29,6 @@ var (
 type Config struct {
 	// Common fields
 	Name                  string
-	AdminPath             string
 	RootDir               string
 	TLSConfig             *tls.Config
 	TLSCertificates       []tls.Certificate
@@ -73,6 +72,7 @@ type Config struct {
 	Loaders                        []Loader
 	Proxy                          *ProxyConfig
 	Record                         *RecordConfig
+	Admin                          *AdminConfig
 	MockFileHandlers               []MockFileHandler
 	HeaderNamesToRedact            map[string]struct{}
 	UseHTTPS                       bool
@@ -96,7 +96,6 @@ type Config struct {
 // Apply copies the current Config struct values to the given Config parameter.
 func (c *Config) Apply(conf *Config) error {
 	conf.Name = c.Name
-	conf.AdminPath = c.AdminPath
 	conf.RootDir = c.RootDir
 	conf.TLSConfig = c.TLSConfig
 	conf.TLSCertificates = c.TLSCertificates
@@ -132,6 +131,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Loaders = c.Loaders
 	conf.Proxy = c.Proxy
 	conf.Record = c.Record
+	conf.Admin = c.Admin
 	conf.UseHTTPS = c.UseHTTPS
 	conf.WebhookTimeout = c.WebhookTimeout
 	conf.MockFileHandlers = c.MockFileHandlers
@@ -139,6 +139,13 @@ func (c *Config) Apply(conf *Config) error {
 	conf.HeaderNamesToRedact = c.HeaderNamesToRedact
 
 	return nil
+}
+
+// AdminConfig configures the admin API of a server: a RESTful HTTP server of its own, apart from the mocks. A nil
+// *AdminConfig serves none.
+type AdminConfig struct {
+	// Addr is the address the admin API listens on: host:port, :port or a port. Empty is a random local port.
+	Addr string
 }
 
 // DebugFn is a function for debug logging.
@@ -178,7 +185,6 @@ func defaultConfig() *Config {
 		HeaderNamesToRedact:            make(map[string]struct{}),
 		UseHTTP2:                       true,
 		Listeners:                      vlatte.NewListener(),
-		AdminPath:                      "/__admin",
 		LogPretty:                      true,
 		LogLevel:                       vlatte.LogLevelInfo,
 		LogVerbosity:                   vlatte.LogHeader,
@@ -501,9 +507,10 @@ func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
 	return cb
 }
 
-// AdminPath sets the Admin path.
-func (cb *ConfigBuilder) AdminPath(path string) *ConfigBuilder {
-	cb.conf.AdminPath = path
+// Admin serves the admin API, on an HTTP server of its own at addr: host:port, :port or a port. Empty is a random
+// local port. Server.AdminURL returns where it listens.
+func (cb *ConfigBuilder) Admin(addr string) *ConfigBuilder {
+	cb.conf.Admin = &AdminConfig{Addr: addr}
 	return cb
 }
 

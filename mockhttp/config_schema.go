@@ -97,6 +97,11 @@ func loadConfigSources(conf *Config) error {
 		conf.Record = &record
 	}
 
+	if conf.Admin != nil {
+		admin := *conf.Admin
+		conf.Admin = &admin
+	}
+
 	values, err := _schema().Load(conf, sources)
 
 	var problems []config.Problem
@@ -484,6 +489,18 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Set: func(c *Config, v config.Value) error {
 				section(&c.Record, *defaultRecordConfig()).IncludeMocked = v.Bool
 				return nil
+			},
+		},
+		field{
+			Key: "admin", Kind: config.Bool, Usage: "Serve the admin API, on an HTTP server of its own.",
+			Set: func(c *Config, v config.Value) error { toggle(&c.Admin, AdminConfig{}, v.Bool); return nil },
+		},
+		field{
+			Key: "admin.addr", Kind: config.String,
+			Usage: "Address the admin API listens on: host:port, :port or port. Empty picks a random local port.",
+			Set: func(c *Config, v config.Value) error {
+				section(&c.Admin, AdminConfig{}).Addr = v.Str
+				return checkAddr(v.Str)
 			},
 		},
 		field{

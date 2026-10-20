@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -139,18 +138,7 @@ func (s *httptestBackend) Info() *BackendInfo {
 // build creates the unstarted httptest.Server, which listens already: on the configured Listener, on the configured
 // address, or else on a random local port.
 func (s *httptestBackend) build() error {
-	admPath := "/" + strings.Trim(s.app.config.AdminPath, "/")
-	admin := http.StripPrefix(admPath, s.app.admin.Init())
-
-	s.server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only the admin API is routed. Every other request, whatever its method, reaches the mock handler.
-		if strings.HasPrefix(r.URL.Path, admPath+"/") {
-			admin.ServeHTTP(w, r)
-			return
-		}
-
-		s.handler.ServeHTTP(w, r)
-	}))
+	s.server = httptest.NewUnstartedServer(s.handler)
 
 	addr := s.app.config.Addr
 	if l := s.app.config.Listener; l != nil {

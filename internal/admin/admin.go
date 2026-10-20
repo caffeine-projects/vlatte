@@ -1,140 +1,257 @@
-// Package admin provides a transport-agnostic admin API for managing mocks
-// stored in a [vlatte.Store]. It exposes an [http.Handler] that can be
-// mounted by any mock server that speaks HTTP for its control plane — HTTP,
-// gRPC and future transports alike.
+// Package admin serves the admin API of a mock server: a RESTful HTTP server of its own, on its own address, the same
+// for mock servers of every protocol. Package handler holds its units, one per operation; a server answers 501 to the
+// operations its protocol can't do, so the API, and its OpenAPI document, stay the same.
 package admin
 
 import (
-	"encoding/json/jsontext"
-	json "encoding/json/v2"
+	"cmp"
+	"context"
 	"errors"
-	"io"
-	"mime"
+	"fmt"
+	"net"
 	"net/http"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
-	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 )
-
-// ErrUnsupportedContentType is returned when a request carries a Content-Type
-// that does not map to a mock file format.
-var ErrUnsupportedContentType = errors.New("admin: unsupported content type")
 
 const (
-	headerContentType = "Content-Type"
-	headerLocation    = "Location"
-	contentTypeJSON   = "application/json; charset=UTF-8"
+	// _readHeaderTimeout bounds how long a client takes to send the headers of a request.
+	_readHeaderTimeout = 10 * time.Second
+
+	// _shutdownTimeout bounds how long Close waits for the requests being served, before it closes their connections.
+	_shutdownTimeout = 5 * time.Second
 )
 
-// Admin is a transport-agnostic admin API for managing mocks stored in a
-// [vlatte.Store].
-type Admin[B vlatte.Mock] struct {
-	repo    vlatte.Store[B]
-	builder vlatte.MockBuilder[B]
+// _routes lists the routes of the admin API, each with what a server that lacks it can't do. The OpenAPI document
+// documents each.
+var _routes = []struct {
+	pattern string
+	lacking string
+}{
+	{pattern: "GET /health"},
+	{pattern: "GET /openapi"},
+	{pattern: "GET /docs"},
+	{pattern: "GET /mocks"},
+	{pattern: "POST /mocks", lacking: "build mocks from documents"},
+	{pattern: "DELETE /mocks"},
+	{pattern: "POST /mocks/validate", lacking: "build mocks from documents"},
+	{pattern: "POST /mocks/reload", lacking: "load mock files"},
+	{pattern: "GET /mocks/{id}"},
+	{pattern: "PUT /mocks/{id}", lacking: "build mocks from documents"},
+	{pattern: "PATCH /mocks/{id}"},
+	{pattern: "DELETE /mocks/{id}"},
 }
 
-// New creates an [Admin] bound to the given repo and mock builder.
-func New[B vlatte.Mock](repo vlatte.Store[B], builder vlatte.MockBuilder[B]) *Admin[B] {
-	return &Admin[B]{repo: repo, builder: builder}
+var errNoMocks = errors.New("admin: no mock store: pass the Mocks option")
+
+// Server is the admin API of a mock server.
+type Server struct {
+	addr    string
+	kind    string
+	url     func() string
+	logger  *zerolog.Logger
+	routes  map[string]http.Handler
+	handler http.Handler
+
+	mu      sync.Mutex // orders Start, Close and the requests that start as Close runs
+	srv     *http.Server
+	lis     net.Listener
+	served  chan struct{}
+	running sync.WaitGroup // the requests being served
+	started bool
+	closed  bool
 }
 
-// Init wires the admin routes and returns the resulting [http.Handler].
-func (a *Admin[B]) Init() http.Handler {
+// Option configures a Server.
+type Option func(s *Server)
+
+// Addr sets the address the admin API listens on: host:port, :port or a port. Empty is a random local port.
+func Addr(addr string) Option {
+	return func(s *Server) { s.addr = addr }
+}
+
+// Info sets what GET /health tells of the mock server: its kind, such as http, and the URL it serves its mocks at.
+func Info(kind string, url func() string) Option {
+	return func(s *Server) { s.kind, s.url = kind, url }
+}
+
+// Logger sets the logger of the admin API's internal errors. Nil logs nothing.
+func Logger(logger *zerolog.Logger) Option {
+	return func(s *Server) { s.logger = logger }
+}
+
+// Mocks sets the store of the mock server's mocks, and the builder of the mocks that requests send, as mock files in
+// JSON or YAML. Without a builder, the routes that add or replace mocks answer 501.
+func Mocks[M vlatte.Mock](store vlatte.Store[M], build vlatte.MockBuilder[M]) Option {
+	return func(s *Server) {
+		s.routes["GET /mocks"] = handler.ListMocks(store)
+		s.routes["DELETE /mocks"] = handler.RemoveAllMocks(store)
+		s.routes["GET /mocks/{id}"] = handler.GetMock(store)
+		s.routes["PATCH /mocks/{id}"] = handler.UpdateMock(store)
+		s.routes["DELETE /mocks/{id}"] = handler.RemoveMock(store)
+
+		if build != nil {
+			s.routes["POST /mocks"] = handler.AddMock(store, build)
+			s.routes["POST /mocks/validate"] = handler.ValidateMock(store, build)
+			s.routes["PUT /mocks/{id}"] = handler.ReplaceMock(store, build)
+		}
+	}
+}
+
+// Files sets the mock files of the mock server, which POST /mocks/reload loads again.
+func Files(files handler.Files) Option {
+	return func(s *Server) { s.routes["POST /mocks/reload"] = handler.ReloadMocks(files) }
+}
+
+// New creates the admin API of a mock server. It needs the Mocks option.
+func New(options ...Option) (*Server, error) {
+	s := &Server{routes: make(map[string]http.Handler, len(_routes))}
+	for _, option := range options {
+		option(s)
+	}
+
+	if s.routes["GET /mocks"] == nil {
+		return nil, errNoMocks
+	}
+
+	if s.logger == nil {
+		s.logger = new(zerolog.Nop())
+	}
+
+	s.routes["GET /health"] = handler.Health(s.kind, s.url)
+	s.routes["GET /openapi"] = handler.OpenAPI()
+	s.routes["GET /docs"] = handler.Docs()
+
 	mux := http.NewServeMux()
-
-	mux.HandleFunc("GET /ping", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("pong"))
-	})
-
-	mux.HandleFunc("GET /mocks/{id}", a.get)
-	mux.HandleFunc("POST /mocks", a.add)
-	mux.HandleFunc("POST /mocks/{$}", a.add)
-
-	return mux
-}
-
-func (a *Admin[B]) extension(r *http.Request) (string, error) {
-	contentType := r.Header.Get(headerContentType)
-	if len(contentType) == 0 {
-		return "json", nil
-	}
-
-	extension, err := mime.ExtensionsByType(contentType)
-	if err != nil {
-		return "", err
-	}
-
-	if len(extension) == 0 {
-		return "", ErrUnsupportedContentType
-	}
-
-	// mime returns extensions with a leading dot, e.g. ".json".
-	ext, ok := config.Format(extension[0])
-	if !ok {
-		return "", ErrUnsupportedContentType
-	}
-
-	return ext, nil
-}
-
-func (a *Admin[B]) add(w http.ResponseWriter, r *http.Request) {
-	extension, err := a.extension(r)
-	if err != nil {
-		http.Error(w, ErrUnsupportedContentType.Error(), http.StatusUnsupportedMediaType)
-		return
-	}
-
-	b, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-
-	mock, err := a.builder.BuildFromBytes(b, extension)
-	if err != nil {
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-
-	if err := a.repo.Store(r.Context(), mock); err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, vlatte.ErrDuplicateID) {
-			status = http.StatusConflict
+	for _, route := range _routes {
+		h := s.routes[route.pattern]
+		if h == nil {
+			h = handler.NotSupported(route.lacking)
 		}
 
-		http.Error(w, err.Error(), status)
-
-		return
+		mux.Handle(route.pattern, h)
 	}
 
-	w.Header().Add(headerLocation, "/mocks/"+mock.ID())
-	w.WriteHeader(http.StatusCreated)
+	csrf := http.NewCrossOriginProtection()
+	csrf.SetDenyHandler(handler.CrossOriginDenied())
+	s.handler = s.track(csrf.Handler(handler.Routing(mux)))
+
+	return s, nil
 }
 
-func (a *Admin[B]) get(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	mock, err := a.repo.Pick(r.Context(), id)
-	if errors.Is(err, vlatte.ErrNotFound) {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
+// MustNew is like New, but panics on an error.
+func MustNew(options ...Option) *Server {
+	s, err := New(options...)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		panic(err)
 	}
 
-	w.Header().Add(headerContentType, contentTypeJSON)
+	return s
+}
 
-	var payload any = mock
-	if d, ok := any(mock).(descriptor.SelfDescriptive); ok {
-		payload = d.Describe()
+// Start listens on the server's address and serves the admin API. It starts once: it fails with vlatte.ErrStarted
+// once it started, and with http.ErrServerClosed once it closed. A start that fails to listen closes the server.
+func (s *Server) Start() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return http.ErrServerClosed
 	}
 
-	if err := json.MarshalEncode(jsontext.NewEncoder(w), payload, json.Deterministic(true)); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if s.started {
+		return vlatte.ErrStarted
 	}
 
-	w.WriteHeader(http.StatusOK)
+	s.started = true
+
+	addr := cmp.Or(s.addr, "127.0.0.1:0")
+	if _, err := strconv.Atoi(addr); err == nil {
+		addr = ":" + addr
+	}
+
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		s.closed = true
+		return fmt.Errorf("admin: %w", err)
+	}
+
+	srv := &http.Server{Handler: s.handler, ReadHeaderTimeout: _readHeaderTimeout}
+	served := make(chan struct{})
+
+	s.srv, s.lis, s.served = srv, lis, served
+
+	go func() {
+		defer close(served)
+
+		if err := srv.Serve(lis); !errors.Is(err, http.ErrServerClosed) {
+			s.logger.Error().Err(err).Msg("admin: serving")
+		}
+	}()
+
+	return nil
+}
+
+// URL returns the base URL of the admin API, or "" before it starts.
+func (s *Server) URL() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.lis == nil {
+		return ""
+	}
+
+	return "http://" + s.lis.Addr().String()
+}
+
+// Close stops the admin API, and waits for the requests it serves to end, so no admin operation runs, and no
+// connection stays, once it returns. It closes the connections of requests that take longer than a few seconds. A
+// closed server doesn't start again.
+func (s *Server) Close() error {
+	s.mu.Lock()
+	s.closed = true
+	srv, served := s.srv, s.served
+	s.mu.Unlock()
+
+	if srv == nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), _shutdownTimeout)
+	defer cancel()
+
+	err := srv.Shutdown(ctx)
+	if err != nil {
+		err = srv.Close()
+	}
+
+	s.running.Wait()
+	<-served
+
+	return err
+}
+
+// track counts the requests h serves, so Close waits for them, and gives them the server's logger. A request that
+// starts once Close runs is aborted: Close closed its connection.
+func (s *Server) track(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			panic(http.ErrAbortHandler)
+		}
+
+		s.running.Add(1)
+		s.mu.Unlock()
+
+		defer s.running.Done()
+
+		h.ServeHTTP(w, r.WithContext(s.logger.WithContext(r.Context())))
+	})
 }

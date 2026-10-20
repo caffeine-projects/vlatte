@@ -55,9 +55,9 @@ type Server struct {
 
 	data    map[string]any
 	logger  *zerolog.Logger
-	started atomic.Bool // set by the first start: a server starts once
-	closed  atomic.Bool // set by Close: a closed server doesn't start again
-	admin   *admin.Admin[*Mock]
+	started atomic.Bool   // set by the first start: a server starts once
+	closed  atomic.Bool   // set by Close: a closed server doesn't start again
+	admin   *admin.Server // nil without Config.Admin
 
 	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
 	events *vlatte.EventRunner
@@ -206,12 +206,20 @@ func New(config ...Option) (*Server, error) {
 	app.requestBodyParsers = parsers
 	app.events = eventRunner
 
-	app.admin = admin.New(
-		repository,
-		vlatte.MockBuilderFunc[*Mock](func(content []byte, ext string) (*Mock, error) {
-			return buildAdminMock(app, content, ext)
-		}),
-	)
+	if conf.Admin != nil {
+		app.admin, err = admin.New(
+			admin.Addr(conf.Admin.Addr),
+			admin.Info(string(Kind), func() string { return app.URL() }),
+			admin.Logger(app.logger),
+			admin.Mocks(repository, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
+				return buildAdminMock(app, content, format)
+			})),
+			admin.Files(app),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
+	}
 
 	server, err := factory.NewBackend(BackendConfig{App: app, Handler: handler})
 	if err != nil {
@@ -332,6 +340,16 @@ func (app *Server) URL(paths ...string) string {
 	return u + rest
 }
 
+// AdminURL returns the base URL of the admin API, or "" when the server serves none, or hasn't started: see
+// ConfigBuilder.Admin.
+func (app *Server) AdminURL() string {
+	if app.admin == nil {
+		return ""
+	}
+
+	return app.admin.URL()
+}
+
 // Parameters returns Params instance associated with this application.
 func (app *Server) Parameters() vlatte.KV {
 	return app.params
@@ -369,11 +387,18 @@ func (app *Server) MustReload() {
 	}
 }
 
-// Close closes the mock server. It cancels the on_complete events still running, such as a webhook waiting for its
-// delay or its target, so the requests waiting for them end, and waits for those requests. It stops the recording,
-// and waits until it wrote what it took. A closed server doesn't start again.
+// Close closes the mock server. It closes the admin API first, which waits for the operations it serves. It cancels
+// the on_complete events still running, such as a webhook waiting for its delay or its target, so the requests
+// waiting for them end, and waits for those requests. It stops the recording, and waits until it wrote what it took.
+// A closed server doesn't start again.
 func (app *Server) Close() {
 	app.closed.Store(true)
+
+	if app.admin != nil {
+		if err := app.admin.Close(); err != nil {
+			app.logger.Debug().Err(err).Msg("server: Close: error closing the admin API")
+		}
+	}
 
 	// The backend waits for the requests it serves, and they wait for their events: cancel the events first.
 	app.events.Close()
@@ -461,6 +486,12 @@ func (app *Server) DescribeConfig() string {
 	buf.WriteString(app.URL())
 	buf.WriteString("\n")
 
+	if app.admin != nil {
+		buf.WriteString("Admin API: ")
+		buf.WriteString(app.AdminURL())
+		buf.WriteString("\n")
+	}
+
 	return buf.String()
 }
 
@@ -469,8 +500,8 @@ func (app *Server) DescribeConfig() string {
 // --
 
 // start starts the server once with listen, the backend's Listen or ListenTLS. The backend listens first, so loaders
-// can read URL, and serves once the mocks loaded and the recording started. A start that fails, or that a Close
-// overtook, closes the server.
+// can read URL, and serves once the mocks loaded, the recording started and the admin API serves. A start that fails,
+// or that a Close overtook, closes the server.
 func (app *Server) start(listen func() error) error {
 	if app.closed.Load() {
 		return http.ErrServerClosed
@@ -483,6 +514,10 @@ func (app *Server) start(listen func() error) error {
 	err := listen()
 	if err == nil {
 		err = app.onStart()
+	}
+
+	if err == nil && app.admin != nil {
+		err = app.admin.Start()
 	}
 
 	if err == nil && app.closed.Load() {

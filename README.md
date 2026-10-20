@@ -452,6 +452,58 @@ record:
 
 The target's TLS certificate is verified: a recording sends the target its requests, credentials included. `record.skip_ssl_verify`, or `RecordSkipSSLVerify(true)`, skips it, such as for a self-signed certificate. In Go, `RecordTransport(rt)` sends through a transport of yours instead, such as one that trusts the target's CA, and `skip_ssl_verify` doesn't apply to it. `vlatte --help` lists every `record` setting.
 
+## Admin API
+
+The admin API manages a server while it runs. It is an HTTP server of its own, on its own address, the same for mock servers of every protocol, and it leaves every path of the mock server to the mocks. It serves only when asked:
+
+```go
+m := mockhttp.MustNew(mockhttp.Setup().Admin("127.0.0.1:8081")) // "" picks a random local port
+m.MustStart()
+fmt.Println(m.AdminURL()) // http://127.0.0.1:8081
+```
+
+From settings, `admin: true` turns it on, and `admin.addr` (`--admin-addr`, `VLATTE_ADMIN_ADDR`) sets its address.
+
+| Route | What it does |
+|---|---|
+| `GET /health` | Answers once the admin API serves, with the kind of the server and the URL of its mocks. |
+| `GET /mocks` | Lists every mock, enabled or not, with its `priority`, `enabled`, `hits` and `origin`. |
+| `POST /mocks` | Adds the mock of the body, a [mock file](#mock-files). An id in use is a `409`. |
+| `POST /mocks/validate` | Checks a mock as `POST /mocks` would, without adding it. |
+| `GET /mocks/{id}` | The mock as a mock file describes it, which `PUT` and `POST` take back. |
+| `PUT /mocks/{id}` | Replaces the mock, in one step. The body's id must be the path's. |
+| `PATCH /mocks/{id}` | Enables or disables the mock: `{"enabled": false}`. |
+| `DELETE /mocks/{id}`, `DELETE /mocks` | Removes the mock, or every mock. |
+| `POST /mocks/reload` | Loads the mock files again, as `m.Reload()` does. A mock file's mock takes the place of a mock added through the admin API with its id. |
+| `GET /openapi`, `GET /docs` | The OpenAPI document, and a page that renders it. The page loads [Scalar](https://scalar.com) from a CDN, so it needs internet. |
+
+**Formats.** Bodies are JSON, or YAML with `Content-Type: application/yaml`. Answers follow `Accept`: JSON, or YAML when it is preferred. A relative `body_file` in a mock sent to the admin API opens from the server's working directory, as `GET /mocks/{id}` writes it.
+
+**Errors** are [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem documents with a stable `code`; the problems of a mock are listed one by one:
+
+```json
+{
+  "status": 400,
+  "title": "Bad Request",
+  "code": "invalid_body",
+  "detail": "the mock has 1 problem",
+  "instance": "/mocks",
+  "problems": [
+    {
+      "code": "unknown_key",
+      "origin": "admin request",
+      "key": "response.stauts",
+      "message": "response.stauts is not a known setting",
+      "hint": "did you mean response.status?"
+    }
+  ]
+}
+```
+
+A request net/http refuses before the admin API reads it, such as one with a malformed request line, is answered in plain text.
+
+**Safety.** The admin API has no authentication: it listens on a local address unless told otherwise. A browser's cross-site request that would change the server is refused with `403`.
+
 ## Failures
 
 When no mock matches, or serving a request fails, the server answers itself. It sends `418 I'm a teapot`, a status a real server rarely sends, so the answer never looks like a mock's, and the `VLatte-Error` header says why:
@@ -568,12 +620,13 @@ vlatte --record --record-target=https://api.example.com --record-paths='/v1/*'
 vlatte
 ```
 
-While it runs, `POST /__admin/mocks` adds a mock sent in the request body, for example as JSON:
+With `--admin`, it serves the [admin API](#admin-api) too, on an address of its own, which it prints. `POST /mocks` adds a mock sent in the request body, for example as JSON:
 
 ```sh
+vlatte --addr=127.0.0.1:8080 --admin-addr=127.0.0.1:8081
 curl -X POST -H 'Content-Type: application/json' \
   -d '{"request":{"method":"GET","path":"/added"},"response":{"status":201}}' \
-  http://127.0.0.1:8080/__admin/mocks
+  http://127.0.0.1:8081/mocks
 ```
 
 ## Development

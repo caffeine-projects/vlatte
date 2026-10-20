@@ -291,7 +291,7 @@ func TestPropMultipart_GoAndFilesDescribeTheSame(t *testing.T) {
 	// and what the admin API's GET shows posts back as a mock that describes the same again.
 	t.Parallel()
 
-	m := MustNew(Setup().Silent())
+	m := MustNew(Setup().Silent().Admin(""))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -333,7 +333,7 @@ func TestPropMultipart_GoAndFilesDescribeTheSame(t *testing.T) {
 		require.Equal(t, fromGo, withoutID(t, scope.Mock(id+"-file")))
 
 		// GET shows the mock; POSTed back under another id, it describes the same.
-		res, shown := fetch(t, m.URL(m.Config().AdminPath, "mocks", id+"-file"))
+		res, shown := fetch(t, m.AdminURL()+"/mocks/"+id+"-file")
 		require.Equal(t, http.StatusOK, res.StatusCode, "%s", shown)
 
 		var again map[string]any
@@ -343,7 +343,7 @@ func TestPropMultipart_GoAndFilesDescribeTheSame(t *testing.T) {
 		body, err := json.Marshal(again, json.Deterministic(true))
 		require.NoError(t, err)
 
-		res, created := post(t, m.URL(m.Config().AdminPath, "mocks"), MIMEApplicationJSON, body)
+		res, created := post(t, m.AdminURL()+"/mocks", MIMEApplicationJSON, body)
 		require.Equal(t, http.StatusCreated, res.StatusCode, "%s\n%s", created, body)
 
 		posted, err := m.storage.Pick(context.Background(), id+"-again")
