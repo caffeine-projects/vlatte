@@ -57,6 +57,23 @@ func TestProblems_Routing(t *testing.T) {
 	})
 }
 
+func TestProblems_PathsThatAreNotUTF8(t *testing.T) {
+	// A request's path can hold any bytes, which JSON and YAML can't: the problem document says the path with the bytes
+	// it can't hold replaced, and is a problem document still.
+	url := serve(t, newStore(t))
+
+	for _, accept := range []string{"application/json", "application/yaml"} {
+		res, body := send(t, request{method: http.MethodGet, url: url + "/%FF", accept: accept})
+
+		require.Equal(t, http.StatusNotFound, res.StatusCode, body)
+		require.Contains(t, res.Header.Get("Content-Type"), "application/problem+", body)
+
+		doc := conforms(t, res, body, "Problem")
+		require.Equal(t, "route_not_found", doc["code"])
+		require.Equal(t, "/\uFFFD", doc["instance"])
+	}
+}
+
 func TestProblems_NotAcceptableIsJSON(t *testing.T) {
 	// A client that takes neither format still gets an answer it can read: JSON.
 	url := serve(t, newStore(t))

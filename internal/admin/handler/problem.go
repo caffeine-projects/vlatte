@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/rs/zerolog"
 
@@ -83,10 +84,13 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 		zerolog.Ctx(r.Context()).Error().Str("code", p.code).Str("path", r.URL.Path).Msg("admin: " + p.detail)
 	}
 
+	// A request can send bytes that aren't UTF-8, such as in its path, which JSON and YAML can't hold.
 	doc := problemDoc{
-		Status: p.status, Title: http.StatusText(p.status), Code: p.code, Detail: p.detail, Instance: r.URL.Path,
+		Status: p.status, Title: http.StatusText(p.status), Code: p.code,
+		Detail: validUTF8(p.detail), Instance: validUTF8(r.URL.Path),
 	}
 	for _, item := range p.problems {
+		item.Key, item.Value, item.Message = validUTF8(item.Key), validUTF8(item.Value), validUTF8(item.Message)
 		doc.Problems = append(doc.Problems, problemItem(item))
 	}
 
@@ -102,6 +106,11 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 	}
 
 	write(w, p.status, problemType(format), body)
+}
+
+// validUTF8 returns s with the bytes that aren't UTF-8 replaced.
+func validUTF8(s string) string {
+	return strings.ToValidUTF8(s, "\uFFFD")
 }
 
 // invalid is the problem of a document a request sent, such as "the mock".
