@@ -1,10 +1,12 @@
 package mockhttp
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"slices"
@@ -177,7 +179,9 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w = &topResponseWriter{ctx: r.Context(), steps: steps, rw: w}
 	}
 
-	res, err := mock.reply.Reply(r.Context(), ReplyInput{RequestValues: reqValues, Writer: w})
+	noSwitch := len(mock.Steps()) > 0 || len(mock.spec.mappers) > 0
+
+	res, err := mock.reply.Reply(r.Context(), ReplyInput{RequestValues: reqValues, Writer: w, noSwitch: noSwitch})
 	if err != nil {
 		h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: %w", err))
 		return
@@ -201,7 +205,25 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		capture.answeredBy(res != nil && res.proxied)
 	}
 
-	if res != nil {
+	switch {
+	case res != nil && res.upgrade != nil:
+		h.debugHeader(rw, vlatte.ProxiedHeader, "true")
+
+		pipe, ok := h.switchProtocols(rw, reqValues, res)
+		if !ok {
+			return
+		}
+
+		// The connections are piped at once, as long as both sides want, while the call is counted, its callbacks
+		// and events run, and it is logged. The handler returns once the pipe is done.
+		piped := make(chan struct{})
+		go func() {
+			defer close(piped)
+			pipe()
+		}()
+
+		defer func() { <-piped }()
+	case res != nil:
 		// A streamed body, such as a proxy's, is read whole for mappers.
 		if len(mock.spec.mappers) > 0 && len(res.Body) == 0 {
 			if err = res.readBody(); err != nil {
@@ -223,7 +245,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// The mock counts as served, whatever happens to the answer once its status and headers are sent.
 		h.render(w, reqValues, res, capture)
-	} else if capture != nil {
+	case capture != nil:
 		capture.record()
 	}
 
@@ -301,8 +323,75 @@ func (h *mockHandler) serveUpstream(w http.ResponseWriter, r *RequestValues, ups
 	}
 
 	h.debugHeader(w, vlatte.ProxiedHeader, "true")
+
+	if res.upgrade != nil {
+		pipe, ok := h.switchProtocols(w, r, res)
+		if !ok {
+			return
+		}
+
+		h.lifecycle.OnProxied(r, res)
+		pipe()
+
+		return
+	}
+
 	h.render(w, r, res, capture)
 	h.lifecycle.OnProxied(r, res)
+}
+
+// switchProtocols answers with res, the 101 of a target that switched protocols, on the client's connection, which it
+// takes over, with the headers set on w, such as the debug headers. It returns the pipe between the client's
+// connection and the target's, to run once the call is logged, and false when it failed: before it took the
+// connection over, the client gets the server's answer to the failure, and after, the log warns.
+func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, res *Response) (func(), bool) {
+	upstream := res.upgrade
+
+	client, err := hijack(w)
+	if err != nil {
+		upstream.Close()
+		h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: switching protocols needs an HTTP/1.1 connection, "+
+			"and a response writer that can hijack it, or that unwraps to one that can: %w", err))
+
+		return nil, false
+	}
+
+	// The server is closing.
+	if !h.app.tunnels.add(client, upstream) {
+		client.Close()
+		upstream.Close()
+
+		return nil, false
+	}
+
+	done := func() {
+		h.app.tunnels.remove(client, upstream)
+		client.Close()
+		upstream.Close()
+	}
+
+	header := w.Header().Clone()
+	maps.Copy(header, res.Header)
+
+	out := bufio.NewWriter(client)
+	_, _ = fmt.Fprintf(out, "HTTP/1.1 %d %s\r\n", res.StatusCode, http.StatusText(res.StatusCode))
+	_ = header.Write(out)
+	_, _ = out.WriteString("\r\n")
+
+	if err := out.Flush(); err != nil {
+		done()
+		h.lifecycle.OnWarning(r, fmt.Errorf("http: answering the switch of protocols: %w", err))
+
+		return nil, false
+	}
+
+	return func() {
+		defer done()
+
+		if err := pipe(client, upstream); err != nil {
+			h.lifecycle.OnWarning(r, fmt.Errorf("http: connection that switched protocols: %w", err))
+		}
+	}, true
 }
 
 // connect opens a tunnel to the host of r, a CONNECT no mock matched, and pipes the client's connection to it until

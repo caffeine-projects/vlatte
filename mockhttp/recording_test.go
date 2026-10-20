@@ -1190,3 +1190,30 @@ func TestRecording_StreamingAnswersStillStream(t *testing.T) {
 	stopRecording(t, m)
 	require.Equal(t, "data: first\n\ndata: last\n\n", onlyMock(t, dir).Response.Body)
 }
+
+func TestRecording_ASwitchedConnectionIsNotRecorded(t *testing.T) {
+	// A call that switched protocols through a proxy reply, here a mock file's, has no response to record: the
+	// connection belongs to the client and the target from then on.
+	target := switchingTarget(t, "echo")
+	dir := t.TempDir()
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(FromBytes([]byte("request: {path: /ws}\nproxy: {target: '"+target.URL+"'}\n"), "yaml"))
+
+	require.NoError(t, m.StartRecording(RecordDir(dir), RecordIncludeMocked(true)))
+
+	conn, br, res := switchThrough(t, m, "/ws")
+	require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
+
+	_, err := io.WriteString(conn, "switched\n")
+	require.NoError(t, err)
+
+	line, err := br.ReadString('\n')
+	require.NoError(t, err)
+	require.Equal(t, "switched\n", line)
+	require.NoError(t, conn.Close())
+
+	require.Empty(t, stopRecording(t, m).Recordings)
+}

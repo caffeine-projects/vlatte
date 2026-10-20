@@ -20,11 +20,11 @@ func WithTransform(transform Transform) Option {
 	}
 }
 
-// WithRoundTripper returns an [Option] that sets the [http.RoundTripper] for a [WebHook], in place of the event's,
+// WithTransport returns an [Option] that sets the [http.RoundTripper] for a [WebHook], in place of the event's,
 // such as the server's transport mockhttp gives.
-func WithRoundTripper(roundTripper http.RoundTripper) Option {
+func WithTransport(transport http.RoundTripper) Option {
 	return func(w *WebHook) error {
-		w.roundTripper = roundTripper
+		w.transport = transport
 		return nil
 	}
 }

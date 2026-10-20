@@ -84,13 +84,15 @@
       "type": "object",
       "properties": {
         "target": { "type": "string", "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^/]+" },
-        "forward_header": { "$ref": "#/$defs/header_map" },
+        "request_header": { "$ref": "#/$defs/header_map" },
         "header": { "$ref": "#/$defs/header_map" },
-        "remove_headers": { "type": "array", "items": { "type": "string" } },
+        "remove_request_headers": { "type": "array", "items": { "type": "string" } },
         "trim_prefix": { "type": "string" },
         "trim_suffix": { "type": "string" },
         "timeout": { "$ref": "#/$defs/duration" },
-        "ssl_verify": { "$ref": "#/$defs/bool" }
+        "ssl_verify": { "$ref": "#/$defs/bool" },
+        "x_forwarded": { "$ref": "#/$defs/bool" },
+        "preserve_host": { "$ref": "#/$defs/bool" }
       },
       "required": [ "target" ],
       "additionalProperties": false

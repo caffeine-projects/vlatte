@@ -182,7 +182,7 @@ func TestWebHook_PrepareFailsTheMock(t *testing.T) {
 func TestWebHook_TransformCanAddHeaders(t *testing.T) {
 	// Parameters without headers had nil header maps, and a Transform that added a header panicked.
 	rt := &sent{}
-	wh, err := webhook.New(webhook.WithRoundTripper(rt), webhook.WithTransform(func(_ context.Context, _ vlatte.OnComplete, a *webhook.Args) error {
+	wh, err := webhook.New(webhook.WithTransport(rt), webhook.WithTransform(func(_ context.Context, _ vlatte.OnComplete, a *webhook.Args) error {
 		a.Header["X-A"] = "a"
 		a.HeaderTemplate["X-B"] = "{{ .b }}"
 
@@ -226,7 +226,7 @@ func TestWebHook_RunChecksWhatTheSendUses(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			rt := &sent{}
-			options := []webhook.Option{webhook.WithRoundTripper(rt)}
+			options := []webhook.Option{webhook.WithTransport(rt)}
 			if tc.transform != nil {
 				options = append(options, webhook.WithTransform(tc.transform))
 			}

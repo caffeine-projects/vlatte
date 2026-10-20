@@ -79,7 +79,7 @@ type Config struct {
 
 	// Transport sends what the server sends: the requests of proxy replies, of the recording target, of the forward
 	// proxy and of webhooks. Each takes its own transport first, when it has one: ProxyReply.Transport,
-	// RecordConfig.Transport, ProxyConfig.Transport or webhook.WithRoundTripper. For upstreams with different needs,
+	// RecordConfig.Transport, ProxyConfig.Transport or webhook.WithTransport. For upstreams with different needs,
 	// give each its own, or pass one that picks a transport by req.URL.Host. It is the caller's: the server never
 	// closes it.
 	//
