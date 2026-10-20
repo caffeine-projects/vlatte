@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"context"
 	"io"
 
 	"github.com/caffeine-projects/vlatte"
@@ -16,6 +17,21 @@ const Origin = "admin"
 type Files interface {
 	// Reload loads the mock files again, in place of the mocks they gave before.
 	Reload() error
+}
+
+// Recorder is a mock server that records what it proxies as mock files.
+type Recorder interface {
+	// StartRecording starts a recording with the settings of doc, a document in format with the keys of the record
+	// section of the server's settings; an empty one keeps them. It returns vlatte.ErrRecording while a recording runs,
+	// and a *config.Error when doc has problems.
+	StartRecording(doc []byte, format string) error
+
+	// StopRecording stops the recording, waits until it wrote what it took, and serves it. It returns
+	// vlatte.ErrNotRecording when none runs. A result with an error tells what wasn't recorded or served.
+	StopRecording(ctx context.Context) (*vlatte.RecordResult, error)
+
+	// RecordingStatus counts the calls of the recording, or is zero when none runs.
+	RecordingStatus() vlatte.RecordStatus
 }
 
 // mockSummary is what the admin API tells of a mock besides its description: its state.

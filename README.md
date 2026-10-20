@@ -452,6 +452,8 @@ record:
 
 The target's TLS certificate is verified: a recording sends the target its requests, credentials included. `record.skip_ssl_verify`, or `RecordSkipSSLVerify(true)`, skips it, such as for a self-signed certificate. In Go, `RecordTransport(rt)` sends through a transport of yours instead, such as one that trusts the target's CA, and `skip_ssl_verify` doesn't apply to it. `vlatte --help` lists every `record` setting.
 
+**Admin API.** The [admin API](#admin-api) starts and stops recordings while the server runs: `POST /recording` takes the keys of the `record` section, `GET /recording` counts the calls, and `DELETE /recording` stops it and lists the files it wrote. Its `/recorder` page does the same from a browser.
+
 ## Admin API
 
 The admin API manages a server while it runs. It is an HTTP server of its own, on its own address, the same for mock servers of every protocol, and it leaves every path of the mock server to the mocks. It serves only when asked:
@@ -475,6 +477,8 @@ From settings, `admin: true` turns it on, and `admin.addr` (`--admin-addr`, `VLA
 | `PATCH /mocks/{id}` | Enables or disables the mock: `{"enabled": false}`. |
 | `DELETE /mocks/{id}`, `DELETE /mocks` | Removes the mock, or every mock. |
 | `POST /mocks/reload` | Loads the mock files again, as `m.Reload()` does. A mock file's mock takes the place of a mock added through the admin API with its id. |
+| `POST /recording`, `GET /recording`, `DELETE /recording` | Starts a [recording](#recording-and-playback) with the keys of the `record` section, counts its calls, and stops it, listing the files it wrote. |
+| `GET /recorder` | A page that records a service from a browser. |
 | `GET /openapi`, `GET /docs` | The OpenAPI document, and a page that renders it. The page loads [Scalar](https://scalar.com) from a CDN, so it needs internet. |
 
 **Formats.** Bodies are JSON, or YAML with `Content-Type: application/yaml`. Answers follow `Accept`: JSON, or YAML when it is preferred. A relative `body_file` in a mock sent to the admin API opens from the server's working directory, as `GET /mocks/{id}` writes it.

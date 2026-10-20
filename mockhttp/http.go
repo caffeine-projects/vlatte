@@ -215,6 +215,7 @@ func New(config ...Option) (*Server, error) {
 				return buildAdminMock(app, content, format)
 			})),
 			admin.Files(app),
+			admin.Recorder(adminRecorder{app}),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("server: %w", err)

@@ -26,6 +26,8 @@ const (
 	_codeLoadFailed           = "load_failed"
 	_codeInternal             = "internal"
 	_codeNotSupported         = "not_supported"
+	_codeRecordingActive      = "recording_active"
+	_codeNotRecording         = "not_recording"
 )
 
 // problemError is an error a handler answers with, as an RFC 9457 problem document.

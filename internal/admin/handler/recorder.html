@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>vlatte recorder</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #fafaf9;
+      --fg: #1c1917;
+      --muted: #78716c;
+      --line: #e7e5e4;
+      --panel: #ffffff;
+      --accent: #b45309;
+      --danger: #b91c1c;
+      --ok: #15803d;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1c1917;
+        --fg: #f5f5f4;
+        --muted: #a8a29e;
+        --line: #44403c;
+        --panel: #292524;
+        --accent: #f59e0b;
+        --danger: #f87171;
+        --ok: #4ade80;
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 32px 16px 64px;
+    }
+
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 16px; margin: 0 0 12px; }
+    p { margin: 0 0 12px; }
+    code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .muted { color: var(--muted); }
+
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 20px;
+      margin-top: 20px;
+    }
+
+    label { display: block; font-weight: 600; margin: 12px 0 4px; }
+    label .muted { font-weight: 400; }
+
+    input[type="text"], select {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--fg);
+      font: inherit;
+    }
+
+    .row { display: flex; gap: 16px; flex-wrap: wrap; }
+    .row > div { flex: 1 1 200px; }
+
+    .check { display: flex; gap: 8px; align-items: center; font-weight: 400; }
+
+    .actions { display: flex; gap: 12px; margin-top: 20px; }
+
+    button {
+      padding: 8px 18px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--fg);
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button:disabled { opacity: 0.5; cursor: default; }
+
+    .state { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+    .dot.on { background: var(--danger); animation: pulse 1.2s infinite; }
+
+    @keyframes pulse { 50% { opacity: 0.3; } }
+
+    .counts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 12px; }
+    .count { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
+    .count b { display: block; font-size: 20px; }
+
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { font-size: 13px; color: var(--muted); font-weight: 600; }
+
+    .error { color: var(--danger); }
+    .error ul { margin: 4px 0 0; padding-left: 20px; }
+
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Recorder</h1>
+  <p class="muted">Records the answers of a service as mock files, which the server serves once the recording stops.</p>
+
+  <p id="unsupported" class="error" hidden></p>
+
+  <section id="setup">
+    <h2>Record</h2>
+    <p id="mocks" class="muted"></p>
+    <form id="form">
+      <label for="target">Target <span class="muted">— the service to record, such as https://api.example.com</span></label>
+      <input id="target" type="text" placeholder="https://api.example.com" autocomplete="off">
+
+      <div class="row">
+        <div>
+          <label for="paths">Paths <span class="muted">— globs, comma-separated; empty takes every path</span></label>
+          <input id="paths" type="text" placeholder="/v1/*">
+        </div>
+        <div>
+          <label for="methods">Methods <span class="muted">— comma-separated; empty takes every method</span></label>
+          <input id="methods" type="text" placeholder="GET, POST">
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="dir">Directory <span class="muted">— empty uses the server's</span></label>
+          <input id="dir" type="text" placeholder="testdata/_mocks_recorded">
+        </div>
+        <div>
+          <label for="format">Format</label>
+          <select id="format">
+            <option value="">The server's</option>
+            <option value="json">JSON</option>
+            <option value="yaml">YAML</option>
+          </select>
+        </div>
+      </div>
+
+      <label class="check"><input id="body_files" type="checkbox"> Write each response body to a file of its own</label>
+      <label class="check"><input id="include_mocked" type="checkbox"> Record the answers of mocks too</label>
+
+      <div class="actions">
+        <button id="start" class="primary" type="submit">Start recording</button>
+        <button id="stop" type="button" disabled>Stop and serve</button>
+      </div>
+    </form>
+    <div id="problem" class="error" hidden></div>
+  </section>
+
+  <section>
+    <div class="state"><span id="dot" class="dot"></span><span id="state">Not recording</span></div>
+    <div class="counts">
+      <div class="count"><b id="calls">0</b><span class="muted">calls</span></div>
+      <div class="count"><b id="mocks-written">0</b><span class="muted">mocks</span></div>
+      <div class="count"><b id="dropped">0</b><span class="muted">dropped</span></div>
+      <div class="count"><b id="failed">0</b><span class="muted">failed</span></div>
+    </div>
+  </section>
+
+  <section id="result" hidden>
+    <h2>Recorded</h2>
+    <p id="result-empty" class="muted" hidden>The recording took no calls.</p>
+    <table id="recordings">
+      <thead><tr><th>Mock</th><th>File</th><th>Responses</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div id="result-errors" class="error" hidden></div>
+  </section>
+</main>
+<script>
+  // The page talks to the admin API it is served by: GET /health, and GET, POST and DELETE /recording.
+  const $ = (id) => document.getElementById(id)
+  let polling = null
+
+  async function call(method, path, body) {
+    const init = { method, headers: { Accept: 'application/json' } }
+    if (body !== undefined) {
+      init.headers['Content-Type'] = 'application/json'
+      init.body = JSON.stringify(body)
+    }
+
+    const res = await fetch(path, init)
+    const text = await res.text()
+    return { res, doc: text ? JSON.parse(text) : null }
+  }
+
+  function list(value) {
+    return value.split(',').map((s) => s.trim()).filter((s) => s !== '')
+  }
+
+  function settings() {
+    const doc = {}
+    for (const key of ['target', 'dir', 'format']) {
+      const value = $(key).value.trim()
+      if (value !== '') doc[key] = value
+    }
+
+    for (const key of ['paths', 'methods']) {
+      const items = list($(key).value)
+      if (items.length > 0) doc[key] = items
+    }
+
+    for (const key of ['body_files', 'include_mocked']) {
+      if ($(key).checked) doc[key] = true
+    }
+
+    return doc
+  }
+
+  function showProblem(where, doc) {
+    const el = $(where)
+    el.replaceChildren()
+    if (!doc) {
+      el.hidden = true
+      return
+    }
+
+    const p = document.createElement('p')
+    p.textContent = doc.detail
+    el.append(p)
+
+    if (doc.problems) {
+      const ul = document.createElement('ul')
+      for (const item of doc.problems) {
+        const li = document.createElement('li')
+        li.textContent = (item.key ? item.key + ': ' : '') + item.message + (item.hint ? ' (' + item.hint + ')' : '')
+        ul.append(li)
+      }
+      el.append(ul)
+    }
+
+    el.hidden = false
+  }
+
+  function showStatus(status) {
+    $('dot').classList.toggle('on', status.active)
+    $('state').textContent = status.active ? 'Recording' : 'Not recording'
+    $('calls').textContent = status.calls
+    $('mocks-written').textContent = status.mocks
+    $('dropped').textContent = status.dropped
+    $('failed').textContent = status.failed
+    $('start').disabled = status.active
+    $('stop').disabled = !status.active
+
+    if (status.active && polling === null) {
+      polling = setInterval(refresh, 1000)
+    } else if (!status.active && polling !== null) {
+      clearInterval(polling)
+      polling = null
+    }
+  }
+
+  function showResult(result) {
+    const tbody = $('recordings').querySelector('tbody')
+    tbody.replaceChildren()
+
+    for (const m of result.recordings) {
+      const tr = document.createElement('tr')
+      for (const text of [m.name || m.id, m.file, String(m.responses)]) {
+        const td = document.createElement('td')
+        td.textContent = text
+        tr.append(td)
+      }
+      tbody.append(tr)
+    }
+
+    $('recordings').hidden = result.recordings.length === 0
+    $('result-empty').hidden = result.recordings.length > 0
+    showProblem('result-errors', result.errors ? { detail: result.errors.join('\n') } : null)
+    $('result').hidden = false
+  }
+
+  async function refresh() {
+    const { res, doc } = await call('GET', 'recording')
+    if (res.status === 501) {
+      $('unsupported').textContent = doc.detail + '.'
+      $('unsupported').hidden = false
+      $('setup').hidden = true
+      return
+    }
+
+    if (res.ok) showStatus(doc)
+  }
+
+  $('form').addEventListener('submit', async (event) => {
+    event.preventDefault()
+    const { res, doc } = await call('POST', 'recording', settings())
+    showProblem('problem', res.ok ? null : doc)
+    if (res.ok) {
+      $('result').hidden = true
+      showStatus(doc)
+    }
+  })
+
+  $('stop').addEventListener('click', async () => {
+    $('stop').disabled = true
+    const { res, doc } = await call('DELETE', 'recording')
+    if (res.ok) {
+      showProblem('problem', null)
+      showStatus(doc.status)
+      showResult(doc)
+    } else {
+      showProblem('problem', doc)
+      refresh()
+    }
+  })
+
+  call('GET', 'health').then(({ doc }) => {
+    if (doc && doc.url) {
+      $('mocks').textContent = 'Send the requests to record to ' + doc.url + '.'
+    }
+  })
+
+  refresh()
+</script>
+</body>
+</html>

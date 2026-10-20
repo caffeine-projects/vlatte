@@ -3,6 +3,7 @@ package mockhttp
 import (
 	json "encoding/json/v2"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,4 +133,79 @@ func TestAdmin_AReloadThatFailsTellsWhy(t *testing.T) {
 	require.Len(t, doc.Problems, 1)
 	require.Equal(t, "response.status", doc.Problems[0]["key"])
 	require.Contains(t, doc.Problems[0]["origin"], "bad.yaml")
+}
+
+func TestAdmin_RecordsAService(t *testing.T) {
+	// A recording started through the admin API takes the requests sent to the mock server to its target, and once
+	// stopped, the server answers them from the mock files it wrote, the target gone.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(HeaderContentType, MIMETextPlain)
+		_, _ = w.Write([]byte("hello from " + r.URL.Path))
+	}))
+
+	dir := t.TempDir()
+	m := adminServer(t, Setup())
+
+	settings := `{"target": "` + target.URL + `", "dir": "` + filepath.ToSlash(dir) + `", "format": "yaml"}`
+	res, body := do(t, http.MethodPost, m.AdminURL()+"/recording", nil, []byte(settings))
+	require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
+
+	_, body = do(t, http.MethodGet, m.URL("/greeting"), nil, nil)
+	require.Equal(t, "hello from /greeting", string(body))
+
+	res, body = do(t, http.MethodDelete, m.AdminURL()+"/recording", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+
+	var result struct {
+		Status     map[string]any `json:"status"`
+		Recordings []struct {
+			File string `json:"file"`
+		} `json:"recordings"`
+	}
+	require.NoError(t, json.Unmarshal(body, &result))
+	require.Equal(t, false, result.Status["active"])
+	require.Len(t, result.Recordings, 1)
+	require.True(t, strings.HasSuffix(result.Recordings[0].File, ".mock.yaml"), result.Recordings[0].File)
+	require.FileExists(t, result.Recordings[0].File)
+
+	target.Close()
+
+	res, body = do(t, http.MethodGet, m.URL("/greeting"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "hello from /greeting", string(body), "served from the recording")
+}
+
+func TestAdmin_RecordingSettingsWithProblems(t *testing.T) {
+	// The settings of a recording are those of the record section of the server's settings, checked the same way.
+	m := adminServer(t, Setup())
+
+	res, body := do(t, http.MethodPost, m.AdminURL()+"/recording", http.Header{HeaderContentType: {"application/yaml"}},
+		[]byte("format: xml\ntarget: ftp://example.com\nfrmat: json\n"))
+	require.Equal(t, http.StatusBadRequest, res.StatusCode, string(body))
+
+	var doc struct {
+		Code     string           `json:"code"`
+		Problems []map[string]any `json:"problems"`
+	}
+	require.NoError(t, json.Unmarshal(body, &doc))
+	require.Equal(t, "invalid_body", doc.Code)
+
+	keys := make([]any, 0, len(doc.Problems))
+	for _, p := range doc.Problems {
+		keys = append(keys, p["key"])
+	}
+	require.ElementsMatch(t, []any{"format", "target", "frmat"}, keys)
+
+	_, body = do(t, http.MethodGet, m.AdminURL()+"/recording", nil, nil)
+	require.JSONEq(t, `{"active": false, "calls": 0, "mocks": 0, "dropped": 0, "failed": 0}`, string(body), "nothing started")
+}
+
+func TestAdmin_RecordingSettingsTheRecordingRefuses(t *testing.T) {
+	// A setting the recording's own checks refuse, such as an empty method, is a problem of the body too: not a
+	// server error.
+	m := adminServer(t, Setup())
+
+	res, body := do(t, http.MethodPost, m.AdminURL()+"/recording", nil, []byte(`{"methods": ["GET", " "]}`))
+	require.Equal(t, http.StatusBadRequest, res.StatusCode, string(body))
+	require.Contains(t, string(body), "recorder: method 1 is empty")
 }

@@ -23,6 +23,10 @@ tags:
     description: The admin API and the mock server it manages.
   - name: Mocks
     description: The mocks the server serves, from files, code and this API.
+  - name: Recording
+    description: |
+      Recording a service as mock files: the server sends the requests the recording takes to its target, and writes
+      the answers as mock files, which it serves once the recording stops. HTTP mock servers only.
 paths:
   /health:
     get:
@@ -239,6 +243,86 @@ paths:
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "404": { $ref: "#/components/responses/MockNotFound" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
+  /recording:
+    get:
+      tags: [Recording]
+      operationId: getRecording
+      summary: Get the state of the recording
+      responses:
+        "200":
+          description: The state of the recording, inactive when none runs.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingStatus" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/RecordingStatus" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    post:
+      tags: [Recording]
+      operationId: startRecording
+      summary: Start a recording
+      description: |
+        Starts a recording with the settings of the server's `record` section, which the body changes. One recording
+        runs at a time.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordingSettings" }
+          application/yaml:
+            schema: { $ref: "#/components/schemas/RecordingSettings" }
+      responses:
+        "201":
+          description: The recording started.
+          headers:
+            Location:
+              description: "`/recording`"
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingStatus" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/RecordingStatus" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/RecordingActive" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    delete:
+      tags: [Recording]
+      operationId: stopRecording
+      summary: Stop the recording and serve it
+      description: |
+        Stops the recording, waits until it wrote what it took, and serves it: the mock files load again, with the
+        recording's directory. Calls it couldn't record, and why it isn't served, are in `errors`: it stopped all the
+        same.
+      responses:
+        "200":
+          description: The recording stopped.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingResult" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/RecordingResult" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/NotRecording" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /recorder:
+    get:
+      tags: [Recording]
+      operationId: getRecorder
+      summary: Record from a browser
+      description: A page that starts and stops recordings, and shows what they wrote.
+      responses:
+        "200":
+          description: The page.
+          content:
+            text/html:
+              schema: { type: string }
 components:
   requestBodies:
     Mock:
@@ -314,6 +398,111 @@ components:
           type: boolean
           description: Whether the mock matches requests.
       additionalProperties: false
+    RecordingSettings:
+      type: object
+      description: The settings of a recording, as the `record` section of the server's settings has them.
+      properties:
+        dir:
+          type: string
+          description: Directory of the recordings. Relative paths start at the server's root directory.
+          default: testdata/_mocks_recorded
+        format:
+          type: string
+          enum: [json, yaml, yml]
+          default: json
+        target:
+          type: string
+          description: The service to record, such as `https://api.example.com`. Requests the recording takes go to it.
+        skip_ssl_verify:
+          type: boolean
+          description: Skip the verification of the target's TLS certificate.
+        methods:
+          type: array
+          items: { type: string }
+          description: Methods of the requests the recording takes. None takes every method.
+        paths:
+          type: array
+          items: { type: string }
+          description: Glob patterns of the paths of the requests the recording takes, such as `/v1/*`.
+        request_headers:
+          type: array
+          items: { type: string }
+          description: Request headers recordings match.
+        exclude_response_headers:
+          type: array
+          items: { type: string }
+          description: Response headers recordings leave out.
+          default: [Set-Cookie]
+        body_files:
+          type: boolean
+          description: Write each response body to a file of its own.
+        max_inline_body:
+          type: integer
+          minimum: 0
+          description: Bytes of a body kept in memory while it is recorded. 0 uses the default.
+        max_body_size:
+          type: integer
+          description: Calls with a larger response body aren't recorded. 0 uses the default; negative, no limit.
+        repeats:
+          type: string
+          enum: [sequence, first]
+          description: What a recording keeps of a request that comes again.
+        include_mocked:
+          type: boolean
+          description: Record the answers of mocks too, not only proxied ones.
+      additionalProperties: false
+    RecordingStatus:
+      type: object
+      required: [active, calls, mocks, dropped, failed]
+      properties:
+        active:
+          type: boolean
+          description: Whether a recording takes calls.
+        calls:
+          type: integer
+          description: Calls the recording took.
+        mocks:
+          type: integer
+          description: Mocks it wrote.
+        dropped:
+          type: integer
+          description: Calls it refused, because too many waited to be written.
+        failed:
+          type: integer
+          description: Calls and mocks it couldn't record.
+      additionalProperties: false
+    RecordingResult:
+      type: object
+      required: [status, recordings]
+      properties:
+        status: { $ref: "#/components/schemas/RecordingStatus" }
+        recordings:
+          type: array
+          description: The mock files the recording wrote, in the order their requests first came.
+          items:
+            type: object
+            required: [id, file, responses]
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              file:
+                type: string
+                description: The path of the mock file.
+              body_files:
+                type: array
+                items: { type: string }
+                description: The names of its body files, next to it.
+              responses:
+                type: integer
+                description: How many responses it replies with.
+            additionalProperties: false
+        errors:
+          type: array
+          items: { type: string }
+          description: What the recording couldn't record, and why it isn't served.
+      additionalProperties: false
     Problem:
       type: object
       description: An RFC 9457 problem document. Its type is `about:blank`, so `title` is the status's phrase.
@@ -341,6 +530,8 @@ components:
             - load_failed
             - internal
             - not_supported
+            - recording_active
+            - not_recording
         detail:
           type: string
           description: What went wrong in this request.
@@ -434,6 +625,20 @@ components:
           schema: { $ref: "#/components/schemas/Problem" }
     LoadFailed:
       description: "`load_failed`: the mock files have problems, listed in `problems`. Nothing changed."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    RecordingActive:
+      description: "`recording_active`: a recording runs already."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotRecording:
+      description: "`not_recording`: no recording runs."
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }

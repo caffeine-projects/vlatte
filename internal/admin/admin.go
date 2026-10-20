@@ -46,6 +46,10 @@ var _routes = []struct {
 	{pattern: "PUT /mocks/{id}", lacking: "build mocks from documents"},
 	{pattern: "PATCH /mocks/{id}"},
 	{pattern: "DELETE /mocks/{id}"},
+	{pattern: "GET /recording", lacking: "record"},
+	{pattern: "POST /recording", lacking: "record"},
+	{pattern: "DELETE /recording", lacking: "record"},
+	{pattern: "GET /recorder"},
 }
 
 var errNoMocks = errors.New("admin: no mock store: pass the Mocks option")
@@ -109,6 +113,15 @@ func Files(files handler.Files) Option {
 	return func(s *Server) { s.routes["POST /mocks/reload"] = handler.ReloadMocks(files) }
 }
 
+// Recorder sets the recorder of the mock server, which GET, POST and DELETE /recording control.
+func Recorder(rec handler.Recorder) Option {
+	return func(s *Server) {
+		s.routes["GET /recording"] = handler.RecordingStatus(rec)
+		s.routes["POST /recording"] = handler.StartRecording(rec)
+		s.routes["DELETE /recording"] = handler.StopRecording(rec)
+	}
+}
+
 // New creates the admin API of a mock server. It needs the Mocks option.
 func New(options ...Option) (*Server, error) {
 	s := &Server{routes: make(map[string]http.Handler, len(_routes))}
@@ -127,6 +140,7 @@ func New(options ...Option) (*Server, error) {
 	s.routes["GET /health"] = handler.Health(s.kind, s.url)
 	s.routes["GET /openapi"] = handler.OpenAPI()
 	s.routes["GET /docs"] = handler.Docs()
+	s.routes["GET /recorder"] = handler.RecorderPage()
 
 	mux := http.NewServeMux()
 	for _, route := range _routes {
