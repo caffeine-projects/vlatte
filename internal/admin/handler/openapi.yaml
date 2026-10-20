@@ -23,6 +23,10 @@ tags:
     description: The admin API and the mock server it manages.
   - name: Mocks
     description: The mocks the server serves, from files, code and this API.
+  - name: Scenarios
+    description: |
+      Scenarios: mocks that match in turn, as a scenario moves from state to state. A scenario starts in `started`.
+      HTTP mock servers only.
   - name: Recording
     description: |
       Recording a service as mock files: the server sends the requests the recording takes to its target, and writes
@@ -323,6 +327,66 @@ paths:
           content:
             text/html:
               schema: { type: string }
+  /scenarios:
+    get:
+      tags: [Scenarios]
+      operationId: listScenarios
+      summary: List scenarios
+      description: Every scenario a mock started, or whose state was set, in the order of their names.
+      responses:
+        "200":
+          description: The scenarios.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScenarioList" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/ScenarioList" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    delete:
+      tags: [Scenarios]
+      operationId: resetScenarios
+      summary: Start every scenario over
+      description: Moves every scenario back to `started`.
+      responses:
+        "204":
+          description: Every scenario is in `started`.
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /scenarios/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: The name of the scenario, exactly as mocks write it.
+        schema: { type: string }
+    put:
+      tags: [Scenarios]
+      operationId: setScenario
+      summary: Move a scenario to a state
+      description: The mocks that require the state match next. A scenario no mock started yet starts in it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScenarioChange" }
+          application/yaml:
+            schema: { $ref: "#/components/schemas/ScenarioChange" }
+      responses:
+        "200":
+          description: The scenario, moved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Scenario" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/Scenario" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
 components:
   requestBodies:
     Mock:
@@ -397,6 +461,33 @@ components:
         enabled:
           type: boolean
           description: Whether the mock matches requests.
+      additionalProperties: false
+    Scenario:
+      type: object
+      required: [name, state]
+      properties:
+        name:
+          type: string
+        state:
+          type: string
+          examples: [started]
+      additionalProperties: false
+    ScenarioList:
+      type: object
+      required: [scenarios]
+      properties:
+        scenarios:
+          type: array
+          items: { $ref: "#/components/schemas/Scenario" }
+      additionalProperties: false
+    ScenarioChange:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          minLength: 1
+          description: The state the scenario moves to.
       additionalProperties: false
     RecordingSettings:
       type: object

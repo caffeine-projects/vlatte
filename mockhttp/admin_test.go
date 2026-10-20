@@ -209,3 +209,34 @@ func TestAdmin_RecordingSettingsTheRecordingRefuses(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, res.StatusCode, string(body))
 	require.Contains(t, string(body), "recorder: method 1 is empty")
 }
+
+func TestAdmin_MovesScenarios(t *testing.T) {
+	// A test that needs a scenario in some state sets it, instead of replaying the requests that lead there, and starts
+	// it over after.
+	m := adminServer(t, Setup())
+	m.MustMock(
+		Getf("/pay").StartScenario("Checkout").ScenarioStateWillBe("paid").Reply(OK()),
+		Getf("/pay").ScenarioIs("Checkout").ScenarioStateIs("paid").Reply(Status(http.StatusConflict)),
+	)
+
+	res, _ := do(t, http.MethodGet, m.URL("/pay"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	res, _ = do(t, http.MethodDelete, m.AdminURL()+"/scenarios", nil, nil)
+	require.Equal(t, http.StatusNoContent, res.StatusCode)
+
+	res, _ = do(t, http.MethodGet, m.URL("/pay"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, "started over")
+
+	res, _ = do(t, http.MethodDelete, m.AdminURL()+"/scenarios", nil, nil)
+	require.Equal(t, http.StatusNoContent, res.StatusCode)
+
+	res, body := do(t, http.MethodPut, m.AdminURL()+"/scenarios/Checkout", nil, []byte(`{"state": "paid"}`))
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+
+	res, _ = do(t, http.MethodGet, m.URL("/pay"), nil, nil)
+	require.Equal(t, http.StatusConflict, res.StatusCode, "the mock of the state set")
+
+	_, body = do(t, http.MethodGet, m.AdminURL()+"/scenarios", nil, nil)
+	require.JSONEq(t, `{"scenarios": [{"name": "Checkout", "state": "paid"}]}`, string(body))
+}

@@ -146,3 +146,32 @@ func TestScenario_NamesDifferingInCaseAreTwoScenarios(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, ok, "checkout is still where it started")
 }
+
+func TestScenarioStore_SetAndReset(t *testing.T) {
+	// The admin API moves scenarios: a state set is the one mocks match next, and a reset starts every scenario over.
+	store := NewScenarioStore()
+	arg := vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), nil)
+
+	start := Scenario(store, "checkout", ScenarioStateStarted, "paid")
+	_, _ = start.Match(arg)
+	assert.Equal(t, map[string]string{"checkout": ScenarioStateStarted}, store.Scenarios())
+
+	store.SetScenario("checkout", "paid")
+	store.SetScenario("Refund", "asked")
+	assert.Equal(t, map[string]string{"checkout": "paid", "Refund": "asked"}, store.Scenarios())
+
+	ok, err := Scenario(store, "checkout", "paid", "").Match(arg)
+	assert.NoError(t, err)
+	assert.True(t, ok, "a mock that requires the state set matches")
+
+	ok, err = Scenario(store, "Refund", "done", "").Match(arg)
+	assert.NoError(t, err)
+	assert.False(t, ok, "a scenario set before any mock started it has the state set")
+
+	store.ResetScenarios()
+	assert.Equal(t, map[string]string{"checkout": ScenarioStateStarted, "Refund": ScenarioStateStarted}, store.Scenarios())
+
+	ok, err = start.Match(arg)
+	assert.NoError(t, err)
+	assert.True(t, ok, "the scenario starts over")
+}

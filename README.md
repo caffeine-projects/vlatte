@@ -479,6 +479,7 @@ From settings, `admin: true` turns it on, and `admin.addr` (`--admin-addr`, `VLA
 | `POST /mocks/reload` | Loads the mock files again, as `m.Reload()` does. A mock file's mock takes the place of a mock added through the admin API with its id. |
 | `POST /recording`, `GET /recording`, `DELETE /recording` | Starts a [recording](#recording-and-playback) with the keys of the `record` section, counts its calls, and stops it, listing the files it wrote. |
 | `GET /recorder` | A page that records a service from a browser. |
+| `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios` | Lists the state of each scenario, moves one to a state, `{"state": "paid"}`, and starts every scenario over. Names are exact: `Checkout` isn't `checkout`. |
 | `GET /openapi`, `GET /docs` | The OpenAPI document, and a page that renders it. The page loads [Scalar](https://scalar.com) from a CDN, so it needs internet. |
 
 **Formats.** Bodies are JSON, or YAML with `Content-Type: application/yaml`. Answers follow `Accept`: JSON, or YAML when it is preferred. A relative `body_file` in a mock sent to the admin API opens from the server's working directory, as `GET /mocks/{id}` writes it.

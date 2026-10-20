@@ -34,6 +34,18 @@ type Recorder interface {
 	RecordingStatus() vlatte.RecordStatus
 }
 
+// Scenarios is a mock server that keeps the state of scenarios: mocks that match in turn.
+type Scenarios interface {
+	// Scenarios returns the state of every scenario, by name.
+	Scenarios() map[string]string
+
+	// SetScenario moves the scenario name to state, starting it when no mock did yet.
+	SetScenario(name, state string)
+
+	// ResetScenarios moves every scenario back to where it started.
+	ResetScenarios()
+}
+
 // mockSummary is what the admin API tells of a mock besides its description: its state.
 type mockSummary struct {
 	ID       string `json:"id"`

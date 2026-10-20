@@ -50,6 +50,9 @@ var _routes = []struct {
 	{pattern: "POST /recording", lacking: "record"},
 	{pattern: "DELETE /recording", lacking: "record"},
 	{pattern: "GET /recorder"},
+	{pattern: "GET /scenarios", lacking: "keep scenarios"},
+	{pattern: "PUT /scenarios/{name}", lacking: "keep scenarios"},
+	{pattern: "DELETE /scenarios", lacking: "keep scenarios"},
 }
 
 var errNoMocks = errors.New("admin: no mock store: pass the Mocks option")
@@ -119,6 +122,15 @@ func Recorder(rec handler.Recorder) Option {
 		s.routes["GET /recording"] = handler.RecordingStatus(rec)
 		s.routes["POST /recording"] = handler.StartRecording(rec)
 		s.routes["DELETE /recording"] = handler.StopRecording(rec)
+	}
+}
+
+// Scenarios sets the scenarios of the mock server, which GET, PUT and DELETE /scenarios read and move.
+func Scenarios(scenarios handler.Scenarios) Option {
+	return func(s *Server) {
+		s.routes["GET /scenarios"] = handler.ListScenarios(scenarios)
+		s.routes["PUT /scenarios/{name}"] = handler.SetScenario(scenarios)
+		s.routes["DELETE /scenarios"] = handler.ResetScenarios(scenarios)
 	}
 }
 

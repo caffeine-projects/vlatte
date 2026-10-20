@@ -216,6 +216,7 @@ func New(config ...Option) (*Server, error) {
 			})),
 			admin.Files(app),
 			admin.Recorder(adminRecorder{app}),
+			admin.Scenarios(app.scenarioStore),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("server: %w", err)
