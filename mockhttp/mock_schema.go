@@ -498,11 +498,11 @@ var _proxySchema = config.NewSchema(
 		},
 	},
 	proxyField{
-		Key: "forward_header", Kind: config.Any, Usage: "Headers added to the forwarded request, by name. Hop-by-hop ones, such as Connection, fail the mock, except Te: trailers.",
+		Key: "forward_header", Kind: config.Any, Usage: "Headers of the forwarded request, by name, in place of the client's. Hop-by-hop ones, such as Connection, fail the mock, except Te: trailers.",
 		Set: func(p *proxyDef, v config.Value) error { return headerValues(v, &p.forwardHeader) },
 	},
 	proxyField{
-		Key: "header", Kind: config.Any, Usage: "Headers added to the response, by name.",
+		Key: "header", Kind: config.Any, Usage: "Headers of the response, by name, in place of the target's.",
 		Set: func(p *proxyDef, v config.Value) error { return headerValues(v, &p.header) },
 	},
 	proxyField{

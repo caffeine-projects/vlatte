@@ -72,13 +72,13 @@ func From[T FromTypes](target T) *ProxyReply {
 	}
 }
 
-// Header sets an extra response header that will be set after the proxy target replies.
+// Header adds a value to a response header, which replaces the target's values of that name.
 func (r *ProxyReply) Header(key, value string) *ProxyReply {
 	r.headers.Add(key, value)
 	return r
 }
 
-// Headers sets extra response headers that will be set after the proxy target replies.
+// Headers adds the values of response headers, which replace the target's values of those names.
 func (r *ProxyReply) Headers(header http.Header) *ProxyReply {
 	for k, v := range header {
 		for _, vv := range v {
@@ -89,15 +89,17 @@ func (r *ProxyReply) Headers(header http.Header) *ProxyReply {
 	return r
 }
 
-// ForwardHeader sets an extra header to be sent to the proxy target. A hop-by-hop header, such as Connection or
-// Upgrade, fails the build of the mock: a proxy doesn't send it on. "Te: trailers" is the exception.
+// ForwardHeader adds a value to a header sent to the proxy target, which replaces the client's values of that name. A
+// hop-by-hop header, such as Connection or Upgrade, fails the build of the mock: a proxy doesn't send it on.
+// "Te: trailers" is the exception.
 func (r *ProxyReply) ForwardHeader(key, value string) *ProxyReply {
 	r.proxyHeaders.Add(key, value)
 	return r
 }
 
-// ProxyHeaders sets extra headers to be sent to the proxy target. A hop-by-hop header, such as Connection or Upgrade,
-// fails the build of the mock: a proxy doesn't send it on. "Te: trailers" is the exception.
+// ProxyHeaders adds the values of headers sent to the proxy target, which replace the client's values of those names.
+// A hop-by-hop header, such as Connection or Upgrade, fails the build of the mock: a proxy doesn't send it on.
+// "Te: trailers" is the exception.
 func (r *ProxyReply) ProxyHeaders(header http.Header) *ProxyReply {
 	for k, v := range header {
 		for _, vv := range v {
@@ -258,10 +260,10 @@ func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, er
 		out.Header.Del(h)
 	}
 
+	// A header of the mock's replaces the client's values of that name: a mock sets a token for the target in place of
+	// the client's, rather than send both.
 	for key, values := range p.proxyHeaders {
-		for _, value := range values {
-			out.Header.Add(key, value)
-		}
+		out.Header[key] = slices.Clone(values)
 	}
 
 	// As http.Client does, the target's user info goes as Basic auth, unless the request has an Authorization.
@@ -275,10 +277,9 @@ func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, er
 		return nil, fmt.Errorf("reply_proxy: %w", err)
 	}
 
+	// A header of the mock's replaces the target's values of that name: the client gets one Content-Type, not two.
 	for key, values := range p.headers {
-		for _, value := range values {
-			res.Header.Add(key, value)
-		}
+		res.Header[key] = slices.Clone(values)
 	}
 
 	return res, nil

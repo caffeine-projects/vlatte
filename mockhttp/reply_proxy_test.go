@@ -1302,3 +1302,43 @@ func TestProxyReply_SendsTheTargetCredentialsOverTLS(t *testing.T) {
 		})
 	}
 }
+
+func TestProxyReply_HeadersOfTheMockReplaceThoseOfTheSameName(t *testing.T) {
+	// A header of the mock's was added to the client's, and to the target's: the target got the client's token and the
+	// mock's, and the client two Content-Types. The mock's values replace those of the same name. Several values of the
+	// mock's go together, and other headers stay as they came.
+	got := make(chan http.Header, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- r.Header.Clone()
+
+		w.Header().Set(HeaderContentType, "text/plain")
+		w.Header().Set("X-Target", "kept")
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/p").Reply(From(target.URL).
+		ForwardHeader("X-Token", "mock").
+		ForwardHeader("X-Tags", "a").
+		ForwardHeader("X-Tags", "b").
+		Header(HeaderContentType, "application/json")))
+
+	req, err := http.NewRequest(http.MethodGet, m.URL("/p"), nil)
+	require.NoError(t, err)
+	req.Header.Set("X-Token", "client")
+	req.Header.Set("X-Client", "kept")
+
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	sent := <-got
+	require.Equal(t, []string{"mock"}, sent.Values("X-Token"))
+	require.Equal(t, []string{"a", "b"}, sent.Values("X-Tags"))
+	require.Equal(t, []string{"kept"}, sent.Values("X-Client"))
+
+	require.Equal(t, []string{"application/json"}, res.Header.Values(HeaderContentType))
+	require.Equal(t, []string{"kept"}, res.Header.Values("X-Target"))
+}
