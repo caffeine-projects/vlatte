@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"bytes"
+	"context"
 	json "encoding/json/v2"
 	"errors"
 	"io"
@@ -114,6 +115,53 @@ func (b *fakeBuilder) BuildFromBytes(content []byte, format string) (*fakeMock, 
 	b.built = append(b.built, mock)
 
 	return mock, nil
+}
+
+// brokenStore is a memory store whose operations fail with the errors it has, and work otherwise.
+type brokenStore struct {
+	*vlatte.MemoryStore[*fakeMock]
+
+	storeErr, replaceErr, pickErr, pickAllErr, clearErr error
+}
+
+func (s *brokenStore) Store(ctx context.Context, mocks ...*fakeMock) error {
+	if s.storeErr != nil {
+		return s.storeErr
+	}
+
+	return s.MemoryStore.Store(ctx, mocks...)
+}
+
+func (s *brokenStore) Replace(ctx context.Context, old []*fakeMock, mocks ...*fakeMock) error {
+	if s.replaceErr != nil {
+		return s.replaceErr
+	}
+
+	return s.MemoryStore.Replace(ctx, old, mocks...)
+}
+
+func (s *brokenStore) Pick(ctx context.Context, id string) (*fakeMock, error) {
+	if s.pickErr != nil {
+		return nil, s.pickErr
+	}
+
+	return s.MemoryStore.Pick(ctx, id)
+}
+
+func (s *brokenStore) PickAll(ctx context.Context) ([]*fakeMock, error) {
+	if s.pickAllErr != nil {
+		return nil, s.pickAllErr
+	}
+
+	return s.MemoryStore.PickAll(ctx)
+}
+
+func (s *brokenStore) Clear(ctx context.Context) error {
+	if s.clearErr != nil {
+		return s.clearErr
+	}
+
+	return s.MemoryStore.Clear(ctx)
 }
 
 // newFake returns an enabled fake mock with id, described as {"id": id}.

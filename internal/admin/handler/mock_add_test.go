@@ -84,6 +84,12 @@ func TestAddMock_Refused(t *testing.T) {
 			wantCode:   "invalid_body",
 		},
 		{
+			name:       "a document that is no mock",
+			body:       `[1]`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "invalid_body",
+		},
+		{
 			name:        "a media type that isn't JSON or YAML",
 			contentType: "application/xml",
 			body:        `<mock/>`,

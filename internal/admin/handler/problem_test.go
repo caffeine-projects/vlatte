@@ -3,6 +3,7 @@ package handler_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,6 +11,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/mfeat"
 )
 
 // plainMock is a mock that can't describe itself, as gRPC mocks can't.
@@ -45,6 +47,21 @@ func TestProblems_Routing(t *testing.T) {
 		doc := problem(t, res, body, http.StatusMethodNotAllowed, "method_not_allowed")
 		require.Equal(t, "GET, HEAD", res.Header.Get("Allow"))
 		require.Equal(t, "/health doesn't take POST: it takes GET, HEAD", doc["detail"])
+	})
+
+	t.Run("a path ServeMux cleans", func(t *testing.T) {
+		// ServeMux redirects to the clean path, whether it has a route or not: the redirect is no problem, and the clean
+		// path answers.
+		res, body := send(t, request{method: http.MethodGet, url: url + "//mocks"})
+
+		require.Equal(t, http.StatusOK, res.StatusCode, body)
+		require.Equal(t, "/mocks", res.Request.URL.Path)
+		conforms(t, res, body, "MockList")
+
+		res, body = send(t, request{method: http.MethodGet, url: url + "//nope"})
+
+		problem(t, res, body, http.StatusNotFound, "route_not_found")
+		require.NotNil(t, res.Request.Response, "redirected")
 	})
 
 	t.Run("in yaml", func(t *testing.T) {
@@ -85,13 +102,23 @@ func TestProblems_NotAcceptableIsJSON(t *testing.T) {
 }
 
 func TestProblems_UnsupportedMediaTypeSaysWhatIs(t *testing.T) {
-	// RFC 9110: a 415 can list the media types the server takes.
-	url := serve(t, newStore(t))
+	// Every route that reads a body reads JSON or YAML only. RFC 9110: a 415 can list the media types the server takes.
+	files := &fakeFiles{}
+	url := serve(t, newStore(t, newFake("hello")),
+		admin.Files(files), admin.Recorder(&fakeRecorder{}), admin.Scenarios(mfeat.NewScenarioStore()))
 
-	res, body := send(t, request{method: http.MethodPost, url: url + "/mocks", contentType: "text/plain", body: "id: x"})
+	for _, route := range []string{
+		"POST /mocks", "POST /mocks/validate", "PUT /mocks/hello", "PATCH /mocks/hello", "POST /mocks/save",
+		"PUT /scenarios/checkout", "POST /recording",
+	} {
+		method, path, _ := strings.Cut(route, " ")
+		res, body := send(t, request{method: method, url: url + path, contentType: "text/plain", body: "id: hello"})
 
-	problem(t, res, body, http.StatusUnsupportedMediaType, "unsupported_media_type")
-	require.Equal(t, "application/json, application/yaml", res.Header.Get("Accept"))
+		problem(t, res, body, http.StatusUnsupportedMediaType, "unsupported_media_type")
+		require.Equal(t, "application/json, application/yaml", res.Header.Get("Accept"), route)
+	}
+
+	require.Empty(t, files.dir, "nothing was saved")
 }
 
 func TestProblems_CrossOrigin(t *testing.T) {

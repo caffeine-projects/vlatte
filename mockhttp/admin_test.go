@@ -421,6 +421,9 @@ func TestRelocate_MovesTheBodyFilesOfTheMockFileFormatOnly(t *testing.T) {
 
 	relocate(got, up)
 	require.Equal(t, want, got)
+
+	relocate(got, "")
+	require.Equal(t, want, got, "a mock file in the working directory names its files as the working directory does")
 }
 
 func TestAdmin_SaveWritesNothingWhenAMockCantBeSaved(t *testing.T) {
@@ -448,25 +451,35 @@ func TestAdmin_SaveWritesNothingWhenAMockCantBeSaved(t *testing.T) {
 
 func TestAdmin_SaveThatFailsToLoadPutsTheFilesBack(t *testing.T) {
 	// A saved file whose mock has the id of another mock file's fails to load: left on disk, it would fail every
-	// later start. The save puts the files back as they were, and the server serves what it served.
+	// later start. The save puts the files back as they were, those it overwrote too, and the server serves what it
+	// served.
 	root := t.TempDir()
 	mocks := filepath.Join(root, "testdata", "_mocks")
 	require.NoError(t, os.MkdirAll(mocks, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(mocks, "a.mock.yaml"),
 		[]byte("id: x\nrequest: {method: GET, path: /x}\nresponse: {status: 200, body: from a.mock.yaml}\n"), 0o600))
 
+	y := []byte("id: y\nrequest: {method: GET, path: /y}\nresponse: {status: 200, body: from y.mock.yaml}\n")
+	require.NoError(t, os.WriteFile(filepath.Join(mocks, "y.mock.yaml"), y, 0o600))
+
 	m := adminServer(t, Setup().RootDir(root).MockFilePatterns("testdata/_mocks/*mock.yaml"))
 
-	res, body := do(t, http.MethodPut, m.AdminURL()+"/mocks/x", nil,
-		[]byte(`{"id": "x", "request": {"method": "GET", "path": "/x"}, "response": {"status": 200, "body": "from the admin API"}}`))
-	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+	for _, id := range []string{"x", "y"} {
+		res, body := do(t, http.MethodPut, m.AdminURL()+"/mocks/"+id, nil,
+			[]byte(`{"id": "`+id+`", "request": {"method": "GET", "path": "/`+id+`"}, "response": {"status": 200, "body": "from the admin API"}}`))
+		require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+	}
 
-	res, body = do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, nil)
+	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, nil)
 	require.Equal(t, http.StatusConflict, res.StatusCode, string(body))
 
 	entries, err := os.ReadDir(mocks)
 	require.NoError(t, err)
-	require.Len(t, entries, 1, "x.mock.yaml was removed")
+	require.Len(t, entries, 2, "x.mock.yaml was removed")
+
+	saved, err := os.ReadFile(filepath.Join(mocks, "y.mock.yaml"))
+	require.NoError(t, err)
+	require.Equal(t, string(y), string(saved), "y.mock.yaml holds what it held")
 
 	_, body = do(t, http.MethodGet, m.URL("/x"), nil, nil)
 	require.Equal(t, "from the admin API", string(body))
@@ -474,6 +487,103 @@ func TestAdmin_SaveThatFailsToLoadPutsTheFilesBack(t *testing.T) {
 	next := MustNew(Setup().Silent().RootDir(root).MockFilePatterns("testdata/_mocks/*mock.yaml"))
 	require.NoError(t, next.Start(), "a later start loads the files")
 	next.Close()
+}
+
+func TestAdmin_SaveWithNothingToSave(t *testing.T) {
+	// Only the mocks the admin API added are saved: with none, no file or directory is written.
+	root := t.TempDir()
+	m := adminServer(t, Setup().RootDir(root))
+	m.MustMock(Getf("/code").Reply(OK()))
+
+	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+	require.JSONEq(t, `{"files": []}`, string(body))
+
+	_, err := os.Stat(filepath.Join(root, "testdata"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestAdmin_SaveThatCantWrite(t *testing.T) {
+	// A save that can't write its files fails, and leaves none of them: the mocks stay the admin API's.
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, root string)
+	}{
+		{
+			name: "a directory that is a file",
+			setup: func(t *testing.T, root string) {
+				require.NoError(t, os.WriteFile(filepath.Join(root, "saved"), nil, 0o600))
+			},
+		},
+		{
+			name: "a file that is a directory",
+			setup: func(t *testing.T, root string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "saved", "b.mock.yaml"), 0o700))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			tt.setup(t, root)
+
+			m := adminServer(t, Setup().RootDir(root))
+
+			for _, id := range []string{"a", "b"} {
+				res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil,
+					[]byte(`{"id": "`+id+`", "request": {"method": "GET", "path": "/`+id+`"}, "response": {"status": 200}}`))
+				require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
+			}
+
+			res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, []byte(`{"dir": "saved"}`))
+			require.Equal(t, http.StatusInternalServerError, res.StatusCode, string(body))
+			require.Contains(t, string(body), `"code": "load_failed"`)
+
+			require.NoFileExists(t, filepath.Join(root, "saved", "a.mock.yaml"))
+
+			if entries, err := os.ReadDir(filepath.Join(root, "saved")); err == nil {
+				require.Len(t, entries, 1, "no temporary file stays")
+			}
+
+			_, body = do(t, http.MethodGet, m.AdminURL()+"/mocks", nil, nil)
+			require.Equal(t, 2, strings.Count(string(body), `"origin": "admin"`), string(body))
+		})
+	}
+}
+
+func TestAdmin_ASavedDirectoryThatCantBeReadFailsTheReload(t *testing.T) {
+	// The mocks saved load with the mock files from then on: a reload that can't read their directory fails, and says
+	// which.
+	root := t.TempDir()
+	m := adminServer(t, Setup().RootDir(root))
+
+	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil,
+		[]byte(`{"id": "a", "request": {"method": "GET", "path": "/a"}, "response": {"status": 200}}`))
+	require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
+
+	res, body = do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, []byte(`{"dir": "saved"}`))
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+
+	saved := filepath.Join(root, "saved")
+	require.NoError(t, os.RemoveAll(saved))
+	require.NoError(t, os.WriteFile(saved, nil, 0o600))
+
+	res, body = do(t, http.MethodPost, m.AdminURL()+"/mocks/reload", nil, nil)
+	require.Equal(t, http.StatusInternalServerError, res.StatusCode, string(body))
+	require.Contains(t, string(body), "loader: saved mocks "+saved)
+}
+
+func TestAdmin_RecordsWithTheDefaultSettings(t *testing.T) {
+	// A recording started without settings records with the server's: its defaults, when it has none.
+	m := adminServer(t, Setup().RootDir(t.TempDir()))
+
+	res, body := do(t, http.MethodPost, m.AdminURL()+"/recording", nil, nil)
+	require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
+	require.Contains(t, string(body), `"active": true`)
+
+	res, body = do(t, http.MethodDelete, m.AdminURL()+"/recording", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
 }
 
 func TestAdmin_ResetsTheServer(t *testing.T) {

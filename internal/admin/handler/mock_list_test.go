@@ -28,6 +28,20 @@ func TestListMocks(t *testing.T) {
 	}, doc["mocks"])
 }
 
+func TestListMocks_ANameThatCantBeAnswered(t *testing.T) {
+	// A mock named in Go can have a name that isn't UTF-8, which JSON and YAML can't hold: the list is a problem then,
+	// never part of an answer.
+	m := newFake("hello")
+	m.name = "\xff"
+	url := serve(t, newStore(t, m))
+
+	for _, accept := range []string{"application/json", "application/yaml"} {
+		res, body := send(t, request{method: http.MethodGet, url: url + "/mocks", accept: accept})
+
+		problem(t, res, body, http.StatusInternalServerError, "internal")
+	}
+}
+
 func TestListMocks_None(t *testing.T) {
 	// No mocks is an empty list, not null: clients range over it.
 	url := serve(t, newStore(t))

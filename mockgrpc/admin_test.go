@@ -2,12 +2,15 @@ package mockgrpc
 
 import (
 	"bufio"
+	"context"
 	json "encoding/json/v2"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
@@ -139,6 +142,58 @@ func TestAdmin_StreamsTheCalls(t *testing.T) {
 	require.Equal(t, "/protobuf.TestService/Greetings", byType["matched"]["target"])
 	require.NotEmpty(t, byType["matched"]["mock_id"])
 	require.Equal(t, "/protobuf.TestService/List", byType["unmatched"]["target"])
+}
+
+// failingReply makes repliers that fail every call with an error that has no gRPC status.
+type failingReply struct{}
+
+func (failingReply) NewReplier(*Server) (UnaryReplier, error) { return failingReply{}, nil }
+
+func (failingReply) Reply(context.Context, *UnaryRequestValues) (any, error) {
+	return nil, errors.New("reply: broken")
+}
+
+func TestAdmin_StreamsTheCallsAMockFailed(t *testing.T) {
+	// A reply that fails without a gRPC status failed the call, which isn't the mock's answer: the client follows an
+	// error, with what failed.
+	m, client := adminServer(t)
+	m.MustMock(UnaryMethod("Greetings").Reply(failingReply{}))
+
+	// A missing event fails the test, rather than hangs it.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, m.AdminURL()+"/events", nil)
+	require.NoError(t, err)
+
+	res, err := http.DefaultClient.Do(r)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = res.Body.Close() })
+
+	_, err = client.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.Equal(t, codes.Internal, statusCode(err))
+
+	lines := bufio.NewScanner(res.Body)
+	for lines.Scan() {
+		if line, ok := strings.CutPrefix(lines.Text(), "data: "); ok {
+			var e map[string]any
+			require.NoError(t, json.Unmarshal([]byte(line), &e))
+			require.Equal(t, "error", e["type"])
+			require.Equal(t, "/protobuf.TestService/Greetings", e["target"])
+			require.Contains(t, e["message"], "reply: broken")
+
+			return
+		}
+	}
+
+	t.Fatal("no event of the call")
+}
+
+func TestAdmin_NoURLWithoutTheAdminAPI(t *testing.T) {
+	m := MustNew()
+	t.Cleanup(m.Close)
+
+	require.Empty(t, m.AdminURL())
 }
 
 func TestAdmin_AGRPCServerWhoseAdminCantListen(t *testing.T) {

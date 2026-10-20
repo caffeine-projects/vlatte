@@ -9,7 +9,7 @@ import (
 
 func TestNegotiation(t *testing.T) {
 	// Answers come in the format Accept prefers, weights and wildcards included, as RFC 9110 reads it. JSON wins
-	// ties, and answers a request without Accept.
+	// ties, and answers a request without Accept. A media range or weight that doesn't parse counts for nothing.
 	tests := []struct {
 		accept      string
 		wantType    string
@@ -27,6 +27,8 @@ func TestNegotiation(t *testing.T) {
 		{accept: "application/yaml;q=0.5, application/json;q=0.5", wantType: "application/json"},
 		{accept: "application/json;q=0, */*", wantType: "application/yaml"},
 		{accept: "text/html, application/xhtml+xml, application/xml;q=0.9, */*;q=0.8", wantType: "application/json"},
+		{accept: "application/yaml, ;q=1", wantType: "application/yaml"},
+		{accept: "application/yaml, application/json;q=high", wantType: "application/yaml"},
 		{accept: "application/xml", wantRefused: true},
 		{accept: "application/json;q=0, application/yaml;q=0", wantRefused: true},
 	}

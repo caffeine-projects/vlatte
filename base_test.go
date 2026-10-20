@@ -284,6 +284,23 @@ func TestBase_AMockOutsideEveryScopeGivesWay(t *testing.T) {
 		require.Zero(t, posted.closed.Load())
 	})
 
+	t.Run("a store that can't tell which mocks give way changes nothing", func(t *testing.T) {
+		store := newBrokenStore(nil, nil)
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		posted := newFakeMockWith("x", 0)
+		require.NoError(t, store.Store(t.Context(), posted))
+		store.pickAllErr = errors.New("store down")
+
+		x := newFakeMockWith("x", 0)
+		_, err := app.Mock(fakeBuilder{mock: x})
+		require.EqualError(t, err, "server: store down")
+
+		all, _ := store.MemoryStore.PickAll(t.Context())
+		require.True(t, sameMocks([]*fakeMock{posted}, all))
+		require.Zero(t, posted.closed.Load())
+		require.Equal(t, int64(1), x.closed.Load(), "the mock built is closed")
+	})
+
 	t.Run("a mock of another scope keeps its ID", func(t *testing.T) {
 		store := vlatte.NewStore[*fakeMock]()
 		app := vlatte.NewBase[*fakeMock](struct{}{}, store)

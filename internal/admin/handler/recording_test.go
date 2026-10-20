@@ -85,7 +85,8 @@ func TestRecording_Start(t *testing.T) {
 }
 
 func TestRecording_StartRefused(t *testing.T) {
-	// One recording runs at a time, and settings with problems say which, through the wrapping of the recorder.
+	// One recording runs at a time, and settings with problems say which, through the wrapping of the recorder. A
+	// recorder that fails otherwise is the server's problem.
 	settings := &config.Error{Problems: []config.Problem{{
 		Code: config.CodeInvalidValue, Origin: "admin request", Key: "format", Message: "expected one of json, yaml, yml",
 	}}}
@@ -100,6 +101,10 @@ func TestRecording_StartRefused(t *testing.T) {
 		{
 			name: "settings with problems", err: fmt.Errorf("recorder: option at index 0: %w", settings),
 			wantStatus: http.StatusBadRequest, wantCode: "invalid_body",
+		},
+		{
+			name: "a recorder that fails", err: errors.New("recorder: broken"),
+			wantStatus: http.StatusInternalServerError, wantCode: "internal",
 		},
 	}
 

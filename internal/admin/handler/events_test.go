@@ -134,6 +134,17 @@ func TestEvents_CloseEndsTheStreams(t *testing.T) {
 	}
 }
 
+func TestEvents_AClosedStreamHasNone(t *testing.T) {
+	// Once the events close, as the admin API does, a client that comes gets no stream that would never end.
+	events := handler.NewEvents()
+	url := serve(t, newStore(t), admin.Events(events))
+
+	events.Close()
+
+	res, body := send(t, request{method: http.MethodGet, url: url + "/events"})
+	require.Equal(t, http.StatusNoContent, res.StatusCode, body)
+}
+
 func TestEvents_NotSupported(t *testing.T) {
 	url := serve(t, newStore(t))
 

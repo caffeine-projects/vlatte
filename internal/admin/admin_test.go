@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -186,6 +187,39 @@ func TestServer_CloseWaitsForTheOperationsItServes(t *testing.T) {
 func TestNew_NeedsTheMocks(t *testing.T) {
 	_, err := New()
 	require.EqualError(t, err, "admin: no mock store: pass the Mocks option")
+
+	require.PanicsWithError(t, "admin: no mock store: pass the Mocks option", func() { MustNew() })
+}
+
+func TestServer_ListensOnAPort(t *testing.T) {
+	// A port alone is an address too, on every interface, as a server in a container needs.
+	free, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	_, port, err := net.SplitHostPort(free.Addr().String())
+	require.NoError(t, err)
+	require.NoError(t, free.Close())
+
+	s := newServer(t, Addr(port))
+	require.NoError(t, s.Start())
+	t.Cleanup(func() { _ = s.Close() })
+
+	res, err := http.Get("http://127.0.0.1:" + port + "/health")
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func TestServer_StartsNothingOnceClosing(t *testing.T) {
+	// A request that comes once Close runs, such as on a connection kept alive, starts no operation, so none runs once
+	// Close returned.
+	s := newServer(t)
+	require.NoError(t, s.Close())
+
+	rec := httptest.NewRecorder()
+	s.handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/mocks", nil))
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Contains(t, rec.Body.String(), `"code": "closing"`)
 }
 
 func TestServer_RoutesTheProtocolLacksAnswer501(t *testing.T) {
