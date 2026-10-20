@@ -2,7 +2,6 @@ package mockhttp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -62,6 +61,9 @@ type Server struct {
 	// tunnels holds the connections of the forward proxy's open tunnels, which Close closes.
 	tunnels tunnels
 
+	// proxyAll answers the requests no mock matches, when the setting proxy_all is set.
+	proxyAll Replier
+
 	data    map[string]any
 	logger  *zerolog.Logger
 	started atomic.Bool // set by the first start: a server starts once
@@ -107,10 +109,6 @@ func New(config ...Option) (*Server, error) {
 
 	if err := loadConfigSources(conf); err != nil {
 		return nil, fmt.Errorf("server: error loading configuration sources\n%w", err)
-	}
-
-	if conf.proxyAll != nil && !conf.proxyAll.hasTarget {
-		return nil, errors.New("server: proxy_all.target is required: the URL of the server to proxy the requests no mock matches to")
 	}
 
 	if conf.DebugFn == nil {
@@ -223,6 +221,14 @@ func New(config ...Option) (*Server, error) {
 	app.loaders = loaders
 	app.files = files
 	app.proxy = p
+
+	// The setting proxy_all answers what no mock matches: as a mock, it would count in assertions, and Clean and
+	// Disable would drop it.
+	if def := conf.proxyAll; def != nil {
+		if app.proxyAll, err = def.build().NewReplier(app); err != nil {
+			return nil, fmt.Errorf("server: proxy_all: %w", err)
+		}
+	}
 	app.requestBodyParsers = parsers
 	app.events = eventRunner
 	app.webhooks = newWebhookTransport()
@@ -420,6 +426,10 @@ func (app *Server) Close() {
 		app.proxy.close()
 	}
 
+	if closer, ok := app.proxyAll.(io.Closer); ok {
+		_ = closer.Close()
+	}
+
 	// The backend doesn't track the connections it handed over to tunnels.
 	app.tunnels.closeAll()
 
@@ -571,25 +581,7 @@ func (app *Server) onStart() error {
 		return err
 	}
 
-	if err := app.mockProxyAll(); err != nil {
-		return err
-	}
-
 	return app.startConfiguredRecording()
-}
-
-// mockProxyAll mocks the setting proxy_all, if set, with ProxyAll: a mock added once, as in code, which Reload keeps.
-func (app *Server) mockProxyAll() error {
-	def := app.config.proxyAll
-	if def == nil {
-		return nil
-	}
-
-	if _, err := app.Mock(ProxyAll(def.build()).Name("proxy_all")); err != nil {
-		return fmt.Errorf("server: proxy_all: %w", err)
-	}
-
-	return nil
 }
 
 func (app *Server) load() error {

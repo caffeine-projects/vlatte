@@ -74,6 +74,10 @@ type selectorInput struct {
 
 	// ParsedBody is the parsed http.Request body.
 	ParsedBody any
+
+	// ForProxy is set on a request the server's forward proxy sends on to the host it names: a CONNECT, or a request
+	// in absolute form.
+	ForProxy bool
 }
 
 type expectation = vlatte.Eval[*selectorInput]

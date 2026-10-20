@@ -1591,8 +1591,9 @@ func TestProxyAll_AnswersWhatNoOtherMockMatches(t *testing.T) {
 }
 
 func TestProxyAll_FromTheSettings(t *testing.T) {
-	// WireMock's --proxy-all: the setting proxy_all takes the keys of a mock file's proxy, and the server mocks it with
-	// ProxyAll when it starts, so it comes after every mock, and Reload keeps it.
+	// WireMock's --proxy-all: the setting proxy_all takes the keys of a mock file's proxy, and answers what no mock
+	// matches. It is no mock: assertions don't count it, and Reload and Clean leave it be. Without a forward proxy, a
+	// request in absolute form goes to it too.
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "target "+r.URL.Path)
 	}))
@@ -1612,10 +1613,21 @@ func TestProxyAll_FromTheSettings(t *testing.T) {
 	_, body = get(t, m, "/api/users")
 	require.Equal(t, "target /users", body)
 
+	m.AssertCalled(t)
+
 	require.NoError(t, m.Reload())
+	require.NoError(t, m.Clean(t.Context()))
 
 	_, body = get(t, m, "/api/users")
-	require.Equal(t, "target /users", body, "Reload dropped proxy_all")
+	require.Equal(t, "target /users", body, "Reload or Clean dropped proxy_all")
+
+	res, err := (&http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(mustURL(t, m.URL()))}}).Get("http://elsewhere.local/api/x")
+	require.NoError(t, err)
+
+	b, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, "target /x", string(b), "a request in absolute form, on a server that is no forward proxy")
 
 	require.Contains(t, m.DescribeConfig(), "Proxy All: "+target.URL+"?key=xxxxx")
 }
@@ -1624,5 +1636,41 @@ func TestProxyAll_TheSettingsNeedATarget(t *testing.T) {
 	settings := writeConfigFile(t, t.TempDir(), "settings.yaml", "proxy_all:\n  trim_prefix: /api\n")
 
 	_, err := New(Setup().Silent().ConfigSources(ConfigFile(settings)))
-	require.ErrorContains(t, err, "server: proxy_all.target is required")
+	require.ErrorContains(t, err, "proxy_all is set but proxy_all.target is not")
+	require.ErrorContains(t, err, "settings.yaml")
+}
+
+func TestProxyAll_WithoutAForwardProxy(t *testing.T) {
+	// ProxyAll left alone every request in absolute form, which only a forward proxy sends on: without one, such a
+	// request matched nothing. A nil reply fails the mock, rather than panic when it is built.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "target "+r.URL.Path)
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(ProxyAll(From(target.URL)))
+
+	res, err := (&http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(mustURL(t, m.URL()))}}).Get("http://elsewhere.local/x")
+	require.NoError(t, err)
+
+	b, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, "target /x", string(b))
+
+	_, err = m.Mock(ProxyAll(nil))
+	require.ErrorContains(t, err, "ProxyAll: the reply is nil")
+}
+
+// mustURL parses raw.
+func mustURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+
+	u, err := url.Parse(raw)
+	require.NoError(t, err)
+
+	return u
 }

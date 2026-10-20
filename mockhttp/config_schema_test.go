@@ -58,7 +58,8 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 	fromFile := writeConfigFile(t, t.TempDir(), "settings.json", `{"name": "from-file"}`)
 	tlsArgs := []string{"--tls-cert", _testCertFile, "--tls-key", _testKeyFile}
 
-	// proxy_all needs its target.
+	// proxy_all needs its target. A file sets it, and its flag turns it off.
+	proxyAllFile := writeConfigFile(t, t.TempDir(), "proxy_all.json", `{"proxy_all": {"target": "https://api.example.com"}}`)
 	withTarget := func(args ...string) []string {
 		return append([]string{"--proxy-all-target", "https://api.example.com"}, args...)
 	}
@@ -103,7 +104,7 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"proxy-via":        {[]string{"--proxy-via", "http://proxy:3128"}, func(t *testing.T, c *Config) { require.Equal(t, "http://proxy:3128", c.Proxy.Via) }},
 		"proxy-timeout":    {[]string{"--proxy-timeout", "1500"}, func(t *testing.T, c *Config) { require.Equal(t, 1500*time.Millisecond, c.Proxy.Timeout) }},
 		"proxy-ssl-verify": {[]string{"--proxy-ssl-verify"}, func(t *testing.T, c *Config) { require.True(t, c.Proxy.SSLVerify) }},
-		"proxy-all":        {withTarget("--proxy-all"), func(t *testing.T, c *Config) { require.True(t, c.proxyAll.hasTarget) }},
+		"proxy-all":        {[]string{"--config", proxyAllFile, "--proxy-all=false"}, func(t *testing.T, c *Config) { require.Nil(t, c.proxyAll) }},
 		"proxy-all-target": {
 			[]string{"--proxy-all-target", "https://api.example.com"}, func(t *testing.T, c *Config) { require.Equal(t, "https://api.example.com", c.proxyAll.target) },
 		},

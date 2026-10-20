@@ -518,7 +518,7 @@ var _proxyFields = []proxyField{
 		Set: func(p *proxyDef, v config.Value) error { p.trimSuffix = v.Str; return nil },
 	},
 	{
-		Key: "timeout", Kind: config.Duration,
+		Key: "timeout", Kind: config.Duration, Default: _defaultTimeout.String(),
 		Usage: "How long to wait for the target's response headers, connecting and sending the request included: " +
 			"milliseconds or a Go duration (1.5s). 0 waits forever.",
 		Set: func(p *proxyDef, v config.Value) error { p.timeout, p.hasTimeout = v.Dur, true; return nil },
