@@ -81,15 +81,24 @@ func From[T FromTypes](target T) *ProxyReply {
 
 // ProxyAll returns a mock that answers the requests no other mock matches with reply, as WireMock's proxy-all does: it
 // matches any method and path, and comes last, at the priority math.MaxInt. It leaves CONNECTs alone, and, on a server
-// that is a forward proxy, the requests in absolute form, which the proxy sends on to the hosts they name.
+// that is a forward proxy, the requests in absolute form, which the proxy sends on to the hosts they name. Its
+// description holds the reply under proxy_all, which a mock file loads back as the same mock.
 func ProxyAll(reply *ProxyReply) *Builder {
-	b := AnyMethod().Priority(math.MaxInt)
+	b := AnyMethod()
 
 	// A nil *ProxyReply is no nil ReplierFactory: Build would take it.
 	if reply == nil {
 		b.err = errors.New("ProxyAll: the reply is nil")
 		return b
 	}
+
+	return proxyAll(b, reply)
+}
+
+// proxyAll has b answer with reply the requests no other mock matches, as ProxyAll's mock does.
+func proxyAll(b *Builder, reply *ProxyReply) *Builder {
+	b.Priority(math.MaxInt)
+	b.spec.fallback = true
 
 	b.appendExpectation(&expectation{
 		Target: int(matchingScopeNone),

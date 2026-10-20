@@ -1549,7 +1549,9 @@ func TestForwardProxy_ATunnelDialsWithinTheTransportsLimits(t *testing.T) {
 func TestProxyAll_AnswersWhatNoOtherMockMatches(t *testing.T) {
 	// As WireMock's proxy-all, ProxyAll proxies what no other mock matches: it comes last, whatever the priority of
 	// the others. It leaves the forward proxy's requests alone, which name their host: a request in absolute form goes
-	// to its host, and a CONNECT opens its tunnel.
+	// to its host, and a CONNECT opens its tunnel. Its description loads back as the same mock, and a mock file's
+	// proxy_all makes one: a description that held a plain proxy loaded back as a mock of any request, which took the
+	// tunnels and the forward proxy's requests too.
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "target "+r.URL.Path)
 	}))
@@ -1558,36 +1560,90 @@ func TestProxyAll_AnswersWhatNoOtherMockMatches(t *testing.T) {
 	host := okTarget(t)
 	echo := tcpHost(t, echoConn)
 
-	m := MustNew(Setup().Silent().Proxy())
+	described := func(t *testing.T) vlatte.Builder[*Mock, *Server] {
+		mock, err := ProxyAll(From(target.URL)).Build(MustNew(Setup().Silent()))
+		require.NoError(t, err)
+
+		desc := mock.Describe().Props.(map[string]any)
+		require.Contains(t, desc, "proxy_all")
+		require.NotContains(t, desc, "proxy")
+
+		content, err := mock.MarshalJSON()
+		require.NoError(t, err)
+
+		return FromBytes(content, "json")
+	}
+
+	for name, proxyAll := range map[string]func(t *testing.T) vlatte.Builder[*Mock, *Server]{
+		"ProxyAll":        func(*testing.T) vlatte.Builder[*Mock, *Server] { return ProxyAll(From(target.URL)) },
+		"its description": described,
+		"a mock file's mock": func(*testing.T) vlatte.Builder[*Mock, *Server] {
+			return FromBytes([]byte("proxy_all: {target: '"+target.URL+"'}\n"), "yaml")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := MustNew(Setup().Silent().Proxy())
+			m.MustStart()
+			t.Cleanup(m.Close)
+			m.MustMock(
+				proxyAll(t),
+				Getf("/mocked").Priority(1000).Reply(OK().PlainText("mock")),
+			)
+
+			_, body := get(t, m, "/mocked")
+			require.Equal(t, "mock", body)
+
+			_, body = get(t, m, "/other")
+			require.Equal(t, "target /other", body)
+
+			res, err := proxyClient(t, m).Get(host.URL + "/x")
+			require.NoError(t, err)
+
+			b, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, "ok", string(b), "the forward proxy's request went to the proxy-all target")
+
+			conn, br := openTunnel(t, hostOf(t, m), echo, "")
+
+			_, err = io.WriteString(conn, "tunnel\n")
+			require.NoError(t, err)
+
+			line, err := br.ReadString('\n')
+			require.NoError(t, err)
+			require.Equal(t, "tunnel\n", line)
+		})
+	}
+}
+
+func TestProxyAll_AMockFilesPriorityWins(t *testing.T) {
+	// A mock file's proxy_all comes last, unless the file gives it a priority: then it is matched in its turn.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "target "+r.URL.Path)
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 	m.MustMock(
-		ProxyAll(From(target.URL)),
+		FromBytes([]byte("priority: 1\nproxy_all: {target: '"+target.URL+"'}\n"), "yaml"),
 		Getf("/mocked").Priority(1000).Reply(OK().PlainText("mock")),
 	)
 
 	_, body := get(t, m, "/mocked")
-	require.Equal(t, "mock", body)
+	require.Equal(t, "target /mocked", body)
+}
 
-	_, body = get(t, m, "/other")
-	require.Equal(t, "target /other", body)
+func TestProxyAll_AMockFilesProxyAllIsTheOnlyReply(t *testing.T) {
+	// proxy_all is a reply: a mock file can't give it next to another one.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
 
-	res, err := proxyClient(t, m).Get(host.URL + "/x")
-	require.NoError(t, err)
-
-	b, err := io.ReadAll(res.Body)
-	require.NoError(t, err)
-	require.NoError(t, res.Body.Close())
-	require.Equal(t, "ok", string(b), "the forward proxy's request went to the proxy-all target")
-
-	conn, br := openTunnel(t, hostOf(t, m), echo, "")
-
-	_, err = io.WriteString(conn, "tunnel\n")
-	require.NoError(t, err)
-
-	line, err := br.ReadString('\n')
-	require.NoError(t, err)
-	require.Equal(t, "tunnel\n", line)
+	for _, other := range []string{"response: {status: 200}", "proxy: {target: 'http://a.local'}"} {
+		_, err := m.Mock(FromBytes([]byte("proxy_all: {target: 'http://b.local'}\n"+other+"\n"), "yaml"))
+		require.ErrorContains(t, err, "proxy_all", other)
+	}
 }
 
 func TestProxyAll_FromTheSettings(t *testing.T) {
@@ -1673,4 +1729,14 @@ func mustURL(t *testing.T, raw string) *url.URL {
 	require.NoError(t, err)
 
 	return u
+}
+
+func TestProxyAll_GivenAnotherReplyDescribesThatReply(t *testing.T) {
+	// A ProxyAll mock given another reply holds no proxy reply: its description has no proxy_all, but the reply it has.
+	mock, err := ProxyAll(From("http://target.local")).Reply(OK()).Build(MustNew(Setup().Silent()))
+	require.NoError(t, err)
+
+	desc := mock.Describe().Props.(map[string]any)
+	require.NotContains(t, desc, "proxy_all")
+	require.Contains(t, desc, "response")
 }

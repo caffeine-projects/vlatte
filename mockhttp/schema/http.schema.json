@@ -97,17 +97,25 @@
       "required": [ "target" ],
       "additionalProperties": false
     },
+    "proxy_all": {
+      "description": "Forward what no other mock matches to a target, as proxy does: any request but a CONNECT, and the ones in absolute form a forward proxy sends on to their hosts. It comes last, at the highest priority, unless priority says otherwise, and needs no request.",
+      "$ref": "#/properties/proxy"
+    },
     "ext": { "description": "Settings for the MockFileHandlers of the server.", "type": "object" }
   },
-  "required": [ "request" ],
+  "anyOf": [ { "required": [ "request" ] }, { "required": [ "proxy_all" ] } ],
   "additionalProperties": false,
   "allOf": [
     { "not": { "required": [ "response", "response_sequence" ] } },
     { "not": { "required": [ "response", "response_random" ] } },
     { "not": { "required": [ "response", "proxy" ] } },
+    { "not": { "required": [ "response", "proxy_all" ] } },
     { "not": { "required": [ "response_sequence", "response_random" ] } },
     { "not": { "required": [ "response_sequence", "proxy" ] } },
-    { "not": { "required": [ "response_random", "proxy" ] } }
+    { "not": { "required": [ "response_sequence", "proxy_all" ] } },
+    { "not": { "required": [ "response_random", "proxy" ] } },
+    { "not": { "required": [ "response_random", "proxy_all" ] } },
+    { "not": { "required": [ "proxy", "proxy_all" ] } }
   ],
   "$defs": {
     "duration": {

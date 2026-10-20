@@ -36,22 +36,24 @@ type (
 
 // mockDef is a decoded mock file: what its keys set, before it is applied to a Builder.
 type mockDef struct {
-	id       string
-	name     string
-	priority int
-	enabled  bool
-	delay    time.Duration
-	hasDelay bool
-	repeat   int64
-	scenario scenarioDef
-	events   []vlatte.EventConfig
-	request  requestDef
-	reply    *replyDef
-	sequence *sequenceDef
-	random   *randomDef
-	proxy    *proxyDef
-	ext      map[string]any
-	dir      string // where relative files open from: the mock file's directory; "" is the working directory
+	id          string
+	name        string
+	priority    int
+	hasPriority bool
+	enabled     bool
+	delay       time.Duration
+	hasDelay    bool
+	repeat      int64
+	scenario    scenarioDef
+	events      []vlatte.EventConfig
+	request     requestDef
+	reply       *replyDef
+	sequence    *sequenceDef
+	random      *randomDef
+	proxy       *proxyDef
+	proxyAll    *proxyDef
+	ext         map[string]any
+	dir         string // where relative files open from: the mock file's directory; "" is the working directory
 }
 
 type scenarioDef struct {
@@ -133,7 +135,7 @@ type proxyDef struct {
 }
 
 // _responseKeys are the ways to reply, in the order conflicts are reported.
-var _responseKeys = []string{"response", "response_sequence", "response_random", "proxy"}
+var _responseKeys = []string{"response", "response_sequence", "response_random", "proxy", "proxy_all"}
 
 // _urlKeys are the ways to match the URL, in the order conflicts are reported.
 var _urlKeys = []string{"url", "url_match", "path"}
@@ -149,7 +151,7 @@ var _mockSchema = config.NewSchema(
 	},
 	mockField{
 		Key: "priority", Kind: config.Int, Usage: "Mocks with a lower priority are matched first.",
-		Set: func(d *mockDef, v config.Value) error { d.priority = int(v.Int); return nil },
+		Set: func(d *mockDef, v config.Value) error { d.priority, d.hasPriority = int(v.Int), true; return nil },
 	},
 	mockField{
 		Key: "enabled", Kind: config.Bool, Default: "true", Usage: "Whether the mock can match requests.",
@@ -308,6 +310,16 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error {
 			d.proxy = new(proxyDef)
 			return withRequired(_proxySchema.Decode(d.proxy, v), d.proxy.hasTarget, v, "target")
+		},
+	},
+	mockField{
+		Key: "proxy_all", Kind: config.Any,
+		Usage: "Forward what no other mock matches to a target, as proxy does: any request but a CONNECT, and the ones in " +
+			"absolute form a forward proxy sends on to their hosts. It comes last, at the highest priority, unless priority " +
+			"says otherwise, and needs no request.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.proxyAll = new(proxyDef)
+			return withRequired(_proxySchema.Decode(d.proxyAll, v), d.proxyAll.hasTarget, v, "target")
 		},
 	},
 	mockField{
@@ -563,7 +575,7 @@ func newReplyDef() *replyDef {
 // decoding already found: a request key that failed to decode still counts as a matcher.
 func (d *mockDef) check(origin string, found []config.Problem) []config.Problem {
 	var set []string
-	for i, present := range []bool{d.reply != nil, d.sequence != nil, d.random != nil, d.proxy != nil} {
+	for i, present := range []bool{d.reply != nil, d.sequence != nil, d.random != nil, d.proxy != nil, d.proxyAll != nil} {
 		if present {
 			set = append(set, _responseKeys[i])
 		}
@@ -584,7 +596,8 @@ func (d *mockDef) check(origin string, found []config.Problem) []config.Problem 
 		return p.Key == "request" || strings.HasPrefix(p.Key, "request.")
 	})
 
-	if len(d.request.keys) == 0 && !requestFailed {
+	// proxy_all matches any request on its own.
+	if len(d.request.keys) == 0 && !requestFailed && d.proxyAll == nil {
 		problems = append(problems, config.Problem{
 			Code: config.CodeMissingValue, Origin: origin, Key: "request",
 			Message: "request sets no matcher", Hint: `to match every request, write request: {path: "*"}`,
@@ -1044,6 +1057,17 @@ func (d *mockDef) apply(b *Builder, dir string) {
 	}
 
 	d.request.apply(b)
+
+	if d.proxyAll != nil {
+		proxyAll(b, d.proxyAll.build())
+
+		// A proxy_all comes last, unless the file says otherwise.
+		if d.hasPriority {
+			b.Priority(d.priority)
+		}
+
+		return
+	}
 
 	b.Reply(d.replier(dir))
 }

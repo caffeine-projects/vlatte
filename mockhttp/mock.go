@@ -94,6 +94,7 @@ type mockSpec struct {
 	events       []vlatte.EventConfig
 	callbacks    []vlatte.Callback
 	steps        []vlatte.Step
+	fallback     bool // a ProxyAll mock's: its description holds its reply under proxy_all
 }
 
 // clone returns a copy of s that shares no slice with it, so changing one doesn't change the other.
@@ -350,6 +351,12 @@ func (m *Mock) Describe() descriptor.Descriptor {
 	// The reply as it was when the mock was built: changing it afterwards changes only the mocks built afterwards.
 	if m.replyDesc.IsMap() {
 		m.replyDesc.Merge(data)
+	}
+
+	// A ProxyAll mock given another reply has no proxy reply to describe.
+	if proxy, ok := data["proxy"]; ok && m.spec.fallback {
+		data["proxy_all"] = proxy
+		delete(data, "proxy")
 	}
 
 	if events := describeEvents(m.spec.events); len(events) > 0 {
