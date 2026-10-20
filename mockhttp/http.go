@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -209,9 +210,7 @@ func New(config ...Option) (*Server, error) {
 	app.proxy = p
 	app.requestBodyParsers = parsers
 	app.events = eventRunner
-	// As http.DefaultTransport, which a program may have replaced: the proxies of the environment, and HTTP/2. A
-	// webhook's timeout bounds its dial and handshake.
-	app.webhooks = &http.Transport{Proxy: http.ProxyFromEnvironment, ForceAttemptHTTP2: true, IdleConnTimeout: _idleConnTimeout}
+	app.webhooks = newWebhookTransport()
 
 	app.admin = admin.New(
 		repository,
@@ -486,6 +485,24 @@ func (app *Server) webhookTransport() http.RoundTripper {
 	}
 
 	return app.webhooks
+}
+
+// newWebhookTransport returns the transport a server gives webhooks when its config has none. It is the server's:
+// Close closes its idle connections. It has the limits of http.DefaultTransport, built here rather than copied, as a
+// program may have replaced http.DefaultTransport.
+func newWebhookTransport() *http.Transport {
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
 }
 
 // start starts the server once with listen, the backend's Listen or ListenTLS. The backend listens first, so loaders

@@ -414,7 +414,12 @@ func TestWebHook_TimeoutPrecedence(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				wh, err := webhook.New(webhook.WithRoundTripper(silent{}), webhook.WithTimeout(tc.option))
+				options := []webhook.Option{webhook.WithRoundTripper(silent{})}
+				if tc.option > 0 {
+					options = append(options, webhook.WithTimeout(tc.option))
+				}
+
+				wh, err := webhook.New(options...)
 				require.NoError(t, err)
 
 				start := time.Now()
@@ -862,6 +867,7 @@ func TestWebHook_ConnectionsCloseWithTheServer(t *testing.T) {
 
 	m := mockhttp.MustNew(mockhttp.Setup().Silent().BackendFactory(plainBackends{}).OnCompleteListener("webhook", wh))
 	m.MustStart()
+	t.Cleanup(m.Close)
 
 	m.MustMock(mockhttp.Getf("/test").
 		OnCompleteEvent(webhook.Options().URL(target.URL + "/hook").Method(http.MethodPost).Build("webhook")).

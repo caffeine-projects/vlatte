@@ -482,6 +482,24 @@ func TestEventListeners_ServersShareTheRegistry(t *testing.T) {
 	require.True(t, before.Config().Listeners.OnComplete.Has("second"))
 }
 
+func TestEventListeners_NilGivesEachServerItsOwnRegistryAgain(t *testing.T) {
+	// EventListeners(nil) after a shared registry goes back to a registry of each server's own: the listeners
+	// registered so far reach the server, and those registered later don't reach the registry it stopped sharing.
+	nop := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
+
+	shared := vlatte.NewListener()
+	setup := Setup().Silent().OnCompleteListener("hook", nop).EventListeners(shared).EventListeners(nil)
+
+	m := MustNew(setup)
+	t.Cleanup(m.Close)
+
+	require.NotSame(t, shared, m.Config().Listeners)
+	require.True(t, m.Config().Listeners.OnComplete.Has("hook"))
+
+	setup.OnCompleteListener("later", nop)
+	require.False(t, shared.OnComplete.Has("later"), "a listener registered after EventListeners(nil) reached the shared registry")
+}
+
 // acceptCounter counts the connections accepted through a listener.
 type acceptCounter struct {
 	net.Listener

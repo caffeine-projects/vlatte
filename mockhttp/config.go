@@ -85,9 +85,8 @@ type Config struct {
 	//
 	// Nil leaves each to a transport it makes, and closes with the server. Only the transports it makes for proxy
 	// replies, the recording target and the forward proxy follow its TLS client certificates and CAs, SSLVerify,
-	// RecordConfig.SkipSSLVerify and the forward proxy's Via and Timeout: the one of webhooks verifies certificates and
-	// uses the proxies of the environment, as http.DefaultTransport does. The forward proxy's CONNECT tunnels dial their
-	// host, whatever the transport.
+	// RecordConfig.SkipSSLVerify and the forward proxy's Via and Timeout: the one of webhooks has the settings of
+	// http.DefaultTransport. The forward proxy's CONNECT tunnels dial their host, whatever the transport.
 	Transport http.RoundTripper
 
 	// WebhookTimeout is how long a webhook waits for its answer, from the setting webhook.timeout, unless the webhook
@@ -581,13 +580,10 @@ func (cb *ConfigBuilder) Apply(conf *Config) error {
 		}
 	}
 
-	if err := cb.conf.Apply(conf); err != nil {
-		return err
-	}
-
+	err := cb.conf.Apply(conf)
 	conf.Listeners = listeners
 
-	return nil
+	return err
 }
 
 // register adds listener to the shared registry. A name the registry has already joins its error to the one Apply
