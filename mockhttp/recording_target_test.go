@@ -149,7 +149,7 @@ func TestRecording_AFilterWithAnErrorFailsTheStart(t *testing.T) {
 }
 
 func TestRecording_BadTargets(t *testing.T) {
-	const notAbsolute = "expected an absolute http or https URL, such as https://api.example.com"
+	const notAbsolute = "expected an absolute http or https URL, such as http://api.local:8080"
 
 	const notBare = "expected no path, query or fragment: the requests recorded keep theirs"
 

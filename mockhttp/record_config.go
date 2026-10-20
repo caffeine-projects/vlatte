@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -252,11 +251,11 @@ func (r *RecordConfig) filter() vlatte.Evaluators[*Mock, *selectorInput] {
 // checkRecordTarget checks the URL of a server to record: an absolute http or https URL, without the parts the
 // requests it gets have of their own: a path, a query, a fragment, and credentials.
 func checkRecordTarget(target string) error {
-	u, err := url.Parse(target)
+	u, err := checkTargetURL(target)
 
 	switch {
-	case err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "":
-		return errors.New("expected an absolute http or https URL, such as https://api.example.com")
+	case err != nil:
+		return err
 	case (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
 		return errors.New("expected no path, query or fragment: the requests recorded keep theirs")
 	case u.User != nil:

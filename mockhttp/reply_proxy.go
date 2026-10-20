@@ -186,8 +186,8 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 		return nil, fmt.Errorf("reply_proxy: timeout must be 0 or more, not %s", r.timeout)
 	}
 
-	if t := r.target; (t.Scheme != "http" && t.Scheme != "https") || t.Host == "" {
-		return nil, fmt.Errorf("reply_proxy: target %q: expected an absolute http or https URL, such as http://api.local:8080", displayURL(t))
+	if _, err := checkTargetURL(r.target.String()); err != nil {
+		return nil, fmt.Errorf("reply_proxy: target %q: %w", displayURL(r.target), err)
 	}
 
 	for name, values := range r.proxyHeaders {

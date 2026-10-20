@@ -83,7 +83,7 @@
     "proxy": {
       "type": "object",
       "properties": {
-        "target": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9+.-]*://[^/]+" },
+        "target": { "type": "string", "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^/]+" },
         "forward_header": { "$ref": "#/$defs/header_map" },
         "header": { "$ref": "#/$defs/header_map" },
         "remove_headers": { "type": "array", "items": { "type": "string" } },

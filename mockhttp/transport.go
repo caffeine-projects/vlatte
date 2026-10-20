@@ -42,6 +42,17 @@ func newTransport(conf *Config, verify bool, via *url.URL) *http.Transport {
 	}
 }
 
+// checkTargetURL parses target, the URL of a server to send requests on to, such as the target of a proxy reply or of
+// a recording: an absolute http or https URL.
+func checkTargetURL(target string) (*url.URL, error) {
+	u, err := url.Parse(target)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, errors.New("expected an absolute http or https URL, such as http://api.local:8080")
+	}
+
+	return u, nil
+}
+
 // parseVia parses the URL of a proxy to send through, an absolute http or https URL. An empty via is none.
 func parseVia(via string) (*url.URL, error) {
 	if via == "" {

@@ -1485,3 +1485,15 @@ func (b *lockedBuffer) String() string {
 
 	return b.buf.String()
 }
+
+func TestProxyReply_AMockFileTargetThatIsntHTTPFailsOnItsKey(t *testing.T) {
+	// #63: a mock file's proxy.target had to have a scheme and a host, any scheme: ftp://files.local passed, and failed
+	// only when the mock was built, with an error of the Go API that names no key.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	_, err := m.Mock(FromBytes([]byte("request:\n  path: /p\nproxy:\n  target: ftp://files.local\n"), "yaml"))
+	require.ErrorContains(t, err, "proxy.target")
+	require.ErrorContains(t, err, "expected an absolute http or https URL, such as http://api.local:8080")
+	require.NotContains(t, err.Error(), "reply_proxy:")
+}

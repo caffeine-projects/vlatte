@@ -489,12 +489,9 @@ var _proxySchema = config.NewSchema(
 		Set: func(p *proxyDef, v config.Value) error {
 			p.target, p.hasTarget = v.Str, true
 
-			u, err := url.Parse(v.Str)
-			if err != nil || u.Scheme == "" || u.Host == "" {
-				return errors.New("expected an absolute URL, such as http://api.local:8080")
-			}
+			_, err := checkTargetURL(v.Str)
 
-			return nil
+			return err
 		},
 	},
 	proxyField{
