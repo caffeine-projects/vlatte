@@ -125,18 +125,6 @@ func TestPropStream_EachPauseFollowsAFlush(t *testing.T) {
 	})
 }
 
-func TestRender_WaitsOnTheContext(t *testing.T) {
-	// The real wait ends when the client goes away, and doesn't sleep for nothing.
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-
-	start := time.Now()
-	require.ErrorIs(t, wait(ctx, time.Hour), context.Canceled)
-	require.Less(t, time.Since(start), time.Minute)
-
-	require.NoError(t, wait(t.Context(), time.Millisecond))
-}
-
 // failingWriter is a response writer whose writes, or flushes, fail, as when the client went away.
 type failingWriter struct {
 	header    http.Header

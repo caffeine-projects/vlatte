@@ -8,6 +8,7 @@ import (
 	json "encoding/json/v2"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -395,6 +396,46 @@ func TestWebHook_Timeout(t *testing.T) {
 	})
 }
 
+func TestWebHook_TimeoutPrecedence(t *testing.T) {
+	// The vlatte command set the timeout by writing the WebHook's field once its settings loaded. Now the server gives
+	// its webhook.timeout to the event, and a webhook's own timeout wins over it, so a Go user's WithTimeout isn't
+	// overwritten by a setting.
+	testCases := []struct {
+		name   string
+		option time.Duration
+		server time.Duration
+		want   time.Duration
+	}{
+		{name: "WithTimeout wins over the server's", option: time.Minute, server: 5 * time.Second, want: time.Minute},
+		{name: "the server's without WithTimeout", server: 5 * time.Second, want: 5 * time.Second},
+		{name: "10s without either", want: 10 * time.Second},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				wh, err := webhook.New(webhook.WithRoundTripper(silent{}), webhook.WithTimeout(tc.option))
+				require.NoError(t, err)
+
+				start := time.Now()
+				err = wh.Run(t.Context(), timedOnComplete{params: map[string]any{"url": "http://hooks.test/slow"}, timeout: tc.server})
+
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+				require.Equal(t, tc.want, time.Since(start))
+			})
+		})
+	}
+}
+
+// timedOnComplete is an event that gives a webhook timeout, as mockhttp's gives the server's.
+type timedOnComplete struct {
+	onComplete
+
+	timeout time.Duration
+}
+
+func (e timedOnComplete) WebhookTimeout() time.Duration { return e.timeout }
+
 // silent is a RoundTripper whose target never answers: it returns when the request's context ends.
 type silent struct{}
 
@@ -460,6 +501,87 @@ func TestWebHook_Templates(t *testing.T) {
 			require.Equal(t, http.StatusNoContent, res.StatusCode)
 			require.True(t, target.AssertNumberOfCalls(t, 1))
 		})
+	}
+}
+
+func TestArgsBuilder_Templates(t *testing.T) {
+	// Go users set templates with the builder, as mock files set them with url_template, header_template,
+	// body_template and body_file, and they render the same: with the request that completed the mock, PUT /orders/42.
+	target := mockhttp.MustNew(mockhttp.Setup().Silent())
+	target.MustStart()
+	defer target.Close()
+
+	testCases := []struct {
+		name       string
+		targetMock *mockhttp.Builder
+		args       *webhook.ArgsBuilder
+	}{
+		{
+			"URLTemplate",
+			mockhttp.Postf("/hooks/42").Reply(mockhttp.OK()),
+			webhook.Options().URLTemplate(target.URL() + "/hooks/{{ index .Request.URLPathSegments 1 }}"),
+		},
+		{
+			"HeaderTemplate",
+			mockhttp.Postf("/hooks").Headerf("X-Method", "PUT").Headerf("X-Plain", "{{ .Request.Method }}").Reply(mockhttp.OK()),
+			webhook.Options().URL(target.URL("/hooks")).
+				HeaderTemplate("X-Method", "{{ .Request.Method }}").
+				Header("X-Plain", "{{ .Request.Method }}"),
+		},
+		{
+			"BodyTemplate",
+			mockhttp.Postf("/hooks").Body(match.Eq("order 42")).Reply(mockhttp.OK()),
+			webhook.Options().URL(target.URL("/hooks")).BodyTemplate("order {{ index .Request.URLPathSegments 1 }}"),
+		},
+		{
+			"BodyFile",
+			mockhttp.Postf("/hooks").Body(match.Eq("from a file\n")).Reply(mockhttp.OK()),
+			webhook.Options().URL(target.URL("/hooks")).BodyFile("testdata/hook_body.txt"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			wh, err := webhook.New()
+			require.NoError(t, err)
+
+			m := mockhttp.MustNew(mockhttp.Setup().Silent().OnCompleteListener("webhook", wh))
+			m.MustStart()
+			defer m.Close()
+			defer target.Clean(t.Context())
+
+			target.MustMock(tc.targetMock)
+			m.MustMock(mockhttp.Putf("/orders/42").
+				OnCompleteEvent(tc.args.Method(http.MethodPost).Build("webhook")).
+				Reply(mockhttp.NoContent()))
+
+			req, _ := http.NewRequest(http.MethodPut, m.URL("/orders/42"), nil)
+			res, err := http.DefaultClient.Do(req)
+
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, http.StatusNoContent, res.StatusCode)
+			require.True(t, target.AssertNumberOfCalls(t, 1))
+		})
+	}
+}
+
+func TestArgsBuilder_TemplatesAreCheckedWhenTheMockIsBuilt(t *testing.T) {
+	// A template set with the builder is compiled when the mock is built, as one from a mock file is.
+	wh, err := webhook.New()
+	require.NoError(t, err)
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().OnCompleteListener("webhook", wh))
+	defer m.Close()
+
+	for name, args := range map[string]*webhook.ArgsBuilder{
+		"url_template":      webhook.Options().URLTemplate("{{ .X"),
+		"header_template X": webhook.Options().URL("http://localhost").HeaderTemplate("X", "{{ .X"),
+		"body_template":     webhook.Options().URL("http://localhost").BodyTemplate("{{ .X"),
+	} {
+		_, err := m.Mock(mockhttp.Getf("/x").OnCompleteEvent(args.Build("webhook")).Reply(mockhttp.OK()))
+		require.ErrorIs(t, err, webhook.ErrRenderingTemplate, name)
+		require.ErrorContains(t, err, "template: "+name+":1: unclosed action")
 	}
 }
 
@@ -712,6 +834,90 @@ func (c *carrier) RoundTrip(r *http.Request) (*http.Response, error) {
 	return c.inner.RoundTrip(r)
 }
 
+func TestWebHook_ConnectionsCloseWithTheServer(t *testing.T) {
+	// Webhooks sent through http.DefaultTransport, which kept their idle connections to the target for 90s after the
+	// server closed, unless something closed every idle connection of the process, as an httptest.Server's Close does.
+	// A server without a transport of the caller's now gives webhooks one it closes, whatever its backend. Two sends
+	// still share one connection.
+	var opened, open atomic.Int64
+
+	answer := strings.Repeat("a", 32<<10)
+	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, answer)
+	}))
+	target.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		switch state {
+		case http.StateNew:
+			opened.Add(1)
+			open.Add(1)
+		case http.StateClosed, http.StateHijacked:
+			open.Add(-1)
+		}
+	}
+	target.Start()
+	t.Cleanup(target.Close)
+
+	wh, err := webhook.New()
+	require.NoError(t, err)
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().BackendFactory(plainBackends{}).OnCompleteListener("webhook", wh))
+	m.MustStart()
+
+	m.MustMock(mockhttp.Getf("/test").
+		OnCompleteEvent(webhook.Options().URL(target.URL + "/hook").Method(http.MethodPost).Build("webhook")).
+		Reply(mockhttp.NoContent()))
+
+	client := &http.Client{Transport: &http.Transport{}}
+	for range 2 {
+		res, err := client.Get(m.URL("/test"))
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, http.StatusNoContent, res.StatusCode)
+	}
+
+	require.Equal(t, int64(1), opened.Load(), "the second webhook reused the connection of the first")
+
+	m.Close()
+
+	require.Eventually(t, func() bool { return open.Load() == 0 }, 2*time.Second, 10*time.Millisecond,
+		"connections to the target left open after Close: %d", open.Load())
+}
+
+// plainBackends builds mock server backends on an http.Server, which, unlike an httptest.Server, leaves the idle
+// connections of http.DefaultTransport alone when it closes.
+type plainBackends struct{}
+
+func (plainBackends) NewBackend(cfg mockhttp.BackendConfig) (mockhttp.Backend, error) {
+	return &plainBackend{server: &http.Server{Handler: cfg.Handler}}, nil
+}
+
+type plainBackend struct {
+	server *http.Server
+	ln     net.Listener
+	info   mockhttp.BackendInfo
+}
+
+func (b *plainBackend) Listen() error {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+
+	b.ln, b.info.URL = ln, "http://"+ln.Addr().String()
+
+	return nil
+}
+
+func (b *plainBackend) ListenTLS() error { return errors.New("plain backend: no TLS") }
+
+func (b *plainBackend) Serve() error {
+	go b.server.Serve(b.ln)
+	return nil
+}
+
+func (b *plainBackend) Close() error                { return b.server.Close() }
+func (b *plainBackend) Info() *mockhttp.BackendInfo { return &b.info }
+
 func TestWebHook_SendsThroughTheServerTransport(t *testing.T) {
 	// The server's transport carries what it sends, its webhooks included, such as through a client certificate or a
 	// proxy of the caller's network. A webhook's own transport goes first. With neither, it sends all the same.
@@ -791,7 +997,7 @@ func TestWebHook_AZeroWebHookSends(t *testing.T) {
 func TestWithTimeout_RejectsANegativeTimeout(t *testing.T) {
 	// A negative timeout made every send fail at once.
 	_, err := webhook.New(webhook.WithTimeout(-time.Second))
-	require.EqualError(t, err, "webhook: error applying option at index 0. reason: negative timeout -1s")
+	require.EqualError(t, err, "webhook: option at index 0: negative timeout -1s")
 }
 
 // clocked is a RoundTripper that keeps when it was called, and answers 204.

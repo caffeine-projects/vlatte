@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -262,6 +263,62 @@ func TestNew_ZeroValueConfig(t *testing.T) {
 	require.Equal(t, StatusNoMatch, res.StatusCode)
 }
 
+func TestConfig_ApplyCopiesEveryField(t *testing.T) {
+	// Apply copies each field by hand: a field added to Config without its line in Apply would be dropped by every
+	// Setup() and Config given to New, without a word. Every exported field is set, and each must arrive.
+	samples := map[reflect.Type]any{
+		reflect.TypeFor[net.Listener]():          &net.TCPListener{},
+		reflect.TypeFor[BackendFactory]():        newBackendFactory(),
+		reflect.TypeFor[vlatte.TemplateEngine](): vlatte.MustNewGoTemplateEngine(),
+		reflect.TypeFor[http.RoundTripper]():     &http.Transport{},
+		reflect.TypeFor[vlatte.KV]():             vlatte.NewMemoryKV(),
+	}
+
+	src := &Config{}
+	sv := reflect.ValueOf(src).Elem()
+
+	for i := range sv.NumField() {
+		field := sv.Type().Field(i)
+		if !field.IsExported() {
+			continue
+		}
+
+		value := sv.Field(i)
+		switch kind := field.Type.Kind(); kind {
+		case reflect.String:
+			value.SetString("x")
+		case reflect.Bool:
+			value.SetBool(true)
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			value.SetInt(1)
+		case reflect.Pointer:
+			value.Set(reflect.New(field.Type.Elem()))
+		case reflect.Slice:
+			value.Set(reflect.MakeSlice(field.Type, 1, 1))
+		case reflect.Map:
+			value.Set(reflect.MakeMap(field.Type))
+		case reflect.Func:
+			value.Set(reflect.MakeFunc(field.Type, func([]reflect.Value) []reflect.Value { return nil }))
+		case reflect.Interface:
+			sample, ok := samples[field.Type]
+			require.True(t, ok, "Config.%s: add a sample of %s to this test", field.Name, field.Type)
+			value.Set(reflect.ValueOf(sample))
+		default:
+			t.Fatalf("Config.%s: teach this test to set a %s", field.Name, kind)
+		}
+	}
+
+	dst := &Config{}
+	require.NoError(t, src.Apply(dst))
+
+	dv := reflect.ValueOf(dst).Elem()
+	for i := range dv.NumField() {
+		if field := dv.Type().Field(i); field.IsExported() {
+			require.False(t, dv.Field(i).IsZero(), "Config.Apply doesn't copy %s", field.Name)
+		}
+	}
+}
+
 func TestGlobalEventsAreApplied(t *testing.T) {
 	var fired atomic.Int32
 	setup := Setup().OnCompleteListener("count", vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
@@ -317,6 +374,11 @@ func TestOnCompleteListener_ANameRegisteredTwiceFailsNew(t *testing.T) {
 	require.ErrorIs(t, err, vlatte.ErrEventAlreadyRegistered)
 	require.ErrorContains(t, err, "config: on_complete listener hook: vlatte: event already registered")
 	require.ErrorContains(t, err, "config: on_complete listener audit: vlatte: event already registered")
+
+	// Without a shared registry, each server's own registry fails the same.
+	_, err = New(Setup().Silent().OnCompleteListener("hook", nop).OnCompleteListener("hook", nop))
+	require.ErrorIs(t, err, vlatte.ErrEventAlreadyRegistered)
+	require.ErrorContains(t, err, "config: on_complete listener hook: vlatte: event already registered")
 }
 
 func TestEventListeners_KeepsTheListenersRegisteredBefore(t *testing.T) {
@@ -376,6 +438,48 @@ func TestEventListeners_KeepsTheListenersRegisteredBefore(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOnCompleteListener_ReachesOnlyTheServersBuiltAfter(t *testing.T) {
+	// OnCompleteListener registered as it was called, in a registry every server built from the builder shared, so a
+	// listener registered after a server was built reached it too. Each server now has the listeners registered when
+	// it was built, and a builder builds any number of servers.
+	nop := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
+
+	setup := Setup().Silent().OnCompleteListener("first", nop)
+
+	before := MustNew(setup)
+	t.Cleanup(before.Close)
+
+	setup.OnCompleteListener("second", nop)
+
+	after := MustNew(setup)
+	t.Cleanup(after.Close)
+
+	require.True(t, before.Config().Listeners.OnComplete.Has("first"))
+	require.False(t, before.Config().Listeners.OnComplete.Has("second"), "a listener registered later reached a server built before")
+	require.True(t, after.Config().Listeners.OnComplete.Has("first"))
+	require.True(t, after.Config().Listeners.OnComplete.Has("second"))
+
+	_, err := before.Mock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "second"}).Reply(NoContent()))
+	require.ErrorContains(t, err, "mock: on_complete listener second at index 0 is not registered")
+}
+
+func TestEventListeners_ServersShareTheRegistry(t *testing.T) {
+	// A registry given with EventListeners is shared on purpose: every server built from the builder has the
+	// listeners registered in it, before or after.
+	nop := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
+
+	shared := vlatte.NewListener()
+	setup := Setup().Silent().EventListeners(shared).OnCompleteListener("first", nop)
+
+	before := MustNew(setup)
+	t.Cleanup(before.Close)
+
+	setup.OnCompleteListener("second", nop)
+
+	require.Same(t, shared, before.Config().Listeners)
+	require.True(t, before.Config().Listeners.OnComplete.Has("second"))
 }
 
 // acceptCounter counts the connections accepted through a listener.

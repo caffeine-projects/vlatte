@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
@@ -50,18 +52,18 @@ type Transform func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Ar
 // Register it with [vlatte.Listener.OnComplete] (e.g. via mockhttp.Setup().OnCompleteListener(name, wh)).
 // mockhttp sends it once the mock replied, and the response waits for it: a test checks the target right after.
 //
-// It logs each send and its answer at info level, with Logger, or else with the logger of the event: mockhttp gives
-// the server's. It sends with RoundTripper, or else with the transport of the event: mockhttp gives the server's
-// Config.Transport, or else http.DefaultTransport. A send fails when the target can't be reached in Timeout, or answers
-// with a status outside 2xx; a redirect isn't followed. A zero WebHook has a 10s timeout.
+// It logs each send and its answer at info level, with WithLogger's logger, or else with the logger of the event:
+// mockhttp gives the server's. It sends with WithRoundTripper's transport, or else with the transport of the event:
+// mockhttp gives the server's Config.Transport, or else one it closes with the server. Without either, it sends with
+// http.DefaultTransport. A send fails when the target can't be reached in time, or answers with a status outside 2xx;
+// a redirect isn't followed. The time is WithTimeout's, or else the event's: mockhttp gives the server's
+// Config.WebhookTimeout. Without either, it is 10s. A zero WebHook is ready to use.
 type WebHook struct {
-	RoundTripper http.RoundTripper
-	Transform    Transform
-	Logger       *zerolog.Logger
-	Timeout      time.Duration
+	roundTripper http.RoundTripper
+	transform    Transform
+	logger       *zerolog.Logger
+	timeout      time.Duration
 }
-
-const _defaultTimeout = 10 * time.Second
 
 // New creates a new WebHook instance.
 func New(options ...Option) (*WebHook, error) {
@@ -69,7 +71,7 @@ func New(options ...Option) (*WebHook, error) {
 
 	for i, opt := range options {
 		if err := opt(w); err != nil {
-			return nil, fmt.Errorf("webhook: error applying option at index %d. reason: %w", i, err)
+			return nil, fmt.Errorf("webhook: option at index %d: %w", i, err)
 		}
 	}
 
@@ -113,8 +115,8 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		webhookArgs.HeaderTemplate = make(map[string]string)
 	}
 
-	if w.Transform != nil {
-		if err := w.Transform(ctx, args, webhookArgs); err != nil {
+	if w.transform != nil {
+		if err := w.transform(ctx, args, webhookArgs); err != nil {
 			return fmt.Errorf("webhook: failed to Transform args: %w", err)
 		}
 	}
@@ -177,7 +179,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		body = strings.NewReader(webhookArgs.Body)
 	}
 
-	logger := w.Logger
+	logger := w.logger
 	if logger == nil {
 		logger = loggerOf(args)
 	}
@@ -221,7 +223,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 	// Everything renders before the delay, so a mistake shows without waiting for it.
 	if webhookArgs.Delay > 0 {
-		if err := wait(ctx, webhookArgs.Delay); err != nil {
+		if err := httpx.Wait(ctx, webhookArgs.Delay); err != nil {
 			return fmt.Errorf("webhook: %s %s: waiting for the delay of %s: %w", method, redacted, webhookArgs.Delay, err)
 		}
 	}
@@ -232,15 +234,12 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		Msgf("---> WEBHOOK REQUEST %s %s", method, u.Path)
 
 	// The timeout counts from the send, after the delay.
-	timeout := w.Timeout
-	if timeout <= 0 {
-		timeout = _defaultTimeout
-	}
+	timeout := cmp.Or(w.timeout, timeoutOf(args), httpx.DefaultWebhookTimeout)
 
 	sendCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	roundTripper := w.RoundTripper
+	roundTripper := w.roundTripper
 	if roundTripper == nil {
 		roundTripper = transportOf(args)
 	}
@@ -388,7 +387,7 @@ func (a *Args) validate() error {
 		}
 	}
 
-	if a.Method != "" && !mpart.IsToken(a.Method) {
+	if a.Method != "" && !httpx.IsToken(a.Method) {
 		return errorBadArg(fmt.Errorf("method %q is not an HTTP method", a.Method))
 	}
 
@@ -744,6 +743,16 @@ func transportOf(args vlatte.OnComplete) http.RoundTripper {
 	return http.DefaultTransport
 }
 
+// timeoutOf returns how long a send waits for its answer as the event says, as mockhttp's OnComplete gives the server's
+// Config.WebhookTimeout, or 0 when it doesn't say.
+func timeoutOf(args vlatte.OnComplete) time.Duration {
+	if t, ok := args.(interface{ WebhookTimeout() time.Duration }); ok {
+		return max(t.WebhookTimeout(), 0)
+	}
+
+	return 0
+}
+
 // loggerOf returns the logger the event gives, as mockhttp's OnComplete gives the server's, or one that logs nothing.
 func loggerOf(args vlatte.OnComplete) *zerolog.Logger {
 	if l, ok := args.(interface{ Logger() *zerolog.Logger }); ok {
@@ -810,19 +819,6 @@ func bodyFilePath(dir, name string) string {
 	}
 
 	return filepath.Clean(dir) + string(filepath.Separator) + name
-}
-
-// wait waits for d, or until ctx ends, as mockhttp waits for the delay of a multipart part.
-func wait(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
 }
 
 // render compiles text with engine and executes it with data.
