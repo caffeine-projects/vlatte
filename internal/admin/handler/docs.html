@@ -27,8 +27,9 @@
     Scalar.createApiReference('#app', {
       // The admin API's own document, next to this page: /openapi.
       url: 'openapi',
-      // A local admin API sends nothing to third parties.
+      // Past the script itself, the page reaches no third party: no telemetry, assistants or web fonts.
       telemetry: false,
+      withDefaultFonts: false,
       agent: { disabled: true },
       mcp: { disabled: true },
       showDeveloperTools: 'never',
