@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -2121,4 +2122,120 @@ func TestForwardProxy_InterceptionTunnelsClientsThatSpeakOnlyHTTP2(t *testing.T)
 		require.Equal(t, want.protocol, state.NegotiatedProtocol, protocols)
 		require.Equal(t, want.issuer, state.PeerCertificates[0].Issuer.String(), protocols)
 	}
+}
+
+func TestForwardProxy_InterceptsFromTheSettings(t *testing.T) {
+	// proxy.intercept, with the CA's files, intercepts as ProxyConfig.Intercept does: a client that trusts the CA's
+	// file gets the mocks' answers to its HTTPS requests.
+	dir := t.TempDir()
+	caCert, caKey := writeTestCA(t, dir)
+
+	m := MustNew(Setup().Silent().ConfigSources(ConfigArgs([]string{
+		"--proxy-intercept", "--proxy-ca-cert", caCert, "--proxy-ca-key", caKey,
+	})))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/mocked").Reply(OK().PlainText("mock")))
+
+	pem, err := os.ReadFile(caCert)
+	require.NoError(t, err)
+
+	pool := x509.NewCertPool()
+	require.True(t, pool.AppendCertsFromPEM(pem))
+
+	transport := &http.Transport{Proxy: http.ProxyURL(mustURL(t, m.URL())), TLSClientConfig: &tls.Config{RootCAs: pool}}
+	t.Cleanup(transport.CloseIdleConnections)
+
+	res, err := (&http.Client{Transport: transport}).Get("https://api.example.com/mocked")
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, "mock", string(body))
+}
+
+func TestForwardProxy_SendsInterceptedRequestsOnWithItsSettings(t *testing.T) {
+	// An intercepted request no mock matches goes on to its host as the proxy's requests do: verified when ssl_verify
+	// says so, through Via, and to its own host, not to proxy_all's target.
+	host := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "host "+r.URL.Path)
+	}))
+	t.Cleanup(host.Close)
+
+	elsewhere := okTarget(t)
+
+	get := func(t *testing.T, m *Server) (int, string) {
+		t.Helper()
+
+		res, err := interceptClient(t, m).Get(host.URL + "/x")
+		require.NoError(t, err)
+
+		body, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		return res.StatusCode, string(body)
+	}
+
+	t.Run("ssl_verify", func(t *testing.T) {
+		m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true, SSLVerify: true}))
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		status, body := get(t, m)
+		require.Equal(t, m.Config().ErrorStatusCode, status)
+		require.Contains(t, body, "certificate")
+	})
+
+	t.Run("a Via", func(t *testing.T) {
+		connects := make(chan string, 1)
+		via := tcpHost(t, func(conn net.Conn) {
+			br := bufio.NewReader(conn)
+
+			req, err := http.ReadRequest(br)
+			if err != nil {
+				return
+			}
+
+			connects <- req.Method + " " + req.Host
+
+			upstream, err := net.Dial("tcp", req.Host)
+			if err != nil {
+				return
+			}
+
+			defer upstream.Close()
+
+			_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\n\r\n")
+
+			go func() {
+				_, _ = io.Copy(upstream, br)
+				_ = upstream.(*net.TCPConn).CloseWrite()
+			}()
+
+			_, _ = io.Copy(conn, upstream)
+		})
+
+		m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true, Via: "http://" + via}))
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		status, body := get(t, m)
+		require.Equal(t, http.StatusOK, status, body)
+		require.Equal(t, "host /x", body)
+		require.Equal(t, "CONNECT "+host.Listener.Addr().String(), <-connects)
+	})
+
+	t.Run("proxy_all", func(t *testing.T) {
+		m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true}).ConfigSources(ConfigArgs([]string{
+			"--proxy-all-target", elsewhere.URL,
+		})))
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		status, body := get(t, m)
+		require.Equal(t, http.StatusOK, status, body)
+		require.Equal(t, "host /x", body)
+	})
 }
