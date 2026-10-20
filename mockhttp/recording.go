@@ -110,7 +110,17 @@ func (app *Server) startRecording(conf *RecordConfig) error {
 	}
 
 	if conf.Target != "" {
-		target, err := From(conf.Target).SSLVerify(!conf.SkipSSLVerify).Transport(conf.Transport).NewReplier(app)
+		// The recording verifies its target unless told not to: SkipSSLVerify is the setting a transport of the
+		// caller's would ignore.
+		if conf.SkipSSLVerify && cmp.Or(conf.Transport, app.config.Transport) != nil {
+			return errors.New("recorder: skip_ssl_verify has no effect with a transport of the caller's, " +
+				"RecordConfig.Transport or Config.Transport: skip the verification with that transport, or leave skip_ssl_verify out")
+		}
+
+		reply := From(conf.Target).Transport(conf.Transport)
+		reply.sslVerify = !conf.SkipSSLVerify
+
+		target, err := reply.NewReplier(app)
 		if err != nil {
 			return fmt.Errorf("recorder: target: %w", err)
 		}

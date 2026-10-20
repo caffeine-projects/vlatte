@@ -489,20 +489,17 @@ var _proxySchema = config.NewSchema(
 		Set: func(p *proxyDef, v config.Value) error {
 			p.target, p.hasTarget = v.Str, true
 
-			u, err := url.Parse(v.Str)
-			if err != nil || u.Scheme == "" || u.Host == "" {
-				return errors.New("expected an absolute URL, such as http://api.local:8080")
-			}
+			_, err := checkTargetURL(v.Str)
 
-			return nil
+			return err
 		},
 	},
 	proxyField{
-		Key: "forward_header", Kind: config.Any, Usage: "Headers added to the forwarded request, by name. Hop-by-hop ones, such as Connection, fail the mock, except Te: trailers.",
+		Key: "forward_header", Kind: config.Any, Usage: "Headers of the forwarded request, by name, in place of the client's. Hop-by-hop ones, such as Connection, fail the mock, except Te: trailers.",
 		Set: func(p *proxyDef, v config.Value) error { return headerValues(v, &p.forwardHeader) },
 	},
 	proxyField{
-		Key: "header", Kind: config.Any, Usage: "Headers added to the response, by name.",
+		Key: "header", Kind: config.Any, Usage: "Headers of the response, by name, in place of the target's.",
 		Set: func(p *proxyDef, v config.Value) error { return headerValues(v, &p.header) },
 	},
 	proxyField{

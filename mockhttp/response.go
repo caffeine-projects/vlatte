@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -184,16 +185,32 @@ func (r *Response) render(ctx context.Context, w http.ResponseWriter, wait func(
 }
 
 // readBody reads a streamed body, from BodyCloser, into Body, and closes it. The server measures Body as it sends it,
-// so a Content-Length that came with the stream goes: whoever reads Body can change it.
+// so a Content-Length that came with the stream goes: whoever reads Body can change it. A proxied body, which the
+// server doesn't know the size of, fails over _keptBodyLimit, and an event stream fails at once: it doesn't end.
 func (r *Response) readBody() error {
-	if r.BodyCloser == nil {
+	body := r.BodyCloser
+	if body == nil {
 		return nil
 	}
 
-	defer r.BodyCloser.Close()
+	r.BodyCloser = nil
+	defer body.Close()
 
-	b, err := io.ReadAll(r.BodyCloser)
-	r.Body, r.BodyCloser = b, nil
+	src := io.Reader(body)
+	if r.proxied {
+		if mediaType(r.Header.Get(HeaderContentType)) == "text/event-stream" {
+			return errors.New("response: response mappers read the whole body, and an event stream doesn't end")
+		}
+
+		src = io.LimitReader(body, _keptBodyLimit+1)
+	}
+
+	b, err := io.ReadAll(src)
+	if r.proxied && len(b) > _keptBodyLimit {
+		return fmt.Errorf("response: response mappers read the whole body, and the target's is over %d bytes", _keptBodyLimit)
+	}
+
+	r.Body = b
 	r.Header.Del(HeaderContentLength)
 
 	return err

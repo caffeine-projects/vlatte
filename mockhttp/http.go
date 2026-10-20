@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"uuid"
 
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
@@ -52,7 +53,13 @@ type Server struct {
 	params             vlatte.KV
 	loaders            []Loader
 	rwMutex            sync.RWMutex
-	proxy              *reverseProxy
+	proxy              *forwardProxy
+
+	// id tells the requests this server sends on, in their VLatte-Via, so one that comes back fails as a proxy loop.
+	id string
+
+	// tunnels holds the connections of the forward proxy's open tunnels, which Close closes.
+	tunnels tunnels
 
 	data    map[string]any
 	logger  *zerolog.Logger
@@ -81,7 +88,7 @@ type Server struct {
 // If no port is set, it will start the server on localhost using a random port.
 // It returns an error if a configuration fails to apply or the server cannot be built.
 func New(config ...Option) (*Server, error) {
-	app := &Server{}
+	app := &Server{id: uuid.New().String()}
 
 	conf := defaultConfig()
 
@@ -159,9 +166,12 @@ func New(config ...Option) (*Server, error) {
 		conf.Record = record
 	}
 
-	var p *reverseProxy
+	var p *forwardProxy
 	if conf.Proxy != nil {
-		p = newProxy(app.Logger(), conf)
+		var err error
+		if p, err = newProxy(app.id, conf); err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
 	}
 
 	var lifecycle mockHTTPLifecycle
@@ -377,8 +387,8 @@ func (app *Server) MustReload() {
 
 // Close closes the mock server. It cancels the on_complete events still running, such as a webhook waiting for its
 // delay or its target, so the requests waiting for them end, and waits for those requests. It stops the recording,
-// and waits until it wrote what it took. It closes the idle connections of the transports it made, such as the one of
-// webhooks. A closed server doesn't start again.
+// and waits until it wrote what it took, and closes the forward proxy's open tunnels. It closes the idle connections
+// of the transports it made, such as the one of webhooks. A closed server doesn't start again.
 func (app *Server) Close() {
 	app.closed.Store(true)
 
@@ -404,6 +414,9 @@ func (app *Server) Close() {
 	if app.proxy != nil {
 		app.proxy.close()
 	}
+
+	// The backend doesn't track the connections it handed over to tunnels.
+	app.tunnels.closeAll()
 
 	app.webhooks.CloseIdleConnections()
 }
@@ -448,7 +461,7 @@ func (app *Server) DescribeConfig() string {
 	buf.WriteString("\n")
 
 	if app.config.Proxy != nil {
-		buf.WriteString("Reverse Proxy: ")
+		buf.WriteString("Forward Proxy: ")
 		buf.WriteString("enabled")
 		buf.WriteString("\n")
 	}

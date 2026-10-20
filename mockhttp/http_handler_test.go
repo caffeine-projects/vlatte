@@ -931,3 +931,19 @@ func TestHandler_NoDebugHeadersTurnsThemAllOff(t *testing.T) {
 	_, header, _ := getFull(t, m, "/nothing")
 	require.Equal(t, vlatte.FailureNoMatch, header.Get(HeaderVlatteError))
 }
+
+func TestHandler_StepsDropTheContentLengthOfAReplyThatWritesItsOwn(t *testing.T) {
+	// A step can change how many bytes go out, so the Content-Length a reply declares would be wrong: the server
+	// failed the write. Steps drop it, whatever reply set it, a proxy's or one that writes its own response.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/h").Step(appendStep("<step>")).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(HeaderContentLength, "5")
+		_, _ = io.WriteString(w, "hello")
+	})))
+
+	status, body := get(t, m, "/h")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "hello<step>", body)
+}

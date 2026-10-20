@@ -397,3 +397,33 @@ func TestPropJSONSchema_DurationPattern(t *testing.T) {
 		require.Equal(t, want, err == nil, "decoder on %q: %v", s, err)
 	})
 }
+
+func TestJSONSchema_ProxyTargetPattern(t *testing.T) {
+	// #63: the editor's pattern for proxy.target took any scheme, which the decoder refuses. Both take an absolute http
+	// or https URL only, in any case.
+	_, raw := loadJSONSchema(t)
+
+	props, _ := raw["properties"].(map[string]any)
+	proxy, _ := props["proxy"].(map[string]any)
+	proxyProps, _ := proxy["properties"].(map[string]any)
+	target, _ := proxyProps["target"].(map[string]any)
+	source, _ := target["pattern"].(string)
+	require.NotEmpty(t, source, "proxy.target has no pattern")
+
+	pattern := regexp.MustCompile(source)
+
+	for target, want := range map[string]bool{
+		"http://api.local:8080": true,
+		"https://api.local/v1":  true,
+		"HTTPS://api.local":     true,
+		"ftp://files.local":     false,
+		"ws://api.local":        false,
+		"/x":                    false,
+		"https://":              false,
+		"mailto:a@b":            false,
+	} {
+		_, err := checkTargetURL(target)
+		require.Equal(t, want, err == nil, "decoder on %q: %v", target, err)
+		require.Equal(t, want, pattern.MatchString(target), "pattern on %q", target)
+	}
+}
