@@ -231,3 +231,70 @@ func TestBase_Remock(t *testing.T) {
 		require.True(t, sameMocks([]*fakeMock{c}, scope.Mocks()))
 	})
 }
+
+func TestBase_AMockOutsideEveryScopeGivesWay(t *testing.T) {
+	// The admin API stores mocks outside every scope. A mock file, or code, that defines a mock with the same ID takes
+	// its place, as a save or a reload of files the admin wrote must: the mock is replaced, not refused. Mocks of other
+	// scopes still keep their IDs.
+	t.Run("added", func(t *testing.T) {
+		store := vlatte.NewStore[*fakeMock]()
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		posted := newFakeMockWith("x", 0)
+		require.NoError(t, store.Store(t.Context(), posted))
+
+		x := newFakeMockWith("x", 0)
+		scope, err := app.Mock(fakeBuilder{mock: x})
+		require.NoError(t, err)
+
+		all, _ := store.PickAll(t.Context())
+		require.True(t, sameMocks([]*fakeMock{x}, all))
+		require.True(t, sameMocks([]*fakeMock{x}, scope.Mocks()))
+		require.Equal(t, int64(1), posted.closed.Load(), "it left the store")
+	})
+
+	t.Run("remocked", func(t *testing.T) {
+		store := vlatte.NewStore[*fakeMock]()
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		old, err := app.Mock(fakeBuilder{mock: newFakeMockWith("a", 0)})
+		require.NoError(t, err)
+
+		posted := newFakeMockWith("x", 0)
+		require.NoError(t, store.Store(t.Context(), posted))
+
+		a, x := newFakeMockWith("a", 0), newFakeMockWith("x", 0)
+		_, err = app.Remock(t.Context(), old, fakeBuilder{mock: a}, fakeBuilder{mock: x})
+		require.NoError(t, err)
+
+		all, _ := store.PickAll(t.Context())
+		require.True(t, sameMocks([]*fakeMock{a, x}, all))
+		require.Equal(t, int64(1), posted.closed.Load())
+	})
+
+	t.Run("a failing build leaves it", func(t *testing.T) {
+		store := vlatte.NewStore[*fakeMock]()
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		posted := newFakeMockWith("x", 0)
+		require.NoError(t, store.Store(t.Context(), posted))
+
+		_, err := app.Mock(fakeBuilder{mock: newFakeMockWith("x", 0)}, fakeBuilder{err: errors.New("bad file")})
+		require.Error(t, err)
+
+		all, _ := store.PickAll(t.Context())
+		require.True(t, sameMocks([]*fakeMock{posted}, all))
+		require.Zero(t, posted.closed.Load())
+	})
+
+	t.Run("a mock of another scope keeps its ID", func(t *testing.T) {
+		store := vlatte.NewStore[*fakeMock]()
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		scoped := newFakeMockWith("x", 0)
+		_, err := app.Mock(fakeBuilder{mock: scoped})
+		require.NoError(t, err)
+
+		_, err = app.Mock(fakeBuilder{mock: newFakeMockWith("x", 0)})
+		require.ErrorIs(t, err, vlatte.ErrDuplicateID)
+
+		all, _ := store.PickAll(t.Context())
+		require.True(t, sameMocks([]*fakeMock{scoped}, all))
+	})
+}

@@ -16,7 +16,8 @@ func NewBase[TM Mock, A any](app A, repo Store[TM]) *Base[TM, A] {
 	return &Base[TM, A]{scopes: &Scopes[TM, A]{flavor: app, store: repo}}
 }
 
-// Mock adds one or multiple request mocks.
+// Mock adds one or multiple request mocks. A mock stored outside every scope, such as one the admin API added, gives
+// way to a new mock with its ID.
 // It returns a Scope instance that allows control of the added mocks and also checks if they were called or not.
 func (app *Base[TM, A]) Mock(builders ...Builder[TM, A]) (*Scope[TM], error) {
 	app.mu.Lock()
@@ -39,8 +40,9 @@ func (app *Base[TM, A]) MustMock(builders ...Builder[TM, A]) *Scope[TM] {
 
 // Remock builds builders and swaps their mocks for those of old in one step, so a request finds the mocks of old or
 // the new ones, never neither, and returns their scope, which takes the place of old. With a nil old, it adds the
-// mocks, as Mock does. It changes nothing when a builder fails, when the store refuses the mocks, for example over an
-// ID in use outside old, or when old isn't tracked: replaced or unmocked already, or another server's.
+// mocks, as Mock does. A mock stored outside every scope, such as one the admin API added, gives way to a new mock with
+// its ID. It changes nothing when a builder fails, when the store refuses the mocks, for example over an ID in use in
+// another scope, or when old isn't tracked: replaced or unmocked already, or another server's.
 func (app *Base[TM, A]) Remock(ctx context.Context, old *Scope[TM], builders ...Builder[TM, A]) (*Scope[TM], error) {
 	app.mu.Lock()
 	defer app.mu.Unlock()

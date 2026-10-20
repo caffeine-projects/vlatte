@@ -272,18 +272,19 @@ func (s *Scope[B]) AssertNumberOfCalls(t TestingT, expected int64) bool {
 	return false
 }
 
-// replace swaps the mocks of this scope that the store still holds for mocks, in one step, and empties the scope.
-func (s *Scope[B]) replace(ctx context.Context, mocks []B) error {
+// replace swaps the mocks of this scope that the store still holds, and those of drop, for mocks, in one step, and
+// empties the scope.
+func (s *Scope[B]) replace(ctx context.Context, mocks, drop []B) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// Read under the lock already held: Mocks would take the read lock, which isn't reentrant.
-	own := make([]B, 0, len(s.index))
+	own := make([]B, 0, len(s.index)+len(drop))
 	for _, e := range s.index {
 		own = append(own, e.mock)
 	}
 
-	if err := s.store.Replace(ctx, own, mocks...); err != nil {
+	if err := s.store.Replace(ctx, append(own, drop...), mocks...); err != nil {
 		return err
 	}
 
@@ -309,8 +310,9 @@ func (s *Scopes[B, A]) Add(builders ...Builder[B, A]) (*Scope[B], error) {
 
 // Replace builds every builder, then swaps the mocks for those of old in one step, so a reader finds the mocks of
 // old or the new ones, never neither, and returns their scope, which takes the place of old. With a nil old, it adds
-// the mocks, as Add does. It changes nothing when old isn't tracked, when a builder fails, reporting every failing
-// builder by index, or when the store refuses the mocks, for example over an ID in use outside old.
+// the mocks, as Add does. A mock stored outside every scope, such as one the admin API added, gives way in the same
+// step to a new mock with its ID. It changes nothing when old isn't tracked, when a builder fails, reporting every
+// failing builder by index, or when the store refuses the mocks, for example over an ID in use in another scope.
 // Once replaced, old holds no mocks.
 func (s *Scopes[B, A]) Replace(ctx context.Context, old *Scope[B], builders ...Builder[B, A]) (*Scope[B], error) {
 	if old != nil && !slices.Contains(s.All(), old) {
@@ -337,11 +339,15 @@ func (s *Scopes[B, A]) Replace(ctx context.Context, old *Scope[B], builders ...B
 		return nil, errors.Join(errs...)
 	}
 
-	var err error
-	if old == nil {
+	unscoped, err := s.unscoped(ctx, built)
+	switch {
+	case err != nil:
+	case old != nil:
+		err = old.replace(ctx, built, unscoped)
+	case len(unscoped) > 0:
+		err = s.store.Replace(ctx, unscoped, built...)
+	default:
 		err = s.store.Store(ctx, built...)
-	} else {
-		err = old.replace(ctx, built)
 	}
 
 	if err != nil {
@@ -384,6 +390,40 @@ func (s *Scopes[B, A]) All() []*Scope[B] {
 	copy(ret, s.list)
 
 	return ret
+}
+
+// unscoped returns the stored mocks no scope holds whose IDs mocks take.
+func (s *Scopes[B, A]) unscoped(ctx context.Context, mocks []B) ([]B, error) {
+	ids := make(map[string]struct{}, len(mocks))
+	for _, mock := range mocks {
+		ids[mock.ID()] = struct{}{}
+	}
+
+	stored, err := s.store.PickAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	taken := slices.DeleteFunc(stored, func(mock B) bool {
+		_, ok := ids[mock.ID()]
+		return !ok
+	})
+
+	if len(taken) == 0 {
+		return nil, nil
+	}
+
+	scoped := make(map[any]struct{})
+	for _, scope := range s.All() {
+		for _, mock := range scope.Mocks() {
+			scoped[mock] = struct{}{}
+		}
+	}
+
+	return slices.DeleteFunc(taken, func(mock B) bool {
+		_, ok := scoped[mock]
+		return ok
+	}), nil
 }
 
 // closeBuilt closes the mocks a call built and couldn't store. A builder that returns a mock the store holds, which
