@@ -307,3 +307,27 @@ func TestMock_ADescriptionOpensTheSameBodyFiles(t *testing.T) {
 		})
 	}
 }
+
+func TestMock_ADisabledMockDescribesAsDisabled(t *testing.T) {
+	// A disabled mock, read back and loaded again, as the admin API's save does, stays disabled: it came back enabled,
+	// and matched requests it had been turned off for.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scope := m.MustMock(Getf("/off").Reply(OK()))
+	scope.Disable()
+
+	desc, err := scope.Mocks()[0].MarshalJSON()
+	require.NoError(t, err)
+	require.NoError(t, m.Unmock(t.Context(), scope))
+
+	loaded := m.MustMock(FromBytes(desc, "json"))
+	require.False(t, loaded.Mocks()[0].Enabled(), string(desc))
+	require.Equal(t, StatusNoMatch, getTarget(t, m, "/off"))
+
+	loaded.Enable()
+	desc, err = loaded.Mocks()[0].MarshalJSON()
+	require.NoError(t, err)
+	require.NotContains(t, string(desc), "enabled", "enabled is the default")
+}
