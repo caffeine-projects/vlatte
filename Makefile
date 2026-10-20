@@ -40,7 +40,7 @@ fuzz: ## run every fuzz target for FUZZTIME each
 
 .PHONY: lint
 lint: ## run linters
-	@time go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run
+	@GOTOOLCHAIN=go$$(go list -m -f '{{.GoVersion}}') go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run
 
 .PHONY: bench
 bench: ## run benchmarks
