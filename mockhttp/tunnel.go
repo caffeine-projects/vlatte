@@ -181,18 +181,7 @@ func (p *forwardProxy) dial(ctx context.Context, host string, via []string) (net
 // dialVia opens a connection to host through the proxy at proxyURL: a SOCKS5 one, or an http or https one, with a
 // CONNECT.
 func (p *forwardProxy) dialVia(ctx context.Context, dialer *net.Dialer, proxyURL *url.URL, host string, via []string) (net.Conn, error) {
-	port := proxyURL.Port()
-	switch {
-	case port != "":
-	case proxyURL.Scheme == "https":
-		port = "443"
-	case proxyURL.Scheme == "http":
-		port = "80"
-	default:
-		port = "1080"
-	}
-
-	addr := net.JoinHostPort(proxyURL.Hostname(), port)
+	addr := viaAddr(proxyURL)
 
 	if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
 		return dialSOCKS5(ctx, dialer, addr, proxyURL.User, host)
@@ -257,12 +246,26 @@ func (p *forwardProxy) dialVia(ctx context.Context, dialer *net.Dialer, proxyURL
 		return nil, context.Cause(ctx)
 	}
 
-	if err := conn.SetDeadline(time.Time{}); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
+	// Clearing a deadline fails only on a closed connection, and nothing closes conn before it is returned.
+	_ = conn.SetDeadline(time.Time{})
 
 	return &bufferedConn{Conn: conn, r: br}, nil
+}
+
+// viaAddr returns the host:port of proxyURL, a Via, with the default port of its scheme when it names none.
+func viaAddr(proxyURL *url.URL) string {
+	port := proxyURL.Port()
+	switch {
+	case port != "":
+	case proxyURL.Scheme == "https":
+		port = "443"
+	case proxyURL.Scheme == "http":
+		port = "80"
+	default:
+		port = "1080"
+	}
+
+	return net.JoinHostPort(proxyURL.Hostname(), port)
 }
 
 // dialSOCKS5 opens a connection to host through the SOCKS5 proxy at addr, with the credentials of user, if any.
