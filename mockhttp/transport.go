@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"slices"
 	"time"
+
+	"golang.org/x/net/http/httpproxy"
 )
 
 // _idleConnTimeout closes a connection to an upstream that stays idle. A request still being served when its mock
@@ -17,12 +19,15 @@ const _idleConnTimeout = 15 * time.Second
 // newTransport returns a transport the server makes for its upstreams: the targets of proxy replies and of the
 // recording, and the hosts of the forward proxy. It dials and shakes hands within the limits of http.DefaultTransport,
 // and goes through via, when set, or else through the proxy of the environment (HTTP_PROXY, HTTPS_PROXY and NO_PROXY),
-// which leaves out localhost. It passes compressed bodies on as they come, and speaks HTTP/1.1 to the upstreams.
-// verify sets whether it verifies the TLS certificates of the upstreams, with the server's client CAs.
+// which leaves out localhost. It reads the environment as it is now: http.ProxyFromEnvironment reads it once in a
+// process, so a test that sets it later wouldn't see it. It passes compressed bodies on as they come, and speaks
+// HTTP/1.1 to the upstreams. verify sets whether it verifies the TLS certificates of the upstreams, with the server's
+// client CAs.
 func newTransport(conf *Config, verify bool, via *url.URL) *http.Transport {
-	proxy := http.ProxyFromEnvironment
-	if via != nil {
-		proxy = http.ProxyURL(via)
+	proxy := http.ProxyURL(via)
+	if via == nil {
+		env := httpproxy.FromEnvironment().ProxyFunc()
+		proxy = func(r *http.Request) (*url.URL, error) { return env(r.URL) }
 	}
 
 	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}

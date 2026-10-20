@@ -1,11 +1,16 @@
 package mockhttp
 
 import (
+	"bufio"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -295,4 +300,138 @@ func TestForwardProxy_AViaWithoutAPortTakesItsSchemesDefault(t *testing.T) {
 			require.Equal(t, tt.want, viaAddr(u))
 		})
 	}
+}
+
+// envProxy starts a proxy for HTTP_PROXY and HTTPS_PROXY, which answers each request in absolute form itself, with
+// "env proxy" and the URL, makes the tunnel of each CONNECT an echo, and sends what it took to seen.
+func envProxy(t *testing.T, seen chan<- string) string {
+	t.Helper()
+
+	return "http://" + tcpHost(t, func(conn net.Conn) {
+		br := bufio.NewReader(conn)
+
+		req, err := http.ReadRequest(br)
+		if err != nil {
+			return
+		}
+
+		if req.Method == http.MethodConnect {
+			seen <- "CONNECT " + req.Host
+
+			_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\n\r\n")
+			_, _ = io.Copy(conn, br)
+
+			return
+		}
+
+		seen <- req.URL.String()
+
+		body := "env proxy " + req.URL.String()
+		_, _ = fmt.Fprintf(conn, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(body), body)
+	})
+}
+
+// setProxyEnv sets the proxy of the environment, under both names of each variable: the lowercase one comes first.
+func setProxyEnv(t *testing.T, httpProxy, httpsProxy, noProxy string) {
+	t.Helper()
+
+	for name, value := range map[string]string{"http_proxy": httpProxy, "https_proxy": httpsProxy, "no_proxy": noProxy} {
+		t.Setenv(name, value)
+		t.Setenv(strings.ToUpper(name), value)
+	}
+}
+
+func TestTransport_GoesThroughTheProxyOfTheEnvironment(t *testing.T) {
+	// The transports the server makes go through HTTP_PROXY and HTTPS_PROXY, as Docker sets them in its containers,
+	// unless NO_PROXY leaves the host out, or the forward proxy has a Via: proxy replies, the requests the forward proxy
+	// sends on, and its tunnels. The environment is read when the server is made, not once in a process, so a test can
+	// set it. The host is an address of TEST-NET-1, which nothing answers, and no proxy leaves out as local.
+	const host = "192.0.2.1"
+
+	seen := make(chan string, 10)
+	proxy := envProxy(t, seen)
+
+	// The test's own requests don't go through the environment's proxy, which http.DefaultTransport would keep.
+	direct := &http.Client{Transport: &http.Transport{}}
+	t.Cleanup(direct.CloseIdleConnections)
+
+	read := func(t *testing.T) func(*http.Response, error) (int, string) {
+		return func(res *http.Response, err error) (int, string) {
+			t.Helper()
+			require.NoError(t, err)
+
+			body, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+
+			return res.StatusCode, string(body)
+		}
+	}
+
+	t.Run("HTTP_PROXY and HTTPS_PROXY", func(t *testing.T) {
+		setProxyEnv(t, proxy, proxy, "")
+
+		m := MustNew(Setup().Silent().Proxy())
+		m.MustStart()
+		t.Cleanup(m.Close)
+		m.MustMock(Getf("/p").Reply(From("http://" + host)))
+
+		status, body := read(t)(direct.Get(m.URL("/p")))
+		require.Equal(t, http.StatusOK, status, body)
+		require.Equal(t, "env proxy http://"+host+"/p", body)
+		require.Equal(t, "http://"+host+"/p", <-seen)
+
+		status, body = read(t)(proxyClient(t, m).Get("http://" + host + "/x"))
+		require.Equal(t, http.StatusOK, status, body)
+		require.Equal(t, "env proxy http://"+host+"/x", body)
+		require.Equal(t, "http://"+host+"/x", <-seen)
+
+		conn, br := openTunnel(t, hostOf(t, m), host+":443", "")
+
+		_, err := io.WriteString(conn, "tunnel\n")
+		require.NoError(t, err)
+
+		line, err := br.ReadString('\n')
+		require.NoError(t, err)
+		require.Equal(t, "tunnel\n", line)
+		require.Equal(t, "CONNECT "+host+":443", <-seen)
+	})
+
+	t.Run("NO_PROXY", func(t *testing.T) {
+		setProxyEnv(t, proxy, proxy, host)
+
+		m := MustNew(Setup().Silent())
+		m.MustStart()
+		t.Cleanup(m.Close)
+		m.MustMock(Getf("/p").Reply(From("http://" + host).Timeout(200 * time.Millisecond)))
+
+		status, body := read(t)(direct.Get(m.URL("/p")))
+		require.Equal(t, m.Config().ErrorStatusCode, status, body)
+
+		select {
+		case s := <-seen:
+			t.Fatalf("the request went through the proxy: %s", s)
+		default:
+		}
+	})
+
+	t.Run("a Via", func(t *testing.T) {
+		setProxyEnv(t, proxy, proxy, "")
+
+		viaSeen := make(chan string, 1)
+
+		m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Via: envProxy(t, viaSeen)}))
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		status, body := read(t)(proxyClient(t, m).Get("http://" + host + "/x"))
+		require.Equal(t, http.StatusOK, status, body)
+		require.Equal(t, "http://"+host+"/x", <-viaSeen)
+
+		select {
+		case s := <-seen:
+			t.Fatalf("the request went through the environment's proxy: %s", s)
+		default:
+		}
+	})
 }
