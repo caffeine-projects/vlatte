@@ -94,18 +94,18 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 		doc.Problems = append(doc.Problems, problemItem(item))
 	}
 
-	format, ok := problemFormat(r)
+	f, ok := problemFormat(r)
 	if !ok {
-		format = _formatJSON
+		f = _answerFormats[0]
 	}
 
-	body, err := encode(doc, format)
+	body, err := encode(doc, f.format)
 	if err != nil {
 		http.Error(w, p.detail, p.status)
 		return
 	}
 
-	write(w, p.status, problemType(format), body)
+	write(w, p.status, f.problemType, body)
 }
 
 // validUTF8 returns s with the bytes that aren't UTF-8 replaced.

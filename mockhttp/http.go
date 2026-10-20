@@ -217,8 +217,9 @@ func New(config ...Option) (*Server, error) {
 	app.events = eventRunner
 	app.webhooks = newWebhookTransport()
 
+	// The admin API's options have Mocks: it builds.
 	if conf.Admin != nil {
-		app.admin, err = admin.New(
+		app.admin = admin.MustNew(
 			admin.Addr(conf.Admin.Addr),
 			admin.Info(string(Kind), func() string { return app.URL() }),
 			admin.Logger(app.logger),
@@ -231,9 +232,6 @@ func New(config ...Option) (*Server, error) {
 			admin.Events(events),
 			admin.Logs(logs),
 		)
-		if err != nil {
-			return nil, fmt.Errorf("server: %w", err)
-		}
 	}
 
 	server, err := factory.NewBackend(BackendConfig{App: app, Handler: handler})

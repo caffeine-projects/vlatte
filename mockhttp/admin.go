@@ -147,11 +147,8 @@ type adminFiles struct {
 func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string, error) {
 	app := f.Server
 
-	format, ok := config.Format(cmp.Or(format, _defaultSaveFormat))
-	if !ok {
-		return nil, fmt.Errorf("server: save: format %q is not one of %s", format, strings.Join(MockFileFormats(), ", "))
-	}
-
+	// The admin API checked the format.
+	format = cmp.Or(format, _defaultSaveFormat)
 	dir = cmp.Or(dir, _defaultSaveDir)
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(app.config.RootDir, dir)

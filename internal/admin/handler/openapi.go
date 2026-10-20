@@ -26,9 +26,9 @@ var _openAPIJSON = sync.OnceValues(func() ([]byte, error) {
 // OpenAPI answers the OpenAPI document of the admin API, in JSON or YAML: GET /openapi.
 func OpenAPI() http.Handler {
 	return negotiated(func(w http.ResponseWriter, r *http.Request) {
-		format, _ := responseFormat(r)
-		if format == _formatYAML {
-			write(w, http.StatusOK, contentType(format), OpenAPIDocument)
+		f, _ := responseFormat(r)
+		if f.format == _formatYAML {
+			write(w, http.StatusOK, f.contentType, OpenAPIDocument)
 			return
 		}
 
@@ -38,6 +38,6 @@ func OpenAPI() http.Handler {
 			return
 		}
 
-		write(w, http.StatusOK, contentType(format), body)
+		write(w, http.StatusOK, f.contentType, body)
 	})
 }

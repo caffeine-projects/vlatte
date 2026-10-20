@@ -32,14 +32,9 @@ var _requestFormats = map[string]string{
 	"text/x-yaml":        _formatYAML,
 }
 
-// _answerFormats lists the formats the admin API answers in, with the names Accept can give each, and the media type
-// of their problem documents. JSON comes first: it wins ties.
-var _answerFormats = []struct {
-	format      string
-	contentType string
-	names       []string
-	problemType string
-}{
+// _answerFormats lists the formats the admin API answers in. JSON comes first: it wins ties, and answers problems to
+// requests that accept no format.
+var _answerFormats = []answerFormat{
 	{
 		format: _formatJSON, contentType: "application/json",
 		names:       []string{"application/json"},
@@ -50,6 +45,15 @@ var _answerFormats = []struct {
 		names:       []string{"application/yaml", "application/x-yaml", "text/yaml", "text/x-yaml"},
 		problemType: "application/problem+yaml",
 	},
+}
+
+// answerFormat is a format the admin API answers in, with the names Accept can give it, and the media type of its
+// problem documents.
+type answerFormat struct {
+	format      string
+	contentType string
+	names       []string
+	problemType string
 }
 
 // acceptRange is a media range of an Accept header, and its weight.
@@ -97,25 +101,25 @@ func decodeBody[T any](schema *config.Schema[T], dst *T, data []byte, format str
 
 // responseFormat returns the format r accepts answers in: the one Accept gives the most weight, JSON on a tie or
 // without Accept. It reports false when Accept takes neither.
-func responseFormat(r *http.Request) (string, bool) {
+func responseFormat(r *http.Request) (answerFormat, bool) {
 	return acceptedFormat(r, false)
 }
 
 // problemFormat returns the format r accepts problem documents in: as responseFormat, but a format's problem media
 // type, such as application/problem+json, names it too.
-func problemFormat(r *http.Request) (string, bool) {
+func problemFormat(r *http.Request) (answerFormat, bool) {
 	return acceptedFormat(r, true)
 }
 
-func acceptedFormat(r *http.Request, problem bool) (string, bool) {
+func acceptedFormat(r *http.Request, problem bool) (answerFormat, bool) {
 	header := r.Header.Values("Accept")
 	if len(header) == 0 {
-		return _formatJSON, true
+		return _answerFormats[0], true
 	}
 
 	ranges := parseAccept(header)
 
-	best, bestQ := "", 0.0
+	best, bestQ := answerFormat{}, 0.0
 	for _, f := range _answerFormats {
 		names := f.names
 		if problem {
@@ -123,11 +127,11 @@ func acceptedFormat(r *http.Request, problem bool) (string, bool) {
 		}
 
 		if q := quality(ranges, names); q > bestQ {
-			best, bestQ = f.format, q
+			best, bestQ = f, q
 		}
 	}
 
-	return best, best != ""
+	return best, bestQ > 0
 }
 
 // parseAccept parses the media ranges of Accept headers, leaving out those it can't parse.
@@ -209,15 +213,15 @@ func negotiated(h http.HandlerFunc) http.Handler {
 
 // respond answers v, a value with json tags, in the format r accepts.
 func respond(w http.ResponseWriter, r *http.Request, status int, v any) {
-	format, _ := responseFormat(r)
+	f, _ := responseFormat(r)
 
-	body, err := encode(v, format)
+	body, err := encode(v, f.format)
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
 
-	write(w, status, contentType(format), body)
+	write(w, status, f.contentType, body)
 }
 
 // encode encodes v, a value with json tags, in format.
@@ -228,26 +232,6 @@ func encode(v any, format string) ([]byte, error) {
 	}
 
 	return config.Encode(doc, format)
-}
-
-func contentType(format string) string {
-	for _, f := range _answerFormats {
-		if f.format == format {
-			return f.contentType
-		}
-	}
-
-	return _answerFormats[0].contentType
-}
-
-func problemType(format string) string {
-	for _, f := range _answerFormats {
-		if f.format == format {
-			return f.problemType
-		}
-	}
-
-	return _answerFormats[0].problemType
 }
 
 // write writes an answer whose body is whole: headers can't change once the status is written.

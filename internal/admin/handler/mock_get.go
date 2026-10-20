@@ -26,9 +26,9 @@ func GetMock[M vlatte.Mock](store vlatte.Store[M]) http.Handler {
 			return
 		}
 
-		format, _ := responseFormat(r)
+		f, _ := responseFormat(r)
 
-		body, err := encode(self.Describe(), format)
+		body, err := encode(self.Describe(), f.format)
 		if err != nil {
 			fail(w, r, &problemError{
 				status: http.StatusInternalServerError, code: _codeDescribeFailed,
@@ -38,7 +38,7 @@ func GetMock[M vlatte.Mock](store vlatte.Store[M]) http.Handler {
 			return
 		}
 
-		write(w, http.StatusOK, contentType(format), body)
+		write(w, http.StatusOK, f.contentType, body)
 	})
 }
 

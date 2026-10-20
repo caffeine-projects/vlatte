@@ -94,11 +94,10 @@ func New(config ...Option) (*Server, error) {
 		app.logger = &l
 	}
 
+	// The admin API's options have Mocks: it builds.
 	if conf.Admin != nil {
 		app.events = handler.NewEvents()
-
-		var err error
-		app.admin, err = admin.New(
+		app.admin = admin.MustNew(
 			admin.Addr(conf.Admin.Addr),
 			admin.Info("grpc", app.Addr),
 			admin.Logger(app.logger),
@@ -106,9 +105,6 @@ func New(config ...Option) (*Server, error) {
 			admin.Events(app.events),
 			admin.Logs(logs),
 		)
-		if err != nil {
-			return nil, fmt.Errorf("server: %w", err)
-		}
 	}
 
 	return app, nil
