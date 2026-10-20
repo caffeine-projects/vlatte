@@ -21,7 +21,10 @@ func NewLogs() *Logs {
 // Write sends p, a log line, to the clients of GET /logs. It never waits for them, and never fails, so the logger it
 // writes for never does either.
 func (l *Logs) Write(p []byte) (int, error) {
-	l.stream.publish("log", bytes.Clone(p))
+	if l.stream.listening() {
+		l.stream.publish("log", bytes.Clone(p))
+	}
+
 	return len(p), nil
 }
 

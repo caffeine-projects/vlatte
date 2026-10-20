@@ -91,7 +91,8 @@ func Addr(addr string) Option {
 	return func(s *Server) { s.addr = addr }
 }
 
-// Info sets what GET /health tells of the mock server: its kind, such as http, and the URL it serves its mocks at.
+// Info sets what GET /health tells of the mock server: its kind, such as http, and where it serves its mocks, which
+// url returns: its URL, or its address for gRPC.
 func Info(kind string, url func() string) Option {
 	return func(s *Server) { s.kind, s.url = kind, url }
 }
@@ -298,7 +299,7 @@ func (s *Server) Close() error {
 
 	err := srv.Shutdown(ctx)
 	if err != nil {
-		err = srv.Close()
+		err = errors.Join(err, srv.Close())
 	}
 
 	s.running.Wait()
@@ -308,13 +309,17 @@ func (s *Server) Close() error {
 }
 
 // track counts the requests h serves, so Close waits for them, and gives them the server's logger. A request that
-// starts once Close runs is aborted: Close closed its connection.
+// starts once Close runs gets a 503: no operation starts then.
 func (s *Server) track(h http.Handler) http.Handler {
+	closing := handler.Closing()
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		if s.closed {
 			s.mu.Unlock()
-			panic(http.ErrAbortHandler)
+			closing.ServeHTTP(w, r)
+
+			return
 		}
 
 		s.running.Add(1)

@@ -48,6 +48,8 @@ func TestSaveMocks_Refused(t *testing.T) {
 	}{
 		{name: "a format that isn't a mock file's", body: `{"format": "toml"}`, wantStatus: http.StatusBadRequest, wantCode: "invalid_body"},
 		{name: "an unknown setting", body: `{"directory": "x"}`, wantStatus: http.StatusBadRequest, wantCode: "invalid_body"},
+		{name: "a directory out of the root", body: `{"dir": "../x"}`, wantStatus: http.StatusBadRequest, wantCode: "invalid_body"},
+		{name: "an absolute directory", body: `{"dir": "/etc"}`, wantStatus: http.StatusBadRequest, wantCode: "invalid_body"},
 		{
 			name:       "a mock that can't be described",
 			saveErr:    fmt.Errorf("%w: mock %q: invalid UTF-8", handler.ErrNotDescribed, "binary"),

@@ -40,6 +40,14 @@ func (s *stream) publish(event string, data []byte) {
 	}
 }
 
+// listening reports whether a client listens, so publishers make no message no one gets.
+func (s *stream) listening() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return len(s.clients) > 0
+}
+
 // close ends the stream of every client, and of those that come after.
 func (s *stream) close() {
 	s.mu.Lock()

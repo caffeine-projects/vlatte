@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte/internal/config"
@@ -22,8 +23,18 @@ type savedFiles struct {
 
 var _saveSettingsSchema = config.NewSchema(
 	config.Field[saveSettings]{
-		Key: "dir", Kind: config.String, Usage: "Directory to write the mock files into. Relative paths start at root_dir.",
-		Set: func(s *saveSettings, v config.Value) error { s.dir = v.Str; return nil },
+		Key: "dir", Kind: config.String,
+		Usage: "Directory to write the mock files into, inside the server's root directory, which it starts at.",
+		Set: func(s *saveSettings, v config.Value) error {
+			// Requests choose where the server writes: never outside its root directory.
+			if v.Str != "" && !filepath.IsLocal(filepath.FromSlash(v.Str)) {
+				return errors.New("expected a relative path that stays inside the server's root directory")
+			}
+
+			s.dir = v.Str
+
+			return nil
+		},
 	},
 	config.Field[saveSettings]{
 		Key: "format", Kind: config.String, Usage: "Format of the mock files: " + strings.Join(config.Formats(), ", ") + ".",

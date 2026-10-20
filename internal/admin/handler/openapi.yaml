@@ -364,10 +364,10 @@ paths:
     post:
       tags: [Server]
       operationId: reset
-      summary: Bring the server back to how it started
+      summary: Reset the server between tests
       description: |
-        Removes the mocks added through this API, loads the mock files again, and starts every scenario over. A
-        server without mock files, or scenarios, skips them. Mocks added in code stay.
+        Removes the mocks added through this API, loads the mock files again, saved ones included, and starts every
+        scenario over. Mocks added in code stay as they are. A server without mock files, or scenarios, skips them.
       responses:
         "204":
           description: The server is back to how it started.
@@ -592,7 +592,9 @@ components:
       properties:
         dir:
           type: string
-          description: Directory to write the mock files into. Relative paths start at the server's root directory.
+          description: |
+            Directory to write the mock files into: a relative path, which starts at the server's root directory and
+            stays inside it.
           default: testdata/_mocks
         format:
           type: string
@@ -769,6 +771,7 @@ components:
             - not_supported
             - recording_active
             - not_recording
+            - closing
         detail:
           type: string
           description: What went wrong in this request.

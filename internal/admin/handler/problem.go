@@ -28,6 +28,7 @@ const (
 	_codeNotSupported         = "not_supported"
 	_codeRecordingActive      = "recording_active"
 	_codeNotRecording         = "not_recording"
+	_codeClosing              = "closing"
 )
 
 // problemError is an error a handler answers with, as an RFC 9457 problem document.
@@ -155,6 +156,16 @@ func NotSupported(what string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, &problemError{
 			status: http.StatusNotImplemented, code: _codeNotSupported, detail: "this mock server can't " + what,
+		})
+	})
+}
+
+// Closing answers a request that comes as the admin API closes: no operation starts then.
+func Closing() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close")
+		fail(w, r, &problemError{
+			status: http.StatusServiceUnavailable, code: _codeClosing, detail: "the admin API is closing",
 		})
 	})
 }

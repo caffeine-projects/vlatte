@@ -143,7 +143,7 @@ type adminFiles struct {
 // SaveMocks writes the mocks the admin API added as mock files, <id>.mock.<format>, into dir, then serves them from
 // the files: the server loads its mock files again, dir's too, and each file's mock takes the place of the admin API's
 // mock with its id. A relative dir starts at root_dir. Every mock is described and checked first: when one can't be,
-// nothing is written. It returns the paths of the files.
+// nothing is written. When the files fail to load, they are put back as they were. It returns the paths of the files.
 func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string, error) {
 	app := f.Server
 
@@ -195,13 +195,46 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 		return nil, fmt.Errorf("server: save: %w", err)
 	}
 
+	// Files that fail to load, such as one with the id of another mock file, would fail every later start: they are
+	// put back as they were.
+	written := make([]savedFile, 0, len(paths))
+
 	for i, path := range paths {
+		prev, err := os.ReadFile(path)
+		file := savedFile{path: path, prev: prev, existed: err == nil}
+
 		if err := writeAtomically(path, docs[i]); err != nil {
+			restore(written)
 			return nil, fmt.Errorf("server: save: %w", err)
 		}
+
+		written = append(written, file)
 	}
 
-	return paths, app.loadSaved(dir)
+	if err := app.loadSaved(dir); err != nil {
+		restore(written)
+		return nil, err
+	}
+
+	return paths, nil
+}
+
+// savedFile is a mock file a save wrote, and what it held before.
+type savedFile struct {
+	path    string
+	prev    []byte
+	existed bool
+}
+
+// restore puts the files a save wrote back as they were: it removes the new ones.
+func restore(files []savedFile) {
+	for _, f := range files {
+		if f.existed {
+			_ = writeAtomically(f.path, f.prev)
+		} else {
+			_ = os.Remove(f.path)
+		}
+	}
 }
 
 // mockFile describes mock as the mock file at path, in format, and checks that the file loads back. toWD leads from

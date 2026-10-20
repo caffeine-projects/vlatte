@@ -45,6 +45,10 @@ func NewEvents() *Events {
 
 // Publish sends e to the clients of GET /events. It never waits for them.
 func (e *Events) Publish(event Event) {
+	if !e.stream.listening() {
+		return
+	}
+
 	data, err := json.Marshal(event, json.Deterministic(true))
 	if err != nil {
 		return

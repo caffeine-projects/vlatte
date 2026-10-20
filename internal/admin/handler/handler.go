@@ -22,9 +22,10 @@ type Files interface {
 	// Reload loads the mock files again, in place of the mocks they gave before.
 	Reload() error
 
-	// SaveMocks writes the mocks the admin API added as mock files, in format, into dir, then serves them from the
-	// files, which load from then on. Empty dir and format are the server's defaults. It returns the files' paths. An
-	// error that wraps ErrNotDescribed wrote nothing.
+	// SaveMocks writes the mocks the admin API added as mock files, in format, into dir, a local path that starts at
+	// the server's root directory, then serves them from the files, which load from then on. Empty dir and format are
+	// the server's defaults. It returns the files' paths. An error that wraps ErrNotDescribed wrote nothing, and one
+	// of files that failed to load put them back as they were.
 	SaveMocks(ctx context.Context, dir, format string) ([]string, error)
 }
 

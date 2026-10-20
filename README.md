@@ -477,10 +477,10 @@ From settings, `admin: true` turns it on, and `admin.addr` (`--admin-addr`, `VLA
 | `PATCH /mocks/{id}` | Enables or disables the mock: `{"enabled": false}`. |
 | `DELETE /mocks/{id}`, `DELETE /mocks` | Removes the mock, or every mock. |
 | `POST /mocks/reload` | Loads the mock files again, as `m.Reload()` does. A mock file's mock takes the place of a mock added through the admin API with its id. |
-| `POST /mocks/save` | Writes the mocks added through the admin API as mock files, `<id>.mock.<format>`, and serves them from the files from then on. `{"dir": ..., "format": ...}` defaults to `testdata/_mocks` and YAML, which the default mock file patterns load on the next start. When a mock can't be written as a mock file that loads back, nothing is written. |
+| `POST /mocks/save` | Writes the mocks added through the admin API as mock files, `<id>.mock.<format>`, and serves them from the files from then on. `{"dir": ..., "format": ...}` defaults to `testdata/_mocks` and YAML, which the default mock file patterns load on the next start; `dir` stays inside `root_dir`. When a mock can't be written as a mock file that loads back, nothing is written, and files that fail to load are put back as they were. |
 | `GET /events` | Streams what the server serves as it happens, as [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html): requests a mock answered, requests no mock matched, proxied requests, warnings and errors. Nothing is kept: it is no journal of requests. `curl -N <admin>/events` follows it. |
 | `GET /logs` | Streams the server's log lines, as it writes them, as Server-Sent Events. A server given its own `Logger` streams none. |
-| `POST /reset` | Removes the mocks added through the admin API, loads the mock files again, and starts every scenario over. Mocks added in code stay. |
+| `POST /reset` | Removes the mocks added through the admin API, loads the mock files again, saved ones included, and starts every scenario over. Mocks added in code stay as they are. |
 | `POST /recording`, `GET /recording`, `DELETE /recording` | Starts a [recording](#recording-and-playback) with the keys of the `record` section, counts its calls, and stops it, listing the files it wrote. |
 | `GET /recorder` | A page that records a service from a browser. |
 | `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios` | Lists the state of each scenario, moves one to a state, `{"state": "paid"}`, and starts every scenario over. Names are exact: `Checkout` isn't `checkout`. |
@@ -511,7 +511,7 @@ From settings, `admin: true` turns it on, and `admin.addr` (`--admin-addr`, `VLA
 
 A request net/http refuses before the admin API reads it, such as one with a malformed request line, is answered in plain text.
 
-**Safety.** The admin API has no authentication: it listens on a local address unless told otherwise. A browser's cross-site request that would change the server is refused with `403`.
+**Safety.** The admin API has no authentication: anyone who reaches it can change the mocks, which can read files the server can. It listens on a local address unless told otherwise; with `VLATTE_DOCKER_HOST`, the CLI listens on every interface, as for the mocks, so publish its port only where the network is trusted. A browser's cross-site request that would change the server is refused with `403`.
 
 ## Failures
 

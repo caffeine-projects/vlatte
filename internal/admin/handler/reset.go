@@ -6,8 +6,9 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-// Reset brings the mock server back to how it started: it removes the mocks the admin API added, loads the mock
-// files again, and starts every scenario over: POST /reset. A server without mock files, or scenarios, skips them.
+// Reset removes the mocks the admin API added, loads the mock files again, saved ones included, and starts every
+// scenario over: POST /reset. Mocks added in code stay as they are. A server without mock files, or scenarios, skips
+// them.
 func Reset[M vlatte.Mock](store vlatte.Store[M], files Files, scenarios Scenarios) http.Handler {
 	return negotiated(func(w http.ResponseWriter, r *http.Request) {
 		mocks, err := store.PickAll(r.Context())

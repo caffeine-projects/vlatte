@@ -2,12 +2,14 @@ package handler_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 )
 
 // plainMock is a mock that can't describe itself, as gRPC mocks can't.
@@ -141,4 +143,17 @@ func TestProblems_NotSupported(t *testing.T) {
 
 	res, body := send(t, request{method: http.MethodGet, url: s.URL() + "/mocks"})
 	require.Equal(t, http.StatusOK, res.StatusCode, body)
+}
+
+func TestProblems_Closing(t *testing.T) {
+	// A request that comes as the admin API closes starts no operation, and says why.
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/mocks", nil)
+
+	handler.Closing().ServeHTTP(rec, r)
+
+	res := rec.Result()
+	res.Request = r
+	problem(t, res, rec.Body.String(), http.StatusServiceUnavailable, "closing")
+	require.Equal(t, "close", res.Header.Get("Connection"))
 }
