@@ -916,6 +916,10 @@ func TestProxyReply_SendsThePathTheTargetExpects(t *testing.T) {
 		{name: "a prefix with its slash", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/api/") }, path: "/api/users", want: "/users"},
 		{name: "a prefix before escaped slashes", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/api") }, path: "/api%2Fv1%2Fx", want: "/v1%2Fx"},
 		{name: "a path trimmed to nothing", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/svc") }, path: "/svc", want: "/"},
+		// #69: the prefix trimmed text, so "/api" turned "/apiary" into "/ary". It trims whole segments.
+		{name: "a prefix that ends inside a segment", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/api") }, path: "/apiary", want: "/apiary"},
+		{name: "a prefix of whole segments", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/api/v1") }, path: "/api/v1/users", want: "/users"},
+		{name: "a prefix that ends inside a later segment", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/api/v") }, path: "/api/v1/users", want: "/api/v1/users"},
 		{name: "the target's path", target: "/api", path: "/users", want: "/api/users"},
 		{name: "the target's path ending with a slash", target: "/api/", path: "/users", want: "/api/users"},
 		{name: "the target's path and the root", target: "/api", path: "/", want: "/api/"},

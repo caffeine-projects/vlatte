@@ -119,14 +119,15 @@ func (r *ProxyReply) RemoveProxyHeaders(header ...string) *ProxyReply {
 	return r
 }
 
-// TrimPrefix removes the given prefix from the request path, before the target's path is added. It trims text, not
-// segments: "/api" turns "/apiary" into "/ary".
+// TrimPrefix removes the given prefix from the request path, before the target's path is added. It trims whole
+// segments: "/api" turns "/api/users" into "/users", and "/api" into "", and leaves "/apiary" as it is.
 func (r *ProxyReply) TrimPrefix(prefix string) *ProxyReply {
 	r.trimPrefix = prefix
 	return r
 }
 
-// TrimSuffix removes the given suffix from the request path, before the target's path is added.
+// TrimSuffix removes the given suffix from the request path, before the target's path is added. It trims text, such
+// as an extension: ".json" turns "/users.json" into "/users".
 func (r *ProxyReply) TrimSuffix(suffix string) *ProxyReply {
 	r.trimSuffix = suffix
 	return r
@@ -336,7 +337,9 @@ func (p *proxyReplier) forwardURL(in *url.URL) (*url.URL, error) {
 	// The trims match the decoded path and cut the escaped path at the same place, so escapes such as "%2F" stay.
 	path, escaped := in.Path, in.EscapedPath()
 
-	if rest, ok := strings.CutPrefix(path, p.trimPrefix); ok {
+	// The prefix ends at a segment's end: what follows starts another segment, or nothing does.
+	rest, ok := strings.CutPrefix(path, p.trimPrefix)
+	if ok && (rest == "" || strings.HasPrefix(rest, "/") || strings.HasSuffix(p.trimPrefix, "/")) {
 		escaped = escaped[escapedIndex(escaped, len(p.trimPrefix)):]
 		path = rest
 	}

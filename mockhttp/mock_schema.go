@@ -509,11 +509,11 @@ var _proxySchema = config.NewSchema(
 		Set: func(p *proxyDef, v config.Value) error { p.removeHeaders = v.List; return nil },
 	},
 	proxyField{
-		Key: "trim_prefix", Kind: config.String, Usage: "Prefix removed from the request path, before the target's path is added.",
+		Key: "trim_prefix", Kind: config.String, Usage: "Prefix of whole segments removed from the request path, before the target's path is added.",
 		Set: func(p *proxyDef, v config.Value) error { p.trimPrefix = v.Str; return nil },
 	},
 	proxyField{
-		Key: "trim_suffix", Kind: config.String, Usage: "Suffix removed from the request path, before the target's path is added.",
+		Key: "trim_suffix", Kind: config.String, Usage: "Text removed from the end of the request path, such as an extension, before the target's path is added.",
 		Set: func(p *proxyDef, v config.Value) error { p.trimSuffix = v.Str; return nil },
 	},
 	proxyField{
