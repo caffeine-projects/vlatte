@@ -106,3 +106,43 @@ func TestScenarioConcurrent(t *testing.T) {
 		assert.NoError(t, <-errs)
 	}
 }
+
+func TestScenario_NamesAreExact(t *testing.T) {
+	// A scenario is found under the name it was created with, whatever its case or spaces (#25): before, a name with
+	// capitals or spaces was stored as written but looked up lowercased and trimmed, so its mocks matched every request
+	// and its state never moved.
+	for _, name := range []string{"checkout", "Checkout", " checkout "} {
+		t.Run(name, func(t *testing.T) {
+			store := NewScenarioStore()
+			arg := vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), nil)
+
+			start := Scenario(store, name, ScenarioStateStarted, "paid")
+			ok, err := start.Match(arg)
+			assert.NoError(t, err)
+			assert.True(t, ok)
+			assert.NoError(t, start.SetState())
+
+			ok, err = Scenario(store, name, ScenarioStateStarted, "paid").Match(arg)
+			assert.NoError(t, err)
+			assert.False(t, ok, "the scenario moved on to paid")
+
+			ok, err = Scenario(store, name, "paid", "").Match(arg)
+			assert.NoError(t, err)
+			assert.True(t, ok)
+		})
+	}
+}
+
+func TestScenario_NamesDifferingInCaseAreTwoScenarios(t *testing.T) {
+	// Names are exact, so mock files and the admin API, which names scenarios in paths, agree on them.
+	store := NewScenarioStore()
+	arg := vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), nil)
+
+	upper := Scenario(store, "Checkout", ScenarioStateStarted, "paid")
+	_, _ = upper.Match(arg)
+	assert.NoError(t, upper.SetState())
+
+	ok, err := Scenario(store, "checkout", ScenarioStateStarted, "paid").Match(arg)
+	assert.NoError(t, err)
+	assert.True(t, ok, "checkout is still where it started")
+}

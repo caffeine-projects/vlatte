@@ -1,7 +1,6 @@
 package mfeat
 
 import (
-	"strings"
 	"sync"
 )
 
@@ -16,7 +15,7 @@ func newScenarioState(name string) *scenarioState {
 	return &scenarioState{name: name, state: ScenarioStateStarted}
 }
 
-// ScenarioStore holds scenario state by name.
+// ScenarioStore holds scenario state by name. Names are exact: Checkout and checkout are two scenarios.
 type ScenarioStore struct {
 	mu   sync.RWMutex
 	data map[string]*scenarioState
@@ -28,16 +27,16 @@ func NewScenarioStore() *ScenarioStore {
 }
 
 func (store *ScenarioStore) fetchByName(name string) (*scenarioState, bool) {
-	s, ok := store.data[strings.ToLower(strings.TrimSpace(name))]
+	s, ok := store.data[name]
 	return s, ok
 }
 
 func (store *ScenarioStore) createNewIfNeeded(name string) *scenarioState {
 	s, ok := store.fetchByName(name)
 	if !ok {
-		scenario := newScenarioState(name)
-		store.data[scenario.name] = scenario
-		return scenario
+		s = newScenarioState(name)
+		store.data[name] = s
 	}
+
 	return s
 }
