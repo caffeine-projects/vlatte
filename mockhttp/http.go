@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"maps"
@@ -63,6 +64,10 @@ type Server struct {
 
 	// proxyAll answers the requests no mock matches, when the setting proxy_all is set.
 	proxyAll Replier
+
+	// handler serves the requests, middlewares included, such as those within the tunnels the forward proxy
+	// intercepts.
+	handler http.Handler
 
 	data    map[string]any
 	logger  *zerolog.Logger
@@ -201,6 +206,7 @@ func New(config ...Option) (*Server, error) {
 
 	// Outermost: the decorator and the middlewares see the fragment in r.URL too.
 	handler = withFragment(handler)
+	app.handler = handler
 
 	factory := conf.BackendFactory
 
@@ -436,6 +442,16 @@ func (app *Server) Close() {
 	app.webhooks.CloseIdleConnections()
 }
 
+// ProxyCA returns the certificate of the CA that signs the certificates of the hosts the forward proxy intercepts, for
+// clients to trust, or nil when it doesn't intercept. See ProxyConfig.Intercept.
+func (app *Server) ProxyCA() *x509.Certificate {
+	if app.proxy == nil || app.proxy.interceptor == nil {
+		return nil
+	}
+
+	return app.proxy.interceptor.ca
+}
+
 // SetData sets the data templates read as .Data, such as the URL of another server: {{ .Data.target }}. The server
 // keeps a copy of the map, and requests read the data in force when they arrive.
 func (app *Server) SetData(data map[string]any) {
@@ -478,6 +494,11 @@ func (app *Server) DescribeConfig() string {
 	if app.config.Proxy != nil {
 		buf.WriteString("Forward Proxy: ")
 		buf.WriteString("enabled")
+
+		if app.config.Proxy.Intercept {
+			buf.WriteString(", intercepting HTTPS")
+		}
+
 		buf.WriteString("\n")
 	}
 

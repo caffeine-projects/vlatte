@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -1864,4 +1866,150 @@ func TestProxyAll_PassesProtocolSwitchesOn(t *testing.T) {
 			require.Equal(t, "switched\n", line)
 		})
 	}
+}
+
+// interceptClient returns a client that sends its requests through m, which intercepts their TLS, and trusts its CA.
+func interceptClient(t *testing.T, m *Server) *http.Client {
+	t.Helper()
+
+	pool := x509.NewCertPool()
+	pool.AddCert(m.ProxyCA())
+
+	transport := &http.Transport{Proxy: http.ProxyURL(mustURL(t, m.URL())), TLSClientConfig: &tls.Config{RootCAs: pool}}
+	t.Cleanup(transport.CloseIdleConnections)
+
+	return &http.Client{Transport: transport}
+}
+
+func TestForwardProxy_InterceptsHTTPS(t *testing.T) {
+	// WireMock's HTTPS browser proxying: the TLS in a CONNECT tunnel hid its requests, so mocks never saw them. With
+	// Intercept, the proxy serves that TLS itself, with a certificate for the host signed by its CA, which the client
+	// trusts: mocks answer the requests within, and the proxy sends the rest on to the host.
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "target "+r.URL.Path)
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	scoped := m.MustMock(Getf("/mocked").Reply(OK().PlainText("mock")))
+
+	client := interceptClient(t, m)
+
+	for path, want := range map[string]string{"/mocked": "mock", "/other": "target /other"} {
+		res, err := client.Get(target.URL + path)
+		require.NoError(t, err, path)
+
+		body, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, want, string(body), path)
+	}
+
+	scoped.AssertCalled(t)
+	require.Contains(t, m.DescribeConfig(), "Forward Proxy: enabled, intercepting HTTPS")
+}
+
+func TestForwardProxy_InterceptsWithTheCAItIsGiven(t *testing.T) {
+	// A CA of the caller's signs the hosts' certificates, as for clients that trust it already. A certificate that is no
+	// CA's fails New.
+	ca, err := newCA()
+	require.NoError(t, err)
+
+	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true, CA: ca}))
+	t.Cleanup(m.Close)
+	require.Equal(t, ca.Leaf, m.ProxyCA())
+
+	leaf, err := tls.LoadX509KeyPair(_testCertFile, _testKeyFile)
+	require.NoError(t, err)
+
+	_, err = New(Setup().Silent().Proxy(&ProxyConfig{Intercept: true, CA: &leaf}))
+	require.ErrorContains(t, err, "is no CA's: it can't sign certificates")
+
+	require.Nil(t, MustNew(Setup().Silent().Proxy()).ProxyCA(), "a proxy that doesn't intercept has no CA")
+}
+
+func TestForwardProxy_InterceptionPipesWhatIsntTLS(t *testing.T) {
+	// A client that doesn't start TLS in its tunnel, such as one of another protocol, goes to the host as it would
+	// without interception.
+	echo := tcpHost(t, echoConn)
+
+	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	_, br := openTunnel(t, hostOf(t, m), echo, "plain\n")
+
+	line, err := br.ReadString('\n')
+	require.NoError(t, err)
+	require.Equal(t, "plain\n", line)
+}
+
+func TestForwardProxy_CloseEndsInterceptedConnections(t *testing.T) {
+	// The server serves an intercepted connection with a server of its own, which Close ends with the tunnels.
+	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true}))
+	m.MustStart()
+	m.MustMock(Getf("/mocked").Reply(OK().PlainText("mock")))
+
+	conn, _ := openTunnel(t, hostOf(t, m), "api.local:443", "")
+
+	pool := x509.NewCertPool()
+	pool.AddCert(m.ProxyCA())
+
+	client := tls.Client(conn, &tls.Config{RootCAs: pool, ServerName: "api.local"})
+	require.NoError(t, client.Handshake())
+
+	_, err := io.WriteString(client, "GET /mocked HTTP/1.1\r\nHost: api.local\r\n\r\n")
+	require.NoError(t, err)
+
+	br := bufio.NewReader(client)
+
+	res, err := http.ReadResponse(br, nil)
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, "mock", string(body))
+
+	m.Close()
+
+	_, err = br.ReadByte()
+	require.Error(t, err, "the intercepted connection is still open")
+}
+
+func TestForwardProxy_InterceptedConnectionsSwitchProtocols(t *testing.T) {
+	// A request within an intercepted connection that switches protocols, such as a WebSocket to an https host, takes
+	// the connection over: the interception leaves it open to the switch.
+	target := httptest.NewTLSServer(switchingTarget(t, "echo").Config.Handler)
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	host := mustURL(t, target.URL).Host
+	conn, _ := openTunnel(t, hostOf(t, m), host, "")
+
+	pool := x509.NewCertPool()
+	pool.AddCert(m.ProxyCA())
+
+	client := tls.Client(conn, &tls.Config{RootCAs: pool, ServerName: "127.0.0.1"})
+	require.NoError(t, client.Handshake())
+
+	_, err := fmt.Fprintf(client, "GET /ws HTTP/1.1\r\nHost: %s\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n", host)
+	require.NoError(t, err)
+
+	br := bufio.NewReader(client)
+
+	res, err := http.ReadResponse(br, &http.Request{Method: http.MethodGet})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
+
+	_, err = io.WriteString(client, "switched within\n")
+	require.NoError(t, err)
+
+	line, err := br.ReadString('\n')
+	require.NoError(t, err)
+	require.Equal(t, "switched within\n", line)
 }

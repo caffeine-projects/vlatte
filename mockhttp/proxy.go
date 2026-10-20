@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"cmp"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -36,6 +37,16 @@ type ProxyConfig struct {
 	// and of an https proxy on the way, Via or the one of the environment. They aren't verified by default.
 	SSLVerify bool
 
+	// Intercept serves the TLS of the CONNECT tunnels no mock matches itself, with a certificate for each host, signed
+	// by CA: the requests within are served as the server's own, so mocks answer them and recordings record them, and
+	// the proxy sends the rest on to their hosts. Clients must trust CA. A connection that doesn't start with TLS goes
+	// to its host through a tunnel.
+	Intercept bool
+
+	// CA is the CA that signs the certificates of the hosts Intercept serves. Without it, the server makes a CA of its
+	// own, which Server.ProxyCA returns, for clients to trust.
+	CA *tls.Certificate
+
 	// Transport sends the requests the proxy passes on, in place of the server's Config.Transport. It is the caller's:
 	// the server never closes it. With neither, the proxy makes a transport, which Via, Timeout and SSLVerify shape:
 	// Via and SSLVerify fail New with a transport of the caller's, which would ignore them. The tunnels of CONNECT
@@ -55,6 +66,8 @@ func (p *ProxyConfig) Apply(c *ProxyConfig) error {
 	c.Timeout = p.Timeout
 	c.Via = p.Via
 	c.SSLVerify = p.SSLVerify
+	c.Intercept = p.Intercept
+	c.CA = p.CA
 
 	return nil
 }
@@ -69,6 +82,7 @@ type forwardProxy struct {
 	id               string        // of the server: see Server.id
 	dialer           *net.Dialer   // of the tunnels, to their hosts or to the proxy on the way
 	handshakeTimeout time.Duration // bounds the TLS handshake of a tunnel with an https proxy on the way
+	interceptor      *interceptor  // with Intercept
 }
 
 // newProxy returns the forward proxy of conf. Via and SSLVerify shape the transport the proxy makes, so they fail it
@@ -77,6 +91,20 @@ func newProxy(id string, conf *Config) (*forwardProxy, error) {
 	via, err := parseVia(conf.Proxy.Via)
 	if err != nil {
 		return nil, fmt.Errorf("proxy: via %q: %w", config.Display(conf.Proxy.Via), err)
+	}
+
+	var in *interceptor
+	if conf.Proxy.Intercept {
+		ca := conf.Proxy.CA
+		if ca == nil {
+			if ca, err = newCA(); err != nil {
+				return nil, fmt.Errorf("proxy: making a CA: %w", err)
+			}
+		}
+
+		if in, err = newInterceptor(ca); err != nil {
+			return nil, err
+		}
 	}
 
 	if rt := cmp.Or(conf.Proxy.Transport, conf.Transport); rt != nil {
@@ -95,6 +123,7 @@ func newProxy(id string, conf *Config) (*forwardProxy, error) {
 			id:               id,
 			dialer:           newDialer(),
 			handshakeTimeout: _tlsHandshakeTimeout,
+			interceptor:      in,
 		}, nil
 	}
 
@@ -107,6 +136,7 @@ func newProxy(id string, conf *Config) (*forwardProxy, error) {
 		id:               id,
 		dialer:           newDialer(),
 		handshakeTimeout: _tlsHandshakeTimeout,
+		interceptor:      in,
 	}, nil
 }
 

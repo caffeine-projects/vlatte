@@ -406,6 +406,11 @@ func (h *mockHandler) connect(w http.ResponseWriter, r *RequestValues) {
 		return
 	}
 
+	if h.app.proxy.interceptor != nil {
+		h.intercept(w, r)
+		return
+	}
+
 	// The host is dialed before the client's connection is hijacked: once it is, w can't answer a failure.
 	via := append(slices.Clone(req.Header.Values(_viaHeader)), h.app.id)
 
