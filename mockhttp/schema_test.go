@@ -208,6 +208,8 @@ var _scalarKeys = []struct {
 	{"proxy.trim_suffix", "/b", inProxy("trim_suffix")},
 	{"proxy.timeout", int64(10), inProxy("timeout")},
 	{"proxy.ssl_verify", true, inProxy("ssl_verify")},
+	{"proxy.x_forwarded", true, inProxy("x_forwarded")},
+	{"proxy.preserve_host", true, inProxy("preserve_host")},
 	{"on_complete.name", "hook", func(v any) map[string]any {
 		return withRequest(map[string]any{"on_complete": []any{map[string]any{"name": v}}})
 	}},

@@ -128,6 +128,8 @@ type proxyDef struct {
 	sslVerify     bool
 	hasSSLVerify  bool
 	hasTarget     bool
+	xForwarded    bool
+	preserveHost  bool
 }
 
 // _responseKeys are the ways to reply, in the order conflicts are reported.
@@ -523,6 +525,15 @@ var _proxySchema = config.NewSchema(
 	proxyField{
 		Key: "ssl_verify", Kind: config.Bool, Usage: "Verify the TLS certificate of the target. Off by default.",
 		Set: func(p *proxyDef, v config.Value) error { p.sslVerify, p.hasSSLVerify = v.Bool, true; return nil },
+	},
+	proxyField{
+		Key: "x_forwarded", Kind: config.Bool,
+		Usage: "Set X-Forwarded-For, X-Forwarded-Host and X-Forwarded-Proto on the forwarded request, with the client's address, host and scheme.",
+		Set:   func(p *proxyDef, v config.Value) error { p.xForwarded = v.Bool; return nil },
+	},
+	proxyField{
+		Key: "preserve_host", Kind: config.Bool, Usage: "Send the target the Host the client asked for, in place of the target's.",
+		Set: func(p *proxyDef, v config.Value) error { p.preserveHost = v.Bool; return nil },
 	},
 )
 
@@ -1177,6 +1188,14 @@ func (p *proxyDef) build() *ProxyReply {
 
 	if p.hasSSLVerify {
 		proxy.SSLVerify(p.sslVerify)
+	}
+
+	if p.xForwarded {
+		proxy.XForwarded()
+	}
+
+	if p.preserveHost {
+		proxy.PreserveHost()
 	}
 
 	return proxy

@@ -1713,3 +1713,58 @@ func TestProxyReply_ABodyReadWholeCanBeSentAgain(t *testing.T) {
 		require.Equal(t, want, <-replayed, body)
 	}
 }
+
+func TestProxyReply_TellsTheTargetAboutTheClientWhenAsked(t *testing.T) {
+	// #69: the target couldn't tell the client's address, scheme or host. With XForwarded, or x_forwarded in a mock
+	// file, it gets them in X-Forwarded-For, after the addresses of the proxies before, X-Forwarded-Host and
+	// X-Forwarded-Proto. With PreserveHost, or preserve_host, the target gets the Host the client asked for. Without
+	// them, it gets the client's headers as they came, and its own host.
+	type sent struct {
+		host   string
+		header http.Header
+	}
+
+	got := make(chan sent, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got <- sent{host: r.Host, header: r.Header.Clone()}
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(
+		Getf("/plain").Reply(From(target.URL)),
+		Getf("/go").Reply(From(target.URL).XForwarded().PreserveHost()),
+		FromBytes([]byte("request: {path: /file}\nproxy: {target: '"+target.URL+"', x_forwarded: true, preserve_host: true}\n"), "yaml"),
+	)
+
+	clientHost := hostOf(t, m)
+	targetHost := target.Listener.Addr().String()
+
+	call := func(path string) sent {
+		req, err := http.NewRequest(http.MethodGet, m.URL(path), nil)
+		require.NoError(t, err)
+		req.Header.Set("X-Forwarded-For", "10.0.0.1")
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		return <-got
+	}
+
+	plain := call("/plain")
+	require.Equal(t, targetHost, plain.host)
+	require.Equal(t, "10.0.0.1", plain.header.Get("X-Forwarded-For"))
+	require.Empty(t, plain.header.Get("X-Forwarded-Host"))
+	require.Empty(t, plain.header.Get("X-Forwarded-Proto"))
+
+	for _, path := range []string{"/go", "/file"} {
+		asked := call(path)
+		require.Equal(t, clientHost, asked.host, path)
+		require.Equal(t, "10.0.0.1, 127.0.0.1", asked.header.Get("X-Forwarded-For"), path)
+		require.Equal(t, clientHost, asked.header.Get("X-Forwarded-Host"), path)
+		require.Equal(t, "http", asked.header.Get("X-Forwarded-Proto"), path)
+	}
+}

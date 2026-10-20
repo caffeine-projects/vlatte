@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"slices"
 	"strings"
@@ -40,6 +41,8 @@ type ProxyReply struct {
 	timeout              time.Duration
 	sslVerify            bool
 	sslVerifySet         bool // SSLVerify or SkipSSLVerify was called: a transport of the caller's would ignore it
+	xForwarded           bool
+	preserveHost         bool
 }
 
 // From creates a ProxyReply with the given target. The target's path and query come before the request's: with
@@ -129,6 +132,21 @@ func (r *ProxyReply) TrimSuffix(suffix string) *ProxyReply {
 	return r
 }
 
+// XForwarded sets the X-Forwarded-For, X-Forwarded-Host and X-Forwarded-Proto headers of the requests the target gets,
+// as httputil.ProxyRequest.SetXForwarded does: the client's address, after those of the proxies the request came
+// through, the host the client asked for, and its scheme. Without it, the target gets the client's, if any.
+func (r *ProxyReply) XForwarded() *ProxyReply {
+	r.xForwarded = true
+	return r
+}
+
+// PreserveHost sends the target the Host the client asked for, in place of the target's own, as for a target that
+// serves several hosts, or that checks which host it is asked for.
+func (r *ProxyReply) PreserveHost() *ProxyReply {
+	r.preserveHost = true
+	return r
+}
+
 // Timeout sets how long to wait for the response headers of the target, from the call: connecting and sending the
 // request count too. The body then streams to the client as the target sends it, for as long as the client waits.
 // 0 waits forever. Defaults to 30s.
@@ -176,6 +194,14 @@ func (r *ProxyReply) Describe() descriptor.Descriptor {
 		props["ssl_verify"] = r.sslVerify
 	}
 
+	if r.xForwarded {
+		props["x_forwarded"] = true
+	}
+
+	if r.preserveHost {
+		props["preserve_host"] = true
+	}
+
 	return descriptor.New("proxy", props)
 }
 
@@ -215,6 +241,8 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 		proxyHeadersToRemove: slices.Clone(r.proxyHeadersToRemove),
 		trimPrefix:           r.trimPrefix,
 		trimSuffix:           r.trimSuffix,
+		xForwarded:           r.xForwarded,
+		preserveHost:         r.preserveHost,
 	}
 
 	if rt == nil {
@@ -236,6 +264,8 @@ type proxyReplier struct {
 	proxyHeadersToRemove []string
 	trimPrefix           string
 	trimSuffix           string
+	xForwarded           bool
+	preserveHost         bool
 }
 
 // Reply implements Replier.
@@ -254,7 +284,15 @@ func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, er
 	}
 
 	out.URL = target
+
 	out.Host = p.target.Host
+	if p.preserveHost {
+		out.Host = in.Host
+	}
+
+	if p.xForwarded {
+		(&httputil.ProxyRequest{In: in, Out: out}).SetXForwarded()
+	}
 
 	for _, h := range p.proxyHeadersToRemove {
 		out.Header.Del(h)
