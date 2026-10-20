@@ -842,13 +842,20 @@ func (c *carrier) RoundTrip(r *http.Request) (*http.Response, error) {
 func TestWebHook_ConnectionsCloseWithTheServer(t *testing.T) {
 	// Webhooks sent through http.DefaultTransport, which kept their idle connections to the target for 90s after the
 	// server closed, unless something closed every idle connection of the process, as an httptest.Server's Close does.
-	// A server without a transport of the caller's now gives webhooks one it closes, whatever its backend. Two sends
-	// still share one connection.
+	// A server without a transport of the caller's now gives webhooks one it closes, whatever its backend.
+	//
+	// Two sends share one connection, as a webhook reads the answer before it ends. Closed unread, the answer was
+	// drained by net/http after the send, for at most 50ms: under load, the connection was lost, and the second send
+	// dialed again. The target sends the second half of its answer after those 50ms.
 	var opened, open atomic.Int64
 
-	answer := strings.Repeat("a", 32<<10)
+	half := strings.Repeat("a", 16<<10)
 	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, answer)
+		_, _ = io.WriteString(w, half)
+		_ = http.NewResponseController(w).Flush()
+
+		time.Sleep(100 * time.Millisecond)
+		_, _ = io.WriteString(w, half)
 	}))
 	target.Config.ConnState = func(_ net.Conn, state http.ConnState) {
 		switch state {

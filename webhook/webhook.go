@@ -42,6 +42,10 @@ var (
 // _defaultEngine compiles the templates of a webhook run without a Kit, such as one called directly.
 var _defaultEngine = vlatte.MustNewGoTemplateEngine()
 
+// _maxAnswer is how much of its target's answer a send reads before it ends, as net/http drains of a body closed
+// unread: past it, the connection closes.
+const _maxAnswer = 256 << 10
+
 type Option func(*WebHook) error
 
 // Transform lets users transform and customize the [WebHook] event args and the [Args]
@@ -56,8 +60,9 @@ type Transform func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Ar
 // mockhttp gives the server's. It sends with WithRoundTripper's transport, or else with the transport of the event:
 // mockhttp gives the server's Config.Transport, or else one it closes with the server. Without either, it sends with
 // http.DefaultTransport. A send fails when the target can't be reached in time, or answers with a status outside 2xx;
-// a redirect isn't followed. The time is WithTimeout's, or else the event's: mockhttp gives the server's
-// Config.WebhookTimeout. Without either, it is 10s. A zero WebHook is ready to use.
+// a redirect isn't followed. A send reads up to 256 KiB of the answer, within its time, so its connection carries the
+// next one. The time is WithTimeout's, or else the event's: mockhttp gives the server's Config.WebhookTimeout. Without
+// either, it is 10s. A zero WebHook is ready to use.
 type WebHook struct {
 	roundTripper http.RoundTripper
 	transform    Transform
@@ -250,7 +255,12 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		return fmt.Errorf("webhook: %s %s: request failed: %w", method, redacted, err)
 	}
 
-	defer res.Body.Close()
+	// The answer is read, up to a limit, while the send's timeout holds, so its connection carries the next send:
+	// closed unread, net/http drains it after the send for at most 50ms, and loses the connection when that's too short.
+	defer func() {
+		_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, _maxAnswer))
+		res.Body.Close()
+	}()
 
 	// A redirect isn't followed, as a POST would turn into a GET: like an error, it's an answer the target must fix.
 	if res.StatusCode < 200 || res.StatusCode > 299 {
