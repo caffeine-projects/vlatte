@@ -149,6 +149,12 @@ func parseRequestBody(app *Server, r *http.Request) (parsedBody any, rawBody []b
 		switch {
 		case r.Body != parsing:
 			rest.Close()
+		case whole && len(read) == 0:
+			// An empty body goes on as none, with a Content-Length of 0: the transport would send another body chunked.
+			rest.Close()
+
+			r.Body = http.NoBody
+			r.GetBody = func() (io.ReadCloser, error) { return http.NoBody, nil }
 		case whole:
 			rest.Close()
 

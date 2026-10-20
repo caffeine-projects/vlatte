@@ -143,7 +143,8 @@ func switched(res *http.Response, asked, display string) (*Response, error) {
 		return nil, fmt.Errorf("the target %s switched protocols, and the transport gave no connection to it", display)
 	}
 
-	if got := upgradeType(res.Header); asked == "" || !strings.EqualFold(got, asked) {
+	// A client may offer several protocols, and the target picks one.
+	if got := upgradeType(res.Header); asked == "" || !httpguts.HeaderValuesContainsToken([]string{asked}, got) {
 		conn.Close()
 		return nil, fmt.Errorf("the target %s switched to the protocol %q, not %q", display, got, asked)
 	}
@@ -238,9 +239,9 @@ func keepBody(res *Response, keep bool) {
 
 // forwardRequest returns the copy of r a proxy sends on, with ctx, without the hop-by-hop headers of the client's
 // connection, nor its "Connection: close", and with id, the ID of the server, added to its VLatte-Via. A request that
-// asks to switch protocols, such as to a WebSocket, keeps asking. A request whose VLatte-Via holds id _maxPasses times
-// is in a loop: it fails. The copy shares the trailers of r, which the server sets on r once it reads the body to the
-// end.
+// asks to switch protocols, such as to a WebSocket, keeps asking, but for h2c, which asks for HTTP/2 on the client's
+// connection to the proxy, which the proxy doesn't switch. A request whose VLatte-Via holds id _maxPasses times is in
+// a loop: it fails. The copy shares the trailers of r, which the server sets on r once it reads the body to the end.
 func forwardRequest(ctx context.Context, r *http.Request, id string) (*http.Request, error) {
 	if looped(r.Header, id) {
 		return nil, errProxyLoop
@@ -251,12 +252,18 @@ func forwardRequest(ctx context.Context, r *http.Request, id string) (*http.Requ
 	out.Close = false
 	out.Trailer = r.Trailer
 
-	protocol := upgradeType(out.Header)
+	var protocols []string
+	for protocol := range strings.SplitSeq(upgradeType(out.Header), ",") {
+		if protocol = strings.TrimSpace(protocol); protocol != "" && !strings.EqualFold(protocol, "h2c") {
+			protocols = append(protocols, protocol)
+		}
+	}
+
 	removeRequestHopByHop(out.Header)
 
-	if protocol != "" {
+	if len(protocols) > 0 {
 		out.Header.Set(HeaderConnection, "Upgrade")
-		out.Header.Set(HeaderUpgrade, protocol)
+		out.Header.Set(HeaderUpgrade, strings.Join(protocols, ", "))
 	}
 
 	out.Header.Add(_viaHeader, id)

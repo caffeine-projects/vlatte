@@ -179,7 +179,9 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w = &topResponseWriter{ctx: r.Context(), steps: steps, rw: w}
 	}
 
-	res, err := mock.reply.Reply(r.Context(), ReplyInput{RequestValues: reqValues, Writer: w})
+	noSwitch := len(mock.Steps()) > 0 || len(mock.spec.mappers) > 0
+
+	res, err := mock.reply.Reply(r.Context(), ReplyInput{RequestValues: reqValues, Writer: w, noSwitch: noSwitch})
 	if err != nil {
 		h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: %w", err))
 		return
@@ -205,24 +207,22 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case res != nil && res.upgrade != nil:
-		// A target that switched protocols sends no body that steps or mappers could change.
-		if len(mock.Steps()) > 0 || len(mock.spec.mappers) > 0 {
-			res.upgrade.Close()
-			h.onError(rw, reqValues, vlatte.FailureReply, errors.New("http: the target switched protocols: "+
-				"the mock's steps and response mappers can't apply to the connection"))
-
-			return
-		}
-
 		h.debugHeader(rw, vlatte.ProxiedHeader, "true")
 
-		// The connections are piped once the call is counted and logged: they stay open as long as both sides want.
 		pipe, ok := h.switchProtocols(rw, reqValues, res)
 		if !ok {
 			return
 		}
 
-		defer pipe()
+		// The connections are piped at once, as long as both sides want, while the call is counted, its callbacks
+		// and events run, and it is logged. The handler returns once the pipe is done.
+		piped := make(chan struct{})
+		go func() {
+			defer close(piped)
+			pipe()
+		}()
+
+		defer func() { <-piped }()
 	case res != nil:
 		// A streamed body, such as a proxy's, is read whole for mappers.
 		if len(mock.spec.mappers) > 0 && len(res.Body) == 0 {

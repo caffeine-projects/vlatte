@@ -222,7 +222,8 @@ func TestForward(t *testing.T) {
 			{name: "prefix escaped needlessly", giveReply: From(dest.URL).TrimPrefix("/api"), givePath: "/%61pi/a%2Fb", want: "/a%2Fb"},
 			{name: "prefix with a multibyte escape", giveReply: From(dest.URL).TrimPrefix("/café"), givePath: "/caf%C3%A9/a%2Fb", want: "/a%2Fb"},
 			// What the prefix leaves starts with an escaped "/": sent as "%2Fv1", the target would not start with "/".
-			{name: "prefix before an escaped slash", giveReply: From(dest.URL).TrimPrefix("/api"), givePath: "/api%2Fv1", want: "/v1"},
+			// An escaped slash is inside a segment: "/api%2Fv1" is one segment, which "/api" doesn't trim (#69).
+			{name: "prefix before an escaped slash", giveReply: From(dest.URL).TrimPrefix("/api"), givePath: "/api%2Fv1", want: "/api%2Fv1"},
 		}
 
 		for _, tt := range tests {
@@ -914,7 +915,8 @@ func TestProxyReply_SendsThePathTheTargetExpects(t *testing.T) {
 		want   string
 	}{
 		{name: "a prefix with its slash", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/api/") }, path: "/api/users", want: "/users"},
-		{name: "a prefix before escaped slashes", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/api") }, path: "/api%2Fv1%2Fx", want: "/v1%2Fx"},
+		{name: "a prefix before escaped slashes", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/api") }, path: "/api%2Fv1%2Fx", want: "/api%2Fv1%2Fx"},
+		{name: "a prefix of a segment with escaped slashes", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/api") }, path: "/api/v1%2Fx", want: "/v1%2Fx"},
 		{name: "a path trimmed to nothing", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/svc") }, path: "/svc", want: "/"},
 		// #69: the prefix trimmed text, so "/api" turned "/apiary" into "/ary". It trims whole segments.
 		{name: "a prefix that ends inside a segment", reply: func(r *ProxyReply) *ProxyReply { return r.TrimPrefix("/api") }, path: "/apiary", want: "/apiary"},
@@ -1787,4 +1789,32 @@ func TestProxyReply_FromTakesAStringTypeOfAnyName(t *testing.T) {
 	status, body := get(t, m, "/p")
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, "ok", body)
+}
+
+func TestProxyReply_AnEmptyBodyGoesOnAsNone(t *testing.T) {
+	// An empty request body went on as a body of unknown length: the target got it chunked, which some targets refuse,
+	// as a POST without a Content-Length. It goes on as none, with a Content-Length of 0.
+	type sent struct {
+		length   int64
+		encoding []string
+	}
+
+	got := make(chan sent, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got <- sent{length: r.ContentLength, encoding: r.TransferEncoding}
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Postf("/p").Reply(From(target.URL)))
+
+	res, err := http.Post(m.URL("/p"), "text/plain", http.NoBody)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	s := <-got
+	require.Zero(t, s.length)
+	require.Empty(t, s.encoding)
 }

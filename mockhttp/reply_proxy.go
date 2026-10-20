@@ -95,16 +95,16 @@ func (r *ProxyReply) Headers(header http.Header) *ProxyReply {
 }
 
 // RequestHeader adds a value to a header sent to the proxy target, which replaces the client's values of that name. A
-// hop-by-hop header, such as Connection or Upgrade, fails the build of the mock: a proxy doesn't send it on.
-// "Te: trailers" is the exception.
+// hop-by-hop header, such as Connection or Upgrade, fails the build of the mock: it is about one connection, and a
+// proxy doesn't make one up. A client's request to switch protocols goes on as the client asked. "Te: trailers" is
+// the exception.
 func (r *ProxyReply) RequestHeader(key, value string) *ProxyReply {
 	r.requestHeaders.Add(key, value)
 	return r
 }
 
 // RequestHeaders adds the values of headers sent to the proxy target, which replace the client's values of those names.
-// A hop-by-hop header, such as Connection or Upgrade, fails the build of the mock: a proxy doesn't send it on.
-// "Te: trailers" is the exception.
+// A hop-by-hop header, such as Connection or Upgrade, fails the build of the mock, as for RequestHeader.
 func (r *ProxyReply) RequestHeaders(header http.Header) *ProxyReply {
 	for k, v := range header {
 		for _, vv := range v {
@@ -286,6 +286,12 @@ func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, er
 		return nil, fmt.Errorf("reply_proxy: %w", err)
 	}
 
+	// A mock whose steps or mappers couldn't apply to a connection that switched protocols doesn't ask for a switch.
+	if input.noSwitch {
+		out.Header.Del(HeaderConnection)
+		out.Header.Del(HeaderUpgrade)
+	}
+
 	out.URL = target
 
 	out.Host = p.target.Host
@@ -339,11 +345,14 @@ func (p *proxyReplier) forwardURL(in *url.URL) (*url.URL, error) {
 	// The trims match the decoded path and cut the escaped path at the same place, so escapes such as "%2F" stay.
 	path, escaped := in.Path, in.EscapedPath()
 
-	// The prefix ends at a segment's end: what follows starts another segment, or nothing does.
-	rest, ok := strings.CutPrefix(path, p.trimPrefix)
-	if ok && (rest == "" || strings.HasPrefix(rest, "/") || strings.HasSuffix(p.trimPrefix, "/")) {
-		escaped = escaped[escapedIndex(escaped, len(p.trimPrefix)):]
-		path = rest
+	// The prefix ends at a segment's end, in the escaped path: what follows starts another segment, or nothing does.
+	// An escaped "/", "%2F", is inside a segment.
+	if rest, ok := strings.CutPrefix(path, p.trimPrefix); ok {
+		at := escapedIndex(escaped, len(p.trimPrefix))
+		if at == len(escaped) || escaped[at] == '/' || strings.HasSuffix(p.trimPrefix, "/") {
+			escaped = escaped[at:]
+			path = rest
+		}
 	}
 
 	if rest, ok := strings.CutSuffix(path, p.trimSuffix); ok {
