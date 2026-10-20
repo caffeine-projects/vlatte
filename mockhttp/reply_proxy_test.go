@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"bufio"
 	"bytes"
 	"cmp"
 	"compress/gzip"
@@ -12,7 +13,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1341,4 +1345,143 @@ func TestProxyReply_HeadersOfTheMockReplaceThoseOfTheSameName(t *testing.T) {
 
 	require.Equal(t, []string{"application/json"}, res.Header.Values(HeaderContentType))
 	require.Equal(t, []string{"kept"}, res.Header.Values("X-Target"))
+}
+
+func TestProxyReply_AStepThatChangesTheLengthKeepsTheAnswer(t *testing.T) {
+	// #59: a proxied answer kept the target's Content-Length, which a step that changes the body made wrong: the server
+	// failed the write, the proxy cut the connection, and the client got no answer at all.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "hello")
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/p").Step(appendStep("<step>")).Reply(From(target.URL)))
+
+	status, body := get(t, m, "/p")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "hello<step>", body)
+}
+
+func TestProxyReply_MappersOfABodyThatDoesntEndFail(t *testing.T) {
+	// #61: mappers read the whole body of the target first, with no limit: for an event stream, which doesn't end, the
+	// client got no answer, and the stream piled up in memory. An event stream fails at once, and a body larger than
+	// the proxy keeps fails once it is read past that size. A mock without mappers still streams.
+	release := make(chan struct{})
+	stream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(HeaderContentType, "text/event-stream")
+		_, _ = io.WriteString(w, "data: first\n\n")
+		http.NewResponseController(w).Flush()
+		<-release
+	}))
+	t.Cleanup(stream.Close)
+	t.Cleanup(func() { close(release) })
+
+	large := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, strings.Repeat("l", _keptBodyLimit+1))
+	}))
+	t.Cleanup(large.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	mapper := func(*RequestValues, *Response) error { return nil }
+	m.MustMock(
+		Getf("/plain").Reply(From(stream.URL)),
+		Getf("/mapped").Map(mapper).Reply(From(stream.URL)),
+		Getf("/large").Map(mapper).Reply(From(large.URL)),
+	)
+
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	res, err := client.Get(m.URL("/plain"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = res.Body.Close() })
+
+	line, err := bufio.NewReader(res.Body).ReadString('\n')
+	require.NoError(t, err)
+	require.Equal(t, "data: first\n", line)
+
+	for path, want := range map[string]string{
+		"/mapped": "an event stream doesn't end",
+		"/large":  fmt.Sprintf("the target's is over %d bytes", _keptBodyLimit),
+	} {
+		res, err := client.Get(m.URL(path))
+		require.NoError(t, err, path)
+
+		body, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode, path)
+		require.Contains(t, string(body), want, path)
+	}
+}
+
+func TestProxyReply_MappersReadBodyFilesWhole(t *testing.T) {
+	// The limit on what mappers read is for proxied bodies, of unknown size: a body file is read whole.
+	dir := t.TempDir()
+	content := strings.Repeat("f", _keptBodyLimit+1)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "large.txt"), []byte(content), 0o600))
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/file").
+		Map(func(_ *RequestValues, res *Response) error { res.Body = append(res.Body, '!'); return nil }).
+		Reply(OK().BodyFile(filepath.Join(dir, "large.txt"))))
+
+	status, body := get(t, m, "/file")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, content+"!", body)
+}
+
+func TestProxyReply_AClientThatLeavesDuringTheDelayIsNoError(t *testing.T) {
+	// #62: a client that left during a mock's delay had the proxy call the target with its ended context, which failed,
+	// and was logged as an error. Nothing failed but the client's wait: the mock doesn't reply, and the log warns.
+	var calls atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	t.Cleanup(target.Close)
+
+	logs := &lockedBuffer{}
+	logger := zerolog.New(logs)
+
+	m := MustNew(Setup().Logger(&logger).LogPretty(false))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	scoped := m.MustMock(Getf("/p").Delay(300 * time.Millisecond).Reply(From(target.URL)))
+
+	client := &http.Client{Timeout: 50 * time.Millisecond}
+	_, err := client.Get(m.URL("/p"))
+	require.Error(t, err)
+
+	require.Eventually(t, func() bool { return strings.Contains(logs.String(), "the client left during the delay") },
+		2*time.Second, 10*time.Millisecond)
+
+	require.Zero(t, calls.Load(), "the target was called")
+	require.NotContains(t, logs.String(), `"level":"error"`)
+	require.False(t, scoped.Called())
+}
+
+// lockedBuffer is a buffer a logger writes to while a test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
 }

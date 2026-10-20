@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
@@ -152,16 +153,18 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	reqValues.Data = locals
 
+	// A client that leaves during the delay gets nothing: the mock doesn't reply, nor count the request.
 	if mock.spec.delay != nil {
-		ctxTimeout, cancel := context.WithTimeout(r.Context(), mock.spec.delay())
-		defer cancel()
-
-		<-ctxTimeout.Done()
+		if err := httpx.Wait(r.Context(), mock.spec.delay()); err != nil {
+			h.lifecycle.OnWarning(reqValues, fmt.Errorf("http: the client left during the delay: %w", context.Cause(r.Context())))
+			return
+		}
 	}
 
 	// A failure is vlatte's answer, not the mock's, so it skips the steps of the mock.
 	rw := w
-	if steps := mock.Steps(); len(steps) > 0 {
+	steps := mock.Steps()
+	if len(steps) > 0 {
 		w = &topResponseWriter{ctx: r.Context(), steps: steps, rw: w}
 	}
 
@@ -202,6 +205,12 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if res.proxied {
 			h.debugHeader(w, vlatte.ProxiedHeader, "true")
+		}
+
+		// Steps can change how many bytes go out, so a Content-Length, such as a proxy's target sends, would be wrong:
+		// the server measures the body, or sends it chunked.
+		if len(steps) > 0 {
+			res.Header.Del(HeaderContentLength)
 		}
 
 		// The mock counts as served, whatever happens to the answer once its status and headers are sent.
@@ -397,8 +406,15 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues) {
 
 // onError answers a request whose serving failed, with the error status, so a client tells it from a mock's answer.
 // failure is a vlatte.Failure* value. The body names the mock that matched, if one did, and the error.
-// A replier that wrote its status before failing keeps it: the error is logged anyway.
+// A replier that wrote its status before failing keeps it: the error is logged anyway. A client that left gets no
+// answer, and the failure is a warning, as for a response the client leaves during: nothing failed but the client's
+// wait, such as a proxy's call that its leaving ended.
 func (h *mockHandler) onError(w http.ResponseWriter, r *RequestValues, failure string, err error) {
+	if r.RawRequest.Context().Err() != nil {
+		h.lifecycle.OnWarning(r, err)
+		return
+	}
+
 	defer h.lifecycle.OnError(r, err)
 
 	buf := bufpool.Get()
