@@ -376,10 +376,13 @@ func (p *proxyReplier) forwardURL(in *url.URL) (*url.URL, error) {
 
 	// A "." or ".." segment could climb out of the target's path, for a target that resolves them. The decoded path
 	// counts, so escapes such as "%2e%2e" and "..%2F" do too, and so do the dot segments some targets see: one with
-	// parameters, "..;", or before a backslash, which Windows reads as "/".
-	for segment := range strings.FieldsFuncSeq(path, func(c rune) bool { return c == '/' || c == '\\' }) {
-		if segment, _, _ = strings.Cut(segment, ";"); segment == "." || segment == ".." {
-			return nil, fmt.Errorf(`reply_proxy: path %q has a "." or ".." segment, which could leave the target's path`, in.EscapedPath())
+	// parameters, "..;", or before a backslash, which Windows reads as "/". A target without a path has nothing to
+	// leave: the path goes as the client sent it.
+	if strings.Trim(p.target.Path, "/") != "" {
+		for segment := range strings.FieldsFuncSeq(path, func(c rune) bool { return c == '/' || c == '\\' }) {
+			if segment, _, _ = strings.Cut(segment, ";"); segment == "." || segment == ".." {
+				return nil, fmt.Errorf(`reply_proxy: path %q has a "." or ".." segment, which could leave the target's path`, in.EscapedPath())
+			}
 		}
 	}
 
