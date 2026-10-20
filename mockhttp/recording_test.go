@@ -857,7 +857,8 @@ func TestRecording_ForwardProxy(t *testing.T) {
 	res, err = client.Get(closed.URL + "/gone")
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-	require.Equal(t, http.StatusServiceUnavailable, res.StatusCode)
+	require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
 
 	result := stopRecording(t, m)
 	require.Len(t, result.Recordings, 1)
@@ -887,12 +888,15 @@ func TestRecording_AHostThatBreaksOffIsNotRecorded(t *testing.T) {
 	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
 	t.Cleanup(client.CloseIdleConnections)
 
+	// The proxy cuts the client's connection: before the status, for a short body the server hadn't sent yet, or else
+	// in the body.
 	res, err := client.Get(target.URL + "/cut")
-	require.NoError(t, err)
+	if err == nil {
+		_, err = io.ReadAll(res.Body)
+		require.NoError(t, res.Body.Close())
+	}
 
-	_, err = io.ReadAll(res.Body)
 	require.Error(t, err, "the client doesn't take part of the body for all of it")
-	require.NoError(t, res.Body.Close())
 
 	result := stopRecording(t, m)
 	require.Empty(t, result.Recordings)

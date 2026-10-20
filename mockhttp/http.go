@@ -53,7 +53,7 @@ type Server struct {
 	params             vlatte.KV
 	loaders            []Loader
 	rwMutex            sync.RWMutex
-	proxy              *reverseProxy
+	proxy              *forwardProxy
 
 	// id tells the requests this server sends on, in their VLatte-Via, so one that comes back fails as a proxy loop.
 	id string
@@ -163,7 +163,7 @@ func New(config ...Option) (*Server, error) {
 		conf.Record = record
 	}
 
-	var p *reverseProxy
+	var p *forwardProxy
 	if conf.Proxy != nil {
 		var err error
 		if p, err = newProxy(app.id, app.Logger(), conf); err != nil {
@@ -455,7 +455,7 @@ func (app *Server) DescribeConfig() string {
 	buf.WriteString("\n")
 
 	if app.config.Proxy != nil {
-		buf.WriteString("Reverse Proxy: ")
+		buf.WriteString("Forward Proxy: ")
 		buf.WriteString("enabled")
 		buf.WriteString("\n")
 	}

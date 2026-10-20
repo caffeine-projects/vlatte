@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -14,7 +15,10 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
-var _ ProxyConfigurer = (*ProxyConfig)(nil)
+var (
+	_ ProxyConfigurer = (*ProxyConfig)(nil)
+	_ Replier         = (*forwardProxy)(nil)
+)
 
 // ProxyConfig configures a proxy.
 type ProxyConfig struct {
@@ -24,7 +28,8 @@ type ProxyConfig struct {
 	// through the proxy of the environment, HTTP_PROXY, HTTPS_PROXY and NO_PROXY, which leaves out localhost.
 	Via string
 
-	// Timeout bounds the wait for the response headers of the host, with the transport the proxy makes.
+	// Timeout bounds the wait for the response headers of the host, connecting and sending the request included, with
+	// any transport. 0 waits forever. Defaults to 30s, as for proxy replies.
 	Timeout time.Duration
 
 	// SSLVerify enable/disable server certificate verification, with the transport the proxy makes.
@@ -51,18 +56,20 @@ func (p *ProxyConfig) Apply(c *ProxyConfig) error {
 	return nil
 }
 
-var _defaultProxyConfig = ProxyConfig{Timeout: 10 * time.Second, SSLVerify: false}
+var _defaultProxyConfig = ProxyConfig{Timeout: _defaultTimeout, SSLVerify: false}
 
-type reverseProxy struct {
-	id           string // of the server: see Server.id
-	logger       *zerolog.Logger
-	roundTripper http.RoundTripper
-	transport    *http.Transport // roundTripper, when the proxy made it
+// forwardProxy sends the requests no mock matches to their hosts: it answers a request in absolute form, which names
+// its host, with the host's response, and opens a tunnel to the host of a CONNECT.
+type forwardProxy struct {
+	upstream
+
+	id     string // of the server: see Server.id
+	logger *zerolog.Logger
 }
 
 // newProxy returns the forward proxy of conf. Via and SSLVerify shape the transport the proxy makes, so they fail it
 // with a transport of the caller's, which would ignore them.
-func newProxy(id string, log *zerolog.Logger, conf *Config) (*reverseProxy, error) {
+func newProxy(id string, log *zerolog.Logger, conf *Config) (*forwardProxy, error) {
 	via, err := parseVia(conf.Proxy.Via)
 	if err != nil {
 		return nil, fmt.Errorf("proxy: via %q: %w", config.Display(conf.Proxy.Via), err)
@@ -78,33 +85,34 @@ func newProxy(id string, log *zerolog.Logger, conf *Config) (*reverseProxy, erro
 				"ProxyConfig.Transport or Config.Transport: verify the hosts with that transport, or leave ssl_verify out")
 		}
 
-		return &reverseProxy{id: id, logger: log, roundTripper: rt}, nil
+		return &forwardProxy{rt: rt, timeout: conf.Proxy.Timeout, id: id, logger: log}, nil
 	}
 
 	transport := newTransport(conf, conf.Proxy.SSLVerify, via)
-	transport.ResponseHeaderTimeout = conf.Proxy.Timeout
 
-	return &reverseProxy{id: id, logger: log, roundTripper: transport, transport: transport}, nil
+	return &forwardProxy{rt: transport, owned: transport, timeout: conf.Proxy.Timeout, id: id, logger: log}, nil
 }
 
-// serve sends r to its host and answers with the host's response, or opens a tunnel for a CONNECT. It returns an
-// error when the client didn't get the host's whole answer.
-func (p *reverseProxy) serve(w http.ResponseWriter, r *http.Request) error {
-	if r.Method == http.MethodConnect {
-		return p.handleTunneling(w, r)
+// Reply implements Replier: it sends the request, in absolute form, to its host, and answers with the host's response.
+func (p *forwardProxy) Reply(_ context.Context, input ReplyInput) (*Response, error) {
+	in := input.RequestValues.RawRequest
+
+	// The host gets a copy: the middlewares that read the request after the proxy see it as it came.
+	out, err := forwardRequest(in.Context(), in, p.id)
+	if err != nil {
+		return nil, fmt.Errorf("proxy: %w", err)
 	}
 
-	return p.handleHTTP(w, r)
-}
-
-// close releases the idle connections of the transport the proxy made. A ProxyConfig.Transport is the caller's.
-func (p *reverseProxy) close() {
-	if p.transport != nil {
-		p.transport.CloseIdleConnections()
+	res, err := p.send(out, displayURL(in.URL))
+	if err != nil {
+		return nil, fmt.Errorf("proxy: %w", err)
 	}
+
+	return res, nil
 }
 
-func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) error {
+// tunnel opens a tunnel to the host of r, a CONNECT. It returns an error when the tunnel didn't open, or broke off.
+func (p *forwardProxy) tunnel(w http.ResponseWriter, r *http.Request) error {
 	// Dial before hijacking: once the connection is hijacked, w can no longer report errors.
 	out, err := net.DialTimeout("tcp", r.Host, 5*time.Second)
 	if err != nil {
@@ -152,51 +160,4 @@ func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) e
 	}
 
 	return err
-}
-
-func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) error {
-	// The host gets a copy: the middlewares that read r after the proxy see the request as it came.
-	out, err := forwardRequest(r.Context(), r, p.id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return err
-	}
-
-	res, err := p.roundTripper.RoundTrip(out)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return err
-	}
-
-	defer res.Body.Close()
-
-	removeHopByHop(res.Header)
-	dropCORSHeaders(w, res.Header)
-
-	for k, vv := range res.Header {
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
-	}
-
-	w.WriteHeader(res.StatusCode)
-
-	_, err = io.Copy(w, res.Body)
-	if err != nil {
-		p.logger.Error().Err(err).
-			Str("url", r.URL.String()).
-			Str("method", r.Method).
-			Str("status", res.Status).
-			Msg("proxy: error copying response body")
-
-		return err
-	}
-
-	for k, vv := range res.Trailer {
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
-	}
-
-	return nil
 }

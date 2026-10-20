@@ -88,7 +88,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer capture.end()
 
 		if rec.target != nil {
-			h.serveTarget(w, reqValues, rec.target, capture)
+			h.serveUpstream(w, reqValues, rec.target, capture)
 			return
 		}
 	}
@@ -107,21 +107,19 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A request no mock matches goes to its host, when the server is a proxy.
+	// A request no mock matches goes to its host, when the server is a forward proxy: a CONNECT opens a tunnel to it,
+	// and a request in absolute form, which names it, gets its answer. A request in origin form names no host.
 	if !matched {
-		if h.app.proxy == nil {
+		switch {
+		case h.app.proxy == nil:
 			h.onNoMatches(w, reqValues)
-			return
-		}
-
-		if capture != nil {
-			capture.answeredBy(true)
-		}
-
-		h.debugHeader(w, vlatte.ProxiedHeader, "true")
-
-		if err := h.app.proxy.serve(w, r); err == nil && capture != nil {
-			capture.record()
+		case r.Method == http.MethodConnect:
+			h.debugHeader(w, vlatte.ProxiedHeader, "true")
+			h.app.proxy.tunnel(w, r)
+		case r.URL.Host == "":
+			h.onNoMatches(w, reqValues)
+		default:
+			h.serveUpstream(w, reqValues, h.app.proxy, capture)
 		}
 
 		return
@@ -266,18 +264,21 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.lifecycle.OnMatch(reqValues, res)
 }
 
-// serveTarget answers with the server a recording records, has the capture record its answer, and logs it: no mock
-// answers, so no OnMatch does.
-func (h *mockHandler) serveTarget(w http.ResponseWriter, r *RequestValues, target Replier, capture *captureWriter) {
+// serveUpstream answers with what upstream answers, the target of a recording or the host of the forward proxy, has
+// the capture, if any, record it, and logs it: no mock answers, so no OnMatch does.
+func (h *mockHandler) serveUpstream(w http.ResponseWriter, r *RequestValues, upstream Replier, capture *captureWriter) {
 	ctx := r.RawRequest.Context()
 
-	res, err := target.Reply(ctx, ReplyInput{RequestValues: r, Writer: w})
+	res, err := upstream.Reply(ctx, ReplyInput{RequestValues: r, Writer: w})
 	if err != nil {
-		h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: recording: %w", err))
+		h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: %w", err))
 		return
 	}
 
-	capture.answeredBy(true)
+	if capture != nil {
+		capture.answeredBy(true)
+	}
+
 	h.debugHeader(w, vlatte.ProxiedHeader, "true")
 	h.render(w, r, res, capture)
 	h.lifecycle.OnProxied(r, res)
