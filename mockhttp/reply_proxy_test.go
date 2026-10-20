@@ -1094,6 +1094,17 @@ func TestProxyReply_ARequestThatComesBackFails(t *testing.T) {
 	status, body = get(t, m, "/chain")
 	require.Equal(t, http.StatusOK, status, body)
 	require.Equal(t, "end", body)
+
+	// Nor is a route that passes a server more than once, such as through a gateway that sends it back: m, middle, m
+	// again, then last. A target's path comes before the request's.
+	m.MustMock(Getf("/round").Reply(From(middle.URL())))
+	middle.MustMock(Getf("/round").Reply(From(m.URL("/back"))))
+	m.MustMock(Getf("/back/round").Reply(From(last.URL())))
+	last.MustMock(Getf("/back/round").Reply(OK().PlainText("end")))
+
+	status, body = get(t, m, "/round")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, "end", body)
 }
 
 func TestProxyReply_AHopByHopForwardHeaderFailsTheBuild(t *testing.T) {
@@ -1496,4 +1507,80 @@ func TestProxyReply_AMockFileTargetThatIsntHTTPFailsOnItsKey(t *testing.T) {
 	require.ErrorContains(t, err, "proxy.target")
 	require.ErrorContains(t, err, "expected an absolute http or https URL, such as http://api.local:8080")
 	require.NotContains(t, err.Error(), "reply_proxy:")
+}
+
+func TestProxyReply_SendsTrailersTheTargetDidntAnnounce(t *testing.T) {
+	// A target can send a trailer it didn't announce in a Trailer header. The transport adds those to the response's
+	// trailers once the body is read: the proxy must hand it a map to add them to, or they never reach the client.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "body")
+		http.NewResponseController(w).Flush()
+		w.Header().Set(http.TrailerPrefix+"X-Late", "late")
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent().Proxy())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/p").Reply(From(target.URL)))
+
+	for name, get := range map[string]func() (*http.Response, error){
+		"a proxy reply":     func() (*http.Response, error) { return http.Get(m.URL("/p")) },
+		"the forward proxy": func() (*http.Response, error) { return proxyClient(t, m).Get(target.URL + "/x") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			res, err := get()
+			require.NoError(t, err)
+
+			_, err = io.ReadAll(res.Body)
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, "late", res.Trailer.Get("X-Late"))
+		})
+	}
+}
+
+func TestProxyReply_ACallADeadlineEndsGetsTheFailureAnswer(t *testing.T) {
+	// A client that left gets no answer, and its failure is a warning. A request whose context a middleware's deadline
+	// ended still has its client: it gets the server's answer to the failure, not an empty 200.
+	release := make(chan struct{})
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	t.Cleanup(target.Close)
+	t.Cleanup(func() { close(release) })
+
+	m := MustNew(Setup().Silent().Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithTimeout(r.Context(), 50*time.Millisecond)
+			defer cancel()
+
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/slow").Reply(From(target.URL)))
+
+	status, body := get(t, m, "/slow")
+	require.Equal(t, m.Config().ErrorStatusCode, status)
+	require.Contains(t, body, "context deadline exceeded")
+}
+
+func TestTargetBody_KeepsNothingUnlessToldTo(t *testing.T) {
+	// A proxy kept up to _keptBodyLimit of every body it streamed, though nothing read it: a server that proxies many
+	// bodies at once held that much for each. It keeps a body only for what reads it once it is sent.
+	for _, keep := range []bool{false, true} {
+		body := &targetBody{ReadCloser: io.NopCloser(strings.NewReader("streamed")), cancel: func(error) {}, keep: keep}
+
+		_, err := io.ReadAll(body)
+		require.NoError(t, err)
+
+		kept, ok := body.Kept()
+		require.Equal(t, keep, ok)
+
+		if keep {
+			require.Equal(t, "streamed", string(kept))
+		} else {
+			require.Empty(t, kept)
+		}
+	}
 }

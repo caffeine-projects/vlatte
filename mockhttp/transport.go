@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 )
 
@@ -53,15 +54,16 @@ func checkTargetURL(target string) (*url.URL, error) {
 	return u, nil
 }
 
-// parseVia parses the URL of a proxy to send through, an absolute http or https URL. An empty via is none.
+// parseVia parses the URL of a proxy to send through: an http, https, socks5 or socks5h URL, as http.Transport takes.
+// An empty via is none.
 func parseVia(via string) (*url.URL, error) {
 	if via == "" {
 		return nil, nil
 	}
 
 	u, err := url.Parse(via)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return nil, errors.New("expected an absolute http or https URL, such as http://proxy:3128")
+	if err != nil || !slices.Contains([]string{"http", "https", "socks5", "socks5h"}, u.Scheme) || u.Host == "" {
+		return nil, errors.New("expected an absolute http, https, socks5 or socks5h URL, such as http://proxy:3128")
 	}
 
 	return u, nil

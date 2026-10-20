@@ -54,7 +54,8 @@ type RecordConfig struct {
 	SkipSSLVerify bool
 
 	// Transport sends the requests to the Target, in place of the server's Config.Transport, such as one that trusts
-	// the target's private CA. It is the caller's: the recording never closes it, and SkipSSLVerify doesn't apply to it.
+	// the target's private CA. It is the caller's: the recording never closes it. It decides on its own whether it
+	// verifies the target, so SkipSSLVerify fails the recording with it, as with the server's Config.Transport.
 	Transport http.RoundTripper
 
 	// RequestHeaders are the request headers a recording matches: the first value each had, or its absence. One that

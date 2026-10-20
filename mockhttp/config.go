@@ -88,7 +88,8 @@ type Config struct {
 	// webhooks has the settings of http.DefaultTransport. A setting that only shapes those, and that a transport of the
 	// caller's would ignore, fails instead: a proxy reply's SSLVerify or SkipSSLVerify fails its mock,
 	// RecordConfig.SkipSSLVerify fails the recording, and the forward proxy's Via or SSLVerify fails New. The forward
-	// proxy's CONNECT tunnels dial their host, whatever the transport.
+	// proxy's CONNECT tunnels don't go through a transport: with one of the caller's, they dial their host, and else
+	// they go through the proxy the transport the server makes picks, Via or the proxy of the environment.
 	Transport http.RoundTripper
 
 	// WebhookTimeout is how long a webhook waits for its answer, from the setting webhook.timeout, unless the webhook

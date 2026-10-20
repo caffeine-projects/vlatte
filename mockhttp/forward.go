@@ -21,8 +21,8 @@ var (
 	// errNoHeaders ends a call to an upstream that didn't send its response headers within the timeout.
 	errNoHeaders = errors.New("proxy: no response headers in time")
 
-	// errProxyLoop refuses a request that came back to the server that sent it on.
-	errProxyLoop = errors.New("proxy loop: the request came back to this server: its target, or a proxy on the way, is this server")
+	// errProxyLoop refuses a request that came back to the server that sent it on too often.
+	errProxyLoop = errors.New("proxy loop: the request came back to this server again and again: its target, or a proxy on the way, is this server")
 )
 
 var _forbiddenHeaders = []string{
@@ -42,10 +42,15 @@ const (
 	// while it streams to the client: a larger body isn't kept.
 	_keptBodyLimit = 1 << 20
 
-	// _viaHeader holds the IDs of the servers a request went through. A server that gets back a request it sent on,
-	// such as through a proxy reply whose target is the server itself, refuses it rather than send it on forever. It
-	// isn't Via, which upstreams read: an nginx with gzip_proxied off doesn't compress its answer to a request with one.
+	// _viaHeader holds the IDs of the servers a request went through, once per pass. A server that gets back a request
+	// it sent on _maxPasses times, such as through a proxy reply whose target is the server itself, refuses it rather
+	// than send it on forever. It isn't Via, which upstreams read: an nginx with gzip_proxied off doesn't compress its
+	// answer to a request with one.
 	_viaHeader = "VLatte-Via"
+
+	// _maxPasses is how often a request may go through a server: a route can pass a server more than once, such as
+	// through a gateway that sends it back, and a loop passes it again and again.
+	_maxPasses = 10
 
 	// _maskedQueryValue stands for the values of a query in the URLs errors and logs show.
 	_maskedQueryValue = "xxxxx"
@@ -109,10 +114,13 @@ func (u *upstream) send(out *http.Request, display string) (*Response, error) {
 		stub.Header = res.Header
 	}
 
-	// The server's trailers: the keys it announced now, and their values once its body is read to the end.
-	if res.Trailer != nil {
-		stub.Trailer = res.Trailer
+	// The server's trailers: the keys it announced now, and their values once its body is read to the end. The
+	// transport adds the ones it didn't announce to the map, when there is one.
+	if res.Trailer == nil {
+		res.Trailer = make(http.Header)
 	}
+
+	stub.Trailer = res.Trailer
 
 	return stub, nil
 }
@@ -125,23 +133,24 @@ func (u *upstream) close() {
 	}
 }
 
-// targetBody is the body of a target's response, which streams to the client. It keeps what it reads, up to
-// _keptBodyLimit, and closing it ends the call to the target.
+// targetBody is the body of a target's response, which streams to the client. With keep, it keeps what it reads, up
+// to _keptBodyLimit, for what reads the body once it is sent, and closing it ends the call to the target.
 type targetBody struct {
 	io.ReadCloser
 
 	cancel context.CancelCauseFunc
+	keep   bool // set before the body is read
 	kept   []byte
 	over   bool // read more than it keeps
 	eof    bool
 }
 
-// Read reads the body, and keeps what it read.
+// Read reads the body, and keeps what it read, with keep.
 func (b *targetBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
 
 	switch {
-	case b.over:
+	case !b.keep || b.over:
 	case len(b.kept)+n > _keptBodyLimit:
 		b.over, b.kept = true, nil
 	default:
@@ -163,17 +172,25 @@ func (b *targetBody) Close() error {
 	return err
 }
 
-// Kept returns the body, once read to its end, when it fits in _keptBodyLimit.
+// Kept returns the body, once read to its end, when it kept it, and it fits in _keptBodyLimit.
 func (b *targetBody) Kept() ([]byte, bool) {
-	return b.kept, b.eof && !b.over
+	return b.kept, b.keep && b.eof && !b.over
+}
+
+// keepBody has res keep its streamed body, if it is a target's, for what reads it once it is sent: callbacks, events
+// or the log. A body nothing reads isn't kept, which spares a server that proxies many bodies their memory.
+func keepBody(res *Response, keep bool) {
+	if body, ok := res.BodyCloser.(*targetBody); ok {
+		body.keep = keep
+	}
 }
 
 // forwardRequest returns the copy of r a proxy sends on, with ctx, without the hop-by-hop headers of the client's
 // connection, nor its "Connection: close", and with id, the ID of the server, added to its VLatte-Via. A request whose
-// VLatte-Via holds id already came back to the server: it fails. The copy shares the trailers of r, which the server
+// VLatte-Via holds id _maxPasses times is in a loop: it fails. The copy shares the trailers of r, which the server
 // sets on r once it reads the body to the end.
 func forwardRequest(ctx context.Context, r *http.Request, id string) (*http.Request, error) {
-	if cameBack(r.Header, id) {
+	if looped(r.Header, id) {
 		return nil, errProxyLoop
 	}
 
@@ -185,6 +202,22 @@ func forwardRequest(ctx context.Context, r *http.Request, id string) (*http.Requ
 	out.Header.Add(_viaHeader, id)
 
 	return out, nil
+}
+
+// looped reports whether h, the header of a request, holds id _maxPasses times in its VLatte-Via: the request went
+// through the server with that ID that often, and is in a loop.
+func looped(h http.Header, id string) bool {
+	passes := 0
+
+	for _, v := range h.Values(_viaHeader) {
+		for seen := range strings.SplitSeq(v, ",") {
+			if strings.TrimSpace(seen) == id {
+				passes++
+			}
+		}
+	}
+
+	return passes >= _maxPasses
 }
 
 // removeHopByHop removes the hop-by-hop headers from h: the ones its Connection header names, and _forbiddenHeaders.

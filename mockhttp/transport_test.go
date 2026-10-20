@@ -225,12 +225,13 @@ func TestTransport_ADescribedProxyReplyLoadsBackWithTheCallersTransport(t *testi
 	require.Equal(t, true, verified.Describe().Props.(map[string]any)["proxy"].(map[string]any)["ssl_verify"])
 }
 
-func TestForwardProxy_AViaThatIsNoHTTPURLFailsNew(t *testing.T) {
-	// A Via that didn't parse panicked in New, and one of another scheme failed only when a request went through it.
-	for _, via := range []string{"http://[::1", "socks5://127.0.0.1:1080", "proxy:3128"} {
+func TestForwardProxy_AViaThatIsNoProxyURLFailsNew(t *testing.T) {
+	// A Via that didn't parse panicked in New, and one of a scheme no transport takes failed only when a request went
+	// through it.
+	for _, via := range []string{"http://[::1", "ftp://127.0.0.1:21", "proxy:3128"} {
 		t.Run(via, func(t *testing.T) {
 			_, err := New(Setup().Silent().Proxy(&ProxyConfig{Via: via}))
-			require.ErrorContains(t, err, "expected an absolute http or https URL, such as http://proxy:3128")
+			require.ErrorContains(t, err, "expected an absolute http, https, socks5 or socks5h URL, such as http://proxy:3128")
 		})
 	}
 }

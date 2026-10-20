@@ -199,7 +199,7 @@ func (r *Response) readBody() error {
 	src := io.Reader(body)
 	if r.proxied {
 		if mediaType(r.Header.Get(HeaderContentType)) == "text/event-stream" {
-			return errors.New("the whole body is read for response mappers, and an event stream doesn't end")
+			return errors.New("response: response mappers read the whole body, and an event stream doesn't end")
 		}
 
 		src = io.LimitReader(body, _keptBodyLimit+1)
@@ -207,7 +207,7 @@ func (r *Response) readBody() error {
 
 	b, err := io.ReadAll(src)
 	if r.proxied && len(b) > _keptBodyLimit {
-		return fmt.Errorf("the whole body is read for response mappers, and the target's is over %d bytes", _keptBodyLimit)
+		return fmt.Errorf("response: response mappers read the whole body, and the target's is over %d bytes", _keptBodyLimit)
 	}
 
 	r.Body = b

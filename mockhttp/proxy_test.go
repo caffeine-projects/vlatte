@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -642,4 +643,106 @@ func TestForwardProxy_LogsTheTunnelsItOpens(t *testing.T) {
 
 	require.Contains(t, logs.String(), "<--- REQUEST PROXIED CONNECT")
 	require.Contains(t, logs.String(), `"status":200`)
+}
+
+// socks5Host starts a SOCKS5 proxy without authentication, which sends the address of each connection it opens to
+// dialed.
+func socks5Host(t *testing.T, dialed chan<- string) string {
+	t.Helper()
+
+	return tcpHost(t, func(conn net.Conn) {
+		br := bufio.NewReader(conn)
+
+		// The greeting: the version, then the methods the client offers. No authentication is method 0.
+		greeting := make([]byte, 2)
+		if _, err := io.ReadFull(br, greeting); err != nil {
+			return
+		}
+
+		if _, err := io.ReadFull(br, make([]byte, greeting[1])); err != nil {
+			return
+		}
+
+		_, _ = conn.Write([]byte{5, 0})
+
+		// The request: the version, the command, a reserved byte, then the address and the port.
+		head := make([]byte, 4)
+		if _, err := io.ReadFull(br, head); err != nil {
+			return
+		}
+
+		var host string
+
+		switch head[3] {
+		case 1:
+			ip := make([]byte, net.IPv4len)
+			_, _ = io.ReadFull(br, ip)
+			host = net.IP(ip).String()
+		case 3:
+			n, _ := br.ReadByte()
+			name := make([]byte, n)
+			_, _ = io.ReadFull(br, name)
+			host = string(name)
+		default:
+			return
+		}
+
+		port := make([]byte, 2)
+		if _, err := io.ReadFull(br, port); err != nil {
+			return
+		}
+
+		addr := net.JoinHostPort(host, strconv.Itoa(int(port[0])<<8|int(port[1])))
+		dialed <- addr
+
+		upstream, err := net.Dial("tcp", addr)
+		if err != nil {
+			_, _ = conn.Write([]byte{5, 1, 0, 1, 0, 0, 0, 0, 0, 0})
+			return
+		}
+
+		defer upstream.Close()
+
+		_, _ = conn.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
+
+		go func() {
+			_, _ = io.Copy(upstream, br)
+			_ = upstream.(*net.TCPConn).CloseWrite()
+		}()
+
+		_, _ = io.Copy(conn, upstream)
+	})
+}
+
+func TestForwardProxy_GoesThroughASOCKS5Via(t *testing.T) {
+	// The transport the proxy makes takes a socks5 Via, as http.Transport does, for the requests it sends on. Tunnels
+	// go through it too.
+	target := okTarget(t)
+	echo := tcpHost(t, echoConn)
+
+	dialed := make(chan string, 2)
+	via := socks5Host(t, dialed)
+
+	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Via: "socks5://" + via}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	res, err := proxyClient(t, m).Get(target.URL + "/x")
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, "ok", string(body))
+	require.Equal(t, target.Listener.Addr().String(), <-dialed)
+
+	conn, br := openTunnel(t, hostOf(t, m), echo, "")
+
+	_, err = io.WriteString(conn, "through socks\n")
+	require.NoError(t, err)
+
+	line, err := br.ReadString('\n')
+	require.NoError(t, err)
+	require.Equal(t, "through socks\n", line)
+	require.Equal(t, echo, <-dialed)
 }

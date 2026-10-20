@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -22,12 +23,21 @@ type topResponseWriter struct {
 	rw    http.ResponseWriter
 }
 
-func (w *topResponseWriter) Header() http.Header        { return w.rw.Header() }
-func (w *topResponseWriter) WriteHeader(statusCode int) { w.rw.WriteHeader(statusCode) }
+func (w *topResponseWriter) Header() http.Header { return w.rw.Header() }
+
+// WriteHeader sends the status and the headers. Steps can change how many bytes go out, so a Content-Length, such as
+// a proxy's target sends, would be wrong: the server measures the body instead, or sends it chunked.
+func (w *topResponseWriter) WriteHeader(statusCode int) {
+	w.rw.Header().Del(HeaderContentLength)
+	w.rw.WriteHeader(statusCode)
+}
 
 // Write runs a pipeline of the steps per write, since a pipeline passes one buffer once.
-// The steps may change the bytes they pass on, so Write reports len(p) written, as io.Writer requires.
+// The steps may change the bytes they pass on, so Write reports len(p) written, as io.Writer requires. The first write
+// sends the headers, without a Content-Length, as WriteHeader does.
 func (w *topResponseWriter) Write(p []byte) (int, error) {
+	w.rw.Header().Del(HeaderContentLength)
+
 	if _, err := vlatte.Flow(w.ctx, &vlatte.Sink{W: w.rw}, w.steps).Next(p); err != nil {
 		return 0, err
 	}
@@ -155,7 +165,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// A client that leaves during the delay gets nothing: the mock doesn't reply, nor count the request.
 	if mock.spec.delay != nil {
-		if err := httpx.Wait(r.Context(), mock.spec.delay()); err != nil {
+		if err := httpx.Wait(r.Context(), mock.spec.delay()); errors.Is(err, context.Canceled) {
 			h.lifecycle.OnWarning(reqValues, fmt.Errorf("http: the client left during the delay: %w", context.Cause(r.Context())))
 			return
 		}
@@ -163,8 +173,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// A failure is vlatte's answer, not the mock's, so it skips the steps of the mock.
 	rw := w
-	steps := mock.Steps()
-	if len(steps) > 0 {
+	if steps := mock.Steps(); len(steps) > 0 {
 		w = &topResponseWriter{ctx: r.Context(), steps: steps, rw: w}
 	}
 
@@ -175,12 +184,17 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Render closes the body it sends. A response that isn't rendered, after a failing mapper or a panic, still
-	// closes its body here: a proxy's would keep its connection, and a body file its file.
+	// closes its body here: a proxy's would keep its connection, and a body file its file. A proxy's keeps what it
+	// sends only for what reads it once it is sent.
 	defer func() {
 		if res != nil && res.BodyCloser != nil {
 			res.BodyCloser.Close()
 		}
 	}()
+
+	if res != nil {
+		keepBody(res, h.keepsBody(mock))
+	}
 
 	// A reply that writes its own response, such as Echo, returns none: it is the mock's.
 	if capture != nil {
@@ -205,12 +219,6 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if res.proxied {
 			h.debugHeader(w, vlatte.ProxiedHeader, "true")
-		}
-
-		// Steps can change how many bytes go out, so a Content-Length, such as a proxy's target sends, would be wrong:
-		// the server measures the body, or sends it chunked.
-		if len(steps) > 0 {
-			res.Header.Del(HeaderContentLength)
 		}
 
 		// The mock counts as served, whatever happens to the answer once its status and headers are sent.
@@ -285,6 +293,9 @@ func (h *mockHandler) serveUpstream(w http.ResponseWriter, r *RequestValues, ups
 		return
 	}
 
+	// Only the log reads the body once it is sent.
+	keepBody(res, h.app.config.LogVerbosity >= vlatte.LogBody)
+
 	if capture != nil {
 		capture.answeredBy(true)
 	}
@@ -299,7 +310,7 @@ func (h *mockHandler) serveUpstream(w http.ResponseWriter, r *RequestValues, ups
 func (h *mockHandler) connect(w http.ResponseWriter, r *RequestValues) {
 	req := r.RawRequest
 
-	if cameBack(req.Header, h.app.id) {
+	if looped(req.Header, h.app.id) {
 		h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: %w", errProxyLoop))
 		return
 	}
@@ -345,6 +356,15 @@ func (h *mockHandler) connect(w http.ResponseWriter, r *RequestValues) {
 	if err := pipe(client, upstream); err != nil {
 		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: tunnel to %s: %w", req.Host, err))
 	}
+}
+
+// keepsBody reports whether something reads the body of the answer of mock once it is sent: its callbacks, its
+// on_complete events or the global ones, or the log.
+func (h *mockHandler) keepsBody(mock *Mock) bool {
+	return len(mock.Callbacks()) > 0 ||
+		len(mock.Events().OnComplete) > 0 ||
+		len(h.runner.Global.OnComplete) > 0 ||
+		h.app.config.LogVerbosity >= vlatte.LogBody
 }
 
 // debugHeader sets the debug header key to value, unless the server's debug headers are off or value is empty.
@@ -406,11 +426,11 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues) {
 
 // onError answers a request whose serving failed, with the error status, so a client tells it from a mock's answer.
 // failure is a vlatte.Failure* value. The body names the mock that matched, if one did, and the error.
-// A replier that wrote its status before failing keeps it: the error is logged anyway. A client that left gets no
-// answer, and the failure is a warning, as for a response the client leaves during: nothing failed but the client's
-// wait, such as a proxy's call that its leaving ended.
+// A replier that wrote its status before failing keeps it: the error is logged anyway. A client that left, which
+// cancels the request's context, gets no answer, and the failure is a warning, as for a response the client leaves
+// during: nothing failed but the client's wait, such as a proxy's call that its leaving ended.
 func (h *mockHandler) onError(w http.ResponseWriter, r *RequestValues, failure string, err error) {
-	if r.RawRequest.Context().Err() != nil {
+	if errors.Is(r.RawRequest.Context().Err(), context.Canceled) {
 		h.lifecycle.OnWarning(r, err)
 		return
 	}

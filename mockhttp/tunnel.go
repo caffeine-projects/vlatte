@@ -11,9 +11,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
+
+	netproxy "golang.org/x/net/proxy"
 )
 
 var _ net.Conn = (*bufferedConn)(nil)
@@ -177,18 +178,27 @@ func (p *forwardProxy) dial(ctx context.Context, host string, via []string) (net
 	return conn, nil
 }
 
-// dialVia opens a connection to host through the proxy at proxyURL, an http or https URL, with a CONNECT.
+// dialVia opens a connection to host through the proxy at proxyURL: a SOCKS5 one, or an http or https one, with a
+// CONNECT.
 func (p *forwardProxy) dialVia(ctx context.Context, dialer *net.Dialer, proxyURL *url.URL, host string, via []string) (net.Conn, error) {
 	port := proxyURL.Port()
 	switch {
 	case port != "":
 	case proxyURL.Scheme == "https":
 		port = "443"
-	default:
+	case proxyURL.Scheme == "http":
 		port = "80"
+	default:
+		port = "1080"
 	}
 
-	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(proxyURL.Hostname(), port))
+	addr := net.JoinHostPort(proxyURL.Hostname(), port)
+
+	if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
+		return dialSOCKS5(ctx, dialer, addr, proxyURL.User, host)
+	}
+
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
@@ -250,16 +260,23 @@ func (p *forwardProxy) dialVia(ctx context.Context, dialer *net.Dialer, proxyURL
 	return &bufferedConn{Conn: conn, r: br}, nil
 }
 
-// cameBack reports whether h, the header of a request, holds id in its VLatte-Via: the request went through the server
-// with that ID before, and came back.
-func cameBack(h http.Header, id string) bool {
-	for _, v := range h.Values(_viaHeader) {
-		for seen := range strings.SplitSeq(v, ",") {
-			if strings.TrimSpace(seen) == id {
-				return true
-			}
-		}
+// dialSOCKS5 opens a connection to host through the SOCKS5 proxy at addr, with the credentials of user, if any.
+func dialSOCKS5(ctx context.Context, dialer *net.Dialer, addr string, user *url.Userinfo, host string) (net.Conn, error) {
+	var auth *netproxy.Auth
+	if user != nil {
+		password, _ := user.Password()
+		auth = &netproxy.Auth{User: user.Username(), Password: password}
 	}
 
-	return false
+	d, err := netproxy.SOCKS5("tcp", addr, auth, dialer)
+	if err != nil {
+		return nil, err
+	}
+
+	cd, ok := d.(netproxy.ContextDialer)
+	if !ok {
+		return nil, errors.New("the SOCKS5 dialer doesn't take a context")
+	}
+
+	return cd.DialContext(ctx, "tcp", host)
 }
