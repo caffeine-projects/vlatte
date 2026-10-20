@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -616,14 +615,6 @@ func checkMin(n, least int64) error {
 }
 
 func checkProxyURL(via string) error {
-	if via == "" {
-		return nil
-	}
-
-	u, err := url.Parse(via)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return errors.New("expected an absolute URL, such as http://proxy:3128")
-	}
-
-	return nil
+	_, err := parseVia(via)
+	return err
 }

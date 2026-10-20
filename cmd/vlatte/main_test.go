@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -647,4 +648,58 @@ func TestCLI_AdminSettings(t *testing.T) {
 
 		require.NotContains(t, stdout.String(), "Admin API")
 	})
+}
+
+// proxyAnswer sends a GET for target through the forward proxy at addr, once the CLI listens, and returns the answer.
+func proxyAnswer(t *testing.T, addr, target string) (int, string) {
+	t.Helper()
+
+	proxyURL, err := url.Parse("http://" + addr)
+	require.NoError(t, err)
+
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	t.Cleanup(transport.CloseIdleConnections)
+
+	client := &http.Client{Transport: transport}
+
+	var res *http.Response
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		r, err := client.Get(target)
+		if assert.NoError(c, err) {
+			res = r
+		}
+	}, 10*time.Second, 100*time.Millisecond)
+
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+
+	return res.StatusCode, string(body)
+}
+
+func TestCLI_IsAForwardProxy(t *testing.T) {
+	// --proxy makes the CLI a forward proxy: a mock answers the request it matches, whatever its host, and the proxy
+	// sends the rest on to their hosts.
+	withoutDockerHost(t)
+
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "host "+r.URL.Path)
+	}))
+	t.Cleanup(host.Close)
+
+	mocks := filepath.Join(t.TempDir(), "proxy.mock.yaml")
+	require.NoError(t, os.WriteFile(mocks, []byte("request: {method: GET, path: /mocked}\nresponse: {status: 200, body: mocked}\n"), 0o600))
+
+	addr := randomAddr(t)
+	start(t, "--addr", addr, "--proxy", "--mock-files", mocks, "--log-level", "disabled")
+
+	status, body := proxyAnswer(t, addr, host.URL+"/mocked")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "mocked", body)
+
+	status, body = proxyAnswer(t, addr, host.URL+"/other")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "host /other", body)
 }

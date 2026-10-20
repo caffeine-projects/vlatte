@@ -22,16 +22,23 @@ type Config struct {
 func New(config Config) vlatte.Recipe[*mockhttp.Mock, *mockhttp.Server] {
 	return vlatte.
 		RecipeFunc[*mockhttp.Mock, *mockhttp.Server](func(ctx context.Context, input *vlatte.RecipeInput[*mockhttp.Mock, *mockhttp.Server]) error {
+		reply := mockhttp.From(config.Target).
+			Headers(config.Headers).
+			ProxyHeaders(config.ProxyHeaders).
+			RemoveProxyHeaders(config.ProxyHeadersToRemove...).
+			TrimPrefix(config.TrimPrefix).
+			TrimSuffix(config.TrimSuffix)
+
+		// Skipping the verification is the reply's default: only verifying is a setting, which a transport of the
+		// caller's would ignore.
+		if config.SSLVerify {
+			reply.SSLVerify(true)
+		}
+
 		_, err := input.Flavor.Mock(mockhttp.Request().
 			MethodMatches(match.Anything()).
 			Priority(10).
-			Reply(mockhttp.From(config.Target).
-				Headers(config.Headers).
-				ProxyHeaders(config.ProxyHeaders).
-				RemoveProxyHeaders(config.ProxyHeadersToRemove...).
-				TrimPrefix(config.TrimPrefix).
-				TrimSuffix(config.TrimSuffix).
-				SSLVerify(config.SSLVerify)))
+			Reply(reply))
 
 		return err
 	})

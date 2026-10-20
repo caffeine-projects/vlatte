@@ -120,7 +120,7 @@ func TestProxyTLS_CustomCert(t *testing.T) {
 
 	proxySrv := mockhttp.MustNew(
 		mockhttp.Setup().
-			Proxy(&mockhttp.ProxyConfig{SSLVerify: true, Transport: transport}).TLSCertKeyPair(_tlsCertFile, _tlsKeyFile))
+			Proxy(&mockhttp.ProxyConfig{Transport: transport}).TLSCertKeyPair(_tlsCertFile, _tlsKeyFile))
 	t.Cleanup(func() { proxySrv.Close() })
 	proxySrv.MustStartTLS()
 	proxyScope := proxySrv.MustMock(mockhttp.Get(match.URLPath("/test")).Reply(mockhttp.Accepted()))

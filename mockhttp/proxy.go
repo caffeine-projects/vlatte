@@ -2,33 +2,40 @@ package mockhttp
 
 import (
 	"cmp"
-	"crypto/tls"
+	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net"
 	"net/http"
-	"net/url"
 	"time"
+
+	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
-var _ ProxyConfigurer = (*ProxyConfig)(nil)
+var (
+	_ ProxyConfigurer = (*ProxyConfig)(nil)
+	_ Replier         = (*forwardProxy)(nil)
+)
 
 // ProxyConfig configures a proxy.
 type ProxyConfig struct {
-	// Via sets a URL to route the request via another proxy server, with the transport the proxy makes. Its credentials
-	// go in its URL: a client's Proxy-Authorization is for this proxy, and doesn't go on. Over https, set SSLVerify too,
-	// so they go to that proxy only.
+	// Via sets the URL, http or https, of another proxy server to send the requests through, with the transport the
+	// proxy makes. Its credentials go in its URL: a client's Proxy-Authorization is for this proxy, and doesn't go on.
+	// Over https, set SSLVerify too, so they go to that proxy only. Without Via, the transport the proxy makes goes
+	// through the proxy of the environment, HTTP_PROXY, HTTPS_PROXY and NO_PROXY, which leaves out localhost.
 	Via string
 
-	// Timeout bounds the wait for the response headers of the host, with the transport the proxy makes.
+	// Timeout bounds the wait for the response headers of the host, connecting and sending the request included, with
+	// any transport. 0 waits forever. Defaults to 30s, as for proxy replies.
 	Timeout time.Duration
 
 	// SSLVerify enable/disable server certificate verification, with the transport the proxy makes.
 	SSLVerify bool
 
 	// Transport sends the requests the proxy passes on, in place of the server's Config.Transport. It is the caller's:
-	// the server never closes it. With neither, the proxy makes a transport, which Via, Timeout and SSLVerify shape.
+	// the server never closes it. With neither, the proxy makes a transport, which Via, Timeout and SSLVerify shape:
+	// Via and SSLVerify fail New with a transport of the caller's, which would ignore them. The tunnels of CONNECT
+	// requests go through the proxy the transport the proxy makes picks, Via or the proxy of the environment, and dial
+	// their hosts with a transport of the caller's.
 	Transport http.RoundTripper
 }
 
@@ -47,136 +54,56 @@ func (p *ProxyConfig) Apply(c *ProxyConfig) error {
 	return nil
 }
 
-var _defaultProxyConfig = ProxyConfig{Timeout: 10 * time.Second, SSLVerify: false}
+var _defaultProxyConfig = ProxyConfig{Timeout: _defaultTimeout, SSLVerify: false}
 
-type reverseProxy struct {
-	roundTripper http.RoundTripper
-	transport    *http.Transport // roundTripper, when the proxy made it
+// forwardProxy sends the requests no mock matches to their hosts: it answers a request in absolute form, which names
+// its host, with the host's response, and dials the host of a CONNECT for a tunnel.
+type forwardProxy struct {
+	upstream
+
+	id string // of the server: see Server.id
 }
 
-func newProxy(config *Config) *reverseProxy {
-	rt := cmp.Or(config.Proxy.Transport, config.Transport)
-	if rt == nil {
-		transport := &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: !config.Proxy.SSLVerify,
-				RootCAs:            config.TLSClientCAs,
-				Certificates:       config.TLSCertificates,
-			},
-		}
-
-		if config.Proxy.Via != "" {
-			u, err := url.Parse(config.Proxy.Via)
-			if err != nil {
-				panic(fmt.Errorf("proxy: failed to parse proxy via url %s: %w", config.Proxy.Via, err))
-			}
-
-			transport.Proxy = http.ProxyURL(u)
-		}
-
-		transport.TLSHandshakeTimeout = 15 * time.Second
-		transport.IdleConnTimeout = 15 * time.Second
-		transport.ExpectContinueTimeout = 1 * time.Second
-		transport.ResponseHeaderTimeout = config.Proxy.Timeout
-
-		return &reverseProxy{roundTripper: transport, transport: transport}
-	}
-
-	return &reverseProxy{roundTripper: rt}
-}
-
-// serve sends r to its host and answers with the host's response, or opens a tunnel for a CONNECT. It returns the
-// status and headers the client got, or an error when the client didn't get the host's whole answer.
-func (p *reverseProxy) serve(w http.ResponseWriter, r *http.Request) (*Response, error) {
-	if r.Method == http.MethodConnect {
-		return p.handleTunneling(w, r)
-	}
-
-	return p.handleHTTP(w, r)
-}
-
-// close releases the idle connections of the transport the proxy made. A ProxyConfig.Transport is the caller's.
-func (p *reverseProxy) close() {
-	if p.transport != nil {
-		p.transport.CloseIdleConnections()
-	}
-}
-
-func (p *reverseProxy) handleTunneling(w http.ResponseWriter, r *http.Request) (*Response, error) {
-	// Dial before hijacking: once the connection is hijacked, w can no longer report errors.
-	out, err := net.DialTimeout("tcp", r.Host, 5*time.Second)
+// newProxy returns the forward proxy of conf. Via and SSLVerify shape the transport the proxy makes, so they fail it
+// with a transport of the caller's, which would ignore them.
+func newProxy(id string, conf *Config) (*forwardProxy, error) {
+	via, err := parseVia(conf.Proxy.Via)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return nil, err
+		return nil, fmt.Errorf("proxy: via %q: %w", config.Display(conf.Proxy.Via), err)
 	}
 
-	defer out.Close()
+	if rt := cmp.Or(conf.Proxy.Transport, conf.Transport); rt != nil {
+		switch {
+		case via != nil:
+			return nil, errors.New("proxy: via has no effect with a transport of the caller's, " +
+				"ProxyConfig.Transport or Config.Transport: set the proxy on that transport, or leave via out")
+		case conf.Proxy.SSLVerify:
+			return nil, errors.New("proxy: ssl_verify has no effect with a transport of the caller's, " +
+				"ProxyConfig.Transport or Config.Transport: verify the hosts with that transport, or leave ssl_verify out")
+		}
 
-	hijacker, ok := w.(http.Hijacker)
-	if !ok {
-		http.Error(w, "proxy: hijacking is not supported", http.StatusInternalServerError)
-		return nil, errors.New("proxy: hijacking is not supported")
+		return &forwardProxy{rt: rt, timeout: conf.Proxy.Timeout, id: id}, nil
 	}
 
-	in, _, err := hijacker.Hijack()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return nil, err
-	}
+	transport := newTransport(conf, conf.Proxy.SSLVerify, via)
 
-	defer in.Close()
-
-	// WriteHeader has no effect on a hijacked connection, so the tunnel response is written directly.
-	if _, err = io.WriteString(in, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
-		return nil, fmt.Errorf("proxy: establishing the tunnel: %w", err)
-	}
-
-	errCh := make(chan error, 2)
-	cp := func(dst io.WriteCloser, src io.ReadCloser) {
-		_, err := io.Copy(dst, src)
-		errCh <- err
-	}
-
-	go cp(out, in)
-	go cp(in, out)
-
-	if err = <-errCh; err != nil {
-		return nil, fmt.Errorf("proxy: tunnel: %w", err)
-	}
-
-	return &Response{StatusCode: http.StatusOK}, nil
+	return &forwardProxy{rt: transport, owned: transport, timeout: conf.Proxy.Timeout, id: id}, nil
 }
 
-func (p *reverseProxy) handleHTTP(w http.ResponseWriter, r *http.Request) (*Response, error) {
-	// The host gets a copy: the middlewares that read r after the proxy see the request as it came.
-	res, err := p.roundTripper.RoundTrip(forwardRequest(r.Context(), r))
+// Reply implements Replier: it sends the request, in absolute form, to its host, and answers with the host's response.
+func (p *forwardProxy) Reply(_ context.Context, input ReplyInput) (*Response, error) {
+	in := input.RequestValues.RawRequest
+
+	// The host gets a copy: the middlewares that read the request after the proxy see it as it came.
+	out, err := forwardRequest(in.Context(), in, p.id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return nil, err
+		return nil, fmt.Errorf("proxy: %w", err)
 	}
 
-	defer res.Body.Close()
-
-	removeHopByHop(res.Header)
-	dropCORSHeaders(w, res.Header)
-
-	for k, vv := range res.Header {
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
+	res, err := p.send(out, displayURL(in.URL))
+	if err != nil {
+		return nil, fmt.Errorf("proxy: %w", err)
 	}
 
-	w.WriteHeader(res.StatusCode)
-
-	if _, err = io.Copy(w, res.Body); err != nil {
-		return nil, fmt.Errorf("proxy: copying the body of a %d response: %w", res.StatusCode, err)
-	}
-
-	for k, vv := range res.Trailer {
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
-	}
-
-	return &Response{StatusCode: res.StatusCode, Header: res.Header, Trailer: res.Trailer}, nil
+	return res, nil
 }

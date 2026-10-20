@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -650,14 +649,7 @@ func TestAdmin_StreamsWhatTheProxyServes(t *testing.T) {
 	down.Close()
 
 	m := adminServer(t, Setup().Proxy())
-
-	proxyURL, err := url.Parse(m.URL())
-	require.NoError(t, err)
-
-	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
-	t.Cleanup(transport.CloseIdleConnections)
-
-	client := &http.Client{Transport: transport}
+	client := proxyClient(t, m)
 
 	byType := streamEvents(t, m, 2, func() {
 		for _, target := range []string{host.URL + "/up", down.URL + "/down"} {
@@ -673,7 +665,7 @@ func TestAdmin_StreamsWhatTheProxyServes(t *testing.T) {
 
 	failed := byType["error"]
 	require.Contains(t, failed["target"], "/down")
-	require.Contains(t, failed["message"], "proxying")
+	require.Contains(t, failed["message"], "proxy: calling the target "+down.URL+"/down")
 }
 
 func TestAdmin_StreamsTheLog(t *testing.T) {

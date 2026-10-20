@@ -41,3 +41,34 @@ func TestProxyAll(t *testing.T) {
 	require.Equal(t, "mock", get("/mocked"))
 	require.Equal(t, "backend /anything/else", get("/anything/else"))
 }
+
+func TestProxyAll_VerifiesTheBackendWhenAsked(t *testing.T) {
+	// SSLVerify has the recipe's reply verify its backend's certificate: one the server doesn't trust fails the call.
+	// Without it, the reply's default, the call goes through.
+	backend := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "backend")
+	}))
+	t.Cleanup(backend.Close)
+
+	for _, verify := range []bool{true, false} {
+		m := mockhttp.MustNew(mockhttp.Setup().Silent())
+		require.NoError(t, m.Prep(t.Context(), proxyall.New(proxyall.Config{Target: backend.URL, SSLVerify: verify})))
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		res, err := http.Get(m.URL("/x"))
+		require.NoError(t, err)
+
+		body, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		if verify {
+			require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
+			require.Contains(t, string(body), "certificate")
+		} else {
+			require.Equal(t, http.StatusOK, res.StatusCode)
+			require.Equal(t, "backend", string(body))
+		}
+	}
+}

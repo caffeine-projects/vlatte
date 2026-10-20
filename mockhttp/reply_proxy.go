@@ -3,7 +3,6 @@ package mockhttp
 import (
 	"cmp"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -20,36 +19,9 @@ var (
 	_ ReplierFactory = (*ProxyReply)(nil)
 	_ Replier        = (*proxyReplier)(nil)
 	_ io.Closer      = (*proxyReplier)(nil)
-	_ io.ReadCloser  = (*targetBody)(nil)
-	_ keptBody       = (*targetBody)(nil)
 )
 
-// errNoHeaders ends a call to a target that didn't send its response headers within the proxy's timeout.
-var errNoHeaders = errors.New("reply_proxy: no response headers in time")
-
-var _forbiddenHeaders = []string{
-	"Connection",
-	"Keep-Alive",
-	"Proxy-Authenticate",
-	"Proxy-Authorization",
-	"Proxy-Connection",
-	"TE",
-	"Trailer",
-	"Transfer-Encoding",
-	"Upgrade",
-}
-
-const (
-	_defaultTimeout = 30 * time.Second
-
-	// _keptBodyLimit bounds how much of a target's body a proxy keeps, for the request log, callbacks and events,
-	// while it streams to the client: a larger body isn't kept.
-	_keptBodyLimit = 1 << 20
-
-	// _idleConnTimeout closes a connection to the target that stays idle, as the forward proxy does. A request still
-	// being served when its mock leaves returns its connection afterwards: it closes then, at the latest.
-	_idleConnTimeout = 15 * time.Second
-)
+const _defaultTimeout = 30 * time.Second
 
 type FromTypes interface{ string | *url.URL }
 
@@ -67,6 +39,7 @@ type ProxyReply struct {
 	trimSuffix           string
 	timeout              time.Duration
 	sslVerify            bool
+	sslVerifySet         bool // SSLVerify or SkipSSLVerify was called: a transport of the caller's would ignore it
 }
 
 // From creates a ProxyReply with the given target. The target's path and query come before the request's: with
@@ -99,13 +72,13 @@ func From[T FromTypes](target T) *ProxyReply {
 	}
 }
 
-// Header sets an extra response header that will be set after the proxy target replies.
+// Header adds a value to a response header, which replaces the target's values of that name.
 func (r *ProxyReply) Header(key, value string) *ProxyReply {
 	r.headers.Add(key, value)
 	return r
 }
 
-// Headers sets extra response headers that will be set after the proxy target replies.
+// Headers adds the values of response headers, which replace the target's values of those names.
 func (r *ProxyReply) Headers(header http.Header) *ProxyReply {
 	for k, v := range header {
 		for _, vv := range v {
@@ -116,15 +89,17 @@ func (r *ProxyReply) Headers(header http.Header) *ProxyReply {
 	return r
 }
 
-// ForwardHeader sets an extra header to be sent to the proxy target. A hop-by-hop header, such as Connection or
-// Upgrade, fails the build of the mock: a proxy doesn't send it on. "Te: trailers" is the exception.
+// ForwardHeader adds a value to a header sent to the proxy target, which replaces the client's values of that name. A
+// hop-by-hop header, such as Connection or Upgrade, fails the build of the mock: a proxy doesn't send it on.
+// "Te: trailers" is the exception.
 func (r *ProxyReply) ForwardHeader(key, value string) *ProxyReply {
 	r.proxyHeaders.Add(key, value)
 	return r
 }
 
-// ProxyHeaders sets extra headers to be sent to the proxy target. A hop-by-hop header, such as Connection or Upgrade,
-// fails the build of the mock: a proxy doesn't send it on. "Te: trailers" is the exception.
+// ProxyHeaders adds the values of headers sent to the proxy target, which replace the client's values of those names.
+// A hop-by-hop header, such as Connection or Upgrade, fails the build of the mock: a proxy doesn't send it on.
+// "Te: trailers" is the exception.
 func (r *ProxyReply) ProxyHeaders(header http.Header) *ProxyReply {
 	for k, v := range header {
 		for _, vv := range v {
@@ -163,7 +138,8 @@ func (r *ProxyReply) Timeout(timeout time.Duration) *ProxyReply {
 }
 
 // Transport sets the transport that sends the requests to the target, in place of the server's Config.Transport. It is
-// the caller's: the proxy never closes it, and SSLVerify doesn't apply to it.
+// the caller's: the proxy never closes it. It decides on its own whether it verifies the target, so SSLVerify and
+// SkipSSLVerify fail the build of the mock with it, as with the server's Config.Transport.
 func (r *ProxyReply) Transport(rt http.RoundTripper) *ProxyReply {
 	r.transport = rt
 	return r
@@ -171,28 +147,36 @@ func (r *ProxyReply) Transport(rt http.RoundTripper) *ProxyReply {
 
 // SkipSSLVerify skips the verification of the target's TLS certificate, as a ProxyReply does unless SSLVerify(true).
 func (r *ProxyReply) SkipSSLVerify() *ProxyReply {
-	r.sslVerify = false
+	r.sslVerify, r.sslVerifySet = false, true
 	return r
 }
 
 // SSLVerify sets whether the target's TLS certificate is verified. It isn't by default, so a target with a
 // self-signed certificate answers: set it for a target that gets credentials, such as https://user:pass@api.
 func (r *ProxyReply) SSLVerify(v bool) *ProxyReply {
-	r.sslVerify = v
+	r.sslVerify, r.sslVerifySet = v, true
 	return r
 }
 
+// Describe describes the reply in the mock file format. The target is described as it was set, its credentials
+// included, so the description loads back as the same reply: errors and logs hide them. ssl_verify is described only
+// when it was set, so the description loads back on a server whose Config.Transport would refuse it.
 func (r *ProxyReply) Describe() descriptor.Descriptor {
-	return descriptor.New("proxy", map[string]any{
-		"target":         r.target.Redacted(),
+	props := map[string]any{
+		"target":         r.target.String(),
 		"forward_header": r.proxyHeaders.Clone(),
 		"header":         r.headers.Clone(),
 		"remove_headers": slices.Clone(r.proxyHeadersToRemove),
 		"trim_prefix":    r.trimPrefix,
 		"trim_suffix":    r.trimSuffix,
 		"timeout":        r.timeout.String(),
-		"ssl_verify":     r.sslVerify,
-	})
+	}
+
+	if r.sslVerifySet {
+		props["ssl_verify"] = r.sslVerify
+	}
+
+	return descriptor.New("proxy", props)
 }
 
 // NewReplier implements ReplierFactory. Each mock gets a proxy of its own: copies of the target and the headers, and,
@@ -202,8 +186,8 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 		return nil, fmt.Errorf("reply_proxy: timeout must be 0 or more, not %s", r.timeout)
 	}
 
-	if t := r.target; (t.Scheme != "http" && t.Scheme != "https") || t.Host == "" {
-		return nil, fmt.Errorf("reply_proxy: target %q: expected an absolute http or https URL, such as http://api.local:8080", t.Redacted())
+	if _, err := checkTargetURL(r.target.String()); err != nil {
+		return nil, fmt.Errorf("reply_proxy: target %q: %w", displayURL(r.target), err)
 	}
 
 	for name, values := range r.proxyHeaders {
@@ -214,29 +198,28 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 		}
 	}
 
+	// A transport of the caller's can be shared: the proxy never closes it.
+	rt := cmp.Or(r.transport, app.config.Transport)
+	if rt != nil && r.sslVerifySet {
+		return nil, errors.New("reply_proxy: ssl_verify has no effect with a transport of the caller's, " +
+			"ProxyReply.Transport or Config.Transport: verify the target with that transport, or leave ssl_verify out")
+	}
+
 	p := &proxyReplier{
+		rt:                   rt,
+		timeout:              r.timeout,
+		id:                   app.id,
 		target:               r.target.Clone(),
 		headers:              r.headers.Clone(),
 		proxyHeaders:         r.proxyHeaders.Clone(),
 		proxyHeadersToRemove: slices.Clone(r.proxyHeadersToRemove),
 		trimPrefix:           r.trimPrefix,
 		trimSuffix:           r.trimSuffix,
-		timeout:              r.timeout,
-		// A transport of the caller's can be shared: the proxy never closes it.
-		roundTripper: cmp.Or(r.transport, app.config.Transport),
 	}
 
-	if p.roundTripper == nil {
-		p.transport = &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: !r.sslVerify,
-				RootCAs:            app.config.TLSClientCAs,
-				Certificates:       app.config.TLSCertificates,
-			},
-			DisableCompression: true,
-			IdleConnTimeout:    _idleConnTimeout,
-		}
-		p.roundTripper = p.transport
+	if rt == nil {
+		p.owned = newTransport(app.config, r.sslVerify, nil)
+		p.rt = p.owned
 	}
 
 	return p, nil
@@ -244,43 +227,32 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 
 // proxyReplier sends the requests of one mock to the target, and replies with the response of the target.
 type proxyReplier struct {
+	upstream
+
+	id                   string // of the server, which a request that comes back holds in its VLatte-Via
 	target               *url.URL
 	headers              http.Header
 	proxyHeaders         http.Header
 	proxyHeadersToRemove []string
 	trimPrefix           string
 	trimSuffix           string
-	timeout              time.Duration
-	roundTripper         http.RoundTripper
-	transport            *http.Transport // roundTripper, when the proxy made it
 }
 
 // Reply implements Replier.
 func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, error) {
-	return p.build(input.RequestValues)
-}
+	in := input.RequestValues.RawRequest
 
-// Close releases the idle connections to the target, when the proxy made the transport that holds them. The transport
-// stays usable: a request that was being served when the mock left still gets its answer.
-func (p *proxyReplier) Close() error {
-	if p.transport != nil {
-		p.transport.CloseIdleConnections()
-	}
-
-	return nil
-}
-
-func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
-	target, err := p.forwardURL(req.RawRequest.URL)
+	target, err := p.forwardURL(in.URL)
 	if err != nil {
 		return nil, err
 	}
 
-	// The timeout covers the wait for the response headers. The call ends when its body is closed.
-	ctx, cancel := context.WithCancelCause(req.RawRequest.Context())
-
 	// The target gets a copy: what runs after the reply, such as callbacks and events, sees the request as it came.
-	out := forwardRequest(ctx, req.RawRequest)
+	out, err := forwardRequest(in.Context(), in, p.id)
+	if err != nil {
+		return nil, fmt.Errorf("reply_proxy: %w", err)
+	}
+
 	out.URL = target
 	out.Host = p.target.Host
 
@@ -288,10 +260,10 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 		out.Header.Del(h)
 	}
 
+	// A header of the mock's replaces the client's values of that name: a mock sets a token for the target in place of
+	// the client's, rather than send both.
 	for key, values := range p.proxyHeaders {
-		for _, value := range values {
-			out.Header.Add(key, value)
-		}
+		out.Header[key] = slices.Clone(values)
 	}
 
 	// As http.Client does, the target's user info goes as Basic auth, unless the request has an Authorization.
@@ -300,62 +272,24 @@ func (p *proxyReplier) build(req *RequestValues) (*Response, error) {
 		out.SetBasicAuth(user.Username(), password)
 	}
 
-	var timer *time.Timer
-	if p.timeout > 0 {
-		timer = time.AfterFunc(p.timeout, func() { cancel(errNoHeaders) })
-	}
-
-	res, err := p.roundTripper.RoundTrip(out)
-
-	// The timer fired, or is firing: whatever RoundTrip returned, the call is over. Cancelling here, before reading
-	// anything, doesn't wait for the timer's own cancel.
-	if timer != nil && !timer.Stop() {
-		cancel(errNoHeaders)
-
-		if err == nil {
-			res.Body.Close()
-		}
-
-		return nil, fmt.Errorf("reply_proxy: calling the target %s: no response headers within %s", p.target.Redacted(), p.timeout)
-	}
-
+	res, err := p.send(out, displayURL(p.target))
 	if err != nil {
-		cancel(nil)
-		return nil, fmt.Errorf("reply_proxy: calling the target %s: %w", p.target.Redacted(), err)
+		return nil, fmt.Errorf("reply_proxy: %w", err)
 	}
 
-	stub := newResponse()
-
-	removeHopByHop(res.Header)
-
-	for k, v := range res.Header {
-		for _, vv := range v {
-			stub.Header.Add(k, vv)
-		}
-	}
-
+	// A header of the mock's replaces the target's values of that name: the client gets one Content-Type, not two.
 	for key, values := range p.headers {
-		for _, value := range values {
-			stub.Header.Add(key, value)
-		}
+		res.Header[key] = slices.Clone(values)
 	}
 
-	stub.StatusCode = res.StatusCode
-	stub.BodyCloser = &targetBody{ReadCloser: res.Body, cancel: cancel}
-	stub.proxied = true
+	return res, nil
+}
 
-	// A body of unknown length, or an event stream, goes to the client part by part, as the target sends it. Other
-	// bodies fill the server's buffer, which sends them as it fills.
-	stub.flush = res.ContentLength < 0 || mediaType(res.Header.Get(HeaderContentType)) == "text/event-stream"
-
-	// The target's trailers: the keys it announced now, and their values once its body is read to the end.
-	if res.Trailer == nil {
-		res.Trailer = make(http.Header)
-	}
-
-	stub.Trailer = res.Trailer
-
-	return stub, nil
+// Close releases the idle connections to the target, when the proxy made the transport that holds them. The transport
+// stays usable: a request that was being served when the mock left still gets its answer.
+func (p *proxyReplier) Close() error {
+	p.close()
+	return nil
 }
 
 // forwardURL returns the URL a request to in goes to: the target's, with the path of in after the target's path, once
@@ -420,94 +354,6 @@ func (p *proxyReplier) forwardURL(in *url.URL) (*url.URL, error) {
 		RawQuery:   query,
 		ForceQuery: in.ForceQuery,
 	}, nil
-}
-
-// targetBody is the body of a target's response, which streams to the client. It keeps what it reads, up to
-// _keptBodyLimit, and closing it ends the call to the target.
-type targetBody struct {
-	io.ReadCloser
-
-	cancel context.CancelCauseFunc
-	kept   []byte
-	over   bool // read more than it keeps
-	eof    bool
-}
-
-// Read reads the body, and keeps what it read.
-func (b *targetBody) Read(p []byte) (int, error) {
-	n, err := b.ReadCloser.Read(p)
-
-	switch {
-	case b.over:
-	case len(b.kept)+n > _keptBodyLimit:
-		b.over, b.kept = true, nil
-	default:
-		b.kept = append(b.kept, p[:n]...)
-	}
-
-	if errors.Is(err, io.EOF) {
-		b.eof = true
-	}
-
-	return n, err
-}
-
-// Close closes the body and ends the call to the target.
-func (b *targetBody) Close() error {
-	err := b.ReadCloser.Close()
-	b.cancel(nil)
-
-	return err
-}
-
-// Kept returns the body, once read to its end, when it fits in _keptBodyLimit.
-func (b *targetBody) Kept() ([]byte, bool) {
-	return b.kept, b.eof && !b.over
-}
-
-// forwardRequest returns the copy of r a proxy sends on, with ctx, without the hop-by-hop headers of the client's
-// connection, nor its "Connection: close". The copy shares the trailers of r, which the server sets on r once it reads
-// the body to the end.
-func forwardRequest(ctx context.Context, r *http.Request) *http.Request {
-	out := r.Clone(ctx)
-	out.RequestURI = ""
-	out.Close = false
-	out.Trailer = r.Trailer
-	removeRequestHopByHop(out.Header)
-
-	return out
-}
-
-// removeHopByHop removes the hop-by-hop headers from h: the ones its Connection header names, and _forbiddenHeaders.
-func removeHopByHop(h http.Header) {
-	for _, v := range h.Values(HeaderConnection) {
-		for name := range strings.SplitSeq(v, ",") {
-			if name = strings.TrimSpace(name); name != "" {
-				h.Del(name)
-			}
-		}
-	}
-
-	for _, name := range _forbiddenHeaders {
-		h.Del(name)
-	}
-}
-
-// removeRequestHopByHop removes the hop-by-hop headers from h, the header of a request that goes on. A Te that accepts
-// trailers stays as "Te: trailers", which HTTP/2 and gRPC targets need.
-func removeRequestHopByHop(h http.Header) {
-	trailers := false
-	for _, v := range h.Values("Te") {
-		for token := range strings.SplitSeq(v, ",") {
-			trailers = trailers || strings.EqualFold(strings.TrimSpace(token), "trailers")
-		}
-	}
-
-	removeHopByHop(h)
-
-	if trailers {
-		h.Set("Te", "trailers")
-	}
 }
 
 // escapedIndex returns the index in escaped, a validly escaped path, where its first n decoded bytes end. Each "%"

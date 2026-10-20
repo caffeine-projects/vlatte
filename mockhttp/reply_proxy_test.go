@@ -1,6 +1,8 @@
 package mockhttp
 
 import (
+	"bufio"
+	"bytes"
 	"cmp"
 	"compress/gzip"
 	"context"
@@ -11,11 +13,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -993,23 +999,112 @@ func TestProxyReply_SendsTheTargetCredentials(t *testing.T) {
 	}
 }
 
-func TestProxyReply_KeepsTheTargetPasswordToItself(t *testing.T) {
-	// The target's URL went whole into the mock's description, and into the error a failing call answers the client
-	// with and logs: the password of a target with credentials with it.
-	m := MustNew(Setup().Silent())
+func TestProxyReply_KeepsTheTargetCredentialsOutOfErrorsAndLogs(t *testing.T) {
+	// #65: the target's URL went whole into the error a failing call answers the client with and logs, with the
+	// password of its user info, and the values of its query, such as the API key of APIs that take one there. Both
+	// are hidden. The mock's description keeps the target as it was set, so it loads back as the same mock (#42): the
+	// admin API that serves it is as trusted as the mock files.
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs)
+
+	m := MustNew(Setup().Logger(&logger).LogPretty(false))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
 	// Nothing listens on port 1: the call fails.
-	scoped := m.MustMock(Getf("/p").Reply(From("http://user:secret@127.0.0.1:1")))
+	const target = "http://user:secret@127.0.0.1:1/v1?api_key=SECRET-KEY&flag&page=2"
+	scoped := m.MustMock(Getf("/p").Reply(From(target)))
 
 	status, body := get(t, m, "/p")
 	require.Equal(t, m.Config().ErrorStatusCode, status)
-	require.Contains(t, body, "reply_proxy: calling the target http://user:xxxxx@127.0.0.1:1")
-	require.NotContains(t, body, "secret")
+	require.Contains(t, body, "reply_proxy: calling the target http://user:xxxxx@127.0.0.1:1/v1?api_key=xxxxx&flag&page=xxxxx")
+
+	for name, out := range map[string]string{"the answer": body, "the log": logs.String()} {
+		require.NotContains(t, out, "secret", "%s holds the password", name)
+		require.NotContains(t, out, "SECRET-KEY", "%s holds the API key", name)
+	}
 
 	proxy := scoped.Mocks()[0].Describe().Props.(map[string]any)["proxy"].(map[string]any)
-	require.Equal(t, "http://user:xxxxx@127.0.0.1:1", proxy["target"])
+	require.Equal(t, target, proxy["target"])
+}
+
+func TestProxyReply_AnswersWithTheProxysDebugHeadersOnly(t *testing.T) {
+	// #60: a target that is a vlatte server sends its own VLatte-* debug headers, which went on to the client with the
+	// proxy's: two values for each, and the target's alone with NoDebugHeaders, as if they were the proxy's.
+	target := MustNew(Setup().Silent())
+	target.MustStart()
+	t.Cleanup(target.Close)
+	target.MustMock(Getf("/p").Reply(OK()))
+
+	for _, noDebugHeaders := range []bool{false, true} {
+		t.Run(fmt.Sprintf("NoDebugHeaders=%t", noDebugHeaders), func(t *testing.T) {
+			setup := Setup().Silent()
+			if noDebugHeaders {
+				setup.NoDebugHeaders()
+			}
+
+			m := MustNew(setup)
+			m.MustStart()
+			t.Cleanup(m.Close)
+			scoped := m.MustMock(Getf("/p").Reply(From(target.URL())))
+
+			status, header, _ := getFull(t, m, "/p")
+			require.Equal(t, http.StatusOK, status)
+
+			for _, name := range []string{vlatte.RequestIDHeader, vlatte.MatchedMockIDHeader, vlatte.ProxiedHeader} {
+				if noDebugHeaders {
+					require.Empty(t, header.Values(name), name)
+				} else {
+					require.Len(t, header.Values(name), 1, name)
+				}
+			}
+
+			if !noDebugHeaders {
+				require.Equal(t, scoped.Mocks()[0].ID(), header.Get(vlatte.MatchedMockIDHeader), "the proxy's mock")
+			}
+		})
+	}
+}
+
+func TestProxyReply_ARequestThatComesBackFails(t *testing.T) {
+	// A proxy reply whose target is its own server sent each request back to itself, which sent it on again, until the
+	// server ran out of connections. The request that comes back fails as a loop: the client gets that failure.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/loop").Reply(From(m.URL())))
+
+	status, body := get(t, m, "/loop")
+	require.Equal(t, m.Config().ErrorStatusCode, status)
+	require.Contains(t, body, "proxy loop: the request came back to this server")
+
+	// A chain of servers isn't a loop: each sends the request on once.
+	last := MustNew(Setup().Silent())
+	last.MustStart()
+	t.Cleanup(last.Close)
+	last.MustMock(Getf("/chain").Reply(OK().PlainText("end")))
+
+	middle := MustNew(Setup().Silent())
+	middle.MustStart()
+	t.Cleanup(middle.Close)
+	middle.MustMock(Getf("/chain").Reply(From(last.URL())))
+
+	m.MustMock(Getf("/chain").Reply(From(middle.URL())))
+
+	status, body = get(t, m, "/chain")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, "end", body)
+
+	// Nor is a route that passes a server more than once, such as through a gateway that sends it back: m, middle, m
+	// again, then last. A target's path comes before the request's.
+	m.MustMock(Getf("/round").Reply(From(middle.URL())))
+	middle.MustMock(Getf("/round").Reply(From(m.URL("/back"))))
+	m.MustMock(Getf("/back/round").Reply(From(last.URL())))
+	last.MustMock(Getf("/back/round").Reply(OK().PlainText("end")))
+
+	status, body = get(t, m, "/round")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, "end", body)
 }
 
 func TestProxyReply_AHopByHopForwardHeaderFailsTheBuild(t *testing.T) {
@@ -1220,5 +1315,348 @@ func TestProxyReply_SendsTheTargetCredentialsOverTLS(t *testing.T) {
 			require.Equal(t, http.StatusOK, status)
 			require.Equal(t, "Basic dXNlcjpzZWNyZXQ=", <-got, "user:secret")
 		})
+	}
+}
+
+func TestProxyReply_HeadersOfTheMockReplaceThoseOfTheSameName(t *testing.T) {
+	// A header of the mock's was added to the client's, and to the target's: the target got the client's token and the
+	// mock's, and the client two Content-Types. The mock's values replace those of the same name. Several values of the
+	// mock's go together, and other headers stay as they came.
+	got := make(chan http.Header, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- r.Header.Clone()
+
+		w.Header().Set(HeaderContentType, "text/plain")
+		w.Header().Set("X-Target", "kept")
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/p").Reply(From(target.URL).
+		ForwardHeader("X-Token", "mock").
+		ForwardHeader("X-Tags", "a").
+		ForwardHeader("X-Tags", "b").
+		Header(HeaderContentType, "application/json")))
+
+	req, err := http.NewRequest(http.MethodGet, m.URL("/p"), nil)
+	require.NoError(t, err)
+	req.Header.Set("X-Token", "client")
+	req.Header.Set("X-Client", "kept")
+
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	sent := <-got
+	require.Equal(t, []string{"mock"}, sent.Values("X-Token"))
+	require.Equal(t, []string{"a", "b"}, sent.Values("X-Tags"))
+	require.Equal(t, []string{"kept"}, sent.Values("X-Client"))
+
+	require.Equal(t, []string{"application/json"}, res.Header.Values(HeaderContentType))
+	require.Equal(t, []string{"kept"}, res.Header.Values("X-Target"))
+}
+
+func TestProxyReply_AStepThatChangesTheLengthKeepsTheAnswer(t *testing.T) {
+	// #59: a proxied answer kept the target's Content-Length, which a step that changes the body made wrong: the server
+	// failed the write, the proxy cut the connection, and the client got no answer at all.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "hello")
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/p").Step(appendStep("<step>")).Reply(From(target.URL)))
+
+	status, body := get(t, m, "/p")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "hello<step>", body)
+}
+
+func TestProxyReply_MappersOfABodyThatDoesntEndFail(t *testing.T) {
+	// #61: mappers read the whole body of the target first, with no limit: for an event stream, which doesn't end, the
+	// client got no answer, and the stream piled up in memory. An event stream fails at once, and a body larger than
+	// the proxy keeps fails once it is read past that size. A mock without mappers still streams.
+	release := make(chan struct{})
+	stream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(HeaderContentType, "text/event-stream")
+		_, _ = io.WriteString(w, "data: first\n\n")
+		http.NewResponseController(w).Flush()
+		<-release
+	}))
+	t.Cleanup(stream.Close)
+	t.Cleanup(func() { close(release) })
+
+	large := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, strings.Repeat("l", _keptBodyLimit+1))
+	}))
+	t.Cleanup(large.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	mapper := func(*RequestValues, *Response) error { return nil }
+	m.MustMock(
+		Getf("/plain").Reply(From(stream.URL)),
+		Getf("/mapped").Map(mapper).Reply(From(stream.URL)),
+		Getf("/large").Map(mapper).Reply(From(large.URL)),
+	)
+
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	res, err := client.Get(m.URL("/plain"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = res.Body.Close() })
+
+	line, err := bufio.NewReader(res.Body).ReadString('\n')
+	require.NoError(t, err)
+	require.Equal(t, "data: first\n", line)
+
+	for path, want := range map[string]string{
+		"/mapped": "an event stream doesn't end",
+		"/large":  fmt.Sprintf("the target's is over %d bytes", _keptBodyLimit),
+	} {
+		res, err := client.Get(m.URL(path))
+		require.NoError(t, err, path)
+
+		body, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode, path)
+		require.Contains(t, string(body), want, path)
+	}
+}
+
+func TestProxyReply_MappersReadBodyFilesWhole(t *testing.T) {
+	// The limit on what mappers read is for proxied bodies, of unknown size: a body file is read whole.
+	dir := t.TempDir()
+	content := strings.Repeat("f", _keptBodyLimit+1)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "large.txt"), []byte(content), 0o600))
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/file").
+		Map(func(_ *RequestValues, res *Response) error { res.Body = append(res.Body, '!'); return nil }).
+		Reply(OK().BodyFile(filepath.Join(dir, "large.txt"))))
+
+	status, body := get(t, m, "/file")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, content+"!", body)
+}
+
+func TestProxyReply_AClientThatLeavesDuringTheDelayIsNoError(t *testing.T) {
+	// #62: a client that left during a mock's delay had the proxy call the target with its ended context, which failed,
+	// and was logged as an error. Nothing failed but the client's wait: the mock doesn't reply, and the log warns.
+	var calls atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	t.Cleanup(target.Close)
+
+	logs := &lockedBuffer{}
+	logger := zerolog.New(logs)
+
+	m := MustNew(Setup().Logger(&logger).LogPretty(false))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	scoped := m.MustMock(Getf("/p").Delay(300 * time.Millisecond).Reply(From(target.URL)))
+
+	client := &http.Client{Timeout: 50 * time.Millisecond}
+	_, err := client.Get(m.URL("/p"))
+	require.Error(t, err)
+
+	require.Eventually(t, func() bool { return strings.Contains(logs.String(), "the client left during the delay") },
+		2*time.Second, 10*time.Millisecond)
+
+	require.Zero(t, calls.Load(), "the target was called")
+	require.NotContains(t, logs.String(), `"level":"error"`)
+	require.False(t, scoped.Called())
+}
+
+// lockedBuffer is a buffer a logger writes to while a test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
+}
+
+func TestProxyReply_AMockFileTargetThatIsntHTTPFailsOnItsKey(t *testing.T) {
+	// #63: a mock file's proxy.target had to have a scheme and a host, any scheme: ftp://files.local passed, and failed
+	// only when the mock was built, with an error of the Go API that names no key.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	_, err := m.Mock(FromBytes([]byte("request:\n  path: /p\nproxy:\n  target: ftp://files.local\n"), "yaml"))
+	require.ErrorContains(t, err, "proxy.target")
+	require.ErrorContains(t, err, "expected an absolute http or https URL, such as http://api.local:8080")
+	require.NotContains(t, err.Error(), "reply_proxy:")
+}
+
+func TestProxyReply_SendsTrailersTheTargetDidntAnnounce(t *testing.T) {
+	// A target can send a trailer it didn't announce in a Trailer header. The transport adds those to the response's
+	// trailers once the body is read: the proxy must hand it a map to add them to, or they never reach the client.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "body")
+		http.NewResponseController(w).Flush()
+		w.Header().Set(http.TrailerPrefix+"X-Late", "late")
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent().Proxy())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/p").Reply(From(target.URL)))
+
+	for name, get := range map[string]func() (*http.Response, error){
+		"a proxy reply":     func() (*http.Response, error) { return http.Get(m.URL("/p")) },
+		"the forward proxy": func() (*http.Response, error) { return proxyClient(t, m).Get(target.URL + "/x") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			res, err := get()
+			require.NoError(t, err)
+
+			_, err = io.ReadAll(res.Body)
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, "late", res.Trailer.Get("X-Late"))
+		})
+	}
+}
+
+func TestProxyReply_ACallADeadlineEndsGetsTheFailureAnswer(t *testing.T) {
+	// A client that left gets no answer, and its failure is a warning. A request whose context a middleware's deadline
+	// ended still has its client: it gets the server's answer to the failure, not an empty 200.
+	release := make(chan struct{})
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	t.Cleanup(target.Close)
+	t.Cleanup(func() { close(release) })
+
+	m := MustNew(Setup().Silent().Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithTimeout(r.Context(), 50*time.Millisecond)
+			defer cancel()
+
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/slow").Reply(From(target.URL)))
+
+	status, body := get(t, m, "/slow")
+	require.Equal(t, m.Config().ErrorStatusCode, status)
+	require.Contains(t, body, "context deadline exceeded")
+}
+
+func TestTargetBody_KeepsNothingUnlessToldTo(t *testing.T) {
+	// A proxy kept up to _keptBodyLimit of every body it streamed, though nothing read it: a server that proxies many
+	// bodies at once held that much for each. It keeps a body only for what reads it once it is sent.
+	for _, keep := range []bool{false, true} {
+		body := &targetBody{ReadCloser: io.NopCloser(strings.NewReader("streamed")), cancel: func(error) {}, keep: keep}
+
+		_, err := io.ReadAll(body)
+		require.NoError(t, err)
+
+		kept, ok := body.Kept()
+		require.Equal(t, keep, ok)
+
+		if keep {
+			require.Equal(t, "streamed", string(kept))
+		} else {
+			require.Empty(t, kept)
+		}
+	}
+}
+
+func TestProxyReply_AClientThatLeavesDuringTheCallIsNoError(t *testing.T) {
+	// #62: a client that left while the target was still to answer ended the proxy's call, which failed, and was
+	// logged as an error. Nothing failed but the client's wait: the log warns, and the client gets nothing.
+	called := make(chan struct{}, 1)
+	release := make(chan struct{})
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called <- struct{}{}
+		<-release
+	}))
+	t.Cleanup(target.Close)
+	t.Cleanup(func() { close(release) })
+
+	logs := &lockedBuffer{}
+	logger := zerolog.New(logs)
+
+	m := MustNew(Setup().Logger(&logger).LogPretty(false))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/p").Reply(From(target.URL)))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL("/p"), nil)
+	require.NoError(t, err)
+
+	go func() {
+		<-called
+		cancel()
+	}()
+
+	_, err = http.DefaultClient.Do(req)
+	require.ErrorIs(t, err, context.Canceled)
+
+	require.Eventually(t, func() bool { return strings.Contains(logs.String(), `"level":"warn"`) },
+		2*time.Second, 10*time.Millisecond)
+	require.Contains(t, logs.String(), "calling the target "+target.URL+": context canceled")
+	require.NotContains(t, logs.String(), `"level":"error"`)
+}
+
+// lateTransport answers once the request's context ended, as a transport that doesn't heed it may, with a body that
+// reports its close.
+type lateTransport struct {
+	closed chan struct{}
+}
+
+func (rt lateTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	<-r.Context().Done()
+
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       closeSignal{Reader: strings.NewReader("late"), closed: rt.closed},
+		Request:    r,
+	}, nil
+}
+
+func TestProxyReply_ATimedOutAnswerThatComesAnywayIsClosed(t *testing.T) {
+	// A transport of the caller's may answer after the timeout ended the call: the client gets the timeout, and the
+	// late answer's body is closed, or its connection stays taken.
+	closed := make(chan struct{})
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/p").Reply(From("http://target.local").Transport(lateTransport{closed: closed}).Timeout(50 * time.Millisecond)))
+
+	status, body := get(t, m, "/p")
+	require.Equal(t, m.Config().ErrorStatusCode, status)
+	require.Contains(t, body, "calling the target http://target.local: no response headers within 50ms")
+
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the late answer's body is still open")
 	}
 }
