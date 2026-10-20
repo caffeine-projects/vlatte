@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strings"
@@ -50,6 +51,10 @@ func (f *blockingFiles) Reload() error {
 	<-f.release
 
 	return nil
+}
+
+func (f *blockingFiles) SaveMocks(context.Context, string, string) ([]string, error) {
+	return nil, nil
 }
 
 func newServer(t *testing.T, options ...Option) *Server {

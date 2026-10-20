@@ -164,6 +164,39 @@ paths:
         "409": { $ref: "#/components/responses/DuplicateID" }
         "500": { $ref: "#/components/responses/LoadFailed" }
         "501": { $ref: "#/components/responses/NotSupported" }
+  /mocks/save:
+    post:
+      tags: [Mocks]
+      operationId: saveMocks
+      summary: Save the mocks added through this API as mock files
+      description: |
+        Writes each mock added through this API as a mock file, `<id>.mock.<format>`, into the directory, then serves
+        it from its file, which loads from then on: on the next start too, when the server's mock file patterns take
+        the directory, as they take `testdata/_mocks` and YAML by default. Its relative body files are named from the
+        directory. When a mock can't be described as a mock file, nothing is written.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SaveSettings" }
+          application/yaml:
+            schema: { $ref: "#/components/schemas/SaveSettings" }
+      responses:
+        "200":
+          description: The mock files written.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedFiles" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/SavedFiles" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/DuplicateID" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "500": { $ref: "#/components/responses/SaveFailed" }
+        "501": { $ref: "#/components/responses/NotSupported" }
   /mocks/{id}:
     parameters:
       - name: id
@@ -327,6 +360,21 @@ paths:
           content:
             text/html:
               schema: { type: string }
+  /reset:
+    post:
+      tags: [Server]
+      operationId: reset
+      summary: Bring the server back to how it started
+      description: |
+        Removes the mocks added through this API, loads the mock files again, and starts every scenario over. A
+        server without mock files, or scenarios, skips them. Mocks added in code stay.
+      responses:
+        "204":
+          description: The server is back to how it started.
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/DuplicateID" }
+        "500": { $ref: "#/components/responses/LoadFailed" }
   /scenarios:
     get:
       tags: [Scenarios]
@@ -461,6 +509,27 @@ components:
         enabled:
           type: boolean
           description: Whether the mock matches requests.
+      additionalProperties: false
+    SaveSettings:
+      type: object
+      properties:
+        dir:
+          type: string
+          description: Directory to write the mock files into. Relative paths start at the server's root directory.
+          default: testdata/_mocks
+        format:
+          type: string
+          enum: [json, yaml, yml]
+          default: yaml
+      additionalProperties: false
+    SavedFiles:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          items: { type: string }
+          description: The paths of the mock files written.
       additionalProperties: false
     Scenario:
       type: object
@@ -709,6 +778,15 @@ components:
           schema: { $ref: "#/components/schemas/Problem" }
     DescribeFailed:
       description: "`describe_failed`: the mock can't be described as a mock file, such as one with a binary body."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    SaveFailed:
+      description: |
+        `describe_failed`: a mock can't be described as a mock file, and nothing was written, or `load_failed`: the
+        mock files, written, failed to load, or couldn't be written.
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }

@@ -63,10 +63,12 @@ type Server struct {
 	events *vlatte.EventRunner
 
 	// recording is the recording requests are captured for, if any. recordMu orders its starts, and guards played:
-	// the directory of the last recording StopRecording ended, whose recordings files loads with the mock files.
+	// the directory of the last recording StopRecording ended, whose recordings files loads with the mock files. It
+	// guards saved too: the directories the admin API saved mocks into, whose mock files files loads as well.
 	recording atomic.Pointer[recording]
 	recordMu  sync.Mutex
 	played    string
+	saved     []string
 	files     *fileLoader
 }
 
@@ -214,7 +216,7 @@ func New(config ...Option) (*Server, error) {
 			admin.Mocks(repository, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
 				return buildAdminMock(app, content, format)
 			})),
-			admin.Files(app),
+			admin.Files(adminFiles{app}),
 			admin.Recorder(adminRecorder{app}),
 			admin.Scenarios(app.scenarioStore),
 		)

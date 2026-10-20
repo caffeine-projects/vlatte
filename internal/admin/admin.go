@@ -42,6 +42,7 @@ var _routes = []struct {
 	{pattern: "DELETE /mocks"},
 	{pattern: "POST /mocks/validate", lacking: "build mocks from documents"},
 	{pattern: "POST /mocks/reload", lacking: "load mock files"},
+	{pattern: "POST /mocks/save", lacking: "save mock files"},
 	{pattern: "GET /mocks/{id}"},
 	{pattern: "PUT /mocks/{id}", lacking: "build mocks from documents"},
 	{pattern: "PATCH /mocks/{id}"},
@@ -53,18 +54,22 @@ var _routes = []struct {
 	{pattern: "GET /scenarios", lacking: "keep scenarios"},
 	{pattern: "PUT /scenarios/{name}", lacking: "keep scenarios"},
 	{pattern: "DELETE /scenarios", lacking: "keep scenarios"},
+	{pattern: "POST /reset"},
 }
 
 var errNoMocks = errors.New("admin: no mock store: pass the Mocks option")
 
 // Server is the admin API of a mock server.
 type Server struct {
-	addr    string
-	kind    string
-	url     func() string
-	logger  *zerolog.Logger
-	routes  map[string]http.Handler
-	handler http.Handler
+	addr      string
+	kind      string
+	url       func() string
+	logger    *zerolog.Logger
+	routes    map[string]http.Handler
+	files     handler.Files
+	scenarios handler.Scenarios
+	reset     func(files handler.Files, scenarios handler.Scenarios) http.Handler
+	handler   http.Handler
 
 	mu      sync.Mutex // orders Start, Close and the requests that start as Close runs
 	srv     *http.Server
@@ -103,6 +108,10 @@ func Mocks[M vlatte.Mock](store vlatte.Store[M], build vlatte.MockBuilder[M]) Op
 		s.routes["PATCH /mocks/{id}"] = handler.UpdateMock(store)
 		s.routes["DELETE /mocks/{id}"] = handler.RemoveMock(store)
 
+		s.reset = func(files handler.Files, scenarios handler.Scenarios) http.Handler {
+			return handler.Reset(store, files, scenarios)
+		}
+
 		if build != nil {
 			s.routes["POST /mocks"] = handler.AddMock(store, build)
 			s.routes["POST /mocks/validate"] = handler.ValidateMock(store, build)
@@ -111,9 +120,13 @@ func Mocks[M vlatte.Mock](store vlatte.Store[M], build vlatte.MockBuilder[M]) Op
 	}
 }
 
-// Files sets the mock files of the mock server, which POST /mocks/reload loads again.
+// Files sets the mock files of the mock server, which POST /mocks/reload loads again, and POST /mocks/save writes.
 func Files(files handler.Files) Option {
-	return func(s *Server) { s.routes["POST /mocks/reload"] = handler.ReloadMocks(files) }
+	return func(s *Server) {
+		s.files = files
+		s.routes["POST /mocks/reload"] = handler.ReloadMocks(files)
+		s.routes["POST /mocks/save"] = handler.SaveMocks(files)
+	}
 }
 
 // Recorder sets the recorder of the mock server, which GET, POST and DELETE /recording control.
@@ -128,6 +141,7 @@ func Recorder(rec handler.Recorder) Option {
 // Scenarios sets the scenarios of the mock server, which GET, PUT and DELETE /scenarios read and move.
 func Scenarios(scenarios handler.Scenarios) Option {
 	return func(s *Server) {
+		s.scenarios = scenarios
 		s.routes["GET /scenarios"] = handler.ListScenarios(scenarios)
 		s.routes["PUT /scenarios/{name}"] = handler.SetScenario(scenarios)
 		s.routes["DELETE /scenarios"] = handler.ResetScenarios(scenarios)
@@ -153,6 +167,7 @@ func New(options ...Option) (*Server, error) {
 	s.routes["GET /openapi"] = handler.OpenAPI()
 	s.routes["GET /docs"] = handler.Docs()
 	s.routes["GET /recorder"] = handler.RecorderPage()
+	s.routes["POST /reset"] = s.reset(s.files, s.scenarios)
 
 	mux := http.NewServeMux()
 	for _, route := range _routes {

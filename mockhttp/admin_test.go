@@ -240,3 +240,110 @@ func TestAdmin_MovesScenarios(t *testing.T) {
 	_, body = do(t, http.MethodGet, m.AdminURL()+"/scenarios", nil, nil)
 	require.JSONEq(t, `{"scenarios": [{"name": "Checkout", "state": "paid"}]}`, string(body))
 }
+
+func TestAdmin_SavedMocksOutliveTheServer(t *testing.T) {
+	// Mocks added through the admin API, saved, are served from their files from then on, by this server and by the
+	// next one: the default mock file patterns load where the admin API saves by default. A relative body file still
+	// opens: the file names it from its own directory.
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.Mkdir("bodies", 0o700))
+	require.NoError(t, os.WriteFile("bodies/hello.txt", []byte("hello from a file"), 0o600))
+
+	m := adminServer(t, Setup())
+
+	for _, doc := range []string{
+		`{"id": "hello", "request": {"method": "GET", "path": "/hello"}, "response": {"status": 200, "body_file": "bodies/hello.txt"}}`,
+		`{"id": "inline", "request": {"method": "GET", "path": "/inline"}, "response": {"status": 201, "body": "inline"}}`,
+	} {
+		res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil, []byte(doc))
+		require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
+	}
+
+	m.MustMock(Getf("/code").Reply(OK()))
+
+	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+	require.JSONEq(t, `{"files": ["testdata/_mocks/hello.mock.yaml", "testdata/_mocks/inline.mock.yaml"]}`, string(body))
+
+	saved, err := os.ReadFile("testdata/_mocks/hello.mock.yaml")
+	require.NoError(t, err)
+	require.Contains(t, string(saved), "body_file: ../../bodies/hello.txt")
+
+	_, body = do(t, http.MethodGet, m.AdminURL()+"/mocks", nil, nil)
+	require.Contains(t, string(body), `"origin": "testdata/_mocks/hello.mock.yaml"`, "served from its file")
+	require.NotContains(t, string(body), `"origin": "admin"`)
+
+	res, _ = do(t, http.MethodPost, m.AdminURL()+"/mocks/reload", nil, nil)
+	require.Equal(t, http.StatusNoContent, res.StatusCode, "the files reload without a conflict")
+
+	next := MustNew(Setup().Silent())
+	next.MustStart()
+	t.Cleanup(next.Close)
+
+	for _, s := range []*Server{m, next} {
+		res, body = do(t, http.MethodGet, s.URL("/hello"), nil, nil)
+		require.Equal(t, http.StatusOK, res.StatusCode)
+		require.Equal(t, "hello from a file", string(body))
+
+		res, _ = do(t, http.MethodGet, s.URL("/inline"), nil, nil)
+		require.Equal(t, http.StatusCreated, res.StatusCode)
+	}
+
+	res, _ = do(t, http.MethodGet, next.URL("/code"), nil, nil)
+	require.Equal(t, StatusNoMatch, res.StatusCode, "mocks added in code aren't saved")
+}
+
+func TestAdmin_SaveWritesNothingWhenAMockCantBeSaved(t *testing.T) {
+	// A mock whose description doesn't load back as the same mock, such as one with a trailer (#42), would write a
+	// broken file, which every later start would fail on: nothing is written, the others neither.
+	dir := t.TempDir()
+	m := adminServer(t, Setup())
+
+	for _, doc := range []string{
+		`{"id": "fine", "request": {"method": "GET", "path": "/fine"}, "response": {"status": 200}}`,
+		`{"id": "trailer", "request": {"method": "GET", "path": "/t"}, "response": {"status": 200, "trailer": {"X-T": "v"}}}`,
+	} {
+		res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil, []byte(doc))
+		require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
+	}
+
+	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, []byte(`{"dir": "`+filepath.ToSlash(dir)+`"}`))
+	require.Equal(t, http.StatusInternalServerError, res.StatusCode, string(body))
+	require.Contains(t, string(body), `"code": "describe_failed"`)
+	require.Contains(t, string(body), `mock \"trailer\"`)
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}
+
+func TestAdmin_ResetsTheServer(t *testing.T) {
+	// A reset between tests: the mocks the admin API added go, the mock files load again, and scenarios start over.
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "file.yaml"),
+		[]byte("id: file\nrequest: {method: GET, path: /file}\nresponse: {status: 200}\n"), 0o600))
+
+	m := adminServer(t, Setup().MockFilePatterns(filepath.Join(dir, "*.yaml")))
+	m.MustMock(
+		Getf("/pay").StartScenario("checkout").ScenarioStateWillBe("paid").Reply(OK()),
+		Getf("/pay").ScenarioIs("checkout").ScenarioStateIs("paid").Reply(Status(http.StatusConflict)),
+	)
+
+	res, _ := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil,
+		[]byte(`{"id": "added", "request": {"method": "GET", "path": "/added"}, "response": {"status": 200}}`))
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+
+	res, _ = do(t, http.MethodDelete, m.AdminURL()+"/mocks/file", nil, nil)
+	require.Equal(t, http.StatusNoContent, res.StatusCode)
+
+	res, _ = do(t, http.MethodGet, m.URL("/pay"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	res, body := do(t, http.MethodPost, m.AdminURL()+"/reset", nil, nil)
+	require.Equal(t, http.StatusNoContent, res.StatusCode, string(body))
+
+	for path, want := range map[string]int{"/added": StatusNoMatch, "/file": http.StatusOK, "/pay": http.StatusOK} {
+		res, _ = do(t, http.MethodGet, m.URL(path), nil, nil)
+		require.Equal(t, want, res.StatusCode, path)
+	}
+}

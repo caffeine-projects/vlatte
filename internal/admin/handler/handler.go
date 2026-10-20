@@ -4,6 +4,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/caffeine-projects/vlatte"
@@ -13,10 +14,18 @@ import (
 // the admin API, so the admin API tells them from mocks of files and code.
 const Origin = "admin"
 
+// ErrNotDescribed is the error of a mock that can't be described as a mock file, such as one with a binary body.
+var ErrNotDescribed = errors.New("admin: the mock can't be described as a mock file")
+
 // Files is a mock server that serves mock files.
 type Files interface {
 	// Reload loads the mock files again, in place of the mocks they gave before.
 	Reload() error
+
+	// SaveMocks writes the mocks the admin API added as mock files, in format, into dir, then serves them from the
+	// files, which load from then on. Empty dir and format are the server's defaults. It returns the files' paths. An
+	// error that wraps ErrNotDescribed wrote nothing.
+	SaveMocks(ctx context.Context, dir, format string) ([]string, error)
 }
 
 // Recorder is a mock server that records what it proxies as mock files.
