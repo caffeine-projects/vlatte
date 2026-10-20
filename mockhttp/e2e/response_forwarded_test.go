@@ -41,9 +41,9 @@ func TestProxiedReplies(t *testing.T) {
 	scoped := m.MustMock(mockhttp.Post(match.URLPath("/test")).
 		Body(match.StrictEqual("hello world")).
 		Reply(mockhttp.From(dest.URL).
-			ForwardHeader("x-test", "ok").
+			RequestHeader("x-test", "ok").
 			Header("x-res", "example").
-			RemoveProxyHeaders("x-del")))
+			RemoveRequestHeaders("x-del")))
 
 	data := strings.NewReader("hello world")
 	req, _ := http.NewRequest(http.MethodPost, m.URL()+"/test", data)

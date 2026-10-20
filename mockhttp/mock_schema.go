@@ -117,19 +117,19 @@ type randomDef struct {
 }
 
 type proxyDef struct {
-	target        string
-	forwardHeader []headerValue
-	header        []headerValue
-	removeHeaders []string
-	trimPrefix    string
-	trimSuffix    string
-	timeout       time.Duration
-	hasTimeout    bool
-	sslVerify     bool
-	hasSSLVerify  bool
-	hasTarget     bool
-	xForwarded    bool
-	preserveHost  bool
+	target               string
+	requestHeader        []headerValue
+	header               []headerValue
+	removeRequestHeaders []string
+	trimPrefix           string
+	trimSuffix           string
+	timeout              time.Duration
+	hasTimeout           bool
+	sslVerify            bool
+	hasSSLVerify         bool
+	hasTarget            bool
+	xForwarded           bool
+	preserveHost         bool
 }
 
 // _responseKeys are the ways to reply, in the order conflicts are reported.
@@ -497,16 +497,16 @@ var _proxySchema = config.NewSchema(
 		},
 	},
 	proxyField{
-		Key: "forward_header", Kind: config.Any, Usage: "Headers of the forwarded request, by name, in place of the client's. Hop-by-hop ones, such as Connection, fail the mock, except Te: trailers.",
-		Set: func(p *proxyDef, v config.Value) error { return headerValues(v, &p.forwardHeader) },
+		Key: "request_header", Kind: config.Any, Usage: "Headers of the forwarded request, by name, in place of the client's. Hop-by-hop ones, such as Connection, fail the mock, except Te: trailers.",
+		Set: func(p *proxyDef, v config.Value) error { return headerValues(v, &p.requestHeader) },
 	},
 	proxyField{
 		Key: "header", Kind: config.Any, Usage: "Headers of the response, by name, in place of the target's.",
 		Set: func(p *proxyDef, v config.Value) error { return headerValues(v, &p.header) },
 	},
 	proxyField{
-		Key: "remove_headers", Kind: config.List, Usage: "Headers removed from the forwarded request.",
-		Set: func(p *proxyDef, v config.Value) error { p.removeHeaders = v.List; return nil },
+		Key: "remove_request_headers", Kind: config.List, Usage: "Headers removed from the forwarded request.",
+		Set: func(p *proxyDef, v config.Value) error { p.removeRequestHeaders = v.List; return nil },
 	},
 	proxyField{
 		Key: "trim_prefix", Kind: config.String, Usage: "Prefix of whole segments removed from the request path, before the target's path is added.",
@@ -1162,16 +1162,16 @@ func (r *replyDef) build(dir string) *Reply {
 func (p *proxyDef) build() *ProxyReply {
 	proxy := From(p.target)
 
-	for _, h := range p.forwardHeader {
-		proxy.ForwardHeader(h.name, h.value)
+	for _, h := range p.requestHeader {
+		proxy.RequestHeader(h.name, h.value)
 	}
 
 	for _, h := range p.header {
 		proxy.Header(h.name, h.value)
 	}
 
-	if len(p.removeHeaders) > 0 {
-		proxy.RemoveProxyHeaders(p.removeHeaders...)
+	if len(p.removeRequestHeaders) > 0 {
+		proxy.RemoveRequestHeaders(p.removeRequestHeaders...)
 	}
 
 	if p.trimPrefix != "" {

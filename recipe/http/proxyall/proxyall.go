@@ -24,8 +24,8 @@ func New(config Config) vlatte.Recipe[*mockhttp.Mock, *mockhttp.Server] {
 		RecipeFunc[*mockhttp.Mock, *mockhttp.Server](func(ctx context.Context, input *vlatte.RecipeInput[*mockhttp.Mock, *mockhttp.Server]) error {
 		reply := mockhttp.From(config.Target).
 			Headers(config.Headers).
-			ProxyHeaders(config.ProxyHeaders).
-			RemoveProxyHeaders(config.ProxyHeadersToRemove...).
+			RequestHeaders(config.ProxyHeaders).
+			RemoveRequestHeaders(config.ProxyHeadersToRemove...).
 			TrimPrefix(config.TrimPrefix).
 			TrimSuffix(config.TrimSuffix)
 

@@ -203,7 +203,7 @@ var _scalarKeys = []struct {
 		return withRequest(map[string]any{"response_random": map[string]any{"responses": []any{make(map[string]any)}, "seed": v}})
 	}},
 	{"proxy.target", "http://a", func(v any) map[string]any { return withRequest(map[string]any{"proxy": map[string]any{"target": v}}) }},
-	{"proxy.remove_headers", []any{"a"}, inProxy("remove_headers")},
+	{"proxy.remove_request_headers", []any{"a"}, inProxy("remove_request_headers")},
 	{"proxy.trim_prefix", "/a", inProxy("trim_prefix")},
 	{"proxy.trim_suffix", "/b", inProxy("trim_suffix")},
 	{"proxy.timeout", int64(10), inProxy("timeout")},

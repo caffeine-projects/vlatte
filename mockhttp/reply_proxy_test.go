@@ -66,9 +66,9 @@ func TestForward(t *testing.T) {
 		rv := &RequestValues{RawRequest: req, URL: req.URL}
 
 		reply := From(dest.URL).
-			ForwardHeader("x-proxy", "proxied").
-			ProxyHeaders(ph).
-			RemoveProxyHeaders("x-to-be-removed").
+			RequestHeader("x-proxy", "proxied").
+			RequestHeaders(ph).
+			RemoveRequestHeaders("x-to-be-removed").
 			Header("x-res", "response").
 			Headers(h)
 		res, err := replierOf(t, reply).Reply(t.Context(), ReplyInput{RequestValues: rv, Writer: nil})
@@ -415,16 +415,16 @@ func TestProxyReply_MockDescribesTheProxyAsBuilt(t *testing.T) {
 	m := MustNew(Setup().Silent())
 	t.Cleanup(m.Close)
 
-	rep := From("http://localhost").ForwardHeader("X-Fwd", "a")
+	rep := From("http://localhost").RequestHeader("X-Fwd", "a")
 	mock, err := AnyMethod().Reply(rep).Build(m)
 	require.NoError(t, err)
 
-	rep.ForwardHeader("X-Fwd", "b").Header("X-Res", "c").RemoveProxyHeaders("X-Drop")
+	rep.RequestHeader("X-Fwd", "b").Header("X-Res", "c").RemoveRequestHeaders("X-Drop")
 
 	proxy := mock.Describe().Props.(map[string]any)["proxy"].(map[string]any)
-	require.Equal(t, http.Header{"X-Fwd": {"a"}}, proxy["forward_header"])
+	require.Equal(t, http.Header{"X-Fwd": {"a"}}, proxy["request_header"])
 	require.Empty(t, proxy["header"])
-	require.Empty(t, proxy["remove_headers"])
+	require.Empty(t, proxy["remove_request_headers"])
 }
 
 func TestProxyReply_StreamsTheTargetBody(t *testing.T) {
@@ -816,8 +816,8 @@ func TestProxyReply_LeavesTheClientRequestAsItCame(t *testing.T) {
 		OnCompleteEvent(vlatte.EventConfig{Name: "look"}).
 		Reply(From(target.URL).
 			TrimPrefix("/api").
-			ProxyHeaders(http.Header{"X-Added": {"1"}}).
-			RemoveProxyHeaders(HeaderAuthorization)))
+			RequestHeaders(http.Header{"X-Added": {"1"}}).
+			RemoveRequestHeaders(HeaderAuthorization)))
 
 	req, err := http.NewRequest(http.MethodGet, m.URL("/api/p"), nil)
 	require.NoError(t, err)
@@ -976,7 +976,7 @@ func TestProxyReply_SendsTheTargetCredentials(t *testing.T) {
 	}{
 		{name: "the target's", reply: From(withCredentials.String()), want: basic.Header.Get(HeaderAuthorization)},
 		{name: "the client's first", reply: From(withCredentials.String()), authorization: "Bearer client", want: "Bearer client"},
-		{name: "the target's, without the client's", reply: From(withCredentials.String()).RemoveProxyHeaders(HeaderAuthorization), authorization: "Bearer client", want: basic.Header.Get(HeaderAuthorization)},
+		{name: "the target's, without the client's", reply: From(withCredentials.String()).RemoveRequestHeaders(HeaderAuthorization), authorization: "Bearer client", want: basic.Header.Get(HeaderAuthorization)},
 	}
 
 	for _, tt := range tests {
@@ -1111,7 +1111,7 @@ func TestProxyReply_ARequestThatComesBackFails(t *testing.T) {
 	require.Equal(t, "end", body)
 }
 
-func TestProxyReply_AHopByHopForwardHeaderFailsTheBuild(t *testing.T) {
+func TestProxyReply_AHopByHopRequestHeaderFailsTheBuild(t *testing.T) {
 	// A forward header can't put back what the proxy leaves out of every request: a hop-by-hop header is about one
 	// connection, and "Connection: Upgrade" or "Upgrade: websocket" asks for a protocol switch no proxy reply can pass
 	// on. The build says so, rather than the proxy dropping the header without a word.
@@ -1123,22 +1123,22 @@ func TestProxyReply_AHopByHopForwardHeaderFailsTheBuild(t *testing.T) {
 		reply *ProxyReply
 		want  string
 	}{
-		{name: "Connection", reply: From("http://localhost").ForwardHeader(HeaderConnection, "Upgrade"), want: "Connection"},
-		{name: "Upgrade", reply: From("http://localhost").ProxyHeaders(http.Header{HeaderUpgrade: {"websocket"}}), want: "Upgrade"},
-		{name: "in any case", reply: From("http://localhost").ForwardHeader("proxy-authorization", "Basic cHJveHk6c2VjcmV0"), want: "Proxy-Authorization"},
-		{name: "Te other than trailers", reply: From("http://localhost").ForwardHeader("Te", "gzip"), want: "Te"},
+		{name: "Connection", reply: From("http://localhost").RequestHeader(HeaderConnection, "Upgrade"), want: "Connection"},
+		{name: "Upgrade", reply: From("http://localhost").RequestHeaders(http.Header{HeaderUpgrade: {"websocket"}}), want: "Upgrade"},
+		{name: "in any case", reply: From("http://localhost").RequestHeader("proxy-authorization", "Basic cHJveHk6c2VjcmV0"), want: "Proxy-Authorization"},
+		{name: "Te other than trailers", reply: From("http://localhost").RequestHeader("Te", "gzip"), want: "Te"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := AnyMethod().Reply(tt.reply).Build(m)
-			require.EqualError(t, err, fmt.Sprintf("reply_proxy: forward header %q is hop-by-hop: a proxy doesn't send it on", tt.want))
+			require.EqualError(t, err, fmt.Sprintf("reply_proxy: request header %q is hop-by-hop: a proxy doesn't send it on", tt.want))
 		})
 	}
 
 	t.Run("a mock file", func(t *testing.T) {
-		_, err := m.Mock(FromBytes([]byte("request:\n  path: /p\nproxy:\n  target: http://localhost\n  forward_header: {Connection: Upgrade}\n"), "yaml"))
-		require.ErrorContains(t, err, `reply_proxy: forward header "Connection" is hop-by-hop`)
+		_, err := m.Mock(FromBytes([]byte("request:\n  path: /p\nproxy:\n  target: http://localhost\n  request_header: {Connection: Upgrade}\n"), "yaml"))
+		require.ErrorContains(t, err, `reply_proxy: request header "Connection" is hop-by-hop`)
 	})
 
 	t.Run("Te: trailers goes on", func(t *testing.T) {
@@ -1151,7 +1151,7 @@ func TestProxyReply_AHopByHopForwardHeaderFailsTheBuild(t *testing.T) {
 		m.MustStart()
 		t.Cleanup(m.Close)
 
-		m.MustMock(Getf("/p").Reply(From(target.URL).ForwardHeader("Te", "trailers")))
+		m.MustMock(Getf("/p").Reply(From(target.URL).RequestHeader("Te", "trailers")))
 
 		status, _ := get(t, m, "/p")
 		require.Equal(t, http.StatusOK, status)
@@ -1339,9 +1339,9 @@ func TestProxyReply_HeadersOfTheMockReplaceThoseOfTheSameName(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 	m.MustMock(Getf("/p").Reply(From(target.URL).
-		ForwardHeader("X-Token", "mock").
-		ForwardHeader("X-Tags", "a").
-		ForwardHeader("X-Tags", "b").
+		RequestHeader("X-Token", "mock").
+		RequestHeader("X-Tags", "a").
+		RequestHeader("X-Tags", "b").
 		Header(HeaderContentType, "application/json")))
 
 	req, err := http.NewRequest(http.MethodGet, m.URL("/p"), nil)
@@ -1771,4 +1771,20 @@ func TestProxyReply_TellsTheTargetAboutTheClientWhenAsked(t *testing.T) {
 		require.Equal(t, clientHost, asked.header.Get("X-Forwarded-Host"), path)
 		require.Equal(t, "http", asked.header.Get("X-Forwarded-Proto"), path)
 	}
+}
+
+func TestProxyReply_FromTakesAStringTypeOfAnyName(t *testing.T) {
+	// #69: FromTypes took no ~string, so a target of a named string type, such as a setting's, didn't compile.
+	type targetURL string
+
+	target := okTarget(t)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/p").Reply(From(targetURL(target.URL))))
+
+	status, body := get(t, m, "/p")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "ok", body)
 }

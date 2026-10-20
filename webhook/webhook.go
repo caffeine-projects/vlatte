@@ -57,17 +57,17 @@ type Transform func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Ar
 // mockhttp sends it once the mock replied, and the response waits for it: a test checks the target right after.
 //
 // It logs each send and its answer at info level, with WithLogger's logger, or else with the logger of the event:
-// mockhttp gives the server's. It sends with WithRoundTripper's transport, or else with the transport of the event:
+// mockhttp gives the server's. It sends with WithTransport's transport, or else with the transport of the event:
 // mockhttp gives the server's Config.Transport, or else one it closes with the server. Without either, it sends with
 // http.DefaultTransport. A send fails when the target can't be reached in time, or answers with a status outside 2xx;
 // a redirect isn't followed. A send reads up to 256 KiB of the answer, within its time, so its connection carries the
 // next one. The time is WithTimeout's, or else the event's: mockhttp gives the server's Config.WebhookTimeout. Without
 // either, it is 10s. A zero WebHook is ready to use.
 type WebHook struct {
-	roundTripper http.RoundTripper
-	transform    Transform
-	logger       *zerolog.Logger
-	timeout      time.Duration
+	transport http.RoundTripper
+	transform Transform
+	logger    *zerolog.Logger
+	timeout   time.Duration
 }
 
 // New creates a new WebHook instance.
@@ -203,7 +203,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		}
 
 		// As in replies: the value goes without the spaces and line breaks around it, and a line break inside, which
-		// would end the header there, fails here, whatever the RoundTripper would do with it.
+		// would end the header there, fails here, whatever the Transport would do with it.
 		rendered = textproto.TrimString(rendered)
 		if strings.ContainsAny(rendered, "\r\n") {
 			return fmt.Errorf("webhook: header_template %s holds a line break", k)
@@ -244,7 +244,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 	sendCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	roundTripper := w.roundTripper
+	roundTripper := w.transport
 	if roundTripper == nil {
 		roundTripper = transportOf(args)
 	}
