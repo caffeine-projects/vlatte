@@ -84,9 +84,11 @@ type Config struct {
 	// closes it.
 	//
 	// Nil leaves each to a transport it makes, and closes with the server. Only the transports it makes for proxy
-	// replies, the recording target and the forward proxy follow its TLS client certificates and CAs, SSLVerify,
-	// RecordConfig.SkipSSLVerify and the forward proxy's Via and Timeout: the one of webhooks has the settings of
-	// http.DefaultTransport. The forward proxy's CONNECT tunnels dial their host, whatever the transport.
+	// replies, the recording target and the forward proxy follow its TLS client certificates and CAs: the one of
+	// webhooks has the settings of http.DefaultTransport. A setting that only shapes those, and that a transport of the
+	// caller's would ignore, fails instead: a proxy reply's SSLVerify or SkipSSLVerify fails its mock,
+	// RecordConfig.SkipSSLVerify fails the recording, and the forward proxy's Via or SSLVerify fails New. The forward
+	// proxy's CONNECT tunnels dial their host, whatever the transport.
 	Transport http.RoundTripper
 
 	// WebhookTimeout is how long a webhook waits for its answer, from the setting webhook.timeout, unless the webhook

@@ -3,7 +3,6 @@ package mockhttp
 import (
 	"cmp"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -45,10 +44,6 @@ const (
 	// _keptBodyLimit bounds how much of a target's body a proxy keeps, for the request log, callbacks and events,
 	// while it streams to the client: a larger body isn't kept.
 	_keptBodyLimit = 1 << 20
-
-	// _idleConnTimeout closes a connection to the target that stays idle, as the forward proxy does. A request still
-	// being served when its mock leaves returns its connection afterwards: it closes then, at the latest.
-	_idleConnTimeout = 15 * time.Second
 )
 
 type FromTypes interface{ string | *url.URL }
@@ -67,6 +62,7 @@ type ProxyReply struct {
 	trimSuffix           string
 	timeout              time.Duration
 	sslVerify            bool
+	sslVerifySet         bool // SSLVerify or SkipSSLVerify was called: a transport of the caller's would ignore it
 }
 
 // From creates a ProxyReply with the given target. The target's path and query come before the request's: with
@@ -163,7 +159,8 @@ func (r *ProxyReply) Timeout(timeout time.Duration) *ProxyReply {
 }
 
 // Transport sets the transport that sends the requests to the target, in place of the server's Config.Transport. It is
-// the caller's: the proxy never closes it, and SSLVerify doesn't apply to it.
+// the caller's: the proxy never closes it. It decides on its own whether it verifies the target, so SSLVerify and
+// SkipSSLVerify fail the build of the mock with it, as with the server's Config.Transport.
 func (r *ProxyReply) Transport(rt http.RoundTripper) *ProxyReply {
 	r.transport = rt
 	return r
@@ -171,19 +168,21 @@ func (r *ProxyReply) Transport(rt http.RoundTripper) *ProxyReply {
 
 // SkipSSLVerify skips the verification of the target's TLS certificate, as a ProxyReply does unless SSLVerify(true).
 func (r *ProxyReply) SkipSSLVerify() *ProxyReply {
-	r.sslVerify = false
+	r.sslVerify, r.sslVerifySet = false, true
 	return r
 }
 
 // SSLVerify sets whether the target's TLS certificate is verified. It isn't by default, so a target with a
 // self-signed certificate answers: set it for a target that gets credentials, such as https://user:pass@api.
 func (r *ProxyReply) SSLVerify(v bool) *ProxyReply {
-	r.sslVerify = v
+	r.sslVerify, r.sslVerifySet = v, true
 	return r
 }
 
+// Describe describes the reply in the mock file format. ssl_verify is described only when it was set, so the
+// description loads back on a server whose Config.Transport would refuse it.
 func (r *ProxyReply) Describe() descriptor.Descriptor {
-	return descriptor.New("proxy", map[string]any{
+	props := map[string]any{
 		"target":         r.target.Redacted(),
 		"forward_header": r.proxyHeaders.Clone(),
 		"header":         r.headers.Clone(),
@@ -191,8 +190,13 @@ func (r *ProxyReply) Describe() descriptor.Descriptor {
 		"trim_prefix":    r.trimPrefix,
 		"trim_suffix":    r.trimSuffix,
 		"timeout":        r.timeout.String(),
-		"ssl_verify":     r.sslVerify,
-	})
+	}
+
+	if r.sslVerifySet {
+		props["ssl_verify"] = r.sslVerify
+	}
+
+	return descriptor.New("proxy", props)
 }
 
 // NewReplier implements ReplierFactory. Each mock gets a proxy of its own: copies of the target and the headers, and,
@@ -214,6 +218,13 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 		}
 	}
 
+	// A transport of the caller's can be shared: the proxy never closes it.
+	rt := cmp.Or(r.transport, app.config.Transport)
+	if rt != nil && r.sslVerifySet {
+		return nil, errors.New("reply_proxy: ssl_verify has no effect with a transport of the caller's, " +
+			"ProxyReply.Transport or Config.Transport: verify the target with that transport, or leave ssl_verify out")
+	}
+
 	p := &proxyReplier{
 		target:               r.target.Clone(),
 		headers:              r.headers.Clone(),
@@ -222,20 +233,11 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 		trimPrefix:           r.trimPrefix,
 		trimSuffix:           r.trimSuffix,
 		timeout:              r.timeout,
-		// A transport of the caller's can be shared: the proxy never closes it.
-		roundTripper: cmp.Or(r.transport, app.config.Transport),
+		roundTripper:         rt,
 	}
 
 	if p.roundTripper == nil {
-		p.transport = &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: !r.sslVerify,
-				RootCAs:            app.config.TLSClientCAs,
-				Certificates:       app.config.TLSCertificates,
-			},
-			DisableCompression: true,
-			IdleConnTimeout:    _idleConnTimeout,
-		}
+		p.transport = newTransport(app.config, r.sslVerify, nil)
 		p.roundTripper = p.transport
 	}
 

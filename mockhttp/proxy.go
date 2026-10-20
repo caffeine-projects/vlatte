@@ -2,25 +2,26 @@ package mockhttp
 
 import (
 	"cmp"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/rs/zerolog"
+
+	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
 var _ ProxyConfigurer = (*ProxyConfig)(nil)
 
 // ProxyConfig configures a proxy.
 type ProxyConfig struct {
-	// Via sets a URL to route the request via another proxy server, with the transport the proxy makes. Its credentials
-	// go in its URL: a client's Proxy-Authorization is for this proxy, and doesn't go on. Over https, set SSLVerify too,
-	// so they go to that proxy only.
+	// Via sets the URL, http or https, of another proxy server to send the requests through, with the transport the
+	// proxy makes. Its credentials go in its URL: a client's Proxy-Authorization is for this proxy, and doesn't go on.
+	// Over https, set SSLVerify too, so they go to that proxy only. Without Via, the transport the proxy makes goes
+	// through the proxy of the environment, HTTP_PROXY, HTTPS_PROXY and NO_PROXY, which leaves out localhost.
 	Via string
 
 	// Timeout bounds the wait for the response headers of the host, with the transport the proxy makes.
@@ -30,7 +31,8 @@ type ProxyConfig struct {
 	SSLVerify bool
 
 	// Transport sends the requests the proxy passes on, in place of the server's Config.Transport. It is the caller's:
-	// the server never closes it. With neither, the proxy makes a transport, which Via, Timeout and SSLVerify shape.
+	// the server never closes it. With neither, the proxy makes a transport, which Via, Timeout and SSLVerify shape:
+	// Via and SSLVerify fail New with a transport of the caller's, which would ignore them.
 	Transport http.RoundTripper
 }
 
@@ -57,35 +59,31 @@ type reverseProxy struct {
 	transport    *http.Transport // roundTripper, when the proxy made it
 }
 
-func newProxy(log *zerolog.Logger, config *Config) *reverseProxy {
-	rt := cmp.Or(config.Proxy.Transport, config.Transport)
-	if rt == nil {
-		transport := &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: !config.Proxy.SSLVerify,
-				RootCAs:            config.TLSClientCAs,
-				Certificates:       config.TLSCertificates,
-			},
-		}
-
-		if config.Proxy.Via != "" {
-			u, err := url.Parse(config.Proxy.Via)
-			if err != nil {
-				panic(fmt.Errorf("proxy: failed to parse proxy via url %s: %w", config.Proxy.Via, err))
-			}
-
-			transport.Proxy = http.ProxyURL(u)
-		}
-
-		transport.TLSHandshakeTimeout = 15 * time.Second
-		transport.IdleConnTimeout = 15 * time.Second
-		transport.ExpectContinueTimeout = 1 * time.Second
-		transport.ResponseHeaderTimeout = config.Proxy.Timeout
-
-		return &reverseProxy{logger: log, roundTripper: transport, transport: transport}
+// newProxy returns the forward proxy of conf. Via and SSLVerify shape the transport the proxy makes, so they fail it
+// with a transport of the caller's, which would ignore them.
+func newProxy(log *zerolog.Logger, conf *Config) (*reverseProxy, error) {
+	via, err := parseVia(conf.Proxy.Via)
+	if err != nil {
+		return nil, fmt.Errorf("proxy: via %q: %w", config.Display(conf.Proxy.Via), err)
 	}
 
-	return &reverseProxy{logger: log, roundTripper: rt}
+	if rt := cmp.Or(conf.Proxy.Transport, conf.Transport); rt != nil {
+		switch {
+		case via != nil:
+			return nil, errors.New("proxy: via has no effect with a transport of the caller's, " +
+				"ProxyConfig.Transport or Config.Transport: set the proxy on that transport, or leave via out")
+		case conf.Proxy.SSLVerify:
+			return nil, errors.New("proxy: ssl_verify has no effect with a transport of the caller's, " +
+				"ProxyConfig.Transport or Config.Transport: verify the hosts with that transport, or leave ssl_verify out")
+		}
+
+		return &reverseProxy{logger: log, roundTripper: rt}, nil
+	}
+
+	transport := newTransport(conf, conf.Proxy.SSLVerify, via)
+	transport.ResponseHeaderTimeout = conf.Proxy.Timeout
+
+	return &reverseProxy{logger: log, roundTripper: transport, transport: transport}, nil
 }
 
 // serve sends r to its host and answers with the host's response, or opens a tunnel for a CONNECT. It returns an

@@ -161,7 +161,10 @@ func New(config ...Option) (*Server, error) {
 
 	var p *reverseProxy
 	if conf.Proxy != nil {
-		p = newProxy(app.Logger(), conf)
+		var err error
+		if p, err = newProxy(app.Logger(), conf); err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
 	}
 
 	var lifecycle mockHTTPLifecycle

@@ -129,3 +129,146 @@ func TestTransport_TheForwardProxyGetsTheCallersTransport(t *testing.T) {
 		})
 	}
 }
+
+func TestTransport_ASettingTheCallersTransportWouldIgnoreFails(t *testing.T) {
+	// #67: a transport of the caller's decides on its own whether it verifies its upstreams and which proxy it goes
+	// through, so the settings that shape only the transports the server makes had no effect with it, silently: a mock
+	// that asked to verify its target answered from a target nothing verified. They fail instead, naming the setting
+	// and the transport. A setting left out, such as the defaults of a mock file, still works with any transport.
+	target := okTarget(t)
+	transport := newCountingTransport(t)
+
+	t.Run("a proxy reply", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			setup *ConfigBuilder
+			reply *ProxyReply
+		}{
+			{name: "SSLVerify with the server's", setup: Setup().Transport(transport), reply: From(target.URL).SSLVerify(true)},
+			{name: "SkipSSLVerify with its own", setup: Setup(), reply: From(target.URL).Transport(transport).SkipSSLVerify()},
+			{name: "SSLVerify(false) with its own", setup: Setup(), reply: From(target.URL).SSLVerify(false).Transport(transport)},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				m := MustNew(tt.setup.Silent())
+				t.Cleanup(m.Close)
+
+				_, err := m.Mock(Getf("/p").Reply(tt.reply))
+				require.ErrorContains(t, err, "reply_proxy: ssl_verify has no effect with a transport of the caller's")
+			})
+		}
+	})
+
+	t.Run("a proxy reply of a mock file", func(t *testing.T) {
+		m := MustNew(Setup().Silent().Transport(transport))
+		t.Cleanup(m.Close)
+
+		_, err := m.Mock(FromBytes([]byte("request: {path: /p}\nproxy: {target: '"+target.URL+"', ssl_verify: true}\n"), "yaml"))
+		require.ErrorContains(t, err, "ssl_verify has no effect with a transport of the caller's")
+
+		_, err = m.Mock(FromBytes([]byte("request: {path: /p}\nproxy: {target: '"+target.URL+"'}\n"), "yaml"))
+		require.NoError(t, err, "a mock that leaves ssl_verify out builds")
+	})
+
+	t.Run("the forward proxy", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			setup *ConfigBuilder
+			want  string
+		}{
+			{
+				name:  "Via with the server's",
+				setup: Setup().Transport(transport).Proxy(&ProxyConfig{Via: "http://127.0.0.1:1"}),
+				want:  "proxy: via has no effect with a transport of the caller's",
+			},
+			{
+				name:  "SSLVerify with its own",
+				setup: Setup().Proxy(&ProxyConfig{SSLVerify: true, Transport: transport}),
+				want:  "proxy: ssl_verify has no effect with a transport of the caller's",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				_, err := New(tt.setup.Silent())
+				require.ErrorContains(t, err, tt.want)
+			})
+		}
+	})
+
+	t.Run("the recording", func(t *testing.T) {
+		m := mockedServer(t, Setup().Silent().Transport(transport))
+
+		err := m.StartRecording(RecordDir(t.TempDir()), RecordTarget(target.URL), RecordSkipSSLVerify(true))
+		require.ErrorContains(t, err, "recorder: skip_ssl_verify has no effect with a transport of the caller's")
+
+		require.NoError(t, m.StartRecording(RecordDir(t.TempDir()), RecordTarget(target.URL)), "verifying is the default")
+	})
+}
+
+func TestTransport_ADescribedProxyReplyLoadsBackWithTheCallersTransport(t *testing.T) {
+	// A description that always held ssl_verify, the reply's default included, loaded back as a mock that set it, which
+	// a server with a transport of the caller's refuses: it is described only when it was set.
+	target := okTarget(t)
+
+	m := MustNew(Setup().Silent().Transport(newCountingTransport(t)))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scope := m.MustMock(Getf("/p").Reply(From(target.URL)))
+	proxy := scope.Mocks()[0].Describe().Props.(map[string]any)["proxy"].(map[string]any)
+	require.NotContains(t, proxy, "ssl_verify")
+
+	verified, err := AnyMethod().Reply(From(target.URL).SSLVerify(true)).Build(MustNew(Setup().Silent()))
+	require.NoError(t, err)
+	require.Equal(t, true, verified.Describe().Props.(map[string]any)["proxy"].(map[string]any)["ssl_verify"])
+}
+
+func TestForwardProxy_AViaThatIsNoHTTPURLFailsNew(t *testing.T) {
+	// A Via that didn't parse panicked in New, and one of another scheme failed only when a request went through it.
+	for _, via := range []string{"http://[::1", "socks5://127.0.0.1:1080", "proxy:3128"} {
+		t.Run(via, func(t *testing.T) {
+			_, err := New(Setup().Silent().Proxy(&ProxyConfig{Via: via}))
+			require.ErrorContains(t, err, "expected an absolute http or https URL, such as http://proxy:3128")
+		})
+	}
+}
+
+func TestForwardProxy_PassesCompressedBodiesAsTheyCome(t *testing.T) {
+	// The transport the forward proxy made asked for gzip on behalf of a client that didn't, and unzipped the answer:
+	// the host saw an Accept-Encoding the client never sent, and the client got another body than the host's, without
+	// its Content-Encoding. A body the host compressed goes on as it came.
+	compressed := []byte{0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x01, 0x00, 0x00, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+
+	accepted := make(chan []string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		accepted <- r.Header.Values("Accept-Encoding")
+
+		w.Header().Set("Content-Encoding", "gzip")
+		_, _ = w.Write(compressed)
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent().Proxy())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	proxyURL, err := url.Parse(m.URL())
+	require.NoError(t, err)
+
+	// The client asks for no encoding, and doesn't unzip what it gets.
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL), DisableCompression: true}
+	t.Cleanup(transport.CloseIdleConnections)
+
+	res, err := (&http.Client{Transport: transport}).Get(target.URL + "/x")
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	require.Empty(t, <-accepted, "the host got an Accept-Encoding the client didn't send")
+	require.Equal(t, "gzip", res.Header.Get("Content-Encoding"))
+	require.Equal(t, compressed, body)
+}
