@@ -115,13 +115,28 @@ func TestAgentDocs_ClaudeSkillsLinksAgentSkills(t *testing.T) {
 	require.Equal(t, "../"+_agentSkillsDir, filepath.ToSlash(target))
 }
 
+func TestAgentDocs_ClaudeImportsTheRules(t *testing.T) {
+	// Claude Code reads CLAUDE.md, which imports the rule files the other agents read directly. A lost or broken import
+	// drops those rules from Claude Code without a word.
+	var imports []string
+	for line := range strings.SplitSeq(agentDoc(t, "CLAUDE.md"), "\n") {
+		if path, ok := strings.CutPrefix(strings.TrimSpace(line), "@"); ok {
+			imports = append(imports, path)
+			require.FileExists(t, path)
+		}
+	}
+
+	require.Subset(t, imports, []string{"AGENTS.md", "CONVENTIONS.md"})
+}
+
+// agentDoc returns file with LF line ends, which a Windows checkout turns into CRLF.
 func agentDoc(t *testing.T, file string) string {
 	t.Helper()
 
 	b, err := os.ReadFile(file)
 	require.NoError(t, err)
 
-	return string(b)
+	return strings.ReplaceAll(string(b), "\r\n", "\n")
 }
 
 // agentDocTable returns the body of the table in the section of AGENTS.md headed "## <section>": the trimmed cells of

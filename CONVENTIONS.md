@@ -16,7 +16,7 @@ Run the checks in this order and fix failures before calling the task done. Firs
   3. `make lint`
   4. `make test`
 
-One file that is not `*.md` means the task is not docs only. CI runs the same checks: `.github/workflows/ci.yml`.
+One file that is not `*.md` means the task is not docs only. CI (`.github/workflows/ci.yml`) runs the checks above on every change but one to `*.md` files outside the agent docs.
 
 ## Code shape
 
@@ -30,11 +30,11 @@ One file that is not `*.md` means the task is not docs only. CI runs the same ch
 
 ## Errors
 
-- Messages are lowercase and start with their scope, e.g. `store: …`, `config: …`.
+- Messages are lowercase [lint] and start with their scope, e.g. `store: …`, `config: …`.
 - Wrap with `fmt.Errorf("<context>: %w", err)`. Older `"\n%w"` and `". %w"` forms stay until their line changes.
 - Sentinels are exported `Err…` vars built with `errors.New`, grouped in `var (…)`. Unexported error vars are `err…`, never `_`-prefixed [lint].
 - Static messages use `errors.New`, not `fmt.Errorf` [lint].
-- Match error types with `errors.AsType[T](err)`. Never `errors.As`.
+- Match error types with `errors.AsType[T](err)`. Never `errors.As` [lint].
 - Panic only in `Must*` functions, constructors given programmer-error input, and schema declaration bugs. Return errors everywhere else.
 - errcheck is off on purpose.
 

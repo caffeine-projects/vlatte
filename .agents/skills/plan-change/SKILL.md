@@ -46,11 +46,11 @@ The request: "Add a reply that serves its replies in turn and starts over after 
 Wrong: a new `cycleReplier` with its own mutex and counter, copied from `sequenceReplier`; its tests in `reply_test.go`; a mock file key nobody planned; a concurrency test that sleeps. Right:
 
 - **Context:** open question: what wins when `OnSequenceEnded` is also set. Ask, recommending one.
-- **Reuse:** `SequentialReply` (`mockhttp/reply_seq.go`) already serves replies in order, one per request, with a place in the sequence for each mock; starting over is one more case of its `next`. `newReplier`, `owned` and `closeAll` (`mockhttp/reply.go`) already make and release the replies it holds. No new replier type.
+- **Reuse:** `SequentialReply` (`mockhttp/reply_seq.go`) already serves replies in order, one per request, with a place in the sequence for each mock; starting over is one more case of `sequenceReplier.next`. `newReplier`, `owned` and `closeAll` (`mockhttp/reply.go`) already make and release the replies it holds. No new replier type.
 - **Files and tests:**
   - `mockhttp/reply_seq.go` gains the option; `mockhttp/reply_seq_test.go` holds its tests.
   - Mock files declare sequences under `response_sequence` (`mockhttp/mock_schema.go`), `SequentialReply.Describe` writes the same key, and the admin store refuses a mock whose description does not load back (`mockhttp/admin_store.go`): the option goes in both, with tests in `mockhttp/mock_schema_test.go` and `mockhttp/admin_store_test.go`.
-  - The README section "Mock files" shows the new key.
+  - The JSON schema of mock files, `mockhttp/schema/http.schema.json`, gains the key; `mockhttp/schema_test.go` already fails until it does.
 - **Rules:**
   - CONVENTIONS § Tests: "A test of one file sits beside it, named after it";
   - CONVENTIONS § Time in tests: "That something happened: the code under test signals a channel or a `sync.WaitGroup`, and the test waits on it";

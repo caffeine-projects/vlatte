@@ -9,7 +9,7 @@ Bias: caution over speed on non-trivial work. Use judgment on trivial tasks.
 
 ## Agent docs
 
-- `CONVENTIONS.md`, this file and the first-party skills change only when the maintainer explicitly asks for that change. A request to fix or build code is not one. When your work makes a rule wrong or shows one missing, stop and propose the exact wording; do not write it.
+- `CONVENTIONS.md`, `CLAUDE.md`, this file, `.agents/README.md` and the first-party skills change only when the maintainer explicitly asks for that change. A request to fix or build code is not one. When your work makes a rule wrong or shows one missing, stop and propose the exact wording; do not write it.
 - They hold rules: what an agent would get wrong without being told. Not design descriptions or history. A rule `make lint` checks is marked `[lint]`.
 - A rule names a pattern, never a list of files or symbols that grows with the code.
 
@@ -41,7 +41,7 @@ Before you create or edit a file of a kind below, re-read its section, even if y
 When they disagree: `CONVENTIONS.md` > `use-modern-go` > `uber-go-style` > nearby code. This applies to lines you write or change. Flag older code; do not rewrite it.
 If `use-modern-go` cannot run (e.g. no network on first install), say so and continue; `make lint` still flags old idioms.
 
-`plan-change`, `review-change` and the `uber-go-style` index are written here; `use-modern-go` and the `uber-go-style` rule files are vendored. Do not edit a vendored file. Record an unavoidable patch in [`.agents/README.md`](.agents/README.md).
+`plan-change`, `review-change` and the `uber-go-style` index are written here; `use-modern-go` and the `uber-go-style` rule files are vendored. Do not edit a vendored file. For an unavoidable patch, follow "Third-party skills" in [`.agents/README.md`](.agents/README.md).
 
 ## Generated documentation
 
@@ -85,7 +85,7 @@ Test: would a senior engineer say this is overcomplicated? If yes, simplify.
 
 Touch only what you must. Clean up only your own mess.
 Do not “improve” adjacent code, comments, or formatting.
-Do not refactor what is not broken. Match existing style; for Go idioms see Rule 11.
+Do not refactor what is not broken. Match existing style unless it contradicts these files (Rule 11).
 
 ## Rule 4 — Goal-Driven Execution
 
