@@ -10,11 +10,19 @@ on:
       - '**'
       - '!docs/**'
       - '!**.md'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'CONVENTIONS.md'
+      - '.agents/**'
   pull_request:
     paths:
       - '**'
       - '!docs/**'
       - '!**.md'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'CONVENTIONS.md'
+      - '.agents/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
