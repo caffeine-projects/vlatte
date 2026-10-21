@@ -636,23 +636,9 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		return nil, fmt.Errorf("mock: %w", b.err)
 	}
 
-	// A path parameter reads the segment its template names, so it needs the template, whichever was set first.
-	t := b.spec.pathTemplate
-	params := make([]*expectation, 0, len(b.pathParams))
-	for _, p := range b.pathParams {
-		switch {
-		case t == nil:
-			return nil, fmt.Errorf("mock: path param %q: the mock has no path template: set one with URLPathTemplate", p.name)
-		case !t.has(p.name):
-			return nil, fmt.Errorf("mock: path param %q: path template %q has no such parameter", p.name, t.text)
-		}
-
-		params = append(params, &expectation{
-			Target:   int(matchingScopePathParam),
-			Key:      p.name,
-			Selector: selectPathParam(t, p.name),
-			Matcher:  p.matcher,
-		})
+	params, err := b.pathParamExpectations()
+	if err != nil {
+		return nil, fmt.Errorf("mock: %w", err)
 	}
 
 	// Times counts here as it did when it was a matcher of the builder: a mock limited only by Times, such as a mock
@@ -711,6 +697,30 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 	desc, _ := descriptor.IsSelfDescriptive(b.reply)
 
 	return &Mock{spec: spec, reply: reply, replyDesc: desc, closer: owned(b.reply, reply), enabled: b.enabled}, nil
+}
+
+// pathParamExpectations returns the matchers of the path parameters. A path parameter reads the segment its template
+// names, so it needs the template, whichever was set first.
+func (b *Builder) pathParamExpectations() ([]*expectation, error) {
+	t := b.spec.pathTemplate
+	params := make([]*expectation, 0, len(b.pathParams))
+	for _, p := range b.pathParams {
+		switch {
+		case t == nil:
+			return nil, fmt.Errorf("path param %q: the mock has no path template: set one with URLPathTemplate", p.name)
+		case !t.has(p.name):
+			return nil, fmt.Errorf("path param %q: path template %q has no such parameter", p.name, t.text)
+		}
+
+		params = append(params, &expectation{
+			Target:   int(matchingScopePathParam),
+			Key:      p.name,
+			Selector: selectPathParam(t, p.name),
+			Matcher:  p.matcher,
+		})
+	}
+
+	return params, nil
 }
 
 func (b *Builder) appendExpectation(e *vlatte.Eval[*selectorInput]) {

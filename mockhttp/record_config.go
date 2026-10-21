@@ -185,6 +185,12 @@ func (r *RecordConfig) check() error {
 		return fmt.Errorf("recorder: filter: %w", r.Filter.err)
 	}
 
+	if r.Filter != nil {
+		if _, err := r.Filter.pathParamExpectations(); err != nil {
+			return fmt.Errorf("recorder: filter: %w", err)
+		}
+	}
+
 	var err error
 	if r.Methods, err = trimmed("method", r.Methods); err != nil {
 		return err
@@ -243,7 +249,10 @@ func (r *RecordConfig) filter() vlatte.Evaluators[*Mock, *selectorInput] {
 
 	evals := b.spec.expectations
 	if r.Filter != nil {
+		// check made sure the path params have their template.
+		params, _ := r.Filter.pathParamExpectations()
 		evals = append(evals, r.Filter.spec.expectations...)
+		evals = append(evals, params...)
 	}
 
 	return evals
