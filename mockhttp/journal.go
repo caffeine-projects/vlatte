@@ -17,6 +17,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
 var (
@@ -255,6 +256,25 @@ func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (vlatte.Entr
 	return func(ctx context.Context, e *vlatte.JournalEntry) (bool, error) {
 		return app.matchEntry(ctx, e, evals)
 	}, nil
+}
+
+// adminRequestPattern returns the filter of the request part of a mock file, v, the request key of a query of the
+// admin API: its keys are a mock file's, and it matches as a mock does. An empty one matches every request.
+func (app *Server) adminRequestPattern(v config.Value) (vlatte.EntryFilter, error) {
+	def := newMockDef()
+	doc := config.Value{Origin: v.Origin, Any: map[string]any{"request": v.Any}}
+
+	problems := config.ProblemsOf(doc, _mockSchema.Decode(&def, doc))
+	problems = append(problems, def.request.conflicts(v.Origin)...)
+
+	if len(problems) > 0 {
+		return nil, &config.Error{Problems: problems}
+	}
+
+	b := Request()
+	def.request.apply(b)
+
+	return app.RequestPattern(b)
 }
 
 // matchEntry tells whether evals match the request of e, an entry of the server's journal, as it came. The request

@@ -1,4 +1,4 @@
-openapi: 3.1.0
+openapi: 3.2.0
 info:
   title: vlatte admin API
   version: "1"
@@ -36,6 +36,10 @@ tags:
     description: |
       Recording a service as mock files: the server sends the requests the recording takes to its target, and writes
       the answers as mock files, which it serves once the recording stops. HTTP mock servers only.
+  - name: Journal
+    description: |
+      The journal of the requests the server served, of every outcome, newest first: a changelog in files, indexed,
+      kept across restarts when the server names a directory. A mock server without a journal answers `501`.
 paths:
   /health:
     get:
@@ -373,9 +377,10 @@ paths:
       operationId: reset
       summary: Reset the server between tests
       description: |
-        Removes the mocks added through this API, loads the mock files again, saved ones included, and starts every
-        scenario over. Mocks added in code stay as they are. A server without mock files, or scenarios, skips them.
-        A persistent store loads again too: its mocks come back as it holds them, and nothing is deleted from it.
+        Removes the mocks added through this API, loads the mock files again, saved ones included, starts every
+        scenario over, and clears the journal. Mocks added in code stay as they are. A server without mock files,
+        scenarios, or a journal, skips them. A persistent store loads again too: its mocks come back as it holds them,
+        and nothing is deleted from it.
       responses:
         "204":
           description: The server is back to how it started.
@@ -391,7 +396,7 @@ paths:
       description: |
         Streams what the mock server serves, as it happens, as Server-Sent Events: each event's type is the `type` of
         its data, a JSON `Event`. Nothing is kept: a client gets the events that come while it listens, and one that
-        falls behind misses some. It is no journal of requests.
+        falls behind misses some. The journal, `/requests`, keeps the requests.
       responses:
         "200":
           description: The stream of events.
@@ -485,6 +490,95 @@ paths:
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "413": { $ref: "#/components/responses/BodyTooLarge" }
         "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /requests:
+    get:
+      tags: [Journal]
+      operationId: listRequests
+      summary: List requests
+      description: The newest requests the server served, a page at a time, and how many it holds.
+      parameters:
+        - name: limit
+          in: query
+          description: The most requests to answer. `0` answers the count only.
+          schema: { type: integer, minimum: 0, maximum: 1000, default: 100 }
+        - name: before
+          in: query
+          description: Answer the requests before this one, the `next` of a page.
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: The requests.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestList" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/RequestList" }
+        "400": { $ref: "#/components/responses/InvalidParameter" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    query:
+      tags: [Journal]
+      operationId: queryRequests
+      summary: Find and count requests
+      description: |
+        The requests the query of the body selects, newest first, and their `count`: verify a request came by its
+        count, as `limit: 0` answers alone. Each key narrows the requests; an empty body selects them all. The
+        indexed keys, `kind`, `outcome`, `mock_id`, `method`, `path` and `status`, select without reading the
+        requests. `request` is the request part of a mock of the server's protocol, as a mock file writes it: it
+        matches as a mock does, reading each request the other keys leave, so send `method` and `path` as keys of
+        their own too. Only HTTP mock servers take `request`.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RequestQuery" }
+          application/yaml:
+            schema: { $ref: "#/components/schemas/RequestQuery" }
+      responses:
+        "200":
+          description: The requests.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestList" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/RequestList" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    delete:
+      tags: [Journal]
+      operationId: clearRequests
+      summary: Clear the journal
+      responses:
+        "204":
+          description: The journal holds no request.
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /requests/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The id of the request, as the `VLatte-Request-Id` header of its answer names it.
+        schema: { type: string }
+    get:
+      tags: [Journal]
+      operationId: getRequest
+      summary: Get a request
+      responses:
+        "200":
+          description: The request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JournalEntry" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/JournalEntry" }
+        "404": { $ref: "#/components/responses/RequestNotFound" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
         "501": { $ref: "#/components/responses/NotSupported" }
 components:
   requestBodies:
@@ -750,6 +844,165 @@ components:
           items: { type: string }
           description: What the recording couldn't record, and why it isn't served.
       additionalProperties: false
+    JournalEntry:
+      type: object
+      description: A request the server served, as its journal keeps it.
+      required: [seq, id, time, kind, outcome]
+      properties:
+        seq:
+          type: integer
+          minimum: 1
+          description: Orders the requests of the journal, a later one has a greater one.
+        id:
+          type: string
+          description: The id of the request.
+        time:
+          type: string
+          format: date-time
+          description: When the request came.
+        kind:
+          type: string
+          description: The protocol of the request, such as `http` or `grpc`.
+        outcome:
+          type: string
+          enum: [matched, unmatched, proxied, failed, abandoned]
+          description: |
+            `matched`: a mock answered. `unmatched`: no mock matched. `proxied`: another server answered. `failed`:
+            serving it failed. `abandoned`: its client left before its answer.
+        mock_id:
+          type: string
+          description: The mock that matched, if one did.
+        method:
+          type: string
+          description: The method, such as `GET`. gRPC calls have none.
+        path:
+          type: string
+          description: The path, or the full method of a gRPC call.
+        target:
+          type: string
+          description: What the request asked for in full, such as its URL.
+        status:
+          type: integer
+          description: The status of the answer, such as an HTTP status or a gRPC code.
+        elapsed_ns:
+          type: integer
+          description: How long serving it took, in nanoseconds.
+        header:
+          type: object
+          description: The headers, or the metadata, by name. Those the server redacts are redacted.
+          additionalProperties:
+            type: array
+            items: { type: string }
+        body:
+          type: string
+          description: The body, when it is text.
+        body_base64:
+          type: string
+          contentEncoding: base64
+          description: The body, when it isn't text.
+        body_truncated:
+          type: boolean
+          description: The body kept is less than the request's.
+        message:
+          type: string
+          description: What went wrong, for a request that failed or was abandoned.
+        near_misses:
+          type: array
+          description: The mocks that came closest to matching a request no mock matched, the closest first.
+          items: { $ref: "#/components/schemas/NearMiss" }
+      additionalProperties: false
+    NearMiss:
+      type: object
+      required: [mock_id, passed, total]
+      properties:
+        mock_id:
+          type: string
+        name:
+          type: string
+        passed:
+          type: integer
+          description: How many parts of the request the mock checked matched.
+        total:
+          type: integer
+          description: How many parts it checked.
+        failed:
+          type: array
+          items: { type: string }
+          description: The parts that differ, such as `header Accept`.
+        skipped:
+          type: array
+          items: { type: string }
+          description: The parts it didn't check, which keep state, such as `times` or `scenario`.
+      additionalProperties: false
+    RequestList:
+      type: object
+      required: [count, requests]
+      properties:
+        count:
+          type: integer
+          description: How many requests the query selects, whatever the page.
+        requests:
+          type: array
+          description: A page of them, the newest first.
+          items: { $ref: "#/components/schemas/JournalEntry" }
+        next:
+          type: integer
+          description: The `before` of the next page, when there is one.
+      additionalProperties: false
+    Matcher:
+      description: |
+        Text, which matches equal text, a number or a bool, which matches an equal value, or a matcher list, as mock
+        files write them, such as `["glob", "/users/*"]`.
+      anyOf:
+        - type: string
+        - type: number
+        - type: boolean
+        - type: array
+    RequestQuery:
+      type: object
+      properties:
+        kind:
+          type: string
+          description: The protocol, such as `http`.
+        outcome:
+          type: string
+          enum: [matched, unmatched, proxied, failed, abandoned]
+        mock_id: { $ref: "#/components/schemas/Matcher" }
+        method: { $ref: "#/components/schemas/Matcher" }
+        path: { $ref: "#/components/schemas/Matcher" }
+        target: { $ref: "#/components/schemas/Matcher" }
+        status: { $ref: "#/components/schemas/Matcher" }
+        body:
+          $ref: "#/components/schemas/Matcher"
+          description: Matches the body as text. A JSON path matcher reads it as JSON.
+        header:
+          type: object
+          description: Headers, or metadata, by name, in any case. A request without the header has it empty.
+          additionalProperties: { $ref: "#/components/schemas/Matcher" }
+        since:
+          type: string
+          format: date-time
+          description: The earliest time of the requests.
+        until:
+          type: string
+          format: date-time
+          description: The time the requests came before.
+        request:
+          type: object
+          description: |
+            The request part of a mock of the server's protocol, as a mock file writes it, such as
+            `{"query": {"page": "2"}}`.
+        limit:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          default: 100
+          description: The most requests to answer. `0` answers the count only.
+        before:
+          type: integer
+          minimum: 0
+          description: Answer the requests before this one, the `next` of a page.
+      additionalProperties: false
     Problem:
       type: object
       description: An RFC 9457 problem document. Its type is `about:blank`, so `title` is the status's phrase.
@@ -780,6 +1033,8 @@ components:
             - recording_active
             - not_recording
             - closing
+            - request_not_found
+            - invalid_parameter
         detail:
           type: string
           description: What went wrong in this request.
@@ -896,6 +1151,20 @@ components:
           schema: { $ref: "#/components/schemas/Problem" }
     NotRecording:
       description: "`not_recording`: no recording runs."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    RequestNotFound:
+      description: "`request_not_found`: the journal holds no request of the id."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    InvalidParameter:
+      description: "`invalid_parameter`: a query parameter has a value the route doesn't take."
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }

@@ -198,7 +198,7 @@ func (q *JournalQuery) check() error {
 	switch {
 	case q.Limit < 0:
 		return fmt.Errorf("journal: limit must be 0 or more, not %d", q.Limit)
-	case q.Outcome != "" && !knownOutcome(q.Outcome):
+	case q.Outcome != "" && !q.Outcome.Valid():
 		return fmt.Errorf("journal: outcome %q is not one of matched, unmatched, proxied, failed or abandoned", q.Outcome)
 	}
 
@@ -211,7 +211,8 @@ func (q *JournalQuery) check() error {
 	return nil
 }
 
-func knownOutcome(o Outcome) bool {
+// Valid tells whether o is one of the outcomes a journal knows.
+func (o Outcome) Valid() bool {
 	switch o {
 	case OutcomeMatched, OutcomeUnmatched, OutcomeProxied, OutcomeFailed, OutcomeAbandoned:
 		return true

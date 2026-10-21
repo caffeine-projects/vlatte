@@ -665,7 +665,7 @@ func TestAdmin_ResetsTheServer(t *testing.T) {
 
 func TestAdmin_StreamsWhatTheServerServes(t *testing.T) {
 	// A client follows the requests the mocks answer, and those no mock matched, as they come: to see why a test's
-	// request missed, without a journal of requests.
+	// request missed, without polling the journal.
 	m := adminServer(t, Setup())
 	m.MustMock(Getf("/hello").ID("hello").Reply(OK()))
 

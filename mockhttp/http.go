@@ -276,7 +276,7 @@ func New(config ...Option) (*Server, error) {
 			adminMocks = app.adminStore
 		}
 
-		app.admin = admin.MustNew(
+		options := []admin.Option{
 			admin.Addr(conf.Admin.Addr),
 			admin.Info(string(Kind), func() string { return app.URL() }),
 			admin.Logger(app.logger),
@@ -288,7 +288,10 @@ func New(config ...Option) (*Server, error) {
 			admin.Scenarios(app.scenarioStore),
 			admin.Events(events),
 			admin.Logs(logs),
-		)
+			admin.Journal(journal, app.adminRequestPattern),
+		}
+
+		app.admin = admin.MustNew(options...)
 	}
 
 	server, err := factory.NewBackend(BackendConfig{App: app, Handler: handler})

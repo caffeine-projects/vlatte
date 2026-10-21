@@ -28,7 +28,7 @@ func TestOpenAPI(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, fromYAML, fromJSON)
-	require.Equal(t, "3.1.0", fromJSON.(map[string]any)["openapi"])
+	require.Equal(t, "3.2.0", fromJSON.(map[string]any)["openapi"], "3.2 documents the QUERY method of /requests")
 }
 
 func TestDocs(t *testing.T) {

@@ -30,6 +30,8 @@ const (
 	_codeRecordingActive      = "recording_active"
 	_codeNotRecording         = "not_recording"
 	_codeClosing              = "closing"
+	_codeRequestNotFound      = "request_not_found"
+	_codeInvalidParameter     = "invalid_parameter"
 )
 
 // problemError is an error a handler answers with, as an RFC 9457 problem document.
@@ -179,13 +181,13 @@ func Closing() http.Handler {
 	})
 }
 
-// CrossOriginDenied answers a browser's cross-site request that would change the server, which
+// CrossOriginDenied answers a browser's cross-site request that would change the server, or query its journal, which
 // http.CrossOriginProtection refused.
 func CrossOriginDenied() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, &problemError{
 			status: http.StatusForbidden, code: _codeCrossOrigin,
-			detail: "a cross-origin request can't change the admin API's state",
+			detail: "a cross-origin request can't change the admin API's state, or query it",
 		})
 	})
 }

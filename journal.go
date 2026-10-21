@@ -218,7 +218,8 @@ func (j *Journal) Count(ctx context.Context, q JournalQuery, filters ...EntryFil
 }
 
 // Clear removes every entry. Sequence numbers go on from the last one given while the journal is open: a journal
-// opened on an empty directory starts them over.
+// opened on an empty directory starts them over. A file it can't remove yet, such as one a query holds open where the
+// system keeps it, it logs and removes later: its entries are gone either way.
 func (j *Journal) Clear() error {
 	if j == nil {
 		return ErrNoJournal
@@ -240,16 +241,14 @@ func (j *Journal) Clear() error {
 
 	j.active.Close()
 
-	var (
-		errs []error
-		left []int
-	)
-
 	// A segment that stays on disk would come back with the next journal of the directory: the journal keeps it,
 	// and the next trim removes it.
+	var left []int
+
 	for _, n := range j.files {
 		if err := removeSegment(j.dir, n); err != nil {
-			errs = append(errs, fmt.Errorf("journal: %w", err))
+			j.logger.Warn().Err(err).Msg("journal: removing a segment")
+
 			left = append(left, n)
 		}
 	}
@@ -259,7 +258,7 @@ func (j *Journal) Clear() error {
 	j.rows = nil
 	j.index = newJournalIndex()
 
-	return errors.Join(errs...)
+	return nil
 }
 
 // Close closes the journal, and removes its directory if it is a temporary one. Closing it again does nothing.

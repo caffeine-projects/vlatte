@@ -3,7 +3,9 @@ package mockhttp
 import (
 	"bytes"
 	"context"
+	json "encoding/json/v2"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -293,4 +295,55 @@ func TestJournal_SaysWhenItKeepsLessThanTheBody(t *testing.T) {
 	whole := only(t, m, vlatte.JournalQuery{Path: match.Equal("/whole")})
 	require.Equal(t, "ab", string(whole.Body))
 	require.False(t, whole.BodyTruncated)
+}
+
+func TestJournal_TheAdminAPIQueriesWithTheRequestPartOfMockFiles(t *testing.T) {
+	// A client of any language verifies through the admin API with what its mock files write: the request part of
+	// a mock, as it matches. The answer's VLatte-Request-Id names the request to get back.
+	m := MustNew(Setup().Silent().Admin("").Journal(""))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	res, _ := do(t, http.MethodPost, m.URL("/orders?page=2"), http.Header{"Content-Type": {"application/json"}}, []byte(`{"id": 7}`))
+	id := res.Header.Get(vlatte.RequestIDHeader)
+	require.NotEmpty(t, id)
+
+	_, _ = do(t, http.MethodPost, m.URL("/orders?page=3"), nil, nil)
+
+	query := func(body string) (*http.Response, map[string]any) {
+		t.Helper()
+
+		req, err := http.NewRequestWithContext(t.Context(), "QUERY", m.AdminURL()+"/requests", strings.NewReader(body))
+		require.NoError(t, err)
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+
+		defer res.Body.Close()
+
+		var doc map[string]any
+		require.NoError(t, json.UnmarshalRead(res.Body, &doc))
+
+		return res, doc
+	}
+
+	res, doc := query(`{"limit": 0, "request": {"method": "POST", "query": {"page": "2"}, "body": ["jsonpath", "$.id", ["equal", 7]]}}`)
+	require.Equal(t, http.StatusOK, res.StatusCode, doc)
+	require.Equal(t, float64(1), doc["count"])
+
+	res, doc = query(`{"request": {"url": "/orders", "path": "/orders"}}`)
+	require.Equal(t, http.StatusBadRequest, res.StatusCode, doc)
+	require.Equal(t, "invalid_body", doc["code"])
+	require.Contains(t, fmt.Sprint(doc["problems"]), "request.path")
+
+	got, err := http.Get(m.AdminURL() + "/requests/" + id)
+	require.NoError(t, err)
+
+	defer got.Body.Close()
+
+	var entry map[string]any
+	require.NoError(t, json.UnmarshalRead(got.Body, &entry))
+	require.Equal(t, http.StatusOK, got.StatusCode, entry)
+	require.Equal(t, m.URL("/orders?page=2"), entry["target"])
+	require.Equal(t, `{"id": 7}`, entry["body"])
 }

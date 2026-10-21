@@ -57,6 +57,10 @@ var _routes = []struct {
 	{pattern: "POST /reset"},
 	{pattern: "GET /events", lacking: "stream its events"},
 	{pattern: "GET /logs", lacking: "stream its logs"},
+	{pattern: "GET /requests", lacking: "keep a journal of requests"},
+	{pattern: "QUERY /requests", lacking: "keep a journal of requests"},
+	{pattern: "DELETE /requests", lacking: "keep a journal of requests"},
+	{pattern: "GET /requests/{id}", lacking: "keep a journal of requests"},
 }
 
 var errNoMocks = errors.New("admin: no mock store: pass the Mocks option")
@@ -70,7 +74,8 @@ type Server struct {
 	routes    map[string]http.Handler
 	files     handler.Files
 	scenarios handler.Scenarios
-	reset     func(files handler.Files, scenarios handler.Scenarios) http.Handler
+	journal   handler.Journal
+	reset     func(files handler.Files, scenarios handler.Scenarios, journal handler.Journal) http.Handler
 	streams   []func() // end the streams of Server-Sent Events routes
 	handler   http.Handler
 
@@ -112,8 +117,8 @@ func Mocks[M vlatte.Mock](store vlatte.Store[M], build vlatte.MockBuilder[M]) Op
 		s.routes["PATCH /mocks/{id}"] = handler.UpdateMock(store)
 		s.routes["DELETE /mocks/{id}"] = handler.RemoveMock(store)
 
-		s.reset = func(files handler.Files, scenarios handler.Scenarios) http.Handler {
-			return handler.Reset(store, files, scenarios)
+		s.reset = func(files handler.Files, scenarios handler.Scenarios, journal handler.Journal) http.Handler {
+			return handler.Reset(store, files, scenarios, journal)
 		}
 
 		if build != nil {
@@ -160,6 +165,24 @@ func Events(events *handler.Events) Option {
 	}
 }
 
+// Journal sets the journal of the requests the mock server serves, which GET, QUERY and DELETE /requests read and
+// clear, and POST /reset clears. pattern makes the filter of the request part of a mock of the server's protocol, of
+// a query; nil, for a protocol that has none, takes no request part. A nil journal sets none.
+func Journal(journal handler.Journal, pattern handler.RequestPattern) Option {
+	return func(s *Server) {
+		// A server without a journal passes its nil one: the routes answer 501, and reset skips it.
+		if j, ok := journal.(*vlatte.Journal); journal == nil || ok && j == nil {
+			return
+		}
+
+		s.journal = journal
+		s.routes["GET /requests"] = handler.ListRequests(journal)
+		s.routes["QUERY /requests"] = handler.QueryRequests(journal, pattern)
+		s.routes["DELETE /requests"] = handler.ClearRequests(journal)
+		s.routes["GET /requests/{id}"] = handler.GetRequest(journal)
+	}
+}
+
 // Logs sets the log lines of the mock server, which GET /logs streams. Nil streams none, such as for a server that
 // logs through a logger it was given.
 func Logs(logs *handler.Logs) Option {
@@ -192,7 +215,7 @@ func New(options ...Option) (*Server, error) {
 	s.routes["GET /openapi"] = handler.OpenAPI()
 	s.routes["GET /docs"] = handler.Docs()
 	s.routes["GET /recorder"] = handler.RecorderPage()
-	s.routes["POST /reset"] = s.reset(s.files, s.scenarios)
+	s.routes["POST /reset"] = s.reset(s.files, s.scenarios, s.journal)
 
 	mux := http.NewServeMux()
 	for _, route := range _routes {
