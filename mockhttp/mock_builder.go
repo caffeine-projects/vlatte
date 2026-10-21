@@ -237,8 +237,8 @@ func (b *Builder) URL(m vlatte.Matcher) *Builder {
 	return b
 }
 
-// URLf sets a matcher to the http.Request url.URL that compares the http.Request url.URL with the given value.
-// The expected value will be formatted with the provided format specifier.
+// URLf matches the full URL, such as "http://127.0.0.1:8080/items?page=2", with a glob, formatted with the format
+// specifier: only "*" is special, it crosses "/", and case counts.
 func (b *Builder) URLf(format string, a ...any) *Builder {
 	return b.URL(match.GlobMatch(fmt.Sprintf(format, a...)))
 }
@@ -254,8 +254,8 @@ func (b *Builder) URLPath(m vlatte.Matcher) *Builder {
 	return b
 }
 
-// URLPathf sets a Matcher that compares the http.Request url.URL path with the given value, ignoring the case.
-// The expected value will be formatted with the provided format specifier.
+// URLPathf matches the path with a glob, formatted with the format specifier: only "*" is special, it crosses "/",
+// and case counts, so "/users/*" matches "/users/7/orders", and not "/Users/7".
 func (b *Builder) URLPathf(format string, a ...any) *Builder {
 	return b.URLPath(match.GlobMatch(fmt.Sprintf(format, a...)))
 }
