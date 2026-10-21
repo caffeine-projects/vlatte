@@ -139,6 +139,14 @@ func TestMock_ADescribedMockLoadsBackAndMatchesTheSame(t *testing.T) {
 			wantNoMatch: []string{"/items", "/items?page=2&x=1", "/items?page=3"},
 		},
 		{
+			// Several methods match ignoring case, as one does, and keep doing so loaded back.
+			name:        "methods",
+			give:        Request().Method("get", "PUT").URLPathf("/x"),
+			wantKeys:    []string{"method", "path"},
+			wantMatch:   []string{"/x"},
+			wantNoMatch: []string{"/y"},
+		},
+		{
 			// A path template describes as written, and its parameters by name.
 			name:        "path template",
 			give:        Request().URLPathTemplate("/users/{id}").PathParam("id", match.Equal("7")),

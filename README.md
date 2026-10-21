@@ -108,7 +108,7 @@ response:
 
 No other reading happens: `[equal, 10]` doesn't match `010`. The [match package docs](match/doc.go) state the rule.
 
-**Keys.** Keys are kept as written, so a query name like `userId` matches `userId` only. Header names ignore case; cookie names don't.
+**Keys.** Keys are kept as written, so a query name like `userId` matches `userId` only. Header names and methods ignore case, so `method: get, post` matches `POST`; cookie names don't.
 
 **URLs.** `url: /items?page=2` matches that path and query exactly: the same parameters, in any order, each with its values in order, so `/items` and `/items?page=2&sort=asc` don't match. Path segments compare decoded, so `%41` is `A`, but `%2F` isn't `/`. A relative `url` with a `*` in its path is an error: match a path with a glob through `path: /items/*`, and parameters one by one through `query`. For a literal `*`, write `%2A`. An absolute `url`, such as `https://api.example.com/items`, compares as text ignoring case. In Go, `RequestURI("/items?page=2")` matches as a relative `url` does.
 

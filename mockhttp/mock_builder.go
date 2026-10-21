@@ -190,7 +190,7 @@ func (b *Builder) ClientIP(m vlatte.Matcher) *Builder {
 	return b
 }
 
-// Method sets the HTTP request method to be matched.
+// Method sets the HTTP request methods to match, ignoring case: one, or several, of which the request has one.
 func (b *Builder) Method(methods ...string) *Builder {
 	var m vlatte.Matcher
 	var key string
@@ -201,7 +201,12 @@ func (b *Builder) Method(methods ...string) *Builder {
 		m = match.EqualIgnoreCase(methods[0])
 		key = methods[0]
 	} else {
-		m = match.IsIn(methods)
+		matchers := make([]vlatte.Matcher, len(methods))
+		for i, method := range methods {
+			matchers[i] = match.EqualIgnoreCase(method)
+		}
+
+		m = match.Any(matchers...)
 	}
 
 	b.appendExpectation(&expectation{
