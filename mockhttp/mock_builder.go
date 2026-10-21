@@ -743,14 +743,10 @@ func selectURLPath(_ context.Context, r *selectorInput) any     { return r.URL.P
 func selectURLFragment(_ context.Context, r *selectorInput) any { return r.URL.Fragment }
 func selectEscapedPath(_ context.Context, r *selectorInput) any { return r.URL.EscapedPath() }
 
-// selectPathParam selects the parameter name of t from the path, or nil when the path doesn't fit t.
+// selectPathParam selects the parameter name of t from the path. Its matcher runs after t's, so the path fits t.
 func selectPathParam(t *pathTemplate, name string) vlatte.Selector[*selectorInput] {
 	return func(_ context.Context, r *selectorInput) any {
-		params, ok := t.params(r.URL.EscapedPath())
-		if !ok {
-			return nil
-		}
-
+		params, _ := t.params(r.URL.EscapedPath())
 		return params[name]
 	}
 }

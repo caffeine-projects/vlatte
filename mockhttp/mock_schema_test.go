@@ -99,6 +99,8 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"path_template naming a parameter twice", "request: {path_template: '/a/{id}/b/{id}'}\n", []want{{config.CodeInvalidValue, "request.path_template", `parameter "id" is named twice`, ""}}},
 		{"path_template as a list", "request: {path_template: [glob, '/users/*']}\n", []want{{config.CodeInvalidValue, "request.path_template", "request.path_template must be a string, not a list", ""}}},
 		{"path_params without path_template", "request: {path: /x, path_params: {id: '7'}}\n", []want{{config.CodeMissingValue, "request.path_params", "request.path_params is set without request.path_template", "such as /users/{id}"}}},
+		// The template's problem is the one: path_params can't name its parameters until it parses.
+		{"path_params of a path_template that doesn't parse", "request: {path_template: 'users/{id}', path_params: {id: '7'}}\n", []want{{config.CodeInvalidValue, "request.path_template", "a path template starts with /", ""}}},
 		{"path_params as a list", "request: {path: /x, path_params: [a]}\n", []want{{config.CodeInvalidValue, "request.path_params", "must be an object, not a list", ""}}},
 		// As the editor schema says it.
 		{"empty path_params without path_template", "request: {path: /x, path_params: {}}\n", []want{{config.CodeMissingValue, "request.path_params", "is set without request.path_template", ""}}},
@@ -130,8 +132,11 @@ func TestMockSchema_Rules(t *testing.T) {
 		// The host matched has no port, so text with one would never match.
 		{"host with a port", "request: {host: 'api.local:8080'}\n", []want{{config.CodeInvalidValue, "request.host", `request.host="api.local:8080" has a port or brackets`, `write the address alone: "api.local"`}}},
 		{"IPv6 host in brackets", "request: {host: '[::1]'}\n", []want{{config.CodeInvalidValue, "request.host", `request.host="[::1]" has a port or brackets`, `write the address alone: "::1"`}}},
+		{"host as a number", "request: {host: 5}\n", []want{{config.CodeInvalidValue, "request.host", "must be a string or a matcher list", `write it in quotes: "5"`}}},
+		{"client_ip matcher that doesn't build", "request: {client_ip: [nope]}\n", []want{{config.CodeInvalidValue, "request.client_ip", "unknown matcher", ""}}},
 		{"client_ip with a port", "request: {client_ip: '127.0.0.1:8080'}\n", []want{{config.CodeInvalidValue, "request.client_ip", `request.client_ip="127.0.0.1:8080" has a port or brackets`, `write the address alone: "127.0.0.1"`}}},
 		{"cookie value as a number", "request: {cookie: {session: 1}}\n", []want{{config.CodeInvalidValue, "request.cookie.session", "must be a string or a matcher list", `write it in quotes: "1"`}}},
+		{"headers matcher that doesn't build", "request: {headers: {X-Id: [gt]}}\n", []want{{config.CodeInvalidValue, "request.headers.X-Id", "gt", ""}}},
 		{"forms value as text", "request: {forms: {tag: a}}\n", []want{{config.CodeInvalidValue, "request.forms.tag", "is text, which never equals a list of values", `[contains, "a"]`}}},
 		{"form_file as a list", "request: {form_file: [a]}\n", []want{{config.CodeInvalidValue, "request.form_file", "must be an object, not a list", ""}}},
 		{"file pattern as text", "request: {form_file: {avatar: a.png}}\n", []want{{config.CodeInvalidValue, "request.form_file.avatar", "must be an object, not a string", ""}}},
