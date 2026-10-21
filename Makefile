@@ -65,7 +65,8 @@ tidy: ## tidy go.mod and go.sum
 	@go mod tidy
 
 .PHONY: fmt
-fmt: ## format code with gofumpt
+fmt: ## format code with gci and gofumpt
+	@GOTOOLCHAIN=go$$(go list -m -f '{{.GoVersion}}') go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) fmt
 	@go tool gofumpt -w .
 
 .PHONY: fix

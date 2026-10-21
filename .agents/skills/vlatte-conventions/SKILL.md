@@ -15,7 +15,7 @@ These override `use-modern-go` and `uber-go-style`. Apply them to code you write
 - File names are snake_case, e.g. `reply_random.go`.
 - Keep one short receiver name per type [lint]: `app` (`Server`, `Base`), `cb` (`ConfigBuilder`), `b` (builders), `m` (`Mock`).
 - Constructors are `New(...Option) (*T, error)` plus a panicking `MustNew`. The root package uses `New<Type>`. A `Must` prefix means the function panics.
-- Imports come in three groups separated by blank lines: standard library, third-party, then `github.com/caffeine-projects/vlatte/...`. Uber uses two.
+- Imports come in three groups separated by blank lines [lint]: standard library, third-party, then `github.com/caffeine-projects/vlatte/...`. Uber uses two.
 
 ## Errors
 
