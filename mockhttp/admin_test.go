@@ -149,6 +149,52 @@ func TestAdmin_AMockReadBackPostsBack(t *testing.T) {
 	require.Equal(t, "hello from a file", string(body))
 }
 
+func TestAdmin_ProxyMocksReadBackAsTheyWere(t *testing.T) {
+	// A proxy mock, with every option of its proxy, and a proxy_all mock, which has no request, read from the admin API
+	// and put back, describe the same, and still proxy as they did.
+	headers := make(chan http.Header, 2)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers <- r.Header.Clone()
+		_, _ = w.Write([]byte("from the target " + r.URL.Path))
+	}))
+	t.Cleanup(target.Close)
+
+	m := adminServer(t, Setup())
+
+	for _, doc := range []string{
+		`{"id": "proxied", "request": {"method": "GET", "path": "/api/*"}, "proxy": {"target": "` + target.URL + `",
+			"request_header": {"X-Added": "yes"}, "header": {"X-Answer": "set"}, "remove_request_headers": ["X-Gone"],
+			"trim_prefix": "/api", "timeout": "5s", "x_forwarded": true, "preserve_host": true}}`,
+		`{"id": "rest", "proxy_all": {"target": "` + target.URL + `"}}`,
+	} {
+		res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil, []byte(doc))
+		require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
+	}
+
+	for _, id := range []string{"proxied", "rest"} {
+		_, desc := do(t, http.MethodGet, m.AdminURL()+"/mocks/"+id, nil, nil)
+
+		res, body := do(t, http.MethodPut, m.AdminURL()+"/mocks/"+id, nil, desc)
+		require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+
+		_, again := do(t, http.MethodGet, m.AdminURL()+"/mocks/"+id, nil, nil)
+		require.JSONEq(t, string(desc), string(again), id)
+	}
+
+	res, body := do(t, http.MethodGet, m.URL("/api/users"), http.Header{"X-Gone": {"1"}}, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "from the target /users", string(body))
+	require.Equal(t, "set", res.Header.Get("X-Answer"))
+
+	got := <-headers
+	require.Equal(t, "yes", got.Get("X-Added"))
+	require.Empty(t, got.Get("X-Gone"))
+	require.NotEmpty(t, got.Get("X-Forwarded-For"))
+
+	_, body = do(t, http.MethodGet, m.URL("/other"), nil, nil)
+	require.Equal(t, "from the target /other", string(body), "proxy_all answers what no mock matches")
+}
+
 func TestAdmin_AReloadReplacesAdminMocksWithTheFilesOnes(t *testing.T) {
 	// A mock file whose mock has the id of a mock added through the admin API takes its place on reload, as one
 	// written by a save does: the reload doesn't fail over the id.
