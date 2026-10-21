@@ -21,9 +21,9 @@ type callKey struct{}
 type scope int
 
 const (
-	scopeMethod scope = iota + 1
-	scopeHeader
-	scopeField
+	_scopeMethod scope = iota + 1
+	_scopeHeader
+	_scopeField
 )
 
 // openJournal opens the journal conf configures, nil when it configures none.
@@ -173,11 +173,11 @@ func (c *journalCall) end(ctx context.Context, err error) {
 // describeEval names the part of a call e checks, such as "header x-team".
 func describeEval[T any](e *vlatte.Eval[T]) string {
 	switch scope(e.Target) {
-	case scopeMethod:
+	case _scopeMethod:
 		return "method"
-	case scopeHeader:
+	case _scopeHeader:
 		return "header " + e.Key
-	case scopeField:
+	case _scopeField:
 		return "field " + e.Key
 	}
 

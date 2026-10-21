@@ -201,7 +201,7 @@ func ClearRequests(journal Journal) http.Handler {
 }
 
 // answerRequests answers the requests q, with filters, selects, a page of limit of them, or their count only for 0.
-// A matcher of the query that panics is the query's problem.
+// A matcher of the query that fails, or panics, is the query's problem.
 func answerRequests(w http.ResponseWriter, r *http.Request, journal Journal, q vlatte.JournalQuery, filters []vlatte.EntryFilter, limit int) {
 	var (
 		list requestList
@@ -224,7 +224,7 @@ func answerRequests(w http.ResponseWriter, r *http.Request, journal Journal, q v
 	case r.Context().Err() != nil:
 		// The client left: no one reads the answer.
 		return
-	case errors.Is(err, vlatte.ErrMatchPanicked):
+	case errors.Is(err, vlatte.ErrMatching), errors.Is(err, vlatte.ErrMatchPanicked):
 		err = &problemError{status: http.StatusBadRequest, code: _codeInvalidBody, detail: "the query: " + err.Error()}
 		fallthrough
 	default:

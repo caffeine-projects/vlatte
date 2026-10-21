@@ -221,7 +221,8 @@ func (o Outcome) Valid() bool {
 	return false
 }
 
-// matchValue runs m on v. A matcher that panics fails the query instead of the server.
+// matchValue runs m on v. A matcher that fails, or panics, fails the query, with ErrMatching or ErrMatchPanicked,
+// instead of the server.
 func matchValue(ctx context.Context, m Matcher, v any) (ok bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -231,7 +232,7 @@ func matchValue(ctx context.Context, m Matcher, v any) (ok bool, err error) {
 
 	ok, err = m.Match(NewMatcherArg(ctx, NewExplanation(), v))
 	if err != nil {
-		return false, fmt.Errorf("journal: %s: %w", m.Name(), err)
+		return false, fmt.Errorf("journal: %w: %s: %w", ErrMatching, m.Name(), err)
 	}
 
 	return ok, nil

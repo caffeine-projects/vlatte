@@ -13,6 +13,7 @@ import (
 	"slices"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rs/zerolog"
 
@@ -142,9 +143,9 @@ func newJournalCall(app *Server, r *RequestValues) *journalCall {
 	}
 }
 
-// journalBody returns what the journal keeps of the body of r: what the server read of it, up to the journal's limit,
-// and whether that is less than the body. A server that reads no body, under NoBodyParsing, or of a GET or a HEAD,
-// keeps none of one.
+// journalBody returns what the journal takes of the body of r, and whether the server read less than the body. A
+// server that reads no body, under NoBodyParsing, or of a GET or a HEAD, has none of one. The journal clips the body
+// to its limit, between characters: it takes a character's bytes past the limit.
 func journalBody(conf *Config, r *RequestValues) ([]byte, bool) {
 	req, body := r.RawRequest, r.RawBodyBytes
 
@@ -153,8 +154,8 @@ func journalBody(conf *Config, r *RequestValues) ([]byte, bool) {
 		conf.MaxBodyParsingLimit > 0 && int64(len(body)) >= conf.MaxBodyParsingLimit ||
 		req.ContentLength > int64(len(body))
 
-	if limit := conf.Journal.MaxBodySize; limit > 0 && int64(len(body)) > limit {
-		body, truncated = vlatte.ClipBody(body, int(limit)), true
+	if limit := conf.Journal.MaxBodySize; limit > 0 {
+		body = body[:min(int64(len(body)), limit+utf8.UTFMax)]
 	}
 
 	return bytes.Clone(body), truncated
@@ -294,7 +295,12 @@ func (app *Server) matchEntry(ctx context.Context, e *vlatte.JournalEntry, evals
 		defer req.MultipartForm.RemoveAll()
 	}
 
-	return evals.Eval(ctx, vlatte.NewExplanation(), newSelectorInput(req, rv, false))
+	ok, err := evals.Eval(ctx, vlatte.NewExplanation(), newSelectorInput(req, rv, false))
+	if err != nil {
+		return false, fmt.Errorf("http: %w: entry %d: %w", vlatte.ErrMatching, e.Seq, err)
+	}
+
+	return ok, nil
 }
 
 // entryRequest rebuilds the request of e, in origin form: the server reads its URL as its own, as it read the

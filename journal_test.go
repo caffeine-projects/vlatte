@@ -713,3 +713,22 @@ func TestJournal_ARelativeDirectoryStaysWhereItOpened(t *testing.T) {
 	require.NoError(t, j.Append(entry("b")))
 	require.Equal(t, []string{"b", "a"}, find(t, j, vlatte.JournalQuery{Body: match.Empty()}))
 }
+
+func TestJournal_ItsDirectoryIgnoresItsFiles(t *testing.T) {
+	// The journal holds requests, their secrets included, in a directory such as testdata/_journal: a project that
+	// commits its testdata leaves them out. A .gitignore of the user's own stays as it is.
+	dir := t.TempDir()
+	newJournal(t, vlatte.JournalOptions{Dir: dir})
+
+	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	require.NoError(t, err)
+	require.Contains(t, string(data), "\n*\n")
+
+	mine := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(mine, ".gitignore"), []byte("!keep\n"), 0o644))
+	newJournal(t, vlatte.JournalOptions{Dir: mine})
+
+	data, err = os.ReadFile(filepath.Join(mine, ".gitignore"))
+	require.NoError(t, err)
+	require.Equal(t, "!keep\n", string(data))
+}

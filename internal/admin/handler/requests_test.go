@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"testing"
@@ -176,6 +177,12 @@ func TestQueryRequests_TheRequestPartIsTheProtocolsPattern(t *testing.T) {
 			return nil, config.Invalid(v, "a bad request part", "")
 		}
 
+		if v.Any == "failing" {
+			return func(context.Context, *vlatte.JournalEntry) (bool, error) {
+				return false, fmt.Errorf("%w: a matcher that fails", vlatte.ErrMatching)
+			}, nil
+		}
+
 		return func(_ context.Context, e *vlatte.JournalEntry) (bool, error) { return e.Path == "/b", nil }, nil
 	}
 
@@ -187,6 +194,10 @@ func TestQueryRequests_TheRequestPartIsTheProtocolsPattern(t *testing.T) {
 	require.Equal(t, "request", got.Key)
 
 	res, body = send(t, request{method: "QUERY", url: url + "/requests", body: `{"request": "bad"}`})
+	problem(t, res, body, http.StatusBadRequest, "invalid_body")
+
+	// A matcher that fails on a request is the query's problem, not the server's.
+	res, body = send(t, request{method: "QUERY", url: url + "/requests", body: `{"request": "failing"}`})
 	problem(t, res, body, http.StatusBadRequest, "invalid_body")
 }
 

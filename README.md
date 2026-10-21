@@ -623,6 +623,8 @@ gRPC servers keep the same journal with `mockgrpc.Setup().Journal(dir)`: a call'
 - A body the journal cut, or that the server didn't read, has `body_truncated`: the server reads no body of a `GET` or `HEAD`, nor under `no_body_parsing`, nor past `MaxBodyParsingLimit`.
 - The headers the server redacts in its logs (`RedactHeader`) are redacted in the journal. gRPC metadata is kept as it came.
 - Requests the server answers before its mocks get them, such as CORS preflights, or that a middleware answers, aren't journaled.
+- A reply that writes its own answer, as `Handler` does, journals status `0`, and a failure the status of failures, `error_status_code`, even when a reply sent another before failing.
+- A named directory gets a `.gitignore` of its files, so committing `testdata` leaves the journal out.
 
 The settings `journal` (`--journal`, `VLATTE_JOURNAL`), `journal.dir`, `journal.max_entries` and `journal.max_body_size` configure it.
 
@@ -784,7 +786,7 @@ curl -X POST -H 'Content-Type: application/json' \
 
 The command keeps the mocks its admin API adds in `testdata/_admin`, as [persistent admin mocks](#persistent-admin-mocks), so the next run serves them: `--admin-dir` moves them, and `--admin-dir=""` keeps them in memory.
 
-It keeps a [journal](#request-journal) of the requests it serves in `testdata/_journal`, across restarts, which the admin API queries: `--journal-dir` moves it, `--journal-dir=""` keeps it in a temporary directory, and `--journal=false` turns it off. Two commands can't share a journal directory: give each its own. The journal holds the requests it got, secrets included: keep `testdata/_journal` out of version control, as with a `.gitignore` line.
+It keeps a [journal](#request-journal) of the requests it serves in `testdata/_journal`, across restarts, which the admin API queries: `--journal-dir` moves it, `--journal-dir=""` keeps it in a temporary directory, and `--journal=false` turns it off. Two commands can't share a journal directory: give each its own. The journal holds the requests it got, secrets included: its directory ignores its files in git.
 
 ## Development
 

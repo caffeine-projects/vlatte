@@ -22,6 +22,9 @@ const (
 	DefaultJournalMaxBodySize = 1 << 20
 
 	_journalLock = "journal.lock"
+
+	// _journalGitignore keeps the files of a journal's directory out of git.
+	_journalGitignore = "# vlatte's request journal: the requests a mock server served, their secrets included.\n*\n"
 )
 
 var (
@@ -312,9 +315,14 @@ func (j *Journal) append(e *JournalEntry, line []byte, encodeErr error) (*sealed
 	if _, err := j.active.Write(data); err != nil {
 		err = j.failed(fmt.Errorf("journal: %w", err))
 
-		// A line cut short would run into the next one: the segment loses it, or the journal starts a new one.
+		// A line cut short would run into the next one: the segment loses it, or the journal starts a new one. When
+		// neither works, the next line starts after it, as the file has it, on a line of its own if it can.
 		if j.active.Truncate(j.size) != nil {
-			return j.rotate(), err
+			if sealed := j.rotate(); sealed != nil {
+				return sealed, err
+			}
+
+			j.resync()
 		}
 
 		return nil, err
@@ -373,6 +381,7 @@ func (j *Journal) openDir() error {
 		}
 
 		j.dir = dir
+		j.ignoreDir()
 	}
 
 	lock, err := lockDir(j.dir)
@@ -384,6 +393,28 @@ func (j *Journal) openDir() error {
 	j.lock = lock
 
 	return nil
+}
+
+// ignoreDir writes a .gitignore of every file into the journal's directory, unless it has one: the journal holds
+// requests, their secrets included, which a project that commits its testdata must not commit.
+func (j *Journal) ignoreDir() {
+	path := filepath.Join(j.dir, ".gitignore")
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if errors.Is(err, fs.ErrExist) {
+		return
+	}
+
+	if err == nil {
+		_, err = f.WriteString(_journalGitignore)
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+	}
+
+	if err != nil {
+		j.logger.Warn().Err(err).Msg("journal: writing the .gitignore of its directory")
+	}
 }
 
 // load reads the entries of the segments on disk, from their sidecars where they describe them, drops those past
@@ -546,6 +577,18 @@ func (j *Journal) rotate() *sealedSegment {
 	j.index.compact(j.first())
 
 	return sealed
+}
+
+// resync takes the size of the active segment from its file, after a write that left part of a line in it, ended by
+// a new line when the file takes one: later rows have the offsets their lines have.
+func (j *Journal) resync() {
+	if _, err := j.active.Write([]byte{'\n'}); err != nil {
+		j.logger.Warn().Err(err).Msg("journal: ending a line cut short")
+	}
+
+	if info, err := j.active.Stat(); err == nil {
+		j.size = info.Size()
+	}
 }
 
 // first returns the sequence number of the oldest entry the journal holds, or the next one it gives.

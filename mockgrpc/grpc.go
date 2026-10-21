@@ -85,6 +85,14 @@ func New(config ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: %w", err)
 	}
 
+	// A server that fails to build closes its journal: a temporary one goes.
+	built := false
+	defer func() {
+		if !built {
+			journal.Close()
+		}
+	}()
+
 	in := &interceptors{app: app}
 	unary := []grpc.UnaryServerInterceptor{in.recoverUnary, in.UnaryInterceptor}
 	stream := []grpc.StreamServerInterceptor{in.recoverStream, in.StreamInterceptor}
@@ -125,6 +133,8 @@ func New(config ...Option) (*Server, error) {
 			admin.Journal(journal, nil),
 		)
 	}
+
+	built = true
 
 	return app, nil
 }
