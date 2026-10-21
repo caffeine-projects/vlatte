@@ -21,12 +21,14 @@ type UnaryBuilder struct {
 	reply        UnaryReplierFactory
 }
 
+// UnaryMethod starts a mock of a method, named by whole segments of its full method "/pkg.Service/Method": "Method",
+// "Service/Method", "pkg.Service/Method" or the full method. A part of a name, such as "Meth", matches none.
 func UnaryMethod(method string) *UnaryBuilder {
 	b := &UnaryBuilder{}
 	b.expectations = append(
 		b.expectations,
 		&vlatte.Eval[*UnaryValueSelectorIn]{
-			Matcher:  match.Contain(method),
+			Matcher:  methodName(method),
 			Selector: unarySelectMethod,
 		},
 	)
