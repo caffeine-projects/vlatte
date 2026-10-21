@@ -623,11 +623,17 @@ func locals(r *RequestValues, provided map[string]any, params *viewdata.Paramete
 		body = viewdata.NewBody(r.RawRequest.Method, r.RawBodyBytes, r.ParsedBodyData)
 	}
 
+	var pathParams map[string]string
+	if r.Mock != nil && r.Mock.spec.pathTemplate != nil {
+		pathParams, _ = r.Mock.spec.pathTemplate.params(r.URL.EscapedPath())
+	}
+
 	req := &viewdata.Request{
 		ID:              r.ReqID,
 		Method:          r.RawRequest.Method,
 		URL:             r.URL,
 		URLPathSegments: r.URLPathSegments,
+		PathParams:      pathParams,
 		Header:          r.RawRequest.Header.Clone(),
 		Cookies:         cookies,
 		Body:            body,

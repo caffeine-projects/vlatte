@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"uuid"
@@ -39,7 +41,8 @@ type Builder struct {
 	scenario              string
 	scenarioNewState      string
 	scenarioRequiredState string
-	err                   error // the first error of a method that can't return one, such as FormFile's or ID's
+	pathParams            []namedMatcher // set with PathParam; Build makes them matchers, once it knows the template
+	err                   error          // the first error of a method that can't return one, such as FormFile's or ID's
 }
 
 // Request creates a new empty Builder.
@@ -163,6 +166,31 @@ func (b *Builder) SchemeMatches(m vlatte.Matcher) *Builder {
 	return b
 }
 
+// Host defines a matcher for the host the request names, without its port: its Host header, or the host of a request
+// in absolute form, as a forward proxy gets, such as "api.local". An IPv6 address comes without brackets. Host names
+// ignore case: compare them with match.EqualIgnoreCase.
+func (b *Builder) Host(m vlatte.Matcher) *Builder {
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeHost),
+		Selector: selectHost,
+		Matcher:  m,
+	})
+
+	return b
+}
+
+// ClientIP defines a matcher for the address of the client, as http.Request.RemoteAddr has it, without its port.
+// Behind a proxy it is the proxy's: X-Forwarded-For is a header, which Header matches.
+func (b *Builder) ClientIP(m vlatte.Matcher) *Builder {
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeClientIP),
+		Selector: selectClientIP,
+		Matcher:  m,
+	})
+
+	return b
+}
+
 // Method sets the HTTP request method to be matched.
 func (b *Builder) Method(methods ...string) *Builder {
 	var m vlatte.Matcher
@@ -233,6 +261,51 @@ func (b *Builder) URLPathf(format string, a ...any) *Builder {
 	return b.URLPath(match.GlobMatch(fmt.Sprintf(format, a...)))
 }
 
+// RequestURI matches the path and query of the request exactly, as match.RequestURI does and a mock file's relative
+// url, such as "/items?page=2", does: the same path, and the same parameters, in any order, each with its values in
+// order. It panics when uri isn't a URL.
+func (b *Builder) RequestURI(uri string) *Builder {
+	return b.URL(match.RequestURI(uri))
+}
+
+// URLPathTemplate matches the path with a template, such as /users/{id}/orders/{orderId}: the path has as many
+// segments, each literal one the same once decoded, and a non-empty one for each parameter. A parameter is a whole
+// segment, and %7B writes a literal brace. PathParam matches a parameter, and templates read them as
+// .Request.PathParams. A mock has one path template, which other matchers of the URL or the path add to.
+func (b *Builder) URLPathTemplate(template string) *Builder {
+	t, err := parsePathTemplate(template)
+	if err == nil && b.spec.pathTemplate != nil {
+		err = fmt.Errorf("the mock has path template %q already", b.spec.pathTemplate.text)
+	}
+
+	if err != nil {
+		if b.err == nil {
+			b.err = fmt.Errorf("path template %q: %w", template, err)
+		}
+
+		return b
+	}
+
+	b.spec.pathTemplate = t
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeURLPathTemplate),
+		Key:      template,
+		Selector: selectEscapedPath,
+		Matcher:  t,
+	})
+
+	return b
+}
+
+// PathParam defines a matcher for a parameter of the path template, by its name: the segment it takes, decoded. With
+// URLPathTemplate("/users/{id}"), PathParam("id", match.Equal("7")) matches /users/7. Build fails when the mock has
+// no path template, or its template has no such parameter.
+func (b *Builder) PathParam(name string, m vlatte.Matcher) *Builder {
+	b.pathParams = append(b.pathParams, namedMatcher{name: name, matcher: m})
+
+	return b
+}
+
 // URLFragment defines a matcher to be applied to the URL fragment: the decoded text after a "#" in the request
 // target. An escaped "%23" is part of the path. Go's http.Client doesn't send fragments: a request with URL.Opaque
 // set to the path and fragment, such as "/users#top", does.
@@ -267,6 +340,57 @@ func (b *Builder) Header(name string, m vlatte.Matcher) *Builder {
 // Headerf adds a matcher to a specific http.Header key.
 func (b *Builder) Headerf(name string, value string, a ...any) *Builder {
 	return b.Header(name, match.StrictEqual(fmt.Sprintf(value, a...)))
+}
+
+// Headers defines a matcher for every value of a header: a []string in the order the request sent them, empty when
+// the request has no such header. Header reads only the first value. Values a request sends in one line, such as
+// "a, b", are one value.
+func (b *Builder) Headers(name string, m vlatte.Matcher) *Builder {
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeHeaders),
+		Key:      name,
+		Selector: selectHeaders(name),
+		Matcher:  m,
+	})
+
+	return b
+}
+
+// Cookie defines a matcher for the value of a cookie, by its name, which keeps its case. It reads the first cookie
+// with that name, as http.Request.Cookie does, and nil when the request has none, which no text matches.
+func (b *Builder) Cookie(name string, m vlatte.Matcher) *Builder {
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeCookie),
+		Key:      name,
+		Selector: selectCookie(name),
+		Matcher:  m,
+	})
+
+	return b
+}
+
+// BasicAuth matches the credentials of the request's Basic Authorization header, exactly.
+func (b *Builder) BasicAuth(username, password string) *Builder {
+	return b.BasicAuthMatches(match.StrictEqual(username), match.StrictEqual(password))
+}
+
+// BasicAuthMatches defines matchers for the username and the password of the request's Basic Authorization header,
+// as http.Request.BasicAuth reads them. Without Basic credentials, both are nil.
+func (b *Builder) BasicAuthMatches(username, password vlatte.Matcher) *Builder {
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeBasicAuth),
+		Key:      "username",
+		Selector: selectBasicAuthUsername,
+		Matcher:  username,
+	})
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeBasicAuth),
+		Key:      "password",
+		Selector: selectBasicAuthPassword,
+		Matcher:  password,
+	})
+
+	return b
 }
 
 // ContentType matches the Content-Type of the request, ignoring case. A value without parameters matches the media
@@ -351,6 +475,19 @@ func (b *Builder) FormField(name string, m vlatte.Matcher) *Builder {
 // FormFieldf defines a matcher for a specific form field by its key.
 func (b *Builder) FormFieldf(field string, value string, a ...any) *Builder {
 	return b.FormField(field, match.StrictEqual(fmt.Sprintf(value, a...)))
+}
+
+// FormFields defines a matcher for every value of a field of the body's form: a []string, empty when the form has no
+// such field. Like FormField, it never reads the query.
+func (b *Builder) FormFields(name string, m vlatte.Matcher) *Builder {
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeFormFields),
+		Key:      name,
+		Selector: selectFormFields(name),
+		Matcher:  m,
+	})
+
+	return b
 }
 
 // Times sets how many requests each mock built from the builder serves: 1 or more. Each mock counts its own, so a mock
@@ -494,6 +631,25 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		return nil, fmt.Errorf("mock: %w", b.err)
 	}
 
+	// A path parameter reads the segment its template names, so it needs the template, whichever was set first.
+	t := b.spec.pathTemplate
+	params := make([]*expectation, 0, len(b.pathParams))
+	for _, p := range b.pathParams {
+		switch {
+		case t == nil:
+			return nil, fmt.Errorf("mock: path param %q: the mock has no path template: set one with URLPathTemplate", p.name)
+		case !t.has(p.name):
+			return nil, fmt.Errorf("mock: path param %q: path template %q has no such parameter", p.name, t.text)
+		}
+
+		params = append(params, &expectation{
+			Target:   int(matchingScopePathParam),
+			Key:      p.name,
+			Selector: selectPathParam(t, p.name),
+			Matcher:  p.matcher,
+		})
+	}
+
 	// Times counts here as it did when it was a matcher of the builder: a mock limited only by Times, such as a mock
 	// file with repeat and no request keys, still builds.
 	if len(b.spec.expectations) == 0 && b.times == 0 {
@@ -508,6 +664,8 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 	if spec.id == "" {
 		spec.id = uuid.New().String()
 	}
+
+	spec.expectations = append(spec.expectations, params...)
 
 	// The matchers that keep state for one mock are made for it: Times counts the requests of this mock only, and the
 	// scenario runs in the store of app.
@@ -584,8 +742,75 @@ func selectMethod(_ context.Context, r *selectorInput) any      { return r.RawRe
 func selectURL(_ context.Context, r *selectorInput) any         { return r.URL.String() }
 func selectURLPath(_ context.Context, r *selectorInput) any     { return r.URL.Path }
 func selectURLFragment(_ context.Context, r *selectorInput) any { return r.URL.Fragment }
+func selectEscapedPath(_ context.Context, r *selectorInput) any { return r.URL.EscapedPath() }
+
+// selectPathParam selects the parameter name of t from the path, or nil when the path doesn't fit t.
+func selectPathParam(t *pathTemplate, name string) vlatte.Selector[*selectorInput] {
+	return func(_ context.Context, r *selectorInput) any {
+		params, ok := t.params(r.URL.EscapedPath())
+		if !ok {
+			return nil
+		}
+
+		return params[name]
+	}
+}
+
 func selectHeader(k string) vlatte.Selector[*selectorInput] {
 	return func(_ context.Context, r *selectorInput) any { return r.RawRequest.Header.Get(k) }
+}
+
+func selectHeaders(k string) vlatte.Selector[*selectorInput] {
+	return func(_ context.Context, r *selectorInput) any { return r.RawRequest.Header.Values(k) }
+}
+
+// selectCookie selects the value of the first cookie named name, or nil without one, as selectBasicAuthUsername does.
+func selectCookie(name string) vlatte.Selector[*selectorInput] {
+	return func(_ context.Context, r *selectorInput) any {
+		c, err := r.RawRequest.Cookie(name)
+		if err != nil {
+			return nil
+		}
+
+		return c.Value
+	}
+}
+
+// selectBasicAuthUsername selects the username of Basic credentials, or nil without them, so that no text matches a
+// request without credentials.
+func selectBasicAuthUsername(_ context.Context, r *selectorInput) any {
+	username, _, ok := r.RawRequest.BasicAuth()
+	if !ok {
+		return nil
+	}
+
+	return username
+}
+
+// selectBasicAuthPassword selects the password of Basic credentials, or nil without them, as selectBasicAuthUsername.
+func selectBasicAuthPassword(_ context.Context, r *selectorInput) any {
+	_, password, ok := r.RawRequest.BasicAuth()
+	if !ok {
+		return nil
+	}
+
+	return password
+}
+
+// selectHost selects the host name of the request, without its port and an IPv6 address's brackets.
+func selectHost(_ context.Context, r *selectorInput) any {
+	return (&url.URL{Host: r.RawRequest.Host}).Hostname()
+}
+
+// selectClientIP selects the address of the client without its port, or RemoteAddr as it is when it has none, as a
+// middleware may set it.
+func selectClientIP(_ context.Context, r *selectorInput) any {
+	ip, _, err := net.SplitHostPort(r.RawRequest.RemoteAddr)
+	if err != nil {
+		return r.RawRequest.RemoteAddr
+	}
+
+	return ip
 }
 
 func selectQuery(k string) vlatte.Selector[*selectorInput] {
@@ -600,5 +825,10 @@ func selectBody(_ context.Context, r *selectorInput) any { return r.ParsedBody }
 // selectFormField selects a field of a form body. Only the body counts: http.Request.Form also holds the query.
 func selectFormField(k string) vlatte.Selector[*selectorInput] {
 	return func(_ context.Context, r *selectorInput) any { return r.Form.Get(k) }
+}
+
+// selectFormFields selects every value of a field of a form body, as selectFormField does its first.
+func selectFormFields(k string) vlatte.Selector[*selectorInput] {
+	return func(_ context.Context, r *selectorInput) any { return r.Form[k] }
 }
 func selectRawRequest(_ context.Context, r *selectorInput) any { return r.RawRequest }

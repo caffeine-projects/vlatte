@@ -42,11 +42,20 @@ var _mockFaults = []mockFault{
 		delete(r, "path")
 		r["url_match"] = "("
 	}},
+	{"path_params", config.CodeMissingValue, "request.path_params", func(doc map[string]any) {
+		sub(doc, "request")["path_params"] = map[string]any{"id": "7"}
+	}},
 	{"query", config.CodeInvalidValue, "request.query.page", func(doc map[string]any) {
 		sub(doc, "request")["query"] = map[string]any{"page": int64(1)}
 	}},
 	{"matcher", config.CodeInvalidValue, "request.header.X-Id", func(doc map[string]any) {
 		sub(doc, "request")["header"] = map[string]any{"X-Id": []any{"gt"}}
+	}},
+	{"headers", config.CodeInvalidValue, "request.headers.X-Tag", func(doc map[string]any) {
+		sub(doc, "request")["headers"] = map[string]any{"X-Tag": "a"}
+	}},
+	{"basic_auth", config.CodeMissingValue, "request.basic_auth.password", func(doc map[string]any) {
+		sub(doc, "request")["basic_auth"] = map[string]any{"username": "u"}
 	}},
 	{"delay", config.CodeInvalidValue, "delay", func(doc map[string]any) { doc["delay"] = int64(-5) }},
 	{"repeat", config.CodeInvalidValue, "repeat", func(doc map[string]any) { doc["repeat"] = int64(0) }},

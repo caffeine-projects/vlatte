@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -274,6 +275,74 @@ func TestMatchers_URLFragmentFromAMockFile(t *testing.T) {
 
 	res, body = getTarget(t, m, "/test#other")
 	require.Equal(t, mockhttp.StatusNoMatch, res.StatusCode, string(body))
+}
+
+func TestMatchers_RequestParts(t *testing.T) {
+	// Each key of the file matches its part of the request: the whole request matches, and one that misses any part
+	// doesn't. The client's address is always this machine's, so client_ip only has to match.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.FromFile("testdata/matchers/09_request_parts.yaml"))
+
+	send := func(t *testing.T, form string, spoil func(r *http.Request)) int {
+		req, err := http.NewRequest(http.MethodPost, m.URL("/login"), strings.NewReader(form))
+		require.NoError(t, err)
+
+		req.Host = "api.local:8080"
+		req.Header.Set(mockhttp.HeaderContentType, mockhttp.MIMEFormURLEncoded)
+		req.Header["Accept"] = []string{"application/json", "text/html"}
+		req.AddCookie(&http.Cookie{Name: "session", Value: "abc"})
+		req.SetBasicAuth("jeff", "s3cret")
+		spoil(req)
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		return res.StatusCode
+	}
+
+	require.Equal(t, http.StatusNoContent, send(t, "tag=a&tag=b", func(*http.Request) {}))
+
+	tests := []struct {
+		name  string
+		form  string
+		spoil func(r *http.Request)
+	}{
+		{"host", "tag=a&tag=b", func(r *http.Request) { r.Host = "other.local" }},
+		{"headers", "tag=a&tag=b", func(r *http.Request) { r.Header["Accept"] = []string{"text/html"} }},
+		{"cookie", "tag=a&tag=b", func(r *http.Request) { r.Header.Del(mockhttp.HeaderCookie) }},
+		{"basic_auth", "tag=a&tag=b", func(r *http.Request) { r.Header.Del(mockhttp.HeaderAuthorization) }},
+		{"forms", "tag=a", func(*http.Request) {}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, mockhttp.StatusNoMatch, send(t, tt.form, tt.spoil))
+		})
+	}
+}
+
+func TestMatchers_PathTemplate(t *testing.T) {
+	// path_template matches paths of its shape, path_params their parameters, and the reply reads them by name.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.FromFile("testdata/matchers/10_path_template.yaml"))
+
+	res, body := getTarget(t, m, "/users/42/orders/BR-7")
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+	require.Equal(t, "BR-7 of 42", string(body))
+
+	// A failure answers 418 too: the header says no mock matched.
+	for _, target := range []string{"/users/me/orders/BR-7", "/users/42/orders", "/users/42/orders/BR-7/"} {
+		res, body = getTarget(t, m, target)
+		require.Equal(t, mockhttp.StatusNoMatch, res.StatusCode, "%s: %s", target, body)
+		require.Equal(t, vlatte.FailureNoMatch, res.Header.Get(mockhttp.HeaderVlatteError), "%s: %s", target, body)
+	}
 }
 
 func TestMatchers_QueryLeavesTheFragmentOut(t *testing.T) {

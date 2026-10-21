@@ -91,7 +91,12 @@ type Request struct {
 	// URLPathSegments are the segments of the URL path, each decoded: /users/1 is [users 1], and /files/a%2Fb is
 	// [files a/b].
 	URLPathSegments []string
-	Header          http.Header
+
+	// PathParams holds the parameters of the path template of the mock that matched, decoded, by name: /users/{id}
+	// gives {{ .Request.PathParams.id }}. A mock without one has none.
+	PathParams map[string]string
+
+	Header http.Header
 
 	// Cookies holds the cookies of the request, by name.
 	Cookies map[string]*http.Cookie

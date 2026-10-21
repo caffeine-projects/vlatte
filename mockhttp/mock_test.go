@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -138,6 +139,30 @@ func TestMock_ADescribedMockLoadsBackAndMatchesTheSame(t *testing.T) {
 			wantNoMatch: []string{"/items", "/items?page=2&x=1", "/items?page=3"},
 		},
 		{
+			// A path template describes as written, and its parameters by name.
+			name:        "path template",
+			give:        Request().URLPathTemplate("/users/{id}").PathParam("id", match.Equal("7")),
+			wantKeys:    []string{"path_params", "path_template"},
+			wantMatch:   []string{"/users/7"},
+			wantNoMatch: []string{"/users/8", "/users/7/", "/users/7/x", "/users"},
+		},
+		{
+			// A path template adds to the other matchers of the path, in Go as in mock files.
+			name:        "path and path template",
+			give:        Request().URLPathf("/users/*").URLPathTemplate("/{kind}/{id}"),
+			wantKeys:    []string{"path", "path_template"},
+			wantMatch:   []string{"/users/7"},
+			wantNoMatch: []string{"/teams/7", "/users/7/x"},
+		},
+		{
+			// RequestURI is the exact url of mock files in Go.
+			name:        "RequestURI",
+			give:        Request().RequestURI("/items?page=2&sort=asc"),
+			wantKeys:    []string{"url"},
+			wantMatch:   []string{"/items?page=2&sort=asc", "/items?sort=asc&page=2"},
+			wantNoMatch: []string{"/items?page=2", "/items?page=2&sort=asc&x=1", "/items/?page=2&sort=asc"},
+		},
+		{
 			// A mock file has url or path, not both: the path matcher goes in url.
 			name:        "url and path",
 			give:        Request().URL(match.Contain("test")).URLPathf("/test"),
@@ -176,6 +201,82 @@ func TestMock_ADescribedMockLoadsBackAndMatchesTheSame(t *testing.T) {
 				require.Equal(t, StatusNoMatch, getTarget(t, loaded, target), "loaded: %s: %s", target, desc)
 			}
 		})
+	}
+}
+
+func TestMock_ADescribedRequestPartLoadsBackAndMatchesTheSame(t *testing.T) {
+	// As TestMock_ADescribedMockLoadsBackAndMatchesTheSame, for the parts of a request beyond its target: each
+	// describes under its own key, and loads back to match the request it matched, and miss one that misses that part.
+	give := Postf("/x").
+		Headers("X-Tag", match.Equal([]string{"a", "b"})).
+		FormFields("tag", match.Equal([]string{"a", "b"})).
+		Cookie("session", match.Equal("abc")).
+		BasicAuth("jeff", "s3cret").
+		Host(match.EqualIgnoreCase("api.local")).
+		ClientIP(match.Equal("10.0.0.1"))
+
+	// The client's address is the connection's: a middleware sets it from the request, as one behind a proxy may.
+	setup := func() *ConfigBuilder {
+		return Setup().Silent().Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.RemoteAddr = r.Header.Get("X-Remote-Addr")
+				next.ServeHTTP(w, r)
+			})
+		})
+	}
+
+	built := MustNew(setup())
+	built.MustStart()
+	t.Cleanup(built.Close)
+
+	desc, err := built.MustMock(give.Reply(OK())).Mocks()[0].MarshalJSON()
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(desc, &doc))
+	request, _ := doc["request"].(map[string]any)
+	require.Equal(t, []string{"basic_auth", "client_ip", "cookie", "forms", "headers", "host", "method", "path"},
+		slices.Sorted(maps.Keys(request)), string(desc))
+
+	loaded := MustNew(setup())
+	loaded.MustStart()
+	t.Cleanup(loaded.Close)
+	loaded.MustMock(FromBytes(desc, "json"))
+
+	send := func(m *Server, form string, spoil func(r *http.Request)) int {
+		req, err := http.NewRequest(http.MethodPost, m.URL("/x"), strings.NewReader(form))
+		require.NoError(t, err)
+
+		req.Host = "api.local"
+		req.Header.Set(HeaderContentType, MIMEFormURLEncoded)
+		req.Header["X-Tag"] = []string{"a", "b"}
+		req.Header.Set(HeaderCookie, "session=abc")
+		req.Header.Set("X-Remote-Addr", "10.0.0.1:1234")
+		req.SetBasicAuth("jeff", "s3cret")
+		spoil(req)
+
+		return statusOf(t, req)
+	}
+
+	misses := []struct {
+		name  string
+		form  string
+		spoil func(r *http.Request)
+	}{
+		{"headers", "tag=a&tag=b", func(r *http.Request) { r.Header["X-Tag"] = []string{"a"} }},
+		{"forms", "tag=a", func(*http.Request) {}},
+		{"cookie", "tag=a&tag=b", func(r *http.Request) { r.Header.Set(HeaderCookie, "session=xyz") }},
+		{"basic_auth", "tag=a&tag=b", func(r *http.Request) { r.SetBasicAuth("jeff", "S3cret") }},
+		{"host", "tag=a&tag=b", func(r *http.Request) { r.Host = "other.local" }},
+		{"client_ip", "tag=a&tag=b", func(r *http.Request) { r.Header.Set("X-Remote-Addr", "10.0.0.2:1234") }},
+	}
+
+	for _, m := range []*Server{built, loaded} {
+		require.Equal(t, http.StatusOK, send(m, "tag=a&tag=b", func(*http.Request) {}), string(desc))
+
+		for _, miss := range misses {
+			require.Equal(t, StatusNoMatch, send(m, miss.form, miss.spoil), "%s: %s", miss.name, desc)
+		}
 	}
 }
 
