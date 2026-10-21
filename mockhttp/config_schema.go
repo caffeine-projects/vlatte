@@ -3,9 +3,11 @@ package mockhttp
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -97,6 +99,14 @@ func loadConfigSources(conf *Config) error {
 		conf.Record = &record
 	}
 
+	if conf.proxyAll != nil {
+		proxyAll := *conf.proxyAll
+		proxyAll.requestHeader = slices.Clone(proxyAll.requestHeader)
+		proxyAll.header = slices.Clone(proxyAll.header)
+		proxyAll.removeRequestHeaders = slices.Clone(proxyAll.removeRequestHeaders)
+		conf.proxyAll = &proxyAll
+	}
+
 	values, err := _schema().Load(conf, sources)
 
 	var problems []config.Problem
@@ -110,6 +120,8 @@ func loadConfigSources(conf *Config) error {
 	}
 
 	problems = append(problems, loadTLSFiles(conf, values)...)
+	problems = append(problems, checkProxyAll(conf, values)...)
+
 	if len(problems) > 0 {
 		return &config.Error{Problems: problems}
 	}
@@ -204,7 +216,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 	d := defaultConfig()
 	rec := defaultRecordConfig()
 
-	return config.NewSchema(
+	return config.NewSchema(withProxyAll(
 		field{
 			Key: _keyConfigFile, Short: "c", Kind: config.String,
 			Usage: fmt.Sprintf("Config file to load, instead of looking up %s.{json,yaml,yml} in %s.",
@@ -492,8 +504,55 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				"(1.5s). 0 uses " + httpx.DefaultWebhookTimeout.String() + ".",
 			Set: func(c *Config, v config.Value) error { c.WebhookTimeout = v.Dur; return nil },
 		},
-	)
+	)...)
 })
+
+// checkProxyAll reports proxy_all set without its target, from the source of a key that set it.
+func checkProxyAll(conf *Config, values map[string]config.Value) []config.Problem {
+	if conf.proxyAll == nil || conf.proxyAll.hasTarget {
+		return nil
+	}
+
+	var origin string
+
+	for _, key := range slices.Sorted(maps.Keys(values)) {
+		if key == "proxy_all" || strings.HasPrefix(key, "proxy_all.") {
+			origin = values[key].Origin
+			break
+		}
+	}
+
+	return []config.Problem{{
+		Code: config.CodeMissingValue, Origin: origin, Key: "proxy_all.target",
+		Message: "proxy_all is set but proxy_all.target is not", Hint: "set the URL to proxy the requests no mock matches to",
+	}}
+}
+
+// withProxyAll returns fields with those of proxy_all after the forward proxy's: a section with the keys of a mock
+// file's proxy, whose reply answers the requests no mock matches. The keys that take an object, request_header and
+// header, are left out: flags and variables can't give one. Code mocks ProxyAll with them.
+func withProxyAll(fields ...field) []field {
+	proxyAll := []field{{
+		Key: "proxy_all", Kind: config.Bool,
+		Usage: "Proxy the requests no mock matches, but those the forward proxy sends on, to proxy_all.target.",
+		Set:   func(c *Config, v config.Value) error { toggle(&c.proxyAll, proxyDef{}, v.Bool); return nil },
+	}}
+
+	for _, pf := range _proxyFields {
+		if pf.Kind == config.Any {
+			continue
+		}
+
+		proxyAll = append(proxyAll, field{
+			Key: "proxy_all." + pf.Key, Kind: pf.Kind, Usage: pf.Usage, Default: pf.Default,
+			Set: func(c *Config, v config.Value) error { return pf.Set(section(&c.proxyAll, proxyDef{}), v) },
+		})
+	}
+
+	after := slices.IndexFunc(fields, func(f field) bool { return f.Key == "proxy.ssl_verify" }) + 1
+
+	return slices.Insert(fields, after, proxyAll...)
+}
 
 // section returns *p, creating it as a copy of def when nil, so def itself is never modified.
 func section[S any](p **S, def S) *S {

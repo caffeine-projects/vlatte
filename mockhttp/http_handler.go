@@ -91,6 +91,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Form:       r.PostForm,
 		Files:      formFiles(r),
 		ParsedBody: reqValues.ParsedBodyData,
+		ForProxy:   h.app.proxy != nil && (r.Method == http.MethodConnect || r.URL.Host != ""),
 	}
 
 	// A recording captures the request as it came, and the answer as the client gets it. A CONNECT opens a tunnel,
@@ -123,17 +124,18 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A request no mock matches goes to its host, when the server is a forward proxy: a CONNECT opens a tunnel to it,
-	// and a request in absolute form, which names it, gets its answer. A request in origin form names no host.
+	// and a request in absolute form, which names it, gets its answer. Another goes to the target of proxy_all, if set:
+	// a CONNECT names no request to send it.
 	if !matched {
 		switch {
-		case h.app.proxy == nil:
-			h.onNoMatches(w, reqValues)
-		case r.Method == http.MethodConnect:
+		case input.ForProxy && r.Method == http.MethodConnect:
 			h.connect(w, reqValues)
-		case r.URL.Host == "":
-			h.onNoMatches(w, reqValues)
-		default:
+		case input.ForProxy:
 			h.serveUpstream(w, reqValues, h.app.proxy, capture)
+		case h.app.proxyAll != nil && r.Method != http.MethodConnect:
+			h.serveUpstream(w, reqValues, h.app.proxyAll, capture)
+		default:
+			h.onNoMatches(w, reqValues)
 		}
 
 		return

@@ -61,6 +61,9 @@ type Server struct {
 	// tunnels holds the connections of the forward proxy's open tunnels, which Close closes.
 	tunnels tunnels
 
+	// proxyAll answers the requests no mock matches, when the setting proxy_all is set.
+	proxyAll Replier
+
 	data    map[string]any
 	logger  *zerolog.Logger
 	started atomic.Bool // set by the first start: a server starts once
@@ -218,6 +221,14 @@ func New(config ...Option) (*Server, error) {
 	app.loaders = loaders
 	app.files = files
 	app.proxy = p
+
+	// The setting proxy_all answers what no mock matches: as a mock, it would count in assertions, and Clean and
+	// Disable would drop it.
+	if def := conf.proxyAll; def != nil {
+		if app.proxyAll, err = def.build().NewReplier(app); err != nil {
+			return nil, fmt.Errorf("server: proxy_all: %w", err)
+		}
+	}
 	app.requestBodyParsers = parsers
 	app.events = eventRunner
 	app.webhooks = newWebhookTransport()
@@ -415,6 +426,10 @@ func (app *Server) Close() {
 		app.proxy.close()
 	}
 
+	if closer, ok := app.proxyAll.(io.Closer); ok {
+		_ = closer.Close()
+	}
+
 	// The backend doesn't track the connections it handed over to tunnels.
 	app.tunnels.closeAll()
 
@@ -464,6 +479,14 @@ func (app *Server) DescribeConfig() string {
 		buf.WriteString("Forward Proxy: ")
 		buf.WriteString("enabled")
 		buf.WriteString("\n")
+	}
+
+	if def := app.config.proxyAll; def != nil {
+		if target, err := checkTargetURL(def.target); err == nil {
+			buf.WriteString("Proxy All: ")
+			buf.WriteString(displayURL(target))
+			buf.WriteString("\n")
+		}
 	}
 
 	if app.config.Record != nil {

@@ -618,3 +618,40 @@ func TestCLI_IsAForwardProxy(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, "host /other", body)
 }
+
+func TestCLI_ProxiesWhatNoMockMatches(t *testing.T) {
+	// --proxy-all-target sends what no mock matches on to the target, as WireMock's --proxy-all does. With --record,
+	// the target's answers are recorded, and a later run serves them without the target.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, "target "+r.URL.Path)
+	}))
+	t.Cleanup(target.Close)
+
+	mocks := filepath.Join(t.TempDir(), "mocked.mock.yaml")
+	require.NoError(t, os.WriteFile(mocks, []byte("request: {method: GET, path: /mocked}\nresponse: {status: 200, body: mocked}\n"), 0o600))
+
+	addr := randomAddr(t)
+	stop := start(t, "--addr", addr, "--mock-files", mocks, "--proxy-all-target", target.URL, "--record", "--log-level", "disabled")
+
+	status, body := firstAnswer(t, "http://"+addr+"/mocked")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "mocked", body)
+
+	status, body = firstAnswer(t, "http://"+addr+"/other")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "target /other", body)
+
+	require.Equal(t, 0, stop(), "a stopped server exits cleanly")
+	target.Close()
+
+	addr = randomAddr(t)
+	start(t, "--addr", addr, "--log-level", "disabled")
+
+	status, body = firstAnswer(t, "http://"+addr+"/other")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "target /other", body, "the recording of what proxy_all answered")
+}

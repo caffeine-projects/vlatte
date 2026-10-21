@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -19,7 +20,7 @@ func TestProxyAll(t *testing.T) {
 	t.Cleanup(backend.Close)
 
 	m := mockhttp.MustNew(mockhttp.Setup().Silent())
-	require.NoError(t, m.Prep(t.Context(), proxyall.New(proxyall.Config{Target: backend.URL})))
+	require.NoError(t, m.Prep(t.Context(), proxyall.New(mockhttp.From(backend.URL).Timeout(5*time.Second))))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -43,8 +44,8 @@ func TestProxyAll(t *testing.T) {
 }
 
 func TestProxyAll_VerifiesTheBackendWhenAsked(t *testing.T) {
-	// SSLVerify has the recipe's reply verify its backend's certificate: one the server doesn't trust fails the call.
-	// Without it, the reply's default, the call goes through.
+	// The recipe answers with the reply it is given, options and all: one that verifies its backend's certificate
+	// fails the call to a backend the server doesn't trust, and one that doesn't, the reply's default, goes through.
 	backend := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "backend")
 	}))
@@ -52,7 +53,7 @@ func TestProxyAll_VerifiesTheBackendWhenAsked(t *testing.T) {
 
 	for _, verify := range []bool{true, false} {
 		m := mockhttp.MustNew(mockhttp.Setup().Silent())
-		require.NoError(t, m.Prep(t.Context(), proxyall.New(proxyall.Config{Target: backend.URL, SSLVerify: verify})))
+		require.NoError(t, m.Prep(t.Context(), proxyall.New(mockhttp.From(backend.URL).SSLVerify(verify))))
 		m.MustStart()
 		t.Cleanup(m.Close)
 

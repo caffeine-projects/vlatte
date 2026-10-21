@@ -28,6 +28,7 @@ const (
 	_example          = `  vlatte
   vlatte --addr=:3000
   vlatte --proxy
+  vlatte --proxy-all-target=https://api.example.com
   vlatte --proxy --record
   vlatte --record --record-target=https://api.example.com
 `
@@ -201,7 +202,7 @@ Commands:
 Examples:
 %s
 Settings apply in this order, each overriding the ones before: defaults, the %s.{json,yaml,yml} file
-in %s, %s_* environment variables, then flags. Setting a key of the cors, proxy or record section
+in %s, %s_* environment variables, then flags. Setting a key of the cors, proxy, proxy_all or record section
 turns the section on.
 
 Settings:

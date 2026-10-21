@@ -58,6 +58,12 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 	fromFile := writeConfigFile(t, t.TempDir(), "settings.json", `{"name": "from-file"}`)
 	tlsArgs := []string{"--tls-cert", _testCertFile, "--tls-key", _testKeyFile}
 
+	// proxy_all needs its target. A file sets it, and its flag turns it off.
+	proxyAllFile := writeConfigFile(t, t.TempDir(), "proxy_all.json", `{"proxy_all": {"target": "https://api.example.com"}}`)
+	withTarget := func(args ...string) []string {
+		return append([]string{"--proxy-all-target", "https://api.example.com"}, args...)
+	}
+
 	tests := map[string]struct {
 		args  []string
 		check func(t *testing.T, c *Config)
@@ -98,9 +104,27 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"proxy-via":        {[]string{"--proxy-via", "http://proxy:3128"}, func(t *testing.T, c *Config) { require.Equal(t, "http://proxy:3128", c.Proxy.Via) }},
 		"proxy-timeout":    {[]string{"--proxy-timeout", "1500"}, func(t *testing.T, c *Config) { require.Equal(t, 1500*time.Millisecond, c.Proxy.Timeout) }},
 		"proxy-ssl-verify": {[]string{"--proxy-ssl-verify"}, func(t *testing.T, c *Config) { require.True(t, c.Proxy.SSLVerify) }},
-		"record":           {[]string{"--record"}, func(t *testing.T, c *Config) { require.Equal(t, defaultRecordConfig(), c.Record) }},
-		"record-dir":       {[]string{"--record-dir", "out"}, func(t *testing.T, c *Config) { require.Equal(t, "out", c.Record.Dir) }},
-		"record-format":    {[]string{"--record-format", ".YAML"}, func(t *testing.T, c *Config) { require.Equal(t, "yaml", c.Record.Format) }},
+		"proxy-all":        {[]string{"--config", proxyAllFile, "--proxy-all=false"}, func(t *testing.T, c *Config) { require.Nil(t, c.proxyAll) }},
+		"proxy-all-target": {
+			[]string{"--proxy-all-target", "https://api.example.com"}, func(t *testing.T, c *Config) { require.Equal(t, "https://api.example.com", c.proxyAll.target) },
+		},
+		"proxy-all-remove-request-headers": {
+			withTarget("--proxy-all-remove-request-headers", "x-a,x-b"),
+			func(t *testing.T, c *Config) {
+				require.Equal(t, []string{"x-a", "x-b"}, c.proxyAll.removeRequestHeaders)
+			},
+		},
+		"proxy-all-trim-prefix": {withTarget("--proxy-all-trim-prefix", "/api"), func(t *testing.T, c *Config) { require.Equal(t, "/api", c.proxyAll.trimPrefix) }},
+		"proxy-all-trim-suffix": {withTarget("--proxy-all-trim-suffix", ".json"), func(t *testing.T, c *Config) { require.Equal(t, ".json", c.proxyAll.trimSuffix) }},
+		"proxy-all-timeout": {
+			withTarget("--proxy-all-timeout", "1.5s"), func(t *testing.T, c *Config) { require.Equal(t, 1500*time.Millisecond, c.proxyAll.timeout) },
+		},
+		"proxy-all-ssl-verify":    {withTarget("--proxy-all-ssl-verify"), func(t *testing.T, c *Config) { require.True(t, c.proxyAll.sslVerify) }},
+		"proxy-all-x-forwarded":   {withTarget("--proxy-all-x-forwarded"), func(t *testing.T, c *Config) { require.True(t, c.proxyAll.xForwarded) }},
+		"proxy-all-preserve-host": {withTarget("--proxy-all-preserve-host"), func(t *testing.T, c *Config) { require.True(t, c.proxyAll.preserveHost) }},
+		"record":                  {[]string{"--record"}, func(t *testing.T, c *Config) { require.Equal(t, defaultRecordConfig(), c.Record) }},
+		"record-dir":              {[]string{"--record-dir", "out"}, func(t *testing.T, c *Config) { require.Equal(t, "out", c.Record.Dir) }},
+		"record-format":           {[]string{"--record-format", ".YAML"}, func(t *testing.T, c *Config) { require.Equal(t, "yaml", c.Record.Format) }},
 		"record-target": {
 			[]string{"--record-target", "https://api.example.com"},
 			func(t *testing.T, c *Config) { require.Equal(t, "https://api.example.com", c.Record.Target) },
@@ -364,6 +388,25 @@ func TestConfigSources_FileFormatsAgree(t *testing.T) {
 }
 
 func TestConfigSources_Hazards(t *testing.T) {
+	t.Run("another server's proxy_all is never modified", func(t *testing.T) {
+		// A server made from another's Config loads its sources onto a copy of its proxy_all: the other server keeps
+		// its own settings.
+		first, err := New(Setup().Silent().ConfigSources(ConfigArgs([]string{
+			"--proxy-all-target", "http://first.local", "--proxy-all-remove-request-headers", "X-A",
+		})))
+		require.NoError(t, err)
+
+		conf := *first.Config()
+		conf.ConfigSources = []ConfigSource{ConfigArgs([]string{"--proxy-all-target", "http://second.local"})}
+
+		second, err := New(&conf)
+		require.NoError(t, err)
+
+		require.Equal(t, "http://first.local", first.Config().proxyAll.target)
+		require.Equal(t, "http://second.local", second.Config().proxyAll.target)
+		require.Equal(t, []string{"X-A"}, second.Config().proxyAll.removeRequestHeaders, "the rest stays as the other's")
+	})
+
 	t.Run("a shared CORS struct is never modified", func(t *testing.T) {
 		before := DefaultCORSConfig
 		t.Setenv("VLATTE_CORS_MAX_AGE", "60")
