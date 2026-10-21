@@ -189,6 +189,9 @@ func TestBuilder_Host(t *testing.T) {
 		{"another host", "/x", "api.local.evil", StatusNoMatch},
 		{"the server's own", "/x", "", StatusNoMatch},
 		{"an IPv6 address, without its brackets", "/v6", "[::1]:8080", http.StatusOK},
+		// net/http takes any port, as the host file key's check does: a port that isn't a number is still a port.
+		{"with a port that isn't a number", "/x", "api.local:bad", http.StatusOK},
+		{"an IPv6 address sent without brackets", "/v6", "::1", http.StatusOK},
 	}
 
 	for _, tt := range tests {

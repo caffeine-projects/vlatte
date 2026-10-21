@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -1170,12 +1169,7 @@ func setHost(r *requestDef, v config.Value) error {
 // bareHost reports text of host or client_ip with a port, or the brackets of an IPv6 address: the value it compares
 // with has neither, so it would never match.
 func bareHost(v config.Value, s string) error {
-	host := s
-	if h, _, err := net.SplitHostPort(s); err == nil {
-		host = h
-	}
-
-	if host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]"); host != s {
+	if host := hostOnly(s); host != s {
 		return config.Invalid(v, fmt.Sprintf("%s=%q has a port or brackets, which the value it matches never has", v.Key, s),
 			fmt.Sprintf("write the address alone: %q", host))
 	}

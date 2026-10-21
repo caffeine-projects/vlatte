@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 	"uuid"
@@ -166,9 +165,9 @@ func (b *Builder) SchemeMatches(m vlatte.Matcher) *Builder {
 	return b
 }
 
-// Host defines a matcher for the host the request names, without its port: its Host header, or the host of a request
-// in absolute form, as a forward proxy gets, such as "api.local". An IPv6 address comes without brackets. Host names
-// ignore case: compare them with match.EqualIgnoreCase.
+// Host defines a matcher for the host the request names, without its port, whatever the port: its Host header, or the
+// host of a request in absolute form, as a forward proxy gets, such as "api.local". An IPv6 address comes without
+// brackets. Host names ignore case: compare them with [match.EqualIgnoreCase].
 func (b *Builder) Host(m vlatte.Matcher) *Builder {
 	b.appendExpectation(&expectation{
 		Target:   int(matchingScopeHost),
@@ -797,20 +796,22 @@ func selectBasicAuthPassword(_ context.Context, r *selectorInput) any {
 	return password
 }
 
-// selectHost selects the host name of the request, without its port and an IPv6 address's brackets.
-func selectHost(_ context.Context, r *selectorInput) any {
-	return (&url.URL{Host: r.RawRequest.Host}).Hostname()
+func selectHost(_ context.Context, r *selectorInput) any { return hostOnly(r.RawRequest.Host) }
+
+// selectClientIP selects the address of the client, which a middleware may have set without a port.
+func selectClientIP(_ context.Context, r *selectorInput) any {
+	return hostOnly(r.RawRequest.RemoteAddr)
 }
 
-// selectClientIP selects the address of the client without its port, or RemoteAddr as it is when it has none, as a
-// middleware may set it.
-func selectClientIP(_ context.Context, r *selectorInput) any {
-	ip, _, err := net.SplitHostPort(r.RawRequest.RemoteAddr)
-	if err != nil {
-		return r.RawRequest.RemoteAddr
+// hostOnly returns an address without its port and the brackets of an IPv6 address: "api.local:8080" and
+// "api.local:x" are "api.local", and "[::1]:80", "[::1]" and "::1" are "::1". Unlike url.URL.Hostname, it takes any
+// port, as net/http does, and an IPv6 address without brackets.
+func hostOnly(s string) string {
+	if host, _, err := net.SplitHostPort(s); err == nil {
+		return host
 	}
 
-	return ip
+	return strings.TrimSuffix(strings.TrimPrefix(s, "["), "]")
 }
 
 func selectQuery(k string) vlatte.Selector[*selectorInput] {
