@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
@@ -118,7 +120,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	sub := vlatte.NewExplanation()
 	mocks := vlatte.Mocks[*Mock, *selectorInput](stored)
-	mock, matched, err := mocks.Find(r.Context(), sub, input, func(m *Mock) vlatte.Evaluators[*Mock, *selectorInput] { return m.spec.expectations })
+	mock, matched, err := mocks.Find(r.Context(), sub, input, expectationsOf)
 	if err != nil {
 		h.onError(w, reqValues, vlatte.FailureMatch, fmt.Errorf("http: finding a mock: %w", err))
 		return
@@ -136,7 +138,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case h.app.proxyAll != nil && r.Method != http.MethodConnect:
 			h.serveUpstream(w, reqValues, h.app.proxyAll, capture)
 		default:
-			h.onNoMatches(w, reqValues)
+			h.onNoMatches(w, reqValues, mocks, input)
 		}
 
 		return
@@ -543,8 +545,15 @@ func (h *mockHandler) render(w http.ResponseWriter, r *RequestValues, res *Respo
 	}
 }
 
-func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues) {
+// onNoMatches answers a request none of mocks matched, input, with the mocks that came closest, unless the server
+// reports none.
+func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, mocks vlatte.Mocks[*Mock, *selectorInput], input *selectorInput) {
 	defer h.lifecycle.OnNoMatch(r)
+
+	var near []vlatte.NearMiss
+	if !h.app.config.NoNearMisses {
+		near = mocks.NearMisses(r.RawRequest.Context(), input, expectationsOf, describeExpectation)
+	}
 
 	buf := bufpool.Get()
 	buf.Reset()
@@ -555,6 +564,7 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues) {
 	buf.WriteString(" ")
 	buf.WriteString(r.URL.String())
 	buf.WriteString("\n\n")
+	writeNearMisses(buf, near)
 
 	w.Header().Add(HeaderContentType, MIMETextPlainCharsetUTF8)
 	w.Header().Set(HeaderVlatteError, vlatte.FailureNoMatch)
@@ -562,6 +572,39 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues) {
 
 	buf.WriteTo(w)
 }
+
+// writeNearMisses writes misses to buf, one per line, after a title: the parts of each mock that matched, those that
+// differ, and those it didn't check. A line break in a name or a matcher's error is a space: a mock stays a line.
+func writeNearMisses(buf *bytes.Buffer, misses []vlatte.NearMiss) {
+	if len(misses) == 0 {
+		return
+	}
+
+	buf.WriteString("CLOSEST MOCKS\n")
+
+	for _, miss := range misses {
+		line := "[" + miss.MockID + "]"
+		if miss.Name != "" && miss.Name != miss.MockID {
+			line += " " + miss.Name
+		}
+
+		line += fmt.Sprintf(": %d of %d parts matched", miss.Passed, miss.Total)
+
+		if len(miss.Failed) > 0 {
+			line += "; differs in " + strings.Join(miss.Failed, ", ")
+		}
+
+		if len(miss.Skipped) > 0 {
+			line += "; not checked: " + strings.Join(miss.Skipped, ", ")
+		}
+
+		_oneLine.WriteString(buf, line)
+		buf.WriteString("\n")
+	}
+}
+
+// _oneLine turns line breaks into spaces.
+var _oneLine = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
 
 // onError answers a request whose serving failed, with the error status, so a client tells it from a mock's answer.
 // failure is a vlatte.Failure* value. The body names the mock that matched, if one did, and the error.
@@ -610,6 +653,34 @@ func (h *mockHandler) onError(w http.ResponseWriter, r *RequestValues, failure s
 	w.WriteHeader(h.app.config.ErrorStatusCode)
 
 	buf.WriteTo(w)
+}
+
+// expectationsOf returns the matchers of the request part of m.
+func expectationsOf(m *Mock) vlatte.Evaluators[*Mock, *selectorInput] {
+	return m.spec.expectations
+}
+
+// describeExpectation names the part of a request e checks, such as "header Accept": the name of a header, query
+// parameter or form field goes with its kind. A part of no kind, such as Times, goes by its key.
+func describeExpectation(e *expectation) string {
+	scope := matchingScope(e.Target)
+	name := scope.FieldName()
+
+	switch {
+	case name == "":
+		return e.Key
+	case e.Key == "":
+		return name
+	}
+
+	// The key of a method or a scheme is the value it wants, which the part's name says enough of.
+
+	switch scope {
+	case matchingScopeHeader, matchingScopeQuery, matchingScopeQueries, matchingScopeFormField, matchingScopeFormFile:
+		return name + " " + e.Key
+	}
+
+	return name
 }
 
 func locals(r *RequestValues, provided map[string]any, params *viewdata.Parameters) *viewdata.Data {

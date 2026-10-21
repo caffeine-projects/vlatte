@@ -64,6 +64,7 @@ type Config struct {
 	MaxBodyParsingLimit            int64
 	NoBodyParsing                  bool
 	NoDebugHeaders                 bool
+	NoNearMisses                   bool
 	Middlewares                    []func(http.Handler) http.Handler
 	CORS                           *CORSConfig
 	BackendFactory                 BackendFactory
@@ -131,6 +132,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.MaxBodyParsingLimit = c.MaxBodyParsingLimit
 	conf.NoBodyParsing = c.NoBodyParsing
 	conf.NoDebugHeaders = c.NoDebugHeaders
+	conf.NoNearMisses = c.NoNearMisses
 	conf.Middlewares = c.Middlewares
 	conf.CORS = c.CORS
 	conf.BackendFactory = c.BackendFactory
@@ -290,6 +292,13 @@ func (cb *ConfigBuilder) NoBodyParsing() *ConfigBuilder {
 // VLatte-Error stays: it tells the server's own answers from a mock's.
 func (cb *ConfigBuilder) NoDebugHeaders() *ConfigBuilder {
 	cb.conf.NoDebugHeaders = true
+	return cb
+}
+
+// NoNearMisses turns off the report of the mocks closest to a request no mock matched, which the answer to it lists:
+// building it runs the matchers of every mock again, such as the action of match.Peek.
+func (cb *ConfigBuilder) NoNearMisses() *ConfigBuilder {
+	cb.conf.NoNearMisses = true
 	return cb
 }
 

@@ -374,6 +374,7 @@ func (b *Builder) Once() *Builder {
 func (b *Builder) RequestMatches(predicate func(r *http.Request) (bool, error)) *Builder {
 	b.appendExpectation(&expectation{
 		Target:   int(matchingScopeNone),
+		Key:      "request",
 		Selector: selectRawRequest,
 		Matcher: match.Function(func(v any) (bool, error) {
 			r, ok := v.(*http.Request)
@@ -514,6 +515,7 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 	if b.times > 0 {
 		spec.expectations = append(spec.expectations, &expectation{
 			Target:  int(matchingScopeNone),
+			Key:     "times",
 			Matcher: mfeat.Repeat(b.times),
 		})
 	}
