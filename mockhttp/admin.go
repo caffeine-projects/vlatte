@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/atomicfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
@@ -28,6 +29,9 @@ const (
 	// files on the next start too.
 	_defaultSaveDir    = "testdata/_mocks"
 	_defaultSaveFormat = "yaml"
+
+	// _saveTempPattern names the files a save is writing: never *.mock.*, so loading mock files skips them.
+	_saveTempPattern = ".save-*.tmp"
 )
 
 // adminLogs returns the admin API's logs, and the writer the server's logger writes them through, when the server
@@ -200,7 +204,7 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 		prev, err := os.ReadFile(path)
 		file := savedFile{path: path, prev: prev, existed: err == nil}
 
-		if err := writeAtomically(path, docs[i]); err != nil {
+		if err := atomicfile.Write(filepath.Dir(path), _saveTempPattern, path, docs[i]); err != nil {
 			restore(written)
 			return nil, fmt.Errorf("server: save: %w", err)
 		}
@@ -227,7 +231,7 @@ type savedFile struct {
 func restore(files []savedFile) {
 	for _, f := range files {
 		if f.existed {
-			_ = writeAtomically(f.path, f.prev)
+			_ = atomicfile.Write(filepath.Dir(f.path), _saveTempPattern, f.path, f.prev)
 		} else {
 			_ = os.Remove(f.path)
 		}
@@ -351,34 +355,6 @@ func relocateFile(obj any, toWD string) {
 func listItems(v any) []any {
 	list, _ := v.([]any)
 	return list
-}
-
-// writeAtomically writes data to path through a temporary file of its directory, renamed into place: a reader finds the
-// file whole, or not at all. The temporary file's name isn't a mock file's.
-func writeAtomically(path string, data []byte) error {
-	f, err := os.CreateTemp(filepath.Dir(path), ".save-*.tmp")
-	if err != nil {
-		return err
-	}
-
-	_, err = f.Write(data)
-	if err == nil {
-		err = f.Chmod(0o644)
-	}
-
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
-	}
-
-	if err == nil {
-		err = os.Rename(f.Name(), path)
-	}
-
-	if err != nil {
-		_ = os.Remove(f.Name())
-	}
-
-	return err
 }
 
 // loadSaved loads the mock files again, those of dir too, from now on. When they fail to load, dir stays out.
