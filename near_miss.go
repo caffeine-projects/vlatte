@@ -9,18 +9,27 @@ import (
 // _nearMisses is how many mocks a near miss report names at most.
 const _nearMisses = 3
 
-// Misses are the mocks [Mocks.Find] tried for one request, and that didn't match it, each with the part it stopped
-// at: none once a mock matched. The zero value is ready to use; give each Find its own.
+// Misses are the mocks [Mocks.Find] tried for a request, and that didn't match it, each with the part it stopped at:
+// none once a mock matched. The zero value is ready to use. A server may reuse one, a request at a time, such as
+// through a sync.Pool: Find starts it over, and Reset lets go of what it kept.
 type Misses[M Mock, TIn any] struct {
 	in    TIn
-	tried []tried[M, TIn]
+	evals GetEvals[M, TIn]
+	tried []tried[M]
 }
 
 // tried is a mock Find tried: the parts before stop matched, and the one at stop didn't.
-type tried[M Mock, TIn any] struct {
-	mock  M
-	evals Evaluators[M, TIn]
-	stop  int
+type tried[M Mock] struct {
+	mock M
+	stop int
+}
+
+// Reset lets go of the mocks and the request Find kept, keeping the room they took for the next request.
+func (m *Misses[M, TIn]) Reset() {
+	clear(m.tried[:cap(m.tried)])
+
+	var in TIn
+	m.in, m.evals, m.tried = in, nil, m.tried[:0]
 }
 
 // nearMiss is a NearMiss as NearMisses ranks it: differs counts the parts that failed and keep no state, the parts
@@ -50,7 +59,7 @@ func (m *Misses[M, TIn]) NearMisses(ctx context.Context, describe func(*Eval[TIn
 		near := nearMiss{miss: NearMiss{MockID: t.mock.ID(), Name: t.mock.Name()}}
 		matched := 0
 
-		for i, eval := range t.evals {
+		for i, eval := range m.evals(t.mock) {
 			_, keepsState := eval.Matcher.(Stateful)
 
 			var (

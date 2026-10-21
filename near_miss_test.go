@@ -193,3 +193,37 @@ func TestFind_KeepingMissesFindsTheSameMock(t *testing.T) {
 
 	require.Zero(t, cRuns)
 }
+
+func TestFind_AReusedMissesHoldsItsLastRequest(t *testing.T) {
+	// A server reuses its misses, a request at a time, so a matched request costs no room: each Find starts them
+	// over, so a report never names the mocks of a request before, nor of one a mock matched.
+	a, b := newFakeMockWith("a", 0), newFakeMockWith("b", 0)
+	mocks := map[*fakeMock][]*vlatte.Eval[request]{
+		a: {part("path", match.Equal("/b")), part("method", match.Equal("GET"))},
+		b: {part("method", match.Equal("POST")), part("path", match.Equal("/b"))},
+	}
+	evals := func(m *fakeMock) vlatte.Evaluators[*fakeMock, request] { return mocks[m] }
+	seq := vlatte.Mocks[*fakeMock, request](slices.Values([]*fakeMock{a, b}))
+	describe := func(e *vlatte.Eval[request]) string { return e.Key }
+	misses := new(vlatte.Misses[*fakeMock, request])
+
+	_, matched, err := seq.Find(t.Context(), nil, request{"method": "GET"}, evals, misses)
+	require.NoError(t, err)
+	require.False(t, matched)
+
+	_, matched, err = seq.Find(t.Context(), nil, request{"path": "/b"}, evals, misses)
+	require.NoError(t, err)
+	require.False(t, matched)
+	require.Equal(t, []vlatte.NearMiss{
+		{MockID: "a", Name: "a", Passed: 1, Total: 2, Failed: []string{"method"}},
+		{MockID: "b", Name: "b", Passed: 1, Total: 2, Failed: []string{"method"}},
+	}, misses.NearMisses(t.Context(), describe), "the mocks of the request before are gone")
+
+	_, matched, err = seq.Find(t.Context(), nil, request{"method": "POST", "path": "/b"}, evals, misses)
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.Empty(t, misses.NearMisses(t.Context(), describe), "a matched request has no misses")
+
+	misses.Reset()
+	require.Empty(t, misses.NearMisses(t.Context(), describe))
+}

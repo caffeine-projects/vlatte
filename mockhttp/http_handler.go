@@ -14,12 +14,16 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
+
+// _misses recycles the misses of the requests no mock matches, which matching keeps for every request.
+var _misses = sync.Pool{New: func() any { return new(vlatte.Misses[*Mock, *selectorInput]) }}
 
 // topResponseWriter passes every write of a reply through the steps of its mock, then to rw.
 type topResponseWriter struct {
@@ -114,10 +118,15 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Near misses go on from where matching stopped, so no matcher runs twice for the request. Only the answer to a
-	// request no mock matches, and no proxy takes, lists them.
+	// request no mock matches, and no proxy takes, lists them. Requests share the room the misses take.
 	var misses *vlatte.Misses[*Mock, *selectorInput]
 	if !h.app.config.NoNearMisses && !input.ForProxy && (h.app.proxyAll == nil || r.Method == http.MethodConnect) {
-		misses = new(vlatte.Misses[*Mock, *selectorInput])
+		misses, _ = _misses.Get().(*vlatte.Misses[*Mock, *selectorInput])
+
+		defer func() {
+			misses.Reset()
+			_misses.Put(misses)
+		}()
 	}
 
 	sub := vlatte.NewExplanation()

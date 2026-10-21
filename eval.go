@@ -71,8 +71,8 @@ type Mocks[M Mock, TIn any] iter.Seq[M]
 
 // Find tries to find an exact match in the mocks.
 // It returns the mock that matched and a boolean indicating if a match was found.
-// misses, when not nil, keeps each mock that didn't match, with the part it stopped at, which [Misses.NearMisses]
-// goes on from.
+// misses, when not nil, starts over and keeps each mock that didn't match, with the part it stopped at, which
+// [Misses.NearMisses] goes on from.
 func (mocks Mocks[M, TIn]) Find(
 	ctx context.Context,
 	sub *Explanation,
@@ -81,7 +81,7 @@ func (mocks Mocks[M, TIn]) Find(
 	misses *Misses[M, TIn],
 ) (M, bool, error) {
 	if misses != nil {
-		misses.in = in
+		misses.in, misses.evals, misses.tried = in, evals, misses.tried[:0]
 	}
 
 	for mock := range mocks {
@@ -95,14 +95,14 @@ func (mocks Mocks[M, TIn]) Find(
 
 		if stop == len(e) {
 			if misses != nil {
-				misses.tried = nil
+				misses.tried = misses.tried[:0]
 			}
 
 			return mock, true, nil
 		}
 
 		if misses != nil {
-			misses.tried = append(misses.tried, tried[M, TIn]{mock: mock, evals: e, stop: stop})
+			misses.tried = append(misses.tried, tried[M]{mock: mock, stop: stop})
 		}
 	}
 
