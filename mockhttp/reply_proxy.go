@@ -6,13 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/match"
 )
 
 var (
@@ -23,7 +27,8 @@ var (
 
 const _defaultTimeout = 30 * time.Second
 
-type FromTypes interface{ string | *url.URL }
+// FromTypes are the types of the target From takes: a URL, as text, of a string type of any name, or parsed.
+type FromTypes interface{ ~string | *url.URL }
 
 // ProxyReply represents a response stub that will be the response "proxied" from the specified target.
 // Use From to init a new ProxyReply. It is a ReplierFactory: each mock built with it gets a proxy of its own. It sends
@@ -33,13 +38,15 @@ type ProxyReply struct {
 	target               *url.URL
 	transport            http.RoundTripper
 	headers              http.Header
-	proxyHeaders         http.Header
-	proxyHeadersToRemove []string
+	requestHeaders       http.Header
+	removeRequestHeaders []string
 	trimPrefix           string
 	trimSuffix           string
 	timeout              time.Duration
 	sslVerify            bool
 	sslVerifySet         bool // SSLVerify or SkipSSLVerify was called: a transport of the caller's would ignore it
+	xForwarded           bool
+	preserveHost         bool
 }
 
 // From creates a ProxyReply with the given target. The target's path and query come before the request's: with
@@ -47,29 +54,61 @@ type ProxyReply struct {
 func From[T FromTypes](target T) *ProxyReply {
 	var u *url.URL
 
-	switch e := any(target).(type) {
-	case string:
-		var err error
-
-		u, err = url.Parse(e)
-		if err != nil {
-			panic(fmt.Errorf("reply_proxy: target: %w", err))
-		}
-	case *url.URL:
+	if e, ok := any(target).(*url.URL); ok {
 		if e == nil {
 			panic(errors.New("reply_proxy: target: nil URL"))
 		}
 
 		u = e.Clone()
+	} else {
+		// A string type of another name, such as type Target string, is no string to a type switch.
+		var err error
+
+		u, err = url.Parse(reflect.ValueOf(target).String())
+		if err != nil {
+			panic(fmt.Errorf("reply_proxy: target: %w", err))
+		}
 	}
 
 	return &ProxyReply{
 		target:               u,
 		headers:              make(http.Header),
-		proxyHeaders:         make(http.Header),
-		proxyHeadersToRemove: make([]string, 0),
+		requestHeaders:       make(http.Header),
+		removeRequestHeaders: make([]string, 0),
 		timeout:              _defaultTimeout,
 	}
+}
+
+// ProxyAll returns a mock that answers the requests no other mock matches with reply, as WireMock's proxy-all does: it
+// matches any method and path, and comes last, at the priority math.MaxInt. It leaves CONNECTs alone, and, on a server
+// that is a forward proxy, the requests in absolute form, which the proxy sends on to the hosts they name. Its
+// description holds the reply under proxy_all, which a mock file loads back as the same mock.
+func ProxyAll(reply *ProxyReply) *Builder {
+	b := AnyMethod()
+
+	// A nil *ProxyReply is no nil ReplierFactory: Build would take it.
+	if reply == nil {
+		b.err = errors.New("ProxyAll: the reply is nil")
+		return b
+	}
+
+	return proxyAll(b, reply)
+}
+
+// proxyAll has b answer with reply the requests no other mock matches, as ProxyAll's mock does.
+func proxyAll(b *Builder, reply *ProxyReply) *Builder {
+	b.Priority(math.MaxInt)
+	b.spec.fallback = true
+
+	b.appendExpectation(&expectation{
+		Target: int(matchingScopeNone),
+		Selector: func(_ context.Context, in *selectorInput) any {
+			return in.RawRequest.Method != http.MethodConnect && !in.ForProxy
+		},
+		Matcher: match.Equal(true),
+	})
+
+	return b.Reply(reply)
 }
 
 // Header adds a value to a response header, which replaces the target's values of that name.
@@ -89,43 +128,59 @@ func (r *ProxyReply) Headers(header http.Header) *ProxyReply {
 	return r
 }
 
-// ForwardHeader adds a value to a header sent to the proxy target, which replaces the client's values of that name. A
-// hop-by-hop header, such as Connection or Upgrade, fails the build of the mock: a proxy doesn't send it on.
-// "Te: trailers" is the exception.
-func (r *ProxyReply) ForwardHeader(key, value string) *ProxyReply {
-	r.proxyHeaders.Add(key, value)
+// RequestHeader adds a value to a header sent to the proxy target, which replaces the client's values of that name. A
+// hop-by-hop header, such as Connection or Upgrade, fails the build of the mock: it is about one connection, and a
+// proxy doesn't make one up. A client's request to switch protocols goes on as the client asked. "Te: trailers" is
+// the exception.
+func (r *ProxyReply) RequestHeader(key, value string) *ProxyReply {
+	r.requestHeaders.Add(key, value)
 	return r
 }
 
-// ProxyHeaders adds the values of headers sent to the proxy target, which replace the client's values of those names.
-// A hop-by-hop header, such as Connection or Upgrade, fails the build of the mock: a proxy doesn't send it on.
-// "Te: trailers" is the exception.
-func (r *ProxyReply) ProxyHeaders(header http.Header) *ProxyReply {
+// RequestHeaders adds the values of headers sent to the proxy target, which replace the client's values of those names.
+// A hop-by-hop header, such as Connection or Upgrade, fails the build of the mock, as for RequestHeader.
+func (r *ProxyReply) RequestHeaders(header http.Header) *ProxyReply {
 	for k, v := range header {
 		for _, vv := range v {
-			r.proxyHeaders.Add(k, vv)
+			r.requestHeaders.Add(k, vv)
 		}
 	}
 
 	return r
 }
 
-// RemoveProxyHeaders removes the given header before sending the request to the proxy target.
-func (r *ProxyReply) RemoveProxyHeaders(header ...string) *ProxyReply {
-	r.proxyHeadersToRemove = append(r.proxyHeadersToRemove, header...)
+// RemoveRequestHeaders removes the given headers from the request before it is sent to the proxy target.
+func (r *ProxyReply) RemoveRequestHeaders(header ...string) *ProxyReply {
+	r.removeRequestHeaders = append(r.removeRequestHeaders, header...)
 	return r
 }
 
-// TrimPrefix removes the given prefix from the request path, before the target's path is added. It trims text, not
-// segments: "/api" turns "/apiary" into "/ary".
+// TrimPrefix removes the given prefix from the request path, before the target's path is added. It trims whole
+// segments: "/api" turns "/api/users" into "/users", and "/api" into "", and leaves "/apiary" as it is.
 func (r *ProxyReply) TrimPrefix(prefix string) *ProxyReply {
 	r.trimPrefix = prefix
 	return r
 }
 
-// TrimSuffix removes the given suffix from the request path, before the target's path is added.
+// TrimSuffix removes the given suffix from the request path, before the target's path is added. It trims text, such
+// as an extension: ".json" turns "/users.json" into "/users".
 func (r *ProxyReply) TrimSuffix(suffix string) *ProxyReply {
 	r.trimSuffix = suffix
+	return r
+}
+
+// XForwarded sets the X-Forwarded-For, X-Forwarded-Host and X-Forwarded-Proto headers of the requests the target gets,
+// as httputil.ProxyRequest.SetXForwarded does: the client's address, after those of the proxies the request came
+// through, the host the client asked for, and its scheme. Without it, the target gets the client's, if any.
+func (r *ProxyReply) XForwarded() *ProxyReply {
+	r.xForwarded = true
+	return r
+}
+
+// PreserveHost sends the target the Host the client asked for, in place of the target's own, as for a target that
+// serves several hosts, or that checks which host it is asked for.
+func (r *ProxyReply) PreserveHost() *ProxyReply {
+	r.preserveHost = true
 	return r
 }
 
@@ -151,8 +206,9 @@ func (r *ProxyReply) SkipSSLVerify() *ProxyReply {
 	return r
 }
 
-// SSLVerify sets whether the target's TLS certificate is verified. It isn't by default, so a target with a
-// self-signed certificate answers: set it for a target that gets credentials, such as https://user:pass@api.
+// SSLVerify sets whether the target's TLS certificate is verified, and the certificate of an https proxy on the way,
+// from HTTPS_PROXY. They aren't by default, so a target with a self-signed certificate answers: set it for a target
+// that gets credentials, such as https://user:pass@api.
 func (r *ProxyReply) SSLVerify(v bool) *ProxyReply {
 	r.sslVerify, r.sslVerifySet = v, true
 	return r
@@ -163,17 +219,25 @@ func (r *ProxyReply) SSLVerify(v bool) *ProxyReply {
 // when it was set, so the description loads back on a server whose Config.Transport would refuse it.
 func (r *ProxyReply) Describe() descriptor.Descriptor {
 	props := map[string]any{
-		"target":         r.target.String(),
-		"forward_header": r.proxyHeaders.Clone(),
-		"header":         r.headers.Clone(),
-		"remove_headers": slices.Clone(r.proxyHeadersToRemove),
-		"trim_prefix":    r.trimPrefix,
-		"trim_suffix":    r.trimSuffix,
-		"timeout":        r.timeout.String(),
+		"target":                 r.target.String(),
+		"request_header":         r.requestHeaders.Clone(),
+		"header":                 r.headers.Clone(),
+		"remove_request_headers": slices.Clone(r.removeRequestHeaders),
+		"trim_prefix":            r.trimPrefix,
+		"trim_suffix":            r.trimSuffix,
+		"timeout":                r.timeout.String(),
 	}
 
 	if r.sslVerifySet {
 		props["ssl_verify"] = r.sslVerify
+	}
+
+	if r.xForwarded {
+		props["x_forwarded"] = true
+	}
+
+	if r.preserveHost {
+		props["preserve_host"] = true
 	}
 
 	return descriptor.New("proxy", props)
@@ -190,11 +254,11 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 		return nil, fmt.Errorf("reply_proxy: target %q: %w", displayURL(r.target), err)
 	}
 
-	for name, values := range r.proxyHeaders {
+	for name, values := range r.requestHeaders {
 		// "Te: trailers" is the one hop-by-hop header a proxy sends on, as for a client's.
 		trailers := strings.EqualFold(name, "Te") && !slices.ContainsFunc(values, func(v string) bool { return !strings.EqualFold(v, "trailers") })
 		if !trailers && slices.ContainsFunc(_forbiddenHeaders, func(h string) bool { return strings.EqualFold(h, name) }) {
-			return nil, fmt.Errorf("reply_proxy: forward header %q is hop-by-hop: a proxy doesn't send it on", name)
+			return nil, fmt.Errorf("reply_proxy: request header %q is hop-by-hop: a proxy doesn't send it on", name)
 		}
 	}
 
@@ -211,10 +275,12 @@ func (r *ProxyReply) NewReplier(app *Server) (Replier, error) {
 		id:                   app.id,
 		target:               r.target.Clone(),
 		headers:              r.headers.Clone(),
-		proxyHeaders:         r.proxyHeaders.Clone(),
-		proxyHeadersToRemove: slices.Clone(r.proxyHeadersToRemove),
+		requestHeaders:       r.requestHeaders.Clone(),
+		removeRequestHeaders: slices.Clone(r.removeRequestHeaders),
 		trimPrefix:           r.trimPrefix,
 		trimSuffix:           r.trimSuffix,
+		xForwarded:           r.xForwarded,
+		preserveHost:         r.preserveHost,
 	}
 
 	if rt == nil {
@@ -232,10 +298,12 @@ type proxyReplier struct {
 	id                   string // of the server, which a request that comes back holds in its VLatte-Via
 	target               *url.URL
 	headers              http.Header
-	proxyHeaders         http.Header
-	proxyHeadersToRemove []string
+	requestHeaders       http.Header
+	removeRequestHeaders []string
 	trimPrefix           string
 	trimSuffix           string
+	xForwarded           bool
+	preserveHost         bool
 }
 
 // Reply implements Replier.
@@ -253,16 +321,30 @@ func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, er
 		return nil, fmt.Errorf("reply_proxy: %w", err)
 	}
 
-	out.URL = target
-	out.Host = p.target.Host
+	// A mock whose steps or mappers couldn't apply to a connection that switched protocols doesn't ask for a switch.
+	if input.noSwitch {
+		out.Header.Del(HeaderConnection)
+		out.Header.Del(HeaderUpgrade)
+	}
 
-	for _, h := range p.proxyHeadersToRemove {
+	out.URL = target
+
+	out.Host = p.target.Host
+	if p.preserveHost {
+		out.Host = in.Host
+	}
+
+	if p.xForwarded {
+		(&httputil.ProxyRequest{In: in, Out: out}).SetXForwarded()
+	}
+
+	for _, h := range p.removeRequestHeaders {
 		out.Header.Del(h)
 	}
 
 	// A header of the mock's replaces the client's values of that name: a mock sets a token for the target in place of
 	// the client's, rather than send both.
-	for key, values := range p.proxyHeaders {
+	for key, values := range p.requestHeaders {
 		out.Header[key] = slices.Clone(values)
 	}
 
@@ -298,9 +380,14 @@ func (p *proxyReplier) forwardURL(in *url.URL) (*url.URL, error) {
 	// The trims match the decoded path and cut the escaped path at the same place, so escapes such as "%2F" stay.
 	path, escaped := in.Path, in.EscapedPath()
 
+	// The prefix ends at a segment's end, in the escaped path: what follows starts another segment, or nothing does.
+	// An escaped "/", "%2F", is inside a segment.
 	if rest, ok := strings.CutPrefix(path, p.trimPrefix); ok {
-		escaped = escaped[escapedIndex(escaped, len(p.trimPrefix)):]
-		path = rest
+		at := escapedIndex(escaped, len(p.trimPrefix))
+		if at == len(escaped) || escaped[at] == '/' || strings.HasSuffix(p.trimPrefix, "/") {
+			escaped = escaped[at:]
+			path = rest
+		}
 	}
 
 	if rest, ok := strings.CutSuffix(path, p.trimSuffix); ok {

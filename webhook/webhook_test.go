@@ -183,7 +183,7 @@ func TestWebHook_TLS(t *testing.T) {
 		Headerf(mockhttp.HeaderContentType, mockhttp.MIMETextPlainCharsetUTF8).
 		Reply(mockhttp.OK().PlainText("hello")))
 
-	wh, err := webhook.New(webhook.WithRoundTripper(&http.Transport{
+	wh, err := webhook.New(webhook.WithTransport(&http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true,
 			Certificates:       []tls.Certificate{cert},
@@ -385,7 +385,7 @@ func TestWebHook_AStreamedReplyEndsAfterItsWebhooks(t *testing.T) {
 func TestWebHook_Timeout(t *testing.T) {
 	// The timeout bounds a send: a target that never answers fails it after exactly the timeout.
 	synctest.Test(t, func(t *testing.T) {
-		wh, err := webhook.New(webhook.WithRoundTripper(silent{}), webhook.WithTimeout(time.Minute))
+		wh, err := webhook.New(webhook.WithTransport(silent{}), webhook.WithTimeout(time.Minute))
 		require.NoError(t, err)
 
 		start := time.Now()
@@ -414,7 +414,7 @@ func TestWebHook_TimeoutPrecedence(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				options := []webhook.Option{webhook.WithRoundTripper(silent{})}
+				options := []webhook.Option{webhook.WithTransport(silent{})}
 				if tc.option > 0 {
 					options = append(options, webhook.WithTimeout(tc.option))
 				}
@@ -671,7 +671,7 @@ func TestWebHook_TemplateErrors(t *testing.T) {
 func TestWebHook_KitWithoutAnEngine(t *testing.T) {
 	// A Kit without a template engine renders the event's templates with Go templates, and the Kit's data.
 	rt := &sent{}
-	wh, err := webhook.New(webhook.WithRoundTripper(rt))
+	wh, err := webhook.New(webhook.WithTransport(rt))
 	require.NoError(t, err)
 
 	err = wh.Run(t.Context(), onComplete{params: map[string]any{"url_template": "http://hooks.test/{{ .id }}"}, kit: kit{data: map[string]any{"id": "42"}}})
@@ -684,7 +684,7 @@ func TestWebHook_HeaderTemplateValues(t *testing.T) {
 	// scalar ends with, and a line break inside fails the send before the request is made, whatever the RoundTripper
 	// would do with it.
 	rt := &sent{}
-	wh, err := webhook.New(webhook.WithRoundTripper(rt))
+	wh, err := webhook.New(webhook.WithTransport(rt))
 	require.NoError(t, err)
 
 	send := func(v string) error {
@@ -720,7 +720,7 @@ func TestWebHook_AnAnswerOutside2xxFailsTheSend(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(http.StatusText(tc.status), func(t *testing.T) {
 			rt := &answer{status: tc.status}
-			wh, err := webhook.New(webhook.WithRoundTripper(rt))
+			wh, err := webhook.New(webhook.WithTransport(rt))
 			require.NoError(t, err)
 
 			err = wh.Run(t.Context(), onComplete{params: map[string]any{"method": "POST", "url": "http://hooks.test/x"}})
@@ -739,7 +739,7 @@ func TestWebHook_SendsWhatTheURLAndMethodSay(t *testing.T) {
 	// method: post went out as "post", though request methods match in any case, and the user and password of a URL
 	// were never sent: RoundTrip, unlike http.Client, doesn't send them as Basic auth.
 	rt := &sent{}
-	wh, err := webhook.New(webhook.WithRoundTripper(rt))
+	wh, err := webhook.New(webhook.WithTransport(rt))
 	require.NoError(t, err)
 
 	require.NoError(t, wh.Run(t.Context(), onComplete{params: map[string]any{"method": "post", "url": "http://user:pa%20ss@hooks.test/x"}}))
@@ -773,7 +773,7 @@ func TestWebHook_LogsEachSendOnce(t *testing.T) {
 			out := &logs{}
 			logger := zerolog.New(out)
 
-			wh, err := webhook.New(webhook.WithRoundTripper(&answer{status: tc.status}), webhook.WithLogger(&logger))
+			wh, err := webhook.New(webhook.WithTransport(&answer{status: tc.status}), webhook.WithLogger(&logger))
 			require.NoError(t, err)
 
 			_ = wh.Run(t.Context(), onComplete{params: map[string]any{"url": "http://user:secret@hooks.test/x"}})
@@ -799,7 +799,7 @@ func TestWebHook_LogsWithTheServerLogger(t *testing.T) {
 	logger := zerolog.New(out)
 
 	rt := &sent{}
-	wh, err := webhook.New(webhook.WithRoundTripper(rt))
+	wh, err := webhook.New(webhook.WithTransport(rt))
 	require.NoError(t, err)
 
 	require.NoError(t, wh.Run(t.Context(), onComplete{params: map[string]any{"url": "http://hooks.test/direct"}, logger: &logger}))
@@ -960,7 +960,7 @@ func TestWebHook_SendsThroughTheServerTransport(t *testing.T) {
 
 			var options []webhook.Option
 			if tt.own {
-				options = append(options, webhook.WithRoundTripper(own))
+				options = append(options, webhook.WithTransport(own))
 			}
 
 			wh, err := webhook.New(options...)
@@ -1029,7 +1029,7 @@ func TestWebHook_Delay(t *testing.T) {
 	t.Run("sent after the delay", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			rt := &clocked{}
-			wh, err := webhook.New(webhook.WithRoundTripper(rt))
+			wh, err := webhook.New(webhook.WithTransport(rt))
 			require.NoError(t, err)
 
 			start := time.Now()
@@ -1042,7 +1042,7 @@ func TestWebHook_Delay(t *testing.T) {
 
 	t.Run("the timeout counts from the send", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			wh, err := webhook.New(webhook.WithRoundTripper(silent{}), webhook.WithTimeout(time.Second))
+			wh, err := webhook.New(webhook.WithTransport(silent{}), webhook.WithTimeout(time.Second))
 			require.NoError(t, err)
 
 			start := time.Now()
@@ -1056,7 +1056,7 @@ func TestWebHook_Delay(t *testing.T) {
 	t.Run("a context that ends during the delay sends nothing", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			rt := &clocked{}
-			wh, err := webhook.New(webhook.WithRoundTripper(rt))
+			wh, err := webhook.New(webhook.WithTransport(rt))
 			require.NoError(t, err)
 
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)

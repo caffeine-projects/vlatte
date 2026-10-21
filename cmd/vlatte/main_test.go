@@ -3,7 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
@@ -702,4 +708,116 @@ func TestCLI_IsAForwardProxy(t *testing.T) {
 	status, body = proxyAnswer(t, addr, host.URL+"/other")
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, "host /other", body)
+}
+
+func TestCLI_ProxiesWhatNoMockMatches(t *testing.T) {
+	// --proxy-all-target sends what no mock matches on to the target, as WireMock's --proxy-all does. With --record,
+	// the target's answers are recorded, and a later run serves them without the target.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, "target "+r.URL.Path)
+	}))
+	t.Cleanup(target.Close)
+
+	mocks := filepath.Join(t.TempDir(), "mocked.mock.yaml")
+	require.NoError(t, os.WriteFile(mocks, []byte("request: {method: GET, path: /mocked}\nresponse: {status: 200, body: mocked}\n"), 0o600))
+
+	addr := randomAddr(t)
+	stop := start(t, "--addr", addr, "--mock-files", mocks, "--proxy-all-target", target.URL, "--record", "--log-level", "disabled")
+
+	status, body := firstAnswer(t, "http://"+addr+"/mocked")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "mocked", body)
+
+	status, body = firstAnswer(t, "http://"+addr+"/other")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "target /other", body)
+
+	require.Equal(t, 0, stop(), "a stopped server exits cleanly")
+	target.Close()
+
+	addr = randomAddr(t)
+	start(t, "--addr", addr, "--log-level", "disabled")
+
+	status, body = firstAnswer(t, "http://"+addr+"/other")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "target /other", body, "the recording of what proxy_all answered")
+}
+
+// writeCA writes the certificate and the key of a CA, as PEM files, into dir.
+func writeCA(t *testing.T, dir string) (string, string) {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	template := &x509.Certificate{
+		Subject:               pkix.Name{CommonName: "test CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	require.NoError(t, err)
+
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(key)
+	require.NoError(t, err)
+
+	certFile, keyFile := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "ca-key.pem")
+	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600))
+	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8}), 0o600))
+
+	return certFile, keyFile
+}
+
+func TestCLI_InterceptsHTTPS(t *testing.T) {
+	// --proxy-intercept, with the CA's files, has the forward proxy serve the TLS of its tunnels: a client that trusts
+	// the CA gets the mocks' answers to its HTTPS requests, for any host.
+	withoutDockerHost(t)
+
+	dir := t.TempDir()
+	certFile, keyFile := writeCA(t, dir)
+
+	mocks := filepath.Join(dir, "https.mock.yaml")
+	require.NoError(t, os.WriteFile(mocks, []byte("request: {method: GET, path: /mocked}\nresponse: {status: 200, body: mocked}\n"), 0o600))
+
+	addr := randomAddr(t)
+	start(t, "--addr", addr, "--proxy-intercept", "--proxy-ca-cert", certFile, "--proxy-ca-key", keyFile,
+		"--mock-files", mocks, "--log-level", "disabled")
+
+	ca, err := os.ReadFile(certFile)
+	require.NoError(t, err)
+
+	pool := x509.NewCertPool()
+	require.True(t, pool.AppendCertsFromPEM(ca))
+
+	proxyURL, err := url.Parse("http://" + addr)
+	require.NoError(t, err)
+
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL), TLSClientConfig: &tls.Config{RootCAs: pool}}
+	t.Cleanup(transport.CloseIdleConnections)
+
+	client := &http.Client{Transport: transport}
+
+	var body []byte
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res, err := client.Get("https://api.example.com/mocked")
+		if !assert.NoError(c, err) {
+			return
+		}
+
+		defer res.Body.Close()
+
+		body, err = io.ReadAll(res.Body)
+		assert.NoError(c, err)
+	}, 10*time.Second, 100*time.Millisecond)
+
+	require.Equal(t, "mocked", string(body))
 }

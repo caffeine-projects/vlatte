@@ -74,6 +74,10 @@ type selectorInput struct {
 
 	// ParsedBody is the parsed http.Request body.
 	ParsedBody any
+
+	// ForProxy is set on a request the server's forward proxy sends on to the host it names: a CONNECT, or a request
+	// in absolute form.
+	ForProxy bool
 }
 
 type expectation = vlatte.Eval[*selectorInput]
@@ -90,6 +94,7 @@ type mockSpec struct {
 	events       []vlatte.EventConfig
 	callbacks    []vlatte.Callback
 	steps        []vlatte.Step
+	fallback     bool // a ProxyAll mock's: its description holds its reply under proxy_all
 }
 
 // clone returns a copy of s that shares no slice with it, so changing one doesn't change the other.
@@ -335,7 +340,8 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		data["name"] = m.Name()
 	}
 
-	if m.Priority() != 0 {
+	// A fallback, as ProxyAll's mock, without a priority loads back last, at math.MaxInt: its 0 goes too.
+	if m.Priority() != 0 || m.spec.fallback {
 		data["priority"] = m.Priority()
 	}
 
@@ -351,6 +357,12 @@ func (m *Mock) Describe() descriptor.Descriptor {
 	// The reply as it was when the mock was built: changing it afterwards changes only the mocks built afterwards.
 	if m.replyDesc.IsMap() {
 		m.replyDesc.Merge(data)
+	}
+
+	// A ProxyAll mock given another reply has no proxy reply to describe.
+	if proxy, ok := data["proxy"]; ok && m.spec.fallback {
+		data["proxy_all"] = proxy
+		delete(data, "proxy")
 	}
 
 	if events := describeEvents(m.spec.events); len(events) > 0 {

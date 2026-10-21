@@ -19,16 +19,43 @@ import (
 
 var _ net.Conn = (*bufferedConn)(nil)
 
-// tunnels holds the connections of the open tunnels. The server doesn't track a connection once it is hijacked, so
-// Server.Close closes them.
+// tunnels holds the connections of the open tunnels, CONNECT ones and those of protocol switches. The server doesn't
+// track a connection once it is hijacked, nor wait for its handler, so Server.Close closes them, and waits for each add
+// to be removed.
 type tunnels struct {
-	mu     sync.Mutex
-	conns  map[net.Conn]struct{}
-	closed bool
+	mu      sync.Mutex
+	conns   map[io.Closer]struct{}
+	closed  bool
+	open    sync.WaitGroup // an add that wasn't removed yet
+	closing chan struct{}  // closed by closeAll
 }
 
-// add tracks conns until remove. It reports false, and tracks nothing, once closeAll ran: the caller closes them.
-func (t *tunnels) add(conns ...net.Conn) bool {
+// bind returns ctx, ended by closeAll too, and a func that releases it.
+func (t *tunnels) bind(ctx context.Context) (context.Context, context.CancelFunc) {
+	t.mu.Lock()
+	if t.closing == nil {
+		t.closing = make(chan struct{})
+	}
+
+	closing := t.closing
+	t.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(ctx)
+
+	go func() {
+		select {
+		case <-closing:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	return ctx, cancel
+}
+
+// add tracks conns until a remove of them. It reports false, and tracks nothing, once closeAll ran: the caller closes
+// them.
+func (t *tunnels) add(conns ...io.Closer) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -36,8 +63,10 @@ func (t *tunnels) add(conns ...net.Conn) bool {
 		return false
 	}
 
+	t.open.Add(1)
+
 	if t.conns == nil {
-		t.conns = make(map[net.Conn]struct{})
+		t.conns = make(map[io.Closer]struct{})
 	}
 
 	for _, c := range conns {
@@ -47,28 +76,41 @@ func (t *tunnels) add(conns ...net.Conn) bool {
 	return true
 }
 
-// remove stops tracking conns.
-func (t *tunnels) remove(conns ...net.Conn) {
+// remove stops tracking conns, which one add tracked.
+func (t *tunnels) remove(conns ...io.Closer) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	for _, c := range conns {
 		delete(t.conns, c)
 	}
+
+	t.open.Done()
 }
 
-// closeAll closes the connections it tracks, and those added later.
+// closeAll closes the connections it tracks, and those added later, and waits until the handlers that added them
+// removed them.
 func (t *tunnels) closeAll() {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 
-	t.closed = true
+	if t.closing == nil {
+		t.closing = make(chan struct{})
+	}
+
+	// Server.Close may run more than once.
+	if !t.closed {
+		t.closed = true
+		close(t.closing)
+	}
 
 	for c := range t.conns {
 		_ = c.Close()
 	}
 
 	clear(t.conns)
+	t.mu.Unlock()
+
+	t.open.Wait()
 }
 
 // bufferedConn is a connection whose first bytes were read into r already, such as by an HTTP parser: it reads them
@@ -83,7 +125,8 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }
 
-// CloseWrite ends what goes out on the connection, so the peer reads to its end, and leaves what comes in open.
+// CloseWrite ends what goes out on the connection, so the peer reads to its end, and leaves what comes in open. A
+// connection that can't is closed.
 func (c *bufferedConn) CloseWrite() error {
 	return closeWrite(c.Conn)
 }
@@ -103,9 +146,9 @@ func hijack(w http.ResponseWriter) (net.Conn, error) {
 // pipe copies client to upstream and upstream to client until both directions end. A side that ends what it sends has
 // the other side read to an end, so the other direction goes on until its own end. A side that breaks off ends both:
 // the other direction has nowhere to go. It returns the first error that isn't the end of a connection.
-func pipe(client, upstream net.Conn) error {
+func pipe(client, upstream io.ReadWriteCloser) error {
 	errs := make(chan error, 2)
-	copyTo := func(dst, src net.Conn) {
+	copyTo := func(dst, src io.ReadWriteCloser) {
 		_, err := io.Copy(dst, src)
 		if err != nil {
 			_ = dst.Close()
@@ -131,15 +174,18 @@ func pipe(client, upstream net.Conn) error {
 }
 
 // closeWrite ends what goes out on c, and leaves what comes in open, when c can: a connection that can't is closed.
-func closeWrite(c net.Conn) error {
+func closeWrite(c io.ReadWriteCloser) error {
 	if cw, ok := c.(interface{ CloseWrite() error }); ok {
-		return cw.CloseWrite()
+		if err := cw.CloseWrite(); err == nil {
+			return nil
+		}
 	}
 
 	return c.Close()
 }
 
-// dial opens a connection to host, the host:port of a CONNECT, for a tunnel, within the proxy's timeout. It goes
+// dial opens a connection to host, the host:port of a CONNECT, for a tunnel, within the proxy's timeout, and within the
+// limits of the transport the proxy makes: to connect, and for a TLS handshake with an https proxy on the way. It goes
 // through the proxy that the transport the proxy made picks for host, Via or the proxy of the environment, with a
 // CONNECT of its own, which carries via, the VLatte-Via of the request. Without one, or with a transport of the
 // caller's, it dials host.
@@ -159,10 +205,8 @@ func (p *forwardProxy) dial(ctx context.Context, host string, via []string) (net
 		}
 	}
 
-	var dialer net.Dialer
-
 	if proxyURL == nil {
-		conn, err := dialer.DialContext(ctx, "tcp", host)
+		conn, err := p.dialer.DialContext(ctx, "tcp", host)
 		if err != nil {
 			return nil, fmt.Errorf("proxy: opening a tunnel to %s: %w", host, err)
 		}
@@ -170,7 +214,7 @@ func (p *forwardProxy) dial(ctx context.Context, host string, via []string) (net
 		return conn, nil
 	}
 
-	conn, err := p.dialVia(ctx, &dialer, proxyURL, host, via)
+	conn, err := p.dialVia(ctx, proxyURL, host, via)
 	if err != nil {
 		return nil, fmt.Errorf("proxy: opening a tunnel to %s through %s: %w", host, displayURL(proxyURL), err)
 	}
@@ -180,14 +224,14 @@ func (p *forwardProxy) dial(ctx context.Context, host string, via []string) (net
 
 // dialVia opens a connection to host through the proxy at proxyURL: a SOCKS5 one, or an http or https one, with a
 // CONNECT.
-func (p *forwardProxy) dialVia(ctx context.Context, dialer *net.Dialer, proxyURL *url.URL, host string, via []string) (net.Conn, error) {
+func (p *forwardProxy) dialVia(ctx context.Context, proxyURL *url.URL, host string, via []string) (net.Conn, error) {
 	addr := viaAddr(proxyURL)
 
 	if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
-		return dialSOCKS5(ctx, dialer, addr, proxyURL.User, host)
+		return dialSOCKS5(ctx, p.dialer, addr, proxyURL.User, host)
 	}
 
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	conn, err := p.dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
@@ -200,8 +244,13 @@ func (p *forwardProxy) dialVia(ctx context.Context, dialer *net.Dialer, proxyURL
 		cfg := p.owned.TLSClientConfig.Clone()
 		cfg.ServerName = proxyURL.Hostname()
 
+		handshake, cancel := context.WithTimeout(ctx, p.handshakeTimeout)
 		tlsConn := tls.Client(conn, cfg)
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
+		err := tlsConn.HandshakeContext(handshake)
+
+		cancel()
+
+		if err != nil {
 			_ = conn.Close()
 			return nil, err
 		}

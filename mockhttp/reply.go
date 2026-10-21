@@ -32,6 +32,10 @@ var errNoReplier = errors.New("reply: the factory made no replier")
 type ReplyInput struct {
 	RequestValues *RequestValues
 	Writer        http.ResponseWriter
+
+	// noSwitch keeps a proxy reply from asking its target to switch protocols, for a mock whose steps or response
+	// mappers couldn't apply to the connection: the target answers as to any request.
+	noSwitch bool
 }
 
 // newReplier asks f for the Replier of a mock of app. A factory that makes none fails the build here: the nil Replier

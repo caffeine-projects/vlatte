@@ -28,6 +28,8 @@ const (
 	_example          = `  vlatte
   vlatte --addr=:3000
   vlatte --proxy
+  vlatte --proxy --proxy-intercept --proxy-ca-cert=ca.pem --proxy-ca-key=ca-key.pem
+  vlatte --proxy-all-target=https://api.example.com
   vlatte --proxy --record
   vlatte --record --record-target=https://api.example.com
   vlatte --admin-addr=127.0.0.1:8081
@@ -204,8 +206,8 @@ Commands:
 Examples:
 %s
 Settings apply in this order, each overriding the ones before: defaults, the %s.{json,yaml,yml} file
-in %s, %s_* environment variables, then flags. Setting a key of the cors, proxy, record or admin
-section turns the section on. The admin API is on, on a random local port: --admin=false turns it off.
+in %s, %s_* environment variables, then flags. Setting a key of the cors, proxy, proxy_all, record or
+admin section turns the section on. The admin API is on, on a random local port: --admin=false turns it off.
 
 Settings:
 %s`,

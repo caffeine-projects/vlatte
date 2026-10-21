@@ -136,20 +136,33 @@ func parseRequestBody(app *Server, r *http.Request) (parsedBody any, rawBody []b
 
 	rawBody, err = io.ReadAll(reader)
 
-	// The returns below can clear rawBody before the deferred call runs.
+	// The returns below can clear rawBody before the deferred call runs. A body shorter than the limit was read whole.
 	read := rawBody
+	whole := err == nil && (app.config.MaxBodyParsingLimit <= 0 || int64(len(read)) < app.config.MaxBodyParsingLimit)
 	parsing := io.NopCloser(bytes.NewReader(read))
 	r.Body = parsing
 
 	// A parser that replaced the body, such as with the body it decoded, keeps it. The replacement can't read rest,
-	// which no parser sees: rest closes here, as rereadBody closes it otherwise.
+	// which no parser sees: rest closes here, as rereadBody closes it otherwise. A body read whole can be read again,
+	// with GetBody: a proxy's transport sends it again on a new connection when the one it reused was closed.
 	defer func() {
-		if r.Body == parsing {
-			r.Body = rereadBody{Reader: io.MultiReader(bytes.NewReader(read), rest), Closer: rest}
-			return
-		}
+		switch {
+		case r.Body != parsing:
+			rest.Close()
+		case whole && len(read) == 0:
+			// An empty body goes on as none, with a Content-Length of 0: the transport would send another body chunked.
+			rest.Close()
 
-		rest.Close()
+			r.Body = http.NoBody
+			r.GetBody = func() (io.ReadCloser, error) { return http.NoBody, nil }
+		case whole:
+			rest.Close()
+
+			r.Body = io.NopCloser(bytes.NewReader(read))
+			r.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(read)), nil }
+		default:
+			r.Body = rereadBody{Reader: io.MultiReader(bytes.NewReader(read), rest), Closer: rest}
+		}
 	}()
 
 	if err != nil {

@@ -5,11 +5,11 @@ request:
 
 proxy:
   target: http://target.invalid
-  forward_header:
+  request_header:
     test: ok
   header:
     res: example
-  remove_headers:
+  remove_request_headers:
     - del
   ssl_verify: false
   timeout: 5s

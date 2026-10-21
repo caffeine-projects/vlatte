@@ -79,7 +79,7 @@ type Config struct {
 
 	// Transport sends what the server sends: the requests of proxy replies, of the recording target, of the forward
 	// proxy and of webhooks. Each takes its own transport first, when it has one: ProxyReply.Transport,
-	// RecordConfig.Transport, ProxyConfig.Transport or webhook.WithRoundTripper. For upstreams with different needs,
+	// RecordConfig.Transport, ProxyConfig.Transport or webhook.WithTransport. For upstreams with different needs,
 	// give each its own, or pass one that picks a transport by req.URL.Host. It is the caller's: the server never
 	// closes it.
 	//
@@ -95,6 +95,10 @@ type Config struct {
 	// WebhookTimeout is how long a webhook waits for its answer, from the setting webhook.timeout, unless the webhook
 	// has a timeout of its own, as webhook.WithTimeout gives. 0 uses the webhook's default, 10s.
 	WebhookTimeout time.Duration
+
+	// proxyAll is the proxy reply of the setting proxy_all, which answers the requests no mock matches, without a
+	// mock: see Server.proxyAll. Code mocks ProxyAll itself.
+	proxyAll *proxyDef
 }
 
 // Apply copies the current Config struct values to the given Config parameter.
@@ -141,6 +145,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.MockFileHandlers = c.MockFileHandlers
 	conf.Transport = c.Transport
 	conf.HeaderNamesToRedact = c.HeaderNamesToRedact
+	conf.proxyAll = c.proxyAll
 
 	return nil
 }

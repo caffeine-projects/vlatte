@@ -168,8 +168,8 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"proxy target that isn't absolute", ok + "proxy: {target: /x}\n", []want{{config.CodeInvalidValue, "proxy.target", "expected an absolute http or https URL", ""}}},
 		{"proxy target that isn't http", ok + "proxy: {target: 'ftp://files.local'}\n", []want{{config.CodeInvalidValue, "proxy.target", "expected an absolute http or https URL", ""}}},
 		{"negative proxy timeout", ok + "proxy: {target: 'http://a', timeout: -1}\n", []want{{config.CodeInvalidValue, "proxy.timeout", "proxy.timeout must be 0 or more, not -1", ""}}},
-		{"remove_headers as an object", ok + "proxy: {target: 'http://a', remove_headers: {a: 1}}\n", []want{{config.CodeInvalidValue, "proxy.remove_headers", "proxy.remove_headers must be a list of strings, not an object", ""}}},
-		{"remove_headers as text", ok + "proxy: {target: 'http://a', remove_headers: 'a, b'}\n", []want{{config.CodeInvalidValue, "proxy.remove_headers", "must be a list of strings, not a string", `write a list: ["a", "b"]`}}},
+		{"remove_request_headers as an object", ok + "proxy: {target: 'http://a', remove_request_headers: {a: 1}}\n", []want{{config.CodeInvalidValue, "proxy.remove_request_headers", "proxy.remove_request_headers must be a list of strings, not an object", ""}}},
+		{"remove_request_headers as text", ok + "proxy: {target: 'http://a', remove_request_headers: 'a, b'}\n", []want{{config.CodeInvalidValue, "proxy.remove_request_headers", "must be a list of strings, not a string", `write a list: ["a", "b"]`}}},
 		{"target as a number", ok + "proxy: {target: 5}\n", []want{{config.CodeInvalidValue, "proxy.target", "proxy.target must be a string, not a number", `write it in quotes: "5"`}}},
 		{"ext as a list", ok + "ext: [1]\n", []want{{config.CodeInvalidValue, "ext", "must be an object, not a list", ""}}},
 	}
@@ -501,9 +501,9 @@ func TestMockFile_ProxyKeys(t *testing.T) {
 request: {path: /api/users.json}
 proxy:
   target: ` + target.URL + `
-  forward_header: {X-Fwd: a}
+  request_header: {X-Fwd: a}
   header: {X-Res: [b, c]}
-  remove_headers: [X-Drop]
+  remove_request_headers: [X-Drop]
   trim_prefix: /api
   trim_suffix: .json
   timeout: 1500

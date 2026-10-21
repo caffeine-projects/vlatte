@@ -1190,3 +1190,59 @@ func TestRecording_StreamingAnswersStillStream(t *testing.T) {
 	stopRecording(t, m)
 	require.Equal(t, "data: first\n\ndata: last\n\n", onlyMock(t, dir).Response.Body)
 }
+
+func TestRecording_ASwitchedConnectionIsNotRecorded(t *testing.T) {
+	// A call that switched protocols through a proxy reply, here a mock file's, has no response to record: the
+	// connection belongs to the client and the target from then on.
+	target := switchingTarget(t, "echo")
+	dir := t.TempDir()
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(FromBytes([]byte("request: {path: /ws}\nproxy: {target: '"+target.URL+"'}\n"), "yaml"))
+
+	require.NoError(t, m.StartRecording(RecordDir(dir), RecordIncludeMocked(true)))
+
+	conn, br, res := switchThrough(t, m, "/ws")
+	require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
+
+	_, err := io.WriteString(conn, "switched\n")
+	require.NoError(t, err)
+
+	line, err := br.ReadString('\n')
+	require.NoError(t, err)
+	require.Equal(t, "switched\n", line)
+	require.NoError(t, conn.Close())
+
+	require.Empty(t, stopRecording(t, m).Recordings)
+}
+
+func TestRecording_InterceptedHTTPS(t *testing.T) {
+	// The requests of an intercepted HTTPS connection are the server's own: those no mock matches get their host's
+	// answer, which is recorded, as for a request in absolute form.
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(HeaderContentType, MIMETextPlain)
+		_, _ = io.WriteString(w, "host "+r.URL.Path)
+	}))
+	t.Cleanup(target.Close)
+
+	dir := t.TempDir()
+
+	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	require.NoError(t, m.StartRecording(RecordDir(dir)))
+
+	res, err := interceptClient(t, m).Get(target.URL + "/items?page=2")
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	result := stopRecording(t, m)
+	require.Len(t, result.Recordings, 1)
+
+	mock := onlyMock(t, dir)
+	require.Equal(t, "/items?page=2", mock.Request.URL)
+	require.Equal(t, "host /items", mock.Response.Body)
+}

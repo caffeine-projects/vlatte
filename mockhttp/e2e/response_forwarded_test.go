@@ -41,9 +41,9 @@ func TestProxiedReplies(t *testing.T) {
 	scoped := m.MustMock(mockhttp.Post(match.URLPath("/test")).
 		Body(match.StrictEqual("hello world")).
 		Reply(mockhttp.From(dest.URL).
-			ForwardHeader("x-test", "ok").
+			RequestHeader("x-test", "ok").
 			Header("x-res", "example").
-			RemoveProxyHeaders("x-del")))
+			RemoveRequestHeaders("x-del")))
 
 	data := strings.NewReader("hello world")
 	req, _ := http.NewRequest(http.MethodPost, m.URL()+"/test", data)
@@ -147,4 +147,31 @@ func TestProxiedReplies_TheFragmentStaysHere(t *testing.T) {
 	res, body := getTarget(t, m, "/test#contacts")
 	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
 	require.Equal(t, "/test", string(body))
+}
+
+func TestProxiedReplyMockFileTellsTheTargetAboutTheClient(t *testing.T) {
+	// A mock file's proxy reply trims whole segments, and with x_forwarded and preserve_host, the target gets the
+	// client's details and the Host it asked for.
+	got := make(chan *http.Request, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got <- r }))
+	t.Cleanup(target.Close)
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.FromBytes(forwardingTo(t, "testdata/response_forwarded/client_details.yaml", target.URL), "yaml"))
+
+	res, err := http.Get(m.URL("/api/items"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	host := strings.TrimPrefix(m.URL(), "http://")
+	r := <-got
+	require.Equal(t, "/items", r.URL.Path)
+	require.Equal(t, host, r.Host)
+	require.Equal(t, "127.0.0.1", r.Header.Get("X-Forwarded-For"))
+	require.Equal(t, host, r.Header.Get("X-Forwarded-Host"))
+	require.Equal(t, "http", r.Header.Get("X-Forwarded-Proto"))
 }

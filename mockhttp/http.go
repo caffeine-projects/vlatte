@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"maps"
@@ -60,6 +61,13 @@ type Server struct {
 
 	// tunnels holds the connections of the forward proxy's open tunnels, which Close closes.
 	tunnels tunnels
+
+	// proxyAll answers the requests no mock matches, when the setting proxy_all is set.
+	proxyAll Replier
+
+	// handler serves the requests, middlewares included, such as those within the tunnels the forward proxy
+	// intercepts.
+	handler http.Handler
 
 	data    map[string]any
 	logger  *zerolog.Logger
@@ -203,6 +211,7 @@ func New(config ...Option) (*Server, error) {
 
 	// Outermost: the decorator and the middlewares see the fragment in r.URL too.
 	handler = withFragment(handler)
+	app.handler = handler
 
 	factory := conf.BackendFactory
 
@@ -223,6 +232,14 @@ func New(config ...Option) (*Server, error) {
 	app.loaders = loaders
 	app.files = files
 	app.proxy = p
+
+	// The setting proxy_all answers what no mock matches: as a mock, it would count in assertions, and Clean and
+	// Disable would drop it.
+	if def := conf.proxyAll; def != nil {
+		if app.proxyAll, err = def.build().NewReplier(app); err != nil {
+			return nil, fmt.Errorf("server: proxy_all: %w", err)
+		}
+	}
 	app.requestBodyParsers = parsers
 	app.events = eventRunner
 	app.webhooks = newWebhookTransport()
@@ -432,6 +449,10 @@ func (app *Server) Close() {
 		app.logger.Debug().Err(err).Msg("server: Close: error closing server")
 	}
 
+	// The backend doesn't track the connections it handed over to tunnels, nor wait for their handlers, such as the
+	// requests of intercepted connections: they end before the recording and the mocks do.
+	app.tunnels.closeAll()
+
 	// The recording logged each call it couldn't record. The server closes: it serves nothing more.
 	_, _ = app.stopRecording(context.Background(), false)
 
@@ -447,10 +468,21 @@ func (app *Server) Close() {
 		app.proxy.close()
 	}
 
-	// The backend doesn't track the connections it handed over to tunnels.
-	app.tunnels.closeAll()
+	if closer, ok := app.proxyAll.(io.Closer); ok {
+		_ = closer.Close()
+	}
 
 	app.webhooks.CloseIdleConnections()
+}
+
+// ProxyCA returns the certificate of the CA that signs the certificates of the hosts the forward proxy intercepts, for
+// clients to trust, or nil when it doesn't intercept. See ProxyConfig.Intercept.
+func (app *Server) ProxyCA() *x509.Certificate {
+	if app.proxy == nil || app.proxy.interceptor == nil {
+		return nil
+	}
+
+	return app.proxy.interceptor.ca
 }
 
 // SetData sets the data templates read as .Data, such as the URL of another server: {{ .Data.target }}. The server
@@ -495,7 +527,20 @@ func (app *Server) DescribeConfig() string {
 	if app.config.Proxy != nil {
 		buf.WriteString("Forward Proxy: ")
 		buf.WriteString("enabled")
+
+		if app.config.Proxy.Intercept {
+			buf.WriteString(", intercepting HTTPS")
+		}
+
 		buf.WriteString("\n")
+	}
+
+	if def := app.config.proxyAll; def != nil {
+		if target, err := checkTargetURL(def.target); err == nil {
+			buf.WriteString("Proxy All: ")
+			buf.WriteString(displayURL(target))
+			buf.WriteString("\n")
+		}
 	}
 
 	if app.config.Record != nil {

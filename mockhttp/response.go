@@ -48,6 +48,10 @@ type Response struct {
 
 	// proxied is set on the response of a target, which recordings keep.
 	proxied bool
+
+	// upgrade is the connection to a target that switched protocols, as to a WebSocket: the server pipes it to the
+	// client's, rather than render a body.
+	upgrade io.ReadWriteCloser
 }
 
 func newResponse() *Response {
