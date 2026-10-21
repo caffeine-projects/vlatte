@@ -323,6 +323,11 @@ func TestParseURL_KeepsThePathAsSent(t *testing.T) {
 			giveMethod: http.MethodGet, giveTarget: "http://api.local:8443/x",
 			wantURL: "http://api.local:8443/x", wantPath: "/x", wantSegments: []string{"x"},
 		},
+		// A port is the default of its own scheme only.
+		{
+			giveMethod: http.MethodGet, giveTarget: "http://api.local:443/x",
+			wantURL: "http://api.local:443/x", wantPath: "/x", wantSegments: []string{"x"},
+		},
 		{
 			giveMethod: http.MethodGet, giveTarget: "https://[::1]:443/x",
 			wantURL: "https://[::1]/x", wantPath: "/x", wantSegments: []string{"x"},

@@ -290,28 +290,50 @@ func TestMock_ADescribedRequestPartLoadsBackAndMatchesTheSame(t *testing.T) {
 
 func TestMock_ADescriptionKeepsTheScenarioAndRepeat(t *testing.T) {
 	// A mock described its scenario and repeat as a single argument, which the description dropped, as it merged maps
-	// only: saved through the admin API, a mock of one request served every request, outside its scenario.
-	built := MustNew(Setup().Silent())
-	built.MustStart()
-	t.Cleanup(built.Close)
+	// only: saved through the admin API, a mock of one request served every request, outside its scenario. Each mock
+	// below misses its second request only through the key it tests.
+	tests := []struct {
+		name    string
+		give    *Builder
+		wantKey string
+		want    any
+	}{
+		{
+			name:    "repeat",
+			give:    Getf("/x").Times(1),
+			wantKey: "repeat",
+			want:    float64(1),
+		},
+		{
+			name:    "scenario",
+			give:    Getf("/x").ScenarioIs("checkout").ScenarioStateIs("started").ScenarioStateWillBe("paid"),
+			wantKey: "scenario",
+			want:    map[string]any{"name": "checkout", "required_state": "started", "new_state": "paid"},
+		},
+	}
 
-	desc, err := built.MustMock(Getf("/x").Times(1).
-		ScenarioIs("checkout").ScenarioStateIs("started").ScenarioStateWillBe("paid").
-		Reply(OK())).Mocks()[0].MarshalJSON()
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			built := MustNew(Setup().Silent())
+			built.MustStart()
+			t.Cleanup(built.Close)
 
-	var doc map[string]any
-	require.NoError(t, json.Unmarshal(desc, &doc))
-	require.Equal(t, float64(1), doc["repeat"], string(desc))
-	require.Equal(t, map[string]any{"name": "checkout", "required_state": "started", "new_state": "paid"}, doc["scenario"], string(desc))
+			desc, err := built.MustMock(tt.give.Reply(OK())).Mocks()[0].MarshalJSON()
+			require.NoError(t, err)
 
-	loaded := MustNew(Setup().Silent())
-	loaded.MustStart()
-	t.Cleanup(loaded.Close)
-	loaded.MustMock(FromBytes(desc, "json"))
+			var doc map[string]any
+			require.NoError(t, json.Unmarshal(desc, &doc))
+			require.Equal(t, tt.want, doc[tt.wantKey], string(desc))
 
-	require.Equal(t, http.StatusOK, getTarget(t, loaded, "/x"))
-	require.Equal(t, StatusNoMatch, getTarget(t, loaded, "/x"), "it serves one request")
+			loaded := MustNew(Setup().Silent())
+			loaded.MustStart()
+			t.Cleanup(loaded.Close)
+			loaded.MustMock(FromBytes(desc, "json"))
+
+			require.Equal(t, http.StatusOK, getTarget(t, loaded, "/x"))
+			require.Equal(t, StatusNoMatch, getTarget(t, loaded, "/x"), string(desc))
+		})
+	}
 }
 
 // getTarget sends a GET with target as the request target, as is, and returns the status: Go's http.Client doesn't
