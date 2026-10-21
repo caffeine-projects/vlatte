@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 )
 
 var (
@@ -62,6 +63,7 @@ func (in *interceptors) UnaryInterceptor(
 	}
 
 	if !pass {
+		in.app.publish(handler.EventUnmatched, info.FullMethod, nil, nil)
 		return nil, fail(ctx, vlatte.FailureNoMatch, codes.NotFound, "unary: request was not matched with any mock")
 	}
 
@@ -73,10 +75,12 @@ func (in *interceptors) UnaryInterceptor(
 	rv := &UnaryRequestValues{reqMsg, info, rawBody, in.app}
 	res, err := mock.unaryReply.Reply(ctx, rv)
 	if err != nil {
+		in.app.publishReply(info.FullMethod, mock, err)
 		return nil, replyError(ctx, "unary", mock, err)
 	}
 
 	mock.Inc()
+	in.app.publish(handler.EventMatched, info.FullMethod, mock, nil)
 
 	return res, nil
 }

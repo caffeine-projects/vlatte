@@ -32,8 +32,13 @@ const (
   vlatte --proxy-all-target=https://api.example.com
   vlatte --proxy --record
   vlatte --record --record-target=https://api.example.com
+  vlatte --admin-addr=127.0.0.1:8081
 `
 	_helpHint = "Run 'vlatte --help' to list flags, environment variables and file keys."
+
+	// _adminDir is where the command keeps the mocks its admin API adds, across restarts. The default mock file
+	// patterns don't match it, so only the admin API's store loads its files.
+	_adminDir = "testdata/_admin"
 )
 
 var (
@@ -127,7 +132,11 @@ func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stder
 	// waiting for their answers as long as the server's webhook.timeout setting says.
 	wh := &webhook.WebHook{}
 
+	// The command serves the admin API, which keeps the mocks it adds across restarts, unless settings turn either off:
+	// they apply after code.
 	m, err := mockhttp.New(mockhttp.Setup().
+		Admin(adminAddr()).
+		AdminStore(mockhttp.FileStore(_adminDir)).
 		ConfigSources(mockhttp.DefaultConfigSources(args)...).
 		OnCompleteListener("webhook", wh))
 	if errors.Is(err, flag.ErrHelp) {
@@ -203,14 +212,15 @@ Commands:
 Examples:
 %s
 Settings apply in this order, each overriding the ones before: defaults, the %s.{json,yaml,yml} file
-in %s, %s_* environment variables, then flags. Setting a key of the cors, proxy, proxy_all or record section
-turns the section on.
+in %s, %s_* environment variables, then flags. Setting a key of the cors, proxy, proxy_all, record or
+admin section turns the section on. The admin API is on, on a random local port: --admin=false turns it off.
+It keeps the mocks it adds in %s, across restarts: --admin-dir="" keeps them in memory.
 
 Settings:
 %s`,
 		root.Long, root.Use, root.Use, commands.String(), root.Example,
 		mockhttp.DefaultConfigFileName, strings.Join(mockhttp.DefaultConfigDirectories, " or "), mockhttp.EnvPrefix,
-		mockhttp.ConfigUsage())
+		_adminDir, mockhttp.ConfigUsage())
 }
 
 // registerCompletions declares the server flags to cobra, which completes their names.

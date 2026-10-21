@@ -1265,3 +1265,54 @@ func TestWebHook_ADescribedMockSendsTheSameWebhook(t *testing.T) {
 		})
 	}
 }
+
+func TestWebHook_ASavedMockStillSendsItsBodyFile(t *testing.T) {
+	// The admin API saves a mock as a mock file, which names the body file of its webhook from its own directory: the
+	// webhook sends the file still, once the server serves the saved mock file.
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.Mkdir("bodies", 0o700))
+	require.NoError(t, os.WriteFile("bodies/hook.json", []byte(`{"from": "a file"}`), 0o600))
+
+	got := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got <- string(b)
+	}))
+	t.Cleanup(target.Close)
+
+	wh, err := webhook.New()
+	require.NoError(t, err)
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin("").OnCompleteListener("webhook", wh))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	doc := `{"id": "hooked", "request": {"method": "GET", "path": "/hooked"}, "response": {"status": 202},
+		"on_complete": [{"name": "webhook", "parameters": {"url": "` + target.URL + `", "body_file": "bodies/hook.json"}}]}`
+	res, err := http.Post(m.AdminURL()+"/mocks", "application/json", strings.NewReader(doc))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+
+	res, err = http.Post(m.AdminURL()+"/mocks/save", "application/json", nil)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	saved, err := os.ReadFile("testdata/_mocks/hooked.mock.yaml")
+	require.NoError(t, err)
+	require.Contains(t, string(saved), "body_file: ../../bodies/hook.json")
+
+	res, err = http.Get(m.URL("/hooked"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusAccepted, res.StatusCode)
+
+	// The response waits for its webhooks.
+	select {
+	case body := <-got:
+		require.JSONEq(t, `{"from": "a file"}`, body)
+	default:
+		t.Fatal("the webhook wasn't sent")
+	}
+}

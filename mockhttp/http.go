@@ -71,9 +71,12 @@ type Server struct {
 
 	data    map[string]any
 	logger  *zerolog.Logger
-	started atomic.Bool // set by the first start: a server starts once
-	closed  atomic.Bool // set by Close: a closed server doesn't start again
-	admin   *admin.Admin[*Mock]
+	started atomic.Bool   // set by the first start: a server starts once
+	closed  atomic.Bool   // set by Close: a closed server doesn't start again
+	admin   *admin.Server // nil without Config.Admin
+
+	// adminStore writes the changes of the admin API through to its persistent store; nil without AdminConfig.Store.
+	adminStore *admin.Store[*Mock]
 
 	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
 	events *vlatte.EventRunner
@@ -83,10 +86,12 @@ type Server struct {
 	webhooks *http.Transport
 
 	// recording is the recording requests are captured for, if any. recordMu orders its starts, and guards played:
-	// the directory of the last recording StopRecording ended, whose recordings files loads with the mock files.
+	// the directory of the last recording StopRecording ended, whose recordings files loads with the mock files. It
+	// guards saved too: the directories the admin API saved mocks into, whose mock files files loads as well.
 	recording atomic.Pointer[recording]
 	recordMu  sync.Mutex
 	played    string
+	saved     []string
 	files     *fileLoader
 }
 
@@ -138,7 +143,8 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	app.config = conf
-	app.logger = app.getLog(conf)
+	logs, tee := adminLogs(conf)
+	app.logger = app.getLog(conf, tee)
 
 	repository := vlatte.NewStore[*Mock]()
 
@@ -192,6 +198,8 @@ func New(config ...Option) (*Server, error) {
 		lifecycle = newBuiltInMockHTTPLifecycle(app)
 	}
 
+	events, lifecycle := withAdminEvents(conf, lifecycle)
+
 	globalEvents, err := prepareGlobalEvents(conf)
 	if err != nil {
 		return nil, err
@@ -239,12 +247,35 @@ func New(config ...Option) (*Server, error) {
 	app.events = eventRunner
 	app.webhooks = newWebhookTransport()
 
-	app.admin = admin.New(
-		repository,
-		vlatte.MockBuilderFunc[*Mock](func(content []byte, ext string) (*Mock, error) {
-			return buildAdminMock(app, content, ext)
-		}),
-	)
+	// The admin API changes mocks through a store of its own when they persist: the server's other mocks, of mock
+	// files and code, never reach the persistent store. The admin API's options have Mocks: it builds.
+	if conf.Admin != nil {
+		adminMocks := repository
+
+		if conf.Admin.Store != nil {
+			durable, err := conf.Admin.Store(app)
+			if err != nil {
+				return nil, fmt.Errorf("server: admin store: %w", err)
+			}
+
+			app.adminStore = admin.NewStore(repository, durable, app.logger)
+			adminMocks = app.adminStore
+		}
+
+		app.admin = admin.MustNew(
+			admin.Addr(conf.Admin.Addr),
+			admin.Info(string(Kind), func() string { return app.URL() }),
+			admin.Logger(app.logger),
+			admin.Mocks(adminMocks, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
+				return buildAdminMock(app, content, format)
+			})),
+			admin.Files(adminFiles{app}),
+			admin.Recorder(adminRecorder{app}),
+			admin.Scenarios(app.scenarioStore),
+			admin.Events(events),
+			admin.Logs(logs),
+		)
+	}
 
 	server, err := factory.NewBackend(BackendConfig{App: app, Handler: handler})
 	if err != nil {
@@ -310,8 +341,9 @@ func (app *Server) Name() string {
 
 // Start starts the mock server. It listens, so loaders can read URL, loads the mocks and starts the recording the
 // config sets, then serves: the first request finds them. A server starts once: Start returns vlatte.ErrStarted once it
-// started, and http.ErrServerClosed once it closed. A start that fails to listen, load or serve closes the server, so
-// nothing listens.
+// started, and http.ErrServerClosed once it closed. Start is all or nothing: a start that fails to listen, load the
+// mocks, start the recording or the admin API, or serve, stops what started and closes the server, so nothing listens,
+// the listener of Config.Listener included.
 func (app *Server) Start() error {
 	return app.start(app.server.Listen)
 }
@@ -365,6 +397,16 @@ func (app *Server) URL(paths ...string) string {
 	return u + rest
 }
 
+// AdminURL returns the base URL of the admin API, or "" when the server serves none, or hasn't started: see
+// ConfigBuilder.Admin.
+func (app *Server) AdminURL() string {
+	if app.admin == nil {
+		return ""
+	}
+
+	return app.admin.URL()
+}
+
 // Parameters returns Params instance associated with this application.
 func (app *Server) Parameters() vlatte.KV {
 	return app.params
@@ -402,12 +444,19 @@ func (app *Server) MustReload() {
 	}
 }
 
-// Close closes the mock server. It cancels the on_complete events still running, such as a webhook waiting for its
-// delay or its target, so the requests waiting for them end, and waits for those requests. It stops the recording,
-// and waits until it wrote what it took, and closes the forward proxy's open tunnels. It closes the idle connections
-// of the transports it made, such as the one of webhooks. A closed server doesn't start again.
+// Close closes the mock server. It closes the admin API first, which waits for the operations it serves. It cancels
+// the on_complete events still running, such as a webhook waiting for its delay or its target, so the requests
+// waiting for them end, and waits for those requests. It stops the recording, and waits until it wrote what it took,
+// and closes the forward proxy's open tunnels. It closes the idle connections of the transports it made, such as the
+// one of webhooks. A closed server doesn't start again.
 func (app *Server) Close() {
 	app.closed.Store(true)
+
+	if app.admin != nil {
+		if err := app.admin.Close(); err != nil {
+			app.logger.Debug().Err(err).Msg("server: Close: error closing the admin API")
+		}
+	}
 
 	// The backend waits for the requests it serves, and they wait for their events: cancel the events first.
 	app.events.Close()
@@ -528,6 +577,12 @@ func (app *Server) DescribeConfig() string {
 	buf.WriteString(app.URL())
 	buf.WriteString("\n")
 
+	if app.admin != nil {
+		buf.WriteString("Admin API: ")
+		buf.WriteString(app.AdminURL())
+		buf.WriteString("\n")
+	}
+
 	return buf.String()
 }
 
@@ -564,8 +619,8 @@ func newWebhookTransport() *http.Transport {
 }
 
 // start starts the server once with listen, the backend's Listen or ListenTLS. The backend listens first, so loaders
-// can read URL, and serves once the mocks loaded and the recording started. A start that fails, or that a Close
-// overtook, closes the server.
+// can read URL, and serves once the mocks loaded, the recording started and the admin API serves. A start that fails,
+// or that a Close overtook, closes the server.
 func (app *Server) start(listen func() error) error {
 	if app.closed.Load() {
 		return http.ErrServerClosed
@@ -578,6 +633,10 @@ func (app *Server) start(listen func() error) error {
 	err := listen()
 	if err == nil {
 		err = app.onStart()
+	}
+
+	if err == nil && app.admin != nil {
+		err = app.admin.Start()
 	}
 
 	if err == nil && app.closed.Load() {
@@ -614,10 +673,18 @@ func (app *Server) load() error {
 		}
 	}
 
+	// After the mock files: a mock of the persistent store gives way to a mock file's mock of its id.
+	if app.adminStore != nil {
+		if err := app.adminStore.Reload(context.Background()); err != nil {
+			return fmt.Errorf("server: admin store: %w", err)
+		}
+	}
+
 	return nil
 }
 
-func (app *Server) getLog(conf *Config) *zerolog.Logger {
+// getLog returns the logger of conf, or builds one that writes to the standard output, and to tee unless it is nil.
+func (app *Server) getLog(conf *Config, tee io.Writer) *zerolog.Logger {
 	if conf.Logger != nil {
 		return conf.Logger
 	}
@@ -627,6 +694,10 @@ func (app *Server) getLog(conf *Config) *zerolog.Logger {
 		output = zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
 	} else {
 		output = os.Stdout
+	}
+
+	if tee != nil {
+		output = zerolog.MultiLevelWriter(output, tee)
 	}
 
 	c := zerolog.New(output).Level(zerolog.Level(conf.LogLevel)).With().Timestamp()

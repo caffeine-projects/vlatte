@@ -167,6 +167,9 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 			[]string{"--record-repeats", "first"}, func(t *testing.T, c *Config) { require.Equal(t, vlatte.RecordFirst, c.Record.Repeats) },
 		},
 		"record-include-mocked": {[]string{"--record-include-mocked"}, func(t *testing.T, c *Config) { require.True(t, c.Record.IncludeMocked) }},
+		"admin":                 {[]string{"--admin"}, func(t *testing.T, c *Config) { require.Equal(t, &AdminConfig{}, c.Admin) }},
+		"admin-addr":            {[]string{"--admin-addr", "127.0.0.1:9090"}, func(t *testing.T, c *Config) { require.Equal(t, "127.0.0.1:9090", c.Admin.Addr) }},
+		"admin-dir":             {[]string{"--admin-dir", "admin"}, func(t *testing.T, c *Config) { require.NotNil(t, c.Admin.Store) }},
 		"webhook-timeout":       {[]string{"--webhook-timeout", "1.5s"}, func(t *testing.T, c *Config) { require.Equal(t, 1500*time.Millisecond, c.WebhookTimeout) }},
 	}
 

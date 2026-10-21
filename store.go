@@ -51,7 +51,8 @@ func (s *MemoryStore[B]) Store(_ context.Context, mocks ...B) error {
 	return s.swap(func(B) bool { return false }, mocks)
 }
 
-// Replace removes the mocks of old it holds, the very instances, and stores mocks, in one step.
+// Replace removes the mocks of old it holds, the very instances, and stores mocks, in one step. A mock of old that it
+// stores again keeps its place, so it matches in the same order.
 // It changes nothing when an ID of mocks is held by a mock it keeps, or repeated in the call.
 func (s *MemoryStore[B]) Replace(_ context.Context, old []B, mocks ...B) error {
 	gone := make(map[any]struct{}, len(old))
@@ -66,8 +67,9 @@ func (s *MemoryStore[B]) Replace(_ context.Context, old []B, mocks ...B) error {
 }
 
 // swap removes the mocks drop reports and adds mocks, in one step, ordered by priority and then by when they were
-// stored. It changes nothing when an ID of mocks is held by a mock it keeps, or repeated in the call. Once the store
-// is unlocked, it closes the mocks it removed, unless it added them back.
+// stored: a mock it removes and adds back keeps its place. It changes nothing when an ID of mocks is held by a mock it
+// keeps, or repeated in the call. Once the store is unlocked, it closes the mocks it removed, unless it added them
+// back.
 func (s *MemoryStore[B]) swap(drop func(B) bool, mocks []B) error {
 	gone, err := s.exchange(drop, mocks)
 	if err != nil {
@@ -104,20 +106,31 @@ func (s *MemoryStore[B]) exchange(drop func(B) bool, mocks []B) ([]B, error) {
 		added[mock] = struct{}{}
 	}
 
-	// Only now: deleting in place changes the stored mocks, which a refused call must leave alone.
+	// Only now: deleting in place changes the stored mocks, which a refused call must leave alone. A mock added back
+	// stays where it is.
 	var gone []B
 
-	s.mocks = append(slices.DeleteFunc(s.mocks, func(mock B) bool {
+	kept := make(map[any]struct{})
+	s.mocks = slices.DeleteFunc(s.mocks, func(mock B) bool {
 		if !drop(mock) {
 			return false
 		}
 
-		if _, back := added[mock]; !back {
-			gone = append(gone, mock)
+		if _, back := added[mock]; back {
+			kept[mock] = struct{}{}
+			return false
 		}
 
+		gone = append(gone, mock)
+
 		return true
-	}), mocks...)
+	})
+
+	for _, mock := range mocks {
+		if _, ok := kept[mock]; !ok {
+			s.mocks = append(s.mocks, mock)
+		}
+	}
 
 	slices.SortStableFunc(s.mocks, func(a, b B) int {
 		return cmp.Compare(a.Priority(), b.Priority())

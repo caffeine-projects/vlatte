@@ -1,204 +1,253 @@
 package admin
 
 import (
-	json "encoding/json/v2"
-	"errors"
-	"io"
+	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
-var _ vlatte.Mock = (*fakeMock)(nil)
-
-// _client gets answers as they are sent: a redirect is an answer, not followed.
-var _client = &http.Client{
-	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(
+		m,
+		goleak.IgnoreTopFunction("net/http.(*persistConn).readLoop"),
+		goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),
+	)
 }
 
-// fakeMock is the least the admin API needs to store a mock and describe it.
-type fakeMock struct {
-	Key string `json:"id"`
+// stubMock is the least a store needs.
+type stubMock struct {
+	id string
 }
 
-func (m *fakeMock) ID() string            { return m.Key }
-func (m *fakeMock) Name() string          { return m.Key }
-func (m *fakeMock) Priority() int         { return 0 }
-func (m *fakeMock) Hits() int64           { return 0 }
-func (m *fakeMock) Called() bool          { return false }
-func (m *fakeMock) Enabled() bool         { return true }
-func (m *fakeMock) Enable()               {}
-func (m *fakeMock) Disable()              {}
-func (m *fakeMock) Events() vlatte.Events { return vlatte.Events{} }
-func (m *fakeMock) String() string        { return m.Key }
+func (m *stubMock) ID() string            { return m.id }
+func (m *stubMock) Name() string          { return "" }
+func (m *stubMock) Priority() int         { return 0 }
+func (m *stubMock) Hits() int64           { return 0 }
+func (m *stubMock) Called() bool          { return false }
+func (m *stubMock) Enabled() bool         { return true }
+func (m *stubMock) Enable()               {}
+func (m *stubMock) Disable()              {}
+func (m *stubMock) Events() vlatte.Events { return vlatte.Events{} }
+func (m *stubMock) String() string        { return m.id }
 
-// newAdminServer serves an admin API over an empty store. Its builder takes {"id": "..."} and fails on anything else.
-func newAdminServer(t *testing.T) *httptest.Server {
+// blockingFiles holds a reload until released.
+type blockingFiles struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (f *blockingFiles) Reload() error {
+	close(f.entered)
+	<-f.release
+
+	return nil
+}
+
+func (f *blockingFiles) SaveMocks(context.Context, string, string) ([]string, error) {
+	return nil, nil
+}
+
+func newServer(t *testing.T, options ...Option) *Server {
 	t.Helper()
 
-	builder := vlatte.MockBuilderFunc[*fakeMock](func(content []byte, _ string) (*fakeMock, error) {
-		m := &fakeMock{}
-		if err := json.Unmarshal(content, m, json.RejectUnknownMembers(true)); err != nil {
-			return nil, err
-		}
-
-		if m.Key == "" {
-			return nil, errors.New("fake mock: no id")
-		}
-
-		return m, nil
-	})
-
-	srv := httptest.NewServer(New(vlatte.NewStore[*fakeMock](), builder).Init())
-	t.Cleanup(srv.Close)
-
-	return srv
-}
-
-// send makes a request to the admin API and returns its response, with the body read.
-func send(t *testing.T, method, url, contentType, body string) (*http.Response, string) {
-	t.Helper()
-
-	req, err := http.NewRequestWithContext(t.Context(), method, url, strings.NewReader(body))
+	s, err := New(append([]Option{Mocks[*stubMock](vlatte.NewStore[*stubMock](), nil)}, options...)...)
 	require.NoError(t, err)
 
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
+	return s
+}
+
+func TestServer_RoutesAreTheDocumentedOnes(t *testing.T) {
+	// The OpenAPI document is written by hand: every route must be in it, and it must document no other.
+	doc, err := config.Parse(handler.OpenAPIDocument, "yaml")
+	require.NoError(t, err)
+
+	paths, _ := doc.(map[string]any)["paths"].(map[string]any)
+
+	var documented []string
+	for path, item := range paths {
+		for method := range item.(map[string]any) {
+			if method != "parameters" {
+				documented = append(documented, strings.ToUpper(method)+" "+path)
+			}
+		}
 	}
 
-	res, err := _client.Do(req)
-	require.NoError(t, err)
+	routes := make([]string, 0, len(_routes))
+	for _, route := range _routes {
+		routes = append(routes, route.pattern)
+	}
 
-	b, err := io.ReadAll(res.Body)
+	require.ElementsMatch(t, routes, documented)
+}
+
+func TestServer_ListensOnItsOwnAddress(t *testing.T) {
+	// The admin API is a server of its own: it listens where it is told, apart from the mocks it manages.
+	free, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := free.Addr().String()
+	require.NoError(t, free.Close())
+
+	s := newServer(t, Addr(addr))
+	require.Empty(t, s.URL(), "nothing listens before Start")
+
+	require.NoError(t, s.Start())
+	require.Equal(t, "http://"+addr, s.URL())
+
+	res, err := http.Get(s.URL() + "/health")
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
-
-	return res, string(b)
-}
-
-func TestAdmin_Ping(t *testing.T) {
-	// Clients wait on ping to know the admin API is up.
-	srv := newAdminServer(t)
-
-	res, body := send(t, http.MethodGet, srv.URL+"/ping", "", "")
-
 	require.Equal(t, http.StatusOK, res.StatusCode)
-	require.Equal(t, "pong", body)
+
+	require.NoError(t, s.Close())
+
+	_, err = net.DialTimeout("tcp", addr, time.Second)
+	require.Error(t, err, "nothing listens once closed")
 }
 
-func TestAdmin_AddThenGet(t *testing.T) {
-	// A mock added through the admin API can be read back from where the Location header points.
-	srv := newAdminServer(t)
+func TestServer_StartsOnce(t *testing.T) {
+	// As the mock servers do: a server starts once, a closed one doesn't start again, even one that never started,
+	// and a start that fails to listen closes it.
+	t.Run("twice", func(t *testing.T) {
+		s := newServer(t)
+		require.NoError(t, s.Start())
+		t.Cleanup(func() { _ = s.Close() })
 
-	res, _ := send(t, http.MethodPost, srv.URL+"/mocks", "application/json", `{"id":"m1"}`)
-	require.Equal(t, http.StatusCreated, res.StatusCode)
-	require.Equal(t, "/mocks/m1", res.Header.Get("Location"))
+		require.ErrorIs(t, s.Start(), vlatte.ErrStarted)
+	})
 
-	res, body := send(t, http.MethodGet, srv.URL+"/mocks/m1", "", "")
+	t.Run("closed before it started", func(t *testing.T) {
+		s := newServer(t)
+		require.NoError(t, s.Close())
+
+		require.ErrorIs(t, s.Start(), http.ErrServerClosed)
+		require.Empty(t, s.URL())
+	})
+
+	t.Run("a start that fails", func(t *testing.T) {
+		taken, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = taken.Close() })
+
+		s := newServer(t, Addr(taken.Addr().String()))
+
+		require.ErrorContains(t, s.Start(), "admin: ")
+		require.ErrorIs(t, s.Start(), http.ErrServerClosed)
+	})
+}
+
+func TestServer_CloseWaitsForTheOperationsItServes(t *testing.T) {
+	// The mock server closes its mocks once the admin API closed: an operation still running, such as a reload,
+	// would store mocks after that. Close returns once no operation runs.
+	files := &blockingFiles{entered: make(chan struct{}), release: make(chan struct{})}
+	s := newServer(t, Files(files))
+	require.NoError(t, s.Start())
+
+	reloaded := make(chan int, 1)
+	go func() {
+		res, err := http.Post(s.URL()+"/mocks/reload", "", nil)
+		if err != nil {
+			reloaded <- 0
+			return
+		}
+
+		_ = res.Body.Close()
+		reloaded <- res.StatusCode
+	}()
+
+	<-files.entered
+
+	closed := make(chan struct{})
+	go func() {
+		_ = s.Close()
+		close(closed)
+	}()
+
+	select {
+	case <-closed:
+		t.Fatal("Close returned while a reload ran")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(files.release)
+	<-closed
+	require.Equal(t, http.StatusNoContent, <-reloaded, "the reload ended")
+}
+
+func TestNew_NeedsTheMocks(t *testing.T) {
+	_, err := New()
+	require.EqualError(t, err, "admin: no mock store: pass the Mocks option")
+
+	require.PanicsWithError(t, "admin: no mock store: pass the Mocks option", func() { MustNew() })
+}
+
+func TestServer_ListensOnAPort(t *testing.T) {
+	// A port alone is an address too, on every interface, as a server in a container needs.
+	free, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	_, port, err := net.SplitHostPort(free.Addr().String())
+	require.NoError(t, err)
+	require.NoError(t, free.Close())
+
+	s := newServer(t, Addr(port))
+	require.NoError(t, s.Start())
+	t.Cleanup(func() { _ = s.Close() })
+
+	res, err := http.Get("http://127.0.0.1:" + port + "/health")
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusOK, res.StatusCode)
-	require.Equal(t, "application/json; charset=UTF-8", res.Header.Get("Content-Type"))
-	require.JSONEq(t, `{"id":"m1"}`, body)
 }
 
-func TestAdmin_AddAcceptsATrailingSlash(t *testing.T) {
-	// Clients written against the chi router may post to /mocks/: it still adds the mock.
-	srv := newAdminServer(t)
+func TestServer_StartsNothingOnceClosing(t *testing.T) {
+	// A request that comes once Close runs, such as on a connection kept alive, starts no operation, so none runs once
+	// Close returned.
+	s := newServer(t)
+	require.NoError(t, s.Close())
 
-	res, _ := send(t, http.MethodPost, srv.URL+"/mocks/", "", `{"id":"m1"}`)
-	require.Equal(t, http.StatusCreated, res.StatusCode)
+	rec := httptest.NewRecorder()
+	s.handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/mocks", nil))
 
-	res, _ = send(t, http.MethodGet, srv.URL+"/mocks/m1", "", "")
-	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Contains(t, rec.Body.String(), `"code": "closing"`)
 }
 
-func TestAdmin_AddRejects(t *testing.T) {
-	// A mock the admin API can't take is refused with a status that names the client's mistake.
-	tests := []struct {
-		name            string
-		giveContentType string
-		giveBody        string
-		wantStatus      int
-	}{
-		{
-			name:            "an id already in use",
-			giveContentType: "application/json",
-			giveBody:        `{"id":"m1"}`,
-			wantStatus:      http.StatusConflict,
-		},
-		{
-			name:            "a malformed mock",
-			giveContentType: "application/json",
-			giveBody:        `{"id":`,
-			wantStatus:      http.StatusBadRequest,
-		},
-		{
-			name:            "a content type of an unsupported format",
-			giveContentType: "application/xml",
-			giveBody:        `{"id":"m2"}`,
-			wantStatus:      http.StatusUnsupportedMediaType,
-		},
-		{
-			name:            "an unknown content type",
-			giveContentType: "application/x-vlatte-unknown",
-			giveBody:        `{"id":"m2"}`,
-			wantStatus:      http.StatusUnsupportedMediaType,
-		},
+func TestServer_RoutesTheProtocolLacksAnswer501(t *testing.T) {
+	// Every route answers, whatever the server's protocol can do: the API is the same for every mock server.
+	s := newServer(t)
+	require.NoError(t, s.Start())
+	t.Cleanup(func() { _ = s.Close() })
+
+	checked := 0
+
+	for _, route := range _routes {
+		if route.lacking == "" {
+			continue
+		}
+
+		method, path, _ := strings.Cut(route.pattern, " ")
+		path = strings.ReplaceAll(path, "{id}", "x")
+
+		r, err := http.NewRequestWithContext(t.Context(), method, s.URL()+path, nil)
+		require.NoError(t, err)
+
+		res, err := http.DefaultClient.Do(r)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, http.StatusNotImplemented, res.StatusCode, route.pattern)
+
+		checked++
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			srv := newAdminServer(t)
-
-			res, _ := send(t, http.MethodPost, srv.URL+"/mocks", "", `{"id":"m1"}`)
-			require.Equal(t, http.StatusCreated, res.StatusCode)
-
-			res, _ = send(t, http.MethodPost, srv.URL+"/mocks", tt.giveContentType, tt.giveBody)
-			require.Equal(t, tt.wantStatus, res.StatusCode)
-		})
-	}
-}
-
-func TestAdmin_RoutesAnswerOnlyTheirMethods(t *testing.T) {
-	// A known route called with another method is a 405 that names the methods it takes, not a 404.
-	tests := []struct {
-		giveMethod string
-		givePath   string
-		wantAllow  string
-	}{
-		{giveMethod: http.MethodGet, givePath: "/mocks", wantAllow: http.MethodPost},
-		{giveMethod: http.MethodDelete, givePath: "/ping", wantAllow: http.MethodGet},
-		{giveMethod: "PURGE", givePath: "/mocks/m1", wantAllow: http.MethodGet},
-	}
-
-	srv := newAdminServer(t)
-
-	for _, tt := range tests {
-		t.Run(tt.giveMethod+" "+tt.givePath, func(t *testing.T) {
-			res, _ := send(t, tt.giveMethod, srv.URL+tt.givePath, "", "")
-
-			require.Equal(t, http.StatusMethodNotAllowed, res.StatusCode)
-			require.Contains(t, res.Header.Get("Allow"), tt.wantAllow)
-		})
-	}
-}
-
-func TestAdmin_UnknownIsNotFound(t *testing.T) {
-	// Paths the admin API doesn't have, and mocks it doesn't hold, are a 404, not a redirect or a server error.
-	srv := newAdminServer(t)
-
-	res, _ := send(t, http.MethodPost, srv.URL+"/mocks", "", `{"id":"m1"}`)
-	require.Equal(t, http.StatusCreated, res.StatusCode)
-
-	for _, path := range []string{"/", "/nope", "/mocks/missing", "/mocks/m1/more"} {
-		t.Run(path, func(t *testing.T) {
-			res, _ := send(t, http.MethodGet, srv.URL+path, "", "")
-
-			require.Equal(t, http.StatusNotFound, res.StatusCode)
-		})
-	}
+	require.NotZero(t, checked)
 }

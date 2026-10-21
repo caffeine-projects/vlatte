@@ -345,6 +345,11 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		data["priority"] = m.Priority()
 	}
 
+	// Enabled is the default: a disabled mock, such as one the admin API turned off, says so.
+	if !m.Enabled() {
+		data["enabled"] = false
+	}
+
 	if len(request) > 0 {
 		data["request"] = request
 	}

@@ -231,7 +231,7 @@ func TestMultipart_TemplatedPartEchoesTheUpload(t *testing.T) {
 func TestMultipart_AdminRoundTrip(t *testing.T) {
 	// A mock with a form_file pattern and a multipart reply, posted to the admin API as JSON, is stored, shown and
 	// served.
-	m := mockhttp.MustNew()
+	m := mockhttp.MustNew(mockhttp.Setup().Admin(""))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -241,12 +241,12 @@ func TestMultipart_AdminRoundTrip(t *testing.T) {
 		"response": {"status": 200, "multipart": {"type": "mixed", "boundary": "b", "parts": [{"body": "ok"}]}}
 	}`
 
-	res, err := http.Post(m.URL(m.Config().AdminPath, "mocks"), mockhttp.MIMEApplicationJSON, strings.NewReader(doc))
+	res, err := http.Post(m.AdminURL()+"/mocks", mockhttp.MIMEApplicationJSON, strings.NewReader(doc))
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusCreated, res.StatusCode)
 
-	res, err = http.Get(m.URL(m.Config().AdminPath, "mocks", "upload"))
+	res, err = http.Get(m.AdminURL() + "/mocks/upload")
 	require.NoError(t, err)
 
 	var shown map[string]any

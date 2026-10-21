@@ -12,7 +12,6 @@ import (
 	"net/textproto"
 	"net/url"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
@@ -174,7 +174,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 		body = strings.NewReader(b)
 	case webhookArgs.BodyFile != "":
-		b, err := os.ReadFile(bodyFilePath(webhookArgs.dir, webhookArgs.BodyFile))
+		b, err := os.ReadFile(bodyfile.Path(webhookArgs.dir, webhookArgs.BodyFile))
 		if err != nil {
 			return fmt.Errorf("webhook: error reading body_file %s: %w", webhookArgs.BodyFile, err)
 		}
@@ -309,7 +309,7 @@ func (a *Args) Describe() descriptor.Descriptor {
 
 	for key, value := range map[string]string{
 		"url": a.URL, "url_template": a.URLTemplate, "method": a.Method,
-		"body": a.Body, "body_template": a.BodyTemplate, "body_file": bodyFilePath(a.dir, a.BodyFile),
+		"body": a.Body, "body_template": a.BodyTemplate, "body_file": bodyfile.Path(a.dir, a.BodyFile),
 	} {
 		if value != "" {
 			params[key] = value
@@ -680,22 +680,13 @@ func (m *multipartParams) Encode(engine vlatte.TemplateEngine, data any) (string
 }
 
 // describeMultipart describes a multipart body as the parameters of a mock file write it: under multipart_template
-// when its text is templates, else under multipart. The relative body files of its parts are joined to its directory.
+// when its text is templates, else under multipart.
 func describeMultipart(spec *mpart.Spec) descriptor.Descriptor {
-	resolved := *spec
-	resolved.Parts = make([]*mpart.PartSpec, len(spec.Parts))
-
-	for i, part := range spec.Parts {
-		p := *part
-		p.File = bodyFilePath(spec.Dir, p.File)
-		resolved.Parts[i] = &p
-	}
-
 	if spec.Templated {
-		return descriptor.New("multipart_template", resolved.Doc())
+		return descriptor.New("multipart_template", spec.Doc())
 	}
 
-	return descriptor.New("multipart", resolved.Doc())
+	return descriptor.New("multipart", spec.Doc())
 }
 
 // countSet counts the values that are set: non-empty strings and true bools.
@@ -818,17 +809,6 @@ func checkURL(raw string) error {
 	}
 
 	return nil
-}
-
-// bodyFilePath returns the body file name joined to dir, where a relative name opens from, such as the mock file's
-// directory: it opens the same file from the working directory, as a description loaded back opens it. The name stays
-// as it is, since it can be a template.
-func bodyFilePath(dir, name string) string {
-	if dir == "" || name == "" || filepath.IsAbs(name) {
-		return name
-	}
-
-	return filepath.Clean(dir) + string(filepath.Separator) + name
 }
 
 // render compiles text with engine and executes it with data.

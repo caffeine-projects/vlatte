@@ -31,7 +31,8 @@ type fileLoader struct {
 	scope *Scope // the mocks of the last load
 }
 
-// Load adds the mocks of every matching file, and of every mock file of the recording directories, in file name order,
+// Load adds the mocks of every matching file, and of every mock file of the recording directories and of those the
+// admin API saved mocks into, in file name order,
 // so mocks of equal priority match in that order. A reload swaps them for the mocks of the last load in one step, so a
 // request finds one set or the other. When a file has problems, Load changes nothing and reports every file with
 // problems.
@@ -78,19 +79,14 @@ func (l *fileLoader) Load(app *Server) error {
 	}
 
 	for _, dir := range app.recordDirs() {
-		entries, err := os.ReadDir(dir)
-
-		switch {
-		case errors.Is(err, fs.ErrNotExist):
-			continue
-		case err != nil:
+		if err := mockFilesIn(dir, add); err != nil {
 			return fmt.Errorf("loader: recordings %s: %w", dir, err)
 		}
+	}
 
-		for _, e := range entries {
-			if !e.IsDir() && isMockFile(e.Name()) {
-				add(filepath.Join(dir, e.Name()))
-			}
+	for _, dir := range app.savedDirs() {
+		if err := mockFilesIn(dir, add); err != nil {
+			return fmt.Errorf("loader: saved mocks %s: %w", dir, err)
 		}
 	}
 
@@ -112,6 +108,26 @@ func (l *fileLoader) Load(app *Server) error {
 	}
 
 	l.scope = scope
+
+	return nil
+}
+
+// mockFilesIn adds the mock files of dir, named <name>.mock.<format>. A dir that doesn't exist has none.
+func mockFilesIn(dir string, add func(file string)) error {
+	entries, err := os.ReadDir(dir)
+
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		return err
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() && isMockFile(e.Name()) {
+			add(filepath.Join(dir, e.Name()))
+		}
+	}
 
 	return nil
 }

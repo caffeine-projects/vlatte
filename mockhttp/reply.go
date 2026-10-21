@@ -398,11 +398,13 @@ func (rep *Reply) Describe() descriptor.Descriptor {
 
 	switch rep.bodyType {
 	case _bodyFile:
-		response["body_file"] = rep.bodyFilename
+		response["body_file"] = bodyfile.Path(rep.bodyFileDir, rep.bodyFilename)
 	case _bodyTemplate:
 		response["body"] = rep.bodyTemplateContent
 	case _bodyMultipart:
-		response["multipart"] = rep.multipart.spec.Doc()
+		spec := rep.multipart.spec
+		spec.Dir = rep.bodyFileDir
+		response["multipart"] = spec.Doc()
 	default:
 		if rep.response.Body != nil {
 			response["body"] = string(rep.response.Body)

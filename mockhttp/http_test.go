@@ -403,7 +403,7 @@ func TestDefaultLoggerIncludesServerName(t *testing.T) {
 	os.Stdout = w
 	t.Cleanup(func() { os.Stdout = stdout })
 
-	log := (&Server{}).getLog(&Config{Name: "srv"})
+	log := (&Server{}).getLog(&Config{Name: "srv"}, nil)
 	log.Info().Msg("hello")
 	require.NoError(t, w.Close())
 

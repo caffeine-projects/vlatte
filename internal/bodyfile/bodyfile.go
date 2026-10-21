@@ -52,3 +52,14 @@ func splitWritten(source, name string) (written, rest string) {
 
 	return filepath.FromSlash(written), filepath.FromSlash(strings.Join(got[n:], "/"))
 }
+
+// Path returns the body file name joined to dir, where a relative name opens from, such as the mock file's
+// directory: it opens the same file from the working directory, as a description loaded back opens it. The name stays
+// as it is, since it can be a template.
+func Path(dir, name string) string {
+	if dir == "" || name == "" || filepath.IsAbs(name) {
+		return name
+	}
+
+	return filepath.Clean(dir) + string(filepath.Separator) + name
+}

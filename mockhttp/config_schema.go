@@ -100,6 +100,11 @@ func loadConfigSources(conf *Config) error {
 		conf.Record = &record
 	}
 
+	if conf.Admin != nil {
+		admin := *conf.Admin
+		conf.Admin = &admin
+	}
+
 	if conf.proxyAll != nil {
 		proxyAll := *conf.proxyAll
 		proxyAll.requestHeader = slices.Clone(proxyAll.requestHeader)
@@ -188,7 +193,10 @@ func tlsFileProblem(v config.Value, what string, err error) config.Problem {
 	return p
 }
 
-type field = config.Field[Config]
+type (
+	field       = config.Field[Config]
+	recordField = config.Field[RecordConfig]
+)
 
 var _logLevels = []config.Choice{
 	{Name: "trace", Value: int64(zerolog.TraceLevel)},
@@ -216,33 +224,32 @@ var _logVerbosities = []config.Choice{
 // _schema declares every server setting. Defaults shown in help come from the Go defaults, which stay the only ones.
 var _schema = sync.OnceValue(func() *config.Schema[Config] {
 	d := defaultConfig()
-	rec := defaultRecordConfig()
 
-	return config.NewSchema(withProxyAll(
-		field{
+	before := []field{
+		{
 			Key: _keyConfigFile, Short: "c", Kind: config.String,
 			Usage: fmt.Sprintf("Config file to load, instead of looking up %s.{json,yaml,yml} in %s.",
 				DefaultConfigFileName, strings.Join(DefaultConfigDirectories, " and ")),
 		},
-		field{
+		{
 			Key: "name", Short: "n", Kind: config.String, Usage: "Server name, shown in logs.",
 			Set: func(c *Config, v config.Value) error { c.Name = v.Str; return nil },
 		},
-		field{
+		{
 			Key: "addr", Short: "a", Kind: config.String,
 			Usage: "Address to listen on: host:port, :port or port. Empty picks a random local port.",
 			Set:   func(c *Config, v config.Value) error { c.Addr = v.Str; return checkAddr(v.Str) },
 		},
-		field{
+		{
 			Key: "root_dir", Kind: config.String, Usage: "Directory that relative mock file patterns and recording paths start at.",
 			Set: func(c *Config, v config.Value) error { c.RootDir = v.Str; return nil },
 		},
-		field{
+		{
 			Key: "mock_files", Kind: config.List, Default: strings.Join(d.MockFileSearchPatterns, ","),
 			Usage: "Glob patterns of the mock files to load on start.",
 			Set:   func(c *Config, v config.Value) error { c.MockFileSearchPatterns = v.List; return nil },
 		},
-		field{
+		{
 			Key: "no_match_status_code", Kind: config.Int, Default: strconv.Itoa(d.RequestWasNotMatchedStatusCode),
 			Usage: "Status code of the response to a request that matches no mock.",
 			Set: func(c *Config, v config.Value) error {
@@ -250,7 +257,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return checkStatus(v.Int)
 			},
 		},
-		field{
+		{
 			Key: "error_status_code", Kind: config.Int, Default: strconv.Itoa(d.ErrorStatusCode),
 			Usage: "Status code of the response when serving a request fails, such as a reply that fails.",
 			Set: func(c *Config, v config.Value) error {
@@ -258,52 +265,52 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return checkStatus(v.Int)
 			},
 		},
-		field{
+		{
 			Key: "https", Kind: config.Bool, Usage: "Serve HTTPS instead of HTTP. Only the vlatte command reads it.",
 			Set: func(c *Config, v config.Value) error { c.UseHTTPS = v.Bool; return nil },
 		},
-		field{
+		{
 			Key: "colors", Kind: config.Bool, Default: strconv.FormatBool(d.Colors), Usage: "Use colors in debug logs.",
 			Set: func(c *Config, v config.Value) error { c.Colors = v.Bool; return nil },
 		},
-		field{
+		{
 			Key: "debug", Kind: config.Bool, Usage: "Print descriptive logs for each request, instead of structured ones.",
 			Set: func(c *Config, v config.Value) error { c.Debug = v.Bool; return nil },
 		},
-		field{
+		{
 			Key: "debug_headers", Kind: config.Bool, Default: strconv.FormatBool(!d.NoDebugHeaders),
 			Usage: "Add debug headers, such as VLatte-Matched-Mock-Id, to each answer. VLatte-Error stays either way.",
 			Set:   func(c *Config, v config.Value) error { c.NoDebugHeaders = !v.Bool; return nil },
 		},
-		field{Key: "tls.cert", Kind: config.String, Usage: "TLS certificate file. Requires tls.key."},
-		field{Key: "tls.key", Kind: config.String, Usage: "TLS private key file. Requires tls.cert."},
-		field{
+		{Key: "tls.cert", Kind: config.String, Usage: "TLS certificate file. Requires tls.key."},
+		{Key: "tls.key", Kind: config.String, Usage: "TLS private key file. Requires tls.cert."},
+		{
 			Key: "tls.ca", Kind: config.String,
 			Usage: "File of the CA certificates that client certificates must be signed by (mutual TLS). Requires tls.cert and tls.key.",
 		},
-		field{
+		{
 			Key: "log.level", Kind: config.Int, Choices: _logLevels, Default: choiceName(_logLevels, int64(d.LogLevel)),
 			Usage: "Log level.",
 			Set:   func(c *Config, v config.Value) error { c.LogLevel = vlatte.LogLevel(v.Int); return nil },
 		},
-		field{
+		{
 			Key: "log.verbosity", Kind: config.Int, Choices: _logVerbosities, Default: choiceName(_logVerbosities, int64(d.LogVerbosity)),
 			Usage: "How much of each request and response to log.",
 			Set:   func(c *Config, v config.Value) error { c.LogVerbosity = vlatte.LogVerbosity(v.Int); return nil },
 		},
-		field{
+		{
 			Key: "log.max_body_size", Kind: config.Int, Usage: "Bodies larger than this many bytes aren't logged. 0 logs bodies of any size.",
 			Set: func(c *Config, v config.Value) error { c.LogBodyMaxSize = v.Int; return checkMin(v.Int, 0) },
 		},
-		field{
+		{
 			Key: "log.pretty", Kind: config.Bool, Default: strconv.FormatBool(d.LogPretty), Usage: "Human-friendly console logs instead of JSON.",
 			Set: func(c *Config, v config.Value) error { c.LogPretty = v.Bool; return nil },
 		},
-		field{
+		{
 			Key: "cors", Kind: config.Bool, Usage: "Enable CORS.",
 			Set: func(c *Config, v config.Value) error { toggle(&c.CORS, DefaultCORSConfig, v.Bool); return nil },
 		},
-		field{
+		{
 			Key: "cors.allowed_origin", Kind: config.String, Default: DefaultCORSConfig.AllowedOrigin,
 			Usage: "Allowed origins, comma-separated. * allows any.",
 			Set: func(c *Config, v config.Value) error {
@@ -311,7 +318,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return nil
 			},
 		},
-		field{
+		{
 			Key: "cors.allow_credentials", Kind: config.Bool,
 			Usage: "Send Access-Control-Allow-Credentials: true. With *, the origin of the request is allowed.",
 			Set: func(c *Config, v config.Value) error {
@@ -319,7 +326,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return nil
 			},
 		},
-		field{
+		{
 			Key: "cors.allowed_methods", Kind: config.String, Default: DefaultCORSConfig.AllowedMethods,
 			Usage: "Allowed methods, comma-separated. * allows the method a preflight request asks for.",
 			Set: func(c *Config, v config.Value) error {
@@ -327,7 +334,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return nil
 			},
 		},
-		field{
+		{
 			Key: "cors.allowed_headers", Kind: config.String,
 			Usage: "Allowed headers, comma-separated. Empty or * allows the headers a preflight request asks for.",
 			Set: func(c *Config, v config.Value) error {
@@ -335,14 +342,14 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return nil
 			},
 		},
-		field{
+		{
 			Key: "cors.expose_headers", Kind: config.String, Usage: "Headers exposed to browsers, comma-separated.",
 			Set: func(c *Config, v config.Value) error {
 				section(&c.CORS, DefaultCORSConfig).ExposeHeaders = v.Str
 				return nil
 			},
 		},
-		field{
+		{
 			Key: "cors.max_age", Kind: config.Int, Default: strconv.Itoa(DefaultCORSConfig.MaxAge),
 			Usage: "Seconds browsers may cache a preflight response. -1 omits Access-Control-Max-Age.",
 			Set: func(c *Config, v config.Value) error {
@@ -350,7 +357,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return checkMin(v.Int, -1)
 			},
 		},
-		field{
+		{
 			Key: "cors.success_status_code", Kind: config.Int, Default: strconv.Itoa(DefaultCORSConfig.SuccessStatusCode),
 			Usage: "Status code of the response to a preflight request. Browsers fail a preflight answered with a status other than 2xx.",
 			Set: func(c *Config, v config.Value) error {
@@ -358,18 +365,18 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return checkStatus(v.Int)
 			},
 		},
-		field{
+		{
 			Key: "proxy", Kind: config.Bool, Usage: "Proxy the requests that match no mock to their original host.",
 			Set: func(c *Config, v config.Value) error { toggle(&c.Proxy, _defaultProxyConfig, v.Bool); return nil },
 		},
-		field{
+		{
 			Key: "proxy.via", Kind: config.String, Usage: "URL of a proxy to send proxied requests through.",
 			Set: func(c *Config, v config.Value) error {
 				section(&c.Proxy, _defaultProxyConfig).Via = v.Str
 				return checkProxyURL(v.Str)
 			},
 		},
-		field{
+		{
 			Key: "proxy.timeout", Kind: config.Duration, Default: _defaultProxyConfig.Timeout.String(),
 			Usage: "How long to wait for the response headers of a proxied request: milliseconds or a Go duration (1.5s). 0 waits forever.",
 			Set: func(c *Config, v config.Value) error {
@@ -377,14 +384,14 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return nil
 			},
 		},
-		field{
+		{
 			Key: "proxy.ssl_verify", Kind: config.Bool, Usage: "Verify the TLS certificates of proxied servers.",
 			Set: func(c *Config, v config.Value) error {
 				section(&c.Proxy, _defaultProxyConfig).SSLVerify = v.Bool
 				return nil
 			},
 		},
-		field{
+		{
 			Key: "proxy.intercept", Kind: config.Bool,
 			Usage: "Serve the HTTPS of CONNECT tunnels with certificates signed by proxy.ca_cert, so mocks answer it. " +
 				"Requires proxy.ca_cert and proxy.ca_key.",
@@ -393,46 +400,107 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return nil
 			},
 		},
-		field{
+		{
 			Key: "proxy.ca_cert", Kind: config.String,
 			Usage: "Certificate file of the CA that signs the certificates proxy.intercept serves, which clients must trust. Requires proxy.ca_key.",
 			Set:   func(c *Config, _ config.Value) error { section(&c.Proxy, _defaultProxyConfig); return nil },
 		},
-		field{
+		{
 			Key: "proxy.ca_key", Kind: config.String, Usage: "Private key file of proxy.ca_cert. Requires proxy.ca_cert.",
 			Set: func(c *Config, _ config.Value) error { section(&c.Proxy, _defaultProxyConfig); return nil },
 		},
-		field{
+		{
 			Key: "record", Kind: config.Bool, Usage: "Record proxied requests and their responses as mock files, from start to close.",
 			Set: func(c *Config, v config.Value) error { toggle(&c.Record, *defaultRecordConfig(), v.Bool); return nil },
 		},
-		field{
-			Key: "record.dir", Kind: config.String, Default: rec.Dir,
-			Usage: "Directory of the recordings. Relative paths start at root_dir.",
+	}
+
+	after := []field{
+		{
+			Key: "admin", Kind: config.Bool, Usage: "Serve the admin API, on an HTTP server of its own.",
+			Set: func(c *Config, v config.Value) error { toggle(&c.Admin, AdminConfig{}, v.Bool); return nil },
+		},
+		{
+			Key: "admin.addr", Kind: config.String,
+			Usage: "Address the admin API listens on: host:port, :port or port. Empty picks a random local port.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).Dir = v.Str
+				section(&c.Admin, AdminConfig{}).Addr = v.Str
+				return checkAddr(v.Str)
+			},
+		},
+		{
+			Key: "admin.dir", Kind: config.String,
+			Usage: "Directory of the files that keep the mocks the admin API adds across restarts, which only the server " +
+				"loads: keep it out of mock_files. Relative paths start at root_dir. Empty keeps them in memory.",
+			Set: func(c *Config, v config.Value) error {
+				admin := section(&c.Admin, AdminConfig{})
+
+				admin.Store = nil
+				if v.Str != "" {
+					admin.Store = FileStore(v.Str)
+				}
+
 				return nil
 			},
 		},
-		field{
-			Key: "record.format", Kind: config.String, Default: rec.Format,
+		{
+			Key: "webhook.timeout", Kind: config.Duration,
+			Usage: "How long a webhook without a timeout of its own waits for its answer: milliseconds or a Go duration " +
+				"(1.5s). 0 uses " + httpx.DefaultWebhookTimeout.String() + ".",
+			Set: func(c *Config, v config.Value) error { c.WebhookTimeout = v.Dur; return nil },
+		},
+	}
+
+	records := recordFields()
+	fields := make([]field, 0, len(before)+len(records)+len(after))
+	fields = append(fields, before...)
+
+	for _, f := range records {
+		fields = append(fields, inRecord(f))
+	}
+
+	return config.NewSchema(withProxyAll(append(fields, after...)...)...)
+})
+
+// _recordSchema declares the settings of a recording, as the record section of the server's settings has them: the
+// body of the admin API's POST /recording.
+var _recordSchema = sync.OnceValue(func() *config.Schema[RecordConfig] {
+	return config.NewSchema(recordFields()...)
+})
+
+// recordFields declares the settings of a recording: the keys of the record section of the server's settings, and of
+// the body of the admin API's POST /recording.
+func recordFields() []recordField {
+	rec := defaultRecordConfig()
+
+	return []recordField{
+		{
+			Key: "dir", Kind: config.String, Default: rec.Dir,
+			Usage: "Directory of the recordings. Relative paths start at root_dir.",
+			Set: func(r *RecordConfig, v config.Value) error {
+				r.Dir = v.Str
+				return nil
+			},
+		},
+		{
+			Key: "format", Kind: config.String, Default: rec.Format,
 			Usage: "Format of the recorded mock files: " + strings.Join(MockFileFormats(), ", ") + ".",
-			Set: func(c *Config, v config.Value) error {
+			Set: func(r *RecordConfig, v config.Value) error {
 				format, ok := config.Format(v.Str)
 				if !ok {
 					return fmt.Errorf("expected one of %s", strings.Join(MockFileFormats(), ", "))
 				}
 
-				section(&c.Record, *defaultRecordConfig()).Format = format
+				r.Format = format
 
 				return nil
 			},
 		},
-		field{
-			Key: "record.target", Kind: config.String,
+		{
+			Key: "target", Kind: config.String,
 			Usage: "Server to record, such as https://api.example.com: the requests the recording takes go to it, before any mock.",
-			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).Target = v.Str
+			Set: func(r *RecordConfig, v config.Value) error {
+				r.Target = v.Str
 				if v.Str == "" {
 					return nil
 				}
@@ -440,92 +508,96 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return checkRecordTarget(v.Str)
 			},
 		},
-		field{
-			Key: "record.skip_ssl_verify", Kind: config.Bool,
+		{
+			Key: "skip_ssl_verify", Kind: config.Bool,
 			Usage: "Skip the verification of the TLS certificate of record.target, such as for a self-signed one.",
-			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).SkipSSLVerify = v.Bool
+			Set: func(r *RecordConfig, v config.Value) error {
+				r.SkipSSLVerify = v.Bool
 				return nil
 			},
 		},
-		field{
-			Key: "record.methods", Kind: config.List, Usage: "Methods of the requests the recording takes. Empty takes every method.",
-			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).Methods = v.List
+		{
+			Key: "methods", Kind: config.List, Usage: "Methods of the requests the recording takes. Empty takes every method.",
+			Set: func(r *RecordConfig, v config.Value) error {
+				r.Methods = v.List
 				return nil
 			},
 		},
-		field{
-			Key: "record.paths", Kind: config.List,
+		{
+			Key: "paths", Kind: config.List,
 			Usage: "Glob patterns of the paths of the requests the recording takes, such as /v1/*, where * matches / too. Empty takes every path.",
-			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).Paths = v.List
+			Set: func(r *RecordConfig, v config.Value) error {
+				r.Paths = v.List
 				return nil
 			},
 		},
-		field{
-			Key: "record.request_headers", Kind: config.List,
+		{
+			Key: "request_headers", Kind: config.List,
 			Usage: "Request headers recordings match: the first value each had, or its absence.",
-			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).RequestHeaders = v.List
+			Set: func(r *RecordConfig, v config.Value) error {
+				r.RequestHeaders = v.List
 				return nil
 			},
 		},
-		field{
-			Key: "record.exclude_response_headers", Kind: config.List, Default: strings.Join(rec.ExcludeResponseHeaders, ","),
+		{
+			Key: "exclude_response_headers", Kind: config.List, Default: strings.Join(rec.ExcludeResponseHeaders, ","),
 			Usage: "Response headers recordings leave out. A list replaces the default; an empty one keeps every header.",
-			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).ExcludeResponseHeaders = v.List
+			Set: func(r *RecordConfig, v config.Value) error {
+				r.ExcludeResponseHeaders = v.List
 				return nil
 			},
 		},
-		field{
-			Key: "record.body_files", Kind: config.Bool, Usage: "Write each recorded response body to a file of its own, instead of inline.",
-			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).BodyFiles = v.Bool
+		{
+			Key: "body_files", Kind: config.Bool, Usage: "Write each recorded response body to a file of its own, instead of inline.",
+			Set: func(r *RecordConfig, v config.Value) error {
+				r.BodyFiles = v.Bool
 				return nil
 			},
 		},
-		field{
-			Key: "record.max_inline_body", Kind: config.Int, Default: strconv.FormatInt(rec.MaxInlineBody, 10),
+		{
+			Key: "max_inline_body", Kind: config.Int, Default: strconv.FormatInt(rec.MaxInlineBody, 10),
 			Usage: "Bytes of a body kept in memory while it is recorded: a larger one goes to a file as it streams. " +
 				"Text bodies kept in memory are written inline. 0 uses the default.",
-			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).MaxInlineBody = v.Int
+			Set: func(r *RecordConfig, v config.Value) error {
+				r.MaxInlineBody = v.Int
 				return checkMin(v.Int, 0)
 			},
 		},
-		field{
-			Key: "record.max_body_size", Kind: config.Int, Default: strconv.FormatInt(rec.MaxBodySize, 10),
+		{
+			Key: "max_body_size", Kind: config.Int, Default: strconv.FormatInt(rec.MaxBodySize, 10),
 			Usage: "Calls with a larger response body, in bytes, aren't recorded. 0 uses the default; a negative value means no limit.",
-			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).MaxBodySize = v.Int
+			Set: func(r *RecordConfig, v config.Value) error {
+				r.MaxBodySize = v.Int
 				return nil
 			},
 		},
-		field{
-			Key: "record.repeats", Kind: config.Int, Choices: _recordRepeats, Default: choiceName(_recordRepeats, int64(rec.Repeats)),
+		{
+			Key: "repeats", Kind: config.Int, Choices: _recordRepeats, Default: choiceName(_recordRepeats, int64(rec.Repeats)),
 			Usage: "What a recording keeps of a request that comes again: every response, in order, or the first one.",
-			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).Repeats = vlatte.RecordRepeats(v.Int)
+			Set: func(r *RecordConfig, v config.Value) error {
+				r.Repeats = vlatte.RecordRepeats(v.Int)
 				return nil
 			},
 		},
-		field{
-			Key: "record.include_mocked", Kind: config.Bool, Usage: "Record the answers of mocks too, not only proxied ones.",
-			Set: func(c *Config, v config.Value) error {
-				section(&c.Record, *defaultRecordConfig()).IncludeMocked = v.Bool
+		{
+			Key: "include_mocked", Kind: config.Bool, Usage: "Record the answers of mocks too, not only proxied ones.",
+			Set: func(r *RecordConfig, v config.Value) error {
+				r.IncludeMocked = v.Bool
 				return nil
 			},
 		},
-		field{
-			Key: "webhook.timeout", Kind: config.Duration,
-			Usage: "How long a webhook without a timeout of its own waits for its answer: milliseconds or a Go duration " +
-				"(1.5s). 0 uses " + httpx.DefaultWebhookTimeout.String() + ".",
-			Set: func(c *Config, v config.Value) error { c.WebhookTimeout = v.Dur; return nil },
-		},
-	)...)
-})
+	}
+}
+
+// inRecord declares a setting of a recording under the server's record section, which it turns on.
+func inRecord(f recordField) field {
+	set := f.Set
+
+	return field{
+		Key: "record." + f.Key, Short: f.Short, Usage: f.Usage, Default: f.Default, Kind: f.Kind, Choices: f.Choices,
+		Set: func(c *Config, v config.Value) error { return set(section(&c.Record, *defaultRecordConfig()), v) },
+	}
+}
 
 // loadProxyCA loads the CA of proxy.ca_cert and proxy.ca_key. Interception from the settings needs one: clients must
 // trust the CA, and one the server makes lives only as long as the server.

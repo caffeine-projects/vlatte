@@ -1,0 +1,910 @@
+openapi: 3.1.0
+info:
+  title: vlatte admin API
+  version: "1"
+  summary: Manage a vlatte mock server while it runs.
+  description: |
+    The admin API of a vlatte mock server. It is an HTTP server of its own, on its own address, the same for mock
+    servers of every protocol: an operation the server's protocol can't do answers `501` with the code `not_supported`.
+
+    **Formats.** Bodies are JSON or YAML: send `Content-Type: application/json`, the default, or `application/yaml`.
+    Answers follow `Accept`: JSON by default, YAML when it is preferred. `Accept` that takes neither is `406`.
+
+    **Errors.** Every error is an RFC 9457 problem document, `application/problem+json` or `application/problem+yaml`,
+    with a stable `code`. Problems of a mock or a body list each in `problems`.
+
+    **Safety.** The admin API has no authentication: it listens on a local address unless told otherwise. Browsers'
+    cross-site requests that change state are refused with `403`.
+
+    **Persistence.** A mock server with a persistent store, such as the files of the vlatte command or a database,
+    writes each change this API makes to its mocks to that store at once: the mocks it adds outlive the server. The
+    server serves what the store holds when it starts and on each reload, changes made to the store directly included.
+    Without one, the mocks this API adds last as long as the server.
+  license:
+    name: MIT
+    url: https://github.com/caffeine-projects/vlatte/blob/main/LICENSE
+tags:
+  - name: Server
+    description: The admin API and the mock server it manages.
+  - name: Mocks
+    description: The mocks the server serves, from files, code and this API.
+  - name: Scenarios
+    description: |
+      Scenarios: mocks that match in turn, as a scenario moves from state to state. A scenario starts in `started`.
+      HTTP mock servers only.
+  - name: Recording
+    description: |
+      Recording a service as mock files: the server sends the requests the recording takes to its target, and writes
+      the answers as mock files, which it serves once the recording stops. HTTP mock servers only.
+paths:
+  /health:
+    get:
+      tags: [Server]
+      operationId: getHealth
+      summary: Check the admin API
+      description: Answers once the admin API serves, with the kind of the mock server and the URL of its mocks.
+      responses:
+        "200":
+          description: The admin API serves.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/Health" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+  /openapi:
+    get:
+      tags: [Server]
+      operationId: getOpenAPI
+      summary: Get this document
+      description: This OpenAPI document, in JSON or YAML as `Accept` asks.
+      responses:
+        "200":
+          description: The OpenAPI document.
+          content:
+            application/json:
+              schema: { type: object }
+            application/yaml:
+              schema: { type: object }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+  /docs:
+    get:
+      tags: [Server]
+      operationId: getDocs
+      summary: Read this document
+      description: A page that renders this document. It loads its renderer, Scalar, from a CDN.
+      responses:
+        "200":
+          description: The page.
+          content:
+            text/html:
+              schema: { type: string }
+  /mocks:
+    get:
+      tags: [Mocks]
+      operationId: listMocks
+      summary: List mocks
+      description: Every mock, enabled or not, in the order mocks match requests.
+      responses:
+        "200":
+          description: The mocks.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MockList" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/MockList" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+    post:
+      tags: [Mocks]
+      operationId: addMock
+      summary: Add a mock
+      description: |
+        Adds the mock of the body, a mock file. Without an `id`, the mock gets a new one. An `id` in use is a `409`:
+        replace that mock with `PUT /mocks/{id}`. A relative `body_file` opens from the server's working directory.
+      requestBody: { $ref: "#/components/requestBodies/Mock" }
+      responses:
+        "201":
+          description: The mock was added.
+          headers:
+            Location:
+              description: Where the mock is, such as `/mocks/hello`.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/DuplicateID" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    delete:
+      tags: [Mocks]
+      operationId: removeAllMocks
+      summary: Remove every mock
+      description: |
+        Removes every mock, of files and code too, and empties the persistent store. `POST /mocks/reload` loads the
+        mock files again.
+      responses:
+        "204":
+          description: The server has no mocks.
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+  /mocks/validate:
+    post:
+      tags: [Mocks]
+      operationId: validateMock
+      summary: Check a mock without adding it
+      description: Builds the mock of the body as `POST /mocks` would, and answers the same, without adding it.
+      requestBody: { $ref: "#/components/requestBodies/Mock" }
+      responses:
+        "200":
+          description: The mock would be added.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/DuplicateID" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /mocks/reload:
+    post:
+      tags: [Mocks]
+      operationId: reloadMocks
+      summary: Load the mock files and the persistent store again
+      description: |
+        Swaps the mocks of the mock files, and of the persistent store, for what they hold now, in one step. A mock
+        added through this API gives way to a mock file's mock with its id. When a file has problems, nothing changes.
+      responses:
+        "204":
+          description: The mock files were loaded.
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/DuplicateID" }
+        "500": { $ref: "#/components/responses/LoadFailed" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /mocks/save:
+    post:
+      tags: [Mocks]
+      operationId: saveMocks
+      summary: Save the mocks added through this API as mock files
+      description: |
+        Writes each mock added through this API as a mock file, `<id>.mock.<format>`, into the directory, then serves
+        it from its file, which loads from then on: on the next start too, when the server's mock file patterns take
+        the directory, as they take `testdata/_mocks` and YAML by default. Its relative body files are named from the
+        directory. When a mock can't be described as a mock file, nothing is written.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SaveSettings" }
+          application/yaml:
+            schema: { $ref: "#/components/schemas/SaveSettings" }
+      responses:
+        "200":
+          description: The mock files written.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedFiles" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/SavedFiles" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/DuplicateID" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "500": { $ref: "#/components/responses/SaveFailed" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /mocks/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The id of the mock.
+        schema: { type: string, pattern: "^[A-Za-z0-9._~-]+$" }
+    get:
+      tags: [Mocks]
+      operationId: getMock
+      summary: Get a mock
+      description: The mock as a mock file describes it, which `PUT` and `POST` take back.
+      responses:
+        "200":
+          description: The mock.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Mock" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/Mock" }
+        "404": { $ref: "#/components/responses/MockNotFound" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "500": { $ref: "#/components/responses/DescribeFailed" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    put:
+      tags: [Mocks]
+      operationId: replaceMock
+      summary: Replace a mock
+      description: |
+        Swaps the mock for the mock of the body in one step, so a request finds one or the other. The body's `id` must
+        be the path's. A mock replaced this way gives way to a mock file's mock with its id on the next reload.
+      requestBody: { $ref: "#/components/requestBodies/Mock" }
+      responses:
+        "200":
+          description: The mock was replaced.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "404": { $ref: "#/components/responses/MockNotFound" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    patch:
+      tags: [Mocks]
+      operationId: updateMock
+      summary: Enable or disable a mock
+      description: A disabled mock matches no request until it is enabled again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MockChange" }
+          application/yaml:
+            schema: { $ref: "#/components/schemas/MockChange" }
+      responses:
+        "200":
+          description: The mock, changed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/MockSummary" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "404": { $ref: "#/components/responses/MockNotFound" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+    delete:
+      tags: [Mocks]
+      operationId: removeMock
+      summary: Remove a mock
+      responses:
+        "204":
+          description: The mock was removed.
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "404": { $ref: "#/components/responses/MockNotFound" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+  /recording:
+    get:
+      tags: [Recording]
+      operationId: getRecording
+      summary: Get the state of the recording
+      responses:
+        "200":
+          description: The state of the recording, inactive when none runs.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingStatus" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/RecordingStatus" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    post:
+      tags: [Recording]
+      operationId: startRecording
+      summary: Start a recording
+      description: |
+        Starts a recording with the settings of the server's `record` section, which the body changes. One recording
+        runs at a time.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordingSettings" }
+          application/yaml:
+            schema: { $ref: "#/components/schemas/RecordingSettings" }
+      responses:
+        "201":
+          description: The recording started.
+          headers:
+            Location:
+              description: "`/recording`"
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingStatus" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/RecordingStatus" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/RecordingActive" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    delete:
+      tags: [Recording]
+      operationId: stopRecording
+      summary: Stop the recording and serve it
+      description: |
+        Stops the recording, waits until it wrote what it took, and serves it: the mock files load again, with the
+        recording's directory. Calls it couldn't record, and why it isn't served, are in `errors`: it stopped all the
+        same.
+      responses:
+        "200":
+          description: The recording stopped.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingResult" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/RecordingResult" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/NotRecording" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /recorder:
+    get:
+      tags: [Recording]
+      operationId: getRecorder
+      summary: Record from a browser
+      description: A page that starts and stops recordings, and shows what they wrote.
+      responses:
+        "200":
+          description: The page.
+          content:
+            text/html:
+              schema: { type: string }
+  /reset:
+    post:
+      tags: [Server]
+      operationId: reset
+      summary: Reset the server between tests
+      description: |
+        Removes the mocks added through this API, loads the mock files again, saved ones included, and starts every
+        scenario over. Mocks added in code stay as they are. A server without mock files, or scenarios, skips them.
+        A persistent store loads again too: its mocks come back as it holds them, and nothing is deleted from it.
+      responses:
+        "204":
+          description: The server is back to how it started.
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/DuplicateID" }
+        "500": { $ref: "#/components/responses/LoadFailed" }
+  /events:
+    get:
+      tags: [Server]
+      operationId: streamEvents
+      summary: Follow what the server serves
+      description: |
+        Streams what the mock server serves, as it happens, as Server-Sent Events: each event's type is the `type` of
+        its data, a JSON `Event`. Nothing is kept: a client gets the events that come while it listens, and one that
+        falls behind misses some. It is no journal of requests.
+      responses:
+        "200":
+          description: The stream of events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "Server-Sent Events, such as `event: matched` then `data: {\"type\": \"matched\", ...}`."
+              example: |
+                event: matched
+                data: {"method":"GET","mock_id":"hello","request_id":"7f3a","status":200,"target":"/hello","time":"2026-10-20T12:00:00Z","type":"matched"}
+
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /logs:
+    get:
+      tags: [Server]
+      operationId: streamLogs
+      summary: Follow the server's log
+      description: |
+        Streams the log lines of the mock server, as it writes them, as Server-Sent Events of type `log`: each one's
+        data is a JSON log line. Nothing is kept. A server that logs through a logger it was given streams none.
+      responses:
+        "200":
+          description: The stream of log lines.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "Server-Sent Events: `event: log` then `data: {\"level\": \"info\", ...}`."
+              example: |
+                event: log
+                data: {"level":"info","url":"/hello","time":"2026-10-20T12:00:00Z","message":"---> REQUEST RECEIVED GET /hello"}
+
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /scenarios:
+    get:
+      tags: [Scenarios]
+      operationId: listScenarios
+      summary: List scenarios
+      description: Every scenario a mock started, or whose state was set, in the order of their names.
+      responses:
+        "200":
+          description: The scenarios.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScenarioList" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/ScenarioList" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    delete:
+      tags: [Scenarios]
+      operationId: resetScenarios
+      summary: Start every scenario over
+      description: Moves every scenario back to `started`.
+      responses:
+        "204":
+          description: Every scenario is in `started`.
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /scenarios/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: The name of the scenario, exactly as mocks write it.
+        schema: { type: string }
+    put:
+      tags: [Scenarios]
+      operationId: setScenario
+      summary: Move a scenario to a state
+      description: The mocks that require the state match next. A scenario no mock started yet starts in it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScenarioChange" }
+          application/yaml:
+            schema: { $ref: "#/components/schemas/ScenarioChange" }
+      responses:
+        "200":
+          description: The scenario, moved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Scenario" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/Scenario" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+components:
+  requestBodies:
+    Mock:
+      required: true
+      description: A mock file, in JSON or YAML.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Mock" }
+        application/yaml:
+          schema: { $ref: "#/components/schemas/Mock" }
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+        kind:
+          type: string
+          description: The protocol of the mock server.
+          examples: [http, grpc]
+        url:
+          type: string
+          description: |
+            Where the mock server serves its mocks: its URL, such as `http://127.0.0.1:8080`, or its address for gRPC,
+            such as `127.0.0.1:50051`.
+    Mock:
+      type: object
+      description: |
+        A mock file. For HTTP mock servers, `mockhttp/schema/http.schema.json` in the vlatte repository describes it.
+      properties:
+        id:
+          type: string
+          pattern: "^[A-Za-z0-9._~-]+$"
+      additionalProperties: true
+      examples:
+        - id: hello
+          request: { method: GET, path: /hello }
+          response: { status: 200, body: hello }
+    MockSummary:
+      type: object
+      description: The state of a mock.
+      required: [id, priority, enabled, hits]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        priority:
+          type: integer
+          description: Mocks of lower priority match first.
+        enabled:
+          type: boolean
+          description: Whether the mock matches requests.
+        hits:
+          type: integer
+          description: How many requests the mock answered.
+        origin:
+          type: string
+          description: Where the mock came from, such as a mock file's path, or `admin` for this API.
+      additionalProperties: false
+    MockList:
+      type: object
+      required: [mocks]
+      properties:
+        mocks:
+          type: array
+          items: { $ref: "#/components/schemas/MockSummary" }
+      additionalProperties: false
+    MockChange:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether the mock matches requests.
+      additionalProperties: false
+    Event:
+      type: object
+      description: Something that happened on the mock server, the data of an event of `GET /events`.
+      required: [type, time]
+      properties:
+        type:
+          type: string
+          enum: [matched, unmatched, proxied, warning, error]
+          description: |
+            `matched`: a mock answered a request. `unmatched`: no mock matched it. `proxied`: the server proxied it.
+            `warning`: something went wrong without failing the request, such as a webhook. `error`: it failed.
+        time:
+          type: string
+          format: date-time
+        request_id:
+          type: string
+        method:
+          type: string
+          description: The method of the request, such as `GET`.
+        target:
+          type: string
+          description: What the request asked for, such as the URL of an HTTP request.
+        mock_id:
+          type: string
+          description: The mock that matched, if one did.
+        status:
+          type: integer
+          description: The status of the answer, when there was one.
+        message:
+          type: string
+          description: What went wrong.
+      additionalProperties: false
+    SaveSettings:
+      type: object
+      properties:
+        dir:
+          type: string
+          description: |
+            Directory to write the mock files into: a relative path, which starts at the server's root directory and
+            stays inside it.
+          default: testdata/_mocks
+        format:
+          type: string
+          enum: [json, yaml, yml]
+          default: yaml
+      additionalProperties: false
+    SavedFiles:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          items: { type: string }
+          description: The paths of the mock files written.
+      additionalProperties: false
+    Scenario:
+      type: object
+      required: [name, state]
+      properties:
+        name:
+          type: string
+        state:
+          type: string
+          examples: [started]
+      additionalProperties: false
+    ScenarioList:
+      type: object
+      required: [scenarios]
+      properties:
+        scenarios:
+          type: array
+          items: { $ref: "#/components/schemas/Scenario" }
+      additionalProperties: false
+    ScenarioChange:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          minLength: 1
+          description: The state the scenario moves to.
+      additionalProperties: false
+    RecordingSettings:
+      type: object
+      description: The settings of a recording, as the `record` section of the server's settings has them.
+      properties:
+        dir:
+          type: string
+          description: Directory of the recordings. Relative paths start at the server's root directory.
+          default: testdata/_mocks_recorded
+        format:
+          type: string
+          enum: [json, yaml, yml]
+          default: json
+        target:
+          type: string
+          description: The service to record, such as `https://api.example.com`. Requests the recording takes go to it.
+        skip_ssl_verify:
+          type: boolean
+          description: Skip the verification of the target's TLS certificate.
+        methods:
+          type: array
+          items: { type: string }
+          description: Methods of the requests the recording takes. None takes every method.
+        paths:
+          type: array
+          items: { type: string }
+          description: Glob patterns of the paths of the requests the recording takes, such as `/v1/*`.
+        request_headers:
+          type: array
+          items: { type: string }
+          description: Request headers recordings match.
+        exclude_response_headers:
+          type: array
+          items: { type: string }
+          description: Response headers recordings leave out.
+          default: [Set-Cookie]
+        body_files:
+          type: boolean
+          description: Write each response body to a file of its own.
+        max_inline_body:
+          type: integer
+          minimum: 0
+          description: Bytes of a body kept in memory while it is recorded. 0 uses the default.
+        max_body_size:
+          type: integer
+          description: Calls with a larger response body aren't recorded. 0 uses the default; negative, no limit.
+        repeats:
+          type: string
+          enum: [sequence, first]
+          description: What a recording keeps of a request that comes again.
+        include_mocked:
+          type: boolean
+          description: Record the answers of mocks too, not only proxied ones.
+      additionalProperties: false
+    RecordingStatus:
+      type: object
+      required: [active, calls, mocks, dropped, failed]
+      properties:
+        active:
+          type: boolean
+          description: Whether a recording takes calls.
+        calls:
+          type: integer
+          description: Calls the recording took.
+        mocks:
+          type: integer
+          description: Mocks it wrote.
+        dropped:
+          type: integer
+          description: Calls it refused, because too many waited to be written.
+        failed:
+          type: integer
+          description: Calls and mocks it couldn't record.
+      additionalProperties: false
+    RecordingResult:
+      type: object
+      required: [status, recordings]
+      properties:
+        status: { $ref: "#/components/schemas/RecordingStatus" }
+        recordings:
+          type: array
+          description: The mock files the recording wrote, in the order their requests first came.
+          items:
+            type: object
+            required: [id, file, responses]
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              file:
+                type: string
+                description: The path of the mock file.
+              body_files:
+                type: array
+                items: { type: string }
+                description: The names of its body files, next to it.
+              responses:
+                type: integer
+                description: How many responses it replies with.
+            additionalProperties: false
+        errors:
+          type: array
+          items: { type: string }
+          description: What the recording couldn't record, and why it isn't served.
+      additionalProperties: false
+    Problem:
+      type: object
+      description: An RFC 9457 problem document. Its type is `about:blank`, so `title` is the status's phrase.
+      required: [status, title, code, detail, instance]
+      properties:
+        status:
+          type: integer
+        title:
+          type: string
+        code:
+          type: string
+          description: What went wrong, as a stable code clients can act on.
+          enum:
+            - invalid_body
+            - id_mismatch
+            - cross_origin
+            - mock_not_found
+            - route_not_found
+            - method_not_allowed
+            - not_acceptable
+            - duplicate_id
+            - body_too_large
+            - unsupported_media_type
+            - describe_failed
+            - load_failed
+            - internal
+            - not_supported
+            - recording_active
+            - not_recording
+            - closing
+        detail:
+          type: string
+          description: What went wrong in this request.
+        instance:
+          type: string
+          description: The path of the request.
+        problems:
+          type: array
+          description: The problems of a mock, a body or a mock file, one by one.
+          items: { $ref: "#/components/schemas/ProblemItem" }
+      additionalProperties: false
+    ProblemItem:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: A stable code, such as `unknown_key`, `invalid_value` or `parse_error`.
+        origin:
+          type: string
+          description: Where the problem is, such as `admin request` or a mock file.
+        key:
+          type: string
+          description: The key with the problem, such as `response.status`.
+        value:
+          type: string
+          description: The value with the problem.
+        message:
+          type: string
+        hint:
+          type: string
+          description: How to fix it.
+      additionalProperties: false
+  responses:
+    InvalidBody:
+      description: "`invalid_body`: the mock or the body has problems, or `id_mismatch`: the body's id isn't the path's."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    CrossOrigin:
+      description: "`cross_origin`: a browser's cross-site request can't change the server."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    MockNotFound:
+      description: "`mock_not_found`: no mock has the id."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotAcceptable:
+      description: "`not_acceptable`: `Accept` takes neither JSON nor YAML. Always JSON."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    DuplicateID:
+      description: "`duplicate_id`: a mock has the id already."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    BodyTooLarge:
+      description: "`body_too_large`: the body is over 10 MiB."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    UnsupportedMediaType:
+      description: "`unsupported_media_type`: the body is neither JSON nor YAML. `Accept` lists what is."
+      headers:
+        Accept:
+          schema: { type: string }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    DescribeFailed:
+      description: "`describe_failed`: the mock can't be described as a mock file, such as one with a binary body."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    SaveFailed:
+      description: |
+        `describe_failed`: a mock can't be described as a mock file, and nothing was written, or `load_failed`: the
+        mock files, written, failed to load, or couldn't be written.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    LoadFailed:
+      description: "`load_failed`: the mock files have problems, listed in `problems`. Nothing changed."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    RecordingActive:
+      description: "`recording_active`: a recording runs already."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotRecording:
+      description: "`not_recording`: no recording runs."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotSupported:
+      description: "`not_supported`: the mock server's protocol can't do this."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }

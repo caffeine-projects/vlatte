@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"crypto/tls"
+	"net"
 	"net/http"
 	"testing"
 
@@ -149,34 +150,18 @@ func TestServer_PathsReachTheMocksAsSent(t *testing.T) {
 	}
 }
 
-func TestServer_TheAdminPathIsReserved(t *testing.T) {
-	// Requests under the admin path are the admin API's, even when a mock would match them: no mock can shadow it.
-	m := MustNew(Setup().Silent())
-	m.MustStart()
-	t.Cleanup(m.Close)
-
-	scope := m.MustMock(AnyMethod().Reply(echo()))
-
-	res, body := do(t, http.MethodGet, m.URL(m.Config().AdminPath, "ping"), nil, nil)
-	require.Equal(t, http.StatusOK, res.StatusCode)
-	require.Equal(t, "pong", string(body))
-
-	res, _ = do(t, http.MethodGet, m.URL(m.Config().AdminPath, "nope"), nil, nil)
-	require.Equal(t, http.StatusNotFound, res.StatusCode)
-
-	vlatte.NotCalled(t, scope)
-}
-
-func TestServer_PathsOutsideTheAdminAPIReachTheMocks(t *testing.T) {
-	// Only paths under the admin path are the admin API's. A path that only starts like it, or holds it further in,
-	// is a mock's. So is the admin path alone, which has no admin endpoint.
-	m := MustNew(Setup().Silent())
+func TestServer_TheAdminAPIIsApartFromTheMocks(t *testing.T) {
+	// The admin API serves on an address of its own: every path of the mock server, /__admin included, is the mocks'.
+	m := MustNew(Setup().Silent().Admin(""))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
 	m.MustMock(AnyMethod().Reply(echo()))
 
-	for _, path := range []string{"/__administrator", "/__admin_x/ping", "/x/__admin/ping", "/__admin"} {
+	require.NotEmpty(t, m.AdminURL())
+	require.NotEqual(t, m.URL(), m.AdminURL())
+
+	for _, path := range []string{"/__admin/mocks", "/__admin/ping", "/mocks", "/health"} {
 		t.Run(path, func(t *testing.T) {
 			res, _ := do(t, http.MethodGet, m.URL()+path, nil, nil)
 
@@ -184,34 +169,30 @@ func TestServer_PathsOutsideTheAdminAPIReachTheMocks(t *testing.T) {
 			require.Equal(t, path, res.Header.Get("X-Path"))
 		})
 	}
+
+	res, body := do(t, http.MethodGet, m.AdminURL()+"/health", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.JSONEq(t, `{"status": "ok", "kind": "http", "url": "`+m.URL()+`"}`, string(body))
 }
 
-func TestServer_CustomAdminPath(t *testing.T) {
-	// The admin API moves to the configured path, written with or without its slashes, and leaves the default one to
-	// the mocks.
-	tests := []struct {
-		giveAdminPath string
-		wantPingPath  string
-	}{
-		{giveAdminPath: "/ctl", wantPingPath: "/ctl/ping"},
-		{giveAdminPath: "ctl", wantPingPath: "/ctl/ping"},
-		{giveAdminPath: "/ctl/", wantPingPath: "/ctl/ping"},
-		{giveAdminPath: "/a/b", wantPingPath: "/a/b/ping"},
-	}
+func TestServer_NoAdminAPIUnlessAsked(t *testing.T) {
+	// A server opens one port unless its admin API is asked for: tests start many servers.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
 
-	for _, tt := range tests {
-		t.Run(tt.giveAdminPath, func(t *testing.T) {
-			m := MustNew(Setup().Silent().AdminPath(tt.giveAdminPath))
-			m.MustStart()
-			t.Cleanup(m.Close)
+	require.Empty(t, m.AdminURL())
+}
 
-			res, body := do(t, http.MethodGet, m.URL()+tt.wantPingPath, nil, nil)
-			require.Equal(t, http.StatusOK, res.StatusCode)
-			require.Equal(t, "pong", string(body))
+func TestServer_AdminAPIThatCantListen(t *testing.T) {
+	// The admin API failing to listen fails the start, which closes the server, mocks and all.
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = taken.Close() })
 
-			res, _ = do(t, http.MethodGet, m.URL("/__admin/ping"), nil, nil)
-			require.Equal(t, StatusNoMatch, res.StatusCode)
-			require.Equal(t, vlatte.FailureNoMatch, res.Header.Get(HeaderVlatteError))
-		})
-	}
+	m := MustNew(Setup().Silent().Admin(taken.Addr().String()))
+	t.Cleanup(m.Close)
+
+	require.ErrorContains(t, m.Start(), "admin: ")
+	require.ErrorIs(t, m.Start(), http.ErrServerClosed)
 }

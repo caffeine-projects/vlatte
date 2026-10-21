@@ -55,11 +55,12 @@ func (m *fakeMock) Close() error {
 // hit records a served request, as a protocol server does after a mock matches.
 func (m *fakeMock) hit() { m.hits.Add(1) }
 
-// brokenStore is a memory store whose Pick, Delete or Replace fails, for the error paths of scopes.
+// brokenStore is a memory store whose Pick, PickAll, Delete or Replace fails, for the error paths of scopes.
 type brokenStore struct {
 	*vlatte.MemoryStore[*fakeMock]
 
 	pickErr    error
+	pickAllErr error
 	deleteErr  error
 	replaceErr error
 }
@@ -74,6 +75,14 @@ func (s *brokenStore) Pick(ctx context.Context, id string) (*fakeMock, error) {
 	}
 
 	return s.MemoryStore.Pick(ctx, id)
+}
+
+func (s *brokenStore) PickAll(ctx context.Context) ([]*fakeMock, error) {
+	if s.pickAllErr != nil {
+		return nil, s.pickAllErr
+	}
+
+	return s.MemoryStore.PickAll(ctx)
 }
 
 func (s *brokenStore) Delete(ctx context.Context, ids ...string) error {

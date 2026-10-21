@@ -20,6 +20,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/caffeine-projects/vlatte/internal/atomicfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
@@ -434,7 +435,7 @@ func (s *RecordSession[X, Q, S]) write(g *recordGroup) (retry bool) {
 	g.pending = nil
 
 	file := filepath.Join(s.opts.Dir, g.id+".mock."+s.format)
-	if err := writeAtomic(s.opts.Dir, file, data); err != nil {
+	if err := atomicfile.Write(s.opts.Dir, _tempPattern, file, data); err != nil {
 		s.failMock(g, fmt.Errorf("recorder: %s: %w", g.id, err))
 		return true
 	}
@@ -520,7 +521,7 @@ func (s *RecordSession[X, Q, S]) writeBody(p pendingFile) error {
 		return os.Rename(p.temp, target)
 	}
 
-	return writeAtomic(s.opts.Dir, target, p.data)
+	return atomicfile.Write(s.opts.Dir, _tempPattern, target, p.data)
 }
 
 // dropUnwritten removes the spooled files of mocks that couldn't be written.
@@ -694,34 +695,6 @@ func discard[X any](x X) {
 	if d, ok := any(x).(interface{ Discard() }); ok {
 		d.Discard()
 	}
-}
-
-// writeAtomic writes data to file through a temporary file of dir, renamed into place: a reader finds the file
-// whole, or not at all.
-func writeAtomic(dir, file string, data []byte) error {
-	f, err := os.CreateTemp(dir, _tempPattern)
-	if err != nil {
-		return err
-	}
-
-	_, err = f.Write(data)
-	if err == nil {
-		err = f.Chmod(0o644)
-	}
-
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
-	}
-
-	if err == nil {
-		err = os.Rename(f.Name(), file)
-	}
-
-	if err != nil {
-		os.Remove(f.Name())
-	}
-
-	return err
 }
 
 // removeOtherFormats removes the mock files file replaces in other formats, such as a.mock.yaml for a.mock.json: one

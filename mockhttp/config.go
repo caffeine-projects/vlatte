@@ -29,7 +29,6 @@ var (
 type Config struct {
 	// Common fields
 	Name                  string
-	AdminPath             string
 	RootDir               string
 	TLSConfig             *tls.Config
 	TLSCertificates       []tls.Certificate
@@ -57,7 +56,7 @@ type Config struct {
 
 	// HTTP-specific fields
 	Addr                           string
-	Listener                       net.Listener
+	Listener                       net.Listener // in place of listening on Addr: see ConfigBuilder.Listener
 	UseHTTP2                       bool
 	RequestWasNotMatchedStatusCode int
 	ErrorStatusCode                int
@@ -73,6 +72,7 @@ type Config struct {
 	Loaders                        []Loader
 	Proxy                          *ProxyConfig
 	Record                         *RecordConfig
+	Admin                          *AdminConfig
 	MockFileHandlers               []MockFileHandler
 	HeaderNamesToRedact            map[string]struct{}
 	UseHTTPS                       bool
@@ -104,7 +104,6 @@ type Config struct {
 // Apply copies the current Config struct values to the given Config parameter.
 func (c *Config) Apply(conf *Config) error {
 	conf.Name = c.Name
-	conf.AdminPath = c.AdminPath
 	conf.RootDir = c.RootDir
 	conf.TLSConfig = c.TLSConfig
 	conf.TLSCertificates = c.TLSCertificates
@@ -140,6 +139,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Loaders = c.Loaders
 	conf.Proxy = c.Proxy
 	conf.Record = c.Record
+	conf.Admin = c.Admin
 	conf.UseHTTPS = c.UseHTTPS
 	conf.WebhookTimeout = c.WebhookTimeout
 	conf.MockFileHandlers = c.MockFileHandlers
@@ -149,6 +149,24 @@ func (c *Config) Apply(conf *Config) error {
 
 	return nil
 }
+
+// AdminConfig configures the admin API of a server: a RESTful HTTP server of its own, apart from the mocks. A nil
+// *AdminConfig serves none.
+type AdminConfig struct {
+	// Addr is the address the admin API listens on: host:port, :port or a port. Empty is a random local port.
+	Addr string
+
+	// Store makes the persistent store of the mocks the admin API adds, such as FileStore(dir) or a database of yours:
+	// each change the admin API makes reaches it at once, and the server serves what it holds when it starts and on
+	// each Reload, so changes made to it directly take effect too. Nil keeps those mocks in memory, as long as the
+	// server runs.
+	Store AdminStore
+}
+
+// AdminStore makes the persistent store of the mocks the admin API adds, for the server app. The store keeps their
+// descriptions, by ID, such as in files or a database: EncodeMock describes a mock, and DecodeMock builds it back.
+// The mocks of mock files and code never reach it.
+type AdminStore func(app *Server) (vlatte.Store[*Mock], error)
 
 // DebugFn is a function for debug logging.
 type DebugFn func(string, any)
@@ -191,7 +209,6 @@ func defaultConfig() *Config {
 		HeaderNamesToRedact:            make(map[string]struct{}),
 		UseHTTP2:                       true,
 		Listeners:                      vlatte.NewListener(),
-		AdminPath:                      "/__admin",
 		LogPretty:                      true,
 		LogLevel:                       vlatte.LogLevelInfo,
 		LogVerbosity:                   vlatte.LogHeader,
@@ -224,7 +241,7 @@ func (cb *ConfigBuilder) Addr(addr string) *ConfigBuilder {
 }
 
 // Listener sets an already bound listener for the mock HTTP server to serve instead of listening on Addr.
-// The server closes it on Close.
+// Start takes it: Close, or a Start that fails, closes it, so nothing listens without a server behind it.
 func (cb *ConfigBuilder) Listener(l net.Listener) *ConfigBuilder {
 	cb.conf.Listener = l
 	return cb
@@ -522,9 +539,17 @@ func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
 	return cb
 }
 
-// AdminPath sets the Admin path.
-func (cb *ConfigBuilder) AdminPath(path string) *ConfigBuilder {
-	cb.conf.AdminPath = path
+// Admin serves the admin API, on an HTTP server of its own at addr: host:port, :port or a port. Empty is a random
+// local port. Server.AdminURL returns where it listens.
+func (cb *ConfigBuilder) Admin(addr string) *ConfigBuilder {
+	section(&cb.conf.Admin, AdminConfig{}).Addr = addr
+	return cb
+}
+
+// AdminStore keeps the mocks the admin API adds in the persistent store store makes, such as FileStore(dir), and
+// serves the admin API: see AdminConfig.Store.
+func (cb *ConfigBuilder) AdminStore(store AdminStore) *ConfigBuilder {
+	section(&cb.conf.Admin, AdminConfig{}).Store = store
 	return cb
 }
 

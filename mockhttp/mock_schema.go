@@ -8,13 +8,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/filterbuilder"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
@@ -760,10 +760,9 @@ func decodeFilePattern(d *mockDef, field string, v config.Value) error {
 	}
 
 	if def.bodyFile != "" {
-		path := def.bodyFile
-		if d.dir != "" && !filepath.IsAbs(path) {
-			path = filepath.Join(d.dir, path)
-		}
+		// Joined to the mock file's directory, the name opens the same file from the working directory, as the
+		// pattern's description says it.
+		path := bodyfile.Path(d.dir, def.bodyFile)
 
 		b, err := os.ReadFile(path)
 		switch {
@@ -779,7 +778,7 @@ func decodeFilePattern(d *mockDef, field string, v config.Value) error {
 			}}}
 		}
 
-		def.pattern.bodyFileBytes(def.bodyFile, b)
+		def.pattern.bodyFileBytes(path, b)
 	}
 
 	d.request.formFile = append(d.request.formFile, func(b *Builder) { b.FormFile(field, def.pattern) })

@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -569,6 +570,143 @@ func TestCLI_RecordingsItCantServeDontFailTheRun(t *testing.T) {
 	require.Equal(t, 0, code, "every call was recorded")
 	require.Contains(t, stderr, "mock id already in use", "why the recording isn't served")
 	require.FileExists(t, files[0], "the recording was written again")
+}
+
+// lockedBuffer is a bytes.Buffer the CLI writes to while the test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
+}
+
+// startAdmin runs the CLI with args, as start does, and returns the URL of the admin API it prints.
+func startAdmin(t *testing.T, args ...string) (string, func() int) {
+	t.Helper()
+
+	var stdout lockedBuffer
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	go func() { done <- run(ctx, args, &stdout, io.Discard) }()
+
+	code, stopped := 0, false
+	stop := func() int {
+		if !stopped {
+			cancel()
+			code, stopped = <-done, true
+		}
+
+		return code
+	}
+
+	t.Cleanup(func() { stop() })
+
+	var adminURL string
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		_, after, ok := strings.Cut(stdout.String(), "Admin API: ")
+		if assert.True(c, ok) {
+			adminURL, _, _ = strings.Cut(after, "\n")
+		}
+	}, 5*time.Second, 10*time.Millisecond)
+
+	return adminURL, stop
+}
+
+// postMock adds the mock of doc, a YAML document, through the admin API at adminURL.
+func postMock(t *testing.T, adminURL, doc string) {
+	t.Helper()
+
+	res, err := http.Post(adminURL+"/mocks", "application/yaml", strings.NewReader(doc))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+}
+
+func TestCLI_ServesTheAdminAPI(t *testing.T) {
+	// The command serves the admin API on its own address, and prints it, so a user can add mocks while it runs.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	addr := randomAddr(t)
+	adminURL, _ := startAdmin(t, "--addr", addr, "--log-level", "disabled")
+	require.True(t, strings.HasPrefix(adminURL, "http://127.0.0.1:"), adminURL)
+
+	postMock(t, adminURL, "request: {method: GET, path: /added}\nresponse: {status: 201}\n")
+
+	status, _ := firstAnswer(t, "http://"+addr+"/added")
+	require.Equal(t, http.StatusCreated, status)
+}
+
+func TestCLI_KeepsTheAdminMocksAcrossRestarts(t *testing.T) {
+	// The mocks the admin API adds are kept in testdata/_admin, so the next run serves them. --admin-dir moves them,
+	// and an empty one keeps them in memory.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	addr := randomAddr(t)
+	adminURL, stop := startAdmin(t, "--addr", addr, "--log-level", "disabled")
+	postMock(t, adminURL, "id: kept\nrequest: {method: GET, path: /kept}\nresponse: {status: 201}\n")
+	require.FileExists(t, filepath.Join("testdata", "_admin", "kept.mock.yaml"))
+	require.Zero(t, stop())
+
+	start(t, "--addr", addr, "--log-level", "disabled")
+
+	status, _ := firstAnswer(t, "http://"+addr+"/kept")
+	require.Equal(t, http.StatusCreated, status)
+
+	t.Run("in memory", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+
+		adminURL, _ := startAdmin(t, "--addr", randomAddr(t), "--admin-dir=", "--log-level", "disabled")
+		postMock(t, adminURL, "id: gone\nrequest: {method: GET, path: /gone}\nresponse: {status: 201}\n")
+
+		_, err := os.Stat("testdata")
+		require.ErrorIs(t, err, os.ErrNotExist)
+	})
+}
+
+func TestCLI_AdminSettings(t *testing.T) {
+	// --admin-addr moves the admin API, and --admin=false turns it off: settings apply after the command's default.
+	withoutDockerHost(t)
+
+	t.Run("an address", func(t *testing.T) {
+		admin := randomAddr(t)
+		start(t, "--addr", randomAddr(t), "--admin-addr", admin, "--log-level", "disabled")
+
+		status, body := firstAnswer(t, "http://"+admin+"/health")
+		require.Equal(t, http.StatusOK, status)
+		require.Contains(t, body, `"kind": "http"`)
+	})
+
+	t.Run("off", func(t *testing.T) {
+		addr := randomAddr(t)
+
+		var stdout lockedBuffer
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan int, 1)
+		go func() {
+			done <- run(ctx, []string{"--addr", addr, "--admin=false", "--log-level", "disabled"}, &stdout, io.Discard)
+		}()
+		t.Cleanup(func() { cancel(); <-done })
+
+		require.EventuallyWithT(t, func(c *assert.CollectT) {
+			assert.Contains(c, stdout.String(), "Listening: ")
+		}, 5*time.Second, 10*time.Millisecond)
+
+		require.NotContains(t, stdout.String(), "Admin API")
+	})
 }
 
 // proxyAnswer sends a GET for target through the forward proxy at addr, once the CLI listens, and returns the answer.

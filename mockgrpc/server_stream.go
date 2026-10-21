@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 )
 
 var (
@@ -266,6 +267,7 @@ func (in *interceptors) StreamInterceptor(
 	}
 
 	if !pass {
+		in.app.publish(handler.EventUnmatched, info.FullMethod, nil, nil)
 		return fail(ctx, vlatte.FailureNoMatch, codes.NotFound, "stream: request was not matched with any mock")
 	}
 
@@ -277,10 +279,12 @@ func (in *interceptors) StreamInterceptor(
 	values := &StreamRequestValues{rawBody, stream, info, in.app}
 	_, err = mock.streamReply.Reply(ctx, values)
 	if err != nil {
+		in.app.publishReply(info.FullMethod, mock, err)
 		return replyError(ctx, "stream", mock, err)
 	}
 
 	mock.Inc()
+	in.app.publish(handler.EventMatched, info.FullMethod, mock, nil)
 
 	return nil
 }
