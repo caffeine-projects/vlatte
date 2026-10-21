@@ -341,8 +341,9 @@ func (app *Server) Name() string {
 
 // Start starts the mock server. It listens, so loaders can read URL, loads the mocks and starts the recording the
 // config sets, then serves: the first request finds them. A server starts once: Start returns vlatte.ErrStarted once it
-// started, and http.ErrServerClosed once it closed. A start that fails to listen, load or serve closes the server, so
-// nothing listens.
+// started, and http.ErrServerClosed once it closed. Start is all or nothing: a start that fails to listen, load the
+// mocks, start the recording or the admin API, or serve, stops what started and closes the server, so nothing listens,
+// the listener of Config.Listener included.
 func (app *Server) Start() error {
 	return app.start(app.server.Listen)
 }

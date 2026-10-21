@@ -5,6 +5,7 @@ import (
 	"context"
 	json "encoding/json/v2"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -775,4 +776,80 @@ func TestAdmin_ResetPutsBackTheFilesMock(t *testing.T) {
 
 	_, body = do(t, http.MethodGet, m.AdminURL()+"/mocks", nil, nil)
 	require.NotContains(t, string(body), `"origin": "admin"`)
+}
+
+func TestAdmin_AStartThatFailsLeavesNothingListening(t *testing.T) {
+	// Start is all or nothing: when any part fails to start, the admin API, the mock files or the persistent store,
+	// nothing listens, the listener the server was given included, and the server stays closed.
+	free := func(t *testing.T) string {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		require.NoError(t, l.Close())
+
+		return l.Addr().String()
+	}
+
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, admin string) *ConfigBuilder
+	}{
+		{
+			name: "an admin address taken",
+			setup: func(t *testing.T, _ string) *ConfigBuilder {
+				taken, err := net.Listen("tcp", "127.0.0.1:0")
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = taken.Close() })
+
+				return Setup().Admin(taken.Addr().String())
+			},
+		},
+		{
+			name: "a mock file with problems",
+			setup: func(t *testing.T, admin string) *ConfigBuilder {
+				root := t.TempDir()
+				require.NoError(t, os.Mkdir(filepath.Join(root, "mocks"), 0o700))
+				require.NoError(t, os.WriteFile(filepath.Join(root, "mocks", "bad.yaml"), []byte("request: {methd: GET}\n"), 0o600))
+
+				return Setup().Admin(admin).RootDir(root).MockFilePatterns("mocks/*.yaml")
+			},
+		},
+		{
+			name: "a persistent store it can't read",
+			setup: func(t *testing.T, admin string) *ConfigBuilder {
+				notADir := filepath.Join(t.TempDir(), "file")
+				require.NoError(t, os.WriteFile(notADir, nil, 0o600))
+
+				return Setup().Admin(admin).AdminStore(FileStore(notADir))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			admin := free(t)
+
+			l, err := net.Listen("tcp", "127.0.0.1:0")
+			require.NoError(t, err)
+
+			m := MustNew(tt.setup(t, admin).Silent().Listener(l))
+			t.Cleanup(m.Close)
+
+			require.Error(t, m.Start())
+
+			// An open listener would wait for a client: the deadline fails the test instead.
+			if tcp, ok := l.(*net.TCPListener); ok {
+				_ = tcp.SetDeadline(time.Now().Add(time.Second))
+			}
+
+			_, err = l.Accept()
+			require.ErrorIs(t, err, net.ErrClosed)
+
+			for _, addr := range []string{l.Addr().String(), admin} {
+				_, err := net.DialTimeout("tcp", addr, time.Second)
+				require.Error(t, err, "nothing listens on %s", addr)
+			}
+
+			require.ErrorIs(t, m.Start(), http.ErrServerClosed)
+		})
+	}
 }

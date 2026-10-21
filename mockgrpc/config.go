@@ -12,7 +12,7 @@ type Config struct {
 	ServiceDesc   *grpc.ServiceDesc
 	ServerOptions []grpc.ServerOption
 	Addr          string
-	Listener      net.Listener
+	Listener      net.Listener // in place of listening on Addr: see ConfigBuilder.Listener
 	Logger        *zerolog.Logger
 
 	// NoDebugHeaders turns off the debug header metadata, such as vlatte-matched-mock-id, of the server's answers.
@@ -79,7 +79,7 @@ func (cb *ConfigBuilder) Addr(addr string) *ConfigBuilder {
 }
 
 // Listener sets an already bound listener for the mock GRPC server to serve instead of listening on Addr.
-// The server closes it on Close.
+// Start takes it: Close, or a Start that fails, closes it, so nothing listens without a server behind it.
 func (cb *ConfigBuilder) Listener(l net.Listener) *ConfigBuilder {
 	cb.conf.Listener = l
 	return cb

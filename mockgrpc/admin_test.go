@@ -210,6 +210,36 @@ func TestAdmin_AGRPCServerWhoseAdminCantListen(t *testing.T) {
 	require.Empty(t, m.Addr())
 }
 
+func TestAdmin_AGRPCStartThatFailsClosesTheListenerItWasGiven(t *testing.T) {
+	// Start is all or nothing: when the admin API can't listen, nothing does, the listener the server was given
+	// included, so clients are refused at once rather than left waiting on a server that isn't there.
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = taken.Close() })
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	m := MustNew(Setup().Listener(l).Admin(taken.Addr().String()))
+	t.Cleanup(m.Close)
+
+	require.ErrorContains(t, m.Start(), "admin: ")
+
+	// An open listener would wait for a client: the deadline fails the test instead.
+	if tcp, ok := l.(*net.TCPListener); ok {
+		_ = tcp.SetDeadline(time.Now().Add(time.Second))
+	}
+
+	_, err = l.Accept()
+	require.ErrorIs(t, err, net.ErrClosed)
+
+	_, err = net.DialTimeout("tcp", l.Addr().String(), time.Second)
+	require.Error(t, err, "nothing listens")
+
+	require.Empty(t, m.Addr())
+	require.ErrorIs(t, m.Start(), grpc.ErrServerStopped)
+}
+
 func statusCode(err error) codes.Code {
 	return status.Code(err)
 }

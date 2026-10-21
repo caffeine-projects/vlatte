@@ -133,7 +133,9 @@ func (app *Server) Prep(ctx context.Context, recipes ...Recipe) error {
 }
 
 // Start starts the mock server. A server starts once: Start fails with vlatte.ErrStarted once it started, and with
-// grpc.ErrServerStopped once it closed. A start that fails to listen closes the server.
+// grpc.ErrServerStopped once it closed. Start is all or nothing: it serves once it listens and its admin API, if any,
+// serves. A start that fails stops what started, closes the server, and leaves nothing listening, the listener of
+// Config.Listener included.
 func (app *Server) Start() error {
 	app.mu.Lock()
 	defer app.mu.Unlock()

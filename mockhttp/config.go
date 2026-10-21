@@ -56,7 +56,7 @@ type Config struct {
 
 	// HTTP-specific fields
 	Addr                           string
-	Listener                       net.Listener
+	Listener                       net.Listener // in place of listening on Addr: see ConfigBuilder.Listener
 	UseHTTP2                       bool
 	RequestWasNotMatchedStatusCode int
 	ErrorStatusCode                int
@@ -241,7 +241,7 @@ func (cb *ConfigBuilder) Addr(addr string) *ConfigBuilder {
 }
 
 // Listener sets an already bound listener for the mock HTTP server to serve instead of listening on Addr.
-// The server closes it on Close.
+// Start takes it: Close, or a Start that fails, closes it, so nothing listens without a server behind it.
 func (cb *ConfigBuilder) Listener(l net.Listener) *ConfigBuilder {
 	cb.conf.Listener = l
 	return cb
