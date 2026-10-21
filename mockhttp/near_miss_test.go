@@ -34,9 +34,30 @@ func TestNoMatch_ListsTheClosestMocks(t *testing.T) {
 		"[orders]: 1 of 3 parts matched; differs in path, query page\n", body)
 }
 
+func TestNoMatch_NearMissesRunNoMatcherTwice(t *testing.T) {
+	// The report goes on from where matching stopped: a matcher with an action, such as Peek's, runs once for a
+	// request no mock matched, as it does for one a mock matched.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	var runs int
+	peek := match.Peek(match.Equal("1"), func(any) error { runs++; return nil })
+
+	m.MustMock(
+		Getf("/a").ID("a").Header("x", peek).Reply(OK()),
+		Postf("/b").ID("b").Header("x", peek).Reply(OK()),
+	)
+
+	status, _, body := getFull(t, m, "/a")
+	require.Equal(t, StatusNoMatch, status)
+	require.Contains(t, body, "[a]: 2 of 3 parts matched; differs in header x\n")
+	require.Equal(t, 2, runs, "the header of each mock ran once: a's in matching, b's in the report")
+}
+
 func TestNoMatch_NearMissesStartNoScenario(t *testing.T) {
-	// A scenario starts with the first request its mock matches: a near miss report, which runs every mock's
-	// matchers, must not start it, or a later request finds the scenario in a state no test set.
+	// A scenario starts with the first request its mock matches: a near miss report, which runs the matchers
+	// matching never reached, must not start it, or a later request finds the scenario in a state no test set.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -50,8 +71,8 @@ func TestNoMatch_NearMissesStartNoScenario(t *testing.T) {
 }
 
 func TestNoMatch_NearMissesTurnOff(t *testing.T) {
-	// The report runs every mock's matchers again: a server with many mocks, or matchers with actions, turns it off,
-	// in code or in its settings.
+	// The report runs the matchers matching never reached: a server with many mocks, or matchers with actions, turns
+	// it off, in code or in its settings.
 	for name, setup := range map[string]*ConfigBuilder{
 		"builder": Setup().Silent().NoNearMisses(),
 		"setting": Setup().Silent().ConfigSources(ConfigArgs([]string{"--near-misses=false"})),
@@ -72,7 +93,8 @@ func TestNoMatch_NearMissesTurnOff(t *testing.T) {
 
 func TestNoMatch_NamesEachPartAsTheBuilderDoes(t *testing.T) {
 	// A part is named as a test wrote it, Times and RequestMatches included, and a matcher's error stays on its
-	// mock's line, whatever it holds. Matching stops at the path, before the predicate: only the report runs it.
+	// mock's line, whatever it holds. A Once used up is the part a mock differs in: matching ran it. Matching stops
+	// at the path, before the predicate: only the report runs it.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -88,7 +110,7 @@ func TestNoMatch_NamesEachPartAsTheBuilderDoes(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 
 	_, _, body := getFull(t, m, "/a")
-	require.Contains(t, body, "\n[once]: 2 of 2 parts matched; not checked: times\n")
+	require.Contains(t, body, "\n[once]: 2 of 3 parts matched; differs in times\n")
 
 	_, _, body = getFull(t, m, "/b")
 	require.Contains(t, body, "\n[predicate]: 1 of 3 parts matched; differs in path, request: ")

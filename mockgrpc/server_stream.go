@@ -267,16 +267,22 @@ func (in *interceptors) StreamInterceptor(
 	input := &StreamValueSelectorIn{rawBody, info}
 	evals := func(m *Mock) vlatte.Evaluators[*Mock, *StreamValueSelectorIn] { return m.streamExpectations }
 
-	mock, pass, err := mocks.Find(ctx, sub, input, evals)
+	// Only the journal reports near misses: a call's status carries no more than its message. They go on from where
+	// matching stopped, so no matcher runs twice for the call.
+	var misses *vlatte.Misses[*Mock, *StreamValueSelectorIn]
+	if call != nil && !in.app.config.NoNearMisses {
+		misses = new(vlatte.Misses[*Mock, *StreamValueSelectorIn])
+	}
+
+	mock, pass, err := mocks.Find(ctx, sub, input, evals, misses)
 	if err != nil {
 		return fail(ctx, vlatte.FailureMatch, codes.Internal, "stream: finding a mock: %v", err)
 	}
 
 	if !pass {
-		// Only the journal reports near misses: a call's status carries no more than its message.
 		var near []vlatte.NearMiss
-		if call != nil && !in.app.config.NoNearMisses {
-			near = mocks.NearMisses(ctx, input, evals, describeEval)
+		if misses != nil {
+			near = misses.NearMisses(ctx, describeEval)
 		}
 
 		call.unmatched(near)

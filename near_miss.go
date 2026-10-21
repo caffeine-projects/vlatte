@@ -9,51 +9,100 @@ import (
 // _nearMisses is how many mocks a near miss report names at most.
 const _nearMisses = 3
 
-// NearMisses returns the mocks that came closest to matching in, a request none matched: at most 3, those with the
-// fewest parts that failed first, then those with the most that passed, in the order of mocks. A mock none of whose
-// parts passed is left out, unless it has only parts it skipped. describe names the part of the request an
-// evaluator checks, such as "header Accept"; a part whose matcher failed with an error names it too.
-//
-// It runs every matcher of each mock again, not only up to the first that fails, so the action of a matcher such as
-// match.Peek runs again too. It skips those that keep state, as running a scenario's may change it: their parts,
-// such as Times or a scenario's state, are those a mock all of whose other parts passed missed by.
-func (mocks Mocks[M, TIn]) NearMisses(ctx context.Context, in TIn, evals GetEvals[M, TIn], describe func(*Eval[TIn]) string) []NearMiss {
-	var misses []NearMiss
+// Misses are the mocks [Mocks.Find] tried for one request, and that didn't match it, each with the part it stopped
+// at: none once a mock matched. The zero value is ready to use; give each Find its own.
+type Misses[M Mock, TIn any] struct {
+	in    TIn
+	tried []tried[M, TIn]
+}
 
-	for mock := range mocks {
+// tried is a mock Find tried: the parts before stop matched, and the one at stop didn't.
+type tried[M Mock, TIn any] struct {
+	mock  M
+	evals Evaluators[M, TIn]
+	stop  int
+}
+
+// nearMiss is a NearMiss as NearMisses ranks it: differs counts the parts that failed and keep no state, the parts
+// of the request.
+type nearMiss struct {
+	miss    NearMiss
+	differs int
+}
+
+// NearMisses returns the mocks that came closest to matching the request Find found no mock for: at most 3, those
+// that differ in the fewest parts of the request first, then those with the most parts that passed, in the order
+// Find tried them. A part that keeps state, such as a Times used up, is no part of the request: a mock that missed
+// by it alone comes first. describe names the part of the request an evaluator checks, such as "header Accept"; a
+// part whose matcher failed with an error names it too.
+//
+// No matcher runs twice for a request: each mock goes on from the part Find stopped at, which failed, and only the
+// parts after it run now. Of those, it skips the ones that keep state, as running a scenario's may change it. A mock
+// none of whose request parts passed is left out, unless it differs in none.
+func (m *Misses[M, TIn]) NearMisses(ctx context.Context, describe func(*Eval[TIn]) string) []NearMiss {
+	var ranked []nearMiss
+
+	for _, t := range m.tried {
 		if ctx.Err() != nil {
 			break
 		}
 
-		miss := NearMiss{MockID: mock.ID(), Name: mock.Name()}
-		exp := NewExplanation()
+		near := nearMiss{miss: NearMiss{MockID: t.mock.ID(), Name: t.mock.Name()}}
+		matched := 0
 
-		for _, eval := range evals(mock) {
-			if _, ok := eval.Matcher.(Stateful); ok {
-				miss.Skipped = append(miss.Skipped, describe(eval))
+		for i, eval := range t.evals {
+			_, keepsState := eval.Matcher.(Stateful)
+
+			var (
+				ok  bool
+				err error
+			)
+
+			// Matching ran the parts up to the stop: those before it matched, and that one didn't.
+			switch {
+			case i < t.stop:
+				ok = true
+			case i == t.stop:
+			case keepsState:
+				near.miss.Skipped = append(near.miss.Skipped, describe(eval))
 				continue
+			default:
+				ok, err = eval.Match(ctx, nil, m.in)
 			}
 
-			miss.Total++
+			near.miss.Total++
 
-			switch ok, err := eval.Match(ctx, exp, in); {
+			switch {
 			case err != nil:
-				miss.Failed = append(miss.Failed, describe(eval)+": "+err.Error())
+				near.miss.Failed = append(near.miss.Failed, describe(eval)+": "+err.Error())
 			case ok:
-				miss.Passed++
+				near.miss.Passed++
 			default:
-				miss.Failed = append(miss.Failed, describe(eval))
+				near.miss.Failed = append(near.miss.Failed, describe(eval))
+			}
+
+			switch {
+			case keepsState:
+			case ok && err == nil:
+				matched++
+			default:
+				near.differs++
 			}
 		}
 
-		if miss.Passed > 0 || (len(miss.Failed) == 0 && len(miss.Skipped) > 0) {
-			misses = append(misses, miss)
+		if matched > 0 || near.differs == 0 {
+			ranked = append(ranked, near)
 		}
 	}
 
-	slices.SortStableFunc(misses, func(a, b NearMiss) int {
-		return cmp.Or(cmp.Compare(len(a.Failed), len(b.Failed)), cmp.Compare(b.Passed, a.Passed))
+	slices.SortStableFunc(ranked, func(a, b nearMiss) int {
+		return cmp.Or(cmp.Compare(a.differs, b.differs), cmp.Compare(b.miss.Passed, a.miss.Passed))
 	})
 
-	return misses[:min(len(misses), _nearMisses)]
+	misses := make([]NearMiss, 0, min(len(ranked), _nearMisses))
+	for _, near := range ranked[:min(len(ranked), _nearMisses)] {
+		misses = append(misses, near.miss)
+	}
+
+	return misses
 }

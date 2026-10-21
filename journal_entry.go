@@ -76,7 +76,8 @@ type JournalEntry struct {
 }
 
 // NearMiss is a mock that came close to matching a request: Passed of the Total parts it checked matched. Failed names
-// the parts that didn't, and Skipped those it didn't check, which keep state, such as a scenario's.
+// the parts that didn't, and Skipped those it didn't check, which keep state, such as a scenario's, that matching
+// never reached.
 type NearMiss struct {
 	MockID  string   `json:"mock_id"`
 	Name    string   `json:"name,omitempty"`

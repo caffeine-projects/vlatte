@@ -289,7 +289,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		},
 		{
 			Key: "near_misses", Kind: config.Bool, Default: strconv.FormatBool(!d.NoNearMisses),
-			Usage: "List the mocks closest to a request no mock matched in its answer. It runs every mock's matchers again.",
+			Usage: "List the mocks closest to a request no mock matched in its answer. It runs the matchers matching never reached.",
 			Set:   func(c *Config, v config.Value) error { c.NoNearMisses = !v.Bool; return nil },
 		},
 		{Key: "tls.cert", Kind: config.String, Usage: "TLS certificate file. Requires tls.key."},

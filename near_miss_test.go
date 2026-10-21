@@ -24,27 +24,45 @@ func part(name string, m vlatte.Matcher) *vlatte.Eval[request] {
 	}
 }
 
-// statefulMatcher is a matcher that keeps state, such as a scenario's, and counts the times it runs.
+// statefulMatcher is a matcher that keeps state, such as Times or a scenario's, matches as it says, and counts the
+// times it runs.
 type statefulMatcher struct {
-	runs int
+	matches bool
+	runs    int
 }
 
 func (m *statefulMatcher) Name() string                          { return "stateful" }
-func (m *statefulMatcher) Match(vlatte.MatcherArg) (bool, error) { m.runs++; return false, nil }
+func (m *statefulMatcher) Match(vlatte.MatcherArg) (bool, error) { m.runs++; return m.matches, nil }
 func (m *statefulMatcher) SetState() error                       { return nil }
 
-func nearMisses(t *testing.T, mocks map[*fakeMock][]*vlatte.Eval[request], order []*fakeMock, in request) []vlatte.NearMiss {
-	seq := vlatte.Mocks[*fakeMock, request](slices.Values(order))
+// counted is m that counts in runs the times it runs.
+func counted(m vlatte.Matcher, runs *int) vlatte.Matcher {
+	return vlatte.MatcherFunc(m.Name(), func(arg vlatte.MatcherArg) (bool, error) {
+		*runs++
+		return m.Match(arg)
+	})
+}
 
-	return seq.NearMisses(t.Context(), in,
-		func(m *fakeMock) vlatte.Evaluators[*fakeMock, request] { return mocks[m] },
-		func(e *vlatte.Eval[request]) string { return e.Key })
+// nearMisses finds no mock of order for in, as a server does, then reports the closest.
+func nearMisses(t *testing.T, mocks map[*fakeMock][]*vlatte.Eval[request], order []*fakeMock, in request) []vlatte.NearMiss {
+	t.Helper()
+
+	seq := vlatte.Mocks[*fakeMock, request](slices.Values(order))
+	misses := new(vlatte.Misses[*fakeMock, request])
+
+	_, matched, err := seq.Find(t.Context(), vlatte.NewExplanation(), in,
+		func(m *fakeMock) vlatte.Evaluators[*fakeMock, request] { return mocks[m] }, misses)
+	require.NoError(t, err)
+	require.False(t, matched)
+
+	return misses.NearMisses(t.Context(), func(e *vlatte.Eval[request]) string { return e.Key })
 }
 
 func TestNearMisses_RanksTheClosestMocks(t *testing.T) {
 	// A request no mock matched is a test's puzzle: the report names the mocks that came closest, those that differ
 	// in the fewest parts first, then those that matched the most, and says which parts differed. A mock that
-	// matched nothing is no hint, and three are enough to read.
+	// matched nothing is no hint, and three are enough to read. A mock that differs in its first part only is as
+	// close as one that differs in its last.
 	in := request{"method": "GET", "path": "/a", "h": "1"}
 
 	m1, m2, m3, m4, m5 := newFakeMockWith("m1", 0), newFakeMockWith("m2", 0), newFakeMockWith("m3", 0),
@@ -55,42 +73,83 @@ func TestNearMisses_RanksTheClosestMocks(t *testing.T) {
 		m2: {part("method", match.Equal("GET")), part("path", match.Equal("/a")), part("h", match.Equal("2"))},
 		m3: {part("method", match.Equal("POST"))},
 		m4: {part("method", match.Equal("GET")), part("path", match.Equal("/a")), part("h", match.Equal("2")), part("x", match.Equal("y"))},
-		m5: {part("method", match.Equal("GET"))},
+		m5: {part("method", match.Equal("POST")), part("path", match.Equal("/a")), part("h", match.Equal("1"))},
 	}
 
 	got := nearMisses(t, mocks, []*fakeMock{m1, m2, m3, m4, m5}, in)
 
 	require.Equal(t, []vlatte.NearMiss{
-		{MockID: "m5", Name: "m5", Passed: 1, Total: 1},
 		{MockID: "m2", Name: "m2", Passed: 2, Total: 3, Failed: []string{"h"}},
+		{MockID: "m5", Name: "m5", Passed: 2, Total: 3, Failed: []string{"method"}},
 		{MockID: "m1", Name: "m1", Passed: 1, Total: 2, Failed: []string{"path"}},
 	}, got)
 }
 
-func TestNearMisses_SkipsMatchersThatKeepState(t *testing.T) {
-	// A scenario's matcher may start the scenario as it runs: reporting a near miss must change nothing, so such
-	// matchers never run, and the report names them, as the reason a mock whose other parts all matched didn't.
-	in := request{"method": "GET", "path": "/a"}
-	scenario := &statefulMatcher{}
-	m, only, far := newFakeMockWith("m", 0), newFakeMockWith("only", 0), newFakeMockWith("far", 0)
+func TestNearMisses_NoMatcherRunsTwice(t *testing.T) {
+	// The report goes on from where matching stopped: a matcher costs once per request, and its action, such as
+	// Peek's, runs once, however many mocks the request misses.
+	in := request{"method": "GET", "path": "/a", "h": "1"}
+	a, b := newFakeMockWith("a", 0), newFakeMockWith("b", 0)
+	runs := make([]int, 5)
 
 	got := nearMisses(t, map[*fakeMock][]*vlatte.Eval[request]{
-		far:  {part("method", match.Equal("GET")), part("path", match.Equal("/a")), part("h", match.Equal("1"))},
-		m:    {part("method", match.Equal("GET")), {Key: "scenario", Matcher: scenario}},
-		only: {{Key: "times", Matcher: &statefulMatcher{}}},
-	}, []*fakeMock{far, m, only}, in)
+		a: {part("method", counted(match.Equal("GET"), &runs[0])), part("path", counted(match.Equal("/b"), &runs[1])), part("h", counted(match.Equal("1"), &runs[2]))},
+		b: {part("method", counted(match.Equal("POST"), &runs[3])), part("path", counted(match.Equal("/a"), &runs[4]))},
+	}, []*fakeMock{a, b}, in)
 
-	require.Zero(t, scenario.runs)
+	require.Equal(t, []int{1, 1, 1, 1, 1}, runs, "each part ran once: in matching, or in the report")
 	require.Equal(t, []vlatte.NearMiss{
-		{MockID: "m", Name: "m", Passed: 1, Total: 1, Skipped: []string{"scenario"}},
-		{MockID: "only", Name: "only", Skipped: []string{"times"}},
-		{MockID: "far", Name: "far", Passed: 2, Total: 3, Failed: []string{"h"}},
+		{MockID: "a", Name: "a", Passed: 2, Total: 3, Failed: []string{"path"}},
+		{MockID: "b", Name: "b", Passed: 1, Total: 2, Failed: []string{"method"}},
+	}, got)
+}
+
+func TestNearMisses_RunsNoMatcherThatKeepsState(t *testing.T) {
+	// A scenario's matcher may start the scenario as it runs: the report must change nothing, so it runs none, and
+	// names those matching never reached. One matching ran, and that failed, such as a Times used up, is the reason
+	// a mock missed, and no part of the request: a mock that missed by nothing else is kept, and comes first.
+	in := request{"method": "GET", "path": "/a"}
+	scenario, usedUp, onlyTimes := &statefulMatcher{}, &statefulMatcher{}, &statefulMatcher{}
+	m, used, only := newFakeMockWith("m", 0), newFakeMockWith("used", 0), newFakeMockWith("only", 0)
+
+	got := nearMisses(t, map[*fakeMock][]*vlatte.Eval[request]{
+		m:    {part("path", match.Equal("/b")), part("method", match.Equal("GET")), {Key: "scenario", Matcher: scenario}},
+		used: {part("method", match.Equal("GET")), part("path", match.Equal("/a")), {Key: "times", Matcher: usedUp}},
+		only: {{Key: "times", Matcher: onlyTimes}},
+	}, []*fakeMock{m, used, only}, in)
+
+	require.Zero(t, scenario.runs, "the report runs no matcher that keeps state")
+	require.Equal(t, 1, usedUp.runs, "matching ran it, the report not again")
+	require.Equal(t, 1, onlyTimes.runs, "matching ran it, the report not again")
+	require.Equal(t, []vlatte.NearMiss{
+		{MockID: "used", Name: "used", Passed: 2, Total: 3, Failed: []string{"times"}},
+		{MockID: "only", Name: "only", Passed: 0, Total: 1, Failed: []string{"times"}},
+		{MockID: "m", Name: "m", Passed: 1, Total: 2, Failed: []string{"path"}, Skipped: []string{"scenario"}},
+	}, got)
+}
+
+func TestNearMisses_RanksByThePartsOfTheRequest(t *testing.T) {
+	// A test that sent the request a mock wants, to a mock used up, needs to read that mock first, ahead of one
+	// that matched more parts but wants another request. A part that keeps state and passed is no part of the
+	// request either: a mock that matched nothing else is no hint.
+	in := request{"method": "GET", "path": "/a", "h": "1", "q": "1"}
+	a, b, c := newFakeMockWith("a", 0), newFakeMockWith("b", 0), newFakeMockWith("c", 0)
+
+	got := nearMisses(t, map[*fakeMock][]*vlatte.Eval[request]{
+		a: {part("method", match.Equal("GET")), part("path", match.Equal("/a")), part("h", match.Equal("1")), part("q", match.Equal("2"))},
+		b: {part("method", match.Equal("GET")), part("path", match.Equal("/a")), {Key: "times", Matcher: &statefulMatcher{}}},
+		c: {{Key: "times", Matcher: &statefulMatcher{matches: true}}, part("method", match.Equal("POST"))},
+	}, []*fakeMock{a, b, c}, in)
+
+	require.Equal(t, []vlatte.NearMiss{
+		{MockID: "b", Name: "b", Passed: 2, Total: 3, Failed: []string{"times"}},
+		{MockID: "a", Name: "a", Passed: 3, Total: 4, Failed: []string{"q"}},
 	}, got)
 }
 
 func TestNearMisses_AFailingMatcherFailsItsPart(t *testing.T) {
-	// A matcher that fails, or panics, is a part that didn't match, with its error: the report goes on with the
-	// next ones.
+	// A matcher that fails, or panics, as the report runs it, is a part that didn't match, with its error: the
+	// report goes on with the next ones.
 	in := request{"method": "GET"}
 	m := newFakeMockWith("m", 0)
 
@@ -98,14 +157,39 @@ func TestNearMisses_AFailingMatcherFailsItsPart(t *testing.T) {
 	panicking := vlatte.MatcherFunc("panicking", func(vlatte.MatcherArg) (bool, error) { panic("boom") })
 
 	got := nearMisses(t, map[*fakeMock][]*vlatte.Eval[request]{
-		m: {part("a", failing), part("b", panicking), part("method", match.Equal("GET"))},
+		m: {part("method", match.Equal("POST")), part("a", failing), part("b", panicking), part("x", match.Equal(""))},
 	}, []*fakeMock{m}, in)
 
 	require.Len(t, got, 1)
 	require.Equal(t, 1, got[0].Passed)
-	require.Equal(t, 3, got[0].Total)
-	require.Len(t, got[0].Failed, 2)
-	require.Equal(t, "a: bad", got[0].Failed[0], "an error names itself: a broken matcher isn't a request that differs")
-	require.Contains(t, got[0].Failed[1], "b: ")
-	require.Contains(t, got[0].Failed[1], "boom")
+	require.Equal(t, 4, got[0].Total)
+	require.Len(t, got[0].Failed, 3)
+	require.Equal(t, "method", got[0].Failed[0])
+	require.Equal(t, "a: bad", got[0].Failed[1], "an error names itself: a broken matcher isn't a request that differs")
+	require.Contains(t, got[0].Failed[2], "b: ")
+	require.Contains(t, got[0].Failed[2], "boom")
+}
+
+func TestFind_KeepingMissesFindsTheSameMock(t *testing.T) {
+	// Keeping the misses changes no match: Find stops at the first mock that matches, either way.
+	in := request{"method": "GET"}
+	a, b, c := newFakeMockWith("a", 0), newFakeMockWith("b", 0), newFakeMockWith("c", 0)
+	var cRuns int
+
+	mocks := map[*fakeMock][]*vlatte.Eval[request]{
+		a: {part("method", match.Equal("POST"))},
+		b: {part("method", match.Equal("GET"))},
+		c: {part("method", counted(match.Equal("GET"), &cRuns))},
+	}
+	evals := func(m *fakeMock) vlatte.Evaluators[*fakeMock, request] { return mocks[m] }
+	seq := vlatte.Mocks[*fakeMock, request](slices.Values([]*fakeMock{a, b, c}))
+
+	for _, misses := range []*vlatte.Misses[*fakeMock, request]{nil, new(vlatte.Misses[*fakeMock, request])} {
+		found, matched, err := seq.Find(t.Context(), vlatte.NewExplanation(), in, evals, misses)
+		require.NoError(t, err)
+		require.True(t, matched)
+		require.Same(t, b, found)
+	}
+
+	require.Zero(t, cRuns)
 }

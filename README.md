@@ -676,7 +676,7 @@ CLOSEST MOCKS
 [create]: 1 of 2 parts matched; differs in method
 ```
 
-Building it runs every mock's matchers again, the action of a `match.Peek` included: `near_misses: false`, `--near-misses=false` or `mockhttp.Setup().NoNearMisses()` turns it off.
+The report runs no matcher twice: it goes on from the part where matching stopped, which a mock differs in, so it runs only the matchers matching never reached, the action of a `match.Peek` among them. It runs none that keeps state, such as a scenario's, which it lists as not checked. A mock that wants the request but is used up, by its `Times`, differs in `times` only, and comes first. `near_misses: false`, `--near-misses=false` or `mockhttp.Setup().NoNearMisses()` turns it off.
 
 A gRPC server answers `NotFound` when no mock matches, and `Internal` when serving a call fails, with the same values in the `vlatte-error` trailer. A mock that answers with a status, as `Unary().Status(...)` does, gets no trailer: that status is its answer.
 

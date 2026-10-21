@@ -317,8 +317,9 @@ func (cb *ConfigBuilder) NoDebugHeaders() *ConfigBuilder {
 	return cb
 }
 
-// NoNearMisses turns off the report of the mocks closest to a request no mock matched, which the answer to it lists:
-// building it runs the matchers of every mock again, such as the action of match.Peek.
+// NoNearMisses turns off the report of the mocks closest to a request no mock matched, which the answer to it lists.
+// The report runs no matcher twice: it runs those matching never reached, such as the action of a match.Peek after
+// the part a mock differs in.
 func (cb *ConfigBuilder) NoNearMisses() *ConfigBuilder {
 	cb.conf.NoNearMisses = true
 	return cb

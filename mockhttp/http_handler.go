@@ -113,9 +113,16 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Near misses go on from where matching stopped, so no matcher runs twice for the request. Only the answer to a
+	// request no mock matches, and no proxy takes, lists them.
+	var misses *vlatte.Misses[*Mock, *selectorInput]
+	if !h.app.config.NoNearMisses && !input.ForProxy && (h.app.proxyAll == nil || r.Method == http.MethodConnect) {
+		misses = new(vlatte.Misses[*Mock, *selectorInput])
+	}
+
 	sub := vlatte.NewExplanation()
 	mocks := vlatte.Mocks[*Mock, *selectorInput](stored)
-	mock, matched, err := mocks.Find(r.Context(), sub, input, expectationsOf)
+	mock, matched, err := mocks.Find(r.Context(), sub, input, expectationsOf, misses)
 	if err != nil {
 		h.onError(w, reqValues, vlatte.FailureMatch, fmt.Errorf("http: finding a mock: %w", err))
 		return
@@ -133,7 +140,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case h.app.proxyAll != nil && r.Method != http.MethodConnect:
 			h.serveUpstream(w, reqValues, h.app.proxyAll, capture)
 		default:
-			h.onNoMatches(w, reqValues, mocks, input)
+			h.onNoMatches(w, reqValues, misses)
 		}
 
 		return
@@ -540,13 +547,13 @@ func (h *mockHandler) render(w http.ResponseWriter, r *RequestValues, res *Respo
 	}
 }
 
-// onNoMatches answers a request none of mocks matched, input, with the mocks that came closest, unless the server
-// reports none. Its journal entry lists them too.
-func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, mocks vlatte.Mocks[*Mock, *selectorInput], input *selectorInput) {
+// onNoMatches answers a request no mock matched with the mocks that came closest, of misses, unless the server
+// reports none: misses is nil then. Its journal entry lists them too.
+func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, misses *vlatte.Misses[*Mock, *selectorInput]) {
 	defer h.lifecycle.OnNoMatch(r)
 
-	if !h.app.config.NoNearMisses {
-		r.nearMisses = mocks.NearMisses(r.RawRequest.Context(), input, expectationsOf, describeExpectation)
+	if misses != nil {
+		r.nearMisses = misses.NearMisses(r.RawRequest.Context(), describeExpectation)
 	}
 
 	buf := bufpool.Get()

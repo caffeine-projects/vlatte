@@ -27,7 +27,7 @@ type Config struct {
 	Journal *JournalConfig
 
 	// NoNearMisses turns off the report of the mocks closest to a call no mock matched, which its journal entry
-	// lists: building it runs the matchers of every mock again.
+	// lists. The report runs no matcher twice: it runs those matching never reached.
 	NoNearMisses bool
 }
 
