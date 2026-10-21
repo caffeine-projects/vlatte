@@ -6,10 +6,11 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/caffeine-projects/vlatte/match"
-	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
 func TestCompressedResponse_GZIP(t *testing.T) {

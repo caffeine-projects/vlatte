@@ -3,8 +3,9 @@ package mfeat
 import (
 	"testing"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 func TestScenario(t *testing.T) {

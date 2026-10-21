@@ -6,9 +6,10 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockhttp"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSequenceReplies(t *testing.T) {
