@@ -706,6 +706,8 @@ curl -X POST -H 'Content-Type: application/json' \
   http://127.0.0.1:8081/mocks
 ```
 
+The command keeps the mocks its admin API adds in `testdata/_admin`, as [persistent admin mocks](#persistent-admin-mocks), so the next run serves them: `--admin-dir` moves them, and `--admin-dir=""` keeps them in memory.
+
 ## Development
 
 ```sh
