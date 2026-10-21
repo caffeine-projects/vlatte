@@ -75,6 +75,9 @@ type Server struct {
 	closed  atomic.Bool   // set by Close: a closed server doesn't start again
 	admin   *admin.Server // nil without Config.Admin
 
+	// adminStore writes the changes of the admin API through to its persistent store; nil without AdminConfig.Store.
+	adminStore *admin.Store[*Mock]
+
 	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
 	events *vlatte.EventRunner
 
@@ -244,13 +247,26 @@ func New(config ...Option) (*Server, error) {
 	app.events = eventRunner
 	app.webhooks = newWebhookTransport()
 
-	// The admin API's options have Mocks: it builds.
+	// The admin API changes mocks through a store of its own when they persist: the server's other mocks, of mock
+	// files and code, never reach the persistent store. The admin API's options have Mocks: it builds.
 	if conf.Admin != nil {
+		adminMocks := repository
+
+		if conf.Admin.Store != nil {
+			durable, err := conf.Admin.Store(app)
+			if err != nil {
+				return nil, fmt.Errorf("server: admin store: %w", err)
+			}
+
+			app.adminStore = admin.NewStore(repository, durable, app.logger)
+			adminMocks = app.adminStore
+		}
+
 		app.admin = admin.MustNew(
 			admin.Addr(conf.Admin.Addr),
 			admin.Info(string(Kind), func() string { return app.URL() }),
 			admin.Logger(app.logger),
-			admin.Mocks(repository, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
+			admin.Mocks(adminMocks, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
 				return buildAdminMock(app, content, format)
 			})),
 			admin.Files(adminFiles{app}),
@@ -653,6 +669,13 @@ func (app *Server) load() error {
 		err := loader.Load(app)
 		if err != nil {
 			return err
+		}
+	}
+
+	// After the mock files: a mock of the persistent store gives way to a mock file's mock of its id.
+	if app.adminStore != nil {
+		if err := app.adminStore.Reload(context.Background()); err != nil {
+			return fmt.Errorf("server: admin store: %w", err)
 		}
 	}
 

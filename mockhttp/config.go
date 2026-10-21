@@ -155,7 +155,18 @@ func (c *Config) Apply(conf *Config) error {
 type AdminConfig struct {
 	// Addr is the address the admin API listens on: host:port, :port or a port. Empty is a random local port.
 	Addr string
+
+	// Store makes the persistent store of the mocks the admin API adds, such as FileStore(dir) or a database of yours:
+	// each change the admin API makes reaches it at once, and the server serves what it holds when it starts and on
+	// each Reload, so changes made to it directly take effect too. Nil keeps those mocks in memory, as long as the
+	// server runs.
+	Store AdminStore
 }
+
+// AdminStore makes the persistent store of the mocks the admin API adds, for the server app. The store keeps their
+// descriptions, by ID, such as in files or a database: EncodeMock describes a mock, and DecodeMock builds it back.
+// The mocks of mock files and code never reach it.
+type AdminStore func(app *Server) (vlatte.Store[*Mock], error)
 
 // DebugFn is a function for debug logging.
 type DebugFn func(string, any)
@@ -531,7 +542,14 @@ func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
 // Admin serves the admin API, on an HTTP server of its own at addr: host:port, :port or a port. Empty is a random
 // local port. Server.AdminURL returns where it listens.
 func (cb *ConfigBuilder) Admin(addr string) *ConfigBuilder {
-	cb.conf.Admin = &AdminConfig{Addr: addr}
+	section(&cb.conf.Admin, AdminConfig{}).Addr = addr
+	return cb
+}
+
+// AdminStore keeps the mocks the admin API adds in the persistent store store makes, such as FileStore(dir), and
+// serves the admin API: see AdminConfig.Store.
+func (cb *ConfigBuilder) AdminStore(store AdminStore) *ConfigBuilder {
+	section(&cb.conf.Admin, AdminConfig{}).Store = store
 	return cb
 }
 

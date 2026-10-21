@@ -429,6 +429,21 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			},
 		},
 		{
+			Key: "admin.dir", Kind: config.String,
+			Usage: "Directory of the files that keep the mocks the admin API adds across restarts, which only the server " +
+				"loads: keep it out of mock_files. Relative paths start at root_dir. Empty keeps them in memory.",
+			Set: func(c *Config, v config.Value) error {
+				admin := section(&c.Admin, AdminConfig{})
+
+				admin.Store = nil
+				if v.Str != "" {
+					admin.Store = FileStore(v.Str)
+				}
+
+				return nil
+			},
+		},
+		{
 			Key: "webhook.timeout", Kind: config.Duration,
 			Usage: "How long a webhook without a timeout of its own waits for its answer: milliseconds or a Go duration " +
 				"(1.5s). 0 uses " + httpx.DefaultWebhookTimeout.String() + ".",

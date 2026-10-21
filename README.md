@@ -524,11 +524,11 @@ From settings, `admin: true` turns it on, and `admin.addr` (`--admin-addr`, `VLA
 | `PUT /mocks/{id}` | Replaces the mock, in one step. The body's id must be the path's. |
 | `PATCH /mocks/{id}` | Enables or disables the mock: `{"enabled": false}`. |
 | `DELETE /mocks/{id}`, `DELETE /mocks` | Removes the mock, or every mock. |
-| `POST /mocks/reload` | Loads the mock files again, as `m.Reload()` does. A mock file's mock takes the place of a mock added through the admin API with its id. |
+| `POST /mocks/reload` | Loads the mock files, and the [persistent store](#persistent-admin-mocks), again, as `m.Reload()` does. A mock file's mock takes the place of a mock added through the admin API with its id. |
 | `POST /mocks/save` | Writes the mocks added through the admin API as mock files, `<id>.mock.<format>`, and serves them from the files from then on. `{"dir": ..., "format": ...}` defaults to `testdata/_mocks` and YAML, which the default mock file patterns load on the next start; `dir` stays inside `root_dir`. When a mock can't be written as a mock file that loads back, nothing is written, and files that fail to load are put back as they were. |
 | `GET /events` | Streams what the server serves as it happens, as [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html): requests a mock answered, requests no mock matched, proxied requests, warnings and errors. Nothing is kept: it is no journal of requests. `curl -N <admin>/events` follows it. |
 | `GET /logs` | Streams the server's log lines, as it writes them, as Server-Sent Events. A server given its own `Logger` streams none. |
-| `POST /reset` | Removes the mocks added through the admin API, loads the mock files again, saved ones included, and starts every scenario over. Mocks added in code stay as they are. |
+| `POST /reset` | Removes the mocks added through the admin API, loads the mock files again, saved ones included, and starts every scenario over. Mocks added in code stay as they are. The mocks of a persistent store come back from it: reset never deletes what it holds. |
 | `POST /recording`, `GET /recording`, `DELETE /recording` | Starts a [recording](#recording-and-playback) with the keys of the `record` section, counts its calls, and stops it, listing the files it wrote. |
 | `GET /recorder` | A page that records a service from a browser. |
 | `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios` | Lists the state of each scenario, moves one to a state, `{"state": "paid"}`, and starts every scenario over. Names are exact: `Checkout` isn't `checkout`. |
@@ -560,6 +560,26 @@ From settings, `admin: true` turns it on, and `admin.addr` (`--admin-addr`, `VLA
 A request net/http refuses before the admin API reads it, such as one with a malformed request line, is answered in plain text.
 
 **Safety.** The admin API has no authentication: anyone who reaches it can change the mocks, which can read files the server can. It listens on a local address unless told otherwise; with `VLATTE_DOCKER_HOST`, the CLI listens on every interface, as for the mocks, so publish its port only where the network is trusted. A browser's cross-site request that would change the server is refused with `403`.
+
+### Persistent admin mocks
+
+The mocks the admin API adds last as long as the server, unless a persistent store keeps them. Each change the admin API makes, adding, replacing, enabling, disabling or removing a mock, reaches the store at once, and the server serves what the store holds when it starts and on each reload, so a change made to the store directly takes effect then too. The mocks of mock files and code never reach it, and a mock file's mock wins over a mock of the store with its id.
+
+`FileStore(dir)` keeps them as mock files, `<id>.mock.yaml`, which only the store loads: keep `dir` out of the mock file patterns. A relative `dir` starts at `root_dir`. A mock whose description doesn't load back is refused, as its file would fail every later start. From settings, `admin.dir` (`--admin-dir`, `VLATTE_ADMIN_DIR`) sets the directory, and an empty one keeps the mocks in memory.
+
+```go
+m := mockhttp.MustNew(mockhttp.Setup().Admin("").AdminStore(mockhttp.FileStore("testdata/_admin")))
+```
+
+Any `vlatte.Store[*mockhttp.Mock]` can be the store, such as a database collection. It keeps the descriptions of the mocks by ID: `EncodeMock` writes one, and `DecodeMock` builds the mock back for the server.
+
+```go
+mockhttp.Setup().AdminStore(func(app *mockhttp.Server) (vlatte.Store[*mockhttp.Mock], error) {
+	return &collectionStore{app: app, coll: coll}, nil // Store: EncodeMock(mock, "json"); PickAll: DecodeMock(app, doc, "json")
+})
+```
+
+`POST /mocks/save` is apart from the store: it exports the admin API's mocks as mock files to commit, which then serve in place of the store's copies.
 
 ## Failures
 
