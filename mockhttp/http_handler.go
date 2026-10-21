@@ -613,8 +613,9 @@ func (h *mockHandler) onError(w http.ResponseWriter, r *RequestValues, failure s
 }
 
 func locals(r *RequestValues, provided map[string]any, params *viewdata.Parameters) *viewdata.Data {
-	cookies := make(map[string]*http.Cookie, len(r.RawRequest.Cookies()))
-	for _, cookie := range r.RawRequest.Cookies() {
+	parsed := r.RawRequest.Cookies()
+	cookies := make(map[string]*http.Cookie, len(parsed))
+	for _, cookie := range parsed {
 		cookies[cookie.Name] = cookie
 	}
 
