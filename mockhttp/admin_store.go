@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"iter"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -64,16 +66,23 @@ func FileStore(dir string) AdminStore {
 			path = filepath.Join(app.config.RootDir, path)
 		}
 
-		return &fileStore{app: app, dir: path}, nil
+		return &fileStore{app: app, dir: path, remove: os.Remove}, nil
 	}
 }
 
-// fileStore keeps the mocks of the admin API as mock files in dir. Its writes are serialized. Pick, PickAll and List
-// build new mocks from the files each time.
+// fileStore keeps the mocks of the admin API as mock files in dir. Its changes are serialized, and change its files
+// all or nothing. Pick, PickAll and List build new mocks from the files each time.
 type fileStore struct {
-	app *Server
-	dir string
-	mu  sync.Mutex
+	app    *Server
+	dir    string
+	remove func(name string) error // os.Remove; tests make it fail, as a file system can
+	mu     sync.Mutex
+}
+
+// fileWrite is a file a change of the store writes.
+type fileWrite struct {
+	path string
+	data []byte
 }
 
 func (s *fileStore) List(ctx context.Context) (iter.Seq[*Mock], error) {
@@ -82,7 +91,16 @@ func (s *fileStore) List(ctx context.Context) (iter.Seq[*Mock], error) {
 		return nil, err
 	}
 
-	return slices.Values(slices.DeleteFunc(all, func(m *Mock) bool { return !m.Enabled() })), nil
+	// The mocks it leaves out are built for nothing: they release what they hold.
+	return slices.Values(slices.DeleteFunc(all, func(m *Mock) bool {
+		if m.Enabled() {
+			return false
+		}
+
+		_ = m.Close()
+
+		return true
+	})), nil
 }
 
 func (s *fileStore) Store(ctx context.Context, mocks ...*Mock) error {
@@ -90,7 +108,8 @@ func (s *fileStore) Store(ctx context.Context, mocks ...*Mock) error {
 }
 
 // Replace writes the files of mocks, then removes those of the mocks of old it doesn't write again. Every mock is
-// described and checked first: when one fails, nothing is written.
+// described and checked first: when one fails, nothing is written. When a file can't be written or removed, the files
+// it changed are put back.
 func (s *fileStore) Replace(_ context.Context, old []*Mock, mocks ...*Mock) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -126,33 +145,35 @@ func (s *fileStore) Replace(_ context.Context, old []*Mock, mocks ...*Mock) erro
 		docs = append(docs, data)
 	}
 
-	if len(mocks) > 0 {
-		if err := os.MkdirAll(s.dir, 0o755); err != nil {
-			return fmt.Errorf("server: admin store: %w", err)
-		}
-	}
+	writes := make([]fileWrite, 0, len(mocks))
+
+	var removes []string
 
 	for i, mock := range mocks {
 		path := filepath.Join(s.dir, mock.ID()+".mock."+_fileStoreFormat)
-		if err := atomicfile.Write(s.dir, _fileStoreTempPattern, path, docs[i]); err != nil {
-			return fmt.Errorf("server: admin store: %w", err)
-		}
+		writes = append(writes, fileWrite{path: path, data: docs[i]})
 
 		// A file of the mock in another format, such as one a person wrote, is replaced too.
 		if prev, ok := held[mock.ID()]; ok && prev != path {
-			_ = os.Remove(prev)
+			removes = append(removes, prev)
 		}
 	}
 
 	for id := range gone {
 		if _, again := written[id]; !again {
 			if path, ok := held[id]; ok {
-				_ = os.Remove(path)
+				removes = append(removes, path)
 			}
 		}
 	}
 
-	return nil
+	if len(writes) > 0 {
+		if err := os.MkdirAll(s.dir, 0o755); err != nil {
+			return fmt.Errorf("server: admin store: %w", err)
+		}
+	}
+
+	return s.apply(writes, removes)
 }
 
 func (s *fileStore) Pick(_ context.Context, id string) (*Mock, error) {
@@ -217,15 +238,15 @@ func (s *fileStore) Delete(_ context.Context, ids ...string) error {
 		return err
 	}
 
+	var removes []string
+
 	for _, id := range ids {
 		if path, ok := held[id]; ok {
-			if err := os.Remove(path); err != nil {
-				return fmt.Errorf("server: admin store: %w", err)
-			}
+			removes = append(removes, path)
 		}
 	}
 
-	return nil
+	return s.apply(nil, removes)
 }
 
 func (s *fileStore) Clear(context.Context) error {
@@ -237,10 +258,44 @@ func (s *fileStore) Clear(context.Context) error {
 		return err
 	}
 
-	for _, path := range held {
-		if err := os.Remove(path); err != nil {
-			return fmt.Errorf("server: admin store: %w", err)
+	return s.apply(nil, slices.Sorted(maps.Values(held)))
+}
+
+// apply writes and then removes files, all or nothing: on the first failure, it puts back the files it changed, and
+// returns the failure, with what it couldn't put back. A file already gone is removed.
+func (s *fileStore) apply(writes []fileWrite, removes []string) error {
+	changed := make([]savedFile, 0, len(writes)+len(removes))
+
+	fail := func(err error) error {
+		return fmt.Errorf("server: admin store: %w", errors.Join(err, restore(changed, _fileStoreTempPattern)))
+	}
+
+	for _, w := range writes {
+		file, err := backup(w.path)
+		if err == nil {
+			err = atomicfile.Write(s.dir, _fileStoreTempPattern, w.path, w.data)
 		}
+
+		if err != nil {
+			return fail(err)
+		}
+
+		changed = append(changed, file)
+	}
+
+	for _, path := range removes {
+		file, err := backup(path)
+		if err == nil {
+			if err = s.remove(path); errors.Is(err, fs.ErrNotExist) {
+				err = nil
+			}
+		}
+
+		if err != nil {
+			return fail(err)
+		}
+
+		changed = append(changed, file)
 	}
 
 	return nil

@@ -3,8 +3,10 @@ package mockhttp
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -201,41 +203,65 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 	written := make([]savedFile, 0, len(paths))
 
 	for i, path := range paths {
-		prev, err := os.ReadFile(path)
-		file := savedFile{path: path, prev: prev, existed: err == nil}
+		file, err := backup(path)
+		if err == nil {
+			err = atomicfile.Write(filepath.Dir(path), _saveTempPattern, path, docs[i])
+		}
 
-		if err := atomicfile.Write(filepath.Dir(path), _saveTempPattern, path, docs[i]); err != nil {
-			restore(written)
-			return nil, fmt.Errorf("server: save: %w", err)
+		if err != nil {
+			return nil, fmt.Errorf("server: save: %w", errors.Join(err, restore(written, _saveTempPattern)))
 		}
 
 		written = append(written, file)
 	}
 
 	if err := app.loadSaved(dir); err != nil {
-		restore(written)
-		return nil, err
+		return nil, errors.Join(err, restore(written, _saveTempPattern))
 	}
 
 	return paths, nil
 }
 
-// savedFile is a mock file a save wrote, and what it held before.
+// savedFile is a mock file a change wrote or removed, and what it held before.
 type savedFile struct {
 	path    string
 	prev    []byte
 	existed bool
 }
 
-// restore puts the files a save wrote back as they were: it removes the new ones.
-func restore(files []savedFile) {
-	for _, f := range files {
+// backup returns what the file at path holds now: its content, or that there is none.
+func backup(path string) (savedFile, error) {
+	prev, err := os.ReadFile(path)
+
+	switch {
+	case err == nil:
+		return savedFile{path: path, prev: prev, existed: true}, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return savedFile{path: path}, nil
+	default:
+		return savedFile{}, err
+	}
+}
+
+// restore puts files back as they were, the last changed first: it writes back what they held, through temporary
+// files named after pattern, and removes those that didn't exist. It returns what it couldn't put back.
+func restore(files []savedFile, pattern string) error {
+	var errs []error
+
+	for _, f := range slices.Backward(files) {
+		var err error
 		if f.existed {
-			_ = atomicfile.Write(filepath.Dir(f.path), _saveTempPattern, f.path, f.prev)
-		} else {
-			_ = os.Remove(f.path)
+			err = atomicfile.Write(filepath.Dir(f.path), pattern, f.path, f.prev)
+		} else if err = os.Remove(f.path); errors.Is(err, fs.ErrNotExist) {
+			err = nil
+		}
+
+		if err != nil {
+			errs = append(errs, fmt.Errorf("putting %s back: %w", f.path, err))
 		}
 	}
+
+	return errors.Join(errs...)
 }
 
 // mockFile describes mock as the mock file at path, in format, and checks that the file loads back. toWD leads from

@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"maps"
@@ -461,4 +462,99 @@ func TestEncodeMock_AMockThatCantBeDescribed(t *testing.T) {
 
 	_, err := EncodeMock(scope.Mock("x"), "json")
 	require.ErrorContains(t, err, `describing mock "x"`)
+}
+
+// errRefused is a file system refusing to remove a file, such as one that is immutable.
+var errRefused = errors.New("file system: operation not permitted")
+
+// refusingStore makes a file store of dir whose file system refuses to remove the files named names.
+func refusingStore(dir string, names ...string) AdminStore {
+	return func(app *Server) (vlatte.Store[*Mock], error) {
+		remove := func(name string) error {
+			if slices.Contains(names, filepath.Base(name)) {
+				return errRefused
+			}
+
+			return os.Remove(name)
+		}
+
+		return &fileStore{app: app, dir: dir, remove: remove}, nil
+	}
+}
+
+func TestFileStore_ADeleteTheFileSystemRefusesKeepsTheMock(t *testing.T) {
+	// A delete whose file stays would serve again on the next reload: it fails, and the mock stays as it was, served
+	// and kept.
+	dir := t.TempDir()
+	m := adminServer(t, Setup().AdminStore(refusingStore(dir, "hello.mock.yaml")))
+	addMock(t, m, `{"id": "hello", "request": {"method": "GET", "path": "/hello"}, "response": {"status": 200}}`)
+
+	res, body := do(t, http.MethodDelete, m.AdminURL()+"/mocks/hello", nil, nil)
+	require.Equal(t, http.StatusInternalServerError, res.StatusCode, string(body))
+	require.Contains(t, string(body), "operation not permitted")
+
+	res, _ = do(t, http.MethodGet, m.URL("/hello"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.FileExists(t, filepath.Join(dir, "hello.mock.yaml"))
+
+	require.NoError(t, m.Reload())
+
+	res, _ = do(t, http.MethodGet, m.URL("/hello"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func TestFileStore_AClearThatFailsKeepsEveryFile(t *testing.T) {
+	// The files removed before the one that fails come back: a restart serves what the server serves.
+	dir := t.TempDir()
+	m := adminServer(t, Setup().AdminStore(refusingStore(dir, "b.mock.yaml")))
+	addMock(t, m, `{"id": "a", "request": {"method": "GET", "path": "/a"}, "response": {"status": 200, "body": "a"}}`)
+	addMock(t, m, `{"id": "b", "request": {"method": "GET", "path": "/b"}, "response": {"status": 200, "body": "b"}}`)
+
+	before, err := os.ReadFile(filepath.Join(dir, "a.mock.yaml"))
+	require.NoError(t, err)
+
+	res, body := do(t, http.MethodDelete, m.AdminURL()+"/mocks", nil, nil)
+	require.Equal(t, http.StatusInternalServerError, res.StatusCode, string(body))
+
+	after, err := os.ReadFile(filepath.Join(dir, "a.mock.yaml"))
+	require.NoError(t, err, "a.mock.yaml is back")
+	require.Equal(t, string(before), string(after))
+	require.FileExists(t, filepath.Join(dir, "b.mock.yaml"))
+
+	for _, path := range []string{"/a", "/b"} {
+		res, _ = do(t, http.MethodGet, m.URL(path), nil, nil)
+		require.Equal(t, http.StatusOK, res.StatusCode, path)
+	}
+}
+
+func TestFileStore_AWriteThatFailsChangesNoFile(t *testing.T) {
+	// A change of two mocks whose second file can't be written, here as a directory is in its place, leaves the first
+	// file as it was.
+	ctx := t.Context()
+	dir := t.TempDir()
+	m := adminServer(t, Setup())
+
+	store, err := FileStore(dir)(m)
+	require.NoError(t, err)
+
+	build := func(id, body string) *Mock {
+		built, err := DecodeMock(m, []byte(`{"id": "`+id+`", "request": {"method": "GET", "path": "/`+id+`"}, "response": {"status": 200, "body": "`+body+`"}}`), "json")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = built.Close() })
+
+		return built
+	}
+
+	a := build("a", "first")
+	require.NoError(t, store.Store(ctx, a))
+
+	before, err := os.ReadFile(filepath.Join(dir, "a.mock.yaml"))
+	require.NoError(t, err)
+
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "b.mock.yaml"), 0o700))
+	require.Error(t, store.Replace(ctx, []*Mock{a}, build("a", "second"), build("b", "b")))
+
+	after, err := os.ReadFile(filepath.Join(dir, "a.mock.yaml"))
+	require.NoError(t, err)
+	require.Equal(t, string(before), string(after))
 }
