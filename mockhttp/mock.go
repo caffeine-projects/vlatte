@@ -61,8 +61,8 @@ type selectorInput struct {
 	// RawRequest is the original incoming http.Request.
 	RawRequest *http.Request
 
-	// URL is the full request url.URL, including scheme, host, port: those the request names, when a forward proxy
-	// gets or intercepts it, and the server's otherwise.
+	// URL is the full request url.URL, including scheme, host, port: those a request in absolute form, as a forward
+	// proxy gets, or an intercepted one names, and the server's otherwise.
 	URL *url.URL
 
 	Query url.Values
