@@ -5,6 +5,8 @@ import (
 
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 type Config struct {
@@ -20,6 +22,13 @@ type Config struct {
 
 	// Admin serves the admin API, on an HTTP server of its own. Nil serves none.
 	Admin *AdminConfig
+
+	// Journal keeps a journal of the calls the server serves. Nil keeps none.
+	Journal *JournalConfig
+
+	// NoNearMisses turns off the report of the mocks closest to a call no mock matched, which its journal entry
+	// lists: building it runs the matchers of every mock again.
+	NoNearMisses bool
 }
 
 // AdminConfig configures the admin API of a server: a RESTful HTTP server of its own, the same as HTTP mock servers
@@ -27,6 +36,21 @@ type Config struct {
 type AdminConfig struct {
 	// Addr is the address the admin API listens on: host:port, :port or a port. Empty is a random local port.
 	Addr string
+}
+
+// JournalConfig configures the journal of a server: the calls its mocks get, of every outcome, which tests and the
+// admin API verify and search, while the server runs: Close closes it. The calls an interceptor of ServerOptions
+// answers aren't in it.
+type JournalConfig struct {
+	// Dir is where the journal keeps its files, across restarts. Empty keeps them in a temporary directory, which
+	// Close removes.
+	Dir string
+
+	// MaxEntries is how many calls the journal keeps, the newest. 0 keeps them all.
+	MaxEntries int
+
+	// MaxBodySize is how many bytes of a call's request message, as JSON, the journal keeps. 0 keeps whole messages.
+	MaxBodySize int64
 }
 
 func (c *Config) Apply(conf *Config) error {
@@ -38,6 +62,8 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Logger = c.Logger
 	conf.NoDebugHeaders = c.NoDebugHeaders
 	conf.Admin = c.Admin
+	conf.Journal = c.Journal
+	conf.NoNearMisses = c.NoNearMisses
 
 	return nil
 }
@@ -100,5 +126,23 @@ func (cb *ConfigBuilder) Apply(conf *Config) error {
 // local port. Server.AdminURL returns where it listens.
 func (cb *ConfigBuilder) Admin(addr string) *ConfigBuilder {
 	cb.conf.Admin = &AdminConfig{Addr: addr}
+	return cb
+}
+
+// Journal keeps a journal of the calls the server serves, in dir, across restarts: see JournalConfig. Empty keeps it
+// in a temporary directory, which Close removes, as a test wants: a named one keeps the calls of earlier runs.
+func (cb *ConfigBuilder) Journal(dir string) *ConfigBuilder {
+	cb.conf.Journal = &JournalConfig{
+		Dir:         dir,
+		MaxEntries:  vlatte.DefaultJournalMaxEntries,
+		MaxBodySize: vlatte.DefaultJournalMaxBodySize,
+	}
+
+	return cb
+}
+
+// NoNearMisses turns off the report of the mocks closest to a call no mock matched: see Config.NoNearMisses.
+func (cb *ConfigBuilder) NoNearMisses() *ConfigBuilder {
+	cb.conf.NoNearMisses = true
 	return cb
 }

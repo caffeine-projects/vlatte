@@ -25,6 +25,9 @@ var (
 	_ grpc.ServiceRegistrar         = (*Server)(nil)
 )
 
+// Kind is the protocol of gRPC mock servers, the Kind of their journal entries.
+const Kind vlatte.Kind = "grpc"
+
 type Server struct {
 	*vlatte.Base[*Mock, *Server]
 
@@ -61,24 +64,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	store := vlatte.NewStore[*Mock]()
-	in := &interceptors{app: app}
-	// User options come first: the mock interceptors never call the next handler, so they must run last.
-	// The recovery interceptors run just before them, so a panic serving a mock answers the call.
-	// Chain* is used because the plain interceptor options can only be set once.
-	opts := append(slices.Clone(conf.ServerOptions),
-		grpc.ChainUnaryInterceptor(in.recoverUnary, in.UnaryInterceptor),
-		grpc.ChainStreamInterceptor(in.recoverStream, in.StreamInterceptor),
-	)
-	srv := grpc.NewServer(opts...)
-
-	if conf.ServiceDesc != nil && conf.Service != nil {
-		srv.RegisterService(conf.ServiceDesc, conf.Service)
-	}
-
-	app.Base = vlatte.NewBase(app, store, nil)
-	app.storage = store
 	app.config = conf
-	app.server = srv
 	app.logger = conf.Logger
 
 	// The admin API streams the log lines of a logger the server builds, not those of one it was given.
@@ -94,16 +80,49 @@ func New(config ...Option) (*Server, error) {
 		app.logger = &l
 	}
 
+	journal, err := app.openJournal(conf)
+	if err != nil {
+		return nil, fmt.Errorf("server: %w", err)
+	}
+
+	in := &interceptors{app: app}
+	unary := []grpc.UnaryServerInterceptor{in.recoverUnary, in.UnaryInterceptor}
+	stream := []grpc.StreamServerInterceptor{in.recoverStream, in.StreamInterceptor}
+
+	// The journal sees each call as it ends, a panic as the failure its recovery makes of it.
+	if journal != nil {
+		unary = slices.Insert(unary, 0, in.journalUnary)
+		stream = slices.Insert(stream, 0, in.journalStream)
+	}
+
+	// User options come first: the mock interceptors never call the next handler, so they must run last.
+	// The recovery interceptors run just before them, so a panic serving a mock answers the call.
+	// Chain* is used because the plain interceptor options can only be set once.
+	opts := append(slices.Clone(conf.ServerOptions),
+		grpc.ChainUnaryInterceptor(unary...),
+		grpc.ChainStreamInterceptor(stream...),
+	)
+	srv := grpc.NewServer(opts...)
+
+	if conf.ServiceDesc != nil && conf.Service != nil {
+		srv.RegisterService(conf.ServiceDesc, conf.Service)
+	}
+
+	app.Base = vlatte.NewBase(app, store, journal)
+	app.storage = store
+	app.server = srv
+
 	// The admin API's options have Mocks: it builds.
 	if conf.Admin != nil {
 		app.events = handler.NewEvents()
 		app.admin = admin.MustNew(
 			admin.Addr(conf.Admin.Addr),
-			admin.Info("grpc", app.Addr),
+			admin.Info(string(Kind), app.Addr),
 			admin.Logger(app.logger),
 			admin.Mocks[*Mock](store, nil),
 			admin.Events(app.events),
 			admin.Logs(logs),
+			admin.Journal(journal, nil),
 		)
 	}
 
@@ -156,6 +175,8 @@ func (app *Server) Start() error {
 		lis, err = net.Listen("tcp", app.config.Addr)
 		if err != nil {
 			app.closed = true
+			app.Journal().Close()
+
 			return fmt.Errorf("server: Start: failed to create listener: %w", err)
 		}
 	}
@@ -167,6 +188,7 @@ func (app *Server) Start() error {
 			_ = lis.Close()
 			app.addr = ""
 			app.closed = true
+			app.Journal().Close()
 
 			return fmt.Errorf("server: Start: %w", err)
 		}
@@ -229,7 +251,8 @@ func (app *Server) Addr() string {
 }
 
 // Close stops the server, waiting for calls in flight to finish. It closes the admin API first, which waits for the
-// operations it serves. A closed server doesn't start again, even one that never started.
+// operations it serves, and the journal last, which it removes if it is a temporary one: verify the calls before
+// Close. A closed server doesn't start again, even one that never started.
 func (app *Server) Close() {
 	app.mu.Lock()
 	app.closed = true
@@ -242,12 +265,14 @@ func (app *Server) Close() {
 		}
 	}
 
-	if served == nil {
-		return
+	if served != nil {
+		app.server.GracefulStop()
+		<-served
 	}
 
-	app.server.GracefulStop()
-	<-served
+	if err := app.Journal().Close(); err != nil {
+		app.logger.Warn().Err(err).Msg("server: Close: closing the journal")
+	}
 }
 
 // publish sends an event of kind, of a call of target, a full method, to the admin API's clients: mock, the mock that

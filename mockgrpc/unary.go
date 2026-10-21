@@ -55,17 +55,33 @@ func (in *interceptors) UnaryInterceptor(
 	}
 
 	rawBody := string(b)
+	call := callOf(ctx)
+	call.request(b)
+
 	sub := vlatte.NewExplanation()
 	mocks := vlatte.Mocks[*Mock, *UnaryValueSelectorIn](ofKind(em, func(m *Mock) bool { return m.unaryReply != nil }))
-	mock, pass, err := mocks.Find(ctx, sub, &UnaryValueSelectorIn{rawBody, info}, func(m *Mock) vlatte.Evaluators[*Mock, *UnaryValueSelectorIn] { return m.unaryExpectations })
+	input := &UnaryValueSelectorIn{rawBody, info}
+	evals := func(m *Mock) vlatte.Evaluators[*Mock, *UnaryValueSelectorIn] { return m.unaryExpectations }
+
+	mock, pass, err := mocks.Find(ctx, sub, input, evals)
 	if err != nil {
 		return nil, fail(ctx, vlatte.FailureMatch, codes.Internal, "unary: finding a mock: %v", err)
 	}
 
 	if !pass {
+		// Only the journal reports near misses: a call's status carries no more than its message.
+		var near []vlatte.NearMiss
+		if call != nil && !in.app.config.NoNearMisses {
+			near = mocks.NearMisses(ctx, input, evals, describeEval)
+		}
+
+		call.unmatched(near)
+
 		in.app.publish(handler.EventUnmatched, info.FullMethod, nil, nil)
 		return nil, fail(ctx, vlatte.FailureNoMatch, codes.NotFound, "unary: request was not matched with any mock")
 	}
+
+	call.matched(mock)
 
 	// The header goes out with the reply's own, or with its status.
 	if !in.app.config.NoDebugHeaders {
@@ -74,6 +90,8 @@ func (in *interceptors) UnaryInterceptor(
 
 	rv := &UnaryRequestValues{reqMsg, info, rawBody, in.app}
 	res, err := mock.unaryReply.Reply(ctx, rv)
+	call.replied(ctx, err)
+
 	if err != nil {
 		in.app.publishReply(info.FullMethod, mock, err)
 		return nil, replyError(ctx, "unary", mock, err)
