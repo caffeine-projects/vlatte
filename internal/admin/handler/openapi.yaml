@@ -15,6 +15,11 @@ info:
 
     **Safety.** The admin API has no authentication: it listens on a local address unless told otherwise. Browsers'
     cross-site requests that change state are refused with `403`.
+
+    **Persistence.** A mock server with a persistent store, such as the files of the vlatte command or a database,
+    writes each change this API makes to its mocks to that store at once: the mocks it adds outlive the server. The
+    server serves what the store holds when it starts and on each reload, changes made to the store directly included.
+    Without one, the mocks this API adds last as long as the server.
   license:
     name: MIT
     url: https://github.com/caffeine-projects/vlatte/blob/main/LICENSE
@@ -120,7 +125,9 @@ paths:
       tags: [Mocks]
       operationId: removeAllMocks
       summary: Remove every mock
-      description: Removes every mock, of files and code too. `POST /mocks/reload` loads the mock files again.
+      description: |
+        Removes every mock, of files and code too, and empties the persistent store. `POST /mocks/reload` loads the
+        mock files again.
       responses:
         "204":
           description: The server has no mocks.
@@ -152,10 +159,10 @@ paths:
     post:
       tags: [Mocks]
       operationId: reloadMocks
-      summary: Load the mock files again
+      summary: Load the mock files and the persistent store again
       description: |
-        Swaps the mocks of the mock files for what the files define now, in one step. A mock added through this API
-        gives way to a mock file's mock with its id. When a file has problems, nothing changes.
+        Swaps the mocks of the mock files, and of the persistent store, for what they hold now, in one step. A mock
+        added through this API gives way to a mock file's mock with its id. When a file has problems, nothing changes.
       responses:
         "204":
           description: The mock files were loaded.
@@ -368,6 +375,7 @@ paths:
       description: |
         Removes the mocks added through this API, loads the mock files again, saved ones included, and starts every
         scenario over. Mocks added in code stay as they are. A server without mock files, or scenarios, skips them.
+        A persistent store loads again too: its mocks come back as it holds them, and nothing is deleted from it.
       responses:
         "204":
           description: The server is back to how it started.

@@ -117,11 +117,14 @@ func (b *fakeBuilder) BuildFromBytes(content []byte, format string) (*fakeMock, 
 	return mock, nil
 }
 
-// brokenStore is a memory store whose operations fail with the errors it has, and work otherwise.
+// brokenStore is a memory store whose operations fail with the errors it has, and work otherwise. It counts the
+// calls of Replace.
 type brokenStore struct {
 	*vlatte.MemoryStore[*fakeMock]
 
 	storeErr, replaceErr, pickErr, pickAllErr, clearErr error
+
+	replaces atomic.Int64
 }
 
 func (s *brokenStore) Store(ctx context.Context, mocks ...*fakeMock) error {
@@ -133,6 +136,8 @@ func (s *brokenStore) Store(ctx context.Context, mocks ...*fakeMock) error {
 }
 
 func (s *brokenStore) Replace(ctx context.Context, old []*fakeMock, mocks ...*fakeMock) error {
+	s.replaces.Add(1)
+
 	if s.replaceErr != nil {
 		return s.replaceErr
 	}

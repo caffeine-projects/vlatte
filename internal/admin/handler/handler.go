@@ -19,7 +19,8 @@ var ErrNotDescribed = errors.New("admin: the mock can't be described as a mock f
 
 // Files is a mock server that serves mock files.
 type Files interface {
-	// Reload loads the mock files again, in place of the mocks they gave before.
+	// Reload loads the mocks of the server's sources again, its mock files and its persistent store, in place of the
+	// mocks they gave before.
 	Reload() error
 
 	// SaveMocks writes the mocks the admin API added as mock files, in format, into dir, a local path that starts at
@@ -67,12 +68,19 @@ type mockSummary struct {
 }
 
 func summarize(mock vlatte.Mock) mockSummary {
-	s := mockSummary{ID: mock.ID(), Name: mock.Name(), Priority: mock.Priority(), Enabled: mock.Enabled(), Hits: mock.Hits()}
+	return mockSummary{
+		ID: mock.ID(), Name: mock.Name(), Priority: mock.Priority(), Enabled: mock.Enabled(), Hits: mock.Hits(),
+		Origin: origin(mock),
+	}
+}
+
+// origin returns where mock came from, such as Origin or a mock file, or "" when it doesn't say.
+func origin(mock vlatte.Mock) string {
 	if o, ok := mock.(interface{ Origin() string }); ok {
-		s.Origin = o.Origin()
+		return o.Origin()
 	}
 
-	return s
+	return ""
 }
 
 // closeMock releases what a mock the store didn't take holds, such as the HTTP client of a proxy mock.

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/internal/admin"
@@ -33,6 +34,29 @@ func TestReset(t *testing.T) {
 	require.Equal(t, int64(1), added.closed.Load(), "a removed mock is closed")
 	require.Equal(t, 1, files.reloads)
 	require.Equal(t, map[string]string{"checkout": "started"}, scenarios.Scenarios())
+}
+
+func TestReset_KeepsWhatAPersistentStoreBringsBack(t *testing.T) {
+	// The reload of a persistent store serves what it holds in place of the admin mocks it served: those come back,
+	// and reset doesn't remove them, so it never deletes from the persistent store.
+	added := newFake("added")
+	added.origin = handler.Origin
+	store := newStore(t, added)
+
+	again := newFake("added")
+	again.origin = handler.Origin
+	files := &fakeFiles{onReload: func() { assert.NoError(t, store.Replace(t.Context(), []*fakeMock{added}, again)) }}
+
+	url := serve(t, store, admin.Files(files))
+
+	res, body := send(t, request{method: http.MethodPost, url: url + "/reset"})
+
+	require.Equal(t, http.StatusNoContent, res.StatusCode, body)
+
+	got, err := store.Pick(t.Context(), "added")
+	require.NoError(t, err)
+	require.Same(t, again, got)
+	require.Zero(t, again.closed.Load())
 }
 
 func TestReset_WithoutFilesOrScenarios(t *testing.T) {

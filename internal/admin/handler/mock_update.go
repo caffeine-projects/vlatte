@@ -20,7 +20,8 @@ var _mockChangeSchema = config.NewSchema(
 )
 
 // UpdateMock changes the state of the mock of the path's id, and answers it: PATCH /mocks/{id}. A disabled mock
-// matches no request, until enabled again.
+// matches no request, until enabled again. The mock is stored again with its new state, which a persistent store
+// keeps: when the store refuses it, the mock keeps the state it had.
 func UpdateMock[M vlatte.Mock](store vlatte.Store[M]) http.Handler {
 	return negotiated(func(w http.ResponseWriter, r *http.Request) {
 		data, format, err := readBody(w, r)
@@ -41,14 +42,25 @@ func UpdateMock[M vlatte.Mock](store vlatte.Store[M]) http.Handler {
 			return
 		}
 
-		switch {
-		case change.enabled == nil:
-		case *change.enabled:
-			mock.Enable()
-		default:
-			mock.Disable()
+		if change.enabled != nil && *change.enabled != mock.Enabled() {
+			setEnabled(mock, *change.enabled)
+
+			if err := store.Replace(r.Context(), []M{mock}, mock); err != nil {
+				setEnabled(mock, !*change.enabled)
+				fail(w, r, err)
+
+				return
+			}
 		}
 
 		respond(w, r, http.StatusOK, summarize(mock))
 	})
+}
+
+func setEnabled(mock vlatte.Mock, enabled bool) {
+	if enabled {
+		mock.Enable()
+	} else {
+		mock.Disable()
+	}
 }

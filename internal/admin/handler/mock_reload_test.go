@@ -14,19 +14,24 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
-// fakeFiles is a mock server's mock files: Reload returns err, and SaveMocks keeps what it is asked for and answers
-// saved and saveErr.
+// fakeFiles is a mock server's mock files: Reload runs onReload, if any, and returns err, and SaveMocks keeps what it
+// is asked for and answers saved and saveErr.
 type fakeFiles struct {
-	reloads int
-	err     error
-	dir     string
-	format  string
-	saved   []string
-	saveErr error
+	reloads  int
+	err      error
+	onReload func()
+	dir      string
+	format   string
+	saved    []string
+	saveErr  error
 }
 
 func (f *fakeFiles) Reload() error {
 	f.reloads++
+	if f.onReload != nil {
+		f.onReload()
+	}
+
 	return f.err
 }
 

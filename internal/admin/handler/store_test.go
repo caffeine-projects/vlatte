@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 )
 
 func TestStoreFailures(t *testing.T) {
@@ -64,7 +65,9 @@ func TestStoreFailures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// An admin mock, which reset removes.
 			hello := newFake("hello")
+			hello.origin = handler.Origin
 			store := &brokenStore{MemoryStore: new(vlatte.MemoryStore[*fakeMock])}
 			require.NoError(t, store.Store(t.Context(), hello))
 			tt.broken(store)
