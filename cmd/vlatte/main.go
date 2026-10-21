@@ -28,6 +28,7 @@ const (
 	_example          = `  vlatte
   vlatte --addr=:3000
   vlatte --proxy
+  vlatte --proxy --proxy-intercept --proxy-ca-cert=ca.pem --proxy-ca-key=ca-key.pem
   vlatte --proxy-all-target=https://api.example.com
   vlatte --proxy --record
   vlatte --record --record-target=https://api.example.com

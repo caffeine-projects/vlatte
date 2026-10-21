@@ -1,6 +1,8 @@
 package mockhttp
 
 import (
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
@@ -57,6 +59,10 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 	// and this table must cover every flag, so a new key can't be added without a test.
 	fromFile := writeConfigFile(t, t.TempDir(), "settings.json", `{"name": "from-file"}`)
 	tlsArgs := []string{"--tls-cert", _testCertFile, "--tls-key", _testKeyFile}
+
+	// proxy.intercept needs a CA.
+	caCert, caKey := writeTestCA(t, t.TempDir())
+	intercept := []string{"--proxy-intercept", "--proxy-ca-cert", caCert, "--proxy-ca-key", caKey}
 
 	// proxy_all needs its target. A file sets it, and its flag turns it off.
 	proxyAllFile := writeConfigFile(t, t.TempDir(), "proxy_all.json", `{"proxy_all": {"target": "https://api.example.com"}}`)
@@ -122,6 +128,9 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"proxy-all-ssl-verify":    {withTarget("--proxy-all-ssl-verify"), func(t *testing.T, c *Config) { require.True(t, c.proxyAll.sslVerify) }},
 		"proxy-all-x-forwarded":   {withTarget("--proxy-all-x-forwarded"), func(t *testing.T, c *Config) { require.True(t, c.proxyAll.xForwarded) }},
 		"proxy-all-preserve-host": {withTarget("--proxy-all-preserve-host"), func(t *testing.T, c *Config) { require.True(t, c.proxyAll.preserveHost) }},
+		"proxy-intercept":         {intercept, func(t *testing.T, c *Config) { require.True(t, c.Proxy.Intercept) }},
+		"proxy-ca-cert":           {intercept, func(t *testing.T, c *Config) { require.NotNil(t, c.Proxy.CA) }},
+		"proxy-ca-key":            {intercept, func(t *testing.T, c *Config) { require.NotNil(t, c.Proxy.CA.PrivateKey) }},
 		"record":                  {[]string{"--record"}, func(t *testing.T, c *Config) { require.Equal(t, defaultRecordConfig(), c.Record) }},
 		"record-dir":              {[]string{"--record-dir", "out"}, func(t *testing.T, c *Config) { require.Equal(t, "out", c.Record.Dir) }},
 		"record-format":           {[]string{"--record-format", ".YAML"}, func(t *testing.T, c *Config) { require.Equal(t, "yaml", c.Record.Format) }},
@@ -622,4 +631,73 @@ func TestConfigUsage_ListsEverySetting(t *testing.T) {
 	require.Contains(t, usage, "file key log.max_body_size")
 	require.Contains(t, usage, "Default: info.")
 	require.Equal(t, "42", choiceName(_logLevels, 42), "a default without a name shows its number")
+}
+
+// writeTestCA writes the certificate and the key of a new CA, as PEM files in dir, and returns their paths.
+func writeTestCA(t *testing.T, dir string) (string, string) {
+	t.Helper()
+
+	ca, err := newCA()
+	require.NoError(t, err)
+
+	key, err := x509.MarshalPKCS8PrivateKey(ca.PrivateKey)
+	require.NoError(t, err)
+
+	certFile, keyFile := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "ca-key.pem")
+	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca.Certificate[0]}), 0o600))
+	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}), 0o600))
+
+	return certFile, keyFile
+}
+
+func TestConfigSources_InterceptionNeedsACA(t *testing.T) {
+	// A CA the server makes lives as long as the server, and a client of the vlatte command can't get it to trust: the
+	// settings that intercept need the CA's files, both of them.
+	dir := t.TempDir()
+	caCert, _ := writeTestCA(t, dir)
+
+	tests := map[string]struct {
+		args []string
+		want string
+	}{
+		"no CA":      {[]string{"--proxy-intercept"}, "proxy.intercept is set but proxy.ca_cert and proxy.ca_key are not"},
+		"no CA key":  {[]string{"--proxy-intercept", "--proxy-ca-cert", caCert}, "proxy.ca_cert is set but proxy.ca_key is not"},
+		"no CA cert": {[]string{"--proxy-intercept", "--proxy-ca-key", caCert}, "proxy.ca_key is set but proxy.ca_cert is not"},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := loadConfig(t, Setup(), ConfigFile(DefaultConfigFileName, t.TempDir()), ConfigArgs(tt.args))
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+func TestConfigSources_TheCAOfAProxyTurnedOffLeavesItOff(t *testing.T) {
+	// Loading the CA's files turned the forward proxy on again, after a later source turned it off.
+	dir := t.TempDir()
+	caCert, caKey := writeTestCA(t, dir)
+	file := writeConfigFile(t, dir, "settings.yaml",
+		"proxy:\n  intercept: true\n  ca_cert: "+caCert+"\n  ca_key: "+caKey+"\n")
+
+	c, err := loadConfig(t, Setup(), ConfigFile(file), ConfigArgs([]string{"--proxy=false"}))
+	require.NoError(t, err)
+	require.Nil(t, c.Proxy)
+}
+
+func TestConfigSources_TheCAKeysTurnTheProxyOn(t *testing.T) {
+	// As any key of a section, proxy.ca_cert and proxy.ca_key turn the forward proxy on, and a CA file that doesn't
+	// load is a problem, not a setting left out.
+	dir := t.TempDir()
+	caCert, caKey := writeTestCA(t, dir)
+
+	c, err := loadConfig(t, Setup(), ConfigFile(DefaultConfigFileName, t.TempDir()),
+		ConfigArgs([]string{"--proxy-ca-cert", caCert, "--proxy-ca-key", caKey}))
+	require.NoError(t, err)
+	require.NotNil(t, c.Proxy)
+	require.NotNil(t, c.Proxy.CA)
+
+	_, err = loadConfig(t, Setup(), ConfigFile(DefaultConfigFileName, t.TempDir()),
+		ConfigArgs([]string{"--proxy-ca-cert", filepath.Join(dir, "missing.pem"), "--proxy-ca-key", caKey}))
+	require.ErrorContains(t, err, "can't load the CA's certificate and key")
 }

@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"maps"
@@ -120,6 +121,7 @@ func loadConfigSources(conf *Config) error {
 	}
 
 	problems = append(problems, loadTLSFiles(conf, values)...)
+	problems = append(problems, loadProxyCA(conf, values)...)
 	problems = append(problems, checkProxyAll(conf, values)...)
 
 	if len(problems) > 0 {
@@ -383,6 +385,24 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			},
 		},
 		field{
+			Key: "proxy.intercept", Kind: config.Bool,
+			Usage: "Serve the HTTPS of CONNECT tunnels with certificates signed by proxy.ca_cert, so mocks answer it. " +
+				"Requires proxy.ca_cert and proxy.ca_key.",
+			Set: func(c *Config, v config.Value) error {
+				section(&c.Proxy, _defaultProxyConfig).Intercept = v.Bool
+				return nil
+			},
+		},
+		field{
+			Key: "proxy.ca_cert", Kind: config.String,
+			Usage: "Certificate file of the CA that signs the certificates proxy.intercept serves, which clients must trust. Requires proxy.ca_key.",
+			Set:   func(c *Config, _ config.Value) error { section(&c.Proxy, _defaultProxyConfig); return nil },
+		},
+		field{
+			Key: "proxy.ca_key", Kind: config.String, Usage: "Private key file of proxy.ca_cert. Requires proxy.ca_cert.",
+			Set: func(c *Config, _ config.Value) error { section(&c.Proxy, _defaultProxyConfig); return nil },
+		},
+		field{
 			Key: "record", Kind: config.Bool, Usage: "Record proxied requests and their responses as mock files, from start to close.",
 			Set: func(c *Config, v config.Value) error { toggle(&c.Record, *defaultRecordConfig(), v.Bool); return nil },
 		},
@@ -507,6 +527,47 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 	)...)
 })
 
+// loadProxyCA loads the CA of proxy.ca_cert and proxy.ca_key. Interception from the settings needs one: clients must
+// trust the CA, and one the server makes lives only as long as the server.
+func loadProxyCA(conf *Config, values map[string]config.Value) []config.Problem {
+	// A source that turned the forward proxy off, such as --proxy=false, leaves it off.
+	if conf.Proxy == nil {
+		return nil
+	}
+
+	cert, hasCert := values["proxy.ca_cert"]
+	key, hasKey := values["proxy.ca_key"]
+	intercept, hasIntercept := values["proxy.intercept"]
+
+	switch {
+	case hasCert && !hasKey:
+		return []config.Problem{{
+			Code: config.CodeMissingValue, Origin: cert.Origin, Key: "proxy.ca_key",
+			Message: "proxy.ca_cert is set but proxy.ca_key is not", Hint: "set both",
+		}}
+	case hasKey && !hasCert:
+		return []config.Problem{{
+			Code: config.CodeMissingValue, Origin: key.Origin, Key: "proxy.ca_cert",
+			Message: "proxy.ca_key is set but proxy.ca_cert is not", Hint: "set both",
+		}}
+	case hasCert:
+		ca, err := tls.LoadX509KeyPair(cert.Str, key.Str)
+		if err != nil {
+			return []config.Problem{tlsFileProblem(cert, "can't load the CA's certificate and key", err)}
+		}
+
+		conf.Proxy.CA = &ca
+	case hasIntercept && intercept.Bool && conf.Proxy.CA == nil:
+		return []config.Problem{{
+			Code: config.CodeMissingValue, Origin: intercept.Origin, Key: "proxy.ca_cert",
+			Message: "proxy.intercept is set but proxy.ca_cert and proxy.ca_key are not",
+			Hint:    "clients must trust the CA that signs the certificates of the hosts it intercepts",
+		}}
+	}
+
+	return nil
+}
+
 // checkProxyAll reports proxy_all set without its target, from the source of a key that set it.
 func checkProxyAll(conf *Config, values map[string]config.Value) []config.Problem {
 	if conf.proxyAll == nil || conf.proxyAll.hasTarget {
@@ -549,7 +610,12 @@ func withProxyAll(fields ...field) []field {
 		})
 	}
 
-	after := slices.IndexFunc(fields, func(f field) bool { return f.Key == "proxy.ssl_verify" }) + 1
+	after := 0
+	for i, f := range fields {
+		if strings.HasPrefix(f.Key, "proxy.") {
+			after = i + 1
+		}
+	}
 
 	return slices.Insert(fields, after, proxyAll...)
 }

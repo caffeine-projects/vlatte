@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"slices"
 	"strconv"
@@ -406,47 +407,94 @@ func (h *mockHandler) connect(w http.ResponseWriter, r *RequestValues) {
 		return
 	}
 
-	// The host is dialed before the client's connection is hijacked: once it is, w can't answer a failure.
-	via := append(slices.Clone(req.Header.Values(_viaHeader)), h.app.id)
+	if h.app.proxy.interceptor != nil {
+		h.intercept(w, r)
+		return
+	}
 
-	upstream, err := h.app.proxy.dial(req.Context(), req.Host, via)
+	// The host is dialed before the client's connection is taken over: once it is, w can't answer a failure.
+	upstream, err := h.dialHost(req.Context(), req)
 	if err != nil {
 		h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: %w", err))
 		return
 	}
 
-	defer upstream.Close()
+	client, ok := h.openConnect(w, r)
+	if !ok {
+		upstream.Close()
+		return
+	}
 
+	defer h.closeConnect(client)
+
+	h.tunnel(client, upstream, r)
+}
+
+// openConnect takes the client's connection over from w, for r, a CONNECT, tracks it, and answers 200 on it. It
+// reports false when it can't: before it takes the connection over, the client gets the server's answer to the
+// failure. closeConnect ends what it opened.
+func (h *mockHandler) openConnect(w http.ResponseWriter, r *RequestValues) (net.Conn, bool) {
 	client, err := hijack(w)
 	if err != nil {
 		h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: proxy: a tunnel needs an HTTP/1.1 connection, "+
 			"and a response writer that can hijack it, or that unwraps to one that can: %w", err))
 
-		return
+		return nil, false
 	}
-
-	defer client.Close()
 
 	// The server is closing.
-	if !h.app.tunnels.add(client, upstream) {
-		return
+	if !h.app.tunnels.add(client) {
+		client.Close()
+		return nil, false
 	}
-
-	defer h.app.tunnels.remove(client, upstream)
 
 	// WriteHeader has no effect on a hijacked connection: the answer goes on the connection itself.
 	if _, err := io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
-		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: answering the CONNECT to %s: %w", req.Host, err))
+		h.closeConnect(client)
+		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: answering the CONNECT to %s: %w", r.RawRequest.Host, err))
+
+		return nil, false
+	}
+
+	return client, true
+}
+
+// closeConnect closes client, which openConnect opened, and stops tracking it.
+func (h *mockHandler) closeConnect(client net.Conn) {
+	h.app.tunnels.remove(client)
+	client.Close()
+}
+
+// dialHost dials the host of req, a CONNECT, within ctx, with the server's ID added to the request's VLatte-Via.
+func (h *mockHandler) dialHost(ctx context.Context, req *http.Request) (net.Conn, error) {
+	via := append(slices.Clone(req.Header.Values(_viaHeader)), h.app.id)
+	return h.app.proxy.dial(ctx, req.Host, via)
+}
+
+// tunnel logs r, a CONNECT, as answered, and pipes client, which got its 200, to upstream, the connection to the host,
+// until both sides end, or the server closes.
+func (h *mockHandler) tunnel(client, upstream net.Conn, r *RequestValues) {
+	defer upstream.Close()
+
+	// The server is closing.
+	if !h.app.tunnels.add(upstream) {
 		return
 	}
 
+	defer h.app.tunnels.remove(upstream)
+
+	h.logConnect(r)
+
+	if err := pipe(client, upstream); err != nil {
+		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: tunnel to %s: %w", r.RawRequest.Host, err))
+	}
+}
+
+// logConnect logs r, a CONNECT, as answered with 200 by the proxy.
+func (h *mockHandler) logConnect(r *RequestValues) {
 	opened := newResponse()
 	opened.StatusCode = http.StatusOK
 	h.lifecycle.OnProxied(r, opened)
-
-	if err := pipe(client, upstream); err != nil {
-		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: tunnel to %s: %w", req.Host, err))
-	}
 }
 
 // keepsBody reports whether something reads the body of the answer of mock once it is sent: its callbacks, its
