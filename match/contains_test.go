@@ -3,9 +3,10 @@ package match
 import (
 	"testing"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 func TestContains(t *testing.T) {

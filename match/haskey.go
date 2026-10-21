@@ -1,9 +1,9 @@
 package match
 
 import (
-	"github.com/caffeine-projects/vlatte"
-
 	"github.com/ohler55/ojg/jp"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 // HasKey matches when the value (map or struct) has the given key/path.

@@ -4,8 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 func TestStrictEqual(t *testing.T) {

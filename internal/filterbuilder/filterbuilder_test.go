@@ -5,9 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 func matches(t *testing.T, m vlatte.Matcher, v any) bool {

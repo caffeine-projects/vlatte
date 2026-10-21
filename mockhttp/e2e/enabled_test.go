@@ -4,8 +4,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
 func TestEnabledDisabledMocks(t *testing.T) {

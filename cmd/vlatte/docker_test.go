@@ -4,9 +4,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
 func TestConfigDockerDefaultHTTPHost(t *testing.T) {
