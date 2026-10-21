@@ -77,11 +77,29 @@ func (s *Store[M]) Store(ctx context.Context, mocks ...M) error {
 }
 
 // Replace replaces old with mocks in the persistent store, then in the server's. A mock of old that mocks holds again
-// is written again, as an edit of its state, such as its enabled state, is persisted, and keeps its place. When the
-// server's store refuses mocks, the persistent store gets back the mocks of old it held.
+// is written again, as an edit of its state, such as its enabled state, is persisted, and keeps its place. A mock of
+// old the server no longer serves, such as one a reload replaced since it was picked, is left out, as the server's
+// store leaves it out: the mock that took its id since, and its description, stay. When the server's store refuses
+// mocks, the persistent store gets back the mocks of old it held.
 func (s *Store[M]) Replace(ctx context.Context, old []M, mocks ...M) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// The persistent store tells mocks apart by id: it gets only the very mocks the server serves.
+	served, err := s.serving.PickAll(ctx)
+	if err != nil {
+		return err
+	}
+
+	present := make(map[any]struct{}, len(served))
+	for _, mock := range served {
+		present[mock] = struct{}{}
+	}
+
+	old = slices.DeleteFunc(slices.Clone(old), func(mock M) bool {
+		_, ok := present[mock]
+		return !ok
+	})
 
 	if err := s.durable.Replace(ctx, old, mocks...); err != nil {
 		return err

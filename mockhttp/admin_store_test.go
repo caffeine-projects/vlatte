@@ -558,3 +558,39 @@ func TestFileStore_AWriteThatFailsChangesNoFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, string(before), string(after))
 }
+
+func TestFileStore_AStaleDeleteLeavesTheNewerMock(t *testing.T) {
+	// A delete picks the mock it removes, then removes it: a reload or a PUT in between swaps in a newer mock with its
+	// id, which stays, with its file, as the delete only removes the mock it picked.
+	for name, between := range map[string]func(t *testing.T, m *Server){
+		"reload": func(t *testing.T, m *Server) { require.NoError(t, m.Reload()) },
+		"put": func(t *testing.T, m *Server) {
+			res, body := do(t, http.MethodPut, m.AdminURL()+"/mocks/hello", nil,
+				[]byte(`{"id": "hello", "request": {"method": "GET", "path": "/hello"}, "response": {"status": 200, "body": "newer"}}`))
+			require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			m := adminServer(t, Setup().AdminStore(FileStore(dir)))
+			addMock(t, m, `{"id": "hello", "request": {"method": "GET", "path": "/hello"}, "response": {"status": 200, "body": "newer"}}`)
+
+			picked, err := m.adminStore.Pick(t.Context(), "hello")
+			require.NoError(t, err)
+
+			between(t, m)
+
+			require.NoError(t, m.adminStore.Replace(t.Context(), []*Mock{picked}))
+
+			require.FileExists(t, filepath.Join(dir, "hello.mock.yaml"))
+
+			_, body := do(t, http.MethodGet, m.URL("/hello"), nil, nil)
+			require.Equal(t, "newer", string(body))
+
+			require.NoError(t, m.Reload())
+
+			_, body = do(t, http.MethodGet, m.URL("/hello"), nil, nil)
+			require.Equal(t, "newer", string(body), "its file stays")
+		})
+	}
+}

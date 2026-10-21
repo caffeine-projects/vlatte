@@ -396,3 +396,28 @@ func TestStore_ListsWhatTheServerServes(t *testing.T) {
 
 	require.Equal(t, []string{"on"}, listed)
 }
+
+func TestStore_AMockPickedBeforeAReloadLeavesTheNewerOne(t *testing.T) {
+	// A delete or replace of a mock picked before a reload swapped in a newer one with its id, as a race between two
+	// admin requests can: the newer mock, and the description the persistent store holds for it, stay.
+	ctx := t.Context()
+	serving, durable := vlatte.NewStore[*docMock](), newDocStore()
+	s := NewStore[*docMock](serving, durable, nil)
+
+	picked := newDocMock("a", true)
+	require.NoError(t, s.Store(ctx, picked))
+	require.NoError(t, s.Reload(ctx))
+
+	newer, err := s.Pick(ctx, "a")
+	require.NoError(t, err)
+	require.NotSame(t, picked, newer)
+
+	require.NoError(t, s.Replace(ctx, []*docMock{picked}), "a delete of the picked mock")
+	require.ErrorIs(t, s.Replace(ctx, []*docMock{picked}, newDocMock("a", false)), vlatte.ErrDuplicateID,
+		"a replace of the picked mock")
+
+	got, err := s.Pick(ctx, "a")
+	require.NoError(t, err)
+	require.Same(t, newer, got)
+	require.Equal(t, map[string]bool{"a": true}, durable.held())
+}
