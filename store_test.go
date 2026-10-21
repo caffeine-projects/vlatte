@@ -167,6 +167,16 @@ func TestMemoryStoreMachine(t *testing.T) {
 
 				batch := rapid.SliceOfN(genStoreMock(), 0, 3).Draw(t, "batch")
 
+				// A mock of old stored again, as an edit of its state is persisted, keeps its place.
+				var again []*fakeMock
+				for _, m := range old {
+					if slices.ContainsFunc(model, func(e storeEntry) bool { return e.mock == m }) && rapid.Bool().Draw(t, "stored again") {
+						again = append(again, m)
+					}
+				}
+
+				batch = append(again, batch...)
+
 				taken := make(map[string]bool)
 				for _, e := range model {
 					if !slices.Contains(old, e.mock) {
@@ -192,13 +202,16 @@ func TestMemoryStoreMachine(t *testing.T) {
 				require.NoError(t, err)
 
 				for _, e := range model {
-					if slices.Contains(old, e.mock) {
+					if slices.Contains(old, e.mock) && !slices.Contains(again, e.mock) {
 						left = append(left, e.mock)
 					}
 				}
 
-				model = slices.DeleteFunc(model, func(e storeEntry) bool { return slices.Contains(old, e.mock) })
-				for _, m := range batch {
+				model = slices.DeleteFunc(model, func(e storeEntry) bool {
+					return slices.Contains(old, e.mock) && !slices.Contains(again, e.mock)
+				})
+
+				for _, m := range batch[len(again):] {
 					seq++
 					model = append(model, storeEntry{mock: m, seq: seq})
 				}
@@ -326,6 +339,22 @@ func TestMemoryStore_ReplaceKeepsOpenWhatItAddsBack(t *testing.T) {
 
 	require.Zero(t, kept.closed.Load(), "added back")
 	require.Equal(t, int64(1), gone.closed.Load())
+}
+
+func TestMemoryStore_ReplaceKeepsThePlaceOfWhatItAddsBack(t *testing.T) {
+	// A mock stored again, as the admin API does to persist an edit of its state, matches in the order it did:
+	// moving it behind the mocks of its priority would change which mock answers a request.
+	ctx := t.Context()
+	store := vlatte.NewStore[*fakeMock]()
+
+	a, b, c := newFakeMockWith("a", 0), newFakeMockWith("b", 0), newFakeMockWith("c", 0)
+	require.NoError(t, store.Store(ctx, a, b, c))
+
+	require.NoError(t, store.Replace(ctx, []*fakeMock{a}, a))
+
+	all, err := store.PickAll(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []*fakeMock{a, b, c}, all)
 }
 
 func TestMemoryStore_DeleteAndClearCloseWhatLeaves(t *testing.T) {

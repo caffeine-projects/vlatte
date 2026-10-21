@@ -51,7 +51,7 @@ func (f MockBuilderFunc[B]) BuildFromBytes(content []byte, extension string) (B,
 }
 
 // Store holds the mocks of a server. Replace, Delete and Clear close the mocks they remove that implement io.Closer,
-// once the store is unlocked; a mock Replace stores again stays open.
+// once the store is unlocked; a mock Replace stores again stays open, and keeps its place in the order mocks match.
 type Store[T Mock] interface {
 	List(ctx context.Context) (iter.Seq[T], error)
 
