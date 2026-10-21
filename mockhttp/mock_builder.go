@@ -537,7 +537,7 @@ func (b *Builder) StartScenario(name string) *Builder {
 	return b
 }
 
-// ScenarioIs mark this mock to be used only within the given scenario.
+// ScenarioIs puts the mock in the given scenario. Without [Builder.ScenarioStateIs], it matches in any state of it.
 func (b *Builder) ScenarioIs(scenario string) *Builder {
 	b.scenario = scenario
 
@@ -552,6 +552,7 @@ func (b *Builder) ScenarioStateIs(requiredState string) *Builder {
 }
 
 // ScenarioStateWillBe defines the state of the scenario after this mock is matched, making the scenario flow continue.
+// It starts the scenario when no mock did yet.
 func (b *Builder) ScenarioStateWillBe(newState string) *Builder {
 	b.scenarioNewState = newState
 

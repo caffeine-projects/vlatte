@@ -179,6 +179,54 @@ func TestBuilder_ScenarioAdvancesPerServer(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, "the scenario of s2 is still where it started")
 }
 
+func TestBuilder_AScenarioMockWithoutARequiredState(t *testing.T) {
+	// A mock that requires no state of its scenario matches in any state, as in WireMock, and its new state moves the
+	// scenario, one no mock started too: it required "", the state of no scenario, and its new state was dropped.
+	newServer := func(builders ...*Builder) *Server {
+		m := MustNew(Setup().Silent())
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		for _, b := range builders {
+			m.MustMock(b)
+		}
+
+		return m
+	}
+
+	t.Run("matches in any state", func(t *testing.T) {
+		m := newServer(
+			Getf("/begin").StartScenario("checkout").ScenarioStateWillBe("cart").Reply(OK()),
+			Getf("/pay").ScenarioIs("checkout").ScenarioStateWillBe("paid").Reply(OK()),
+			Getf("/cart").ScenarioIs("checkout").ScenarioStateIs("cart").Reply(OK()))
+
+		for _, step := range []struct {
+			path string
+			want int
+		}{
+			{"/begin", http.StatusOK},
+			{"/pay", http.StatusOK},
+			{"/cart", StatusNoMatch},
+		} {
+			status, _ := get(t, m, step.path)
+			require.Equal(t, step.want, status, step.path)
+		}
+	})
+
+	t.Run("starts the scenario it moves", func(t *testing.T) {
+		m := newServer(
+			Getf("/pay").ScenarioIs("checkout").ScenarioStateWillBe("paid").Reply(OK()),
+			Getf("/cart").ScenarioIs("checkout").ScenarioStateIs("cart").Reply(OK()))
+
+		status, _ := get(t, m, "/pay")
+		require.Equal(t, http.StatusOK, status)
+
+		// A scenario no mock started matches whatever state a mock requires: this one was started, at paid.
+		status, _ = get(t, m, "/cart")
+		require.Equal(t, StatusNoMatch, status)
+	})
+}
+
 func TestBuilder_AddedTwiceToOneServer(t *testing.T) {
 	// A builder without an ID gets a new one at each build, so it can be added to a server more than once. With an
 	// ID, a server still holds one mock per ID.
