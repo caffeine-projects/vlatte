@@ -214,6 +214,7 @@ func TestForwardProxy_AnInterceptedTLSStartThatFailsIsClosed(t *testing.T) {
 		"a record cut short":              append(header(100), make([]byte, 10)...),
 		"a record over the size limit":    header(0xFFFF),
 		"a record that is no ClientHello": append(header(8), 0x02, 0x00, 0x00, 0x04, 0x03, 0x03, 0x00, 0x00),
+		"a record of no TLS version":      append([]byte{0x16, 0x16, 0x03, 0x30, 0x00}, make([]byte, 0x3000)...),
 	}
 
 	for name, first := range tests {

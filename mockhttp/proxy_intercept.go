@@ -2,7 +2,6 @@ package mockhttp
 
 import (
 	"bufio"
-	"bytes"
 	"cmp"
 	"context"
 	"crypto"
@@ -14,7 +13,6 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -28,7 +26,7 @@ import (
 
 var (
 	_ net.Listener = (*oneConnListener)(nil)
-	_ net.Conn     = (*recordConn)(nil)
+	_ net.Conn     = discardingConn{}
 )
 
 // errHelloRead stops the handshake that reads a ClientHello for peekALPN.
@@ -326,7 +324,8 @@ func (h *mockHandler) serveIntercepted(conn *tls.Conn, authority string) bool {
 }
 
 // peekALPN returns the protocols the TLS ClientHello that in starts with offers by ALPN, and leaves the ClientHello to
-// be read. crypto/tls reads it, from a copy of the record that holds it, up to where a server picks its config.
+// be read. crypto/tls reads it, from the record that holds it, sent through a pipe, up to where a server picks its
+// config.
 func peekALPN(in *bufio.Reader) ([]string, error) {
 	header, err := in.Peek(5)
 	if err != nil {
@@ -343,12 +342,26 @@ func peekALPN(in *bufio.Reader) ([]string, error) {
 		read      bool
 	)
 
-	_ = tls.Server(&recordConn{r: bytes.NewReader(record)}, &tls.Config{
+	server, client := net.Pipe()
+	written := make(chan struct{})
+
+	go func() {
+		defer close(written)
+
+		_, _ = client.Write(record)
+		_ = client.Close()
+	}()
+
+	_ = tls.Server(discardingConn{server}, &tls.Config{
 		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 			protocols, read = slices.Clone(hello.SupportedProtos), true
 			return nil, errHelloRead
 		},
 	}).Handshake()
+
+	// crypto/tls may stop before the end of the record, such as at a header that isn't TLS's: closing ends the write.
+	_ = server.Close()
+	<-written
 
 	if !read {
 		return nil, errors.New("proxy: no TLS ClientHello in the first record")
@@ -357,19 +370,13 @@ func peekALPN(in *bufio.Reader) ([]string, error) {
 	return protocols, nil
 }
 
-// recordConn is a connection that reads r, such as a copy of a TLS record, and drops what is written to it.
-type recordConn struct {
-	r io.Reader
+// discardingConn is a connection that drops what is written to it, such as the alert of a handshake peekALPN stops:
+// nothing reads it.
+type discardingConn struct {
+	net.Conn
 }
 
-func (c *recordConn) Read(p []byte) (int, error)       { return c.r.Read(p) }
-func (c *recordConn) Write(p []byte) (int, error)      { return len(p), nil }
-func (c *recordConn) Close() error                     { return nil }
-func (c *recordConn) LocalAddr() net.Addr              { return &net.TCPAddr{} }
-func (c *recordConn) RemoteAddr() net.Addr             { return &net.TCPAddr{} }
-func (c *recordConn) SetDeadline(time.Time) error      { return nil }
-func (c *recordConn) SetReadDeadline(time.Time) error  { return nil }
-func (c *recordConn) SetWriteDeadline(time.Time) error { return nil }
+func (c discardingConn) Write(p []byte) (int, error) { return len(p), nil }
 
 // oneConnListener is the listener of one connection, accepted already: its first Accept returns it, and the next
 // ones fail, so the server that serves it doesn't wait for more.
