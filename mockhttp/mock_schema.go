@@ -297,10 +297,10 @@ var _mockSchema = config.NewSchema(
 		},
 	},
 	mockField{
-		Key: "request.queries", Kind: config.Any, Usage: "Query parameters with many values to match, by name.",
+		Key: "request.queries", Kind: config.Any, Usage: "Query parameters with many values to match, by name: every value, as a list.",
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "queries")
-			return matchEach(v, &d.request.queries, func(b *Builder, name string, m vlatte.Matcher) { b.Queries(name, m) })
+			return matchLists(v, &d.request.queries, func(b *Builder, name string, m vlatte.Matcher) { b.Queries(name, m) })
 		},
 	},
 	mockField{
@@ -1097,8 +1097,8 @@ func matchEach(v config.Value, dst *[]func(*Builder), add func(b *Builder, name 
 	})
 }
 
-// matchLists is matchEach for headers and forms, whose matchers get every value, as a list: text, which never equals a
-// list, is a problem.
+// matchLists is matchEach for queries, headers and forms, whose matchers get every value, as a list: text, which
+// never equals a list, is a problem.
 func matchLists(v config.Value, dst *[]func(*Builder), add func(b *Builder, name string, m vlatte.Matcher)) error {
 	return config.Members(v, func(name string, member config.Value) error {
 		if s, isText := member.Any.(string); isText {

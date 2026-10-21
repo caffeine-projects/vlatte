@@ -137,6 +137,7 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"client_ip with a port", "request: {client_ip: '127.0.0.1:8080'}\n", []want{{config.CodeInvalidValue, "request.client_ip", `request.client_ip="127.0.0.1:8080" has a port or brackets`, `write the address alone: "127.0.0.1"`}}},
 		{"cookie value as a number", "request: {cookie: {session: 1}}\n", []want{{config.CodeInvalidValue, "request.cookie.session", "must be a string or a matcher list", `write it in quotes: "1"`}}},
 		{"headers matcher that doesn't build", "request: {headers: {X-Id: [gt]}}\n", []want{{config.CodeInvalidValue, "request.headers.X-Id", "gt", ""}}},
+		{"queries value as text", "request: {queries: {page: '2'}}\n", []want{{config.CodeInvalidValue, "request.queries.page", `request.queries.page="2" is text, which never equals a list of values`, `[contains, "2"]`}}},
 		{"forms value as text", "request: {forms: {tag: a}}\n", []want{{config.CodeInvalidValue, "request.forms.tag", "is text, which never equals a list of values", `[contains, "a"]`}}},
 		{"form_file as a list", "request: {form_file: [a]}\n", []want{{config.CodeInvalidValue, "request.form_file", "must be an object, not a list", ""}}},
 		{"file pattern as text", "request: {form_file: {avatar: a.png}}\n", []want{{config.CodeInvalidValue, "request.form_file.avatar", "must be an object, not a string", ""}}},

@@ -40,7 +40,7 @@
         "url_match": { "type": "string", "format": "regex" },
         "fragment": { "description": "URL fragment: the text after a \"#\" of the request target. Only clients that write a \"#\" into the request target send one.", "$ref": "#/$defs/matcher" },
         "query": { "$ref": "#/$defs/keyed_matcher" },
-        "queries": { "$ref": "#/$defs/keyed_matcher" },
+        "queries": { "description": "Query parameters with many values, by name: every value, as a list.", "$ref": "#/$defs/keyed_list_matcher" },
         "header": { "$ref": "#/$defs/keyed_matcher" },
         "headers": { "description": "Headers with many values, by name: every value, as a list.", "$ref": "#/$defs/keyed_list_matcher" },
         "cookie": { "description": "Cookies, by name, which keeps its case.", "$ref": "#/$defs/keyed_matcher" },

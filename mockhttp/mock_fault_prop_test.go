@@ -54,6 +54,9 @@ var _mockFaults = []mockFault{
 	{"headers", config.CodeInvalidValue, "request.headers.X-Tag", func(doc map[string]any) {
 		sub(doc, "request")["headers"] = map[string]any{"X-Tag": "a"}
 	}},
+	{"queries", config.CodeInvalidValue, "request.queries.page", func(doc map[string]any) {
+		sub(doc, "request")["queries"] = map[string]any{"page": "2"}
+	}},
 	{"basic_auth", config.CodeMissingValue, "request.basic_auth.password", func(doc map[string]any) {
 		sub(doc, "request")["basic_auth"] = map[string]any{"username": "u"}
 	}},
