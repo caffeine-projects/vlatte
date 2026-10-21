@@ -676,7 +676,7 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 	// scenario runs in the store of app.
 	if b.times > 0 {
 		spec.expectations = append(spec.expectations, &expectation{
-			Target:  int(matchingScopeNone),
+			Target:  int(matchingScopeRepeat),
 			Matcher: mfeat.Repeat(b.times),
 		})
 	}

@@ -288,6 +288,32 @@ func TestMock_ADescribedRequestPartLoadsBackAndMatchesTheSame(t *testing.T) {
 	}
 }
 
+func TestMock_ADescriptionKeepsTheScenarioAndRepeat(t *testing.T) {
+	// A mock described its scenario and repeat as a single argument, which the description dropped, as it merged maps
+	// only: saved through the admin API, a mock of one request served every request, outside its scenario.
+	built := MustNew(Setup().Silent())
+	built.MustStart()
+	t.Cleanup(built.Close)
+
+	desc, err := built.MustMock(Getf("/x").Times(1).
+		ScenarioIs("checkout").ScenarioStateIs("started").ScenarioStateWillBe("paid").
+		Reply(OK())).Mocks()[0].MarshalJSON()
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(desc, &doc))
+	require.Equal(t, float64(1), doc["repeat"], string(desc))
+	require.Equal(t, map[string]any{"name": "checkout", "required_state": "started", "new_state": "paid"}, doc["scenario"], string(desc))
+
+	loaded := MustNew(Setup().Silent())
+	loaded.MustStart()
+	t.Cleanup(loaded.Close)
+	loaded.MustMock(FromBytes(desc, "json"))
+
+	require.Equal(t, http.StatusOK, getTarget(t, loaded, "/x"))
+	require.Equal(t, StatusNoMatch, getTarget(t, loaded, "/x"), "it serves one request")
+}
+
 // getTarget sends a GET with target as the request target, as is, and returns the status: Go's http.Client doesn't
 // send a URL's fragment.
 func getTarget(t *testing.T, m *Server, target string) int {

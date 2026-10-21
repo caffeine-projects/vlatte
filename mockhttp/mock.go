@@ -329,6 +329,16 @@ func (m *Mock) Describe() descriptor.Descriptor {
 				request[target.FieldName()] = sd.Describe()
 			}
 
+		case matchingScopeScenario, matchingScopeRepeat:
+			// They describe as a single argument, the value of their key, such as repeat: 1.
+			for _, e := range expectations {
+				if sd, ok := e.Matcher.(descriptor.SelfDescriptive); ok {
+					if args, ok := sd.Describe().Props.([]any); ok && len(args) == 1 {
+						data[target.FieldName()] = args[0]
+					}
+				}
+			}
+
 		default:
 			for _, e := range expectations {
 				if sd, ok := e.Matcher.(descriptor.SelfDescriptive); ok {
@@ -427,6 +437,7 @@ const (
 	matchingScopeClientIP
 	matchingScopeURLPathTemplate
 	matchingScopePathParam
+	matchingScopeRepeat
 )
 
 func (t matchingScope) FieldName() string {
@@ -471,6 +482,8 @@ func (t matchingScope) FieldName() string {
 		return "path_template"
 	case matchingScopePathParam:
 		return "path_params"
+	case matchingScopeRepeat:
+		return "repeat"
 	default:
 		return ""
 	}
