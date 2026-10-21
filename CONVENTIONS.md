@@ -23,7 +23,7 @@ One file that is not `*.md` means the task is not docs only. CI runs the same ch
 - One struct field per line, test-table structs included. Never `a, b string`.
 - Prefix unexported package-level vars and consts with `_`, e.g. `_defaultProxyConfig`.
 - Assert interface compliance at the top of the file: `var _ I = (*T)(nil)`.
-- File names are snake_case, e.g. `reply_random.go`.
+- File names are lowercase, as Go's own are: `reply_random.go`, `hasprefix.go`. Never end one in a GOOS or GOARCH name (`_js.go`, `_linux.go`): Go builds it only there.
 - Keep one short receiver name per type [lint]: `app` (`Server`, `Base`), `cb` (`ConfigBuilder`), `b` (builders), `m` (`Mock`).
 - Constructors are `New(...Option) (*T, error)` plus a panicking `MustNew`. The root package uses `New<Type>`. A `Must` prefix means the function panics.
 - Imports come in three groups separated by blank lines [lint]: standard library, third-party, then `github.com/caffeine-projects/vlatte/...`. Uber uses two.
