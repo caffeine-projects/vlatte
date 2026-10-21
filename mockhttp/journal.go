@@ -225,18 +225,17 @@ func (c *journalCall) end(r *RequestValues, p any) {
 	warning := c.warning
 	c.mu.Unlock()
 
+	// net/http drops the connection of an answer aborted: the client has what was sent, as when the handler ends.
 	abort, _ := p.(error)
+	aborted := errors.Is(abort, http.ErrAbortHandler)
 
 	switch ctx := r.RawRequest.Context(); {
-	case errors.Is(abort, http.ErrAbortHandler):
-		// net/http drops the connection of an answer aborted: the client has what was sent.
-		c.record(r, vlatte.OutcomeFailed, r.sent(), cmp.Or(warning, abort))
-	case p != nil:
-		// The recovery middleware answers a panic, once the handler is done, with the status of failures, unless the
-		// reply sent one first.
-		c.record(r, vlatte.OutcomeFailed, cmp.Or(r.sent(), r.App.config.ErrorStatusCode), fmt.Errorf("%w: %v", errPanicked, p))
+	case p != nil && !aborted:
+		c.record(r, vlatte.OutcomeFailed, r.panicked(), fmt.Errorf("%w: %v", errPanicked, p))
 	case ctx.Err() != nil:
 		c.record(r, vlatte.OutcomeAbandoned, r.sent(), cmp.Or(warning, context.Cause(ctx)))
+	case aborted:
+		c.record(r, vlatte.OutcomeFailed, r.sent(), cmp.Or(warning, abort))
 	default:
 		c.record(r, vlatte.OutcomeFailed, r.sent(), cmp.Or(warning, errNoAnswer))
 	}

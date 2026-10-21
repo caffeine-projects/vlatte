@@ -72,6 +72,17 @@ func (r *RequestValues) sent() int {
 	return r.answer.status
 }
 
+// panicked returns the status the client of a request whose serving panicked gets: the recovery middleware answers
+// once the handler is done, with the status of failures, unless the reply sent one first, or the connection was taken
+// over.
+func (r *RequestValues) panicked() int {
+	if r.sent() != 0 || r.answer != nil && r.answer.hijacked {
+		return r.sent()
+	}
+
+	return r.App.config.ErrorStatusCode
+}
+
 // answered returns the status the client got, once a mock or a proxy answered it with res: the one sent, or res's,
 // which vlatte writes itself on a connection it takes over, such as a CONNECT's or an upgrade's. A reply that wrote
 // nothing, such as a Handler, answers 200, as net/http does.

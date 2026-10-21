@@ -79,6 +79,18 @@ func TestJournal_KeepsEachRequestOnceWhateverItsOutcome(t *testing.T) {
 			runtime.Goexit()
 			return nil, nil
 		})),
+		Getf("/aborts-late").ID("aborts-late").Reply(Func(func(_ http.ResponseWriter, r *RequestValues) (*Response, error) {
+			<-r.RawRequest.Context().Done()
+			panic(http.ErrAbortHandler)
+		})),
+		Getf("/takes-over").ID("takes-over").Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+			conn, _, err := http.NewResponseController(w).Hijack()
+			if err == nil {
+				conn.Close()
+			}
+
+			panic("taken")
+		})),
 	)
 
 	tests := []struct {
@@ -97,6 +109,8 @@ func TestJournal_KeepsEachRequestOnceWhateverItsOutcome(t *testing.T) {
 		{name: "panicked", server: m, path: "/panics", outcome: vlatte.OutcomeFailed, status: 599, mockID: "panics", message: "panicked: boom"},
 		{name: "aborted", server: m, path: "/aborts", outcome: vlatte.OutcomeFailed, mockID: "aborts", message: "abort Handler"},
 		{name: "exited", server: m, path: "/exits", outcome: vlatte.OutcomeFailed, mockID: "exits", message: "ended without an answer"},
+		{name: "aborted once its client left", server: m, path: "/aborts-late", outcome: vlatte.OutcomeAbandoned, mockID: "aborts-late", message: "canceled"},
+		{name: "panicked on a connection taken over", server: m, path: "/takes-over", outcome: vlatte.OutcomeFailed, mockID: "takes-over", message: "panicked: taken"},
 		{name: "abandoned", server: m, path: "/slow", outcome: vlatte.OutcomeAbandoned, mockID: "slow", message: "left during the delay"},
 		{name: "handler", server: m, path: "/handler", outcome: vlatte.OutcomeMatched, status: http.StatusCreated, mockID: "handler"},
 		{name: "handler writing nothing", server: m, path: "/silent", outcome: vlatte.OutcomeMatched, status: http.StatusOK, mockID: "silent"},
