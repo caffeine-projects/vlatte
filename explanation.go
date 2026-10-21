@@ -1,10 +1,8 @@
 package vlatte
 
-// noopExplanation collects the messages of matchers that run without an Explanation.
-var noopExplanation = &Explanation{Name: "noop"}
-
 // Explanation records why a mock matched a request or not, as a tree of named blocks.
 // [MatcherArg.Explain] hands one to each matcher.
+// A nil *Explanation records nothing; its methods are safe to call.
 type Explanation struct {
 	Name     string
 	Items    []ExplanationItem
@@ -18,15 +16,16 @@ func NewExplanation() *Explanation {
 }
 
 // Root reports whether e is the root of its tree.
+// A nil Explanation has no parent, so it reports true.
 func (e *Explanation) Root() bool {
-	return e.Parent == nil
+	return e == nil || e.Parent == nil
 }
 
 // Sub adds a child block with the given name and returns it.
-// On a nil Explanation, it returns a block that discards what it records.
+// On a nil Explanation, it returns nil, which records nothing.
 func (e *Explanation) Sub(name string) *Explanation {
 	if e == nil {
-		return noopExplanation
+		return nil
 	}
 
 	child := &Explanation{Parent: e, Name: name}
@@ -36,7 +35,12 @@ func (e *Explanation) Sub(name string) *Explanation {
 }
 
 // AddMessage records a message in this block.
+// On a nil Explanation, it does nothing.
 func (e *Explanation) AddMessage(message string) {
+	if e == nil {
+		return
+	}
+
 	e.Items = append(e.Items, ExplanationItem{Message: message})
 }
 
