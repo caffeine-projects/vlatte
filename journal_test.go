@@ -697,3 +697,19 @@ func TestClipBody(t *testing.T) {
 		})
 	}
 }
+
+func TestJournal_ARelativeDirectoryStaysWhereItOpened(t *testing.T) {
+	// A server may change its working directory, as a test's cleanup does: the journal keeps reading and writing the
+	// files of the directory it opened.
+	opened := t.TempDir()
+	t.Chdir(opened)
+
+	j := newJournal(t, vlatte.JournalOptions{Dir: "journal"})
+	require.NoError(t, j.Append(entry("a")))
+	require.Equal(t, filepath.Join(opened, "journal"), j.Dir())
+
+	t.Chdir(t.TempDir())
+
+	require.NoError(t, j.Append(entry("b")))
+	require.Equal(t, []string{"b", "a"}, find(t, j, vlatte.JournalQuery{Body: match.Empty()}))
+}

@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	json "encoding/json/v2"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -59,6 +60,23 @@ func start(t *testing.T, args ...string) (stop func() int) {
 func withoutDockerHost(t *testing.T) {
 	t.Setenv(_dockerHostEnv, "")
 	require.NoError(t, os.Unsetenv(_dockerHostEnv))
+}
+
+func TestMain(m *testing.M) {
+	// The command keeps its admin mocks and its journal under the working directory: the tests run in a directory of
+	// their own, so none writes into the repository.
+	dir, err := os.MkdirTemp("", "vlatte-cli-test-*")
+	if err != nil {
+		panic(err)
+	}
+
+	defer os.RemoveAll(dir)
+
+	if err := os.Chdir(dir); err != nil {
+		panic(err)
+	}
+
+	m.Run()
 }
 
 func randomAddr(t *testing.T) string {
@@ -116,6 +134,9 @@ func TestCLI_HTTPS(t *testing.T) {
 }
 
 func TestDockerCLI(t *testing.T) {
+	// The server outlives the test, which doesn't wait for it to stop: its journal is apart from the next tests'.
+	t.Chdir(t.TempDir())
+
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { cancel() })
 	t.Setenv(_dockerHostEnv, "localhost")
@@ -673,7 +694,7 @@ func TestCLI_KeepsTheAdminMocksAcrossRestarts(t *testing.T) {
 		adminURL, _ := startAdmin(t, "--addr", randomAddr(t), "--admin-dir=", "--log-level", "disabled")
 		postMock(t, adminURL, "id: gone\nrequest: {method: GET, path: /gone}\nresponse: {status: 201}\n")
 
-		_, err := os.Stat("testdata")
+		_, err := os.Stat(filepath.Join("testdata", "_admin"))
 		require.ErrorIs(t, err, os.ErrNotExist)
 	})
 }
@@ -874,4 +895,53 @@ func TestCLI_InterceptsHTTPS(t *testing.T) {
 	}, 10*time.Second, 100*time.Millisecond)
 
 	require.Equal(t, "mocked", string(body))
+}
+
+func TestCLI_KeepsAJournalOfRequests(t *testing.T) {
+	// The command keeps the requests it serves in testdata/_journal, across restarts, which the admin API queries.
+	// --journal=false turns it off.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	count := func(adminURL string) (int, map[string]any) {
+		t.Helper()
+
+		req, err := http.NewRequestWithContext(t.Context(), "QUERY", adminURL+"/requests", strings.NewReader(`{"path": "/x", "limit": 0}`))
+		require.NoError(t, err)
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+
+		defer res.Body.Close()
+
+		var doc map[string]any
+		require.NoError(t, json.UnmarshalRead(res.Body, &doc))
+
+		return res.StatusCode, doc
+	}
+
+	addr := randomAddr(t)
+	adminURL, stop := startAdmin(t, "--addr", addr, "--log-level", "disabled")
+	status, _ := firstAnswer(t, "http://"+addr+"/x")
+	require.Equal(t, mockhttp.StatusNoMatch, status)
+
+	code, doc := count(adminURL)
+	require.Equal(t, http.StatusOK, code, doc)
+	require.Equal(t, float64(1), doc["count"])
+	require.Zero(t, stop())
+	require.DirExists(t, filepath.Join("testdata", "_journal"))
+
+	adminURL, _ = startAdmin(t, "--addr", addr, "--log-level", "disabled")
+	code, doc = count(adminURL)
+	require.Equal(t, http.StatusOK, code, doc)
+	require.Equal(t, float64(1), doc["count"], "the request of the first run")
+
+	t.Run("off", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+
+		adminURL, _ := startAdmin(t, "--addr", randomAddr(t), "--journal=false", "--log-level", "disabled")
+		code, _ := count(adminURL)
+		require.Equal(t, http.StatusNotImplemented, code)
+		require.NoDirExists(t, filepath.Join("testdata", "_journal"))
+	})
 }

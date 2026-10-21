@@ -127,7 +127,7 @@ func MustNewJournal(o JournalOptions) *Journal {
 	return j
 }
 
-// Dir returns the directory of the journal's files.
+// Dir returns the directory of the journal's files, as an absolute path.
 func (j *Journal) Dir() string {
 	if j == nil {
 		return ""
@@ -361,8 +361,18 @@ func (j *Journal) openDir() error {
 		}
 
 		j.dir, j.temp = dir, true
-	} else if err := os.MkdirAll(j.dir, 0o755); err != nil {
-		return fmt.Errorf("journal: %w", err)
+	} else {
+		// The files are found where the journal opened, whatever the working directory becomes.
+		dir, err := filepath.Abs(j.dir)
+		if err != nil {
+			return fmt.Errorf("journal: %w", err)
+		}
+
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("journal: %w", err)
+		}
+
+		j.dir = dir
 	}
 
 	lock, err := lockDir(j.dir)
