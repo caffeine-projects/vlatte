@@ -664,7 +664,7 @@ require.Equal(t, vlatte.FailureReply, res.Header.Get(vlatte.FailureHeader))
 
 The status of `no-match` is `no_match_status_code`, and the status of the others is `error_status_code`. Both default to 418.
 
-The answer to a request no mock matched lists the mocks that came closest, as does its [journal](#request-journal) entry: the parts of the request each matched, those that differ, and those it didn't check, such as `times` or a scenario's state, which a report never runs.
+The answer to a request no mock matched lists the mocks that came closest, as does its [journal](#request-journal) entry: the parts of the request each matched, those that differ, and those it didn't check, such as a scenario's state, which a report never runs. A `times` used up is a part a mock differs in.
 
 ```
 REQUEST DID NOT MATCH
