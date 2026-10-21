@@ -15,7 +15,7 @@ import (
 func TestBase_AssertNotCalled(t *testing.T) {
 	// A reload leaves an emptied or a new scope behind, and scopes are often partly called:
 	// the assertion fails only when a tracked mock was called, and names only those mocks.
-	app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock]())
+	app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock](), nil)
 
 	passes := func(t *testing.T) {
 		t.Helper()
@@ -53,7 +53,7 @@ func TestBase_AssertNotCalled(t *testing.T) {
 func TestBase_Unmock(t *testing.T) {
 	// Unmock deletes the mocks of a scope and stops tracking it; other scopes are left alone.
 	store := vlatte.NewStore[*fakeMock]()
-	app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+	app := vlatte.NewBase[*fakeMock](struct{}{}, store, nil)
 
 	gone, kept := newFakeMockWith("gone", 0), newFakeMockWith("kept", 0)
 	scope, err := app.Mock(fakeBuilder{mock: gone})
@@ -80,7 +80,7 @@ func TestBase_Unmock(t *testing.T) {
 func TestBase_UnmockKeepsTrackingWhatItCantDelete(t *testing.T) {
 	// A scope whose mocks are still stored must stay tracked, or they would serve without assertions.
 	store := newBrokenStore(errors.New("store down"), nil)
-	app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+	app := vlatte.NewBase[*fakeMock](struct{}{}, store, nil)
 
 	m := newFakeMockWith("a", 0)
 	scope, err := app.Mock(fakeBuilder{mock: m})
@@ -99,7 +99,7 @@ func TestBase_Remock(t *testing.T) {
 	setup := func(t *testing.T, store vlatte.Store[*fakeMock]) (*vlatte.Base[*fakeMock, struct{}], *vlatte.Scope[*fakeMock], []*fakeMock) {
 		t.Helper()
 
-		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store, nil)
 		mocks := []*fakeMock{newFakeMockWith("a", 0), newFakeMockWith("b", 0), newFakeMockWith("x", 0)}
 
 		old, err := app.Mock(fakeBuilder{mock: mocks[0]}, fakeBuilder{mock: mocks[1]})
@@ -238,7 +238,7 @@ func TestBase_AMockOutsideEveryScopeGivesWay(t *testing.T) {
 	// scopes still keep their IDs.
 	t.Run("added", func(t *testing.T) {
 		store := vlatte.NewStore[*fakeMock]()
-		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store, nil)
 		posted := newFakeMockWith("x", 0)
 		require.NoError(t, store.Store(t.Context(), posted))
 
@@ -254,7 +254,7 @@ func TestBase_AMockOutsideEveryScopeGivesWay(t *testing.T) {
 
 	t.Run("remocked", func(t *testing.T) {
 		store := vlatte.NewStore[*fakeMock]()
-		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store, nil)
 		old, err := app.Mock(fakeBuilder{mock: newFakeMockWith("a", 0)})
 		require.NoError(t, err)
 
@@ -272,7 +272,7 @@ func TestBase_AMockOutsideEveryScopeGivesWay(t *testing.T) {
 
 	t.Run("a failing build leaves it", func(t *testing.T) {
 		store := vlatte.NewStore[*fakeMock]()
-		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store, nil)
 		posted := newFakeMockWith("x", 0)
 		require.NoError(t, store.Store(t.Context(), posted))
 
@@ -286,7 +286,7 @@ func TestBase_AMockOutsideEveryScopeGivesWay(t *testing.T) {
 
 	t.Run("a store that can't tell which mocks give way changes nothing", func(t *testing.T) {
 		store := newBrokenStore(nil, nil)
-		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store, nil)
 		posted := newFakeMockWith("x", 0)
 		require.NoError(t, store.Store(t.Context(), posted))
 		store.pickAllErr = errors.New("store down")
@@ -303,7 +303,7 @@ func TestBase_AMockOutsideEveryScopeGivesWay(t *testing.T) {
 
 	t.Run("a mock of another scope keeps its ID", func(t *testing.T) {
 		store := vlatte.NewStore[*fakeMock]()
-		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store, nil)
 		scoped := newFakeMockWith("x", 0)
 		_, err := app.Mock(fakeBuilder{mock: scoped})
 		require.NoError(t, err)

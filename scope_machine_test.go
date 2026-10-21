@@ -27,7 +27,7 @@ func TestScopesMachine(t *testing.T) {
 
 	rapid.Check(t, func(t *rapid.T) {
 		store := vlatte.NewStore[*fakeMock]()
-		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store, nil)
 
 		var (
 			scopes []*modelScope

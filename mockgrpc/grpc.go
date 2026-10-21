@@ -75,7 +75,7 @@ func New(config ...Option) (*Server, error) {
 		srv.RegisterService(conf.ServiceDesc, conf.Service)
 	}
 
-	app.Base = vlatte.NewBase(app, store)
+	app.Base = vlatte.NewBase(app, store, nil)
 	app.storage = store
 	app.config = conf
 	app.server = srv

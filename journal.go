@@ -29,6 +29,9 @@ var (
 	ErrJournalClosed   = errors.New("journal: closed")
 	ErrJournalInUse    = errors.New("journal: another journal keeps its files in the directory")
 	ErrRequestNotFound = errors.New("journal: request not found")
+
+	// ErrNoRequestPatterns is the error of a verification with request patterns on a server whose protocol has none.
+	ErrNoRequestPatterns = errors.New("journal: the server takes no request patterns")
 )
 
 // JournalOptions configures a [Journal].

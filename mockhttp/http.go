@@ -228,7 +228,7 @@ func New(config ...Option) (*Server, error) {
 	loaders = append(loaders, files)
 	loaders = append(loaders, conf.Loaders...)
 
-	app.Base = vlatte.NewBase(app, repository)
+	app.Base = vlatte.NewBase(app, repository, nil)
 	app.storage = repository
 	app.scenarioStore = mfeat.NewScenarioStore()
 	app.params = params
