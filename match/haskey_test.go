@@ -3,8 +3,9 @@ package match
 import (
 	"testing"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 func TestHasKey(t *testing.T) {

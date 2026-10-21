@@ -4,8 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 func TestXor(t *testing.T) {
