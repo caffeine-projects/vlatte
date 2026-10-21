@@ -330,3 +330,69 @@ func TestStore_AReloadThatFailsChangesNothing(t *testing.T) {
 	require.Equal(t, []string{"a"}, servedIDs(t, s))
 	require.Zero(t, a.closed.Load())
 }
+
+// failingStore is the store of a server whose PickAll or Replace fails with the errors it has.
+type failingStore struct {
+	*vlatte.MemoryStore[*docMock]
+
+	pickAllErr error
+	replaceErr error
+}
+
+func (s *failingStore) PickAll(ctx context.Context) ([]*docMock, error) {
+	if s.pickAllErr != nil {
+		return nil, s.pickAllErr
+	}
+
+	return s.MemoryStore.PickAll(ctx)
+}
+
+func (s *failingStore) Replace(ctx context.Context, old []*docMock, mocks ...*docMock) error {
+	if s.replaceErr != nil {
+		return s.replaceErr
+	}
+
+	return s.MemoryStore.Replace(ctx, old, mocks...)
+}
+
+func TestStore_AReloadTheServerRefusesChangesNothing(t *testing.T) {
+	// The mocks a failed reload built never serve: they are closed, and the server serves what it did.
+	errBroken := errors.New("store: broken")
+
+	for name, serving := range map[string]*failingStore{
+		"list":    {MemoryStore: new(vlatte.MemoryStore[*docMock]), pickAllErr: errBroken},
+		"replace": {MemoryStore: new(vlatte.MemoryStore[*docMock]), replaceErr: errBroken},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			durable := newDocStore()
+			durable.docs["a"] = true
+
+			s := NewStore[*docMock](serving, durable, nil)
+
+			require.ErrorIs(t, s.Reload(ctx), errBroken)
+
+			all, err := serving.MemoryStore.PickAll(ctx)
+			require.NoError(t, err)
+			require.Empty(t, all)
+		})
+	}
+}
+
+func TestStore_ListsWhatTheServerServes(t *testing.T) {
+	ctx := t.Context()
+	serving := vlatte.NewStore[*docMock]()
+	s := NewStore[*docMock](serving, newDocStore(), nil)
+
+	require.NoError(t, s.Store(ctx, newDocMock("on", true), newDocMock("off", false)))
+
+	enabled, err := s.List(ctx)
+	require.NoError(t, err)
+
+	var listed []string
+	for m := range enabled {
+		listed = append(listed, m.ID())
+	}
+
+	require.Equal(t, []string{"on"}, listed)
+}

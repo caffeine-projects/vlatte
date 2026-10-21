@@ -335,3 +335,130 @@ func TestEncodeMock_DecodesBack(t *testing.T) {
 	_, err = EncodeMock(back, "toml")
 	require.ErrorContains(t, err, `format "toml"`)
 }
+
+func TestFileStore_IsAStoreOfMockFiles(t *testing.T) {
+	// The file store keeps a mock file per mock, by ID, as a store must: it refuses an ID it holds, builds new mocks
+	// from its files, and removes their files.
+	ctx := t.Context()
+	dir := t.TempDir()
+	m := adminServer(t, Setup())
+
+	store, err := FileStore(dir)(m)
+	require.NoError(t, err)
+
+	mock := func(id string) *Mock {
+		built, err := DecodeMock(m, []byte(`{"id": "`+id+`", "request": {"method": "GET", "path": "/`+id+`"}, "response": {"status": 200}}`), "json")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = built.Close() })
+
+		return built
+	}
+
+	a, b := mock("a"), mock("b")
+	require.NoError(t, store.Store(ctx, a, b))
+	require.ErrorIs(t, store.Store(ctx, mock("a")), vlatte.ErrDuplicateID)
+	require.ErrorIs(t, store.Store(ctx, mock("c"), mock("c")), vlatte.ErrDuplicateID)
+	require.NoFileExists(t, filepath.Join(dir, "c.mock.yaml"), "a refused call writes nothing")
+
+	got, err := store.Pick(ctx, "a")
+	require.NoError(t, err)
+	require.NotSame(t, a, got, "built from its file")
+	require.NoError(t, got.Close())
+
+	_, err = store.Pick(ctx, "missing")
+	require.ErrorIs(t, err, vlatte.ErrNotFound)
+
+	b.Disable()
+	require.NoError(t, store.Replace(ctx, []*Mock{b}, b))
+
+	enabled, err := store.List(ctx)
+	require.NoError(t, err)
+
+	var listed []string
+	for mock := range enabled {
+		listed = append(listed, mock.ID())
+		require.NoError(t, mock.Close())
+	}
+
+	require.Equal(t, []string{"a"}, listed, "b is disabled")
+
+	// A file of a mock in another format, such as one a person wrote, gives way to the one the store writes.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "j.mock.json"),
+		[]byte(`{"id": "j", "request": {"method": "GET", "path": "/j"}, "response": {"status": 200}}`), 0o600))
+	require.NoError(t, store.Replace(ctx, []*Mock{mock("j")}, mock("j")))
+	require.FileExists(t, filepath.Join(dir, "j.mock.yaml"))
+	require.NoFileExists(t, filepath.Join(dir, "j.mock.json"))
+
+	require.NoError(t, store.Delete(ctx, "a", "missing"))
+	require.NoFileExists(t, filepath.Join(dir, "a.mock.yaml"))
+
+	require.NoError(t, store.Clear(ctx))
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}
+
+func TestFileStore_FilesWithProblems(t *testing.T) {
+	// A file with problems builds no mock at all, and says which file: the server serves what it served.
+	ctx := t.Context()
+	dir := t.TempDir()
+	m := adminServer(t, Setup())
+
+	store, err := FileStore(dir)(m)
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "good.mock.yaml"),
+		[]byte("id: good\nrequest: {method: GET, path: /good}\nresponse: {status: 200}\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.mock.yaml"), []byte("id: bad\nrequest: {methd: GET}\n"), 0o600))
+
+	all, err := store.PickAll(ctx)
+	require.ErrorContains(t, err, filepath.Join(dir, "bad.mock.yaml"))
+	require.Nil(t, all)
+}
+
+func TestFileStore_ADirectoryItCantUse(t *testing.T) {
+	// A directory that is a file, or a mock file that is a directory, fails each operation that needs it.
+	ctx := t.Context()
+	m := adminServer(t, Setup())
+
+	notADir := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(notADir, nil, 0o600))
+
+	store, err := FileStore(notADir)(m)
+	require.NoError(t, err)
+
+	hello, err := DecodeMock(m, []byte(`{"id": "hello", "request": {"method": "GET", "path": "/hello"}, "response": {"status": 200}}`), "json")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = hello.Close() })
+
+	require.Error(t, store.Store(ctx, hello))
+	_, err = store.PickAll(ctx)
+	require.Error(t, err)
+	_, err = store.Pick(ctx, "hello")
+	require.Error(t, err)
+	require.Error(t, store.Delete(ctx, "hello"))
+	require.Error(t, store.Clear(ctx))
+
+	inTheWay := t.TempDir()
+
+	store, err = FileStore(inTheWay)(m)
+	require.NoError(t, err)
+
+	// A directory where the mock's file goes: the write fails, and leaves no temporary file.
+	require.NoError(t, os.Mkdir(filepath.Join(inTheWay, "hello.mock.yaml"), 0o700))
+	require.Error(t, store.Store(ctx, hello))
+
+	temps, err := filepath.Glob(filepath.Join(inTheWay, _fileStoreTempPattern))
+	require.NoError(t, err)
+	require.Empty(t, temps)
+}
+
+func TestEncodeMock_AMockThatCantBeDescribed(t *testing.T) {
+	// A name of a mock made in Go can hold bytes that aren't UTF-8, which a description can't.
+	m := adminServer(t, Setup())
+	scope := m.MustMock(Getf("/x").ID("x").Name("\xff").Reply(OK()))
+
+	_, err := EncodeMock(scope.Mock("x"), "json")
+	require.ErrorContains(t, err, `describing mock "x"`)
+}
