@@ -3,6 +3,7 @@ package vlatte_test
 import (
 	"bytes"
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -520,4 +521,156 @@ func TestJournal_AHeaderWithoutAMatcherIsAnError(t *testing.T) {
 
 	_, err := j.Find(t.Context(), vlatte.JournalQuery{Header: map[string]vlatte.Matcher{"X": nil}})
 	require.ErrorContains(t, err, `header "X" has no matcher`)
+}
+
+func TestJournal_ReopensFromTheIndexesOfItsSegments(t *testing.T) {
+	// A journal that kept many requests opens fast: it reads its rows from the sidecar of each segment, not from the
+	// log. Here the log is overwritten with bytes of its size and time that aren't JSON: only the sidecar can tell
+	// the rows.
+	dir := t.TempDir()
+
+	j, err := vlatte.NewJournal(vlatte.JournalOptions{Dir: dir})
+	require.NoError(t, err)
+
+	for _, id := range []string{"a", "b", "c"} {
+		require.NoError(t, j.Append(entry(id)))
+	}
+
+	require.NoError(t, j.Close())
+	require.FileExists(t, filepath.Join(dir, "journal-000001.idx"))
+
+	log := filepath.Join(dir, "journal-000001.log")
+	info, err := os.Stat(log)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(log, bytes.Repeat([]byte("x"), int(info.Size())), 0o600))
+	require.NoError(t, os.Chtimes(log, info.ModTime(), info.ModTime()))
+
+	j = newJournal(t, vlatte.JournalOptions{Dir: dir})
+
+	count, err := j.Count(t.Context(), vlatte.JournalQuery{Kind: "http", Path: match.Equal("/b")})
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+}
+
+func TestJournal_ScansSegmentsItsIndexesDontDescribe(t *testing.T) {
+	// A sidecar that is missing, that doesn't decode, or that describes a log of another size or time, such as one
+	// written past it, or rewritten, is no source: the journal scans the log, and writes the sidecar anew.
+	tests := []struct {
+		name  string
+		spoil func(t *testing.T, log, idx string)
+		want  []string
+	}{
+		{
+			name:  "missing",
+			spoil: func(t *testing.T, _, idx string) { require.NoError(t, os.Remove(idx)) },
+			want:  []string{"b", "a"},
+		},
+		{
+			name:  "corrupt",
+			spoil: func(t *testing.T, _, idx string) { require.NoError(t, os.WriteFile(idx, []byte("{"), 0o600)) },
+			want:  []string{"b", "a"},
+		},
+		{
+			name: "written past",
+			spoil: func(t *testing.T, log, _ string) {
+				f, err := os.OpenFile(log, os.O_APPEND|os.O_WRONLY, 0)
+				require.NoError(t, err)
+
+				_, err = f.WriteString(`{"seq":3,"id":"late","time":"2026-10-21T12:00:00Z","kind":"http","outcome":"matched"}` + "\n")
+				require.NoError(t, err)
+				require.NoError(t, f.Close())
+			},
+			want: []string{"late", "b", "a"},
+		},
+		{
+			name: "rewritten",
+			spoil: func(t *testing.T, log, _ string) {
+				data, err := os.ReadFile(log)
+				require.NoError(t, err)
+
+				// The same size, another first line, and a later time of change.
+				data = bytes.Replace(data, []byte(`"id":"a"`), []byte(`"id":"z"`), 1)
+				require.NoError(t, os.WriteFile(log, data, 0o600))
+				require.NoError(t, os.Chtimes(log, time.Now().Add(time.Minute), time.Now().Add(time.Minute)))
+			},
+			want: []string{"b", "z"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			j, err := vlatte.NewJournal(vlatte.JournalOptions{Dir: dir})
+			require.NoError(t, err)
+			require.NoError(t, j.Append(entry("a")))
+			require.NoError(t, j.Append(entry("b")))
+			require.NoError(t, j.Close())
+
+			log, idx := filepath.Join(dir, "journal-000001.log"), filepath.Join(dir, "journal-000001.idx")
+			tt.spoil(t, log, idx)
+
+			j = newJournal(t, vlatte.JournalOptions{Dir: dir})
+			require.Equal(t, tt.want, find(t, j, vlatte.JournalQuery{}))
+			describes(t, idx, log)
+		})
+	}
+}
+
+// describes checks that the sidecar idx describes log as it is.
+func describes(t *testing.T, idx, log string) {
+	t.Helper()
+
+	data, err := os.ReadFile(idx)
+	require.NoError(t, err)
+
+	var sidecar struct {
+		LogSize    int64 `json:"log_size"`
+		LogModTime int64 `json:"log_mod_time"`
+	}
+	require.NoError(t, json.Unmarshal(data, &sidecar))
+
+	info, err := os.Stat(log)
+	require.NoError(t, err)
+	require.Equal(t, info.Size(), sidecar.LogSize)
+	require.Equal(t, info.ModTime().UnixNano(), sidecar.LogModTime)
+}
+
+func TestJournal_RemovesSidecarsWithoutALog(t *testing.T) {
+	// A sidecar a failed removal left behind its log describes nothing: the next journal removes it.
+	dir := t.TempDir()
+	orphan := filepath.Join(dir, "journal-000007.idx")
+	require.NoError(t, os.WriteFile(orphan, []byte(`{"rows":[]}`), 0o600))
+
+	newJournal(t, vlatte.JournalOptions{Dir: dir})
+	require.NoFileExists(t, orphan)
+}
+
+func TestJournal_IndexesEachSegmentItFills(t *testing.T) {
+	// A crash loses no sidecar but the active segment's: each full one has its own as soon as the next starts.
+	j := newJournal(t, vlatte.JournalOptions{MaxEntries: 4})
+
+	for i := range 3 {
+		require.NoError(t, j.Append(entry(strconv.Itoa(i))))
+	}
+
+	for _, n := range []string{"1", "2", "3"} {
+		describes(t, filepath.Join(j.Dir(), "journal-00000"+n+".idx"), filepath.Join(j.Dir(), "journal-00000"+n+".log"))
+	}
+}
+
+func TestJournal_TemporaryJournalsWriteNoSidecar(t *testing.T) {
+	// Nothing reads the sidecars of a journal whose directory goes with it: it writes none.
+	j, err := vlatte.NewJournal(vlatte.JournalOptions{MaxEntries: 4})
+	require.NoError(t, err)
+
+	defer j.Close()
+
+	for i := range 3 {
+		require.NoError(t, j.Append(entry(strconv.Itoa(i))))
+	}
+
+	sidecars, err := filepath.Glob(filepath.Join(j.Dir(), "*.idx"))
+	require.NoError(t, err)
+	require.Empty(t, sidecars)
 }

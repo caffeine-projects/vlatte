@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"unicode/utf8"
@@ -149,59 +150,14 @@ func (j *Journal) Append(e *JournalEntry) error {
 
 	line, err := encodeEntry(e)
 
-	j.mu.Lock()
-	defer j.mu.Unlock()
+	sealed, err := j.append(e, line, err)
 
-	if j.closed {
-		return ErrJournalClosed
+	// A full segment gets its sidecar once the lock is released: appends don't wait on it.
+	if sealed != nil {
+		sealed.finish(j.logger)
 	}
 
-	if err != nil {
-		return j.failed(fmt.Errorf("journal: %w", err))
-	}
-
-	seq := j.seq + 1
-	data := withSeq(line, seq)
-
-	if _, err := j.active.Write(data); err != nil {
-		// A line cut short would run into the next one: the segment loses it, or the journal starts a new one.
-		if j.active.Truncate(j.size) != nil {
-			j.rotate()
-		}
-
-		return j.failed(fmt.Errorf("journal: %w", err))
-	}
-
-	j.seq = seq
-	e.Seq = seq
-
-	j.rows = append(j.rows, journalRow{
-		Seq:     seq,
-		ID:      e.ID,
-		Time:    e.Time,
-		Kind:    e.Kind,
-		Outcome: e.Outcome,
-		MockID:  e.MockID,
-		Method:  e.Method,
-		Path:    e.Path,
-		Target:  e.Target,
-		Status:  e.Status,
-		Segment: j.files[len(j.files)-1],
-		Offset:  j.size,
-		Size:    len(data),
-	})
-	j.index.add(&j.rows[len(j.rows)-1])
-
-	j.size += int64(len(data))
-	j.count++
-
-	j.trim()
-
-	if j.count >= j.perSegment || j.size >= _segmentBytes {
-		j.rotate()
-	}
-
-	return nil
+	return err
 }
 
 // Get returns the entry of the request id.
@@ -289,7 +245,7 @@ func (j *Journal) Clear() error {
 	// A segment that stays on disk would come back with the next journal of the directory: the journal keeps it,
 	// and the next trim removes it.
 	for _, n := range j.files {
-		if err := os.Remove(segmentPath(j.dir, n)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := removeSegment(j.dir, n); err != nil {
 			errs = append(errs, fmt.Errorf("journal: %w", err))
 			left = append(left, n)
 		}
@@ -318,16 +274,80 @@ func (j *Journal) Close() error {
 
 	j.closed = true
 
-	err := j.active.Close()
+	active := j.files[len(j.files)-1]
 
-	// An empty segment holds nothing to keep.
+	// An empty segment holds nothing to keep. Another gets its sidecar, for the next journal to open it fast.
+	var err error
 	if j.count == 0 {
-		os.Remove(segmentPath(j.dir, j.files[len(j.files)-1]))
+		err = j.active.Close()
+		removeSegment(j.dir, active)
+	} else {
+		err = j.seal(active, j.active).finish(j.logger)
 	}
 
 	j.release()
 
 	return err
+}
+
+// append writes line, the line of e, or fails with encodeErr, the error encoding it, under the lock. It returns the
+// segment it filled, if it did, for its caller to finish.
+func (j *Journal) append(e *JournalEntry, line []byte, encodeErr error) (*sealedSegment, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	if j.closed {
+		return nil, ErrJournalClosed
+	}
+
+	if encodeErr != nil {
+		return nil, j.failed(fmt.Errorf("journal: %w", encodeErr))
+	}
+
+	seq := j.seq + 1
+	data := withSeq(line, seq)
+
+	if _, err := j.active.Write(data); err != nil {
+		err = j.failed(fmt.Errorf("journal: %w", err))
+
+		// A line cut short would run into the next one: the segment loses it, or the journal starts a new one.
+		if j.active.Truncate(j.size) != nil {
+			return j.rotate(), err
+		}
+
+		return nil, err
+	}
+
+	j.seq = seq
+	e.Seq = seq
+
+	j.rows = append(j.rows, journalRow{
+		Seq:     seq,
+		ID:      e.ID,
+		Time:    e.Time,
+		Kind:    e.Kind,
+		Outcome: e.Outcome,
+		MockID:  e.MockID,
+		Method:  e.Method,
+		Path:    e.Path,
+		Target:  e.Target,
+		Status:  e.Status,
+		Segment: j.files[len(j.files)-1],
+		Offset:  j.size,
+		Size:    len(data),
+	})
+	j.index.add(&j.rows[len(j.rows)-1])
+
+	j.size += int64(len(data))
+	j.count++
+
+	j.trim()
+
+	if j.count >= j.perSegment || j.size >= _segmentBytes {
+		return j.rotate(), nil
+	}
+
+	return nil, nil
 }
 
 // openDir creates the journal's directory, or a temporary one, and locks it.
@@ -354,22 +374,40 @@ func (j *Journal) openDir() error {
 	return nil
 }
 
-// load reads the entries of the segments on disk, drops those past MaxEntries, and starts a new segment to append
-// to: a segment that a crash cut short is never written again.
+// load reads the entries of the segments on disk, from their sidecars where they describe them, drops those past
+// MaxEntries, and starts a new segment to append to: a segment that a crash cut short is never written again.
 func (j *Journal) load() error {
-	numbers, err := segments(j.dir)
+	numbers, sidecars, err := listSegments(j.dir)
 	if err != nil {
 		return fmt.Errorf("journal: %w", err)
 	}
 
-	for _, n := range numbers {
-		rows, bad, err := scanSegment(j.dir, n)
-		if err != nil {
-			return fmt.Errorf("journal: %w", err)
+	// A locked directory is this journal's alone: a file being written is one a crash left.
+	if j.lock != nil {
+		if temps, err := filepath.Glob(filepath.Join(j.dir, _journalTemps)); err == nil {
+			for _, temp := range temps {
+				os.Remove(temp)
+			}
 		}
+	}
 
-		if bad > 0 {
-			j.logger.Warn().Str("file", segmentPath(j.dir, n)).Int("lines", bad).Msg("journal: left out lines that don't decode")
+	// A sidecar a failed removal left describes no log.
+	for _, n := range sidecars {
+		if !slices.Contains(numbers, n) {
+			os.Remove(indexPath(j.dir, n))
+		}
+	}
+
+	scanned := make(map[int][]journalRow)
+
+	for _, n := range numbers {
+		rows, ok := readIndex(j.dir, n)
+		if !ok {
+			if rows, err = j.scan(n); err != nil {
+				return err
+			}
+
+			scanned[n] = rows
 		}
 
 		for i := range rows {
@@ -399,7 +437,47 @@ func (j *Journal) load() error {
 	j.trim()
 	j.index.compact(j.first())
 
+	// The segments it scanned and keeps get their sidecars: the next journal reads those.
+	for n, rows := range scanned {
+		if slices.Contains(j.files, n) {
+			if err := writeIndex(j.dir, n, rows); err != nil {
+				j.logger.Warn().Err(err).Msg("journal: writing the index of a segment")
+			}
+		}
+	}
+
 	return nil
+}
+
+// scan reads the rows of segment n from its log, and logs the lines it left out.
+func (j *Journal) scan(n int) ([]journalRow, error) {
+	rows, bad, err := scanSegment(j.dir, n)
+	if err != nil {
+		return nil, fmt.Errorf("journal: %w", err)
+	}
+
+	if bad > 0 {
+		j.logger.Warn().Str("file", segmentPath(j.dir, n)).Int("lines", bad).Msg("journal: left out lines that don't decode")
+	}
+
+	return rows, nil
+}
+
+// seal returns segment n, whose log is f, to finish: the rows the journal holds of it are all those of its log, as
+// it holds no fewer than a segment's. A temporary journal writes no sidecar: nothing reads it.
+func (j *Journal) seal(n int, f *os.File) *sealedSegment {
+	s := &sealedSegment{dir: j.dir, n: n, file: f}
+
+	if !j.temp {
+		i := len(j.rows)
+		for i > 0 && j.rows[i-1].Segment == n {
+			i--
+		}
+
+		s.rows, s.index = j.rows[i:], true
+	}
+
+	return s
 }
 
 // trim drops the oldest entries past MaxEntries, and the segments that hold none of the entries left.
@@ -427,7 +505,7 @@ func (j *Journal) trim() {
 			continue
 		}
 
-		if err := os.Remove(segmentPath(j.dir, n)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := removeSegment(j.dir, n); err != nil {
 			// The next trim tries again.
 			j.logger.Warn().Err(err).Msg("journal: removing a segment")
 
@@ -438,20 +516,24 @@ func (j *Journal) trim() {
 	j.files = kept
 }
 
-// rotate starts a new segment. On a failure, the journal keeps appending to the full one.
-func (j *Journal) rotate() {
+// rotate starts a new segment, and returns the full one to finish once the lock is released. On a failure, the
+// journal keeps appending to the full one.
+func (j *Journal) rotate() *sealedSegment {
 	next := j.files[len(j.files)-1] + 1
 
 	f, err := openSegment(j.dir, next)
 	if err != nil {
 		j.logger.Warn().Err(err).Msg("journal: starting a new segment")
-		return
+		return nil
 	}
 
-	j.active.Close()
+	sealed := j.seal(j.files[len(j.files)-1], j.active)
+
 	j.active, j.size, j.count = f, 0, 0
 	j.files = append(j.files, next)
 	j.index.compact(j.first())
+
+	return sealed
 }
 
 // first returns the sequence number of the oldest entry the journal holds, or the next one it gives.
@@ -641,6 +723,39 @@ func (j *Journal) lists(q *JournalQuery, a *journalAccepted) [][][]uint64 {
 	return fields
 }
 
+// sealedSegment is a segment the journal no longer appends to: its log to close, and, with index, its sidecar to
+// write with rows. It touches nothing the journal's lock guards.
+type sealedSegment struct {
+	dir   string
+	n     int
+	file  *os.File
+	rows  []journalRow
+	index bool
+}
+
+// finish closes the log of s and writes its sidecar. The log is on disk before its sidecar describes it: a crash
+// leaves no sidecar of a log that lost its rows.
+func (s *sealedSegment) finish(logger *zerolog.Logger) error {
+	if !s.index {
+		return s.file.Close()
+	}
+
+	err := s.file.Sync()
+	if closeErr := s.file.Close(); err == nil {
+		err = closeErr
+	}
+
+	if err == nil {
+		err = writeIndex(s.dir, s.n, s.rows)
+	}
+
+	if err != nil {
+		logger.Warn().Err(err).Msg("journal: writing the index of a segment")
+	}
+
+	return err
+}
+
 // segmentFiles opens the segments a query reads, once each.
 type segmentFiles struct {
 	dir   string
@@ -686,5 +801,8 @@ func clip(body []byte, n int) []byte {
 // openSegment creates segment n of dir, to append to. Its entries are requests, which may hold secrets: only the
 // user reads them.
 func openSegment(dir string, n int) (*os.File, error) {
+	// A sidecar a failed removal left would describe another log.
+	os.Remove(indexPath(dir, n))
+
 	return os.OpenFile(segmentPath(dir, n), os.O_WRONLY|os.O_CREATE|os.O_EXCL|os.O_APPEND, 0o600)
 }

@@ -4,18 +4,26 @@ import (
 	"bytes"
 	"encoding/json/jsontext"
 	json "encoding/json/v2"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/caffeine-projects/vlatte/internal/atomicfile"
 )
 
 const (
 	_journalPrefix    = "journal-"
 	_journalLogSuffix = ".log"
+	_journalIdxSuffix = ".idx"
+
+	// _journalTemps names the files a journal is writing: a crash may leave them, which the next one removes.
+	_journalTemps = ".journal-*.tmp"
 
 	// _segmentEntries and _segmentBytes bound a segment: the journal starts a new one when either is reached, so
 	// dropping the oldest entries deletes whole files.
@@ -43,17 +51,91 @@ type journalRow struct {
 
 // segmentPath returns the path of the log file of segment n of dir.
 func segmentPath(dir string, n int) string {
-	return filepath.Join(dir, fmt.Sprintf("%s%06d%s", _journalPrefix, n, _journalLogSuffix))
+	return segmentFile(dir, n, _journalLogSuffix)
 }
 
-// segments returns the numbers of the segments of dir, in order.
-func segments(dir string) ([]int, error) {
-	entries, err := os.ReadDir(dir)
+// indexPath returns the path of the sidecar of segment n of dir: its rows, which a journal reads in place of the
+// log, when it describes the log as it is.
+func indexPath(dir string, n int) string {
+	return segmentFile(dir, n, _journalIdxSuffix)
+}
+
+func segmentFile(dir string, n int, suffix string) string {
+	return filepath.Join(dir, fmt.Sprintf("%s%06d%s", _journalPrefix, n, suffix))
+}
+
+// segmentIndex is the sidecar of a segment: its rows, and the size and time of change of the log they describe.
+type segmentIndex struct {
+	LogSize    int64        `json:"log_size"`
+	LogModTime int64        `json:"log_mod_time"`
+	Rows       []journalRow `json:"rows"`
+}
+
+// writeIndex writes the sidecar of segment n of dir, with rows, all those of the segment, which nothing appends to
+// anymore.
+func writeIndex(dir string, n int, rows []journalRow) error {
+	info, err := os.Stat(segmentPath(dir, n))
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	var numbers []int
+	data, err := json.Marshal(&segmentIndex{LogSize: info.Size(), LogModTime: info.ModTime().UnixNano(), Rows: rows})
+	if err != nil {
+		return err
+	}
+
+	return atomicfile.WritePerm(dir, _journalTemps, indexPath(dir, n), data, 0o600)
+}
+
+// readIndex returns the rows of segment n of dir from its sidecar, when there is one that describes the log as it
+// is, of the size and time of change it names: a log written past its sidecar, or rewritten, is scanned instead.
+func readIndex(dir string, n int) ([]journalRow, bool) {
+	data, err := os.ReadFile(indexPath(dir, n))
+	if err != nil {
+		return nil, false
+	}
+
+	info, err := os.Stat(segmentPath(dir, n))
+	if err != nil {
+		return nil, false
+	}
+
+	var idx segmentIndex
+	if err := json.Unmarshal(data, &idx); err != nil || idx.LogSize != info.Size() || idx.LogModTime != info.ModTime().UnixNano() {
+		return nil, false
+	}
+
+	for i := range idx.Rows {
+		row := &idx.Rows[i]
+		if row.Seq == 0 || row.Offset < 0 || row.Size <= 0 || row.Offset+int64(row.Size) > idx.LogSize {
+			return nil, false
+		}
+
+		row.Segment = n
+	}
+
+	return idx.Rows, true
+}
+
+// removeSegment removes the files of segment n of dir: its sidecar first, which names nothing without its log.
+func removeSegment(dir string, n int) error {
+	var errs []error
+
+	for _, path := range []string{indexPath(dir, n), segmentPath(dir, n)} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+// listSegments returns the numbers of the logs of dir, and those of its sidecars, in order.
+func listSegments(dir string) (logs, sidecars []int, err error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	for _, entry := range entries {
 		rest, ok := strings.CutPrefix(entry.Name(), _journalPrefix)
@@ -61,19 +143,19 @@ func segments(dir string) ([]int, error) {
 			continue
 		}
 
-		digits, ok := strings.CutSuffix(rest, _journalLogSuffix)
-		if !ok {
-			continue
-		}
-
-		if n, err := strconv.Atoi(digits); err == nil && n >= 0 {
-			numbers = append(numbers, n)
+		for suffix, numbers := range map[string]*[]int{_journalLogSuffix: &logs, _journalIdxSuffix: &sidecars} {
+			if digits, ok := strings.CutSuffix(rest, suffix); ok {
+				if n, err := strconv.Atoi(digits); err == nil && n >= 0 {
+					*numbers = append(*numbers, n)
+				}
+			}
 		}
 	}
 
-	slices.Sort(numbers)
+	slices.Sort(logs)
+	slices.Sort(sidecars)
 
-	return numbers, nil
+	return logs, sidecars, nil
 }
 
 // encodeEntry returns the line of e, without its sequence number, which withSeq adds once the journal gives it one.
