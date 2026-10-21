@@ -340,7 +340,8 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		data["name"] = m.Name()
 	}
 
-	if m.Priority() != 0 {
+	// A fallback, as ProxyAll's mock, without a priority loads back last, at math.MaxInt: its 0 goes too.
+	if m.Priority() != 0 || m.spec.fallback {
 		data["priority"] = m.Priority()
 	}
 

@@ -1635,6 +1635,50 @@ func TestProxyAll_AMockFilesPriorityWins(t *testing.T) {
 	require.Equal(t, "target /mocked", body)
 }
 
+func TestProxyAll_APriorityOf0SurvivesDescribe(t *testing.T) {
+	// A proxy_all mock given a priority of 0 is matched among the priority-0 mocks, but its description left 0 out, as
+	// for any mock, which has 0 by default: loaded back, it came last again, at math.MaxInt, and another mock won. Its
+	// description keeps it.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "target "+r.URL.Path)
+	}))
+	t.Cleanup(target.Close)
+
+	file := []byte("priority: 0\nproxy_all: {target: '" + target.URL + "'}\n")
+
+	described := func(t *testing.T, b vlatte.Builder[*Mock, *Server]) vlatte.Builder[*Mock, *Server] {
+		t.Helper()
+
+		mock, err := b.Build(MustNew(Setup().Silent()))
+		require.NoError(t, err)
+		require.Equal(t, 0, mock.Describe().Props.(map[string]any)["priority"])
+
+		content, err := mock.MarshalJSON()
+		require.NoError(t, err)
+
+		return FromBytes(content, "json")
+	}
+
+	for name, proxyAll := range map[string]func(t *testing.T) vlatte.Builder[*Mock, *Server]{
+		"ProxyAll": func(*testing.T) vlatte.Builder[*Mock, *Server] { return ProxyAll(From(target.URL)).Priority(0) },
+		"its description": func(t *testing.T) vlatte.Builder[*Mock, *Server] {
+			return described(t, ProxyAll(From(target.URL)).Priority(0))
+		},
+		"a mock file's mock":     func(*testing.T) vlatte.Builder[*Mock, *Server] { return FromBytes(file, "yaml") },
+		"the file's description": func(t *testing.T) vlatte.Builder[*Mock, *Server] { return described(t, FromBytes(file, "yaml")) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := MustNew(Setup().Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+			m.MustMock(proxyAll(t), Getf("/x").Priority(1).Reply(OK().PlainText("mock")))
+
+			_, body := get(t, m, "/x")
+			require.Equal(t, "target /x", body, "the proxy_all mock wasn't matched before the mock of priority 1")
+		})
+	}
+}
+
 func TestProxyAll_AMockFilesProxyAllIsTheOnlyReply(t *testing.T) {
 	// proxy_all is a reply: a mock file can't give it next to another one.
 	m := MustNew(Setup().Silent())
