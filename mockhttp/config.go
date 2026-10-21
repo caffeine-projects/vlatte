@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"cmp"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -18,11 +19,19 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
+const (
+	// DefaultWorkDir is the work directory of a server without a name, and holds a named server's: see Config.WorkDir.
+	DefaultWorkDir = "testdata/vlatte"
+
+	// WorkDirVar, at the start of a path, stands for the server's work directory, as in "{workdir}/_mocks".
+	WorkDirVar = "{workdir}"
+)
+
 // Defaults
 var (
-	// ConfigMockFilePattern is the default filename glob pattern to search for local mock files: the recordings of the
-	// default record directory too.
-	ConfigMockFilePattern = append([]string{"testdata/_mocks/*mock.yaml", "testdata/_mocks/*mock.yml"}, recordedMockFiles(_defaultRecordDir)...)
+	// ConfigMockFilePattern is the default filename glob pattern to search for local mock files, in the server's work
+	// directory: the recordings of the default record directory too.
+	ConfigMockFilePattern = append([]string{WorkDirVar + "/_mocks/*mock.yaml", WorkDirVar + "/_mocks/*mock.yml"}, recordedMockFiles(_defaultRecordDir)...)
 )
 
 // Config holds the configuration of an HTTP mock Server.
@@ -30,6 +39,7 @@ type Config struct {
 	// Common fields
 	Name                  string
 	RootDir               string
+	WorkDir               string
 	TLSConfig             *tls.Config
 	TLSCertificates       []tls.Certificate
 	TLSClientCAs          *x509.CertPool
@@ -107,6 +117,7 @@ type Config struct {
 func (c *Config) Apply(conf *Config) error {
 	conf.Name = c.Name
 	conf.RootDir = c.RootDir
+	conf.WorkDir = c.WorkDir
 	conf.TLSConfig = c.TLSConfig
 	conf.TLSCertificates = c.TLSCertificates
 	conf.TLSClientCAs = c.TLSClientCAs
@@ -173,7 +184,8 @@ type AdminConfig struct {
 // none.
 type JournalConfig struct {
 	// Dir is where the journal keeps its files, across restarts: a server that starts again finds the requests it
-	// served before. Relative paths start at RootDir. Empty keeps them in a temporary directory, which Close removes.
+	// served before. Relative paths start at RootDir, and WorkDirVar at the server's work directory, as in
+	// "{workdir}/_journal". Empty keeps them in a temporary directory, which Close removes.
 	Dir string
 
 	// MaxEntries is how many requests the journal keeps, the newest. 0 keeps them all.
@@ -252,7 +264,8 @@ func Setup() *ConfigBuilder {
 	}
 }
 
-// Name sets a name to the mock server.
+// Name sets a name to the mock server, which its logs show. It names the folder of its files too, in DefaultWorkDir,
+// unless WorkDir sets another: a path inside it, which doesn't start with _, as vlatte's own folders do.
 func (cb *ConfigBuilder) Name(name string) *ConfigBuilder {
 	cb.conf.Name = name
 	return cb
@@ -282,6 +295,14 @@ func (cb *ConfigBuilder) Port(port int) *ConfigBuilder {
 // as they are.
 func (cb *ConfigBuilder) RootDir(rootDir string) *ConfigBuilder {
 	cb.conf.RootDir = rootDir
+	return cb
+}
+
+// WorkDir sets the directory of the server's own files: the mock files, recordings, admin mocks and journal of its
+// defaults, whose paths start with WorkDirVar. Empty is DefaultWorkDir, or DefaultWorkDir/<name> for a named server.
+// A relative dir starts at RootDir.
+func (cb *ConfigBuilder) WorkDir(dir string) *ConfigBuilder {
+	cb.conf.WorkDir = dir
 	return cb
 }
 
@@ -429,8 +450,8 @@ func (cb *ConfigBuilder) Parameters(params vlatte.KV) *ConfigBuilder {
 	return cb
 }
 
-// MockFilePatterns sets custom Glob patterns to load mock from the file system.
-// Defaults to [testdata/*.mock.json, testdata/*.mock.yaml].
+// MockFilePatterns sets custom Glob patterns to load mock from the file system, which may start with WorkDirVar.
+// Defaults to ConfigMockFilePattern.
 func (cb *ConfigBuilder) MockFilePatterns(patterns ...string) *ConfigBuilder {
 	cb.conf.MockFileSearchPatterns = patterns
 
@@ -712,4 +733,49 @@ func loadCertPool(file string) (*x509.CertPool, error) {
 	}
 
 	return pool, nil
+}
+
+// workDir returns the directory of the server's own files: WorkDir, or DefaultWorkDir, the folder of the server's name
+// in it for a named server.
+func (c *Config) workDir() string {
+	return cmp.Or(c.WorkDir, filepath.Join(DefaultWorkDir, c.Name))
+}
+
+// path returns where the file or pattern p of the server is: a leading WorkDirVar is the server's work directory,
+// and a relative path starts at RootDir.
+func (c *Config) path(p string) string {
+	if rest, ok := strings.CutPrefix(p, WorkDirVar); ok && (rest == "" || os.IsPathSeparator(rest[0])) {
+		p = filepath.Join(c.workDir(), rest)
+	}
+
+	if filepath.IsAbs(p) {
+		return p
+	}
+
+	return filepath.Join(c.RootDir, p)
+}
+
+// checkName checks the name of a server that names its work directory, a folder of DefaultWorkDir.
+func (c *Config) checkName() error {
+	if problem := c.nameProblem(); problem != "" {
+		return fmt.Errorf("config: name %q %s", c.Name, problem)
+	}
+
+	return nil
+}
+
+// nameProblem tells what is wrong with the name of a server that names its work directory, "" when nothing is: it
+// stays inside DefaultWorkDir, and doesn't start with _, as vlatte's own folders do.
+func (c *Config) nameProblem() string {
+	name := c.Name
+	if c.WorkDir != "" || name == "" {
+		return ""
+	}
+
+	if !filepath.IsLocal(name) || name == "." || strings.HasPrefix(name, "_") {
+		return "names the folder of the server's files, in " + DefaultWorkDir + ": use one inside it, which " +
+			"doesn't start with _, or set workdir"
+	}
+
+	return ""
 }

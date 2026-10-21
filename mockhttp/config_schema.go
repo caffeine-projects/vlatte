@@ -133,6 +133,7 @@ func loadConfigSources(conf *Config) error {
 	problems = append(problems, loadTLSFiles(conf, values)...)
 	problems = append(problems, loadProxyCA(conf, values)...)
 	problems = append(problems, checkProxyAll(conf, values)...)
+	problems = append(problems, checkName(conf, values)...)
 
 	if len(problems) > 0 {
 		return &config.Error{Problems: problems}
@@ -237,7 +238,9 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				DefaultConfigFileName, strings.Join(DefaultConfigDirectories, " and ")),
 		},
 		{
-			Key: "name", Short: "n", Kind: config.String, Usage: "Server name, shown in logs.",
+			Key: "name", Short: "n", Kind: config.String,
+			Usage: "Server name, shown in logs. It names the folder of the server's files in " + DefaultWorkDir +
+				", unless workdir is set: a path inside it, which doesn't start with _.",
 			Set: func(c *Config, v config.Value) error { c.Name = v.Str; return nil },
 		},
 		{
@@ -248,6 +251,12 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		{
 			Key: "root_dir", Kind: config.String, Usage: "Directory that relative mock file patterns and recording paths start at.",
 			Set: func(c *Config, v config.Value) error { c.RootDir = v.Str; return nil },
+		},
+		{
+			Key: "workdir", Kind: config.String, Default: DefaultWorkDir + ", or " + DefaultWorkDir + "/<name> for a named server",
+			Usage: "Directory of the server's own files: its mock files, recordings, admin mocks and journal. A path " +
+				"setting that starts with " + WorkDirVar + " starts there. Relative paths start at root_dir.",
+			Set: func(c *Config, v config.Value) error { c.WorkDir = v.Str; return nil },
 		},
 		{
 			Key: "mock_files", Kind: config.List, Default: strings.Join(d.MockFileSearchPatterns, ","),
@@ -441,7 +450,8 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		{
 			Key: "admin.dir", Kind: config.String,
 			Usage: "Directory of the files that keep the mocks the admin API adds across restarts, which only the server " +
-				"loads: keep it out of mock_files. Relative paths start at root_dir. Empty keeps them in memory.",
+				"loads: keep it out of mock_files. Relative paths start at root_dir, and {workdir} at workdir. Empty keeps them " +
+				"in memory.",
 			Set: func(c *Config, v config.Value) error {
 				admin := section(&c.Admin, AdminConfig{})
 
@@ -459,8 +469,8 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		},
 		{
 			Key: "journal.dir", Kind: config.String,
-			Usage: "Directory of the journal's files, kept across restarts. Relative paths start at root_dir. Empty keeps " +
-				"them in a temporary directory, removed when the server stops.",
+			Usage: "Directory of the journal's files, kept across restarts. Relative paths start at root_dir, and " +
+				"{workdir} at workdir. Empty keeps them in a temporary directory, removed when the server stops.",
 			Set: func(c *Config, v config.Value) error {
 				section(&c.Journal, defaultJournalConfig()).Dir = v.Str
 				return nil
@@ -515,7 +525,7 @@ func recordFields() []recordField {
 	return []recordField{
 		{
 			Key: "dir", Kind: config.String, Default: rec.Dir,
-			Usage: "Directory of the recordings. Relative paths start at root_dir.",
+			Usage: "Directory of the recordings. Relative paths start at root_dir, and {workdir} at workdir.",
 			Set: func(r *RecordConfig, v config.Value) error {
 				r.Dir = v.Str
 				return nil
@@ -680,6 +690,22 @@ func loadProxyCA(conf *Config, values map[string]config.Value) []config.Problem 
 }
 
 // checkProxyAll reports proxy_all set without its target, from the source of a key that set it.
+// checkName checks the name sources set, which names the server's work directory unless workdir is set: workdir may
+// come from a later source. Code's names are checked as the server is built.
+func checkName(conf *Config, values map[string]config.Value) []config.Problem {
+	v, ok := values["name"]
+	if !ok {
+		return nil
+	}
+
+	problem := conf.nameProblem()
+	if problem == "" {
+		return nil
+	}
+
+	return []config.Problem{{Code: config.CodeInvalidValue, Origin: v.Origin, Key: "name", Value: conf.Name, Message: problem}}
+}
+
 func checkProxyAll(conf *Config, values map[string]config.Value) []config.Problem {
 	if conf.proxyAll == nil || conf.proxyAll.hasTarget {
 		return nil

@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -34,16 +33,16 @@ var (
 	errPanicked = errors.New("http: the request panicked")
 )
 
-// openJournal opens the journal conf configures, nil when it configures none. A relative directory starts at the
-// root directory, as the admin API's does.
+// openJournal opens the journal conf configures, nil when it configures none. Its directory reads as the admin API's
+// does: a relative one starts at the root directory, and WorkDirVar at the work directory.
 func openJournal(conf *Config, logger *zerolog.Logger) (*vlatte.Journal, error) {
 	if conf.Journal == nil {
 		return nil, nil
 	}
 
 	dir := conf.Journal.Dir
-	if dir != "" && !filepath.IsAbs(dir) {
-		dir = filepath.Join(conf.RootDir, dir)
+	if dir != "" {
+		dir = conf.path(dir)
 	}
 
 	journal, err := vlatte.NewJournal(vlatte.JournalOptions{

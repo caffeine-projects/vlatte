@@ -121,6 +121,10 @@ func New(config ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: error loading configuration sources\n%w", err)
 	}
 
+	if err := conf.checkName(); err != nil {
+		return nil, fmt.Errorf("server: %w", err)
+	}
+
 	if conf.DebugFn == nil {
 		conf.DebugFn = func(_ string, _ any) {}
 	}
@@ -557,6 +561,10 @@ func (app *Server) DescribeConfig() string {
 		buf.WriteString("\n")
 	}
 
+	buf.WriteString("Work Dir: ")
+	buf.WriteString(app.config.path(WorkDirVar))
+	buf.WriteString("\n")
+
 	buf.WriteString("Mock Search Patterns: ")
 	buf.WriteString(strings.Join(app.config.MockFileSearchPatterns, ", "))
 	buf.WriteString("\n")
@@ -586,7 +594,7 @@ func (app *Server) DescribeConfig() string {
 
 	if app.config.Record != nil {
 		buf.WriteString("Recording: ")
-		buf.WriteString(app.config.Record.dir(app.config.RootDir))
+		buf.WriteString(app.config.Record.dir(app.config))
 		buf.WriteString("\n")
 
 		if target := app.config.Record.Target; target != "" {

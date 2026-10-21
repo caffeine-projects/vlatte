@@ -83,6 +83,7 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"name":     {[]string{"--name", "api"}, func(t *testing.T, c *Config) { require.Equal(t, "api", c.Name) }},
 		"addr":     {[]string{"--addr", "127.0.0.1:0"}, func(t *testing.T, c *Config) { require.Equal(t, "127.0.0.1:0", c.Addr) }},
 		"root-dir": {[]string{"--root-dir", "root"}, func(t *testing.T, c *Config) { require.Equal(t, "root", c.RootDir) }},
+		"workdir":  {[]string{"--workdir", "work"}, func(t *testing.T, c *Config) { require.Equal(t, "work", c.WorkDir) }},
 		"mock-files": {[]string{"--mock-files", "a/*.yaml,b/*.yaml"}, func(t *testing.T, c *Config) {
 			require.Equal(t, []string{"a/*.yaml", "b/*.yaml"}, c.MockFileSearchPatterns)
 		}},

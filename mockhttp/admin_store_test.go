@@ -295,13 +295,13 @@ func TestAdminStore_SaveExportsAsMockFiles(t *testing.T) {
 	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
 
-	require.FileExists(t, filepath.Join(root, "testdata", "_mocks", "hello.mock.yaml"))
+	require.FileExists(t, filepath.Join(root, "testdata", "vlatte", "_mocks", "hello.mock.yaml"))
 	require.FileExists(t, filepath.Join(root, "admin", "hello.mock.yaml"))
 
 	require.NoError(t, m.Reload())
 
 	_, body = do(t, http.MethodGet, m.AdminURL()+"/mocks", nil, nil)
-	require.Contains(t, string(body), `testdata/_mocks/hello.mock.yaml"`, "served from the mock file")
+	require.Contains(t, string(body), `testdata/vlatte/_mocks/hello.mock.yaml"`, "served from the mock file")
 
 	res, _ = do(t, http.MethodGet, m.URL("/hello"), nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode)

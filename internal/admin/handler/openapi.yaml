@@ -183,7 +183,7 @@ paths:
       description: |
         Writes each mock added through this API as a mock file, `<id>.mock.<format>`, into the directory, then serves
         it from its file, which loads from then on: on the next start too, when the server's mock file patterns take
-        the directory, as they take `testdata/_mocks` and YAML by default. Its relative body files are named from the
+        the directory, as they take `{workdir}/_mocks`, in the server's work directory, and YAML by default. Its relative body files are named from the
         directory. When a mock can't be described as a mock file, nothing is written.
       requestBody:
         required: false
@@ -696,8 +696,7 @@ components:
           type: string
           description: |
             Directory to write the mock files into: a relative path, which starts at the server's root directory and
-            stays inside it.
-          default: testdata/_mocks
+            stays inside it. Without one, the `_mocks` folder of the server's work directory.
         format:
           type: string
           enum: [json, yaml, yml]
@@ -745,8 +744,10 @@ components:
       properties:
         dir:
           type: string
-          description: Directory of the recordings. Relative paths start at the server's root directory.
-          default: testdata/_mocks_recorded
+          description: |
+            Directory of the recordings. Relative paths start at the server's root directory, and `{workdir}` at its
+            work directory.
+          default: "{workdir}/_mocks_recorded"
         format:
           type: string
           enum: [json, yaml, yml]

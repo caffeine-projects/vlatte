@@ -1299,9 +1299,9 @@ func TestWebHook_ASavedMockStillSendsItsBodyFile(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusOK, res.StatusCode)
 
-	saved, err := os.ReadFile("testdata/_mocks/hooked.mock.yaml")
+	saved, err := os.ReadFile("testdata/vlatte/_mocks/hooked.mock.yaml")
 	require.NoError(t, err)
-	require.Contains(t, string(saved), "body_file: ../../bodies/hook.json")
+	require.Contains(t, string(saved), "body_file: ../../../bodies/hook.json")
 
 	res, err = http.Get(m.URL("/hooked"))
 	require.NoError(t, err)

@@ -366,14 +366,14 @@ func TestAdmin_SavedMocksOutliveTheServer(t *testing.T) {
 
 	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
-	require.JSONEq(t, `{"files": ["testdata/_mocks/hello.mock.yaml", "testdata/_mocks/inline.mock.yaml"]}`, string(body))
+	require.JSONEq(t, `{"files": ["testdata/vlatte/_mocks/hello.mock.yaml", "testdata/vlatte/_mocks/inline.mock.yaml"]}`, string(body))
 
-	saved, err := os.ReadFile("testdata/_mocks/hello.mock.yaml")
+	saved, err := os.ReadFile("testdata/vlatte/_mocks/hello.mock.yaml")
 	require.NoError(t, err)
-	require.Contains(t, string(saved), "body_file: ../../bodies/hello.txt")
+	require.Contains(t, string(saved), "body_file: ../../../bodies/hello.txt")
 
 	_, body = do(t, http.MethodGet, m.AdminURL()+"/mocks", nil, nil)
-	require.Contains(t, string(body), `"origin": "testdata/_mocks/hello.mock.yaml"`, "served from its file")
+	require.Contains(t, string(body), `"origin": "testdata/vlatte/_mocks/hello.mock.yaml"`, "served from its file")
 	require.NotContains(t, string(body), `"origin": "admin"`)
 
 	res, _ = do(t, http.MethodPost, m.AdminURL()+"/mocks/reload", nil, nil)
@@ -417,7 +417,7 @@ func TestAdmin_SaveMovesOnlyTheBodyFilesTheServerOpens(t *testing.T) {
 	res, body = do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
 
-	data, err := os.ReadFile("testdata/_mocks/hello.mock.yaml")
+	data, err := os.ReadFile("testdata/vlatte/_mocks/hello.mock.yaml")
 	require.NoError(t, err)
 
 	doc, err := config.Parse(data, "yaml")
@@ -425,7 +425,7 @@ func TestAdmin_SaveMovesOnlyTheBodyFilesTheServerOpens(t *testing.T) {
 
 	saved := object(t, doc)
 	response := object(t, saved["response"])
-	require.Equal(t, "../../bodies/hello.txt", response["body_file"])
+	require.Equal(t, "../../../bodies/hello.txt", response["body_file"])
 	require.Equal(t, "not-a-file", object(t, object(t, response["template"])["data"])["body_file"])
 
 	events, _ := saved["on_complete"].([]any)

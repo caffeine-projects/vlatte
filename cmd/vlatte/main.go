@@ -36,12 +36,13 @@ const (
 `
 	_helpHint = "Run 'vlatte --help' to list flags, environment variables and file keys."
 
-	// _adminDir is where the command keeps the mocks its admin API adds, across restarts. The default mock file
-	// patterns don't match it, so only the admin API's store loads its files.
-	_adminDir = "testdata/_admin"
+	// _adminDir is where the command keeps the mocks its admin API adds, across restarts, in the server's work
+	// directory. The default mock file patterns don't match it, so only the admin API's store loads its files.
+	_adminDir = mockhttp.WorkDirVar + "/_admin"
 
-	// _journalDir is where the command keeps the journal of the requests it serves, across restarts.
-	_journalDir = "testdata/_journal"
+	// _journalDir is where the command keeps the journal of the requests it serves, across restarts, in the
+	// server's work directory.
+	_journalDir = mockhttp.WorkDirVar + "/_journal"
 )
 
 var (
@@ -217,7 +218,9 @@ Examples:
 %s
 Settings apply in this order, each overriding the ones before: defaults, the %s.{json,yaml,yml} file
 in %s, %s_* environment variables, then flags. Setting a key of the cors, proxy, proxy_all, record,
-admin or journal section turns the section on. The admin API is on, on a random local port: --admin=false turns it off.
+admin or journal section turns the section on. The server keeps its own files in its work directory, %s,
+or %s/<name> for a server --name names: --workdir sets another.
+The admin API is on, on a random local port: --admin=false turns it off.
 It keeps the mocks it adds in %s, across restarts: --admin-dir="" keeps them in memory.
 The server keeps a journal of the requests it serves in %s, across restarts: --journal=false turns it off.
 
@@ -225,7 +228,7 @@ Settings:
 %s`,
 		root.Long, root.Use, root.Use, commands.String(), root.Example,
 		mockhttp.DefaultConfigFileName, strings.Join(mockhttp.DefaultConfigDirectories, " or "), mockhttp.EnvPrefix,
-		_adminDir, _journalDir, mockhttp.ConfigUsage())
+		mockhttp.DefaultWorkDir, mockhttp.DefaultWorkDir, _adminDir, _journalDir, mockhttp.ConfigUsage())
 }
 
 // registerCompletions declares the server flags to cobra, which completes their names.

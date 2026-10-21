@@ -434,7 +434,7 @@ func TestCLI_WebhookTimeout(t *testing.T) {
 }
 
 func TestCLI_RecordsThenPlaysBack(t *testing.T) {
-	// --record --record-target records the target's answers until the CLI stops, into testdata/_mocks_recorded. A
+	// --record --record-target records the target's answers until the CLI stops, into testdata/vlatte/_mocks_recorded. A
 	// later run serves them, without the target: the default mock files include them.
 	withoutDockerHost(t)
 	t.Chdir(t.TempDir())
@@ -455,7 +455,7 @@ func TestCLI_RecordsThenPlaysBack(t *testing.T) {
 
 	require.Equal(t, 0, stop(), "a stopped server exits cleanly")
 
-	files, err := filepath.Glob(filepath.Join("testdata", "_mocks_recorded", "*.mock.json"))
+	files, err := filepath.Glob(filepath.Join("testdata", "vlatte", "_mocks_recorded", "*.mock.json"))
 	require.NoError(t, err)
 	require.Len(t, files, 1, "the CLI wrote the recording when it stopped")
 
@@ -577,15 +577,15 @@ func TestCLI_RecordingsItCantServeDontFailTheRun(t *testing.T) {
 	code, _ := record("1")
 	require.Equal(t, 0, code)
 
-	files, err := filepath.Glob(filepath.Join("testdata", "_mocks_recorded", "*.mock.json"))
+	files, err := filepath.Glob(filepath.Join("testdata", "vlatte", "_mocks_recorded", "*.mock.json"))
 	require.NoError(t, err)
 	require.Len(t, files, 1)
 
-	// JSON is YAML too: the default patterns load the .yaml files of testdata/_mocks.
+	// JSON is YAML too: the default patterns load the .yaml files of testdata/vlatte/_mocks.
 	data, err := os.ReadFile(files[0])
 	require.NoError(t, err)
-	require.NoError(t, os.MkdirAll(filepath.Join("testdata", "_mocks"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join("testdata", "_mocks", "items.mock.yaml"), data, 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join("testdata", "vlatte", "_mocks"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join("testdata", "vlatte", "_mocks", "items.mock.yaml"), data, 0o600))
 	require.NoError(t, os.Remove(files[0]))
 
 	code, stderr := record("2")
@@ -672,7 +672,7 @@ func TestCLI_ServesTheAdminAPI(t *testing.T) {
 }
 
 func TestCLI_KeepsTheAdminMocksAcrossRestarts(t *testing.T) {
-	// The mocks the admin API adds are kept in testdata/_admin, so the next run serves them. --admin-dir moves them,
+	// The mocks the admin API adds are kept in testdata/vlatte/_admin, so the next run serves them. --admin-dir moves them,
 	// and an empty one keeps them in memory.
 	withoutDockerHost(t)
 	t.Chdir(t.TempDir())
@@ -680,7 +680,7 @@ func TestCLI_KeepsTheAdminMocksAcrossRestarts(t *testing.T) {
 	addr := randomAddr(t)
 	adminURL, stop := startAdmin(t, "--addr", addr, "--log-level", "disabled")
 	postMock(t, adminURL, "id: kept\nrequest: {method: GET, path: /kept}\nresponse: {status: 201}\n")
-	require.FileExists(t, filepath.Join("testdata", "_admin", "kept.mock.yaml"))
+	require.FileExists(t, filepath.Join("testdata", "vlatte", "_admin", "kept.mock.yaml"))
 	require.Zero(t, stop())
 
 	start(t, "--addr", addr, "--log-level", "disabled")
@@ -694,7 +694,7 @@ func TestCLI_KeepsTheAdminMocksAcrossRestarts(t *testing.T) {
 		adminURL, _ := startAdmin(t, "--addr", randomAddr(t), "--admin-dir=", "--log-level", "disabled")
 		postMock(t, adminURL, "id: gone\nrequest: {method: GET, path: /gone}\nresponse: {status: 201}\n")
 
-		_, err := os.Stat(filepath.Join("testdata", "_admin"))
+		_, err := os.Stat(filepath.Join("testdata", "vlatte", "_admin"))
 		require.ErrorIs(t, err, os.ErrNotExist)
 	})
 }
@@ -898,7 +898,7 @@ func TestCLI_InterceptsHTTPS(t *testing.T) {
 }
 
 func TestCLI_KeepsAJournalOfRequests(t *testing.T) {
-	// The command keeps the requests it serves in testdata/_journal, across restarts, which the admin API queries.
+	// The command keeps the requests it serves in testdata/vlatte/_journal, across restarts, which the admin API queries.
 	// --journal=false turns it off.
 	withoutDockerHost(t)
 	t.Chdir(t.TempDir())
@@ -929,7 +929,7 @@ func TestCLI_KeepsAJournalOfRequests(t *testing.T) {
 	require.Equal(t, http.StatusOK, code, doc)
 	require.Equal(t, float64(1), doc["count"])
 	require.Zero(t, stop())
-	require.DirExists(t, filepath.Join("testdata", "_journal"))
+	require.DirExists(t, filepath.Join("testdata", "vlatte", "_journal"))
 
 	adminURL, _ = startAdmin(t, "--addr", addr, "--log-level", "disabled")
 	code, doc = count(adminURL)
@@ -942,6 +942,32 @@ func TestCLI_KeepsAJournalOfRequests(t *testing.T) {
 		adminURL, _ := startAdmin(t, "--addr", randomAddr(t), "--journal=false", "--log-level", "disabled")
 		code, _ := count(adminURL)
 		require.Equal(t, http.StatusNotImplemented, code)
-		require.NoDirExists(t, filepath.Join("testdata", "_journal"))
+		require.NoDirExists(t, filepath.Join("testdata", "vlatte", "_journal"))
 	})
+}
+
+func TestCLI_NamedServersKeepTheirOwnFiles(t *testing.T) {
+	// Two servers in one directory each keep their files, the journal's lock included, in a folder of their name:
+	// both start. --workdir puts a server's files where it says.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	for _, name := range []string{"a", "b"} {
+		addr := randomAddr(t)
+		adminURL, _ := startAdmin(t, "--addr", addr, "--name", name, "--log-level", "disabled")
+		postMock(t, adminURL, "id: kept\nrequest: {method: GET, path: /kept}\nresponse: {status: 201}\n")
+
+		status, _ := firstAnswer(t, "http://"+addr+"/kept")
+		require.Equal(t, http.StatusCreated, status)
+	}
+
+	for _, name := range []string{"a", "b"} {
+		require.DirExists(t, filepath.Join("testdata", "vlatte", name, "_journal"))
+		require.FileExists(t, filepath.Join("testdata", "vlatte", name, "_admin", "kept.mock.yaml"))
+	}
+
+	adminURL, _ := startAdmin(t, "--addr", randomAddr(t), "--workdir", "elsewhere", "--log-level", "disabled")
+	postMock(t, adminURL, "id: moved\nrequest: {method: GET, path: /moved}\nresponse: {status: 201}\n")
+	require.FileExists(t, filepath.Join("elsewhere", "_admin", "moved.mock.yaml"))
+	require.DirExists(t, filepath.Join("elsewhere", "_journal"))
 }

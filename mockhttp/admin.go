@@ -29,7 +29,7 @@ var (
 const (
 	// _defaultSaveDir is where the admin API saves mocks by default: the default mock file patterns load its YAML
 	// files on the next start too.
-	_defaultSaveDir    = "testdata/_mocks"
+	_defaultSaveDir    = WorkDirVar + "/_mocks"
 	_defaultSaveFormat = "yaml"
 
 	// _saveTempPattern names the files a save is writing: never *.mock.*, so loading mock files skips them.
@@ -159,8 +159,11 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 
 	// The admin API checked the format.
 	format = cmp.Or(format, _defaultSaveFormat)
-	dir = cmp.Or(dir, _defaultSaveDir)
-	if !filepath.IsAbs(dir) {
+	// A dir the admin API sends stays inside root_dir, as it checked: only the default is in the work directory.
+	switch {
+	case dir == "":
+		dir = app.config.path(_defaultSaveDir)
+	case !filepath.IsAbs(dir):
 		dir = filepath.Join(app.config.RootDir, dir)
 	}
 
