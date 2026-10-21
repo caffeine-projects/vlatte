@@ -457,3 +457,37 @@ func TestForwardProxy_AnInterceptedClientThatStallsIsClosed(t *testing.T) {
 	default:
 	}
 }
+
+func TestOneConnListener_HandsItsConnectionOverOnce(t *testing.T) {
+	// The server of an intercepted connection takes it, then waits on Accept until the connection is over, and
+	// returns: it returns neither before, nor ever waits for another connection.
+	conn, peer := net.Pipe()
+	t.Cleanup(func() {
+		_ = conn.Close()
+		_ = peer.Close()
+	})
+
+	l := &oneConnListener{conn: conn, done: make(chan struct{})}
+
+	got, err := l.Accept()
+	require.NoError(t, err)
+	require.Same(t, conn, got)
+	require.Equal(t, conn.LocalAddr(), l.Addr())
+	require.NoError(t, l.Close())
+
+	next := make(chan error, 1)
+
+	go func() {
+		_, err := l.Accept()
+		next <- err
+	}()
+
+	select {
+	case err := <-next:
+		t.Fatalf("Accept returned before the connection was over: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(l.done)
+	require.ErrorIs(t, <-next, net.ErrClosed)
+}

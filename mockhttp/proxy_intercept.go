@@ -289,7 +289,7 @@ func (h *mockHandler) serveIntercepted(conn *tls.Conn, authority string) bool {
 		switched bool
 	)
 
-	done := make(chan struct{})
+	l := &oneConnListener{conn: conn, done: make(chan struct{})}
 	srv := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r.URL.Scheme, r.URL.Host = "https", authority
@@ -304,21 +304,14 @@ func (h *mockHandler) serveIntercepted(conn *tls.Conn, authority string) bool {
 			if state == http.StateClosed || state == http.StateHijacked {
 				once.Do(func() {
 					switched = state == http.StateHijacked
-					close(done)
+					close(l.done)
 				})
 			}
 		},
 	}
 
-	l := &oneConnListener{conn: conn}
+	// Serve returns once the connection is over: the listener's next Accept waits for it.
 	_ = srv.Serve(l)
-
-	// A server that failed before it took the connection never serves it.
-	if !l.accepted.Load() {
-		return false
-	}
-
-	<-done
 
 	return switched
 }
@@ -378,19 +371,22 @@ type discardingConn struct {
 
 func (c discardingConn) Write(p []byte) (int, error) { return len(p), nil }
 
-// oneConnListener is the listener of one connection, accepted already: its first Accept returns it, and the next
-// ones fail, so the server that serves it doesn't wait for more.
+// oneConnListener is the listener of one connection, accepted already: its first Accept returns it, and the next ones
+// wait until done is closed, once the connection is over, and fail, so the server that serves it returns then.
 type oneConnListener struct {
 	conn     net.Conn
+	done     chan struct{}
 	accepted atomic.Bool
 }
 
 func (l *oneConnListener) Accept() (net.Conn, error) {
-	if l.accepted.Swap(true) {
-		return nil, net.ErrClosed
+	if !l.accepted.Swap(true) {
+		return l.conn, nil
 	}
 
-	return l.conn, nil
+	<-l.done
+
+	return nil, net.ErrClosed
 }
 
 func (l *oneConnListener) Close() error   { return nil }
