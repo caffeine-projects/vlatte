@@ -85,7 +85,8 @@ type Request struct {
 	ID     string
 	Method string
 
-	// URL is the request URL, on the server's base URL.
+	// URL is the request URL: the one the client asked for when a forward proxy gets or intercepts the request, and
+	// otherwise on the server's base URL.
 	URL *url.URL
 
 	// URLPathSegments are the segments of the URL path, each decoded: /users/1 is [users 1], and /files/a%2Fb is

@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match"
 )
 
 func TestForwardProxy_AConnectItCantDialGetsTheFailureAnswer(t *testing.T) {
@@ -1910,6 +1911,37 @@ func TestForwardProxy_InterceptsHTTPS(t *testing.T) {
 
 	scoped.AssertCalled(t)
 	require.Contains(t, m.DescribeConfig(), "Forward Proxy: enabled, intercepting HTTPS")
+}
+
+func TestForwardProxy_MocksMatchTheURLTheClientAskedFor(t *testing.T) {
+	// The URL mocks matched was the server's, for proxied requests too: scheme: https never matched an intercepted
+	// request, nor an absolute url the host of a proxied one. They match the request's own scheme and host now.
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "target")
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(
+		Request().Scheme("https").URL(match.Equal(target.URL+"/secure")).Reply(OK().PlainText("intercepted")),
+		Request().Scheme("http").URL(match.Equal("http://api.example.com/users")).Reply(OK().PlainText("proxied")))
+
+	body := func(client *http.Client, target string) string {
+		res, err := client.Get(target)
+		require.NoError(t, err, target)
+
+		b, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		return string(b)
+	}
+
+	require.Equal(t, "intercepted", body(interceptClient(t, m), target.URL+"/secure"))
+	require.Equal(t, "proxied", body(proxyClient(t, m), "http://api.example.com/users"))
 }
 
 func TestForwardProxy_InterceptsWithTheCAItIsGiven(t *testing.T) {

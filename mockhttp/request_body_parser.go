@@ -37,10 +37,10 @@ func parseRequest(r *http.Request, options *Server) (*RequestValues, []byte, err
 	return req, rawBody, err
 }
 
-// parseURL returns the request URL, on the server's base URL, and its path segments. The path stays escaped as the
-// client sent it: decoded, "%3F" and "%23" would start a query or a fragment.
+// parseURL returns the request URL and its path segments. The path stays escaped as the client sent it: decoded, "%3F"
+// and "%23" would start a query or a fragment.
 func parseURL(r *http.Request, baseURL string) (*url.URL, []string) {
-	// The scheme and host are the server's. A target's user info, opaque part and empty query ("/a?") are left out.
+	// A target's user info, opaque part and empty query ("/a?") are left out.
 	u := &url.URL{
 		Path:        r.URL.Path,
 		RawPath:     r.URL.RawPath,
@@ -48,7 +48,15 @@ func parseURL(r *http.Request, baseURL string) (*url.URL, []string) {
 		Fragment:    r.URL.Fragment,
 		RawFragment: r.URL.RawFragment,
 	}
-	if base, err := url.Parse(baseURL); err == nil {
+
+	// A request in absolute form, as a forward proxy gets, and an intercepted one keep their scheme and host, without
+	// the scheme's default port. Others, a CONNECT's included, are on the server's base URL.
+	if r.URL.IsAbs() {
+		u.Scheme, u.Host = r.URL.Scheme, r.URL.Host
+		if port := r.URL.Port(); (u.Scheme == "http" && port == "80") || (u.Scheme == "https" && port == "443") {
+			u.Host = strings.TrimSuffix(u.Host, ":"+port)
+		}
+	} else if base, err := url.Parse(baseURL); err == nil {
 		u.Scheme, u.Host = base.Scheme, base.Host
 	}
 
