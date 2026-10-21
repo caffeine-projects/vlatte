@@ -491,3 +491,23 @@ func TestOneConnListener_HandsItsConnectionOverOnce(t *testing.T) {
 	close(l.done)
 	require.ErrorIs(t, <-next, net.ErrClosed)
 }
+
+func TestForwardProxy_AHostNameACertificateCantHoldFailsTheHandshake(t *testing.T) {
+	// crypto/tls passes on a server name that isn't ASCII, which no certificate can hold: the handshake fails, and the
+	// log says why.
+	host, dialed := acceptedHost(t)
+	m, logs := interceptLogs(t)
+
+	conn, _ := openTunnel(t, hostOf(t, m), host, "")
+
+	client := tls.Client(conn, &tls.Config{ServerName: "bücher.example", InsecureSkipVerify: true})
+	require.Error(t, client.Handshake())
+
+	requireWarned(t, logs, "proxy: making the certificate of bücher.example: ")
+
+	select {
+	case <-dialed:
+		t.Fatal("the host was dialed")
+	default:
+	}
+}
