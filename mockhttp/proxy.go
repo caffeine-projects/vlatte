@@ -81,7 +81,7 @@ type forwardProxy struct {
 
 	id               string        // of the server: see Server.id
 	dialer           *net.Dialer   // of the tunnels, to their hosts or to the proxy on the way
-	handshakeTimeout time.Duration // bounds the TLS handshake of a tunnel with an https proxy on the way
+	handshakeTimeout time.Duration // bounds a TLS handshake: of a tunnel with an https proxy, or of an intercepted client
 	interceptor      *interceptor  // with Intercept
 }
 

@@ -423,3 +423,36 @@ func TestForwardProxy_InterceptionNeedsAConnectionItCanTakeOver(t *testing.T) {
 		require.Empty(t, got, "the client got an answer")
 	})
 }
+
+func TestForwardProxy_AnInterceptedClientThatStallsIsClosed(t *testing.T) {
+	// The first byte of an intercepted connection had a limit, and the handshake one, but not what came between: a
+	// client that started a TLS record and held back the rest held its connection until it sent more, left, or the
+	// server closed. The handshake's limit bounds the whole ClientHello, and one that doesn't come in time fails the
+	// handshake, which closes the connection.
+	host, dialed := acceptedHost(t)
+
+	logs := &lockedBuffer{}
+	logger := zerolog.New(logs)
+
+	m := MustNew(Setup().Logger(&logger).LogPretty(false).Proxy(&ProxyConfig{Intercept: true}))
+	m.proxy.handshakeTimeout = 200 * time.Millisecond
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	conn, _ := openTunnel(t, hostOf(t, m), host, "")
+
+	// A record header for 100 bytes, and 10 of them: the rest never comes.
+	_, err := conn.Write(append([]byte{0x16, 0x03, 0x01, 0x00, 100}, make([]byte, 10)...))
+	require.NoError(t, err)
+
+	_, err = io.ReadAll(conn)
+	require.NoError(t, err, "the connection stayed open")
+
+	requireWarned(t, logs, "http: proxy: intercepting the TLS connection to "+host)
+
+	select {
+	case <-dialed:
+		t.Fatal("the host was dialed")
+	default:
+	}
+}

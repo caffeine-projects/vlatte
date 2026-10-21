@@ -39,9 +39,6 @@ const (
 	// nothing in that time waits for its host to speak first, as an SSH client does: it goes to the host.
 	_firstBytesWait = 2 * time.Second
 
-	// _handshakeTimeout bounds the TLS handshake of an intercepted connection.
-	_handshakeTimeout = 10 * time.Second
-
 	// _maxLeaves bounds how many certificates of hosts an interceptor keeps: a client can ask for any name.
 	_maxLeaves = 1024
 
@@ -219,20 +216,15 @@ func (h *mockHandler) intercept(w http.ResponseWriter, r *RequestValues) {
 	in := bufio.NewReaderSize(client, _maxRecord)
 	first, err := in.Peek(1)
 
-	_ = client.SetReadDeadline(time.Time{})
+	// The handshake's limit bounds what a TLS client sends next: the rest of its ClientHello, which peekALPN waits for,
+	// then the handshake. A ClientHello that doesn't come in time fails the handshake.
+	_ = client.SetReadDeadline(time.Now().Add(h.app.proxy.handshakeTimeout))
 
 	conn := &bufferedConn{Conn: client, r: in}
 
 	switch {
 	case errors.Is(err, os.ErrDeadlineExceeded) || (err == nil && first[0] != 0x16):
-		upstream, err := h.dialHost(ctx, req)
-		if err != nil {
-			h.lifecycle.OnWarning(r, fmt.Errorf("http: %w", err))
-			return
-		}
-
-		h.tunnel(conn, upstream, r)
-
+		h.passOn(ctx, conn, r)
 		return
 	case err != nil:
 		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: reading the intercepted connection to %s: %w", req.Host, err))
@@ -242,14 +234,7 @@ func (h *mockHandler) intercept(w http.ResponseWriter, r *RequestValues) {
 	// A client that can't speak HTTP/1.1, such as a gRPC one, which offers only h2, goes to the host through a tunnel:
 	// the interception serves HTTP/1.1.
 	if protocols, err := peekALPN(in); err == nil && len(protocols) > 0 && !slices.Contains(protocols, "http/1.1") {
-		upstream, err := h.dialHost(ctx, req)
-		if err != nil {
-			h.lifecycle.OnWarning(r, fmt.Errorf("http: %w", err))
-			return
-		}
-
-		h.tunnel(conn, upstream, r)
-
+		h.passOn(ctx, conn, r)
 		return
 	}
 
@@ -265,7 +250,7 @@ func (h *mockHandler) intercept(w http.ResponseWriter, r *RequestValues) {
 		NextProtos: []string{"http/1.1"},
 	})
 
-	handshake, cancel := context.WithTimeout(ctx, _handshakeTimeout)
+	handshake, cancel := context.WithTimeout(ctx, h.app.proxy.handshakeTimeout)
 	err = tlsConn.HandshakeContext(handshake)
 
 	cancel()
@@ -275,9 +260,26 @@ func (h *mockHandler) intercept(w http.ResponseWriter, r *RequestValues) {
 		return
 	}
 
+	// The requests within have no limit of their own, as on the server's own connections.
+	_ = client.SetReadDeadline(time.Time{})
+
 	h.logConnect(r)
 
 	switched = h.serveIntercepted(tlsConn, req.Host)
+}
+
+// passOn sends conn, an intercepted connection the proxy doesn't serve, on to the host r, a CONNECT, names, through a
+// tunnel without a deadline.
+func (h *mockHandler) passOn(ctx context.Context, conn net.Conn, r *RequestValues) {
+	_ = conn.SetReadDeadline(time.Time{})
+
+	upstream, err := h.dialHost(ctx, r.RawRequest)
+	if err != nil {
+		h.lifecycle.OnWarning(r, fmt.Errorf("http: %w", err))
+		return
+	}
+
+	h.tunnel(conn, upstream, r)
 }
 
 // serveIntercepted serves the requests of conn, an intercepted TLS connection to authority, with the server's
