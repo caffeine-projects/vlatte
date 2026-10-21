@@ -1,7 +1,6 @@
 package mockgrpc
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,6 +26,7 @@ func TestMethod_UnaryMatchesWholeNames(t *testing.T) {
 		{"TestService/Greetings", codes.OK},
 		{"protobuf.TestService/Greetings", codes.OK},
 		{"/protobuf.TestService/Greetings", codes.OK},
+		{"/Greetings", codes.OK},
 		{"Greet", codes.NotFound},
 		{"etings", codes.NotFound},
 		{"Service/Greetings", codes.NotFound},
@@ -37,7 +37,7 @@ func TestMethod_UnaryMatchesWholeNames(t *testing.T) {
 			m, client := methodServer(t)
 			m.MustMock(UnaryMethod(tt.give).Reply(Unary().Message(&pb.HiRes{Message: "bye"})))
 
-			_, err := client.Greetings(context.Background(), &pb.HiReq{Message: "hi"})
+			_, err := client.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
 			require.Equal(t, tt.want, status.Code(err))
 		})
 	}
@@ -58,7 +58,7 @@ func TestMethod_StreamMatchesWholeNames(t *testing.T) {
 			m, client := methodServer(t)
 			m.MustMock(ServerStreamMethod(tt.give).Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})))
 
-			stream, err := client.List(context.Background(), &pb.ListReq{})
+			stream, err := client.List(t.Context(), &pb.ListReq{})
 			require.NoError(t, err)
 
 			_, err = stream.Recv()

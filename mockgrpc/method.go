@@ -4,21 +4,14 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match"
 )
 
-var _ vlatte.Matcher = methodName("")
+// methodName matches a full method, such as "/pkg.Service/Method", by a name of whole segments: its end after a "/"
+// or a ".", such as "Method", "/Method", "Service/Method", "pkg.Service/Method" or the full method. "Meth" doesn't
+// match.
+func methodName(name string) vlatte.Matcher {
+	name = strings.TrimPrefix(name, "/")
 
-// methodName matches a full method, such as "/pkg.Service/Method", by a name of whole segments: the full method, or
-// its end after a "/" or a ".", such as "Method", "Service/Method" or "pkg.Service/Method". "Meth" doesn't match.
-type methodName string
-
-// Name implements vlatte.Matcher.
-func (n methodName) Name() string { return "Method" }
-
-// Match implements vlatte.Matcher.
-func (n methodName) Match(arg vlatte.MatcherArg) (bool, error) {
-	full, _ := arg.Value().(string)
-	rest, ok := strings.CutSuffix(full, string(n))
-
-	return ok && (rest == "" || strings.HasSuffix(rest, "/") || strings.HasSuffix(rest, ".")), nil
+	return match.Any(match.HasSuffix("/"+name), match.HasSuffix("."+name))
 }
