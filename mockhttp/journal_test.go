@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -48,13 +49,15 @@ func only(t *testing.T, m *Server, q vlatte.JournalQuery) *vlatte.JournalEntry {
 func TestJournal_KeepsEachRequestOnceWhateverItsOutcome(t *testing.T) {
 	// A test verifies the requests a server got, not only those a mock answered: each request is one entry, with
 	// the outcome it reached first, whether a mock answered it, none did, another server did, serving it failed,
-	// it panicked, or its client left.
+	// it panicked, or its client left, and the status the client got, which a reply that writes its own response
+	// sends.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 	}))
 	t.Cleanup(upstream.Close)
 
-	m := journaledServer(t, Setup())
+	// Failures get a status of their own, so an entry tells them from a request no mock matched.
+	m := journaledServer(t, Setup().ErrorStatusCode(599))
 	proxied := journaledServer(t, Setup().ConfigSources(ConfigArgs([]string{"--proxy-all-target", upstream.URL})))
 
 	m.MustMock(
@@ -62,6 +65,20 @@ func TestJournal_KeepsEachRequestOnceWhateverItsOutcome(t *testing.T) {
 		Getf("/failed").ID("failed").Reply(OK().BodyFile("missing.txt")),
 		Getf("/panics").ID("panics").Reply(Func(func(http.ResponseWriter, *RequestValues) (*Response, error) { panic("boom") })),
 		Getf("/slow").ID("slow").Delay(5*time.Second).Reply(OK()),
+		Getf("/handler").ID("handler").Reply(Handler(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusCreated) })),
+		Getf("/silent").ID("silent").Reply(Handler(func(http.ResponseWriter, *http.Request) {})),
+		Getf("/echo").ID("echo").Reply(Echo()),
+		Getf("/late").ID("late").Reply(Func(func(w http.ResponseWriter, _ *RequestValues) (*Response, error) {
+			w.WriteHeader(http.StatusAccepted)
+			return nil, errors.New("late failure")
+		})),
+		Getf("/aborts").ID("aborts").Reply(Func(func(http.ResponseWriter, *RequestValues) (*Response, error) {
+			panic(http.ErrAbortHandler)
+		})),
+		Getf("/exits").ID("exits").Reply(Func(func(http.ResponseWriter, *RequestValues) (*Response, error) {
+			runtime.Goexit()
+			return nil, nil
+		})),
 	)
 
 	tests := []struct {
@@ -76,10 +93,20 @@ func TestJournal_KeepsEachRequestOnceWhateverItsOutcome(t *testing.T) {
 		{name: "matched", server: m, path: "/matched", outcome: vlatte.OutcomeMatched, status: http.StatusOK, mockID: "matched"},
 		{name: "unmatched", server: m, path: "/nothing", outcome: vlatte.OutcomeUnmatched, status: StatusNoMatch},
 		{name: "proxied", server: proxied, path: "/up", outcome: vlatte.OutcomeProxied, status: http.StatusAccepted},
-		{name: "failed", server: m, path: "/failed", outcome: vlatte.OutcomeFailed, status: StatusNoMatch, mockID: "failed", message: "missing.txt"},
-		{name: "panicked", server: m, path: "/panics", outcome: vlatte.OutcomeFailed, mockID: "panics", message: "ended without an answer"},
+		{name: "failed", server: m, path: "/failed", outcome: vlatte.OutcomeFailed, status: 599, mockID: "failed", message: "missing.txt"},
+		{name: "panicked", server: m, path: "/panics", outcome: vlatte.OutcomeFailed, status: 599, mockID: "panics", message: "panicked: boom"},
+		{name: "aborted", server: m, path: "/aborts", outcome: vlatte.OutcomeFailed, mockID: "aborts", message: "abort Handler"},
+		{name: "exited", server: m, path: "/exits", outcome: vlatte.OutcomeFailed, mockID: "exits", message: "ended without an answer"},
 		{name: "abandoned", server: m, path: "/slow", outcome: vlatte.OutcomeAbandoned, mockID: "slow", message: "left during the delay"},
+		{name: "handler", server: m, path: "/handler", outcome: vlatte.OutcomeMatched, status: http.StatusCreated, mockID: "handler"},
+		{name: "handler writing nothing", server: m, path: "/silent", outcome: vlatte.OutcomeMatched, status: http.StatusOK, mockID: "silent"},
+		{name: "echo", server: m, path: "/echo", outcome: vlatte.OutcomeMatched, status: http.StatusOK, mockID: "echo"},
+		{name: "failed after its status", server: m, path: "/late", outcome: vlatte.OutcomeFailed, status: http.StatusAccepted, mockID: "late", message: "late failure"},
 	}
+
+	// A client retries a request whose connection, one it reused, drops without an answer: each request goes on a
+	// connection of its own, so the server gets it once.
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -89,7 +116,7 @@ func TestJournal_KeepsEachRequestOnceWhateverItsOutcome(t *testing.T) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, tt.server.URL(tt.path), nil)
 			require.NoError(t, err)
 
-			if res, err := http.DefaultClient.Do(req); err == nil {
+			if res, err := client.Do(req); err == nil {
 				res.Body.Close()
 			}
 
@@ -258,7 +285,29 @@ func TestJournal_ATunnelIsOneEntry(t *testing.T) {
 
 	e := only(t, m, vlatte.JournalQuery{Method: match.Equal(http.MethodConnect)})
 	require.Equal(t, vlatte.OutcomeProxied, e.Outcome)
+	require.Equal(t, http.StatusOK, e.Status, "the status line vlatte wrote on the connection it took over")
 	require.Equal(t, strings.TrimPrefix(target.URL, "https://"), e.Target)
+}
+
+func TestJournal_ASwitchKeepsItsStatus(t *testing.T) {
+	// A request that switches protocols gets its 101 on the connection vlatte took over: the entry has it.
+	target := switchingTarget(t, "echo")
+
+	m := journaledServer(t, Setup().Proxy())
+	m.MustMock(Getf("/ws").ID("ws").Reply(From(target.URL)))
+
+	_, _, res := switchThrough(t, m, "/ws")
+	require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
+
+	q := vlatte.JournalQuery{Path: match.Equal("/ws")}
+	require.Eventually(t, func() bool {
+		n, err := m.CountRequests(t.Context(), q)
+		return err == nil && n > 0
+	}, 5*time.Second, 10*time.Millisecond)
+
+	e := only(t, m, q)
+	require.Equal(t, vlatte.OutcomeMatched, e.Outcome)
+	require.Equal(t, http.StatusSwitchingProtocols, e.Status)
 }
 
 func TestJournal_AFailingJournalNeverFailsARequest(t *testing.T) {

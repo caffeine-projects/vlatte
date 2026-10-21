@@ -25,6 +25,13 @@ import (
 // _misses recycles the misses of the requests no mock matches, which matching keeps for every request.
 var _misses = sync.Pool{New: func() any { return new(vlatte.Misses[*Mock, *selectorInput]) }}
 
+var (
+	_ http.Flusher  = (*answerWriter)(nil)
+	_ http.Hijacker = (*answerWriter)(nil)
+	_ http.Pusher   = (*answerWriter)(nil)
+	_ io.ReaderFrom = (*answerWriter)(nil)
+)
+
 // topResponseWriter passes every write of a reply through the steps of its mock, then to rw.
 type topResponseWriter struct {
 	ctx   context.Context
@@ -57,6 +64,99 @@ func (w *topResponseWriter) Write(p []byte) (int, error) {
 // Unwrap returns the response writer, so http.ResponseController can flush it.
 func (w *topResponseWriter) Unwrap() http.ResponseWriter { return w.rw }
 
+// answerWriter keeps the status the client gets, the first final one sent, which the journal, the logs and the
+// events tell. A handler's own writer is under it: a reply may flush it, push with it, or take its connection over.
+type answerWriter struct {
+	rw       http.ResponseWriter
+	status   int
+	hijacked bool
+}
+
+func (w *answerWriter) Header() http.Header { return w.rw.Header() }
+
+// WriteHeader implements http.ResponseWriter. An informational status, such as 103 Early Hints, isn't the answer,
+// nor is a code net/http refuses.
+func (w *answerWriter) WriteHeader(code int) {
+	if code == http.StatusSwitchingProtocols || code >= 200 && code <= 999 {
+		w.sent(code)
+	}
+
+	w.rw.WriteHeader(code)
+}
+
+// Write implements http.ResponseWriter: a body without a status answers 200.
+func (w *answerWriter) Write(p []byte) (int, error) {
+	w.sent(http.StatusOK)
+	return w.rw.Write(p)
+}
+
+// Flush implements http.Flusher.
+func (w *answerWriter) Flush() {
+	_ = w.FlushError()
+}
+
+// FlushError flushes the response to the client, as http.ResponseController does. A flush sends the status, 200
+// unless one was set, when the writer can flush.
+func (w *answerWriter) FlushError() error {
+	err := http.NewResponseController(w.rw).Flush()
+	if err == nil {
+		w.sent(http.StatusOK)
+	}
+
+	return err
+}
+
+// Hijack implements http.Hijacker. What goes on a connection taken over isn't a status the server sends.
+func (w *answerWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, rw, err := http.NewResponseController(w.rw).Hijack()
+	if err == nil {
+		w.hijacked = true
+	}
+
+	return conn, rw, err
+}
+
+// ReadFrom implements io.ReaderFrom, so copying a body, such as a file's, reaches the writer's own, which may send it
+// at once.
+func (w *answerWriter) ReadFrom(r io.Reader) (int64, error) {
+	var (
+		n   int64
+		err error
+	)
+
+	if rf, ok := w.rw.(io.ReaderFrom); ok {
+		n, err = rf.ReadFrom(r)
+	} else {
+		n, err = io.Copy(writerOnly{w.rw}, r)
+	}
+
+	if n > 0 {
+		w.sent(http.StatusOK)
+	}
+
+	return n, err
+}
+
+// Push implements http.Pusher, when the writer pushes, such as over HTTP/2.
+func (w *answerWriter) Push(target string, opts *http.PushOptions) error {
+	if p, ok := w.rw.(http.Pusher); ok {
+		return p.Push(target, opts)
+	}
+
+	return http.ErrNotSupported
+}
+
+// Unwrap returns the response writer, so http.ResponseController reaches it.
+func (w *answerWriter) Unwrap() http.ResponseWriter { return w.rw }
+
+// sent keeps code, the status the client gets, unless one was sent, or the connection was taken over: net/http
+// sends nothing more on it.
+func (w *answerWriter) sent(code int) {
+	if w.status == 0 && !w.hijacked {
+		w.status = code
+	}
+}
+
 type mockHandler struct {
 	app                   *Server
 	lifecycle             mockHTTPLifecycle
@@ -77,6 +177,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.app.config.DebugFn("req", r)
 
 	reqValues, rawBody, parseErr := parseRequest(r, h.app)
+
+	reqValues.answer = &answerWriter{rw: w}
+	w = reqValues.answer
+
 	h.debugHeader(w, vlatte.RequestIDHeader, reqValues.ReqID)
 
 	if parseErr != nil {
@@ -91,8 +195,20 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.lifecycle.OnRequest(reqValues)
 
-	// A request that ends without an outcome, such as one whose client left, or that panicked, is journaled too.
-	defer reqValues.journal.end(reqValues)
+	// A request that ends without an outcome, such as one whose client left, or that panicked, is journaled too. A
+	// panic goes on to the recovery middleware, which answers it, as it goes on through net/http's.
+	defer func() {
+		if reqValues.journal == nil {
+			return
+		}
+
+		p := recover()
+		reqValues.journal.end(reqValues, p)
+
+		if p != nil {
+			panic(p)
+		}
+	}()
 
 	input := newSelectorInput(r, reqValues, h.app.proxy != nil && (r.Method == http.MethodConnect || r.URL.Host != ""))
 

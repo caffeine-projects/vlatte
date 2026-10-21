@@ -586,7 +586,7 @@ mockhttp.Setup().AdminStore(func(app *mockhttp.Server) (vlatte.Store[*mockhttp.M
 
 ## Request journal
 
-A server can keep a journal of the requests its mocks get, whatever their outcome: a mock answered it (`matched`), none matched (`unmatched`), another server did (`proxied`), serving it failed (`failed`), or its client left first (`abandoned`). A test then verifies the requests it sent, as WireMock's `verify` does, while matching and hits work as before.
+A server can keep a journal of the requests its mocks get, whatever their outcome: a mock answered it (`matched`), none matched (`unmatched`), another server did (`proxied`), serving it failed (`failed`), or its client left first (`abandoned`). A test then verifies the requests it sent, as WireMock's `verify` does, while matching and hits work as before. Each entry has the status the client got: the one a reply that writes its own answer sent, as `Handler` does, `200` when it sent none, and for a failure the status sent before it, else `error_status_code`, as for a panic.
 
 ```go
 m := mockhttp.MustNew(mockhttp.Setup().Journal("")) // "" keeps it in a temporary directory, which Close removes
@@ -623,7 +623,6 @@ gRPC servers keep the same journal with `mockgrpc.Setup().Journal(dir)`: a call'
 - A body the journal cut, or that the server didn't read, has `body_truncated`: the server reads no body of a `GET` or `HEAD`, nor under `no_body_parsing`, nor past `MaxBodyParsingLimit`.
 - The headers the server redacts in its logs (`RedactHeader`) are redacted in the journal. gRPC metadata is kept as it came.
 - Requests the server answers before its mocks get them, such as CORS preflights, or that a middleware answers, aren't journaled.
-- A reply that writes its own answer, as `Handler` does, journals status `0`, and a failure the status of failures, `error_status_code`, even when a reply sent another before failing.
 - A named directory gets a `.gitignore` of its files, so committing `testdata` leaves the journal out.
 
 The settings `journal` (`--journal`, `VLATTE_JOURNAL`), `journal.dir`, `journal.max_entries` and `journal.max_body_size` configure it.

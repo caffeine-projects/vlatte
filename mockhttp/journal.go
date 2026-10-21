@@ -26,8 +26,13 @@ var (
 	_ vlatte.RequestPatterns[*Mock, *Server] = (*Server)(nil)
 )
 
-// errNoAnswer is the message of a request that ended without an outcome, such as one that panicked.
-var errNoAnswer = errors.New("http: the request ended without an answer")
+var (
+	// errNoAnswer is the message of a request that ended without an outcome.
+	errNoAnswer = errors.New("http: the request ended without an answer")
+
+	// errPanicked is the message of a request whose serving panicked.
+	errPanicked = errors.New("http: the request panicked")
+)
 
 // openJournal opens the journal conf configures, nil when it configures none. A relative directory starts at the
 // root directory, as the admin API's does.
@@ -75,15 +80,15 @@ func (j journalEvents) OnRequest(r *RequestValues) {
 }
 
 func (j journalEvents) OnMatch(r *RequestValues, res *Response) {
-	r.journal.record(r, vlatte.OutcomeMatched, statusOf(res), nil)
+	r.journal.record(r, vlatte.OutcomeMatched, r.answered(res), nil)
 }
 
 func (j journalEvents) OnProxied(r *RequestValues, res *Response) {
-	r.journal.record(r, vlatte.OutcomeProxied, statusOf(res), nil)
+	r.journal.record(r, vlatte.OutcomeProxied, r.answered(res), nil)
 }
 
 func (j journalEvents) OnNoMatch(r *RequestValues) {
-	r.journal.record(r, vlatte.OutcomeUnmatched, j.app.config.RequestWasNotMatchedStatusCode, nil)
+	r.journal.record(r, vlatte.OutcomeUnmatched, r.sent(), nil)
 }
 
 // OnWarning keeps the warning, which tells why a request that reaches no outcome ended.
@@ -91,16 +96,9 @@ func (j journalEvents) OnWarning(r *RequestValues, err error) {
 	r.journal.warn(err)
 }
 
+// OnError journals the status the client got: a reply may have sent one before it failed.
 func (j journalEvents) OnError(r *RequestValues, err error) {
-	r.journal.record(r, vlatte.OutcomeFailed, j.app.config.ErrorStatusCode, err)
-}
-
-func statusOf(res *Response) int {
-	if res == nil {
-		return 0
-	}
-
-	return res.StatusCode
+	r.journal.record(r, vlatte.OutcomeFailed, r.sent(), err)
 }
 
 // journalCall is the entry of a request in the server's journal, which it appends once the request reaches an
@@ -216,9 +214,9 @@ func (c *journalCall) warn(err error) {
 	c.warning = err
 }
 
-// end appends the entry of r, a request that ended, if it reached no outcome: abandoned, when its client left, or
-// failed, such as by a panic, with its last warning.
-func (c *journalCall) end(r *RequestValues) {
+// end appends the entry of r, a request that ended, if it reached no outcome: failed, when it panicked with p, abandoned,
+// when its client left, or failed, with its last warning, with the status sent.
+func (c *journalCall) end(r *RequestValues, p any) {
 	if c == nil {
 		return
 	}
@@ -227,12 +225,21 @@ func (c *journalCall) end(r *RequestValues) {
 	warning := c.warning
 	c.mu.Unlock()
 
-	if ctx := r.RawRequest.Context(); ctx.Err() != nil {
-		c.record(r, vlatte.OutcomeAbandoned, 0, cmp.Or(warning, context.Cause(ctx)))
-		return
-	}
+	abort, _ := p.(error)
 
-	c.record(r, vlatte.OutcomeFailed, 0, cmp.Or(warning, errNoAnswer))
+	switch ctx := r.RawRequest.Context(); {
+	case errors.Is(abort, http.ErrAbortHandler):
+		// net/http drops the connection of an answer aborted: the client has what was sent.
+		c.record(r, vlatte.OutcomeFailed, r.sent(), cmp.Or(warning, abort))
+	case p != nil:
+		// The recovery middleware answers a panic, once the handler is done, with the status of failures, unless the
+		// reply sent one first.
+		c.record(r, vlatte.OutcomeFailed, cmp.Or(r.sent(), r.App.config.ErrorStatusCode), fmt.Errorf("%w: %v", errPanicked, p))
+	case ctx.Err() != nil:
+		c.record(r, vlatte.OutcomeAbandoned, r.sent(), cmp.Or(warning, context.Cause(ctx)))
+	default:
+		c.record(r, vlatte.OutcomeFailed, r.sent(), cmp.Or(warning, errNoAnswer))
+	}
 }
 
 // RequestPattern returns the filter of journal entries that the request part of b matches, as it matches a request:

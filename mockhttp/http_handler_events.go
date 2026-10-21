@@ -120,9 +120,11 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *Response) {
 
 	evt.Dict("mock", dict)
 
-	// A reply that writes its own response, such as Echo or Handler, returns none: there are no response fields.
+	// A reply that writes its own response, such as Echo or Handler, returns none: the status it sent is all there is.
 	if s != nil {
 		evt.Dict("response", h.responseDict(s))
+	} else {
+		evt.Dict("response", zerolog.Dict().Int("status", r.answered(nil)))
 	}
 
 	evt.Msgf("<--- REQUEST MATCHED %s %s", r.RawRequest.Method, r.URL.Path)
@@ -289,9 +291,13 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Resp
 	buf.WriteString(h.cz.Green("Took(ms): "))
 	buf.WriteString(strconv.FormatInt(time.Since(rv.StartedAtTime).Milliseconds(), 10))
 
-	// A reply that writes its own response, such as Echo or Handler, returns none: there is no response to print.
+	// A reply that writes its own response, such as Echo or Handler, returns none: the status it sent is all there is.
 	if s != nil {
 		h.writeResponse(buf, s)
+	} else {
+		buf.WriteString("\n")
+		buf.WriteString(h.cz.Green("Status: "))
+		buf.WriteString(strconv.Itoa(rv.answered(nil)))
 	}
 
 	buf.WriteString("\n")

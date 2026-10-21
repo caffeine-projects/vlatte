@@ -50,6 +50,10 @@ type RequestValues struct {
 
 	// journal is the entry of the request in the server's journal, nil when it keeps none.
 	journal *journalCall
+
+	// answer is the writer of the response, which keeps the status the client gets. It is nil for a request the
+	// server doesn't serve, such as one rebuilt from the journal.
+	answer *answerWriter
 }
 
 // Accessors for the fields above.
@@ -58,3 +62,28 @@ func (r *RequestValues) StartedAt() time.Time           { return r.StartedAtTime
 func (r *RequestValues) OriginalRequest() *http.Request { return r.RawRequest }
 func (r *RequestValues) RawBody() []byte                { return r.RawBodyBytes }
 func (r *RequestValues) ParsedBody() any                { return r.ParsedBodyData }
+
+// sent returns the status the server sent the client, 0 before it sends one.
+func (r *RequestValues) sent() int {
+	if r.answer == nil {
+		return 0
+	}
+
+	return r.answer.status
+}
+
+// answered returns the status the client got, once a mock or a proxy answered it with res: the one sent, or res's,
+// which vlatte writes itself on a connection it takes over, such as a CONNECT's or an upgrade's. A reply that wrote
+// nothing, such as a Handler, answers 200, as net/http does.
+func (r *RequestValues) answered(res *Response) int {
+	switch {
+	case r.sent() != 0:
+		return r.sent()
+	case res != nil:
+		return res.StatusCode
+	case r.answer != nil && r.answer.hijacked:
+		return 0
+	}
+
+	return http.StatusOK
+}

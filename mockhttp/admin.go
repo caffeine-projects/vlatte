@@ -68,33 +68,37 @@ type adminEvents struct {
 func (a adminEvents) OnRequest(*RequestValues) {}
 
 func (a adminEvents) OnMatch(r *RequestValues, res *Response) {
-	a.publish(handler.EventMatched, r, res, nil)
+	a.publish(handler.EventMatched, r, r.answered(res), nil)
 }
 
 func (a adminEvents) OnProxied(r *RequestValues, res *Response) {
-	a.publish(handler.EventProxied, r, res, nil)
+	a.publish(handler.EventProxied, r, r.answered(res), nil)
 }
 
 func (a adminEvents) OnNoMatch(r *RequestValues) {
-	a.publish(handler.EventUnmatched, r, nil, nil)
+	a.publish(handler.EventUnmatched, r, r.sent(), nil)
 }
 
 func (a adminEvents) OnWarning(r *RequestValues, err error) {
-	a.publish(handler.EventWarning, r, nil, err)
+	a.publish(handler.EventWarning, r, 0, err)
 }
 
 func (a adminEvents) OnError(r *RequestValues, err error) {
-	a.publish(handler.EventError, r, nil, err)
+	a.publish(handler.EventError, r, r.sent(), err)
 }
 
-func (a adminEvents) publish(kind string, r *RequestValues, res *Response, err error) {
-	e := handler.Event{Type: kind, Time: time.Now(), RequestID: r.ReqID, Method: r.RawRequest.Method, Target: r.URL.String()}
+// publish publishes the event of r, with the status the client got, 0 for none.
+func (a adminEvents) publish(kind string, r *RequestValues, status int, err error) {
+	e := handler.Event{
+		Type:      kind,
+		Time:      time.Now(),
+		RequestID: r.ReqID,
+		Method:    r.RawRequest.Method,
+		Target:    r.URL.String(),
+		Status:    status,
+	}
 	if r.Mock != nil {
 		e.MockID = r.Mock.ID()
-	}
-
-	if res != nil {
-		e.Status = res.StatusCode
 	}
 
 	if err != nil {

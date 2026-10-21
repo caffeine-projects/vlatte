@@ -681,7 +681,22 @@ func TestAdmin_StreamsWhatTheServerServes(t *testing.T) {
 
 	unmatched := byType["unmatched"]
 	require.Equal(t, "POST", unmatched["method"])
+	require.Equal(t, float64(StatusNoMatch), unmatched["status"])
 	require.Contains(t, unmatched["target"], "/nope")
+}
+
+func TestAdmin_StreamsTheStatusAHandlerSent(t *testing.T) {
+	// A reply that writes its own response, as Handler does, returns none: the event has the status the client got.
+	m := adminServer(t, Setup())
+	m.MustMock(Getf("/made").ID("made").Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})))
+
+	byType := streamEvents(t, m, 1, func() {
+		do(t, http.MethodGet, m.URL("/made"), nil, nil)
+	})
+
+	require.Equal(t, float64(http.StatusCreated), byType["matched"]["status"])
 }
 
 func TestAdmin_StreamsWhatTheProxyServes(t *testing.T) {

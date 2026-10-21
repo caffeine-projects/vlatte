@@ -510,7 +510,7 @@ func TestHandler_EventsRunForRepliesWithoutAResponse(t *testing.T) {
 func TestLifecycle_RepliesWithoutAResponseAreLogged(t *testing.T) {
 	// #24: Echo, Handler and a Func that returns no response write their own response. Both request logs read that
 	// response and panicked on every such request: the recovery middleware tried to answer 418 after the reply had
-	// answered, and the log held a stack trace instead of the match.
+	// answered, and the log held a stack trace instead of the match. The log tells the status the client got.
 	replies := []struct {
 		name  string
 		reply ReplierFactory
@@ -551,6 +551,7 @@ func TestLifecycle_RepliesWithoutAResponseAreLogged(t *testing.T) {
 			require.Equal(t, rc.want, status)
 			require.Contains(t, logs.String(), "REQUEST MATCHED GET /x")
 			require.Contains(t, logs.String(), `"mock":{"id":"x"}`)
+			require.Contains(t, logs.String(), `"response":{"status":`+strconv.Itoa(rc.want)+`}`)
 			require.NotContains(t, logs.String(), "panic")
 		})
 	}
@@ -579,7 +580,7 @@ func TestLifecycle_RepliesWithoutAResponseAreLogged(t *testing.T) {
 			require.NoError(t, err)
 			require.Contains(t, string(out), "REQUEST MATCHED")
 			require.Contains(t, string(out), "Mock: x")
-			require.NotContains(t, string(out), "Status:")
+			require.Contains(t, string(out), "Status: "+strconv.Itoa(rc.want)+"\n")
 			require.NotContains(t, string(out), "panic")
 		})
 	}
