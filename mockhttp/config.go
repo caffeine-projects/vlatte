@@ -74,6 +74,7 @@ type Config struct {
 	Proxy                          *ProxyConfig
 	Record                         *RecordConfig
 	Admin                          *AdminConfig
+	Journal                        *JournalConfig
 	MockFileHandlers               []MockFileHandler
 	HeaderNamesToRedact            map[string]struct{}
 	UseHTTPS                       bool
@@ -133,6 +134,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.NoBodyParsing = c.NoBodyParsing
 	conf.NoDebugHeaders = c.NoDebugHeaders
 	conf.NoNearMisses = c.NoNearMisses
+	conf.Journal = c.Journal
 	conf.Middlewares = c.Middlewares
 	conf.CORS = c.CORS
 	conf.BackendFactory = c.BackendFactory
@@ -163,6 +165,26 @@ type AdminConfig struct {
 	// each Reload, so changes made to it directly take effect too. Nil keeps those mocks in memory, as long as the
 	// server runs.
 	Store AdminStore
+}
+
+// JournalConfig configures the journal of a server: the requests its mocks get, of every outcome, which tests and the
+// admin API verify and search, while the server runs: Close closes it. The requests the server answers before its
+// mocks get them, such as CORS preflights, and those a middleware answers, aren't in it. A nil *JournalConfig keeps
+// none.
+type JournalConfig struct {
+	// Dir is where the journal keeps its files, across restarts: a server that starts again finds the requests it
+	// served before. Relative paths start at RootDir. Empty keeps them in a temporary directory, which Close removes.
+	Dir string
+
+	// MaxEntries is how many requests the journal keeps, the newest. 0 keeps them all.
+	MaxEntries int
+
+	// MaxBodySize is how many bytes of a request's body the journal keeps. 0 keeps whole bodies.
+	MaxBodySize int64
+}
+
+func defaultJournalConfig() JournalConfig {
+	return JournalConfig{MaxEntries: vlatte.DefaultJournalMaxEntries, MaxBodySize: vlatte.DefaultJournalMaxBodySize}
 }
 
 // AdminStore makes the persistent store of the mocks the admin API adds, for the server app. The store keeps their
@@ -552,6 +574,13 @@ func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
 // local port. Server.AdminURL returns where it listens.
 func (cb *ConfigBuilder) Admin(addr string) *ConfigBuilder {
 	section(&cb.conf.Admin, AdminConfig{}).Addr = addr
+	return cb
+}
+
+// Journal keeps a journal of the requests the server serves, in dir, across restarts: see JournalConfig. Empty keeps
+// it in a temporary directory, which Close removes, as a test wants: a named one keeps the requests of earlier runs.
+func (cb *ConfigBuilder) Journal(dir string) *ConfigBuilder {
+	section(&cb.conf.Journal, defaultJournalConfig()).Dir = dir
 	return cb
 }
 

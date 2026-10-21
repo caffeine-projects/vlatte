@@ -199,6 +199,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	events, lifecycle := withAdminEvents(conf, lifecycle)
+	lifecycle = withJournal(app, conf, lifecycle)
 
 	globalEvents, err := prepareGlobalEvents(conf)
 	if err != nil {
@@ -228,7 +229,20 @@ func New(config ...Option) (*Server, error) {
 	loaders = append(loaders, files)
 	loaders = append(loaders, conf.Loaders...)
 
-	app.Base = vlatte.NewBase(app, repository, nil)
+	journal, err := openJournal(conf, app.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	// A server that fails to build closes its journal: a temporary one goes.
+	built := false
+	defer func() {
+		if !built {
+			journal.Close()
+		}
+	}()
+
+	app.Base = vlatte.NewBase(app, repository, journal)
 	app.storage = repository
 	app.scenarioStore = mfeat.NewScenarioStore()
 	app.params = params
@@ -283,6 +297,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	app.server = server
+	built = true
 
 	return app, nil
 }
@@ -448,7 +463,8 @@ func (app *Server) MustReload() {
 // the on_complete events still running, such as a webhook waiting for its delay or its target, so the requests
 // waiting for them end, and waits for those requests. It stops the recording, and waits until it wrote what it took,
 // and closes the forward proxy's open tunnels. It closes the idle connections of the transports it made, such as the
-// one of webhooks. A closed server doesn't start again.
+// one of webhooks. Last, it closes the journal, and removes a temporary one: verify the requests before Close, as
+// t.Cleanup(m.Close) leaves a test to. A closed server doesn't start again.
 func (app *Server) Close() {
 	app.closed.Store(true)
 
@@ -490,6 +506,11 @@ func (app *Server) Close() {
 	}
 
 	app.webhooks.CloseIdleConnections()
+
+	// Last: the requests the backend waited for are journaled. A temporary journal goes.
+	if err := app.Journal().Close(); err != nil {
+		app.logger.Warn().Err(err).Msg("server: Close: closing the journal")
+	}
 }
 
 // ProxyCA returns the certificate of the CA that signs the certificates of the hosts the forward proxy intercepts, for

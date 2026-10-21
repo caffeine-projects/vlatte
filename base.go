@@ -392,6 +392,10 @@ func describeEntry(e *JournalEntry) string {
 		fmt.Fprintf(&b, " [%s]", e.MockID)
 	}
 
+	if e.BodyTruncated {
+		b.WriteString(" (body cut)")
+	}
+
 	if e.Message != "" {
 		b.WriteString(": ")
 		b.WriteString(e.Message)

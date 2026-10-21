@@ -87,15 +87,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.lifecycle.OnRequest(reqValues)
 
-	input := &selectorInput{
-		RawRequest: r,
-		URL:        reqValues.URL,
-		Query:      r.URL.Query(),
-		Form:       r.PostForm,
-		Files:      formFiles(r),
-		ParsedBody: reqValues.ParsedBodyData,
-		ForProxy:   h.app.proxy != nil && (r.Method == http.MethodConnect || r.URL.Host != ""),
-	}
+	// A request that ends without an outcome, such as one whose client left, or that panicked, is journaled too.
+	defer reqValues.journal.end(reqValues)
+
+	input := newSelectorInput(r, reqValues, h.app.proxy != nil && (r.Method == http.MethodConnect || r.URL.Host != ""))
 
 	// A recording captures the request as it came, and the answer as the client gets it. A CONNECT opens a tunnel,
 	// which answers nothing. A recording with a target sends it what it takes, before any mock.
@@ -546,13 +541,12 @@ func (h *mockHandler) render(w http.ResponseWriter, r *RequestValues, res *Respo
 }
 
 // onNoMatches answers a request none of mocks matched, input, with the mocks that came closest, unless the server
-// reports none.
+// reports none. Its journal entry lists them too.
 func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, mocks vlatte.Mocks[*Mock, *selectorInput], input *selectorInput) {
 	defer h.lifecycle.OnNoMatch(r)
 
-	var near []vlatte.NearMiss
 	if !h.app.config.NoNearMisses {
-		near = mocks.NearMisses(r.RawRequest.Context(), input, expectationsOf, describeExpectation)
+		r.nearMisses = mocks.NearMisses(r.RawRequest.Context(), input, expectationsOf, describeExpectation)
 	}
 
 	buf := bufpool.Get()
@@ -564,7 +558,7 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, mocks
 	buf.WriteString(" ")
 	buf.WriteString(r.URL.String())
 	buf.WriteString("\n\n")
-	writeNearMisses(buf, near)
+	writeNearMisses(buf, r.nearMisses)
 
 	w.Header().Add(HeaderContentType, MIMETextPlainCharsetUTF8)
 	w.Header().Set(HeaderVlatteError, vlatte.FailureNoMatch)
@@ -653,6 +647,20 @@ func (h *mockHandler) onError(w http.ResponseWriter, r *RequestValues, failure s
 	w.WriteHeader(h.app.config.ErrorStatusCode)
 
 	buf.WriteTo(w)
+}
+
+// newSelectorInput returns what the matchers of mocks read of r, whose values rv holds: forProxy tells a request the
+// forward proxy may answer.
+func newSelectorInput(r *http.Request, rv *RequestValues, forProxy bool) *selectorInput {
+	return &selectorInput{
+		RawRequest: r,
+		URL:        rv.URL,
+		Query:      r.URL.Query(),
+		Form:       r.PostForm,
+		Files:      formFiles(r),
+		ParsedBody: rv.ParsedBodyData,
+		ForProxy:   forProxy,
+	}
 }
 
 // expectationsOf returns the matchers of the request part of m.

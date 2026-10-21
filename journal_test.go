@@ -674,3 +674,26 @@ func TestJournal_TemporaryJournalsWriteNoSidecar(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, sidecars)
 }
+
+func TestClipBody(t *testing.T) {
+	// Text stays text, clipped between characters; other bytes are cut at the limit.
+	tests := []struct {
+		name string
+		give string
+		n    int
+		want string
+	}{
+		{name: "ascii", give: "abcd", n: 2, want: "ab"},
+		{name: "between characters", give: "aéb", n: 3, want: "aé"},
+		{name: "within a character", give: "aéb", n: 2, want: "a"},
+		{name: "within a 4-byte character", give: "a😀", n: 3, want: "a"},
+		{name: "binary", give: "\xff\x00\xfe", n: 2, want: "\xff\x00"},
+		{name: "binary with a continuation byte", give: "\xff\x80\x80", n: 2, want: "\xff\x80"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, string(vlatte.ClipBody([]byte(tt.give), tt.n)))
+		})
+	}
+}

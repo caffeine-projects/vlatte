@@ -105,6 +105,11 @@ func loadConfigSources(conf *Config) error {
 		conf.Admin = &admin
 	}
 
+	if conf.Journal != nil {
+		journal := *conf.Journal
+		conf.Journal = &journal
+	}
+
 	if conf.proxyAll != nil {
 		proxyAll := *conf.proxyAll
 		proxyAll.requestHeader = slices.Clone(proxyAll.requestHeader)
@@ -446,6 +451,35 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				}
 
 				return nil
+			},
+		},
+		{
+			Key: "journal", Kind: config.Bool, Usage: "Keep a journal of the requests the server serves, of every outcome.",
+			Set: func(c *Config, v config.Value) error { toggle(&c.Journal, defaultJournalConfig(), v.Bool); return nil },
+		},
+		{
+			Key: "journal.dir", Kind: config.String,
+			Usage: "Directory of the journal's files, kept across restarts. Relative paths start at root_dir. Empty keeps " +
+				"them in a temporary directory, removed when the server stops.",
+			Set: func(c *Config, v config.Value) error {
+				section(&c.Journal, defaultJournalConfig()).Dir = v.Str
+				return nil
+			},
+		},
+		{
+			Key: "journal.max_entries", Kind: config.Int, Default: strconv.Itoa(vlatte.DefaultJournalMaxEntries),
+			Usage: "How many requests the journal keeps, the newest. 0 keeps them all.",
+			Set: func(c *Config, v config.Value) error {
+				section(&c.Journal, defaultJournalConfig()).MaxEntries = int(v.Int)
+				return checkMin(v.Int, 0)
+			},
+		},
+		{
+			Key: "journal.max_body_size", Kind: config.Int, Default: strconv.Itoa(vlatte.DefaultJournalMaxBodySize),
+			Usage: "How many bytes of a request's body the journal keeps. 0 keeps whole bodies.",
+			Set: func(c *Config, v config.Value) error {
+				section(&c.Journal, defaultJournalConfig()).MaxBodySize = v.Int
+				return checkMin(v.Int, 0)
 			},
 		},
 		{

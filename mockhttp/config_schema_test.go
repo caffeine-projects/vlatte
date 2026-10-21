@@ -33,6 +33,9 @@ func loadConfig(t *testing.T, setup *ConfigBuilder, sources ...ConfigSource) (*C
 		return nil, err
 	}
 
+	// The server never starts: its journal, which it opened, closes.
+	t.Cleanup(func() { m.Journal().Close() })
+
 	return m.Config(), nil
 }
 
@@ -59,6 +62,8 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 	// and this table must cover every flag, so a new key can't be added without a test.
 	fromFile := writeConfigFile(t, t.TempDir(), "settings.json", `{"name": "from-file"}`)
 	tlsArgs := []string{"--tls-cert", _testCertFile, "--tls-key", _testKeyFile}
+
+	journalDir := t.TempDir()
 
 	// proxy.intercept needs a CA.
 	caCert, caKey := writeTestCA(t, t.TempDir())
@@ -88,15 +93,21 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"debug":                {[]string{"--debug"}, func(t *testing.T, c *Config) { require.True(t, c.Debug) }},
 		"debug-headers":        {[]string{"--debug-headers=false"}, func(t *testing.T, c *Config) { require.True(t, c.NoDebugHeaders) }},
 		"near-misses":          {[]string{"--near-misses=false"}, func(t *testing.T, c *Config) { require.True(t, c.NoNearMisses) }},
-		"tls-cert":             {tlsArgs, func(t *testing.T, c *Config) { require.Len(t, c.TLSCertificates, 1) }},
-		"tls-key":              {tlsArgs, func(t *testing.T, c *Config) { require.Len(t, c.TLSCertificates, 1) }},
-		"tls-ca":               {slices.Concat(tlsArgs, []string{"--tls-ca", _testClientCertFile}), func(t *testing.T, c *Config) { require.NotNil(t, c.TLSClientCAs) }},
-		"log-level":            {[]string{"--log-level", "warn"}, func(t *testing.T, c *Config) { require.Equal(t, vlatte.LogLevelWarn, c.LogLevel) }},
-		"log-verbosity":        {[]string{"--log-verbosity", "body"}, func(t *testing.T, c *Config) { require.Equal(t, vlatte.LogBody, c.LogVerbosity) }},
-		"log-max-body-size":    {[]string{"--log-max-body-size", "1024"}, func(t *testing.T, c *Config) { require.Equal(t, int64(1024), c.LogBodyMaxSize) }},
-		"log-pretty":           {[]string{"--log-pretty=false"}, func(t *testing.T, c *Config) { require.False(t, c.LogPretty) }},
-		"cors":                 {[]string{"--cors"}, func(t *testing.T, c *Config) { require.Equal(t, &DefaultCORSConfig, c.CORS) }},
-		"cors-allowed-origin":  {[]string{"--cors-allowed-origin", "https://a.org"}, func(t *testing.T, c *Config) { require.Equal(t, "https://a.org", c.CORS.AllowedOrigin) }},
+		"journal":              {[]string{"--journal"}, func(t *testing.T, c *Config) { require.Equal(t, new(defaultJournalConfig()), c.Journal) }},
+		"journal-dir":          {[]string{"--journal-dir", journalDir}, func(t *testing.T, c *Config) { require.Equal(t, journalDir, c.Journal.Dir) }},
+		"journal-max-entries":  {[]string{"--journal-max-entries", "5"}, func(t *testing.T, c *Config) { require.Equal(t, 5, c.Journal.MaxEntries) }},
+		"journal-max-body-size": {
+			[]string{"--journal-max-body-size", "64"}, func(t *testing.T, c *Config) { require.Equal(t, int64(64), c.Journal.MaxBodySize) },
+		},
+		"tls-cert":            {tlsArgs, func(t *testing.T, c *Config) { require.Len(t, c.TLSCertificates, 1) }},
+		"tls-key":             {tlsArgs, func(t *testing.T, c *Config) { require.Len(t, c.TLSCertificates, 1) }},
+		"tls-ca":              {slices.Concat(tlsArgs, []string{"--tls-ca", _testClientCertFile}), func(t *testing.T, c *Config) { require.NotNil(t, c.TLSClientCAs) }},
+		"log-level":           {[]string{"--log-level", "warn"}, func(t *testing.T, c *Config) { require.Equal(t, vlatte.LogLevelWarn, c.LogLevel) }},
+		"log-verbosity":       {[]string{"--log-verbosity", "body"}, func(t *testing.T, c *Config) { require.Equal(t, vlatte.LogBody, c.LogVerbosity) }},
+		"log-max-body-size":   {[]string{"--log-max-body-size", "1024"}, func(t *testing.T, c *Config) { require.Equal(t, int64(1024), c.LogBodyMaxSize) }},
+		"log-pretty":          {[]string{"--log-pretty=false"}, func(t *testing.T, c *Config) { require.False(t, c.LogPretty) }},
+		"cors":                {[]string{"--cors"}, func(t *testing.T, c *Config) { require.Equal(t, &DefaultCORSConfig, c.CORS) }},
+		"cors-allowed-origin": {[]string{"--cors-allowed-origin", "https://a.org"}, func(t *testing.T, c *Config) { require.Equal(t, "https://a.org", c.CORS.AllowedOrigin) }},
 		"cors-allow-credentials": {
 			[]string{"--cors-allow-credentials"}, func(t *testing.T, c *Config) { require.True(t, c.CORS.AllowCredentials) },
 		},

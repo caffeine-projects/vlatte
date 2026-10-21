@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 // RequestValues groups HTTP request data, including the parsed body.
@@ -42,6 +44,12 @@ type RequestValues struct {
 
 	// bodyParser is the parser that read the body, or nil.
 	bodyParser RequestBodyParser
+
+	// nearMisses are the mocks closest to matching a request no mock matched, when the server reports them.
+	nearMisses []vlatte.NearMiss
+
+	// journal is the entry of the request in the server's journal, nil when it keeps none.
+	journal *journalCall
 }
 
 // Accessors for the fields above.

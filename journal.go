@@ -145,7 +145,7 @@ func (j *Journal) Append(e *JournalEntry) error {
 	}
 
 	if j.maxBody > 0 && int64(len(e.Body)) > j.maxBody {
-		e.Body = clip(e.Body, int(j.maxBody))
+		e.Body = ClipBody(e.Body, int(j.maxBody))
 		e.BodyTruncated = true
 	}
 
@@ -789,16 +789,24 @@ func (s *segmentFiles) close() {
 	}
 }
 
-// clip returns the first n bytes of body, n less than its length, fewer when n cuts a character of a text body:
-// clipped text stays text.
-func clip(body []byte, n int) []byte {
-	if utf8.Valid(body) {
-		for n > 0 && !utf8.RuneStart(body[n]) {
-			n--
-		}
+// ClipBody returns the first n bytes of body, n less than its length, fewer when n cuts a character of a body whose
+// first n bytes are text: clipped text stays text, as a journal keeps it.
+func ClipBody(body []byte, n int) []byte {
+	cut := n
+	for i := 1; i < utf8.UTFMax && cut > 0 && !utf8.RuneStart(body[cut]); i++ {
+		cut--
 	}
 
-	return body[:n]
+	if cut == n {
+		return body[:n]
+	}
+
+	// The character that starts at cut is one n cuts, if body is text.
+	if r, size := utf8.DecodeRune(body[cut:]); r == utf8.RuneError || cut+size <= n || !utf8.Valid(body[:cut]) {
+		return body[:n]
+	}
+
+	return body[:cut]
 }
 
 // openSegment creates segment n of dir, to append to. Its entries are requests, which may hold secrets: only the
