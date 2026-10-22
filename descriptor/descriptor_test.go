@@ -108,9 +108,9 @@ func TestConstructors_RenderTheJSONCallersSerialize(t *testing.T) {
 			want: `{"a":1,"b":"x"}`,
 		},
 		{
-			name: "key only maybe renders the self-descriptive item in place of the key",
+			name: "key only maybe keeps the key and nests the self-descriptive item",
 			give: KeyOnlyMaybe("k", inner),
-			want: `["inner","x"]`,
+			want: `["k",["inner","x"]]`,
 		},
 		{
 			name: "key only maybe falls back to the key for a plain item",
@@ -233,11 +233,15 @@ func TestDescriptor_MergeRefusesNonMapPropsAndLeavesTargetUntouched(t *testing.T
 	require.Equal(t, map[string]any{"a": 1}, target)
 }
 
-func TestDescriptor_InvalidPropsFailToMarshal(t *testing.T) {
+func TestDescriptor_InvalidPropsAreRejectedNamingTheAcceptedTypes(t *testing.T) {
 	d := Descriptor{Key: "k", Props: "boom"}
+	wantMsg := "descriptor: spec is not a valid type: expected: []any, map[string]any, Descriptor or nil. got: string"
+
+	require.EqualError(t, d.Validate(), wantMsg)
 
 	m, err := d.Marshallable()
 	require.ErrorIs(t, err, ErrSpecNotValidType)
+	require.EqualError(t, err, wantMsg)
 	require.Nil(t, m)
 
 	b, err := d.MarshalJSON()
