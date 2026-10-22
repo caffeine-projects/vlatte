@@ -431,6 +431,14 @@ func (b *Builder) OnCompleteEvent(cfg vlatte.EventConfig) *Builder {
 	return b
 }
 
+// Step adds steps that the body of each answer of the mock passes through, in order, before it reaches the client:
+// to delay it, send it in parts, change it or cut it. See [vlatte.Step]. Each answer has a flow of its own, so a
+// stage keeps what it counts for that answer only.
+//
+// Flushes pass through the steps too, and so does the end of the answer, an empty body included. A stage that
+// aborts the flow, with [vlatte.ErrAbort] or [vlatte.ErrReset], cuts the answer after what it sent: the mock counts
+// the call and runs its callbacks and events, then cuts the connection. ErrReset resets an HTTP/1 connection.
+// A failure, such as a failing reply, is vlatte's answer, and skips the steps.
 func (b *Builder) Step(steps ...vlatte.Step) *Builder {
 	b.spec.steps = append(b.spec.steps, steps...)
 

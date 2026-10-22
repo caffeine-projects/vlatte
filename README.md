@@ -412,6 +412,24 @@ An intercepted connection speaks HTTP/1.1.
 
 The transports vlatte makes go through the proxy of `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`, which leaves out `localhost`, unless `proxy.via` sets one. Docker can set these variables in containers from `~/.docker/config.json`, and so send the hosts of a compose network, such as `http://api:8080`, to that proxy: add them to `NO_PROXY`. A variable that names the vlatte server itself sends the requests it proxies back to it, until they fail as a proxy loop: set `NO_PROXY=*` for its process, or `proxy.via`.
 
+## Steps
+
+In Go, `Step` passes the body of each answer of a mock through steps, in order, before it reaches the client: to delay it, send it in parts, change it or cut it. A step is a `vlatte.Step`. For each answer, its `Open` makes the step's stage of that answer's `vlatte.Flow`, so a stage keeps what it counts for one answer only: a mock's answers don't share it.
+
+```go
+upper := vlatte.StepFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
+	if _, err := next.Write(bytes.ToUpper(b)); err != nil {
+		return 0, err
+	}
+
+	return len(b), nil
+})
+
+m.MustMock(mockhttp.Getf("/hello").Step(upper).Reply(mockhttp.OK().PlainText("hello")))
+```
+
+A stage gets each write of the body, each flush, and the end of the answer, an empty body included. It can pass a write on as it is, changed, in parts, later or not at all, and send what it holds at a flush or at the end. It may write from a goroutine of its own, and needs no lock: vlatte orders its writes with the reply's. Steps can change the body's length, so the answer has no `Content-Length`. A stage aborts the answer by returning an error that matches `vlatte.ErrAbort`, or with `Flow.Abort`, such as from a timer, which ends a reply that waits on the answer's context, as a proxy reply does. The mock still counts the call and runs its callbacks and events. Then the connection is cut, after what was sent: an HTTP/1 connection is closed, and an HTTP/2 stream is reset. With `vlatte.ErrReset`, an HTTP/1 connection is reset too, so the client reads `ECONNRESET`. A failure, such as a failing reply, is vlatte's answer, and skips the steps.
+
 ## Recording and playback
 
 A server records what it proxies as mock files, then answers the same requests the same way, without the service.

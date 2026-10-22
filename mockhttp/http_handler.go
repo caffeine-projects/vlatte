@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +13,8 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
@@ -19,37 +22,175 @@ import (
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
 
-// topResponseWriter passes every write of a reply through the steps of its mock, then to rw.
+var (
+	_ http.ResponseWriter = (*topResponseWriter)(nil)
+	_ http.Flusher        = (*topResponseWriter)(nil)
+	_ http.Hijacker       = (*topResponseWriter)(nil)
+	_ vlatte.Stage        = responseSink{}
+)
+
+// errAbandoned ends the flow of the steps of a mock whose reply failed or panicked: a failure is vlatte's answer, not
+// the mock's.
+var errAbandoned = errors.New("http: the reply ended before its steps did")
+
+// topResponseWriter passes the body a reply writes, and its flushes, through one flow of the steps of its mock, then
+// to rw. A stage may write from a goroutine of its own, so mu guards rw: every call to it, the wrapper's and the
+// flow's sink's, takes mu. The reply sees an http.ResponseWriter as any other, and needs no lock of its own.
 type topResponseWriter struct {
-	ctx   context.Context
-	steps []vlatte.Step
-	rw    http.ResponseWriter
+	mu         sync.Mutex
+	rw         http.ResponseWriter
+	flow       *vlatte.Flow
+	headerSent bool
+	ended      bool
 }
 
-func (w *topResponseWriter) Header() http.Header { return w.rw.Header() }
+// newTopResponseWriter opens the flow of steps, within ctx, in front of rw.
+func newTopResponseWriter(ctx context.Context, steps []vlatte.Step, rw http.ResponseWriter) *topResponseWriter {
+	w := &topResponseWriter{rw: rw}
+	w.flow = vlatte.NewFlow(ctx, responseSink{w}, steps)
+
+	return w
+}
+
+func (w *topResponseWriter) Header() http.Header {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return w.rw.Header()
+}
 
 // WriteHeader sends the status and the headers. Steps can change how many bytes go out, so a Content-Length, such as
 // a proxy's target sends, would be wrong: the server measures the body instead, or sends it chunked.
 func (w *topResponseWriter) WriteHeader(statusCode int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	w.rw.Header().Del(HeaderContentLength)
 	w.rw.WriteHeader(statusCode)
+
+	if statusCode >= http.StatusOK || statusCode == http.StatusSwitchingProtocols {
+		w.headerSent = true
+	}
 }
 
-// Write passes p through the steps, then to rw.
-// The steps may change the bytes they pass on, so Write reports len(p) written, as io.Writer requires. The first write
-// sends the headers, without a Content-Length, as WriteHeader does.
+// Write passes p through the steps, then to rw, after the headers.
 func (w *topResponseWriter) Write(p []byte) (int, error) {
-	w.rw.Header().Del(HeaderContentLength)
+	w.sendHeader()
+	return w.flow.Write(p)
+}
 
-	if _, err := vlatte.Flow(w.ctx, &vlatte.Sink{W: w.rw}, w.steps).Next(p); err != nil {
+// FlushError passes the flush through the steps, then flushes rw, after the headers: a stage that delays the body
+// delays its flushes too.
+func (w *topResponseWriter) FlushError() error {
+	w.sendHeader()
+	return w.flow.Flush()
+}
+
+// Flush implements http.Flusher, as FlushError does.
+func (w *topResponseWriter) Flush() {
+	_ = w.FlushError()
+}
+
+// Hijack takes the connection over from rw, under the lock.
+func (w *topResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return http.NewResponseController(w.rw).Hijack()
+}
+
+// SetReadDeadline sets the read deadline of rw, under the lock.
+func (w *topResponseWriter) SetReadDeadline(deadline time.Time) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return http.NewResponseController(w.rw).SetReadDeadline(deadline)
+}
+
+// SetWriteDeadline sets the write deadline of rw, under the lock.
+func (w *topResponseWriter) SetWriteDeadline(deadline time.Time) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return http.NewResponseController(w.rw).SetWriteDeadline(deadline)
+}
+
+// EnableFullDuplex has rw read the request while it writes the response, under the lock.
+func (w *topResponseWriter) EnableFullDuplex() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return http.NewResponseController(w.rw).EnableFullDuplex()
+}
+
+// Unwrap returns the response writer, so captureWriterOf finds the capture under it. http.ResponseController finds
+// the wrapper's own methods first.
+func (w *topResponseWriter) Unwrap() http.ResponseWriter { return w.rw }
+
+// Context returns the flow's context: it ends when the request's does, or a stage aborts the flow.
+func (w *topResponseWriter) Context() context.Context { return w.flow.Context() }
+
+// sendHeader sends the status, 200 unless the reply sent one, before the first bytes or flush enter the flow. The
+// server then writes from its own copy of the headers, so the reply setting one later, such as a trailer, doesn't
+// race a stage that writes from a goroutine of its own.
+func (w *topResponseWriter) sendHeader() {
+	if !w.headerSent {
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// end ends the flow once the reply wrote all it will: its stages pass on what they hold, and end. It returns once the
+// last did, so nothing writes to rw after it.
+func (w *topResponseWriter) end() error {
+	w.ended = true
+	return w.flow.Close()
+}
+
+// abandon ends a flow that end didn't, such as on a panic or a failure, which are vlatte's answer, not the mock's:
+// its stages drop what they hold. A nil w, for a mock without steps, has none.
+func (w *topResponseWriter) abandon() {
+	if w != nil && !w.ended {
+		w.flow.Abort(errAbandoned)
+		_ = w.end()
+	}
+}
+
+// aborted returns the cause of the flow when a stage aborted it, or nil.
+func (w *topResponseWriter) aborted() error {
+	if cause := context.Cause(w.flow.Context()); errors.Is(cause, vlatte.ErrAbort) {
+		return cause
+	}
+
+	return nil
+}
+
+// responseSink ends the flow of a topResponseWriter: it writes to its rw, under its lock. Once the flow ended, it
+// writes nothing more, whatever a stage still passes on.
+type responseSink struct{ w *topResponseWriter }
+
+func (s responseSink) Write(p []byte) (int, error) {
+	if err := context.Cause(s.w.flow.Context()); err != nil {
 		return 0, err
 	}
 
-	return len(p), nil
+	s.w.mu.Lock()
+	defer s.w.mu.Unlock()
+
+	return s.w.rw.Write(p)
 }
 
-// Unwrap returns the response writer, so http.ResponseController can flush it.
-func (w *topResponseWriter) Unwrap() http.ResponseWriter { return w.rw }
+func (s responseSink) Flush() error {
+	if err := context.Cause(s.w.flow.Context()); err != nil {
+		return err
+	}
+
+	s.w.mu.Lock()
+	defer s.w.mu.Unlock()
+
+	return flushTo(http.NewResponseController(s.w.rw))
+}
+
+func (s responseSink) Close() error { return nil }
 
 type mockHandler struct {
 	app                   *Server
@@ -176,18 +317,40 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// A failure is vlatte's answer, not the mock's, so it skips the steps of the mock.
+	// A failure is vlatte's answer, not the mock's, so it skips the steps of the mock. The flow of the steps drives the
+	// reply: a stage that aborts it, such as on a timer, ends a reply that waits.
 	rw := w
+	ctx := r.Context()
+
+	var top *topResponseWriter
 	if steps := mock.Steps(); len(steps) > 0 {
-		w = &topResponseWriter{ctx: r.Context(), steps: steps, rw: w}
+		top = newTopResponseWriter(ctx, steps, w)
+		defer top.abandon()
+
+		w = top
+		ctx = top.Context()
 	}
 
 	noSwitch := len(mock.Steps()) > 0 || len(mock.spec.mappers) > 0
 
-	res, err := mock.reply.Reply(r.Context(), ReplyInput{RequestValues: reqValues, Writer: w, noSwitch: noSwitch})
+	// cut is the cause of a flow a stage aborted. The cut is the mock's answer: the call counts, then the connection
+	// is cut.
+	var cut error
+
+	res, err := mock.reply.Reply(ctx, ReplyInput{RequestValues: reqValues, Writer: w, noSwitch: noSwitch})
 	if err != nil {
-		h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: %w", err))
-		return
+		if top != nil {
+			cut = top.aborted()
+		}
+
+		if cut == nil {
+			top.abandon()
+			h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: %w", err))
+
+			return
+		}
+
+		_ = top.end()
 	}
 
 	// Render closes the body it sends. A response that isn't rendered, after a failing mapper or a panic, still
@@ -209,6 +372,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case cut != nil:
+		// A cut answer isn't recorded.
 	case res != nil && res.upgrade != nil:
 		h.debugHeader(rw, vlatte.ProxiedHeader, "true")
 
@@ -230,6 +395,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// A streamed body, such as a proxy's, is read whole for mappers.
 		if len(mock.spec.mappers) > 0 && len(res.Body) == 0 {
 			if err = res.readBody(); err != nil {
+				top.abandon()
 				h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: reading the response body: %w", err))
 				return
 			}
@@ -237,6 +403,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		for i, mapper := range mock.spec.mappers {
 			if err = mapper(reqValues, res); err != nil {
+				top.abandon()
 				h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: response mapper at index %d: %w", i, err))
 				return
 			}
@@ -247,9 +414,19 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// The mock counts as served, whatever happens to the answer once its status and headers are sent.
-		h.render(w, reqValues, res, capture)
-	case capture != nil:
-		capture.record()
+		cut = h.render(ctx, w, reqValues, res, capture)
+	default:
+		// A reply that writes its own answer, such as Echo, wrote it all: the steps pass on what they hold.
+		if top != nil {
+			endErr := top.end()
+			if cut = top.aborted(); cut == nil && endErr != nil {
+				h.renderFailed(reqValues, false, fmt.Errorf("http: ending the steps: %w", endErr))
+			}
+		}
+
+		if capture != nil && cut == nil {
+			capture.record()
+		}
 	}
 
 	mock.Inc()
@@ -305,6 +482,27 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	h.lifecycle.OnMatch(reqValues, res)
+
+	if cut != nil {
+		h.cut(rw, cut)
+	}
+}
+
+// cut ends the answer as a stage of the mock asked, once the call is counted and logged: with a reset over a
+// connection that can take one, else by aborting the handler, which closes an HTTP/1 connection and resets an HTTP/2
+// stream. w is the writer under the steps.
+func (h *mockHandler) cut(w http.ResponseWriter, cause error) {
+	// The client gets what the mock sent before the cut: neither an abort nor a hijack sends what the server buffers.
+	_ = flushTo(http.NewResponseController(w))
+
+	if errors.Is(cause, vlatte.ErrReset) {
+		if conn, err := hijack(w); err == nil {
+			resetConn(conn)
+			return
+		}
+	}
+
+	panic(http.ErrAbortHandler)
 }
 
 // serveUpstream answers with what upstream answers, the target of a recording or the host of the forward proxy, has
@@ -339,7 +537,7 @@ func (h *mockHandler) serveUpstream(w http.ResponseWriter, r *RequestValues, ups
 		return
 	}
 
-	h.render(w, r, res, capture)
+	_ = h.render(ctx, w, r, res, capture)
 	h.lifecycle.OnProxied(r, res)
 }
 
@@ -515,31 +713,45 @@ func (h *mockHandler) debugHeader(w http.ResponseWriter, key, value string) {
 	w.Header().Set(key, value)
 }
 
-// render sends res, and has the capture, if any, record it once the client got it whole. The status and headers are
-// sent by now, so an error can't become the response: it is logged, as a warning when the client went away. A proxied
-// answer whose body broke off cuts the client's connection, as a proxy does, so the client doesn't take part of the
-// target's body for all of it.
-func (h *mockHandler) render(w http.ResponseWriter, r *RequestValues, res *Response, capture *captureWriter) {
-	ctx := r.RawRequest.Context()
+// render sends res through w, ends the steps of the mock, if any, and has the capture, if any, record the answer once
+// the client got it whole. It returns the cause of an abort a stage asked for, or nil: the caller cuts the answer.
+// The status and headers are sent by now, so an error can't become the response: renderFailed logs it.
+func (h *mockHandler) render(ctx context.Context, w http.ResponseWriter, r *RequestValues, res *Response, capture *captureWriter) error {
+	err := res.Render(ctx, w)
 
-	if err := res.Render(ctx, w); err != nil {
-		err = fmt.Errorf("http: rendering response: %w", err)
+	// The steps pass on what they hold before anything reads what the client got.
+	if top, ok := w.(*topResponseWriter); ok {
+		err = cmp.Or(err, top.end())
 
-		switch {
-		case ctx.Err() != nil:
-			h.lifecycle.OnWarning(r, err)
-		case res.proxied:
-			h.lifecycle.OnError(r, err)
-			panic(http.ErrAbortHandler)
-		default:
-			h.lifecycle.OnError(r, err)
+		if cut := top.aborted(); cut != nil {
+			return cut
 		}
+	}
 
-		return
+	if err != nil {
+		h.renderFailed(r, res.proxied, fmt.Errorf("http: rendering response: %w", err))
+		return nil
 	}
 
 	if capture != nil {
 		capture.record()
+	}
+
+	return nil
+}
+
+// renderFailed logs err, the failure of an answer whose status and headers are sent: as a warning when the client went
+// away. A proxied answer whose body broke off cuts the client's connection, as a proxy does, so the client doesn't
+// take part of the target's body for all of it.
+func (h *mockHandler) renderFailed(r *RequestValues, proxied bool, err error) {
+	switch {
+	case r.RawRequest.Context().Err() != nil:
+		h.lifecycle.OnWarning(r, err)
+	case proxied:
+		h.lifecycle.OnError(r, err)
+		panic(http.ErrAbortHandler)
+	default:
+		h.lifecycle.OnError(r, err)
 	}
 }
 

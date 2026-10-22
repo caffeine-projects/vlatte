@@ -86,7 +86,7 @@ func TestPropStream_EachPauseFollowsAFlush(t *testing.T) {
 
 		var w http.ResponseWriter = ew
 		if withSteps {
-			w = &topResponseWriter{ctx: context.Background(), steps: []vlatte.Step{appendStep("")}, rw: ew}
+			w = newTopResponseWriter(context.Background(), []vlatte.Step{appendStep("")}, ew)
 		}
 
 		waits := 0

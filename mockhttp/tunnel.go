@@ -173,6 +173,27 @@ func pipe(client, upstream io.ReadWriteCloser) error {
 	return err
 }
 
+// resetConn closes conn with a TCP reset: the peer reads a reset, not an end, and what conn still had to send is
+// dropped. A connection with no TCP connection under its wrappers is closed.
+func resetConn(conn net.Conn) {
+	for {
+		switch c := conn.(type) {
+		case *net.TCPConn:
+			_ = c.SetLinger(0)
+			_ = c.Close()
+
+			return
+		case *bufferedConn:
+			conn = c.Conn
+		case *tls.Conn:
+			conn = c.NetConn()
+		default:
+			_ = conn.Close()
+			return
+		}
+	}
+}
+
 // closeWrite ends what goes out on c, and leaves what comes in open, when c can: a connection that can't is closed.
 func closeWrite(c io.ReadWriteCloser) error {
 	if cw, ok := c.(interface{ CloseWrite() error }); ok {

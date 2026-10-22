@@ -307,7 +307,7 @@ type proxyReplier struct {
 }
 
 // Reply implements Replier.
-func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, error) {
+func (p *proxyReplier) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
 	in := input.RequestValues.RawRequest
 
 	target, err := p.forwardURL(in.URL)
@@ -316,7 +316,7 @@ func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, er
 	}
 
 	// The target gets a copy: what runs after the reply, such as callbacks and events, sees the request as it came.
-	out, err := forwardRequest(in.Context(), in, p.id)
+	out, err := forwardRequest(ctx, in, p.id)
 	if err != nil {
 		return nil, fmt.Errorf("reply_proxy: %w", err)
 	}

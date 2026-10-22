@@ -2,100 +2,213 @@ package vlatte
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"slices"
 )
 
 var (
-	_ io.Writer = (*Sink)(nil)
-	_ Step      = (*Sink)(nil)
-	_ Step      = StepFunc(nil)
-	_ Next      = (*link)(nil)
-	_ Next      = end{}
+	// ErrAbort is the cause of a flow a stage aborted, with [Flow.Abort] or by returning an error that matches it.
+	// The server cuts the stream: an HTTP/1 connection is closed, and an HTTP/2 stream is reset.
+	ErrAbort = errors.New("flow: aborted")
+
+	// ErrReset aborts a flow, as [ErrAbort] does, with a TCP reset where the connection allows one: its unsent data
+	// is dropped and the peer reads a reset, not an end. Elsewhere, such as over HTTP/2, it cuts the stream.
+	ErrReset = errors.New("flow: reset")
 )
 
-// Next is the rest of a flow after a [Step]: the steps after it, then the sink.
-// Next passes b to the next step and returns what that step returns. Through steps that pass their buffer on whole,
-// that is what the sink wrote, which is not len(b) once a step changed the bytes.
-// Next can be called any number of times, as by a step that passes its buffer on in parts: each call passes its
-// buffer through all of the rest of the flow.
-type Next interface {
-	Next(b []byte) (n int, err error)
+// errClosed is the cause of a flow once it is closed.
+var errClosed = errors.New("flow: closed")
+
+var (
+	_ Stage = (*Flow)(nil)
+	_ Stage = (*Sink)(nil)
+	_ Stage = (*funcStage)(nil)
+	_ Stage = clipped{}
+	_ Step  = StepFunc(nil)
+)
+
+// Stage is a step's part of one [Flow]. Write follows [io.Writer]: n is how much of b the stage took, which is len(b)
+// when it passed b on changed, in parts, later, or not at all.
+//
+// A stage decides what goes on to next: b as it is, changed or in parts, later, or nothing. It fails the flow by
+// returning an error. One that matches [ErrAbort] or [ErrReset] aborts it. Flush passes on what the stage holds,
+// then flushes next. Close passes on what it holds, then closes next.
+//
+// The flow's caller calls a stage one call at a time. A stage may call next from a goroutine of its own, as one that
+// delays its writes does: its calls never overlap, and all of them end before its Close returns.
+// b is the caller's, as for [io.Writer]: a stage must not change its bytes, and copies it to keep it once Write
+// returned. The flow clips every b, so append always copies it.
+// Once the flow's [Flow.Context] ends, a stage drops what it holds, returns from Close at once, and its goroutines
+// and timers end.
+type Stage interface {
+	Write(b []byte) (n int, err error)
+	Flush() error
+	Close() error
 }
 
-// Step is a stage of a flow. Handle gets each buffer the stage before it passes on, and decides what goes on: it can
-// pass b to next as it is, pass it on changed or in parts, delay it, drop it by not calling next, or fail the write
-// by returning an error, which next returns to the step before it.
-// Handle calls next one call at a time, and never once it returned: the sink, such as a response writer, can't be
-// written to concurrently or later.
-// b is the caller's, as for [io.Writer]: Handle must not change its bytes, nor keep it once it returned. To change
-// the bytes, it passes on a new slice, such as append returns: the flow clips b, so append always copies it.
-// Steps can be shared, such as a mock's steps across its requests: Handle must be safe for concurrent use.
+// Step makes its [Stage] of each [Flow] it is part of, in front of next: the rest of the flow. A step keeps what
+// lasts the whole flow in its stage, such as a count of the bytes it passed. A mock's steps make the stages of all
+// its responses: Open must be safe for concurrent use.
+//
+// flow gives the stage the flow's context, and a way to abort it from a timer: see [Flow.Abort].
 type Step interface {
-	Handle(ctx context.Context, b []byte, next Next) (n int, err error)
+	Open(flow *Flow, next Stage) Stage
 }
 
-// StepFunc is an adapter to allow the use of ordinary functions as pipeline Steps.
+// StepFunc is a [Step] with no state, an adapter for ordinary functions: its stage calls it for each write, with the
+// flow's context, and passes Flush and Close on.
 //
 // Example:
 //
-//	StepFunc(func(ctx context.Context, b []byte, next Next) (int, error) {
-//	    select {
-//	    case <-ctx.Done():
-//	        return 0, ctx.Err()
-//	    default:
-//	        return next.Next(b)
+//	StepFunc(func(ctx context.Context, b []byte, next Stage) (int, error) {
+//	    if _, err := next.Write(bytes.ToUpper(b)); err != nil {
+//	        return 0, err
 //	    }
+//
+//	    return len(b), nil
 //	})
-type StepFunc func(ctx context.Context, b []byte, next Next) (n int, err error)
+type StepFunc func(ctx context.Context, b []byte, next Stage) (n int, err error)
 
-// Handle calls the underlying function, allowing [StepFunc] to satisfy the [Step] interface.
-func (f StepFunc) Handle(ctx context.Context, b []byte, next Next) (n int, err error) {
-	return f(ctx, b, next)
+// Open makes the stage of f in flow, in front of next.
+func (f StepFunc) Open(flow *Flow, next Stage) Stage {
+	return &funcStage{fn: f, ctx: flow.Context(), next: next}
 }
 
-// Flow returns the start of a flow that passes a buffer through steps, in order, then to sink. Every step gets ctx,
-// typically the request's context, so it can stop when the client leaves or a deadline passes.
-// The sink ends the flow: the [Next] it gets returns [io.EOF].
-// Flow neither keeps nor changes steps, so they can be shared, such as a mock's steps across concurrent requests.
-func Flow(ctx context.Context, sink Step, steps []Step) Next {
-	links := make([]link, len(steps)+1)
-	links[len(steps)] = link{ctx: ctx, step: sink, next: end{}}
+// Flow is one stream through steps: a response body, the bytes of a response on the wire, a request body, one
+// direction of a connection. Each step has its [Stage] in it, and the sink comes last.
+//
+// A flow is a [Stage] itself: its caller calls Write, Flush and Close, one call at a time, and Close once the stream
+// ends. Once its [Flow.Context] ends, Write and Flush return the cause.
+type Flow struct {
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+	head   Stage
+	closed bool
+}
 
-	for i, step := range slices.Backward(steps) {
-		links[i] = link{ctx: ctx, step: step, next: &links[i+1]}
+// NewFlow opens the stages of steps in a new flow, in front of sink, from the last step to the first. The flow's
+// context derives from ctx, typically the request's, so its stages stop when the client leaves. Steps can be shared,
+// such as a mock's steps across its concurrent requests: NewFlow neither keeps nor changes steps.
+func NewFlow(ctx context.Context, sink Stage, steps []Step) *Flow {
+	f := &Flow{}
+	f.ctx, f.cancel = context.WithCancelCause(ctx)
+
+	next := Stage(clipped{sink})
+	for _, step := range slices.Backward(steps) {
+		next = clipped{step.Open(f, next)}
 	}
 
-	return &links[0]
+	f.head = next
+
+	return f
 }
 
-// link is a step of a flow, with next as the rest of the flow.
-type link struct {
+// Context returns the flow's context. It ends when the context the flow was made with does, when a stage aborts the
+// flow, or once the flow is closed. context.Cause tells which: a cause that matches [ErrAbort] is an abort.
+func (f *Flow) Context() context.Context {
+	return f.ctx
+}
+
+// Abort aborts the flow, from any goroutine, such as a stage's timer: it ends the flow's context with a cause that
+// matches [ErrAbort] and err, which may be nil. Pass [ErrReset] for a reset. The first end wins: once the flow ended,
+// Abort does nothing.
+func (f *Flow) Abort(err error) {
+	switch {
+	case err == nil:
+		err = ErrAbort
+	case !errors.Is(err, ErrAbort):
+		err = fmt.Errorf("%w: %w", ErrAbort, err)
+	}
+
+	f.cancel(err)
+}
+
+// Write passes b to the first stage. An error that matches [ErrAbort] or [ErrReset] aborts the flow.
+func (f *Flow) Write(b []byte) (int, error) {
+	if err := context.Cause(f.ctx); err != nil {
+		return 0, err
+	}
+
+	n, err := f.head.Write(b)
+
+	return n, f.check(err)
+}
+
+// Flush has the stages pass on what they hold, then flushes the sink.
+func (f *Flow) Flush() error {
+	if err := context.Cause(f.ctx); err != nil {
+		return err
+	}
+
+	return f.check(f.head.Flush())
+}
+
+// Close ends the stream: the stages pass on what they hold and end, in order, then the sink. Then the flow's context
+// ends. Close returns once the last stage did, so nothing reaches the sink after it. Closing again does nothing.
+func (f *Flow) Close() error {
+	if f.closed {
+		return nil
+	}
+
+	f.closed = true
+	err := f.check(f.head.Close())
+	f.cancel(errClosed)
+
+	return err
+}
+
+// check aborts the flow when err asks to.
+func (f *Flow) check(err error) error {
+	if errors.Is(err, ErrAbort) || errors.Is(err, ErrReset) {
+		f.Abort(err)
+	}
+
+	return err
+}
+
+// funcStage is the stage of a StepFunc in a flow.
+type funcStage struct {
+	fn   StepFunc
 	ctx  context.Context
-	step Step
-	next Next
+	next Stage
 }
 
-// Next clips b, so a step that appends to it can't write over what follows b in its array, such as the next part of
-// a step that passes its buffer on in parts.
-func (l *link) Next(b []byte) (int, error) {
-	return l.step.Handle(l.ctx, slices.Clip(b), l.next)
-}
+func (s *funcStage) Write(b []byte) (int, error) { return s.fn(s.ctx, b, s.next) }
 
-// end is what follows the sink: nothing.
-type end struct{}
+func (s *funcStage) Flush() error { return s.next.Flush() }
 
-func (end) Next([]byte) (int, error) { return 0, io.EOF }
+func (s *funcStage) Close() error { return s.next.Close() }
 
-// Sink is the final [Step] that writes the final output to the underlying [io.Writer].
+// clipped passes every buffer to s clipped, so a stage that appends to one can't write over what follows it in its
+// array, such as the next part of a stage that passes its buffer on in parts.
+type clipped struct{ s Stage }
+
+func (c clipped) Write(b []byte) (int, error) { return c.s.Write(slices.Clip(b)) }
+
+func (c clipped) Flush() error { return c.s.Flush() }
+
+func (c clipped) Close() error { return c.s.Close() }
+
+// Sink is a [Stage] that ends a flow: it writes what it gets to W.
 type Sink struct{ W io.Writer }
 
-// Handle writes the provided byte slice to the underlying [io.Writer].
-func (s *Sink) Handle(_ context.Context, b []byte, _ Next) (int, error) {
-	return s.W.Write(b)
+// Write writes p to W and returns what W returns, so a Sink is also an [io.Writer].
+func (s *Sink) Write(p []byte) (n int, err error) {
+	return s.W.Write(p)
 }
 
-// Write writes p to W and returns what W returns, as Handle does, so a Sink is also an [io.Writer].
-func (s *Sink) Write(p []byte) (n int, err error) {
-	return s.Handle(context.Background(), p, nil)
+// Flush flushes W when it can, with a Flush() error method, such as a [bufio.Writer] has.
+func (s *Sink) Flush() error {
+	if f, ok := s.W.(interface{ Flush() error }); ok {
+		return f.Flush()
+	}
+
+	return nil
+}
+
+// Close does nothing: W is its owner's to close.
+func (s *Sink) Close() error {
+	return nil
 }
