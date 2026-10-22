@@ -34,7 +34,8 @@ var _wireHeaders = []string{HeaderContentLength, "Transfer-Encoding", HeaderConn
 type wireResponseWriter struct {
 	conn      net.Conn
 	tunnels   *tunnels
-	release   context.CancelFunc // releases the flow's context
+	base      context.Context    // the context the flow derives from, which the server's close ends
+	release   context.CancelFunc // releases base
 	flow      *vlatte.Flow
 	out       vlatte.Stage // the flow, or the connection once the steps are abandoned
 	header    http.Header
@@ -88,8 +89,8 @@ func (h *mockHandler) takeOver(ctx context.Context, w http.ResponseWriter, r *Re
 		ww.chunked = true
 	}
 
-	ctx, ww.release = h.app.tunnels.bind(context.WithoutCancel(ctx))
-	ww.flow = vlatte.NewFlow(ctx, &vlatte.Sink{W: conn}, steps)
+	ww.base, ww.release = h.app.tunnels.bind(context.WithoutCancel(ctx))
+	ww.flow = vlatte.NewFlow(ww.base, &vlatte.Sink{W: conn}, steps)
 	ww.out = ww.flow
 
 	return ww, nil
@@ -267,11 +268,12 @@ func (w *wireResponseWriter) finish(cut error) {
 	w.close(cut)
 }
 
-// handOver hands the connection over to a switch of protocols, with the flow of the wire steps, which go on with its
-// bytes: the answer no longer finishes it. close ends them, as finish does, with the cause of a cut, if any.
-func (w *wireResponseWriter) handOver() (conn net.Conn, flow *vlatte.Flow, closeConn func(cut error)) {
+// handOver hands the connection over to a switch of protocols, with the flow of the wire steps, which go on with
+// what goes to the client, and base, the context of what goes the other way, which the end of the flow doesn't end:
+// the answer no longer finishes them. close ends them, as finish does, with the cause of a cut, if any.
+func (w *wireResponseWriter) handOver() (conn net.Conn, base context.Context, flow *vlatte.Flow, closeConn func(cut error)) {
 	w.finished = true
-	return w.conn, w.flow, w.close
+	return w.conn, w.base, w.flow, w.close
 }
 
 // close ends the flow, and closes the connection, or resets it for a cut that matches ErrReset. The steps of a cut

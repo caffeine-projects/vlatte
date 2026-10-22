@@ -42,7 +42,7 @@ var (
 // b is the caller's, as for [io.Writer]: a stage must not change its bytes, and copies it to keep it once Write
 // returned. The flow clips every b, so append always copies it.
 // Once the flow's [Flow.Context] ends, a stage drops what it holds, returns from Close at once, and its goroutines
-// and timers end: what it still passes on doesn't reach the sink.
+// and timers end: what it passes on from then on doesn't reach the sink.
 type Stage interface {
 	Write(b []byte) (n int, err error)
 	Flush() error

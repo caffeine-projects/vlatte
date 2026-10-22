@@ -1413,6 +1413,7 @@ func TestProxy_AStepThatCutsTheAnswerCutsTheSwitch(t *testing.T) {
 	conn, err := net.Dial("tcp", hostOf(t, m))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
+	require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
 
 	_, err = fmt.Fprintf(conn, "GET /ws HTTP/1.1\r\nHost: %s\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n", hostOf(t, m))
 	require.NoError(t, err)
@@ -1421,6 +1422,46 @@ func TestProxy_AStepThatCutsTheAnswerCutsTheSwitch(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, got)
 	require.EqualValues(t, 1, scoped.Hits())
+}
+
+func TestProxy_ATargetThatEndsWhatItSendsLeavesTheClientSending(t *testing.T) {
+	// A side that ends what it sends has the other side go on until its own end, through the steps of each direction:
+	// the end of what the target sends, through the wire steps, doesn't end what the client sends.
+	got := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		conn, rw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+
+		defer conn.Close()
+
+		_, _ = io.WriteString(rw, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\nhello")
+		_ = rw.Flush()
+		_ = conn.(*net.TCPConn).CloseWrite()
+
+		b, _ := io.ReadAll(rw)
+		got <- string(b)
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/ws").WireStep(vlatte.StepFunc(passWire)).UpstreamStep(appendStep("?")).Reply(From(target.URL)))
+
+	conn, br, res := switchThrough(t, m, "/ws")
+	require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
+
+	hello, err := io.ReadAll(br)
+	require.NoError(t, err)
+	require.Equal(t, "hello", string(hello))
+
+	_, err = io.WriteString(conn, "ping")
+	require.NoError(t, err)
+	require.NoError(t, conn.(*net.TCPConn).CloseWrite())
+
+	require.Equal(t, "ping?", <-got)
 }
 
 func TestProxy_AClientMayOfferSeveralProtocols(t *testing.T) {

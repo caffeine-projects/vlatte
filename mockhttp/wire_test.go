@@ -20,8 +20,9 @@ import (
 )
 
 var (
-	_ vlatte.Step = wireLogStep{}
-	_ vlatte.Step = holdHeadStep{}
+	_ vlatte.Step  = wireLogStep{}
+	_ vlatte.Stage = (*wireLogStage)(nil)
+	_ vlatte.Step  = holdHeadStep{}
 )
 
 // dialServer opens a connection to the server of m, and sends it a GET of path in HTTP/1.1.
@@ -459,4 +460,25 @@ func TestWire_AFlushSendsTheHeadAtOnce(t *testing.T) {
 	body, err := io.ReadAll(res.Body)
 	require.NoError(t, err)
 	require.Equal(t, "event", string(body))
+}
+
+func TestWire_ACutOfTheBodyStepsEndsTheAnswerShort(t *testing.T) {
+	// A body step that cuts the answer leaves the client with a body that breaks off, not one that looks whole: the
+	// wire doesn't get its last chunk.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scoped := m.MustMock(Getf("/cut").
+		Step(limitStep{n: 2, err: vlatte.ErrAbort}).
+		WireStep(vlatte.StepFunc(passWire)).
+		Reply(OK().PlainText("hello")))
+
+	res, err := http.ReadResponse(bufio.NewReader(dialServer(t, m, "/cut")), nil)
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	require.Equal(t, "he", string(body))
+	require.EqualValues(t, 1, scoped.Hits())
 }

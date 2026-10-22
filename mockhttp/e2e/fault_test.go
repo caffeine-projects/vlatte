@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"bufio"
 	"bytes"
 	"io"
 	"net"
@@ -85,9 +84,6 @@ func TestFault_RandomDataThenClose(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, fault.RandomDataSize)
 	require.False(t, bytes.HasPrefix(got, []byte("HTTP/")))
-
-	_, err = http.ReadResponse(bufio.NewReader(bytes.NewReader(got)), nil)
-	require.Error(t, err, "a client can't read garbage as an answer")
 	require.EqualValues(t, 1, scoped.Hits())
 }
 

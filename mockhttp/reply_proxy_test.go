@@ -19,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -1475,6 +1476,51 @@ func TestProxyReply_AnUpstreamAbortCutsTheAnswer(t *testing.T) {
 	_, err := client.Post(m.URL("/up"), MIMETextPlain, strings.NewReader("ping"))
 	require.ErrorIs(t, err, io.EOF)
 	require.EqualValues(t, 1, scoped.Hits())
+}
+
+// holdStep holds what its stage gets until d passed, or the flow ends.
+type holdStep struct{ d time.Duration }
+
+func (s holdStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+	return vlatte.StepFunc(func(ctx context.Context, b []byte, next vlatte.Stage) (int, error) {
+		select {
+		case <-time.After(s.d):
+			return next.Write(b)
+		case <-ctx.Done():
+			return 0, context.Cause(ctx)
+		}
+	}).Open(flow, next)
+}
+
+func TestStepReader_CloseStopsTheSteps(t *testing.T) {
+	// A target that answered early, before it read the whole body, has the transport close it: a stage that holds the
+	// body on a timer doesn't keep the call waiting.
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		r := newStepReader(t.Context(), io.NopCloser(strings.NewReader("ping")), []vlatte.Step{holdStep{d: time.Hour}})
+
+		require.NoError(t, r.Close())
+		require.Zero(t, time.Since(start))
+	})
+}
+
+func TestProxyReply_AnUpstreamCutEndsTheBodyStepsAtOnce(t *testing.T) {
+	// The cut is the answer: the steps of the body end as for any cut, dropping what they hold, rather than send it on
+	// their own time first.
+	target := receivingTarget(t, make(chan upstreamReceived, 1))
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	closed := make(chan error, 1)
+	m.MustMock(Postf("/up").Step(closeStep{closed: closed}).UpstreamStep(limitStep{n: 2, err: vlatte.ErrAbort}).Reply(From(target.URL)))
+
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+
+	_, err := client.Post(m.URL("/up"), MIMETextPlain, strings.NewReader("ping"))
+	require.ErrorIs(t, err, io.EOF)
+	require.ErrorIs(t, <-closed, vlatte.ErrAbort)
 }
 
 func TestStepReader_CloseEndsTheCopy(t *testing.T) {

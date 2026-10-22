@@ -23,6 +23,8 @@ var (
 	_ Stage = (*shiftStage)(nil)
 	_ Stage = (*timedSink)(nil)
 	_ Stage = failStage{}
+	_ Stage = lateStage{}
+	_ Step  = lateStep{}
 	_ Step  = (*TestStep)(nil)
 	_ Step  = countStep{}
 	_ Step  = logStep{}

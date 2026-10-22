@@ -379,7 +379,9 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// The steps of the body end as for any cut: they drop what they hold.
 		if top != nil {
+			top.flow.Abort(cut)
 			_ = top.end()
 			started = top.headerSent
 		}
@@ -624,7 +626,7 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 			closeWire func(cut error)
 		)
 
-		client, wireFlow, closeWire = wire.handOver()
+		client, ctx, wireFlow, closeWire = wire.handOver()
 		headOut = wireFlow
 
 		// The server is closing.
@@ -635,8 +637,9 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 			return nil, false
 		}
 
-		ctx = wireFlow.Context()
-		toClient = vlatte.NewFlow(ctx, wireFlow, mock.Steps())
+		// What goes to the client ends with the wire steps, and an abort of theirs cuts it: its flow derives from
+		// theirs. What goes the other way, from ctx, outlives the end of what goes to the client.
+		toClient = vlatte.NewFlow(wireFlow.Context(), wireFlow, mock.Steps())
 		done = func(cut error) {
 			h.app.tunnels.remove(upstream)
 			upstream.Close()

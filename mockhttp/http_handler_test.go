@@ -134,6 +134,18 @@ func TestTopResponseWriter_AFailingStepFailsTheWrite(t *testing.T) {
 	require.Empty(t, rec.Body.String())
 }
 
+var (
+	_ vlatte.Step  = asyncStep{}
+	_ vlatte.Stage = (*asyncStage)(nil)
+	_ vlatte.Step  = logStep{}
+	_ vlatte.Stage = (*logStage)(nil)
+	_ vlatte.Step  = limitStep{}
+	_ vlatte.Stage = (*limitStage)(nil)
+	_ vlatte.Step  = closeStep{}
+	_ vlatte.Stage = (*closeStage)(nil)
+	_ vlatte.Step  = abortOn{}
+)
+
 // asyncStep passes on what its stage gets from a goroutine of its own, in order, as a stage that delays a stream
 // does: the reply and the stage write to the response at once.
 type asyncStep struct{}

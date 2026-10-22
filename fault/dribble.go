@@ -15,8 +15,8 @@ var (
 
 // ChunkedDribbleDelay returns a body step that sends the body in parts over total, chunks of them, to test a client
 // against a slow network, deterministically: it holds the whole body until the reply wrote it, then sends part k,
-// flushed, at k·total/chunks, and ends the body at total. Parts differ in size by a byte at most, and a body shorter than chunks
-// has empty parts, which send nothing. An empty body ends at total.
+// flushed, at k·total/chunks, and ends the body at total. Parts differ in size by a byte at most, and a body
+// shorter than chunks has empty parts, which send nothing. An empty body ends at total.
 //
 // It holds the body whole, so a stream that doesn't end, such as server-sent events, never goes out. It panics when
 // chunks is less than 1, or total is negative.

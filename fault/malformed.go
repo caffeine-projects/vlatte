@@ -21,8 +21,9 @@ var _malformedChunk = []byte("not a chunk\r\nmalformed\r\n")
 
 // MalformedResponseChunk returns a wire step that breaks the body of a chunked answer: it passes the status line and
 // the headers on, with the mock's own status, then sends garbage in place of the first chunk, and aborts the flow, so
-// the connection closes. The client reads a valid head, then fails to read the body. The body of an HTTP/1.0 answer
-// isn't chunked: the client reads the garbage as the body.
+// the connection closes. The client reads a valid head, then fails to read the body. It breaks the answer after the
+// first head, an informational one, such as 103 Early Hints, included. The body of an HTTP/1.0 answer isn't
+// chunked: the client reads the garbage as the body.
 func MalformedResponseChunk() vlatte.Step {
 	return malformedChunk{}
 }

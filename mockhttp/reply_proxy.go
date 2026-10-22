@@ -531,10 +531,11 @@ func (r *stepReader) Read(p []byte) (int, error) {
 	return r.pipe.Read(p)
 }
 
-// Close stops the copy, and waits for it to end.
+// Close stops the copy, and the steps, which drop what they hold, and waits for them to end.
 func (r *stepReader) Close() error {
 	err := r.pipe.Close()
 	_ = r.body.Close()
+	r.flow.Abort(errBodyEnded)
 	<-r.done
 
 	return err

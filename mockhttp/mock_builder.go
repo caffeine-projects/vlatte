@@ -451,8 +451,8 @@ func (b *Builder) Step(steps ...vlatte.Step) *Builder {
 //
 // The mock answers on its connection, which it takes over, in HTTP/1.x, with Connection: close, so the connection
 // ends with the answer. A request over HTTP/2 can't give its connection over: it gets vlatte's error answer. A stage
-// that aborts the flow, with [vlatte.ErrAbort] or [vlatte.ErrReset], closes the connection, or resets it, at once,
-// once the mock counted the call and ran its callbacks and events. A failure, such as a failing reply, is vlatte's
+// that aborts the flow, with [vlatte.ErrAbort] or [vlatte.ErrReset], has the connection closed, or reset, without
+// the rest of the answer, once the mock counted the call and ran its callbacks and events. A failure, such as a failing reply, is vlatte's
 // answer, and skips the steps. A recording leaves the call out.
 func (b *Builder) WireStep(steps ...vlatte.Step) *Builder {
 	b.spec.wireSteps = append(b.spec.wireSteps, steps...)
@@ -465,7 +465,9 @@ func (b *Builder) WireStep(steps ...vlatte.Step) *Builder {
 // change its length, so the target gets it chunked. A request without a body has nothing for them.
 //
 // The server reads the body of a request before it matches a mock, so the client's upload has ended by then: these
-// steps apply to what the mock sends on, not to how it reads the client. A stage that aborts the flow, with
+// steps apply to what the mock sends on, not to how it reads the client. A body the server doesn't read whole, with
+// NoBodyParsing or past MaxBodyParsingLimit, is read from the client as the target reads it, so a stage that slows it
+// slows the upload too. A stage that aborts the flow, with
 // [vlatte.ErrAbort] or [vlatte.ErrReset], fails the call to the target and cuts the client's answer, once the mock
 // counted the call.
 func (b *Builder) UpstreamStep(steps ...vlatte.Step) *Builder {
