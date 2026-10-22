@@ -884,6 +884,55 @@ func TestJournal_AnAnswerADecoratorAbortsHasNoStatus(t *testing.T) {
 	require.Zero(t, e.Status, "no status reached the client")
 }
 
+func TestJournal_KeepsTheStatusBehindAMiddlewareThatHidesTheAnswer(t *testing.T) {
+	// A middleware that hands the mock a context of its own and a writer that doesn't unwrap hides the writer outside
+	// it: the entry then has the status the mock sent, as before there was one, which is the client's but for a
+	// middleware that changes it.
+	body := bytes.Repeat([]byte("0123456789abcdef"), 8<<10)
+	file := filepath.Join(t.TempDir(), "body.bin")
+	require.NoError(t, os.WriteFile(file, body, 0o600))
+
+	tests := []struct {
+		name    string
+		reply   ReplierFactory
+		status  int
+		outcome journal.Outcome
+	}{
+		{name: "a body the mock copies", reply: Created().BodyFile(file), status: http.StatusCreated, outcome: journal.OutcomeMatched},
+		{
+			name:    "a mock that panics",
+			reply:   Func(func(http.ResponseWriter, *RequestValues) (*Response, error) { panic("boom") }),
+			status:  StatusNoMatch,
+			outcome: journal.OutcomeFailed,
+		},
+		{
+			name: "a mock that answers, then panics",
+			reply: Func(func(w http.ResponseWriter, _ *RequestValues) (*Response, error) {
+				w.WriteHeader(http.StatusAccepted)
+				panic("boom")
+			}),
+			status:  http.StatusAccepted,
+			outcome: journal.OutcomeFailed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := journaledServer(t, Setup().Use(middleware(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+				next.ServeHTTP(opaqueWriter{w}, r.WithContext(context.Background()))
+			})))
+			m.MustMock(Getf("/hidden").Reply(tt.reply))
+
+			res, _ := do(t, http.MethodGet, m.URL("/hidden"), nil, nil)
+			require.Equal(t, tt.status, res.StatusCode)
+
+			e := only(t, m, journal.Query{})
+			require.Equal(t, tt.status, e.Status)
+			require.Equal(t, tt.outcome, e.Outcome)
+		})
+	}
+}
+
 func TestJournal_AnInterceptedRequestKeepsTheStatusTheClientGot(t *testing.T) {
 	// The requests within a tunnel the proxy intercepts go through the server's middlewares too, and their entries
 	// have the status the client got, as any request's.
