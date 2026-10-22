@@ -227,3 +227,31 @@ func TestFind_AReusedMissesHoldsItsLastRequest(t *testing.T) {
 	misses.Reset()
 	require.Empty(t, misses.NearMisses(t.Context(), describe))
 }
+
+func TestNearMisses_AClientThatLeftStillGetsTheWholeReport(t *testing.T) {
+	// The report is the request's answer and its journal entry: a client that leaves as it is built, or before,
+	// changes neither. Every mock matching tried is ranked, and a matcher that reads the request's context sees one
+	// that goes on.
+	in := request{"method": "GET", "path": "/a"}
+	a, b := newFakeMockWith("a", 0), newFakeMockWith("b", 0)
+
+	alive := vlatte.MatcherFunc("alive", func(arg vlatte.MatcherArg) (bool, error) { return true, arg.Context().Err() })
+	mocks := map[*fakeMock][]*vlatte.Eval[request]{
+		a: {part("method", match.Equal("POST")), part("path", alive)},
+		b: {part("path", match.Equal("/b")), part("method", match.Equal("GET"))},
+	}
+	evals := func(m *fakeMock) vlatte.Evaluators[*fakeMock, request] { return mocks[m] }
+	misses := new(vlatte.Misses[*fakeMock, request])
+
+	_, matched, err := vlatte.Mocks[*fakeMock, request](slices.Values([]*fakeMock{a, b})).Find(t.Context(), nil, in, evals, misses)
+	require.NoError(t, err)
+	require.False(t, matched)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.Equal(t, []vlatte.NearMiss{
+		{MockID: "a", Name: "a", Passed: 1, Total: 2, Failed: []string{"method"}},
+		{MockID: "b", Name: "b", Passed: 1, Total: 2, Failed: []string{"path"}},
+	}, misses.NearMisses(ctx, func(e *vlatte.Eval[request]) string { return e.Key }))
+}

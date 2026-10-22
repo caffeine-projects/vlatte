@@ -60,14 +60,15 @@ type nearMiss struct {
 // No matcher runs twice for a request: each mock goes on from the part Find stopped at, which failed, and only the
 // parts after it run now. Of those, it skips the ones that keep state, as running a scenario's may change it. A mock
 // none of whose request parts passed is left out, unless it differs in none.
+//
+// The report is whole even once ctx, the request's, is done, as when its client left: the matchers get a context
+// with its values that isn't.
 func (m *Misses[M, TIn]) NearMisses(ctx context.Context, describe func(*Eval[TIn]) string) []NearMiss {
 	var ranked []nearMiss
 
-	for _, t := range m.tried {
-		if ctx.Err() != nil {
-			break
-		}
+	ctx = context.WithoutCancel(ctx)
 
+	for _, t := range m.tried {
 		near := nearMiss{miss: NearMiss{MockID: t.mock.ID(), Name: t.mock.Name()}}
 		matched := 0
 
