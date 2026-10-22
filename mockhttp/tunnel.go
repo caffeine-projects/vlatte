@@ -15,6 +15,8 @@ import (
 	"time"
 
 	netproxy "golang.org/x/net/proxy"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 var _ net.Conn = (*bufferedConn)(nil)
@@ -145,27 +147,67 @@ func hijack(w http.ResponseWriter) (net.Conn, error) {
 
 // pipe copies client to upstream and upstream to client until both directions end. A side that ends what it sends has
 // the other side read to an end, so the other direction goes on until its own end. A side that breaks off ends both:
-// the other direction has nowhere to go. It returns the first error that isn't the end of a connection.
-func pipe(client, upstream io.ReadWriteCloser) error {
+// the other direction has nowhere to go. It returns the first error that isn't the end of a connection, or a cut.
+//
+// toClient and toUpstream, when not nil, are the flows of steps each direction writes through: a flow ends with its
+// direction. A stage that aborts one, even on a timer while no byte comes, cuts both sides, or resets them with
+// vlatte.ErrReset.
+func pipe(client, upstream io.ReadWriteCloser, toClient, toUpstream *vlatte.Flow) error {
+	cut := func(cause error) {
+		if errors.Is(cause, vlatte.ErrReset) {
+			resetConn(client)
+			resetConn(upstream)
+
+			return
+		}
+
+		_ = client.Close()
+		_ = upstream.Close()
+	}
+
+	for _, flow := range []*vlatte.Flow{toClient, toUpstream} {
+		if flow != nil {
+			context.AfterFunc(flow.Context(), func() {
+				if cause := context.Cause(flow.Context()); errors.Is(cause, vlatte.ErrAbort) {
+					cut(cause)
+				}
+			})
+		}
+	}
+
 	errs := make(chan error, 2)
-	copyTo := func(dst, src io.ReadWriteCloser) {
-		_, err := io.Copy(dst, src)
+	copyTo := func(dst, src io.ReadWriteCloser, flow *vlatte.Flow) {
+		var w io.Writer = dst
+		if flow != nil {
+			w = flow
+		}
+
+		_, err := io.Copy(w, src)
 		if err != nil {
-			_ = dst.Close()
-			_ = src.Close()
-		} else {
+			cut(err)
+		}
+
+		if flow != nil {
+			if closeErr := flow.Close(); err == nil && closeErr != nil {
+				err = closeErr
+				cut(err)
+			}
+		}
+
+		if err == nil {
 			_ = closeWrite(dst)
 		}
 
 		errs <- err
 	}
 
-	go copyTo(upstream, client)
-	go copyTo(client, upstream)
+	go copyTo(upstream, client, toUpstream)
+	go copyTo(client, upstream, toClient)
 
 	var err error
 	for range 2 {
-		if e := <-errs; err == nil && e != nil && !errors.Is(e, net.ErrClosed) {
+		e := <-errs
+		if err == nil && e != nil && !errors.Is(e, net.ErrClosed) && !errors.Is(e, vlatte.ErrAbort) && !errors.Is(e, vlatte.ErrReset) {
 			err = e
 		}
 	}
@@ -175,7 +217,7 @@ func pipe(client, upstream io.ReadWriteCloser) error {
 
 // resetConn closes conn with a TCP reset: the peer reads a reset, not an end, and what conn still had to send is
 // dropped. A connection with no TCP connection under its wrappers is closed.
-func resetConn(conn net.Conn) {
+func resetConn(conn io.Closer) {
 	for {
 		switch c := conn.(type) {
 		case *net.TCPConn:

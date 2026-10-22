@@ -34,6 +34,7 @@ var _wireHeaders = []string{HeaderContentLength, "Transfer-Encoding", HeaderConn
 type wireResponseWriter struct {
 	conn      net.Conn
 	tunnels   *tunnels
+	release   context.CancelFunc // releases the flow's context
 	flow      *vlatte.Flow
 	out       vlatte.Stage // the flow, or the connection once the steps are abandoned
 	header    http.Header
@@ -47,8 +48,9 @@ type wireResponseWriter struct {
 }
 
 // takeOver takes the connection of r over from w, for the wire steps of its mock, and returns the writer that answers
-// on it, within ctx. What is left of the request's body is read first: net/http forbids the body once the connection
-// is taken over.
+// on it, within ctx, which the server's close ends too: once the connection is taken over, a read on it, such as of
+// a switch of protocols, can end the request's context. What is left of the request's body is read first: net/http
+// forbids the body once the connection is taken over.
 func (h *mockHandler) takeOver(ctx context.Context, w http.ResponseWriter, r *RequestValues, steps []vlatte.Step) (*wireResponseWriter, error) {
 	req := r.RawRequest
 	if req.ProtoMajor != 1 {
@@ -86,6 +88,7 @@ func (h *mockHandler) takeOver(ctx context.Context, w http.ResponseWriter, r *Re
 		ww.chunked = true
 	}
 
+	ctx, ww.release = h.app.tunnels.bind(context.WithoutCancel(ctx))
 	ww.flow = vlatte.NewFlow(ctx, &vlatte.Sink{W: conn}, steps)
 	ww.out = ww.flow
 
@@ -251,7 +254,6 @@ func (w *wireResponseWriter) finish(cut error) {
 	}
 
 	w.finished = true
-	defer w.tunnels.remove(w.conn)
 
 	if cut == nil {
 		cut = w.aborted()
@@ -262,10 +264,27 @@ func (w *wireResponseWriter) finish(cut error) {
 		cut = w.aborted()
 	}
 
+	w.close(cut)
+}
+
+// handOver hands the connection over to a switch of protocols, with the flow of the wire steps, which go on with its
+// bytes: the answer no longer finishes it. close ends them, as finish does, with the cause of a cut, if any.
+func (w *wireResponseWriter) handOver() (conn net.Conn, flow *vlatte.Flow, closeConn func(cut error)) {
+	w.finished = true
+	return w.conn, w.flow, w.close
+}
+
+// close ends the flow, and closes the connection, or resets it for a cut that matches ErrReset. The steps of a cut
+// drop what they hold.
+func (w *wireResponseWriter) close(cut error) {
+	defer w.release()
+	defer w.tunnels.remove(w.conn)
+
 	if cut != nil {
 		w.flow.Abort(cut)
-		_ = w.flow.Close()
 	}
+
+	_ = w.flow.Close()
 
 	if errors.Is(cut, vlatte.ErrReset) {
 		resetConn(w.conn)

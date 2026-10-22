@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"bufio"
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -351,7 +352,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx = top.Context()
 	}
 
-	noSwitch := len(mock.Steps()) > 0 || len(mock.WireSteps()) > 0 || len(mock.spec.mappers) > 0
+	noSwitch := len(mock.spec.mappers) > 0
 
 	// fail answers a failure to serve the mock, which skips its steps, and ends the answer.
 	fail := func(err error) {
@@ -415,9 +416,21 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case cut != nil:
 		// A cut answer isn't recorded.
 	case res != nil && res.upgrade != nil:
+		// The answer ends with its head: the steps go on with the connection. A stage that cut the answer cuts the
+		// switch.
+		if top != nil {
+			_ = top.end()
+			started = top.headerSent
+		}
+
+		if cut = cmp.Or(top.aborted(), wire.aborted()); cut != nil {
+			res.upgrade.Close()
+			break
+		}
+
 		h.debugHeader(rw, vlatte.ProxiedHeader, "true")
 
-		pipe, ok := h.switchProtocols(rw, reqValues, res)
+		pipe, ok := h.switchProtocols(rw, reqValues, res, mock, wire)
 		if !ok {
 			return
 		}
@@ -572,7 +585,7 @@ func (h *mockHandler) serveUpstream(w http.ResponseWriter, r *RequestValues, ups
 	h.debugHeader(w, vlatte.ProxiedHeader, "true")
 
 	if res.upgrade != nil {
-		pipe, ok := h.switchProtocols(w, r, res)
+		pipe, ok := h.switchProtocols(w, r, res, nil, nil)
 		if !ok {
 			return
 		}
@@ -591,53 +604,123 @@ func (h *mockHandler) serveUpstream(w http.ResponseWriter, r *RequestValues, ups
 // takes over, with the headers set on w, such as the debug headers. It returns the pipe between the client's
 // connection and the target's, to run once the call is logged, and false when it failed: before it took the
 // connection over, the client gets the server's answer to the failure, and after, the log warns.
-func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, res *Response) (func(), bool) {
+//
+// mock, when not nil, is the mock that answered: its steps pass on what the target sends, and its upstream steps what
+// the client sends. wire, when not nil, holds the client's connection already: its steps go on with the bytes of the
+// connection, the 101 included, after the steps of the mock.
+func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, res *Response, mock *Mock, wire *wireResponseWriter) (func(), bool) {
 	upstream := res.upgrade
-
-	client, err := hijack(w)
-	if err != nil {
-		upstream.Close()
-		h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: switching protocols needs an HTTP/1.1 connection, "+
-			"and a response writer that can hijack it, or that unwraps to one that can: %w", err))
-
-		return nil, false
-	}
-
-	// The server is closing.
-	if !h.app.tunnels.add(client, upstream) {
-		client.Close()
-		upstream.Close()
-
-		return nil, false
-	}
-
-	done := func() {
-		h.app.tunnels.remove(client, upstream)
-		client.Close()
-		upstream.Close()
-	}
 
 	header := w.Header().Clone()
 	maps.Copy(header, res.Header)
 
-	out := bufio.NewWriter(client)
-	_, _ = fmt.Fprintf(out, "HTTP/1.1 %d %s\r\n", res.StatusCode, http.StatusText(res.StatusCode))
-	_ = header.Write(out)
-	_, _ = out.WriteString("\r\n")
+	var head bytes.Buffer
+	_, _ = fmt.Fprintf(&head, "HTTP/1.1 %d %s\r\n", res.StatusCode, http.StatusText(res.StatusCode))
+	_ = header.Write(&head)
+	_, _ = head.WriteString("\r\n")
 
-	if err := out.Flush(); err != nil {
-		done()
+	var (
+		client   net.Conn
+		ctx      context.Context
+		headOut  io.Writer // where the 101 goes
+		toClient *vlatte.Flow
+		done     func(cut error)
+	)
+
+	if wire != nil {
+		var (
+			wireFlow  *vlatte.Flow
+			closeWire func(cut error)
+		)
+
+		client, wireFlow, closeWire = wire.handOver()
+		headOut = wireFlow
+
+		// The server is closing.
+		if !h.app.tunnels.add(upstream) {
+			upstream.Close()
+			closeWire(nil)
+
+			return nil, false
+		}
+
+		ctx = wireFlow.Context()
+		toClient = vlatte.NewFlow(ctx, wireFlow, mock.Steps())
+		done = func(cut error) {
+			h.app.tunnels.remove(upstream)
+			upstream.Close()
+			closeWire(cut)
+		}
+	} else {
+		var err error
+		if client, err = hijack(w); err != nil {
+			upstream.Close()
+			h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: switching protocols needs an HTTP/1.1 connection, "+
+				"and a response writer that can hijack it, or that unwraps to one that can: %w", err))
+
+			return nil, false
+		}
+
+		// The server is closing.
+		if !h.app.tunnels.add(client, upstream) {
+			client.Close()
+			upstream.Close()
+
+			return nil, false
+		}
+
+		headOut = client
+
+		// A read of the client's connection, now the mock's, can end the request's context.
+		var release context.CancelFunc
+		ctx, release = h.app.tunnels.bind(context.WithoutCancel(r.RawRequest.Context()))
+
+		if mock != nil && len(mock.Steps()) > 0 {
+			toClient = vlatte.NewFlow(ctx, &vlatte.Sink{W: client}, mock.Steps())
+		}
+
+		done = func(cut error) {
+			defer release()
+
+			h.app.tunnels.remove(client, upstream)
+
+			if errors.Is(cut, vlatte.ErrReset) {
+				resetConn(client)
+				resetConn(upstream)
+
+				return
+			}
+
+			client.Close()
+			upstream.Close()
+		}
+	}
+
+	var toUpstream *vlatte.Flow
+	if mock != nil && len(mock.UpstreamSteps()) > 0 {
+		toUpstream = vlatte.NewFlow(ctx, &vlatte.Sink{W: upstream}, mock.UpstreamSteps())
+	}
+
+	// The 101 goes first, through the wire steps, if any: they see every byte of the connection.
+	if _, err := headOut.Write(head.Bytes()); err != nil {
+		// A stage that aborted the 101 cut the switch: the mock answered, so the call counts.
+		if cut := context.Cause(ctx); errors.Is(cut, vlatte.ErrAbort) {
+			return func() { done(cut) }, true
+		}
+
+		done(nil)
 		h.lifecycle.OnWarning(r, fmt.Errorf("http: answering the switch of protocols: %w", err))
 
 		return nil, false
 	}
 
 	return func() {
-		defer done()
-
-		if err := pipe(client, upstream); err != nil {
+		err := pipe(client, upstream, toClient, toUpstream)
+		if err != nil {
 			h.lifecycle.OnWarning(r, fmt.Errorf("http: connection that switched protocols: %w", err))
 		}
+
+		done(nil)
 	}, true
 }
 
@@ -729,7 +812,7 @@ func (h *mockHandler) tunnel(client, upstream net.Conn, r *RequestValues) {
 
 	h.logConnect(r)
 
-	if err := pipe(client, upstream); err != nil {
+	if err := pipe(client, upstream, nil, nil); err != nil {
 		h.lifecycle.OnWarning(r, fmt.Errorf("http: proxy: tunnel to %s: %w", r.RawRequest.Host, err))
 	}
 }

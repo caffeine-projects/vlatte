@@ -323,7 +323,7 @@ func (p *proxyReplier) Reply(ctx context.Context, input ReplyInput) (*Response, 
 		return nil, fmt.Errorf("reply_proxy: %w", err)
 	}
 
-	// A mock whose steps or mappers couldn't apply to a connection that switched protocols doesn't ask for a switch.
+	// A mock whose mappers couldn't apply to a connection that switched protocols doesn't ask for a switch.
 	if input.noSwitch {
 		out.Header.Del(HeaderConnection)
 		out.Header.Del(HeaderUpgrade)
