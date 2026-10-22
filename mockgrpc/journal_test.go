@@ -251,3 +251,144 @@ func TestJournal_ACallWhoseClientLeftIsAbandoned(t *testing.T) {
 	require.Equal(t, journal.OutcomeAbandoned, e.Outcome)
 	require.NotEmpty(t, e.MockID)
 }
+
+// greet calls Greetings on c, and returns what failed.
+func greet(t *testing.T, c pb.TestServiceClient) error {
+	t.Helper()
+
+	_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+
+	return err
+}
+
+// list calls List on c, and receives its messages, until the call ends with what failed, if anything.
+func list(t *testing.T, c pb.TestServiceClient) error {
+	t.Helper()
+
+	stream, err := c.List(t.Context(), &pb.ListReq{})
+	require.NoError(t, err)
+
+	for {
+		if _, err := stream.Recv(); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+
+			return err
+		}
+	}
+}
+
+func TestJournal_KeepsTheCodeTheClientGot(t *testing.T) {
+	// An interceptor may change the code a mock answered with, as an auth check that runs after it does: the entry has
+	// the code the client got, however the interceptor was given, so a test verifies what its client saw.
+	deny := func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+		_, _ = next(ctx, req)
+		return nil, status.Error(codes.PermissionDenied, "denied")
+	}
+	unavailable := func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, next grpc.StreamHandler) error {
+		_ = next(srv, ss)
+		return status.Error(codes.Unavailable, "unavailable")
+	}
+
+	tests := []struct {
+		name   string
+		option grpc.ServerOption
+		call   func(t *testing.T, c pb.TestServiceClient) error
+		want   codes.Code
+	}{
+		{name: "a unary interceptor of its own", option: grpc.UnaryInterceptor(deny), call: greet, want: codes.PermissionDenied},
+		{name: "a chained unary interceptor", option: grpc.ChainUnaryInterceptor(deny), call: greet, want: codes.PermissionDenied},
+		{name: "a chained stream interceptor", option: grpc.ChainStreamInterceptor(unavailable), call: list, want: codes.Unavailable},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, c := journaled(t, Setup().ServerOptions(tt.option))
+			m.MustMock(
+				UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{})),
+				ServerStreamMethod("List").Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})),
+			)
+
+			require.Equal(t, tt.want, status.Code(tt.call(t, c)))
+
+			e := onlyCall(t, m, journal.Query{})
+			require.Equal(t, int(tt.want), e.Status, "the code the client got")
+			require.Equal(t, journal.OutcomeMatched, e.Outcome)
+		})
+	}
+}
+
+func TestJournal_LeavesOutTheCallsAnInterceptorAnswers(t *testing.T) {
+	// An interceptor that answers a call itself, as one that refuses it does, answers it before any mock: the call is
+	// none of the journal's, however the interceptor was given.
+	refuse := func(context.Context, any, *grpc.UnaryServerInfo, grpc.UnaryHandler) (any, error) {
+		return nil, status.Error(codes.Unauthenticated, "who are you")
+	}
+	refuseStream := func(any, grpc.ServerStream, *grpc.StreamServerInfo, grpc.StreamHandler) error {
+		return status.Error(codes.Unauthenticated, "who are you")
+	}
+
+	tests := []struct {
+		name   string
+		option grpc.ServerOption
+		call   func(t *testing.T, c pb.TestServiceClient) error
+	}{
+		{name: "a unary interceptor of its own", option: grpc.UnaryInterceptor(refuse), call: greet},
+		{name: "a chained unary interceptor", option: grpc.ChainUnaryInterceptor(refuse), call: greet},
+		{name: "a chained stream interceptor", option: grpc.ChainStreamInterceptor(refuseStream), call: list},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, c := journaled(t, Setup().ServerOptions(tt.option))
+			m.MustMock(UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{})))
+
+			require.Equal(t, codes.Unauthenticated, status.Code(tt.call(t, c)))
+
+			n, err := m.CountRequests(t.Context(), journal.Query{})
+			require.NoError(t, err)
+			require.Zero(t, n)
+		})
+	}
+}
+
+func TestJournal_KeepsOneEntryOfACallAnInterceptorHidesFromIt(t *testing.T) {
+	// An interceptor that hands the next handler a context of its own, not the call's, hides the call from the mocks,
+	// whose reply then fails: the call is journaled once all the same, with the code the client got, not twice.
+	detach := func(_ context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+		return next(context.Background(), req)
+	}
+
+	m, c := journaled(t, Setup().ServerOptions(grpc.ChainUnaryInterceptor(detach)))
+	m.MustMock(UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{})))
+
+	require.Equal(t, codes.Internal, status.Code(greet(t, c)))
+	require.Equal(t, int(codes.Internal), onlyCall(t, m, journal.Query{}).Status)
+}
+
+// rawCodec sends a request message as the bytes it is, which may be no message at all.
+type rawCodec struct{}
+
+func (rawCodec) Marshal(v any) ([]byte, error) { return v.([]byte), nil }
+func (rawCodec) Unmarshal([]byte, any) error   { return nil }
+func (rawCodec) Name() string                  { return "proto" }
+
+func TestJournal_KeepsACallWhoseRequestDoesntDecode(t *testing.T) {
+	// A request the server can't decode fails before any interceptor or mock: it reached the server all the same,
+	// and its entry has the code the client got.
+	m, _ := journaled(t, Setup())
+
+	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	// A field of 255 bytes, of which none came.
+	err = conn.Invoke(t.Context(), pb.TestService_Greetings_FullMethodName, []byte{0x0a, 0xff}, &pb.HiRes{}, grpc.ForceCodec(rawCodec{}))
+	require.Equal(t, codes.Internal, status.Code(err))
+
+	e := onlyCall(t, m, journal.Query{})
+	require.Equal(t, pb.TestService_Greetings_FullMethodName, e.Path)
+	require.Equal(t, journal.OutcomeFailed, e.Outcome)
+	require.Equal(t, int(codes.Internal), e.Status)
+}

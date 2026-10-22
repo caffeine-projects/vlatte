@@ -23,10 +23,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -405,6 +407,94 @@ func TestNew_AServerThatFailsToBuildRemovesItsTemporaryJournal(t *testing.T) {
 	left, err := filepath.Glob(filepath.Join(tmp, "vlatte-journal-*"))
 	require.NoError(t, err)
 	require.Empty(t, left)
+}
+
+func TestNew_WithAJournalAStreamInterceptorGoesInTheChain(t *testing.T) {
+	// The journal runs outside every interceptor, so it has the code the client gets. grpc runs the stream interceptor
+	// set with grpc.StreamInterceptor outside all the others, so the journal takes it: New fails with one given in
+	// ServerOptions, which grpc.ChainStreamInterceptor gives as well, rather than journal the codes it changes wrong.
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+
+	passStream := func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, next grpc.StreamHandler) error {
+		return next(srv, ss)
+	}
+	pass := func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+		return next(ctx, req)
+	}
+
+	_, err := New(Setup().Journal("").ServerOptions(grpc.StreamInterceptor(passStream)))
+	require.ErrorIs(t, err, ErrStreamInterceptorSlot)
+
+	left, err := filepath.Glob(filepath.Join(tmp, "vlatte-journal-*"))
+	require.NoError(t, err)
+	require.Empty(t, left, "a server that fails to build removes its temporary journal")
+
+	for name, setup := range map[string]*ConfigBuilder{
+		"a stream interceptor without a journal":      Setup().ServerOptions(grpc.StreamInterceptor(passStream)),
+		"a chained stream interceptor with a journal": Setup().Journal("").ServerOptions(grpc.ChainStreamInterceptor(passStream)),
+		"a unary interceptor with a journal":          Setup().Journal("").ServerOptions(grpc.UnaryInterceptor(pass)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, err := New(setup)
+			require.NoError(t, err)
+			m.Close()
+		})
+	}
+}
+
+func TestServer_WarnsOfAServiceRegisteredPastTheJournal(t *testing.T) {
+	// A service registered on GRPCServer, past the mock server, has its unary calls journaled within the interceptors,
+	// with the code the mocks answered with: Start says so, and how to journal the code the client gets.
+	tests := []struct {
+		name     string
+		register func(m *Server)
+		warns    bool
+	}{
+		{
+			name:     "on GRPCServer",
+			register: func(m *Server) { pb.RegisterTestServiceServer(m.GRPCServer(), pb.UnimplementedTestServiceServer{}) },
+			warns:    true,
+		},
+		{
+			name:     "on the server",
+			register: func(m *Server) { pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{}) },
+		},
+		{
+			// A stream's journal is outside every interceptor wherever its service is registered.
+			name: "on the server, with a service of streams on GRPCServer",
+			register: func(m *Server) {
+				pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})
+				reflection.Register(m.GRPCServer())
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			logger := zerolog.New(&buf)
+
+			m := MustNew(Setup().Logger(&logger).Journal(""))
+			tt.register(m)
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			require.Equal(t, tt.warns, strings.Contains(buf.String(), "a service registered on GRPCServer"), buf.String())
+			require.Equal(t, tt.warns, strings.Contains(buf.String(), `"service":"`+pb.TestService_ServiceDesc.ServiceName+`"`), buf.String())
+
+			conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = conn.Close() })
+
+			_, err = pb.NewTestServiceClient(conn).Greetings(t.Context(), &pb.HiReq{})
+			require.Equal(t, codes.NotFound, status.Code(err))
+
+			n, err := m.CountRequests(t.Context(), journal.Query{})
+			require.NoError(t, err)
+			require.Equal(t, 1, n, "the call is journaled either way")
+		})
+	}
 }
 
 func TestListener(t *testing.T) {

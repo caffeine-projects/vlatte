@@ -43,6 +43,9 @@ func (in *interceptors) UnaryInterceptor(
 	info *grpc.UnaryServerInfo,
 	_ grpc.UnaryHandler,
 ) (any, error) {
+	call := callOf(ctx)
+	call.serve(ctx)
+
 	// Proto3 treats zero values as unset, so leave them out as protojson does.
 	b, err := json.Marshal(reqMsg, json.OmitZeroStructFields(true), json.Deterministic(true))
 	if err != nil {
@@ -55,7 +58,6 @@ func (in *interceptors) UnaryInterceptor(
 	}
 
 	rawBody := string(b)
-	call := callOf(ctx)
 	call.request(b)
 
 	sub := vlatte.NewExplanation()

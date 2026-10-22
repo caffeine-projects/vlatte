@@ -2,6 +2,7 @@ package mockgrpc
 
 import (
 	"context"
+	"slices"
 	"time"
 	"uuid"
 
@@ -41,9 +42,44 @@ func (app *Server) openJournal(conf *Config) (*journal.Journal, error) {
 	})
 }
 
-// journalUnary journals a unary call once it ends. It runs outside the recovery interceptor: a call that panicked
-// ends as the failure the recovery makes of it.
+// journaledService returns a copy of desc whose unary methods journal each call once it ends. grpc runs every unary
+// interceptor within a method's handler, whether ServerOptions set it with grpc.UnaryInterceptor or chained it, so the
+// entry has the code the client gets, and is appended before grpc sends it. A request the server can't decode fails
+// before any interceptor, and is journaled too. desc stays as it is: generated code shares it.
+func (app *Server) journaledService(desc *grpc.ServiceDesc) *grpc.ServiceDesc {
+	d := *desc
+	d.Methods = slices.Clone(desc.Methods)
+
+	for i := range d.Methods {
+		method, handler := "/"+desc.ServiceName+"/"+d.Methods[i].MethodName, d.Methods[i].Handler
+
+		d.Methods[i].Handler = func(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+			call := app.newCall(ctx, method)
+			decode := func(v any) error {
+				err := dec(v)
+				call.undecoded = err != nil
+
+				return err
+			}
+
+			res, err := handler(srv, context.WithValue(ctx, callKey{}, call), decode, interceptor)
+			call.end(ctx, err)
+
+			return res, err
+		}
+	}
+
+	return &d
+}
+
+// journalUnary journals a unary call of a service registered on GRPCServer once it ends, from within the
+// interceptors of ServerOptions; a call the handler journals already passes. It runs outside the recovery
+// interceptor: a call that panicked ends as the failure the recovery makes of it.
 func (in *interceptors) journalUnary(ctx context.Context, req any, info *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+	if callOf(ctx) != nil {
+		return next(ctx, req)
+	}
+
 	call := in.app.newCall(ctx, info.FullMethod)
 
 	res, err := next(context.WithValue(ctx, callKey{}, call), req)
@@ -52,7 +88,8 @@ func (in *interceptors) journalUnary(ctx context.Context, req any, info *grpc.Un
 	return res, err
 }
 
-// journalStream journals a streaming call once it ends, as journalUnary does.
+// journalStream journals a streaming call once it ends. grpc runs it before every other stream interceptor, so the
+// entry has the code the client gets.
 func (in *interceptors) journalStream(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, next grpc.StreamHandler) error {
 	call := in.app.newCall(ss.Context(), info.FullMethod)
 
@@ -73,34 +110,52 @@ func (s *callStream) Context() context.Context {
 	return s.ctx
 }
 
-// journalCall is the entry of a call in the server's journal, which the mock interceptors fill in, and the journal
-// interceptor appends once the call ends. A call runs on one goroutine.
+// journalCall is the entry of a call in the server's journal, which the mock interceptors fill in, and the journal's
+// method handler or interceptor appends once the call ends. A call runs on one goroutine.
 type journalCall struct {
 	journal *journal.Journal
 	entry   journal.Entry
+
+	// headers is set when the answer names its entry in a header.
+	headers bool
+
+	// served is set once a mock interceptor took the call: a call that an interceptor of ServerOptions answers itself
+	// never is, and isn't the journal's.
+	served bool
+
+	// undecoded is set when the server couldn't decode the request, which fails before any interceptor.
+	undecoded bool
 }
 
-// newCall starts the entry of a call of method, its request id in the header of its answer, as HTTP's debug headers
-// have it, unless the server sends none.
+// newCall starts the entry of a call of ctx, of method.
 func (app *Server) newCall(ctx context.Context, method string) *journalCall {
-	id := uuid.New().String()
-
-	if !app.config.NoDebugHeaders {
-		_ = grpc.SetHeader(ctx, metadata.Pairs(vlatte.RequestIDHeader, id))
-	}
-
 	md, _ := metadata.FromIncomingContext(ctx)
 
 	return &journalCall{
 		journal: app.Journal(),
+		headers: !app.config.NoDebugHeaders,
 		entry: journal.Entry{
-			ID:     id,
+			ID:     uuid.New().String(),
 			Time:   time.Now(),
 			Kind:   Kind,
 			Path:   method,
 			Target: method,
 			Header: md.Copy(),
 		},
+	}
+}
+
+// serve sets that a mock interceptor took the call, of ctx: its answer has its request id in a header, as HTTP's debug
+// headers have it, unless the server sends none.
+func (c *journalCall) serve(ctx context.Context) {
+	if c == nil {
+		return
+	}
+
+	c.served = true
+
+	if c.headers {
+		_ = grpc.SetHeader(ctx, metadata.Pairs(vlatte.RequestIDHeader, c.entry.ID))
 	}
 }
 
@@ -147,14 +202,20 @@ func (c *journalCall) replied(ctx context.Context, err error) {
 }
 
 // end appends the entry of the call, which ended with err, with its gRPC code. A call that reached no outcome, such
-// as one that failed before matching, or panicked, failed, or was abandoned when its client left.
+// as one that failed before matching, or panicked, failed, or was abandoned when its client left. A call that an
+// interceptor answered itself, which reached no mock, isn't appended.
 func (c *journalCall) end(ctx context.Context, err error) {
+	if !c.served && !c.undecoded {
+		return
+	}
+
 	c.entry.Status = int(status.Code(err))
 	c.entry.Elapsed = time.Since(c.entry.Time)
 
+	// grpc ends the context of a call whose request it couldn't decode: its client didn't leave.
 	if c.entry.Outcome == "" {
 		c.entry.Outcome = journal.OutcomeFailed
-		if ctx.Err() != nil {
+		if ctx.Err() != nil && !c.undecoded {
 			c.entry.Outcome = journal.OutcomeAbandoned
 		}
 

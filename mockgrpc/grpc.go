@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,12 @@ var (
 	_ grpc.ServiceRegistrar         = (*Server)(nil)
 )
 
+// ErrStreamInterceptorSlot is the error of a server with a journal whose ServerOptions set the stream interceptor
+// with grpc.StreamInterceptor, which grpc runs before every other: the journal takes it, to journal the code a call
+// ends with. grpc.ChainStreamInterceptor gives the same interceptor.
+var ErrStreamInterceptorSlot = errors.New("mockgrpc: with a journal, pass stream interceptors with " +
+	"grpc.ChainStreamInterceptor: the journal takes grpc.StreamInterceptor")
+
 // Kind is the protocol of gRPC mock servers, the Kind of their journal entries.
 const Kind vlatte.Kind = "grpc"
 
@@ -33,8 +40,13 @@ type Server struct {
 	*vlatte.Base[*Mock, *Server]
 	*journal.Verifier[*Mock, *Server]
 
-	server  *grpc.Server
-	config  *Config
+	server *grpc.Server
+	config *Config
+
+	// journaled names the services whose unary calls the journal sees after every interceptor: those registered
+	// through the server, not on GRPCServer. Registering ends before Start.
+	journaled map[string]bool
+
 	logger  *zerolog.Logger
 	storage vlatte.Store[*Mock]
 	admin   *admin.Server   // nil without Config.Admin
@@ -99,29 +111,35 @@ func New(config ...Option) (*Server, error) {
 	unary := []grpc.UnaryServerInterceptor{in.recoverUnary, in.UnaryInterceptor}
 	stream := []grpc.StreamServerInterceptor{in.recoverStream, in.StreamInterceptor}
 
-	// The journal sees each call as it ends, a panic as the failure its recovery makes of it.
+	// The journal sees each call as it ends, with the code the client gets, outside every interceptor of the user's
+	// options. A unary call's journals within its method's handler, where grpc runs every unary interceptor: see
+	// register. A stream's takes the stream interceptor grpc runs before every other. The unary one in the chain is
+	// for services registered on GRPCServer, past the server.
+	var opts []grpc.ServerOption
 	if j != nil {
+		opts = append(opts, grpc.StreamInterceptor(in.journalStream))
 		unary = slices.Insert(unary, 0, in.journalUnary)
-		stream = slices.Insert(stream, 0, in.journalStream)
 	}
 
-	// User options come first: the mock interceptors never call the next handler, so they must run last.
+	// User options come next: the mock interceptors never call the next handler, so they must run last.
 	// The recovery interceptors run just before them, so a panic serving a mock answers the call.
-	// Chain* is used because the plain interceptor options can only be set once.
-	opts := append(slices.Clone(conf.ServerOptions),
-		grpc.ChainUnaryInterceptor(unary...),
-		grpc.ChainStreamInterceptor(stream...),
-	)
-	srv := grpc.NewServer(opts...)
+	opts = append(opts, conf.ServerOptions...)
+	opts = append(opts, grpc.ChainUnaryInterceptor(unary...), grpc.ChainStreamInterceptor(stream...))
 
-	if conf.ServiceDesc != nil && conf.Service != nil {
-		srv.RegisterService(conf.ServiceDesc, conf.Service)
+	srv, err := newGRPCServer(opts, j != nil)
+	if err != nil {
+		return nil, fmt.Errorf("server: %w", err)
 	}
 
 	app.Base = vlatte.NewBase(app, store)
 	app.Verifier = journal.NewVerifier[*Mock, *Server](j, nil)
 	app.storage = store
 	app.server = srv
+	app.journaled = make(map[string]bool)
+
+	if conf.ServiceDesc != nil && conf.Service != nil {
+		app.register(conf.ServiceDesc, conf.Service)
+	}
 
 	// The admin API's options have Mocks: it builds.
 	if conf.Admin != nil {
@@ -207,6 +225,8 @@ func (app *Server) Start() error {
 		}
 	}
 
+	app.warnUnjournaled()
+
 	app.served = make(chan struct{})
 
 	go func(served chan struct{}) {
@@ -232,7 +252,9 @@ func (app *Server) MustStart() {
 }
 
 // GRPCServer returns the underlying gRPC server, for features beyond registering services,
-// such as server reflection.
+// such as server reflection. With a journal, a service registered on it has the entries of its unary calls journaled
+// within the interceptors of ServerOptions, with the code the mocks answered with: Start warns of it. RegisterService
+// journals the code the client gets.
 func (app *Server) GRPCServer() *grpc.Server {
 	return app.server
 }
@@ -241,9 +263,30 @@ func (app *Server) GRPCServer() *grpc.Server {
 //
 //	pb.RegisterGreeterServer(m, pb.UnimplementedGreeterServer{})
 //
-// It implements [grpc.ServiceRegistrar] and must be called before Start.
+// It implements [grpc.ServiceRegistrar] and must be called before Start. With a journal, the entries of its calls
+// have the code the client gets, after every interceptor: register services here, not on GRPCServer.
 func (app *Server) RegisterService(desc *grpc.ServiceDesc, impl any) {
-	app.server.RegisterService(desc, impl)
+	app.register(desc, impl)
+}
+
+// newGRPCServer builds the gRPC server of opts. grpc panics on an option that sets a stream interceptor once one
+// is: with a journal, which sets it first, that is an option of the user's, which New refuses.
+func newGRPCServer(opts []grpc.ServerOption, journaled bool) (srv *grpc.Server, err error) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+
+		if msg, _ := r.(string); journaled && strings.Contains(msg, "stream server interceptor was already set") {
+			err = fmt.Errorf("%w: %s", ErrStreamInterceptorSlot, msg)
+			return
+		}
+
+		panic(r)
+	}()
+
+	return grpc.NewServer(opts...), nil
 }
 
 // AdminURL returns the base URL of the admin API, or "" when the server serves none, or hasn't started: see
@@ -316,4 +359,30 @@ func (app *Server) publishReply(target string, mock *Mock, err error) {
 	}
 
 	app.publish(handler.EventError, target, mock, err)
+}
+
+// register registers the service desc describes, of impl: with a journal, its unary methods journal their calls.
+func (app *Server) register(desc *grpc.ServiceDesc, impl any) {
+	if app.Journal() != nil {
+		desc = app.journaledService(desc)
+		app.journaled[desc.ServiceName] = true
+	}
+
+	app.server.RegisterService(desc, impl)
+}
+
+// warnUnjournaled warns of each service registered on GRPCServer, past the server, with unary methods: their entries
+// have the code the mocks answered with, not the one the client gets after the interceptors of ServerOptions.
+func (app *Server) warnUnjournaled() {
+	if app.Journal() == nil {
+		return
+	}
+
+	for name, info := range app.server.GetServiceInfo() {
+		unary := slices.ContainsFunc(info.Methods, func(m grpc.MethodInfo) bool { return !m.IsClientStream && !m.IsServerStream })
+		if unary && !app.journaled[name] {
+			app.logger.Warn().Str("service", name).Msg("server: Start: a service registered on GRPCServer journals its " +
+				"unary calls with the code the mocks answered with, before the interceptors: register it with RegisterService")
+		}
+	}
 }

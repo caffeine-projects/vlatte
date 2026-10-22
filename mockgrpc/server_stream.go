@@ -241,6 +241,8 @@ func (in *interceptors) StreamInterceptor(
 	_ grpc.StreamHandler,
 ) error {
 	ctx := stream.Context()
+	call := callOf(ctx)
+	call.serve(ctx)
 
 	reqMsg, err := receiveRequest(stream, info)
 	if err != nil {
@@ -259,7 +261,6 @@ func (in *interceptors) StreamInterceptor(
 	}
 
 	rawBody := string(b)
-	call := callOf(ctx)
 	call.request(b)
 
 	sub := vlatte.NewExplanation()
