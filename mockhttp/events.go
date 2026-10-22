@@ -51,8 +51,8 @@ type RequestValues struct {
 	// journal is the entry of the request in the server's journal, nil when it keeps none.
 	journal *journalCall
 
-	// answer is the writer of the response, which keeps the status the client gets. It is nil for a request the
-	// server doesn't serve, such as one rebuilt from the journal.
+	// answer is the writer of the response, which keeps the status the client gets. A request the server doesn't
+	// serve, such as one rebuilt from the journal, has none, and reaches no lifecycle.
 	answer *answerWriter
 }
 
@@ -65,10 +65,6 @@ func (r *RequestValues) ParsedBody() any                { return r.ParsedBodyDat
 
 // sent returns the status the server sent the client, 0 before it sends one.
 func (r *RequestValues) sent() int {
-	if r.answer == nil {
-		return 0
-	}
-
 	return r.answer.status
 }
 
@@ -76,7 +72,7 @@ func (r *RequestValues) sent() int {
 // once the handler is done, with the status of failures, unless the reply sent one first, or the connection was taken
 // over.
 func (r *RequestValues) panicked() int {
-	if r.sent() != 0 || r.answer != nil && r.answer.hijacked {
+	if r.sent() != 0 || r.answer.hijacked {
 		return r.sent()
 	}
 
@@ -92,7 +88,7 @@ func (r *RequestValues) answered(res *Response) int {
 		return r.sent()
 	case res != nil:
 		return res.StatusCode
-	case r.answer != nil && r.answer.hijacked:
+	case r.answer.hijacked:
 		return 0
 	}
 

@@ -168,12 +168,8 @@ func requestTarget(req *http.Request, u *url.URL) string {
 	return u.String()
 }
 
-// record appends the entry of r with its outcome, unless it has one already. A nil c journals nothing.
+// record appends the entry of r with its outcome, unless it has one already.
 func (c *journalCall) record(r *RequestValues, outcome journal.Outcome, status int, err error) {
-	if c == nil {
-		return
-	}
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -200,10 +196,6 @@ func (c *journalCall) record(r *RequestValues, outcome journal.Outcome, status i
 
 // warn keeps err, the last warning of the request, which tells why it ended, if it reaches no outcome.
 func (c *journalCall) warn(err error) {
-	if c == nil {
-		return
-	}
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -213,10 +205,6 @@ func (c *journalCall) warn(err error) {
 // end appends the entry of r, a request that ended, if it reached no outcome: failed, when it panicked with p, abandoned,
 // when its client left, or failed, with its last warning, with the status sent.
 func (c *journalCall) end(r *RequestValues, p any) {
-	if c == nil {
-		return
-	}
-
 	c.mu.Lock()
 	warning := c.warning
 	c.mu.Unlock()

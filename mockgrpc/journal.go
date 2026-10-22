@@ -149,10 +149,6 @@ func (c *journalCall) replied(ctx context.Context, err error) {
 // end appends the entry of the call, which ended with err, with its gRPC code. A call that reached no outcome, such
 // as one that failed before matching, or panicked, failed, or was abandoned when its client left.
 func (c *journalCall) end(ctx context.Context, err error) {
-	if c == nil {
-		return
-	}
-
 	c.entry.Status = int(status.Code(err))
 	c.entry.Elapsed = time.Since(c.entry.Time)
 
@@ -178,9 +174,7 @@ func describeEval[T any](e *vlatte.Eval[T]) string {
 		return "method"
 	case _scopeHeader:
 		return "header " + e.Key
-	case _scopeField:
-		return "field " + e.Key
 	}
 
-	return e.Key
+	return "field " + e.Key
 }
