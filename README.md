@@ -436,6 +436,25 @@ A stage gets each write of the body, each flush, and the end of the answer, an e
 
 A connection that switched protocols, such as a WebSocket, goes through the steps too. The answer ends with its head, so its steps end there, and a stage that cuts it leaves the client without a switch. Then what the target sends the client passes the mock's steps again, in a flow of its own, then its wire steps, which saw the `101` too. What the client sends the target passes its upstream steps. A stage that aborts either way, even on a timer while nothing comes, cuts both sides, or resets them with `vlatte.ErrReset`.
 
+## Faults
+
+The `fault` package has steps that make a mock answer wrong, to test how a client handles a server that fails:
+
+| Step | Level | What the client gets |
+|---|---|---|
+| `fault.EmptyResponse()` | `WireStep` | No byte at all: the connection ends where it waits for a status line. |
+| `fault.MalformedResponseChunk()` | `WireStep` | The status line and headers, with the mock's status, then garbage in place of the first chunk of the body, then the end of the connection. |
+| `fault.RandomDataThenClose()` | `WireStep` | `fault.RandomDataSize` random bytes in place of the answer, then the end of the connection. |
+| `fault.ConnectionResetByPeer()` | `WireStep` | A TCP reset, such as `ECONNRESET`, before a status line. |
+| `fault.ChunkedDribbleDelay(chunks, total)` | `Step` | The whole body, in `chunks` flushed parts spread over `total`: part k comes at k·total/chunks, and the body ends at `total`. The body is held until the reply wrote all of it. |
+
+```go
+m.MustMock(mockhttp.Getf("/users").WireStep(fault.ConnectionResetByPeer()).Reply(mockhttp.OK()))
+m.MustMock(mockhttp.Getf("/report").Step(fault.ChunkedDribbleDelay(5, 2*time.Second)).Reply(mockhttp.OK().BodyFile("report.csv")))
+```
+
+A wire fault needs HTTP/1.x, as wire steps do. Faults combine with other steps: a fault on the wire comes after the steps of `Step`. A mock that answers with a fault still counts the call, and runs its callbacks and events, before the connection ends.
+
 ## Recording and playback
 
 A server records what it proxies as mock files, then answers the same requests the same way, without the service.
