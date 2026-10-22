@@ -79,15 +79,13 @@ func (r *RequestValues) panicked() int {
 	return r.App.config.ErrorStatusCode
 }
 
-// answered returns the status the client got, once a mock or a proxy answered it with res: the one sent, or res's,
-// which vlatte writes itself on a connection it takes over, such as a CONNECT's or an upgrade's. A reply that wrote
-// nothing, such as a Handler, answers 200, as net/http does.
-func (r *RequestValues) answered(res *Response) int {
+// answered returns the status the client got, once a mock or a proxy answered it: the one sent, or the one vlatte
+// wrote on a connection it took over, such as a CONNECT's or an upgrade's. A reply that wrote nothing, such as a
+// Handler, answers 200, as net/http does, unless it took the connection over.
+func (r *RequestValues) answered() int {
 	switch {
 	case r.sent() != 0:
 		return r.sent()
-	case res != nil:
-		return res.StatusCode
 	case r.answer.hijacked:
 		return 0
 	}

@@ -124,7 +124,7 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *Response) {
 	if s != nil {
 		evt.Dict("response", h.responseDict(s))
 	} else {
-		evt.Dict("response", zerolog.Dict().Int("status", r.answered(nil)))
+		evt.Dict("response", zerolog.Dict().Int("status", r.answered()))
 	}
 
 	evt.Msgf("<--- REQUEST MATCHED %s %s", r.RawRequest.Method, r.URL.Path)
@@ -297,7 +297,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Resp
 	} else {
 		buf.WriteString("\n")
 		buf.WriteString(h.cz.Green("Status: "))
-		buf.WriteString(strconv.Itoa(rv.answered(nil)))
+		buf.WriteString(strconv.Itoa(rv.answered()))
 	}
 
 	buf.WriteString("\n")

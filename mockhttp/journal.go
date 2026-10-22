@@ -80,11 +80,11 @@ func (j journalEvents) OnRequest(r *RequestValues) {
 }
 
 func (j journalEvents) OnMatch(r *RequestValues, res *Response) {
-	r.journal.record(r, journal.OutcomeMatched, r.answered(res), nil)
+	r.journal.record(r, journal.OutcomeMatched, r.answered(), nil)
 }
 
 func (j journalEvents) OnProxied(r *RequestValues, res *Response) {
-	r.journal.record(r, journal.OutcomeProxied, r.answered(res), nil)
+	r.journal.record(r, journal.OutcomeProxied, r.answered(), nil)
 }
 
 func (j journalEvents) OnNoMatch(r *RequestValues) {

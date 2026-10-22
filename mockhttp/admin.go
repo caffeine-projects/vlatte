@@ -68,11 +68,11 @@ type adminEvents struct {
 func (a adminEvents) OnRequest(*RequestValues) {}
 
 func (a adminEvents) OnMatch(r *RequestValues, res *Response) {
-	a.publish(handler.EventMatched, r, r.answered(res), nil)
+	a.publish(handler.EventMatched, r, r.answered(), nil)
 }
 
 func (a adminEvents) OnProxied(r *RequestValues, res *Response) {
-	a.publish(handler.EventProxied, r, r.answered(res), nil)
+	a.publish(handler.EventProxied, r, r.answered(), nil)
 }
 
 func (a adminEvents) OnNoMatch(r *RequestValues) {
