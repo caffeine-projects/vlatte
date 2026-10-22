@@ -247,10 +247,18 @@ func (j *Journal) Clear() error {
 		return fmt.Errorf("journal: %w", err)
 	}
 
+	// The tombstone comes first, and stays: a segment that stays on disk, as a crash or a removal that fails leaves
+	// one, is dropped by the next journal of the directory, which removes the tombstone once none is left.
+	if err := writeCleared(j.dir, next); err != nil {
+		f.Close()
+		removeSegment(j.dir, next)
+
+		return fmt.Errorf("journal: %w", err)
+	}
+
 	j.active.Close()
 
-	// A segment that stays on disk would come back with the next journal of the directory: the journal keeps it,
-	// and the next trim removes it.
+	// The journal keeps a segment that stays on disk: the next trim removes it.
 	var left []int
 
 	for _, n := range j.files {
@@ -430,6 +438,12 @@ func (j *Journal) load() error {
 		return fmt.Errorf("journal: %w", err)
 	}
 
+	// The segments a Clear removed, which stayed on disk, go now.
+	cleared := readCleared(j.dir)
+	if cleared > 0 {
+		numbers = j.dropCleared(numbers, cleared)
+	}
+
 	// A locked directory is this journal's alone: a file being written is one a crash left.
 	if j.lock != nil {
 		if temps, err := filepath.Glob(filepath.Join(j.dir, _journalTemps)); err == nil {
@@ -470,9 +484,10 @@ func (j *Journal) load() error {
 		}
 	}
 
-	next := 1
+	// The new segment comes after those a tombstone drops, which may be on disk still.
+	next := max(1, cleared)
 	if len(numbers) > 0 {
-		next = numbers[len(numbers)-1] + 1
+		next = max(next, numbers[len(numbers)-1]+1)
 	}
 
 	f, err := openSegment(j.dir, next)
@@ -495,6 +510,28 @@ func (j *Journal) load() error {
 	}
 
 	return nil
+}
+
+// dropCleared removes the segments of numbers before cleared, those a Clear removed, and returns the others. Once
+// none is left, the tombstone goes too.
+func (j *Journal) dropCleared(numbers []int, cleared int) []int {
+	kept := numbers[:0]
+	left := false
+
+	for _, n := range numbers {
+		switch {
+		case n >= cleared:
+			kept = append(kept, n)
+		case removeSegment(j.dir, n) != nil:
+			left = true
+		}
+	}
+
+	if !left {
+		os.Remove(filepath.Join(j.dir, _journalCleared))
+	}
+
+	return kept
 }
 
 // scan reads the rows of segment n from its log, and logs the lines it left out.

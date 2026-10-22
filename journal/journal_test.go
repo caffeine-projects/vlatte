@@ -733,3 +733,61 @@ func TestJournal_ItsDirectoryIgnoresItsFiles(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "!keep\n", string(data))
 }
+
+func TestJournal_ClearedRequestsStayClearedWhenTheirFilesDoNot(t *testing.T) {
+	// A segment Clear can't delete, such as one a query still has open on Windows, or one a crash left before Clear
+	// got to it, stays on disk: the next journal of the directory still finds none of the requests Clear removed,
+	// while the requests that came after count.
+	dir := t.TempDir()
+	j, err := journal.New(journal.Options{Dir: dir})
+	require.NoError(t, err)
+
+	require.NoError(t, j.Append(entry("a")))
+	require.NoError(t, j.Append(entry("b")))
+
+	logs, err := filepath.Glob(filepath.Join(dir, "journal-*.log"))
+	require.NoError(t, err)
+
+	kept := make(map[string][]byte, len(logs))
+	for _, log := range logs {
+		kept[log], err = os.ReadFile(log)
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, j.Clear())
+	require.NoError(t, j.Append(entry("c")))
+	require.NoError(t, j.Close())
+
+	// What a delete that failed, or a crash, leaves.
+	for log, data := range kept {
+		require.NoError(t, os.WriteFile(log, data, 0o600))
+	}
+
+	reopened, err := journal.New(journal.Options{Dir: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { reopened.Close() })
+
+	page, err := reopened.Find(t.Context(), journal.Query{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"c"}, entryIDs(page))
+}
+
+func TestJournal_AClearThatCantRecordItselfClearsNothing(t *testing.T) {
+	// Clear first records, in the journal's directory, that the requests before it are gone, so a later journal of
+	// the directory drops them: when it can't, it fails, and the journal keeps its requests, as a reply that failed
+	// changes nothing.
+	dir := t.TempDir()
+	j, err := journal.New(journal.Options{Dir: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { j.Close() })
+
+	require.NoError(t, j.Append(entry("a")))
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "journal.clear"), 0o700))
+
+	_, ok := errors.AsType[*os.LinkError](j.Clear())
+	require.True(t, ok, "the tombstone can't take the place of a directory")
+
+	page, err := j.Find(t.Context(), journal.Query{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"a"}, entryIDs(page))
+}

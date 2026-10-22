@@ -26,6 +26,10 @@ const (
 	// _journalTemps names the files a journal is writing: a crash may leave them, which the next one removes.
 	_journalTemps = ".journal-*.tmp"
 
+	// _journalCleared names the tombstone of a Clear: the first segment it kept, whose earlier ones hold requests
+	// it removed, which a journal of the directory drops as it opens.
+	_journalCleared = "journal.clear"
+
 	// _segmentEntries and _segmentBytes bound a segment: the journal starts a new one when either is reached, so
 	// dropping the oldest entries deletes whole files.
 	_segmentEntries = 10_000
@@ -228,4 +232,36 @@ func readEntry(f *os.File, row journalRow) (*Entry, error) {
 	e := line.entry()
 
 	return &e, nil
+}
+
+// writeCleared writes the tombstone of a Clear of dir that kept segment n and the later ones, and syncs dir, so the
+// tombstone is there before Clear deletes a file.
+func writeCleared(dir string, n int) error {
+	if err := atomicfile.WritePerm(dir, _journalTemps, filepath.Join(dir, _journalCleared), []byte(strconv.Itoa(n)+"\n"), 0o600); err != nil {
+		return err
+	}
+
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+
+	defer d.Close()
+
+	return d.Sync()
+}
+
+// readCleared returns the first segment the last Clear of dir kept, 0 when no Clear left one to drop.
+func readCleared(dir string) int {
+	data, err := os.ReadFile(filepath.Join(dir, _journalCleared))
+	if err != nil {
+		return 0
+	}
+
+	n, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0
+	}
+
+	return n
 }
