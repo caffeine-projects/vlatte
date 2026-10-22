@@ -1,6 +1,6 @@
 //go:build !unix
 
-package vlatte
+package journal
 
 import "os"
 

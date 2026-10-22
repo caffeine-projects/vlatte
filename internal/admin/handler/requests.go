@@ -12,10 +12,11 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/filterbuilder"
+	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
-var _ Journal = (*vlatte.Journal)(nil)
+var _ Journal = (*journal.Journal)(nil)
 
 const (
 	// _requestsPage is how many requests a list answers when it names no limit, and _maxRequestsPage the most it
@@ -24,29 +25,29 @@ const (
 	_maxRequestsPage = 1000
 )
 
-// Journal is the journal of the requests a mock server serves, such as a *vlatte.Journal.
+// Journal is the journal of the requests a mock server serves, such as a *journal.Journal.
 type Journal interface {
-	Find(ctx context.Context, q vlatte.JournalQuery, filters ...vlatte.EntryFilter) (vlatte.JournalPage, error)
-	Count(ctx context.Context, q vlatte.JournalQuery, filters ...vlatte.EntryFilter) (int, error)
-	Get(id string) (*vlatte.JournalEntry, error)
+	Find(ctx context.Context, q journal.Query, filters ...journal.Filter) (journal.Page, error)
+	Count(ctx context.Context, q journal.Query, filters ...journal.Filter) (int, error)
+	Get(id string) (*journal.Entry, error)
 	Clear() error
 }
 
 // RequestPattern makes the filter of the request part of a mock of the server's protocol, v, as a mock file writes
 // it: the request key of a query.
-type RequestPattern func(v config.Value) (vlatte.EntryFilter, error)
+type RequestPattern func(v config.Value) (journal.Filter, error)
 
 // requestList is the answer of GET and QUERY /requests: count is how many requests the query selects, whatever page
 // requests holds, and next, the before of the next page, when there is one.
 type requestList struct {
-	Count    int                    `json:"count"`
-	Requests []*vlatte.JournalEntry `json:"requests"`
-	Next     uint64                 `json:"next,omitzero"`
+	Count    int              `json:"count"`
+	Requests []*journal.Entry `json:"requests"`
+	Next     uint64           `json:"next,omitzero"`
 }
 
 // requestQuery is the body of QUERY /requests: a query, the request part of a mock, and a page.
 type requestQuery struct {
-	q       vlatte.JournalQuery
+	q       journal.Query
 	request *config.Value
 	limit   int
 }
@@ -59,7 +60,7 @@ var _requestQuerySchema = config.NewSchema(
 	config.Field[requestQuery]{
 		Key: "outcome", Kind: config.String, Usage: "What came of the requests: matched, unmatched, proxied, failed or abandoned.",
 		Set: func(c *requestQuery, v config.Value) error {
-			c.q.Outcome = vlatte.Outcome(v.Str)
+			c.q.Outcome = journal.Outcome(v.Str)
 			if !c.q.Outcome.Valid() {
 				return config.Invalid(v, fmt.Sprintf("outcome %q is no outcome", v.Str), "use matched, unmatched, proxied, failed or abandoned")
 			}
@@ -121,7 +122,7 @@ var _requestQuerySchema = config.NewSchema(
 
 // ListRequests answers the newest requests the server served: GET /requests. The limit and before parameters page
 // through them.
-func ListRequests(journal Journal) http.Handler {
+func ListRequests(j Journal) http.Handler {
 	return negotiated(func(w http.ResponseWriter, r *http.Request) {
 		limit, before, err := pageOf(r)
 		if err != nil {
@@ -129,14 +130,14 @@ func ListRequests(journal Journal) http.Handler {
 			return
 		}
 
-		answerRequests(w, r, journal, vlatte.JournalQuery{Before: before}, nil, limit)
+		answerRequests(w, r, j, journal.Query{Before: before}, nil, limit)
 	})
 }
 
 // QueryRequests answers the requests the query of the body selects, and their count: QUERY /requests. A request
 // part, which the server's protocol makes a pattern of, narrows them as a mock matches. An empty body selects them
 // all.
-func QueryRequests(journal Journal, pattern RequestPattern) http.Handler {
+func QueryRequests(j Journal, pattern RequestPattern) http.Handler {
 	return negotiated(func(w http.ResponseWriter, r *http.Request) {
 		data, format, err := readBody(w, r)
 		if err != nil {
@@ -150,7 +151,7 @@ func QueryRequests(journal Journal, pattern RequestPattern) http.Handler {
 			return
 		}
 
-		var filters []vlatte.EntryFilter
+		var filters []journal.Filter
 
 		if query.request != nil {
 			filter, err := requestFilter(*query.request, pattern)
@@ -162,17 +163,17 @@ func QueryRequests(journal Journal, pattern RequestPattern) http.Handler {
 			filters = append(filters, filter)
 		}
 
-		answerRequests(w, r, journal, query.q, filters, query.limit)
+		answerRequests(w, r, j, query.q, filters, query.limit)
 	})
 }
 
 // GetRequest answers the request of the path's id: GET /requests/{id}.
-func GetRequest(journal Journal) http.Handler {
+func GetRequest(j Journal) http.Handler {
 	return negotiated(func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 
-		entry, err := journal.Get(id)
-		if errors.Is(err, vlatte.ErrRequestNotFound) {
+		entry, err := j.Get(id)
+		if errors.Is(err, journal.ErrNotFound) {
 			err = &problemError{
 				status: http.StatusNotFound, code: _codeRequestNotFound,
 				detail: fmt.Sprintf("the journal holds no request of the id %q", id),
@@ -189,9 +190,9 @@ func GetRequest(journal Journal) http.Handler {
 }
 
 // ClearRequests removes every request of the journal: DELETE /requests.
-func ClearRequests(journal Journal) http.Handler {
+func ClearRequests(j Journal) http.Handler {
 	return negotiated(func(w http.ResponseWriter, r *http.Request) {
-		if err := journal.Clear(); err != nil {
+		if err := j.Clear(); err != nil {
 			fail(w, r, err)
 			return
 		}
@@ -202,19 +203,19 @@ func ClearRequests(journal Journal) http.Handler {
 
 // answerRequests answers the requests q, with filters, selects, a page of limit of them, or their count only for 0.
 // A matcher of the query that fails, or panics, is the query's problem.
-func answerRequests(w http.ResponseWriter, r *http.Request, journal Journal, q vlatte.JournalQuery, filters []vlatte.EntryFilter, limit int) {
+func answerRequests(w http.ResponseWriter, r *http.Request, j Journal, q journal.Query, filters []journal.Filter, limit int) {
 	var (
 		list requestList
 		err  error
 	)
 
 	if limit == 0 {
-		list.Count, err = journal.Count(r.Context(), q, filters...)
+		list.Count, err = j.Count(r.Context(), q, filters...)
 	} else {
 		q.Limit = limit
 
-		var page vlatte.JournalPage
-		if page, err = journal.Find(r.Context(), q, filters...); err == nil {
+		var page journal.Page
+		if page, err = j.Find(r.Context(), q, filters...); err == nil {
 			list = requestList{Count: page.Count, Requests: page.Entries, Next: page.Next}
 		}
 	}
@@ -234,7 +235,7 @@ func answerRequests(w http.ResponseWriter, r *http.Request, journal Journal, q v
 
 	// An empty page is a list, not null.
 	if list.Requests == nil {
-		list.Requests = []*vlatte.JournalEntry{}
+		list.Requests = []*journal.Entry{}
 	}
 
 	respond(w, r, http.StatusOK, list)
@@ -242,7 +243,7 @@ func answerRequests(w http.ResponseWriter, r *http.Request, journal Journal, q v
 
 // requestFilter makes the filter of the request part of a query, v, with pattern, the server's protocol's. A server
 // whose protocol has none takes no request part.
-func requestFilter(v config.Value, pattern RequestPattern) (vlatte.EntryFilter, error) {
+func requestFilter(v config.Value, pattern RequestPattern) (journal.Filter, error) {
 	if pattern == nil {
 		return nil, config.Invalid(v, "this mock server's protocol takes no request part", "select by the other keys")
 	}

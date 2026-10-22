@@ -6,7 +6,7 @@ import (
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 
-	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/journal"
 )
 
 type Config struct {
@@ -134,8 +134,8 @@ func (cb *ConfigBuilder) Admin(addr string) *ConfigBuilder {
 func (cb *ConfigBuilder) Journal(dir string) *ConfigBuilder {
 	cb.conf.Journal = &JournalConfig{
 		Dir:         dir,
-		MaxEntries:  vlatte.DefaultJournalMaxEntries,
-		MaxBodySize: vlatte.DefaultJournalMaxBodySize,
+		MaxEntries:  journal.DefaultMaxEntries,
+		MaxBodySize: journal.DefaultMaxBodySize,
 	}
 
 	return cb

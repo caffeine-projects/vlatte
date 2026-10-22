@@ -1,4 +1,4 @@
-package vlatte_test
+package journal_test
 
 import (
 	"context"
@@ -13,13 +13,14 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
 // modelQuery is a query of the journal, with the plain filter the model runs for it.
 type modelQuery struct {
-	q    vlatte.JournalQuery
-	keep func(e *vlatte.JournalEntry) bool
+	q    journal.Query
+	keep func(e *journal.Entry) bool
 }
 
 func TestJournalMachine(t *testing.T) {
@@ -32,15 +33,15 @@ func TestJournalMachine(t *testing.T) {
 		dir, err := os.MkdirTemp(base, "")
 		require.NoError(t, err)
 
-		opts := vlatte.JournalOptions{Dir: dir, MaxEntries: rapid.IntRange(0, 12).Draw(t, "max")}
+		opts := journal.Options{Dir: dir, MaxEntries: rapid.IntRange(0, 12).Draw(t, "max")}
 
-		j, err := vlatte.NewJournal(opts)
+		j, err := journal.New(opts)
 		require.NoError(t, err)
 
 		defer func() { j.Close() }()
 
 		var (
-			model []*vlatte.JournalEntry
+			model []*journal.Entry
 			next  int
 		)
 
@@ -74,9 +75,9 @@ func TestJournalMachine(t *testing.T) {
 
 				got, err := j.Get(id)
 
-				i := slices.IndexFunc(model, func(e *vlatte.JournalEntry) bool { return e.ID == id })
+				i := slices.IndexFunc(model, func(e *journal.Entry) bool { return e.ID == id })
 				if i < 0 {
-					require.ErrorIs(t, err, vlatte.ErrRequestNotFound)
+					require.ErrorIs(t, err, journal.ErrNotFound)
 					return
 				}
 
@@ -90,7 +91,7 @@ func TestJournalMachine(t *testing.T) {
 			"restart": func(t *rapid.T) {
 				require.NoError(t, j.Close())
 
-				j, err = vlatte.NewJournal(opts)
+				j, err = journal.New(opts)
 				require.NoError(t, err)
 			},
 		})
@@ -98,8 +99,8 @@ func TestJournalMachine(t *testing.T) {
 }
 
 // scan selects the entries of model that mq keeps, as Find does, without an index.
-func scan(model []*vlatte.JournalEntry, mq modelQuery) vlatte.JournalPage {
-	var page vlatte.JournalPage
+func scan(model []*journal.Entry, mq modelQuery) journal.Page {
+	var page journal.Page
 
 	for _, e := range slices.Backward(model) {
 		if !mq.keep(e) {
@@ -126,10 +127,10 @@ func scan(model []*vlatte.JournalEntry, mq modelQuery) vlatte.JournalPage {
 	return page
 }
 
-func drawEntry(t *rapid.T, id string) *vlatte.JournalEntry {
+func drawEntry(t *rapid.T, id string) *journal.Entry {
 	path := rapid.SampledFrom([]string{"/a", "/b", "/c/d"}).Draw(t, "path")
 
-	e := &vlatte.JournalEntry{
+	e := &journal.Entry{
 		ID:      id,
 		Time:    _t0.Add(time.Duration(rapid.IntRange(0, 10).Draw(t, "minute")) * time.Minute),
 		Kind:    rapid.SampledFrom([]vlatte.Kind{"http", "grpc"}).Draw(t, "kind"),
@@ -153,22 +154,22 @@ func drawEntry(t *rapid.T, id string) *vlatte.JournalEntry {
 	return e
 }
 
-var _outcomes = []vlatte.Outcome{
-	vlatte.OutcomeMatched,
-	vlatte.OutcomeUnmatched,
-	vlatte.OutcomeProxied,
-	vlatte.OutcomeFailed,
-	vlatte.OutcomeAbandoned,
+var _outcomes = []journal.Outcome{
+	journal.OutcomeMatched,
+	journal.OutcomeUnmatched,
+	journal.OutcomeProxied,
+	journal.OutcomeFailed,
+	journal.OutcomeAbandoned,
 }
 
 // drawQuery draws a query of a few fields, each with the plain check the model runs for it.
-func drawQuery(t *rapid.T, model []*vlatte.JournalEntry) modelQuery {
+func drawQuery(t *rapid.T, model []*journal.Entry) modelQuery {
 	var (
-		q      vlatte.JournalQuery
-		checks []func(e *vlatte.JournalEntry) bool
+		q      journal.Query
+		checks []func(e *journal.Entry) bool
 	)
 
-	text := func(label string, values []string, set func(m vlatte.Matcher), get func(e *vlatte.JournalEntry) string) {
+	text := func(label string, values []string, set func(m vlatte.Matcher), get func(e *journal.Entry) string) {
 		if !rapid.Bool().Draw(t, label) {
 			return
 		}
@@ -181,45 +182,45 @@ func drawQuery(t *rapid.T, model []*vlatte.JournalEntry) modelQuery {
 		}
 
 		set(match.Any(matchers...))
-		checks = append(checks, func(e *vlatte.JournalEntry) bool { return slices.Contains(picked, get(e)) })
+		checks = append(checks, func(e *journal.Entry) bool { return slices.Contains(picked, get(e)) })
 	}
 
 	if rapid.Bool().Draw(t, "by kind") {
 		q.Kind = rapid.SampledFrom([]vlatte.Kind{"http", "grpc", "ws"}).Draw(t, "kind")
-		checks = append(checks, func(e *vlatte.JournalEntry) bool { return e.Kind == q.Kind })
+		checks = append(checks, func(e *journal.Entry) bool { return e.Kind == q.Kind })
 	}
 
 	if rapid.Bool().Draw(t, "by outcome") {
 		q.Outcome = rapid.SampledFrom(_outcomes).Draw(t, "outcome")
-		checks = append(checks, func(e *vlatte.JournalEntry) bool { return e.Outcome == q.Outcome })
+		checks = append(checks, func(e *journal.Entry) bool { return e.Outcome == q.Outcome })
 	}
 
-	text("by mock", []string{"", "m1", "m2", "m3"}, func(m vlatte.Matcher) { q.MockID = m }, func(e *vlatte.JournalEntry) string { return e.MockID })
-	text("by method", []string{"", "GET", "POST"}, func(m vlatte.Matcher) { q.Method = m }, func(e *vlatte.JournalEntry) string { return e.Method })
-	text("by path", []string{"/a", "/b", "/c/d"}, func(m vlatte.Matcher) { q.Path = m }, func(e *vlatte.JournalEntry) string { return e.Path })
+	text("by mock", []string{"", "m1", "m2", "m3"}, func(m vlatte.Matcher) { q.MockID = m }, func(e *journal.Entry) string { return e.MockID })
+	text("by method", []string{"", "GET", "POST"}, func(m vlatte.Matcher) { q.Method = m }, func(e *journal.Entry) string { return e.Method })
+	text("by path", []string{"/a", "/b", "/c/d"}, func(m vlatte.Matcher) { q.Path = m }, func(e *journal.Entry) string { return e.Path })
 
 	if rapid.Bool().Draw(t, "by target") {
 		q.Target = match.Contain("?q=1")
-		checks = append(checks, func(e *vlatte.JournalEntry) bool { return strings.Contains(e.Target, "?q=1") })
+		checks = append(checks, func(e *journal.Entry) bool { return strings.Contains(e.Target, "?q=1") })
 	}
 
 	if rapid.Bool().Draw(t, "by status") {
 		least := rapid.SampledFrom([]int{0, 200, 404}).Draw(t, "least status")
 		q.Status = match.GreaterThanOrEqual(least)
-		checks = append(checks, func(e *vlatte.JournalEntry) bool { return e.Status >= least })
+		checks = append(checks, func(e *journal.Entry) bool { return e.Status >= least })
 	}
 
 	if rapid.Bool().Draw(t, "by time") {
 		since := _t0.Add(time.Duration(rapid.IntRange(0, 10).Draw(t, "since")) * time.Minute)
 		until := since.Add(time.Duration(rapid.IntRange(0, 10).Draw(t, "span")) * time.Minute)
 		q.Since, q.Until = since, until
-		checks = append(checks, func(e *vlatte.JournalEntry) bool { return !e.Time.Before(since) && e.Time.Before(until) })
+		checks = append(checks, func(e *journal.Entry) bool { return !e.Time.Before(since) && e.Time.Before(until) })
 	}
 
 	if rapid.Bool().Draw(t, "by header") {
 		v := rapid.SampledFrom([]string{"", "1", "2"}).Draw(t, "header value")
 		q.Header = map[string]vlatte.Matcher{"x-A": match.Equal(v)}
-		checks = append(checks, func(e *vlatte.JournalEntry) bool {
+		checks = append(checks, func(e *journal.Entry) bool {
 			got := ""
 			for k, values := range e.Header {
 				if strings.EqualFold(k, "x-A") {
@@ -234,7 +235,7 @@ func drawQuery(t *rapid.T, model []*vlatte.JournalEntry) modelQuery {
 	if rapid.Bool().Draw(t, "by body") {
 		v := rapid.SampledFrom([]string{"", "x", `{"id":1}`}).Draw(t, "body value")
 		q.Body = match.Equal(v)
-		checks = append(checks, func(e *vlatte.JournalEntry) bool { return string(e.Body) == v })
+		checks = append(checks, func(e *journal.Entry) bool { return string(e.Body) == v })
 	}
 
 	q.Limit = rapid.IntRange(0, 4).Draw(t, "limit")
@@ -243,7 +244,7 @@ func drawQuery(t *rapid.T, model []*vlatte.JournalEntry) modelQuery {
 		q.Before = rapid.SampledFrom(model).Draw(t, "before").Seq
 	}
 
-	return modelQuery{q: q, keep: func(e *vlatte.JournalEntry) bool {
+	return modelQuery{q: q, keep: func(e *journal.Entry) bool {
 		for _, check := range checks {
 			if !check(e) {
 				return false

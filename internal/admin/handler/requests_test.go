@@ -13,13 +13,14 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/journal"
 )
 
 // journalOf returns a journal of entries, the protocol's own: a path, and its method.
-func journalOf(t *testing.T, entries ...*vlatte.JournalEntry) *vlatte.Journal {
+func journalOf(t *testing.T, entries ...*journal.Entry) *journal.Journal {
 	t.Helper()
 
-	j, err := vlatte.NewJournal(vlatte.JournalOptions{Dir: t.TempDir()})
+	j, err := journal.New(journal.Options{Dir: t.TempDir()})
 	require.NoError(t, err)
 	t.Cleanup(func() { j.Close() })
 
@@ -30,8 +31,8 @@ func journalOf(t *testing.T, entries ...*vlatte.JournalEntry) *vlatte.Journal {
 	return j
 }
 
-func entryOf(id, method, path string, outcome vlatte.Outcome) *vlatte.JournalEntry {
-	return &vlatte.JournalEntry{
+func entryOf(id, method, path string, outcome journal.Outcome) *journal.Entry {
+	return &journal.Entry{
 		ID:      id,
 		Time:    time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC),
 		Kind:    "fake",
@@ -63,9 +64,9 @@ func TestListRequests(t *testing.T) {
 	// GET lists the newest requests a page at a time, in a browser or behind any proxy, with how many there are: the
 	// count stays as the pages go.
 	j := journalOf(t,
-		entryOf("a", "GET", "/a", vlatte.OutcomeMatched),
-		entryOf("b", "GET", "/b", vlatte.OutcomeUnmatched),
-		entryOf("c", "POST", "/c", vlatte.OutcomeMatched),
+		entryOf("a", "GET", "/a", journal.OutcomeMatched),
+		entryOf("b", "GET", "/b", journal.OutcomeUnmatched),
+		entryOf("c", "POST", "/c", journal.OutcomeMatched),
 	)
 	url := serve(t, newStore(t), admin.Journal(j, nil))
 
@@ -95,9 +96,9 @@ func TestQueryRequests(t *testing.T) {
 	// QUERY selects requests by the keys of a query, with the matchers mock files write, and counts them: limit 0
 	// answers the count alone, which is what a client verifying a request needs.
 	j := journalOf(t,
-		entryOf("a", "GET", "/users/1", vlatte.OutcomeMatched),
-		entryOf("b", "GET", "/orders", vlatte.OutcomeUnmatched),
-		entryOf("c", "POST", "/users", vlatte.OutcomeMatched),
+		entryOf("a", "GET", "/users/1", journal.OutcomeMatched),
+		entryOf("b", "GET", "/orders", journal.OutcomeUnmatched),
+		entryOf("c", "POST", "/users", journal.OutcomeMatched),
 	)
 	url := serve(t, newStore(t), admin.Journal(j, nil))
 
@@ -166,11 +167,11 @@ func TestQueryRequests_ProblemsOfTheQuery(t *testing.T) {
 func TestQueryRequests_TheRequestPartIsTheProtocolsPattern(t *testing.T) {
 	// The server's protocol makes a pattern of the request part, as its mocks match: it narrows what the other keys
 	// select, and its problems are the query's.
-	j := journalOf(t, entryOf("a", "GET", "/a", vlatte.OutcomeMatched), entryOf("b", "GET", "/b", vlatte.OutcomeMatched))
+	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched), entryOf("b", "GET", "/b", journal.OutcomeMatched))
 
 	var got config.Value
 
-	pattern := func(v config.Value) (vlatte.EntryFilter, error) {
+	pattern := func(v config.Value) (journal.Filter, error) {
 		got = v
 
 		if v.Any == "bad" {
@@ -178,12 +179,12 @@ func TestQueryRequests_TheRequestPartIsTheProtocolsPattern(t *testing.T) {
 		}
 
 		if v.Any == "failing" {
-			return func(context.Context, *vlatte.JournalEntry) (bool, error) {
+			return func(context.Context, *journal.Entry) (bool, error) {
 				return false, fmt.Errorf("%w: a matcher that fails", vlatte.ErrMatching)
 			}, nil
 		}
 
-		return func(_ context.Context, e *vlatte.JournalEntry) (bool, error) { return e.Path == "/b", nil }, nil
+		return func(_ context.Context, e *journal.Entry) (bool, error) { return e.Path == "/b", nil }, nil
 	}
 
 	url := serve(t, newStore(t), admin.Journal(j, pattern))
@@ -216,7 +217,7 @@ func TestQueryRequests_IsRefusedCrossSite(t *testing.T) {
 }
 
 func TestGetRequest(t *testing.T) {
-	j := journalOf(t, entryOf("a", "GET", "/a", vlatte.OutcomeMatched))
+	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
 	url := serve(t, newStore(t), admin.Journal(j, nil))
 
 	res, body := send(t, request{method: http.MethodGet, url: url + "/requests/a"})
@@ -232,29 +233,29 @@ func TestGetRequest(t *testing.T) {
 
 func TestClearRequests(t *testing.T) {
 	// A test clears the journal between its cases, on its own or with the rest of the server through POST /reset.
-	j := journalOf(t, entryOf("a", "GET", "/a", vlatte.OutcomeMatched))
+	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
 	url := serve(t, newStore(t), admin.Journal(j, nil))
 
 	res, body := send(t, request{method: http.MethodDelete, url: url + "/requests"})
 	require.Equal(t, http.StatusNoContent, res.StatusCode, body)
 
-	count, err := j.Count(t.Context(), vlatte.JournalQuery{})
+	count, err := j.Count(t.Context(), journal.Query{})
 	require.NoError(t, err)
 	require.Zero(t, count)
 
-	require.NoError(t, j.Append(entryOf("b", "GET", "/b", vlatte.OutcomeMatched)))
+	require.NoError(t, j.Append(entryOf("b", "GET", "/b", journal.OutcomeMatched)))
 
 	res, body = send(t, request{method: http.MethodPost, url: url + "/reset"})
 	require.Equal(t, http.StatusNoContent, res.StatusCode, body)
 
-	count, err = j.Count(t.Context(), vlatte.JournalQuery{})
+	count, err = j.Count(t.Context(), journal.Query{})
 	require.NoError(t, err)
 	require.Zero(t, count, "reset clears the journal")
 }
 
 func TestJournal_ANilJournalIsNone(t *testing.T) {
 	// A server without a journal passes its nil one: its journal routes answer 501, and a reset works.
-	url := serve(t, newStore(t), admin.Journal((*vlatte.Journal)(nil), nil))
+	url := serve(t, newStore(t), admin.Journal((*journal.Journal)(nil), nil))
 
 	res, body := send(t, request{method: http.MethodGet, url: url + "/requests"})
 	problem(t, res, body, http.StatusNotImplemented, "not_supported")

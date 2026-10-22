@@ -18,6 +18,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
+	"github.com/caffeine-projects/vlatte/journal"
 )
 
 const (
@@ -477,7 +478,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			},
 		},
 		{
-			Key: "journal.max_entries", Kind: config.Int, Default: strconv.Itoa(vlatte.DefaultJournalMaxEntries),
+			Key: "journal.max_entries", Kind: config.Int, Default: strconv.Itoa(journal.DefaultMaxEntries),
 			Usage: "How many requests the journal keeps, the newest. 0 keeps them all.",
 			Set: func(c *Config, v config.Value) error {
 				section(&c.Journal, defaultJournalConfig()).MaxEntries = int(v.Int)
@@ -485,7 +486,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			},
 		},
 		{
-			Key: "journal.max_body_size", Kind: config.Int, Default: strconv.Itoa(vlatte.DefaultJournalMaxBodySize),
+			Key: "journal.max_body_size", Kind: config.Int, Default: strconv.Itoa(journal.DefaultMaxBodySize),
 			Usage: "How many bytes of a request's body the journal keeps. 0 keeps whole bodies.",
 			Set: func(c *Config, v config.Value) error {
 				section(&c.Journal, defaultJournalConfig()).MaxBodySize = v.Int

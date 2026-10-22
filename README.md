@@ -594,21 +594,22 @@ m.MustStart()
 t.Cleanup(m.Close)
 
 // ... the code under test sends its requests ...
+// journal is github.com/caffeine-projects/vlatte/journal.
 
-m.AssertRequested(t, 1, vlatte.JournalQuery{Method: match.Equal("POST"), Path: match.Equal("/orders")})
-m.AssertRequested(t, 2, vlatte.JournalQuery{Header: map[string]vlatte.Matcher{"Authorization": match.HasPrefix("Bearer ")}})
-m.AssertNotRequested(t, vlatte.JournalQuery{Outcome: vlatte.OutcomeUnmatched})
+m.AssertRequested(t, 1, journal.Query{Method: match.Equal("POST"), Path: match.Equal("/orders")})
+m.AssertRequested(t, 2, journal.Query{Header: map[string]vlatte.Matcher{"Authorization": match.HasPrefix("Bearer ")}})
+m.AssertNotRequested(t, journal.Query{Outcome: journal.OutcomeUnmatched})
 
 // The request part of a mock verifies as a mock matches: query parameters, forms, files, the parsed body.
-m.AssertRequested(t, 1, vlatte.JournalQuery{}, mockhttp.Request().Method("POST").Query("page", match.Equal("2")))
+m.AssertRequested(t, 1, journal.Query{}, mockhttp.Request().Method("POST").Query("page", match.Equal("2")))
 
-entries, err := m.Requests(ctx, vlatte.JournalQuery{Path: match.GlobMatch("/users/*"), Limit: 10}) // newest first
-n, err := m.CountRequests(ctx, vlatte.JournalQuery{Kind: mockhttp.Kind})
+entries, err := m.Requests(ctx, journal.Query{Path: match.GlobMatch("/users/*"), Limit: 10}) // newest first
+n, err := m.CountRequests(ctx, journal.Query{Kind: mockhttp.Kind})
 ```
 
 A failed assertion lists the requests that matched, or the newest ones when none did, with the mock that came closest to each request no mock matched. A request is journaled as the server ends its answer, as hits count: a client gets a small answer only then, while it may read the start of a large one a moment before.
 
-A `vlatte.JournalQuery` selects by the fields every protocol has. `Kind`, `Outcome`, `MockID`, `Method`, `Path` and `Status` are indexed: a query runs each of their matchers once per value the journal holds, not once per request, and reads no request from disk for them. `Target` (the full URL), `Since` and `Until` filter in memory too. `Header`, `Body` and request patterns read the requests the other fields leave. `Limit` and `Before` page through them, newest first; `m.Journal().Find` returns the next page's cursor and the count.
+A `journal.Query`, of package `github.com/caffeine-projects/vlatte/journal`, selects by the fields every protocol has. `Kind`, `Outcome`, `MockID`, `Method`, `Path` and `Status` are indexed: a query runs each of their matchers once per value the journal holds, not once per request, and reads no request from disk for them. `Target` (the full URL), `Since` and `Until` filter in memory too. `Header`, `Body` and request patterns read the requests the other fields leave. `Limit` and `Before` page through them, newest first; `m.Journal().Find` returns the next page's cursor and the count. A `journal.Journal` works on its own too, as a changelog of any requests: `journal.New(journal.Options{Dir: dir})`.
 
 Patterns are the request part of a mock builder, such as `mockhttp.Request()`: the server rebuilds each request from the journal and matches it, through its body parsers. A pattern has no `Times`, `Once` or scenario, which count served requests rather than match one. A rebuilt request has no `RemoteAddr` or TLS state for a `RequestMatches` predicate.
 

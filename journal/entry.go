@@ -1,4 +1,4 @@
-package vlatte
+package journal
 
 import (
 	"encoding/json/jsontext"
@@ -6,11 +6,13 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 var (
-	_ json.MarshalerTo     = (*JournalEntry)(nil)
-	_ json.UnmarshalerFrom = (*JournalEntry)(nil)
+	_ json.MarshalerTo     = (*Entry)(nil)
+	_ json.UnmarshalerFrom = (*Entry)(nil)
 )
 
 // Outcome is what came of a request a mock server served.
@@ -29,9 +31,9 @@ const (
 	OutcomeAbandoned Outcome = "abandoned"
 )
 
-// JournalEntry is a request a mock server served, as its [Journal] keeps it. The fields every protocol has are its
+// Entry is a request a mock server served, as its [Journal] keeps it. The fields every protocol has are its
 // own; a protocol fills those it has: gRPC has no method, and its path is the full method of the call.
-type JournalEntry struct {
+type Entry struct {
 	// Seq orders the entries of a journal: a later entry has a greater one. Append sets it.
 	Seq uint64
 
@@ -42,7 +44,7 @@ type JournalEntry struct {
 	Time time.Time
 
 	// Kind is the protocol of the request, such as "http".
-	Kind Kind
+	Kind vlatte.Kind
 
 	Outcome Outcome
 
@@ -72,28 +74,16 @@ type JournalEntry struct {
 	Message string
 
 	// NearMisses are the mocks that came closest to matching a request no mock matched.
-	NearMisses []NearMiss
+	NearMisses []vlatte.NearMiss
 }
 
-// NearMiss is a mock that came close to matching a request: Passed of the Total parts it checked matched. Failed names
-// the parts that didn't, and Skipped those it didn't check, which keep state, such as a scenario's, that matching
-// never reached.
-type NearMiss struct {
-	MockID  string   `json:"mock_id"`
-	Name    string   `json:"name,omitempty"`
-	Passed  int      `json:"passed"`
-	Total   int      `json:"total"`
-	Failed  []string `json:"failed,omitempty"`
-	Skipped []string `json:"skipped,omitempty"`
-}
-
-// journalLine is the JSON form of a JournalEntry, a line of its journal's files: a body that is text is kept as
+// journalLine is the JSON form of an Entry, a line of its journal's files: a body that is text is kept as
 // such, so a person reads it; another goes in base64. JSON has no durations: the elapsed time is in nanoseconds.
 type journalLine struct {
 	Seq           uint64              `json:"seq,omitzero"`
 	ID            string              `json:"id"`
 	Time          time.Time           `json:"time"`
-	Kind          Kind                `json:"kind"`
+	Kind          vlatte.Kind         `json:"kind"`
 	Outcome       Outcome             `json:"outcome"`
 	MockID        string              `json:"mock_id,omitempty"`
 	Method        string              `json:"method,omitempty"`
@@ -106,17 +96,17 @@ type journalLine struct {
 	BodyBase64    []byte              `json:"body_base64,omitempty"`
 	BodyTruncated bool                `json:"body_truncated,omitzero"`
 	Message       string              `json:"message,omitempty"`
-	NearMisses    []NearMiss          `json:"near_misses,omitempty"`
+	NearMisses    []vlatte.NearMiss   `json:"near_misses,omitempty"`
 }
 
 // MarshalJSONTo writes e as its journal's files keep it.
-func (e *JournalEntry) MarshalJSONTo(enc *jsontext.Encoder) error {
+func (e *Entry) MarshalJSONTo(enc *jsontext.Encoder) error {
 	line := e.line()
 	return json.MarshalEncode(enc, &line)
 }
 
 // UnmarshalJSONFrom reads e as MarshalJSONTo writes it.
-func (e *JournalEntry) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+func (e *Entry) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	var line journalLine
 	if err := json.UnmarshalDecode(dec, &line); err != nil {
 		return err
@@ -129,16 +119,16 @@ func (e *JournalEntry) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 
 // validUTF8 replaces the bytes of the text of e that the index keeps, which aren't UTF-8, with U+FFFD, as the JSON of
 // e has them: the index and the journal's files have the same values. Encoding replaces those of the rest.
-func (e *JournalEntry) validUTF8() {
+func (e *Entry) validUTF8() {
 	for _, s := range []*string{&e.ID, &e.MockID, &e.Method, &e.Path, &e.Target} {
 		*s = strings.ToValidUTF8(*s, "\uFFFD")
 	}
 
-	e.Kind = Kind(strings.ToValidUTF8(string(e.Kind), "\uFFFD"))
+	e.Kind = vlatte.Kind(strings.ToValidUTF8(string(e.Kind), "\uFFFD"))
 	e.Outcome = Outcome(strings.ToValidUTF8(string(e.Outcome), "\uFFFD"))
 }
 
-func (e *JournalEntry) line() journalLine {
+func (e *Entry) line() journalLine {
 	line := journalLine{
 		Seq:           e.Seq,
 		ID:            e.ID,
@@ -166,13 +156,13 @@ func (e *JournalEntry) line() journalLine {
 	return line
 }
 
-func (l *journalLine) entry() JournalEntry {
+func (l *journalLine) entry() Entry {
 	body := l.BodyBase64
 	if l.Body != "" {
 		body = []byte(l.Body)
 	}
 
-	return JournalEntry{
+	return Entry{
 		Seq:           l.Seq,
 		ID:            l.ID,
 		Time:          l.Time,

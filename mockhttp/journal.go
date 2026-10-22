@@ -18,11 +18,12 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/journal"
 )
 
 var (
-	_ mockHTTPLifecycle                      = journalEvents{}
-	_ vlatte.RequestPatterns[*Mock, *Server] = (*Server)(nil)
+	_ mockHTTPLifecycle                       = journalEvents{}
+	_ journal.RequestPatterns[*Mock, *Server] = (*Server)(nil)
 )
 
 var (
@@ -35,7 +36,7 @@ var (
 
 // openJournal opens the journal conf configures, nil when it configures none. Its directory reads as the admin API's
 // does: a relative one starts at the root directory, and WorkDirVar at the work directory.
-func openJournal(conf *Config, logger *zerolog.Logger) (*vlatte.Journal, error) {
+func openJournal(conf *Config, logger *zerolog.Logger) (*journal.Journal, error) {
 	if conf.Journal == nil {
 		return nil, nil
 	}
@@ -45,7 +46,7 @@ func openJournal(conf *Config, logger *zerolog.Logger) (*vlatte.Journal, error) 
 		dir = conf.path(dir)
 	}
 
-	journal, err := vlatte.NewJournal(vlatte.JournalOptions{
+	journal, err := journal.New(journal.Options{
 		Dir:         dir,
 		MaxEntries:  conf.Journal.MaxEntries,
 		MaxBodySize: conf.Journal.MaxBodySize,
@@ -79,15 +80,15 @@ func (j journalEvents) OnRequest(r *RequestValues) {
 }
 
 func (j journalEvents) OnMatch(r *RequestValues, res *Response) {
-	r.journal.record(r, vlatte.OutcomeMatched, r.answered(res), nil)
+	r.journal.record(r, journal.OutcomeMatched, r.answered(res), nil)
 }
 
 func (j journalEvents) OnProxied(r *RequestValues, res *Response) {
-	r.journal.record(r, vlatte.OutcomeProxied, r.answered(res), nil)
+	r.journal.record(r, journal.OutcomeProxied, r.answered(res), nil)
 }
 
 func (j journalEvents) OnNoMatch(r *RequestValues) {
-	r.journal.record(r, vlatte.OutcomeUnmatched, r.sent(), nil)
+	r.journal.record(r, journal.OutcomeUnmatched, r.sent(), nil)
 }
 
 // OnWarning keeps the warning, which tells why a request that reaches no outcome ended.
@@ -97,15 +98,15 @@ func (j journalEvents) OnWarning(r *RequestValues, err error) {
 
 // OnError journals the status the client got: a reply may have sent one before it failed.
 func (j journalEvents) OnError(r *RequestValues, err error) {
-	r.journal.record(r, vlatte.OutcomeFailed, r.sent(), err)
+	r.journal.record(r, journal.OutcomeFailed, r.sent(), err)
 }
 
 // journalCall is the entry of a request in the server's journal, which it appends once the request reaches an
 // outcome: the first one counts.
 type journalCall struct {
-	journal *vlatte.Journal
+	journal *journal.Journal
 	mu      sync.Mutex
-	entry   vlatte.JournalEntry
+	entry   journal.Entry
 	warning error
 	done    bool
 }
@@ -126,7 +127,7 @@ func newJournalCall(app *Server, r *RequestValues) *journalCall {
 
 	return &journalCall{
 		journal: app.Journal(),
-		entry: vlatte.JournalEntry{
+		entry: journal.Entry{
 			ID:            r.ReqID,
 			Time:          r.StartedAtTime,
 			Kind:          Kind,
@@ -172,7 +173,7 @@ func requestTarget(req *http.Request, u *url.URL) string {
 }
 
 // record appends the entry of r with its outcome, unless it has one already. A nil c journals nothing.
-func (c *journalCall) record(r *RequestValues, outcome vlatte.Outcome, status int, err error) {
+func (c *journalCall) record(r *RequestValues, outcome journal.Outcome, status int, err error) {
 	if c == nil {
 		return
 	}
@@ -230,20 +231,20 @@ func (c *journalCall) end(r *RequestValues, p any) {
 
 	switch ctx := r.RawRequest.Context(); {
 	case p != nil && !aborted:
-		c.record(r, vlatte.OutcomeFailed, r.panicked(), fmt.Errorf("%w: %v", errPanicked, p))
+		c.record(r, journal.OutcomeFailed, r.panicked(), fmt.Errorf("%w: %v", errPanicked, p))
 	case ctx.Err() != nil:
-		c.record(r, vlatte.OutcomeAbandoned, r.sent(), cmp.Or(warning, context.Cause(ctx)))
+		c.record(r, journal.OutcomeAbandoned, r.sent(), cmp.Or(warning, context.Cause(ctx)))
 	case aborted:
-		c.record(r, vlatte.OutcomeFailed, r.sent(), cmp.Or(warning, abort))
+		c.record(r, journal.OutcomeFailed, r.sent(), cmp.Or(warning, abort))
 	default:
-		c.record(r, vlatte.OutcomeFailed, r.sent(), cmp.Or(warning, errNoAnswer))
+		c.record(r, journal.OutcomeFailed, r.sent(), cmp.Or(warning, errNoAnswer))
 	}
 }
 
 // RequestPattern returns the filter of journal entries that the request part of b matches, as it matches a request:
 // b is a *Builder, such as Request(), whose reply counts for nothing. Times, Once and scenarios match no request
-// served before, so a pattern has none. It implements vlatte.RequestPatterns.
-func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (vlatte.EntryFilter, error) {
+// served before, so a pattern has none. It implements journal.RequestPatterns.
+func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (journal.Filter, error) {
 	builder, ok := b.(*Builder)
 
 	switch {
@@ -259,14 +260,14 @@ func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (vlatte.Entr
 
 	evals := vlatte.Evaluators[*Mock, *selectorInput](slices.Clone(builder.spec.expectations))
 
-	return func(ctx context.Context, e *vlatte.JournalEntry) (bool, error) {
+	return func(ctx context.Context, e *journal.Entry) (bool, error) {
 		return app.matchEntry(ctx, e, evals)
 	}, nil
 }
 
 // adminRequestPattern returns the filter of the request part of a mock file, v, the request key of a query of the
 // admin API: its keys are a mock file's, and it matches as a mock does. An empty one matches every request.
-func (app *Server) adminRequestPattern(v config.Value) (vlatte.EntryFilter, error) {
+func (app *Server) adminRequestPattern(v config.Value) (journal.Filter, error) {
 	def := newMockDef()
 	doc := config.Value{Origin: v.Origin, Any: map[string]any{"request": v.Any}}
 
@@ -285,7 +286,7 @@ func (app *Server) adminRequestPattern(v config.Value) (vlatte.EntryFilter, erro
 
 // matchEntry tells whether evals match the request of e, an entry of the server's journal, as it came. The request
 // goes through the server's body parsers, as it did.
-func (app *Server) matchEntry(ctx context.Context, e *vlatte.JournalEntry, evals vlatte.Evaluators[*Mock, *selectorInput]) (bool, error) {
+func (app *Server) matchEntry(ctx context.Context, e *journal.Entry, evals vlatte.Evaluators[*Mock, *selectorInput]) (bool, error) {
 	if e.Kind != Kind {
 		return false, nil
 	}
@@ -310,7 +311,7 @@ func (app *Server) matchEntry(ctx context.Context, e *vlatte.JournalEntry, evals
 
 // entryRequest rebuilds the request of e, in origin form: the server reads its URL as its own, as it read the
 // request. The Host header goes in Host, as net/http has it.
-func entryRequest(ctx context.Context, e *vlatte.JournalEntry) (*http.Request, error) {
+func entryRequest(ctx context.Context, e *journal.Entry) (*http.Request, error) {
 	u := &url.URL{Host: e.Target}
 
 	if e.Method != http.MethodConnect {

@@ -378,7 +378,7 @@ func TestScopesReplace_ClosesBuiltMocksItCantStore(t *testing.T) {
 	// #26: a mock built for a call that fails never reaches the store, so nothing else would close it. A proxy mock
 	// among them would keep its HTTP client and its connections.
 	t.Run("another builder fails", func(t *testing.T) {
-		app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock](), nil)
+		app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock]())
 		built := newFakeMockWith("built", 0)
 
 		_, err := app.Mock(fakeBuilder{mock: built}, fakeBuilder{err: errors.New("bad")})
@@ -387,7 +387,7 @@ func TestScopesReplace_ClosesBuiltMocksItCantStore(t *testing.T) {
 	})
 
 	t.Run("the store refuses them", func(t *testing.T) {
-		app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock](), nil)
+		app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock]())
 		held := newFakeMockWith("a", 0)
 		_, err := app.Mock(fakeBuilder{mock: held})
 		require.NoError(t, err)
@@ -403,7 +403,7 @@ func TestScopesReplace_ClosesBuiltMocksItCantStore(t *testing.T) {
 	t.Run("a builder that returns a stored mock gets it back open", func(t *testing.T) {
 		// Builder forbids returning a mock it returned before, but a mock that still serves must not be closed by
 		// the call the store refused.
-		app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock](), nil)
+		app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock]())
 		held := newFakeMockWith("a", 0)
 		b := fakeBuilder{mock: held}
 
@@ -416,7 +416,7 @@ func TestScopesReplace_ClosesBuiltMocksItCantStore(t *testing.T) {
 	})
 
 	t.Run("a remock closes the mocks it replaces", func(t *testing.T) {
-		app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock](), nil)
+		app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock]())
 		first := newFakeMockWith("a", 0)
 		scope, err := app.Mock(fakeBuilder{mock: first})
 		require.NoError(t, err)
@@ -453,7 +453,7 @@ func (b fakeBuilder) Build(struct{}) (*fakeMock, error) {
 func TestScopesAdd_StoresNothingWhenABuilderFails(t *testing.T) {
 	// A half-added set of mocks would serve without a scope that could assert or clean them.
 	store := vlatte.NewStore[*fakeMock]()
-	app := vlatte.NewBase[*fakeMock](struct{}{}, store, nil)
+	app := vlatte.NewBase[*fakeMock](struct{}{}, store)
 
 	scope, err := app.Mock(
 		fakeBuilder{mock: newFakeMockWith("ok", 0)},
@@ -475,7 +475,7 @@ func TestPropScopesAdd_AllOrNothing(t *testing.T) {
 	// and its error names every failing builder.
 	rapid.Check(t, func(t *rapid.T) {
 		store := vlatte.NewStore[*fakeMock]()
-		app := vlatte.NewBase[*fakeMock](struct{}{}, store, nil)
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
 
 		stored := rapid.SliceOfNDistinct(rapid.SampledFrom(_storeIDs), 0, 3, func(id string) string { return id }).Draw(t, "stored")
 		for _, id := range stored {

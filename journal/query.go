@@ -1,4 +1,4 @@
-package vlatte
+package journal
 
 import (
 	"cmp"
@@ -7,22 +7,24 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
-// EntryFilter tells whether an entry of a journal is one a query wants, such as a protocol's request pattern does.
-type EntryFilter func(ctx context.Context, e *JournalEntry) (bool, error)
+// Filter tells whether an entry of a journal is one a query wants, such as a protocol's request pattern does.
+type Filter func(ctx context.Context, e *Entry) (bool, error)
 
-// JournalQuery selects entries of a [Journal]. Each field set narrows the entries it selects; the zero query selects
+// Query selects entries of a [Journal]. Each field set narrows the entries it selects; the zero query selects
 // them all. A matcher gets the value of its field: text, or an int for Status.
-type JournalQuery struct {
-	Kind    Kind
+type Query struct {
+	Kind    vlatte.Kind
 	Outcome Outcome
 
-	MockID Matcher
-	Method Matcher
-	Path   Matcher
-	Target Matcher
-	Status Matcher
+	MockID vlatte.Matcher
+	Method vlatte.Matcher
+	Path   vlatte.Matcher
+	Target vlatte.Matcher
+	Status vlatte.Matcher
 
 	// Since and Until bound the time of the request: Since includes it, Until doesn't.
 	Since time.Time
@@ -30,10 +32,10 @@ type JournalQuery struct {
 
 	// Header matches headers by name, in any case: a matcher gets the first value of its header, or "" when the
 	// request has none.
-	Header map[string]Matcher
+	Header map[string]vlatte.Matcher
 
 	// Body gets the body as text.
-	Body Matcher
+	Body vlatte.Matcher
 
 	// Limit is the most entries Find returns, the newest first; 0 returns them all. Count leaves it out.
 	Limit int
@@ -43,10 +45,10 @@ type JournalQuery struct {
 	Before uint64
 }
 
-// JournalPage is a page of the entries a query selects, the newest first. Count is the number of entries the query
+// Page is a page of the entries a query selects, the newest first. Count is the number of entries the query
 // selects, its Limit and Before left out. Next, when not 0, is the Before of the next page.
-type JournalPage struct {
-	Entries []*JournalEntry
+type Page struct {
+	Entries []*Entry
 	Count   int
 	Next    uint64
 }
@@ -71,7 +73,7 @@ type journalAccepted struct {
 }
 
 // accept matches the values of s with the matchers of q: each matcher runs once per value, not once per entry.
-func (s *journalSnapshot) accept(ctx context.Context, q *JournalQuery) (*journalAccepted, error) {
+func (s *journalSnapshot) accept(ctx context.Context, q *Query) (*journalAccepted, error) {
 	var (
 		a   journalAccepted
 		err error
@@ -125,7 +127,7 @@ func (s *journalSnapshot) candidates(fields [][][]uint64) []journalRow {
 }
 
 // acceptedValues returns the values m matches. A nil m accepts none: its field doesn't select.
-func acceptedValues[K comparable](ctx context.Context, m Matcher, values []K) ([]K, error) {
+func acceptedValues[K comparable](ctx context.Context, m vlatte.Matcher, values []K) ([]K, error) {
 	if m == nil {
 		return nil, nil
 	}
@@ -147,7 +149,7 @@ func acceptedValues[K comparable](ctx context.Context, m Matcher, values []K) ([
 }
 
 // keeps tells whether row, a candidate, is one q selects by the fields rows hold that the index doesn't.
-func (q *JournalQuery) keeps(ctx context.Context, row *journalRow) (bool, error) {
+func (q *Query) keeps(ctx context.Context, row *journalRow) (bool, error) {
 	if !q.Since.IsZero() && row.Time.Before(q.Since) {
 		return false, nil
 	}
@@ -164,12 +166,12 @@ func (q *JournalQuery) keeps(ctx context.Context, row *journalRow) (bool, error)
 }
 
 // readsEntries tells whether q, with filters, selects entries by what only their files hold.
-func (q *JournalQuery) readsEntries(filters []EntryFilter) bool {
+func (q *Query) readsEntries(filters []Filter) bool {
 	return len(q.Header) > 0 || q.Body != nil || len(filters) > 0
 }
 
 // selects tells whether q, with filters, selects e by what only its file holds.
-func (q *JournalQuery) selects(ctx context.Context, e *JournalEntry, filters []EntryFilter) (bool, error) {
+func (q *Query) selects(ctx context.Context, e *Entry, filters []Filter) (bool, error) {
 	for name, m := range q.Header {
 		ok, err := matchValue(ctx, m, firstValue(e.Header, name))
 		if err != nil || !ok {
@@ -194,7 +196,7 @@ func (q *JournalQuery) selects(ctx context.Context, e *JournalEntry, filters []E
 	return true, nil
 }
 
-func (q *JournalQuery) check() error {
+func (q *Query) check() error {
 	switch {
 	case q.Limit < 0:
 		return fmt.Errorf("journal: limit must be 0 or more, not %d", q.Limit)
@@ -223,16 +225,16 @@ func (o Outcome) Valid() bool {
 
 // matchValue runs m on v. A matcher that fails, or panics, fails the query, with ErrMatching or ErrMatchPanicked,
 // instead of the server.
-func matchValue(ctx context.Context, m Matcher, v any) (ok bool, err error) {
+func matchValue(ctx context.Context, m vlatte.Matcher, v any) (ok bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("journal: %w: %T: %v", ErrMatchPanicked, m, r)
+			err = fmt.Errorf("journal: %w: %T: %v", vlatte.ErrMatchPanicked, m, r)
 		}
 	}()
 
-	ok, err = m.Match(NewMatcherArg(ctx, NewExplanation(), v))
+	ok, err = m.Match(vlatte.NewMatcherArg(ctx, vlatte.NewExplanation(), v))
 	if err != nil {
-		return false, fmt.Errorf("journal: %w: %s: %w", ErrMatching, m.Name(), err)
+		return false, fmt.Errorf("journal: %w: %s: %w", vlatte.ErrMatching, m.Name(), err)
 	}
 
 	return ok, nil

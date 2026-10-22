@@ -24,6 +24,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
+	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid/recovery"
@@ -45,6 +46,7 @@ const Kind vlatte.Kind = "http"
 // Server is the base for the mock server.
 type Server struct {
 	*vlatte.Base[*Mock, *Server]
+	*journal.Verifier[*Mock, *Server]
 
 	config             *Config
 	server             Backend
@@ -233,7 +235,7 @@ func New(config ...Option) (*Server, error) {
 	loaders = append(loaders, files)
 	loaders = append(loaders, conf.Loaders...)
 
-	journal, err := openJournal(conf, app.logger)
+	j, err := openJournal(conf, app.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -242,11 +244,12 @@ func New(config ...Option) (*Server, error) {
 	built := false
 	defer func() {
 		if !built {
-			journal.Close()
+			j.Close()
 		}
 	}()
 
-	app.Base = vlatte.NewBase(app, repository, journal)
+	app.Base = vlatte.NewBase(app, repository)
+	app.Verifier = journal.NewVerifier[*Mock, *Server](j, app)
 	app.storage = repository
 	app.scenarioStore = mfeat.NewScenarioStore()
 	app.params = params
@@ -292,7 +295,7 @@ func New(config ...Option) (*Server, error) {
 			admin.Scenarios(app.scenarioStore),
 			admin.Events(events),
 			admin.Logs(logs),
-			admin.Journal(journal, app.adminRequestPattern),
+			admin.Journal(j, app.adminRequestPattern),
 		}
 
 		app.admin = admin.MustNew(options...)

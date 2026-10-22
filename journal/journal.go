@@ -1,4 +1,7 @@
-package vlatte
+// Package journal keeps the requests a mock server serves, of any protocol, whatever their outcome: a changelog of
+// JSON lines in segment files, with an index in memory that narrows queries. Queries match with the matchers of mocks,
+// such as those of package match. A server embeds a Verifier, next to its vlatte.Base, to verify its requests.
+package journal
 
 import (
 	"context"
@@ -12,14 +15,16 @@ import (
 	"unicode/utf8"
 
 	"github.com/rs/zerolog"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 const (
-	// DefaultJournalMaxEntries is how many entries the journal of a mock server keeps by default, the newest.
-	DefaultJournalMaxEntries = 10_000
+	// DefaultMaxEntries is how many entries the journal of a mock server keeps by default, the newest.
+	DefaultMaxEntries = 10_000
 
-	// DefaultJournalMaxBodySize is how many bytes of a body the journal of a mock server keeps by default.
-	DefaultJournalMaxBodySize = 1 << 20
+	// DefaultMaxBodySize is how many bytes of a body the journal of a mock server keeps by default.
+	DefaultMaxBodySize = 1 << 20
 
 	_journalLock = "journal.lock"
 
@@ -28,17 +33,17 @@ const (
 )
 
 var (
-	ErrNoJournal       = errors.New("journal: the server keeps no journal of requests: turn its journal on")
-	ErrJournalClosed   = errors.New("journal: closed")
-	ErrJournalInUse    = errors.New("journal: another journal keeps its files in the directory")
-	ErrRequestNotFound = errors.New("journal: request not found")
+	ErrNoJournal = errors.New("journal: the server keeps no journal of requests: turn its journal on")
+	ErrClosed    = errors.New("journal: closed")
+	ErrInUse     = errors.New("journal: another journal keeps its files in the directory")
+	ErrNotFound  = errors.New("journal: request not found")
 
 	// ErrNoRequestPatterns is the error of a verification with request patterns on a server whose protocol has none.
 	ErrNoRequestPatterns = errors.New("journal: the server takes no request patterns")
 )
 
-// JournalOptions configures a [Journal].
-type JournalOptions struct {
+// Options configures a [Journal].
+type Options struct {
 	// Dir is where the journal keeps its files, across restarts. Empty keeps them in a temporary directory, which
 	// Close removes.
 	Dir string
@@ -80,9 +85,9 @@ type Journal struct {
 	failures int
 }
 
-// NewJournal opens the journal of o.Dir, with the entries it holds, or creates it. One journal at a time keeps its
-// files in a directory: another one fails with ErrJournalInUse, where the system locks files.
-func NewJournal(o JournalOptions) (*Journal, error) {
+// New opens the journal of o.Dir, with the entries it holds, or creates it. One journal at a time keeps its
+// files in a directory: another one fails with ErrInUse, where the system locks files.
+func New(o Options) (*Journal, error) {
 	switch {
 	case o.MaxEntries < 0:
 		return nil, fmt.Errorf("journal: MaxEntries must be 0 or more, not %d", o.MaxEntries)
@@ -120,9 +125,9 @@ func NewJournal(o JournalOptions) (*Journal, error) {
 	return j, nil
 }
 
-// MustNewJournal is like NewJournal, but panics on an error.
-func MustNewJournal(o JournalOptions) *Journal {
-	j, err := NewJournal(o)
+// MustNew is like New, but panics on an error.
+func MustNew(o Options) *Journal {
+	j, err := New(o)
 	if err != nil {
 		panic(err)
 	}
@@ -142,7 +147,7 @@ func (j *Journal) Dir() string {
 // Append adds e to the journal, and gives it its sequence number. A body over the journal's limit loses the rest,
 // and text that isn't UTF-8, which JSON can't hold, gets U+FFFD in place of its bad bytes. A failure is logged, the
 // first and then each time their count doubles, and returned.
-func (j *Journal) Append(e *JournalEntry) error {
+func (j *Journal) Append(e *Entry) error {
 	if j == nil {
 		return ErrNoJournal
 	}
@@ -167,7 +172,7 @@ func (j *Journal) Append(e *JournalEntry) error {
 }
 
 // Get returns the entry of the request id.
-func (j *Journal) Get(id string) (*JournalEntry, error) {
+func (j *Journal) Get(id string) (*Entry, error) {
 	if j == nil {
 		return nil, ErrNoJournal
 	}
@@ -176,7 +181,7 @@ func (j *Journal) Get(id string) (*JournalEntry, error) {
 
 	if j.closed {
 		j.mu.Unlock()
-		return nil, ErrJournalClosed
+		return nil, ErrClosed
 	}
 
 	var (
@@ -194,7 +199,7 @@ func (j *Journal) Get(id string) (*JournalEntry, error) {
 	j.mu.Unlock()
 
 	if !found {
-		return nil, fmt.Errorf("%w: %s", ErrRequestNotFound, id)
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
 
 	files := segmentFiles{dir: j.dir}
@@ -203,19 +208,19 @@ func (j *Journal) Get(id string) (*JournalEntry, error) {
 	e, err := files.read(row)
 	if errors.Is(err, fs.ErrNotExist) {
 		// The journal dropped it meanwhile.
-		return nil, fmt.Errorf("%w: %s", ErrRequestNotFound, id)
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
 
 	return e, err
 }
 
 // Find returns the entries q selects, with filters, the newest first, a page of them when q has a Limit.
-func (j *Journal) Find(ctx context.Context, q JournalQuery, filters ...EntryFilter) (JournalPage, error) {
+func (j *Journal) Find(ctx context.Context, q Query, filters ...Filter) (Page, error) {
 	return j.query(ctx, &q, filters, true)
 }
 
 // Count returns how many entries q selects, with filters. It reads no entry when q selects by indexed fields only.
-func (j *Journal) Count(ctx context.Context, q JournalQuery, filters ...EntryFilter) (int, error) {
+func (j *Journal) Count(ctx context.Context, q Query, filters ...Filter) (int, error) {
 	page, err := j.query(ctx, &q, filters, false)
 	return page.Count, err
 }
@@ -232,7 +237,7 @@ func (j *Journal) Clear() error {
 	defer j.mu.Unlock()
 
 	if j.closed {
-		return ErrJournalClosed
+		return ErrClosed
 	}
 
 	next := j.files[len(j.files)-1] + 1
@@ -297,12 +302,12 @@ func (j *Journal) Close() error {
 
 // append writes line, the line of e, or fails with encodeErr, the error encoding it, under the lock. It returns the
 // segment it filled, if it did, for its caller to finish.
-func (j *Journal) append(e *JournalEntry, line []byte, encodeErr error) (*sealedSegment, error) {
+func (j *Journal) append(e *Entry, line []byte, encodeErr error) (*sealedSegment, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
 	if j.closed {
-		return nil, ErrJournalClosed
+		return nil, ErrClosed
 	}
 
 	if encodeErr != nil {
@@ -624,23 +629,23 @@ func (j *Journal) release() {
 }
 
 // query runs q, with filters: it counts the entries q selects and, with collect, returns the page of them q asks for.
-func (j *Journal) query(ctx context.Context, q *JournalQuery, filters []EntryFilter, collect bool) (JournalPage, error) {
+func (j *Journal) query(ctx context.Context, q *Query, filters []Filter, collect bool) (Page, error) {
 	if j == nil {
-		return JournalPage{}, ErrNoJournal
+		return Page{}, ErrNoJournal
 	}
 
 	if err := q.check(); err != nil {
-		return JournalPage{}, err
+		return Page{}, err
 	}
 
 	snap, err := j.snapshot(q)
 	if err != nil {
-		return JournalPage{}, err
+		return Page{}, err
 	}
 
 	accepted, err := snap.accept(ctx, q)
 	if err != nil {
-		return JournalPage{}, err
+		return Page{}, err
 	}
 
 	rows := snap.candidates(j.lists(q, accepted))
@@ -649,20 +654,20 @@ func (j *Journal) query(ctx context.Context, q *JournalQuery, filters []EntryFil
 	defer files.close()
 
 	var (
-		page JournalPage
+		page Page
 		disk = q.readsEntries(filters)
 	)
 
 	for i := len(rows) - 1; i >= 0; i-- {
 		if err := ctx.Err(); err != nil {
-			return JournalPage{}, err
+			return Page{}, err
 		}
 
 		row := &rows[i]
 
 		ok, err := q.keeps(ctx, row)
 		if err != nil {
-			return JournalPage{}, err
+			return Page{}, err
 		}
 
 		if !ok {
@@ -672,7 +677,7 @@ func (j *Journal) query(ctx context.Context, q *JournalQuery, filters []EntryFil
 		paged := collect && (q.Before == 0 || row.Seq < q.Before)
 		full := q.Limit > 0 && len(page.Entries) >= q.Limit
 
-		var entry *JournalEntry
+		var entry *Entry
 
 		if disk || (paged && !full) {
 			entry, err = files.read(*row)
@@ -682,14 +687,14 @@ func (j *Journal) query(ctx context.Context, q *JournalQuery, filters []EntryFil
 			}
 
 			if err != nil {
-				return JournalPage{}, fmt.Errorf("journal: reading entry %d: %w", row.Seq, err)
+				return Page{}, fmt.Errorf("journal: reading entry %d: %w", row.Seq, err)
 			}
 		}
 
 		if disk {
 			if ok, err := q.selects(ctx, entry, filters); err != nil || !ok {
 				if err != nil {
-					return JournalPage{}, err
+					return Page{}, err
 				}
 
 				continue
@@ -714,12 +719,12 @@ func (j *Journal) query(ctx context.Context, q *JournalQuery, filters []EntryFil
 
 // snapshot copies what q reads of the journal, for q to read once the lock is released: the rows, and the values of
 // the indexed fields q matches.
-func (j *Journal) snapshot(q *JournalQuery) (*journalSnapshot, error) {
+func (j *Journal) snapshot(q *Query) (*journalSnapshot, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
 	if j.closed {
-		return nil, ErrJournalClosed
+		return nil, ErrClosed
 	}
 
 	s := &journalSnapshot{dir: j.dir, rows: slices.Clip(j.rows)}
@@ -745,14 +750,14 @@ func (j *Journal) snapshot(q *JournalQuery) (*journalSnapshot, error) {
 
 // lists returns, for each indexed field q selects by, the lists of the values it accepts: those the journal holds
 // now, which may name entries its snapshot's rows don't, newer ones, or miss some, which it dropped meanwhile.
-func (j *Journal) lists(q *JournalQuery, a *journalAccepted) [][][]uint64 {
+func (j *Journal) lists(q *Query, a *journalAccepted) [][][]uint64 {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
 	var fields [][][]uint64
 
 	if q.Kind != "" {
-		fields = append(fields, j.index.kind.of([]Kind{q.Kind}))
+		fields = append(fields, j.index.kind.of([]vlatte.Kind{q.Kind}))
 	}
 
 	if q.Outcome != "" {
@@ -817,7 +822,7 @@ type segmentFiles struct {
 	files map[int]*os.File
 }
 
-func (s *segmentFiles) read(row journalRow) (*JournalEntry, error) {
+func (s *segmentFiles) read(row journalRow) (*Entry, error) {
 	f, ok := s.files[row.Segment]
 	if !ok {
 		var err error

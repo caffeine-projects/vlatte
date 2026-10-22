@@ -18,6 +18,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/journal"
 )
 
 var (
@@ -30,6 +31,7 @@ const Kind vlatte.Kind = "grpc"
 
 type Server struct {
 	*vlatte.Base[*Mock, *Server]
+	*journal.Verifier[*Mock, *Server]
 
 	server  *grpc.Server
 	config  *Config
@@ -80,7 +82,7 @@ func New(config ...Option) (*Server, error) {
 		app.logger = &l
 	}
 
-	journal, err := app.openJournal(conf)
+	j, err := app.openJournal(conf)
 	if err != nil {
 		return nil, fmt.Errorf("server: %w", err)
 	}
@@ -89,7 +91,7 @@ func New(config ...Option) (*Server, error) {
 	built := false
 	defer func() {
 		if !built {
-			journal.Close()
+			j.Close()
 		}
 	}()
 
@@ -98,7 +100,7 @@ func New(config ...Option) (*Server, error) {
 	stream := []grpc.StreamServerInterceptor{in.recoverStream, in.StreamInterceptor}
 
 	// The journal sees each call as it ends, a panic as the failure its recovery makes of it.
-	if journal != nil {
+	if j != nil {
 		unary = slices.Insert(unary, 0, in.journalUnary)
 		stream = slices.Insert(stream, 0, in.journalStream)
 	}
@@ -116,7 +118,8 @@ func New(config ...Option) (*Server, error) {
 		srv.RegisterService(conf.ServiceDesc, conf.Service)
 	}
 
-	app.Base = vlatte.NewBase(app, store, journal)
+	app.Base = vlatte.NewBase(app, store)
+	app.Verifier = journal.NewVerifier[*Mock, *Server](j, nil)
 	app.storage = store
 	app.server = srv
 
@@ -130,7 +133,7 @@ func New(config ...Option) (*Server, error) {
 			admin.Mocks[*Mock](store, nil),
 			admin.Events(app.events),
 			admin.Logs(logs),
-			admin.Journal(journal, nil),
+			admin.Journal(j, nil),
 		)
 	}
 

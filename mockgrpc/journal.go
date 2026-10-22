@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/journal"
 )
 
 var _ grpc.ServerStream = (*callStream)(nil)
@@ -27,12 +28,12 @@ const (
 )
 
 // openJournal opens the journal conf configures, nil when it configures none.
-func (app *Server) openJournal(conf *Config) (*vlatte.Journal, error) {
+func (app *Server) openJournal(conf *Config) (*journal.Journal, error) {
 	if conf.Journal == nil {
 		return nil, nil
 	}
 
-	return vlatte.NewJournal(vlatte.JournalOptions{
+	return journal.New(journal.Options{
 		Dir:         conf.Journal.Dir,
 		MaxEntries:  conf.Journal.MaxEntries,
 		MaxBodySize: conf.Journal.MaxBodySize,
@@ -75,8 +76,8 @@ func (s *callStream) Context() context.Context {
 // journalCall is the entry of a call in the server's journal, which the mock interceptors fill in, and the journal
 // interceptor appends once the call ends. A call runs on one goroutine.
 type journalCall struct {
-	journal *vlatte.Journal
-	entry   vlatte.JournalEntry
+	journal *journal.Journal
+	entry   journal.Entry
 }
 
 // newCall starts the entry of a call of method, its request id in the header of its answer, as HTTP's debug headers
@@ -92,7 +93,7 @@ func (app *Server) newCall(ctx context.Context, method string) *journalCall {
 
 	return &journalCall{
 		journal: app.Journal(),
-		entry: vlatte.JournalEntry{
+		entry: journal.Entry{
 			ID:     id,
 			Time:   time.Now(),
 			Kind:   Kind,
@@ -126,7 +127,7 @@ func (c *journalCall) matched(mock *Mock) {
 // unmatched sets that no mock matched the call: misses came closest.
 func (c *journalCall) unmatched(misses []vlatte.NearMiss) {
 	if c != nil {
-		c.entry.Outcome, c.entry.NearMisses = vlatte.OutcomeUnmatched, misses
+		c.entry.Outcome, c.entry.NearMisses = journal.OutcomeUnmatched, misses
 	}
 }
 
@@ -138,10 +139,10 @@ func (c *journalCall) replied(ctx context.Context, err error) {
 		return
 	}
 
-	c.entry.Outcome = vlatte.OutcomeMatched
+	c.entry.Outcome = journal.OutcomeMatched
 
 	if _, ok := status.FromError(err); !ok {
-		c.entry.Outcome, c.entry.Message = vlatte.OutcomeFailed, err.Error()
+		c.entry.Outcome, c.entry.Message = journal.OutcomeFailed, err.Error()
 	}
 }
 
@@ -156,9 +157,9 @@ func (c *journalCall) end(ctx context.Context, err error) {
 	c.entry.Elapsed = time.Since(c.entry.Time)
 
 	if c.entry.Outcome == "" {
-		c.entry.Outcome = vlatte.OutcomeFailed
+		c.entry.Outcome = journal.OutcomeFailed
 		if ctx.Err() != nil {
-			c.entry.Outcome = vlatte.OutcomeAbandoned
+			c.entry.Outcome = journal.OutcomeAbandoned
 		}
 
 		if err != nil {

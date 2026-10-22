@@ -1,4 +1,4 @@
-package vlatte
+package journal
 
 import (
 	"strconv"
@@ -10,12 +10,12 @@ import (
 func TestJournal_IndexForgetsTheEntriesItDrops(t *testing.T) {
 	// A server that runs for long must not grow its memory with every request it ever served: the index holds the
 	// entries the journal keeps, and the lists keep at most a segment of dropped ones until the next one starts.
-	j, err := NewJournal(JournalOptions{Dir: t.TempDir(), MaxEntries: 8})
+	j, err := New(Options{Dir: t.TempDir(), MaxEntries: 8})
 	require.NoError(t, err)
 	t.Cleanup(func() { j.Close() })
 
 	for i := range 100 {
-		require.NoError(t, j.Append(&JournalEntry{ID: strconv.Itoa(i), Kind: "http", Path: "/" + strconv.Itoa(i)}))
+		require.NoError(t, j.Append(&Entry{ID: strconv.Itoa(i), Kind: "http", Path: "/" + strconv.Itoa(i)}))
 	}
 
 	require.Len(t, j.rows, 8)

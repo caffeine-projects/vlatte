@@ -18,6 +18,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/journal"
 )
 
 const (
@@ -75,7 +76,7 @@ type Server struct {
 	files     handler.Files
 	scenarios handler.Scenarios
 	journal   handler.Journal
-	reset     func(files handler.Files, scenarios handler.Scenarios, journal handler.Journal) http.Handler
+	reset     func(files handler.Files, scenarios handler.Scenarios, j handler.Journal) http.Handler
 	streams   []func() // end the streams of Server-Sent Events routes
 	handler   http.Handler
 
@@ -117,8 +118,8 @@ func Mocks[M vlatte.Mock](store vlatte.Store[M], build vlatte.MockBuilder[M]) Op
 		s.routes["PATCH /mocks/{id}"] = handler.UpdateMock(store)
 		s.routes["DELETE /mocks/{id}"] = handler.RemoveMock(store)
 
-		s.reset = func(files handler.Files, scenarios handler.Scenarios, journal handler.Journal) http.Handler {
-			return handler.Reset(store, files, scenarios, journal)
+		s.reset = func(files handler.Files, scenarios handler.Scenarios, j handler.Journal) http.Handler {
+			return handler.Reset(store, files, scenarios, j)
 		}
 
 		if build != nil {
@@ -168,18 +169,18 @@ func Events(events *handler.Events) Option {
 // Journal sets the journal of the requests the mock server serves, which GET, QUERY and DELETE /requests read and
 // clear, and POST /reset clears. pattern makes the filter of the request part of a mock of the server's protocol, of
 // a query; nil, for a protocol that has none, takes no request part. A nil journal sets none.
-func Journal(journal handler.Journal, pattern handler.RequestPattern) Option {
+func Journal(j handler.Journal, pattern handler.RequestPattern) Option {
 	return func(s *Server) {
 		// A server without a journal passes its nil one: the routes answer 501, and reset skips it.
-		if j, ok := journal.(*vlatte.Journal); journal == nil || ok && j == nil {
+		if typed, ok := j.(*journal.Journal); j == nil || ok && typed == nil {
 			return
 		}
 
-		s.journal = journal
-		s.routes["GET /requests"] = handler.ListRequests(journal)
-		s.routes["QUERY /requests"] = handler.QueryRequests(journal, pattern)
-		s.routes["DELETE /requests"] = handler.ClearRequests(journal)
-		s.routes["GET /requests/{id}"] = handler.GetRequest(journal)
+		s.journal = j
+		s.routes["GET /requests"] = handler.ListRequests(j)
+		s.routes["QUERY /requests"] = handler.QueryRequests(j, pattern)
+		s.routes["DELETE /requests"] = handler.ClearRequests(j)
+		s.routes["GET /requests/{id}"] = handler.GetRequest(j)
 	}
 }
 

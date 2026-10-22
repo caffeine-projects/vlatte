@@ -17,6 +17,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/journal"
 )
 
 const (
@@ -196,7 +197,7 @@ type JournalConfig struct {
 }
 
 func defaultJournalConfig() JournalConfig {
-	return JournalConfig{MaxEntries: vlatte.DefaultJournalMaxEntries, MaxBodySize: vlatte.DefaultJournalMaxBodySize}
+	return JournalConfig{MaxEntries: journal.DefaultMaxEntries, MaxBodySize: journal.DefaultMaxBodySize}
 }
 
 // AdminStore makes the persistent store of the mocks the admin API adds, for the server app. The store keeps their

@@ -21,6 +21,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/testmock"
+	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -36,7 +37,7 @@ func journaledServer(t *testing.T, setup *ConfigBuilder) *Server {
 }
 
 // only returns the one entry of the journal of m that q selects.
-func only(t *testing.T, m *Server, q vlatte.JournalQuery) *vlatte.JournalEntry {
+func only(t *testing.T, m *Server, q journal.Query) *journal.Entry {
 	t.Helper()
 
 	entries, err := m.Requests(t.Context(), q)
@@ -97,25 +98,25 @@ func TestJournal_KeepsEachRequestOnceWhateverItsOutcome(t *testing.T) {
 		name    string
 		server  *Server
 		path    string
-		outcome vlatte.Outcome
+		outcome journal.Outcome
 		status  int
 		mockID  string
 		message string
 	}{
-		{name: "matched", server: m, path: "/matched", outcome: vlatte.OutcomeMatched, status: http.StatusOK, mockID: "matched"},
-		{name: "unmatched", server: m, path: "/nothing", outcome: vlatte.OutcomeUnmatched, status: StatusNoMatch},
-		{name: "proxied", server: proxied, path: "/up", outcome: vlatte.OutcomeProxied, status: http.StatusAccepted},
-		{name: "failed", server: m, path: "/failed", outcome: vlatte.OutcomeFailed, status: 599, mockID: "failed", message: "missing.txt"},
-		{name: "panicked", server: m, path: "/panics", outcome: vlatte.OutcomeFailed, status: 599, mockID: "panics", message: "panicked: boom"},
-		{name: "aborted", server: m, path: "/aborts", outcome: vlatte.OutcomeFailed, mockID: "aborts", message: "abort Handler"},
-		{name: "exited", server: m, path: "/exits", outcome: vlatte.OutcomeFailed, mockID: "exits", message: "ended without an answer"},
-		{name: "aborted once its client left", server: m, path: "/aborts-late", outcome: vlatte.OutcomeAbandoned, mockID: "aborts-late", message: "canceled"},
-		{name: "panicked on a connection taken over", server: m, path: "/takes-over", outcome: vlatte.OutcomeFailed, mockID: "takes-over", message: "panicked: taken"},
-		{name: "abandoned", server: m, path: "/slow", outcome: vlatte.OutcomeAbandoned, mockID: "slow", message: "left during the delay"},
-		{name: "handler", server: m, path: "/handler", outcome: vlatte.OutcomeMatched, status: http.StatusCreated, mockID: "handler"},
-		{name: "handler writing nothing", server: m, path: "/silent", outcome: vlatte.OutcomeMatched, status: http.StatusOK, mockID: "silent"},
-		{name: "echo", server: m, path: "/echo", outcome: vlatte.OutcomeMatched, status: http.StatusOK, mockID: "echo"},
-		{name: "failed after its status", server: m, path: "/late", outcome: vlatte.OutcomeFailed, status: http.StatusAccepted, mockID: "late", message: "late failure"},
+		{name: "matched", server: m, path: "/matched", outcome: journal.OutcomeMatched, status: http.StatusOK, mockID: "matched"},
+		{name: "unmatched", server: m, path: "/nothing", outcome: journal.OutcomeUnmatched, status: StatusNoMatch},
+		{name: "proxied", server: proxied, path: "/up", outcome: journal.OutcomeProxied, status: http.StatusAccepted},
+		{name: "failed", server: m, path: "/failed", outcome: journal.OutcomeFailed, status: 599, mockID: "failed", message: "missing.txt"},
+		{name: "panicked", server: m, path: "/panics", outcome: journal.OutcomeFailed, status: 599, mockID: "panics", message: "panicked: boom"},
+		{name: "aborted", server: m, path: "/aborts", outcome: journal.OutcomeFailed, mockID: "aborts", message: "abort Handler"},
+		{name: "exited", server: m, path: "/exits", outcome: journal.OutcomeFailed, mockID: "exits", message: "ended without an answer"},
+		{name: "aborted once its client left", server: m, path: "/aborts-late", outcome: journal.OutcomeAbandoned, mockID: "aborts-late", message: "canceled"},
+		{name: "panicked on a connection taken over", server: m, path: "/takes-over", outcome: journal.OutcomeFailed, mockID: "takes-over", message: "panicked: taken"},
+		{name: "abandoned", server: m, path: "/slow", outcome: journal.OutcomeAbandoned, mockID: "slow", message: "left during the delay"},
+		{name: "handler", server: m, path: "/handler", outcome: journal.OutcomeMatched, status: http.StatusCreated, mockID: "handler"},
+		{name: "handler writing nothing", server: m, path: "/silent", outcome: journal.OutcomeMatched, status: http.StatusOK, mockID: "silent"},
+		{name: "echo", server: m, path: "/echo", outcome: journal.OutcomeMatched, status: http.StatusOK, mockID: "echo"},
+		{name: "failed after its status", server: m, path: "/late", outcome: journal.OutcomeFailed, status: http.StatusAccepted, mockID: "late", message: "late failure"},
 	}
 
 	// A client retries a request whose connection, one it reused, drops without an answer: each request goes on a
@@ -134,7 +135,7 @@ func TestJournal_KeepsEachRequestOnceWhateverItsOutcome(t *testing.T) {
 				res.Body.Close()
 			}
 
-			q := vlatte.JournalQuery{Path: match.Equal(tt.path)}
+			q := journal.Query{Path: match.Equal(tt.path)}
 
 			// The client of a request that hangs leaves before the server ends it.
 			require.Eventually(t, func() bool {
@@ -168,7 +169,7 @@ func TestJournal_KeepsTheRequestAsItCame(t *testing.T) {
 	res, _ := do(t, http.MethodPost, m.URL("/a?q=1"), http.Header{"Authorization": {"Bearer secret"}, "X-Mine": {"1"}}, []byte("123456"))
 	require.Equal(t, http.StatusOK, res.StatusCode)
 
-	e := only(t, m, vlatte.JournalQuery{})
+	e := only(t, m, journal.Query{})
 	require.Equal(t, "1", http.Header(e.Header).Get("X-Mine"))
 	require.Empty(t, http.Header(e.Header).Get("X-Changed"))
 	require.NotContains(t, http.Header(e.Header).Get("Authorization"), "secret")
@@ -185,7 +186,7 @@ func TestJournal_UnmatchedEntriesNameTheClosestMocks(t *testing.T) {
 
 	_, _ = do(t, http.MethodGet, m.URL("/users"), nil, nil)
 
-	e := only(t, m, vlatte.JournalQuery{Outcome: vlatte.OutcomeUnmatched})
+	e := only(t, m, journal.Query{Outcome: journal.OutcomeUnmatched})
 	require.Equal(t, []vlatte.NearMiss{{MockID: "users", Passed: 2, Total: 3, Failed: []string{"header Accept"}}}, e.NearMisses)
 }
 
@@ -207,15 +208,15 @@ func TestJournal_VerifiesWithRequestPatterns(t *testing.T) {
 
 	ft := testmock.NewFakeT()
 
-	require.True(t, m.AssertRequested(ft, 1, vlatte.JournalQuery{}, Request().Method("POST").Query("page", match.Equal("2"))))
-	require.True(t, m.AssertRequested(ft, 1, vlatte.JournalQuery{}, Request().Body(match.JSONPath("$.id", match.Equal(7)))))
-	require.True(t, m.AssertRequested(ft, 1, vlatte.JournalQuery{}, Request().FormField("b", match.Equal("2"))))
-	require.True(t, m.AssertRequested(ft, 1, vlatte.JournalQuery{}, Request().FormFile("doc", FileWith().Filename(match.Equal("a.txt")).Body(match.Equal("hello")))))
-	require.True(t, m.AssertRequested(ft, 1, vlatte.JournalQuery{}, Request().RequestMatches(func(r *http.Request) (bool, error) {
+	require.True(t, m.AssertRequested(ft, 1, journal.Query{}, Request().Method("POST").Query("page", match.Equal("2"))))
+	require.True(t, m.AssertRequested(ft, 1, journal.Query{}, Request().Body(match.JSONPath("$.id", match.Equal(7)))))
+	require.True(t, m.AssertRequested(ft, 1, journal.Query{}, Request().FormField("b", match.Equal("2"))))
+	require.True(t, m.AssertRequested(ft, 1, journal.Query{}, Request().FormFile("doc", FileWith().Filename(match.Equal("a.txt")).Body(match.Equal("hello")))))
+	require.True(t, m.AssertRequested(ft, 1, journal.Query{}, Request().RequestMatches(func(r *http.Request) (bool, error) {
 		return r.URL.Path == "/form", nil
 	})))
-	require.True(t, m.AssertNotRequested(ft, vlatte.JournalQuery{}, Request().Query("page", match.Equal("3"))))
-	require.True(t, m.AssertRequested(ft, 3, vlatte.JournalQuery{Method: match.Equal("POST")}, Request().URLPath(match.HasPrefix("/"))))
+	require.True(t, m.AssertNotRequested(ft, journal.Query{}, Request().Query("page", match.Equal("3"))))
+	require.True(t, m.AssertRequested(ft, 3, journal.Query{Method: match.Equal("POST")}, Request().URLPath(match.HasPrefix("/"))))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
 }
 
@@ -230,12 +231,12 @@ func TestJournal_RefusesPatternsThatCountRequests(t *testing.T) {
 		"broken":   Request().Times(0),
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := m.CountRequests(t.Context(), vlatte.JournalQuery{}, pattern)
+			_, err := m.CountRequests(t.Context(), journal.Query{}, pattern)
 			require.Error(t, err)
 		})
 	}
 
-	_, err := m.CountRequests(t.Context(), vlatte.JournalQuery{}, vlatte.Builder[*Mock, *Server](FromBytes([]byte("{}"), ".json")))
+	_, err := m.CountRequests(t.Context(), journal.Query{}, vlatte.Builder[*Mock, *Server](FromBytes([]byte("{}"), ".json")))
 	require.ErrorContains(t, err, "is a *Builder")
 }
 
@@ -253,7 +254,7 @@ func TestJournal_KeepsRequestsAcrossRestarts(t *testing.T) {
 	t.Cleanup(second.Close)
 
 	ft := testmock.NewFakeT()
-	require.True(t, second.AssertRequested(ft, 1, vlatte.JournalQuery{Path: match.Equal("/before")}))
+	require.True(t, second.AssertRequested(ft, 1, journal.Query{Path: match.Equal("/before")}))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
 }
 
@@ -273,8 +274,8 @@ func TestJournal_AServerWithoutOneCantVerify(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	_, err := m.CountRequests(t.Context(), vlatte.JournalQuery{})
-	require.ErrorIs(t, err, vlatte.ErrNoJournal)
+	_, err := m.CountRequests(t.Context(), journal.Query{})
+	require.ErrorIs(t, err, journal.ErrNoJournal)
 }
 
 func TestJournal_ATunnelIsOneEntry(t *testing.T) {
@@ -297,8 +298,8 @@ func TestJournal_ATunnelIsOneEntry(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 
-	e := only(t, m, vlatte.JournalQuery{Method: match.Equal(http.MethodConnect)})
-	require.Equal(t, vlatte.OutcomeProxied, e.Outcome)
+	e := only(t, m, journal.Query{Method: match.Equal(http.MethodConnect)})
+	require.Equal(t, journal.OutcomeProxied, e.Outcome)
 	require.Equal(t, http.StatusOK, e.Status, "the status line vlatte wrote on the connection it took over")
 	require.Equal(t, strings.TrimPrefix(target.URL, "https://"), e.Target)
 }
@@ -313,14 +314,14 @@ func TestJournal_ASwitchKeepsItsStatus(t *testing.T) {
 	_, _, res := switchThrough(t, m, "/ws")
 	require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
 
-	q := vlatte.JournalQuery{Path: match.Equal("/ws")}
+	q := journal.Query{Path: match.Equal("/ws")}
 	require.Eventually(t, func() bool {
 		n, err := m.CountRequests(t.Context(), q)
 		return err == nil && n > 0
 	}, 5*time.Second, 10*time.Millisecond)
 
 	e := only(t, m, q)
-	require.Equal(t, vlatte.OutcomeMatched, e.Outcome)
+	require.Equal(t, journal.OutcomeMatched, e.Outcome)
 	require.Equal(t, http.StatusSwitchingProtocols, e.Status)
 }
 
@@ -334,8 +335,8 @@ func TestJournal_AFailingJournalNeverFailsARequest(t *testing.T) {
 	status, _ := get(t, m, "/a")
 	require.Equal(t, http.StatusOK, status)
 
-	_, err := m.CountRequests(t.Context(), vlatte.JournalQuery{})
-	require.True(t, errors.Is(err, vlatte.ErrJournalClosed))
+	_, err := m.CountRequests(t.Context(), journal.Query{})
+	require.True(t, errors.Is(err, journal.ErrClosed))
 }
 
 func TestJournal_SaysWhenItKeepsLessThanTheBody(t *testing.T) {
@@ -347,15 +348,15 @@ func TestJournal_SaysWhenItKeepsLessThanTheBody(t *testing.T) {
 	_, _ = do(t, http.MethodGet, m.URL("/get"), nil, []byte("a body"))
 	_, _ = do(t, http.MethodPost, m.URL("/whole"), nil, []byte("ab"))
 
-	text := only(t, m, vlatte.JournalQuery{Path: match.Equal("/text")})
+	text := only(t, m, journal.Query{Path: match.Equal("/text")})
 	require.Equal(t, "a", string(text.Body), "a character the limit cuts is left out")
 	require.True(t, text.BodyTruncated)
 
-	get := only(t, m, vlatte.JournalQuery{Path: match.Equal("/get")})
+	get := only(t, m, journal.Query{Path: match.Equal("/get")})
 	require.Empty(t, get.Body)
 	require.True(t, get.BodyTruncated, "the server reads no body of a GET")
 
-	whole := only(t, m, vlatte.JournalQuery{Path: match.Equal("/whole")})
+	whole := only(t, m, journal.Query{Path: match.Equal("/whole")})
 	require.Equal(t, "ab", string(whole.Body))
 	require.False(t, whole.BodyTruncated)
 }

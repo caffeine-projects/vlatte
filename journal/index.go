@@ -1,7 +1,9 @@
-package vlatte
+package journal
 
 import (
 	"slices"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 // postings index the entries of a journal by a field: each value maps to the sequence numbers of the entries that
@@ -78,7 +80,7 @@ func (p *postings[K]) compact(first uint64) {
 // journalIndex indexes the entries of a journal by the fields queries filter most: those with few values, and the
 // path. Its lists may still hold entries the journal dropped, until compact runs: a query skips them.
 type journalIndex struct {
-	kind    postings[Kind]
+	kind    postings[vlatte.Kind]
 	outcome postings[Outcome]
 	mockID  postings[string]
 	method  postings[string]
@@ -91,7 +93,7 @@ type journalIndex struct {
 
 func newJournalIndex() journalIndex {
 	return journalIndex{
-		kind:    newPostings[Kind](),
+		kind:    newPostings[vlatte.Kind](),
 		outcome: newPostings[Outcome](),
 		mockID:  newPostings[string](),
 		method:  newPostings[string](),

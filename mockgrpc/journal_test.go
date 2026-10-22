@@ -20,6 +20,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/testmock"
+	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -41,7 +42,7 @@ func journaled(t *testing.T, setup *ConfigBuilder) (*Server, pb.TestServiceClien
 }
 
 // onlyCall returns the one entry of the journal of m that q selects.
-func onlyCall(t *testing.T, m *Server, q vlatte.JournalQuery) *vlatte.JournalEntry {
+func onlyCall(t *testing.T, m *Server, q journal.Query) *journal.Entry {
 	t.Helper()
 
 	entries, err := m.Requests(t.Context(), q)
@@ -75,20 +76,20 @@ func TestJournal_KeepsEachCallOnceWhateverItsOutcome(t *testing.T) {
 
 	tests := []struct {
 		message string
-		outcome vlatte.Outcome
+		outcome journal.Outcome
 		code    codes.Code
 		mock    bool
 	}{
-		{message: "hi", outcome: vlatte.OutcomeMatched, code: codes.OK, mock: true},
-		{message: "denied", outcome: vlatte.OutcomeMatched, code: codes.PermissionDenied, mock: true},
-		{message: "broken", outcome: vlatte.OutcomeFailed, code: codes.Internal, mock: true},
-		{message: "panics", outcome: vlatte.OutcomeFailed, code: codes.Internal, mock: true},
-		{message: "nobody", outcome: vlatte.OutcomeUnmatched, code: codes.NotFound},
+		{message: "hi", outcome: journal.OutcomeMatched, code: codes.OK, mock: true},
+		{message: "denied", outcome: journal.OutcomeMatched, code: codes.PermissionDenied, mock: true},
+		{message: "broken", outcome: journal.OutcomeFailed, code: codes.Internal, mock: true},
+		{message: "panics", outcome: journal.OutcomeFailed, code: codes.Internal, mock: true},
+		{message: "nobody", outcome: journal.OutcomeUnmatched, code: codes.NotFound},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.message, func(t *testing.T) {
-			e := onlyCall(t, m, vlatte.JournalQuery{Body: match.Field("message", match.Equal(tt.message))})
+			e := onlyCall(t, m, journal.Query{Body: match.Field("message", match.Equal(tt.message))})
 			require.Equal(t, tt.outcome, e.Outcome)
 			require.Equal(t, int(tt.code), e.Status)
 			require.Equal(t, tt.mock, e.MockID != "", e.MockID)
@@ -99,8 +100,8 @@ func TestJournal_KeepsEachCallOnceWhateverItsOutcome(t *testing.T) {
 	}
 
 	ft := testmock.NewFakeT()
-	require.True(t, m.AssertRequested(ft, 5, vlatte.JournalQuery{Kind: Kind, Path: match.HasSuffix("/Greetings")}))
-	require.True(t, m.AssertRequested(ft, 5, vlatte.JournalQuery{Header: map[string]vlatte.Matcher{"X-Team": match.Equal("core")}}))
+	require.True(t, m.AssertRequested(ft, 5, journal.Query{Kind: Kind, Path: match.HasSuffix("/Greetings")}))
+	require.True(t, m.AssertRequested(ft, 5, journal.Query{Header: map[string]vlatte.Matcher{"X-Team": match.Equal("core")}}))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
 }
 
@@ -111,7 +112,7 @@ func TestJournal_UnmatchedCallsNameTheClosestMocks(t *testing.T) {
 	_, err := c.Greetings(t.Context(), &pb.HiReq{})
 	require.Equal(t, codes.NotFound, status.Code(err))
 
-	e := onlyCall(t, m, vlatte.JournalQuery{Outcome: vlatte.OutcomeUnmatched})
+	e := onlyCall(t, m, journal.Query{Outcome: journal.OutcomeUnmatched})
 	require.Len(t, e.NearMisses, 1)
 	require.Equal(t, 1, e.NearMisses[0].Passed)
 	require.Equal(t, []string{"header x-team"}, e.NearMisses[0].Failed)
@@ -133,8 +134,8 @@ func TestJournal_KeepsStreamingCalls(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	e := onlyCall(t, m, vlatte.JournalQuery{Path: match.Equal("/protobuf.TestService/List")})
-	require.Equal(t, vlatte.OutcomeMatched, e.Outcome)
+	e := onlyCall(t, m, journal.Query{Path: match.Equal("/protobuf.TestService/List")})
+	require.Equal(t, journal.OutcomeMatched, e.Outcome)
 	require.JSONEq(t, `{"message": "all"}`, string(e.Body))
 }
 
@@ -150,15 +151,15 @@ func TestJournal_TheAnswerNamesItsCall(t *testing.T) {
 
 	e, err := m.Journal().Get(ids[0])
 	require.NoError(t, err)
-	require.Equal(t, vlatte.OutcomeUnmatched, e.Outcome)
+	require.Equal(t, journal.OutcomeUnmatched, e.Outcome)
 }
 
 func TestJournal_GRPCHasNoRequestPatterns(t *testing.T) {
 	// A gRPC call is verified by its fields: its protocol has no request patterns, and says so.
 	m, _ := journaled(t, Setup())
 
-	_, err := m.CountRequests(t.Context(), vlatte.JournalQuery{}, UnaryMethod("Greetings"))
-	require.ErrorIs(t, err, vlatte.ErrNoRequestPatterns)
+	_, err := m.CountRequests(t.Context(), journal.Query{}, UnaryMethod("Greetings"))
+	require.ErrorIs(t, err, journal.ErrNoRequestPatterns)
 }
 
 func TestJournal_AServerThatNeverStartedRemovesItsJournal(t *testing.T) {
@@ -229,11 +230,11 @@ func TestJournal_ACallWhoseClientLeftIsAbandoned(t *testing.T) {
 	cancel()
 
 	require.Eventually(t, func() bool {
-		n, err := m.CountRequests(t.Context(), vlatte.JournalQuery{})
+		n, err := m.CountRequests(t.Context(), journal.Query{})
 		return err == nil && n == 1
 	}, 5*time.Second, 10*time.Millisecond)
 
-	e := onlyCall(t, m, vlatte.JournalQuery{})
-	require.Equal(t, vlatte.OutcomeAbandoned, e.Outcome)
+	e := onlyCall(t, m, journal.Query{})
+	require.Equal(t, journal.OutcomeAbandoned, e.Outcome)
 	require.NotEmpty(t, e.MockID)
 }

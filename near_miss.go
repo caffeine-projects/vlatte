@@ -9,6 +9,18 @@ import (
 // _nearMisses is how many mocks a near miss report names at most.
 const _nearMisses = 3
 
+// NearMiss is a mock that came close to matching a request: Passed of the Total parts it checked matched. Failed names
+// the parts that didn't, and Skipped those it didn't check, which keep state, such as a scenario's, that matching
+// never reached.
+type NearMiss struct {
+	MockID  string   `json:"mock_id"`
+	Name    string   `json:"name,omitempty"`
+	Passed  int      `json:"passed"`
+	Total   int      `json:"total"`
+	Failed  []string `json:"failed,omitempty"`
+	Skipped []string `json:"skipped,omitempty"`
+}
+
 // Misses are the mocks [Mocks.Find] tried for a request, and that didn't match it, each with the part it stopped at:
 // none once a mock matched. The zero value is ready to use. A server may reuse one, a request at a time, such as
 // through a sync.Pool: Find starts it over, and Reset lets go of what it kept.

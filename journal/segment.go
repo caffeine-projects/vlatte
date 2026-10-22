@@ -1,4 +1,4 @@
-package vlatte
+package journal
 
 import (
 	"bytes"
@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/atomicfile"
 )
 
@@ -34,19 +35,19 @@ const (
 // journalRow is what a journal keeps in memory of an entry: all but its headers and body, which stay on disk, and
 // where it is there. Its JSON names are those of the entry's line, so a scan reads a row from a line.
 type journalRow struct {
-	Seq     uint64    `json:"seq"`
-	ID      string    `json:"id"`
-	Time    time.Time `json:"time"`
-	Kind    Kind      `json:"kind"`
-	Outcome Outcome   `json:"outcome"`
-	MockID  string    `json:"mock_id,omitempty"`
-	Method  string    `json:"method,omitempty"`
-	Path    string    `json:"path,omitempty"`
-	Target  string    `json:"target,omitempty"`
-	Status  int       `json:"status,omitzero"`
-	Segment int       `json:"segment"`
-	Offset  int64     `json:"offset"`
-	Size    int       `json:"size"`
+	Seq     uint64      `json:"seq"`
+	ID      string      `json:"id"`
+	Time    time.Time   `json:"time"`
+	Kind    vlatte.Kind `json:"kind"`
+	Outcome Outcome     `json:"outcome"`
+	MockID  string      `json:"mock_id,omitempty"`
+	Method  string      `json:"method,omitempty"`
+	Path    string      `json:"path,omitempty"`
+	Target  string      `json:"target,omitempty"`
+	Status  int         `json:"status,omitzero"`
+	Segment int         `json:"segment"`
+	Offset  int64       `json:"offset"`
+	Size    int         `json:"size"`
 }
 
 // segmentPath returns the path of the log file of segment n of dir.
@@ -160,7 +161,7 @@ func listSegments(dir string) (logs, sidecars []int, err error) {
 
 // encodeEntry returns the line of e, without its sequence number, which withSeq adds once the journal gives it one.
 // Text that isn't UTF-8, such as a header of another encoding, gets U+FFFD in place of its bad bytes.
-func encodeEntry(e *JournalEntry) ([]byte, error) {
+func encodeEntry(e *Entry) ([]byte, error) {
 	line := e.line()
 	line.Seq = 0
 
@@ -213,7 +214,7 @@ func scanSegment(dir string, n int) (rows []journalRow, bad int, err error) {
 }
 
 // readEntry reads the entry of row from f, the log file of its segment.
-func readEntry(f *os.File, row journalRow) (*JournalEntry, error) {
+func readEntry(f *os.File, row journalRow) (*Entry, error) {
 	data := make([]byte, row.Size)
 	if _, err := f.ReadAt(data, row.Offset); err != nil {
 		return nil, err
