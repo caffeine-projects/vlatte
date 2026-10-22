@@ -3,6 +3,7 @@ package mockgrpc
 import (
 	"context"
 	"slices"
+	"sync"
 	"time"
 	"uuid"
 
@@ -44,8 +45,8 @@ func (app *Server) openJournal(conf *Config) (*journal.Journal, error) {
 
 // journaledService returns a copy of desc whose unary methods journal each call once it ends. grpc runs every unary
 // interceptor within a method's handler, whether ServerOptions set it with grpc.UnaryInterceptor or chained it, so the
-// entry has the code the client gets, and is appended before grpc sends it. A request the server can't decode fails
-// before any interceptor, and is journaled too. desc stays as it is: generated code shares it.
+// entry has the code the client gets, and is appended before grpc sends it. desc stays as it is: generated code
+// shares it.
 func (app *Server) journaledService(desc *grpc.ServiceDesc) *grpc.ServiceDesc {
 	d := *desc
 	d.Methods = slices.Clone(desc.Methods)
@@ -55,14 +56,8 @@ func (app *Server) journaledService(desc *grpc.ServiceDesc) *grpc.ServiceDesc {
 
 		d.Methods[i].Handler = func(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 			call := app.newCall(ctx, method)
-			decode := func(v any) error {
-				err := dec(v)
-				call.undecoded = err != nil
 
-				return err
-			}
-
-			res, err := handler(srv, context.WithValue(ctx, callKey{}, call), decode, interceptor)
+			res, err := handler(srv, context.WithValue(ctx, callKey{}, call), dec, interceptor)
 			call.end(ctx, err)
 
 			return res, err
@@ -111,20 +106,20 @@ func (s *callStream) Context() context.Context {
 }
 
 // journalCall is the entry of a call in the server's journal, which the mock interceptors fill in, and the journal's
-// method handler or interceptor appends once the call ends. A call runs on one goroutine.
+// method handler or interceptor appends once the call ends. An interceptor of ServerOptions may run the mock apart
+// and answer first, so the mock may go on as the entry is appended: what it sets then is left out.
 type journalCall struct {
 	journal *journal.Journal
-	entry   journal.Entry
 
 	// headers is set when the answer names its entry in a header.
 	headers bool
 
+	mu    sync.Mutex
+	entry journal.Entry
+
 	// served is set once a mock interceptor took the call: a call that an interceptor of ServerOptions answers itself
 	// never is, and isn't the journal's.
 	served bool
-
-	// undecoded is set when the server couldn't decode the request, which fails before any interceptor.
-	undecoded bool
 }
 
 // newCall starts the entry of a call of ctx, of method.
@@ -152,7 +147,7 @@ func (c *journalCall) serve(ctx context.Context) {
 		return
 	}
 
-	c.served = true
+	c.update(func() { c.served = true })
 
 	if c.headers {
 		_ = grpc.SetHeader(ctx, metadata.Pairs(vlatte.RequestIDHeader, c.entry.ID))
@@ -165,67 +160,78 @@ func callOf(ctx context.Context) *journalCall {
 	return call
 }
 
+// update runs set on the call, unless the server keeps no journal.
+func (c *journalCall) update(set func()) {
+	if c == nil {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	set()
+}
+
 // request sets the request message of the call, as JSON, which the call no longer changes.
 func (c *journalCall) request(body []byte) {
-	if c != nil {
-		c.entry.Body = body
-	}
+	c.update(func() { c.entry.Body = body })
 }
 
 // matched sets that mock matched the call.
 func (c *journalCall) matched(mock *Mock) {
-	if c != nil {
-		c.entry.MockID = mock.ID()
-	}
+	c.update(func() { c.entry.MockID = mock.ID() })
 }
 
 // unmatched sets that no mock matched the call: misses came closest.
 func (c *journalCall) unmatched(misses []vlatte.NearMiss) {
-	if c != nil {
-		c.entry.Outcome, c.entry.NearMisses = journal.OutcomeUnmatched, misses
-	}
+	c.update(func() { c.entry.Outcome, c.entry.NearMisses = journal.OutcomeUnmatched, misses })
 }
 
 // replied sets that the mock that matched the call answered it, unless err, its reply's error, has no gRPC status: a
 // mock's status is its answer, any other error a failure. A reply that failed as the client left, of ctx, is left to
 // end, which tells the call was abandoned.
 func (c *journalCall) replied(ctx context.Context, err error) {
-	if c == nil || err != nil && ctx.Err() != nil {
+	if err != nil && ctx.Err() != nil {
 		return
 	}
 
-	c.entry.Outcome = journal.OutcomeMatched
+	c.update(func() {
+		c.entry.Outcome = journal.OutcomeMatched
 
-	if _, ok := status.FromError(err); !ok {
-		c.entry.Outcome, c.entry.Message = journal.OutcomeFailed, err.Error()
-	}
+		if _, ok := status.FromError(err); !ok {
+			c.entry.Outcome, c.entry.Message = journal.OutcomeFailed, err.Error()
+		}
+	})
 }
 
 // end appends the entry of the call, which ended with err, with its gRPC code. A call that reached no outcome, such
 // as one that failed before matching, or panicked, failed, or was abandoned when its client left. A call that an
 // interceptor answered itself, which reached no mock, isn't appended.
 func (c *journalCall) end(ctx context.Context, err error) {
-	if !c.served && !c.undecoded {
+	c.mu.Lock()
+	served, entry := c.served, c.entry
+	c.mu.Unlock()
+
+	if !served {
 		return
 	}
 
-	c.entry.Status = int(status.Code(err))
-	c.entry.Elapsed = time.Since(c.entry.Time)
+	entry.Status = int(status.Code(err))
+	entry.Elapsed = time.Since(entry.Time)
 
-	// grpc ends the context of a call whose request it couldn't decode: its client didn't leave.
-	if c.entry.Outcome == "" {
-		c.entry.Outcome = journal.OutcomeFailed
-		if ctx.Err() != nil && !c.undecoded {
-			c.entry.Outcome = journal.OutcomeAbandoned
+	if entry.Outcome == "" {
+		entry.Outcome = journal.OutcomeFailed
+		if ctx.Err() != nil {
+			entry.Outcome = journal.OutcomeAbandoned
 		}
 
 		if err != nil {
-			c.entry.Message = err.Error()
+			entry.Message = err.Error()
 		}
 	}
 
 	// The journal logs what it fails to keep.
-	c.journal.Append(&c.entry)
+	c.journal.Append(&entry)
 }
 
 // describeEval names the part of a call e checks, such as "header x-team".

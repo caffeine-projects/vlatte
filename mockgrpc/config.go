@@ -41,7 +41,7 @@ type AdminConfig struct {
 // JournalConfig configures the journal of a server: the calls its mocks get, of every outcome, which tests and the
 // admin API verify and search, while the server runs: Close closes it. The calls an interceptor of ServerOptions
 // answers aren't in it. An entry has the code the client gets, after every interceptor of ServerOptions: a stream
-// interceptor goes through grpc.ChainStreamInterceptor then, see ErrStreamInterceptorSlot.
+// interceptor goes through [grpc.ChainStreamInterceptor] then, see [ErrStreamInterceptorSlot].
 type JournalConfig struct {
 	// Dir is where the journal keeps its files, across restarts. Empty keeps them in a temporary directory, which
 	// Close removes.
@@ -89,8 +89,8 @@ func (cb *ConfigBuilder) Service(sd *grpc.ServiceDesc, service any) *ConfigBuild
 }
 
 // ServerOptions sets the options of the gRPC server, such as interceptors, which run before the mocks. With a
-// journal, a stream interceptor goes through grpc.ChainStreamInterceptor, not grpc.StreamInterceptor, which the
-// journal takes: New fails with ErrStreamInterceptorSlot.
+// journal, a stream interceptor goes through [grpc.ChainStreamInterceptor], not [grpc.StreamInterceptor], which the
+// journal takes: [New] fails with [ErrStreamInterceptorSlot].
 func (cb *ConfigBuilder) ServerOptions(options ...grpc.ServerOption) *ConfigBuilder {
 	cb.conf.ServerOptions = options
 	return cb

@@ -615,7 +615,7 @@ Patterns are the request part of a mock builder, such as `mockhttp.Request()`: t
 
 gRPC servers keep the same journal with `mockgrpc.Setup().Journal(dir)`: a call's path is its full method, such as `/pkg.Service/Method`, its headers its metadata, its body its request message as JSON, which `match.Field` and `match.JSONPath` read, and its status its code, the one the client got, after every interceptor of `ServerOptions`. Its answer's `vlatte-request-id` header names its entry. gRPC has no request patterns.
 - With a journal, a stream interceptor goes through `grpc.ChainStreamInterceptor`: the journal takes `grpc.StreamInterceptor`, which grpc runs before every other, and `New` fails with `mockgrpc.ErrStreamInterceptorSlot` when `ServerOptions` sets it. A unary interceptor goes either way.
-- A call an interceptor answers itself isn't journaled, nor one grpc refuses before any, such as a call of an unknown method. A request grpc can't decode is.
+- A call an interceptor answers itself isn't journaled, nor one grpc answers before any interceptor, such as a call of an unknown method, or one whose request it can't decode.
 - A unary reply grpc fails to send once every interceptor returned, such as one larger than a `grpc.MaxSendMsgSize` set, keeps the code they returned.
 - A service registered on `GRPCServer()`, past the server, has its unary calls journaled within the interceptors, with the code its mocks answered with, which `Start` warns of: register services with `RegisterService`, or `pb.RegisterGreeterServer(m, ...)`.
 

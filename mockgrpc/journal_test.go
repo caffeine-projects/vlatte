@@ -374,9 +374,9 @@ func (rawCodec) Marshal(v any) ([]byte, error) { return v.([]byte), nil }
 func (rawCodec) Unmarshal([]byte, any) error   { return nil }
 func (rawCodec) Name() string                  { return "proto" }
 
-func TestJournal_KeepsACallWhoseRequestDoesntDecode(t *testing.T) {
-	// A request the server can't decode fails before any interceptor or mock: it reached the server all the same,
-	// and its entry has the code the client got.
+func TestJournal_LeavesOutACallWhoseRequestDoesntDecode(t *testing.T) {
+	// grpc answers a request it can't decode itself, before any interceptor or mock, as it does a call of an unknown
+	// method: the call is none of the journal's, which couldn't append its entry before the client had its answer.
 	m, _ := journaled(t, Setup())
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -387,8 +387,36 @@ func TestJournal_KeepsACallWhoseRequestDoesntDecode(t *testing.T) {
 	err = conn.Invoke(t.Context(), pb.TestService_Greetings_FullMethodName, []byte{0x0a, 0xff}, &pb.HiRes{}, grpc.ForceCodec(rawCodec{}))
 	require.Equal(t, codes.Internal, status.Code(err))
 
-	e := onlyCall(t, m, journal.Query{})
-	require.Equal(t, pb.TestService_Greetings_FullMethodName, e.Path)
-	require.Equal(t, journal.OutcomeFailed, e.Outcome)
-	require.Equal(t, int(codes.Internal), e.Status)
+	n, err := m.CountRequests(t.Context(), journal.Query{})
+	require.NoError(t, err)
+	require.Zero(t, n)
+}
+
+func TestJournal_KeepsACallAnInterceptorAnswersWhileItsMockGoesOn(t *testing.T) {
+	// An interceptor may answer while the mock goes on, as one that times it out runs it apart: the entry has the
+	// code the client got, whatever the mock does as the journal appends it. make test runs with -race, which fails
+	// this test when the mock and the journal share the entry unguarded.
+	started, done := make(chan struct{}), make(chan struct{})
+	timeout := func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+		go func() {
+			defer close(done)
+
+			_, _ = next(ctx, req)
+		}()
+
+		<-started
+
+		return nil, status.Error(codes.DeadlineExceeded, "too slow")
+	}
+
+	m, c := journaled(t, Setup().ServerOptions(grpc.ChainUnaryInterceptor(timeout)))
+	m.MustMock(UnaryMethod("Greetings").Reply(funcUnaryReply(func() (any, error) {
+		close(started)
+		return &pb.HiRes{}, nil
+	})))
+
+	require.Equal(t, codes.DeadlineExceeded, status.Code(greet(t, c)))
+	<-done
+
+	require.Equal(t, int(codes.DeadlineExceeded), onlyCall(t, m, journal.Query{}).Status)
 }

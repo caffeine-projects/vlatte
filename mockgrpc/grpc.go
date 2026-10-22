@@ -28,10 +28,10 @@ var (
 )
 
 // ErrStreamInterceptorSlot is the error of a server with a journal whose ServerOptions set the stream interceptor
-// with grpc.StreamInterceptor, which grpc runs before every other: the journal takes it, to journal the code a call
-// ends with. grpc.ChainStreamInterceptor gives the same interceptor.
-var ErrStreamInterceptorSlot = errors.New("mockgrpc: with a journal, pass stream interceptors with " +
-	"grpc.ChainStreamInterceptor: the journal takes grpc.StreamInterceptor")
+// with [grpc.StreamInterceptor], which grpc runs before every other: the journal takes it, to journal the code a call
+// ends with. [grpc.ChainStreamInterceptor] gives the same interceptor.
+var ErrStreamInterceptorSlot = errors.New("journal: pass stream interceptors with grpc.ChainStreamInterceptor: " +
+	"the journal takes grpc.StreamInterceptor")
 
 // Kind is the protocol of gRPC mock servers, the Kind of their journal entries.
 const Kind vlatte.Kind = "grpc"
@@ -253,8 +253,8 @@ func (app *Server) MustStart() {
 
 // GRPCServer returns the underlying gRPC server, for features beyond registering services,
 // such as server reflection. With a journal, a service registered on it has the entries of its unary calls journaled
-// within the interceptors of ServerOptions, with the code the mocks answered with: Start warns of it. RegisterService
-// journals the code the client gets.
+// within the interceptors of ServerOptions, with the code the mocks answered with: [Server.Start] warns of it.
+// [Server.RegisterService] journals the code the client gets.
 func (app *Server) GRPCServer() *grpc.Server {
 	return app.server
 }
@@ -264,7 +264,7 @@ func (app *Server) GRPCServer() *grpc.Server {
 //	pb.RegisterGreeterServer(m, pb.UnimplementedGreeterServer{})
 //
 // It implements [grpc.ServiceRegistrar] and must be called before Start. With a journal, the entries of its calls
-// have the code the client gets, after every interceptor: register services here, not on GRPCServer.
+// have the code the client gets, after every interceptor: register services here, not on [Server.GRPCServer].
 func (app *Server) RegisterService(desc *grpc.ServiceDesc, impl any) {
 	app.register(desc, impl)
 }
@@ -279,7 +279,7 @@ func newGRPCServer(opts []grpc.ServerOption, journaled bool) (srv *grpc.Server, 
 		}
 
 		if msg, _ := r.(string); journaled && strings.Contains(msg, "stream server interceptor was already set") {
-			err = fmt.Errorf("%w: %s", ErrStreamInterceptorSlot, msg)
+			err = ErrStreamInterceptorSlot
 			return
 		}
 
