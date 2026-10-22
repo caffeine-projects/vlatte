@@ -35,7 +35,7 @@ func (w *topResponseWriter) WriteHeader(statusCode int) {
 	w.rw.WriteHeader(statusCode)
 }
 
-// Write runs a pipeline of the steps per write, since a pipeline passes one buffer once.
+// Write passes p through the steps, then to rw.
 // The steps may change the bytes they pass on, so Write reports len(p) written, as io.Writer requires. The first write
 // sends the headers, without a Content-Length, as WriteHeader does.
 func (w *topResponseWriter) Write(p []byte) (int, error) {

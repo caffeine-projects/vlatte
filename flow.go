@@ -10,17 +10,27 @@ var (
 	_ io.Writer = (*Sink)(nil)
 	_ Step      = (*Sink)(nil)
 	_ Step      = StepFunc(nil)
+	_ Next      = (*link)(nil)
+	_ Next      = end{}
 )
 
-// Next represents the continuation of a pipeline from the current [Step].
-// It is used to advance to the next processing [Step] in the flow.
+// Next is the rest of a flow after a [Step]: the steps after it, then the sink.
+// Next passes b to the next step and returns what that step returns. Through steps that pass their buffer on whole,
+// that is what the sink wrote, which is not len(b) once a step changed the bytes.
+// Next can be called any number of times, as by a step that passes its buffer on in parts: each call passes its
+// buffer through all of the rest of the flow.
 type Next interface {
-	Next([]byte) (n int, err error)
+	Next(b []byte) (n int, err error)
 }
 
-// Step defines a single processing unit in the pipeline.
-// It receives a context (for cancellation/timeouts), a byte buffer, and the next [Step].
-// It can inspect, modify, or halt processing based on the content or context state.
+// Step is a stage of a flow. Handle gets each buffer the stage before it passes on, and decides what goes on: it can
+// pass b to next as it is, pass it on changed or in parts, delay it, drop it by not calling next, or fail the write
+// by returning an error, which next returns to the step before it.
+// Handle calls next one call at a time, and never once it returned: the sink, such as a response writer, can't be
+// written to concurrently or later.
+// b is the caller's, as for [io.Writer]: Handle must not change its bytes, nor keep it once it returned. To change
+// the bytes, it passes on a new slice, such as append returns: the flow clips b, so append always copies it.
+// Steps can be shared, such as a mock's steps across its requests: Handle must be safe for concurrent use.
 type Step interface {
 	Handle(ctx context.Context, b []byte, next Next) (n int, err error)
 }
@@ -44,31 +54,38 @@ func (f StepFunc) Handle(ctx context.Context, b []byte, next Next) (n int, err e
 	return f(ctx, b, next)
 }
 
-// pipeline represents an ordered sequence of [Step]s and carries the [context.Context]
-// so each step can react to cancellation or deadlines (e.g. timeout simulation).
-type pipeline struct {
-	ctx   context.Context
-	steps []Step
-	index int
-}
-
-// Flow creates a new pipeline from a [context.Context] and a slice of [Step]s.
-// The context is passed to every step's Handle and is typically the request context,
-// so steps can respect client disconnect or timeouts.
-// A pipeline passes one buffer through the steps, once. steps is not modified.
+// Flow returns the start of a flow that passes a buffer through steps, in order, then to sink. Every step gets ctx,
+// typically the request's context, so it can stop when the client leaves or a deadline passes.
+// The sink ends the flow: the [Next] it gets returns [io.EOF].
+// Flow neither keeps nor changes steps, so they can be shared, such as a mock's steps across concurrent requests.
 func Flow(ctx context.Context, sink Step, steps []Step) Next {
-	// The sink goes into a copy: steps may be shared, such as a mock's steps across concurrent requests.
-	return &pipeline{ctx: ctx, steps: slices.Concat(steps, []Step{sink})}
+	links := make([]link, len(steps)+1)
+	links[len(steps)] = link{ctx: ctx, step: sink, next: end{}}
+
+	for i, step := range slices.Backward(steps) {
+		links[i] = link{ctx: ctx, step: step, next: &links[i+1]}
+	}
+
+	return &links[0]
 }
 
-func (p *pipeline) Next(b []byte) (n int, err error) {
-	if p.index >= len(p.steps) {
-		return 0, io.EOF
-	}
-	i := p.index
-	p.index++
-	return p.steps[i].Handle(p.ctx, b, p)
+// link is a step of a flow, with next as the rest of the flow.
+type link struct {
+	ctx  context.Context
+	step Step
+	next Next
 }
+
+// Next clips b, so a step that appends to it can't write over what follows b in its array, such as the next part of
+// a step that passes its buffer on in parts.
+func (l *link) Next(b []byte) (int, error) {
+	return l.step.Handle(l.ctx, slices.Clip(b), l.next)
+}
+
+// end is what follows the sink: nothing.
+type end struct{}
+
+func (end) Next([]byte) (int, error) { return 0, io.EOF }
 
 // Sink is the final [Step] that writes the final output to the underlying [io.Writer].
 type Sink struct{ W io.Writer }
@@ -78,9 +95,7 @@ func (s *Sink) Handle(_ context.Context, b []byte, _ Next) (int, error) {
 	return s.W.Write(b)
 }
 
-// Write makes [Sink] compatible with the [io.Writer] interface.
-// When called directly (outside a pipeline), context.Background() is used —
-// cancellation and deadlines are not propagated. Drive the pipeline through [Next] to preserve context.
+// Write writes p to W and returns what W returns, as Handle does, so a Sink is also an [io.Writer].
 func (s *Sink) Write(p []byte) (n int, err error) {
 	return s.Handle(context.Background(), p, nil)
 }

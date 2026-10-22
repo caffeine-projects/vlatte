@@ -50,6 +50,28 @@ func TestTopResponseWriter_EveryWritePassesTheSteps(t *testing.T) {
 	require.Equal(t, "a!b!c!", rec.Body.String())
 }
 
+func TestTopResponseWriter_AStepCanPassAWriteOnInParts(t *testing.T) {
+	// The slicer toxic passes each write on in parts. Every part after the first failed the write, which cut the body.
+	slicer := vlatte.StepFunc(func(_ context.Context, p []byte, next vlatte.Next) (int, error) {
+		for part := range slices.Chunk(p, 2) {
+			if _, err := next.Next(part); err != nil {
+				return 0, err
+			}
+		}
+
+		return len(p), nil
+	})
+
+	rec := httptest.NewRecorder()
+	w := &topResponseWriter{ctx: t.Context(), steps: []vlatte.Step{slicer}, rw: rec}
+
+	n, err := w.Write([]byte("hello"))
+
+	require.NoError(t, err)
+	require.Equal(t, 5, n)
+	require.Equal(t, "hello", rec.Body.String())
+}
+
 func TestTopResponseWriter_FlushReachesTheResponseWriter(t *testing.T) {
 	// D2: streamed parts are flushed with http.ResponseController, which gets past the steps through Unwrap.
 	rec := httptest.NewRecorder()
