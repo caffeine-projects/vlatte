@@ -181,6 +181,22 @@ func TestJournal_KeepsTheRequestAsItCame(t *testing.T) {
 	require.Equal(t, "/a", e.Path)
 }
 
+func TestJournal_RedactsTheHostToo(t *testing.T) {
+	// net/http keeps the Host header apart from the others, but it is a header the client sent all the same: a
+	// server that redacts it in its logs keeps it out of its journal too. A pattern still matches its URL, which is
+	// the server's.
+	m := journaledServer(t, Setup().RedactHeader("Host"))
+
+	_, _ = do(t, http.MethodGet, m.URL("/private"), nil, nil)
+
+	e := only(t, m, journal.Query{Path: match.Equal("/private")})
+	require.Equal(t, []string{"<redacted>"}, e.Header["Host"])
+
+	n, err := m.CountRequests(t.Context(), journal.Query{}, Request().URL(match.Equal(m.URL("/private"))))
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+}
+
 func TestJournal_UnmatchedEntriesNameTheClosestMocks(t *testing.T) {
 	m := journaledServer(t, Setup())
 	m.MustMock(Getf("/users").ID("users").Header("Accept", match.Equal("application/json")).Reply(OK()))

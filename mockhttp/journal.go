@@ -115,14 +115,20 @@ func newJournalCall(app *Server, r *RequestValues) *journalCall {
 	req := r.RawRequest
 	body, truncated := journalBody(app.config, r)
 
-	// The Host header is no header of net/http's: the entry has it, as the client sent it.
+	// The Host header is no header of net/http's: the entry has it, as the client sent it, unless the server redacts
+	// it, as any other.
 	header := redactHeader(req.Header, app.config.HeaderNamesToRedact)
 	if len(app.config.HeaderNamesToRedact) == 0 {
 		header = req.Header.Clone()
 	}
 
 	if req.Host != "" {
-		header.Set("Host", req.Host)
+		host := req.Host
+		if _, ok := app.config.HeaderNamesToRedact["host"]; ok {
+			host = _redacted
+		}
+
+		header.Set("Host", host)
 	}
 
 	return &journalCall{
