@@ -159,8 +159,7 @@ func (rec *recording) requestBody(rv *RequestValues, raw []byte, parseErr error)
 		return bodyUnmatched, ""
 	}
 
-	// The server read only part of it. A body exactly at the limit may have had more.
-	if limit := conf.MaxBodyParsingLimit; limit > 0 && int64(len(raw)) >= limit || r.ContentLength > int64(len(raw)) {
+	if bodyCut(conf.MaxBodyParsingLimit, r, raw) {
 		return bodyUnmatched, "the server read only part of the body"
 	}
 

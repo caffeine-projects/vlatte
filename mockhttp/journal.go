@@ -154,9 +154,7 @@ func journalBody(conf *Config, r *RequestValues) ([]byte, bool) {
 	req, body := r.RawRequest, r.RawBodyBytes
 
 	unread := conf.NoBodyParsing || req.Method == http.MethodGet || req.Method == http.MethodHead
-	truncated := unread && req.ContentLength != 0 ||
-		conf.MaxBodyParsingLimit > 0 && int64(len(body)) >= conf.MaxBodyParsingLimit ||
-		req.ContentLength > int64(len(body))
+	truncated := unread && req.ContentLength != 0 || bodyCut(conf.MaxBodyParsingLimit, req, body)
 
 	if limit := conf.Journal.MaxBodySize; limit > 0 {
 		body = body[:min(int64(len(body)), limit+utf8.UTFMax)]

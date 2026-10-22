@@ -435,6 +435,22 @@ func TestJournal_SaysWhenItKeepsLessThanTheBody(t *testing.T) {
 	require.False(t, whole.BodyTruncated)
 }
 
+func TestJournal_ABodyAtTheParseLimitIsWholeWhenItsLengthSaysSo(t *testing.T) {
+	// A body that fills the server's parse limit was read whole when its Content-Length is that size: a pattern of
+	// it counts it. One of no length may have had more, which the entry says.
+	m := journaledServer(t, Setup().MaxBodyParsingLimit(4))
+
+	sentRequest{method: http.MethodPost, target: "/sized", body: []byte("abcd")}.send(t, m.URL(""))
+	sentRequest{method: http.MethodPost, target: "/streamed", body: []byte("abcd"), chunked: true}.send(t, m.URL(""))
+
+	require.False(t, only(t, m, journal.Query{Path: match.Equal("/sized")}).BodyTruncated)
+	require.True(t, only(t, m, journal.Query{Path: match.Equal("/streamed")}).BodyTruncated)
+
+	n, err := m.CountRequests(t.Context(), journal.Query{Path: match.Equal("/sized")}, Request().Body(match.Equal("abcd")))
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+}
+
 func TestJournal_APatternCantReadABodyTheJournalCut(t *testing.T) {
 	// A pattern that reads the body of a request whose body the journal didn't keep whole can't tell whether the
 	// request matched: verifying fails, rather than count no request, so AssertNotRequested can't pass for a request
