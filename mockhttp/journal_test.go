@@ -864,6 +864,30 @@ func TestJournal_AnAnswerATimeoutGaveFirstKeepsItsStatus(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, e.Status, "the status the client got")
 }
 
+func TestJournal_AContextAMiddlewareEndsAfterwardIsNoClientThatLeft(t *testing.T) {
+	// A middleware may end the context it hands the mock once the mock is done, as a timeout middleware does: the
+	// entry has the outcome serving reached, not that of a client that left.
+	m := journaledServer(t, Setup().Use(middleware(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})))
+	m.MustMock(Getf("/aborts").Reply(Handler(func(http.ResponseWriter, *http.Request) {
+		panic(http.ErrAbortHandler)
+	})))
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, m.URL("/aborts"), nil)
+	require.NoError(t, err)
+
+	_, err = _rawClient.Do(req)
+	require.ErrorIs(t, err, io.EOF)
+
+	e := only(t, m, journal.Query{})
+	require.Equal(t, journal.OutcomeFailed, e.Outcome)
+	require.Contains(t, e.Message, http.ErrAbortHandler.Error())
+}
+
 func TestJournal_AnAnswerADecoratorAbortsHasNoStatus(t *testing.T) {
 	// A decorator that aborts the answer, as a proxy does, drops the connection: the client got no status, whatever
 	// the mock wrote under it.

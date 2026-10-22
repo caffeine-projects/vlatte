@@ -203,8 +203,8 @@ func (c *journalCall) warn(err error) {
 }
 
 // end appends the entry of r, a request that ended, if it reached no outcome: failed, when it panicked with p, abandoned,
-// when its client left, or failed, with its last warning, with the status sent.
-func (c *journalCall) end(r *RequestValues, p any) {
+// when its client left, which left tells, or failed, with its last warning, with the status sent.
+func (c *journalCall) end(r *RequestValues, p any, left error) {
 	c.mu.Lock()
 	warning := c.warning
 	c.mu.Unlock()
@@ -213,11 +213,11 @@ func (c *journalCall) end(r *RequestValues, p any) {
 	abort, _ := p.(error)
 	aborted := errors.Is(abort, http.ErrAbortHandler)
 
-	switch ctx := r.RawRequest.Context(); {
+	switch {
 	case p != nil && !aborted:
 		c.record(r, journal.OutcomeFailed, r.panicked(), fmt.Errorf("%w: %v", errPanicked, p))
-	case ctx.Err() != nil:
-		c.record(r, journal.OutcomeAbandoned, r.sent(), cmp.Or(warning, context.Cause(ctx)))
+	case left != nil:
+		c.record(r, journal.OutcomeAbandoned, r.sent(), cmp.Or(warning, left))
 	case aborted:
 		c.record(r, journal.OutcomeFailed, r.sent(), cmp.Or(warning, abort))
 	default:

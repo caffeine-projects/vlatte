@@ -322,8 +322,9 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		p := recover()
-		reqValues.answer.then(func() { reqValues.journal.end(reqValues, p) })
+		// A middleware may end the context it gave once the mock handler returns: whether the client left is told now.
+		p, left := recover(), context.Cause(r.Context())
+		reqValues.answer.then(func() { reqValues.journal.end(reqValues, p, left) })
 
 		if p != nil {
 			panic(p)
