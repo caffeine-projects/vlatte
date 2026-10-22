@@ -157,6 +157,12 @@ func (w *answerWriter) sent(code int) {
 	}
 }
 
+// wroteOn keeps code, the status vlatte wrote itself on the connection it took over, such as a CONNECT's 200: the
+// client has it, whatever comes of the connection next.
+func (w *answerWriter) wroteOn(code int) {
+	w.status = code
+}
+
 type mockHandler struct {
 	app                   *Server
 	lifecycle             mockHTTPLifecycle
@@ -517,6 +523,8 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 		return nil, false
 	}
 
+	r.answer.wroteOn(res.StatusCode)
+
 	return func() {
 		defer done()
 
@@ -584,6 +592,8 @@ func (h *mockHandler) openConnect(w http.ResponseWriter, r *RequestValues) (net.
 
 		return nil, false
 	}
+
+	r.answer.wroteOn(http.StatusOK)
 
 	return client, true
 }

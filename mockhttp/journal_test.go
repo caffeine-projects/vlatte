@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -304,25 +305,82 @@ func TestJournal_ATunnelIsOneEntry(t *testing.T) {
 	require.Equal(t, strings.TrimPrefix(target.URL, "https://"), e.Target)
 }
 
+func TestJournal_AConnectKeepsTheAnswerItGot(t *testing.T) {
+	// A CONNECT gets its 200 on the connection the proxy takes over, before the proxy knows what comes of it: a tunnel
+	// that fails after it still answered 200, and its entry says so, with what failed.
+	for name, tt := range map[string]struct {
+		host    func(t *testing.T) string
+		start   func(conn net.Conn)
+		message string
+	}{
+		"a TLS start that fails": {
+			host: func(t *testing.T) string { host, _ := acceptedHost(t); return host },
+			start: func(conn net.Conn) {
+				// A TLS record that is no ClientHello: the handshake fails as it reads it.
+				_, _ = conn.Write([]byte{0x16, 0x03, 0x01, 0x00, 0x08, 0x02, 0x00, 0x00, 0x04, 0x03, 0x03, 0x00, 0x00})
+			},
+			message: "intercepting the TLS connection",
+		},
+		"a host that is gone": {
+			host:    closedAddr,
+			start:   func(conn net.Conn) { _, _ = io.WriteString(conn, "plain\n") },
+			message: "opening a tunnel",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := journaledServer(t, Setup().Proxy(&ProxyConfig{Intercept: true}))
+			host := tt.host(t)
+
+			conn, _ := openTunnel(t, hostOf(t, m), host, "")
+			tt.start(conn)
+
+			_, _ = io.ReadAll(conn)
+
+			q := journal.Query{Method: match.Equal(http.MethodConnect)}
+			require.Eventually(t, func() bool {
+				n, err := m.CountRequests(t.Context(), q)
+				return err == nil && n == 1
+			}, 5*time.Second, 10*time.Millisecond)
+
+			e := only(t, m, q)
+			require.Equal(t, http.StatusOK, e.Status, "the 200 the client got")
+			require.Equal(t, journal.OutcomeFailed, e.Outcome)
+			require.Contains(t, e.Message, tt.message)
+		})
+	}
+}
+
 func TestJournal_ASwitchKeepsItsStatus(t *testing.T) {
-	// A request that switches protocols gets its 101 on the connection vlatte took over: the entry has it.
+	// A request that switches protocols gets its 101 on the connection vlatte took over: the entry has it, even when
+	// what runs after the switch, such as a callback, panics.
 	target := switchingTarget(t, "echo")
 
 	m := journaledServer(t, Setup().Proxy())
-	m.MustMock(Getf("/ws").ID("ws").Reply(From(target.URL)))
+	m.MustMock(
+		Getf("/ws").ID("ws").Reply(From(target.URL)),
+		Getf("/ws-panics").ID("ws-panics").Callback(func(context.Context, vlatte.CallbackInput) error { panic("after the switch") }).
+			Reply(From(target.URL)),
+	)
 
-	_, _, res := switchThrough(t, m, "/ws")
-	require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
+	for path, outcome := range map[string]journal.Outcome{"/ws": journal.OutcomeMatched, "/ws-panics": journal.OutcomeFailed} {
+		t.Run(path, func(t *testing.T) {
+			conn, _, res := switchThrough(t, m, path)
+			require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
 
-	q := journal.Query{Path: match.Equal("/ws")}
-	require.Eventually(t, func() bool {
-		n, err := m.CountRequests(t.Context(), q)
-		return err == nil && n > 0
-	}, 5*time.Second, 10*time.Millisecond)
+			// The request ends with the connection it switched.
+			require.NoError(t, conn.Close())
 
-	e := only(t, m, q)
-	require.Equal(t, journal.OutcomeMatched, e.Outcome)
-	require.Equal(t, http.StatusSwitchingProtocols, e.Status)
+			q := journal.Query{Path: match.Equal(path)}
+			require.Eventually(t, func() bool {
+				n, err := m.CountRequests(t.Context(), q)
+				return err == nil && n > 0
+			}, 5*time.Second, 10*time.Millisecond)
+
+			e := only(t, m, q)
+			require.Equal(t, outcome, e.Outcome)
+			require.Equal(t, http.StatusSwitchingProtocols, e.Status)
+		})
+	}
 }
 
 func TestJournal_AFailingJournalNeverFailsARequest(t *testing.T) {
