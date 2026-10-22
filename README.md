@@ -621,7 +621,7 @@ gRPC servers keep the same journal with `mockgrpc.Setup().Journal(dir)`: a call'
 
 **Limits.**
 - The journal keeps the newest 10 000 requests (`journal.max_entries`, `0` for all), and 1 MiB of each body (`journal.max_body_size`, `0` for whole bodies).
-- A body the journal cut, or that the server didn't read, has `body_truncated`: the server reads no body of a `GET` or `HEAD`, nor under `no_body_parsing`, nor past `MaxBodyParsingLimit`. A request pattern that reads the body, such as `Body` or `FormFile`, fails on such a request, when the rest of the pattern matches it, rather than miss it: `AssertNotRequested` can't pass for a request the server got.
+- A body the journal cut, or that the server didn't read, has `body_truncated`: the server reads no body of a `GET` or `HEAD`, nor under `no_body_parsing`, nor past `MaxBodyParsingLimit`. A request pattern that reads the body, such as `Body`, `FormFile` or `RequestMatches`, which gets the whole request, fails on such a request, when the rest of the pattern matches it, rather than miss it: `AssertNotRequested` can't pass for a request the server got.
 - The headers the server redacts in its logs (`RedactHeader`) are redacted in the journal. gRPC metadata is kept as it came.
 - Requests the server answers before its mocks get them, such as CORS preflights, or that a middleware answers, aren't journaled.
 - A named directory gets a `.gitignore` of its files, so committing `testdata` leaves the journal out.
