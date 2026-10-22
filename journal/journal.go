@@ -519,10 +519,15 @@ func (j *Journal) dropCleared(numbers []int, cleared int) []int {
 	left := false
 
 	for _, n := range numbers {
-		switch {
-		case n >= cleared:
+		if n >= cleared {
 			kept = append(kept, n)
-		case removeSegment(j.dir, n) != nil:
+			continue
+		}
+
+		// The next journal of the directory tries again.
+		if err := removeSegment(j.dir, n); err != nil {
+			j.logger.Warn().Err(err).Msg("journal: removing a segment a Clear removed")
+
 			left = true
 		}
 	}

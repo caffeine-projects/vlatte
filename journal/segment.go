@@ -234,21 +234,10 @@ func readEntry(f *os.File, row journalRow) (*Entry, error) {
 	return &e, nil
 }
 
-// writeCleared writes the tombstone of a Clear of dir that kept segment n and the later ones, and syncs dir, so the
-// tombstone is there before Clear deletes a file.
+// writeCleared writes the tombstone of a Clear of dir that kept segment n and the later ones. It survives the process,
+// as the journal's logs do, not the machine: neither is synced.
 func writeCleared(dir string, n int) error {
-	if err := atomicfile.WritePerm(dir, _journalTemps, filepath.Join(dir, _journalCleared), []byte(strconv.Itoa(n)+"\n"), 0o600); err != nil {
-		return err
-	}
-
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-
-	defer d.Close()
-
-	return d.Sync()
+	return atomicfile.WritePerm(dir, _journalTemps, filepath.Join(dir, _journalCleared), []byte(strconv.Itoa(n)+"\n"), 0o600)
 }
 
 // readCleared returns the first segment the last Clear of dir kept, 0 when no Clear left one to drop.
