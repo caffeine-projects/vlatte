@@ -26,6 +26,7 @@ var (
 	_ Stage = (*Sink)(nil)
 	_ Stage = (*funcStage)(nil)
 	_ Stage = clipped{}
+	_ Stage = sinkStage{}
 	_ Step  = StepFunc(nil)
 )
 
@@ -41,7 +42,7 @@ var (
 // b is the caller's, as for [io.Writer]: a stage must not change its bytes, and copies it to keep it once Write
 // returned. The flow clips every b, so append always copies it.
 // Once the flow's [Flow.Context] ends, a stage drops what it holds, returns from Close at once, and its goroutines
-// and timers end.
+// and timers end: what it still passes on doesn't reach the sink.
 type Stage interface {
 	Write(b []byte) (n int, err error)
 	Flush() error
@@ -95,7 +96,7 @@ func NewFlow(ctx context.Context, sink Stage, steps []Step) *Flow {
 	f := &Flow{}
 	f.ctx, f.cancel = context.WithCancelCause(ctx)
 
-	next := Stage(clipped{sink})
+	next := Stage(sinkStage{flow: f, sink: sink})
 	for _, step := range slices.Backward(steps) {
 		next = clipped{step.Open(f, next)}
 	}
@@ -190,6 +191,31 @@ func (c clipped) Write(b []byte) (int, error) { return c.s.Write(slices.Clip(b))
 func (c clipped) Flush() error { return c.s.Flush() }
 
 func (c clipped) Close() error { return c.s.Close() }
+
+// sinkStage passes to the sink of flow, clipped, while the flow is on: once it ended, such as by an abort, what a stage
+// still passes on reaches nothing.
+type sinkStage struct {
+	flow *Flow
+	sink Stage
+}
+
+func (s sinkStage) Write(b []byte) (int, error) {
+	if err := context.Cause(s.flow.ctx); err != nil {
+		return 0, err
+	}
+
+	return s.sink.Write(slices.Clip(b))
+}
+
+func (s sinkStage) Flush() error {
+	if err := context.Cause(s.flow.ctx); err != nil {
+		return err
+	}
+
+	return s.sink.Flush()
+}
+
+func (s sinkStage) Close() error { return s.sink.Close() }
 
 // Sink is a [Stage] that ends a flow: it writes what it gets to W.
 type Sink struct{ W io.Writer }

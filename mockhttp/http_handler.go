@@ -169,15 +169,10 @@ func (w *topResponseWriter) aborted() error {
 	return nil
 }
 
-// responseSink ends the flow of a topResponseWriter: it writes to its rw, under its lock. Once the flow ended, it
-// writes nothing more, whatever a stage still passes on.
+// responseSink ends the flow of a topResponseWriter: it writes to its rw, under its lock.
 type responseSink struct{ w *topResponseWriter }
 
 func (s responseSink) Write(p []byte) (int, error) {
-	if err := context.Cause(s.w.flow.Context()); err != nil {
-		return 0, err
-	}
-
 	s.w.mu.Lock()
 	defer s.w.mu.Unlock()
 
@@ -185,10 +180,6 @@ func (s responseSink) Write(p []byte) (int, error) {
 }
 
 func (s responseSink) Flush() error {
-	if err := context.Cause(s.w.flow.Context()); err != nil {
-		return err
-	}
-
 	s.w.mu.Lock()
 	defer s.w.mu.Unlock()
 

@@ -490,6 +490,37 @@ func TestFlow_AStageThatReturnsAnAbortAbortsTheFlow(t *testing.T) {
 	}
 }
 
+// lateStep passes something on at its end, whatever happened before, as a stage that ignores the end of its flow does.
+type lateStep struct{}
+
+func (lateStep) Open(_ *Flow, next Stage) Stage { return lateStage{next: next} }
+
+type lateStage struct{ next Stage }
+
+func (s lateStage) Write(b []byte) (int, error) { return s.next.Write(b) }
+
+func (s lateStage) Flush() error { return s.next.Flush() }
+
+func (s lateStage) Close() error {
+	_, _ = s.next.Write([]byte("late"))
+	_ = s.next.Flush()
+
+	return s.next.Close()
+}
+
+func TestFlow_NothingReachesTheSinkOnceTheFlowEnded(t *testing.T) {
+	// An abort cuts the stream there: a stage that still passes something on, as its end runs, doesn't send it after
+	// the cut, such as a second answer on a connection that was cut.
+	var log []string
+	sink := &logStage{name: "sink", log: &log, next: &partsSink{}}
+	flow := NewFlow(t.Context(), sink, []Step{lateStep{}})
+
+	flow.Abort(nil)
+
+	require.NoError(t, flow.Close())
+	require.Equal(t, []string{"sink close"}, log)
+}
+
 func TestFlow_CloseEndsTheContext(t *testing.T) {
 	// A stage's timers and goroutines end with the flow's context: once the stream ended, nothing of it runs on.
 	flow := NewFlow(t.Context(), &partsSink{}, nil)
