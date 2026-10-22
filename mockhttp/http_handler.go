@@ -155,8 +155,12 @@ func (w *topResponseWriter) abandon() {
 	}
 }
 
-// aborted returns the cause of the flow when a stage aborted it, or nil.
+// aborted returns the cause of the flow when a stage aborted it, or nil. A nil w, for a mock without steps, has none.
 func (w *topResponseWriter) aborted() error {
+	if w == nil {
+		return nil
+	}
+
 	if cause := context.Cause(w.flow.Context()); errors.Is(cause, vlatte.ErrAbort) {
 		return cause
 	}
@@ -317,10 +321,26 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	ctx := r.Context()
+
+	// A mock with wire steps answers on its connection, which it takes over, so they see every byte of the answer.
+	var wire *wireResponseWriter
+	if steps := mock.WireSteps(); len(steps) > 0 {
+		var err error
+		if wire, err = h.takeOver(ctx, w, reqValues, steps); err != nil {
+			h.onError(w, reqValues, vlatte.FailureReply, err)
+			return
+		}
+
+		defer wire.finish(errAbandoned)
+
+		w = wire
+		ctx = wire.Context()
+	}
+
 	// A failure is vlatte's answer, not the mock's, so it skips the steps of the mock. The flow of the steps drives the
 	// reply: a stage that aborts it, such as on a timer, ends a reply that waits.
 	rw := w
-	ctx := r.Context()
 
 	var top *topResponseWriter
 	if steps := mock.Steps(); len(steps) > 0 {
@@ -331,7 +351,15 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx = top.Context()
 	}
 
-	noSwitch := len(mock.Steps()) > 0 || len(mock.spec.mappers) > 0
+	noSwitch := len(mock.Steps()) > 0 || len(mock.WireSteps()) > 0 || len(mock.spec.mappers) > 0
+
+	// fail answers a failure to serve the mock, which skips its steps, and ends the answer.
+	fail := func(err error) {
+		top.abandon()
+		wire.abandon()
+		h.onError(rw, reqValues, vlatte.FailureReply, err)
+		wire.finish(nil)
+	}
 
 	// cut is the cause of a flow a stage aborted. The cut is the mock's answer: the call counts, then the connection
 	// is cut.
@@ -339,14 +367,15 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	res, err := mock.reply.Reply(ctx, ReplyInput{RequestValues: reqValues, Writer: w, noSwitch: noSwitch})
 	if err != nil {
-		if top != nil {
-			cut = top.aborted()
+		// A stage that aborted the flow can fail the reply, such as a proxy's waiting on the flow: the cut is the
+		// mock's answer.
+		cut = cmp.Or(top.aborted(), wire.aborted())
+		if cut == nil && (errors.Is(err, vlatte.ErrAbort) || errors.Is(err, vlatte.ErrReset)) {
+			cut = err
 		}
 
 		if cut == nil {
-			top.abandon()
-			h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: %w", err))
-
+			fail(fmt.Errorf("http: %w", err))
 			return
 		}
 
@@ -395,16 +424,14 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// A streamed body, such as a proxy's, is read whole for mappers.
 		if len(mock.spec.mappers) > 0 && len(res.Body) == 0 {
 			if err = res.readBody(); err != nil {
-				top.abandon()
-				h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: reading the response body: %w", err))
+				fail(fmt.Errorf("http: reading the response body: %w", err))
 				return
 			}
 		}
 
 		for i, mapper := range mock.spec.mappers {
 			if err = mapper(reqValues, res); err != nil {
-				top.abandon()
-				h.onError(rw, reqValues, vlatte.FailureReply, fmt.Errorf("http: response mapper at index %d: %w", i, err))
+				fail(fmt.Errorf("http: response mapper at index %d: %w", i, err))
 				return
 			}
 		}
@@ -419,7 +446,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// A reply that writes its own answer, such as Echo, wrote it all: the steps pass on what they hold.
 		if top != nil {
 			endErr := top.end()
-			if cut = top.aborted(); cut == nil && endErr != nil {
+			if cut = cmp.Or(top.aborted(), wire.aborted()); cut == nil && endErr != nil {
 				h.renderFailed(reqValues, false, fmt.Errorf("http: ending the steps: %w", endErr))
 			}
 		}
@@ -483,7 +510,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.lifecycle.OnMatch(reqValues, res)
 
-	if cut != nil {
+	switch {
+	case wire != nil:
+		wire.finish(cut)
+	case cut != nil:
 		h.cut(rw, cut)
 	}
 }
@@ -722,10 +752,17 @@ func (h *mockHandler) render(ctx context.Context, w http.ResponseWriter, r *Requ
 	// The steps pass on what they hold before anything reads what the client got.
 	if top, ok := w.(*topResponseWriter); ok {
 		err = cmp.Or(err, top.end())
+	}
 
-		if cut := top.aborted(); cut != nil {
+	// A stage that aborted the flow, of the body or of the wire, cut the answer: a write it failed is no failure.
+	if a, ok := w.(interface{ aborted() error }); ok {
+		if cut := a.aborted(); cut != nil {
 			return cut
 		}
+	}
+
+	if errors.Is(err, vlatte.ErrAbort) || errors.Is(err, vlatte.ErrReset) {
+		return err
 	}
 
 	if err != nil {

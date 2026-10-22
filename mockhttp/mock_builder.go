@@ -445,6 +445,21 @@ func (b *Builder) Step(steps ...vlatte.Step) *Builder {
 	return b
 }
 
+// WireStep adds steps that every byte of each answer of the mock passes through, in order, as the client reads it:
+// the status line, the headers, the framing of the body and the body, after the steps of Step. They can send what
+// isn't HTTP: nothing at all, half the headers, garbage after a valid head. See [vlatte.Step].
+//
+// The mock answers on its connection, which it takes over, in HTTP/1.x, with Connection: close, so the connection
+// ends with the answer. A request over HTTP/2 can't give its connection over: it gets vlatte's error answer. A stage
+// that aborts the flow, with [vlatte.ErrAbort] or [vlatte.ErrReset], closes the connection, or resets it, at once,
+// once the mock counted the call and ran its callbacks and events. A failure, such as a failing reply, is vlatte's
+// answer, and skips the steps. A recording leaves the call out.
+func (b *Builder) WireStep(steps ...vlatte.Step) *Builder {
+	b.spec.wireSteps = append(b.spec.wireSteps, steps...)
+
+	return b
+}
+
 // Delay waits for the given duration before serving the mocked response.
 func (b *Builder) Delay(duration time.Duration) *Builder {
 	b.spec.delay = vlatte.Latency(duration)

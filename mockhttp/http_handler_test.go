@@ -317,7 +317,7 @@ func TestSteps_AStageCanWriteFromAGoroutineOfItsOwn(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	var deadline, duplex error
+	controls := make(chan [2]error, 1)
 
 	m.MustMock(Getf("/async").Step(asyncStep{}, appendStep("!")).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Trailer", "X-Sum")
@@ -325,8 +325,10 @@ func TestSteps_AStageCanWriteFromAGoroutineOfItsOwn(t *testing.T) {
 		_ = http.NewResponseController(w).Flush()
 		_, _ = io.WriteString(w, "b")
 
-		deadline = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(time.Minute))
-		duplex = http.NewResponseController(w).EnableFullDuplex()
+		controls <- [2]error{
+			http.NewResponseController(w).SetWriteDeadline(time.Now().Add(time.Minute)),
+			http.NewResponseController(w).EnableFullDuplex(),
+		}
 
 		w.Header().Set("X-Sum", "2")
 	})))
@@ -340,8 +342,7 @@ func TestSteps_AStageCanWriteFromAGoroutineOfItsOwn(t *testing.T) {
 
 	require.Equal(t, "a!b!", string(body))
 	require.Equal(t, "2", res.Trailer.Get("X-Sum"))
-	require.NoError(t, deadline)
-	require.NoError(t, duplex)
+	require.Equal(t, [2]error{nil, nil}, <-controls)
 }
 
 // limitStep passes on the first n bytes of each response, then aborts it with err, as a limit on the data a
