@@ -40,9 +40,11 @@ func KeyOnly(key string) Descriptor {
 	return New[[]any](key, nil)
 }
 
+// KeyOnlyMaybe creates a descriptor with the given key and, when item is [SelfDescriptive],
+// its description as the only argument. Any other item is ignored, as in [KeyOnly].
 func KeyOnlyMaybe(key string, item any) Descriptor {
 	if self, ok := item.(SelfDescriptive); ok {
-		return New(key, self.Describe())
+		return SingleArg(key, self.Describe())
 	}
 
 	return KeyOnly(key)
@@ -104,14 +106,14 @@ func Root[T P](props T) Descriptor {
 // Props describes the properties of a [SelfDescriptive] describle type.
 type Props any
 
-// Descriptor describes a type.
-// The Key field is the name of the type and also will be used as the key in when Props is a map[string]any.
-// Example:
+// Descriptor describes a type. Props decides how it marshals:
 //
-//	Descriptor{Key: "eq", Props: map[string]any{"field1": "value1","field2": "value2"}}
-//	will render the JSON: {"eq": {"field1": "value1","field2": "value2"}}
-//	Descriptor{Key: "eq", Props: []any{"field1", "value1","field2", "value2"}}
-//	will render the JSON: ["eq", "field1", "value1","field2", "value2"]
+//	Descriptor{Key: "eq", Props: []any{"a", 1}}          renders ["eq","a",1]
+//	Descriptor{Key: "eq", Props: nil}                    renders ["eq"]
+//	Descriptor{Key: "eq", Props: map[string]any{"a": 1}} renders {"a":1}
+//
+// A map leaves Key out: [Descriptor.Merge] places it under Key in a parent map.
+// A [Descriptor] as Props renders as that descriptor.
 type Descriptor struct {
 	Key   string
 	Props Props
@@ -131,7 +133,7 @@ func (d Descriptor) Validate() error {
 	case map[string]any:
 		break
 	default:
-		return fmt.Errorf("%w: expected: []any, map[string]any or nil. got: %T", ErrSpecNotValidType, t)
+		return fmt.Errorf("%w: expected: []any, map[string]any, Descriptor or nil. got: %T", ErrSpecNotValidType, t)
 	}
 
 	return nil
@@ -185,7 +187,7 @@ func (d Descriptor) Marshallable() (any, error) {
 		return d.Props, nil
 	}
 
-	return nil, fmt.Errorf("%w: expected: []any, map[string]any or nil. got: %T", ErrSpecNotValidType, d.Props)
+	return nil, fmt.Errorf("%w: expected: []any, map[string]any, Descriptor or nil. got: %T", ErrSpecNotValidType, d.Props)
 }
 
 // MarshalJSON implements the [json.Marshaler] interface.
