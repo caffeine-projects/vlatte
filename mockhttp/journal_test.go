@@ -12,8 +12,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -93,6 +96,16 @@ func TestJournal_KeepsEachRequestOnceWhateverItsOutcome(t *testing.T) {
 
 			panic("taken")
 		})),
+		// What a reply writes on a connection it took over is no status the server sent: the entry has none.
+		Getf("/answers-on-its-own").ID("answers-on-its-own").Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+			conn, _, err := http.NewResponseController(w).Hijack()
+			if err != nil {
+				return
+			}
+
+			_, _ = io.WriteString(conn, "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+			conn.Close()
+		})),
 	)
 
 	tests := []struct {
@@ -113,6 +126,7 @@ func TestJournal_KeepsEachRequestOnceWhateverItsOutcome(t *testing.T) {
 		{name: "exited", server: m, path: "/exits", outcome: journal.OutcomeFailed, mockID: "exits", message: "ended without an answer"},
 		{name: "aborted once its client left", server: m, path: "/aborts-late", outcome: journal.OutcomeAbandoned, mockID: "aborts-late", message: "canceled"},
 		{name: "panicked on a connection taken over", server: m, path: "/takes-over", outcome: journal.OutcomeFailed, mockID: "takes-over", message: "panicked: taken"},
+		{name: "answered on a connection taken over", server: m, path: "/answers-on-its-own", outcome: journal.OutcomeMatched, mockID: "answers-on-its-own"},
 		{name: "abandoned", server: m, path: "/slow", outcome: journal.OutcomeAbandoned, mockID: "slow", message: "left during the delay"},
 		{name: "handler", server: m, path: "/handler", outcome: journal.OutcomeMatched, status: http.StatusCreated, mockID: "handler"},
 		{name: "handler writing nothing", server: m, path: "/silent", outcome: journal.OutcomeMatched, status: http.StatusOK, mockID: "silent"},
@@ -286,6 +300,16 @@ func TestJournal_ATemporaryJournalGoesWithTheServer(t *testing.T) {
 	require.NoDirExists(t, dir)
 }
 
+func TestJournal_AServerThatCantKeepItsJournalFailsToBuild(t *testing.T) {
+	// A server asked for a journal it can't keep fails as it is built, with the reason, rather than serve requests
+	// a test then can't verify.
+	file := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(file, nil, 0o600))
+
+	_, err := New(Setup().Silent().Journal(filepath.Join(file, "journal")))
+	require.ErrorIs(t, err, syscall.ENOTDIR)
+}
+
 func TestJournal_AServerWithoutOneCantVerify(t *testing.T) {
 	m := MustNew(Setup().Silent())
 	m.MustStart()
@@ -319,6 +343,31 @@ func TestJournal_ATunnelIsOneEntry(t *testing.T) {
 	require.Equal(t, journal.OutcomeProxied, e.Outcome)
 	require.Equal(t, http.StatusOK, e.Status, "the status line vlatte wrote on the connection it took over")
 	require.Equal(t, strings.TrimPrefix(target.URL, "https://"), e.Target)
+}
+
+func TestJournal_ARequestToTheForwardProxyKeepsTheURLItNames(t *testing.T) {
+	// A request to the forward proxy names its host's URL in full: the entry's target is that URL, not the proxy's,
+	// so a test verifies the calls its code made to other hosts.
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(host.Close)
+
+	m := journaledServer(t, Setup().Proxy())
+
+	res, err := proxyClient(t, m).Get(host.URL + "/up?q=1")
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	q := journal.Query{Target: match.Equal(host.URL + "/up?q=1")}
+	require.Eventually(t, func() bool {
+		n, err := m.CountRequests(t.Context(), q)
+		return err == nil && n == 1
+	}, 5*time.Second, 10*time.Millisecond)
+
+	e := only(t, m, q)
+	require.Equal(t, journal.OutcomeProxied, e.Outcome)
+	require.Equal(t, http.StatusAccepted, e.Status)
 }
 
 func TestJournal_AConnectKeepsTheAnswerItGot(t *testing.T) {
@@ -496,6 +545,70 @@ func TestJournal_APatternCantReadABodyTheJournalCut(t *testing.T) {
 	n, err = cut.CountRequests(t.Context(), journal.Query{}, Request().URLPath(match.Equal("/other")).FormFile("upload", FileWith()))
 	require.NoError(t, err)
 	require.Zero(t, n, "the rest of the request differs: no body tells otherwise")
+}
+
+func TestJournal_APatternCountsOnlyTheRequestsOfItsProtocol(t *testing.T) {
+	// A journal may hold the calls of another protocol, such as gRPC's, whose fields read otherwise: an HTTP pattern
+	// counts none of them, even one with the path it matches.
+	m := journaledServer(t, Setup())
+
+	_, _ = do(t, http.MethodGet, m.URL("/pkg.Service/Call"), nil, nil)
+	require.NoError(t, m.Journal().Append(&journal.Entry{Kind: "grpc", Path: "/pkg.Service/Call", Target: "/pkg.Service/Call"}))
+
+	total, err := m.CountRequests(t.Context(), journal.Query{})
+	require.NoError(t, err)
+	require.Equal(t, 2, total, "the journal has both")
+
+	n, err := m.CountRequests(t.Context(), journal.Query{}, Request().URLPath(match.Equal("/pkg.Service/Call")))
+	require.NoError(t, err)
+	require.Equal(t, 1, n, "the HTTP request only")
+}
+
+func TestJournal_APatternFailsOnAnEntryThatIsNoRequest(t *testing.T) {
+	// An entry whose target is no URL, such as one appended by hand, is no request a pattern can match: verifying
+	// fails, and names the entry, rather than count it out.
+	m := journaledServer(t, Setup())
+
+	broken := &journal.Entry{Kind: Kind, Method: http.MethodGet, Target: "http://[::1"}
+	require.NoError(t, m.Journal().Append(broken))
+
+	_, err := m.CountRequests(t.Context(), journal.Query{}, Request().URLPath(match.Equal("/")))
+
+	urlErr, ok := errors.AsType[*url.Error](err)
+	require.True(t, ok, "%v", err)
+	require.Equal(t, "http://[::1", urlErr.URL)
+	require.ErrorContains(t, err, fmt.Sprintf("entry %d: target", broken.Seq))
+}
+
+func TestJournal_AMatcherThatFailsFailsTheVerification(t *testing.T) {
+	// A matcher that can't tell whether a request matches, such as a predicate that fails, fails verifying, as it
+	// fails matching, rather than count the request out: AssertNotRequested can't pass for a request the server got.
+	m := journaledServer(t, Setup())
+	_, _ = do(t, http.MethodGet, m.URL("/a"), nil, nil)
+
+	errPredicate := errors.New("predicate: failed")
+	pattern := Request().RequestMatches(func(*http.Request) (bool, error) { return false, errPredicate })
+
+	_, err := m.CountRequests(t.Context(), journal.Query{}, pattern)
+	require.ErrorIs(t, err, vlatte.ErrMatching)
+	require.ErrorIs(t, err, errPredicate)
+
+	ft := testmock.NewFakeT()
+	require.False(t, m.AssertNotRequested(ft, journal.Query{}, pattern))
+}
+
+func TestJournal_APatternReadsAnEntryWithoutHeaders(t *testing.T) {
+	// An entry may have no headers, such as one appended by hand: a pattern reads its request as net/http hands one
+	// to a handler, with a Header, and the host of its target.
+	m := journaledServer(t, Setup())
+
+	require.NoError(t, m.Journal().Append(&journal.Entry{Kind: Kind, Method: http.MethodGet, Path: "/plain", Target: "http://example.com/plain"}))
+
+	n, err := m.CountRequests(t.Context(), journal.Query{}, Request().URLPath(match.Equal("/plain")).RequestMatches(func(r *http.Request) (bool, error) {
+		return r.Header != nil && r.Host == "example.com", nil
+	}))
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
 }
 
 func TestJournal_TheAdminAPIQueriesWithTheRequestPartOfMockFiles(t *testing.T) {

@@ -118,6 +118,19 @@ func TestJournal_UnmatchedCallsNameTheClosestMocks(t *testing.T) {
 	require.Equal(t, []string{"header x-team"}, e.NearMisses[0].Failed)
 }
 
+func TestJournal_AnUnmatchedCallNamesTheMethodItsClosestMockDiffersIn(t *testing.T) {
+	// A mock of another method came closest, the fields of the call matched: the near miss names the method, so a
+	// test sees it mocked the wrong method, not the wrong fields.
+	m, c := journaled(t, Setup())
+	scope := m.MustMock(UnaryMethod("Other").Field("message", match.Equal("hi")).Reply(Unary().Message(&pb.HiRes{})))
+
+	_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	e := onlyCall(t, m, journal.Query{Outcome: journal.OutcomeUnmatched})
+	require.Equal(t, []vlatte.NearMiss{{MockID: scope.IDs()[0], Passed: 1, Total: 2, Failed: []string{"method"}}}, e.NearMisses)
+}
+
 func TestJournal_KeepsStreamingCalls(t *testing.T) {
 	m, c := journaled(t, Setup())
 	m.MustMock(ServerStreamMethod("List").Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})))

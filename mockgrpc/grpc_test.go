@@ -3,10 +3,16 @@ package mockgrpc
 import (
 	"bytes"
 	"context"
+	json "encoding/json/v2"
 	"errors"
+	"io/fs"
 	"net"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -187,6 +193,51 @@ func TestServeErrorsAreLogged(t *testing.T) {
 	require.Contains(t, buf.String(), errAccept.Error())
 }
 
+func TestClose_LogsAJournalThatFailsToClose(t *testing.T) {
+	// Close returns nothing: a journal that fails to write the index of its last segment, which the next server of
+	// its directory opens fast from, must be logged, not swallowed.
+	var buf bytes.Buffer
+	logger := zerolog.New(&buf)
+
+	dir := t.TempDir()
+	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}).Logger(&logger).Journal(dir))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	_, err = pb.NewTestServiceClient(conn).Greetings(t.Context(), &pb.HiReq{})
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	// A directory where the index of the segment goes: the journal can't write it.
+	idx := filepath.Join(dir, "journal-000001.idx")
+	require.NoError(t, os.Mkdir(idx, 0o755))
+
+	m.Close()
+
+	type logLine struct {
+		Level   string `json:"level"`
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+
+	var closing []logLine
+	for line := range strings.Lines(buf.String()) {
+		var l logLine
+		require.NoError(t, json.Unmarshal([]byte(line), &l), line)
+
+		if l.Message == "server: Close: closing the journal" {
+			closing = append(closing, l)
+		}
+	}
+
+	require.Len(t, closing, 1, buf.String())
+	require.Equal(t, "warn", closing[0].Level)
+	require.True(t, strings.HasSuffix(closing[0].Error, " "+idx+": "+syscall.EEXIST.Error()), closing[0].Error)
+}
+
 func TestServerOptionsAreApplied(t *testing.T) {
 	var calls atomic.Int32
 	count := func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
@@ -321,6 +372,39 @@ func TestNew_ReturnsErrors(t *testing.T) {
 	require.ErrorContains(t, err, "bad config")
 
 	require.Panics(t, func() { MustNew(failingConfigurer{}) })
+}
+
+func TestNew_AJournalThatDoesntOpenFailsTheServer(t *testing.T) {
+	// A server without the journal it was given keeps no call a test can verify: New fails, naming what is in the
+	// way.
+	file := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(file, nil, 0o600))
+
+	_, err := New(Setup().Journal(filepath.Join(file, "journal")))
+	require.ErrorIs(t, err, syscall.ENOTDIR)
+
+	pathErr, ok := errors.AsType[*fs.PathError](err)
+	require.True(t, ok, err)
+	require.Equal(t, file, pathErr.Path)
+}
+
+func TestNew_AServerThatFailsToBuildRemovesItsTemporaryJournal(t *testing.T) {
+	// grpc panics on server options it can't take, two plain interceptors, once New opened the journal: a temporary
+	// one goes with the server, or each such test leaves a directory behind in the system's temporary one.
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+
+	pass := func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		return handler(ctx, req)
+	}
+
+	require.Panics(t, func() {
+		_, _ = New(Setup().ServerOptions(grpc.UnaryInterceptor(pass), grpc.UnaryInterceptor(pass)).Journal(""))
+	})
+
+	left, err := filepath.Glob(filepath.Join(tmp, "vlatte-journal-*"))
+	require.NoError(t, err)
+	require.Empty(t, left)
 }
 
 func TestListener(t *testing.T) {

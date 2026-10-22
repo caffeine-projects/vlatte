@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
 )
@@ -92,14 +94,29 @@ func TestListRequests(t *testing.T) {
 	}
 }
 
+func TestListRequests_AClientThatLeftGetsNoAnswer(t *testing.T) {
+	// A client that leaves stops its query, and the handler answers nothing: no one reads it, and the client's leaving
+	// is no internal error of the server.
+	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	rec := httptest.NewRecorder()
+	handler.ListRequests(j).ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/requests", nil))
+
+	require.Empty(t, rec.Header(), "no answer")
+	require.Empty(t, rec.Body.String(), "no answer")
+}
+
 func TestQueryRequests(t *testing.T) {
 	// QUERY selects requests by the keys of a query, with the matchers mock files write, and counts them: limit 0
 	// answers the count alone, which is what a client verifying a request needs.
-	j := journalOf(t,
-		entryOf("a", "GET", "/users/1", journal.OutcomeMatched),
-		entryOf("b", "GET", "/orders", journal.OutcomeUnmatched),
-		entryOf("c", "POST", "/users", journal.OutcomeMatched),
-	)
+	a := entryOf("a", "GET", "/users/1", journal.OutcomeMatched)
+	a.MockID = "get-user"
+	c := entryOf("c", "POST", "/users", journal.OutcomeMatched)
+	c.MockID = "add-user"
+	j := journalOf(t, a, entryOf("b", "GET", "/orders", journal.OutcomeUnmatched), c)
 	url := serve(t, newStore(t), admin.Journal(j, nil))
 
 	tests := []struct {
@@ -112,6 +129,8 @@ func TestQueryRequests(t *testing.T) {
 		{name: "glob", body: `{"path": ["glob", "/users*"]}`, want: []string{"c", "a"}, count: 2},
 		{name: "text", body: `{"method": "POST"}`, want: []string{"c"}, count: 1},
 		{name: "outcome", body: `{"outcome": "unmatched"}`, want: []string{"b"}, count: 1},
+		{name: "mock", body: `{"mock_id": "add-user"}`, want: []string{"c"}, count: 1},
+		{name: "target in full", body: `{"target": "fake:///orders"}`, want: []string{"b"}, count: 1},
 		{name: "status as a number", body: `{"status": 200, "kind": "fake"}`, want: []string{"c", "b", "a"}, count: 3},
 		{name: "header in any case", body: `{"header": {"accept": ["contains", "json"]}}`, want: []string{"c", "b", "a"}, count: 3},
 		{name: "json body", body: `{"body": ["jsonpath", "$.id", ["equal", 7]], "path": "/orders"}`, want: []string{"b"}, count: 1},
@@ -135,6 +154,29 @@ func TestQueryRequests(t *testing.T) {
 	require.Equal(t, []string{"b"}, requestIDs(conforms(t, res, body, "RequestList")), "YAML too")
 }
 
+func TestQueryRequests_PagesWithTheNextOfAPage(t *testing.T) {
+	// A query pages as GET does: the next of a page is the before of the page after it, of the same selection, and
+	// the count stays as the pages go.
+	j := journalOf(t,
+		entryOf("a", "GET", "/a", journal.OutcomeMatched),
+		entryOf("b", "GET", "/b", journal.OutcomeMatched),
+		entryOf("c", "POST", "/c", journal.OutcomeMatched),
+	)
+	url := serve(t, newStore(t), admin.Journal(j, nil))
+
+	res, body := send(t, request{method: "QUERY", url: url + "/requests", body: `{"limit": 1, "method": "GET"}`})
+	doc := conforms(t, res, body, "RequestList")
+	require.Equal(t, []string{"b"}, requestIDs(doc))
+	require.Equal(t, int64(2), doc["count"])
+
+	next := fmt.Sprintf(`{"limit": 1, "method": "GET", "before": %d}`, doc["next"])
+	res, body = send(t, request{method: "QUERY", url: url + "/requests", body: next})
+	doc = conforms(t, res, body, "RequestList")
+	require.Equal(t, []string{"a"}, requestIDs(doc))
+	require.Equal(t, int64(2), doc["count"])
+	require.NotContains(t, doc, "next", "the last page")
+}
+
 func TestQueryRequests_ProblemsOfTheQuery(t *testing.T) {
 	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil))
 
@@ -148,6 +190,7 @@ func TestQueryRequests_ProblemsOfTheQuery(t *testing.T) {
 		{name: "object as matcher", body: `{"method": {}}`, key: "method"},
 		{name: "bad time", body: `{"since": "yesterday"}`, key: "since"},
 		{name: "limit over the most", body: `{"limit": 1001}`, key: "limit"},
+		{name: "negative before", body: `{"before": -1}`, key: "before"},
 		{name: "unknown key", body: `{"paths": "/a"}`, key: "paths"},
 		{name: "request part of no protocol", body: `{"request": {"method": "GET"}}`, key: "request"},
 	}
@@ -251,6 +294,19 @@ func TestClearRequests(t *testing.T) {
 	count, err = j.Count(t.Context(), journal.Query{})
 	require.NoError(t, err)
 	require.Zero(t, count, "reset clears the journal")
+}
+
+func TestClearRequests_AJournalThatFailsToClear(t *testing.T) {
+	// A journal that can't clear says so, and why: a test that went on would verify against the requests of the case
+	// before.
+	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
+	require.NoError(t, j.Close())
+	url := serve(t, newStore(t), admin.Journal(j, nil))
+
+	res, body := send(t, request{method: http.MethodDelete, url: url + "/requests"})
+
+	doc := problem(t, res, body, http.StatusInternalServerError, "internal")
+	require.Equal(t, journal.ErrClosed.Error(), doc["detail"])
 }
 
 func TestJournal_ANilJournalIsNone(t *testing.T) {

@@ -3,15 +3,19 @@ package journal_test
 import (
 	"bytes"
 	"context"
+	"encoding/json/jsontext"
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -772,22 +776,431 @@ func TestJournal_ClearedRequestsStayClearedWhenTheirFilesDoNot(t *testing.T) {
 	require.Equal(t, []string{"c"}, entryIDs(page))
 }
 
-func TestJournal_AClearThatCantRecordItselfClearsNothing(t *testing.T) {
-	// Clear first records, in the journal's directory, that the requests before it are gone, so a later journal of
-	// the directory drops them: when it can't, it fails, and the journal keeps its requests, as a reply that failed
-	// changes nothing.
+func TestJournal_AClearThatCantStartOverClearsNothing(t *testing.T) {
+	// Clear starts a new segment, and records, in the journal's directory, that the requests before it are gone, so a
+	// later journal of the directory drops them: when it can't, it fails, and the journal keeps its requests, as a
+	// reply that failed changes nothing.
+	tests := []struct {
+		name  string
+		file  string
+		check func(t *testing.T, err error)
+	}{
+		{
+			name: "no room for its tombstone",
+			file: "journal.clear",
+			check: func(t *testing.T, err error) {
+				_, ok := errors.AsType[*os.LinkError](err)
+				require.True(t, ok, "the tombstone can't take the place of a directory: %v", err)
+			},
+		},
+		{
+			name:  "no room for its next segment",
+			file:  "journal-000002.log",
+			check: func(t *testing.T, err error) { require.ErrorIs(t, err, fs.ErrExist) },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			j := newJournal(t, journal.Options{Dir: dir})
+			require.NoError(t, j.Append(entry("a")))
+			require.NoError(t, os.Mkdir(filepath.Join(dir, tt.file), 0o700))
+
+			tt.check(t, j.Clear())
+			require.Equal(t, []string{"a"}, find(t, j, journal.Query{}))
+		})
+	}
+}
+
+// warnings returns a logger that writes into logs, and logs.
+func warnings() (*zerolog.Logger, *bytes.Buffer) {
+	logs := &bytes.Buffer{}
+	logger := zerolog.New(logs)
+
+	return &logger, logs
+}
+
+// makeStuck puts a directory that holds a file at path: no file can take its place, nor can it be removed.
+func makeStuck(t *testing.T, path string) {
+	t.Helper()
+
+	require.NoError(t, os.RemoveAll(path))
+	require.NoError(t, os.MkdirAll(path, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(path, "stuck"), nil, 0o600))
+}
+
+func TestNew_FailsWhereItCantKeepItsFiles(t *testing.T) {
+	// A journal that can't keep its files fails as it opens, with the reason, rather than lose requests later: a
+	// test learns at once that its server can't verify.
+	file := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(file, nil, 0o600))
+
+	tests := []struct {
+		name  string
+		dir   func(t *testing.T) string
+		wants error
+	}{
+		{
+			name:  "a directory under a file",
+			dir:   func(*testing.T) string { return filepath.Join(file, "journal") },
+			wants: syscall.ENOTDIR,
+		},
+		{
+			name: "a lock that is a directory",
+			dir: func(t *testing.T) string {
+				if runtime.GOOS == "windows" {
+					t.Skip("directories aren't locked on Windows")
+				}
+
+				dir := t.TempDir()
+				require.NoError(t, os.Mkdir(filepath.Join(dir, "journal.lock"), 0o700))
+
+				return dir
+			},
+			wants: syscall.EISDIR,
+		},
+		{
+			name: "a log it can't read",
+			dir: func(t *testing.T) string {
+				dir := t.TempDir()
+				require.NoError(t, os.Symlink(filepath.Join(dir, "gone"), filepath.Join(dir, "journal-000001.log")))
+
+				return dir
+			},
+			wants: fs.ErrNotExist,
+		},
+		{
+			name: "a log it can't read, whose sidecar it can",
+			dir: func(t *testing.T) string {
+				dir := t.TempDir()
+				j, err := journal.New(journal.Options{Dir: dir})
+				require.NoError(t, err)
+				require.NoError(t, j.Append(entry("a")))
+				require.NoError(t, j.Close())
+
+				log := filepath.Join(dir, "journal-000001.log")
+				require.FileExists(t, filepath.Join(dir, "journal-000001.idx"))
+				require.NoError(t, os.Remove(log))
+				require.NoError(t, os.Symlink(filepath.Join(dir, "gone"), log))
+
+				return dir
+			},
+			wants: fs.ErrNotExist,
+		},
+		{
+			name: "no room for its next segment",
+			dir: func(t *testing.T) string {
+				dir := t.TempDir()
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "journal-000001.log"), nil, 0o600))
+				require.NoError(t, os.Mkdir(filepath.Join(dir, "journal-000002.log"), 0o700))
+
+				return dir
+			},
+			wants: fs.ErrExist,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := journal.New(journal.Options{Dir: tt.dir(t)})
+			require.ErrorIs(t, err, tt.wants)
+		})
+	}
+
+	t.Run("no temporary directory", func(t *testing.T) {
+		t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
+
+		_, err := journal.New(journal.Options{})
+		require.ErrorIs(t, err, fs.ErrNotExist)
+	})
+}
+
+func TestNew_ARelativeDirNeedsAWorkingDirectory(t *testing.T) {
+	// A relative directory is resolved as the journal opens, so a later change of directory doesn't move its files:
+	// with no working directory to resolve it from, the journal fails.
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.Remove(dir))
+
+	_, err := journal.New(journal.Options{Dir: "journal"})
+	require.ErrorIs(t, err, fs.ErrNotExist)
+}
+
+func TestMustNew_OpensAsNewDoesOrPanicsWithItsError(t *testing.T) {
+	// A caller that can't go on without a journal opens it in one line: the journal New returns, or New's error as
+	// the panic, which tells why.
+	j := journal.MustNew(journal.Options{Dir: t.TempDir()})
+	t.Cleanup(func() { j.Close() })
+	require.NoError(t, j.Append(entry("a")))
+
+	file := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(file, nil, 0o600))
+
+	defer func() {
+		err, _ := recover().(error)
+		require.ErrorIs(t, err, syscall.ENOTDIR)
+	}()
+
+	journal.MustNew(journal.Options{Dir: filepath.Join(file, "journal")})
+	t.Fatal("MustNew returned")
+}
+
+func TestJournal_OpensWithoutWhatACrashLeftBeingWritten(t *testing.T) {
+	// A crash may leave a file the journal was writing whole: the next journal of the directory removes it.
+	dir := t.TempDir()
+	temp := filepath.Join(dir, ".journal-123.tmp")
+	require.NoError(t, os.WriteFile(temp, []byte("half"), 0o600))
+
+	newJournal(t, journal.Options{Dir: dir})
+	require.NoFileExists(t, temp)
+}
+
+func TestJournal_KeepsTheFirstOfASequenceNumberSeenTwice(t *testing.T) {
+	// Sequence numbers only grow within a journal: a segment that comes after, with numbers already seen, such as one
+	// copied in from another journal, is none of this journal's.
+	logOf := func(ids ...string) []byte {
+		dir := t.TempDir()
+		j, err := journal.New(journal.Options{Dir: dir})
+		require.NoError(t, err)
+
+		for _, id := range ids {
+			require.NoError(t, j.Append(entry(id)))
+		}
+
+		require.NoError(t, j.Close())
+
+		data, err := os.ReadFile(filepath.Join(dir, "journal-000001.log"))
+		require.NoError(t, err)
+
+		return data
+	}
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "journal-000001.log"), logOf("a", "b", "c"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "journal-000002.log"), logOf("other"), 0o600))
+
+	j := newJournal(t, journal.Options{Dir: dir})
+	require.Equal(t, []string{"c", "b", "a"}, find(t, j, journal.Query{}))
+}
+
+func TestJournal_ScansALogWhoseSidecarItCantUse(t *testing.T) {
+	// A sidecar only saves a scan of its log: one the journal can't read, or that describes rows its log can't hold,
+	// is no index at all, and the log is read instead. One it can't write is logged, and the journal opens.
+	tests := []struct {
+		name    string
+		spoil   func(t *testing.T, sidecar string)
+		warning string
+	}{
+		{
+			name:    "a sidecar that is a directory",
+			spoil:   makeStuck,
+			warning: "journal: writing the index of a segment",
+		},
+		{
+			name: "a sidecar with a row its log can't hold",
+			spoil: func(t *testing.T, sidecar string) {
+				data, err := os.ReadFile(sidecar)
+				require.NoError(t, err)
+
+				// Every other value stays as written: as a float, the log's time of change would change too.
+				var doc map[string]jsontext.Value
+				require.NoError(t, json.Unmarshal(data, &doc))
+
+				var rows []map[string]jsontext.Value
+				require.NoError(t, json.Unmarshal(doc["rows"], &rows))
+				require.NotEmpty(t, rows)
+				rows[0]["size"] = jsontext.Value("0")
+
+				doc["rows"], err = json.Marshal(rows)
+				require.NoError(t, err)
+
+				data, err = json.Marshal(doc)
+				require.NoError(t, err)
+				require.NoError(t, os.WriteFile(sidecar, data, 0o600))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			j, err := journal.New(journal.Options{Dir: dir})
+			require.NoError(t, err)
+			require.NoError(t, j.Append(entry("a")))
+			require.NoError(t, j.Close())
+
+			sidecar := filepath.Join(dir, "journal-000001.idx")
+			require.FileExists(t, sidecar)
+			tt.spoil(t, sidecar)
+
+			logger, logs := warnings()
+			reopened := newJournal(t, journal.Options{Dir: dir, Logger: logger})
+			require.Equal(t, []string{"a"}, find(t, reopened, journal.Query{}))
+
+			if tt.warning != "" {
+				require.Contains(t, logs.String(), tt.warning)
+			}
+		})
+	}
+}
+
+func TestJournal_LogsTheSegmentsItCantRemove(t *testing.T) {
+	// A segment the system won't remove stays, and the journal says so: its requests stay gone all the same, and the
+	// journal goes on.
+	t.Run("on Clear", func(t *testing.T) {
+		dir := t.TempDir()
+		logger, logs := warnings()
+		j := newJournal(t, journal.Options{Dir: dir, Logger: logger})
+		require.NoError(t, j.Append(entry("a")))
+		makeStuck(t, filepath.Join(dir, "journal-000001.idx"))
+
+		require.NoError(t, j.Clear())
+		require.Contains(t, logs.String(), "journal: removing a segment")
+		require.Empty(t, find(t, j, journal.Query{}))
+	})
+
+	t.Run("on dropping the oldest", func(t *testing.T) {
+		dir := t.TempDir()
+		logger, logs := warnings()
+		j := newJournal(t, journal.Options{Dir: dir, MaxEntries: 1, Logger: logger})
+		require.NoError(t, j.Append(entry("a")))
+		makeStuck(t, filepath.Join(dir, "journal-000001.idx"))
+
+		require.NoError(t, j.Append(entry("b")))
+		require.Contains(t, logs.String(), "journal: removing a segment")
+		require.Equal(t, []string{"b"}, find(t, j, journal.Query{}))
+	})
+
+	t.Run("on opening after a Clear", func(t *testing.T) {
+		dir := t.TempDir()
+		j, err := journal.New(journal.Options{Dir: dir})
+		require.NoError(t, err)
+		require.NoError(t, j.Append(entry("a")))
+
+		log := filepath.Join(dir, "journal-000001.log")
+		data, err := os.ReadFile(log)
+		require.NoError(t, err)
+
+		require.NoError(t, j.Clear())
+		require.NoError(t, j.Append(entry("b")))
+		require.NoError(t, j.Close())
+
+		// What a crash during the Clear leaves: the segment it removed, which the system won't remove now.
+		require.NoError(t, os.WriteFile(log, data, 0o600))
+		makeStuck(t, filepath.Join(dir, "journal-000001.idx"))
+
+		logger, logs := warnings()
+		reopened := newJournal(t, journal.Options{Dir: dir, Logger: logger})
+		require.Contains(t, logs.String(), "journal: removing a segment a Clear removed")
+		require.Equal(t, []string{"b"}, find(t, reopened, journal.Query{}))
+	})
+}
+
+func TestJournal_KeepsAppendingWhenItCantStartASegment(t *testing.T) {
+	// A segment is full, but the next can't be made: the journal logs it, and keeps the requests in the full one.
+	dir := t.TempDir()
+	logger, logs := warnings()
+	j := newJournal(t, journal.Options{Dir: dir, MaxEntries: 4, Logger: logger})
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "journal-000002.log"), 0o700))
+
+	require.NoError(t, j.Append(entry("a")))
+	require.NoError(t, j.Append(entry("b")))
+
+	require.Contains(t, logs.String(), "journal: starting a new segment")
+	require.Equal(t, []string{"b", "a"}, find(t, j, journal.Query{}))
+}
+
+func TestJournal_AnEntryWhoseFileWentIsNotFound(t *testing.T) {
+	// The file of an entry can go under the journal, as dropping old segments makes it go: Get says it has none.
+	dir := t.TempDir()
+	j := newJournal(t, journal.Options{Dir: dir})
+	require.NoError(t, j.Append(entry("a")))
+	require.NoError(t, os.Remove(filepath.Join(dir, "journal-000001.log")))
+
+	_, err := j.Get("a")
+	require.ErrorIs(t, err, journal.ErrNotFound)
+}
+
+func TestJournal_FindFailsOnALogThatChangedUnderIt(t *testing.T) {
+	// A log another program cut or wrote over no longer holds the entries the index names: Find says so, rather than
+	// return entries that aren't the requests.
+	tests := []struct {
+		name  string
+		spoil func(t *testing.T, log string)
+		check func(t *testing.T, err error)
+	}{
+		{
+			name:  "cut",
+			spoil: func(t *testing.T, log string) { require.NoError(t, os.Truncate(log, 0)) },
+			check: func(t *testing.T, err error) { require.ErrorIs(t, err, io.EOF) },
+		},
+		{
+			name: "written over",
+			spoil: func(t *testing.T, log string) {
+				info, err := os.Stat(log)
+				require.NoError(t, err)
+				require.NoError(t, os.WriteFile(log, bytes.Repeat([]byte("x"), int(info.Size())), 0o600))
+			},
+			check: func(t *testing.T, err error) {
+				_, ok := errors.AsType[*jsontext.SyntacticError](err)
+				require.True(t, ok, "%v", err)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			j := newJournal(t, journal.Options{Dir: dir})
+			require.NoError(t, j.Append(entry("a")))
+			tt.spoil(t, filepath.Join(dir, "journal-000001.log"))
+
+			_, err := j.Find(t.Context(), journal.Query{})
+			tt.check(t, err)
+		})
+	}
+}
+
+func TestJournal_FindStopsWithItsContext(t *testing.T) {
+	// A query of a large journal ends when its caller does, such as a client of the admin API that left.
+	j := newJournal(t, journal.Options{})
+	require.NoError(t, j.Append(entry("a")))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := j.Find(ctx, journal.Query{})
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestJournal_AnEntryItCantWriteIsNotKept(t *testing.T) {
+	// An entry the journal can't write fails its Append, and the journal logs the first failures, then fewer and
+	// fewer: a server whose journal broke goes on, with a log that doesn't flood.
+	logger, logs := warnings()
+	j := newJournal(t, journal.Options{Logger: logger})
+
+	for range 5 {
+		err := j.Append(entry("far", func(e *journal.Entry) { e.Time = time.Date(10_000, 1, 1, 0, 0, 0, 0, time.UTC) }))
+		_, ok := errors.AsType[*json.SemanticError](err)
+		require.True(t, ok, "%v", err)
+	}
+
+	require.Equal(t, 3, strings.Count(logs.String(), "journal: an entry was not kept"), "the 1st, 2nd and 4th")
+	require.Empty(t, find(t, j, journal.Query{}))
+}
+
+func TestJournal_ATombstoneItCantReadClearsNothing(t *testing.T) {
+	// A tombstone holds the first segment a Clear kept: one that holds no number, as only a person editing it can
+	// leave, drops nothing.
 	dir := t.TempDir()
 	j, err := journal.New(journal.Options{Dir: dir})
 	require.NoError(t, err)
-	t.Cleanup(func() { j.Close() })
-
 	require.NoError(t, j.Append(entry("a")))
-	require.NoError(t, os.Mkdir(filepath.Join(dir, "journal.clear"), 0o700))
+	require.NoError(t, j.Close())
 
-	_, ok := errors.AsType[*os.LinkError](j.Clear())
-	require.True(t, ok, "the tombstone can't take the place of a directory")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "journal.clear"), []byte("none\n"), 0o600))
 
-	page, err := j.Find(t.Context(), journal.Query{})
-	require.NoError(t, err)
-	require.Equal(t, []string{"a"}, entryIDs(page))
+	reopened := newJournal(t, journal.Options{Dir: dir})
+	require.Equal(t, []string{"a"}, find(t, reopened, journal.Query{}))
 }

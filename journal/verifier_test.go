@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -118,6 +121,55 @@ func TestVerifier_AssertRequested(t *testing.T) {
 	report = errorText(t, ft)
 	require.Contains(t, report, "Got 0.")
 	require.Contains(t, report, "Requests the server served (2 of 2, the newest first):")
+}
+
+func TestVerifier_AFailureTellsWhatCameOfEachRequest(t *testing.T) {
+	// A failure's list says, of each request, what a test needs to tell why it was or wasn't the one expected: the
+	// mock that answered it, a body the journal cut, what failed, and the mock that came closest, which only a part
+	// that keeps state, such as Times, kept from matching.
+	j := journaled(t,
+		entry("a", func(e *journal.Entry) { e.MockID, e.BodyTruncated = "m1", true }),
+		entry("b", func(e *journal.Entry) { e.Outcome, e.Status, e.Message = journal.OutcomeFailed, 500, "reply: boom" }),
+		entry("c", func(e *journal.Entry) {
+			e.Outcome, e.Status = journal.OutcomeUnmatched, 418
+			e.NearMisses = []vlatte.NearMiss{{MockID: "m2", Passed: 2, Total: 2, Skipped: []string{"times"}}}
+		}),
+	)
+	app := journal.NewVerifier[*fakeMock, struct{}](j, nil)
+
+	ft := testmock.NewFakeT()
+	require.False(t, app.AssertNotRequested(ft, journal.Query{}))
+
+	report := errorText(t, ft)
+	require.Contains(t, report, "unmatched GET http://127.0.0.1/c 418, closest [m2] missed by times\n")
+	require.Contains(t, report, "failed GET http://127.0.0.1/b 500: reply: boom\n")
+	require.Contains(t, report, "matched GET http://127.0.0.1/a 200 [m1] (body cut)\n")
+}
+
+func TestVerifier_AFailureSaysWhenTheServerServedNothing(t *testing.T) {
+	app := journal.NewVerifier[*fakeMock, struct{}](journaled(t), nil)
+
+	ft := testmock.NewFakeT()
+	require.False(t, app.AssertRequested(ft, 1, journal.Query{}))
+	require.Contains(t, errorText(t, ft), "Got 0.\n  Requests the server served: none\n")
+}
+
+func TestVerifier_AFailureSaysWhenItCantListTheRequests(t *testing.T) {
+	// None matched, and the requests the server served can't be read: the failure says so, with why, rather than
+	// list none, as if the server had served nothing.
+	dir := t.TempDir()
+	j := newJournal(t, journal.Options{Dir: dir})
+	require.NoError(t, j.Append(entry("a")))
+	require.NoError(t, os.Truncate(filepath.Join(dir, "journal-000001.log"), 0))
+
+	app := journal.NewVerifier[*fakeMock, struct{}](j, nil)
+
+	ft := testmock.NewFakeT()
+	require.False(t, app.AssertRequested(ft, 1, journal.Query{Path: match.Equal("/b")}))
+
+	report := errorText(t, ft)
+	require.Contains(t, report, "Got 0.\nCould not list the requests.\n")
+	require.Contains(t, report, io.EOF.Error())
 }
 
 func TestVerifier_AssertsInACleanup(t *testing.T) {

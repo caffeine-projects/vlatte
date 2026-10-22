@@ -699,6 +699,45 @@ func TestAdmin_StreamsTheStatusAHandlerSent(t *testing.T) {
 	require.Equal(t, float64(http.StatusCreated), byType["matched"]["status"])
 }
 
+func TestAdmin_StreamsWarnings(t *testing.T) {
+	// A request can go wrong without an error of the server, as one whose client left during its mock's delay: a
+	// client follows the warning, with no status, as the client got none.
+	arrived := make(chan struct{}, 1)
+	m := adminServer(t, Setup().Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			arrived <- struct{}{}
+			next.ServeHTTP(w, r)
+		})
+	}))
+	m.MustMock(Getf("/slow").ID("slow").Delay(5 * time.Second).Reply(OK()))
+
+	byType := streamEvents(t, m, 1, func() {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		// The client leaves once the server has its request.
+		go func() {
+			select {
+			case <-arrived:
+			case <-ctx.Done():
+			}
+
+			cancel()
+		}()
+
+		r, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL("/slow"), nil)
+		require.NoError(t, err)
+
+		_, err = http.DefaultClient.Do(r)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	warning := byType["warning"]
+	require.Equal(t, "slow", warning["mock_id"])
+	require.Contains(t, warning["message"], "the client left during the delay")
+	require.NotContains(t, warning, "status")
+}
+
 func TestAdmin_StreamsWhatTheProxyServes(t *testing.T) {
 	// A request no mock matches goes to its host when the server is a proxy: a client follows it with the host's status,
 	// and follows the error when the host can't be reached, as for the requests the mocks answer.

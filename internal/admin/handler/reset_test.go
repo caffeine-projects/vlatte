@@ -11,6 +11,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
+	"github.com/caffeine-projects/vlatte/journal"
 )
 
 func TestReset(t *testing.T) {
@@ -91,4 +92,17 @@ func TestReset_FilesThatFailToLoad(t *testing.T) {
 	require.Equal(t, []string{"added"}, ids(t, store))
 	require.Zero(t, added.closed.Load())
 	require.Equal(t, map[string]string{"checkout": "paid"}, scenarios.Scenarios())
+}
+
+func TestReset_AJournalThatFailsToClear(t *testing.T) {
+	// A reset that can't clear the journal says so, and why: a test that went on would verify against the requests of
+	// the test before.
+	j := journalOf(t)
+	require.NoError(t, j.Close())
+	url := serve(t, newStore(t), admin.Journal(j, nil))
+
+	res, body := send(t, request{method: http.MethodPost, url: url + "/reset"})
+
+	doc := problem(t, res, body, http.StatusInternalServerError, "internal")
+	require.Equal(t, journal.ErrClosed.Error(), doc["detail"])
 }
