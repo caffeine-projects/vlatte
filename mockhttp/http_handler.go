@@ -64,12 +64,76 @@ func (w *topResponseWriter) Write(p []byte) (int, error) {
 // Unwrap returns the response writer, so http.ResponseController can flush it.
 func (w *topResponseWriter) Unwrap() http.ResponseWriter { return w.rw }
 
+// answerKey keys the answerWriter of a request in its context.
+type answerKey struct{}
+
 // answerWriter keeps the status the client gets, the first final one sent, which the journal, the logs and the
 // events tell. A handler's own writer is under it: a reply may flush it, push with it, or take its connection over.
+//
+// withAnswer puts one outside the decorator and the middlewares, which sees what they send in place of a mock, and
+// holds the outcomes of the request until the client has its answer. A handler that can't find it, as under a
+// middleware that hides both the request's context and its own writer's, keeps one of its own under the middlewares.
 type answerWriter struct {
-	rw       http.ResponseWriter
-	status   int
-	hijacked bool
+	rw http.ResponseWriter
+
+	// outer is set for the writer withAnswer puts outside the middlewares.
+	outer bool
+
+	mu        sync.Mutex
+	status    int
+	hijacked  bool
+	done      bool
+	unwinding bool
+	held      []func()
+}
+
+// withAnswer serves next with an answerWriter outside it, in the context of the request too, so the outcomes of a
+// request tell the status the client got, whatever a middleware or the decorator sends. They run once next returns:
+// the client has its answer then, but for net/http's last flush, so a test that checks the journal right after the
+// response sees the request.
+func withAnswer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		a := &answerWriter{rw: w, outer: true}
+		returned := false
+
+		// A panic that no middleware answers drops the connection, as a runtime.Goexit does.
+		defer func() { a.finish(!returned) }()
+
+		next.ServeHTTP(a, r.WithContext(context.WithValue(r.Context(), answerKey{}, a)))
+		returned = true
+	})
+}
+
+// answerOf returns the answerWriter of r, which w writes to: the one withAnswer put outside the middlewares, found in
+// r's context or under w, or a new one over w when a middleware hid it. The outer one may be done already, as when a
+// timeout of the decorator answered first: the outcomes then run at once, with the status the client got.
+func answerOf(r *http.Request, w http.ResponseWriter) *answerWriter {
+	if a, ok := r.Context().Value(answerKey{}).(*answerWriter); ok {
+		return a
+	}
+
+	if a, ok := writerOf[*answerWriter](w); ok {
+		return a
+	}
+
+	return &answerWriter{rw: w}
+}
+
+// writerOf returns the writer of type W that w writes to: w, or one that the Unwrap of a writer over it hands out.
+func writerOf[W http.ResponseWriter](w http.ResponseWriter) (W, bool) {
+	for {
+		if found, ok := w.(W); ok {
+			return found, true
+		}
+
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			var none W
+			return none, false
+		}
+
+		w = u.Unwrap()
+	}
 }
 
 func (w *answerWriter) Header() http.Header { return w.rw.Header() }
@@ -110,7 +174,9 @@ func (w *answerWriter) FlushError() error {
 func (w *answerWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	conn, rw, err := http.NewResponseController(w.rw).Hijack()
 	if err == nil {
+		w.mu.Lock()
 		w.hijacked = true
+		w.mu.Unlock()
 	}
 
 	return conn, rw, err
@@ -152,6 +218,9 @@ func (w *answerWriter) Unwrap() http.ResponseWriter { return w.rw }
 // sent keeps code, the status the client gets, unless one was sent, or the connection was taken over: net/http
 // sends nothing more on it.
 func (w *answerWriter) sent(code int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	if w.status == 0 && !w.hijacked {
 		w.status = code
 	}
@@ -160,7 +229,48 @@ func (w *answerWriter) sent(code int) {
 // wroteOn keeps code, the status vlatte wrote itself on the connection it took over, such as a CONNECT's 200: the
 // client has it, whatever comes of the connection next.
 func (w *answerWriter) wroteOn(code int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	w.status = code
+}
+
+// state returns the status sent, 0 for none yet, whether the connection was taken over, and whether the handler
+// panicked past the middlewares, which drops the connection.
+func (w *answerWriter) state() (status int, hijacked, unwinding bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return w.status, w.hijacked, w.unwinding
+}
+
+// then runs f, an outcome of the request w answers, once the client has the answer: when the handler withAnswer
+// serves returns. It runs f at once when w is a handler's own, its handler returned, or its connection was taken
+// over, as a tunnel's, which stays open: what vlatte wrote on it is the answer.
+func (w *answerWriter) then(f func()) {
+	w.mu.Lock()
+
+	if !w.outer || w.done || w.hijacked {
+		w.mu.Unlock()
+		f()
+
+		return
+	}
+
+	w.held = append(w.held, f)
+	w.mu.Unlock()
+}
+
+// finish runs the outcomes then held, once the handler withAnswer serves is done: unwinding when it panicked.
+func (w *answerWriter) finish(unwinding bool) {
+	w.mu.Lock()
+	held := w.held
+	w.held, w.done, w.unwinding = nil, true, unwinding
+	w.mu.Unlock()
+
+	for _, f := range held {
+		f()
+	}
 }
 
 type mockHandler struct {
@@ -184,8 +294,11 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	reqValues, rawBody, parseErr := parseRequest(r, h.app)
 
-	reqValues.answer = &answerWriter{rw: w}
-	w = reqValues.answer
+	// The mock writes to w, through the middlewares' writers: only a writer of its own goes under them.
+	reqValues.answer = answerOf(r, w)
+	if !reqValues.answer.outer {
+		w = reqValues.answer
+	}
 
 	h.debugHeader(w, vlatte.RequestIDHeader, reqValues.ReqID)
 
@@ -201,15 +314,16 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.lifecycle.OnRequest(reqValues)
 
-	// A request that ends without an outcome, such as one whose client left, or that panicked, is journaled too. A
-	// panic goes on to the recovery middleware, which answers it, as it goes on through net/http's.
+	// A request that ends without an outcome, such as one whose client left, or that panicked, is journaled too, once
+	// the client has its answer. A panic goes on to the recovery middleware, which answers it, as it goes on through
+	// net/http's.
 	defer func() {
 		if reqValues.journal == nil {
 			return
 		}
 
 		p := recover()
-		reqValues.journal.end(reqValues, p)
+		reqValues.answer.then(func() { reqValues.journal.end(reqValues, p) })
 
 		if p != nil {
 			panic(p)

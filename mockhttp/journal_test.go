@@ -661,3 +661,246 @@ func TestJournal_TheAdminAPIQueriesWithTheRequestPartOfMockFiles(t *testing.T) {
 	require.Equal(t, m.URL("/orders?page=2"), entry["target"])
 	require.Equal(t, `{"id": 7}`, entry["body"])
 }
+
+// rewriting is the writer of a middleware that answers with its status in place of the one the handler under it
+// writes.
+type rewriting struct {
+	http.ResponseWriter
+
+	status int
+	wrote  bool
+}
+
+func (w *rewriting) WriteHeader(int) {
+	if !w.wrote {
+		w.wrote = true
+		w.ResponseWriter.WriteHeader(w.status)
+	}
+}
+
+func (w *rewriting) Write(p []byte) (int, error) {
+	w.WriteHeader(0)
+	return w.ResponseWriter.Write(p)
+}
+
+// unwrapping is a rewriting writer that hands out the writer under it, as http.ResponseController expects.
+type unwrapping struct {
+	*rewriting
+}
+
+func (w unwrapping) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// middleware is a middleware whose handler is serve.
+func middleware(serve func(w http.ResponseWriter, r *http.Request, next http.Handler)) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { serve(w, r, next) })
+	}
+}
+
+func TestJournal_KeepsTheStatusTheClientGot(t *testing.T) {
+	// A middleware or a decorator may answer first, or answer in place of the mock: the entry has the status the
+	// client got, not the one the mock wrote, which a test of the client's code would otherwise verify in vain.
+	// drops is a middleware that answers nothing of what the handler under it writes: the client gets net/http's 200.
+	drops := Setup().Use(middleware(func(_ http.ResponseWriter, r *http.Request, next http.Handler) {
+		next.ServeHTTP(httptest.NewRecorder(), r)
+	}))
+
+	tests := []struct {
+		name    string
+		setup   *ConfigBuilder
+		reply   ReplierFactory
+		path    string
+		status  int
+		outcome journal.Outcome
+		mockID  string
+	}{
+		{
+			name: "a middleware that answers first",
+			setup: Setup().Use(middleware(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+				w.WriteHeader(http.StatusAccepted)
+				next.ServeHTTP(w, r)
+			})),
+			reply:   Handler(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "body") }),
+			path:    "/answered",
+			status:  http.StatusAccepted,
+			outcome: journal.OutcomeMatched,
+			mockID:  "answered",
+		},
+		{
+			name: "a middleware that answers in place of the mock",
+			setup: Setup().Use(middleware(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+				next.ServeHTTP(httptest.NewRecorder(), r)
+				w.WriteHeader(http.StatusServiceUnavailable)
+			})),
+			reply:   OK(),
+			path:    "/answered",
+			status:  http.StatusServiceUnavailable,
+			outcome: journal.OutcomeMatched,
+			mockID:  "answered",
+		},
+		{
+			name: "a decorator that sends early hints, then its own answer",
+			setup: Setup().HandlerDecorator(middleware(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+				next.ServeHTTP(httptest.NewRecorder(), r)
+				w.WriteHeader(http.StatusEarlyHints)
+				w.WriteHeader(http.StatusConflict)
+			})),
+			reply:   OK(),
+			path:    "/answered",
+			status:  http.StatusConflict,
+			outcome: journal.OutcomeMatched,
+			mockID:  "answered",
+		},
+		{
+			name: "a middleware that drops the request's context",
+			setup: Setup().Use(middleware(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+				next.ServeHTTP(unwrapping{&rewriting{ResponseWriter: w, status: http.StatusCreated}}, r.WithContext(context.Background()))
+			})),
+			reply:   OK(),
+			path:    "/answered",
+			status:  http.StatusCreated,
+			outcome: journal.OutcomeMatched,
+			mockID:  "answered",
+		},
+		{
+			name: "a middleware whose writer doesn't unwrap",
+			setup: Setup().Use(middleware(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+				next.ServeHTTP(&rewriting{ResponseWriter: w, status: http.StatusCreated}, r)
+			})),
+			reply:   OK(),
+			path:    "/answered",
+			status:  http.StatusCreated,
+			outcome: journal.OutcomeMatched,
+			mockID:  "answered",
+		},
+		{
+			name: "a middleware that recovers the mock's panic",
+			setup: Setup().Use(middleware(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+				defer func() {
+					if recover() != nil {
+						w.WriteHeader(http.StatusServiceUnavailable)
+					}
+				}()
+
+				next.ServeHTTP(w, r)
+			})),
+			reply:   Func(func(http.ResponseWriter, *RequestValues) (*Response, error) { panic("boom") }),
+			path:    "/answered",
+			status:  http.StatusServiceUnavailable,
+			outcome: journal.OutcomeFailed,
+			mockID:  "answered",
+		},
+		{
+			name: "a middleware that swallows the mock's panic",
+			setup: Setup().Use(middleware(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+				defer func() { _ = recover() }()
+
+				next.ServeHTTP(w, r)
+			})),
+			reply:   Func(func(http.ResponseWriter, *RequestValues) (*Response, error) { panic("boom") }),
+			path:    "/answered",
+			status:  http.StatusOK,
+			outcome: journal.OutcomeFailed,
+			mockID:  "answered",
+		},
+		{
+			name:    "a middleware that drops the answer of a mock that failed",
+			setup:   drops,
+			reply:   OK().BodyFile("missing.txt"),
+			path:    "/answered",
+			status:  http.StatusOK,
+			outcome: journal.OutcomeFailed,
+			mockID:  "answered",
+		},
+		{
+			name:    "a middleware that drops the answer to a request no mock matched",
+			setup:   drops,
+			reply:   OK(),
+			path:    "/missed",
+			status:  http.StatusOK,
+			outcome: journal.OutcomeUnmatched,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := journaledServer(t, tt.setup)
+			m.MustMock(Getf("/answered").ID("answered").Reply(tt.reply))
+
+			res, _ := do(t, http.MethodGet, m.URL(tt.path), nil, nil)
+			require.Equal(t, tt.status, res.StatusCode)
+
+			e := only(t, m, journal.Query{})
+			require.Equal(t, tt.status, e.Status, "the status the client got")
+			require.Equal(t, tt.outcome, e.Outcome)
+			require.Equal(t, tt.mockID, e.MockID)
+		})
+	}
+}
+
+func TestJournal_AnAnswerATimeoutGaveFirstKeepsItsStatus(t *testing.T) {
+	// A decorator that times the mock out, as http.TimeoutHandler does, answers the client while the mock goes on:
+	// the entry the mock ends later has the status the client got.
+	release := make(chan struct{})
+
+	m := journaledServer(t, Setup().HandlerDecorator(func(next http.Handler) http.Handler {
+		return http.TimeoutHandler(next, 10*time.Millisecond, "timed out")
+	}))
+	m.MustMock(Getf("/slow").ID("slow").Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+		<-release
+		_, _ = io.WriteString(w, "late")
+	})))
+
+	res, _ := do(t, http.MethodGet, m.URL("/slow"), nil, nil)
+	require.Equal(t, http.StatusServiceUnavailable, res.StatusCode)
+	close(release)
+
+	require.Eventually(t, func() bool {
+		n, err := m.CountRequests(t.Context(), journal.Query{})
+		return err == nil && n == 1
+	}, 5*time.Second, 10*time.Millisecond)
+
+	e := only(t, m, journal.Query{})
+	require.Equal(t, http.StatusServiceUnavailable, e.Status, "the status the client got")
+}
+
+func TestJournal_AnAnswerADecoratorAbortsHasNoStatus(t *testing.T) {
+	// A decorator that aborts the answer, as a proxy does, drops the connection: the client got no status, whatever
+	// the mock wrote under it.
+	m := journaledServer(t, Setup().HandlerDecorator(middleware(func(_ http.ResponseWriter, r *http.Request, next http.Handler) {
+		next.ServeHTTP(httptest.NewRecorder(), r)
+		panic(http.ErrAbortHandler)
+	})))
+	m.MustMock(Getf("/aborted").ID("aborted").Reply(OK()))
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, m.URL("/aborted"), nil)
+	require.NoError(t, err)
+
+	_, err = _rawClient.Do(req)
+	require.ErrorIs(t, err, io.EOF)
+
+	e := only(t, m, journal.Query{})
+	require.Equal(t, journal.OutcomeMatched, e.Outcome)
+	require.Zero(t, e.Status, "no status reached the client")
+}
+
+func TestJournal_AnInterceptedRequestKeepsTheStatusTheClientGot(t *testing.T) {
+	// The requests within a tunnel the proxy intercepts go through the server's middlewares too, and their entries
+	// have the status the client got, as any request's.
+	target := httptest.NewTLSServer(http.NotFoundHandler())
+	t.Cleanup(target.Close)
+
+	m := journaledServer(t, Setup().Proxy(&ProxyConfig{Intercept: true}).Use(middleware(
+		func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+			next.ServeHTTP(unwrapping{&rewriting{ResponseWriter: w, status: http.StatusCreated}}, r)
+		})))
+	m.MustMock(Getf("/mocked").Reply(OK()))
+
+	res, err := interceptClient(t, m).Get(target.URL + "/mocked")
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+
+	e := only(t, m, journal.Query{Path: match.Equal("/mocked")})
+	require.Equal(t, http.StatusCreated, e.Status)
+}

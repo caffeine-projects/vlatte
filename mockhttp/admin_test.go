@@ -738,6 +738,37 @@ func TestAdmin_StreamsWarnings(t *testing.T) {
 	require.NotContains(t, warning, "status")
 }
 
+func TestAdmin_StreamsTheStatusAMiddlewareSent(t *testing.T) {
+	// A middleware may answer in place of the mock: the event has the status the client got.
+	m := adminServer(t, Setup().Use(middleware(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		next.ServeHTTP(&rewriting{ResponseWriter: w, status: http.StatusCreated}, r)
+	})))
+	m.MustMock(Getf("/made").ID("made").Reply(OK()))
+
+	byType := streamEvents(t, m, 1, func() {
+		do(t, http.MethodGet, m.URL("/made"), nil, nil)
+	})
+
+	require.Equal(t, float64(http.StatusCreated), byType["matched"]["status"])
+}
+
+func TestAdmin_StreamsTheStatusOfAnAnswerAMiddlewareDropped(t *testing.T) {
+	// A middleware that answers nothing of what the mock wrote leaves the client net/http's 200: the events of a
+	// failure and of a request no mock matched have it too.
+	m := adminServer(t, Setup().Use(middleware(func(_ http.ResponseWriter, r *http.Request, next http.Handler) {
+		next.ServeHTTP(httptest.NewRecorder(), r)
+	})))
+	m.MustMock(Getf("/fails").ID("fails").Reply(OK().BodyFile("missing.txt")))
+
+	byType := streamEvents(t, m, 2, func() {
+		do(t, http.MethodGet, m.URL("/fails"), nil, nil)
+		do(t, http.MethodGet, m.URL("/nope"), nil, nil)
+	})
+
+	require.Equal(t, float64(http.StatusOK), byType["error"]["status"])
+	require.Equal(t, float64(http.StatusOK), byType["unmatched"]["status"])
+}
+
 func TestAdmin_StreamsWhatTheProxyServes(t *testing.T) {
 	// A request no mock matches goes to its host when the server is a proxy: a client follows it with the host's status,
 	// and follows the error when the host can't be reached, as for the requests the mocks answer.

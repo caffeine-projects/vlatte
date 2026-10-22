@@ -355,7 +355,7 @@ func (cb *ConfigBuilder) MaxBodyParsingLimit(n int64) *ConfigBuilder {
 }
 
 // Use adds middlewares that wrap the mock handler, to intercept requests. They run in the order they are added, across
-// calls.
+// calls. The journal, the logs and the events tell the status a middleware sends, when it answers in place of a mock.
 func (cb *ConfigBuilder) Use(fn ...func(handler http.Handler) http.Handler) *ConfigBuilder {
 	cb.conf.Middlewares = append(cb.conf.Middlewares, fn...)
 	return cb
@@ -382,7 +382,8 @@ func (cb *ConfigBuilder) BackendFactory(factory BackendFactory) *ConfigBuilder {
 	return cb
 }
 
-// HandlerDecorator configures a custom HTTP handler using the default mock handler.
+// HandlerDecorator configures a custom HTTP handler using the default mock handler. The journal, the logs and the
+// events tell the status it sends, when it answers in place of a mock, such as on a timeout.
 func (cb *ConfigBuilder) HandlerDecorator(fn func(handler http.Handler) http.Handler) *ConfigBuilder {
 	cb.conf.HandlerDecorator = fn
 	return cb

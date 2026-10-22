@@ -51,8 +51,9 @@ type RequestValues struct {
 	// journal is the entry of the request in the server's journal, nil when it keeps none.
 	journal *journalCall
 
-	// answer is the writer of the response, which keeps the status the client gets. A request the server doesn't
-	// serve, such as one rebuilt from the journal, has none, and reaches no lifecycle.
+	// answer keeps the status the client gets, and holds the outcomes of the request until the client has its
+	// answer: see answerWriter. A request the server doesn't serve, such as one rebuilt from the journal, has none, and
+	// reaches no lifecycle.
 	answer *answerWriter
 }
 
@@ -65,28 +66,36 @@ func (r *RequestValues) ParsedBody() any                { return r.ParsedBodyDat
 
 // sent returns the status the server sent the client, 0 before it sends one.
 func (r *RequestValues) sent() int {
-	return r.answer.status
+	status, _, _ := r.answer.state()
+	return status
 }
 
-// panicked returns the status the client of a request whose serving panicked gets: the recovery middleware answers
-// once the handler is done, with the status of failures, unless the reply sent one first, or the connection was taken
-// over.
+// panicked returns the status the client of a request whose serving panicked gets. The writer outside the
+// middlewares has the answer of the one that recovered the panic, by the time the outcomes run. A handler's own writer
+// doesn't: the recovery middleware answers once the handler is done, with the status of failures, unless the reply
+// sent one first, or the connection was taken over.
 func (r *RequestValues) panicked() int {
-	if r.sent() != 0 || r.answer.hijacked {
-		return r.sent()
+	if r.answer.outer {
+		return r.answered()
+	}
+
+	if status, hijacked, _ := r.answer.state(); status != 0 || hijacked {
+		return status
 	}
 
 	return r.App.config.ErrorStatusCode
 }
 
-// answered returns the status the client got, once a mock or a proxy answered it: the one sent, or the one vlatte
-// wrote on a connection it took over, such as a CONNECT's or an upgrade's. A reply that wrote nothing, such as a
-// Handler, answers 200, as net/http does, unless it took the connection over.
+// answered returns the status the client got: the one sent, or the one vlatte wrote on a connection it took over,
+// such as a CONNECT's or an upgrade's. A handler that wrote nothing, such as a Handler reply, answers 200, as net/http
+// does, unless the connection was taken over, or dropped by a panic.
 func (r *RequestValues) answered() int {
+	status, hijacked, unwinding := r.answer.state()
+
 	switch {
-	case r.sent() != 0:
-		return r.sent()
-	case r.answer.hijacked:
+	case status != 0:
+		return status
+	case hijacked || unwinding:
 		return 0
 	}
 

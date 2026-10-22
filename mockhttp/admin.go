@@ -76,7 +76,7 @@ func (a adminEvents) OnProxied(r *RequestValues, res *Response) {
 }
 
 func (a adminEvents) OnNoMatch(r *RequestValues) {
-	a.publish(handler.EventUnmatched, r, r.sent(), nil)
+	a.publish(handler.EventUnmatched, r, r.answered(), nil)
 }
 
 func (a adminEvents) OnWarning(r *RequestValues, err error) {
@@ -84,7 +84,7 @@ func (a adminEvents) OnWarning(r *RequestValues, err error) {
 }
 
 func (a adminEvents) OnError(r *RequestValues, err error) {
-	a.publish(handler.EventError, r, r.sent(), err)
+	a.publish(handler.EventError, r, r.answered(), err)
 }
 
 // publish publishes the event of r, with the status the client got, 0 for none.

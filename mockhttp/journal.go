@@ -88,7 +88,7 @@ func (j journalEvents) OnProxied(r *RequestValues, res *Response) {
 }
 
 func (j journalEvents) OnNoMatch(r *RequestValues) {
-	r.journal.record(r, journal.OutcomeUnmatched, r.sent(), nil)
+	r.journal.record(r, journal.OutcomeUnmatched, r.answered(), nil)
 }
 
 // OnWarning keeps the warning, which tells why a request that reaches no outcome ended.
@@ -98,7 +98,7 @@ func (j journalEvents) OnWarning(r *RequestValues, err error) {
 
 // OnError journals the status the client got: a reply may have sent one before it failed.
 func (j journalEvents) OnError(r *RequestValues, err error) {
-	r.journal.record(r, journal.OutcomeFailed, r.sent(), err)
+	r.journal.record(r, journal.OutcomeFailed, r.answered(), err)
 }
 
 // journalCall is the entry of a request in the server's journal, which it appends once the request reaches an

@@ -205,7 +205,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	events, lifecycle := withAdminEvents(conf, lifecycle)
-	lifecycle = withJournal(app, conf, lifecycle)
+	lifecycle = heldLifecycle{withJournal(app, conf, lifecycle)}
 
 	globalEvents, err := prepareGlobalEvents(conf)
 	if err != nil {
@@ -219,8 +219,9 @@ func New(config ...Option) (*Server, error) {
 		handler = conf.HandlerDecorator(handler)
 	}
 
-	// Outermost: the decorator and the middlewares see the fragment in r.URL too.
-	handler = withFragment(handler)
+	// The decorator and the middlewares see the fragment in r.URL too. Outermost, the answer's writer sees the status
+	// the client gets, whatever they send.
+	handler = withAnswer(withFragment(handler))
 	app.handler = handler
 
 	factory := conf.BackendFactory
