@@ -11,7 +11,7 @@ metadata:
 
 This index was written for vlatte. `references/` is a verbatim copy of uber-go/guide `src/`.
 
-- Precedence: `vlatte-conventions` > `use-modern-go` > this guide.
+- Precedence: `CONVENTIONS.md` > `use-modern-go` > this guide.
 - Read a rule file only when the change touches that rule.
 - `[lint]`: `make lint` checks the mechanical part of the rule. Fix what it flags.
 
@@ -19,7 +19,7 @@ Superseded by modern Go:
 - references/atomic.md: use `sync/atomic` typed values (`atomic.Bool`, `atomic.Int64`, …), not `go.uber.org/atomic`.
 - references/test-table.md, "Parallel Tests": since Go 1.22 each iteration has its own loop variable. No copy needed.
 
-Repo overrides (see `vlatte-conventions`): `import-group.md` (three groups here) and `lint.md` (errcheck is off).
+Repo overrides (see `CONVENTIONS.md`): `import-group.md` (three groups here) and `lint.md` (errcheck is off).
 
 ## Guidelines
 

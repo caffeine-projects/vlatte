@@ -4,9 +4,16 @@ Skills that help AI coding agents contribute to vlatte. Each skill is a folder w
 
 | Skill | Purpose | Origin |
 |---|---|---|
-| `skills/vlatte-conventions/` | This project's code shape and error conventions | First-party |
+| `skills/plan-change/` | Plan a change against `AGENTS.md` and `CONVENTIONS.md` before the first edit | First-party |
+| `skills/review-change/` | Review a diff against `AGENTS.md` and `CONVENTIONS.md` before handing it over | First-party |
 | `skills/use-modern-go/` | Modern Go idioms for the Go version in `go.mod` | Vendored |
 | `skills/uber-go-style/` | Uber Go Style Guide, one file per rule | Index first-party, rules vendored |
+
+This project's own rules are not a skill: they live in [`CONVENTIONS.md`](../CONVENTIONS.md), which every agent reads before an edit. The Skills table in [`AGENTS.md`](../AGENTS.md) says which skill to load for which work.
+
+## First-party skills
+
+`plan-change`, `review-change` and the `uber-go-style` index are written here. They are agent docs: "Agent docs" in [`AGENTS.md`](../AGENTS.md) governs every change to them.
 
 ## Discovery
 
@@ -18,6 +25,8 @@ Skills that help AI coding agents contribute to vlatte. Each skill is a folder w
 ## Adding a skill
 
 Create `.agents/skills/<name>/SKILL.md` with `name` (equal to the folder name) and `description` frontmatter. Keep `SKILL.md` short and put details in `references/` files, which agents read only when needed. Never create skills under `.claude/skills/`.
+
+Then add a row to the Skills table in [`AGENTS.md`](../AGENTS.md) naming the work that loads it. `go test -run TestAgentDocs .` fails when a table row names no skill, a `name` differs from its folder, or `.claude/skills` stops linking here.
 
 ## Third-party skills
 
