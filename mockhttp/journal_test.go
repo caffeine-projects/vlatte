@@ -419,6 +419,53 @@ func TestJournal_SaysWhenItKeepsLessThanTheBody(t *testing.T) {
 	require.False(t, whole.BodyTruncated)
 }
 
+func TestJournal_APatternCantReadABodyTheJournalCut(t *testing.T) {
+	// A pattern that reads the body of a request whose body the journal didn't keep whole can't tell whether the
+	// request matched: verifying fails, rather than count no request, so AssertNotRequested can't pass for a request
+	// the server got. A pattern of the rest of the request still counts it, and one the rest misses misses it.
+	cut := journaledServer(t, Setup().ConfigSources(ConfigArgs([]string{"--journal-max-body-size", "64"})))
+	unread := journaledServer(t, Setup().NoBodyParsing())
+
+	var form bytes.Buffer
+	w := multipart.NewWriter(&form)
+	part, err := w.CreateFormFile("upload", "a.txt")
+	require.NoError(t, err)
+	_, err = part.Write(bytes.Repeat([]byte("a"), 200))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	_, _ = do(t, http.MethodPost, cut.URL("/upload"), http.Header{"Content-Type": {w.FormDataContentType()}}, form.Bytes())
+	_, _ = do(t, http.MethodPost, unread.URL("/text"), nil, []byte("a body"))
+
+	tests := []struct {
+		name    string
+		server  *Server
+		pattern *Builder
+	}{
+		{name: "a form file of a body cut", server: cut, pattern: Request().FormFile("upload", FileWith())},
+		{name: "a body the server didn't read", server: unread, pattern: Request().Body(match.Contain("body"))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tt.server.CountRequests(t.Context(), journal.Query{}, tt.pattern)
+			require.ErrorIs(t, err, vlatte.ErrMatching)
+			require.ErrorContains(t, err, "the journal kept part of its body")
+
+			ft := testmock.NewFakeT()
+			require.False(t, tt.server.AssertNotRequested(ft, journal.Query{}, tt.pattern), "it can't tell")
+		})
+	}
+
+	n, err := cut.CountRequests(t.Context(), journal.Query{}, Request().URLPath(match.Equal("/upload")))
+	require.NoError(t, err)
+	require.Equal(t, 1, n, "a pattern of the rest of the request still reads it")
+
+	n, err = cut.CountRequests(t.Context(), journal.Query{}, Request().URLPath(match.Equal("/other")).FormFile("upload", FileWith()))
+	require.NoError(t, err)
+	require.Zero(t, n, "the rest of the request differs: no body tells otherwise")
+}
+
 func TestJournal_TheAdminAPIQueriesWithTheRequestPartOfMockFiles(t *testing.T) {
 	// A client of any language verifies through the admin API with what its mock files write: the request part of
 	// a mock, as it matches. The answer's VLatte-Request-Id names the request to get back.

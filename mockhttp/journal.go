@@ -260,9 +260,40 @@ func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (journal.Fil
 
 	evals := vlatte.Evaluators[*Mock, *selectorInput](slices.Clone(builder.spec.expectations))
 
+	// A pattern that reads the body can't tell whether a body the journal cut matched: the rest of the pattern runs
+	// first, as a miss there is a miss.
+	var rest vlatte.Evaluators[*Mock, *selectorInput]
+
+	for _, e := range evals {
+		if !readsBody(matchingScope(e.Target)) {
+			rest = append(rest, e)
+		}
+	}
+
 	return func(ctx context.Context, e *journal.Entry) (bool, error) {
-		return app.matchEntry(ctx, e, evals)
+		if !e.BodyTruncated || len(rest) == len(evals) {
+			return app.matchEntry(ctx, e, evals)
+		}
+
+		ok, err := app.matchEntry(ctx, e, rest)
+		if err != nil || !ok {
+			return false, err
+		}
+
+		return false, fmt.Errorf("http: %w: entry %d: the journal kept part of its body, which the pattern reads",
+			vlatte.ErrMatching, e.Seq)
 	}, nil
+}
+
+// readsBody reports whether a matcher of scope reads the body of a request: one of the body or of a form does, and so
+// may a predicate of the whole request, RequestMatches.
+func readsBody(scope matchingScope) bool {
+	switch scope {
+	case matchingScopeBody, matchingScopeFormField, matchingScopeFormFile, matchingScopeNone:
+		return true
+	}
+
+	return false
 }
 
 // adminRequestPattern returns the filter of the request part of a mock file, v, the request key of a query of the
