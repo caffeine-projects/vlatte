@@ -460,6 +460,20 @@ func (b *Builder) WireStep(steps ...vlatte.Step) *Builder {
 	return b
 }
 
+// UpstreamStep adds steps that what the mock sends on passes through, in order, as its target reads it: the body of
+// the request a proxy reply sends, such as to delay it, send it in parts or cut it. See [vlatte.Step]. Steps can
+// change its length, so the target gets it chunked. A request without a body has nothing for them.
+//
+// The server reads the body of a request before it matches a mock, so the client's upload has ended by then: these
+// steps apply to what the mock sends on, not to how it reads the client. A stage that aborts the flow, with
+// [vlatte.ErrAbort] or [vlatte.ErrReset], fails the call to the target and cuts the client's answer, once the mock
+// counted the call.
+func (b *Builder) UpstreamStep(steps ...vlatte.Step) *Builder {
+	b.spec.upSteps = append(b.spec.upSteps, steps...)
+
+	return b
+}
+
 // Delay waits for the given duration before serving the mocked response.
 func (b *Builder) Delay(duration time.Duration) *Builder {
 	b.spec.delay = vlatte.Latency(duration)

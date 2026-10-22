@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match"
 )
@@ -22,6 +23,7 @@ import (
 var (
 	_ ReplierFactory = (*ProxyReply)(nil)
 	_ Replier        = (*proxyReplier)(nil)
+	_ io.ReadCloser  = (*stepReader)(nil)
 	_ io.Closer      = (*proxyReplier)(nil)
 )
 
@@ -327,6 +329,19 @@ func (p *proxyReplier) Reply(ctx context.Context, input ReplyInput) (*Response, 
 		out.Header.Del(HeaderUpgrade)
 	}
 
+	// The body goes through the upstream steps of the mock, which can change its length: it goes chunked, and a retry
+	// of the transport, which would read it again past the steps, can't happen. A stage that aborts ends the call.
+	var up *stepReader
+	if len(input.upstream) > 0 && out.Body != nil && out.Body != http.NoBody {
+		up = newStepReader(out.Context(), out.Body, input.upstream)
+
+		out = out.WithContext(up.ctx)
+		out.Body = up
+		out.ContentLength = -1
+		out.GetBody = nil
+		out.Header.Del(HeaderContentLength)
+	}
+
 	out.URL = target
 
 	out.Host = p.target.Host
@@ -355,6 +370,17 @@ func (p *proxyReplier) Reply(ctx context.Context, input ReplyInput) (*Response, 
 	}
 
 	res, err := p.send(out, displayURL(p.target))
+
+	// A stage that aborted what the mock sends on cut the call, even one the target answered first: the cut is the
+	// mock's answer.
+	if cause := up.aborted(); cause != nil {
+		if err == nil && res.BodyCloser != nil {
+			_ = res.BodyCloser.Close()
+		}
+
+		return nil, cause
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("reply_proxy: %w", err)
 	}
@@ -456,4 +482,73 @@ func escapedIndex(escaped string, n int) int {
 	}
 
 	return i
+}
+
+// errBodyEnded ends the flow of a stepReader whose body broke off, or whose reader stopped, such as a target that
+// answered early: the stages stop, but no stage asked for a cut.
+var errBodyEnded = errors.New("reply_proxy: the body ended before its steps did")
+
+// stepReader reads a body through a flow of steps: a goroutine copies the body through the flow, whose sink is a pipe
+// the reader reads, so a stage that writes later, or in parts, is read as it writes. ctx, for the call that reads it,
+// ends with the cause of an abort a stage asks for.
+type stepReader struct {
+	ctx  context.Context
+	flow *vlatte.Flow
+	pipe *io.PipeReader
+	body io.ReadCloser
+	done chan struct{}
+}
+
+// newStepReader starts copying body through a flow of steps, within ctx.
+func newStepReader(ctx context.Context, body io.ReadCloser, steps []vlatte.Step) *stepReader {
+	ctx, cancel := context.WithCancelCause(ctx)
+	pr, pw := io.Pipe()
+
+	r := &stepReader{ctx: ctx, pipe: pr, body: body, done: make(chan struct{})}
+	r.flow = vlatte.NewFlow(ctx, &vlatte.Sink{W: pw}, steps)
+
+	context.AfterFunc(r.flow.Context(), func() {
+		if cause := r.aborted(); cause != nil {
+			cancel(cause)
+		}
+	})
+
+	go func() {
+		defer close(r.done)
+
+		_, err := io.Copy(r.flow, body)
+		if err != nil {
+			r.flow.Abort(fmt.Errorf("%w: %w", errBodyEnded, err))
+		}
+
+		pw.CloseWithError(cmp.Or(err, r.flow.Close()))
+	}()
+
+	return r
+}
+
+func (r *stepReader) Read(p []byte) (int, error) {
+	return r.pipe.Read(p)
+}
+
+// Close stops the copy, and waits for it to end.
+func (r *stepReader) Close() error {
+	err := r.pipe.Close()
+	_ = r.body.Close()
+	<-r.done
+
+	return err
+}
+
+// aborted returns the cause of the flow when a stage aborted it, or nil. A nil r, for a body without steps, has none.
+func (r *stepReader) aborted() error {
+	if r == nil {
+		return nil
+	}
+
+	if cause := context.Cause(r.flow.Context()); errors.Is(cause, vlatte.ErrAbort) && !errors.Is(cause, errBodyEnded) {
+		return cause
+	}
+
+	return nil
 }

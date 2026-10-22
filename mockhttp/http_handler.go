@@ -362,10 +362,18 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// cut is the cause of a flow a stage aborted. The cut is the mock's answer: the call counts, then the connection
-	// is cut.
-	var cut error
+	// is cut, after what was sent, if the answer started.
+	var (
+		cut     error
+		started bool
+	)
 
-	res, err := mock.reply.Reply(ctx, ReplyInput{RequestValues: reqValues, Writer: w, noSwitch: noSwitch})
+	res, err := mock.reply.Reply(ctx, ReplyInput{
+		RequestValues: reqValues,
+		Writer:        w,
+		noSwitch:      noSwitch,
+		upstream:      mock.UpstreamSteps(),
+	})
 	if err != nil {
 		// A stage that aborted the flow can fail the reply, such as a proxy's waiting on the flow: the cut is the
 		// mock's answer.
@@ -379,7 +387,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		_ = top.end()
+		if top != nil {
+			_ = top.end()
+			started = top.headerSent
+		}
 	}
 
 	// Render closes the body it sends. A response that isn't rendered, after a failing mapper or a panic, still
@@ -442,9 +453,12 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// The mock counts as served, whatever happens to the answer once its status and headers are sent.
 		cut = h.render(ctx, w, reqValues, res, capture)
+		started = true
 	default:
 		// A reply that writes its own answer, such as Echo, wrote it all: the steps pass on what they hold.
 		if top != nil {
+			started = top.headerSent
+
 			endErr := top.end()
 			if cut = cmp.Or(top.aborted(), wire.aborted()); cut == nil && endErr != nil {
 				h.renderFailed(reqValues, false, fmt.Errorf("http: ending the steps: %w", endErr))
@@ -514,16 +528,18 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case wire != nil:
 		wire.finish(cut)
 	case cut != nil:
-		h.cut(rw, cut)
+		h.cut(rw, cut, started)
 	}
 }
 
 // cut ends the answer as a stage of the mock asked, once the call is counted and logged: with a reset over a
 // connection that can take one, else by aborting the handler, which closes an HTTP/1 connection and resets an HTTP/2
-// stream. w is the writer under the steps.
-func (h *mockHandler) cut(w http.ResponseWriter, cause error) {
-	// The client gets what the mock sent before the cut: neither an abort nor a hijack sends what the server buffers.
-	_ = flushTo(http.NewResponseController(w))
+// stream. w is the writer under the steps. An answer that started goes out first, as far as it got: neither an abort
+// nor a hijack sends what the server buffers. One that didn't sends nothing, not even a status.
+func (h *mockHandler) cut(w http.ResponseWriter, cause error, started bool) {
+	if started {
+		_ = flushTo(http.NewResponseController(w))
+	}
 
 	if errors.Is(cause, vlatte.ErrReset) {
 		if conn, err := hijack(w); err == nil {

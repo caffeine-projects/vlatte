@@ -95,6 +95,7 @@ type mockSpec struct {
 	callbacks    []vlatte.Callback
 	steps        []vlatte.Step
 	wireSteps    []vlatte.Step
+	upSteps      []vlatte.Step
 	fallback     bool // a ProxyAll mock's: its description holds its reply under proxy_all
 }
 
@@ -107,6 +108,7 @@ func (s mockSpec) clone() mockSpec {
 	s.callbacks = slices.Clone(s.callbacks)
 	s.steps = slices.Clone(s.steps)
 	s.wireSteps = slices.Clone(s.wireSteps)
+	s.upSteps = slices.Clone(s.upSteps)
 
 	return s
 }
@@ -214,6 +216,11 @@ func (m *Mock) Steps() []vlatte.Step {
 // WireSteps returns the steps that the bytes of each answer of the mock pass through: see Builder.WireStep.
 func (m *Mock) WireSteps() []vlatte.Step {
 	return m.spec.wireSteps
+}
+
+// UpstreamSteps returns the steps that what the mock sends on passes through: see Builder.UpstreamStep.
+func (m *Mock) UpstreamSteps() []vlatte.Step {
+	return m.spec.upSteps
 }
 
 // String names the mock as "Mock [id] name", as assertion messages do.

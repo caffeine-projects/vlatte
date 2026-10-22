@@ -432,6 +432,8 @@ A stage gets each write of the body, each flush, and the end of the answer, an e
 
 `WireStep` passes every byte of each answer through its steps, after those of `Step`: the status line, the headers, the framing of the body and the body, so a step can send what isn't HTTP, such as nothing at all, half the headers, or garbage after a valid head. The mock takes its connection over and answers in HTTP/1.x itself, with `Connection: close`: the body is chunked over HTTP/1.1, and ends with the connection over HTTP/1.0. A request over HTTP/2 can't give its connection over, so it gets vlatte's error answer: turn HTTP/2 off, or use an HTTP/1.1 client, to test a mock with wire steps. An abort closes the connection at once, and `vlatte.ErrReset` resets it. A recording leaves out the answers of mocks with wire steps.
 
+`UpstreamStep` passes what a mock sends on through its steps: the body of the request a proxy reply sends to its target. Steps can change its length, so the target gets it chunked. The server reads the body of a request before it matches a mock, so these steps don't slow the client's upload: they apply to what the mock sends on. A stage that aborts ends the call to the target, and the client's answer is cut as for any abort.
+
 ## Recording and playback
 
 A server records what it proxies as mock files, then answers the same requests the same way, without the service.

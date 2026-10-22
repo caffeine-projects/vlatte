@@ -36,6 +36,9 @@ type ReplyInput struct {
 	// noSwitch keeps a proxy reply from asking its target to switch protocols, for a mock whose steps or response
 	// mappers couldn't apply to the connection: the target answers as to any request.
 	noSwitch bool
+
+	// upstream are the steps of the mock that what a proxy reply sends on passes through: the request's body.
+	upstream []vlatte.Step
 }
 
 // newReplier asks f for the Replier of a mock of app. A factory that makes none fails the build here: the nil Replier
