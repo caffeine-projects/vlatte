@@ -58,10 +58,10 @@ func (v *Verifier[TM, A]) CountRequests(ctx context.Context, q Query, patterns .
 // AssertRequested asserts that the server served exactly expected requests that q selects, and that every pattern
 // matches, whatever their outcome: a request no mock matched counts too. See Requests. On a failure, it lists the
 // newest of those requests, or, when there are none, the newest the server served.
-func (v *Verifier[TM, A]) AssertRequested(t vlatte.TestingT, expected int, q Query, patterns ...vlatte.Builder[TM, A]) bool {
+func (v *Verifier[TM, A]) AssertRequested(ctx context.Context, t vlatte.TestingT, expected int, q Query, patterns ...vlatte.Builder[TM, A]) bool {
 	t.Helper()
 
-	return v.assertRequests(t, q, patterns, func(count int) bool { return count == expected },
+	return v.assertRequests(ctx, t, q, patterns, func(count int) bool { return count == expected },
 		func(count int) string {
 			return fmt.Sprintf("Expected %d request(s) matching the query.\nGot %d.", expected, count)
 		})
@@ -69,20 +69,19 @@ func (v *Verifier[TM, A]) AssertRequested(t vlatte.TestingT, expected int, q Que
 
 // AssertNotRequested asserts that the server served no request that q selects, and that every pattern matches. See
 // Requests. On a failure, it lists the newest of those requests.
-func (v *Verifier[TM, A]) AssertNotRequested(t vlatte.TestingT, q Query, patterns ...vlatte.Builder[TM, A]) bool {
+func (v *Verifier[TM, A]) AssertNotRequested(ctx context.Context, t vlatte.TestingT, q Query, patterns ...vlatte.Builder[TM, A]) bool {
 	t.Helper()
 
-	return v.assertRequests(t, q, patterns, func(count int) bool { return count == 0 },
+	return v.assertRequests(ctx, t, q, patterns, func(count int) bool { return count == 0 },
 		func(count int) string { return fmt.Sprintf("%d request(s) matched the query when none should.", count) })
 }
 
 // assertRequests asserts that the count of the requests q selects, with patterns, passes, or fails t with what
 // failed says of it, and a list of requests. An assertion runs with a context of its own: one in a cleanup of t
 // runs once t's context is done.
-func (v *Verifier[TM, A]) assertRequests(t vlatte.TestingT, q Query, patterns []vlatte.Builder[TM, A], passes func(int) bool, failed func(int) string) bool {
+func (v *Verifier[TM, A]) assertRequests(ctx context.Context, t vlatte.TestingT, q Query, patterns []vlatte.Builder[TM, A], passes func(int) bool, failed func(int) string) bool {
 	t.Helper()
 
-	ctx := context.Background()
 	q.Limit, q.Before = _recentRequests, 0
 
 	page, err := v.find(ctx, q, patterns)

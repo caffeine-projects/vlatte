@@ -40,7 +40,7 @@ fuzz: ## run every fuzz target for FUZZTIME each
 
 .PHONY: lint
 lint: ## run linters
-	@GOTOOLCHAIN=go$$(go list -m -f '{{.GoVersion}}') go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run
+	@golangci-lint run
 
 .PHONY: bench
 bench: ## run benchmarks
@@ -66,7 +66,7 @@ tidy: ## tidy go.mod and go.sum
 
 .PHONY: fmt
 fmt: ## format code with gci and gofumpt
-	@GOTOOLCHAIN=go$$(go list -m -f '{{.GoVersion}}') go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) fmt
+	@golangci-lint fmt
 	@go tool gofumpt -w .
 
 .PHONY: fix

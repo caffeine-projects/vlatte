@@ -100,8 +100,8 @@ func TestJournal_KeepsEachCallOnceWhateverItsOutcome(t *testing.T) {
 	}
 
 	ft := testmock.NewFakeT()
-	require.True(t, m.AssertRequested(ft, 5, journal.Query{Kind: Kind, Path: match.HasSuffix("/Greetings")}))
-	require.True(t, m.AssertRequested(ft, 5, journal.Query{Header: map[string]vlatte.Matcher{"X-Team": match.Equal("core")}}))
+	require.True(t, m.AssertRequested(t.Context(), ft, 5, journal.Query{Kind: Kind, Path: match.HasSuffix("/Greetings")}))
+	require.True(t, m.AssertRequested(t.Context(), ft, 5, journal.Query{Header: map[string]vlatte.Matcher{"X-Team": match.Equal("core")}}))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
 }
 

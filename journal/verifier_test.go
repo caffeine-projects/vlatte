@@ -101,12 +101,12 @@ func TestVerifier_AssertRequested(t *testing.T) {
 	app := journal.NewVerifier[*fakeMock, struct{}](j, nil)
 
 	ft := testmock.NewFakeT()
-	require.True(t, app.AssertRequested(ft, 2, journal.Query{Method: match.Equal("GET")}))
-	require.True(t, app.AssertRequested(ft, 1, journal.Query{Outcome: journal.OutcomeUnmatched}))
+	require.True(t, app.AssertRequested(t.Context(), ft, 2, journal.Query{Method: match.Equal("GET")}))
+	require.True(t, app.AssertRequested(t.Context(), ft, 1, journal.Query{Outcome: journal.OutcomeUnmatched}))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
 
 	ft = testmock.NewFakeT()
-	require.False(t, app.AssertRequested(ft, 1, journal.Query{Path: match.HasPrefix("/")}))
+	require.False(t, app.AssertRequested(t.Context(), ft, 1, journal.Query{Path: match.HasPrefix("/")}))
 
 	report := errorText(t, ft)
 	require.Contains(t, report, "Expected 1 request(s) matching the query.\nGot 2.")
@@ -116,7 +116,7 @@ func TestVerifier_AssertRequested(t *testing.T) {
 
 	// None matched: the requests the server served instead tell why.
 	ft = testmock.NewFakeT()
-	require.False(t, app.AssertRequested(ft, 1, journal.Query{Path: match.Equal("/c")}))
+	require.False(t, app.AssertRequested(t.Context(), ft, 1, journal.Query{Path: match.Equal("/c")}))
 
 	report = errorText(t, ft)
 	require.Contains(t, report, "Got 0.")
@@ -138,7 +138,7 @@ func TestVerifier_AFailureTellsWhatCameOfEachRequest(t *testing.T) {
 	app := journal.NewVerifier[*fakeMock, struct{}](j, nil)
 
 	ft := testmock.NewFakeT()
-	require.False(t, app.AssertNotRequested(ft, journal.Query{}))
+	require.False(t, app.AssertNotRequested(t.Context(), ft, journal.Query{}))
 
 	report := errorText(t, ft)
 	require.Contains(t, report, "unmatched GET http://127.0.0.1/c 418, closest [m2] missed by times\n")
@@ -150,7 +150,7 @@ func TestVerifier_AFailureSaysWhenTheServerServedNothing(t *testing.T) {
 	app := journal.NewVerifier[*fakeMock, struct{}](journaled(t), nil)
 
 	ft := testmock.NewFakeT()
-	require.False(t, app.AssertRequested(ft, 1, journal.Query{}))
+	require.False(t, app.AssertRequested(t.Context(), ft, 1, journal.Query{}))
 	require.Contains(t, errorText(t, ft), "Got 0.\n  Requests the server served: none\n")
 }
 
@@ -165,7 +165,7 @@ func TestVerifier_AFailureSaysWhenItCantListTheRequests(t *testing.T) {
 	app := journal.NewVerifier[*fakeMock, struct{}](j, nil)
 
 	ft := testmock.NewFakeT()
-	require.False(t, app.AssertRequested(ft, 1, journal.Query{Path: match.Equal("/b")}))
+	require.False(t, app.AssertRequested(t.Context(), ft, 1, journal.Query{Path: match.Equal("/b")}))
 
 	report := errorText(t, ft)
 	require.Contains(t, report, "Got 0.\nCould not list the requests.\n")
@@ -179,7 +179,7 @@ func TestVerifier_AssertsInACleanup(t *testing.T) {
 	t.Run("cleanup", func(t *testing.T) {
 		t.Cleanup(func() {
 			require.Error(t, t.Context().Err())
-			require.True(t, app.AssertRequested(t, 1, journal.Query{Path: match.Equal("/a")}))
+			require.True(t, app.AssertRequested(t.Context(), t, 1, journal.Query{Path: match.Equal("/a")}))
 		})
 	})
 }
@@ -190,11 +190,11 @@ func TestVerifier_AssertNotRequested(t *testing.T) {
 	app := journal.NewVerifier[*fakeMock, struct{}](j, nil)
 
 	ft := testmock.NewFakeT()
-	require.True(t, app.AssertNotRequested(ft, journal.Query{Method: match.Equal("PUT")}))
+	require.True(t, app.AssertNotRequested(t.Context(), ft, journal.Query{Method: match.Equal("PUT")}))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
 
 	ft = testmock.NewFakeT()
-	require.False(t, app.AssertNotRequested(ft, journal.Query{Method: match.Equal("POST")}))
+	require.False(t, app.AssertNotRequested(t.Context(), ft, journal.Query{Method: match.Equal("POST")}))
 
 	report := errorText(t, ft)
 	require.Contains(t, report, "1 request(s) matched the query when none should.")
@@ -218,8 +218,8 @@ func TestVerifier_VerifiesWithTheRequestPatternsOfItsProtocol(t *testing.T) {
 	require.Zero(t, count, "every pattern must match")
 
 	ft := testmock.NewFakeT()
-	require.True(t, app.AssertRequested(ft, 1, journal.Query{}, pathPattern("/c")))
-	require.True(t, app.AssertNotRequested(ft, journal.Query{Method: match.Equal("GET")}, pathPattern("/c")))
+	require.True(t, app.AssertRequested(t.Context(), ft, 1, journal.Query{}, pathPattern("/c")))
+	require.True(t, app.AssertNotRequested(t.Context(), ft, journal.Query{Method: match.Equal("GET")}, pathPattern("/c")))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
 }
 
@@ -254,11 +254,11 @@ func TestVerifier_VerificationFailsLoudly(t *testing.T) {
 			require.ErrorIs(t, err, tt.wants)
 
 			ft := testmock.NewFakeT()
-			require.False(t, tt.app.AssertRequested(ft, 0, journal.Query{}, tt.give...))
+			require.False(t, tt.app.AssertRequested(t.Context(), ft, 0, journal.Query{}, tt.give...))
 			require.Contains(t, errorText(t, ft), tt.wants.Error())
 
 			ft = testmock.NewFakeT()
-			require.False(t, tt.app.AssertNotRequested(ft, journal.Query{}, tt.give...))
+			require.False(t, tt.app.AssertNotRequested(t.Context(), ft, journal.Query{}, tt.give...))
 			require.Contains(t, errorText(t, ft), tt.wants.Error())
 		})
 	}

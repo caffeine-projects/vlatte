@@ -239,15 +239,15 @@ func TestJournal_VerifiesWithRequestPatterns(t *testing.T) {
 
 	ft := testmock.NewFakeT()
 
-	require.True(t, m.AssertRequested(ft, 1, journal.Query{}, Request().Method("POST").Query("page", match.Equal("2"))))
-	require.True(t, m.AssertRequested(ft, 1, journal.Query{}, Request().Body(match.JSONPath("$.id", match.Equal(7)))))
-	require.True(t, m.AssertRequested(ft, 1, journal.Query{}, Request().FormField("b", match.Equal("2"))))
-	require.True(t, m.AssertRequested(ft, 1, journal.Query{}, Request().FormFile("doc", FileWith().Filename(match.Equal("a.txt")).Body(match.Equal("hello")))))
-	require.True(t, m.AssertRequested(ft, 1, journal.Query{}, Request().RequestMatches(func(r *http.Request) (bool, error) {
+	require.True(t, m.AssertRequested(t.Context(), ft, 1, journal.Query{}, Request().Method("POST").Query("page", match.Equal("2"))))
+	require.True(t, m.AssertRequested(t.Context(), ft, 1, journal.Query{}, Request().Body(match.JSONPath("$.id", match.Equal(7)))))
+	require.True(t, m.AssertRequested(t.Context(), ft, 1, journal.Query{}, Request().FormField("b", match.Equal("2"))))
+	require.True(t, m.AssertRequested(t.Context(), ft, 1, journal.Query{}, Request().FormFile("doc", FileWith().Filename(match.Equal("a.txt")).Body(match.Equal("hello")))))
+	require.True(t, m.AssertRequested(t.Context(), ft, 1, journal.Query{}, Request().RequestMatches(func(r *http.Request) (bool, error) {
 		return r.URL.Path == "/form", nil
 	})))
-	require.True(t, m.AssertNotRequested(ft, journal.Query{}, Request().Query("page", match.Equal("3"))))
-	require.True(t, m.AssertRequested(ft, 3, journal.Query{Method: match.Equal("POST")}, Request().URLPath(match.HasPrefix("/"))))
+	require.True(t, m.AssertNotRequested(t.Context(), ft, journal.Query{}, Request().Query("page", match.Equal("3"))))
+	require.True(t, m.AssertRequested(t.Context(), ft, 3, journal.Query{Method: match.Equal("POST")}, Request().URLPath(match.HasPrefix("/"))))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
 }
 
@@ -285,7 +285,7 @@ func TestJournal_KeepsRequestsAcrossRestarts(t *testing.T) {
 	t.Cleanup(second.Close)
 
 	ft := testmock.NewFakeT()
-	require.True(t, second.AssertRequested(ft, 1, journal.Query{Path: match.Equal("/before")}))
+	require.True(t, second.AssertRequested(t.Context(), ft, 1, journal.Query{Path: match.Equal("/before")}))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
 }
 
@@ -534,7 +534,7 @@ func TestJournal_APatternCantReadABodyTheJournalCut(t *testing.T) {
 			require.ErrorContains(t, err, "the journal kept part of its body")
 
 			ft := testmock.NewFakeT()
-			require.False(t, tt.server.AssertNotRequested(ft, journal.Query{}, tt.pattern), "it can't tell")
+			require.False(t, tt.server.AssertNotRequested(t.Context(), ft, journal.Query{}, tt.pattern), "it can't tell")
 		})
 	}
 
@@ -594,7 +594,7 @@ func TestJournal_AMatcherThatFailsFailsTheVerification(t *testing.T) {
 	require.ErrorIs(t, err, errPredicate)
 
 	ft := testmock.NewFakeT()
-	require.False(t, m.AssertNotRequested(ft, journal.Query{}, pattern))
+	require.False(t, m.AssertNotRequested(t.Context(), ft, journal.Query{}, pattern))
 }
 
 func TestJournal_APatternReadsAnEntryWithoutHeaders(t *testing.T) {
