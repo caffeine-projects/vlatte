@@ -458,7 +458,12 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		pipe, ok := h.switchProtocols(rw, reqValues, res, mock, wire)
 		if !ok {
-			return
+			// A wire stage that cut the 101 cut the switch: the mock answered, so the call counts.
+			if cut = wire.aborted(); cut == nil {
+				return
+			}
+
+			break
 		}
 
 		// The connections are piped at once, as long as both sides want, while the call is counted, its callbacks
@@ -629,7 +634,8 @@ func (h *mockHandler) serveUpstream(w http.ResponseWriter, r *RequestValues, ups
 // switchProtocols answers with res, the 101 of a target that switched protocols, on the client's connection, which it
 // takes over, with the headers set on w, such as the debug headers. It returns the pipe between the client's
 // connection and the target's, to run once the call is logged, and false when it failed: before it took the
-// connection over, the client gets the server's answer to the failure, and after, the log warns.
+// connection over, the client gets the server's answer to the failure, and after, the log warns. It returns false
+// too when a stage of wire cut the 101, which leaves wire to finish with the cut.
 //
 // mock, when not nil, is the mock that answered: its steps pass on what the target sends, and its upstream steps what
 // the client sends. wire, when not nil, holds the client's connection already: its steps go on with the bytes of the
@@ -648,19 +654,29 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 	var (
 		client   net.Conn
 		ctx      context.Context
-		headOut  io.Writer // where the 101 goes
 		toClient *vlatte.Flow
-		done     func(cut error)
+		done     func()
 	)
 
 	if wire != nil {
+		// The 101 goes first, through the wire steps: they see every byte of the connection. A stage that cuts it cuts
+		// the switch, which the caller finishes as any cut of the answer.
+		if _, err := wire.flow.Write(head.Bytes()); err != nil {
+			upstream.Close()
+
+			if wire.aborted() == nil {
+				h.lifecycle.OnWarning(r, fmt.Errorf("http: answering the switch of protocols: %w", err))
+			}
+
+			return nil, false
+		}
+
 		var (
 			wireFlow  *vlatte.Flow
 			closeWire func(cut error)
 		)
 
 		client, ctx, wireFlow, closeWire = wire.handOver()
-		headOut = wireFlow
 
 		// The server is closing.
 		if !h.app.tunnels.add(upstream) {
@@ -673,10 +689,10 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 		// What goes to the client ends with the wire steps, and an abort of theirs cuts it: its flow derives from
 		// theirs. What goes the other way, from ctx, outlives the end of what goes to the client.
 		toClient = vlatte.NewFlow(wireFlow.Context(), wireFlow, mock.Steps())
-		done = func(cut error) {
+		done = func() {
 			h.app.tunnels.remove(upstream)
 			upstream.Close()
-			closeWire(cut)
+			closeWire(nil)
 		}
 	} else {
 		var err error
@@ -696,30 +712,27 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 			return nil, false
 		}
 
-		headOut = client
-
 		// A read of the client's connection, now the mock's, can end the request's context.
 		var release context.CancelFunc
 		ctx, release = h.app.tunnels.bind(context.WithoutCancel(r.RawRequest.Context()))
 
-		if mock != nil && len(mock.Steps()) > 0 {
-			toClient = vlatte.NewFlow(ctx, &vlatte.Sink{W: client}, mock.Steps())
-		}
-
-		done = func(cut error) {
+		done = func() {
 			defer release()
 
 			h.app.tunnels.remove(client, upstream)
-
-			if errors.Is(cut, vlatte.ErrReset) {
-				resetConn(client)
-				resetConn(upstream)
-
-				return
-			}
-
 			client.Close()
 			upstream.Close()
+		}
+
+		if _, err := client.Write(head.Bytes()); err != nil {
+			done()
+			h.lifecycle.OnWarning(r, fmt.Errorf("http: answering the switch of protocols: %w", err))
+
+			return nil, false
+		}
+
+		if mock != nil && len(mock.Steps()) > 0 {
+			toClient = vlatte.NewFlow(ctx, &vlatte.Sink{W: client}, mock.Steps())
 		}
 	}
 
@@ -728,26 +741,13 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 		toUpstream = vlatte.NewFlow(ctx, &vlatte.Sink{W: upstream}, mock.UpstreamSteps())
 	}
 
-	// The 101 goes first, through the wire steps, if any: they see every byte of the connection.
-	if _, err := headOut.Write(head.Bytes()); err != nil {
-		// A stage that aborted the 101 cut the switch: the mock answered, so the call counts.
-		if cut := context.Cause(ctx); errors.Is(cut, vlatte.ErrAbort) {
-			return func() { done(cut) }, true
-		}
-
-		done(nil)
-		h.lifecycle.OnWarning(r, fmt.Errorf("http: answering the switch of protocols: %w", err))
-
-		return nil, false
-	}
-
 	return func() {
 		err := pipe(client, upstream, toClient, toUpstream)
 		if err != nil {
 			h.lifecycle.OnWarning(r, fmt.Errorf("http: connection that switched protocols: %w", err))
 		}
 
-		done(nil)
+		done()
 	}, true
 }
 

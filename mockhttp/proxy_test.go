@@ -1424,6 +1424,50 @@ func TestProxy_AStepThatCutsTheAnswerCutsTheSwitch(t *testing.T) {
 	require.EqualValues(t, 1, scoped.Hits())
 }
 
+func TestProxy_AWireStepThatCutsThe101CutsTheSwitch(t *testing.T) {
+	// The wire steps see the 101 as any head: one that cuts it leaves the client without a switch, closed or reset, as
+	// it asked. The cut is the mock's answer: the call counts.
+	tests := []struct {
+		name  string
+		err   error
+		reset bool
+	}{
+		{name: "an abort", err: vlatte.ErrAbort},
+		{name: "a reset", err: vlatte.ErrReset, reset: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			echo := switchingTarget(t, "echo")
+
+			m := MustNew(Setup().Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			cut := vlatte.StepFunc(func(context.Context, []byte, vlatte.Stage) (int, error) { return 0, tc.err })
+			scoped := m.MustMock(Getf("/ws").WireStep(cut).Reply(From(echo.URL)))
+
+			conn, err := net.Dial("tcp", hostOf(t, m))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = conn.Close() })
+			require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+
+			_, err = fmt.Fprintf(conn, "GET /ws HTTP/1.1\r\nHost: %s\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n", hostOf(t, m))
+			require.NoError(t, err)
+
+			got, err := io.ReadAll(conn)
+			if tc.reset {
+				require.ErrorIs(t, err, syscall.ECONNRESET)
+			} else {
+				require.NoError(t, err)
+			}
+
+			require.Empty(t, got)
+			require.EqualValues(t, 1, scoped.Hits())
+		})
+	}
+}
+
 func TestProxy_ATargetThatEndsWhatItSendsLeavesTheClientSending(t *testing.T) {
 	// A side that ends what it sends has the other side go on until its own end, through the steps of each direction:
 	// the end of what the target sends, through the wire steps, doesn't end what the client sends.
