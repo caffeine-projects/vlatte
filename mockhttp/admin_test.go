@@ -65,6 +65,7 @@ func streamEvents(t *testing.T, m *Server, n int, send func()) map[any]map[strin
 		byType[e["type"]] = e
 	}
 
+	require.NoError(t, lines.Err())
 	require.Len(t, byType, n, "events: %v", byType)
 
 	return byType
@@ -821,6 +822,7 @@ func TestAdmin_StreamsTheLog(t *testing.T) {
 			var entry map[string]any
 			require.NoError(t, json.Unmarshal([]byte(line), &entry), line)
 			require.Equal(t, "info", entry["level"])
+			require.NoError(t, lines.Err())
 
 			return
 		}
