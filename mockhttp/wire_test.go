@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ var (
 	_ vlatte.Step  = wireLogStep{}
 	_ vlatte.Stage = (*wireLogStage)(nil)
 	_ vlatte.Step  = holdHeadStep{}
+	_ vlatte.Step  = seenStep{}
 )
 
 // dialServer opens a connection to the server of m, and sends it a GET of path in HTTP/1.1.
@@ -466,6 +468,87 @@ func TestWire_TheRequestBodyCanStillBeRead(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, "ping", string(body))
+}
+
+// seenStep sends each part its stage gets on seen, then passes it on.
+type seenStep struct{ seen chan<- string }
+
+func (s seenStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+	return vlatte.StepFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
+		s.seen <- string(b)
+		return next.Write(b)
+	}).Open(flow, next)
+}
+
+func TestWire_UpstreamStepsTakeABodyLeftUnreadAsItComes(t *testing.T) {
+	// The mock takes its connection over before it replies, so it reads first what the server left of the body,
+	// through the upstream steps: they take it from the client as it comes, so a stage that holds a part holds the
+	// upload. The target gets the body as they passed it on, once.
+	got := make(chan upstreamReceived, 1)
+	target := receivingTarget(t, got)
+
+	m := MustNew(Setup().Silent().NoBodyParsing())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	seen := make(chan string, 4)
+	m.MustMock(Postf("/up").
+		WireStep(vlatte.StepFunc(passWire)).
+		UpstreamStep(seenStep{seen: seen}, appendStep("?")).
+		Reply(From(target.URL)))
+
+	upload, sending := io.Pipe()
+	answered := make(chan error, 1)
+
+	go func() {
+		res, err := (&http.Client{Transport: &http.Transport{DisableKeepAlives: true}}).Post(m.URL("/up"), MIMETextPlain, upload)
+		if err == nil {
+			_ = res.Body.Close()
+		}
+
+		answered <- err
+	}()
+
+	_, err := io.WriteString(sending, "part1")
+	require.NoError(t, err)
+
+	// The guard only bounds a failure.
+	select {
+	case part := <-seen:
+		require.Equal(t, "part1", part)
+	case <-time.After(5 * time.Second):
+		require.Fail(t, "the steps waited for the whole upload")
+	}
+
+	_, err = io.WriteString(sending, "part2")
+	require.NoError(t, err)
+	require.NoError(t, sending.Close())
+
+	require.NoError(t, <-answered)
+	require.Equal(t, upstreamReceived{body: "part1?part2?", contentLength: -1, transferEncoding: []string{"chunked"}}, <-got)
+}
+
+func TestWire_AnUpstreamAbortOfABodyLeftUnreadCutsTheAnswer(t *testing.T) {
+	// A stage that cuts the upload as the mock reads it cuts the answer before it starts: the cut is the mock's
+	// answer, so the call counts, and the target gets nothing.
+	got := make(chan upstreamReceived, 1)
+	target := receivingTarget(t, got)
+
+	m := MustNew(Setup().Silent().NoBodyParsing())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scoped := m.MustMock(Postf("/up").
+		WireStep(vlatte.StepFunc(passWire)).
+		UpstreamStep(limitStep{n: 2, err: vlatte.ErrAbort}).
+		Reply(From(target.URL)))
+
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+
+	_, err := client.Post(m.URL("/up"), MIMETextPlain, strings.NewReader("ping"))
+	require.ErrorIs(t, err, io.EOF)
+	require.EqualValues(t, 1, scoped.Hits())
+	require.Empty(t, got)
 }
 
 func TestWire_AnAbortOfTheBodyStepsCutsTheWireToo(t *testing.T) {

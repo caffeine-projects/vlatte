@@ -39,6 +39,7 @@ type wireResponseWriter struct {
 	flow      *vlatte.Flow
 	out       vlatte.Stage // the flow, or the connection once the steps are abandoned
 	header    http.Header
+	upstream  bool // the upstream steps read the request body, before the connection was taken over
 	proto     string
 	head      bool // a HEAD: the answer has no body
 	chunked   bool // HTTP/1.1: the body is chunked
@@ -50,15 +51,21 @@ type wireResponseWriter struct {
 
 // takeOver takes the connection of r over from w, for the wire steps of its mock, and returns the writer that answers
 // on it, within ctx, which the server's close ends too: once the connection is taken over, a read on it, such as of
-// a switch of protocols, can end the request's context. What is left of the request's body is read first: net/http
-// forbids the body once the connection is taken over.
-func (h *mockHandler) takeOver(ctx context.Context, w http.ResponseWriter, r *RequestValues, steps []vlatte.Step) (*wireResponseWriter, error) {
+// a switch of protocols, can end the request's context. What is left of the request's body is read first, through
+// upSteps, the upstream steps of the mock: net/http forbids the body once the connection is taken over. A stage that
+// aborts them returns the cause, before the connection is taken over.
+func (h *mockHandler) takeOver(ctx context.Context, w http.ResponseWriter, r *RequestValues, steps, upSteps []vlatte.Step) (*wireResponseWriter, error) {
 	req := r.RawRequest
 	if req.ProtoMajor != 1 {
 		return nil, fmt.Errorf("%w, not %s", errWireNeedsHTTP1, req.Proto)
 	}
 
-	if err := bufferBody(req); err != nil {
+	upstream, err := bufferBody(ctx, req, upSteps)
+	if errors.Is(err, vlatte.ErrAbort) {
+		return nil, err
+	}
+
+	if err != nil {
 		return nil, fmt.Errorf("http: reading the request body: %w", err)
 	}
 
@@ -77,11 +84,12 @@ func (h *mockHandler) takeOver(ctx context.Context, w http.ResponseWriter, r *Re
 	}
 
 	ww := &wireResponseWriter{
-		conn:    conn,
-		tunnels: &h.app.tunnels,
-		header:  header,
-		proto:   "HTTP/1.0",
-		head:    req.Method == http.MethodHead,
+		conn:     conn,
+		tunnels:  &h.app.tunnels,
+		header:   header,
+		upstream: upstream,
+		proto:    "HTTP/1.0",
+		head:     req.Method == http.MethodHead,
 	}
 
 	if req.ProtoAtLeast(1, 1) {
@@ -97,22 +105,37 @@ func (h *mockHandler) takeOver(ctx context.Context, w http.ResponseWriter, r *Re
 }
 
 // bufferBody reads what is left of the body of req into memory, so it can be read once the connection is taken over.
-func bufferBody(req *http.Request) error {
+// A body the server didn't read whole, which GetBody can't read again, is still the client's: it is read through
+// steps, as the target would read it, so they pace the upload, and it is read again as they passed it on. It returns
+// whether the steps read it, and the cause of an abort a stage asks for.
+func bufferBody(ctx context.Context, req *http.Request, steps []vlatte.Step) (bool, error) {
 	if req.Body == nil || req.Body == http.NoBody {
-		return nil
+		return false, nil
 	}
 
-	body, err := io.ReadAll(req.Body)
-	_ = req.Body.Close()
+	var up *stepReader
+
+	body := req.Body
+	if len(steps) > 0 && req.GetBody == nil {
+		up = newStepReader(ctx, body, steps)
+		body = up
+	}
+
+	b, err := io.ReadAll(body)
+	_ = body.Close()
+
+	if cause := up.aborted(); cause != nil {
+		return false, cause
+	}
 
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	req.Body = io.NopCloser(bytes.NewReader(body))
-	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
+	req.Body = io.NopCloser(bytes.NewReader(b))
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(b)), nil }
 
-	return nil
+	return up != nil, nil
 }
 
 func (w *wireResponseWriter) Header() http.Header { return w.header }

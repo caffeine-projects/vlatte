@@ -315,13 +315,32 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// A mock with wire steps answers on its connection, which it takes over, so they see every byte of the answer.
+	// cut is the cause of a flow a stage aborted. The cut is the mock's answer: the call counts, then the connection
+	// is cut, after what was sent, if the answer started.
+	var (
+		cut     error
+		started bool
+	)
+
+	// A mock with wire steps answers on its connection, which it takes over, so they see every byte of the answer. It
+	// reads a body still the client's first, through the upstream steps, which the reply then skips: a stage that
+	// aborts them cuts the answer before it starts.
+	upSteps := mock.UpstreamSteps()
+
 	var wire *wireResponseWriter
 	if steps := mock.WireSteps(); len(steps) > 0 {
 		var err error
-		if wire, err = h.takeOver(ctx, w, reqValues, steps); err != nil {
+		if wire, err = h.takeOver(ctx, w, reqValues, steps, upSteps); err != nil && !errors.Is(err, vlatte.ErrAbort) {
 			h.onError(w, reqValues, vlatte.FailureReply, err)
 			return
+		}
+
+		cut = err
+	}
+
+	if wire != nil {
+		if wire.upstream {
+			upSteps = nil
 		}
 
 		// A panic is vlatte's answer, without the steps, which the recovery middleware can't write on the connection
@@ -352,7 +371,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rw := w
 
 	var top *topResponseWriter
-	if steps := mock.Steps(); len(steps) > 0 {
+	if steps := mock.Steps(); len(steps) > 0 && cut == nil {
 		top = newTopResponseWriter(ctx, steps, w)
 		defer top.abandon()
 
@@ -370,19 +389,16 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		wire.finish(nil)
 	}
 
-	// cut is the cause of a flow a stage aborted. The cut is the mock's answer: the call counts, then the connection
-	// is cut, after what was sent, if the answer started.
-	var (
-		cut     error
-		started bool
-	)
+	var res *Response
+	if cut == nil {
+		res, err = mock.reply.Reply(ctx, ReplyInput{
+			RequestValues: reqValues,
+			Writer:        w,
+			noSwitch:      noSwitch,
+			upstream:      upSteps,
+		})
+	}
 
-	res, err := mock.reply.Reply(ctx, ReplyInput{
-		RequestValues: reqValues,
-		Writer:        w,
-		noSwitch:      noSwitch,
-		upstream:      mock.UpstreamSteps(),
-	})
 	if err != nil {
 		// A stage that aborted the flow can fail the reply, such as a proxy's waiting on the flow: the cut is the
 		// mock's answer.

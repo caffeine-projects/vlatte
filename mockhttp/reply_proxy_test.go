@@ -1523,6 +1523,49 @@ func TestProxyReply_AnUpstreamCutEndsTheBodyStepsAtOnce(t *testing.T) {
 	require.ErrorIs(t, <-closed, vlatte.ErrAbort)
 }
 
+// countingReader counts the bytes read of r.
+type countingReader struct {
+	r io.Reader
+	n atomic.Int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n.Add(int64(n))
+
+	return n, err
+}
+
+func TestStepReader_TakesTheBodyOnlyAsTheTargetReadsIt(t *testing.T) {
+	// A body the server didn't read whole is still the client's: what the steps take of it, the client sent. They
+	// take nothing before the target reads, then a small piece at a time, so a stage that holds one holds the upload.
+	synctest.Test(t, func(t *testing.T) {
+		body := &countingReader{r: strings.NewReader(strings.Repeat("x", 64<<10))}
+		r := newStepReader(t.Context(), io.NopCloser(body), []vlatte.Step{holdStep{d: time.Hour}})
+
+		synctest.Wait()
+		require.Zero(t, body.n.Load(), "taken before the target reads")
+
+		go func() { _, _ = r.Read(make([]byte, 1)) }()
+
+		synctest.Wait()
+		require.EqualValues(t, _upstreamPiece, body.n.Load())
+		require.NoError(t, r.Close())
+	})
+}
+
+func TestStepReader_CloseEndsTheStepsOfABodyNeverRead(t *testing.T) {
+	// A target that answers without reading the body, or a call that fails first, has the transport close it: the
+	// steps end, as for a body read, and nothing of the body is taken.
+	body := &countingReader{r: strings.NewReader("ping")}
+	closed := make(chan error, 1)
+	r := newStepReader(t.Context(), io.NopCloser(body), []vlatte.Step{closeStep{closed: closed}})
+
+	require.NoError(t, r.Close())
+	require.ErrorIs(t, <-closed, errBodyEnded)
+	require.Zero(t, body.n.Load())
+}
+
 func TestStepReader_CloseEndsTheCopy(t *testing.T) {
 	// The transport closes a request body it no longer reads, such as when the target answered early: the copy
 	// through the steps ends, rather than wait on the pipe.

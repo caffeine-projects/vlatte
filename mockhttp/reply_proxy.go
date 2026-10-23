@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
@@ -484,27 +485,34 @@ func escapedIndex(escaped string, n int) int {
 	return i
 }
 
+// _upstreamPiece is how much of a body the upstream steps take at a time: of a body still the client's, a stage that
+// holds a piece holds the client's upload after little of it.
+const _upstreamPiece = 1 << 10
+
 // errBodyEnded ends the flow of a stepReader whose body broke off, or whose reader stopped, such as a target that
 // answered early: the stages stop, but no stage asked for a cut.
 var errBodyEnded = errors.New("reply_proxy: the body ended before its steps did")
 
-// stepReader reads a body through a flow of steps: a goroutine copies the body through the flow, whose sink is a pipe
-// the reader reads, so a stage that writes later, or in parts, is read as it writes. ctx, for the call that reads it,
-// ends with the cause of an abort a stage asks for.
+// stepReader reads a body through a flow of steps: from the first read, a goroutine copies the body through the flow,
+// whose sink is a pipe the reader reads, so a stage that writes later, or in parts, is read as it writes. The copy
+// takes the body as it is read, a piece at a time: of a body still the client's, a stage that holds a piece holds the
+// upload. ctx, for the call that reads it, ends with the cause of an abort a stage asks for.
 type stepReader struct {
-	ctx  context.Context
-	flow *vlatte.Flow
-	pipe *io.PipeReader
-	body io.ReadCloser
-	done chan struct{}
+	ctx   context.Context
+	flow  *vlatte.Flow
+	pipe  *io.PipeReader
+	sink  *io.PipeWriter
+	body  io.ReadCloser
+	start sync.Once
+	done  chan struct{}
 }
 
-// newStepReader starts copying body through a flow of steps, within ctx.
+// newStepReader opens a flow of steps, within ctx, for body.
 func newStepReader(ctx context.Context, body io.ReadCloser, steps []vlatte.Step) *stepReader {
 	ctx, cancel := context.WithCancelCause(ctx)
 	pr, pw := io.Pipe()
 
-	r := &stepReader{ctx: ctx, pipe: pr, body: body, done: make(chan struct{})}
+	r := &stepReader{ctx: ctx, pipe: pr, sink: pw, body: body, done: make(chan struct{})}
 	r.flow = vlatte.NewFlow(ctx, &vlatte.Sink{W: pw}, steps)
 
 	context.AfterFunc(r.flow.Context(), func() {
@@ -513,32 +521,43 @@ func newStepReader(ctx context.Context, body io.ReadCloser, steps []vlatte.Step)
 		}
 	})
 
-	go func() {
-		defer close(r.done)
-
-		_, err := io.Copy(r.flow, body)
-		if err != nil {
-			r.flow.Abort(fmt.Errorf("%w: %w", errBodyEnded, err))
-		}
-
-		pw.CloseWithError(cmp.Or(err, r.flow.Close()))
-	}()
-
 	return r
 }
 
+// Read starts the copy, at the first read, and reads what the steps passed on.
 func (r *stepReader) Read(p []byte) (int, error) {
+	r.start.Do(func() { go r.copy() })
 	return r.pipe.Read(p)
 }
 
 // Close stops the copy, and the steps, which drop what they hold, and waits for them to end.
 func (r *stepReader) Close() error {
+	// A body never read has no copy to wait for: its steps end here.
+	r.start.Do(func() {
+		r.flow.Abort(errBodyEnded)
+		_ = r.flow.Close()
+		close(r.done)
+	})
+
 	err := r.pipe.Close()
 	_ = r.body.Close()
 	r.flow.Abort(errBodyEnded)
 	<-r.done
 
 	return err
+}
+
+// copy copies the body through the flow, in pieces of _upstreamPiece: the body's own WriterTo, if any, is hidden, so
+// it can't pass more at once.
+func (r *stepReader) copy() {
+	defer close(r.done)
+
+	_, err := io.CopyBuffer(r.flow, struct{ io.Reader }{r.body}, make([]byte, _upstreamPiece))
+	if err != nil {
+		r.flow.Abort(fmt.Errorf("%w: %w", errBodyEnded, err))
+	}
+
+	r.sink.CloseWithError(cmp.Or(err, r.flow.Close()))
 }
 
 // aborted returns the cause of the flow when a stage aborted it, or nil. A nil r, for a body without steps, has none.
