@@ -1378,6 +1378,55 @@ func TestProxy_AStepThatAbortsASwitchedConnectionCutsBothSides(t *testing.T) {
 	}
 }
 
+func TestProxy_AStepThatFailsAsASideEndsCutsBothSides(t *testing.T) {
+	// A side that ends what it sends ends its steps: one that fails there, such as to reset once the client is done
+	// sending, cuts both sides, rather than leave the other going on, which waits for an end that doesn't come.
+	tests := []struct {
+		name  string
+		err   error
+		reset bool
+	}{
+		{name: "a failure", err: errors.New("step: failed")},
+		{name: "a reset", err: vlatte.ErrReset, reset: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			echo := switchingTarget(t, "echo")
+
+			m := MustNew(Setup().Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			closed := make(chan error, 1)
+			m.MustMock(Getf("/ws").UpstreamStep(closeStep{closed: closed, err: tc.err}).Reply(From(echo.URL)))
+
+			conn, br, res := switchThrough(t, m, "/ws")
+			require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
+
+			_, err := io.WriteString(conn, "hi")
+			require.NoError(t, err)
+
+			got := make([]byte, len("hi"))
+			_, err = io.ReadFull(br, got)
+			require.NoError(t, err)
+			require.Equal(t, "hi", string(got))
+
+			require.NoError(t, conn.(*net.TCPConn).CloseWrite())
+
+			rest, err := io.ReadAll(br)
+			if tc.reset {
+				require.ErrorIs(t, err, syscall.ECONNRESET)
+			} else {
+				require.NoError(t, err)
+				require.Empty(t, rest)
+			}
+
+			require.NoError(t, <-closed)
+		})
+	}
+}
+
 func TestProxy_AStepCanCutAnIdleSwitchedConnection(t *testing.T) {
 	// A timeout on a WebSocket that carries nothing: no write comes, so only the flow's abort can cut it.
 	echo := switchingTarget(t, "echo")
@@ -1695,9 +1744,11 @@ func TestProxy_ASwitchedConnectionThatBreaksIsAWarning(t *testing.T) {
 		name   string
 		reads  bool
 		writes bool
+		wire   bool
 		want   string
 	}{
 		{name: "before the 101", writes: true, want: "http: answering the switch of protocols: "},
+		{name: "before the 101 through the wire steps", writes: true, wire: true, want: "http: answering the switch of protocols: "},
 		{name: "once switched", reads: true, want: "http: connection that switched protocols: "},
 	}
 
@@ -1711,7 +1762,13 @@ func TestProxy_ASwitchedConnectionThatBreaksIsAWarning(t *testing.T) {
 			m := MustNew(Setup().Logger(&logger).LogPretty(false).Use(breaking(tt.reads, tt.writes)))
 			m.MustStart()
 			t.Cleanup(m.Close)
-			m.MustMock(Getf("/ws").Reply(From(target.URL)))
+
+			mock := Getf("/ws")
+			if tt.wire {
+				mock = mock.WireStep(vlatte.StepFunc(passWire))
+			}
+
+			m.MustMock(mock.Reply(From(target.URL)))
 
 			conn, err := net.Dial("tcp", hostOf(t, m))
 			require.NoError(t, err)

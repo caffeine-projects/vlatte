@@ -271,6 +271,76 @@ func TestWire_AHandlerThatAbortsCutsTheConnection(t *testing.T) {
 	require.Equal(t, "part", string(body))
 }
 
+func TestWire_ABodyThatFailsIsVlattesAnswer(t *testing.T) {
+	// The mock reads what is left of the body before it takes its connection over: a body that fails to read, such as
+	// a malformed chunk, fails the reply, which the client learns from vlatte's answer.
+	m := MustNew(Setup().Silent().NoBodyParsing())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scoped := m.MustMock(Postf("/body").WireStep(vlatte.StepFunc(passWire)).Reply(OK()))
+
+	u, err := url.Parse(m.URL("/body"))
+	require.NoError(t, err)
+
+	conn, err := net.Dial("tcp", u.Host)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	_, err = io.WriteString(conn, "POST /body HTTP/1.1\r\nHost: "+u.Host+"\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n")
+	require.NoError(t, err)
+
+	res, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
+	require.Contains(t, string(body), "http: reading the request body: invalid byte in chunk length")
+	require.EqualValues(t, 0, scoped.Hits())
+}
+
+func TestWire_BehindAWriterThatCantHandTheConnectionOverIsVlattesAnswer(t *testing.T) {
+	// A middleware's writer that doesn't unwrap to the server's can't give the connection over: the client learns
+	// why, rather than an answer without the steps.
+	m := MustNew(Setup().Silent().Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { next.ServeHTTP(opaqueWriter{w}, r) })
+	}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scoped := m.MustMock(Getf("/wire").WireStep(vlatte.StepFunc(passWire)).Reply(OK().PlainText("hello")))
+
+	res, err := http.ReadResponse(bufio.NewReader(dialServer(t, m, "/wire")), nil)
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
+	require.Contains(t, string(body), errWireNeedsHTTP1.Error())
+	require.EqualValues(t, 0, scoped.Hits())
+}
+
+func TestWire_WhileTheServerClosesNothingIsAnswered(t *testing.T) {
+	// A connection taken over while the server closes is one Close no longer ends: it is closed instead, without an
+	// answer.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scoped := m.MustMock(Getf("/wire").WireStep(vlatte.StepFunc(passWire)).Reply(OK().PlainText("hello")))
+
+	// What Close does once the server stops taking requests.
+	m.tunnels.closeAll()
+
+	wire, err := readWire(dialServer(t, m, "/wire"))
+	require.NoError(t, err)
+	require.Empty(t, wire)
+	require.EqualValues(t, 0, scoped.Hits())
+}
+
 func TestWire_OverHTTP2IsVlattesAnswer(t *testing.T) {
 	// HTTP/2 can't give a connection over, so a mock with wire steps can't answer on it: the client learns why, rather
 	// than an answer without the steps.
@@ -322,6 +392,76 @@ func TestWire_TheEndOfTheAnswerCarriesTheTrailers(t *testing.T) {
 	require.Equal(t, "body", string(body))
 	require.Equal(t, "4", res.Trailer.Get("X-Sum"))
 	require.Equal(t, "yes", res.Trailer.Get("X-Late"))
+}
+
+func TestWire_ATrailerSetBeforeTheBodyStaysOutOfTheHead(t *testing.T) {
+	// A header with http.TrailerPrefix is a trailer whenever the reply sets it, as net/http sends it: the head
+	// doesn't carry it.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/trailer").WireStep(vlatte.StepFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(http.TrailerPrefix+"X-Early", "yes")
+		_, _ = io.WriteString(w, "body")
+	})))
+
+	wire, err := readWire(dialServer(t, m, "/trailer"))
+	require.NoError(t, err)
+
+	head, _, _ := bytes.Cut(wire, []byte("\r\n\r\n"))
+	require.NotContains(t, string(head), "X-Early")
+
+	res, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(wire)), nil)
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, "body", string(body))
+	require.Equal(t, http.Header{"X-Early": {"yes"}}, res.Trailer)
+}
+
+func TestWire_AnEmptyWriteDoesntEndTheBody(t *testing.T) {
+	// An empty chunk ends a chunked body: an empty write, such as of a stream that had nothing yet, sends none.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/empty").WireStep(vlatte.StepFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "bo")
+		_, _ = w.Write(nil)
+		_, _ = io.WriteString(w, "dy")
+	})))
+
+	res, err := http.ReadResponse(bufio.NewReader(dialServer(t, m, "/empty")), nil)
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, "body", string(body))
+}
+
+func TestWire_AReplyThatWritesNothingAnswers200(t *testing.T) {
+	// As net/http does, a reply that writes nothing answers 200 with an empty body, which still ends as HTTP/1.1
+	// does.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scoped := m.MustMock(Getf("/nothing").WireStep(vlatte.StepFunc(passWire)).Reply(Handler(func(http.ResponseWriter, *http.Request) {})))
+
+	wire, err := readWire(dialServer(t, m, "/nothing"))
+	require.NoError(t, err)
+
+	res, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(wire)), nil)
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Empty(t, body)
+	require.True(t, bytes.HasSuffix(wire, []byte("\r\n\r\n0\r\n\r\n")), "%q", wire)
+	require.EqualValues(t, 1, scoped.Hits())
 }
 
 func passWire(_ context.Context, b []byte, next vlatte.Stage) (int, error) { return next.Write(b) }

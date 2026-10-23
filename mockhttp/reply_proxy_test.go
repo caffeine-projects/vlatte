@@ -1478,6 +1478,85 @@ func TestProxyReply_AnUpstreamAbortCutsTheAnswer(t *testing.T) {
 	require.EqualValues(t, 1, scoped.Hits())
 }
 
+func TestProxyReply_AnUpstreamAbortCutsAnAnswerThatStarted(t *testing.T) {
+	// A target can answer before it read the body, as a stream does: a step that then cuts what the mock sends on
+	// cuts the client's answer where it got, not as one that looks whole. The cut is the mock's answer: it counts.
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = http.NewResponseController(w).EnableFullDuplex()
+		_, _ = io.WriteString(w, "start")
+		_ = http.NewResponseController(w).Flush()
+		_, _ = io.Copy(io.Discard, r.Body)
+	}))
+	t.Cleanup(target.Close)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	// A stage holds the body, so what the mock sends on goes on while the answer streams.
+	release := make(chan struct{})
+	scoped := m.MustMock(Postf("/up").
+		UpstreamStep(abortOn{release: release, err: errors.New("step: cut")}, holdStep{d: time.Hour}).
+		Reply(From(target.URL)))
+
+	res, err := http.Post(m.URL("/up"), MIMETextPlain, strings.NewReader("ping"))
+	require.NoError(t, err)
+
+	first := make([]byte, len("start"))
+	_, err = io.ReadFull(res.Body, first)
+	require.NoError(t, err)
+	require.Equal(t, "start", string(first))
+
+	close(release)
+
+	rest, err := io.ReadAll(res.Body)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	require.Empty(t, rest)
+	require.NoError(t, res.Body.Close())
+	require.EqualValues(t, 1, scoped.Hits())
+}
+
+// closedBody is a body that tells closed once it is closed.
+type closedBody struct {
+	io.Reader
+
+	closed chan<- struct{}
+}
+
+func (b closedBody) Close() error {
+	close(b.closed)
+	return nil
+}
+
+func TestProxyReply_AnUpstreamAbortCutsAnAnswerTheTargetGaveAnyway(t *testing.T) {
+	// A target may answer whatever it read of the body: a step that cut what the mock sent on still cuts the client's
+	// answer, and the target's is closed, so its connection is let go.
+	closed := make(chan struct{})
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		_, _ = io.ReadAll(r.Body)
+		body := closedBody{Reader: strings.NewReader("answer"), closed: closed}
+
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: body, ContentLength: -1, Request: r}, nil
+	})
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	scoped := m.MustMock(Postf("/up").UpstreamStep(limitStep{n: 2, err: vlatte.ErrAbort}).Reply(From("http://target.test").Transport(transport)))
+
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+
+	_, err := client.Post(m.URL("/up"), MIMETextPlain, strings.NewReader("ping"))
+	require.ErrorIs(t, err, io.EOF)
+	require.EqualValues(t, 1, scoped.Hits())
+
+	select {
+	case <-closed:
+	default:
+		require.Fail(t, "the target's answer stayed open")
+	}
+}
+
 // holdStep holds what its stage gets until d passed, or the flow ends.
 type holdStep struct{ d time.Duration }
 

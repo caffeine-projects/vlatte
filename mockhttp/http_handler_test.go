@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	json "encoding/json/v2"
 	"errors"
 	"io"
@@ -329,7 +330,7 @@ func TestSteps_AStageCanWriteFromAGoroutineOfItsOwn(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	controls := make(chan [2]error, 1)
+	controls := make(chan [3]error, 1)
 
 	m.MustMock(Getf("/async").Step(asyncStep{}, appendStep("!")).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Trailer", "X-Sum")
@@ -337,8 +338,9 @@ func TestSteps_AStageCanWriteFromAGoroutineOfItsOwn(t *testing.T) {
 		_ = http.NewResponseController(w).Flush()
 		_, _ = io.WriteString(w, "b")
 
-		controls <- [2]error{
+		controls <- [3]error{
 			http.NewResponseController(w).SetWriteDeadline(time.Now().Add(time.Minute)),
+			http.NewResponseController(w).SetReadDeadline(time.Now().Add(time.Minute)),
 			http.NewResponseController(w).EnableFullDuplex(),
 		}
 
@@ -354,7 +356,64 @@ func TestSteps_AStageCanWriteFromAGoroutineOfItsOwn(t *testing.T) {
 
 	require.Equal(t, "a!b!", string(body))
 	require.Equal(t, "2", res.Trailer.Get("X-Sum"))
-	require.Equal(t, [2]error{nil, nil}, <-controls)
+	require.Equal(t, [3]error{nil, nil, nil}, <-controls)
+}
+
+func TestSteps_AHandlerCanTakeItsConnectionOver(t *testing.T) {
+	// A handler that answers on the connection itself, as one that switches protocols does, still can behind steps:
+	// what it writes there is past them, which see only what it writes to the response.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/raw").Step(appendStep("!")).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+		conn, rw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		defer conn.Close()
+
+		_, _ = io.WriteString(rw, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi")
+		_ = rw.Flush()
+	})))
+
+	res, err := http.Get(m.URL("/raw"))
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "hi", string(body))
+}
+
+func TestSteps_AStepThatFailsAsTheAnswerEndsIsLogged(t *testing.T) {
+	// The steps end once a reply wrote its answer, which is sent by then: a step that fails there can't change it, so
+	// the failure is logged, and the mock counts as served.
+	logs := &logBuffer{}
+	logger := zerolog.New(logs)
+
+	m := MustNew(Setup().Logger(&logger))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	failed := errors.New("step: failed at the end")
+	scoped := m.MustMock(Getf("/end").Step(closeStep{closed: make(chan error, 1), err: failed}).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "body")
+	})))
+
+	res, err := http.Get(m.URL("/end"))
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "body", string(body))
+	require.EqualValues(t, 1, scoped.Hits())
+	require.Contains(t, logs.String(), "http: ending the steps: step: failed at the end")
 }
 
 // limitStep passes on the first n bytes of each response, then aborts it with err, as a limit on the data a
@@ -434,6 +493,27 @@ func TestSteps_AResetCutsTheConnectionWithAReset(t *testing.T) {
 	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
 
 	res, err := client.Get(m.URL("/reset"))
+	if err == nil {
+		_, err = io.ReadAll(res.Body)
+		_ = res.Body.Close()
+	}
+
+	require.ErrorIs(t, err, syscall.ECONNRESET)
+	require.EqualValues(t, 1, scoped.Hits())
+}
+
+func TestSteps_AResetCutsATLSConnectionWithAReset(t *testing.T) {
+	// A reset reaches the TCP connection under TLS too: the client reads a reset, not the end of the TLS stream.
+	m := MustNew(Setup().Silent())
+	m.MustStartTLS()
+	t.Cleanup(m.Close)
+
+	scoped := m.MustMock(Getf("/reset").Step(limitStep{n: 5, err: vlatte.ErrReset}).Reply(OK().PlainText("hello world")))
+
+	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, DisableKeepAlives: true, Protocols: new(http.Protocols)}
+	tr.Protocols.SetHTTP1(true)
+
+	res, err := (&http.Client{Transport: tr}).Get(m.URL("/reset"))
 	if err == nil {
 		_, err = io.ReadAll(res.Body)
 		_ = res.Body.Close()
