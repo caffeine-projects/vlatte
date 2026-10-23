@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bufio"
 	"bytes"
 	"io"
 	"net"
@@ -65,15 +66,18 @@ func TestFault_EmptyResponse(t *testing.T) {
 }
 
 func TestFault_MalformedResponseChunk(t *testing.T) {
+	// The client fails on the garbage before the connection ends: the call counts by that end.
 	m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.MalformedResponseChunk()).Reply(mockhttp.NotFound().PlainText("hello")))
 
-	res, err := newClient(t).Get(m.URL("/f"))
+	got, err := rawGet(t, m, "/f")
+	require.NoError(t, err)
+
+	res, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(got)), nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNotFound, res.StatusCode)
 
 	_, err = io.ReadAll(res.Body)
 	require.ErrorContains(t, err, "invalid byte in chunk length")
-	require.NoError(t, res.Body.Close())
 	require.EqualValues(t, 1, scoped.Hits())
 }
 
