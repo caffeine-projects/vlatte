@@ -221,6 +221,54 @@ func TestWire_AFailureIsVlattesAnswerWithoutTheSteps(t *testing.T) {
 	require.True(t, res.Close)
 }
 
+func TestWire_APanicIsVlattesAnswerWithoutTheSteps(t *testing.T) {
+	// A panic is a failure, which the client learns from vlatte's answer on the connection the mock took over, as on
+	// any other: a step that drops everything doesn't hide it.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	drop := vlatte.StepFunc(func(_ context.Context, b []byte, _ vlatte.Stage) (int, error) { return len(b), nil })
+	m.MustMock(Getf("/panic").WireStep(drop).Reply(Handler(func(http.ResponseWriter, *http.Request) {
+		panic("boom")
+	})))
+
+	wire, err := readWire(dialServer(t, m, "/panic"))
+	require.NoError(t, err)
+
+	res, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(wire)), nil)
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+	require.Equal(t, vlatte.FailurePanic, res.Header.Get(HeaderVlatteError))
+	require.Equal(t, "PANIC\nGET /panic\n\nboom", string(body))
+	require.True(t, res.Close)
+}
+
+func TestWire_AHandlerThatAbortsCutsTheConnection(t *testing.T) {
+	// net/http aborts a response with http.ErrAbortHandler, as a reverse proxy does once its target breaks off: the
+	// client keeps what was sent, then reads a body that breaks off, not a panic answer after it.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/abort").WireStep(vlatte.StepFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "part")
+		w.(http.Flusher).Flush()
+		panic(http.ErrAbortHandler)
+	})))
+
+	res, err := http.ReadResponse(bufio.NewReader(dialServer(t, m, "/abort")), nil)
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "part", string(body))
+}
+
 func TestWire_OverHTTP2IsVlattesAnswer(t *testing.T) {
 	// HTTP/2 can't give a connection over, so a mock with wire steps can't answer on it: the client learns why, rather
 	// than an answer without the steps.

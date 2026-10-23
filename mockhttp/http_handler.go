@@ -324,7 +324,24 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		defer wire.finish(errAbandoned)
+		// A panic is vlatte's answer, without the steps, which the recovery middleware can't write on the connection
+		// the mock took over: it is answered here. An abort of the handler cuts the connection.
+		defer func() {
+			p := recover()
+			if err, ok := p.(error); p != nil && (!ok || !errors.Is(err, http.ErrAbortHandler)) {
+				wire.abandon()
+				h.app.recoverer.Answer(wire, r, p)
+				wire.finish(nil)
+
+				return
+			}
+
+			wire.finish(errAbandoned)
+
+			if p != nil {
+				panic(p)
+			}
+		}()
 
 		w = wire
 		ctx = wire.Context()
