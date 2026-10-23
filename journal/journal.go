@@ -802,7 +802,7 @@ func (j *Journal) lists(q *Query, a *journalAccepted) [][][]uint64 {
 		fields = append(fields, j.index.kind.of([]vlatte.Kind{q.Kind}))
 	}
 
-	if q.Outcome != "" {
+	if q.Outcome != OutcomeUnknown {
 		fields = append(fields, j.index.outcome.of([]Outcome{q.Outcome}))
 	}
 

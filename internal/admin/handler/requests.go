@@ -58,13 +58,16 @@ var _requestQuerySchema = config.NewSchema(
 		Set: func(c *requestQuery, v config.Value) error { c.q.Kind = vlatte.Kind(v.Str); return nil },
 	},
 	config.Field[requestQuery]{
-		Key: "outcome", Kind: config.String, Usage: "What came of the requests: matched, unmatched, proxied, failed or abandoned.",
+		Key: "outcome", Kind: config.Int, Usage: "What came of the requests: matched, unmatched, proxied, failed or abandoned.",
+		Choices: []config.Choice{
+			{Name: "matched", Value: int64(journal.OutcomeMatched)},
+			{Name: "unmatched", Value: int64(journal.OutcomeUnmatched)},
+			{Name: "proxied", Value: int64(journal.OutcomeProxied)},
+			{Name: "failed", Value: int64(journal.OutcomeFailed)},
+			{Name: "abandoned", Value: int64(journal.OutcomeAbandoned)},
+		},
 		Set: func(c *requestQuery, v config.Value) error {
-			c.q.Outcome = journal.Outcome(v.Str)
-			if !c.q.Outcome.Valid() {
-				return config.Invalid(v, fmt.Sprintf("outcome %q is no outcome", v.Str), "use matched, unmatched, proxied, failed or abandoned")
-			}
-
+			c.q.Outcome = journal.Outcome(v.Int)
 			return nil
 		},
 	},

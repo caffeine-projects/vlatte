@@ -82,6 +82,7 @@ func (v *Verifier[TM, A]) AssertNotRequested(ctx context.Context, t vlatte.Testi
 func (v *Verifier[TM, A]) assertRequests(ctx context.Context, t vlatte.TestingT, q Query, patterns []vlatte.Builder[TM, A], passes func(int) bool, failed func(int) string) bool {
 	t.Helper()
 
+	ctx = context.WithoutCancel(ctx)
 	q.Limit, q.Before = _recentRequests, 0
 
 	page, err := v.find(ctx, q, patterns)

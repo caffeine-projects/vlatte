@@ -596,12 +596,12 @@ t.Cleanup(m.Close)
 // ... the code under test sends its requests ...
 // journal is github.com/caffeine-projects/vlatte/journal.
 
-m.AssertRequested(t, 1, journal.Query{Method: match.Equal("POST"), Path: match.Equal("/orders")})
-m.AssertRequested(t, 2, journal.Query{Header: map[string]vlatte.Matcher{"Authorization": match.HasPrefix("Bearer ")}})
-m.AssertNotRequested(t, journal.Query{Outcome: journal.OutcomeUnmatched})
+m.AssertRequested(ctx, t, 1, journal.Query{Method: match.Equal("POST"), Path: match.Equal("/orders")})
+m.AssertRequested(ctx, t, 2, journal.Query{Header: map[string]vlatte.Matcher{"Authorization": match.HasPrefix("Bearer ")}})
+m.AssertNotRequested(ctx, t, journal.Query{Outcome: journal.OutcomeUnmatched})
 
 // The request part of a mock verifies as a mock matches: query parameters, forms, files, the parsed body.
-m.AssertRequested(t, 1, journal.Query{}, mockhttp.Request().Method("POST").Query("page", match.Equal("2")))
+m.AssertRequested(ctx, t, 1, journal.Query{}, mockhttp.Request().Method("POST").Query("page", match.Equal("2")))
 
 entries, err := m.Requests(ctx, journal.Query{Path: match.GlobMatch("/users/*"), Limit: 10}) // newest first
 n, err := m.CountRequests(ctx, journal.Query{Kind: mockhttp.Kind})

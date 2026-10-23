@@ -1,6 +1,7 @@
 package journal
 
 import (
+	"encoding"
 	"encoding/json/jsontext"
 	json "encoding/json/v2"
 	"strings"
@@ -11,25 +12,76 @@ import (
 )
 
 var (
-	_ json.MarshalerTo     = (*Entry)(nil)
-	_ json.UnmarshalerFrom = (*Entry)(nil)
+	_ json.MarshalerTo         = (*Entry)(nil)
+	_ json.UnmarshalerFrom     = (*Entry)(nil)
+	_ encoding.TextMarshaler   = OutcomeUnknown
+	_ encoding.TextUnmarshaler = (*Outcome)(nil)
 )
 
 // Outcome is what came of a request a mock server served.
-type Outcome string
+type Outcome int8
 
 const (
+	// OutcomeUnknown is an outcome that could not be parsed.
+	OutcomeUnknown Outcome = iota
 	// OutcomeMatched is a request a mock answered.
-	OutcomeMatched Outcome = "matched"
+	OutcomeMatched
 	// OutcomeUnmatched is a request no mock matched, which the server answered as such.
-	OutcomeUnmatched Outcome = "unmatched"
+	OutcomeUnmatched
 	// OutcomeProxied is a request another server answered: the host of a forward proxy, or a proxy's target.
-	OutcomeProxied Outcome = "proxied"
+	OutcomeProxied
 	// OutcomeFailed is a request whose serving failed.
-	OutcomeFailed Outcome = "failed"
+	OutcomeFailed
 	// OutcomeAbandoned is a request whose client left before it got its answer.
-	OutcomeAbandoned Outcome = "abandoned"
+	OutcomeAbandoned
 )
+
+// String returns the outcome's name, or "unknown" for an unrecognized value.
+func (o Outcome) String() string {
+	switch o {
+	case OutcomeMatched:
+		return "matched"
+	case OutcomeUnmatched:
+		return "unmatched"
+	case OutcomeProxied:
+		return "proxied"
+	case OutcomeFailed:
+		return "failed"
+	case OutcomeAbandoned:
+		return "abandoned"
+	default:
+		return "unknown"
+	}
+}
+
+// ParseOutcome parses an outcome's name in any case, returning [OutcomeUnknown] for an unrecognized name.
+func ParseOutcome(s string) Outcome {
+	switch strings.ToLower(s) {
+	case "matched":
+		return OutcomeMatched
+	case "unmatched":
+		return OutcomeUnmatched
+	case "proxied":
+		return OutcomeProxied
+	case "failed":
+		return OutcomeFailed
+	case "abandoned":
+		return OutcomeAbandoned
+	default:
+		return OutcomeUnknown
+	}
+}
+
+// MarshalText encodes o as its name, keeping outcomes readable in journal files and API responses.
+func (o Outcome) MarshalText() ([]byte, error) {
+	return []byte(o.String()), nil
+}
+
+// UnmarshalText parses an outcome's name as [ParseOutcome] does.
+func (o *Outcome) UnmarshalText(text []byte) error {
+	*o = ParseOutcome(string(text))
+	return nil
+}
 
 // Entry is a request a mock server served, as its [Journal] keeps it. The fields every protocol has are its
 // own; a protocol fills those it has: gRPC has no method, and its path is the full method of the call.
@@ -125,7 +177,6 @@ func (e *Entry) validUTF8() {
 	}
 
 	e.Kind = vlatte.Kind(strings.ToValidUTF8(string(e.Kind), "\uFFFD"))
-	e.Outcome = Outcome(strings.ToValidUTF8(string(e.Outcome), "\uFFFD"))
 }
 
 func (e *Entry) line() journalLine {

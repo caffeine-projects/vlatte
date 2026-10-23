@@ -200,8 +200,8 @@ func (q *Query) check() error {
 	switch {
 	case q.Limit < 0:
 		return fmt.Errorf("journal: limit must be 0 or more, not %d", q.Limit)
-	case q.Outcome != "" && !q.Outcome.Valid():
-		return fmt.Errorf("journal: outcome %q is not one of matched, unmatched, proxied, failed or abandoned", q.Outcome)
+	case q.Outcome != OutcomeUnknown && !q.Outcome.Valid():
+		return fmt.Errorf("journal: outcome %d is not one of matched, unmatched, proxied, failed or abandoned", q.Outcome)
 	}
 
 	for name, m := range q.Header {

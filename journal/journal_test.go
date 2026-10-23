@@ -202,8 +202,8 @@ func TestJournal_RejectsBadQueries(t *testing.T) {
 	_, err := j.Find(t.Context(), journal.Query{Limit: -1})
 	require.ErrorContains(t, err, "limit")
 
-	_, err = j.Find(t.Context(), journal.Query{Outcome: "won"})
-	require.ErrorContains(t, err, `outcome "won"`)
+	_, err = j.Find(t.Context(), journal.Query{Outcome: journal.Outcome(-1)})
+	require.EqualError(t, err, "journal: outcome -1 is not one of matched, unmatched, proxied, failed or abandoned")
 }
 
 func TestJournal_AMatcherThatPanicsFailsTheQuery(t *testing.T) {
@@ -497,10 +497,12 @@ func TestJournal_KeepsRequestsWhoseTextIsntUTF8(t *testing.T) {
 	j := newJournal(t, journal.Options{})
 
 	require.NoError(t, j.Append(entry("latin1", func(e *journal.Entry) {
+		e.Kind = "caf\xe9"
 		e.Path = "/caf\xe9"
 		e.Header = map[string][]string{"X-Name": {"caf\xe9"}}
 	})))
 
+	require.Equal(t, []string{"latin1"}, find(t, j, journal.Query{Kind: "caf�"}))
 	require.Equal(t, []string{"latin1"}, find(t, j, journal.Query{Path: match.Equal("/caf�")}))
 	require.Equal(t, []string{"latin1"}, find(t, j, journal.Query{Header: map[string]vlatte.Matcher{"x-name": match.Equal("caf�")}}))
 
@@ -916,15 +918,16 @@ func TestNew_FailsWhereItCantKeepItsFiles(t *testing.T) {
 	})
 }
 
-func TestNew_ARelativeDirNeedsAWorkingDirectory(t *testing.T) {
-	// A relative directory is resolved as the journal opens, so a later change of directory doesn't move its files:
-	// with no working directory to resolve it from, the journal fails.
+func TestNew_ARelativeDirCannotUseAReplacedWorkingDirectory(t *testing.T) {
+	// The working directory has been replaced by a file. Systems that can still name the removed directory
+	// must fail to create the journal there; others fail to resolve the relative path first.
 	dir := t.TempDir()
 	t.Chdir(dir)
 	require.NoError(t, os.Remove(dir))
+	require.NoError(t, os.WriteFile(dir, nil, 0o600))
 
 	_, err := journal.New(journal.Options{Dir: "journal"})
-	require.ErrorIs(t, err, fs.ErrNotExist)
+	require.True(t, errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR), "%v", err)
 }
 
 func TestMustNew_OpensAsNewDoesOrPanicsWithItsError(t *testing.T) {

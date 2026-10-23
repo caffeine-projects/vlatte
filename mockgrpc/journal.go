@@ -219,7 +219,7 @@ func (c *journalCall) end(ctx context.Context, err error) {
 	entry.Status = int(status.Code(err))
 	entry.Elapsed = time.Since(entry.Time)
 
-	if entry.Outcome == "" {
+	if entry.Outcome == journal.OutcomeUnknown {
 		entry.Outcome = journal.OutcomeFailed
 		if ctx.Err() != nil {
 			entry.Outcome = journal.OutcomeAbandoned

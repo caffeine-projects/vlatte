@@ -177,6 +177,84 @@ func TestQueryRequests_PagesWithTheNextOfAPage(t *testing.T) {
 	require.NotContains(t, doc, "next", "the last page")
 }
 
+func TestQueryRequests_OutcomeNamesAreTheWireFormat(t *testing.T) {
+	tests := []struct {
+		name    string
+		outcome journal.Outcome
+	}{
+		{name: "matched", outcome: journal.OutcomeMatched},
+		{name: "unmatched", outcome: journal.OutcomeUnmatched},
+		{name: "proxied", outcome: journal.OutcomeProxied},
+		{name: "failed", outcome: journal.OutcomeFailed},
+		{name: "abandoned", outcome: journal.OutcomeAbandoned},
+	}
+	j := journalOf(t)
+	for _, tt := range tests {
+		require.NoError(t, j.Append(entryOf(tt.name, "GET", "/", tt.outcome)))
+	}
+	url := serve(t, newStore(t), admin.Journal(j, nil))
+
+	for _, format := range []string{"json", "yaml"} {
+		for _, tt := range tests {
+			t.Run(format+"/"+tt.name, func(t *testing.T) {
+				// JSON is also YAML: both decoders must accept the documented text names.
+				query := fmt.Sprintf(`{"outcome": %q}`, tt.name)
+				conformsAs(t, query, format, "RequestQuery")
+				res, body := send(t, request{
+					method: "QUERY", url: url + "/requests", body: query,
+					contentType: "application/" + format, accept: "application/" + format,
+				})
+				require.Equal(t, http.StatusOK, res.StatusCode, body)
+				doc := conforms(t, res, body, "RequestList")
+				require.Equal(t, int64(1), doc["count"])
+				require.Equal(t, []string{tt.name}, requestIDs(doc))
+				entries, _ := doc["requests"].([]any)
+				require.Len(t, entries, 1)
+				got, _ := entries[0].(map[string]any)
+				require.Equal(t, tt.name, got["outcome"])
+			})
+		}
+	}
+}
+
+func TestQueryRequests_InvalidOutcomesExplainTheNamesToSend(t *testing.T) {
+	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil))
+	const names = "matched, unmatched, proxied, failed or abandoned"
+	tests := []struct {
+		value   string
+		message string
+		hint    string
+	}{
+		{value: "0", message: "outcome must be one of " + names + ", not a number"},
+		{value: "1", message: "outcome must be one of " + names + ", not a number", hint: "write the name: matched"},
+		{value: "2", message: "outcome must be one of " + names + ", not a number", hint: "write the name: unmatched"},
+		{value: "3", message: "outcome must be one of " + names + ", not a number", hint: "write the name: proxied"},
+		{value: "4", message: "outcome must be one of " + names + ", not a number", hint: "write the name: failed"},
+		{value: "5", message: "outcome must be one of " + names + ", not a number", hint: "write the name: abandoned"},
+		{value: `"1"`, message: "outcome must be one of " + names + `, not "1"`, hint: "write the name: matched"},
+		{value: `"won"`, message: "outcome must be one of " + names + `, not "won"`},
+	}
+
+	for _, format := range []string{"json", "yaml"} {
+		for _, tt := range tests {
+			t.Run(format+"/"+tt.value, func(t *testing.T) {
+				res, body := send(t, request{
+					method: "QUERY", url: url + "/requests", body: `{"outcome": ` + tt.value + `}`,
+					contentType: "application/" + format, accept: "application/" + format,
+				})
+				doc := problem(t, res, body, http.StatusBadRequest, "invalid_body")
+				problems, _ := doc["problems"].([]any)
+				require.Len(t, problems, 1)
+				got, _ := problems[0].(map[string]any)
+				require.Equal(t, "outcome", got["key"])
+				require.Equal(t, tt.message, got["message"])
+				hint, _ := got["hint"].(string)
+				require.Equal(t, tt.hint, hint)
+			})
+		}
+	}
+}
+
 func TestQueryRequests_ProblemsOfTheQuery(t *testing.T) {
 	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil))
 
