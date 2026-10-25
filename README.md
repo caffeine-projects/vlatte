@@ -77,12 +77,12 @@ err := m.Prep(ctx, proxyall.New(mockhttp.From("https://api.example.com").Timeout
 ## Mock files
 
 Mocks can also live in YAML or JSON files (`.json`, `.yaml` or `.yml`).
-- **On start,** the server loads the files matching `testdata/_mocks/*mock.yaml` and `testdata/_mocks/*mock.yml`, and the [recordings](#recording-and-playback) in `testdata/_mocks_recorded`, in name order. Change the patterns with `Setup().MockFilePatterns(...)`.
+- **On start,** the server loads the files matching `testdata/vlatte/_mocks/*mock.yaml` and `testdata/vlatte/_mocks/*mock.yml`, and the [recordings](#recording-and-playback) in `testdata/vlatte/_mocks_recorded`, in name order: the folders of its [work directory](#work-directory). Change the patterns with `Setup().MockFilePatterns(...)`.
 - **To load one file,** use `m.MustMock(mockhttp.FromFile(path))`.
 - **`m.Reload()`** replaces the mocks of the files with what they hold now, in one step. When a file has problems, it returns them and the mocks stay as they were.
 
 ```yaml
-# testdata/_mocks/hello_mock.yaml
+# testdata/vlatte/_mocks/hello_mock.yaml
 id: hello            # optional: names the mock, as in the admin API's /mocks/hello
 request:
   method: GET
@@ -120,8 +120,8 @@ No other reading happens: `[equal, 10]` doesn't match `010`. The [match package 
 
 ```
 mock: 2 problems
-  file testdata/_mocks/users_mock.yaml: unknown_key: response.stauts is not a known setting; did you mean response.status?
-  file testdata/_mocks/users_mock.yaml: conflict: proxy is set with response; keep one of them
+  file testdata/vlatte/_mocks/users_mock.yaml: unknown_key: response.stauts is not a known setting; did you mean response.status?
+  file testdata/vlatte/_mocks/users_mock.yaml: conflict: proxy is set with response; keep one of them
 ```
 
 ## Templates
@@ -489,7 +489,7 @@ A filter that fails takes nothing: the request is served as usual, and the failu
 
 **Playback.**
 - `StopRecording` waits until every call it took is written, then serves the recordings: the mock files load again, with the recording's directory, so the hits of file mocks count from 0. When `ctx` ends first, it returns ctx's error, and the recording keeps writing: another `StopRecording` waits for it again, and a `StartRecording` once it wrote everything ends it. Either serves it. A `StopRecording` that `Close` cuts short says the recordings aren't served.
-- A server started later serves them too. The default mock file patterns include `testdata/_mocks_recorded`, and a server serves the recordings of its `record.dir`.
+- A server started later serves them too. The default mock file patterns include `testdata/vlatte/_mocks_recorded`, and a server serves the recordings of its `record.dir`.
 - A server serves the recordings of the last recording `StopRecording` ended, not those of earlier ones in other directories. The same request recorded into two directories a server serves has one ID twice: `StopRecording` reports it, and the server serves what it served before.
 - A mock that proxies every request needs a priority number above 0 to let the recordings answer first: `AnyMethod().Priority(10).Reply(From(target))`.
 - A recording answers its request before any proxy, so a later recording without a target doesn't record that request again: it records what is new. A recording with a target records every request it takes.
@@ -526,7 +526,7 @@ mockhttp.RecordTransform(func(r *mockhttp.RecordedMock) error {
 
 **Secrets.** Mock files are plain text, and often committed: review them first. They hold the request bodies recordings match, such as a password or a `client_secret`, the values of the headers `RecordRequestHeaders` names, the response headers and bodies, such as tokens, and the query, in the URL and in the file name. `Set-Cookie` is left out by default. The headers `Setup().RedactHeader(...)` names keep their values out too: a response header is written `<redacted>`, and a request header matches by its presence. `RecordTransform` hides the rest.
 
-**Files.** A recording writes a mock file named after its request, such as `GET-items-page-2-<hash>.mock.json`, or `.yaml` or `.yml` with `RecordFormat`, into its directory: `testdata/_mocks_recorded` by default, from `root_dir`. A mock file appears whole, or not at all.
+**Files.** A recording writes a mock file named after its request, such as `GET-items-page-2-<hash>.mock.json`, or `.yaml` or `.yml` with `RecordFormat`, into its directory: `{workdir}/_mocks_recorded` by default, `testdata/vlatte/_mocks_recorded`. A mock file appears whole, or not at all.
 
 **Status.** `RecordingStatus` counts the calls taken, the mocks written, and the calls dropped or that failed. A response never waits for the calls before it to be written: when too many wait, the next ones are dropped and counted.
 
@@ -568,13 +568,16 @@ From settings, `admin: true` turns it on, and `admin.addr` (`--admin-addr`, `VLA
 | `PATCH /mocks/{id}` | Enables or disables the mock: `{"enabled": false}`. |
 | `DELETE /mocks/{id}`, `DELETE /mocks` | Removes the mock, or every mock. |
 | `POST /mocks/reload` | Loads the mock files, and the [persistent store](#persistent-admin-mocks), again, as `m.Reload()` does. A mock file's mock takes the place of a mock added through the admin API with its id. |
-| `POST /mocks/save` | Writes the mocks added through the admin API as mock files, `<id>.mock.<format>`, and serves them from the files from then on. `{"dir": ..., "format": ...}` defaults to `testdata/_mocks` and YAML, which the default mock file patterns load on the next start; `dir` stays inside `root_dir`. When a mock can't be written as a mock file that loads back, nothing is written, and files that fail to load are put back as they were. |
-| `GET /events` | Streams what the server serves as it happens, as [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html): requests a mock answered, requests no mock matched, proxied requests, warnings and errors. Nothing is kept: it is no journal of requests. `curl -N <admin>/events` follows it. |
+| `POST /mocks/save` | Writes the mocks added through the admin API as mock files, `<id>.mock.<format>`, and serves them from the files from then on. `{"dir": ..., "format": ...}` defaults to `{workdir}/_mocks` and YAML, which the default mock file patterns load on the next start; `dir` stays inside `root_dir`. When a mock can't be written as a mock file that loads back, nothing is written, and files that fail to load are put back as they were. |
+| `GET /events` | Streams what the server serves as it happens, as [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html): requests a mock answered, requests no mock matched, proxied requests, warnings and errors. Nothing is kept: the [journal](#request-journal) keeps the requests. `curl -N <admin>/events` follows it. |
 | `GET /logs` | Streams the server's log lines, as it writes them, as Server-Sent Events. A server given its own `Logger` streams none. |
-| `POST /reset` | Removes the mocks added through the admin API, loads the mock files again, saved ones included, and starts every scenario over. Mocks added in code stay as they are. The mocks of a persistent store come back from it: reset never deletes what it holds. |
+| `POST /reset` | Removes the mocks added through the admin API, loads the mock files again, saved ones included, starts every scenario over, and clears the [journal](#request-journal). Mocks added in code stay as they are. The mocks of a persistent store come back from it: reset never deletes what it holds. |
 | `POST /recording`, `GET /recording`, `DELETE /recording` | Starts a [recording](#recording-and-playback) with the keys of the `record` section, counts its calls, and stops it, listing the files it wrote. |
 | `GET /recorder` | A page that records a service from a browser. |
 | `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios` | Lists the state of each scenario, moves one to a state, `{"state": "paid"}`, and starts every scenario over. Names are exact: `Checkout` isn't `checkout`. |
+| `GET /requests` | Lists the newest requests of the [journal](#request-journal), with their `count`: `?limit=` (100 by default, 1000 at most, `0` for the count alone) and `?before=`, the `next` of a page, page through them. |
+| `QUERY /requests` | Finds and counts the requests a query selects, in the body: see [Request journal](#request-journal). It uses the HTTP [`QUERY`](https://httpwg.org/http-extensions/draft-ietf-httpbis-safe-method-w-body.html) method, safe as `GET` is, with a body: `curl -X QUERY`. |
+| `GET /requests/{id}`, `DELETE /requests` | Gets a request by the id its answer's `VLatte-Request-Id` names, and clears the journal. |
 | `GET /openapi`, `GET /docs` | The OpenAPI document, and a page that renders it. The page loads [Scalar](https://scalar.com) from a CDN, so it needs internet. |
 
 **Formats.** Bodies are JSON, or YAML with `Content-Type: application/yaml`. Answers follow `Accept`: JSON, or YAML when it is preferred. A relative `body_file` in a mock sent to the admin API opens from the server's working directory, as `GET /mocks/{id}` writes it.
@@ -602,16 +605,16 @@ From settings, `admin: true` turns it on, and `admin.addr` (`--admin-addr`, `VLA
 
 A request net/http refuses before the admin API reads it, such as one with a malformed request line, is answered in plain text.
 
-**Safety.** The admin API has no authentication: anyone who reaches it can change the mocks, which can read files the server can. It listens on a local address unless told otherwise; with `VLATTE_DOCKER_HOST`, the CLI listens on every interface, as for the mocks, so publish its port only where the network is trusted. A browser's cross-site request that would change the server is refused with `403`.
+**Safety.** The admin API has no authentication: anyone who reaches it can change the mocks, which can read files the server can, and read the requests of the journal. It listens on a local address unless told otherwise; with `VLATTE_DOCKER_HOST`, the CLI listens on every interface, as for the mocks, so publish its port only where the network is trusted. A browser's cross-site request that would change the server, or query its journal, is refused with `403`.
 
 ### Persistent admin mocks
 
 The mocks the admin API adds last as long as the server, unless a persistent store keeps them. Each change the admin API makes, adding, replacing, enabling, disabling or removing a mock, reaches the store at once, and the server serves what the store holds when it starts and on each reload, so a change made to the store directly takes effect then too. The mocks of mock files and code never reach it, and a mock file's mock wins over a mock of the store with its id.
 
-`FileStore(dir)` keeps them as mock files, `<id>.mock.yaml`, which only the store loads: keep `dir` out of the mock file patterns. A relative `dir` starts at `root_dir`. A mock whose description doesn't load back is refused, as its file would fail every later start. From settings, `admin.dir` (`--admin-dir`, `VLATTE_ADMIN_DIR`) sets the directory, and an empty one keeps the mocks in memory.
+`FileStore(dir)` keeps them as mock files, `<id>.mock.yaml`, which only the store loads: keep `dir` out of the mock file patterns. A relative `dir` starts at `root_dir`, and `{workdir}` at the [work directory](#work-directory). A mock whose description doesn't load back is refused, as its file would fail every later start. From settings, `admin.dir` (`--admin-dir`, `VLATTE_ADMIN_DIR`) sets the directory, and an empty one keeps the mocks in memory.
 
 ```go
-m := mockhttp.MustNew(mockhttp.Setup().Admin("").AdminStore(mockhttp.FileStore("testdata/_admin")))
+m := mockhttp.MustNew(mockhttp.Setup().Admin("").AdminStore(mockhttp.FileStore("{workdir}/_admin")))
 ```
 
 Any `vlatte.Store[*mockhttp.Mock]` can be the store, such as a database collection. It keeps the descriptions of the mocks by ID: `EncodeMock` writes one, and `DecodeMock` builds the mock back for the server.
@@ -623,6 +626,72 @@ mockhttp.Setup().AdminStore(func(app *mockhttp.Server) (vlatte.Store[*mockhttp.M
 ```
 
 `POST /mocks/save` is apart from the store: it exports the admin API's mocks as mock files to commit, which then serve in place of the store's copies.
+
+## Request journal
+
+A server can keep a journal of the requests its mocks get, whatever their outcome: a mock answered it (`matched`), none matched (`unmatched`), another server did (`proxied`), serving it failed (`failed`), or its client left first (`abandoned`). A test then verifies the requests it sent, as WireMock's `verify` does, while matching and hits work as before. Each entry has the status the client got: the one a reply that writes its own answer sent, as `Handler` does, `200` when it sent none, and for a failure the status sent before it, else `error_status_code`, as for a panic. A middleware (`Use`) or the decorator (`HandlerDecorator`) that answers before the mock, in its place, or once a timeout ends it, sets that status, as it does in the logs and the admin API's events.
+
+```go
+m := mockhttp.MustNew(mockhttp.Setup().Journal("")) // "" keeps it in a temporary directory, which Close removes
+m.MustStart()
+t.Cleanup(m.Close)
+
+// ... the code under test sends its requests ...
+// journal is github.com/caffeine-projects/vlatte/journal.
+
+m.AssertRequested(ctx, t, 1, journal.Query{Method: match.Equal("POST"), Path: match.Equal("/orders")})
+m.AssertRequested(ctx, t, 2, journal.Query{Header: map[string]vlatte.Matcher{"Authorization": match.HasPrefix("Bearer ")}})
+m.AssertNotRequested(ctx, t, journal.Query{Outcome: journal.OutcomeUnmatched})
+
+// The request part of a mock verifies as a mock matches: query parameters, forms, files, the parsed body.
+m.AssertRequested(ctx, t, 1, journal.Query{}, mockhttp.Request().Method("POST").Query("page", match.Equal("2")))
+
+entries, err := m.Requests(ctx, journal.Query{Path: match.GlobMatch("/users/*"), Limit: 10}) // newest first
+n, err := m.CountRequests(ctx, journal.Query{Kind: mockhttp.Kind})
+```
+
+A failed assertion lists the requests that matched, or the newest ones when none did, with the mock that came closest to each request no mock matched. A request is journaled as the server ends its answer, as hits count: a client gets a small answer only then, while it may read the start of a large one a moment before.
+
+A `journal.Query`, of package `github.com/caffeine-projects/vlatte/journal`, selects by the fields every protocol has. `Kind`, `Outcome`, `MockID`, `Method`, `Path` and `Status` are indexed: a query runs each of their matchers once per value the journal holds, not once per request, and reads no request from disk for them. `Target` (the full URL), `Since` and `Until` filter in memory too. `Header`, `Body` and request patterns read the requests the other fields leave. `Limit` and `Before` page through them, newest first; `m.Journal().Find` returns the next page's cursor and the count. A `journal.Journal` works on its own too, as a changelog of any requests: `journal.New(journal.Options{Dir: dir})`.
+
+Patterns are the request part of a mock builder, such as `mockhttp.Request()`: the server rebuilds each request from the journal and matches it, through its body parsers. A pattern has no `Times`, `Once` or scenario, which count served requests rather than match one. A rebuilt request has no `RemoteAddr` or TLS state for a `RequestMatches` predicate.
+
+gRPC servers keep the same journal with `mockgrpc.Setup().Journal(dir)`: a call's path is its full method, such as `/pkg.Service/Method`, its headers its metadata, its body its request message as JSON, which `match.Field` and `match.JSONPath` read, and its status its code, the one the client got, after every interceptor of `ServerOptions`. Its answer's `vlatte-request-id` header names its entry. gRPC has no request patterns.
+- With a journal, a stream interceptor goes through `grpc.ChainStreamInterceptor`: the journal takes `grpc.StreamInterceptor`, which grpc runs before every other, and `New` fails with `mockgrpc.ErrStreamInterceptorSlot` when `ServerOptions` sets it. A unary interceptor goes either way.
+- A call an interceptor answers itself isn't journaled, nor one grpc answers before any interceptor, such as a call of an unknown method, or one whose request it can't decode.
+- A unary reply grpc fails to send once every interceptor returned, such as one larger than a `grpc.MaxSendMsgSize` set, keeps the code they returned.
+- A service registered on `GRPCServer()`, past the server, has its unary calls journaled within the interceptors, with the code its mocks answered with, which `Start` warns of: register services with `RegisterService`, or `pb.RegisterGreeterServer(m, ...)`.
+
+**Files.** The journal is a changelog: each request is a JSON line, appended to `journal-NNNNNN.log` files. A new file starts every quarter of `journal.max_entries` requests (10 000 at most) or 64 MiB, so dropping the oldest requests removes whole files. Each full file, and the last one on a clean stop, gets a `.idx` sidecar with its index, so a restart reads no log. A text body stays text; another is `body_base64`. `DELETE /requests` and `Clear` write a `journal.clear` tombstone before they delete the files, so a restart drops a file a crash or a failed delete left. Only the user reads the files.
+
+**Persistence.** A named directory keeps the requests across restarts: a server that starts again finds the requests it served before, and a test verifies against them too, so tests use `Journal("")`. One server at a time keeps a journal in a directory: another fails to start. An HTTP server's relative directory starts at `root_dir`, and `{workdir}` at its [work directory](#work-directory), as in `{workdir}/_journal`. Close closes the journal: verify the requests before it, as `t.Cleanup(m.Close)` leaves a test to.
+
+**Limits.**
+- The journal keeps the newest 10 000 requests (`journal.max_entries`, `0` for all), and 1 MiB of each body (`journal.max_body_size`, `0` for whole bodies).
+- A body the journal cut, or that the server didn't read, has `body_truncated`: the server reads no body of a `GET` or `HEAD`, nor under `no_body_parsing`, nor past `MaxBodyParsingLimit`. A request pattern that reads the body, such as `Body`, `FormFile` or `RequestMatches`, which gets the whole request, fails on such a request, when the rest of the pattern matches it, rather than miss it: `AssertNotRequested` can't pass for a request the server got.
+- The headers the server redacts in its logs (`RedactHeader`) are redacted in the journal. gRPC metadata is kept as it came.
+- Requests the server answers before its mocks get them, such as CORS preflights, or that a middleware answers, aren't journaled.
+- A named directory gets a `.gitignore` of its files, so committing `testdata` leaves the journal out.
+
+The settings `journal` (`--journal`, `VLATTE_JOURNAL`), `journal.dir`, `journal.max_entries` and `journal.max_body_size` configure it.
+
+Through the [admin API](#admin-api), `QUERY /requests` takes a query in the body, with the matchers of mock files, and answers the requests, newest first, and their `count`. `"limit": 0` answers the count alone. `request` is the request part of a mock file:
+
+```sh
+curl -X QUERY -H 'Content-Type: application/json' \
+  -d '{"method": "POST", "path": "/orders", "request": {"query": {"page": "2"}}, "limit": 0}' \
+  http://127.0.0.1:8081/requests
+# {"count": 1, "requests": []}
+```
+
+| Key | Selects |
+|---|---|
+| `kind`, `outcome` | The protocol, such as `http`, and the outcome, exactly. |
+| `mock_id`, `method`, `path`, `target`, `status`, `body` | By a matcher: text matches equal text, a number or a bool an equal value, and a list is a matcher, such as `["glob", "/users/*"]` or `["jsonpath", "$.id", ["equal", 7]]`. |
+| `header` | Headers, or metadata, by name in any case, each by a matcher. |
+| `since`, `until` | The time of the requests, in RFC 3339. |
+| `request` | The request part of a mock file of the server's protocol. HTTP only. Send `method` and `path` on their own too: the index narrows the requests before `request` reads them. |
+| `limit`, `before` | The page: 100 requests by default, 1000 at most, and the `next` of the page before. |
 
 ## Failures
 
@@ -643,6 +712,19 @@ require.Equal(t, vlatte.FailureReply, res.Header.Get(vlatte.FailureHeader))
 
 The status of `no-match` is `no_match_status_code`, and the status of the others is `error_status_code`. Both default to 418.
 
+The answer to a request no mock matched lists the mocks that came closest, as does its [journal](#request-journal) entry: the parts of the request each matched, those that differ, and those it didn't check, such as a scenario's state, which a report never runs. A `times` used up is a part a mock differs in.
+
+```
+REQUEST DID NOT MATCH
+GET http://127.0.0.1:8080/users
+
+CLOSEST MOCKS
+[users] list users: 2 of 3 parts matched; differs in header Accept
+[create]: 1 of 2 parts matched; differs in method
+```
+
+The report runs no matcher twice: it goes on from the part where matching stopped, which a mock differs in, so it runs only the matchers matching never reached, the action of a `match.Peek` among them. It runs none that keeps state, such as a scenario's, which it lists as not checked. A mock that wants the request but is used up, by its `Times`, differs in `times` only, and comes first. `near_misses: false`, `--near-misses=false` or `mockhttp.Setup().NoNearMisses()` turns it off.
+
 A gRPC server answers `NotFound` when no mock matches, and `Internal` when serving a call fails, with the same values in the `vlatte-error` trailer. A mock that answers with a status, as `Unary().Status(...)` does, gets no trailer: that status is its answer.
 
 ## Debug headers
@@ -655,7 +737,7 @@ Each answer says how the server served it, in `VLatte-*` headers:
 | `VLatte-Matched-Mock-Name` | Its name, when it has one. |
 | `VLatte-Matched-Mock-Hits` | Its hits, this request included. |
 | `VLatte-Matched-Mock-Source` | The file it was loaded from, when it was loaded from one. |
-| `VLatte-Request-Id` | The ID of the request: `.Request.ID` in templates, `request_id` in the logs. Every answer has it, failures and no-match included. |
+| `VLatte-Request-Id` | The ID of the request: `.Request.ID` in templates, `request_id` in the logs, its id in the [journal](#request-journal). Every answer has it, failures and no-match included. |
 | `VLatte-Proxied` | `true` when a real service answered instead of a mock: a mock that replies with `From(...)`, a proxy passing on a request no mock matches, or the target of a recording. |
 
 A failure keeps the headers of the mock that matched before it failed. Hits count once the answer is sent, so two requests served at the same time can show the same number. A test checks them like any header:
@@ -668,7 +750,7 @@ Header names don't depend on case: Go sends `Vlatte-Matched-Mock-Id`, and HTTP/2
 
 `debug_headers: false` turns them all off, as do `VLATTE_DEBUG_HEADERS=false`, `--debug-headers=false` and `mockhttp.Setup().NoDebugHeaders()`. `VLatte-Error` stays: it is not a debug header.
 
-A gRPC server sends `vlatte-matched-mock-id`, `vlatte-matched-mock-name` and `vlatte-matched-mock-hits` as header metadata, with a mock's message or status. `Name(...)` on a mock builder sets the name. `mockgrpc.Setup().NoDebugHeaders()` turns them off.
+A gRPC server sends `vlatte-matched-mock-id`, `vlatte-matched-mock-name` and `vlatte-matched-mock-hits` as header metadata, with a mock's message or status, and `vlatte-request-id` when it keeps a journal. `Name(...)` on a mock builder sets the name. `mockgrpc.Setup().NoDebugHeaders()` turns them off.
 
 ## Configuration
 
@@ -699,9 +781,25 @@ proxy:
 cors: true
 ```
 
-Setting a key of a section (`cors`, `proxy`, `proxy_all` or `record`) turns the section on, and `false` turns it off.
+Setting a key of a section (`cors`, `proxy`, `proxy_all`, `record`, `admin` or `journal`) turns the section on, and `false` turns it off.
 
 `root_dir` is the directory that relative mock file patterns and record directories start at. Absolute ones are used as they are.
+
+### Work directory
+
+A server keeps its own files in its work directory: `testdata/vlatte`, or `testdata/vlatte/<name>` for a server `name` names, so servers that share a directory keep apart. `workdir` (`--workdir`, `Setup().WorkDir(dir)`) sets another, as is, from `root_dir`. Without it, a server's name is one folder, which doesn't start with `_`, as vlatte's own do.
+
+```
+testdata/
+  vlatte/
+    _mocks/            mock files
+    _mocks_recorded/   recordings
+    _admin/            the mocks the CLI's admin API adds
+    _journal/          the CLI's journal
+    test/              a server named "test": its own _mocks, _admin, _journal...
+```
+
+A path setting that starts with `{workdir}`, such as `mock_files`, `record.dir`, `admin.dir` or `journal.dir`, starts at the work directory: the defaults do, as `--help` shows. Other relative paths start at `root_dir`. In a YAML file, quote such a value: `dir: "{workdir}/recordings"`.
 
 Unknown keys, flags and `VLATTE_*` variables are errors, except `VLATTE_DOCKER_HOST`. A server that can't load its settings reports every problem at once:
 
@@ -721,7 +819,7 @@ m = mockhttp.MustNew(mockhttp.Setup().ConfigSources(mockhttp.ConfigFile("testdat
 
 ## CLI
 
-`vlatte` serves the mock files under `testdata/_mocks` in the working directory:
+`vlatte` serves the mock files under `testdata/vlatte/_mocks` in the working directory:
 
 ```sh
 vlatte --addr=127.0.0.1:8080
@@ -736,7 +834,7 @@ It [records](#recording-and-playback) a service until it stops, and serves the r
 
 ```sh
 vlatte --record --record-target=https://api.example.com --record-paths='/v1/*'
-# Ctrl-C writes the recordings into testdata/_mocks_recorded; another Ctrl-C quits at once
+# Ctrl-C writes the recordings into testdata/vlatte/_mocks_recorded; another Ctrl-C quits at once
 vlatte
 ```
 
@@ -749,7 +847,9 @@ curl -X POST -H 'Content-Type: application/json' \
   http://127.0.0.1:8081/mocks
 ```
 
-The command keeps the mocks its admin API adds in `testdata/_admin`, as [persistent admin mocks](#persistent-admin-mocks), so the next run serves them: `--admin-dir` moves them, and `--admin-dir=""` keeps them in memory.
+The command keeps the mocks its admin API adds in `{workdir}/_admin`, as [persistent admin mocks](#persistent-admin-mocks), so the next run serves them: `--admin-dir` moves them, and `--admin-dir=""` keeps them in memory.
+
+It keeps a [journal](#request-journal) of the requests it serves in `{workdir}/_journal`, across restarts, which the admin API queries: `--journal-dir` moves it, `--journal-dir=""` keeps it in a temporary directory, and `--journal=false` turns it off. Two commands can't share a journal directory: give each a `--name`, which gives it a [work directory](#work-directory) of its own, `testdata/vlatte/<name>`. The journal holds the requests it got, secrets included: its directory ignores its files in git.
 
 ## Development
 

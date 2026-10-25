@@ -3,8 +3,10 @@ package mockhttp
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -616,4 +619,59 @@ func TestUse_MiddlewaresSeeEveryMethod(t *testing.T) {
 
 	require.Equal(t, http.StatusAccepted, res.StatusCode)
 	require.Equal(t, "PURGE", res.Header.Get("X-Seen-Method"))
+}
+
+func TestConfig_TheServersFilesAreInItsWorkDir(t *testing.T) {
+	// A server keeps its own files in its work directory: one of its name, when it has one, so servers of one
+	// directory keep apart, unless workdir puts them elsewhere. Only a leading {workdir} stands for it.
+	abs := filepath.Join(t.TempDir(), "work")
+
+	tests := []struct {
+		name string
+		conf Config
+		path string
+		want string
+	}{
+		{name: "default", path: "{workdir}/_mocks", want: filepath.Join("testdata", "vlatte", "_mocks")},
+		{name: "named", conf: Config{Name: "api"}, path: "{workdir}/_journal", want: filepath.Join("testdata", "vlatte", "api", "_journal")},
+		{name: "set", conf: Config{Name: "api", WorkDir: "work"}, path: "{workdir}/_admin", want: filepath.Join("work", "_admin")},
+		{name: "from the root", conf: Config{RootDir: "root"}, path: "{workdir}/_mocks", want: filepath.Join("root", "testdata", "vlatte", "_mocks")},
+		{name: "absolute", conf: Config{RootDir: "root", WorkDir: abs + "/"}, path: "{workdir}/_mocks", want: filepath.Join(abs, "_mocks")},
+		{name: "itself", path: "{workdir}", want: filepath.Join("testdata", "vlatte")},
+		{name: "no placeholder", conf: Config{RootDir: "root"}, path: "mocks/*.yaml", want: filepath.Join("root", "mocks", "*.yaml")},
+		{name: "another name", path: "{workdirs}/a", want: filepath.Join("{workdirs}", "a")},
+		{name: "not leading", path: "a/{workdir}/b", want: filepath.Join("a", "{workdir}", "b")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.conf.path(tt.path))
+		})
+	}
+}
+
+func TestNew_ANameThatNamesTheWorkDirStaysInIt(t *testing.T) {
+	// The name of a server is a folder of testdata/vlatte, next to vlatte's own, whose names start with _: a name
+	// that would leave it, or take one of vlatte's, fails, unless workdir sets the folder. From settings, it is a
+	// problem of the name, as a bad value of any setting is.
+	for _, name := range []string{"..", ".", "../x", "/abs", "_mocks"} {
+		_, err := New(Setup().Silent().Name(name))
+		require.ErrorContains(t, err, "names the folder of the server's files", name)
+
+		_, err = New(Setup().Silent().ConfigSources(ConfigArgs([]string{"--name", name})))
+		cfgErr, ok := errors.AsType[*config.Error](err)
+		require.True(t, ok, "%s: %v", name, err)
+		require.Equal(t, "name", cfgErr.Problems[0].Key)
+	}
+
+	for _, setup := range []*ConfigBuilder{
+		Setup().Name("api"),
+		Setup().Name("orders/v1"),
+		Setup().Name("..").WorkDir("work"),
+		Setup().ConfigSources(ConfigArgs([]string{"--name", "..", "--workdir", "work"})),
+	} {
+		m, err := New(setup.Silent())
+		require.NoError(t, err)
+		m.Close()
+	}
 }

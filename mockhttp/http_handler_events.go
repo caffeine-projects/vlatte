@@ -19,6 +19,7 @@ var (
 	_ mockHTTPLifecycle = (*builtInMockHTTPLifecycle)(nil)
 	_ mockHTTPLifecycle = (*builtInDescriptiveMockHTTPLifecycle)(nil)
 	_ mockHTTPLifecycle = lifecycles(nil)
+	_ mockHTTPLifecycle = heldLifecycle{}
 )
 
 // _redacted stands for the values of a header that the logs and the recordings hide.
@@ -72,6 +73,29 @@ func (ls lifecycles) OnError(r *RequestValues, err error) {
 	}
 }
 
+// heldLifecycle runs the outcomes of a request once the client has its answer, so the log, the events and the journal
+// tell the status the client got, whatever a middleware sends: see answerWriter.then. The request and its warnings
+// run as they come.
+type heldLifecycle struct {
+	mockHTTPLifecycle
+}
+
+func (l heldLifecycle) OnMatch(r *RequestValues, res *Response) {
+	r.answer.then(func() { l.mockHTTPLifecycle.OnMatch(r, res) })
+}
+
+func (l heldLifecycle) OnProxied(r *RequestValues, res *Response) {
+	r.answer.then(func() { l.mockHTTPLifecycle.OnProxied(r, res) })
+}
+
+func (l heldLifecycle) OnNoMatch(r *RequestValues) {
+	r.answer.then(func() { l.mockHTTPLifecycle.OnNoMatch(r) })
+}
+
+func (l heldLifecycle) OnError(r *RequestValues, err error) {
+	r.answer.then(func() { l.mockHTTPLifecycle.OnError(r, err) })
+}
+
 // Standard HTTP Lifecycle
 
 type builtInMockHTTPLifecycle struct {
@@ -120,9 +144,11 @@ func (h *builtInMockHTTPLifecycle) OnMatch(r *RequestValues, s *Response) {
 
 	evt.Dict("mock", dict)
 
-	// A reply that writes its own response, such as Echo or Handler, returns none: there are no response fields.
+	// A reply that writes its own response, such as Echo or Handler, returns none: the status it sent is all there is.
 	if s != nil {
-		evt.Dict("response", h.responseDict(s))
+		evt.Dict("response", h.responseDict(r, s))
+	} else {
+		evt.Dict("response", zerolog.Dict().Int("status", r.answered()))
 	}
 
 	evt.Msgf("<--- REQUEST MATCHED %s %s", r.RawRequest.Method, r.URL.Path)
@@ -138,7 +164,7 @@ func (h *builtInMockHTTPLifecycle) OnProxied(r *RequestValues, s *Response) {
 		Str("url", r.URL.String()).
 		Str("request_id", r.ReqID).
 		Dur("elapsed", time.Since(r.StartedAtTime)).
-		Dict("response", h.responseDict(s)).
+		Dict("response", h.responseDict(r, s)).
 		Msgf("<--- REQUEST PROXIED %s %s", r.RawRequest.Method, r.URL.Path)
 }
 
@@ -186,9 +212,10 @@ func (h *builtInMockHTTPLifecycle) OnError(r *RequestValues, err error) {
 	evt.Msgf("<--- ERROR %s %s", r.RawRequest.Method, r.URL.Path)
 }
 
-// responseDict holds the fields of s the verbosity logs.
-func (h *builtInMockHTTPLifecycle) responseDict(s *Response) *zerolog.Event {
-	res := zerolog.Dict().Int("status", s.StatusCode)
+// responseDict holds the fields of s, the answer to r, the verbosity logs, with the status the client got, which a
+// middleware may have sent in place of the one of s.
+func (h *builtInMockHTTPLifecycle) responseDict(r *RequestValues, s *Response) *zerolog.Event {
+	res := zerolog.Dict().Int("status", r.answered())
 
 	if h.app.config.LogVerbosity >= vlatte.LogHeader {
 		redactedHeader := redactHeader(s.Header, h.app.config.HeaderNamesToRedact)
@@ -289,9 +316,13 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnMatch(rv *RequestValues, s *Resp
 	buf.WriteString(h.cz.Green("Took(ms): "))
 	buf.WriteString(strconv.FormatInt(time.Since(rv.StartedAtTime).Milliseconds(), 10))
 
-	// A reply that writes its own response, such as Echo or Handler, returns none: there is no response to print.
+	// A reply that writes its own response, such as Echo or Handler, returns none: the status it sent is all there is.
 	if s != nil {
-		h.writeResponse(buf, s)
+		h.writeResponse(buf, rv, s)
+	} else {
+		buf.WriteString("\n")
+		buf.WriteString(h.cz.Green("Status: "))
+		buf.WriteString(strconv.Itoa(rv.answered()))
 	}
 
 	buf.WriteString("\n")
@@ -321,7 +352,7 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnProxied(rv *RequestValues, s *Re
 	buf.WriteString("\n")
 	buf.WriteString(h.cz.Green("Took(ms): "))
 	buf.WriteString(strconv.FormatInt(time.Since(rv.StartedAtTime).Milliseconds(), 10))
-	h.writeResponse(buf, s)
+	h.writeResponse(buf, rv, s)
 	buf.WriteString("\n")
 	buf.WriteTo(h.out)
 }
@@ -388,11 +419,12 @@ func (h *builtInDescriptiveMockHTTPLifecycle) OnError(r *RequestValues, err erro
 	)
 }
 
-// writeResponse prints the fields of s the verbosity logs.
-func (h *builtInDescriptiveMockHTTPLifecycle) writeResponse(buf *bytes.Buffer, s *Response) {
+// writeResponse prints the fields of s, the answer to rv, the verbosity logs, with the status the client got, which a
+// middleware may have sent in place of the one of s.
+func (h *builtInDescriptiveMockHTTPLifecycle) writeResponse(buf *bytes.Buffer, rv *RequestValues, s *Response) {
 	buf.WriteString("\n")
 	buf.WriteString(h.cz.Green("Status: "))
-	buf.WriteString(strconv.FormatInt(int64(s.StatusCode), 10))
+	buf.WriteString(strconv.Itoa(rv.answered()))
 
 	if h.app.config.LogVerbosity >= vlatte.LogHeader && len(s.Header) > 0 {
 		buf.WriteString("\n")

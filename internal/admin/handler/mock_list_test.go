@@ -9,7 +9,7 @@ import (
 
 func TestListMocks(t *testing.T) {
 	// The list tells the state of every mock, disabled ones too, in the order mocks match: a client sees which mocks
-	// requests reached, without a journal of requests.
+	// requests reached, by their hits.
 	first, second := newFake("first"), newFake("second")
 	first.origin = "file mocks/first.yaml"
 	first.hits.Store(3)

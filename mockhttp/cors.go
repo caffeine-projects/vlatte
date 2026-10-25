@@ -265,7 +265,7 @@ func dropCORSHeaders(w http.ResponseWriter, h http.Header) {
 			maps.DeleteFunc(w.Header(), isCORSHeader)
 
 			// A recording leaves out the headers set before the answer, as the server's: these are the answer's.
-			if c := captureWriterOf(w); c != nil {
+			if c, ok := writerOf[*captureWriter](w); ok {
 				maps.DeleteFunc(c.before, isCORSHeader)
 			}
 

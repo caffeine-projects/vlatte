@@ -43,6 +43,9 @@ func (in *interceptors) UnaryInterceptor(
 	info *grpc.UnaryServerInfo,
 	_ grpc.UnaryHandler,
 ) (any, error) {
+	call := callOf(ctx)
+	call.serve(ctx)
+
 	// Proto3 treats zero values as unset, so leave them out as protojson does.
 	b, err := json.Marshal(reqMsg, json.OmitZeroStructFields(true), json.Deterministic(true))
 	if err != nil {
@@ -55,17 +58,38 @@ func (in *interceptors) UnaryInterceptor(
 	}
 
 	rawBody := string(b)
+	call.request(b)
+
 	sub := vlatte.NewExplanation()
 	mocks := vlatte.Mocks[*Mock, *UnaryValueSelectorIn](ofKind(em, func(m *Mock) bool { return m.unaryReply != nil }))
-	mock, pass, err := mocks.Find(ctx, sub, &UnaryValueSelectorIn{rawBody, info}, func(m *Mock) vlatte.Evaluators[*Mock, *UnaryValueSelectorIn] { return m.unaryExpectations })
+	input := &UnaryValueSelectorIn{rawBody, info}
+	evals := func(m *Mock) vlatte.Evaluators[*Mock, *UnaryValueSelectorIn] { return m.unaryExpectations }
+
+	// Only the journal reports near misses: a call's status carries no more than its message. They go on from where
+	// matching stopped, so no matcher runs twice for the call.
+	var misses *vlatte.Misses[*Mock, *UnaryValueSelectorIn]
+	if call != nil && !in.app.config.NoNearMisses {
+		misses = new(vlatte.Misses[*Mock, *UnaryValueSelectorIn])
+	}
+
+	mock, pass, err := mocks.Find(ctx, sub, input, evals, misses)
 	if err != nil {
 		return nil, fail(ctx, vlatte.FailureMatch, codes.Internal, "unary: finding a mock: %v", err)
 	}
 
 	if !pass {
+		var near []vlatte.NearMiss
+		if misses != nil {
+			near = misses.NearMisses(ctx, describeEval)
+		}
+
+		call.unmatched(near)
+
 		in.app.publish(handler.EventUnmatched, info.FullMethod, nil, nil)
 		return nil, fail(ctx, vlatte.FailureNoMatch, codes.NotFound, "unary: request was not matched with any mock")
 	}
+
+	call.matched(mock)
 
 	// The header goes out with the reply's own, or with its status.
 	if !in.app.config.NoDebugHeaders {
@@ -74,6 +98,8 @@ func (in *interceptors) UnaryInterceptor(
 
 	rv := &UnaryRequestValues{reqMsg, info, rawBody, in.app}
 	res, err := mock.unaryReply.Reply(ctx, rv)
+	call.replied(ctx, err)
+
 	if err != nil {
 		in.app.publishReply(info.FullMethod, mock, err)
 		return nil, replyError(ctx, "unary", mock, err)

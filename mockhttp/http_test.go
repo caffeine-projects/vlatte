@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,12 +11,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -622,6 +625,27 @@ func TestServer_AStartThatFailsClosesTheServer(t *testing.T) {
 			require.ErrorIs(t, start(m), http.ErrServerClosed, "a start that fails closes the server")
 		})
 	}
+}
+
+func TestServer_CloseLogsAJournalThatFailsToClose(t *testing.T) {
+	// Close returns nothing: a journal that can't write the index of its last segment, which the next server of its
+	// directory opens fast from, is logged, not lost.
+	logs := &bytes.Buffer{}
+	logger := zerolog.New(logs)
+
+	dir := t.TempDir()
+	m := MustNew(Setup().Logger(&logger).Journal(dir))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	res, _ := do(t, http.MethodGet, m.URL("/nope"), nil, nil)
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+
+	// A directory where the index of the segment goes: no file can take its place.
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "journal-000001.idx"), 0o700))
+
+	m.Close()
+	require.Contains(t, logs.String(), "server: Close: closing the journal")
 }
 
 func TestServer_ACloseDuringTheStartStopsIt(t *testing.T) {

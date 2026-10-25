@@ -143,7 +143,7 @@ func TestPlayback_AFileLoadsOnce(t *testing.T) {
 
 	_, target := answering(t, "recorded")
 
-	dir, err := filepath.Abs(filepath.Join("testdata", "_mocks_recorded"))
+	dir, err := filepath.Abs(filepath.Join("testdata", "vlatte", "_mocks_recorded"))
 	require.NoError(t, err)
 
 	m := MustNew(Setup().Silent().Record(RecordTarget(target), RecordDir(dir)))

@@ -113,20 +113,6 @@ type captureWriter struct {
 	done     bool // the call went to the recording, or was discarded
 }
 
-// captureWriterOf returns the captureWriter that w writes to, or nil when w doesn't write to one.
-func captureWriterOf(w http.ResponseWriter) *captureWriter {
-	for {
-		switch rw := w.(type) {
-		case *captureWriter:
-			return rw
-		case interface{ Unwrap() http.ResponseWriter }:
-			w = rw.Unwrap()
-		default:
-			return nil
-		}
-	}
-}
-
 // capture captures the call of rv for the recording, and returns the writer to answer it with. raw is the request
 // body the server read, and parseErr why it couldn't parse it.
 func (rec *recording) capture(w http.ResponseWriter, rv *RequestValues, raw []byte, parseErr error) *captureWriter {
@@ -161,8 +147,7 @@ func (rec *recording) requestBody(rv *RequestValues, raw []byte, parseErr error)
 		return bodyUnmatched, ""
 	}
 
-	// The server read only part of it. A body exactly at the limit may have had more.
-	if limit := conf.MaxBodyParsingLimit; limit > 0 && int64(len(raw)) >= limit || r.ContentLength > int64(len(raw)) {
+	if bodyCut(conf.MaxBodyParsingLimit, r, raw) {
 		return bodyUnmatched, "the server read only part of the body"
 	}
 

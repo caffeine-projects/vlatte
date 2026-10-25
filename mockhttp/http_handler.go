@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,11 +24,18 @@ import (
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
 
+// _misses recycles the misses of the requests no mock matches, which matching keeps for every request.
+var _misses = sync.Pool{New: func() any { return new(vlatte.Misses[*Mock, *selectorInput]) }}
+
 var (
 	_ http.ResponseWriter = (*topResponseWriter)(nil)
 	_ http.Flusher        = (*topResponseWriter)(nil)
 	_ http.Hijacker       = (*topResponseWriter)(nil)
 	_ vlatte.Stage        = responseSink{}
+	_ http.Flusher        = (*answerWriter)(nil)
+	_ http.Hijacker       = (*answerWriter)(nil)
+	_ http.Pusher         = (*answerWriter)(nil)
+	_ io.ReaderFrom       = (*answerWriter)(nil)
 )
 
 // errAbandoned ends the flow of the steps of a mock whose reply failed or panicked: a failure is vlatte's answer, not
@@ -188,6 +196,215 @@ func (s responseSink) Flush() error {
 
 func (s responseSink) Close() error { return nil }
 
+// answerKey keys the answerWriter of a request in its context.
+type answerKey struct{}
+
+// answerWriter keeps the status the client gets, the first final one sent, which the journal, the logs and the
+// events tell. A handler's own writer is under it: a reply may flush it, push with it, or take its connection over.
+//
+// withAnswer puts one outside the decorator and the middlewares, which sees what they send in place of a mock, and
+// holds the outcomes of the request until the client has its answer. A handler that can't find it, as under a
+// middleware that hides both the request's context and its own writer's, keeps one of its own under the middlewares.
+type answerWriter struct {
+	rw http.ResponseWriter
+
+	// outer is set for the writer withAnswer puts outside the middlewares.
+	outer bool
+
+	mu        sync.Mutex
+	status    int
+	hijacked  bool
+	done      bool
+	unwinding bool
+	held      []func()
+}
+
+// withAnswer serves next with an answerWriter outside it, in the context of the request too, so the outcomes of a
+// request tell the status the client got, whatever a middleware or the decorator sends. They run once next returns:
+// the client has its answer then, but for net/http's last flush, so a test that checks the journal right after the
+// response sees the request.
+func withAnswer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		a := &answerWriter{rw: w, outer: true}
+		returned := false
+
+		// A panic that no middleware answers drops the connection, as a runtime.Goexit does.
+		defer func() { a.finish(!returned) }()
+
+		next.ServeHTTP(a, r.WithContext(context.WithValue(r.Context(), answerKey{}, a)))
+		returned = true
+	})
+}
+
+// answerOf returns the answerWriter of r, which w writes to: the one withAnswer put outside the middlewares, found in
+// r's context or under w, or a new one over w when a middleware hid it. The outer one may be done already, as when a
+// timeout of the decorator answered first: the outcomes then run at once, with the status the client got.
+func answerOf(r *http.Request, w http.ResponseWriter) *answerWriter {
+	if a, ok := r.Context().Value(answerKey{}).(*answerWriter); ok {
+		return a
+	}
+
+	if a, ok := writerOf[*answerWriter](w); ok {
+		return a
+	}
+
+	return &answerWriter{rw: w}
+}
+
+// writerOf returns the writer of type W that w writes to: w, or one that the Unwrap of a writer over it hands out.
+func writerOf[W http.ResponseWriter](w http.ResponseWriter) (W, bool) {
+	for {
+		if found, ok := w.(W); ok {
+			return found, true
+		}
+
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			var none W
+			return none, false
+		}
+
+		w = u.Unwrap()
+	}
+}
+
+func (w *answerWriter) Header() http.Header { return w.rw.Header() }
+
+// WriteHeader implements http.ResponseWriter. An informational status, such as 103 Early Hints, isn't the answer,
+// nor is a code net/http refuses.
+func (w *answerWriter) WriteHeader(code int) {
+	if code == http.StatusSwitchingProtocols || code >= 200 && code <= 999 {
+		w.sent(code)
+	}
+
+	w.rw.WriteHeader(code)
+}
+
+// Write implements http.ResponseWriter: a body without a status answers 200.
+func (w *answerWriter) Write(p []byte) (int, error) {
+	w.sent(http.StatusOK)
+	return w.rw.Write(p)
+}
+
+// Flush implements http.Flusher.
+func (w *answerWriter) Flush() {
+	_ = w.FlushError()
+}
+
+// FlushError flushes the response to the client, as http.ResponseController does. A flush sends the status, 200
+// unless one was set, when the writer can flush.
+func (w *answerWriter) FlushError() error {
+	err := http.NewResponseController(w.rw).Flush()
+	if err == nil {
+		w.sent(http.StatusOK)
+	}
+
+	return err
+}
+
+// Hijack implements http.Hijacker. What goes on a connection taken over isn't a status the server sends.
+func (w *answerWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, rw, err := http.NewResponseController(w.rw).Hijack()
+	if err == nil {
+		w.mu.Lock()
+		w.hijacked = true
+		w.mu.Unlock()
+	}
+
+	return conn, rw, err
+}
+
+// ReadFrom implements io.ReaderFrom, so copying a body, such as a file's, reaches the writer's own, which may send it
+// at once.
+func (w *answerWriter) ReadFrom(r io.Reader) (int64, error) {
+	var (
+		n   int64
+		err error
+	)
+
+	if rf, ok := w.rw.(io.ReaderFrom); ok {
+		n, err = rf.ReadFrom(r)
+	} else {
+		n, err = io.Copy(writerOnly{w.rw}, r)
+	}
+
+	if n > 0 {
+		w.sent(http.StatusOK)
+	}
+
+	return n, err
+}
+
+// Push implements http.Pusher, when the writer pushes, such as over HTTP/2.
+func (w *answerWriter) Push(target string, opts *http.PushOptions) error {
+	if p, ok := w.rw.(http.Pusher); ok {
+		return p.Push(target, opts)
+	}
+
+	return http.ErrNotSupported
+}
+
+// Unwrap returns the response writer, so http.ResponseController reaches it.
+func (w *answerWriter) Unwrap() http.ResponseWriter { return w.rw }
+
+// sent keeps code, the status the client gets, unless one was sent, or the connection was taken over: net/http
+// sends nothing more on it.
+func (w *answerWriter) sent(code int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.status == 0 && !w.hijacked {
+		w.status = code
+	}
+}
+
+// wroteOn keeps code, the status vlatte wrote itself on the connection it took over, such as a CONNECT's 200: the
+// client has it, whatever comes of the connection next.
+func (w *answerWriter) wroteOn(code int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.status = code
+}
+
+// state returns the status sent, 0 for none yet, whether the connection was taken over, and whether the handler
+// panicked past the middlewares, which drops the connection.
+func (w *answerWriter) state() (status int, hijacked, unwinding bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return w.status, w.hijacked, w.unwinding
+}
+
+// then runs f, an outcome of the request w answers, once the client has the answer: when the handler withAnswer
+// serves returns. It runs f at once when w is a handler's own, its handler returned, or its connection was taken
+// over, as a tunnel's, which stays open: what vlatte wrote on it is the answer.
+func (w *answerWriter) then(f func()) {
+	w.mu.Lock()
+
+	if !w.outer || w.done || w.hijacked {
+		w.mu.Unlock()
+		f()
+
+		return
+	}
+
+	w.held = append(w.held, f)
+	w.mu.Unlock()
+}
+
+// finish runs the outcomes then held, once the handler withAnswer serves is done: unwinding when it panicked.
+func (w *answerWriter) finish(unwinding bool) {
+	w.mu.Lock()
+	held := w.held
+	w.held, w.done, w.unwinding = nil, true, unwinding
+	w.mu.Unlock()
+
+	for _, f := range held {
+		f()
+	}
+}
+
 type mockHandler struct {
 	app                   *Server
 	lifecycle             mockHTTPLifecycle
@@ -208,6 +425,13 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.app.config.DebugFn("req", r)
 
 	reqValues, rawBody, parseErr := parseRequest(r, h.app)
+
+	// The mock writes to w, through the middlewares' writers: only a writer of its own goes under them.
+	reqValues.answer = answerOf(r, w)
+	if !reqValues.answer.outer {
+		w = reqValues.answer
+	}
+
 	h.debugHeader(w, vlatte.RequestIDHeader, reqValues.ReqID)
 
 	if parseErr != nil {
@@ -222,15 +446,24 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.lifecycle.OnRequest(reqValues)
 
-	input := &selectorInput{
-		RawRequest: r,
-		URL:        reqValues.URL,
-		Query:      r.URL.Query(),
-		Form:       r.PostForm,
-		Files:      formFiles(r),
-		ParsedBody: reqValues.ParsedBodyData,
-		ForProxy:   h.app.proxy != nil && (r.Method == http.MethodConnect || r.URL.Host != ""),
-	}
+	// A request that ends without an outcome, such as one whose client left, or that panicked, is journaled too, once
+	// the client has its answer. A panic goes on to the recovery middleware, which answers it, as it goes on through
+	// net/http's.
+	defer func() {
+		if reqValues.journal == nil {
+			return
+		}
+
+		// A middleware may end the context it gave once the mock handler returns: whether the client left is told now.
+		p, left := recover(), context.Cause(r.Context())
+		reqValues.answer.then(func() { reqValues.journal.end(reqValues, p, left) })
+
+		if p != nil {
+			panic(p)
+		}
+	}()
+
+	input := newSelectorInput(r, reqValues, h.app.proxy != nil && (r.Method == http.MethodConnect || r.URL.Host != ""))
 
 	// A recording captures the request as it came, and the answer as the client gets it. A CONNECT opens a tunnel,
 	// which answers nothing. A recording with a target sends it what it takes, before any mock.
@@ -253,9 +486,21 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Near misses go on from where matching stopped, so no matcher runs twice for the request. Only the answer to a
+	// request no mock matches, and no proxy takes, lists them. Requests share the room the misses take.
+	var misses *vlatte.Misses[*Mock, *selectorInput]
+	if !h.app.config.NoNearMisses && !input.ForProxy && (h.app.proxyAll == nil || r.Method == http.MethodConnect) {
+		misses, _ = _misses.Get().(*vlatte.Misses[*Mock, *selectorInput])
+
+		defer func() {
+			misses.Reset()
+			_misses.Put(misses)
+		}()
+	}
+
 	sub := vlatte.NewExplanation()
 	mocks := vlatte.Mocks[*Mock, *selectorInput](stored)
-	mock, matched, err := mocks.Find(r.Context(), sub, input, func(m *Mock) vlatte.Evaluators[*Mock, *selectorInput] { return m.spec.expectations })
+	mock, matched, err := mocks.Find(r.Context(), sub, input, expectationsOf, misses)
 	if err != nil {
 		h.onError(w, reqValues, vlatte.FailureMatch, fmt.Errorf("http: finding a mock: %w", err))
 		return
@@ -273,7 +518,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case h.app.proxyAll != nil && r.Method != http.MethodConnect:
 			h.serveUpstream(w, reqValues, h.app.proxyAll, capture)
 		default:
-			h.onNoMatches(w, reqValues)
+			h.onNoMatches(w, reqValues, misses)
 		}
 
 		return
@@ -754,6 +999,8 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 		toUpstream = vlatte.NewFlow(ctx, &vlatte.Sink{W: upstream}, mock.UpstreamSteps())
 	}
 
+	r.answer.wroteOn(res.StatusCode)
+
 	return func() {
 		err := pipe(client, upstream, toClient, toUpstream)
 		if err != nil {
@@ -822,6 +1069,8 @@ func (h *mockHandler) openConnect(w http.ResponseWriter, r *RequestValues) (net.
 
 		return nil, false
 	}
+
+	r.answer.wroteOn(http.StatusOK)
 
 	return client, true
 }
@@ -931,8 +1180,14 @@ func (h *mockHandler) renderFailed(r *RequestValues, proxied bool, err error) {
 	}
 }
 
-func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues) {
+// onNoMatches answers a request no mock matched with the mocks that came closest, of misses, unless the server
+// reports none: misses is nil then. Its journal entry lists them too.
+func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, misses *vlatte.Misses[*Mock, *selectorInput]) {
 	defer h.lifecycle.OnNoMatch(r)
+
+	if misses != nil {
+		r.nearMisses = misses.NearMisses(r.RawRequest.Context(), describeExpectation)
+	}
 
 	buf := bufpool.Get()
 	buf.Reset()
@@ -943,6 +1198,7 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues) {
 	buf.WriteString(" ")
 	buf.WriteString(r.URL.String())
 	buf.WriteString("\n\n")
+	writeNearMisses(buf, r.nearMisses)
 
 	w.Header().Add(HeaderContentType, MIMETextPlainCharsetUTF8)
 	w.Header().Set(HeaderVlatteError, vlatte.FailureNoMatch)
@@ -950,6 +1206,39 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues) {
 
 	buf.WriteTo(w)
 }
+
+// writeNearMisses writes misses to buf, one per line, after a title: the parts of each mock that matched, those that
+// differ, and those it didn't check. A line break in a name or a matcher's error is a space: a mock stays a line.
+func writeNearMisses(buf *bytes.Buffer, misses []vlatte.NearMiss) {
+	if len(misses) == 0 {
+		return
+	}
+
+	buf.WriteString("CLOSEST MOCKS\n")
+
+	for _, miss := range misses {
+		line := "[" + miss.MockID + "]"
+		if miss.Name != "" && miss.Name != miss.MockID {
+			line += " " + miss.Name
+		}
+
+		line += fmt.Sprintf(": %d of %d parts matched", miss.Passed, miss.Total)
+
+		if len(miss.Failed) > 0 {
+			line += "; differs in " + strings.Join(miss.Failed, ", ")
+		}
+
+		if len(miss.Skipped) > 0 {
+			line += "; not checked: " + strings.Join(miss.Skipped, ", ")
+		}
+
+		_oneLine.WriteString(buf, line)
+		buf.WriteString("\n")
+	}
+}
+
+// _oneLine turns line breaks into spaces.
+var _oneLine = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
 
 // onError answers a request whose serving failed, with the error status, so a client tells it from a mock's answer.
 // failure is a vlatte.Failure* value. The body names the mock that matched, if one did, and the error.
@@ -998,6 +1287,48 @@ func (h *mockHandler) onError(w http.ResponseWriter, r *RequestValues, failure s
 	w.WriteHeader(h.app.config.ErrorStatusCode)
 
 	buf.WriteTo(w)
+}
+
+// newSelectorInput returns what the matchers of mocks read of r, whose values rv holds: forProxy tells a request the
+// forward proxy may answer.
+func newSelectorInput(r *http.Request, rv *RequestValues, forProxy bool) *selectorInput {
+	return &selectorInput{
+		RawRequest: r,
+		URL:        rv.URL,
+		Query:      r.URL.Query(),
+		Form:       r.PostForm,
+		Files:      formFiles(r),
+		ParsedBody: rv.ParsedBodyData,
+		ForProxy:   forProxy,
+	}
+}
+
+// expectationsOf returns the matchers of the request part of m.
+func expectationsOf(m *Mock) vlatte.Evaluators[*Mock, *selectorInput] {
+	return m.spec.expectations
+}
+
+// describeExpectation names the part of a request e checks, such as "header Accept": the name of a header, query
+// parameter or form field goes with its kind. A part of no kind, such as Times, goes by its key.
+func describeExpectation(e *expectation) string {
+	scope := matchingScope(e.Target)
+	name := scope.FieldName()
+
+	switch {
+	case name == "":
+		return e.Key
+	case e.Key == "":
+		return name
+	}
+
+	// The key of a method or a scheme is the value it wants, which the part's name says enough of.
+
+	switch scope {
+	case matchingScopeHeader, matchingScopeQuery, matchingScopeQueries, matchingScopeFormField, matchingScopeFormFile:
+		return name + " " + e.Key
+	}
+
+	return name
 }
 
 func locals(r *RequestValues, provided map[string]any, params *viewdata.Parameters) *viewdata.Data {
