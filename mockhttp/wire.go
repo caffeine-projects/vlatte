@@ -24,6 +24,9 @@ var (
 // one: it answers in HTTP/1.x on the connection itself.
 var errWireNeedsHTTP1 = errors.New("http: wire steps need an HTTP/1.x connection")
 
+// errTakeOverClosed is the failure of a takeover while the server closes: the connection is closed, without an answer.
+var errTakeOverClosed = errors.New("http: the server closed the connection it took over")
+
 // _wireHeaders are the headers wireResponseWriter sets itself: the framing of the answer is its own.
 var _wireHeaders = []string{HeaderContentLength, "Transfer-Encoding", HeaderConnection}
 
@@ -80,7 +83,7 @@ func (h *mockHandler) takeOver(ctx context.Context, w http.ResponseWriter, r *Re
 	// The server is closing.
 	if !h.app.tunnels.add(conn) {
 		_ = conn.Close()
-		return nil, fmt.Errorf("http: %w", net.ErrClosed)
+		return nil, errTakeOverClosed
 	}
 
 	ww := &wireResponseWriter{

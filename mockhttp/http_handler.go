@@ -333,7 +333,11 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if steps := mock.WireSteps(); len(steps) > 0 {
 		var err error
 		if wire, err = h.takeOver(ctx, w, reqValues, steps, upSteps); err != nil && !errors.Is(err, vlatte.ErrAbort) {
-			h.onError(w, reqValues, vlatte.FailureReply, err)
+			// A connection the server's close took over is closed: it can't get an answer.
+			if !errors.Is(err, errTakeOverClosed) {
+				h.onError(w, reqValues, vlatte.FailureReply, err)
+			}
+
 			return
 		}
 

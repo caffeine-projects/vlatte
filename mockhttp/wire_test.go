@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -327,12 +328,24 @@ func TestWire_BehindAWriterThatCantHandTheConnectionOverIsVlattesAnswer(t *testi
 
 func TestWire_WhileTheServerClosesNothingIsAnswered(t *testing.T) {
 	// A connection taken over while the server closes is one Close no longer ends: it is closed instead, without an
-	// answer.
-	m := MustNew(Setup().Silent())
+	// answer, and nothing tries to write one on it.
+	served := make(chan struct{})
+	m := MustNew(Setup().Silent().Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer close(served)
+			next.ServeHTTP(w, r)
+		})
+	}))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
 	scoped := m.MustMock(Getf("/wire").WireStep(vlatte.StepFunc(passWire)).Reply(OK().PlainText("hello")))
+
+	// net/http logs a write on a connection taken over to the log package, without a server ErrorLog.
+	logs := &lockedBuffer{}
+	out := log.Writer()
+	log.SetOutput(logs)
+	t.Cleanup(func() { log.SetOutput(out) })
 
 	// What Close does once the server stops taking requests.
 	m.tunnels.closeAll()
@@ -340,6 +353,9 @@ func TestWire_WhileTheServerClosesNothingIsAnswered(t *testing.T) {
 	wire, err := readWire(dialServer(t, m, "/wire"))
 	require.NoError(t, err)
 	require.Empty(t, wire)
+
+	<-served
+	require.NotContains(t, logs.String(), "hijacked connection")
 	require.EqualValues(t, 0, scoped.Hits())
 }
 
