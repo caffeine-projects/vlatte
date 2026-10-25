@@ -68,17 +68,17 @@ var errNoMocks = errors.New("admin: no mock store: pass the Mocks option")
 
 // Server is the admin API of a mock server.
 type Server struct {
-	addr      string
-	kind      string
-	url       func() string
-	logger    *zerolog.Logger
-	routes    map[string]http.Handler
-	files     handler.Files
-	scenarios handler.Scenarios
-	journal   handler.Journal
-	reset     func(files handler.Files, scenarios handler.Scenarios, j handler.Journal) http.Handler
-	streams   []func() // end the streams of Server-Sent Events routes
-	handler   http.Handler
+	addr    string
+	logger  *zerolog.Logger
+	caps    handler.Capabilities
+	routes  map[string]http.Handler
+	streams []func() // end the streams of Server-Sent Events routes
+	handler http.Handler
+
+	// newOperations makes the operations on the mocks of the Mocks option, and operations the routes that run them,
+	// once New has the capabilities of every option.
+	newOperations func(caps handler.Capabilities) *handler.Operations
+	operations    map[string]func(ops *handler.Operations) http.Handler
 
 	mu      sync.Mutex // orders Start, Close and the requests that start as Close runs
 	srv     *http.Server
@@ -100,7 +100,7 @@ func Addr(addr string) Option {
 // Info sets what GET /health tells of the mock server: its kind, such as http, and where it serves its mocks, which
 // url returns: its URL, or its address for gRPC.
 func Info(kind string, url func() string) Option {
-	return func(s *Server) { s.kind, s.url = kind, url }
+	return func(s *Server) { s.caps.Kind, s.caps.URL = kind, url }
 }
 
 // Logger sets the logger of the admin API's internal errors. Nil logs nothing.
@@ -112,20 +112,20 @@ func Logger(logger *zerolog.Logger) Option {
 // JSON or YAML. Without a builder, the routes that add or replace mocks answer 501.
 func Mocks[M vlatte.Mock](store vlatte.Store[M], build vlatte.MockBuilder[M]) Option {
 	return func(s *Server) {
-		s.routes["GET /mocks"] = handler.ListMocks(store)
-		s.routes["DELETE /mocks"] = handler.RemoveAllMocks(store)
-		s.routes["GET /mocks/{id}"] = handler.GetMock(store)
-		s.routes["PATCH /mocks/{id}"] = handler.UpdateMock(store)
-		s.routes["DELETE /mocks/{id}"] = handler.RemoveMock(store)
-
-		s.reset = func(files handler.Files, scenarios handler.Scenarios, j handler.Journal) http.Handler {
-			return handler.Reset(store, files, scenarios, j)
+		s.newOperations = func(caps handler.Capabilities) *handler.Operations {
+			return handler.NewOperations(store, build, caps)
 		}
 
+		s.operations["GET /mocks"] = handler.ListMocks
+		s.operations["DELETE /mocks"] = handler.RemoveAllMocks
+		s.operations["GET /mocks/{id}"] = handler.GetMock
+		s.operations["PATCH /mocks/{id}"] = handler.UpdateMock
+		s.operations["DELETE /mocks/{id}"] = handler.RemoveMock
+
 		if build != nil {
-			s.routes["POST /mocks"] = handler.AddMock(store, build)
-			s.routes["POST /mocks/validate"] = handler.ValidateMock(store, build)
-			s.routes["PUT /mocks/{id}"] = handler.ReplaceMock(store, build)
+			s.operations["POST /mocks"] = handler.AddMock
+			s.operations["POST /mocks/validate"] = handler.ValidateMock
+			s.operations["PUT /mocks/{id}"] = handler.ReplaceMock
 		}
 	}
 }
@@ -133,28 +133,29 @@ func Mocks[M vlatte.Mock](store vlatte.Store[M], build vlatte.MockBuilder[M]) Op
 // Files sets the mock files of the mock server, which POST /mocks/reload loads again, and POST /mocks/save writes.
 func Files(files handler.Files) Option {
 	return func(s *Server) {
-		s.files = files
-		s.routes["POST /mocks/reload"] = handler.ReloadMocks(files)
-		s.routes["POST /mocks/save"] = handler.SaveMocks(files)
+		s.caps.Files = files
+		s.operations["POST /mocks/reload"] = handler.ReloadMocks
+		s.operations["POST /mocks/save"] = handler.SaveMocks
 	}
 }
 
 // Recorder sets the recorder of the mock server, which GET, POST and DELETE /recording control.
 func Recorder(rec handler.Recorder) Option {
 	return func(s *Server) {
-		s.routes["GET /recording"] = handler.RecordingStatus(rec)
-		s.routes["POST /recording"] = handler.StartRecording(rec)
-		s.routes["DELETE /recording"] = handler.StopRecording(rec)
+		s.caps.Recorder = rec
+		s.operations["GET /recording"] = handler.RecordingStatus
+		s.operations["POST /recording"] = handler.StartRecording
+		s.operations["DELETE /recording"] = handler.StopRecording
 	}
 }
 
 // Scenarios sets the scenarios of the mock server, which GET, PUT and DELETE /scenarios read and move.
 func Scenarios(scenarios handler.Scenarios) Option {
 	return func(s *Server) {
-		s.scenarios = scenarios
-		s.routes["GET /scenarios"] = handler.ListScenarios(scenarios)
-		s.routes["PUT /scenarios/{name}"] = handler.SetScenario(scenarios)
-		s.routes["DELETE /scenarios"] = handler.ResetScenarios(scenarios)
+		s.caps.Scenarios = scenarios
+		s.operations["GET /scenarios"] = handler.ListScenarios
+		s.operations["PUT /scenarios/{name}"] = handler.SetScenario
+		s.operations["DELETE /scenarios"] = handler.ResetScenarios
 	}
 }
 
@@ -176,11 +177,11 @@ func Journal(j handler.Journal, pattern handler.RequestPattern) Option {
 			return
 		}
 
-		s.journal = j
-		s.routes["GET /requests"] = handler.ListRequests(j)
-		s.routes["QUERY /requests"] = handler.QueryRequests(j, pattern)
-		s.routes["DELETE /requests"] = handler.ClearRequests(j)
-		s.routes["GET /requests/{id}"] = handler.GetRequest(j)
+		s.caps.Journal, s.caps.Pattern = j, pattern
+		s.operations["GET /requests"] = handler.ListRequests
+		s.operations["QUERY /requests"] = handler.QueryRequests
+		s.operations["DELETE /requests"] = handler.ClearRequests
+		s.operations["GET /requests/{id}"] = handler.GetRequest
 	}
 }
 
@@ -199,12 +200,15 @@ func Logs(logs *handler.Logs) Option {
 
 // New creates the admin API of a mock server. It needs the Mocks option.
 func New(options ...Option) (*Server, error) {
-	s := &Server{routes: make(map[string]http.Handler, len(_routes))}
+	s := &Server{
+		routes:     make(map[string]http.Handler, len(_routes)),
+		operations: make(map[string]func(ops *handler.Operations) http.Handler, len(_routes)),
+	}
 	for _, option := range options {
 		option(s)
 	}
 
-	if s.routes["GET /mocks"] == nil {
+	if s.newOperations == nil {
 		return nil, errNoMocks
 	}
 
@@ -212,15 +216,21 @@ func New(options ...Option) (*Server, error) {
 		s.logger = new(zerolog.Nop())
 	}
 
-	s.routes["GET /health"] = handler.Health(s.kind, s.url)
+	ops := s.newOperations(s.caps)
+
+	s.operations["GET /health"] = handler.Health
+	s.operations["POST /reset"] = handler.Reset
 	s.routes["GET /openapi"] = handler.OpenAPI()
 	s.routes["GET /docs"] = handler.Docs()
 	s.routes["GET /recorder"] = handler.RecorderPage()
-	s.routes["POST /reset"] = s.reset(s.files, s.scenarios, s.journal)
 
 	mux := http.NewServeMux()
 	for _, route := range _routes {
 		h := s.routes[route.pattern]
+		if operation := s.operations[route.pattern]; operation != nil {
+			h = operation(ops)
+		}
+
 		if h == nil {
 			h = handler.NotSupported(route.lacking)
 		}

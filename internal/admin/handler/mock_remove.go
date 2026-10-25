@@ -1,26 +1,20 @@
 package handler
 
 import (
-	"net/http"
-
-	"github.com/caffeine-projects/vlatte"
+	"context"
 )
 
-// RemoveMock removes the mock of the path's id, and closes it: DELETE /mocks/{id}.
-func RemoveMock[M vlatte.Mock](store vlatte.Store[M]) http.Handler {
-	return negotiated(func(w http.ResponseWriter, r *http.Request) {
-		mock, err := pick(r, store, r.PathValue("id"))
-		if err != nil {
-			fail(w, r, err)
-			return
-		}
+// RemoveMock removes the mock of id, and closes it.
+func (o *Operations) RemoveMock(ctx context.Context, id string) error {
+	return o.mocks.remove(ctx, id)
+}
 
-		// Removed as the very mock picked: a mock that took its id since stays.
-		if err := store.Replace(r.Context(), []M{mock}); err != nil {
-			fail(w, r, err)
-			return
-		}
+func (m *storeMocks[M]) remove(ctx context.Context, id string) error {
+	mock, err := m.pick(ctx, id)
+	if err != nil {
+		return err
+	}
 
-		w.WriteHeader(http.StatusNoContent)
-	})
+	// Removed as the very mock picked: a mock that took its id since stays.
+	return m.store.Replace(ctx, []M{mock})
 }

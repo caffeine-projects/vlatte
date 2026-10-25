@@ -1,6 +1,7 @@
 package handler_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -201,4 +202,36 @@ func TestProblems_Closing(t *testing.T) {
 	res.Request = r
 	problem(t, res, rec.Body.String(), http.StatusServiceUnavailable, "closing")
 	require.Equal(t, "close", res.Header.Get("Connection"))
+}
+
+func TestProblem_ErrorsTheCallerCantFixAreInternalButABodyTooLarge(t *testing.T) {
+	// Another way in than HTTP answers an operation's error as the admin API does: the document a route would answer.
+	tests := []struct {
+		name string
+		err  error
+		want handler.ProblemDocument
+	}{
+		{
+			name: "a body over its limit",
+			err:  &http.MaxBytesError{Limit: 10},
+			want: handler.ProblemDocument{
+				Status: 413, Title: "Request Entity Too Large", Code: "body_too_large",
+				Detail: "the body is over the limit of 10 bytes", Instance: "add_mock",
+			},
+		},
+		{
+			name: "a store that failed",
+			err:  errors.New("store: broken \xff"),
+			want: handler.ProblemDocument{
+				Status: 500, Title: "Internal Server Error", Code: "internal",
+				Detail: "store: broken �", Instance: "add_mock",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, handler.Problem(tt.err, "add_mock"))
+		})
+	}
 }

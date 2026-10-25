@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/require"
@@ -22,6 +23,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/journal"
 )
 
 var (
@@ -342,4 +344,77 @@ func ids(t *testing.T, store vlatte.Store[*fakeMock]) []string {
 	}
 
 	return out
+}
+
+// fakeRecorder records nothing: it keeps the settings it starts with, and answers what it is told to.
+type fakeRecorder struct {
+	doc      string
+	format   string
+	status   vlatte.RecordStatus
+	startErr error
+	result   *vlatte.RecordResult
+	stopErr  error
+}
+
+func (r *fakeRecorder) StartRecording(doc []byte, format string) error {
+	if r.startErr != nil {
+		return r.startErr
+	}
+
+	r.doc, r.format = string(doc), format
+	r.status.Active = true
+
+	return nil
+}
+
+func (r *fakeRecorder) StopRecording(context.Context) (*vlatte.RecordResult, error) {
+	return r.result, r.stopErr
+}
+
+func (r *fakeRecorder) RecordingStatus() vlatte.RecordStatus {
+	return r.status
+}
+
+// journalOf returns a journal of entries, the protocol's own: a path, and its method.
+func journalOf(t *testing.T, entries ...*journal.Entry) *journal.Journal {
+	t.Helper()
+
+	j, err := journal.New(journal.Options{Dir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { j.Close() })
+
+	for _, e := range entries {
+		require.NoError(t, j.Append(e))
+	}
+
+	return j
+}
+
+func entryOf(id, method, path string, outcome journal.Outcome) *journal.Entry {
+	return &journal.Entry{
+		ID:      id,
+		Time:    time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC),
+		Kind:    "fake",
+		Outcome: outcome,
+		Method:  method,
+		Path:    path,
+		Target:  "fake://" + path,
+		Status:  200,
+		Header:  map[string][]string{"Accept": {"application/json"}},
+		Body:    []byte(`{"id": 7}`),
+	}
+}
+
+// requestIDs returns the ids of the requests of a RequestList.
+func requestIDs(doc map[string]any) []string {
+	list, _ := doc["requests"].([]any)
+
+	ids := make([]string, 0, len(list))
+	for _, r := range list {
+		e, _ := r.(map[string]any)
+		id, _ := e["id"].(string)
+		ids = append(ids, id)
+	}
+
+	return ids
 }
