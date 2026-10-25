@@ -407,7 +407,7 @@ paths:
                 description: "Server-Sent Events, such as `event: matched` then `data: {\"type\": \"matched\", ...}`."
               example: |
                 event: matched
-                data: {"method":"GET","mock_id":"hello","request_id":"7f3a","status":200,"target":"/hello","time":"2026-10-20T12:00:00Z","type":"matched"}
+                data: {"method":"GET","mock_id":"hello","request_id":"7f3a","status":200,"target":"http://127.0.0.1:8080/hello","time":"2026-10-20T12:00:00Z","type":"matched"}
 
         "501": { $ref: "#/components/responses/NotSupported" }
   /logs:

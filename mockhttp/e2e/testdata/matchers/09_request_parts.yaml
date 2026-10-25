@@ -1,0 +1,18 @@
+# The parts of a request beyond its target, each under its own key.
+request:
+  method: POST
+  path: /login
+  host: API.local
+  client_ip: [isIn, ["127.0.0.1", "::1"]]
+  headers:
+    accept: [itemsMatch, [text/html, application/json]]
+  cookie:
+    session: abc
+  basic_auth:
+    username: jeff
+    password: s3cret
+  forms:
+    tag: [len, 2]
+
+response:
+  status: 204

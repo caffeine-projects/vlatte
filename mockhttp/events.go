@@ -20,7 +20,8 @@ type RequestValues struct {
 	// RawRequest is the original incoming http.Request.
 	RawRequest *http.Request
 
-	// URL is the full request url.URL, including scheme, host, port.
+	// URL is the full request url.URL, including scheme, host, port: those a request in absolute form, as a forward
+	// proxy gets, or an intercepted one names, and the server's otherwise.
 	URL *url.URL
 
 	// URLPathSegments stores path segments, each decoded: an escaped "/" stays in its segment.

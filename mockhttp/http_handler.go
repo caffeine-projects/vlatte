@@ -1309,13 +1309,13 @@ func expectationsOf(m *Mock) vlatte.Evaluators[*Mock, *selectorInput] {
 }
 
 // describeExpectation names the part of a request e checks, such as "header Accept": the name of a header, query
-// parameter or form field goes with its kind. A part of no kind, such as Times, goes by its key.
+// parameter, form field, cookie or path param goes with its kind. Times, and a part of no kind, go by their key.
 func describeExpectation(e *expectation) string {
 	scope := matchingScope(e.Target)
 	name := scope.FieldName()
 
 	switch {
-	case name == "":
+	case name == "" || scope == matchingScopeRepeat:
 		return e.Key
 	case e.Key == "":
 		return name
@@ -1324,7 +1324,8 @@ func describeExpectation(e *expectation) string {
 	// The key of a method or a scheme is the value it wants, which the part's name says enough of.
 
 	switch scope {
-	case matchingScopeHeader, matchingScopeQuery, matchingScopeQueries, matchingScopeFormField, matchingScopeFormFile:
+	case matchingScopeHeader, matchingScopeQuery, matchingScopeQueries, matchingScopeFormField, matchingScopeFormFile,
+		matchingScopeHeaders, matchingScopeFormFields, matchingScopeCookie, matchingScopePathParam:
 		return name + " " + e.Key
 	}
 
@@ -1332,8 +1333,9 @@ func describeExpectation(e *expectation) string {
 }
 
 func locals(r *RequestValues, provided map[string]any, params *viewdata.Parameters) *viewdata.Data {
-	cookies := make(map[string]*http.Cookie, len(r.RawRequest.Cookies()))
-	for _, cookie := range r.RawRequest.Cookies() {
+	parsed := r.RawRequest.Cookies()
+	cookies := make(map[string]*http.Cookie, len(parsed))
+	for _, cookie := range parsed {
 		cookies[cookie.Name] = cookie
 	}
 
@@ -1342,11 +1344,17 @@ func locals(r *RequestValues, provided map[string]any, params *viewdata.Paramete
 		body = viewdata.NewBody(r.RawRequest.Method, r.RawBodyBytes, r.ParsedBodyData)
 	}
 
+	var pathParams map[string]string
+	if r.Mock != nil && r.Mock.spec.pathTemplate != nil {
+		pathParams, _ = r.Mock.spec.pathTemplate.params(r.URL.EscapedPath())
+	}
+
 	req := &viewdata.Request{
 		ID:              r.ReqID,
 		Method:          r.RawRequest.Method,
 		URL:             r.URL,
 		URLPathSegments: r.URLPathSegments,
+		PathParams:      pathParams,
 		Header:          r.RawRequest.Header.Clone(),
 		Cookies:         cookies,
 		Body:            body,

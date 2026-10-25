@@ -27,6 +27,7 @@ import (
 type (
 	mockField        = config.Field[mockDef]
 	filePatternField = config.Field[filePatternDef]
+	basicAuthField   = config.Field[basicAuthDef]
 	replyField       = config.Field[replyDef]
 	sequenceField    = config.Field[sequenceDef]
 	randomField      = config.Field[randomDef]
@@ -65,17 +66,33 @@ type scenarioDef struct {
 
 // requestDef holds the request matchers, as Builder calls, and the keys that set them.
 type requestDef struct {
-	keys     []string
-	scheme   func(*Builder)
-	method   func(*Builder)
-	url      map[string]func(*Builder) // by key: url, url_match or path; only one may be set
-	fragment func(*Builder)
-	query    []func(*Builder)
-	queries  []func(*Builder)
-	header   []func(*Builder)
-	form     []func(*Builder)
-	formFile []func(*Builder)
-	body     func(*Builder)
+	keys      []string
+	scheme    func(*Builder)
+	method    func(*Builder)
+	host      func(*Builder)
+	clientIP  func(*Builder)
+	basicAuth func(*Builder)
+	url       map[string]func(*Builder) // by key: url, url_match or path; only one may be set
+	fragment  func(*Builder)
+	query     []func(*Builder)
+	queries   []func(*Builder)
+	header    []func(*Builder)
+	headers   []func(*Builder)
+	cookie    []func(*Builder)
+	form      []func(*Builder)
+	forms     []func(*Builder)
+	formFile  []func(*Builder)
+	body      func(*Builder)
+
+	pathTemplate   *pathTemplate // the parsed path_template, which adds to the matcher of url, url_match or path
+	pathParams     []func(*Builder)
+	pathParamNames []string // the names under path_params, sorted
+}
+
+// basicAuthDef is a decoded request.basic_auth: the matchers of its username and password.
+type basicAuthDef struct {
+	username vlatte.Matcher
+	password vlatte.Matcher
 }
 
 // filePatternDef is a decoded form_file pattern.
@@ -200,6 +217,33 @@ var _mockSchema = config.NewSchema(
 		},
 	},
 	mockField{
+		Key: "request.host", Kind: config.Any, Usage: "Host the request names, without its port: text, compared ignoring case, or a matcher list.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.request.keys = append(d.request.keys, "host")
+			return setHost(&d.request, v)
+		},
+	},
+	mockField{
+		Key: "request.client_ip", Kind: config.Any, Usage: "Address of the client, without its port: text or a matcher list.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.request.keys = append(d.request.keys, "client_ip")
+			if s, isText := v.Any.(string); isText {
+				if err := bareHost(v, s); err != nil {
+					return err
+				}
+			}
+
+			m, err := filterbuilder.MatcherOf(v)
+			if err != nil {
+				return err
+			}
+
+			d.request.clientIP = func(b *Builder) { b.ClientIP(m) }
+
+			return nil
+		},
+	},
+	mockField{
 		Key: "request.url", Kind: config.Any,
 		Usage: "URL to match: an absolute URL, compared ignoring case; a relative one, such as /items?page=2, " +
 			"whose path and query must be the same, the parameters in any order, each with its values in order; or a matcher list.",
@@ -220,6 +264,22 @@ var _mockSchema = config.NewSchema(
 		},
 	},
 	mockField{
+		Key: "request.path_template", Kind: config.String,
+		Usage: "Path to match with parameters, such as /users/{id}: a parameter is a whole segment, and takes any segment but an empty one.",
+		Set:   func(d *mockDef, v config.Value) error { return setPathTemplate(&d.request, v) },
+	},
+	mockField{
+		Key: "request.path_params", Kind: config.Any, Usage: "Parameters of path_template to match, by name: text or a matcher list each.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.request.keys = append(d.request.keys, "path_params")
+			if obj, ok := v.Any.(map[string]any); ok {
+				d.request.pathParamNames = slices.Sorted(maps.Keys(obj))
+			}
+
+			return matchEach(v, &d.request.pathParams, func(b *Builder, name string, m vlatte.Matcher) { b.PathParam(name, m) })
+		},
+	},
+	mockField{
 		Key: "request.fragment", Kind: config.Any,
 		Usage: `URL fragment to match: a glob, or a matcher list. Only clients that write a "#" into the request target send one.`,
 		Set: func(d *mockDef, v config.Value) error {
@@ -237,10 +297,10 @@ var _mockSchema = config.NewSchema(
 		},
 	},
 	mockField{
-		Key: "request.queries", Kind: config.Any, Usage: "Query parameters with many values to match, by name.",
+		Key: "request.queries", Kind: config.Any, Usage: "Query parameters with many values to match, by name: every value, as a list.",
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "queries")
-			return matchEach(v, &d.request.queries, func(b *Builder, name string, m vlatte.Matcher) { b.Queries(name, m) })
+			return matchLists(v, &d.request.queries, func(b *Builder, name string, m vlatte.Matcher) { b.Queries(name, m) })
 		},
 	},
 	mockField{
@@ -255,10 +315,54 @@ var _mockSchema = config.NewSchema(
 		},
 	},
 	mockField{
+		Key: "request.headers", Kind: config.Any, Usage: "Headers with many values to match, by name: every value, as a list.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.request.keys = append(d.request.keys, "headers")
+			if err := sameHeader(v); err != nil {
+				return err
+			}
+
+			return matchLists(v, &d.request.headers, func(b *Builder, name string, m vlatte.Matcher) { b.Headers(name, m) })
+		},
+	},
+	mockField{
+		Key: "request.cookie", Kind: config.Any, Usage: "Cookies to match, by name, which keeps its case: text or a matcher list each.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.request.keys = append(d.request.keys, "cookie")
+			return matchEach(v, &d.request.cookie, func(b *Builder, name string, m vlatte.Matcher) { b.Cookie(name, m) })
+		},
+	},
+	mockField{
+		Key: "request.basic_auth", Kind: config.Any, Usage: "Credentials of a Basic Authorization header to match: username and password.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.request.keys = append(d.request.keys, "basic_auth")
+
+			var auth basicAuthDef
+
+			err := _basicAuthSchema.Decode(&auth, v)
+			err = withRequired(err, auth.username != nil, v, "username")
+			err = withRequired(err, auth.password != nil, v, "password")
+			if err != nil {
+				return err
+			}
+
+			d.request.basicAuth = func(b *Builder) { b.BasicAuthMatches(auth.username, auth.password) }
+
+			return nil
+		},
+	},
+	mockField{
 		Key: "request.form", Kind: config.Any, Usage: "Fields of a urlencoded or multipart form body to match, by name: text or a matcher list each.",
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "form")
 			return matchEach(v, &d.request.form, func(b *Builder, name string, m vlatte.Matcher) { b.FormField(name, m) })
+		},
+	},
+	mockField{
+		Key: "request.forms", Kind: config.Any, Usage: "Fields of a form body with many values to match, by name: every value, as a list.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.request.keys = append(d.request.keys, "forms")
+			return matchLists(v, &d.request.forms, func(b *Builder, name string, m vlatte.Matcher) { b.FormFields(name, m) })
 		},
 	},
 	mockField{
@@ -387,6 +491,27 @@ var _filePatternSchema = config.NewSchema(
 			}
 
 			return nil
+		},
+	},
+)
+
+var _basicAuthSchema = config.NewSchema(
+	basicAuthField{
+		Key: "username", Kind: config.Any, Usage: "Username to match: text or a matcher list.",
+		Set: func(a *basicAuthDef, v config.Value) error {
+			m, err := filterbuilder.MatcherOf(v)
+			a.username = m
+
+			return err
+		},
+	},
+	basicAuthField{
+		Key: "password", Kind: config.Any, Usage: "Password to match: text or a matcher list.",
+		Set: func(a *basicAuthDef, v config.Value) error {
+			m, err := filterbuilder.MatcherOf(v)
+			a.password = m
+
+			return err
 		},
 	},
 )
@@ -583,6 +708,7 @@ func (d *mockDef) check(origin string, found []config.Problem) []config.Problem 
 
 	problems := conflicts(origin, "", set)
 	problems = append(problems, d.request.conflicts(origin)...)
+	problems = append(problems, d.request.checkPathParams(origin, found)...)
 
 	requestFailed := slices.ContainsFunc(found, func(p config.Problem) bool {
 		return p.Key == "request" || strings.HasPrefix(p.Key, "request.")
@@ -601,6 +727,46 @@ func (d *mockDef) check(origin string, found []config.Problem) []config.Problem 
 			Code: config.CodeMissingValue, Origin: origin, Key: "scenario.name",
 			Message: "scenario is set but scenario.name is not", Hint: "name the scenario",
 		})
+	}
+
+	return problems
+}
+
+// checkPathParams reports path_params without a path_template, and the names under it that the template doesn't have.
+// A path_params that isn't an object, and a path_template that failed to parse, have their own problems in found.
+func (r *requestDef) checkPathParams(origin string, found []config.Problem) []config.Problem {
+	if !slices.Contains(r.keys, "path_params") ||
+		slices.ContainsFunc(found, func(p config.Problem) bool { return p.Key == "request.path_params" }) {
+		return nil
+	}
+
+	t := r.pathTemplate
+	if t == nil {
+		if slices.Contains(r.keys, "path_template") {
+			return nil
+		}
+
+		return []config.Problem{{
+			Code: config.CodeMissingValue, Origin: origin, Key: "request.path_params",
+			Message: "request.path_params is set without request.path_template",
+			Hint:    "name the parameters in request.path_template, such as /users/{id}",
+		}}
+	}
+
+	hint := "request.path_template has no parameters"
+	if names := t.paramNames(); len(names) > 0 {
+		hint = "its parameters are " + strings.Join(names, ", ")
+	}
+
+	var problems []config.Problem
+	for _, name := range r.pathParamNames {
+		if !t.has(name) {
+			key := "request.path_params." + name
+			problems = append(problems, config.Problem{
+				Code: config.CodeUnknownKey, Origin: origin, Key: key,
+				Message: fmt.Sprintf("%s names no parameter of request.path_template %q", key, t.text), Hint: hint,
+			})
+		}
 	}
 
 	return problems
@@ -907,6 +1073,26 @@ func matchEach(v config.Value, dst *[]func(*Builder), add func(b *Builder, name 
 	})
 }
 
+// matchLists is matchEach for queries, headers and forms, whose matchers get every value, as a list: text, which
+// never equals a list, is a problem.
+func matchLists(v config.Value, dst *[]func(*Builder), add func(b *Builder, name string, m vlatte.Matcher)) error {
+	return config.Members(v, func(name string, member config.Value) error {
+		if s, isText := member.Any.(string); isText {
+			return config.Invalid(member, fmt.Sprintf("%s=%q is text, which never equals a list of values", member.Key, s),
+				fmt.Sprintf("write a matcher list, such as [contains, %q]", s))
+		}
+
+		m, err := filterbuilder.MatcherOf(member)
+		if err != nil {
+			return err
+		}
+
+		*dst = append(*dst, func(b *Builder) { add(b, name, m) })
+
+		return nil
+	})
+}
+
 func setMethod(r *requestDef, v config.Value) error {
 	s, ok := v.Any.(string)
 	if !ok {
@@ -929,6 +1115,40 @@ func setMethod(r *requestDef, v config.Value) error {
 	}
 
 	r.method = func(b *Builder) { b.Method(methods...) }
+
+	return nil
+}
+
+// setHost sets the host matcher. Text is a host name, which ignores case.
+func setHost(r *requestDef, v config.Value) error {
+	s, ok := v.Any.(string)
+	if !ok {
+		m, err := filterbuilder.MatcherOf(v)
+		if err != nil {
+			return err
+		}
+
+		r.host = func(b *Builder) { b.Host(m) }
+
+		return nil
+	}
+
+	if err := bareHost(v, s); err != nil {
+		return err
+	}
+
+	r.host = func(b *Builder) { b.Host(match.EqualIgnoreCase(s)) }
+
+	return nil
+}
+
+// bareHost reports text of host or client_ip with a port, or the brackets of an IPv6 address: the value it compares
+// with has neither, so it would never match.
+func bareHost(v config.Value, s string) error {
+	if host := hostOnly(s); host != s {
+		return config.Invalid(v, fmt.Sprintf("%s=%q has a port or brackets, which the value it matches never has", v.Key, s),
+			fmt.Sprintf("write the address alone: %q", host))
+	}
 
 	return nil
 }
@@ -979,6 +1199,20 @@ func setURL(r *requestDef, v config.Value) error {
 	}
 
 	r.url["url"] = func(b *Builder) { b.URL(match.EqualIgnoreCase(s)) }
+
+	return nil
+}
+
+func setPathTemplate(r *requestDef, v config.Value) error {
+	r.keys = append(r.keys, "path_template")
+
+	t, err := parsePathTemplate(v.Str)
+	if err != nil {
+		return config.Invalid(v, fmt.Sprintf("%s=%q is not a path template: %v", v.Key, v.Str, err),
+			"a parameter is a whole segment, such as /users/{id}")
+	}
+
+	r.pathTemplate = t
 
 	return nil
 }
@@ -1061,7 +1295,7 @@ func (r *requestDef) conflicts(origin string) []config.Problem {
 
 // apply adds the request matchers to b, in a fixed order.
 func (r *requestDef) apply(b *Builder) {
-	for _, set := range []func(*Builder){r.scheme, r.method} {
+	for _, set := range []func(*Builder){r.scheme, r.method, r.host, r.clientIP, r.basicAuth} {
 		if set != nil {
 			set(b)
 		}
@@ -1073,11 +1307,15 @@ func (r *requestDef) apply(b *Builder) {
 		}
 	}
 
+	if r.pathTemplate != nil {
+		b.URLPathTemplate(r.pathTemplate.text)
+	}
+
 	if r.fragment != nil {
 		r.fragment(b)
 	}
 
-	for _, sets := range [][]func(*Builder){r.query, r.queries, r.header, r.form, r.formFile} {
+	for _, sets := range [][]func(*Builder){r.query, r.queries, r.header, r.headers, r.cookie, r.form, r.forms, r.formFile, r.pathParams} {
 		for _, set := range sets {
 			set(b)
 		}

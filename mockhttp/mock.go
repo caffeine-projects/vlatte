@@ -61,7 +61,8 @@ type selectorInput struct {
 	// RawRequest is the original incoming http.Request.
 	RawRequest *http.Request
 
-	// URL is the full request url.URL, including scheme, host, port.
+	// URL is the full request url.URL, including scheme, host, port: those a request in absolute form, as a forward
+	// proxy gets, or an intercepted one names, and the server's otherwise.
 	URL *url.URL
 
 	Query url.Values
@@ -96,7 +97,8 @@ type mockSpec struct {
 	steps        []vlatte.Step
 	wireSteps    []vlatte.Step
 	upSteps      []vlatte.Step
-	fallback     bool // a ProxyAll mock's: its description holds its reply under proxy_all
+	fallback     bool          // a ProxyAll mock's: its description holds its reply under proxy_all
+	pathTemplate *pathTemplate // set with URLPathTemplate; it never changes, so the mocks share it
 }
 
 // clone returns a copy of s that shares no slice with it, so changing one doesn't change the other.
@@ -257,7 +259,8 @@ func (m *Mock) Describe() descriptor.Descriptor {
 
 	for target, expectations := range expectationsByTarget {
 		switch target {
-		case matchingScopeQuery, matchingScopeQueries, matchingScopeHeader, matchingScopeFormField:
+		case matchingScopeQuery, matchingScopeQueries, matchingScopeHeader, matchingScopeHeaders, matchingScopeFormField,
+			matchingScopeFormFields, matchingScopeCookie, matchingScopeBasicAuth, matchingScopePathParam:
 			keys := make(map[string]any, counters[target])
 
 			if len(expectations) == 1 {
@@ -299,6 +302,10 @@ func (m *Mock) Describe() descriptor.Descriptor {
 
 			request[target.FieldName()] = keys
 
+		case matchingScopeURLPathTemplate:
+			// A mock has one path template, which describes as it was written.
+			request[target.FieldName()] = expectations[0].Key
+
 		case matchingScopeFormFile:
 			// One pattern of a field is an object, and several a list, in the order they were added.
 			files := make(map[string]any)
@@ -318,7 +325,7 @@ func (m *Mock) Describe() descriptor.Descriptor {
 			request[target.FieldName()] = files
 
 		case matchingScopeScheme, matchingScopeMethod, matchingScopeURL, matchingScopeURLPath, matchingScopeURLFragment,
-			matchingScopeBody:
+			matchingScopeBody, matchingScopeHost, matchingScopeClientIP:
 			if len(expectations) == 1 {
 				if sd, ok := expectations[0].Matcher.(descriptor.SelfDescriptive); ok {
 					request[target.FieldName()] = sd.Describe()
@@ -335,6 +342,16 @@ func (m *Mock) Describe() descriptor.Descriptor {
 			all := match.All(matchers...)
 			if sd, ok := vlatte.Matcher(all).(descriptor.SelfDescriptive); ok {
 				request[target.FieldName()] = sd.Describe()
+			}
+
+		case matchingScopeScenario, matchingScopeRepeat:
+			// They describe as a single argument, the value of their key, such as repeat: 1.
+			for _, e := range expectations {
+				if sd, ok := e.Matcher.(descriptor.SelfDescriptive); ok {
+					if args, ok := sd.Describe().Props.([]any); ok && len(args) == 1 {
+						data[target.FieldName()] = args[0]
+					}
+				}
 			}
 
 		default:
@@ -427,6 +444,15 @@ const (
 	matchingScopeFormFile
 	matchingScopeScenario
 	matchingScopeURLFragment
+	matchingScopeHeaders
+	matchingScopeFormFields
+	matchingScopeCookie
+	matchingScopeBasicAuth
+	matchingScopeHost
+	matchingScopeClientIP
+	matchingScopeURLPathTemplate
+	matchingScopePathParam
+	matchingScopeRepeat
 )
 
 func (t matchingScope) FieldName() string {
@@ -455,6 +481,24 @@ func (t matchingScope) FieldName() string {
 		return "scenario"
 	case matchingScopeURLFragment:
 		return "fragment"
+	case matchingScopeHeaders:
+		return "headers"
+	case matchingScopeFormFields:
+		return "forms"
+	case matchingScopeCookie:
+		return "cookie"
+	case matchingScopeBasicAuth:
+		return "basic_auth"
+	case matchingScopeHost:
+		return "host"
+	case matchingScopeClientIP:
+		return "client_ip"
+	case matchingScopeURLPathTemplate:
+		return "path_template"
+	case matchingScopePathParam:
+		return "path_params"
+	case matchingScopeRepeat:
+		return "repeat"
 	default:
 		return ""
 	}

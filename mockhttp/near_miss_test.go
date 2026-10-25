@@ -116,3 +116,22 @@ func TestNoMatch_NamesEachPartAsTheBuilderDoes(t *testing.T) {
 	require.Contains(t, body, "\n[predicate]: 1 of 3 parts matched; differs in path, request: ")
 	require.Contains(t, body, "bad request\n")
 }
+
+func TestNoMatch_NamesAKeyedPartWithItsKey(t *testing.T) {
+	// A part of many keys names the one a mock differs in, as a header does: "differs in cookie" would leave a test
+	// to find which cookie.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(
+		Getf("/a").ID("headers").Headers("X-Id", match.Equal([]string{"1"})).Reply(OK()),
+		Getf("/a").ID("cookie").Cookie("session", match.Equal("s")).Reply(OK()),
+		Request().ID("param").Method(http.MethodGet).URLPathTemplate("/{id}").PathParam("id", match.Equal("b")).Reply(OK()),
+	)
+
+	_, _, body := getFull(t, m, "/a")
+	require.Contains(t, body, "\n[headers]: 2 of 3 parts matched; differs in headers X-Id\n")
+	require.Contains(t, body, "\n[cookie]: 2 of 3 parts matched; differs in cookie session\n")
+	require.Contains(t, body, "\n[param]: 2 of 3 parts matched; differs in path_params id\n")
+}

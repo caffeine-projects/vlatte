@@ -85,13 +85,19 @@ type Request struct {
 	ID     string
 	Method string
 
-	// URL is the request URL, on the server's base URL.
+	// URL is the request URL: the one a request in absolute form, as a forward proxy gets, or an intercepted one names,
+	// and otherwise on the server's base URL.
 	URL *url.URL
 
 	// URLPathSegments are the segments of the URL path, each decoded: /users/1 is [users 1], and /files/a%2Fb is
 	// [files a/b].
 	URLPathSegments []string
-	Header          http.Header
+
+	// PathParams holds the parameters of the path template of the mock that matched, decoded, by name: /users/{id}
+	// gives {{ .Request.PathParams.id }}. A mock without one has none.
+	PathParams map[string]string
+
+	Header http.Header
 
 	// Cookies holds the cookies of the request, by name.
 	Cookies map[string]*http.Cookie
