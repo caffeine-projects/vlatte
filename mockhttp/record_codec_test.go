@@ -28,16 +28,33 @@ import (
 
 // sentRequest is a request a test sends.
 type sentRequest struct {
-	method string
-	target string // the path and query
-	header http.Header
-	body   []byte
+	method  string
+	target  string // the path and query
+	header  http.Header
+	body    []byte
+	chunked bool // the body goes without a Content-Length, as a stream's does
 }
 
 func (r sentRequest) send(t *testing.T, base string) (*http.Response, []byte) {
 	t.Helper()
 
-	return do(t, cmp.Or(r.method, http.MethodGet), base+r.target, r.header, r.body)
+	if !r.chunked {
+		return do(t, cmp.Or(r.method, http.MethodGet), base+r.target, r.header, r.body)
+	}
+
+	// A reader whose length the client can't tell goes chunked.
+	req, err := http.NewRequestWithContext(t.Context(), cmp.Or(r.method, http.MethodGet), base+r.target, struct{ io.Reader }{bytes.NewReader(r.body)})
+	require.NoError(t, err)
+	maps.Copy(req.Header, r.header)
+
+	res, err := _rawClient.Do(req)
+	require.NoError(t, err)
+
+	b, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	return res, b
 }
 
 // textParser reads application/x-custom bodies, as a parser of a server's config does.
@@ -428,9 +445,20 @@ func TestRecording_RequestSection(t *testing.T) {
 			match:   []sentRequest{{method: http.MethodPost, target: "/c", header: textType, body: []byte("1234567")}},
 		},
 		{
-			name:    "a body exactly at the limit, which may have had more",
+			name:    "a body exactly at the limit, whose length says it is whole",
 			setup:   func() *ConfigBuilder { return Setup().MaxBodyParsingLimit(5) },
 			request: sentRequest{method: http.MethodPost, target: "/c", header: textType, body: []byte("12345")},
+			want: RecordedRequest{
+				Method: http.MethodPost, URL: "/c",
+				Header: map[string]MatcherSpec{HeaderContentType: contentType(MIMETextPlain)},
+				Body:   MatcherSpec{"equal", "12345"},
+			},
+			miss: []sentRequest{{method: http.MethodPost, target: "/c", header: textType, body: []byte("12346")}},
+		},
+		{
+			name:    "a body of no length that reaches the limit, which may have had more",
+			setup:   func() *ConfigBuilder { return Setup().MaxBodyParsingLimit(5) },
+			request: sentRequest{method: http.MethodPost, target: "/c", header: textType, body: []byte("12345"), chunked: true},
 			want:    RecordedRequest{Method: http.MethodPost, URL: "/c"},
 		},
 		{

@@ -24,6 +24,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
+	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid/recovery"
@@ -45,6 +46,7 @@ const Kind vlatte.Kind = "http"
 // Server is the base for the mock server.
 type Server struct {
 	*vlatte.Base[*Mock, *Server]
+	*journal.Verifier[*Mock, *Server]
 
 	config             *Config
 	server             Backend
@@ -119,6 +121,10 @@ func New(config ...Option) (*Server, error) {
 
 	if err := loadConfigSources(conf); err != nil {
 		return nil, fmt.Errorf("server: error loading configuration sources\n%w", err)
+	}
+
+	if err := conf.checkName(); err != nil {
+		return nil, fmt.Errorf("server: %w", err)
 	}
 
 	if conf.DebugFn == nil {
@@ -199,6 +205,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	events, lifecycle := withAdminEvents(conf, lifecycle)
+	lifecycle = heldLifecycle{withJournal(app, conf, lifecycle)}
 
 	globalEvents, err := prepareGlobalEvents(conf)
 	if err != nil {
@@ -212,8 +219,9 @@ func New(config ...Option) (*Server, error) {
 		handler = conf.HandlerDecorator(handler)
 	}
 
-	// Outermost: the decorator and the middlewares see the fragment in r.URL too.
-	handler = withFragment(handler)
+	// The decorator and the middlewares see the fragment in r.URL too. Outermost, the answer's writer sees the status
+	// the client gets, whatever they send.
+	handler = withAnswer(withFragment(handler))
 	app.handler = handler
 
 	factory := conf.BackendFactory
@@ -228,7 +236,21 @@ func New(config ...Option) (*Server, error) {
 	loaders = append(loaders, files)
 	loaders = append(loaders, conf.Loaders...)
 
+	j, err := openJournal(conf, app.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	// A server that fails to build closes its journal: a temporary one goes.
+	built := false
+	defer func() {
+		if !built {
+			j.Close()
+		}
+	}()
+
 	app.Base = vlatte.NewBase(app, repository)
+	app.Verifier = journal.NewVerifier[*Mock, *Server](j, app)
 	app.storage = repository
 	app.scenarioStore = mfeat.NewScenarioStore()
 	app.params = params
@@ -262,7 +284,7 @@ func New(config ...Option) (*Server, error) {
 			adminMocks = app.adminStore
 		}
 
-		app.admin = admin.MustNew(
+		options := []admin.Option{
 			admin.Addr(conf.Admin.Addr),
 			admin.Info(string(Kind), func() string { return app.URL() }),
 			admin.Logger(app.logger),
@@ -274,7 +296,10 @@ func New(config ...Option) (*Server, error) {
 			admin.Scenarios(app.scenarioStore),
 			admin.Events(events),
 			admin.Logs(logs),
-		)
+			admin.Journal(j, app.adminRequestPattern),
+		}
+
+		app.admin = admin.MustNew(options...)
 	}
 
 	server, err := factory.NewBackend(BackendConfig{App: app, Handler: handler})
@@ -283,6 +308,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	app.server = server
+	built = true
 
 	return app, nil
 }
@@ -448,7 +474,8 @@ func (app *Server) MustReload() {
 // the on_complete events still running, such as a webhook waiting for its delay or its target, so the requests
 // waiting for them end, and waits for those requests. It stops the recording, and waits until it wrote what it took,
 // and closes the forward proxy's open tunnels. It closes the idle connections of the transports it made, such as the
-// one of webhooks. A closed server doesn't start again.
+// one of webhooks. Last, it closes the journal, and removes a temporary one: verify the requests before Close, as
+// t.Cleanup(m.Close) leaves a test to. A closed server doesn't start again.
 func (app *Server) Close() {
 	app.closed.Store(true)
 
@@ -490,6 +517,11 @@ func (app *Server) Close() {
 	}
 
 	app.webhooks.CloseIdleConnections()
+
+	// Last: the requests the backend waited for are journaled. A temporary journal goes.
+	if err := app.Journal().Close(); err != nil {
+		app.logger.Warn().Err(err).Msg("server: Close: closing the journal")
+	}
 }
 
 // ProxyCA returns the certificate of the CA that signs the certificates of the hosts the forward proxy intercepts, for
@@ -533,6 +565,10 @@ func (app *Server) DescribeConfig() string {
 		buf.WriteString("\n")
 	}
 
+	buf.WriteString("Work Dir: ")
+	buf.WriteString(app.config.path(WorkDirVar))
+	buf.WriteString("\n")
+
 	buf.WriteString("Mock Search Patterns: ")
 	buf.WriteString(strings.Join(app.config.MockFileSearchPatterns, ", "))
 	buf.WriteString("\n")
@@ -562,7 +598,7 @@ func (app *Server) DescribeConfig() string {
 
 	if app.config.Record != nil {
 		buf.WriteString("Recording: ")
-		buf.WriteString(app.config.Record.dir(app.config.RootDir))
+		buf.WriteString(app.config.Record.dir(app.config))
 		buf.WriteString("\n")
 
 		if target := app.config.Record.Target; target != "" {

@@ -1,0 +1,17 @@
+id: petstore-update-user
+name: Update a user account
+request:
+  method: PUT
+  path: /users/22222222-2222-4222-8222-222222222222
+response:
+  status: 200
+  header:
+    Content-Type: application/json
+  body:
+    id: 22222222-2222-4222-8222-222222222222
+    username: alex
+    firstName: Alexander
+    lastName: Morgan
+    email: alex@example.com
+    createdAt: "2026-01-01T12:00:00Z"
+    updatedAt: "2026-01-02T12:00:00Z"

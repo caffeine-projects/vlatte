@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	json "encoding/json/v2"
 	"errors"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -532,7 +534,7 @@ func TestHandler_EventsRunForRepliesWithoutAResponse(t *testing.T) {
 func TestLifecycle_RepliesWithoutAResponseAreLogged(t *testing.T) {
 	// #24: Echo, Handler and a Func that returns no response write their own response. Both request logs read that
 	// response and panicked on every such request: the recovery middleware tried to answer 418 after the reply had
-	// answered, and the log held a stack trace instead of the match.
+	// answered, and the log held a stack trace instead of the match. The log tells the status the client got.
 	replies := []struct {
 		name  string
 		reply ReplierFactory
@@ -573,6 +575,7 @@ func TestLifecycle_RepliesWithoutAResponseAreLogged(t *testing.T) {
 			require.Equal(t, rc.want, status)
 			require.Contains(t, logs.String(), "REQUEST MATCHED GET /x")
 			require.Contains(t, logs.String(), `"mock":{"id":"x"}`)
+			require.Contains(t, logs.String(), `"response":{"status":`+strconv.Itoa(rc.want)+`}`)
 			require.NotContains(t, logs.String(), "panic")
 		})
 	}
@@ -601,7 +604,7 @@ func TestLifecycle_RepliesWithoutAResponseAreLogged(t *testing.T) {
 			require.NoError(t, err)
 			require.Contains(t, string(out), "REQUEST MATCHED")
 			require.Contains(t, string(out), "Mock: x")
-			require.NotContains(t, string(out), "Status:")
+			require.Contains(t, string(out), "Status: "+strconv.Itoa(rc.want)+"\n")
 			require.NotContains(t, string(out), "panic")
 		})
 	}
@@ -968,4 +971,110 @@ func TestHandler_StepsDropTheContentLengthOfAReplyThatWritesItsOwn(t *testing.T)
 	status, body := get(t, m, "/h")
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, "hello<step>", body)
+}
+
+func TestHandler_AFlushSendsTheAnswerSoFar(t *testing.T) {
+	// A Handler reply that streams flushes with w.(http.Flusher), as handlers written before http.ResponseController
+	// do: the client gets the status and the headers at once, before the reply ends.
+	received := make(chan struct{})
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/stream").Reply(Handler(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Stream", "on")
+		w.(http.Flusher).Flush()
+
+		// The rest waits for the client to have the answer, which only the flush sent.
+		select {
+		case <-received:
+		case <-r.Context().Done():
+			return
+		}
+
+		_, _ = io.WriteString(w, "rest")
+	})))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL("/stream"), nil)
+	require.NoError(t, err)
+
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err, "the answer waited for the reply to end")
+	close(received)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "on", res.Header.Get("X-Stream"))
+	require.Equal(t, "rest", string(body))
+}
+
+func TestHandler_ABodyCopiedPastAWriterThatCantReadFromArrivesWhole(t *testing.T) {
+	// A middleware's writer seldom reads from a reader, as net/http's does: a body the reply copies, such as a body
+	// file's, still reaches the client whole, and the journal has the status the client got.
+	body := bytes.Repeat([]byte("0123456789abcdef"), 8<<10)
+	file := filepath.Join(t.TempDir(), "body.bin")
+	require.NoError(t, os.WriteFile(file, body, 0o600))
+
+	m := journaledServer(t, Setup().Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { next.ServeHTTP(opaqueWriter{w}, r) })
+	}))
+	m.MustMock(Getf("/file").Reply(Created().BodyFile(file)))
+
+	res, got := do(t, http.MethodGet, m.URL("/file"), nil, nil)
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+	require.Equal(t, body, got)
+
+	e := only(t, m, journal.Query{Path: match.Equal("/file")})
+	require.Equal(t, journal.OutcomeMatched, e.Outcome)
+	require.Equal(t, http.StatusCreated, e.Status)
+}
+
+func TestHandler_APushGoesToTheWriterThatCanPush(t *testing.T) {
+	// A Handler reply pushes with w.(http.Pusher), as on a server of its own. Over HTTP/2, the push reaches HTTP/2's
+	// writer, which checks it: here it refuses the promise of a POST. HTTP/1.1 can't push: Push says so with
+	// http.ErrNotSupported, as net/http's own writer would, and the reply goes on to answer.
+	pushed := make(chan error, 1)
+
+	m := MustNew(Setup().Silent())
+	m.MustStartTLS()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/page").Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+		pushed <- w.(http.Pusher).Push("/style.css", &http.PushOptions{Method: http.MethodPost})
+		w.WriteHeader(http.StatusNoContent)
+	})))
+
+	// push requests the page over HTTP/protoMajor, and returns what Push returned to the reply.
+	push := func(t *testing.T, protoMajor int) error {
+		t.Helper()
+
+		tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, Protocols: new(http.Protocols)}
+		tr.Protocols.SetHTTP1(protoMajor == 1)
+		tr.Protocols.SetHTTP2(protoMajor == 2)
+		t.Cleanup(tr.CloseIdleConnections)
+
+		res, err := (&http.Client{Transport: tr}).Get(m.URL("/page"))
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		require.Equal(t, protoMajor, res.ProtoMajor)
+		require.Equal(t, http.StatusNoContent, res.StatusCode)
+
+		return <-pushed
+	}
+
+	t.Run("HTTP/1.1, which can't push", func(t *testing.T) {
+		require.ErrorIs(t, push(t, 1), http.ErrNotSupported)
+	})
+
+	t.Run("HTTP/2, which checks the push", func(t *testing.T) {
+		require.EqualError(t, push(t, 2), `method "POST" must be GET or HEAD`)
+	})
 }

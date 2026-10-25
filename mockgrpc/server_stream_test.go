@@ -13,10 +13,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
@@ -193,4 +198,20 @@ func TestServerStream_LastStreamSetterWins(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	require.Equal(t, []string{"a"}, listKeys(t, pb.NewTestServiceClient(conn)))
+}
+
+func TestServerStream_AnUnmatchedCallNamesTheClosestMocks(t *testing.T) {
+	// A streaming call no mock matched is journaled as a unary one is: with the mocks that came closest, and the part
+	// each differs in, which tell a test what its mock got wrong.
+	m, c := journaled(t, Setup())
+	scope := m.MustMock(ServerStreamMethod("List").Field("message", match.Equal("all")).Reply(ServerStream[*pb.ListItem]()))
+
+	stream, err := c.List(t.Context(), &pb.ListReq{Message: "some"})
+	require.NoError(t, err)
+
+	_, err = stream.Recv()
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	e := onlyCall(t, m, journal.Query{Outcome: journal.OutcomeUnmatched})
+	require.Equal(t, []vlatte.NearMiss{{MockID: scope.IDs()[0], Passed: 1, Total: 2, Failed: []string{"field message"}}}, e.NearMisses)
 }

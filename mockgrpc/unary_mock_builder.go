@@ -26,6 +26,7 @@ func UnaryMethod(method string) *UnaryBuilder {
 	b.expectations = append(
 		b.expectations,
 		&vlatte.Eval[*UnaryValueSelectorIn]{
+			Target:   int(_scopeMethod),
 			Matcher:  match.Contain(method),
 			Selector: unarySelectMethod,
 		},
@@ -38,6 +39,8 @@ func (b *UnaryBuilder) Header(key string, m vlatte.Matcher) *UnaryBuilder {
 	b.expectations = append(
 		b.expectations,
 		&vlatte.Eval[*UnaryValueSelectorIn]{
+			Target:   int(_scopeHeader),
+			Key:      key,
 			Matcher:  m,
 			Selector: unarySelectHeader(key),
 		},
@@ -50,6 +53,8 @@ func (b *UnaryBuilder) Field(path string, m vlatte.Matcher) *UnaryBuilder {
 	b.expectations = append(
 		b.expectations,
 		&vlatte.Eval[*UnaryValueSelectorIn]{
+			Target:   int(_scopeField),
+			Key:      path,
 			Matcher:  match.Field(path, m),
 			Selector: unarySelectBody,
 		},

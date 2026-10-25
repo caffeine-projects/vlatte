@@ -56,17 +56,13 @@ func DecodeMock(app *Server, data []byte, format string) (*Mock, error) {
 
 // FileStore makes a persistent store of the mocks the admin API adds: a mock file each, <id>.mock.yaml in dir, as
 // EncodeMock describes the mock. Only the store reads them: keep dir out of the mock file patterns, or its mocks would
-// load twice. A relative dir starts at the server's root directory. A file a person adds, edits or removes takes effect
+// load twice. A relative dir starts at the server's root directory, and WorkDirVar at its work directory, as in
+// "{workdir}/_admin". A file a person adds, edits or removes takes effect
 // on the server's next reload. A mock whose description doesn't load back is refused: its file would fail every later
 // start.
 func FileStore(dir string) AdminStore {
 	return func(app *Server) (vlatte.Store[*Mock], error) {
-		path := dir
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(app.config.RootDir, path)
-		}
-
-		return &fileStore{app: app, dir: path, remove: os.Remove}, nil
+		return &fileStore{app: app, dir: app.config.path(dir), remove: os.Remove}, nil
 	}
 }
 

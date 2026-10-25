@@ -241,6 +241,8 @@ func (in *interceptors) StreamInterceptor(
 	_ grpc.StreamHandler,
 ) error {
 	ctx := stream.Context()
+	call := callOf(ctx)
+	call.serve(ctx)
 
 	reqMsg, err := receiveRequest(stream, info)
 	if err != nil {
@@ -259,17 +261,38 @@ func (in *interceptors) StreamInterceptor(
 	}
 
 	rawBody := string(b)
+	call.request(b)
+
 	sub := vlatte.NewExplanation()
 	mocks := vlatte.Mocks[*Mock, *StreamValueSelectorIn](ofKind(em, func(m *Mock) bool { return m.streamReply != nil }))
-	mock, pass, err := mocks.Find(ctx, sub, &StreamValueSelectorIn{rawBody, info}, func(m *Mock) vlatte.Evaluators[*Mock, *StreamValueSelectorIn] { return m.streamExpectations })
+	input := &StreamValueSelectorIn{rawBody, info}
+	evals := func(m *Mock) vlatte.Evaluators[*Mock, *StreamValueSelectorIn] { return m.streamExpectations }
+
+	// Only the journal reports near misses: a call's status carries no more than its message. They go on from where
+	// matching stopped, so no matcher runs twice for the call.
+	var misses *vlatte.Misses[*Mock, *StreamValueSelectorIn]
+	if call != nil && !in.app.config.NoNearMisses {
+		misses = new(vlatte.Misses[*Mock, *StreamValueSelectorIn])
+	}
+
+	mock, pass, err := mocks.Find(ctx, sub, input, evals, misses)
 	if err != nil {
 		return fail(ctx, vlatte.FailureMatch, codes.Internal, "stream: finding a mock: %v", err)
 	}
 
 	if !pass {
+		var near []vlatte.NearMiss
+		if misses != nil {
+			near = misses.NearMisses(ctx, describeEval)
+		}
+
+		call.unmatched(near)
+
 		in.app.publish(handler.EventUnmatched, info.FullMethod, nil, nil)
 		return fail(ctx, vlatte.FailureNoMatch, codes.NotFound, "stream: request was not matched with any mock")
 	}
+
+	call.matched(mock)
 
 	// The header goes out with the reply's own, or with its status.
 	if !in.app.config.NoDebugHeaders {
@@ -278,6 +301,8 @@ func (in *interceptors) StreamInterceptor(
 
 	values := &StreamRequestValues{rawBody, stream, info, in.app}
 	_, err = mock.streamReply.Reply(ctx, values)
+	call.replied(ctx, err)
+
 	if err != nil {
 		in.app.publishReply(info.FullMethod, mock, err)
 		return replyError(ctx, "stream", mock, err)

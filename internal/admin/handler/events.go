@@ -32,8 +32,8 @@ type Event struct {
 	Message   string    `json:"message,omitempty"`
 }
 
-// Events are the events of a mock server, which it publishes and GET /events streams. It keeps none: they are no
-// journal of requests.
+// Events are the events of a mock server, which it publishes and GET /events streams. It keeps none: the journal,
+// GET /requests, keeps the requests.
 type Events struct {
 	stream *stream
 }

@@ -65,6 +65,7 @@ func streamEvents(t *testing.T, m *Server, n int, send func()) map[any]map[strin
 		byType[e["type"]] = e
 	}
 
+	require.NoError(t, lines.Err())
 	require.Len(t, byType, n, "events: %v", byType)
 
 	return byType
@@ -366,14 +367,14 @@ func TestAdmin_SavedMocksOutliveTheServer(t *testing.T) {
 
 	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
-	require.JSONEq(t, `{"files": ["testdata/_mocks/hello.mock.yaml", "testdata/_mocks/inline.mock.yaml"]}`, string(body))
+	require.JSONEq(t, `{"files": ["testdata/vlatte/_mocks/hello.mock.yaml", "testdata/vlatte/_mocks/inline.mock.yaml"]}`, string(body))
 
-	saved, err := os.ReadFile("testdata/_mocks/hello.mock.yaml")
+	saved, err := os.ReadFile("testdata/vlatte/_mocks/hello.mock.yaml")
 	require.NoError(t, err)
-	require.Contains(t, string(saved), "body_file: ../../bodies/hello.txt")
+	require.Contains(t, string(saved), "body_file: ../../../bodies/hello.txt")
 
 	_, body = do(t, http.MethodGet, m.AdminURL()+"/mocks", nil, nil)
-	require.Contains(t, string(body), `"origin": "testdata/_mocks/hello.mock.yaml"`, "served from its file")
+	require.Contains(t, string(body), `"origin": "testdata/vlatte/_mocks/hello.mock.yaml"`, "served from its file")
 	require.NotContains(t, string(body), `"origin": "admin"`)
 
 	res, _ = do(t, http.MethodPost, m.AdminURL()+"/mocks/reload", nil, nil)
@@ -417,7 +418,7 @@ func TestAdmin_SaveMovesOnlyTheBodyFilesTheServerOpens(t *testing.T) {
 	res, body = do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
 
-	data, err := os.ReadFile("testdata/_mocks/hello.mock.yaml")
+	data, err := os.ReadFile("testdata/vlatte/_mocks/hello.mock.yaml")
 	require.NoError(t, err)
 
 	doc, err := config.Parse(data, "yaml")
@@ -425,7 +426,7 @@ func TestAdmin_SaveMovesOnlyTheBodyFilesTheServerOpens(t *testing.T) {
 
 	saved := object(t, doc)
 	response := object(t, saved["response"])
-	require.Equal(t, "../../bodies/hello.txt", response["body_file"])
+	require.Equal(t, "../../../bodies/hello.txt", response["body_file"])
 	require.Equal(t, "not-a-file", object(t, object(t, response["template"])["data"])["body_file"])
 
 	events, _ := saved["on_complete"].([]any)
@@ -665,7 +666,7 @@ func TestAdmin_ResetsTheServer(t *testing.T) {
 
 func TestAdmin_StreamsWhatTheServerServes(t *testing.T) {
 	// A client follows the requests the mocks answer, and those no mock matched, as they come: to see why a test's
-	// request missed, without a journal of requests.
+	// request missed, without polling the journal.
 	m := adminServer(t, Setup())
 	m.MustMock(Getf("/hello").ID("hello").Reply(OK()))
 
@@ -681,7 +682,92 @@ func TestAdmin_StreamsWhatTheServerServes(t *testing.T) {
 
 	unmatched := byType["unmatched"]
 	require.Equal(t, "POST", unmatched["method"])
+	require.Equal(t, float64(StatusNoMatch), unmatched["status"])
 	require.Contains(t, unmatched["target"], "/nope")
+}
+
+func TestAdmin_StreamsTheStatusAHandlerSent(t *testing.T) {
+	// A reply that writes its own response, as Handler does, returns none: the event has the status the client got.
+	m := adminServer(t, Setup())
+	m.MustMock(Getf("/made").ID("made").Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})))
+
+	byType := streamEvents(t, m, 1, func() {
+		do(t, http.MethodGet, m.URL("/made"), nil, nil)
+	})
+
+	require.Equal(t, float64(http.StatusCreated), byType["matched"]["status"])
+}
+
+func TestAdmin_StreamsWarnings(t *testing.T) {
+	// A request can go wrong without an error of the server, as one whose client left during its mock's delay: a
+	// client follows the warning, with no status, as the client got none.
+	arrived := make(chan struct{}, 1)
+	m := adminServer(t, Setup().Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			arrived <- struct{}{}
+			next.ServeHTTP(w, r)
+		})
+	}))
+	m.MustMock(Getf("/slow").ID("slow").Delay(5 * time.Second).Reply(OK()))
+
+	byType := streamEvents(t, m, 1, func() {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		// The client leaves once the server has its request.
+		go func() {
+			select {
+			case <-arrived:
+			case <-ctx.Done():
+			}
+
+			cancel()
+		}()
+
+		r, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL("/slow"), nil)
+		require.NoError(t, err)
+
+		_, err = http.DefaultClient.Do(r)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	warning := byType["warning"]
+	require.Equal(t, "slow", warning["mock_id"])
+	require.Contains(t, warning["message"], "the client left during the delay")
+	require.NotContains(t, warning, "status")
+}
+
+func TestAdmin_StreamsTheStatusAMiddlewareSent(t *testing.T) {
+	// A middleware may answer in place of the mock: the event has the status the client got.
+	m := adminServer(t, Setup().Use(middleware(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		next.ServeHTTP(&rewriting{ResponseWriter: w, status: http.StatusCreated}, r)
+	})))
+	m.MustMock(Getf("/made").ID("made").Reply(OK()))
+
+	byType := streamEvents(t, m, 1, func() {
+		do(t, http.MethodGet, m.URL("/made"), nil, nil)
+	})
+
+	require.Equal(t, float64(http.StatusCreated), byType["matched"]["status"])
+}
+
+func TestAdmin_StreamsTheStatusOfAnAnswerAMiddlewareDropped(t *testing.T) {
+	// A middleware that answers nothing of what the mock wrote leaves the client net/http's 200: the events of a
+	// failure and of a request no mock matched have it too.
+	m := adminServer(t, Setup().Use(middleware(func(_ http.ResponseWriter, r *http.Request, next http.Handler) {
+		next.ServeHTTP(httptest.NewRecorder(), r)
+	})))
+	m.MustMock(Getf("/fails").ID("fails").Reply(OK().BodyFile("missing.txt")))
+
+	byType := streamEvents(t, m, 2, func() {
+		do(t, http.MethodGet, m.URL("/fails"), nil, nil)
+		do(t, http.MethodGet, m.URL("/nope"), nil, nil)
+	})
+
+	require.Equal(t, float64(http.StatusOK), byType["error"]["status"])
+	require.Equal(t, float64(http.StatusOK), byType["unmatched"]["status"])
 }
 
 func TestAdmin_StreamsWhatTheProxyServes(t *testing.T) {
@@ -736,6 +822,7 @@ func TestAdmin_StreamsTheLog(t *testing.T) {
 			var entry map[string]any
 			require.NoError(t, json.Unmarshal([]byte(line), &entry), line)
 			require.Equal(t, "info", entry["level"])
+			require.NoError(t, lines.Err())
 
 			return
 		}

@@ -1,0 +1,599 @@
+{
+  "info": {
+    "name": "Modern Petstore",
+    "description": "Requests for petstore.openapi.yaml. Start the local example from the repository root with `make example:petstore`, then send requests to `{{baseUrl}}` (default: http://127.0.0.1:8080). The resource IDs match the example fixtures. The mocks return static success responses; writes, filters and authentication are not simulated.\n\nOptional query filters are disabled by default. For an authenticated server, set `githubSession` to your session cookie value locally and enable the Cookie header on protected requests. The example password in the registration body is sample data.\n\nFor the photo upload, select a local image in Body > form-data > file before sending.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "noauth"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8080",
+      "type": "string",
+      "description": "API base URL without a trailing slash."
+    },
+    {
+      "key": "petId",
+      "value": "11111111-1111-4111-8111-111111111111",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "22222222-2222-4222-8222-222222222222",
+      "type": "string"
+    },
+    {
+      "key": "orderId",
+      "value": "33333333-3333-4333-8333-333333333333",
+      "type": "string"
+    },
+    {
+      "key": "githubSession",
+      "value": "",
+      "type": "string",
+      "description": "Optional petstore_gh_session cookie value for an authenticated server. Set locally."
+    }
+  ],
+  "item": [
+    {
+      "name": "Pets",
+      "description": "Browse, adopt and manage pets.",
+      "item": [
+        {
+          "name": "List pets matching the given filters",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pets?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pets"
+              ],
+              "query": [
+                {
+                  "key": "species",
+                  "value": "DOG",
+                  "description": "Optional. Allowed values: DOG, CAT, RABBIT, BIRD, REPTILE, OTHER.",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "AVAILABLE",
+                  "description": "Optional. Allowed values: AVAILABLE, PENDING, ADOPTED, NOT_AVAILABLE.",
+                  "disabled": true
+                },
+                {
+                  "key": "size",
+                  "value": "LARGE",
+                  "description": "Optional. Allowed values: SMALL, MEDIUM, LARGE.",
+                  "disabled": true
+                },
+                {
+                  "key": "ageMin",
+                  "value": "0",
+                  "description": "Optional. Minimum: 0.",
+                  "disabled": true
+                },
+                {
+                  "key": "ageMax",
+                  "value": "120",
+                  "description": "Optional. Minimum: 0.",
+                  "disabled": true
+                },
+                {
+                  "key": "goodWithKids",
+                  "value": "true",
+                  "description": "Optional.",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Required. Minimum: 1.",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Required. Minimum: 1. Maximum: 100.",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Search pets by structured criteria",
+          "request": {
+            "method": "QUERY",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pets"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"criteria\": {\n    \"species\": [\n      \"DOG\"\n    ],\n    \"ageRange\": {\n      \"min\": 0,\n      \"max\": 120\n    },\n    \"size\": [\n      \"LARGE\"\n    ],\n    \"compatibility\": {\n      \"goodWithKids\": true\n    }\n  },\n  \"sort\": {\n    \"field\": \"ageMonths\",\n    \"order\": \"ASC\"\n  },\n  \"pagination\": {\n    \"page\": 1,\n    \"limit\": 20\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Add a pet to the store",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "petstore_gh_session={{githubSession}}",
+                "description": "Enable and set githubSession when using an authenticated server. Not required by the local mocks.",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pets"
+              ]
+            },
+            "description": "Requires roles: write:pets.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"species\": \"DOG\",\n  \"name\": \"Buddy\",\n  \"breed\": \"Golden Retriever\",\n  \"ageMonths\": 24,\n  \"size\": \"LARGE\",\n  \"goodWithKids\": true,\n  \"price\": \"150.00\",\n  \"currency\": \"EUR\",\n  \"status\": \"AVAILABLE\",\n  \"photos\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get a pet by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pets/{{petId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pets",
+                "{{petId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update an existing pet",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "petstore_gh_session={{githubSession}}",
+                "description": "Enable and set githubSession when using an authenticated server. Not required by the local mocks.",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pets/{{petId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pets",
+                "{{petId}}"
+              ]
+            },
+            "description": "Requires roles: write:pets.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Buddy Jr.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Remove a pet from the store",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "petstore_gh_session={{githubSession}}",
+                "description": "Enable and set githubSession when using an authenticated server. Not required by the local mocks.",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pets/{{petId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pets",
+                "{{petId}}"
+              ]
+            },
+            "description": "Requires roles: write:pets."
+          }
+        },
+        {
+          "name": "Upload a photo for a pet",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "petstore_gh_session={{githubSession}}",
+                "description": "Enable and set githubSession when using an authenticated server. Not required by the local mocks.",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pets/{{petId}}/images",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pets",
+                "{{petId}}",
+                "images"
+              ]
+            },
+            "description": "Requires roles: write:pets.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": null,
+                  "description": "Required. Select a local image file before sending."
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "description": "Register and manage user accounts.",
+      "item": [
+        {
+          "name": "Register a user account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"alex\",\n  \"firstName\": \"Alex\",\n  \"lastName\": \"Morgan\",\n  \"email\": \"alex@example.com\",\n  \"password\": \"example-password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get a user by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "petstore_gh_session={{githubSession}}",
+                "description": "Enable and set githubSession when using an authenticated server. Not required by the local mocks.",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update a user account",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "petstore_gh_session={{githubSession}}",
+                "description": "Enable and set githubSession when using an authenticated server. Not required by the local mocks.",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Alexander\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Delete a user account",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "petstore_gh_session={{githubSession}}",
+                "description": "Enable and set githubSession when using an authenticated server. Not required by the local mocks.",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "description": "Place and track adoption orders.",
+      "item": [
+        {
+          "name": "Place an adoption order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "petstore_gh_session={{githubSession}}",
+                "description": "Enable and set githubSession when using an authenticated server. Not required by the local mocks.",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"petId\": \"{{petId}}\",\n  \"userId\": \"{{userId}}\",\n  \"totalAmount\": \"150.00\",\n  \"currency\": \"EUR\",\n  \"status\": \"PLACED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get an order by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "petstore_gh_session={{githubSession}}",
+                "description": "Enable and set githubSession when using an authenticated server. Not required by the local mocks.",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cancel an order",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "petstore_gh_session={{githubSession}}",
+                "description": "Enable and set githubSession when using an authenticated server. Not required by the local mocks.",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Inventory",
+      "description": "Aggregate counts of pets by status.",
+      "item": [
+        {
+          "name": "Count pets by status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Cookie",
+                "value": "petstore_gh_session={{githubSession}}",
+                "description": "Enable and set githubSession when using an authenticated server. Not required by the local mocks.",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/inventories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "inventories"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
