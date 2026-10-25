@@ -33,7 +33,7 @@ func (h *Recover) Recover(next http.Handler) http.Handler {
 
 // Answer answers recovery, what a panic serving r recovered, on w, for a handler that recovers its panics itself,
 // such as one whose w isn't the server's. Call it from the deferred function that recovered: the stack it passes to
-// fn is the panic's. A recovery of http.ErrAbortHandler panics again: net/http aborts the response with it.
+// fn is the panic's. A recovery of [http.ErrAbortHandler] panics again: net/http aborts the response with it.
 func (h *Recover) Answer(w http.ResponseWriter, r *http.Request, recovery any) {
 	// net/http aborts a response with it, as the reverse proxy does when the client goes away.
 	if err, ok := recovery.(error); ok && errors.Is(err, http.ErrAbortHandler) {

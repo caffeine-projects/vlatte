@@ -1673,7 +1673,7 @@ func TestStepReader_TakesTheBodyOnlyAsTheTargetReadsIt(t *testing.T) {
 		go func() { _, _ = r.Read(make([]byte, 1)) }()
 
 		synctest.Wait()
-		require.EqualValues(t, _upstreamPiece, body.n.Load())
+		require.EqualValues(t, 1<<10, body.n.Load())
 		require.NoError(t, r.Close())
 	})
 }
