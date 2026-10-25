@@ -926,7 +926,7 @@ func expectationsOf(m *Mock) vlatte.Evaluators[*Mock, *selectorInput] {
 }
 
 // describeExpectation names the part of a request e checks, such as "header Accept": the name of a header, query
-// parameter or form field goes with its kind. Times, and a part of no kind, go by their key.
+// parameter, form field, cookie or path param goes with its kind. Times, and a part of no kind, go by their key.
 func describeExpectation(e *expectation) string {
 	scope := matchingScope(e.Target)
 	name := scope.FieldName()
@@ -941,7 +941,8 @@ func describeExpectation(e *expectation) string {
 	// The key of a method or a scheme is the value it wants, which the part's name says enough of.
 
 	switch scope {
-	case matchingScopeHeader, matchingScopeQuery, matchingScopeQueries, matchingScopeFormField, matchingScopeFormFile:
+	case matchingScopeHeader, matchingScopeQuery, matchingScopeQueries, matchingScopeFormField, matchingScopeFormFile,
+		matchingScopeHeaders, matchingScopeFormFields, matchingScopeCookie, matchingScopePathParam:
 		return name + " " + e.Key
 	}
 
