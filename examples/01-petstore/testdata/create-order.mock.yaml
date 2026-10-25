@@ -1,0 +1,18 @@
+id: petstore-create-order
+name: Place an adoption order
+request:
+  method: POST
+  path: /orders
+response:
+  status: 201
+  header:
+    Content-Type: application/json
+  body:
+    id: 33333333-3333-4333-8333-333333333333
+    petId: 11111111-1111-4111-8111-111111111111
+    userId: 22222222-2222-4222-8222-222222222222
+    totalAmount: "150.00"
+    currency: EUR
+    status: PLACED
+    createdAt: "2026-01-01T12:00:00Z"
+    updatedAt: "2026-01-01T12:00:00Z"

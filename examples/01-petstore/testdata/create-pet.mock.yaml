@@ -1,0 +1,23 @@
+id: petstore-create-pet
+name: Add a pet to the store
+request:
+  method: POST
+  path: /pets
+response:
+  status: 201
+  header:
+    Content-Type: application/json
+  body:
+    id: 11111111-1111-4111-8111-111111111111
+    species: DOG
+    name: Buddy
+    breed: Golden Retriever
+    ageMonths: 24
+    size: LARGE
+    goodWithKids: true
+    price: "150.00"
+    currency: EUR
+    status: AVAILABLE
+    photos: []
+    createdAt: "2026-01-01T12:00:00Z"
+    updatedAt: "2026-01-01T12:00:00Z"

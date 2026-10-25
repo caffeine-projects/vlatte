@@ -1,0 +1,1212 @@
+openapi: 3.2.0
+info:
+  title: Modern Petstore
+  version: 1.0.0
+  description: A pet adoption API, modelled on the OpenAPI 3.2 Modern Petstore
+    specification.
+servers:
+  - url: /
+    description: This server
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags:
+        - Pets
+      summary: List pets matching the given filters
+      parameters:
+        - name: species
+          in: querya
+          required: false
+          schema:
+            anyOf:
+              - const: DOG
+                type: string
+              - const: CAT
+                type: string
+              - const: RABBIT
+                type: string
+              - const: BIRD
+                type: string
+              - const: REPTILE
+                type: string
+              - const: OTHER
+                type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - const: AVAILABLE
+                type: string
+              - const: PENDING
+                type: string
+              - const: ADOPTED
+                type: string
+              - const: NOT_AVAILABLE
+                type: string
+        - name: size
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - const: SMALL
+                type: string
+              - const: MEDIUM
+                type: string
+              - const: LARGE
+                type: string
+        - name: ageMin
+          in: query
+          required: false
+          schema:
+            minimum: 0
+            type: integer
+        - name: ageMax
+          in: query
+          required: false
+          schema:
+            minimum: 0
+            type: integer
+        - name: goodWithKids
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: page
+          in: query
+          required: true
+          schema:
+            minimum: 1
+            default: 1
+            type: integer
+        - name: limit
+          in: query
+          required: true
+          schema:
+            minimum: 1
+            maximum: 100
+            default: 20
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetList"
+        "422":
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      security: []
+    additionalOperations:
+      QUERY:
+        operationId: searchPets
+        tags:
+          - Pets
+        summary: Search pets by structured criteria
+        responses:
+          "200":
+            description: OK
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/PetList"
+          "422":
+            description: Unprocessable Entity
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/ApiError"
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  criteria:
+                    type: object
+                    properties:
+                      species:
+                        type: array
+                        items:
+                          anyOf:
+                            - const: DOG
+                              type: string
+                            - const: CAT
+                              type: string
+                            - const: RABBIT
+                              type: string
+                            - const: BIRD
+                              type: string
+                            - const: REPTILE
+                              type: string
+                            - const: OTHER
+                              type: string
+                      ageRange:
+                        type: object
+                        properties:
+                          min:
+                            type: integer
+                          max:
+                            type: integer
+                      size:
+                        type: array
+                        items:
+                          anyOf:
+                            - const: SMALL
+                              type: string
+                            - const: MEDIUM
+                              type: string
+                            - const: LARGE
+                              type: string
+                      compatibility:
+                        type: object
+                        properties:
+                          goodWithKids:
+                            type: boolean
+                  sort:
+                    type: object
+                    properties:
+                      field:
+                        anyOf:
+                          - const: ageMonths
+                            type: string
+                          - const: price
+                            type: string
+                      order:
+                        anyOf:
+                          - const: ASC
+                            type: string
+                          - const: DESC
+                            type: string
+                  pagination:
+                    type: object
+                    properties:
+                      page:
+                        type: integer
+                      limit:
+                        type: integer
+        security: []
+    post:
+      operationId: createPet
+      tags:
+        - Pets
+      summary: Add a pet to the store
+      description: "Requires roles: write:pets."
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - species
+                - name
+                - ageMonths
+                - price
+              properties:
+                species:
+                  anyOf:
+                    - const: DOG
+                      type: string
+                    - const: CAT
+                      type: string
+                    - const: RABBIT
+                      type: string
+                    - const: BIRD
+                      type: string
+                    - const: REPTILE
+                      type: string
+                    - const: OTHER
+                      type: string
+                name:
+                  minLength: 1
+                  maxLength: 50
+                  type: string
+                breed:
+                  type: string
+                ageMonths:
+                  minimum: 0
+                  type: integer
+                size:
+                  anyOf:
+                    - const: SMALL
+                      type: string
+                    - const: MEDIUM
+                      type: string
+                    - const: LARGE
+                      type: string
+                color:
+                  type: string
+                gender:
+                  anyOf:
+                    - const: MALE
+                      type: string
+                    - const: FEMALE
+                      type: string
+                    - const: UNKNOWN
+                      type: string
+                goodWithKids:
+                  type: boolean
+                price:
+                  type: string
+                currency:
+                  pattern: ^[A-Z]{3}$
+                  type: string
+                description:
+                  type: string
+                status:
+                  anyOf:
+                    - const: AVAILABLE
+                      type: string
+                    - const: PENDING
+                      type: string
+                    - const: ADOPTED
+                      type: string
+                    - const: NOT_AVAILABLE
+                      type: string
+                photos:
+                  type: array
+                  items:
+                    format: uri
+                    type: string
+                medicalInfo:
+                  type: object
+                  properties:
+                    spayedNeutered:
+                      type: boolean
+                    vaccinated:
+                      type: boolean
+                    microchipped:
+                      type: boolean
+                    specialNeeds:
+                      type: boolean
+                    healthNotes:
+                      type: string
+      security:
+        - GitHub: []
+  /pets/{id}:
+    get:
+      operationId: getPet
+      tags:
+        - Pets
+      summary: Get a pet by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+        "404":
+          description: No pet exists with that ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      security: []
+    put:
+      operationId: updatePet
+      tags:
+        - Pets
+      summary: Update an existing pet
+      description: "Requires roles: write:pets."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                species:
+                  anyOf:
+                    - const: DOG
+                      type: string
+                    - const: CAT
+                      type: string
+                    - const: RABBIT
+                      type: string
+                    - const: BIRD
+                      type: string
+                    - const: REPTILE
+                      type: string
+                    - const: OTHER
+                      type: string
+                name:
+                  minLength: 1
+                  maxLength: 50
+                  type: string
+                breed:
+                  type: string
+                ageMonths:
+                  minimum: 0
+                  type: integer
+                size:
+                  anyOf:
+                    - const: SMALL
+                      type: string
+                    - const: MEDIUM
+                      type: string
+                    - const: LARGE
+                      type: string
+                color:
+                  type: string
+                gender:
+                  anyOf:
+                    - const: MALE
+                      type: string
+                    - const: FEMALE
+                      type: string
+                    - const: UNKNOWN
+                      type: string
+                goodWithKids:
+                  type: boolean
+                price:
+                  type: string
+                currency:
+                  pattern: ^[A-Z]{3}$
+                  type: string
+                description:
+                  type: string
+                status:
+                  anyOf:
+                    - const: AVAILABLE
+                      type: string
+                    - const: PENDING
+                      type: string
+                    - const: ADOPTED
+                      type: string
+                    - const: NOT_AVAILABLE
+                      type: string
+                photos:
+                  type: array
+                  items:
+                    format: uri
+                    type: string
+                medicalInfo:
+                  type: object
+                  properties:
+                    spayedNeutered:
+                      type: boolean
+                    vaccinated:
+                      type: boolean
+                    microchipped:
+                      type: boolean
+                    specialNeeds:
+                      type: boolean
+                    healthNotes:
+                      type: string
+      security:
+        - GitHub: []
+    delete:
+      operationId: deletePet
+      tags:
+        - Pets
+      summary: Remove a pet from the store
+      description: "Requires roles: write:pets."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      security:
+        - GitHub: []
+  /pets/{id}/images:
+    post:
+      operationId: uploadPetPhoto
+      tags:
+        - Pets
+      summary: Upload a photo for a pet
+      description: "Requires roles: write:pets."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetPhotoUploaded"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+                - file
+      security:
+        - GitHub: []
+  /users:
+    post:
+      operationId: createUser
+      tags:
+        - Users
+      summary: Register a user account
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "422":
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - email
+                - password
+              properties:
+                username:
+                  minLength: 3
+                  maxLength: 50
+                  type: string
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                email:
+                  format: email
+                  type: string
+                phone:
+                  pattern: ^\+?[1-9]\d{1,14}$
+                  type: string
+                password:
+                  minLength: 8
+                  type: string
+  /users/{id}:
+    get:
+      operationId: getUserById
+      tags:
+        - Users
+      summary: Get a user by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      security:
+        - GitHub: []
+    put:
+      operationId: updateUser
+      tags:
+        - Users
+      summary: Update a user account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                email:
+                  format: email
+                  type: string
+                phone:
+                  pattern: ^\+?[1-9]\d{1,14}$
+                  type: string
+                password:
+                  minLength: 8
+                  type: string
+      security:
+        - GitHub: []
+    delete:
+      operationId: deleteUser
+      tags:
+        - Users
+      summary: Delete a user account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      security:
+        - GitHub: []
+  /orders:
+    post:
+      operationId: createOrder
+      tags:
+        - Orders
+      summary: Place an adoption order
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No pet exists with the given petId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - petId
+              properties:
+                petId:
+                  format: uuid
+                  type: string
+                userId:
+                  format: uuid
+                  type: string
+                totalAmount:
+                  type: string
+                currency:
+                  pattern: ^[A-Z]{3}$
+                  type: string
+                status:
+                  anyOf:
+                    - const: PLACED
+                      type: string
+                    - const: APPROVED
+                      type: string
+                    - const: SHIPPED
+                      type: string
+                    - const: DELIVERED
+                      type: string
+                    - const: CANCELLED
+                      type: string
+      security:
+        - GitHub: []
+  /orders/{id}:
+    get:
+      operationId: getOrder
+      tags:
+        - Orders
+      summary: Get an order by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      security:
+        - GitHub: []
+    delete:
+      operationId: deleteOrder
+      tags:
+        - Orders
+      summary: Cancel an order
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      security:
+        - GitHub: []
+  /inventories:
+    get:
+      operationId: getInventory
+      tags:
+        - Inventory
+      summary: Count pets by status
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Inventory"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      security:
+        - GitHub: []
+components:
+  schemas:
+    ApiError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
+    FieldError:
+      type: object
+      required:
+        - field
+        - message
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+    Inventory:
+      type: object
+      patternProperties:
+        ^(.*)$:
+          type: integer
+    Order:
+      type: object
+      required:
+        - petId
+        - totalAmount
+        - currency
+        - status
+        - id
+        - createdAt
+        - updatedAt
+      properties:
+        petId:
+          format: uuid
+          type: string
+        userId:
+          format: uuid
+          type: string
+        totalAmount:
+          type: string
+        currency:
+          pattern: ^[A-Z]{3}$
+          type: string
+        status:
+          anyOf:
+            - const: PLACED
+              type: string
+            - const: APPROVED
+              type: string
+            - const: SHIPPED
+              type: string
+            - const: DELIVERED
+              type: string
+            - const: CANCELLED
+              type: string
+        id:
+          format: uuid
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+    Pet:
+      type: object
+      required:
+        - species
+        - name
+        - ageMonths
+        - price
+        - currency
+        - status
+        - photos
+        - id
+        - createdAt
+        - updatedAt
+      properties:
+        species:
+          anyOf:
+            - const: DOG
+              type: string
+            - const: CAT
+              type: string
+            - const: RABBIT
+              type: string
+            - const: BIRD
+              type: string
+            - const: REPTILE
+              type: string
+            - const: OTHER
+              type: string
+        name:
+          minLength: 1
+          maxLength: 50
+          type: string
+        breed:
+          type: string
+        ageMonths:
+          minimum: 0
+          type: integer
+        size:
+          anyOf:
+            - const: SMALL
+              type: string
+            - const: MEDIUM
+              type: string
+            - const: LARGE
+              type: string
+        color:
+          type: string
+        gender:
+          anyOf:
+            - const: MALE
+              type: string
+            - const: FEMALE
+              type: string
+            - const: UNKNOWN
+              type: string
+        goodWithKids:
+          type: boolean
+        price:
+          type: string
+        currency:
+          pattern: ^[A-Z]{3}$
+          type: string
+        description:
+          type: string
+        status:
+          anyOf:
+            - const: AVAILABLE
+              type: string
+            - const: PENDING
+              type: string
+            - const: ADOPTED
+              type: string
+            - const: NOT_AVAILABLE
+              type: string
+        photos:
+          type: array
+          items:
+            format: uri
+            type: string
+        medicalInfo:
+          type: object
+          properties:
+            spayedNeutered:
+              type: boolean
+            vaccinated:
+              type: boolean
+            microchipped:
+              type: boolean
+            specialNeeds:
+              type: boolean
+            healthNotes:
+              type: string
+        id:
+          format: uuid
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+    PetList:
+      type: object
+      required:
+        - data
+        - pagination
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Pet"
+        pagination:
+          type: object
+          required:
+            - page
+            - limit
+            - totalItems
+            - totalPages
+          properties:
+            page:
+              type: integer
+            limit:
+              type: integer
+            totalItems:
+              type: integer
+            totalPages:
+              type: integer
+    PetPhotoUploaded:
+      type: object
+      required:
+        - message
+        - success
+        - photo
+      properties:
+        message:
+          type: string
+        success:
+          type: boolean
+        photo:
+          format: uri
+          type: string
+    User:
+      type: object
+      required:
+        - username
+        - email
+        - id
+        - createdAt
+        - updatedAt
+      properties:
+        username:
+          minLength: 3
+          maxLength: 50
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          format: email
+          type: string
+        phone:
+          pattern: ^\+?[1-9]\d{1,14}$
+          type: string
+        id:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+  securitySchemes:
+    Basic:
+      type: http
+      scheme: basic
+    GitHub:
+      type: apiKey
+      in: cookie
+      name: petstore_gh_session
+      description: "Session cookie issued after an OAuth 2.0 sign-in at
+        https://github.com/login/oauth/authorize (scopes: read:user,
+        user:email). Sign in through the browser; the cookie is then sent
+        automatically."
+tags:
+  - name: Pets
+    description: Browse, adopt and manage pets.
+  - name: Users
+    description: Register and manage user accounts.
+  - name: Orders
+    description: Place and track adoption orders.
+  - name: Inventory
+    description: Aggregate counts of pets by status.

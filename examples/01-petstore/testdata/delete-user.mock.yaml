@@ -1,0 +1,7 @@
+id: petstore-delete-user
+name: Delete a user account
+request:
+  method: DELETE
+  path: /users/22222222-2222-4222-8222-222222222222
+response:
+  status: 204

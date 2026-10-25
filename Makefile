@@ -4,6 +4,8 @@
 # allow user specific optional overrides
 -include Makefile.overrides
 
+include examples/Makefile
+
 # keep in sync with the golangci-lint-action version in .github/workflows/ci.yml
 GOLANGCI_LINT_VERSION ?= v2.14.0
 
@@ -91,4 +93,4 @@ vuln: ## check for known vulnerabilities
 
 .PHONY: help
 help: ## show help
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ": ## "} /^[a-zA-Z0-9_\\:-]+: ## / {gsub(/\\:/, ":", $$1); printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
