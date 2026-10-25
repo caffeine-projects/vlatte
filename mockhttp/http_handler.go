@@ -323,9 +323,11 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// A mock with wire steps answers on its connection, which it takes over, so they see every byte of the answer. It
-	// reads a body still the client's first, through the upstream steps, which the reply then skips: a stage that
-	// aborts them cuts the answer before it starts.
+	// reads a body still the client's first, through the upstream steps: a proxy reply sends what they passed on, and
+	// a stage that aborts them cuts the answer before it starts.
 	upSteps := mock.UpstreamSteps()
+
+	var upBody *bytes.Reader
 
 	var wire *wireResponseWriter
 	if steps := mock.WireSteps(); len(steps) > 0 {
@@ -339,7 +341,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if wire != nil {
-		if wire.upstream {
+		if upBody = wire.upstream; upBody != nil {
 			upSteps = nil
 		}
 
@@ -396,6 +398,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Writer:        w,
 			noSwitch:      noSwitch,
 			upstream:      upSteps,
+			upstreamBody:  upBody,
 		})
 	}
 

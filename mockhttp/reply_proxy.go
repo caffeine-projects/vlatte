@@ -333,11 +333,18 @@ func (p *proxyReplier) Reply(ctx context.Context, input ReplyInput) (*Response, 
 	// The body goes through the upstream steps of the mock, which can change its length: it goes chunked, and a retry
 	// of the transport, which would read it again past the steps, can't happen. A stage that aborts ends the call.
 	var up *stepReader
-	if len(input.upstream) > 0 && out.Body != nil && out.Body != http.NoBody {
+
+	switch {
+	case input.upstreamBody != nil:
+		out.Body = io.NopCloser(input.upstreamBody)
+	case len(input.upstream) > 0 && out.Body != nil && out.Body != http.NoBody:
 		up = newStepReader(out.Context(), out.Body, input.upstream)
 
 		out = out.WithContext(up.ctx)
 		out.Body = up
+	}
+
+	if input.upstreamBody != nil || up != nil {
 		out.ContentLength = -1
 		out.GetBody = nil
 		out.Header.Del(HeaderContentLength)

@@ -39,7 +39,7 @@ type wireResponseWriter struct {
 	flow      *vlatte.Flow
 	out       vlatte.Stage // the flow, or the connection once the steps are abandoned
 	header    http.Header
-	upstream  bool // the upstream steps read the request body, before the connection was taken over
+	upstream  *bytes.Reader // the body as the upstream steps passed it on, when they read it before the takeover
 	proto     string
 	head      bool // a HEAD: the answer has no body
 	chunked   bool // HTTP/1.1: the body is chunked
@@ -104,18 +104,25 @@ func (h *mockHandler) takeOver(ctx context.Context, w http.ResponseWriter, r *Re
 	return ww, nil
 }
 
-// bufferBody reads what is left of the body of req into memory, so it can be read once the connection is taken over.
-// A body the server didn't read whole, which GetBody can't read again, is still the client's: it is read through
-// steps, as the target would read it, so they pace the upload, and it is read again as they passed it on. It returns
-// whether the steps read it, and the cause of an abort a stage asks for.
-func bufferBody(ctx context.Context, req *http.Request, steps []vlatte.Step) (bool, error) {
+// bufferBody reads what is left of the body of req into memory, so it can be read once the connection is taken over:
+// req reads it again as the client sent it. A body the server didn't read whole, which GetBody can't read again, is
+// still the client's: it is read through steps, as the target would read it, so they pace the upload. It returns the
+// body as they passed it on, or nil when they didn't read it, and the cause of an abort a stage asks for.
+func bufferBody(ctx context.Context, req *http.Request, steps []vlatte.Step) (*bytes.Reader, error) {
 	if req.Body == nil || req.Body == http.NoBody {
-		return false, nil
+		return nil, nil
 	}
 
-	var up *stepReader
+	var (
+		sent bytes.Buffer
+		up   *stepReader
+	)
 
-	body := req.Body
+	body := io.ReadCloser(struct {
+		io.Reader
+		io.Closer
+	}{io.TeeReader(req.Body, &sent), req.Body})
+
 	if len(steps) > 0 && req.GetBody == nil {
 		up = newStepReader(ctx, body, steps)
 		body = up
@@ -125,17 +132,22 @@ func bufferBody(ctx context.Context, req *http.Request, steps []vlatte.Step) (bo
 	_ = body.Close()
 
 	if cause := up.aborted(); cause != nil {
-		return false, cause
+		return nil, cause
 	}
 
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
-	req.Body = io.NopCloser(bytes.NewReader(b))
-	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(b)), nil }
+	raw := sent.Bytes()
+	req.Body = io.NopCloser(bytes.NewReader(raw))
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }
 
-	return up != nil, nil
+	if up == nil {
+		return nil, nil
+	}
+
+	return bytes.NewReader(b), nil
 }
 
 func (w *wireResponseWriter) Header() http.Header { return w.header }

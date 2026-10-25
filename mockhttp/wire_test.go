@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -666,6 +667,51 @@ func TestWire_UpstreamStepsTakeABodyLeftUnreadAsItComes(t *testing.T) {
 
 	require.NoError(t, <-answered)
 	require.Equal(t, upstreamReceived{body: "part1?part2?", contentLength: -1, transferEncoding: []string{"chunked"}}, <-got)
+}
+
+func TestWire_TheTargetGetsTheBodyTheUpstreamStepsPassedOn(t *testing.T) {
+	// A client that sends its length sends a body the steps can change: the target gets theirs, chunked, rather than
+	// a body whose length the client's no longer tells.
+	got := make(chan upstreamReceived, 1)
+	target := receivingTarget(t, got)
+
+	m := MustNew(Setup().Silent().NoBodyParsing())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Postf("/up").WireStep(vlatte.StepFunc(passWire)).UpstreamStep(appendStep("?")).Reply(From(target.URL)))
+
+	res, err := (&http.Client{Transport: &http.Transport{DisableKeepAlives: true}}).Post(m.URL("/up"), MIMETextPlain, strings.NewReader("ping"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, upstreamReceived{body: "ping?", contentLength: -1, transferEncoding: []string{"chunked"}}, <-got)
+}
+
+func TestWire_AReplyReadsTheBodyTheClientSent(t *testing.T) {
+	// The upstream steps shape what a proxy sends on: a reply that reads the body itself reads the client's, as the
+	// same mock without wire steps does.
+	m := MustNew(Setup().Silent().NoBodyParsing())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Postf("/body").WireStep(vlatte.StepFunc(passWire)).UpstreamStep(appendStep("?")).Reply(Handler(func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			b = []byte(err.Error())
+		}
+
+		_, _ = fmt.Fprintf(w, "%s %d", b, r.ContentLength)
+	})))
+
+	res, err := (&http.Client{Transport: &http.Transport{DisableKeepAlives: true}}).Post(m.URL("/body"), MIMETextPlain, strings.NewReader("ping"))
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, "ping 4", string(body))
 }
 
 func TestWire_AnUpstreamAbortOfABodyLeftUnreadCutsTheAnswer(t *testing.T) {

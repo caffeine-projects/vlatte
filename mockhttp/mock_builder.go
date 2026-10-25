@@ -469,7 +469,7 @@ func (b *Builder) WireStep(steps ...vlatte.Step) *Builder {
 // NoBodyParsing or past MaxBodyParsingLimit, is read from the client as the target reads it, a small piece at a time,
 // so a stage that slows it slows the upload too, once the connection's buffers are full. A mock with wire steps
 // takes its connection over before it replies, so it reads such a body through these steps first: they pace the
-// upload, and the reply gets the body as they passed it on, which a proxy's target gets at once. A stage that aborts
+// upload, and a proxy's target gets the body as they passed it on, at once. A stage that aborts
 // the flow, with [vlatte.ErrAbort] or [vlatte.ErrReset], fails the call to the target and cuts the client's answer,
 // once the mock counted the call.
 func (b *Builder) UpstreamStep(steps ...vlatte.Step) *Builder {
