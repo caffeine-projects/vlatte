@@ -575,7 +575,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case wire != nil:
 		wire.finish(cut)
 	case cut != nil:
-		h.cut(rw, cut, started)
+		h.cut(rw, r, cut, started)
 	}
 }
 
@@ -583,7 +583,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // connection that can take one, else by aborting the handler, which closes an HTTP/1 connection and resets an HTTP/2
 // stream. w is the writer under the steps. An answer that started goes out first, as far as it got: neither an abort
 // nor a hijack sends what the server buffers. One that didn't sends nothing, not even a status.
-func (h *mockHandler) cut(w http.ResponseWriter, cause error, started bool) {
+func (h *mockHandler) cut(w http.ResponseWriter, r *http.Request, cause error, started bool) {
 	if started {
 		_ = flushTo(http.NewResponseController(w))
 	}
@@ -594,6 +594,12 @@ func (h *mockHandler) cut(w http.ResponseWriter, cause error, started bool) {
 			return
 		}
 	}
+
+	// net/http reads what is left of the request's body before it closes the connection, with no deadline: a client
+	// that sends nothing more would hold it. The body closes here, past a deadline, so that read ends at once. The
+	// connection ends here, so nothing else reads it.
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now())
+	_ = r.Body.Close()
 
 	panic(http.ErrAbortHandler)
 }

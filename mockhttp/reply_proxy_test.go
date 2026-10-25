@@ -1478,6 +1478,32 @@ func TestProxyReply_AnUpstreamAbortCutsTheAnswer(t *testing.T) {
 	require.EqualValues(t, 1, scoped.Hits())
 }
 
+func TestProxyReply_AnUpstreamAbortEndsAStalledUpload(t *testing.T) {
+	// A step that times the upload out, while the client sends nothing more, cuts the answer then: the mock doesn't
+	// wait for a client that may never send the rest.
+	target := receivingTarget(t, make(chan upstreamReceived, 1))
+
+	m := MustNew(Setup().Silent().NoBodyParsing())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	seen := make(chan string, 1)
+	release := make(chan struct{})
+	scoped := m.MustMock(Postf("/up").
+		UpstreamStep(seenStep{seen: seen}, abortOn{release: release, err: errors.New("step: timed out")}).
+		Reply(From(target.URL)))
+
+	conn := stallUpload(t, m, "/up")
+	require.Equal(t, "ab", <-seen)
+
+	close(release)
+
+	got, err := io.ReadAll(conn)
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.EqualValues(t, 1, scoped.Hits())
+}
+
 // cutBody sends first, then waits for ctx to end, and fails as a transport whose connection was cut does: with an
 // error of its own, not the cause of ctx.
 type cutBody struct {

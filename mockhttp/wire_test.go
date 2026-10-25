@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -712,6 +713,54 @@ func TestWire_AReplyReadsTheBodyTheClientSent(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, "ping 4", string(body))
+}
+
+// stallUpload sends m a POST of path whose body is 10 bytes long but sends 2 of them, "ab", then waits, and returns
+// its connection.
+func stallUpload(t *testing.T, m *Server, path string) net.Conn {
+	t.Helper()
+
+	u, err := url.Parse(m.URL(path))
+	require.NoError(t, err)
+
+	conn, err := net.Dial("tcp", u.Host)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	// The deadline only bounds a failure.
+	require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+
+	_, err = io.WriteString(conn, "POST "+path+" HTTP/1.1\r\nHost: "+u.Host+"\r\nContent-Length: 10\r\n\r\nab")
+	require.NoError(t, err)
+
+	return conn
+}
+
+func TestWire_AnUpstreamAbortEndsAStalledUpload(t *testing.T) {
+	// A step that times the upload out, while the client sends nothing more, cuts the answer then: the mock doesn't
+	// wait for a client that may never send the rest.
+	target := receivingTarget(t, make(chan upstreamReceived, 1))
+
+	m := MustNew(Setup().Silent().NoBodyParsing())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	seen := make(chan string, 1)
+	release := make(chan struct{})
+	scoped := m.MustMock(Postf("/up").
+		WireStep(vlatte.StepFunc(passWire)).
+		UpstreamStep(seenStep{seen: seen}, abortOn{release: release, err: errors.New("step: timed out")}).
+		Reply(From(target.URL)))
+
+	conn := stallUpload(t, m, "/up")
+	require.Equal(t, "ab", <-seen)
+
+	close(release)
+
+	got, err := io.ReadAll(conn)
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.EqualValues(t, 1, scoped.Hits())
 }
 
 func TestWire_AnUpstreamAbortOfABodyLeftUnreadCutsTheAnswer(t *testing.T) {

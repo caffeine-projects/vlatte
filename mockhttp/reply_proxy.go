@@ -509,7 +509,7 @@ var errBodyEnded = errors.New("reply_proxy: the body ended before its steps did"
 // stepReader reads a body through a flow of steps: from the first read, a goroutine copies the body through the flow,
 // whose sink is a pipe the reader reads, so a stage that writes later, or in parts, is read as it writes. The copy
 // takes the body as it is read, a piece at a time: of a body still the client's, a stage that holds a piece holds the
-// upload. ctx, for the call that reads it, ends with the cause of an abort a stage asks for.
+// upload. ctx, for the call that reads it, ends with the cause of an abort a stage asks for, and so does the reader.
 type stepReader struct {
 	ctx   context.Context
 	flow  *vlatte.Flow
@@ -531,6 +531,7 @@ func newStepReader(ctx context.Context, body io.ReadCloser, steps []vlatte.Step)
 	context.AfterFunc(r.flow.Context(), func() {
 		if cause := r.aborted(); cause != nil {
 			cancel(cause)
+			pw.CloseWithError(cause)
 		}
 	})
 
@@ -543,7 +544,9 @@ func (r *stepReader) Read(p []byte) (int, error) {
 	return r.pipe.Read(p)
 }
 
-// Close stops the copy, and the steps, which drop what they hold, and waits for them to end.
+// Close stops the copy, and the steps, which drop what they hold, and waits for them to end. After an abort, it
+// neither closes the body nor waits for the copy, which may wait on a client that sends nothing more: closing a
+// server's request body reads the rest of it. The cut that follows ends the connection, and the copy with it.
 func (r *stepReader) Close() error {
 	// A body never read has no copy to wait for: its steps end here.
 	r.start.Do(func() {
@@ -553,6 +556,10 @@ func (r *stepReader) Close() error {
 	})
 
 	err := r.pipe.Close()
+	if r.aborted() != nil {
+		return err
+	}
+
 	_ = r.body.Close()
 	r.flow.Abort(errBodyEnded)
 	<-r.done
