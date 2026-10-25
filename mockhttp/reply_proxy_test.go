@@ -1478,26 +1478,45 @@ func TestProxyReply_AnUpstreamAbortCutsTheAnswer(t *testing.T) {
 	require.EqualValues(t, 1, scoped.Hits())
 }
 
+// cutBody sends first, then waits for ctx to end, and fails as a transport whose connection was cut does: with an
+// error of its own, not the cause of ctx.
+type cutBody struct {
+	ctx   context.Context
+	first []byte
+}
+
+func (b *cutBody) Read(p []byte) (int, error) {
+	if len(b.first) > 0 {
+		n := copy(p, b.first)
+		b.first = b.first[n:]
+
+		return n, nil
+	}
+
+	<-b.ctx.Done()
+
+	return 0, net.ErrClosed
+}
+
+func (b *cutBody) Close() error { return nil }
+
 func TestProxyReply_AnUpstreamAbortCutsAnAnswerThatStarted(t *testing.T) {
 	// A target can answer before it read the body, as a stream does: a step that then cuts what the mock sends on
-	// cuts the client's answer where it got, not as one that looks whole. The cut is the mock's answer: it counts.
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = http.NewResponseController(w).EnableFullDuplex()
-		_, _ = io.WriteString(w, "start")
-		_ = http.NewResponseController(w).Flush()
-		_, _ = io.Copy(io.Discard, r.Body)
-	}))
-	t.Cleanup(target.Close)
+	// cuts the client's answer where it got, not as one that looks whole. The cut is the mock's answer: it counts,
+	// whatever error the cut ends the target's answer with.
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := &cutBody{ctx: r.Context(), first: []byte("start")}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: body, ContentLength: -1, Request: r}, nil
+	})
 
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	// A stage holds the body, so what the mock sends on goes on while the answer streams.
 	release := make(chan struct{})
 	scoped := m.MustMock(Postf("/up").
-		UpstreamStep(abortOn{release: release, err: errors.New("step: cut")}, holdStep{d: time.Hour}).
-		Reply(From(target.URL)))
+		UpstreamStep(abortOn{release: release, err: errors.New("step: cut")}).
+		Reply(From("http://target.test").Transport(transport)))
 
 	res, err := http.Post(m.URL("/up"), MIMETextPlain, strings.NewReader("ping"))
 	require.NoError(t, err)

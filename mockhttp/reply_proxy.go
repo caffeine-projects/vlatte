@@ -393,6 +393,12 @@ func (p *proxyReplier) Reply(ctx context.Context, input ReplyInput) (*Response, 
 		return nil, fmt.Errorf("reply_proxy: %w", err)
 	}
 
+	// A stage that cuts what the mock sends on once the target answered cuts the call, which ends its body: the read
+	// fails with the cut, the mock's answer.
+	if body, ok := res.BodyCloser.(*targetBody); ok && up != nil {
+		body.cut = up.aborted
+	}
+
 	// A header of the mock's replaces the target's values of that name: the client gets one Content-Type, not two.
 	for key, values := range p.headers {
 		res.Header[key] = slices.Clone(values)
