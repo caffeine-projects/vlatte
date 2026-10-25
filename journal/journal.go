@@ -1,6 +1,3 @@
-// Package journal keeps the requests a mock server serves, of any protocol, whatever their outcome: a changelog of
-// JSON lines in segment files, with an index in memory that narrows queries. Queries match with the matchers of mocks,
-// such as those of package match. A server embeds a Verifier, next to its vlatte.Base, to verify its requests.
 package journal
 
 import (
