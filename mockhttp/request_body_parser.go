@@ -37,6 +37,14 @@ func parseRequest(r *http.Request, options *Server) (*RequestValues, []byte, err
 	return req, rawBody, err
 }
 
+// bodyCut reports whether the server read only part of raw, the body of r it read under limit, its
+// MaxBodyParsingLimit: short of its Content-Length, or up to the limit, unless its Content-Length says that was all.
+// A body of no length that reaches the limit may have had more.
+func bodyCut(limit int64, r *http.Request, raw []byte) bool {
+	n := int64(len(raw))
+	return limit > 0 && n >= limit && r.ContentLength != n || r.ContentLength > n
+}
+
 // parseURL returns the request URL and its path segments. The path stays escaped as the client sent it: decoded, "%3F"
 // and "%23" would start a query or a fragment.
 func parseURL(r *http.Request, baseURL string) (*url.URL, []string) {

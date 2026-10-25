@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"cmp"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -16,13 +17,22 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/journal"
+)
+
+const (
+	// DefaultWorkDir is the work directory of a server without a name, and holds a named server's: see Config.WorkDir.
+	DefaultWorkDir = "testdata/vlatte"
+
+	// WorkDirVar, at the start of a path, stands for the server's work directory, as in "{workdir}/_mocks".
+	WorkDirVar = "{workdir}"
 )
 
 // Defaults
 var (
-	// ConfigMockFilePattern is the default filename glob pattern to search for local mock files: the recordings of the
-	// default record directory too.
-	ConfigMockFilePattern = append([]string{"testdata/_mocks/*mock.yaml", "testdata/_mocks/*mock.yml"}, recordedMockFiles(_defaultRecordDir)...)
+	// ConfigMockFilePattern is the default filename glob pattern to search for local mock files, in the server's work
+	// directory: the recordings of the default record directory too.
+	ConfigMockFilePattern = append([]string{WorkDirVar + "/_mocks/*mock.yaml", WorkDirVar + "/_mocks/*mock.yml"}, recordedMockFiles(_defaultRecordDir)...)
 )
 
 // Config holds the configuration of an HTTP mock Server.
@@ -30,6 +40,7 @@ type Config struct {
 	// Common fields
 	Name                  string
 	RootDir               string
+	WorkDir               string
 	TLSConfig             *tls.Config
 	TLSCertificates       []tls.Certificate
 	TLSClientCAs          *x509.CertPool
@@ -64,6 +75,7 @@ type Config struct {
 	MaxBodyParsingLimit            int64
 	NoBodyParsing                  bool
 	NoDebugHeaders                 bool
+	NoNearMisses                   bool
 	Middlewares                    []func(http.Handler) http.Handler
 	CORS                           *CORSConfig
 	BackendFactory                 BackendFactory
@@ -73,6 +85,7 @@ type Config struct {
 	Proxy                          *ProxyConfig
 	Record                         *RecordConfig
 	Admin                          *AdminConfig
+	Journal                        *JournalConfig
 	MockFileHandlers               []MockFileHandler
 	HeaderNamesToRedact            map[string]struct{}
 	UseHTTPS                       bool
@@ -105,6 +118,7 @@ type Config struct {
 func (c *Config) Apply(conf *Config) error {
 	conf.Name = c.Name
 	conf.RootDir = c.RootDir
+	conf.WorkDir = c.WorkDir
 	conf.TLSConfig = c.TLSConfig
 	conf.TLSCertificates = c.TLSCertificates
 	conf.TLSClientCAs = c.TLSClientCAs
@@ -131,6 +145,8 @@ func (c *Config) Apply(conf *Config) error {
 	conf.MaxBodyParsingLimit = c.MaxBodyParsingLimit
 	conf.NoBodyParsing = c.NoBodyParsing
 	conf.NoDebugHeaders = c.NoDebugHeaders
+	conf.NoNearMisses = c.NoNearMisses
+	conf.Journal = c.Journal
 	conf.Middlewares = c.Middlewares
 	conf.CORS = c.CORS
 	conf.BackendFactory = c.BackendFactory
@@ -161,6 +177,27 @@ type AdminConfig struct {
 	// each Reload, so changes made to it directly take effect too. Nil keeps those mocks in memory, as long as the
 	// server runs.
 	Store AdminStore
+}
+
+// JournalConfig configures the journal of a server: the requests its mocks get, of every outcome, which tests and the
+// admin API verify and search, while the server runs: Close closes it. The requests the server answers before its
+// mocks get them, such as CORS preflights, and those a middleware answers, aren't in it. A nil *JournalConfig keeps
+// none.
+type JournalConfig struct {
+	// Dir is where the journal keeps its files, across restarts: a server that starts again finds the requests it
+	// served before. Relative paths start at RootDir, and WorkDirVar at the server's work directory, as in
+	// "{workdir}/_journal". Empty keeps them in a temporary directory, which Close removes.
+	Dir string
+
+	// MaxEntries is how many requests the journal keeps, the newest. 0 keeps them all.
+	MaxEntries int
+
+	// MaxBodySize is how many bytes of a request's body the journal keeps. 0 keeps whole bodies.
+	MaxBodySize int64
+}
+
+func defaultJournalConfig() JournalConfig {
+	return JournalConfig{MaxEntries: journal.DefaultMaxEntries, MaxBodySize: journal.DefaultMaxBodySize}
 }
 
 // AdminStore makes the persistent store of the mocks the admin API adds, for the server app. The store keeps their
@@ -228,7 +265,8 @@ func Setup() *ConfigBuilder {
 	}
 }
 
-// Name sets a name to the mock server.
+// Name sets a name to the mock server, which its logs show. It names the folder of its files too, in DefaultWorkDir,
+// unless WorkDir sets another: a path inside it, which doesn't start with _, as vlatte's own folders do.
 func (cb *ConfigBuilder) Name(name string) *ConfigBuilder {
 	cb.conf.Name = name
 	return cb
@@ -258,6 +296,14 @@ func (cb *ConfigBuilder) Port(port int) *ConfigBuilder {
 // as they are.
 func (cb *ConfigBuilder) RootDir(rootDir string) *ConfigBuilder {
 	cb.conf.RootDir = rootDir
+	return cb
+}
+
+// WorkDir sets the directory of the server's own files: the mock files, recordings, admin mocks and journal of its
+// defaults, whose paths start with WorkDirVar. Empty is DefaultWorkDir, or DefaultWorkDir/<name> for a named server.
+// A relative dir starts at RootDir.
+func (cb *ConfigBuilder) WorkDir(dir string) *ConfigBuilder {
+	cb.conf.WorkDir = dir
 	return cb
 }
 
@@ -293,6 +339,14 @@ func (cb *ConfigBuilder) NoDebugHeaders() *ConfigBuilder {
 	return cb
 }
 
+// NoNearMisses turns off the report of the mocks closest to a request no mock matched, which the answer to it lists.
+// The report runs no matcher twice: it runs those matching never reached, such as the action of a match.Peek after
+// the part a mock differs in.
+func (cb *ConfigBuilder) NoNearMisses() *ConfigBuilder {
+	cb.conf.NoNearMisses = true
+	return cb
+}
+
 // MaxBodyParsingLimit sets the limit of bytes that request body parsers should read.
 // Zero means no limit.
 func (cb *ConfigBuilder) MaxBodyParsingLimit(n int64) *ConfigBuilder {
@@ -301,7 +355,7 @@ func (cb *ConfigBuilder) MaxBodyParsingLimit(n int64) *ConfigBuilder {
 }
 
 // Use adds middlewares that wrap the mock handler, to intercept requests. They run in the order they are added, across
-// calls.
+// calls. The journal, the logs and the events tell the status a middleware sends, when it answers in place of a mock.
 func (cb *ConfigBuilder) Use(fn ...func(handler http.Handler) http.Handler) *ConfigBuilder {
 	cb.conf.Middlewares = append(cb.conf.Middlewares, fn...)
 	return cb
@@ -328,7 +382,8 @@ func (cb *ConfigBuilder) BackendFactory(factory BackendFactory) *ConfigBuilder {
 	return cb
 }
 
-// HandlerDecorator configures a custom HTTP handler using the default mock handler.
+// HandlerDecorator configures a custom HTTP handler using the default mock handler. The journal, the logs and the
+// events tell the status it sends, when it answers in place of a mock, such as on a timeout.
 func (cb *ConfigBuilder) HandlerDecorator(fn func(handler http.Handler) http.Handler) *ConfigBuilder {
 	cb.conf.HandlerDecorator = fn
 	return cb
@@ -397,8 +452,8 @@ func (cb *ConfigBuilder) Parameters(params vlatte.KV) *ConfigBuilder {
 	return cb
 }
 
-// MockFilePatterns sets custom Glob patterns to load mock from the file system.
-// Defaults to [testdata/*.mock.json, testdata/*.mock.yaml].
+// MockFilePatterns sets custom Glob patterns to load mock from the file system, which may start with WorkDirVar.
+// Defaults to ConfigMockFilePattern.
 func (cb *ConfigBuilder) MockFilePatterns(patterns ...string) *ConfigBuilder {
 	cb.conf.MockFileSearchPatterns = patterns
 
@@ -546,6 +601,13 @@ func (cb *ConfigBuilder) Admin(addr string) *ConfigBuilder {
 	return cb
 }
 
+// Journal keeps a journal of the requests the server serves, in dir, across restarts: see JournalConfig. Empty keeps
+// it in a temporary directory, which Close removes, as a test wants: a named one keeps the requests of earlier runs.
+func (cb *ConfigBuilder) Journal(dir string) *ConfigBuilder {
+	section(&cb.conf.Journal, defaultJournalConfig()).Dir = dir
+	return cb
+}
+
 // AdminStore keeps the mocks the admin API adds in the persistent store store makes, such as FileStore(dir), and
 // serves the admin API: see AdminConfig.Store.
 func (cb *ConfigBuilder) AdminStore(store AdminStore) *ConfigBuilder {
@@ -673,4 +735,49 @@ func loadCertPool(file string) (*x509.CertPool, error) {
 	}
 
 	return pool, nil
+}
+
+// workDir returns the directory of the server's own files: WorkDir, or DefaultWorkDir, the folder of the server's name
+// in it for a named server.
+func (c *Config) workDir() string {
+	return cmp.Or(c.WorkDir, filepath.Join(DefaultWorkDir, c.Name))
+}
+
+// path returns where the file or pattern p of the server is: a leading WorkDirVar is the server's work directory,
+// and a relative path starts at RootDir.
+func (c *Config) path(p string) string {
+	if rest, ok := strings.CutPrefix(p, WorkDirVar); ok && (rest == "" || os.IsPathSeparator(rest[0])) {
+		p = filepath.Join(c.workDir(), rest)
+	}
+
+	if filepath.IsAbs(p) {
+		return p
+	}
+
+	return filepath.Join(c.RootDir, p)
+}
+
+// checkName checks the name of a server that names its work directory, a folder of DefaultWorkDir.
+func (c *Config) checkName() error {
+	if problem := c.nameProblem(); problem != "" {
+		return fmt.Errorf("config: name %q %s", c.Name, problem)
+	}
+
+	return nil
+}
+
+// nameProblem tells what is wrong with the name of a server that names its work directory, "" when nothing is: it
+// stays inside DefaultWorkDir, and doesn't start with _, as vlatte's own folders do.
+func (c *Config) nameProblem() string {
+	name := c.Name
+	if c.WorkDir != "" || name == "" {
+		return ""
+	}
+
+	if !filepath.IsLocal(name) || name == "." || strings.HasPrefix(name, "_") {
+		return "names the folder of the server's files, in " + DefaultWorkDir + ": use one inside it, which " +
+			"doesn't start with _, or set workdir"
+	}
+
+	return ""
 }

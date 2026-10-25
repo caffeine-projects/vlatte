@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -17,7 +16,7 @@ import (
 var _ RecordConfigurer = (*RecordConfig)(nil)
 
 const (
-	_defaultRecordDir     = "testdata/_mocks_recorded"
+	_defaultRecordDir     = WorkDirVar + "/_mocks_recorded"
 	_defaultRecordFormat  = "json"
 	_defaultMaxInlineBody = 1 << 20
 	_defaultMaxBodySize   = 1 << 30
@@ -275,13 +274,9 @@ func checkRecordTarget(target string) error {
 	}
 }
 
-// dir returns the directory of the recordings: Dir, from root when it is relative.
-func (r *RecordConfig) dir(root string) string {
-	if filepath.IsAbs(r.Dir) {
-		return r.Dir
-	}
-
-	return filepath.Join(root, r.Dir)
+// dir returns the directory of the recordings of the server c configures: Dir, as c.path reads it.
+func (r *RecordConfig) dir(c *Config) string {
+	return c.path(r.Dir)
 }
 
 // recordedMockFiles returns the glob patterns of the mock files a recording writes into dir.

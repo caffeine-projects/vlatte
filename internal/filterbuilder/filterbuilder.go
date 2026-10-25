@@ -75,6 +75,22 @@ const (
 
 var errEmptySpec = errors.New(`a matcher spec names its matcher first, as in ["equal", 1]`)
 
+// MatcherOf returns the matcher of a value of a mock file, v: text matches equal text, and a list is a matcher spec.
+func MatcherOf(v config.Value) (vlatte.Matcher, error) {
+	switch x := v.Any.(type) {
+	case string:
+		return TryBuildMatcher(x)
+	case []any:
+		if len(x) == 0 {
+			return nil, config.Invalid(v, v.Key+" is an empty list", "name a matcher, such as [equal, x]")
+		}
+
+		return TryBuildMatcher(x)
+	default:
+		return nil, config.Mismatch(v, "a string or a matcher list, such as [equal, x]", config.String)
+	}
+}
+
 // TryBuildMatcher builds the matcher of a value of a mock file: a string matches text equal to it,
 // and a list is a matcher spec.
 func TryBuildMatcher(spec any) (vlatte.Matcher, error) {

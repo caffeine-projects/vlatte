@@ -105,11 +105,12 @@ func TestProblems_UnsupportedMediaTypeSaysWhatIs(t *testing.T) {
 	// Every route that reads a body reads JSON or YAML only. RFC 9110: a 415 can list the media types the server takes.
 	files := &fakeFiles{}
 	url := serve(t, newStore(t, newFake("hello")),
-		admin.Files(files), admin.Recorder(&fakeRecorder{}), admin.Scenarios(mfeat.NewScenarioStore()))
+		admin.Files(files), admin.Recorder(&fakeRecorder{}), admin.Scenarios(mfeat.NewScenarioStore()),
+		admin.Journal(journalOf(t), nil))
 
 	for _, route := range []string{
 		"POST /mocks", "POST /mocks/validate", "PUT /mocks/hello", "PATCH /mocks/hello", "POST /mocks/save",
-		"PUT /scenarios/checkout", "POST /recording",
+		"PUT /scenarios/checkout", "POST /recording", "QUERY /requests",
 	} {
 		method, path, _ := strings.Cut(route, " ")
 		res, body := send(t, request{method: method, url: url + path, contentType: "text/plain", body: "id: hello"})

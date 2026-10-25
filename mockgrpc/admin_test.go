@@ -139,6 +139,7 @@ func TestAdmin_StreamsTheCalls(t *testing.T) {
 		}
 	}
 
+	require.NoError(t, lines.Err())
 	require.Equal(t, "/protobuf.TestService/Greetings", byType["matched"]["target"])
 	require.NotEmpty(t, byType["matched"]["mock_id"])
 	require.Equal(t, "/protobuf.TestService/List", byType["unmatched"]["target"])
@@ -181,6 +182,7 @@ func TestAdmin_StreamsTheCallsAMockFailed(t *testing.T) {
 			require.Equal(t, "error", e["type"])
 			require.Equal(t, "/protobuf.TestService/Greetings", e["target"])
 			require.Contains(t, e["message"], "reply: broken")
+			require.NoError(t, lines.Err())
 
 			return
 		}

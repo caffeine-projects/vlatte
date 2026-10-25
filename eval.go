@@ -71,21 +71,38 @@ type Mocks[M Mock, TIn any] iter.Seq[M]
 
 // Find tries to find an exact match in the mocks.
 // It returns the mock that matched and a boolean indicating if a match was found.
+// misses, when not nil, starts over and keeps each mock that didn't match, with the part it stopped at, which
+// [Misses.NearMisses] goes on from.
 func (mocks Mocks[M, TIn]) Find(
 	ctx context.Context,
 	sub *Explanation,
 	in TIn,
 	evals GetEvals[M, TIn],
+	misses *Misses[M, TIn],
 ) (M, bool, error) {
+	if misses != nil {
+		misses.in, misses.evals, misses.tried = in, evals, misses.tried[:0]
+	}
+
 	for mock := range mocks {
-		ok, err := evals(mock).Eval(ctx, sub, in)
+		e := evals(mock)
+
+		stop, err := e.stop(ctx, sub, in)
 		if err != nil {
 			var nothing M
 			return nothing, false, fmt.Errorf("%w: %s: %w", ErrMatching, mock.String(), err)
 		}
 
-		if ok {
+		if stop == len(e) {
+			if misses != nil {
+				misses.tried = misses.tried[:0]
+			}
+
 			return mock, true, nil
+		}
+
+		if misses != nil {
+			misses.tried = append(misses.tried, tried[M]{mock: mock, stop: stop})
 		}
 	}
 
@@ -99,16 +116,23 @@ type Evaluators[M Mock, TIn any] []*Eval[TIn]
 // Eval evaluates the input against all evaluators from a single [Mock].
 // Normally this function is used together with [Mocks.Find]
 func (e Evaluators[M, TIn]) Eval(ctx context.Context, sub *Explanation, in TIn) (bool, error) {
+	stop, err := e.stop(ctx, sub, in)
+	return err == nil && stop == len(e), err
+}
+
+// stop evaluates the input against the evaluators in order, up to the first that doesn't match: it returns its
+// index, or len(e) when all match.
+func (e Evaluators[M, TIn]) stop(ctx context.Context, sub *Explanation, in TIn) (int, error) {
 	for i, eval := range e {
 		ok, err := eval.Match(ctx, sub, in)
 		if err != nil {
-			return false, fmt.Errorf("eval[%d][%s]: %w", i, eval.String(), err)
+			return i, fmt.Errorf("eval[%d][%s]: %w", i, eval.String(), err)
 		}
 
 		if !ok {
-			return false, nil
+			return i, nil
 		}
 	}
 
-	return true, nil
+	return len(e), nil
 }

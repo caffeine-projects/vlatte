@@ -233,7 +233,7 @@ var _mockSchema = config.NewSchema(
 				}
 			}
 
-			m, err := matcherOf(v)
+			m, err := filterbuilder.MatcherOf(v)
 			if err != nil {
 				return err
 			}
@@ -378,7 +378,7 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "body")
 
-			m, err := matcherOf(v)
+			m, err := filterbuilder.MatcherOf(v)
 			if err != nil {
 				return err
 			}
@@ -499,7 +499,7 @@ var _basicAuthSchema = config.NewSchema(
 	basicAuthField{
 		Key: "username", Kind: config.Any, Usage: "Username to match: text or a matcher list.",
 		Set: func(a *basicAuthDef, v config.Value) error {
-			m, err := matcherOf(v)
+			m, err := filterbuilder.MatcherOf(v)
 			a.username = m
 
 			return err
@@ -508,7 +508,7 @@ var _basicAuthSchema = config.NewSchema(
 	basicAuthField{
 		Key: "password", Kind: config.Any, Usage: "Password to match: text or a matcher list.",
 		Set: func(a *basicAuthDef, v config.Value) error {
-			m, err := matcherOf(v)
+			m, err := filterbuilder.MatcherOf(v)
 			a.password = m
 
 			return err
@@ -707,15 +707,7 @@ func (d *mockDef) check(origin string, found []config.Problem) []config.Problem 
 	}
 
 	problems := conflicts(origin, "", set)
-
-	var urlKeys []string
-	for _, k := range _urlKeys {
-		if _, ok := d.request.url[k]; ok {
-			urlKeys = append(urlKeys, k)
-		}
-	}
-
-	problems = append(problems, conflicts(origin, "request", urlKeys)...)
+	problems = append(problems, d.request.conflicts(origin)...)
 	problems = append(problems, d.request.checkPathParams(origin, found)...)
 
 	requestFailed := slices.ContainsFunc(found, func(p config.Problem) bool {
@@ -954,7 +946,7 @@ func decodeFilePattern(d *mockDef, field string, v config.Value) error {
 
 // withMatcher calls set with the matcher of a value: text, compared as is, or a matcher list.
 func withMatcher(v config.Value, set func(vlatte.Matcher) *FilePattern) error {
-	m, err := matcherOf(v)
+	m, err := filterbuilder.MatcherOf(v)
 	if err != nil {
 		return err
 	}
@@ -1050,22 +1042,6 @@ func sameHeader(v config.Value) error {
 	return nil
 }
 
-// matcherOf builds the matcher of a value: a string, compared as is, or a matcher list such as [contains, x].
-func matcherOf(v config.Value) (vlatte.Matcher, error) {
-	switch x := v.Any.(type) {
-	case string:
-		return filterbuilder.TryBuildMatcher(x)
-	case []any:
-		if len(x) == 0 {
-			return nil, config.Invalid(v, v.Key+" is an empty list", "name a matcher, such as [equal, x]")
-		}
-
-		return filterbuilder.TryBuildMatcher(x)
-	default:
-		return nil, config.Mismatch(v, "a string or a matcher list, such as [equal, x]", config.String)
-	}
-}
-
 // matchText calls text with a text value, or matcher with the matcher of a matcher list.
 func matchText(v config.Value, text func(string), matcher func(vlatte.Matcher)) error {
 	if s, ok := v.Any.(string); ok {
@@ -1073,7 +1049,7 @@ func matchText(v config.Value, text func(string), matcher func(vlatte.Matcher)) 
 		return nil
 	}
 
-	m, err := matcherOf(v)
+	m, err := filterbuilder.MatcherOf(v)
 	if err != nil {
 		return err
 	}
@@ -1086,7 +1062,7 @@ func matchText(v config.Value, text func(string), matcher func(vlatte.Matcher)) 
 // matchEach decodes an object of matcher values, by name, into Builder calls in name order.
 func matchEach(v config.Value, dst *[]func(*Builder), add func(b *Builder, name string, m vlatte.Matcher)) error {
 	return config.Members(v, func(name string, member config.Value) error {
-		m, err := matcherOf(member)
+		m, err := filterbuilder.MatcherOf(member)
 		if err != nil {
 			return err
 		}
@@ -1106,7 +1082,7 @@ func matchLists(v config.Value, dst *[]func(*Builder), add func(b *Builder, name
 				fmt.Sprintf("write a matcher list, such as [contains, %q]", s))
 		}
 
-		m, err := matcherOf(member)
+		m, err := filterbuilder.MatcherOf(member)
 		if err != nil {
 			return err
 		}
@@ -1120,7 +1096,7 @@ func matchLists(v config.Value, dst *[]func(*Builder), add func(b *Builder, name
 func setMethod(r *requestDef, v config.Value) error {
 	s, ok := v.Any.(string)
 	if !ok {
-		m, err := matcherOf(v)
+		m, err := filterbuilder.MatcherOf(v)
 		if err != nil {
 			return err
 		}
@@ -1147,7 +1123,7 @@ func setMethod(r *requestDef, v config.Value) error {
 func setHost(r *requestDef, v config.Value) error {
 	s, ok := v.Any.(string)
 	if !ok {
-		m, err := matcherOf(v)
+		m, err := filterbuilder.MatcherOf(v)
 		if err != nil {
 			return err
 		}
@@ -1183,7 +1159,7 @@ func setURL(r *requestDef, v config.Value) error {
 
 	s, ok := v.Any.(string)
 	if !ok {
-		m, err := matcherOf(v)
+		m, err := filterbuilder.MatcherOf(v)
 		if err != nil {
 			return err
 		}
@@ -1303,6 +1279,18 @@ func (d *mockDef) apply(b *Builder, dir string) {
 	}
 
 	b.Reply(d.replier(dir))
+}
+
+// conflicts reports the keys of r that match the URL set with another: only one of them can be.
+func (r *requestDef) conflicts(origin string) []config.Problem {
+	var urlKeys []string
+	for _, k := range _urlKeys {
+		if _, ok := r.url[k]; ok {
+			urlKeys = append(urlKeys, k)
+		}
+	}
+
+	return conflicts(origin, "request", urlKeys)
 }
 
 // apply adds the request matchers to b, in a fixed order.

@@ -29,7 +29,7 @@ var (
 const (
 	// _defaultSaveDir is where the admin API saves mocks by default: the default mock file patterns load its YAML
 	// files on the next start too.
-	_defaultSaveDir    = "testdata/_mocks"
+	_defaultSaveDir    = WorkDirVar + "/_mocks"
 	_defaultSaveFormat = "yaml"
 
 	// _saveTempPattern names the files a save is writing: never *.mock.*, so loading mock files skips them.
@@ -68,33 +68,37 @@ type adminEvents struct {
 func (a adminEvents) OnRequest(*RequestValues) {}
 
 func (a adminEvents) OnMatch(r *RequestValues, res *Response) {
-	a.publish(handler.EventMatched, r, res, nil)
+	a.publish(handler.EventMatched, r, r.answered(), nil)
 }
 
 func (a adminEvents) OnProxied(r *RequestValues, res *Response) {
-	a.publish(handler.EventProxied, r, res, nil)
+	a.publish(handler.EventProxied, r, r.answered(), nil)
 }
 
 func (a adminEvents) OnNoMatch(r *RequestValues) {
-	a.publish(handler.EventUnmatched, r, nil, nil)
+	a.publish(handler.EventUnmatched, r, r.answered(), nil)
 }
 
 func (a adminEvents) OnWarning(r *RequestValues, err error) {
-	a.publish(handler.EventWarning, r, nil, err)
+	a.publish(handler.EventWarning, r, 0, err)
 }
 
 func (a adminEvents) OnError(r *RequestValues, err error) {
-	a.publish(handler.EventError, r, nil, err)
+	a.publish(handler.EventError, r, r.answered(), err)
 }
 
-func (a adminEvents) publish(kind string, r *RequestValues, res *Response, err error) {
-	e := handler.Event{Type: kind, Time: time.Now(), RequestID: r.ReqID, Method: r.RawRequest.Method, Target: r.URL.String()}
+// publish publishes the event of r, with the status the client got, 0 for none.
+func (a adminEvents) publish(kind string, r *RequestValues, status int, err error) {
+	e := handler.Event{
+		Type:      kind,
+		Time:      time.Now(),
+		RequestID: r.ReqID,
+		Method:    r.RawRequest.Method,
+		Target:    r.URL.String(),
+		Status:    status,
+	}
 	if r.Mock != nil {
 		e.MockID = r.Mock.ID()
-	}
-
-	if res != nil {
-		e.Status = res.StatusCode
 	}
 
 	if err != nil {
@@ -155,8 +159,11 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 
 	// The admin API checked the format.
 	format = cmp.Or(format, _defaultSaveFormat)
-	dir = cmp.Or(dir, _defaultSaveDir)
-	if !filepath.IsAbs(dir) {
+	// A dir the admin API sends stays inside root_dir, as it checked: only the default is in the work directory.
+	switch {
+	case dir == "":
+		dir = app.config.path(_defaultSaveDir)
+	case !filepath.IsAbs(dir):
 		dir = filepath.Join(app.config.RootDir, dir)
 	}
 

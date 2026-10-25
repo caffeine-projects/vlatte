@@ -6,6 +6,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var _ SelfDescriptive = selfDescribing{}
+
 func TestDescriptor_MarshalJSON(t *testing.T) {
 	type testCase struct {
 		key          string
@@ -69,4 +71,196 @@ func TestDescriptor_Validate(t *testing.T) {
 			require.ErrorIs(t, err, tc.err)
 		})
 	}
+}
+
+type selfDescribing struct {
+	d Descriptor
+}
+
+func (s selfDescribing) Describe() Descriptor { return s.d }
+
+func TestConstructors_RenderTheJSONCallersSerialize(t *testing.T) {
+	inner := selfDescribing{d: New("inner", []any{"x"})}
+
+	tests := []struct {
+		name string
+		give Descriptor
+		want string
+	}{
+		{
+			name: "single arg renders the key followed by the item",
+			give: SingleArg("k", 1),
+			want: `["k",1]`,
+		},
+		{
+			name: "key only renders a one-element array",
+			give: KeyOnly("k"),
+			want: `["k"]`,
+		},
+		{
+			name: "multi args renders the key followed by every arg",
+			give: MultiArgs("k", "a", 2),
+			want: `["k","a",2]`,
+		},
+		{
+			name: "key value pairs render an object without the key",
+			give: WithKeyValuePairs("k", "a", 1, "b", "x"),
+			want: `{"a":1,"b":"x"}`,
+		},
+		{
+			name: "key only maybe keeps the key and nests the self-descriptive item",
+			give: KeyOnlyMaybe("k", inner),
+			want: `["k",["inner","x"]]`,
+		},
+		{
+			name: "key only maybe falls back to the key for a plain item",
+			give: KeyOnlyMaybe("k", 42),
+			want: `["k"]`,
+		},
+		{
+			name: "maybe items keeps only self-descriptive items",
+			give: WithMaybeItems("k", []any{inner, "plain", 3}),
+			want: `["k",["inner","x"]]`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.NoError(t, tt.give.Validate())
+
+			b, err := tt.give.MarshalJSON()
+			require.NoError(t, err)
+			require.Equal(t, tt.want, string(b))
+		})
+	}
+}
+
+func TestConstructors_PanicOnEmptyKeyBecauseItIsAProgrammerError(t *testing.T) {
+	t.Run("New", func(t *testing.T) {
+		require.PanicsWithValue(t, ErrKeyEmpty, func() { New("", []any{"a"}) })
+	})
+	t.Run("MultiArgs", func(t *testing.T) {
+		require.PanicsWithValue(t, ErrKeyEmpty, func() { MultiArgs("", "a") })
+	})
+	t.Run("WithKeyValuePairs", func(t *testing.T) {
+		require.PanicsWithValue(t, ErrKeyEmpty, func() { WithKeyValuePairs("", "a", 1) })
+	})
+	t.Run("WithMaybeItems", func(t *testing.T) {
+		require.PanicsWithValue(t, ErrKeyEmpty, func() { WithMaybeItems("", nil) })
+	})
+}
+
+func TestWithKeyValuePairs_PanicsOnMalformedPairs(t *testing.T) {
+	tests := []struct {
+		name    string
+		give    []any
+		wantErr string
+	}{
+		{
+			name:    "odd count",
+			give:    []any{"a", 1, "b"},
+			wantErr: "descriptor: expected an even number of key/value props. got: 3",
+		},
+		{
+			name:    "non-string key reports its props index",
+			give:    []any{"a", 1, 2, "b"},
+			wantErr: "descriptor: expected a string key at index 2. got: int. value: 2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.PanicsWithError(t, tt.wantErr, func() { WithKeyValuePairs("k", tt.give...) })
+		})
+	}
+}
+
+func TestRoot_MarksOnlyRootDescriptors(t *testing.T) {
+	root := Root(map[string]any{"a": 1})
+	require.True(t, root.Root())
+	require.Equal(t, "root", root.Key)
+
+	require.False(t, New("k", []any{}).Root())
+}
+
+func TestDescriptor_IsMapAndIsArrayTellPropsShapesApart(t *testing.T) {
+	tests := []struct {
+		name      string
+		give      any
+		wantMap   bool
+		wantArray bool
+	}{
+		{
+			name:      "map",
+			give:      map[string]any{"a": 1},
+			wantMap:   true,
+			wantArray: false,
+		},
+		{
+			name:      "slice",
+			give:      []any{"a"},
+			wantMap:   false,
+			wantArray: true,
+		},
+		{
+			name:      "nil",
+			give:      nil,
+			wantMap:   false,
+			wantArray: false,
+		},
+		{
+			name:      "descriptor",
+			give:      New("inner", []any{"a"}),
+			wantMap:   false,
+			wantArray: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := Descriptor{Key: "k", Props: tt.give}
+			require.Equal(t, tt.wantMap, d.IsMap())
+			require.Equal(t, tt.wantArray, d.IsArray())
+		})
+	}
+}
+
+func TestDescriptor_MergeRefusesNonMapPropsAndLeavesTargetUntouched(t *testing.T) {
+	target := map[string]any{"a": 1}
+
+	err := New("k", []any{"x"}).Merge(target)
+	require.ErrorIs(t, err, ErrSpecNotValidType)
+	require.Equal(t, map[string]any{"a": 1}, target)
+}
+
+func TestDescriptor_InvalidPropsAreRejectedNamingTheAcceptedTypes(t *testing.T) {
+	d := Descriptor{Key: "k", Props: "boom"}
+	wantMsg := "descriptor: spec is not a valid type: expected: []any, map[string]any, Descriptor or nil. got: string"
+
+	require.EqualError(t, d.Validate(), wantMsg)
+
+	m, err := d.Marshallable()
+	require.ErrorIs(t, err, ErrSpecNotValidType)
+	require.EqualError(t, err, wantMsg)
+	require.Nil(t, m)
+
+	b, err := d.MarshalJSON()
+	require.ErrorIs(t, err, ErrSpecNotValidType)
+	require.Nil(t, b)
+}
+
+func TestDescriptor_StringShowsKeyAndProps(t *testing.T) {
+	require.Equal(t, "k([a 1])", New("k", []any{"a", 1}).String())
+}
+
+func TestIsSelfDescriptive_ReturnsTheDescriptionOnlyForSelfDescriptiveValues(t *testing.T) {
+	want := New("inner", []any{"x"})
+
+	got, ok := IsSelfDescriptive(selfDescribing{d: want})
+	require.True(t, ok)
+	require.Equal(t, want, got)
+
+	got, ok = IsSelfDescriptive(42)
+	require.False(t, ok)
+	require.Equal(t, Descriptor{}, got)
 }

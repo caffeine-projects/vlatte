@@ -28,6 +28,7 @@ func ServerStreamMethod(method string) *StreamBuilder {
 	b.expectations = append(
 		b.expectations,
 		&vlatte.Eval[*StreamValueSelectorIn]{
+			Target:   int(_scopeMethod),
 			Matcher:  methodName(method),
 			Selector: streamSelectMethod,
 		},
@@ -40,6 +41,8 @@ func (b *StreamBuilder) Header(key string, m vlatte.Matcher) *StreamBuilder {
 	b.expectations = append(
 		b.expectations,
 		&vlatte.Eval[*StreamValueSelectorIn]{
+			Target:   int(_scopeHeader),
+			Key:      key,
 			Matcher:  m,
 			Selector: streamSelectHeader(key),
 		},
@@ -52,6 +55,8 @@ func (b *StreamBuilder) Field(path string, m vlatte.Matcher) *StreamBuilder {
 	b.expectations = append(
 		b.expectations,
 		&vlatte.Eval[*StreamValueSelectorIn]{
+			Target:   int(_scopeField),
+			Key:      path,
 			Matcher:  match.Field(path, m),
 			Selector: streamSelectBody,
 		},

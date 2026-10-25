@@ -68,8 +68,8 @@ func (c *sse) next(t *testing.T) (string, string) {
 }
 
 func TestEvents(t *testing.T) {
-	// A client follows what the mock server serves as it happens, each client all of it, without a journal of
-	// requests to poll.
+	// A client follows what the mock server serves as it happens, each client all of it, without polling the
+	// journal.
 	events := handler.NewEvents()
 	url := serve(t, newStore(t), admin.Events(events))
 

@@ -102,6 +102,7 @@ func proxyAll(b *Builder, reply *ProxyReply) *Builder {
 
 	b.appendExpectation(&expectation{
 		Target: int(matchingScopeNone),
+		Key:    "proxy_all",
 		Selector: func(_ context.Context, in *selectorInput) any {
 			return in.RawRequest.Method != http.MethodConnect && !in.ForProxy
 		},
