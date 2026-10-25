@@ -108,9 +108,27 @@ response:
 
 No other reading happens: `[equal, 10]` doesn't match `010`. The [match package docs](match/doc.go) state the rule.
 
-**Keys.** Keys are kept as written, so a query name like `userId` matches `userId` only.
+**Keys.** Keys are kept as written, so a query name like `userId` matches `userId` only. Header names, and methods written as text, ignore case, so `method: get, post` matches `POST`; cookie names don't.
 
-**URLs.** `url: /items?page=2` matches that path and query exactly: the same parameters, in any order, each with its values in order, so `/items` and `/items?page=2&sort=asc` don't match. Path segments compare decoded, so `%41` is `A`, but `%2F` isn't `/`. A relative `url` with a `*` in its path is an error: match a path with a glob through `path: /items/*`, and parameters one by one through `query`. For a literal `*`, write `%2A`. An absolute `url`, such as `https://api.example.com/items`, compares as text ignoring case.
+**URLs.** `url: /items?page=2` matches that path and query exactly: the same parameters, in any order, each with its values in order, so `/items` and `/items?page=2&sort=asc` don't match. Path segments compare decoded, so `%41` is `A`, but `%2F` isn't `/`. A relative `url` with a `*` in its path is an error: match a path with a glob through `path: /items/*`, and parameters one by one through `query`. For a literal `*`, write `%2A`. An absolute `url`, such as `https://api.example.com/items`, compares as text ignoring case, with the server's URL, or the one a request names in absolute form, as the forward proxy gets it, or intercepted, without its default port. In Go, `RequestURI("/items?page=2")` matches as a relative `url` does.
+
+**Path templates.** `path_template: /users/{id}/orders/{orderId}` matches paths of its shape: as many segments, the literal ones the same once decoded, and a non-empty one for each parameter, so `/users/7/orders` and `/users/7/orders/9/` don't match. A parameter is a whole segment; write a literal brace as `%7B` or `%7D`. `path_params` matches the parameters by name, decoded, and templates read them as `.Request.PathParams.id`, or `index .Request.PathParams "order-id"` for a name that isn't a Go identifier. `url`, `url_match` or `path` can match the request too. In Go, `URLPathTemplate` and `PathParam`.
+
+```yaml
+request:
+  method: GET
+  path_template: /users/{id}
+  path_params:
+    id: [regex, '^[0-9]+$']
+response:
+  body: 'user {{ .Request.PathParams.id }}'
+  template:
+    enabled: true
+```
+
+**Many values.** `query`, `header` and `form` read the first value of a name. `queries`, `headers` and `forms` (`Queries`, `Headers` and `FormFields` in Go) read every value, as a list, so they take matcher lists, such as `[contains, a]`, `[itemsMatch, [a, b]]` or `[len, 2]`: they refuse text, which never equals a list. A name the request doesn't have is an empty list, which `[not, present]` matches, and a header sent empty isn't. A header line such as `a, b` is one value.
+
+**More of the request.** `cookie` matches cookies by name, as `Cookie` does; a cookie the request doesn't have is null, which no text matches. `basic_auth: {username: jeff, password: s3cret}` matches Basic credentials, as `BasicAuth` does, and `BasicAuthMatches` takes matchers; without credentials, the username and password are null, which no text matches. `host` matches the host the request names, without its port, and text ignores case: `Host` in Go. `client_ip` matches the client's address, as the server's connection has it, not `X-Forwarded-For`: `ClientIP` in Go.
 
 **Proxy replies.** A `proxy` reply (`From` in Go) answers with what its target answers: see [Proxying](#proxying).
 
@@ -161,6 +179,7 @@ m.MustMock(mockhttp.Postf("/users").Reply(mockhttp.Created().
 | Field | What it holds |
 |---|---|
 | `.Request.Method`, `.Request.URL`, `.Request.URLPathSegments`, `.Request.Header`, `.Request.ID` | The request. `index .Request.URLPathSegments 0` is the first segment of the path. |
+| `.Request.PathParams.<name>` | The parameters of the mock's [path template](#mock-files), decoded. |
 | `.Request.Body.String`, `.Request.Body.Content`, `.Request.HasBody` | The body. JSON bodies are text: read their fields with `fromJson`. |
 | `.Request.Cookie "name"`, `.Request.PostForm.Get "f"`, `.Request.FormFile "f"` | Cookies and forms. |
 | `.Server.URL` | The server's base URL. |
@@ -206,7 +225,7 @@ Pass it with `Setup().TemplateEngine(e)`. Templates then use its syntax everywhe
 
 Go's `net/http` parses request bodies: `ParseForm` reads urlencoded forms and `ParseMultipartForm` reads `multipart/form-data`. Bodies are parsed by their media type, in any case: `text/plain` and `application/json` as text, and the two form types as forms.
 
-**Fields.** `FormField` (file key `form`) reads a field of either encoding, as `http.Request.PostFormValue` does: its first value, and never the query.
+**Fields.** `FormField` (file key `form`) reads a field of either encoding, as `http.Request.PostFormValue` does: its first value, and never the query. `FormFields` (file key `forms`) reads every value.
 
 **Files.** `FormFile` (file key `form_file`) matches the files of a field with a pattern. Some file of the field must meet every condition of the pattern, or every file with `Every()` (`every: true`). With several patterns for one field, each must be met by some file of the field, and one file may meet several.
 
@@ -393,11 +412,11 @@ The target's TLS certificate isn't verified unless `ssl_verify: true`, so a targ
 
 **Proxy all.** `ProxyAll(From(target))` in Go mocks what no other mock matches with a proxy reply, as WireMock's `--proxy-all` does: it matches any method and path, and comes last, at priority `math.MaxInt`. It leaves alone `CONNECT`s, and, on a server that is a forward proxy, the requests in absolute form, which the proxy sends on to their hosts. In a mock file, `proxy_all` takes the keys of `proxy` and makes the same mock, without `request`; a `ProxyAll` mock's description loads back as one. The `proxyall` recipe mocks it. The `proxy_all` setting does the same without a mock, so assertions don't count it, and `Clean` and `Reload` leave it: `vlatte --proxy-all-target=https://api.example.com`. It takes the keys of a mock file's `proxy` but `request_header` and `header`, which flags and variables can't give.
 
-**Forward proxy.** A client sends its requests to the server in absolute form, `GET http://api.local/users`, and opens a tunnel with `CONNECT` for an `https` URL. A mock that matches the request answers it; mocks match the path and ignore the host. A request no mock matches goes to its host. A request in origin form, `GET /users`, names no host: no mock matching it, it gets the no-match answer. `proxy.timeout` is the timeout, and `proxy.ssl_verify` verifies the certificates of the hosts, and of an `https` proxy on the way, `proxy.via` or the one of `HTTPS_PROXY`: none is verified by default. `proxy.via` sends the requests through another proxy, an `http`, `https`, `socks5` or `socks5h` URL whose user info goes as its credentials: a client's `Proxy-Authorization` is for vlatte, and doesn't go on.
+**Forward proxy.** A client sends its requests to the server in absolute form, `GET http://api.local/users`, and opens a tunnel with `CONNECT` for an `https` URL. A mock that matches the request answers it; mocks match the path and ignore the host, unless they match it, with `host` or an absolute `url`. A request no mock matches goes to its host. A request in origin form, `GET /users`, names no host: no mock matching it, it gets the no-match answer. `proxy.timeout` is the timeout, and `proxy.ssl_verify` verifies the certificates of the hosts, and of an `https` proxy on the way, `proxy.via` or the one of `HTTPS_PROXY`: none is verified by default. `proxy.via` sends the requests through another proxy, an `http`, `https`, `socks5` or `socks5h` URL whose user info goes as its credentials: a client's `Proxy-Authorization` is for vlatte, and doesn't go on.
 
 A `CONNECT` no mock matches opens a tunnel to its host, through `proxy.via` or the proxy of the environment, if any, within `proxy.timeout`, and the log shows that it opened. What goes through a tunnel, such as a TLS connection, isn't read: mocks don't see it, unless the proxy intercepts it. Each side of a tunnel ends what it sends on its own, and the tunnel closes once both did, or once the server closes. A tunnel needs HTTP/1.1, and a response writer that can hijack its connection: a middleware's writer must unwrap, with `Unwrap() http.ResponseWriter`, to the server's.
 
-**HTTPS interception.** With `proxy.intercept` (`ProxyConfig{Intercept: true}` in Go), the proxy serves the TLS of a `CONNECT` no mock matches itself, as WireMock's HTTPS browser proxying does. It answers with a certificate for the host the `CONNECT` names, or the name the client asks for, signed by its CA, which clients must trust. The requests within are then the server's own, for `https://` that host: mocks answer them, recordings record them, the log shows them, and the proxy sends the rest on to the host. A connection that doesn't start with TLS goes to the host through a tunnel, as does one whose client offers only `h2` by ALPN, such as a gRPC client, and one whose client sends nothing for 2 seconds, waiting for a host that speaks first, such as an SSH server: a host the proxy can't reach then closes the connection, as the `200` went out already. `proxy.ca_cert` and `proxy.ca_key` name the CA's files, which the settings need: a CA's certificate, or an intermediate CA's, followed by its chain, which the proxy sends with each host's. In Go, `ProxyConfig.CA` sets it, and without one, the server makes a CA of its own, valid for a year, which `m.ProxyCA()` returns for clients to trust:
+**HTTPS interception.** With `proxy.intercept` (`ProxyConfig{Intercept: true}` in Go), the proxy serves the TLS of a `CONNECT` no mock matches itself, as WireMock's HTTPS browser proxying does. It answers with a certificate for the host the `CONNECT` names, or the name the client asks for, signed by its CA, which clients must trust. The requests within are then the server's own, for `https://` that host, which `scheme` and an absolute `url` see: mocks answer them, recordings record them, the log shows them, and the proxy sends the rest on to the host. A connection that doesn't start with TLS goes to the host through a tunnel, as does one whose client offers only `h2` by ALPN, such as a gRPC client, and one whose client sends nothing for 2 seconds, waiting for a host that speaks first, such as an SSH server: a host the proxy can't reach then closes the connection, as the `200` went out already. `proxy.ca_cert` and `proxy.ca_key` name the CA's files, which the settings need: a CA's certificate, or an intermediate CA's, followed by its chain, which the proxy sends with each host's. In Go, `ProxyConfig.CA` sets it, and without one, the server makes a CA of its own, valid for a year, which `m.ProxyCA()` returns for clients to trust:
 
 ```go
 m := mockhttp.MustNew(mockhttp.Setup().Proxy(&mockhttp.ProxyConfig{Intercept: true}))
@@ -611,7 +630,7 @@ A failed assertion lists the requests that matched, or the newest ones when none
 
 A `journal.Query`, of package `github.com/caffeine-projects/vlatte/journal`, selects by the fields every protocol has. `Kind`, `Outcome`, `MockID`, `Method`, `Path` and `Status` are indexed: a query runs each of their matchers once per value the journal holds, not once per request, and reads no request from disk for them. `Target` (the full URL), `Since` and `Until` filter in memory too. `Header`, `Body` and request patterns read the requests the other fields leave. `Limit` and `Before` page through them, newest first; `m.Journal().Find` returns the next page's cursor and the count. A `journal.Journal` works on its own too, as a changelog of any requests: `journal.New(journal.Options{Dir: dir})`.
 
-Patterns are the request part of a mock builder, such as `mockhttp.Request()`: the server rebuilds each request from the journal and matches it, through its body parsers. A pattern has no `Times`, `Once` or scenario, which count served requests rather than match one. A rebuilt request has no `RemoteAddr` or TLS state for a `RequestMatches` predicate.
+Patterns are the request part of a mock builder, such as `mockhttp.Request()`: the server rebuilds each request from the journal and matches it, through its body parsers. A pattern has no `Times`, `Once` or scenario, which count served requests rather than match one, and no `ClientIP`: a rebuilt request has no `RemoteAddr`, nor TLS state for a `RequestMatches` predicate.
 
 gRPC servers keep the same journal with `mockgrpc.Setup().Journal(dir)`: a call's path is its full method, such as `/pkg.Service/Method`, its headers its metadata, its body its request message as JSON, which `match.Field` and `match.JSONPath` read, and its status its code, the one the client got, after every interceptor of `ServerOptions`. Its answer's `vlatte-request-id` header names its entry. gRPC has no request patterns.
 - With a journal, a stream interceptor goes through `grpc.ChainStreamInterceptor`: the journal takes `grpc.StreamInterceptor`, which grpc runs before every other, and `New` fails with `mockgrpc.ErrStreamInterceptorSlot` when `ServerOptions` sets it. A unary interceptor goes either way.

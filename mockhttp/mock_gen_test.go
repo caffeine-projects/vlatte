@@ -297,8 +297,9 @@ func genRequest(baseURL string) *rapid.Generator[requestModel] {
 			r.hasMethod = true
 			r.doc["method"] = []any{"isIn", toAny(methods)}
 		default:
+			// Several methods are compared ignoring case too.
 			r.hasMethod = true
-			r.doc["method"] = strings.Join(methods, rapid.SampledFrom([]string{",", ", ", " ,"}).Draw(t, "separator"))
+			r.doc["method"] = strings.ToLower(strings.Join(methods, rapid.SampledFrom([]string{",", ", ", " ,"}).Draw(t, "separator")))
 		}
 
 		return r

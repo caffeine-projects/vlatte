@@ -93,6 +93,7 @@ func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 	require.Equal(t, _proxySchema.Keys(), keys(props(raw)["proxy"]), "proxy")
 	require.Equal(t, _eventSchema.Keys(), keys(defs["on_complete_event"]), "on_complete")
 	require.Equal(t, _filePatternSchema.Keys(), keys(defs["file_pattern"]), "form_file")
+	require.Equal(t, _basicAuthSchema.Keys(), keys(props(props(raw)["request"])["basic_auth"]), "basic_auth")
 	require.Equal(t, mpart.SpecSchema.Keys(), keys(defs["multipart"]), "multipart")
 	require.Equal(t, mpart.PartSchema.Keys(), keys(defs["multipart_part"]), "multipart part")
 }
@@ -186,6 +187,9 @@ var _scalarKeys = []struct {
 		return withRequest(map[string]any{"scenario": map[string]any{"name": "s", "new_state": v}})
 	}},
 	{"request.url_match", "x", func(v any) map[string]any { return map[string]any{"request": map[string]any{"url_match": v}} }},
+	{"request.path_template", "/users/{id}", func(v any) map[string]any {
+		return map[string]any{"request": map[string]any{"path_template": v}}
+	}},
 	{"response.status", int64(200), inReply("status")},
 	{"response.body_file", "b.txt", inReply("body_file")},
 	{"response.encoding", "gzip", inReply("encoding")},

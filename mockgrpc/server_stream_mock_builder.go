@@ -21,13 +21,15 @@ type StreamBuilder struct {
 	reply        StreamReplierFactory
 }
 
+// ServerStreamMethod starts a mock of a method, named by whole segments of its full method "/pkg.Service/Method": "Method",
+// "Service/Method", "pkg.Service/Method" or the full method. A part of a name, such as "Meth", matches none.
 func ServerStreamMethod(method string) *StreamBuilder {
 	b := &StreamBuilder{}
 	b.expectations = append(
 		b.expectations,
 		&vlatte.Eval[*StreamValueSelectorIn]{
 			Target:   int(_scopeMethod),
-			Matcher:  match.Contain(method),
+			Matcher:  methodName(method),
 			Selector: streamSelectMethod,
 		},
 	)

@@ -31,14 +31,31 @@
       "properties": {
         "scheme": { "$ref": "#/$defs/matcher" },
         "method": { "$ref": "#/$defs/matcher" },
+        "host": { "description": "Host the request names, without its port: text, compared ignoring case, or a matcher list.", "$ref": "#/$defs/matcher" },
+        "client_ip": { "description": "Address of the client, without its port.", "$ref": "#/$defs/matcher" },
         "path": { "$ref": "#/$defs/matcher" },
+        "path_template": { "description": "Path with parameters, such as /users/{id}: a parameter is a whole segment, and takes any segment but an empty one.", "type": "string", "pattern": "^/" },
+        "path_params": { "description": "Parameters of path_template, by name.", "$ref": "#/$defs/keyed_matcher" },
         "url": { "description": "URL: an absolute one, compared ignoring case; a relative one, such as /items?page=2, whose path and query must be the same, the parameters in any order, each with its values in order; or a matcher list.", "$ref": "#/$defs/matcher" },
         "url_match": { "type": "string", "format": "regex" },
         "fragment": { "description": "URL fragment: the text after a \"#\" of the request target. Only clients that write a \"#\" into the request target send one.", "$ref": "#/$defs/matcher" },
         "query": { "$ref": "#/$defs/keyed_matcher" },
-        "queries": { "$ref": "#/$defs/keyed_matcher" },
+        "queries": { "description": "Query parameters with many values, by name: every value, as a list.", "$ref": "#/$defs/keyed_list_matcher" },
         "header": { "$ref": "#/$defs/keyed_matcher" },
+        "headers": { "description": "Headers with many values, by name: every value, as a list.", "$ref": "#/$defs/keyed_list_matcher" },
+        "cookie": { "description": "Cookies, by name, which keeps its case.", "$ref": "#/$defs/keyed_matcher" },
+        "basic_auth": {
+          "description": "Credentials of a Basic Authorization header.",
+          "type": "object",
+          "properties": {
+            "username": { "$ref": "#/$defs/matcher" },
+            "password": { "$ref": "#/$defs/matcher" }
+          },
+          "required": [ "username", "password" ],
+          "additionalProperties": false
+        },
         "form": { "description": "Fields of a urlencoded or multipart form body, by name.", "$ref": "#/$defs/keyed_matcher" },
+        "forms": { "description": "Fields of a form body with many values, by name: every value, as a list.", "$ref": "#/$defs/keyed_list_matcher" },
         "form_file": {
           "description": "Files of a multipart form body, by field name: a pattern, or a list of patterns, each met by some file of the field.",
           "type": "object",
@@ -55,6 +72,7 @@
       },
       "minProperties": 1,
       "additionalProperties": false,
+      "dependentRequired": { "path_params": [ "path_template" ] },
       "allOf": [
         { "not": { "required": [ "url", "url_match" ] } },
         { "not": { "required": [ "url", "path" ] } },
@@ -143,6 +161,13 @@
       "type": "object",
       "patternProperties": {
         "^.*$": { "$ref": "#/$defs/matcher" }
+      }
+    },
+    "keyed_list_matcher": {
+      "description": "Matcher lists by name, such as [\"contains\", \"x\"]: each gets every value, a list, which text never equals.",
+      "type": "object",
+      "patternProperties": {
+        "^.*$": { "type": "array", "minItems": 1 }
       }
     },
     "file_pattern": {

@@ -305,6 +305,33 @@ func TestParseURL_KeepsThePathAsSent(t *testing.T) {
 			giveMethod: http.MethodConnect, giveTarget: "example.com:443",
 			wantURL: "http://localhost", wantSegments: []string{},
 		},
+		// A request in absolute form, as a forward proxy gets, and an intercepted one names its scheme and host: the URL
+		// keeps them, without the scheme's default port.
+		{
+			giveMethod: http.MethodGet, giveTarget: "http://api.local/x?a=1",
+			wantURL: "http://api.local/x?a=1", wantPath: "/x", wantQuery: "a=1", wantSegments: []string{"x"},
+		},
+		{
+			giveMethod: http.MethodGet, giveTarget: "https://api.local:443/x",
+			wantURL: "https://api.local/x", wantPath: "/x", wantSegments: []string{"x"},
+		},
+		{
+			giveMethod: http.MethodGet, giveTarget: "http://api.local:80/x",
+			wantURL: "http://api.local/x", wantPath: "/x", wantSegments: []string{"x"},
+		},
+		{
+			giveMethod: http.MethodGet, giveTarget: "http://api.local:8443/x",
+			wantURL: "http://api.local:8443/x", wantPath: "/x", wantSegments: []string{"x"},
+		},
+		// A port is the default of its own scheme only.
+		{
+			giveMethod: http.MethodGet, giveTarget: "http://api.local:443/x",
+			wantURL: "http://api.local:443/x", wantPath: "/x", wantSegments: []string{"x"},
+		},
+		{
+			giveMethod: http.MethodGet, giveTarget: "https://[::1]:443/x",
+			wantURL: "https://[::1]/x", wantPath: "/x", wantSegments: []string{"x"},
+		},
 	}
 
 	for _, tt := range tests {

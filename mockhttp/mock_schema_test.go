@@ -94,6 +94,18 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"url_match that doesn't compile", "request: {url_match: '('}\n", []want{{config.CodeInvalidValue, "request.url_match", `request.url_match must be a regular expression, not "("`, "error parsing regexp"}}},
 		{"url matcher that doesn't build", "request: {url: [regex, '(']}\n", []want{{config.CodeInvalidValue, "request.url", "regex takes a regular expression", ""}}},
 		{"url and path", "request: {url: /x, path: /y}\n", []want{{config.CodeConflict, "request.path", "request.path is set with request.url", "keep one of them"}}},
+		{"path_template without its /", "request: {path_template: 'users/{id}'}\n", []want{{config.CodeInvalidValue, "request.path_template", `request.path_template="users/{id}" is not a path template: a path template starts with /`, "a parameter is a whole segment"}}},
+		{"path_template with a parameter in a segment", "request: {path_template: '/users/a{id}'}\n", []want{{config.CodeInvalidValue, "request.path_template", `segment "a{id}": a parameter is a whole segment`, "such as /users/{id}"}}},
+		{"path_template naming a parameter twice", "request: {path_template: '/a/{id}/b/{id}'}\n", []want{{config.CodeInvalidValue, "request.path_template", `parameter "id" is named twice`, ""}}},
+		{"path_template as a list", "request: {path_template: [glob, '/users/*']}\n", []want{{config.CodeInvalidValue, "request.path_template", "request.path_template must be a string, not a list", ""}}},
+		{"path_params without path_template", "request: {path: /x, path_params: {id: '7'}}\n", []want{{config.CodeMissingValue, "request.path_params", "request.path_params is set without request.path_template", "such as /users/{id}"}}},
+		// The template's problem is the one: path_params can't name its parameters until it parses.
+		{"path_params of a path_template that doesn't parse", "request: {path_template: 'users/{id}', path_params: {id: '7'}}\n", []want{{config.CodeInvalidValue, "request.path_template", "a path template starts with /", ""}}},
+		{"path_params as a list", "request: {path: /x, path_params: [a]}\n", []want{{config.CodeInvalidValue, "request.path_params", "must be an object, not a list", ""}}},
+		// As the editor schema says it.
+		{"empty path_params without path_template", "request: {path: /x, path_params: {}}\n", []want{{config.CodeMissingValue, "request.path_params", "is set without request.path_template", ""}}},
+		{"path_params naming no parameter", "request: {path_template: '/users/{id}', path_params: {userId: '7'}}\n", []want{{config.CodeUnknownKey, "request.path_params.userId", `request.path_params.userId names no parameter of request.path_template "/users/{id}"`, "its parameters are id"}}},
+		{"path_params of a template without parameters", "request: {path_template: /users, path_params: {id: '7'}}\n", []want{{config.CodeUnknownKey, "request.path_params.id", "names no parameter", "request.path_template has no parameters"}}},
 		// A relative url is exact, so a glob or a bare name in it would never match: path takes globs.
 		{"relative url without its /", "request: {url: 'items?page=2'}\n", []want{{config.CodeInvalidValue, "request.url", `"items?page=2" must be an absolute URL, or start with /`, "use path instead"}}},
 		// A relative url was a glob: written as one, it would match only itself.
@@ -108,6 +120,25 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"header map as a list", "request: {header: [a]}\n", []want{{config.CodeInvalidValue, "request.header", "must be an object, not a list", ""}}},
 		// Found by TestPropMockFile_ServesItsModel: no request could match both, so the mock never matched.
 		{"two names of one header", "request: {header: {X-Id: a, x-id: b}}\n", []want{{config.CodeConflict, "request.header.x-id", "name the same header", "header names ignore case"}}},
+		{"two names of one header with many values", "request: {headers: {X-Id: [len, 1], x-id: [len, 2]}}\n", []want{{config.CodeConflict, "request.headers.x-id", "name the same header", "header names ignore case"}}},
+		// Text never equals the list of a header's values: the mock would load and never match.
+		{"headers value as text", "request: {headers: {Accept: text/html}}\n", []want{{config.CodeInvalidValue, "request.headers.Accept", `request.headers.Accept="text/html" is text, which never equals a list of values`, `write a matcher list, such as [contains, "text/html"]`}}},
+		{"basic_auth without a password", "request: {basic_auth: {username: u}}\n", []want{{config.CodeMissingValue, "request.basic_auth.password", "request.basic_auth.password is required", ""}}},
+		{"basic_auth key with a typo", "request: {basic_auth: {username: u, pasword: p}}\n", []want{
+			{config.CodeUnknownKey, "request.basic_auth.pasword", "not a known setting", "did you mean request.basic_auth.password?"},
+			{config.CodeMissingValue, "request.basic_auth.password", "is required", ""},
+		}},
+		{"basic_auth as text", "request: {basic_auth: 'u:p'}\n", []want{{config.CodeInvalidValue, "request.basic_auth", "must be an object, not a string", ""}}},
+		// The host matched has no port, so text with one would never match.
+		{"host with a port", "request: {host: 'api.local:8080'}\n", []want{{config.CodeInvalidValue, "request.host", `request.host="api.local:8080" has a port or brackets`, `write the address alone: "api.local"`}}},
+		{"IPv6 host in brackets", "request: {host: '[::1]'}\n", []want{{config.CodeInvalidValue, "request.host", `request.host="[::1]" has a port or brackets`, `write the address alone: "::1"`}}},
+		{"host as a number", "request: {host: 5}\n", []want{{config.CodeInvalidValue, "request.host", "must be a string or a matcher list", `write it in quotes: "5"`}}},
+		{"client_ip matcher that doesn't build", "request: {client_ip: [nope]}\n", []want{{config.CodeInvalidValue, "request.client_ip", "unknown matcher", ""}}},
+		{"client_ip with a port", "request: {client_ip: '127.0.0.1:8080'}\n", []want{{config.CodeInvalidValue, "request.client_ip", `request.client_ip="127.0.0.1:8080" has a port or brackets`, `write the address alone: "127.0.0.1"`}}},
+		{"cookie value as a number", "request: {cookie: {session: 1}}\n", []want{{config.CodeInvalidValue, "request.cookie.session", "must be a string or a matcher list", `write it in quotes: "1"`}}},
+		{"headers matcher that doesn't build", "request: {headers: {X-Id: [gt]}}\n", []want{{config.CodeInvalidValue, "request.headers.X-Id", "gt", ""}}},
+		{"queries value as text", "request: {queries: {page: '2'}}\n", []want{{config.CodeInvalidValue, "request.queries.page", `request.queries.page="2" is text, which never equals a list of values`, `[contains, "2"]`}}},
+		{"forms value as text", "request: {forms: {tag: a}}\n", []want{{config.CodeInvalidValue, "request.forms.tag", "is text, which never equals a list of values", `[contains, "a"]`}}},
 		{"form_file as a list", "request: {form_file: [a]}\n", []want{{config.CodeInvalidValue, "request.form_file", "must be an object, not a list", ""}}},
 		{"file pattern as text", "request: {form_file: {avatar: a.png}}\n", []want{{config.CodeInvalidValue, "request.form_file.avatar", "must be an object, not a string", ""}}},
 		{"file pattern key with a typo", "request: {form_file: {avatar: {filname: a.png}}}\n", []want{{config.CodeUnknownKey, "request.form_file.avatar.filname", "not a known setting", "did you mean request.form_file.avatar.filename?"}}},
