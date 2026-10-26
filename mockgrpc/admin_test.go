@@ -478,3 +478,73 @@ func TestAdmin_SavesUnderARelativeRootDir(t *testing.T) {
 	got, _ := greetWith(t, pb.NewTestServiceClient(m.MustDial()), "hi")
 	require.Equal(t, "from file", got)
 }
+
+func TestAdmin_ASaveThatFailsPutsBackTheFileItReplaced(t *testing.T) {
+	// A saved file of the same id is replaced by the save: when the save fails, it's back as it was.
+	dir := t.TempDir()
+	saved := filepath.Join(dir, "_mocks")
+	require.NoError(t, os.Mkdir(saved, 0o755))
+
+	before := []byte("request: {method: Greetings}\nresponse: {message: {message: before}}\n")
+	require.NoError(t, os.WriteFile(filepath.Join(saved, "kept.mock.yaml"), before, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(saved, "broken.mock.yaml"), []byte("request: {method: Nope}"), 0o600))
+
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin("").Logger(&logger).RootDir(dir))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	doc := `{"id": "kept", "request": {"method": "Greetings"}, "response": {"message": {"message": "kept"}}}`
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks", doc)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	status, body = call(t, http.MethodPost, m.AdminURL()+"/mocks/save", `{}`)
+	require.Equal(t, http.StatusInternalServerError, status, body)
+
+	after, err := os.ReadFile(filepath.Join(saved, "kept.mock.yaml"))
+	require.NoError(t, err)
+	require.Equal(t, string(before), string(after))
+}
+
+func TestAdmin_ASaveThatCantDescribeAMockWritesNothing(t *testing.T) {
+	// Every mock is checked before any file is written: one whose body file is gone fails the save, and its file
+	// isn't written half way.
+	wd := t.TempDir()
+	t.Chdir(wd)
+	require.NoError(t, os.WriteFile("items.json", []byte(`[{"key": "a"}]`), 0o600))
+
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin("").Logger(&logger).RootDir(wd))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks",
+		`{"id": "items", "request": {"method": "List"}, "response": {"body_file": "items.json"}}`)
+	require.Equal(t, http.StatusCreated, status, body)
+	require.NoError(t, os.Remove("items.json"))
+
+	status, body = call(t, http.MethodPost, m.AdminURL()+"/mocks/save", `{}`)
+	require.NotEqual(t, http.StatusOK, status, body)
+	require.Contains(t, body, "items")
+	require.NoDirExists(t, filepath.Join(wd, "_mocks"))
+}
+
+func TestAdmin_ASaveThatCantWriteAFileKeepsTheMocksItAdded(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "_mocks", "kept.mock.yaml"), 0o755))
+
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin("").Logger(&logger).RootDir(dir))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	doc := `{"id": "kept", "request": {"method": "Greetings"}, "response": {"message": {"message": "kept"}}}`
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks", doc)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	status, body = call(t, http.MethodPost, m.AdminURL()+"/mocks/save", `{}`)
+	require.Equal(t, http.StatusInternalServerError, status, body)
+
+	got, _ := greetWith(t, pb.NewTestServiceClient(m.MustDial()), "hi")
+	require.Equal(t, "kept", got)
+}

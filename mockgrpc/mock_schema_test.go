@@ -141,3 +141,12 @@ func TestMockFile_NamesTheKeyOfEachProblem(t *testing.T) {
 		})
 	}
 }
+
+func TestMockFile_ABodyFileThatIsNoJSONSaysSo(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "items.json", "not json")
+	path := writeFile(t, dir, "list.yaml", `{request: {method: List}, response: {body_file: items.json}}`)
+
+	_, err := fileServer(t, Setup()).Mock(FromFile(path))
+	require.ErrorContains(t, err, "is not JSON")
+}

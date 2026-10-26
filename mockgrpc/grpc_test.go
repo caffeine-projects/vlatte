@@ -643,3 +643,9 @@ func TestNoMatchCode_IsTheCodeOfAnUnmatchedCall(t *testing.T) {
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.FailureHeader))
 }
+
+func TestNew_AGlobalEventOfNoListenerFails(t *testing.T) {
+	// A global event runs for every mock: one that names no listener fails New, rather than every call.
+	_, err := New(Setup().Silent().GlobalEvents(&vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "nobody"}}}))
+	require.ErrorContains(t, err, "server: global on_complete listener nobody at index 0 is not registered")
+}

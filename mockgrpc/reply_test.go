@@ -40,3 +40,23 @@ func TestFunc_AnswersWithWhatItSends(t *testing.T) {
 	require.Equal(t, codes.ResourceExhausted, code, "a status is the mock's answer")
 	require.Equal(t, []string{"x", "y"}, listKeys(t, c))
 }
+
+func TestFunc_ACallThatAnswersOneMessageSendsOnce(t *testing.T) {
+	// A unary call has one answer: a second Send fails, rather than replacing the first.
+	second := make(chan error, 1)
+	m := serve(t)
+	m.MustMock(Method("Greetings").Reply(Func(func(_ context.Context, call *Call) error {
+		if err := call.Send(&pb.HiRes{Message: "first"}); err != nil {
+			return err
+		}
+
+		second <- call.Send(&pb.HiRes{Message: "second"})
+
+		return nil
+	})))
+
+	res, err := client(t, m).Greetings(t.Context(), &pb.HiReq{})
+	require.NoError(t, err)
+	require.Equal(t, "first", res.GetMessage())
+	require.ErrorIs(t, <-second, errSentTwice)
+}

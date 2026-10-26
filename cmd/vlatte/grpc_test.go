@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,6 +134,23 @@ func TestRun_InvalidGRPCSettingsLeaveNothingOpen(t *testing.T) {
 	var stderr bytes.Buffer
 	require.Equal(t, 2, run(t.Context(), []string{"--grpc-no-match-code=NOPE"}, io.Discard, &stderr))
 	require.Contains(t, stderr.String(), "grpc.no_match_code")
+
+	stop := start(t, "--addr", randomAddr(t))
+	require.Equal(t, 0, stop(), "the next run starts and stops")
+}
+
+func TestRun_AGRPCPortInUseFailsTheRun(t *testing.T) {
+	// The gRPC server starts after the HTTP one: when it can't listen, the run fails and the HTTP server stops too.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
+
+	var stderr bytes.Buffer
+	require.Equal(t, 1, run(t.Context(), []string{"--addr", randomAddr(t), "--grpc-addr", l.Addr().String()}, io.Discard, &stderr))
+	require.Contains(t, stderr.String(), "address already in use")
 
 	stop := start(t, "--addr", randomAddr(t))
 	require.Equal(t, 0, stop(), "the next run starts and stops")

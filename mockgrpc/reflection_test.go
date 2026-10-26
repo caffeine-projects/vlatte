@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	v1 "google.golang.org/grpc/reflection/grpc_reflection_v1"
 
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
@@ -68,4 +69,36 @@ func TestReflection_ServesTheV1AlphaServiceToo(t *testing.T) {
 	var res v1.ServerReflectionResponse
 	require.NoError(t, stream.RecvMsg(&res))
 	require.NotEmpty(t, res.GetListServicesResponse().GetService())
+}
+
+func TestReflection_ServesTheFilesOfTheServersDescriptorsByName(t *testing.T) {
+	// grpcurl asks for the files a service's file imports by their names: those of the server's descriptors resolve
+	// as those of generated code do, and an unknown one is an error, not an empty file.
+	m := MustNew(Setup().Silent().Reflection().Descriptors(writeDescriptorSet(t, "dyn")))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	stream, err := v1.NewServerReflectionClient(m.MustDial()).ServerReflectionInfo(t.Context())
+	require.NoError(t, err)
+
+	for _, name := range []string{"dyn.proto", "google/protobuf/timestamp.proto"} {
+		require.NoError(t, stream.Send(&v1.ServerReflectionRequest{
+			MessageRequest: &v1.ServerReflectionRequest_FileByFilename{FileByFilename: name},
+		}))
+
+		res, err := stream.Recv()
+		require.NoError(t, err)
+		require.NotEmpty(t, res.GetFileDescriptorResponse().GetFileDescriptorProto(), name)
+	}
+
+	for _, req := range []*v1.ServerReflectionRequest{
+		{MessageRequest: &v1.ServerReflectionRequest_FileByFilename{FileByFilename: "nope.proto"}},
+		{MessageRequest: &v1.ServerReflectionRequest_FileContainingSymbol{FileContainingSymbol: "dyn.Nope"}},
+	} {
+		require.NoError(t, stream.Send(req))
+
+		res, err := stream.Recv()
+		require.NoError(t, err)
+		require.Equal(t, int32(codes.NotFound), res.GetErrorResponse().GetErrorCode(), "%v", req)
+	}
 }

@@ -46,3 +46,10 @@ func TestMockFiles_AStartThatFailsToLoadThemServesNothing(t *testing.T) {
 	require.ErrorContains(t, m.Start(), "unknown method")
 	require.Empty(t, m.Addr(), "nothing listens")
 }
+
+func TestLoader_ABadPatternFailsStart(t *testing.T) {
+	m := MustNew(Setup().Silent().MockFiles("["))
+	t.Cleanup(m.Close)
+
+	require.ErrorContains(t, m.Start(), "loader: pattern [")
+}

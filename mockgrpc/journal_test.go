@@ -553,3 +553,16 @@ func TestJournal_APatternOfTheMethodOnlyCountsACutRequest(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, n)
 }
+
+func TestJournal_APatternWhoseMatcherFailsFailsTheQuery(t *testing.T) {
+	// A matcher that can't tell fails the count: a miss would make a verification pass that should fail.
+	m, c := journaled(t, Setup())
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
+
+	_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.NoError(t, err)
+
+	broken := match.Function(func(any) (bool, error) { return false, errors.New("broken") })
+	_, err = m.CountRequests(t.Context(), journal.Query{}, Method("Greetings").Body(broken))
+	require.ErrorIs(t, err, vlatte.ErrMatching)
+}

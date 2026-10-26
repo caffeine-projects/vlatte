@@ -2,6 +2,7 @@ package mockgrpc
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -283,4 +284,31 @@ func TestBuilder_JSONThatIsNoRequestOfTheMethodFailsTheMock(t *testing.T) {
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
+}
+
+func TestBuilder_HeaderMatchesEveryValueOfAKeySentTwice(t *testing.T) {
+	// A key the client sent twice is matched as the list of its values, not by its first one.
+	m := serve(t)
+	m.MustMock(Method("Greetings").Header("x-team", match.Equal([]string{"a", "b"})).Reply(Message(&pb.HiRes{Message: "both"})))
+
+	ctx := metadata.AppendToOutgoingContext(t.Context(), "x-team", "a", "x-team", "b")
+	res, err := client(t, m).Greetings(ctx, &pb.HiReq{})
+	require.NoError(t, err)
+	require.Equal(t, "both", res.GetMessage())
+}
+
+func TestBuilder_AFailingCallbackDoesntChangeTheAnswer(t *testing.T) {
+	done := make(chan struct{})
+	m := serve(t)
+	m.MustMock(Method("Greetings").
+		Callback(func(context.Context, vlatte.OnComplete) error {
+			defer close(done)
+			return errors.New("broken")
+		}).
+		Reply(Message(&pb.HiRes{Message: "answered"})))
+
+	res, err := client(t, m).Greetings(t.Context(), &pb.HiReq{})
+	require.NoError(t, err)
+	require.Equal(t, "answered", res.GetMessage())
+	<-done
 }
