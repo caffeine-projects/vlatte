@@ -238,6 +238,18 @@ func TestQueryRequests_OutcomeNamesAreTheWireFormat(t *testing.T) {
 	}
 }
 
+func TestQueryRequests_RefusesAMatcherListThatNamesNoMatcher(t *testing.T) {
+	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil, nil))
+
+	res, body := send(t, request{method: "QUERY", url: url + "/requests", body: `{"method": []}`})
+	doc := problem(t, res, body, http.StatusBadRequest, "invalid_body")
+	problems, _ := doc["problems"].([]any)
+	require.Len(t, problems, 1)
+	got, _ := problems[0].(map[string]any)
+	require.Equal(t, "method", got["key"])
+	require.Contains(t, got["message"], `a matcher spec names its matcher first, as in ["equal", 1]`)
+}
+
 func TestQueryRequests_InvalidOutcomesExplainTheNamesToSend(t *testing.T) {
 	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil, nil))
 	const names = "matched, unmatched, proxied, failed or abandoned"

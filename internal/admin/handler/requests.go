@@ -11,7 +11,6 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
-	"github.com/caffeine-projects/vlatte/internal/matchspec"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
@@ -330,7 +329,7 @@ func matcherOf(matchers *matchbuild.Registry, v config.Value) (vlatte.Matcher, e
 		return match.Equal(v.Any), nil
 	}
 
-	return matchspec.MatcherOf(matchers, v)
+	return matchers.TryBuildMatcher(v.Any)
 }
 
 func parseTime(v config.Value, dst *time.Time) error {
