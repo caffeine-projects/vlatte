@@ -515,19 +515,6 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	callbackInput := &CallbackInput{m: mock, req: reqValues, res: res}
-	for i, callback := range mock.Callbacks() {
-		err = callback(r.Context(), callbackInput)
-		if err != nil {
-			h.lifecycle.OnWarning(reqValues, fmt.Errorf(
-				"callback: error with callback %d %T:\n%w",
-				i,
-				callback,
-				err,
-			))
-		}
-	}
-
 	// The handler waits for the events, so the response ends after them: a test checks what they did right after it.
 	// They run before the request log, so its elapsed time counts them.
 	h.runner.OnComplete(
@@ -751,11 +738,10 @@ func (h *mockHandler) logConnect(r *RequestValues) {
 	h.lifecycle.OnProxied(r, opened)
 }
 
-// keepsBody reports whether something reads the body of the answer of mock once it is sent: its callbacks, its
-// on_complete events or the global ones, or the log.
+// keepsBody reports whether something reads the body of the answer of mock once it is sent: its on_complete events,
+// callbacks included, or the global ones, or the log.
 func (h *mockHandler) keepsBody(mock *Mock) bool {
-	return len(mock.Callbacks()) > 0 ||
-		len(mock.Events().OnComplete) > 0 ||
+	return len(mock.Events().OnComplete) > 0 ||
 		len(h.runner.Global.OnComplete) > 0 ||
 		h.app.config.LogVerbosity >= vlatte.LogBody
 }

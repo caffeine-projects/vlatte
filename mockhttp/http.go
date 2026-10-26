@@ -324,8 +324,8 @@ func MustNew(config ...Option) *Server {
 }
 
 // prepareGlobalEvents returns the global events of conf with their parameters as their listeners prepare them, without
-// changing conf's: see vlatte.EventPreparer. Like a mock's events, each must name a registered listener: an event
-// that names none would never run.
+// changing conf's: see vlatte.EventPreparer. Like a mock's events, each must name a registered listener, unless it
+// carries its own: an event that names none would never run.
 func prepareGlobalEvents(conf *Config) (*vlatte.Events, error) {
 	if conf.GlobalEvents == nil {
 		return conf.GlobalEvents, nil
@@ -333,6 +333,10 @@ func prepareGlobalEvents(conf *Config) (*vlatte.Events, error) {
 
 	events := &vlatte.Events{OnComplete: slices.Clone(conf.GlobalEvents.OnComplete)}
 	for i, def := range events.OnComplete {
+		if def.Listener != nil {
+			continue
+		}
+
 		if conf.Listeners == nil || !conf.Listeners.OnComplete.Has(def.Name) {
 			return nil, fmt.Errorf("server: global on_complete listener %s at index %d is not registered", def.Name, i)
 		}

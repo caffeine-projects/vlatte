@@ -687,8 +687,8 @@ func TestProxyReply_CallbacksSeeTheProxiedBody(t *testing.T) {
 	t.Cleanup(target.Close)
 
 	seen := make(chan string, 2)
-	callback := func(_ context.Context, in vlatte.CallbackInput) error {
-		seen <- string(in.(*CallbackInput).Response().Body)
+	callback := func(_ context.Context, in vlatte.OnComplete) error {
+		seen <- string(in.(*OnComplete).Response().Body)
 		return nil
 	}
 
@@ -810,8 +810,8 @@ func TestProxyReply_LeavesTheClientRequestAsItCame(t *testing.T) {
 			seen <- look("mapper", rv.RawRequest)
 			return nil
 		}).
-		Callback(func(_ context.Context, in vlatte.CallbackInput) error {
-			seen <- look("callback", in.(*CallbackInput).Request().RawRequest)
+		Callback(func(_ context.Context, in vlatte.OnComplete) error {
+			seen <- look("callback", in.(*OnComplete).Request().RawRequest)
 			return nil
 		}).
 		OnCompleteEvent(vlatte.EventConfig{Name: "look"}).
@@ -834,9 +834,13 @@ func TestProxyReply_LeavesTheClientRequestAsItCame(t *testing.T) {
 
 	require.Equal(t, sight{who: "target", path: "/p", host: targetURL.Host, added: "1"}, <-forwarded)
 
-	for _, who := range []string{"mapper", "callback", "listener"} {
-		require.Equal(t, sight{who: who, path: "/api/p", host: req.URL.Host, authorization: "Bearer client"}, <-seen)
+	asSent := func(who string) sight {
+		return sight{who: who, path: "/api/p", host: req.URL.Host, authorization: "Bearer client"}
 	}
+
+	// The mapper runs before the response is sent; the callback and the listener, events both, at the same time after.
+	require.Equal(t, asSent("mapper"), <-seen)
+	require.ElementsMatch(t, []sight{asSent("callback"), asSent("listener")}, []sight{<-seen, <-seen})
 }
 
 func TestProxyReply_LeavesHopByHopHeadersOut(t *testing.T) {

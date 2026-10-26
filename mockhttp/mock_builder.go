@@ -561,10 +561,14 @@ func (b *Builder) ScenarioStateWillBe(newState string) *Builder {
 	return b
 }
 
-// Callback adds a callback that will be executed after the mocked response is served.
-func (b *Builder) Callback(callback vlatte.Callback) *Builder {
-	b.spec.callbacks = append(b.spec.callbacks, callback)
-
+// Callback adds fn as an on_complete event of the mock, named callback in the logs, with no listener to register. It
+// runs as the mock's other events and the global ones do: at the same time as them, once the mock replied, and the
+// response waits for it, so a test checks what it did right after the call. fn gets an [*OnComplete], read-only as
+// the events run at the same time, and a context that the client leaving doesn't end, and [Server.Close] does. An
+// error or a panic of fn is logged as a warning, unless Close canceled it, and never changes the response. Mock files
+// can't set callbacks, and a mock's description leaves them out.
+func (b *Builder) Callback(fn vlatte.EventFunc[vlatte.OnComplete]) *Builder {
+	b.spec.events = append(b.spec.events, vlatte.EventConfig{Name: "callback", Listener: fn})
 	return b
 }
 
@@ -679,6 +683,10 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 
 	// As prepareGlobalEvents does: the prepared parameters go into the mock's copy, never into the builder.
 	for i, def := range spec.events {
+		if def.Listener != nil {
+			continue
+		}
+
 		if app.config.Listeners == nil || !app.config.Listeners.OnComplete.Has(def.Name) {
 			return nil, fmt.Errorf("mock: on_complete listener %s at index %d is not registered", def.Name, i)
 		}

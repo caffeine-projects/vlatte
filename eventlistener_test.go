@@ -150,6 +150,50 @@ func TestEventRunner_ReportsUnregisteredNamesAndPanics(t *testing.T) {
 	})
 }
 
+func TestEventRunner_RunsTheListenerAnEventCarries(t *testing.T) {
+	// An event set in Go, such as a callback, carries its listener: it runs with no registration, even under a name a
+	// registered listener has, and its error and panic are reported under its name, as a registered one's are.
+	synctest.Test(t, func(t *testing.T) {
+		var got reported
+
+		listeners := vlatte.NewListener()
+		register(t, listeners, "callback", func(context.Context, vlatte.OnComplete) error {
+			got.add(errors.New("the registered listener ran"))
+			return nil
+		})
+
+		params := vlatte.Parameters(map[string]any{"k": "v"})
+		gotParams := make(chan vlatte.Parameters, 2)
+
+		mock := newFakeMock()
+		mock.events.OnComplete = vlatte.EventConfigs{
+			{Name: "callback", Parameters: params, Listener: vlatte.EventFunc[vlatte.OnComplete](
+				func(_ context.Context, e vlatte.OnComplete) error {
+					gotParams <- e.Parameters()
+					return nil
+				})},
+			{Name: "callback", Listener: vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
+				return errors.New("failed")
+			})},
+			{Name: "callback", Listener: vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
+				panic("boom")
+			})},
+		}
+
+		vlatte.NewEventRunner(nil, nil).OnComplete(t.Context(), mock, argsOf(mock), got.add)
+		vlatte.NewEventRunner(listeners, nil).OnComplete(t.Context(), mock, argsOf(mock), got.add)
+
+		errs := got.all()
+		require.Len(t, errs, 4, "each runner reports the error and the panic, and no registered listener runs")
+		require.Equal(t, "on_complete listener callback at index 1: failed", errs[0])
+		require.Equal(t, "on_complete listener callback at index 1: failed", errs[1])
+		require.True(t, strings.HasPrefix(errs[2], "on_complete listener callback at index 2: panic: boom\n"), errs[2])
+		require.True(t, strings.HasPrefix(errs[3], "on_complete listener callback at index 2: panic: boom\n"), errs[3])
+		require.Equal(t, params, <-gotParams, "argsFn gets the event, parameters included")
+		require.Equal(t, params, <-gotParams)
+	})
+}
+
 func TestEventRunner_CloseCancelsTheEventsRunning(t *testing.T) {
 	// Close cancels the events running, such as a webhook waiting for a slow target, so the requests waiting for them
 	// end, and a server closes at once. A closed runner runs nothing after.

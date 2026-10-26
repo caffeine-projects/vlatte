@@ -48,6 +48,12 @@ type EventConfig struct {
 	// Dir is where relative files of the parameters open from, such as the directory of the mock file that defines
 	// the event. "" is the working directory.
 	Dir string
+
+	// Listener, when set, runs the event in place of the listener registered under Name, which then only names the
+	// event in errors: it needs no registration. Its Parameters reach it as they are: [EventPreparer] doesn't apply.
+	// Events set in Go can carry one, as [github.com/caffeine-projects/vlatte/mockhttp.Builder.Callback] does. Mock
+	// files can't, and a mock's description leaves out the events that carry one.
+	Listener EventListener[OnComplete]
 }
 
 type EventConfigs []EventConfig
@@ -234,12 +240,19 @@ func (r *EventRunner) run(ctx context.Context, scope string, i int, def EventCon
 		}
 	}()
 
-	if !r.Listeners.OnComplete.Has(def.Name) {
+	var err error
+
+	switch {
+	case def.Listener != nil:
+		err = def.Listener.Run(ctx, argsFn(ctx, def))
+	case r.Listeners.OnComplete.Has(def.Name):
+		err = r.Listeners.OnComplete.Run(ctx, def.Name, argsFn(ctx, def))
+	default:
 		onErr(fmt.Errorf("%s is not registered", name))
 		return
 	}
 
-	if err := r.Listeners.OnComplete.Run(ctx, def.Name, argsFn(ctx, def)); err != nil && ctx.Err() == nil {
+	if err != nil && ctx.Err() == nil {
 		onErr(fmt.Errorf("%s: %w", name, err))
 	}
 }

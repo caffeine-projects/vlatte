@@ -1356,7 +1356,7 @@ func TestProxy_ASwitchedConnectionFlowsWhileCallbacksRun(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 	m.MustMock(Getf("/ws").
-		Callback(func(context.Context, vlatte.CallbackInput) error {
+		Callback(func(context.Context, vlatte.OnComplete) error {
 			<-release
 			return nil
 		}).
@@ -2050,7 +2050,7 @@ func TestForwardProxy_CloseWaitsForInterceptedRequests(t *testing.T) {
 	m := MustNew(Setup().Silent().Proxy(&ProxyConfig{Intercept: true}))
 	m.MustStart()
 	m.MustMock(Getf("/slow").
-		Callback(func(context.Context, vlatte.CallbackInput) error {
+		Callback(func(context.Context, vlatte.OnComplete) error {
 			close(entered)
 			<-release
 
