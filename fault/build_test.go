@@ -161,6 +161,7 @@ func TestBuild_RefusesASpecItCantBuild(t *testing.T) {
 		{name: "a fraction", spec: []any{"limit_data", 1.5}, want: "fault: limit_data takes a number of bytes, a whole number, not a number"},
 		{name: "a count as text", spec: []any{"limit_data", "10"}, want: "fault: limit_data takes a number of bytes, a whole number, not a string"},
 		{name: "a negative limit", spec: []any{"limit_data", int64(-1)}, want: "fault: limit data can't be -1 bytes"},
+		{name: "a fraction of a byte", spec: []any{"bandwidth", 0.5}, want: "fault: bandwidth takes bytes per second, a whole number, not a number"},
 		{name: "no rate", spec: []any{"bandwidth", int64(0)}, want: "fault: bandwidth needs a byte per second at least, not 0"},
 		{
 			name: "an unknown link", spec: []any{"bandwidth", "5g"},
