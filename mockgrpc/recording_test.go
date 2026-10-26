@@ -307,7 +307,7 @@ func TestRecording_ATargetThatCantBeReachedFailsTheCallUnrecorded(t *testing.T) 
 	var trailer metadata.MD
 	_, err = client(t, m).Greetings(t.Context(), &pb.HiReq{}, grpc.Trailer(&trailer))
 	require.Equal(t, codes.Internal, status.Code(err))
-	require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(vlatte.FailureHeader))
+	require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(vlatte.HeaderFailure))
 
 	res, err := m.StopRecording(t.Context())
 	require.NoError(t, err)

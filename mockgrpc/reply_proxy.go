@@ -29,9 +29,9 @@ var errNoTarget = errors.New("reply_proxy: no target: name the server to proxy t
 // _debugKeys are the debug header keys, as metadata holds them: a target that is a mock server sets its own, which
 // the mock's replace.
 var _debugKeys = []string{
-	strings.ToLower(vlatte.MatchedMockIDHeader),
-	strings.ToLower(vlatte.MatchedMockHitsHeader),
-	strings.ToLower(vlatte.MatchedMockNameHeader),
+	strings.ToLower(vlatte.HeaderMatchedMockID),
+	strings.ToLower(vlatte.HeaderMatchedMockHits),
+	strings.ToLower(vlatte.HeaderMatchedMockName),
 }
 
 // ProxyReply answers each call with the answer of another gRPC server, the target: the mock sends it the call, its

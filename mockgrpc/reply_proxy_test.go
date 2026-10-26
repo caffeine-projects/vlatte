@@ -64,9 +64,9 @@ func TestProxy_DebugHeadersNameTheProxyingMock(t *testing.T) {
 	var header metadata.MD
 	_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{}, grpc.Header(&header))
 	require.NoError(t, err)
-	require.Equal(t, []string{front.ID()}, header.Get(vlatte.MatchedMockIDHeader))
-	require.Equal(t, []string{"front"}, header.Get(vlatte.MatchedMockNameHeader))
-	require.Equal(t, []string{"1"}, header.Get(vlatte.MatchedMockHitsHeader))
+	require.Equal(t, []string{front.ID()}, header.Get(vlatte.HeaderMatchedMockID))
+	require.Equal(t, []string{"front"}, header.Get(vlatte.HeaderMatchedMockName))
+	require.Equal(t, []string{"1"}, header.Get(vlatte.HeaderMatchedMockHits))
 }
 
 func TestProxy_StreamsGoOnMessageByMessage(t *testing.T) {
@@ -203,7 +203,7 @@ func TestProxy_TheTargetsStatusIsTheAnswer(t *testing.T) {
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	require.Equal(t, "no", status.Convert(err).Message())
 	require.Equal(t, []string{"w"}, trailer.Get("t"))
-	require.Empty(t, trailer.Get(vlatte.FailureHeader))
+	require.Empty(t, trailer.Get(vlatte.HeaderFailure))
 }
 
 func TestProxy_ATargetThatCantBeReachedFailsTheCall(t *testing.T) {
@@ -237,7 +237,7 @@ func TestProxy_ATargetThatCantBeReachedFailsTheCall(t *testing.T) {
 			err := call(&trailer)
 			require.Equal(t, codes.Internal, status.Code(err))
 			require.Contains(t, status.Convert(err).Message(), "reply_proxy: target "+addr)
-			require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(vlatte.FailureHeader))
+			require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(vlatte.HeaderFailure))
 		})
 	}
 }
