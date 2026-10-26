@@ -15,73 +15,96 @@ import (
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
+// seen is what a callback saw, sent to the test's goroutine: a require in a callback runs on another one.
+type seen struct {
+	kind   string
+	mockID string
+	method string
+	path   string
+	body   any
+	status int
+}
+
+// see returns a callback that sends what it sees on the channel it returns, and then returns err.
+func see(err error) (vlatte.EventFunc[vlatte.OnComplete], <-chan seen) {
+	ch := make(chan seen, 1)
+
+	return func(_ context.Context, e vlatte.OnComplete) error {
+		in, ok := e.(*mockhttp.OnComplete)
+		if !ok {
+			ch <- seen{kind: fmt.Sprintf("%T", e)}
+			return err
+		}
+
+		ch <- seen{
+			kind:   in.Kind().String(),
+			mockID: in.Mock().ID(),
+			method: in.Request().RawRequest.Method,
+			path:   in.Request().URL.Path,
+			body:   in.Request().ParsedBodyData,
+			status: in.Response().StatusCode,
+		}
+
+		return err
+	}, ch
+}
+
+// received returns what ch got, which the response waits for.
+func received(t *testing.T, ch <-chan seen) seen {
+	t.Helper()
+
+	select {
+	case s := <-ch:
+		return s
+	default:
+		t.Fatal("the response came before the callback ran")
+		return seen{}
+	}
+}
+
 func TestCallbacks(t *testing.T) {
 	t.Run("should call registered post action", func(t *testing.T) {
-		spy := false
-		m := mockhttp.MustNew()
+		m := mockhttp.MustNew(mockhttp.Setup().Silent())
 		m.MustStart()
 
 		defer m.Close()
 
-		scope := m.MustMock(mockhttp.Post(match.URLPath("/test")).
-			Callback(func(ctx context.Context, input vlatte.CallbackInput) error {
-				cinput, ok := input.(*mockhttp.CallbackInput)
-
-				require.True(t, ok)
-				require.Equal(t, "http", cinput.Kind().String())
-				require.NotNil(t, cinput)
-				require.NotNil(t, cinput.Mock())
-				require.NotNil(t, cinput.Request())
-				require.NotNil(t, cinput.Response())
-				require.Equal(t, http.MethodPost, cinput.Request().RawRequest.Method)
-				require.Equal(t, "/test", cinput.Request().URL.Path)
-				require.Equal(t, "hi", cinput.Request().ParsedBodyData.(string))
-
-				spy = true
-
-				return nil
-			}).
-			Reply(mockhttp.OK()))
+		callback, ch := see(nil)
+		scope := m.MustMock(mockhttp.Post(match.URLPath("/test")).Callback(callback).Reply(mockhttp.OK()))
 
 		res, err := http.Post(fmt.Sprintf("%s/test", m.URL()), mockhttp.MIMETextPlain, strings.NewReader("hi"))
 		require.NoError(t, err)
 
 		defer res.Body.Close()
 
-		require.True(t, scope.AssertCalled(t))
 		require.Equal(t, http.StatusOK, res.StatusCode)
-		require.True(t, spy)
+		require.True(t, scope.AssertCalled(t))
+		require.Equal(t, seen{
+			kind:   "http",
+			mockID: scope.IDs()[0],
+			method: http.MethodPost,
+			path:   "/test",
+			body:   "hi",
+			status: http.StatusOK,
+		}, received(t, ch))
 	})
 
 	t.Run("should not be affected by errors on registered post actions", func(t *testing.T) {
-		var callbackErrReceiver error
-
-		callbackErr := errors.New("failed to run post action")
-		m := mockhttp.MustNew()
+		m := mockhttp.MustNew(mockhttp.Setup().Silent())
 		m.MustStart()
 
 		defer m.Close()
 
-		scope := m.MustMock(mockhttp.Get(match.URLPath("/test")).
-			Callback(func(ctx context.Context, input vlatte.CallbackInput) error {
-				cinput, ok := input.(*mockhttp.CallbackInput)
-				require.True(t, ok)
-				require.NotNil(t, cinput)
-
-				callbackErrReceiver = callbackErr
-
-				return callbackErr
-			}).
-			Reply(mockhttp.OK()))
+		callback, ch := see(errors.New("failed to run post action"))
+		scope := m.MustMock(mockhttp.Get(match.URLPath("/test")).Callback(callback).Reply(mockhttp.OK()))
 
 		res, err := http.Get(fmt.Sprintf("%s/test", m.URL()))
 		require.NoError(t, err)
 
 		defer res.Body.Close()
 
-		require.True(t, scope.AssertCalled(t))
-		require.NotNil(t, callbackErrReceiver)
-		require.Equal(t, callbackErr, callbackErrReceiver)
 		require.Equal(t, http.StatusOK, res.StatusCode)
+		require.True(t, scope.AssertCalled(t))
+		require.Equal(t, scope.IDs()[0], received(t, ch).mockID)
 	})
 }

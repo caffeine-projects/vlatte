@@ -388,6 +388,57 @@ func TestMock_ADescriptionKeepsTheEvents(t *testing.T) {
 	require.ElementsMatch(t, []vlatte.Parameters{map[string]any{"k": "v"}, nil}, []vlatte.Parameters{<-got, <-got})
 }
 
+func TestMock_ADescriptionLeavesOutTheCallbacks(t *testing.T) {
+	// A callback is a function: a mock file can't hold it. The description keeps the events a mock file names, and
+	// loads back as a mock with those, and with no callback; it doesn't fail on the one it can't write.
+	got := make(chan string, 4)
+	capture := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
+		got <- "event"
+		return nil
+	})
+
+	m := MustNew(Setup().Silent().OnCompleteListener("capture", capture))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scope := m.MustMock(
+		Getf("/both").ID("both").
+			Callback(func(context.Context, vlatte.OnComplete) error {
+				got <- "callback"
+				return nil
+			}).
+			OnCompleteEvent(vlatte.EventConfig{Name: "capture"}).
+			Reply(NoContent()),
+		Getf("/callback").ID("callback").
+			Callback(func(context.Context, vlatte.OnComplete) error { return nil }).
+			Reply(NoContent()),
+	)
+
+	both, ok := scope.Mock("both").Describe().Props.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, []any{map[string]any{"name": "capture"}}, both["on_complete"])
+
+	only, ok := scope.Mock("callback").Describe().Props.(map[string]any)
+	require.True(t, ok)
+	require.NotContains(t, only, "on_complete", "a mock with only callbacks describes no events")
+
+	doc, err := json.Marshal(both)
+	require.NoError(t, err)
+
+	require.NoError(t, m.Clean(t.Context()))
+	m.MustMock(FromBytes(doc, "json"))
+
+	status, _ := get(t, m, "/both")
+	require.Equal(t, http.StatusNoContent, status)
+	require.Equal(t, "event", <-got)
+
+	select {
+	case extra := <-got:
+		t.Fatalf("the loaded mock ran a %s", extra)
+	default:
+	}
+}
+
 func TestMock_ADescriptionOpensTheSameBodyFiles(t *testing.T) {
 	// A relative body_file opens from the mock file's directory. Its description must name the file so that it opens
 	// from the working directory, where a description posted back, or loaded with FromBytes, opens it (#38): it named

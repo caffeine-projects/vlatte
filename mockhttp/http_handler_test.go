@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	json "encoding/json/v2"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -1630,4 +1632,409 @@ func TestHandler_APushGoesToTheWriterThatCanPush(t *testing.T) {
 	t.Run("HTTP/2, which checks the push", func(t *testing.T) {
 		require.EqualError(t, push(t, 2), `method "POST" must be GET or HEAD`)
 	})
+}
+
+func TestHandler_TheResponseWaitsForTheCallbacks(t *testing.T) {
+	// A callback is an on_complete event of its mock: the response waits for it, so a test checks what it did right
+	// after the call, with no wait of its own.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+
+	var done atomic.Bool
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").
+		Callback(func(context.Context, vlatte.OnComplete) error {
+			close(entered)
+			<-release
+			done.Store(true)
+
+			return nil
+		}).
+		Reply(OK().PlainText("ok")))
+
+	// The client runs in a goroutine of its own: it sends what it got, and the test asserts it.
+	responded := make(chan int, 1)
+	go func() {
+		res, err := http.Get(m.URL("/x"))
+		if err != nil {
+			responded <- 0
+			return
+		}
+
+		_ = res.Body.Close()
+		responded <- res.StatusCode
+	}()
+
+	select {
+	case <-entered:
+	case status := <-responded:
+		t.Fatalf("the response, %d, came before the callback ran", status)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the callback never ran")
+	}
+
+	select {
+	case status := <-responded:
+		t.Fatalf("the response, %d, came while the callback ran", status)
+	default:
+	}
+
+	close(release)
+	require.Equal(t, http.StatusOK, <-responded)
+	require.True(t, done.Load(), "the response came once the callback was done")
+}
+
+func TestHandler_APanickingCallbackIsAWarning(t *testing.T) {
+	// A callback's panic is logged, as an event's is: the client gets the mock's answer, the other callbacks and
+	// events of the mock run, and the request is logged as matched.
+	logs := &logBuffer{}
+	logger := zerolog.New(logs)
+
+	var ran atomic.Int32
+
+	m := MustNew(Setup().Logger(&logger).OnCompleteListener("counts", vlatte.EventFunc[vlatte.OnComplete](
+		func(context.Context, vlatte.OnComplete) error {
+			ran.Add(1)
+			return nil
+		})))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/panics").
+		Callback(func(context.Context, vlatte.OnComplete) error { panic("boom") }).
+		Callback(func(context.Context, vlatte.OnComplete) error {
+			ran.Add(1)
+			return nil
+		}).
+		OnCompleteEvent(vlatte.EventConfig{Name: "counts"}).
+		Reply(OK().PlainText("ok")))
+
+	status, body := get(t, m, "/panics")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "ok", body)
+	require.Equal(t, int32(2), ran.Load(), "the other callback and the event ran")
+	require.Contains(t, logs.String(), "on_complete listener callback at index 0: panic: boom")
+	require.Contains(t, logs.String(), "REQUEST MATCHED GET /panics")
+
+	status, _ = get(t, m, "/panics")
+	require.Equal(t, http.StatusOK, status, "the server keeps serving")
+}
+
+func TestHandler_ACallbackThatExitsItsGoroutineStillGetsTheResponse(t *testing.T) {
+	// A failing require in a callback calls t.FailNow, which exits the goroutine it runs on (#35). It ran on the
+	// handler's, and the client got no response. It exits the callback's own goroutine now: the client gets its answer.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/exits").
+		Callback(func(context.Context, vlatte.OnComplete) error {
+			runtime.Goexit()
+			return nil
+		}).
+		Reply(OK().PlainText("ok")))
+
+	status, body := get(t, m, "/exits")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "ok", body)
+}
+
+func TestHandler_CallbacksOutliveTheClient(t *testing.T) {
+	// A client that leaves, as one that times out does, ends the context of its request, not the callbacks of the
+	// request: they run with the context events get.
+	started := make(chan struct{})
+	release := make(chan struct{})
+	seen := make(chan error, 1)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	// Last in, first out: the callback ends before the server closes, when the test fails first.
+	t.Cleanup(func() { close(release) })
+
+	m.MustMock(Getf("/x").
+		Callback(func(ctx context.Context, in vlatte.OnComplete) error {
+			close(started)
+
+			select {
+			case <-in.(*OnComplete).Request().RawRequest.Context().Done():
+			case <-release:
+			}
+
+			seen <- ctx.Err()
+
+			return nil
+		}).
+		Reply(NoContent()))
+
+	ctx, leave := context.WithCancel(t.Context())
+	defer leave()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL("/x"), nil)
+	require.NoError(t, err)
+
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+
+		if res, err := http.DefaultClient.Do(req); err == nil {
+			_ = res.Body.Close()
+		}
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the callback never started")
+	}
+
+	leave()
+	<-ended
+
+	select {
+	case err := <-seen:
+		require.NoError(t, err, "the client leaving ended the callback's context")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the callback never saw the client leave")
+	}
+}
+
+func TestHandler_CloseCancelsTheCallbacksRunning(t *testing.T) {
+	// Close stops the callbacks still running, as it stops events, instead of waiting for them.
+	started := make(chan struct{})
+	release := make(chan struct{})
+	canceled := make(chan error, 1)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	t.Cleanup(func() { close(release) })
+
+	m.MustMock(Getf("/waits").
+		Callback(func(ctx context.Context, _ vlatte.OnComplete) error {
+			close(started)
+
+			select {
+			case <-ctx.Done():
+			case <-release: // the test failed first
+			}
+
+			canceled <- context.Cause(ctx)
+
+			return ctx.Err()
+		}).
+		Reply(NoContent()))
+
+	go func() {
+		if res, err := http.Get(m.URL("/waits")); err == nil {
+			_ = res.Body.Close()
+		}
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the callback never started")
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		m.Close()
+	}()
+
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close waited for the callback instead of canceling it")
+	}
+
+	select {
+	case err := <-canceled:
+		require.ErrorIs(t, err, context.Canceled)
+	default:
+		t.Fatal("Close returned before the callback it canceled")
+	}
+}
+
+func TestHandler_CallbacksRunAlongsideTheEvents(t *testing.T) {
+	// Callbacks are events of their mock: they run at the same time as each other, the mock's named events and the
+	// global ones, so none holds up another. Each waits here until all four run: one after the other, none would see
+	// the others. A failing one is logged under its index, and the others run all the same.
+	const runners = 4
+
+	var arrived atomic.Int32
+
+	all := make(chan struct{})
+	together := make(chan bool, runners)
+
+	meet := func() error {
+		if arrived.Add(1) == runners {
+			close(all)
+		}
+
+		select {
+		case <-all:
+			together <- true
+		case <-time.After(5 * time.Second):
+			together <- false
+		}
+
+		return nil
+	}
+
+	logs := &logBuffer{}
+	logger := zerolog.New(logs)
+
+	meets := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return meet() })
+	m := MustNew(Setup().Logger(&logger).
+		OnCompleteListener("meets", meets).
+		GlobalEvents(&vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "meets"}}}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").
+		Callback(func(context.Context, vlatte.OnComplete) error { return meet() }).
+		Callback(func(context.Context, vlatte.OnComplete) error {
+			_ = meet()
+			return errors.New("failed")
+		}).
+		OnCompleteEvent(vlatte.EventConfig{Name: "meets"}).
+		Reply(NoContent()))
+
+	status, _ := get(t, m, "/x")
+	require.Equal(t, http.StatusNoContent, status)
+
+	for range runners {
+		require.True(t, <-together, "a callback or an event waited for another")
+	}
+
+	require.Contains(t, logs.String(), "on_complete listener callback at index 1: failed")
+}
+
+func TestHandler_CallbacksSeeTheServedRequest(t *testing.T) {
+	// A callback gets what an event gets: the mock, its hits counting the request, and the response as it was sent,
+	// after the mappers. A reply that writes its own response, such as Handler, returns none. A callback has no
+	// parameters: a mock file can't set it.
+	type view struct {
+		kind     string
+		hits     int64
+		status   int
+		body     string
+		params   vlatte.Parameters
+		response bool
+	}
+
+	views := make(chan view, 2)
+	callback := func(_ context.Context, e vlatte.OnComplete) error {
+		in, ok := e.(*OnComplete)
+		if !ok {
+			views <- view{kind: fmt.Sprintf("%T", e)}
+			return nil
+		}
+
+		v := view{kind: in.Kind().String(), hits: in.Mock().Hits(), params: in.Parameters(), response: in.Response() != nil}
+
+		if res := in.Response(); res != nil {
+			v.status, v.body = res.StatusCode, string(res.Body)
+		}
+
+		views <- v
+
+		return nil
+	}
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(
+		Getf("/mapped").
+			Map(func(_ *RequestValues, res *Response) error {
+				res.StatusCode = http.StatusAccepted
+				res.Body = []byte("mapped")
+
+				return nil
+			}).
+			Callback(callback).
+			Reply(OK().PlainText("ok")),
+		Getf("/handler").
+			Callback(callback).
+			Reply(Handler(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusCreated) })),
+	)
+
+	status, body := get(t, m, "/mapped")
+	require.Equal(t, http.StatusAccepted, status)
+	require.Equal(t, "mapped", body)
+	require.Equal(t, view{kind: "http", hits: 1, status: http.StatusAccepted, body: "mapped", response: true}, <-views)
+
+	status, _ = get(t, m, "/handler")
+	require.Equal(t, http.StatusCreated, status)
+	require.Equal(t, view{kind: "http", hits: 1}, <-views)
+}
+
+func TestHandler_CallbacksRunOnlyForAServedMock(t *testing.T) {
+	// A callback runs once its mock served the request. A request it doesn't match, or that its mock fails to serve,
+	// runs none. The response waits for callbacks, so one that ran would have run by then.
+	tests := []struct {
+		name    string
+		give    *Builder
+		target  string
+		want    int
+		wantRan int32
+	}{
+		{
+			name:   "no match",
+			give:   Getf("/x").Reply(OK()),
+			target: "/y",
+			want:   StatusNoMatch,
+		},
+		{
+			name: "failing reply",
+			give: Getf("/x").Reply(Func(func(http.ResponseWriter, *RequestValues) (*Response, error) {
+				return nil, errors.New("failed")
+			})),
+			target: "/x",
+			want:   http.StatusInternalServerError,
+		},
+		{
+			name: "failing mapper",
+			give: Getf("/x").
+				Map(func(*RequestValues, *Response) error { return errors.New("failed") }).
+				Reply(OK()),
+			target: "/x",
+			want:   http.StatusInternalServerError,
+		},
+		{
+			name:    "served",
+			give:    Getf("/x").Reply(OK()),
+			target:  "/x",
+			want:    http.StatusOK,
+			wantRan: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var ran atomic.Int32
+
+			m := MustNew(Setup().Silent().ErrorStatusCode(http.StatusInternalServerError))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(tt.give.Callback(func(context.Context, vlatte.OnComplete) error {
+				ran.Add(1)
+				return nil
+			}))
+
+			status, _ := get(t, m, tt.target)
+			require.Equal(t, tt.want, status)
+			require.Equal(t, tt.wantRan, ran.Load())
+		})
+	}
 }

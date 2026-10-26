@@ -16,32 +16,9 @@ import (
 )
 
 var (
-	_ vlatte.Mock          = (*Mock)(nil)
-	_ io.Closer            = (*Mock)(nil)
-	_ vlatte.CallbackInput = (*CallbackInput)(nil)
+	_ vlatte.Mock = (*Mock)(nil)
+	_ io.Closer   = (*Mock)(nil)
 )
-
-type CallbackInput struct {
-	m   *Mock
-	req *RequestValues
-	res *Response
-}
-
-func (i *CallbackInput) Kind() vlatte.Kind {
-	return Kind
-}
-
-func (i *CallbackInput) Mock() vlatte.Mock {
-	return i.m
-}
-
-func (i *CallbackInput) Request() *RequestValues {
-	return i.req
-}
-
-func (i *CallbackInput) Response() *Response {
-	return i.res
-}
 
 // Mapper is the function definition to be used to map a Mock response MockedResponse before serving it.
 // The response is the mapper's to change, but for its Body bytes, which other responses of the mock can share: replace
@@ -93,7 +70,6 @@ type mockSpec struct {
 	mappers      []Mapper
 	delay        vlatte.Delay
 	events       []vlatte.EventConfig
-	callbacks    []vlatte.Callback
 	steps        []vlatte.Step
 	wireSteps    []vlatte.Step
 	upSteps      []vlatte.Step
@@ -107,7 +83,6 @@ func (s mockSpec) clone() mockSpec {
 	s.expectations = slices.Clone(s.expectations)
 	s.mappers = slices.Clone(s.mappers)
 	s.events = slices.Clone(s.events)
-	s.callbacks = slices.Clone(s.callbacks)
 	s.steps = slices.Clone(s.steps)
 	s.wireSteps = slices.Clone(s.wireSteps)
 	s.upSteps = slices.Clone(s.upSteps)
@@ -205,10 +180,6 @@ func (m *Mock) Switch(state bool) {
 
 func (m *Mock) Events() vlatte.Events {
 	return vlatte.Events{OnComplete: m.spec.events}
-}
-
-func (m *Mock) Callbacks() []vlatte.Callback {
-	return m.spec.callbacks
 }
 
 func (m *Mock) Steps() []vlatte.Step {
@@ -403,11 +374,16 @@ func (m *Mock) Describe() descriptor.Descriptor {
 	return descriptor.Root(data)
 }
 
-// describeEvents describes events as a mock file writes them. Parameters that describe themselves, as a webhook's do,
+// describeEvents describes events as a mock file writes them, but those that carry their listener, such as callbacks,
+// which a mock file can't hold. Parameters that describe themselves, as a webhook's do,
 // give their description; others, such as the maps of mock files, go as they are.
 func describeEvents(events []vlatte.EventConfig) []any {
 	described := make([]any, 0, len(events))
 	for _, e := range events {
+		if e.Listener != nil {
+			continue
+		}
+
 		event := map[string]any{"name": e.Name}
 
 		switch p := e.Parameters.(type) {

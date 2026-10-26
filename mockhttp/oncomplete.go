@@ -11,9 +11,9 @@ import (
 
 var _ vlatte.OnComplete = (*OnComplete)(nil)
 
-// OnComplete implements vlatte.OnComplete for HTTP mocks. Listeners get it once the mock replied, and the response
-// waits for them. It's read-only: the listeners of a request run at the same time. The request's body was read: read
-// it from Request, not from RawRequest.Body. Listeners use the context they get: it has the request's values, and the
+// OnComplete implements vlatte.OnComplete for HTTP mocks. Listeners, and the callbacks of [Builder.Callback], get it
+// once the mock replied, and the response waits for them. It's read-only: the listeners of a request run at the same
+// time. The request's body was read: read it from Request, not from RawRequest.Body. Listeners use the context they get: it has the request's values, and the
 // client leaving doesn't end it, as it ends the request's.
 type OnComplete struct {
 	m         *Mock

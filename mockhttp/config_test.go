@@ -360,6 +360,35 @@ func TestGlobalEventsMustNameARegisteredListener(t *testing.T) {
 	}
 }
 
+func TestGlobalEventsCanCarryTheirListener(t *testing.T) {
+	// A global event set in Go can carry its listener, as a callback does: it needs none registered, nor a listener
+	// store, and runs for every matched request.
+	for name, setup := range map[string]*ConfigBuilder{
+		"listeners":         Setup(),
+		"no listener store": Setup().EventListeners(nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var fired atomic.Int32
+			counts := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
+				fired.Add(1)
+				return nil
+			})
+
+			m := MustNew(setup.Silent().GlobalEvents(&vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "counts", Listener: counts}}}))
+			m.MustStart()
+			t.Cleanup(m.Close)
+			m.MustMock(Getf("/a").Reply(OK()), Getf("/b").Callback(counts).Reply(OK()))
+
+			for _, path := range []string{"/a", "/b"} {
+				status, _ := get(t, m, path)
+				require.Equal(t, http.StatusOK, status)
+			}
+
+			require.Equal(t, int32(3), fired.Load(), "the global event ran twice, and the callback of /b once")
+		})
+	}
+}
+
 func TestOnCompleteListener_ANameRegisteredTwiceFailsNew(t *testing.T) {
 	// #18: the error of Register was dropped, so the second listener of a name never ran, without a word. Every name
 	// registered twice fails New now, naming the listener, whether the registry is the builder's or a shared one.

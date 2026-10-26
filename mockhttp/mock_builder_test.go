@@ -111,6 +111,41 @@ func TestBuilder_OneBuilderOnTwoServers(t *testing.T) {
 	require.Equal(t, StatusNoMatch, status, "s1 served its one request")
 }
 
+func TestBuilder_ACallbackNeedsNoRegisteredListener(t *testing.T) {
+	// A mock's events must name a registered listener; a callback carries its own, so a server with none, or with no
+	// listener store, builds it. A callback added to a builder later doesn't reach the mocks it built already.
+	for name, setup := range map[string]*ConfigBuilder{
+		"no listener":       Setup(),
+		"no listener store": Setup().EventListeners(nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var first, later atomic.Int32
+
+			m := MustNew(setup.Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			b := Getf("/x").Callback(func(context.Context, vlatte.OnComplete) error {
+				first.Add(1)
+				return nil
+			}).Reply(OK())
+
+			_, err := m.Mock(b)
+			require.NoError(t, err)
+
+			b.Callback(func(context.Context, vlatte.OnComplete) error {
+				later.Add(1)
+				return nil
+			})
+
+			status, _ := get(t, m, "/x")
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, int32(1), first.Load())
+			require.Zero(t, later.Load(), "the mock built before the callback was added runs only its own")
+		})
+	}
+}
+
 func TestBuilder_EachMockCountsItsOwnTimes(t *testing.T) {
 	// Times was a matcher the builder held, so every mock built from the builder shared one count: a Once builder,
 	// served and then remocked, made a mock that never matched, while its hits said 0. Each mock counts its own now.

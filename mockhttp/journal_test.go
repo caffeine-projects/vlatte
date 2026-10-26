@@ -176,8 +176,8 @@ func TestJournal_KeepsTheRequestAsItCame(t *testing.T) {
 	// the server redacts in its logs are redacted, and a body over the journal's limit is cut, and says so.
 	m := journaledServer(t, Setup().RedactHeader("Authorization").ConfigSources(ConfigArgs([]string{"--journal-max-body-size", "4"})))
 
-	m.MustMock(Postf("/a").Callback(func(_ context.Context, in vlatte.CallbackInput) error {
-		in.(*CallbackInput).Request().RawRequest.Header.Set("X-Changed", "later")
+	m.MustMock(Postf("/a").Callback(func(_ context.Context, in vlatte.OnComplete) error {
+		in.(*OnComplete).Request().RawRequest.Header.Set("X-Changed", "later")
 		return nil
 	}).Reply(OK()))
 
@@ -461,17 +461,18 @@ func TestJournal_AConnectKeepsTheAnswerItGot(t *testing.T) {
 
 func TestJournal_ASwitchKeepsItsStatus(t *testing.T) {
 	// A request that switches protocols gets its 101 on the connection vlatte took over: the entry has it, even when
-	// what runs after the switch, such as a callback, panics.
+	// what runs after the switch, such as a callback, panics. The panic is the callback's, a warning, as an event's is:
+	// the mock matched.
 	target := switchingTarget(t, "echo")
 
 	m := journaledServer(t, Setup().Proxy())
 	m.MustMock(
 		Getf("/ws").ID("ws").Reply(From(target.URL)),
-		Getf("/ws-panics").ID("ws-panics").Callback(func(context.Context, vlatte.CallbackInput) error { panic("after the switch") }).
+		Getf("/ws-panics").ID("ws-panics").Callback(func(context.Context, vlatte.OnComplete) error { panic("after the switch") }).
 			Reply(From(target.URL)),
 	)
 
-	for path, outcome := range map[string]journal.Outcome{"/ws": journal.OutcomeMatched, "/ws-panics": journal.OutcomeFailed} {
+	for path, outcome := range map[string]journal.Outcome{"/ws": journal.OutcomeMatched, "/ws-panics": journal.OutcomeMatched} {
 		t.Run(path, func(t *testing.T) {
 			conn, _, res := switchThrough(t, m, path)
 			require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
