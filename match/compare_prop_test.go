@@ -236,6 +236,11 @@ func TestPropMatchers_NoErrorOnAnyValue(t *testing.T) {
 		RegExpr("^a"), Trim(Equal("a")), ToLower(Equal("a")), ToUpper(Equal("A")), Split(",", Len(2)), URLPath("/a"),
 		Not(Equal(int64(1))), All(Equal("a"), Truthy()), Any(Len(1), Empty()), Both(Present(), Nil()),
 		Either(Truthy(), Falsy()), XOR(Truthy(), Falsy()),
+		EqualJSON(`[1, {"a": 2}]`, IgnoreArrayOrder(), IgnoreExtraElements()), ItemsMatch([]vlatte.Matcher{Equal("a"), Len(1)}),
+		JSONSchema(`{"type": "object", "required": ["a"]}`), EqualXML(`<a b="1"><c/></a>`, IgnoreChildOrder()),
+		XPath("//a", Some(Equal("1"))), XPath("count(//a)", GreaterThan(1)),
+		Before(time.Unix(0, 0)), AfterNow(ExpectedOffset(-1, Days), TruncateActual(FirstDayOfMonth)),
+		EqualDateTime(time.Unix(0, 0), ActualFormat("02/01/2006"), LocalTime()),
 	}
 
 	rapid.Check(t, func(t *rapid.T) {

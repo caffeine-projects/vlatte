@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"cmp"
 	"context"
 	"crypto/x509"
 	"fmt"
@@ -25,6 +26,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid/recovery"
@@ -296,7 +298,7 @@ func New(config ...Option) (*Server, error) {
 			admin.Scenarios(app.scenarioStore),
 			admin.Events(events),
 			admin.Logs(logs),
-			admin.Journal(j, app.adminRequestPattern),
+			admin.Journal(j, app.adminRequestPattern, app.matchers()),
 		}
 
 		app.admin = admin.MustNew(options...)
@@ -625,6 +627,12 @@ func (app *Server) DescribeConfig() string {
 // --
 // Internals
 // --
+
+// matchers returns the registry that builds the matcher lists of the server's mock files: Config.Matchers, or the
+// built-in matchers.
+func (app *Server) matchers() *matchbuild.Registry {
+	return cmp.Or(app.config.Matchers, _builtinMatchers)
+}
 
 // webhookTransport returns the transport webhooks send through when they have none of their own: Config.Transport,
 // which is the caller's, or else the one the server made, which Close closes.

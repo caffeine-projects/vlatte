@@ -18,6 +18,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -389,4 +390,40 @@ func TestBuilder_DelayFunc(t *testing.T) {
 	}
 
 	require.Equal(t, int64(2), picks.Load())
+}
+
+func TestBuilder_MatchesGivesTheMatcherTheRequest(t *testing.T) {
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/m").Matches(match.Function(func(v any) (bool, error) {
+		r, ok := v.(*http.Request)
+		return ok && r.URL.Query().Get("ok") == "1", nil
+	})).Reply(OK()))
+
+	status, _ := get(t, m, "/m?ok=1")
+	require.Equal(t, http.StatusOK, status)
+
+	status, _ = get(t, m, "/m?ok=0")
+	require.Equal(t, StatusNoMatch, status)
+}
+
+func TestBuilder_MatchesDescribesUnderCustom(t *testing.T) {
+	// A matcher of the whole request that describes itself, such as a custom one of the server's registry, loads back
+	// from the mock's description: a predicate of RequestMatches can't.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	scope := m.MustMock(Getf("/m").ID("m").
+		Matches(match.Not(match.Nil())).
+		RequestMatches(func(*http.Request) (bool, error) { return true, nil }).
+		Reply(OK()))
+
+	desc, ok := scope.Mock("m").Describe().Props.(map[string]any)
+	require.True(t, ok)
+
+	request, ok := desc["request"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, []any{descriptor.SingleArg("not", descriptor.KeyOnly("nil"))}, request["custom"])
 }

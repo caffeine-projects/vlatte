@@ -531,6 +531,21 @@ func (b *Builder) RequestMatches(predicate func(r *http.Request) (bool, error)) 
 	return b
 }
 
+// Matches adds a matcher of the whole request: m gets the *http.Request, as the predicate of RequestMatches does. A
+// mock file's request.custom adds matchers this way, such as custom ones of the server's registry: see
+// [ConfigBuilder.Matchers]. Unlike a predicate, a matcher that describes itself is described, under request.custom,
+// so the admin API's store keeps it.
+func (b *Builder) Matches(m vlatte.Matcher) *Builder {
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeCustom),
+		Key:      "custom",
+		Selector: selectRawRequest,
+		Matcher:  m,
+	})
+
+	return b
+}
+
 // StartScenario sets that this mock will start a new scenario with the given name.
 func (b *Builder) StartScenario(name string) *Builder {
 	b.scenario = name

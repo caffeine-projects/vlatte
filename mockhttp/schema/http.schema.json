@@ -68,7 +68,12 @@
             }
           }
         },
-        "body": { "$ref": "#/$defs/matcher" }
+        "body": { "$ref": "#/$defs/matcher" },
+        "custom": {
+          "description": "Matchers of the whole request, such as custom ones of the server: a list of matcher lists, or names.",
+          "type": "array",
+          "items": { "oneOf": [ { "type": "string" }, { "type": "array", "minItems": 1 } ] }
+        }
       },
       "minProperties": 1,
       "additionalProperties": false,

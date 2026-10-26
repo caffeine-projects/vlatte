@@ -18,6 +18,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 const (
@@ -56,6 +57,10 @@ type Config struct {
 	GlobalEvents          *vlatte.Events
 	TemplateDataProviders []TemplateDataProvider
 	DebugFn               DebugFn
+
+	// Matchers builds the matcher lists of mock files, and of the admin API's request queries: the built-in matchers
+	// and custom ones. Nil builds the built-in matchers only.
+	Matchers *matchbuild.Registry
 
 	// TemplateEngine compiles every template of the server's mocks. Nil uses a vlatte.GoTemplateEngine.
 	TemplateEngine vlatte.TemplateEngine
@@ -131,6 +136,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Debug = c.Debug
 	conf.Colors = c.Colors
 	conf.Listeners = c.Listeners
+	conf.Matchers = c.Matchers
 	conf.GlobalEvents = c.GlobalEvents
 	conf.TemplateEngine = c.TemplateEngine
 	conf.TemplateDataProviders = c.TemplateDataProviders
@@ -560,6 +566,13 @@ func (cb *ConfigBuilder) EventListeners(listeners *vlatte.Listener) *ConfigBuild
 		}
 	}
 
+	return cb
+}
+
+// Matchers sets the registry that builds the matcher lists of the server's mock files, such as one that holds
+// custom matchers: [matchbuild.WithMatcher]. Servers can share a registry. Nil builds the built-in matchers only.
+func (cb *ConfigBuilder) Matchers(r *matchbuild.Registry) *ConfigBuilder {
+	cb.conf.Matchers = r
 	return cb
 }
 

@@ -58,6 +58,7 @@ local scheme = import './scheme.libsonnet';
     forms(key, matcher):: { forms: { [key]: matcher } },
     formFile(field, pattern):: { form_file: { [field]: pattern } },
     body(matcher):: { body: matcher },
+    custom(matchers):: { custom: matchers },
   },
 
   response(v):: { response: internal.merge(v) },

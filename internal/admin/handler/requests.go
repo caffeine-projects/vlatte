@@ -11,9 +11,10 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
-	"github.com/caffeine-projects/vlatte/internal/filterbuilder"
+	"github.com/caffeine-projects/vlatte/internal/matchspec"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 var _ Journal = (*journal.Journal)(nil)
@@ -47,9 +48,10 @@ type requestList struct {
 
 // requestQuery is the body of QUERY /requests: a query, the request part of a mock, and a page.
 type requestQuery struct {
-	q       journal.Query
-	request *config.Value
-	limit   int
+	matchers *matchbuild.Registry // builds the matcher lists of the query: the server's
+	q        journal.Query
+	request  *config.Value
+	limit    int
 }
 
 var _requestQuerySchema = config.NewSchema(
@@ -83,7 +85,7 @@ var _requestQuerySchema = config.NewSchema(
 			c.q.Header = make(map[string]vlatte.Matcher)
 
 			return config.Members(v, func(name string, member config.Value) error {
-				m, err := matcherOf(member)
+				m, err := matcherOf(c.matchers, member)
 				c.q.Header[name] = m
 
 				return err
@@ -139,8 +141,13 @@ func ListRequests(j Journal) http.Handler {
 
 // QueryRequests answers the requests the query of the body selects, and their count: QUERY /requests. A request
 // part, which the server's protocol makes a pattern of, narrows them as a mock matches. An empty body selects them
-// all.
-func QueryRequests(j Journal, pattern RequestPattern) http.Handler {
+// all. matchers builds the matcher lists of the query, as it does the server's mock files; nil builds the built-in
+// matchers only.
+func QueryRequests(j Journal, pattern RequestPattern, matchers *matchbuild.Registry) http.Handler {
+	if matchers == nil {
+		matchers = matchbuild.MustNew()
+	}
+
 	return negotiated(func(w http.ResponseWriter, r *http.Request) {
 		data, format, err := readBody(w, r)
 		if err != nil {
@@ -148,7 +155,7 @@ func QueryRequests(j Journal, pattern RequestPattern) http.Handler {
 			return
 		}
 
-		query := requestQuery{limit: _requestsPage}
+		query := requestQuery{matchers: matchers, limit: _requestsPage}
 		if err := decodeBody(_requestQuerySchema, &query, data, format); err != nil {
 			fail(w, r, invalid("the query", err))
 			return
@@ -307,7 +314,7 @@ func queryMatcher(key, what string, set func(c *requestQuery, m vlatte.Matcher))
 	return config.Field[requestQuery]{
 		Key: key, Kind: config.Any, Usage: what + ": text, a number, or a matcher list such as [\"glob\", \"/users/*\"].",
 		Set: func(c *requestQuery, v config.Value) error {
-			m, err := matcherOf(v)
+			m, err := matcherOf(c.matchers, v)
 			set(c, m)
 
 			return err
@@ -317,13 +324,13 @@ func queryMatcher(key, what string, set func(c *requestQuery, m vlatte.Matcher))
 
 // matcherOf returns the matcher of a value of a query, as a mock file's, but a number or a bool matches an equal
 // value, such as a status.
-func matcherOf(v config.Value) (vlatte.Matcher, error) {
+func matcherOf(matchers *matchbuild.Registry, v config.Value) (vlatte.Matcher, error) {
 	switch v.Any.(type) {
 	case bool, float64, int64, int, uint64:
 		return match.Equal(v.Any), nil
 	}
 
-	return filterbuilder.MatcherOf(v)
+	return matchspec.MatcherOf(matchers, v)
 }
 
 func parseTime(v config.Value, dst *time.Time) error {

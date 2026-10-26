@@ -16,6 +16,8 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 // journalOf returns a journal of entries, the protocol's own: a path, and its method.
@@ -70,7 +72,7 @@ func TestListRequests(t *testing.T) {
 		entryOf("b", "GET", "/b", journal.OutcomeUnmatched),
 		entryOf("c", "POST", "/c", journal.OutcomeMatched),
 	)
-	url := serve(t, newStore(t), admin.Journal(j, nil))
+	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
 
 	res, body := send(t, request{method: http.MethodGet, url: url + "/requests?limit=2"})
 	require.Equal(t, http.StatusOK, res.StatusCode, body)
@@ -117,7 +119,7 @@ func TestQueryRequests(t *testing.T) {
 	c := entryOf("c", "POST", "/users", journal.OutcomeMatched)
 	c.MockID = "add-user"
 	j := journalOf(t, a, entryOf("b", "GET", "/orders", journal.OutcomeUnmatched), c)
-	url := serve(t, newStore(t), admin.Journal(j, nil))
+	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
 
 	tests := []struct {
 		name  string
@@ -154,6 +156,25 @@ func TestQueryRequests(t *testing.T) {
 	require.Equal(t, []string{"b"}, requestIDs(conforms(t, res, body, "RequestList")), "YAML too")
 }
 
+func TestQueryRequests_ReadsTheCustomMatchersOfTheServer(t *testing.T) {
+	// A query reads matcher lists as the server's mock files do, custom matchers included; without them, it refuses
+	// the name.
+	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched), entryOf("b", "POST", "/b", journal.OutcomeMatched))
+	readOnly := matchbuild.MustNew(matchbuild.WithMatcher("read-only", func(*matchbuild.Registry, []any) (vlatte.Matcher, error) {
+		return match.IsIn([]any{"GET", "HEAD"}), nil
+	}))
+
+	url := serve(t, newStore(t), admin.Journal(j, nil, readOnly))
+	res, body := send(t, request{method: "QUERY", url: url + "/requests", body: `{"method": ["read-only"]}`})
+	require.Equal(t, http.StatusOK, res.StatusCode, body)
+	require.Equal(t, []string{"a"}, requestIDs(conforms(t, res, body, "RequestList")))
+
+	url = serve(t, newStore(t), admin.Journal(j, nil, nil))
+	res, body = send(t, request{method: "QUERY", url: url + "/requests", body: `{"method": ["read-only"]}`})
+	require.Equal(t, http.StatusBadRequest, res.StatusCode, body)
+	require.Contains(t, body, `unknown matcher \"read-only\"`)
+}
+
 func TestQueryRequests_PagesWithTheNextOfAPage(t *testing.T) {
 	// A query pages as GET does: the next of a page is the before of the page after it, of the same selection, and
 	// the count stays as the pages go.
@@ -162,7 +183,7 @@ func TestQueryRequests_PagesWithTheNextOfAPage(t *testing.T) {
 		entryOf("b", "GET", "/b", journal.OutcomeMatched),
 		entryOf("c", "POST", "/c", journal.OutcomeMatched),
 	)
-	url := serve(t, newStore(t), admin.Journal(j, nil))
+	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
 
 	res, body := send(t, request{method: "QUERY", url: url + "/requests", body: `{"limit": 1, "method": "GET"}`})
 	doc := conforms(t, res, body, "RequestList")
@@ -192,7 +213,7 @@ func TestQueryRequests_OutcomeNamesAreTheWireFormat(t *testing.T) {
 	for _, tt := range tests {
 		require.NoError(t, j.Append(entryOf(tt.name, "GET", "/", tt.outcome)))
 	}
-	url := serve(t, newStore(t), admin.Journal(j, nil))
+	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
 
 	for _, format := range []string{"json", "yaml"} {
 		for _, tt := range tests {
@@ -218,7 +239,7 @@ func TestQueryRequests_OutcomeNamesAreTheWireFormat(t *testing.T) {
 }
 
 func TestQueryRequests_InvalidOutcomesExplainTheNamesToSend(t *testing.T) {
-	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil))
+	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil, nil))
 	const names = "matched, unmatched, proxied, failed or abandoned"
 	tests := []struct {
 		value   string
@@ -256,7 +277,7 @@ func TestQueryRequests_InvalidOutcomesExplainTheNamesToSend(t *testing.T) {
 }
 
 func TestQueryRequests_ProblemsOfTheQuery(t *testing.T) {
-	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil))
+	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil, nil))
 
 	tests := []struct {
 		name string
@@ -308,7 +329,7 @@ func TestQueryRequests_TheRequestPartIsTheProtocolsPattern(t *testing.T) {
 		return func(_ context.Context, e *journal.Entry) (bool, error) { return e.Path == "/b", nil }, nil
 	}
 
-	url := serve(t, newStore(t), admin.Journal(j, pattern))
+	url := serve(t, newStore(t), admin.Journal(j, pattern, nil))
 
 	res, body := send(t, request{method: "QUERY", url: url + "/requests", body: `{"request": {"path": "/b"}, "method": "GET"}`})
 	require.Equal(t, []string{"b"}, requestIDs(conforms(t, res, body, "RequestList")))
@@ -325,7 +346,7 @@ func TestQueryRequests_TheRequestPartIsTheProtocolsPattern(t *testing.T) {
 
 func TestQueryRequests_IsRefusedCrossSite(t *testing.T) {
 	// QUERY is safe, but a browser's page of another site must not read the requests the server got.
-	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil))
+	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil, nil))
 
 	r, err := http.NewRequestWithContext(t.Context(), "QUERY", url+"/requests", nil)
 	require.NoError(t, err)
@@ -339,7 +360,7 @@ func TestQueryRequests_IsRefusedCrossSite(t *testing.T) {
 
 func TestGetRequest(t *testing.T) {
 	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
-	url := serve(t, newStore(t), admin.Journal(j, nil))
+	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
 
 	res, body := send(t, request{method: http.MethodGet, url: url + "/requests/a"})
 	require.Equal(t, http.StatusOK, res.StatusCode, body)
@@ -355,7 +376,7 @@ func TestGetRequest(t *testing.T) {
 func TestClearRequests(t *testing.T) {
 	// A test clears the journal between its cases, on its own or with the rest of the server through POST /reset.
 	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
-	url := serve(t, newStore(t), admin.Journal(j, nil))
+	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
 
 	res, body := send(t, request{method: http.MethodDelete, url: url + "/requests"})
 	require.Equal(t, http.StatusNoContent, res.StatusCode, body)
@@ -379,7 +400,7 @@ func TestClearRequests_AJournalThatFailsToClear(t *testing.T) {
 	// before.
 	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
 	require.NoError(t, j.Close())
-	url := serve(t, newStore(t), admin.Journal(j, nil))
+	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
 
 	res, body := send(t, request{method: http.MethodDelete, url: url + "/requests"})
 
@@ -389,7 +410,7 @@ func TestClearRequests_AJournalThatFailsToClear(t *testing.T) {
 
 func TestJournal_ANilJournalIsNone(t *testing.T) {
 	// A server without a journal passes its nil one: its journal routes answer 501, and a reset works.
-	url := serve(t, newStore(t), admin.Journal((*journal.Journal)(nil), nil))
+	url := serve(t, newStore(t), admin.Journal((*journal.Journal)(nil), nil, nil))
 
 	res, body := send(t, request{method: http.MethodGet, url: url + "/requests"})
 	problem(t, res, body, http.StatusNotImplemented, "not_supported")
