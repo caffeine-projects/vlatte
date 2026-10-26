@@ -189,7 +189,8 @@ func (cb *ConfigBuilder) Listener(l net.Listener) *ConfigBuilder {
 }
 
 // InMemory serves the server in memory, in place of listening on a port: only the connections of Server.Dial reach
-// it. Tests that run in parallel need no free port, and nothing outside the test can call the server.
+// it. Tests that run in parallel need no free port, and nothing outside the test can call the server. New fails for a
+// server given a Listener too.
 func (cb *ConfigBuilder) InMemory() *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.InMemory = true })
 }

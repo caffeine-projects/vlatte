@@ -1,9 +1,11 @@
 package mockgrpc
 
 import (
+	"net"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 
@@ -28,7 +30,7 @@ func TestDial_ReachesTheServerAndClosesWithIt(t *testing.T) {
 	require.Equal(t, connectivity.Shutdown, conn.GetState(), "Close closed the connection")
 
 	_, err = m.Dial()
-	require.ErrorIs(t, err, errNotStarted)
+	require.ErrorIs(t, err, grpc.ErrServerStopped, "a closed server serves no more")
 }
 
 func TestInMemory_ServesWithoutAPort(t *testing.T) {
@@ -44,4 +46,14 @@ func TestInMemory_ServesWithoutAPort(t *testing.T) {
 
 	_, code := greetWith(t, c, "unmocked")
 	require.Equal(t, codes.NotFound, code)
+}
+
+func TestInMemory_RefusesAListener(t *testing.T) {
+	// An in-memory server serves no listener: one given too was neither served nor closed.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
+
+	_, err = New(Setup().InMemory().Listener(l))
+	require.ErrorIs(t, err, errInMemoryListener)
 }

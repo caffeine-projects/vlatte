@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/atomicfile"
+	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
@@ -168,7 +168,7 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 	}
 
 	// Descriptions name relative body files from the working directory; a mock file names them from its directory.
-	toWD, err := fromDir(dir)
+	toWD, err := bodyfile.FromDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("server: save: %w", err)
 	}
@@ -207,68 +207,26 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 
 	// Files that fail to load, such as one with the id of another mock file, would fail every later start: they are
 	// put back as they were.
-	written := make([]savedFile, 0, len(paths))
+	written := make([]atomicfile.Saved, 0, len(paths))
 
 	for i, path := range paths {
-		file, err := backup(path)
+		file, err := atomicfile.Backup(path)
 		if err == nil {
 			err = atomicfile.Write(filepath.Dir(path), _saveTempPattern, path, docs[i])
 		}
 
 		if err != nil {
-			return nil, fmt.Errorf("server: save: %w", errors.Join(err, restore(written, _saveTempPattern)))
+			return nil, fmt.Errorf("server: save: %w", errors.Join(err, atomicfile.Restore(written, _saveTempPattern)))
 		}
 
 		written = append(written, file)
 	}
 
 	if err := app.loadSaved(dir); err != nil {
-		return nil, errors.Join(err, restore(written, _saveTempPattern))
+		return nil, errors.Join(err, atomicfile.Restore(written, _saveTempPattern))
 	}
 
 	return paths, nil
-}
-
-// savedFile is a mock file a change wrote or removed, and what it held before.
-type savedFile struct {
-	path    string
-	prev    []byte
-	existed bool
-}
-
-// backup returns what the file at path holds now: its content, or that there is none.
-func backup(path string) (savedFile, error) {
-	prev, err := os.ReadFile(path)
-
-	switch {
-	case err == nil:
-		return savedFile{path: path, prev: prev, existed: true}, nil
-	case errors.Is(err, fs.ErrNotExist):
-		return savedFile{path: path}, nil
-	default:
-		return savedFile{}, err
-	}
-}
-
-// restore puts files back as they were, the last changed first: it writes back what they held, through temporary
-// files named after pattern, and removes those that didn't exist. It returns what it couldn't put back.
-func restore(files []savedFile, pattern string) error {
-	var errs []error
-
-	for _, f := range slices.Backward(files) {
-		var err error
-		if f.existed {
-			err = atomicfile.Write(filepath.Dir(f.path), pattern, f.path, f.prev)
-		} else if err = os.Remove(f.path); errors.Is(err, fs.ErrNotExist) {
-			err = nil
-		}
-
-		if err != nil {
-			errs = append(errs, fmt.Errorf("putting %s back: %w", f.path, err))
-		}
-	}
-
-	return errors.Join(errs...)
 }
 
 // mockFile describes mock as the mock file at path, in format, and checks that the file loads back. toWD leads from
@@ -296,26 +254,6 @@ func mockFile(app *Server, mock *Mock, path, format, toWD string) ([]byte, error
 	return data, nil
 }
 
-// fromDir returns the path that leads from dir to the working directory, such as ../.., or "" when they are one.
-func fromDir(dir string) (string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return "", err
-	}
-
-	rel, err := filepath.Rel(abs, wd)
-	if err != nil || rel == "." {
-		return "", err
-	}
-
-	return rel, nil
-}
-
 // relocate makes the relative body files of doc, a mock's description, which open from the working directory, open
 // from the directory toWD leads from to it: it puts toWD before them. The names stay as they are otherwise, since they
 // can be templates. Only the files of the mock file format move: those of replies and their multipart parts, of form
@@ -338,17 +276,17 @@ func relocate(doc any, toWD string) {
 	}
 
 	for _, reply := range replies {
-		relocateFile(reply, toWD)
+		bodyfile.Relocate(reply, toWD)
 		relocateParts(reply, "multipart", toWD)
 	}
 
 	if req, ok := mock["request"].(map[string]any); ok {
 		files, _ := req["form_file"].(map[string]any)
 		for _, pattern := range files {
-			relocateFile(pattern, toWD)
+			bodyfile.Relocate(pattern, toWD)
 
 			for _, p := range listItems(pattern) {
-				relocateFile(p, toWD)
+				bodyfile.Relocate(p, toWD)
 			}
 		}
 	}
@@ -360,7 +298,7 @@ func relocate(doc any, toWD string) {
 			continue
 		}
 
-		relocateFile(event["parameters"], toWD)
+		bodyfile.Relocate(event["parameters"], toWD)
 		relocateParts(event["parameters"], "multipart", toWD)
 		relocateParts(event["parameters"], "multipart_template", toWD)
 	}
@@ -372,15 +310,7 @@ func relocateParts(obj any, key, toWD string) {
 	multipart, _ := m[key].(map[string]any)
 
 	for _, part := range listItems(multipart["parts"]) {
-		relocateFile(part, toWD)
-	}
-}
-
-// relocateFile relocates the body_file of obj, an object, when it names a relative file, as relocate does.
-func relocateFile(obj any, toWD string) {
-	m, _ := obj.(map[string]any)
-	if name, ok := m["body_file"].(string); ok && name != "" && !filepath.IsAbs(name) {
-		m["body_file"] = toWD + string(filepath.Separator) + name
+		bodyfile.Relocate(part, toWD)
 	}
 }
 

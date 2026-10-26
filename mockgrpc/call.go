@@ -23,7 +23,8 @@ var (
 // the client sent, in Messages, once it closed its side. A bidi streaming call has the messages received so far: its
 // mock matches before any, on the method and the header, and its reply reads them with Recv.
 //
-// Its methods are safe for concurrent use. The messages are the server's: don't change them.
+// Its methods are safe for concurrent use, but Send and Recv, which follow grpc's streams: one goroutine at a time may
+// call Send, and one Recv. The messages are the server's: don't change them.
 type Call struct {
 	server *Server
 	method string

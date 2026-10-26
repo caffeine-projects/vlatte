@@ -3,15 +3,15 @@ package mockgrpc
 import (
 	"cmp"
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/atomicfile"
+	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
 )
@@ -44,6 +44,11 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 		dir = filepath.Join(app.config.RootDir, dir)
 	}
 
+	toWD, err := bodyfile.FromDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("server: save: %w", err)
+	}
+
 	mocks, err := app.storage.PickAll(ctx)
 	if err != nil {
 		return nil, err
@@ -62,7 +67,7 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 
 		path := filepath.Join(dir, mock.ID()+".mock."+format)
 
-		data, err := mockFile(app, mock, path, format)
+		data, err := mockFile(app, mock, path, format, toWD)
 		if err != nil {
 			return nil, fmt.Errorf("%w: mock %q: %w", handler.ErrNotDescribed, mock.ID(), err)
 		}
@@ -80,16 +85,16 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 		return nil, fmt.Errorf("server: save: %w", err)
 	}
 
-	written := make([]savedFile, 0, len(paths))
+	written := make([]atomicfile.Saved, 0, len(paths))
 
 	for i, path := range paths {
-		file, err := backup(path)
+		file, err := atomicfile.Backup(path)
 		if err == nil {
 			err = atomicfile.Write(dir, _saveTempPattern, path, docs[i])
 		}
 
 		if err != nil {
-			return nil, fmt.Errorf("server: save: %w", errors.Join(err, restore(written)))
+			return nil, fmt.Errorf("server: save: %w", errors.Join(err, atomicfile.Restore(written, _saveTempPattern)))
 		}
 
 		written = append(written, file)
@@ -101,24 +106,31 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 	}
 
 	if err := app.storage.Delete(ctx, ids...); err != nil {
-		return nil, fmt.Errorf("server: save: %w", errors.Join(err, restore(written)))
+		return nil, fmt.Errorf("server: save: %w", errors.Join(err, atomicfile.Restore(written, _saveTempPattern)))
 	}
 
 	if err := app.loader.loadWith(app, dir); err != nil {
-		return nil, errors.Join(err, restore(written), app.storage.Store(ctx, saved...))
+		return nil, errors.Join(err, atomicfile.Restore(written, _saveTempPattern), app.storage.Store(ctx, saved...))
 	}
 
 	return paths, nil
 }
 
-// mockFile describes mock as the mock file at path, in format, and checks that the file loads back.
-func mockFile(app *Server, mock *Mock, path, format string) ([]byte, error) {
-	d := mock.Describe()
-
-	doc, err := d.Marshallable()
+// mockFile describes mock as the mock file at path, in format, and checks that the file loads back. toWD leads from
+// the file's directory to the working directory, which the relative body files of the admin API's mocks open from.
+func mockFile(app *Server, mock *Mock, path, format, toWD string) ([]byte, error) {
+	desc, err := mock.Describe().MarshalJSON()
 	if err != nil {
 		return nil, err
 	}
+
+	// A copy of the description, whose files move.
+	var doc map[string]any
+	if err := json.Unmarshal(desc, &doc); err != nil {
+		return nil, err
+	}
+
+	relocate(doc, toWD)
 
 	data, err := config.Encode(doc, format)
 	if err != nil {
@@ -132,45 +144,20 @@ func mockFile(app *Server, mock *Mock, path, format string) ([]byte, error) {
 	return data, nil
 }
 
-// savedFile is a mock file SaveMocks wrote, and what it held before.
-type savedFile struct {
-	path    string
-	prev    []byte
-	existed bool
-}
+// relocate makes the relative body files of doc, a mock's description, which open from the working directory, open
+// from the directory toWD leads from to it: those of its response, and of the responses of its bidi reply.
+func relocate(doc map[string]any, toWD string) {
+	bodyfile.Relocate(doc["response"], toWD)
 
-// backup returns what the file at path holds now: its content, or that there is none.
-func backup(path string) (savedFile, error) {
-	prev, err := os.ReadFile(path)
+	bidi, _ := doc["bidi"].(map[string]any)
+	bodyfile.Relocate(bidi["otherwise"], toWD)
+	bodyfile.Relocate(bidi["on_end"], toWD)
 
-	switch {
-	case err == nil:
-		return savedFile{path: path, prev: prev, existed: true}, nil
-	case errors.Is(err, fs.ErrNotExist):
-		return savedFile{path: path}, nil
-	default:
-		return savedFile{}, err
+	rules, _ := bidi["on"].([]any)
+	for _, rule := range rules {
+		r, _ := rule.(map[string]any)
+		bodyfile.Relocate(r["response"], toWD)
 	}
-}
-
-// restore puts files back as they were, the last written first. It returns what it couldn't put back.
-func restore(files []savedFile) error {
-	var errs []error
-
-	for _, f := range slices.Backward(files) {
-		var err error
-		if f.existed {
-			err = atomicfile.Write(filepath.Dir(f.path), _saveTempPattern, f.path, f.prev)
-		} else if err = os.Remove(f.path); errors.Is(err, fs.ErrNotExist) {
-			err = nil
-		}
-
-		if err != nil {
-			errs = append(errs, fmt.Errorf("putting %s back: %w", f.path, err))
-		}
-	}
-
-	return errors.Join(errs...)
 }
 
 // adminRequestPattern returns the filter of the request part of a mock file, v, the request key of a query of the

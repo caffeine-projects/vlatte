@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	v1 "google.golang.org/grpc/reflection/grpc_reflection_v1"
 
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
@@ -37,6 +38,7 @@ func TestReflection_ListsTheServicesTheServerServes(t *testing.T) {
 
 	require.ElementsMatch(t, []string{
 		"grpc.reflection.v1.ServerReflection",
+		"grpc.reflection.v1alpha.ServerReflection",
 		"dyn.TestService",
 		"dyn.OtherService",
 		"protobuf.TestService",
@@ -50,4 +52,20 @@ func TestReflection_ListsTheServicesTheServerServes(t *testing.T) {
 	res, err = stream.Recv()
 	require.NoError(t, err)
 	require.NotEmpty(t, res.GetFileDescriptorResponse().GetFileDescriptorProto())
+}
+
+func TestReflection_ServesTheV1AlphaServiceToo(t *testing.T) {
+	// Older tools ask grpc.reflection.v1alpha: the mocks answered it, with no mock matched. Its messages are v1's.
+	m := MustNew(Setup().Silent().Reflection())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	stream, err := m.MustDial().NewStream(t.Context(), &grpc.StreamDesc{ClientStreams: true, ServerStreams: true},
+		"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo")
+	require.NoError(t, err)
+	require.NoError(t, stream.SendMsg(&v1.ServerReflectionRequest{MessageRequest: &v1.ServerReflectionRequest_ListServices{}}))
+
+	var res v1.ServerReflectionResponse
+	require.NoError(t, stream.RecvMsg(&res))
+	require.NotEmpty(t, res.GetListServicesResponse().GetService())
 }

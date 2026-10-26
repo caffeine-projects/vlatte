@@ -63,3 +63,33 @@ func Path(dir, name string) string {
 
 	return filepath.Clean(dir) + string(filepath.Separator) + name
 }
+
+// FromDir returns the path that leads from dir to the working directory, such as ../.., or "" when they are one.
+func FromDir(dir string) (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+
+	rel, err := filepath.Rel(abs, wd)
+	if err != nil || rel == "." {
+		return "", err
+	}
+
+	return rel, nil
+}
+
+// Relocate makes the body_file of obj, an object of a mock's description, which opens from the working directory when
+// it is relative, open from the directory toWD leads from to it, as FromDir returns: it puts toWD before it. The name
+// stays as it is otherwise, since it can be a template.
+func Relocate(obj any, toWD string) {
+	m, _ := obj.(map[string]any)
+	if name, ok := m["body_file"].(string); ok && toWD != "" && name != "" && !filepath.IsAbs(name) {
+		m["body_file"] = toWD + string(filepath.Separator) + name
+	}
+}

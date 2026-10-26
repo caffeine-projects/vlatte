@@ -357,7 +357,8 @@ func TestBase_DisableWaitsForARemock(t *testing.T) {
 	}()
 
 	// A Disable that doesn't wait returns at once. One that waits returns only after the Remock: the test lets it
-	// try, then lets the Remock end, and never fails for a Disable that is slow to start.
+	// try, then lets the Remock end. It never fails for a Disable that is slow to start, but then it can't tell: a
+	// goroutine waiting on a mutex has no event to wait on, nor is it durably blocked for synctest.
 	select {
 	case <-disabled:
 	case <-time.After(100 * time.Millisecond):

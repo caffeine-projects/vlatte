@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 	v1 "google.golang.org/grpc/reflection/grpc_reflection_v1"
+	v1alpha "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 )
@@ -20,14 +21,16 @@ var (
 	} = (*resolver)(nil)
 )
 
-// registerReflection registers the reflection service, which the server implements itself: the mocks don't serve it.
+// registerReflection registers the reflection service, v1 and v1alpha, which older tools ask, as reflection.Register
+// does. The server implements them itself: the mocks don't serve them.
 func (app *Server) registerReflection() {
-	v1.RegisterServerReflectionServer(app.server, reflection.NewServerV1(reflection.ServerOptions{
-		Services:           &reflectedServices{app: app},
-		DescriptorResolver: app.resolver,
-	}))
+	opts := reflection.ServerOptions{Services: &reflectedServices{app: app}, DescriptorResolver: app.resolver}
+
+	v1.RegisterServerReflectionServer(app.server, reflection.NewServerV1(opts))
+	v1alpha.RegisterServerReflectionServer(app.server, reflection.NewServer(opts))
 
 	app.internal[v1.ServerReflection_ServiceDesc.ServiceName] = true
+	app.internal[v1alpha.ServerReflection_ServiceDesc.ServiceName] = true
 }
 
 // reflectedServices lists the services the server serves to reflection: those registered on it, those of its

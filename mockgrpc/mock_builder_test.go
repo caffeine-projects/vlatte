@@ -118,13 +118,26 @@ func TestBuilder_AScenarioMovesOnAsItsMocksAnswer(t *testing.T) {
 
 func TestBuilder_AClientThatLeavesDuringTheDelayIsNotCounted(t *testing.T) {
 	m := serve(t)
-	scope := m.MustMock(Method("Greetings").Once().Delay(time.Hour).Reply(Message(&pb.HiRes{})))
+	waiting := make(chan struct{})
+	scope := m.MustMock(Method("Greetings").Once().
+		DelayFunc(func() time.Duration {
+			close(waiting)
+			return time.Hour
+		}).
+		Reply(Message(&pb.HiRes{})))
 
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	_, err := client(t, m).Greetings(ctx, &pb.HiReq{})
-	require.Equal(t, codes.DeadlineExceeded, status.Code(err))
+	called := make(chan error, 1)
+	go func() {
+		_, err := client(t, m).Greetings(ctx, &pb.HiReq{})
+		called <- err
+	}()
+
+	<-waiting
+	cancel()
+	require.Equal(t, codes.Canceled, status.Code(<-called))
 
 	// Close waits for the call: the server saw the client leave.
 	m.Close()
@@ -176,7 +189,7 @@ func TestBuilder_OnCompleteEventsRunTheirRegisteredListeners(t *testing.T) {
 		OnCompleteEvent(vlatte.EventConfig{Name: "record", Parameters: "mock"}).
 		Reply(Message(&pb.HiRes{})))
 
-	_, err := pb.NewTestServiceClient(dial(t, m)).Greetings(t.Context(), &pb.HiReq{})
+	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"global", "mock"}, []string{<-got, <-got})
 
@@ -203,7 +216,7 @@ func TestBuilder_FieldReadsTheRequestAsProtoJSON(t *testing.T) {
 		Field("tags[1]", match.Equal("b")).
 		Reply(Message(&pb.Rich{UserId: "matched"})))
 
-	res, err := pb.NewTestServiceClient(dial(t, m)).Inspect(t.Context(), &pb.Rich{
+	res, err := pb.NewTestServiceClient(m.MustDial()).Inspect(t.Context(), &pb.Rich{
 		UserId: "u1",
 		Count:  42,
 		Color:  pb.Color_COLOR_RED,

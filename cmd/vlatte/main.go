@@ -153,6 +153,9 @@ func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stder
 		return code
 	}
 
+	// Close releases what New opened, such as the journal, whether the server starts or not.
+	defer m.Close()
+
 	g, err := newGRPC(grpcArgs, wh)
 	if code, done := settingsFailed(cmd, err, stdout, stderr); done {
 		return code
@@ -175,8 +178,6 @@ func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stder
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-
-	defer m.Close()
 
 	// The gRPC server serves when its settings turn it on, after the HTTP one: its mock files can name the same
 	// webhooks.

@@ -6,8 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rs/zerolog"
-
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
 )
@@ -40,18 +38,6 @@ type (
 
 	field = config.Field[Config]
 )
-
-var _logLevels = []config.Choice{
-	{Name: "trace", Value: int64(zerolog.TraceLevel)},
-	{Name: "debug", Value: int64(zerolog.DebugLevel)},
-	{Name: "info", Value: int64(zerolog.InfoLevel)},
-	{Name: "warn", Value: int64(zerolog.WarnLevel)},
-	{Name: "error", Value: int64(zerolog.ErrorLevel)},
-	{Name: "fatal", Value: int64(zerolog.FatalLevel)},
-	{Name: "panic", Value: int64(zerolog.PanicLevel)},
-	{Name: "none", Value: int64(zerolog.NoLevel)},
-	{Name: "disabled", Value: int64(zerolog.Disabled)},
-}
 
 // _schema declares every setting of a gRPC mock server: the grpc section, and config, which names the file.
 var _schema = sync.OnceValue(func() *config.Schema[Config] {
@@ -127,27 +113,33 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			},
 		},
 		field{
-			Key: "grpc.log.level", Kind: config.Int, Choices: _logLevels, Default: "info", Usage: "Level of the gRPC server's log.",
+			Key: "grpc.log.level", Kind: config.Int, Choices: config.LogLevels, Default: "info", Usage: "Level of the gRPC server's log.",
 			Set: func(c *Config, v config.Value) error { c.LogLevel = int8(v.Int); return nil },
 		},
 		field{
 			Key: "grpc.admin", Kind: config.Bool, Usage: "Serve the admin API of the gRPC server, on an HTTP server of its own.",
-			Set: func(c *Config, v config.Value) error { toggle(&c.Admin, AdminConfig{}, v.Bool); return nil },
+			Set: func(c *Config, v config.Value) error { config.Toggle(&c.Admin, AdminConfig{}, v.Bool); return nil },
 		},
 		field{
 			Key: "grpc.admin.addr", Kind: config.String,
 			Usage: "Address the gRPC server's admin API listens on: host:port, :port or port. Empty picks a random local port.",
-			Set:   func(c *Config, v config.Value) error { section(&c.Admin, AdminConfig{}).Addr = v.Str; return nil },
+			Set: func(c *Config, v config.Value) error {
+				config.Section(&c.Admin, AdminConfig{}).Addr = v.Str
+				return nil
+			},
 		},
 		field{
 			Key: "grpc.journal", Kind: config.Bool, Usage: "Keep a journal of the calls the gRPC server serves, of every outcome.",
-			Set: func(c *Config, v config.Value) error { toggle(&c.Journal, defaultJournalConfig(), v.Bool); return nil },
+			Set: func(c *Config, v config.Value) error {
+				config.Toggle(&c.Journal, defaultJournalConfig(), v.Bool)
+				return nil
+			},
 		},
 		field{
 			Key: "grpc.journal.dir", Kind: config.String,
 			Usage: "Directory of the journal's files, kept across restarts. Empty keeps them in a temporary directory, removed when the server stops.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Journal, defaultJournalConfig()).Dir = v.Str
+				config.Section(&c.Journal, defaultJournalConfig()).Dir = v.Str
 				return nil
 			},
 		},
@@ -155,7 +147,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Key: "grpc.journal.max_entries", Kind: config.Int, Default: strconv.Itoa(journal.DefaultMaxEntries),
 			Usage: "How many calls the journal keeps, the newest. 0 keeps them all.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Journal, defaultJournalConfig()).MaxEntries = int(v.Int)
+				config.Section(&c.Journal, defaultJournalConfig()).MaxEntries = int(v.Int)
 				return nil
 			},
 		},
@@ -163,7 +155,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Key: "grpc.journal.max_body_size", Kind: config.Int, Default: strconv.Itoa(journal.DefaultMaxBodySize),
 			Usage: "How many bytes of a call's request, as JSON, the journal keeps. 0 keeps whole requests.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Journal, defaultJournalConfig()).MaxBodySize = v.Int
+				config.Section(&c.Journal, defaultJournalConfig()).MaxBodySize = v.Int
 				return nil
 			},
 		},
@@ -251,23 +243,4 @@ func loadConfigSources(conf *Config) error {
 // defaultJournalConfig is the journal a source turns on.
 func defaultJournalConfig() JournalConfig {
 	return JournalConfig{MaxEntries: journal.DefaultMaxEntries, MaxBodySize: journal.DefaultMaxBodySize}
-}
-
-// section returns the section *p points to, turning it on with def when it is off.
-func section[S any](p **S, def S) *S {
-	if *p == nil {
-		*p = &def
-	}
-
-	return *p
-}
-
-// toggle turns a section on, keeping its settings if it already is, or off.
-func toggle[S any](p **S, def S, on bool) {
-	if !on {
-		*p = nil
-		return
-	}
-
-	section(p, def)
 }

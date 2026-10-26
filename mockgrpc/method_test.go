@@ -4,8 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -68,7 +66,7 @@ func TestMethod_ANameOfMethodsOfOneTypeServesThemAll(t *testing.T) {
 	require.Equal(t, []string{pb.OtherService_Greetings_FullMethodName, pb.TestService_Greetings_FullMethodName},
 		scope.Mocks()[0].Methods())
 
-	conn := dial(t, m)
+	conn := m.MustDial()
 
 	_, err := pb.NewTestServiceClient(conn).Greetings(t.Context(), &pb.HiReq{})
 	require.NoError(t, err)
@@ -87,16 +85,5 @@ func methodServer(t *testing.T) (*Server, pb.TestServiceClient) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	return m, pb.NewTestServiceClient(dial(t, m))
-}
-
-// dial returns a client connection to m, which the test closes.
-func dial(t *testing.T, m *Server) *grpc.ClientConn {
-	t.Helper()
-
-	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = conn.Close() })
-
-	return conn
+	return m, pb.NewTestServiceClient(m.MustDial())
 }

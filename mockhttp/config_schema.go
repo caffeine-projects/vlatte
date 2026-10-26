@@ -13,8 +13,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rs/zerolog"
-
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
@@ -206,18 +204,6 @@ type (
 	recordField = config.Field[RecordConfig]
 )
 
-var _logLevels = []config.Choice{
-	{Name: "trace", Value: int64(zerolog.TraceLevel)},
-	{Name: "debug", Value: int64(zerolog.DebugLevel)},
-	{Name: "info", Value: int64(zerolog.InfoLevel)},
-	{Name: "warn", Value: int64(zerolog.WarnLevel)},
-	{Name: "error", Value: int64(zerolog.ErrorLevel)},
-	{Name: "fatal", Value: int64(zerolog.FatalLevel)},
-	{Name: "panic", Value: int64(zerolog.PanicLevel)},
-	{Name: "none", Value: int64(zerolog.NoLevel)},
-	{Name: "disabled", Value: int64(zerolog.Disabled)},
-}
-
 var _recordRepeats = []config.Choice{
 	{Name: "sequence", Value: int64(vlatte.RecordSequence)},
 	{Name: "first", Value: int64(vlatte.RecordFirst)},
@@ -310,7 +296,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Usage: "File of the CA certificates that client certificates must be signed by (mutual TLS). Requires tls.cert and tls.key.",
 		},
 		{
-			Key: "log.level", Kind: config.Int, Choices: _logLevels, Default: choiceName(_logLevels, int64(d.LogLevel)),
+			Key: "log.level", Kind: config.Int, Choices: config.LogLevels, Default: choiceName(config.LogLevels, int64(d.LogLevel)),
 			Usage: "Log level.",
 			Set:   func(c *Config, v config.Value) error { c.LogLevel = vlatte.LogLevel(v.Int); return nil },
 		},
@@ -329,13 +315,13 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		},
 		{
 			Key: "cors", Kind: config.Bool, Usage: "Enable CORS.",
-			Set: func(c *Config, v config.Value) error { toggle(&c.CORS, DefaultCORSConfig, v.Bool); return nil },
+			Set: func(c *Config, v config.Value) error { config.Toggle(&c.CORS, DefaultCORSConfig, v.Bool); return nil },
 		},
 		{
 			Key: "cors.allowed_origin", Kind: config.String, Default: DefaultCORSConfig.AllowedOrigin,
 			Usage: "Allowed origins, comma-separated. * allows any.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.CORS, DefaultCORSConfig).AllowedOrigin = v.Str
+				config.Section(&c.CORS, DefaultCORSConfig).AllowedOrigin = v.Str
 				return nil
 			},
 		},
@@ -343,7 +329,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Key: "cors.allow_credentials", Kind: config.Bool,
 			Usage: "Send Access-Control-Allow-Credentials: true. With *, the origin of the request is allowed.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.CORS, DefaultCORSConfig).AllowCredentials = v.Bool
+				config.Section(&c.CORS, DefaultCORSConfig).AllowCredentials = v.Bool
 				return nil
 			},
 		},
@@ -351,7 +337,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Key: "cors.allowed_methods", Kind: config.String, Default: DefaultCORSConfig.AllowedMethods,
 			Usage: "Allowed methods, comma-separated. * allows the method a preflight request asks for.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.CORS, DefaultCORSConfig).AllowedMethods = v.Str
+				config.Section(&c.CORS, DefaultCORSConfig).AllowedMethods = v.Str
 				return nil
 			},
 		},
@@ -359,14 +345,14 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Key: "cors.allowed_headers", Kind: config.String,
 			Usage: "Allowed headers, comma-separated. Empty or * allows the headers a preflight request asks for.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.CORS, DefaultCORSConfig).AllowedHeaders = v.Str
+				config.Section(&c.CORS, DefaultCORSConfig).AllowedHeaders = v.Str
 				return nil
 			},
 		},
 		{
 			Key: "cors.expose_headers", Kind: config.String, Usage: "Headers exposed to browsers, comma-separated.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.CORS, DefaultCORSConfig).ExposeHeaders = v.Str
+				config.Section(&c.CORS, DefaultCORSConfig).ExposeHeaders = v.Str
 				return nil
 			},
 		},
@@ -374,7 +360,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Key: "cors.max_age", Kind: config.Int, Default: strconv.Itoa(DefaultCORSConfig.MaxAge),
 			Usage: "Seconds browsers may cache a preflight response. -1 omits Access-Control-Max-Age.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.CORS, DefaultCORSConfig).MaxAge = int(v.Int)
+				config.Section(&c.CORS, DefaultCORSConfig).MaxAge = int(v.Int)
 				return checkMin(v.Int, -1)
 			},
 		},
@@ -382,18 +368,21 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Key: "cors.success_status_code", Kind: config.Int, Default: strconv.Itoa(DefaultCORSConfig.SuccessStatusCode),
 			Usage: "Status code of the response to a preflight request. Browsers fail a preflight answered with a status other than 2xx.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.CORS, DefaultCORSConfig).SuccessStatusCode = int(v.Int)
+				config.Section(&c.CORS, DefaultCORSConfig).SuccessStatusCode = int(v.Int)
 				return checkStatus(v.Int)
 			},
 		},
 		{
 			Key: "proxy", Kind: config.Bool, Usage: "Proxy the requests that match no mock to their original host.",
-			Set: func(c *Config, v config.Value) error { toggle(&c.Proxy, _defaultProxyConfig, v.Bool); return nil },
+			Set: func(c *Config, v config.Value) error {
+				config.Toggle(&c.Proxy, _defaultProxyConfig, v.Bool)
+				return nil
+			},
 		},
 		{
 			Key: "proxy.via", Kind: config.String, Usage: "URL of a proxy to send proxied requests through.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Proxy, _defaultProxyConfig).Via = v.Str
+				config.Section(&c.Proxy, _defaultProxyConfig).Via = v.Str
 				return checkProxyURL(v.Str)
 			},
 		},
@@ -401,14 +390,14 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Key: "proxy.timeout", Kind: config.Duration, Default: _defaultProxyConfig.Timeout.String(),
 			Usage: "How long to wait for the response headers of a proxied request: milliseconds or a Go duration (1.5s). 0 waits forever.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Proxy, _defaultProxyConfig).Timeout = v.Dur
+				config.Section(&c.Proxy, _defaultProxyConfig).Timeout = v.Dur
 				return nil
 			},
 		},
 		{
 			Key: "proxy.ssl_verify", Kind: config.Bool, Usage: "Verify the TLS certificates of proxied servers.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Proxy, _defaultProxyConfig).SSLVerify = v.Bool
+				config.Section(&c.Proxy, _defaultProxyConfig).SSLVerify = v.Bool
 				return nil
 			},
 		},
@@ -417,35 +406,38 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Usage: "Serve the HTTPS of CONNECT tunnels with certificates signed by proxy.ca_cert, so mocks answer it. " +
 				"Requires proxy.ca_cert and proxy.ca_key.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Proxy, _defaultProxyConfig).Intercept = v.Bool
+				config.Section(&c.Proxy, _defaultProxyConfig).Intercept = v.Bool
 				return nil
 			},
 		},
 		{
 			Key: "proxy.ca_cert", Kind: config.String,
 			Usage: "Certificate file of the CA that signs the certificates proxy.intercept serves, which clients must trust. Requires proxy.ca_key.",
-			Set:   func(c *Config, _ config.Value) error { section(&c.Proxy, _defaultProxyConfig); return nil },
+			Set:   func(c *Config, _ config.Value) error { config.Section(&c.Proxy, _defaultProxyConfig); return nil },
 		},
 		{
 			Key: "proxy.ca_key", Kind: config.String, Usage: "Private key file of proxy.ca_cert. Requires proxy.ca_cert.",
-			Set: func(c *Config, _ config.Value) error { section(&c.Proxy, _defaultProxyConfig); return nil },
+			Set: func(c *Config, _ config.Value) error { config.Section(&c.Proxy, _defaultProxyConfig); return nil },
 		},
 		{
 			Key: "record", Kind: config.Bool, Usage: "Record proxied requests and their responses as mock files, from start to close.",
-			Set: func(c *Config, v config.Value) error { toggle(&c.Record, *defaultRecordConfig(), v.Bool); return nil },
+			Set: func(c *Config, v config.Value) error {
+				config.Toggle(&c.Record, *defaultRecordConfig(), v.Bool)
+				return nil
+			},
 		},
 	}
 
 	after := []field{
 		{
 			Key: "admin", Kind: config.Bool, Usage: "Serve the admin API, on an HTTP server of its own.",
-			Set: func(c *Config, v config.Value) error { toggle(&c.Admin, AdminConfig{}, v.Bool); return nil },
+			Set: func(c *Config, v config.Value) error { config.Toggle(&c.Admin, AdminConfig{}, v.Bool); return nil },
 		},
 		{
 			Key: "admin.addr", Kind: config.String,
 			Usage: "Address the admin API listens on: host:port, :port or port. Empty picks a random local port.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Admin, AdminConfig{}).Addr = v.Str
+				config.Section(&c.Admin, AdminConfig{}).Addr = v.Str
 				return checkAddr(v.Str)
 			},
 		},
@@ -455,7 +447,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				"loads: keep it out of mock_files. Relative paths start at root_dir, and {workdir} at workdir. Empty keeps them " +
 				"in memory.",
 			Set: func(c *Config, v config.Value) error {
-				admin := section(&c.Admin, AdminConfig{})
+				admin := config.Section(&c.Admin, AdminConfig{})
 
 				admin.Store = nil
 				if v.Str != "" {
@@ -467,14 +459,17 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		},
 		{
 			Key: "journal", Kind: config.Bool, Usage: "Keep a journal of the requests the server serves, of every outcome.",
-			Set: func(c *Config, v config.Value) error { toggle(&c.Journal, defaultJournalConfig(), v.Bool); return nil },
+			Set: func(c *Config, v config.Value) error {
+				config.Toggle(&c.Journal, defaultJournalConfig(), v.Bool)
+				return nil
+			},
 		},
 		{
 			Key: "journal.dir", Kind: config.String,
 			Usage: "Directory of the journal's files, kept across restarts. Relative paths start at root_dir, and " +
 				"{workdir} at workdir. Empty keeps them in a temporary directory, removed when the server stops.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Journal, defaultJournalConfig()).Dir = v.Str
+				config.Section(&c.Journal, defaultJournalConfig()).Dir = v.Str
 				return nil
 			},
 		},
@@ -482,7 +477,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Key: "journal.max_entries", Kind: config.Int, Default: strconv.Itoa(journal.DefaultMaxEntries),
 			Usage: "How many requests the journal keeps, the newest. 0 keeps them all.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Journal, defaultJournalConfig()).MaxEntries = int(v.Int)
+				config.Section(&c.Journal, defaultJournalConfig()).MaxEntries = int(v.Int)
 				return checkMin(v.Int, 0)
 			},
 		},
@@ -490,7 +485,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Key: "journal.max_body_size", Kind: config.Int, Default: strconv.Itoa(journal.DefaultMaxBodySize),
 			Usage: "How many bytes of a request's body the journal keeps. 0 keeps whole bodies.",
 			Set: func(c *Config, v config.Value) error {
-				section(&c.Journal, defaultJournalConfig()).MaxBodySize = v.Int
+				config.Section(&c.Journal, defaultJournalConfig()).MaxBodySize = v.Int
 				return checkMin(v.Int, 0)
 			},
 		},
@@ -647,7 +642,9 @@ func inRecord(f recordField) field {
 
 	return field{
 		Key: "record." + f.Key, Short: f.Short, Usage: f.Usage, Default: f.Default, Kind: f.Kind, Choices: f.Choices,
-		Set: func(c *Config, v config.Value) error { return set(section(&c.Record, *defaultRecordConfig()), v) },
+		Set: func(c *Config, v config.Value) error {
+			return set(config.Section(&c.Record, *defaultRecordConfig()), v)
+		},
 	}
 }
 
@@ -736,7 +733,7 @@ func withProxyAll(fields ...field) []field {
 	proxyAll := []field{{
 		Key: "proxy_all", Kind: config.Bool,
 		Usage: "Proxy the requests no mock matches, but those the forward proxy sends on, to proxy_all.target.",
-		Set:   func(c *Config, v config.Value) error { toggle(&c.proxyAll, proxyDef{}, v.Bool); return nil },
+		Set:   func(c *Config, v config.Value) error { config.Toggle(&c.proxyAll, proxyDef{}, v.Bool); return nil },
 	}}
 
 	for _, pf := range _proxyFields {
@@ -746,7 +743,7 @@ func withProxyAll(fields ...field) []field {
 
 		proxyAll = append(proxyAll, field{
 			Key: "proxy_all." + pf.Key, Kind: pf.Kind, Usage: pf.Usage, Default: pf.Default,
-			Set: func(c *Config, v config.Value) error { return pf.Set(section(&c.proxyAll, proxyDef{}), v) },
+			Set: func(c *Config, v config.Value) error { return pf.Set(config.Section(&c.proxyAll, proxyDef{}), v) },
 		})
 	}
 
@@ -758,25 +755,6 @@ func withProxyAll(fields ...field) []field {
 	}
 
 	return slices.Insert(fields, after, proxyAll...)
-}
-
-// section returns *p, creating it as a copy of def when nil, so def itself is never modified.
-func section[S any](p **S, def S) *S {
-	if *p == nil {
-		*p = &def
-	}
-
-	return *p
-}
-
-// toggle turns a section on, keeping its settings if it already is, or off.
-func toggle[S any](p **S, def S, on bool) {
-	if !on {
-		*p = nil
-		return
-	}
-
-	section(p, def)
 }
 
 func choiceName(choices []config.Choice, value int64) string {

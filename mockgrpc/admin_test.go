@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -364,4 +365,30 @@ func TestAdmin_StreamsTheLogOfALoggerItBuilds(t *testing.T) {
 	given, _ := adminServer(t)
 	status, _ := call(t, http.MethodGet, given.AdminURL()+"/logs", "")
 	require.Equal(t, http.StatusNotImplemented, status)
+}
+
+func TestAdmin_SavesAMockWithABodyFile(t *testing.T) {
+	// A relative body_file of a mock the admin API added opens from the working directory: saved into a directory of
+	// its own, the file names it from there, and serves the same messages.
+	wd := t.TempDir()
+	t.Chdir(wd)
+	require.NoError(t, os.WriteFile("items.json", []byte(`[{"key": "a"}, {"key": "b"}]`), 0o600))
+
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin("").Logger(&logger).ConfigSources())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks",
+		`{"id": "items", "request": {"method": "List"}, "response": {"body_file": "items.json"}}`)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	status, body = call(t, http.MethodPost, m.AdminURL()+"/mocks/save", `{"dir": "saved/mocks"}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	saved, err := os.ReadFile(filepath.Join(wd, "saved", "mocks", "items.mock.yaml"))
+	require.NoError(t, err)
+	require.Contains(t, string(saved), filepath.Join("..", "..", "items.json"))
+
+	require.Equal(t, []string{"a", "b"}, listKeys(t, pb.NewTestServiceClient(m.MustDial())))
 }

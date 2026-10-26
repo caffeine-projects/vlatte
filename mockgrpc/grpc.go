@@ -94,6 +94,10 @@ func New(config ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: loading configuration sources: %w", err)
 	}
 
+	if conf.InMemory && conf.Listener != nil {
+		return nil, fmt.Errorf("server: %w", errInMemoryListener)
+	}
+
 	if conf.NoMatchCode == codes.OK {
 		conf.NoMatchCode = codes.NotFound
 	}

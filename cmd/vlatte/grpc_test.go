@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,4 +122,18 @@ response:
 	}, 10*time.Second, 100*time.Millisecond)
 
 	require.Equal(t, 0, stop(), "a stopped command exits cleanly")
+}
+
+func TestRun_InvalidGRPCSettingsLeaveNothingOpen(t *testing.T) {
+	// An invalid gRPC setting is a usage error. The HTTP server, built first, kept its journal open: the next run in
+	// the directory found it in use.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	var stderr bytes.Buffer
+	require.Equal(t, 2, run(t.Context(), []string{"--grpc-no-match-code=NOPE"}, io.Discard, &stderr))
+	require.Contains(t, stderr.String(), "grpc.no_match_code")
+
+	stop := start(t, "--addr", randomAddr(t))
+	require.Equal(t, 0, stop(), "the next run starts and stops")
 }

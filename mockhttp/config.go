@@ -17,6 +17,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
@@ -597,21 +598,21 @@ func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
 // Admin serves the admin API, on an HTTP server of its own at addr: host:port, :port or a port. Empty is a random
 // local port. Server.AdminURL returns where it listens.
 func (cb *ConfigBuilder) Admin(addr string) *ConfigBuilder {
-	section(&cb.conf.Admin, AdminConfig{}).Addr = addr
+	config.Section(&cb.conf.Admin, AdminConfig{}).Addr = addr
 	return cb
 }
 
 // Journal keeps a journal of the requests the server serves, in dir, across restarts: see JournalConfig. Empty keeps
 // it in a temporary directory, which Close removes, as a test wants: a named one keeps the requests of earlier runs.
 func (cb *ConfigBuilder) Journal(dir string) *ConfigBuilder {
-	section(&cb.conf.Journal, defaultJournalConfig()).Dir = dir
+	config.Section(&cb.conf.Journal, defaultJournalConfig()).Dir = dir
 	return cb
 }
 
 // AdminStore keeps the mocks the admin API adds in the persistent store store makes, such as FileStore(dir), and
 // serves the admin API: see AdminConfig.Store.
 func (cb *ConfigBuilder) AdminStore(store AdminStore) *ConfigBuilder {
-	section(&cb.conf.Admin, AdminConfig{}).Store = store
+	config.Section(&cb.conf.Admin, AdminConfig{}).Store = store
 	return cb
 }
 

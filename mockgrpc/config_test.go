@@ -62,12 +62,12 @@ func TestSetup_OptionsCompose(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	var header metadata.MD
-	_, err := pb.NewTestServiceClient(dial(t, m)).Greetings(t.Context(), &pb.HiReq{}, grpc.Header(&header))
+	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{}, grpc.Header(&header))
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 
 	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
 
-	_, err = pb.NewTestServiceClient(dial(t, m)).Greetings(t.Context(), &pb.HiReq{}, grpc.Header(&header))
+	_, err = pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{}, grpc.Header(&header))
 	require.NoError(t, err)
 	require.Empty(t, header.Get(vlatte.MatchedMockIDHeader), "no debug headers")
 }

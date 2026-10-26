@@ -187,7 +187,7 @@ func TestResponse_TemplateRendersEachCall(t *testing.T) {
 	m.MustMock(Method("Greetings").Reply(Template(
 		`{"message": "{{ .Parameters.Get "greeting" }} {{ .Request.Message.message }} of {{ index .Request.Header "x-team" 0 }}"}`)))
 
-	c := pb.NewTestServiceClient(dial(t, m))
+	c := pb.NewTestServiceClient(m.MustDial())
 	for _, name := range []string{"ann", "bob"} {
 		ctx := metadata.AppendToOutgoingContext(t.Context(), "x-team", "core")
 		res, err := c.Greetings(ctx, &pb.HiReq{Message: name})

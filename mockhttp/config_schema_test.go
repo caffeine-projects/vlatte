@@ -658,7 +658,7 @@ func TestConfigUsage_ListsEverySetting(t *testing.T) {
 
 	require.Contains(t, usage, "file key log.max_body_size")
 	require.Contains(t, usage, "Default: info.")
-	require.Equal(t, "42", choiceName(_logLevels, 42), "a default without a name shows its number")
+	require.Equal(t, "42", choiceName(config.LogLevels, 42), "a default without a name shows its number")
 }
 
 // writeTestCA writes the certificate and the key of a new CA, as PEM files in dir, and returns their paths.

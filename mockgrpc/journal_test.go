@@ -211,7 +211,7 @@ func TestJournal_APatternOfACutRequestCantTell(t *testing.T) {
 	t.Cleanup(m.Close)
 	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
 
-	_, err := pb.NewTestServiceClient(dial(t, m)).Greetings(t.Context(), &pb.HiReq{Message: "a long message, cut"})
+	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{Message: "a long message, cut"})
 	require.NoError(t, err)
 
 	_, err = m.CountRequests(t.Context(), journal.Query{}, Method("Greetings").Field("message", match.Equal("x")))

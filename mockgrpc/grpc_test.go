@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -602,29 +603,32 @@ func TestMocksOfBothKinds_EachCallFindsItsKind(t *testing.T) {
 }
 
 func TestClose_CutsTheCallsThatOutlastTheShutdownTimeout(t *testing.T) {
-	// Close waited for every call: a stream whose client never closed it held Close, and the test, forever.
-	m := MustNew(Setup().Silent().ShutdownTimeout(10 * time.Millisecond))
-	m.MustStart()
-	m.MustMock(Method("Chat").Reply(Bidi()))
+	// Close waited for every call: a stream whose client never closed it held Close, and the test, forever. The
+	// clock is synctest's, which moves once every goroutine waits: the timeout passes at once.
+	synctest.Test(t, func(t *testing.T) {
+		m := MustNew(Setup().Silent().InMemory().ShutdownTimeout(time.Minute))
+		m.MustStart()
+		m.MustMock(Method("Chat").Reply(Bidi()))
 
-	stream, err := pb.NewTestServiceClient(dial(t, m)).Chat(t.Context())
-	require.NoError(t, err)
-	require.NoError(t, stream.Send(&pb.HiReq{Message: "never closes"}))
+		// A client of its own: Close closes those of Dial first, which would end the stream.
+		conn, err := grpc.NewClient("passthrough:///bufconn",
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return m.memory.DialContext(ctx) }))
+		require.NoError(t, err)
 
-	closed := make(chan struct{})
-	go func() {
-		defer close(closed)
+		defer conn.Close()
+
+		stream, err := pb.NewTestServiceClient(conn).Chat(t.Context())
+		require.NoError(t, err)
+		require.NoError(t, stream.Send(&pb.HiReq{Message: "never closes"}))
+
+		start := time.Now()
 		m.Close()
-	}()
+		require.Equal(t, time.Minute, time.Since(start).Round(time.Second), "Close waited for the timeout, then cut the call")
 
-	select {
-	case <-closed:
-	case <-time.After(10 * time.Second):
-		t.Fatal("Close waited for the call past its timeout")
-	}
-
-	_, err = stream.Recv()
-	require.Equal(t, codes.Unavailable, status.Code(err), "the call was cut: %v", err)
+		_, err = stream.Recv()
+		require.Equal(t, codes.Unavailable, status.Code(err), "the call was cut: %v", err)
+	})
 }
 
 func TestNoMatchCode_IsTheCodeOfAnUnmatchedCall(t *testing.T) {
@@ -635,7 +639,7 @@ func TestNoMatchCode_IsTheCodeOfAnUnmatchedCall(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	var trailer metadata.MD
-	_, err := pb.NewTestServiceClient(dial(t, m)).Greetings(t.Context(), &pb.HiReq{}, grpc.Trailer(&trailer))
+	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{}, grpc.Trailer(&trailer))
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.FailureHeader))
 }
