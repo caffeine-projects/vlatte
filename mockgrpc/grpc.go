@@ -63,16 +63,17 @@ type Server struct {
 	// internal names the services the server implements itself, such as reflection: the mocks don't serve them.
 	internal map[string]bool
 
-	mu      sync.Mutex // orders Start and Close, which a Close overlapping a Start would otherwise outrun
-	addr    string
-	served  chan struct{}
-	started bool              // set by the first start: a server starts once
-	closed  bool              // set by Close: a closed server doesn't start again
-	memory  *bufconn.Listener // the listener of an in-memory server, once it started
-	creds   *serverCreds      // TLS once StartTLS started the server
-	tls     bool              // set by StartTLS
-	cert    *x509.Certificate // the certificate StartTLS serves, when it knows it
-	conns   []*grpc.ClientConn
+	mu        sync.Mutex // orders Start and Close, which a Close overlapping a Start would otherwise outrun
+	addr      string
+	served    chan struct{}
+	started   bool              // set by the first start: a server starts once
+	closed    bool              // set by Close: a closed server doesn't start again
+	memory    *bufconn.Listener // the listener of an in-memory server, once it started
+	creds     *serverCreds      // TLS once StartTLS started the server
+	ownsCreds bool              // the server handshakes with creds: not when ServerOptions set grpc.Creds
+	tls       bool              // set by StartTLS
+	cert      *x509.Certificate // the certificate StartTLS serves, when it knows it
+	conns     []*grpc.ClientConn
 }
 
 // New creates a new gRPC mock Server with the given configurations.
@@ -187,6 +188,7 @@ func New(config ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: %w", err)
 	}
 
+	app.ownsCreds = keepsCreds(srv, app.creds)
 	app.Base = vlatte.NewBase(app, store)
 	app.Verifier = journal.NewVerifier[*Mock, *Server](j, app)
 	app.storage = store

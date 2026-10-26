@@ -196,6 +196,25 @@ func TestStartTLS_CredentialsOfServerOptionsWin(t *testing.T) {
 
 	creds := credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})
 	m := startTLS(t, Setup().ServerOptions(grpc.Creds(creds)))
+	require.Nil(t, m.Certificate(), "the server serves the certificate of its options, not one StartTLS made")
+
+	conf := &tls.Config{RootCAs: certPool(t, _tlsCertFile), ServerName: "localhost", MinVersion: tls.VersionTLS12}
+	got, code := greetWith(t, dialTLS(t, m, conf), "hello")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "hi", got)
+}
+
+func TestStartTLS_IgnoresItsCertificatesWhenServerOptionsSetCredentials(t *testing.T) {
+	// The server serves the credentials of its options: a certificate of TLSCertificates it never serves failed the
+	// start, and closed the server.
+	cert, err := tls.LoadX509KeyPair(_tlsCertFile, _tlsKeyFile)
+	require.NoError(t, err)
+
+	creds := credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})
+	m := startTLS(t, Setup().
+		TLSCertificates([]tls.Certificate{{Certificate: [][]byte{[]byte("not DER")}}}).
+		ServerOptions(grpc.Creds(creds)))
+	require.Nil(t, m.Certificate())
 
 	conf := &tls.Config{RootCAs: certPool(t, _tlsCertFile), ServerName: "localhost", MinVersion: tls.VersionTLS12}
 	got, code := greetWith(t, dialTLS(t, m, conf), "hello")

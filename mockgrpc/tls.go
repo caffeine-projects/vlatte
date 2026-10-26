@@ -9,8 +9,10 @@ import (
 	"crypto/x509/pkix"
 	"fmt"
 	"net"
+	"reflect"
 	"time"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
 
@@ -25,8 +27,10 @@ type serverCreds struct {
 
 // StartTLS starts the mock server as Start does, serving TLS: Config.TLSConfig, or the certificates of
 // Config.TLSCertificates, requiring a client certificate when Config.TLSClientCAs is set. Without either, it serves
-// a self-signed certificate for localhost, 127.0.0.1 and ::1, valid for a day: see Certificate. Credentials that
-// ServerOptions set with grpc.Creds win over these. Dial trusts the certificate the server serves.
+// a self-signed certificate for localhost, 127.0.0.1 and ::1, valid for a day: see Certificate. Dial trusts the
+// certificate the server serves. Credentials that ServerOptions set with grpc.Creds win over all of these: the server
+// serves them as Start does, Certificate returns nil, and Dial dials as it does after Start, so pass it
+// grpc.WithTransportCredentials.
 func (app *Server) StartTLS() error {
 	return app.start("StartTLS", true)
 }
@@ -39,8 +43,8 @@ func (app *Server) MustStartTLS() {
 }
 
 // Certificate returns the certificate the server serves since StartTLS, for clients to trust, as
-// [crypto/x509.CertPool.AddCert] does. It returns nil before StartTLS, after Start, and for a Config.TLSConfig without
-// certificates, such as one with GetCertificate.
+// [crypto/x509.CertPool.AddCert] does. It returns nil before StartTLS, after Start, for a Config.TLSConfig without
+// certificates, such as one with GetCertificate, and for a server whose ServerOptions set grpc.Creds.
 func (app *Server) Certificate() *x509.Certificate {
 	app.mu.Lock()
 	defer app.mu.Unlock()
@@ -50,6 +54,11 @@ func (app *Server) Certificate() *x509.Certificate {
 
 // serveTLS sets the server's credentials to TLS, before it serves.
 func (app *Server) serveTLS() error {
+	// The server serves the credentials of its options: what StartTLS would set, it never serves.
+	if !app.ownsCreds {
+		return nil
+	}
+
 	conf := app.config.TLSConfig
 	if conf == nil {
 		certs := app.config.TLSCertificates
@@ -85,8 +94,8 @@ func (app *Server) serveTLS() error {
 }
 
 // clientTLS returns the TLS configuration of a client that trusts the certificate the server serves, under the first
-// host name it has, or its first IP address, whatever address the client dials, such as that of an in-memory server. Without a certificate it
-// trusts the system's CAs.
+// host name it has, or its first IP address, whatever address the client dials, such as that of an in-memory server.
+// Without a certificate it trusts the system's CAs.
 func (app *Server) clientTLS() *tls.Config {
 	conf := &tls.Config{MinVersion: tls.VersionTLS12}
 	if app.cert == nil {
@@ -104,6 +113,15 @@ func (app *Server) clientTLS() *tls.Config {
 	}
 
 	return conf
+}
+
+// keepsCreds reports whether srv handshakes with creds, the credentials New gave it first: grpc keeps the last
+// credentials of its options, and has no API that returns them, so this reads its field. A grpc that renames the field
+// counts as keeping creds, as it does unless ServerOptions set grpc.Creds.
+func keepsCreds(srv *grpc.Server, creds *serverCreds) bool {
+	kept := reflect.ValueOf(srv).Elem().FieldByName("opts").FieldByName("creds")
+
+	return !kept.IsValid() || kept.Elem().Kind() == reflect.Pointer && kept.Elem().Pointer() == reflect.ValueOf(creds).Pointer()
 }
 
 // leafOf returns the leaf certificate of cert, parsing it when cert has none parsed.
