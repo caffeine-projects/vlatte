@@ -457,7 +457,7 @@ A connection that switched protocols, such as a WebSocket, goes through the step
 
 ## Faults
 
-The `fault` package has steps that make a mock answer wrong, to test how a client handles a server that fails, or a bad network, as the toxics of [Toxiproxy](https://github.com/Shopify/toxiproxy#toxics) do. A step of either level acts on the body with `Step`, and on every byte of the answer, its head included, with `WireStep`:
+The `fault` package has steps that make a mock answer wrong, to test how a client handles a server that fails, or a bad network. A step of either level acts on the body with `Step`, and on every byte of the answer, its head included, with `WireStep`:
 
 | Step | Level | What the client gets |
 |---|---|---|

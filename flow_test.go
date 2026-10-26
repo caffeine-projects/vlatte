@@ -101,7 +101,7 @@ func TestFlow_LeavesTheStepsAlone(t *testing.T) {
 
 func passOn(_ context.Context, b []byte, next Stage) (int, error) { return next.Write(b) }
 
-// sliceStep passes its buffer on in parts of size bytes, as the slicer toxic does. It slices the buffer without
+// sliceStep passes its buffer on in parts of size bytes, as fault.Slicer does. It slices the buffer without
 // clipping the parts, as a hand-written step may.
 func sliceStep(size int) Step {
 	return StepFunc(func(_ context.Context, p []byte, next Stage) (int, error) {
@@ -128,7 +128,7 @@ func (s *partsSink) Flush() error { return nil }
 func (s *partsSink) Close() error { return nil }
 
 func TestFlow_AStepCanPassItsBufferInParts(t *testing.T) {
-	// The slicer and bandwidth toxics pass one buffer on in parts. The flow kept one position for all its calls, so
+	// fault.Slicer and fault.Bandwidth pass one buffer on in parts. The flow kept one position for all its calls, so
 	// once the first part reached the sink, the second got io.EOF.
 	sink := &partsSink{}
 
@@ -140,7 +140,7 @@ func TestFlow_AStepCanPassItsBufferInParts(t *testing.T) {
 }
 
 func TestFlow_AStepThatDropsEverythingDropsEveryPart(t *testing.T) {
-	// A step that passes nothing on, as the timeout toxic does, drops every part a step before it passes. The flow
+	// A step that passes nothing on, as fault.Timeout does, drops every part a step before it passes. The flow
 	// resumed a part from the step after the last one that ran, so the second part got past the drop.
 	drop := StepFunc(func(_ context.Context, p []byte, _ Stage) (int, error) { return len(p), nil })
 
@@ -187,7 +187,7 @@ func TestFlow_AStepThatFailsStopsTheFlow(t *testing.T) {
 type ctxKey struct{}
 
 func TestFlow_EveryStepGetsTheContextOfTheFlow(t *testing.T) {
-	// A step stops when the client leaves, as the timeout toxic must, through the context the flow was given.
+	// A step stops when the client leaves, as fault.Timeout must, through the context the flow was given.
 	ctx := context.WithValue(t.Context(), ctxKey{}, "request")
 
 	var got []any
@@ -533,7 +533,7 @@ func TestFlow_CloseEndsTheContext(t *testing.T) {
 	require.NotErrorIs(t, context.Cause(flow.Context()), ErrAbort)
 }
 
-// abortAfter aborts its flow d after the flow opened, with err, as a timeout toxic does on a stream with no data. It
+// abortAfter aborts its flow d after the flow opened, with err, as fault.Timeout does on a stream with no data. It
 // passes everything on.
 type abortAfter struct {
 	d   time.Duration
@@ -562,7 +562,7 @@ func TestFlow_AStageCanAbortTheFlowOnATimer(t *testing.T) {
 	})
 }
 
-// shiftStep passes every write on d after it came, from a goroutine of its stage, as a latency toxic does: the writer
+// shiftStep passes every write on d after it came, from a goroutine of its stage, as fault.Latency does: the writer
 // goes on meanwhile, so the whole stream is shifted by d, not slowed down.
 type shiftStep struct{ d time.Duration }
 

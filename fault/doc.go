@@ -9,10 +9,10 @@
 // [ChunkedDribbleDelay] changes when the body arrives, not what it is: it goes with
 // [github.com/caffeine-projects/vlatte/mockhttp.Builder.Step], over any protocol.
 //
-// Those that act as a bad network does, as the toxics of Toxiproxy do, go with either: [Latency], [Bandwidth],
-// [Slicer], [SlowClose], [Timeout], [LimitData] and [ConnectionResetByPeerAfter]. With Step they act on the body;
-// with WireStep, on every byte of the answer, its head included. A reset with Step over HTTP/2 cuts the stream, as
-// HTTP/2 has no connection of its own to reset.
+// Those that act as a bad network does go with either: [Latency], [Bandwidth], [Slicer], [SlowClose], [Timeout],
+// [LimitData] and [ConnectionResetByPeerAfter]. With Step they act on the body; with WireStep, on every byte of the
+// answer, its head included. A reset with Step over HTTP/2 cuts the stream, as HTTP/2 has no connection of its own to
+// reset.
 //
 //	m.MustMock(mockhttp.Getf("/report").Step(fault.Bandwidth(fault.Bandwidth3G)).Reply(mockhttp.OK().BodyFile("report.csv")))
 //
