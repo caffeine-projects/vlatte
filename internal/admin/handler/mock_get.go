@@ -43,3 +43,11 @@ func (m *storeMocks) pick(ctx context.Context, id string) (vlatte.Mock, error) {
 func notFound(id string) *problemError {
 	return &problemError{status: http.StatusNotFound, code: _codeMockNotFound, detail: fmt.Sprintf("no mock has the id %q", id)}
 }
+
+// describeFailed is the problem of the mock of id, whose description failed to encode with err.
+func describeFailed(id string, err error) *problemError {
+	return &problemError{
+		status: http.StatusInternalServerError, code: _codeDescribeFailed,
+		detail: fmt.Sprintf("the mock %q can't be described: %v", id, err),
+	}
+}

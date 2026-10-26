@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json/jsontext"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -18,5 +19,17 @@ func addGetMockTool(s *mcp.Server, ops *Operations) {
 		Annotations: _readOnly,
 	}
 
-	addTool(s, tool, func(ctx context.Context, in mockID) (any, error) { return ops.GetMock(ctx, in.ID) })
+	addTool(s, tool, func(ctx context.Context, in mockID) (any, error) {
+		desc, err := ops.GetMock(ctx, in.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		body, err := encode(desc, _formatJSON)
+		if err != nil {
+			return nil, describeFailed(in.ID, err)
+		}
+
+		return jsontext.Value(body), nil
+	})
 }

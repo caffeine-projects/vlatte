@@ -103,30 +103,36 @@ func addTool[In any](s *mcp.Server, tool *mcp.Tool, run func(ctx context.Context
 	mcp.AddTool(s, tool, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
 		out, err := run(ctx, in)
 		if err != nil {
-			return toolResult(Problem(err, tool.Name), true), nil, nil
+			return problemResult(err, tool.Name), nil, nil
 		}
 
 		if out == nil {
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: _mcpDone}}}, nil, nil
 		}
 
-		return toolResult(out, false), nil, nil
+		body, ok := out.(jsontext.Value)
+		if !ok {
+			if body, err = encode(out, _formatJSON); err != nil {
+				return problemResult(err, tool.Name), nil, nil
+			}
+		}
+
+		return toolResult(body, false), nil, nil
 	})
 }
 
-// toolResult is the result of a tool that returns v, a JSON document or a value with json tags, or fails with v, a
-// problem document, when failed.
-func toolResult(v any, failed bool) *mcp.CallToolResult {
-	body, ok := v.(jsontext.Value)
-	if !ok {
-		b, err := encode(v, _formatJSON)
-		if err != nil {
-			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}, IsError: true}
-		}
-
-		body = b
+// problemResult is the result of the tool name that failed with err: its problem document.
+func problemResult(err error, name string) *mcp.CallToolResult {
+	body, encodeErr := encode(Problem(err, name), _formatJSON)
+	if encodeErr != nil {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}, IsError: true}
 	}
 
+	return toolResult(body, true)
+}
+
+// toolResult is the result of a tool that returns body, a JSON document, or fails with it, a problem document.
+func toolResult(body jsontext.Value, failed bool) *mcp.CallToolResult {
 	return &mcp.CallToolResult{
 		Content:           []mcp.Content{&mcp.TextContent{Text: string(body)}},
 		StructuredContent: body,
@@ -155,9 +161,5 @@ func moduleVersion() string {
 
 // document encodes v, an object of a tool's input, as the JSON document the operation takes.
 func document(v any) ([]byte, error) {
-	if v == nil {
-		return nil, nil
-	}
-
 	return encode(v, _formatJSON)
 }
