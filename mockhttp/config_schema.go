@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -762,15 +761,7 @@ func choiceName(choices []config.Choice, value int64) string {
 
 // checkAddr accepts the addresses the server can listen on: empty, a port, or host:port.
 func checkAddr(addr string) error {
-	if addr == "" {
-		return nil
-	}
-
-	if _, err := strconv.Atoi(addr); err == nil {
-		return nil
-	}
-
-	if _, _, err := net.SplitHostPort(addr); err != nil {
+	if !httpx.ListenAddr(addr) {
 		return errors.New("expected host:port, :port or a port number")
 	}
 

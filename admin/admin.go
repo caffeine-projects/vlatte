@@ -15,20 +15,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"strconv"
 	"sync"
 
 	adminserver "github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 )
 
 var _ adminapi.API = (*Admin)(nil)
 
-// ErrServing is the error of an Admin given to a second mock server: it serves one.
-var ErrServing = errors.New("admin: the admin API serves a mock server already")
-
 var (
+	// ErrServing is the error of an Admin given to a second mock server: it serves one.
+	ErrServing = errors.New("admin: the admin API serves a mock server already")
+
 	errNotServing = errors.New("admin: the admin API serves no mock server yet: create one with it first")
 	errNoMCP      = errors.New("admin: MCP is off: create the admin API with the MCP option")
 )
@@ -80,8 +79,8 @@ func MustNew(options ...Option) *Admin {
 	return a
 }
 
-// Serve returns the admin API of the mock server of caps. A mock server calls it as it is created; a second call
-// fails with ErrServing.
+// Serve returns the admin API of the mock server of caps. Only mock servers call it, as they are created: code passes
+// the Admin to the ConfigBuilder.Admin of mockhttp or mockgrpc. A second call fails with ErrServing.
 func (a *Admin) Serve(caps adminapi.Capabilities) (adminapi.Server, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -121,15 +120,7 @@ func (a *Admin) ServeMCP(ctx context.Context, in io.Reader, out io.Writer) error
 }
 
 func checkAddr(addr string) error {
-	if addr == "" {
-		return nil
-	}
-
-	if _, err := strconv.Atoi(addr); err == nil {
-		return nil
-	}
-
-	if _, _, err := net.SplitHostPort(addr); err != nil {
+	if !httpx.ListenAddr(addr) {
 		return fmt.Errorf("admin: address %q: expected host:port, :port or a port number", addr)
 	}
 
