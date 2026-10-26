@@ -5,11 +5,16 @@
 //	m := mockhttp.MustNew(mockhttp.Setup().Admin(admin.MustNew(admin.Addr("127.0.0.1:8081"))))
 //
 // The same works for gRPC with mockgrpc. An Admin serves one mock server.
+//
+// With [MCP], the admin API serves its operations to AI agents too, over the Model Context Protocol: a tool per
+// operation, at POST /mcp of the admin API, and over stdio with [Admin.ServeMCP].
 package admin
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"sync"
@@ -23,12 +28,17 @@ var _ adminapi.API = (*Admin)(nil)
 // ErrServing is the error of an Admin given to a second mock server: it serves one.
 var ErrServing = errors.New("admin: the admin API serves a mock server already")
 
+var (
+	errNotServing = errors.New("admin: the admin API serves no mock server yet: create one with it first")
+	errNoMCP      = errors.New("admin: MCP is off: create the admin API with the MCP option")
+)
+
 // Admin is the admin API a mock server opts into, with ConfigBuilder.Admin of mockhttp or mockgrpc.
 type Admin struct {
 	opts adminserver.Options
 
-	mu      sync.Mutex
-	serving bool
+	mu     sync.Mutex
+	server *adminserver.Server // nil until it serves a mock server
 }
 
 // Option configures an Admin.
@@ -38,6 +48,12 @@ type Option func(a *Admin)
 // port: the mock server's AdminURL returns where it listens.
 func Addr(addr string) Option {
 	return func(a *Admin) { a.opts.Addr = addr }
+}
+
+// MCP serves the admin operations over the Model Context Protocol too, for AI agents: Streamable HTTP at POST /mcp
+// of the admin API, without sessions, and stdio with [Admin.ServeMCP]. Off, POST /mcp answers 501.
+func MCP() Option {
+	return func(a *Admin) { a.opts.MCP = true }
 }
 
 // New creates an admin API. It fails on an address that is neither host:port, :port nor a port.
@@ -70,7 +86,7 @@ func (a *Admin) Serve(caps adminapi.Capabilities) (adminapi.Server, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if a.serving {
+	if a.server != nil {
 		return nil, ErrServing
 	}
 
@@ -79,9 +95,29 @@ func (a *Admin) Serve(caps adminapi.Capabilities) (adminapi.Server, error) {
 		return nil, err
 	}
 
-	a.serving = true
+	a.server = s
 
 	return s, nil
+}
+
+// ServeMCP serves the admin operations over MCP on in and out, newline-delimited JSON-RPC, as an agent that starts
+// the program talks to it over its stdin and stdout, until in ends or ctx is done. Nothing else may write to out, such
+// as logs. It needs the MCP option, and the mock server created with the admin API; the mock server's Close waits for
+// the calls it serves.
+func (a *Admin) ServeMCP(ctx context.Context, in io.Reader, out io.Writer) error {
+	if !a.opts.MCP {
+		return errNoMCP
+	}
+
+	a.mu.Lock()
+	s := a.server
+	a.mu.Unlock()
+
+	if s == nil {
+		return errNotServing
+	}
+
+	return s.ServeMCP(ctx, in, out)
 }
 
 func checkAddr(addr string) error {

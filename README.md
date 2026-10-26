@@ -682,6 +682,7 @@ The `vlatte` command serves the admin API by default: `admin: false` (`--admin=f
 | `QUERY /requests` | Finds and counts the requests a query selects, in the body: see [Request journal](#request-journal). It uses the HTTP [`QUERY`](https://httpwg.org/http-extensions/draft-ietf-httpbis-safe-method-w-body.html) method, safe as `GET` is, with a body: `curl -X QUERY`. |
 | `GET /requests/{id}`, `DELETE /requests` | Gets a request by the id its answer's `VLatte-Request-Id` names, and clears the journal. |
 | `GET /schema` | The [JSON Schema](mockhttp/schema/http.schema.json) of mock files, for clients that write them. A gRPC server answers `501`. |
+| `POST /mcp` | The [MCP](#mcp) endpoint, when the admin API serves MCP; `501` otherwise. |
 | `GET /openapi`, `GET /docs` | The OpenAPI document, and a page that renders it. The page loads [Scalar](https://scalar.com) from a CDN, so it needs internet. |
 
 **Formats.** Bodies are JSON, or YAML with `Content-Type: application/yaml`. Answers follow `Accept`: JSON, or YAML when it is preferred. A relative `body_file` in a mock sent to the admin API opens from the server's working directory, as `GET /mocks/{id}` writes it.
@@ -710,6 +711,20 @@ The `vlatte` command serves the admin API by default: `admin: false` (`--admin=f
 A request net/http refuses before the admin API reads it, such as one with a malformed request line, is answered in plain text.
 
 **Safety.** The admin API has no authentication: anyone who reaches it can change the mocks, which can read files the server can, and read the requests of the journal. It listens on a local address unless told otherwise; with `VLATTE_DOCKER_HOST`, the CLI listens on every interface, as for the mocks, so publish its port only where the network is trusted. A browser's cross-site request that would change the server, or query its journal, is refused with `403`.
+
+### MCP
+
+With `admin.MCP()`, the admin API serves its operations to AI agents too, over the [Model Context Protocol](https://modelcontextprotocol.io): a tool per route, named after its operation, such as `add_mock`, `list_mocks` and `query_requests`. A tool takes what its route's body takes, as JSON, and answers what the route answers, or its problem document as the tool's error. An agent sees only the tools the server can do: a gRPC server has no `add_mock`, and one without a journal no `query_requests`.
+
+```go
+api := admin.MustNew(admin.MCP())
+m := mockhttp.MustNew(mockhttp.Setup().Admin(api).LogOutput(os.Stderr)) // over stdio, only MCP writes to stdout
+m.MustStart()
+fmt.Println(m.AdminURL() + "/mcp") // Streamable HTTP, for an agent that runs elsewhere
+err := api.ServeMCP(ctx, os.Stdin, os.Stdout) // stdio, for an agent that starts the program, until stdin ends
+```
+
+`POST /mcp` keeps no sessions and answers in JSON. It is as open as the rest of the admin API: see Safety above.
 
 ### Persistent admin mocks
 

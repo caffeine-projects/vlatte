@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -198,14 +199,88 @@ func serveWith(t *testing.T, store vlatte.Store[*fakeMock], b *fakeBuilder, caps
 		c = caps[0]
 	}
 
-	c.Mocks = adminapi.MocksOf[*fakeMock](store, b)
+	return start(t, admin.Options{}, store, b, c).URL()
+}
 
-	s, err := admin.New(admin.Options{}, c)
+// start starts an admin API of opts, of store, whose mocks requests build with b, with the capabilities of caps.
+func start(t *testing.T, opts admin.Options, store vlatte.Store[*fakeMock], b *fakeBuilder, caps adminapi.Capabilities) *admin.Server {
+	t.Helper()
+
+	caps.Mocks = adminapi.MocksOf[*fakeMock](store, b)
+
+	s, err := admin.New(opts, caps)
 	require.NoError(t, err)
 	require.NoError(t, s.Start())
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
 
-	return s.URL()
+	return s
+}
+
+// connect starts an admin API like serve, which serves MCP, and connects an MCP client to it, as an agent does, over
+// Streamable HTTP.
+func connect(t *testing.T, store vlatte.Store[*fakeMock], caps ...adminapi.Capabilities) *mcp.ClientSession {
+	t.Helper()
+
+	return connectWith(t, store, &fakeBuilder{}, caps...)
+}
+
+// connectWith is like connect, with mocks that b builds.
+func connectWith(t *testing.T, store vlatte.Store[*fakeMock], b *fakeBuilder, caps ...adminapi.Capabilities) *mcp.ClientSession {
+	t.Helper()
+
+	var c adminapi.Capabilities
+	if len(caps) > 0 {
+		c = caps[0]
+	}
+
+	s := start(t, admin.Options{MCP: true}, store, b, c)
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{Endpoint: s.URL() + "/mcp"}, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cs.Close() })
+
+	return cs
+}
+
+// call calls the tool name with args, which must succeed, and returns the text of its result.
+func call(t *testing.T, cs *mcp.ClientSession, name string, args any) string {
+	t.Helper()
+
+	text, failed := callTool(t, cs, name, args)
+	require.False(t, failed, text)
+
+	return text
+}
+
+// callFails calls the tool name with args, which must fail with the problem of status and code, as the OpenAPI
+// document documents it, and returns it.
+func callFails(t *testing.T, cs *mcp.ClientSession, name string, args any, status int, code string) map[string]any {
+	t.Helper()
+
+	text, failed := callTool(t, cs, name, args)
+	require.True(t, failed, text)
+
+	doc := conformsAs(t, text, "json", "Problem")
+	require.Equal(t, code, doc["code"], text)
+	require.Equal(t, int64(status), doc["status"])
+	require.Equal(t, name, doc["instance"], "the instance is the tool")
+
+	return doc
+}
+
+// callTool calls the tool name with args, and returns the text of its result, and whether it failed.
+func callTool(t *testing.T, cs *mcp.ClientSession, name string, args any) (string, bool) {
+	t.Helper()
+
+	res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: args})
+	require.NoError(t, err)
+	require.Len(t, res.Content, 1)
+
+	text, ok := res.Content[0].(*mcp.TextContent)
+	require.True(t, ok, "the result is text")
+
+	return text.Text, res.IsError
 }
 
 // newStore returns a store holding mocks.

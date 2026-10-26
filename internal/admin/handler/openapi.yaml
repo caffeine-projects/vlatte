@@ -598,6 +598,31 @@ paths:
         "404": { $ref: "#/components/responses/RequestNotFound" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "501": { $ref: "#/components/responses/NotSupported" }
+  /mcp:
+    post:
+      tags: [Server]
+      operationId: serveMCP
+      summary: Call the admin API over MCP
+      description: |
+        The Model Context Protocol endpoint, over Streamable HTTP, for AI agents: a tool per operation of this API, named
+        after it in snake_case, such as `add_mock`, with the operation's result in JSON. It keeps no sessions and answers
+        in JSON, never a stream. A mock server that doesn't serve MCP answers `501`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A JSON-RPC 2.0 message of the Model Context Protocol.
+      responses:
+        "200":
+          description: The JSON-RPC 2.0 response.
+          content:
+            application/json:
+              schema: { type: object }
+        "202":
+          description: The notification or response was accepted.
+        "501": { $ref: "#/components/responses/NotSupported" }
 components:
   requestBodies:
     Mock:

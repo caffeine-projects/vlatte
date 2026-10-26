@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -263,7 +265,8 @@ func TestServer_CloseEndsTheStreams(t *testing.T) {
 	require.NoError(t, s.Start())
 
 	for _, path := range []string{"/events", "/logs"} {
-		r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, s.URL()+path, nil)
+		// Not t.Context: it ends before the cleanups that read what is left of the streams.
+		r, err := http.NewRequestWithContext(context.Background(), http.MethodGet, s.URL()+path, nil)
 		require.NoError(t, err)
 
 		res, err := http.DefaultClient.Do(r)
@@ -311,4 +314,82 @@ func TestServer_StreamsItLacksAreNotSupported(t *testing.T) {
 		require.Equal(t, http.StatusNotImplemented, res.StatusCode, path)
 		require.Contains(t, string(body), `"detail": "`+detail+`"`, path)
 	}
+}
+
+// connectMCP serves s over stdio and connects a client to it, which the test closes.
+func connectMCP(t *testing.T, s *Server) *mcp.ClientSession {
+	t.Helper()
+
+	serverIn, clientOut := io.Pipe()
+	clientIn, serverOut := io.Pipe()
+
+	served := make(chan error, 1)
+	go func() {
+		served <- s.ServeMCP(context.Background(), serverIn, serverOut)
+		_ = serverOut.Close()
+	}()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := client.Connect(t.Context(), &mcp.IOTransport{Reader: clientIn, Writer: clientOut}, nil)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		_ = cs.Close()
+		<-served
+	})
+
+	return cs
+}
+
+func TestServer_CloseWaitsForTheMCPCallsItServes(t *testing.T) {
+	// A program that serves MCP over stdio starts no HTTP server, but its calls run operations all the same: Close
+	// waits for them, as it does for the requests it serves.
+	files := &blockingFiles{entered: make(chan struct{}), release: make(chan struct{})}
+	s := newServer(t, Options{MCP: true}, adminapi.Capabilities{Files: files})
+	cs := connectMCP(t, s)
+
+	release := sync.OnceFunc(func() { close(files.release) })
+	t.Cleanup(release) // a failed test ends the reload, so the client closes
+
+	reloaded := make(chan error, 1)
+	go func() {
+		_, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "reload_mocks"})
+		reloaded <- err
+	}()
+
+	<-files.entered
+
+	closed := make(chan struct{})
+	go func() {
+		_ = s.Close()
+		close(closed)
+	}()
+
+	select {
+	case <-closed:
+		t.Fatal("Close returned while a reload ran")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	release()
+	<-closed
+	require.NoError(t, <-reloaded, "the reload ended")
+}
+
+func TestServer_ServesMCPOnlyWhenAsked(t *testing.T) {
+	// MCP is a door to every operation: a server opens it only when its options say so.
+	s := newServer(t, Options{}, adminapi.Capabilities{})
+
+	err := s.ServeMCP(t.Context(), strings.NewReader(""), io.Discard)
+	require.EqualError(t, err, "admin: MCP is off: set Options.MCP")
+}
+
+func TestServer_StartsNoMCPCallOnceClosing(t *testing.T) {
+	// A call that comes once Close runs starts no operation, as a request does not.
+	s := newServer(t, Options{MCP: true}, adminapi.Capabilities{})
+	cs := connectMCP(t, s)
+	require.NoError(t, s.Close())
+
+	_, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "remove_all_mocks"})
+	require.ErrorContains(t, err, "admin: the admin API is closing")
 }
