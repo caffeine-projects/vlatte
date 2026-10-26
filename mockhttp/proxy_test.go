@@ -1287,7 +1287,7 @@ func TestProxy_AMockThatCantFollowASwitchDoesntAskForOne(t *testing.T) {
 }
 
 func TestProxy_ASwitchedConnectionPassesTheStepsOfTheMock(t *testing.T) {
-	// Toxics apply to a WebSocket as to any connection: what the target sends the client passes the steps of the mock,
+	// Faults apply to a WebSocket as to any connection: what the target sends the client passes the steps of the mock,
 	// and what the client sends the target its upstream steps.
 	echo := switchingTarget(t, "echo")
 
