@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -48,6 +49,7 @@ type Config struct {
 	TLSClientCAs          *x509.CertPool
 	Parameters            vlatte.KV
 	Logger                *zerolog.Logger
+	LogOutput             io.Writer
 	LogVerbosity          vlatte.LogVerbosity
 	LogLevel              vlatte.LogLevel
 	LogPretty             bool
@@ -131,6 +133,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.TLSClientCAs = c.TLSClientCAs
 	conf.Parameters = c.Parameters
 	conf.Logger = c.Logger
+	conf.LogOutput = c.LogOutput
 	conf.LogVerbosity = c.LogVerbosity
 	conf.LogLevel = c.LogLevel
 	conf.LogPretty = c.LogPretty
@@ -393,6 +396,14 @@ func (cb *ConfigBuilder) HandlerDecorator(fn func(handler http.Handler) http.Han
 // Logger sets a custom zerolog.Logger.
 func (cb *ConfigBuilder) Logger(l *zerolog.Logger) *ConfigBuilder {
 	cb.conf.Logger = l
+	return cb
+}
+
+// LogOutput sets where the server writes its logs, its debug output and the requests echo replies log, in place of
+// the standard output, such as for a program that keeps the standard output for something else. A Logger writes
+// where it was told to.
+func (cb *ConfigBuilder) LogOutput(w io.Writer) *ConfigBuilder {
+	cb.conf.LogOutput = w
 	return cb
 }
 

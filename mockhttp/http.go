@@ -205,10 +205,14 @@ func New(config ...Option) (*Server, error) {
 
 	var lifecycle mockHTTPLifecycle
 	if conf.Debug {
-		fd := os.Stdout.Fd()
-		colors := ansi(colorsEnabled(conf.Colors, isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)))
-		// On Windows consoles, colorable translates the escape codes.
-		lifecycle = newBuiltInDescriptiveMockHTTPLifecycle(app, colors, colorable.NewColorable(os.Stdout))
+		out, terminal := app.logOutput(), false
+		if f, ok := out.(*os.File); ok {
+			terminal = isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
+			// On Windows consoles, colorable translates the escape codes.
+			out = colorable.NewColorable(f)
+		}
+
+		lifecycle = newBuiltInDescriptiveMockHTTPLifecycle(app, ansi(colorsEnabled(conf.Colors, terminal)), out)
 	} else {
 		lifecycle = newBuiltInMockHTTPLifecycle(app)
 	}
@@ -746,7 +750,16 @@ func (app *Server) load() error {
 	return nil
 }
 
-// getLog returns the logger of conf, or builds one that writes to the standard output, and to tee unless it is nil.
+// logOutput returns where the server writes its logs and its debug output: Config.LogOutput, or the standard output.
+func (app *Server) logOutput() io.Writer {
+	if app != nil && app.config != nil && app.config.LogOutput != nil {
+		return app.config.LogOutput
+	}
+
+	return os.Stdout
+}
+
+// getLog returns the logger of conf, or builds one that writes to its log output, and to tee unless it is nil.
 func (app *Server) getLog(conf *Config, tee io.Writer) *zerolog.Logger {
 	if conf.Logger != nil {
 		return conf.Logger
@@ -754,9 +767,9 @@ func (app *Server) getLog(conf *Config, tee io.Writer) *zerolog.Logger {
 
 	var output io.Writer
 	if conf.LogPretty {
-		output = zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+		output = zerolog.ConsoleWriter{Out: app.logOutput(), TimeFormat: time.RFC3339}
 	} else {
-		output = os.Stdout
+		output = app.logOutput()
 	}
 
 	if tee != nil {
