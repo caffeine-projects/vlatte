@@ -35,6 +35,11 @@ type dateTimeMatcher struct {
 }
 
 func newDateTime(op dateTimeOp, expected time.Time, now bool, opts []DateTimeOption) *dateTimeMatcher {
+	// A description writes the expected time with its UTC offset, which is all it loads back with: a named zone keeps
+	// its offset at that time, so truncations agree before and after.
+	_, zoneOffset := expected.Zone()
+	expected = expected.In(time.FixedZone("", zoneOffset))
+
 	m := &dateTimeMatcher{op: op, Expected: expected, now: now}
 	for _, opt := range opts {
 		opt.applyDateTime(&m.opts)
@@ -74,7 +79,7 @@ func (m *dateTimeMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	}
 
 	if m.opts.truncateActual != 0 {
-		got = m.opts.truncateActual.truncate(got)
+		got = m.opts.truncateActual.truncate(got.In(want.Location()))
 	}
 
 	var passed bool

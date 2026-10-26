@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 // _registry builds the specs of the tests: the built-in matchers only.
@@ -306,7 +307,7 @@ func TestBuildMatcher_XPath(t *testing.T) {
 
 	namespaced, err := _registry.BuildMatcher([]any{
 		"xpath", "/s:outer/s:inner",
-		[]any{"equal", "<x:inner>1</x:inner>"},
+		[]any{"eqx", `<y:inner xmlns:y="urn:stuff">1</y:inner>`},
 		map[string]any{"namespaces": map[string]any{"s": "urn:stuff"}},
 	})
 	require.NoError(t, err)
@@ -339,5 +340,26 @@ func TestBuildMatcher_DateTime(t *testing.T) {
 		m, err := _registry.BuildMatcher(tc.spec)
 		require.NoError(t, err, "%v", tc.spec)
 		assert.Equal(t, tc.want, matches(t, m, tc.value), "%v on %s", tc.spec, tc.value)
+	}
+}
+
+func TestBuildMatcher_JSONSchemaObjectDescribesTheSameEachTime(t *testing.T) {
+	// The admin API's store writes a mock as its description: one mock file must write the same file each time.
+	schema := map[string]any{"type": "object", "required": []any{"a"}, "properties": map[string]any{"a": make(map[string]any), "b": make(map[string]any)}}
+
+	var first string
+
+	for i := range 20 {
+		m, err := _registry.BuildMatcher([]any{"jsonschema", schema})
+		require.NoError(t, err)
+
+		data, err := m.(descriptor.SelfDescriptive).Describe().MarshalJSON()
+		require.NoError(t, err)
+
+		if i == 0 {
+			first = string(data)
+		}
+
+		require.Equal(t, first, string(data))
 	}
 }

@@ -13,6 +13,8 @@ import (
 //
 // A value without a zone is read in [time.Local] when expected has one, as WireMock reads it; [LocalTime] compares
 // wall clocks instead. [ExpectedOffset], [TruncateExpected] and [TruncateActual] shift the dates and times compared.
+// Truncations take the days and hours of expected's UTC offset, at expected: a named zone, such as Europe/Madrid,
+// keeps its offset of that date, the one a description of the matcher writes.
 func Before(expected time.Time, opts ...DateTimeOption) vlatte.Matcher {
 	return newDateTime(_opBefore, expected, false, opts)
 }
@@ -40,7 +42,8 @@ func AfterNow(opts ...DateTimeOption) vlatte.Matcher {
 }
 
 // EqualDateTimeNow matches a date and time equal to the time it is matched at, in UTC. It is of use with truncations:
-// EqualDateTimeNow(TruncateExpected(FirstHourOfDay), TruncateActual(FirstHourOfDay)) matches any time today.
+// EqualDateTimeNow(TruncateExpected(FirstHourOfDay), TruncateActual(FirstHourOfDay)) matches any time of today, in
+// UTC.
 func EqualDateTimeNow(opts ...DateTimeOption) vlatte.Matcher {
 	return newDateTime(_opEqual, time.Time{}, true, opts)
 }
@@ -188,8 +191,9 @@ type truncateActual Truncation
 
 func (t truncateActual) applyDateTime(o *dateTimeOptions) { o.truncateActual = Truncation(t) }
 
-// TruncateActual truncates the date and time matched, as WireMock's truncateActual does: with
-// EqualDateTime(march, TruncateActual(FirstDayOfMonth)), any time in March matches, march being March 1, 00:00.
+// TruncateActual truncates the date and time matched, in the zone of the expected one, as WireMock's truncateActual
+// does: with EqualDateTime(march, TruncateActual(FirstDayOfMonth)), any time in March matches, march being March 1,
+// 00:00, and March being the month in march's zone.
 func TruncateActual(t Truncation) DateTimeOption { return truncateActual(t) }
 
 type truncateLast struct{}
@@ -206,7 +210,8 @@ type actualFormat string
 func (f actualFormat) applyDateTime(o *dateTimeOptions) { o.actualFormat = string(f) }
 
 // ActualFormat reads text values in layout, a Go time layout, such as "02/01/2006", rather than in the formats read
-// by default. A value read with a layout that writes no zone has none.
+// by default. A value read with a layout that writes no zone has none. Prefer a numeric offset, such as -0700, to a
+// zone abbreviation, MST: Go reads an abbreviation it doesn't know as UTC.
 func ActualFormat(layout string) DateTimeOption { return actualFormat(layout) }
 
 type localTime struct{}

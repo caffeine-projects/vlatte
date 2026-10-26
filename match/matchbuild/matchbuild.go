@@ -1,7 +1,7 @@
 // Package matchbuild builds matchers from the matcher specs of mock files: a list whose first item names the
 // matcher and whose other items are its arguments, such as ["contains", "x"] or ["jsonpath", "$.a", ["gt", 1]].
-// Arguments are checked when a spec is built, so a mock file with a bad spec doesn't load, and nothing a spec
-// builds fails on a request.
+// Arguments are checked when a spec is built, so a mock file with a bad spec doesn't load, and no built-in matcher a
+// spec builds fails on a request: only a custom one can, as its [BuildFunc] makes it.
 //
 // A [Registry] builds specs: the built-in matchers, and the custom ones it was given with [WithMatcher].
 // Each server reads its mock files with a registry of its own, or one several servers share.
@@ -483,7 +483,7 @@ func (s spec) jsonSchema() (vlatte.Matcher, error) {
 
 	schema, isText := s.args[0].(string)
 	if !isText {
-		data, err := json.Marshal(s.args[0])
+		data, err := json.Marshal(s.args[0], json.Deterministic(true))
 		if err != nil {
 			return nil, fmt.Errorf("%s takes a JSON Schema: %w", s.name, err)
 		}

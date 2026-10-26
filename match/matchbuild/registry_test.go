@@ -147,9 +147,9 @@ func TestNew_RefusesNamesThatAreTakenOrEmpty(t *testing.T) {
 	)
 	require.ErrorIs(t, err, ErrNameTaken)
 	require.ErrorIs(t, err, ErrNameEmpty)
-	require.EqualError(t, err, `matchbuild: matcher "equal": matchbuild: matcher name is taken
-matchbuild: matcher "EQ": matchbuild: matcher name is taken
-matchbuild: matcher "Longer-Than": matchbuild: matcher name is taken
+	require.EqualError(t, err, `matchbuild: matcher name is taken: "equal"
+matchbuild: matcher name is taken: "EQ"
+matchbuild: matcher name is taken: "Longer-Than"
 matchbuild: matcher name is empty`)
 }
 
@@ -159,7 +159,7 @@ func TestNew_RefusesAMatcherWithoutABuildFunction(t *testing.T) {
 }
 
 func TestMustNew_PanicsOnABadName(t *testing.T) {
-	require.PanicsWithError(t, `matchbuild: matcher "equal": matchbuild: matcher name is taken`, func() {
+	require.PanicsWithError(t, `matchbuild: matcher name is taken: "equal"`, func() {
 		MustNew(WithMatcher("equal", longerThan))
 	})
 }

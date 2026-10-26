@@ -11,8 +11,8 @@ import (
 
 // XPath applies matcher to what expr, an XPath 1.0 expression, selects in an XML document: text, such as a request
 // body. matcher gets nil when expr selects nothing, the one result when it selects one, and a list of them when it
-// selects more, as [JSONPath] does: Some(m) matches when any of them matches. An element is given as its XML, so
-// [EqualXML] can compare it; an attribute or a text node, as its text; a number, a string or a bool that expr
+// selects more, as [JSONPath] does: Some(m) matches when any of them matches. An element is given as its XML, with the
+// namespace declarations its ancestors make, so [EqualXML] can compare it; an attribute or a text node, as its text; a number, a string or a bool that expr
 // computes, as it is.
 //
 // A name in expr selects elements whose name is written the same, prefix included, unless [XPathNamespace] binds its

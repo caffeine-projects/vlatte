@@ -1,6 +1,7 @@
 package match
 
 import (
+	"encoding/xml"
 	"fmt"
 	"strings"
 
@@ -81,10 +82,60 @@ func (m *xpathMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 // node as its text.
 func nodeValue(n xpath.NodeNavigator) any {
 	if nav, ok := n.(*xmlquery.NodeNavigator); ok && n.NodeType() == xpath.ElementNode {
-		return nav.Current().OutputXML(true)
+		return elementXML(nav.Current())
 	}
 
 	return n.Value()
+}
+
+// elementXML returns the XML of an element with the namespace declarations its ancestors make, the innermost of each
+// prefix, so its names mean in it what they mean in the document.
+func elementXML(n *xmlquery.Node) string {
+	out := n.OutputXML(true)
+
+	declared := make(map[string]bool)
+	for _, a := range n.Attr {
+		if prefix, ok := declaresPrefix(a); ok {
+			declared[prefix] = true
+		}
+	}
+
+	var decls strings.Builder
+
+	for ancestor := n.Parent; ancestor != nil; ancestor = ancestor.Parent {
+		for _, a := range ancestor.Attr {
+			prefix, ok := declaresPrefix(a)
+			if !ok || declared[prefix] {
+				continue
+			}
+
+			declared[prefix] = true
+
+			decls.WriteString(" " + qualified(a.Name) + `="`)
+			_ = xml.EscapeText(&decls, []byte(a.Value))
+			decls.WriteString(`"`)
+		}
+	}
+
+	// The declarations go after the element's name, which ends the start tag's first word.
+	end := strings.IndexAny(out, " \t\r\n/>")
+	if decls.Len() == 0 || end < 0 {
+		return out
+	}
+
+	return out[:end] + decls.String() + out[end:]
+}
+
+// declaresPrefix reports whether an attribute declares a namespace, and the prefix it binds: "" for the default one.
+func declaresPrefix(a xmlquery.Attr) (string, bool) {
+	switch {
+	case a.Name.Space == "" && a.Name.Local == "xmlns":
+		return "", true
+	case a.Name.Space == "xmlns":
+		return a.Name.Local, true
+	default:
+		return "", false
+	}
 }
 
 // Describe implements descriptor.SelfDescriptive.

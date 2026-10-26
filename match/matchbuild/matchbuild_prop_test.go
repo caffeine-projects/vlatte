@@ -140,8 +140,16 @@ func TestBuildMatcher_LoadsWhatMatchersDescribe(t *testing.T) {
 		spec, err := value.DecodeJSON(data)
 		require.NoError(t, err)
 
-		_, err = _registry.BuildMatcher(spec)
+		loaded, err := _registry.BuildMatcher(spec)
 		require.NoError(t, err, "%s", data)
+
+		// The same matcher loads back, options included: it describes itself the same.
+		loadedDesc, ok := descriptor.IsSelfDescriptive(loaded)
+		require.True(t, ok)
+
+		loadedData, err := loadedDesc.MarshalJSON()
+		require.NoError(t, err)
+		require.JSONEq(t, string(data), string(loadedData))
 	}
 }
 

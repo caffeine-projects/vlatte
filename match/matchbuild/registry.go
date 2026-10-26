@@ -86,7 +86,7 @@ func New(opts ...Option) (*Registry, error) {
 		case m.name == "":
 			errs = errors.Join(errs, ErrNameEmpty)
 		case isBuiltin || isCustom:
-			errs = errors.Join(errs, fmt.Errorf("matchbuild: matcher %q: %w", m.name, ErrNameTaken))
+			errs = errors.Join(errs, fmt.Errorf("%w: %q", ErrNameTaken, m.name))
 		case m.build == nil:
 			errs = errors.Join(errs, fmt.Errorf("matchbuild: matcher %q has no build function", m.name))
 		default:

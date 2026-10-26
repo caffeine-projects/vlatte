@@ -56,9 +56,15 @@ func TestDateTime_ComparesInstants(t *testing.T) {
 
 func TestDateTime_LocalAndZoned(t *testing.T) {
 	// As WireMock: a value without a zone is read in the system's zone when the expected one has a zone, and a local
-	// expected date and time compares wall clocks, whatever the value's zone.
-	noon := time.Date(2021, time.June, 1, 12, 0, 0, 0, time.Local)
-	require.True(t, dateMatches(t, EqualDateTime(noon), "2021-06-01T12:00:00"))
+	// expected date and time compares wall clocks, whatever the value's zone. The system's zone here isn't UTC, as it
+	// is on CI's machines, where reading the value as UTC would pass too.
+	system := time.Local
+	time.Local = time.FixedZone("system", 5*3600)
+	t.Cleanup(func() { time.Local = system })
+
+	noon := time.Date(2021, time.June, 1, 12, 0, 0, 0, time.UTC)
+	require.True(t, dateMatches(t, EqualDateTime(noon), "2021-06-01T17:00:00"))
+	require.False(t, dateMatches(t, EqualDateTime(noon), "2021-06-01T12:00:00"))
 
 	wall := time.Date(2021, time.June, 1, 12, 0, 0, 0, time.UTC)
 	require.True(t, dateMatches(t, EqualDateTime(wall, LocalTime()), "2021-06-01T12:00:00+05:00"))
@@ -166,7 +172,23 @@ func TestDateTime_NowIsTheTimeOfTheMatch(t *testing.T) {
 		today := EqualDateTimeNow(TruncateExpected(FirstHourOfDay), TruncateActual(FirstHourOfDay))
 		require.True(t, dateMatches(t, today, time.Now().UTC().Format(time.RFC3339)))
 		require.False(t, dateMatches(t, today, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339)))
+
+		// Today is a day of the expected zone, UTC: a value in another zone is truncated in that zone too.
+		require.True(t, dateMatches(t, today, time.Now().In(time.FixedZone("", 2*3600)).Format(time.RFC3339)))
 	})
+}
+
+func TestDateTime_TruncatesInTheOffsetOfTheExpectedTime(t *testing.T) {
+	// A description writes the expected time with its UTC offset, which is all a mock file loads back: a named zone
+	// truncates with its offset at the expected time, whatever the offset on the other side of a change to summer
+	// time, so a matcher built in Go and the one loaded from its description agree.
+	madrid, err := time.LoadLocation("Europe/Madrid")
+	require.NoError(t, err)
+
+	// March 30 is in summer time, +02:00; its first day of the month, March 1, is in winter time, +01:00.
+	m := Before(time.Date(2026, time.March, 30, 10, 0, 0, 0, madrid), TruncateExpected(FirstDayOfMonth))
+	require.True(t, dateMatches(t, m, "2026-02-28T21:59:00Z"))
+	require.False(t, dateMatches(t, m, "2026-02-28T22:30:00Z"), "midnight of March 1 at +02:00 is 22:00Z")
 }
 
 func TestDateTime_Describes(t *testing.T) {

@@ -83,8 +83,10 @@ func (m XMLNamespaceMode) String() string {
 	}
 }
 
-func (m XMLNamespaceMode) applyXML(o *xmlOptions) { o.namespaces = m }
+type xmlNamespaces XMLNamespaceMode
+
+func (m xmlNamespaces) applyXML(o *xmlOptions) { o.namespaces = XMLNamespaceMode(m) }
 
 // XMLNamespaces sets how [EqualXML] compares the names of elements and attributes, as WireMock's namespaceAwareness
 // does.
-func XMLNamespaces(mode XMLNamespaceMode) EqualXMLOption { return mode }
+func XMLNamespaces(mode XMLNamespaceMode) EqualXMLOption { return xmlNamespaces(mode) }

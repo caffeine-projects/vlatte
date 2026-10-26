@@ -55,8 +55,6 @@ func TestItemsMatch_ItemsThatAreMatchers(t *testing.T) {
 		{[]string{"1", "20"}, false},
 		{[]string{"1", "20", "x", "y"}, false},
 		{[]string{"1", "20", "30"}, false},
-		// "12" fits both Contain("2") and Not(Contain("3")), and "x" only the latter: pairing "12" with the latter
-		// first must not hide the pairing that works.
 		{[]string{"x", "1", "12"}, true},
 		// Not(Contain("3")) fits "1" and "2", but each is another matcher's own.
 		{[]string{"1", "2", "3"}, false},
@@ -67,6 +65,16 @@ func TestItemsMatch_ItemsThatAreMatchers(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, tc.expected, ok, "%v", tc.value)
 	}
+}
+
+func TestItemsMatch_PairsMatchersWithTheValuesLeft(t *testing.T) {
+	// "12" fits both matchers, and "x" only the first: pairing the first with "12", as a greedy pairing in order
+	// would, must not hide the pairing that works.
+	m := ItemsMatch([]vlatte.Matcher{Not(Contain("3")), Contain("2")})
+
+	ok, err := m.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), []string{"12", "x"}))
+	require.NoError(t, err)
+	require.True(t, ok)
 }
 
 func TestItemsMatch_MixesMatchersAndValues(t *testing.T) {

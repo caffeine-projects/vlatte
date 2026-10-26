@@ -42,7 +42,7 @@ func TestFormat_WritesWhatParseReads(t *testing.T) {
 	}
 }
 
-func TestHasZone(t *testing.T) {
+func TestHasZone_AnAbbreviationOrAnOffsetIsAZone(t *testing.T) {
 	for layout, want := range map[string]bool{
 		time.RFC3339: true, time.RFC1123: true, time.RFC822Z: true, "2006-01-02 -07": true,
 		"02/01/2006": false, time.Kitchen: false, "2006-01-02T15:04:05": false,
@@ -51,7 +51,7 @@ func TestHasZone(t *testing.T) {
 	}
 }
 
-func TestCutOffset(t *testing.T) {
+func TestCutOffset_OnlyASignedNumberAndAUnitAtTheEnd(t *testing.T) {
 	tests := []struct {
 		text string
 		base string

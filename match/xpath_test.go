@@ -55,9 +55,10 @@ func TestXPath_Namespaces(t *testing.T) {
 	const doc = `<s:outer xmlns:s="http://stuff.example.com" xmlns:m="http://more.example.com"><m:inner>111</m:inner></s:outer>`
 
 	// Names are compared as written, unless a prefix is bound; local-name() ignores the prefix.
-	require.True(t, xmlMatches(t, XPath("/s:outer/m:inner", Equal("<m:inner>111</m:inner>")), doc))
+	inner := EqualXML(`<m:inner xmlns:m="http://more.example.com">111</m:inner>`)
+	require.True(t, xmlMatches(t, XPath("/s:outer/m:inner", inner), doc))
 	require.False(t, xmlMatches(t, XPath("/outer/inner", Present()), doc))
-	require.True(t, xmlMatches(t, XPath("/*[local-name()='outer']/*[local-name()='inner']", Equal("<m:inner>111</m:inner>")), doc))
+	require.True(t, xmlMatches(t, XPath("/*[local-name()='outer']/*[local-name()='inner']", inner), doc))
 
 	m := XPath("/stuff:outer/more:inner[.=111]", Present(),
 		XPathNamespace("stuff", "http://stuff.example.com"), XPathNamespace("more", "http://more.example.com"))
@@ -110,4 +111,27 @@ func TestXPath_Describes(t *testing.T) {
 	data, err = XPath("/p:a", Present(), XPathNamespace("p", "urn:p")).(descriptor.SelfDescriptive).Describe().MarshalJSON()
 	require.NoError(t, err)
 	require.JSONEq(t, `["xpath", "/p:a", ["present"], {"namespaces": {"p": "urn:p"}}]`, string(data))
+}
+
+func TestXPath_AnElementKeepsTheNamespacesInScope(t *testing.T) {
+	// An element is given as its XML for EqualXML to compare: the namespaces its ancestors declare must come with it,
+	// or its names lose their namespace, or their prefix isn't bound and it isn't XML at all.
+	tests := []struct {
+		name string
+		doc  string
+		m    vlatte.Matcher
+	}{
+		{"a default namespace", `<order xmlns="urn:o"><id>7</id></order>`, XPath("/*/*", EqualXML(`<id xmlns="urn:o">7</id>`))},
+		{"a prefix", `<o:order xmlns:o="urn:o"><o:id>7</o:id></o:order>`, XPath("/o:order/o:id", EqualXML(`<x:id xmlns:x="urn:o">7</x:id>`))},
+		{
+			"the innermost declaration", `<o:order xmlns:o="urn:outer"><o:id xmlns:o="urn:o">7</o:id></o:order>`,
+			XPath("//*[local-name()='id']", EqualXML(`<o:id xmlns:o="urn:o">7</o:id>`)),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.True(t, xmlMatches(t, tc.m, tc.doc))
+		})
+	}
 }
