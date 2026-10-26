@@ -183,6 +183,7 @@ func TestBuild_RefusesASpecItCantBuild(t *testing.T) {
 			name: "a slicer delay of another type", spec: []any{"slicer", int64(64), int64(16), []any{}},
 			want: "fault: slicer takes the delay, whole milliseconds or a Go duration such as 1.5s, not a list",
 		},
+		{name: "a latency alone", spec: "latency", want: "fault: latency takes 1 or 2 arguments, not 0"},
 		{name: "a limit alone", spec: "limit_data", want: "fault: limit_data takes 1 argument, not 0"},
 		{name: "two rates", spec: []any{"bandwidth", int64(1), int64(2)}, want: "fault: bandwidth takes 1 argument, not 2"},
 		{name: "no rate", spec: []any{"bandwidth", int64(0)}, want: "fault: bandwidth needs a byte per second at least, not 0"},
