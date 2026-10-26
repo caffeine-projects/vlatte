@@ -129,6 +129,23 @@ func TestLatency_StopsWhenTheClientLeaves(t *testing.T) {
 	})
 }
 
+func TestLatency_StopsWhenTheClientLeavesAnIdleAnswer(t *testing.T) {
+	// A client that leaves while nothing is on its way ends the answer too: the end doesn't wait, and sends nothing.
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		sink := &timedSink{start: time.Now()}
+		flow := vlatte.NewFlow(ctx, sink, []vlatte.Step{fault.Latency(vlatte.Latency(time.Second))})
+
+		time.Sleep(time.Second)
+		cancel()
+		synctest.Wait()
+
+		require.ErrorIs(t, flow.Close(), context.Canceled)
+		require.Empty(t, sink.log)
+		require.Equal(t, time.Second, time.Since(sink.start))
+	})
+}
+
 func TestLatency_AClientThatWentAwayEndsIt(t *testing.T) {
 	// Once a write or flush fails to reach the client, what follows has nowhere to go: the writer learns it at its
 	// next call, and at the end.

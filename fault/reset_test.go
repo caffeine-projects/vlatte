@@ -39,9 +39,10 @@ func TestConnectionResetByPeerAfter_PassesTheAnswerOnThenResets(t *testing.T) {
 
 		_, err := flow.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 		require.NoError(t, err)
+		require.NoError(t, flow.Flush())
 
 		require.ErrorIs(t, flow.Close(), vlatte.ErrReset)
-		require.Equal(t, []string{"HTTP/1.1 200 OK\r\n\r\n at 0s", "flush at 0s"}, sink.log)
+		require.Equal(t, []string{"HTTP/1.1 200 OK\r\n\r\n at 0s", "flush at 0s", "flush at 0s"}, sink.log)
 		require.Equal(t, time.Second, time.Since(sink.start))
 
 		cause := context.Cause(flow.Context())

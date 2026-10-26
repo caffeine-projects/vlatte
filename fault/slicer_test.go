@@ -94,6 +94,18 @@ func TestSlicer_SendsEachWriteInSlices(t *testing.T) {
 	}
 }
 
+func TestSlicer_PassesFlushesOnAsTheyCome(t *testing.T) {
+	// A flush, such as of a head before its body, carries no bytes to slice: it isn't delayed.
+	synctest.Test(t, func(t *testing.T) {
+		sink := &timedSink{start: time.Now()}
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.Slicer(1, 0, time.Second)})
+
+		require.NoError(t, flow.Flush())
+		require.NoError(t, flow.Close())
+		require.Equal(t, []string{"flush at 0s", "close at 0s"}, sink.log)
+	})
+}
+
 func TestSlicer_SlicesOfVaryingSizesKeepTheBytes(t *testing.T) {
 	// Sizes vary at random within the variation, so a client meets cuts anywhere, but it reads the same answer.
 	sink := &sliceSink{}
