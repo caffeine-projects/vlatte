@@ -726,6 +726,12 @@ err := api.ServeMCP(ctx, os.Stdin, os.Stdout) // stdio, for an agent that starts
 
 `POST /mcp` keeps no sessions and answers in JSON. It is as open as the rest of the admin API: see Safety above.
 
+The `vlatte` command serves MCP at `POST /mcp` by default, and `vlatte mcp` serves it on stdin and stdout, for an agent that starts the command as its MCP server. `vlatte mcp` takes the server's flags, and writes its banner and logs to stderr. `mcp: false` (`--mcp=false`, `VLATTE_MCP=false`) turns MCP off. An agent's MCP settings start it as any command:
+
+```json
+{"mcpServers": {"vlatte": {"command": "vlatte", "args": ["mcp", "--mock-files=mocks/*.yaml"]}}}
+```
+
 ### Persistent admin mocks
 
 The mocks the admin API adds last as long as the server, unless a persistent store keeps them. Each change the admin API makes, adding, replacing, enabling, disabling or removing a mock, reaches the store at once, and the server serves what the store holds when it starts and on each reload, so a change made to the store directly takes effect then too. The mocks of mock files and code never reach it, and a mock file's mock wins over a mock of the store with its id.
