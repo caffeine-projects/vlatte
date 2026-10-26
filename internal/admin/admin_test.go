@@ -92,7 +92,8 @@ func TestServer_RoutesAreTheDocumentedOnes(t *testing.T) {
 
 	routes := make([]string, 0, len(_routes))
 	for _, route := range _routes {
-		routes = append(routes, route.pattern)
+		// GET /{$} is the root alone, which the document names /.
+		routes = append(routes, strings.TrimSuffix(route.pattern, "{$}"))
 	}
 
 	require.ElementsMatch(t, routes, documented)

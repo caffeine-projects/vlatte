@@ -205,7 +205,7 @@ func TestRun_HelpListsTheCommandsSettings(t *testing.T) {
 	var out bytes.Buffer
 	require.Equal(t, 0, run(context.Background(), []string{"--help"}, nil, &out, io.Discard))
 
-	for _, key := range []string{"admin", "admin.addr", "admin.dir", "grpc.admin", "grpc.admin.addr"} {
+	for _, key := range []string{"admin", "admin.addr", "admin.dir", "admin.docs_version", "grpc.admin", "grpc.admin.addr"} {
 		require.Equal(t, 1, strings.Count(out.String(), "file key "+key+"\n"), key)
 	}
 
@@ -726,6 +726,16 @@ func TestCLI_AdminSettings(t *testing.T) {
 		status, body := firstAnswer(t, "http://"+admin+"/health")
 		require.Equal(t, http.StatusOK, status)
 		require.Contains(t, body, `"kind": "http"`)
+	})
+
+	t.Run("a docs version", func(t *testing.T) {
+		// A newer Scalar than vlatte pins renders the documentation, at the root of the admin API.
+		admin := randomAddr(t)
+		start(t, "--addr", randomAddr(t), "--admin-addr", admin, "--admin-docs-version", "1.80.0", "--log-level", "disabled")
+
+		status, body := firstAnswer(t, "http://"+admin+"/")
+		require.Equal(t, http.StatusOK, status)
+		require.Contains(t, body, "@scalar/api-reference@1.80.0/")
 	})
 
 	t.Run("a key turns it on", func(t *testing.T) {

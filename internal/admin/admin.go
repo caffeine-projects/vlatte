@@ -40,8 +40,9 @@ var _routes = []struct {
 	lacking string
 }{
 	{pattern: "GET /health"},
-	{pattern: "GET /openapi"},
+	{pattern: "GET /{$}"},
 	{pattern: "GET /docs"},
+	{pattern: "GET /openapi"},
 	{pattern: "GET /schema", lacking: "describe its mock files"},
 	{pattern: "GET /mocks"},
 	{pattern: "POST /mocks", lacking: "build mocks from documents"},
@@ -133,6 +134,9 @@ type Options struct {
 
 	// MCP serves the admin operations over MCP too: Streamable HTTP at POST /mcp, and stdio with [Server.ServeMCP].
 	MCP bool
+
+	// DocsVersion is the version of Scalar the docs page loads. Empty is the version vlatte pins.
+	DocsVersion string
 }
 
 // New creates the admin API of the mock server of caps, which needs its Mocks.
@@ -153,9 +157,11 @@ func New(opts Options, caps adminapi.Capabilities) (*Server, error) {
 
 	ops := handler.NewOperations(caps)
 
+	docs := handler.Docs(opts.DocsVersion)
 	routes := map[string]http.Handler{
+		"GET /{$}":      docs,
+		"GET /docs":     docs,
 		"GET /openapi":  handler.OpenAPI(),
-		"GET /docs":     handler.Docs(),
 		"GET /recorder": handler.RecorderPage(),
 	}
 

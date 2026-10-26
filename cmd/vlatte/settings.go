@@ -13,10 +13,11 @@ import (
 // settings are the command's own settings, which it reads from the sources the mock server reads: the server
 // accepts and ignores them, as a library server must not serve an admin API settings ask for.
 type settings struct {
-	admin     bool
-	adminAddr string
-	adminDir  string
-	mcp       bool
+	admin       bool
+	adminAddr   string
+	adminDir    string
+	mcp         bool
+	docsVersion string // of both admin APIs
 
 	grpcAdmin     bool // the gRPC server's admin API, which serves when the gRPC server does
 	grpcAdminAddr string
@@ -55,6 +56,17 @@ func settingsSchema() *config.Schema[settings] {
 				"loads: keep it out of mock_files. Relative paths start at root_dir, and {workdir} at workdir. Empty keeps them " +
 				"in memory.",
 			Set: func(s *settings, v config.Value) error { s.admin, s.adminDir = true, v.Str; return nil },
+		},
+		config.Field[settings]{
+			Key: "admin.docs_version", Kind: config.String,
+			Usage: "Version of Scalar, such as 1.80.0, that the documentation page of the admin APIs, at / and /docs, " +
+				"loads instead of the one vlatte pins, which it checks against its hash. Empty is the pinned one.",
+			Set: func(s *settings, v config.Value) error {
+				s.admin, s.docsVersion = true, v.Str
+				_, err := admin.New(admin.DocsVersion(v.Str))
+
+				return err
+			},
 		},
 		config.Field[settings]{
 			Key: "mcp", Kind: config.Bool, Default: "true",
@@ -131,7 +143,7 @@ func (s settings) setupGRPC(cb *mockgrpc.ConfigBuilder) *mockgrpc.ConfigBuilder 
 
 // newAdmin returns an admin API on addr, which serves MCP too unless s turns it off.
 func (s settings) newAdmin(addr string) *admin.Admin {
-	options := []admin.Option{admin.Addr(addr)}
+	options := []admin.Option{admin.Addr(addr), admin.DocsVersion(s.docsVersion)}
 	if s.mcp {
 		options = append(options, admin.MCP())
 	}

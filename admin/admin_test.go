@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -27,6 +28,37 @@ func TestNew_RefusesAMalformedAddress(t *testing.T) {
 		_, err := admin.New(admin.Addr(addr))
 		require.NoError(t, err, addr)
 	}
+}
+
+func TestNew_RefusesAMalformedDocsVersion(t *testing.T) {
+	// The version goes into the documentation page: only a version of an npm package, checked in the user's code.
+	for _, version := range []string{"latest", "1.80", "v1.80.0", `1.80.0"><script>`} {
+		_, err := admin.New(admin.DocsVersion(version))
+		require.EqualError(t, err, fmt.Sprintf("admin: docs version %q: expected a version such as 1.80.0", version))
+	}
+
+	for _, version := range []string{"", "1.80.0", "2.0.0-beta.1"} {
+		_, err := admin.New(admin.DocsVersion(version))
+		require.NoError(t, err, version)
+	}
+}
+
+func TestAdmin_DocsLoadTheVersionItIsGiven(t *testing.T) {
+	// A user takes a newer Scalar before vlatte pins it: the page at the root loads it, unchecked by a hash it lacks.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(admin.MustNew(admin.DocsVersion("1.80.0"))))
+	require.NoError(t, m.Start())
+	t.Cleanup(m.Close)
+
+	res, err := http.Get(m.AdminURL() + "/")
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Contains(t, string(body), `src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.80.0/dist/browser/standalone.js"`)
+	require.NotContains(t, string(body), "integrity=")
 }
 
 func TestAdmin_ServesTheMockServerItIsGiven(t *testing.T) {

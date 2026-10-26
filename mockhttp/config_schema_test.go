@@ -685,7 +685,7 @@ func TestConfigUsage_LeavesOutTheCommandsSettings(t *testing.T) {
 	}
 
 	for _, f := range ConfigFlags() {
-		require.NotContains(t, []string{"admin", "admin-addr", "admin-dir", "mcp"}, f.Name)
+		require.NotContains(t, []string{"admin", "admin-addr", "admin-dir", "admin-docs-version", "mcp"}, f.Name)
 	}
 }
 
