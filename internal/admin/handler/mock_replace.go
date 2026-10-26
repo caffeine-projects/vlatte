@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 // ReplaceMock swaps the mock of id for the mock of doc, a mock file in format, in one step, so a request finds one or
@@ -13,7 +15,7 @@ func (o *Operations) ReplaceMock(ctx context.Context, id string, doc []byte, for
 	return o.mocks.replace(ctx, id, doc, format)
 }
 
-func (m *storeMocks[M]) replace(ctx context.Context, id string, doc []byte, format string) (MockSummary, error) {
+func (m *storeMocks) replace(ctx context.Context, id string, doc []byte, format string) (MockSummary, error) {
 	mock, err := m.buildMock(doc, format)
 	if err != nil {
 		return MockSummary{}, err
@@ -34,7 +36,7 @@ func (m *storeMocks[M]) replace(ctx context.Context, id string, doc []byte, form
 		return MockSummary{}, err
 	}
 
-	if err := m.store.Replace(ctx, []M{old}, mock); err != nil {
+	if err := m.mocks.Replace(ctx, []vlatte.Mock{old}, mock); err != nil {
 		closeMock(mock)
 		return MockSummary{}, storeError(id, err)
 	}

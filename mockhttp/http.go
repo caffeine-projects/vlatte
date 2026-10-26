@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -23,7 +24,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
@@ -33,6 +34,8 @@ import (
 )
 
 var _ vlatte.Flavor[*Mock, *Server] = (*Server)(nil)
+
+var errAdminStoreWithoutAdmin = errors.New("server: AdminStore needs an admin API: pass ConfigBuilder.Admin")
 
 // StatusNoMatch describes an HTTP response where no Mock was found.
 //
@@ -79,12 +82,12 @@ type Server struct {
 
 	data    map[string]any
 	logger  *zerolog.Logger
-	started atomic.Bool   // set by the first start: a server starts once
-	closed  atomic.Bool   // set by Close: a closed server doesn't start again
-	admin   *admin.Server // nil without Config.Admin
+	started atomic.Bool     // set by the first start: a server starts once
+	closed  atomic.Bool     // set by Close: a closed server doesn't start again
+	admin   adminapi.Server // nil without Config.Admin
 
-	// adminStore writes the changes of the admin API through to its persistent store; nil without AdminConfig.Store.
-	adminStore *admin.Store[*Mock]
+	// adminStore writes the changes of the admin API through to its persistent store; nil without Config.AdminStore.
+	adminStore *adminapi.Store[*Mock]
 
 	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
 	events *vlatte.EventRunner
@@ -202,10 +205,14 @@ func New(config ...Option) (*Server, error) {
 
 	var lifecycle mockHTTPLifecycle
 	if conf.Debug {
-		fd := os.Stdout.Fd()
-		colors := ansi(colorsEnabled(conf.Colors, isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)))
-		// On Windows consoles, colorable translates the escape codes.
-		lifecycle = newBuiltInDescriptiveMockHTTPLifecycle(app, colors, colorable.NewColorable(os.Stdout))
+		out, terminal := app.logOutput(), false
+		if f, ok := out.(*os.File); ok {
+			terminal = isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
+			// On Windows consoles, colorable translates the escape codes.
+			out = colorable.NewColorable(f)
+		}
+
+		lifecycle = newBuiltInDescriptiveMockHTTPLifecycle(app, ansi(colorsEnabled(conf.Colors, terminal)), out)
 	} else {
 		lifecycle = newBuiltInMockHTTPLifecycle(app)
 	}
@@ -276,36 +283,44 @@ func New(config ...Option) (*Server, error) {
 	app.webhooks = newWebhookTransport()
 
 	// The admin API changes mocks through a store of its own when they persist: the server's other mocks, of mock
-	// files and code, never reach the persistent store. The admin API's options have Mocks: it builds.
+	// files and code, never reach the persistent store.
+	if conf.AdminStore != nil && conf.Admin == nil {
+		return nil, errAdminStoreWithoutAdmin
+	}
+
 	if conf.Admin != nil {
 		adminMocks := repository
 
-		if conf.Admin.Store != nil {
-			durable, err := conf.Admin.Store(app)
+		if conf.AdminStore != nil {
+			durable, err := conf.AdminStore(app)
 			if err != nil {
 				return nil, fmt.Errorf("server: admin store: %w", err)
 			}
 
-			app.adminStore = admin.NewStore(repository, durable, app.logger)
+			app.adminStore = adminapi.NewStore(repository, durable, app.logger)
 			adminMocks = app.adminStore
 		}
 
-		options := []admin.Option{
-			admin.Addr(conf.Admin.Addr),
-			admin.Info(string(Kind), func() string { return app.URL() }),
-			admin.Logger(app.logger),
-			admin.Mocks(adminMocks, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
+		app.admin, err = conf.Admin.Serve(adminapi.Capabilities{
+			Kind:   string(Kind),
+			URL:    func() string { return app.URL() },
+			Logger: app.logger,
+			Mocks: adminapi.MocksOf(adminMocks, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
 				return buildAdminMock(app, content, format)
 			})),
-			admin.Files(adminFiles{app}),
-			admin.Recorder(adminRecorder{app}),
-			admin.Scenarios(app.scenarioStore),
-			admin.Events(events),
-			admin.Logs(logs),
-			admin.Journal(j, app.adminRequestPattern, app.matchers()),
+			Files:      adminFiles{app},
+			Recorder:   adminRecorder{app},
+			Scenarios:  app.scenarioStore,
+			Events:     events,
+			Logs:       logs,
+			Journal:    j,
+			Pattern:    app.adminRequestPattern,
+			Matchers:   app.matchers(),
+			MockSchema: _mockFileSchema,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("server: %w", err)
 		}
-
-		app.admin = admin.MustNew(options...)
 	}
 
 	server, err := factory.NewBackend(BackendConfig{App: app, Handler: handler})
@@ -735,7 +750,16 @@ func (app *Server) load() error {
 	return nil
 }
 
-// getLog returns the logger of conf, or builds one that writes to the standard output, and to tee unless it is nil.
+// logOutput returns where the server writes its logs and its debug output: Config.LogOutput, or the standard output.
+func (app *Server) logOutput() io.Writer {
+	if app != nil && app.config != nil && app.config.LogOutput != nil {
+		return app.config.LogOutput
+	}
+
+	return os.Stdout
+}
+
+// getLog returns the logger of conf, or builds one that writes to its log output, and to tee unless it is nil.
 func (app *Server) getLog(conf *Config, tee io.Writer) *zerolog.Logger {
 	if conf.Logger != nil {
 		return conf.Logger
@@ -743,9 +767,9 @@ func (app *Server) getLog(conf *Config, tee io.Writer) *zerolog.Logger {
 
 	var output io.Writer
 	if conf.LogPretty {
-		output = zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+		output = zerolog.ConsoleWriter{Out: app.logOutput(), TimeFormat: time.RFC3339}
 	} else {
-		output = os.Stdout
+		output = app.logOutput()
 	}
 
 	if tee != nil {

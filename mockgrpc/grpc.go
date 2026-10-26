@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"slices"
@@ -21,8 +20,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin"
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/journal"
 )
@@ -57,8 +55,8 @@ type Server struct {
 	resolver  *resolver
 	scenarios *mfeat.ScenarioStore
 	runner    *vlatte.EventRunner // runs the on_complete events of mocks
-	admin     *admin.Server       // nil without Config.Admin
-	events    *handler.Events     // the admin API's; nil without it
+	admin     adminapi.Server     // nil without Config.Admin
+	events    *adminapi.Events    // the admin API's; nil without it
 
 	loader *fileLoader // loads the mock files of Config.MockFiles
 
@@ -123,9 +121,9 @@ func New(config ...Option) (*Server, error) {
 	app.config = conf
 
 	// The admin API streams the log lines of a logger the server builds, not those of one it was given.
-	var logs *handler.Logs
+	var logs *adminapi.Logs
 	if conf.Admin != nil && conf.Logger == nil {
-		logs = handler.NewLogs()
+		logs = adminapi.NewLogs()
 	}
 
 	app.logger = newLogger(conf, logs)
@@ -205,22 +203,27 @@ func New(config ...Option) (*Server, error) {
 		app.register(conf.ServiceDesc, conf.Service)
 	}
 
-	// The admin API's options have Mocks: it builds.
 	if conf.Admin != nil {
-		app.events = handler.NewEvents()
-		app.admin = admin.MustNew(
-			admin.Addr(conf.Admin.Addr),
-			admin.Info(string(Kind), app.Addr),
-			admin.Logger(app.logger),
-			admin.Mocks[*Mock](store, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
+		app.events = adminapi.NewEvents()
+		api, err := conf.Admin.Serve(adminapi.Capabilities{
+			Kind:   string(Kind),
+			URL:    app.Addr,
+			Logger: app.logger,
+			Mocks: adminapi.MocksOf(store, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
 				return buildAdminMock(app, content, format)
 			})),
-			admin.Files(adminFiles{app}),
-			admin.Scenarios(app.scenarios),
-			admin.Events(app.events),
-			admin.Logs(logs),
-			admin.Journal(j, app.adminRequestPattern, nil),
-		)
+			Files:     adminFiles{app},
+			Scenarios: app.scenarios,
+			Events:    app.events,
+			Logs:      logs,
+			Journal:   j,
+			Pattern:   app.adminRequestPattern,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
+
+		app.admin = api
 	}
 
 	built = true
@@ -483,7 +486,7 @@ func (app *Server) publish(ctx context.Context, kind, target string, mock *Mock,
 		return
 	}
 
-	e := handler.Event{Type: kind, Time: time.Now(), Target: target, Status: int(code)}
+	e := adminapi.Event{Type: kind, Time: time.Now(), Target: target, Status: int(code)}
 	if mock != nil {
 		e.MockID = mock.ID()
 	}
@@ -525,16 +528,20 @@ func (app *Server) warnUnjournaled() {
 	}
 }
 
-// newLogger returns the logger of conf: its Logger, or one that writes to the standard output, and to logs when the
-// admin API streams them, at conf.LogLevel.
-func newLogger(conf *Config, logs *handler.Logs) *zerolog.Logger {
+// newLogger returns the logger of conf: its Logger, or one that writes to conf.LogOutput, the standard output by
+// default, and to logs when the admin API streams them, at conf.LogLevel.
+func newLogger(conf *Config, logs *adminapi.Logs) *zerolog.Logger {
 	if conf.Logger != nil {
 		return conf.Logger
 	}
 
-	var out io.Writer = os.Stdout
+	out := conf.LogOutput
+	if out == nil {
+		out = os.Stdout
+	}
+
 	if logs != nil {
-		out = zerolog.MultiLevelWriter(os.Stdout, logs)
+		out = zerolog.MultiLevelWriter(out, logs)
 	}
 
 	c := zerolog.New(out).Level(zerolog.Level(conf.LogLevel)).With().Timestamp()

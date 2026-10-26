@@ -7,14 +7,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 )
 
 func TestScenarios(t *testing.T) {
 	// A client reads where each scenario is, moves one to the state its test needs, and starts them all over.
 	store := mfeat.NewScenarioStore()
-	base := serve(t, newStore(t), admin.Scenarios(store))
+	base := serve(t, newStore(t), adminapi.Capabilities{Scenarios: store})
 
 	res, body := send(t, request{method: http.MethodPut, url: base + "/scenarios/" + url.PathEscape("Check out"), body: `{"state": "paid"}`})
 	require.Equal(t, http.StatusOK, res.StatusCode, body)
@@ -37,7 +37,7 @@ func TestScenarios(t *testing.T) {
 
 func TestScenarios_ANewStateIsRequired(t *testing.T) {
 	store := mfeat.NewScenarioStore()
-	base := serve(t, newStore(t), admin.Scenarios(store))
+	base := serve(t, newStore(t), adminapi.Capabilities{Scenarios: store})
 
 	for _, body := range []string{``, `{}`, `{"state": ""}`, `{"state": "x", "name": "y"}`} {
 		res, answer := send(t, request{method: http.MethodPut, url: base + "/scenarios/s", body: body})

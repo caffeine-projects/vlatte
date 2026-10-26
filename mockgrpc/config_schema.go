@@ -130,18 +130,10 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Key: "grpc.log.level", Kind: config.Int, Choices: config.LogLevels, Default: "info", Usage: "Level of the gRPC server's log.",
 			Set: func(c *Config, v config.Value) error { c.LogLevel = int8(v.Int); return nil },
 		},
-		field{
-			Key: "grpc.admin", Kind: config.Bool, Usage: "Serve the admin API of the gRPC server, on an HTTP server of its own.",
-			Set: func(c *Config, v config.Value) error { config.Toggle(&c.Admin, AdminConfig{}, v.Bool); return nil },
-		},
-		field{
-			Key: "grpc.admin.addr", Kind: config.String,
-			Usage: "Address the gRPC server's admin API listens on: host:port, :port or port. Empty picks a random local port.",
-			Set: func(c *Config, v config.Value) error {
-				config.Section(&c.Admin, AdminConfig{}).Addr = v.Str
-				return nil
-			},
-		},
+		// The vlatte command's settings, which it reads from the same sources: a server accepts them, and ignores
+		// them, so a config file it shares with the command loads.
+		field{Key: "grpc.admin", Kind: config.Bool, Hidden: true},
+		field{Key: "grpc.admin.addr", Kind: config.String, Hidden: true},
 		field{
 			Key: "grpc.journal", Kind: config.Bool, Usage: "Keep a journal of the calls the gRPC server serves, of every outcome.",
 			Set: func(c *Config, v config.Value) error {
@@ -245,11 +237,6 @@ func loadConfigSources(conf *Config) error {
 	}
 
 	// Sources change sections in place: copy them, so one shared with other servers is never changed.
-	if conf.Admin != nil {
-		admin := *conf.Admin
-		conf.Admin = &admin
-	}
-
 	if conf.Journal != nil {
 		j := *conf.Journal
 		conf.Journal = &j

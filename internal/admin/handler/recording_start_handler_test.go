@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
@@ -30,7 +30,7 @@ func TestRecording_Start(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := &fakeRecorder{}
-			url := serve(t, newStore(t), admin.Recorder(rec))
+			url := serve(t, newStore(t), adminapi.Capabilities{Recorder: rec})
 
 			res, body := send(t, request{method: http.MethodPost, url: url + "/recording", contentType: tt.contentType, body: tt.body})
 
@@ -69,7 +69,7 @@ func TestRecording_StartRefused(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			url := serve(t, newStore(t), admin.Recorder(&fakeRecorder{startErr: tt.err}))
+			url := serve(t, newStore(t), adminapi.Capabilities{Recorder: &fakeRecorder{startErr: tt.err}})
 
 			res, body := send(t, request{method: http.MethodPost, url: url + "/recording", body: `{"format": "xml"}`})
 

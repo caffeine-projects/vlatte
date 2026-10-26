@@ -1,14 +1,9 @@
 package handler
 
 import (
-	"context"
-
-	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
-
-var _ mocks = (*storeMocks[vlatte.Mock])(nil)
 
 // What a mock server lacks the capability to do, for the problem of an operation it can't do.
 const (
@@ -16,6 +11,7 @@ const (
 	_lackingRecorder  = "record"
 	_lackingScenarios = "keep scenarios"
 	_lackingJournal   = "keep a journal of requests"
+	_lackingSchema    = "describe its mock files"
 )
 
 // Operations are the admin operations of a mock server, apart from how a request reaches them: each route of the
@@ -23,50 +19,27 @@ const (
 // server without mock files, returns a not_supported problem, as its route answers 501. Bodies are documents, in JSON
 // or YAML, as the routes take them. [Problem] gives the problem document of an error.
 type Operations struct {
-	mocks     mocks
+	mocks     storeMocks
 	kind      string
 	url       func() string
-	files     Files
-	recorder  Recorder
-	scenarios Scenarios
-	journal   Journal
-	pattern   RequestPattern
+	files     adminapi.Files
+	recorder  adminapi.Recorder
+	scenarios adminapi.Scenarios
+	journal   adminapi.Journal
+	pattern   adminapi.RequestPattern
 	matchers  *matchbuild.Registry
+	schema    []byte
 }
 
-// Capabilities are what a mock server gives its admin operations besides its mocks. A nil one is one it lacks.
-type Capabilities struct {
-	// Kind is the kind of the mock server, such as http.
-	Kind string
-
-	// URL returns where the server serves its mocks: its URL, or its address for gRPC.
-	URL func() string
-
-	Files     Files
-	Recorder  Recorder
-	Scenarios Scenarios
-	Journal   Journal
-
-	// Pattern makes the filter of the request part of a mock of the server's protocol, for [Operations.QueryRequests].
-	// Nil, for a protocol that has none, takes no request part.
-	Pattern RequestPattern
-
-	// Matchers builds the matcher lists of a query of [Operations.QueryRequests], as it does the server's mock files.
-	// Nil builds the built-in matchers only.
-	Matchers *matchbuild.Registry
-}
-
-// NewOperations returns the admin operations of a mock server on the mocks of store, which build makes from
-// documents, and on caps. With a nil build, the server makes no mocks from documents: [Operations.AddMock],
-// [Operations.ValidateMock] and [Operations.ReplaceMock] need a server that does.
-func NewOperations[M vlatte.Mock](store vlatte.Store[M], build vlatte.MockBuilder[M], caps Capabilities) *Operations {
+// NewOperations returns the admin operations of the mock server of caps, which has its Mocks.
+func NewOperations(caps adminapi.Capabilities) *Operations {
 	matchers := caps.Matchers
 	if matchers == nil {
 		matchers = matchbuild.MustNew()
 	}
 
 	return &Operations{
-		mocks:     &storeMocks[M]{store: store, build: build},
+		mocks:     storeMocks{mocks: caps.Mocks},
 		kind:      caps.Kind,
 		url:       caps.URL,
 		files:     caps.Files,
@@ -75,24 +48,30 @@ func NewOperations[M vlatte.Mock](store vlatte.Store[M], build vlatte.MockBuilde
 		journal:   caps.Journal,
 		pattern:   caps.Pattern,
 		matchers:  matchers,
+		schema:    caps.MockSchema,
 	}
 }
 
-// mocks are the operations on the mocks of a server, whatever their type: storeMocks does them on a store of one.
-type mocks interface {
-	list(ctx context.Context) (MockList, error)
-	get(ctx context.Context, id string) (descriptor.Descriptor, error)
-	add(ctx context.Context, doc []byte, format string) (MockSummary, error)
-	validate(ctx context.Context, doc []byte, format string) (MockSummary, error)
-	replace(ctx context.Context, id string, doc []byte, format string) (MockSummary, error)
-	update(ctx context.Context, id string, doc []byte, format string) (MockSummary, error)
-	remove(ctx context.Context, id string) error
-	removeAll(ctx context.Context) error
-	reset(ctx context.Context, files Files, scenarios Scenarios, journal Journal) error
-}
+// Builds reports whether the server builds mocks from documents, for [Operations.AddMock], [Operations.ValidateMock]
+// and [Operations.ReplaceMock].
+func (o *Operations) Builds() bool { return o.mocks.mocks.Builds() }
 
-// storeMocks does the operations on the mocks of store, which build makes from documents.
-type storeMocks[M vlatte.Mock] struct {
-	store vlatte.Store[M]
-	build vlatte.MockBuilder[M]
+// HasFiles reports whether the server serves mock files, for [Operations.ReloadMocks] and [Operations.SaveMocks].
+func (o *Operations) HasFiles() bool { return o.files != nil }
+
+// Records reports whether the server records, for [Operations.StartRecording] and its siblings.
+func (o *Operations) Records() bool { return o.recorder != nil }
+
+// HasScenarios reports whether the server keeps scenarios, for [Operations.ListScenarios] and its siblings.
+func (o *Operations) HasScenarios() bool { return o.scenarios != nil }
+
+// HasMockSchema reports whether the server describes its mock files with a JSON Schema, for [Operations.MockSchema].
+func (o *Operations) HasMockSchema() bool { return o.schema != nil }
+
+// HasJournal reports whether the server keeps a journal of requests, for [Operations.ListRequests] and its siblings.
+func (o *Operations) HasJournal() bool { return o.journal != nil }
+
+// storeMocks does the operations on the mocks of a mock server.
+type storeMocks struct {
+	mocks adminapi.Mocks
 }

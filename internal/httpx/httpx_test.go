@@ -31,3 +31,14 @@ func TestIsToken(t *testing.T) {
 		require.False(t, IsToken(s), s)
 	}
 }
+
+func TestListenAddr_TakesWhatAServerListensOn(t *testing.T) {
+	// A port alone listens on every interface, as a server in a container needs; a host alone has no port to listen on.
+	for _, addr := range []string{"", "8081", ":8081", "127.0.0.1:8081", "[::1]:8081"} {
+		require.True(t, ListenAddr(addr), addr)
+	}
+
+	for _, addr := range []string{"localhost", "127.0.0.1", "http://localhost:8081"} {
+		require.False(t, ListenAddr(addr), addr)
+	}
+}

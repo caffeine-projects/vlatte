@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
@@ -68,7 +69,7 @@ func (o *Operations) SaveMocks(ctx context.Context, doc []byte, format string) (
 	paths, err := o.files.SaveMocks(ctx, settings.dir, settings.format)
 
 	switch {
-	case errors.Is(err, ErrNotDescribed):
+	case errors.Is(err, adminapi.ErrNotDescribed):
 		return SavedFiles{}, &problemError{
 			status: http.StatusInternalServerError, code: _codeDescribeFailed,
 			detail: "nothing was saved: " + err.Error(), problems: configProblems(err),

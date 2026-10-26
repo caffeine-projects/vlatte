@@ -2,9 +2,11 @@ package mockgrpc
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -15,6 +17,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
@@ -111,7 +114,7 @@ func TestSetup_FilesServeServicesWithoutGeneratedCode(t *testing.T) {
 
 func TestSetup_NameTagsTheLogLinesOfTheServer(t *testing.T) {
 	// Several servers log to the same output: each line names the server that wrote it.
-	m := MustNew(Setup().Name("orders").Admin("").LogLevel(vlatte.LogLevelWarn))
+	m := MustNew(Setup().Name("orders").Admin(admin.MustNew()).LogLevel(vlatte.LogLevelWarn))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -134,4 +137,36 @@ func TestSetup_NameTagsTheLogLinesOfTheServer(t *testing.T) {
 	}
 
 	t.Fatal("no log line of the call")
+}
+
+// syncBuffer is a buffer a server writes to while a test reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
+}
+
+func TestSetup_LogOutputTakesTheLogsOfTheLoggerItBuilds(t *testing.T) {
+	// A program that keeps the standard output for something else, as vlatte mcp keeps it for MCP, logs elsewhere.
+	var out syncBuffer
+	m := MustNew(Setup().LogOutput(&out).LogLevel(vlatte.LogLevelWarn))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{})
+	require.Equal(t, codes.NotFound, status.Code(err))
+	require.Contains(t, out.String(), "no mock matched the call")
 }

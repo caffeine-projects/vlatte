@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
@@ -48,6 +50,7 @@ type Config struct {
 	TLSClientCAs          *x509.CertPool
 	Parameters            vlatte.KV
 	Logger                *zerolog.Logger
+	LogOutput             io.Writer
 	LogVerbosity          vlatte.LogVerbosity
 	LogLevel              vlatte.LogLevel
 	LogPretty             bool
@@ -90,7 +93,8 @@ type Config struct {
 	Loaders                        []Loader
 	Proxy                          *ProxyConfig
 	Record                         *RecordConfig
-	Admin                          *AdminConfig
+	Admin                          AdminAPI
+	AdminStore                     AdminStore
 	Journal                        *JournalConfig
 	MockFileHandlers               []MockFileHandler
 	HeaderNamesToRedact            map[string]struct{}
@@ -130,6 +134,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.TLSClientCAs = c.TLSClientCAs
 	conf.Parameters = c.Parameters
 	conf.Logger = c.Logger
+	conf.LogOutput = c.LogOutput
 	conf.LogVerbosity = c.LogVerbosity
 	conf.LogLevel = c.LogLevel
 	conf.LogPretty = c.LogPretty
@@ -163,6 +168,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Proxy = c.Proxy
 	conf.Record = c.Record
 	conf.Admin = c.Admin
+	conf.AdminStore = c.AdminStore
 	conf.UseHTTPS = c.UseHTTPS
 	conf.WebhookTimeout = c.WebhookTimeout
 	conf.MockFileHandlers = c.MockFileHandlers
@@ -173,18 +179,10 @@ func (c *Config) Apply(conf *Config) error {
 	return nil
 }
 
-// AdminConfig configures the admin API of a server: a RESTful HTTP server of its own, apart from the mocks. A nil
-// *AdminConfig serves none.
-type AdminConfig struct {
-	// Addr is the address the admin API listens on: host:port, :port or a port. Empty is a random local port.
-	Addr string
-
-	// Store makes the persistent store of the mocks the admin API adds, such as FileStore(dir) or a database of yours:
-	// each change the admin API makes reaches it at once, and the server serves what it holds when it starts and on
-	// each Reload, so changes made to it directly take effect too. Nil keeps those mocks in memory, as long as the
-	// server runs.
-	Store AdminStore
-}
+// AdminAPI is an admin API the server opts into: a RESTful HTTP server of its own, apart from the mocks, that lists,
+// adds and changes them while the server runs. Make one with [github.com/caffeine-projects/vlatte/admin.New]. A nil
+// AdminAPI serves none.
+type AdminAPI = adminapi.API
 
 // JournalConfig configures the journal of a server: the requests its mocks get, of every outcome, which tests and the
 // admin API verify and search, while the server runs: Close closes it. The requests the server answers before its
@@ -402,6 +400,14 @@ func (cb *ConfigBuilder) Logger(l *zerolog.Logger) *ConfigBuilder {
 	return cb
 }
 
+// LogOutput sets where the server writes its logs, its debug output and the requests echo replies log, in place of
+// the standard output, such as for a program that keeps the standard output for something else. A Logger writes
+// where it was told to.
+func (cb *ConfigBuilder) LogOutput(w io.Writer) *ConfigBuilder {
+	cb.conf.LogOutput = w
+	return cb
+}
+
 func (cb *ConfigBuilder) Silent() *ConfigBuilder {
 	cb.conf.LogLevel = vlatte.LogLevelDisabled
 	return cb
@@ -608,10 +614,10 @@ func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
 	return cb
 }
 
-// Admin serves the admin API, on an HTTP server of its own at addr: host:port, :port or a port. Empty is a random
-// local port. Server.AdminURL returns where it listens.
-func (cb *ConfigBuilder) Admin(addr string) *ConfigBuilder {
-	config.Section(&cb.conf.Admin, AdminConfig{}).Addr = addr
+// Admin serves the admin API api, such as admin.MustNew(admin.Addr("127.0.0.1:8081")), on an HTTP server of its own.
+// Server.AdminURL returns where it listens.
+func (cb *ConfigBuilder) Admin(api AdminAPI) *ConfigBuilder {
+	cb.conf.Admin = api
 	return cb
 }
 
@@ -622,10 +628,12 @@ func (cb *ConfigBuilder) Journal(dir string) *ConfigBuilder {
 	return cb
 }
 
-// AdminStore keeps the mocks the admin API adds in the persistent store store makes, such as FileStore(dir), and
-// serves the admin API: see AdminConfig.Store.
+// AdminStore keeps the mocks the admin API adds in the persistent store store makes, such as FileStore(dir): each
+// change the admin API makes reaches it at once, and the server serves what it holds when it starts and on each
+// Reload, so changes made to it directly take effect too. Without one, those mocks stay in memory, as long as the
+// server runs. It needs an admin API: see Admin.
 func (cb *ConfigBuilder) AdminStore(store AdminStore) *ConfigBuilder {
-	config.Section(&cb.conf.Admin, AdminConfig{}).Store = store
+	cb.conf.AdminStore = store
 	return cb
 }
 

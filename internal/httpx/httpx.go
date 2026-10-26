@@ -3,6 +3,8 @@ package httpx
 
 import (
 	"context"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -36,4 +38,19 @@ func IsToken(s string) bool {
 	}
 
 	return true
+}
+
+// ListenAddr reports whether addr is an address a server can listen on: empty, a port, or host:port.
+func ListenAddr(addr string) bool {
+	if addr == "" {
+		return true
+	}
+
+	if _, err := strconv.Atoi(addr); err == nil {
+		return true
+	}
+
+	_, _, err := net.SplitHostPort(addr)
+
+	return err == nil
 }

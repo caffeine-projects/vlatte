@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net"
 	"slices"
 	"strconv"
 	"strings"
@@ -96,11 +95,6 @@ func loadConfigSources(conf *Config) error {
 	if conf.Record != nil {
 		record := *conf.Record
 		conf.Record = &record
-	}
-
-	if conf.Admin != nil {
-		admin := *conf.Admin
-		conf.Admin = &admin
 	}
 
 	if conf.Journal != nil {
@@ -384,34 +378,12 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 	}
 
 	after := []field{
-		{
-			Key: "admin", Kind: config.Bool, Usage: "Serve the admin API, on an HTTP server of its own.",
-			Set: func(c *Config, v config.Value) error { config.Toggle(&c.Admin, AdminConfig{}, v.Bool); return nil },
-		},
-		{
-			Key: "admin.addr", Kind: config.String,
-			Usage: "Address the admin API listens on: host:port, :port or port. Empty picks a random local port.",
-			Set: func(c *Config, v config.Value) error {
-				config.Section(&c.Admin, AdminConfig{}).Addr = v.Str
-				return checkAddr(v.Str)
-			},
-		},
-		{
-			Key: "admin.dir", Kind: config.String,
-			Usage: "Directory of the files that keep the mocks the admin API adds across restarts, which only the server " +
-				"loads: keep it out of mock_files. Relative paths start at root_dir, and {workdir} at workdir. Empty keeps them " +
-				"in memory.",
-			Set: func(c *Config, v config.Value) error {
-				admin := config.Section(&c.Admin, AdminConfig{})
-
-				admin.Store = nil
-				if v.Str != "" {
-					admin.Store = FileStore(v.Str)
-				}
-
-				return nil
-			},
-		},
+		// The vlatte command's settings, which it reads from the same sources: a server accepts them, and ignores
+		// them, so a config file it shares with the command loads.
+		{Key: "admin", Kind: config.Bool, Hidden: true},
+		{Key: "admin.addr", Kind: config.String, Hidden: true},
+		{Key: "admin.dir", Kind: config.String, Hidden: true},
+		{Key: "mcp", Kind: config.Bool, Hidden: true},
 		{
 			Key: "journal", Kind: config.Bool, Usage: "Keep a journal of the requests the server serves, of every outcome.",
 			Set: func(c *Config, v config.Value) error {
@@ -724,15 +696,7 @@ func choiceName(choices []config.Choice, value int64) string {
 
 // checkAddr accepts the addresses the server can listen on: empty, a port, or host:port.
 func checkAddr(addr string) error {
-	if addr == "" {
-		return nil
-	}
-
-	if _, err := strconv.Atoi(addr); err == nil {
-		return nil
-	}
-
-	if _, _, err := net.SplitHostPort(addr); err != nil {
+	if !httpx.ListenAddr(addr) {
 		return errors.New("expected host:port, :port or a port number")
 	}
 

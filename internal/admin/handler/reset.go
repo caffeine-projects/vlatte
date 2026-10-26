@@ -2,6 +2,9 @@ package handler
 
 import (
 	"context"
+
+	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 )
 
 // Reset removes the mocks the admin API added, loads the mocks of the server's sources again, its mock files and its
@@ -12,15 +15,15 @@ func (o *Operations) Reset(ctx context.Context) error {
 	return o.mocks.reset(ctx, o.files, o.scenarios, o.journal)
 }
 
-func (m *storeMocks[M]) reset(ctx context.Context, files Files, scenarios Scenarios, journal Journal) error {
-	mocks, err := m.store.PickAll(ctx)
+func (m *storeMocks) reset(ctx context.Context, files adminapi.Files, scenarios adminapi.Scenarios, journal adminapi.Journal) error {
+	mocks, err := m.mocks.PickAll(ctx)
 	if err != nil {
 		return err
 	}
 
 	added := make(map[any]struct{}, len(mocks))
 	for _, mock := range mocks {
-		if origin(mock) == Origin {
+		if origin(mock) == adminapi.Origin {
 			added[mock] = struct{}{}
 		}
 	}
@@ -34,12 +37,12 @@ func (m *storeMocks[M]) reset(ctx context.Context, files Files, scenarios Scenar
 	}
 
 	// The admin mocks the reload left are those no source holds.
-	mocks, err = m.store.PickAll(ctx)
+	mocks, err = m.mocks.PickAll(ctx)
 	if err != nil {
 		return err
 	}
 
-	var left []M
+	var left []vlatte.Mock
 	for _, mock := range mocks {
 		if _, ok := added[mock]; ok {
 			left = append(left, mock)
@@ -47,7 +50,7 @@ func (m *storeMocks[M]) reset(ctx context.Context, files Files, scenarios Scenar
 	}
 
 	if len(left) > 0 {
-		if err := m.store.Replace(ctx, left); err != nil {
+		if err := m.mocks.Replace(ctx, left); err != nil {
 			return err
 		}
 	}

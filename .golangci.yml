@@ -38,6 +38,21 @@ linters:
           deny:
             - pkg: github.com/spf13/viper
               desc: settings and mock files load through internal/config
+        admin:
+          files:
+            - "$all"
+            - "!**/admin/**"
+            - "!**/cmd/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/caffeine-projects/vlatte/admin$
+              desc: a mock server takes an admin API as adminapi.API, so basic usage links no admin server
+            - pkg: github.com/caffeine-projects/vlatte/internal/admin$
+              desc: a mock server takes an admin API as adminapi.API, so basic usage links no admin server
+            - pkg: github.com/caffeine-projects/vlatte/internal/admin/
+              desc: a mock server takes an admin API as adminapi.API, so basic usage links no admin server
+            - pkg: github.com/modelcontextprotocol/go-sdk
+              desc: only the admin API serves MCP, so basic usage links no MCP SDK
         templates:
           files:
             - "!**/go_template*.go"

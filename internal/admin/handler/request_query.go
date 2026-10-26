@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
@@ -120,7 +121,7 @@ func (o *Operations) QueryRequests(ctx context.Context, doc []byte, format strin
 
 // requestFilter makes the filter of the request part of a query, v, with pattern, the server's protocol's. A server
 // whose protocol has none takes no request part.
-func requestFilter(v config.Value, pattern RequestPattern) (journal.Filter, error) {
+func requestFilter(v config.Value, pattern adminapi.RequestPattern) (journal.Filter, error) {
 	if pattern == nil {
 		return nil, config.Invalid(v, "this mock server's protocol takes no request part", "select by the other keys")
 	}

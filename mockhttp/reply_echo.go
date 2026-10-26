@@ -3,7 +3,6 @@ package mockhttp
 import (
 	"context"
 	"io"
-	"os"
 
 	"github.com/caffeine-projects/vlatte/descriptor"
 )
@@ -34,13 +33,14 @@ func (e *EchoReply) Describe() descriptor.Descriptor {
 }
 
 // NewReplier implements ReplierFactory.
-func (e *EchoReply) NewReplier(*Server) (Replier, error) {
-	return &echoReplier{log: e.stdoutLog}, nil
+func (e *EchoReply) NewReplier(app *Server) (Replier, error) {
+	return &echoReplier{log: e.stdoutLog, out: app.logOutput()}, nil
 }
 
-// echoReplier writes the requests of one mock back, as they came.
+// echoReplier writes the requests of one mock back, as they came, and to out, the server's log output, when it logs.
 type echoReplier struct {
 	log bool
+	out io.Writer
 }
 
 // Reply implements Replier.
@@ -48,7 +48,7 @@ func (e *echoReplier) Reply(_ context.Context, input ReplyInput) (*Response, err
 	input.Writer.Header().Add(HeaderContentType, MIMETextPlainCharsetUTF8)
 
 	if e.log {
-		return nil, input.RequestValues.RawRequest.Write(io.MultiWriter(input.Writer, os.Stdout))
+		return nil, input.RequestValues.RawRequest.Write(io.MultiWriter(input.Writer, e.out))
 	}
 
 	return nil, input.RequestValues.RawRequest.Write(input.Writer)

@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,7 +151,7 @@ func TestRun_InvalidGRPCSettingsLeaveNothingOpen(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	var stderr bytes.Buffer
-	require.Equal(t, 2, run(t.Context(), []string{"--grpc-no-match-code=NOPE"}, io.Discard, &stderr))
+	require.Equal(t, 2, run(t.Context(), []string{"--grpc-no-match-code=NOPE"}, nil, io.Discard, &stderr))
 	require.Contains(t, stderr.String(), "grpc.no_match_code")
 
 	stop := start(t, "--addr", randomAddr(t))
@@ -166,7 +168,7 @@ func TestRun_AGRPCPortInUseFailsTheRun(t *testing.T) {
 	t.Cleanup(func() { _ = l.Close() })
 
 	var stderr bytes.Buffer
-	require.Equal(t, 1, run(t.Context(), []string{"--addr", randomAddr(t), "--grpc-addr", l.Addr().String()}, io.Discard, &stderr))
+	require.Equal(t, 1, run(t.Context(), []string{"--addr", randomAddr(t), "--grpc-addr", l.Addr().String()}, nil, io.Discard, &stderr))
 	require.Contains(t, stderr.String(), "address already in use")
 
 	stop := start(t, "--addr", randomAddr(t))
@@ -199,4 +201,37 @@ func TestCLI_ServesGRPCMocksOverTLS(t *testing.T) {
 	require.Equal(t, codes.Unavailable, status.Code(err))
 
 	require.Equal(t, 0, stop(), "a stopped command exits cleanly")
+}
+
+func TestRun_ServesTheGRPCAdminAPIItsSettingsSay(t *testing.T) {
+	// The gRPC server's admin API is the command's to serve, as the HTTP server's is: --grpc-admin-addr sets where,
+	// and --grpc-admin=false turns it off.
+	withoutDockerHost(t)
+
+	adminAddr := randomAddr(t)
+	start(t, "--addr", randomAddr(t), "--grpc-addr", randomAddr(t), "--grpc-admin-addr", adminAddr, "--log-level", "disabled")
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res, err := http.Get("http://" + adminAddr + "/health")
+		if !assert.NoError(c, err) {
+			return
+		}
+
+		body, _ := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+
+		assert.Equal(c, http.StatusOK, res.StatusCode)
+		assert.Contains(c, string(body), `"kind": "grpc"`)
+	}, 10*time.Second, 50*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	// Another run, beside the first, which holds the journal's directory: without a journal.
+	var stdout, stderr bytes.Buffer
+	require.Equal(t, 0, run(ctx, []string{
+		"--addr", randomAddr(t), "--grpc-addr", randomAddr(t), "--grpc-admin=false",
+		"--journal=false", "--log-level", "disabled",
+	}, nil, &stdout, &stderr), stderr.String())
+	require.Contains(t, stdout.String(), ", admin API: \n", "no admin API serves the gRPC server")
 }

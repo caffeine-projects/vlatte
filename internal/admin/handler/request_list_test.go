@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
@@ -13,7 +14,7 @@ func TestOperations_ListRequestsTakesAPageOfALimitItCanAnswer(t *testing.T) {
 	// A page holds whole bodies: a caller apart from GET /requests, which checks its parameter, can't ask for more
 	// than the most a page holds, nor for a negative count.
 	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
-	ops := handler.NewOperations(newStore(t), nil, handler.Capabilities{Journal: j})
+	ops := handler.NewOperations(adminapi.Capabilities{Mocks: adminapi.MocksOf[*fakeMock](newStore(t), nil), Journal: j})
 
 	for _, limit := range []int{-1, 1001} {
 		_, err := ops.ListRequests(t.Context(), limit, 0)

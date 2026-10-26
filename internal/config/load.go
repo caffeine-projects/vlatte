@@ -30,6 +30,21 @@ type Source interface {
 // It returns the winning value of every key a source set.
 // The error is flag.ErrHelp when the arguments ask for help, or an *Error listing every problem found.
 func (s *Schema[T]) Load(dst *T, sources []Source) (map[string]Value, error) {
+	return s.load(&s.catalog, dst, sources)
+}
+
+// LoadOnly is like Load, but reads only the settings of the schema from sources that hold others too, such as those
+// of another schema: an unknown key, environment variable or flag is no problem, and is skipped. A flag it doesn't
+// know is skipped with the argument that follows it, unless that argument is a flag: an unknown flag takes its value
+// after =, or as the next argument.
+func (s *Schema[T]) LoadOnly(dst *T, sources []Source) (map[string]Value, error) {
+	only := s.catalog
+	only.loadOnly = true
+
+	return s.load(&only, dst, sources)
+}
+
+func (s *Schema[T]) load(c *catalog, dst *T, sources []Source) (map[string]Value, error) {
 	layers := make([][]entry, len(sources))
 	var problems []Problem
 
@@ -37,7 +52,7 @@ func (s *Schema[T]) Load(dst *T, sources []Source) (map[string]Value, error) {
 	for i := len(sources) - 1; i >= 0; i-- {
 		higher := layers[i+1:]
 
-		entries, found, err := sources[i].load(&s.catalog, func(key string) (entry, bool) { return find(higher, key) })
+		entries, found, err := sources[i].load(c, func(key string) (entry, bool) { return find(higher, key) })
 		if err != nil {
 			return nil, err
 		}

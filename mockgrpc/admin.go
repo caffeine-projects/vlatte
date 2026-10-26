@@ -9,14 +9,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/atomicfile"
 	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
-var _ handler.Files = adminFiles{}
+var _ adminapi.Files = adminFiles{}
 
 const (
 	// _defaultSaveDir is where the admin API saves mocks by default, under the root directory.
@@ -61,7 +61,7 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 	)
 
 	for _, mock := range mocks {
-		if mock.Origin() != handler.Origin {
+		if mock.Origin() != adminapi.Origin {
 			continue
 		}
 
@@ -69,7 +69,7 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 
 		data, err := mockFile(app, mock, path, format, toWD)
 		if err != nil {
-			return nil, fmt.Errorf("%w: mock %q: %w", handler.ErrNotDescribed, mock.ID(), err)
+			return nil, fmt.Errorf("%w: mock %q: %w", adminapi.ErrNotDescribed, mock.ID(), err)
 		}
 
 		paths = append(paths, path)

@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
@@ -25,7 +26,7 @@ import (
 func adminServer(t *testing.T, setup *ConfigBuilder) *Server {
 	t.Helper()
 
-	m := MustNew(setup.Silent().Admin(""))
+	m := MustNew(setup.Silent().Admin(admin.MustNew()))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -803,7 +804,7 @@ func TestAdmin_StreamsWhatTheProxyServes(t *testing.T) {
 
 func TestAdmin_StreamsTheLog(t *testing.T) {
 	// The log lines the server writes reach the admin API's clients too, such as for a server in a container.
-	m := MustNew(Setup().Admin("").LogLevel(vlatte.LogLevelInfo))
+	m := MustNew(Setup().Admin(admin.MustNew()).LogLevel(vlatte.LogLevelInfo))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -834,7 +835,7 @@ func TestAdmin_StreamsTheLog(t *testing.T) {
 func TestAdmin_NoLogStreamForALoggerItWasGiven(t *testing.T) {
 	// A logger the server was given writes where it was told to: the admin API doesn't take its lines.
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -878,7 +879,7 @@ func TestAdmin_AStartThatFailsLeavesNothingListening(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		setup func(t *testing.T, admin string) *ConfigBuilder
+		setup func(t *testing.T, adminAddr string) *ConfigBuilder
 	}{
 		{
 			name: "an admin address taken",
@@ -887,38 +888,38 @@ func TestAdmin_AStartThatFailsLeavesNothingListening(t *testing.T) {
 				require.NoError(t, err)
 				t.Cleanup(func() { _ = taken.Close() })
 
-				return Setup().Admin(taken.Addr().String())
+				return Setup().Admin(admin.MustNew(admin.Addr(taken.Addr().String())))
 			},
 		},
 		{
 			name: "a mock file with problems",
-			setup: func(t *testing.T, admin string) *ConfigBuilder {
+			setup: func(t *testing.T, adminAddr string) *ConfigBuilder {
 				root := t.TempDir()
 				require.NoError(t, os.Mkdir(filepath.Join(root, "mocks"), 0o700))
 				require.NoError(t, os.WriteFile(filepath.Join(root, "mocks", "bad.yaml"), []byte("request: {methd: GET}\n"), 0o600))
 
-				return Setup().Admin(admin).RootDir(root).MockFilePatterns("mocks/*.yaml")
+				return Setup().Admin(admin.MustNew(admin.Addr(adminAddr))).RootDir(root).MockFilePatterns("mocks/*.yaml")
 			},
 		},
 		{
 			name: "a persistent store it can't read",
-			setup: func(t *testing.T, admin string) *ConfigBuilder {
+			setup: func(t *testing.T, adminAddr string) *ConfigBuilder {
 				notADir := filepath.Join(t.TempDir(), "file")
 				require.NoError(t, os.WriteFile(notADir, nil, 0o600))
 
-				return Setup().Admin(admin).AdminStore(FileStore(notADir))
+				return Setup().Admin(admin.MustNew(admin.Addr(adminAddr))).AdminStore(FileStore(notADir))
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			admin := free(t)
+			adminAddr := free(t)
 
 			l, err := net.Listen("tcp", "127.0.0.1:0")
 			require.NoError(t, err)
 
-			m := MustNew(tt.setup(t, admin).Silent().Listener(l))
+			m := MustNew(tt.setup(t, adminAddr).Silent().Listener(l))
 			t.Cleanup(m.Close)
 
 			require.Error(t, m.Start())
@@ -931,7 +932,7 @@ func TestAdmin_AStartThatFailsLeavesNothingListening(t *testing.T) {
 			_, err = l.Accept()
 			require.ErrorIs(t, err, net.ErrClosed)
 
-			for _, addr := range []string{l.Addr().String(), admin} {
+			for _, addr := range []string{l.Addr().String(), adminAddr} {
 				_, err := net.DialTimeout("tcp", addr, time.Second)
 				require.Error(t, err, "nothing listens on %s", addr)
 			}
@@ -939,4 +940,17 @@ func TestAdmin_AStartThatFailsLeavesNothingListening(t *testing.T) {
 			require.ErrorIs(t, m.Start(), http.ErrServerClosed)
 		})
 	}
+}
+
+func TestAdmin_ServesTheMockFileSchema(t *testing.T) {
+	// A client that writes mock files, such as an editor or an agent, reads their schema from the server it writes them
+	// for: the schema the repository ships for editors.
+	m := adminServer(t, Setup())
+
+	res, body := do(t, http.MethodGet, m.AdminURL()+"/schema", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	want, err := os.ReadFile("schema/http.schema.json")
+	require.NoError(t, err)
+	require.Equal(t, string(want), string(body))
 }
