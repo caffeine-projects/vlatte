@@ -13,11 +13,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/fault"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -538,4 +540,64 @@ func TestMock_ADisabledMockDescribesAsDisabled(t *testing.T) {
 	desc, err = loaded.Mocks()[0].MarshalJSON()
 	require.NoError(t, err)
 	require.NotContains(t, string(desc), "enabled", "enabled is the default")
+}
+
+func TestMock_FaultsDescribeAsTheirSpecs(t *testing.T) {
+	// A mock's faults describe as a mock file lists them, each at its level, so the description loads back with them.
+	// A step of Go code, which a mock file can't hold, is left out, as a callback is.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	upper := vlatte.StepFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
+		return next.Write(bytes.ToUpper(b))
+	})
+
+	scope := m.MustMock(Getf("/f").
+		Step(fault.SlowClose(2*time.Second), upper, fault.LimitData(3)).
+		WireStep(fault.ConnectionResetByPeer()).
+		UpstreamStep(fault.Bandwidth(100)).
+		Reply(OK()))
+
+	want := map[string]any{
+		"steps": []any{
+			map[string]any{"type": "slow_close", "delay": "2s"},
+			map[string]any{"type": "limit_data", "bytes": 3.0},
+		},
+		"wire_steps":     []any{map[string]any{"type": "connection_reset_by_peer"}},
+		"upstream_steps": []any{map[string]any{"type": "bandwidth", "rate": 100.0}},
+	}
+
+	desc, err := scope.Mocks()[0].MarshalJSON()
+	require.NoError(t, err)
+	require.NoError(t, m.Unmock(t.Context(), scope))
+
+	loaded := m.MustMock(FromBytes(desc, "json"))
+	again, err := loaded.Mocks()[0].MarshalJSON()
+	require.NoError(t, err)
+
+	for _, d := range [][]byte{desc, again} {
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(d, &got))
+
+		for key, steps := range want {
+			require.Equal(t, steps, got[key], key)
+		}
+	}
+}
+
+func TestMock_NoStepsDescribeAsNone(t *testing.T) {
+	// A mock without faults, or with steps of Go code only, has no steps in its description: an empty list would be
+	// a key the mock file never had.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	upper := vlatte.StepFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
+		return next.Write(bytes.ToUpper(b))
+	})
+
+	for _, b := range []*Builder{Getf("/a"), Getf("/b").Step(upper).WireStep(upper)} {
+		desc, err := m.MustMock(b.Reply(OK())).Mocks()[0].MarshalJSON()
+		require.NoError(t, err)
+		require.NotContains(t, string(desc), "steps")
+	}
 }

@@ -18,4 +18,8 @@
 //
 // A fault that ends the answer aborts its flow: the mock still counts the call, and runs its callbacks and events,
 // before the connection ends.
+//
+// Mock files declare faults as objects, such as {"type": "bandwidth", "rate": "3g"}, under steps, wire_steps and
+// upstream_steps: see [github.com/caffeine-projects/vlatte/fault/faultbuild]. Each fault describes itself as the
+// object that builds it.
 package fault

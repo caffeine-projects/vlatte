@@ -6,11 +6,13 @@ import (
 	"slices"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ vlatte.Step  = malformedChunk{}
-	_ vlatte.Stage = (*malformedStage)(nil)
+	_ vlatte.Step                = malformedChunk{}
+	_ descriptor.SelfDescriptive = malformedChunk{}
+	_ vlatte.Stage               = (*malformedStage)(nil)
 )
 
 // _headEnd ends the status line and headers of an answer.
@@ -29,6 +31,11 @@ func MalformedResponseChunk() vlatte.Step {
 }
 
 type malformedChunk struct{}
+
+// Describe implements [descriptor.SelfDescriptive].
+func (malformedChunk) Describe() descriptor.Descriptor {
+	return descriptor.WithKeyValuePairs("malformed_response_chunk", "type", "malformed_response_chunk")
+}
 
 func (malformedChunk) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	return &malformedStage{flow: flow, next: next}

@@ -5,11 +5,13 @@ import (
 	"fmt"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ vlatte.Step  = limitData{}
-	_ vlatte.Stage = (*limitDataStage)(nil)
+	_ vlatte.Step                = limitData{}
+	_ descriptor.SelfDescriptive = limitData{}
+	_ vlatte.Stage               = (*limitDataStage)(nil)
 )
 
 // LimitData returns a step that passes the first n bytes of the answer on, flushed, then aborts the flow, so the
@@ -29,6 +31,11 @@ func LimitData(n int) vlatte.Step {
 }
 
 type limitData struct{ n int }
+
+// Describe implements [descriptor.SelfDescriptive].
+func (l limitData) Describe() descriptor.Descriptor {
+	return descriptor.WithKeyValuePairs("limit_data", "type", "limit_data", "bytes", l.n)
+}
 
 func (l limitData) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	return &limitDataStage{flow: flow, left: l.n, next: next}

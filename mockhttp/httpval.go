@@ -56,17 +56,17 @@ const (
 	HeaderReferrerPolicy                  = "Referrer-Policy"
 
 	// HeaderVlatteError says why vlatte, and not a mock, answered a request: one of the vlatte.Failure* values.
-	HeaderVlatteError = vlatte.FailureHeader
+	HeaderVlatteError = vlatte.HeaderFailure
 )
 
 // _debugHeaders are the headers a server adds to its answers unless Config.NoDebugHeaders is set.
 var _debugHeaders = []string{
-	vlatte.MatchedMockIDHeader,
-	vlatte.MatchedMockNameHeader,
-	vlatte.MatchedMockHitsHeader,
-	vlatte.MatchedMockSourceHeader,
-	vlatte.RequestIDHeader,
-	vlatte.ProxiedHeader,
+	vlatte.HeaderMatchedMockID,
+	vlatte.HeaderMatchedMockName,
+	vlatte.HeaderMatchedMockHits,
+	vlatte.HeaderMatchedMockSource,
+	vlatte.HeaderRequestID,
+	vlatte.HeaderProxied,
 }
 
 // MIME types, for building and matching mocks.

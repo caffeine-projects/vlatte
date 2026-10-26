@@ -193,7 +193,7 @@ response:
 
 **Types.** Each key takes one type, as the schema says. Write text in quotes where a string goes, as in `name: "123"`, and numbers bare, as in `priority: 10`. Bools read the way Go's `strconv.ParseBool` reads them, so `true`, `"true"`, `t` and `1` are all true. A value of the wrong type is an error that says how to write it.
 
-**Durations.** `delay`, `proxy.timeout` and the `delay` of a [webhook](#webhooks) take whole milliseconds (`1500`) or a Go duration (`1.5s`). `"1500"` in quotes is neither.
+**Durations.** `delay`, `proxy.timeout`, the durations of [faults](#faults) and the `delay` of a [webhook](#webhooks) take whole milliseconds (`1500`) or a Go duration (`1.5s`). `"1500"` in quotes is neither.
 
 **Matching.** Most of a request is text: its path, query, headers and form values. A matcher reads that text as the type it compares with:
 - `[equal, 10]` and `[isIn, [10, 20]]` match `?page=10`;
@@ -632,7 +632,7 @@ The `fault` package has steps that make a mock answer wrong, to test how a clien
 | `fault.RandomDataThenClose()` | `WireStep` | `fault.RandomDataSize` random bytes in place of the answer, then the end of the connection. |
 | `fault.ConnectionResetByPeer()` | `WireStep` | A TCP reset, such as `ECONNRESET`, before a status line. |
 | `fault.ChunkedDribbleDelay(chunks, total)` | `Step` | The whole body, in `chunks` flushed parts spread over `total`: part k comes at k·total/chunks, and the body ends at `total`. The body is held until the reply wrote all of it. |
-| `fault.Latency(delay)` | Either | Every write and flush the `vlatte.Delay` later, such as `vlatte.Latency(d)` or `vlatte.Jitter(avg, deviation)`, in order. The answer keeps its pace: the writer doesn't wait. |
+| `fault.Latency(latency, jitter)` | Either | Every write and flush `latency` later, give or take `jitter` at random, in order. The answer keeps its pace: the writer doesn't wait. |
 | `fault.Bandwidth(bytesPerSecond)` | Either | Each write at that rate, in flushed pieces of a tenth of a second. `fault.Bandwidth3G` and the other `fault.Bandwidth*` constants are common links, in bytes per second. |
 | `fault.Slicer(averageSize, sizeVariation, delay)` | Either | Each write in flushed slices of `averageSize` bytes, give or take `sizeVariation` at random, `delay` apart. |
 | `fault.SlowClose(delay)` | Either | The whole answer, then its end `delay` later: the body's last chunk with `Step`, the close of the connection with `WireStep`. |
@@ -643,11 +643,47 @@ The `fault` package has steps that make a mock answer wrong, to test how a clien
 ```go
 m.MustMock(mockhttp.Getf("/users").WireStep(fault.ConnectionResetByPeer()).Reply(mockhttp.OK()))
 m.MustMock(mockhttp.Getf("/report").Step(fault.ChunkedDribbleDelay(5, 2*time.Second)).Reply(mockhttp.OK().BodyFile("report.csv")))
-m.MustMock(mockhttp.Getf("/search").WireStep(fault.Latency(vlatte.Jitter(300*time.Millisecond, 20))).Reply(mockhttp.OK()))
+m.MustMock(mockhttp.Getf("/search").WireStep(fault.Latency(300*time.Millisecond, 60*time.Millisecond)).Reply(mockhttp.OK()))
 m.MustMock(mockhttp.Getf("/video").Step(fault.Bandwidth(fault.Bandwidth3G)).Reply(mockhttp.OK().BodyFile("video.mp4")))
 ```
 
 A wire fault needs HTTP/1.x, as wire steps do. Faults combine with other steps: a fault on the wire comes after the steps of `Step`. A mock that answers with a fault still counts the call, and runs its callbacks and events, before the connection ends.
+
+**In mock files,** `steps`, `wire_steps` and `upstream_steps` list faults for `Step`, `WireStep` and `UpstreamStep`. A fault is an object: `type` names it, after its function in snake case, and its other keys are its parameters, by name. Durations are whole milliseconds or a Go duration, such as `1.5s`. A parameter with a default can be left out.
+
+| `type` | Parameters |
+|---|---|
+| `empty_response`, `malformed_response_chunk`, `random_data_then_close`, `connection_reset_by_peer` | None. |
+| `chunked_dribble_delay` | `chunks`, `total` |
+| `latency` | `latency`; `jitter`, 0 by default |
+| `bandwidth` | `rate`: bytes per second, or a `fault.Bandwidth*` constant in snake case: `gprs`, `dial_up`, `2g`, `good_2g`, `3g`, `good_3g`, `dsl`, `4g`, `wifi` or `fiber` |
+| `slicer` | `average_size`; `size_variation` and `delay`, 0 by default |
+| `slow_close` | `delay` |
+| `timeout` | `after`, 0 by default: never |
+| `limit_data` | `bytes` |
+| `connection_reset_by_peer_after` | `after` |
+
+```yaml
+request:
+  method: GET
+  path: /report
+response:
+  status: 200
+  body_file: report.csv
+steps:
+  - type: bandwidth
+    rate: 3g
+  - type: connection_reset_by_peer_after
+    after: 5s
+wire_steps:
+  - type: latency
+    latency: 300ms
+    jitter: 60ms
+```
+
+A fault with a missing parameter, a key it doesn't take, or a value its function refuses fails the file, with each problem at its key, such as `steps[1].after`. `faultbuild.Build`, of package `fault/faultbuild`, builds a fault from its object in Go.
+
+A mock describes its faults the same way, so the admin API shows them and its store keeps them. A step of your own, such as a `vlatte.StepFunc`, isn't in the description.
 
 ## Recording and playback
 
@@ -925,7 +961,7 @@ When no mock matches, or serving a request fails, the server answers itself. It 
 The body says the same in text, and names the mock and the error. A test checks the header:
 
 ```go
-require.Equal(t, vlatte.FailureReply, res.Header.Get(vlatte.FailureHeader))
+require.Equal(t, vlatte.FailureReply, res.Header.Get(vlatte.HeaderFailure))
 ```
 
 The status of `no-match` is `no_match_status_code`, and the status of the others is `error_status_code`. Both default to 418.
@@ -961,7 +997,7 @@ Each answer says how the server served it, in `VLatte-*` headers:
 A failure keeps the headers of the mock that matched before it failed. Hits count once the answer is sent, so two requests served at the same time can show the same number. A test checks them like any header:
 
 ```go
-require.Equal(t, "users-get", res.Header.Get(vlatte.MatchedMockIDHeader))
+require.Equal(t, "users-get", res.Header.Get(vlatte.HeaderMatchedMockID))
 ```
 
 Header names don't depend on case: Go sends `Vlatte-Matched-Mock-Id`, and HTTP/2 sends them in lower case. Recordings leave the debug headers out.

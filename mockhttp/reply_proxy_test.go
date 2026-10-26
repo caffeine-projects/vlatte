@@ -1062,7 +1062,7 @@ func TestProxyReply_AnswersWithTheProxysDebugHeadersOnly(t *testing.T) {
 			status, header, _ := getFull(t, m, "/p")
 			require.Equal(t, http.StatusOK, status)
 
-			for _, name := range []string{vlatte.RequestIDHeader, vlatte.MatchedMockIDHeader, vlatte.ProxiedHeader} {
+			for _, name := range []string{vlatte.HeaderRequestID, vlatte.HeaderMatchedMockID, vlatte.HeaderProxied} {
 				if noDebugHeaders {
 					require.Empty(t, header.Values(name), name)
 				} else {
@@ -1071,7 +1071,7 @@ func TestProxyReply_AnswersWithTheProxysDebugHeadersOnly(t *testing.T) {
 			}
 
 			if !noDebugHeaders {
-				require.Equal(t, scoped.Mocks()[0].ID(), header.Get(vlatte.MatchedMockIDHeader), "the proxy's mock")
+				require.Equal(t, scoped.Mocks()[0].ID(), header.Get(vlatte.HeaderMatchedMockID), "the proxy's mock")
 			}
 		})
 	}

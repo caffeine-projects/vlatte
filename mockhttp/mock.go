@@ -384,6 +384,16 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		data["on_complete"] = events
 	}
 
+	for key, steps := range map[string][]vlatte.Step{
+		"steps":          m.spec.steps,
+		"wire_steps":     m.spec.wireSteps,
+		"upstream_steps": m.spec.upSteps,
+	} {
+		if described := describeSteps(steps); len(described) > 0 {
+			data[key] = described
+		}
+	}
+
 	return descriptor.Root(data)
 }
 
@@ -408,6 +418,19 @@ func describeEvents(events []vlatte.EventConfig) []any {
 		}
 
 		described = append(described, event)
+	}
+
+	return described
+}
+
+// describeSteps describes steps as a mock file lists them, but those that don't describe themselves, such as a
+// [vlatte.StepFunc], which a mock file can't hold. Faults describe themselves.
+func describeSteps(steps []vlatte.Step) []any {
+	var described []any
+	for _, s := range steps {
+		if d, ok := descriptor.IsSelfDescriptive(s); ok {
+			described = append(described, d)
+		}
 	}
 
 	return described

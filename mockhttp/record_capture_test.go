@@ -161,7 +161,7 @@ func TestRecording_LeavesOutTheDebugHeaders(t *testing.T) {
 	require.NoError(t, m.StartRecording(RecordDir(dir), RecordIncludeMocked(true)))
 
 	res, _ := do(t, http.MethodGet, m.URL("/r"), nil, nil)
-	require.Equal(t, "original", res.Header.Get(vlatte.MatchedMockIDHeader), "the answer had them")
+	require.Equal(t, "original", res.Header.Get(vlatte.HeaderMatchedMockID), "the answer had them")
 
 	stopRecording(t, m)
 

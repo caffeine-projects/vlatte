@@ -44,16 +44,16 @@ func TestDebugHeader_NamesTheMockThatMatched(t *testing.T) {
 		var header metadata.MD
 		_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "hi"}, grpc.Header(&header))
 		require.NoError(t, err)
-		require.Equal(t, unary.IDs(), header.Get(vlatte.MatchedMockIDHeader))
-		require.Equal(t, []string{"greet"}, header.Get(vlatte.MatchedMockNameHeader))
-		require.Equal(t, []string{hits}, header.Get(vlatte.MatchedMockHitsHeader), "the hits count this call")
+		require.Equal(t, unary.IDs(), header.Get(vlatte.HeaderMatchedMockID))
+		require.Equal(t, []string{"greet"}, header.Get(vlatte.HeaderMatchedMockName))
+		require.Equal(t, []string{hits}, header.Get(vlatte.HeaderMatchedMockHits), "the hits count this call")
 		require.Equal(t, []string{"v1"}, header.Get("k1"), "next to the mock's own header")
 	}
 
 	header := streamHeader(t, c)
-	require.Equal(t, stream.IDs(), header.Get(vlatte.MatchedMockIDHeader))
-	require.Equal(t, []string{"1"}, header.Get(vlatte.MatchedMockHitsHeader), "each mock counts its own")
-	require.Empty(t, header.Get(vlatte.MatchedMockNameHeader), "a mock with no name sends none")
+	require.Equal(t, stream.IDs(), header.Get(vlatte.HeaderMatchedMockID))
+	require.Equal(t, []string{"1"}, header.Get(vlatte.HeaderMatchedMockHits), "each mock counts its own")
+	require.Empty(t, header.Get(vlatte.HeaderMatchedMockName), "a mock with no name sends none")
 }
 
 func TestDebugHeader_AMockThatAnswersWithAStatus(t *testing.T) {
@@ -64,7 +64,7 @@ func TestDebugHeader_AMockThatAnswersWithAStatus(t *testing.T) {
 	var header metadata.MD
 	_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{Message: "hi"}, grpc.Header(&header))
 	require.Equal(t, codes.NotFound, status.Code(err))
-	require.Equal(t, scope.IDs(), header.Get(vlatte.MatchedMockIDHeader))
+	require.Equal(t, scope.IDs(), header.Get(vlatte.HeaderMatchedMockID))
 }
 
 func TestDebugHeader_NoneWhenNoMockMatched(t *testing.T) {
@@ -74,8 +74,8 @@ func TestDebugHeader_NoneWhenNoMockMatched(t *testing.T) {
 	var header, trailer metadata.MD
 	_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{Message: "hi"}, grpc.Header(&header), grpc.Trailer(&trailer))
 	require.Equal(t, codes.NotFound, status.Code(err))
-	require.Empty(t, header.Get(vlatte.MatchedMockIDHeader))
-	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.FailureHeader))
+	require.Empty(t, header.Get(vlatte.HeaderMatchedMockID))
+	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.HeaderFailure))
 }
 
 func TestDebugHeader_NoDebugHeadersTurnsThemOff(t *testing.T) {
@@ -95,7 +95,7 @@ func TestDebugHeader_NoDebugHeadersTurnsThemOff(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, md := range []metadata.MD{header, streamHeader(t, c)} {
-		for _, key := range []string{vlatte.MatchedMockIDHeader, vlatte.MatchedMockNameHeader, vlatte.MatchedMockHitsHeader} {
+		for _, key := range []string{vlatte.HeaderMatchedMockID, vlatte.HeaderMatchedMockName, vlatte.HeaderMatchedMockHits} {
 			require.Empty(t, md.Get(key), key)
 		}
 	}
@@ -111,14 +111,14 @@ func TestDebugHeader_ACallTheMockDoesntCountSendsNoHits(t *testing.T) {
 	var header metadata.MD
 	_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "not json"}, grpc.Header(&header))
 	require.Equal(t, codes.Internal, status.Code(err))
-	require.Empty(t, header.Get(vlatte.MatchedMockHitsHeader))
-	require.Empty(t, header.Get(vlatte.MatchedMockIDHeader))
+	require.Empty(t, header.Get(vlatte.HeaderMatchedMockHits))
+	require.Empty(t, header.Get(vlatte.HeaderMatchedMockID))
 	require.Zero(t, scope.Hits())
 
 	res, err := c.Greetings(t.Context(), &pb.HiReq{Message: `"ok"`}, grpc.Header(&header))
 	require.NoError(t, err)
 	require.Equal(t, "ok", res.GetMessage())
-	require.Equal(t, []string{"1"}, header.Get(vlatte.MatchedMockHitsHeader))
+	require.Equal(t, []string{"1"}, header.Get(vlatte.HeaderMatchedMockHits))
 	require.Equal(t, int64(1), scope.Hits())
 }
 
@@ -138,7 +138,7 @@ func TestDebugHeader_AClientThatLeavesAfterTheHeaderTakesTheHitBack(t *testing.T
 
 	header, err := stream.Header()
 	require.NoError(t, err)
-	require.Equal(t, []string{"1"}, header.Get(vlatte.MatchedMockHitsHeader))
+	require.Equal(t, []string{"1"}, header.Get(vlatte.HeaderMatchedMockHits))
 
 	_, err = stream.Recv()
 	require.NoError(t, err)
@@ -149,7 +149,7 @@ func TestDebugHeader_AClientThatLeavesAfterTheHeaderTakesTheHitBack(t *testing.T
 	require.Equal(t, codes.Canceled, status.Code(err))
 	require.Eventually(t, func() bool { return scope.Hits() == 0 }, time.Second, time.Millisecond)
 
-	require.Equal(t, []string{"1"}, streamHeader(t, c).Get(vlatte.MatchedMockHitsHeader))
+	require.Equal(t, []string{"1"}, streamHeader(t, c).Get(vlatte.HeaderMatchedMockHits))
 	require.Equal(t, int64(1), scope.Hits())
 }
 
