@@ -532,3 +532,24 @@ func TestJournal_APatternIsABuilderOfTheRequestOnly(t *testing.T) {
 		})
 	}
 }
+
+func TestJournal_APatternOfTheMethodOnlyCountsACutRequest(t *testing.T) {
+	// A pattern that reads only the method and the header needs none of the request: one the journal cut counts, and
+	// one of another method is a miss, not an error.
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Logger(&logger), &journalSize{max: 10})
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
+
+	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{Message: "a long message, cut"})
+	require.NoError(t, err)
+
+	n, err := m.CountRequests(t.Context(), journal.Query{}, Method("Greetings"))
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	n, err = m.CountRequests(t.Context(), journal.Query{}, Method("List"))
+	require.NoError(t, err)
+	require.Zero(t, n)
+}

@@ -303,10 +303,13 @@ func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (journal.Fil
 			return false, nil
 		}
 
-		if e.BodyTruncated && builder.readsRequest {
+		if e.BodyTruncated {
 			ok, err := rest.Eval(ctx, vlatte.NewExplanation(), entryCall(app, e, md, nil))
-			if err != nil || !ok {
+			switch {
+			case err != nil || !ok:
 				return false, err
+			case !builder.readsRequest:
+				return true, nil
 			}
 
 			return false, fmt.Errorf("grpc: %w: entry %d: the journal kept part of its request, which the pattern reads",
