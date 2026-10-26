@@ -21,13 +21,15 @@ var OpenAPIDocument []byte
 // _openAPIJSON is the OpenAPI document in JSON, with the keys of its objects in the order the YAML document has them:
 // renderers, such as the docs page, list its paths and operations in that order, which keeps related ones together.
 var _openAPIJSON = sync.OnceValues(func() ([]byte, error) {
+	// The node holds the order of the keys, which the data model of the document doesn't.
+	var node yaml.Node
+
 	doc, err := config.Parse(OpenAPIDocument, _formatYAML)
-	if err != nil {
-		return nil, err
+	if err == nil {
+		err = yaml.Unmarshal(OpenAPIDocument, &node)
 	}
 
-	var node yaml.Node
-	if err := yaml.Unmarshal(OpenAPIDocument, &node); err != nil {
+	if err != nil {
 		return nil, err
 	}
 
