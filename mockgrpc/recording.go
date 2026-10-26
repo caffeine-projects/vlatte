@@ -88,6 +88,9 @@ func (app *Server) IsRecording() bool {
 
 // startRecording starts a recording with conf, checked. A recording that stopped, and wrote everything, gives way.
 func (app *Server) startRecording(conf *RecordConfig) error {
+	app.recordMu.Lock()
+	defer app.recordMu.Unlock()
+
 	// A recording that wrote everything, whose StopRecording gave up waiting, ends here, and is served as it asked.
 	if old := app.recording.Load(); old != nil {
 		select {
@@ -96,14 +99,6 @@ func (app *Server) startRecording(conf *RecordConfig) error {
 		default:
 			return vlatte.ErrRecording
 		}
-	}
-
-	app.recordMu.Lock()
-	defer app.recordMu.Unlock()
-
-	// Another start came first.
-	if app.recording.Load() != nil {
-		return vlatte.ErrRecording
 	}
 
 	rec := &recording{conf: conf, dir: conf.dir(app.config), served: make(chan struct{})}
@@ -163,15 +158,10 @@ func (app *Server) end(ctx context.Context, rec *recording, mayServe bool) (*vla
 	}
 
 	if !rec.ended.CompareAndSwap(false, true) {
-		// Served goes first when ctx ended too.
 		select {
 		case <-rec.served:
 		case <-ctx.Done():
-			select {
-			case <-rec.served:
-			default:
-				return res, ctx.Err()
-			}
+			return res, ctx.Err()
 		}
 
 		return res, errors.Join(err, rec.playErr)

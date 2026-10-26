@@ -11,7 +11,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -176,13 +175,8 @@ func (c *recordCodec) Response(x *recordedCall, _ *vlatte.RecordFiles) (Recorded
 	s.Status = &RecordedStatus{Code: codeName(x.status.Code()), Message: x.status.Message()}
 
 	for i, d := range x.status.Proto().GetDetails() {
-		b, err := protojson.MarshalOptions{Resolver: c.resolver}.Marshal(d)
+		detail, err := c.message(d)
 		if err != nil {
-			return RecordedResponse{}, fmt.Errorf("status detail %d: %w", i, err)
-		}
-
-		var detail any
-		if err := json.Unmarshal(b, &detail); err != nil {
 			return RecordedResponse{}, fmt.Errorf("status detail %d: %w", i, err)
 		}
 

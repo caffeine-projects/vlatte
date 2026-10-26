@@ -1,12 +1,14 @@
 package mockgrpc
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
@@ -407,3 +409,100 @@ func TestRecording_AConfigWithBadSettingsFailsNew(t *testing.T) {
 type failingRecordOption struct{}
 
 func (failingRecordOption) Apply(*RecordConfig) error { return errors.New("no") }
+
+func TestRecording_StartsFromTheServersRecordSettings(t *testing.T) {
+	target := serve(t)
+	target.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "recorded"})))
+
+	m := recorder(t, Setup().Record(&RecordConfig{Target: target.Addr(), Dir: "rec", Methods: []string{"Greetings"}, RequestHeaders: []string{"x-tenant"}}))
+	_, err := m.StopRecording(t.Context())
+	require.NoError(t, err)
+
+	require.NoError(t, m.StartRecording(RecordDialOptions(grpc.WithUserAgent("rec"))))
+
+	_, err = client(t, m).Greetings(t.Context(), &pb.HiReq{})
+	require.NoError(t, err)
+
+	res, err := m.StopRecording(t.Context())
+	require.NoError(t, err)
+	require.Len(t, res.Recordings, 1)
+	require.Equal(t, filepath.Join(m.Config().RootDir, "rec"), filepath.Dir(res.Recordings[0].File))
+}
+
+func TestRecording_AStartEndsARecordingWhoseStopGaveUp(t *testing.T) {
+	m := recorder(t)
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "mocked"})))
+	require.NoError(t, m.StartRecording(RecordIncludeMocked(true)))
+
+	_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{})
+	require.NoError(t, err)
+
+	rec := m.recording.Load()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err = m.StopRecording(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+
+	<-rec.session.Done()
+	require.NoError(t, m.StartRecording())
+	require.NotSame(t, rec, m.recording.Load())
+
+	<-rec.served
+	require.NoError(t, rec.playErr)
+}
+
+func TestRecording_AStopWaitsForTheStopThatEndsIt(t *testing.T) {
+	m := recorder(t)
+	require.NoError(t, m.StartRecording())
+
+	// Another stop ends it.
+	rec := m.recording.Load()
+	rec.ended.Store(true)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+
+	res, err := m.StopRecording(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NotNil(t, res)
+
+	rec.ended.Store(false)
+
+	_, err = m.StopRecording(t.Context())
+	require.NoError(t, err)
+
+	res, err = m.end(t.Context(), rec, true)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+}
+
+func TestRecording_ARecordingThatCantBeServedSaysWhy(t *testing.T) {
+	m := recorder(t)
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "mocked"})))
+	require.NoError(t, m.StartRecording(RecordIncludeMocked(true)))
+
+	_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{})
+	require.NoError(t, err)
+
+	dir := filepath.Join(m.Config().RootDir, "_mocks_recorded")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.mock.json"), []byte("{"), 0o600))
+
+	res, err := m.StopRecording(t.Context())
+	require.ErrorContains(t, err, "recorder: serving the recordings:")
+	require.Len(t, res.Recordings, 1)
+}
+
+func TestRecording_ADirectoryThatCantBeMadeFailsTheRecording(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "file"), nil, 0o600))
+
+	m := recorder(t, Setup().RootDir(root))
+	require.ErrorContains(t, m.StartRecording(RecordDir("file")), "recorder:")
+	require.False(t, m.IsRecording())
+
+	conf := MustNew(Setup().Silent().RootDir(root).Record(RecordDir("file")))
+	t.Cleanup(conf.Close)
+	require.ErrorContains(t, conf.Start(), "recorder:")
+}
