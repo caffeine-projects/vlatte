@@ -23,6 +23,11 @@ func TestListFuncs(t *testing.T) {
 		{name: "remove out of range", text: `{{ remove (list 1) -2 }}`, err: "index -2 is out of a list of 1 items"},
 		{name: "reverse", text: `{{ reverse (list 1 2 3) | toJSON }}`, want: "[3,2,1]"},
 		{name: "randomItem of an empty list", text: `{{ randomItem list }}`, err: "the list is empty"},
+		{name: "insert into a value that isn't a list", text: `{{ insert "a" 0 1 }}`, err: "error calling insert: string is not a list"},
+		{name: "remove from a value that isn't a list", text: `{{ remove "a" 0 }}`, err: "error calling remove: string is not a list"},
+		{name: "randomItem of a value that isn't a list", text: `{{ randomItem "a" }}`, err: "error calling randomItem: string is not a list"},
+		{name: "shuffle a value that isn't a list", text: `{{ shuffle "a" }}`, err: "error calling shuffle: string is not a list"},
+		{name: "reverse a value that isn't a list", text: `{{ reverse "a" }}`, err: "error calling reverse: string is not a list"},
 	})
 }
 
@@ -70,6 +75,9 @@ func TestSortBy(t *testing.T) {
 		{name: "descending with reverse", text: `{{ range reverse (sortBy (fromJSON .) "$.age") }}{{ .name }}{{ end }}`, data: people, want: "cabn"},
 		{name: "plain values with $", text: `{{ sortBy (list 3 1.5 2) "$" | toJSON }}`, want: "[1.5,2,3]"},
 		{name: "strings are values, not JSON text", text: `{{ sortBy (list "b" "a") "$" | join "" }}`, want: "ab"},
+		{name: "booleans, false first", text: `{{ sortBy (list true false true) "$" | toJSON }}`, want: "[false,true,true]"},
+		{name: "values that don't order", text: `{{ sortBy (list (list 1)) "$" }}`, err: "error calling sortBy: can't sort by []interface {} values"},
+		{name: "a value that isn't a list", text: `{{ sortBy "a" "$" }}`, err: "error calling sortBy: string is not a list"},
 		{name: "mixed kinds", text: `{{ sortBy (list 1 "a") "$" }}`, err: "can't sort by both number and string values"},
 		{name: "an invalid path", text: `{{ sortBy (list 1) "$[" }}`, err: "error calling sortBy: not terminated at 3 in $["},
 	})

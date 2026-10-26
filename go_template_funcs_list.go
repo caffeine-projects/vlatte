@@ -37,12 +37,8 @@ func listItems(list any) ([]any, error) {
 	return items, nil
 }
 
-// list returns its arguments as a list, which is empty, not nil, without any, so toJSON writes [].
+// list returns its arguments as a list. Without any, a template gives it an empty list, not nil, so toJSON writes [].
 func list(items ...any) []any {
-	if items == nil {
-		return []any{}
-	}
-
 	return items
 }
 

@@ -668,3 +668,8 @@ func TestNew_TemplateEnvWithAnEngineOfTheUsersOwnFails(t *testing.T) {
 	require.ErrorIs(t, err, errTemplateEnvWithEngine)
 	require.ErrorContains(t, err, "grpc.template.env")
 }
+
+func TestNew_TemplateEnvFromGoRefusesAnInvalidName(t *testing.T) {
+	_, err := New(Setup().TemplateEnv("A=B"))
+	require.ErrorContains(t, err, `environment variable name "A=B" is invalid`)
+}

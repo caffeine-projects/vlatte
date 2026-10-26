@@ -12,6 +12,7 @@ func TestJSONPath(t *testing.T) {
 	runFuncCases(t, []funcCase{
 		{name: "reads JSON text, such as a request body", text: `{{ jsonPath "$.items[1].sku" . }}`, data: _orderJSON, want: "b"},
 		{name: "reads a value", text: `{{ jsonPath "$.id" (fromJSON .) }}`, data: _orderJSON, want: "o-1"},
+		{name: "reads JSON bytes", text: `{{ jsonPath "$.id" . }}`, data: []byte(_orderJSON), want: "o-1"},
 		{name: "gives the first of many", text: `{{ jsonPath "$.items[*].sku" . }}`, data: _orderJSON, want: "a"},
 		{name: "keeps the type of what it selects", text: `{{ jsonPath "$.items[0]" . | toJSON }}`, data: _orderJSON, want: `{"qty":2,"sku":"a"}`},
 		{name: "nothing selected is nil, for default", text: `{{ jsonPath "$.missing" . | default "none" }}`, data: _orderJSON, want: "none"},
@@ -28,6 +29,8 @@ func TestDeleteJSONPath(t *testing.T) {
 		{name: "removes list items", text: `{{ deleteJSONPath "$.items[0]" (fromJSON .) | toJSON }}`, data: `{"items": [1, 2]}`, want: `{"items":[2]}`},
 		{name: "reads JSON text, such as a request body", text: `{{ deleteJSONPath "$.a" . | toJSON }}`, data: `{"a": 1, "b": 2}`, want: `{"b":2}`},
 		{name: "nothing selected changes nothing", text: `{{ deleteJSONPath "$.x" (fromJSON .) | toJSON }}`, data: `{"id": 1}`, want: `{"id":1}`},
+		{name: "an invalid path", text: `{{ deleteJSONPath "$[" "{}" }}`, err: "error calling deleteJSONPath: not terminated"},
+		{name: "text that isn't JSON", text: `{{ deleteJSONPath "$.a" "{" }}`, err: "error calling deleteJSONPath: jsontext: unexpected EOF"},
 	})
 
 	t.Run("leaves its value unchanged", func(t *testing.T) {
@@ -78,6 +81,17 @@ func TestMergePatch(t *testing.T) {
 	t.Run("text that isn't JSON", func(t *testing.T) {
 		_, err := render(t, e, `{{ mergePatch "{" "{}" }}`, nil)
 		require.ErrorContains(t, err, "error calling mergePatch: jsontext: unexpected EOF")
+
+		_, err = render(t, e, `{{ mergePatch "{}" "{" }}`, nil)
+		require.ErrorContains(t, err, "error calling mergePatch: jsontext: unexpected EOF")
+	})
+
+	t.Run("patches a map of any value type, such as query parameters", func(t *testing.T) {
+		data := map[string]any{"query": map[string]string{"page": "1", "sort": "asc"}}
+
+		out, err := render(t, e, `{{ mergePatch "{\"sort\": null, \"size\": 10}" .query | toJSON }}`, data)
+		require.NoError(t, err)
+		require.JSONEq(t, `{"page": "1", "size": 10}`, out)
 	})
 
 	t.Run("leaves its value unchanged", func(t *testing.T) {
@@ -99,5 +113,6 @@ func TestJSONFormatting(t *testing.T) {
 		},
 		{name: "compactJSON", text: `{{ compactJSON . }}`, data: "{\n  \"b\": 1,\n  \"a\": [1, 2]\n}", want: `{"b":1,"a":[1,2]}`},
 		{name: "indentJSON of text that isn't JSON", text: `{{ indentJSON "{" }}`, err: "error calling indentJSON: jsontext: unexpected EOF"},
+		{name: "compactJSON of text that isn't JSON", text: `{{ compactJSON "{" }}`, err: "error calling compactJSON: jsontext: unexpected EOF"},
 	})
 }

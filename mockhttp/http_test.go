@@ -768,3 +768,8 @@ func TestNew_TemplateEnvRefusesAnInvalidName(t *testing.T) {
 	_, err := New(Setup().ConfigSources(ConfigArgs([]string{"--template-env", "A=B"})))
 	require.ErrorContains(t, err, `environment variable name "A=B" is invalid`)
 }
+
+func TestNew_TemplateEnvFromGoRefusesAnInvalidName(t *testing.T) {
+	_, err := New(Setup().TemplateEnv("A=B"))
+	require.ErrorContains(t, err, `environment variable name "A=B" is invalid`)
+}

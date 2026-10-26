@@ -33,6 +33,7 @@ func TestEnv(t *testing.T) {
 			`{{ "VLATTE_TEST_SECRET" | env }}`,
 			`{{ if true }}{{ with 1 }}{{ printf "%s" (env "VLATTE_TEST_SECRET") }}{{ end }}{{ end }}`,
 			`{{ define "x" }}{{ env "VLATTE_TEST_SECRET" }}{{ end }}`,
+			`{{ define "x" }}{{ . }}{{ end }}{{ template "x" (env "VLATTE_TEST_SECRET") }}`,
 		}
 
 		for _, text := range texts {
@@ -40,6 +41,12 @@ func TestEnv(t *testing.T) {
 			require.EqualError(t, err, `template: body: env: "VLATTE_TEST_SECRET" is not allowed`, text)
 			require.ErrorIs(t, err, errEnvNotAllowed)
 		}
+	})
+
+	t.Run("a template that calls another without data compiles", func(t *testing.T) {
+		out, err := render(t, e, `{{ define "x" }}{{ env "VLATTE_TEST_TENANT" }}{{ end }}{{ template "x" }}`, nil)
+		require.NoError(t, err)
+		require.Equal(t, "acme", out)
 	})
 
 	t.Run("a name read from data is checked when it runs", func(t *testing.T) {

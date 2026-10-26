@@ -35,6 +35,7 @@ func TestXPathNodes(t *testing.T) {
 		},
 		{name: "an attribute", text: `{{ range xpathNodes "//@sku" . }}{{ .Name }}={{ . }} {{ end }}`, data: _orderXML, want: "sku=a sku=b "},
 		{name: "nothing selected", text: `{{ len (xpathNodes "//missing" .) }}`, data: _orderXML, want: "0"},
+		{name: "text that isn't XML", text: `{{ xpathNodes "/a" "<a>" }}`, err: "error calling xpathNodes: element <a> is not closed"},
 		{name: "a value instead of nodes", text: `{{ xpathNodes "count(//item)" . }}`, data: _orderXML, err: `error calling xpathNodes: "count(//item)" computes a float64, not nodes`},
 	})
 }

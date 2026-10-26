@@ -69,7 +69,10 @@ func TestRegexpFuncs(t *testing.T) {
 		{name: "regexpSubmatch without a match is nil", text: `{{ len (regexpSubmatch "x" "y") }}`, want: "0"},
 		{name: "regexpReplaceAll expands groups", text: `{{ regexpReplaceAll "(\\w+)-(\\w+)" "$2-$1" "a-b c-d" }}`, want: "b-a d-c"},
 		{name: "regexpMatch", text: `{{ regexpMatch "^v[0-9]$" "v2" }} {{ regexpMatch "^v[0-9]$" "v22" }}`, want: "true false"},
-		{name: "an invalid pattern fails", text: `{{ regexpMatch "(" "x" }}`, err: "error parsing regexp"},
+		{name: "an invalid pattern fails", text: `{{ regexpMatch "(" "x" }}`, err: "error calling regexpMatch: error parsing regexp"},
+		{name: "regexpFind with an invalid pattern", text: `{{ regexpFind "(" "x" }}`, err: "error calling regexpFind: error parsing regexp"},
+		{name: "regexpSubmatch with an invalid pattern", text: `{{ regexpSubmatch "(" "x" }}`, err: "error calling regexpSubmatch: error parsing regexp"},
+		{name: "regexpReplaceAll with an invalid pattern", text: `{{ regexpReplaceAll "(" "" "x" }}`, err: "error calling regexpReplaceAll: error parsing regexp"},
 	})
 }
 
@@ -96,6 +99,7 @@ func TestDefault(t *testing.T) {
 		{name: "an empty string", text: `{{ "" | default "x" }}`, want: "x"},
 		{name: "an empty list", text: `{{ list | default "x" }}`, want: "x"},
 		{name: "an empty map", text: `{{ fromJSON "{}" | default "x" }}`, want: "x"},
+		{name: "a nil pointer", text: `{{ . | default "x" }}`, data: (*string)(nil), want: "x"},
 		{name: "a value", text: `{{ "v" | default "x" }}`, want: "v"},
 		{
 			// A real zero is a value: a count of 0 must not become the fallback.
