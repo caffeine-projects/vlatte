@@ -174,6 +174,29 @@ func TestLatency_AClientThatWentAwayEndsIt(t *testing.T) {
 	}
 }
 
+func TestLatency_AStageAfterItThatAbortsEndsTheFlow(t *testing.T) {
+	// A stage after the latency that aborts, once the write reaches it, ends the answer then: a stream waiting on the
+	// flow's context learns it without another write.
+	for name, abort := range map[string]error{"an abort": vlatte.ErrAbort, "a reset": vlatte.ErrReset} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cut := vlatte.StepFunc(func(context.Context, []byte, vlatte.Stage) (int, error) { return 0, abort })
+				start := time.Now()
+				flow := vlatte.NewFlow(t.Context(), failingSink{}, []vlatte.Step{fault.Latency(vlatte.Latency(time.Second)), cut})
+
+				_, err := flow.Write([]byte("a"))
+				require.NoError(t, err)
+
+				<-flow.Context().Done()
+				require.Equal(t, time.Second, time.Since(start))
+				require.ErrorIs(t, context.Cause(flow.Context()), vlatte.ErrAbort)
+				require.ErrorIs(t, context.Cause(flow.Context()), abort)
+				require.ErrorIs(t, flow.Close(), abort)
+			})
+		})
+	}
+}
+
 func TestLatency_RefusesNoDelay(t *testing.T) {
 	// A latency with no delay to pick is a mistake of the mock: it fails as the mock is built.
 	require.PanicsWithValue(t, "fault: latency needs a delay", func() { fault.Latency(nil) })

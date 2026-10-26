@@ -3,6 +3,7 @@ package fault
 import (
 	"bytes"
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -37,6 +38,7 @@ type latency struct{ delay vlatte.Delay }
 
 func (l latency) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	s := &latencyStage{
+		flow:  flow,
 		ctx:   flow.Context(),
 		delay: l.delay,
 		next:  next,
@@ -58,8 +60,10 @@ type latencyOp struct {
 }
 
 // latencyStage queues what it gets, each with the time it is due, and passes it on, in order, from a goroutine of its
-// own, which ends with the flow, the end of the answer, or the first error of next.
+// own, which ends with the flow, the end of the answer, or the first error of next, which aborts the flow when it asks
+// to.
 type latencyStage struct {
+	flow  *vlatte.Flow
 	ctx   context.Context
 	delay vlatte.Delay
 	next  vlatte.Stage
@@ -119,6 +123,11 @@ func (s *latencyStage) run() {
 	defer close(s.done)
 
 	err := s.passOn()
+
+	// The flow's caller doesn't see what next returns from here: an abort must end the flow itself.
+	if errors.Is(err, vlatte.ErrAbort) || errors.Is(err, vlatte.ErrReset) {
+		s.flow.Abort(err)
+	}
 
 	s.mu.Lock()
 	s.err = err
