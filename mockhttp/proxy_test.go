@@ -231,7 +231,7 @@ func TestForwardProxy_PassesTheHostAnswerOnAsAProxyReplyDoes(t *testing.T) {
 	require.Equal(t, "body", string(body))
 	require.Equal(t, "abc", res.Trailer.Get("X-Checksum"))
 	require.Empty(t, res.Header.Values("Keep-Alive"))
-	require.Equal(t, "true", res.Header.Get(vlatte.ProxiedHeader))
+	require.Equal(t, "true", res.Header.Get(vlatte.HeaderProxied))
 }
 
 func TestForwardProxy_StreamsTheHostBodyAsItComes(t *testing.T) {
@@ -278,7 +278,7 @@ func TestForwardProxy_ARequestInOriginFormGetsTheNoMatchAnswer(t *testing.T) {
 
 	require.Equal(t, m.Config().RequestWasNotMatchedStatusCode, res.StatusCode)
 	require.Equal(t, vlatte.FailureNoMatch, res.Header.Get(HeaderVlatteError))
-	require.Empty(t, res.Header.Get(vlatte.ProxiedHeader))
+	require.Empty(t, res.Header.Get(vlatte.HeaderProxied))
 }
 
 func TestForwardProxy_LogsWhatTheHostAnswered(t *testing.T) {
@@ -322,7 +322,7 @@ func TestForwardProxy_AFailedCallIsVlattesAnswer(t *testing.T) {
 	require.Equal(t, m.Config().ErrorStatusCode, res.StatusCode)
 	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
 	require.Contains(t, string(body), "proxy: calling the target "+closed.URL+"/gone")
-	require.Empty(t, res.Header.Get(vlatte.ProxiedHeader))
+	require.Empty(t, res.Header.Get(vlatte.HeaderProxied))
 }
 
 func TestForwardProxy_TimesOutWithTheCallersTransport(t *testing.T) {
@@ -1239,8 +1239,8 @@ func TestProxy_PassesProtocolSwitchesOn(t *testing.T) {
 			require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
 			require.Equal(t, "echo", res.Header.Get(HeaderUpgrade))
 			require.Equal(t, "yes", res.Header.Get("X-Target"))
-			require.Equal(t, "true", res.Header.Get(vlatte.ProxiedHeader))
-			require.NotEmpty(t, res.Header.Get(vlatte.RequestIDHeader))
+			require.Equal(t, "true", res.Header.Get(vlatte.HeaderProxied))
+			require.NotEmpty(t, res.Header.Get(vlatte.HeaderRequestID))
 
 			_, err := io.WriteString(conn, "switched\n")
 			require.NoError(t, err)

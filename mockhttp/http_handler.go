@@ -432,7 +432,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w = reqValues.answer
 	}
 
-	h.debugHeader(w, vlatte.RequestIDHeader, reqValues.ReqID)
+	h.debugHeader(w, vlatte.HeaderRequestID, reqValues.ReqID)
 
 	if parseErr != nil {
 		h.lifecycle.OnWarning(reqValues, fmt.Errorf("request_body_parser: %w", parseErr))
@@ -528,10 +528,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reqValues.Mock = mock
 
 	// The hits count this request, which Inc counts once the answer is sent.
-	h.debugHeader(w, vlatte.MatchedMockIDHeader, mock.ID())
-	h.debugHeader(w, vlatte.MatchedMockNameHeader, mock.Name())
-	h.debugHeader(w, vlatte.MatchedMockHitsHeader, strconv.FormatInt(mock.Hits()+1, 10))
-	h.debugHeader(w, vlatte.MatchedMockSourceHeader, mock.Origin())
+	h.debugHeader(w, vlatte.HeaderMatchedMockID, mock.ID())
+	h.debugHeader(w, vlatte.HeaderMatchedMockName, mock.Name())
+	h.debugHeader(w, vlatte.HeaderMatchedMockHits, strconv.FormatInt(mock.Hits()+1, 10))
+	h.debugHeader(w, vlatte.HeaderMatchedMockSource, mock.Origin())
 
 	d := make(map[string]any, len(h.templateDataProviders))
 	sdpIn := &TemplateDataProviderInput{r: reqValues}
@@ -706,7 +706,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		h.debugHeader(rw, vlatte.ProxiedHeader, "true")
+		h.debugHeader(rw, vlatte.HeaderProxied, "true")
 
 		pipe, ok := h.switchProtocols(rw, reqValues, res, mock, wire)
 		if !ok {
@@ -744,7 +744,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if res.proxied {
-			h.debugHeader(w, vlatte.ProxiedHeader, "true")
+			h.debugHeader(w, vlatte.HeaderProxied, "true")
 		}
 
 		// The mock counts as served, whatever happens to the answer once its status and headers are sent.
@@ -858,7 +858,7 @@ func (h *mockHandler) serveUpstream(w http.ResponseWriter, r *RequestValues, ups
 		capture.answeredBy(true)
 	}
 
-	h.debugHeader(w, vlatte.ProxiedHeader, "true")
+	h.debugHeader(w, vlatte.HeaderProxied, "true")
 
 	if res.upgrade != nil {
 		pipe, ok := h.switchProtocols(w, r, res, nil, nil)

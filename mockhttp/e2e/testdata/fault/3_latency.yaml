@@ -1,0 +1,10 @@
+request:
+  method: GET
+  path: /latency
+response:
+  status: 200
+  body: hello
+wire_steps:
+  - type: latency
+    latency: 50ms
+    jitter: 10ms

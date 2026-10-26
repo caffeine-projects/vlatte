@@ -45,5 +45,5 @@ func TestServer_AnUnknownMethodIsUnimplemented(t *testing.T) {
 	var trailer metadata.MD
 	err := m.MustDial().Invoke(t.Context(), "/nope.Service/Call", &pb.HiReq{}, &pb.HiRes{}, grpc.Trailer(&trailer))
 	require.Equal(t, codes.Unimplemented, status.Code(err))
-	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.FailureHeader))
+	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.HeaderFailure))
 }

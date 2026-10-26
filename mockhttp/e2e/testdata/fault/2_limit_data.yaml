@@ -1,0 +1,11 @@
+request:
+  method: GET
+  path: /limit
+response:
+  status: 200
+  body: hello
+steps:
+  - type: slow_close
+    delay: 0
+  - type: limit_data
+    bytes: 3

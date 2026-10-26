@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"iter"
@@ -17,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/fault"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
@@ -636,4 +638,28 @@ func TestFileStore_KeepsAMockOfACustomRequestMatcher(t *testing.T) {
 
 	res, _ = do(t, http.MethodGet, m.URL(), nil, nil)
 	require.Equal(t, StatusNoMatch, res.StatusCode)
+}
+
+func TestFileStore_KeepsAMockOfFaults(t *testing.T) {
+	// Faults describe themselves as their specs: a mock with faults is stored, and has them after a restart.
+	dir := t.TempDir()
+
+	m := adminServer(t, Setup().AdminStore(FileStore(dir)))
+	addMock(t, m, `{"id": "faulty", "request": {"method": "GET", "path": "/f"}, "response": {"status": 200},
+		"steps": [{"type": "limit_data", "bytes": 3}, {"type": "bandwidth", "rate": "3g"}],
+		"wire_steps": [{"type": "connection_reset_by_peer"}]}`)
+	m.Close()
+
+	m = adminServer(t, Setup().AdminStore(FileStore(dir)))
+
+	res, body := do(t, http.MethodGet, m.AdminURL()+"/mocks/faulty", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+	require.Equal(t, []any{
+		map[string]any{"type": "limit_data", "bytes": 3.0},
+		map[string]any{"type": "bandwidth", "rate": float64(fault.Bandwidth3G)},
+	}, got["steps"])
+	require.Equal(t, []any{map[string]any{"type": "connection_reset_by_peer"}}, got["wire_steps"])
 }
