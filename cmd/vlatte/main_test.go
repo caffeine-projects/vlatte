@@ -11,6 +11,7 @@ import (
 	"crypto/x509/pkix"
 	json "encoding/json/v2"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -23,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -1083,4 +1085,31 @@ func TestRun_MCPHelp(t *testing.T) {
 	require.Equal(t, 0, run(context.Background(), []string{"mcp", "--help"}, nil, &out, io.Discard))
 	require.Contains(t, out.String(), "serves its admin API to an AI agent over MCP, on stdin and stdout")
 	require.Contains(t, out.String(), "vlatte mcp [flags]")
+}
+
+func TestCLI_MCPFailsWhenTheServerCantStart(t *testing.T) {
+	// An agent that starts vlatte mcp learns why it ended: the server's error goes to stderr, and stdout stays empty.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
+
+	var stdout, stderr bytes.Buffer
+	require.Equal(t, 1, run(context.Background(), []string{"mcp", "--addr", l.Addr().String()}, strings.NewReader(""), &stdout, &stderr))
+	require.Contains(t, stderr.String(), "address already in use")
+	require.Empty(t, stdout.String())
+}
+
+func TestCLI_MCPFailsWhenStdinFails(t *testing.T) {
+	// A stdin that fails ends the server with an error, not as an agent that hung up.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	var stderr lockedBuffer
+	stdin := iotest.ErrReader(errors.New("stdin: broken"))
+
+	require.Equal(t, 1, run(context.Background(), []string{"mcp", "--addr", randomAddr(t)}, stdin, io.Discard, &stderr))
+	require.Contains(t, stderr.String(), "stdin: broken")
 }

@@ -2,10 +2,12 @@ package handler_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
@@ -40,4 +42,24 @@ func TestMockSchema_NotSupported(t *testing.T) {
 
 	doc := problem(t, res, body, http.StatusNotImplemented, "not_supported")
 	require.Equal(t, "this mock server can't describe its mock files", doc["detail"])
+}
+
+func TestMockSchema_OnOperationsWithoutOne(t *testing.T) {
+	// The handler answers for itself, as the route does, when the server has no schema.
+	ops := handler.NewOperations(adminapi.Capabilities{Mocks: adminapi.MocksOf[*fakeMock](newStore(t), nil)})
+
+	rec := httptest.NewRecorder()
+	handler.MockSchema(ops).ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/schema", nil))
+
+	require.Equal(t, http.StatusNotImplemented, rec.Code)
+	require.Contains(t, rec.Body.String(), `"code": "not_supported"`)
+}
+
+func TestMockSchema_ASchemaThatIsntJSONIsTheServersProblem(t *testing.T) {
+	// YAML is the server's schema converted: one that doesn't parse is an internal error, not a broken document.
+	url := serve(t, newStore(t), adminapi.Capabilities{MockSchema: []byte(`{"type":`)})
+
+	res, body := send(t, request{method: http.MethodGet, url: url + "/schema", accept: "application/yaml"})
+
+	problem(t, res, body, http.StatusInternalServerError, "internal")
 }

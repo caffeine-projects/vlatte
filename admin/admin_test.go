@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/admin"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/mockgrpc"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
@@ -76,4 +77,15 @@ func TestAdmin_MCPIsOffUnlessAsked(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusNotImplemented, res.StatusCode)
+}
+
+func TestAdmin_AServerItCantServeLeavesItFree(t *testing.T) {
+	// A mock server the admin API refuses, such as one without its mocks, doesn't take it: the next one gets it.
+	api := admin.MustNew()
+
+	_, err := api.Serve(adminapi.Capabilities{})
+	require.EqualError(t, err, "admin: no mocks: the capabilities need Mocks")
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(api))
+	t.Cleanup(m.Close)
 }
