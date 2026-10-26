@@ -1,14 +1,22 @@
-// Package mockgrpc runs gRPC mock servers for tests.
+// Package mockgrpc runs gRPC mock servers for tests, and for the vlatte command.
 //
-// Register the service on a [Server], add mocks for its methods, then start it:
+// A server serves any method of the services whose generated code the program imports, or whose descriptor sets it
+// was given with [ConfigBuilder.Descriptors]: no service needs registering. Mocks name methods, match the calls, and
+// answer them, whatever their call type: unary, server, client or bidi streaming.
 //
-//	m := mockgrpc.MustNew()
-//	pb.RegisterGreeterServer(m, pb.UnimplementedGreeterServer{})
+//	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory())
 //	m.MustStart()
-//	defer m.Close()
+//	t.Cleanup(m.Close)
 //
-//	m.MustMock(mockgrpc.UnaryMethod("Greeter/SayHello").
-//		Reply(mockgrpc.Unary().Message(&pb.HelloReply{Message: "hi"})))
+//	m.MustMock(mockgrpc.Method("greeter.Greeter/SayHello").
+//		Field("name", match.Equal("ann")).
+//		Reply(mockgrpc.Message(&pb.HelloReply{Message: "hi ann"})))
 //
-// Clients connect to [Server.Addr].
+//	client := pb.NewGreeterClient(m.MustDial())
+//
+// [Method] starts a mock; its matchers read the call's metadata and its request, as protojson writes it with the
+// field names of the .proto file. [Message], [Messages], [JSON], [Template], [Status], [Bidi] and [Func] reply.
+// Mocks can be limited with Times, take part in scenarios, wait with Delay, and run on_complete events, such as
+// webhooks. A server can keep a journal of its calls, which tests verify with the same builders, and serve an admin
+// API. Mocks can also come from JSON or YAML files: see [FromFile].
 package mockgrpc
