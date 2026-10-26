@@ -38,3 +38,12 @@ func mockIDs(doc map[string]any) []string {
 
 	return ids
 }
+
+func TestListMocksTool_ANameThatCantBeAnswered(t *testing.T) {
+	// A mock named in Go can have a name that isn't UTF-8, which JSON can't hold: the list is a problem then.
+	m := newFake("hello")
+	m.name = "\xff"
+	cs := connect(t, newStore(t, m))
+
+	callFails(t, cs, "list_mocks", nil, http.StatusInternalServerError, "internal")
+}

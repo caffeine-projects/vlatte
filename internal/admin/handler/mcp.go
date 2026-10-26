@@ -1,9 +1,9 @@
 package handler
 
 import (
+	"cmp"
 	"context"
 	"encoding/json/jsontext"
-	"fmt"
 	"io"
 	"net/http"
 	"reflect"
@@ -104,10 +104,24 @@ type noInput struct{}
 // addTool adds tool to s, which runs run on its input. run returns the operation's result, nil for none, or its
 // error, whose problem document is the tool's error.
 func addTool[In any](s *mcp.Server, tool *mcp.Tool, run func(ctx context.Context, in In) (any, error)) {
-	tool.InputSchema = inputSchema[In]()
+	serveTool(s, tool, func(ctx context.Context, _ jsontext.Value, in In) (any, error) { return run(ctx, in) })
+}
 
-	mcp.AddTool(s, tool, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
-		out, err := run(ctx, in)
+// addArgumentsTool is like addTool, for a tool whose arguments, of the schema of In, are the document its operation
+// takes: run takes them as they came.
+func addArgumentsTool[In any](s *mcp.Server, tool *mcp.Tool, run func(ctx context.Context, args jsontext.Value) (any, error)) {
+	serveTool(s, tool, func(ctx context.Context, args jsontext.Value, _ In) (any, error) { return run(ctx, args) })
+}
+
+// serveTool adds tool to s, which runs run on its arguments, as they came and decoded as In.
+func serveTool[In any](s *mcp.Server, tool *mcp.Tool, run func(ctx context.Context, args jsontext.Value, in In) (any, error)) {
+	// The SDK infers the schema of an input this can't describe, and refuses what neither can.
+	if schema, err := inputSchema[In](); err == nil {
+		tool.InputSchema = schema
+	}
+
+	mcp.AddTool(s, tool, func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
+		out, err := run(ctx, jsontext.Value(req.Params.Arguments), in)
 		if err != nil {
 			return problemResult(ctx, err, tool.Name), nil, nil
 		}
@@ -157,15 +171,10 @@ func toolResult(body jsontext.Value, failed bool) *mcp.CallToolResult {
 var _documentSchema = &jsonschema.Schema{Type: "object"}
 
 // inputSchema is the input schema of a tool whose input is In: its jsontext.Value fields are documents.
-func inputSchema[In any]() *jsonschema.Schema {
-	schema, err := jsonschema.For[In](&jsonschema.ForOptions{
+func inputSchema[In any]() (*jsonschema.Schema, error) {
+	return jsonschema.For[In](&jsonschema.ForOptions{
 		TypeSchemas: map[reflect.Type]*jsonschema.Schema{reflect.TypeFor[jsontext.Value](): _documentSchema},
 	})
-	if err != nil {
-		panic(fmt.Sprintf("admin: the input of a tool: %v", err))
-	}
-
-	return schema
 }
 
 // moduleVersion is the version of vlatte the program was built with, as the main module or a dependency, or
@@ -173,18 +182,14 @@ func inputSchema[In any]() *jsonschema.Schema {
 func moduleVersion() string {
 	const path = "github.com/caffeine-projects/vlatte"
 
+	version := "(devel)"
 	if info, ok := debug.ReadBuildInfo(); ok {
 		for _, m := range append([]*debug.Module{&info.Main}, info.Deps...) {
-			if m.Path == path && m.Version != "" && m.Version != "(devel)" {
-				return m.Version
+			if m.Path == path {
+				version = cmp.Or(m.Version, version)
 			}
 		}
 	}
 
-	return "(devel)"
-}
-
-// document encodes v, an object of a tool's input, as the JSON document the operation takes.
-func document(v any) ([]byte, error) {
-	return encode(v, _formatJSON)
+	return version
 }

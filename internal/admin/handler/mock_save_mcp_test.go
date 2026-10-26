@@ -26,3 +26,14 @@ func TestSaveMocksTool_Refused(t *testing.T) {
 	callFails(t, cs, "save_mocks", map[string]any{"dir": "../x"}, http.StatusBadRequest, "invalid_body")
 	require.Empty(t, files.dir, "nothing was saved")
 }
+
+func TestSaveMocksTool_Defaults(t *testing.T) {
+	// No arguments take the server's defaults, as an empty body does.
+	files := &fakeFiles{saved: []string{"_mocks/hello.mock.yaml"}}
+	cs := connect(t, newStore(t), adminapi.Capabilities{Files: files})
+
+	doc := conformsAs(t, call(t, cs, "save_mocks", nil), "json", "SavedFiles")
+	require.Equal(t, []any{"_mocks/hello.mock.yaml"}, doc["files"])
+	require.Empty(t, files.dir)
+	require.Empty(t, files.format)
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
+	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 )
 
@@ -178,4 +179,17 @@ func TestNewMCP_DocumentArgumentsAreObjectsWithTheirDescription(t *testing.T) {
 		"properties": {"mock": {"type": "object", "description": "The mock, as a mock file writes it: see mock_schema."}},
 		"additionalProperties": false
 	}`, string(schema))
+}
+
+func TestAddTool_AProblemThatCantBeEncodedStillFails(t *testing.T) {
+	// A problem whose origin isn't UTF-8, such as a mock file's path read from a disk, can't be a JSON problem
+	// document: the tool still fails, with the problem's detail, so the agent learns what failed.
+	err := &config.Error{Scope: "mock", Problems: []config.Problem{{
+		Code: config.CodeInvalidValue, Origin: "file \xff.yaml", Key: "response.status", Message: "bad status",
+	}}}
+	cs := connect(t, newStore(t), adminapi.Capabilities{Files: &fakeFiles{err: err}})
+
+	text, failed := callTool(t, cs, "reload_mocks", nil)
+	require.True(t, failed)
+	require.Equal(t, "the mock files have 1 problem", text)
 }

@@ -1113,3 +1113,16 @@ func TestCLI_MCPFailsWhenStdinFails(t *testing.T) {
 	require.Equal(t, 1, run(context.Background(), []string{"mcp", "--addr", randomAddr(t)}, stdin, io.Discard, &stderr))
 	require.Contains(t, stderr.String(), "stdin: broken")
 }
+
+func TestCLI_AServerThatCantBeCreatedFailsTheRun(t *testing.T) {
+	// A setting that is valid but can't be served, such as a root directory that is a file, fails the run, apart
+	// from usage errors.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.WriteFile("afile", nil, 0o600))
+
+	var stderr bytes.Buffer
+	require.Equal(t, 1, run(context.Background(), []string{"--addr", randomAddr(t), "--root-dir=afile"}, nil, io.Discard, &stderr))
+	require.Contains(t, stderr.String(), "afile: not a directory")
+	require.NotContains(t, stderr.String(), _helpHint)
+}

@@ -20,11 +20,6 @@ func addSetScenarioTool(s *mcp.Server, ops *Operations) {
 	}
 
 	addTool(s, tool, func(_ context.Context, in scenarioState) (any, error) {
-		doc, err := document(map[string]any{"state": in.State})
-		if err != nil {
-			return nil, err
-		}
-
-		return ops.SetScenario(in.Name, doc, _formatJSON)
+		return ops.moveScenario(in.Name, in.State)
 	})
 }

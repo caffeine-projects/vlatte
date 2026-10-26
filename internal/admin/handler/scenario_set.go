@@ -29,13 +29,18 @@ func (o *Operations) SetScenario(name string, doc []byte, format string) (Scenar
 		return Scenario{}, invalid("the body", err)
 	}
 
-	if change.state == "" {
+	return o.moveScenario(name, change.state)
+}
+
+// moveScenario moves the scenario name to state, which can't be empty, and returns it.
+func (o *Operations) moveScenario(name, state string) (Scenario, error) {
+	if state == "" {
 		return Scenario{}, invalid("the body", &config.Error{Problems: []config.Problem{{
 			Code: config.CodeMissingValue, Origin: "admin request", Key: "state", Message: "state is required",
 		}}})
 	}
 
-	o.scenarios.SetScenario(name, change.state)
+	o.scenarios.SetScenario(name, state)
 
-	return Scenario{Name: name, State: change.state}, nil
+	return Scenario{Name: name, State: state}, nil
 }
