@@ -422,6 +422,14 @@ func (app *Server) Close() {
 		<-served
 	}
 
+	// The mocks stay stored, so assertions still read them after Close: they release what they hold.
+	mocks, _ := app.storage.PickAll(context.Background())
+	for _, mock := range mocks {
+		if err := mock.Close(); err != nil {
+			app.logger.Warn().Err(err).Msgf("server: Close: closing mock %s", mock.ID())
+		}
+	}
+
 	if err := app.Journal().Close(); err != nil {
 		app.logger.Warn().Err(err).Msg("server: Close: closing the journal")
 	}

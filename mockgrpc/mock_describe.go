@@ -117,6 +117,10 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		if res, ok := r.describe(); ok {
 			doc["bidi"] = res
 		}
+	case *ProxyReply:
+		if res, ok := r.describe(); ok {
+			doc["proxy"] = res
+		}
 	}
 
 	return descriptor.Root(doc)
@@ -377,6 +381,26 @@ func (b *BidiReply) describe() (map[string]any, bool) {
 		}
 
 		res[key] = v
+	}
+
+	return res, true
+}
+
+// describe describes the ProxyReply as a mock file writes it, and reports false when it has dial options, which no mock
+// file can hold.
+func (r *ProxyReply) describe() (map[string]any, bool) {
+	if len(r.dialOptions) > 0 {
+		return nil, false
+	}
+
+	res := map[string]any{"target": r.target}
+
+	if h := describeMD(r.header); h != nil {
+		res["header"] = h
+	}
+
+	if len(r.remove) > 0 {
+		res["remove_headers"] = anys(r.remove)
 	}
 
 	return res, true
