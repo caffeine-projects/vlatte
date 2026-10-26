@@ -3,6 +3,7 @@ package mockgrpc
 import (
 	"context"
 	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
@@ -41,12 +42,16 @@ type Builder struct {
 	scenarioRequiredState string
 	scenarioNewState      string
 	delay                 vlatte.Delay
+	delayDuration         time.Duration // the delay of Delay, which a description writes; DelayFunc's can't be
 	events                vlatte.EventConfigs
 	expectations          []*vlatte.Eval[*Call]
-	readsRequest          bool // a matcher reads the request, which a bidi call hasn't sent when it matches
+	readsRequest          bool    // a matcher reads the request, which a bidi call hasn't sent when it matches
+	json                  *string // set with JSON: the request, decoded once the method is known
 	reply                 Reply
 	origin                string
-	err                   error // the first error of a method that can't return one, such as ID's
+	doc                   map[string]any   // the mock document the builder was read from, which describes its mocks
+	described             describedRequest // the request matchers, as a mock file writes them
+	err                   error            // the first error of a method that can't return one, such as ID's
 }
 
 // Method starts a mock of a method, named by whole segments of its full method "/pkg.Service/Method": "Method",
@@ -96,6 +101,7 @@ func (b *Builder) Enabled(enabled bool) *Builder {
 // Header matches the metadata the client sent under key: its value, when it sent one, else all of them, nil when it
 // sent none. gRPC metadata keys are lowercase.
 func (b *Builder) Header(key string, m vlatte.Matcher) *Builder {
+	b.described.header = append(b.described.header, namedMatcher{name: key, matcher: m})
 	b.expectations = append(b.expectations, &vlatte.Eval[*Call]{
 		Target:   int(_scopeHeader),
 		Key:      key,
@@ -110,6 +116,7 @@ func (b *Builder) Header(key string, m vlatte.Matcher) *Builder {
 // as protojson writes it, with the field names of the .proto file: enums as names, int64 values as text. A client
 // streaming call is read as the array of its messages, so "$[0].key" reads its first message.
 func (b *Builder) Field(path string, m vlatte.Matcher) *Builder {
+	b.described.fields = append(b.described.fields, namedMatcher{name: path, matcher: m})
 	b.readsRequest = true
 	b.expectations = append(b.expectations, &vlatte.Eval[*Call]{
 		Target:   int(_scopeField),
@@ -121,8 +128,9 @@ func (b *Builder) Field(path string, m vlatte.Matcher) *Builder {
 	return b
 }
 
-// JSON matches a request whose JSON, as Field reads it, equals text, by match.EqualJSON's rule: fields the request
-// leaves out are its zero values, which text leaves out too.
+// JSON matches a request equal to the message text holds, by proto.Equal: text is read as protojson reads it, in the
+// type of the method's request, so {"user_id": "u1", "count": 42} and {"userId": "u1", "count": "42"} match the same
+// call. A client streaming call's text is an array of its messages. Build fails on text that holds no such message.
 func (b *Builder) JSON(text string) *Builder {
 	if !jsontext.Value(text).IsValid() && b.err == nil {
 		b.err = fmt.Errorf("json: not JSON: %q", text)
@@ -130,10 +138,20 @@ func (b *Builder) JSON(text string) *Builder {
 	}
 
 	b.readsRequest = true
+	b.json = &text
+
+	return b
+}
+
+// Body matches the request as JSON text, as Field reads it, with m, such as match.Contain("ann") or
+// match.EqualJSON(...).
+func (b *Builder) Body(m vlatte.Matcher) *Builder {
+	b.described.body = m
+	b.readsRequest = true
 	b.expectations = append(b.expectations, &vlatte.Eval[*Call]{
 		Target:   int(_scopeRequest),
-		Key:      "json",
-		Matcher:  match.EqualJSON(text),
+		Key:      "body",
+		Matcher:  m,
 		Selector: selectJSON,
 	})
 
@@ -142,16 +160,19 @@ func (b *Builder) JSON(text string) *Builder {
 
 // Message matches a request message equal to msg, by proto.Equal: the request of a unary or server streaming call.
 func (b *Builder) Message(msg proto.Message) *Builder {
+	b.described.message = msg
 	return b.messages("message", []proto.Message{msg})
 }
 
 // Messages matches the messages of a client streaming call, in order, each equal to its own by proto.Equal.
 func (b *Builder) Messages(msgs ...proto.Message) *Builder {
+	b.described.messages = msgs
 	return b.messages("messages", msgs)
 }
 
 // CallMatches matches a call fn reports true for. fn reads the call as matchers do, with its request: see [Call].
 func (b *Builder) CallMatches(fn func(call *Call) (bool, error)) *Builder {
+	b.described.undescribable = true
 	b.readsRequest = true
 	b.expectations = append(b.expectations, &vlatte.Eval[*Call]{
 		Target: int(_scopeRequest),
@@ -218,14 +239,14 @@ func (b *Builder) ScenarioStateWillBe(newState string) *Builder {
 // Delay waits for d before the mock replies. A client that leaves during the delay gets nothing, and the mock doesn't
 // count the call.
 func (b *Builder) Delay(d time.Duration) *Builder {
-	b.delay = vlatte.Latency(d)
+	b.delay, b.delayDuration = vlatte.Latency(d), d
 	return b
 }
 
 // DelayFunc sets a function that picks the delay before each reply, such as [vlatte.Jitter] or
 // [vlatte.UniformDistribution].
 func (b *Builder) DelayFunc(delay vlatte.Delay) *Builder {
-	b.delay = delay
+	b.delay, b.delayDuration = delay, 0
 	return b
 }
 
@@ -328,6 +349,14 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		events:       events,
 		reply:        b.reply,
 		replier:      replier,
+		doc:          b.doc,
+		described: mockDescription{
+			request:  b.described,
+			json:     b.json,
+			times:    b.times,
+			delay:    b.delayDuration,
+			scenario: [3]string{b.scenario, b.scenarioRequiredState, b.scenarioNewState},
+		},
 	}, nil
 }
 
@@ -356,7 +385,67 @@ func (b *Builder) request(app *Server) ([]protoreflect.MethodDescriptor, []*vlat
 		Selector: selectMethod,
 	})
 
-	return methods, append(expectations, b.expectations...), nil
+	expectations = append(expectations, b.expectations...)
+
+	if b.json != nil {
+		e, err := jsonEval(app.resolver, methods, *b.json)
+		if err != nil {
+			return nil, nil, fmt.Errorf("mock: %s: %w", b.method, err)
+		}
+
+		expectations = append(expectations, e)
+	}
+
+	return methods, expectations, nil
+}
+
+// jsonEval returns the matcher of JSON: a call whose messages equal those text holds, read in the request type of each
+// of methods.
+func jsonEval(r *resolver, methods []protoreflect.MethodDescriptor, text string) (*vlatte.Eval[*Call], error) {
+	want := make(map[string][]proto.Message, len(methods))
+
+	for _, md := range methods {
+		var msgs []proto.Message
+
+		if md.IsStreamingClient() {
+			var raw []jsontext.Value
+			if err := json.Unmarshal([]byte(text), &raw); err != nil {
+				return nil, fmt.Errorf("json: the request of %s is an array of messages: %w", fullMethod(md), err)
+			}
+
+			for i, item := range raw {
+				msg, err := r.decode(md.Input(), item)
+				if err != nil {
+					return nil, fmt.Errorf("json: message %d: %w", i, err)
+				}
+
+				msgs = append(msgs, msg)
+			}
+		} else {
+			msg, err := r.decode(md.Input(), []byte(text))
+			if err != nil {
+				return nil, fmt.Errorf("json: %w", err)
+			}
+
+			msgs = []proto.Message{msg}
+		}
+
+		want[fullMethod(md)] = msgs
+	}
+
+	return &vlatte.Eval[*Call]{
+		Target: int(_scopeRequest),
+		Key:    "json",
+		Matcher: vlatte.MatcherFunc("protoEqual", func(arg vlatte.MatcherArg) (bool, error) {
+			call, ok := arg.Value().(*Call)
+			if !ok {
+				return false, fmt.Errorf("mock: json matcher got %T, want *Call", arg.Value())
+			}
+
+			return slices.EqualFunc(call.Messages(), want[call.method], proto.Equal), nil
+		}),
+		Selector: selectCall,
+	}, nil
 }
 
 // messages matches the messages of the request, the value selectMessages gives, with msgs. key names the matcher in

@@ -346,7 +346,7 @@ func entryCall(app *Server, e *journal.Entry, md protoreflect.MethodDescriptor, 
 // streaming client.
 func decodeEntry(app *Server, e *journal.Entry, md protoreflect.MethodDescriptor) (*Call, error) {
 	if !md.IsStreamingClient() {
-		msg, err := decodeMessage(md.Input(), e.Body)
+		msg, err := app.resolver.decode(md.Input(), e.Body)
 		if err != nil {
 			return nil, err
 		}
@@ -361,7 +361,7 @@ func decodeEntry(app *Server, e *journal.Entry, md protoreflect.MethodDescriptor
 
 	msgs := make([]proto.Message, len(raw))
 	for i, r := range raw {
-		msg, err := decodeMessage(md.Input(), r)
+		msg, err := app.resolver.decode(md.Input(), r)
 		if err != nil {
 			return nil, fmt.Errorf("message %d: %w", i, err)
 		}

@@ -15,8 +15,8 @@ import (
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
@@ -57,6 +57,8 @@ type Server struct {
 	runner    *vlatte.EventRunner // runs the on_complete events of mocks
 	admin     *admin.Server       // nil without Config.Admin
 	events    *handler.Events     // the admin API's; nil without it
+
+	loader *fileLoader // loads the mock files of Config.MockFiles
 
 	// internal names the services the server implements itself, such as reflection: the mocks don't serve them.
 	internal map[string]bool
@@ -177,6 +179,7 @@ func New(config ...Option) (*Server, error) {
 	app.server = srv
 	app.journaled = make(map[string]bool)
 	app.internal = make(map[string]bool)
+	app.loader = &fileLoader{}
 
 	if conf.Reflection {
 		app.registerReflection()
@@ -193,10 +196,14 @@ func New(config ...Option) (*Server, error) {
 			admin.Addr(conf.Admin.Addr),
 			admin.Info(string(Kind), app.Addr),
 			admin.Logger(app.logger),
-			admin.Mocks[*Mock](store, nil),
+			admin.Mocks[*Mock](store, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
+				return buildAdminMock(app, content, format)
+			})),
+			admin.Files(adminFiles{app}),
+			admin.Scenarios(app.scenarios),
 			admin.Events(app.events),
 			admin.Logs(logs),
-			admin.Journal(j, nil),
+			admin.Journal(j, app.adminRequestPattern),
 		)
 	}
 
@@ -274,6 +281,21 @@ func (app *Server) Start() error {
 
 			return fmt.Errorf("server: Start: %w", err)
 		}
+	}
+
+	// The mock files load before the server serves, so its first call finds them.
+	if err := app.loader.load(app); err != nil {
+		_ = lis.Close()
+		app.addr = ""
+		app.closed = true
+
+		if app.admin != nil {
+			_ = app.admin.Close()
+		}
+
+		app.Journal().Close()
+
+		return fmt.Errorf("server: Start: %w", err)
 	}
 
 	app.warnUnjournaled()
@@ -414,15 +436,20 @@ func (app *Server) stop() {
 }
 
 // publish sends an event of kind, of a call of target, a full method, to the admin API's clients: mock, the mock that
-// matched, if one did, and err, what failed, if anything. Nothing is published without the admin API.
-func (app *Server) publish(kind, target string, mock *Mock, err error) {
+// matched, if one did, code, the code the call answered, and err, what failed, if anything. The event names the call's
+// journal entry, when the server keeps a journal. Nothing is published without the admin API.
+func (app *Server) publish(ctx context.Context, kind, target string, mock *Mock, code codes.Code, err error) {
 	if app.events == nil {
 		return
 	}
 
-	e := handler.Event{Type: kind, Time: time.Now(), Target: target}
+	e := handler.Event{Type: kind, Time: time.Now(), Target: target, Status: int(code)}
 	if mock != nil {
 		e.MockID = mock.ID()
+	}
+
+	if call := callOf(ctx); call != nil {
+		e.RequestID = call.entry.ID
 	}
 
 	if err != nil {
@@ -430,17 +457,6 @@ func (app *Server) publish(kind, target string, mock *Mock, err error) {
 	}
 
 	app.events.Publish(e)
-}
-
-// publishReply publishes the call of target whose mock replied err: an error with a gRPC status is the mock's answer,
-// as replyError tells, and any other a failure.
-func (app *Server) publishReply(target string, mock *Mock, err error) {
-	if _, ok := status.FromError(err); ok {
-		app.publish(handler.EventMatched, target, mock, nil)
-		return
-	}
-
-	app.publish(handler.EventError, target, mock, err)
 }
 
 // register registers the service desc describes, of impl: with a journal, its unary methods journal their calls.
@@ -493,21 +509,21 @@ func newLogger(conf *Config, logs *handler.Logs) *zerolog.Logger {
 
 // newResolver returns the resolver of the descriptors conf gives, in Files and Descriptors.
 func newResolver(conf *Config) (*resolver, error) {
-	r := &resolver{}
+	var files []*protoregistry.Files
 	if conf.Files != nil {
-		r.files = append(r.files, conf.Files)
+		files = append(files, conf.Files)
 	}
 
 	if len(conf.Descriptors) > 0 {
-		files, err := loadDescriptors(conf.Descriptors)
+		loaded, err := loadDescriptors(conf.Descriptors)
 		if err != nil {
 			return nil, err
 		}
 
-		r.files = append(r.files, files)
+		files = append(files, loaded)
 	}
 
-	return r, nil
+	return newResolverOf(files...), nil
 }
 
 // globalEvents returns the global on_complete events of conf.

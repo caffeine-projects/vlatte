@@ -36,6 +36,8 @@ type Mock struct {
 	events       vlatte.EventConfigs
 	reply        Reply // what the builder replies with, for its description
 	replier      Replier
+	doc          map[string]any // the mock document the mock was read from, nil for a mock built in Go
+	described    mockDescription
 }
 
 // ID returns the ID of the mock.

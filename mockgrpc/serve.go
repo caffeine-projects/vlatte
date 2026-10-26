@@ -65,7 +65,7 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 		}
 
 		journaled.unmatched(near)
-		app.publish(handler.EventUnmatched, call.method, nil, nil)
+		app.publish(ctx, handler.EventUnmatched, call.method, nil, app.config.NoMatchCode, nil)
 		app.logger.Warn().Str("method", call.method).Msg("grpc: no mock matched the call")
 
 		return fail(ctx, vlatte.FailureNoMatch, app.config.NoMatchCode, "%s: no mock matched the call of %s", kind,
@@ -97,7 +97,7 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 	journaled.replied(ctx, err)
 
 	if err != nil && !hasStatus(err) {
-		app.publishReply(call.method, mock, err)
+		app.publish(ctx, handler.EventError, call.method, mock, codes.Internal, err)
 		return replyError(ctx, kind.String(), mock, err)
 	}
 
@@ -109,7 +109,7 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 
 	mock.Inc()
 	app.afterServed(ctx, mock, call, err)
-	app.publish(handler.EventMatched, call.method, mock, nil)
+	app.publish(ctx, handler.EventMatched, call.method, mock, status.Code(err), nil)
 
 	return err
 }
@@ -159,7 +159,7 @@ func (in *interceptors) unknown(ctx context.Context, method string) error {
 	journaled.serve(ctx)
 	journaled.unmatched(nil)
 
-	in.app.publish(handler.EventUnmatched, method, nil, nil)
+	in.app.publish(ctx, handler.EventUnmatched, method, nil, codes.Unimplemented, nil)
 	in.app.logger.Warn().Str("method", method).Msg("grpc: no descriptor describes the method of the call")
 
 	return fail(ctx, vlatte.FailureNoMatch, codes.Unimplemented, "grpc: unknown method %s: import the generated "+

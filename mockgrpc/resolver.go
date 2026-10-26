@@ -1,12 +1,15 @@
 package mockgrpc
 
 import (
+	"bytes"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"os"
 	"slices"
 	"strings"
 
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -68,6 +71,73 @@ func typeOf(md protoreflect.MethodDescriptor) callType {
 // protoregistry.GlobalFiles, where generated code registers its own.
 type resolver struct {
 	files []*protoregistry.Files // Config.Files and Config.Descriptors, searched first
+	types []*dynamicpb.Types     // the message types of files, for those generated code doesn't have
+}
+
+// newResolverOf returns the resolver of files, searched before protoregistry.GlobalFiles.
+func newResolverOf(files ...*protoregistry.Files) *resolver {
+	r := &resolver{files: files}
+	for _, f := range files {
+		r.types = append(r.types, dynamicpb.NewTypes(f))
+	}
+
+	return r
+}
+
+// FindMessageByName implements protoregistry.MessageTypeResolver, for the Any fields of messages: generated types
+// first, then those of the server's descriptors.
+func (r *resolver) FindMessageByName(name protoreflect.FullName) (protoreflect.MessageType, error) {
+	if mt, err := protoregistry.GlobalTypes.FindMessageByName(name); err == nil {
+		return mt, nil
+	}
+
+	for _, t := range r.types {
+		if mt, err := t.FindMessageByName(name); err == nil {
+			return mt, nil
+		}
+	}
+
+	return nil, protoregistry.NotFound
+}
+
+// FindMessageByURL implements protoregistry.MessageTypeResolver: url names the type after its last "/".
+func (r *resolver) FindMessageByURL(url string) (protoreflect.MessageType, error) {
+	name := url
+	if _, after, ok := strings.CutLast(url, "/"); ok {
+		name = after
+	}
+
+	return r.FindMessageByName(protoreflect.FullName(name))
+}
+
+// FindExtensionByName implements protoregistry.ExtensionTypeResolver.
+func (r *resolver) FindExtensionByName(field protoreflect.FullName) (protoreflect.ExtensionType, error) {
+	if xt, err := protoregistry.GlobalTypes.FindExtensionByName(field); err == nil {
+		return xt, nil
+	}
+
+	for _, t := range r.types {
+		if xt, err := t.FindExtensionByName(field); err == nil {
+			return xt, nil
+		}
+	}
+
+	return nil, protoregistry.NotFound
+}
+
+// FindExtensionByNumber implements protoregistry.ExtensionTypeResolver.
+func (r *resolver) FindExtensionByNumber(message protoreflect.FullName, field protoreflect.FieldNumber) (protoreflect.ExtensionType, error) {
+	if xt, err := protoregistry.GlobalTypes.FindExtensionByNumber(message, field); err == nil {
+		return xt, nil
+	}
+
+	for _, t := range r.types {
+		if xt, err := t.FindExtensionByNumber(message, field); err == nil {
+			return xt, nil
+		}
+	}
+
+	return nil, protoregistry.NotFound
 }
 
 // fullMethod is the name gRPC gives the method md: "/pkg.Service/Method".
@@ -235,4 +305,60 @@ func withGlobalImports(set *descriptorpb.FileDescriptorSet) *descriptorpb.FileDe
 	}
 
 	return &descriptorpb.FileDescriptorSet{File: append(missing, set.GetFile()...)}
+}
+
+// encode returns msg as compact JSON, as matchers, the journal and templates read it: as protojson writes it, with
+// the field names of the .proto file and zero values left out. protojson varies its spaces, which the journal
+// shouldn't keep.
+func (r *resolver) encode(msg proto.Message) ([]byte, error) {
+	if msg == nil {
+		return nil, nil
+	}
+
+	b, err := protojson.MarshalOptions{UseProtoNames: true, Resolver: r}.Marshal(msg)
+	if err != nil {
+		return nil, fmt.Errorf("encoding the request message: %w", err)
+	}
+
+	v := jsontext.Value(b)
+	if err := v.Compact(); err != nil {
+		return nil, fmt.Errorf("encoding the request message: %w", err)
+	}
+
+	return v, nil
+}
+
+// encodeArray returns msgs as a compact JSON array, each as encode writes it.
+func (r *resolver) encodeArray(msgs []proto.Message) ([]byte, error) {
+	var buf bytes.Buffer
+
+	buf.WriteByte('[')
+
+	for i, msg := range msgs {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+
+		b, err := r.encode(msg)
+		if err != nil {
+			return nil, fmt.Errorf("message %d: %w", i, err)
+		}
+
+		buf.Write(b)
+	}
+
+	buf.WriteByte(']')
+
+	return buf.Bytes(), nil
+}
+
+// decode reads b, as protojson writes it, into a new message of the type desc describes. Field names may be those of
+// the .proto file or their JSON names.
+func (r *resolver) decode(desc protoreflect.MessageDescriptor, b []byte) (proto.Message, error) {
+	msg := newMessage(desc)
+	if err := (protojson.UnmarshalOptions{Resolver: r}).Unmarshal(b, msg); err != nil {
+		return nil, fmt.Errorf("not a %s: %w", desc.FullName(), err)
+	}
+
+	return msg, nil
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
@@ -89,24 +91,118 @@ func TestAdmin_IsTheSameForGRPC(t *testing.T) {
 }
 
 func TestAdmin_WhatGRPCMocksCantDo(t *testing.T) {
-	// gRPC mocks have no mock file format, recordings or scenarios: those operations answer 501, and say so.
+	// gRPC mocks don't record what they proxy: that operation answers 501, and says so.
 	m, _ := adminServer(t)
-	scope := m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "bye"})))
 
-	for _, route := range []struct {
-		method string
-		path   string
-	}{
-		{method: http.MethodPost, path: "/mocks"},
-		{method: http.MethodGet, path: "/mocks/" + scope.IDs()[0]},
-		{method: http.MethodPost, path: "/mocks/reload"},
-		{method: http.MethodPost, path: "/recording"},
-		{method: http.MethodGet, path: "/scenarios"},
-	} {
-		status, body := call(t, route.method, m.AdminURL()+route.path, `{}`)
-		require.Equal(t, http.StatusNotImplemented, status, route.path)
-		require.Contains(t, body, `"code": "not_supported"`)
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/recording", `{}`)
+	require.Equal(t, http.StatusNotImplemented, status)
+	require.Contains(t, body, `"code": "not_supported"`)
+}
+
+func TestAdmin_AddsDescribesAndResetsMocksOfDocuments(t *testing.T) {
+	// The admin API answered 501 to adding a gRPC mock, or reading one: gRPC mocks had no document. They have the
+	// mock file format now, so the admin API adds them, returns them as written, and a reset removes them.
+	m, client := adminServer(t)
+	doc := `{"id": "greet", "request": {"method": "Greetings", "fields": {"message": "hi"}}, "response": {"message": {"message": "from admin"}}}`
+
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks", doc)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	res, err := client.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.NoError(t, err)
+	require.Equal(t, "from admin", res.GetMessage())
+
+	status, body = call(t, http.MethodGet, m.AdminURL()+"/mocks/greet", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.JSONEq(t, doc, body)
+
+	status, body = call(t, http.MethodPost, m.AdminURL()+"/mocks", `{"request": {"method": "Nope"}, "response": {}}`)
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Contains(t, body, "unknown method")
+
+	status, _ = call(t, http.MethodPost, m.AdminURL()+"/reset", "")
+	require.Equal(t, http.StatusNoContent, status)
+
+	_, err = client.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.Equal(t, codes.NotFound, statusCode(err), "a reset removes the mocks the admin API added")
+}
+
+func TestAdmin_DescribesAMockBuiltInGo(t *testing.T) {
+	m, _ := adminServer(t)
+	m.MustMock(Method("Greetings").ID("go").Priority(2).Header("x-team", match.Equal("core")).
+		Reply(Message(&pb.HiRes{Message: "bye"}).Trailer("t", "v")))
+
+	status, body := call(t, http.MethodGet, m.AdminURL()+"/mocks/go", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.JSONEq(t, `{
+		"id": "go",
+		"priority": 2,
+		"request": {"method": "Greetings", "header": {"x-team": ["eq", "core"]}},
+		"response": {"messages": [{"message": "bye"}], "trailer": {"t": ["v"]}}
+	}`, body)
+}
+
+func TestAdmin_MovesScenarios(t *testing.T) {
+	m, client := adminServer(t)
+	m.MustMock(
+		Method("Greetings").ScenarioIs("s").ScenarioStateIs("started").Reply(Message(&pb.HiRes{Message: "first"})),
+		Method("Greetings").ScenarioIs("s").ScenarioStateIs("later").Reply(Message(&pb.HiRes{Message: "later"})),
+	)
+
+	status, body := call(t, http.MethodPut, m.AdminURL()+"/scenarios/s", `{"state": "later"}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	res, err := client.Greetings(t.Context(), &pb.HiReq{})
+	require.NoError(t, err)
+	require.Equal(t, "later", res.GetMessage())
+}
+
+func TestAdmin_SavesTheMocksItAddedAsFiles(t *testing.T) {
+	// The mocks the admin API adds go with the server: saved, they load from files, as written, on later starts.
+	dir := t.TempDir()
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin("").Logger(&logger).RootDir(dir))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	doc := `{"id": "saved", "request": {"method": "Greetings"}, "response": {"message": {"message": "from file"}}}`
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks", doc)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	status, body = call(t, http.MethodPost, m.AdminURL()+"/mocks/save", `{}`)
+	require.Equal(t, http.StatusOK, status, body)
+	require.FileExists(t, filepath.Join(dir, "_mocks", "saved.mock.yaml"))
+
+	saved, err := m.storage.Pick(t.Context(), "saved")
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(dir, "_mocks", "saved.mock.yaml"), saved.Origin(), "the file serves it now")
+
+	got, _ := greetWith(t, pb.NewTestServiceClient(m.MustDial()), "hi")
+	require.Equal(t, "from file", got)
+}
+
+func TestAdmin_QueriesTheJournalWithARequestOfAMockFile(t *testing.T) {
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin("").Logger(&logger).Journal(""))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
+
+	c := pb.NewTestServiceClient(m.MustDial())
+	for _, msg := range []string{"hi", "bye"} {
+		_, err := c.Greetings(t.Context(), &pb.HiReq{Message: msg})
+		require.NoError(t, err)
 	}
+
+	status, body := call(t, "QUERY", m.AdminURL()+"/requests", `{"request": {"method": "Greetings", "fields": {"message": "bye"}}}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	var page struct {
+		Requests []map[string]any `json:"requests"`
+	}
+
+	require.NoError(t, json.Unmarshal([]byte(body), &page))
+	require.Len(t, page.Requests, 1, body)
 }
 
 func TestAdmin_StreamsTheCalls(t *testing.T) {

@@ -1,17 +1,13 @@
 package mockgrpc
 
 import (
-	"bytes"
-	"encoding/json/jsontext"
 	"errors"
-	"fmt"
 	"io"
 	"slices"
 	"sync"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -20,10 +16,6 @@ var (
 	errSentTwice = errors.New("reply: the call answers one message: Send was called twice")
 	errNoRecv    = errors.New("reply: only a bidi streaming call receives messages: its messages are in Messages")
 )
-
-// _jsonOptions encode messages as matchers, the journal and templates read them: proto field names, as in the .proto
-// file, with zero values left out.
-var _jsonOptions = protojson.MarshalOptions{UseProtoNames: true}
 
 // Call is a call a mock serves, as its matchers, replies, templates and events read it.
 //
@@ -169,10 +161,10 @@ func (c *Call) encode() ([]byte, error) {
 	defer c.mu.Unlock()
 
 	if !c.isClientStream() {
-		return encodeJSON(c.message)
+		return c.server.resolver.encode(c.message)
 	}
 
-	return encodeJSONArray(c.messages)
+	return c.server.resolver.encodeArray(c.messages)
 }
 
 // receive reads the request of a streaming call before matching: the one message of a server streaming call, every
@@ -225,47 +217,4 @@ func (c *Call) isClientStream() bool {
 
 func (c *Call) isServerStream() bool {
 	return c.desc.IsStreamingServer()
-}
-
-// encodeJSON returns msg as compact JSON: protojson output varies its spaces, which the journal shouldn't keep.
-func encodeJSON(msg proto.Message) ([]byte, error) {
-	if msg == nil {
-		return nil, nil
-	}
-
-	b, err := _jsonOptions.Marshal(msg)
-	if err != nil {
-		return nil, fmt.Errorf("encoding the request message: %w", err)
-	}
-
-	v := jsontext.Value(b)
-	if err := v.Compact(); err != nil {
-		return nil, fmt.Errorf("encoding the request message: %w", err)
-	}
-
-	return v, nil
-}
-
-// encodeJSONArray returns msgs as a compact JSON array.
-func encodeJSONArray(msgs []proto.Message) ([]byte, error) {
-	var buf bytes.Buffer
-
-	buf.WriteByte('[')
-
-	for i, msg := range msgs {
-		if i > 0 {
-			buf.WriteByte(',')
-		}
-
-		b, err := encodeJSON(msg)
-		if err != nil {
-			return nil, fmt.Errorf("message %d: %w", i, err)
-		}
-
-		buf.Write(b)
-	}
-
-	buf.WriteByte(']')
-
-	return buf.Bytes(), nil
 }

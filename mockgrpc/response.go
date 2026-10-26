@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"time"
 
+	// Mock files name the google.rpc error details of a status by type: the program has them.
+	_ "google.golang.org/genproto/googleapis/rpc/errdetails"
+	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
@@ -34,15 +37,18 @@ var (
 // A unary or client streaming method answers one message, or a status: the empty message of its output type when the
 // Response has neither. A server or bidi streaming method answers each message in turn, then the status.
 type Response struct {
-	header    metadata.MD
-	trailer   metadata.MD
-	messages  []proto.Message
-	json      []string
-	templated bool // json holds templates
-	code      codes.Code
-	message   string
-	details   []proto.Message
-	delay     vlatte.Delay
+	header     metadata.MD
+	trailer    metadata.MD
+	messages   []proto.Message
+	json       []string
+	templated  bool // json holds templates
+	code       codes.Code
+	message    string
+	details    []proto.Message
+	detailJSON []string // details as mock files give them: JSON of Any messages, read as the replier is made
+	delay      vlatte.Delay
+	// delayDuration is the delay of MessageDelay, which a description writes; MessageDelayFunc's can't be.
+	delayDuration time.Duration
 }
 
 // Message returns a Response that answers msg, which must be of the type the method answers with.
@@ -112,13 +118,13 @@ func (r *Response) Details(details ...proto.Message) *Response {
 
 // MessageDelay waits for d before each message of the answer: a stream that trickles in.
 func (r *Response) MessageDelay(d time.Duration) *Response {
-	r.delay = vlatte.Latency(d)
+	r.delay, r.delayDuration = vlatte.Latency(d), d
 	return r
 }
 
 // MessageDelayFunc sets a function that picks the delay before each message of the answer, such as [vlatte.Jitter].
 func (r *Response) MessageDelayFunc(delay vlatte.Delay) *Response {
-	r.delay = delay
+	r.delay, r.delayDuration = delay, 0
 	return r
 }
 
@@ -130,7 +136,7 @@ func (r *Response) NewReplier(app *Server, methods []protoreflect.MethodDescript
 
 // replier makes the replier of NewReplier.
 func (r *Response) replier(app *Server, methods []protoreflect.MethodDescriptor) (*responseReplier, error) {
-	st, err := r.status()
+	st, err := r.status(app.resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +161,7 @@ func (r *Response) replier(app *Server, methods []protoreflect.MethodDescriptor)
 	}
 
 	for _, md := range methods {
-		msgs, err := r.messagesOf(md)
+		msgs, err := r.messagesOf(app.resolver, md)
 		if err != nil {
 			return nil, fmt.Errorf("reply: %s: %w", fullMethod(md), err)
 		}
@@ -176,33 +182,45 @@ func (r *Response) replier(app *Server, methods []protoreflect.MethodDescriptor)
 	return rep, nil
 }
 
-// status returns the status the Response ends with.
-func (r *Response) status() (*status.Status, error) {
-	st := status.New(r.code, r.message)
-	if len(r.details) == 0 {
-		return st, nil
+// status returns the status the Response ends with. A detail that is an Any, as mock files give them, goes as it is.
+func (r *Response) status(res *resolver) (*status.Status, error) {
+	if len(r.details) == 0 && len(r.detailJSON) == 0 {
+		return status.New(r.code, r.message), nil
 	}
 
 	if r.code == codes.OK {
 		return nil, fmt.Errorf("reply: %w", errDetailsWithoutStatus)
 	}
 
-	details := make([]protoadapt.MessageV1, len(r.details))
+	p := &spb.Status{Code: int32(r.code), Message: r.message}
+
 	for i, d := range r.details {
-		details[i] = protoadapt.MessageV1Of(d)
+		a, ok := d.(*anypb.Any)
+		if !ok {
+			var err error
+			if a, err = anypb.New(d); err != nil {
+				return nil, fmt.Errorf("reply: status detail %d: %w", i, err)
+			}
+		}
+
+		p.Details = append(p.Details, a)
 	}
 
-	st, err := st.WithDetails(details...)
-	if err != nil {
-		return nil, fmt.Errorf("reply: status details: %w", err)
+	for i, text := range r.detailJSON {
+		a := &anypb.Any{}
+		if err := (protojson.UnmarshalOptions{Resolver: res}).Unmarshal([]byte(text), a); err != nil {
+			return nil, fmt.Errorf("reply: status detail %d: %w", len(r.details)+i, err)
+		}
+
+		p.Details = append(p.Details, a)
 	}
 
-	return st, nil
+	return status.FromProto(p), nil
 }
 
 // messagesOf returns the messages of the Response for md: those it was given, which must be of md's output type, or
 // those its JSON holds, read in that type. Templates render for each call.
-func (r *Response) messagesOf(md protoreflect.MethodDescriptor) ([]proto.Message, error) {
+func (r *Response) messagesOf(res *resolver, md protoreflect.MethodDescriptor) ([]proto.Message, error) {
 	out := md.Output()
 
 	if r.templated {
@@ -212,7 +230,7 @@ func (r *Response) messagesOf(md protoreflect.MethodDescriptor) ([]proto.Message
 	if r.json != nil {
 		msgs := make([]proto.Message, len(r.json))
 		for i, text := range r.json {
-			msg, err := decodeMessage(out, []byte(text))
+			msg, err := res.decode(out, []byte(text))
 			if err != nil {
 				return nil, fmt.Errorf("json %d: %w", i, err)
 			}
@@ -230,16 +248,6 @@ func (r *Response) messagesOf(md protoreflect.MethodDescriptor) ([]proto.Message
 	}
 
 	return r.messages, nil
-}
-
-// decodeMessage reads b, as protojson writes it, into a new message of the type desc describes.
-func decodeMessage(desc protoreflect.MessageDescriptor, b []byte) (proto.Message, error) {
-	msg := newMessage(desc)
-	if err := protojson.Unmarshal(b, msg); err != nil {
-		return nil, fmt.Errorf("not a %s: %w", desc.FullName(), err)
-	}
-
-	return msg, nil
 }
 
 // responseReplier answers the calls of one mock with a Response. Calls only read it: gRPC sends the header and
@@ -307,7 +315,7 @@ func (r *responseReplier) messagesFor(ctx context.Context, call *Call) ([]proto.
 			return nil, fmt.Errorf("template %d: %w", i, err)
 		}
 
-		msg, err := decodeMessage(call.desc.Output(), buf.Bytes())
+		msg, err := call.server.resolver.decode(call.desc.Output(), buf.Bytes())
 		if err != nil {
 			return nil, fmt.Errorf("template %d: %w", i, err)
 		}

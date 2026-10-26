@@ -69,6 +69,12 @@ type Config struct {
 	// Parameters are the parameters templates read. Nil keeps them in memory.
 	Parameters vlatte.KV
 
+	// RootDir is where relative MockFiles patterns start. Empty is the working directory.
+	RootDir string
+
+	// MockFiles are glob patterns of the mock files the server loads at Start and on Reload.
+	MockFiles []string
+
 	// ShutdownTimeout is how long Close waits for the calls in flight before it cuts them. 0 means 5s.
 	ShutdownTimeout time.Duration
 
@@ -251,6 +257,17 @@ func (cb *ConfigBuilder) TemplateEngine(e vlatte.TemplateEngine) *ConfigBuilder 
 // Parameters sets the parameters templates read: {{ .Parameters.Get "key" }}.
 func (cb *ConfigBuilder) Parameters(params vlatte.KV) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.Parameters = params })
+}
+
+// RootDir sets where relative MockFiles patterns start. The default is the working directory.
+func (cb *ConfigBuilder) RootDir(dir string) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.RootDir = dir })
+}
+
+// MockFiles adds glob patterns of mock files, such as "testdata/grpc/*.yaml", which the server loads at Start, before
+// it serves, and again on Reload. See FromFile for their format.
+func (cb *ConfigBuilder) MockFiles(patterns ...string) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.MockFiles = append(conf.MockFiles, patterns...) })
 }
 
 // ShutdownTimeout sets how long Close waits for the calls in flight, such as a stream a client never ends, before it

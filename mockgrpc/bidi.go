@@ -165,7 +165,7 @@ func (r *bidiReplier) Reply(ctx context.Context, call *Call) error {
 			return err
 		}
 
-		b, err := encodeJSON(msg)
+		b, err := call.server.resolver.encode(msg)
 		if err != nil {
 			return err
 		}
