@@ -54,7 +54,7 @@ var (
 	//go:embed banner.txt
 	_banner      string
 	_description = fmt.Sprintf(`%s
-Flexible HTTP and gRPC mocking tool for Go.
+Flexible mocking tool for Go.
 Mock file formats: %s
 
 For more information, visit: %s`,
