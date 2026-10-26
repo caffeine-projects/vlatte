@@ -122,3 +122,25 @@ func TestFromFile_AMethodNoServiceHasFailsTheMock(t *testing.T) {
 	_, err := m.Mock(FromFile(path))
 	require.ErrorContains(t, err, "unknown method")
 }
+
+func TestFromFile_AFileThatCantBeReadSaysWhy(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "dir.yaml"), 0o755))
+
+	m := fileServer(t, Setup())
+
+	for _, tc := range []struct {
+		path string
+		code string
+	}{
+		{writeFile(t, dir, "mock.txt", "{}"), config.CodeUnsupportedFormat},
+		{filepath.Join(dir, "missing.yaml"), config.CodeFileNotFound},
+		{filepath.Join(dir, "dir.yaml"), config.CodeReadError},
+	} {
+		_, err := m.Mock(FromFile(tc.path))
+		cfgErr, ok := errors.AsType[*config.Error](err)
+		require.True(t, ok, "%v", err)
+		require.Len(t, cfgErr.Problems, 1)
+		require.Equal(t, tc.code, cfgErr.Problems[0].Code, "%s", tc.path)
+	}
+}

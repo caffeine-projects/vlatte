@@ -205,3 +205,24 @@ func TestResponse_ATemplateThatRendersNoMessageFailsTheCall(t *testing.T) {
 	require.Equal(t, codes.Internal, status.Code(err))
 	require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(vlatte.FailureHeader))
 }
+
+func TestResponse_ADetailOfATypeNoOneKnowsFailsTheMock(t *testing.T) {
+	m := serve(t)
+
+	_, err := m.Mock(FromBytes([]byte(`
+request: {method: Greetings}
+response: {status: {code: NOT_FOUND, details: [{"@type": "type.googleapis.com/nope.Detail"}]}}
+`), "yaml"))
+	require.ErrorContains(t, err, "reply: status detail 0")
+}
+
+func TestResponse_ATemplateThatFailsToRenderFailsTheCall(t *testing.T) {
+	m := serve(t)
+	m.MustMock(Method("Greetings").Reply(Template(`{{ .Request.Nope }}`)))
+
+	var trailer metadata.MD
+	_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{}, grpc.Trailer(&trailer))
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.Contains(t, status.Convert(err).Message(), "template 0")
+	require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(vlatte.FailureHeader))
+}

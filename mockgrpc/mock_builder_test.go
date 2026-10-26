@@ -264,3 +264,23 @@ func TestBuilder_ABidiMockMatchesNoRequest(t *testing.T) {
 	_, err = m.Mock(Method("Chat").Header("x-team", match.Equal("core")).Reply(Bidi()))
 	require.NoError(t, err)
 }
+
+func TestBuilder_JSONThatIsNoRequestOfTheMethodFailsTheMock(t *testing.T) {
+	// A JSON request that can't be a request of the method would never match: the mock fails when it's added.
+	m := serve(t)
+
+	for _, tc := range []struct {
+		name string
+		b    *Builder
+		want string
+	}{
+		{"unknown field", Method("Greetings").JSON(`{"nope": 1}`), "mock: Greetings: json:"},
+		{"stream without an array", Method("Upload").JSON(`{"key": "a"}`), "is an array of messages"},
+		{"stream with a bad message", Method("Upload").JSON(`[{"key": "a"}, {"nope": 1}]`), "json: message 1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := m.Mock(tc.b.Reply(Message(&pb.HiRes{})))
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}

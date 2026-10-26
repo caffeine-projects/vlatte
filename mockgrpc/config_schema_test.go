@@ -103,3 +103,28 @@ func TestConfigFlags_AreTheGRPCSection(t *testing.T) {
 
 	require.Contains(t, ConfigUsage(), "env VLATTE_GRPC_ADDR, file key grpc.addr")
 }
+
+func TestConfigSources_ReadTheRestOfTheGRPCSection(t *testing.T) {
+	// A code is a name or a number on a command line too, and the journal keys each set the journal.
+	dir := t.TempDir()
+
+	m, err := New(Setup().ConfigSources(ConfigArgs([]string{
+		"--grpc-no-match-code=14",
+		"--grpc-near-misses=false",
+		"--grpc-journal-dir=" + dir,
+		"--grpc-journal-max-body-size=64",
+	})))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+
+	c := m.Config()
+	require.Equal(t, codes.Unavailable, c.NoMatchCode)
+	require.True(t, c.NoNearMisses)
+	require.Equal(t, dir, c.Journal.Dir)
+	require.Equal(t, int64(64), c.Journal.MaxBodySize)
+}
+
+func TestConfigSources_AShutdownTimeoutOfZeroFails(t *testing.T) {
+	_, err := New(Setup().ConfigSources(ConfigArgs([]string{"--grpc-shutdown-timeout=0"})))
+	require.ErrorContains(t, err, "grpc.shutdown_timeout")
+}

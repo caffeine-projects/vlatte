@@ -117,3 +117,35 @@ func TestBidi_JournalsEveryMessageTheClientSent(t *testing.T) {
 	e := onlyCall(t, m, journal.Query{})
 	require.JSONEq(t, `[{"message": "a"}, {"message": "b"}]`, string(e.Body))
 }
+
+func TestBidi_BuildRefusesAResponseTheMethodCantSend(t *testing.T) {
+	// A rule, otherwise or on_end that can't answer Chat fails the mock when it's added, not the call.
+	bad := JSON(`{"nope": 1}`)
+	m := serve(t)
+
+	for _, tc := range []struct {
+		name  string
+		reply *BidiReply
+		want  string
+	}{
+		{"rule", Bidi().On(match.Contain("x"), bad), "reply: rule 0"},
+		{"otherwise", Bidi().Otherwise(bad), "reply: otherwise"},
+		{"on end", Bidi().OnEnd(bad), "reply: on end"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := m.Mock(Method("Chat").Reply(tc.reply))
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestBidi_ARuleWhoseMatcherFailsFailsTheCall(t *testing.T) {
+	// A rule that can't tell whether a message matches ends the call with an error, rather than answering by another.
+	broken := match.Function(func(any) (bool, error) { return false, errors.New("broken") })
+	m := serve(t)
+	m.MustMock(Method("Chat").Reply(Bidi().On(broken, Message(&pb.HiRes{})).Otherwise(Message(&pb.HiRes{Message: "other"}))))
+
+	got, code := chat(t, client(t, m), nil, "a")
+	require.Equal(t, codes.Internal, code)
+	require.Empty(t, got)
+}
