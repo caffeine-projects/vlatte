@@ -3,6 +3,8 @@ package fault
 import (
 	"context"
 	"fmt"
+	"math"
+	"math/bits"
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
@@ -71,7 +73,7 @@ func (s *bandwidthStage) Write(b []byte) (int, error) {
 	for sent := 0; sent < len(b); {
 		end := min(len(b), sent+piece)
 
-		if err := waitUntil(s.ctx, start.Add(time.Duration(end)*time.Second/time.Duration(s.rate))); err != nil {
+		if err := waitUntil(s.ctx, start.Add(sendTime(end, s.rate))); err != nil {
 			return sent, err
 		}
 
@@ -92,3 +94,16 @@ func (s *bandwidthStage) Write(b []byte) (int, error) {
 func (s *bandwidthStage) Flush() error { return s.next.Flush() }
 
 func (s *bandwidthStage) Close() error { return s.next.Close() }
+
+// sendTime is how long n bytes take at rate bytes a second, in 128 bits so a huge write doesn't overflow: a time
+// longer than a duration holds is the longest one.
+func sendTime(n, rate int) time.Duration {
+	hi, lo := bits.Mul64(uint64(n), uint64(time.Second))
+	if hi >= uint64(rate) {
+		return math.MaxInt64
+	}
+
+	q, _ := bits.Div64(hi, lo, uint64(rate))
+
+	return time.Duration(min(q, math.MaxInt64))
+}
