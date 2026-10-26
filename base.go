@@ -81,6 +81,9 @@ func (app *Base[TM, A]) Enable() {
 
 // Disable disables all mocks.
 func (app *Base[TM, A]) Disable() {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
 	for _, scope := range app.scopes.All() {
 		scope.Disable()
 	}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -314,4 +315,57 @@ func TestBase_AMockOutsideEveryScopeGivesWay(t *testing.T) {
 		all, _ := store.PickAll(t.Context())
 		require.True(t, sameMocks([]*fakeMock{scoped}, all))
 	})
+}
+
+// blockingBuilder builds its mock once release is closed, after telling entered it began.
+type blockingBuilder struct {
+	mock    *fakeMock
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b blockingBuilder) Build(struct{}) (*fakeMock, error) {
+	close(b.entered)
+	<-b.release
+
+	return b.mock, nil
+}
+
+func TestBase_DisableWaitsForARemock(t *testing.T) {
+	// #44: Disable didn't wait for a Remock, as Enable does: one that came while a Remock built, such as a mock file
+	// reload, disabled the mocks being replaced, and the ones swapped in stayed enabled.
+	app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock]())
+
+	old, err := app.Mock(fakeBuilder{mock: newFakeMockWith("a", 0)})
+	require.NoError(t, err)
+
+	swapped := newFakeMockWith("a", 0)
+	b := blockingBuilder{mock: swapped, entered: make(chan struct{}), release: make(chan struct{})}
+
+	remocked := make(chan error, 1)
+	go func() {
+		_, err := app.Remock(t.Context(), old, b)
+		remocked <- err
+	}()
+
+	<-b.entered
+
+	disabled := make(chan struct{})
+	go func() {
+		defer close(disabled)
+		app.Disable()
+	}()
+
+	// A Disable that doesn't wait returns at once. One that waits returns only after the Remock: the test lets it
+	// try, then lets the Remock end, and never fails for a Disable that is slow to start.
+	select {
+	case <-disabled:
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(b.release)
+	require.NoError(t, <-remocked)
+	<-disabled
+
+	require.False(t, swapped.Enabled(), "the mocks swapped in are disabled too")
 }
