@@ -40,6 +40,7 @@ type Call struct {
 	sent     []proto.Message
 	answer   proto.Message // what Send set, for a call that answers one message
 	hit      *hit          // counts the call as its answer goes out
+	proxied  bool          // the answer is a proxy's: another server answered
 }
 
 // newCall returns the call of method, which md describes, with header, the metadata of the client.

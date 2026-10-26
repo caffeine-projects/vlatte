@@ -40,6 +40,19 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 		journaled.request(body)
 	}
 
+	// A recording captures the answer as the client gets it. A recording with a target sends it what it takes, before
+	// any mock.
+	rec := app.recordingOf(call)
+
+	var cs *captureStream
+	if rec != nil {
+		ctx, cs = capture(ctx)
+
+		if rec.target != nil {
+			return in.serveTarget(ctx, call, rec, cs)
+		}
+	}
+
 	stored, err := app.storage.List(ctx)
 	if err != nil {
 		return fail(ctx, vlatte.FailureMatch, codes.Internal, "%s: listing mocks: %v", kind, err)
@@ -117,10 +130,43 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 		return err
 	}
 
+	if rec != nil {
+		rec.record(call, cs, err)
+	}
+
 	// A reply that sent nothing yet answers with its status, or a unary call's message, which go out now.
 	h.count()
 	app.afterServed(ctx, mock, call, err)
 	app.publish(ctx, handler.EventMatched, call.method, mock, status.Code(err), nil)
+
+	return err
+}
+
+// serveTarget answers call with the answer of the target of rec, the recording, which records it: no mock answers,
+// and none counts the call. cs keeps the header and trailer of the answer.
+func (in *interceptors) serveTarget(ctx context.Context, call *Call, rec *recording, cs *captureStream) error {
+	kind := typeOf(call.desc)
+	journaled := callOf(ctx)
+
+	err := rec.target.Reply(ctx, call)
+
+	if kind == _bidiStream {
+		if b, encErr := call.encode(); encErr == nil {
+			journaled.request(b)
+		}
+	}
+
+	journaled.proxied(ctx, err)
+
+	if err != nil && !hasStatus(err) {
+		in.app.logger.Warn().Err(err).Str("method", call.method).Msg("recorder: the target failed the call")
+		return fail(ctx, vlatte.FailureReply, codes.Internal, "%s: recorder: %v", kind, err)
+	}
+
+	// A client that left got no whole answer: the recording doesn't take it.
+	if ctx.Err() == nil {
+		rec.record(call, cs, err)
+	}
 
 	return err
 }
@@ -198,8 +244,12 @@ type hit struct {
 	counted bool
 }
 
-// count counts the call, once.
+// count counts the call, once. A call no mock answers, such as one the target of a recording answers, has no hit.
 func (h *hit) count() {
+	if h == nil {
+		return
+	}
+
 	h.once.Do(func() {
 		h.counted = true
 

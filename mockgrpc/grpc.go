@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -60,6 +61,10 @@ type Server struct {
 
 	loader *fileLoader // loads the mock files of Config.MockFiles
 
+	// recording is the recording calls are captured for, if any. recordMu orders its starts.
+	recording atomic.Pointer[recording]
+	recordMu  sync.Mutex
+
 	// internal names the services the server implements itself, such as reflection: the mocks don't serve them.
 	internal map[string]bool
 
@@ -96,6 +101,16 @@ func New(config ...Option) (*Server, error) {
 
 	if conf.InMemory && conf.Listener != nil {
 		return nil, fmt.Errorf("server: %w", errInMemoryListener)
+	}
+
+	// The server's record settings are its own: a caller's Config may be shared.
+	if conf.Record != nil {
+		rec := conf.Record.clone()
+		if err := rec.check(); err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
+
+		conf.Record = rec
 	}
 
 	if conf.NoMatchCode == codes.OK {
@@ -189,6 +204,11 @@ func New(config ...Option) (*Server, error) {
 	app.internal = make(map[string]bool)
 	app.loader = &fileLoader{}
 
+	// The recordings of the configured directory are served with the mock files.
+	if conf.Record != nil {
+		app.loader.saved = []string{conf.Record.dir(conf)}
+	}
+
 	if conf.Reflection {
 		app.registerReflection()
 	}
@@ -208,6 +228,7 @@ func New(config ...Option) (*Server, error) {
 				return buildAdminMock(app, content, format)
 			})),
 			admin.Files(adminFiles{app}),
+			admin.Recorder(adminRecorder{app}),
 			admin.Scenarios(app.scenarios),
 			admin.Events(app.events),
 			admin.Logs(logs),
@@ -291,8 +312,13 @@ func (app *Server) Start() error {
 		}
 	}
 
-	// The mock files load before the server serves, so its first call finds them.
-	if err := app.loader.load(app); err != nil {
+	// The mock files load before the server serves, so its first call finds them, and so does the recording.
+	err := app.loader.load(app)
+	if err == nil {
+		err = app.startConfiguredRecording()
+	}
+
+	if err != nil {
 		_ = lis.Close()
 		app.addr = ""
 		app.closed = true
@@ -421,6 +447,9 @@ func (app *Server) Close() {
 		app.stop()
 		<-served
 	}
+
+	// The recording logged each call it couldn't record. The server closes: it serves nothing more.
+	_, _ = app.stopRecording(context.Background(), false)
 
 	// The mocks stay stored, so assertions still read them after Close: they release what they hold.
 	mocks, _ := app.storage.PickAll(context.Background())

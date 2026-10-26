@@ -11,7 +11,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -116,16 +115,17 @@ type proxyReplier struct {
 
 // Reply implements Replier.
 func (p *proxyReplier) Reply(ctx context.Context, call *Call) error {
+	call.proxied = true
+
 	desc := &grpc.StreamDesc{
 		StreamName:    string(call.desc.Name()),
 		ServerStreams: call.isServerStream(),
 		ClientStreams: call.isClientStream(),
 	}
 
-	// The call to the target ends with the client's: when it leaves, or its deadline passes.
-	var from peer.Peer
-
-	cs, err := p.conn.NewStream(metadata.NewOutgoingContext(ctx, p.outgoing(call.header)), desc, call.method, grpc.Peer(&from))
+	// The call to the target ends with the client's: when it leaves, or its deadline passes. A stream that opens
+	// reached the target: grpc opens it on a connection to it.
+	cs, err := p.conn.NewStream(metadata.NewOutgoingContext(ctx, p.outgoing(call.header)), desc, call.method)
 	if err != nil {
 		return p.unreached(err)
 	}
@@ -133,23 +133,14 @@ func (p *proxyReplier) Reply(ctx context.Context, call *Call) error {
 	p.send(call, cs)
 
 	// The target's header goes out as it comes, before its first message. A call it ended at once has none: its
-	// status, and trailer, answer.
+	// status, and trailer, answer. A header or trailer that can't go out is of a client that left: the call ends as
+	// the target's does.
 	if header, _ := cs.Header(); header != nil {
-		if err := grpc.SendHeader(ctx, incomingMD(header)); err != nil {
-			return err
-		}
+		_ = grpc.SendHeader(ctx, incomingMD(header))
 	}
 
 	err = p.receive(call, cs)
-
-	if err := grpc.SetTrailer(ctx, incomingMD(cs.Trailer())); err != nil {
-		return err
-	}
-
-	// A call that never reached the target has no peer: its status is grpc's, not the target's.
-	if err != nil && from.Addr == nil {
-		return p.unreached(err)
-	}
+	_ = grpc.SetTrailer(ctx, incomingMD(cs.Trailer()))
 
 	return err
 }
@@ -161,7 +152,7 @@ func (p *proxyReplier) Close() error {
 
 // send sends the target the messages of the client: the one of a unary or server streaming call, all those of a client
 // streaming call, and, from a goroutine, those of a bidi call as the client sends them, while the target answers. A
-// message the target doesn't take, because it ended the call, ends the sending: the status tells why.
+// message the target doesn't take, because it ended the call, fails: the status tells why.
 func (p *proxyReplier) send(call *Call, cs grpc.ClientStream) {
 	if call.isClientStream() && call.isServerStream() {
 		// The goroutine ends once the client closes its side, or the call ends, which ends Recv.
@@ -170,9 +161,7 @@ func (p *proxyReplier) send(call *Call, cs grpc.ClientStream) {
 	}
 
 	for _, msg := range call.Messages() {
-		if cs.SendMsg(msg) != nil {
-			return
-		}
+		_ = cs.SendMsg(msg)
 	}
 
 	_ = cs.CloseSend()

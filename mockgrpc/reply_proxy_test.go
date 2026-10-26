@@ -159,6 +159,38 @@ func TestProxy_ABidiCallGoesOnAsTheTargetAnswers(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF)
 }
 
+func TestProxy_AClientThatLeavesEndsTheCallToTheTarget(t *testing.T) {
+	// The target's call is the client's: a client that leaves a bidi call ends it at the target too, rather than
+	// leave the target waiting for messages that never come.
+	got := make(chan struct{})
+	ended := make(chan error, 1)
+
+	target := serve(t)
+	target.MustMock(Method("Chat").Reply(Func(func(ctx context.Context, call *Call) error {
+		if _, err := call.Recv(); err == nil {
+			close(got)
+		}
+
+		_, err := call.Recv()
+		ended <- ctx.Err()
+
+		return err
+	})))
+
+	m := proxied(t, From(target.Addr()))
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	stream, err := client(t, m).Chat(ctx)
+	require.NoError(t, err)
+	require.NoError(t, stream.Send(&pb.HiReq{Message: "a"}))
+
+	<-got
+	cancel()
+
+	require.ErrorIs(t, <-ended, context.Canceled)
+}
+
 func TestProxy_TheTargetsStatusIsTheAnswer(t *testing.T) {
 	// A target that fails the call answers: the client gets its status, as from a mock that replies with Status.
 	target := serve(t)
