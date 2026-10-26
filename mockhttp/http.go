@@ -71,6 +71,10 @@ type Server struct {
 	// intercepts.
 	handler http.Handler
 
+	// recoverer answers a panic serving a request: the outermost middleware, and a mock that answers on the
+	// connection it took over, which the middleware can't write to.
+	recoverer *recovery.Recover
+
 	data    map[string]any
 	logger  *zerolog.Logger
 	started atomic.Bool   // set by the first start: a server starts once
@@ -158,11 +162,11 @@ func New(config ...Option) (*Server, error) {
 	parsers = append(parsers, conf.RequestBodyParsers...)
 	parsers = append(parsers, &plainTextParser{}, &formURLEncodedParser{}, &multipartFormParser{}, &noopParser{})
 
-	recoverer := recovery.New(func(err error) { app.logger.Error().Err(err).Msg(err.Error()) },
+	app.recoverer = recovery.New(func(err error) { app.logger.Error().Err(err).Msg(err.Error()) },
 		conf.ErrorStatusCode, http.Header{http.CanonicalHeaderKey(HeaderVlatteError): {vlatte.FailurePanic}})
 
 	middlewares := make([]func(handler http.Handler) http.Handler, 0)
-	middlewares = append(middlewares, recoverer.Recover)
+	middlewares = append(middlewares, app.recoverer.Recover)
 
 	if conf.CORS != nil {
 		middlewares = append(middlewares, corsMiddleware(conf.CORS))

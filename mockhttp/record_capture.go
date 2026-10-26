@@ -95,13 +95,15 @@ func (x *recordedCall) size() int {
 
 // captureWriter passes a response to the client, and keeps what the client gets for a recording: the status, the
 // headers, the body and the trailers. It wraps the server's writer, so it sees what the steps of a mock send, and
-// what replies that write their own response send.
+// what replies that write their own response send. A step of a mock may write from a goroutine of its own, so mu
+// guards the state of the capture.
 type captureWriter struct {
 	rw     http.ResponseWriter
 	rec    *recording
 	call   *recordedCall
 	before http.Header // the headers set before the handler ran, such as CORS headers
 
+	mu       sync.Mutex
 	wrote    bool // the status and headers are sent
 	head     bool // a HEAD: its answer has no body, whatever the reply writes
 	keep     bool // keeps the body
@@ -170,6 +172,9 @@ func (c *captureWriter) Header() http.Header {
 
 // WriteHeader implements http.ResponseWriter. An informational status, such as 103 Early Hints, isn't the answer.
 func (c *captureWriter) WriteHeader(code int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if !c.wrote && (code < 100 || code > 199 || code == http.StatusSwitchingProtocols) {
 		c.start(code)
 	}
@@ -179,6 +184,9 @@ func (c *captureWriter) WriteHeader(code int) {
 
 // Write implements http.ResponseWriter. The client gets p first.
 func (c *captureWriter) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if !c.wrote {
 		c.start(http.StatusOK)
 	}
@@ -205,6 +213,9 @@ func (c *captureWriter) Flush() {
 // FlushError flushes the response to the client, as http.ResponseController does. A flush sends the status and
 // headers, when the writer can flush.
 func (c *captureWriter) FlushError() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	err := http.NewResponseController(c.rw).Flush()
 	if err == nil && !c.wrote {
 		c.start(http.StatusOK)
@@ -215,6 +226,9 @@ func (c *captureWriter) FlushError() error {
 
 // Hijack implements http.Hijacker. A connection taken over, such as by an upgrade, isn't recorded.
 func (c *captureWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	conn, rw, err := http.NewResponseController(c.rw).Hijack()
 	if err == nil {
 		c.hijacked = true
@@ -240,6 +254,9 @@ func (c *captureWriter) Unwrap() http.ResponseWriter {
 // answeredBy tells who answers: a proxy, or a mock. A mock's answer is recorded only with
 // RecordConfig.IncludeMocked, so its body isn't kept otherwise.
 func (c *captureWriter) answeredBy(proxied bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.proxied = proxied
 
 	switch {
@@ -252,12 +269,15 @@ func (c *captureWriter) answeredBy(proxied bool) {
 
 // record hands the call to the recording, once the client got the whole answer.
 func (c *captureWriter) record() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.done {
 		return
 	}
 
 	if c.hijacked || c.failed || !c.keepsAnswer() {
-		c.end()
+		c.discard()
 		return
 	}
 
@@ -275,6 +295,14 @@ func (c *captureWriter) record() {
 
 // end discards the call, unless it went to the recording.
 func (c *captureWriter) end() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.discard()
+}
+
+// discard discards the call, unless it went to the recording, with mu held.
+func (c *captureWriter) discard() {
 	if !c.done {
 		c.done = true
 		c.call.Discard()

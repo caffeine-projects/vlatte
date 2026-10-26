@@ -575,8 +575,49 @@ func (b *Builder) OnCompleteEvent(cfg vlatte.EventConfig) *Builder {
 	return b
 }
 
+// Step adds steps that the body of each answer of the mock passes through, in order, before it reaches the client:
+// to delay it, send it in parts, change it or cut it. See [vlatte.Step]. Each answer has a flow of its own, so a
+// stage keeps what it counts for that answer only.
+//
+// Flushes pass through the steps too, and so does the end of the answer, an empty body included. A stage that
+// aborts the flow, with [vlatte.ErrAbort] or [vlatte.ErrReset], cuts the answer after what it sent: the mock counts
+// the call and runs its callbacks and events, then cuts the connection. ErrReset resets an HTTP/1 connection.
+// A failure, such as a failing reply, is vlatte's answer, and skips the steps.
 func (b *Builder) Step(steps ...vlatte.Step) *Builder {
 	b.spec.steps = append(b.spec.steps, steps...)
+
+	return b
+}
+
+// WireStep adds steps that every byte of each answer of the mock passes through, in order, as the client reads it:
+// the status line, the headers, the framing of the body and the body, after the steps of Step. They can send what
+// isn't HTTP: nothing at all, half the headers, garbage after a valid head. See [vlatte.Step].
+//
+// The mock answers on its connection, which it takes over, in HTTP/1.x, with Connection: close, so the connection
+// ends with the answer. A request over HTTP/2 can't give its connection over: it gets vlatte's error answer. A stage
+// that aborts the flow, with [vlatte.ErrAbort] or [vlatte.ErrReset], has the connection closed, or reset, without
+// the rest of the answer, once the mock counted the call and ran its callbacks and events. A failure, such as a failing reply, is vlatte's
+// answer, and skips the steps. A recording leaves the call out.
+func (b *Builder) WireStep(steps ...vlatte.Step) *Builder {
+	b.spec.wireSteps = append(b.spec.wireSteps, steps...)
+
+	return b
+}
+
+// UpstreamStep adds steps that what the mock sends on passes through, in order, as its target reads it: the body of
+// the request a proxy reply sends, such as to delay it, send it in parts or cut it. See [vlatte.Step]. Steps can
+// change its length, so the target gets it chunked. A request without a body has nothing for them.
+//
+// The server reads the body of a request before it matches a mock, so the client's upload has ended by then: these
+// steps apply to what the mock sends on, not to how it reads the client. A body the server doesn't read whole, with
+// NoBodyParsing or past MaxBodyParsingLimit, is read from the client as the target reads it, a small piece at a time,
+// so a stage that slows it slows the upload too, once the connection's buffers are full. A mock with wire steps
+// takes its connection over before it replies, so it reads such a body through these steps first: they pace the
+// upload, and a proxy's target gets the body as they passed it on, at once. A stage that aborts
+// the flow, with [vlatte.ErrAbort] or [vlatte.ErrReset], fails the call to the target and cuts the client's answer,
+// once the mock counted the call.
+func (b *Builder) UpstreamStep(steps ...vlatte.Step) *Builder {
+	b.spec.upSteps = append(b.spec.upSteps, steps...)
 
 	return b
 }

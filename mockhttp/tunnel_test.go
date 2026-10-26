@@ -18,7 +18,7 @@ func TestTunnel_ASideThatCantEndOnlyWhatItSendsIsClosed(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = pipe(client, upstream)
+		_ = pipe(client, upstream, nil, nil)
 	}()
 
 	go func() {

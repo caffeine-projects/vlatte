@@ -14,8 +14,14 @@ import (
 
 type TestStep struct{ txt string }
 
-func (in *TestStep) Handle(_ context.Context, p []byte, next vlatte.Next) (n int, err error) {
-	return next.Next(append(p, []byte(in.txt)...))
+func (in *TestStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+	return vlatte.StepFunc(func(_ context.Context, p []byte, next vlatte.Stage) (int, error) {
+		if _, err := next.Write(append(p, []byte(in.txt)...)); err != nil {
+			return 0, err
+		}
+
+		return len(p), nil
+	}).Open(flow, next)
 }
 
 func TestFlow(t *testing.T) {

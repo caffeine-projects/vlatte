@@ -399,7 +399,7 @@ The three share one engine, and answer alike:
 - The hop-by-hop headers of either connection, such as `Connection`, `Keep-Alive` and `Proxy-Authorization`, don't go on. A request's `Te: trailers` does.
 - The upstream's `VLatte-*` headers, such as the debug headers of an upstream that is a vlatte server too, don't reach the client: it gets the proxy's.
 - Compressed bodies go on as they came, and a redirect goes back to the client: the proxy doesn't follow it.
-- A request that asks to switch protocols, such as a WebSocket handshake (`Connection: Upgrade`, `Upgrade: websocket`), asks the upstream too. Once the upstream switches, the client gets its `101`, and the two connections are piped until both sides end, or the server closes, while the mock's callbacks and events run. A mock counts the call, and the log shows it, when the switch is done. A mock with steps or response mappers doesn't ask the upstream to switch, as they can't apply to a connection: the upstream answers as to any request. `h2c`, which asks for HTTP/2 on the client's own connection, isn't asked on. An upstream that switches to a protocol the client didn't offer fails the call. A switch needs HTTP/1.1.
+- A request that asks to switch protocols, such as a WebSocket handshake (`Connection: Upgrade`, `Upgrade: websocket`), asks the upstream too. Once the upstream switches, the client gets its `101`, and the two connections are piped until both sides end, or the server closes, while the mock's callbacks and events run. A mock counts the call, and the log shows it, when the switch is done. A mock's steps apply to the connection too: see [Steps](#steps). A mock with response mappers doesn't ask the upstream to switch, as they can't apply to a connection: the upstream answers as to any request. `h2c`, which asks for HTTP/2 on the client's own connection, isn't asked on. An upstream that switches to a protocol the client didn't offer fails the call. A switch needs HTTP/1.1.
 - The timeout bounds the wait for the response headers, connecting and sending the request included: 30 seconds by default, and 0 waits forever. The body has no time limit.
 - A call that fails gets the server's answer to a failure, `ErrorStatusCode` with `VLatte-Error: reply`, unless the client left: then the log warns. Errors and logs show the upstream's URL without its password, and with its query values masked: `?api_key=xxxxx`. An upstream body that breaks off cuts the client's connection, so the client doesn't take part of it for all of it.
 - A request the proxy sends on carries the server's ID in `VLatte-Via`. A request that passes the same server 10 times, as in a loop, such as through a proxy reply whose target is the server itself, fails as a proxy loop rather than being sent on forever. A route may pass a server more than once, such as through a gateway that sends it back.
@@ -430,6 +430,49 @@ An intercepted connection speaks HTTP/1.1.
 **Transports.** In Go, `From(target).Transport(rt)` sends a proxy reply through a transport of yours, such as one with a client certificate, and `Setup().Transport(rt)` sets one for every proxy reply, the recording target, the forward proxy and webhooks. A transport of yours replaces the one vlatte makes, and decides on its own how it verifies certificates and which proxy it goes through: `ssl_verify`, `proxy.via`, `proxy.ssl_verify` and `record.skip_ssl_verify` fail with it, rather than being ignored. The timeouts apply to any transport.
 
 The transports vlatte makes go through the proxy of `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`, which leaves out `localhost`, unless `proxy.via` sets one. Docker can set these variables in containers from `~/.docker/config.json`, and so send the hosts of a compose network, such as `http://api:8080`, to that proxy: add them to `NO_PROXY`. A variable that names the vlatte server itself sends the requests it proxies back to it, until they fail as a proxy loop: set `NO_PROXY=*` for its process, or `proxy.via`.
+
+## Steps
+
+In Go, `Step` passes the body of each answer of a mock through steps, in order, before it reaches the client: to delay it, send it in parts, change it or cut it. A step is a `vlatte.Step`. For each answer, its `Open` makes the step's stage of that answer's `vlatte.Flow`, so a stage keeps what it counts for one answer only: a mock's answers don't share it.
+
+```go
+upper := vlatte.StepFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
+	if _, err := next.Write(bytes.ToUpper(b)); err != nil {
+		return 0, err
+	}
+
+	return len(b), nil
+})
+
+m.MustMock(mockhttp.Getf("/hello").Step(upper).Reply(mockhttp.OK().PlainText("hello")))
+```
+
+A stage gets each write of the body, each flush, and the end of the answer, an empty body included. It can pass a write on as it is, changed, in parts, later or not at all, and send what it holds at a flush or at the end. It may write from a goroutine of its own, and needs no lock: vlatte orders its writes with the reply's. Steps can change the body's length, so the answer has no `Content-Length`. A stage aborts the answer by returning an error that matches `vlatte.ErrAbort`, or with `Flow.Abort`, such as from a timer, which ends a reply that waits on the answer's context, as a proxy reply does. The mock still counts the call and runs its callbacks and events. Then the connection is cut, after what was sent: an HTTP/1 connection is closed, and an HTTP/2 stream is reset. With `vlatte.ErrReset`, an HTTP/1 connection is reset too, so the client reads `ECONNRESET`. A failure, such as a failing reply, is vlatte's answer, and skips the steps.
+
+`WireStep` passes every byte of each answer through its steps, after those of `Step`: the status line, the headers, the framing of the body and the body, so a step can send what isn't HTTP, such as nothing at all, half the headers, or garbage after a valid head. The mock takes its connection over and answers in HTTP/1.x itself, with `Connection: close`: the body is chunked over HTTP/1.1, and ends with the connection over HTTP/1.0. A request over HTTP/2 can't give its connection over, so it gets vlatte's error answer: turn HTTP/2 off, or use an HTTP/1.1 client, to test a mock with wire steps. An abort closes the connection without the rest of the answer, and `vlatte.ErrReset` resets it, once the mock counted the call and ran its callbacks and events. A recording leaves out the answers of mocks with wire steps.
+
+`UpstreamStep` passes what a mock sends on through its steps: the body of the request a proxy reply sends to its target. Steps can change its length, so the target gets it chunked. The server reads the body of a request before it matches a mock, so these steps don't slow the client's upload: they apply to what the mock sends on. A body the server doesn't read whole, with `NoBodyParsing` or past `MaxBodyParsingLimit`, is read from the client as the target reads it, a small piece at a time, so a step that slows it slows the upload too, once the connection's buffers are full. A mock with wire steps takes its connection over before it replies, so it reads such a body through these steps first: they pace the upload, and a proxy's target gets the body as they passed it on, at once. A stage that aborts ends the call to the target, and the client's answer is cut as for any abort.
+
+A connection that switched protocols, such as a WebSocket, goes through the steps too. The answer ends with its head, so its steps end there, and a stage that cuts it leaves the client without a switch. Then what the target sends the client passes the mock's steps again, in a flow of its own, then its wire steps, which saw the `101` too. What the client sends the target passes its upstream steps. A stage that aborts either way, even on a timer while nothing comes, cuts both sides, or resets them with `vlatte.ErrReset`.
+
+## Faults
+
+The `fault` package has steps that make a mock answer wrong, to test how a client handles a server that fails:
+
+| Step | Level | What the client gets |
+|---|---|---|
+| `fault.EmptyResponse()` | `WireStep` | No byte at all: the connection ends where it waits for a status line. |
+| `fault.MalformedResponseChunk()` | `WireStep` | The status line and headers, with the mock's status, then garbage in place of the first chunk of the body, then the end of the connection. |
+| `fault.RandomDataThenClose()` | `WireStep` | `fault.RandomDataSize` random bytes in place of the answer, then the end of the connection. |
+| `fault.ConnectionResetByPeer()` | `WireStep` | A TCP reset, such as `ECONNRESET`, before a status line. |
+| `fault.ChunkedDribbleDelay(chunks, total)` | `Step` | The whole body, in `chunks` flushed parts spread over `total`: part k comes at k·total/chunks, and the body ends at `total`. The body is held until the reply wrote all of it. |
+
+```go
+m.MustMock(mockhttp.Getf("/users").WireStep(fault.ConnectionResetByPeer()).Reply(mockhttp.OK()))
+m.MustMock(mockhttp.Getf("/report").Step(fault.ChunkedDribbleDelay(5, 2*time.Second)).Reply(mockhttp.OK().BodyFile("report.csv")))
+```
+
+A wire fault needs HTTP/1.x, as wire steps do. Faults combine with other steps: a fault on the wire comes after the steps of `Step`. A mock that answers with a fault still counts the call, and runs its callbacks and events, before the connection ends.
 
 ## Recording and playback
 
