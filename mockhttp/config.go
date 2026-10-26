@@ -722,7 +722,7 @@ func applyTLS(c *Config, certFile, keyFile, clientCertFile string) error {
 	}
 
 	if len(clientCertFile) > 0 {
-		cp, err := loadCertPool(clientCertFile)
+		cp, err := config.CertPool(clientCertFile)
 		if err != nil {
 			return err
 		}
@@ -733,22 +733,6 @@ func applyTLS(c *Config, certFile, keyFile, clientCertFile string) error {
 	c.TLSCertificates = []tls.Certificate{cert}
 
 	return nil
-}
-
-// loadCertPool reads the PEM certificates in file.
-// A file without any is an error: an empty pool would reject every client certificate.
-func loadCertPool(file string) (*x509.CertPool, error) {
-	pem, err := os.ReadFile(filepath.Clean(file))
-	if err != nil {
-		return nil, err
-	}
-
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pem) {
-		return nil, fmt.Errorf("%s has no PEM certificates", file)
-	}
-
-	return pool, nil
 }
 
 // workDir returns the directory of the server's own files: WorkDir, or DefaultWorkDir, the folder of the server's name

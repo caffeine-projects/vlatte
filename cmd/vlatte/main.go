@@ -182,7 +182,12 @@ func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stder
 	// The gRPC server serves when its settings turn it on, after the HTTP one: its mock files can name the same
 	// webhooks.
 	if g.Config().Serve {
-		if err := g.Start(); err != nil {
+		start := g.Start
+		if g.Config().UseTLS {
+			start = g.StartTLS
+		}
+
+		if err := start(); err != nil {
 			_, _ = fmt.Fprintln(stderr, err)
 			return 1
 		}
