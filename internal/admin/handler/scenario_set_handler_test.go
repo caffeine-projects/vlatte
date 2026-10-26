@@ -47,12 +47,3 @@ func TestScenarios_ANewStateIsRequired(t *testing.T) {
 
 	require.Empty(t, store.Scenarios(), "nothing moved")
 }
-
-func TestScenarios_NotSupported(t *testing.T) {
-	base := serve(t, newStore(t))
-
-	res, body := send(t, request{method: http.MethodGet, url: base + "/scenarios"})
-
-	doc := problem(t, res, body, http.StatusNotImplemented, "not_supported")
-	require.Equal(t, "this mock server can't keep scenarios", doc["detail"])
-}

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,8 +17,8 @@ type saveSettings struct {
 	format string
 }
 
-// savedFiles is the answer of POST /mocks/save.
-type savedFiles struct {
+// SavedFiles is the answer of [Operations.SaveMocks]: POST /mocks/save.
+type SavedFiles struct {
 	Files []string `json:"files"`
 }
 
@@ -51,34 +52,30 @@ var _saveSettingsSchema = config.NewSchema(
 	},
 )
 
-// SaveMocks writes the mocks the admin API added as mock files, and serves them from the files from then on, so they
-// outlive the server: POST /mocks/save. A mock that can't be described as a mock file writes no file at all.
-func SaveMocks(files Files) http.Handler {
-	return negotiated(func(w http.ResponseWriter, r *http.Request) {
-		data, format, err := readBody(w, r)
-		if err != nil {
-			fail(w, r, err)
-			return
-		}
+// SaveMocks writes the mocks the admin API added as mock files, with the settings of doc, a document in format, and
+// serves them from the files from then on, so they outlive the server. It returns the files' paths. A mock that can't
+// be described as a mock file writes no file at all. It needs a server with mock files.
+func (o *Operations) SaveMocks(ctx context.Context, doc []byte, format string) (SavedFiles, error) {
+	if o.files == nil {
+		return SavedFiles{}, notSupported("save mock files")
+	}
 
-		var settings saveSettings
-		if err := decodeBody(_saveSettingsSchema, &settings, data, format); err != nil {
-			fail(w, r, invalid("the body", err))
-			return
-		}
+	var settings saveSettings
+	if err := decodeBody(_saveSettingsSchema, &settings, doc, format); err != nil {
+		return SavedFiles{}, invalid("the body", err)
+	}
 
-		paths, err := files.SaveMocks(r.Context(), settings.dir, settings.format)
+	paths, err := o.files.SaveMocks(ctx, settings.dir, settings.format)
 
-		switch {
-		case errors.Is(err, ErrNotDescribed):
-			fail(w, r, &problemError{
-				status: http.StatusInternalServerError, code: _codeDescribeFailed,
-				detail: "nothing was saved: " + err.Error(), problems: configProblems(err),
-			})
-		case err != nil:
-			fail(w, r, loadError(err))
-		default:
-			respond(w, r, http.StatusOK, savedFiles{Files: append(make([]string, 0, len(paths)), paths...)})
+	switch {
+	case errors.Is(err, ErrNotDescribed):
+		return SavedFiles{}, &problemError{
+			status: http.StatusInternalServerError, code: _codeDescribeFailed,
+			detail: "nothing was saved: " + err.Error(), problems: configProblems(err),
 		}
-	})
+	case err != nil:
+		return SavedFiles{}, loadError(err)
+	default:
+		return SavedFiles{Files: append(make([]string, 0, len(paths)), paths...)}, nil
+	}
 }

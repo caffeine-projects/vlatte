@@ -34,7 +34,8 @@ const (
 	_codeInvalidParameter     = "invalid_parameter"
 )
 
-// problemError is an error a handler answers with, as an RFC 9457 problem document.
+// problemError is an error of an operation that its caller can fix, which the admin API answers as an RFC 9457
+// problem document.
 type problemError struct {
 	status   int
 	code     string
@@ -46,19 +47,19 @@ func (e *problemError) Error() string {
 	return e.detail
 }
 
-// problemDoc is an RFC 9457 problem document. Its type is about:blank, so its title is the status's phrase, and code
-// tells problems apart.
-type problemDoc struct {
+// ProblemDocument is an RFC 9457 problem document, as the admin API answers an error. Its type is about:blank, so its
+// title is the status's phrase, and code tells problems apart.
+type ProblemDocument struct {
 	Status   int           `json:"status"`
 	Title    string        `json:"title"`
 	Code     string        `json:"code"`
 	Detail   string        `json:"detail"`
 	Instance string        `json:"instance"`
-	Problems []problemItem `json:"problems,omitempty"`
+	Problems []ProblemItem `json:"problems,omitempty"`
 }
 
-// problemItem is one problem of a document: a mock, a body or a mock file.
-type problemItem struct {
+// ProblemItem is one problem of a document: a mock, a body or a mock file.
+type ProblemItem struct {
 	Code    string `json:"code"`
 	Origin  string `json:"origin,omitempty"`
 	Key     string `json:"key,omitempty"`
@@ -67,33 +68,19 @@ type problemItem struct {
 	Hint    string `json:"hint,omitempty"`
 }
 
-// fail answers err as a problem document, in the format the request accepts, JSON when it accepts none. Errors that
-// aren't a *problemError are internal ones, but for a body too large. Internal errors are logged: the client can't
-// fix them.
-func fail(w http.ResponseWriter, r *http.Request, err error) {
-	p, ok := errors.AsType[*problemError](err)
-	if !ok {
-		p = &problemError{status: http.StatusInternalServerError, code: _codeInternal, detail: err.Error()}
-		if tooLarge, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			p = &problemError{
-				status: http.StatusRequestEntityTooLarge, code: _codeBodyTooLarge,
-				detail: fmt.Sprintf("the body is over the limit of %d bytes", tooLarge.Limit),
-			}
-		}
-	}
+// Problem returns the problem document of err, an error of an operation, about instance, what the operation was asked
+// for, such as the path of a request. An error the caller can't fix, such as a store that failed, is an internal one,
+// of status 500, but for a body over its limit.
+func Problem(err error, instance string) ProblemDocument {
+	return problemOf(err).document(instance)
+}
 
+// fail answers err as a problem document, in the format the request accepts, JSON when it accepts none. Internal
+// errors are logged: the client can't fix them.
+func fail(w http.ResponseWriter, r *http.Request, err error) {
+	p := problemOf(err)
 	if p.status >= http.StatusInternalServerError {
 		zerolog.Ctx(r.Context()).Error().Str("code", p.code).Str("path", r.URL.Path).Msg("admin: " + p.detail)
-	}
-
-	// A request can send bytes that aren't UTF-8, such as in its path, which JSON and YAML can't hold.
-	doc := problemDoc{
-		Status: p.status, Title: http.StatusText(p.status), Code: p.code,
-		Detail: validUTF8(p.detail), Instance: validUTF8(r.URL.Path),
-	}
-	for _, item := range p.problems {
-		item.Key, item.Value, item.Message = validUTF8(item.Key), validUTF8(item.Value), validUTF8(item.Message)
-		doc.Problems = append(doc.Problems, problemItem(item))
 	}
 
 	f, ok := problemFormat(r)
@@ -101,13 +88,45 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 		f = _answerFormats[0]
 	}
 
-	body, err := encode(doc, f.format)
+	body, err := encode(p.document(r.URL.Path), f.format)
 	if err != nil {
 		http.Error(w, p.detail, p.status)
 		return
 	}
 
 	write(w, p.status, f.problemType, body)
+}
+
+// problemOf returns the problem of err: err itself when it is a *problemError, or else an internal one, but for a body
+// too large.
+func problemOf(err error) *problemError {
+	if p, ok := errors.AsType[*problemError](err); ok {
+		return p
+	}
+
+	if tooLarge, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		return &problemError{
+			status: http.StatusRequestEntityTooLarge, code: _codeBodyTooLarge,
+			detail: fmt.Sprintf("the body is over the limit of %d bytes", tooLarge.Limit),
+		}
+	}
+
+	return &problemError{status: http.StatusInternalServerError, code: _codeInternal, detail: err.Error()}
+}
+
+// document returns the problem document of e about instance.
+func (e *problemError) document(instance string) ProblemDocument {
+	// A request can send bytes that aren't UTF-8, such as in its path, which JSON and YAML can't hold.
+	doc := ProblemDocument{
+		Status: e.status, Title: http.StatusText(e.status), Code: e.code,
+		Detail: validUTF8(e.detail), Instance: validUTF8(instance),
+	}
+	for _, item := range e.problems {
+		item.Key, item.Value, item.Message = validUTF8(item.Key), validUTF8(item.Value), validUTF8(item.Message)
+		doc.Problems = append(doc.Problems, ProblemItem(item))
+	}
+
+	return doc
 }
 
 // validUTF8 returns s with the bytes that aren't UTF-8 replaced.
@@ -165,10 +184,13 @@ func count(problems int) string {
 // NotSupported answers that the mock server can't do what a route does, such as "record".
 func NotSupported(what string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fail(w, r, &problemError{
-			status: http.StatusNotImplemented, code: _codeNotSupported, detail: "this mock server can't " + what,
-		})
+		fail(w, r, notSupported(what))
 	})
+}
+
+// notSupported is the problem of an operation the mock server can't do, such as "record".
+func notSupported(what string) *problemError {
+	return &problemError{status: http.StatusNotImplemented, code: _codeNotSupported, detail: "this mock server can't " + what}
 }
 
 // Closing answers a request that comes as the admin API closes: no operation starts then.

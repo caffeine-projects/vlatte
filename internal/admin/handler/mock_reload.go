@@ -8,17 +8,18 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-// ReloadMocks loads the mock files of the server again: POST /mocks/reload. When a file has problems, the server
-// serves what it served before.
-func ReloadMocks(files Files) http.Handler {
-	return negotiated(func(w http.ResponseWriter, r *http.Request) {
-		if err := files.Reload(); err != nil {
-			fail(w, r, loadError(err))
-			return
-		}
+// ReloadMocks loads the mock files of the server again. When a file has problems, the server serves what it served
+// before. It needs a server with mock files.
+func (o *Operations) ReloadMocks() error {
+	if o.files == nil {
+		return notSupported("load mock files")
+	}
 
-		w.WriteHeader(http.StatusNoContent)
-	})
+	if err := o.files.Reload(); err != nil {
+		return loadError(err)
+	}
+
+	return nil
 }
 
 // loadError is the problem of mock files that failed to load.

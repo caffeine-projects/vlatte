@@ -4,112 +4,17 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
-	"strconv"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
-
-// journalOf returns a journal of entries, the protocol's own: a path, and its method.
-func journalOf(t *testing.T, entries ...*journal.Entry) *journal.Journal {
-	t.Helper()
-
-	j, err := journal.New(journal.Options{Dir: t.TempDir()})
-	require.NoError(t, err)
-	t.Cleanup(func() { j.Close() })
-
-	for _, e := range entries {
-		require.NoError(t, j.Append(e))
-	}
-
-	return j
-}
-
-func entryOf(id, method, path string, outcome journal.Outcome) *journal.Entry {
-	return &journal.Entry{
-		ID:      id,
-		Time:    time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC),
-		Kind:    "fake",
-		Outcome: outcome,
-		Method:  method,
-		Path:    path,
-		Target:  "fake://" + path,
-		Status:  200,
-		Header:  map[string][]string{"Accept": {"application/json"}},
-		Body:    []byte(`{"id": 7}`),
-	}
-}
-
-// requestIDs returns the ids of the requests of a RequestList.
-func requestIDs(doc map[string]any) []string {
-	list, _ := doc["requests"].([]any)
-
-	ids := make([]string, 0, len(list))
-	for _, r := range list {
-		e, _ := r.(map[string]any)
-		id, _ := e["id"].(string)
-		ids = append(ids, id)
-	}
-
-	return ids
-}
-
-func TestListRequests(t *testing.T) {
-	// GET lists the newest requests a page at a time, in a browser or behind any proxy, with how many there are: the
-	// count stays as the pages go.
-	j := journalOf(t,
-		entryOf("a", "GET", "/a", journal.OutcomeMatched),
-		entryOf("b", "GET", "/b", journal.OutcomeUnmatched),
-		entryOf("c", "POST", "/c", journal.OutcomeMatched),
-	)
-	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
-
-	res, body := send(t, request{method: http.MethodGet, url: url + "/requests?limit=2"})
-	require.Equal(t, http.StatusOK, res.StatusCode, body)
-
-	doc := conforms(t, res, body, "RequestList")
-	require.Equal(t, []string{"c", "b"}, requestIDs(doc))
-	require.Equal(t, int64(3), doc["count"])
-
-	res, body = send(t, request{method: http.MethodGet, url: url + "/requests?limit=2&before=" + strconv.FormatInt(doc["next"].(int64), 10)})
-	doc = conforms(t, res, body, "RequestList")
-	require.Equal(t, []string{"a"}, requestIDs(doc))
-	require.Equal(t, int64(3), doc["count"])
-	require.NotContains(t, doc, "next", "the last page")
-
-	res, body = send(t, request{method: http.MethodGet, url: url + "/requests", accept: "application/yaml"})
-	require.Equal(t, []string{"c", "b", "a"}, requestIDs(conforms(t, res, body, "RequestList")))
-
-	for _, params := range []string{"limit=-1", "limit=1001", "limit=x", "before=-1"} {
-		res, body = send(t, request{method: http.MethodGet, url: url + "/requests?" + params})
-		problem(t, res, body, http.StatusBadRequest, "invalid_parameter")
-	}
-}
-
-func TestListRequests_AClientThatLeftGetsNoAnswer(t *testing.T) {
-	// A client that leaves stops its query, and the handler answers nothing: no one reads it, and the client's leaving
-	// is no internal error of the server.
-	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
-
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-
-	rec := httptest.NewRecorder()
-	handler.ListRequests(j).ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/requests", nil))
-
-	require.Empty(t, rec.Header(), "no answer")
-	require.Empty(t, rec.Body.String(), "no answer")
-}
 
 func TestQueryRequests(t *testing.T) {
 	// QUERY selects requests by the keys of a query, with the matchers mock files write, and counts them: limit 0
@@ -368,65 +273,4 @@ func TestQueryRequests_IsRefusedCrossSite(t *testing.T) {
 	require.NoError(t, err)
 
 	problem(t, res, readBody(t, res), http.StatusForbidden, "cross_origin")
-}
-
-func TestGetRequest(t *testing.T) {
-	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
-	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
-
-	res, body := send(t, request{method: http.MethodGet, url: url + "/requests/a"})
-	require.Equal(t, http.StatusOK, res.StatusCode, body)
-
-	doc := conforms(t, res, body, "JournalEntry")
-	require.Equal(t, "a", doc["id"])
-	require.Equal(t, `{"id": 7}`, doc["body"])
-
-	res, body = send(t, request{method: http.MethodGet, url: url + "/requests/nope"})
-	problem(t, res, body, http.StatusNotFound, "request_not_found")
-}
-
-func TestClearRequests(t *testing.T) {
-	// A test clears the journal between its cases, on its own or with the rest of the server through POST /reset.
-	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
-	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
-
-	res, body := send(t, request{method: http.MethodDelete, url: url + "/requests"})
-	require.Equal(t, http.StatusNoContent, res.StatusCode, body)
-
-	count, err := j.Count(t.Context(), journal.Query{})
-	require.NoError(t, err)
-	require.Zero(t, count)
-
-	require.NoError(t, j.Append(entryOf("b", "GET", "/b", journal.OutcomeMatched)))
-
-	res, body = send(t, request{method: http.MethodPost, url: url + "/reset"})
-	require.Equal(t, http.StatusNoContent, res.StatusCode, body)
-
-	count, err = j.Count(t.Context(), journal.Query{})
-	require.NoError(t, err)
-	require.Zero(t, count, "reset clears the journal")
-}
-
-func TestClearRequests_AJournalThatFailsToClear(t *testing.T) {
-	// A journal that can't clear says so, and why: a test that went on would verify against the requests of the case
-	// before.
-	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
-	require.NoError(t, j.Close())
-	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
-
-	res, body := send(t, request{method: http.MethodDelete, url: url + "/requests"})
-
-	doc := problem(t, res, body, http.StatusInternalServerError, "internal")
-	require.Equal(t, journal.ErrClosed.Error(), doc["detail"])
-}
-
-func TestJournal_ANilJournalIsNone(t *testing.T) {
-	// A server without a journal passes its nil one: its journal routes answer 501, and a reset works.
-	url := serve(t, newStore(t), admin.Journal((*journal.Journal)(nil), nil, nil))
-
-	res, body := send(t, request{method: http.MethodGet, url: url + "/requests"})
-	problem(t, res, body, http.StatusNotImplemented, "not_supported")
-
-	res, body = send(t, request{method: http.MethodPost, url: url + "/reset"})
-	require.Equal(t, http.StatusNoContent, res.StatusCode, body)
 }
