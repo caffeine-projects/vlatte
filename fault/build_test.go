@@ -162,6 +162,29 @@ func TestBuild_RefusesASpecItCantBuild(t *testing.T) {
 		{name: "a count as text", spec: []any{"limit_data", "10"}, want: "fault: limit_data takes a number of bytes, a whole number, not a string"},
 		{name: "a negative limit", spec: []any{"limit_data", int64(-1)}, want: "fault: limit data can't be -1 bytes"},
 		{name: "a fraction of a byte", spec: []any{"bandwidth", 0.5}, want: "fault: bandwidth takes bytes per second, a whole number, not a number"},
+		{name: "a dribble without its total", spec: []any{"chunked_dribble_delay", int64(3)}, want: "fault: chunked_dribble_delay takes 2 arguments, not 1"},
+		{
+			name: "chunks as text", spec: []any{"chunked_dribble_delay", "3", "1s"},
+			want: "fault: chunked_dribble_delay takes chunks, a whole number, not a string",
+		},
+		{
+			name: "a total of another type", spec: []any{"chunked_dribble_delay", int64(3), false},
+			want: "fault: chunked_dribble_delay takes total, whole milliseconds or a Go duration such as 1.5s, not a bool",
+		},
+		{
+			name: "a slice size as text", spec: []any{"slicer", "64", int64(16), "0s"},
+			want: "fault: slicer takes the average size, a whole number, not a string",
+		},
+		{
+			name: "a size variation as text", spec: []any{"slicer", int64(64), "16", "0s"},
+			want: "fault: slicer takes the size variation, a whole number, not a string",
+		},
+		{
+			name: "a slicer delay of another type", spec: []any{"slicer", int64(64), int64(16), []any{}},
+			want: "fault: slicer takes the delay, whole milliseconds or a Go duration such as 1.5s, not a list",
+		},
+		{name: "a limit alone", spec: "limit_data", want: "fault: limit_data takes 1 argument, not 0"},
+		{name: "two rates", spec: []any{"bandwidth", int64(1), int64(2)}, want: "fault: bandwidth takes 1 argument, not 2"},
 		{name: "no rate", spec: []any{"bandwidth", int64(0)}, want: "fault: bandwidth needs a byte per second at least, not 0"},
 		{
 			name: "an unknown link", spec: []any{"bandwidth", "5g"},
