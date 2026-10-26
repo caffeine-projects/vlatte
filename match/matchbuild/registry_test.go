@@ -45,7 +45,7 @@ func TestRegistry_ACustomMatcherKeepsItsName(t *testing.T) {
 	// A custom matcher describes itself as its spec, but logs show the name it gives itself.
 	m, err := MustNew(WithMatcher("longer-than", longerThan)).BuildMatcher([]any{"longer-than", int64(3)})
 	require.NoError(t, err)
-	require.Equal(t, match.Function(nil).Name(), m.Name())
+	require.Equal(t, "function", m.Name())
 }
 
 func TestRegistry_CustomMatcherTakesNestedSpecs(t *testing.T) {

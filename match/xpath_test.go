@@ -180,3 +180,33 @@ func TestXPath_SelectsTheNodesOfTheDocument(t *testing.T) {
 		})
 	}
 }
+
+func TestXPath_AnElementIsGivenAsWritten(t *testing.T) {
+	// Text matchers read an element's XML: its text keeps its line breaks and tabs, and an empty element its end tag.
+	doc := "<r><a>line1\n\tline2 &amp; <![CDATA[<x>]]></a><e></e><f k=\"a&quot;b\"/></r>"
+
+	require.True(t, xmlMatches(t, XPath("/r/a", Equal("<a>line1\n\tline2 &amp; &lt;x&gt;</a>")), doc))
+	require.True(t, xmlMatches(t, XPath("/r/e", Equal("<e></e>")), doc))
+	require.True(t, xmlMatches(t, XPath("/r/f", Equal(`<f k="a&#34;b"></f>`)), doc))
+}
+
+func TestXPath_ADocumentThatIsntWellFormedIsntXML(t *testing.T) {
+	// The document is read as XML 1.0 with namespaces: one root, no text outside it, and each prefix bound.
+	for _, doc := range []string{"<a/><b/>", "x<a/>", "<a/>x", `<a p:x="1"/>`} {
+		require.False(t, xmlMatches(t, XPath("count(/*)", Anything()), doc), doc)
+	}
+}
+
+func TestXPath_LastSkipsProcessingInstructions(t *testing.T) {
+	require.True(t, xmlMatches(t, XPath("/r/node()[last()]", Equal("<b></b>")), "<r><b/><?pi?></r>"))
+	require.True(t, xmlMatches(t, XPath("count(/r/b[1]/preceding-sibling::node())", Equal(0)), "<r><?pi?><b/><b/></r>"))
+	require.True(t, xmlMatches(t, XPath("count(/r/node()[last()])", Equal(1)), "<r><?pi?><b/></r>"))
+
+	// The document, and an attribute, have no siblings: last() of either is itself.
+	require.True(t, xmlMatches(t, XPath("count(/self::node()[last()])", Equal(1)), "<r/>"))
+	require.True(t, xmlMatches(t, XPath("count(/r/@a[last()])", Equal(1)), `<r a="1"/>`))
+}
+
+func TestXPath_NamesItself(t *testing.T) {
+	require.Equal(t, "XPath", XPath("/a", Present()).Name())
+}

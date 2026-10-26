@@ -34,6 +34,7 @@ type xmlNode struct {
 	attrs    []xmlAttr
 	children []*xmlNode
 	parent   *xmlNode
+	index    int    // the node's place among its parent's children
 	text     string // the data of text, a comment or a processing instruction
 }
 
@@ -69,7 +70,7 @@ func parseXML(data []byte, mode XMLNamespaceMode) (*xmlNode, error) {
 	var root *xmlNode
 
 	add := func(n *xmlNode) {
-		n.parent = open
+		n.parent, n.index = open, len(open.children)
 		open.children = append(open.children, n)
 	}
 

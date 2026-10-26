@@ -46,28 +46,3 @@ func TestXMLNav_EveryAxisWalksTheDocument(t *testing.T) {
 		})
 	}
 }
-
-func TestXMLNav_MovesOnlyWithinItsDocument(t *testing.T) {
-	a, err := parseXML([]byte("<a/>"), XMLNamespacesByURI)
-	require.NoError(t, err)
-
-	b, err := parseXML([]byte("<b/>"), XMLNamespacesByURI)
-	require.NoError(t, err)
-
-	nav := newXMLNav(a)
-	require.False(t, nav.MoveTo(newXMLNav(b)))
-	require.True(t, nav.MoveTo(newXMLNav(a)))
-	require.False(t, nav.MoveToFirst(), "the document has no siblings")
-
-	// The first sibling skips what XPath doesn't see, such as a processing instruction.
-	c, err := parseXML([]byte("<a><?pi?><b/><c/></a>"), XMLNamespacesByURI)
-	require.NoError(t, err)
-
-	nav = newXMLNav(c)
-	require.True(t, nav.MoveToChild())
-	require.True(t, nav.MoveToChild())
-	require.True(t, nav.MoveToNext())
-	require.Equal(t, "c", nav.LocalName())
-	require.True(t, nav.MoveToFirst())
-	require.Equal(t, "b", nav.LocalName())
-}

@@ -159,9 +159,7 @@ func TestEqualXML_TheXMLPrefixNeedsNoDeclaration(t *testing.T) {
 	require.False(t, xmlMatches(t, EqualXML(`<a x="1"/>`), `<a p:x="1"/>`), "an unbound prefix isn't XML")
 }
 
-func TestXMLMatchers_NameThemselves(t *testing.T) {
+func TestEqualXML_NamesItself(t *testing.T) {
 	// A matcher's name is what logs and failures show.
 	require.Equal(t, "EqualXML", EqualXML("<a/>").Name())
-	require.Equal(t, "XPath", XPath("/a", Present()).Name())
-	require.Equal(t, "JSONSchema", JSONSchema("{}").Name())
 }

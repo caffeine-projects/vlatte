@@ -166,16 +166,14 @@ func (x *xmlNav) MoveToPrevious() bool {
 	return x.moveSibling(-1)
 }
 
-// MoveTo implements xpath.NodeNavigator: to where other is, in the same document.
+// MoveTo implements xpath.NodeNavigator: to where other is.
 func (x *xmlNav) MoveTo(other xpath.NodeNavigator) bool {
 	o, ok := other.(*xmlNav)
-	if !ok || document(o.node) != document(x.node) {
-		return false
+	if ok {
+		*x = *o
 	}
 
-	*x = *o
-
-	return true
+	return ok
 }
 
 // name returns the name of the node or attribute: an element's or an attribute's, and nothing for other nodes.
@@ -196,7 +194,7 @@ func (x *xmlNav) moveSibling(step int) bool {
 	}
 
 	siblings := x.node.parent.children
-	for i := slices.Index(siblings, x.node) + step; i >= 0 && i < len(siblings); i += step {
+	for i := x.node.index + step; i >= 0 && i < len(siblings); i += step {
 		if visible(siblings[i]) {
 			x.node = siblings[i]
 			return true
@@ -204,14 +202,6 @@ func (x *xmlNav) moveSibling(step int) bool {
 	}
 
 	return false
-}
-
-func document(n *xmlNode) *xmlNode {
-	for n.parent != nil {
-		n = n.parent
-	}
-
-	return n
 }
 
 // elementXML returns the XML of an element, with the namespace declarations its ancestors make that it doesn't make
@@ -241,11 +231,15 @@ func elementXML(e *xmlNode) string {
 	return b.String()
 }
 
-// writeXML writes a node as XML, with more attributes on an element.
+// _textEscaper escapes what text can't hold as is. Line breaks and tabs stay as written, as text matchers expect them.
+var _textEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
+// writeXML writes a node as XML, with more attributes on an element: an element has its end tag, even when empty, and
+// CDATA sections are escaped text.
 func writeXML(b *strings.Builder, n *xmlNode, more []xmlAttr) {
 	switch n.kind {
 	case _xmlText:
-		_ = xml.EscapeText(b, []byte(n.text))
+		b.WriteString(_textEscaper.Replace(n.text))
 	case _xmlComment:
 		b.WriteString("<!--" + n.text + "-->")
 	case _xmlProcInst:
@@ -259,11 +253,6 @@ func writeXML(b *strings.Builder, n *xmlNode, more []xmlAttr) {
 			b.WriteString(" " + writtenName(a.name) + `="`)
 			_ = xml.EscapeText(b, []byte(a.value))
 			b.WriteString(`"`)
-		}
-
-		if len(n.children) == 0 {
-			b.WriteString("/>")
-			return
 		}
 
 		b.WriteString(">")

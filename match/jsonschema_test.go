@@ -129,9 +129,13 @@ func TestJSONSchema_DraftsAreNamedAsMockFilesWriteThem(t *testing.T) {
 	}
 }
 
-func TestJSONSchema_Draft6(t *testing.T) {
+func TestJSONSchema_Draft6ReadsExclusiveMaximumAsANumber(t *testing.T) {
 	// draft-06 made exclusiveMaximum a number, as later drafts have it.
 	m := JSONSchema(`{"exclusiveMaximum": 10}`, SchemaDraft(JSONSchemaDraft6))
 	require.True(t, schemaMatches(t, m, int64(9)))
 	require.False(t, schemaMatches(t, m, int64(10)))
+}
+
+func TestJSONSchema_NamesItself(t *testing.T) {
+	require.Equal(t, "JSONSchema", JSONSchema("{}").Name())
 }
