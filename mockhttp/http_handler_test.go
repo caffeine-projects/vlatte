@@ -63,7 +63,7 @@ func TestTopResponseWriter_EveryWritePassesTheSteps(t *testing.T) {
 }
 
 func TestTopResponseWriter_AStepCanPassAWriteOnInParts(t *testing.T) {
-	// The slicer toxic passes each write on in parts. Every part after the first failed the write, which cut the body.
+	// fault.Slicer passes each write on in parts. Every part after the first failed the write, which cut the body.
 	slicer := vlatte.StepFunc(func(_ context.Context, p []byte, next vlatte.Stage) (int, error) {
 		for part := range slices.Chunk(p, 2) {
 			if _, err := next.Write(part); err != nil {

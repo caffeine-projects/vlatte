@@ -89,13 +89,18 @@ func (s *dribbleStage) Close() error {
 
 // wait waits until k·total/chunks after start, or the flow's end.
 func (s *dribbleStage) wait(start time.Time, k int) error {
-	t := time.NewTimer(time.Until(start.Add(s.total * time.Duration(k) / time.Duration(s.chunks))))
-	defer t.Stop()
+	return waitUntil(s.ctx, start.Add(s.total*time.Duration(k)/time.Duration(s.chunks)))
+}
+
+// waitUntil waits until t, or the end of ctx, whose cause it returns.
+func waitUntil(ctx context.Context, t time.Time) error {
+	timer := time.NewTimer(time.Until(t))
+	defer timer.Stop()
 
 	select {
-	case <-t.C:
+	case <-timer.C:
 		return nil
-	case <-s.ctx.Done():
-		return context.Cause(s.ctx)
+	case <-ctx.Done():
+		return context.Cause(ctx)
 	}
 }
