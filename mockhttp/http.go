@@ -304,14 +304,15 @@ func New(config ...Option) (*Server, error) {
 			Mocks: adminapi.MocksOf(adminMocks, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
 				return buildAdminMock(app, content, format)
 			})),
-			Files:     adminFiles{app},
-			Recorder:  adminRecorder{app},
-			Scenarios: app.scenarioStore,
-			Events:    events,
-			Logs:      logs,
-			Journal:   j,
-			Pattern:   app.adminRequestPattern,
-			Matchers:  app.matchers(),
+			Files:      adminFiles{app},
+			Recorder:   adminRecorder{app},
+			Scenarios:  app.scenarioStore,
+			Events:     events,
+			Logs:       logs,
+			Journal:    j,
+			Pattern:    app.adminRequestPattern,
+			Matchers:   app.matchers(),
+			MockSchema: _mockFileSchema,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("server: %w", err)

@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"cmp"
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,11 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
+
+// _mockFileSchema is the JSON Schema of mock files, which the admin API serves to the clients that write them.
+//
+//go:embed schema/http.schema.json
+var _mockFileSchema []byte
 
 var (
 	_ adminapi.Recorder = adminRecorder{}

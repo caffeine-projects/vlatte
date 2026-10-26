@@ -39,6 +39,7 @@ var _routes = []struct {
 	{pattern: "GET /health"},
 	{pattern: "GET /openapi"},
 	{pattern: "GET /docs"},
+	{pattern: "GET /schema", lacking: "describe its mock files"},
 	{pattern: "GET /mocks"},
 	{pattern: "POST /mocks", lacking: "build mocks from documents"},
 	{pattern: "DELETE /mocks"},
@@ -76,6 +77,7 @@ var _operations = map[string]struct {
 	can   func(ops *handler.Operations) bool
 }{
 	"GET /health":           {serve: handler.Health},
+	"GET /schema":           {serve: handler.MockSchema, can: (*handler.Operations).HasMockSchema},
 	"GET /mocks":            {serve: handler.ListMocks},
 	"POST /mocks":           {serve: handler.AddMock, can: (*handler.Operations).Builds},
 	"DELETE /mocks":         {serve: handler.RemoveAllMocks},

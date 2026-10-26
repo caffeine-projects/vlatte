@@ -11,6 +11,7 @@ const (
 	_lackingRecorder  = "record"
 	_lackingScenarios = "keep scenarios"
 	_lackingJournal   = "keep a journal of requests"
+	_lackingSchema    = "describe its mock files"
 )
 
 // Operations are the admin operations of a mock server, apart from how a request reaches them: each route of the
@@ -27,6 +28,7 @@ type Operations struct {
 	journal   adminapi.Journal
 	pattern   adminapi.RequestPattern
 	matchers  *matchbuild.Registry
+	schema    []byte
 }
 
 // NewOperations returns the admin operations of the mock server of caps, which has its Mocks.
@@ -46,6 +48,7 @@ func NewOperations(caps adminapi.Capabilities) *Operations {
 		journal:   caps.Journal,
 		pattern:   caps.Pattern,
 		matchers:  matchers,
+		schema:    caps.MockSchema,
 	}
 }
 
@@ -61,6 +64,9 @@ func (o *Operations) Records() bool { return o.recorder != nil }
 
 // HasScenarios reports whether the server keeps scenarios, for [Operations.ListScenarios] and its siblings.
 func (o *Operations) HasScenarios() bool { return o.scenarios != nil }
+
+// HasMockSchema reports whether the server describes its mock files with a JSON Schema, for [Operations.MockSchema].
+func (o *Operations) HasMockSchema() bool { return o.schema != nil }
 
 // HasJournal reports whether the server keeps a journal of requests, for [Operations.ListRequests] and its siblings.
 func (o *Operations) HasJournal() bool { return o.journal != nil }

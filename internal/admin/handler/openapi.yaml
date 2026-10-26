@@ -83,6 +83,24 @@ paths:
           content:
             text/html:
               schema: { type: string }
+  /schema:
+    get:
+      tags: [Mocks]
+      operationId: getMockSchema
+      summary: Get the mock file schema
+      description: |
+        The JSON Schema of the server's mock files, in JSON or YAML as `Accept` asks, so a client writes mocks the
+        server takes. HTTP mock servers only.
+      responses:
+        "200":
+          description: The JSON Schema of the mock files.
+          content:
+            application/json:
+              schema: { type: object }
+            application/yaml:
+              schema: { type: object }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "501": { $ref: "#/components/responses/NotSupported" }
   /mocks:
     get:
       tags: [Mocks]

@@ -95,6 +95,11 @@ func TestOperations_ACapabilityTheServerLacksIsNotSupported(t *testing.T) {
 			detail: "this mock server can't keep a journal of requests",
 		},
 		{
+			name:   "get the mock file schema",
+			call:   func(context.Context) error { _, err := ops.MockSchema(); return err },
+			detail: "this mock server can't describe its mock files",
+		},
+		{
 			name:   "clear the requests",
 			call:   func(context.Context) error { return ops.ClearRequests() },
 			detail: "this mock server can't keep a journal of requests",

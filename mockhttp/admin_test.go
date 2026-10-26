@@ -941,3 +941,16 @@ func TestAdmin_AStartThatFailsLeavesNothingListening(t *testing.T) {
 		})
 	}
 }
+
+func TestAdmin_ServesTheMockFileSchema(t *testing.T) {
+	// A client that writes mock files, such as an editor or an agent, reads their schema from the server it writes them
+	// for: the schema the repository ships for editors.
+	m := adminServer(t, Setup())
+
+	res, body := do(t, http.MethodGet, m.AdminURL()+"/schema", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	want, err := os.ReadFile("schema/http.schema.json")
+	require.NoError(t, err)
+	require.Equal(t, string(want), string(body))
+}

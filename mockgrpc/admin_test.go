@@ -102,6 +102,7 @@ func TestAdmin_WhatGRPCMocksCantDo(t *testing.T) {
 		{method: http.MethodPost, path: "/mocks/reload"},
 		{method: http.MethodPost, path: "/recording"},
 		{method: http.MethodGet, path: "/scenarios"},
+		{method: http.MethodGet, path: "/schema"},
 	} {
 		status, body := call(t, route.method, m.AdminURL()+route.path, `{}`)
 		require.Equal(t, http.StatusNotImplemented, status, route.path)

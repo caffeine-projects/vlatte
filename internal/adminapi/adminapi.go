@@ -89,6 +89,9 @@ type Capabilities struct {
 	// Matchers builds the matcher lists of a query of the journal, as it does the server's mock files. Nil builds the
 	// built-in matchers only.
 	Matchers *matchbuild.Registry
+
+	// MockSchema is the JSON Schema of the server's mock files, a JSON document, for clients that write them.
+	MockSchema []byte
 }
 
 // Server is the admin API of one mock server.
