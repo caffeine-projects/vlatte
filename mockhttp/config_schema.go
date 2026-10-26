@@ -462,6 +462,16 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			},
 		},
 		{
+			Key: "template.env", Kind: config.List,
+			Usage: "Environment variables templates may read with env, by exact name. Templates read none without it.",
+			Set: func(c *Config, v config.Value) error {
+				c.TemplateEnv = v.List
+				_, err := vlatte.NewGoTemplateEngine(vlatte.WithEnv(v.List...))
+
+				return err
+			},
+		},
+		{
 			Key: "webhook.timeout", Kind: config.Duration,
 			Usage: "How long a webhook without a timeout of its own waits for its answer: milliseconds or a Go duration " +
 				"(1.5s). 0 uses " + httpx.DefaultWebhookTimeout.String() + ".",

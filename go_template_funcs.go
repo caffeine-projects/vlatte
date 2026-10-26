@@ -3,20 +3,83 @@ package vlatte
 import (
 	"encoding/base64"
 	json "encoding/json/v2"
+	"net/url"
+	"strings"
 	"time"
 	"uuid"
 )
 
-// goTemplateFuncs returns the functions Go templates can call besides those of text/template. Each call returns a
-// new map, so an engine can add to its own.
+// goTemplateFuncs returns the functions Go templates can call besides those of text/template, but env, which the
+// engine adds. Each call returns a new map, so an engine can add to its own.
 func goTemplateFuncs() map[string]any {
 	return map[string]any{
-		"toJson":       toJSON,
-		"fromJson":     fromJSON,
+		"toJSON":       toJSON,
+		"fromJSON":     fromJSON,
 		"uuid":         newUUID,
 		"now":          now,
 		"base64Encode": base64Encode,
 		"base64Decode": base64Decode,
+
+		"toUpper":          strings.ToUpper,
+		"toLower":          strings.ToLower,
+		"trimSpace":        strings.TrimSpace,
+		"title":            title,
+		"upperFirst":       upperFirst,
+		"truncate":         truncate,
+		"replaceAll":       replaceAll,
+		"split":            split,
+		"join":             join,
+		"substring":        substring,
+		"slug":             slug,
+		"regexpFind":       regexpFind,
+		"regexpSubmatch":   regexpSubmatch,
+		"regexpReplaceAll": regexpReplaceAll,
+		"regexpMatch":      regexpMatch,
+		"contains":         contains,
+		"default":          defaultValue,
+
+		"add":     add,
+		"sub":     sub,
+		"mul":     mul,
+		"div":     div,
+		"mod":     mod,
+		"toInt":   toInt,
+		"toFloat": toFloat,
+
+		"list":       list,
+		"append":     appendItem,
+		"insert":     insertItem,
+		"remove":     removeItem,
+		"randomItem": randomItem,
+		"shuffle":    shuffle,
+		"sortBy":     sortBy,
+		"reverse":    reverse,
+
+		"jsonPath":       jsonPath,
+		"jsonPathAll":    jsonPathAll,
+		"deleteJSONPath": deleteJSONPath,
+		"mergePatch":     mergePatch,
+		"indentJSON":     indentJSON,
+		"compactJSON":    compactJSON,
+
+		"xpath":      xpathString,
+		"xpathNodes": xpathNodes,
+
+		"formatTime":   formatTime,
+		"parseTime":    parseTime,
+		"timeAdd":      timeAdd,
+		"inZone":       inZone,
+		"truncateTime": truncateTime,
+
+		"queryUnescape": url.QueryUnescape,
+		"parseQuery":    url.ParseQuery,
+
+		"randomString": randomString,
+		"randomInt":    randomInt,
+		"randomFloat":  randomFloat,
+
+		"hash": hashOf,
+		"hmac": hmacOf,
 	}
 }
 

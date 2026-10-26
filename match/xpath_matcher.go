@@ -10,6 +10,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
+	"github.com/caffeine-projects/vlatte/internal/xmldoc"
 )
 
 var (
@@ -38,7 +39,7 @@ func (m *xpathMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return mismatch(strings.Join([]string{"XPath(", m.Expr, ") Value is not text"}, ""))
 	}
 
-	doc, err := parseXML([]byte(text), XMLNamespacesByURI)
+	doc, err := xmldoc.Parse([]byte(text), false)
 	if err != nil {
 		return mismatch(strings.Join([]string{"XPath(", m.Expr, ") Value is not XML"}, ""))
 	}
@@ -58,8 +59,8 @@ func (m *xpathMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 // nodeValue returns what XPath gives the inner matcher for a node it selects: an element as its XML, and any other
 // node as its text.
 func nodeValue(n xpath.NodeNavigator) any {
-	if nav, ok := n.(*xmlNav); ok && n.NodeType() == xpath.ElementNode {
-		return elementXML(nav.node)
+	if nav, ok := n.(*xmldoc.Nav); ok && n.NodeType() == xpath.ElementNode {
+		return xmldoc.ElementXML(nav.Node())
 	}
 
 	return n.Value()
@@ -81,11 +82,11 @@ func (m *xpathMatcher) Describe() descriptor.Descriptor {
 
 // evaluate returns what the expression selects in a document: nil for no node, the node for one, and a list for more,
 // or the number, string or bool it computes.
-func (m *xpathMatcher) evaluate(doc *xmlNode) any {
+func (m *xpathMatcher) evaluate(doc *xmldoc.Node) any {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	result := m.compiled.Evaluate(newXMLNav(doc))
+	result := m.compiled.Evaluate(xmldoc.NewNav(doc))
 
 	r, isNodes := result.(*xpath.NodeIterator)
 	if !isNodes {

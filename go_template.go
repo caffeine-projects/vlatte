@@ -19,20 +19,38 @@ var _missingKeyModes = []string{"default", "invalid", "zero", "error"}
 //
 // text/template, and not html/template, is the package for mocks: templates write bodies of any type, such as JSON
 // and XML, and headers, URLs and file names, which html/template would escape for HTML. Escape on purpose with the
-// html, js and urlquery functions, or with toJson for a JSON value.
+// html, js and urlquery functions, or with toJSON for a JSON value.
 //
-// Besides the functions of text/template, templates can call:
-//   - toJson: a value as JSON, such as a quoted and escaped string;
-//   - fromJson: JSON text as a value, such as the fields of a JSON request body;
-//   - uuid: a random UUID;
-//   - now: the current time.Time;
-//   - base64Encode and base64Decode: a string to and from standard base64.
+// Besides the functions of text/template, templates can call those below. A function's last argument is the value it
+// works on, so it pipes, as in {{ .Request.Header.Get "X-Name" | trimSpace | toUpper }}, but for the list functions,
+// which take the list first, as Go's append does. A function given a bad argument, such as an unknown algorithm or a
+// number that isn't one, fails the template, so a mock never answers with a broken body.
+//   - JSON: toJSON (a value as JSON, such as a quoted and escaped string), fromJSON, jsonPath and jsonPathAll (what a
+//     JSONPath selects), deleteJSONPath and mergePatch (RFC 7386), which read a value or JSON text, and indentJSON
+//     and compactJSON.
+//   - Strings: toUpper, toLower, trimSpace, title, upperFirst, truncate, replaceAll, split, join, substring and slug,
+//     which count runes, not bytes; regexpFind, regexpSubmatch, regexpReplaceAll and regexpMatch, with Go's regexp
+//     syntax; contains, for a substring, a list item or a map key; default, for a value that is nil, "" or empty.
+//   - Numbers: add, sub, mul, div and mod, on ints when both operands are integers and on float64s otherwise, and
+//     toInt and toFloat, which convert numbers and numeric strings, such as a query parameter.
+//   - Lists: list, append, insert, remove, randomItem, shuffle, reverse and sortBy, which return new lists.
+//   - XML: xpath, the text of what an XPath 1.0 expression selects, and xpathNodes, the nodes it selects.
+//   - Time: now, the current time.Time; formatTime and parseTime, with Go layouts, the names of those of package
+//     time, such as RFC3339, and unix and unixMilli; timeAdd, by a Go duration or such as "3 days"; inZone; and
+//     truncateTime, such as to "first day of month".
+//   - Encoding: base64Encode and base64Decode, queryUnescape and parseQuery.
+//   - Random: uuid, randomString, randomInt and randomFloat. They are not for secrets.
+//   - Hashes: hash, such as {{ hash "sha256" "hex" .Request.Body.String }}, and hmac.
+//   - env: the value of an environment variable WithEnv allows. A name env is given as a literal and isn't allowed
+//     fails the template when it compiles.
 //
 // A missing map key is an error, so a typo doesn't render as "<no value>". Read an optional key with index, which
 // gives the zero value, as in {{ with index .Extra "name" }}{{ . }}{{ end }}, or change the rule with WithMissingKey.
 type GoTemplateEngine struct {
 	funcs      map[string]any
 	missingKey string
+	envAllowed map[string]bool // the environment variables env reads
+	customEnv  bool            // whether WithTemplateFuncs replaced env, so Compile doesn't check its names
 }
 
 // GoTemplateOption configures a GoTemplateEngine.
@@ -40,7 +58,8 @@ type GoTemplateOption func(*GoTemplateEngine) error
 
 // NewGoTemplateEngine creates a GoTemplateEngine.
 func NewGoTemplateEngine(opts ...GoTemplateOption) (*GoTemplateEngine, error) {
-	e := &GoTemplateEngine{funcs: goTemplateFuncs(), missingKey: "error"}
+	e := &GoTemplateEngine{funcs: goTemplateFuncs(), missingKey: "error", envAllowed: make(map[string]bool)}
+	e.funcs["env"] = e.env
 
 	for _, opt := range opts {
 		if err := opt(e); err != nil {
@@ -71,6 +90,10 @@ func WithTemplateFuncs(funcs map[string]any) GoTemplateOption {
 
 		maps.Copy(e.funcs, funcs)
 
+		if _, ok := funcs["env"]; ok {
+			e.customEnv = true
+		}
+
 		return nil
 	}
 }
@@ -90,7 +113,8 @@ func WithMissingKey(mode string) GoTemplateOption {
 	}
 }
 
-// Compile parses text as a Go template. The error is text/template's, such as "template: body:1: unclosed action".
+// Compile parses text as a Go template. The error is text/template's, such as "template: body:1: unclosed action",
+// or names an environment variable env is given and the engine doesn't allow.
 func (e *GoTemplateEngine) Compile(name, text string) (Template, error) {
 	if e.missingKey == "" {
 		return nil, errors.New("vlatte: go template engine: create it with NewGoTemplateEngine")
@@ -99,6 +123,12 @@ func (e *GoTemplateEngine) Compile(name, text string) (Template, error) {
 	t, err := template.New(name).Option("missingkey=" + e.missingKey).Funcs(e.funcs).Parse(text)
 	if err != nil {
 		return nil, err
+	}
+
+	if !e.customEnv {
+		if err := e.checkEnv(t); err != nil {
+			return nil, fmt.Errorf("template: %s: env: %w", name, err)
+		}
 	}
 
 	return t, nil

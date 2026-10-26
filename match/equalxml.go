@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/xmldoc"
 )
 
 // EqualXML matches text, such as a request body, that is an XML document equal to expected. Documents are equal when
@@ -22,12 +23,12 @@ func EqualXML(expected string, opts ...EqualXMLOption) vlatte.Matcher {
 		opt.applyXML(&m.opts)
 	}
 
-	want, err := parseXML([]byte(expected), m.opts.namespaces)
+	want, err := xmldoc.Parse([]byte(expected), m.opts.namespaces == XMLNamespacesIgnored)
 	if err != nil {
 		panic(fmt.Errorf("match: eqx: %w", err))
 	}
 
-	m.want = want.root()
+	m.want = want.Root()
 
 	return m
 }

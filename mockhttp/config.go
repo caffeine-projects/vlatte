@@ -39,6 +39,11 @@ var (
 	ConfigMockFilePattern = append([]string{WorkDirVar + "/_mocks/*mock.yaml", WorkDirVar + "/_mocks/*mock.yml"}, recordedMockFiles(_defaultRecordDir)...)
 )
 
+// errTemplateEnvWithEngine says a server has both a TemplateEngine and template.env, which configures the engine the
+// server makes without one.
+var errTemplateEnvWithEngine = errors.New("config: template.env configures the default template engine, and the " +
+	"server has a TemplateEngine: allow the variables on it with vlatte.WithEnv")
+
 // Config holds the configuration of an HTTP mock Server.
 type Config struct {
 	// Common fields
@@ -68,6 +73,11 @@ type Config struct {
 
 	// TemplateEngine compiles every template of the server's mocks. Nil uses a vlatte.GoTemplateEngine.
 	TemplateEngine vlatte.TemplateEngine
+
+	// TemplateEnv names the environment variables templates may read with env, from the setting template.env. It
+	// configures the vlatte.GoTemplateEngine the server makes without a TemplateEngine, so setting both is an error:
+	// allow them on that engine with vlatte.WithEnv.
+	TemplateEnv []string
 
 	// ConfigSources lists where settings are read from after code, lowest precedence first.
 	// Nil reads DefaultConfigSources(nil): the config file, then VLATTE_* environment variables.
@@ -145,6 +155,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Matchers = c.Matchers
 	conf.GlobalEvents = c.GlobalEvents
 	conf.TemplateEngine = c.TemplateEngine
+	conf.TemplateEnv = c.TemplateEnv
 	conf.TemplateDataProviders = c.TemplateDataProviders
 	conf.DebugFn = c.DebugFn
 	conf.ConfigSources = c.ConfigSources
@@ -642,6 +653,13 @@ func (cb *ConfigBuilder) AdminStore(store AdminStore) *ConfigBuilder {
 // vlatte.GoTemplateEngine. To give Go templates more functions, set one made with vlatte.WithTemplateFuncs.
 func (cb *ConfigBuilder) TemplateEngine(e vlatte.TemplateEngine) *ConfigBuilder {
 	cb.conf.TemplateEngine = e
+	return cb
+}
+
+// TemplateEnv allows the templates of the server's default engine to read the environment variables names with env.
+// See Config.TemplateEnv.
+func (cb *ConfigBuilder) TemplateEnv(names ...string) *ConfigBuilder {
+	cb.conf.TemplateEnv = names
 	return cb
 }
 

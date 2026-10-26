@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
 )
@@ -73,6 +74,16 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		field{
 			Key: "grpc.reflection", Kind: config.Bool, Usage: "Serve gRPC server reflection, so grpcurl and other tools list the services.",
 			Set: func(c *Config, v config.Value) error { c.Reflection = v.Bool; return nil },
+		},
+		field{
+			Key: "grpc.template.env", Kind: config.List,
+			Usage: "Environment variables templates may read with env, by exact name. Templates read none without it.",
+			Set: func(c *Config, v config.Value) error {
+				c.TemplateEnv = v.List
+				_, err := vlatte.NewGoTemplateEngine(vlatte.WithEnv(v.List...))
+
+				return err
+			},
 		},
 		field{
 			Key: "grpc.no_match_code", Kind: config.String, Default: "NOT_FOUND",

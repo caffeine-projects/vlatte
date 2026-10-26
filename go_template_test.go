@@ -140,23 +140,23 @@ func TestGoTemplateEngine_Compile(t *testing.T) {
 func TestGoTemplateFuncs(t *testing.T) {
 	e := MustNewGoTemplateEngine()
 
-	t.Run("toJson writes values a JSON body can hold", func(t *testing.T) {
+	t.Run("toJSON writes values a JSON body can hold", func(t *testing.T) {
 		data := map[string]any{"name": `a "b" <c>`, "tags": map[string]any{"z": 1, "a": 2}}
 
-		out, err := render(t, e, `{"name": {{ toJson .name }}, "tags": {{ toJson .tags }}}`, data)
+		out, err := render(t, e, `{"name": {{ toJSON .name }}, "tags": {{ toJSON .tags }}}`, data)
 		require.NoError(t, err)
 		// Quotes escaped, no HTML escaping, and keys sorted so responses are stable.
 		require.Equal(t, `{"name": "a \"b\" <c>", "tags": {"a":2,"z":1}}`, out)
 	})
 
-	t.Run("fromJson reads the fields of JSON text", func(t *testing.T) {
-		out, err := render(t, e, `{{ index (fromJson .) "id" }}`, `{"id": "42"}`)
+	t.Run("fromJSON reads the fields of JSON text", func(t *testing.T) {
+		out, err := render(t, e, `{{ index (fromJSON .) "id" }}`, `{"id": "42"}`)
 		require.NoError(t, err)
 		require.Equal(t, "42", out)
 	})
 
-	t.Run("fromJson fails on text that isn't JSON", func(t *testing.T) {
-		_, err := render(t, e, `{{ fromJson . }}`, `{"id": `)
+	t.Run("fromJSON fails on text that isn't JSON", func(t *testing.T) {
+		_, err := render(t, e, `{{ fromJSON . }}`, `{"id": `)
 		require.Error(t, err)
 	})
 
