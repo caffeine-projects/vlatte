@@ -13,6 +13,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
+	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -24,7 +25,7 @@ var (
 )
 
 // errMockID says what an ID may hold. IDs name mocks in admin API paths, such as /mocks/{id}.
-var errMockID = errors.New("an id holds only letters, digits, '.', '_', '~' and '-'")
+var errMockID = mockid.ErrInvalid
 
 // Builder describes a mock. Build makes a new Mock from it each time, for the given server, and leaves the builder as
 // it was: one builder can be added to many servers, or more than once to one, and changing it after Mock changes only
@@ -779,24 +780,9 @@ func (b *Builder) appendExpectation(e *vlatte.Eval[*selectorInput]) {
 	b.spec.expectations = append(b.spec.expectations, e)
 }
 
-// checkMockID accepts the IDs a mock can have: letters, digits, '.', '_', '~' and '-', the characters
-// a URL path needs no escaping for.
+// checkMockID accepts the IDs a mock can have: see mockid.Check.
 func checkMockID(id string) error {
-	if id == "" || strings.ContainsFunc(id, notIDRune) {
-		return errMockID
-	}
-
-	return nil
-}
-
-// notIDRune reports whether r can't be part of a mock ID.
-func notIDRune(r rune) bool {
-	switch {
-	case 'a' <= r && r <= 'z', 'A' <= r && r <= 'Z', '0' <= r && r <= '9':
-		return false
-	default:
-		return !strings.ContainsRune("._~-", r)
-	}
+	return mockid.Check(id)
 }
 
 // --

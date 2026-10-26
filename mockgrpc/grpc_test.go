@@ -14,7 +14,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
-	"testing/iotest"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -25,7 +24,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/journal"
@@ -39,14 +38,15 @@ type blockingUnaryReply struct {
 }
 
 // NewReplier gives every mock this reply itself: the test waits on its channels.
-func (r *blockingUnaryReply) NewReplier(*Server) (UnaryReplier, error) {
+func (r *blockingUnaryReply) NewReplier(*Server, []protoreflect.MethodDescriptor) (Replier, error) {
 	return r, nil
 }
 
-func (r *blockingUnaryReply) Reply(_ context.Context, _ *UnaryRequestValues) (any, error) {
+func (r *blockingUnaryReply) Reply(_ context.Context, call *Call) error {
 	close(r.entered)
 	<-r.release
-	return &pb.HiRes{Message: "bye"}, nil
+
+	return call.Send(&pb.HiRes{Message: "bye"})
 }
 
 func TestClose_BeforeStart(t *testing.T) {
@@ -131,7 +131,7 @@ func TestClose_WaitsForInFlightCalls(t *testing.T) {
 	reply := &blockingUnaryReply{entered: make(chan struct{}), release: make(chan struct{})}
 	release := sync.OnceFunc(func() { close(reply.release) })
 	t.Cleanup(release)
-	m.MustMock(UnaryMethod("Greetings").Reply(reply))
+	m.MustMock(Method("Greetings").Reply(reply))
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
@@ -257,7 +257,7 @@ func TestServerOptionsAreApplied(t *testing.T) {
 			pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})
 			m.MustStart()
 			t.Cleanup(m.Close)
-			m.MustMock(UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{Message: "bye"})))
+			m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "bye"})))
 
 			conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 			require.NoError(t, err)
@@ -312,9 +312,9 @@ func TestServerStream_MatchesRequestFields(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(ServerStreamMethod("List").
+	m.MustMock(Method("List").
 		Field("message", match.Eq("hi")).
-		Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})))
+		Reply(Messages(&pb.ListItem{Key: "a"})))
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
@@ -341,9 +341,9 @@ func TestServerStream_MatchesRequestHeader(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(ServerStreamMethod("List").
+	m.MustMock(Method("List").
 		Header("x-team", match.Eq("a")).
-		Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})))
+		Reply(Messages(&pb.ListItem{Key: "a"})))
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
@@ -519,7 +519,7 @@ func TestListener(t *testing.T) {
 func TestUnaryBuilder_OneBuilderOnTwoServers(t *testing.T) {
 	// Build returned the builder's own mock, so two servers served one mock, with one hit count and one ID. Each build
 	// is a new mock now, with a replier of its own.
-	b := UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{Message: "hi"}))
+	b := Method("Greetings").Reply(Message(&pb.HiRes{Message: "hi"}))
 
 	servers := make([]*Server, 2)
 	mocks := make([]*Mock, 2)
@@ -551,31 +551,32 @@ func TestUnaryBuilder_OneBuilderOnTwoServers(t *testing.T) {
 // noReplier is a reply factory that makes no replier.
 type noReplier struct{}
 
-func (noReplier) NewReplier(*Server) (UnaryReplier, error) { return nil, nil }
+func (noReplier) NewReplier(*Server, []protoreflect.MethodDescriptor) (Replier, error) {
+	return nil, nil
+}
 
 func TestBuilder_ReplyErrors(t *testing.T) {
 	// Build stored the reply as given, so a mock without a reply was added and failed every call, and a stream whose
-	// reader failed streamed nothing, without an error. Build makes the replier of the mock now, and those fail it.
+	// messages didn't decode streamed nothing, without an error. Build makes the replier of the mock now, and those
+	// fail it.
 	m := MustNew()
 
-	_, err := UnaryMethod("Greetings").Build(m)
+	_, err := Method("Greetings").Build(m)
 	require.EqualError(t, err, "mock: no reply set: use Reply")
 
-	_, err = UnaryMethod("Greetings").Reply(noReplier{}).Build(m)
-	require.EqualError(t, err, "reply: the factory made no replier")
+	_, err = Method("Greetings").Reply(noReplier{}).Build(m)
+	require.EqualError(t, err, "mock: Greetings: reply: the factory made no replier")
 
-	_, err = ServerStreamMethod("List").
-		Reply(ServerStream[*pb.ListItem]().JSON(iotest.ErrReader(errors.New("boom")))).
-		Build(m)
-	require.EqualError(t, err, "stream: reading the messages: boom")
+	_, err = Method("List").Reply(JSON(`{"nope": 1}`)).Build(m)
+	require.ErrorContains(t, err, "mock: List: reply: /protobuf.TestService/List: json 0: not a protobuf.ListItem")
 }
 
 func TestMocksOfBothKinds_EachCallFindsItsKind(t *testing.T) {
 	// A mock has matchers for its own kind of call only, and no matchers match every call: a stream call matched a
 	// unary mock added before the stream mock, and failed, and a unary call did the same with a stream mock added
 	// first. Each call is matched against the mocks of its kind now.
-	unary := UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{Message: "hi"}))
-	stream := ServerStreamMethod("List").Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}}))
+	unary := Method("Greetings").Reply(Message(&pb.HiRes{Message: "hi"}))
+	stream := Method("List").Reply(Messages(&pb.ListItem{Key: "a"}))
 
 	for _, unaryFirst := range []bool{true, false} {
 		m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
@@ -598,4 +599,43 @@ func TestMocksOfBothKinds_EachCallFindsItsKind(t *testing.T) {
 		require.Equal(t, "hi", res.Message)
 		require.Equal(t, []string{"a"}, listKeys(t, client), "unary first: %t", unaryFirst)
 	}
+}
+
+func TestClose_CutsTheCallsThatOutlastTheShutdownTimeout(t *testing.T) {
+	// Close waited for every call: a stream whose client never closed it held Close, and the test, forever.
+	m := MustNew(Setup().Silent().ShutdownTimeout(10 * time.Millisecond))
+	m.MustStart()
+	m.MustMock(Method("Chat").Reply(Bidi()))
+
+	stream, err := pb.NewTestServiceClient(dial(t, m)).Chat(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, stream.Send(&pb.HiReq{Message: "never closes"}))
+
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		m.Close()
+	}()
+
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close waited for the call past its timeout")
+	}
+
+	_, err = stream.Recv()
+	require.Equal(t, codes.Unavailable, status.Code(err), "the call was cut: %v", err)
+}
+
+func TestNoMatchCode_IsTheCodeOfAnUnmatchedCall(t *testing.T) {
+	// A call no mock matched answered NotFound, which an app may take for the answer of a real server: the code is
+	// the server's to choose, as HTTP mock servers choose their status.
+	m := MustNew(Setup().Silent().NoMatchCode(codes.Unimplemented))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	var trailer metadata.MD
+	_, err := pb.NewTestServiceClient(dial(t, m)).Greetings(t.Context(), &pb.HiReq{}, grpc.Trailer(&trailer))
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.FailureHeader))
 }

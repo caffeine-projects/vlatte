@@ -44,8 +44,8 @@ func TestFailures_FindingAMock(t *testing.T) {
 	t.Run("a matcher fails", func(t *testing.T) {
 		m := serve(t)
 		broken := match.Function(func(any) (bool, error) { return false, errors.New("matcher failed") })
-		unary := m.MustMock(UnaryMethod("Greetings").Field("message", broken).Reply(Unary()))
-		stream := m.MustMock(ServerStreamMethod("List").Field("message", broken).Reply(ServerStream[*pb.ListItem]()))
+		unary := m.MustMock(Method("Greetings").Field("message", broken).Reply(Message(&pb.HiRes{})))
+		stream := m.MustMock(Method("List").Field("message", broken).Reply(Messages()))
 		c := client(t, m)
 
 		var trailer metadata.MD

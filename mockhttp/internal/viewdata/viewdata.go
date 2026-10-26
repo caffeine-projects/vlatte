@@ -3,12 +3,12 @@ package viewdata
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/url"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/params"
 )
 
 // Data is what templates render with: the dot of a Go template, and the context of any other engine.
@@ -46,37 +46,12 @@ func (d *Data) WithExtra(extra any) *Data {
 	return &c
 }
 
-// Parameters gives templates the app parameters as text: {{ .Parameters.Get "key" }}. A parameter that may be missing
-// reads with Has first: {{ if .Parameters.Has "key" }}.
-type Parameters struct {
-	ctx context.Context
-	kv  vlatte.KV
-}
+// Parameters gives templates the app parameters as text: {{ .Parameters.Get "key" }}.
+type Parameters = params.Parameters
 
+// NewParameters returns the Parameters of kv, read with ctx.
 func NewParameters(ctx context.Context, kv vlatte.KV) *Parameters {
-	return &Parameters{ctx: ctx, kv: kv}
-}
-
-// Get returns the value stored under key as text. A key that isn't stored is an error, as a missing map key is, so a
-// typo doesn't render as an empty value.
-func (p *Parameters) Get(key string) (string, error) {
-	ok, err := p.Has(key)
-	if err != nil {
-		return "", err
-	}
-
-	if !ok {
-		return "", fmt.Errorf("parameters: no parameter %q", key)
-	}
-
-	b, err := p.kv.Get(p.ctx, key)
-
-	return string(b), err
-}
-
-// Has reports whether a value is stored under key.
-func (p *Parameters) Has(key string) (bool, error) {
-	return p.kv.Has(p.ctx, key)
+	return params.New(ctx, kv)
 }
 
 // Request is the request being served.

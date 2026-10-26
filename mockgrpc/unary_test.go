@@ -22,13 +22,12 @@ func TestUnary(t *testing.T) {
 	defer m.Close()
 	pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})
 	m.MustStart()
-	m.MustMock(UnaryMethod("Greetings").
+	m.MustMock(Method("Greetings").
 		Header("h1", match.Eq("v1")).
 		Field("message", match.Eq("hi")).
-		Reply(Unary().
+		Reply(Message(&pb.HiRes{Message: "bye"}).
 			Header("k1", "v1", "v2").
-			Trailer("tk1", "tv1", "tv2").
-			Message(&pb.HiRes{Message: "bye"})))
+			Trailer("tk1", "tv1", "tv2")))
 
 	ctx := context.Background()
 	ctx = metadata.AppendToOutgoingContext(ctx, "h1", "v1")
@@ -58,8 +57,8 @@ func TestUnaryReply_ChangesAfterMockReachOnlyLaterMocks(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	reply := Unary().Header("x-a", "1").Message(&pb.HiRes{Message: "hi"})
-	b := UnaryMethod("Greetings").Reply(reply)
+	reply := Message(&pb.HiRes{Message: "hi"}).Header("x-a", "1")
+	b := Method("Greetings").Reply(reply)
 	scope := m.MustMock(b)
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -105,8 +104,8 @@ func TestUnaryReply_Status(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(UnaryMethod("Greetings").
-		Reply(Unary().Header("k", "v").Status(status.New(codes.PermissionDenied, "denied"))))
+	m.MustMock(Method("Greetings").
+		Reply(Status(codes.PermissionDenied, "denied").Header("k", "v")))
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)

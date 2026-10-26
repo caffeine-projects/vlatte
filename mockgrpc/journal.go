@@ -27,6 +27,9 @@ const (
 	_scopeMethod scope = iota + 1
 	_scopeHeader
 	_scopeField
+	_scopeRequest
+	_scopeRepeat
+	_scopeScenario
 )
 
 // openJournal opens the journal conf configures, nil when it configures none.
@@ -241,6 +244,12 @@ func describeEval[T any](e *vlatte.Eval[T]) string {
 		return "method"
 	case _scopeHeader:
 		return "header " + e.Key
+	case _scopeRequest:
+		return "request " + e.Key
+	case _scopeRepeat:
+		return "times"
+	case _scopeScenario:
+		return "scenario " + e.Key
 	}
 
 	return "field " + e.Key

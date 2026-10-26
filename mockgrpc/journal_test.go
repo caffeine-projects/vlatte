@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/testmock"
@@ -58,12 +58,12 @@ func TestJournal_KeepsEachCallOnceWhateverItsOutcome(t *testing.T) {
 	m, c := journaled(t, Setup())
 
 	m.MustMock(
-		UnaryMethod("Greetings").Field("message", match.Equal("hi")).Reply(Unary().Message(&pb.HiRes{Message: "hello"})),
-		UnaryMethod("Greetings").Field("message", match.Equal("denied")).Reply(Unary().Status(status.New(codes.PermissionDenied, "no"))),
-		UnaryMethod("Greetings").Field("message", match.Equal("broken")).Reply(funcUnaryReply(func() (any, error) {
+		Method("Greetings").Field("message", match.Equal("hi")).Reply(Message(&pb.HiRes{Message: "hello"})),
+		Method("Greetings").Field("message", match.Equal("denied")).Reply(Status(codes.PermissionDenied, "no")),
+		Method("Greetings").Field("message", match.Equal("broken")).Reply(funcUnaryReply(func() (any, error) {
 			return nil, errors.New("unary broke")
 		})),
-		UnaryMethod("Greetings").Field("message", match.Equal("panics")).Reply(funcUnaryReply(func() (any, error) {
+		Method("Greetings").Field("message", match.Equal("panics")).Reply(funcUnaryReply(func() (any, error) {
 			panic("boom")
 		})),
 	)
@@ -107,7 +107,7 @@ func TestJournal_KeepsEachCallOnceWhateverItsOutcome(t *testing.T) {
 
 func TestJournal_UnmatchedCallsNameTheClosestMocks(t *testing.T) {
 	m, c := journaled(t, Setup())
-	m.MustMock(UnaryMethod("Greetings").Header("x-team", match.Equal("core")).Reply(Unary().Message(&pb.HiRes{})))
+	m.MustMock(Method("Greetings").Header("x-team", match.Equal("core")).Reply(Message(&pb.HiRes{})))
 
 	_, err := c.Greetings(t.Context(), &pb.HiReq{})
 	require.Equal(t, codes.NotFound, status.Code(err))
@@ -122,7 +122,7 @@ func TestJournal_AnUnmatchedCallNamesTheMethodItsClosestMockDiffersIn(t *testing
 	// A mock of another method came closest, the fields of the call matched: the near miss names the method, so a
 	// test sees it mocked the wrong method, not the wrong fields.
 	m, c := journaled(t, Setup())
-	scope := m.MustMock(UnaryMethod("Other").Field("message", match.Equal("hi")).Reply(Unary().Message(&pb.HiRes{})))
+	scope := m.MustMock(Method("OtherService/Greetings").Field("message", match.Equal("hi")).Reply(Message(&pb.HiRes{})))
 
 	_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
 	require.Equal(t, codes.NotFound, status.Code(err))
@@ -133,7 +133,7 @@ func TestJournal_AnUnmatchedCallNamesTheMethodItsClosestMockDiffersIn(t *testing
 
 func TestJournal_KeepsStreamingCalls(t *testing.T) {
 	m, c := journaled(t, Setup())
-	m.MustMock(ServerStreamMethod("List").Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})))
+	m.MustMock(Method("List").Reply(Messages(&pb.ListItem{Key: "a"})))
 
 	stream, err := c.List(t.Context(), &pb.ListReq{Message: "all"})
 	require.NoError(t, err)
@@ -171,7 +171,7 @@ func TestJournal_GRPCHasNoRequestPatterns(t *testing.T) {
 	// A gRPC call is verified by its fields: its protocol has no request patterns, and says so.
 	m, _ := journaled(t, Setup())
 
-	_, err := m.CountRequests(t.Context(), journal.Query{}, UnaryMethod("Greetings"))
+	_, err := m.CountRequests(t.Context(), journal.Query{}, Method("Greetings"))
 	require.ErrorIs(t, err, journal.ErrNoRequestPatterns)
 }
 
@@ -212,13 +212,15 @@ type waitStreamReply struct {
 	began chan struct{}
 }
 
-func (r waitStreamReply) NewReplier(*Server) (StreamReplier, error) { return r, nil }
+func (r waitStreamReply) NewReplier(*Server, []protoreflect.MethodDescriptor) (Replier, error) {
+	return r, nil
+}
 
-func (r waitStreamReply) Reply(ctx context.Context, _ *StreamRequestValues) (any, error) {
+func (r waitStreamReply) Reply(ctx context.Context, _ *Call) error {
 	close(r.began)
 	<-ctx.Done()
 
-	return nil, status.FromContextError(ctx.Err()).Err()
+	return status.FromContextError(ctx.Err()).Err()
 }
 
 func TestJournal_ACallWhoseClientLeftIsAbandoned(t *testing.T) {
@@ -226,7 +228,7 @@ func TestJournal_ACallWhoseClientLeftIsAbandoned(t *testing.T) {
 	// matched it.
 	m, c := journaled(t, Setup())
 	reply := waitStreamReply{began: make(chan struct{})}
-	m.MustMock(ServerStreamMethod("List").Reply(reply))
+	m.MustMock(Method("List").Reply(reply))
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -306,8 +308,8 @@ func TestJournal_KeepsTheCodeTheClientGot(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m, c := journaled(t, Setup().ServerOptions(tt.option))
 			m.MustMock(
-				UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{})),
-				ServerStreamMethod("List").Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})),
+				Method("Greetings").Reply(Message(&pb.HiRes{})),
+				Method("List").Reply(Messages(&pb.ListItem{Key: "a"})),
 			)
 
 			require.Equal(t, tt.want, status.Code(tt.call(t, c)))
@@ -342,7 +344,7 @@ func TestJournal_LeavesOutTheCallsAnInterceptorAnswers(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m, c := journaled(t, Setup().ServerOptions(tt.option))
-			m.MustMock(UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{})))
+			m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
 
 			require.Equal(t, codes.Unauthenticated, status.Code(tt.call(t, c)))
 
@@ -361,7 +363,7 @@ func TestJournal_KeepsOneEntryOfACallAnInterceptorHidesFromIt(t *testing.T) {
 	}
 
 	m, c := journaled(t, Setup().ServerOptions(grpc.ChainUnaryInterceptor(detach)))
-	m.MustMock(UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{})))
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
 
 	require.Equal(t, codes.Internal, status.Code(greet(t, c)))
 	require.Equal(t, int(codes.Internal), onlyCall(t, m, journal.Query{}).Status)
@@ -410,7 +412,7 @@ func TestJournal_KeepsACallAnInterceptorAnswersWhileItsMockGoesOn(t *testing.T) 
 	}
 
 	m, c := journaled(t, Setup().ServerOptions(grpc.ChainUnaryInterceptor(timeout)))
-	m.MustMock(UnaryMethod("Greetings").Reply(funcUnaryReply(func() (any, error) {
+	m.MustMock(Method("Greetings").Reply(funcUnaryReply(func() (any, error) {
 		close(started)
 		return &pb.HiRes{}, nil
 	})))

@@ -21,6 +21,9 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	TestService_Greetings_FullMethodName = "/protobuf.TestService/Greetings"
 	TestService_List_FullMethodName      = "/protobuf.TestService/List"
+	TestService_Upload_FullMethodName    = "/protobuf.TestService/Upload"
+	TestService_Chat_FullMethodName      = "/protobuf.TestService/Chat"
+	TestService_Inspect_FullMethodName   = "/protobuf.TestService/Inspect"
 )
 
 // TestServiceClient is the client API for TestService service.
@@ -29,6 +32,9 @@ const (
 type TestServiceClient interface {
 	Greetings(ctx context.Context, in *HiReq, opts ...grpc.CallOption) (*HiRes, error)
 	List(ctx context.Context, in *ListReq, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ListItem], error)
+	Upload(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ListItem, HiRes], error)
+	Chat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HiReq, HiRes], error)
+	Inspect(ctx context.Context, in *Rich, opts ...grpc.CallOption) (*Rich, error)
 }
 
 type testServiceClient struct {
@@ -68,12 +74,51 @@ func (c *testServiceClient) List(ctx context.Context, in *ListReq, opts ...grpc.
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TestService_ListClient = grpc.ServerStreamingClient[ListItem]
 
+func (c *testServiceClient) Upload(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ListItem, HiRes], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &TestService_ServiceDesc.Streams[1], TestService_Upload_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ListItem, HiRes]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TestService_UploadClient = grpc.ClientStreamingClient[ListItem, HiRes]
+
+func (c *testServiceClient) Chat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HiReq, HiRes], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &TestService_ServiceDesc.Streams[2], TestService_Chat_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[HiReq, HiRes]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TestService_ChatClient = grpc.BidiStreamingClient[HiReq, HiRes]
+
+func (c *testServiceClient) Inspect(ctx context.Context, in *Rich, opts ...grpc.CallOption) (*Rich, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Rich)
+	err := c.cc.Invoke(ctx, TestService_Inspect_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TestServiceServer is the server API for TestService service.
 // All implementations must embed UnimplementedTestServiceServer
 // for forward compatibility.
 type TestServiceServer interface {
 	Greetings(context.Context, *HiReq) (*HiRes, error)
 	List(*ListReq, grpc.ServerStreamingServer[ListItem]) error
+	Upload(grpc.ClientStreamingServer[ListItem, HiRes]) error
+	Chat(grpc.BidiStreamingServer[HiReq, HiRes]) error
+	Inspect(context.Context, *Rich) (*Rich, error)
 	mustEmbedUnimplementedTestServiceServer()
 }
 
@@ -89,6 +134,15 @@ func (UnimplementedTestServiceServer) Greetings(context.Context, *HiReq) (*HiRes
 }
 func (UnimplementedTestServiceServer) List(*ListReq, grpc.ServerStreamingServer[ListItem]) error {
 	return status.Error(codes.Unimplemented, "method List not implemented")
+}
+func (UnimplementedTestServiceServer) Upload(grpc.ClientStreamingServer[ListItem, HiRes]) error {
+	return status.Error(codes.Unimplemented, "method Upload not implemented")
+}
+func (UnimplementedTestServiceServer) Chat(grpc.BidiStreamingServer[HiReq, HiRes]) error {
+	return status.Error(codes.Unimplemented, "method Chat not implemented")
+}
+func (UnimplementedTestServiceServer) Inspect(context.Context, *Rich) (*Rich, error) {
+	return nil, status.Error(codes.Unimplemented, "method Inspect not implemented")
 }
 func (UnimplementedTestServiceServer) mustEmbedUnimplementedTestServiceServer() {}
 func (UnimplementedTestServiceServer) testEmbeddedByValue()                     {}
@@ -140,6 +194,38 @@ func _TestService_List_Handler(srv interface{}, stream grpc.ServerStream) error 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type TestService_ListServer = grpc.ServerStreamingServer[ListItem]
 
+func _TestService_Upload_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(TestServiceServer).Upload(&grpc.GenericServerStream[ListItem, HiRes]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TestService_UploadServer = grpc.ClientStreamingServer[ListItem, HiRes]
+
+func _TestService_Chat_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(TestServiceServer).Chat(&grpc.GenericServerStream[HiReq, HiRes]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TestService_ChatServer = grpc.BidiStreamingServer[HiReq, HiRes]
+
+func _TestService_Inspect_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Rich)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TestServiceServer).Inspect(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TestService_Inspect_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TestServiceServer).Inspect(ctx, req.(*Rich))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TestService_ServiceDesc is the grpc.ServiceDesc for TestService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -151,12 +237,165 @@ var TestService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Greetings",
 			Handler:    _TestService_Greetings_Handler,
 		},
+		{
+			MethodName: "Inspect",
+			Handler:    _TestService_Inspect_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "List",
 			Handler:       _TestService_List_Handler,
 			ServerStreams: true,
+		},
+		{
+			StreamName:    "Upload",
+			Handler:       _TestService_Upload_Handler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "Chat",
+			Handler:       _TestService_Chat_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "test.proto",
+}
+
+const (
+	OtherService_Greetings_FullMethodName = "/protobuf.OtherService/Greetings"
+	OtherService_Inspect_FullMethodName   = "/protobuf.OtherService/Inspect"
+)
+
+// OtherServiceClient is the client API for OtherService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// OtherService shares method names with TestService: Greetings of the same call type, Inspect of another.
+type OtherServiceClient interface {
+	Greetings(ctx context.Context, in *HiReq, opts ...grpc.CallOption) (*HiRes, error)
+	Inspect(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Rich, Rich], error)
+}
+
+type otherServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewOtherServiceClient(cc grpc.ClientConnInterface) OtherServiceClient {
+	return &otherServiceClient{cc}
+}
+
+func (c *otherServiceClient) Greetings(ctx context.Context, in *HiReq, opts ...grpc.CallOption) (*HiRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HiRes)
+	err := c.cc.Invoke(ctx, OtherService_Greetings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *otherServiceClient) Inspect(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Rich, Rich], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &OtherService_ServiceDesc.Streams[0], OtherService_Inspect_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[Rich, Rich]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type OtherService_InspectClient = grpc.ClientStreamingClient[Rich, Rich]
+
+// OtherServiceServer is the server API for OtherService service.
+// All implementations must embed UnimplementedOtherServiceServer
+// for forward compatibility.
+//
+// OtherService shares method names with TestService: Greetings of the same call type, Inspect of another.
+type OtherServiceServer interface {
+	Greetings(context.Context, *HiReq) (*HiRes, error)
+	Inspect(grpc.ClientStreamingServer[Rich, Rich]) error
+	mustEmbedUnimplementedOtherServiceServer()
+}
+
+// UnimplementedOtherServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedOtherServiceServer struct{}
+
+func (UnimplementedOtherServiceServer) Greetings(context.Context, *HiReq) (*HiRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method Greetings not implemented")
+}
+func (UnimplementedOtherServiceServer) Inspect(grpc.ClientStreamingServer[Rich, Rich]) error {
+	return status.Error(codes.Unimplemented, "method Inspect not implemented")
+}
+func (UnimplementedOtherServiceServer) mustEmbedUnimplementedOtherServiceServer() {}
+func (UnimplementedOtherServiceServer) testEmbeddedByValue()                      {}
+
+// UnsafeOtherServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to OtherServiceServer will
+// result in compilation errors.
+type UnsafeOtherServiceServer interface {
+	mustEmbedUnimplementedOtherServiceServer()
+}
+
+func RegisterOtherServiceServer(s grpc.ServiceRegistrar, srv OtherServiceServer) {
+	// If the following call panics, it indicates UnimplementedOtherServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&OtherService_ServiceDesc, srv)
+}
+
+func _OtherService_Greetings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HiReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OtherServiceServer).Greetings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OtherService_Greetings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OtherServiceServer).Greetings(ctx, req.(*HiReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OtherService_Inspect_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(OtherServiceServer).Inspect(&grpc.GenericServerStream[Rich, Rich]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type OtherService_InspectServer = grpc.ClientStreamingServer[Rich, Rich]
+
+// OtherService_ServiceDesc is the grpc.ServiceDesc for OtherService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var OtherService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "protobuf.OtherService",
+	HandlerType: (*OtherServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Greetings",
+			Handler:    _OtherService_Greetings_Handler,
+		},
+	},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Inspect",
+			Handler:       _OtherService_Inspect_Handler,
+			ClientStreams: true,
 		},
 	},
 	Metadata: "test.proto",

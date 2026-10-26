@@ -10,7 +10,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/caffeine-projects/vlatte"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
@@ -35,8 +34,8 @@ func streamHeader(t *testing.T, c pb.TestServiceClient) metadata.MD {
 func TestDebugHeader_NamesTheMockThatMatched(t *testing.T) {
 	// A client sees which mock answered its call, and how often that mock did, without the server's logs.
 	m := serve(t)
-	unary := m.MustMock(UnaryMethod("Greetings").Name("greet").Reply(Unary().Header("k1", "v1").Message(&pb.HiRes{Message: "bye"})))
-	stream := m.MustMock(ServerStreamMethod("List").Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})))
+	unary := m.MustMock(Method("Greetings").Name("greet").Reply(Message(&pb.HiRes{Message: "bye"}).Header("k1", "v1")))
+	stream := m.MustMock(Method("List").Reply(Messages(&pb.ListItem{Key: "a"})))
 	c := client(t, m)
 
 	for _, hits := range []string{"1", "2"} {
@@ -58,7 +57,7 @@ func TestDebugHeader_NamesTheMockThatMatched(t *testing.T) {
 func TestDebugHeader_AMockThatAnswersWithAStatus(t *testing.T) {
 	// A status is the mock's answer, so it names its mock as a message does.
 	m := serve(t)
-	scope := m.MustMock(UnaryMethod("Greetings").Reply(Unary().Status(status.New(codes.NotFound, "no such user"))))
+	scope := m.MustMock(Method("Greetings").Reply(Status(codes.NotFound, "no such user")))
 
 	var header metadata.MD
 	_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{Message: "hi"}, grpc.Header(&header))
@@ -84,8 +83,8 @@ func TestDebugHeader_NoDebugHeadersTurnsThemOff(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	m.MustMock(
-		UnaryMethod("Greetings").Name("greet").Reply(Unary().Message(&pb.HiRes{Message: "bye"})),
-		ServerStreamMethod("List").Name("list").Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})),
+		Method("Greetings").Name("greet").Reply(Message(&pb.HiRes{Message: "bye"})),
+		Method("List").Name("list").Reply(Messages(&pb.ListItem{Key: "a"})),
 	)
 	c := client(t, m)
 

@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -60,7 +61,7 @@ func TestAdmin_IsTheSameForGRPC(t *testing.T) {
 	// The admin API of a gRPC mock server is the HTTP one, on its own address: it lists the mocks with their hits,
 	// and turns them off and on.
 	m, client := adminServer(t)
-	scope := m.MustMock(UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{Message: "bye"})))
+	scope := m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "bye"})))
 	id := scope.IDs()[0]
 
 	_, err := client.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
@@ -90,7 +91,7 @@ func TestAdmin_IsTheSameForGRPC(t *testing.T) {
 func TestAdmin_WhatGRPCMocksCantDo(t *testing.T) {
 	// gRPC mocks have no mock file format, recordings or scenarios: those operations answer 501, and say so.
 	m, _ := adminServer(t)
-	scope := m.MustMock(UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{Message: "bye"})))
+	scope := m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "bye"})))
 
 	for _, route := range []struct {
 		method string
@@ -111,7 +112,7 @@ func TestAdmin_WhatGRPCMocksCantDo(t *testing.T) {
 func TestAdmin_StreamsTheCalls(t *testing.T) {
 	// A client follows the calls the mocks answer, and those none matched, as HTTP mock servers' clients do.
 	m, client := adminServer(t)
-	m.MustMock(UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{Message: "bye"})))
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "bye"})))
 
 	r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, m.AdminURL()+"/events", nil)
 	require.NoError(t, err)
@@ -148,17 +149,19 @@ func TestAdmin_StreamsTheCalls(t *testing.T) {
 // failingReply makes repliers that fail every call with an error that has no gRPC status.
 type failingReply struct{}
 
-func (failingReply) NewReplier(*Server) (UnaryReplier, error) { return failingReply{}, nil }
+func (failingReply) NewReplier(*Server, []protoreflect.MethodDescriptor) (Replier, error) {
+	return failingReply{}, nil
+}
 
-func (failingReply) Reply(context.Context, *UnaryRequestValues) (any, error) {
-	return nil, errors.New("reply: broken")
+func (failingReply) Reply(context.Context, *Call) error {
+	return errors.New("reply: broken")
 }
 
 func TestAdmin_StreamsTheCallsAMockFailed(t *testing.T) {
 	// A reply that fails without a gRPC status failed the call, which isn't the mock's answer: the client follows an
 	// error, with what failed.
 	m, client := adminServer(t)
-	m.MustMock(UnaryMethod("Greetings").Reply(failingReply{}))
+	m.MustMock(Method("Greetings").Reply(failingReply{}))
 
 	// A missing event fails the test, rather than hangs it.
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

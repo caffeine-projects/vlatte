@@ -14,11 +14,13 @@ import (
 
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
@@ -47,10 +49,13 @@ type Server struct {
 	// through the server, not on GRPCServer. Registering ends before Start.
 	journaled map[string]bool
 
-	logger  *zerolog.Logger
-	storage vlatte.Store[*Mock]
-	admin   *admin.Server   // nil without Config.Admin
-	events  *handler.Events // the admin API's; nil without it
+	logger    *zerolog.Logger
+	storage   vlatte.Store[*Mock]
+	resolver  *resolver
+	scenarios *mfeat.ScenarioStore
+	runner    *vlatte.EventRunner // runs the on_complete events of mocks
+	admin     *admin.Server       // nil without Config.Admin
+	events    *handler.Events     // the admin API's; nil without it
 
 	mu      sync.Mutex // orders Start and Close, which a Close overlapping a Start would otherwise outrun
 	addr    string
@@ -77,22 +82,47 @@ func New(config ...Option) (*Server, error) {
 		}
 	}
 
+	if conf.NoMatchCode == codes.OK {
+		conf.NoMatchCode = codes.NotFound
+	}
+
+	if conf.ShutdownTimeout <= 0 {
+		conf.ShutdownTimeout = _defaultShutdownTimeout
+	}
+
+	if conf.TemplateEngine == nil {
+		conf.TemplateEngine = vlatte.MustNewGoTemplateEngine()
+	}
+
+	if conf.Parameters == nil {
+		conf.Parameters = vlatte.NewMemoryKV()
+	}
+
 	store := vlatte.NewStore[*Mock]()
 	app.config = conf
-	app.logger = conf.Logger
 
 	// The admin API streams the log lines of a logger the server builds, not those of one it was given.
 	var logs *handler.Logs
-	if app.logger == nil {
-		var out io.Writer = os.Stdout
-		if conf.Admin != nil {
-			logs = handler.NewLogs()
-			out = zerolog.MultiLevelWriter(os.Stdout, logs)
-		}
-
-		l := zerolog.New(out).With().Timestamp().Logger()
-		app.logger = &l
+	if conf.Admin != nil && conf.Logger == nil {
+		logs = handler.NewLogs()
 	}
+
+	app.logger = newLogger(conf, logs)
+
+	res, err := newResolver(conf)
+	if err != nil {
+		return nil, fmt.Errorf("server: %w", err)
+	}
+
+	app.resolver = res
+	app.scenarios = mfeat.NewScenarioStore()
+
+	global, err := app.prepareEvents(globalEvents(conf), "server: global on_complete listener")
+	if err != nil {
+		return nil, err
+	}
+
+	app.runner = vlatte.NewEventRunner(conf.Listeners, &vlatte.Events{OnComplete: global})
 
 	j, err := app.openJournal(conf)
 	if err != nil {
@@ -124,7 +154,11 @@ func New(config ...Option) (*Server, error) {
 	// User options come next: the mock interceptors never call the next handler, so they must run last.
 	// The recovery interceptors run just before them, so a panic serving a mock answers the call.
 	opts = append(opts, conf.ServerOptions...)
-	opts = append(opts, grpc.ChainUnaryInterceptor(unary...), grpc.ChainStreamInterceptor(stream...))
+	opts = append(opts,
+		grpc.ChainUnaryInterceptor(unary...),
+		grpc.ChainStreamInterceptor(stream...),
+		grpc.UnknownServiceHandler(unknownService),
+	)
 
 	srv, err := newGRPCServer(opts, j != nil)
 	if err != nil {
@@ -321,13 +355,38 @@ func (app *Server) Close() {
 		}
 	}
 
+	// The calls wait for their events: cancel the events first.
+	app.runner.Close()
+
 	if served != nil {
-		app.server.GracefulStop()
+		app.stop()
 		<-served
 	}
 
 	if err := app.Journal().Close(); err != nil {
 		app.logger.Warn().Err(err).Msg("server: Close: closing the journal")
+	}
+}
+
+// stop stops the gRPC server, waiting for the calls in flight up to Config.ShutdownTimeout, then cutting them: a
+// stream whose client never ends it doesn't hold Close.
+func (app *Server) stop() {
+	stopped := make(chan struct{})
+
+	go func() {
+		defer close(stopped)
+		app.server.GracefulStop()
+	}()
+
+	t := time.NewTimer(app.config.ShutdownTimeout)
+	defer t.Stop()
+
+	select {
+	case <-stopped:
+	case <-t.C:
+		app.logger.Warn().Dur("timeout", app.config.ShutdownTimeout).Msg("server: Close: cutting the calls in flight")
+		app.server.Stop()
+		<-stopped
 	}
 }
 
@@ -385,4 +444,85 @@ func (app *Server) warnUnjournaled() {
 				"unary calls with the code the mocks answered with, before the interceptors: register it with RegisterService")
 		}
 	}
+}
+
+// newLogger returns the logger of conf: its Logger, or one that writes to the standard output, and to logs when the
+// admin API streams them, at conf.LogLevel.
+func newLogger(conf *Config, logs *handler.Logs) *zerolog.Logger {
+	if conf.Logger != nil {
+		return conf.Logger
+	}
+
+	var out io.Writer = os.Stdout
+	if logs != nil {
+		out = zerolog.MultiLevelWriter(os.Stdout, logs)
+	}
+
+	c := zerolog.New(out).Level(zerolog.Level(conf.LogLevel)).With().Timestamp()
+	if conf.Name != "" {
+		c = c.Str("server", conf.Name)
+	}
+
+	l := c.Logger()
+
+	return &l
+}
+
+// newResolver returns the resolver of the descriptors conf gives, in Files and Descriptors.
+func newResolver(conf *Config) (*resolver, error) {
+	r := &resolver{}
+	if conf.Files != nil {
+		r.files = append(r.files, conf.Files)
+	}
+
+	if len(conf.Descriptors) > 0 {
+		files, err := loadDescriptors(conf.Descriptors)
+		if err != nil {
+			return nil, err
+		}
+
+		r.files = append(r.files, files)
+	}
+
+	return r, nil
+}
+
+// globalEvents returns the global on_complete events of conf.
+func globalEvents(conf *Config) vlatte.EventConfigs {
+	if conf.GlobalEvents == nil {
+		return nil
+	}
+
+	return conf.GlobalEvents.OnComplete
+}
+
+// prepareEvents returns a copy of events with their parameters as their listeners prepare them: see
+// vlatte.EventPreparer. Each must name a registered listener, unless it carries its own: an event that names none
+// would never run. scope starts the errors.
+func (app *Server) prepareEvents(events vlatte.EventConfigs, scope string) (vlatte.EventConfigs, error) {
+	if len(events) == 0 {
+		return nil, nil
+	}
+
+	out := slices.Clone(events)
+	listeners := app.config.Listeners
+
+	for i, def := range out {
+		if def.Listener != nil {
+			continue
+		}
+
+		if listeners == nil || !listeners.OnComplete.Has(def.Name) {
+			return nil, fmt.Errorf("%s %s at index %d is not registered", scope, def.Name, i)
+		}
+
+		params, err := listeners.OnComplete.Prepare(def, app.templateEngine())
+		if err != nil {
+			return nil, fmt.Errorf("%s %s at index %d: %w", scope, def.Name, i, err)
+		}
+
+		out[i].Parameters = params
+	}
+
+	return out, nil
 }

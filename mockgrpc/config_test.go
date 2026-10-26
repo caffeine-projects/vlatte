@@ -4,7 +4,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/caffeine-projects/vlatte"
@@ -36,7 +38,7 @@ func TestNoNearMisses_LeavesTheClosestMocksOutOfTheJournal(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m, c := journaled(t, tt.setup)
-			scope := m.MustMock(UnaryMethod("Greetings").Field("message", match.Equal("hi")).Reply(Unary().Message(&pb.HiRes{})))
+			scope := m.MustMock(Method("Greetings").Field("message", match.Equal("hi")).Reply(Message(&pb.HiRes{})))
 
 			_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "bye"})
 			require.Equal(t, codes.NotFound, status.Code(err))
@@ -50,4 +52,22 @@ func TestNoNearMisses_LeavesTheClosestMocksOutOfTheJournal(t *testing.T) {
 			require.Equal(t, want, e.NearMisses)
 		})
 	}
+}
+
+func TestSetup_OptionsCompose(t *testing.T) {
+	// Each Setup set every setting, defaults included, so a later one reset what an earlier one set. A later one
+	// changes only what it sets now: here, the code of the first and the debug headers of the second both hold.
+	m := MustNew(Setup().Silent().NoMatchCode(codes.Unimplemented), Setup().NoDebugHeaders())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	var header metadata.MD
+	_, err := pb.NewTestServiceClient(dial(t, m)).Greetings(t.Context(), &pb.HiReq{}, grpc.Header(&header))
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
+
+	_, err = pb.NewTestServiceClient(dial(t, m)).Greetings(t.Context(), &pb.HiReq{}, grpc.Header(&header))
+	require.NoError(t, err)
+	require.Empty(t, header.Get(vlatte.MatchedMockIDHeader), "no debug headers")
 }
