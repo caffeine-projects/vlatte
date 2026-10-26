@@ -45,7 +45,8 @@ func ConfigFile(path string, dirs ...string) ConfigSource {
 }
 
 // ConfigEnv reads server settings from VLATTE_* environment variables, such as VLATTE_LOG_LEVEL for log.level.
-// Any other VLATTE_* variable is an error, except VLATTE_DOCKER_HOST, which the vlatte command reads.
+// Any other VLATTE_* variable is an error, except VLATTE_DOCKER_HOST, which the vlatte command reads, and the
+// VLATTE_GRPC_* ones, the gRPC server's: see mockgrpc.ConfigEnv.
 func ConfigEnv() ConfigSource {
 	return config.Env(EnvPrefix, EnvPrefix+"_DOCKER_HOST")
 }
@@ -509,7 +510,8 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		fields = append(fields, inRecord(f))
 	}
 
-	return config.NewSchema(withProxyAll(append(fields, after...)...)...)
+	// The grpc section is the gRPC server's, which the vlatte command reads from the same sources with mockgrpc.
+	return config.NewSchema(withProxyAll(append(fields, after...)...)...).Skip("grpc")
 })
 
 // _recordSchema declares the settings of a recording, as the record section of the server's settings has them: the

@@ -23,6 +23,13 @@ type Config struct {
 	// Name names the server in its log lines.
 	Name string
 
+	// ConfigSources are the sources of settings New reads after the options, which they override: see
+	// DefaultConfigSources, which nil reads. An empty list reads none.
+	ConfigSources []ConfigSource
+
+	// Serve reports whether the settings turned the grpc section on: the vlatte command serves gRPC mocks then.
+	Serve bool
+
 	Service       any
 	ServiceDesc   *grpc.ServiceDesc
 	ServerOptions []grpc.ServerOption
@@ -274,6 +281,13 @@ func (cb *ConfigBuilder) MockFiles(patterns ...string) *ConfigBuilder {
 // cuts them. The default is 5s.
 func (cb *ConfigBuilder) ShutdownTimeout(d time.Duration) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.ShutdownTimeout = d })
+}
+
+// ConfigSources sets the sources of settings New reads after the options, which they override: see
+// DefaultConfigSources. Without it, New reads DefaultConfigSources(nil): the grpc section of .vlatterc, and the
+// VLATTE_GRPC_* environment variables. Call it with none to read none.
+func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.ConfigSources = append(make([]ConfigSource, 0, len(sources)), sources...) })
 }
 
 // Admin serves the admin API, on an HTTP server of its own at addr: host:port, :port or a port. Empty is a random

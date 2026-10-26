@@ -90,6 +90,10 @@ func New(config ...Option) (*Server, error) {
 		}
 	}
 
+	if err := loadConfigSources(conf); err != nil {
+		return nil, fmt.Errorf("server: loading configuration sources: %w", err)
+	}
+
 	if conf.NoMatchCode == codes.OK {
 		conf.NoMatchCode = codes.NotFound
 	}
@@ -360,6 +364,12 @@ func newGRPCServer(opts []grpc.ServerOption, journaled bool) (srv *grpc.Server, 
 	}()
 
 	return grpc.NewServer(opts...), nil
+}
+
+// Config returns the configuration of the server, as its options and sources left it. Changing it after New changes
+// nothing the server set up already.
+func (app *Server) Config() *Config {
+	return app.config
 }
 
 // AdminURL returns the base URL of the admin API, or "" when the server serves none, or hasn't started: see
