@@ -85,7 +85,7 @@ func (app *Server) serveTLS() error {
 }
 
 // clientTLS returns the TLS configuration of a client that trusts the certificate the server serves, under the first
-// host name it has, whatever address the client dials, such as that of an in-memory server. Without a certificate it
+// host name it has, or its first IP address, whatever address the client dials, such as that of an in-memory server. Without a certificate it
 // trusts the system's CAs.
 func (app *Server) clientTLS() *tls.Config {
 	conf := &tls.Config{MinVersion: tls.VersionTLS12}
@@ -96,8 +96,11 @@ func (app *Server) clientTLS() *tls.Config {
 	conf.RootCAs = x509.NewCertPool()
 	conf.RootCAs.AddCert(app.cert)
 
-	if len(app.cert.DNSNames) > 0 {
+	switch {
+	case len(app.cert.DNSNames) > 0:
 		conf.ServerName = app.cert.DNSNames[0]
+	case len(app.cert.IPAddresses) > 0:
+		conf.ServerName = app.cert.IPAddresses[0].String()
 	}
 
 	return conf

@@ -1,11 +1,16 @@
 package mockgrpc
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"math/big"
 	"net"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -223,4 +228,28 @@ func TestStartTLS_ACertificateItCantReadFailsTheStart(t *testing.T) {
 
 	_, err = l.Accept()
 	require.ErrorIs(t, err, net.ErrClosed)
+}
+
+func TestStartTLS_ServesAnIPOnlyCertificateInMemory(t *testing.T) {
+	// A certificate with IP addresses only names no host: Dial verified it against the in-memory address, which no
+	// certificate names, and every call failed.
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	require.NoError(t, err)
+
+	m := startTLS(t, Setup().InMemory().TLSCertificates([]tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}))
+
+	got, code := greetWith(t, pb.NewTestServiceClient(m.MustDial()), "hello")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "hi", got)
 }
