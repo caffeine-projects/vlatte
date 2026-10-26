@@ -18,6 +18,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -111,6 +112,41 @@ func TestBuilder_OneBuilderOnTwoServers(t *testing.T) {
 	require.Equal(t, StatusNoMatch, status, "s1 served its one request")
 }
 
+func TestBuilder_ACallbackNeedsNoRegisteredListener(t *testing.T) {
+	// A mock's events must name a registered listener; a callback carries its own, so a server with none, or with no
+	// listener store, builds it. A callback added to a builder later doesn't reach the mocks it built already.
+	for name, setup := range map[string]*ConfigBuilder{
+		"no listener":       Setup(),
+		"no listener store": Setup().EventListeners(nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var first, later atomic.Int32
+
+			m := MustNew(setup.Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			b := Getf("/x").Callback(func(context.Context, vlatte.OnComplete) error {
+				first.Add(1)
+				return nil
+			}).Reply(OK())
+
+			_, err := m.Mock(b)
+			require.NoError(t, err)
+
+			b.Callback(func(context.Context, vlatte.OnComplete) error {
+				later.Add(1)
+				return nil
+			})
+
+			status, _ := get(t, m, "/x")
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, int32(1), first.Load())
+			require.Zero(t, later.Load(), "the mock built before the callback was added runs only its own")
+		})
+	}
+}
+
 func TestBuilder_EachMockCountsItsOwnTimes(t *testing.T) {
 	// Times was a matcher the builder held, so every mock built from the builder shared one count: a Once builder,
 	// served and then remocked, made a mock that never matched, while its hits said 0. Each mock counts its own now.
@@ -177,6 +213,54 @@ func TestBuilder_ScenarioAdvancesPerServer(t *testing.T) {
 
 	status, _ = get(t, s2, "/pay")
 	require.Equal(t, http.StatusOK, status, "the scenario of s2 is still where it started")
+}
+
+func TestBuilder_AScenarioMockWithoutARequiredState(t *testing.T) {
+	// A mock that requires no state of its scenario matches in any state, as in WireMock, and its new state moves the
+	// scenario, one no mock started too: it required "", the state of no scenario, and its new state was dropped.
+	newServer := func(builders ...*Builder) *Server {
+		m := MustNew(Setup().Silent())
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		for _, b := range builders {
+			m.MustMock(b)
+		}
+
+		return m
+	}
+
+	t.Run("matches in any state", func(t *testing.T) {
+		m := newServer(
+			Getf("/begin").StartScenario("checkout").ScenarioStateWillBe("cart").Reply(OK()),
+			Getf("/pay").ScenarioIs("checkout").ScenarioStateWillBe("paid").Reply(OK()),
+			Getf("/cart").ScenarioIs("checkout").ScenarioStateIs("cart").Reply(OK()))
+
+		for _, step := range []struct {
+			path string
+			want int
+		}{
+			{"/begin", http.StatusOK},
+			{"/pay", http.StatusOK},
+			{"/cart", StatusNoMatch},
+		} {
+			status, _ := get(t, m, step.path)
+			require.Equal(t, step.want, status, step.path)
+		}
+	})
+
+	t.Run("starts the scenario it moves", func(t *testing.T) {
+		m := newServer(
+			Getf("/pay").ScenarioIs("checkout").ScenarioStateWillBe("paid").Reply(OK()),
+			Getf("/cart").ScenarioIs("checkout").ScenarioStateIs("cart").Reply(OK()))
+
+		status, _ := get(t, m, "/pay")
+		require.Equal(t, http.StatusOK, status)
+
+		// A scenario no mock started matches whatever state a mock requires: this one was started, at paid.
+		status, _ = get(t, m, "/cart")
+		require.Equal(t, StatusNoMatch, status)
+	})
 }
 
 func TestBuilder_AddedTwiceToOneServer(t *testing.T) {
@@ -341,4 +425,40 @@ func TestBuilder_DelayFunc(t *testing.T) {
 	}
 
 	require.Equal(t, int64(2), picks.Load())
+}
+
+func TestBuilder_MatchesGivesTheMatcherTheRequest(t *testing.T) {
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/m").Matches(match.Function(func(v any) (bool, error) {
+		r, ok := v.(*http.Request)
+		return ok && r.URL.Query().Get("ok") == "1", nil
+	})).Reply(OK()))
+
+	status, _ := get(t, m, "/m?ok=1")
+	require.Equal(t, http.StatusOK, status)
+
+	status, _ = get(t, m, "/m?ok=0")
+	require.Equal(t, StatusNoMatch, status)
+}
+
+func TestBuilder_MatchesDescribesUnderCustom(t *testing.T) {
+	// A matcher of the whole request that describes itself, such as a custom one of the server's registry, loads back
+	// from the mock's description: a predicate of RequestMatches can't.
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	scope := m.MustMock(Getf("/m").ID("m").
+		Matches(match.Not(match.Nil())).
+		RequestMatches(func(*http.Request) (bool, error) { return true, nil }).
+		Reply(OK()))
+
+	desc, ok := scope.Mock("m").Describe().Props.(map[string]any)
+	require.True(t, ok)
+
+	request, ok := desc["request"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, []any{descriptor.SingleArg("not", descriptor.KeyOnly("nil"))}, request["custom"])
 }

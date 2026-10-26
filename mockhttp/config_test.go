@@ -20,6 +20,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 type testBodyParser struct{}
@@ -360,6 +361,35 @@ func TestGlobalEventsMustNameARegisteredListener(t *testing.T) {
 	}
 }
 
+func TestGlobalEventsCanCarryTheirListener(t *testing.T) {
+	// A global event set in Go can carry its listener, as a callback does: it needs none registered, nor a listener
+	// store, and runs for every matched request.
+	for name, setup := range map[string]*ConfigBuilder{
+		"listeners":         Setup(),
+		"no listener store": Setup().EventListeners(nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var fired atomic.Int32
+			counts := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
+				fired.Add(1)
+				return nil
+			})
+
+			m := MustNew(setup.Silent().GlobalEvents(&vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "counts", Listener: counts}}}))
+			m.MustStart()
+			t.Cleanup(m.Close)
+			m.MustMock(Getf("/a").Reply(OK()), Getf("/b").Callback(counts).Reply(OK()))
+
+			for _, path := range []string{"/a", "/b"} {
+				status, _ := get(t, m, path)
+				require.Equal(t, http.StatusOK, status)
+			}
+
+			require.Equal(t, int32(3), fired.Load(), "the global event ran twice, and the callback of /b once")
+		})
+	}
+}
+
 func TestOnCompleteListener_ANameRegisteredTwiceFailsNew(t *testing.T) {
 	// #18: the error of Register was dropped, so the second listener of a name never ran, without a word. Every name
 	// registered twice fails New now, naming the listener, whether the registry is the builder's or a shared one.
@@ -674,4 +704,48 @@ func TestNew_ANameThatNamesTheWorkDirStaysInIt(t *testing.T) {
 		require.NoError(t, err)
 		m.Close()
 	}
+}
+
+// longerThan builds the custom matcher [longer-than, n]: a body longer than n bytes.
+func longerThan(_ *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
+	if len(args) != 1 {
+		return nil, errors.New("takes a length")
+	}
+
+	n, ok := args[0].(int64)
+	if !ok {
+		return nil, errors.New("takes a length")
+	}
+
+	return match.Function(func(v any) (bool, error) {
+		b, isBytes := v.([]byte)
+		return isBytes && int64(len(b)) > n, nil
+	}), nil
+}
+
+const _longerThanMock = `{"request": {"method": "POST", "body": ["longer-than", 3]}, "response": {"status": 200}}`
+
+func TestConfigBuilder_Matchers_MockFilesNameCustomMatchers(t *testing.T) {
+	m := MustNew(Setup().Silent().Matchers(matchbuild.MustNew(matchbuild.WithMatcher("longer-than", longerThan))))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(FromBytes([]byte(_longerThanMock), "json"))
+
+	res, _ := do(t, http.MethodPost, m.URL(), nil, []byte("abcd"))
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	res, _ = do(t, http.MethodPost, m.URL(), nil, []byte("abc"))
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+}
+
+func TestConfigBuilder_Matchers_BelongToTheirServer(t *testing.T) {
+	// A registry is the server's, not global: a server without it doesn't know its matchers.
+	MustNew(Setup().Silent().Matchers(matchbuild.MustNew(matchbuild.WithMatcher("longer-than", longerThan)))).Close()
+
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	_, err := m.Mock(FromBytes([]byte(_longerThanMock), "json"))
+	require.ErrorContains(t, err, `unknown matcher "longer-than"`)
 }

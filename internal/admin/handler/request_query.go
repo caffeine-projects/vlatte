@@ -7,16 +7,17 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
-	"github.com/caffeine-projects/vlatte/internal/filterbuilder"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 // requestQuery is the body of QUERY /requests: a query, the request part of a mock, and a page.
 type requestQuery struct {
-	q       journal.Query
-	request *config.Value
-	limit   int
+	matchers *matchbuild.Registry // builds the matcher lists of the query: the server's
+	q        journal.Query
+	request  *config.Value
+	limit    int
 }
 
 var _requestQuerySchema = config.NewSchema(
@@ -50,7 +51,7 @@ var _requestQuerySchema = config.NewSchema(
 			c.q.Header = make(map[string]vlatte.Matcher)
 
 			return config.Members(v, func(name string, member config.Value) error {
-				m, err := matcherOf(member)
+				m, err := matcherOf(c.matchers, member)
 				c.q.Header[name] = m
 
 				return err
@@ -98,7 +99,7 @@ func (o *Operations) QueryRequests(ctx context.Context, doc []byte, format strin
 		return RequestList{}, notSupported(_lackingJournal)
 	}
 
-	query := requestQuery{limit: _requestsPage}
+	query := requestQuery{matchers: o.matchers, limit: _requestsPage}
 	if err := decodeBody(_requestQuerySchema, &query, doc, format); err != nil {
 		return RequestList{}, invalid("the query", err)
 	}
@@ -132,7 +133,7 @@ func queryMatcher(key, what string, set func(c *requestQuery, m vlatte.Matcher))
 	return config.Field[requestQuery]{
 		Key: key, Kind: config.Any, Usage: what + ": text, a number, or a matcher list such as [\"glob\", \"/users/*\"].",
 		Set: func(c *requestQuery, v config.Value) error {
-			m, err := matcherOf(v)
+			m, err := matcherOf(c.matchers, v)
 			set(c, m)
 
 			return err
@@ -142,13 +143,13 @@ func queryMatcher(key, what string, set func(c *requestQuery, m vlatte.Matcher))
 
 // matcherOf returns the matcher of a value of a query, as a mock file's, but a number or a bool matches an equal
 // value, such as a status.
-func matcherOf(v config.Value) (vlatte.Matcher, error) {
+func matcherOf(matchers *matchbuild.Registry, v config.Value) (vlatte.Matcher, error) {
 	switch v.Any.(type) {
 	case bool, float64, int64, int, uint64:
 		return match.Equal(v.Any), nil
 	}
 
-	return filterbuilder.MatcherOf(v)
+	return matchers.TryBuildMatcher(v.Any)
 }
 
 func parseTime(v config.Value, dst *time.Time) error {

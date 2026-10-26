@@ -191,15 +191,23 @@ type targetBody struct {
 	io.ReadCloser
 
 	cancel context.CancelCauseFunc
-	keep   bool // set before the body is read
+	cut    func() error // the cause of a cut of the call, such as by an upstream step, or nil
+	keep   bool         // set before the body is read
 	kept   []byte
 	over   bool // read more than it keeps
 	eof    bool
 }
 
-// Read reads the body, and keeps what it read, with keep.
+// Read reads the body, and keeps what it read, with keep. A read that fails once the call was cut fails with the
+// cause of the cut, whatever error the cut ended the body with.
 func (b *targetBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
+
+	if err != nil && !errors.Is(err, io.EOF) && b.cut != nil {
+		if cause := b.cut(); cause != nil {
+			err = cause
+		}
+	}
 
 	switch {
 	case !b.keep || b.over:

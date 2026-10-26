@@ -291,7 +291,7 @@ func TestPropMockFile_DurationsAreTheSameEverywhere(t *testing.T) {
 			"proxy":   map[string]any{"target": "http://localhost", "timeout": raw},
 		}
 
-		def := newMockDef()
+		def := newMockDef(_builtinMatchers)
 		_, err := _mockSchema.Load(&def, []config.Source{config.Bytes("doc", "yaml", encodeMock(t, doc, "yaml"))})
 		require.NoError(t, err)
 

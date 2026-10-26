@@ -1,6 +1,8 @@
 package match
 
 import (
+	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -31,59 +33,45 @@ func (m *itemsMatchMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		))
 	}
 
-	if !pairUp(m.Expected, items) {
+	paired, err := pairUp(len(m.Expected), len(items), func(w, g int) (bool, error) {
+		if inner, ok := m.Expected[w].(vlatte.Matcher); ok {
+			return inner.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), items[g]))
+		}
+
+		return value.Equal(m.Expected[w], items[g]), nil
+	})
+	if err != nil {
+		return failure(fmt.Errorf("itemsMatch: %w", err))
+	}
+
+	if !paired {
 		return mismatch("ItemsMatch() Items doesn't match")
 	}
 
 	return success()
 }
 
-// pairUp reports whether every item of want pairs with an item of got of its own, equal to it.
-// Equal isn't transitive, as "1.0" and "1" both equal 1 but not each other, so a greedy pairing could miss one
-// that exists: this finds a maximum matching instead, with augmenting paths.
-func pairUp(want, got []any) bool {
-	equal := make([][]bool, len(want))
-	for w := range want {
-		equal[w] = make([]bool, len(got))
-		for g := range got {
-			equal[w][g] = value.Equal(want[w], got[g])
-		}
+// Describe implements descriptor.SelfDescriptive. Items that are matchers describe as hasExactly, whose items are
+// matcher specs: an item that is a value is written as the Equal matcher that compares it.
+func (m *itemsMatchMatcher) Describe() descriptor.Descriptor {
+	if !slices.ContainsFunc(m.Expected, isMatcher) {
+		return descriptor.SingleArg("itemsMatch", m.Expected)
 	}
 
-	pair := make([]int, len(got)) // the item of want each item of got is paired with, or -1
-	for g := range pair {
-		pair[g] = -1
-	}
-
-	var augment func(w int, seen []bool) bool
-
-	augment = func(w int, seen []bool) bool {
-		for g := range got {
-			if seen[g] || !equal[w][g] {
-				continue
-			}
-
-			seen[g] = true
-
-			if pair[g] < 0 || augment(pair[g], seen) {
-				pair[g] = w
-				return true
-			}
+	specs := make([]any, len(m.Expected))
+	for i, item := range m.Expected {
+		inner, ok := item.(vlatte.Matcher)
+		if !ok {
+			inner = Equal(item)
 		}
 
-		return false
+		specs[i] = describe(inner)
 	}
 
-	for w := range want {
-		if !augment(w, make([]bool, len(got))) {
-			return false
-		}
-	}
-
-	return true
+	return descriptor.SingleArg("hasExactly", specs)
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *itemsMatchMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("itemsMatch", m.Expected)
+func isMatcher(v any) bool {
+	_, ok := v.(vlatte.Matcher)
+	return ok
 }

@@ -240,9 +240,18 @@ func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (journal.Fil
 		return nil, errors.New("http: a request pattern has no Times or Once: they count the requests a mock serves")
 	case builder.scenario != "":
 		return nil, errors.New("http: a request pattern has no scenario: its state is now's, not the request's")
+	case slices.ContainsFunc(builder.spec.expectations, func(e *expectation) bool {
+		return matchingScope(e.Target) == matchingScopeClientIP
+	}):
+		return nil, errors.New("http: a request pattern has no ClientIP: the journal keeps no client address")
 	}
 
-	evals := vlatte.Evaluators[*Mock, *selectorInput](slices.Clone(builder.spec.expectations))
+	params, err := builder.pathParamExpectations()
+	if err != nil {
+		return nil, fmt.Errorf("http: request pattern: %w", err)
+	}
+
+	evals := vlatte.Evaluators[*Mock, *selectorInput](slices.Concat(builder.spec.expectations, params))
 
 	// A pattern that reads the body can't tell whether a body the journal cut matched: the rest of the pattern runs
 	// first, as a miss there is a miss.
@@ -270,10 +279,11 @@ func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (journal.Fil
 }
 
 // readsBody reports whether a matcher of scope reads the body of a request: one of the body or of a form does, and so
-// may a predicate of the whole request, RequestMatches.
+// may a matcher of the whole request, of RequestMatches or Matches.
 func readsBody(scope matchingScope) bool {
 	switch scope {
-	case matchingScopeBody, matchingScopeFormField, matchingScopeFormFile, matchingScopeNone:
+	case matchingScopeBody, matchingScopeFormField, matchingScopeFormFields, matchingScopeFormFile, matchingScopeNone,
+		matchingScopeCustom:
 		return true
 	}
 
@@ -283,7 +293,7 @@ func readsBody(scope matchingScope) bool {
 // adminRequestPattern returns the filter of the request part of a mock file, v, the request key of a query of the
 // admin API: its keys are a mock file's, and it matches as a mock does. An empty one matches every request.
 func (app *Server) adminRequestPattern(v config.Value) (journal.Filter, error) {
-	def := newMockDef()
+	def := newMockDef(app.matchers())
 	doc := config.Value{Origin: v.Origin, Any: map[string]any{"request": v.Any}}
 
 	problems := config.ProblemsOf(doc, _mockSchema.Decode(&def, doc))
@@ -324,8 +334,9 @@ func (app *Server) matchEntry(ctx context.Context, e *journal.Entry, evals vlatt
 	return ok, nil
 }
 
-// entryRequest rebuilds the request of e, in origin form: the server reads its URL as its own, as it read the
-// request. The Host header goes in Host, as net/http has it.
+// entryRequest rebuilds the request of e, with its target's URL: the server reads the scheme and host of a request to
+// the forward proxy, or an intercepted one, as it read them, and its own of another, which its target has. The Host
+// header goes in Host, as net/http has it.
 func entryRequest(ctx context.Context, e *journal.Entry) (*http.Request, error) {
 	u := &url.URL{Host: e.Target}
 
@@ -346,7 +357,7 @@ func entryRequest(ctx context.Context, e *journal.Entry) (*http.Request, error) 
 
 	req := &http.Request{
 		Method:        e.Method,
-		URL:           &url.URL{Path: u.Path, RawPath: u.RawPath, RawQuery: u.RawQuery, Fragment: u.Fragment, RawFragment: u.RawFragment},
+		URL:           &url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath, RawQuery: u.RawQuery, Fragment: u.Fragment, RawFragment: u.RawFragment},
 		Proto:         "HTTP/1.1",
 		ProtoMajor:    1,
 		ProtoMinor:    1,

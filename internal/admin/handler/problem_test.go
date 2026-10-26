@@ -107,7 +107,7 @@ func TestProblems_UnsupportedMediaTypeSaysWhatIs(t *testing.T) {
 	files := &fakeFiles{}
 	url := serve(t, newStore(t, newFake("hello")),
 		admin.Files(files), admin.Recorder(&fakeRecorder{}), admin.Scenarios(mfeat.NewScenarioStore()),
-		admin.Journal(journalOf(t), nil))
+		admin.Journal(journalOf(t), nil, nil))
 
 	for _, route := range []string{
 		"POST /mocks", "POST /mocks/validate", "PUT /mocks/hello", "PATCH /mocks/hello", "POST /mocks/save",

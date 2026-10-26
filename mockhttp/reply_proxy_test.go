@@ -19,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -687,8 +688,8 @@ func TestProxyReply_CallbacksSeeTheProxiedBody(t *testing.T) {
 	t.Cleanup(target.Close)
 
 	seen := make(chan string, 2)
-	callback := func(_ context.Context, in vlatte.CallbackInput) error {
-		seen <- string(in.(*CallbackInput).Response().Body)
+	callback := func(_ context.Context, in vlatte.OnComplete) error {
+		seen <- string(in.(*OnComplete).Response().Body)
 		return nil
 	}
 
@@ -810,8 +811,8 @@ func TestProxyReply_LeavesTheClientRequestAsItCame(t *testing.T) {
 			seen <- look("mapper", rv.RawRequest)
 			return nil
 		}).
-		Callback(func(_ context.Context, in vlatte.CallbackInput) error {
-			seen <- look("callback", in.(*CallbackInput).Request().RawRequest)
+		Callback(func(_ context.Context, in vlatte.OnComplete) error {
+			seen <- look("callback", in.(*OnComplete).Request().RawRequest)
 			return nil
 		}).
 		OnCompleteEvent(vlatte.EventConfig{Name: "look"}).
@@ -834,9 +835,13 @@ func TestProxyReply_LeavesTheClientRequestAsItCame(t *testing.T) {
 
 	require.Equal(t, sight{who: "target", path: "/p", host: targetURL.Host, added: "1"}, <-forwarded)
 
-	for _, who := range []string{"mapper", "callback", "listener"} {
-		require.Equal(t, sight{who: who, path: "/api/p", host: req.URL.Host, authorization: "Bearer client"}, <-seen)
+	asSent := func(who string) sight {
+		return sight{who: who, path: "/api/p", host: req.URL.Host, authorization: "Bearer client"}
 	}
+
+	// The mapper runs before the response is sent; the callback and the listener, events both, at the same time after.
+	require.Equal(t, asSent("mapper"), <-seen)
+	require.ElementsMatch(t, []sight{asSent("callback"), asSent("listener")}, []sight{<-seen, <-seen})
 }
 
 func TestProxyReply_LeavesHopByHopHeadersOut(t *testing.T) {
@@ -1380,6 +1385,329 @@ func TestProxyReply_AStepThatChangesTheLengthKeepsTheAnswer(t *testing.T) {
 	status, body := get(t, m, "/p")
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, "hello<step>", body)
+}
+
+// upstreamReceived is what a target got of a request.
+type upstreamReceived struct {
+	body             string
+	contentLength    int64
+	transferEncoding []string
+}
+
+// receivingTarget starts a target that sends what it got of each request on got.
+func receivingTarget(t *testing.T, got chan<- upstreamReceived) *httptest.Server {
+	t.Helper()
+
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got <- upstreamReceived{body: string(b), contentLength: r.ContentLength, transferEncoding: r.TransferEncoding}
+	}))
+	t.Cleanup(target.Close)
+
+	return target
+}
+
+func TestProxyReply_UpstreamStepsChangeTheBodyTheTargetGets(t *testing.T) {
+	// A step on what the mock sends on changes the request its target gets, its length included: the target gets it
+	// chunked, so the length it reads is the body's.
+	got := make(chan upstreamReceived, 1)
+	target := receivingTarget(t, got)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	scoped := m.MustMock(Postf("/up").UpstreamStep(appendStep("!")).Reply(From(target.URL)))
+
+	res, err := http.Post(m.URL("/up"), MIMETextPlain, strings.NewReader("ping"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, upstreamReceived{body: "ping!", contentLength: -1, transferEncoding: []string{"chunked"}}, <-got)
+	require.EqualValues(t, 1, scoped.Hits())
+}
+
+func TestProxyReply_ARequestWithoutABodyHasNothingForTheUpstreamSteps(t *testing.T) {
+	// The upstream steps see the body only: a request without one goes to the target as it came.
+	got := make(chan upstreamReceived, 1)
+	target := receivingTarget(t, got)
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/up").UpstreamStep(failingStep{}).Reply(From(target.URL)))
+
+	status, _ := get(t, m, "/up")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, upstreamReceived{}, <-got)
+}
+
+func TestProxyReply_AFailingUpstreamStepFailsTheReply(t *testing.T) {
+	// A step that fails what the mock sends on fails the call to the target: the reply failed, and the client gets
+	// vlatte's answer.
+	target := receivingTarget(t, make(chan upstreamReceived, 1))
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	scoped := m.MustMock(Postf("/up").UpstreamStep(failingStep{}).Reply(From(target.URL)))
+
+	res, err := http.Post(m.URL("/up"), MIMETextPlain, strings.NewReader("ping"))
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
+	require.Contains(t, string(body), "step: failed")
+	require.EqualValues(t, 0, scoped.Hits())
+}
+
+func TestProxyReply_AnUpstreamAbortCutsTheAnswer(t *testing.T) {
+	// A step that cuts what the mock sends on cuts the client's answer too: the cut is the mock's answer, so it
+	// counts.
+	target := receivingTarget(t, make(chan upstreamReceived, 1))
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	scoped := m.MustMock(Postf("/up").UpstreamStep(limitStep{n: 2, err: vlatte.ErrAbort}).Reply(From(target.URL)))
+
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+
+	_, err := client.Post(m.URL("/up"), MIMETextPlain, strings.NewReader("ping"))
+	require.ErrorIs(t, err, io.EOF)
+	require.EqualValues(t, 1, scoped.Hits())
+}
+
+func TestProxyReply_AnUpstreamAbortEndsAStalledUpload(t *testing.T) {
+	// A step that times the upload out, while the client sends nothing more, cuts the answer then: the mock doesn't
+	// wait for a client that may never send the rest.
+	target := receivingTarget(t, make(chan upstreamReceived, 1))
+
+	m := MustNew(Setup().Silent().NoBodyParsing())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	seen := make(chan string, 1)
+	release := make(chan struct{})
+	scoped := m.MustMock(Postf("/up").
+		UpstreamStep(seenStep{seen: seen}, abortOn{release: release, err: errors.New("step: timed out")}).
+		Reply(From(target.URL)))
+
+	conn := stallUpload(t, m, "/up")
+	require.Equal(t, "ab", <-seen)
+
+	close(release)
+
+	got, err := io.ReadAll(conn)
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.EqualValues(t, 1, scoped.Hits())
+}
+
+// cutBody sends first, then waits for ctx to end, and fails as a transport whose connection was cut does: with an
+// error of its own, not the cause of ctx.
+type cutBody struct {
+	ctx   context.Context
+	first []byte
+}
+
+func (b *cutBody) Read(p []byte) (int, error) {
+	if len(b.first) > 0 {
+		n := copy(p, b.first)
+		b.first = b.first[n:]
+
+		return n, nil
+	}
+
+	<-b.ctx.Done()
+
+	return 0, net.ErrClosed
+}
+
+func (b *cutBody) Close() error { return nil }
+
+func TestProxyReply_AnUpstreamAbortCutsAnAnswerThatStarted(t *testing.T) {
+	// A target can answer before it read the body, as a stream does: a step that then cuts what the mock sends on
+	// cuts the client's answer where it got, not as one that looks whole. The cut is the mock's answer: it counts,
+	// whatever error the cut ends the target's answer with.
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := &cutBody{ctx: r.Context(), first: []byte("start")}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: body, ContentLength: -1, Request: r}, nil
+	})
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	release := make(chan struct{})
+	scoped := m.MustMock(Postf("/up").
+		UpstreamStep(abortOn{release: release, err: errors.New("step: cut")}).
+		Reply(From("http://target.test").Transport(transport)))
+
+	res, err := http.Post(m.URL("/up"), MIMETextPlain, strings.NewReader("ping"))
+	require.NoError(t, err)
+
+	first := make([]byte, len("start"))
+	_, err = io.ReadFull(res.Body, first)
+	require.NoError(t, err)
+	require.Equal(t, "start", string(first))
+
+	close(release)
+
+	rest, err := io.ReadAll(res.Body)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	require.Empty(t, rest)
+	require.NoError(t, res.Body.Close())
+	require.EqualValues(t, 1, scoped.Hits())
+}
+
+// closedBody is a body that tells closed once it is closed.
+type closedBody struct {
+	io.Reader
+
+	closed chan<- struct{}
+}
+
+func (b closedBody) Close() error {
+	close(b.closed)
+	return nil
+}
+
+func TestProxyReply_AnUpstreamAbortCutsAnAnswerTheTargetGaveAnyway(t *testing.T) {
+	// A target may answer whatever it read of the body: a step that cut what the mock sent on still cuts the client's
+	// answer, and the target's is closed, so its connection is let go.
+	closed := make(chan struct{})
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		_, _ = io.ReadAll(r.Body)
+		body := closedBody{Reader: strings.NewReader("answer"), closed: closed}
+
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: body, ContentLength: -1, Request: r}, nil
+	})
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	scoped := m.MustMock(Postf("/up").UpstreamStep(limitStep{n: 2, err: vlatte.ErrAbort}).Reply(From("http://target.test").Transport(transport)))
+
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+
+	_, err := client.Post(m.URL("/up"), MIMETextPlain, strings.NewReader("ping"))
+	require.ErrorIs(t, err, io.EOF)
+	require.EqualValues(t, 1, scoped.Hits())
+
+	select {
+	case <-closed:
+	default:
+		require.Fail(t, "the target's answer stayed open")
+	}
+}
+
+// holdStep holds what its stage gets until d passed, or the flow ends.
+type holdStep struct{ d time.Duration }
+
+func (s holdStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+	return vlatte.StepFunc(func(ctx context.Context, b []byte, next vlatte.Stage) (int, error) {
+		select {
+		case <-time.After(s.d):
+			return next.Write(b)
+		case <-ctx.Done():
+			return 0, context.Cause(ctx)
+		}
+	}).Open(flow, next)
+}
+
+func TestStepReader_CloseStopsTheSteps(t *testing.T) {
+	// A target that answered early, before it read the whole body, has the transport close it: a stage that holds the
+	// body on a timer doesn't keep the call waiting.
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		r := newStepReader(t.Context(), io.NopCloser(strings.NewReader("ping")), []vlatte.Step{holdStep{d: time.Hour}})
+
+		require.NoError(t, r.Close())
+		require.Zero(t, time.Since(start))
+	})
+}
+
+func TestProxyReply_AnUpstreamCutEndsTheBodyStepsAtOnce(t *testing.T) {
+	// The cut is the answer: the steps of the body end as for any cut, dropping what they hold, rather than send it on
+	// their own time first.
+	target := receivingTarget(t, make(chan upstreamReceived, 1))
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	closed := make(chan error, 1)
+	m.MustMock(Postf("/up").Step(closeStep{closed: closed}).UpstreamStep(limitStep{n: 2, err: vlatte.ErrAbort}).Reply(From(target.URL)))
+
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+
+	_, err := client.Post(m.URL("/up"), MIMETextPlain, strings.NewReader("ping"))
+	require.ErrorIs(t, err, io.EOF)
+	require.ErrorIs(t, <-closed, vlatte.ErrAbort)
+}
+
+// countingReader counts the bytes read of r.
+type countingReader struct {
+	r io.Reader
+	n atomic.Int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n.Add(int64(n))
+
+	return n, err
+}
+
+func TestStepReader_TakesTheBodyOnlyAsTheTargetReadsIt(t *testing.T) {
+	// A body the server didn't read whole is still the client's: what the steps take of it, the client sent. They
+	// take nothing before the target reads, then a small piece at a time, so a stage that holds one holds the upload.
+	synctest.Test(t, func(t *testing.T) {
+		body := &countingReader{r: strings.NewReader(strings.Repeat("x", 64<<10))}
+		r := newStepReader(t.Context(), io.NopCloser(body), []vlatte.Step{holdStep{d: time.Hour}})
+
+		synctest.Wait()
+		require.Zero(t, body.n.Load(), "taken before the target reads")
+
+		go func() { _, _ = r.Read(make([]byte, 1)) }()
+
+		synctest.Wait()
+		require.EqualValues(t, 1<<10, body.n.Load())
+		require.NoError(t, r.Close())
+	})
+}
+
+func TestStepReader_CloseEndsTheStepsOfABodyNeverRead(t *testing.T) {
+	// A target that answers without reading the body, or a call that fails first, has the transport close it: the
+	// steps end, as for a body read, and nothing of the body is taken.
+	body := &countingReader{r: strings.NewReader("ping")}
+	closed := make(chan error, 1)
+	r := newStepReader(t.Context(), io.NopCloser(body), []vlatte.Step{closeStep{closed: closed}})
+
+	require.NoError(t, r.Close())
+	require.ErrorIs(t, <-closed, errBodyEnded)
+	require.Zero(t, body.n.Load())
+}
+
+func TestStepReader_CloseEndsTheCopy(t *testing.T) {
+	// The transport closes a request body it no longer reads, such as when the target answered early: the copy
+	// through the steps ends, rather than wait on the pipe.
+	body := io.NopCloser(strings.NewReader(strings.Repeat("x", 1<<20)))
+	r := newStepReader(t.Context(), body, []vlatte.Step{appendStep("")})
+
+	first := make([]byte, 4)
+	_, err := io.ReadFull(r, first)
+	require.NoError(t, err)
+
+	require.NoError(t, r.Close())
+
+	_, err = r.Read(first)
+	require.ErrorIs(t, err, io.ErrClosedPipe)
 }
 
 func TestProxyReply_MappersOfABodyThatDoesntEndFail(t *testing.T) {

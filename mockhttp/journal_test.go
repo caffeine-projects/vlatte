@@ -176,8 +176,8 @@ func TestJournal_KeepsTheRequestAsItCame(t *testing.T) {
 	// the server redacts in its logs are redacted, and a body over the journal's limit is cut, and says so.
 	m := journaledServer(t, Setup().RedactHeader("Authorization").ConfigSources(ConfigArgs([]string{"--journal-max-body-size", "4"})))
 
-	m.MustMock(Postf("/a").Callback(func(_ context.Context, in vlatte.CallbackInput) error {
-		in.(*CallbackInput).Request().RawRequest.Header.Set("X-Changed", "later")
+	m.MustMock(Postf("/a").Callback(func(_ context.Context, in vlatte.OnComplete) error {
+		in.(*OnComplete).Request().RawRequest.Header.Set("X-Changed", "later")
 		return nil
 	}).Reply(OK()))
 
@@ -249,6 +249,50 @@ func TestJournal_VerifiesWithRequestPatterns(t *testing.T) {
 	require.True(t, m.AssertNotRequested(t.Context(), ft, journal.Query{}, Request().Query("page", match.Equal("3"))))
 	require.True(t, m.AssertRequested(t.Context(), ft, 3, journal.Query{Method: match.Equal("POST")}, Request().URLPath(match.HasPrefix("/"))))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
+}
+
+func TestJournal_APatternMatchesItsPathParams(t *testing.T) {
+	// A pattern's path params are matchers a mock gets when it builds: a pattern took the builder's other matchers
+	// only, so a pattern of /users/{id} with id 7 counted /users/8 too.
+	m := journaledServer(t, Setup())
+
+	_, _ = do(t, http.MethodGet, m.URL("/users/7"), nil, nil)
+	_, _ = do(t, http.MethodGet, m.URL("/users/8"), nil, nil)
+
+	n, err := m.CountRequests(t.Context(), journal.Query{}, Request().URLPathTemplate("/users/{id}").PathParam("id", match.Equal("7")))
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	_, err = m.CountRequests(t.Context(), journal.Query{}, Request().PathParam("id", match.Equal("7")))
+	require.EqualError(t, err, `journal: pattern 0: http: request pattern: path param "id": the mock has no path template: set one with URLPathTemplate`)
+}
+
+func TestJournal_APatternMatchesTheURLAProxiedRequestNames(t *testing.T) {
+	// A mock matches a request to the forward proxy on the URL it names, its scheme and host included: a pattern
+	// matched the journal's entry on the server's URL, so the pattern of a mock that served it counted no request.
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	t.Cleanup(host.Close)
+
+	m := journaledServer(t, Setup().Proxy())
+
+	res, err := proxyClient(t, m).Get(host.URL + "/up?q=1")
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	pattern := Request().URL(match.Equal(host.URL + "/up?q=1"))
+	require.Eventually(t, func() bool {
+		n, err := m.CountRequests(t.Context(), journal.Query{}, pattern)
+		return err == nil && n == 1
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestJournal_RefusesPatternsOfTheClientAddress(t *testing.T) {
+	// The journal keeps no client address: a pattern of one would count no request, and AssertNotRequested would
+	// pass for a request the server got.
+	m := journaledServer(t, Setup())
+
+	_, err := m.CountRequests(t.Context(), journal.Query{}, Request().ClientIP(match.Equal("127.0.0.1")))
+	require.EqualError(t, err, "journal: pattern 0: http: a request pattern has no ClientIP: the journal keeps no client address")
 }
 
 func TestJournal_RefusesPatternsThatCountRequests(t *testing.T) {
@@ -417,17 +461,18 @@ func TestJournal_AConnectKeepsTheAnswerItGot(t *testing.T) {
 
 func TestJournal_ASwitchKeepsItsStatus(t *testing.T) {
 	// A request that switches protocols gets its 101 on the connection vlatte took over: the entry has it, even when
-	// what runs after the switch, such as a callback, panics.
+	// what runs after the switch, such as a callback, panics. The panic is the callback's, a warning, as an event's is:
+	// the mock matched.
 	target := switchingTarget(t, "echo")
 
 	m := journaledServer(t, Setup().Proxy())
 	m.MustMock(
 		Getf("/ws").ID("ws").Reply(From(target.URL)),
-		Getf("/ws-panics").ID("ws-panics").Callback(func(context.Context, vlatte.CallbackInput) error { panic("after the switch") }).
+		Getf("/ws-panics").ID("ws-panics").Callback(func(context.Context, vlatte.OnComplete) error { panic("after the switch") }).
 			Reply(From(target.URL)),
 	)
 
-	for path, outcome := range map[string]journal.Outcome{"/ws": journal.OutcomeMatched, "/ws-panics": journal.OutcomeFailed} {
+	for path, outcome := range map[string]journal.Outcome{"/ws": journal.OutcomeMatched, "/ws-panics": journal.OutcomeMatched} {
 		t.Run(path, func(t *testing.T) {
 			conn, _, res := switchThrough(t, m, path)
 			require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
@@ -525,6 +570,7 @@ func TestJournal_APatternCantReadABodyTheJournalCut(t *testing.T) {
 	}{
 		{name: "a form file of a body cut", server: cut, pattern: Request().FormFile("upload", FileWith())},
 		{name: "a body the server didn't read", server: unread, pattern: Request().Body(match.Contain("body"))},
+		{name: "form fields of a body the server didn't read", server: unread, pattern: Request().FormFields("a", match.Equal([]string{"1"}))},
 	}
 
 	for _, tt := range tests {

@@ -22,7 +22,7 @@ func TestListRequests(t *testing.T) {
 		entryOf("b", "GET", "/b", journal.OutcomeUnmatched),
 		entryOf("c", "POST", "/c", journal.OutcomeMatched),
 	)
-	url := serve(t, newStore(t), admin.Journal(j, nil))
+	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
 
 	res, body := send(t, request{method: http.MethodGet, url: url + "/requests?limit=2"})
 	require.Equal(t, http.StatusOK, res.StatusCode, body)
@@ -64,7 +64,7 @@ func TestListRequests_AClientThatLeftGetsNoAnswer(t *testing.T) {
 
 func TestJournal_ANilJournalIsNone(t *testing.T) {
 	// A server without a journal passes its nil one: its journal routes answer 501, and a reset works.
-	url := serve(t, newStore(t), admin.Journal((*journal.Journal)(nil), nil))
+	url := serve(t, newStore(t), admin.Journal((*journal.Journal)(nil), nil, nil))
 
 	res, body := send(t, request{method: http.MethodGet, url: url + "/requests"})
 	problem(t, res, body, http.StatusNotImplemented, "not_supported")

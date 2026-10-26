@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -39,7 +40,8 @@ type Builder struct {
 	scenario              string
 	scenarioNewState      string
 	scenarioRequiredState string
-	err                   error // the first error of a method that can't return one, such as FormFile's or ID's
+	pathParams            []namedMatcher // set with PathParam; Build makes them matchers, once it knows the template
+	err                   error          // the first error of a method that can't return one, such as FormFile's or ID's
 }
 
 // Request creates a new empty Builder.
@@ -163,7 +165,33 @@ func (b *Builder) SchemeMatches(m vlatte.Matcher) *Builder {
 	return b
 }
 
-// Method sets the HTTP request method to be matched.
+// Host defines a matcher for the host the request names, without its port, whatever the port: its Host header, or the
+// host of a request in absolute form, as a forward proxy gets, such as "api.local". An IPv6 address comes without
+// brackets. Host names ignore case: compare them with [match.EqualIgnoreCase].
+func (b *Builder) Host(m vlatte.Matcher) *Builder {
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeHost),
+		Selector: selectHost,
+		Matcher:  m,
+	})
+
+	return b
+}
+
+// ClientIP defines a matcher for the address of the client, as http.Request.RemoteAddr has it, without its port.
+// Behind a proxy it is the proxy's: X-Forwarded-For is a header, which Header matches.
+func (b *Builder) ClientIP(m vlatte.Matcher) *Builder {
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeClientIP),
+		Selector: selectClientIP,
+		Matcher:  m,
+	})
+
+	return b
+}
+
+// Method sets the HTTP request methods to match, ignoring case: one, or several, of which the request has one. It
+// panics without a method.
 func (b *Builder) Method(methods ...string) *Builder {
 	var m vlatte.Matcher
 	var key string
@@ -174,7 +202,12 @@ func (b *Builder) Method(methods ...string) *Builder {
 		m = match.EqualIgnoreCase(methods[0])
 		key = methods[0]
 	} else {
-		m = match.IsIn(methods)
+		matchers := make([]vlatte.Matcher, len(methods))
+		for i, method := range methods {
+			matchers[i] = match.EqualIgnoreCase(method)
+		}
+
+		m = match.Any(matchers...)
 	}
 
 	b.appendExpectation(&expectation{
@@ -210,8 +243,8 @@ func (b *Builder) URL(m vlatte.Matcher) *Builder {
 	return b
 }
 
-// URLf sets a matcher to the http.Request url.URL that compares the http.Request url.URL with the given value.
-// The expected value will be formatted with the provided format specifier.
+// URLf matches the full URL, such as "http://127.0.0.1:8080/items?page=2", with a glob, formatted with the format
+// specifier: only "*" is special, it crosses "/", and case counts.
 func (b *Builder) URLf(format string, a ...any) *Builder {
 	return b.URL(match.GlobMatch(fmt.Sprintf(format, a...)))
 }
@@ -227,10 +260,55 @@ func (b *Builder) URLPath(m vlatte.Matcher) *Builder {
 	return b
 }
 
-// URLPathf sets a Matcher that compares the http.Request url.URL path with the given value, ignoring the case.
-// The expected value will be formatted with the provided format specifier.
+// URLPathf matches the path with a glob, formatted with the format specifier: only "*" is special, it crosses "/",
+// and case counts, so "/users/*" matches "/users/7/orders", and not "/Users/7".
 func (b *Builder) URLPathf(format string, a ...any) *Builder {
 	return b.URLPath(match.GlobMatch(fmt.Sprintf(format, a...)))
+}
+
+// RequestURI matches the path and query of the request exactly, as match.RequestURI does and a mock file's relative
+// url, such as "/items?page=2", does: the same path, and the same parameters, in any order, each with its values in
+// order. It panics when uri isn't a URL.
+func (b *Builder) RequestURI(uri string) *Builder {
+	return b.URL(match.RequestURI(uri))
+}
+
+// URLPathTemplate matches the path with a template, such as /users/{id}/orders/{orderId}: the path has as many
+// segments, each literal one the same once decoded, and a non-empty one for each parameter. A parameter is a whole
+// segment, and %7B writes a literal brace. PathParam matches a parameter, and templates read them as
+// .Request.PathParams. A mock has one path template, which other matchers of the URL or the path add to.
+func (b *Builder) URLPathTemplate(template string) *Builder {
+	t, err := parsePathTemplate(template)
+	if err == nil && b.spec.pathTemplate != nil {
+		err = fmt.Errorf("the mock has path template %q already", b.spec.pathTemplate.text)
+	}
+
+	if err != nil {
+		if b.err == nil {
+			b.err = fmt.Errorf("path template %q: %w", template, err)
+		}
+
+		return b
+	}
+
+	b.spec.pathTemplate = t
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeURLPathTemplate),
+		Key:      template,
+		Selector: selectEscapedPath,
+		Matcher:  t,
+	})
+
+	return b
+}
+
+// PathParam defines a matcher for a parameter of the path template, by its name: the segment it takes, decoded. With
+// URLPathTemplate("/users/{id}"), PathParam("id", match.Equal("7")) matches /users/7. Build fails when the mock has
+// no path template, or its template has no such parameter.
+func (b *Builder) PathParam(name string, m vlatte.Matcher) *Builder {
+	b.pathParams = append(b.pathParams, namedMatcher{name: name, matcher: m})
+
+	return b
 }
 
 // URLFragment defines a matcher to be applied to the URL fragment: the decoded text after a "#" in the request
@@ -267,6 +345,57 @@ func (b *Builder) Header(name string, m vlatte.Matcher) *Builder {
 // Headerf adds a matcher to a specific http.Header key.
 func (b *Builder) Headerf(name string, value string, a ...any) *Builder {
 	return b.Header(name, match.StrictEqual(fmt.Sprintf(value, a...)))
+}
+
+// Headers defines a matcher for every value of a header: a []string in the order the request sent them, empty when
+// the request has no such header. Header reads only the first value. Values a request sends in one line, such as
+// "a, b", are one value.
+func (b *Builder) Headers(name string, m vlatte.Matcher) *Builder {
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeHeaders),
+		Key:      name,
+		Selector: selectHeaders(name),
+		Matcher:  m,
+	})
+
+	return b
+}
+
+// Cookie defines a matcher for the value of a cookie, by its name, which keeps its case. It reads the first cookie
+// with that name, as http.Request.Cookie does, and nil when the request has none, which no text matches.
+func (b *Builder) Cookie(name string, m vlatte.Matcher) *Builder {
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeCookie),
+		Key:      name,
+		Selector: selectCookie(name),
+		Matcher:  m,
+	})
+
+	return b
+}
+
+// BasicAuth matches the credentials of the request's Basic Authorization header, exactly.
+func (b *Builder) BasicAuth(username, password string) *Builder {
+	return b.BasicAuthMatches(match.StrictEqual(username), match.StrictEqual(password))
+}
+
+// BasicAuthMatches defines matchers for the username and the password of the request's Basic Authorization header,
+// as http.Request.BasicAuth reads them. Without Basic credentials, both are nil.
+func (b *Builder) BasicAuthMatches(username, password vlatte.Matcher) *Builder {
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeBasicAuth),
+		Key:      "username",
+		Selector: selectBasicAuthUsername,
+		Matcher:  username,
+	})
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeBasicAuth),
+		Key:      "password",
+		Selector: selectBasicAuthPassword,
+		Matcher:  password,
+	})
+
+	return b
 }
 
 // ContentType matches the Content-Type of the request, ignoring case. A value without parameters matches the media
@@ -353,6 +482,19 @@ func (b *Builder) FormFieldf(field string, value string, a ...any) *Builder {
 	return b.FormField(field, match.StrictEqual(fmt.Sprintf(value, a...)))
 }
 
+// FormFields defines a matcher for every value of a field of the body's form: a []string, empty when the form has no
+// such field. Like FormField, it never reads the query.
+func (b *Builder) FormFields(name string, m vlatte.Matcher) *Builder {
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeFormFields),
+		Key:      name,
+		Selector: selectFormFields(name),
+		Matcher:  m,
+	})
+
+	return b
+}
+
 // Times sets how many requests each mock built from the builder serves: 1 or more. Each mock counts its own, so a mock
 // built again, as Remock does, starts from zero. The last call wins.
 func (b *Builder) Times(times int64) *Builder {
@@ -389,6 +531,21 @@ func (b *Builder) RequestMatches(predicate func(r *http.Request) (bool, error)) 
 	return b
 }
 
+// Matches adds a matcher of the whole request: m gets the *http.Request, as the predicate of RequestMatches does. A
+// mock file's request.custom adds matchers this way, such as custom ones of the server's registry: see
+// [ConfigBuilder.Matchers]. Unlike a predicate, a matcher that describes itself is described, under request.custom,
+// so the admin API's store keeps it.
+func (b *Builder) Matches(m vlatte.Matcher) *Builder {
+	b.appendExpectation(&expectation{
+		Target:   int(matchingScopeCustom),
+		Key:      "custom",
+		Selector: selectRawRequest,
+		Matcher:  m,
+	})
+
+	return b
+}
+
 // StartScenario sets that this mock will start a new scenario with the given name.
 func (b *Builder) StartScenario(name string) *Builder {
 	b.scenario = name
@@ -397,7 +554,7 @@ func (b *Builder) StartScenario(name string) *Builder {
 	return b
 }
 
-// ScenarioIs mark this mock to be used only within the given scenario.
+// ScenarioIs puts the mock in the given scenario. Without [Builder.ScenarioStateIs], it matches in any state of it.
 func (b *Builder) ScenarioIs(scenario string) *Builder {
 	b.scenario = scenario
 
@@ -412,16 +569,21 @@ func (b *Builder) ScenarioStateIs(requiredState string) *Builder {
 }
 
 // ScenarioStateWillBe defines the state of the scenario after this mock is matched, making the scenario flow continue.
+// It starts the scenario when no mock did yet.
 func (b *Builder) ScenarioStateWillBe(newState string) *Builder {
 	b.scenarioNewState = newState
 
 	return b
 }
 
-// Callback adds a callback that will be executed after the mocked response is served.
-func (b *Builder) Callback(callback vlatte.Callback) *Builder {
-	b.spec.callbacks = append(b.spec.callbacks, callback)
-
+// Callback adds fn as an on_complete event of the mock, named callback in the logs, with no listener to register. It
+// runs as the mock's other events and the global ones do: at the same time as them, once the mock replied, and the
+// response waits for it, so a test checks what it did right after the call. fn gets an [*OnComplete], read-only as
+// the events run at the same time, and a context that the client leaving doesn't end, and [Server.Close] does. An
+// error or a panic of fn is logged as a warning, unless Close canceled it, and never changes the response. Mock files
+// can't set callbacks, and a mock's description leaves them out.
+func (b *Builder) Callback(fn vlatte.EventFunc[vlatte.OnComplete]) *Builder {
+	b.spec.events = append(b.spec.events, vlatte.EventConfig{Name: "callback", Listener: fn})
 	return b
 }
 
@@ -432,8 +594,49 @@ func (b *Builder) OnCompleteEvent(cfg vlatte.EventConfig) *Builder {
 	return b
 }
 
+// Step adds steps that the body of each answer of the mock passes through, in order, before it reaches the client:
+// to delay it, send it in parts, change it or cut it. See [vlatte.Step]. Each answer has a flow of its own, so a
+// stage keeps what it counts for that answer only.
+//
+// Flushes pass through the steps too, and so does the end of the answer, an empty body included. A stage that
+// aborts the flow, with [vlatte.ErrAbort] or [vlatte.ErrReset], cuts the answer after what it sent: the mock counts
+// the call and runs its callbacks and events, then cuts the connection. ErrReset resets an HTTP/1 connection.
+// A failure, such as a failing reply, is vlatte's answer, and skips the steps.
 func (b *Builder) Step(steps ...vlatte.Step) *Builder {
 	b.spec.steps = append(b.spec.steps, steps...)
+
+	return b
+}
+
+// WireStep adds steps that every byte of each answer of the mock passes through, in order, as the client reads it:
+// the status line, the headers, the framing of the body and the body, after the steps of Step. They can send what
+// isn't HTTP: nothing at all, half the headers, garbage after a valid head. See [vlatte.Step].
+//
+// The mock answers on its connection, which it takes over, in HTTP/1.x, with Connection: close, so the connection
+// ends with the answer. A request over HTTP/2 can't give its connection over: it gets vlatte's error answer. A stage
+// that aborts the flow, with [vlatte.ErrAbort] or [vlatte.ErrReset], has the connection closed, or reset, without
+// the rest of the answer, once the mock counted the call and ran its callbacks and events. A failure, such as a failing reply, is vlatte's
+// answer, and skips the steps. A recording leaves the call out.
+func (b *Builder) WireStep(steps ...vlatte.Step) *Builder {
+	b.spec.wireSteps = append(b.spec.wireSteps, steps...)
+
+	return b
+}
+
+// UpstreamStep adds steps that what the mock sends on passes through, in order, as its target reads it: the body of
+// the request a proxy reply sends, such as to delay it, send it in parts or cut it. See [vlatte.Step]. Steps can
+// change its length, so the target gets it chunked. A request without a body has nothing for them.
+//
+// The server reads the body of a request before it matches a mock, so the client's upload has ended by then: these
+// steps apply to what the mock sends on, not to how it reads the client. A body the server doesn't read whole, with
+// NoBodyParsing or past MaxBodyParsingLimit, is read from the client as the target reads it, a small piece at a time,
+// so a stage that slows it slows the upload too, once the connection's buffers are full. A mock with wire steps
+// takes its connection over before it replies, so it reads such a body through these steps first: they pace the
+// upload, and a proxy's target gets the body as they passed it on, at once. A stage that aborts
+// the flow, with [vlatte.ErrAbort] or [vlatte.ErrReset], fails the call to the target and cuts the client's answer,
+// once the mock counted the call.
+func (b *Builder) UpstreamStep(steps ...vlatte.Step) *Builder {
+	b.spec.upSteps = append(b.spec.upSteps, steps...)
 
 	return b
 }
@@ -495,6 +698,11 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		return nil, fmt.Errorf("mock: %w", b.err)
 	}
 
+	params, err := b.pathParamExpectations()
+	if err != nil {
+		return nil, fmt.Errorf("mock: %w", err)
+	}
+
 	// Times counts here as it did when it was a matcher of the builder: a mock limited only by Times, such as a mock
 	// file with repeat and no request keys, still builds.
 	if len(b.spec.expectations) == 0 && b.times == 0 {
@@ -510,11 +718,13 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		spec.id = uuid.New().String()
 	}
 
+	spec.expectations = append(spec.expectations, params...)
+
 	// The matchers that keep state for one mock are made for it: Times counts the requests of this mock only, and the
 	// scenario runs in the store of app.
 	if b.times > 0 {
 		spec.expectations = append(spec.expectations, &expectation{
-			Target:  int(matchingScopeNone),
+			Target:  int(matchingScopeRepeat),
 			Key:     "times",
 			Matcher: mfeat.Repeat(b.times),
 		})
@@ -529,6 +739,10 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 
 	// As prepareGlobalEvents does: the prepared parameters go into the mock's copy, never into the builder.
 	for i, def := range spec.events {
+		if def.Listener != nil {
+			continue
+		}
+
 		if app.config.Listeners == nil || !app.config.Listeners.OnComplete.Has(def.Name) {
 			return nil, fmt.Errorf("mock: on_complete listener %s at index %d is not registered", def.Name, i)
 		}
@@ -550,6 +764,30 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 	desc, _ := descriptor.IsSelfDescriptive(b.reply)
 
 	return &Mock{spec: spec, reply: reply, replyDesc: desc, closer: owned(b.reply, reply), enabled: b.enabled}, nil
+}
+
+// pathParamExpectations returns the matchers of the path parameters. A path parameter reads the segment its template
+// names, so it needs the template, whichever was set first.
+func (b *Builder) pathParamExpectations() ([]*expectation, error) {
+	t := b.spec.pathTemplate
+	params := make([]*expectation, 0, len(b.pathParams))
+	for _, p := range b.pathParams {
+		switch {
+		case t == nil:
+			return nil, fmt.Errorf("path param %q: the mock has no path template: set one with URLPathTemplate", p.name)
+		case !t.has(p.name):
+			return nil, fmt.Errorf("path param %q: path template %q has no such parameter", p.name, t.text)
+		}
+
+		params = append(params, &expectation{
+			Target:   int(matchingScopePathParam),
+			Key:      p.name,
+			Selector: selectPathParam(t, p.name),
+			Matcher:  p.matcher,
+		})
+	}
+
+	return params, nil
 }
 
 func (b *Builder) appendExpectation(e *vlatte.Eval[*selectorInput]) {
@@ -586,8 +824,73 @@ func selectMethod(_ context.Context, r *selectorInput) any      { return r.RawRe
 func selectURL(_ context.Context, r *selectorInput) any         { return r.URL.String() }
 func selectURLPath(_ context.Context, r *selectorInput) any     { return r.URL.Path }
 func selectURLFragment(_ context.Context, r *selectorInput) any { return r.URL.Fragment }
+func selectEscapedPath(_ context.Context, r *selectorInput) any { return r.URL.EscapedPath() }
+
+// selectPathParam selects the parameter name of t from the path. Its matcher runs after t's, so the path fits t.
+func selectPathParam(t *pathTemplate, name string) vlatte.Selector[*selectorInput] {
+	return func(_ context.Context, r *selectorInput) any {
+		params, _ := t.params(r.URL.EscapedPath())
+		return params[name]
+	}
+}
+
 func selectHeader(k string) vlatte.Selector[*selectorInput] {
 	return func(_ context.Context, r *selectorInput) any { return r.RawRequest.Header.Get(k) }
+}
+
+func selectHeaders(k string) vlatte.Selector[*selectorInput] {
+	return func(_ context.Context, r *selectorInput) any { return r.RawRequest.Header.Values(k) }
+}
+
+// selectCookie selects the value of the first cookie named name, or nil without one, as selectBasicAuthUsername does.
+func selectCookie(name string) vlatte.Selector[*selectorInput] {
+	return func(_ context.Context, r *selectorInput) any {
+		c, err := r.RawRequest.Cookie(name)
+		if err != nil {
+			return nil
+		}
+
+		return c.Value
+	}
+}
+
+// selectBasicAuthUsername selects the username of Basic credentials, or nil without them, so that no text matches a
+// request without credentials.
+func selectBasicAuthUsername(_ context.Context, r *selectorInput) any {
+	username, _, ok := r.RawRequest.BasicAuth()
+	if !ok {
+		return nil
+	}
+
+	return username
+}
+
+// selectBasicAuthPassword selects the password of Basic credentials, or nil without them, as selectBasicAuthUsername.
+func selectBasicAuthPassword(_ context.Context, r *selectorInput) any {
+	_, password, ok := r.RawRequest.BasicAuth()
+	if !ok {
+		return nil
+	}
+
+	return password
+}
+
+func selectHost(_ context.Context, r *selectorInput) any { return hostOnly(r.RawRequest.Host) }
+
+// selectClientIP selects the address of the client, which a middleware may have set without a port.
+func selectClientIP(_ context.Context, r *selectorInput) any {
+	return hostOnly(r.RawRequest.RemoteAddr)
+}
+
+// hostOnly returns an address without its port and the brackets of an IPv6 address: "api.local:8080" and
+// "api.local:x" are "api.local", and "[::1]:80", "[::1]" and "::1" are "::1". Unlike url.URL.Hostname, it takes any
+// port, as net/http does, and an IPv6 address without brackets.
+func hostOnly(s string) string {
+	if host, _, err := net.SplitHostPort(s); err == nil {
+		return host
+	}
+
+	return strings.TrimSuffix(strings.TrimPrefix(s, "["), "]")
 }
 
 func selectQuery(k string) vlatte.Selector[*selectorInput] {
@@ -602,5 +905,10 @@ func selectBody(_ context.Context, r *selectorInput) any { return r.ParsedBody }
 // selectFormField selects a field of a form body. Only the body counts: http.Request.Form also holds the query.
 func selectFormField(k string) vlatte.Selector[*selectorInput] {
 	return func(_ context.Context, r *selectorInput) any { return r.Form.Get(k) }
+}
+
+// selectFormFields selects every value of a field of a form body, as selectFormField does its first.
+func selectFormFields(k string) vlatte.Selector[*selectorInput] {
+	return func(_ context.Context, r *selectorInput) any { return r.Form[k] }
 }
 func selectRawRequest(_ context.Context, r *selectorInput) any { return r.RawRequest }

@@ -63,6 +63,7 @@ func TestHello(t *testing.T) {
 | `mockhttp` | HTTP mock servers |
 | `mockgrpc` | gRPC mock servers |
 | `match` | Request matchers, such as `match.Equal`, `match.JSONPath` and `match.All` |
+| `match/matchbuild` | The matcher lists of mock files, and the registry of custom matchers |
 | `webhook` | Calling a URL after a mock is served |
 | `recipe/<protocol>/<recipe>` | Recipes that prepare a server, such as `recipe/http/proxyall` |
 | `vlatte` | The types every mock server shares, and the Go template engine |
@@ -108,9 +109,99 @@ response:
 
 No other reading happens: `[equal, 10]` doesn't match `010`. The [match package docs](match/doc.go) state the rule.
 
-**Keys.** Keys are kept as written, so a query name like `userId` matches `userId` only.
+**Keys.** Keys are kept as written, so a query name like `userId` matches `userId` only. Header names, and methods written as text, ignore case, so `method: get, post` matches `POST`; cookie names don't.
 
-**URLs.** `url: /items?page=2` matches that path and query exactly: the same parameters, in any order, each with its values in order, so `/items` and `/items?page=2&sort=asc` don't match. Path segments compare decoded, so `%41` is `A`, but `%2F` isn't `/`. A relative `url` with a `*` in its path is an error: match a path with a glob through `path: /items/*`, and parameters one by one through `query`. For a literal `*`, write `%2A`. An absolute `url`, such as `https://api.example.com/items`, compares as text ignoring case.
+**URLs.** `url: /items?page=2` matches that path and query exactly: the same parameters, in any order, each with its values in order, so `/items` and `/items?page=2&sort=asc` don't match. Path segments compare decoded, so `%41` is `A`, but `%2F` isn't `/`. A relative `url` with a `*` in its path is an error: match a path with a glob through `path: /items/*`, and parameters one by one through `query`. For a literal `*`, write `%2A`. An absolute `url`, such as `https://api.example.com/items`, compares as text ignoring case, with the server's URL, or the one a request names in absolute form, as the forward proxy gets it, or intercepted, without its default port. In Go, `RequestURI("/items?page=2")` matches as a relative `url` does.
+
+**Path templates.** `path_template: /users/{id}/orders/{orderId}` matches paths of its shape: as many segments, the literal ones the same once decoded, and a non-empty one for each parameter, so `/users/7/orders` and `/users/7/orders/9/` don't match. A parameter is a whole segment; write a literal brace as `%7B` or `%7D`. `path_params` matches the parameters by name, decoded, and templates read them as `.Request.PathParams.id`, or `index .Request.PathParams "order-id"` for a name that isn't a Go identifier. `url`, `url_match` or `path` can match the request too. In Go, `URLPathTemplate` and `PathParam`.
+
+```yaml
+request:
+  method: GET
+  path_template: /users/{id}
+  path_params:
+    id: [regex, '^[0-9]+$']
+response:
+  body: 'user {{ .Request.PathParams.id }}'
+  template:
+    enabled: true
+```
+
+**Many values.** `query`, `header` and `form` read the first value of a name. `queries`, `headers` and `forms` (`Queries`, `Headers` and `FormFields` in Go) read every value, as a list, so they take matcher lists, such as `[contains, a]`, `[itemsMatch, [a, b]]` or `[len, 2]`: they refuse text, which never equals a list. A name the request doesn't have is an empty list, which `[not, present]` matches, and a header sent empty isn't. A header line such as `a, b` is one value.
+
+**More of the request.** `cookie` matches cookies by name, as `Cookie` does; a cookie the request doesn't have is null, which no text matches. `basic_auth: {username: jeff, password: s3cret}` matches Basic credentials, as `BasicAuth` does, and `BasicAuthMatches` takes matchers; without credentials, the username and password are null, which no text matches. `host` matches the host the request names, without its port, and text ignores case: `Host` in Go. `client_ip` matches the client's address, as the server's connection has it, not `X-Forwarded-For`: `ClientIP` in Go.
+
+**JSON bodies.** `[eqj, {...}]` matches JSON equal to the document given, in full. An object of options after it loosens that: `ignore_array_order: true` pairs list items up in any order, and `ignore_extra_elements: true` ignores members and list items the stub doesn't name. `[jsonschema, schema]` matches JSON that conforms to a JSON Schema, an object or JSON text, of draft 2020-12 unless `$schema` or `{draft: 7}` says otherwise; it loads no `$ref` outside the schema. In Go: `EqualJSON(doc, IgnoreArrayOrder(), IgnoreExtraElements())` and `JSONSchema(text, SchemaDraft(JSONSchemaDraft7))`.
+
+```yaml
+request:
+  method: POST
+  path: /pets
+  body: [all, [
+    [eqj, {name: Rex, tags: [a, b]}, {ignore_array_order: true, ignore_extra_elements: true}],
+    [jsonpath, $.id, [regex, '^[0-9]+$']]
+  ]]
+```
+
+**XML bodies.** `[eqx, '<order id="7"><item>1</item></order>']` matches an equal XML document, by what it means: attributes in any order, text trimmed, comments and indentation left out, names compared by namespace URI. Options: `ignore_child_order: true`, and `namespaces: strict` to compare prefixes too, or `none` to read no namespaces. `[xpath, expression, matcher]` applies the matcher to what an XPath 1.0 expression selects: nothing is null, one result is itself, more are a list, so `[some, m]` matches any of them; an element is its XML. `{namespaces: {t: "urn:todo"}}` binds a prefix of the expression. In Go: `EqualXML`, `IgnoreChildOrder`, `XMLNamespaces`, `XPath` and `XPathNamespace`.
+
+**Dates and times.** `[before, x]`, `[after, x]` and `[equalDateTime, x]` (`eqdt`) compare a date and time in RFC 3339, in ISO 8601 without a zone, or in an HTTP format. `x` is one of those, or `now`, and either may end with an offset: `"now +3 days"`, `"2026-01-01T00:00:00Z -2 weeks"`. Options: `truncate_expected` and `truncate_actual`, each one of `first minute of hour`, `first hour of day`, `first day of month`, `first day of next month`, `last day of month`, `first day of year`, `first day of next year` and `last day of year`; `truncate_last: true` to offset first; `actual_format` with a Go layout, such as `02/01/2006`; `local_time: true` to compare wall clocks. An `x` without a zone is local, as with `local_time`; a request's date and time without a zone, against an `x` with one, is read in the server's zone. In Go: `Before`, `After`, `EqualDateTime`, `BeforeNow`, `AfterNow` and `EqualDateTimeNow`, with typed options such as `ExpectedOffset(3, match.Days)`.
+
+```yaml
+request:
+  header:
+    X-Date: [after, "now -1 hours"]
+  query:
+    until: [before, "now +15 days", {truncate_expected: first day of month}]
+```
+
+**Lists of matchers.** `[hasExactly, [[equal, "1"], [contains, "2"]]]` matches a list of as many values as matchers, each value matched by a matcher of its own, in any order. In Go, `ItemsMatch` takes matchers as items.
+
+**Custom matchers.** A server reads mock files with its registry of matchers: the built-in ones, and the custom ones you give it. A custom matcher is built from its arguments when the mock loads, and its name works anywhere a matcher list does, in mock files, admin API mocks and request journal queries. `request.custom` lists matchers of the whole request: each gets the `*http.Request` (`Builder.Matches` in Go). A registry belongs to the servers you give it to; servers can share one.
+
+```go
+registry := matchbuild.MustNew(matchbuild.WithMatcher("body-too-long",
+	func(_ *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
+		if len(args) != 1 {
+			return nil, errors.New("takes a length")
+		}
+
+		limit, ok := args[0].(int64)
+		if !ok {
+			return nil, errors.New("takes a length")
+		}
+
+		return match.Function(func(v any) (bool, error) {
+			r, ok := v.(*http.Request)
+			return ok && r.ContentLength > limit, nil
+		}), nil
+	}))
+
+m := mockhttp.MustNew(mockhttp.Setup().Matchers(registry))
+```
+
+```yaml
+request:
+  custom: [[body-too-long, 2048]]
+response:
+  status: 413
+```
+
+**From WireMock.** WireMock's matchers, and what vlatte writes for each:
+
+| WireMock | vlatte |
+|---|---|
+| `equalTo`, `caseInsensitive`, `contains`, `matches` | `equal`, `eqi`, `contains`, `regex` |
+| `doesNotContain`, `doesNotMatch`, `absent` | `[not, [contains, x]]`, `[not, [regex, x]]`, `[not, present]` |
+| `equalToNumber`, `greaterThanNumber`, and the rest | `equal`, `gt`, `gte`, `lt`, `lte` |
+| `and`, `or`, `not` | `all`, `any`, `not` |
+| `matchesJsonPath` | `haskey`, `jsonpath` |
+| `equalToJson`, its placeholders | `eqj` with options; `[all, [eqj, ...], [jsonpath, $.id, ...]]` |
+| `matchesJsonSchema` | `jsonschema` |
+| `equalToXml`, `matchesXPath` | `eqx`, `xpath` |
+| `before`, `after`, `equalToDateTime` | `before`, `after`, `eqdt` |
+| `hasExactly`, `includes` | `hasExactly`, `[all, [some, m1], [some, m2]]` |
+| `customMatcher` | `request.custom` and a registry of custom matchers |
 
 **Proxy replies.** A `proxy` reply (`From` in Go) answers with what its target answers: see [Proxying](#proxying).
 
@@ -161,6 +252,7 @@ m.MustMock(mockhttp.Postf("/users").Reply(mockhttp.Created().
 | Field | What it holds |
 |---|---|
 | `.Request.Method`, `.Request.URL`, `.Request.URLPathSegments`, `.Request.Header`, `.Request.ID` | The request. `index .Request.URLPathSegments 0` is the first segment of the path. |
+| `.Request.PathParams.<name>` | The parameters of the mock's [path template](#mock-files), decoded. |
 | `.Request.Body.String`, `.Request.Body.Content`, `.Request.HasBody` | The body. JSON bodies are text: read their fields with `fromJson`. |
 | `.Request.Cookie "name"`, `.Request.PostForm.Get "f"`, `.Request.FormFile "f"` | Cookies and forms. |
 | `.Server.URL` | The server's base URL. |
@@ -206,7 +298,7 @@ Pass it with `Setup().TemplateEngine(e)`. Templates then use its syntax everywhe
 
 Go's `net/http` parses request bodies: `ParseForm` reads urlencoded forms and `ParseMultipartForm` reads `multipart/form-data`. Bodies are parsed by their media type, in any case: `text/plain` and `application/json` as text, and the two form types as forms.
 
-**Fields.** `FormField` (file key `form`) reads a field of either encoding, as `http.Request.PostFormValue` does: its first value, and never the query.
+**Fields.** `FormField` (file key `form`) reads a field of either encoding, as `http.Request.PostFormValue` does: its first value, and never the query. `FormFields` (file key `forms`) reads every value.
 
 **Files.** `FormFile` (file key `form_file`) matches the files of a field with a pattern. Some file of the field must meet every condition of the pattern, or every file with `Every()` (`every: true`). With several patterns for one field, each must be met by some file of the field, and one file may meet several.
 
@@ -380,7 +472,7 @@ The three share one engine, and answer alike:
 - The hop-by-hop headers of either connection, such as `Connection`, `Keep-Alive` and `Proxy-Authorization`, don't go on. A request's `Te: trailers` does.
 - The upstream's `VLatte-*` headers, such as the debug headers of an upstream that is a vlatte server too, don't reach the client: it gets the proxy's.
 - Compressed bodies go on as they came, and a redirect goes back to the client: the proxy doesn't follow it.
-- A request that asks to switch protocols, such as a WebSocket handshake (`Connection: Upgrade`, `Upgrade: websocket`), asks the upstream too. Once the upstream switches, the client gets its `101`, and the two connections are piped until both sides end, or the server closes, while the mock's callbacks and events run. A mock counts the call, and the log shows it, when the switch is done. A mock with steps or response mappers doesn't ask the upstream to switch, as they can't apply to a connection: the upstream answers as to any request. `h2c`, which asks for HTTP/2 on the client's own connection, isn't asked on. An upstream that switches to a protocol the client didn't offer fails the call. A switch needs HTTP/1.1.
+- A request that asks to switch protocols, such as a WebSocket handshake (`Connection: Upgrade`, `Upgrade: websocket`), asks the upstream too. Once the upstream switches, the client gets its `101`, and the two connections are piped until both sides end, or the server closes, while the mock's callbacks and events run. A mock counts the call, and the log shows it, when the switch is done. A mock's steps apply to the connection too: see [Steps](#steps). A mock with response mappers doesn't ask the upstream to switch, as they can't apply to a connection: the upstream answers as to any request. `h2c`, which asks for HTTP/2 on the client's own connection, isn't asked on. An upstream that switches to a protocol the client didn't offer fails the call. A switch needs HTTP/1.1.
 - The timeout bounds the wait for the response headers, connecting and sending the request included: 30 seconds by default, and 0 waits forever. The body has no time limit.
 - A call that fails gets the server's answer to a failure, `ErrorStatusCode` with `VLatte-Error: reply`, unless the client left: then the log warns. Errors and logs show the upstream's URL without its password, and with its query values masked: `?api_key=xxxxx`. An upstream body that breaks off cuts the client's connection, so the client doesn't take part of it for all of it.
 - A request the proxy sends on carries the server's ID in `VLatte-Via`. A request that passes the same server 10 times, as in a loop, such as through a proxy reply whose target is the server itself, fails as a proxy loop rather than being sent on forever. A route may pass a server more than once, such as through a gateway that sends it back.
@@ -393,11 +485,11 @@ The target's TLS certificate isn't verified unless `ssl_verify: true`, so a targ
 
 **Proxy all.** `ProxyAll(From(target))` in Go mocks what no other mock matches with a proxy reply, as WireMock's `--proxy-all` does: it matches any method and path, and comes last, at priority `math.MaxInt`. It leaves alone `CONNECT`s, and, on a server that is a forward proxy, the requests in absolute form, which the proxy sends on to their hosts. In a mock file, `proxy_all` takes the keys of `proxy` and makes the same mock, without `request`; a `ProxyAll` mock's description loads back as one. The `proxyall` recipe mocks it. The `proxy_all` setting does the same without a mock, so assertions don't count it, and `Clean` and `Reload` leave it: `vlatte --proxy-all-target=https://api.example.com`. It takes the keys of a mock file's `proxy` but `request_header` and `header`, which flags and variables can't give.
 
-**Forward proxy.** A client sends its requests to the server in absolute form, `GET http://api.local/users`, and opens a tunnel with `CONNECT` for an `https` URL. A mock that matches the request answers it; mocks match the path and ignore the host. A request no mock matches goes to its host. A request in origin form, `GET /users`, names no host: no mock matching it, it gets the no-match answer. `proxy.timeout` is the timeout, and `proxy.ssl_verify` verifies the certificates of the hosts, and of an `https` proxy on the way, `proxy.via` or the one of `HTTPS_PROXY`: none is verified by default. `proxy.via` sends the requests through another proxy, an `http`, `https`, `socks5` or `socks5h` URL whose user info goes as its credentials: a client's `Proxy-Authorization` is for vlatte, and doesn't go on.
+**Forward proxy.** A client sends its requests to the server in absolute form, `GET http://api.local/users`, and opens a tunnel with `CONNECT` for an `https` URL. A mock that matches the request answers it; mocks match the path and ignore the host, unless they match it, with `host` or an absolute `url`. A request no mock matches goes to its host. A request in origin form, `GET /users`, names no host: no mock matching it, it gets the no-match answer. `proxy.timeout` is the timeout, and `proxy.ssl_verify` verifies the certificates of the hosts, and of an `https` proxy on the way, `proxy.via` or the one of `HTTPS_PROXY`: none is verified by default. `proxy.via` sends the requests through another proxy, an `http`, `https`, `socks5` or `socks5h` URL whose user info goes as its credentials: a client's `Proxy-Authorization` is for vlatte, and doesn't go on.
 
 A `CONNECT` no mock matches opens a tunnel to its host, through `proxy.via` or the proxy of the environment, if any, within `proxy.timeout`, and the log shows that it opened. What goes through a tunnel, such as a TLS connection, isn't read: mocks don't see it, unless the proxy intercepts it. Each side of a tunnel ends what it sends on its own, and the tunnel closes once both did, or once the server closes. A tunnel needs HTTP/1.1, and a response writer that can hijack its connection: a middleware's writer must unwrap, with `Unwrap() http.ResponseWriter`, to the server's.
 
-**HTTPS interception.** With `proxy.intercept` (`ProxyConfig{Intercept: true}` in Go), the proxy serves the TLS of a `CONNECT` no mock matches itself, as WireMock's HTTPS browser proxying does. It answers with a certificate for the host the `CONNECT` names, or the name the client asks for, signed by its CA, which clients must trust. The requests within are then the server's own, for `https://` that host: mocks answer them, recordings record them, the log shows them, and the proxy sends the rest on to the host. A connection that doesn't start with TLS goes to the host through a tunnel, as does one whose client offers only `h2` by ALPN, such as a gRPC client, and one whose client sends nothing for 2 seconds, waiting for a host that speaks first, such as an SSH server: a host the proxy can't reach then closes the connection, as the `200` went out already. `proxy.ca_cert` and `proxy.ca_key` name the CA's files, which the settings need: a CA's certificate, or an intermediate CA's, followed by its chain, which the proxy sends with each host's. In Go, `ProxyConfig.CA` sets it, and without one, the server makes a CA of its own, valid for a year, which `m.ProxyCA()` returns for clients to trust:
+**HTTPS interception.** With `proxy.intercept` (`ProxyConfig{Intercept: true}` in Go), the proxy serves the TLS of a `CONNECT` no mock matches itself, as WireMock's HTTPS browser proxying does. It answers with a certificate for the host the `CONNECT` names, or the name the client asks for, signed by its CA, which clients must trust. The requests within are then the server's own, for `https://` that host, which `scheme` and an absolute `url` see: mocks answer them, recordings record them, the log shows them, and the proxy sends the rest on to the host. A connection that doesn't start with TLS goes to the host through a tunnel, as does one whose client offers only `h2` by ALPN, such as a gRPC client, and one whose client sends nothing for 2 seconds, waiting for a host that speaks first, such as an SSH server: a host the proxy can't reach then closes the connection, as the `200` went out already. `proxy.ca_cert` and `proxy.ca_key` name the CA's files, which the settings need: a CA's certificate, or an intermediate CA's, followed by its chain, which the proxy sends with each host's. In Go, `ProxyConfig.CA` sets it, and without one, the server makes a CA of its own, valid for a year, which `m.ProxyCA()` returns for clients to trust:
 
 ```go
 m := mockhttp.MustNew(mockhttp.Setup().Proxy(&mockhttp.ProxyConfig{Intercept: true}))
@@ -411,6 +503,49 @@ An intercepted connection speaks HTTP/1.1.
 **Transports.** In Go, `From(target).Transport(rt)` sends a proxy reply through a transport of yours, such as one with a client certificate, and `Setup().Transport(rt)` sets one for every proxy reply, the recording target, the forward proxy and webhooks. A transport of yours replaces the one vlatte makes, and decides on its own how it verifies certificates and which proxy it goes through: `ssl_verify`, `proxy.via`, `proxy.ssl_verify` and `record.skip_ssl_verify` fail with it, rather than being ignored. The timeouts apply to any transport.
 
 The transports vlatte makes go through the proxy of `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`, which leaves out `localhost`, unless `proxy.via` sets one. Docker can set these variables in containers from `~/.docker/config.json`, and so send the hosts of a compose network, such as `http://api:8080`, to that proxy: add them to `NO_PROXY`. A variable that names the vlatte server itself sends the requests it proxies back to it, until they fail as a proxy loop: set `NO_PROXY=*` for its process, or `proxy.via`.
+
+## Steps
+
+In Go, `Step` passes the body of each answer of a mock through steps, in order, before it reaches the client: to delay it, send it in parts, change it or cut it. A step is a `vlatte.Step`. For each answer, its `Open` makes the step's stage of that answer's `vlatte.Flow`, so a stage keeps what it counts for one answer only: a mock's answers don't share it.
+
+```go
+upper := vlatte.StepFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
+	if _, err := next.Write(bytes.ToUpper(b)); err != nil {
+		return 0, err
+	}
+
+	return len(b), nil
+})
+
+m.MustMock(mockhttp.Getf("/hello").Step(upper).Reply(mockhttp.OK().PlainText("hello")))
+```
+
+A stage gets each write of the body, each flush, and the end of the answer, an empty body included. It can pass a write on as it is, changed, in parts, later or not at all, and send what it holds at a flush or at the end. It may write from a goroutine of its own, and needs no lock: vlatte orders its writes with the reply's. Steps can change the body's length, so the answer has no `Content-Length`. A stage aborts the answer by returning an error that matches `vlatte.ErrAbort`, or with `Flow.Abort`, such as from a timer, which ends a reply that waits on the answer's context, as a proxy reply does. The mock still counts the call and runs its callbacks and events. Then the connection is cut, after what was sent: an HTTP/1 connection is closed, and an HTTP/2 stream is reset. With `vlatte.ErrReset`, an HTTP/1 connection is reset too, so the client reads `ECONNRESET`. A failure, such as a failing reply, is vlatte's answer, and skips the steps.
+
+`WireStep` passes every byte of each answer through its steps, after those of `Step`: the status line, the headers, the framing of the body and the body, so a step can send what isn't HTTP, such as nothing at all, half the headers, or garbage after a valid head. The mock takes its connection over and answers in HTTP/1.x itself, with `Connection: close`: the body is chunked over HTTP/1.1, and ends with the connection over HTTP/1.0. A request over HTTP/2 can't give its connection over, so it gets vlatte's error answer: turn HTTP/2 off, or use an HTTP/1.1 client, to test a mock with wire steps. An abort closes the connection without the rest of the answer, and `vlatte.ErrReset` resets it, once the mock counted the call and ran its callbacks and events. A recording leaves out the answers of mocks with wire steps.
+
+`UpstreamStep` passes what a mock sends on through its steps: the body of the request a proxy reply sends to its target. Steps can change its length, so the target gets it chunked. The server reads the body of a request before it matches a mock, so these steps don't slow the client's upload: they apply to what the mock sends on. A body the server doesn't read whole, with `NoBodyParsing` or past `MaxBodyParsingLimit`, is read from the client as the target reads it, a small piece at a time, so a step that slows it slows the upload too, once the connection's buffers are full. A mock with wire steps takes its connection over before it replies, so it reads such a body through these steps first: they pace the upload, and a proxy's target gets the body as they passed it on, at once. A stage that aborts ends the call to the target, and the client's answer is cut as for any abort.
+
+A connection that switched protocols, such as a WebSocket, goes through the steps too. The answer ends with its head, so its steps end there, and a stage that cuts it leaves the client without a switch. Then what the target sends the client passes the mock's steps again, in a flow of its own, then its wire steps, which saw the `101` too. What the client sends the target passes its upstream steps. A stage that aborts either way, even on a timer while nothing comes, cuts both sides, or resets them with `vlatte.ErrReset`.
+
+## Faults
+
+The `fault` package has steps that make a mock answer wrong, to test how a client handles a server that fails:
+
+| Step | Level | What the client gets |
+|---|---|---|
+| `fault.EmptyResponse()` | `WireStep` | No byte at all: the connection ends where it waits for a status line. |
+| `fault.MalformedResponseChunk()` | `WireStep` | The status line and headers, with the mock's status, then garbage in place of the first chunk of the body, then the end of the connection. |
+| `fault.RandomDataThenClose()` | `WireStep` | `fault.RandomDataSize` random bytes in place of the answer, then the end of the connection. |
+| `fault.ConnectionResetByPeer()` | `WireStep` | A TCP reset, such as `ECONNRESET`, before a status line. |
+| `fault.ChunkedDribbleDelay(chunks, total)` | `Step` | The whole body, in `chunks` flushed parts spread over `total`: part k comes at k·total/chunks, and the body ends at `total`. The body is held until the reply wrote all of it. |
+
+```go
+m.MustMock(mockhttp.Getf("/users").WireStep(fault.ConnectionResetByPeer()).Reply(mockhttp.OK()))
+m.MustMock(mockhttp.Getf("/report").Step(fault.ChunkedDribbleDelay(5, 2*time.Second)).Reply(mockhttp.OK().BodyFile("report.csv")))
+```
+
+A wire fault needs HTTP/1.x, as wire steps do. Faults combine with other steps: a fault on the wire comes after the steps of `Step`. A mock that answers with a fault still counts the call, and runs its callbacks and events, before the connection ends.
 
 ## Recording and playback
 
@@ -611,7 +746,7 @@ A failed assertion lists the requests that matched, or the newest ones when none
 
 A `journal.Query`, of package `github.com/caffeine-projects/vlatte/journal`, selects by the fields every protocol has. `Kind`, `Outcome`, `MockID`, `Method`, `Path` and `Status` are indexed: a query runs each of their matchers once per value the journal holds, not once per request, and reads no request from disk for them. `Target` (the full URL), `Since` and `Until` filter in memory too. `Header`, `Body` and request patterns read the requests the other fields leave. `Limit` and `Before` page through them, newest first; `m.Journal().Find` returns the next page's cursor and the count. A `journal.Journal` works on its own too, as a changelog of any requests: `journal.New(journal.Options{Dir: dir})`.
 
-Patterns are the request part of a mock builder, such as `mockhttp.Request()`: the server rebuilds each request from the journal and matches it, through its body parsers. A pattern has no `Times`, `Once` or scenario, which count served requests rather than match one. A rebuilt request has no `RemoteAddr` or TLS state for a `RequestMatches` predicate.
+Patterns are the request part of a mock builder, such as `mockhttp.Request()`: the server rebuilds each request from the journal and matches it, through its body parsers. A pattern has no `Times`, `Once` or scenario, which count served requests rather than match one, and no `ClientIP`: a rebuilt request has no `RemoteAddr`, nor TLS state for a `RequestMatches` predicate.
 
 gRPC servers keep the same journal with `mockgrpc.Setup().Journal(dir)`: a call's path is its full method, such as `/pkg.Service/Method`, its headers its metadata, its body its request message as JSON, which `match.Field` and `match.JSONPath` read, and its status its code, the one the client got, after every interceptor of `ServerOptions`. Its answer's `vlatte-request-id` header names its entry. gRPC has no request patterns.
 - With a journal, a stream interceptor goes through `grpc.ChainStreamInterceptor`: the journal takes `grpc.StreamInterceptor`, which grpc runs before every other, and `New` fails with `mockgrpc.ErrStreamInterceptorSlot` when `ServerOptions` sets it. A unary interceptor goes either way.

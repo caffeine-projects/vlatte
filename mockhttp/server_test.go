@@ -43,14 +43,17 @@ func TestServer_EveryMethodReachesTheMocks(t *testing.T) {
 }
 
 func TestServer_MethodMatchesIgnoringCase(t *testing.T) {
-	// Mock files and Builder.Method match the method ignoring case, so a request in another case gets that mock.
+	// Mock files and Builder.Method match the method ignoring case, so a request in another case gets that mock. One
+	// method or several: Method("get", "POST") compared several with their case, so a GET missed it.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
 	m.MustMock(
 		Request().Method("PURGE").URLPathf("/purge").Reply(Accepted()),
-		Getf("/get").Reply(Accepted()))
+		Getf("/get").Reply(Accepted()),
+		Request().Method("get", "POST").URLPathf("/many").Reply(Accepted()),
+		FromBytes([]byte("request: {method: 'get, post', path: /file}\nresponse: {status: 202}\n"), "yaml"))
 
 	tests := []struct {
 		giveMethod string
@@ -60,6 +63,10 @@ func TestServer_MethodMatchesIgnoringCase(t *testing.T) {
 		{giveMethod: "purge", givePath: "/purge"},
 		{giveMethod: "Purge", givePath: "/purge"},
 		{giveMethod: "get", givePath: "/get"},
+		{giveMethod: "GET", givePath: "/many"},
+		{giveMethod: "post", givePath: "/many"},
+		{giveMethod: "POST", givePath: "/file"},
+		{giveMethod: "Get", givePath: "/file"},
 	}
 
 	for _, tt := range tests {

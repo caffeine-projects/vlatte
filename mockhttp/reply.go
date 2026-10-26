@@ -33,9 +33,16 @@ type ReplyInput struct {
 	RequestValues *RequestValues
 	Writer        http.ResponseWriter
 
-	// noSwitch keeps a proxy reply from asking its target to switch protocols, for a mock whose steps or response
-	// mappers couldn't apply to the connection: the target answers as to any request.
+	// noSwitch keeps a proxy reply from asking its target to switch protocols, for a mock whose response mappers
+	// couldn't apply to the connection: the target answers as to any request.
 	noSwitch bool
+
+	// upstream are the steps of the mock that what a proxy reply sends on passes through: the request's body.
+	upstream []vlatte.Step
+
+	// upstreamBody is the request's body as the upstream steps passed it on, when they read it before the reply, such
+	// as for a mock with wire steps: a proxy reply sends it in place of the body. Nil otherwise.
+	upstreamBody *bytes.Reader
 }
 
 // newReplier asks f for the Replier of a mock of app. A factory that makes none fails the build here: the nil Replier

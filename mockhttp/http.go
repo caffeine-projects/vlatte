@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"cmp"
 	"context"
 	"crypto/x509"
 	"fmt"
@@ -25,6 +26,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid/recovery"
@@ -70,6 +72,10 @@ type Server struct {
 	// handler serves the requests, middlewares included, such as those within the tunnels the forward proxy
 	// intercepts.
 	handler http.Handler
+
+	// recoverer answers a panic serving a request: the outermost middleware, and a mock that answers on the
+	// connection it took over, which the middleware can't write to.
+	recoverer *recovery.Recover
 
 	data    map[string]any
 	logger  *zerolog.Logger
@@ -158,11 +164,11 @@ func New(config ...Option) (*Server, error) {
 	parsers = append(parsers, conf.RequestBodyParsers...)
 	parsers = append(parsers, &plainTextParser{}, &formURLEncodedParser{}, &multipartFormParser{}, &noopParser{})
 
-	recoverer := recovery.New(func(err error) { app.logger.Error().Err(err).Msg(err.Error()) },
+	app.recoverer = recovery.New(func(err error) { app.logger.Error().Err(err).Msg(err.Error()) },
 		conf.ErrorStatusCode, http.Header{http.CanonicalHeaderKey(HeaderVlatteError): {vlatte.FailurePanic}})
 
 	middlewares := make([]func(handler http.Handler) http.Handler, 0)
-	middlewares = append(middlewares, recoverer.Recover)
+	middlewares = append(middlewares, app.recoverer.Recover)
 
 	if conf.CORS != nil {
 		middlewares = append(middlewares, corsMiddleware(conf.CORS))
@@ -296,7 +302,7 @@ func New(config ...Option) (*Server, error) {
 			admin.Scenarios(app.scenarioStore),
 			admin.Events(events),
 			admin.Logs(logs),
-			admin.Journal(j, app.adminRequestPattern),
+			admin.Journal(j, app.adminRequestPattern, app.matchers()),
 		}
 
 		app.admin = admin.MustNew(options...)
@@ -324,8 +330,8 @@ func MustNew(config ...Option) *Server {
 }
 
 // prepareGlobalEvents returns the global events of conf with their parameters as their listeners prepare them, without
-// changing conf's: see vlatte.EventPreparer. Like a mock's events, each must name a registered listener: an event
-// that names none would never run.
+// changing conf's: see vlatte.EventPreparer. Like a mock's events, each must name a registered listener, unless it
+// carries its own: an event that names none would never run.
 func prepareGlobalEvents(conf *Config) (*vlatte.Events, error) {
 	if conf.GlobalEvents == nil {
 		return conf.GlobalEvents, nil
@@ -333,6 +339,10 @@ func prepareGlobalEvents(conf *Config) (*vlatte.Events, error) {
 
 	events := &vlatte.Events{OnComplete: slices.Clone(conf.GlobalEvents.OnComplete)}
 	for i, def := range events.OnComplete {
+		if def.Listener != nil {
+			continue
+		}
+
 		if conf.Listeners == nil || !conf.Listeners.OnComplete.Has(def.Name) {
 			return nil, fmt.Errorf("server: global on_complete listener %s at index %d is not registered", def.Name, i)
 		}
@@ -625,6 +635,12 @@ func (app *Server) DescribeConfig() string {
 // --
 // Internals
 // --
+
+// matchers returns the registry that builds the matcher lists of the server's mock files: Config.Matchers, or the
+// built-in matchers.
+func (app *Server) matchers() *matchbuild.Registry {
+	return cmp.Or(app.config.Matchers, _builtinMatchers)
+}
 
 // webhookTransport returns the transport webhooks send through when they have none of their own: Config.Transport,
 // which is the caller's, or else the one the server made, which Close closes.

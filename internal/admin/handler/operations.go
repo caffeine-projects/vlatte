@@ -5,6 +5,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 var _ mocks = (*storeMocks[vlatte.Mock])(nil)
@@ -30,6 +31,7 @@ type Operations struct {
 	scenarios Scenarios
 	journal   Journal
 	pattern   RequestPattern
+	matchers  *matchbuild.Registry
 }
 
 // Capabilities are what a mock server gives its admin operations besides its mocks. A nil one is one it lacks.
@@ -49,12 +51,21 @@ type Capabilities struct {
 	// Nil, for a
 	// protocol that has none, takes no request part.
 	Pattern RequestPattern
+
+	// Matchers builds the matcher lists of a query of [Operations.QueryRequests], as it does the server's mock files.
+	// Nil builds the built-in matchers only.
+	Matchers *matchbuild.Registry
 }
 
 // NewOperations returns the admin operations of a mock server on the mocks of store, which build makes from
 // documents, and on caps. With a nil build, the server makes no mocks from documents: [Operations.AddMock],
 // [Operations.ValidateMock] and [Operations.ReplaceMock] need a server that does.
 func NewOperations[M vlatte.Mock](store vlatte.Store[M], build vlatte.MockBuilder[M], caps Capabilities) *Operations {
+	matchers := caps.Matchers
+	if matchers == nil {
+		matchers = matchbuild.MustNew()
+	}
+
 	return &Operations{
 		mocks:     &storeMocks[M]{store: store, build: build},
 		kind:      caps.Kind,
@@ -64,6 +75,7 @@ func NewOperations[M vlatte.Mock](store vlatte.Store[M], build vlatte.MockBuilde
 		scenarios: caps.Scenarios,
 		journal:   caps.Journal,
 		pattern:   caps.Pattern,
+		matchers:  matchers,
 	}
 }
 

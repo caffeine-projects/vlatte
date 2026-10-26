@@ -99,7 +99,7 @@ func TestReset_AJournalThatFailsToClear(t *testing.T) {
 	// the test before.
 	j := journalOf(t)
 	require.NoError(t, j.Close())
-	url := serve(t, newStore(t), admin.Journal(j, nil))
+	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
 
 	res, body := send(t, request{method: http.MethodPost, url: url + "/reset"})
 

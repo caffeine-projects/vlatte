@@ -4,15 +4,21 @@ import (
 	"bytes"
 	"crypto/tls"
 	json "encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
@@ -276,6 +282,74 @@ func TestMatchers_URLFragmentFromAMockFile(t *testing.T) {
 	require.Equal(t, mockhttp.StatusNoMatch, res.StatusCode, string(body))
 }
 
+func TestMatchers_RequestParts(t *testing.T) {
+	// Each key of the file matches its part of the request: the whole request matches, and one that misses any part
+	// doesn't. The client's address is always this machine's, so client_ip only has to match.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.FromFile("testdata/matchers/09_request_parts.yaml"))
+
+	send := func(t *testing.T, form string, spoil func(r *http.Request)) int {
+		req, err := http.NewRequest(http.MethodPost, m.URL("/login"), strings.NewReader(form))
+		require.NoError(t, err)
+
+		req.Host = "api.local:8080"
+		req.Header.Set(mockhttp.HeaderContentType, mockhttp.MIMEFormURLEncoded)
+		req.Header["Accept"] = []string{"application/json", "text/html"}
+		req.AddCookie(&http.Cookie{Name: "session", Value: "abc"})
+		req.SetBasicAuth("jeff", "s3cret")
+		spoil(req)
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		return res.StatusCode
+	}
+
+	require.Equal(t, http.StatusNoContent, send(t, "tag=a&tag=b", func(*http.Request) {}))
+
+	tests := []struct {
+		name  string
+		form  string
+		spoil func(r *http.Request)
+	}{
+		{"host", "tag=a&tag=b", func(r *http.Request) { r.Host = "other.local" }},
+		{"headers", "tag=a&tag=b", func(r *http.Request) { r.Header["Accept"] = []string{"text/html"} }},
+		{"cookie", "tag=a&tag=b", func(r *http.Request) { r.Header.Del(mockhttp.HeaderCookie) }},
+		{"basic_auth", "tag=a&tag=b", func(r *http.Request) { r.Header.Del(mockhttp.HeaderAuthorization) }},
+		{"forms", "tag=a", func(*http.Request) {}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, mockhttp.StatusNoMatch, send(t, tt.form, tt.spoil))
+		})
+	}
+}
+
+func TestMatchers_PathTemplate(t *testing.T) {
+	// path_template matches paths of its shape, path_params their parameters, and the reply reads them by name.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.FromFile("testdata/matchers/10_path_template.yaml"))
+
+	res, body := getTarget(t, m, "/users/42/orders/BR-7")
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+	require.Equal(t, "BR-7 of 42", string(body))
+
+	// A failure answers 418 too: the header says no mock matched.
+	for _, target := range []string{"/users/me/orders/BR-7", "/users/42/orders", "/users/42/orders/BR-7/"} {
+		res, body = getTarget(t, m, target)
+		require.Equal(t, mockhttp.StatusNoMatch, res.StatusCode, "%s: %s", target, body)
+		require.Equal(t, vlatte.FailureNoMatch, res.Header.Get(mockhttp.HeaderVlatteError), "%s: %s", target, body)
+	}
+}
+
 func TestMatchers_QueryLeavesTheFragmentOut(t *testing.T) {
 	// Go's server leaves a "#" in the query it reads: q would be "1#contacts".
 	m := mockhttp.MustNew(mockhttp.Setup().Silent())
@@ -333,4 +407,110 @@ func TestMatchers_NoReply_ShouldReturn200ByDefault(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func TestMatchers_WireMockParity(t *testing.T) {
+	// The matchers WireMock has and vlatte lacked, each from a mock file, on a server with a custom matcher. A second
+	// server holds each mock as the admin API's store keeps it, EncodeMock's description: every request must be
+	// answered the same by both, so no matcher is lost on the way.
+	hasHeader := func(_ *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
+		if len(args) != 1 {
+			return nil, errors.New("takes a header name")
+		}
+
+		name, ok := args[0].(string)
+		if !ok {
+			return nil, errors.New("takes a header name")
+		}
+
+		return match.Function(func(v any) (bool, error) {
+			r, isRequest := v.(*http.Request)
+			return isRequest && r.Header.Get(name) != "", nil
+		}), nil
+	}
+
+	setup := func() *mockhttp.ConfigBuilder {
+		return mockhttp.Setup().Silent().Matchers(matchbuild.MustNew(matchbuild.WithMatcher("has-header", hasHeader)))
+	}
+
+	files := mockhttp.MustNew(setup())
+	files.MustStart()
+	t.Cleanup(files.Close)
+
+	stored := mockhttp.MustNew(setup())
+	stored.MustStart()
+	t.Cleanup(stored.Close)
+
+	ids := []string{"json", "schema", "xml", "xpath", "dates", "exactly", "custom"}
+	scope := files.MustMock(
+		mockhttp.FromFile("testdata/matchers/11_equaljson_options.yaml"),
+		mockhttp.FromFile("testdata/matchers/12_jsonschema.yaml"),
+		mockhttp.FromFile("testdata/matchers/13_equalxml.yaml"),
+		mockhttp.FromFile("testdata/matchers/14_xpath.yaml"),
+		mockhttp.FromFile("testdata/matchers/15_dates.yaml"),
+		mockhttp.FromFile("testdata/matchers/16_hasexactly.yaml"),
+		mockhttp.FromFile("testdata/matchers/17_custom.yaml"),
+	)
+
+	for _, id := range ids {
+		doc, err := mockhttp.EncodeMock(scope.Mock(id), "yaml")
+		require.NoError(t, err, id)
+		stored.MustMock(mockhttp.FromBytes(doc, "yaml"))
+	}
+
+	now := time.Now().UTC()
+	todo := `<todo-list xmlns="urn:todo"><todo-item>wash the car</todo-item><todo-item>walk the dog</todo-item></todo-list>`
+
+	tests := []struct {
+		name   string
+		method string
+		target string
+		header http.Header
+		body   string
+		want   int
+	}{
+		{"json: any order, extra elements", http.MethodPost, "/json", nil, `{"tags": ["c", "b", "a"], "name": "Rex", "age": 3}`, http.StatusOK},
+		{"json: a missing item", http.MethodPost, "/json", nil, `{"tags": ["b"], "name": "Rex"}`, mockhttp.StatusNoMatch},
+		{"schema: conforms", http.MethodPost, "/schema", nil, `{"name": "Rex", "age": 3}`, http.StatusOK},
+		{"schema: doesn't", http.MethodPost, "/schema", nil, `{"name": "Rex", "age": -3}`, mockhttp.StatusNoMatch},
+		{"xml: children in any order", http.MethodPost, "/xml", nil, "<order id=\"7\">\n  <item>2</item>\n  <item>1</item>\n</order>", http.StatusOK},
+		{"xml: another attribute", http.MethodPost, "/xml", nil, `<order id="8"><item>1</item><item>2</item></order>`, mockhttp.StatusNoMatch},
+		{"xpath: in the namespace", http.MethodPost, "/xpath", nil, todo, http.StatusOK},
+		{"xpath: another namespace", http.MethodPost, "/xpath", nil, strings.ReplaceAll(todo, "urn:todo", "urn:other"), mockhttp.StatusNoMatch},
+		{
+			"dates: within the range", http.MethodGet, "/dates?until=" + url.QueryEscape(now.Add(72*time.Hour).Format(time.RFC3339)),
+			http.Header{"X-Date": {now.Format(http.TimeFormat)}},
+			"", http.StatusOK,
+		},
+		{
+			"dates: too old", http.MethodGet, "/dates?until=" + url.QueryEscape(now.Add(72*time.Hour).Format(time.RFC3339)),
+			http.Header{"X-Date": {now.Add(-2 * time.Hour).Format(http.TimeFormat)}},
+			"", mockhttp.StatusNoMatch,
+		},
+		{
+			"dates: too late", http.MethodGet, "/dates?until=" + url.QueryEscape(now.Add(240*time.Hour).Format(time.RFC3339)),
+			http.Header{"X-Date": {now.Format(http.TimeFormat)}},
+			"", mockhttp.StatusNoMatch,
+		},
+		{"exactly: each value its matcher", http.MethodGet, "/exactly?id=20&id=1", nil, "", http.StatusOK},
+		{"exactly: one too many", http.MethodGet, "/exactly?id=20&id=1&id=3", nil, "", mockhttp.StatusNoMatch},
+		{"custom: the header", http.MethodGet, "/custom", http.Header{"X-Admin": {"1"}}, "", http.StatusOK},
+		{"custom: no header", http.MethodGet, "/custom", nil, "", mockhttp.StatusNoMatch},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, server := range []*mockhttp.Server{files, stored} {
+				req, err := http.NewRequestWithContext(t.Context(), tc.method, server.URL(tc.target), strings.NewReader(tc.body))
+				require.NoError(t, err)
+
+				maps.Copy(req.Header, tc.header)
+
+				res, err := http.DefaultClient.Do(req)
+				require.NoError(t, err)
+				require.NoError(t, res.Body.Close())
+				require.Equal(t, tc.want, res.StatusCode)
+			}
+		})
+	}
 }

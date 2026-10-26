@@ -12,7 +12,7 @@ import (
 
 func TestGetRequest(t *testing.T) {
 	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
-	url := serve(t, newStore(t), admin.Journal(j, nil))
+	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
 
 	res, body := send(t, request{method: http.MethodGet, url: url + "/requests/a"})
 	require.Equal(t, http.StatusOK, res.StatusCode, body)

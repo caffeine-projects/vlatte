@@ -988,7 +988,7 @@ func TestRecording_AStepThatFailsIsNotRecorded(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/slow").Step(vlatte.StepFunc(func(ctx context.Context, _ []byte, _ vlatte.Next) (int, error) {
+	m.MustMock(Getf("/slow").Step(vlatte.StepFunc(func(ctx context.Context, _ []byte, _ vlatte.Stage) (int, error) {
 		<-ctx.Done()
 		return 0, ctx.Err()
 	})).Reply(OK().PlainText("hello")))

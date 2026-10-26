@@ -45,6 +45,25 @@ func TestTemplateData_RequestAndServer(t *testing.T) {
 	require.Equal(t, next+" "+m.URL()+" second", body)
 }
 
+func TestTemplateData_PathParams(t *testing.T) {
+	// Templates read the parameters of the mock's path template by name, decoded, as PathParam matches them. A mock
+	// without one has none, so reading one fails the request rather than writing nothing.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Request().URLPathTemplate("/files/{dir}/{name}").Reply(OK().BodyTemplate(`{{ .Request.PathParams.dir }} {{ .Request.PathParams.name }}`)))
+	m.MustMock(Getf("/plain/*").Reply(OK().BodyTemplate(`{{ .Request.PathParams.name }}`)))
+
+	status, body := get(t, m, "/files/a%2Fb/c%20d.txt")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "a/b c d.txt", body)
+
+	status, header, _ := getFull(t, m, "/plain/x")
+	require.NotEqual(t, http.StatusOK, status)
+	require.Equal(t, vlatte.FailureReply, header.Get(HeaderVlatteError), "no path template, no parameters: the reply fails")
+}
+
 func TestTemplateData_Parameters(t *testing.T) {
 	// A parameter that isn't set fails the request, as a missing map key does, so a typo doesn't render as an empty
 	// value. Has reads a parameter that may be missing.
