@@ -2,12 +2,14 @@ package handler_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 )
 
 func TestRecording_Status(t *testing.T) {
@@ -36,4 +38,19 @@ func TestRecording_NotSupported(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	require.Equal(t, "text/html; charset=utf-8", res.Header.Get("Content-Type"))
 	require.Contains(t, body, "call('POST', 'recording'")
+}
+
+func TestRecordingStatus_OnOperationsThatCantRecord(t *testing.T) {
+	// The handler, mounted apart from the admin API's routes on a server that can't record, answers what its route
+	// would: a 501 problem, never a status of a recorder it lacks.
+	ops := handler.NewOperations(newStore(t), nil, handler.Capabilities{})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/recording", nil)
+	rec := httptest.NewRecorder()
+
+	handler.RecordingStatus(ops).ServeHTTP(rec, req)
+
+	res := rec.Result()
+	res.Request = req
+	doc := problem(t, res, rec.Body.String(), http.StatusNotImplemented, "not_supported")
+	require.Equal(t, "this mock server can't record", doc["detail"])
 }

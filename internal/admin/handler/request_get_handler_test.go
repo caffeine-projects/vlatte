@@ -24,3 +24,15 @@ func TestGetRequest(t *testing.T) {
 	res, body = send(t, request{method: http.MethodGet, url: url + "/requests/nope"})
 	problem(t, res, body, http.StatusNotFound, "request_not_found")
 }
+
+func TestGetRequest_AJournalThatFailsIsTheServersProblem(t *testing.T) {
+	// A journal that can't read is no missing request: the client can't fix it, so the answer is a 500 that says why.
+	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
+	require.NoError(t, j.Close())
+	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
+
+	res, body := send(t, request{method: http.MethodGet, url: url + "/requests/a"})
+
+	doc := problem(t, res, body, http.StatusInternalServerError, "internal")
+	require.Equal(t, journal.ErrClosed.Error(), doc["detail"])
+}

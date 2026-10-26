@@ -48,8 +48,7 @@ type Capabilities struct {
 	Journal   Journal
 
 	// Pattern makes the filter of the request part of a mock of the server's protocol, for [Operations.QueryRequests].
-	// Nil, for a
-	// protocol that has none, takes no request part.
+	// Nil, for a protocol that has none, takes no request part.
 	Pattern RequestPattern
 
 	// Matchers builds the matcher lists of a query of [Operations.QueryRequests], as it does the server's mock files.

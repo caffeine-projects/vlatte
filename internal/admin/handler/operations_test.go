@@ -102,7 +102,10 @@ func TestOperations_ACapabilityTheServerLacksIsNotSupported(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			doc := handler.Problem(tt.call(ctx), "op")
+			err := tt.call(ctx)
+			require.EqualError(t, err, tt.detail)
+
+			doc := handler.Problem(err, "op")
 
 			require.Equal(t, handler.ProblemDocument{
 				Status: 501, Title: "Not Implemented", Code: "not_supported", Detail: tt.detail, Instance: "op",

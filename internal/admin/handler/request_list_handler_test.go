@@ -62,6 +62,21 @@ func TestListRequests_AClientThatLeftGetsNoAnswer(t *testing.T) {
 	require.Empty(t, rec.Body.String(), "no answer")
 }
 
+func TestListRequests_AJournalThatFailsIsTheServersProblem(t *testing.T) {
+	// A journal that can't read is no problem of the query: the client can't fix it, so the answer is a 500 that says
+	// why, for a page and for a count alike.
+	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
+	require.NoError(t, j.Close())
+	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
+
+	for _, params := range []string{"limit=1", "limit=0"} {
+		res, body := send(t, request{method: http.MethodGet, url: url + "/requests?" + params})
+
+		doc := problem(t, res, body, http.StatusInternalServerError, "internal")
+		require.Equal(t, journal.ErrClosed.Error(), doc["detail"], params)
+	}
+}
+
 func TestJournal_ANilJournalIsNone(t *testing.T) {
 	// A server without a journal passes its nil one: its journal routes answer 501, and a reset works.
 	url := serve(t, newStore(t), admin.Journal((*journal.Journal)(nil), nil, nil))
