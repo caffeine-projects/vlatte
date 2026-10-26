@@ -566,3 +566,49 @@ func TestJournal_APatternWhoseMatcherFailsFailsTheQuery(t *testing.T) {
 	_, err = m.CountRequests(t.Context(), journal.Query{}, Method("Greetings").Body(broken))
 	require.ErrorIs(t, err, vlatte.ErrMatching)
 }
+
+func TestJournal_APatternReadsTheEntriesAJournalKeptAcrossRestarts(t *testing.T) {
+	// A journal kept in a directory holds entries of earlier runs, maybe of another protocol, another service, or
+	// messages the .proto has changed since: a pattern skips those it can't be about, and fails on a request it
+	// can't read, rather than miscount.
+	for _, tc := range []struct {
+		name    string
+		path    string
+		body    string
+		pattern *Builder
+	}{
+		{"a message that no longer decodes", pb.TestService_Greetings_FullMethodName, `{"nope": 1}`, Method("Greetings").Field("message", match.Equal("x"))},
+		{"a stream that is no array", pb.TestService_Upload_FullMethodName, `{"key": "a"}`, Method("Upload").Field("$[0].key", match.Equal("a"))},
+		{"a stream message that no longer decodes", pb.TestService_Upload_FullMethodName, `[{"nope": 1}]`, Method("Upload").Field("$[0].key", match.Equal("a"))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			j := journal.MustNew(journal.Options{Dir: dir})
+			require.NoError(t, j.Append(&journal.Entry{Kind: "http", Method: http.MethodGet, Path: "/greetings"}))
+			require.NoError(t, j.Append(&journal.Entry{Kind: Kind, Path: "/gone.Service/Greetings", Body: []byte(`{}`)}))
+			require.NoError(t, j.Close())
+
+			logger := zerolog.Nop()
+			m := MustNew(Setup().Logger(&logger).Journal(dir))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			n, err := m.CountRequests(t.Context(), journal.Query{}, tc.pattern)
+			require.NoError(t, err)
+			require.Zero(t, n, "neither entry is a call of the method")
+
+			m.Close()
+
+			j = journal.MustNew(journal.Options{Dir: dir})
+			require.NoError(t, j.Append(&journal.Entry{Kind: Kind, Path: tc.path, Body: []byte(tc.body)}))
+			require.NoError(t, j.Close())
+
+			m = MustNew(Setup().Logger(&logger).Journal(dir))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			_, err = m.CountRequests(t.Context(), journal.Query{}, tc.pattern)
+			require.ErrorIs(t, err, vlatte.ErrMatching)
+		})
+	}
+}

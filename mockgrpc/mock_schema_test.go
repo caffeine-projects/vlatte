@@ -123,6 +123,8 @@ func TestMockFile_NamesTheKeyOfEachProblem(t *testing.T) {
 		{"header item that is no string", `{request: {method: Chat}, bidi: {trailer: {t: [1]}}}`, "bidi.trailer.t[0]"},
 		{"rule without a response", `{request: {method: Chat}, bidi: {on: [{when: [contains, a]}]}}`, "bidi.on[0]"},
 		{"rule that is no object", `{request: {method: Chat}, bidi: {on: [1]}}`, "bidi.on[0]"},
+		{"code that is no name or number", `{request: {method: Greetings}, response: {status: {code: [5]}}}`, "response.status.code"},
+		{"messages JSON can't write", `{request: {method: Upload, messages: [{key: .nan}]}, response: {}}`, "request.messages"},
 		{"body file that is missing", `{request: {method: Greetings}, response: {body_file: nope.json}}`, "response.body_file"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

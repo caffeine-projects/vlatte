@@ -14,6 +14,8 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/dynamicpb"
+	_ "google.golang.org/protobuf/types/gofeaturespb" // registers the pb.go extension
+	_ "google.golang.org/protobuf/types/known/apipb"  // registers api.proto, whose imports import more
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/caffeine-projects/vlatte/match"
@@ -187,7 +189,11 @@ func TestResolver_EncodeFailsOnAMessageProtoJSONCantWrite(t *testing.T) {
 	// UTF-8, fails the call rather than matching as something else.
 	r := newResolverOf()
 
-	_, err := r.encode(&pb.HiReq{Message: "\xff"})
+	b, err := r.encode(nil)
+	require.NoError(t, err)
+	require.Nil(t, b, "a bidi call has no request before its reply reads one")
+
+	_, err = r.encode(&pb.HiReq{Message: "\xff"})
 	require.ErrorContains(t, err, "encoding the request message")
 
 	_, err = r.encodeArray([]proto.Message{&pb.HiReq{}, &pb.HiReq{Message: "\xff"}})
@@ -201,4 +207,77 @@ func TestCallType_NamesEachShape(t *testing.T) {
 	require.Equal(t, "client streaming", _clientStream.String())
 	require.Equal(t, "bidi streaming", _bidiStream.String())
 	require.Equal(t, "unknown", callType(0).String())
+}
+
+func TestDescriptors_AnImportOfAnImportResolvesFromGeneratedCode(t *testing.T) {
+	// A set without --include_imports lacks the imports of its imports too: they resolve from generated code.
+	fd := &descriptorpb.FileDescriptorProto{
+		Name:       new("uses_api.proto"),
+		Package:    new("uses"),
+		Dependency: []string{"google/protobuf/api.proto"},
+		Syntax:     new("proto3"),
+	}
+
+	b, err := proto.Marshal(&descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fd}})
+	require.NoError(t, err)
+
+	path := filepath.Join(t.TempDir(), "uses.binpb")
+	require.NoError(t, os.WriteFile(path, b, 0o600))
+
+	files, err := loadDescriptors([]string{path})
+	require.NoError(t, err)
+
+	_, err = files.FindFileByPath("google/protobuf/source_context.proto")
+	require.NoError(t, err, "api.proto imports it")
+}
+
+func TestResolver_FindsTheExtensionsOfItsDescriptors(t *testing.T) {
+	// protojson resolves the extension fields of a message with the server's resolver, as it does Any types.
+	fd := &descriptorpb.FileDescriptorProto{
+		Name:    new("ext.proto"),
+		Package: new("ext"),
+		Syntax:  new("proto2"),
+		MessageType: []*descriptorpb.DescriptorProto{{
+			Name:           new("Base"),
+			ExtensionRange: []*descriptorpb.DescriptorProto_ExtensionRange{{Start: new(int32(100)), End: new(int32(200))}},
+		}},
+		Extension: []*descriptorpb.FieldDescriptorProto{{
+			Name:     new("tag"),
+			Number:   new(int32(100)),
+			Label:    descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+			Type:     descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum(),
+			Extendee: new(".ext.Base"),
+		}},
+	}
+
+	b, err := proto.Marshal(&descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fd}})
+	require.NoError(t, err)
+
+	path := filepath.Join(t.TempDir(), "ext.binpb")
+	require.NoError(t, os.WriteFile(path, b, 0o600))
+
+	files, err := loadDescriptors([]string{path})
+	require.NoError(t, err)
+
+	r := newResolverOf(files)
+
+	xt, err := r.FindExtensionByName("ext.tag")
+	require.NoError(t, err)
+	require.Equal(t, protoreflect.FullName("ext.tag"), xt.TypeDescriptor().FullName())
+
+	xt, err = r.FindExtensionByNumber("ext.Base", 100)
+	require.NoError(t, err)
+	require.Equal(t, protoreflect.FullName("ext.tag"), xt.TypeDescriptor().FullName())
+}
+
+func TestResolver_FindsTheExtensionsOfGeneratedCode(t *testing.T) {
+	r := newResolverOf()
+
+	xt, err := r.FindExtensionByName("pb.go")
+	require.NoError(t, err)
+	require.Equal(t, protoreflect.FullName("pb.go"), xt.TypeDescriptor().FullName())
+
+	xt, err = r.FindExtensionByNumber("google.protobuf.FeatureSet", xt.TypeDescriptor().Number())
+	require.NoError(t, err)
+	require.Equal(t, protoreflect.FullName("pb.go"), xt.TypeDescriptor().FullName())
 }

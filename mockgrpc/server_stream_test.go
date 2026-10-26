@@ -176,3 +176,35 @@ func TestClientStream_JournalsEveryMessage(t *testing.T) {
 	e := onlyCall(t, m, journal.Query{})
 	require.JSONEq(t, `[{"key": "a"}, {"key": "b"}]`, string(e.Body))
 }
+
+func TestServerStream_ARequestThatDoesntDecodeFailsTheCall(t *testing.T) {
+	// A client of another language can send a request that isn't a message of the method, such as a string that
+	// isn't UTF-8: the call fails, rather than matching a mock with a message that isn't what it sent.
+	m := serve(t)
+	m.MustMock(Method("List").Reply(Message(&pb.ListItem{Key: "a"})))
+
+	stream, err := m.MustDial().NewStream(t.Context(), &pb.TestService_ServiceDesc.Streams[0],
+		pb.TestService_List_FullMethodName, grpc.ForceCodec(rawCodec{}))
+	require.NoError(t, err)
+	require.NoError(t, stream.SendMsg([]byte{0x0a, 0x01, 0xff}))
+	require.NoError(t, stream.CloseSend())
+
+	var got []byte
+	err = stream.RecvMsg(&got)
+	require.Equal(t, codes.Internal, status.Code(err), "%v", err)
+	require.Contains(t, status.Convert(err).Message(), "invalid UTF-8")
+}
+
+func TestClientStream_ARequestThatDoesntDecodeFailsTheCall(t *testing.T) {
+	m := serve(t)
+	m.MustMock(Method("Upload").Reply(Message(&pb.HiRes{})))
+
+	stream, err := m.MustDial().NewStream(t.Context(), &pb.TestService_ServiceDesc.Streams[1],
+		pb.TestService_Upload_FullMethodName, grpc.ForceCodec(rawCodec{}))
+	require.NoError(t, err)
+	require.NoError(t, stream.SendMsg([]byte{0x0a, 0x01, 0xff}))
+	require.NoError(t, stream.CloseSend())
+
+	err = stream.RecvMsg(new([]byte))
+	require.Equal(t, codes.Internal, status.Code(err), "%v", err)
+}

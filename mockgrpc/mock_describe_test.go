@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/match"
@@ -127,6 +128,7 @@ func TestDescribe_WritesBidiRulesAndStreamedMessages(t *testing.T) {
 		Method("Upload").ID("upload").JSON(`[{"key": "a"}]`).
 			Reply(Status(codes.InvalidArgument, "bad").Details(&errdetails.ErrorInfo{Reason: "R"})),
 		Method("Upload").ID("messages").Messages(&pb.ListItem{Key: "b"}).Reply(Message(&pb.HiRes{})),
+		Method("Chat").ID("rules-only").Reply(Bidi().On(match.Contain("x"), Message(&pb.HiRes{}))),
 	)
 
 	want := map[string]string{
@@ -147,6 +149,11 @@ func TestDescribe_WritesBidiRulesAndStreamedMessages(t *testing.T) {
 			"response": {"status": {"code": "INVALID_ARGUMENT", "message": "bad", "details": [
 				{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "R"}
 			]}}
+		}`,
+		"rules-only": `{
+			"id": "rules-only",
+			"request": {"method": "Chat"},
+			"bidi": {"on": [{"when": ["contains", "x"], "response": {"messages": [{}]}}]}
 		}`,
 		"messages": `{
 			"id": "messages",
@@ -172,11 +179,13 @@ func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 	scope := m.MustMock(
 		Method("List").ID("delay").Reply(Message(&pb.ListItem{}).MessageDelayFunc(vlatte.Latency(time.Millisecond))),
 		Method("Chat").ID("rule").Reply(Bidi().On(custom, Message(&pb.HiRes{}))),
-		Method("Chat").ID("otherwise").Reply(Bidi().Otherwise(Message(&pb.HiRes{}).MessageDelayFunc(vlatte.Latency(0)))),
+		Method("Chat").ID("otherwise").Reply(Bidi().Otherwise(Message(&pb.HiRes{}).MessageDelayFunc(vlatte.Latency(time.Millisecond)))),
 		Method("Chat").ID("rule-response").
-			Reply(Bidi().On(match.Contain("x"), Message(&pb.HiRes{}).MessageDelayFunc(vlatte.Latency(0)))),
+			Reply(Bidi().On(match.Contain("x"), Message(&pb.HiRes{}).MessageDelayFunc(vlatte.Latency(time.Millisecond)))),
 		Method("Greetings").ID("call").CallMatches(func(*Call) (bool, error) { return true, nil }).Body(custom).
 			Reply(Func(func(context.Context, *Call) error { return nil })),
+		Method("Greetings").ID("utf8").Message(&pb.HiReq{Message: "\xff"}).Reply(Messages(&pb.HiRes{Message: "\xff"})),
+		Method("Greetings").ID("detail").Reply(Status(codes.NotFound, "x").Details(&anypb.Any{TypeUrl: "type.googleapis.com/nope.X"})),
 	)
 
 	want := map[string]string{
@@ -185,6 +194,8 @@ func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 		"otherwise":     `{"id": "otherwise", "request": {"method": "Chat"}}`,
 		"rule-response": `{"id": "rule-response", "request": {"method": "Chat"}}`,
 		"call":          `{"id": "call", "request": {"method": "Greetings"}}`,
+		"utf8":          `{"id": "utf8", "request": {"method": "Greetings"}}`,
+		"detail":        `{"id": "detail", "request": {"method": "Greetings"}}`,
 	}
 
 	require.Len(t, scope.Mocks(), len(want))

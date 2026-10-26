@@ -226,3 +226,8 @@ func TestResponse_ATemplateThatFailsToRenderFailsTheCall(t *testing.T) {
 	require.Contains(t, status.Convert(err).Message(), "template 0")
 	require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(vlatte.FailureHeader))
 }
+
+func TestResponse_ADetailThatIsNoMessageFailsTheMock(t *testing.T) {
+	_, err := serve(t).Mock(Method("Greetings").Reply(Status(codes.NotFound, "x").Details(&pb.HiReq{Message: "\xff"})))
+	require.ErrorContains(t, err, "reply: status detail 0")
+}

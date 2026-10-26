@@ -548,3 +548,29 @@ func TestAdmin_ASaveThatCantWriteAFileKeepsTheMocksItAdded(t *testing.T) {
 	got, _ := greetWith(t, pb.NewTestServiceClient(m.MustDial()), "hi")
 	require.Equal(t, "kept", got)
 }
+
+func TestAdmin_SavesABidiMockWithBodyFilesInItsRules(t *testing.T) {
+	// The body files of a bidi reply's rules, otherwise and on_end open from the working directory too: saved, each
+	// names its file from the saved file's directory.
+	wd := t.TempDir()
+	t.Chdir(wd)
+	require.NoError(t, os.WriteFile("hello.json", []byte(`{"message": "hello"}`), 0o600))
+
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin("").Logger(&logger).ConfigSources())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks", `{"id": "chat", "request": {"method": "Chat"}, "bidi": {
+		"on": [{"when": ["field", "message", ["eq", "hi"]], "response": {"body_file": "hello.json"}}],
+		"on_end": {"body_file": "hello.json"}
+	}}`)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	status, body = call(t, http.MethodPost, m.AdminURL()+"/mocks/save", `{"dir": "saved"}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	saved, err := os.ReadFile(filepath.Join(wd, "saved", "chat.mock.yaml"))
+	require.NoError(t, err)
+	require.Equal(t, 2, strings.Count(string(saved), filepath.Join("..", "hello.json")), "%s", saved)
+}

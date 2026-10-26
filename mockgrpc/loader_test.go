@@ -1,7 +1,9 @@
 package mockgrpc
 
 import (
+	"net/http"
 	"os"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -48,8 +50,15 @@ func TestMockFiles_AStartThatFailsToLoadThemServesNothing(t *testing.T) {
 }
 
 func TestLoader_ABadPatternFailsStart(t *testing.T) {
-	m := MustNew(Setup().Silent().MockFiles("["))
+	// A start that fails leaves nothing serving: the admin API stops too.
+	m := MustNew(Setup().Silent().Admin("").MockFiles("["))
 	t.Cleanup(m.Close)
 
 	require.ErrorContains(t, m.Start(), "loader: pattern [")
+
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, m.AdminURL()+"/health", nil)
+	require.NoError(t, err)
+
+	_, err = http.DefaultClient.Do(r)
+	require.ErrorIs(t, err, syscall.ECONNREFUSED)
 }
