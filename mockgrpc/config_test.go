@@ -77,7 +77,7 @@ func TestSetup_OptionsCompose(t *testing.T) {
 
 	_, err = pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{}, grpc.Header(&header))
 	require.NoError(t, err)
-	require.Empty(t, header.Get(vlatte.MatchedMockIDHeader), "no debug headers")
+	require.Empty(t, header.Get(vlatte.HeaderMatchedMockID), "no debug headers")
 }
 
 func TestConfig_SetsEverySettingItsZeroValuesIncluded(t *testing.T) {

@@ -959,7 +959,7 @@ When no mock matches, or serving a request fails, the server answers itself. It 
 The body says the same in text, and names the mock and the error. A test checks the header:
 
 ```go
-require.Equal(t, vlatte.FailureReply, res.Header.Get(vlatte.FailureHeader))
+require.Equal(t, vlatte.FailureReply, res.Header.Get(vlatte.HeaderFailure))
 ```
 
 The status of `no-match` is `no_match_status_code`, and the status of the others is `error_status_code`. Both default to 418.
@@ -995,7 +995,7 @@ Each answer says how the server served it, in `VLatte-*` headers:
 A failure keeps the headers of the mock that matched before it failed. Hits count once the answer is sent, so two requests served at the same time can show the same number. A test checks them like any header:
 
 ```go
-require.Equal(t, "users-get", res.Header.Get(vlatte.MatchedMockIDHeader))
+require.Equal(t, "users-get", res.Header.Get(vlatte.HeaderMatchedMockID))
 ```
 
 Header names don't depend on case: Go sends `Vlatte-Matched-Mock-Id`, and HTTP/2 sends them in lower case. Recordings leave the debug headers out.

@@ -74,7 +74,7 @@ func TestReplyFailures_NameTheMock(t *testing.T) {
 	var trailer metadata.MD
 	_, err := c.Greetings(context.Background(), &pb.HiReq{}, grpc.Trailer(&trailer))
 	require.Equal(t, codes.Internal, status.Code(err))
-	require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(vlatte.FailureHeader))
+	require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(vlatte.HeaderFailure))
 	require.Contains(t, status.Convert(err).Message(), "Mock ["+unary.IDs()[0]+"]")
 	require.Contains(t, status.Convert(err).Message(), "unary broke")
 
@@ -82,7 +82,7 @@ func TestReplyFailures_NameTheMock(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.Recv()
 	require.Equal(t, codes.Internal, status.Code(err))
-	require.Equal(t, []string{vlatte.FailureReply}, s.Trailer().Get(vlatte.FailureHeader))
+	require.Equal(t, []string{vlatte.FailureReply}, s.Trailer().Get(vlatte.HeaderFailure))
 	require.Contains(t, status.Convert(err).Message(), "Mock ["+stream.IDs()[0]+"]")
 	require.Contains(t, status.Convert(err).Message(), "stream broke")
 }
@@ -97,7 +97,7 @@ func TestReplyFailures_AMockStatusIsTheMocksAnswer(t *testing.T) {
 	_, err := client(t, m).Greetings(context.Background(), &pb.HiReq{}, grpc.Trailer(&trailer))
 	require.Equal(t, codes.NotFound, status.Code(err))
 	require.Equal(t, "no such user", status.Convert(err).Message())
-	require.Empty(t, trailer.Get(vlatte.FailureHeader))
+	require.Empty(t, trailer.Get(vlatte.HeaderFailure))
 }
 
 func TestRecover(t *testing.T) {
@@ -113,13 +113,13 @@ func TestRecover(t *testing.T) {
 		_, err := c.Greetings(context.Background(), &pb.HiReq{}, grpc.Trailer(&trailer))
 		require.Equal(t, codes.Internal, status.Code(err))
 		require.Equal(t, "panic: unary boom", status.Convert(err).Message())
-		require.Equal(t, []string{vlatte.FailurePanic}, trailer.Get(vlatte.FailureHeader))
+		require.Equal(t, []string{vlatte.FailurePanic}, trailer.Get(vlatte.HeaderFailure))
 
 		s, err := c.List(context.Background(), &pb.ListReq{})
 		require.NoError(t, err)
 		_, err = s.Recv()
 		require.Equal(t, codes.Internal, status.Code(err))
 		require.Equal(t, "panic: stream boom", status.Convert(err).Message())
-		require.Equal(t, []string{vlatte.FailurePanic}, s.Trailer().Get(vlatte.FailureHeader))
+		require.Equal(t, []string{vlatte.FailurePanic}, s.Trailer().Get(vlatte.HeaderFailure))
 	}
 }

@@ -159,7 +159,7 @@ func (c *journalCall) serve(ctx context.Context) {
 	c.update(func() { c.served = true })
 
 	if c.headers {
-		_ = grpc.SetHeader(ctx, metadata.Pairs(vlatte.RequestIDHeader, c.entry.ID))
+		_ = grpc.SetHeader(ctx, metadata.Pairs(vlatte.HeaderRequestID, c.entry.ID))
 	}
 }
 
