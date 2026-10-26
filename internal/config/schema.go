@@ -79,6 +79,8 @@ type Field[T any] struct {
 	// Set validates the value and applies it to dst. Its error becomes a problem of the value.
 	// A nil Set leaves the value to the caller, which reads it from Load's result.
 	Set func(dst *T, v Value) error
+	// Hidden keeps the setting out of Flags and Usage: it is read, and checked, as any other.
+	Hidden bool
 }
 
 // Value is a setting's value, converted to its Kind.
@@ -115,6 +117,7 @@ type field struct {
 	flag    string // derived flag name, such as "log-level"
 	env     string // derived environment variable name without prefix, such as "LOG_LEVEL"
 	section bool   // a Bool key that other keys nest under, such as "cors"
+	hidden  bool   // left out of Flags and Usage
 }
 
 // catalog is the view of a schema that sources use. It doesn't depend on the target type.
@@ -123,6 +126,7 @@ type catalog struct {
 	byKey  map[string]*field
 	byFlag map[string]*field   // long names and shorthands
 	groups map[string]struct{} // prefixes with no key of their own, such as "log"
+	only   bool                // sources read only its keys, and let every other one through: see Schema.LoadOnly
 }
 
 // Schema holds the settings of a T, in the order they were declared.
@@ -173,6 +177,7 @@ func NewSchema[T any](fields ...Field[T]) *Schema[T] {
 			choices: decl.Choices,
 			flag:    _flagName.Replace(decl.Key),
 			env:     strings.ToUpper(strings.ReplaceAll(decl.Key, ".", "_")),
+			hidden:  decl.Hidden,
 		}
 
 		// Two keys can't share an environment variable without sharing a flag: both names turn "." and "_"
@@ -226,6 +231,10 @@ func NewSchema[T any](fields ...Field[T]) *Schema[T] {
 func (c *catalog) Flags() []Flag {
 	flags := make([]Flag, 0, len(c.fields))
 	for _, f := range c.fields {
+		if f.hidden {
+			continue
+		}
+
 		flag := Flag{Name: f.flag, Shorthand: f.short, Usage: f.usage, Bool: f.kind == Bool}
 		for _, choice := range f.choices {
 			flag.Values = append(flag.Values, choice.Name)
@@ -242,6 +251,10 @@ func (c *catalog) Usage(envPrefix string) string {
 	var b strings.Builder
 
 	for _, f := range c.fields {
+		if f.hidden {
+			continue
+		}
+
 		b.WriteString("  ")
 		if f.short != "" {
 			fmt.Fprintf(&b, "-%s, ", f.short)

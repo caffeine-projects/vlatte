@@ -308,13 +308,13 @@ func TestAdminStore_SaveExportsAsMockFiles(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 }
 
-func TestAdminStore_AnEmptyDirKeepsTheMocksInMemory(t *testing.T) {
-	// The setting admin.dir chooses the files of the store, and an empty one turns it off, such as for a command that
-	// keeps its mocks by default.
-	m := MustNew(Setup().Silent().AdminStore(FileStore("admin")).ConfigSources(ConfigArgs([]string{"--admin-dir="})))
-	t.Cleanup(m.Close)
+func TestAdminStore_NeedsAnAdminAPI(t *testing.T) {
+	// A persistent store of the admin API's mocks without an admin API would keep nothing: it is a mistake of the
+	// setup, not a store to ignore.
+	_, err := New(Setup().Silent().AdminStore(FileStore(t.TempDir())))
 
-	require.Nil(t, m.Config().Admin.Store)
+	require.ErrorIs(t, err, errAdminStoreWithoutAdmin)
+	require.EqualError(t, err, "server: AdminStore needs an admin API: pass ConfigBuilder.Admin")
 }
 
 func TestEncodeMock_DecodesBack(t *testing.T) {

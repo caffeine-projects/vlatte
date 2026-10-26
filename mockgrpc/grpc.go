@@ -17,7 +17,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/journal"
 )
@@ -49,7 +48,7 @@ type Server struct {
 
 	logger  *zerolog.Logger
 	storage vlatte.Store[*Mock]
-	admin   *admin.Server    // nil without Config.Admin
+	admin   adminapi.Server  // nil without Config.Admin
 	events  *adminapi.Events // the admin API's; nil without it
 
 	mu      sync.Mutex // orders Start and Close, which a Close overlapping a Start would otherwise outrun
@@ -143,7 +142,7 @@ func New(config ...Option) (*Server, error) {
 
 	if conf.Admin != nil {
 		app.events = adminapi.NewEvents()
-		app.admin = admin.MustNew(admin.Options{Addr: conf.Admin.Addr}, adminapi.Capabilities{
+		admin, err := conf.Admin.Serve(adminapi.Capabilities{
 			Kind:    string(Kind),
 			URL:     app.Addr,
 			Logger:  app.logger,
@@ -152,6 +151,11 @@ func New(config ...Option) (*Server, error) {
 			Logs:    logs,
 			Journal: j,
 		})
+		if err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
+
+		app.admin = admin
 	}
 
 	built = true

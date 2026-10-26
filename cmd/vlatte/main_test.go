@@ -196,6 +196,18 @@ func TestRun_Help(t *testing.T) {
 	}
 }
 
+func TestRun_HelpListsTheCommandsSettings(t *testing.T) {
+	// The admin settings are the command's, not the server's: help lists them once, with the server's.
+	var out bytes.Buffer
+	require.Equal(t, 0, run(context.Background(), []string{"--help"}, &out, io.Discard))
+
+	for _, key := range []string{"admin", "admin.addr", "admin.dir"} {
+		require.Equal(t, 1, strings.Count(out.String(), "file key "+key+"\n"), key)
+	}
+
+	require.Equal(t, 1, strings.Count(out.String(), "file key config\n"))
+}
+
 func TestRun_SubcommandHelp(t *testing.T) {
 	// The settings list belongs to the server command: subcommands keep cobra's help.
 	for _, args := range [][]string{{"help", "version"}, {"version", "--help"}} {

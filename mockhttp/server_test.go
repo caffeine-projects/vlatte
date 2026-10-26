@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
 )
 
 // echo answers 202 and tells, in headers, the method and the path the mock got.
@@ -159,7 +160,7 @@ func TestServer_PathsReachTheMocksAsSent(t *testing.T) {
 
 func TestServer_TheAdminAPIIsApartFromTheMocks(t *testing.T) {
 	// The admin API serves on an address of its own: every path of the mock server, /__admin included, is the mocks'.
-	m := MustNew(Setup().Silent().Admin(""))
+	m := MustNew(Setup().Silent().Admin(admin.MustNew()))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -197,7 +198,7 @@ func TestServer_AdminAPIThatCantListen(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = taken.Close() })
 
-	m := MustNew(Setup().Silent().Admin(taken.Addr().String()))
+	m := MustNew(Setup().Silent().Admin(admin.MustNew(admin.Addr(taken.Addr().String()))))
 	t.Cleanup(m.Close)
 
 	require.ErrorContains(t, m.Start(), "admin: ")

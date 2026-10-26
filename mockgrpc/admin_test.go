@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
+	"github.com/caffeine-projects/vlatte/admin"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
@@ -27,7 +28,7 @@ func adminServer(t *testing.T) (*Server, pb.TestServiceClient) {
 	t.Helper()
 
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger))
 	pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -204,7 +205,7 @@ func TestAdmin_AGRPCServerWhoseAdminCantListen(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = taken.Close() })
 
-	m := MustNew(Setup().Admin(taken.Addr().String()))
+	m := MustNew(Setup().Admin(admin.MustNew(admin.Addr(taken.Addr().String()))))
 	t.Cleanup(m.Close)
 
 	require.ErrorContains(t, m.Start(), "admin: ")
@@ -222,7 +223,7 @@ func TestAdmin_AGRPCStartThatFailsClosesTheListenerItWasGiven(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
-	m := MustNew(Setup().Listener(l).Admin(taken.Addr().String()))
+	m := MustNew(Setup().Listener(l).Admin(admin.MustNew(admin.Addr(taken.Addr().String()))))
 	t.Cleanup(m.Close)
 
 	require.ErrorContains(t, m.Start(), "admin: ")
@@ -248,7 +249,7 @@ func statusCode(err error) codes.Code {
 
 func TestAdmin_StreamsTheLogOfALoggerItBuilds(t *testing.T) {
 	// A server that builds its logger streams its log lines; one given a logger, as adminServer's, doesn't.
-	m := MustNew(Setup().Admin(""))
+	m := MustNew(Setup().Admin(admin.MustNew()))
 	m.MustStart()
 	t.Cleanup(m.Close)
 

@@ -195,6 +195,8 @@ func (w *walker) walk(settings map[string]any, prefix string) {
 			}
 
 			w.walk(obj, key)
+		case w.only:
+			// Another schema's key.
 		default:
 			hint := ""
 			if near := suggest(key, w.Keys()); near != "" {

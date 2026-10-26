@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -23,7 +24,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/journal"
@@ -34,6 +34,8 @@ import (
 )
 
 var _ vlatte.Flavor[*Mock, *Server] = (*Server)(nil)
+
+var errAdminStoreWithoutAdmin = errors.New("server: AdminStore needs an admin API: pass ConfigBuilder.Admin")
 
 // StatusNoMatch describes an HTTP response where no Mock was found.
 //
@@ -80,11 +82,11 @@ type Server struct {
 
 	data    map[string]any
 	logger  *zerolog.Logger
-	started atomic.Bool   // set by the first start: a server starts once
-	closed  atomic.Bool   // set by Close: a closed server doesn't start again
-	admin   *admin.Server // nil without Config.Admin
+	started atomic.Bool     // set by the first start: a server starts once
+	closed  atomic.Bool     // set by Close: a closed server doesn't start again
+	admin   adminapi.Server // nil without Config.Admin
 
-	// adminStore writes the changes of the admin API through to its persistent store; nil without AdminConfig.Store.
+	// adminStore writes the changes of the admin API through to its persistent store; nil without Config.AdminStore.
 	adminStore *adminapi.Store[*Mock]
 
 	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
@@ -278,11 +280,15 @@ func New(config ...Option) (*Server, error) {
 
 	// The admin API changes mocks through a store of its own when they persist: the server's other mocks, of mock
 	// files and code, never reach the persistent store.
+	if conf.AdminStore != nil && conf.Admin == nil {
+		return nil, errAdminStoreWithoutAdmin
+	}
+
 	if conf.Admin != nil {
 		adminMocks := repository
 
-		if conf.Admin.Store != nil {
-			durable, err := conf.Admin.Store(app)
+		if conf.AdminStore != nil {
+			durable, err := conf.AdminStore(app)
 			if err != nil {
 				return nil, fmt.Errorf("server: admin store: %w", err)
 			}
@@ -291,7 +297,7 @@ func New(config ...Option) (*Server, error) {
 			adminMocks = app.adminStore
 		}
 
-		app.admin = admin.MustNew(admin.Options{Addr: conf.Admin.Addr}, adminapi.Capabilities{
+		app.admin, err = conf.Admin.Serve(adminapi.Capabilities{
 			Kind:   string(Kind),
 			URL:    func() string { return app.URL() },
 			Logger: app.logger,
@@ -307,6 +313,9 @@ func New(config ...Option) (*Server, error) {
 			Pattern:   app.adminRequestPattern,
 			Matchers:  app.matchers(),
 		})
+		if err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
 	}
 
 	server, err := factory.NewBackend(BackendConfig{App: app, Handler: handler})

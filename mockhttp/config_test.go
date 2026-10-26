@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
@@ -276,6 +277,7 @@ func TestConfig_ApplyCopiesEveryField(t *testing.T) {
 		reflect.TypeFor[vlatte.TemplateEngine](): vlatte.MustNewGoTemplateEngine(),
 		reflect.TypeFor[http.RoundTripper]():     &http.Transport{},
 		reflect.TypeFor[vlatte.KV]():             vlatte.NewMemoryKV(),
+		reflect.TypeFor[AdminAPI]():              admin.MustNew(),
 	}
 
 	src := &Config{}

@@ -136,14 +136,7 @@ func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stder
 	// waiting for their answers as long as the server's webhook.timeout setting says.
 	wh := &webhook.WebHook{}
 
-	// The command serves the admin API, which keeps the mocks it adds across restarts, and keeps a journal of the
-	// requests it serves, unless settings turn them off: they apply after code.
-	m, err := mockhttp.New(mockhttp.Setup().
-		Admin(adminAddr()).
-		AdminStore(mockhttp.FileStore(_adminDir)).
-		Journal(_journalDir).
-		ConfigSources(mockhttp.DefaultConfigSources(args)...).
-		OnCompleteListener("webhook", wh))
+	m, err := newServer(args, wh)
 	if errors.Is(err, flag.ErrHelp) {
 		printHelp(cmd, stdout)
 		return 0
@@ -228,7 +221,8 @@ Settings:
 %s`,
 		root.Long, root.Use, root.Use, commands.String(), root.Example,
 		mockhttp.DefaultConfigFileName, strings.Join(mockhttp.DefaultConfigDirectories, " or "), mockhttp.EnvPrefix,
-		mockhttp.DefaultWorkDir, mockhttp.DefaultWorkDir, _adminDir, _journalDir, mockhttp.ConfigUsage())
+		mockhttp.DefaultWorkDir, mockhttp.DefaultWorkDir, _adminDir, _journalDir,
+		settingsSchema().Usage(mockhttp.EnvPrefix)+mockhttp.ConfigUsage())
 }
 
 // registerCompletions declares the server flags to cobra, which completes their names.
@@ -238,7 +232,7 @@ func registerCompletions(cmd *cobra.Command) {
 	flags := cmd.Flags()
 	values := make(map[string][]string)
 
-	for _, f := range mockhttp.ConfigFlags() {
+	for _, f := range append(settingsSchema().Flags(), mockhttp.ConfigFlags()...) {
 		if f.Bool {
 			flags.BoolP(f.Name, f.Shorthand, false, f.Usage)
 		} else {

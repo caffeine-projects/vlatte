@@ -19,6 +19,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
@@ -231,7 +232,7 @@ func TestMultipart_TemplatedPartEchoesTheUpload(t *testing.T) {
 func TestMultipart_AdminRoundTrip(t *testing.T) {
 	// A mock with a form_file pattern and a multipart reply, posted to the admin API as JSON, is stored, shown and
 	// served.
-	m := mockhttp.MustNew(mockhttp.Setup().Admin(""))
+	m := mockhttp.MustNew(mockhttp.Setup().Admin(admin.MustNew()))
 	m.MustStart()
 	t.Cleanup(m.Close)
 

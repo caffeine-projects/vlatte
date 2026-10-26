@@ -6,6 +6,7 @@ import (
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
@@ -21,7 +22,7 @@ type Config struct {
 	NoDebugHeaders bool
 
 	// Admin serves the admin API, on an HTTP server of its own. Nil serves none.
-	Admin *AdminConfig
+	Admin AdminAPI
 
 	// Journal keeps a journal of the calls the server serves. Nil keeps none.
 	Journal *JournalConfig
@@ -31,12 +32,10 @@ type Config struct {
 	NoNearMisses bool
 }
 
-// AdminConfig configures the admin API of a server: a RESTful HTTP server of its own, the same as HTTP mock servers
-// have. The operations gRPC mocks can't do, such as adding mocks from documents, answer 501.
-type AdminConfig struct {
-	// Addr is the address the admin API listens on: host:port, :port or a port. Empty is a random local port.
-	Addr string
-}
+// AdminAPI is an admin API the server opts into: a RESTful HTTP server of its own, the same as HTTP mock servers have.
+// Make one with [github.com/caffeine-projects/vlatte/admin.New]. The operations gRPC mocks can't do, such as adding
+// mocks from documents, answer 501.
+type AdminAPI = adminapi.API
 
 // JournalConfig configures the journal of a server: the calls its mocks get, of every outcome, which tests and the
 // admin API verify and search, while the server runs: Close closes it. The calls an interceptor of ServerOptions
@@ -126,10 +125,10 @@ func (cb *ConfigBuilder) Apply(conf *Config) error {
 	return cb.conf.Apply(conf)
 }
 
-// Admin serves the admin API, on an HTTP server of its own at addr: host:port, :port or a port. Empty is a random
-// local port. Server.AdminURL returns where it listens.
-func (cb *ConfigBuilder) Admin(addr string) *ConfigBuilder {
-	cb.conf.Admin = &AdminConfig{Addr: addr}
+// Admin serves the admin API api, such as admin.MustNew(admin.Addr("127.0.0.1:8081")), on an HTTP server of its own.
+// Server.AdminURL returns where it listens.
+func (cb *ConfigBuilder) Admin(api AdminAPI) *ConfigBuilder {
+	cb.conf.Admin = api
 	return cb
 }
 

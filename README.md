@@ -648,15 +648,17 @@ The target's TLS certificate is verified: a recording sends the target its reque
 
 ## Admin API
 
-The admin API manages a server while it runs. It is an HTTP server of its own, on its own address, the same for mock servers of every protocol, and it leaves every path of the mock server to the mocks. It serves only when asked:
+The admin API manages a server while it runs. It is an HTTP server of its own, on its own address, the same for mock servers of every protocol, and it leaves every path of the mock server to the mocks. It serves only when asked, from the `admin` package:
 
 ```go
-m := mockhttp.MustNew(mockhttp.Setup().Admin("127.0.0.1:8081")) // "" picks a random local port
+m := mockhttp.MustNew(mockhttp.Setup().Admin(admin.MustNew(admin.Addr("127.0.0.1:8081")))) // no Addr picks a random local port
 m.MustStart()
 fmt.Println(m.AdminURL()) // http://127.0.0.1:8081
 ```
 
-From settings, `admin: true` turns it on, and `admin.addr` (`--admin-addr`, `VLATTE_ADMIN_ADDR`) sets its address. A gRPC server serves the same admin API with `mockgrpc.Setup().Admin(addr)`: what gRPC mocks can't do, such as being added from a mock file, answers `501`.
+A gRPC server serves the same admin API with `mockgrpc.Setup().Admin(admin.MustNew(...))`: what gRPC mocks can't do, such as being added from a mock file, answers `501`. An `Admin` serves one mock server. A server that doesn't ask for an admin API links neither it nor what it serves with.
+
+The `vlatte` command serves the admin API by default: `admin: false` (`--admin=false`, `VLATTE_ADMIN=false`) turns it off, and `admin.addr` (`--admin-addr`, `VLATTE_ADMIN_ADDR`) sets its address. These settings are the command's: a server made in Go ignores them, even in a `.vlatterc` it shares with the command, and serves an admin API only when its code asks for one.
 
 | Route | What it does |
 |---|---|
@@ -712,10 +714,10 @@ A request net/http refuses before the admin API reads it, such as one with a mal
 
 The mocks the admin API adds last as long as the server, unless a persistent store keeps them. Each change the admin API makes, adding, replacing, enabling, disabling or removing a mock, reaches the store at once, and the server serves what the store holds when it starts and on each reload, so a change made to the store directly takes effect then too. The mocks of mock files and code never reach it, and a mock file's mock wins over a mock of the store with its id.
 
-`FileStore(dir)` keeps them as mock files, `<id>.mock.yaml`, which only the store loads: keep `dir` out of the mock file patterns. A relative `dir` starts at `root_dir`, and `{workdir}` at the [work directory](#work-directory). A mock whose description doesn't load back is refused, as its file would fail every later start. From settings, `admin.dir` (`--admin-dir`, `VLATTE_ADMIN_DIR`) sets the directory, and an empty one keeps the mocks in memory.
+`FileStore(dir)` keeps them as mock files, `<id>.mock.yaml`, which only the store loads: keep `dir` out of the mock file patterns. A relative `dir` starts at `root_dir`, and `{workdir}` at the [work directory](#work-directory). A mock whose description doesn't load back is refused, as its file would fail every later start. The `vlatte` command keeps them in `{workdir}/_admin`: `admin.dir` (`--admin-dir`, `VLATTE_ADMIN_DIR`) sets another directory, and an empty one keeps the mocks in memory. In Go, `AdminStore` needs `Admin`:
 
 ```go
-m := mockhttp.MustNew(mockhttp.Setup().Admin("").AdminStore(mockhttp.FileStore("{workdir}/_admin")))
+m := mockhttp.MustNew(mockhttp.Setup().Admin(admin.MustNew()).AdminStore(mockhttp.FileStore("{workdir}/_admin")))
 ```
 
 Any `vlatte.Store[*mockhttp.Mock]` can be the store, such as a database collection. It keeps the descriptions of the mocks by ID: `EncodeMock` writes one, and `DecodeMock` builds the mock back for the server.

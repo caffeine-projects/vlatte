@@ -101,11 +101,6 @@ func loadConfigSources(conf *Config) error {
 		conf.Record = &record
 	}
 
-	if conf.Admin != nil {
-		admin := *conf.Admin
-		conf.Admin = &admin
-	}
-
 	if conf.Journal != nil {
 		journal := *conf.Journal
 		conf.Journal = &journal
@@ -436,34 +431,12 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 	}
 
 	after := []field{
-		{
-			Key: "admin", Kind: config.Bool, Usage: "Serve the admin API, on an HTTP server of its own.",
-			Set: func(c *Config, v config.Value) error { toggle(&c.Admin, AdminConfig{}, v.Bool); return nil },
-		},
-		{
-			Key: "admin.addr", Kind: config.String,
-			Usage: "Address the admin API listens on: host:port, :port or port. Empty picks a random local port.",
-			Set: func(c *Config, v config.Value) error {
-				section(&c.Admin, AdminConfig{}).Addr = v.Str
-				return checkAddr(v.Str)
-			},
-		},
-		{
-			Key: "admin.dir", Kind: config.String,
-			Usage: "Directory of the files that keep the mocks the admin API adds across restarts, which only the server " +
-				"loads: keep it out of mock_files. Relative paths start at root_dir, and {workdir} at workdir. Empty keeps them " +
-				"in memory.",
-			Set: func(c *Config, v config.Value) error {
-				admin := section(&c.Admin, AdminConfig{})
-
-				admin.Store = nil
-				if v.Str != "" {
-					admin.Store = FileStore(v.Str)
-				}
-
-				return nil
-			},
-		},
+		// The vlatte command's settings, which it reads from the same sources: a server accepts them, and ignores
+		// them, so a config file it shares with the command loads.
+		{Key: "admin", Kind: config.Bool, Hidden: true},
+		{Key: "admin.addr", Kind: config.String, Hidden: true},
+		{Key: "admin.dir", Kind: config.String, Hidden: true},
+		{Key: "mcp", Kind: config.Bool, Hidden: true},
 		{
 			Key: "journal", Kind: config.Bool, Usage: "Keep a journal of the requests the server serves, of every outcome.",
 			Set: func(c *Config, v config.Value) error { toggle(&c.Journal, defaultJournalConfig(), v.Bool); return nil },

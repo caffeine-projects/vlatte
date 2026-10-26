@@ -21,7 +21,12 @@ func Args(args []string) Source {
 }
 
 func (s *argsSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
-	if len(s.args) == 0 {
+	args := s.args
+	if c.only {
+		args = knownArgs(c, args)
+	}
+
+	if len(args) == 0 {
 		return nil, nil, nil
 	}
 
@@ -56,7 +61,7 @@ func (s *argsSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 		}
 	}
 
-	err := fs.Parse(s.args)
+	err := fs.Parse(args)
 	switch {
 	case errors.Is(err, flag.ErrHelp):
 		return nil, nil, flag.ErrHelp
@@ -65,7 +70,7 @@ func (s *argsSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 	}
 
 	rest := fs.Args()
-	first := len(s.args) - len(rest)
+	first := len(args) - len(rest)
 
 	var problems []Problem
 	for i, arg := range rest {
@@ -80,7 +85,7 @@ func (s *argsSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 
 		// "--cors false" sets cors and leaves "false" behind.
 		if _, err := strconv.ParseBool(arg); err == nil && i == 0 && first > 0 {
-			prev := s.args[first-1]
+			prev := args[first-1]
 			if f := c.byFlag[strings.TrimLeft(prev, "-")]; f != nil && f.kind == Bool && prev != "--" {
 				p.Hint = fmt.Sprintf("a bool flag takes its value after =, as in %s=%s", prev, arg)
 			}
@@ -90,6 +95,52 @@ func (s *argsSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 	}
 
 	return entries, problems, nil
+}
+
+// knownArgs returns the flags of args that c knows, with their values, and those that ask for help, for a load of
+// only the keys of c. A flag it doesn't know is skipped, with the next argument, its value, unless that is a flag too.
+// It stops at "--".
+func knownArgs(c *catalog, args []string) []string {
+	var known []string
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			break
+		}
+
+		name, hasValue := strings.CutPrefix(arg, "--")
+		if !hasValue {
+			name, hasValue = strings.CutPrefix(arg, "-")
+		}
+
+		if !hasValue || name == "" {
+			continue // not a flag: the value of an unknown one, or an argument another schema reports
+		}
+
+		name, _, inline := strings.Cut(name, "=")
+		if name == "h" || name == "help" {
+			known = append(known, arg) // asks for help, whatever the schema
+			continue
+		}
+
+		f := c.byFlag[name]
+		takesNext := !inline && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-")
+
+		switch {
+		case f == nil:
+			if takesNext {
+				i++
+			}
+		case f.kind != Bool && takesNext:
+			known = append(known, arg, args[i+1])
+			i++
+		default:
+			known = append(known, arg)
+		}
+	}
+
+	return known
 }
 
 // flagProblem describes an error of the flag package.

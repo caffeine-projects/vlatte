@@ -38,7 +38,7 @@ func (s *envSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 	var problems []Problem
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
-		if _, found := known[name]; found || !strings.HasPrefix(name, s.prefix+"_") || slices.Contains(s.reserved, name) {
+		if _, found := known[name]; found || c.only || !strings.HasPrefix(name, s.prefix+"_") || slices.Contains(s.reserved, name) {
 			continue
 		}
 
