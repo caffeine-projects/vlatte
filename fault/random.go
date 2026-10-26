@@ -28,7 +28,7 @@ type randomData struct{}
 
 // Describe implements [descriptor.SelfDescriptive].
 func (randomData) Describe() descriptor.Descriptor {
-	return descriptor.KeyOnly("random_data_then_close")
+	return descriptor.WithKeyValuePairs("random_data_then_close", "type", "random_data_then_close")
 }
 
 func (randomData) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {

@@ -58,7 +58,9 @@ func Bandwidth(bytesPerSecond int) vlatte.Step {
 type bandwidth struct{ rate int }
 
 // Describe implements [descriptor.SelfDescriptive], with the rate in bytes per second.
-func (b bandwidth) Describe() descriptor.Descriptor { return descriptor.SingleArg("bandwidth", b.rate) }
+func (b bandwidth) Describe() descriptor.Descriptor {
+	return descriptor.WithKeyValuePairs("bandwidth", "type", "bandwidth", "rate", b.rate)
+}
 
 func (b bandwidth) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	return &bandwidthStage{ctx: flow.Context(), rate: b.rate, next: next}

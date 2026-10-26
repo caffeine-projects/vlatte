@@ -34,7 +34,7 @@ type malformedChunk struct{}
 
 // Describe implements [descriptor.SelfDescriptive].
 func (malformedChunk) Describe() descriptor.Descriptor {
-	return descriptor.KeyOnly("malformed_response_chunk")
+	return descriptor.WithKeyValuePairs("malformed_response_chunk", "type", "malformed_response_chunk")
 }
 
 func (malformedChunk) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {

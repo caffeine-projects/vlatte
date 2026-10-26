@@ -35,7 +35,7 @@ type slowClose struct{ delay time.Duration }
 
 // Describe implements [descriptor.SelfDescriptive].
 func (c slowClose) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("slow_close", c.delay.String())
+	return descriptor.WithKeyValuePairs("slow_close", "type", "slow_close", "delay", c.delay.String())
 }
 
 func (c slowClose) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {

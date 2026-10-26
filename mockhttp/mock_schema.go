@@ -210,7 +210,7 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error { return setEvents(&d.events, d.dir, v) },
 	},
 	mockField{
-		Key: "steps", Kind: config.Any, Usage: "Faults the body of each answer passes through, in order: a list of fault specs, such as [slow_close, 2s].",
+		Key: "steps", Kind: config.Any, Usage: "Faults the body of each answer passes through, in order: a list of fault specs, such as {type: slow_close, delay: 2s}.",
 		Set: func(d *mockDef, v config.Value) error { return setSteps(&d.steps, v) },
 	},
 	mockField{
@@ -1026,10 +1026,10 @@ func setEvents(events *[]vlatte.EventConfig, dir string, v config.Value) error {
 	})
 }
 
-// setSteps decodes a list of fault specs, such as [latency, 100ms]: see [faultbuild.Build].
+// setSteps decodes a list of fault specs, such as {type: latency, latency: 100ms}: see [faultbuild.Build].
 func setSteps(steps *[]vlatte.Step, v config.Value) error {
 	return config.Items(v, func(item config.Value) error {
-		step, err := faultbuild.Build(item.Any)
+		step, err := faultbuild.BuildAt(item.Any, item.Origin, item.Key)
 		if err != nil {
 			return err
 		}

@@ -556,7 +556,19 @@ m.MustMock(mockhttp.Getf("/video").Step(fault.Bandwidth(fault.Bandwidth3G)).Repl
 
 A wire fault needs HTTP/1.x, as wire steps do. Faults combine with other steps: a fault on the wire comes after the steps of `Step`. A mock that answers with a fault still counts the call, and runs its callbacks and events, before the connection ends.
 
-**In mock files,** `steps`, `wire_steps` and `upstream_steps` list faults for `Step`, `WireStep` and `UpstreamStep`. A fault is its name, such as `empty_response`, or a list of its name and arguments, such as `[slow_close, 2s]`: the names are those of the functions in snake case, and the arguments theirs, in order. A latency without jitter can leave it out: `[latency, 300ms]` is `fault.Latency(300*time.Millisecond, 0)`. `bandwidth` takes bytes per second, or the name of a `fault.Bandwidth*` constant in snake case: `gprs`, `dial_up`, `2g`, `good_2g`, `3g`, `good_3g`, `dsl`, `4g`, `wifi` or `fiber`. `faultbuild.Build`, of package `fault/faultbuild`, builds a spec in Go.
+**In mock files,** `steps`, `wire_steps` and `upstream_steps` list faults for `Step`, `WireStep` and `UpstreamStep`. A fault is an object: `type` names it, after its function in snake case, and its other keys are its parameters, by name. Durations are whole milliseconds or a Go duration, such as `1.5s`. A parameter with a default can be left out.
+
+| `type` | Parameters |
+|---|---|
+| `empty_response`, `malformed_response_chunk`, `random_data_then_close`, `connection_reset_by_peer` | None. |
+| `chunked_dribble_delay` | `chunks`, `total` |
+| `latency` | `latency`; `jitter`, 0 by default |
+| `bandwidth` | `rate`: bytes per second, or a `fault.Bandwidth*` constant in snake case: `gprs`, `dial_up`, `2g`, `good_2g`, `3g`, `good_3g`, `dsl`, `4g`, `wifi` or `fiber` |
+| `slicer` | `average_size`; `size_variation` and `delay`, 0 by default |
+| `slow_close` | `delay` |
+| `timeout` | `after`, 0 by default: never |
+| `limit_data` | `bytes` |
+| `connection_reset_by_peer_after` | `after` |
 
 ```yaml
 request:
@@ -566,11 +578,17 @@ response:
   status: 200
   body_file: report.csv
 steps:
-  - [bandwidth, 3g]
-  - [connection_reset_by_peer_after, 5s]
+  - type: bandwidth
+    rate: 3g
+  - type: connection_reset_by_peer_after
+    after: 5s
 wire_steps:
-  - [latency, 300ms, 60ms]
+  - type: latency
+    latency: 300ms
+    jitter: 60ms
 ```
+
+A fault with a missing parameter, a key it doesn't take, or a value its function refuses fails the file, with each problem at its key, such as `steps[1].after`. `faultbuild.Build`, of package `fault/faultbuild`, builds a fault from its object in Go.
 
 A mock describes its faults the same way, so the admin API shows them and its store keeps them. A step of your own, such as a `vlatte.StepFunc`, isn't in the description.
 

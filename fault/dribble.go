@@ -41,7 +41,8 @@ type chunkedDribble struct {
 
 // Describe implements [descriptor.SelfDescriptive].
 func (d chunkedDribble) Describe() descriptor.Descriptor {
-	return descriptor.MultiArgs("chunked_dribble_delay", d.chunks, d.total.String())
+	return descriptor.WithKeyValuePairs("chunked_dribble_delay",
+		"type", "chunked_dribble_delay", "chunks", d.chunks, "total", d.total.String())
 }
 
 func (d chunkedDribble) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {

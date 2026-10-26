@@ -715,9 +715,19 @@ func TestMockFile_StepsProblems(t *testing.T) {
 		key  string
 		want string
 	}{
-		{"steps: [[slow_close, 1s], [bandwidth, 0]]", "steps[1]", `steps[1]="[\"bandwidth\",0]": fault: bandwidth needs a byte per second at least, not 0`},
-		{"wire_steps: [nope]", "wire_steps[0]", `wire_steps[0]="nope": faultbuild: unknown fault "nope"`},
-		{"upstream_steps: [[latency]]", "upstream_steps[0]", `upstream_steps[0]="[\"latency\"]": faultbuild: latency takes 1 or 2 arguments, not 0`},
+		{
+			"steps: [{type: slow_close, delay: 1s}, {type: bandwidth, rate: 0}]", "steps[1]",
+			"steps[1]: bandwidth needs a byte per second at least, not 0",
+		},
+		{
+			"wire_steps: [{type: nope}]", "wire_steps[0].type",
+			"wire_steps[0].type must be one of empty_response, malformed_response_chunk, random_data_then_close, " +
+				"connection_reset_by_peer, chunked_dribble_delay, latency, bandwidth, slicer, slow_close, timeout, " +
+				`limit_data or connection_reset_by_peer_after, not "nope"`,
+		},
+		{"upstream_steps: [{type: latency}]", "upstream_steps[0].latency", "upstream_steps[0].latency is required by a latency fault"},
+		{"steps: [{type: slow_close, dely: 1s, delay: 1s}]", "steps[0].dely", "steps[0].dely is not a known setting"},
+		{"steps: [[slow_close, 1s]]", "steps[0]", "steps[0] must be an object, such as {type: latency, latency: 300ms}, not a list"},
 		{"steps: empty_response", "steps", "steps must be a list, not a string"},
 	}
 

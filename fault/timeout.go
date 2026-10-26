@@ -35,9 +35,13 @@ func Timeout(timeout time.Duration) vlatte.Step {
 
 type timeoutStep struct{ timeout time.Duration }
 
-// Describe implements [descriptor.SelfDescriptive].
+// Describe implements [descriptor.SelfDescriptive], without a timeout of 0, which never ends the answer.
 func (t timeoutStep) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("timeout", t.timeout.String())
+	if t.timeout == 0 {
+		return descriptor.WithKeyValuePairs("timeout", "type", "timeout")
+	}
+
+	return descriptor.WithKeyValuePairs("timeout", "type", "timeout", "after", t.timeout.String())
 }
 
 func (t timeoutStep) Open(flow *vlatte.Flow, _ vlatte.Stage) vlatte.Stage {

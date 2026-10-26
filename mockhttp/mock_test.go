@@ -559,9 +559,12 @@ func TestMock_FaultsDescribeAsTheirSpecs(t *testing.T) {
 		Reply(OK()))
 
 	want := map[string]any{
-		"steps":          []any{[]any{"slow_close", "2s"}, []any{"limit_data", 3.0}},
-		"wire_steps":     []any{[]any{"connection_reset_by_peer"}},
-		"upstream_steps": []any{[]any{"bandwidth", 100.0}},
+		"steps": []any{
+			map[string]any{"type": "slow_close", "delay": "2s"},
+			map[string]any{"type": "limit_data", "bytes": 3.0},
+		},
+		"wire_steps":     []any{map[string]any{"type": "connection_reset_by_peer"}},
+		"upstream_steps": []any{map[string]any{"type": "bandwidth", "rate": 100.0}},
 	}
 
 	desc, err := scope.Mocks()[0].MarshalJSON()

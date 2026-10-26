@@ -427,6 +427,16 @@ func TestJSONSchema_ProxyTargetPattern(t *testing.T) {
 	}
 }
 
+// faultSpec returns the spec of a fault of type typ, with the keys and values of its parameters.
+func faultSpec(typ string, params ...any) map[string]any {
+	spec := map[string]any{"type": typ}
+	for i := 0; i < len(params); i += 2 {
+		spec[params[i].(string)] = params[i+1]
+	}
+
+	return spec
+}
+
 func TestJSONSchema_FaultsAgreeWithTheDecoder(t *testing.T) {
 	// The editor schema accepts a fault spec exactly when the decoder builds it, at each level. A slicer's variation
 	// must stay below its size, and a latency's jitter within it, which the schema can't compare: the decoder alone
@@ -439,35 +449,41 @@ func TestJSONSchema_FaultsAgreeWithTheDecoder(t *testing.T) {
 		spec  any
 		valid bool
 	}{
-		{"empty_response", true},
-		{[]any{"malformed_response_chunk"}, true},
-		{"random_data_then_close", true},
-		{"connection_reset_by_peer", true},
-		{[]any{"connection_reset_by_peer_after", "1s"}, true},
-		{[]any{"chunked_dribble_delay", int64(3), int64(300)}, true},
-		{[]any{"latency", "100ms"}, true},
-		{[]any{"latency", "100ms", "20ms"}, true},
-		{[]any{"bandwidth", int64(1)}, true},
-		{[]any{"bandwidth", "good_3g"}, true},
-		{[]any{"slicer", int64(8), int64(7), "0"}, true},
-		{[]any{"slow_close", int64(0)}, true},
-		{[]any{"timeout", "1.5s"}, true},
-		{[]any{"limit_data", int64(0)}, true},
-		{"nope", false},
-		{"slow_close", false},
-		{[]any{}, false},
-		{[]any{"empty_response", int64(1)}, false},
-		{[]any{"connection_reset_by_peer_after", "-1s"}, false},
-		{[]any{"chunked_dribble_delay", int64(0), "1s"}, false},
-		{[]any{"latency", "1s", int64(-1)}, false},
-		{[]any{"latency", "1s", 12.5}, false},
-		{[]any{"bandwidth", int64(0)}, false},
-		{[]any{"bandwidth", "5g"}, false},
-		{[]any{"slicer", int64(0), int64(0), "0s"}, false},
-		{[]any{"slicer", int64(4), int64(-1), "0s"}, false},
-		{[]any{"timeout", "1500"}, false},
-		{[]any{"limit_data", 1.5}, false},
+		{faultSpec("empty_response"), true},
+		{faultSpec("malformed_response_chunk"), true},
+		{faultSpec("random_data_then_close"), true},
+		{faultSpec("connection_reset_by_peer"), true},
+		{faultSpec("connection_reset_by_peer_after", "after", "1s"), true},
+		{faultSpec("chunked_dribble_delay", "chunks", int64(3), "total", int64(300)), true},
+		{faultSpec("latency", "latency", "100ms"), true},
+		{faultSpec("latency", "latency", "100ms", "jitter", "20ms"), true},
+		{faultSpec("bandwidth", "rate", int64(1)), true},
+		{faultSpec("bandwidth", "rate", "good_3g"), true},
+		{faultSpec("slicer", "average_size", int64(8)), true},
+		{faultSpec("slicer", "average_size", int64(8), "size_variation", int64(7), "delay", "0"), true},
+		{faultSpec("slow_close", "delay", int64(0)), true},
+		{faultSpec("timeout"), true},
+		{faultSpec("timeout", "after", "1.5s"), true},
+		{faultSpec("limit_data", "bytes", int64(0)), true},
+		{"empty_response", false},
+		{[]any{"slow_close", "1s"}, false},
 		{map[string]any{"latency": "1s"}, false},
+		{faultSpec("nope"), false},
+		{faultSpec("Latency", "latency", "1s"), false},
+		{faultSpec("slow_close"), false},
+		{faultSpec("empty_response", "delay", "1s"), false},
+		{faultSpec("latency", "latency", "1s", "latncy", "1s"), false},
+		{faultSpec("connection_reset_by_peer_after", "after", "-1s"), false},
+		{faultSpec("chunked_dribble_delay", "chunks", int64(0), "total", "1s"), false},
+		{faultSpec("chunked_dribble_delay", "chunks", int64(3)), false},
+		{faultSpec("latency", "latency", "1s", "jitter", int64(-1)), false},
+		{faultSpec("latency", "latency", "1s", "jitter", 12.5), false},
+		{faultSpec("bandwidth", "rate", int64(0)), false},
+		{faultSpec("bandwidth", "rate", "5g"), false},
+		{faultSpec("slicer", "average_size", int64(0)), false},
+		{faultSpec("slicer", "average_size", int64(4), "size_variation", int64(-1)), false},
+		{faultSpec("timeout", "after", "1500"), false},
+		{faultSpec("limit_data", "bytes", 1.5), false},
 	}
 
 	for _, key := range []string{"steps", "wire_steps", "upstream_steps"} {

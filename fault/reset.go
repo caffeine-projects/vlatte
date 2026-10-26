@@ -29,7 +29,7 @@ type resetByPeer struct{}
 
 // Describe implements [descriptor.SelfDescriptive].
 func (resetByPeer) Describe() descriptor.Descriptor {
-	return descriptor.KeyOnly("connection_reset_by_peer")
+	return descriptor.WithKeyValuePairs("connection_reset_by_peer", "type", "connection_reset_by_peer")
 }
 
 func (resetByPeer) Open(flow *vlatte.Flow, _ vlatte.Stage) vlatte.Stage {
@@ -70,7 +70,8 @@ type resetAfter struct{ d time.Duration }
 
 // Describe implements [descriptor.SelfDescriptive].
 func (r resetAfter) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("connection_reset_by_peer_after", r.d.String())
+	return descriptor.WithKeyValuePairs("connection_reset_by_peer_after",
+		"type", "connection_reset_by_peer_after", "after", r.d.String())
 }
 
 func (r resetAfter) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {

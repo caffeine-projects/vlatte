@@ -5,4 +5,6 @@ response:
   status: 200
   body: hello
 wire_steps:
-  - [latency, 50ms, 10ms]
+  - type: latency
+    latency: 50ms
+    jitter: 10ms

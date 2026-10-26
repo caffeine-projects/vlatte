@@ -49,10 +49,10 @@ type latencyStep struct {
 // Describe implements [descriptor.SelfDescriptive], without a jitter of 0.
 func (l latencyStep) Describe() descriptor.Descriptor {
 	if l.jitter == 0 {
-		return descriptor.SingleArg("latency", l.latency.String())
+		return descriptor.WithKeyValuePairs("latency", "type", "latency", "latency", l.latency.String())
 	}
 
-	return descriptor.MultiArgs("latency", l.latency.String(), l.jitter.String())
+	return descriptor.WithKeyValuePairs("latency", "type", "latency", "latency", l.latency.String(), "jitter", l.jitter.String())
 }
 
 func (l latencyStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {

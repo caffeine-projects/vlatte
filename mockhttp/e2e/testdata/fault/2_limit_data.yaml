@@ -5,5 +5,7 @@ response:
   status: 200
   body: hello
 steps:
-  - [slow_close, 0]
-  - [limit_data, 3]
+  - type: slow_close
+    delay: 0
+  - type: limit_data
+    bytes: 3

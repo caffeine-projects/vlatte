@@ -47,9 +47,18 @@ type slicer struct {
 	delay     time.Duration
 }
 
-// Describe implements [descriptor.SelfDescriptive].
+// Describe implements [descriptor.SelfDescriptive], without a size variation or a delay of 0.
 func (sl slicer) Describe() descriptor.Descriptor {
-	return descriptor.MultiArgs("slicer", sl.size, sl.variation, sl.delay.String())
+	props := []any{"type", "slicer", "average_size", sl.size}
+	if sl.variation != 0 {
+		props = append(props, "size_variation", sl.variation)
+	}
+
+	if sl.delay != 0 {
+		props = append(props, "delay", sl.delay.String())
+	}
+
+	return descriptor.WithKeyValuePairs("slicer", props...)
 }
 
 func (sl slicer) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
