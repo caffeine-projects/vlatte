@@ -785,6 +785,8 @@ fmt.Println(m.AdminURL()) // http://127.0.0.1:8081
 
 A gRPC server serves the same admin API with `mockgrpc.Setup().Admin(admin.MustNew(...))`, with gRPC mock files: what gRPC mocks can't do, recording, answers `501`. An `Admin` serves one mock server. A server that doesn't ask for an admin API links neither it nor what it serves with.
 
+`admin.Use(middlewares...)` wraps every HTTP request of the admin API, `POST /mcp` included, in the middlewares given, the first outermost, such as one that checks an authentication header and answers `401` in place of the admin API. MCP over stdio doesn't go through them.
+
 The `vlatte` command serves the admin API by default: `admin: false` (`--admin=false`, `VLATTE_ADMIN=false`) turns it off, and `admin.addr` (`--admin-addr`, `VLATTE_ADMIN_ADDR`) sets its address. Its gRPC server serves an admin API of its own, which `grpc.admin: false` (`--grpc-admin=false`) turns off and `grpc.admin.addr` (`--grpc-admin-addr`) places. These settings are the command's: a server made in Go ignores them, even in a `.vlatterc` it shares with the command, and serves an admin API only when its code asks for one.
 
 | Route | What it does |

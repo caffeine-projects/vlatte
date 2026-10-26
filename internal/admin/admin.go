@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -133,6 +134,10 @@ type Options struct {
 
 	// MCP serves the admin operations over MCP too: Streamable HTTP at POST /mcp, and stdio with [Server.ServeMCP].
 	MCP bool
+
+	// Middlewares wrap every HTTP request of the admin API, the first outermost. They run before the cross-origin
+	// check and the routes, and not for MCP over stdio.
+	Middlewares []func(http.Handler) http.Handler
 }
 
 // New creates the admin API of the mock server of caps, which needs its Mocks.
@@ -193,7 +198,12 @@ func New(opts Options, caps adminapi.Capabilities) (*Server, error) {
 
 	csrf := http.NewCrossOriginProtection()
 	csrf.SetDenyHandler(handler.CrossOriginDenied())
-	s.handler = s.track(csrf.Handler(handler.Routing(mux)))
+	h := csrf.Handler(handler.Routing(mux))
+	for _, middleware := range slices.Backward(opts.Middlewares) {
+		h = middleware(h)
+	}
+
+	s.handler = s.track(h)
 
 	return s, nil
 }
