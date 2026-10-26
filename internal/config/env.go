@@ -25,6 +25,10 @@ func (s *envSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 
 	var entries []entry
 	for _, f := range c.fields {
+		if top, _, _ := strings.Cut(f.key, "."); !c.owns(top) {
+			continue
+		}
+
 		name := s.prefix + "_" + f.env
 		known[name] = struct{}{}
 
@@ -38,7 +42,8 @@ func (s *envSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 	var problems []Problem
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
-		if _, found := known[name]; found || !strings.HasPrefix(name, s.prefix+"_") || slices.Contains(s.reserved, name) {
+		rest, ours := strings.CutPrefix(name, s.prefix+"_")
+		if _, found := known[name]; found || !ours || slices.Contains(s.reserved, name) || !c.ownsEnv(rest) {
 			continue
 		}
 

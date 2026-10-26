@@ -193,6 +193,7 @@ func TestRun_Help(t *testing.T) {
 		require.Contains(t, help, "completion", args)
 		require.Contains(t, help, "--log-level name", args)
 		require.Contains(t, help, "env VLATTE_LOG_LEVEL, file key log.level", args)
+		require.Contains(t, help, "env VLATTE_GRPC_ADDR, file key grpc.addr", args, "the gRPC settings too")
 	}
 }
 

@@ -371,6 +371,18 @@ func TestConfigSources_Defaults(t *testing.T) {
 		_, err := New()
 		require.NoError(t, err)
 	})
+
+	t.Run("the grpc section is the gRPC server's", func(t *testing.T) {
+		// The vlatte command reads the gRPC server's settings from the same file and environment: a gRPC setting
+		// made every HTTP server fail as unknown.
+		t.Chdir(t.TempDir())
+		require.NoError(t, os.WriteFile(".vlatterc.yaml", []byte("name: http\ngrpc: {addr: \":50051\"}\n"), 0o600))
+		t.Setenv("VLATTE_GRPC_ADDR", ":50051")
+
+		m, err := New()
+		require.NoError(t, err)
+		require.Equal(t, "http", m.Config().Name, "the file's own settings still apply")
+	})
 }
 
 func TestConfigSources_FileFormatsAgree(t *testing.T) {
@@ -646,7 +658,7 @@ func TestConfigUsage_ListsEverySetting(t *testing.T) {
 
 	require.Contains(t, usage, "file key log.max_body_size")
 	require.Contains(t, usage, "Default: info.")
-	require.Equal(t, "42", choiceName(_logLevels, 42), "a default without a name shows its number")
+	require.Equal(t, "42", choiceName(config.LogLevels, 42), "a default without a name shows its number")
 }
 
 // writeTestCA writes the certificate and the key of a new CA, as PEM files in dir, and returns their paths.

@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
@@ -22,13 +23,12 @@ func TestUnary(t *testing.T) {
 	defer m.Close()
 	pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})
 	m.MustStart()
-	m.MustMock(UnaryMethod("Greetings").
+	m.MustMock(Method("Greetings").
 		Header("h1", match.Eq("v1")).
 		Field("message", match.Eq("hi")).
-		Reply(Unary().
+		Reply(Message(&pb.HiRes{Message: "bye"}).
 			Header("k1", "v1", "v2").
-			Trailer("tk1", "tv1", "tv2").
-			Message(&pb.HiRes{Message: "bye"})))
+			Trailer("tk1", "tv1", "tv2")))
 
 	ctx := context.Background()
 	ctx = metadata.AppendToOutgoingContext(ctx, "h1", "v1")
@@ -58,8 +58,8 @@ func TestUnaryReply_ChangesAfterMockReachOnlyLaterMocks(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	reply := Unary().Header("x-a", "1").Message(&pb.HiRes{Message: "hi"})
-	b := UnaryMethod("Greetings").Reply(reply)
+	reply := Message(&pb.HiRes{Message: "hi"}).Header("x-a", "1")
+	b := Method("Greetings").Reply(reply)
 	scope := m.MustMock(b)
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -105,8 +105,8 @@ func TestUnaryReply_Status(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(UnaryMethod("Greetings").
-		Reply(Unary().Header("k", "v").Status(status.New(codes.PermissionDenied, "denied"))))
+	m.MustMock(Method("Greetings").
+		Reply(Status(codes.PermissionDenied, "denied").Header("k", "v")))
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
@@ -120,4 +120,14 @@ func TestUnaryReply_Status(t *testing.T) {
 	require.Equal(t, codes.PermissionDenied, st.Code())
 	require.Equal(t, "denied", st.Message())
 	require.Equal(t, []string{"v"}, header.Get("k"))
+}
+
+func TestUnary_ARequestProtoJSONCantWriteFailsTheCall(t *testing.T) {
+	// Matchers read the request as protojson writes it: one it refuses, such as a timestamp out of its range, fails
+	// the call rather than matching as something else.
+	m := serve(t)
+	m.MustMock(Method("TestService/Inspect").Reply(Message(&pb.Rich{})))
+
+	_, err := client(t, m).Inspect(t.Context(), &pb.Rich{At: &timestamppb.Timestamp{Seconds: 1 << 62}})
+	require.Equal(t, codes.Internal, status.Code(err), "%v", err)
 }

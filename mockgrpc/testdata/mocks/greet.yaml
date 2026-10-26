@@ -1,0 +1,10 @@
+id: greet
+priority: 1
+request:
+  method: protobuf.TestService/Greetings
+  header: {x-team: core}
+  fields: {message: [hasprefix, "h"]}
+response:
+  message: {message: hello}
+  header: {k: v}
+  trailer: {t: [a, b]}

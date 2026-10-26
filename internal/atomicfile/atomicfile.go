@@ -2,8 +2,12 @@
 package atomicfile
 
 import (
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"slices"
 )
 
 // Write writes data to path through a temporary file of dir, named after pattern as os.CreateTemp names it, renamed
@@ -38,4 +42,46 @@ func WritePerm(dir, pattern, path string, data []byte, perm fs.FileMode) error {
 	}
 
 	return err
+}
+
+// Saved is a file a change is about to write or remove, and what it held before, which Restore puts back.
+type Saved struct {
+	path    string
+	prev    []byte
+	existed bool
+}
+
+// Backup returns what the file at path holds now: its content, or that there is none.
+func Backup(path string) (Saved, error) {
+	prev, err := os.ReadFile(path)
+
+	switch {
+	case err == nil:
+		return Saved{path: path, prev: prev, existed: true}, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return Saved{path: path}, nil
+	default:
+		return Saved{}, err
+	}
+}
+
+// Restore puts files back as they were, the last changed first: it writes back what they held, through temporary
+// files named after pattern, and removes those that didn't exist. It returns what it couldn't put back.
+func Restore(files []Saved, pattern string) error {
+	var errs []error
+
+	for _, f := range slices.Backward(files) {
+		var err error
+		if f.existed {
+			err = Write(filepath.Dir(f.path), pattern, f.path, f.prev)
+		} else if err = os.Remove(f.path); errors.Is(err, fs.ErrNotExist) {
+			err = nil
+		}
+
+		if err != nil {
+			errs = append(errs, fmt.Errorf("putting %s back: %w", f.path, err))
+		}
+	}
+
+	return errors.Join(errs...)
 }

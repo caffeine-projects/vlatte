@@ -1,0 +1,4 @@
+{
+  "request": {"method": "List"},
+  "response": {"body_file": "items.json", "message_delay": 1, "status": {"code": 10, "message": "cut"}}
+}

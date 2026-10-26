@@ -1,16 +1,17 @@
 package mockgrpc
 
 import (
+	"context"
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/caffeine-projects/vlatte"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
@@ -35,8 +36,8 @@ func streamHeader(t *testing.T, c pb.TestServiceClient) metadata.MD {
 func TestDebugHeader_NamesTheMockThatMatched(t *testing.T) {
 	// A client sees which mock answered its call, and how often that mock did, without the server's logs.
 	m := serve(t)
-	unary := m.MustMock(UnaryMethod("Greetings").Name("greet").Reply(Unary().Header("k1", "v1").Message(&pb.HiRes{Message: "bye"})))
-	stream := m.MustMock(ServerStreamMethod("List").Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})))
+	unary := m.MustMock(Method("Greetings").Name("greet").Reply(Message(&pb.HiRes{Message: "bye"}).Header("k1", "v1")))
+	stream := m.MustMock(Method("List").Reply(Messages(&pb.ListItem{Key: "a"})))
 	c := client(t, m)
 
 	for _, hits := range []string{"1", "2"} {
@@ -58,7 +59,7 @@ func TestDebugHeader_NamesTheMockThatMatched(t *testing.T) {
 func TestDebugHeader_AMockThatAnswersWithAStatus(t *testing.T) {
 	// A status is the mock's answer, so it names its mock as a message does.
 	m := serve(t)
-	scope := m.MustMock(UnaryMethod("Greetings").Reply(Unary().Status(status.New(codes.NotFound, "no such user"))))
+	scope := m.MustMock(Method("Greetings").Reply(Status(codes.NotFound, "no such user")))
 
 	var header metadata.MD
 	_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{Message: "hi"}, grpc.Header(&header))
@@ -84,8 +85,8 @@ func TestDebugHeader_NoDebugHeadersTurnsThemOff(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	m.MustMock(
-		UnaryMethod("Greetings").Name("greet").Reply(Unary().Message(&pb.HiRes{Message: "bye"})),
-		ServerStreamMethod("List").Name("list").Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})),
+		Method("Greetings").Name("greet").Reply(Message(&pb.HiRes{Message: "bye"})),
+		Method("List").Name("list").Reply(Messages(&pb.ListItem{Key: "a"})),
 	)
 	c := client(t, m)
 
@@ -98,4 +99,70 @@ func TestDebugHeader_NoDebugHeadersTurnsThemOff(t *testing.T) {
 			require.Empty(t, md.Get(key), key)
 		}
 	}
+}
+
+func TestDebugHeader_ACallTheMockDoesntCountSendsNoHits(t *testing.T) {
+	// The hits of the header are the mock's once the call counts: a template that renders no message fails the call
+	// before its answer goes out, so the header names no mock, the mock counts nothing, and Once still matches.
+	m := serve(t)
+	scope := m.MustMock(Method("Greetings").Once().Reply(Template(`{"message": {{ .Request.Message.message }}}`)))
+	c := client(t, m)
+
+	var header metadata.MD
+	_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "not json"}, grpc.Header(&header))
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.Empty(t, header.Get(vlatte.MatchedMockHitsHeader))
+	require.Empty(t, header.Get(vlatte.MatchedMockIDHeader))
+	require.Zero(t, scope.Hits())
+
+	res, err := c.Greetings(t.Context(), &pb.HiReq{Message: `"ok"`}, grpc.Header(&header))
+	require.NoError(t, err)
+	require.Equal(t, "ok", res.GetMessage())
+	require.Equal(t, []string{"1"}, header.Get(vlatte.MatchedMockHitsHeader))
+	require.Equal(t, int64(1), scope.Hits())
+}
+
+func TestDebugHeader_AClientThatLeavesAfterTheHeaderTakesTheHitBack(t *testing.T) {
+	// A stream's header goes out with its first message, which counts the call: a client that leaves before the
+	// answer ends takes the hit back, so the next call's header says 1 again.
+	m := serve(t)
+	scope := m.MustMock(Method("List").Reply(Messages(&pb.ListItem{Key: "a"}, &pb.ListItem{Key: "b"}).
+		MessageDelayFunc(delays(0, time.Hour, 0, 0))))
+	c := client(t, m)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	stream, err := c.List(ctx, &pb.ListReq{})
+	require.NoError(t, err)
+
+	header, err := stream.Header()
+	require.NoError(t, err)
+	require.Equal(t, []string{"1"}, header.Get(vlatte.MatchedMockHitsHeader))
+
+	_, err = stream.Recv()
+	require.NoError(t, err)
+
+	cancel()
+
+	_, err = stream.Recv()
+	require.Equal(t, codes.Canceled, status.Code(err))
+	require.Eventually(t, func() bool { return scope.Hits() == 0 }, time.Second, time.Millisecond)
+
+	require.Equal(t, []string{"1"}, streamHeader(t, c).Get(vlatte.MatchedMockHitsHeader))
+	require.Equal(t, int64(1), scope.Hits())
+}
+
+func TestDebugHeader_AClientThatLeavesDuringTheDelayIsNotCounted(t *testing.T) {
+	m := serve(t)
+	scope := m.MustMock(Method("Greetings").Delay(time.Hour).Reply(Message(&pb.HiRes{})))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := client(t, m).Greetings(ctx, &pb.HiReq{})
+	require.Equal(t, codes.DeadlineExceeded, status.Code(err))
+
+	m.Close()
+	require.Zero(t, scope.Hits())
 }

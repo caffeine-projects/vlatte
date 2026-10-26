@@ -1,6 +1,8 @@
 syntax = "proto3";
 package protobuf;
 
+import "google/protobuf/timestamp.proto";
+
 option go_package = "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf";
 
 message HiReq {
@@ -19,7 +21,38 @@ message ListItem {
   string key = 1;
 }
 
+enum Color {
+  COLOR_UNSPECIFIED = 0;
+  COLOR_RED = 1;
+  COLOR_BLUE = 2;
+}
+
+// Rich holds the kinds of fields whose JSON form protojson decides: names, enums, int64, oneofs, maps, nested
+// messages and well-known types.
+message Rich {
+  string user_id = 1;
+  int64 count = 2;
+  Color color = 3;
+  oneof choice {
+    string name = 4;
+    int32 code = 5;
+  }
+  map<string, string> labels = 6;
+  HiReq nested = 7;
+  google.protobuf.Timestamp at = 8;
+  repeated string tags = 9;
+}
+
 service TestService {
   rpc Greetings (HiReq) returns (HiRes) {}
   rpc List(ListReq) returns (stream ListItem) {}
+  rpc Upload(stream ListItem) returns (HiRes) {}
+  rpc Chat(stream HiReq) returns (stream HiRes) {}
+  rpc Inspect(Rich) returns (Rich) {}
+}
+
+// OtherService shares method names with TestService: Greetings of the same call type, Inspect of another.
+service OtherService {
+  rpc Greetings (HiReq) returns (HiRes) {}
+  rpc Inspect(stream Rich) returns (Rich) {}
 }
