@@ -50,20 +50,24 @@ func (l *fileLoader) loadLocked(app *Server) error {
 
 	seen := make(map[string]bool)
 
-	patterns := slices.Clone(app.config.MockFiles)
+	globs := make([]string, 0, len(app.config.MockFiles)+len(l.saved)*len(MockFileFormats()))
+	for _, pattern := range app.config.MockFiles {
+		if !filepath.IsAbs(pattern) && app.config.RootDir != "" {
+			pattern = filepath.Join(app.config.RootDir, pattern)
+		}
+
+		globs = append(globs, pattern)
+	}
+
+	// The saved directories start at the root directory already.
 	for _, dir := range l.saved {
 		for _, format := range MockFileFormats() {
-			patterns = append(patterns, filepath.Join(dir, "*.mock."+format))
+			globs = append(globs, filepath.Join(dir, "*.mock."+format))
 		}
 	}
 
-	for _, pattern := range patterns {
-		glob := pattern
-		if !filepath.IsAbs(glob) && app.config.RootDir != "" {
-			glob = filepath.Join(app.config.RootDir, glob)
-		}
-
-		matches, err := filepath.Glob(glob)
+	for _, pattern := range globs {
+		matches, err := filepath.Glob(pattern)
 		if err != nil {
 			return fmt.Errorf("loader: pattern %s: %w", pattern, err)
 		}

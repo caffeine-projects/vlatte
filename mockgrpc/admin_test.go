@@ -455,3 +455,26 @@ func TestAdmin_AQueryWithoutAMethodSaysSo(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status, body)
 	require.Contains(t, body, "request.method is required")
 }
+
+func TestAdmin_SavesUnderARelativeRootDir(t *testing.T) {
+	// The saved files are under the root directory once: with a relative one, the server loads them from where it
+	// wrote them, and the mocks still answer.
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.Mkdir("fixtures", 0o755))
+
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin("").Logger(&logger).RootDir("fixtures"))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	doc := `{"id": "saved", "request": {"method": "Greetings"}, "response": {"message": {"message": "from file"}}}`
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks", doc)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	status, body = call(t, http.MethodPost, m.AdminURL()+"/mocks/save", `{}`)
+	require.Equal(t, http.StatusOK, status, body)
+	require.FileExists(t, filepath.Join("fixtures", "_mocks", "saved.mock.yaml"))
+
+	got, _ := greetWith(t, pb.NewTestServiceClient(m.MustDial()), "hi")
+	require.Equal(t, "from file", got)
+}
