@@ -132,10 +132,7 @@ func (app *Server) afterServed(ctx context.Context, mock *Mock, call *Call, err 
 		mock,
 		func(ctx context.Context, cfg vlatte.EventConfig) vlatte.OnComplete {
 			// The call's context ends when the client leaves: templates read the parameters with the event's.
-			data, dataErr := app.templateData(ctx, call)
-			if dataErr != nil {
-				data = &TemplateData{}
-			}
+			data := app.templateData(ctx, call)
 
 			return &OnComplete{
 				m:      mock,

@@ -303,10 +303,7 @@ func (r *responseReplier) messagesFor(ctx context.Context, call *Call) ([]proto.
 		return r.messages[call.method], nil
 	}
 
-	data, err := call.server.templateData(ctx, call)
-	if err != nil {
-		return nil, err
-	}
+	data := call.server.templateData(ctx, call)
 
 	msgs := make([]proto.Message, len(r.templates))
 	for i, t := range r.templates {

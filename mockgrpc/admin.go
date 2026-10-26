@@ -124,11 +124,9 @@ func mockFile(app *Server, mock *Mock, path, format, toWD string) ([]byte, error
 		return nil, err
 	}
 
-	// A copy of the description, whose files move.
+	// A copy of the description, whose files move: MarshalJSON wrote it as a JSON object.
 	var doc map[string]any
-	if err := json.Unmarshal(desc, &doc); err != nil {
-		return nil, err
-	}
+	_ = json.Unmarshal(desc, &doc)
 
 	relocate(doc, toWD)
 

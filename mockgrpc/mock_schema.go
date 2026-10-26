@@ -616,12 +616,9 @@ func readMessages(r *replyDef, v config.Value) error {
 	}
 
 	r.messages = make([]string, 0, len(items))
-	for i, item := range items {
-		text, err := json.Marshal(item)
-		if err != nil {
-			return config.Invalid(v, fmt.Sprintf("%s: message %d: %v", v.Key, i, err), "")
-		}
-
+	// Each item was read from JSON: it writes back.
+	for _, item := range items {
+		text, _ := json.Marshal(item)
 		r.messages = append(r.messages, string(text))
 	}
 

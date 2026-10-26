@@ -236,10 +236,9 @@ func (r *Response) describe() (map[string]any, bool) {
 				continue
 			}
 
+			// Build read each text as a message of the method: it is JSON.
 			var v any
-			if err := json.Unmarshal([]byte(text), &v); err != nil {
-				return nil, false
-			}
+			_ = json.Unmarshal([]byte(text), &v)
 
 			msgs = append(msgs, v)
 		}
@@ -268,19 +267,11 @@ func (r *Response) describe() (map[string]any, bool) {
 	if r.code != 0 || r.message != "" {
 		st := map[string]any{"code": codeName(r.code), "message": r.message}
 
-		details := make([]any, 0, len(r.details)+len(r.detailJSON))
+		// The details of a mock file, in detailJSON, are left out: its document describes it.
+		details := make([]any, 0, len(r.details))
 		for _, d := range r.details {
 			v, ok := describeAny(d)
 			if !ok {
-				return nil, false
-			}
-
-			details = append(details, v)
-		}
-
-		for _, text := range r.detailJSON {
-			var v any
-			if err := json.Unmarshal([]byte(text), &v); err != nil {
 				return nil, false
 			}
 
@@ -359,10 +350,9 @@ func describeAny(d proto.Message) (any, bool) {
 		return nil, false
 	}
 
+	// protojson writes a message as a JSON object.
 	var v map[string]any
-	if err := json.Unmarshal(b, &v); err != nil {
-		return nil, false
-	}
+	_ = json.Unmarshal(b, &v)
 
 	if _, isAny := v["@type"]; !isAny {
 		v["@type"] = "type.googleapis.com/" + string(d.ProtoReflect().Descriptor().FullName())

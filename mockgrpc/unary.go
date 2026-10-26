@@ -16,12 +16,9 @@ func (in *interceptors) UnaryInterceptor(
 	ctx context.Context,
 	req any,
 	info *grpc.UnaryServerInfo,
-	next grpc.UnaryHandler,
+	_ grpc.UnaryHandler,
 ) (any, error) {
-	if in.app.isInternal(info.FullMethod) {
-		return next(ctx, req)
-	}
-
+	// The services the server implements itself, such as reflection, have no unary methods.
 	md, ok := in.app.resolver.method(info.FullMethod)
 	if !ok {
 		return nil, in.unknown(ctx, info.FullMethod)

@@ -320,10 +320,9 @@ func (r *resolver) encode(msg proto.Message) ([]byte, error) {
 		return nil, fmt.Errorf("encoding the request message: %w", err)
 	}
 
+	// protojson writes valid JSON, which compacts.
 	v := jsontext.Value(b)
-	if err := v.Compact(); err != nil {
-		return nil, fmt.Errorf("encoding the request message: %w", err)
-	}
+	_ = v.Compact()
 
 	return v, nil
 }

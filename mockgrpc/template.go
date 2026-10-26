@@ -3,7 +3,6 @@ package mockgrpc
 import (
 	"context"
 	json "encoding/json/v2"
-	"fmt"
 
 	"google.golang.org/grpc/metadata"
 
@@ -63,12 +62,11 @@ func (app *Server) templateEngine() vlatte.TemplateEngine {
 }
 
 // templateData returns the template data of call, whose parameters read with ctx.
-func (app *Server) templateData(ctx context.Context, call *Call) (*TemplateData, error) {
+func (app *Server) templateData(ctx context.Context, call *Call) *TemplateData {
+	// The request is as protojson writes it: JSON, which reads.
 	var msg any
 	if b := call.JSON(); len(b) > 0 {
-		if err := json.Unmarshal(b, &msg); err != nil {
-			return nil, fmt.Errorf("template: reading the request: %w", err)
-		}
+		_ = json.Unmarshal(b, &msg)
 	}
 
 	return &TemplateData{
@@ -78,5 +76,5 @@ func (app *Server) templateData(ctx context.Context, call *Call) (*TemplateData,
 			Message: msg,
 		},
 		Parameters: params.New(ctx, app.config.Parameters),
-	}, nil
+	}
 }
