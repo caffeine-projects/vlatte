@@ -127,3 +127,41 @@ func TestEqualXML_DescribesItsOptions(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `["eqx", "<a/>", {"ignore_child_order": true, "namespaces": "strict"}]`, string(data))
 }
+
+func TestEqualXML_OnlyXMLWhiteSpaceIsTrimmed(t *testing.T) {
+	// A non-breaking space is text, not the white space between elements.
+	require.False(t, xmlMatches(t, EqualXML("<a></a>"), "<a>&#160;</a>"))
+	require.False(t, xmlMatches(t, EqualXML("<a>x</a>"), "<a>&#160;x</a>"))
+	require.True(t, xmlMatches(t, EqualXML("<a>x</a>"), "<a>\t\r\n x \n</a>"))
+	require.False(t, xmlMatches(t, EqualXML("<a/>"), "&#160;<a/>"), "text outside the root")
+	require.True(t, xmlMatches(t, EqualXML("<a/>"), " \n<a/>\n"))
+}
+
+func TestEqualXML_NamespaceModesAreNamedAsMockFilesWriteThem(t *testing.T) {
+	modes := map[XMLNamespaceMode]string{
+		XMLNamespacesByURI: "uri", XMLNamespacesStrict: "strict", XMLNamespacesIgnored: "none",
+		XMLNamespaceMode(99): "XMLNamespaceMode(99)",
+	}
+	for mode, want := range modes {
+		require.Equal(t, want, mode.String())
+	}
+}
+
+func TestEQX_IsEqualXML(t *testing.T) {
+	require.True(t, xmlMatches(t, EQX(`<a><b/></a>`, IgnoreChildOrder()), `<a> <b/> </a>`))
+	require.False(t, xmlMatches(t, EQX(`<a><b/></a>`), `<a><c/></a>`))
+}
+
+func TestEqualXML_TheXMLPrefixNeedsNoDeclaration(t *testing.T) {
+	// xml is bound by XML itself; any other prefix must be declared, on an attribute as on an element.
+	require.True(t, xmlMatches(t, EqualXML(`<a xml:lang="en"/>`), `<a xml:lang="en"/>`))
+	require.False(t, xmlMatches(t, EqualXML(`<a xml:lang="en"/>`), `<a xml:lang="pt"/>`))
+	require.False(t, xmlMatches(t, EqualXML(`<a x="1"/>`), `<a p:x="1"/>`), "an unbound prefix isn't XML")
+}
+
+func TestXMLMatchers_NameThemselves(t *testing.T) {
+	// A matcher's name is what logs and failures show.
+	require.Equal(t, "EqualXML", EqualXML("<a/>").Name())
+	require.Equal(t, "XPath", XPath("/a", Present()).Name())
+	require.Equal(t, "JSONSchema", JSONSchema("{}").Name())
+}

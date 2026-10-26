@@ -1,6 +1,7 @@
 package matchbuild
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -362,4 +363,18 @@ func TestBuildMatcher_JSONSchemaObjectDescribesTheSameEachTime(t *testing.T) {
 
 		require.Equal(t, first, string(data))
 	}
+}
+
+func TestBuilt_OnlyAConstructorsErrorBecomesAnError(t *testing.T) {
+	// A constructor of package match panics with an error on input it can't build: that is the spec's error. Any other
+	// panic is a bug, and goes on.
+	errBad := errors.New("bad input")
+
+	_, err := built(func() vlatte.Matcher { panic(errBad) })
+	require.ErrorIs(t, err, errBad)
+
+	require.PanicsWithValue(t, "not an error", func() { _, _ = built(func() vlatte.Matcher { panic("not an error") }) })
+
+	var nilMap map[string]int
+	require.Panics(t, func() { _, _ = built(func() vlatte.Matcher { nilMap["x"] = 1; return nil }) }, "a runtime error")
 }

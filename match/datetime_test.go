@@ -212,3 +212,29 @@ func TestDateTime_Describes(t *testing.T) {
 		require.JSONEq(t, tc.want, string(data))
 	}
 }
+
+func TestDateTime_UnitsAndTruncationsAreNamedAsMockFilesWriteThem(t *testing.T) {
+	// A description writes these names, and a mock file reads them back.
+	units := map[DateTimeUnit]string{
+		Seconds: "seconds", Minutes: "minutes", Hours: "hours", Days: "days", Weeks: "weeks", Months: "months",
+		Years: "years", DateTimeUnit(99): "DateTimeUnit(99)",
+	}
+	for unit, want := range units {
+		require.Equal(t, want, unit.String())
+	}
+
+	truncations := map[Truncation]string{
+		FirstMinuteOfHour: "first minute of hour", FirstHourOfDay: "first hour of day", FirstDayOfMonth: "first day of month",
+		FirstDayOfNextMonth: "first day of next month", LastDayOfMonth: "last day of month",
+		FirstDayOfYear: "first day of year", FirstDayOfNextYear: "first day of next year", LastDayOfYear: "last day of year",
+		Truncation(99): "Truncation(99)",
+	}
+	for truncation, want := range truncations {
+		require.Equal(t, want, truncation.String())
+	}
+}
+
+func TestDateTime_AnUnknownTruncationOrUnitChangesNothing(t *testing.T) {
+	m := EqualDateTime(_june1, TruncateExpected(Truncation(99)), ExpectedOffset(3, DateTimeUnit(99)))
+	require.True(t, dateMatches(t, m, "2021-06-01T12:00:00Z"))
+}

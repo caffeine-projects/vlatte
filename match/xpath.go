@@ -17,19 +17,21 @@ import (
 //
 // A name in expr selects elements whose name is written the same, prefix included, unless [XPathNamespace] binds its
 // prefix to a namespace URI: then it selects by namespace and local name, whatever prefix the document gives them.
-// local-name() selects by local name alone: /*[local-name()='order']. A value that isn't XML doesn't match. XPath
-// panics when expr isn't an XPath expression.
+// local-name() selects by local name alone: /*[local-name()='order']. The document's nodes are XPath 1.0's: its
+// elements, their attributes, its text, white space included, and its comments; processing instructions aren't
+// selected. A value that isn't XML doesn't match. XPath panics when expr isn't an XPath expression.
 func XPath(expr string, matcher vlatte.Matcher, opts ...XPathOption) vlatte.Matcher {
 	var o xpathOptions
 	for _, opt := range opts {
 		opt.applyXPath(&o)
 	}
 
-	if _, err := xpath.CompileWithNS(expr, o.namespaces); err != nil {
+	compiled, err := xpath.CompileWithNS(expr, o.namespaces)
+	if err != nil {
 		panic(fmt.Errorf("match: xpath: the expression %s is invalid: %w", expr, err))
 	}
 
-	return &xpathMatcher{Expr: expr, Matcher: matcher, namespaces: o.namespaces}
+	return &xpathMatcher{Expr: expr, Matcher: matcher, namespaces: o.namespaces, compiled: compiled}
 }
 
 // XPathOption configures [XPath].

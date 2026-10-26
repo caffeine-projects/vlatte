@@ -1,6 +1,7 @@
 package match
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
@@ -17,7 +18,7 @@ var (
 // equalXMLMatcher passes when the value is an XML document equal to the expected one.
 type equalXMLMatcher struct {
 	Expected string
-	want     *xmlElement
+	want     *xmlNode // the root element
 	opts     xmlOptions
 }
 
@@ -30,7 +31,7 @@ func (m *equalXMLMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 
 	if text, ok := value.Text(v); ok {
 		got, err := parseXML([]byte(text), m.opts.namespaces)
-		if err == nil && m.opts.sameElement(m.want, got) {
+		if err == nil && m.opts.sameElement(m.want, got.root()) {
 			return success()
 		}
 	}
@@ -47,35 +48,74 @@ func (o xmlOptions) sameName(want, got xmlName) bool {
 	}
 }
 
-func (o xmlOptions) sameElement(want, got *xmlElement) bool {
-	if !o.sameName(want.name, got.name) || len(want.attrs) != len(got.attrs) || len(want.children) != len(got.children) {
+// xmlItem is a part of an element's content, as EqualXML compares it: an element, or text.
+type xmlItem struct {
+	elem *xmlNode // nil for text
+	text string
+}
+
+// content returns what EqualXML compares of an element's children: its elements, and the text between two of them,
+// comments and processing instructions left out, trimmed of XML white space, when any is left.
+func content(e *xmlNode) []xmlItem {
+	var (
+		items []xmlItem
+		text  strings.Builder
+	)
+
+	flush := func() {
+		if t := trimXMLSpace(text.String()); t != "" {
+			items = append(items, xmlItem{text: t})
+		}
+
+		text.Reset()
+	}
+
+	for _, c := range e.children {
+		switch c.kind {
+		case _xmlElement:
+			flush()
+
+			items = append(items, xmlItem{elem: c})
+		case _xmlText:
+			text.WriteString(c.text)
+		}
+	}
+
+	flush()
+
+	return items
+}
+
+// attributes returns the attributes EqualXML compares: namespace declarations aren't.
+func attributes(e *xmlNode) []xmlAttr {
+	return slices.DeleteFunc(slices.Clone(e.attrs), func(a xmlAttr) bool { return a.decl })
+}
+
+func (o xmlOptions) sameElement(want, got *xmlNode) bool {
+	wantAttrs, gotAttrs := attributes(want), attributes(got)
+	wantItems, gotItems := content(want), content(got)
+
+	if !o.sameName(want.name, got.name) || len(wantAttrs) != len(gotAttrs) || len(wantItems) != len(gotItems) {
 		return false
 	}
 
-	for _, wa := range want.attrs {
-		found := false
-		for _, ga := range got.attrs {
-			if o.sameName(wa.name, ga.name) {
-				found = wa.value == ga.value
-				break
-			}
-		}
-
-		if !found {
+	for _, wa := range wantAttrs {
+		i := slices.IndexFunc(gotAttrs, func(ga xmlAttr) bool { return o.sameName(wa.name, ga.name) })
+		if i < 0 || gotAttrs[i].value != wa.value {
 			return false
 		}
 	}
 
 	if o.ignoreChildOrder {
-		paired, _ := pairUp(len(want.children), len(got.children), func(w, g int) (bool, error) {
-			return o.sameNode(want.children[w], got.children[g]), nil
+		paired, _ := pairUp(len(wantItems), len(gotItems), func(w, g int) (bool, error) {
+			return o.sameItem(wantItems[w], gotItems[g]), nil
 		})
 
 		return paired
 	}
 
-	for i := range want.children {
-		if !o.sameNode(want.children[i], got.children[i]) {
+	for i := range wantItems {
+		if !o.sameItem(wantItems[i], gotItems[i]) {
 			return false
 		}
 	}
@@ -83,7 +123,7 @@ func (o xmlOptions) sameElement(want, got *xmlElement) bool {
 	return true
 }
 
-func (o xmlOptions) sameNode(want, got xmlNode) bool {
+func (o xmlOptions) sameItem(want, got xmlItem) bool {
 	if want.elem == nil || got.elem == nil {
 		return want.elem == nil && got.elem == nil && want.text == got.text
 	}

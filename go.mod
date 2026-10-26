@@ -11,7 +11,6 @@ ignore (
 tool mvdan.cc/gofumpt
 
 require (
-	github.com/antchfx/xmlquery v1.5.2
 	github.com/antchfx/xpath v1.3.9
 	github.com/google/go-jsonnet v0.22.0
 	github.com/mailgun/raymond/v2 v2.0.48
@@ -32,7 +31,6 @@ require (
 )
 
 require (
-	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect

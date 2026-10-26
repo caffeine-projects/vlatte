@@ -65,6 +65,7 @@ func TestCutOffset_OnlyASignedNumberAndAUnitAtTheEnd(t *testing.T) {
 		{"now", "now", 0, "", false},
 		{"now 3 days", "now 3 days", 0, "", false},
 		{"Tue Jun  1 12:00:00 2021", "Tue Jun  1 12:00:00 2021", 0, "", false},
+		{"now +99999999999999999999 days", "now +99999999999999999999 days", 0, "", false},
 	}
 
 	for _, tc := range tests {

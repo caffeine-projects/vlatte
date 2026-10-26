@@ -5,10 +5,6 @@ package match
 // other), so a greedy pairing could miss one that exists: this finds a maximum matching instead, with augmenting
 // paths. An error of fits stops it.
 func pairUp(want, got int, fits func(w, g int) (bool, error)) (bool, error) {
-	if want > got {
-		return false, nil
-	}
-
 	fit := make([][]bool, want)
 	for w := range want {
 		fit[w] = make([]bool, got)

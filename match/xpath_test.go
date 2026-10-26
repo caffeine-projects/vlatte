@@ -135,3 +135,48 @@ func TestXPath_AnElementKeepsTheNamespacesInScope(t *testing.T) {
 		})
 	}
 }
+
+func TestXPath_NamesAreAsWrittenWhateverTheOrderOfDeclarations(t *testing.T) {
+	// Without XPathNamespace, a name selects by its prefix as written: two prefixes of one namespace, or a default
+	// namespace declared before or after a prefix, must not change what an expression selects.
+	tests := []struct {
+		doc  string
+		expr string
+		want bool
+	}{
+		{`<order xmlns:o="urn:o" xmlns="urn:o" o:id="7"/>`, "/order/@o:id", true},
+		{`<order xmlns:o="urn:o" xmlns="urn:o" o:id="7"/>`, "/order/@id", false},
+		{`<order xmlns="urn:o" xmlns:o="urn:o" o:id="7"/>`, "/order/@o:id", true},
+		{`<order xmlns="urn:o" xmlns:o="urn:o" o:id="7"/>`, "/order/@id", false},
+		{`<root xmlns:a="urn:o" xmlns:b="urn:o"><a:child>1</a:child></root>`, "/root/a:child", true},
+		{`<root xmlns:a="urn:o" xmlns:b="urn:o"><a:child>1</a:child></root>`, "/root/child", false},
+		{`<root xmlns:a="urn:o" xmlns:b="urn:o"><a:child>1</a:child></root>`, "/root/b:child", false},
+	}
+
+	for _, tc := range tests {
+		require.Equal(t, tc.want, xmlMatches(t, XPath(tc.expr, Present()), tc.doc), "%s on %s", tc.expr, tc.doc)
+	}
+}
+
+func TestXPath_SelectsTheNodesOfTheDocument(t *testing.T) {
+	// XPath 1.0's nodes: no declaration that the document doesn't have, a processing instruction isn't an element,
+	// and text that is only white space is a text node.
+	tests := []struct {
+		name string
+		doc  string
+		m    vlatte.Matcher
+	}{
+		{"one node under the root", `<a/>`, XPath("count(/node())", Equal(1))},
+		{"the root element first", `<a/>`, XPath("/node()", EqualXML("<a/>"))},
+		{"a processing instruction isn't an element", `<?custom x?><a>1</a>`, XPath("/*", EqualXML("<a>1</a>"))},
+		{"nor inside one", `<a><?pi?><b/></a>`, XPath("count(/a/*)", Equal(1))},
+		{"white space is text", `<a> <b/> </a>`, XPath("count(/a/text())", Equal(2))},
+		{"comments are nodes", `<a><!--c--><b/></a>`, XPath("count(/a/node())", Equal(2))},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.True(t, xmlMatches(t, tc.m, tc.doc))
+		})
+	}
+}

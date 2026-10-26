@@ -27,7 +27,7 @@ func EqualXML(expected string, opts ...EqualXMLOption) vlatte.Matcher {
 		panic(fmt.Errorf("match: eqx: %w", err))
 	}
 
-	m.want = want
+	m.want = want.root()
 
 	return m
 }

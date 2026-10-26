@@ -41,6 +41,13 @@ func TestRegistry_BuildsACustomMatcherByNameInAnyCase(t *testing.T) {
 	require.False(t, matches(t, m, "abc"))
 }
 
+func TestRegistry_ACustomMatcherKeepsItsName(t *testing.T) {
+	// A custom matcher describes itself as its spec, but logs show the name it gives itself.
+	m, err := MustNew(WithMatcher("longer-than", longerThan)).BuildMatcher([]any{"longer-than", int64(3)})
+	require.NoError(t, err)
+	require.Equal(t, match.Function(nil).Name(), m.Name())
+}
+
 func TestRegistry_CustomMatcherTakesNestedSpecs(t *testing.T) {
 	// A custom matcher builds its arguments with the registry building it, so it can nest other custom matchers.
 	r := MustNew(

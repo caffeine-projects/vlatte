@@ -118,3 +118,20 @@ func TestJSONSchema_Describes(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `["jsonSchema", "{}", {"draft": "2019-09"}]`, string(data))
 }
+
+func TestJSONSchema_DraftsAreNamedAsMockFilesWriteThem(t *testing.T) {
+	drafts := map[JSONSchemaDraft]string{
+		JSONSchemaDraft4: "4", JSONSchemaDraft6: "6", JSONSchemaDraft7: "7", JSONSchemaDraft2019: "2019-09",
+		JSONSchemaDraft2020: "2020-12", JSONSchemaDraft(99): "JSONSchemaDraft(99)",
+	}
+	for draft, want := range drafts {
+		require.Equal(t, want, draft.String())
+	}
+}
+
+func TestJSONSchema_Draft6(t *testing.T) {
+	// draft-06 made exclusiveMaximum a number, as later drafts have it.
+	m := JSONSchema(`{"exclusiveMaximum": 10}`, SchemaDraft(JSONSchemaDraft6))
+	require.True(t, schemaMatches(t, m, int64(9)))
+	require.False(t, schemaMatches(t, m, int64(10)))
+}
