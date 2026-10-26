@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -344,36 +345,40 @@ func connectMCP(t *testing.T, s *Server) *mcp.ClientSession {
 func TestServer_CloseWaitsForTheMCPCallsItServes(t *testing.T) {
 	// A program that serves MCP over stdio starts no HTTP server, but its calls run operations all the same: Close
 	// waits for them, as it does for the requests it serves.
-	files := &blockingFiles{entered: make(chan struct{}), release: make(chan struct{})}
-	s := newServer(t, Options{MCP: true}, adminapi.Capabilities{Files: files})
-	cs := connectMCP(t, s)
+	synctest.Test(t, func(t *testing.T) {
+		files := &blockingFiles{entered: make(chan struct{}), release: make(chan struct{})}
+		s := newServer(t, Options{MCP: true}, adminapi.Capabilities{Files: files})
+		cs := connectMCP(t, s)
 
-	release := sync.OnceFunc(func() { close(files.release) })
-	t.Cleanup(release) // a failed test ends the reload, so the client closes
+		release := sync.OnceFunc(func() { close(files.release) })
+		t.Cleanup(release) // a failed test ends the reload, so the client closes
 
-	reloaded := make(chan error, 1)
-	go func() {
-		_, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "reload_mocks"})
-		reloaded <- err
-	}()
+		reloaded := make(chan error, 1)
+		go func() {
+			_, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "reload_mocks"})
+			reloaded <- err
+		}()
 
-	<-files.entered
+		<-files.entered
 
-	closed := make(chan struct{})
-	go func() {
-		_ = s.Close()
-		close(closed)
-	}()
+		closed := make(chan struct{})
+		go func() {
+			_ = s.Close()
+			close(closed)
+		}()
 
-	select {
-	case <-closed:
-		t.Fatal("Close returned while a reload ran")
-	case <-time.After(100 * time.Millisecond):
-	}
+		// Every goroutine of the test is blocked: Close too, as long as the reload runs.
+		synctest.Wait()
+		select {
+		case <-closed:
+			t.Fatal("Close returned while a reload ran")
+		default:
+		}
 
-	release()
-	<-closed
-	require.NoError(t, <-reloaded, "the reload ended")
+		release()
+		<-closed
+		require.NoError(t, <-reloaded, "the reload ended")
+	})
 }
 
 func TestServer_ServesMCPOnlyWhenAsked(t *testing.T) {
