@@ -1,0 +1,7 @@
+request: {method: Chat}
+bidi:
+  on:
+    - when: [field, message, [eq, hi]]
+      response: {message: {message: hello}}
+  otherwise: {messages: [{message: "?"}]}
+  on_end: {message: {message: bye}}

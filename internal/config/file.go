@@ -167,6 +167,11 @@ func (w *walker) walk(settings map[string]any, prefix string) {
 		f := w.byKey[key]
 		_, group := w.groups[key]
 
+		// A top-level setting of another schema is that schema's to read.
+		if prefix == "" && w.outer == "" && !w.owns(name) {
+			continue
+		}
+
 		switch {
 		case strings.Contains(name, "."):
 			w.problem(CodeUnknownKey, key, w.full(key)+" is written as a dotted key", "nest it: "+nested(key))
@@ -195,7 +200,7 @@ func (w *walker) walk(settings map[string]any, prefix string) {
 			}
 
 			w.walk(obj, key)
-		case w.only:
+		case w.loadOnly:
 			// Another schema's key.
 		default:
 			hint := ""

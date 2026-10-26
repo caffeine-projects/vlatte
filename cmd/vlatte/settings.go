@@ -5,6 +5,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/mockgrpc"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/caffeine-projects/vlatte/webhook"
 )
@@ -16,12 +17,18 @@ type settings struct {
 	adminAddr string
 	adminDir  string
 	mcp       bool
+
+	grpcAdmin     bool // the gRPC server's admin API, which serves when the gRPC server does
+	grpcAdminAddr string
 }
 
-// defaultSettings serve the admin API, over MCP too, which keeps the mocks it adds across restarts: settings apply
-// after them.
+// defaultSettings serve the admin API, over MCP too, which keeps the mocks it adds across restarts, and the gRPC
+// server's own: settings apply after them.
 func defaultSettings() settings {
-	return settings{admin: true, adminAddr: adminAddr(), adminDir: _adminDir, mcp: true}
+	return settings{
+		admin: true, adminAddr: adminAddr(), adminDir: _adminDir, mcp: true,
+		grpcAdmin: true, grpcAdminAddr: grpcAdminAddr(),
+	}
 }
 
 func settingsSchema() *config.Schema[settings] {
@@ -55,6 +62,21 @@ func settingsSchema() *config.Schema[settings] {
 				"with vlatte mcp.",
 			Set: func(s *settings, v config.Value) error { s.mcp = v.Bool; return nil },
 		},
+		config.Field[settings]{
+			Key: "grpc.admin", Kind: config.Bool, Default: "true",
+			Usage: "Serve the admin API of the gRPC server, on an HTTP server of its own.",
+			Set:   func(s *settings, v config.Value) error { s.grpcAdmin = v.Bool; return nil },
+		},
+		config.Field[settings]{
+			Key: "grpc.admin.addr", Kind: config.String,
+			Usage: "Address the gRPC server's admin API listens on: host:port, :port or port. Empty picks a random local port.",
+			Set: func(s *settings, v config.Value) error {
+				s.grpcAdmin, s.grpcAdminAddr = true, v.Str
+				_, err := admin.New(admin.Addr(v.Str))
+
+				return err
+			},
+		},
 	)
 }
 
@@ -71,7 +93,7 @@ func loadSettings(args []string) (settings, error) {
 // restarts, and keeps a journal of the requests it serves, unless settings turn them off: they apply after code. It
 // returns the admin API too, nil when it is off.
 func newServer(args []string, s settings, wh *webhook.WebHook, logOutput io.Writer) (*mockhttp.Server, *admin.Admin, error) {
-	cb, api := s.setup(mockhttp.Setup())
+	cb, api := s.setupHTTP(mockhttp.Setup())
 
 	m, err := mockhttp.New(cb.
 		Journal(_journalDir).
@@ -82,18 +104,13 @@ func newServer(args []string, s settings, wh *webhook.WebHook, logOutput io.Writ
 	return m, api, err
 }
 
-// setup applies s to the server's setup, and returns the admin API it adds, if any.
-func (s settings) setup(cb *mockhttp.ConfigBuilder) (*mockhttp.ConfigBuilder, *admin.Admin) {
+// setupHTTP applies s to the HTTP server's setup, and returns the admin API it adds, if any.
+func (s settings) setupHTTP(cb *mockhttp.ConfigBuilder) (*mockhttp.ConfigBuilder, *admin.Admin) {
 	if !s.admin {
 		return cb, nil
 	}
 
-	options := []admin.Option{admin.Addr(s.adminAddr)}
-	if s.mcp {
-		options = append(options, admin.MCP())
-	}
-
-	api := admin.MustNew(options...)
+	api := s.newAdmin(s.adminAddr)
 	cb.Admin(api)
 
 	if s.adminDir != "" {
@@ -101,4 +118,23 @@ func (s settings) setup(cb *mockhttp.ConfigBuilder) (*mockhttp.ConfigBuilder, *a
 	}
 
 	return cb, api
+}
+
+// setupGRPC applies s to the gRPC server's setup.
+func (s settings) setupGRPC(cb *mockgrpc.ConfigBuilder) *mockgrpc.ConfigBuilder {
+	if s.grpcAdmin {
+		cb.Admin(s.newAdmin(s.grpcAdminAddr))
+	}
+
+	return cb
+}
+
+// newAdmin returns an admin API on addr, which serves MCP too unless s turns it off.
+func (s settings) newAdmin(addr string) *admin.Admin {
+	options := []admin.Option{admin.Addr(addr)}
+	if s.mcp {
+		options = append(options, admin.MCP())
+	}
+
+	return admin.MustNew(options...)
 }

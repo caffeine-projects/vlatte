@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/mockgrpc"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/caffeine-projects/vlatte/webhook"
 )
@@ -35,6 +37,7 @@ const (
   vlatte --record --record-target=https://api.example.com
   vlatte --admin-addr=127.0.0.1:8081
   vlatte mcp
+  vlatte --grpc-descriptors=api.binpb --grpc-mock-files='mocks/grpc/*.yaml'
 `
 	_helpHint = "Run 'vlatte --help' to list flags, environment variables and file keys."
 
@@ -51,7 +54,7 @@ var (
 	//go:embed banner.txt
 	_banner      string
 	_description = fmt.Sprintf(`%s
-Flexible HTTP mocking tool for Go.
+Flexible HTTP and gRPC mocking tool for Go.
 Mock file formats: %s
 
 For more information, visit: %s`,
@@ -139,12 +142,13 @@ func serve(ctx context.Context, cmd *cobra.Command, args []string, stdout, stder
 		return code
 	}
 
-	m, _, code := startServer(cmd, args, s, stdout, stdout, stderr)
+	m, g, _, code := startServer(cmd, args, s, stdout, stdout, stderr)
 	if m == nil {
 		return code
 	}
 
 	defer m.Close()
+	defer g.Close()
 
 	<-ctx.Done()
 
@@ -164,12 +168,13 @@ func serveMCP(ctx context.Context, cmd *cobra.Command, args []string, stdin io.R
 		return 2
 	}
 
-	m, api, code := startServer(cmd, args, s, stderr, stderr, stderr)
+	m, g, api, code := startServer(cmd, args, s, stderr, stderr, stderr)
 	if m == nil {
 		return code
 	}
 
 	defer m.Close()
+	defer g.Close()
 
 	if err := api.ServeMCP(ctx, stdin, stdout); err != nil && ctx.Err() == nil {
 		_, _ = fmt.Fprintln(stderr, err)
@@ -190,17 +195,27 @@ func commandSettings(cmd *cobra.Command, args []string, stdout, stderr io.Writer
 	return s, failure(cmd, err, stdout, stderr), false
 }
 
-// startServer creates and starts the mock server of cmd's args, with the command's settings s, which logs to
-// logOutput, and writes its banner and settings to out. It returns the server and its admin API, or a nil server and
-// the exit code.
-func startServer(cmd *cobra.Command, args []string, s settings, out, logOutput, stderr io.Writer) (*mockhttp.Server, *admin.Admin, int) {
+// startServer creates and starts the mock servers of cmd's args, with the command's settings s, which log to
+// logOutput, and writes their banner and settings to out: the HTTP server, and the gRPC one, which serves only when
+// its settings turn it on. It returns the servers, which the caller closes, and the HTTP server's admin API, or nil
+// servers and the exit code.
+func startServer(cmd *cobra.Command, args []string, s settings, out, logOutput, stderr io.Writer) (*mockhttp.Server, *mockgrpc.Server, *admin.Admin, int) {
 	// Mock files name their on_complete listeners: webhook sends their webhooks, logging with the server's logger and
 	// waiting for their answers as long as the server's webhook.timeout setting says.
 	wh := &webhook.WebHook{}
 
-	m, api, err := newServer(args, s, wh, logOutput)
+	httpArgs, grpcArgs := splitArgs(args)
+
+	m, api, err := newServer(httpArgs, s, wh, logOutput)
 	if err != nil {
-		return nil, nil, failure(cmd, err, out, stderr)
+		return nil, nil, nil, failure(cmd, err, out, stderr)
+	}
+
+	g, err := newGRPC(grpcArgs, s, wh, logOutput)
+	if err != nil {
+		// Close releases what New opened, such as the journal.
+		m.Close()
+		return nil, nil, nil, failure(cmd, err, out, stderr)
 	}
 
 	// The docker address wins over every source, and its port depends on the final https setting.
@@ -214,15 +229,28 @@ func startServer(cmd *cobra.Command, args []string, s settings, out, logOutput, 
 		err = m.Start()
 	}
 
+	// The gRPC server serves when its settings turn it on, after the HTTP one: its mock files can name the same
+	// webhooks.
+	if err == nil && g.Config().Serve {
+		err = g.Start()
+	}
+
 	if err != nil {
+		g.Close()
+		m.Close()
 		_, _ = fmt.Fprintln(stderr, err)
-		return nil, nil, 1
+
+		return nil, nil, nil, 1
 	}
 
 	_, _ = fmt.Fprintln(out, _banner)
 	_, _ = fmt.Fprintln(out, m.DescribeConfig())
 
-	return m, api, 0
+	if g.Config().Serve {
+		_, _ = fmt.Fprintf(out, "gRPC mocks: %s, admin API: %s\n", g.Addr(), g.AdminURL())
+	}
+
+	return m, g, api, 0
 }
 
 // failure reports err, of loading the settings or creating the server, and returns the exit code: 0 for help, which
@@ -299,12 +327,19 @@ It serves AI agents over MCP too, at POST /mcp, and 'vlatte mcp' on stdin and st
 It keeps the mocks it adds in %s, across restarts: --admin-dir="" keeps them in memory.
 The server keeps a journal of the requests it serves in %s, across restarts: --journal=false turns it off.
 
+Setting a key of the grpc section, such as --grpc or --grpc-descriptors, serves gRPC mocks too, on %s: the services of
+the descriptor sets --grpc-descriptors names, as the mock files --grpc-mock-files names describe their calls. It
+serves gRPC server reflection, and its own admin API, on a random local port, and keeps a journal of its calls, for
+as long as it runs: --grpc-reflection=false, --grpc-admin=false and --grpc-journal=false turn them off.
+
 Settings:
+%s
+gRPC settings:
 %s`,
 		root.Long, root.Use, root.Use, commands.String(), root.Example,
 		mockhttp.DefaultConfigFileName, strings.Join(mockhttp.DefaultConfigDirectories, " or "), mockhttp.EnvPrefix,
-		mockhttp.DefaultWorkDir, mockhttp.DefaultWorkDir, _adminDir, _journalDir,
-		settingsSchema().Usage(mockhttp.EnvPrefix)+mockhttp.ConfigUsage())
+		mockhttp.DefaultWorkDir, mockhttp.DefaultWorkDir, _adminDir, _journalDir, _grpcAddr,
+		settingsSchema().Usage(mockhttp.EnvPrefix)+mockhttp.ConfigUsage(), mockgrpc.ConfigUsage())
 }
 
 // registerCompletions declares the server flags to cobra, which completes their names.
@@ -314,7 +349,12 @@ func registerCompletions(cmd *cobra.Command) {
 	flags := cmd.Flags()
 	values := make(map[string][]string)
 
-	for _, f := range append(settingsSchema().Flags(), mockhttp.ConfigFlags()...) {
+	for _, f := range slices.Concat(settingsSchema().Flags(), mockhttp.ConfigFlags(), mockgrpc.ConfigFlags()) {
+		// The config file is a setting of both servers.
+		if flags.Lookup(f.Name) != nil {
+			continue
+		}
+
 		if f.Bool {
 			flags.BoolP(f.Name, f.Shorthand, false, f.Usage)
 		} else {

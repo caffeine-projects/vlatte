@@ -260,14 +260,14 @@ func (s *fileStore) Clear(context.Context) error {
 // apply writes and then removes files, all or nothing: on the first failure, it puts back the files it changed, and
 // returns the failure, with what it couldn't put back. A file already gone is removed.
 func (s *fileStore) apply(writes []fileWrite, removes []string) error {
-	changed := make([]savedFile, 0, len(writes)+len(removes))
+	changed := make([]atomicfile.Saved, 0, len(writes)+len(removes))
 
 	fail := func(err error) error {
-		return fmt.Errorf("server: admin store: %w", errors.Join(err, restore(changed, _fileStoreTempPattern)))
+		return fmt.Errorf("server: admin store: %w", errors.Join(err, atomicfile.Restore(changed, _fileStoreTempPattern)))
 	}
 
 	for _, w := range writes {
-		file, err := backup(w.path)
+		file, err := atomicfile.Backup(w.path)
 		if err == nil {
 			err = atomicfile.Write(s.dir, _fileStoreTempPattern, w.path, w.data)
 		}
@@ -280,7 +280,7 @@ func (s *fileStore) apply(writes []fileWrite, removes []string) error {
 	}
 
 	for _, path := range removes {
-		file, err := backup(path)
+		file, err := atomicfile.Backup(path)
 		if err == nil {
 			if err = s.remove(path); errors.Is(err, fs.ErrNotExist) {
 				err = nil

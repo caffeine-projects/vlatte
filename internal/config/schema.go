@@ -122,11 +122,16 @@ type field struct {
 
 // catalog is the view of a schema that sources use. It doesn't depend on the target type.
 type catalog struct {
-	fields []*field
-	byKey  map[string]*field
-	byFlag map[string]*field   // long names and shorthands
-	groups map[string]struct{} // prefixes with no key of their own, such as "log"
-	only   bool                // sources read only its keys, and let every other one through: see Schema.LoadOnly
+	fields   []*field
+	byKey    map[string]*field
+	byFlag   map[string]*field   // long names and shorthands
+	groups   map[string]struct{} // prefixes with no key of their own, such as "log"
+	loadOnly bool                // sources read only its keys, and let every other one through: see Schema.LoadOnly
+
+	// skip and only name the top-level settings files and environment variables leave to other schemas, that read
+	// the same sources: those of skip, or all but those of only.
+	skip []string
+	only []string
 }
 
 // Schema holds the settings of a T, in the order they were declared.
@@ -227,6 +232,21 @@ func NewSchema[T any](fields ...Field[T]) *Schema[T] {
 	return s
 }
 
+// Skip leaves the top-level settings names, such as "grpc", to another schema that reads the same files and
+// environment variables: the schema ignores them there, where it would report them as unknown. Flags are the
+// caller's to split: an Args source reports every flag it doesn't know.
+func (s *Schema[T]) Skip(names ...string) *Schema[T] {
+	s.skip = append(s.skip, names...)
+	return s
+}
+
+// Only reads only the top-level settings names, such as "grpc", from files and environment variables: the schema
+// leaves the others to the schemas that read the same sources, as Skip does.
+func (s *Schema[T]) Only(names ...string) *Schema[T] {
+	s.only = append(s.only, names...)
+	return s
+}
+
 // Flags lists the command-line flags of the settings, in declaration order.
 func (c *catalog) Flags() []Flag {
 	flags := make([]Flag, 0, len(c.fields))
@@ -309,6 +329,32 @@ func (c *catalog) KindOf(key string) (Kind, bool) {
 	}
 
 	return f.kind, true
+}
+
+// owns reports whether the top-level setting name is the schema's to read from files.
+func (c *catalog) owns(name string) bool {
+	if len(c.only) > 0 && !slices.Contains(c.only, name) {
+		return false
+	}
+
+	return !slices.Contains(c.skip, name)
+}
+
+// ownsEnv reports whether the environment variable name, without its prefix and underscore, such as GRPC_ADDR, is
+// the schema's to read.
+func (c *catalog) ownsEnv(name string) bool {
+	under := func(names []string) bool {
+		return slices.ContainsFunc(names, func(n string) bool {
+			env := strings.ToUpper(n)
+			return name == env || strings.HasPrefix(name, env+"_")
+		})
+	}
+
+	if len(c.only) > 0 && !under(c.only) {
+		return false
+	}
+
+	return !under(c.skip)
 }
 
 // children lists the names right under prefix, of keys and groups, in declaration order.

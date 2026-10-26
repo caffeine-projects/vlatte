@@ -22,7 +22,7 @@ func Args(args []string) Source {
 
 func (s *argsSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 	args := s.args
-	if c.only {
+	if c.loadOnly {
 		args = knownArgs(c, args)
 	}
 

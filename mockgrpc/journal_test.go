@@ -16,7 +16,11 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/dynamicpb"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/admin"
@@ -59,12 +63,12 @@ func TestJournal_KeepsEachCallOnceWhateverItsOutcome(t *testing.T) {
 	m, c := journaled(t, Setup())
 
 	m.MustMock(
-		UnaryMethod("Greetings").Field("message", match.Equal("hi")).Reply(Unary().Message(&pb.HiRes{Message: "hello"})),
-		UnaryMethod("Greetings").Field("message", match.Equal("denied")).Reply(Unary().Status(status.New(codes.PermissionDenied, "no"))),
-		UnaryMethod("Greetings").Field("message", match.Equal("broken")).Reply(funcUnaryReply(func() (any, error) {
+		Method("Greetings").Field("message", match.Equal("hi")).Reply(Message(&pb.HiRes{Message: "hello"})),
+		Method("Greetings").Field("message", match.Equal("denied")).Reply(Status(codes.PermissionDenied, "no")),
+		Method("Greetings").Field("message", match.Equal("broken")).Reply(funcUnaryReply(func() (any, error) {
 			return nil, errors.New("unary broke")
 		})),
-		UnaryMethod("Greetings").Field("message", match.Equal("panics")).Reply(funcUnaryReply(func() (any, error) {
+		Method("Greetings").Field("message", match.Equal("panics")).Reply(funcUnaryReply(func() (any, error) {
 			panic("boom")
 		})),
 	)
@@ -108,7 +112,7 @@ func TestJournal_KeepsEachCallOnceWhateverItsOutcome(t *testing.T) {
 
 func TestJournal_UnmatchedCallsNameTheClosestMocks(t *testing.T) {
 	m, c := journaled(t, Setup())
-	m.MustMock(UnaryMethod("Greetings").Header("x-team", match.Equal("core")).Reply(Unary().Message(&pb.HiRes{})))
+	m.MustMock(Method("Greetings").Header("x-team", match.Equal("core")).Reply(Message(&pb.HiRes{})))
 
 	_, err := c.Greetings(t.Context(), &pb.HiReq{})
 	require.Equal(t, codes.NotFound, status.Code(err))
@@ -123,7 +127,7 @@ func TestJournal_AnUnmatchedCallNamesTheMethodItsClosestMockDiffersIn(t *testing
 	// A mock of another method came closest, the fields of the call matched: the near miss names the method, so a
 	// test sees it mocked the wrong method, not the wrong fields.
 	m, c := journaled(t, Setup())
-	scope := m.MustMock(UnaryMethod("Other").Field("message", match.Equal("hi")).Reply(Unary().Message(&pb.HiRes{})))
+	scope := m.MustMock(Method("OtherService/Greetings").Field("message", match.Equal("hi")).Reply(Message(&pb.HiRes{})))
 
 	_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
 	require.Equal(t, codes.NotFound, status.Code(err))
@@ -134,7 +138,7 @@ func TestJournal_AnUnmatchedCallNamesTheMethodItsClosestMockDiffersIn(t *testing
 
 func TestJournal_KeepsStreamingCalls(t *testing.T) {
 	m, c := journaled(t, Setup())
-	m.MustMock(ServerStreamMethod("List").Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})))
+	m.MustMock(Method("List").Reply(Messages(&pb.ListItem{Key: "a"})))
 
 	stream, err := c.List(t.Context(), &pb.ListReq{Message: "all"})
 	require.NoError(t, err)
@@ -168,12 +172,69 @@ func TestJournal_TheAnswerNamesItsCall(t *testing.T) {
 	require.Equal(t, journal.OutcomeUnmatched, e.Outcome)
 }
 
-func TestJournal_GRPCHasNoRequestPatterns(t *testing.T) {
-	// A gRPC call is verified by its fields: its protocol has no request patterns, and says so.
-	m, _ := journaled(t, Setup())
+func TestJournal_VerifiesCallsWithMockBuilders(t *testing.T) {
+	// A gRPC call was verified by the fields of its entry only: its protocol had no request patterns. A builder of
+	// its mocks is one now, matched as it matches a call, on the request the journal kept.
+	m, c := journaled(t, Setup())
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
 
-	_, err := m.CountRequests(t.Context(), journal.Query{}, UnaryMethod("Greetings"))
-	require.ErrorIs(t, err, journal.ErrNoRequestPatterns)
+	for _, msg := range []string{"hi", "hi", "bye"} {
+		ctx := metadata.AppendToOutgoingContext(t.Context(), "x-team", "core")
+		_, err := c.Greetings(ctx, &pb.HiReq{Message: msg})
+		require.NoError(t, err)
+	}
+
+	require.True(t, m.AssertRequested(t.Context(), t, 2, journal.Query{},
+		Method("Greetings").Field("message", match.Equal("hi")).Header("x-team", match.Equal("core"))))
+	require.True(t, m.AssertRequested(t.Context(), t, 1, journal.Query{}, Method("Greetings").Message(&pb.HiReq{Message: "bye"})))
+	require.True(t, m.AssertNotRequested(t.Context(), t, journal.Query{}, Method("List")))
+
+	_, err := m.CountRequests(t.Context(), journal.Query{}, Method("Greetings").Once())
+	require.ErrorContains(t, err, "a request pattern has no Times or Once")
+
+	_, err = m.CountRequests(t.Context(), journal.Query{}, Method("Nope"))
+	require.ErrorIs(t, err, ErrUnknownMethod)
+}
+
+func TestJournal_VerifiesClientStreamsByAllTheirMessages(t *testing.T) {
+	m, c := journaled(t, Setup())
+	m.MustMock(Method("Upload").Reply(Message(&pb.HiRes{})))
+
+	_, code := upload(t, c, "a", "b")
+	require.Equal(t, codes.OK, code)
+
+	require.True(t, m.AssertRequested(t.Context(), t, 1, journal.Query{},
+		Method("Upload").Messages(&pb.ListItem{Key: "a"}, &pb.ListItem{Key: "b"})))
+	require.True(t, m.AssertRequested(t.Context(), t, 1, journal.Query{}, Method("Upload").Field("$[1].key", match.Equal("b"))))
+}
+
+func TestJournal_APatternOfACutRequestCantTell(t *testing.T) {
+	// The journal kept part of a request: a pattern that reads it can't tell whether it matched, and says so.
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Logger(&logger), &journalSize{max: 10})
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
+
+	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{Message: "a long message, cut"})
+	require.NoError(t, err)
+
+	_, err = m.CountRequests(t.Context(), journal.Query{}, Method("Greetings").Field("message", match.Equal("x")))
+	require.ErrorIs(t, err, vlatte.ErrMatching)
+
+	n, err := m.CountRequests(t.Context(), journal.Query{}, Method("List").Field("message", match.Equal("x")))
+	require.NoError(t, err)
+	require.Zero(t, n, "a miss on the method is a miss")
+}
+
+// journalSize keeps a journal whose entries keep max bytes of their request.
+type journalSize struct {
+	max int64
+}
+
+func (j *journalSize) Apply(conf *Config) error {
+	conf.Journal = &JournalConfig{MaxBodySize: j.max}
+	return nil
 }
 
 func TestJournal_AServerThatNeverStartedRemovesItsJournal(t *testing.T) {
@@ -213,13 +274,15 @@ type waitStreamReply struct {
 	began chan struct{}
 }
 
-func (r waitStreamReply) NewReplier(*Server) (StreamReplier, error) { return r, nil }
+func (r waitStreamReply) NewReplier(*Server, []protoreflect.MethodDescriptor) (Replier, error) {
+	return r, nil
+}
 
-func (r waitStreamReply) Reply(ctx context.Context, _ *StreamRequestValues) (any, error) {
+func (r waitStreamReply) Reply(ctx context.Context, _ *Call) error {
 	close(r.began)
 	<-ctx.Done()
 
-	return nil, status.FromContextError(ctx.Err()).Err()
+	return status.FromContextError(ctx.Err()).Err()
 }
 
 func TestJournal_ACallWhoseClientLeftIsAbandoned(t *testing.T) {
@@ -227,7 +290,7 @@ func TestJournal_ACallWhoseClientLeftIsAbandoned(t *testing.T) {
 	// matched it.
 	m, c := journaled(t, Setup())
 	reply := waitStreamReply{began: make(chan struct{})}
-	m.MustMock(ServerStreamMethod("List").Reply(reply))
+	m.MustMock(Method("List").Reply(reply))
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -307,8 +370,8 @@ func TestJournal_KeepsTheCodeTheClientGot(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m, c := journaled(t, Setup().ServerOptions(tt.option))
 			m.MustMock(
-				UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{})),
-				ServerStreamMethod("List").Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})),
+				Method("Greetings").Reply(Message(&pb.HiRes{})),
+				Method("List").Reply(Messages(&pb.ListItem{Key: "a"})),
 			)
 
 			require.Equal(t, tt.want, status.Code(tt.call(t, c)))
@@ -343,7 +406,7 @@ func TestJournal_LeavesOutTheCallsAnInterceptorAnswers(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m, c := journaled(t, Setup().ServerOptions(tt.option))
-			m.MustMock(UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{})))
+			m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
 
 			require.Equal(t, codes.Unauthenticated, status.Code(tt.call(t, c)))
 
@@ -362,7 +425,7 @@ func TestJournal_KeepsOneEntryOfACallAnInterceptorHidesFromIt(t *testing.T) {
 	}
 
 	m, c := journaled(t, Setup().ServerOptions(grpc.ChainUnaryInterceptor(detach)))
-	m.MustMock(UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{})))
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
 
 	require.Equal(t, codes.Internal, status.Code(greet(t, c)))
 	require.Equal(t, int(codes.Internal), onlyCall(t, m, journal.Query{}).Status)
@@ -411,7 +474,7 @@ func TestJournal_KeepsACallAnInterceptorAnswersWhileItsMockGoesOn(t *testing.T) 
 	}
 
 	m, c := journaled(t, Setup().ServerOptions(grpc.ChainUnaryInterceptor(timeout)))
-	m.MustMock(UnaryMethod("Greetings").Reply(funcUnaryReply(func() (any, error) {
+	m.MustMock(Method("Greetings").Reply(funcUnaryReply(func() (any, error) {
 		close(started)
 		return &pb.HiRes{}, nil
 	})))
@@ -420,4 +483,203 @@ func TestJournal_KeepsACallAnInterceptorAnswersWhileItsMockGoesOn(t *testing.T) 
 	<-done
 
 	require.Equal(t, int(codes.DeadlineExceeded), onlyCall(t, m, journal.Query{}).Status)
+}
+
+func TestJournal_NearMissesNameEachPartTheirMockChecks(t *testing.T) {
+	// A near miss names what failed in words a test reads: the field, the request, the times and the scenario.
+	m, c := journaled(t, Setup())
+	m.MustMock(
+		Method("Greetings").ID("parts").
+			Field("message", match.Equal("x")).
+			Body(match.Contain("x")).
+			Message(&pb.HiReq{Message: "x"}).
+			Reply(Message(&pb.HiRes{})),
+		Method("Greetings").ID("scenario").Priority(9).ScenarioIs("s").ScenarioStateIs("never").Reply(Message(&pb.HiRes{})),
+		Method("Greetings").ID("once").Once().ScenarioIs("s").ScenarioStateWillBe("done").Reply(Message(&pb.HiRes{})),
+	)
+
+	_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.NoError(t, err)
+
+	_, err = c.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	e := onlyCall(t, m, journal.Query{Outcome: journal.OutcomeUnmatched})
+	failed := make(map[string][]string, len(e.NearMisses))
+	for _, nm := range e.NearMisses {
+		failed[nm.MockID] = nm.Failed
+	}
+
+	require.Equal(t, map[string][]string{
+		"parts":    {"field message", "request body", "request message"},
+		"scenario": {"scenario s"},
+		"once":     {"times"},
+	}, failed)
+}
+
+func TestJournal_APatternIsABuilderOfTheRequestOnly(t *testing.T) {
+	// A pattern matches calls served before: a part that counts or keeps state from now on has no meaning in it, and
+	// fails the query rather than matching nothing.
+	m, _ := journaled(t, Setup())
+
+	for _, tc := range []struct {
+		name    string
+		pattern vlatte.Builder[*Mock, *Server]
+		want    string
+	}{
+		{"a mock file", FromBytes([]byte(`{request: {method: Greetings}}`), "yaml"), "a request pattern is a *Builder"},
+		{"a builder with an error", Method("Greetings").Times(0), "request pattern: times 0"},
+		{"a scenario", Method("Greetings").ScenarioIs("s"), "a request pattern has no scenario"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := m.CountRequests(t.Context(), journal.Query{}, tc.pattern)
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestJournal_APatternOfTheMethodOnlyCountsACutRequest(t *testing.T) {
+	// A pattern that reads only the method and the header needs none of the request: one the journal cut counts, and
+	// one of another method is a miss, not an error.
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Logger(&logger), &journalSize{max: 10})
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
+
+	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{Message: "a long message, cut"})
+	require.NoError(t, err)
+
+	n, err := m.CountRequests(t.Context(), journal.Query{}, Method("Greetings"))
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	n, err = m.CountRequests(t.Context(), journal.Query{}, Method("List"))
+	require.NoError(t, err)
+	require.Zero(t, n)
+}
+
+func TestJournal_APatternWhoseMatcherFailsFailsTheQuery(t *testing.T) {
+	// A matcher that can't tell fails the count: a miss would make a verification pass that should fail.
+	m, c := journaled(t, Setup())
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
+
+	_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.NoError(t, err)
+
+	broken := match.Function(func(any) (bool, error) { return false, errors.New("broken") })
+	_, err = m.CountRequests(t.Context(), journal.Query{}, Method("Greetings").Body(broken))
+	require.ErrorIs(t, err, vlatte.ErrMatching)
+}
+
+func TestJournal_APatternReadsTheEntriesAJournalKeptAcrossRestarts(t *testing.T) {
+	// A journal kept in a directory holds entries of earlier runs, maybe of another protocol, another service, or
+	// messages the .proto has changed since: a pattern skips those it can't be about, and fails on a request it
+	// can't read, rather than miscount.
+	for _, tc := range []struct {
+		name    string
+		path    string
+		body    string
+		pattern *Builder
+	}{
+		{"a message that no longer decodes", pb.TestService_Greetings_FullMethodName, `{"nope": 1}`, Method("Greetings").Field("message", match.Equal("x"))},
+		{"a stream that is no array", pb.TestService_Upload_FullMethodName, `{"key": "a"}`, Method("Upload").Field("$[0].key", match.Equal("a"))},
+		{"a stream message that no longer decodes", pb.TestService_Upload_FullMethodName, `[{"nope": 1}]`, Method("Upload").Field("$[0].key", match.Equal("a"))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			j := journal.MustNew(journal.Options{Dir: dir})
+			require.NoError(t, j.Append(&journal.Entry{Kind: "http", Method: http.MethodGet, Path: "/greetings"}))
+			require.NoError(t, j.Append(&journal.Entry{Kind: Kind, Path: "/gone.Service/Greetings", Body: []byte(`{}`)}))
+			require.NoError(t, j.Close())
+
+			logger := zerolog.Nop()
+			m := MustNew(Setup().Logger(&logger).Journal(dir))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			n, err := m.CountRequests(t.Context(), journal.Query{}, tc.pattern)
+			require.NoError(t, err)
+			require.Zero(t, n, "neither entry is a call of the method")
+
+			m.Close()
+
+			j = journal.MustNew(journal.Options{Dir: dir})
+			require.NoError(t, j.Append(&journal.Entry{Kind: Kind, Path: tc.path, Body: []byte(tc.body)}))
+			require.NoError(t, j.Close())
+
+			m = MustNew(Setup().Logger(&logger).Journal(dir))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			_, err = m.CountRequests(t.Context(), journal.Query{}, tc.pattern)
+			require.ErrorIs(t, err, vlatte.ErrMatching)
+		})
+	}
+}
+
+func TestJournal_ABidiCallWhoseMessagesCantBeWrittenFailed(t *testing.T) {
+	// A bidi call's messages are journaled once its reply returns: a message protojson can't write, such as an Any of
+	// a type the server doesn't know, which a Func reply reads without writing, leaves its entry without them, which
+	// says so rather than that the call matched.
+	anyFile := protodesc.ToFileDescriptorProto(anypb.File_google_protobuf_any_proto)
+	fd := &descriptorpb.FileDescriptorProto{
+		Name:       new("wrap.proto"),
+		Package:    new("wrap"),
+		Dependency: []string{anyFile.GetName()},
+		Syntax:     new("proto3"),
+		MessageType: []*descriptorpb.DescriptorProto{{
+			Name: new("Wrap"),
+			Field: []*descriptorpb.FieldDescriptorProto{{
+				Name: new("any"), JsonName: new("any"), Number: new(int32(1)),
+				Label:    descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+				Type:     descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(),
+				TypeName: new(".google.protobuf.Any"),
+			}},
+		}},
+		Service: []*descriptorpb.ServiceDescriptorProto{{
+			Name: new("Wrapper"),
+			Method: []*descriptorpb.MethodDescriptorProto{{
+				Name: new("Chat"), InputType: new(".wrap.Wrap"), OutputType: new(".wrap.Wrap"),
+				ClientStreaming: new(true), ServerStreaming: new(true),
+			}},
+		}},
+	}
+
+	files, err := protodesc.NewFiles(&descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{anyFile, fd}})
+	require.NoError(t, err)
+
+	m, _ := journaled(t, Setup().Files(files))
+	m.MustMock(Method("wrap.Wrapper/Chat").Reply(Func(func(_ context.Context, call *Call) error {
+		for {
+			if _, err := call.Recv(); err != nil {
+				return nil
+			}
+		}
+	})))
+
+	wrap, err := files.FindDescriptorByName("wrap.Wrap")
+	require.NoError(t, err)
+
+	msg := dynamicpb.NewMessage(wrap.(protoreflect.MessageDescriptor))
+	unknown := &anypb.Any{TypeUrl: "type.googleapis.com/nope.X", Value: []byte{0x0a, 0x01, 'x'}}
+	msg.Set(msg.Descriptor().Fields().ByName("any"), protoreflect.ValueOfMessage(unknown.ProtoReflect()))
+
+	stream, err := m.MustDial().NewStream(t.Context(), &grpc.StreamDesc{ClientStreams: true, ServerStreams: true}, "/wrap.Wrapper/Chat")
+	require.NoError(t, err)
+	require.NoError(t, stream.SendMsg(msg))
+	require.NoError(t, stream.CloseSend())
+
+	for {
+		if err := stream.RecvMsg(dynamicpb.NewMessage(wrap.(protoreflect.MessageDescriptor))); err != nil {
+			require.ErrorIs(t, err, io.EOF, "the client got the mock's answer")
+			break
+		}
+	}
+
+	e := onlyCall(t, m, journal.Query{})
+	require.Equal(t, journal.OutcomeFailed, e.Outcome)
+	require.Empty(t, e.Body)
+	require.Contains(t, e.Message, "bidi streaming: ")
+	require.Contains(t, e.Message, "nope.X")
 }

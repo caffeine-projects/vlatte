@@ -39,7 +39,7 @@ func (s *Schema[T]) Load(dst *T, sources []Source) (map[string]Value, error) {
 // after =, or as the next argument.
 func (s *Schema[T]) LoadOnly(dst *T, sources []Source) (map[string]Value, error) {
 	only := s.catalog
-	only.only = true
+	only.loadOnly = true
 
 	return s.load(&only, dst, sources)
 }

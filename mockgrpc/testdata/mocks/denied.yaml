@@ -1,0 +1,9 @@
+request:
+  method: protobuf.TestService/Greetings
+  message: {message: denied}
+response:
+  status:
+    code: permission_denied
+    message: "no"
+    details:
+      - {"@type": type.googleapis.com/google.rpc.ErrorInfo, reason: NOT_ALLOWED, domain: test}

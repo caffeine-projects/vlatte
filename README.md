@@ -1,6 +1,6 @@
 # vlatte
 
-Mock HTTP and gRPC servers for Go tests, and a CLI that serves HTTP mocks from files.
+Mock HTTP and gRPC servers for Go tests, and a CLI that serves HTTP and gRPC mocks from files.
 
 ## Install
 
@@ -54,7 +54,98 @@ func TestHello(t *testing.T) {
 }
 ```
 
-`mockhttp.New` does the same as `MustNew` but returns an error instead of panicking. Pass `mockhttp.Setup()` to either one to configure the server: its address, TLS, CORS, proxying or recording, for example. The `mockgrpc` package offers the same for gRPC services.
+`mockhttp.New` does the same as `MustNew` but returns an error instead of panicking. Pass `mockhttp.Setup()` to either one to configure the server: its address, TLS, CORS, proxying or recording, for example. The `mockgrpc` package offers the same for gRPC services: see [Mock gRPC calls](#mock-grpc-calls).
+
+## Mock gRPC calls
+
+A gRPC mock server serves any method of the services whose generated code the program imports: it needs no implementation registered. A mock names its method, matches the calls, and answers them, whatever their type: unary, server streaming, client streaming or bidi streaming.
+
+```go
+func TestGreeter(t *testing.T) {
+	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory()) // no port: only m.Dial reaches it
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockgrpc.Method("greeter.Greeter/SayHello").
+		Header("x-team", match.Equal("core")).
+		Field("name", match.Equal("ann")).
+		Reply(mockgrpc.Message(&pb.HelloReply{Message: "hi ann"})))
+
+	client := pb.NewGreeterClient(m.MustDial()) // closed with the server
+	res, err := client.SayHello(metadata.AppendToOutgoingContext(t.Context(), "x-team", "core"), &pb.HelloRequest{Name: "ann"})
+	// ...
+}
+```
+
+**Methods.** `Method` takes a method by whole segments of its full method: `SayHello`, `Greeter/SayHello`, `greeter.Greeter/SayHello`, or the full method, such as `pb.Greeter_SayHello_FullMethodName`. A mock fails to build, rather than wait for calls that never come, when its name names no method (`mockgrpc.ErrUnknownMethod`: a typo), or methods of different call types (`mockgrpc.ErrAmbiguousMethod`: name the service). A call of a method no descriptor describes answers `Unimplemented`.
+
+**Matchers.** They read the call's metadata and its request, as protojson writes it, with the field names of the `.proto` file: enums by name, `int64` values as text, timestamps in RFC 3339.
+
+| Matcher | Matches |
+|---|---|
+| `Header(key, m)` | A metadata key. |
+| `Field(path, m)` | The request at a JSON path, such as `user_id` or `items[0].key`. A client stream's request is the array of its messages: `$[0].key`. |
+| `Message(msg)`, `Messages(msgs...)` | A request equal to `msg` by `proto.Equal`; a client stream's messages, in order. |
+| `JSON(text)` | A request equal to the message `text` holds, read as protojson reads it, so `{"count": 42}` and `{"count": "42"}` match the same call. |
+| `Body(m)` | The request as JSON text, such as `match.Contain("ann")`. |
+| `CallMatches(fn)` | A call `fn` reports true for. |
+
+A client streaming call matches once the client closed its side, on all its messages. A bidi call matches as it starts, on its method and metadata: its `Bidi` reply matches each message.
+
+**Replies.**
+
+| Reply | Answers |
+|---|---|
+| `Message(msg)` | A message, which must be of the method's output type. |
+| `Messages(msgs...)` | The messages of a server or bidi stream, in turn. |
+| `JSON(texts...)` | The messages `texts` hold, in the method's output type. |
+| `Template(texts...)` | Like `JSON`, rendered for each call: `{"message": "hi {{ .Request.Message.name }}"}`, with `.Request.Header` and `.Parameters`. |
+| `Status(code, msg)` | A status, with no message. |
+| `Bidi()` | A bidi stream, message by message: `On(matcher, reply)`, `Otherwise(reply)`, `OnEnd(reply)`. |
+| `Func(fn)` | Whatever `fn` sends through the call, for anything else. |
+
+A reply's `Header` and `Trailer` add metadata, `Status` ends a stream with a status after its messages, `Details` adds `errdetails` messages to it, and `MessageDelay` waits before each message. `Build` checks a reply against the method: its messages' type, and that a unary or client streaming method gets one message, or a status.
+
+```go
+m.MustMock(mockgrpc.Method("Users/Get").
+	Reply(mockgrpc.Status(codes.InvalidArgument, "bad id").
+		Details(&errdetails.BadRequest{FieldViolations: []*errdetails.BadRequest_FieldViolation{{Field: "id"}}})))
+
+m.MustMock(mockgrpc.Method("Feed/Watch").
+	Reply(mockgrpc.Messages(&pb.Event{Id: "1"}, &pb.Event{Id: "2"}).
+		MessageDelay(100 * time.Millisecond).
+		Status(codes.Unavailable, "restarting")))
+
+m.MustMock(mockgrpc.Method("Chat/Talk").Reply(mockgrpc.Bidi().
+	On(match.Field("text", match.Equal("hi")), mockgrpc.Message(&pb.Line{Text: "hello"})).
+	Otherwise(mockgrpc.JSON(`{"text": "?"}`)).
+	OnEnd(mockgrpc.Message(&pb.Line{Text: "bye"}))))
+```
+
+**Mock features.** As HTTP mocks, gRPC mocks have an `ID`, a `Name` and a `Priority`, can start `Enabled(false)`, serve a number of calls with `Times` and `Once`, take part in scenarios with `StartScenario`, `ScenarioIs`, `ScenarioStateIs` and `ScenarioStateWillBe`, wait before replying with `Delay` and `DelayFunc`, and run [on_complete events](#webhooks), such as webhooks, with `OnCompleteEvent`, and callbacks with `Callback`. An answer with a status counts as the mock's answer, for `Times` and scenarios too.
+
+**Descriptors.** A server without the generated code of a service serves it from its descriptors, with messages of dynamic types: `Setup().Descriptors("api.binpb")` loads descriptor sets, as `protoc --descriptor_set_out=api.binpb --include_imports` or `buf build -o api.binpb` write them, and `Setup().Files(files)` takes a `*protoregistry.Files`.
+
+**Mock files.** `Setup().MockFiles("testdata/grpc/*.yaml")` loads gRPC mock files at `Start`, and `m.Reload()` again; `mockgrpc.FromFile` and `FromBytes` build one. Their keys mirror the Go API, and [`mockgrpc/schema/grpc.schema.json`](mockgrpc/schema/grpc.schema.json) describes them for editors:
+
+```yaml
+id: denied
+priority: 1
+request:
+  method: users.Users/Get
+  header: {authorization: [hasprefix, "Bearer "]}
+  fields: {id: [regex, "^u-"]}
+response:
+  status:
+    code: PERMISSION_DENIED
+    message: not yours
+    details:
+      - {"@type": type.googleapis.com/google.rpc.ErrorInfo, reason: NOT_OWNER}
+```
+
+`request.message` and `request.messages` match whole messages, `request.body` takes a matcher of the request's JSON. `response` takes `message`, `messages`, `body_file` (a JSON file of a message or a list of them), `template`, `header`, `trailer`, `status` and `message_delay`; `bidi` takes `header`, `trailer`, `on` (rules of `when` and `response`), `otherwise` and `on_end`. `delay`, `repeat`, `scenario` and `on_complete` work as in HTTP mock files.
+
+**More.** `Setup().Reflection()` serves server reflection, so `grpcurl` lists the services and describes their messages. A server keeps a [journal](#request-journal) of its calls with `Setup().Journal(dir)`, which tests verify with the same builders, serves an [admin API](#admin-api) with `Setup().Admin(admin.MustNew())`, and answers a call no mock matched with `Setup().NoMatchCode(code)`, `NotFound` by default. `Close` waits for the calls in flight up to `Setup().ShutdownTimeout(d)`, 5s by default, then cuts them.
 
 ## Packages
 
@@ -656,9 +747,9 @@ m.MustStart()
 fmt.Println(m.AdminURL()) // http://127.0.0.1:8081
 ```
 
-A gRPC server serves the same admin API with `mockgrpc.Setup().Admin(admin.MustNew(...))`: what gRPC mocks can't do, such as being added from a mock file, answers `501`. An `Admin` serves one mock server. A server that doesn't ask for an admin API links neither it nor what it serves with.
+A gRPC server serves the same admin API with `mockgrpc.Setup().Admin(admin.MustNew(...))`, with gRPC mock files: what gRPC mocks can't do, recording, answers `501`. An `Admin` serves one mock server. A server that doesn't ask for an admin API links neither it nor what it serves with.
 
-The `vlatte` command serves the admin API by default: `admin: false` (`--admin=false`, `VLATTE_ADMIN=false`) turns it off, and `admin.addr` (`--admin-addr`, `VLATTE_ADMIN_ADDR`) sets its address. These settings are the command's: a server made in Go ignores them, even in a `.vlatterc` it shares with the command, and serves an admin API only when its code asks for one.
+The `vlatte` command serves the admin API by default: `admin: false` (`--admin=false`, `VLATTE_ADMIN=false`) turns it off, and `admin.addr` (`--admin-addr`, `VLATTE_ADMIN_ADDR`) sets its address. Its gRPC server serves an admin API of its own, which `grpc.admin: false` (`--grpc-admin=false`) turns off and `grpc.admin.addr` (`--grpc-admin-addr`) places. These settings are the command's: a server made in Go ignores them, even in a `.vlatterc` it shares with the command, and serves an admin API only when its code asks for one.
 
 | Route | What it does |
 |---|---|
@@ -781,9 +872,9 @@ A `journal.Query`, of package `github.com/caffeine-projects/vlatte/journal`, sel
 
 Patterns are the request part of a mock builder, such as `mockhttp.Request()`: the server rebuilds each request from the journal and matches it, through its body parsers. A pattern has no `Times`, `Once` or scenario, which count served requests rather than match one, and no `ClientIP`: a rebuilt request has no `RemoteAddr`, nor TLS state for a `RequestMatches` predicate.
 
-gRPC servers keep the same journal with `mockgrpc.Setup().Journal(dir)`: a call's path is its full method, such as `/pkg.Service/Method`, its headers its metadata, its body its request message as JSON, which `match.Field` and `match.JSONPath` read, and its status its code, the one the client got, after every interceptor of `ServerOptions`. Its answer's `vlatte-request-id` header names its entry. gRPC has no request patterns.
+gRPC servers keep the same journal with `mockgrpc.Setup().Journal(dir)`: a call's path is its full method, such as `/pkg.Service/Method`, its headers its metadata, its body its request message as JSON, which `match.Field` and `match.JSONPath` read, and its status its code, the one the client got, after every interceptor of `ServerOptions`. Its answer's `vlatte-request-id` header names its entry. A client or bidi stream's body is the JSON array of the messages its client sent. Patterns are gRPC mock builders, such as `mockgrpc.Method("Greetings").Field("message", match.Equal("hi"))`, and the admin API's `request` key takes the request part of a gRPC mock file.
 - With a journal, a stream interceptor goes through `grpc.ChainStreamInterceptor`: the journal takes `grpc.StreamInterceptor`, which grpc runs before every other, and `New` fails with `mockgrpc.ErrStreamInterceptorSlot` when `ServerOptions` sets it. A unary interceptor goes either way.
-- A call an interceptor answers itself isn't journaled, nor one grpc answers before any interceptor, such as a call of an unknown method, or one whose request it can't decode.
+- A call an interceptor answers itself isn't journaled, nor one grpc answers before any interceptor, such as one whose request it can't decode. A call of a method no descriptor describes is journaled as unmatched.
 - A unary reply grpc fails to send once every interceptor returned, such as one larger than a `grpc.MaxSendMsgSize` set, keeps the code they returned.
 - A service registered on `GRPCServer()`, past the server, has its unary calls journaled within the interceptors, with the code its mocks answered with, which `Start` warns of: register services with `RegisterService`, or `pb.RegisterGreeterServer(m, ...)`.
 
@@ -850,7 +941,7 @@ CLOSEST MOCKS
 
 The report runs no matcher twice: it goes on from the part where matching stopped, which a mock differs in, so it runs only the matchers matching never reached, the action of a `match.Peek` among them. It runs none that keeps state, such as a scenario's, which it lists as not checked. A mock that wants the request but is used up, by its `Times`, differs in `times` only, and comes first. `near_misses: false`, `--near-misses=false` or `mockhttp.Setup().NoNearMisses()` turns it off.
 
-A gRPC server answers `NotFound` when no mock matches, and `Internal` when serving a call fails, with the same values in the `vlatte-error` trailer. A mock that answers with a status, as `Unary().Status(...)` does, gets no trailer: that status is its answer.
+A gRPC server answers `NotFound` when no mock matches (`Setup().NoMatchCode` sets another), `Unimplemented` for a method no descriptor describes, and `Internal` when serving a call fails, with the same values in the `vlatte-error` trailer. A mock that answers with a status, as `Status(...)` does, gets no trailer: that status is its answer.
 
 ## Debug headers
 
@@ -973,6 +1064,14 @@ curl -X POST -H 'Content-Type: application/json' \
 ```
 
 The command keeps the mocks its admin API adds in `{workdir}/_admin`, as [persistent admin mocks](#persistent-admin-mocks), so the next run serves them: `--admin-dir` moves them, and `--admin-dir=""` keeps them in memory.
+
+It serves gRPC mocks too, when a setting of the `grpc` section is set, as `--grpc-*` flags, `VLATTE_GRPC_*` variables, or `grpc:` in `.vlatterc`. It listens on `:50051`, unless `--grpc-addr` says, serves the services of the descriptor sets `--grpc-descriptors` names, from the mock files `--grpc-mock-files` names, with server reflection, an admin API of its own, which it prints, and a journal of its calls:
+
+```sh
+protoc --descriptor_set_out=api.binpb --include_imports api.proto
+vlatte --grpc-descriptors=api.binpb --grpc-mock-files='mocks/grpc/*.yaml'
+grpcurl -plaintext -d '{"id": "u-1"}' localhost:50051 users.Users/Get
+```
 
 It keeps a [journal](#request-journal) of the requests it serves in `{workdir}/_journal`, across restarts, which the admin API queries: `--journal-dir` moves it, `--journal-dir=""` keeps it in a temporary directory, and `--journal=false` turns it off. Two commands can't share a journal directory: give each a `--name`, which gives it a [work directory](#work-directory) of its own, `testdata/vlatte/<name>`. The journal holds the requests it got, secrets included: its directory ignores its files in git.
 

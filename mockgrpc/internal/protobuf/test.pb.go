@@ -9,6 +9,7 @@ package protobuf
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -20,6 +21,55 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
+
+type Color int32
+
+const (
+	Color_COLOR_UNSPECIFIED Color = 0
+	Color_COLOR_RED         Color = 1
+	Color_COLOR_BLUE        Color = 2
+)
+
+// Enum value maps for Color.
+var (
+	Color_name = map[int32]string{
+		0: "COLOR_UNSPECIFIED",
+		1: "COLOR_RED",
+		2: "COLOR_BLUE",
+	}
+	Color_value = map[string]int32{
+		"COLOR_UNSPECIFIED": 0,
+		"COLOR_RED":         1,
+		"COLOR_BLUE":        2,
+	}
+)
+
+func (x Color) Enum() *Color {
+	p := new(Color)
+	*p = x
+	return p
+}
+
+func (x Color) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Color) Descriptor() protoreflect.EnumDescriptor {
+	return file_test_proto_enumTypes[0].Descriptor()
+}
+
+func (Color) Type() protoreflect.EnumType {
+	return &file_test_proto_enumTypes[0]
+}
+
+func (x Color) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Color.Descriptor instead.
+func (Color) EnumDescriptor() ([]byte, []int) {
+	return file_test_proto_rawDescGZIP(), []int{0}
+}
 
 type HiReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -197,12 +247,152 @@ func (x *ListItem) GetKey() string {
 	return ""
 }
 
+// Rich holds the kinds of fields whose JSON form protojson decides: names, enums, int64, oneofs, maps, nested
+// messages and well-known types.
+type Rich struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	UserId string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Count  int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	Color  Color                  `protobuf:"varint,3,opt,name=color,proto3,enum=protobuf.Color" json:"color,omitempty"`
+	// Types that are valid to be assigned to Choice:
+	//
+	//	*Rich_Name
+	//	*Rich_Code
+	Choice        isRich_Choice          `protobuf_oneof:"choice"`
+	Labels        map[string]string      `protobuf:"bytes,6,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Nested        *HiReq                 `protobuf:"bytes,7,opt,name=nested,proto3" json:"nested,omitempty"`
+	At            *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=at,proto3" json:"at,omitempty"`
+	Tags          []string               `protobuf:"bytes,9,rep,name=tags,proto3" json:"tags,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Rich) Reset() {
+	*x = Rich{}
+	mi := &file_test_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Rich) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Rich) ProtoMessage() {}
+
+func (x *Rich) ProtoReflect() protoreflect.Message {
+	mi := &file_test_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Rich.ProtoReflect.Descriptor instead.
+func (*Rich) Descriptor() ([]byte, []int) {
+	return file_test_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *Rich) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *Rich) GetCount() int64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *Rich) GetColor() Color {
+	if x != nil {
+		return x.Color
+	}
+	return Color_COLOR_UNSPECIFIED
+}
+
+func (x *Rich) GetChoice() isRich_Choice {
+	if x != nil {
+		return x.Choice
+	}
+	return nil
+}
+
+func (x *Rich) GetName() string {
+	if x != nil {
+		if x, ok := x.Choice.(*Rich_Name); ok {
+			return x.Name
+		}
+	}
+	return ""
+}
+
+func (x *Rich) GetCode() int32 {
+	if x != nil {
+		if x, ok := x.Choice.(*Rich_Code); ok {
+			return x.Code
+		}
+	}
+	return 0
+}
+
+func (x *Rich) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+func (x *Rich) GetNested() *HiReq {
+	if x != nil {
+		return x.Nested
+	}
+	return nil
+}
+
+func (x *Rich) GetAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.At
+	}
+	return nil
+}
+
+func (x *Rich) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+type isRich_Choice interface {
+	isRich_Choice()
+}
+
+type Rich_Name struct {
+	Name string `protobuf:"bytes,4,opt,name=name,proto3,oneof"`
+}
+
+type Rich_Code struct {
+	Code int32 `protobuf:"varint,5,opt,name=code,proto3,oneof"`
+}
+
+func (*Rich_Name) isRich_Choice() {}
+
+func (*Rich_Code) isRich_Choice() {}
+
 var File_test_proto protoreflect.FileDescriptor
 
 const file_test_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"test.proto\x12\bprotobuf\"!\n" +
+	"test.proto\x12\bprotobuf\x1a\x1fgoogle/protobuf/timestamp.proto\"!\n" +
 	"\x05HiReq\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"!\n" +
 	"\x05HiRes\x12\x18\n" +
@@ -210,10 +400,35 @@ const file_test_proto_rawDesc = "" +
 	"\aListReq\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"\x1c\n" +
 	"\bListItem\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key2q\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\"\xea\x02\n" +
+	"\x04Rich\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\x12%\n" +
+	"\x05color\x18\x03 \x01(\x0e2\x0f.protobuf.ColorR\x05color\x12\x14\n" +
+	"\x04name\x18\x04 \x01(\tH\x00R\x04name\x12\x14\n" +
+	"\x04code\x18\x05 \x01(\x05H\x00R\x04code\x122\n" +
+	"\x06labels\x18\x06 \x03(\v2\x1a.protobuf.Rich.LabelsEntryR\x06labels\x12'\n" +
+	"\x06nested\x18\a \x01(\v2\x0f.protobuf.HiReqR\x06nested\x12*\n" +
+	"\x02at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12\x12\n" +
+	"\x04tags\x18\t \x03(\tR\x04tags\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\b\n" +
+	"\x06choice*=\n" +
+	"\x05Color\x12\x15\n" +
+	"\x11COLOR_UNSPECIFIED\x10\x00\x12\r\n" +
+	"\tCOLOR_RED\x10\x01\x12\x0e\n" +
+	"\n" +
+	"COLOR_BLUE\x10\x022\x81\x02\n" +
 	"\vTestService\x12/\n" +
 	"\tGreetings\x12\x0f.protobuf.HiReq\x1a\x0f.protobuf.HiRes\"\x00\x121\n" +
-	"\x04List\x12\x11.protobuf.ListReq\x1a\x12.protobuf.ListItem\"\x000\x01B@Z>github.com/caffeine-projects/vlatte/mockgrpc/internal/protobufb\x06proto3"
+	"\x04List\x12\x11.protobuf.ListReq\x1a\x12.protobuf.ListItem\"\x000\x01\x121\n" +
+	"\x06Upload\x12\x12.protobuf.ListItem\x1a\x0f.protobuf.HiRes\"\x00(\x01\x12.\n" +
+	"\x04Chat\x12\x0f.protobuf.HiReq\x1a\x0f.protobuf.HiRes\"\x00(\x010\x01\x12+\n" +
+	"\aInspect\x12\x0e.protobuf.Rich\x1a\x0e.protobuf.Rich\"\x002n\n" +
+	"\fOtherService\x12/\n" +
+	"\tGreetings\x12\x0f.protobuf.HiReq\x1a\x0f.protobuf.HiRes\"\x00\x12-\n" +
+	"\aInspect\x12\x0e.protobuf.Rich\x1a\x0e.protobuf.Rich\"\x00(\x01B@Z>github.com/caffeine-projects/vlatte/mockgrpc/internal/protobufb\x06proto3"
 
 var (
 	file_test_proto_rawDescOnce sync.Once
@@ -227,23 +442,42 @@ func file_test_proto_rawDescGZIP() []byte {
 	return file_test_proto_rawDescData
 }
 
-var file_test_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_test_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_test_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_test_proto_goTypes = []any{
-	(*HiReq)(nil),    // 0: protobuf.HiReq
-	(*HiRes)(nil),    // 1: protobuf.HiRes
-	(*ListReq)(nil),  // 2: protobuf.ListReq
-	(*ListItem)(nil), // 3: protobuf.ListItem
+	(Color)(0),                    // 0: protobuf.Color
+	(*HiReq)(nil),                 // 1: protobuf.HiReq
+	(*HiRes)(nil),                 // 2: protobuf.HiRes
+	(*ListReq)(nil),               // 3: protobuf.ListReq
+	(*ListItem)(nil),              // 4: protobuf.ListItem
+	(*Rich)(nil),                  // 5: protobuf.Rich
+	nil,                           // 6: protobuf.Rich.LabelsEntry
+	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
 }
 var file_test_proto_depIdxs = []int32{
-	0, // 0: protobuf.TestService.Greetings:input_type -> protobuf.HiReq
-	2, // 1: protobuf.TestService.List:input_type -> protobuf.ListReq
-	1, // 2: protobuf.TestService.Greetings:output_type -> protobuf.HiRes
-	3, // 3: protobuf.TestService.List:output_type -> protobuf.ListItem
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	0,  // 0: protobuf.Rich.color:type_name -> protobuf.Color
+	6,  // 1: protobuf.Rich.labels:type_name -> protobuf.Rich.LabelsEntry
+	1,  // 2: protobuf.Rich.nested:type_name -> protobuf.HiReq
+	7,  // 3: protobuf.Rich.at:type_name -> google.protobuf.Timestamp
+	1,  // 4: protobuf.TestService.Greetings:input_type -> protobuf.HiReq
+	3,  // 5: protobuf.TestService.List:input_type -> protobuf.ListReq
+	4,  // 6: protobuf.TestService.Upload:input_type -> protobuf.ListItem
+	1,  // 7: protobuf.TestService.Chat:input_type -> protobuf.HiReq
+	5,  // 8: protobuf.TestService.Inspect:input_type -> protobuf.Rich
+	1,  // 9: protobuf.OtherService.Greetings:input_type -> protobuf.HiReq
+	5,  // 10: protobuf.OtherService.Inspect:input_type -> protobuf.Rich
+	2,  // 11: protobuf.TestService.Greetings:output_type -> protobuf.HiRes
+	4,  // 12: protobuf.TestService.List:output_type -> protobuf.ListItem
+	2,  // 13: protobuf.TestService.Upload:output_type -> protobuf.HiRes
+	2,  // 14: protobuf.TestService.Chat:output_type -> protobuf.HiRes
+	5,  // 15: protobuf.TestService.Inspect:output_type -> protobuf.Rich
+	2,  // 16: protobuf.OtherService.Greetings:output_type -> protobuf.HiRes
+	5,  // 17: protobuf.OtherService.Inspect:output_type -> protobuf.Rich
+	11, // [11:18] is the sub-list for method output_type
+	4,  // [4:11] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_test_proto_init() }
@@ -251,18 +485,23 @@ func file_test_proto_init() {
 	if File_test_proto != nil {
 		return
 	}
+	file_test_proto_msgTypes[4].OneofWrappers = []any{
+		(*Rich_Name)(nil),
+		(*Rich_Code)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_test_proto_rawDesc), len(file_test_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   4,
+			NumEnums:      1,
+			NumMessages:   6,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_test_proto_goTypes,
 		DependencyIndexes: file_test_proto_depIdxs,
+		EnumInfos:         file_test_proto_enumTypes,
 		MessageInfos:      file_test_proto_msgTypes,
 	}.Build()
 	File_test_proto = out.File

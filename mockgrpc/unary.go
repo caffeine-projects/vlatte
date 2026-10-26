@@ -2,180 +2,40 @@ package mockgrpc
 
 import (
 	"context"
-	json "encoding/json/v2"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/adminapi"
 )
 
-var (
-	_ UnaryReplierFactory = (*UnaryReply)(nil)
-	_ UnaryReplier        = (*unaryReplier)(nil)
-)
-
-type UnaryValueSelectorIn struct {
-	RequestMessage any
-	Info           *grpc.UnaryServerInfo
-}
-
-type UnaryRequestValues struct {
-	RequestMessage any
-	Info           *grpc.UnaryServerInfo
-	RawBody        any
-	App            *Server
-}
-
-type UnaryResponse struct {
-	Header  metadata.MD
-	Trailer metadata.MD
-	Message any
-	Status  *status.Status
-}
-
+// UnaryInterceptor serves the unary calls of the services registered on the server, whose handlers grpc runs it in:
+// grpc decoded the request message already.
 func (in *interceptors) UnaryInterceptor(
 	ctx context.Context,
-	reqMsg any,
+	req any,
 	info *grpc.UnaryServerInfo,
 	_ grpc.UnaryHandler,
 ) (any, error) {
-	call := callOf(ctx)
-	call.serve(ctx)
-
-	// Proto3 treats zero values as unset, so leave them out as protojson does.
-	b, err := json.Marshal(reqMsg, json.OmitZeroStructFields(true), json.Deterministic(true))
-	if err != nil {
-		return nil, fail(ctx, vlatte.FailureMatch, codes.Internal, "unary: encoding the request message: %v", err)
+	// The services the server implements itself, such as reflection, have no unary methods.
+	md, ok := in.app.resolver.method(info.FullMethod)
+	if !ok {
+		return nil, in.unknown(ctx, info.FullMethod)
 	}
 
-	em, err := in.app.storage.List(ctx)
-	if err != nil {
-		return nil, fail(ctx, vlatte.FailureMatch, codes.Internal, "unary: listing mocks: %v", err)
+	msg, ok := req.(proto.Message)
+	if !ok {
+		return nil, fail(ctx, vlatte.FailureMatch, codes.Internal, "grpc: the request of %s is a %T, not a protobuf "+
+			"message", info.FullMethod, req)
 	}
 
-	rawBody := string(b)
-	call.request(b)
+	call := newCall(in.app, info.FullMethod, md, incoming(ctx), nil)
+	call.message = msg
 
-	sub := vlatte.NewExplanation()
-	mocks := vlatte.Mocks[*Mock, *UnaryValueSelectorIn](ofKind(em, func(m *Mock) bool { return m.unaryReply != nil }))
-	input := &UnaryValueSelectorIn{rawBody, info}
-	evals := func(m *Mock) vlatte.Evaluators[*Mock, *UnaryValueSelectorIn] { return m.unaryExpectations }
-
-	// Only the journal reports near misses: a call's status carries no more than its message. They go on from where
-	// matching stopped, so no matcher runs twice for the call.
-	var misses *vlatte.Misses[*Mock, *UnaryValueSelectorIn]
-	if call != nil && !in.app.config.NoNearMisses {
-		misses = new(vlatte.Misses[*Mock, *UnaryValueSelectorIn])
-	}
-
-	mock, pass, err := mocks.Find(ctx, sub, input, evals, misses)
-	if err != nil {
-		return nil, fail(ctx, vlatte.FailureMatch, codes.Internal, "unary: finding a mock: %v", err)
-	}
-
-	if !pass {
-		var near []vlatte.NearMiss
-		if misses != nil {
-			near = misses.NearMisses(ctx, describeEval)
-		}
-
-		call.unmatched(near)
-
-		in.app.publish(adminapi.EventUnmatched, info.FullMethod, nil, nil)
-		return nil, fail(ctx, vlatte.FailureNoMatch, codes.NotFound, "unary: request was not matched with any mock")
-	}
-
-	call.matched(mock)
-
-	// The header goes out with the reply's own, or with its status.
-	if !in.app.config.NoDebugHeaders {
-		_ = grpc.SetHeader(ctx, debugHeader(mock))
-	}
-
-	rv := &UnaryRequestValues{reqMsg, info, rawBody, in.app}
-	res, err := mock.unaryReply.Reply(ctx, rv)
-	call.replied(ctx, err)
-
-	if err != nil {
-		in.app.publishReply(info.FullMethod, mock, err)
-		return nil, replyError(ctx, "unary", mock, err)
-	}
-
-	mock.Inc()
-	in.app.publish(adminapi.EventMatched, info.FullMethod, mock, nil)
-
-	return res, nil
-}
-
-// UnaryReply describes the reply of a unary mock: its header, trailer, and message or status. It is a
-// UnaryReplierFactory: each mock built with it gets a replier of its own, so changing it after Mock changes only the
-// mocks built afterwards. It keeps the message it is given without copying it: don't change it afterwards.
-type UnaryReply struct {
-	response *UnaryResponse
-}
-
-func Unary() *UnaryReply {
-	return &UnaryReply{response: &UnaryResponse{
-		Header:  make(metadata.MD),
-		Trailer: make(metadata.MD),
-	}}
-}
-
-func (u *UnaryReply) Status(st *status.Status) *UnaryReply {
-	u.response.Status = st
-	return u
-}
-
-func (u *UnaryReply) Header(k string, v ...string) *UnaryReply {
-	u.response.Header.Append(k, v...)
-	return u
-}
-
-func (u *UnaryReply) Trailer(k string, v ...string) *UnaryReply {
-	u.response.Trailer.Append(k, v...)
-	return u
-}
-
-func (u *UnaryReply) Message(msg any) *UnaryReply {
-	u.response.Message = msg
-	return u
-}
-
-// NewReplier implements UnaryReplierFactory. The replier has a header and trailer of its own.
-func (u *UnaryReply) NewReplier(*Server) (UnaryReplier, error) {
-	return &unaryReplier{response: UnaryResponse{
-		Header:  u.response.Header.Copy(),
-		Trailer: u.response.Trailer.Copy(),
-		Message: u.response.Message,
-		Status:  u.response.Status,
-	}}, nil
-}
-
-// unaryReplier serves the calls of one unary mock. UnaryReply.NewReplier makes it, and calls only read it: gRPC sends
-// the header and trailer without writing into them.
-type unaryReplier struct {
-	response UnaryResponse
-}
-
-// Reply implements UnaryReplier.
-func (r *unaryReplier) Reply(ctx context.Context, _ *UnaryRequestValues) (any, error) {
-	err := grpc.SendHeader(ctx, r.response.Header)
-	if err != nil {
+	if err := in.serve(ctx, call); err != nil {
 		return nil, err
 	}
 
-	err = grpc.SetTrailer(ctx, r.response.Trailer)
-	if err != nil {
-		return nil, err
-	}
-
-	if r.response.Status != nil {
-		return nil, r.response.Status.Err()
-	}
-
-	return r.response.Message, nil
+	return call.answered(), nil
 }

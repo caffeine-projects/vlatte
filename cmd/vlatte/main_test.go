@@ -196,6 +196,7 @@ func TestRun_Help(t *testing.T) {
 		require.Contains(t, help, "completion", args)
 		require.Contains(t, help, "--log-level name", args)
 		require.Contains(t, help, "env VLATTE_LOG_LEVEL, file key log.level", args)
+		require.Contains(t, help, "env VLATTE_GRPC_ADDR, file key grpc.addr", args, "the gRPC settings too")
 	}
 }
 
@@ -204,11 +205,11 @@ func TestRun_HelpListsTheCommandsSettings(t *testing.T) {
 	var out bytes.Buffer
 	require.Equal(t, 0, run(context.Background(), []string{"--help"}, nil, &out, io.Discard))
 
-	for _, key := range []string{"admin", "admin.addr", "admin.dir"} {
+	for _, key := range []string{"admin", "admin.addr", "admin.dir", "grpc.admin", "grpc.admin.addr"} {
 		require.Equal(t, 1, strings.Count(out.String(), "file key "+key+"\n"), key)
 	}
 
-	require.Equal(t, 1, strings.Count(out.String(), "file key config\n"))
+	require.Equal(t, 2, strings.Count(out.String(), "file key config\n"), "the HTTP and the gRPC settings name the file")
 }
 
 func TestRun_SubcommandHelp(t *testing.T) {
@@ -1012,7 +1013,7 @@ func TestCLI_ServesMCPOnStdio(t *testing.T) {
 	var stderr lockedBuffer
 	done := make(chan int, 1)
 	go func() {
-		done <- run(context.Background(), []string{"mcp", "--addr", addr}, stdin, stdout, &stderr)
+		done <- run(context.Background(), []string{"mcp", "--addr", addr, "--grpc-addr", randomAddr(t)}, stdin, stdout, &stderr)
 		_ = stdout.Close()
 	}()
 
@@ -1034,6 +1035,7 @@ func TestCLI_ServesMCPOnStdio(t *testing.T) {
 	require.Equal(t, 0, <-done)
 	require.Contains(t, stderr.String(), _banner)
 	require.Contains(t, stderr.String(), "GET /added", "the server logs to stderr")
+	require.Contains(t, stderr.String(), "gRPC mocks: ", "and so does the gRPC server")
 }
 
 func TestCLI_MCPNeedsTheAdminAPIAndMCP(t *testing.T) {

@@ -233,3 +233,30 @@ func TestSchema_HiddenSettingsAreReadButNotListed(t *testing.T) {
 	require.Equal(t, "api", c.Name)
 	require.True(t, values["admin"].Bool)
 }
+
+func TestSkipAndOnly_ShareFilesAndEnvironmentWithAnotherSchema(t *testing.T) {
+	// Two servers read one config file and one environment: each reports what neither knows, and leaves the other's
+	// settings to it, where it would report them as unknown.
+	path := writeFile(t, t.TempDir(), "app.yaml", "name: api\nother: {addr: x}\nfeature: {size: 3}\n")
+	t.Setenv("APP_PORT", "81")
+	t.Setenv("APP_OTHER_ADDR", "y")
+
+	var c testConfig
+	_, err := testSchema().Skip("other").Load(&c, []Source{File("", path), Env("APP")})
+	require.NoError(t, err)
+	require.Equal(t, "api", c.Name)
+	require.Equal(t, int64(81), c.Port)
+
+	var only testConfig
+	_, err = testSchema().Only("feature").Load(&only, []Source{File("", path), Env("APP")})
+	require.NoError(t, err)
+	require.Empty(t, only.Name, "name is another schema's")
+	require.Zero(t, only.Port, "APP_PORT is another schema's")
+	require.Equal(t, int64(3), only.Feature.Size)
+
+	// What no schema reads is still reported.
+	t.Setenv("APP_NOPE", "1")
+
+	_, err = testSchema().Skip("other").Load(&c, []Source{Env("APP")})
+	require.Equal(t, CodeUnknownKey, requireProblems(t, err)[0].Code)
+}

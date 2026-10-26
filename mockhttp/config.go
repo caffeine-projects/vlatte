@@ -19,6 +19,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
+	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
@@ -623,7 +624,7 @@ func (cb *ConfigBuilder) Admin(api AdminAPI) *ConfigBuilder {
 // Journal keeps a journal of the requests the server serves, in dir, across restarts: see JournalConfig. Empty keeps
 // it in a temporary directory, which Close removes, as a test wants: a named one keeps the requests of earlier runs.
 func (cb *ConfigBuilder) Journal(dir string) *ConfigBuilder {
-	section(&cb.conf.Journal, defaultJournalConfig()).Dir = dir
+	config.Section(&cb.conf.Journal, defaultJournalConfig()).Dir = dir
 	return cb
 }
 
