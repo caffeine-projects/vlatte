@@ -1,0 +1,8 @@
+request:
+  method: GET
+  path: /reset
+response:
+  status: 200
+  body: hello
+wire_steps:
+  - type: connection_reset_by_peer

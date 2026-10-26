@@ -704,3 +704,38 @@ func TestMockFile_CustomProblems(t *testing.T) {
 		}
 	}
 }
+
+func TestMockFile_StepsProblems(t *testing.T) {
+	// A fault spec that can't be built fails the file, at its key, with what is wrong.
+	app := MustNew(Setup().Silent())
+	t.Cleanup(app.Close)
+
+	tests := []struct {
+		doc  string
+		key  string
+		want string
+	}{
+		{
+			"steps: [{type: slow_close, delay: 1s}, {type: bandwidth, rate: 0}]", "steps[1]",
+			"steps[1]: bandwidth needs a byte per second at least, not 0",
+		},
+		{
+			"wire_steps: [{type: nope}]", "wire_steps[0].type",
+			"wire_steps[0].type must be one of empty_response, malformed_response_chunk, random_data_then_close, " +
+				"connection_reset_by_peer, chunked_dribble_delay, latency, bandwidth, slicer, slow_close, timeout, " +
+				`limit_data or connection_reset_by_peer_after, not "nope"`,
+		},
+		{"upstream_steps: [{type: latency}]", "upstream_steps[0].latency", "upstream_steps[0].latency is required by a latency fault"},
+		{"steps: [{type: slow_close, dely: 1s, delay: 1s}]", "steps[0].dely", "steps[0].dely is not a known setting"},
+		{"steps: [[slow_close, 1s]]", "steps[0]", "steps[0] must be an object, such as {type: latency, latency: 300ms}, not a list"},
+		{"steps: empty_response", "steps", "steps must be a list, not a string"},
+	}
+
+	for _, tc := range tests {
+		_, err := decodeDoc(app, "request: {path: /f}\nresponse: {status: 200}\n"+tc.doc)
+		problems := mockProblems(t, err)
+		require.Len(t, problems, 1, tc.doc)
+		require.Equal(t, tc.key, problems[0].Key, tc.doc)
+		require.Equal(t, tc.want, problems[0].Message, tc.doc)
+	}
+}
