@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
@@ -57,11 +58,16 @@ type Server struct {
 	admin     *admin.Server       // nil without Config.Admin
 	events    *handler.Events     // the admin API's; nil without it
 
+	// internal names the services the server implements itself, such as reflection: the mocks don't serve them.
+	internal map[string]bool
+
 	mu      sync.Mutex // orders Start and Close, which a Close overlapping a Start would otherwise outrun
 	addr    string
 	served  chan struct{}
-	started bool // set by the first start: a server starts once
-	closed  bool // set by Close: a closed server doesn't start again
+	started bool              // set by the first start: a server starts once
+	closed  bool              // set by Close: a closed server doesn't start again
+	memory  *bufconn.Listener // the listener of an in-memory server, once it started
+	conns   []*grpc.ClientConn
 }
 
 // New creates a new gRPC mock Server with the given configurations.
@@ -166,10 +172,15 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	app.Base = vlatte.NewBase(app, store)
-	app.Verifier = journal.NewVerifier[*Mock, *Server](j, nil)
+	app.Verifier = journal.NewVerifier[*Mock, *Server](j, app)
 	app.storage = store
 	app.server = srv
 	app.journaled = make(map[string]bool)
+	app.internal = make(map[string]bool)
+
+	if conf.Reflection {
+		app.registerReflection()
+	}
 
 	if conf.ServiceDesc != nil && conf.Service != nil {
 		app.register(conf.ServiceDesc, conf.Service)
@@ -235,6 +246,12 @@ func (app *Server) Start() error {
 	app.started = true
 
 	lis := app.config.Listener
+
+	if app.config.InMemory {
+		app.memory = bufconn.Listen(_bufSize)
+		lis = app.memory
+	}
+
 	if lis == nil {
 		var err error
 		lis, err = net.Listen("tcp", app.config.Addr)
@@ -347,6 +364,8 @@ func (app *Server) Close() {
 	app.mu.Lock()
 	app.closed = true
 	served := app.served
+	conns := app.conns
+	app.conns = nil
 	app.mu.Unlock()
 
 	if app.admin != nil {
@@ -355,8 +374,12 @@ func (app *Server) Close() {
 		}
 	}
 
-	// The calls wait for their events: cancel the events first.
+	// The calls wait for their events: cancel the events first. The connections Dial made end their calls.
 	app.runner.Close()
+
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
 
 	if served != nil {
 		app.stop()

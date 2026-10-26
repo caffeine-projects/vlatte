@@ -167,12 +167,69 @@ func TestJournal_TheAnswerNamesItsCall(t *testing.T) {
 	require.Equal(t, journal.OutcomeUnmatched, e.Outcome)
 }
 
-func TestJournal_GRPCHasNoRequestPatterns(t *testing.T) {
-	// A gRPC call is verified by its fields: its protocol has no request patterns, and says so.
-	m, _ := journaled(t, Setup())
+func TestJournal_VerifiesCallsWithMockBuilders(t *testing.T) {
+	// A gRPC call was verified by the fields of its entry only: its protocol had no request patterns. A builder of
+	// its mocks is one now, matched as it matches a call, on the request the journal kept.
+	m, c := journaled(t, Setup())
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
 
-	_, err := m.CountRequests(t.Context(), journal.Query{}, Method("Greetings"))
-	require.ErrorIs(t, err, journal.ErrNoRequestPatterns)
+	for _, msg := range []string{"hi", "hi", "bye"} {
+		ctx := metadata.AppendToOutgoingContext(t.Context(), "x-team", "core")
+		_, err := c.Greetings(ctx, &pb.HiReq{Message: msg})
+		require.NoError(t, err)
+	}
+
+	require.True(t, m.AssertRequested(t.Context(), t, 2, journal.Query{},
+		Method("Greetings").Field("message", match.Equal("hi")).Header("x-team", match.Equal("core"))))
+	require.True(t, m.AssertRequested(t.Context(), t, 1, journal.Query{}, Method("Greetings").Message(&pb.HiReq{Message: "bye"})))
+	require.True(t, m.AssertNotRequested(t.Context(), t, journal.Query{}, Method("List")))
+
+	_, err := m.CountRequests(t.Context(), journal.Query{}, Method("Greetings").Once())
+	require.ErrorContains(t, err, "a request pattern has no Times or Once")
+
+	_, err = m.CountRequests(t.Context(), journal.Query{}, Method("Nope"))
+	require.ErrorIs(t, err, ErrUnknownMethod)
+}
+
+func TestJournal_VerifiesClientStreamsByAllTheirMessages(t *testing.T) {
+	m, c := journaled(t, Setup())
+	m.MustMock(Method("Upload").Reply(Message(&pb.HiRes{})))
+
+	_, code := upload(t, c, "a", "b")
+	require.Equal(t, codes.OK, code)
+
+	require.True(t, m.AssertRequested(t.Context(), t, 1, journal.Query{},
+		Method("Upload").Messages(&pb.ListItem{Key: "a"}, &pb.ListItem{Key: "b"})))
+	require.True(t, m.AssertRequested(t.Context(), t, 1, journal.Query{}, Method("Upload").Field("$[1].key", match.Equal("b"))))
+}
+
+func TestJournal_APatternOfACutRequestCantTell(t *testing.T) {
+	// The journal kept part of a request: a pattern that reads it can't tell whether it matched, and says so.
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Logger(&logger), &journalSize{max: 10})
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
+
+	_, err := pb.NewTestServiceClient(dial(t, m)).Greetings(t.Context(), &pb.HiReq{Message: "a long message, cut"})
+	require.NoError(t, err)
+
+	_, err = m.CountRequests(t.Context(), journal.Query{}, Method("Greetings").Field("message", match.Equal("x")))
+	require.ErrorIs(t, err, vlatte.ErrMatching)
+
+	n, err := m.CountRequests(t.Context(), journal.Query{}, Method("List").Field("message", match.Equal("x")))
+	require.NoError(t, err)
+	require.Zero(t, n, "a miss on the method is a miss")
+}
+
+// journalSize keeps a journal whose entries keep max bytes of their request.
+type journalSize struct {
+	max int64
+}
+
+func (j *journalSize) Apply(conf *Config) error {
+	conf.Journal = &JournalConfig{MaxBodySize: j.max}
+	return nil
 }
 
 func TestJournal_AServerThatNeverStartedRemovesItsJournal(t *testing.T) {

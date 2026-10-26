@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
@@ -270,29 +271,15 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		return nil, errNoReply
 	}
 
-	methods, err := app.resolver.find(b.method)
+	methods, expectations, err := b.request(app)
 	if err != nil {
 		return nil, err
-	}
-
-	if typeOf(methods[0]) == _bidiStream && b.readsRequest {
-		return nil, fmt.Errorf("mock: %s: %w", b.method, errBidiMatcher)
 	}
 
 	names := make([]string, len(methods))
 	for i, md := range methods {
 		names[i] = fullMethod(md)
 	}
-
-	// The method goes first: a call of another method misses on it, and its near misses say so.
-	expectations := make([]*vlatte.Eval[*Call], 0, len(b.expectations)+3)
-	expectations = append(expectations, &vlatte.Eval[*Call]{
-		Target:   int(_scopeMethod),
-		Key:      b.method,
-		Matcher:  methodIn(names),
-		Selector: selectMethod,
-	})
-	expectations = append(expectations, b.expectations...)
 
 	// The matchers that keep state for one mock are made for it: Times counts the calls of this mock only, and the
 	// scenario runs in the store of app.
@@ -342,6 +329,34 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		reply:        b.reply,
 		replier:      replier,
 	}, nil
+}
+
+// request returns the methods the builder names, and the matchers of its request: the method first, so a call of
+// another method misses on it, and its near misses say so.
+func (b *Builder) request(app *Server) ([]protoreflect.MethodDescriptor, []*vlatte.Eval[*Call], error) {
+	methods, err := app.resolver.find(b.method)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if typeOf(methods[0]) == _bidiStream && b.readsRequest {
+		return nil, nil, fmt.Errorf("mock: %s: %w", b.method, errBidiMatcher)
+	}
+
+	names := make([]string, len(methods))
+	for i, md := range methods {
+		names[i] = fullMethod(md)
+	}
+
+	expectations := make([]*vlatte.Eval[*Call], 0, len(b.expectations)+3)
+	expectations = append(expectations, &vlatte.Eval[*Call]{
+		Target:   int(_scopeMethod),
+		Key:      b.method,
+		Matcher:  methodIn(names),
+		Selector: selectMethod,
+	})
+
+	return methods, append(expectations, b.expectations...), nil
 }
 
 // messages matches the messages of the request, the value selectMessages gives, with msgs. key names the matcher in

@@ -29,6 +29,12 @@ type Config struct {
 	Addr          string
 	Listener      net.Listener // in place of listening on Addr: see ConfigBuilder.Listener
 
+	// InMemory serves the server in memory, in place of listening on Addr: see ConfigBuilder.InMemory.
+	InMemory bool
+
+	// Reflection serves the gRPC server reflection service: see ConfigBuilder.Reflection.
+	Reflection bool
+
 	// Logger is the server's logger. Nil builds one that writes to the standard output, at LogLevel.
 	Logger *zerolog.Logger
 
@@ -167,6 +173,19 @@ func (cb *ConfigBuilder) Addr(addr string) *ConfigBuilder {
 // Start takes it: Close, or a Start that fails, closes it, so nothing listens without a server behind it.
 func (cb *ConfigBuilder) Listener(l net.Listener) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.Listener = l })
+}
+
+// InMemory serves the server in memory, in place of listening on a port: only the connections of Server.Dial reach
+// it. Tests that run in parallel need no free port, and nothing outside the test can call the server.
+func (cb *ConfigBuilder) InMemory() *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.InMemory = true })
+}
+
+// Reflection serves the gRPC server reflection service, so tools such as grpcurl and Postman list the services the
+// server serves, and describe their messages: those registered on it, those of its descriptors, and those its mocks
+// name.
+func (cb *ConfigBuilder) Reflection() *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.Reflection = true })
 }
 
 // NoDebugHeaders turns off the debug header metadata, such as vlatte-matched-mock-id, that the server adds to its

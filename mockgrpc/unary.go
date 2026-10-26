@@ -16,8 +16,12 @@ func (in *interceptors) UnaryInterceptor(
 	ctx context.Context,
 	req any,
 	info *grpc.UnaryServerInfo,
-	_ grpc.UnaryHandler,
+	next grpc.UnaryHandler,
 ) (any, error) {
+	if in.app.isInternal(info.FullMethod) {
+		return next(ctx, req)
+	}
+
 	md, ok := in.app.resolver.method(info.FullMethod)
 	if !ok {
 		return nil, in.unknown(ctx, info.FullMethod)

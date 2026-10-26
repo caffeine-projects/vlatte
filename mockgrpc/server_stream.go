@@ -12,11 +12,15 @@ import (
 // unary ones included: grpc gives those to its unknown service handler, as bidi streams. The method's descriptor
 // tells what the call is.
 func (in *interceptors) StreamInterceptor(
-	_ any,
+	srv any,
 	stream grpc.ServerStream,
 	info *grpc.StreamServerInfo,
-	_ grpc.StreamHandler,
+	next grpc.StreamHandler,
 ) error {
+	if in.app.isInternal(info.FullMethod) {
+		return next(srv, stream)
+	}
+
 	ctx := stream.Context()
 
 	md, ok := in.app.resolver.method(info.FullMethod)
