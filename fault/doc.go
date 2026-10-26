@@ -20,5 +20,5 @@
 // before the connection ends.
 //
 // Mock files declare faults as specs, such as ["bandwidth", "3g"], under steps, wire_steps and upstream_steps: see
-// [Build]. Each fault describes itself as its spec.
+// [github.com/caffeine-projects/vlatte/fault/faultbuild]. Each fault describes itself as its spec.
 package fault

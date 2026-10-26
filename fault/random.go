@@ -27,7 +27,9 @@ func RandomDataThenClose() vlatte.Step {
 type randomData struct{}
 
 // Describe implements [descriptor.SelfDescriptive].
-func (randomData) Describe() descriptor.Descriptor { return descriptor.KeyOnly(_fRandomDataThenClose) }
+func (randomData) Describe() descriptor.Descriptor {
+	return descriptor.KeyOnly("random_data_then_close")
+}
 
 func (randomData) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	return &randomStage{flow: flow, next: next}

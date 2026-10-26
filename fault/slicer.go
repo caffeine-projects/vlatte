@@ -49,7 +49,7 @@ type slicer struct {
 
 // Describe implements [descriptor.SelfDescriptive].
 func (sl slicer) Describe() descriptor.Descriptor {
-	return descriptor.MultiArgs(_fSlicer, sl.size, sl.variation, sl.delay.String())
+	return descriptor.MultiArgs("slicer", sl.size, sl.variation, sl.delay.String())
 }
 
 func (sl slicer) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {

@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/fault"
+	"github.com/caffeine-projects/vlatte/fault/faultbuild"
 	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
@@ -1026,10 +1026,10 @@ func setEvents(events *[]vlatte.EventConfig, dir string, v config.Value) error {
 	})
 }
 
-// setSteps decodes a list of fault specs, such as [latency, 100ms]: see [fault.Build].
+// setSteps decodes a list of fault specs, such as [latency, 100ms]: see [faultbuild.Build].
 func setSteps(steps *[]vlatte.Step, v config.Value) error {
 	return config.Items(v, func(item config.Value) error {
-		step, err := fault.Build(item.Any)
+		step, err := faultbuild.Build(item.Any)
 		if err != nil {
 			return err
 		}

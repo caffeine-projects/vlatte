@@ -23,7 +23,7 @@ func EmptyResponse() vlatte.Step {
 type emptyResponse struct{}
 
 // Describe implements [descriptor.SelfDescriptive].
-func (emptyResponse) Describe() descriptor.Descriptor { return descriptor.KeyOnly(_fEmptyResponse) }
+func (emptyResponse) Describe() descriptor.Descriptor { return descriptor.KeyOnly("empty_response") }
 
 func (emptyResponse) Open(flow *vlatte.Flow, _ vlatte.Stage) vlatte.Stage {
 	return &emptyStage{flow: flow}

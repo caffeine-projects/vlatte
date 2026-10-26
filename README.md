@@ -556,7 +556,7 @@ m.MustMock(mockhttp.Getf("/video").Step(fault.Bandwidth(fault.Bandwidth3G)).Repl
 
 A wire fault needs HTTP/1.x, as wire steps do. Faults combine with other steps: a fault on the wire comes after the steps of `Step`. A mock that answers with a fault still counts the call, and runs its callbacks and events, before the connection ends.
 
-**In mock files,** `steps`, `wire_steps` and `upstream_steps` list faults for `Step`, `WireStep` and `UpstreamStep`. A fault is its name, such as `empty_response`, or a list of its name and arguments, such as `[slow_close, 2s]`: the names are those of the functions in snake case, and the arguments theirs, in order. A latency without jitter can leave it out: `[latency, 300ms]` is `fault.Latency(300*time.Millisecond, 0)`. `bandwidth` takes bytes per second, or the name of a `fault.Bandwidth*` constant in snake case: `gprs`, `dial_up`, `2g`, `good_2g`, `3g`, `good_3g`, `dsl`, `4g`, `wifi` or `fiber`. `fault.Build` builds a spec in Go.
+**In mock files,** `steps`, `wire_steps` and `upstream_steps` list faults for `Step`, `WireStep` and `UpstreamStep`. A fault is its name, such as `empty_response`, or a list of its name and arguments, such as `[slow_close, 2s]`: the names are those of the functions in snake case, and the arguments theirs, in order. A latency without jitter can leave it out: `[latency, 300ms]` is `fault.Latency(300*time.Millisecond, 0)`. `bandwidth` takes bytes per second, or the name of a `fault.Bandwidth*` constant in snake case: `gprs`, `dial_up`, `2g`, `good_2g`, `3g`, `good_3g`, `dsl`, `4g`, `wifi` or `fiber`. `faultbuild.Build`, of package `fault/faultbuild`, builds a spec in Go.
 
 ```yaml
 request:

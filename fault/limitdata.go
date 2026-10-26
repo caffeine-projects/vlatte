@@ -33,7 +33,7 @@ func LimitData(n int) vlatte.Step {
 type limitData struct{ n int }
 
 // Describe implements [descriptor.SelfDescriptive].
-func (l limitData) Describe() descriptor.Descriptor { return descriptor.SingleArg(_fLimitData, l.n) }
+func (l limitData) Describe() descriptor.Descriptor { return descriptor.SingleArg("limit_data", l.n) }
 
 func (l limitData) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	return &limitDataStage{flow: flow, left: l.n, next: next}

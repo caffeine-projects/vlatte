@@ -716,8 +716,8 @@ func TestMockFile_StepsProblems(t *testing.T) {
 		want string
 	}{
 		{"steps: [[slow_close, 1s], [bandwidth, 0]]", "steps[1]", `steps[1]="[\"bandwidth\",0]": fault: bandwidth needs a byte per second at least, not 0`},
-		{"wire_steps: [nope]", "wire_steps[0]", `wire_steps[0]="nope": fault: unknown fault "nope"`},
-		{"upstream_steps: [[latency]]", "upstream_steps[0]", `upstream_steps[0]="[\"latency\"]": fault: latency takes 1 or 2 arguments, not 0`},
+		{"wire_steps: [nope]", "wire_steps[0]", `wire_steps[0]="nope": faultbuild: unknown fault "nope"`},
+		{"upstream_steps: [[latency]]", "upstream_steps[0]", `upstream_steps[0]="[\"latency\"]": faultbuild: latency takes 1 or 2 arguments, not 0`},
 		{"steps: empty_response", "steps", "steps must be a list, not a string"},
 	}
 

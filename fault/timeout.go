@@ -37,7 +37,7 @@ type timeoutStep struct{ timeout time.Duration }
 
 // Describe implements [descriptor.SelfDescriptive].
 func (t timeoutStep) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg(_fTimeout, t.timeout.String())
+	return descriptor.SingleArg("timeout", t.timeout.String())
 }
 
 func (t timeoutStep) Open(flow *vlatte.Flow, _ vlatte.Stage) vlatte.Stage {
