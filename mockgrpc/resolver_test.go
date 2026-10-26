@@ -11,8 +11,10 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/dynamicpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
@@ -101,4 +103,102 @@ func TestDescriptors_ASetThatDoesntLoadFailsNew(t *testing.T) {
 
 	_, err = New(Setup().Descriptors(garbage))
 	require.ErrorContains(t, err, "descriptors: "+garbage)
+}
+
+func TestDescriptors_ASetWithItsImportsOrTwiceLoadsOnce(t *testing.T) {
+	// protoc --include_imports writes the well-known types the set imports, and a server given two sets that share a
+	// file loads it once: neither is a duplicate.
+	fd := protodesc.ToFileDescriptorProto(pb.File_test_proto)
+	ts := protodesc.ToFileDescriptorProto(timestamppb.File_google_protobuf_timestamp_proto)
+
+	b, err := proto.Marshal(&descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{ts, fd}})
+	require.NoError(t, err)
+
+	path := filepath.Join(t.TempDir(), "full.binpb")
+	require.NoError(t, os.WriteFile(path, b, 0o600))
+
+	files, err := loadDescriptors([]string{path, path})
+	require.NoError(t, err)
+	require.Equal(t, 2, files.NumFiles())
+}
+
+func TestDescriptors_AnImportNoFileHasFailsNew(t *testing.T) {
+	fd := &descriptorpb.FileDescriptorProto{
+		Name:       new("lonely.proto"),
+		Package:    new("lonely"),
+		Dependency: []string{"nowhere.proto"},
+		Syntax:     new("proto3"),
+	}
+
+	b, err := proto.Marshal(&descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fd}})
+	require.NoError(t, err)
+
+	path := filepath.Join(t.TempDir(), "lonely.binpb")
+	require.NoError(t, os.WriteFile(path, b, 0o600))
+
+	_, err = New(Setup().Descriptors(path))
+	require.ErrorContains(t, err, "descriptors:")
+	require.ErrorContains(t, err, "nowhere.proto")
+}
+
+func TestResolver_FindsTheTypesOfItsDescriptors(t *testing.T) {
+	// protojson resolves the Any fields of a message with the server's resolver: a type of the server's descriptors
+	// resolves as well as one of generated code, and an unknown one is protoregistry.NotFound, as protojson expects.
+	files, err := loadDescriptors([]string{writeDescriptorSet(t, "dyn")})
+	require.NoError(t, err)
+
+	r := newResolverOf(files)
+
+	mt, err := r.FindMessageByURL("type.googleapis.com/dyn.HiReq")
+	require.NoError(t, err)
+	require.Equal(t, protoreflect.FullName("dyn.HiReq"), mt.Descriptor().FullName())
+
+	mt, err = r.FindMessageByName("protobuf.HiReq")
+	require.NoError(t, err)
+	require.Equal(t, protoreflect.FullName("protobuf.HiReq"), mt.Descriptor().FullName())
+
+	_, err = r.FindMessageByName("dyn.Nope")
+	require.ErrorIs(t, err, protoregistry.NotFound)
+
+	_, err = r.FindExtensionByName("dyn.nope")
+	require.ErrorIs(t, err, protoregistry.NotFound)
+
+	_, err = r.FindExtensionByNumber("dyn.HiReq", 100)
+	require.ErrorIs(t, err, protoregistry.NotFound)
+}
+
+func TestResolver_MethodOfANameNoServiceHasIsNone(t *testing.T) {
+	r := newResolverOf()
+
+	for _, name := range []string{"/protobuf.TestService/Greetings", "protobuf.TestService/Greetings"} {
+		md, ok := r.method(name)
+		require.True(t, ok, name)
+		require.Equal(t, "/protobuf.TestService/Greetings", fullMethod(md))
+	}
+
+	for _, name := range []string{"Greetings", "/protobuf.HiReq/Greetings", "/protobuf.Nope/Greetings", "/protobuf.TestService/Nope"} {
+		_, ok := r.method(name)
+		require.False(t, ok, name)
+	}
+}
+
+func TestResolver_EncodeFailsOnAMessageProtoJSONCantWrite(t *testing.T) {
+	// The journal and the matchers read a call as JSON: a message protojson refuses, such as a string that isn't
+	// UTF-8, fails the call rather than matching as something else.
+	r := newResolverOf()
+
+	_, err := r.encode(&pb.HiReq{Message: "\xff"})
+	require.ErrorContains(t, err, "encoding the request message")
+
+	_, err = r.encodeArray([]proto.Message{&pb.HiReq{}, &pb.HiReq{Message: "\xff"}})
+	require.ErrorContains(t, err, "message 1: encoding the request message")
+}
+
+func TestCallType_NamesEachShape(t *testing.T) {
+	// Errors name the call types of methods that differ, such as an ambiguous method's.
+	require.Equal(t, "unary", _unary.String())
+	require.Equal(t, "server streaming", _serverStream.String())
+	require.Equal(t, "client streaming", _clientStream.String())
+	require.Equal(t, "bidi streaming", _bidiStream.String())
+	require.Equal(t, "unknown", callType(0).String())
 }

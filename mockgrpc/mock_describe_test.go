@@ -3,6 +3,7 @@ package mockgrpc
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
@@ -58,5 +59,139 @@ func TestDescribe_AMockBuiltInGoLoadsBackTheSame(t *testing.T) {
 		item, err := stream.Recv()
 		require.NoError(t, err)
 		require.Equal(t, "x", item.GetKey())
+	}
+}
+
+func TestDescribe_WritesEveryPartAMockFileHolds(t *testing.T) {
+	// The admin API shows a mock built in Go as its description: each part a mock file holds is written as the file
+	// writes it, and the parts it can't hold, such as a callback, are left out.
+	noop := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
+	m := MustNew(Setup().Silent().OnCompleteListener("record", noop))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scope := m.MustMock(Method("List").
+		ID("full").
+		Name("greet").
+		Priority(2).
+		Enabled(false).
+		Delay(time.Second).
+		Times(3).
+		ScenarioIs("s").
+		ScenarioStateIs("a").
+		ScenarioStateWillBe("b").
+		OnCompleteEvent(vlatte.EventConfig{Name: "record", Parameters: map[string]any{"k": "v"}}).
+		Callback(noop).
+		Field("message", match.Equal("hi")).
+		Body(match.Contain("hi")).
+		Reply(Template(`{"message": "{{ .Request.message }}"}`).
+			Trailer("T", "1").
+			Status(codes.Aborted, "cut").
+			MessageDelay(time.Millisecond)))
+
+	doc, err := scope.Mocks()[0].Describe().MarshalJSON()
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"id": "full",
+		"name": "greet",
+		"priority": 2,
+		"enabled": false,
+		"delay": "1s",
+		"repeat": 3,
+		"scenario": {"name": "s", "required_state": "a", "new_state": "b"},
+		"on_complete": [{"name": "record", "parameters": {"k": "v"}}],
+		"request": {
+			"method": "List",
+			"fields": {"message": ["eq", "hi"]},
+			"body": ["contains", "hi"]
+		},
+		"response": {
+			"messages": ["{\"message\": \"{{ .Request.message }}\"}"],
+			"template": true,
+			"trailer": {"t": ["1"]},
+			"status": {"code": "ABORTED", "message": "cut"},
+			"message_delay": "1ms"
+		}
+	}`, string(doc))
+}
+
+func TestDescribe_WritesBidiRulesAndStreamedMessages(t *testing.T) {
+	m := serve(t)
+	scope := m.MustMock(
+		Method("Chat").ID("chat").Reply(Bidi().
+			Header("h", "1").
+			Trailer("t", "2").
+			On(match.Contain("hi"), Message(&pb.HiRes{Message: "hello"})).
+			Otherwise(JSON(`{"message": "what"}`)).
+			OnEnd(Messages(&pb.HiRes{Message: "bye"}))),
+		Method("Upload").ID("upload").JSON(`[{"key": "a"}]`).
+			Reply(Status(codes.InvalidArgument, "bad").Details(&errdetails.ErrorInfo{Reason: "R"})),
+		Method("Upload").ID("messages").Messages(&pb.ListItem{Key: "b"}).Reply(Message(&pb.HiRes{})),
+	)
+
+	want := map[string]string{
+		"chat": `{
+			"id": "chat",
+			"request": {"method": "Chat"},
+			"bidi": {
+				"header": {"h": ["1"]},
+				"trailer": {"t": ["2"]},
+				"on": [{"when": ["contains", "hi"], "response": {"messages": [{"message": "hello"}]}}],
+				"otherwise": {"messages": [{"message": "what"}]},
+				"on_end": {"messages": [{"message": "bye"}]}
+			}
+		}`,
+		"upload": `{
+			"id": "upload",
+			"request": {"method": "Upload", "messages": [{"key": "a"}]},
+			"response": {"status": {"code": "INVALID_ARGUMENT", "message": "bad", "details": [
+				{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "R"}
+			]}}
+		}`,
+		"messages": `{
+			"id": "messages",
+			"request": {"method": "Upload", "messages": [{"key": "b"}]},
+			"response": {"messages": [{}]}
+		}`,
+	}
+
+	require.Len(t, scope.Mocks(), len(want))
+
+	for _, mock := range scope.Mocks() {
+		doc, err := mock.Describe().MarshalJSON()
+		require.NoError(t, err)
+		require.JSONEq(t, want[mock.ID()], string(doc))
+	}
+}
+
+func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
+	// A description without a response doesn't load back: the admin API shows what it can, rather than a reply that
+	// answers differently.
+	custom := match.Function(func(any) (bool, error) { return true, nil })
+	m := serve(t)
+	scope := m.MustMock(
+		Method("List").ID("delay").Reply(Message(&pb.ListItem{}).MessageDelayFunc(vlatte.Latency(time.Millisecond))),
+		Method("Chat").ID("rule").Reply(Bidi().On(custom, Message(&pb.HiRes{}))),
+		Method("Chat").ID("otherwise").Reply(Bidi().Otherwise(Message(&pb.HiRes{}).MessageDelayFunc(vlatte.Latency(0)))),
+		Method("Chat").ID("rule-response").
+			Reply(Bidi().On(match.Contain("x"), Message(&pb.HiRes{}).MessageDelayFunc(vlatte.Latency(0)))),
+		Method("Greetings").ID("call").CallMatches(func(*Call) (bool, error) { return true, nil }).Body(custom).
+			Reply(Func(func(context.Context, *Call) error { return nil })),
+	)
+
+	want := map[string]string{
+		"delay":         `{"id": "delay", "request": {"method": "List"}}`,
+		"rule":          `{"id": "rule", "request": {"method": "Chat"}}`,
+		"otherwise":     `{"id": "otherwise", "request": {"method": "Chat"}}`,
+		"rule-response": `{"id": "rule-response", "request": {"method": "Chat"}}`,
+		"call":          `{"id": "call", "request": {"method": "Greetings"}}`,
+	}
+
+	require.Len(t, scope.Mocks(), len(want))
+
+	for _, mock := range scope.Mocks() {
+		doc, err := mock.Describe().MarshalJSON()
+		require.NoError(t, err)
+		require.JSONEq(t, want[mock.ID()], string(doc))
 	}
 }

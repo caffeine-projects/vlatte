@@ -479,3 +479,56 @@ func TestJournal_KeepsACallAnInterceptorAnswersWhileItsMockGoesOn(t *testing.T) 
 
 	require.Equal(t, int(codes.DeadlineExceeded), onlyCall(t, m, journal.Query{}).Status)
 }
+
+func TestJournal_NearMissesNameEachPartTheirMockChecks(t *testing.T) {
+	// A near miss names what failed in words a test reads: the field, the request, the times and the scenario.
+	m, c := journaled(t, Setup())
+	m.MustMock(
+		Method("Greetings").ID("parts").
+			Field("message", match.Equal("x")).
+			Body(match.Contain("x")).
+			Message(&pb.HiReq{Message: "x"}).
+			Reply(Message(&pb.HiRes{})),
+		Method("Greetings").ID("scenario").Priority(9).ScenarioIs("s").ScenarioStateIs("never").Reply(Message(&pb.HiRes{})),
+		Method("Greetings").ID("once").Once().ScenarioIs("s").ScenarioStateWillBe("done").Reply(Message(&pb.HiRes{})),
+	)
+
+	_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.NoError(t, err)
+
+	_, err = c.Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	e := onlyCall(t, m, journal.Query{Outcome: journal.OutcomeUnmatched})
+	failed := make(map[string][]string, len(e.NearMisses))
+	for _, nm := range e.NearMisses {
+		failed[nm.MockID] = nm.Failed
+	}
+
+	require.Equal(t, map[string][]string{
+		"parts":    {"field message", "request body", "request message"},
+		"scenario": {"scenario s"},
+		"once":     {"times"},
+	}, failed)
+}
+
+func TestJournal_APatternIsABuilderOfTheRequestOnly(t *testing.T) {
+	// A pattern matches calls served before: a part that counts or keeps state from now on has no meaning in it, and
+	// fails the query rather than matching nothing.
+	m, _ := journaled(t, Setup())
+
+	for _, tc := range []struct {
+		name    string
+		pattern vlatte.Builder[*Mock, *Server]
+		want    string
+	}{
+		{"a mock file", FromBytes([]byte(`{request: {method: Greetings}}`), "yaml"), "a request pattern is a *Builder"},
+		{"a builder with an error", Method("Greetings").Times(0), "request pattern: times 0"},
+		{"a scenario", Method("Greetings").ScenarioIs("s"), "a request pattern has no scenario"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := m.CountRequests(t.Context(), journal.Query{}, tc.pattern)
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}

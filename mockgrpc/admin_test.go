@@ -392,3 +392,66 @@ func TestAdmin_SavesAMockWithABodyFile(t *testing.T) {
 
 	require.Equal(t, []string{"a", "b"}, listKeys(t, pb.NewTestServiceClient(m.MustDial())))
 }
+
+func TestAdmin_SavesNothingWithoutMocksItAdded(t *testing.T) {
+	// Mocks of Go code or of files are not the admin API's to save: with none of its own, it writes no file.
+	dir := t.TempDir()
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin("").Logger(&logger).RootDir(dir))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
+
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks/save", `{}`)
+	require.Equal(t, http.StatusOK, status, body)
+	require.NoDirExists(t, filepath.Join(dir, "_mocks"))
+}
+
+func TestAdmin_ASaveThatFailsKeepsTheMocksItAdded(t *testing.T) {
+	// A save that can't write its files, or whose files don't load, leaves the server as it was: the admin API's
+	// mocks still answer, and no file of theirs is left behind.
+	for _, tc := range []struct {
+		name    string
+		prepare func(t *testing.T, dir string)
+	}{
+		{"dir is a file", func(t *testing.T, dir string) {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "_mocks"), nil, 0o600))
+		}},
+		{"dir has a broken mock file", func(t *testing.T, dir string) {
+			require.NoError(t, os.Mkdir(filepath.Join(dir, "_mocks"), 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "_mocks", "broken.mock.yaml"), []byte("request: {method: Nope}"), 0o600))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tc.prepare(t, dir)
+
+			logger := zerolog.Nop()
+			m := MustNew(Setup().Admin("").Logger(&logger).RootDir(dir))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			doc := `{"id": "kept", "request": {"method": "Greetings"}, "response": {"message": {"message": "kept"}}}`
+			status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks", doc)
+			require.Equal(t, http.StatusCreated, status, body)
+
+			status, body = call(t, http.MethodPost, m.AdminURL()+"/mocks/save", `{}`)
+			require.Equal(t, http.StatusInternalServerError, status, body)
+			require.NoFileExists(t, filepath.Join(dir, "_mocks", "kept.mock.yaml"))
+
+			got, _ := greetWith(t, pb.NewTestServiceClient(m.MustDial()), "hi")
+			require.Equal(t, "kept", got)
+		})
+	}
+}
+
+func TestAdmin_AQueryWithoutAMethodSaysSo(t *testing.T) {
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin("").Logger(&logger).Journal(""))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	status, body := call(t, "QUERY", m.AdminURL()+"/requests", `{"request": {"fields": {"message": "bye"}}}`)
+	require.Equal(t, http.StatusBadRequest, status, body)
+	require.Contains(t, body, "request.method is required")
+}

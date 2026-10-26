@@ -1,8 +1,13 @@
 package mockgrpc
 
 import (
+	"bufio"
+	"context"
+	"net/http"
+	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -70,4 +75,63 @@ func TestSetup_OptionsCompose(t *testing.T) {
 	_, err = pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{}, grpc.Header(&header))
 	require.NoError(t, err)
 	require.Empty(t, header.Get(vlatte.MatchedMockIDHeader), "no debug headers")
+}
+
+func TestConfig_SetsEverySettingItsZeroValuesIncluded(t *testing.T) {
+	// A Config option replaces what options before it set: the no-match code of the first is gone.
+	logger := zerolog.Nop()
+	m := MustNew(Setup().NoMatchCode(codes.Unimplemented), &Config{Logger: &logger, NoMatchCode: codes.Aborted, ConfigSources: []ConfigSource{}})
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{})
+	require.Equal(t, codes.Aborted, status.Code(err))
+}
+
+func TestSetup_AListenerNameTwiceFailsNew(t *testing.T) {
+	noop := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
+
+	_, err := New(Setup().OnCompleteListener("a", noop).OnCompleteListener("a", noop))
+	require.ErrorContains(t, err, "config: on_complete listener a:")
+}
+
+func TestSetup_FilesServeServicesWithoutGeneratedCode(t *testing.T) {
+	// A registry of descriptors, as Files gives it, serves as a descriptor set file does.
+	files, err := loadDescriptors([]string{writeDescriptorSet(t, "dyn")})
+	require.NoError(t, err)
+
+	without := MustNew(Setup().Silent())
+	_, err = without.Mock(Method("dyn.TestService/Greetings").Reply(JSON(`{}`)))
+	require.ErrorIs(t, err, ErrUnknownMethod)
+
+	with := MustNew(Setup().Silent().Files(files))
+	_, err = with.Mock(Method("dyn.TestService/Greetings").Reply(JSON(`{}`)))
+	require.NoError(t, err)
+}
+
+func TestSetup_NameTagsTheLogLinesOfTheServer(t *testing.T) {
+	// Several servers log to the same output: each line names the server that wrote it.
+	m := MustNew(Setup().Name("orders").Admin("").LogLevel(vlatte.LogLevelWarn))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, m.AdminURL()+"/logs", nil)
+	require.NoError(t, err)
+
+	res, err := http.DefaultClient.Do(r)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = res.Body.Close() })
+
+	_, err = pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{})
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	lines := bufio.NewScanner(res.Body)
+	for lines.Scan() {
+		if strings.Contains(lines.Text(), "no mock matched the call") {
+			require.Contains(t, lines.Text(), `"server":"orders"`)
+			return
+		}
+	}
+
+	t.Fatal("no log line of the call")
 }
