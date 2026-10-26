@@ -12,6 +12,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 )
 
@@ -105,9 +106,7 @@ func TestProblems_NotAcceptableIsJSON(t *testing.T) {
 func TestProblems_UnsupportedMediaTypeSaysWhatIs(t *testing.T) {
 	// Every route that reads a body reads JSON or YAML only. RFC 9110: a 415 can list the media types the server takes.
 	files := &fakeFiles{}
-	url := serve(t, newStore(t, newFake("hello")),
-		admin.Files(files), admin.Recorder(&fakeRecorder{}), admin.Scenarios(mfeat.NewScenarioStore()),
-		admin.Journal(journalOf(t), nil, nil))
+	url := serve(t, newStore(t, newFake("hello")), adminapi.Capabilities{Files: files, Recorder: &fakeRecorder{}, Scenarios: mfeat.NewScenarioStore(), Journal: journalOf(t)})
 
 	for _, route := range []string{
 		"POST /mocks", "POST /mocks/validate", "PUT /mocks/hello", "PATCH /mocks/hello", "POST /mocks/save",
@@ -161,7 +160,7 @@ func TestProblems_NotSupported(t *testing.T) {
 	store := vlatte.NewStore[*plainMock]()
 	require.NoError(t, store.Store(t.Context(), &plainMock{id: "hello"}))
 
-	s, err := admin.New(admin.Mocks[*plainMock](store, nil))
+	s, err := admin.New(admin.Options{}, adminapi.Capabilities{Mocks: adminapi.MocksOf[*plainMock](store, nil)})
 	require.NoError(t, err)
 	require.NoError(t, s.Start())
 	t.Cleanup(func() { require.NoError(t, s.Close()) })

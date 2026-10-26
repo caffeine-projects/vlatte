@@ -24,6 +24,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
@@ -84,7 +85,7 @@ type Server struct {
 	admin   *admin.Server // nil without Config.Admin
 
 	// adminStore writes the changes of the admin API through to its persistent store; nil without AdminConfig.Store.
-	adminStore *admin.Store[*Mock]
+	adminStore *adminapi.Store[*Mock]
 
 	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
 	events *vlatte.EventRunner
@@ -276,7 +277,7 @@ func New(config ...Option) (*Server, error) {
 	app.webhooks = newWebhookTransport()
 
 	// The admin API changes mocks through a store of its own when they persist: the server's other mocks, of mock
-	// files and code, never reach the persistent store. The admin API's options have Mocks: it builds.
+	// files and code, never reach the persistent store.
 	if conf.Admin != nil {
 		adminMocks := repository
 
@@ -286,26 +287,26 @@ func New(config ...Option) (*Server, error) {
 				return nil, fmt.Errorf("server: admin store: %w", err)
 			}
 
-			app.adminStore = admin.NewStore(repository, durable, app.logger)
+			app.adminStore = adminapi.NewStore(repository, durable, app.logger)
 			adminMocks = app.adminStore
 		}
 
-		options := []admin.Option{
-			admin.Addr(conf.Admin.Addr),
-			admin.Info(string(Kind), func() string { return app.URL() }),
-			admin.Logger(app.logger),
-			admin.Mocks(adminMocks, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
+		app.admin = admin.MustNew(admin.Options{Addr: conf.Admin.Addr}, adminapi.Capabilities{
+			Kind:   string(Kind),
+			URL:    func() string { return app.URL() },
+			Logger: app.logger,
+			Mocks: adminapi.MocksOf(adminMocks, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
 				return buildAdminMock(app, content, format)
 			})),
-			admin.Files(adminFiles{app}),
-			admin.Recorder(adminRecorder{app}),
-			admin.Scenarios(app.scenarioStore),
-			admin.Events(events),
-			admin.Logs(logs),
-			admin.Journal(j, app.adminRequestPattern, app.matchers()),
-		}
-
-		app.admin = admin.MustNew(options...)
+			Files:     adminFiles{app},
+			Recorder:  adminRecorder{app},
+			Scenarios: app.scenarioStore,
+			Events:    events,
+			Logs:      logs,
+			Journal:   j,
+			Pattern:   app.adminRequestPattern,
+			Matchers:  app.matchers(),
+		})
 	}
 
 	server, err := factory.NewBackend(BackendConfig{App: app, Handler: handler})

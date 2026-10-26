@@ -7,15 +7,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/caffeine-projects/vlatte/internal/admin"
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
 func TestSaveMocks(t *testing.T) {
 	// The server writes the files; the answer says where, so the client can commit them.
 	files := &fakeFiles{saved: []string{"testdata/_mocks/hello.mock.yaml"}}
-	url := serve(t, newStore(t), admin.Files(files))
+	url := serve(t, newStore(t), adminapi.Capabilities{Files: files})
 
 	res, body := send(t, request{method: http.MethodPost, url: url + "/mocks/save", contentType: "application/yaml", body: "dir: mocks\nformat: .JSON\n"})
 
@@ -28,7 +27,7 @@ func TestSaveMocks(t *testing.T) {
 func TestSaveMocks_Defaults(t *testing.T) {
 	// Without a body, the server's defaults apply; with nothing to save, the list is empty, not null.
 	files := &fakeFiles{}
-	url := serve(t, newStore(t), admin.Files(files))
+	url := serve(t, newStore(t), adminapi.Capabilities{Files: files})
 
 	res, body := send(t, request{method: http.MethodPost, url: url + "/mocks/save"})
 
@@ -52,7 +51,7 @@ func TestSaveMocks_Refused(t *testing.T) {
 		{name: "an absolute directory", body: `{"dir": "/etc"}`, wantStatus: http.StatusBadRequest, wantCode: "invalid_body"},
 		{
 			name:       "a mock that can't be described",
-			saveErr:    fmt.Errorf("%w: mock %q: invalid UTF-8", handler.ErrNotDescribed, "binary"),
+			saveErr:    fmt.Errorf("%w: mock %q: invalid UTF-8", adminapi.ErrNotDescribed, "binary"),
 			wantStatus: http.StatusInternalServerError,
 			wantCode:   "describe_failed",
 		},
@@ -68,7 +67,7 @@ func TestSaveMocks_Refused(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			url := serve(t, newStore(t), admin.Files(&fakeFiles{saveErr: tt.saveErr}))
+			url := serve(t, newStore(t), adminapi.Capabilities{Files: &fakeFiles{saveErr: tt.saveErr}})
 
 			res, body := send(t, request{method: http.MethodPost, url: url + "/mocks/save", body: tt.body})
 

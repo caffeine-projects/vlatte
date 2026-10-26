@@ -6,13 +6,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 )
 
 func TestHealth(t *testing.T) {
 	// Clients wait on GET /health to know the admin API serves. With the admin API on an address of its own, it also
 	// tells where the mock server serves its mocks, which the recorder page shows.
-	url := serve(t, newStore(t), admin.Info("http", func() string { return "http://127.0.0.1:8080" }))
+	url := serve(t, newStore(t), adminapi.Capabilities{Kind: "http", URL: func() string { return "http://127.0.0.1:8080" }})
 
 	res, body := send(t, request{method: http.MethodGet, url: url + "/health"})
 

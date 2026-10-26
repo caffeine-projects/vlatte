@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 )
 
 func TestScenarios_NotSupported(t *testing.T) {
@@ -22,7 +23,7 @@ func TestScenarios_NotSupported(t *testing.T) {
 func TestListScenarios_OnOperationsThatKeepNoScenarios(t *testing.T) {
 	// The handler, mounted apart from the admin API's routes on a server without scenarios, answers what its route
 	// would: a 501 problem, never an empty list that reads as no scenario started.
-	ops := handler.NewOperations(newStore(t), nil, handler.Capabilities{})
+	ops := handler.NewOperations(adminapi.Capabilities{Mocks: adminapi.MocksOf[*fakeMock](newStore(t), nil)})
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/scenarios", nil)
 	rec := httptest.NewRecorder()
 

@@ -14,7 +14,7 @@ func (o *Operations) ValidateMock(ctx context.Context, doc []byte, format string
 	return o.mocks.validate(ctx, doc, format)
 }
 
-func (m *storeMocks[M]) validate(ctx context.Context, doc []byte, format string) (MockSummary, error) {
+func (m *storeMocks) validate(ctx context.Context, doc []byte, format string) (MockSummary, error) {
 	mock, err := m.buildMock(doc, format)
 	if err != nil {
 		return MockSummary{}, err
@@ -22,7 +22,7 @@ func (m *storeMocks[M]) validate(ctx context.Context, doc []byte, format string)
 
 	defer closeMock(mock)
 
-	_, err = m.store.Pick(ctx, mock.ID())
+	_, err = m.mocks.Pick(ctx, mock.ID())
 
 	switch {
 	case err == nil:

@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 )
 
 var (
@@ -85,7 +85,7 @@ func (in *interceptors) UnaryInterceptor(
 
 		call.unmatched(near)
 
-		in.app.publish(handler.EventUnmatched, info.FullMethod, nil, nil)
+		in.app.publish(adminapi.EventUnmatched, info.FullMethod, nil, nil)
 		return nil, fail(ctx, vlatte.FailureNoMatch, codes.NotFound, "unary: request was not matched with any mock")
 	}
 
@@ -106,7 +106,7 @@ func (in *interceptors) UnaryInterceptor(
 	}
 
 	mock.Inc()
-	in.app.publish(handler.EventMatched, info.FullMethod, mock, nil)
+	in.app.publish(adminapi.EventMatched, info.FullMethod, mock, nil)
 
 	return res, nil
 }

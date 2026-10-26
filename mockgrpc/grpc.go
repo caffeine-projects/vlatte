@@ -18,7 +18,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
@@ -49,8 +49,8 @@ type Server struct {
 
 	logger  *zerolog.Logger
 	storage vlatte.Store[*Mock]
-	admin   *admin.Server   // nil without Config.Admin
-	events  *handler.Events // the admin API's; nil without it
+	admin   *admin.Server    // nil without Config.Admin
+	events  *adminapi.Events // the admin API's; nil without it
 
 	mu      sync.Mutex // orders Start and Close, which a Close overlapping a Start would otherwise outrun
 	addr    string
@@ -82,11 +82,11 @@ func New(config ...Option) (*Server, error) {
 	app.logger = conf.Logger
 
 	// The admin API streams the log lines of a logger the server builds, not those of one it was given.
-	var logs *handler.Logs
+	var logs *adminapi.Logs
 	if app.logger == nil {
 		var out io.Writer = os.Stdout
 		if conf.Admin != nil {
-			logs = handler.NewLogs()
+			logs = adminapi.NewLogs()
 			out = zerolog.MultiLevelWriter(os.Stdout, logs)
 		}
 
@@ -141,18 +141,17 @@ func New(config ...Option) (*Server, error) {
 		app.register(conf.ServiceDesc, conf.Service)
 	}
 
-	// The admin API's options have Mocks: it builds.
 	if conf.Admin != nil {
-		app.events = handler.NewEvents()
-		app.admin = admin.MustNew(
-			admin.Addr(conf.Admin.Addr),
-			admin.Info(string(Kind), app.Addr),
-			admin.Logger(app.logger),
-			admin.Mocks[*Mock](store, nil),
-			admin.Events(app.events),
-			admin.Logs(logs),
-			admin.Journal(j, nil, nil),
-		)
+		app.events = adminapi.NewEvents()
+		app.admin = admin.MustNew(admin.Options{Addr: conf.Admin.Addr}, adminapi.Capabilities{
+			Kind:    string(Kind),
+			URL:     app.Addr,
+			Logger:  app.logger,
+			Mocks:   adminapi.MocksOf[*Mock](store, nil),
+			Events:  app.events,
+			Logs:    logs,
+			Journal: j,
+		})
 	}
 
 	built = true
@@ -338,7 +337,7 @@ func (app *Server) publish(kind, target string, mock *Mock, err error) {
 		return
 	}
 
-	e := handler.Event{Type: kind, Time: time.Now(), Target: target}
+	e := adminapi.Event{Type: kind, Time: time.Now(), Target: target}
 	if mock != nil {
 		e.MockID = mock.ID()
 	}
@@ -354,11 +353,11 @@ func (app *Server) publish(kind, target string, mock *Mock, err error) {
 // as replyError tells, and any other a failure.
 func (app *Server) publishReply(target string, mock *Mock, err error) {
 	if _, ok := status.FromError(err); ok {
-		app.publish(handler.EventMatched, target, mock, nil)
+		app.publish(adminapi.EventMatched, target, mock, nil)
 		return
 	}
 
-	app.publish(handler.EventError, target, mock, err)
+	app.publish(adminapi.EventError, target, mock, err)
 }
 
 // register registers the service desc describes, of impl: with a journal, its unary methods journal their calls.

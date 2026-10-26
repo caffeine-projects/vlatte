@@ -1,20 +1,29 @@
-package handler_test
+package adminapi_test
 
 import (
 	"bufio"
 	"context"
 	json "encoding/json/v2"
-	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/caffeine-projects/vlatte/internal/admin"
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 )
+
+// serveStream serves the stream of h, Events or Logs, and returns its URL.
+func serveStream(t *testing.T, h http.Handler) string {
+	t.Helper()
+
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	return srv.URL
+}
 
 // sse is a client of a Server-Sent Events route.
 type sse struct {
@@ -70,25 +79,24 @@ func (c *sse) next(t *testing.T) (string, string) {
 func TestEvents(t *testing.T) {
 	// A client follows what the mock server serves as it happens, each client all of it, without polling the
 	// journal.
-	events := handler.NewEvents()
-	url := serve(t, newStore(t), admin.Events(events))
+	events := adminapi.NewEvents()
+	url := serveStream(t, events)
 
-	first, second := listen(t, url+"/events"), listen(t, url+"/events")
+	first, second := listen(t, url), listen(t, url)
 
 	at := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
-	events.Publish(handler.Event{Type: handler.EventMatched, Time: at, Method: "GET", Target: "/hello", MockID: "hello", Status: 200})
-	events.Publish(handler.Event{Type: handler.EventUnmatched, Time: at, Method: "POST", Target: "/nope"})
+	events.Publish(adminapi.Event{Type: adminapi.EventMatched, Time: at, Method: "GET", Target: "/hello", MockID: "hello", Status: 200})
+	events.Publish(adminapi.Event{Type: adminapi.EventUnmatched, Time: at, Method: "POST", Target: "/nope"})
 
 	for _, c := range []*sse{first, second} {
 		event, data := c.next(t)
 		require.Equal(t, "matched", event)
-		conformsAs(t, data, "json", "Event")
 		require.JSONEq(t, `{"type": "matched", "time": "2026-10-20T12:00:00Z", "method": "GET", "target": "/hello", "mock_id": "hello", "status": 200}`, data)
 
 		event, data = c.next(t)
 		require.Equal(t, "unmatched", event)
 
-		var e handler.Event
+		var e adminapi.Event
 		require.NoError(t, json.Unmarshal([]byte(data), &e))
 		require.Equal(t, "/nope", e.Target)
 	}
@@ -96,60 +104,29 @@ func TestEvents(t *testing.T) {
 
 func TestEvents_AClientThatLeavesStopsGettingThem(t *testing.T) {
 	// Publishers never wait on clients: one that left, or falls behind, misses events, and the others don't.
-	events := handler.NewEvents()
-	url := serve(t, newStore(t), admin.Events(events))
+	events := adminapi.NewEvents()
+	url := serveStream(t, events)
 
-	gone, stays := listen(t, url+"/events"), listen(t, url+"/events")
+	gone, stays := listen(t, url), listen(t, url)
 	gone.cancel()
 
 	for range 1000 {
-		events.Publish(handler.Event{Type: handler.EventWarning, Message: "w"})
+		events.Publish(adminapi.Event{Type: adminapi.EventWarning, Message: "w"})
 	}
 
 	event, _ := stays.next(t)
 	require.Equal(t, "warning", event)
 }
 
-func TestEvents_CloseEndsTheStreams(t *testing.T) {
-	// A stream never ends on its own: closing the admin API ends it, so nothing of the admin API outlives Close.
-	events := handler.NewEvents()
-
-	s, err := admin.New(admin.Mocks[*fakeMock](newStore(t), &fakeBuilder{}), admin.Events(events))
-	require.NoError(t, err)
-	require.NoError(t, s.Start())
-
-	c := listen(t, s.URL()+"/events")
-
-	done := make(chan error, 1)
-	go func() { done <- s.Close() }()
-
-	_, err = io.ReadAll(c.res.Body)
-	require.NoError(t, err, "the stream ends")
-
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("Close waited on the stream")
-	}
-}
-
 func TestEvents_AClosedStreamHasNone(t *testing.T) {
 	// Once the events close, as the admin API does, a client that comes gets no stream that would never end.
-	events := handler.NewEvents()
-	url := serve(t, newStore(t), admin.Events(events))
+	events := adminapi.NewEvents()
+	url := serveStream(t, events)
 
 	events.Close()
 
-	res, body := send(t, request{method: http.MethodGet, url: url + "/events"})
-	require.Equal(t, http.StatusNoContent, res.StatusCode, body)
-}
-
-func TestEvents_NotSupported(t *testing.T) {
-	url := serve(t, newStore(t))
-
-	res, body := send(t, request{method: http.MethodGet, url: url + "/events"})
-
-	doc := problem(t, res, body, http.StatusNotImplemented, "not_supported")
-	require.Equal(t, "this mock server can't stream its events", doc["detail"])
+	res, err := http.Get(url)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusNoContent, res.StatusCode)
 }

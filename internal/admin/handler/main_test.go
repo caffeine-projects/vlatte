@@ -22,6 +22,7 @@ import (
 	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
 )
@@ -112,7 +113,7 @@ func (b *fakeBuilder) BuildFromBytes(content []byte, format string) (*fakeMock, 
 	name, _ := m["name"].(string)
 	priority, _ := m["priority"].(int64)
 
-	mock := &fakeMock{id: id, name: name, priority: int(priority), origin: handler.Origin, doc: m}
+	mock := &fakeMock{id: id, name: name, priority: int(priority), origin: adminapi.Origin, doc: m}
 	mock.enabled.Store(true)
 	b.built = append(b.built, mock)
 
@@ -179,20 +180,27 @@ func newFake(id string) *fakeMock {
 	return m
 }
 
-// serve starts an admin API of store, whose mocks requests build with a fakeBuilder, and returns its URL.
-func serve(t *testing.T, store vlatte.Store[*fakeMock], options ...admin.Option) string {
+// serve starts an admin API of store, whose mocks requests build with a fakeBuilder, with the capabilities of caps,
+// if any, and returns its URL.
+func serve(t *testing.T, store vlatte.Store[*fakeMock], caps ...adminapi.Capabilities) string {
 	t.Helper()
 
-	return serveWith(t, store, &fakeBuilder{}, options...)
+	return serveWith(t, store, &fakeBuilder{}, caps...)
 }
 
-// serveWith starts an admin API of store, whose mocks requests build with b, and returns its URL.
-func serveWith(t *testing.T, store vlatte.Store[*fakeMock], b *fakeBuilder, options ...admin.Option) string {
+// serveWith starts an admin API of store, whose mocks requests build with b, with the capabilities of caps, if any,
+// and returns its URL.
+func serveWith(t *testing.T, store vlatte.Store[*fakeMock], b *fakeBuilder, caps ...adminapi.Capabilities) string {
 	t.Helper()
 
-	options = append([]admin.Option{admin.Mocks[*fakeMock](store, b)}, options...)
+	var c adminapi.Capabilities
+	if len(caps) > 0 {
+		c = caps[0]
+	}
 
-	s, err := admin.New(options...)
+	c.Mocks = adminapi.MocksOf[*fakeMock](store, b)
+
+	s, err := admin.New(admin.Options{}, c)
 	require.NoError(t, err)
 	require.NoError(t, s.Start())
 	t.Cleanup(func() { require.NoError(t, s.Close()) })

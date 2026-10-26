@@ -13,15 +13,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/atomicfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 var (
-	_ handler.Recorder  = adminRecorder{}
-	_ handler.Files     = adminFiles{}
+	_ adminapi.Recorder = adminRecorder{}
+	_ adminapi.Files    = adminFiles{}
 	_ RecordConfigurer  = recordDoc{}
 	_ mockHTTPLifecycle = adminEvents{}
 )
@@ -38,58 +38,58 @@ const (
 
 // adminLogs returns the admin API's logs, and the writer the server's logger writes them through, when the server
 // serves the admin API and builds its logger: a logger it was given writes where it was told to.
-func adminLogs(conf *Config) (*handler.Logs, io.Writer) {
+func adminLogs(conf *Config) (*adminapi.Logs, io.Writer) {
 	if conf.Admin == nil || conf.Logger != nil {
 		return nil, nil
 	}
 
-	logs := handler.NewLogs()
+	logs := adminapi.NewLogs()
 
 	return logs, logs
 }
 
 // withAdminEvents adds the admin API's events to lifecycle, when the server serves the admin API: no event is
 // published without it.
-func withAdminEvents(conf *Config, lifecycle mockHTTPLifecycle) (*handler.Events, mockHTTPLifecycle) {
+func withAdminEvents(conf *Config, lifecycle mockHTTPLifecycle) (*adminapi.Events, mockHTTPLifecycle) {
 	if conf.Admin == nil {
 		return nil, lifecycle
 	}
 
-	events := handler.NewEvents()
+	events := adminapi.NewEvents()
 
 	return events, lifecycles{lifecycle, adminEvents{events}}
 }
 
 // adminEvents publishes what the server serves to the admin API's events, which GET /events streams.
 type adminEvents struct {
-	events *handler.Events
+	events *adminapi.Events
 }
 
 func (a adminEvents) OnRequest(*RequestValues) {}
 
 func (a adminEvents) OnMatch(r *RequestValues, res *Response) {
-	a.publish(handler.EventMatched, r, r.answered(), nil)
+	a.publish(adminapi.EventMatched, r, r.answered(), nil)
 }
 
 func (a adminEvents) OnProxied(r *RequestValues, res *Response) {
-	a.publish(handler.EventProxied, r, r.answered(), nil)
+	a.publish(adminapi.EventProxied, r, r.answered(), nil)
 }
 
 func (a adminEvents) OnNoMatch(r *RequestValues) {
-	a.publish(handler.EventUnmatched, r, r.answered(), nil)
+	a.publish(adminapi.EventUnmatched, r, r.answered(), nil)
 }
 
 func (a adminEvents) OnWarning(r *RequestValues, err error) {
-	a.publish(handler.EventWarning, r, 0, err)
+	a.publish(adminapi.EventWarning, r, 0, err)
 }
 
 func (a adminEvents) OnError(r *RequestValues, err error) {
-	a.publish(handler.EventError, r, r.answered(), err)
+	a.publish(adminapi.EventError, r, r.answered(), err)
 }
 
 // publish publishes the event of r, with the status the client got, 0 for none.
 func (a adminEvents) publish(kind string, r *RequestValues, status int, err error) {
-	e := handler.Event{
+	e := adminapi.Event{
 		Type:      kind,
 		Time:      time.Now(),
 		RequestID: r.ReqID,
@@ -182,7 +182,7 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 	var docs [][]byte
 
 	for _, mock := range mocks {
-		if mock.Origin() != handler.Origin {
+		if mock.Origin() != adminapi.Origin {
 			continue
 		}
 
@@ -190,7 +190,7 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 
 		data, err := mockFile(app, mock, path, format, toWD)
 		if err != nil {
-			return nil, fmt.Errorf("%w: mock %q: %w", handler.ErrNotDescribed, mock.ID(), err)
+			return nil, fmt.Errorf("%w: mock %q: %w", adminapi.ErrNotDescribed, mock.ID(), err)
 		}
 
 		paths = append(paths, path)

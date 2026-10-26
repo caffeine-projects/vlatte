@@ -18,8 +18,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/journal"
-	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 const (
@@ -65,21 +65,46 @@ var _routes = []struct {
 	{pattern: "GET /requests/{id}", lacking: "keep a journal of requests"},
 }
 
-var errNoMocks = errors.New("admin: no mock store: pass the Mocks option")
+var _ adminapi.Server = (*Server)(nil)
+
+var errNoMocks = errors.New("admin: no mocks: the capabilities need Mocks")
+
+// _operations are the routes that run an admin operation, each with whether the mock server can do it: a route the
+// server can't do answers 501.
+var _operations = map[string]struct {
+	serve func(ops *handler.Operations) http.Handler
+	can   func(ops *handler.Operations) bool
+}{
+	"GET /health":           {serve: handler.Health},
+	"GET /mocks":            {serve: handler.ListMocks},
+	"POST /mocks":           {serve: handler.AddMock, can: (*handler.Operations).Builds},
+	"DELETE /mocks":         {serve: handler.RemoveAllMocks},
+	"POST /mocks/validate":  {serve: handler.ValidateMock, can: (*handler.Operations).Builds},
+	"POST /mocks/reload":    {serve: handler.ReloadMocks, can: (*handler.Operations).HasFiles},
+	"POST /mocks/save":      {serve: handler.SaveMocks, can: (*handler.Operations).HasFiles},
+	"GET /mocks/{id}":       {serve: handler.GetMock},
+	"PUT /mocks/{id}":       {serve: handler.ReplaceMock, can: (*handler.Operations).Builds},
+	"PATCH /mocks/{id}":     {serve: handler.UpdateMock},
+	"DELETE /mocks/{id}":    {serve: handler.RemoveMock},
+	"GET /recording":        {serve: handler.RecordingStatus, can: (*handler.Operations).Records},
+	"POST /recording":       {serve: handler.StartRecording, can: (*handler.Operations).Records},
+	"DELETE /recording":     {serve: handler.StopRecording, can: (*handler.Operations).Records},
+	"GET /scenarios":        {serve: handler.ListScenarios, can: (*handler.Operations).HasScenarios},
+	"PUT /scenarios/{name}": {serve: handler.SetScenario, can: (*handler.Operations).HasScenarios},
+	"DELETE /scenarios":     {serve: handler.ResetScenarios, can: (*handler.Operations).HasScenarios},
+	"POST /reset":           {serve: handler.Reset},
+	"GET /requests":         {serve: handler.ListRequests, can: (*handler.Operations).HasJournal},
+	"QUERY /requests":       {serve: handler.QueryRequests, can: (*handler.Operations).HasJournal},
+	"DELETE /requests":      {serve: handler.ClearRequests, can: (*handler.Operations).HasJournal},
+	"GET /requests/{id}":    {serve: handler.GetRequest, can: (*handler.Operations).HasJournal},
+}
 
 // Server is the admin API of a mock server.
 type Server struct {
 	addr    string
 	logger  *zerolog.Logger
-	caps    handler.Capabilities
-	routes  map[string]http.Handler
 	streams []func() // end the streams of Server-Sent Events routes
 	handler http.Handler
-
-	// newOperations makes the operations on the mocks of the Mocks option, and operations the routes that run them,
-	// once New has the capabilities of every option.
-	newOperations func(caps handler.Capabilities) *handler.Operations
-	operations    map[string]func(ops *handler.Operations) http.Handler
 
 	mu      sync.Mutex // orders Start, Close and the requests that start as Close runs
 	srv     *http.Server
@@ -90,149 +115,55 @@ type Server struct {
 	closed  bool
 }
 
-// Option configures a Server.
-type Option func(s *Server)
-
-// Addr sets the address the admin API listens on: host:port, :port or a port. Empty is a random local port.
-func Addr(addr string) Option {
-	return func(s *Server) { s.addr = addr }
+// Options configure a Server.
+type Options struct {
+	// Addr is the address the admin API listens on: host:port, :port or a port. Empty is a random local port.
+	Addr string
 }
 
-// Info sets what GET /health tells of the mock server: its kind, such as http, and where it serves its mocks, which
-// url returns: its URL, or its address for gRPC.
-func Info(kind string, url func() string) Option {
-	return func(s *Server) { s.caps.Kind, s.caps.URL = kind, url }
-}
-
-// Logger sets the logger of the admin API's internal errors. Nil logs nothing.
-func Logger(logger *zerolog.Logger) Option {
-	return func(s *Server) { s.logger = logger }
-}
-
-// Mocks sets the store of the mock server's mocks, and the builder of the mocks that requests send, as mock files in
-// JSON or YAML. Without a builder, the routes that add or replace mocks answer 501.
-func Mocks[M vlatte.Mock](store vlatte.Store[M], build vlatte.MockBuilder[M]) Option {
-	return func(s *Server) {
-		s.newOperations = func(caps handler.Capabilities) *handler.Operations {
-			return handler.NewOperations(store, build, caps)
-		}
-
-		s.operations["GET /mocks"] = handler.ListMocks
-		s.operations["DELETE /mocks"] = handler.RemoveAllMocks
-		s.operations["GET /mocks/{id}"] = handler.GetMock
-		s.operations["PATCH /mocks/{id}"] = handler.UpdateMock
-		s.operations["DELETE /mocks/{id}"] = handler.RemoveMock
-
-		if build != nil {
-			s.operations["POST /mocks"] = handler.AddMock
-			s.operations["POST /mocks/validate"] = handler.ValidateMock
-			s.operations["PUT /mocks/{id}"] = handler.ReplaceMock
-		}
-	}
-}
-
-// Files sets the mock files of the mock server, which POST /mocks/reload loads again, and POST /mocks/save writes.
-func Files(files handler.Files) Option {
-	return func(s *Server) {
-		s.caps.Files = files
-		s.operations["POST /mocks/reload"] = handler.ReloadMocks
-		s.operations["POST /mocks/save"] = handler.SaveMocks
-	}
-}
-
-// Recorder sets the recorder of the mock server, which GET, POST and DELETE /recording control.
-func Recorder(rec handler.Recorder) Option {
-	return func(s *Server) {
-		s.caps.Recorder = rec
-		s.operations["GET /recording"] = handler.RecordingStatus
-		s.operations["POST /recording"] = handler.StartRecording
-		s.operations["DELETE /recording"] = handler.StopRecording
-	}
-}
-
-// Scenarios sets the scenarios of the mock server, which GET, PUT and DELETE /scenarios read and move.
-func Scenarios(scenarios handler.Scenarios) Option {
-	return func(s *Server) {
-		s.caps.Scenarios = scenarios
-		s.operations["GET /scenarios"] = handler.ListScenarios
-		s.operations["PUT /scenarios/{name}"] = handler.SetScenario
-		s.operations["DELETE /scenarios"] = handler.ResetScenarios
-	}
-}
-
-// Events sets the events of the mock server, which GET /events streams.
-func Events(events *handler.Events) Option {
-	return func(s *Server) {
-		s.routes["GET /events"] = handler.EventStream(events)
-		s.streams = append(s.streams, events.Close)
-	}
-}
-
-// Journal sets the journal of the requests the mock server serves, which GET, QUERY and DELETE /requests read and
-// clear, and POST /reset clears. pattern makes the filter of the request part of a mock of the server's protocol, of
-// a query; nil, for a protocol that has none, takes no request part. matchers builds the matcher lists of a query, as
-// it does the server's mock files; nil builds the built-in matchers only. A nil journal sets none.
-func Journal(j handler.Journal, pattern handler.RequestPattern, matchers *matchbuild.Registry) Option {
-	return func(s *Server) {
-		// A server without a journal passes its nil one: the routes answer 501, and reset skips it.
-		if typed, ok := j.(*journal.Journal); j == nil || ok && typed == nil {
-			return
-		}
-
-		s.caps.Journal, s.caps.Pattern, s.caps.Matchers = j, pattern, matchers
-		s.operations["GET /requests"] = handler.ListRequests
-		s.operations["QUERY /requests"] = handler.QueryRequests
-		s.operations["DELETE /requests"] = handler.ClearRequests
-		s.operations["GET /requests/{id}"] = handler.GetRequest
-	}
-}
-
-// Logs sets the log lines of the mock server, which GET /logs streams. Nil streams none, such as for a server that
-// logs through a logger it was given.
-func Logs(logs *handler.Logs) Option {
-	return func(s *Server) {
-		if logs == nil {
-			return
-		}
-
-		s.routes["GET /logs"] = handler.LogStream(logs)
-		s.streams = append(s.streams, logs.Close)
-	}
-}
-
-// New creates the admin API of a mock server. It needs the Mocks option.
-func New(options ...Option) (*Server, error) {
-	s := &Server{
-		routes:     make(map[string]http.Handler, len(_routes)),
-		operations: make(map[string]func(ops *handler.Operations) http.Handler, len(_routes)),
-	}
-	for _, option := range options {
-		option(s)
-	}
-
-	if s.newOperations == nil {
+// New creates the admin API of the mock server of caps, which needs its Mocks.
+func New(opts Options, caps adminapi.Capabilities) (*Server, error) {
+	if caps.Mocks == nil {
 		return nil, errNoMocks
 	}
 
+	// A server without a journal may pass its nil one: the routes answer 501, and reset skips it.
+	if j, ok := caps.Journal.(*journal.Journal); ok && j == nil {
+		caps.Journal = nil
+	}
+
+	s := &Server{addr: opts.Addr, logger: caps.Logger}
 	if s.logger == nil {
 		s.logger = new(zerolog.Nop())
 	}
 
-	ops := s.newOperations(s.caps)
+	ops := handler.NewOperations(caps)
 
-	s.operations["GET /health"] = handler.Health
-	s.operations["POST /reset"] = handler.Reset
-	s.routes["GET /openapi"] = handler.OpenAPI()
-	s.routes["GET /docs"] = handler.Docs()
-	s.routes["GET /recorder"] = handler.RecorderPage()
+	routes := map[string]http.Handler{
+		"GET /openapi":  handler.OpenAPI(),
+		"GET /docs":     handler.Docs(),
+		"GET /recorder": handler.RecorderPage(),
+	}
+
+	if caps.Events != nil {
+		routes["GET /events"] = caps.Events
+		s.streams = append(s.streams, caps.Events.Close)
+	}
+
+	if caps.Logs != nil {
+		routes["GET /logs"] = caps.Logs
+		s.streams = append(s.streams, caps.Logs.Close)
+	}
+
+	for pattern, op := range _operations {
+		if op.can == nil || op.can(ops) {
+			routes[pattern] = op.serve(ops)
+		}
+	}
 
 	mux := http.NewServeMux()
 	for _, route := range _routes {
-		h := s.routes[route.pattern]
-		if operation := s.operations[route.pattern]; operation != nil {
-			h = operation(ops)
-		}
-
+		h := routes[route.pattern]
 		if h == nil {
 			h = handler.NotSupported(route.lacking)
 		}
@@ -248,8 +179,8 @@ func New(options ...Option) (*Server, error) {
 }
 
 // MustNew is like New, but panics on an error.
-func MustNew(options ...Option) *Server {
-	s, err := New(options...)
+func MustNew(opts Options, caps adminapi.Capabilities) *Server {
+	s, err := New(opts, caps)
 	if err != nil {
 		panic(err)
 	}

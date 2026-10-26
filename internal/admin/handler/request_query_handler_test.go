@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
@@ -24,7 +24,7 @@ func TestQueryRequests(t *testing.T) {
 	c := entryOf("c", "POST", "/users", journal.OutcomeMatched)
 	c.MockID = "add-user"
 	j := journalOf(t, a, entryOf("b", "GET", "/orders", journal.OutcomeUnmatched), c)
-	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j})
 
 	tests := []struct {
 		name  string
@@ -69,12 +69,12 @@ func TestQueryRequests_ReadsTheCustomMatchersOfTheServer(t *testing.T) {
 		return match.IsIn([]any{"GET", "HEAD"}), nil
 	}))
 
-	url := serve(t, newStore(t), admin.Journal(j, nil, readOnly))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j, Matchers: readOnly})
 	res, body := send(t, request{method: "QUERY", url: url + "/requests", body: `{"method": ["read-only"]}`})
 	require.Equal(t, http.StatusOK, res.StatusCode, body)
 	require.Equal(t, []string{"a"}, requestIDs(conforms(t, res, body, "RequestList")))
 
-	url = serve(t, newStore(t), admin.Journal(j, nil, nil))
+	url = serve(t, newStore(t), adminapi.Capabilities{Journal: j})
 	res, body = send(t, request{method: "QUERY", url: url + "/requests", body: `{"method": ["read-only"]}`})
 	require.Equal(t, http.StatusBadRequest, res.StatusCode, body)
 	require.Contains(t, body, `unknown matcher \"read-only\"`)
@@ -88,7 +88,7 @@ func TestQueryRequests_PagesWithTheNextOfAPage(t *testing.T) {
 		entryOf("b", "GET", "/b", journal.OutcomeMatched),
 		entryOf("c", "POST", "/c", journal.OutcomeMatched),
 	)
-	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j})
 
 	res, body := send(t, request{method: "QUERY", url: url + "/requests", body: `{"limit": 1, "method": "GET"}`})
 	doc := conforms(t, res, body, "RequestList")
@@ -118,7 +118,7 @@ func TestQueryRequests_OutcomeNamesAreTheWireFormat(t *testing.T) {
 	for _, tt := range tests {
 		require.NoError(t, j.Append(entryOf(tt.name, "GET", "/", tt.outcome)))
 	}
-	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j})
 
 	for _, format := range []string{"json", "yaml"} {
 		for _, tt := range tests {
@@ -144,7 +144,7 @@ func TestQueryRequests_OutcomeNamesAreTheWireFormat(t *testing.T) {
 }
 
 func TestQueryRequests_RefusesAMatcherListThatNamesNoMatcher(t *testing.T) {
-	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: journalOf(t)})
 
 	res, body := send(t, request{method: "QUERY", url: url + "/requests", body: `{"method": []}`})
 	doc := problem(t, res, body, http.StatusBadRequest, "invalid_body")
@@ -156,7 +156,7 @@ func TestQueryRequests_RefusesAMatcherListThatNamesNoMatcher(t *testing.T) {
 }
 
 func TestQueryRequests_InvalidOutcomesExplainTheNamesToSend(t *testing.T) {
-	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: journalOf(t)})
 	const names = "matched, unmatched, proxied, failed or abandoned"
 	tests := []struct {
 		value   string
@@ -194,7 +194,7 @@ func TestQueryRequests_InvalidOutcomesExplainTheNamesToSend(t *testing.T) {
 }
 
 func TestQueryRequests_ProblemsOfTheQuery(t *testing.T) {
-	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: journalOf(t)})
 
 	tests := []struct {
 		name string
@@ -246,7 +246,7 @@ func TestQueryRequests_TheRequestPartIsTheProtocolsPattern(t *testing.T) {
 		return func(_ context.Context, e *journal.Entry) (bool, error) { return e.Path == "/b", nil }, nil
 	}
 
-	url := serve(t, newStore(t), admin.Journal(j, pattern, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j, Pattern: pattern})
 
 	res, body := send(t, request{method: "QUERY", url: url + "/requests", body: `{"request": {"path": "/b"}, "method": "GET"}`})
 	require.Equal(t, []string{"b"}, requestIDs(conforms(t, res, body, "RequestList")))
@@ -263,7 +263,7 @@ func TestQueryRequests_TheRequestPartIsTheProtocolsPattern(t *testing.T) {
 
 func TestQueryRequests_IsRefusedCrossSite(t *testing.T) {
 	// QUERY is safe, but a browser's page of another site must not read the requests the server got.
-	url := serve(t, newStore(t), admin.Journal(journalOf(t), nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: journalOf(t)})
 
 	r, err := http.NewRequestWithContext(t.Context(), "QUERY", url+"/requests", nil)
 	require.NoError(t, err)

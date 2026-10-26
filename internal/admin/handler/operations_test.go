@@ -7,12 +7,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 )
 
 func TestOperations_ACapabilityTheServerLacksIsNotSupported(t *testing.T) {
 	// An operation reached apart from the admin API's routes, which route only what a server can do, says the server
 	// can't do it, as its route would: it never panics on the capability it lacks.
-	ops := handler.NewOperations(newStore(t), nil, handler.Capabilities{})
+	ops := handler.NewOperations(adminapi.Capabilities{Mocks: adminapi.MocksOf[*fakeMock](newStore(t), nil)})
 	ctx := t.Context()
 
 	tests := []struct {

@@ -1,4 +1,4 @@
-package handler
+package adminapi
 
 import (
 	"bytes"
@@ -6,7 +6,10 @@ import (
 	"net/http"
 )
 
-var _ io.Writer = (*Logs)(nil)
+var (
+	_ io.Writer    = (*Logs)(nil)
+	_ http.Handler = (*Logs)(nil)
+)
 
 // Logs are the log lines of a mock server, which its logger writes and GET /logs streams. It keeps none.
 type Logs struct {
@@ -33,7 +36,7 @@ func (l *Logs) Close() {
 	l.stream.close()
 }
 
-// LogStream streams the log lines of the mock server, as it writes them, as Server-Sent Events of type log: GET /logs.
-func LogStream(logs *Logs) http.Handler {
-	return http.HandlerFunc(logs.stream.serve)
+// ServeHTTP streams the log lines of the mock server, as it writes them, as Server-Sent Events of type log: GET /logs.
+func (l *Logs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	l.stream.serve(w, r)
 }

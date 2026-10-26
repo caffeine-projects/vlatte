@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
@@ -22,7 +22,7 @@ func TestListRequests(t *testing.T) {
 		entryOf("b", "GET", "/b", journal.OutcomeUnmatched),
 		entryOf("c", "POST", "/c", journal.OutcomeMatched),
 	)
-	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j})
 
 	res, body := send(t, request{method: http.MethodGet, url: url + "/requests?limit=2"})
 	require.Equal(t, http.StatusOK, res.StatusCode, body)
@@ -55,7 +55,7 @@ func TestListRequests_AClientThatLeftGetsNoAnswer(t *testing.T) {
 	cancel()
 
 	rec := httptest.NewRecorder()
-	ops := handler.NewOperations(newStore(t), nil, handler.Capabilities{Journal: j})
+	ops := handler.NewOperations(adminapi.Capabilities{Mocks: adminapi.MocksOf[*fakeMock](newStore(t), nil), Journal: j})
 	handler.ListRequests(ops).ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/requests", nil))
 
 	require.Empty(t, rec.Header(), "no answer")
@@ -67,7 +67,7 @@ func TestListRequests_AJournalThatFailsIsTheServersProblem(t *testing.T) {
 	// why, for a page and for a count alike.
 	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
 	require.NoError(t, j.Close())
-	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j})
 
 	for _, params := range []string{"limit=1", "limit=0"} {
 		res, body := send(t, request{method: http.MethodGet, url: url + "/requests?" + params})
@@ -79,7 +79,7 @@ func TestListRequests_AJournalThatFailsIsTheServersProblem(t *testing.T) {
 
 func TestJournal_ANilJournalIsNone(t *testing.T) {
 	// A server without a journal passes its nil one: its journal routes answer 501, and a reset works.
-	url := serve(t, newStore(t), admin.Journal((*journal.Journal)(nil), nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: (*journal.Journal)(nil)})
 
 	res, body := send(t, request{method: http.MethodGet, url: url + "/requests"})
 	problem(t, res, body, http.StatusNotImplemented, "not_supported")

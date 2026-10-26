@@ -9,8 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin"
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/journal"
 )
@@ -19,7 +18,7 @@ func TestReset(t *testing.T) {
 	// A reset brings the server back to how it started, as between two tests: the mocks the admin API added go, the
 	// mock files load again, and scenarios start over. Mocks of files and code stay.
 	added, fromFile := newFake("added"), newFake("from-file")
-	added.origin = handler.Origin
+	added.origin = adminapi.Origin
 	fromFile.origin = "file mocks/from-file.yaml"
 
 	store := newStore(t, added, fromFile)
@@ -27,7 +26,7 @@ func TestReset(t *testing.T) {
 	scenarios := mfeat.NewScenarioStore()
 	scenarios.SetScenario("checkout", "paid")
 
-	url := serve(t, store, admin.Files(files), admin.Scenarios(scenarios))
+	url := serve(t, store, adminapi.Capabilities{Files: files, Scenarios: scenarios})
 
 	res, body := send(t, request{method: http.MethodPost, url: url + "/reset"})
 
@@ -42,14 +41,14 @@ func TestReset_KeepsWhatAPersistentStoreBringsBack(t *testing.T) {
 	// The reload of a persistent store serves what it holds in place of the admin mocks it served: those come back,
 	// and reset doesn't remove them, so it never deletes from the persistent store.
 	added := newFake("added")
-	added.origin = handler.Origin
+	added.origin = adminapi.Origin
 	store := newStore(t, added)
 
 	again := newFake("added")
-	again.origin = handler.Origin
+	again.origin = adminapi.Origin
 	files := &fakeFiles{onReload: func() { assert.NoError(t, store.Replace(t.Context(), []*fakeMock{added}, again)) }}
 
-	url := serve(t, store, admin.Files(files))
+	url := serve(t, store, adminapi.Capabilities{Files: files})
 
 	res, body := send(t, request{method: http.MethodPost, url: url + "/reset"})
 
@@ -64,7 +63,7 @@ func TestReset_KeepsWhatAPersistentStoreBringsBack(t *testing.T) {
 func TestReset_WithoutFilesOrScenarios(t *testing.T) {
 	// A server of a protocol without mock files or scenarios still resets what it has.
 	added := newFake("added")
-	added.origin = handler.Origin
+	added.origin = adminapi.Origin
 	store := newStore(t, added, newFake("code"))
 
 	url := serve(t, store)
@@ -79,13 +78,13 @@ func TestReset_FilesThatFailToLoad(t *testing.T) {
 	// The files load first: when they fail to, the reset changes nothing, so the admin API's mocks still serve, open,
 	// and the scenarios stay where they were. It removed and closed them, and a retry couldn't bring them back.
 	added := newFake("added")
-	added.origin = handler.Origin
+	added.origin = adminapi.Origin
 	store := newStore(t, added)
 	scenarios := mfeat.NewScenarioStore()
 	scenarios.SetScenario("checkout", "paid")
 
 	files := &fakeFiles{err: errors.New("loader: pattern [: syntax error in pattern")}
-	url := serve(t, store, admin.Files(files), admin.Scenarios(scenarios))
+	url := serve(t, store, adminapi.Capabilities{Files: files, Scenarios: scenarios})
 
 	res, body := send(t, request{method: http.MethodPost, url: url + "/reset"})
 
@@ -99,14 +98,14 @@ func TestReset_AStoreThatFailsAfterTheReload(t *testing.T) {
 	// A store that can't list the mocks the reload left is the server's problem: the answer is a 500 that says why, and
 	// the reset stops there, before it removes the admin API's mocks or starts the scenarios over.
 	added := newFake("added")
-	added.origin = handler.Origin
+	added.origin = adminapi.Origin
 	store := &brokenStore{MemoryStore: new(vlatte.MemoryStore[*fakeMock])}
 	require.NoError(t, store.Store(t.Context(), added))
 	scenarios := mfeat.NewScenarioStore()
 	scenarios.SetScenario("checkout", "paid")
 
 	files := &fakeFiles{onReload: func() { store.pickAllErr = errors.New("store: broken") }}
-	url := serve(t, store, admin.Files(files), admin.Scenarios(scenarios))
+	url := serve(t, store, adminapi.Capabilities{Files: files, Scenarios: scenarios})
 
 	res, body := send(t, request{method: http.MethodPost, url: url + "/reset"})
 
@@ -126,7 +125,7 @@ func TestReset_AJournalThatFailsToClear(t *testing.T) {
 	// the test before.
 	j := journalOf(t)
 	require.NoError(t, j.Close())
-	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j})
 
 	res, body := send(t, request{method: http.MethodPost, url: url + "/reset"})
 

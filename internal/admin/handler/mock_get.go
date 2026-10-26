@@ -16,7 +16,7 @@ func (o *Operations) GetMock(ctx context.Context, id string) (descriptor.Descrip
 	return o.mocks.get(ctx, id)
 }
 
-func (m *storeMocks[M]) get(ctx context.Context, id string) (descriptor.Descriptor, error) {
+func (m *storeMocks) get(ctx context.Context, id string) (descriptor.Descriptor, error) {
 	mock, err := m.pick(ctx, id)
 	if err != nil {
 		return descriptor.Descriptor{}, err
@@ -31,8 +31,8 @@ func (m *storeMocks[M]) get(ctx context.Context, id string) (descriptor.Descript
 }
 
 // pick returns the mock with id.
-func (m *storeMocks[M]) pick(ctx context.Context, id string) (M, error) {
-	mock, err := m.store.Pick(ctx, id)
+func (m *storeMocks) pick(ctx context.Context, id string) (vlatte.Mock, error) {
+	mock, err := m.mocks.Pick(ctx, id)
 	if errors.Is(err, vlatte.ErrNotFound) {
 		return mock, notFound(id)
 	}

@@ -21,7 +21,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 )
 
 var (
@@ -288,7 +288,7 @@ func (in *interceptors) StreamInterceptor(
 
 		call.unmatched(near)
 
-		in.app.publish(handler.EventUnmatched, info.FullMethod, nil, nil)
+		in.app.publish(adminapi.EventUnmatched, info.FullMethod, nil, nil)
 		return fail(ctx, vlatte.FailureNoMatch, codes.NotFound, "stream: request was not matched with any mock")
 	}
 
@@ -309,7 +309,7 @@ func (in *interceptors) StreamInterceptor(
 	}
 
 	mock.Inc()
-	in.app.publish(handler.EventMatched, info.FullMethod, mock, nil)
+	in.app.publish(adminapi.EventMatched, info.FullMethod, mock, nil)
 
 	return nil
 }

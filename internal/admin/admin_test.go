@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
@@ -58,10 +60,12 @@ func (f *blockingFiles) SaveMocks(context.Context, string, string) ([]string, er
 	return nil, nil
 }
 
-func newServer(t *testing.T, options ...Option) *Server {
+func newServer(t *testing.T, opts Options, caps adminapi.Capabilities) *Server {
 	t.Helper()
 
-	s, err := New(append([]Option{Mocks[*stubMock](vlatte.NewStore[*stubMock](), nil)}, options...)...)
+	caps.Mocks = adminapi.MocksOf[*stubMock](vlatte.NewStore[*stubMock](), nil)
+
+	s, err := New(opts, caps)
 	require.NoError(t, err)
 
 	return s
@@ -98,7 +102,7 @@ func TestServer_ListensOnItsOwnAddress(t *testing.T) {
 	addr := free.Addr().String()
 	require.NoError(t, free.Close())
 
-	s := newServer(t, Addr(addr))
+	s := newServer(t, Options{Addr: addr}, adminapi.Capabilities{})
 	require.Empty(t, s.URL(), "nothing listens before Start")
 
 	require.NoError(t, s.Start())
@@ -119,7 +123,7 @@ func TestServer_StartsOnce(t *testing.T) {
 	// As the mock servers do: a server starts once, a closed one doesn't start again, even one that never started,
 	// and a start that fails to listen closes it.
 	t.Run("twice", func(t *testing.T) {
-		s := newServer(t)
+		s := newServer(t, Options{}, adminapi.Capabilities{})
 		require.NoError(t, s.Start())
 		t.Cleanup(func() { _ = s.Close() })
 
@@ -127,7 +131,7 @@ func TestServer_StartsOnce(t *testing.T) {
 	})
 
 	t.Run("closed before it started", func(t *testing.T) {
-		s := newServer(t)
+		s := newServer(t, Options{}, adminapi.Capabilities{})
 		require.NoError(t, s.Close())
 
 		require.ErrorIs(t, s.Start(), http.ErrServerClosed)
@@ -139,7 +143,7 @@ func TestServer_StartsOnce(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = taken.Close() })
 
-		s := newServer(t, Addr(taken.Addr().String()))
+		s := newServer(t, Options{Addr: taken.Addr().String()}, adminapi.Capabilities{})
 
 		require.ErrorContains(t, s.Start(), "admin: ")
 		require.ErrorIs(t, s.Start(), http.ErrServerClosed)
@@ -150,7 +154,7 @@ func TestServer_CloseWaitsForTheOperationsItServes(t *testing.T) {
 	// The mock server closes its mocks once the admin API closed: an operation still running, such as a reload,
 	// would store mocks after that. Close returns once no operation runs.
 	files := &blockingFiles{entered: make(chan struct{}), release: make(chan struct{})}
-	s := newServer(t, Files(files))
+	s := newServer(t, Options{}, adminapi.Capabilities{Files: files})
 	require.NoError(t, s.Start())
 
 	reloaded := make(chan int, 1)
@@ -185,10 +189,10 @@ func TestServer_CloseWaitsForTheOperationsItServes(t *testing.T) {
 }
 
 func TestNew_NeedsTheMocks(t *testing.T) {
-	_, err := New()
-	require.EqualError(t, err, "admin: no mock store: pass the Mocks option")
+	_, err := New(Options{}, adminapi.Capabilities{})
+	require.EqualError(t, err, "admin: no mocks: the capabilities need Mocks")
 
-	require.PanicsWithError(t, "admin: no mock store: pass the Mocks option", func() { MustNew() })
+	require.PanicsWithError(t, "admin: no mocks: the capabilities need Mocks", func() { MustNew(Options{}, adminapi.Capabilities{}) })
 }
 
 func TestServer_ListensOnAPort(t *testing.T) {
@@ -199,7 +203,7 @@ func TestServer_ListensOnAPort(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, free.Close())
 
-	s := newServer(t, Addr(port))
+	s := newServer(t, Options{Addr: port}, adminapi.Capabilities{})
 	require.NoError(t, s.Start())
 	t.Cleanup(func() { _ = s.Close() })
 
@@ -212,7 +216,7 @@ func TestServer_ListensOnAPort(t *testing.T) {
 func TestServer_StartsNothingOnceClosing(t *testing.T) {
 	// A request that comes once Close runs, such as on a connection kept alive, starts no operation, so none runs once
 	// Close returned.
-	s := newServer(t)
+	s := newServer(t, Options{}, adminapi.Capabilities{})
 	require.NoError(t, s.Close())
 
 	rec := httptest.NewRecorder()
@@ -224,7 +228,7 @@ func TestServer_StartsNothingOnceClosing(t *testing.T) {
 
 func TestServer_RoutesTheProtocolLacksAnswer501(t *testing.T) {
 	// Every route answers, whatever the server's protocol can do: the API is the same for every mock server.
-	s := newServer(t)
+	s := newServer(t, Options{}, adminapi.Capabilities{})
 	require.NoError(t, s.Start())
 	t.Cleanup(func() { _ = s.Close() })
 
@@ -250,4 +254,61 @@ func TestServer_RoutesTheProtocolLacksAnswer501(t *testing.T) {
 	}
 
 	require.NotZero(t, checked)
+}
+
+func TestServer_CloseEndsTheStreams(t *testing.T) {
+	// A stream never ends on its own: closing the admin API ends it, so nothing of the admin API outlives Close.
+	events := adminapi.NewEvents()
+	s := newServer(t, Options{}, adminapi.Capabilities{Events: events, Logs: adminapi.NewLogs()})
+	require.NoError(t, s.Start())
+
+	for _, path := range []string{"/events", "/logs"} {
+		r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, s.URL()+path, nil)
+		require.NoError(t, err)
+
+		res, err := http.DefaultClient.Do(r)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, res.StatusCode, path)
+
+		ended := make(chan error, 1)
+		go func() {
+			_, err := io.ReadAll(res.Body)
+			_ = res.Body.Close()
+			ended <- err
+		}()
+
+		t.Cleanup(func() { require.NoError(t, <-ended, "the stream of %s ends", path) })
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- s.Close() }()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close waited on the streams")
+	}
+}
+
+func TestServer_StreamsItLacksAreNotSupported(t *testing.T) {
+	// A server that logs through a logger it was given streams no log lines; one without events streams none.
+	s := newServer(t, Options{}, adminapi.Capabilities{})
+	require.NoError(t, s.Start())
+	t.Cleanup(func() { _ = s.Close() })
+
+	for path, detail := range map[string]string{
+		"/events": "this mock server can't stream its events",
+		"/logs":   "this mock server can't stream its logs",
+	} {
+		res, err := http.Get(s.URL() + path)
+		require.NoError(t, err)
+
+		body, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		require.Equal(t, http.StatusNotImplemented, res.StatusCode, path)
+		require.Contains(t, string(body), `"detail": "`+detail+`"`, path)
+	}
 }
