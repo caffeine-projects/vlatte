@@ -277,7 +277,18 @@ func incomingMD(md metadata.MD) metadata.MD {
 }
 
 // reservedKey reports whether gRPC sets the metadata key k of its own on each call, such as :authority, content-type
-// and grpc-timeout: a call it sends takes none of the client's.
+// and grpc-timeout: a call it sends takes none of the client's. Other grpc- keys, such as grpc-trace-bin and
+// grpc-retry-pushback-ms, are the application's.
 func reservedKey(k string) bool {
-	return strings.HasPrefix(k, ":") || strings.HasPrefix(k, "grpc-") || k == "content-type" || k == "user-agent" || k == "te"
+	if strings.HasPrefix(k, ":") {
+		return true
+	}
+
+	switch k {
+	case "content-type", "user-agent", "te",
+		"grpc-message-type", "grpc-encoding", "grpc-accept-encoding", "grpc-message", "grpc-status", "grpc-timeout":
+		return true
+	default:
+		return false
+	}
 }

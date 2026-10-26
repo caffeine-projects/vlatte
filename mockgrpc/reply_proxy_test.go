@@ -271,3 +271,27 @@ func TestProxy_DialOptionsReachTheTarget(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "in memory", res.GetMessage())
 }
+
+func TestProxy_TheTargetGetsTheGRPCMetadataLeftToTheApplication(t *testing.T) {
+	// gRPC reserves only some grpc- keys: a trace context and a retry's attempt count are the client's metadata, which
+	// the target needs as the client sent it.
+	got := make(chan metadata.MD, 1)
+
+	target := serve(t)
+	target.MustMock(Method("Greetings").Reply(Func(func(ctx context.Context, call *Call) error {
+		md, _ := metadata.FromIncomingContext(ctx)
+		got <- md
+
+		return call.Send(&pb.HiRes{})
+	})))
+
+	m := proxied(t, From(target.Addr()))
+
+	ctx := metadata.AppendToOutgoingContext(t.Context(), "grpc-trace-bin", "trace", "grpc-previous-rpc-attempts", "2")
+	_, err := client(t, m).Greetings(ctx, &pb.HiReq{})
+	require.NoError(t, err)
+
+	md := <-got
+	require.Equal(t, []string{"trace"}, md.Get("grpc-trace-bin"))
+	require.Equal(t, []string{"2"}, md.Get("grpc-previous-rpc-attempts"))
+}

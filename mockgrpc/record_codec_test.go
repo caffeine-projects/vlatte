@@ -49,7 +49,7 @@ func TestRecordCodec_LeavesOutAnswerMetadataThatIsntText(t *testing.T) {
 	c := codecOf(t)
 
 	x := recordedCallOf("Greetings", &pb.HiReq{})
-	x.resHeader = metadata.Pairs("h", "\xff", "h", "v", "grpc-x", "y")
+	x.resHeader = metadata.Pairs("h", "\xff", "h", "v", "grpc-status", "0")
 
 	s, err := c.Response(x, nil)
 	require.NoError(t, err)
@@ -100,4 +100,17 @@ func TestRecordCodec_WritesMessagesWhoseJSONIsAStringAsTheMockFileReadsThem(t *t
 	var loaded timestamppb.Timestamp
 	require.NoError(t, protojson.Unmarshal([]byte(text), &loaded))
 	require.True(t, proto.Equal(at, &loaded))
+}
+
+func TestRecordCodec_KeepsTheRetryPushbackOfTheTrailer(t *testing.T) {
+	// A client that retries backs off as the trailer's grpc-retry-pushback-ms says: a recording answers with it, as
+	// the target did. The keys gRPC sets itself it leaves out.
+	c := codecOf(t)
+
+	x := recordedCallOf("Greetings", &pb.HiReq{})
+	x.trailer = metadata.Pairs("grpc-retry-pushback-ms", "100", "grpc-status", "14", "grpc-accept-encoding", "gzip")
+
+	s, err := c.Response(x, nil)
+	require.NoError(t, err)
+	require.Equal(t, map[string][]string{"grpc-retry-pushback-ms": {"100"}}, s.Trailer)
 }
