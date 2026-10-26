@@ -714,7 +714,7 @@ A request net/http refuses before the admin API reads it, such as one with a mal
 
 ### MCP
 
-With `admin.MCP()`, the admin API serves its operations to AI agents too, over the [Model Context Protocol](https://modelcontextprotocol.io): a tool per route, named after its operation, such as `add_mock`, `list_mocks` and `query_requests`. A tool takes what its route's body takes, as JSON, and answers what the route answers, or its problem document as the tool's error. An agent sees only the tools the server can do: a gRPC server has no `add_mock`, and one without a journal no `query_requests`.
+With `admin.MCP()`, the admin API serves its operations to AI agents too, over the [Model Context Protocol](https://modelcontextprotocol.io): a tool per operation, named after it, such as `add_mock`, `list_mocks` and `query_requests`; the streams, the OpenAPI document and the pages have none. A tool's arguments carry what its route takes, the body under a key, such as `{"mock": ...}` for `add_mock` and `{"query": ...}` for `query_requests`, and its tool's schema names them. A tool answers what its route answers, or its problem document as the tool's error. An agent sees only the tools the server can do: a gRPC server has no `add_mock`, and one without a journal no `query_requests`.
 
 ```go
 api := admin.MustNew(admin.MCP())
