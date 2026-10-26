@@ -19,6 +19,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 const (
@@ -168,8 +169,9 @@ func Events(events *handler.Events) Option {
 
 // Journal sets the journal of the requests the mock server serves, which GET, QUERY and DELETE /requests read and
 // clear, and POST /reset clears. pattern makes the filter of the request part of a mock of the server's protocol, of
-// a query; nil, for a protocol that has none, takes no request part. A nil journal sets none.
-func Journal(j handler.Journal, pattern handler.RequestPattern) Option {
+// a query; nil, for a protocol that has none, takes no request part. matchers builds the matcher lists of a query, as
+// it does the server's mock files; nil builds the built-in matchers only. A nil journal sets none.
+func Journal(j handler.Journal, pattern handler.RequestPattern, matchers *matchbuild.Registry) Option {
 	return func(s *Server) {
 		// A server without a journal passes its nil one: the routes answer 501, and reset skips it.
 		if typed, ok := j.(*journal.Journal); j == nil || ok && typed == nil {
@@ -178,7 +180,7 @@ func Journal(j handler.Journal, pattern handler.RequestPattern) Option {
 
 		s.journal = j
 		s.routes["GET /requests"] = handler.ListRequests(j)
-		s.routes["QUERY /requests"] = handler.QueryRequests(j, pattern)
+		s.routes["QUERY /requests"] = handler.QueryRequests(j, pattern, matchers)
 		s.routes["DELETE /requests"] = handler.ClearRequests(j)
 		s.routes["GET /requests/{id}"] = handler.GetRequest(j)
 	}

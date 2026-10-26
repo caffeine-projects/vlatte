@@ -151,7 +151,7 @@ func New(config ...Option) (*Server, error) {
 			admin.Mocks[*Mock](store, nil),
 			admin.Events(app.events),
 			admin.Logs(logs),
-			admin.Journal(j, nil),
+			admin.Journal(j, nil, nil),
 		)
 	}
 

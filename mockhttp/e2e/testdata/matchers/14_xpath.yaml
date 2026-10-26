@@ -1,0 +1,11 @@
+# WireMock's matchesXPath with xPathNamespaces and a nested matcher.
+id: xpath
+request:
+  method: POST
+  path: /xpath
+  body:
+    - all
+    - - [xpath, "//t:todo-item/text()", [some, [contains, wash]], {namespaces: {t: "urn:todo"}}]
+      - [xpath, "count(//t:todo-item)", [gte, 2], {namespaces: {t: "urn:todo"}}]
+response:
+  status: 200

@@ -13,6 +13,7 @@ import (
 type equalJSONMatcher struct {
 	Expected any
 	want     any // what the expected JSON means
+	opts     jsonOptions
 }
 
 // Name implements vlatte.Matcher.
@@ -23,7 +24,7 @@ func (m *equalJSONMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
 
 	got, err := jsonOf(v)
-	if err == nil && value.Same(m.want, got) {
+	if err == nil && m.opts.same(m.want, got) {
 		return success()
 	}
 
@@ -40,7 +41,69 @@ func jsonOf(v any) (any, error) {
 	return value.ViaJSON(v)
 }
 
-// Describe implements descriptor.SelfDescriptive.
+// same reports whether got, a JSON document, equals want, another, as the options loosen it.
+func (o jsonOptions) same(want, got any) bool {
+	switch w := want.(type) {
+	case map[string]any:
+		g, ok := got.(map[string]any)
+		if !ok || len(g) < len(w) || len(g) > len(w) && !o.ignoreExtraElements {
+			return false
+		}
+
+		for k, wv := range w {
+			if gv, ok := g[k]; !ok || !o.same(wv, gv) {
+				return false
+			}
+		}
+
+		return true
+	case []any:
+		g, ok := got.([]any)
+		if !ok || len(g) < len(w) || len(g) > len(w) && !o.ignoreExtraElements {
+			return false
+		}
+
+		if o.ignoreArrayOrder {
+			paired, _ := pairUp(len(w), len(g), func(i, j int) (bool, error) { return o.same(w[i], g[j]), nil })
+			return paired
+		}
+
+		// In order, the expected items are a subsequence of the value's: pairing each with the first item left that
+		// it equals leaves the most items for the rest, so this finds one when there is one.
+		j := 0
+		for _, wv := range w {
+			for j < len(g) && !o.same(wv, g[j]) {
+				j++
+			}
+
+			if j == len(g) {
+				return false
+			}
+
+			j++
+		}
+
+		return true
+	default:
+		return value.Same(want, got)
+	}
+}
+
+// Describe implements descriptor.SelfDescriptive. Options are described as an object after the expected JSON, with
+// the keys of mock files.
 func (m *equalJSONMatcher) Describe() descriptor.Descriptor {
-	return descriptor.MultiArgs("eqj", m.Expected)
+	opts := make(map[string]any, 2)
+	if m.opts.ignoreArrayOrder {
+		opts["ignore_array_order"] = true
+	}
+
+	if m.opts.ignoreExtraElements {
+		opts["ignore_extra_elements"] = true
+	}
+
+	if len(opts) == 0 {
+		return descriptor.MultiArgs("eqj", m.Expected)
+	}
+
+	return descriptor.MultiArgs("eqj", m.Expected, opts)
 }

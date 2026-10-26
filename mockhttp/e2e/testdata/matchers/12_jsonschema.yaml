@@ -1,0 +1,15 @@
+# WireMock's matchesJsonSchema, with a schema version.
+id: schema
+request:
+  method: POST
+  path: /schema
+  body:
+    - jsonschema
+    - type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        age: {type: integer, minimum: 0}
+    - {draft: 7}
+response:
+  status: 200

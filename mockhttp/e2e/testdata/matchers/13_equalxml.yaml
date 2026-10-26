@@ -1,0 +1,8 @@
+# WireMock's equalToXml with ignoreOrderOfSameNode.
+id: xml
+request:
+  method: POST
+  path: /xml
+  body: [equalxml, "<order id='7'><item>1</item><item>2</item></order>", {ignore_child_order: true}]
+response:
+  status: 200

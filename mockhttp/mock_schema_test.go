@@ -17,6 +17,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 // decodeDoc builds a YAML mock document for app, as the admin API does.
@@ -631,6 +633,74 @@ func TestMockFile_RelativeURLIsExact(t *testing.T) {
 
 		if tc.status == http.StatusOK {
 			require.Equal(t, tc.body, body, tc.target)
+		}
+	}
+}
+
+// hasHeader builds the custom request matcher [has-header, name]: a request that has the header name.
+func hasHeader(_ *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
+	if len(args) != 1 {
+		return nil, errors.New("takes a header name")
+	}
+
+	name, ok := args[0].(string)
+	if !ok {
+		return nil, errors.New("takes a header name")
+	}
+
+	return match.Function(func(v any) (bool, error) {
+		r, isRequest := v.(*http.Request)
+		return isRequest && r.Header.Get(name) != "", nil
+	}), nil
+}
+
+func TestMockFile_CustomMatchesTheWholeRequest(t *testing.T) {
+	// WireMock's customMatcher: a matcher of the server's registry, by name with its arguments, gets the request.
+	m := MustNew(Setup().Silent().Matchers(matchbuild.MustNew(matchbuild.WithMatcher("has-header", hasHeader))))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(FromBytes([]byte("request: {path: /a, custom: [[has-header, X-Admin], [not, [has-header, X-Banned]]]}\nresponse: {status: 200}\n"), "yaml"))
+
+	tests := []struct {
+		header http.Header
+		status int
+	}{
+		{http.Header{"X-Admin": {"1"}}, http.StatusOK},
+		{http.Header{}, StatusNoMatch},
+		{http.Header{"X-Admin": {"1"}, "X-Banned": {"1"}}, StatusNoMatch},
+	}
+
+	for _, tc := range tests {
+		res, _ := do(t, http.MethodGet, m.URL("/a"), tc.header, nil)
+		require.Equal(t, tc.status, res.StatusCode, "%v", tc.header)
+	}
+}
+
+func TestMockFile_CustomProblems(t *testing.T) {
+	app := MustNew(Setup().Silent().Matchers(matchbuild.MustNew(matchbuild.WithMatcher("has-header", hasHeader))))
+	t.Cleanup(app.Close)
+
+	tests := []struct {
+		doc  string
+		want []string
+	}{
+		// custom is a list of specs: one spec alone is a list of a name and a header, read as two specs.
+		{"request: {custom: [has-header, X-Admin]}\nresponse: {status: 200}", []string{
+			`request.custom[0]="has-header": has-header: takes a header name`, `request.custom[1]="X-Admin": unknown matcher "X-Admin"`,
+		}},
+		{"request: {custom: [[nope]]}\nresponse: {status: 200}", []string{`unknown matcher "nope"`}},
+		{"request: {custom: [1]}\nresponse: {status: 200}", []string{"a matcher list, such as [is-admin], or a matcher's name"}},
+		{"request: {custom: has-header}\nresponse: {status: 200}", []string{"a list"}},
+	}
+
+	for _, tc := range tests {
+		_, err := decodeDoc(app, tc.doc)
+		problems := mockProblems(t, err)
+		require.Len(t, problems, len(tc.want), tc.doc)
+
+		for i, want := range tc.want {
+			require.Contains(t, problems[i].Message, want, tc.doc)
 		}
 	}
 }

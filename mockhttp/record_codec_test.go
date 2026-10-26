@@ -170,7 +170,7 @@ func FuzzCanonicalURL(f *testing.F) {
 		require.NoError(t, err)
 		require.True(t, ok, "%q doesn't match %q", canonical, target)
 
-		require.NoError(t, setURL(&requestDef{}, config.Value{Key: "request.url", Any: canonical}), "a mock file takes %q", canonical)
+		require.NoError(t, setURL(&requestDef{matchers: _builtinMatchers}, config.Value{Key: "request.url", Any: canonical}), "a mock file takes %q", canonical)
 
 		again, err := url.ParseRequestURI(canonical)
 		require.NoError(t, err)
