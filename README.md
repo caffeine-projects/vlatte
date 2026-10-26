@@ -457,7 +457,7 @@ A connection that switched protocols, such as a WebSocket, goes through the step
 
 ## Faults
 
-The `fault` package has steps that make a mock answer wrong, to test how a client handles a server that fails:
+The `fault` package has steps that make a mock answer wrong, to test how a client handles a server that fails, or a bad network, as the toxics of [Toxiproxy](https://github.com/Shopify/toxiproxy#toxics) do. A step of either level acts on the body with `Step`, and on every byte of the answer, its head included, with `WireStep`:
 
 | Step | Level | What the client gets |
 |---|---|---|
@@ -466,10 +466,19 @@ The `fault` package has steps that make a mock answer wrong, to test how a clien
 | `fault.RandomDataThenClose()` | `WireStep` | `fault.RandomDataSize` random bytes in place of the answer, then the end of the connection. |
 | `fault.ConnectionResetByPeer()` | `WireStep` | A TCP reset, such as `ECONNRESET`, before a status line. |
 | `fault.ChunkedDribbleDelay(chunks, total)` | `Step` | The whole body, in `chunks` flushed parts spread over `total`: part k comes at k·total/chunks, and the body ends at `total`. The body is held until the reply wrote all of it. |
+| `fault.Latency(delay)` | Either | Every write and flush the `vlatte.Delay` later, such as `vlatte.Latency(d)` or `vlatte.Jitter(avg, deviation)`, in order. The answer keeps its pace: the writer doesn't wait. |
+| `fault.Bandwidth(bytesPerSecond)` | Either | Each write at that rate, in flushed pieces of a tenth of a second. `fault.Bandwidth3G` and the other `fault.Bandwidth*` constants are common links, in bytes per second. |
+| `fault.Slicer(averageSize, sizeVariation, delay)` | Either | Each write in flushed slices of `averageSize` bytes, give or take `sizeVariation` at random, `delay` apart. |
+| `fault.SlowClose(delay)` | Either | The whole answer, then its end `delay` later: the body's last chunk with `Step`, the close of the connection with `WireStep`. |
+| `fault.Timeout(timeout)` | Either | Nothing, then the end of the connection `timeout` after the answer began; with `Step`, the head comes with that end. A timeout of 0 never ends. |
+| `fault.LimitData(n)` | Either | The first `n` bytes, then the end of the connection: bytes of the body with `Step`, of the whole answer with `WireStep`. |
+| `fault.ConnectionResetByPeerAfter(d)` | Either | The answer as it comes, then a TCP reset `d` after it began. With `Step` over HTTP/2, the stream is cut instead. |
 
 ```go
 m.MustMock(mockhttp.Getf("/users").WireStep(fault.ConnectionResetByPeer()).Reply(mockhttp.OK()))
 m.MustMock(mockhttp.Getf("/report").Step(fault.ChunkedDribbleDelay(5, 2*time.Second)).Reply(mockhttp.OK().BodyFile("report.csv")))
+m.MustMock(mockhttp.Getf("/search").WireStep(fault.Latency(vlatte.Jitter(300*time.Millisecond, 20))).Reply(mockhttp.OK()))
+m.MustMock(mockhttp.Getf("/video").Step(fault.Bandwidth(fault.Bandwidth3G)).Reply(mockhttp.OK().BodyFile("video.mp4")))
 ```
 
 A wire fault needs HTTP/1.x, as wire steps do. Faults combine with other steps: a fault on the wire comes after the steps of `Step`. A mock that answers with a fault still counts the call, and runs its callbacks and events, before the connection ends.

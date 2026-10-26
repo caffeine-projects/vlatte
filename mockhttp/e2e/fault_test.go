@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -113,4 +114,152 @@ func TestFault_ChunkedDribbleDelay(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	require.Equal(t, "hello world", string(body))
 	require.EqualValues(t, 1, scoped.Hits())
+}
+
+func TestFault_Latency(t *testing.T) {
+	// The whole answer, its head included, comes the latency late, and whole.
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.Latency(vlatte.Latency(50*time.Millisecond))).Reply(mockhttp.OK().PlainText("hello")))
+
+	start := time.Now()
+	res, err := newClient(t).Get(m.URL("/f"))
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, time.Since(start), 50*time.Millisecond)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "hello", string(body))
+	require.EqualValues(t, 1, scoped.Hits())
+}
+
+func TestFault_Bandwidth(t *testing.T) {
+	// A body of 400 bytes at 2000 bytes a second takes 200ms at least, and arrives whole.
+	want := strings.Repeat("a", 400)
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").Step(fault.Bandwidth(2000)).Reply(mockhttp.OK().PlainText(want)))
+
+	start := time.Now()
+	res, err := newClient(t).Get(m.URL("/f"))
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	require.GreaterOrEqual(t, time.Since(start), 200*time.Millisecond)
+	require.Equal(t, want, string(body))
+	require.EqualValues(t, 1, scoped.Hits())
+}
+
+func TestFault_SlowClose(t *testing.T) {
+	// The client has the body, but reads its end late.
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").Step(fault.SlowClose(50*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello")))
+
+	start := time.Now()
+	res, err := newClient(t).Get(m.URL("/f"))
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	require.GreaterOrEqual(t, time.Since(start), 50*time.Millisecond)
+	require.Equal(t, "hello", string(body))
+	require.EqualValues(t, 1, scoped.Hits())
+}
+
+func TestFault_Timeout(t *testing.T) {
+	t.Run("WireStep", func(t *testing.T) {
+		// The client waits, gets no byte, not even a head, then the end of the connection.
+		m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.Timeout(50*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello")))
+
+		start := time.Now()
+		got, err := rawGet(t, m, "/f")
+		require.NoError(t, err)
+		require.Empty(t, got)
+		require.GreaterOrEqual(t, time.Since(start), 50*time.Millisecond)
+		require.EqualValues(t, 1, scoped.Hits())
+	})
+
+	t.Run("Step", func(t *testing.T) {
+		// The client waits, then gets the head, sent as the answer is cut, and the end of the connection for a body.
+		m, scoped := startFaulty(t, mockhttp.Getf("/f").Step(fault.Timeout(50*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello")))
+
+		start := time.Now()
+		res, err := newClient(t).Get(m.URL("/f"))
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, time.Since(start), 50*time.Millisecond)
+		require.Equal(t, http.StatusOK, res.StatusCode)
+
+		body, err := io.ReadAll(res.Body)
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		require.Empty(t, body)
+		require.NoError(t, res.Body.Close())
+		require.EqualValues(t, 1, scoped.Hits())
+	})
+}
+
+func TestFault_ConnectionResetByPeerAfter(t *testing.T) {
+	// The client reads the whole answer, then a reset where it waits for the end of the connection.
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.ConnectionResetByPeerAfter(50*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello")))
+
+	got, err := rawGet(t, m, "/f")
+	require.ErrorIs(t, err, syscall.ECONNRESET)
+
+	res, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(got)), nil)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, "hello", string(body))
+	require.EqualValues(t, 1, scoped.Hits())
+}
+
+func TestFault_Slicer(t *testing.T) {
+	// The answer comes in slices of 6 bytes at most, its head included, each 2ms after the one before, and the client
+	// reads it whole.
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.Slicer(4, 2, 2*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello world")))
+
+	start := time.Now()
+	got, err := rawGet(t, m, "/f")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, time.Since(start), time.Duration(len(got)/6)*2*time.Millisecond)
+
+	res, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(got)), nil)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, "hello world", string(body))
+	require.EqualValues(t, 1, scoped.Hits())
+}
+
+func TestFault_LimitData(t *testing.T) {
+	t.Run("WireStep", func(t *testing.T) {
+		// The limit counts the bytes of the whole answer: the client gets the start of the status line, then the end.
+		m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.LimitData(12)).Reply(mockhttp.OK().PlainText("hello")))
+
+		got, err := rawGet(t, m, "/f")
+		require.NoError(t, err)
+		require.Equal(t, "HTTP/1.1 200", string(got))
+		require.EqualValues(t, 1, scoped.Hits())
+	})
+
+	t.Run("Step", func(t *testing.T) {
+		// The limit counts the bytes of the body: the client gets a valid head, then a body cut short.
+		m, scoped := startFaulty(t, mockhttp.Getf("/f").Step(fault.LimitData(3)).Reply(mockhttp.OK().PlainText("hello")))
+
+		res, err := newClient(t).Get(m.URL("/f"))
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, res.StatusCode)
+
+		body, err := io.ReadAll(res.Body)
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		require.Equal(t, "hel", string(body))
+		require.NoError(t, res.Body.Close())
+		require.EqualValues(t, 1, scoped.Hits())
+	})
 }
