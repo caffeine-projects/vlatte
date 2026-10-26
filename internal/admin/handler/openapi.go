@@ -32,52 +32,51 @@ var _openAPIJSON = sync.OnceValues(func() ([]byte, error) {
 	}
 
 	var out bytes.Buffer
-	if err := encodeInOrder(jsontext.NewEncoder(&out, jsontext.WithIndent("  ")), node.Content[0], doc); err != nil {
-		return nil, err
-	}
 
-	return out.Bytes(), nil
+	enc := orderedEncoder{enc: jsontext.NewEncoder(&out, jsontext.WithIndent("  "))}
+	enc.encode(node.Content[0], doc)
+
+	return out.Bytes(), enc.err
 })
 
-// encodeInOrder writes v, the value of the data model that node decodes to, as JSON, with the keys of its objects in
-// the order node has them.
-func encodeInOrder(enc *jsontext.Encoder, node *yaml.Node, v any) error {
-	if node.Kind == yaml.AliasNode {
-		node = node.Alias
-	}
+// orderedEncoder writes a value of the data model as JSON, with the keys of its objects in the order of the YAML node
+// it decodes from. It stops at the first error, which it keeps.
+type orderedEncoder struct {
+	enc *jsontext.Encoder
+	err error
+}
 
+// encode writes v, the value node decodes to.
+func (e *orderedEncoder) encode(node *yaml.Node, v any) {
 	switch x := v.(type) {
 	case map[string]any:
-		if err := enc.WriteToken(jsontext.BeginObject); err != nil {
-			return err
-		}
+		e.token(jsontext.BeginObject)
 
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key := node.Content[i].Value
-			if err := enc.WriteToken(jsontext.String(key)); err != nil {
-				return err
-			}
-
-			if err := encodeInOrder(enc, node.Content[i+1], x[key]); err != nil {
-				return err
-			}
+			e.token(jsontext.String(key))
+			e.encode(node.Content[i+1], x[key])
 		}
 
-		return enc.WriteToken(jsontext.EndObject)
+		e.token(jsontext.EndObject)
 	case []any:
-		if err := enc.WriteToken(jsontext.BeginArray); err != nil {
-			return err
+		e.token(jsontext.BeginArray)
+
+		for i, item := range x {
+			e.encode(node.Content[i], item)
 		}
 
-		for i, e := range x {
-			if err := encodeInOrder(enc, node.Content[i], e); err != nil {
-				return err
-			}
-		}
-
-		return enc.WriteToken(jsontext.EndArray)
+		e.token(jsontext.EndArray)
 	default:
-		return json.MarshalEncode(enc, v)
+		if e.err == nil {
+			e.err = json.MarshalEncode(e.enc, v)
+		}
+	}
+}
+
+func (e *orderedEncoder) token(t jsontext.Token) {
+	if e.err == nil {
+		e.err = e.enc.WriteToken(t)
 	}
 }
 
