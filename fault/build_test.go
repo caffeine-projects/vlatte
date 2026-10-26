@@ -1,4 +1,4 @@
-package fault_test
+package fault
 
 import (
 	"testing"
@@ -10,7 +10,6 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
-	"github.com/caffeine-projects/vlatte/fault"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
@@ -37,43 +36,43 @@ func TestBuild_BuildsTheFaultItsSpecNames(t *testing.T) {
 		want vlatte.Step
 		desc []any
 	}{
-		{name: "a name alone", spec: "empty_response", want: fault.EmptyResponse(), desc: []any{"empty_response"}},
-		{name: "empty response", spec: []any{"empty_response"}, want: fault.EmptyResponse(), desc: []any{"empty_response"}},
-		{name: "malformed chunk", spec: []any{"malformed_response_chunk"}, want: fault.MalformedResponseChunk(), desc: []any{"malformed_response_chunk"}},
-		{name: "random data", spec: []any{"random_data_then_close"}, want: fault.RandomDataThenClose(), desc: []any{"random_data_then_close"}},
-		{name: "reset", spec: []any{"connection_reset_by_peer"}, want: fault.ConnectionResetByPeer(), desc: []any{"connection_reset_by_peer"}},
+		{name: "a name alone", spec: "empty_response", want: EmptyResponse(), desc: []any{"empty_response"}},
+		{name: "empty response", spec: []any{"empty_response"}, want: EmptyResponse(), desc: []any{"empty_response"}},
+		{name: "malformed chunk", spec: []any{"malformed_response_chunk"}, want: MalformedResponseChunk(), desc: []any{"malformed_response_chunk"}},
+		{name: "random data", spec: []any{"random_data_then_close"}, want: RandomDataThenClose(), desc: []any{"random_data_then_close"}},
+		{name: "reset", spec: []any{"connection_reset_by_peer"}, want: ConnectionResetByPeer(), desc: []any{"connection_reset_by_peer"}},
 		{
 			name: "reset after", spec: []any{"connection_reset_by_peer_after", "1.5s"},
-			want: fault.ConnectionResetByPeerAfter(1500 * time.Millisecond), desc: []any{"connection_reset_by_peer_after", "1.5s"},
+			want: ConnectionResetByPeerAfter(1500 * time.Millisecond), desc: []any{"connection_reset_by_peer_after", "1.5s"},
 		},
 		{
 			name: "dribble", spec: []any{"chunked_dribble_delay", int64(5), "2s"},
-			want: fault.ChunkedDribbleDelay(5, 2*time.Second), desc: []any{"chunked_dribble_delay", int64(5), "2s"},
+			want: ChunkedDribbleDelay(5, 2*time.Second), desc: []any{"chunked_dribble_delay", int64(5), "2s"},
 		},
-		{name: "bandwidth", spec: []any{"bandwidth", int64(2000)}, want: fault.Bandwidth(2000), desc: []any{"bandwidth", int64(2000)}},
-		{name: "a common link", spec: []any{"bandwidth", "3g"}, want: fault.Bandwidth(fault.Bandwidth3G), desc: []any{"bandwidth", int64(fault.Bandwidth3G)}},
+		{name: "bandwidth", spec: []any{"bandwidth", int64(2000)}, want: Bandwidth(2000), desc: []any{"bandwidth", int64(2000)}},
+		{name: "a common link", spec: []any{"bandwidth", "3g"}, want: Bandwidth(Bandwidth3G), desc: []any{"bandwidth", int64(Bandwidth3G)}},
 		{
 			name: "slicer", spec: []any{"slicer", int64(64), int64(16), "10ms"},
-			want: fault.Slicer(64, 16, 10*time.Millisecond), desc: []any{"slicer", int64(64), int64(16), "10ms"},
+			want: Slicer(64, 16, 10*time.Millisecond), desc: []any{"slicer", int64(64), int64(16), "10ms"},
 		},
-		{name: "slow close", spec: []any{"slow_close", "2s"}, want: fault.SlowClose(2 * time.Second), desc: []any{"slow_close", "2s"}},
-		{name: "timeout", spec: []any{"timeout", "0s"}, want: fault.Timeout(0), desc: []any{"timeout", "0s"}},
-		{name: "limit data", spec: []any{"limit_data", int64(0)}, want: fault.LimitData(0), desc: []any{"limit_data", int64(0)}},
+		{name: "slow close", spec: []any{"slow_close", "2s"}, want: SlowClose(2 * time.Second), desc: []any{"slow_close", "2s"}},
+		{name: "timeout", spec: []any{"timeout", "0s"}, want: Timeout(0), desc: []any{"timeout", "0s"}},
+		{name: "limit data", spec: []any{"limit_data", int64(0)}, want: LimitData(0), desc: []any{"limit_data", int64(0)}},
 		{
 			name: "the most milliseconds", spec: []any{"timeout", int64(9223372036854)},
-			want: fault.Timeout(9223372036854 * time.Millisecond), desc: []any{"timeout", (9223372036854 * time.Millisecond).String()},
+			want: Timeout(9223372036854 * time.Millisecond), desc: []any{"timeout", (9223372036854 * time.Millisecond).String()},
 		},
-		{name: "milliseconds", spec: []any{"slow_close", int64(1500)}, want: fault.SlowClose(1500 * time.Millisecond), desc: []any{"slow_close", "1.5s"}},
+		{name: "milliseconds", spec: []any{"slow_close", int64(1500)}, want: SlowClose(1500 * time.Millisecond), desc: []any{"slow_close", "1.5s"}},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			step, err := fault.Build(tc.spec)
+			step, err := Build(tc.spec)
 			require.NoError(t, err)
 			require.Equal(t, tc.desc, described(t, step))
 			require.Equal(t, described(t, tc.want), described(t, step))
 
-			again, err := fault.Build(described(t, step))
+			again, err := Build(described(t, step))
 			require.NoError(t, err)
 			require.Equal(t, tc.desc, described(t, again))
 		})
@@ -102,12 +101,12 @@ func TestBuild_LatencyDelaysAsItsSpecSays(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			step, err := fault.Build(tc.spec)
+			step, err := Build(tc.spec)
 			require.NoError(t, err)
 			require.Equal(t, tc.desc, described(t, step))
 
 			synctest.Test(t, func(t *testing.T) {
-				sink := &timedSink{start: time.Now()}
+				sink := &bandwidthSink{start: time.Now()}
 				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{step})
 
 				_, err := flow.Write([]byte("a"))
@@ -208,7 +207,7 @@ func TestBuild_RefusesASpecItCantBuild(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			step, err := fault.Build(tc.spec)
+			step, err := Build(tc.spec)
 			require.EqualError(t, err, tc.want)
 			require.Nil(t, step)
 		})
@@ -271,7 +270,7 @@ func TestPropBuild_ADescriptionBuildsTheSameFault(t *testing.T) {
 	// The admin API describes a mock, and its store writes the description to a file that must load as the same mock:
 	// a fault built from its own description describes itself the same, through JSON or YAML as a file holds it.
 	rapid.Check(t, func(t *rapid.T) {
-		step, err := fault.Build(genSpec().Draw(t, "spec"))
+		step, err := Build(genSpec().Draw(t, "spec"))
 		require.NoError(t, err)
 
 		first, err := value.ViaJSON(step.(descriptor.SelfDescriptive).Describe())
@@ -285,12 +284,23 @@ func TestPropBuild_ADescriptionBuildsTheSameFault(t *testing.T) {
 			read, err := config.Parse(data, format)
 			require.NoError(t, err)
 
-			again, err := fault.Build(read)
+			again, err := Build(read)
 			require.NoError(t, err)
 
 			second, err := value.ViaJSON(again.(descriptor.SelfDescriptive).Describe())
 			require.NoError(t, err)
 			require.Equal(t, first, second, format)
 		}
+	})
+}
+
+func TestBuilt_ABugStillPanics(t *testing.T) {
+	// Only the messages constructors panic with on input they refuse become errors: a bug, such as an index out of
+	// range, must not pass for a spec that is wrong.
+	require.PanicsWithError(t, "runtime error: index out of range [1] with length 0", func() {
+		_, _ = built(func() vlatte.Step {
+			var steps []vlatte.Step
+			return steps[1]
+		})
 	})
 }

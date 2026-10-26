@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/fault"
 )
 
@@ -95,8 +96,13 @@ func TestLatency_JitterKeepsTheOrder(t *testing.T) {
 
 func TestLatency_IsDescribedByItsDurations(t *testing.T) {
 	// A latency describes itself as the spec that builds it again, from Go code as from a mock file.
-	require.Equal(t, []any{"latency", "1.5s"}, described(t, fault.Latency(1500*time.Millisecond, 0)))
-	require.Equal(t, []any{"latency", "1s", "200ms"}, described(t, fault.Latency(time.Second, 200*time.Millisecond)))
+	got, ok := descriptor.IsSelfDescriptive(fault.Latency(1500*time.Millisecond, 0))
+	require.True(t, ok)
+	require.Equal(t, descriptor.SingleArg("latency", "1.5s"), got)
+
+	got, ok = descriptor.IsSelfDescriptive(fault.Latency(time.Second, 200*time.Millisecond))
+	require.True(t, ok)
+	require.Equal(t, descriptor.MultiArgs("latency", "1s", "200ms"), got)
 }
 
 func TestLatency_KeepsWhatItWasGiven(t *testing.T) {
