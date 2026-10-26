@@ -16,7 +16,11 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/dynamicpb"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/testmock"
@@ -611,4 +615,70 @@ func TestJournal_APatternReadsTheEntriesAJournalKeptAcrossRestarts(t *testing.T)
 			require.ErrorIs(t, err, vlatte.ErrMatching)
 		})
 	}
+}
+
+func TestJournal_ABidiCallWhoseMessagesCantBeWrittenFailed(t *testing.T) {
+	// A bidi call's messages are journaled once its reply returns: a message protojson can't write, such as an Any of
+	// a type the server doesn't know, which a Func reply reads without writing, leaves its entry without them, which
+	// says so rather than that the call matched.
+	anyFile := protodesc.ToFileDescriptorProto(anypb.File_google_protobuf_any_proto)
+	fd := &descriptorpb.FileDescriptorProto{
+		Name:       new("wrap.proto"),
+		Package:    new("wrap"),
+		Dependency: []string{anyFile.GetName()},
+		Syntax:     new("proto3"),
+		MessageType: []*descriptorpb.DescriptorProto{{
+			Name: new("Wrap"),
+			Field: []*descriptorpb.FieldDescriptorProto{{
+				Name: new("any"), JsonName: new("any"), Number: new(int32(1)),
+				Label:    descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+				Type:     descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(),
+				TypeName: new(".google.protobuf.Any"),
+			}},
+		}},
+		Service: []*descriptorpb.ServiceDescriptorProto{{
+			Name: new("Wrapper"),
+			Method: []*descriptorpb.MethodDescriptorProto{{
+				Name: new("Chat"), InputType: new(".wrap.Wrap"), OutputType: new(".wrap.Wrap"),
+				ClientStreaming: new(true), ServerStreaming: new(true),
+			}},
+		}},
+	}
+
+	files, err := protodesc.NewFiles(&descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{anyFile, fd}})
+	require.NoError(t, err)
+
+	m, _ := journaled(t, Setup().Files(files))
+	m.MustMock(Method("wrap.Wrapper/Chat").Reply(Func(func(_ context.Context, call *Call) error {
+		for {
+			if _, err := call.Recv(); err != nil {
+				return nil
+			}
+		}
+	})))
+
+	wrap, err := files.FindDescriptorByName("wrap.Wrap")
+	require.NoError(t, err)
+
+	msg := dynamicpb.NewMessage(wrap.(protoreflect.MessageDescriptor))
+	unknown := &anypb.Any{TypeUrl: "type.googleapis.com/nope.X", Value: []byte{0x0a, 0x01, 'x'}}
+	msg.Set(msg.Descriptor().Fields().ByName("any"), protoreflect.ValueOfMessage(unknown.ProtoReflect()))
+
+	stream, err := m.MustDial().NewStream(t.Context(), &grpc.StreamDesc{ClientStreams: true, ServerStreams: true}, "/wrap.Wrapper/Chat")
+	require.NoError(t, err)
+	require.NoError(t, stream.SendMsg(msg))
+	require.NoError(t, stream.CloseSend())
+
+	for {
+		if err := stream.RecvMsg(dynamicpb.NewMessage(wrap.(protoreflect.MessageDescriptor))); err != nil {
+			require.ErrorIs(t, err, io.EOF, "the client got the mock's answer")
+			break
+		}
+	}
+
+	e := onlyCall(t, m, journal.Query{})
+	require.Equal(t, journal.OutcomeFailed, e.Outcome)
+	require.Empty(t, e.Body)
+	require.Contains(t, e.Message, "bidi streaming: ")
+	require.Contains(t, e.Message, "nope.X")
 }

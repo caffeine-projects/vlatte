@@ -213,6 +213,11 @@ func (c *journalCall) replied(ctx context.Context, err error) {
 	})
 }
 
+// failed sets that the call failed with err, whatever its answer.
+func (c *journalCall) failed(err error) {
+	c.update(func() { c.entry.Outcome, c.entry.Message = journal.OutcomeFailed, err.Error() })
+}
+
 // end appends the entry of the call, which ended with err, with its gRPC code. A call that reached no outcome, such
 // as one that failed before matching, or panicked, failed, or was abandoned when its client left. A call that an
 // interceptor answered itself, which reached no mock, isn't appended.

@@ -206,3 +206,62 @@ func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 		require.JSONEq(t, want[mock.ID()], string(doc))
 	}
 }
+
+func TestDescribe_AMockWithAMatcherOrDelayItCannotHoldHasNoResponse(t *testing.T) {
+	// A description without a matcher, or the delay, of its mock would load back as a mock that matches more calls,
+	// or answers sooner: it has no response, so it doesn't load back at all.
+	custom := match.Function(func(any) (bool, error) { return true, nil })
+	reply := Message(&pb.HiRes{Message: "hi"})
+	m := serve(t)
+	scope := m.MustMock(
+		Method("Greetings").ID("call").CallMatches(func(*Call) (bool, error) { return true, nil }).Reply(reply),
+		Method("Greetings").ID("header").Header("x-team", custom).Header("x-env", match.Equal("ci")).Reply(reply),
+		Method("Greetings").ID("field").Field("message", custom).Reply(reply),
+		Method("Greetings").ID("body").Body(custom).Reply(reply),
+		Method("Greetings").ID("message").Message(&pb.HiReq{Message: "\xff"}).Reply(reply),
+		Method("Upload").ID("messages").Messages(&pb.ListItem{Key: "\xff"}).Reply(reply),
+		Method("Greetings").ID("delay").DelayFunc(vlatte.Latency(time.Millisecond)).Reply(reply),
+		Method("Greetings").ID("delay-then-fixed").DelayFunc(vlatte.Latency(time.Millisecond)).Delay(time.Second).Reply(reply),
+	)
+
+	want := map[string]string{
+		"call":             `{"id": "call", "request": {"method": "Greetings"}}`,
+		"header":           `{"id": "header", "request": {"method": "Greetings", "header": {"x-env": ["eq", "ci"]}}}`,
+		"field":            `{"id": "field", "request": {"method": "Greetings"}}`,
+		"body":             `{"id": "body", "request": {"method": "Greetings"}}`,
+		"message":          `{"id": "message", "request": {"method": "Greetings"}}`,
+		"messages":         `{"id": "messages", "request": {"method": "Upload"}}`,
+		"delay":            `{"id": "delay", "request": {"method": "Greetings"}}`,
+		"delay-then-fixed": `{"id": "delay-then-fixed", "delay": "1s", "request": {"method": "Greetings"}, "response": {"messages": [{"message": "hi"}]}}`,
+	}
+
+	require.Len(t, scope.Mocks(), len(want))
+
+	for _, mock := range scope.Mocks() {
+		doc, err := mock.Describe().MarshalJSON()
+		require.NoError(t, err)
+		require.JSONEq(t, want[mock.ID()], string(doc))
+
+		if mock.ID() != "delay-then-fixed" {
+			_, err = serve(t).Mock(FromBytes(doc, "json"))
+			require.ErrorContains(t, err, "the mock has no response", mock.ID())
+		}
+	}
+}
+
+func TestDescribe_AMockOfADocumentSaysWhetherItIsEnabled(t *testing.T) {
+	// The admin API turns a mock off and on without changing its document: the description says what it is now.
+	m := serve(t)
+	scope := m.MustMock(FromBytes([]byte(`{"id": "doc", "enabled": false, "request": {"method": "Greetings"}, "response": {}}`), "json"))
+	mock := scope.Mock("doc")
+
+	doc, err := mock.Describe().MarshalJSON()
+	require.NoError(t, err)
+	require.JSONEq(t, `{"id": "doc", "enabled": false, "request": {"method": "Greetings"}, "response": {}}`, string(doc))
+
+	mock.Enable()
+
+	doc, err = mock.Describe().MarshalJSON()
+	require.NoError(t, err)
+	require.JSONEq(t, `{"id": "doc", "request": {"method": "Greetings"}, "response": {}}`, string(doc))
+}

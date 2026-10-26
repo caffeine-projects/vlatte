@@ -79,12 +79,12 @@ func fail(ctx context.Context, failure string, c codes.Code, format string, a ..
 	return status.Errorf(c, format, a...)
 }
 
-// debugHeader is the header metadata naming mock, the mock that matched a call: its ID, its hits, this call included,
-// and its name, when it has one. Inc counts the call once it is answered.
-func debugHeader(mock *Mock) metadata.MD {
+// debugHeader is the header metadata naming mock, the mock that matched a call: its ID, hits, its hits with this call,
+// and its name, when it has one.
+func debugHeader(mock *Mock, hits int64) metadata.MD {
 	md := metadata.Pairs(
 		vlatte.MatchedMockIDHeader, mock.ID(),
-		vlatte.MatchedMockHitsHeader, strconv.FormatInt(mock.Hits()+1, 10),
+		vlatte.MatchedMockHitsHeader, strconv.FormatInt(hits, 10),
 	)
 
 	if name := mock.Name(); name != "" {

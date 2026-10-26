@@ -263,6 +263,12 @@ type responseReplier struct {
 
 // Reply implements Replier.
 func (r *responseReplier) Reply(ctx context.Context, call *Call) error {
+	// Templates render before anything goes out: one that fails sends no header.
+	msgs, err := r.messagesFor(ctx, call)
+	if err != nil {
+		return err
+	}
+
 	// The header goes out first, so a client sees it before a delayed message, or with the status.
 	if err := grpc.SendHeader(ctx, r.header); err != nil {
 		return err
@@ -272,7 +278,7 @@ func (r *responseReplier) Reply(ctx context.Context, call *Call) error {
 		return err
 	}
 
-	return r.send(ctx, call)
+	return r.sendMessages(ctx, call, msgs)
 }
 
 // send sends the messages of the answer, waiting before each for the delay, then returns the status it ends with.
@@ -282,6 +288,11 @@ func (r *responseReplier) send(ctx context.Context, call *Call) error {
 		return err
 	}
 
+	return r.sendMessages(ctx, call, msgs)
+}
+
+// sendMessages sends msgs, waiting before each for the delay, then returns the status the answer ends with.
+func (r *responseReplier) sendMessages(ctx context.Context, call *Call, msgs []proto.Message) error {
 	for _, msg := range msgs {
 		if r.delay != nil {
 			if err := httpx.Wait(ctx, r.delay()); err != nil {

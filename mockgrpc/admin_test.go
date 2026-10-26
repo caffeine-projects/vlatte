@@ -5,6 +5,7 @@ import (
 	"context"
 	json "encoding/json/v2"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -22,8 +23,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
+	"github.com/caffeine-projects/vlatte/webhook"
 )
 
 // adminServer starts a gRPC mock server with its admin API, and a client of it.
@@ -573,4 +576,145 @@ func TestAdmin_SavesABidiMockWithBodyFilesInItsRules(t *testing.T) {
 	saved, err := os.ReadFile(filepath.Join(wd, "saved", "chat.mock.yaml"))
 	require.NoError(t, err)
 	require.Equal(t, 2, strings.Count(string(saved), filepath.Join("..", "hello.json")), "%s", saved)
+}
+
+func TestAdmin_DescribesAndSavesTheEnabledStateItSet(t *testing.T) {
+	// Turning a mock of a document off or on doesn't change its document: its description and its saved file say
+	// what the admin API set, so the saved mock loads back as it was.
+	dir := t.TempDir()
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin("").Logger(&logger).RootDir(dir))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	c := pb.NewTestServiceClient(m.MustDial())
+
+	for _, doc := range []string{
+		`{"id": "off", "request": {"method": "Greetings", "fields": {"message": "off"}}, "response": {"message": {"message": "off"}}}`,
+		`{"id": "on", "enabled": false, "request": {"method": "Greetings", "fields": {"message": "on"}}, "response": {"message": {"message": "on"}}}`,
+	} {
+		status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks", doc)
+		require.Equal(t, http.StatusCreated, status, body)
+	}
+
+	for id, enabled := range map[string]string{"off": "false", "on": "true"} {
+		status, body := call(t, http.MethodPatch, m.AdminURL()+"/mocks/"+id, `{"enabled": `+enabled+`}`)
+		require.Equal(t, http.StatusOK, status, body)
+	}
+
+	_, body := call(t, http.MethodGet, m.AdminURL()+"/mocks/off", "")
+	require.JSONEq(t, `{"id": "off", "enabled": false, "request": {"method": "Greetings", "fields": {"message": "off"}}, "response": {"message": {"message": "off"}}}`, body)
+
+	_, body = call(t, http.MethodGet, m.AdminURL()+"/mocks/on", "")
+	require.JSONEq(t, `{"id": "on", "request": {"method": "Greetings", "fields": {"message": "on"}}, "response": {"message": {"message": "on"}}}`, body)
+
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks/save", `{}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	_, code := greetWith(t, c, "off")
+	require.Equal(t, codes.NotFound, code, "saved off, it loads back off")
+
+	got, _ := greetWith(t, c, "on")
+	require.Equal(t, "on", got, "saved on, it loads back on")
+}
+
+func TestRelocate_MovesTheBodyFilesOfWebhooks(t *testing.T) {
+	// The mock file format opens the body files of webhooks, and of their multipart parts, from the mock file's
+	// directory: those move. Other listeners read their parameters as they will, so theirs stay.
+	const doc = `{
+		"response": {"body_file": %[1]q},
+		"on_complete": [
+			{"name": "webhook", "parameters": {
+				"body_file": %[1]q,
+				"multipart": {"parts": [{"body_file": %[1]q}]},
+				"multipart_template": {"parts": [{"body_file": %[1]q}]}
+			}},
+			{"name": "audit", "parameters": {"body_file": "kept"}}
+		]
+	}`
+
+	up := filepath.Join("..", "..")
+
+	var got, want map[string]any
+	require.NoError(t, json.Unmarshal(fmt.Appendf(nil, doc, "hook.txt"), &got))
+	require.NoError(t, json.Unmarshal(fmt.Appendf(nil, doc, filepath.Join(up, "hook.txt")), &want))
+
+	relocate(got, up)
+	require.Equal(t, want, got)
+}
+
+func TestAdmin_SavesAMockWithAWebhookBodyFile(t *testing.T) {
+	// A webhook's body_file opens from the mock file's directory: saved elsewhere, it names the same file.
+	wd := t.TempDir()
+	t.Chdir(wd)
+	require.NoError(t, os.WriteFile("hook.txt", []byte("hook"), 0o600))
+
+	wh, err := webhook.New()
+	require.NoError(t, err)
+
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin("").Logger(&logger).ConfigSources().OnCompleteListener("webhook", wh))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks", `{"id": "hooked", "request": {"method": "Greetings"},
+		"response": {"message": {"message": "hi"}},
+		"on_complete": [{"name": "webhook", "parameters": {"url": "http://hooks.example/hook", "body_file": "hook.txt"}}]}`)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	status, body = call(t, http.MethodPost, m.AdminURL()+"/mocks/save", `{"dir": "saved/mocks"}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	saved, err := os.ReadFile(filepath.Join(wd, "saved", "mocks", "hooked.mock.yaml"))
+	require.NoError(t, err)
+	require.Contains(t, string(saved), "body_file: "+filepath.Join("..", "..", "hook.txt"))
+}
+
+// spyEngine is a template engine that calls during before it compiles each template.
+type spyEngine struct {
+	vlatte.TemplateEngine
+
+	during func()
+}
+
+func (e spyEngine) Compile(name, text string) (vlatte.Template, error) {
+	e.during()
+	return e.TemplateEngine.Compile(name, text)
+}
+
+func TestAdmin_ASaveKeepsServingTheMocksItAddedWhileTheFilesLoad(t *testing.T) {
+	// A saved file's mock takes the place of the admin API's in one step: a call while the files build, as their
+	// templates compile, still finds the admin API's mock.
+	engine, err := vlatte.NewGoTemplateEngine()
+	require.NoError(t, err)
+
+	var (
+		c    pb.TestServiceClient
+		seen []codes.Code
+	)
+
+	spy := spyEngine{TemplateEngine: engine, during: func() {
+		if c != nil {
+			_, code := greetWith(t, c, "hi")
+			seen = append(seen, code)
+		}
+	}}
+
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin("").Logger(&logger).RootDir(t.TempDir()).TemplateEngine(spy))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks", `{"id": "saved", "request": {"method": "Greetings"},
+		"response": {"message": "{\"message\": \"{{ .Request.Message.message }}\"}", "template": true}}`)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	c = pb.NewTestServiceClient(m.MustDial())
+
+	status, body = call(t, http.MethodPost, m.AdminURL()+"/mocks/save", `{}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	require.NotEmpty(t, seen)
+	for _, code := range seen {
+		require.Equal(t, codes.OK, code)
+	}
 }

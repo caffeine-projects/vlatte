@@ -78,7 +78,7 @@ func (m *Mock) Inc() {
 	m.hits.Add(1)
 }
 
-// Hits returns how many calls the mock answered, with messages or with a status.
+// Hits returns how many calls the mock answered, with messages or with a status, and is answering.
 func (m *Mock) Hits() int64 {
 	return m.hits.Load()
 }

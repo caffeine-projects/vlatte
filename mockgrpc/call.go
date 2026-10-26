@@ -39,6 +39,7 @@ type Call struct {
 	messages []proto.Message
 	sent     []proto.Message
 	answer   proto.Message // what Send set, for a call that answers one message
+	hit      *hit          // counts the call as its answer goes out
 }
 
 // newCall returns the call of method, which md describes, with header, the metadata of the client.
@@ -112,6 +113,9 @@ func (c *Call) NewOutput() proto.Message {
 // sends it once the reply returns. A streaming server sends each message as Send gets it.
 func (c *Call) Send(msg proto.Message) error {
 	if c.isServerStream() {
+		// SendMsg sends the header first.
+		c.hit.count()
+
 		if err := c.stream.SendMsg(msg); err != nil {
 			return err
 		}

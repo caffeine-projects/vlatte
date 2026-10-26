@@ -3,6 +3,7 @@ package mockgrpc
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -17,8 +18,9 @@ import (
 // serve matches call with the server's mocks, and answers it with the first that matches: the path of every call,
 // whatever its type. It returns what the call ends with: nil, the status of the mock's answer, or a failure.
 //
-// In order: the mock's delay, its reply, then, once it answered, with messages or a status, its hit, the state of its
-// stateful matchers, such as Times and scenarios, and its events. A reply that fails counts nothing.
+// In order: the mock's delay, its reply, then, once it answered, with messages or a status, the state of its stateful
+// matchers, such as Times and scenarios, and its events. The mock counts the call as its answer starts going out, so
+// the debug header carries the count: a reply that fails, or a client that leaves, takes it back, and counts nothing.
 func (in *interceptors) serve(ctx context.Context, call *Call) error {
 	app := in.app
 	kind := typeOf(call.desc)
@@ -74,11 +76,6 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 
 	journaled.matched(mock)
 
-	// The header goes out with the reply's own, or with its status.
-	if !app.config.NoDebugHeaders {
-		_ = grpc.SetHeader(ctx, debugHeader(mock))
-	}
-
 	// A client that leaves during the delay gets nothing: the mock doesn't reply, nor count the call.
 	if d := mock.wait(); d > 0 {
 		if err := httpx.Wait(ctx, d); err != nil {
@@ -86,28 +83,42 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 		}
 	}
 
-	err = mock.replier.Reply(ctx, call)
+	h := &hit{ctx: ctx, mock: mock, debug: !app.config.NoDebugHeaders}
+	call.hit = h
 
+	err = mock.replier.Reply(grpc.NewContextWithServerTransportStream(ctx, hitStream{grpc.ServerTransportStreamFromContext(ctx), h}), call)
+
+	// A bidi call whose messages can't be written as JSON is journaled without them: its entry says it failed.
+	var encErr error
 	if kind == _bidiStream {
-		if b, encErr := call.encode(); encErr == nil {
+		var b []byte
+		if b, encErr = call.encode(); encErr == nil {
 			journaled.request(b)
 		}
 	}
 
 	journaled.replied(ctx, err)
 
+	if encErr != nil {
+		journaled.failed(fmt.Errorf("%s: %w", kind, encErr))
+	}
+
 	if err != nil && !hasStatus(err) {
+		h.takeBack()
 		app.publish(ctx, handler.EventError, call.method, mock, codes.Internal, err)
+
 		return replyError(ctx, kind.String(), mock, err)
 	}
 
 	// A client that left during the reply, such as between the messages of a stream, got no whole answer: the mock
 	// doesn't count the call.
 	if err != nil && ctx.Err() != nil {
+		h.takeBack()
 		return err
 	}
 
-	mock.Inc()
+	// A reply that sent nothing yet answers with its status, or a unary call's message, which go out now.
+	h.count()
 	app.afterServed(ctx, mock, call, err)
 	app.publish(ctx, handler.EventMatched, call.method, mock, status.Code(err), nil)
 
@@ -174,4 +185,49 @@ func incoming(ctx context.Context) metadata.MD {
 func unknownService(_ any, stream grpc.ServerStream) error {
 	method, _ := grpc.MethodFromServerStream(stream)
 	return status.Error(codes.Unimplemented, fmt.Sprintf("grpc: unknown method %s", method))
+}
+
+// hit counts a call of mock once the answer starts going out: with its header, its first message of a stream, or its
+// status. The debug header goes out with it, and carries the count then. A call that fails, or whose client leaves,
+// after its answer started takes the hit back: the header went out, and can't.
+type hit struct {
+	ctx     context.Context // the call's, whose stream sets the header
+	mock    *Mock
+	debug   bool // the server sends debug headers
+	once    sync.Once
+	counted bool
+}
+
+// count counts the call, once.
+func (h *hit) count() {
+	h.once.Do(func() {
+		h.counted = true
+
+		hits := h.mock.hits.Add(1)
+		if h.debug {
+			_ = grpc.SetHeader(h.ctx, debugHeader(h.mock, hits))
+		}
+	})
+}
+
+// takeBack uncounts the call, if it was counted, and keeps a reply that goes on from counting it.
+func (h *hit) takeBack() {
+	h.once.Do(func() {})
+
+	if h.counted {
+		h.mock.hits.Add(-1)
+	}
+}
+
+// hitStream is the stream of a call's reply: it counts the call as its header goes out.
+type hitStream struct {
+	grpc.ServerTransportStream
+
+	hit *hit
+}
+
+// SendHeader counts the call, then sends md.
+func (s hitStream) SendHeader(md metadata.MD) error {
+	s.hit.count()
+	return s.ServerTransportStream.SendHeader(md)
 }

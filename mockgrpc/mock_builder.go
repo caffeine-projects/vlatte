@@ -43,6 +43,7 @@ type Builder struct {
 	scenarioNewState      string
 	delay                 vlatte.Delay
 	delayDuration         time.Duration // the delay of Delay, which a description writes; DelayFunc's can't be
+	delayFunc             bool          // the delay is DelayFunc's
 	events                vlatte.EventConfigs
 	expectations          []*vlatte.Eval[*Call]
 	readsRequest          bool    // a matcher reads the request, which a bidi call hasn't sent when it matches
@@ -239,14 +240,14 @@ func (b *Builder) ScenarioStateWillBe(newState string) *Builder {
 // Delay waits for d before the mock replies. A client that leaves during the delay gets nothing, and the mock doesn't
 // count the call.
 func (b *Builder) Delay(d time.Duration) *Builder {
-	b.delay, b.delayDuration = vlatte.Latency(d), d
+	b.delay, b.delayDuration, b.delayFunc = vlatte.Latency(d), d, false
 	return b
 }
 
 // DelayFunc sets a function that picks the delay before each reply, such as [vlatte.Jitter] or
 // [vlatte.UniformDistribution].
 func (b *Builder) DelayFunc(delay vlatte.Delay) *Builder {
-	b.delay, b.delayDuration = delay, 0
+	b.delay, b.delayDuration, b.delayFunc = delay, 0, delay != nil
 	return b
 }
 
@@ -351,11 +352,12 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		replier:      replier,
 		doc:          b.doc,
 		described: mockDescription{
-			request:  b.described,
-			json:     b.json,
-			times:    b.times,
-			delay:    b.delayDuration,
-			scenario: [3]string{b.scenario, b.scenarioRequiredState, b.scenarioNewState},
+			request:   b.described,
+			json:      b.json,
+			times:     b.times,
+			delay:     b.delayDuration,
+			delayFunc: b.delayFunc,
+			scenario:  [3]string{b.scenario, b.scenarioRequiredState, b.scenarioNewState},
 		},
 	}, nil
 }

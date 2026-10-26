@@ -33,21 +33,30 @@ type namedMatcher struct {
 
 // mockDescription is what a mock built in Go keeps of its builder, to describe itself.
 type mockDescription struct {
-	request  describedRequest
-	json     *string
-	times    int64
-	delay    time.Duration
-	scenario [3]string // name, required state, new state
+	request   describedRequest
+	json      *string
+	times     int64
+	delay     time.Duration
+	delayFunc bool      // the delay is DelayFunc's, which no mock file can hold
+	scenario  [3]string // name, required state, new state
 }
 
 // Describe implements descriptor.SelfDescriptive: the mock as a mock file writes it, which the admin API returns and
 // saves. A mock read from a document is described by it, with its ID. A mock built in Go is described as far as mock
 // files can hold it: a Func reply, a CallMatches matcher, a callback, a custom matcher or a DelayFunc delay can't be,
-// and is left out, so a description without a response doesn't load back.
+// and is left out. A mock with a matcher or a delay left out is described without its reply too, so its description
+// doesn't load back as a mock that matches more calls, or replies sooner.
 func (m *Mock) Describe() descriptor.Descriptor {
 	if m.doc != nil {
 		doc := maps.Clone(m.doc)
 		doc["id"] = m.id
+
+		// The admin API enables and disables a mock without changing its document.
+		if m.Enabled() {
+			delete(doc, "enabled")
+		} else {
+			doc["enabled"] = false
+		}
 
 		return descriptor.Root(doc)
 	}
@@ -92,7 +101,12 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		doc["on_complete"] = events
 	}
 
-	doc["request"] = d.describeRequest(m.method)
+	req, complete := d.describeRequest(m.method)
+	doc["request"] = req
+
+	if !complete || d.delayFunc {
+		return descriptor.Root(doc)
+	}
 
 	switch r := m.reply.(type) {
 	case *Response:
@@ -108,20 +122,32 @@ func (m *Mock) Describe() descriptor.Descriptor {
 	return descriptor.Root(doc)
 }
 
-// describeRequest describes the request part of a mock of method.
-func (d *mockDescription) describeRequest(method string) map[string]any {
+// describeRequest describes the request part of a mock of method, and reports false when a matcher is left out.
+func (d *mockDescription) describeRequest(method string) (map[string]any, bool) {
 	req := map[string]any{"method": method}
+	complete := !d.request.undescribable
 
-	if header := describeMatchers(d.request.header); len(header) > 0 {
+	header, ok := describeMatchers(d.request.header)
+	complete = complete && ok
+
+	if len(header) > 0 {
 		req["header"] = header
 	}
 
-	if fields := describeMatchers(d.request.fields); len(fields) > 0 {
+	fields, ok := describeMatchers(d.request.fields)
+	complete = complete && ok
+
+	if len(fields) > 0 {
 		req["fields"] = fields
 	}
 
-	if v, ok := describeMatcher(d.request.body); ok {
-		req["body"] = v
+	if d.request.body != nil {
+		v, ok := describeMatcher(d.request.body)
+		complete = complete && ok
+
+		if ok {
+			req["body"] = v
+		}
 	}
 
 	switch {
@@ -135,28 +161,41 @@ func (d *mockDescription) describeRequest(method string) map[string]any {
 			}
 		}
 	case d.request.message != nil:
-		if v, ok := describeMessage(d.request.message); ok {
+		v, ok := describeMessage(d.request.message)
+		complete = complete && ok
+
+		if ok {
 			req["message"] = v
 		}
 	case d.request.messages != nil:
-		if v, ok := describeMessages(d.request.messages); ok {
+		v, ok := describeMessages(d.request.messages)
+		complete = complete && ok
+
+		if ok {
 			req["messages"] = v
 		}
 	}
 
-	return req
+	return req, complete
 }
 
-// describeMatchers describes matchers by name, leaving out those that can't be described.
-func describeMatchers(matchers []namedMatcher) map[string]any {
+// describeMatchers describes matchers by name, leaving out those that can't be described, and reports false when it
+// leaves one out.
+func describeMatchers(matchers []namedMatcher) (map[string]any, bool) {
 	out := make(map[string]any, len(matchers))
+	complete := true
+
 	for _, nm := range matchers {
-		if v, ok := describeMatcher(nm.matcher); ok {
-			out[nm.name] = v
+		v, ok := describeMatcher(nm.matcher)
+		if !ok {
+			complete = false
+			continue
 		}
+
+		out[nm.name] = v
 	}
 
-	return out
+	return out, complete
 }
 
 // describeMatcher returns the matcher list of m, as matchbuild reads it.
