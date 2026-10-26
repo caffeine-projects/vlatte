@@ -16,10 +16,6 @@ func addMockSchemaTool(s *mcp.Server, ops *Operations) {
 
 	addTool(s, tool, func(context.Context, noInput) (any, error) {
 		schema, err := ops.MockSchema()
-		if err != nil {
-			return nil, err
-		}
-
-		return jsontext.Value(schema), nil
+		return jsontext.Value(schema), err
 	})
 }

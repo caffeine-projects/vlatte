@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json/jsontext"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -9,7 +10,7 @@ import (
 // mockReplacement is the input of replace_mock.
 type mockReplacement struct {
 	ID   string         `json:"id" jsonschema:"The id of the mock to replace."`
-	Mock map[string]any `json:"mock" jsonschema:"The new mock, as a mock file writes it, with the same id or none."`
+	Mock jsontext.Value `json:"mock" jsonschema:"The new mock, as a mock file writes it, with the same id: get_mock gives it."`
 }
 
 func addReplaceMockTool(s *mcp.Server, ops *Operations) {
@@ -20,15 +21,6 @@ func addReplaceMockTool(s *mcp.Server, ops *Operations) {
 	}
 
 	addTool(s, tool, func(ctx context.Context, in mockReplacement) (any, error) {
-		if _, ok := in.Mock["id"]; !ok {
-			in.Mock["id"] = in.ID
-		}
-
-		doc, err := document(in.Mock)
-		if err != nil {
-			return nil, err
-		}
-
-		return ops.ReplaceMock(ctx, in.ID, doc, _formatJSON)
+		return ops.ReplaceMock(ctx, in.ID, in.Mock, _formatJSON)
 	})
 }

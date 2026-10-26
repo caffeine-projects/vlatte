@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -20,11 +21,6 @@ func addUpdateMockTool(s *mcp.Server, ops *Operations) {
 	}
 
 	addTool(s, tool, func(ctx context.Context, in mockState) (any, error) {
-		doc, err := document(map[string]any{"enabled": in.Enabled})
-		if err != nil {
-			return nil, err
-		}
-
-		return ops.UpdateMock(ctx, in.ID, doc, _formatJSON)
+		return ops.UpdateMock(ctx, in.ID, fmt.Appendf(nil, `{"enabled": %t}`, in.Enabled), _formatJSON)
 	})
 }

@@ -3,10 +3,13 @@ package handler
 import (
 	"context"
 	"encoding/json/jsontext"
+	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"runtime/debug"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 )
@@ -101,6 +104,8 @@ type noInput struct{}
 // addTool adds tool to s, which runs run on its input. run returns the operation's result, nil for none, or its
 // error, whose problem document is the tool's error.
 func addTool[In any](s *mcp.Server, tool *mcp.Tool, run func(ctx context.Context, in In) (any, error)) {
+	tool.InputSchema = inputSchema[In]()
+
 	mcp.AddTool(s, tool, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
 		out, err := run(ctx, in)
 		if err != nil {
@@ -147,18 +152,31 @@ func toolResult(body jsontext.Value, failed bool) *mcp.CallToolResult {
 	}
 }
 
-// moduleVersion is the version of vlatte the program was built with, or "(devel)".
+// _documentSchema is the schema of a tool's argument that the operation takes as it comes, such as a mock: an object,
+// which the operation checks.
+var _documentSchema = &jsonschema.Schema{Type: "object"}
+
+// inputSchema is the input schema of a tool whose input is In: its jsontext.Value fields are documents.
+func inputSchema[In any]() *jsonschema.Schema {
+	schema, err := jsonschema.For[In](&jsonschema.ForOptions{
+		TypeSchemas: map[reflect.Type]*jsonschema.Schema{reflect.TypeFor[jsontext.Value](): _documentSchema},
+	})
+	if err != nil {
+		panic(fmt.Sprintf("admin: the input of a tool: %v", err))
+	}
+
+	return schema
+}
+
+// moduleVersion is the version of vlatte the program was built with, as the main module or a dependency, or
+// "(devel)".
 func moduleVersion() string {
 	const path = "github.com/caffeine-projects/vlatte"
 
 	if info, ok := debug.ReadBuildInfo(); ok {
-		if info.Main.Path == path && info.Main.Version != "" {
-			return info.Main.Version
-		}
-
-		for _, dep := range info.Deps {
-			if dep.Path == path {
-				return dep.Version
+		for _, m := range append([]*debug.Module{&info.Main}, info.Deps...) {
+			if m.Path == path && m.Version != "" && m.Version != "(devel)" {
+				return m.Version
 			}
 		}
 	}

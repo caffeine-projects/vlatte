@@ -3,6 +3,7 @@ package handler_test
 import (
 	"bytes"
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"net/http"
 	"slices"
@@ -156,4 +157,25 @@ func TestAddTool_LogsTheErrorsTheAgentCantFix(t *testing.T) {
 	logs.Reset()
 	callFails(t, cs, "get_mock", map[string]any{"id": "missing"}, http.StatusNotFound, "mock_not_found")
 	require.Empty(t, logs.String(), "the agent fixes what it asked for")
+}
+
+func TestNewMCP_DocumentArgumentsAreObjectsWithTheirDescription(t *testing.T) {
+	// An agent writes the arguments from the input schema: a mock is an object, and its description says where its
+	// schema is.
+	cs := connect(t, newStore(t))
+
+	res, err := cs.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+
+	i := slices.IndexFunc(res.Tools, func(tool *mcp.Tool) bool { return tool.Name == "add_mock" })
+	require.NotEqual(t, -1, i)
+
+	schema, err := json.Marshal(res.Tools[i].InputSchema)
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"type": "object",
+		"required": ["mock"],
+		"properties": {"mock": {"type": "object", "description": "The mock, as a mock file writes it: see mock_schema."}},
+		"additionalProperties": false
+	}`, string(schema))
 }

@@ -14,11 +14,6 @@ func addValidateMockTool(s *mcp.Server, ops *Operations) {
 	}
 
 	addTool(s, tool, func(ctx context.Context, in mockDocument) (any, error) {
-		doc, err := document(in.Mock)
-		if err != nil {
-			return nil, err
-		}
-
-		return ops.ValidateMock(ctx, doc, _formatJSON)
+		return ops.ValidateMock(ctx, in.Mock, _formatJSON)
 	})
 }

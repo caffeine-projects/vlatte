@@ -13,6 +13,7 @@ tool mvdan.cc/gofumpt
 require (
 	github.com/antchfx/xpath v1.3.9
 	github.com/google/go-jsonnet v0.22.0
+	github.com/google/jsonschema-go v0.4.3
 	github.com/mailgun/raymond/v2 v2.0.48
 	github.com/mattn/go-colorable v0.1.16
 	github.com/mattn/go-isatty v0.0.24
@@ -32,7 +33,6 @@ require (
 )
 
 require (
-	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
