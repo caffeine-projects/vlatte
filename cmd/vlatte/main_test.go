@@ -725,6 +725,18 @@ func TestCLI_AdminSettings(t *testing.T) {
 		require.Contains(t, body, `"kind": "http"`)
 	})
 
+	t.Run("a key turns it on", func(t *testing.T) {
+		// Setting a key of the admin section turns the section on, as for every section, over a source before.
+		t.Setenv("VLATTE_ADMIN", "false")
+		t.Chdir(t.TempDir())
+
+		admin := randomAddr(t)
+		start(t, "--addr", randomAddr(t), "--admin-addr", admin, "--log-level", "disabled")
+
+		status, _ := firstAnswer(t, "http://"+admin+"/health")
+		require.Equal(t, http.StatusOK, status)
+	})
+
 	t.Run("off", func(t *testing.T) {
 		addr := randomAddr(t)
 

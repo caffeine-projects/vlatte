@@ -36,7 +36,7 @@ func settingsSchema() *config.Schema[settings] {
 			Key: "admin.addr", Kind: config.String,
 			Usage: "Address the admin API listens on: host:port, :port or port. Empty picks a random local port.",
 			Set: func(s *settings, v config.Value) error {
-				s.adminAddr = v.Str
+				s.admin, s.adminAddr = true, v.Str
 				_, err := admin.New(admin.Addr(v.Str))
 
 				return err
@@ -47,7 +47,7 @@ func settingsSchema() *config.Schema[settings] {
 			Usage: "Directory of the files that keep the mocks the admin API adds across restarts, which only the server " +
 				"loads: keep it out of mock_files. Relative paths start at root_dir, and {workdir} at workdir. Empty keeps them " +
 				"in memory.",
-			Set: func(s *settings, v config.Value) error { s.adminDir = v.Str; return nil },
+			Set: func(s *settings, v config.Value) error { s.admin, s.adminDir = true, v.Str; return nil },
 		},
 		config.Field[settings]{
 			Key: "mcp", Kind: config.Bool, Default: "true",
