@@ -2,15 +2,19 @@ package mockgrpc
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/caffeine-projects/vlatte/internal/config"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
@@ -79,4 +83,21 @@ func TestRecordCodec_FailsOnMessagesItCantWrite(t *testing.T) {
 
 	_, err = c.message(nil)
 	require.Error(t, err)
+}
+
+func TestRecordCodec_WritesMessagesWhoseJSONIsAStringAsTheMockFileReadsThem(t *testing.T) {
+	// A mock file reads a string message as JSON text, so a message protojson writes as a JSON string, such as a
+	// Timestamp, is written as its JSON text: it loads back as the message recorded.
+	c := codecOf(t)
+	at := timestamppb.New(time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC))
+
+	v, err := c.message(at)
+	require.NoError(t, err)
+
+	text, err := jsonText(config.Value{Any: v})
+	require.NoError(t, err)
+
+	var loaded timestamppb.Timestamp
+	require.NoError(t, protojson.Unmarshal([]byte(text), &loaded))
+	require.True(t, proto.Equal(at, &loaded))
 }

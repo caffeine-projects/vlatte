@@ -506,3 +506,47 @@ func TestRecording_ADirectoryThatCantBeMadeFailsTheRecording(t *testing.T) {
 	t.Cleanup(conf.Close)
 	require.ErrorContains(t, conf.Start(), "recorder:")
 }
+
+func TestRecording_AStopLetsTheCallsOnTheTargetFinish(t *testing.T) {
+	// Stopping a recording stops what it takes, not the traffic it proxies: a stream to the target that runs when the
+	// recording stops gets the rest of its answer.
+	got := make(chan struct{})
+
+	target := serve(t)
+	target.MustMock(Method("Chat").Reply(Func(func(_ context.Context, call *Call) error {
+		if _, err := call.Recv(); err != nil {
+			return err
+		}
+
+		close(got)
+
+		msg, err := call.Recv()
+		if err != nil {
+			return err
+		}
+
+		return call.Send(&pb.HiRes{Message: "after " + msg.(*pb.HiReq).GetMessage()})
+	})))
+
+	m := recorder(t)
+	require.NoError(t, m.StartRecording(RecordTarget(target.Addr())))
+
+	stream, err := client(t, m).Chat(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, stream.Send(&pb.HiReq{Message: "a"}))
+
+	<-got
+
+	_, err = m.StopRecording(t.Context())
+	require.NoError(t, err)
+
+	require.NoError(t, stream.Send(&pb.HiReq{Message: "stop"}))
+	require.NoError(t, stream.CloseSend())
+
+	res, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, "after stop", res.GetMessage())
+
+	_, err = stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+}

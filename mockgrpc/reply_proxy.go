@@ -7,6 +7,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"sync"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -111,11 +112,21 @@ type proxyReplier struct {
 	conn   *grpc.ClientConn
 	header metadata.MD
 	remove []string
+
+	mu     sync.Mutex
+	calls  int  // the calls it carries
+	closed bool // set by Close: the last call it carries closes the connection
 }
 
 // Reply implements Replier.
 func (p *proxyReplier) Reply(ctx context.Context, call *Call) error {
 	call.proxied = true
+
+	p.mu.Lock()
+	p.calls++
+	p.mu.Unlock()
+
+	defer p.leave()
 
 	desc := &grpc.StreamDesc{
 		StreamName:    string(call.desc.Name()),
@@ -145,9 +156,30 @@ func (p *proxyReplier) Reply(ctx context.Context, call *Call) error {
 	return err
 }
 
-// Close closes the connection to the target. A call it carries ends.
+// Close closes the connection to the target once the calls it carries end: they get the rest of the target's answer.
 func (p *proxyReplier) Close() error {
+	p.mu.Lock()
+	p.closed = true
+	idle := p.calls == 0
+	p.mu.Unlock()
+
+	if !idle {
+		return nil
+	}
+
 	return p.conn.Close()
+}
+
+// leave counts a call that ended, and closes the connection when Close came first, and the call was the last.
+func (p *proxyReplier) leave() {
+	p.mu.Lock()
+	p.calls--
+	last := p.closed && p.calls == 0
+	p.mu.Unlock()
+
+	if last {
+		_ = p.conn.Close()
+	}
 }
 
 // send sends the target the messages of the client: the one of a unary or server streaming call, all those of a client

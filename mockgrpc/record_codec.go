@@ -192,7 +192,8 @@ func (c *recordCodec) Mock(m *RecordedMock) any {
 }
 
 // message returns msg as a mock file holds it: as protojson writes it, decoded as JSON, so equal messages are written
-// alike.
+// alike. A message protojson writes as a JSON string, such as a Timestamp, is its JSON text, quotes included: a mock
+// file reads a string message as JSON text.
 func (c *recordCodec) message(msg proto.Message) (any, error) {
 	b, err := c.resolver.encode(msg)
 	if err != nil {
@@ -202,6 +203,10 @@ func (c *recordCodec) message(msg proto.Message) (any, error) {
 	var v any
 	if err := json.Unmarshal(b, &v); err != nil {
 		return nil, err
+	}
+
+	if _, ok := v.(string); ok {
+		return string(b), nil
 	}
 
 	return v, nil
