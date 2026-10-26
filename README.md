@@ -145,7 +145,7 @@ response:
 
 `request.message` and `request.messages` match whole messages, `request.body` takes a matcher of the request's JSON. `response` takes `message`, `messages`, `body_file` (a JSON file of a message or a list of them), `template`, `header`, `trailer`, `status` and `message_delay`; `bidi` takes `header`, `trailer`, `on` (rules of `when` and `response`), `otherwise` and `on_end`. `delay`, `repeat`, `scenario` and `on_complete` work as in HTTP mock files.
 
-**More.** `Setup().Reflection()` serves server reflection, so `grpcurl` lists the services and describes their messages. A server keeps a [journal](#request-journal) of its calls with `Setup().Journal(dir)`, which tests verify with the same builders, serves an [admin API](#admin-api) with `Setup().Admin(addr)`, and answers a call no mock matched with `Setup().NoMatchCode(code)`, `NotFound` by default. `Close` waits for the calls in flight up to `Setup().ShutdownTimeout(d)`, 5s by default, then cuts them.
+**More.** `Setup().Reflection()` serves server reflection, so `grpcurl` lists the services and describes their messages. A server keeps a [journal](#request-journal) of its calls with `Setup().Journal(dir)`, which tests verify with the same builders, serves an [admin API](#admin-api) with `Setup().Admin(admin.MustNew())`, and answers a call no mock matched with `Setup().NoMatchCode(code)`, `NotFound` by default. `Close` waits for the calls in flight up to `Setup().ShutdownTimeout(d)`, 5s by default, then cuts them.
 
 ## Packages
 
@@ -739,15 +739,17 @@ The target's TLS certificate is verified: a recording sends the target its reque
 
 ## Admin API
 
-The admin API manages a server while it runs. It is an HTTP server of its own, on its own address, the same for mock servers of every protocol, and it leaves every path of the mock server to the mocks. It serves only when asked:
+The admin API manages a server while it runs. It is an HTTP server of its own, on its own address, the same for mock servers of every protocol, and it leaves every path of the mock server to the mocks. It serves only when asked, from the `admin` package:
 
 ```go
-m := mockhttp.MustNew(mockhttp.Setup().Admin("127.0.0.1:8081")) // "" picks a random local port
+m := mockhttp.MustNew(mockhttp.Setup().Admin(admin.MustNew(admin.Addr("127.0.0.1:8081")))) // no Addr picks a random local port
 m.MustStart()
 fmt.Println(m.AdminURL()) // http://127.0.0.1:8081
 ```
 
-From settings, `admin: true` turns it on, and `admin.addr` (`--admin-addr`, `VLATTE_ADMIN_ADDR`) sets its address. A gRPC server serves the same admin API with `mockgrpc.Setup().Admin(addr)`, with gRPC mock files: what gRPC mocks can't do, recording, answers `501`.
+A gRPC server serves the same admin API with `mockgrpc.Setup().Admin(admin.MustNew(...))`, with gRPC mock files: what gRPC mocks can't do, recording, answers `501`. An `Admin` serves one mock server. A server that doesn't ask for an admin API links neither it nor what it serves with.
+
+The `vlatte` command serves the admin API by default: `admin: false` (`--admin=false`, `VLATTE_ADMIN=false`) turns it off, and `admin.addr` (`--admin-addr`, `VLATTE_ADMIN_ADDR`) sets its address. Its gRPC server serves an admin API of its own, which `grpc.admin: false` (`--grpc-admin=false`) turns off and `grpc.admin.addr` (`--grpc-admin-addr`) places. These settings are the command's: a server made in Go ignores them, even in a `.vlatterc` it shares with the command, and serves an admin API only when its code asks for one.
 
 | Route | What it does |
 |---|---|
@@ -770,6 +772,8 @@ From settings, `admin: true` turns it on, and `admin.addr` (`--admin-addr`, `VLA
 | `GET /requests` | Lists the newest requests of the [journal](#request-journal), with their `count`: `?limit=` (100 by default, 1000 at most, `0` for the count alone) and `?before=`, the `next` of a page, page through them. |
 | `QUERY /requests` | Finds and counts the requests a query selects, in the body: see [Request journal](#request-journal). It uses the HTTP [`QUERY`](https://httpwg.org/http-extensions/draft-ietf-httpbis-safe-method-w-body.html) method, safe as `GET` is, with a body: `curl -X QUERY`. |
 | `GET /requests/{id}`, `DELETE /requests` | Gets a request by the id its answer's `VLatte-Request-Id` names, and clears the journal. |
+| `GET /schema` | The [JSON Schema](mockhttp/schema/http.schema.json) of mock files, for clients that write them. A gRPC server answers `501`. |
+| `POST /mcp` | The [MCP](#mcp) endpoint, when the admin API serves MCP; `501` otherwise. |
 | `GET /openapi`, `GET /docs` | The OpenAPI document, and a page that renders it. The page loads [Scalar](https://scalar.com) from a CDN, so it needs internet. |
 
 **Formats.** Bodies are JSON, or YAML with `Content-Type: application/yaml`. Answers follow `Accept`: JSON, or YAML when it is preferred. A relative `body_file` in a mock sent to the admin API opens from the server's working directory, as `GET /mocks/{id}` writes it.
@@ -799,14 +803,34 @@ A request net/http refuses before the admin API reads it, such as one with a mal
 
 **Safety.** The admin API has no authentication: anyone who reaches it can change the mocks, which can read files the server can, and read the requests of the journal. It listens on a local address unless told otherwise; with `VLATTE_DOCKER_HOST`, the CLI listens on every interface, as for the mocks, so publish its port only where the network is trusted. A browser's cross-site request that would change the server, or query its journal, is refused with `403`.
 
+### MCP
+
+With `admin.MCP()`, the admin API serves its operations to AI agents too, over the [Model Context Protocol](https://modelcontextprotocol.io): a tool per operation, named after it, such as `add_mock`, `list_mocks` and `query_requests`; the streams, the OpenAPI document and the pages have none. A tool's arguments carry what its route takes, the body under a key, such as `{"mock": ...}` for `add_mock` and `{"query": ...}` for `query_requests`, and its tool's schema names them. A tool answers what its route answers, or its problem document as the tool's error. An agent sees only the tools the server can do: a gRPC server has no `add_mock`, and one without a journal no `query_requests`.
+
+```go
+api := admin.MustNew(admin.MCP())
+m := mockhttp.MustNew(mockhttp.Setup().Admin(api).LogOutput(os.Stderr)) // over stdio, only MCP writes to stdout
+m.MustStart()
+fmt.Println(m.AdminURL() + "/mcp") // Streamable HTTP, for an agent that runs elsewhere
+err := api.ServeMCP(ctx, os.Stdin, os.Stdout) // stdio, for an agent that starts the program, until stdin ends
+```
+
+`POST /mcp` keeps no sessions and answers in JSON. It is as open as the rest of the admin API: see Safety above.
+
+The `vlatte` command serves MCP at `POST /mcp` by default, and `vlatte mcp` serves it on stdin and stdout, for an agent that starts the command as its MCP server. `vlatte mcp` takes the server's flags, and writes its banner and logs to stderr. `mcp: false` (`--mcp=false`, `VLATTE_MCP=false`) turns MCP off. An agent's MCP settings start it as any command:
+
+```json
+{"mcpServers": {"vlatte": {"command": "vlatte", "args": ["mcp", "--mock-files=mocks/*.yaml"]}}}
+```
+
 ### Persistent admin mocks
 
 The mocks the admin API adds last as long as the server, unless a persistent store keeps them. Each change the admin API makes, adding, replacing, enabling, disabling or removing a mock, reaches the store at once, and the server serves what the store holds when it starts and on each reload, so a change made to the store directly takes effect then too. The mocks of mock files and code never reach it, and a mock file's mock wins over a mock of the store with its id.
 
-`FileStore(dir)` keeps them as mock files, `<id>.mock.yaml`, which only the store loads: keep `dir` out of the mock file patterns. A relative `dir` starts at `root_dir`, and `{workdir}` at the [work directory](#work-directory). A mock whose description doesn't load back is refused, as its file would fail every later start. From settings, `admin.dir` (`--admin-dir`, `VLATTE_ADMIN_DIR`) sets the directory, and an empty one keeps the mocks in memory.
+`FileStore(dir)` keeps them as mock files, `<id>.mock.yaml`, which only the store loads: keep `dir` out of the mock file patterns. A relative `dir` starts at `root_dir`, and `{workdir}` at the [work directory](#work-directory). A mock whose description doesn't load back is refused, as its file would fail every later start. The `vlatte` command keeps them in `{workdir}/_admin`: `admin.dir` (`--admin-dir`, `VLATTE_ADMIN_DIR`) sets another directory, and an empty one keeps the mocks in memory. In Go, `AdminStore` needs `Admin`:
 
 ```go
-m := mockhttp.MustNew(mockhttp.Setup().Admin("").AdminStore(mockhttp.FileStore("{workdir}/_admin")))
+m := mockhttp.MustNew(mockhttp.Setup().Admin(admin.MustNew()).AdminStore(mockhttp.FileStore("{workdir}/_admin")))
 ```
 
 Any `vlatte.Store[*mockhttp.Mock]` can be the store, such as a database collection. It keeps the descriptions of the mocks by ID: `EncodeMock` writes one, and `DecodeMock` builds the mock back for the server.

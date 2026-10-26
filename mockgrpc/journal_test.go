@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/testmock"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
@@ -249,7 +250,7 @@ func TestJournal_TheAdminAPIServesGRPCCalls(t *testing.T) {
 	// The admin API's journal is the same for gRPC: a query of the indexed keys counts calls, and a request part,
 	// which gRPC has none of, is a problem of the query.
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}).Logger(&logger).Admin("").Journal(""))
+	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}).Logger(&logger).Admin(admin.MustNew()).Journal(""))
 	m.MustStart()
 	t.Cleanup(m.Close)
 

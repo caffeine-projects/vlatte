@@ -9,6 +9,6 @@ func (o *Operations) RemoveAllMocks(ctx context.Context) error {
 	return o.mocks.removeAll(ctx)
 }
 
-func (m *storeMocks[M]) removeAll(ctx context.Context) error {
-	return m.store.Clear(ctx)
+func (m *storeMocks) removeAll(ctx context.Context) error {
+	return m.mocks.Clear(ctx)
 }

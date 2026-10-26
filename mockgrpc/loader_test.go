@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
+	"github.com/caffeine-projects/vlatte/admin"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
@@ -51,7 +52,7 @@ func TestMockFiles_AStartThatFailsToLoadThemServesNothing(t *testing.T) {
 
 func TestLoader_ABadPatternFailsStart(t *testing.T) {
 	// A start that fails leaves nothing serving: the admin API stops too.
-	m := MustNew(Setup().Silent().Admin("").MockFiles("["))
+	m := MustNew(Setup().Silent().Admin(admin.MustNew()).MockFiles("["))
 	t.Cleanup(m.Close)
 
 	require.ErrorContains(t, m.Start(), "loader: pattern [")

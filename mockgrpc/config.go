@@ -2,6 +2,7 @@ package mockgrpc
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
@@ -47,6 +49,9 @@ type Config struct {
 
 	// LogLevel is the level of the logger the server builds.
 	LogLevel vlatte.LogLevel
+
+	// LogOutput is where the logger the server builds writes. Nil is the standard output.
+	LogOutput io.Writer
 
 	// NoDebugHeaders turns off the debug header metadata, such as vlatte-matched-mock-id, of the server's answers.
 	NoDebugHeaders bool
@@ -86,7 +91,7 @@ type Config struct {
 	ShutdownTimeout time.Duration
 
 	// Admin serves the admin API, on an HTTP server of its own. Nil serves none.
-	Admin *AdminConfig
+	Admin AdminAPI
 
 	// Journal keeps a journal of the calls the server serves. Nil keeps none.
 	Journal *JournalConfig
@@ -96,12 +101,10 @@ type Config struct {
 	NoNearMisses bool
 }
 
-// AdminConfig configures the admin API of a server: a RESTful HTTP server of its own, the same as HTTP mock servers
-// have.
-type AdminConfig struct {
-	// Addr is the address the admin API listens on: host:port, :port or a port. Empty is a random local port.
-	Addr string
-}
+// AdminAPI is an admin API the server opts into: a RESTful HTTP server of its own, the same as HTTP mock servers have.
+// Make one with [github.com/caffeine-projects/vlatte/admin.New]. The operations gRPC mocks can't do, such as recording,
+// answer 501.
+type AdminAPI = adminapi.API
 
 // JournalConfig configures the journal of a server: the calls its mocks get, of every outcome, which tests and the
 // admin API verify and search, while the server runs: Close closes it. The calls an interceptor of ServerOptions
@@ -170,6 +173,12 @@ func (cb *ConfigBuilder) Logger(logger *zerolog.Logger) *ConfigBuilder {
 // LogLevel sets the level of the logger the server builds.
 func (cb *ConfigBuilder) LogLevel(l vlatte.LogLevel) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.LogLevel = l })
+}
+
+// LogOutput sets where the logger the server builds writes, in place of the standard output, such as for a program
+// that keeps the standard output for something else. A Logger writes where it was told to.
+func (cb *ConfigBuilder) LogOutput(w io.Writer) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.LogOutput = w })
 }
 
 // Silent turns off the logs of the logger the server builds.
@@ -291,10 +300,10 @@ func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.ConfigSources = append(make([]ConfigSource, 0, len(sources)), sources...) })
 }
 
-// Admin serves the admin API, on an HTTP server of its own at addr: host:port, :port or a port. Empty is a random
-// local port. Server.AdminURL returns where it listens.
-func (cb *ConfigBuilder) Admin(addr string) *ConfigBuilder {
-	return cb.set(func(conf *Config) { conf.Admin = &AdminConfig{Addr: addr} })
+// Admin serves the admin API api, such as admin.MustNew(admin.Addr("127.0.0.1:8081")), on an HTTP server of its own.
+// Server.AdminURL returns where it listens.
+func (cb *ConfigBuilder) Admin(api AdminAPI) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.Admin = api })
 }
 
 // Journal keeps a journal of the calls the server serves, in dir, across restarts: see JournalConfig. Empty keeps it

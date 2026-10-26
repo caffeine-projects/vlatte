@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 )
 
 func TestRecording_Stop(t *testing.T) {
@@ -24,7 +24,7 @@ func TestRecording_Stop(t *testing.T) {
 		},
 		stopErr: errors.Join(errors.New("recorder: GET /a: too large"), errors.New("recorder: mock id already in use")),
 	}
-	url := serve(t, newStore(t), admin.Recorder(rec))
+	url := serve(t, newStore(t), adminapi.Capabilities{Recorder: rec})
 
 	res, body := send(t, request{method: http.MethodDelete, url: url + "/recording"})
 
@@ -39,7 +39,7 @@ func TestRecording_Stop(t *testing.T) {
 
 func TestRecording_StopRefused(t *testing.T) {
 	t.Run("none runs", func(t *testing.T) {
-		url := serve(t, newStore(t), admin.Recorder(&fakeRecorder{stopErr: vlatte.ErrNotRecording}))
+		url := serve(t, newStore(t), adminapi.Capabilities{Recorder: &fakeRecorder{stopErr: vlatte.ErrNotRecording}})
 
 		res, body := send(t, request{method: http.MethodDelete, url: url + "/recording"})
 
@@ -47,7 +47,7 @@ func TestRecording_StopRefused(t *testing.T) {
 	})
 
 	t.Run("no result", func(t *testing.T) {
-		url := serve(t, newStore(t), admin.Recorder(&fakeRecorder{stopErr: context.DeadlineExceeded}))
+		url := serve(t, newStore(t), adminapi.Capabilities{Recorder: &fakeRecorder{stopErr: context.DeadlineExceeded}})
 
 		res, body := send(t, request{method: http.MethodDelete, url: url + "/recording"})
 

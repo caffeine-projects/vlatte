@@ -43,7 +43,7 @@ func (s *envSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
 		rest, ours := strings.CutPrefix(name, s.prefix+"_")
-		if _, found := known[name]; found || !ours || slices.Contains(s.reserved, name) || !c.ownsEnv(rest) {
+		if _, found := known[name]; found || c.loadOnly || !ours || slices.Contains(s.reserved, name) || !c.ownsEnv(rest) {
 			continue
 		}
 

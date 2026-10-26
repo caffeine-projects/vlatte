@@ -6,13 +6,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
 func TestGetRequest(t *testing.T) {
 	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
-	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j})
 
 	res, body := send(t, request{method: http.MethodGet, url: url + "/requests/a"})
 	require.Equal(t, http.StatusOK, res.StatusCode, body)
@@ -29,7 +29,7 @@ func TestGetRequest_AJournalThatFailsIsTheServersProblem(t *testing.T) {
 	// A journal that can't read is no missing request: the client can't fix it, so the answer is a 500 that says why.
 	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
 	require.NoError(t, j.Close())
-	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j})
 
 	res, body := send(t, request{method: http.MethodGet, url: url + "/requests/a"})
 

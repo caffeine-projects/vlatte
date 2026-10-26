@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 
+	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/match"
 )
@@ -291,7 +292,7 @@ func TestPropMultipart_GoAndFilesDescribeTheSame(t *testing.T) {
 	// and what the admin API's GET shows posts back as a mock that describes the same again.
 	t.Parallel()
 
-	m := MustNew(Setup().Silent().Admin(""))
+	m := MustNew(Setup().Silent().Admin(admin.MustNew()))
 	m.MustStart()
 	t.Cleanup(m.Close)
 

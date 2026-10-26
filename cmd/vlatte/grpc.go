@@ -1,7 +1,9 @@
 package main
 
 import (
+	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/caffeine-projects/vlatte/mockgrpc"
@@ -21,8 +23,9 @@ const (
 // gRPC server reads the grpc section of the file the HTTP server reads. The flags end at --, as the HTTP server's
 // parser reads them: -- and what follows go to the HTTP server, which rejects them as unexpected arguments.
 func splitArgs(args []string) (httpArgs, grpcArgs []string) {
+	// The command reads some gRPC settings itself, such as grpc.admin: the gRPC server accepts them too.
 	takesValue := make(map[string]bool)
-	for _, f := range mockgrpc.ConfigFlags() {
+	for _, f := range slices.Concat(mockgrpc.ConfigFlags(), settingsSchema().Flags()) {
 		takesValue[f.Name] = !f.Bool
 	}
 
@@ -66,20 +69,31 @@ func splitArgs(args []string) (httpArgs, grpcArgs []string) {
 	return httpArgs, grpcArgs
 }
 
-// newGRPC returns the command's gRPC server, as args and the shared sources set it: it serves only when its settings
-// turn the grpc section on. It sends the webhooks of mock files through wh, as the HTTP server does, serves
-// reflection, and serves its admin API and keeps a journal, unless settings turn them off.
-func newGRPC(args []string, wh *webhook.WebHook) (*mockgrpc.Server, error) {
-	addr, admin := _grpcAddr, "127.0.0.1:0"
+// newGRPC returns the command's gRPC server, as args and the shared sources set it, with the command's settings s,
+// which logs to logOutput: it serves only when its settings turn the grpc section on. It sends the webhooks of mock
+// files through wh, as the HTTP server does, serves reflection, and serves its admin API and keeps a journal, unless
+// settings turn them off.
+func newGRPC(args []string, s settings, wh *webhook.WebHook, logOutput io.Writer) (*mockgrpc.Server, error) {
+	addr := _grpcAddr
 	if _, ok := os.LookupEnv(_dockerHostEnv); ok {
-		addr, admin = dockerHost()+strings.TrimPrefix(_grpcAddr, ":"), dockerHost()+_dockerGRPCAdminPort
+		addr = dockerHost() + strings.TrimPrefix(_grpcAddr, ":")
 	}
 
-	return mockgrpc.New(mockgrpc.Setup().
+	return mockgrpc.New(s.setupGRPC(mockgrpc.Setup()).
 		Addr(addr).
-		Admin(admin).
 		Journal("").
 		Reflection().
+		LogOutput(logOutput).
 		OnCompleteListener("webhook", wh).
 		ConfigSources(mockgrpc.DefaultConfigSources(args)...))
+}
+
+// grpcAdminAddr is where the gRPC server's admin API listens unless settings say: a random local port, or its port of
+// the vlatte image.
+func grpcAdminAddr() string {
+	if _, ok := os.LookupEnv(_dockerHostEnv); ok {
+		return dockerHost() + _dockerGRPCAdminPort
+	}
+
+	return "127.0.0.1:0"
 }

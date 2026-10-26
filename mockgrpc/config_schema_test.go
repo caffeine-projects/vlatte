@@ -57,7 +57,7 @@ grpc:
 	require.True(t, c.NoDebugHeaders)
 	require.Equal(t, 2*time.Second, c.ShutdownTimeout)
 	require.Equal(t, vlatte.LogLevelWarn, c.LogLevel)
-	require.Equal(t, &AdminConfig{Addr: ":0"}, c.Admin)
+	require.Nil(t, c.Admin, "the admin settings are the vlatte command's: a server accepts them, and ignores them")
 	require.Equal(t, 3, c.Journal.MaxEntries)
 }
 

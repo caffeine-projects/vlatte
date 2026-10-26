@@ -1,10 +1,12 @@
-package handler
+package adminapi
 
 import (
 	json "encoding/json/v2"
 	"net/http"
 	"time"
 )
+
+var _ http.Handler = (*Events)(nil)
 
 // Types of the events of a mock server.
 const (
@@ -62,8 +64,8 @@ func (e *Events) Close() {
 	e.stream.close()
 }
 
-// EventStream streams the events of the mock server, as they happen, as Server-Sent Events: GET /events. Each event
-// is a JSON Event, of the event type its type names.
-func EventStream(events *Events) http.Handler {
-	return http.HandlerFunc(events.stream.serve)
+// ServeHTTP streams the events of the mock server, as they happen, as Server-Sent Events: GET /events. Each event is
+// a JSON Event, of the event type its type names.
+func (e *Events) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	e.stream.serve(w, r)
 }

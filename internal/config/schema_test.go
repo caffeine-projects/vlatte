@@ -216,6 +216,24 @@ func TestUsage_ShowsEveryWayToSetAKey(t *testing.T) {
 	require.Equal(t, want, s.Usage("APP"))
 }
 
+func TestSchema_HiddenSettingsAreReadButNotListed(t *testing.T) {
+	// A setting another program owns, as the vlatte command owns admin, must load without a problem, but help and
+	// completions must not offer it.
+	s := NewSchema(
+		Field[testConfig]{Key: "name", Kind: String, Usage: "Name.", Set: func(c *testConfig, v Value) error { c.Name = v.Str; return nil }},
+		Field[testConfig]{Key: "admin", Kind: Bool, Usage: "Admin.", Hidden: true},
+	)
+
+	require.Equal(t, []Flag{{Name: "name", Usage: "Name."}}, s.Flags())
+	require.Equal(t, "  --name string\n        Name.\n        env APP_NAME, file key name\n", s.Usage("APP"))
+
+	var c testConfig
+	values, err := s.Load(&c, []Source{Args([]string{"--admin", "--name=api"})})
+	require.NoError(t, err)
+	require.Equal(t, "api", c.Name)
+	require.True(t, values["admin"].Bool)
+}
+
 func TestSkipAndOnly_ShareFilesAndEnvironmentWithAnotherSchema(t *testing.T) {
 	// Two servers read one config file and one environment: each reports what neither knows, and leaves the other's
 	// settings to it, where it would report them as unknown.

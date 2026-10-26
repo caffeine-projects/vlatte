@@ -1,0 +1,91 @@
+package admin_test
+
+import (
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte/admin"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
+	"github.com/caffeine-projects/vlatte/mockgrpc"
+	"github.com/caffeine-projects/vlatte/mockhttp"
+)
+
+func TestNew_RefusesAMalformedAddress(t *testing.T) {
+	// The address is checked as the admin API is made, in the user's code, not when the mock server starts.
+	_, err := admin.New(admin.Addr("localhost"))
+	require.EqualError(t, err, `admin: address "localhost": expected host:port, :port or a port number`)
+
+	require.PanicsWithError(t, `admin: address "localhost": expected host:port, :port or a port number`, func() {
+		admin.MustNew(admin.Addr("localhost"))
+	})
+
+	for _, addr := range []string{"", "8081", ":8081", "127.0.0.1:8081"} {
+		_, err := admin.New(admin.Addr(addr))
+		require.NoError(t, err, addr)
+	}
+}
+
+func TestAdmin_ServesTheMockServerItIsGiven(t *testing.T) {
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(admin.MustNew(admin.Addr("127.0.0.1:0"))))
+	require.NoError(t, m.Start())
+	t.Cleanup(m.Close)
+
+	res, err := http.Get(m.AdminURL() + "/health")
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Contains(t, string(body), `"kind": "http"`)
+}
+
+func TestAdmin_ServesOneMockServer(t *testing.T) {
+	// An admin API listens on one address, for the mocks of one server: a second server would share neither.
+	api := admin.MustNew()
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(api))
+	t.Cleanup(m.Close)
+
+	_, err := mockhttp.New(mockhttp.Setup().Silent().Admin(api))
+	require.ErrorIs(t, err, admin.ErrServing)
+
+	_, err = mockgrpc.New(mockgrpc.Setup().Admin(api))
+	require.ErrorIs(t, err, admin.ErrServing)
+}
+
+func TestAdmin_ServeMCPNeedsTheOptionAndAMockServer(t *testing.T) {
+	err := admin.MustNew().ServeMCP(t.Context(), strings.NewReader(""), io.Discard)
+	require.EqualError(t, err, "admin: MCP is off: create the admin API with the MCP option")
+
+	err = admin.MustNew(admin.MCP()).ServeMCP(t.Context(), strings.NewReader(""), io.Discard)
+	require.EqualError(t, err, "admin: the admin API serves no mock server yet: create one with it first")
+}
+
+func TestAdmin_MCPIsOffUnlessAsked(t *testing.T) {
+	// MCP is a door to every operation: POST /mcp answers that the server can't serve it, unless the option opens it.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(admin.MustNew(admin.Addr("127.0.0.1:0"))))
+	require.NoError(t, m.Start())
+	t.Cleanup(m.Close)
+
+	res, err := http.Post(m.AdminURL()+"/mcp", "application/json", strings.NewReader(`{}`))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusNotImplemented, res.StatusCode)
+}
+
+func TestAdmin_AServerItCantServeLeavesItFree(t *testing.T) {
+	// A mock server the admin API refuses, such as one without its mocks, doesn't take it: the next one gets it.
+	api := admin.MustNew()
+
+	_, err := api.Serve(adminapi.Capabilities{})
+	require.EqualError(t, err, "admin: no mocks: the capabilities need Mocks")
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(api))
+	t.Cleanup(m.Close)
+}

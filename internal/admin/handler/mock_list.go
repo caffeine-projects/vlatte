@@ -14,8 +14,8 @@ func (o *Operations) ListMocks(ctx context.Context) (MockList, error) {
 	return o.mocks.list(ctx)
 }
 
-func (m *storeMocks[M]) list(ctx context.Context) (MockList, error) {
-	mocks, err := m.store.PickAll(ctx)
+func (m *storeMocks) list(ctx context.Context) (MockList, error) {
+	mocks, err := m.mocks.PickAll(ctx)
 	if err != nil {
 		return MockList{}, err
 	}

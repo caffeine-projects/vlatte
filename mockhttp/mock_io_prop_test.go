@@ -16,6 +16,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
 )
 
 // genKey draws a key as users write them: mixed case, dots, spaces, YAML traps and any unicode.
@@ -134,7 +135,7 @@ func TestPropAdmin_AddsMocksByID(t *testing.T) {
 	// M15: a mock posted to the admin API is stored under its id and served; posting the id again is a conflict.
 	t.Parallel()
 
-	m := MustNew(Setup().Silent().Admin(""))
+	m := MustNew(Setup().Silent().Admin(admin.MustNew()))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
