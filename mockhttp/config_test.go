@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
@@ -276,6 +278,8 @@ func TestConfig_ApplyCopiesEveryField(t *testing.T) {
 		reflect.TypeFor[vlatte.TemplateEngine](): vlatte.MustNewGoTemplateEngine(),
 		reflect.TypeFor[http.RoundTripper]():     &http.Transport{},
 		reflect.TypeFor[vlatte.KV]():             vlatte.NewMemoryKV(),
+		reflect.TypeFor[AdminAPI]():              admin.MustNew(),
+		reflect.TypeFor[io.Writer]():             io.Discard,
 	}
 
 	src := &Config{}
@@ -748,4 +752,31 @@ func TestConfigBuilder_Matchers_BelongToTheirServer(t *testing.T) {
 
 	_, err := m.Mock(FromBytes([]byte(_longerThanMock), "json"))
 	require.ErrorContains(t, err, `unknown matcher "longer-than"`)
+}
+
+func TestConfigBuilder_LogOutput(t *testing.T) {
+	// A program that keeps the standard output for something else, such as JSON-RPC over stdio, has the server
+	// write its logs, its debug output and the requests echo replies log elsewhere.
+	for name, debug := range map[string]bool{"logs": false, "debug": true} {
+		t.Run(name, func(t *testing.T) {
+			out := &lockedBuffer{}
+
+			setup := Setup().LogOutput(out).LogLevel(vlatte.LogLevelInfo).LogPretty(false)
+			setup.conf.Debug = debug
+
+			m := MustNew(setup)
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(Getf("/echo").Reply(Echo().Log()))
+
+			res, err := http.Get(m.URL("/echo"))
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, http.StatusOK, res.StatusCode)
+
+			require.Contains(t, out.String(), "GET /echo HTTP/1.1", "the echo")
+			require.Contains(t, out.String(), "REQUEST MATCHED", "the request's log or debug lines")
+		})
+	}
 }

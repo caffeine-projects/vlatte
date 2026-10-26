@@ -8,13 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 )
 
 func TestRecording_Status(t *testing.T) {
 	rec := &fakeRecorder{status: vlatte.RecordStatus{Active: true, Calls: 3, Mocks: 2, Dropped: 1}}
-	url := serve(t, newStore(t), admin.Recorder(rec))
+	url := serve(t, newStore(t), adminapi.Capabilities{Recorder: rec})
 
 	res, body := send(t, request{method: http.MethodGet, url: url + "/recording"})
 
@@ -43,7 +43,7 @@ func TestRecording_NotSupported(t *testing.T) {
 func TestRecordingStatus_OnOperationsThatCantRecord(t *testing.T) {
 	// The handler, mounted apart from the admin API's routes on a server that can't record, answers what its route
 	// would: a 501 problem, never a status of a recorder it lacks.
-	ops := handler.NewOperations(newStore(t), nil, handler.Capabilities{})
+	ops := handler.NewOperations(adminapi.Capabilities{Mocks: adminapi.MocksOf[*fakeMock](newStore(t), nil)})
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/recording", nil)
 	rec := httptest.NewRecorder()
 

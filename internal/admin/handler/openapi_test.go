@@ -1,11 +1,14 @@
 package handler_test
 
 import (
+	json "encoding/json/v2"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
@@ -43,4 +46,15 @@ func TestDocs(t *testing.T) {
 	require.Contains(t, body, `url: 'openapi'`)
 	require.Regexp(t, `src="https://cdn\.jsdelivr\.net/npm/@scalar/api-reference@\d+\.\d+\.\d+/dist/browser/standalone\.js"`, body)
 	require.Regexp(t, `integrity="sha384-[A-Za-z0-9+/=]+"`, body)
+}
+
+func TestOpenAPI_DocumentsTheEvents(t *testing.T) {
+	// GET /events streams the events of the mock server: the document says what a client of it reads.
+	data, err := json.Marshal(adminapi.Event{
+		Type: adminapi.EventMatched, Time: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC), RequestID: "1", Method: "GET",
+		Target: "/hello", MockID: "hello", Status: 200, Message: "matched",
+	})
+	require.NoError(t, err)
+
+	conformsAs(t, string(data), "json", "Event")
 }

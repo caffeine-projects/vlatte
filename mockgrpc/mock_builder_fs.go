@@ -9,7 +9,7 @@ import (
 	"slices"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
@@ -85,7 +85,7 @@ func (b *bytesBuilder) Build(app *Server) (*Mock, error) {
 
 // buildAdminMock builds a mock the admin API was sent. Its origin tells it from mocks of files and code.
 func buildAdminMock(app *Server, content []byte, format string) (*Mock, error) {
-	return mockDoc{origin: "admin request", source: handler.Origin, format: format, data: content}.build(app)
+	return mockDoc{origin: "admin request", source: adminapi.Origin, format: format, data: content}.build(app)
 }
 
 // mockDoc is a mock document and where it came from.

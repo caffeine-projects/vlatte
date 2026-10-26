@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/atomicfile"
 	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
@@ -18,9 +18,9 @@ import (
 )
 
 var (
-	_ handler.Files    = adminFiles{}
-	_ handler.Recorder = adminRecorder{}
-	_ RecordConfigurer = recordDoc{}
+	_ adminapi.Files    = adminFiles{}
+	_ adminapi.Recorder = adminRecorder{}
+	_ RecordConfigurer  = recordDoc{}
 )
 
 const (
@@ -103,7 +103,7 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 	)
 
 	for _, mock := range mocks {
-		if mock.Origin() != handler.Origin {
+		if mock.Origin() != adminapi.Origin {
 			continue
 		}
 
@@ -111,7 +111,7 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 
 		data, err := mockFile(app, mock, path, format, toWD)
 		if err != nil {
-			return nil, fmt.Errorf("%w: mock %q: %w", handler.ErrNotDescribed, mock.ID(), err)
+			return nil, fmt.Errorf("%w: mock %q: %w", adminapi.ErrNotDescribed, mock.ID(), err)
 		}
 
 		paths = append(paths, path)

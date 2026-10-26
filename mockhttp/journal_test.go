@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/testmock"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
@@ -660,7 +661,7 @@ func TestJournal_APatternReadsAnEntryWithoutHeaders(t *testing.T) {
 func TestJournal_TheAdminAPIQueriesWithTheRequestPartOfMockFiles(t *testing.T) {
 	// A client of any language verifies through the admin API with what its mock files write: the request part of
 	// a mock, as it matches. The answer's VLatte-Request-Id names the request to get back.
-	m := MustNew(Setup().Silent().Admin("").Journal(""))
+	m := MustNew(Setup().Silent().Admin(admin.MustNew()).Journal(""))
 	m.MustStart()
 	t.Cleanup(m.Close)
 

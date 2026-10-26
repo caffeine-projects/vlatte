@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
@@ -42,7 +42,7 @@ func (f *fakeFiles) SaveMocks(_ context.Context, dir, format string) ([]string, 
 
 func TestReloadMocks(t *testing.T) {
 	files := &fakeFiles{}
-	url := serve(t, newStore(t), admin.Files(files))
+	url := serve(t, newStore(t), adminapi.Capabilities{Files: files})
 
 	res, body := send(t, request{method: http.MethodPost, url: url + "/mocks/reload"})
 
@@ -88,7 +88,7 @@ func TestReloadMocks_Failed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			url := serve(t, newStore(t), admin.Files(&fakeFiles{err: tt.err}))
+			url := serve(t, newStore(t), adminapi.Capabilities{Files: &fakeFiles{err: tt.err}})
 
 			res, body := send(t, request{method: http.MethodPost, url: url + "/mocks/reload"})
 

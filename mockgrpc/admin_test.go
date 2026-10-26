@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 	"github.com/caffeine-projects/vlatte/webhook"
@@ -34,7 +35,7 @@ func adminServer(t *testing.T) (*Server, pb.TestServiceClient) {
 	t.Helper()
 
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger))
 	pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -94,6 +95,15 @@ func TestAdmin_IsTheSameForGRPC(t *testing.T) {
 	require.Empty(t, mocks)
 }
 
+func TestAdmin_WhatGRPCMocksCantDo(t *testing.T) {
+	// gRPC mocks have no JSON Schema of their mock files: the operation answers 501, and says so.
+	m, _ := adminServer(t)
+
+	status, body := call(t, http.MethodGet, m.AdminURL()+"/schema", "")
+	require.Equal(t, http.StatusNotImplemented, status)
+	require.Contains(t, body, `"code": "not_supported"`)
+}
+
 func TestAdmin_RecordsAService(t *testing.T) {
 	// A recording started through the admin API takes the calls of the mock server to its target, and once stopped,
 	// the server answers them from the mock files it wrote, the target gone.
@@ -149,7 +159,7 @@ func TestAdmin_RecordingSettingsWithProblems(t *testing.T) {
 
 func TestAdmin_AnEmptyRecordingBodyKeepsTheServersSettings(t *testing.T) {
 	dir := t.TempDir()
-	m := MustNew(Setup().Silent().Admin("").RootDir(dir))
+	m := MustNew(Setup().Silent().Admin(admin.MustNew()).RootDir(dir))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -221,7 +231,7 @@ func TestAdmin_SavesTheMocksItAddedAsFiles(t *testing.T) {
 	// The mocks the admin API adds go with the server: saved, they load from files, as written, on later starts.
 	dir := t.TempDir()
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger).RootDir(dir))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).RootDir(dir))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -243,7 +253,7 @@ func TestAdmin_SavesTheMocksItAddedAsFiles(t *testing.T) {
 
 func TestAdmin_QueriesTheJournalWithARequestOfAMockFile(t *testing.T) {
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger).Journal(""))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).Journal(""))
 	m.MustStart()
 	t.Cleanup(m.Close)
 	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
@@ -363,7 +373,7 @@ func TestAdmin_AGRPCServerWhoseAdminCantListen(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = taken.Close() })
 
-	m := MustNew(Setup().Admin(taken.Addr().String()))
+	m := MustNew(Setup().Admin(admin.MustNew(admin.Addr(taken.Addr().String()))))
 	t.Cleanup(m.Close)
 
 	require.ErrorContains(t, m.Start(), "admin: ")
@@ -381,7 +391,7 @@ func TestAdmin_AGRPCStartThatFailsClosesTheListenerItWasGiven(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
-	m := MustNew(Setup().Listener(l).Admin(taken.Addr().String()))
+	m := MustNew(Setup().Listener(l).Admin(admin.MustNew(admin.Addr(taken.Addr().String()))))
 	t.Cleanup(m.Close)
 
 	require.ErrorContains(t, m.Start(), "admin: ")
@@ -407,7 +417,7 @@ func statusCode(err error) codes.Code {
 
 func TestAdmin_StreamsTheLogOfALoggerItBuilds(t *testing.T) {
 	// A server that builds its logger streams its log lines; one given a logger, as adminServer's, doesn't.
-	m := MustNew(Setup().Admin(""))
+	m := MustNew(Setup().Admin(admin.MustNew()))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -434,7 +444,7 @@ func TestAdmin_SavesAMockWithABodyFile(t *testing.T) {
 	require.NoError(t, os.WriteFile("items.json", []byte(`[{"key": "a"}, {"key": "b"}]`), 0o600))
 
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger).ConfigSources())
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).ConfigSources())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -456,7 +466,7 @@ func TestAdmin_SavesNothingWithoutMocksItAdded(t *testing.T) {
 	// Mocks of Go code or of files are not the admin API's to save: with none of its own, it writes no file.
 	dir := t.TempDir()
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger).RootDir(dir))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).RootDir(dir))
 	m.MustStart()
 	t.Cleanup(m.Close)
 	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
@@ -486,7 +496,7 @@ func TestAdmin_ASaveThatFailsKeepsTheMocksItAdded(t *testing.T) {
 			tc.prepare(t, dir)
 
 			logger := zerolog.Nop()
-			m := MustNew(Setup().Admin("").Logger(&logger).RootDir(dir))
+			m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).RootDir(dir))
 			m.MustStart()
 			t.Cleanup(m.Close)
 
@@ -506,7 +516,7 @@ func TestAdmin_ASaveThatFailsKeepsTheMocksItAdded(t *testing.T) {
 
 func TestAdmin_AQueryWithoutAMethodSaysSo(t *testing.T) {
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger).Journal(""))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).Journal(""))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -522,7 +532,7 @@ func TestAdmin_SavesUnderARelativeRootDir(t *testing.T) {
 	require.NoError(t, os.Mkdir("fixtures", 0o755))
 
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger).RootDir("fixtures"))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).RootDir("fixtures"))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -549,7 +559,7 @@ func TestAdmin_ASaveThatFailsPutsBackTheFileItReplaced(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(saved, "broken.mock.yaml"), []byte("request: {method: Nope}"), 0o600))
 
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger).RootDir(dir))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).RootDir(dir))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -573,7 +583,7 @@ func TestAdmin_ASaveThatCantDescribeAMockWritesNothing(t *testing.T) {
 	require.NoError(t, os.WriteFile("items.json", []byte(`[{"key": "a"}]`), 0o600))
 
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger).RootDir(wd))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).RootDir(wd))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -593,7 +603,7 @@ func TestAdmin_ASaveThatCantWriteAFileKeepsTheMocksItAdded(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "_mocks", "kept.mock.yaml"), 0o755))
 
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger).RootDir(dir))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).RootDir(dir))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -616,7 +626,7 @@ func TestAdmin_SavesABidiMockWithBodyFilesInItsRules(t *testing.T) {
 	require.NoError(t, os.WriteFile("hello.json", []byte(`{"message": "hello"}`), 0o600))
 
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger).ConfigSources())
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).ConfigSources())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -639,7 +649,7 @@ func TestAdmin_DescribesAndSavesTheEnabledStateItSet(t *testing.T) {
 	// what the admin API set, so the saved mock loads back as it was.
 	dir := t.TempDir()
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger).RootDir(dir))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).RootDir(dir))
 	m.MustStart()
 	t.Cleanup(m.Close)
 	c := pb.NewTestServiceClient(m.MustDial())
@@ -708,7 +718,7 @@ func TestAdmin_SavesAMockWithAWebhookBodyFile(t *testing.T) {
 	require.NoError(t, err)
 
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger).ConfigSources().OnCompleteListener("webhook", wh))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).ConfigSources().OnCompleteListener("webhook", wh))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -756,7 +766,7 @@ func TestAdmin_ASaveKeepsServingTheMocksItAddedWhileTheFilesLoad(t *testing.T) {
 	}}
 
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger).RootDir(t.TempDir()).TemplateEngine(spy))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).RootDir(t.TempDir()).TemplateEngine(spy))
 	m.MustStart()
 	t.Cleanup(m.Close)
 

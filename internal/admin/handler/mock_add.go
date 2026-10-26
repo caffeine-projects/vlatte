@@ -16,13 +16,13 @@ func (o *Operations) AddMock(ctx context.Context, doc []byte, format string) (Mo
 	return o.mocks.add(ctx, doc, format)
 }
 
-func (m *storeMocks[M]) add(ctx context.Context, doc []byte, format string) (MockSummary, error) {
+func (m *storeMocks) add(ctx context.Context, doc []byte, format string) (MockSummary, error) {
 	mock, err := m.buildMock(doc, format)
 	if err != nil {
 		return MockSummary{}, err
 	}
 
-	if err := m.store.Store(ctx, mock); err != nil {
+	if err := m.mocks.Store(ctx, mock); err != nil {
 		closeMock(mock)
 		return MockSummary{}, storeError(mock.ID(), err)
 	}
@@ -31,16 +31,14 @@ func (m *storeMocks[M]) add(ctx context.Context, doc []byte, format string) (Moc
 }
 
 // buildMock builds the mock of doc, a mock file in format.
-func (m *storeMocks[M]) buildMock(doc []byte, format string) (M, error) {
-	if m.build == nil {
-		var zero M
-		return zero, notSupported(_lackingBuilder)
+func (m *storeMocks) buildMock(doc []byte, format string) (vlatte.Mock, error) {
+	if !m.mocks.Builds() {
+		return nil, notSupported(_lackingBuilder)
 	}
 
-	mock, err := m.build.BuildFromBytes(doc, format)
+	mock, err := m.mocks.Build(doc, format)
 	if err != nil {
-		var zero M
-		return zero, invalid("the mock", err)
+		return nil, invalid("the mock", err)
 	}
 
 	return mock, nil

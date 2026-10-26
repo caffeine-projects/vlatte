@@ -180,9 +180,6 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 			[]string{"--record-repeats", "first"}, func(t *testing.T, c *Config) { require.Equal(t, vlatte.RecordFirst, c.Record.Repeats) },
 		},
 		"record-include-mocked": {[]string{"--record-include-mocked"}, func(t *testing.T, c *Config) { require.True(t, c.Record.IncludeMocked) }},
-		"admin":                 {[]string{"--admin"}, func(t *testing.T, c *Config) { require.Equal(t, &AdminConfig{}, c.Admin) }},
-		"admin-addr":            {[]string{"--admin-addr", "127.0.0.1:9090"}, func(t *testing.T, c *Config) { require.Equal(t, "127.0.0.1:9090", c.Admin.Addr) }},
-		"admin-dir":             {[]string{"--admin-dir", "admin"}, func(t *testing.T, c *Config) { require.NotNil(t, c.Admin.Store) }},
 		"webhook-timeout":       {[]string{"--webhook-timeout", "1.5s"}, func(t *testing.T, c *Config) { require.Equal(t, 1500*time.Millisecond, c.WebhookTimeout) }},
 	}
 
@@ -659,6 +656,37 @@ func TestConfigUsage_ListsEverySetting(t *testing.T) {
 	require.Contains(t, usage, "file key log.max_body_size")
 	require.Contains(t, usage, "Default: info.")
 	require.Equal(t, "42", choiceName(config.LogLevels, 42), "a default without a name shows its number")
+}
+
+func TestConfigSources_TheCommandsAdminSettingsServeNoAdminAPI(t *testing.T) {
+	// The admin API is opted into in code: settings the vlatte command reads, from a config file it shares with tests,
+	// or its environment, neither fail a library server nor give it an admin API.
+	t.Setenv(EnvPrefix+"_ADMIN", "true")
+	t.Setenv(EnvPrefix+"_MCP", "true")
+
+	file := writeConfigFile(t, t.TempDir(), "settings.yaml", "admin:\n  addr: 127.0.0.1:9090\n  dir: admin\nmcp: true\n")
+
+	m, err := New(Setup().Silent().ConfigSources(
+		ConfigFile(file), ConfigEnv(), ConfigArgs([]string{"--admin", "--admin-addr=:9091", "--admin-dir", "x", "--mcp"}),
+	))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+
+	require.NoError(t, m.Start())
+	require.Nil(t, m.Config().Admin)
+	require.Nil(t, m.Config().AdminStore)
+	require.Empty(t, m.AdminURL())
+}
+
+func TestConfigUsage_LeavesOutTheCommandsSettings(t *testing.T) {
+	// Help and completions of a library server offer none of the vlatte command's settings.
+	for _, name := range []string{"--admin", "VLATTE_ADMIN", "file key admin", "--mcp", "VLATTE_MCP", "file key mcp"} {
+		require.NotContains(t, ConfigUsage(), name)
+	}
+
+	for _, f := range ConfigFlags() {
+		require.NotContains(t, []string{"admin", "admin-addr", "admin-dir", "mcp"}, f.Name)
+	}
 }
 
 // writeTestCA writes the certificate and the key of a new CA, as PEM files in dir, and returns their paths.

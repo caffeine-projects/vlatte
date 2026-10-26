@@ -6,14 +6,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
 func TestClearRequests(t *testing.T) {
 	// A test clears the journal between its cases, on its own or with the rest of the server through POST /reset.
 	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
-	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j})
 
 	res, body := send(t, request{method: http.MethodDelete, url: url + "/requests"})
 	require.Equal(t, http.StatusNoContent, res.StatusCode, body)
@@ -37,7 +37,7 @@ func TestClearRequests_AJournalThatFailsToClear(t *testing.T) {
 	// before.
 	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
 	require.NoError(t, j.Close())
-	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j})
 
 	res, body := send(t, request{method: http.MethodDelete, url: url + "/requests"})
 

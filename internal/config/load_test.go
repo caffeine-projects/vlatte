@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"flag"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -152,4 +154,48 @@ func TestLoad_KeysWithoutSetAreReturned(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "b.yaml", values["config"].Str)
 	require.Equal(t, "flag --config", values["config"].Origin)
+}
+
+func TestLoadOnly_LetsOtherSettingsThrough(t *testing.T) {
+	// The vlatte command reads its own settings from the sources the mock server reads too: the server's settings,
+	// which the command doesn't know, are no problem of the command's.
+	dir := t.TempDir()
+	file := filepath.Join(dir, "app.yaml")
+	require.NoError(t, os.WriteFile(file, []byte("name: from-file\nother: 1\nlog:\n  other: x\ngroup:\n  key: 2\n"), 0o600))
+	t.Setenv("APP_OTHER", "1")
+	t.Setenv("APP_PORT", "81")
+
+	var c testConfig
+	values, err := testSchema().LoadOnly(&c, []Source{
+		File("config", file),
+		Env("APP"),
+		Args([]string{"--other", "x", "--debug", "-o", "y", "--other-bool", "--tags", "a", "--more=z", "positional", "--log-level=info", "--", "--name=after"}),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "from-file", c.Name, "flags after -- are no flags")
+	require.Equal(t, int64(81), c.Port)
+	require.True(t, c.Debug)
+	require.Equal(t, []string{"a"}, c.Tags)
+	require.Equal(t, int64(1), c.Level)
+	require.Len(t, values, 5)
+}
+
+func TestLoadOnly_StillChecksItsOwnSettings(t *testing.T) {
+	var c testConfig
+	_, err := testSchema().LoadOnly(&c, []Source{Args([]string{"--other=1", "--port=eighty"})})
+
+	problems := requireProblems(t, err)
+	require.Len(t, problems, 1)
+	require.Equal(t, "port", problems[0].Key)
+}
+
+func TestLoadOnly_HelpStopsBeforeLowerSources(t *testing.T) {
+	// Help must work whatever the other sources hold, as Load's does.
+	for _, arg := range []string{"-h", "--help"} {
+		var c testConfig
+		_, err := testSchema().LoadOnly(&c, []Source{layer{{key: "port", raw: "eighty", origin: "file a.yaml"}}, Args([]string{"--other", arg})})
+
+		require.ErrorIs(t, err, flag.ErrHelp, arg)
+	}
 }

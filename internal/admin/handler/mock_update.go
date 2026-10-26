@@ -27,7 +27,7 @@ func (o *Operations) UpdateMock(ctx context.Context, id string, doc []byte, form
 	return o.mocks.update(ctx, id, doc, format)
 }
 
-func (m *storeMocks[M]) update(ctx context.Context, id string, doc []byte, format string) (MockSummary, error) {
+func (m *storeMocks) update(ctx context.Context, id string, doc []byte, format string) (MockSummary, error) {
 	var change mockChange
 	if err := decodeBody(_mockChangeSchema, &change, doc, format); err != nil {
 		return MockSummary{}, invalid("the body", err)
@@ -41,7 +41,7 @@ func (m *storeMocks[M]) update(ctx context.Context, id string, doc []byte, forma
 	if change.enabled != nil && *change.enabled != mock.Enabled() {
 		setEnabled(mock, *change.enabled)
 
-		if err := m.store.Replace(ctx, []M{mock}, mock); err != nil {
+		if err := m.mocks.Replace(ctx, []vlatte.Mock{mock}, mock); err != nil {
 			setEnabled(mock, !*change.enabled)
 			return MockSummary{}, err
 		}

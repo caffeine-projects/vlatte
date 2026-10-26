@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
 )
 
@@ -80,7 +80,7 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 		}
 
 		journaled.unmatched(near)
-		app.publish(ctx, handler.EventUnmatched, call.method, nil, app.config.NoMatchCode, nil)
+		app.publish(ctx, adminapi.EventUnmatched, call.method, nil, app.config.NoMatchCode, nil)
 		app.logger.Warn().Str("method", call.method).Msg("grpc: no mock matched the call")
 
 		return fail(ctx, vlatte.FailureNoMatch, app.config.NoMatchCode, "%s: no mock matched the call of %s", kind,
@@ -118,7 +118,7 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 
 	if err != nil && !hasStatus(err) {
 		h.takeBack()
-		app.publish(ctx, handler.EventError, call.method, mock, codes.Internal, err)
+		app.publish(ctx, adminapi.EventError, call.method, mock, codes.Internal, err)
 
 		return replyError(ctx, kind.String(), mock, err)
 	}
@@ -137,7 +137,7 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 	// A reply that sent nothing yet answers with its status, or a unary call's message, which go out now.
 	h.count()
 	app.afterServed(ctx, mock, call, err)
-	app.publish(ctx, handler.EventMatched, call.method, mock, status.Code(err), nil)
+	app.publish(ctx, adminapi.EventMatched, call.method, mock, status.Code(err), nil)
 
 	return err
 }
@@ -213,7 +213,7 @@ func (in *interceptors) unknown(ctx context.Context, method string) error {
 	journaled.serve(ctx)
 	journaled.unmatched(nil)
 
-	in.app.publish(ctx, handler.EventUnmatched, method, nil, codes.Unimplemented, nil)
+	in.app.publish(ctx, adminapi.EventUnmatched, method, nil, codes.Unimplemented, nil)
 	in.app.logger.Warn().Str("method", method).Msg("grpc: no descriptor describes the method of the call")
 
 	return fail(ctx, vlatte.FailureNoMatch, codes.Unimplemented, "grpc: unknown method %s: import the generated "+

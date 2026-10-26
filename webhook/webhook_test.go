@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/caffeine-projects/vlatte/webhook"
@@ -1283,7 +1284,7 @@ func TestWebHook_ASavedMockStillSendsItsBodyFile(t *testing.T) {
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin("").OnCompleteListener("webhook", wh))
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(admin.MustNew()).OnCompleteListener("webhook", wh))
 	m.MustStart()
 	t.Cleanup(m.Close)
 

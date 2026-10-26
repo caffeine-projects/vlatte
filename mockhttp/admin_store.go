@@ -14,7 +14,7 @@ import (
 	"sync"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/atomicfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/value"
@@ -338,5 +338,5 @@ func (s *fileStore) decode(path string) (*Mock, error) {
 		return nil, fmt.Errorf("server: admin store: %w", err)
 	}
 
-	return mockDoc{origin: "file " + path, source: handler.Origin, format: format, data: data}.build(s.app)
+	return mockDoc{origin: "file " + path, source: adminapi.Origin, format: format, data: data}.build(s.app)
 }
