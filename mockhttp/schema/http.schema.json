@@ -26,6 +26,9 @@
       "additionalProperties": false
     },
     "on_complete": { "type": "array", "items": { "$ref": "#/$defs/on_complete_event" } },
+    "steps": { "description": "Faults the body of each answer passes through, in order.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
+    "wire_steps": { "description": "Faults every byte of each answer passes through, its head included, after steps. Needs HTTP/1.x.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
+    "upstream_steps": { "description": "Faults the body a proxy reply sends on passes through.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
     "request": {
       "type": "object",
       "properties": {
@@ -153,6 +156,33 @@
       "oneOf": [
         { "type": "boolean" },
         { "enum": [ 0, 1, "1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False" ] }
+      ]
+    },
+    "fault": {
+      "description": "A fault: its name alone, or a list of its name and arguments, such as [\"slow_close\", \"2s\"].",
+      "oneOf": [
+        { "enum": [ "empty_response", "malformed_response_chunk", "random_data_then_close", "connection_reset_by_peer" ] },
+        { "type": "array", "prefixItems": [ { "enum": [ "empty_response", "malformed_response_chunk", "random_data_then_close", "connection_reset_by_peer" ] } ], "minItems": 1, "maxItems": 1 },
+        { "type": "array", "prefixItems": [ { "enum": [ "connection_reset_by_peer_after", "slow_close", "timeout" ] }, { "$ref": "#/$defs/duration" } ], "minItems": 2, "maxItems": 2 },
+        { "type": "array", "prefixItems": [ { "const": "chunked_dribble_delay" }, { "type": "integer", "minimum": 1 }, { "$ref": "#/$defs/duration" } ], "minItems": 3, "maxItems": 3 },
+        {
+          "description": "A latency, and the jitter it varies by, up to the latency.",
+          "type": "array", "prefixItems": [ { "const": "latency" }, { "$ref": "#/$defs/duration" }, { "$ref": "#/$defs/duration" } ], "minItems": 2, "maxItems": 3
+        },
+        {
+          "description": "Bytes per second, or the name of a common link.",
+          "type": "array",
+          "prefixItems": [
+            { "const": "bandwidth" },
+            { "oneOf": [ { "type": "integer", "minimum": 1 }, { "enum": [ "gprs", "dial_up", "2g", "good_2g", "3g", "good_3g", "dsl", "4g", "wifi", "fiber" ] } ] }
+          ],
+          "minItems": 2, "maxItems": 2
+        },
+        {
+          "description": "The average size of a slice, how much it varies by, below the average, and the delay before each.",
+          "type": "array", "prefixItems": [ { "const": "slicer" }, { "type": "integer", "minimum": 1 }, { "type": "integer", "minimum": 0 }, { "$ref": "#/$defs/duration" } ], "minItems": 4, "maxItems": 4
+        },
+        { "type": "array", "prefixItems": [ { "const": "limit_data" }, { "type": "integer", "minimum": 0 } ], "minItems": 2, "maxItems": 2 }
       ]
     },
     "matcher": {

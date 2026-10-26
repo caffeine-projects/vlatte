@@ -426,3 +426,60 @@ func TestJSONSchema_ProxyTargetPattern(t *testing.T) {
 		require.Equal(t, want, pattern.MatchString(target), "pattern on %q", target)
 	}
 }
+
+func TestJSONSchema_FaultsAgreeWithTheDecoder(t *testing.T) {
+	// The editor schema accepts a fault spec exactly when the decoder builds it, at each level. A slicer's variation
+	// must stay below its size, and a latency's jitter within it, which the schema can't compare: the decoder alone
+	// checks them.
+	schema, _ := loadJSONSchema(t)
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	tests := []struct {
+		spec  any
+		valid bool
+	}{
+		{"empty_response", true},
+		{[]any{"malformed_response_chunk"}, true},
+		{"random_data_then_close", true},
+		{"connection_reset_by_peer", true},
+		{[]any{"connection_reset_by_peer_after", "1s"}, true},
+		{[]any{"chunked_dribble_delay", int64(3), int64(300)}, true},
+		{[]any{"latency", "100ms"}, true},
+		{[]any{"latency", "100ms", "20ms"}, true},
+		{[]any{"bandwidth", int64(1)}, true},
+		{[]any{"bandwidth", "good_3g"}, true},
+		{[]any{"slicer", int64(8), int64(7), "0"}, true},
+		{[]any{"slow_close", int64(0)}, true},
+		{[]any{"timeout", "1.5s"}, true},
+		{[]any{"limit_data", int64(0)}, true},
+		{"nope", false},
+		{"slow_close", false},
+		{[]any{}, false},
+		{[]any{"empty_response", int64(1)}, false},
+		{[]any{"connection_reset_by_peer_after", "-1s"}, false},
+		{[]any{"chunked_dribble_delay", int64(0), "1s"}, false},
+		{[]any{"latency", "1s", int64(-1)}, false},
+		{[]any{"latency", "1s", 12.5}, false},
+		{[]any{"bandwidth", int64(0)}, false},
+		{[]any{"bandwidth", "5g"}, false},
+		{[]any{"slicer", int64(0), int64(0), "0s"}, false},
+		{[]any{"slicer", int64(4), int64(-1), "0s"}, false},
+		{[]any{"timeout", "1500"}, false},
+		{[]any{"limit_data", 1.5}, false},
+		{map[string]any{"latency": "1s"}, false},
+	}
+
+	for _, key := range []string{"steps", "wire_steps", "upstream_steps"} {
+		for _, tc := range tests {
+			doc := withRequest(map[string]any{key: []any{tc.spec}})
+
+			data, err := config.Encode(doc, "json")
+			require.NoError(t, err)
+
+			_, decodeErr := mockDoc{origin: "doc", format: "json", data: data}.build(m)
+			require.Equal(t, tc.valid, decodeErr == nil, "%s: %#v: %v", key, tc.spec, decodeErr)
+			require.Equal(t, tc.valid, schema.Validate(instance(t, doc)) == nil, "%s: %#v", key, tc.spec)
+		}
+	}
+}

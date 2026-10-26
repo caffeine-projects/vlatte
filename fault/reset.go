@@ -6,13 +6,16 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ vlatte.Step  = resetByPeer{}
-	_ vlatte.Stage = (*resetStage)(nil)
-	_ vlatte.Step  = resetAfter{}
-	_ vlatte.Stage = (*resetAfterStage)(nil)
+	_ vlatte.Step                = resetByPeer{}
+	_ descriptor.SelfDescriptive = resetByPeer{}
+	_ vlatte.Stage               = (*resetStage)(nil)
+	_ vlatte.Step                = resetAfter{}
+	_ descriptor.SelfDescriptive = resetAfter{}
+	_ vlatte.Stage               = (*resetAfterStage)(nil)
 )
 
 // ConnectionResetByPeer returns a wire step that resets the connection: at the first byte of the answer, or at its
@@ -23,6 +26,11 @@ func ConnectionResetByPeer() vlatte.Step {
 }
 
 type resetByPeer struct{}
+
+// Describe implements [descriptor.SelfDescriptive].
+func (resetByPeer) Describe() descriptor.Descriptor {
+	return descriptor.KeyOnly(_fConnectionResetByPeer)
+}
 
 func (resetByPeer) Open(flow *vlatte.Flow, _ vlatte.Stage) vlatte.Stage {
 	return &resetStage{flow: flow}
@@ -59,6 +67,11 @@ func ConnectionResetByPeerAfter(d time.Duration) vlatte.Step {
 }
 
 type resetAfter struct{ d time.Duration }
+
+// Describe implements [descriptor.SelfDescriptive].
+func (r resetAfter) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg(_fConnectionResetByPeerAfter, r.d.String())
+}
 
 func (r resetAfter) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	abortAfter(flow, r.d, vlatte.ErrReset)

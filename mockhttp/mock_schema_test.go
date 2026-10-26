@@ -704,3 +704,28 @@ func TestMockFile_CustomProblems(t *testing.T) {
 		}
 	}
 }
+
+func TestMockFile_StepsProblems(t *testing.T) {
+	// A fault spec that can't be built fails the file, at its key, with what is wrong.
+	app := MustNew(Setup().Silent())
+	t.Cleanup(app.Close)
+
+	tests := []struct {
+		doc  string
+		key  string
+		want string
+	}{
+		{"steps: [[slow_close, 1s], [bandwidth, 0]]", "steps[1]", `steps[1]="[\"bandwidth\",0]": fault: bandwidth needs a byte per second at least, not 0`},
+		{"wire_steps: [nope]", "wire_steps[0]", `wire_steps[0]="nope": fault: unknown fault "nope"`},
+		{"upstream_steps: [[latency]]", "upstream_steps[0]", `upstream_steps[0]="[\"latency\"]": fault: latency takes 1 or 2 arguments, not 0`},
+		{"steps: empty_response", "steps", "steps must be a list, not a string"},
+	}
+
+	for _, tc := range tests {
+		_, err := decodeDoc(app, "request: {path: /f}\nresponse: {status: 200}\n"+tc.doc)
+		problems := mockProblems(t, err)
+		require.Len(t, problems, 1, tc.doc)
+		require.Equal(t, tc.key, problems[0].Key, tc.doc)
+		require.Equal(t, tc.want, problems[0].Message, tc.doc)
+	}
+}

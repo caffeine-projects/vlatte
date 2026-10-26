@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/fault"
 	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
@@ -47,6 +48,9 @@ type mockDef struct {
 	repeat      int64
 	scenario    scenarioDef
 	events      []vlatte.EventConfig
+	steps       []vlatte.Step
+	wireSteps   []vlatte.Step
+	upSteps     []vlatte.Step
 	request     requestDef
 	reply       *replyDef
 	sequence    *sequenceDef
@@ -204,6 +208,18 @@ var _mockSchema = config.NewSchema(
 	mockField{
 		Key: "on_complete", Kind: config.Any, Usage: "Events to run after the mock replies: a list of {name, parameters}.",
 		Set: func(d *mockDef, v config.Value) error { return setEvents(&d.events, d.dir, v) },
+	},
+	mockField{
+		Key: "steps", Kind: config.Any, Usage: "Faults the body of each answer passes through, in order: a list of fault specs, such as [slow_close, 2s].",
+		Set: func(d *mockDef, v config.Value) error { return setSteps(&d.steps, v) },
+	},
+	mockField{
+		Key: "wire_steps", Kind: config.Any, Usage: "Faults every byte of each answer passes through, its head included, after steps: a list of fault specs. Needs HTTP/1.x.",
+		Set: func(d *mockDef, v config.Value) error { return setSteps(&d.wireSteps, v) },
+	},
+	mockField{
+		Key: "upstream_steps", Kind: config.Any, Usage: "Faults the body a proxy reply sends on passes through: a list of fault specs.",
+		Set: func(d *mockDef, v config.Value) error { return setSteps(&d.upSteps, v) },
 	},
 	mockField{
 		Key: "request.scheme", Kind: config.Any, Usage: "Scheme to match: text, or a matcher list.",
@@ -1010,6 +1026,20 @@ func setEvents(events *[]vlatte.EventConfig, dir string, v config.Value) error {
 	})
 }
 
+// setSteps decodes a list of fault specs, such as [latency, 100ms]: see [fault.Build].
+func setSteps(steps *[]vlatte.Step, v config.Value) error {
+	return config.Items(v, func(item config.Value) error {
+		step, err := fault.Build(item.Any)
+		if err != nil {
+			return err
+		}
+
+		*steps = append(*steps, step)
+
+		return nil
+	})
+}
+
 // headerValues decodes an object of header values: a string, or a list of strings, each.
 func headerValues(v config.Value, dst *[]headerValue) error {
 	return config.Members(v, func(name string, m config.Value) error {
@@ -1314,6 +1344,8 @@ func (d *mockDef) apply(b *Builder, dir string) {
 	for _, e := range d.events {
 		b.OnCompleteEvent(e)
 	}
+
+	b.Step(d.steps...).WireStep(d.wireSteps...).UpstreamStep(d.upSteps...)
 
 	d.request.apply(b)
 

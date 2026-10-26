@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ vlatte.Step  = randomData{}
-	_ vlatte.Stage = (*randomStage)(nil)
+	_ vlatte.Step                = randomData{}
+	_ descriptor.SelfDescriptive = randomData{}
+	_ vlatte.Stage               = (*randomStage)(nil)
 )
 
 // RandomDataSize is how many random bytes [RandomDataThenClose] sends.
@@ -23,6 +25,9 @@ func RandomDataThenClose() vlatte.Step {
 }
 
 type randomData struct{}
+
+// Describe implements [descriptor.SelfDescriptive].
+func (randomData) Describe() descriptor.Descriptor { return descriptor.KeyOnly(_fRandomDataThenClose) }
 
 func (randomData) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	return &randomStage{flow: flow, next: next}

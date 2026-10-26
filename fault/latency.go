@@ -4,39 +4,58 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"math"
+	"math/rand/v2"
 	"sync"
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ vlatte.Step  = latency{}
-	_ vlatte.Stage = (*latencyStage)(nil)
+	_ vlatte.Step                = latencyStep{}
+	_ descriptor.SelfDescriptive = latencyStep{}
+	_ vlatte.Stage               = (*latencyStage)(nil)
 )
 
-// Latency returns a step that delays every write and flush by what delay picks for it, such as [vlatte.Latency] or
-// [vlatte.Jitter], to test a client against a distant server: each reaches the client that long after the writer
-// sent it, in order, as over a link with that latency. The writer doesn't wait: the answer keeps its pace, only
-// later, and a stream whose writes come a second apart still gets them a second apart. With a delay that varies, a
-// write waits for those before it, so nothing comes out of order. The end of the answer comes once what was sent
-// before it did.
+// Latency returns a step that delays every write and flush by latency, give or take jitter at random, to test a client
+// against a distant server: each reaches the client from latency-jitter to latency+jitter after the writer sent it,
+// in order, as over a link with that latency. The writer doesn't wait: the answer keeps its pace, only later, and a
+// stream whose writes come a second apart still gets them a second apart. With jitter, a write waits for those
+// before it, so nothing comes out of order. The end of the answer comes once what was sent before it did.
 //
 // It goes with [github.com/caffeine-projects/vlatte/mockhttp.Builder.Step], to delay the body, or with
-// [github.com/caffeine-projects/vlatte/mockhttp.Builder.WireStep], to delay the whole answer, its head included.
-// delay is called for each write and flush of every answer of the mock at once: it must be safe for concurrent use,
-// as [vlatte.Latency] and [vlatte.Jitter] are. It panics when delay is nil.
-func Latency(delay vlatte.Delay) vlatte.Step {
-	if delay == nil {
-		panic("fault: latency needs a delay")
+// [github.com/caffeine-projects/vlatte/mockhttp.Builder.WireStep], to delay the whole answer, its head included. It
+// panics when latency is negative, or jitter is negative or more than latency.
+func Latency(latency, jitter time.Duration) vlatte.Step {
+	if latency < 0 {
+		panic(fmt.Sprintf("fault: latency can't be %s", latency))
 	}
 
-	return latency{delay: delay}
+	if jitter < 0 || jitter > latency {
+		panic(fmt.Sprintf("fault: latency jitter must be from 0 to %s, not %s", latency, jitter))
+	}
+
+	return latencyStep{latency: latency, jitter: jitter}
 }
 
-type latency struct{ delay vlatte.Delay }
+type latencyStep struct {
+	latency time.Duration
+	jitter  time.Duration
+}
 
-func (l latency) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+// Describe implements [descriptor.SelfDescriptive], without a jitter of 0.
+func (l latencyStep) Describe() descriptor.Descriptor {
+	if l.jitter == 0 {
+		return descriptor.SingleArg(_fLatency, l.latency.String())
+	}
+
+	return descriptor.MultiArgs(_fLatency, l.latency.String(), l.jitter.String())
+}
+
+func (l latencyStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	s := &latencyStage{
 		flow:  flow,
 		ctx:   flow.Context(),
@@ -49,6 +68,18 @@ func (l latency) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	go s.run()
 
 	return s
+}
+
+// delay picks the delay of a write or flush: from latency-jitter to latency+jitter, which is at most twice the
+// longest duration, so it can't overflow a uint64. One longer than a duration holds is the longest one.
+func (l latencyStep) delay() time.Duration {
+	if l.jitter == 0 {
+		return l.latency
+	}
+
+	d := uint64(l.latency-l.jitter) + rand.Uint64N(2*uint64(l.jitter)+1)
+
+	return time.Duration(min(d, math.MaxInt64))
 }
 
 // latencyOp is what a latencyStage passes on at: a write of b, a flush, or the end.

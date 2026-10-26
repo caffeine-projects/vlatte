@@ -18,4 +18,7 @@
 //
 // A fault that ends the answer aborts its flow: the mock still counts the call, and runs its callbacks and events,
 // before the connection ends.
+//
+// Mock files declare faults as specs, such as ["bandwidth", "3g"], under steps, wire_steps and upstream_steps: see
+// [Build]. Each fault describes itself as its spec.
 package fault

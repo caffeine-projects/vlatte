@@ -118,7 +118,7 @@ func TestFault_ChunkedDribbleDelay(t *testing.T) {
 
 func TestFault_Latency(t *testing.T) {
 	// The whole answer, its head included, comes the latency late, and whole.
-	m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.Latency(vlatte.Latency(50*time.Millisecond))).Reply(mockhttp.OK().PlainText("hello")))
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.Latency(50*time.Millisecond, 0)).Reply(mockhttp.OK().PlainText("hello")))
 
 	start := time.Now()
 	res, err := newClient(t).Get(m.URL("/f"))
@@ -260,6 +260,57 @@ func TestFault_LimitData(t *testing.T) {
 		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
 		require.Equal(t, "hel", string(body))
 		require.NoError(t, res.Body.Close())
+		require.EqualValues(t, 1, scoped.Hits())
+	})
+}
+
+func TestFault_FromAMockFile(t *testing.T) {
+	// A mock file declares faults as specs, at the level of each: they act as the faults of Go code do.
+	start := func(t *testing.T, file string) (*mockhttp.Server, *vlatte.Scope[*mockhttp.Mock]) {
+		t.Helper()
+
+		m := mockhttp.MustNew(mockhttp.Setup().Silent())
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		return m, m.MustMock(mockhttp.FromFile("testdata/fault/" + file))
+	}
+
+	t.Run("wire_steps", func(t *testing.T) {
+		m, scoped := start(t, "1_reset.yaml")
+
+		_, err := newClient(t).Get(m.URL("/reset"))
+		require.ErrorIs(t, err, syscall.ECONNRESET)
+		require.EqualValues(t, 1, scoped.Hits())
+	})
+
+	t.Run("steps", func(t *testing.T) {
+		m, scoped := start(t, "2_limit_data.yaml")
+
+		res, err := newClient(t).Get(m.URL("/limit"))
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, res.StatusCode)
+
+		body, err := io.ReadAll(res.Body)
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		require.Equal(t, "hel", string(body))
+		require.NoError(t, res.Body.Close())
+		require.EqualValues(t, 1, scoped.Hits())
+	})
+
+	t.Run("latency", func(t *testing.T) {
+		// 50ms, give or take 10ms.
+		m, scoped := start(t, "3_latency.yaml")
+
+		begin := time.Now()
+		res, err := newClient(t).Get(m.URL("/latency"))
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, time.Since(begin), 40*time.Millisecond)
+
+		body, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, "hello", string(body))
 		require.EqualValues(t, 1, scoped.Hits())
 	})
 }

@@ -6,11 +6,13 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ vlatte.Step  = chunkedDribble{}
-	_ vlatte.Stage = (*dribbleStage)(nil)
+	_ vlatte.Step                = chunkedDribble{}
+	_ descriptor.SelfDescriptive = chunkedDribble{}
+	_ vlatte.Stage               = (*dribbleStage)(nil)
 )
 
 // ChunkedDribbleDelay returns a body step that sends the body in parts over total, chunks of them, to test a client
@@ -35,6 +37,11 @@ func ChunkedDribbleDelay(chunks int, total time.Duration) vlatte.Step {
 type chunkedDribble struct {
 	chunks int
 	total  time.Duration
+}
+
+// Describe implements [descriptor.SelfDescriptive].
+func (d chunkedDribble) Describe() descriptor.Descriptor {
+	return descriptor.MultiArgs(_fChunkedDribbleDelay, d.chunks, d.total.String())
 }
 
 func (d chunkedDribble) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {

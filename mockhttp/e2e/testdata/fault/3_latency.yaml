@@ -1,0 +1,8 @@
+request:
+  method: GET
+  path: /latency
+response:
+  status: 200
+  body: hello
+wire_steps:
+  - [latency, 50ms, 10ms]
