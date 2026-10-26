@@ -42,6 +42,18 @@ func TestSplitArgs_GivesEachServerItsFlags(t *testing.T) {
 	}, grpcArgs)
 }
 
+func TestSplitArgs_FlagsEndAtTheTerminator(t *testing.T) {
+	// The HTTP server's parser stops at -- and rejects what follows: no gRPC flag after it configures the gRPC server.
+	httpArgs, grpcArgs := splitArgs([]string{
+		"--addr", ":8080", "--grpc-addr", "--", "--", "--grpc-addr=:50051", "--grpc-descriptors=api.binpb", "-c", "x",
+	})
+
+	require.Equal(t, []string{
+		"--addr", ":8080", "--", "--grpc-addr=:50051", "--grpc-descriptors=api.binpb", "-c", "x",
+	}, httpArgs)
+	require.Equal(t, []string{"--grpc-addr", "--"}, grpcArgs, "a flag's value can be --")
+}
+
 // healthSet writes the descriptors of the health service, renamed into package pkg so that the program has no
 // generated code of it, as a descriptor set file, and returns the file and the descriptors.
 func healthSet(t *testing.T, pkg string) (string, protoreflect.FileDescriptor) {

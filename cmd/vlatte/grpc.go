@@ -18,7 +18,8 @@ const (
 
 // splitArgs splits the command's arguments between its servers: the flags of gRPC settings, --grpc-*, go to the gRPC
 // server, with their values, and the others to the HTTP server. The config file, --config or -c, goes to both: the
-// gRPC server reads the grpc section of the file the HTTP server reads.
+// gRPC server reads the grpc section of the file the HTTP server reads. The flags end at --, as the HTTP server's
+// parser reads them: -- and what follows go to the HTTP server, which rejects them as unexpected arguments.
 func splitArgs(args []string) (httpArgs, grpcArgs []string) {
 	takesValue := make(map[string]bool)
 	for _, f := range mockgrpc.ConfigFlags() {
@@ -27,6 +28,11 @@ func splitArgs(args []string) (httpArgs, grpcArgs []string) {
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+
+		if arg == "--" {
+			httpArgs = append(httpArgs, args[i:]...)
+			break
+		}
 
 		name, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
 		if !strings.HasPrefix(arg, "-") {
