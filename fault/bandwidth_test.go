@@ -1,4 +1,4 @@
-package fault_test
+package fault
 
 import (
 	"context"
@@ -12,8 +12,58 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/fault"
 )
+
+var (
+	_ vlatte.Stage = (*bandwidthSink)(nil)
+	_ vlatte.Stage = bandwidthFailingSink{}
+)
+
+// bandwidthSink logs each write, flush and close it gets, with the time it came, from start.
+type bandwidthSink struct {
+	start time.Time
+	log   []string
+}
+
+func (s *bandwidthSink) Write(b []byte) (int, error) {
+	s.log = append(s.log, string(b)+" at "+time.Since(s.start).String())
+	return len(b), nil
+}
+
+func (s *bandwidthSink) Flush() error {
+	s.log = append(s.log, "flush at "+time.Since(s.start).String())
+	return nil
+}
+
+func (s *bandwidthSink) Close() error {
+	s.log = append(s.log, "close at "+time.Since(s.start).String())
+	return nil
+}
+
+// bandwidthFailingSink is a sink whose writes, or flushes, fail with err, as those to a client that went away do.
+type bandwidthFailingSink struct {
+	err     error
+	writes  bool
+	flushes bool
+}
+
+func (s bandwidthFailingSink) Write(b []byte) (int, error) {
+	if s.writes {
+		return 0, s.err
+	}
+
+	return len(b), nil
+}
+
+func (s bandwidthFailingSink) Flush() error {
+	if s.flushes {
+		return s.err
+	}
+
+	return nil
+}
+
+func (s bandwidthFailingSink) Close() error { return nil }
 
 func TestBandwidth_SendsEachWriteAtTheRate(t *testing.T) {
 	// A slow link, deterministically: each byte comes when the rate lets it, in flushed pieces of a tenth of a second,
@@ -68,8 +118,8 @@ func TestBandwidth_SendsEachWriteAtTheRate(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				sink := &timedSink{start: time.Now()}
-				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.Bandwidth(tc.rate)})
+				sink := &bandwidthSink{start: time.Now()}
+				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{Bandwidth(tc.rate)})
 
 				for _, w := range tc.writes {
 					n, err := flow.Write([]byte(w))
@@ -87,8 +137,8 @@ func TestBandwidth_SendsEachWriteAtTheRate(t *testing.T) {
 func TestBandwidth_APauseDoesntSpeedTheNextWriteUp(t *testing.T) {
 	// The rate holds for each write: an idle second earns no burst, as a link has no store of time unused.
 	synctest.Test(t, func(t *testing.T) {
-		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.Bandwidth(10)})
+		sink := &bandwidthSink{start: time.Now()}
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{Bandwidth(10)})
 
 		_, err := flow.Write([]byte("a"))
 		require.NoError(t, err)
@@ -104,8 +154,8 @@ func TestBandwidth_APauseDoesntSpeedTheNextWriteUp(t *testing.T) {
 func TestBandwidth_PassesFlushesOnAsTheyCome(t *testing.T) {
 	// A flush, such as of a head before its body, isn't slowed: it carries no bytes.
 	synctest.Test(t, func(t *testing.T) {
-		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.Bandwidth(1)})
+		sink := &bandwidthSink{start: time.Now()}
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{Bandwidth(1)})
 
 		require.NoError(t, flow.Flush())
 		require.NoError(t, flow.Close())
@@ -121,16 +171,16 @@ func TestBandwidth_CommonBandwidthsAreInBytesPerSecond(t *testing.T) {
 		bandwidth     int
 		kbitPerSecond int
 	}{
-		{name: "GPRS", bandwidth: fault.BandwidthGPRS, kbitPerSecond: 50},
-		{name: "dial-up", bandwidth: fault.BandwidthDialUp, kbitPerSecond: 56},
-		{name: "2G", bandwidth: fault.Bandwidth2G, kbitPerSecond: 250},
-		{name: "good 2G", bandwidth: fault.BandwidthGood2G, kbitPerSecond: 450},
-		{name: "3G", bandwidth: fault.Bandwidth3G, kbitPerSecond: 750},
-		{name: "good 3G", bandwidth: fault.BandwidthGood3G, kbitPerSecond: 1500},
-		{name: "DSL", bandwidth: fault.BandwidthDSL, kbitPerSecond: 2000},
-		{name: "4G", bandwidth: fault.Bandwidth4G, kbitPerSecond: 4000},
-		{name: "Wi-Fi", bandwidth: fault.BandwidthWiFi, kbitPerSecond: 30000},
-		{name: "fiber", bandwidth: fault.BandwidthFiber, kbitPerSecond: 100000},
+		{name: "GPRS", bandwidth: BandwidthGPRS, kbitPerSecond: 50},
+		{name: "dial-up", bandwidth: BandwidthDialUp, kbitPerSecond: 56},
+		{name: "2G", bandwidth: Bandwidth2G, kbitPerSecond: 250},
+		{name: "good 2G", bandwidth: BandwidthGood2G, kbitPerSecond: 450},
+		{name: "3G", bandwidth: Bandwidth3G, kbitPerSecond: 750},
+		{name: "good 3G", bandwidth: BandwidthGood3G, kbitPerSecond: 1500},
+		{name: "DSL", bandwidth: BandwidthDSL, kbitPerSecond: 2000},
+		{name: "4G", bandwidth: Bandwidth4G, kbitPerSecond: 4000},
+		{name: "Wi-Fi", bandwidth: BandwidthWiFi, kbitPerSecond: 30000},
+		{name: "fiber", bandwidth: BandwidthFiber, kbitPerSecond: 100000},
 	}
 
 	for _, tc := range tests {
@@ -139,7 +189,7 @@ func TestBandwidth_CommonBandwidthsAreInBytesPerSecond(t *testing.T) {
 
 			synctest.Test(t, func(t *testing.T) {
 				start := time.Now()
-				flow := vlatte.NewFlow(t.Context(), failingSink{}, []vlatte.Step{fault.Bandwidth(tc.bandwidth)})
+				flow := vlatte.NewFlow(t.Context(), bandwidthFailingSink{}, []vlatte.Step{Bandwidth(tc.bandwidth)})
 
 				_, err := flow.Write(make([]byte, 2*tc.bandwidth))
 				require.NoError(t, err)
@@ -153,8 +203,8 @@ func TestBandwidth_StopsWhenTheClientLeaves(t *testing.T) {
 	// A client that leaves gets nothing more, and the writer doesn't wait out the rest of the write.
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
-		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(ctx, sink, []vlatte.Step{fault.Bandwidth(10)})
+		sink := &bandwidthSink{start: time.Now()}
+		flow := vlatte.NewFlow(ctx, sink, []vlatte.Step{Bandwidth(10)})
 
 		time.AfterFunc(150*time.Millisecond, cancel)
 
@@ -170,14 +220,14 @@ func TestBandwidth_AClientThatWentAwayEndsIt(t *testing.T) {
 	// A piece the client can't get, or can't be flushed to it, ends the write at once: the rest has nowhere to go.
 	errGone := errors.New("client: gone")
 
-	for name, sink := range map[string]failingSink{
+	for name, sink := range map[string]bandwidthFailingSink{
 		"a write": {err: errGone, writes: true},
 		"a flush": {err: errGone, flushes: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				start := time.Now()
-				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.Bandwidth(10)})
+				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{Bandwidth(10)})
 
 				_, err := flow.Write([]byte("abc"))
 				require.ErrorIs(t, err, errGone)
@@ -189,8 +239,8 @@ func TestBandwidth_AClientThatWentAwayEndsIt(t *testing.T) {
 
 func TestBandwidth_RefusesNoRate(t *testing.T) {
 	// A link that sends nothing is a mistake of the mock, not a slow link: it fails as the mock is built.
-	require.PanicsWithValue(t, "fault: bandwidth needs a byte per second at least, not 0", func() { fault.Bandwidth(0) })
-	require.PanicsWithValue(t, "fault: bandwidth needs a byte per second at least, not -1", func() { fault.Bandwidth(-1) })
+	require.PanicsWithValue(t, "fault: bandwidth needs a byte per second at least, not 0", func() { Bandwidth(0) })
+	require.PanicsWithValue(t, "fault: bandwidth needs a byte per second at least, not -1", func() { Bandwidth(-1) })
 }
 
 func TestBandwidth_AHugeWriteStaysPaced(t *testing.T) {
@@ -203,14 +253,14 @@ func TestBandwidth_AHugeWriteStaysPaced(t *testing.T) {
 		want time.Duration
 	}{
 		{name: "a small write", n: 25, rate: 100, want: 250 * time.Millisecond},
-		{name: "past what n·1s holds", n: 9_223_372_037, rate: fault.BandwidthFiber, want: 737_869_762_960 * time.Nanosecond},
+		{name: "past what n·1s holds", n: 9_223_372_037, rate: BandwidthFiber, want: 737_869_762_960 * time.Nanosecond},
 		{name: "a rate past what 1s·rate holds", n: 1, rate: math.MaxInt64, want: 0},
 		{name: "longer than a duration holds", n: math.MaxInt64, rate: 1, want: math.MaxInt64},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, fault.SendTime(tc.n, tc.rate))
+			require.Equal(t, tc.want, sendTime(tc.n, tc.rate))
 		})
 	}
 }
