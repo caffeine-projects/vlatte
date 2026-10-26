@@ -1,14 +1,18 @@
 package handler_test
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
@@ -136,4 +140,20 @@ func connectInMemory(t *testing.T, s *mcp.Server) *mcp.ClientSession {
 	})
 
 	return cs
+}
+
+func TestAddTool_LogsTheErrorsTheAgentCantFix(t *testing.T) {
+	// An internal error, such as a store that is down, is the server's to fix: it reaches the server's log, as a
+	// request's does, and not only the agent.
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs)
+	store := &brokenStore{MemoryStore: new(vlatte.MemoryStore[*fakeMock]), pickAllErr: errors.New("store: down")}
+	cs := connect(t, store, adminapi.Capabilities{Logger: &logger})
+
+	callFails(t, cs, "list_mocks", nil, http.StatusInternalServerError, "internal")
+	require.JSONEq(t, `{"level": "error", "code": "internal", "tool": "list_mocks", "message": "admin: store: down"}`, logs.String())
+
+	logs.Reset()
+	callFails(t, cs, "get_mock", map[string]any{"id": "missing"}, http.StatusNotFound, "mock_not_found")
+	require.Empty(t, logs.String(), "the agent fixes what it asked for")
 }

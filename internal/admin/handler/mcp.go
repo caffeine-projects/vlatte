@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rs/zerolog"
 )
 
 // _mcpDone is the text of a tool whose operation answers nothing, as its route answers 204.
@@ -103,7 +104,7 @@ func addTool[In any](s *mcp.Server, tool *mcp.Tool, run func(ctx context.Context
 	mcp.AddTool(s, tool, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
 		out, err := run(ctx, in)
 		if err != nil {
-			return problemResult(err, tool.Name), nil, nil
+			return problemResult(ctx, err, tool.Name), nil, nil
 		}
 
 		if out == nil {
@@ -113,7 +114,7 @@ func addTool[In any](s *mcp.Server, tool *mcp.Tool, run func(ctx context.Context
 		body, ok := out.(jsontext.Value)
 		if !ok {
 			if body, err = encode(out, _formatJSON); err != nil {
-				return problemResult(err, tool.Name), nil, nil
+				return problemResult(ctx, err, tool.Name), nil, nil
 			}
 		}
 
@@ -121,9 +122,15 @@ func addTool[In any](s *mcp.Server, tool *mcp.Tool, run func(ctx context.Context
 	})
 }
 
-// problemResult is the result of the tool name that failed with err: its problem document.
-func problemResult(err error, name string) *mcp.CallToolResult {
-	body, encodeErr := encode(Problem(err, name), _formatJSON)
+// problemResult is the result of the tool name that failed with err: its problem document. Internal errors are logged,
+// with the logger of ctx: the agent can't fix them.
+func problemResult(ctx context.Context, err error, name string) *mcp.CallToolResult {
+	p := problemOf(err)
+	if p.status >= http.StatusInternalServerError {
+		zerolog.Ctx(ctx).Error().Str("code", p.code).Str("tool", name).Msg("admin: " + p.detail)
+	}
+
+	body, encodeErr := encode(p.document(name), _formatJSON)
 	if encodeErr != nil {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}, IsError: true}
 	}
