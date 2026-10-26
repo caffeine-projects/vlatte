@@ -159,7 +159,7 @@ func describeMatchers(matchers []namedMatcher) map[string]any {
 	return out
 }
 
-// describeMatcher returns the matcher list of m, as filterbuilder reads it.
+// describeMatcher returns the matcher list of m, as matchbuild reads it.
 func describeMatcher(m vlatte.Matcher) (any, bool) {
 	if m == nil {
 		return nil, false

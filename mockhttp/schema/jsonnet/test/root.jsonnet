@@ -25,6 +25,7 @@ vlatte.mock([
     req.form('title', m.eq('Holiday')),
     req.forms('tag', ['len', 2]),
     req.formFile('photo', { filename: m.eq('a.png'), content_type: 'image/png' }),
+    req.custom([['body-too-long', 2048], 'is-admin']),
   ]),
   vlatte.response([
     res.ok(),

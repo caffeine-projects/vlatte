@@ -11,6 +11,7 @@ ignore (
 tool mvdan.cc/gofumpt
 
 require (
+	github.com/antchfx/xpath v1.3.9
 	github.com/google/go-jsonnet v0.22.0
 	github.com/mailgun/raymond/v2 v2.0.48
 	github.com/mattn/go-colorable v0.1.16

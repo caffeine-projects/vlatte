@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 var _ vlatte.Store[*Mock] = (*docsStore)(nil)
@@ -593,4 +594,46 @@ func TestFileStore_AStaleDeleteLeavesTheNewerMock(t *testing.T) {
 			require.Equal(t, "newer", string(body), "its file stays")
 		})
 	}
+}
+
+func TestFileStore_KeepsAMockOfACustomMatcher(t *testing.T) {
+	// The store writes a mock as its description and builds it back: a custom matcher, inside a built-in one, describes
+	// itself as its spec, so the mock is stored, and serves the same after a restart.
+	dir := t.TempDir()
+	setup := func() *ConfigBuilder {
+		return Setup().AdminStore(FileStore(dir)).
+			Matchers(matchbuild.MustNew(matchbuild.WithMatcher("longer-than", longerThan)))
+	}
+
+	m := adminServer(t, setup())
+	addMock(t, m, `{"id": "short", "request": {"method": "POST", "body": ["not", ["longer-than", 3]]}, "response": {"status": 200}}`)
+	m.Close()
+
+	m = adminServer(t, setup())
+
+	res, _ := do(t, http.MethodPost, m.URL(), nil, []byte("abc"))
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	res, _ = do(t, http.MethodPost, m.URL(), nil, []byte("abcd"))
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+}
+
+func TestFileStore_KeepsAMockOfACustomRequestMatcher(t *testing.T) {
+	dir := t.TempDir()
+	setup := func() *ConfigBuilder {
+		return Setup().AdminStore(FileStore(dir)).
+			Matchers(matchbuild.MustNew(matchbuild.WithMatcher("has-header", hasHeader)))
+	}
+
+	m := adminServer(t, setup())
+	addMock(t, m, `{"id": "admin", "request": {"method": "GET", "custom": [["has-header", "X-Admin"]]}, "response": {"status": 200}}`)
+	m.Close()
+
+	m = adminServer(t, setup())
+
+	res, _ := do(t, http.MethodGet, m.URL(), http.Header{"X-Admin": {"1"}}, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	res, _ = do(t, http.MethodGet, m.URL(), nil, nil)
+	require.Equal(t, StatusNoMatch, res.StatusCode)
 }

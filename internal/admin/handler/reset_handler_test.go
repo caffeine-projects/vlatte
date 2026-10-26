@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
@@ -94,12 +95,38 @@ func TestReset_FilesThatFailToLoad(t *testing.T) {
 	require.Equal(t, map[string]string{"checkout": "paid"}, scenarios.Scenarios())
 }
 
+func TestReset_AStoreThatFailsAfterTheReload(t *testing.T) {
+	// A store that can't list the mocks the reload left is the server's problem: the answer is a 500 that says why, and
+	// the reset stops there, before it removes the admin API's mocks or starts the scenarios over.
+	added := newFake("added")
+	added.origin = handler.Origin
+	store := &brokenStore{MemoryStore: new(vlatte.MemoryStore[*fakeMock])}
+	require.NoError(t, store.Store(t.Context(), added))
+	scenarios := mfeat.NewScenarioStore()
+	scenarios.SetScenario("checkout", "paid")
+
+	files := &fakeFiles{onReload: func() { store.pickAllErr = errors.New("store: broken") }}
+	url := serve(t, store, admin.Files(files), admin.Scenarios(scenarios))
+
+	res, body := send(t, request{method: http.MethodPost, url: url + "/reset"})
+
+	doc := problem(t, res, body, http.StatusInternalServerError, "internal")
+	require.Equal(t, "store: broken", doc["detail"])
+	require.Equal(t, 1, files.reloads)
+
+	all, err := store.MemoryStore.PickAll(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []*fakeMock{added}, all)
+	require.Zero(t, added.closed.Load())
+	require.Equal(t, map[string]string{"checkout": "paid"}, scenarios.Scenarios())
+}
+
 func TestReset_AJournalThatFailsToClear(t *testing.T) {
 	// A reset that can't clear the journal says so, and why: a test that went on would verify against the requests of
 	// the test before.
 	j := journalOf(t)
 	require.NoError(t, j.Close())
-	url := serve(t, newStore(t), admin.Journal(j, nil))
+	url := serve(t, newStore(t), admin.Journal(j, nil, nil))
 
 	res, body := send(t, request{method: http.MethodPost, url: url + "/reset"})
 

@@ -154,6 +154,7 @@ response:
 | `mockhttp` | HTTP mock servers |
 | `mockgrpc` | gRPC mock servers |
 | `match` | Request matchers, such as `match.Equal`, `match.JSONPath` and `match.All` |
+| `match/matchbuild` | The matcher lists of mock files, and the registry of custom matchers |
 | `webhook` | Calling a URL after a mock is served |
 | `recipe/<protocol>/<recipe>` | Recipes that prepare a server, such as `recipe/http/proxyall` |
 | `vlatte` | The types every mock server shares, and the Go template engine |
@@ -220,6 +221,78 @@ response:
 **Many values.** `query`, `header` and `form` read the first value of a name. `queries`, `headers` and `forms` (`Queries`, `Headers` and `FormFields` in Go) read every value, as a list, so they take matcher lists, such as `[contains, a]`, `[itemsMatch, [a, b]]` or `[len, 2]`: they refuse text, which never equals a list. A name the request doesn't have is an empty list, which `[not, present]` matches, and a header sent empty isn't. A header line such as `a, b` is one value.
 
 **More of the request.** `cookie` matches cookies by name, as `Cookie` does; a cookie the request doesn't have is null, which no text matches. `basic_auth: {username: jeff, password: s3cret}` matches Basic credentials, as `BasicAuth` does, and `BasicAuthMatches` takes matchers; without credentials, the username and password are null, which no text matches. `host` matches the host the request names, without its port, and text ignores case: `Host` in Go. `client_ip` matches the client's address, as the server's connection has it, not `X-Forwarded-For`: `ClientIP` in Go.
+
+**JSON bodies.** `[eqj, {...}]` matches JSON equal to the document given, in full. An object of options after it loosens that: `ignore_array_order: true` pairs list items up in any order, and `ignore_extra_elements: true` ignores members and list items the stub doesn't name. `[jsonschema, schema]` matches JSON that conforms to a JSON Schema, an object or JSON text, of draft 2020-12 unless `$schema` or `{draft: 7}` says otherwise; it loads no `$ref` outside the schema. In Go: `EqualJSON(doc, IgnoreArrayOrder(), IgnoreExtraElements())` and `JSONSchema(text, SchemaDraft(JSONSchemaDraft7))`.
+
+```yaml
+request:
+  method: POST
+  path: /pets
+  body: [all, [
+    [eqj, {name: Rex, tags: [a, b]}, {ignore_array_order: true, ignore_extra_elements: true}],
+    [jsonpath, $.id, [regex, '^[0-9]+$']]
+  ]]
+```
+
+**XML bodies.** `[eqx, '<order id="7"><item>1</item></order>']` matches an equal XML document, by what it means: attributes in any order, text trimmed, comments and indentation left out, names compared by namespace URI. Options: `ignore_child_order: true`, and `namespaces: strict` to compare prefixes too, or `none` to read no namespaces. `[xpath, expression, matcher]` applies the matcher to what an XPath 1.0 expression selects: nothing is null, one result is itself, more are a list, so `[some, m]` matches any of them; an element is its XML. `{namespaces: {t: "urn:todo"}}` binds a prefix of the expression. In Go: `EqualXML`, `IgnoreChildOrder`, `XMLNamespaces`, `XPath` and `XPathNamespace`.
+
+**Dates and times.** `[before, x]`, `[after, x]` and `[equalDateTime, x]` (`eqdt`) compare a date and time in RFC 3339, in ISO 8601 without a zone, or in an HTTP format. `x` is one of those, or `now`, and either may end with an offset: `"now +3 days"`, `"2026-01-01T00:00:00Z -2 weeks"`. Options: `truncate_expected` and `truncate_actual`, each one of `first minute of hour`, `first hour of day`, `first day of month`, `first day of next month`, `last day of month`, `first day of year`, `first day of next year` and `last day of year`; `truncate_last: true` to offset first; `actual_format` with a Go layout, such as `02/01/2006`; `local_time: true` to compare wall clocks. An `x` without a zone is local, as with `local_time`; a request's date and time without a zone, against an `x` with one, is read in the server's zone. In Go: `Before`, `After`, `EqualDateTime`, `BeforeNow`, `AfterNow` and `EqualDateTimeNow`, with typed options such as `ExpectedOffset(3, match.Days)`.
+
+```yaml
+request:
+  header:
+    X-Date: [after, "now -1 hours"]
+  query:
+    until: [before, "now +15 days", {truncate_expected: first day of month}]
+```
+
+**Lists of matchers.** `[hasExactly, [[equal, "1"], [contains, "2"]]]` matches a list of as many values as matchers, each value matched by a matcher of its own, in any order. In Go, `ItemsMatch` takes matchers as items.
+
+**Custom matchers.** A server reads mock files with its registry of matchers: the built-in ones, and the custom ones you give it. A custom matcher is built from its arguments when the mock loads, and its name works anywhere a matcher list does, in mock files, admin API mocks and request journal queries. `request.custom` lists matchers of the whole request: each gets the `*http.Request` (`Builder.Matches` in Go). A registry belongs to the servers you give it to; servers can share one.
+
+```go
+registry := matchbuild.MustNew(matchbuild.WithMatcher("body-too-long",
+	func(_ *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
+		if len(args) != 1 {
+			return nil, errors.New("takes a length")
+		}
+
+		limit, ok := args[0].(int64)
+		if !ok {
+			return nil, errors.New("takes a length")
+		}
+
+		return match.Function(func(v any) (bool, error) {
+			r, ok := v.(*http.Request)
+			return ok && r.ContentLength > limit, nil
+		}), nil
+	}))
+
+m := mockhttp.MustNew(mockhttp.Setup().Matchers(registry))
+```
+
+```yaml
+request:
+  custom: [[body-too-long, 2048]]
+response:
+  status: 413
+```
+
+**From WireMock.** WireMock's matchers, and what vlatte writes for each:
+
+| WireMock | vlatte |
+|---|---|
+| `equalTo`, `caseInsensitive`, `contains`, `matches` | `equal`, `eqi`, `contains`, `regex` |
+| `doesNotContain`, `doesNotMatch`, `absent` | `[not, [contains, x]]`, `[not, [regex, x]]`, `[not, present]` |
+| `equalToNumber`, `greaterThanNumber`, and the rest | `equal`, `gt`, `gte`, `lt`, `lte` |
+| `and`, `or`, `not` | `all`, `any`, `not` |
+| `matchesJsonPath` | `haskey`, `jsonpath` |
+| `equalToJson`, its placeholders | `eqj` with options; `[all, [eqj, ...], [jsonpath, $.id, ...]]` |
+| `matchesJsonSchema` | `jsonschema` |
+| `equalToXml`, `matchesXPath` | `eqx`, `xpath` |
+| `before`, `after`, `equalToDateTime` | `before`, `after`, `eqdt` |
+| `hasExactly`, `includes` | `hasExactly`, `[all, [some, m1], [some, m2]]` |
+| `customMatcher` | `request.custom` and a registry of custom matchers |
 
 **Proxy replies.** A `proxy` reply (`From` in Go) answers with what its target answers: see [Proxying](#proxying).
 

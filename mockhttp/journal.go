@@ -279,10 +279,11 @@ func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (journal.Fil
 }
 
 // readsBody reports whether a matcher of scope reads the body of a request: one of the body or of a form does, and so
-// may a predicate of the whole request, RequestMatches.
+// may a matcher of the whole request, of RequestMatches or Matches.
 func readsBody(scope matchingScope) bool {
 	switch scope {
-	case matchingScopeBody, matchingScopeFormField, matchingScopeFormFields, matchingScopeFormFile, matchingScopeNone:
+	case matchingScopeBody, matchingScopeFormField, matchingScopeFormFields, matchingScopeFormFile, matchingScopeNone,
+		matchingScopeCustom:
 		return true
 	}
 
@@ -292,7 +293,7 @@ func readsBody(scope matchingScope) bool {
 // adminRequestPattern returns the filter of the request part of a mock file, v, the request key of a query of the
 // admin API: its keys are a mock file's, and it matches as a mock does. An empty one matches every request.
 func (app *Server) adminRequestPattern(v config.Value) (journal.Filter, error) {
-	def := newMockDef()
+	def := newMockDef(app.matchers())
 	doc := config.Value{Origin: v.Origin, Any: map[string]any{"request": v.Any}}
 
 	problems := config.ProblemsOf(doc, _mockSchema.Decode(&def, doc))

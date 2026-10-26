@@ -14,8 +14,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
-	"github.com/caffeine-projects/vlatte/internal/filterbuilder"
 	"github.com/caffeine-projects/vlatte/internal/mockid"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 // The gRPC mock file format is declared here, one table per object of a mock file. The tables decode a document
@@ -214,7 +214,7 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "body")
 
-			m, err := filterbuilder.MatcherOf(v)
+			m, err := matcherOf(v)
 			d.request.body = m
 
 			return err
@@ -379,7 +379,7 @@ var _ruleSchema = config.NewSchema(
 	ruleField{
 		Key: "when", Kind: config.Any, Usage: "Matcher list of the message as JSON text, such as [field, message, [equal, hi]].",
 		Set: func(r *ruleDef, v config.Value) error {
-			m, err := filterbuilder.MatcherOf(v)
+			m, err := matcherOf(v)
 			r.when = m
 
 			return err
@@ -728,10 +728,29 @@ func headerValues(v config.Value, dst *[]headerValue) error {
 	})
 }
 
+// _builtinMatchers builds the matcher lists of mock files.
+var _builtinMatchers = matchbuild.MustNew()
+
+// matcherOf returns the matcher of v, a value of a mock file: text matches equal text, and a list is a matcher spec.
+func matcherOf(v config.Value) (vlatte.Matcher, error) {
+	switch x := v.Any.(type) {
+	case string:
+		return _builtinMatchers.TryBuildMatcher(x)
+	case []any:
+		if len(x) == 0 {
+			return nil, config.Invalid(v, v.Key+" is an empty list", "name a matcher, such as [equal, x]")
+		}
+
+		return _builtinMatchers.TryBuildMatcher(x)
+	default:
+		return nil, config.Mismatch(v, "a string or a matcher list, such as [equal, x]", config.String)
+	}
+}
+
 // matchEach decodes an object of matcher values, by name, into Builder calls in name order.
 func matchEach(v config.Value, dst *[]func(*Builder), add func(b *Builder, name string, m vlatte.Matcher)) error {
 	return config.Members(v, func(name string, member config.Value) error {
-		m, err := filterbuilder.MatcherOf(member)
+		m, err := matcherOf(member)
 		if err != nil {
 			return err
 		}

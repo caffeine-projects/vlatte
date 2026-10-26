@@ -16,9 +16,9 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
-	"github.com/caffeine-projects/vlatte/internal/filterbuilder"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 // The mock file format is declared here, one table per object of a mock file. The tables decode a document
@@ -66,6 +66,7 @@ type scenarioDef struct {
 
 // requestDef holds the request matchers, as Builder calls, and the keys that set them.
 type requestDef struct {
+	matchers  *matchbuild.Registry // builds the matcher lists: the server's
 	keys      []string
 	scheme    func(*Builder)
 	method    func(*Builder)
@@ -83,6 +84,7 @@ type requestDef struct {
 	forms     []func(*Builder)
 	formFile  []func(*Builder)
 	body      func(*Builder)
+	custom    []func(*Builder)
 
 	pathTemplate   *pathTemplate // the parsed path_template, which adds to the matcher of url, url_match or path
 	pathParams     []func(*Builder)
@@ -91,12 +93,14 @@ type requestDef struct {
 
 // basicAuthDef is a decoded request.basic_auth: the matchers of its username and password.
 type basicAuthDef struct {
+	matchers *matchbuild.Registry
 	username vlatte.Matcher
 	password vlatte.Matcher
 }
 
 // filePatternDef is a decoded form_file pattern.
 type filePatternDef struct {
+	matchers *matchbuild.Registry
 	pattern  *FilePattern
 	hasBody  bool
 	bodyFile string
@@ -205,7 +209,7 @@ var _mockSchema = config.NewSchema(
 		Key: "request.scheme", Kind: config.Any, Usage: "Scheme to match: text, or a matcher list.",
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "scheme")
-			return matchText(v, func(s string) { d.request.scheme = func(b *Builder) { b.Scheme(s) } },
+			return matchText(d.request.matchers, v, func(s string) { d.request.scheme = func(b *Builder) { b.Scheme(s) } },
 				func(m vlatte.Matcher) { d.request.scheme = func(b *Builder) { b.SchemeMatches(m) } })
 		},
 	},
@@ -233,7 +237,7 @@ var _mockSchema = config.NewSchema(
 				}
 			}
 
-			m, err := filterbuilder.MatcherOf(v)
+			m, err := matcherOf(d.request.matchers, v)
 			if err != nil {
 				return err
 			}
@@ -259,7 +263,7 @@ var _mockSchema = config.NewSchema(
 			d.request.keys = append(d.request.keys, "path")
 			d.request.url = withURL(d.request.url)
 
-			return matchText(v, func(s string) { d.request.url["path"] = func(b *Builder) { b.URL(match.URLPath(s)) } },
+			return matchText(d.request.matchers, v, func(s string) { d.request.url["path"] = func(b *Builder) { b.URL(match.URLPath(s)) } },
 				func(m vlatte.Matcher) { d.request.url["path"] = func(b *Builder) { b.URLPath(m) } })
 		},
 	},
@@ -276,7 +280,7 @@ var _mockSchema = config.NewSchema(
 				d.request.pathParamNames = slices.Sorted(maps.Keys(obj))
 			}
 
-			return matchEach(v, &d.request.pathParams, func(b *Builder, name string, m vlatte.Matcher) { b.PathParam(name, m) })
+			return matchEach(d.request.matchers, v, &d.request.pathParams, func(b *Builder, name string, m vlatte.Matcher) { b.PathParam(name, m) })
 		},
 	},
 	mockField{
@@ -285,7 +289,7 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "fragment")
 
-			return matchText(v, func(s string) { d.request.fragment = func(b *Builder) { b.URLFragment(match.GlobMatch(s)) } },
+			return matchText(d.request.matchers, v, func(s string) { d.request.fragment = func(b *Builder) { b.URLFragment(match.GlobMatch(s)) } },
 				func(m vlatte.Matcher) { d.request.fragment = func(b *Builder) { b.URLFragment(m) } })
 		},
 	},
@@ -293,14 +297,14 @@ var _mockSchema = config.NewSchema(
 		Key: "request.query", Kind: config.Any, Usage: "Query parameters to match, by name: text or a matcher list each.",
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "query")
-			return matchEach(v, &d.request.query, func(b *Builder, name string, m vlatte.Matcher) { b.Query(name, m) })
+			return matchEach(d.request.matchers, v, &d.request.query, func(b *Builder, name string, m vlatte.Matcher) { b.Query(name, m) })
 		},
 	},
 	mockField{
 		Key: "request.queries", Kind: config.Any, Usage: "Query parameters with many values to match, by name: every value, as a list.",
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "queries")
-			return matchLists(v, &d.request.queries, func(b *Builder, name string, m vlatte.Matcher) { b.Queries(name, m) })
+			return matchLists(d.request.matchers, v, &d.request.queries, func(b *Builder, name string, m vlatte.Matcher) { b.Queries(name, m) })
 		},
 	},
 	mockField{
@@ -311,7 +315,7 @@ var _mockSchema = config.NewSchema(
 				return err
 			}
 
-			return matchEach(v, &d.request.header, func(b *Builder, name string, m vlatte.Matcher) { b.Header(name, m) })
+			return matchEach(d.request.matchers, v, &d.request.header, func(b *Builder, name string, m vlatte.Matcher) { b.Header(name, m) })
 		},
 	},
 	mockField{
@@ -322,14 +326,14 @@ var _mockSchema = config.NewSchema(
 				return err
 			}
 
-			return matchLists(v, &d.request.headers, func(b *Builder, name string, m vlatte.Matcher) { b.Headers(name, m) })
+			return matchLists(d.request.matchers, v, &d.request.headers, func(b *Builder, name string, m vlatte.Matcher) { b.Headers(name, m) })
 		},
 	},
 	mockField{
 		Key: "request.cookie", Kind: config.Any, Usage: "Cookies to match, by name, which keeps its case: text or a matcher list each.",
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "cookie")
-			return matchEach(v, &d.request.cookie, func(b *Builder, name string, m vlatte.Matcher) { b.Cookie(name, m) })
+			return matchEach(d.request.matchers, v, &d.request.cookie, func(b *Builder, name string, m vlatte.Matcher) { b.Cookie(name, m) })
 		},
 	},
 	mockField{
@@ -337,7 +341,7 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "basic_auth")
 
-			var auth basicAuthDef
+			auth := basicAuthDef{matchers: d.request.matchers}
 
 			err := _basicAuthSchema.Decode(&auth, v)
 			err = withRequired(err, auth.username != nil, v, "username")
@@ -355,14 +359,14 @@ var _mockSchema = config.NewSchema(
 		Key: "request.form", Kind: config.Any, Usage: "Fields of a urlencoded or multipart form body to match, by name: text or a matcher list each.",
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "form")
-			return matchEach(v, &d.request.form, func(b *Builder, name string, m vlatte.Matcher) { b.FormField(name, m) })
+			return matchEach(d.request.matchers, v, &d.request.form, func(b *Builder, name string, m vlatte.Matcher) { b.FormField(name, m) })
 		},
 	},
 	mockField{
 		Key: "request.forms", Kind: config.Any, Usage: "Fields of a form body with many values to match, by name: every value, as a list.",
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "forms")
-			return matchLists(v, &d.request.forms, func(b *Builder, name string, m vlatte.Matcher) { b.FormFields(name, m) })
+			return matchLists(d.request.matchers, v, &d.request.forms, func(b *Builder, name string, m vlatte.Matcher) { b.FormFields(name, m) })
 		},
 	},
 	mockField{
@@ -378,7 +382,7 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "body")
 
-			m, err := filterbuilder.MatcherOf(v)
+			m, err := matcherOf(d.request.matchers, v)
 			if err != nil {
 				return err
 			}
@@ -386,6 +390,29 @@ var _mockSchema = config.NewSchema(
 			d.request.body = func(b *Builder) { b.Body(m) }
 
 			return nil
+		},
+	},
+	mockField{
+		Key: "request.custom", Kind: config.Any,
+		Usage: "Matchers of the whole request, such as custom ones of the server: a list of matcher lists, or names.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.request.keys = append(d.request.keys, "custom")
+			return config.Items(v, func(item config.Value) error {
+				switch item.Any.(type) {
+				case string, []any:
+				default:
+					return config.Mismatch(item, "a matcher list, such as [is-admin], or a matcher's name", config.String)
+				}
+
+				m, err := d.request.matchers.BuildMatcher(item.Any)
+				if err != nil {
+					return err
+				}
+
+				d.request.custom = append(d.request.custom, func(b *Builder) { b.Matches(m) })
+
+				return nil
+			})
 		},
 	},
 	mockField{
@@ -444,12 +471,14 @@ var _mockSchema = config.NewSchema(
 var _filePatternSchema = config.NewSchema(
 	filePatternField{
 		Key: "filename", Kind: config.Any, Usage: "File name to match, as Go reads it: its base. Text or a matcher list.",
-		Set: func(d *filePatternDef, v config.Value) error { return withMatcher(v, d.pattern.Filename) },
+		Set: func(d *filePatternDef, v config.Value) error { return withMatcher(d.matchers, v, d.pattern.Filename) },
 	},
 	filePatternField{
 		Key: "content_type", Kind: config.Any,
 		Usage: "Media type to match: in lower case, without parameters, or empty when absent. Text or a matcher list.",
-		Set:   func(d *filePatternDef, v config.Value) error { return withMatcher(v, d.pattern.ContentType) },
+		Set: func(d *filePatternDef, v config.Value) error {
+			return withMatcher(d.matchers, v, d.pattern.ContentType)
+		},
 	},
 	filePatternField{
 		Key: "header", Kind: config.Any, Usage: "Headers of the file's part to match, by name: text or a matcher list each.",
@@ -459,7 +488,7 @@ var _filePatternSchema = config.NewSchema(
 			}
 
 			return config.Members(v, func(name string, member config.Value) error {
-				return withMatcher(member, func(m vlatte.Matcher) *FilePattern { return d.pattern.Header(name, m) })
+				return withMatcher(d.matchers, member, func(m vlatte.Matcher) *FilePattern { return d.pattern.Header(name, m) })
 			})
 		},
 	},
@@ -467,7 +496,7 @@ var _filePatternSchema = config.NewSchema(
 		Key: "body", Kind: config.Any, Usage: "Content to match, as text: text or a matcher list.",
 		Set: func(d *filePatternDef, v config.Value) error {
 			d.hasBody = true
-			return withMatcher(v, func(m vlatte.Matcher) *FilePattern { return d.pattern.Body(m) })
+			return withMatcher(d.matchers, v, func(m vlatte.Matcher) *FilePattern { return d.pattern.Body(m) })
 		},
 	},
 	filePatternField{
@@ -499,7 +528,7 @@ var _basicAuthSchema = config.NewSchema(
 	basicAuthField{
 		Key: "username", Kind: config.Any, Usage: "Username to match: text or a matcher list.",
 		Set: func(a *basicAuthDef, v config.Value) error {
-			m, err := filterbuilder.MatcherOf(v)
+			m, err := matcherOf(a.matchers, v)
 			a.username = m
 
 			return err
@@ -508,7 +537,7 @@ var _basicAuthSchema = config.NewSchema(
 	basicAuthField{
 		Key: "password", Kind: config.Any, Usage: "Password to match: text or a matcher list.",
 		Set: func(a *basicAuthDef, v config.Value) error {
-			m, err := filterbuilder.MatcherOf(v)
+			m, err := matcherOf(a.matchers, v)
 			a.password = m
 
 			return err
@@ -688,8 +717,12 @@ var _eventSchema = config.NewSchema(
 	},
 )
 
-func newMockDef() mockDef {
-	return mockDef{enabled: true}
+// _builtinMatchers builds the matcher lists of a server that has no registry of its own.
+var _builtinMatchers = matchbuild.MustNew()
+
+// newMockDef returns an empty mockDef whose matcher lists matchers builds.
+func newMockDef(matchers *matchbuild.Registry) mockDef {
+	return mockDef{enabled: true, request: requestDef{matchers: matchers}}
 }
 
 func newReplyDef() *replyDef {
@@ -906,7 +939,7 @@ func decodeFormFiles(d *mockDef, v config.Value) error {
 
 // decodeFilePattern decodes a pattern of the files of field, and reads its body_file.
 func decodeFilePattern(d *mockDef, field string, v config.Value) error {
-	def := filePatternDef{pattern: FileWith()}
+	def := filePatternDef{matchers: d.request.matchers, pattern: FileWith()}
 
 	err := _filePatternSchema.Decode(&def, v)
 	if def.hasBody && def.bodyFile != "" {
@@ -945,8 +978,8 @@ func decodeFilePattern(d *mockDef, field string, v config.Value) error {
 }
 
 // withMatcher calls set with the matcher of a value: text, compared as is, or a matcher list.
-func withMatcher(v config.Value, set func(vlatte.Matcher) *FilePattern) error {
-	m, err := filterbuilder.MatcherOf(v)
+func withMatcher(matchers *matchbuild.Registry, v config.Value, set func(vlatte.Matcher) *FilePattern) error {
+	m, err := matcherOf(matchers, v)
 	if err != nil {
 		return err
 	}
@@ -1042,14 +1075,31 @@ func sameHeader(v config.Value) error {
 	return nil
 }
 
+// matcherOf returns the matcher of v, a value of a mock file, that r builds: text matches equal text, and a list is a
+// matcher spec.
+func matcherOf(r *matchbuild.Registry, v config.Value) (vlatte.Matcher, error) {
+	switch x := v.Any.(type) {
+	case string:
+		return r.TryBuildMatcher(x)
+	case []any:
+		if len(x) == 0 {
+			return nil, config.Invalid(v, v.Key+" is an empty list", "name a matcher, such as [equal, x]")
+		}
+
+		return r.TryBuildMatcher(x)
+	default:
+		return nil, config.Mismatch(v, "a string or a matcher list, such as [equal, x]", config.String)
+	}
+}
+
 // matchText calls text with a text value, or matcher with the matcher of a matcher list.
-func matchText(v config.Value, text func(string), matcher func(vlatte.Matcher)) error {
+func matchText(matchers *matchbuild.Registry, v config.Value, text func(string), matcher func(vlatte.Matcher)) error {
 	if s, ok := v.Any.(string); ok {
 		text(s)
 		return nil
 	}
 
-	m, err := filterbuilder.MatcherOf(v)
+	m, err := matcherOf(matchers, v)
 	if err != nil {
 		return err
 	}
@@ -1060,9 +1110,9 @@ func matchText(v config.Value, text func(string), matcher func(vlatte.Matcher)) 
 }
 
 // matchEach decodes an object of matcher values, by name, into Builder calls in name order.
-func matchEach(v config.Value, dst *[]func(*Builder), add func(b *Builder, name string, m vlatte.Matcher)) error {
+func matchEach(matchers *matchbuild.Registry, v config.Value, dst *[]func(*Builder), add func(b *Builder, name string, m vlatte.Matcher)) error {
 	return config.Members(v, func(name string, member config.Value) error {
-		m, err := filterbuilder.MatcherOf(member)
+		m, err := matcherOf(matchers, member)
 		if err != nil {
 			return err
 		}
@@ -1075,14 +1125,14 @@ func matchEach(v config.Value, dst *[]func(*Builder), add func(b *Builder, name 
 
 // matchLists is matchEach for queries, headers and forms, whose matchers get every value, as a list: text, which
 // never equals a list, is a problem.
-func matchLists(v config.Value, dst *[]func(*Builder), add func(b *Builder, name string, m vlatte.Matcher)) error {
+func matchLists(matchers *matchbuild.Registry, v config.Value, dst *[]func(*Builder), add func(b *Builder, name string, m vlatte.Matcher)) error {
 	return config.Members(v, func(name string, member config.Value) error {
 		if s, isText := member.Any.(string); isText {
 			return config.Invalid(member, fmt.Sprintf("%s=%q is text, which never equals a list of values", member.Key, s),
 				fmt.Sprintf("write a matcher list, such as [contains, %q]", s))
 		}
 
-		m, err := filterbuilder.MatcherOf(member)
+		m, err := matcherOf(matchers, member)
 		if err != nil {
 			return err
 		}
@@ -1096,7 +1146,7 @@ func matchLists(v config.Value, dst *[]func(*Builder), add func(b *Builder, name
 func setMethod(r *requestDef, v config.Value) error {
 	s, ok := v.Any.(string)
 	if !ok {
-		m, err := filterbuilder.MatcherOf(v)
+		m, err := matcherOf(r.matchers, v)
 		if err != nil {
 			return err
 		}
@@ -1123,7 +1173,7 @@ func setMethod(r *requestDef, v config.Value) error {
 func setHost(r *requestDef, v config.Value) error {
 	s, ok := v.Any.(string)
 	if !ok {
-		m, err := filterbuilder.MatcherOf(v)
+		m, err := matcherOf(r.matchers, v)
 		if err != nil {
 			return err
 		}
@@ -1159,7 +1209,7 @@ func setURL(r *requestDef, v config.Value) error {
 
 	s, ok := v.Any.(string)
 	if !ok {
-		m, err := filterbuilder.MatcherOf(v)
+		m, err := matcherOf(r.matchers, v)
 		if err != nil {
 			return err
 		}
@@ -1178,7 +1228,7 @@ func setURL(r *requestDef, v config.Value) error {
 				"to match the path with a glob, use path; for a literal *, write %2A")
 		}
 
-		m, err := filterbuilder.BuildMatcher([]any{"requesturi", s})
+		m, err := r.matchers.BuildMatcher([]any{"requesturi", s})
 		if err != nil {
 			return config.Invalid(v, fmt.Sprintf("%s=%q is not a URL: %v", v.Key, s, err), "")
 		}
@@ -1315,7 +1365,9 @@ func (r *requestDef) apply(b *Builder) {
 		r.fragment(b)
 	}
 
-	for _, sets := range [][]func(*Builder){r.query, r.queries, r.header, r.headers, r.cookie, r.form, r.forms, r.formFile, r.pathParams} {
+	for _, sets := range [][]func(*Builder){
+		r.query, r.queries, r.header, r.headers, r.cookie, r.form, r.forms, r.formFile, r.pathParams, r.custom,
+	} {
 		for _, set := range sets {
 			set(b)
 		}

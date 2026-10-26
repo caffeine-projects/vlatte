@@ -28,6 +28,10 @@
 // [Truthy] and [Falsy] read bools the way Equal does; nil is neither true nor false. [Len] counts the bytes of text,
 // the items of a list and the members of an object.
 //
+// Some matchers read text as a document: [EqualJSON] and [JSONSchema] as JSON, and [EqualXML] and [XPath] as XML.
+// The date and time matchers, such as [Before], read text as a date and time, and compare instants, or wall clocks
+// with [LocalTime]. Text they can't read doesn't match.
+//
 // A value of a class a matcher doesn't take, such as a number for [HasPrefix] or a missing field for [GreaterThan],
 // doesn't match. It isn't an error: a matcher returns an error only when user code does, as in [Function], since an
 // error stops the search for a mock.

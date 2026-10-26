@@ -4,16 +4,21 @@ import (
 	"bytes"
 	"crypto/tls"
 	json "encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
@@ -402,4 +407,110 @@ func TestMatchers_NoReply_ShouldReturn200ByDefault(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func TestMatchers_WireMockParity(t *testing.T) {
+	// The matchers WireMock has and vlatte lacked, each from a mock file, on a server with a custom matcher. A second
+	// server holds each mock as the admin API's store keeps it, EncodeMock's description: every request must be
+	// answered the same by both, so no matcher is lost on the way.
+	hasHeader := func(_ *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
+		if len(args) != 1 {
+			return nil, errors.New("takes a header name")
+		}
+
+		name, ok := args[0].(string)
+		if !ok {
+			return nil, errors.New("takes a header name")
+		}
+
+		return match.Function(func(v any) (bool, error) {
+			r, isRequest := v.(*http.Request)
+			return isRequest && r.Header.Get(name) != "", nil
+		}), nil
+	}
+
+	setup := func() *mockhttp.ConfigBuilder {
+		return mockhttp.Setup().Silent().Matchers(matchbuild.MustNew(matchbuild.WithMatcher("has-header", hasHeader)))
+	}
+
+	files := mockhttp.MustNew(setup())
+	files.MustStart()
+	t.Cleanup(files.Close)
+
+	stored := mockhttp.MustNew(setup())
+	stored.MustStart()
+	t.Cleanup(stored.Close)
+
+	ids := []string{"json", "schema", "xml", "xpath", "dates", "exactly", "custom"}
+	scope := files.MustMock(
+		mockhttp.FromFile("testdata/matchers/11_equaljson_options.yaml"),
+		mockhttp.FromFile("testdata/matchers/12_jsonschema.yaml"),
+		mockhttp.FromFile("testdata/matchers/13_equalxml.yaml"),
+		mockhttp.FromFile("testdata/matchers/14_xpath.yaml"),
+		mockhttp.FromFile("testdata/matchers/15_dates.yaml"),
+		mockhttp.FromFile("testdata/matchers/16_hasexactly.yaml"),
+		mockhttp.FromFile("testdata/matchers/17_custom.yaml"),
+	)
+
+	for _, id := range ids {
+		doc, err := mockhttp.EncodeMock(scope.Mock(id), "yaml")
+		require.NoError(t, err, id)
+		stored.MustMock(mockhttp.FromBytes(doc, "yaml"))
+	}
+
+	now := time.Now().UTC()
+	todo := `<todo-list xmlns="urn:todo"><todo-item>wash the car</todo-item><todo-item>walk the dog</todo-item></todo-list>`
+
+	tests := []struct {
+		name   string
+		method string
+		target string
+		header http.Header
+		body   string
+		want   int
+	}{
+		{"json: any order, extra elements", http.MethodPost, "/json", nil, `{"tags": ["c", "b", "a"], "name": "Rex", "age": 3}`, http.StatusOK},
+		{"json: a missing item", http.MethodPost, "/json", nil, `{"tags": ["b"], "name": "Rex"}`, mockhttp.StatusNoMatch},
+		{"schema: conforms", http.MethodPost, "/schema", nil, `{"name": "Rex", "age": 3}`, http.StatusOK},
+		{"schema: doesn't", http.MethodPost, "/schema", nil, `{"name": "Rex", "age": -3}`, mockhttp.StatusNoMatch},
+		{"xml: children in any order", http.MethodPost, "/xml", nil, "<order id=\"7\">\n  <item>2</item>\n  <item>1</item>\n</order>", http.StatusOK},
+		{"xml: another attribute", http.MethodPost, "/xml", nil, `<order id="8"><item>1</item><item>2</item></order>`, mockhttp.StatusNoMatch},
+		{"xpath: in the namespace", http.MethodPost, "/xpath", nil, todo, http.StatusOK},
+		{"xpath: another namespace", http.MethodPost, "/xpath", nil, strings.ReplaceAll(todo, "urn:todo", "urn:other"), mockhttp.StatusNoMatch},
+		{
+			"dates: within the range", http.MethodGet, "/dates?until=" + url.QueryEscape(now.Add(72*time.Hour).Format(time.RFC3339)),
+			http.Header{"X-Date": {now.Format(http.TimeFormat)}},
+			"", http.StatusOK,
+		},
+		{
+			"dates: too old", http.MethodGet, "/dates?until=" + url.QueryEscape(now.Add(72*time.Hour).Format(time.RFC3339)),
+			http.Header{"X-Date": {now.Add(-2 * time.Hour).Format(http.TimeFormat)}},
+			"", mockhttp.StatusNoMatch,
+		},
+		{
+			"dates: too late", http.MethodGet, "/dates?until=" + url.QueryEscape(now.Add(240*time.Hour).Format(time.RFC3339)),
+			http.Header{"X-Date": {now.Format(http.TimeFormat)}},
+			"", mockhttp.StatusNoMatch,
+		},
+		{"exactly: each value its matcher", http.MethodGet, "/exactly?id=20&id=1", nil, "", http.StatusOK},
+		{"exactly: one too many", http.MethodGet, "/exactly?id=20&id=1&id=3", nil, "", mockhttp.StatusNoMatch},
+		{"custom: the header", http.MethodGet, "/custom", http.Header{"X-Admin": {"1"}}, "", http.StatusOK},
+		{"custom: no header", http.MethodGet, "/custom", nil, "", mockhttp.StatusNoMatch},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, server := range []*mockhttp.Server{files, stored} {
+				req, err := http.NewRequestWithContext(t.Context(), tc.method, server.URL(tc.target), strings.NewReader(tc.body))
+				require.NoError(t, err)
+
+				maps.Copy(req.Header, tc.header)
+
+				res, err := http.DefaultClient.Do(req)
+				require.NoError(t, err)
+				require.NoError(t, res.Body.Close())
+				require.Equal(t, tc.want, res.StatusCode)
+			}
+		})
+	}
 }

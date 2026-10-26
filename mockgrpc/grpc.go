@@ -211,7 +211,7 @@ func New(config ...Option) (*Server, error) {
 			admin.Scenarios(app.scenarios),
 			admin.Events(app.events),
 			admin.Logs(logs),
-			admin.Journal(j, app.adminRequestPattern),
+			admin.Journal(j, app.adminRequestPattern, nil),
 		)
 	}
 
