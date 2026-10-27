@@ -507,7 +507,7 @@ response:
 - **Delays.** An event's `delay` wins over `event_delay`. Everything before a wait is flushed first. In Go, `EventDelayFunc` takes a `vlatte.Delay`, such as `vlatte.Jitter`; a description leaves it out.
 - **Ending.** A stream ends after its last event, and clients reconnect after `retry`. With `keep_open`, it ends when the client leaves or the server closes. The mock counts the request and runs its callbacks and `on_complete` events once the stream ends, with the body it sent.
 - **Reconnecting.** `resume` sends a request with a `Last-Event-ID` header only the events after the one with that id; an unknown id gets them all. Match the header to answer reconnections with another mock, and serve `204 No Content` to tell clients to stop reconnecting.
-- **Templates.** With `template.enabled`, or `Template()` in Go, event types, ids, comments and text data are templates. JSON data and `raw` are sent as they are.
+- **Templates.** With `template.enabled`, or `Template()` in Go, event types, ids, comments and text data are templates. JSON data and `raw` are sent as they are. A mock file reads a string as text, so a saved templated stream writes `DataJSON` of a string as text, which is then a template.
 - **Faults.** [Steps and faults](#faults) apply to the stream as to any body: `fault.LimitData` drops the connection after some bytes, as a flaky network does.
 - **Mappers.** Response mappers read the whole body, which a stream may never end, so a mock can't have both.
 
