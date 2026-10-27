@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"slices"
 	"time"
 
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
@@ -58,15 +59,16 @@ func (app *Server) scenarioUses(ctx context.Context) (iter.Seq[matchscenario.Use
 		return nil, fmt.Errorf("http: listing mocks: %w", err)
 	}
 
-	return func(yield func(matchscenario.Use) bool) {
-		for m := range mocks {
-			for _, e := range m.spec.expectations {
-				if sm, ok := e.Matcher.(*matchscenario.Matcher); ok && !yield(matchscenario.Use{MockID: m.ID(), Matcher: sm}) {
-					return
-				}
+	var uses []matchscenario.Use
+	for m := range mocks {
+		for _, e := range m.spec.expectations {
+			if sm, ok := e.Matcher.(*matchscenario.Matcher); ok {
+				uses = append(uses, matchscenario.Use{MockID: m.ID(), Matcher: sm})
 			}
 		}
-	}, nil
+	}
+
+	return slices.Values(uses), nil
 }
 
 // movedScenarios keeps the moves of the scenarios of r's mock, which Find picked, for the journal, and publishes them to
