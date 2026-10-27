@@ -121,14 +121,14 @@ func TestSSE_ReconnectsAfterADropAndResumes(t *testing.T) {
 }
 
 func TestSSE_AKeepOpenStreamEndsWhenTheClientLeaves(t *testing.T) {
-	// A stream that keeps open serves the client as long as it stays. Once it leaves, the mock counts the request and
-	// runs its callbacks, with what the client got.
+	// A stream that keeps open serves the client as long as it stays. Once it leaves, the mock runs its callbacks,
+	// with what the client got.
 	m := mockhttp.MustNew(mockhttp.Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
 	ended := make(chan string, 1)
-	scoped := m.MustMock(mockhttp.Getf("/events").
+	m.MustMock(mockhttp.Getf("/events").
 		Reply(mockhttp.OK().EventStream(mockhttp.NewEventStream(mockhttp.NewEvent().Data("hi")).KeepOpen())).
 		Callback(func(_ context.Context, in vlatte.OnComplete) error {
 			ended <- string(in.(*mockhttp.OnComplete).Response().Body)
@@ -141,12 +141,43 @@ func TestSSE_AKeepOpenStreamEndsWhenTheClientLeaves(t *testing.T) {
 	ev, err := c.next()
 	require.NoError(t, err)
 	require.Equal(t, []string{"data: hi"}, ev)
-	require.EqualValues(t, 0, scoped.Hits(), "the stream is still open")
 
 	leave()
 
 	require.Equal(t, "data: hi\n\n", <-ended)
-	require.EqualValues(t, 1, scoped.Hits())
+}
+
+func TestSSE_AStreamCountsOnceItOpens(t *testing.T) {
+	// A live feed stays open as long as its client does, so it counts as served once it opens: a Once mock serves one
+	// client, not every client that comes before the first leaves, and its scenario moves on.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	feed := m.MustMock(mockhttp.Getf("/feed").Once().
+		StartScenario("feed").ScenarioStateWillBe("open").
+		Reply(mockhttp.OK().EventStream(mockhttp.NewEventStream(mockhttp.NewEvent().Data("hi")).KeepOpen())))
+	m.MustMock(mockhttp.Getf("/feed").Priority(1).Reply(mockhttp.Status(http.StatusConflict)))
+	m.MustMock(mockhttp.Getf("/feed/state").ScenarioIs("feed").ScenarioStateIs("open").Reply(mockhttp.OK().PlainText("open")))
+
+	ctx, leave := context.WithCancel(t.Context())
+	defer leave()
+
+	_, c := openStream(ctx, t, newClient(t), m.URL("/feed"), "")
+
+	ev, err := c.next()
+	require.NoError(t, err)
+	require.Equal(t, []string{"data: hi"}, ev)
+	require.EqualValues(t, 1, feed.Hits(), "the stream is open")
+
+	res, err := newClient(t).Get(m.URL("/feed"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusConflict, res.StatusCode, "the feed served its one client")
+
+	res, body := getTarget(t, m, "/feed/state")
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "open", string(body))
 }
 
 func TestSSE_ServerCloseEndsAKeepOpenStream(t *testing.T) {
