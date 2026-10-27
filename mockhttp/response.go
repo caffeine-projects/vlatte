@@ -20,6 +20,9 @@ import (
 var (
 	_ io.Writer = flushingWriter{}
 
+	// errEventStreamMappers is the error of response mappers given an event stream to read whole.
+	errEventStreamMappers = errors.New("response: response mappers read the whole body, and an event stream doesn't end")
+
 	gzipper = &sync.Pool{New: func() any { return gzip.NewWriter(nil) }}
 )
 
@@ -27,6 +30,39 @@ var (
 // request log, callbacks and events.
 type keptBody interface {
 	Kept() ([]byte, bool)
+}
+
+// keeper keeps what a streamed body read, with keep, up to _keptBodyLimit: a body embeds it, and records each read.
+type keeper struct {
+	keep bool // set before the body is read
+	kept []byte
+	over bool // read more than it keeps
+	eof  bool
+}
+
+// Kept returns the body, once read to its end, when it kept it, and it fits in _keptBodyLimit.
+func (k *keeper) Kept() ([]byte, bool) {
+	return k.kept, k.keep && k.eof && !k.over
+}
+
+// keepSent sets whether the body keeps what it reads. Call it before the body is read.
+func (k *keeper) keepSent(keep bool) {
+	k.keep = keep
+}
+
+// record keeps p, what a read returned with err, when the body keeps what it reads and it fits.
+func (k *keeper) record(p []byte, err error) {
+	switch {
+	case !k.keep || k.over:
+	case len(k.kept)+len(p) > _keptBodyLimit:
+		k.over, k.kept = true, nil
+	default:
+		k.kept = append(k.kept, p...)
+	}
+
+	if errors.Is(err, io.EOF) {
+		k.eof = true
+	}
 }
 
 // Response defines the HTTP response that will be served once a Mock is matched with an HTTP Request.
@@ -158,7 +194,11 @@ func (r *Response) render(ctx context.Context, w http.ResponseWriter, wait func(
 			return err
 		}
 	} else if r.BodyCloser != nil {
-		if len(r.Encoding) > 0 {
+		if len(r.Encoding) > 0 && r.flush {
+			if err := r.encodeFlushing(w, r.BodyCloser); err != nil {
+				return err
+			}
+		} else if len(r.Encoding) > 0 {
 			if _, err := r.encode(w, r.BodyCloser); err != nil {
 				return err
 			}
@@ -190,7 +230,8 @@ func (r *Response) render(ctx context.Context, w http.ResponseWriter, wait func(
 
 // readBody reads a streamed body, from BodyCloser, into Body, and closes it. The server measures Body as it sends it,
 // so a Content-Length that came with the stream goes: whoever reads Body can change it. A proxied body, which the
-// server doesn't know the size of, fails over _keptBodyLimit, and an event stream fails at once: it doesn't end.
+// server doesn't know the size of, fails over _keptBodyLimit, and an event stream fails at once, a proxied one or a
+// reply's: it may not end.
 func (r *Response) readBody() error {
 	body := r.BodyCloser
 	if body == nil {
@@ -200,10 +241,14 @@ func (r *Response) readBody() error {
 	r.BodyCloser = nil
 	defer body.Close()
 
+	if _, ok := body.(*eventStreamBody); ok {
+		return errEventStreamMappers
+	}
+
 	src := io.Reader(body)
 	if r.proxied {
 		if mediaType(r.Header.Get(HeaderContentType)) == "text/event-stream" {
-			return errors.New("response: response mappers read the whole body, and an event stream doesn't end")
+			return errEventStreamMappers
 		}
 
 		src = io.LimitReader(body, _keptBodyLimit+1)
@@ -300,6 +345,47 @@ func (r *Response) stream(ctx context.Context, w http.ResponseWriter, wait func(
 	}
 
 	return flush()
+}
+
+// encodeFlushing writes reader to w gzipped, the one encoding there is, and flushes both after each read, so a streamed body, such
+// as an event stream, reaches the client as it comes rather than once the encoder's buffer fills.
+func (r *Response) encodeFlushing(w http.ResponseWriter, reader io.Reader) error {
+	gz := gzipWriter(w)
+	defer gzipper.Put(gz)
+
+	rc := http.NewResponseController(w)
+	buf := make([]byte, 32*1024)
+
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			if _, werr := gz.Write(buf[:n]); werr != nil {
+				return werr
+			}
+
+			if ferr := gz.Flush(); ferr != nil {
+				return ferr
+			}
+
+			if ferr := flushTo(rc); ferr != nil {
+				return ferr
+			}
+		}
+
+		if errors.Is(err, io.EOF) {
+			break
+		}
+
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := gz.Close(); err != nil {
+		return err
+	}
+
+	return flushTo(rc)
 }
 
 func (r *Response) encode(w io.Writer, reader io.Reader) (n int64, err error) {

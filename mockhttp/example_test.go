@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockhttp"
@@ -73,6 +75,42 @@ func Example_multipart() {
 	// Output:
 	// 201 multipart/mixed; boundary=b
 	// "--b\r\nContent-Type: text/plain\r\n\r\nsaved\r\n--b--\r\n"
+}
+
+func Example_eventStream() {
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	defer m.Close()
+
+	// Stream a completion as Server-Sent Events, a JSON chunk at a time, as LLM APIs do.
+	m.MustMock(mockhttp.Postf("/v1/completions").
+		Reply(mockhttp.OK().EventStream(mockhttp.NewEventStream(
+			mockhttp.NewEvent().DataJSON(map[string]string{"text": "Hel"}),
+			mockhttp.NewEvent().DataJSON(map[string]string{"text": "lo"}),
+			mockhttp.NewEvent().Name("done").Data("[DONE]"),
+		).EventDelay(time.Millisecond))))
+
+	res, err := http.Post(m.URL("/v1/completions"), mockhttp.MIMEApplicationJSON, strings.NewReader(`{"prompt":"hi"}`))
+	if err != nil {
+		panic(err)
+	}
+	defer res.Body.Close()
+
+	stream, err := io.ReadAll(res.Body)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(res.Header.Get(mockhttp.HeaderContentType))
+	fmt.Print(string(stream))
+	// Output:
+	// text/event-stream
+	// data: {"text":"Hel"}
+	//
+	// data: {"text":"lo"}
+	//
+	// event: done
+	// data: [DONE]
 }
 
 func ExampleServer_StartRecording() {

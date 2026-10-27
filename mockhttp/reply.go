@@ -16,6 +16,7 @@ import (
 	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
+	"github.com/caffeine-projects/vlatte/internal/sse"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
@@ -103,6 +104,7 @@ type Reply struct {
 	bodyTemplateContent string
 	teData              any
 	multipart           *Multipart
+	eventStream         *EventStream
 	delayedErr          error
 }
 
@@ -119,6 +121,7 @@ const (
 	_bodyTemplate
 	_bodyFile
 	_bodyMultipart
+	_bodyEventStream
 )
 
 type bodyEncoding int
@@ -359,6 +362,17 @@ func (rep *Reply) Multipart(mp *Multipart) *Reply {
 	return rep
 }
 
+// EventStream defines the response body as a stream of Server-Sent Events, sent event by event. The body sets the
+// Content-Type, text/event-stream: setting a Content-Type too, with Header or HeaderTemplate, makes building the mock
+// fail. It sets Cache-Control to no-cache too, unless the reply sets one. A mock with response mappers, which read the
+// whole body, can't have one: building it fails.
+func (rep *Reply) EventStream(es *EventStream) *Reply {
+	rep.body(_bodyEventStream)
+	rep.eventStream = es
+
+	return rep
+}
+
 // SetTemplateData sets the data model to be used by templates during response building.
 func (rep *Reply) SetTemplateData(data any) *Reply {
 	rep.teData = data
@@ -467,6 +481,12 @@ func (rep *Reply) NewReplier(app *Server) (Replier, error) {
 		}
 	}
 
+	if rep.bodyType == _bodyEventStream {
+		if err := r.compileEventStream(rep); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := r.compileTemplates(rep); err != nil {
 		return nil, fmt.Errorf("reply: %w", err)
 	}
@@ -489,13 +509,15 @@ func (rep *Reply) body(kind bodyType) {
 	rep.teType &^= _teBody | _teBodyFilename
 	rep.delayedErr = nil
 	rep.multipart = nil
+	rep.eventStream = nil
 }
 
 // hasTemplates reports whether the reply has templates: a body, a body file name, header values or the text of a
 // multipart body.
 func (rep *Reply) hasTemplates() bool {
 	return rep.teType&(_teBody|_teBodyFilename) != 0 || len(rep.headerWithTemplate) > 0 ||
-		rep.bodyType == _bodyMultipart && rep.multipart.spec.Templated
+		rep.bodyType == _bodyMultipart && rep.multipart.spec.Templated ||
+		rep.bodyType == _bodyEventStream && rep.eventStream.spec.Templated
 }
 
 // responseReplier serves the response a Reply describes, for one mock. Reply.NewReplier makes it, and requests only
@@ -513,11 +535,12 @@ type responseReplier struct {
 	bodyFilenameTemplate vlatte.Template
 	bodyTemplate         vlatte.Template
 	multipartEncoder     *mpart.Encoder
+	eventStreamEncoder   *sse.Encoder
 }
 
 // Reply implements Replier.
-func (r *responseReplier) Reply(_ context.Context, input ReplyInput) (*Response, error) {
-	res, err := r.build(input.RequestValues)
+func (r *responseReplier) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
+	res, err := r.build(ctx, input.RequestValues)
 	if err != nil {
 		return nil, fmt.Errorf("reply: %w", err)
 	}
@@ -556,6 +579,22 @@ func (r *responseReplier) compileTemplates(rep *Reply) error {
 	return nil
 }
 
+// compileEventStream checks the event stream of rep and compiles it with the engine of r, once per mock.
+func (r *responseReplier) compileEventStream(rep *Reply) error {
+	if rep.response.Header.Get(HeaderContentType) != "" || rep.headerWithTemplate.Get(HeaderContentType) != "" {
+		return errors.New("reply: an event stream sets the Content-Type: remove the Content-Type header")
+	}
+
+	e, err := sse.Compile(&rep.eventStream.spec, r.engine)
+	if err != nil {
+		return fmt.Errorf("reply: %w", err)
+	}
+
+	r.eventStreamEncoder = e
+
+	return nil
+}
+
 // compileMultipart checks the multipart body of rep and compiles it with the engine of r, once per mock: the boundary
 // drawn here is the one of every response the mock serves.
 func (r *responseReplier) compileMultipart(rep *Reply) error {
@@ -576,7 +615,8 @@ func (r *responseReplier) compileMultipart(rep *Reply) error {
 	return nil
 }
 
-func (r *responseReplier) build(rv *RequestValues) (*Response, error) {
+// build builds the response to rv. ctx is the reply's: an event stream sends until it ends.
+func (r *responseReplier) build(ctx context.Context, rv *RequestValues) (*Response, error) {
 	// Each response has a Header, Trailer and Cookies of its own: mappers, callbacks and listeners can change them, and
 	// requests run at the same time.
 	response := r.response.clone()
@@ -616,6 +656,25 @@ func (r *responseReplier) build(rv *RequestValues) (*Response, error) {
 		response.Header.Set(HeaderContentType, r.multipartEncoder.ContentType())
 		response.Body = body
 		response.pauses = pauses
+
+	case _bodyEventStream:
+		var lastEventID string
+		if rv.RawRequest != nil {
+			lastEventID = rv.RawRequest.Header.Get(HeaderLastEventID)
+		}
+
+		stream, err := r.eventStreamEncoder.Stream(ctx, data, lastEventID)
+		if err != nil {
+			return nil, err
+		}
+
+		response.Header.Set(HeaderContentType, MIMETextEventStream)
+		if response.Header.Get(HeaderCacheControl) == "" {
+			response.Header.Set(HeaderCacheControl, "no-cache")
+		}
+
+		response.BodyCloser = &eventStreamBody{stream: stream}
+		response.flush = true
 
 	case _bodyTemplate:
 		body, err := execute(r.bodyTemplate, data)

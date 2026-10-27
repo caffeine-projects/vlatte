@@ -714,6 +714,11 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		return nil, ErrNoReplies
 	}
 
+	// Mappers read the whole body, and an event stream may not end. One a sequence holds fails at its request.
+	if rep, ok := b.reply.(*Reply); ok && rep.bodyType == _bodyEventStream && len(b.spec.mappers) > 0 {
+		return nil, errors.New("mock: response mappers read the whole body, and an event stream doesn't end: remove the mappers")
+	}
+
 	spec := b.spec.clone()
 	if spec.id == "" {
 		spec.id = uuid.New().String()
