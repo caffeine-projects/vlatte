@@ -73,7 +73,9 @@ func (m *Misses[M, TIn]) NearMisses(ctx context.Context, describe func(*Eval[TIn
 		matched := 0
 
 		for i, eval := range m.evals(t.mock) {
-			_, keepsState := eval.Matcher.(Stateful)
+			_, stateful := eval.Matcher.(Stateful)
+			_, claims := eval.Matcher.(Claimer)
+			keepsState := stateful || claims
 
 			var (
 				ok  bool

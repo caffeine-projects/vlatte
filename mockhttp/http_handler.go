@@ -550,7 +550,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	reqValues.Data = locals
 
-	// A client that leaves during the delay gets nothing: the mock doesn't reply, nor count the request.
+	// A client that leaves during the delay gets nothing: the mock doesn't reply, nor count the request. Its scenario
+	// moved already, when Find picked it.
 	if mock.spec.delay != nil {
 		if err := httpx.Wait(r.Context(), mock.spec.delay()); errors.Is(err, context.Canceled) {
 			h.lifecycle.OnWarning(reqValues, fmt.Errorf("http: the client left during the delay: %w", context.Cause(r.Context())))

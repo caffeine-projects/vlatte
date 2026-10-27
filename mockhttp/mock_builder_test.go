@@ -534,6 +534,48 @@ func TestBuilder_ServesScenarios(t *testing.T) {
 	scenariotest.Run(t, newScenarioServer(false))
 }
 
+func TestBuilder_AScenarioMovesWhenItsClientLeavesDuringTheDelay(t *testing.T) {
+	// The scenario moves when its mock is picked: a client that gives up during the delay and calls again gets the
+	// mock of the next state, as another client would have.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	waiting := make(chan struct{})
+	m.MustMock(
+		Getf("/pay").StartScenario("checkout").ScenarioStateWillBe("paid").
+			DelayFunc(func() time.Duration {
+				close(waiting)
+				return time.Hour
+			}).
+			Reply(OK()),
+		Getf("/pay").ScenarioIs("checkout").ScenarioStateIs("paid").Reply(Status(http.StatusConflict)),
+	)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL("/pay"), nil)
+	require.NoError(t, err)
+
+	called := make(chan error, 1)
+	go func() {
+		res, err := _rawClient.Do(req)
+		if err == nil {
+			res.Body.Close()
+		}
+
+		called <- err
+	}()
+
+	<-waiting
+	cancel()
+	require.ErrorIs(t, <-called, context.Canceled)
+
+	res, _ := do(t, http.MethodGet, m.URL("/pay"), nil, nil)
+	require.Equal(t, http.StatusConflict, res.StatusCode)
+}
+
 // statusOf sends req and returns the status of the response.
 func statusOf(t *testing.T, req *http.Request) int {
 	t.Helper()
