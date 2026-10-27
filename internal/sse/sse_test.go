@@ -139,3 +139,47 @@ func TestEncode_RefusesALineBreakATemplateRendered(t *testing.T) {
 	_, err = e.Encode(map[string]any{"ID": "1\n2"})
 	require.EqualError(t, err, "sse: events[1]: id holds a line break")
 }
+
+func TestCompile_RefusesATemplateThatDoesntCompile(t *testing.T) {
+	_, err := Compile(&Spec{Templated: true, Events: []*EventSpec{{Data: []byte("{{ .X"), HasData: true}}}, _engine)
+	require.ErrorContains(t, err, "sse: events[0]: data: ")
+}
+
+func TestEncode_NamesTheFieldWhoseTemplateFails(t *testing.T) {
+	// A template that fails at a request names its event and field, so the failure answer points at the mock's text.
+	fail := "{{ .X.Y }}" // X is text: it has no field Y
+
+	tests := []struct {
+		name  string
+		event *EventSpec
+		want  string
+	}{
+		{"comment", &EventSpec{Comment: fail}, "sse: events[0]: comment: "},
+		{"event", &EventSpec{Event: fail}, "sse: events[0]: event: "},
+		{"id", &EventSpec{ID: fail, HasID: true}, "sse: events[0]: id: "},
+		{"data", &EventSpec{Data: []byte(fail), HasData: true}, "sse: events[0]: data: "},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e, err := Compile(&Spec{Templated: true, Events: []*EventSpec{tc.event}}, _engine)
+			require.NoError(t, err)
+
+			_, err = e.Stream(t.Context(), map[string]any{"X": "text"}, "")
+			require.ErrorContains(t, err, tc.want)
+			require.ErrorContains(t, err, "can't evaluate field Y")
+		})
+	}
+}
+
+func TestLines_StopsWhenTheLoopBreaks(t *testing.T) {
+	var got []string
+	for line := range lines("a\nb\nc") {
+		got = append(got, line)
+		if line == "b" {
+			break
+		}
+	}
+
+	require.Equal(t, []string{"a", "b"}, got)
+}

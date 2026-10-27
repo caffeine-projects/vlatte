@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"bytes"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -19,6 +20,7 @@ import (
 
 var (
 	_ io.Writer = flushingWriter{}
+	_ io.Writer = gzipFlushingWriter{}
 
 	// errEventStreamMappers is the error of response mappers given an event stream to read whole.
 	errEventStreamMappers = errors.New("response: response mappers read the whole body, and an event stream doesn't end")
@@ -347,45 +349,37 @@ func (r *Response) stream(ctx context.Context, w http.ResponseWriter, wait func(
 	return flush()
 }
 
-// encodeFlushing writes reader to w gzipped, the one encoding there is, and flushes both after each read, so a streamed body, such
-// as an event stream, reaches the client as it comes rather than once the encoder's buffer fills.
+// encodeFlushing writes reader to w gzipped, the one encoding there is, and flushes both after each read, so a
+// streamed body, such as an event stream, reaches the client as it comes rather than once the encoder's buffer fills.
 func (r *Response) encodeFlushing(w http.ResponseWriter, reader io.Reader) error {
 	gz := gzipWriter(w)
 	defer gzipper.Put(gz)
 
 	rc := http.NewResponseController(w)
-	buf := make([]byte, 32*1024)
-
-	for {
-		n, err := reader.Read(buf)
-		if n > 0 {
-			if _, werr := gz.Write(buf[:n]); werr != nil {
-				return werr
-			}
-
-			if ferr := gz.Flush(); ferr != nil {
-				return ferr
-			}
-
-			if ferr := flushTo(rc); ferr != nil {
-				return ferr
-			}
-		}
-
-		if errors.Is(err, io.EOF) {
-			break
-		}
-
-		if err != nil {
-			return err
-		}
-	}
-
-	if err := gz.Close(); err != nil {
+	if _, err := io.Copy(gzipFlushingWriter{gz: gz, rc: rc}, reader); err != nil {
 		return err
 	}
 
-	return flushTo(rc)
+	return cmp.Or(gz.Close(), flushTo(rc))
+}
+
+// gzipFlushingWriter writes through gz, and flushes gz and rc after every write.
+type gzipFlushingWriter struct {
+	gz *gzip.Writer
+	rc *http.ResponseController
+}
+
+func (f gzipFlushingWriter) Write(p []byte) (int, error) {
+	n, err := f.gz.Write(p)
+	if err == nil {
+		err = f.gz.Flush()
+	}
+
+	if err == nil {
+		err = flushTo(f.rc)
+	}
+
+	return n, err
 }
 
 func (r *Response) encode(w io.Writer, reader io.Reader) (n int64, err error) {
