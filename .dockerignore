@@ -1,0 +1,21 @@
+# Files git doesn't track: the build keeps .git, and a tracked file left out would mark the binary's version dirty.
+.claude/*
+!.claude/skills
+.idea/
+.vscode/
+.local/
+.env
+**/.DS_Store
+**/testdata/rapid/
+bin/
+out/
+docs/.ai/
+*.test
+*.out
+coverage.txt
+coverage.html
+test-report.out
+Makefile.overrides
+CLAUDE.local.md
+go.work
+go.work.sum

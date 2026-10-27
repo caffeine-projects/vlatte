@@ -90,3 +90,78 @@ jobs:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ./coverage.txt
         disable_search: true
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Set up Buildx
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+    # Builds every platform the image supports, without keeping them: the runner can load one platform only.
+    - name: Build every platform
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        cache-from: type=gha,scope=docker
+        cache-to: type=gha,scope=docker,mode=max
+
+    - name: Build
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        load: true
+        tags: vlatte:ci
+        cache-from: type=gha,scope=docker
+
+    - name: Smoke test
+      run: |
+        set -eu
+
+        user="$(docker image inspect vlatte:ci --format '{{.Config.User}}')"
+        if [ "$user" != "nonroot:nonroot" ]; then
+          echo "::error::image runs as '$user', not nonroot:nonroot"
+          exit 1
+        fi
+
+        version="$(docker run --rm vlatte:ci version)"
+        revision="$(git rev-parse --short=12 HEAD)"
+        case "$version" in
+          *+dirty) echo "::error::version $version is dirty"; exit 1 ;;
+          *"$revision"*) ;;
+          *) echo "::error::version $version does not name revision $revision"; exit 1 ;;
+        esac
+
+        mocks="$RUNNER_TEMP/mocks"
+        mkdir -p "$mocks"
+        printf 'request:\n  method: GET\n  path: /hello\nresponse:\n  status: 200\n  body: hello\n' > "$mocks/hello.mock.yaml"
+
+        # The hardened way to run it: read-only, no capabilities, writing only to its work directory and /tmp.
+        docker run -d --name vlatte \
+          --read-only --cap-drop ALL --security-opt no-new-privileges \
+          --tmpfs /tmp --tmpfs /vlatte/testdata/vlatte:uid=65532,gid=65532 \
+          -v "$mocks:/vlatte/testdata/vlatte/_mocks:ro" \
+          -p 8080:8080 -p 8081:8081 \
+          vlatte:ci
+
+        trap 'docker logs vlatte' EXIT
+
+        curl -fsS --retry 10 --retry-all-errors --retry-delay 1 http://localhost:8081/readyz
+        body="$(curl -fsS http://localhost:8080/hello)"
+        if [ "$body" != "hello" ]; then
+          echo "::error::GET /hello answered '$body', not 'hello'"
+          exit 1
+        fi
+
+        docker stop vlatte
+        code="$(docker inspect vlatte --format '{{.State.ExitCode}}')"
+        if [ "$code" != "0" ]; then
+          echo "::error::vlatte exited with $code on SIGTERM"
+          exit 1
+        fi

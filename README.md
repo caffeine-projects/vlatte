@@ -1167,6 +1167,33 @@ grpcurl -plaintext -d '{"id": "u-1"}' localhost:50051 users.Users/Get
 
 It keeps a [journal](#request-journal) of the requests it serves in `{workdir}/_journal`, across restarts, which the admin API queries: `--journal-dir` moves it, `--journal-dir=""` keeps it in a temporary directory, and `--journal=false` turns it off. Two commands can't share a journal directory: give each a `--name`, which gives it a [work directory](#work-directory) of its own, `testdata/vlatte/<name>`. The journal holds the requests it got, secrets included: its directory ignores its files in git.
 
+## Docker
+
+The `Dockerfile` builds an image of the [CLI](#cli) for the platforms of its distroless base, such as `linux/amd64` and `linux/arm64`, run by a non-root user (`65532`):
+
+```sh
+make docker   # docker build -t vlatte:dev .
+docker run --rm -p 8080:8080 -p 8081:8081 -v "$PWD/testdata/vlatte/_mocks:/vlatte/testdata/vlatte/_mocks:ro" vlatte:dev
+```
+
+The image sets `VLATTE_DOCKER_HOST`, so it listens on every interface, on fixed ports: mocks on `8080`, or `8443` with `--https`, the admin API on `8081`, and gRPC mocks on `50051`, with their admin API on `8082`. Its working directory is `/vlatte`, so the CLI's defaults apply below it: mock files in `/vlatte/testdata/vlatte/_mocks`, and a `.vlatterc` file in `/vlatte` or `/vlatte/testdata`. Arguments go to `vlatte`, and `VLATTE_*` variables set the same [settings](#configuration):
+
+```sh
+docker run --rm -p 8080:8080 -e VLATTE_LOG_LEVEL=debug vlatte:dev --proxy-all-target=https://api.example.com
+docker run --rm vlatte:dev version
+```
+
+The CLI writes its journal and the mocks the admin API adds to `/vlatte/testdata/vlatte`, which the image's user owns. To keep them, or recordings, on the host, mount a `testdata` directory over `/vlatte/testdata` and run as its owner: `--user "$(id -u):$(id -g)" -v "$PWD/testdata:/vlatte/testdata"`. With a read-only root file system, give both of its writable paths a `tmpfs`:
+
+```sh
+docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --tmpfs /tmp --tmpfs /vlatte/testdata/vlatte:uid=65532,gid=65532 \
+  -v "$PWD/testdata/vlatte/_mocks:/vlatte/testdata/vlatte/_mocks:ro" \
+  -p 8080:8080 -p 8081:8081 vlatte:dev
+```
+
+The image has no shell, so it declares no `HEALTHCHECK`: probe the admin API's `GET /livez` and `GET /readyz` on `8081` instead, as a Kubernetes `httpGet` probe does.
+
 ## Development
 
 ```sh
