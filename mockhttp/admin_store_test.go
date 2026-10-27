@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -119,6 +120,10 @@ func (s *docsStore) Delete(_ context.Context, ids ...string) error {
 		delete(s.docs, id)
 	}
 
+	return nil
+}
+
+func (s *docsStore) Health(context.Context) error {
 	return nil
 }
 
@@ -443,6 +448,7 @@ func TestFileStore_ADirectoryItCantUse(t *testing.T) {
 	require.Error(t, err)
 	require.Error(t, store.Delete(ctx, "hello"))
 	require.Error(t, store.Clear(ctx))
+	require.ErrorIs(t, store.Health(ctx), syscall.ENOTDIR)
 
 	inTheWay := t.TempDir()
 
@@ -456,6 +462,16 @@ func TestFileStore_ADirectoryItCantUse(t *testing.T) {
 	temps, err := filepath.Glob(filepath.Join(inTheWay, _fileStoreTempPattern))
 	require.NoError(t, err)
 	require.Empty(t, temps)
+}
+
+func TestFileStore_IsReadyBeforeItsDirectoryExists(t *testing.T) {
+	// A server whose admin API has added no mock yet has no store directory: it serves, so it is ready.
+	m := adminServer(t, Setup())
+
+	store, err := FileStore(filepath.Join(t.TempDir(), "_admin"))(m)
+	require.NoError(t, err)
+
+	require.NoError(t, store.Health(t.Context()))
 }
 
 func TestEncodeMock_AMockThatCantBeDescribed(t *testing.T) {

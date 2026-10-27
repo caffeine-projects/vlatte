@@ -794,6 +794,9 @@ The `vlatte` command serves the admin API by default: `admin: false` (`--admin=f
 | Route | What it does |
 |---|---|
 | `GET /health` | Answers once the admin API serves, with the kind of the server and the URL of its mocks. |
+| `GET /livez` | The Kubernetes liveness probe: answers as `/health` does, whatever the mock store says. |
+| `GET /readyz` | The Kubernetes readiness probe: answers as `/health` does once the mock store's `Health` returns nil, and `503` while it returns an error. |
+| `GET /startupz` | The Kubernetes startup probe: answers as `/health` does. The admin API serves only once the mock server loaded its mocks. |
 | `GET /mocks` | Lists every mock, enabled or not, with its `priority`, `enabled`, `hits` and `origin`. |
 | `POST /mocks` | Adds the mock of the body, a [mock file](#mock-files). An id in use is a `409`. |
 | `POST /mocks/validate` | Checks a mock as `POST /mocks` would, without adding it. |
@@ -873,7 +876,7 @@ The mocks the admin API adds last as long as the server, unless a persistent sto
 m := mockhttp.MustNew(mockhttp.Setup().Admin(admin.MustNew()).AdminStore(mockhttp.FileStore("{workdir}/_admin")))
 ```
 
-Any `vlatte.Store[*mockhttp.Mock]` can be the store, such as a database collection. It keeps the descriptions of the mocks by ID: `EncodeMock` writes one, and `DecodeMock` builds the mock back for the server.
+Any `vlatte.Store[*mockhttp.Mock]` can be the store, such as a database collection. It keeps the descriptions of the mocks by ID: `EncodeMock` writes one, and `DecodeMock` builds the mock back for the server. Its `Health(ctx)` returns an error while it can't serve the mocks, such as when the database is down: `GET /readyz` answers `503` until it returns nil.
 
 ```go
 mockhttp.Setup().AdminStore(func(app *mockhttp.Server) (vlatte.Store[*mockhttp.Mock], error) {
