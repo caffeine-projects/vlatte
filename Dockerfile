@@ -51,4 +51,9 @@ ENV VLATTE_DOCKER_HOST=0.0.0.0
 
 EXPOSE 8080 8443 8081 50051 8082
 
+# Asks the admin API's readiness probe. A server run with --admin=false needs --no-healthcheck, and one with another
+# --admin-addr a health check that names its probe: vlatte health http://127.0.0.1:9000/readyz.
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --start-interval=1s --retries=3 \
+    CMD ["/usr/local/bin/vlatte", "health"]
+
 ENTRYPOINT ["/usr/local/bin/vlatte"]

@@ -159,6 +159,18 @@ jobs:
           exit 1
         fi
 
+        # The HEALTHCHECK probes every second while the container starts.
+        health=""
+        for _ in $(seq 1 30); do
+          health="$(docker inspect vlatte --format '{{.State.Health.Status}}')"
+          [ "$health" = "healthy" ] && break
+          sleep 1
+        done
+        if [ "$health" != "healthy" ]; then
+          echo "::error::container is '$health', not healthy"
+          exit 1
+        fi
+
         docker stop vlatte
         code="$(docker inspect vlatte --format '{{.State.ExitCode}}')"
         if [ "$code" != "0" ]; then
