@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sync"
+	"sync/atomic"
 	"time"
 	"uuid"
 
@@ -118,19 +118,14 @@ func (s *callStream) Context() context.Context {
 // method handler or interceptor appends once the call ends. An interceptor of ServerOptions may run the mock apart
 // and answer first, so the mock may go on as the entry is appended: what it sets then is left out.
 type journalCall struct {
-	journal *journal.Journal
+	draft *journal.Draft
 
 	// headers is set when the answer names its entry in a header.
 	headers bool
 
-	mu    sync.Mutex
-	entry journal.Entry
-
 	// served is set once a mock interceptor took the call: a call that an interceptor of ServerOptions answers itself
 	// never is, and isn't the journal's.
-	served bool
-
-	events journal.EventErrors
+	served atomic.Bool
 }
 
 // newCall starts the entry of a call of ctx, of method.
@@ -138,16 +133,15 @@ func (app *Server) newCall(ctx context.Context, method string) *journalCall {
 	md, _ := metadata.FromIncomingContext(ctx)
 
 	return &journalCall{
-		journal: app.Journal(),
-		headers: !app.config.NoDebugHeaders,
-		entry: journal.Entry{
+		draft: app.Journal().Draft(journal.Entry{
 			ID:     uuid.New().String(),
 			Time:   time.Now(),
 			Kind:   Kind,
 			Path:   method,
 			Target: method,
 			Header: md.Copy(),
-		},
+		}),
+		headers: !app.config.NoDebugHeaders,
 	}
 }
 
@@ -158,10 +152,10 @@ func (c *journalCall) serve(ctx context.Context) {
 		return
 	}
 
-	c.update(func() { c.served = true })
+	c.served.Store(true)
 
 	if c.headers {
-		_ = grpc.SetHeader(ctx, metadata.Pairs(vlatte.HeaderRequestID, c.entry.ID))
+		_ = grpc.SetHeader(ctx, metadata.Pairs(vlatte.HeaderRequestID, c.draft.ID()))
 	}
 }
 
@@ -172,30 +166,27 @@ func callOf(ctx context.Context) *journalCall {
 }
 
 // update runs set on the call, unless the server keeps no journal.
-func (c *journalCall) update(set func()) {
+func (c *journalCall) update(set func(e *journal.Entry)) {
 	if c == nil {
 		return
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	set()
+	c.draft.Update(set)
 }
 
 // request sets the request message of the call, as JSON, which the call no longer changes.
 func (c *journalCall) request(body []byte) {
-	c.update(func() { c.entry.Body = body })
+	c.update(func(e *journal.Entry) { e.Body = body })
 }
 
 // matched sets that mock matched the call.
 func (c *journalCall) matched(mock *Mock) {
-	c.update(func() { c.entry.MockID = mock.ID() })
+	c.update(func(e *journal.Entry) { e.MockID = mock.ID() })
 }
 
 // unmatched sets that no mock matched the call: misses came closest.
 func (c *journalCall) unmatched(misses []vlatte.NearMiss) {
-	c.update(func() { c.entry.Outcome, c.entry.NearMisses = journal.OutcomeUnmatched, misses })
+	c.update(func(e *journal.Entry) { e.Outcome, e.NearMisses = journal.OutcomeUnmatched, misses })
 }
 
 // replied sets that the mock that matched the call answered it, unless err, its reply's error, has no gRPC status: a
@@ -206,11 +197,11 @@ func (c *journalCall) replied(ctx context.Context, err error) {
 		return
 	}
 
-	c.update(func() {
-		c.entry.Outcome = journal.OutcomeMatched
+	c.update(func(e *journal.Entry) {
+		e.Outcome = journal.OutcomeMatched
 
 		if _, ok := status.FromError(err); !ok {
-			c.entry.Outcome, c.entry.Message = journal.OutcomeFailed, err.Error()
+			e.Outcome, e.Message = journal.OutcomeFailed, err.Error()
 		}
 	})
 }
@@ -218,23 +209,23 @@ func (c *journalCall) replied(ctx context.Context, err error) {
 // proxied sets that the target of a recording answered the call, as replied does for a mock's answer.
 func (c *journalCall) proxied(ctx context.Context, err error) {
 	c.replied(ctx, err)
-	c.update(func() {
-		if c.entry.Outcome == journal.OutcomeMatched {
-			c.entry.Outcome = journal.OutcomeProxied
+	c.update(func(e *journal.Entry) {
+		if e.Outcome == journal.OutcomeMatched {
+			e.Outcome = journal.OutcomeProxied
 		}
 	})
 }
 
 // failed sets that the call failed with err, whatever its answer.
 func (c *journalCall) failed(err error) {
-	c.update(func() { c.entry.Outcome, c.entry.Message = journal.OutcomeFailed, err.Error() })
+	c.update(func(e *journal.Entry) { e.Outcome, e.Message = journal.OutcomeFailed, err.Error() })
 }
 
 // eventFailed keeps err, the error of an on_complete event of the call, which its entry's message tells when the call
 // has no failure of its own.
 func (c *journalCall) eventFailed(err error) {
 	if c != nil {
-		c.events.Add(err)
+		c.draft.EventFailed(err)
 	}
 }
 
@@ -242,33 +233,26 @@ func (c *journalCall) eventFailed(err error) {
 // as one that failed before matching, or panicked, failed, or was abandoned when its client left. A call that an
 // interceptor answered itself, which reached no mock, isn't appended.
 func (c *journalCall) end(ctx context.Context, err error) {
-	c.mu.Lock()
-	served, entry := c.served, c.entry
-	c.mu.Unlock()
-
-	if !served {
+	if !c.served.Load() {
 		return
 	}
 
-	entry.Status = int(status.Code(err))
-	entry.Elapsed = time.Since(entry.Time)
-
-	if entry.Outcome == journal.OutcomeUnknown {
-		entry.Outcome = journal.OutcomeFailed
-		if ctx.Err() != nil {
-			entry.Outcome = journal.OutcomeAbandoned
-		}
-
-		if err != nil {
-			entry.Message = err.Error()
-		}
-	}
-
-	// A call a mock answered tells the on_complete events that failed, such as webhooks.
-	c.events.Tell(&entry)
-
 	// The journal logs what it fails to keep.
-	c.journal.Append(&entry)
+	c.draft.Append(func(e *journal.Entry) {
+		e.Status = int(status.Code(err))
+		e.Elapsed = time.Since(e.Time)
+
+		if e.Outcome == journal.OutcomeUnknown {
+			e.Outcome = journal.OutcomeFailed
+			if ctx.Err() != nil {
+				e.Outcome = journal.OutcomeAbandoned
+			}
+
+			if err != nil {
+				e.Message = err.Error()
+			}
+		}
+	})
 }
 
 // describeEval names the part of a call e checks, such as "header x-team".

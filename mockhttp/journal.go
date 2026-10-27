@@ -104,12 +104,9 @@ func (j journalEvents) OnError(r *RequestValues, err error) {
 // journalCall is the entry of a request in the server's journal, which it appends once the request reaches an
 // outcome: the first one counts.
 type journalCall struct {
-	journal *journal.Journal
+	draft   *journal.Draft
 	mu      sync.Mutex
-	entry   journal.Entry
 	warning error
-	events  journal.EventErrors
-	done    bool
 }
 
 func newJournalCall(app *Server, r *RequestValues) *journalCall {
@@ -124,20 +121,17 @@ func newJournalCall(app *Server, r *RequestValues) *journalCall {
 
 	header = redactHeader(header, app.config.HeaderNamesToRedact)
 
-	return &journalCall{
-		journal: app.Journal(),
-		entry: journal.Entry{
-			ID:            r.ReqID,
-			Time:          r.StartedAtTime,
-			Kind:          Kind,
-			Method:        req.Method,
-			Path:          r.URL.Path,
-			Target:        requestTarget(req, r.URL),
-			Header:        header,
-			Body:          body,
-			BodyTruncated: truncated,
-		},
-	}
+	return &journalCall{draft: app.Journal().Draft(journal.Entry{
+		ID:            r.ReqID,
+		Time:          r.StartedAtTime,
+		Kind:          Kind,
+		Method:        req.Method,
+		Path:          r.URL.Path,
+		Target:        requestTarget(req, r.URL),
+		Header:        header,
+		Body:          body,
+		BodyTruncated: truncated,
+	})}
 }
 
 // journalBody returns what the journal takes of the body of r, and whether the server read less than the body. A
@@ -171,31 +165,20 @@ func requestTarget(req *http.Request, u *url.URL) string {
 
 // record appends the entry of r with its outcome, unless it has one already.
 func (c *journalCall) record(r *RequestValues, outcome journal.Outcome, status int, err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.done {
-		return
-	}
-
-	c.done = true
-	c.entry.Outcome, c.entry.Status = outcome, status
-	c.entry.Elapsed = time.Since(c.entry.Time)
-	c.entry.NearMisses = r.nearMisses
-
-	if r.Mock != nil {
-		c.entry.MockID = r.Mock.ID()
-	}
-
-	if err != nil {
-		c.entry.Message = err.Error()
-	}
-
-	// A request a mock answered tells the on_complete events that failed, such as webhooks.
-	c.events.Tell(&c.entry)
-
 	// The journal logs what it fails to keep.
-	c.journal.Append(&c.entry)
+	c.draft.Append(func(e *journal.Entry) {
+		e.Outcome, e.Status = outcome, status
+		e.Elapsed = time.Since(e.Time)
+		e.NearMisses = r.nearMisses
+
+		if r.Mock != nil {
+			e.MockID = r.Mock.ID()
+		}
+
+		if err != nil {
+			e.Message = err.Error()
+		}
+	})
 }
 
 // eventFailed keeps err, the error of an on_complete event of the request, which its entry's message tells. A server
@@ -205,7 +188,7 @@ func (c *journalCall) eventFailed(err error) {
 		return
 	}
 
-	c.events.Add(err)
+	c.draft.EventFailed(err)
 }
 
 // warn keeps err, the last warning of the request, which tells why it ended, if it reaches no outcome.
