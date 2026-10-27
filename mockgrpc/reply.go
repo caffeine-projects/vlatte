@@ -37,8 +37,15 @@ type Reply interface {
 
 // Replier answers the calls of one mock. Reply sends the answer through call: the messages with [Call.Send], and the
 // header and trailer with grpc.SetHeader, grpc.SendHeader and grpc.SetTrailer on ctx. An error with a gRPC status,
-// such as status.Error makes, ends the call with that status: it is the mock's answer. Any other error is a failure,
-// which the client gets as Internal with the vlatte-error trailer.
+// such as status.Error makes, ends the call with that status: it is the mock's answer.
+//
+// An error that matches [vlatte.ErrAbort] or [vlatte.ErrReset] cuts the call, as a server that crashes would: the mock
+// counts the call and runs its events, then the server cuts the call's connection after the messages of a stream
+// Reply sent, before any status, so the client reads Unavailable and no trailer. ErrReset resets a TCP connection, so
+// the client reads ECONNRESET, and ErrAbort ends it. grpc can't reset one stream from a handler, so the other calls on
+// the connection end too. A server whose ServerOptions set grpc.Creds can't cut its connections: the call fails.
+//
+// Any other error is a failure, which the client gets as Internal with the vlatte-error trailer.
 type Replier interface {
 	Reply(ctx context.Context, call *Call) error
 }
