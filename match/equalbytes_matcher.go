@@ -8,6 +8,11 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
+var (
+	_ vlatte.Matcher             = (*equalBytesMatcher)(nil)
+	_ descriptor.SelfDescriptive = (*equalBytesMatcher)(nil)
+)
+
 // equalBytesMatcher passes when the value is text of the expected bytes.
 type equalBytesMatcher struct {
 	Expected []byte

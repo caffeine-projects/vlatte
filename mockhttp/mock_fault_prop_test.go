@@ -102,6 +102,12 @@ var _mockFaults = []mockFault{
 	{"multipart", config.CodeInvalidValue, "response.multipart.parts[0].delay", func(doc map[string]any) {
 		withMultipart(doc)["parts"] = []any{map[string]any{"delay": int64(-5)}}
 	}},
+	{"multipart", config.CodeConflict, "response.multipart.parts[0].body_base64", func(doc map[string]any) {
+		withMultipart(doc)["parts"] = []any{map[string]any{"body": "x", "body_base64": "eA=="}}
+	}},
+	{"multipart", config.CodeConflict, "response.multipart.parts[0].body_file", func(doc map[string]any) {
+		withMultipart(doc)["parts"] = []any{map[string]any{"body_base64": "eA==", "body_file": "x.bin"}}
+	}},
 	{"multipart", config.CodeConflict, "response.multipart", func(doc map[string]any) {
 		withMultipart(doc)
 		sub(doc, "response")["body"] = "x"

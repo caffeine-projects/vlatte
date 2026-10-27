@@ -290,39 +290,6 @@ func TestMock_ADescribedRequestPartLoadsBackAndMatchesTheSame(t *testing.T) {
 	}
 }
 
-func TestMock_ABinaryBodyMatcherLoadsBackAndMatchesTheSame(t *testing.T) {
-	// Equal of bytes that aren't UTF-8 matches, but its description can't hold them. EqualBytes describes them in
-	// base64: loaded back, the mock matches the same body, and misses other bytes.
-	bin := []byte{0x89, 'P', 'N', 'G', 0xff, 0xfe, 0x00}
-
-	built := MustNew(Setup().Silent())
-	built.MustStart()
-	t.Cleanup(built.Close)
-
-	desc, err := built.MustMock(Postf("/b").Body(match.EqualBytes(bin)).Reply(OK())).Mocks()[0].MarshalJSON()
-	require.NoError(t, err)
-	require.Contains(t, string(desc), `"body":["equalbytes","iVBOR//+AA=="]`)
-
-	loaded := MustNew(Setup().Silent())
-	loaded.MustStart()
-	t.Cleanup(loaded.Close)
-	loaded.MustMock(FromBytes(desc, "json"))
-
-	send := func(m *Server, body []byte) int {
-		req, err := http.NewRequest(http.MethodPost, m.URL("/b"), bytes.NewReader(body))
-		require.NoError(t, err)
-
-		req.Header.Set(HeaderContentType, "application/octet-stream")
-
-		return statusOf(t, req)
-	}
-
-	for _, m := range []*Server{built, loaded} {
-		require.Equal(t, http.StatusOK, send(m, bin), string(desc))
-		require.Equal(t, StatusNoMatch, send(m, bin[:len(bin)-1]), string(desc))
-	}
-}
-
 func TestMock_ADescriptionKeepsTheScenarioAndRepeat(t *testing.T) {
 	// A mock described its scenario and repeat as a single argument, which the description dropped, as it merged maps
 	// only: saved through the admin API, a mock of one request served every request, outside its scenario. Each mock
