@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io/fs"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -194,6 +196,55 @@ func TestServeErrorsAreLogged(t *testing.T) {
 	}
 
 	require.Contains(t, buf.String(), errAccept.Error())
+}
+
+func TestClose_ClosesTheConnectionsOfWebhooks(t *testing.T) {
+	// Listeners such as webhooks send through the transport of the Kit, the server's, not http.DefaultTransport:
+	// Close closes its idle connections, so they don't outlive the server, as the HTTP server's don't.
+	closed := make(chan struct{}, 1)
+	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	target.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateClosed {
+			select {
+			case closed <- struct{}{}:
+			default:
+			}
+		}
+	}
+	target.Start()
+	t.Cleanup(target.Close)
+
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}).Logger(&logger))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Method("Greetings").Callback(func(ctx context.Context, e vlatte.OnComplete) error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.URL, nil)
+		if err != nil {
+			return err
+		}
+
+		res, err := e.Kit().Transport().RoundTrip(req)
+		if err != nil {
+			return err
+		}
+
+		return res.Body.Close()
+	}).Reply(Message(&pb.HiRes{Message: "hello"})))
+
+	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.NoError(t, err)
+
+	m.Close()
+
+	select {
+	case <-closed:
+	case <-t.Context().Done():
+		t.Fatal("the webhook's connection to its target outlived the server")
+	}
 }
 
 func TestClose_ReleasesWhatTheMocksHold(t *testing.T) {

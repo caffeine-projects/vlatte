@@ -32,6 +32,7 @@ var (
 	_ vlatte.EventPreparer                    = (*WebHook)(nil)
 	_ descriptor.SelfDescriptive              = (*Args)(nil)
 	_ descriptor.SelfDescriptive              = (*multipartParams)(nil)
+	_ vlatte.Kit                              = noKit{}
 )
 
 var (
@@ -39,8 +40,12 @@ var (
 	ErrRenderingTemplate = errors.New("webhook: rendering error")
 )
 
-// _defaultEngine compiles the templates of a webhook run without a Kit, such as one called directly.
+// _defaultEngine compiles the templates of a webhook run without a Kit, such as one called directly, or with a Kit
+// without an engine.
 var _defaultEngine = vlatte.MustNewGoTemplateEngine()
+
+// _nopLogger is the logger of a webhook run without a Kit.
+var _nopLogger = zerolog.Nop()
 
 // _maxAnswer is how much of its target's answer a send reads before it ends, as net/http drains of a body closed
 // unread: past it, the connection closes.
@@ -57,13 +62,14 @@ type Transform func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Ar
 // mockhttp sends it once the mock replied, and the response waits for it: a test checks the target right after. An
 // event set to run after the response doesn't hold it: see [vlatte.EventConfig.AfterResponse].
 //
-// It logs each send and its answer at info level, with WithLogger's logger, or else with the logger of the event:
-// mockhttp gives the server's. It sends with WithTransport's transport, or else with the transport of the event:
-// mockhttp gives the server's Config.Transport, or else one it closes with the server. Without either, it sends with
-// http.DefaultTransport. A send fails when the target can't be reached in time, or answers with a status outside 2xx;
-// a redirect isn't followed. A send reads up to 256 KiB of the answer, within its time, so its connection carries the
-// next one. The time is WithTimeout's, or else the event's: mockhttp gives the server's Config.WebhookTimeout. Without
-// either, it is 10s. A zero WebHook is ready to use.
+// It logs each send and its answer at info level, with WithLogger's logger, or else with the server's, which the
+// event's [vlatte.Kit] gives. It sends with WithTransport's transport, or else with the server's, from the Kit too:
+// mockhttp gives its Config.Transport, or else one it closes with the server, as mockgrpc does. Relative files, such
+// as a body_file, open from the Kit's Dir: the directory of the mock file. An event without a Kit logs nothing,
+// sends with http.DefaultTransport, and opens files from the working directory. A send fails when the target can't be
+// reached in time, or answers with a status outside 2xx; a redirect isn't followed. A send reads up to 256 KiB of the
+// answer, within its time, so its connection carries the next one. The time is WithTimeout's, or else the event's:
+// mockhttp gives the server's Config.WebhookTimeout. Without either, it is 10s. A zero WebHook is ready to use.
 type WebHook struct {
 	transport http.RoundTripper
 	transform Transform
@@ -106,8 +112,13 @@ func (w *WebHook) Prepare(cfg vlatte.EventConfig, engine vlatte.TemplateEngine) 
 
 // Run implements vlatte.EventListener[vlatte.OnComplete]. It parses the event parameters and performs the HTTP request.
 func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
+	kit := args.Kit()
+	if kit == nil {
+		kit = noKit{}
+	}
+
 	// Each run has its own copy of the parameters, so a Transform changes only this request.
-	webhookArgs, err := argsOf(args.Parameters(), originOf(args), dirOf(args))
+	webhookArgs, err := argsOf(args.Parameters(), originOf(args), kit.Dir())
 	if err != nil {
 		return err
 	}
@@ -138,7 +149,10 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		method = http.MethodGet
 	}
 
-	engine, data := templating(args)
+	engine, data := kit.TemplateEngine(), kit.Data()
+	if engine == nil {
+		engine = _defaultEngine
+	}
 
 	rawURL := webhookArgs.URL
 	if webhookArgs.URLTemplate != "" {
@@ -187,7 +201,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 	logger := w.logger
 	if logger == nil {
-		logger = loggerOf(args)
+		logger = kit.Logger()
 	}
 
 	// With a context, only a bad method or URL fails it, and validate and checkURL checked both.
@@ -247,7 +261,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 	roundTripper := w.transport
 	if roundTripper == nil {
-		roundTripper = transportOf(args)
+		roundTripper = kit.Transport()
 	}
 
 	// The caller logs the errors: logging them here too would log each twice.
@@ -723,28 +737,6 @@ func headerOf(v config.Value, dst *map[string]string) error {
 	return err
 }
 
-// dirOf returns where the relative files of the event's parameters open from, as mockhttp's OnComplete says: the
-// directory of the mock file that defines the event, or "" for the working directory.
-func dirOf(args vlatte.OnComplete) string {
-	if d, ok := args.(interface{ Dir() string }); ok {
-		return d.Dir()
-	}
-
-	return ""
-}
-
-// transportOf returns the transport the event gives, as mockhttp's OnComplete gives the server's, or
-// http.DefaultTransport.
-func transportOf(args vlatte.OnComplete) http.RoundTripper {
-	if t, ok := args.(interface{ Transport() http.RoundTripper }); ok {
-		if rt := t.Transport(); rt != nil {
-			return rt
-		}
-	}
-
-	return http.DefaultTransport
-}
-
 // timeoutOf returns how long a send waits for its answer as the event says, as mockhttp's OnComplete gives the server's
 // Config.WebhookTimeout, or 0 when it doesn't say.
 func timeoutOf(args vlatte.OnComplete) time.Duration {
@@ -755,19 +747,6 @@ func timeoutOf(args vlatte.OnComplete) time.Duration {
 	return 0
 }
 
-// loggerOf returns the logger the event gives, as mockhttp's OnComplete gives the server's, or one that logs nothing.
-func loggerOf(args vlatte.OnComplete) *zerolog.Logger {
-	if l, ok := args.(interface{ Logger() *zerolog.Logger }); ok {
-		if logger := l.Logger(); logger != nil {
-			return logger
-		}
-	}
-
-	nop := zerolog.Nop()
-
-	return &nop
-}
-
 // originOf names where the parameters of an event come from, for problems: the mock that completed.
 func originOf(args vlatte.OnComplete) string {
 	if mock := args.Mock(); mock != nil {
@@ -775,22 +754,6 @@ func originOf(args vlatte.OnComplete) string {
 	}
 
 	return "on_complete"
-}
-
-// templating returns what the templates of an event compile and render with: the engine of the server and the data
-// of the request that completed the mock. Without a Kit, they compile with a vlatte.GoTemplateEngine and no data.
-func templating(args vlatte.OnComplete) (vlatte.TemplateEngine, any) {
-	kit := args.Kit()
-	if kit == nil {
-		return _defaultEngine, nil
-	}
-
-	engine := kit.TemplateEngine()
-	if engine == nil {
-		engine = _defaultEngine
-	}
-
-	return engine, kit.Data()
 }
 
 // checkURL checks that raw is an absolute http or https URL with a host. Its errors show the URL without its
@@ -830,3 +793,14 @@ func render(engine vlatte.TemplateEngine, name, text string, data any) (string, 
 func errorBadArg(cause error) error {
 	return fmt.Errorf("%w: %w", ErrBadArg, cause)
 }
+
+// noKit is the Kit of a webhook run without one, such as one called directly: its templates compile with a
+// vlatte.GoTemplateEngine and render with no data, it logs nothing, sends with http.DefaultTransport, and opens
+// relative files from the working directory.
+type noKit struct{}
+
+func (noKit) TemplateEngine() vlatte.TemplateEngine { return _defaultEngine }
+func (noKit) Data() any                             { return nil }
+func (noKit) Logger() *zerolog.Logger               { return &_nopLogger }
+func (noKit) Transport() http.RoundTripper          { return http.DefaultTransport }
+func (noKit) Dir() string                           { return "" }
