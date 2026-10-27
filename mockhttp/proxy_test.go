@@ -1828,7 +1828,7 @@ func TestForwardProxy_ATunnelDialsWithinTheTransportsLimits(t *testing.T) {
 }
 
 func TestProxyAll_AnswersWhatNoOtherMockMatches(t *testing.T) {
-	// As WireMock's proxy-all, ProxyAll proxies what no other mock matches: it comes last, whatever the priority of
+	// ProxyAll proxies what no other mock matches: it comes last, whatever the priority of
 	// the others. It leaves the forward proxy's requests alone, which name their host: a request in absolute form goes
 	// to its host, and a CONNECT opens its tunnel. Its description loads back as the same mock, and a mock file's
 	// proxy_all makes one: a description that held a plain proxy loaded back as a mock of any request, which took the
@@ -1972,7 +1972,7 @@ func TestProxyAll_AMockFilesProxyAllIsTheOnlyReply(t *testing.T) {
 }
 
 func TestProxyAll_FromTheSettings(t *testing.T) {
-	// WireMock's --proxy-all: the setting proxy_all takes the keys of a mock file's proxy, and answers what no mock
+	// The setting proxy_all takes the keys of a mock file's proxy, and answers what no mock
 	// matches. It is no mock: assertions don't count it, and Reload and Clean leave it be. Without a forward proxy, a
 	// request in absolute form goes to it too.
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2161,7 +2161,7 @@ func interceptClient(t *testing.T, m *Server) *http.Client {
 }
 
 func TestForwardProxy_InterceptsHTTPS(t *testing.T) {
-	// WireMock's HTTPS browser proxying: the TLS in a CONNECT tunnel hid its requests, so mocks never saw them. With
+	// HTTPS interception: the TLS in a CONNECT tunnel hid its requests, so mocks never saw them. With
 	// Intercept, the proxy serves that TLS itself, with a certificate for the host signed by its CA, which the client
 	// trusts: mocks answer the requests within, and the proxy sends the rest on to the host.
 	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

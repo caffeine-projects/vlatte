@@ -123,7 +123,7 @@ func TestEqualJSON_ParsesIncomingValuesLeniently(t *testing.T) {
 }
 
 func TestEqualJSON_Options(t *testing.T) {
-	// WireMock's ignoreArrayOrder and ignoreExtraElements: a stub that names only what it cares about.
+	// Array order and extra elements ignored: a stub that names only what it cares about.
 	expected := `{"a": [1, 3], "b": {"c": true}}`
 
 	tests := []struct {

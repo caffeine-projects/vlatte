@@ -91,7 +91,7 @@ type schemaDraft JSONSchemaDraft
 
 func (d schemaDraft) applySchema(o *schemaOptions) { o.draft, o.drafted = JSONSchemaDraft(d), true }
 
-// SchemaDraft sets the draft of a schema of [JSONSchema] without $schema, as WireMock's schemaVersion does.
+// SchemaDraft sets the draft of a schema of [JSONSchema] without $schema.
 func SchemaDraft(d JSONSchemaDraft) JSONSchemaOption { return schemaDraft(d) }
 
 // _schemaURL is where a schema of JSONSchema is, for its compiler: a name, which nothing loads from.
