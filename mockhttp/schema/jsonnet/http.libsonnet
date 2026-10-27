@@ -69,6 +69,7 @@ local scheme = import './scheme.libsonnet';
     header(map):: { header: map },
     headerTemplate(map):: { header_template: map },
     body(b):: { body: b },
+    bodyBase64(b):: { body_base64: b },
     bodyFile(f):: { body_file: f },
     multipart(spec):: { multipart: spec },
     encoding(e):: { encoding: e },

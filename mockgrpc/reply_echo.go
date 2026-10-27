@@ -16,6 +16,9 @@ var (
 	_ Replier = (*echoReplier)(nil)
 )
 
+// errEchoNotDescribed is why a mock with an Echo reply can't be described: mock files have no echo reply.
+var errEchoNotDescribed = errors.New("reply: an Echo reply can't be described as a mock file")
+
 // EchoReply answers each call with the messages the client sent, as they came: each one's bytes, read as a message of
 // the type the method answers with, so the fields of the same numbers come back. A unary or server streaming call
 // answers its request, a bidi streaming call each message as it comes, and a client streaming call the last message
@@ -25,7 +28,8 @@ type EchoReply struct {
 	log bool
 }
 
-// Echo creates a new EchoReply.
+// Echo creates a new EchoReply. Mock files have no echo reply: describing a mock with it fails, so the admin API can't
+// show the mock, nor save it.
 func Echo() *EchoReply {
 	return &EchoReply{}
 }
