@@ -1,11 +1,15 @@
 package mpart
 
 import (
+	json "encoding/json/v2"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/value"
@@ -125,4 +129,157 @@ func TestDecode_AValidObject(t *testing.T) {
 
 	// Doc writes back what Decode read, so admin GET output loads again.
 	require.Equal(t, doc, s.Doc())
+}
+
+func TestPropDecode_ReadsWhatDocWrites(t *testing.T) {
+	// MP5: Decode reads a spec's Doc back as the same spec: the same Doc, and the same bytes on the wire. A byte
+	// body comes back as text, which writes the same bytes.
+	dir := t.TempDir()
+
+	rapid.Check(t, func(t *rapid.T) {
+		s := genSpec(dir).Draw(t, "spec")
+		s.Boundary = genBoundary().Draw(t, "boundary")
+
+		for _, p := range s.Parts {
+			// A mock file is text, so JSON and YAML can't hold such a body: it goes through Go only.
+			if !utf8.Valid(p.Body) {
+				p.Body = []byte("text")
+			}
+		}
+
+		// A mock file is JSON or YAML, so the document goes through JSON as a file does.
+		data, err := json.Marshal(s.Doc(), json.Deterministic(true))
+		require.NoError(t, err)
+
+		read, err := value.DecodeJSON(data)
+		require.NoError(t, err)
+
+		got, err := Decode(config.Value{Key: "multipart", Origin: "doc", Any: read})
+		if slices.ContainsFunc(s.Parts, func(p *PartSpec) bool { return p.File == "" && lineStarts(p.Body, s.Boundary) }) {
+			require.ErrorContains(t, err, "has a line that starts with the boundary", "MP2")
+			return
+		}
+
+		require.NoError(t, err)
+
+		got.Dir = s.Dir
+		require.Equal(t, s.Doc(), got.Doc())
+
+		want, err := Compile(s, _engine)
+		require.NoError(t, err)
+
+		decoded, err := Compile(got, _engine)
+		require.NoError(t, err)
+
+		wantBody, wantPauses, wantErr := want.Encode(nil)
+		gotBody, gotPauses, gotErr := decoded.Encode(nil)
+
+		require.Equal(t, wantErr, gotErr)
+		require.Equal(t, string(wantBody), string(gotBody))
+		require.Equal(t, wantPauses, gotPauses)
+		require.Equal(t, want.ContentType(), decoded.ContentType())
+	})
+}
+
+// specFault is an invalid setting injected into a valid multipart document, and the problem it must cause.
+type specFault struct {
+	area   string // what it touches, so faults drawn together never touch the same thing
+	code   string
+	key    string
+	inject func(doc map[string]any)
+}
+
+// _specFaults touch distinct settings of a valid multipart document. Each document has one part at least.
+var _specFaults = []specFault{
+	{"type", config.CodeMissingValue, "m.type", func(doc map[string]any) { delete(doc, "type") }},
+	{"type", config.CodeInvalidValue, "m.type", func(doc map[string]any) { doc["type"] = "multipart/mixed" }},
+	{"boundary", config.CodeInvalidValue, "m.boundary", func(doc map[string]any) { doc["boundary"] = "ends in a space " }},
+	{"params", config.CodeNotAllowed, "m.params.boundary", func(doc map[string]any) { doc["params"] = map[string]any{"boundary": "x"} }},
+	{"parts", config.CodeInvalidValue, "m.parts", func(doc map[string]any) { doc["parts"] = []any{} }},
+	{"parts", config.CodeConflict, "m.parts[0].header.Content-Type", func(doc map[string]any) {
+		p := doc["parts"].([]any)[0].(map[string]any)
+		p["content_type"] = "a/b"
+		p["header"] = map[string]any{"Content-Type": "c/d"}
+	}},
+	{"parts", config.CodeInvalidValue, "m.parts[0].header.X-N", func(doc map[string]any) {
+		doc["parts"].([]any)[0].(map[string]any)["header"] = map[string]any{"X-N": "a\nb"}
+	}},
+	{"parts", config.CodeInvalidValue, "m.parts[0].delay", func(doc map[string]any) { doc["parts"].([]any)[0].(map[string]any)["delay"] = int64(-5) }},
+	{"parts", config.CodeConflict, "m.parts[0].body_file", func(doc map[string]any) {
+		p := doc["parts"].([]any)[0].(map[string]any)
+		p["body"] = "x"
+		p["body_file"] = "x.bin"
+	}},
+	{"parts", config.CodeUnknownKey, "m.parts[0].nmae", func(doc map[string]any) { doc["parts"].([]any)[0].(map[string]any)["nmae"] = "x" }},
+}
+
+func TestPropDecode_EveryFaultOnce(t *testing.T) {
+	// MP5: each fault of a multipart document is reported once, with its code and key, and nothing else is: the
+	// checks of the model don't repeat what decoding already found.
+	dir := t.TempDir()
+
+	rapid.Check(t, func(t *rapid.T) {
+		s := genSpec(dir).Draw(t, "spec")
+		for _, p := range s.Parts {
+			p.Body = []byte("text")
+		}
+
+		doc := s.Doc()
+
+		faults := rapid.SliceOfNDistinct(rapid.SampledFrom(_specFaults), 1, len(_specFaults),
+			func(f specFault) string { return f.area }).Draw(t, "faults")
+
+		want := make([]string, 0, len(faults))
+		for _, f := range faults {
+			f.inject(doc)
+			want = append(want, f.code+" "+f.key)
+		}
+
+		_, err := Decode(config.Value{Key: "m", Origin: "doc", Any: doc})
+
+		cfgErr, ok := errors.AsType[*config.Error](err)
+		require.True(t, ok, "want a *config.Error, got %v", err)
+
+		got := make([]string, 0, len(cfgErr.Problems))
+		for _, p := range cfgErr.Problems {
+			require.Equal(t, "doc", p.Origin)
+			got = append(got, p.Code+" "+p.Key)
+		}
+
+		require.ElementsMatch(t, want, got)
+	})
+}
+
+func FuzzMultipartDecode(f *testing.F) {
+	// MP6: no document panics Decode, and every problem is keyed under the object's key.
+	for _, seed := range []string{
+		`{"type": "mixed", "parts": [{"body": "x"}]}`,
+		`{"type": "form-data", "boundary": "b", "params": {"start": "<a>"}, "parts": [{"name": "a", "filename": "a.png", "body_file": "a.png", "delay": "1s"}]}`,
+		`{"type": "related", "parts": [{"header": {"content-id": ["<a>", "<b>"]}, "body": {"id": 1}}]}`,
+		`{"type": 1, "parts": {}}`,
+		`{"parts": [null, 1, "x", {"body": null}]}`,
+		`[]`,
+	} {
+		f.Add([]byte(seed))
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		doc, err := value.DecodeJSON(data)
+		if err != nil {
+			return
+		}
+
+		_, err = Decode(config.Value{Key: "m", Origin: "fuzz", Any: doc})
+		if err == nil {
+			return
+		}
+
+		cfgErr, ok := errors.AsType[*config.Error](err)
+		require.True(t, ok, "want a *config.Error, got %v", err)
+
+		for _, p := range cfgErr.Problems {
+			require.True(t, p.Key == "m" || strings.HasPrefix(p.Key, "m.") || strings.HasPrefix(p.Key, "m["), "key %q", p.Key)
+			require.NotEmpty(t, p.Code)
+		}
+	})
 }
