@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -172,21 +173,15 @@ func statesOf(named map[string]bool, transitions []Transition) []State {
 		}
 	}
 
-	out := make([]State, 0, len(named))
-	for name := range named {
-		out = append(out, State{Name: name, Reachable: reachable[name]})
+	names := slices.Sorted(maps.Keys(named))
+	if i := slices.Index(names, StateStarted); i > 0 {
+		names = slices.Insert(slices.Delete(names, i, i+1), 0, StateStarted)
 	}
 
-	slices.SortFunc(out, func(a, b State) int {
-		switch {
-		case a.Name == StateStarted:
-			return -1
-		case b.Name == StateStarted:
-			return 1
-		}
-
-		return cmp.Compare(a.Name, b.Name)
-	})
+	out := make([]State, 0, len(names))
+	for _, name := range names {
+		out = append(out, State{Name: name, Reachable: reachable[name]})
+	}
 
 	return out
 }

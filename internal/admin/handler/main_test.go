@@ -513,10 +513,14 @@ func requestIDs(doc map[string]any) []string {
 	return ids
 }
 
-// fakeScenarios keeps scenarios in a real store, for the scenario matchers of mocks of uses.
+// fakeScenarios keeps scenarios in a real store, for the scenario matchers of mocks of uses. listErr fails listing
+// them, and setErr moving one; unlisted lists none.
 type fakeScenarios struct {
-	store *matchscenario.Store
-	uses  []matchscenario.Use
+	store    *matchscenario.Store
+	uses     []matchscenario.Use
+	listErr  error
+	setErr   error
+	unlisted bool
 }
 
 var _ adminapi.Scenarios = (*fakeScenarios)(nil)
@@ -533,10 +537,18 @@ func newScenarios(mocks ...[4]string) *fakeScenarios {
 }
 
 func (f *fakeScenarios) Scenarios(context.Context) ([]matchscenario.Scenario, error) {
+	if f.listErr != nil || f.unlisted {
+		return nil, f.listErr
+	}
+
 	return f.store.Model(slices.Values(f.uses)), nil
 }
 
 func (f *fakeScenarios) SetScenario(_ context.Context, name, state string) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+
 	return f.store.Move(slices.Values(f.uses), name, state)
 }
 
