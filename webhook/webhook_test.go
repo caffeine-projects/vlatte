@@ -264,6 +264,66 @@ func TestWebHook_TheTargetHasTheWebhookWhenTheResponseComes(t *testing.T) {
 	require.True(t, target.AssertNumberOfCalls(t, 1))
 }
 
+func TestWebHook_SendsEveryValueOfAHeader(t *testing.T) {
+	// A webhook sent one value per header, while replies send several, as a target may need a header given twice:
+	// a list of values sends each of them, in order, from a mock file and from Go.
+	got := make(chan http.Header, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got <- r.Header }))
+	t.Cleanup(target.Close)
+
+	wh, err := New()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name string
+		mock vlatte.Builder[*mockhttp.Mock, *mockhttp.Server]
+	}{
+		{
+			name: "from a mock file",
+			mock: mockhttp.FromBytes([]byte(`
+request: {method: GET, path: /orders}
+response: {status: 204}
+on_complete:
+  - name: webhook
+    parameters:
+      url: `+strconv.Quote(target.URL)+`
+      header: {X-Tag: [a, b]}
+      header_template: {X-Seen: ['{{ .Request.Method }}', two]}
+`), "yaml"),
+		},
+		{
+			name: "from Go",
+			mock: mockhttp.Getf("/orders").
+				OnCompleteEvent(Options().URL(target.URL).
+					Header("X-Tag", "a").
+					Header("X-Tag", "b").
+					HeaderTemplate("X-Seen", "{{ .Request.Method }}").
+					HeaderTemplate("X-Seen", "two").
+					Build("webhook")).
+				Reply(mockhttp.NoContent()),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := mockhttp.MustNew(mockhttp.Setup().Silent().OnCompleteListener("webhook", wh))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(tc.mock)
+
+			res, err := http.Get(m.URL("/orders"))
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, http.StatusNoContent, res.StatusCode)
+
+			header := <-got
+			require.Equal(t, []string{"a", "b"}, header.Values("X-Tag"))
+			require.Equal(t, []string{"GET", "two"}, header.Values("X-Seen"))
+		})
+	}
+}
+
 func TestWebHook_AfterTheResponseTheClientHasItsAnswerFirst(t *testing.T) {
 	// An app that needs its callback once it has its answer, as a payment API's, never got it so: the response waited
 	// for its webhooks. With after_response, the client has its answer while the target still holds the webhook, and
@@ -724,6 +784,12 @@ func TestWebHook_TemplateErrors(t *testing.T) {
 
 	err = wh.Run(t.Context(), onComplete{params: map[string]any{"url_template": "http://localhost/{{ .Nope"}})
 	require.ErrorIs(t, err, ErrRenderingTemplate)
+
+	// Each value of a header renders: a broken one after a good one fails the send.
+	err = wh.Run(t.Context(), onComplete{params: map[string]any{
+		"url": "http://localhost", "header_template": map[string]any{"X-A": []any{"ok", "{{ .Nope"}},
+	}})
+	require.ErrorIs(t, err, ErrRenderingTemplate)
 }
 
 func TestWebHook_KitWithoutAnEngine(t *testing.T) {
@@ -1171,9 +1237,16 @@ func TestArgs_ADescriptionDecodesBack(t *testing.T) {
 		{
 			name: "text keys",
 			args: &Args{
-				URL: "http://hooks.test/x", Method: "POST", Header: map[string]string{"X-A": "1"},
-				HeaderTemplate: map[string]string{"X-B": "{{ .Request.Method }}"}, BodyTemplate: "{{ .Request.URL }}",
+				URL: "http://hooks.test/x", Method: "POST", Header: http.Header{"X-A": {"1"}},
+				HeaderTemplate: map[string][]string{"X-B": {"{{ .Request.Method }}"}}, BodyTemplate: "{{ .Request.URL }}",
 				Delay: 1500 * time.Millisecond, Timeout: 2 * time.Second,
+			},
+		},
+		{
+			name: "headers with several values",
+			args: &Args{
+				URL: "http://hooks.test/x", Header: http.Header{"X-A": {"1", "2"}},
+				HeaderTemplate: map[string][]string{"X-B": {"{{ .Request.Method }}", "b"}},
 			},
 		},
 		{
@@ -1211,6 +1284,10 @@ func TestArgs_ADescriptionDecodesBack(t *testing.T) {
 			}
 		})
 	}
+
+	header := (&Args{Header: http.Header{"X-One": {"1"}, "X-Two": {"1", "2"}}}).Describe().Props.(map[string]any)["header"]
+	require.Equal(t, map[string]any{"X-One": "1", "X-Two": []string{"1", "2"}}, header,
+		"a header with one value is written as a mock file writes it: a string")
 
 	_, templated := (&Args{Multipart: mockhttp.MultipartMixed().Template()}).Describe().Props.(map[string]any)["multipart_template"]
 	require.True(t, templated, "a body whose text is templates goes under multipart_template")
@@ -1391,8 +1468,8 @@ func TestArgsFromMap(t *testing.T) {
 	require.Equal(t, &Args{
 		URL:            "http://a",
 		Method:         "POST",
-		Header:         map[string]string{"A": "1"},
-		HeaderTemplate: map[string]string{"B": "{{ .X }}"},
+		Header:         http.Header{"A": {"1"}},
+		HeaderTemplate: map[string][]string{"B": {"{{ .X }}"}},
 		BodyTemplate:   "x",
 		Delay:          1500 * time.Millisecond,
 		Timeout:        2 * time.Second,
@@ -1415,7 +1492,7 @@ func TestArgsFromMap_ReportsEveryProblem(t *testing.T) {
 	require.ErrorIs(t, err, ErrBadArg)
 	require.EqualError(t, err, `webhook: bad argument: parameters: 5 problems
   on_complete: conflict: parameters.body_file is set with parameters.body; keep one of them
-  on_complete: invalid_value: parameters.header.X must be a string, not a number; write it in quotes: "1"
+  on_complete: invalid_value: parameters.header.X must be a string or a list of strings, not a number; write it in quotes: "1"
   on_complete: unknown_key: parameters.log_level is not a known setting; `+
 		`the keys under parameters are url, url_template, method, header, header_template, body, body_template, body_file, multipart, multipart_template, delay, timeout
   on_complete: invalid_value: parameters.method must be a string, not a number; write it in quotes: "5"
@@ -1454,11 +1531,13 @@ func takes(key string, v any) bool {
 			return true
 		case map[string]any:
 			for _, x := range m {
-				if _, ok := x.(string); !ok {
+				if !headerValue(x) {
 					return false
 				}
 			}
 
+			return true
+		case map[string][]string:
 			return true
 		}
 
@@ -1479,9 +1558,37 @@ func takes(key string, v any) bool {
 	}
 }
 
+// requireHeader asserts that got, a header of Args, holds want, whichever of the header types it has.
+func requireHeader(t require.TestingT, want map[string][]string, got any) {
+	switch h := got.(type) {
+	case http.Header:
+		require.Equal(t, want, map[string][]string(h))
+	default:
+		require.Equal(t, want, got)
+	}
+}
+
+// headerValue reports whether x is a value a header takes: a string, or a list of strings.
+func headerValue(x any) bool {
+	switch x := x.(type) {
+	case string:
+		return true
+	case []any:
+		for _, item := range x {
+			if _, ok := item.(string); !ok {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	return false
+}
+
 func TestPropArgsFromMap_Types(t *testing.T) {
-	// W1: a parameter is taken exactly when it has its type, as in mock files: strings, and objects of strings for
-	// headers, whatever Go types code builds them with. Keys the webhook doesn't read are never taken.
+	// W1: a parameter is taken exactly when it has its type, as in mock files: strings, and objects of strings, or of
+	// lists of strings, for headers, whatever Go types code builds them with. Keys the webhook doesn't read are never taken.
 	keys := []string{
 		"url", "url_template", "method", "body", "body_template", "body_file", "header", "header_template",
 		"multipart", "multipart_template", "delay", "timeout", "log_level", "ssl_verify",
@@ -1493,6 +1600,9 @@ func TestPropArgsFromMap_Types(t *testing.T) {
 		map[string]any{"a": "b"},
 		map[string]string{"a": "b"},
 		map[string]any{"a": 1},
+		map[string]any{"a": []any{"b", "c"}},
+		map[string]any{"a": []any{"b", 1}},
+		map[string][]string{"a": {"b", "c"}},
 		make(map[string]any),
 	}
 
@@ -1523,7 +1633,14 @@ func TestPropArgsFromMap_Types(t *testing.T) {
 		case string:
 			require.Equal(t, x, got[key])
 		case map[string]string:
-			require.Equal(t, x, got[key])
+			header := make(map[string][]string, len(x))
+			for name, value := range x {
+				header[name] = []string{value}
+			}
+
+			requireHeader(t, header, got[key])
+		case map[string][]string:
+			requireHeader(t, x, got[key])
 		case map[string]any:
 			require.Len(t, got[key], len(x))
 		}
@@ -1630,7 +1747,7 @@ func TestWebHook_MultipartErrors(t *testing.T) {
 	}{
 		{"two bodies", &Args{URL: "http://localhost", Body: "x", Multipart: mockhttp.MultipartMixed(mockhttp.NewPart())}, "webhook: bad argument: more than one body is set: keep one of Body, BodyTemplate, BodyFile and Multipart"},
 		{"a template that doesn't parse", brokenTemplate, "webhook: multipart body: multipart: parts[0]: body: template: body:1: unclosed action"},
-		{"a Content-Type header", &Args{URL: "http://localhost", Header: map[string]string{"content-type": "x"}, Multipart: mockhttp.MultipartMixed(mockhttp.NewPart())}, "webhook: bad argument: a multipart body sets the Content-Type: remove the Content-Type header"},
+		{"a Content-Type header", &Args{URL: "http://localhost", Header: http.Header{"content-type": {"x"}}, Multipart: mockhttp.MultipartMixed(mockhttp.NewPart())}, "webhook: bad argument: a multipart body sets the Content-Type: remove the Content-Type header"},
 		{"a body that can't be written", &Args{URL: "http://localhost", Multipart: mockhttp.MultipartForm(mockhttp.NewPart())}, "webhook: multipart body: multipart: parts[0].name is required in a form-data part; name the form field"},
 		{"a Go part with a delay", &Args{URL: "http://localhost", Multipart: mockhttp.MultipartMixed(mockhttp.NewPart().Delay(time.Second))}, "webhook: multipart body: multipart: parts[0].delay can't be set: a body written at once doesn't pause; delays apply to replies only"},
 	}
@@ -1975,7 +2092,7 @@ func TestWebHook_PrepareFailsTheMock(t *testing.T) {
 		{
 			name: "a multipart body and a Content-Type header in Go",
 			params: &Args{
-				URL: "http://localhost", HeaderTemplate: map[string]string{"content-type": "x"},
+				URL: "http://localhost", HeaderTemplate: map[string][]string{"content-type": {"x"}},
 				Multipart: mockhttp.MultipartMixed(mockhttp.NewPart()),
 			},
 			sentinel: ErrBadArg,
@@ -1990,7 +2107,7 @@ func TestWebHook_PrepareFailsTheMock(t *testing.T) {
 		},
 		{
 			name:     "a header twice in Go",
-			params:   &Args{URL: "http://localhost", Header: map[string]string{"x-a": "1", "X-A": "2"}},
+			params:   &Args{URL: "http://localhost", Header: http.Header{"x-a": {"1"}, "X-A": {"2"}}},
 			sentinel: ErrBadArg,
 			want:     "webhook: bad argument: headers X-A and x-a are one header: keep one of them",
 		},
@@ -2072,8 +2189,8 @@ func TestWebHook_TransformCanAddHeaders(t *testing.T) {
 	// Parameters without headers had nil header maps, and a Transform that added a header panicked.
 	rt := &sent{}
 	wh, err := New(WithTransport(rt), WithTransform(func(_ context.Context, _ vlatte.OnComplete, a *Args) error {
-		a.Header["X-A"] = "a"
-		a.HeaderTemplate["X-B"] = "{{ .b }}"
+		a.Header["X-A"] = []string{"a"}
+		a.HeaderTemplate["X-B"] = []string{"{{ .b }}"}
 
 		return nil
 	}))
@@ -2138,8 +2255,8 @@ func TestArgsBuilder_EachConfigHasItsOwnArgs(t *testing.T) {
 	b.URL("http://b.test").Header("X-A", "2")
 	second := b.Build("webhook")
 
-	require.Equal(t, &Args{URL: "http://a.test", Header: map[string]string{"X-A": "1"}}, first.Parameters)
-	require.Equal(t, &Args{URL: "http://b.test", Header: map[string]string{"X-A": "2"}}, second.Parameters)
+	require.Equal(t, &Args{URL: "http://a.test", Header: http.Header{"X-A": {"1"}}}, first.Parameters)
+	require.Equal(t, &Args{URL: "http://b.test", Header: http.Header{"X-A": {"1", "2"}}}, second.Parameters)
 }
 
 func TestWebHook_PrepareFailsAMockFile(t *testing.T) {
@@ -2184,7 +2301,7 @@ func TestWebHook_TransformChangesOneSend(t *testing.T) {
 		Reply(mockhttp.OK()))
 
 	wh, err := New(WithTransform(func(_ context.Context, _ vlatte.OnComplete, a *Args) error {
-		a.Header["X-Seen"] += "x"
+		a.Header["X-Seen"][0] += "x"
 		a.BodyTemplate = "{{ .Request.Method }} transformed"
 
 		return nil
@@ -2195,7 +2312,7 @@ func TestWebHook_TransformChangesOneSend(t *testing.T) {
 	m.MustStart()
 	defer m.Close()
 
-	args := &Args{URL: target.URL("/hooks"), Method: http.MethodPost, Header: map[string]string{"X-Seen": ""}}
+	args := &Args{URL: target.URL("/hooks"), Method: http.MethodPost, Header: http.Header{"X-Seen": {""}}}
 	m.MustMock(mockhttp.Getf("/x").
 		OnCompleteEvent(vlatte.EventConfig{Name: "webhook", Parameters: args}).
 		Reply(mockhttp.NoContent()))
@@ -2219,7 +2336,7 @@ func TestWebHook_TransformChangesOneSend(t *testing.T) {
 	wg.Wait()
 
 	require.True(t, target.AssertNumberOfCalls(t, 10))
-	require.Empty(t, args.Header["X-Seen"], "the mock's parameters stay as they were given")
+	require.Equal(t, []string{""}, args.Header["X-Seen"], "the mock's parameters stay as they were given")
 	require.Empty(t, args.BodyTemplate)
 }
 
@@ -2288,7 +2405,11 @@ func TestJSONSchema_AcceptsWhatPrepareAccepts(t *testing.T) {
 		{name: "a multipart body and a Content-Type header", params: map[string]any{
 			"url": "http://hooks.test", "header": map[string]any{"content-type": "x"}, "multipart": multipart,
 		}},
-		{name: "a list as a header value", params: map[string]any{"url": "http://hooks.test", "header": map[string]any{"X-A": []any{"1"}}}},
+		{name: "a list as a header value", params: map[string]any{"url": "http://hooks.test", "header": map[string]any{"X-A": []any{"1", "2"}}}},
+		{name: "a list holding a number as a header value", params: map[string]any{
+			"url": "http://hooks.test", "header_template": map[string]any{"X-A": []any{"1", 2}},
+		}},
+		{name: "a number as a header value", params: map[string]any{"url": "http://hooks.test", "header": map[string]any{"X-A": 1}}},
 		{name: "a negative delay", params: map[string]any{"url": "http://hooks.test", "delay": -1}},
 		{name: "a key that doesn't exist", params: map[string]any{"url": "http://hooks.test", "urll": "x"}},
 		{name: "an uppercase scheme", params: map[string]any{"url": "HTTP://hooks.test"}},

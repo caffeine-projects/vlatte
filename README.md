@@ -562,7 +562,7 @@ m.MustMock(mockhttp.Postf("/orders").
 |---|---|
 | `url` or `url_template` | Where the request goes: an absolute `http` or `https` URL. One of them is required. |
 | `method` | The method, in any case. Empty means `GET`. |
-| `header`, `header_template` | Headers by name, each a string. Names ignore case, so a name is set once. |
+| `header`, `header_template` | Headers by name, each a string, or a list of strings to send the header once per value, in order. Names ignore case, so a name is set once. |
 | `body`, `body_template`, `body_file`, `multipart`, `multipart_template` | The body, one of them at most. Multipart bodies are as in [replies](#forms-and-multipart). |
 | `delay` | How long to wait before sending, once the mock replied. The response waits for it too, unless the webhook runs after the response. |
 | `timeout` | How long the request may take, from sending it to its answer. Without it, the listener's timeout, or else 10s. |
