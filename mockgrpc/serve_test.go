@@ -286,3 +286,51 @@ func TestFailures_FindingAMock(t *testing.T) {
 		requireMatchFailure(t, err, s.Trailer(), "store down")
 	})
 }
+
+func TestFailures_AContextThatEndsBeforeAMockIsFoundEndsWithItsCode(t *testing.T) {
+	// A call whose context ends before a mock is found, such as one whose deadline runs out as the server reads it,
+	// ends with the code of its context, as one that ends during the delay does: nothing failed to match.
+	for name, tt := range map[string]struct {
+		end  func(context.Context) (context.Context, context.CancelFunc)
+		want codes.Code
+	}{
+		"canceled": {
+			end: func(ctx context.Context) (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(ctx)
+				cancel()
+				return ctx, cancel
+			},
+			want: codes.Canceled,
+		},
+		"past its deadline": {
+			end: func(ctx context.Context) (context.Context, context.CancelFunc) {
+				return context.WithDeadline(ctx, time.Now().Add(-time.Second))
+			},
+			want: codes.DeadlineExceeded,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ended := func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+				ctx, cancel := tt.end(ctx)
+				defer cancel()
+
+				return next(ctx, req)
+			}
+
+			m := MustNew(Setup().Silent().
+				Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}).
+				ServerOptions(grpc.ChainUnaryInterceptor(ended)))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			scope := m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "hello"})))
+
+			var trailer metadata.MD
+			_, err := client(t, m).Greetings(context.Background(), &pb.HiReq{Message: "hi"}, grpc.Trailer(&trailer))
+
+			require.Equal(t, tt.want, status.Code(err))
+			require.Empty(t, trailer.Get(_failureKey))
+			require.Zero(t, scope.Hits())
+		})
+	}
+}

@@ -99,7 +99,7 @@ type mockDoc struct {
 
 // build turns the document into a mock for app. Every failure is a *config.Error listing each problem.
 func (doc mockDoc) build(app *Server) (*Mock, error) {
-	def := newMockDef()
+	def := newMockDef(app.matchers())
 	def.dir = doc.dir
 
 	var problems []config.Problem
