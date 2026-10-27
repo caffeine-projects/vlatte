@@ -1,0 +1,12 @@
+# A server built before stateless MCP doesn't know server/discover: the client falls back to initialize.
+id: mcp-discover
+request:
+  method: POST
+  path: /mcp
+  body: [jsonpath, $.method, [equal, server/discover]]
+response:
+  status: 200
+  header:
+    content-type: application/json
+  body: '{"jsonrpc": "2.0", "id": {{ (fromJson .Request.Body.String).id | toJson }}, "error": {"code": -32601, "message": "Method not found"}}'
+  template: {enabled: true}

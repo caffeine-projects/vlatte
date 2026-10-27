@@ -1,0 +1,22 @@
+# A tool call streams its progress, then its result, on the answer to the call.
+id: mcp-tools-call
+request:
+  method: POST
+  path: /mcp
+  header:
+    mcp-session-id: weather-1
+  body: [all, [[jsonpath, $.method, [equal, tools/call]], [jsonpath, $.params.name, [equal, get_weather]]]]
+response:
+  status: 200
+  event_stream:
+    events:
+      - event: message
+        data: >-
+          {{ $r := fromJson .Request.Body.String }}{"jsonrpc": "2.0", "method": "notifications/progress", "params": {
+          "progressToken": {{ $r.params._meta.progressToken | toJson }}, "progress": 1, "total": 2,
+          "message": {{ printf "looking up %s" $r.params.arguments.city | toJson }}}}
+      - event: message
+        data: >-
+          {{ $r := fromJson .Request.Body.String }}{"jsonrpc": "2.0", "id": {{ $r.id | toJson }}, "result": {
+          "content": [{"type": "text", "text": {{ printf "Sunny, 24°C in %s" $r.params.arguments.city | toJson }}}]}}
+  template: {enabled: true}

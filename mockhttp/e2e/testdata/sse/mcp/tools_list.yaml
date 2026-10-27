@@ -1,0 +1,17 @@
+id: mcp-tools-list
+request:
+  method: POST
+  path: /mcp
+  header:
+    mcp-session-id: weather-1
+  body: [jsonpath, $.method, [equal, tools/list]]
+response:
+  status: 200
+  event_stream:
+    events:
+      - event: message
+        data: >-
+          {"jsonrpc": "2.0", "id": {{ (fromJson .Request.Body.String).id | toJson }}, "result": {"tools": [{
+          "name": "get_weather", "description": "Current weather of a city",
+          "inputSchema": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}]}}
+  template: {enabled: true}
