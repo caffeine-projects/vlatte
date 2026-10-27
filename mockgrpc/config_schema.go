@@ -78,6 +78,20 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Set: func(c *Config, v config.Value) error { c.Reflection = v.Bool; return nil },
 		},
 		field{
+			Key: "grpc.tls", Kind: config.Bool, Usage: "Serve TLS. Only the vlatte command reads it: in Go, Server.StartTLS serves TLS.",
+			Set: func(c *Config, v config.Value) error { c.UseTLS = v.Bool; return nil },
+		},
+		field{
+			Key: "grpc.tls.cert", Kind: config.String, Usage: "TLS certificate file. Requires grpc.tls.key. Without one, TLS serves a self-signed certificate.",
+			Set: turnOnTLS,
+		},
+		field{Key: "grpc.tls.key", Kind: config.String, Usage: "TLS private key file. Requires grpc.tls.cert.", Set: turnOnTLS},
+		field{
+			Key: "grpc.tls.ca", Kind: config.String,
+			Usage: "File of the CA certificates that client certificates must be signed by (mutual TLS). Requires grpc.tls.cert and grpc.tls.key.",
+			Set:   turnOnTLS,
+		},
+		field{
 			Key: "grpc.no_match_code", Kind: config.String, Default: "NOT_FOUND",
 			Usage: "Code of the answer to a call no mock matched: its name, such as UNIMPLEMENTED, or its number.",
 			Set: func(c *Config, v config.Value) error {
@@ -247,6 +261,12 @@ func inSection(fields ...field) []field {
 	return fields
 }
 
+// turnOnTLS turns TLS on for a setting of its files: loadConfigSources loads them.
+func turnOnTLS(c *Config, _ config.Value) error {
+	c.UseTLS = true
+	return nil
+}
+
 // ConfigFile reads server settings from a JSON or YAML file: those of its grpc section. With dirs, path is a base
 // name, such as DefaultConfigFileName, looked up in each dir; finding none is fine. A --config flag or VLATTE_CONFIG
 // variable from a later source names the file to read instead.
@@ -305,9 +325,32 @@ func loadConfigSources(conf *Config) error {
 		conf.Record = conf.Record.clone()
 	}
 
-	_, err := _schema().Load(conf, sources)
+	values, err := _schema().Load(conf, sources)
 
-	return err
+	var problems []config.Problem
+	if err != nil {
+		cfgErr, ok := errors.AsType[*config.Error](err)
+		if !ok {
+			return err
+		}
+
+		problems = cfgErr.Problems
+	}
+
+	loaded, tlsProblems := config.LoadTLS(values, "grpc.tls.")
+	if loaded.Certificates != nil {
+		conf.TLSCertificates = loaded.Certificates
+	}
+
+	if loaded.ClientCAs != nil {
+		conf.TLSClientCAs = loaded.ClientCAs
+	}
+
+	if problems = append(problems, tlsProblems...); len(problems) > 0 {
+		return &config.Error{Problems: problems}
+	}
+
+	return nil
 }
 
 // defaultJournalConfig is the journal a source turns on.

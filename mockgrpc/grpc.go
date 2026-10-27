@@ -2,6 +2,7 @@ package mockgrpc
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
@@ -66,13 +68,17 @@ type Server struct {
 	// internal names the services the server implements itself, such as reflection: the mocks don't serve them.
 	internal map[string]bool
 
-	mu      sync.Mutex // orders Start and Close, which a Close overlapping a Start would otherwise outrun
-	addr    string
-	served  chan struct{}
-	started bool              // set by the first start: a server starts once
-	closed  bool              // set by Close: a closed server doesn't start again
-	memory  *bufconn.Listener // the listener of an in-memory server, once it started
-	conns   []*grpc.ClientConn
+	mu        sync.Mutex // orders Start and Close, which a Close overlapping a Start would otherwise outrun
+	addr      string
+	served    chan struct{}
+	started   bool              // set by the first start: a server starts once
+	closed    bool              // set by Close: a closed server doesn't start again
+	memory    *bufconn.Listener // the listener of an in-memory server, once it started
+	creds     *serverCreds      // TLS once StartTLS started the server
+	ownsCreds bool              // the server handshakes with creds: not when ServerOptions set grpc.Creds
+	tls       bool              // set by StartTLS
+	cert      *x509.Certificate // the certificate StartTLS serves, when it knows it
+	conns     []*grpc.ClientConn
 }
 
 // New creates a new gRPC mock Server with the given configurations.
@@ -170,11 +176,14 @@ func New(config ...Option) (*Server, error) {
 	unary := []grpc.UnaryServerInterceptor{in.recoverUnary, in.UnaryInterceptor}
 	stream := []grpc.StreamServerInterceptor{in.recoverStream, in.StreamInterceptor}
 
+	// The server's credentials come first, so those of the user's options win: StartTLS sets TLS on them.
+	app.creds = &serverCreds{insecure.NewCredentials()}
+	opts := []grpc.ServerOption{grpc.Creds(app.creds)}
+
 	// The journal sees each call as it ends, with the code the client gets, outside every interceptor of the user's
 	// options. A unary call's journals within its method's handler, where grpc runs every unary interceptor: see
 	// register. A stream's takes the stream interceptor grpc runs before every other. The unary one in the chain is
 	// for services registered on GRPCServer, past the server.
-	var opts []grpc.ServerOption
 	if j != nil {
 		opts = append(opts, grpc.StreamInterceptor(in.journalStream))
 		unary = slices.Insert(unary, 0, in.journalUnary)
@@ -194,6 +203,7 @@ func New(config ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: %w", err)
 	}
 
+	app.ownsCreds = keepsCreds(srv, app.creds)
 	app.Base = vlatte.NewBase(app, store)
 	app.Verifier = journal.NewVerifier[*Mock, *Server](j, app)
 	app.storage = store
@@ -271,85 +281,7 @@ func (app *Server) Prep(ctx context.Context, recipes ...Recipe) error {
 // serves. A start that fails stops what started, closes the server, and leaves nothing listening, the listener of
 // Config.Listener included.
 func (app *Server) Start() error {
-	app.mu.Lock()
-	defer app.mu.Unlock()
-
-	if app.closed {
-		return fmt.Errorf("server: Start: %w", grpc.ErrServerStopped)
-	}
-
-	if app.started {
-		return fmt.Errorf("server: Start: %w", vlatte.ErrStarted)
-	}
-
-	app.started = true
-
-	lis := app.config.Listener
-
-	if app.config.InMemory {
-		app.memory = bufconn.Listen(_bufSize)
-		lis = app.memory
-	}
-
-	if lis == nil {
-		var err error
-		lis, err = net.Listen("tcp", app.config.Addr)
-		if err != nil {
-			app.closed = true
-			app.Journal().Close()
-
-			return fmt.Errorf("server: Start: failed to create listener: %w", err)
-		}
-	}
-
-	app.addr = lis.Addr().String()
-
-	if app.admin != nil {
-		if err := app.admin.Start(); err != nil {
-			_ = lis.Close()
-			app.addr = ""
-			app.closed = true
-			app.Journal().Close()
-
-			return fmt.Errorf("server: Start: %w", err)
-		}
-	}
-
-	// The mock files load before the server serves, so its first call finds them, and so does the recording.
-	err := app.loader.load(app)
-	if err == nil {
-		err = app.startConfiguredRecording()
-	}
-
-	if err != nil {
-		_ = lis.Close()
-		app.addr = ""
-		app.closed = true
-
-		if app.admin != nil {
-			_ = app.admin.Close()
-		}
-
-		app.Journal().Close()
-
-		return fmt.Errorf("server: Start: %w", err)
-	}
-
-	app.warnUnjournaled()
-
-	app.served = make(chan struct{})
-
-	go func(served chan struct{}) {
-		defer close(served)
-
-		// Serve returns nil after GracefulStop, so any error is a real failure, but one: a Close that came between
-		// this start and Serve stops the server first, and Serve then refuses to begin.
-		if err := app.server.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-			app.logger.Error().Err(err).Msg("server: error serving")
-		}
-	}(app.served)
-
-	return nil
+	return app.start("Start", false)
 }
 
 // MustStart starts the mock server.
@@ -465,6 +397,102 @@ func (app *Server) Close() {
 	if err := app.Journal().Close(); err != nil {
 		app.logger.Warn().Err(err).Msg("server: Close: closing the journal")
 	}
+}
+
+// start starts the server, serving TLS when useTLS says: see Start. op names the method in its errors.
+func (app *Server) start(op string, useTLS bool) error {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if app.closed {
+		return fmt.Errorf("server: %s: %w", op, grpc.ErrServerStopped)
+	}
+
+	if app.started {
+		return fmt.Errorf("server: %s: %w", op, vlatte.ErrStarted)
+	}
+
+	app.started = true
+
+	if useTLS {
+		if err := app.serveTLS(); err != nil {
+			if app.config.Listener != nil {
+				_ = app.config.Listener.Close()
+			}
+
+			app.closed = true
+			app.Journal().Close()
+
+			return fmt.Errorf("server: %s: %w", op, err)
+		}
+	}
+
+	lis := app.config.Listener
+
+	if app.config.InMemory {
+		app.memory = bufconn.Listen(_bufSize)
+		lis = app.memory
+	}
+
+	if lis == nil {
+		var err error
+		lis, err = net.Listen("tcp", app.config.Addr)
+		if err != nil {
+			app.closed = true
+			app.Journal().Close()
+
+			return fmt.Errorf("server: %s: failed to create listener: %w", op, err)
+		}
+	}
+
+	app.addr = lis.Addr().String()
+
+	if app.admin != nil {
+		if err := app.admin.Start(); err != nil {
+			_ = lis.Close()
+			app.addr = ""
+			app.closed = true
+			app.Journal().Close()
+
+			return fmt.Errorf("server: %s: %w", op, err)
+		}
+	}
+
+	// The mock files load before the server serves, so its first call finds them, and so does the recording.
+	err := app.loader.load(app)
+	if err == nil {
+		err = app.startConfiguredRecording()
+	}
+
+	if err != nil {
+		_ = lis.Close()
+		app.addr = ""
+		app.closed = true
+
+		if app.admin != nil {
+			_ = app.admin.Close()
+		}
+
+		app.Journal().Close()
+
+		return fmt.Errorf("server: %s: %w", op, err)
+	}
+
+	app.warnUnjournaled()
+
+	app.served = make(chan struct{})
+
+	go func(served chan struct{}) {
+		defer close(served)
+
+		// Serve returns nil after GracefulStop, so any error is a real failure, but one: a Close that came between
+		// this start and Serve stops the server first, and Serve then refuses to begin.
+		if err := app.server.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			app.logger.Error().Err(err).Msg("server: error serving")
+		}
+	}(app.served)
+
+	return nil
 }
 
 // stop stops the gRPC server, waiting for the calls in flight up to Config.ShutdownTimeout, then cutting them: a

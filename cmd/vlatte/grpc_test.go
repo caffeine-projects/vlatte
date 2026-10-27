@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"io"
 	"net"
 	"net/http"
@@ -15,13 +16,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/dynamicpb"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func TestSplitArgs_GivesEachServerItsFlags(t *testing.T) {
@@ -168,6 +173,34 @@ func TestRun_AGRPCPortInUseFailsTheRun(t *testing.T) {
 
 	stop := start(t, "--addr", randomAddr(t))
 	require.Equal(t, 0, stop(), "the next run starts and stops")
+}
+
+func TestCLI_ServesGRPCMocksOverTLS(t *testing.T) {
+	// --grpc-tls serves the gRPC mocks over TLS, as --https does the HTTP ones: a client without TLS is refused.
+	withoutDockerHost(t)
+
+	grpcAddr := randomAddr(t)
+	stop := start(t, "--addr", randomAddr(t), "--grpc-addr", grpcAddr, "--grpc-tls")
+
+	creds := credentials.NewTLS(&tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}) //nolint:gosec // its own certificate
+	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(creds))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	// A method the server has no descriptor of: the server, not the handshake, answers.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		err := conn.Invoke(t.Context(), "/unknown.Service/Method", &emptypb.Empty{}, &emptypb.Empty{})
+		assert.Equal(c, codes.Unimplemented, status.Code(err))
+	}, 10*time.Second, 100*time.Millisecond)
+
+	plain, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = plain.Close() })
+
+	err = plain.Invoke(t.Context(), "/unknown.Service/Method", &emptypb.Empty{}, &emptypb.Empty{})
+	require.Equal(t, codes.Unavailable, status.Code(err))
+
+	require.Equal(t, 0, stop(), "a stopped command exits cleanly")
 }
 
 func TestRun_ServesTheGRPCAdminAPIItsSettingsSay(t *testing.T) {

@@ -1,6 +1,8 @@
 package mockgrpc
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
+	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
@@ -43,6 +46,20 @@ type Config struct {
 
 	// Reflection serves the gRPC server reflection service: see ConfigBuilder.Reflection.
 	Reflection bool
+
+	// UseTLS reports whether the settings turned TLS on: the vlatte command serves with Server.StartTLS then.
+	UseTLS bool
+
+	// TLSConfig is the TLS configuration Server.StartTLS serves. It wins over TLSCertificates and TLSClientCAs.
+	TLSConfig *tls.Config
+
+	// TLSCertificates are the certificates Server.StartTLS serves. Empty serves a self-signed one: see
+	// Server.Certificate.
+	TLSCertificates []tls.Certificate
+
+	// TLSClientCAs are the CAs that client certificates must be signed by: Server.StartTLS then requires one
+	// (mutual TLS).
+	TLSClientCAs *x509.CertPool
 
 	// Logger is the server's logger. Nil builds one that writes to the standard output, at LogLevel.
 	Logger *zerolog.Logger
@@ -213,6 +230,55 @@ func (cb *ConfigBuilder) InMemory() *ConfigBuilder {
 // name.
 func (cb *ConfigBuilder) Reflection() *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.Reflection = true })
+}
+
+// TLSConfig sets the TLS configuration Server.StartTLS serves, in place of the one TLSCertKeyPair, TLSMutual,
+// TLSCertificates and TLSClientCAs make.
+func (cb *ConfigBuilder) TLSConfig(c *tls.Config) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.TLSConfig = c })
+}
+
+// TLSCertKeyPair sets the certificate Server.StartTLS serves, from the PEM files of the certificate and its key. New
+// fails on a file it can't load. Without a certificate, StartTLS serves a self-signed one.
+func (cb *ConfigBuilder) TLSCertKeyPair(certFile, keyFile string) *ConfigBuilder {
+	return cb.TLSMutual(certFile, keyFile, "")
+}
+
+// TLSMutual sets the certificate Server.StartTLS serves, as TLSCertKeyPair does, and requires clients to present a
+// certificate signed by a CA of the PEM file clientCAFile (mutual TLS). Empty clientCAFile requires none.
+func (cb *ConfigBuilder) TLSMutual(certFile, keyFile, clientCAFile string) *ConfigBuilder {
+	cb.sets = append(cb.sets, func(conf *Config) error {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return fmt.Errorf("config: loading the TLS certificate and key: %w", err)
+		}
+
+		conf.TLSCertificates = []tls.Certificate{cert}
+
+		if clientCAFile != "" {
+			pool, err := config.CertPool(clientCAFile)
+			if err != nil {
+				return fmt.Errorf("config: loading the TLS client CAs: %w", err)
+			}
+
+			conf.TLSClientCAs = pool
+		}
+
+		return nil
+	})
+
+	return cb
+}
+
+// TLSCertificates sets the certificates Server.StartTLS serves.
+func (cb *ConfigBuilder) TLSCertificates(certs []tls.Certificate) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.TLSCertificates = certs })
+}
+
+// TLSClientCAs sets the CAs that client certificates must be signed by: Server.StartTLS then requires one (mutual
+// TLS).
+func (cb *ConfigBuilder) TLSClientCAs(pool *x509.CertPool) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.TLSClientCAs = pool })
 }
 
 // NoDebugHeaders turns off the debug header metadata, such as vlatte-matched-mock-id, that the server adds to its

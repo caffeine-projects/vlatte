@@ -10,6 +10,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
+	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockgrpc"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
@@ -57,6 +58,54 @@ func TestAdmin_ServesOneMockServer(t *testing.T) {
 
 	_, err = mockgrpc.New(mockgrpc.Setup().Admin(api))
 	require.ErrorIs(t, err, admin.ErrServing)
+}
+
+func TestAdmin_MiddlewaresGuardTheAdminAPI(t *testing.T) {
+	// The admin API changes the mocks of a running server: a middleware can ask its clients for a token, and answer
+	// those without one in its place, so no operation runs for them.
+	authenticate := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer secret" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	api := admin.MustNew(admin.Addr("127.0.0.1:0"), admin.Use(authenticate))
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(api))
+	require.NoError(t, m.Start())
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.Get(match.URLPath("/hello")).Reply(mockhttp.OK()))
+
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodDelete, m.AdminURL()+"/mocks", nil)
+	require.NoError(t, err)
+
+	res, err := http.DefaultClient.Do(r)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusUnauthorized, res.StatusCode)
+	requireStatus(t, m.URL("/hello"), http.StatusOK, "a request without the token removes no mock")
+
+	r.Header.Set("Authorization", "Bearer secret")
+
+	res, err = http.DefaultClient.Do(r)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusNoContent, res.StatusCode)
+	requireStatus(t, m.URL("/hello"), mockhttp.StatusNoMatch, "a request with the token removes the mocks")
+}
+
+func requireStatus(t *testing.T, url string, status int, msg string) {
+	t.Helper()
+
+	res, err := http.Get(url)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, status, res.StatusCode, msg)
 }
 
 func TestAdmin_ServeMCPNeedsTheOptionAndAMockServer(t *testing.T) {

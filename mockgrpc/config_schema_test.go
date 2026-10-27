@@ -1,6 +1,7 @@
 package mockgrpc
 
 import (
+	"crypto/tls"
 	"errors"
 	"flag"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
 func TestConfigSources_ReadTheGRPCSectionOfTheSharedSources(t *testing.T) {
@@ -164,4 +166,89 @@ func TestConfigSources_ReadTheRecordSection(t *testing.T) {
 func TestConfigSources_ARecordFormatOfNoMockFileFails(t *testing.T) {
 	_, err := New(Setup().ConfigSources(ConfigArgs([]string{"--grpc-record-format=xml"})))
 	require.ErrorContains(t, err, "grpc.record.format")
+}
+
+func TestConfigSources_TLSFilesTurnTLSOn(t *testing.T) {
+	// The vlatte command served gRPC mocks without TLS only. The grpc.tls keys name its files, and turn it on, as a
+	// key of a section does.
+	path := filepath.Join(t.TempDir(), "settings.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+grpc:
+  tls:
+    cert: `+_tlsCertFile+`
+    key: `+_tlsKeyFile+`
+    ca: `+_tlsClientCertFile+`
+`), 0o600))
+
+	m, err := New(Setup().Silent().ConfigSources(ConfigFile(path)))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+
+	c := m.Config()
+	require.True(t, c.Serve)
+	require.True(t, c.UseTLS)
+	require.NotNil(t, c.TLSClientCAs)
+
+	m.MustStartTLS()
+	cert, err := tls.LoadX509KeyPair(_tlsCertFile, _tlsKeyFile)
+	require.NoError(t, err)
+	require.Equal(t, cert.Leaf.Raw, m.Certificate().Raw)
+
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "hi"})))
+	_, code := greetWith(t, pb.NewTestServiceClient(m.MustDial()), "hello")
+	require.Equal(t, codes.Unavailable, code, "grpc.tls.ca requires a client certificate")
+}
+
+func TestConfigSources_TLSTurnsTLSOnWithoutFiles(t *testing.T) {
+	m, err := New(Setup().ConfigSources(ConfigArgs([]string{"--grpc-tls"})))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+
+	require.True(t, m.Config().UseTLS)
+	require.Empty(t, m.Config().TLSCertificates, "StartTLS serves a self-signed certificate")
+}
+
+func TestConfigSources_TLSFilesNeedEachOther(t *testing.T) {
+	// A certificate without its key, or client CAs without the server's certificate, can't serve TLS: each is a
+	// problem of the settings, with the other problems found.
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "cert without key",
+			args: []string{"--grpc-tls-cert=" + _tlsCertFile},
+			want: "grpc.tls.cert is set but grpc.tls.key is not",
+		},
+		{
+			name: "key without cert",
+			args: []string{"--grpc-tls-key=" + _tlsKeyFile},
+			want: "grpc.tls.key is set but grpc.tls.cert is not",
+		},
+		{
+			name: "ca without cert and key",
+			args: []string{"--grpc-tls-ca=" + _tlsClientCertFile},
+			want: "grpc.tls.ca is set but grpc.tls.cert and grpc.tls.key are not",
+		},
+		{
+			name: "a cert that can't load",
+			args: []string{"--grpc-tls-cert=" + _tlsKeyFile, "--grpc-tls-key=" + _tlsKeyFile},
+			want: "can't load the certificate and key: tls: failed to find certificate PEM data in certificate input, " +
+				"but did find a private key; PEM inputs may have been switched",
+		},
+		{
+			name: "client CAs that can't load",
+			args: []string{"--grpc-tls-cert=" + _tlsCertFile, "--grpc-tls-key=" + _tlsKeyFile, "--grpc-tls-ca=" + _tlsKeyFile},
+			want: "can't load the client CAs: " + _tlsKeyFile + " has no PEM certificates",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := New(Setup().ConfigSources(ConfigArgs(append(tc.args, "--grpc-shutdown-timeout=0"))))
+			cfgErr, ok := errors.AsType[*config.Error](err)
+			require.True(t, ok, "%v", err)
+			require.Len(t, cfgErr.Problems, 2)
+			require.Equal(t, tc.want, cfgErr.Problems[1].Message)
+		})
+	}
 }
