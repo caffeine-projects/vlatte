@@ -114,6 +114,22 @@ func TestFileStore_ServesWhatItsFilesHoldOnReloadAndReset(t *testing.T) {
 	require.Equal(t, codes.NotFound, code, "its file is gone")
 }
 
+func TestFileStore_AReloadOfAFileWithProblemsKeepsWhatTheServerServes(t *testing.T) {
+	dir := t.TempDir()
+	m, c := storeServer(t, Setup().AdminStore(FileStore(dir)))
+	addMock(t, m, `{"id": "hello", "request": {"method": "Greetings"}, "response": {"message": {"message": "kept"}}}`)
+
+	bad := filepath.Join(dir, "bad.mock.yaml")
+	require.NoError(t, os.WriteFile(bad, []byte("id: bad\nrequest: {methd: Greetings}\n"), 0o600))
+
+	err := m.Reload()
+	require.ErrorContains(t, err, "server: admin store: ")
+	require.ErrorContains(t, err, bad)
+
+	msg, _ := greeting(t, c)
+	require.Equal(t, "kept", msg)
+}
+
 func TestFileStore_RemovingMocksRemovesTheirFiles(t *testing.T) {
 	dir := t.TempDir()
 	m, _ := storeServer(t, Setup().AdminStore(FileStore(dir)))
