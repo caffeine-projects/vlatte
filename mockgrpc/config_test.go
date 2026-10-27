@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
@@ -169,4 +171,94 @@ func TestSetup_LogOutputTakesTheLogsOfTheLoggerItBuilds(t *testing.T) {
 	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{})
 	require.Equal(t, codes.NotFound, status.Code(err))
 	require.Contains(t, out.String(), "no mock matched the call")
+}
+
+// _customMatchers holds two custom matchers: [upper], a text in upper case, and [greets, name], a call of Greetings
+// whose request greets name, which reads the whole call, as request.custom gives it.
+var _customMatchers = matchbuild.MustNew(
+	matchbuild.WithMatcher("upper", func(_ *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
+		if len(args) != 0 {
+			return nil, errors.New("takes no arguments")
+		}
+
+		return match.Function(func(v any) (bool, error) {
+			s, ok := v.(string)
+			return ok && s != "" && s == strings.ToUpper(s), nil
+		}), nil
+	}),
+	matchbuild.WithMatcher("greets", func(_ *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
+		if len(args) != 1 {
+			return nil, errors.New("takes a name")
+		}
+
+		name, ok := args[0].(string)
+		if !ok {
+			return nil, errors.New("takes a name")
+		}
+
+		return match.Function(func(v any) (bool, error) {
+			call, isCall := v.(*Call)
+			if !isCall {
+				return false, nil
+			}
+
+			req, isHi := call.Message().(*pb.HiReq)
+
+			return isHi && req.GetMessage() == name, nil
+		}), nil
+	}),
+)
+
+func TestSetup_MatchersBuildTheCustomMatchersOfMockFiles(t *testing.T) {
+	// A mock file names a custom matcher of the server's registry wherever it takes a matcher list: request.custom
+	// gives it the whole call, and the other keys what they match, such as a field or a bidi message.
+	m := fileServer(t, Setup().Matchers(_customMatchers))
+	m.MustMock(
+		FromBytes([]byte(`
+request: {method: Greetings, fields: {message: [upper]}}
+response: {message: {message: loud}}
+`), "yaml"),
+		FromBytes([]byte(`
+request: {method: Greetings, custom: [[greets, ann]]}
+response: {message: {message: hi ann}}
+`), "yaml"),
+		FromBytes([]byte(`
+request: {method: Chat}
+bidi:
+  on: [{when: [field, message, [upper]], response: {message: {message: loud}}}]
+  otherwise: {message: {message: quiet}}
+`), "yaml"),
+	)
+
+	c := pb.NewTestServiceClient(m.MustDial())
+	for give, want := range map[string]string{"HI": "loud", "ann": "hi ann"} {
+		res, err := c.Greetings(t.Context(), &pb.HiReq{Message: give})
+		require.NoError(t, err, give)
+		require.Equal(t, want, res.GetMessage(), give)
+	}
+
+	_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "bob"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	stream, err := c.Chat(t.Context())
+	require.NoError(t, err)
+
+	for give, want := range map[string]string{"HEY": "loud", "hey": "quiet"} {
+		require.NoError(t, stream.Send(&pb.HiReq{Message: give}))
+
+		res, err := stream.Recv()
+		require.NoError(t, err)
+		require.Equal(t, want, res.GetMessage(), give)
+	}
+
+	require.NoError(t, stream.CloseSend())
+}
+
+func TestSetup_MatchersBelongToTheirServer(t *testing.T) {
+	// A registry is the server's, not global: a server without it doesn't know its matchers, and says which.
+	fileServer(t, Setup().Matchers(_customMatchers))
+	m := fileServer(t, Setup())
+
+	_, err := m.Mock(FromBytes([]byte(`{request: {method: Greetings, custom: [[greets, ann]]}, response: {}}`), "yaml"))
+	require.ErrorContains(t, err, `unknown matcher "greets"`)
 }

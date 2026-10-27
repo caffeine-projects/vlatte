@@ -109,6 +109,7 @@ func TestGreeter(t *testing.T) {
 | `JSON(text)` | A request equal to the message `text` holds, read as protojson reads it, so `{"count": 42}` and `{"count": "42"}` match the same call. |
 | `Body(m)` | The request as JSON text, such as `match.Contain("ann")`. |
 | `CallMatches(fn)` | A call `fn` reports true for. |
+| `Matches(m)` | A call `m` matches: it gets the `*mockgrpc.Call`. |
 
 A client streaming call matches once the client closed its side, on all its messages. A bidi call matches as it starts, on its method and metadata: its `Bidi` reply matches each message.
 
@@ -180,7 +181,7 @@ response:
       - {"@type": type.googleapis.com/google.rpc.ErrorInfo, reason: NOT_OWNER}
 ```
 
-`request.message` and `request.messages` match whole messages, `request.body` takes a matcher of the request's JSON. `response` takes `message`, `messages`, `body_file` (a JSON file of a message or a list of them), `template`, `header`, `trailer`, `status` and `message_delay`; `bidi` takes `header`, `trailer`, `on` (rules of `when` and `response`), `otherwise` and `on_end`; `proxy` takes `target`, `header` and `remove_headers`. `response_sequence` takes `responses`, a list of `response`s, and `after_ended`, a `response`; `response_random` takes `responses` and `seed`. `delay`, `repeat`, `scenario` and `on_complete` work as in HTTP mock files.
+`request.message` and `request.messages` match whole messages, `request.body` takes a matcher of the request's JSON, and `request.custom` lists matchers of the whole call, as `Matches` does. `response` takes `message`, `messages`, `body_file` (a JSON file of a message or a list of them), `template`, `header`, `trailer`, `status` and `message_delay`; `bidi` takes `header`, `trailer`, `on` (rules of `when` and `response`), `otherwise` and `on_end`; `proxy` takes `target`, `header` and `remove_headers`. `response_sequence` takes `responses`, a list of `response`s, and `after_ended`, a `response`; `response_random` takes `responses` and `seed`. `delay`, `repeat`, `scenario` and `on_complete` work as in HTTP mock files. `Setup().Matchers(registry)` gives a server the custom matchers its mock files name, as it does an HTTP one: see [Mock files](#mock-files).
 
 **Proxying and recording.** `From(target)` answers each call with the answer of another gRPC server, of any call type: the target gets the client's metadata and messages, and the client gets the target's header, messages, trailer and status as they come, a bidi call message by message. `Header` sets metadata the target gets in place of the client's, `RemoveHeaders` leaves some out, and `DialOptions` sets options of the connection, which goes without TLS by default, such as `grpc.WithTransportCredentials`. A target's status is the mock's answer; a target it can't reach fails the call, with the `vlatte-error` trailer.
 
@@ -304,7 +305,7 @@ request:
 
 **Lists of matchers.** `[hasExactly, [[equal, "1"], [contains, "2"]]]` matches a list of as many values as matchers, each value matched by a matcher of its own, in any order. In Go, `ItemsMatch` takes matchers as items.
 
-**Custom matchers.** A server reads mock files with its registry of matchers: the built-in ones, and the custom ones you give it. A custom matcher is built from its arguments when the mock loads, and its name works anywhere a matcher list does, in mock files, admin API mocks and request journal queries. `request.custom` lists matchers of the whole request: each gets the `*http.Request` (`Builder.Matches` in Go). A registry belongs to the servers you give it to; servers can share one.
+**Custom matchers.** A server reads mock files with its registry of matchers: the built-in ones, and the custom ones you give it. A custom matcher is built from its arguments when the mock loads, and its name works anywhere a matcher list does, in mock files, admin API mocks and request journal queries. `request.custom` lists matchers of the whole request: each gets the `*http.Request` (`Builder.Matches` in Go). A registry belongs to the servers you give it to; servers can share one, gRPC ones too, whose `request.custom` matchers get the `*mockgrpc.Call`.
 
 ```go
 registry := matchbuild.MustNew(matchbuild.WithMatcher("body-too-long",
