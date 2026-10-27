@@ -362,10 +362,9 @@ func (rep *Reply) Multipart(mp *Multipart) *Reply {
 	return rep
 }
 
-// EventStream defines the response body as a stream of Server-Sent Events, sent event by event. The body sets the
-// Content-Type, text/event-stream: setting a Content-Type too, with Header or HeaderTemplate, makes building the mock
-// fail. It sets Cache-Control to no-cache too, unless the reply sets one. A mock with response mappers, which read the
-// whole body, can't have one: building it fails.
+// EventStream defines the response body as a stream of Server-Sent Events, sent event by event. It sets the
+// Content-Type to text/event-stream and Cache-Control to no-cache, unless the reply sets them. Building the mock fails
+// with a status that has no body, 1xx, 204 or 304, and with response mappers, which read the whole body.
 func (rep *Reply) EventStream(es *EventStream) *Reply {
 	rep.body(_bodyEventStream)
 	rep.eventStream = es
