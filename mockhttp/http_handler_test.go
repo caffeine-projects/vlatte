@@ -1388,23 +1388,23 @@ func TestHandler_DebugHeadersNameTheMockThatMatched(t *testing.T) {
 	m.MustMock(FromFile(path), Getf("/plain").ID("plain").Reply(OK()), Getf("/fails").ID("fails").Reply(OK().BodyFile("missing.txt")))
 
 	_, header, _ := getFull(t, m, "/users")
-	require.Equal(t, "users", header.Get(vlatte.MatchedMockIDHeader))
-	require.Equal(t, "list users", header.Get(vlatte.MatchedMockNameHeader))
-	require.Equal(t, "1", header.Get(vlatte.MatchedMockHitsHeader), "the hits count this request")
-	require.Equal(t, path, header.Get(vlatte.MatchedMockSourceHeader))
+	require.Equal(t, "users", header.Get(vlatte.HeaderMatchedMockID))
+	require.Equal(t, "list users", header.Get(vlatte.HeaderMatchedMockName))
+	require.Equal(t, "1", header.Get(vlatte.HeaderMatchedMockHits), "the hits count this request")
+	require.Equal(t, path, header.Get(vlatte.HeaderMatchedMockSource))
 
 	_, header, _ = getFull(t, m, "/users")
-	require.Equal(t, "2", header.Get(vlatte.MatchedMockHitsHeader))
+	require.Equal(t, "2", header.Get(vlatte.HeaderMatchedMockHits))
 
 	_, header, _ = getFull(t, m, "/plain")
-	require.Equal(t, "plain", header.Get(vlatte.MatchedMockIDHeader))
-	require.Equal(t, "1", header.Get(vlatte.MatchedMockHitsHeader), "each mock counts its own")
-	require.Empty(t, header.Values(vlatte.MatchedMockNameHeader), "a mock with no name sends none")
-	require.Empty(t, header.Values(vlatte.MatchedMockSourceHeader), "nor a mock built in code a source")
+	require.Equal(t, "plain", header.Get(vlatte.HeaderMatchedMockID))
+	require.Equal(t, "1", header.Get(vlatte.HeaderMatchedMockHits), "each mock counts its own")
+	require.Empty(t, header.Values(vlatte.HeaderMatchedMockName), "a mock with no name sends none")
+	require.Empty(t, header.Values(vlatte.HeaderMatchedMockSource), "nor a mock built in code a source")
 
 	_, header, _ = getFull(t, m, "/fails")
 	require.Equal(t, vlatte.FailureReply, header.Get(HeaderVlatteError))
-	require.Equal(t, "fails", header.Get(vlatte.MatchedMockIDHeader), "a reply that fails names its mock too")
+	require.Equal(t, "fails", header.Get(vlatte.HeaderMatchedMockID), "a reply that fails names its mock too")
 }
 
 func TestHandler_RequestIDHeaderFindsTheRequestInTheLogs(t *testing.T) {
@@ -1420,7 +1420,7 @@ func TestHandler_RequestIDHeaderFindsTheRequestInTheLogs(t *testing.T) {
 	m.MustMock(Getf("/id").Reply(OK().BodyTemplate(`{{ .Request.ID }}`)), Getf("/fails").Reply(OK().BodyFile("missing.txt")))
 
 	_, header, body := getFull(t, m, "/id")
-	id := header.Get(vlatte.RequestIDHeader)
+	id := header.Get(vlatte.HeaderRequestID)
 	require.NotEmpty(t, id)
 	require.Equal(t, body, id, "templates see the same ID")
 	require.Contains(t, logs.String(), `"request_id":"`+id+`"`)
@@ -1428,7 +1428,7 @@ func TestHandler_RequestIDHeaderFindsTheRequestInTheLogs(t *testing.T) {
 	seen := map[string]bool{id: true}
 	for _, path := range []string{"/fails", "/nothing"} {
 		_, header, _ := getFull(t, m, path)
-		id := header.Get(vlatte.RequestIDHeader)
+		id := header.Get(vlatte.HeaderRequestID)
 		require.NotEmpty(t, id, path)
 		require.False(t, seen[id], "%s: each request has an ID of its own", path)
 		require.Contains(t, logs.String(), `"request_id":"`+id+`"`, path)
@@ -1450,11 +1450,11 @@ func TestHandler_ProxiedHeaderMarksTheAnswersOfARealService(t *testing.T) {
 
 		_, header, body := getFull(t, m, "/forward")
 		require.Equal(t, "real", body)
-		require.Equal(t, "true", header.Get(vlatte.ProxiedHeader))
-		require.Equal(t, "forward", header.Get(vlatte.MatchedMockIDHeader), "it names its mock")
+		require.Equal(t, "true", header.Get(vlatte.HeaderProxied))
+		require.Equal(t, "forward", header.Get(vlatte.HeaderMatchedMockID), "it names its mock")
 
 		_, header, _ = getFull(t, m, "/mocked")
-		require.Empty(t, header.Values(vlatte.ProxiedHeader), "a mock's own answer isn't proxied")
+		require.Empty(t, header.Values(vlatte.HeaderProxied), "a mock's own answer isn't proxied")
 	})
 
 	t.Run("a request no mock matches, on a proxy", func(t *testing.T) {
@@ -1471,8 +1471,8 @@ func TestHandler_ProxiedHeaderMarksTheAnswersOfARealService(t *testing.T) {
 		res, err := (&http.Client{Transport: transport}).Get(target.URL + "/other")
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
-		require.Equal(t, "true", res.Header.Get(vlatte.ProxiedHeader))
-		require.Empty(t, res.Header.Values(vlatte.MatchedMockIDHeader), "no mock matched")
+		require.Equal(t, "true", res.Header.Get(vlatte.HeaderProxied))
+		require.Empty(t, res.Header.Values(vlatte.HeaderMatchedMockID), "no mock matched")
 	})
 
 	t.Run("a recording's target", func(t *testing.T) {
@@ -1481,7 +1481,7 @@ func TestHandler_ProxiedHeaderMarksTheAnswersOfARealService(t *testing.T) {
 
 		res, body := do(t, http.MethodGet, m.URL("/a"), nil, nil)
 		require.Equal(t, "real", string(body))
-		require.Equal(t, "true", res.Header.Get(vlatte.ProxiedHeader))
+		require.Equal(t, "true", res.Header.Get(vlatte.HeaderProxied))
 
 		stopRecording(t, m)
 	})

@@ -203,7 +203,7 @@ func TestResponse_ATemplateThatRendersNoMessageFailsTheCall(t *testing.T) {
 	var trailer metadata.MD
 	_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{Message: "not json"}, grpc.Trailer(&trailer))
 	require.Equal(t, codes.Internal, status.Code(err))
-	require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(vlatte.FailureHeader))
+	require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(vlatte.HeaderFailure))
 }
 
 func TestResponse_ADetailOfATypeNoOneKnowsFailsTheMock(t *testing.T) {
@@ -224,7 +224,7 @@ func TestResponse_ATemplateThatFailsToRenderFailsTheCall(t *testing.T) {
 	_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{}, grpc.Trailer(&trailer))
 	require.Equal(t, codes.Internal, status.Code(err))
 	require.Contains(t, status.Convert(err).Message(), "template 0")
-	require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(vlatte.FailureHeader))
+	require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(vlatte.HeaderFailure))
 }
 
 func TestResponse_ADetailThatIsNoMessageFailsTheMock(t *testing.T) {

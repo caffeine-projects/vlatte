@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -138,59 +136,16 @@ func loadConfigSources(conf *Config) error {
 
 // loadTLSFiles loads the TLS files that sources named. Code sets them with ConfigBuilder.TLSCertKeyPair or TLSMutual.
 func loadTLSFiles(conf *Config, values map[string]config.Value) []config.Problem {
-	cert, hasCert := values["tls.cert"]
-	key, hasKey := values["tls.key"]
-	ca, hasCA := values["tls.ca"]
-
-	switch {
-	case !hasCert && !hasKey && !hasCA:
-		return nil
-	case hasCert && !hasKey:
-		return []config.Problem{{
-			Code: config.CodeMissingValue, Origin: cert.Origin, Key: "tls.key",
-			Message: "tls.cert is set but tls.key is not", Hint: "set both",
-		}}
-	case hasKey && !hasCert:
-		return []config.Problem{{
-			Code: config.CodeMissingValue, Origin: key.Origin, Key: "tls.cert",
-			Message: "tls.key is set but tls.cert is not", Hint: "set both",
-		}}
-	case !hasCert:
-		return []config.Problem{{
-			Code: config.CodeMissingValue, Origin: ca.Origin, Key: "tls.cert",
-			Message: "tls.ca is set but tls.cert and tls.key are not", Hint: "mutual TLS needs the server's certificate and key too",
-		}}
+	loaded, problems := config.LoadTLS(values, "tls.")
+	if loaded.Certificates != nil {
+		conf.TLSCertificates = loaded.Certificates
 	}
 
-	var problems []config.Problem
-	if err := applyTLS(conf, cert.Str, key.Str, ""); err != nil {
-		problems = append(problems, tlsFileProblem(cert, "can't load the certificate and key", err))
-	}
-
-	if hasCA {
-		pool, err := loadCertPool(ca.Str)
-		if err != nil {
-			return append(problems, tlsFileProblem(ca, "can't load the client CAs", err))
-		}
-
-		conf.TLSClientCAs = pool
+	if loaded.ClientCAs != nil {
+		conf.TLSClientCAs = loaded.ClientCAs
 	}
 
 	return problems
-}
-
-// tlsFileProblem reports a TLS file that can't be loaded as a problem of the setting that named it.
-func tlsFileProblem(v config.Value, what string, err error) config.Problem {
-	p := config.Problem{
-		Code: config.CodeInvalidValue, Origin: v.Origin, Key: v.Key, Value: v.Str,
-		Message: what + ": " + err.Error(),
-	}
-
-	if wd, err := os.Getwd(); err == nil && !filepath.IsAbs(v.Str) {
-		p.Hint = "relative paths start at " + wd
-	}
-
-	return p
 }
 
 type (
@@ -647,7 +602,7 @@ func loadProxyCA(conf *Config, values map[string]config.Value) []config.Problem 
 	case hasCert:
 		ca, err := tls.LoadX509KeyPair(cert.Str, key.Str)
 		if err != nil {
-			return []config.Problem{tlsFileProblem(cert, "can't load the CA's certificate and key", err)}
+			return []config.Problem{config.FileProblem(cert, "can't load the CA's certificate and key", err)}
 		}
 
 		conf.Proxy.CA = &ca

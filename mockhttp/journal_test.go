@@ -666,7 +666,7 @@ func TestJournal_TheAdminAPIQueriesWithTheRequestPartOfMockFiles(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	res, _ := do(t, http.MethodPost, m.URL("/orders?page=2"), http.Header{"Content-Type": {"application/json"}}, []byte(`{"id": 7}`))
-	id := res.Header.Get(vlatte.RequestIDHeader)
+	id := res.Header.Get(vlatte.HeaderRequestID)
 	require.NotEmpty(t, id)
 
 	_, _ = do(t, http.MethodPost, m.URL("/orders?page=3"), nil, nil)

@@ -260,6 +260,39 @@ func TestServer_RoutesTheProtocolLacksAnswer501(t *testing.T) {
 	require.NotZero(t, checked)
 }
 
+func TestServer_MiddlewaresWrapEveryRequestInOrder(t *testing.T) {
+	// A middleware sees each request before the admin API does, even one the cross-origin check denies, so a check
+	// such as authentication leaves no request out. The first one given is the outermost.
+	trace := func(name string) func(http.Handler) http.Handler {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Add("X-Trace", name)
+				next.ServeHTTP(w, r)
+			})
+		}
+	}
+
+	s := newServer(t, Options{Middlewares: []func(http.Handler) http.Handler{trace("first"), trace("second")}}, adminapi.Capabilities{})
+	require.NoError(t, s.Start())
+	t.Cleanup(func() { _ = s.Close() })
+
+	res, err := http.Get(s.URL() + "/health")
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, []string{"first", "second"}, res.Header.Values("X-Trace"))
+
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodDelete, s.URL()+"/mocks", nil)
+	require.NoError(t, err)
+	r.Header.Set("Sec-Fetch-Site", "cross-site")
+
+	res, err = http.DefaultClient.Do(r)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusForbidden, res.StatusCode)
+	require.Equal(t, []string{"first", "second"}, res.Header.Values("X-Trace"))
+}
+
 func TestServer_CloseEndsTheStreams(t *testing.T) {
 	// A stream never ends on its own: closing the admin API ends it, so nothing of the admin API outlives Close.
 	events := adminapi.NewEvents()

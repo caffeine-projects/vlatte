@@ -1,6 +1,6 @@
 // Command testcert writes a self-signed certificate and its key, cert.pem and key.pem, to the working directory.
 //
-// The certificates in mockhttp/e2e/testdata/cert and webhook/testdata/cert come from it:
+// The certificates in mockhttp/e2e/testdata/cert, mockgrpc/testdata/cert and webhook/testdata/cert come from it:
 // cert.pem and key.pem from one run, cert_client.pem and key_client.pem from another,
 // so the client identity in mutual TLS tests differs from the server's.
 //

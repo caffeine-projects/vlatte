@@ -20,8 +20,8 @@ var (
 	errNoReplier = errors.New("reply: the factory made no replier")
 )
 
-// _failureKey is vlatte.FailureHeader as a metadata key, which gRPC wants lowercase.
-var _failureKey = strings.ToLower(vlatte.FailureHeader)
+// _failureKey is vlatte.HeaderFailure as a metadata key, which gRPC wants lowercase.
+var _failureKey = strings.ToLower(vlatte.HeaderFailure)
 
 // Reply is what a mock answers the calls it matches with: [Message], [Messages], [JSON], [Template], [Status], [Bidi]
 // and [Func] make one. [Builder.Build] asks it for a Replier for each mock, given the methods the mock serves, so it
@@ -83,12 +83,12 @@ func fail(ctx context.Context, failure string, c codes.Code, format string, a ..
 // and its name, when it has one.
 func debugHeader(mock *Mock, hits int64) metadata.MD {
 	md := metadata.Pairs(
-		vlatte.MatchedMockIDHeader, mock.ID(),
-		vlatte.MatchedMockHitsHeader, strconv.FormatInt(hits, 10),
+		vlatte.HeaderMatchedMockID, mock.ID(),
+		vlatte.HeaderMatchedMockHits, strconv.FormatInt(hits, 10),
 	)
 
 	if name := mock.Name(); name != "" {
-		md.Set(vlatte.MatchedMockNameHeader, name)
+		md.Set(vlatte.HeaderMatchedMockName, name)
 	}
 
 	return md

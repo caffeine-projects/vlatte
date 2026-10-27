@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"regexp"
 	"sync"
 
@@ -65,6 +66,14 @@ func MCP() Option {
 // file; it loads another unchecked, as its hash isn't known.
 func DocsVersion(version string) Option {
 	return func(a *Admin) { a.opts.DocsVersion = version }
+}
+
+// Use adds middlewares that wrap every HTTP request of the admin API, such as one that checks an authentication header.
+// They run in the order they are added, across calls, before the admin API routes the request: one that answers
+// without calling the next handler answers in place of the admin API. Requests that come once the mock server closes
+// get a 503 without reaching them. MCP over stdio, with [Admin.ServeMCP], doesn't go through them.
+func Use(middlewares ...func(http.Handler) http.Handler) Option {
+	return func(a *Admin) { a.opts.Middlewares = append(a.opts.Middlewares, middlewares...) }
 }
 
 // New creates an admin API. It fails on an address that is neither host:port, :port nor a port, and on a docs version

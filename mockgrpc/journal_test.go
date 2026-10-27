@@ -164,7 +164,7 @@ func TestJournal_TheAnswerNamesItsCall(t *testing.T) {
 	var header metadata.MD
 	_, _ = c.Greetings(t.Context(), &pb.HiReq{}, grpc.Header(&header))
 
-	ids := header.Get(vlatte.RequestIDHeader)
+	ids := header.Get(vlatte.HeaderRequestID)
 	require.Len(t, ids, 1)
 
 	e, err := m.Journal().Get(ids[0])
