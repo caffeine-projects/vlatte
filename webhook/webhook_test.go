@@ -264,6 +264,45 @@ func TestWebHook_TheTargetHasTheWebhookWhenTheResponseComes(t *testing.T) {
 	require.True(t, target.AssertNumberOfCalls(t, 1))
 }
 
+func TestWebHook_AfterTheResponseTheClientHasItsAnswerFirst(t *testing.T) {
+	// An app that needs its callback once it has its answer, as a payment API's, never got it so: the response waited
+	// for its webhooks. With after_response, the client has its answer while the target still holds the webhook, and
+	// the target then gets the whole webhook.
+	arrived, release := make(chan struct{}), make(chan struct{})
+	answered := make(chan bool, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(arrived)
+		<-release
+		answered <- r.Context().Err() == nil
+	}))
+	t.Cleanup(target.Close)
+
+	wh, err := New()
+	require.NoError(t, err)
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().OnCompleteListener("webhook", wh))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.FromBytes([]byte(`
+request: {method: POST, path: /orders}
+response: {status: 202}
+on_complete:
+  - name: webhook
+    after_response: true
+    parameters: {method: POST, url: `+strconv.Quote(target.URL)+`}
+`), "yaml"))
+
+	res, err := http.Post(m.URL("/orders"), "text/plain", nil)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusAccepted, res.StatusCode)
+
+	<-arrived
+	close(release)
+	require.True(t, <-answered, "the webhook waited for its target past the response, and wasn't cut short")
+}
+
 func TestWebHook_InvalidArgs(t *testing.T) {
 	// Parameters that are neither *Args nor a map fail the mock when it is built, not each request after it.
 	name := "webhook"

@@ -421,6 +421,10 @@ func describeEvents(events []vlatte.EventConfig) []any {
 			event["parameters"] = p
 		}
 
+		if e.AfterResponse {
+			event["after_response"] = true
+		}
+
 		described = append(described, event)
 	}
 

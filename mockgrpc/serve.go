@@ -172,7 +172,7 @@ func (in *interceptors) serveTarget(ctx context.Context, call *Call, rec *record
 }
 
 // afterServed runs what follows a mock's answer, which ended with err, a status or nil: its stateful matchers move
-// on, then its events run, and the call ends after them.
+// on, then its events run, and the call ends after them, but for those set to run after the response.
 func (app *Server) afterServed(ctx context.Context, mock *Mock, call *Call, err error) {
 	for i, e := range mock.expectations {
 		if stateful, ok := e.Matcher.(vlatte.Stateful); ok {
