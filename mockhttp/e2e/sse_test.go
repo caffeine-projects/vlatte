@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -200,4 +201,51 @@ func TestSSE_OverHTTP2(t *testing.T) {
 	ev, err := c.next()
 	require.NoError(t, err)
 	require.Equal(t, []string{"event: tick", "data: 1"}, ev)
+}
+
+func TestSSE_FlushesEachEvent(t *testing.T) {
+	// A stream that keeps open never fills the server's buffer: a client gets each event as it is sent, gzipped or
+	// not, or live updates would never arrive.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	stream := mockhttp.NewEventStream(mockhttp.NewEvent().Data("first")).KeepOpen()
+	m.MustMock(mockhttp.Getf("/plain").Reply(mockhttp.OK().EventStream(stream)))
+	m.MustMock(mockhttp.Getf("/gzip").Reply(mockhttp.OK().Gzip().EventStream(stream)))
+
+	for _, path := range []string{"/plain", "/gzip"} {
+		t.Run(path, func(t *testing.T) {
+			ctx, leave := context.WithCancel(t.Context())
+			defer leave()
+
+			_, c := openStream(ctx, t, newClient(t), m.URL(path), "")
+
+			ev, err := c.next()
+			require.NoError(t, err)
+			require.Equal(t, []string{"data: first"}, ev)
+		})
+	}
+}
+
+func TestSSE_SendsTheHeadersBeforeTheFirstEvent(t *testing.T) {
+	// EventSource opens once it has the response headers. A stream with nothing to send yet, such as one that keeps
+	// open with no events, sends them at once, gzipped or not, or the client would never open.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	stream := mockhttp.NewEventStream().KeepOpen()
+	m.MustMock(mockhttp.Getf("/plain").Reply(mockhttp.OK().EventStream(stream)))
+	m.MustMock(mockhttp.Getf("/gzip").Reply(mockhttp.OK().Gzip().EventStream(stream)))
+
+	for _, path := range []string{"/plain", "/gzip"} {
+		t.Run(path, func(t *testing.T) {
+			// The deadline only bounds a server that never sends the headers: openStream fails then.
+			ctx, leave := context.WithTimeout(t.Context(), 10*time.Second)
+			defer leave()
+
+			openStream(ctx, t, newClient(t), m.URL(path), "")
+		})
+	}
 }
