@@ -56,8 +56,8 @@ func Funcs() map[string]any {
 		"sortBy":     sortBy,
 		"reverse":    reverse,
 
-		"jsonPath":       jsonPath,
-		"jsonPathAll":    jsonPathAll,
+		"JSONPath":       jsonPath,
+		"JSONPathAll":    jsonPathAll,
 		"deleteJSONPath": deleteJSONPath,
 		"mergePatch":     mergePatch,
 		"indentJSON":     indentJSON,

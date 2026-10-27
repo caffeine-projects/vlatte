@@ -342,7 +342,7 @@ m.MustMock(mockhttp.Postf("/users").Reply(mockhttp.Created().
 
 | Kind | Functions |
 |---|---|
-| JSON | `toJSON v`, `fromJSON text`, `jsonPath path v` (the first value a JSONPath selects in a value or JSON text, or nil), `jsonPathAll path v`, `deleteJSONPath path v`, `mergePatch patch v` ([RFC 7386](https://www.rfc-editor.org/rfc/rfc7386)); each `v` and `patch` is a value or JSON text, so a string is JSON text; `indentJSON text`, `compactJSON text` |
+| JSON | `toJSON v`, `fromJSON text`, `JSONPath path v` (the first value a JSONPath selects in a value or JSON text, or nil), `JSONPathAll path v`, `deleteJSONPath path v`, `mergePatch patch v` ([RFC 7386](https://www.rfc-editor.org/rfc/rfc7386)); each `v` and `patch` is a value or JSON text, so a string is JSON text; `indentJSON text`, `compactJSON text` |
 | Strings | `toUpper`, `toLower`, `trimSpace`, `title`, `upperFirst`, `truncate max s`, `replaceAll old new s`, `split sep s`, `join sep list`, `substring start end s` (end -1 is the end), `slug`; they count runes, not bytes |
 | Regexps | `regexpFind pattern s`, `regexpSubmatch pattern s`, `regexpReplaceAll pattern repl s` (`$1` is a group), `regexpMatch pattern s`, in Go's syntax |
 | Values | `contains item collection` (a substring, a list item or a map key), `default fallback v` (when v is nil, `""` or empty; 0 and false are values) |
@@ -358,9 +358,9 @@ m.MustMock(mockhttp.Postf("/users").Reply(mockhttp.Created().
 ```yaml
 response:
   body: |
-    {"id": {{ jsonPath "$.order.id" .Request.Body.String | toJSON }},
+    {"id": {{ JSONPath "$.order.id" .Request.Body.String | toJSON }},
      "expires": {{ now | timeAdd "30 days" | formatTime "RFC3339" | toJSON }},
-     "items": {{ jsonPathAll "$.order.items[*].sku" .Request.Body.String | len }}}
+     "items": {{ JSONPathAll "$.order.items[*].sku" .Request.Body.String | len }}}
   template:
     enabled: true
 ```

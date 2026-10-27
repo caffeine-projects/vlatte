@@ -10,16 +10,16 @@ const _orderJSON = `{"id": "o-1", "items": [{"sku": "a", "qty": 2}, {"sku": "b",
 
 func TestJSONPath(t *testing.T) {
 	runFuncCases(t, []funcCase{
-		{name: "reads JSON text, such as a request body", text: `{{ jsonPath "$.items[1].sku" . }}`, data: _orderJSON, want: "b"},
-		{name: "reads a value", text: `{{ jsonPath "$.id" (fromJSON .) }}`, data: _orderJSON, want: "o-1"},
-		{name: "reads JSON bytes", text: `{{ jsonPath "$.id" . }}`, data: []byte(_orderJSON), want: "o-1"},
-		{name: "gives the first of many", text: `{{ jsonPath "$.items[*].sku" . }}`, data: _orderJSON, want: "a"},
-		{name: "keeps the type of what it selects", text: `{{ jsonPath "$.items[0]" . | toJSON }}`, data: _orderJSON, want: `{"qty":2,"sku":"a"}`},
-		{name: "nothing selected is nil, for default", text: `{{ jsonPath "$.missing" . | default "none" }}`, data: _orderJSON, want: "none"},
-		{name: "jsonPathAll gives every value", text: `{{ jsonPathAll "$.items[*].qty" . | toJSON }}`, data: _orderJSON, want: "[2,1]"},
-		{name: "jsonPathAll of nothing is an empty list", text: `{{ jsonPathAll "$.missing" . | toJSON }}`, data: _orderJSON, want: "[]"},
-		{name: "text that isn't JSON", text: `{{ jsonPath "$.id" "{" }}`, err: "error calling jsonPath: jsontext: unexpected EOF"},
-		{name: "an invalid path", text: `{{ jsonPath "$[" "{}" }}`, err: "error calling jsonPath: not terminated"},
+		{name: "reads JSON text, such as a request body", text: `{{ JSONPath "$.items[1].sku" . }}`, data: _orderJSON, want: "b"},
+		{name: "reads a value", text: `{{ JSONPath "$.id" (fromJSON .) }}`, data: _orderJSON, want: "o-1"},
+		{name: "reads JSON bytes", text: `{{ JSONPath "$.id" . }}`, data: []byte(_orderJSON), want: "o-1"},
+		{name: "gives the first of many", text: `{{ JSONPath "$.items[*].sku" . }}`, data: _orderJSON, want: "a"},
+		{name: "keeps the type of what it selects", text: `{{ JSONPath "$.items[0]" . | toJSON }}`, data: _orderJSON, want: `{"qty":2,"sku":"a"}`},
+		{name: "nothing selected is nil, for default", text: `{{ JSONPath "$.missing" . | default "none" }}`, data: _orderJSON, want: "none"},
+		{name: "JSONPathAll gives every value", text: `{{ JSONPathAll "$.items[*].qty" . | toJSON }}`, data: _orderJSON, want: "[2,1]"},
+		{name: "JSONPathAll of nothing is an empty list", text: `{{ JSONPathAll "$.missing" . | toJSON }}`, data: _orderJSON, want: "[]"},
+		{name: "text that isn't JSON", text: `{{ JSONPath "$.id" "{" }}`, err: "error calling JSONPath: jsontext: unexpected EOF"},
+		{name: "an invalid path", text: `{{ JSONPath "$[" "{}" }}`, err: "error calling JSONPath: not terminated"},
 	})
 }
 

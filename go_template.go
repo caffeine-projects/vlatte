@@ -27,7 +27,7 @@ var _missingKeyModes = []string{"default", "invalid", "zero", "error"}
 // works on, so it pipes, as in {{ .Request.Header.Get "X-Name" | trimSpace | toUpper }}, but for the list functions,
 // which take the list first, as Go's append does. A function given a bad argument, such as an unknown algorithm or a
 // number that isn't one, fails the template, so a mock never answers with a broken body.
-//   - JSON: toJSON (a value as JSON, such as a quoted and escaped string), fromJSON, jsonPath and jsonPathAll (what a
+//   - JSON: toJSON (a value as JSON, such as a quoted and escaped string), fromJSON, JSONPath and JSONPathAll (what a
 //     JSONPath selects), deleteJSONPath and mergePatch (RFC 7386), which read a value or JSON text, and indentJSON
 //     and compactJSON.
 //   - Strings: toUpper, toLower, trimSpace, title, upperFirst, truncate, replaceAll, split, join, substring and slug,
