@@ -771,7 +771,7 @@ func TestPrep(t *testing.T) {
 
 	err := m.Prep(t.Context(), vlatte.RecipeFunc[*Mock, *Server](
 		func(_ context.Context, in *vlatte.RecipeInput[*Mock, *Server]) error {
-			_, err := in.Flavor.Mock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "from recipe"})))
+			_, err := in.Server.Mock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "from recipe"})))
 			return err
 		}))
 	require.NoError(t, err)

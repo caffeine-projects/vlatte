@@ -33,7 +33,7 @@ import (
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid/recovery"
 )
 
-var _ vlatte.Flavor[*Mock, *Server] = (*Server)(nil)
+var _ vlatte.Server[*Mock, *Server] = (*Server)(nil)
 
 var errAdminStoreWithoutAdmin = errors.New("server: AdminStore needs an admin API: pass ConfigBuilder.Admin")
 
@@ -384,7 +384,7 @@ func prepareGlobalEvents(conf *Config) (*vlatte.Events, error) {
 // It stops at the first recipe that fails and returns its error.
 func (app *Server) Prep(ctx context.Context, recipes ...Recipe) error {
 	for i, recipe := range recipes {
-		if err := recipe.Prep(ctx, &vlatte.RecipeInput[*Mock, *Server]{Flavor: app}); err != nil {
+		if err := recipe.Prep(ctx, &vlatte.RecipeInput[*Mock, *Server]{Server: app}); err != nil {
 			return fmt.Errorf("server: error applying recipe at index %d with type %T\n%w", i, recipe, err)
 		}
 	}

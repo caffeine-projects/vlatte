@@ -12,7 +12,7 @@ import (
 func New(reply *mockhttp.ProxyReply) vlatte.Recipe[*mockhttp.Mock, *mockhttp.Server] {
 	return vlatte.
 		RecipeFunc[*mockhttp.Mock, *mockhttp.Server](func(_ context.Context, input *vlatte.RecipeInput[*mockhttp.Mock, *mockhttp.Server]) error {
-		_, err := input.Flavor.Mock(mockhttp.ProxyAll(reply))
+		_, err := input.Server.Mock(mockhttp.ProxyAll(reply))
 		return err
 	})
 }
