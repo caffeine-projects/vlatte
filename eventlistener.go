@@ -184,12 +184,25 @@ func NewEventRunner(listeners *Listener, global *Events) *EventRunner {
 // too. onErr gets the error, or the panic, of each event that fails, unless Close canceled it, worded like the errors
 // of mocks that name a listener that isn't registered. A closed runner runs nothing.
 func (r *EventRunner) OnComplete(ctx context.Context, mock Mock, argsFn func(ctx context.Context, cfg EventConfig) OnComplete, onErr func(err error)) {
-	closing, ok := r.context()
+	values := context.WithoutCancel(ctx)
+
+	// The events after the response start under the lock Close takes, so Close waits for each one that started.
+	closing, ok := r.context(func(closing context.Context) {
+		for i, def := range r.Global.OnComplete {
+			if def.AfterResponse {
+				r.later(closing, values, "global on_complete listener", i, def, argsFn, onErr)
+			}
+		}
+
+		for i, def := range mock.Events().OnComplete {
+			if def.AfterResponse {
+				r.later(closing, values, "on_complete listener", i, def, argsFn, onErr)
+			}
+		}
+	})
 	if !ok {
 		return
 	}
-
-	values := context.WithoutCancel(ctx)
 
 	ctx, cancel := context.WithCancel(values)
 	defer cancel()
@@ -201,7 +214,6 @@ func (r *EventRunner) OnComplete(ctx context.Context, mock Mock, argsFn func(ctx
 
 	for i, def := range r.Global.OnComplete {
 		if def.AfterResponse {
-			r.later(values, "global on_complete listener", i, def, argsFn, onErr)
 			continue
 		}
 
@@ -210,7 +222,6 @@ func (r *EventRunner) OnComplete(ctx context.Context, mock Mock, argsFn func(ctx
 
 	for i, def := range mock.Events().OnComplete {
 		if def.AfterResponse {
-			r.later(values, "on_complete listener", i, def, argsFn, onErr)
 			continue
 		}
 
@@ -237,18 +248,10 @@ func (r *EventRunner) Close() {
 }
 
 // later runs the listener of def as run does, in a goroutine that OnComplete doesn't wait for, and Close does, with a
-// context that has the values of values and that Close cancels.
-func (r *EventRunner) later(values context.Context, scope string, i int, def EventConfig, argsFn func(context.Context, EventConfig) OnComplete, onErr func(error)) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// Close may have come since OnComplete began: the WaitGroup it waits on takes no event after.
-	if r.closed {
-		return
-	}
-
+// context that has the values of values and that closing's end cancels. Its caller holds r.mu, and the runner is open.
+func (r *EventRunner) later(closing, values context.Context, scope string, i int, def EventConfig, argsFn func(context.Context, EventConfig) OnComplete, onErr func(error)) {
 	ctx, cancel := context.WithCancel(values)
-	stop := context.AfterFunc(r.ctx, cancel)
+	stop := context.AfterFunc(closing, cancel)
 
 	r.late.Go(func() {
 		defer cancel()
@@ -258,8 +261,9 @@ func (r *EventRunner) later(values context.Context, scope string, i int, def Eve
 	})
 }
 
-// context returns the context Close cancels. A closed runner has none.
-func (r *EventRunner) context() (context.Context, bool) {
+// context returns the context Close cancels, once it called start with it, under the lock Close takes. A closed runner
+// has none, and calls nothing.
+func (r *EventRunner) context(start func(closing context.Context)) (context.Context, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -270,6 +274,8 @@ func (r *EventRunner) context() (context.Context, bool) {
 	if r.ctx == nil {
 		r.ctx, r.cancel = context.WithCancel(context.Background())
 	}
+
+	start(r.ctx)
 
 	return r.ctx, true
 }
