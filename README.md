@@ -174,6 +174,7 @@ A gRPC server records as an HTTP one does: see [Recording and playback](#recordi
 | `mockgrpc` | gRPC mock servers |
 | `match` | Request matchers, such as `match.Equal`, `match.JSONPath` and `match.All` |
 | `match/matchbuild` | The matcher lists of mock files, and the registry of custom matchers |
+| `match/matchscenario` | Scenario state for mock servers, and `scenariotest`, the suite a mock server runs to check it serves scenarios |
 | `webhook` | Calling a URL after a mock is served |
 | `recipe/<protocol>/<recipe>` | Recipes that prepare a server, such as `recipe/http/proxyall` |
 | `vlatte` | The types every mock server shares, and the Go template engine |
@@ -838,7 +839,7 @@ The `vlatte` command serves the admin API by default: `admin: false` (`--admin=f
 | `GET /schema` | The [JSON Schema](mockhttp/schema/http.schema.json) of mock files, for clients that write them. A gRPC server answers `501`. |
 | `POST /mocks/reload` | Loads the mock files, and the [persistent store](#persistent-admin-mocks), again, as `m.Reload()` does. A mock file's mock takes the place of a mock added through the admin API with its id. |
 | `POST /mocks/save` | Writes the mocks added through the admin API as mock files, `<id>.mock.<format>`, and serves them from the files from then on. `{"dir": ..., "format": ...}` defaults to `{workdir}/_mocks` and YAML, which the default mock file patterns load on the next start; `dir` stays inside `root_dir`. When a mock can't be written as a mock file that loads back, nothing is written, and files that fail to load are put back as they were. |
-| `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios` | Lists the state of each scenario, moves one to a state, `{"state": "paid"}`, and starts every scenario over. Names are exact: `Checkout` isn't `checkout`. |
+| `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios` | Lists the state of each scenario, moves one to a state, `{"state": "paid"}`, and starts every scenario over. Names ignore case: `Checkout` is `checkout`. |
 | `GET /requests` | Lists the newest requests of the [journal](#request-journal), with their `count`: `?limit=` (100 by default, 1000 at most, `0` for the count alone) and `?before=`, the `next` of a page, page through them. |
 | `QUERY /requests` | Finds and counts the requests a query selects, in the body: see [Request journal](#request-journal). It uses the HTTP [`QUERY`](https://httpwg.org/http-extensions/draft-ietf-httpbis-safe-method-w-body.html) method, safe as `GET` is, with a body: `curl -X QUERY`. |
 | `GET /requests/{id}`, `DELETE /requests` | Gets a request by the id its answer's `VLatte-Request-Id` names, and clears the journal. |

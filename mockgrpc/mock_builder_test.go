@@ -2,6 +2,7 @@ package mockgrpc
 
 import (
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"testing"
 	"time"
@@ -16,6 +17,8 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
+	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
@@ -311,4 +314,71 @@ func TestBuilder_AFailingCallbackDoesntChangeTheAnswer(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "answered", res.GetMessage())
 	<-done
+}
+
+// scenarioServer runs the scenario suite on a server whose mocks are built in Go, or from mock files.
+type scenarioServer struct {
+	m         *Server
+	c         pb.TestServiceClient
+	fromFiles bool
+}
+
+var _ scenariotest.Server = (*scenarioServer)(nil)
+
+func newScenarioServer(fromFiles bool) func(t *testing.T) scenariotest.Server {
+	return func(t *testing.T) scenariotest.Server {
+		m := serve(t)
+
+		return &scenarioServer{m: m, c: client(t, m), fromFiles: fromFiles}
+	}
+}
+
+func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
+	for _, mk := range mocks {
+		if s.fromFiles {
+			doc, err := json.Marshal(map[string]any{
+				"scenario": map[string]string{
+					"name": mk.Scenario, "required_state": mk.RequiredState, "new_state": mk.NewState,
+				},
+				"request":  map[string]string{"method": "Greetings"},
+				"response": map[string]any{"message": map[string]string{"message": mk.ID}},
+			})
+			require.NoError(t, err)
+
+			s.m.MustMock(FromBytes(doc, "json"))
+
+			continue
+		}
+
+		b := Method("Greetings").ScenarioIs(mk.Scenario).Reply(Message(&pb.HiRes{Message: mk.ID}))
+		if mk.RequiredState != "" {
+			b.ScenarioStateIs(mk.RequiredState)
+		}
+
+		if mk.NewState != "" {
+			b.ScenarioStateWillBe(mk.NewState)
+		}
+
+		s.m.MustMock(b)
+	}
+}
+
+func (s *scenarioServer) Call(t *testing.T) string {
+	got, code := greetWith(t, s.c, "")
+
+	switch code {
+	case codes.OK:
+		return got
+	case codes.NotFound:
+		return ""
+	default:
+		t.Fatalf("want a mock's answer or no match, got %s", code)
+		return ""
+	}
+}
+
+func (s *scenarioServer) Store() *matchscenario.Store { return s.m.scenarios }
+
+func TestBuilder_ServesScenarios(t *testing.T) {
+	scenariotest.Run(t, newScenarioServer(false))
 }

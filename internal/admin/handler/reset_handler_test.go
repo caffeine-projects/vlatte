@@ -10,8 +10,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
-	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 func TestReset(t *testing.T) {
@@ -23,7 +23,7 @@ func TestReset(t *testing.T) {
 
 	store := newStore(t, added, fromFile)
 	files := &fakeFiles{}
-	scenarios := mfeat.NewScenarioStore()
+	scenarios := matchscenario.New()
 	scenarios.SetScenario("checkout", "paid")
 
 	url := serve(t, store, adminapi.Capabilities{Files: files, Scenarios: scenarios})
@@ -80,7 +80,7 @@ func TestReset_FilesThatFailToLoad(t *testing.T) {
 	added := newFake("added")
 	added.origin = adminapi.Origin
 	store := newStore(t, added)
-	scenarios := mfeat.NewScenarioStore()
+	scenarios := matchscenario.New()
 	scenarios.SetScenario("checkout", "paid")
 
 	files := &fakeFiles{err: errors.New("loader: pattern [: syntax error in pattern")}
@@ -101,7 +101,7 @@ func TestReset_AStoreThatFailsAfterTheReload(t *testing.T) {
 	added.origin = adminapi.Origin
 	store := &brokenStore{MemoryStore: new(vlatte.MemoryStore[*fakeMock])}
 	require.NoError(t, store.Store(t.Context(), added))
-	scenarios := mfeat.NewScenarioStore()
+	scenarios := matchscenario.New()
 	scenarios.SetScenario("checkout", "paid")
 
 	files := &fakeFiles{onReload: func() { store.pickAllErr = errors.New("store: broken") }}
