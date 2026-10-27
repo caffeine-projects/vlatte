@@ -62,3 +62,25 @@ func (m *Matcher) Describe() descriptor.Descriptor {
 		"new_state":      m.next,
 	})
 }
+
+// Move is a move of a scenario a mock makes when it is picked: from the state it requires, empty when it requires none,
+// to its new state.
+type Move struct {
+	Scenario string `json:"scenario"`
+	From     string `json:"from,omitempty"`
+	To       string `json:"to"`
+}
+
+// Move returns the move the mock makes when it is picked, and false when it has no new state, so moves nothing.
+func (m *Matcher) Move() (Move, bool) {
+	return Move{Scenario: m.name, From: m.required, To: m.next}, m.next != ""
+}
+
+// String says what the move does, such as "checkout moved from started to paid".
+func (mv Move) String() string {
+	if mv.From == "" {
+		return mv.Scenario + " moved to " + mv.To
+	}
+
+	return mv.Scenario + " moved from " + mv.From + " to " + mv.To
+}

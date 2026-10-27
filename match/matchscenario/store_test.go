@@ -85,3 +85,14 @@ func TestStore_IsSafeForConcurrentUse(t *testing.T) {
 
 	require.Len(t, store.Scenarios(), 1)
 }
+
+func TestView_ReadsTheStateOfAScenario(t *testing.T) {
+	// Templates read a scenario's state through a view, whatever the case of its name.
+	store := New()
+	view := store.View()
+
+	require.Equal(t, StateStarted, view.State("checkout"))
+
+	store.SetScenario("Checkout", "paid")
+	require.Equal(t, "paid", view.State("CHECKOUT"))
+}

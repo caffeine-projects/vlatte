@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"time"
 
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
@@ -28,14 +30,26 @@ func (app *Server) SetScenario(ctx context.Context, name, state string) error {
 		return err
 	}
 
-	return app.scenarios.Move(uses, name, state)
+	if err := app.scenarios.Move(uses, name, state); err != nil {
+		return err
+	}
+
+	app.publishScenario(name, name+" set to "+state)
+
+	return nil
 }
 
 // ResetScenario moves the scenario name back to [matchscenario.StateStarted].
-func (app *Server) ResetScenario(name string) { app.scenarios.ResetScenario(name) }
+func (app *Server) ResetScenario(name string) {
+	app.scenarios.ResetScenario(name)
+	app.publishScenario(name, name+" reset to "+matchscenario.StateStarted)
+}
 
 // ResetScenarios moves every scenario back to [matchscenario.StateStarted].
-func (app *Server) ResetScenarios() { app.scenarios.ResetScenarios() }
+func (app *Server) ResetScenarios() {
+	app.scenarios.ResetScenarios()
+	app.publishScenario("", "every scenario reset to "+matchscenario.StateStarted)
+}
 
 // scenarioUses lists the scenario matchers of the server's mocks.
 func (app *Server) scenarioUses(ctx context.Context) (iter.Seq[matchscenario.Use], error) {
@@ -53,4 +67,46 @@ func (app *Server) scenarioUses(ctx context.Context) (iter.Seq[matchscenario.Use
 			}
 		}
 	}, nil
+}
+
+// movedScenarios returns the moves of the scenarios of mock, which Find picked for the call of ctx, and publishes them to
+// the admin API's events.
+func (app *Server) movedScenarios(ctx context.Context, mock *Mock) []matchscenario.Move {
+	var moves []matchscenario.Move
+
+	for _, e := range mock.expectations {
+		sm, ok := e.Matcher.(*matchscenario.Matcher)
+		if !ok {
+			continue
+		}
+
+		mv, ok := sm.Move()
+		if !ok {
+			continue
+		}
+
+		moves = append(moves, mv)
+
+		if app.events != nil {
+			event := adminapi.Event{
+				Type: adminapi.EventScenario, Time: time.Now(), Target: mv.Scenario, MockID: mock.ID(),
+				Message: mv.String(),
+			}
+			if call := callOf(ctx); call != nil {
+				event.RequestID = call.entry.ID
+			}
+
+			app.events.Publish(event)
+		}
+	}
+
+	return moves
+}
+
+// publishScenario publishes a move of the scenario target, or of every scenario when it is empty, which no request made,
+// to the admin API's events.
+func (app *Server) publishScenario(target, message string) {
+	if app.events != nil {
+		app.events.Publish(adminapi.Event{Type: adminapi.EventScenario, Time: time.Now(), Target: target, Message: message})
+	}
 }

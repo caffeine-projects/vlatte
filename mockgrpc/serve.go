@@ -87,7 +87,7 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 			call.method)
 	}
 
-	journaled.matched(mock)
+	journaled.matched(mock, app.movedScenarios(ctx, mock))
 
 	// A client that leaves during the delay gets nothing: the mock doesn't reply, nor count the call. Its scenario moved
 	// already, when Find picked it.

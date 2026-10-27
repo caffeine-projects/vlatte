@@ -160,3 +160,21 @@ func TestMatcher_DescribesAsTheScenarioOfAMockFile(t *testing.T) {
 		"new_state":      "paid",
 	}), m.Describe())
 }
+
+func TestMatcher_MoveIsWhatAPickDoes(t *testing.T) {
+	// A server records the move of the mock it picked, in its journal and its events: from the state the mock
+	// requires, to its new state.
+	store := New()
+
+	mv, ok := store.Matcher("checkout", StateStarted, "paid").Move()
+	require.True(t, ok)
+	require.Equal(t, Move{Scenario: "checkout", From: StateStarted, To: "paid"}, mv)
+	require.Equal(t, "checkout moved from started to paid", mv.String())
+
+	mv, ok = store.Matcher("checkout", "", "paid").Move()
+	require.True(t, ok)
+	require.Equal(t, "checkout moved to paid", mv.String())
+
+	_, ok = store.Matcher("checkout", "paid", "").Move()
+	require.False(t, ok, "a mock without a new state moves nothing")
+}

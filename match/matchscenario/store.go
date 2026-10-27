@@ -82,6 +82,11 @@ func (s *Store) ResetScenarios() {
 	}
 }
 
+// View returns a view of s that sees every later move. A zero View reads no store, and panics.
+func (s *Store) View() View {
+	return View{store: s}
+}
+
 // claim moves the scenario name from required to next, as [Matcher.Claim] does.
 func (s *Store) claim(name, required, next string) bool {
 	s.mu.Lock()
@@ -131,4 +136,14 @@ func key(name string) string {
 
 		return least
 	}, name)
+}
+
+// View reads the states of the scenarios of a [Store], and changes none: what templates get.
+type View struct {
+	store *Store
+}
+
+// State returns the state of the scenario name, whatever its case, as [Store.State] does.
+func (v View) State(name string) string {
+	return v.store.State(name)
 }

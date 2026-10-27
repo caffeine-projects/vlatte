@@ -99,7 +99,7 @@ A client streaming call matches once the client closed its side, on all its mess
 | `Message(msg)` | A message, which must be of the method's output type. |
 | `Messages(msgs...)` | The messages of a server or bidi stream, in turn. |
 | `JSON(texts...)` | The messages `texts` hold, in the method's output type. |
-| `Template(texts...)` | Like `JSON`, rendered for each call: `{"message": "hi {{ .Request.Message.name }}"}`, with `.Request.Header` and `.Parameters`. |
+| `Template(texts...)` | Like `JSON`, rendered for each call: `{"message": "hi {{ .Request.Message.name }}"}`, with `.Request.Header`, `.Parameters` and `.Scenarios.State "name"`. |
 | `Status(code, msg)` | A status, with no message. |
 | `Bidi()` | A bidi stream, message by message: `On(matcher, reply)`, `Otherwise(reply)`, `OnEnd(reply)`. |
 | `Seq(replies...)` | Each reply in turn, one per call, a stream as a whole, then `OnSequenceEnded(reply)`'s. A call past the end without it fails with the `vlatte-error` trailer. |
@@ -338,6 +338,8 @@ response: {status: 200, body: '{"id": 1}'}
 - **In Go,** `m.Scenarios(ctx)` lists each scenario with its state, the states its mocks name, flagging those no mock moves to, and which mock moves it where. `m.SetScenario(ctx, name, state)` moves a scenario, and refuses a state none of its mocks names with `matchscenario.ErrUnknownState`; a scenario no mock names takes any state. `m.ResetScenario(name)` and `m.ResetScenarios()` start them over.
 - **In the [admin API](#admin-api),** `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios/{name}` and `DELETE /scenarios` do the same.
 - **A request no mock matched** names the scenario a mock waits on: `differs in scenario order needs created, is started`.
+- **Templates** read a scenario's state, the one its mock moved it to: `{{ .Scenarios.State "checkout" }}`. One mock can then answer in every state.
+- **The [journal](#request-journal)** keeps the moves of each request's mock under `scenarios`, and [`GET /events`](#admin-api) streams a `scenario` event for each move, by a request or by the methods and admin API above.
 
 gRPC mocks take part in scenarios the same way.
 
@@ -386,6 +388,7 @@ m.MustMock(mockhttp.Postf("/users").Reply(mockhttp.Created().
 | `.Data` | The map set with `m.SetData`. |
 | `.Provided.<key>` | What `Setup().TemplateDataProviders(...)` provide. |
 | `.Extra` | The reply's `template.data`, or `SetTemplateData` in Go. Webhooks don't have it. |
+| `.Scenarios.State "name"` | The state of a [scenario](#scenarios). |
 
 **Functions.** Besides those of Go templates, such as `if`, `range`, `eq`, `len`, `index`, `slice`, `printf`, `html` and `urlquery`, templates call the functions below. The value a function works on comes last, so it pipes: `{{ .Request.Header.Get "X-Name" | trimSpace | toUpper }}`. List functions take the list first, as Go's `append` does. A bad argument, such as an unknown algorithm or a division by zero, fails the template.
 
@@ -870,11 +873,11 @@ The `vlatte` command serves the admin API by default: `admin: false` (`--admin=f
 | `GET /schema` | The [JSON Schema](mockhttp/schema/http.schema.json) of mock files, for clients that write them. A gRPC server answers `501`. |
 | `POST /mocks/reload` | Loads the mock files, and the [persistent store](#persistent-admin-mocks), again, as `m.Reload()` does. A mock file's mock takes the place of a mock added through the admin API with its id. |
 | `POST /mocks/save` | Writes the mocks added through the admin API as mock files, `<id>.mock.<format>`, and serves them from the files from then on. `{"dir": ..., "format": ...}` defaults to `{workdir}/_mocks` and YAML, which the default mock file patterns load on the next start; `dir` stays inside `root_dir`. When a mock can't be written as a mock file that loads back, nothing is written, and files that fail to load are put back as they were. |
-| `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios` | Lists the state of each scenario, moves one to a state, `{"state": "paid"}`, and starts every scenario over. Names ignore case: `Checkout` is `checkout`. |
+| `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios/{name}`, `DELETE /scenarios` | Lists the state of each scenario, moves one to a state, `{"state": "paid"}`, starts one over, and starts every scenario over. Names ignore case: `Checkout` is `checkout`. |
 | `GET /requests` | Lists the newest requests of the [journal](#request-journal), with their `count`: `?limit=` (100 by default, 1000 at most, `0` for the count alone) and `?before=`, the `next` of a page, page through them. |
 | `QUERY /requests` | Finds and counts the requests a query selects, in the body: see [Request journal](#request-journal). It uses the HTTP [`QUERY`](https://httpwg.org/http-extensions/draft-ietf-httpbis-safe-method-w-body.html) method, safe as `GET` is, with a body: `curl -X QUERY`. |
 | `GET /requests/{id}`, `DELETE /requests` | Gets a request by the id its answer's `VLatte-Request-Id` names, and clears the journal. |
-| `GET /events` | Streams what the server serves as it happens, as [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html): requests a mock answered, requests no mock matched, proxied requests, warnings and errors. Nothing is kept: the [journal](#request-journal) keeps the requests. `curl -N <admin>/events` follows it. |
+| `GET /events` | Streams what the server serves as it happens, as [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html): requests a mock answered, requests no mock matched, proxied requests, warnings, errors and [scenario](#scenarios) moves. Nothing is kept: the [journal](#request-journal) keeps the requests. `curl -N <admin>/events` follows it. |
 | `GET /logs` | Streams the server's log lines, as it writes them, as Server-Sent Events. A server given its own `Logger` streams none. |
 | `POST /recording`, `GET /recording`, `DELETE /recording` | Starts a [recording](#recording-and-playback) with the keys of the `record` section, counts its calls, and stops it, listing the files it wrote. |
 | `GET /recorder` | A page that records a service from a browser. |

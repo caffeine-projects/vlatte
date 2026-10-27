@@ -10,6 +10,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/params"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 var _ vlatte.Kit = (*Kit)(nil)
@@ -26,6 +27,10 @@ type TemplateData struct {
 
 	// Parameters reads the server's parameters: {{ .Parameters.Get "key" }}.
 	Parameters *Parameters
+
+	// Scenarios reads the state of the server's scenarios: {{ .Scenarios.State "checkout" }}. The scenario of the mock
+	// that matched has moved already, when the server picked it.
+	Scenarios matchscenario.View
 }
 
 // TemplateRequest is the call being served, to templates.
@@ -98,5 +103,6 @@ func (app *Server) templateData(ctx context.Context, call *Call) *TemplateData {
 			Message: msg,
 		},
 		Parameters: params.New(ctx, app.config.Parameters),
+		Scenarios:  app.scenarios.View(),
 	}
 }
