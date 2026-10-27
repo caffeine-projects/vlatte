@@ -172,7 +172,8 @@ func (b *Builder) Messages(msgs ...proto.Message) *Builder {
 	return b.messages("messages", msgs)
 }
 
-// CallMatches matches a call fn reports true for. fn reads the call as matchers do, with its request: see [Call].
+// CallMatches matches a call fn reports true for. fn reads the call as matchers do, with its request: see [Call]. A
+// mock file can't hold a function: describing a mock with it fails, so the admin API can't show the mock, nor save it.
 func (b *Builder) CallMatches(fn func(call *Call) (bool, error)) *Builder {
 	b.described.undescribable = true
 	b.readsRequest = true
@@ -196,7 +197,8 @@ func (b *Builder) CallMatches(fn func(call *Call) (bool, error)) *Builder {
 // Matches adds a matcher of the whole call: m gets the *Call, as the function of CallMatches does. A mock file's
 // request.custom adds matchers this way, such as custom ones of the server's registry: see
 // [ConfigBuilder.Matchers]. Unlike a function, a matcher that describes itself is described, under request.custom,
-// so the admin API's store keeps it.
+// so the admin API's store keeps it. Describing a mock with a matcher that doesn't, here or in any other method, fails,
+// as with [Builder.CallMatches].
 func (b *Builder) Matches(m vlatte.Matcher) *Builder {
 	b.described.custom = append(b.described.custom, m)
 	b.readsRequest = true
@@ -263,7 +265,7 @@ func (b *Builder) Delay(d time.Duration) *Builder {
 }
 
 // DelayFunc sets a function that picks the delay before each reply, such as [vlatte.Jitter] or
-// [vlatte.UniformDistribution].
+// [vlatte.UniformDistribution]. Describing a mock with it fails, as with [Builder.CallMatches].
 func (b *Builder) DelayFunc(delay vlatte.Delay) *Builder {
 	b.delay, b.delayDuration, b.delayFunc = delay, 0, delay != nil
 	return b
@@ -274,7 +276,7 @@ func (b *Builder) DelayFunc(delay vlatte.Delay) *Builder {
 // call ends after it, so a test checks what it did right after the call. fn gets an [*OnComplete], read-only as the
 // events run at the same time, and a context that the client leaving doesn't end, and [Server.Close] does. An error
 // or a panic of fn is logged as a warning, and told by the call's journal entry, unless Close canceled it, and never
-// changes the answer. Mock files can't set callbacks, and a mock's description leaves them out.
+// changes the answer. Mock files can't set callbacks: describing a mock with one fails, as with [Builder.CallMatches].
 func (b *Builder) Callback(fn vlatte.EventFunc[vlatte.OnComplete]) *Builder {
 	b.events = append(b.events, vlatte.EventConfig{Name: "callback", Listener: fn})
 	return b
@@ -282,7 +284,8 @@ func (b *Builder) Callback(fn vlatte.EventFunc[vlatte.OnComplete]) *Builder {
 
 // OnCompleteEvent adds an on_complete event to the mock, such as a webhook: it runs once the mock replied, and the
 // call ends after it, unless cfg.AfterResponse is set: see [vlatte.EventConfig.AfterResponse]. Unless it carries its
-// own Listener, its Name names a listener the server registered: see [ConfigBuilder.OnCompleteListener].
+// own Listener, its Name names a listener the server registered: see [ConfigBuilder.OnCompleteListener]. Describing a
+// mock with an event that carries its own Listener fails, as with [Builder.Callback].
 func (b *Builder) OnCompleteEvent(cfg vlatte.EventConfig) *Builder {
 	b.events = append(b.events, cfg)
 	return b
