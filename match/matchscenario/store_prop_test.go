@@ -63,13 +63,22 @@ func TestStore_KeepsStateAsAModelDoes(t *testing.T) {
 				state, started := md.states[strings.ToLower(name)]
 				require.Equal(t, required == "" || !started || state == required, ok)
 			},
-			"answer": func(t *rapid.T) {
+			"claim": func(t *rapid.T) {
 				name := rapid.SampledFrom(_names).Draw(t, "name")
+				required := rapid.SampledFrom(_states).Draw(t, "required")
 				next := rapid.SampledFrom(_states).Draw(t, "next")
 
-				require.NoError(t, store.Matcher(name, "", next).SetState())
+				claimed := store.Matcher(name, required, next).Claim()
 
-				if next != "" {
+				if required == StateStarted {
+					md.start(name)
+				}
+
+				state, started := md.states[strings.ToLower(name)]
+				want := required == "" || !started || state == required
+				require.Equal(t, want, claimed)
+
+				if want && next != "" {
 					md.start(name)
 					md.states[strings.ToLower(name)] = next
 				}

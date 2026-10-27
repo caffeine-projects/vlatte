@@ -3,6 +3,8 @@
 package scenariotest
 
 import (
+	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -21,7 +23,7 @@ type Mock struct {
 	// RequiredState is the state the scenario must be in for the mock to match. Empty matches in any state.
 	RequiredState string
 
-	// NewState is the state the scenario moves to once the mock answered. Empty leaves it where it is.
+	// NewState is the state the scenario moves to when the mock is picked to answer. Empty leaves it where it is.
 	NewState string
 }
 
@@ -117,6 +119,38 @@ func Run(t *testing.T, newServer func(t *testing.T) Server) {
 		require.Equal(t, "pay", srv.Call(t))
 		require.Equal(t, "refund", srv.Call(t))
 		require.Equal(t, map[string]string{"Checkout": "refunded"}, srv.Store().Scenarios(), "one scenario, as first named")
+	})
+
+	t.Run("concurrent requests take one turn each", func(t *testing.T) {
+		// Picking a mock and moving its scenario is one step: two requests in started never both get the mock of
+		// started, as they would if the state moved only after the answer.
+		srv := newServer(t)
+		srv.Mock(t,
+			Mock{ID: "pay", Scenario: "checkout", RequiredState: matchscenario.StateStarted, NewState: "paid"},
+			Mock{ID: "refund", Scenario: "checkout", RequiredState: "paid", NewState: "refunded"},
+			Mock{ID: "done", Scenario: "checkout", RequiredState: "refunded"},
+		)
+
+		const calls = 30
+
+		var mu sync.Mutex
+		got := make(map[string]int)
+
+		t.Run("calls", func(t *testing.T) {
+			for i := range calls {
+				t.Run(strconv.Itoa(i), func(t *testing.T) {
+					t.Parallel()
+
+					id := srv.Call(t)
+
+					mu.Lock()
+					got[id]++
+					mu.Unlock()
+				})
+			}
+		})
+
+		require.Equal(t, map[string]int{"pay": 1, "refund": 1, "done": calls - 2}, got)
 	})
 
 	t.Run("servers keep their own scenarios", func(t *testing.T) {

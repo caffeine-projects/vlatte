@@ -34,7 +34,7 @@ func TestStore_ResetStartsEveryScenarioOver(t *testing.T) {
 	store := New()
 	pay := store.Matcher("checkout", StateStarted, "paid")
 	require.True(t, match(t, pay))
-	require.NoError(t, pay.SetState())
+	require.True(t, pay.Claim())
 	store.SetScenario("Refund", "asked")
 
 	store.ResetScenarios()
@@ -63,7 +63,7 @@ func TestStore_IsSafeForConcurrentUse(t *testing.T) {
 		wg.Go(func() {
 			m := store.Matcher("checkout", StateStarted, "paid")
 			m.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), nil))
-			m.SetState()
+			m.Claim()
 			store.SetScenario("Checkout", "refunded")
 			store.Scenarios()
 			store.ResetScenarios()

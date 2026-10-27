@@ -176,7 +176,7 @@ var _mockSchema = config.NewSchema(
 		},
 	},
 	mockField{
-		Key: "scenario.new_state", Kind: config.String, Usage: "State the scenario moves to once the mock answered.",
+		Key: "scenario.new_state", Kind: config.String, Usage: "State the scenario moves to when the mock is picked to answer.",
 		Set: func(d *mockDef, v config.Value) error { d.scenario.set, d.scenario.newState = true, v.Str; return nil },
 	},
 	mockField{

@@ -2038,3 +2038,32 @@ func TestHandler_CallbacksRunOnlyForAServedMock(t *testing.T) {
 		})
 	}
 }
+
+func TestHandler_AScenarioMovesBeforeItsMockAnswers(t *testing.T) {
+	// A client that gets part of the answer, as of a large or streamed body, and calls again at once must match in the
+	// new state: a request sent while the mock still answers already does.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	during := make(chan int, 1)
+	m.MustMock(
+		Getf("/pay").StartScenario("checkout").ScenarioStateWillBe("paid").
+			Reply(Handler(func(w http.ResponseWriter, r *http.Request) {
+				res, err := _rawClient.Get(m.URL("/receipt"))
+				if err != nil {
+					during <- 0
+					return
+				}
+
+				res.Body.Close()
+				during <- res.StatusCode
+				w.WriteHeader(http.StatusOK)
+			})),
+		Getf("/receipt").ScenarioIs("checkout").ScenarioStateIs("paid").Reply(Status(http.StatusAccepted)),
+	)
+
+	res, _ := do(t, http.MethodGet, m.URL("/pay"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, http.StatusAccepted, <-during, "the receipt of paid answered while pay still answered")
+}

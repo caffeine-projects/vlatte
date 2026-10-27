@@ -7,7 +7,7 @@ import (
 
 var (
 	_ vlatte.Matcher             = (*Matcher)(nil)
-	_ vlatte.Stateful            = (*Matcher)(nil)
+	_ vlatte.Claimer             = (*Matcher)(nil)
 	_ descriptor.SelfDescriptive = (*Matcher)(nil)
 )
 
@@ -20,8 +20,8 @@ type Matcher struct {
 }
 
 // Matcher returns the matcher of a mock of the scenario name. It matches while the scenario is in required, and in
-// any state when required is empty. Once the mock answered, [Matcher.SetState] moves the scenario to next, and leaves
-// it where it is when next is empty.
+// any state when required is empty. When the mock is picked to answer, [Matcher.Claim] moves the scenario to next, and
+// leaves it where it is when next is empty.
 func (s *Store) Matcher(name, required, next string) *Matcher {
 	return &Matcher{store: s, name: name, required: required, next: next}
 }
@@ -41,16 +41,11 @@ func (m *Matcher) Match(_ vlatte.MatcherArg) (bool, error) {
 	return !ok || state == m.required, nil
 }
 
-// SetState implements vlatte.Stateful. It moves the scenario to the mock's new state, starting it when no mock did
-// yet.
-func (m *Matcher) SetState() error {
-	if m.next == "" {
-		return nil
-	}
-
-	m.store.SetScenario(m.name, m.next)
-
-	return nil
+// Claim implements vlatte.Claimer. In one step, it checks the scenario is still in the state the mock requires and
+// moves it to the mock's new state, starting it when no mock did yet. It reports false, moving nothing, when another
+// request moved the scenario since the mock matched.
+func (m *Matcher) Claim() bool {
+	return m.store.claim(m.name, m.required, m.next)
 }
 
 // Describe implements descriptor.SelfDescriptive.

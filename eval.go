@@ -73,6 +73,10 @@ type Mocks[M Mock, TIn any] iter.Seq[M]
 // It returns the mock that matched and a boolean indicating if a match was found.
 // misses, when not nil, starts over and keeps each mock that didn't match, with the part it stopped at, which
 // [Misses.NearMisses] goes on from.
+//
+// The mock found has taken the turn of its [Claimer] matcher. When another request took it first, Find looks again from
+// the first mock, as the mocks now match in the state that request left. A retry adds to sub. Find stops with the
+// error of ctx once it ends.
 func (mocks Mocks[M, TIn]) Find(
 	ctx context.Context,
 	sub *Explanation,
@@ -80,6 +84,27 @@ func (mocks Mocks[M, TIn]) Find(
 	evals GetEvals[M, TIn],
 	misses *Misses[M, TIn],
 ) (M, bool, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			var nothing M
+			return nothing, false, err
+		}
+
+		mock, found, claimed, err := mocks.find(ctx, sub, in, evals, misses)
+		if err != nil || !found || claimed {
+			return mock, found, err
+		}
+	}
+}
+
+// find is one search of [Mocks.Find]. It reports whether the mock it found took the turns of its [Claimer] matchers.
+func (mocks Mocks[M, TIn]) find(
+	ctx context.Context,
+	sub *Explanation,
+	in TIn,
+	evals GetEvals[M, TIn],
+	misses *Misses[M, TIn],
+) (M, bool, bool, error) {
 	if misses != nil {
 		misses.in, misses.evals, misses.tried = in, evals, misses.tried[:0]
 	}
@@ -90,7 +115,7 @@ func (mocks Mocks[M, TIn]) Find(
 		stop, err := e.stop(ctx, sub, in)
 		if err != nil {
 			var nothing M
-			return nothing, false, fmt.Errorf("%w: %s: %w", ErrMatching, mock.String(), err)
+			return nothing, false, false, fmt.Errorf("%w: %s: %w", ErrMatching, mock.String(), err)
 		}
 
 		if stop == len(e) {
@@ -98,7 +123,13 @@ func (mocks Mocks[M, TIn]) Find(
 				misses.tried = misses.tried[:0]
 			}
 
-			return mock, true, nil
+			claimed, err := e.claim()
+			if err != nil {
+				var nothing M
+				return nothing, false, false, fmt.Errorf("%w: %s: %w", ErrMatching, mock.String(), err)
+			}
+
+			return mock, true, claimed, nil
 		}
 
 		if misses != nil {
@@ -107,7 +138,7 @@ func (mocks Mocks[M, TIn]) Find(
 	}
 
 	var nothing M
-	return nothing, false, nil
+	return nothing, false, false, nil
 }
 
 // Evaluators is a list of evaluators.
@@ -118,6 +149,38 @@ type Evaluators[M Mock, TIn any] []*Eval[TIn]
 func (e Evaluators[M, TIn]) Eval(ctx context.Context, sub *Explanation, in TIn) (bool, error) {
 	stop, err := e.stop(ctx, sub, in)
 	return err == nil && stop == len(e), err
+}
+
+// claim takes the turns of the [Claimer] matchers, in order, up to the first another request took: it reports whether
+// it took them all.
+func (e Evaluators[M, TIn]) claim() (claimed bool, err error) {
+	for i, eval := range e {
+		c, ok := eval.Matcher.(Claimer)
+		if !ok {
+			continue
+		}
+
+		if claimed, err = claimOne(c); err != nil || !claimed {
+			if err != nil {
+				err = fmt.Errorf("eval[%d][%s]: %w", i, eval.String(), err)
+			}
+
+			return claimed, err
+		}
+	}
+
+	return true, nil
+}
+
+// claimOne takes the turn of c, turning a panic into an error, as [Eval.Match] does.
+func claimOne(c Claimer) (claimed bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%w: Claim: type: %T %v", ErrMatchPanicked, c, r)
+		}
+	}()
+
+	return c.Claim(), nil
 }
 
 // stop evaluates the input against the evaluators in order, up to the first that doesn't match: it returns its

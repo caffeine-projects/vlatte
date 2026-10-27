@@ -25,11 +25,11 @@ func TestMatcher_AScenarioMovesThroughItsStates(t *testing.T) {
 
 	require.True(t, match(t, pay))
 	require.False(t, match(t, refund), "the scenario is still where it started")
-	require.NoError(t, pay.SetState())
+	require.True(t, pay.Claim())
 
 	require.False(t, match(t, pay), "the scenario moved on to paid")
 	require.True(t, match(t, refund))
-	require.NoError(t, refund.SetState())
+	require.True(t, refund.Claim())
 	require.Equal(t, map[string]string{"checkout": "refunded"}, store.Scenarios())
 }
 
@@ -65,13 +65,28 @@ func TestMatcher_NoRequiredStateMatchesInAnyState(t *testing.T) {
 	}
 }
 
+func TestMatcher_AClaimLostToAnotherRequestMovesNothing(t *testing.T) {
+	// Two requests in started both match the mock of started; the one that claims second must not move the scenario
+	// again, so it looks for the mock of paid instead.
+	store := New()
+	first := store.Matcher("checkout", StateStarted, "paid")
+	second := store.Matcher("checkout", StateStarted, "paid")
+
+	require.True(t, match(t, first))
+	require.True(t, match(t, second))
+
+	require.True(t, first.Claim())
+	require.False(t, second.Claim())
+	require.Equal(t, map[string]string{"checkout": "paid"}, store.Scenarios())
+}
+
 func TestMatcher_ANewStateStartsTheScenario(t *testing.T) {
 	// A mock that requires no state still moves its scenario, one no mock started too.
 	store := New()
 	move := store.Matcher("checkout", "", "paid")
 
 	require.True(t, match(t, move))
-	require.NoError(t, move.SetState())
+	require.True(t, move.Claim())
 	require.Equal(t, map[string]string{"checkout": "paid"}, store.Scenarios())
 }
 
@@ -79,7 +94,7 @@ func TestMatcher_NoNewStateLeavesTheScenarioWhereItIs(t *testing.T) {
 	store := New()
 	store.SetScenario("checkout", "paid")
 
-	require.NoError(t, store.Matcher("checkout", "paid", "").SetState())
+	require.True(t, store.Matcher("checkout", "paid", "").Claim())
 	require.Equal(t, map[string]string{"checkout": "paid"}, store.Scenarios())
 }
 
@@ -90,7 +105,7 @@ func TestMatcher_NamesIgnoreCase(t *testing.T) {
 	pay := store.Matcher("Checkout", StateStarted, "paid")
 
 	require.True(t, match(t, pay))
-	require.NoError(t, pay.SetState())
+	require.True(t, pay.Claim())
 
 	require.False(t, match(t, store.Matcher("checkout", StateStarted, "")))
 	require.True(t, match(t, store.Matcher("CHECKOUT", "paid", "")))
@@ -103,11 +118,11 @@ func TestMatcher_NamesIgnoreCaseAsEqualFoldDoes(t *testing.T) {
 	for _, names := range [][2]string{{"σ", "ς"}, {"ΣΑΣ", "σας"}, {"K", "\u212a"}} {
 		t.Run(names[0], func(t *testing.T) {
 			store := New()
-			require.NoError(t, store.Matcher(names[0], "", "paid").SetState())
+			require.True(t, store.Matcher(names[0], "", "paid").Claim())
 
 			refund := store.Matcher(names[1], "paid", "refunded")
 			require.True(t, match(t, refund))
-			require.NoError(t, refund.SetState())
+			require.True(t, refund.Claim())
 			require.Equal(t, map[string]string{names[0]: "refunded"}, store.Scenarios())
 		})
 	}
@@ -119,7 +134,7 @@ func TestMatcher_StoresAreIsolated(t *testing.T) {
 	payA := a.Matcher("checkout", StateStarted, "paid")
 
 	require.True(t, match(t, payA))
-	require.NoError(t, payA.SetState())
+	require.True(t, payA.Claim())
 
 	require.True(t, match(t, b.Matcher("checkout", StateStarted, "")))
 	require.Equal(t, map[string]string{"checkout": StateStarted}, b.Scenarios())

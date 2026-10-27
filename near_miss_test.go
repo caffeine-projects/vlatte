@@ -128,6 +128,22 @@ func TestNearMisses_RunsNoMatcherThatKeepsState(t *testing.T) {
 	}, got)
 }
 
+func TestNearMisses_RunsNoMatcherThatClaimsATurn(t *testing.T) {
+	// A scenario's matcher takes its turn only when its mock is found, but its match may still start the scenario: the
+	// report runs none, and names it.
+	turn := &turnMatcher{}
+	m := newFakeMockWith("m", 0)
+
+	got := nearMisses(t, map[*fakeMock][]*vlatte.Eval[request]{
+		m: {part("method", match.Equal("GET")), part("path", match.Equal("/b")), {Key: "scenario", Matcher: turn}},
+	}, []*fakeMock{m}, request{"method": "GET", "path": "/a"})
+
+	require.Zero(t, turn.matches)
+	require.Equal(t, []vlatte.NearMiss{
+		{MockID: "m", Name: "m", Passed: 1, Total: 2, Failed: []string{"path"}, Skipped: []string{"scenario"}},
+	}, got)
+}
+
 func TestNearMisses_RanksByThePartsOfTheRequest(t *testing.T) {
 	// A test that sent the request a mock wants, to a mock used up, needs to read that mock first, ahead of one
 	// that matched more parts but wants another request. A part that keeps state and passed is no part of the

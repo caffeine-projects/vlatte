@@ -47,3 +47,26 @@ func TestServer_AnUnknownMethodIsUnimplemented(t *testing.T) {
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.HeaderFailure))
 }
+
+func TestServer_AScenarioMovesBeforeItsMockAnswers(t *testing.T) {
+	// A client that gets the answer and calls again at once must match in the new state: a call sent while the mock
+	// still answers already does.
+	m := serve(t)
+	c := client(t, m)
+
+	during := make(chan string, 1)
+	m.MustMock(
+		Method("Greetings").StartScenario("checkout").ScenarioStateWillBe("paid").
+			Reply(funcUnaryReply(func() (any, error) {
+				got, _ := greetWith(t, c, "")
+				during <- got
+				return &pb.HiRes{Message: "pay"}, nil
+			})),
+		Method("Greetings").ScenarioIs("checkout").ScenarioStateIs("paid").Reply(Message(&pb.HiRes{Message: "receipt"})),
+	)
+
+	got, code := greetWith(t, c, "")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "pay", got)
+	require.Equal(t, "receipt", <-during, "the receipt of paid answered while pay still answered")
+}

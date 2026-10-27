@@ -59,6 +59,26 @@ func (s *Store) ResetScenarios() {
 	}
 }
 
+// claim moves the scenario name from required to next, as [Matcher.Claim] does.
+func (s *Store) claim(name, required, next string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if required == StateStarted {
+		s.start(name)
+	}
+
+	if scn, ok := s.data[key(name)]; ok && required != "" && scn.state != required {
+		return false
+	}
+
+	if next != "" {
+		s.start(name).state = next
+	}
+
+	return true
+}
+
 // state returns the state of the scenario name, and whether it started. With start, it starts the scenario first.
 func (s *Store) state(name string, start bool) (string, bool) {
 	if start {
