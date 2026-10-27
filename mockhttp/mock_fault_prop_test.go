@@ -111,6 +111,34 @@ var _mockFaults = []mockFault{
 		multipart["boundary"] = "b"
 		multipart["parts"] = []any{map[string]any{"body": "a\n--b"}}
 	}},
+	// The event_stream faults share the multipart area: both replace the body, so the two would conflict.
+	{"multipart", config.CodeConflict, "response.event_stream.events[0].raw", func(doc map[string]any) {
+		withEventStream(doc)["events"] = []any{map[string]any{"raw": "x", "data": "y"}}
+	}},
+	{"multipart", config.CodeInvalidValue, "response.event_stream.events[0].data", func(doc map[string]any) {
+		withEventStream(doc)["events"] = []any{map[string]any{"data": nil}}
+	}},
+	{"multipart", config.CodeInvalidValue, "response.event_stream.events[0].delay", func(doc map[string]any) {
+		withEventStream(doc)["events"] = []any{map[string]any{"raw": "x", "delay": int64(-5)}}
+	}},
+	{"multipart", config.CodeInvalidValue, "response.event_stream.events", func(doc map[string]any) {
+		withEventStream(doc)["events"] = map[string]any{"data": "x"}
+	}},
+	{"multipart", config.CodeConflict, "response.event_stream", func(doc map[string]any) {
+		withEventStream(doc)
+		sub(doc, "response")["body"] = "x"
+	}},
+}
+
+// withEventStream replaces the body of the response with an event stream, and returns the event_stream object.
+func withEventStream(doc map[string]any) map[string]any {
+	response := sub(doc, "response")
+	delete(response, "body")
+
+	stream := map[string]any{"events": []any{map[string]any{"data": "x"}}}
+	response["event_stream"] = stream
+
+	return stream
 }
 
 // withMultipart replaces the body of the response with a multipart body, and returns the multipart object.

@@ -271,10 +271,11 @@
         "body": { "description": "Text as is; anything else as JSON.", "not": { "type": "null" } },
         "body_file": { "description": "Relative paths start at the mock file's directory. The name is a template: one rendered from the request must stay inside that directory.", "type": "string", "minLength": 1 },
         "multipart": { "$ref": "#/$defs/multipart" },
+        "event_stream": { "$ref": "#/$defs/event_stream" },
         "template": {
           "type": "object",
           "properties": {
-            "enabled": { "description": "Render the body as a template: a text body, the content of body_file, or the text of multipart parts.", "$ref": "#/$defs/bool" },
+            "enabled": { "description": "Render the body as a template: a text body, the content of body_file, the text of multipart parts, or the text of event_stream events.", "$ref": "#/$defs/bool" },
             "data": { "description": "Data the reply's templates read as .Extra.", "oneOf": [ { "type": "object" }, { "type": "array" } ] }
           },
           "additionalProperties": false
@@ -285,7 +286,10 @@
       "allOf": [
         { "not": { "required": [ "body", "body_file" ] } },
         { "not": { "required": [ "body", "multipart" ] } },
-        { "not": { "required": [ "body_file", "multipart" ] } }
+        { "not": { "required": [ "body_file", "multipart" ] } },
+        { "not": { "required": [ "body", "event_stream" ] } },
+        { "not": { "required": [ "body_file", "event_stream" ] } },
+        { "not": { "required": [ "multipart", "event_stream" ] } }
       ]
     },
     "multipart": {
@@ -320,6 +324,34 @@
       },
       "additionalProperties": false,
       "not": { "required": [ "body", "body_file" ] }
+    },
+    "event_stream": {
+      "description": "A Server-Sent Events body, sent event by event, each flushed as it goes. It sets the Content-Type, text/event-stream.",
+      "type": "object",
+      "properties": {
+        "events": { "type": "array", "items": { "$ref": "#/$defs/event_stream_event" } },
+        "retry": { "description": "Reconnection time sent first, which clients read in whole milliseconds.", "$ref": "#/$defs/duration" },
+        "event_delay": { "description": "How long to wait before each event without a delay of its own.", "$ref": "#/$defs/duration" },
+        "heartbeat": { "description": "Send a comment each time the stream waits this long without sending anything.", "$ref": "#/$defs/duration" },
+        "keep_open": { "description": "Keep the stream open after its last event, until the client leaves.", "$ref": "#/$defs/bool" },
+        "resume": { "description": "Send a request with a Last-Event-ID only the events after the one with that id.", "$ref": "#/$defs/bool" }
+      },
+      "additionalProperties": false
+    },
+    "event_stream_event": {
+      "type": "object",
+      "properties": {
+        "event": { "description": "Event type, without line breaks. Clients dispatch an event without one as a message.", "type": "string" },
+        "id": { "description": "Event id, without line breaks or NUL, which clients send back as Last-Event-ID. An empty id resets it.", "type": "string" },
+        "data": { "description": "Text as is; anything else as JSON. A data line per line.", "not": { "type": "null" } },
+        "retry": { "description": "Reconnection time from this event on.", "$ref": "#/$defs/duration" },
+        "comment": { "description": "Sent first, a comment line per line, which clients skip.", "type": "string" },
+        "delay": { "description": "How long to wait before the event, in place of event_delay.", "$ref": "#/$defs/duration" },
+        "raw": { "description": "Text sent as it is, in place of the other fields but delay.", "type": "string" }
+      },
+      "additionalProperties": false,
+      "if": { "required": [ "raw" ] },
+      "then": { "propertyNames": { "enum": [ "raw", "delay" ] } }
     },
     "on_complete_event": {
       "type": "object",

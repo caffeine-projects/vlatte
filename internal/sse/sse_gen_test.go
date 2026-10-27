@@ -1,6 +1,8 @@
 package sse
 
 import (
+	"time"
+
 	"pgregory.net/rapid"
 )
 
@@ -39,6 +41,42 @@ func genEvent() *rapid.Generator[*EventSpec] {
 
 		if ev.HasData {
 			ev.Data = []byte(genText().Draw(t, "data"))
+		}
+
+		return ev
+	})
+}
+
+// _jsonData holds the JSON data a mock file can hold: objects, arrays and scalars, and a string and null, which a
+// file writes as text.
+var _jsonData = []string{`{"a":1,"b":[true,null,"x"]}`, `[]`, `{}`, `3`, `false`, `"s"`, `null`, `{"z":{"y":"é"}}`}
+
+// genDocEvent draws an event as a mock file can write it: any field of genEvent, JSON data, a retry, or raw text
+// alone, each with a delay or not.
+func genDocEvent() *rapid.Generator[*EventSpec] {
+	return rapid.Custom(func(t *rapid.T) *EventSpec {
+		ev := new(EventSpec)
+
+		switch rapid.IntRange(0, 2).Draw(t, "kind") {
+		case 0:
+			ev.Raw, ev.HasRaw = []byte(genText().Draw(t, "raw")), true
+		case 1:
+			ev = genEvent().Draw(t, "event")
+			if ev.HasData && rapid.Bool().Draw(t, "json") {
+				ev.Data, ev.DataKind = []byte(rapid.SampledFrom(_jsonData).Draw(t, "json_data")), DataJSON
+			}
+		default:
+			ev = genEvent().Draw(t, "event")
+		}
+
+		if !ev.HasRaw {
+			if ev.HasRetry = rapid.Bool().Draw(t, "has_retry"); ev.HasRetry {
+				ev.Retry = time.Duration(rapid.Int64Range(0, 1e12).Draw(t, "retry"))
+			}
+		}
+
+		if ev.HasDelay = rapid.Bool().Draw(t, "has_delay"); ev.HasDelay {
+			ev.Delay = time.Duration(rapid.Int64Range(0, 1e12).Draw(t, "delay"))
 		}
 
 		return ev

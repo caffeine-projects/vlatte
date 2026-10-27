@@ -18,6 +18,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
+	"github.com/caffeine-projects/vlatte/internal/sse"
 )
 
 // http.schema.json is for editors: the decoder doesn't read it. These tests keep the two in step.
@@ -96,6 +97,8 @@ func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 	require.Equal(t, _basicAuthSchema.Keys(), keys(props(props(raw)["request"])["basic_auth"]), "basic_auth")
 	require.Equal(t, mpart.SpecSchema.Keys(), keys(defs["multipart"]), "multipart")
 	require.Equal(t, mpart.PartSchema.Keys(), keys(defs["multipart_part"]), "multipart part")
+	require.Equal(t, sse.SpecSchema.Keys(), keys(defs["event_stream"]), "event_stream")
+	require.Equal(t, sse.EventSchema.Keys(), keys(defs["event_stream_event"]), "event_stream event")
 }
 
 func TestPropJSONSchema_AgreesWithTheDecoder(t *testing.T) {

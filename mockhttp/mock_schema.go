@@ -18,6 +18,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
+	"github.com/caffeine-projects/vlatte/internal/sse"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
@@ -123,6 +124,7 @@ type replyDef struct {
 	hasData        bool
 	gzip           bool
 	multipart      *mpart.Spec
+	eventStream    *sse.Spec
 }
 
 type headerValue struct {
@@ -613,7 +615,17 @@ var _replySchema = config.NewSchema(
 		},
 	},
 	replyField{
-		Key: "template.enabled", Kind: config.Bool, Usage: "Render the body as a template: a text body, the content of body_file, or the text of multipart parts.",
+		Key: "event_stream", Kind: config.Any,
+		Usage: "Server-Sent Events body, sent event by event: events, retry, event_delay, heartbeat, keep_open and resume. It sets the Content-Type, text/event-stream.",
+		Set: func(r *replyDef, v config.Value) error {
+			spec, err := sse.Decode(v)
+			r.eventStream = spec
+
+			return err
+		},
+	},
+	replyField{
+		Key: "template.enabled", Kind: config.Bool, Usage: "Render the body as a template: a text body, the content of body_file, the text of multipart parts, or the text of event_stream events.",
 		Set: func(r *replyDef, v config.Value) error { r.templated = v.Bool; return nil },
 	},
 	replyField{
@@ -878,7 +890,7 @@ func decodeReply(r *replyDef, v config.Value) error {
 	obj, _ := v.Any.(map[string]any)
 
 	var bodies []string
-	for _, key := range []string{"body", "body_file", "multipart"} {
+	for _, key := range []string{"body", "body_file", "multipart", "event_stream"} {
 		if _, ok := obj[key]; ok {
 			bodies = append(bodies, key)
 		}
@@ -896,8 +908,19 @@ func decodeReply(r *replyDef, v config.Value) error {
 		})
 	}
 
-	// A multipart body sets the Content-Type, with its boundary.
-	if _, ok := obj["multipart"]; ok {
+	// A multipart body sets the Content-Type, with its boundary, and an event stream sets text/event-stream.
+	for _, b := range []struct {
+		key  string
+		hint string
+	}{
+		{"multipart", "a multipart body sets the Content-Type: remove the header"},
+		{"event_stream", "an event stream sets the Content-Type: remove the header"},
+	} {
+		body, hint := b.key, b.hint
+		if _, ok := obj[body]; !ok {
+			continue
+		}
+
 		for _, headers := range []string{"header", "header_template"} {
 			names, _ := obj[headers].(map[string]any)
 			for _, name := range slices.Sorted(maps.Keys(names)) {
@@ -905,8 +928,8 @@ func decodeReply(r *replyDef, v config.Value) error {
 					key := v.Key + "." + headers + "." + name
 					problems = append(problems, config.Problem{
 						Code: config.CodeConflict, Origin: v.Origin, Key: key,
-						Message: key + " is set with " + v.Key + ".multipart",
-						Hint:    "a multipart body sets the Content-Type: remove the header",
+						Message: key + " is set with " + v.Key + "." + body,
+						Hint:    hint,
 					})
 				}
 			}
@@ -1473,6 +1496,10 @@ func (r *replyDef) build(dir string) *Reply {
 		spec.Templated = templated
 		rep.bodyFileDir = dir
 		rep.Multipart(&Multipart{spec: spec})
+	case r.eventStream != nil:
+		spec := *r.eventStream
+		spec.Templated = templated
+		rep.EventStream(&EventStream{spec: spec})
 	case r.bodyFile != "":
 		rep.bodyFileDir = dir
 		if templated {

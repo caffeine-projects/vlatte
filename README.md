@@ -336,7 +336,7 @@ m.MustMock(mockhttp.Postf("/users").Reply(mockhttp.Created().
 
 **What is a template.** Nothing else renders: `{{` anywhere else is text.
 - `header_template` values (`HeaderTemplate`).
-- With `template.enabled`: a text `body` (`BodyTemplate`), the content of a `body_file` (`BodyFileWithTemplate`), and the text of `multipart` parts (`Template()`).
+- With `template.enabled`: a text `body` (`BodyTemplate`), the content of a `body_file` (`BodyFileWithTemplate`), the text of `multipart` parts (`Template()`), and the text of `event_stream` events (`Template()`).
 - `body_file` names, always. The content of the file is written as it is unless `template.enabled` is set.
 - Webhook parameters: `url_template`, `header_template`, `body_template` and `multipart_template`.
 
@@ -473,6 +473,43 @@ response:
 **Templates** read forms: `{{ .Request.PostForm.Get "title" }}` and `{{ with .Request.FormFile "avatar" }}{{ .Filename }}{{ end }}`.
 
 **Recording** matches a recorded upload by all its text fields, each with its values in order, and its files by `form_file` patterns, so it replays whatever boundary the next client picks. Files that aren't UTF-8 text go to files next to the recording. An upload with another field doesn't match; one with more files still does. See [Recording and playback](#recording-and-playback).
+
+## Server-Sent Events
+
+`Reply.EventStream` serves a `text/event-stream` body event by event, each flushed to the client as it goes, over HTTP/1.1 and HTTP/2. It sets `Content-Type: text/event-stream`, so a `Content-Type` header with it fails the mock, and `Cache-Control: no-cache` unless the reply sets one.
+
+```go
+m.MustMock(mockhttp.Getf("/prices").Reply(mockhttp.OK().EventStream(mockhttp.NewEventStream(
+	mockhttp.NewEvent().Name("price").ID("1").DataJSON(map[string]any{"value": 10}),
+	mockhttp.NewEvent().Name("price").ID("2").DataJSON(map[string]any{"value": 11}).Delay(time.Second),
+).Retry(3*time.Second).Heartbeat(15*time.Second).KeepOpen().ResumeFromLastEventID())))
+```
+
+```yaml
+response:
+  status: 200
+  event_stream:
+    retry: 3s           # sent first: how long clients wait before they reconnect
+    event_delay: 100ms  # before each event without a delay of its own
+    heartbeat: 15s      # a comment each time the stream waits this long
+    keep_open: true     # stay open after the last event, until the client leaves
+    resume: true        # a Last-Event-ID gets only the events after that id
+    events:
+      - {event: price, id: "1", data: {value: 10}}  # text as is, anything else as JSON
+      - {event: price, id: "2", data: {value: 11}, delay: 1s}
+      - {comment: "keep-alive"}
+      - {data: "line 1\nline 2"}                   # a data line per line
+      - {raw: "data: x\r\n\r\n"}                   # sent as it is
+```
+
+- **Fields.** `event`, `id`, `retry`, `comment` and `data` go on the wire as the [WHATWG event stream format](https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation) reads them. Data and comments with line breaks get a line each, so clients read them back whole. An `event` or `id` with a line break, or an `id` with a NUL, fails the mock, or, in a templated stream, the reply that renders it. An empty `id` is sent: it resets the client's last event ID.
+- **Raw.** `raw` (`Raw` in Go) sends its text as it is, in place of the fields but `delay`, to test a client's parser: CRLF or CR line endings, a byte order mark, an event without its blank line.
+- **Delays.** An event's `delay` wins over `event_delay`. Everything before a wait is flushed first. In Go, `EventDelayFunc` takes a `vlatte.Delay`, such as `vlatte.Jitter`; a description leaves it out.
+- **Ending.** A stream ends after its last event, and clients reconnect after `retry`. With `keep_open`, it ends when the client leaves or the server closes. The mock counts the request and runs its callbacks and `on_complete` events once the stream ends, with the body it sent.
+- **Reconnecting.** `resume` sends a request with a `Last-Event-ID` header only the events after the one with that id; an unknown id gets them all. Match the header to answer reconnections with another mock, and serve `204 No Content` to tell clients to stop reconnecting.
+- **Templates.** With `template.enabled`, or `Template()` in Go, event types, ids, comments and text data are templates. JSON data and `raw` are sent as they are.
+- **Faults.** [Steps and faults](#faults) apply to the stream as to any body: `fault.LimitData` drops the connection after some bytes, as a flaky network does.
+- **Mappers.** Response mappers read the whole body, which a stream may never end, so a mock can't have both.
 
 ## Webhooks
 

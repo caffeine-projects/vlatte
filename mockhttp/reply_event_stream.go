@@ -49,13 +49,18 @@ func (es *EventStream) Retry(d time.Duration) *EventStream {
 // EventDelay waits d before each event that has no delay of its own: a stream that trickles in. A negative d waits for
 // none.
 func (es *EventStream) EventDelay(d time.Duration) *EventStream {
-	return es.EventDelayFunc(vlatte.Latency(d))
+	es.spec.EventDelay = vlatte.Latency(d)
+	es.spec.FixedEventDelay, es.spec.HasFixedEventDelay = max(d, 0), true
+
+	return es
 }
 
 // EventDelayFunc sets a function that picks the wait before each event that has no delay of its own, such as
-// [vlatte.Jitter].
+// [vlatte.Jitter]. A mock file can't write a function: [Reply.Describe] leaves it out.
 func (es *EventStream) EventDelayFunc(delay vlatte.Delay) *EventStream {
 	es.spec.EventDelay = delay
+	es.spec.FixedEventDelay, es.spec.HasFixedEventDelay = 0, false
+
 	return es
 }
 
