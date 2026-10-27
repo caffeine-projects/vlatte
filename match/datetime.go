@@ -11,7 +11,7 @@ import (
 // in ISO 8601 without a zone, or in one of the formats of HTTP dates, unless [ActualFormat] gives its layout. Other
 // values, and text in none of those formats, don't match.
 //
-// A value without a zone is read in [time.Local] when expected has one, as WireMock reads it; [LocalTime] compares
+// A value without a zone is read in [time.Local] when expected has one; [LocalTime] compares
 // wall clocks instead. [ExpectedOffset], [TruncateExpected] and [TruncateActual] shift the dates and times compared.
 // Truncations take the days and hours of expected's UTC offset, at expected: a named zone, such as Europe/Madrid,
 // keeps its offset of that date, the one a description of the matcher writes.
@@ -84,11 +84,11 @@ func (u DateTimeUnit) String() string {
 	}
 }
 
-// Truncation moves a date and time to the start of a period of the calendar, in its own zone, as WireMock's
-// truncations do: [TruncateExpected] and [TruncateActual].
+// Truncation moves a date and time to the start of a period of the calendar, in its own zone, for
+// [TruncateExpected] and [TruncateActual].
 type Truncation int
 
-// The truncations of WireMock.
+// The truncations.
 const (
 	FirstMinuteOfHour Truncation = iota + 1
 	FirstHourOfDay
@@ -173,8 +173,8 @@ type expectedOffset struct {
 
 func (e expectedOffset) applyDateTime(o *dateTimeOptions) { o.offset, o.offsetUnit = e.n, e.unit }
 
-// ExpectedOffset moves the expected date and time by n units, back when n is negative, as WireMock's expectedOffset
-// and "now +3 days" do. A month or a year later is the same day of the month, or the last day of a shorter month:
+// ExpectedOffset moves the expected date and time by n units, back when n is negative, as
+// "now +3 days" does. A month or a year later is the same day of the month, or the last day of a shorter month:
 // January 31 and 1 month is February 28, or 29. A later ExpectedOffset replaces an earlier one.
 func ExpectedOffset(n int, unit DateTimeUnit) DateTimeOption { return expectedOffset{n: n, unit: unit} }
 
@@ -191,8 +191,8 @@ type truncateActual Truncation
 
 func (t truncateActual) applyDateTime(o *dateTimeOptions) { o.truncateActual = Truncation(t) }
 
-// TruncateActual truncates the date and time matched, in the zone of the expected one, as WireMock's truncateActual
-// does: with EqualDateTime(march, TruncateActual(FirstDayOfMonth)), any time in March matches, march being March 1,
+// TruncateActual truncates the date and time matched, in the zone of the expected one: with
+// EqualDateTime(march, TruncateActual(FirstDayOfMonth)), any time in March matches, march being March 1,
 // 00:00, and March being the month in march's zone.
 func TruncateActual(t Truncation) DateTimeOption { return truncateActual(t) }
 
@@ -200,7 +200,7 @@ type truncateLast struct{}
 
 func (truncateLast) applyDateTime(o *dateTimeOptions) { o.truncateLast = true }
 
-// TruncateLast makes [TruncateExpected] apply after [ExpectedOffset], as WireMock's applyTruncationLast does:
+// TruncateLast makes [TruncateExpected] apply after [ExpectedOffset]:
 // EqualDateTimeNow(ExpectedOffset(1, Months), TruncateExpected(LastDayOfMonth), TruncateLast()) is the last day of
 // next month.
 func TruncateLast() DateTimeOption { return truncateLast{} }
@@ -218,6 +218,6 @@ type localTime struct{}
 
 func (localTime) applyDateTime(o *dateTimeOptions) { o.localTime = true }
 
-// LocalTime makes the expected date and time a local one, without a zone, as one WireMock reads without an offset:
+// LocalTime makes the expected date and time a local one, without a zone:
 // its wall clock is compared with the wall clock of the value, in the value's own zone.
 func LocalTime() DateTimeOption { return localTime{} }

@@ -12,4 +12,7 @@ type (
 
 	// Recipe prepares a Server, for example by adding a set of mocks; see [Server.Prep].
 	Recipe = vlatte.Recipe[*Mock, *Server]
+
+	// RecordedMock is a mock a recording made, as RecordConfig.Transforms change it; see [vlatte.RecordedMock].
+	RecordedMock = vlatte.RecordedMock[RecordedRequest, RecordedResponse]
 )

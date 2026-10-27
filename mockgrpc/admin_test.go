@@ -96,21 +96,77 @@ func TestAdmin_IsTheSameForGRPC(t *testing.T) {
 }
 
 func TestAdmin_WhatGRPCMocksCantDo(t *testing.T) {
-	// gRPC mocks don't record what they proxy, and have no JSON Schema of their mock files: those operations answer
-	// 501, and say so.
+	// gRPC mocks have no JSON Schema of their mock files: the operation answers 501, and says so.
 	m, _ := adminServer(t)
 
-	for _, route := range []struct {
-		method string
-		path   string
-	}{
-		{method: http.MethodPost, path: "/recording"},
-		{method: http.MethodGet, path: "/schema"},
-	} {
-		status, body := call(t, route.method, m.AdminURL()+route.path, `{}`)
-		require.Equal(t, http.StatusNotImplemented, status, route.path)
-		require.Contains(t, body, `"code": "not_supported"`, route.path)
+	status, body := call(t, http.MethodGet, m.AdminURL()+"/schema", "")
+	require.Equal(t, http.StatusNotImplemented, status)
+	require.Contains(t, body, `"code": "not_supported"`)
+}
+
+func TestAdmin_RecordsAService(t *testing.T) {
+	// A recording started through the admin API takes the calls of the mock server to its target, and once stopped,
+	// the server answers them from the mock files it wrote, the target gone.
+	target := serve(t)
+	target.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "from the target"})))
+
+	m, client := adminServer(t)
+	dir := t.TempDir()
+
+	settings := `{"target": "` + target.Addr() + `", "dir": "` + filepath.ToSlash(dir) + `", "format": "yaml"}`
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/recording", settings)
+	require.Equal(t, http.StatusCreated, status, body)
+
+	_, err := client.Greetings(t.Context(), &pb.HiReq{})
+	require.NoError(t, err)
+
+	status, body = call(t, http.MethodDelete, m.AdminURL()+"/recording", "")
+	require.Equal(t, http.StatusOK, status, body)
+
+	var result struct {
+		Recordings []struct {
+			File string `json:"file"`
+		} `json:"recordings"`
 	}
+	require.NoError(t, json.Unmarshal([]byte(body), &result))
+	require.Len(t, result.Recordings, 1)
+	require.True(t, strings.HasSuffix(result.Recordings[0].File, ".mock.yaml"), result.Recordings[0].File)
+
+	target.Close()
+
+	res, err := client.Greetings(t.Context(), &pb.HiReq{})
+	require.NoError(t, err)
+	require.Equal(t, "from the target", res.GetMessage(), "served from the recording")
+}
+
+func TestAdmin_RecordingSettingsWithProblems(t *testing.T) {
+	// The settings of a recording are those of the grpc.record section of the server's settings, checked the same
+	// way, and by the recording's own checks.
+	m, _ := adminServer(t)
+
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/recording", `{"format": "xml", "frmat": "json"}`)
+	require.Equal(t, http.StatusBadRequest, status, body)
+	require.Contains(t, body, `"key": "format"`)
+	require.Contains(t, body, `"key": "frmat"`)
+
+	status, body = call(t, http.MethodPost, m.AdminURL()+"/recording", `{"methods": ["Greetings", " "]}`)
+	require.Equal(t, http.StatusBadRequest, status, body)
+	require.Contains(t, body, "recorder: method 1 is empty")
+
+	_, body = call(t, http.MethodGet, m.AdminURL()+"/recording", "")
+	require.JSONEq(t, `{"active": false, "calls": 0, "mocks": 0, "dropped": 0, "failed": 0}`, body, "nothing started")
+}
+
+func TestAdmin_AnEmptyRecordingBodyKeepsTheServersSettings(t *testing.T) {
+	dir := t.TempDir()
+	m := MustNew(Setup().Silent().Admin(admin.MustNew()).RootDir(dir))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/recording", "")
+	require.Equal(t, http.StatusCreated, status, body)
+	require.True(t, m.IsRecording())
+	require.DirExists(t, filepath.Join(dir, "_mocks_recorded"))
 }
 
 func TestAdmin_AddsDescribesAndResetsMocksOfDocuments(t *testing.T) {

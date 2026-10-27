@@ -753,7 +753,7 @@ func hasHeader(_ *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
 }
 
 func TestMockFile_CustomMatchesTheWholeRequest(t *testing.T) {
-	// WireMock's customMatcher: a matcher of the server's registry, by name with its arguments, gets the request.
+	// A custom matcher: a matcher of the server's registry, by name with its arguments, gets the request.
 	m := MustNew(Setup().Silent().Matchers(matchbuild.MustNew(matchbuild.WithMatcher("has-header", hasHeader))))
 	m.MustStart()
 	t.Cleanup(m.Close)

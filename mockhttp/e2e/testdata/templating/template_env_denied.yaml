@@ -1,0 +1,9 @@
+request:
+  path: /secret
+  method: GET
+
+response:
+  status: 200
+  body: '{{ env "VLATTE_E2E_SECRET" }}'
+  template:
+    enabled: true

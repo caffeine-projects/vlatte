@@ -82,7 +82,7 @@ func From[T FromTypes](target T) *ProxyReply {
 	}
 }
 
-// ProxyAll returns a mock that answers the requests no other mock matches with reply, as WireMock's proxy-all does: it
+// ProxyAll returns a mock that answers the requests no other mock matches with reply: it
 // matches any method and path, and comes last, at the priority math.MaxInt. It leaves CONNECTs alone, and, on a server
 // that is a forward proxy, the requests in absolute form, which the proxy sends on to the hosts they name. Its
 // description holds the reply under proxy_all, which a mock file loads back as the same mock.

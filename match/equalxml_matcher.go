@@ -7,6 +7,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
+	"github.com/caffeine-projects/vlatte/internal/xmldoc"
 	"github.com/caffeine-projects/vlatte/match/internal/anyconv"
 )
 
@@ -18,7 +19,7 @@ var (
 // equalXMLMatcher passes when the value is an XML document equal to the expected one.
 type equalXMLMatcher struct {
 	Expected string
-	want     *xmlNode // the root element
+	want     *xmldoc.Node // the root element
 	opts     xmlOptions
 }
 
@@ -30,8 +31,8 @@ func (m *equalXMLMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
 
 	if text, ok := value.Text(v); ok {
-		got, err := parseXML([]byte(text), m.opts.namespaces)
-		if err == nil && m.opts.sameElement(m.want, got.root()) {
+		got, err := xmldoc.Parse([]byte(text), m.opts.namespaces == XMLNamespacesIgnored)
+		if err == nil && m.opts.sameElement(m.want, got.Root()) {
 			return success()
 		}
 	}
@@ -39,45 +40,45 @@ func (m *equalXMLMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"EqualXML(", m.Expected, ") Got: ", anyconv.Stringify(v)}, ""))
 }
 
-func (o xmlOptions) sameName(want, got xmlName) bool {
+func (o xmlOptions) sameName(want, got xmldoc.Name) bool {
 	switch o.namespaces {
 	case XMLNamespacesStrict:
 		return want == got
 	default:
-		return want.space == got.space && want.local == got.local
+		return want.Space == got.Space && want.Local == got.Local
 	}
 }
 
 // xmlItem is a part of an element's content, as EqualXML compares it: an element, or text.
 type xmlItem struct {
-	elem *xmlNode // nil for text
+	elem *xmldoc.Node // nil for text
 	text string
 }
 
 // content returns what EqualXML compares of an element's children: its elements, and the text between two of them,
 // comments and processing instructions left out, trimmed of XML white space, when any is left.
-func content(e *xmlNode) []xmlItem {
+func content(e *xmldoc.Node) []xmlItem {
 	var (
 		items []xmlItem
 		text  strings.Builder
 	)
 
 	flush := func() {
-		if t := trimXMLSpace(text.String()); t != "" {
+		if t := xmldoc.TrimSpace(text.String()); t != "" {
 			items = append(items, xmlItem{text: t})
 		}
 
 		text.Reset()
 	}
 
-	for _, c := range e.children {
-		switch c.kind {
-		case _xmlElement:
+	for _, c := range e.Children {
+		switch c.Kind {
+		case xmldoc.Element:
 			flush()
 
 			items = append(items, xmlItem{elem: c})
-		case _xmlText:
-			text.WriteString(c.text)
+		case xmldoc.Text:
+			text.WriteString(c.Text)
 		}
 	}
 
@@ -87,21 +88,21 @@ func content(e *xmlNode) []xmlItem {
 }
 
 // attributes returns the attributes EqualXML compares: namespace declarations aren't.
-func attributes(e *xmlNode) []xmlAttr {
-	return slices.DeleteFunc(slices.Clone(e.attrs), func(a xmlAttr) bool { return a.decl })
+func attributes(e *xmldoc.Node) []xmldoc.Attr {
+	return slices.DeleteFunc(slices.Clone(e.Attrs), func(a xmldoc.Attr) bool { return a.Decl })
 }
 
-func (o xmlOptions) sameElement(want, got *xmlNode) bool {
+func (o xmlOptions) sameElement(want, got *xmldoc.Node) bool {
 	wantAttrs, gotAttrs := attributes(want), attributes(got)
 	wantItems, gotItems := content(want), content(got)
 
-	if !o.sameName(want.name, got.name) || len(wantAttrs) != len(gotAttrs) || len(wantItems) != len(gotItems) {
+	if !o.sameName(want.Name, got.Name) || len(wantAttrs) != len(gotAttrs) || len(wantItems) != len(gotItems) {
 		return false
 	}
 
 	for _, wa := range wantAttrs {
-		i := slices.IndexFunc(gotAttrs, func(ga xmlAttr) bool { return o.sameName(wa.name, ga.name) })
-		if i < 0 || gotAttrs[i].value != wa.value {
+		i := slices.IndexFunc(gotAttrs, func(ga xmldoc.Attr) bool { return o.sameName(wa.Name, ga.Name) })
+		if i < 0 || gotAttrs[i].Value != wa.Value {
 			return false
 		}
 	}

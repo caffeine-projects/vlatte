@@ -43,7 +43,7 @@ func TestEqualElementsMatcher(t *testing.T) {
 }
 
 func TestItemsMatch_ItemsThatAreMatchers(t *testing.T) {
-	// WireMock's hasExactly: as many values as matchers, each matched by a matcher of its own, in any order.
+	// As many values as matchers, each matched by a matcher of its own, in any order.
 	m := ItemsMatch([]vlatte.Matcher{Equal("1"), Contain("2"), Not(Contain("3"))})
 
 	tests := []struct {

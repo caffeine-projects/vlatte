@@ -1,6 +1,7 @@
 package mockgrpc
 
 import (
+	"io"
 	"slices"
 	"strings"
 	"sync"
@@ -10,7 +11,10 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-var _ vlatte.Mock = (*Mock)(nil)
+var (
+	_ vlatte.Mock = (*Mock)(nil)
+	_ io.Closer   = (*Mock)(nil)
+)
 
 type interceptors struct {
 	app *Server
@@ -38,6 +42,7 @@ type Mock struct {
 	replier      Replier
 	doc          map[string]any // the mock document the mock was read from, nil for a mock built in Go
 	described    mockDescription
+	closeOnce    sync.Once
 }
 
 // ID returns the ID of the mock.
@@ -112,6 +117,20 @@ func (m *Mock) Events() vlatte.Events {
 // String names the mock as "Mock [id] name", as assertion messages do.
 func (m *Mock) String() string {
 	return strings.TrimSpace("Mock [" + m.ID() + "] " + m.Name())
+}
+
+// Close releases what the mock's replier holds, such as the connection of a proxy to its target. The store closes a
+// mock when it leaves the server, and Server.Close closes the mocks still stored. Only the first call does anything.
+func (m *Mock) Close() error {
+	var err error
+
+	m.closeOnce.Do(func() {
+		if c, ok := m.replier.(io.Closer); ok {
+			err = c.Close()
+		}
+	})
+
+	return err
 }
 
 // wait waits for the mock's delay, if it has one.

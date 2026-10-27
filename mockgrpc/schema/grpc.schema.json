@@ -143,6 +143,32 @@
         }
       },
       "additionalProperties": false
+    },
+    "proxy": {
+      "description": "The answer of another gRPC server, the target, to which the call goes on.",
+      "type": "object",
+      "properties": {
+        "target": {
+          "description": "The server to proxy to, as grpc.NewClient takes it, such as localhost:50051. The call goes without TLS.",
+          "type": "string",
+          "minLength": 1
+        },
+        "header": {
+          "description": "Metadata the target gets, by key, in place of the client's values.",
+          "$ref": "#/$defs/header_values"
+        },
+        "remove_headers": {
+          "description": "Keys of the client's metadata the target doesn't get.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -154,8 +180,17 @@
         "response"
       ],
       "not": {
-        "required": [
-          "bidi"
+        "anyOf": [
+          {
+            "required": [
+              "bidi"
+            ]
+          },
+          {
+            "required": [
+              "proxy"
+            ]
+          }
         ]
       }
     },
@@ -164,8 +199,36 @@
         "bidi"
       ],
       "not": {
-        "required": [
-          "response"
+        "anyOf": [
+          {
+            "required": [
+              "response"
+            ]
+          },
+          {
+            "required": [
+              "proxy"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "required": [
+        "proxy"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "response"
+            ]
+          },
+          {
+            "required": [
+              "bidi"
+            ]
+          }
         ]
       }
     }

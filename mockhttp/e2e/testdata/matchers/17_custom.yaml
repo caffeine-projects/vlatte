@@ -1,4 +1,4 @@
-# WireMock's customMatcher: a matcher the server registered, by name with its arguments, gets the whole request.
+# A custom matcher the server registered, by name with its arguments, gets the whole request.
 id: custom
 request:
   method: GET
