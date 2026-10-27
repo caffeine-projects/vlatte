@@ -369,9 +369,13 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		data["request"] = request
 	}
 
-	// The reply as it was when the mock was built: changing it afterwards changes only the mocks built afterwards.
-	if m.replyDesc.IsMap() {
+	// The reply as it was when the mock was built: changing it afterwards changes only the mocks built afterwards. One
+	// a mock file can't hold, such as a Handler, stays, so encoding the description fails rather than drop it.
+	switch {
+	case m.replyDesc.IsMap():
 		m.replyDesc.Merge(data)
+	case m.replyDesc.Err() != nil:
+		data[m.replyDesc.Key] = m.replyDesc
 	}
 
 	// A ProxyAll mock given another reply has no proxy reply to describe.
