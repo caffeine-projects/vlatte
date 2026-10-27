@@ -527,7 +527,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Template data providers see the mock that matched.
 	reqValues.Mock = mock
-	h.app.movedScenarios(reqValues)
+	h.app.movedScenarios(reqValues, input)
 
 	// The hits count this request, which Inc counts once the answer is sent.
 	h.debugHeader(w, vlatte.HeaderMatchedMockID, mock.ID())
@@ -1295,6 +1295,7 @@ func newSelectorInput(r *http.Request, rv *RequestValues, forProxy bool) *select
 		Files:      formFiles(r),
 		ParsedBody: rv.ParsedBodyData,
 		ForProxy:   forProxy,
+		values:     rv,
 	}
 }
 

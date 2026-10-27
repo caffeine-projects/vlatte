@@ -71,7 +71,7 @@ func TestStore_KeepsStateAsAModelDoes(t *testing.T) {
 				required := rapid.SampledFrom(_states).Draw(t, "required")
 				next := rapid.SampledFrom(_states).Draw(t, "next")
 
-				claimed := store.Matcher(name, required, next).Claim()
+				claimed := store.Matcher(name, required, next).Claim(vlatte.MatcherArg{})
 
 				want := required == "" || md.state(name) == required
 				require.Equal(t, want, claimed)

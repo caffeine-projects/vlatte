@@ -42,6 +42,7 @@ type Builder struct {
 	scenario              string
 	scenarioRequiredState string
 	scenarioNewState      string
+	scenarioKey           string
 	delay                 vlatte.Delay
 	delayDuration         time.Duration // the delay of Delay, which a description writes; DelayFunc's can't be
 	delayFunc             bool          // the delay is DelayFunc's
@@ -231,6 +232,18 @@ func (b *Builder) ScenarioStateIs(requiredState string) *Builder {
 	return b
 }
 
+// ScenarioKey sets the template of the key of the instance of the mock's scenario a call plays in, such as
+// {{ with index .Request.Header "x-test-id" }}{{ index . 0 }}{{ end }}: each key is a scenario of its own, starting in
+// started, so tests that run at once with keys of their own don't move each other's. It renders with the data of
+// [Template] replies. It renders more than once for a call: as the mock matches, as it takes its turn and to journal
+// the move, so a key reads the call only, never .Scenarios, a random value or the time. A key that renders empty plays
+// in the shared instance, the one of mocks without a key. A template that fails to render fails the call's matching.
+// Read a keyed instance with [Server.Scenarios], and move it with [Server.SetScenario] and [matchscenario.Key].
+func (b *Builder) ScenarioKey(tmpl string) *Builder {
+	b.scenarioKey = tmpl
+	return b
+}
+
 // ScenarioStateWillBe sets the state the scenario moves to when this mock is picked to answer a call, before it answers:
 // the next call matches in that state, and of two calls in one state, only one gets this mock. The scenario moves even
 // when the mock then fails to answer, as when its client leaves during its delay.
@@ -316,11 +329,18 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 	}
 
 	if b.scenario != "" {
-		expectations = append(expectations, &vlatte.Eval[*Call]{
-			Target:  int(_scopeScenario),
-			Key:     b.scenario,
-			Matcher: app.scenarios.Matcher(b.scenario, b.scenarioRequiredState, b.scenarioNewState),
-		})
+		sm := app.scenarios.Matcher(b.scenario, b.scenarioRequiredState, b.scenarioNewState)
+		e := &vlatte.Eval[*Call]{Target: int(_scopeScenario), Key: b.scenario, Matcher: sm}
+
+		if b.scenarioKey != "" {
+			if e.Selector, err = app.scenarioKey(b.scenarioKey); err != nil {
+				return nil, fmt.Errorf("mock: scenario.key: %w", err)
+			}
+
+			sm.KeyedBy(b.scenarioKey)
+		}
+
+		expectations = append(expectations, e)
 	}
 
 	events, err := app.prepareEvents(b.events, "mock: on_complete listener")
@@ -359,7 +379,7 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 			times:     b.times,
 			delay:     b.delayDuration,
 			delayFunc: b.delayFunc,
-			scenario:  [3]string{b.scenario, b.scenarioRequiredState, b.scenarioNewState},
+			scenario:  [4]string{b.scenario, b.scenarioRequiredState, b.scenarioNewState, b.scenarioKey},
 		},
 	}, nil
 }

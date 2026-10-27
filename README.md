@@ -99,7 +99,7 @@ A client streaming call matches once the client closed its side, on all its mess
 | `Message(msg)` | A message, which must be of the method's output type. |
 | `Messages(msgs...)` | The messages of a server or bidi stream, in turn. |
 | `JSON(texts...)` | The messages `texts` hold, in the method's output type. |
-| `Template(texts...)` | Like `JSON`, rendered for each call: `{"message": "hi {{ .Request.Message.name }}"}`, with `.Request.Header`, `.Parameters` and `.Scenarios.State "name"`. |
+| `Template(texts...)` | Like `JSON`, rendered for each call: `{"message": "hi {{ .Request.Message.name }}"}`, with `.Request.Header`, `.Parameters`, `.Scenarios.State "name"` and `.Scenarios.StateOf "name" "key"`. |
 | `Status(code, msg)` | A status, with no message. |
 | `Bidi()` | A bidi stream, message by message: `On(matcher, reply)`, `Otherwise(reply)`, `OnEnd(reply)`. |
 | `Seq(replies...)` | Each reply in turn, one per call, a stream as a whole, then `OnSequenceEnded(reply)`'s. A call past the end without it fails with the `vlatte-error` trailer. |
@@ -127,7 +127,7 @@ m.MustMock(mockgrpc.Method("Chat/Talk").Reply(mockgrpc.Bidi().
 	OnEnd(mockgrpc.Message(&pb.Line{Text: "bye"}))))
 ```
 
-**Mock features.** As HTTP mocks, gRPC mocks have an `ID`, a `Name` and a `Priority`, can start `Enabled(false)`, serve a number of calls with `Times` and `Once`, take part in [scenarios](#scenarios) with `StartScenario`, `ScenarioIs`, `ScenarioStateIs` and `ScenarioStateWillBe`, wait before replying with `Delay` and `DelayFunc`, and run [on_complete events](#webhooks), such as webhooks, with `OnCompleteEvent`, and callbacks with `Callback`. An answer with a status counts as the mock's answer, for `Times` too. A scenario moves when its mock is picked to answer, before it answers.
+**Mock features.** As HTTP mocks, gRPC mocks have an `ID`, a `Name` and a `Priority`, can start `Enabled(false)`, serve a number of calls with `Times` and `Once`, take part in [scenarios](#scenarios) with `StartScenario`, `ScenarioIs`, `ScenarioStateIs`, `ScenarioStateWillBe` and `ScenarioKey`, wait before replying with `Delay` and `DelayFunc`, and run [on_complete events](#webhooks), such as webhooks, with `OnCompleteEvent`, and callbacks with `Callback`. An answer with a status counts as the mock's answer, for `Times` too. A scenario moves when its mock is picked to answer, before it answers.
 
 **Descriptors.** A server without the generated code of a service serves it from its descriptors, with messages of dynamic types: `Setup().Descriptors("api.binpb")` loads descriptor sets, as `protoc --descriptor_set_out=api.binpb --include_imports` or `buf build -o api.binpb` write them, and `Setup().Files(files)` takes a `*protoregistry.Files`.
 
@@ -335,10 +335,16 @@ response: {status: 200, body: '{"id": 1}'}
 - **States.** A mock that requires no state matches in any state. A mock that requires a state no request moved the scenario to yet doesn't match: a typo in a scenario's name never matches every request.
 - **Turns.** The scenario moves before the mock answers, so the next request matches in the new state, and of two concurrent requests in one state only one gets the mock of that state. It moves even when the mock then doesn't answer, such as when its client leaves during the mock's `delay`.
 - **Names** ignore case: `Checkout` is `checkout`. A scenario is listed under the name its first mock gives it.
-- **In Go,** `m.Scenarios(ctx)` lists each scenario with its state, the states its mocks name, flagging those no mock moves to, and which mock moves it where. `m.SetScenario(ctx, name, state)` moves a scenario, and refuses a state none of its mocks names with `matchscenario.ErrUnknownState`; a scenario no mock names takes any state. `m.ResetScenario(name)` and `m.ResetScenarios()` start them over.
-- **In the [admin API](#admin-api),** `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios/{name}` and `DELETE /scenarios` do the same. Its `/scenario-board` page does it from a browser: it shows where each scenario is, flags the states no mock moves to, moves a scenario with a click, and follows the moves as requests make them.
+- **Keys.** A mock with a scenario key plays in an instance of the scenario for each key: tests that run at once against one server, or tenants of one API, each move their own. The key is a template that renders with the request, as reply templates do: ``ScenarioKey(`{{ .Request.Header.Get "X-Test-Id" }}`)`` in Go, `key` under `scenario` in a mock file. Each key starts in `started`; keys are exact, so `t1` is not `T1`. A key that renders empty plays in the shared instance, the one of mocks without a key, and a key that fails to render fails the request's matching.
+
+```yaml
+scenario: {name: checkout, required_state: started, new_state: paid, key: '{{ .Request.Header.Get "X-Test-Id" }}'}
+```
+
+- **In Go,** `m.Scenarios(ctx)` lists each scenario with its state, the states of its keyed instances that moved, the states its mocks name, flagging those no mock moves to, and which mock moves it where. `m.SetScenario(ctx, name, state)` moves a scenario, and refuses a state none of its mocks names with `matchscenario.ErrUnknownState`; a scenario no mock names takes any state. `m.ResetScenario(name)` starts every instance of a scenario over, and `m.ResetScenarios()` every scenario. `matchscenario.Key("t1")`, as the last argument of `SetScenario` and `ResetScenario`, picks the instance of a key.
+- **In the [admin API](#admin-api),** `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios/{name}` and `DELETE /scenarios` do the same, and `?key=t1` picks the instance of a key. Its `/scenario-board` page does it from a browser: it shows where each scenario and each of its keys is, flags the states no mock moves to, moves a scenario with a click, and follows the moves as requests make them.
 - **A request no mock matched** names the scenario a mock waits on: `differs in scenario order needs created, is started`.
-- **Templates** read a scenario's state, the one its mock moved it to: `{{ .Scenarios.State "checkout" }}`. One mock can then answer in every state.
+- **Templates** read a scenario's state, the one its mock moved it to: `{{ .Scenarios.State "checkout" }}`, and the state of a key: `{{ .Scenarios.StateOf "checkout" (.Request.Header.Get "X-Test-Id") }}`. One mock can then answer in every state.
 - **The [journal](#request-journal)** keeps the moves of each request's mock under `scenarios`, and [`GET /events`](#admin-api) streams a `scenario` event for each move, by a request or by the methods and admin API above.
 
 gRPC mocks take part in scenarios the same way.
@@ -389,6 +395,7 @@ m.MustMock(mockhttp.Postf("/users").Reply(mockhttp.Created().
 | `.Provided.<key>` | What `Setup().TemplateDataProviders(...)` provide. |
 | `.Extra` | The reply's `template.data`, or `SetTemplateData` in Go. Webhooks don't have it. |
 | `.Scenarios.State "name"` | The state of a [scenario](#scenarios). |
+| `.Scenarios.StateOf "name" "key"` | The state of the instance of a [scenario](#scenarios) of a key. |
 
 **Functions.** Besides those of Go templates, such as `if`, `range`, `eq`, `len`, `index`, `slice`, `printf`, `html` and `urlquery`, templates call the functions below. The value a function works on comes last, so it pipes: `{{ .Request.Header.Get "X-Name" | trimSpace | toUpper }}`. List functions take the list first, as Go's `append` does. A bad argument, such as an unknown algorithm or a division by zero, fails the template.
 
@@ -873,7 +880,7 @@ The `vlatte` command serves the admin API by default: `admin: false` (`--admin=f
 | `GET /schema` | The [JSON Schema](mockhttp/schema/http.schema.json) of mock files, for clients that write them. A gRPC server answers `501`. |
 | `POST /mocks/reload` | Loads the mock files, and the [persistent store](#persistent-admin-mocks), again, as `m.Reload()` does. A mock file's mock takes the place of a mock added through the admin API with its id. |
 | `POST /mocks/save` | Writes the mocks added through the admin API as mock files, `<id>.mock.<format>`, and serves them from the files from then on. `{"dir": ..., "format": ...}` defaults to `{workdir}/_mocks` and YAML, which the default mock file patterns load on the next start; `dir` stays inside `root_dir`. When a mock can't be written as a mock file that loads back, nothing is written, and files that fail to load are put back as they were. |
-| `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios/{name}`, `DELETE /scenarios` | Lists the state of each scenario, moves one to a state, `{"state": "paid"}`, starts one over, and starts every scenario over. Names ignore case: `Checkout` is `checkout`. |
+| `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios/{name}`, `DELETE /scenarios` | Lists the state of each scenario, moves one to a state, `{"state": "paid"}`, starts one over, and starts every scenario over. Names ignore case: `Checkout` is `checkout`. `?key=t1` moves or starts over the instance of a key only. |
 | `GET /requests` | Lists the newest requests of the [journal](#request-journal), with their `count`: `?limit=` (100 by default, 1000 at most, `0` for the count alone) and `?before=`, the `next` of a page, page through them. |
 | `QUERY /requests` | Finds and counts the requests a query selects, in the body: see [Request journal](#request-journal). It uses the HTTP [`QUERY`](https://httpwg.org/http-extensions/draft-ietf-httpbis-safe-method-w-body.html) method, safe as `GET` is, with a body: `curl -X QUERY`. |
 | `GET /requests/{id}`, `DELETE /requests` | Gets a request by the id its answer's `VLatte-Request-Id` names, and clears the journal. |

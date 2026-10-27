@@ -24,9 +24,16 @@ var _scenarioChangeSchema = config.NewSchema(
 )
 
 // SetScenario moves the scenario name to the state of doc, a document in format, such as {"state": "paid"}, and
-// returns it. The mocks that require that state match next. Names ignore case: Checkout is checkout. A state none of
-// the scenario's mocks names is an unknown_state problem. It needs a server that keeps scenarios.
-func (o *Operations) SetScenario(ctx context.Context, name string, doc []byte, format string) (Scenario, error) {
+// returns it: its shared instance, or the one in picks, such as matchscenario.Key("t1"). The mocks that require that
+// state match next. Names ignore case: Checkout is checkout. A state none of the scenario's mocks names is an
+// unknown_state problem. It needs a server that keeps scenarios.
+func (o *Operations) SetScenario(
+	ctx context.Context,
+	name string,
+	doc []byte,
+	format string,
+	in ...matchscenario.Instance,
+) (Scenario, error) {
 	if o.scenarios == nil {
 		return Scenario{}, notSupported(_lackingScenarios)
 	}
@@ -36,18 +43,19 @@ func (o *Operations) SetScenario(ctx context.Context, name string, doc []byte, f
 		return Scenario{}, invalid("the body", err)
 	}
 
-	return o.moveScenario(ctx, name, change.state)
+	return o.moveScenario(ctx, name, change.state, in...)
 }
 
-// moveScenario moves the scenario name to state, which can't be empty, and returns it.
-func (o *Operations) moveScenario(ctx context.Context, name, state string) (Scenario, error) {
+// moveScenario moves the scenario name to state, which can't be empty, and returns it: its shared instance, or the
+// one in picks.
+func (o *Operations) moveScenario(ctx context.Context, name, state string, in ...matchscenario.Instance) (Scenario, error) {
 	if state == "" {
 		return Scenario{}, invalid("the body", &config.Error{Problems: []config.Problem{{
 			Code: config.CodeMissingValue, Origin: "admin request", Key: "state", Message: "state is required",
 		}}})
 	}
 
-	err := o.scenarios.SetScenario(ctx, name, state)
+	err := o.scenarios.SetScenario(ctx, name, state, in...)
 	switch {
 	case errors.Is(err, matchscenario.ErrUnknownState):
 		return Scenario{}, &problemError{status: http.StatusBadRequest, code: _codeUnknownState, detail: err.Error()}

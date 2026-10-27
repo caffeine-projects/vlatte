@@ -153,3 +153,78 @@ func TestScenarios_AStoreThatFailsFailsTheCall(t *testing.T) {
 	err = m.SetScenario(t.Context(), "checkout", "paid")
 	require.EqualError(t, err, "http: listing mocks: store down")
 }
+
+func TestScenarios_EachKeyPlaysInAnInstanceOfItsOwn(t *testing.T) {
+	// Tenants of one server, or tests that run at once, each move their own checkout: the key renders with the
+	// request, its path parameters included, and a reply reads the state of its own key.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(
+		FromBytes([]byte(`{
+			"scenario": {"name": "checkout", "required_state": "started", "new_state": "paid", "key": "{{ .Request.PathParams.tenant }}"},
+			"request": {"method": "POST", "path_template": "/tenants/{tenant}/pay"},
+			"response": {"status": 200, "body": "{{ .Scenarios.StateOf \"checkout\" .Request.PathParams.tenant }}", "template": {"enabled": true}}
+		}`), "json"),
+		Getf("/order").Reply(OK().BodyTemplate(`{{ .Scenarios.StateOf "checkout" (.Request.URL.Query.Get "tenant") }}`)),
+	)
+
+	res, body := do(t, http.MethodPost, m.URL("/tenants/a/pay"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "paid", string(body), "the reply reads the state its own request moved")
+
+	res, _ = do(t, http.MethodPost, m.URL("/tenants/a/pay"), nil, nil)
+	require.Equal(t, StatusNoMatch, res.StatusCode, "a paid once")
+
+	res, _ = do(t, http.MethodPost, m.URL("/tenants/b/pay"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, "b pays in its own instance")
+
+	_, order := get(t, m, "/order?tenant=c")
+	require.Equal(t, matchscenario.StateStarted, order)
+
+	_, order = get(t, m, "/order?tenant=a")
+	require.Equal(t, "paid", order)
+}
+
+func TestScenarios_AKeyThatFailsToRenderFailsTheRequest(t *testing.T) {
+	// A key that can't render is a mistake of the mock: the request fails to match with its error, rather than play
+	// in the shared instance.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Postf("/pay").StartScenario("checkout").ScenarioKey(`{{ .Request.Nope }}`).Reply(OK()))
+
+	res, body := do(t, http.MethodPost, m.URL("/pay"), nil, nil)
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+	require.Equal(t, vlatte.FailureMatch, res.Header.Get(HeaderVlatteError))
+	require.Contains(t, string(body), "scenario: key: template: scenario.key")
+
+	_, err := m.Mock(Postf("/pay").StartScenario("checkout").ScenarioKey(`{{`).Reply(OK()))
+	require.ErrorContains(t, err, "mock: scenario.key: template: scenario.key")
+}
+
+func TestScenarios_TheJournalAndTheEventsNameTheKey(t *testing.T) {
+	// A test verifies which instance its request moved, and the admin page which one to redraw.
+	m := adminServer(t, Setup().Journal(""))
+	m.MustMock(Postf("/pay").ID("pay").StartScenario("checkout").ScenarioStateWillBe("paid").
+		ScenarioKey(`{{ .Request.Header.Get "X-Test" }}`).Reply(OK()))
+
+	events := scenarioEvents(t, m, 3, func() {
+		do(t, http.MethodPost, m.URL("/pay"), http.Header{"X-Test": {"t1"}}, nil)
+		require.NoError(t, m.SetScenario(t.Context(), "checkout", "paid", matchscenario.Key("t2")))
+		m.ResetScenario("checkout", matchscenario.Key("t1"))
+	})
+
+	delete(events[0], "request_id")
+	require.Equal(t, []map[string]any{
+		{"type": "scenario", "target": "checkout", "mock_id": "pay", "message": "checkout (key t1) moved from started to paid"},
+		{"type": "scenario", "target": "checkout", "message": "checkout (key t2) set to paid"},
+		{"type": "scenario", "target": "checkout", "message": "checkout (key t1) reset to started"},
+	}, events)
+
+	pay := only(t, m, journal.Query{Path: match.Equal("/pay")})
+	require.Equal(t, []matchscenario.Move{{Scenario: "checkout", Key: "t1", From: matchscenario.StateStarted, To: "paid"}},
+		pay.Scenarios)
+}

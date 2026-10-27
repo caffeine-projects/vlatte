@@ -15,6 +15,6 @@ func TestListScenariosTool(t *testing.T) {
 
 	doc := conformsAs(t, call(t, cs, "list_scenarios", nil), "json", "ScenarioList")
 	require.Equal(t, []any{
-		map[string]any{"name": "checkout", "state": "paid", "states": []any{}, "transitions": []any{}},
+		map[string]any{"name": "checkout", "state": "paid", "instances": []any{}, "states": []any{}, "transitions": []any{}},
 	}, doc["scenarios"])
 }

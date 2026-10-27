@@ -186,6 +186,9 @@ var _scalarKeys = []struct {
 	{"scenario.new_state", "b", func(v any) map[string]any {
 		return withRequest(map[string]any{"scenario": map[string]any{"name": "s", "new_state": v}})
 	}},
+	{"scenario.key", "k", func(v any) map[string]any {
+		return withRequest(map[string]any{"scenario": map[string]any{"name": "s", "key": v}})
+	}},
 	{"request.url_match", "x", func(v any) map[string]any { return map[string]any{"request": map[string]any{"url_match": v}} }},
 	{"request.path_template", "/users/{id}", func(v any) map[string]any {
 		return map[string]any{"request": map[string]any{"path_template": v}}

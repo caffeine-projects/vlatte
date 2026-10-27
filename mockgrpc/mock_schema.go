@@ -59,6 +59,7 @@ type scenarioDef struct {
 	name          string
 	requiredState string
 	newState      string
+	key           string
 }
 
 // requestDef holds the request matchers, as Builder calls, and the keys that set them.
@@ -178,6 +179,12 @@ var _mockSchema = config.NewSchema(
 	mockField{
 		Key: "scenario.new_state", Kind: config.String, Usage: "State the scenario moves to when the mock is picked to answer.",
 		Set: func(d *mockDef, v config.Value) error { d.scenario.set, d.scenario.newState = true, v.Str; return nil },
+	},
+	mockField{
+		Key: "scenario.key", Kind: config.String,
+		Usage: "Template of the key of the scenario's instance a call plays in, such as {{ with index .Request.Header \"x-test-id\" }}{{ index . 0 }}{{ end }}: " +
+			"each key moves an instance of its own. Empty plays in the shared instance.",
+		Set: func(d *mockDef, v config.Value) error { d.scenario.set, d.scenario.key = true, v.Str; return nil },
 	},
 	mockField{
 		Key: "on_complete", Kind: config.Any, Usage: "Events to run once the mock replied: a list of {name, parameters}.",
@@ -656,6 +663,10 @@ func (d *mockDef) apply(b *Builder) {
 
 		if d.scenario.newState != "" {
 			b.ScenarioStateWillBe(d.scenario.newState)
+		}
+
+		if d.scenario.key != "" {
+			b.ScenarioKey(d.scenario.key)
 		}
 	}
 

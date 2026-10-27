@@ -42,6 +42,7 @@ type Builder struct {
 	scenario              string
 	scenarioNewState      string
 	scenarioRequiredState string
+	scenarioKey           string
 	pathParams            []namedMatcher // set with PathParam; Build makes them matchers, once it knows the template
 	err                   error          // the first error of a method that can't return one, such as FormFile's or ID's
 }
@@ -570,6 +571,20 @@ func (b *Builder) ScenarioStateIs(requiredState string) *Builder {
 	return b
 }
 
+// ScenarioKey sets the template of the key of the instance of the mock's scenario a request plays in, such as
+// {{ .Request.Header.Get "X-Test-Id" }}: each key is a scenario of its own, starting in started, so tests that run at
+// once with keys of their own don't move each other's. It renders with the request data of reply templates, with
+// .Provided and .Extra empty, as no mock is picked yet. It renders more than once for a request: as the mock matches,
+// as it takes its turn and to journal the move, so a key reads the request only, never .Scenarios, a random value or
+// the time. A key that renders empty plays in the shared instance, the one of mocks without a key. A template that
+// fails to render fails the request's matching. Read a keyed instance with [Server.Scenarios], and move it with
+// [Server.SetScenario] and [matchscenario.Key].
+func (b *Builder) ScenarioKey(tmpl string) *Builder {
+	b.scenarioKey = tmpl
+
+	return b
+}
+
 // ScenarioStateWillBe sets the state the scenario moves to when this mock is picked to answer a request, before it
 // answers: the next request matches in that state, and of two requests in one state, only one gets this mock. The
 // scenario moves even when the mock then fails to answer, as when its client leaves during its delay.
@@ -734,10 +749,19 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 	}
 
 	if b.scenario != "" {
-		spec.expectations = append(spec.expectations, &expectation{
-			Target:  int(matchingScopeScenario),
-			Matcher: app.scenarioStore.Matcher(b.scenario, b.scenarioRequiredState, b.scenarioNewState),
-		})
+		sm := app.scenarioStore.Matcher(b.scenario, b.scenarioRequiredState, b.scenarioNewState)
+		e := &expectation{Target: int(matchingScopeScenario), Matcher: sm}
+
+		if b.scenarioKey != "" {
+			e.Selector, err = app.scenarioKey(b.scenarioKey, spec.pathTemplate)
+			if err != nil {
+				return nil, fmt.Errorf("mock: scenario.key: %w", err)
+			}
+
+			sm.KeyedBy(b.scenarioKey)
+		}
+
+		spec.expectations = append(spec.expectations, e)
 	}
 
 	// As prepareGlobalEvents does: the prepared parameters go into the mock's copy, never into the builder.

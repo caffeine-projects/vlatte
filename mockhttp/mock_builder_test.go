@@ -484,13 +484,21 @@ func newScenarioServer(fromFiles bool) func(t *testing.T) scenariotest.Server {
 	}
 }
 
+// _scenarioKey is the scenario key of the keyed mocks of a scenarioServer: the header CallWithKey sends.
+const _scenarioKey = `{{ .Request.Header.Get "X-Scenario-Key" }}`
+
 func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 	for _, mk := range mocks {
+		var key string
+		if mk.Keyed {
+			key = _scenarioKey
+		}
+
 		if s.fromFiles {
 			doc, err := json.Marshal(map[string]any{
 				"id": mk.ID,
 				"scenario": map[string]string{
-					"name": mk.Scenario, "required_state": mk.RequiredState, "new_state": mk.NewState,
+					"name": mk.Scenario, "required_state": mk.RequiredState, "new_state": mk.NewState, "key": key,
 				},
 				"request":  map[string]string{"method": http.MethodGet, "path": "/scenario"},
 				"response": map[string]any{"status": http.StatusOK, "body": mk.ID},
@@ -511,12 +519,25 @@ func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 			b.ScenarioStateWillBe(mk.NewState)
 		}
 
+		if key != "" {
+			b.ScenarioKey(key)
+		}
+
 		s.MustMock(b)
 	}
 }
 
 func (s *scenarioServer) Call(t *testing.T) string {
-	res, body := do(t, http.MethodGet, s.URL("/scenario"), nil, nil)
+	return s.call(t, nil)
+}
+
+func (s *scenarioServer) CallWithKey(t *testing.T, key string) string {
+	return s.call(t, http.Header{"X-Scenario-Key": {key}})
+}
+
+// call sends the request of the mocks with header.
+func (s *scenarioServer) call(t *testing.T, header http.Header) string {
+	res, body := do(t, http.MethodGet, s.URL("/scenario"), header, nil)
 
 	switch res.StatusCode {
 	case http.StatusOK:

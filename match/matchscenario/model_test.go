@@ -114,3 +114,19 @@ func TestStore_MoveRefusesNoState(t *testing.T) {
 
 	require.Empty(t, store.Scenarios(), "nothing moved")
 }
+
+func TestStore_ModelListsTheKeyedInstancesThatMoved(t *testing.T) {
+	store := New()
+	pay := store.Matcher("checkout", StateStarted, "paid").KeyedBy("k")
+	require.True(t, pay.Claim(keyed(t, "t2")))
+	require.NoError(t, store.Move(uses("pay", pay), "Checkout", "paid", Key("t1")))
+	store.ResetScenario("checkout", Key("t3"))
+
+	got := store.Model(uses("pay", pay))
+	require.Len(t, got, 1)
+	require.Equal(t, StateStarted, got[0].State, "the shared instance didn't move")
+	require.Equal(t, []KeyedInstance{{Key: "t1", State: "paid"}, {Key: "t2", State: "paid"}}, got[0].Instances)
+
+	require.ErrorIs(t, store.Move(uses("pay", pay), "checkout", "refunded", Key("t1")), ErrUnknownState,
+		"a keyed instance has the states of the scenario's mocks")
+}

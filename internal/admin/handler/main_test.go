@@ -544,14 +544,16 @@ func (f *fakeScenarios) Scenarios(context.Context) ([]matchscenario.Scenario, er
 	return f.store.Model(slices.Values(f.uses)), nil
 }
 
-func (f *fakeScenarios) SetScenario(_ context.Context, name, state string) error {
+func (f *fakeScenarios) SetScenario(_ context.Context, name, state string, in ...matchscenario.Instance) error {
 	if f.setErr != nil {
 		return f.setErr
 	}
 
-	return f.store.Move(slices.Values(f.uses), name, state)
+	return f.store.Move(slices.Values(f.uses), name, state, in...)
 }
 
-func (f *fakeScenarios) ResetScenario(name string) { f.store.ResetScenario(name) }
+func (f *fakeScenarios) ResetScenario(name string, in ...matchscenario.Instance) {
+	f.store.ResetScenario(name, in...)
+}
 
 func (f *fakeScenarios) ResetScenarios() { f.store.ResetScenarios() }

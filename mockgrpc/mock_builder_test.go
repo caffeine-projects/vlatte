@@ -333,13 +333,22 @@ func newScenarioServer(fromFiles bool) func(t *testing.T) scenariotest.Server {
 	}
 }
 
+// _scenarioKey is the scenario key of the keyed mocks of a scenarioServer: the message CallWithKey sends, which a
+// call without one leaves out.
+const _scenarioKey = `{{ with index .Request.Message "message" }}{{ . }}{{ end }}`
+
 func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 	for _, mk := range mocks {
+		var key string
+		if mk.Keyed {
+			key = _scenarioKey
+		}
+
 		if s.fromFiles {
 			doc, err := json.Marshal(map[string]any{
 				"id": mk.ID,
 				"scenario": map[string]string{
-					"name": mk.Scenario, "required_state": mk.RequiredState, "new_state": mk.NewState,
+					"name": mk.Scenario, "required_state": mk.RequiredState, "new_state": mk.NewState, "key": key,
 				},
 				"request":  map[string]string{"method": "Greetings"},
 				"response": map[string]any{"message": map[string]string{"message": mk.ID}},
@@ -360,12 +369,20 @@ func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 			b.ScenarioStateWillBe(mk.NewState)
 		}
 
+		if key != "" {
+			b.ScenarioKey(key)
+		}
+
 		s.MustMock(b)
 	}
 }
 
 func (s *scenarioServer) Call(t *testing.T) string {
-	got, code := greetWith(t, s.c, "")
+	return s.CallWithKey(t, "")
+}
+
+func (s *scenarioServer) CallWithKey(t *testing.T, key string) string {
+	got, code := greetWith(t, s.c, key)
 
 	switch code {
 	case codes.OK:

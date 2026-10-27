@@ -11,10 +11,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -99,4 +101,39 @@ func TestScenarios_AStoreThatFailsFailsTheCall(t *testing.T) {
 
 	err = m.SetScenario(t.Context(), "checkout", "paid")
 	require.EqualError(t, err, "grpc: listing mocks: store down")
+}
+
+func TestScenarios_EachKeyPlaysInAnInstanceOfItsOwn(t *testing.T) {
+	// A call's key renders with the call, and its template and journal entry see the instance of that key.
+	m, c := journaled(t, Setup())
+	m.MustMock(Method("Greetings").StartScenario("checkout").ScenarioStateWillBe("paid").ScenarioKey(_scenarioKey).
+		Reply(Template(`{"message": "{{ .Scenarios.StateOf "checkout" .Request.Message.message }}"}`)))
+
+	got, code := greetWith(t, c, "t1")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "paid", got)
+
+	_, code = greetWith(t, c, "t1")
+	require.Equal(t, codes.NotFound, code, "t1 paid once")
+
+	got, code = greetWith(t, c, "t2")
+	require.Equal(t, codes.OK, code, "t2 pays in its own instance")
+	require.Equal(t, "paid", got)
+
+	e := onlyCall(t, m, journal.Query{Body: match.Contain("t2")})
+	require.Equal(t, []matchscenario.Move{{Scenario: "checkout", Key: "t2", From: matchscenario.StateStarted, To: "paid"}},
+		e.Scenarios)
+}
+
+func TestScenarios_AKeyThatFailsToRenderFailsTheCall(t *testing.T) {
+	// A key that can't render is a mistake of the mock: the call fails, rather than play in the shared instance.
+	m := serve(t)
+	m.MustMock(Method("Greetings").StartScenario("checkout").ScenarioKey(`{{ .Request.Nope }}`).Reply(Message(&pb.HiRes{})))
+
+	_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{})
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.ErrorContains(t, err, "scenario: key: template: scenario.key")
+
+	_, err = m.Mock(Method("Greetings").StartScenario("checkout").ScenarioKey(`{{`).Reply(Message(&pb.HiRes{})))
+	require.ErrorContains(t, err, "mock: scenario.key: template: scenario.key")
 }

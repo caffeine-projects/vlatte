@@ -399,7 +399,12 @@ paths:
       summary: Move a scenario to a state
       description: >-
         The mocks that require the state match next. A state none of the scenario's mocks names is an `unknown_state`
-        problem; a scenario no mock names moves to any state.
+        problem; a scenario no mock names moves to any state. Without `key`, the shared instance moves.
+      parameters:
+        - name: key
+          in: query
+          description: The key of the instance to move, as the scenario key of its mocks renders it. Empty is the shared instance.
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -431,7 +436,12 @@ paths:
       tags: [Scenarios]
       operationId: resetScenario
       summary: Start a scenario over
-      description: Moves the scenario back to `started`.
+      description: Moves every instance of the scenario back to `started`, or only the instance of `key`.
+      parameters:
+        - name: key
+          in: query
+          description: The key of the only instance to reset. Empty is the shared instance.
+          schema: { type: string }
       responses:
         "204":
           description: The scenario is in `started`.
@@ -866,14 +876,21 @@ components:
       additionalProperties: false
     Scenario:
       type: object
-      required: [name, state, states, transitions]
+      required: [name, state, instances, states, transitions]
       properties:
         name:
           type: string
           description: The name its first mock gives it, or the name it was first set under when no mock names it.
         state:
           type: string
+          description: The state of the shared instance, the one of requests without a key.
           examples: [started]
+        instances:
+          type: array
+          description: >-
+            The instances of keys that moved, in the order of their keys: mocks with a scenario key move an instance
+            for each key of their requests. An instance not listed is in `started`.
+          items: { $ref: "#/components/schemas/ScenarioInstance" }
         states:
           type: array
           description: >-
@@ -883,6 +900,15 @@ components:
           type: array
           description: The moves its mocks make when picked to answer, in the order of the mocks.
           items: { $ref: "#/components/schemas/ScenarioTransition" }
+      additionalProperties: false
+    ScenarioInstance:
+      type: object
+      required: [key, state]
+      properties:
+        key:
+          type: string
+        state:
+          type: string
       additionalProperties: false
     ScenarioState:
       type: object
@@ -1108,6 +1134,9 @@ components:
         scenario:
           type: string
           description: The name of the scenario, as the mock gives it.
+        key:
+          type: string
+          description: The key of the instance the request moved; missing for the shared instance.
         from:
           type: string
           description: The state the mock requires; missing when it requires none.

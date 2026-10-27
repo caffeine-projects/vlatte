@@ -49,6 +49,7 @@
 
     h1 { font-size: 22px; margin: 0 0 4px; }
     h2 { font-size: 16px; margin: 0; overflow-wrap: anywhere; }
+    h3 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 16px 0 0; }
     p { margin: 0 0 12px; }
     code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
 
@@ -122,6 +123,9 @@
 
     .note { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
 
+    .instance { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
+    .instance code { overflow-wrap: anywhere; }
+
     .error { color: var(--danger); }
 
     [hidden] { display: none !important; }
@@ -131,7 +135,7 @@
 <main>
   <h1>Scenarios</h1>
   <p class="muted">Where each scenario is, the states its mocks name, and which mock moves it where. Pick a state to
-    move a scenario to it.</p>
+    move a scenario to it. A scenario whose mocks have a key has an instance for each key that moved it.</p>
 
   <p id="unsupported" class="error" role="alert" hidden></p>
 
@@ -208,28 +212,61 @@
     await refresh()
   }
 
-  function render(scenario) {
+  function instancePath(name, key) {
+    return key === null ? scenarioPath(name) : scenarioPath(name) + '?key=' + encodeURIComponent(key)
+  }
+
+  // stateButtons are the buttons that move an instance of scenario, the shared one when key is null, to each state.
+  function stateButtons(scenario, current, key) {
+    const label = key === null ? scenario.name : scenario.name + ' for key ' + key
     const states = el('div', { className: 'states', role: 'group' })
-    states.setAttribute('aria-label', 'States of ' + scenario.name)
+    states.setAttribute('aria-label', 'States of ' + label)
 
     for (const state of scenario.states) {
-      const current = state.name === scenario.state
+      const now = state.name === current
       const button = el('button', {
         type: 'button',
-        className: (current ? 'current ' : '') + (state.reachable ? '' : 'unreachable'),
-        disabled: current,
-        title: state.reachable ? 'Move ' + scenario.name + ' to ' + state.name
+        className: (now ? 'current ' : '') + (state.reachable ? '' : 'unreachable'),
+        disabled: now,
+        title: state.reachable ? 'Move ' + label + ' to ' + state.name
           : 'No mock moves the scenario to this state: only this page or the admin API can',
       }, state.name)
-      button.setAttribute('aria-pressed', String(current))
-      button.dataset.key = 'state:' + scenario.name + ':' + state.name
+      button.setAttribute('aria-pressed', String(now))
+      button.dataset.key = JSON.stringify(['state', scenario.name, key, state.name])
       button.dataset.scenario = scenario.name
-      button.addEventListener('click', () => act('PUT', scenarioPath(scenario.name), { state: state.name }))
+      button.addEventListener('click', () => act('PUT', instancePath(scenario.name, key), { state: state.name }))
       states.append(button)
     }
 
-    const reset = el('button', { type: 'button', disabled: scenario.state === 'started' }, 'Start over')
-    reset.dataset.key = 'reset:' + scenario.name
+    return states
+  }
+
+  // instance is the block of the instance of scenario of one key: where it is, and the buttons that move it.
+  function instance(scenario, inst) {
+    const reset = el('button', { type: 'button', title: 'Start ' + scenario.name + ' over for key ' + inst.key },
+      'Start over')
+    reset.dataset.key = JSON.stringify(['reset', scenario.name, inst.key])
+    reset.dataset.scenario = scenario.name
+    reset.addEventListener('click', () => act('DELETE', instancePath(scenario.name, inst.key)))
+
+    const block = el('div', { className: 'instance' },
+      el('div', { className: 'head' },
+        el('div', { className: 'title' }, el('span', { className: 'muted' }, 'Key'), el('code', {}, inst.key),
+          el('span', { className: 'pill' }, inst.state)),
+        reset))
+
+    if (scenario.states.length > 0) block.append(stateButtons(scenario, inst.state, inst.key))
+    return block
+  }
+
+  function render(scenario) {
+    const keyed = scenario.instances.length > 0
+    const reset = el('button', {
+      type: 'button',
+      disabled: scenario.state === 'started' && !keyed,
+      title: keyed ? 'Start every instance of ' + scenario.name + ' over' : 'Start ' + scenario.name + ' over',
+    }, 'Start over')
+    reset.dataset.key = JSON.stringify(['reset', scenario.name, null])
     reset.dataset.scenario = scenario.name
     reset.addEventListener('click', () => act('DELETE', scenarioPath(scenario.name)))
 
@@ -241,15 +278,19 @@
 
     if (scenario.states.length === 0) {
       section.append(el('p', { className: 'note' }, 'No mock names this scenario: it was set without one.'))
-      return section
+    } else {
+      if (keyed) section.append(el('p', { className: 'note' }, 'Shared: requests without a key.'))
+      section.append(stateButtons(scenario, scenario.state, null))
+
+      const unreachable = scenario.states.filter((s) => !s.reachable).map((s) => s.name)
+      if (unreachable.length > 0) {
+        section.append(el('p', { className: 'note' }, 'No mock moves the scenario to ' + unreachable.join(', ') +
+          ': a mock that requires it waits for this page or the admin API.'))
+      }
     }
 
-    section.append(states)
-
-    const unreachable = scenario.states.filter((s) => !s.reachable).map((s) => s.name)
-    if (unreachable.length > 0) {
-      section.append(el('p', { className: 'note' }, 'No mock moves the scenario to ' + unreachable.join(', ') +
-        ': a mock that requires it waits for this page or the admin API.'))
+    if (keyed) {
+      section.append(el('h3', {}, 'Keys'), ...scenario.instances.map((inst) => instance(scenario, inst)))
     }
 
     if (scenario.transitions.length > 0) {
@@ -330,9 +371,10 @@
     const next = new Map()
     const sections = doc.scenarios.map((scenario) => {
       const section = render(scenario)
+      const where = JSON.stringify([scenario.state, scenario.instances])
       const before = shown.get(scenario.name)
-      if (before !== undefined && before !== scenario.state) section.classList.add('moved')
-      next.set(scenario.name, scenario.state)
+      if (before !== undefined && before !== where) section.classList.add('moved')
+      next.set(scenario.name, where)
       return section
     })
 

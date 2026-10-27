@@ -53,12 +53,19 @@ func (e *Eval[TIn]) Match(ctx context.Context, sub *Explanation, in TIn) (ok boo
 		}
 	}()
 
+	return e.Matcher.Match(e.Arg(ctx, sub, in))
+}
+
+// Arg returns the argument the matcher of e gets for in: the value its Selector selects, or nil without one, with an
+// explanation under sub. A mock server that reads a matcher of the mock Find picked, such as a scenario's to journal
+// its move, gives it the same argument.
+func (e *Eval[TIn]) Arg(ctx context.Context, sub *Explanation, in TIn) MatcherArg {
 	var val any
 	if e.Selector != nil {
 		val = e.Selector(ctx, in)
 	}
 
-	return e.Matcher.Match(NewMatcherArg(ctx, sub.Sub(e.Matcher.Name()), val))
+	return NewMatcherArg(ctx, sub.Sub(e.Matcher.Name()), val)
 }
 
 // GetEvals is a function that returns a list of evaluators of a given [Mock].
@@ -123,7 +130,7 @@ func (mocks Mocks[M, TIn]) find(
 				misses.tried = misses.tried[:0]
 			}
 
-			claimed, err := e.claim()
+			claimed, err := e.claim(ctx, in)
 			if err != nil {
 				var nothing M
 				return nothing, false, false, fmt.Errorf("%w: %s: %w", ErrMatching, mock.String(), err)
@@ -151,16 +158,16 @@ func (e Evaluators[M, TIn]) Eval(ctx context.Context, sub *Explanation, in TIn) 
 	return err == nil && stop == len(e), err
 }
 
-// claim takes the turns of the [Claimer] matchers, in order, up to the first another request took: it reports whether
-// it took them all.
-func (e Evaluators[M, TIn]) claim() (claimed bool, err error) {
+// claim takes the turns of the [Claimer] matchers for in, in order, up to the first another request took: it reports
+// whether it took them all.
+func (e Evaluators[M, TIn]) claim(ctx context.Context, in TIn) (claimed bool, err error) {
 	for i, eval := range e {
 		c, ok := eval.Matcher.(Claimer)
 		if !ok {
 			continue
 		}
 
-		if claimed, err = claimOne(c); err != nil || !claimed {
+		if claimed, err = claimOne(ctx, c, eval, in); err != nil || !claimed {
 			if err != nil {
 				err = fmt.Errorf("eval[%d][%s]: %w", i, eval.String(), err)
 			}
@@ -172,15 +179,15 @@ func (e Evaluators[M, TIn]) claim() (claimed bool, err error) {
 	return true, nil
 }
 
-// claimOne takes the turn of c, turning a panic into an error, as [Eval.Match] does.
-func claimOne(c Claimer) (claimed bool, err error) {
+// claimOne takes the turn of c, the matcher of eval, for in, turning a panic into an error, as [Eval.Match] does.
+func claimOne[TIn any](ctx context.Context, c Claimer, eval *Eval[TIn], in TIn) (claimed bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("%w: Claim: type: %T %v", ErrMatchPanicked, c, r)
 		}
 	}()
 
-	return c.Claim(), nil
+	return c.Claim(eval.Arg(ctx, nil, in)), nil
 }
 
 // stop evaluates the input against the evaluators in order, up to the first that doesn't match: it returns its

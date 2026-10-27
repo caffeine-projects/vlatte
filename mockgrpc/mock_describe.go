@@ -38,7 +38,7 @@ type mockDescription struct {
 	times     int64
 	delay     time.Duration
 	delayFunc bool      // the delay is DelayFunc's, which no mock file can hold
-	scenario  [3]string // name, required state, new state
+	scenario  [4]string // name, required state, new state, key
 }
 
 // Describe implements descriptor.SelfDescriptive: the mock as a mock file writes it, which the admin API returns and
@@ -93,6 +93,10 @@ func (m *Mock) Describe() descriptor.Descriptor {
 
 		if d.scenario[2] != "" {
 			sc["new_state"] = d.scenario[2]
+		}
+
+		if d.scenario[3] != "" {
+			sc["key"] = d.scenario[3]
 		}
 
 		doc["scenario"] = sc

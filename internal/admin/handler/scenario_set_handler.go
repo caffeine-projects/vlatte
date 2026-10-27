@@ -5,7 +5,8 @@ import (
 )
 
 // SetScenario moves the scenario of the path's name to the state of the request body, and answers it: PUT
-// /scenarios/{name}. The mocks that require that state match next. Names ignore case: Checkout is checkout.
+// /scenarios/{name}. The query parameter key moves the instance of that key. The mocks that require that state match
+// next. Names ignore case: Checkout is checkout.
 func SetScenario(ops *Operations) http.Handler {
 	return negotiated(func(w http.ResponseWriter, r *http.Request) {
 		data, format, err := readBody(w, r)
@@ -14,7 +15,7 @@ func SetScenario(ops *Operations) http.Handler {
 			return
 		}
 
-		s, err := ops.SetScenario(r.Context(), r.PathValue("name"), data, format)
+		s, err := ops.SetScenario(r.Context(), r.PathValue("name"), data, format, scenarioInstance(r)...)
 		if err != nil {
 			fail(w, r, err)
 			return
