@@ -363,8 +363,9 @@ func (rep *Reply) Multipart(mp *Multipart) *Reply {
 }
 
 // EventStream defines the response body as a stream of Server-Sent Events, sent event by event. It sets the
-// Content-Type to text/event-stream and Cache-Control to no-cache, unless the reply sets them. Building the mock fails
-// with a status that has no body, 1xx, 204 or 304, and with response mappers, which read the whole body.
+// Content-Type to text/event-stream and Cache-Control to no-cache, unless the reply sets them; a HEAD request gets
+// those headers only. Building the mock fails with a status that has no body, 1xx, 204 or 304, and with response
+// mappers, which read the whole body.
 func (rep *Reply) EventStream(es *EventStream) *Reply {
 	rep.body(_bodyEventStream)
 	rep.eventStream = es
@@ -681,8 +682,12 @@ func (r *responseReplier) build(ctx context.Context, rv *RequestValues) (*Respon
 			response.Header.Set(HeaderCacheControl, "no-cache")
 		}
 
-		response.BodyCloser = &eventStreamBody{stream: stream}
-		response.flush = true
+		// A HEAD request gets the headers only: net/http sends no body, and a stream that keeps open would hold the
+		// request, and its connection, until the client left.
+		if rv.RawRequest == nil || rv.RawRequest.Method != http.MethodHead {
+			response.BodyCloser = &eventStreamBody{stream: stream}
+			response.flush = true
+		}
 
 	case _bodyTemplate:
 		body, err := execute(r.bodyTemplate, data)
