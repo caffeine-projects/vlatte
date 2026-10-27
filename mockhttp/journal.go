@@ -108,7 +108,7 @@ type journalCall struct {
 	mu      sync.Mutex
 	entry   journal.Entry
 	warning error
-	events  []error // of the on_complete events that failed
+	events  journal.EventErrors
 	done    bool
 }
 
@@ -187,14 +187,12 @@ func (c *journalCall) record(r *RequestValues, outcome journal.Outcome, status i
 		c.entry.MockID = r.Mock.ID()
 	}
 
-	// A request a mock answered tells the on_complete events that failed, such as webhooks.
-	if err == nil {
-		err = errors.Join(c.events...)
-	}
-
 	if err != nil {
 		c.entry.Message = err.Error()
 	}
+
+	// A request a mock answered tells the on_complete events that failed, such as webhooks.
+	c.events.Tell(&c.entry)
 
 	// The journal logs what it fails to keep.
 	c.journal.Append(&c.entry)
@@ -207,10 +205,7 @@ func (c *journalCall) eventFailed(err error) {
 		return
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.events = append(c.events, err)
+	c.events.Add(err)
 }
 
 // warn keeps err, the last warning of the request, which tells why it ended, if it reaches no outcome.
