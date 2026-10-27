@@ -140,6 +140,7 @@ func TestConfigSources_ReadTheRecordSection(t *testing.T) {
 		"--grpc-record-methods=Greetings,List",
 		"--grpc-record-request-headers=x-tenant",
 		"--grpc-record-include-mocked",
+		"--grpc-record-repeats=first",
 	})))
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
@@ -151,6 +152,7 @@ func TestConfigSources_ReadTheRecordSection(t *testing.T) {
 	require.Equal(t, []string{"Greetings", "List"}, c.Methods)
 	require.Equal(t, []string{"x-tenant"}, c.RequestHeaders)
 	require.True(t, c.IncludeMocked)
+	require.Equal(t, vlatte.RecordFirst, c.Repeats)
 
 	m.MustStart()
 	require.True(t, m.IsRecording())
@@ -166,6 +168,16 @@ func TestConfigSources_ReadTheRecordSection(t *testing.T) {
 func TestConfigSources_ARecordFormatOfNoMockFileFails(t *testing.T) {
 	_, err := New(Setup().ConfigSources(ConfigArgs([]string{"--grpc-record-format=xml"})))
 	require.ErrorContains(t, err, "grpc.record.format")
+}
+
+func TestConfigSources_RecordRepeatsDefaultsToASequence(t *testing.T) {
+	m, err := New(Setup().Silent().RootDir(t.TempDir()).ConfigSources(ConfigArgs([]string{"--grpc-record-target=localhost:1"})))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+	require.Equal(t, vlatte.RecordSequence, m.Config().Record.Repeats)
+
+	_, err = New(Setup().ConfigSources(ConfigArgs([]string{"--grpc-record-repeats=all"})))
+	require.ErrorContains(t, err, "grpc.record.repeats")
 }
 
 func TestConfigSources_TLSFilesTurnTLSOn(t *testing.T) {

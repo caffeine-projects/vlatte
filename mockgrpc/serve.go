@@ -209,6 +209,7 @@ func (app *Server) afterServed(ctx context.Context, mock *Mock, call *Call, err 
 		},
 		func(err error) {
 			app.logger.Warn().Err(err).Str("mock", mock.ID()).Str("method", call.method).Msg("grpc: on_complete")
+			callOf(ctx).eventFailed(err)
 		},
 	)
 }

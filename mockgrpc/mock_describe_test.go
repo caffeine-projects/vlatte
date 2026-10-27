@@ -2,6 +2,7 @@ package mockgrpc
 
 import (
 	"context"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -203,6 +204,49 @@ func TestDescribe_WritesAProxy(t *testing.T) {
 	}
 }
 
+func TestDescribe_WritesSequencesAndRandoms(t *testing.T) {
+	// A sequence or random reply of Responses is described as a mock file holds it, and loads back as the same.
+	m := serve(t)
+	scope := m.MustMock(
+		Method("Greetings").ID("seq").Reply(Seq(Message(&pb.HiRes{Message: "a"}), Status(codes.NotFound, "b")).
+			OnSequenceEnded(JSON(`{"message": "c"}`))),
+		Method("Greetings").ID("seeded").Reply(RandWithSeed(3, Message(&pb.HiRes{Message: "a"}))),
+		Method("Greetings").ID("generator").Reply(RandWith(rand.New(rand.NewPCG(1, 2)), Message(&pb.HiRes{Message: "a"}))),
+	)
+
+	want := map[string]string{
+		"seq": `{"id": "seq", "request": {"method": "Greetings"}, "response_sequence": {"responses": [` +
+			`{"messages": [{"message": "a"}]}, {"status": {"code": "NOT_FOUND", "message": "b"}}], ` +
+			`"after_ended": {"messages": [{"message": "c"}]}}}`,
+		"seeded":    `{"id": "seeded", "request": {"method": "Greetings"}, "response_random": {"responses": [{"messages": [{"message": "a"}]}], "seed": 3}}`,
+		"generator": `{"id": "generator", "request": {"method": "Greetings"}, "response_random": {"responses": [{"messages": [{"message": "a"}]}]}}`,
+	}
+
+	var seq *Server
+
+	for _, mock := range scope.Mocks() {
+		doc, err := mock.Describe().MarshalJSON()
+		require.NoError(t, err)
+		require.JSONEq(t, want[mock.ID()], string(doc))
+
+		loaded := serve(t)
+		_, err = loaded.Mock(FromBytes(doc, "json"))
+		require.NoError(t, err, "%s", doc)
+
+		if mock.ID() == "seq" {
+			seq = loaded
+		}
+	}
+
+	got := make([]string, 0, 3)
+	for range 3 {
+		greeting, code := greetWith(t, client(t, seq), "")
+		got = append(got, greeting+code.String())
+	}
+
+	require.Equal(t, []string{"aOK", "NotFound", "cOK"}, got, "the sequence loaded back answers in turn")
+}
+
 func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 	// A description without a response doesn't load back: the admin API shows what it can, rather than a reply that
 	// answers differently.
@@ -219,6 +263,12 @@ func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 		Method("Greetings").ID("utf8").Message(&pb.HiReq{Message: "\xff"}).Reply(Messages(&pb.HiRes{Message: "\xff"})),
 		Method("Greetings").ID("detail").Reply(Status(codes.NotFound, "x").Details(&anypb.Any{TypeUrl: "type.googleapis.com/nope.X"})),
 		Method("Greetings").ID("dial").Reply(From("localhost:1").DialOptions(grpc.WithUserAgent("x"))),
+		Method("Greetings").ID("echo").Reply(Echo()),
+		Method("Greetings").ID("shared").Reply(Shared(&countingReplier{})),
+		Method("Greetings").ID("seq-func").Reply(Seq(Message(&pb.HiRes{}), Func(func(context.Context, *Call) error { return nil }))),
+		Method("Greetings").ID("seq-after").Reply(Seq(Message(&pb.HiRes{})).OnSequenceEnded(Echo())),
+		Method("List").ID("seq-delay").Reply(Seq(Messages(&pb.ListItem{}).MessageDelayFunc(vlatte.Latency(time.Millisecond)))),
+		Method("Greetings").ID("rand-echo").Reply(Rand(Echo())),
 	)
 
 	want := map[string]string{
@@ -230,6 +280,12 @@ func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 		"utf8":          `{"id": "utf8", "request": {"method": "Greetings"}}`,
 		"detail":        `{"id": "detail", "request": {"method": "Greetings"}}`,
 		"dial":          `{"id": "dial", "request": {"method": "Greetings"}}`,
+		"echo":          `{"id": "echo", "request": {"method": "Greetings"}}`,
+		"shared":        `{"id": "shared", "request": {"method": "Greetings"}}`,
+		"seq-func":      `{"id": "seq-func", "request": {"method": "Greetings"}}`,
+		"seq-after":     `{"id": "seq-after", "request": {"method": "Greetings"}}`,
+		"seq-delay":     `{"id": "seq-delay", "request": {"method": "List"}}`,
+		"rand-echo":     `{"id": "rand-echo", "request": {"method": "Greetings"}}`,
 	}
 
 	require.Len(t, scope.Mocks(), len(want))

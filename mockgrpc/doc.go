@@ -15,7 +15,8 @@
 //	client := pb.NewGreeterClient(m.MustDial())
 //
 // [Method] starts a mock; its matchers read the call's metadata and its request, as protojson writes it with the
-// field names of the .proto file. [Message], [Messages], [JSON], [Template], [Status], [Bidi] and [Func] reply, and
+// field names of the .proto file. [Message], [Messages], [JSON], [Template], [Status], [Bidi], [Echo] and [Func]
+// reply, [Seq] and [Rand] answer with other replies in turn or at random, [Shared] gives mocks one Replier, and
 // [From] answers with what another server answers, which [Server.StartRecording] records as mock files.
 // Mocks can be limited with Times, take part in scenarios, wait with Delay, and run on_complete events, such as
 // webhooks. A server can keep a journal of its calls, which tests verify with the same builders, and serve an admin

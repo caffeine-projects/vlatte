@@ -43,9 +43,10 @@ type mockDescription struct {
 
 // Describe implements descriptor.SelfDescriptive: the mock as a mock file writes it, which the admin API returns and
 // saves. A mock read from a document is described by it, with its ID. A mock built in Go is described as far as mock
-// files can hold it: a Func reply, a CallMatches matcher, a callback, a custom matcher or a DelayFunc delay can't be,
-// and is left out. A mock with a matcher or a delay left out is described without its reply too, so its description
-// doesn't load back as a mock that matches more calls, or replies sooner.
+// files can hold it: a Func, Echo or Shared reply, a Seq or Rand reply of other replies than Response, a CallMatches
+// matcher, a callback, a custom matcher or a DelayFunc delay can't be, and is left out. A mock with a matcher or a
+// delay left out is described without its reply too, so its description doesn't load back as a mock that matches
+// more calls, or replies sooner.
 func (m *Mock) Describe() descriptor.Descriptor {
 	if m.doc != nil {
 		doc := maps.Clone(m.doc)
@@ -112,6 +113,14 @@ func (m *Mock) Describe() descriptor.Descriptor {
 	case *Response:
 		if res, ok := r.describe(); ok {
 			doc["response"] = res
+		}
+	case *SequentialReply:
+		if res, ok := r.describe(); ok {
+			doc["response_sequence"] = res
+		}
+	case *RandomReply:
+		if res, ok := r.describe(); ok {
+			doc["response_random"] = res
 		}
 	case *BidiReply:
 		if res, ok := r.describe(); ok {
@@ -341,6 +350,65 @@ func (r *Response) describe() (map[string]any, bool) {
 	}
 
 	return res, true
+}
+
+// describe describes the SequentialReply as a mock file's response_sequence, and reports false when one can't hold
+// it: a reply of the sequence that isn't a Response mock files can hold.
+func (r *SequentialReply) describe() (map[string]any, bool) {
+	responses, ok := describeResponses(r.replies)
+	if !ok {
+		return nil, false
+	}
+
+	res := map[string]any{"responses": responses}
+
+	if r.replyAfterSequenceEnded != nil {
+		after, ok := describeResponses([]Reply{r.replyAfterSequenceEnded})
+		if !ok {
+			return nil, false
+		}
+
+		res["after_ended"] = after[0]
+	}
+
+	return res, true
+}
+
+// describe describes the RandomReply as a mock file's response_random, and reports false when one can't hold it, as
+// describeResponses does. RandWith's generator is left out: a mock file can't hold it.
+func (r *RandomReply) describe() (map[string]any, bool) {
+	responses, ok := describeResponses(r.replies)
+	if !ok {
+		return nil, false
+	}
+
+	res := map[string]any{"responses": responses}
+	if r.seeded {
+		res["seed"] = r.seed
+	}
+
+	return res, true
+}
+
+// describeResponses describes replies, each a Response, as a mock file's list of responses, and reports false when
+// one isn't a Response, or can't be described.
+func describeResponses(replies []Reply) ([]any, bool) {
+	out := make([]any, 0, len(replies))
+	for _, reply := range replies {
+		r, ok := reply.(*Response)
+		if !ok {
+			return nil, false
+		}
+
+		v, ok := r.describe()
+		if !ok {
+			return nil, false
+		}
+
+		out = append(out, v)
+	}
+
+	return out, true
 }
 
 // describe describes the BidiReply as a mock file's bidi, and reports false when one can't hold it.

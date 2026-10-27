@@ -10,6 +10,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
@@ -23,9 +24,9 @@ const (
 // RecordConfig configures recording: where the recordings go, and what they match. See Server.StartRecording.
 //
 // A recording writes a mock file for each request: a call of the same method, with the same messages and the
-// metadata RequestHeaders names. It answers the way the first call of that request was answered: its header, its
-// messages, its trailer and its status. A bidi call matches on its method and metadata only, as bidi mocks do, and
-// plays its messages back at once, without waiting for the client's.
+// metadata RequestHeaders names. It answers the way the calls of that request were answered, in turn, then the way
+// the last one was, as Repeats sets: its header, its messages, its trailer and its status. A bidi call matches on its
+// method and metadata only, as bidi mocks do, and plays its messages back at once, without waiting for the client's.
 type RecordConfig struct {
 	// Dir is the directory of the recordings. Relative paths start at Config.RootDir. Defaults to _mocks_recorded.
 	Dir string
@@ -50,6 +51,10 @@ type RecordConfig struct {
 	// no other metadata.
 	RequestHeaders []string
 
+	// Repeats is what a recording keeps of a request that comes again: every answer, in order, or the first one.
+	// Defaults to vlatte.RecordSequence.
+	Repeats vlatte.RecordRepeats
+
 	// IncludeMocked records the answers of mocks too. Without it, only proxied answers are recorded: those of the
 	// Target and of proxy replies, such as From.
 	IncludeMocked bool
@@ -72,7 +77,7 @@ func (f recordConfigFunc) Apply(c *RecordConfig) error {
 }
 
 func defaultRecordConfig() *RecordConfig {
-	return &RecordConfig{Dir: _defaultRecordDir, Format: _defaultRecordFormat}
+	return &RecordConfig{Dir: _defaultRecordDir, Format: _defaultRecordFormat, Repeats: vlatte.RecordSequence}
 }
 
 // Apply sets the fields of r that aren't zero on c, and adds r's DialOptions and Transforms to c's, so configs
@@ -81,6 +86,7 @@ func (r *RecordConfig) Apply(c *RecordConfig) error {
 	c.Dir = cmp.Or(r.Dir, c.Dir)
 	c.Format = cmp.Or(r.Format, c.Format)
 	c.Target = cmp.Or(r.Target, c.Target)
+	c.Repeats = cmp.Or(r.Repeats, c.Repeats)
 	c.DialOptions = slices.Concat(c.DialOptions, r.DialOptions)
 	c.IncludeMocked = c.IncludeMocked || r.IncludeMocked
 	c.Transforms = slices.Concat(c.Transforms, r.Transforms)
@@ -108,7 +114,8 @@ func (r *RecordConfig) clone() *RecordConfig {
 }
 
 // check checks the settings, and writes them as the recording reads them: the format as mock files name it, such as
-// yaml for .YAML, the methods without the spaces around them, and the metadata keys in lower case, as gRPC holds them.
+// yaml for .YAML, the default repeats for none, the methods without the spaces around them, and the metadata keys in
+// lower case, as gRPC holds them.
 func (r *RecordConfig) check() error {
 	format, ok := config.Format(r.Format)
 	if !ok {
@@ -116,9 +123,13 @@ func (r *RecordConfig) check() error {
 	}
 
 	r.Format = format
+	r.Repeats = cmp.Or(r.Repeats, vlatte.RecordSequence)
 
-	if r.Dir == "" {
+	switch {
+	case r.Dir == "":
 		return errors.New("recorder: no directory to record into")
+	case r.Repeats != vlatte.RecordSequence && r.Repeats != vlatte.RecordFirst:
+		return fmt.Errorf("recorder: repeats %d is not vlatte.RecordSequence or vlatte.RecordFirst", r.Repeats)
 	}
 
 	var err error
@@ -190,6 +201,12 @@ func RecordMethods(methods ...string) RecordConfigurer {
 // RecordRequestHeaders sets the metadata keys recordings match: the value each had, or its absence.
 func RecordRequestHeaders(keys ...string) RecordConfigurer {
 	return recordConfigFunc(func(c *RecordConfig) { c.RequestHeaders = keys })
+}
+
+// RecordRepeats sets what a recording keeps of a request that comes again: vlatte.RecordSequence, the default, or
+// vlatte.RecordFirst.
+func RecordRepeats(repeats vlatte.RecordRepeats) RecordConfigurer {
+	return recordConfigFunc(func(c *RecordConfig) { c.Repeats = repeats })
 }
 
 // RecordIncludeMocked sets whether the answers of mocks are recorded too, not only proxied ones.

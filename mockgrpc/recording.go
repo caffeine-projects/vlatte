@@ -117,7 +117,7 @@ func (app *Server) startRecording(conf *RecordConfig) error {
 	session, err := vlatte.NewRecordSession(codec, vlatte.RecordOptions[RecordedRequest, RecordedResponse]{
 		Dir:        rec.dir,
 		Format:     conf.Format,
-		Repeats:    vlatte.RecordFirst,
+		Repeats:    conf.Repeats,
 		Transforms: conf.Transforms,
 		Logger:     app.logger,
 	})
