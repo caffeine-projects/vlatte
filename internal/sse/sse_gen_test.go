@@ -47,9 +47,12 @@ func genEvent() *rapid.Generator[*EventSpec] {
 	})
 }
 
-// _jsonData holds the JSON data of events: objects, arrays and scalars, and what a file writes as text: a string,
-// null, and a number past int64.
-var _jsonData = []string{`{"a":1,"b":[true,null,"x"]}`, `[]`, `{}`, `3`, `false`, `"s"`, `null`, `{"z":{"y":"é"}}`, `18446744073709551615`, `[1.5,-2]`}
+// _jsonData holds the JSON data of events: objects, arrays and scalars, what data reads as text or refuses, a string
+// and null, a number past int64, which a file can't hold, and strings a templated stream would run as templates.
+var _jsonData = []string{
+	`{"a":1,"b":[true,null,"x"]}`, `[]`, `{}`, `3`, `false`, `"s"`, `null`, `{"z":{"y":"é"}}`, `18446744073709551615`,
+	`[1.5,-2]`, `"{{ .X }}"`, `{"a":"{{ .X }}"}`,
+}
 
 // genDocEvent draws an event as a mock file can write it: any field of genEvent, JSON data, a retry, or raw text
 // alone, each with a delay or not.
@@ -62,9 +65,7 @@ func genDocEvent() *rapid.Generator[*EventSpec] {
 			ev.Raw, ev.HasRaw = []byte(genText().Draw(t, "raw")), true
 		case 1:
 			ev = genEvent().Draw(t, "event")
-			if ev.HasData && rapid.Bool().Draw(t, "json") {
-				ev.Data, ev.DataKind = []byte(rapid.SampledFrom(_jsonData).Draw(t, "json_data")), DataJSON
-			}
+			ev.Data, ev.DataKind, ev.HasData = []byte(rapid.SampledFrom(_jsonData).Draw(t, "json_data")), DataJSON, true
 		default:
 			ev = genEvent().Draw(t, "event")
 		}

@@ -49,3 +49,37 @@ func TestDoc_KeepsJSONStringsOfATemplatedStreamLiteral(t *testing.T) {
 	data := map[string]any{"X": "rendered"}
 	require.Equal(t, encode(t, s, data), encode(t, back, data), "%s", text)
 }
+
+func TestDoc_KeepsTheJSONOfATemplatedStreamOutOfItsTemplates(t *testing.T) {
+	// The text of a templated stream is templates, and its JSON data isn't. JSON a file can't write back as the same
+	// bytes, as a Go struct's with its keys in field order, is written as the JSON it holds: built back, the stream
+	// sends it with its keys sorted, and never runs it. Only JSON with a number that would round is written as text,
+	// which keeps the number's digits.
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{"keys out of order", `{"b":"{{ .X }}","a":1}`, `{"a":1,"b":"{{ .X }}"}`},
+		{"white space", `[ "{{ .X }}" ]`, `["{{ .X }}"]`},
+		{"a number that would round", `{"id":18446744073709551615,"b":"x"}`, `{"id":18446744073709551615,"b":"x"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Spec{Templated: true, Events: []*EventSpec{{Data: []byte(tt.data), DataKind: DataJSON, HasData: true}}}
+
+			text, err := config.Encode(s.Doc(), "yaml")
+			require.NoError(t, err)
+
+			doc, err := config.Parse(text, "yaml")
+			require.NoError(t, err)
+
+			back, err := Decode(config.Value{Key: "event_stream", Any: doc})
+			require.NoError(t, err)
+			back.Templated = true
+
+			require.Equal(t, "data: "+tt.want+"\n\n", encode(t, back, map[string]any{"X": "rendered"}), "%s", text)
+		})
+	}
+}

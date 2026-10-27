@@ -2,7 +2,10 @@ package sse
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
 	json "encoding/json/v2"
+	"errors"
+	"io"
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
@@ -177,7 +180,7 @@ func decodeEvent(v config.Value) (*EventSpec, error) {
 func (s *Spec) Doc() map[string]any {
 	events := make([]any, len(s.Events))
 	for i, e := range s.Events {
-		events[i] = e.doc()
+		events[i] = e.doc(s.Templated)
 	}
 
 	doc := map[string]any{"events": events}
@@ -208,8 +211,8 @@ func (s *Spec) Doc() map[string]any {
 	return doc
 }
 
-// doc returns the event as a mock file writes it.
-func (e *EventSpec) doc() map[string]any {
+// doc returns the event as a mock file writes it, in a stream that is templated or not.
+func (e *EventSpec) doc(templated bool) map[string]any {
 	doc := make(map[string]any)
 
 	if e.HasDelay {
@@ -238,7 +241,7 @@ func (e *EventSpec) doc() map[string]any {
 	}
 
 	if e.HasData {
-		key, data := e.dataDoc()
+		key, data := e.dataDoc(templated)
 		doc[key] = data
 	}
 
@@ -246,17 +249,21 @@ func (e *EventSpec) doc() map[string]any {
 }
 
 // dataDoc returns the data as a mock file writes it, and its key: text as text, and JSON as the value it holds, under
-// data, or data_json for a string or null, which data reads as text or refuses. A number that would round, as one past
-// int64, is written as its JSON text, which sends the same bytes; in a templated stream, that text is a template
-// then, as JSON data isn't.
-func (e *EventSpec) dataDoc() (string, any) {
+// data, or data_json for a string or null, which data reads as text or refuses. JSON its value doesn't write back as
+// the same bytes, as a Go struct's with its keys in field order, is written as its text, which sends them. In a
+// templated stream that text would be a template, so there only JSON with a number that would round, as one past
+// int64, is text: other JSON is written as its value, and sent with its keys sorted.
+func (e *EventSpec) dataDoc(templated bool) (string, any) {
 	if e.DataKind != DataJSON {
 		return "data", string(e.Data)
 	}
 
-	// Data that doesn't decode is nil too: as a number that would round, it doesn't marshal back to the same bytes.
-	v, _ := value.DecodeJSON(e.Data)
-	if b, _ := json.Marshal(v, json.Deterministic(true)); !bytes.Equal(b, e.Data) {
+	v, err := value.DecodeJSON(e.Data)
+	if err != nil {
+		return "data", string(e.Data)
+	}
+
+	if b, _ := json.Marshal(v, json.Deterministic(true)); !bytes.Equal(b, e.Data) && (!templated || !numbersHold(e.Data)) {
 		return "data", string(e.Data)
 	}
 
@@ -266,4 +273,26 @@ func (e *EventSpec) dataDoc() (string, any) {
 	}
 
 	return "data", v
+}
+
+// numbersHold reports whether each number of data, JSON, decodes to a value written back as it is: one past int64
+// rounds.
+func numbersHold(data []byte) bool {
+	dec := jsontext.NewDecoder(bytes.NewReader(data))
+
+	for {
+		tok, err := dec.ReadToken()
+		if err != nil {
+			return errors.Is(err, io.EOF)
+		}
+
+		if tok.Kind() != jsontext.KindNumber {
+			continue
+		}
+
+		n, _ := value.DecodeJSON([]byte(tok.String()))
+		if b, _ := json.Marshal(n); string(b) != tok.String() {
+			return false
+		}
+	}
 }

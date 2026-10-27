@@ -11,12 +11,12 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
-// wire compiles s and returns its events as they go on the wire.
+// wire compiles s and returns its events as they go on the wire, rendered with an X when s is templated.
 func wire(t require.TestingT, s *Spec) []Frame {
-	e, err := Compile(s, nil)
+	e, err := Compile(s, _engine)
 	require.NoError(t, err)
 
-	frames, err := e.Encode(nil)
+	frames, err := e.Encode(map[string]any{"X": "rendered"})
 	require.NoError(t, err)
 
 	return frames
@@ -24,9 +24,10 @@ func wire(t require.TestingT, s *Spec) []Frame {
 
 func TestPropDoc_DecodesBackToTheSameStream(t *testing.T) {
 	// SSE2: a stream written as a mock file, as a description writes it, reads back as a stream that sends the same
-	// bytes, ids and delays, and keeps its settings.
+	// bytes, ids and delays, and keeps its settings. A templated stream's JSON data stays out of its templates.
 	rapid.Check(t, func(t *rapid.T) {
 		s := &Spec{
+			Templated: rapid.Bool().Draw(t, "templated"),
 			Events:    rapid.SliceOfN(genDocEvent(), 0, 5).Draw(t, "events"),
 			KeepOpen:  rapid.Bool().Draw(t, "keep_open"),
 			Resume:    rapid.Bool().Draw(t, "resume"),
@@ -50,6 +51,9 @@ func TestPropDoc_DecodesBackToTheSameStream(t *testing.T) {
 
 		back, err := Decode(config.Value{Key: "event_stream", Any: doc})
 		require.NoError(t, err, "%s", text)
+
+		// template.enabled sits beside event_stream, in the reply, which sets it.
+		back.Templated = s.Templated
 
 		require.Equal(t, wire(t, s), wire(t, back), "%s", text)
 		require.Equal(t,

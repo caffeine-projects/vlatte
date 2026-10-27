@@ -87,6 +87,8 @@ func (es *EventStream) ResumeFromLastEventID() *EventStream {
 
 // Template makes the text of the events templates, compiled with the template engine of the server and rendered with
 // the data of each request: their types, ids, comments and text data. JSON data and raw events are sent as they are.
+// The mock's description keeps JSON data as JSON, never as text a template would run: built back, the stream sends
+// it with its object keys sorted.
 func (es *EventStream) Template() *EventStream {
 	es.spec.Templated = true
 	return es
