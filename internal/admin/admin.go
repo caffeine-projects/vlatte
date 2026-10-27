@@ -66,6 +66,7 @@ var _routes = []struct {
 	{pattern: "PUT /scenarios/{name}", lacking: "keep scenarios"},
 	{pattern: "DELETE /scenarios", lacking: "keep scenarios"},
 	{pattern: "DELETE /scenarios/{name}", lacking: "keep scenarios"},
+	{pattern: "GET /scenario-board"},
 	{pattern: "POST /reset"},
 	{pattern: "GET /events", lacking: "stream its events"},
 	{pattern: "GET /logs", lacking: "stream its logs"},
@@ -172,10 +173,11 @@ func New(opts Options, caps adminapi.Capabilities) (*Server, error) {
 
 	docs := handler.Docs(opts.DocsVersion)
 	routes := map[string]http.Handler{
-		"GET /{$}":      docs,
-		"GET /docs":     docs,
-		"GET /openapi":  handler.OpenAPI(),
-		"GET /recorder": handler.RecorderPage(),
+		"GET /{$}":            docs,
+		"GET /docs":           docs,
+		"GET /openapi":        handler.OpenAPI(),
+		"GET /recorder":       handler.RecorderPage(),
+		"GET /scenario-board": handler.ScenarioBoardPage(),
 	}
 
 	if caps.Events != nil {

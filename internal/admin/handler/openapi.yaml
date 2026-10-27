@@ -438,6 +438,20 @@ paths:
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "501": { $ref: "#/components/responses/NotSupported" }
+  /scenario-board:
+    get:
+      tags: [Scenarios]
+      operationId: getScenarioBoard
+      summary: Manage scenarios from a browser
+      description: |
+        A page that shows where each scenario is, the states its mocks name and which mock moves it where, moves a
+        scenario to a state, and starts one or all over. It follows `GET /events` to show moves as they happen.
+      responses:
+        "200":
+          description: The page.
+          content:
+            text/html:
+              schema: { type: string }
   /requests:
     get:
       tags: [Journal]

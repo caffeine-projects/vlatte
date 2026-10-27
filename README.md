@@ -336,7 +336,7 @@ response: {status: 200, body: '{"id": 1}'}
 - **Turns.** The scenario moves before the mock answers, so the next request matches in the new state, and of two concurrent requests in one state only one gets the mock of that state. It moves even when the mock then doesn't answer, such as when its client leaves during the mock's `delay`.
 - **Names** ignore case: `Checkout` is `checkout`. A scenario is listed under the name its first mock gives it.
 - **In Go,** `m.Scenarios(ctx)` lists each scenario with its state, the states its mocks name, flagging those no mock moves to, and which mock moves it where. `m.SetScenario(ctx, name, state)` moves a scenario, and refuses a state none of its mocks names with `matchscenario.ErrUnknownState`; a scenario no mock names takes any state. `m.ResetScenario(name)` and `m.ResetScenarios()` start them over.
-- **In the [admin API](#admin-api),** `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios/{name}` and `DELETE /scenarios` do the same.
+- **In the [admin API](#admin-api),** `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios/{name}` and `DELETE /scenarios` do the same. Its `/scenario-board` page does it from a browser: it shows where each scenario is, flags the states no mock moves to, moves a scenario with a click, and follows the moves as requests make them.
 - **A request no mock matched** names the scenario a mock waits on: `differs in scenario order needs created, is started`.
 - **Templates** read a scenario's state, the one its mock moved it to: `{{ .Scenarios.State "checkout" }}`. One mock can then answer in every state.
 - **The [journal](#request-journal)** keeps the moves of each request's mock under `scenarios`, and [`GET /events`](#admin-api) streams a `scenario` event for each move, by a request or by the methods and admin API above.
@@ -881,6 +881,7 @@ The `vlatte` command serves the admin API by default: `admin: false` (`--admin=f
 | `GET /logs` | Streams the server's log lines, as it writes them, as Server-Sent Events. A server given its own `Logger` streams none. |
 | `POST /recording`, `GET /recording`, `DELETE /recording` | Starts a [recording](#recording-and-playback) with the keys of the `record` section, counts its calls, and stops it, listing the files it wrote. |
 | `GET /recorder` | A page that records a service from a browser. |
+| `GET /scenario-board` | A page that shows and moves [scenarios](#scenarios) from a browser, live. |
 | `POST /mcp` | The [MCP](#mcp) endpoint, when the admin API serves MCP; `501` otherwise. |
 | `GET /`, `GET /docs`, `GET /openapi` | A page that renders the OpenAPI document, at the root and at `/docs`, and the document. The page loads [Scalar](https://scalar.com) from a CDN, so it needs internet: the version vlatte pins, checked against its hash, or a newer one that `admin.DocsVersion("1.80.0")` (`admin.docs_version`, `--admin-docs-version` for the command) names. |
 
