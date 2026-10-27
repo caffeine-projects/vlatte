@@ -73,7 +73,7 @@ var EventSchema = config.NewSchema(
 		Set: func(e *EventSpec, v config.Value) error {
 			switch x := v.Any.(type) {
 			case nil:
-				return config.Invalid(v, v.Key+" is null", `remove it, or write "" for empty data`)
+				return config.Invalid(v, v.Key+" is null", `remove it, write "" for empty data, or data_json: null for JSON null`)
 			case string:
 				e.Data, e.DataKind = []byte(x), DataText
 			default:
@@ -86,6 +86,20 @@ var EventSchema = config.NewSchema(
 			}
 
 			e.HasData = true
+
+			return nil
+		},
+	},
+	eventField{
+		Key: "data_json", Kind: config.Any,
+		Usage: "Data of the event as JSON, strings and null too, never a template. In place of data.",
+		Set: func(e *EventSpec, v config.Value) error {
+			b, err := json.Marshal(v.Any, json.Deterministic(true))
+			if err != nil {
+				return err
+			}
+
+			e.Data, e.DataKind, e.HasData = b, DataJSON, true
 
 			return nil
 		},
@@ -129,17 +143,33 @@ func decodeEvent(v config.Value) (*EventSpec, error) {
 	e := new(EventSpec)
 	err := EventSchema.Decode(e, v)
 
-	// A raw event waits its delay too: only the fields conflict with it.
 	obj, _ := v.Any.(map[string]any)
+	_, hasData := obj["data"]
+	_, hasJSON := obj["data_json"]
+	_, hasRaw := obj["raw"]
 	_, hasDelay := obj["delay"]
-	if _, ok := obj["raw"]; !ok || len(obj) == 1 || len(obj) == 2 && hasDelay {
+
+	var conflicts []config.Problem
+	if hasData && hasJSON {
+		conflicts = append(conflicts, config.Problem{
+			Code: config.CodeConflict, Origin: v.Origin, Key: v.Key + ".data_json",
+			Message: v.Key + ".data_json is set with " + v.Key + ".data", Hint: "keep one of them",
+		})
+	}
+
+	// A raw event waits its delay too: only the fields conflict with it.
+	if hasRaw && len(obj) > 1 && (len(obj) != 2 || !hasDelay) {
+		conflicts = append(conflicts, config.Problem{
+			Code: config.CodeConflict, Origin: v.Origin, Key: v.Key + ".raw",
+			Message: v.Key + ".raw is set with other fields", Hint: "raw is sent alone, as it is, with a delay at most: keep raw, or the fields",
+		})
+	}
+
+	if len(conflicts) == 0 {
 		return e, err
 	}
 
-	return e, &config.Error{Problems: append(config.ProblemsOf(v, err), config.Problem{
-		Code: config.CodeConflict, Origin: v.Origin, Key: v.Key + ".raw",
-		Message: v.Key + ".raw is set with other fields", Hint: "raw is sent alone, as it is, with a delay at most: keep raw, or the fields",
-	})}
+	return e, &config.Error{Problems: append(config.ProblemsOf(v, err), conflicts...)}
 }
 
 // Doc returns s as a mock file writes it, under response.event_stream. An EventDelay that isn't fixed can't be
@@ -208,32 +238,32 @@ func (e *EventSpec) doc() map[string]any {
 	}
 
 	if e.HasData {
-		doc["data"] = e.dataDoc()
+		key, data := e.dataDoc()
+		doc[key] = data
 	}
 
 	return doc
 }
 
-// dataDoc returns the data as a mock file writes it: text as text, and JSON as the value it holds. JSON a file can't
-// hold is written as its JSON text, which sends the same bytes: a string, which a file reads as text, null, which it
-// refuses, and a number that would round, as one past int64. In a templated stream, that text is a template then, as
-// JSON data isn't.
-func (e *EventSpec) dataDoc() any {
+// dataDoc returns the data as a mock file writes it, and its key: text as text, and JSON as the value it holds, under
+// data, or data_json for a string or null, which data reads as text or refuses. A number that would round, as one past
+// int64, is written as its JSON text, which sends the same bytes; in a templated stream, that text is a template
+// then, as JSON data isn't.
+func (e *EventSpec) dataDoc() (string, any) {
 	if e.DataKind != DataJSON {
-		return string(e.Data)
+		return "data", string(e.Data)
 	}
 
-	// Data that doesn't decode is nil too.
+	// Data that doesn't decode is nil too: as a number that would round, it doesn't marshal back to the same bytes.
 	v, _ := value.DecodeJSON(e.Data)
+	if b, _ := json.Marshal(v, json.Deterministic(true)); !bytes.Equal(b, e.Data) {
+		return "data", string(e.Data)
+	}
+
 	switch v.(type) {
 	case string, nil:
-		return string(e.Data)
+		return "data_json", v
 	}
 
-	// A value DecodeJSON returned marshals.
-	if b, _ := json.Marshal(v, json.Deterministic(true)); !bytes.Equal(b, e.Data) {
-		return string(e.Data)
-	}
-
-	return v
+	return "data", v
 }

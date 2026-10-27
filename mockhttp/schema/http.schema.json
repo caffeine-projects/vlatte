@@ -344,12 +344,14 @@
         "event": { "description": "Event type, without line breaks. Clients dispatch an event without one as a message.", "type": "string" },
         "id": { "description": "Event id, without line breaks or NUL, which clients send back as Last-Event-ID. An empty id resets it.", "type": "string" },
         "data": { "description": "Text as is; anything else as JSON. A data line per line.", "not": { "type": "null" } },
+        "data_json": { "description": "Data as JSON, strings and null too, never a template. In place of data." },
         "retry": { "description": "Reconnection time from this event on.", "$ref": "#/$defs/duration" },
         "comment": { "description": "Sent first, a comment line per line, which clients skip.", "type": "string" },
         "delay": { "description": "How long to wait before the event, in place of event_delay.", "$ref": "#/$defs/duration" },
         "raw": { "description": "Text sent as it is, in place of the other fields but delay.", "type": "string" }
       },
       "additionalProperties": false,
+      "not": { "required": [ "data", "data_json" ] },
       "if": { "required": [ "raw" ] },
       "then": { "propertyNames": { "enum": [ "raw", "delay" ] } }
     },

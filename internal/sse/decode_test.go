@@ -26,3 +26,26 @@ func TestDoc_KeepsJSONNumbersAFileCantHold(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, wire(t, s), wire(t, back), "%s", text)
 }
+
+func TestDoc_KeepsJSONStringsOfATemplatedStreamLiteral(t *testing.T) {
+	// JSON data is never a template. A JSON string a file would read as text, a template in a templated stream, is
+	// written as data_json: the stream, built back, sends it as it is.
+	s := &Spec{Templated: true, Events: []*EventSpec{
+		{Data: []byte(`"{{ .X }}"`), DataKind: DataJSON, HasData: true},
+		{Data: []byte(`"{{ unbalanced"`), DataKind: DataJSON, HasData: true},
+		{Data: []byte(`null`), DataKind: DataJSON, HasData: true},
+	}}
+
+	text, err := config.Encode(s.Doc(), "yaml")
+	require.NoError(t, err)
+
+	doc, err := config.Parse(text, "yaml")
+	require.NoError(t, err)
+
+	back, err := Decode(config.Value{Key: "event_stream", Any: doc})
+	require.NoError(t, err)
+	back.Templated = true
+
+	data := map[string]any{"X": "rendered"}
+	require.Equal(t, encode(t, s, data), encode(t, back, data), "%s", text)
+}

@@ -229,7 +229,7 @@ func TestReplyEventStream_Describe(t *testing.T) {
 			"events": [
 				{"event": "price", "id": "", "data": {"value": 10}, "delay": "1.5s"},
 				{"comment": "note", "data": "{{ .X }}", "retry": "1s"},
-				{"data": "\"text\""},
+				{"data_json": "text"},
 				{"raw": "data: x\r\n\r\n"}
 			],
 			"retry": "3s",
