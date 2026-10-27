@@ -190,6 +190,32 @@ func TestAdmin_AMockThatCantBeDescribedSaysWhy(t *testing.T) {
 	}
 }
 
+func TestAdmin_ListsMocksThatCantBeDescribed(t *testing.T) {
+	// A server serves mocks a mock file can hold next to ones it can't, such as a Handler's (#42). The list is a summary
+	// of each, never its description: one that can't be described leaves the list whole, and is listed as it serves.
+	m := adminServer(t, Setup())
+	m.MustMock(Getf("/ok").ID("ok").Reply(OK()))
+	m.MustMock(Getf("/e").ID("echo").Reply(Echo()))
+	m.MustMock(Getf("/h").ID("handler").Reply(Handler(func(http.ResponseWriter, *http.Request) {})))
+
+	res, body := do(t, http.MethodGet, m.AdminURL()+"/mocks", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+
+	var list struct {
+		Mocks []struct {
+			ID string `json:"id"`
+		} `json:"mocks"`
+	}
+	require.NoError(t, json.Unmarshal(body, &list))
+
+	ids := make([]string, 0, len(list.Mocks))
+	for _, mock := range list.Mocks {
+		ids = append(ids, mock.ID)
+	}
+
+	require.ElementsMatch(t, []string{"ok", "echo", "handler"}, ids)
+}
+
 func TestAdmin_ProxyMocksReadBackAsTheyWere(t *testing.T) {
 	// A proxy mock, with every option of its proxy, and a proxy_all mock, which has no request, read from the admin API
 	// and put back, describe the same, and still proxy as they did.

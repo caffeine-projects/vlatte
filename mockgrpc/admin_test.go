@@ -223,6 +223,21 @@ func TestAdmin_AFuncMockCantBeDescribed(t *testing.T) {
 	require.Contains(t, body, "a Func reply can't be described as a mock file")
 }
 
+func TestAdmin_ListsMocksThatCantBeDescribed(t *testing.T) {
+	// A Func mock can't be described, but the list is a summary of each mock, never its description: the list stays
+	// whole, with the Func mock in it.
+	m, _ := adminServer(t)
+	m.MustMock(Method("Greetings").ID("message").Reply(Message(&pb.HiRes{})))
+	m.MustMock(Method("Greetings").ID("func").Priority(1).Reply(Func(func(context.Context, *Call) error { return nil })))
+
+	status, body := call(t, http.MethodGet, m.AdminURL()+"/mocks", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.JSONEq(t, `{"mocks": [
+		{"id": "message", "priority": 0, "enabled": true, "hits": 0},
+		{"id": "func", "priority": 1, "enabled": true, "hits": 0}
+	]}`, body)
+}
+
 func TestAdmin_MovesScenarios(t *testing.T) {
 	m, client := adminServer(t)
 	m.MustMock(
