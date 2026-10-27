@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	_ vlatte.Flavor[*Mock, *Server] = (*Server)(nil)
+	_ vlatte.Server[*Mock, *Server] = (*Server)(nil)
 	_ grpc.ServiceRegistrar         = (*Server)(nil)
 )
 
@@ -283,7 +283,7 @@ func MustNew(config ...Option) *Server {
 // It stops at the first recipe that fails and returns its error.
 func (app *Server) Prep(ctx context.Context, recipes ...Recipe) error {
 	for i, recipe := range recipes {
-		if err := recipe.Prep(ctx, &vlatte.RecipeInput[*Mock, *Server]{Flavor: app}); err != nil {
+		if err := recipe.Prep(ctx, &vlatte.RecipeInput[*Mock, *Server]{Server: app}); err != nil {
 			return fmt.Errorf("server: error applying recipe at index %d with type %T\n%w", i, recipe, err)
 		}
 	}

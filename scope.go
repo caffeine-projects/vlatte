@@ -296,7 +296,7 @@ func (s *Scope[B]) replace(ctx context.Context, mocks, drop []B) error {
 // Scopes is a collection of Scope instances with coordinated add and retrieval.
 type Scopes[B Mock, A any] struct {
 	mu     sync.RWMutex
-	flavor A
+	server A
 	store  Store[B]
 	list   []*Scope[B]
 }
@@ -323,7 +323,7 @@ func (s *Scopes[B, A]) Replace(ctx context.Context, old *Scope[B], builders ...B
 
 	var errs []error
 	for i, b := range builders {
-		mock, err := b.Build(s.flavor)
+		mock, err := b.Build(s.server)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("server: mock %d: %w", i, err))
 			continue

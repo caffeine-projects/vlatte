@@ -785,7 +785,7 @@ func TestPrep(t *testing.T) {
 		err := m.Prep(t.Context(),
 			recipe(func(_ context.Context, in *input) error {
 				ran = append(ran, "first")
-				_, err := in.Flavor.Mock(Getf("/from-recipe").Reply(OK()))
+				_, err := in.Server.Mock(Getf("/from-recipe").Reply(OK()))
 				return err
 			}),
 			recipe(func(context.Context, *input) error {

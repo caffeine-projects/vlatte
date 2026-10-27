@@ -13,7 +13,7 @@ type Base[TM Mock, A any] struct {
 }
 
 func NewBase[TM Mock, A any](app A, repo Store[TM]) *Base[TM, A] {
-	return &Base[TM, A]{scopes: &Scopes[TM, A]{flavor: app, store: repo}}
+	return &Base[TM, A]{scopes: &Scopes[TM, A]{server: app, store: repo}}
 }
 
 // Mock adds one or multiple request mocks. A mock stored outside every scope, such as one the admin API added, gives
