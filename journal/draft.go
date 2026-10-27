@@ -1,7 +1,7 @@
 package journal
 
 import (
-	"errors"
+	"strings"
 	"sync"
 )
 
@@ -49,8 +49,9 @@ func (d *Draft) EventFailed(err error) {
 }
 
 // Append runs end on the entry, which must not call the methods of d, and appends it to the journal, as
-// [Journal.Append] does. The entry's Message tells the events that failed, joined, unless it has a message of its own:
-// the request failed, which its message tells. Only the first Append counts: another appends nothing and returns nil.
+// [Journal.Append] does. The entry's Message tells the events that failed, one line each, unless the entry has a
+// message of its own: the request failed, which its message tells. An error of many lines, such as a panic with its
+// stack, is put on one. Only the first Append counts: another appends nothing and returns nil.
 func (d *Draft) Append(end func(e *Entry)) error {
 	d.mu.Lock()
 
@@ -63,8 +64,13 @@ func (d *Draft) Append(end func(e *Entry)) error {
 	end(&d.entry)
 
 	entry := d.entry
-	if err := errors.Join(d.events...); entry.Message == "" && err != nil {
-		entry.Message = err.Error()
+	if entry.Message == "" && len(d.events) > 0 {
+		lines := make([]string, len(d.events))
+		for i, err := range d.events {
+			lines[i] = joinLines(err.Error(), " ")
+		}
+
+		entry.Message = strings.Join(lines, "\n")
 	}
 
 	d.mu.Unlock()

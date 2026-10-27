@@ -2,6 +2,7 @@ package journal_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -48,6 +49,24 @@ func TestDraft_TheEntryTellsTheEventsThatFailed(t *testing.T) {
 	got, err = j.Get("quiet")
 	require.NoError(t, err)
 	require.Empty(t, got.Message, "no event failed")
+}
+
+func TestDraft_EachEventThatFailedIsALineOfTheMessage(t *testing.T) {
+	// A callback that panics fails with its stack, over many lines. The message still has one line for each event that
+	// failed, so a reader tells them apart.
+	j := newJournal(t, journal.Options{})
+
+	d := j.Draft(*entry("req-1"))
+	stack := "goroutine 7 [running]:\n\tmain.go:12 +0x1d\r\n"
+	d.EventFailed(fmt.Errorf("callback: panic: %v\n%s", "boom", stack))
+	d.EventFailed(errors.New("webhook at index 1: timeout"))
+	require.NoError(t, d.Append(func(*journal.Entry) {}))
+
+	got, err := j.Get("req-1")
+	require.NoError(t, err)
+	require.Equal(t,
+		[]string{"callback: panic: boom goroutine 7 [running]: main.go:12 +0x1d", "webhook at index 1: timeout"},
+		strings.Split(got.Message, "\n"))
 }
 
 func TestDraft_TheFirstOutcomeCounts(t *testing.T) {
