@@ -2,6 +2,8 @@ package mockgrpc
 
 import (
 	"errors"
+	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,14 +38,15 @@ type (
 	// ConfigFlag describes the command-line flag of a setting.
 	ConfigFlag = config.Flag
 
-	field = config.Field[Config]
+	field       = config.Field[Config]
+	recordField = config.Field[RecordConfig]
 )
 
 // _schema declares every setting of a gRPC mock server: the grpc section, and config, which names the file.
 var _schema = sync.OnceValue(func() *config.Schema[Config] {
 	d := defaultConfig()
 
-	return config.NewSchema(inSection(
+	return config.NewSchema(inSection(withRecord(
 		field{Key: _keyConfigFile, Kind: config.String, Usage: "Config file to read, in place of " + DefaultConfigFileName + ": the HTTP server's, whose grpc section this is."},
 		field{
 			Key: "grpc", Kind: config.Bool, Usage: "Serve gRPC mocks: the vlatte command serves them when the grpc section is on.",
@@ -165,8 +168,84 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return nil
 			},
 		},
-	)...).Only("grpc", _keyConfigFile)
+		field{
+			Key: "grpc.record", Kind: config.Bool, Usage: "Record the calls the gRPC server proxies as mock files, from start to close.",
+			Set: func(c *Config, v config.Value) error {
+				config.Toggle(&c.Record, *defaultRecordConfig(), v.Bool)
+				return nil
+			},
+		},
+	)...)...).Only("grpc", _keyConfigFile)
 })
+
+// _recordSchema declares the settings of a recording, as the grpc.record section of the server's settings has them:
+// the body of the admin API's POST /recording.
+var _recordSchema = sync.OnceValue(func() *config.Schema[RecordConfig] {
+	return config.NewSchema(recordFields()...)
+})
+
+// recordFields declares the settings of a recording: the keys of the grpc.record section of the server's settings,
+// and of the body of the admin API's POST /recording.
+func recordFields() []recordField {
+	rec := defaultRecordConfig()
+
+	return []recordField{
+		{
+			Key: "dir", Kind: config.String, Default: rec.Dir, Usage: "Directory of the gRPC recordings. Relative paths start at grpc.root_dir.",
+			Set: func(r *RecordConfig, v config.Value) error { r.Dir = v.Str; return nil },
+		},
+		{
+			Key: "format", Kind: config.String, Default: rec.Format,
+			Usage: "Format of the recorded gRPC mock files: " + strings.Join(MockFileFormats(), ", ") + ".",
+			Set: func(r *RecordConfig, v config.Value) error {
+				format, ok := config.Format(v.Str)
+				if !ok {
+					return fmt.Errorf("expected one of %s", strings.Join(MockFileFormats(), ", "))
+				}
+
+				r.Format = format
+
+				return nil
+			},
+		},
+		{
+			Key: "target", Kind: config.String,
+			Usage: "gRPC server to record, such as localhost:50051: the calls the recording takes go to it, without TLS, before any mock.",
+			Set:   func(r *RecordConfig, v config.Value) error { r.Target = v.Str; return nil },
+		},
+		{
+			Key: "methods", Kind: config.List,
+			Usage: "Methods of the calls the recording takes, by whole segments of their full method, such as Service/Method. Empty takes every method.",
+			Set:   func(r *RecordConfig, v config.Value) error { r.Methods = v.List; return nil },
+		},
+		{
+			Key: "request_headers", Kind: config.List, Usage: "Metadata keys recordings match: the value each had, or its absence.",
+			Set: func(r *RecordConfig, v config.Value) error { r.RequestHeaders = v.List; return nil },
+		},
+		{
+			Key: "include_mocked", Kind: config.Bool, Usage: "Record the answers of mocks too, not only proxied ones.",
+			Set: func(r *RecordConfig, v config.Value) error { r.IncludeMocked = v.Bool; return nil },
+		},
+	}
+}
+
+// withRecord returns fields, then the settings of a recording under the server's grpc.record section.
+func withRecord(fields ...field) []field {
+	settings := recordFields()
+
+	records := make([]field, len(settings))
+	for i, f := range settings {
+		set := f.Set
+		records[i] = field{
+			Key: "grpc.record." + f.Key, Usage: f.Usage, Default: f.Default, Kind: f.Kind,
+			Set: func(c *Config, v config.Value) error {
+				return set(config.Section(&c.Record, *defaultRecordConfig()), v)
+			},
+		}
+	}
+
+	return slices.Concat(fields, records)
+}
 
 // inSection makes setting a key of the grpc section turn it on, as setting the grpc key does.
 func inSection(fields ...field) []field {
@@ -240,6 +319,10 @@ func loadConfigSources(conf *Config) error {
 	if conf.Journal != nil {
 		j := *conf.Journal
 		conf.Journal = &j
+	}
+
+	if conf.Record != nil {
+		conf.Record = conf.Record.clone()
 	}
 
 	values, err := _schema().Load(conf, sources)

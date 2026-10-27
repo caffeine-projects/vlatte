@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -171,6 +172,36 @@ func TestDescribe_WritesBidiRulesAndStreamedMessages(t *testing.T) {
 	}
 }
 
+func TestDescribe_WritesAProxy(t *testing.T) {
+	// A proxy built in Go is described as a mock file holds it, and loads back as the same proxy.
+	m := serve(t)
+	scope := m.MustMock(
+		Method("Greetings").ID("full").Reply(From("localhost:1").Header("X-Token", "a", "b").RemoveHeaders("x-drop")),
+		Method("Greetings").ID("bare").Reply(From("localhost:2")),
+	)
+
+	want := map[string]string{
+		"full": `{"id": "full", "request": {"method": "Greetings"}, "proxy": {"target": "localhost:1", ` +
+			`"header": {"x-token": ["a", "b"]}, "remove_headers": ["x-drop"]}}`,
+		"bare": `{"id": "bare", "request": {"method": "Greetings"}, "proxy": {"target": "localhost:2"}}`,
+	}
+
+	loaded := serve(t)
+
+	for _, mock := range scope.Mocks() {
+		doc, err := mock.Describe().MarshalJSON()
+		require.NoError(t, err)
+		require.JSONEq(t, want[mock.ID()], string(doc))
+
+		again, err := loaded.Mock(FromBytes(doc, "json"))
+		require.NoError(t, err)
+
+		redoc, err := again.Mocks()[0].Describe().MarshalJSON()
+		require.NoError(t, err)
+		require.JSONEq(t, want[mock.ID()], string(redoc))
+	}
+}
+
 func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 	// A description without a response doesn't load back: the admin API shows what it can, rather than a reply that
 	// answers differently.
@@ -186,6 +217,7 @@ func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 			Reply(Func(func(context.Context, *Call) error { return nil })),
 		Method("Greetings").ID("utf8").Message(&pb.HiReq{Message: "\xff"}).Reply(Messages(&pb.HiRes{Message: "\xff"})),
 		Method("Greetings").ID("detail").Reply(Status(codes.NotFound, "x").Details(&anypb.Any{TypeUrl: "type.googleapis.com/nope.X"})),
+		Method("Greetings").ID("dial").Reply(From("localhost:1").DialOptions(grpc.WithUserAgent("x"))),
 	)
 
 	want := map[string]string{
@@ -196,6 +228,7 @@ func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 		"call":          `{"id": "call", "request": {"method": "Greetings"}}`,
 		"utf8":          `{"id": "utf8", "request": {"method": "Greetings"}}`,
 		"detail":        `{"id": "detail", "request": {"method": "Greetings"}}`,
+		"dial":          `{"id": "dial", "request": {"method": "Greetings"}}`,
 	}
 
 	require.Len(t, scope.Mocks(), len(want))

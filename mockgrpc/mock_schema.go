@@ -26,6 +26,7 @@ type (
 	replyField  = config.Field[replyDef]
 	statusField = config.Field[statusDef]
 	bidiField   = config.Field[bidiDef]
+	proxyField  = config.Field[proxyDef]
 	ruleField   = config.Field[ruleDef]
 	eventField  = config.Field[vlatte.EventConfig]
 )
@@ -45,6 +46,7 @@ type mockDef struct {
 	request     requestDef
 	reply       *replyDef
 	bidi        *bidiDef
+	proxy       *proxyDef
 	dir         string // where relative files open from: the mock file's directory; "" is the working directory
 }
 
@@ -98,6 +100,12 @@ type ruleDef struct {
 	dir      string
 	when     vlatte.Matcher
 	response *replyDef
+}
+
+type proxyDef struct {
+	target string
+	header []headerValue
+	remove []string
 }
 
 type headerValue struct {
@@ -232,6 +240,13 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error {
 			d.bidi = &bidiDef{dir: d.dir}
 			return _bidiSchema.Decode(d.bidi, v)
+		},
+	},
+	mockField{
+		Key: "proxy", Kind: config.Any, Usage: "The answer of another gRPC server, the target, to which the call goes on: target, header and remove_headers.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.proxy = &proxyDef{}
+			return _proxySchema.Decode(d.proxy, v)
 		},
 	},
 )
@@ -394,6 +409,21 @@ var _ruleSchema = config.NewSchema(
 	},
 )
 
+var _proxySchema = config.NewSchema(
+	proxyField{
+		Key: "target", Kind: config.String, Usage: "The server to proxy to, as grpc.NewClient takes it, such as localhost:50051. The call goes without TLS.",
+		Set: func(p *proxyDef, v config.Value) error { p.target = v.Str; return nil },
+	},
+	proxyField{
+		Key: "header", Kind: config.Any, Usage: "Metadata the target gets, by key, in place of the client's values: a string or a list of strings each.",
+		Set: func(p *proxyDef, v config.Value) error { return headerValues(v, &p.header) },
+	},
+	proxyField{
+		Key: "remove_headers", Kind: config.List, Usage: "Keys of the client's metadata the target doesn't get.",
+		Set: func(p *proxyDef, v config.Value) error { p.remove = v.List; return nil },
+	},
+)
+
 var _eventSchema = config.NewSchema(
 	eventField{
 		Key: "name", Kind: config.String, Usage: "Name of the registered listener to run.",
@@ -429,17 +459,18 @@ func (d *mockDef) check(origin string, found []config.Problem) []config.Problem 
 
 	problems = append(problems, conflicts(origin, "request", d.request.message)...)
 
-	if d.reply != nil && d.bidi != nil {
+	answers := d.answers()
+	for _, k := range answers[min(1, len(answers)):] {
 		problems = append(problems, config.Problem{
-			Code: config.CodeConflict, Origin: origin, Key: "bidi",
-			Message: "bidi is set with response", Hint: "keep one of them: bidi answers bidi streaming methods",
+			Code: config.CodeConflict, Origin: origin, Key: k,
+			Message: k + " is set with " + answers[0], Hint: "keep one of them: bidi answers bidi streaming methods, and proxy any method",
 		})
 	}
 
-	if d.reply == nil && d.bidi == nil && !failed("response") && !failed("bidi") {
+	if len(answers) == 0 && !failed("response") && !failed("bidi") && !failed("proxy") {
 		problems = append(problems, config.Problem{
 			Code: config.CodeMissingValue, Origin: origin, Key: "response",
-			Message: "the mock has no response", Hint: "set response, or bidi for a bidi streaming method",
+			Message: "the mock has no response", Hint: "set response, bidi for a bidi streaming method, or proxy",
 		})
 	}
 
@@ -455,6 +486,24 @@ func (d *mockDef) check(origin string, found []config.Problem) []config.Problem 
 	}
 
 	return problems
+}
+
+// answers returns the keys of the answers the document sets, of response, bidi and proxy, in that order: a mock has one.
+func (d *mockDef) answers() []string {
+	var keys []string
+	if d.reply != nil {
+		keys = append(keys, "response")
+	}
+
+	if d.bidi != nil {
+		keys = append(keys, "bidi")
+	}
+
+	if d.proxy != nil {
+		keys = append(keys, "proxy")
+	}
+
+	return keys
 }
 
 // replies yields the responses of the document, by key.
@@ -535,7 +584,20 @@ func (d *mockDef) apply(b *Builder) {
 		b.Reply(d.bidi.reply())
 	case d.reply != nil:
 		b.Reply(d.reply.response())
+	case d.proxy != nil:
+		b.Reply(d.proxy.reply())
 	}
+}
+
+// reply returns the ProxyReply the document describes.
+func (p *proxyDef) reply() *ProxyReply {
+	rep := From(p.target).RemoveHeaders(p.remove...)
+
+	for _, h := range p.header {
+		rep.Header(h.name, h.value)
+	}
+
+	return rep
 }
 
 // response returns the Response the reply describes.

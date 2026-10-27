@@ -113,6 +113,10 @@ type Config struct {
 	// Journal keeps a journal of the calls the server serves. Nil keeps none.
 	Journal *JournalConfig
 
+	// Record records the calls the server proxies as mock files, from Start to Close, and serves the recordings of its
+	// directory: see RecordConfig. Nil records nothing, until Server.StartRecording.
+	Record *RecordConfig
+
 	// NoNearMisses turns off the report of the mocks closest to a call no mock matched, which its journal entry
 	// lists. The report runs no matcher twice: it runs those matching never reached.
 	NoNearMisses bool
@@ -387,6 +391,25 @@ func (cb *ConfigBuilder) Journal(dir string) *ConfigBuilder {
 // NoNearMisses turns off the report of the mocks closest to a call no mock matched: see Config.NoNearMisses.
 func (cb *ConfigBuilder) NoNearMisses() *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.NoNearMisses = true })
+}
+
+// Record records the calls the server proxies, from Start to Close, with the default settings, which options change:
+// see RecordConfig.
+func (cb *ConfigBuilder) Record(options ...RecordConfigurer) *ConfigBuilder {
+	cb.sets = append(cb.sets, func(conf *Config) error {
+		rec := defaultRecordConfig()
+		for i, option := range options {
+			if err := option.Apply(rec); err != nil {
+				return fmt.Errorf("config: record option at index %d with type %T: %w", i, option, err)
+			}
+		}
+
+		conf.Record = rec
+
+		return nil
+	})
+
+	return cb
 }
 
 // Apply implements Option: it sets, in order, what the methods of cb set, and leaves the rest of conf as it is.

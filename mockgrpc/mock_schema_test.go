@@ -13,6 +13,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
@@ -126,6 +127,8 @@ func TestMockFile_NamesTheKeyOfEachProblem(t *testing.T) {
 		{"code that is no name or number", `{request: {method: Greetings}, response: {status: {code: [5]}}}`, "response.status.code"},
 		{"messages JSON can't write", `{request: {method: Upload, messages: [{key: .nan}]}, response: {}}`, "request.messages"},
 		{"body file that is missing", `{request: {method: Greetings}, response: {body_file: nope.json}}`, "response.body_file"},
+		{"proxy with a response", `{request: {method: Greetings}, response: {}, proxy: {target: "localhost:1"}}`, "proxy"},
+		{"proxy header that is no string", `{request: {method: Greetings}, proxy: {target: "localhost:1", header: {h: 1}}}`, "proxy.header.h"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := fileServer(t, Setup())
@@ -142,6 +145,30 @@ func TestMockFile_NamesTheKeyOfEachProblem(t *testing.T) {
 			require.Equal(t, []string{tc.key}, keys, "%v", err)
 		})
 	}
+}
+
+func TestMockFile_AProxyGoesOnToItsTarget(t *testing.T) {
+	// A mock file proxies as From does: the target gets the call, with the metadata the file sets in place of the
+	// client's, and without the keys it removes.
+	target := serve(t)
+	target.MustMock(Method("Greetings").
+		Header("x-token", match.Equal("file's")).
+		Header("x-drop", match.Not(match.Present())).
+		Reply(Message(&pb.HiRes{Message: "from the target"})))
+
+	m := serve(t)
+	m.MustMock(FromBytes([]byte(`
+request: {method: Greetings}
+proxy:
+  target: `+target.Addr()+`
+  header: {x-token: file's}
+  remove_headers: [x-drop]
+`), "yaml"))
+
+	ctx := metadata.AppendToOutgoingContext(t.Context(), "x-token", "client's", "x-drop", "1")
+	res, err := client(t, m).Greetings(ctx, &pb.HiReq{})
+	require.NoError(t, err)
+	require.Equal(t, "from the target", res.GetMessage())
 }
 
 func TestMockFile_ABodyFileThatIsNoJSONSaysSo(t *testing.T) {

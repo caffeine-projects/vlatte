@@ -196,6 +196,45 @@ func TestServeErrorsAreLogged(t *testing.T) {
 	require.Contains(t, buf.String(), errAccept.Error())
 }
 
+func TestClose_ReleasesWhatTheMocksHold(t *testing.T) {
+	// A mock's replier may hold a connection, such as a proxy's: Close releases it, and logs one that fails to close,
+	// as it returns nothing.
+	var buf bytes.Buffer
+	logger := zerolog.New(&buf)
+
+	m := MustNew(Setup().Logger(&logger))
+	m.MustStart()
+
+	held := &closingReply{err: errors.New("still busy")}
+	mock := m.MustMock(Method("Greetings").Reply(held)).Mocks()[0]
+
+	m.Close()
+
+	require.Equal(t, int32(1), held.closed.Load())
+	require.Contains(t, buf.String(), "server: Close: closing mock "+mock.ID())
+	require.Contains(t, buf.String(), "still busy")
+
+	require.NoError(t, mock.Close(), "a mock closes once")
+	require.Equal(t, int32(1), held.closed.Load())
+}
+
+// closingReply is a reply whose replier holds something to release: Close counts its calls and returns err.
+type closingReply struct {
+	err    error
+	closed atomic.Int32
+}
+
+func (r *closingReply) NewReplier(*Server, []protoreflect.MethodDescriptor) (Replier, error) {
+	return r, nil
+}
+
+func (r *closingReply) Reply(context.Context, *Call) error { return nil }
+
+func (r *closingReply) Close() error {
+	r.closed.Add(1)
+	return r.err
+}
+
 func TestClose_LogsAJournalThatFailsToClose(t *testing.T) {
 	// Close returns nothing: a journal that fails to write the index of its last segment, which the next server of
 	// its directory opens fast from, must be logged, not swallowed.

@@ -14,7 +14,7 @@ import (
 type fileLoader struct {
 	mu    sync.Mutex
 	scope *Scope   // the mocks of the last load
-	saved []string // the directories the admin API saved mocks into, whose <id>.mock.<format> files load too
+	saved []string // the directories of the admin API's saved mocks and of recordings, whose <id>.mock.<format> files load too
 }
 
 // load adds the mocks of every matching file, in file name order, so mocks of equal priority match in that order. A

@@ -78,6 +78,7 @@ func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 	require.Equal(t, _bidiSchema.Keys(), keys(bidi), "bidi")
 	require.Equal(t, _ruleSchema.Keys(), slices.Sorted(maps.Keys(rule)), "bidi rule")
 	require.Equal(t, _eventSchema.Keys(), keys(defs["on_complete_event"]), "on_complete")
+	require.Equal(t, _proxySchema.Keys(), keys(props(raw)["proxy"]), "proxy")
 }
 
 func TestJSONSchema_AcceptsTheFixturesTheDecoderAccepts(t *testing.T) {
@@ -126,6 +127,8 @@ func TestJSONSchema_RejectsWhatTheDecoderRejects(t *testing.T) {
 		"no method":            `{"request": {}, "response": {}}`,
 		"no answer":            `{"request": {"method": "Greetings"}}`,
 		"response and bidi":    `{"request": {"method": "Chat"}, "response": {}, "bidi": {}}`,
+		"response and proxy":   `{"request": {"method": "Greetings"}, "response": {}, "proxy": {"target": "localhost:1"}}`,
+		"a proxy to nowhere":   `{"request": {"method": "Greetings"}, "proxy": {}}`,
 		"message and messages": `{"request": {"method": "Greetings"}, "response": {"message": {}, "messages": []}}`,
 		"an unknown key":       `{"request": {"method": "Greetings"}, "response": {"body": "x"}}`,
 		"a code out of range":  `{"request": {"method": "Greetings"}, "response": {"status": {"code": 17}}}`,

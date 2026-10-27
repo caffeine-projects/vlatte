@@ -131,6 +131,43 @@ func TestConfigSources_AShutdownTimeoutOfZeroFails(t *testing.T) {
 	require.ErrorContains(t, err, "grpc.shutdown_timeout")
 }
 
+func TestConfigSources_ReadTheRecordSection(t *testing.T) {
+	// The record keys each turn recording on, with the defaults for the keys left out. A recording read from the
+	// settings records from start.
+	m, err := New(Setup().Silent().RootDir(t.TempDir()).ConfigSources(ConfigArgs([]string{
+		"--grpc-record-format=YAML",
+		"--grpc-record-target=localhost:1",
+		"--grpc-record-methods=Greetings,List",
+		"--grpc-record-request-headers=x-tenant",
+		"--grpc-record-include-mocked",
+	})))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+
+	c := m.Config().Record
+	require.Equal(t, "_mocks_recorded", c.Dir)
+	require.Equal(t, "yaml", c.Format)
+	require.Equal(t, "localhost:1", c.Target)
+	require.Equal(t, []string{"Greetings", "List"}, c.Methods)
+	require.Equal(t, []string{"x-tenant"}, c.RequestHeaders)
+	require.True(t, c.IncludeMocked)
+
+	m.MustStart()
+	require.True(t, m.IsRecording())
+
+	t.Setenv("VLATTE_GRPC_RECORD_DIR", "rec")
+
+	off, err := New(Setup().ConfigSources(ConfigEnv(), ConfigArgs([]string{"--grpc-record=false"})))
+	require.NoError(t, err)
+	t.Cleanup(off.Close)
+	require.Nil(t, off.Config().Record, "a later record=false turns it off")
+}
+
+func TestConfigSources_ARecordFormatOfNoMockFileFails(t *testing.T) {
+	_, err := New(Setup().ConfigSources(ConfigArgs([]string{"--grpc-record-format=xml"})))
+	require.ErrorContains(t, err, "grpc.record.format")
+}
+
 func TestConfigSources_TLSFilesTurnTLSOn(t *testing.T) {
 	// The vlatte command served gRPC mocks without TLS only. The grpc.tls keys name its files, and turn it on, as a
 	// key of a section does.
