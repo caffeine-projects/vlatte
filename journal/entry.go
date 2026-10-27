@@ -122,7 +122,8 @@ type Entry struct {
 	Body          []byte
 	BodyTruncated bool
 
-	// Message tells what failed, for a request that failed.
+	// Message tells what failed: the request, for one that failed, or else its on_complete events that failed, such as
+	// webhooks, one line each.
 	Message string
 
 	// NearMisses are the mocks that came closest to matching a request no mock matched.
@@ -231,4 +232,16 @@ func (l *journalLine) entry() Entry {
 		Message:       l.Message,
 		NearMisses:    l.NearMisses,
 	}
+}
+
+// joinLines returns the lines of s that aren't blank, trimmed, joined with sep.
+func joinLines(s, sep string) string {
+	var lines []string
+	for line := range strings.Lines(s) {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+
+	return strings.Join(lines, sep)
 }
