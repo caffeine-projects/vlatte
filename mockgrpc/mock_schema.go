@@ -180,7 +180,7 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error { d.scenario.set, d.scenario.newState = true, v.Str; return nil },
 	},
 	mockField{
-		Key: "on_complete", Kind: config.Any, Usage: "Events to run once the mock replied: a list of {name, parameters}.",
+		Key: "on_complete", Kind: config.Any, Usage: "Events to run once the mock replied: a list of {name, parameters, after_response}.",
 		Set: func(d *mockDef, v config.Value) error { return setEvents(&d.events, d.dir, v) },
 	},
 	mockField{
@@ -496,6 +496,10 @@ var _eventSchema = config.NewSchema(
 	eventField{
 		Key: "parameters", Kind: config.Any, Usage: "Parameters of the listener.",
 		Set: func(e *vlatte.EventConfig, v config.Value) error { e.Parameters = v.Any; return nil },
+	},
+	eventField{
+		Key: "after_response", Kind: config.Bool, Usage: "Send the response without waiting for the event, which runs on.",
+		Set: func(e *vlatte.EventConfig, v config.Value) error { e.AfterResponse = v.Bool; return nil },
 	},
 )
 
@@ -910,26 +914,8 @@ func setEvents(events *[]vlatte.EventConfig, dir string, v config.Value) error {
 
 // headerValues decodes an object of metadata values: a string, or a list of strings, each.
 func headerValues(v config.Value, dst *[]headerValue) error {
-	return config.Members(v, func(name string, m config.Value) error {
-		switch x := m.Any.(type) {
-		case string:
-			*dst = append(*dst, headerValue{name: name, value: x})
-		case []any:
-			return config.Items(m, func(item config.Value) error {
-				s, ok := item.Any.(string)
-				if !ok {
-					return config.Mismatch(item, "a string", config.String)
-				}
-
-				*dst = append(*dst, headerValue{name: name, value: s})
-
-				return nil
-			})
-		default:
-			return config.Mismatch(m, "a string or a list of strings", config.String)
-		}
-
-		return nil
+	return config.MemberStrings(v, func(name, value string) {
+		*dst = append(*dst, headerValue{name: name, value: value})
 	})
 }
 

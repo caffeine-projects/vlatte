@@ -34,3 +34,12 @@ func TestReplyEcho(t *testing.T) {
 	require.Contains(t, string(b), expectedBody)
 	require.Contains(t, string(b), res.Header.Get("x-custom-header"))
 }
+
+func TestEcho_DescribingItFailsSayingSo(t *testing.T) {
+	// #42: mock files have no echo reply, so the description of an Echo mock failed to load back. Describing it fails
+	// now, and says why, rather than describe a mock no file can hold.
+	m := MustNew(Setup().Silent())
+
+	_, err := EncodeMock(m.MustMock(Getf("/e").Reply(Echo())).Mocks()[0], "json")
+	require.ErrorIs(t, err, errEchoNotDescribed)
+}

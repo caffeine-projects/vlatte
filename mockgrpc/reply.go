@@ -19,6 +19,9 @@ import (
 var (
 	errNoReply   = errors.New("mock: no reply set: use Reply")
 	errNoReplier = errors.New("reply: the factory made no replier")
+
+	// errFuncNotDescribed is why a mock with a Func reply can't be described: a mock file can't hold a function.
+	errFuncNotDescribed = errors.New("reply: a Func reply can't be described as a mock file")
 )
 
 // _failureKey is vlatte.HeaderFailure as a metadata key, which gRPC wants lowercase.
@@ -44,7 +47,8 @@ type Replier interface {
 type ReplierFunc func(ctx context.Context, call *Call) error
 
 // Func returns a Reply that answers each call with fn, which sends the answer through call: see [Replier]. A unary or
-// client streaming call whose fn sends no message answers with an empty message of the method's output type.
+// client streaming call whose fn sends no message answers with an empty message of the method's output type. A mock
+// file can't hold a function: describing a mock with it fails, so the admin API can't show the mock, nor save it.
 func Func(fn func(ctx context.Context, call *Call) error) ReplierFunc {
 	return fn
 }
