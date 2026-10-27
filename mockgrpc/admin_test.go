@@ -488,6 +488,40 @@ func TestAdmin_SavesAMockWithABodyFile(t *testing.T) {
 	require.Equal(t, []string{"a", "b"}, listKeys(t, pb.NewTestServiceClient(m.MustDial())))
 }
 
+func TestAdmin_SavesTheBodyFilesOfSequencesAndRandoms(t *testing.T) {
+	// The responses of a sequence or a random reply name their body files as a response does: saved into a directory
+	// of its own, each still opens the file of the working directory.
+	wd := t.TempDir()
+	t.Chdir(wd)
+	require.NoError(t, os.WriteFile("items.json", []byte(`[{"key": "a"}, {"key": "b"}]`), 0o600))
+
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).ConfigSources())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	for _, doc := range []string{
+		`{"id": "seq", "request": {"method": "List"}, "response_sequence": {"responses": [{"body_file": "items.json"}], ` +
+			`"after_ended": {"body_file": "items.json"}}}`,
+		`{"id": "random", "request": {"method": "List"}, "response_random": {"responses": [{"body_file": "items.json"}]}}`,
+	} {
+		status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks", doc)
+		require.Equal(t, http.StatusCreated, status, body)
+	}
+
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks/save", `{"dir": "saved/mocks"}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	moved := filepath.Join("..", "..", "items.json")
+	for id, n := range map[string]int{"seq": 2, "random": 1} {
+		saved, err := os.ReadFile(filepath.Join(wd, "saved", "mocks", id+".mock.yaml"))
+		require.NoError(t, err)
+		require.Equal(t, n, strings.Count(string(saved), moved), "%s", saved)
+	}
+
+	require.Equal(t, []string{"a", "b"}, listKeys(t, pb.NewTestServiceClient(m.MustDial())))
+}
+
 func TestAdmin_SavesNothingWithoutMocksItAdded(t *testing.T) {
 	// Mocks of Go code or of files are not the admin API's to save: with none of its own, it writes no file.
 	dir := t.TempDir()

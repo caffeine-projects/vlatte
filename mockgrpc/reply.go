@@ -3,6 +3,7 @@ package mockgrpc
 import (
 	"context"
 	"errors"
+	"io"
 	"strconv"
 	"strings"
 
@@ -26,9 +27,10 @@ var (
 // _failureKey is vlatte.HeaderFailure as a metadata key, which gRPC wants lowercase.
 var _failureKey = strings.ToLower(vlatte.HeaderFailure)
 
-// Reply is what a mock answers the calls it matches with: [Message], [Messages], [JSON], [Template], [Status], [Bidi]
-// and [Func] make one. [Builder.Build] asks it for a Replier for each mock, given the methods the mock serves, so it
-// checks there what it can, such as that its messages are of the type the methods answer with.
+// Reply is what a mock answers the calls it matches with: [Message], [Messages], [JSON], [Template], [Status], [Bidi],
+// [Seq], [Rand], [Echo], [Shared] and [Func] make one. [Builder.Build] asks it for a Replier for each mock, given the
+// methods the mock serves, so it checks there what it can, such as that its messages are of the type the methods
+// answer with.
 type Reply interface {
 	NewReplier(app *Server, methods []protoreflect.MethodDescriptor) (Replier, error)
 }
@@ -112,4 +114,16 @@ func replyError(ctx context.Context, scope string, mock *Mock, err error) error 
 func hasStatus(err error) bool {
 	_, ok := status.FromError(err)
 	return ok
+}
+
+// closeAll closes cs, all of them, and returns their errors joined.
+func closeAll(cs []io.Closer) error {
+	var errs []error
+	for _, c := range cs {
+		if err := c.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
 }

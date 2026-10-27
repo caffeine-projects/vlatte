@@ -596,14 +596,12 @@ type onComplete struct {
 	params vlatte.Parameters
 	mock   vlatte.Mock
 	kit    vlatte.Kit
-	logger *zerolog.Logger
 }
 
 func (e onComplete) Kind() vlatte.Kind             { return mockhttp.Kind }
 func (e onComplete) Kit() vlatte.Kit               { return e.kit }
 func (e onComplete) Parameters() vlatte.Parameters { return e.params }
 func (e onComplete) Mock() vlatte.Mock             { return e.mock }
-func (e onComplete) Logger() *zerolog.Logger       { return e.logger }
 
 // answer is a RoundTripper that keeps the requests it is given and answers each with status and a body.
 type answer struct {
@@ -643,13 +641,26 @@ func (l *logs) String() string {
 	return l.buf.String()
 }
 
-// kit is the Kit of a server without a template engine: templates render with data.
+// kit is the Kit of a server without a template engine: templates render with data. Without a logger, it logs
+// nothing.
 type kit struct {
-	data any
+	data   any
+	logger *zerolog.Logger
 }
 
 func (k kit) TemplateEngine() vlatte.TemplateEngine { return nil }
 func (k kit) Data() any                             { return k.data }
+func (k kit) Transport() http.RoundTripper          { return http.DefaultTransport }
+func (k kit) Dir() string                           { return "" }
+
+func (k kit) Logger() *zerolog.Logger {
+	if k.logger == nil {
+		nop := zerolog.Nop()
+		return &nop
+	}
+
+	return k.logger
+}
 
 // sent is a RoundTripper that keeps the request it is given and answers 200.
 type sent struct {
@@ -803,7 +814,7 @@ func TestWebHook_LogsWithTheServerLogger(t *testing.T) {
 	wh, err := webhook.New(webhook.WithTransport(rt))
 	require.NoError(t, err)
 
-	require.NoError(t, wh.Run(t.Context(), onComplete{params: map[string]any{"url": "http://hooks.test/direct"}, logger: &logger}))
+	require.NoError(t, wh.Run(t.Context(), onComplete{params: map[string]any{"url": "http://hooks.test/direct"}, kit: kit{logger: &logger}}))
 	require.Contains(t, out.String(), "<--- WEBHOOK GET /direct")
 
 	m := mockhttp.MustNew(mockhttp.Setup().Logger(&logger).OnCompleteListener("webhook", wh))

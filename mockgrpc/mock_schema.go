@@ -22,13 +22,15 @@ import (
 // into the *Def types below; mockDoc.build checks them, then applies them to a Builder.
 
 type (
-	mockField   = config.Field[mockDef]
-	replyField  = config.Field[replyDef]
-	statusField = config.Field[statusDef]
-	bidiField   = config.Field[bidiDef]
-	proxyField  = config.Field[proxyDef]
-	ruleField   = config.Field[ruleDef]
-	eventField  = config.Field[vlatte.EventConfig]
+	mockField     = config.Field[mockDef]
+	replyField    = config.Field[replyDef]
+	statusField   = config.Field[statusDef]
+	sequenceField = config.Field[sequenceDef]
+	randomField   = config.Field[randomDef]
+	bidiField     = config.Field[bidiDef]
+	proxyField    = config.Field[proxyDef]
+	ruleField     = config.Field[ruleDef]
+	eventField    = config.Field[vlatte.EventConfig]
 )
 
 // mockDef is a decoded mock file: what its keys set, before it is applied to a Builder.
@@ -45,6 +47,8 @@ type mockDef struct {
 	events      []vlatte.EventConfig
 	request     requestDef
 	reply       *replyDef
+	sequence    *sequenceDef
+	random      *randomDef
 	bidi        *bidiDef
 	proxy       *proxyDef
 	dir         string // where relative files open from: the mock file's directory; "" is the working directory
@@ -85,6 +89,21 @@ type statusDef struct {
 	code    codes.Code
 	message string
 	details []string // JSON texts of Any messages
+}
+
+type sequenceDef struct {
+	dir        string // where the body_file of its responses open from
+	replies    []*replyDef
+	afterEnded *replyDef
+	set        bool // responses was set
+}
+
+type randomDef struct {
+	dir     string // where the body_file of its responses open from
+	replies []*replyDef
+	seed    int64
+	seeded  bool
+	set     bool // responses was set
 }
 
 type bidiDef struct {
@@ -236,6 +255,20 @@ var _mockSchema = config.NewSchema(
 		},
 	},
 	mockField{
+		Key: "response_sequence", Kind: config.Any, Usage: "Answers served in order, one per call: responses, and after_ended once they run out.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.sequence = &sequenceDef{dir: d.dir}
+			return _sequenceSchema.Decode(d.sequence, v)
+		},
+	},
+	mockField{
+		Key: "response_random", Kind: config.Any, Usage: "Answers served at random, one per call: responses, and a seed to repeat the order.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.random = &randomDef{dir: d.dir}
+			return _randomSchema.Decode(d.random, v)
+		},
+	},
+	mockField{
 		Key: "bidi", Kind: config.Any, Usage: "The answer of a bidi streaming method, message by message: header, trailer, on, otherwise and on_end.",
 		Set: func(d *mockDef, v config.Value) error {
 			d.bidi = &bidiDef{dir: d.dir}
@@ -343,6 +376,37 @@ var _statusSchema = config.NewSchema(
 				return err
 			})
 		},
+	},
+)
+
+var _sequenceSchema = config.NewSchema(
+	sequenceField{
+		Key: "responses", Kind: config.Any, Usage: "The answers, served in order, one per call: a list of responses.",
+		Set: func(s *sequenceDef, v config.Value) error {
+			s.set = true
+			return decodeReplies(&s.replies, s.dir, v)
+		},
+	},
+	sequenceField{
+		Key: "after_ended", Kind: config.Any, Usage: "The answer of the calls that come once the responses ran out.",
+		Set: func(s *sequenceDef, v config.Value) error {
+			s.afterEnded = &replyDef{dir: s.dir}
+			return _replySchema.Decode(s.afterEnded, v)
+		},
+	},
+)
+
+var _randomSchema = config.NewSchema(
+	randomField{
+		Key: "responses", Kind: config.Any, Usage: "The answers, one picked at random for each call: a list of responses.",
+		Set: func(r *randomDef, v config.Value) error {
+			r.set = true
+			return decodeReplies(&r.replies, r.dir, v)
+		},
+	},
+	randomField{
+		Key: "seed", Kind: config.Int, Usage: "Seed of the random order, to repeat it.",
+		Set: func(r *randomDef, v config.Value) error { r.seed, r.seeded = v.Int, true; return nil },
 	},
 )
 
@@ -467,11 +531,30 @@ func (d *mockDef) check(origin string, found []config.Problem) []config.Problem 
 		})
 	}
 
-	if len(answers) == 0 && !failed("response") && !failed("bidi") && !failed("proxy") {
+	if len(answers) == 0 && !slices.ContainsFunc(_answerKeys, failed) {
 		problems = append(problems, config.Problem{
 			Code: config.CodeMissingValue, Origin: origin, Key: "response",
-			Message: "the mock has no response", Hint: "set response, bidi for a bidi streaming method, or proxy",
+			Message: "the mock has no response",
+			Hint:    "set response, response_sequence, response_random, bidi for a bidi streaming method, or proxy",
 		})
+	}
+
+	var noResponses []string // the answers of a list of responses that list none
+	if d.sequence != nil && !d.sequence.set {
+		noResponses = append(noResponses, "response_sequence")
+	}
+
+	if d.random != nil && !d.random.set {
+		noResponses = append(noResponses, "response_random")
+	}
+
+	for _, key := range noResponses {
+		if !failed(key + ".responses") {
+			problems = append(problems, config.Problem{
+				Code: config.CodeMissingValue, Origin: origin, Key: key + ".responses",
+				Message: key + ".responses is required", Hint: "list the answers, one response each",
+			})
+		}
 	}
 
 	for key, r := range d.replies() {
@@ -488,19 +571,16 @@ func (d *mockDef) check(origin string, found []config.Problem) []config.Problem 
 	return problems
 }
 
-// answers returns the keys of the answers the document sets, of response, bidi and proxy, in that order: a mock has one.
+// _answerKeys are the ways a mock file answers, in the order conflicts are reported: a mock has one.
+var _answerKeys = []string{"response", "response_sequence", "response_random", "bidi", "proxy"}
+
+// answers returns the keys of the answers the document sets, in the order of _answerKeys.
 func (d *mockDef) answers() []string {
 	var keys []string
-	if d.reply != nil {
-		keys = append(keys, "response")
-	}
-
-	if d.bidi != nil {
-		keys = append(keys, "bidi")
-	}
-
-	if d.proxy != nil {
-		keys = append(keys, "proxy")
+	for i, set := range []bool{d.reply != nil, d.sequence != nil, d.random != nil, d.bidi != nil, d.proxy != nil} {
+		if set {
+			keys = append(keys, _answerKeys[i])
+		}
 	}
 
 	return keys
@@ -511,6 +591,22 @@ func (d *mockDef) replies() map[string]*replyDef {
 	out := make(map[string]*replyDef)
 	if d.reply != nil {
 		out["response"] = d.reply
+	}
+
+	if d.sequence != nil {
+		for i, r := range d.sequence.replies {
+			out[fmt.Sprintf("response_sequence.responses[%d]", i)] = r
+		}
+
+		if d.sequence.afterEnded != nil {
+			out["response_sequence.after_ended"] = d.sequence.afterEnded
+		}
+	}
+
+	if d.random != nil {
+		for i, r := range d.random.replies {
+			out[fmt.Sprintf("response_random.responses[%d]", i)] = r
+		}
 	}
 
 	if d.bidi != nil {
@@ -584,6 +680,10 @@ func (d *mockDef) apply(b *Builder) {
 		b.Reply(d.bidi.reply())
 	case d.reply != nil:
 		b.Reply(d.reply.response())
+	case d.sequence != nil:
+		b.Reply(d.sequence.reply())
+	case d.random != nil:
+		b.Reply(d.random.reply())
 	case d.proxy != nil:
 		b.Reply(d.proxy.reply())
 	}
@@ -625,6 +725,34 @@ func (r *replyDef) response() *Response {
 	}
 
 	return res
+}
+
+// reply returns the SequentialReply the document describes.
+func (s *sequenceDef) reply() *SequentialReply {
+	rep := Seq()
+	for _, r := range s.replies {
+		rep.Add(r.response())
+	}
+
+	if s.afterEnded != nil {
+		rep.OnSequenceEnded(s.afterEnded.response())
+	}
+
+	return rep
+}
+
+// reply returns the RandomReply the document describes.
+func (r *randomDef) reply() *RandomReply {
+	rep := Rand()
+	if r.seeded {
+		rep = RandWithSeed(r.seed)
+	}
+
+	for _, res := range r.replies {
+		rep.Add(res.response())
+	}
+
+	return rep
 }
 
 // reply returns the BidiReply the document describes.
@@ -685,6 +813,24 @@ func readMessages(r *replyDef, v config.Value) error {
 	}
 
 	return nil
+}
+
+// decodeReplies decodes a list of responses, v, whose body_file open from dir: one at least.
+func decodeReplies(replies *[]*replyDef, dir string, v config.Value) error {
+	if list, ok := v.Any.([]any); ok && len(list) == 0 {
+		return config.Invalid(v, v.Key+" is empty", "list one response at least")
+	}
+
+	return config.Items(v, func(item config.Value) error {
+		r := &replyDef{dir: dir}
+		if err := _replySchema.Decode(r, item); err != nil {
+			return err
+		}
+
+		*replies = append(*replies, r)
+
+		return nil
+	})
 }
 
 // jsonText returns the JSON text a value holds: the text of a string, which must be JSON, else the value written as
