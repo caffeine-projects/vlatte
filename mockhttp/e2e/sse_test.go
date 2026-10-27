@@ -249,3 +249,65 @@ func TestSSE_SendsTheHeadersBeforeTheFirstEvent(t *testing.T) {
 		})
 	}
 }
+
+func TestSSE_FromAMockFile(t *testing.T) {
+	// A mock file declares an event stream under response.event_stream: data that isn't text is JSON, raw is sent as
+	// it is, and template.enabled makes the text templates.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.FromBytes([]byte(`
+request: {method: GET, path: /events}
+response:
+  status: 200
+  event_stream:
+    retry: 2s
+    resume: true
+    events:
+      - {event: price, id: "1", data: {value: 10}}
+      - {comment: note, data: "for {{ .Request.URL.Query.Get \"user\" }}", delay: 1ms}
+      - {raw: "data: crlf\r\n\r\n"}
+  template: {enabled: true}
+`), "yaml"))
+
+	res, body := getTarget(t, m, "/events?user=ana")
+	require.Equal(t, mockhttp.MIMETextEventStream, res.Header.Get(mockhttp.HeaderContentType))
+	require.Equal(t, "retry: 2000\n\nevent: price\nid: 1\ndata: {\"value\":10}\n\n: note\ndata: for ana\n\ndata: crlf\r\n\r\n", string(body))
+}
+
+func TestSSE_ADescriptionLoadsBackAndServesTheSame(t *testing.T) {
+	// A mock the admin API or a store keeps as its description serves the same stream once built back.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scope := m.MustMock(mockhttp.Getf("/a").ID("a").Reply(mockhttp.OK().EventStream(mockhttp.NewEventStream(
+		mockhttp.NewEvent().Name("e").ID("1").DataJSON([]any{1, "two"}),
+		mockhttp.NewEvent().Comment("c\nd").Data("multi\nline").Delay(time.Millisecond),
+		mockhttp.NewEvent().DataJSON(nil),
+		mockhttp.NewEvent().DataJSON(uint64(18446744073709551615)),
+		mockhttp.NewEvent().Raw(": raw\n"),
+	).Retry(time.Second))))
+
+	data, err := mockhttp.EncodeMock(scope.Mock("a"), "yaml")
+	require.NoError(t, err)
+
+	back, err := mockhttp.DecodeMock(m, data, "yaml")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = back.Close() })
+
+	again, err := mockhttp.EncodeMock(back, "yaml")
+	require.NoError(t, err)
+	require.Equal(t, string(data), string(again))
+
+	other := mockhttp.MustNew(mockhttp.Setup().Silent())
+	other.MustStart()
+	t.Cleanup(other.Close)
+	other.MustMock(mockhttp.FromBytes(data, "yaml"))
+
+	_, want := getTarget(t, m, "/a")
+	_, got := getTarget(t, other, "/a")
+	require.Equal(t, "retry: 1000\n\nevent: e\nid: 1\ndata: [1,\"two\"]\n\n: c\n: d\ndata: multi\ndata: line\n\ndata: null\n\ndata: 18446744073709551615\n\n: raw\n", string(want))
+	require.Equal(t, string(want), string(got))
+}

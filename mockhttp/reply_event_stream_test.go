@@ -208,32 +208,6 @@ func TestReplyEventStream_ATemplateThatFailsAtTheRequestFailsTheReply(t *testing
 	require.Contains(t, string(body), "reply: sse: events[0]: id holds a line break")
 }
 
-func TestReplyEventStream_FromAMockFile(t *testing.T) {
-	// A mock file declares an event stream under response.event_stream: data that isn't text is JSON, raw is sent as
-	// it is, and template.enabled makes the text templates.
-	m := MustNew(Setup().Silent())
-	m.MustStart()
-	t.Cleanup(m.Close)
-
-	m.MustMock(FromBytes([]byte(`
-request: {method: GET, path: /events}
-response:
-  status: 200
-  event_stream:
-    retry: 2s
-    resume: true
-    events:
-      - {event: price, id: "1", data: {value: 10}}
-      - {comment: note, data: "for {{ .Request.URL.Query.Get \"user\" }}", delay: 1ms}
-      - {raw: "data: crlf\r\n\r\n"}
-  template: {enabled: true}
-`), "yaml"))
-
-	res, body := fetch(t, m.URL("/events?user=ana"))
-	require.Equal(t, MIMETextEventStream, res.Header.Get(HeaderContentType))
-	require.Equal(t, "retry: 2000\n\nevent: price\nid: 1\ndata: {\"value\":10}\n\n: note\ndata: for ana\n\ndata: crlf\r\n\r\n", string(body))
-}
-
 func TestReplyEventStream_Describe(t *testing.T) {
 	// The description is a mock file's response.event_stream, with the template switch when the stream is templated.
 	// A delay function can't be written: it is left out.
@@ -271,39 +245,4 @@ func TestReplyEventStream_Describe(t *testing.T) {
 	b, err = json.Marshal(described.Describe().Props, json.Deterministic(true))
 	require.NoError(t, err)
 	require.JSONEq(t, `{"status": 200, "event_stream": {"events": []}}`, string(b))
-}
-
-func TestReplyEventStream_ADescriptionLoadsBackAndServesTheSame(t *testing.T) {
-	// A mock the admin API or a store keeps as its description serves the same stream once built back.
-	m := MustNew(Setup().Silent())
-	m.MustStart()
-	t.Cleanup(m.Close)
-
-	scope := m.MustMock(Getf("/a").ID("a").Reply(OK().EventStream(NewEventStream(
-		NewEvent().Name("e").ID("1").DataJSON([]any{1, "two"}),
-		NewEvent().Comment("c\nd").Data("multi\nline").Delay(time.Millisecond),
-		NewEvent().DataJSON(nil),
-		NewEvent().Raw(": raw\n"),
-	).Retry(time.Second))))
-
-	data, err := EncodeMock(scope.Mock("a"), "yaml")
-	require.NoError(t, err)
-
-	back, err := DecodeMock(m, data, "yaml")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = back.Close() })
-
-	again, err := EncodeMock(back, "yaml")
-	require.NoError(t, err)
-	require.Equal(t, string(data), string(again))
-
-	other := MustNew(Setup().Silent())
-	other.MustStart()
-	t.Cleanup(other.Close)
-	other.MustMock(FromBytes(data, "yaml"))
-
-	_, want := fetch(t, m.URL("/a"))
-	_, got := fetch(t, other.URL("/a"))
-	require.Equal(t, "retry: 1000\n\nevent: e\nid: 1\ndata: [1,\"two\"]\n\n: c\n: d\ndata: multi\ndata: line\n\ndata: null\n\n: raw\n", string(want))
-	require.Equal(t, string(want), string(got))
 }
