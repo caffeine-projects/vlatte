@@ -208,6 +208,23 @@ func TestStream_ResumesAfterTheLastEventID(t *testing.T) {
 	}
 }
 
+func TestStream_ResumesAfterTheRenderedID(t *testing.T) {
+	// The ids of a templated stream are the ids the client got, once rendered: a stream whose ids name the request's
+	// job resumes after the one the client sends back.
+	e, err := Compile(&Spec{Templated: true, Resume: true, Events: []*EventSpec{
+		{ID: "{{ .Job }}-1", HasID: true, Data: []byte("a"), HasData: true},
+		{ID: "{{ .Job }}-2", HasID: true, Data: []byte("b"), HasData: true},
+	}}, _engine)
+	require.NoError(t, err)
+
+	synctest.Test(t, func(t *testing.T) {
+		s, err := e.Stream(t.Context(), map[string]any{"Job": "7"}, "7-1")
+		require.NoError(t, err)
+
+		require.Equal(t, []read{{text: "id: 7-2\ndata: b\n\n"}}, readAll(t, s))
+	})
+}
+
 func TestStream_ReadsAfterCloseEnd(t *testing.T) {
 	s := stream(t.Context(), t, &Spec{Events: []*EventSpec{data("a")}}, "")
 	require.NoError(t, s.Close())
