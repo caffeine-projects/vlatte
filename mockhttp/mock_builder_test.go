@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"context"
+	json "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,8 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
+	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 )
 
 // _idOracle is the ID rule written independently of checkMockID: the characters a URL path needs no escaping for.
@@ -461,6 +464,74 @@ func TestBuilder_MatchesDescribesUnderCustom(t *testing.T) {
 	request, ok := desc["request"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, []any{descriptor.SingleArg("not", descriptor.KeyOnly("nil"))}, request["custom"])
+}
+
+// scenarioServer runs the scenario suite on a server whose mocks are built in Go, or from mock files.
+type scenarioServer struct {
+	m         *Server
+	fromFiles bool
+}
+
+var _ scenariotest.Server = (*scenarioServer)(nil)
+
+func newScenarioServer(fromFiles bool) func(t *testing.T) scenariotest.Server {
+	return func(t *testing.T) scenariotest.Server {
+		m := MustNew(Setup().Silent())
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		return &scenarioServer{m: m, fromFiles: fromFiles}
+	}
+}
+
+func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
+	for _, mk := range mocks {
+		if s.fromFiles {
+			doc, err := json.Marshal(map[string]any{
+				"scenario": map[string]string{
+					"name": mk.Scenario, "required_state": mk.RequiredState, "new_state": mk.NewState,
+				},
+				"request":  map[string]string{"method": http.MethodGet, "path": "/scenario"},
+				"response": map[string]any{"status": http.StatusOK, "body": mk.ID},
+			})
+			require.NoError(t, err)
+
+			s.m.MustMock(FromBytes(doc, "json"))
+
+			continue
+		}
+
+		b := Getf("/scenario").ScenarioIs(mk.Scenario).Reply(OK().PlainText(mk.ID))
+		if mk.RequiredState != "" {
+			b.ScenarioStateIs(mk.RequiredState)
+		}
+
+		if mk.NewState != "" {
+			b.ScenarioStateWillBe(mk.NewState)
+		}
+
+		s.m.MustMock(b)
+	}
+}
+
+func (s *scenarioServer) Call(t *testing.T) string {
+	res, body := do(t, http.MethodGet, s.m.URL("/scenario"), nil, nil)
+
+	switch res.StatusCode {
+	case http.StatusOK:
+		return string(body)
+	case StatusNoMatch:
+		return ""
+	default:
+		t.Fatalf("want a mock's answer or no match, got %d: %s", res.StatusCode, body)
+		return ""
+	}
+}
+
+func (s *scenarioServer) Store() *matchscenario.Store { return s.m.scenarioStore }
+
+func TestBuilder_ServesScenarios(t *testing.T) {
+	scenariotest.Run(t, newScenarioServer(false))
 }
 
 // statusOf sends req and returns the status of the response.

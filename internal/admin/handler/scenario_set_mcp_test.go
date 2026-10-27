@@ -7,12 +7,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
-	"github.com/caffeine-projects/vlatte/internal/mfeat"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 func TestSetScenarioTool(t *testing.T) {
 	// An agent moves a scenario to the state its test needs.
-	scenarios := mfeat.NewScenarioStore()
+	scenarios := matchscenario.New()
 	cs := connect(t, newStore(t), adminapi.Capabilities{Scenarios: scenarios})
 
 	doc := conformsAs(t, call(t, cs, "set_scenario", map[string]any{"name": "Check out", "state": "paid"}), "json", "Scenario")

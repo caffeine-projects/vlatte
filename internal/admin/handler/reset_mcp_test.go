@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
-	"github.com/caffeine-projects/vlatte/internal/mfeat"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 func TestResetTool(t *testing.T) {
@@ -16,7 +16,7 @@ func TestResetTool(t *testing.T) {
 	added := newFake("added")
 	added.origin = adminapi.Origin
 	store := newStore(t, added, newFake("from-code"))
-	scenarios := mfeat.NewScenarioStore()
+	scenarios := matchscenario.New()
 	scenarios.SetScenario("checkout", "paid")
 	cs := connect(t, store, adminapi.Capabilities{Scenarios: scenarios})
 

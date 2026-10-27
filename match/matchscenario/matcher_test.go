@@ -1,0 +1,137 @@
+package matchscenario
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
+)
+
+func match(t *testing.T, m *Matcher) bool {
+	t.Helper()
+
+	ok, err := m.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), nil))
+	require.NoError(t, err)
+
+	return ok
+}
+
+func TestMatcher_AScenarioMovesThroughItsStates(t *testing.T) {
+	store := New()
+	pay := store.Matcher("checkout", StateStarted, "paid")
+	refund := store.Matcher("checkout", "paid", "refunded")
+
+	require.True(t, match(t, pay))
+	require.False(t, match(t, refund), "the scenario is still where it started")
+	require.NoError(t, pay.SetState())
+
+	require.False(t, match(t, pay), "the scenario moved on to paid")
+	require.True(t, match(t, refund))
+	require.NoError(t, refund.SetState())
+	require.Equal(t, map[string]string{"checkout": "refunded"}, store.Scenarios())
+}
+
+func TestMatcher_RequiringStartedStartsTheScenario(t *testing.T) {
+	// The scenario shows in the store once a mock that starts it is matched, before it answered.
+	store := New()
+
+	require.True(t, match(t, store.Matcher("checkout", StateStarted, "paid")))
+	require.Equal(t, map[string]string{"checkout": StateStarted}, store.Scenarios())
+}
+
+func TestMatcher_AnotherStateMatchesWhileNoMockStartedTheScenario(t *testing.T) {
+	store := New()
+	refund := store.Matcher("checkout", "paid", "")
+
+	require.True(t, match(t, refund))
+	require.Empty(t, store.Scenarios(), "matching a state other than started starts nothing")
+
+	store.SetScenario("checkout", StateStarted)
+	require.False(t, match(t, refund))
+}
+
+func TestMatcher_NoRequiredStateMatchesInAnyState(t *testing.T) {
+	// A mock that requires no state matches in every state of its scenario, so one mock can answer throughout a flow.
+	store := New()
+	anyState := store.Matcher("checkout", "", "")
+
+	require.True(t, match(t, anyState), "before the scenario starts")
+
+	for _, state := range []string{StateStarted, "paid"} {
+		store.SetScenario("checkout", state)
+		require.True(t, match(t, anyState), state)
+	}
+}
+
+func TestMatcher_ANewStateStartsTheScenario(t *testing.T) {
+	// A mock that requires no state still moves its scenario, one no mock started too.
+	store := New()
+	move := store.Matcher("checkout", "", "paid")
+
+	require.True(t, match(t, move))
+	require.NoError(t, move.SetState())
+	require.Equal(t, map[string]string{"checkout": "paid"}, store.Scenarios())
+}
+
+func TestMatcher_NoNewStateLeavesTheScenarioWhereItIs(t *testing.T) {
+	store := New()
+	store.SetScenario("checkout", "paid")
+
+	require.NoError(t, store.Matcher("checkout", "paid", "").SetState())
+	require.Equal(t, map[string]string{"checkout": "paid"}, store.Scenarios())
+}
+
+func TestMatcher_NamesIgnoreCase(t *testing.T) {
+	// Mocks that write a scenario's name in different cases share it: a name in the wrong case would match every
+	// request and never move, a mistake no one sees in a mock file.
+	store := New()
+	pay := store.Matcher("Checkout", StateStarted, "paid")
+
+	require.True(t, match(t, pay))
+	require.NoError(t, pay.SetState())
+
+	require.False(t, match(t, store.Matcher("checkout", StateStarted, "")))
+	require.True(t, match(t, store.Matcher("CHECKOUT", "paid", "")))
+	require.Equal(t, map[string]string{"Checkout": "paid"}, store.Scenarios())
+}
+
+func TestMatcher_NamesIgnoreCaseAsEqualFoldDoes(t *testing.T) {
+	// Lowercasing alone keeps σ and ς, or K and the Kelvin sign, two scenarios, though strings.EqualFold finds them
+	// equal.
+	for _, names := range [][2]string{{"σ", "ς"}, {"ΣΑΣ", "σας"}, {"K", "\u212a"}} {
+		t.Run(names[0], func(t *testing.T) {
+			store := New()
+			require.NoError(t, store.Matcher(names[0], "", "paid").SetState())
+
+			refund := store.Matcher(names[1], "paid", "refunded")
+			require.True(t, match(t, refund))
+			require.NoError(t, refund.SetState())
+			require.Equal(t, map[string]string{names[0]: "refunded"}, store.Scenarios())
+		})
+	}
+}
+
+func TestMatcher_StoresAreIsolated(t *testing.T) {
+	// Each mock server has its own store: a scenario of one never moves the scenario of the same name of another.
+	a, b := New(), New()
+	payA := a.Matcher("checkout", StateStarted, "paid")
+
+	require.True(t, match(t, payA))
+	require.NoError(t, payA.SetState())
+
+	require.True(t, match(t, b.Matcher("checkout", StateStarted, "")))
+	require.Equal(t, map[string]string{"checkout": StateStarted}, b.Scenarios())
+}
+
+func TestMatcher_DescribesAsTheScenarioOfAMockFile(t *testing.T) {
+	m := New().Matcher("checkout", StateStarted, "paid")
+
+	require.Equal(t, "Scenario", m.Name())
+	require.Equal(t, descriptor.SingleArg("scenario", map[string]any{
+		"name":           "checkout",
+		"required_state": StateStarted,
+		"new_state":      "paid",
+	}), m.Describe())
+}

@@ -17,7 +17,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
-	"github.com/caffeine-projects/vlatte/internal/mfeat"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 func TestNewMCP_ToolsAreTheOperationsTheServerCanDo(t *testing.T) {
@@ -41,7 +41,7 @@ func TestNewMCP_ToolsAreTheOperationsTheServerCanDo(t *testing.T) {
 		{
 			name: "everything",
 			caps: adminapi.Capabilities{
-				Files: &fakeFiles{}, Recorder: &fakeRecorder{}, Scenarios: mfeat.NewScenarioStore(), Journal: journalOf(t),
+				Files: &fakeFiles{}, Recorder: &fakeRecorder{}, Scenarios: matchscenario.New(), Journal: journalOf(t),
 				MockSchema: []byte(`{}`),
 			},
 			build: true,

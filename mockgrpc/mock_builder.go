@@ -17,6 +17,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 var _ vlatte.Builder[*Mock, *Server] = (*Builder)(nil)
@@ -213,7 +214,7 @@ func (b *Builder) Once() *Builder {
 // first state, "started".
 func (b *Builder) StartScenario(name string) *Builder {
 	b.scenario = name
-	b.scenarioRequiredState = mfeat.ScenarioStateStarted
+	b.scenarioRequiredState = matchscenario.StateStarted
 
 	return b
 }
@@ -317,7 +318,7 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		expectations = append(expectations, &vlatte.Eval[*Call]{
 			Target:  int(_scopeScenario),
 			Key:     b.scenario,
-			Matcher: mfeat.Scenario(app.scenarios, b.scenario, b.scenarioRequiredState, b.scenarioNewState),
+			Matcher: app.scenarios.Matcher(b.scenario, b.scenarioRequiredState, b.scenarioNewState),
 		})
 	}
 

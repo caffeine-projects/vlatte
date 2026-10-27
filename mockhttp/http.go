@@ -25,9 +25,9 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
-	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid/recovery"
@@ -56,7 +56,7 @@ type Server struct {
 	config             *Config
 	server             Backend
 	storage            vlatte.Store[*Mock]
-	scenarioStore      *mfeat.ScenarioStore
+	scenarioStore      *matchscenario.Store
 	requestBodyParsers []RequestBodyParser
 	params             vlatte.KV
 	loaders            []Loader
@@ -272,7 +272,7 @@ func New(config ...Option) (*Server, error) {
 	app.Base = vlatte.NewBase(app, repository)
 	app.Verifier = journal.NewVerifier[*Mock, *Server](j, app)
 	app.storage = repository
-	app.scenarioStore = mfeat.NewScenarioStore()
+	app.scenarioStore = matchscenario.New()
 	app.params = params
 	app.loaders = loaders
 	app.files = files

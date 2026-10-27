@@ -24,8 +24,8 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
-	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 var (
@@ -56,7 +56,7 @@ type Server struct {
 	logger    *zerolog.Logger
 	storage   vlatte.Store[*Mock]
 	resolver  *resolver
-	scenarios *mfeat.ScenarioStore
+	scenarios *matchscenario.Store
 	runner    *vlatte.EventRunner // runs the on_complete events of mocks
 	admin     adminapi.Server     // nil without Config.Admin
 	events    *adminapi.Events    // the admin API's; nil without it
@@ -165,7 +165,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	app.resolver = res
-	app.scenarios = mfeat.NewScenarioStore()
+	app.scenarios = matchscenario.New()
 
 	global, err := app.prepareEvents(globalEvents(conf), "server: global on_complete listener")
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
@@ -143,4 +144,8 @@ func TestFromFile_AFileThatCantBeReadSaysWhy(t *testing.T) {
 		require.Len(t, cfgErr.Problems, 1)
 		require.Equal(t, tc.code, cfgErr.Problems[0].Code, "%s", tc.path)
 	}
+}
+
+func TestFromBytes_ServesScenarios(t *testing.T) {
+	scenariotest.Run(t, newScenarioServer(true))
 }
