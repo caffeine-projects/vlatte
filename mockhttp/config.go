@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -134,7 +135,8 @@ type Config struct {
 	proxyAll *proxyDef
 }
 
-// Apply copies the current Config struct values to the given Config parameter.
+// Apply implements Option: it sets every field of conf to c's, its zero values included. [Setup] sets only what its
+// methods set, so its options compose.
 func (c *Config) Apply(conf *Config) error {
 	conf.Name = c.Name
 	conf.RootDir = c.RootDir
@@ -224,21 +226,17 @@ type AdminStore func(app *Server) (vlatte.Store[*Mock], error)
 // DebugFn is a function for debug logging.
 type DebugFn func(string, any)
 
-// ConfigBuilder lets users create a Config using a fluent API.
+// ConfigBuilder builds the configuration of a Server with a fluent API. Each method sets one setting, and Apply sets
+// only those: the options passed to New compose, so a later one changes only what it sets.
 type ConfigBuilder struct {
-	conf                   *Config
-	recorderConf           []RecordConfigurer
-	proxyConf              []ProxyConfigurer
-	tlsCertificateFs       string
-	tlsKeyFs               string
-	tlsClientCertificateFs string
+	sets []func(conf *Config) error
 
-	// onComplete keeps the listeners of OnCompleteListener. Apply registers them in a registry of each config's own,
+	// onComplete keeps the listeners of OnCompleteListener. Apply registers them in the registry of each config,
 	// unless EventListeners gave a shared one: they are registered in it as soon as both are known.
 	onComplete []namedListener
 
-	// shared is set by EventListeners with a registry: the configs Apply builds share it.
-	shared bool
+	// shared is the registry EventListeners set, which the configs Apply builds share.
+	shared *vlatte.Listener
 
 	// err fails Apply, with every listener the shared registry couldn't register.
 	err error
@@ -275,106 +273,89 @@ func defaultConfig() *Config {
 // Setup initialize a new ConfigBuilder.
 // Entrypoint to start a new custom configuration for HTTP mock servers.
 func Setup() *ConfigBuilder {
-	conf := defaultConfig()
-	return &ConfigBuilder{
-		conf: conf,
-	}
+	return &ConfigBuilder{}
 }
 
 // Name sets a name to the mock server, which its logs show. It names the folder of its files too, in DefaultWorkDir,
 // unless WorkDir sets another: a path inside it, which doesn't start with _, as vlatte's own folders do.
 func (cb *ConfigBuilder) Name(name string) *ConfigBuilder {
-	cb.conf.Name = name
-	return cb
+	return cb.set(func(conf *Config) { conf.Name = name })
 }
 
 // Addr sets a custom address for the mock HTTP server.
 func (cb *ConfigBuilder) Addr(addr string) *ConfigBuilder {
-	cb.conf.Addr = addr
-	return cb
+	return cb.set(func(conf *Config) { conf.Addr = addr })
 }
 
 // Listener sets an already bound listener for the mock HTTP server to serve instead of listening on Addr.
 // Start takes it: Close, or a Start that fails, closes it, so nothing listens without a server behind it.
 func (cb *ConfigBuilder) Listener(l net.Listener) *ConfigBuilder {
-	cb.conf.Listener = l
-	return cb
+	return cb.set(func(conf *Config) { conf.Listener = l })
 }
 
 // Port sets a custom port to the mock HTTP server.
 // If none is provided, a random port number will be used.
 func (cb *ConfigBuilder) Port(port int) *ConfigBuilder {
-	cb.conf.Addr = ":" + strconv.FormatInt(int64(port), 10)
-	return cb
+	return cb.set(func(conf *Config) { conf.Addr = ":" + strconv.FormatInt(int64(port), 10) })
 }
 
 // RootDir sets the directory that relative mock file patterns and recording paths start at. Absolute ones are used
 // as they are.
 func (cb *ConfigBuilder) RootDir(rootDir string) *ConfigBuilder {
-	cb.conf.RootDir = rootDir
-	return cb
+	return cb.set(func(conf *Config) { conf.RootDir = rootDir })
 }
 
 // WorkDir sets the directory of the server's own files: the mock files, recordings, admin mocks and journal of its
 // defaults, whose paths start with WorkDirVar. Empty is DefaultWorkDir, or DefaultWorkDir/<name> for a named server.
 // A relative dir starts at RootDir.
 func (cb *ConfigBuilder) WorkDir(dir string) *ConfigBuilder {
-	cb.conf.WorkDir = dir
-	return cb
+	return cb.set(func(conf *Config) { conf.WorkDir = dir })
 }
 
 // MockNotFoundStatusCode defines the status code to be used when no mock matches with an HTTP request.
 func (cb *ConfigBuilder) MockNotFoundStatusCode(code int) *ConfigBuilder {
-	cb.conf.RequestWasNotMatchedStatusCode = code
-	return cb
+	return cb.set(func(conf *Config) { conf.RequestWasNotMatchedStatusCode = code })
 }
 
 // ErrorStatusCode defines the status code of a response vlatte makes when serving a request fails, such as a reply
 // that fails. It defaults to StatusNoMatch, as no-match does: the VLatte-Error header tells them apart.
 func (cb *ConfigBuilder) ErrorStatusCode(code int) *ConfigBuilder {
-	cb.conf.ErrorStatusCode = code
-	return cb
+	return cb.set(func(conf *Config) { conf.ErrorStatusCode = code })
 }
 
 // RequestBodyParsers adds a custom list of RequestBodyParsers.
 func (cb *ConfigBuilder) RequestBodyParsers(bp ...RequestBodyParser) *ConfigBuilder {
-	cb.conf.RequestBodyParsers = append(cb.conf.RequestBodyParsers, bp...)
-	return cb
+	return cb.set(func(conf *Config) { conf.RequestBodyParsers = append(conf.RequestBodyParsers, bp...) })
 }
 
 // NoBodyParsing disables request body parsing.
 func (cb *ConfigBuilder) NoBodyParsing() *ConfigBuilder {
-	cb.conf.NoBodyParsing = true
-	return cb
+	return cb.set(func(conf *Config) { conf.NoBodyParsing = true })
 }
 
 // NoDebugHeaders turns off the debug headers, such as VLatte-Matched-Mock-Id, that the server adds to its answers.
 // VLatte-Error stays: it tells the server's own answers from a mock's.
 func (cb *ConfigBuilder) NoDebugHeaders() *ConfigBuilder {
-	cb.conf.NoDebugHeaders = true
-	return cb
+	return cb.set(func(conf *Config) { conf.NoDebugHeaders = true })
 }
 
 // NoNearMisses turns off the report of the mocks closest to a request no mock matched, which the answer to it lists.
 // The report runs no matcher twice: it runs those matching never reached, such as the action of a match.Peek after
 // the part a mock differs in.
 func (cb *ConfigBuilder) NoNearMisses() *ConfigBuilder {
-	cb.conf.NoNearMisses = true
-	return cb
+	return cb.set(func(conf *Config) { conf.NoNearMisses = true })
 }
 
 // MaxBodyParsingLimit sets the limit of bytes that request body parsers should read.
 // Zero means no limit.
 func (cb *ConfigBuilder) MaxBodyParsingLimit(n int64) *ConfigBuilder {
-	cb.conf.MaxBodyParsingLimit = n
-	return cb
+	return cb.set(func(conf *Config) { conf.MaxBodyParsingLimit = n })
 }
 
 // Use adds middlewares that wrap the mock handler, to intercept requests. They run in the order they are added, across
 // calls. The journal, the logs and the events tell the status a middleware sends, when it answers in place of a mock.
 func (cb *ConfigBuilder) Use(fn ...func(handler http.Handler) http.Handler) *ConfigBuilder {
-	cb.conf.Middlewares = append(cb.conf.Middlewares, fn...)
-	return cb
+	return cb.set(func(conf *Config) { conf.Middlewares = append(conf.Middlewares, fn...) })
 }
 
 // CORS configures CORS for the mock server. An answer that sends a CORS header, such as a proxied one, answers CORS by
@@ -386,179 +367,183 @@ func (cb *ConfigBuilder) CORS(options ...CORSConfigurer) *ConfigBuilder {
 		option.Apply(&opts)
 	}
 
-	cb.conf.CORS = &opts
-
-	return cb
+	return cb.set(func(conf *Config) { conf.CORS = &opts })
 }
 
 // BackendFactory configures a custom BackendFactory used to build the underlying
 // HTTP mock Backend for a Server.
 func (cb *ConfigBuilder) BackendFactory(factory BackendFactory) *ConfigBuilder {
-	cb.conf.BackendFactory = factory
-	return cb
+	return cb.set(func(conf *Config) { conf.BackendFactory = factory })
 }
 
 // HandlerDecorator configures a custom HTTP handler using the default mock handler. The journal, the logs and the
 // events tell the status it sends, when it answers in place of a mock, such as on a timeout.
 func (cb *ConfigBuilder) HandlerDecorator(fn func(handler http.Handler) http.Handler) *ConfigBuilder {
-	cb.conf.HandlerDecorator = fn
-	return cb
+	return cb.set(func(conf *Config) { conf.HandlerDecorator = fn })
 }
 
 // Logger sets a custom zerolog.Logger.
 func (cb *ConfigBuilder) Logger(l *zerolog.Logger) *ConfigBuilder {
-	cb.conf.Logger = l
-	return cb
+	return cb.set(func(conf *Config) { conf.Logger = l })
 }
 
 // LogOutput sets where the server writes its logs, its debug output and the requests echo replies log, in place of
 // the standard output, such as for a program that keeps the standard output for something else. A Logger writes
 // where it was told to.
 func (cb *ConfigBuilder) LogOutput(w io.Writer) *ConfigBuilder {
-	cb.conf.LogOutput = w
-	return cb
+	return cb.set(func(conf *Config) { conf.LogOutput = w })
 }
 
 func (cb *ConfigBuilder) Silent() *ConfigBuilder {
-	cb.conf.LogLevel = vlatte.LogLevelDisabled
-	return cb
+	return cb.set(func(conf *Config) { conf.LogLevel = vlatte.LogLevelDisabled })
 }
 
 // LogVerbosity sets the verbosity of informative logs.
 func (cb *ConfigBuilder) LogVerbosity(l vlatte.LogVerbosity) *ConfigBuilder {
-	cb.conf.LogVerbosity = l
-	return cb
+	return cb.set(func(conf *Config) { conf.LogVerbosity = l })
 }
 
 // LogLevel sets the level of the zerolog.Logger.
 func (cb *ConfigBuilder) LogLevel(l vlatte.LogLevel) *ConfigBuilder {
-	cb.conf.LogLevel = l
-	return cb
+	return cb.set(func(conf *Config) { conf.LogLevel = l })
 }
 
 // LogPretty enable/disable pretty logging.
 func (cb *ConfigBuilder) LogPretty(v bool) *ConfigBuilder {
-	cb.conf.LogPretty = v
-	return cb
+	return cb.set(func(conf *Config) { conf.LogPretty = v })
 }
 
 // LogBodyMaxSize sets the max size of the response body to be logged.
 func (cb *ConfigBuilder) LogBodyMaxSize(size int64) *ConfigBuilder {
-	cb.conf.LogBodyMaxSize = size
-	return cb
+	return cb.set(func(conf *Config) { conf.LogBodyMaxSize = size })
 }
 
 // UseDescriptiveLogger enable/disable the use of a more descriptive logger.
 func (cb *ConfigBuilder) UseDescriptiveLogger() *ConfigBuilder {
-	cb.conf.Debug = true
-	return cb
+	return cb.set(func(conf *Config) { conf.Debug = true })
 }
 
 // Colors enable/disable use of ANSI colors in logs.
 func (cb *ConfigBuilder) Colors(v bool) *ConfigBuilder {
-	cb.conf.Colors = v
-	return cb
+	return cb.set(func(conf *Config) { conf.Colors = v })
 }
 
 // RedactHeader hides the values of the given HTTP headers in logs and recordings. A recording writes <redacted> for
 // the values of a response header, and matches a request header that RecordRequestHeaders names by its presence.
 func (cb *ConfigBuilder) RedactHeader(names ...string) *ConfigBuilder {
-	for _, name := range names {
-		cb.conf.HeaderNamesToRedact[strings.ToLower(name)] = struct{}{}
-	}
+	return cb.set(func(conf *Config) {
+		redact := maps.Clone(conf.HeaderNamesToRedact)
+		if redact == nil {
+			redact = make(map[string]struct{}, len(names))
+		}
 
-	return cb
+		for _, name := range names {
+			redact[strings.ToLower(name)] = struct{}{}
+		}
+
+		conf.HeaderNamesToRedact = redact
+	})
 }
 
 // Parameters sets a custom reply parameters store.
 func (cb *ConfigBuilder) Parameters(params vlatte.KV) *ConfigBuilder {
-	cb.conf.Parameters = params
-	return cb
+	return cb.set(func(conf *Config) { conf.Parameters = params })
 }
 
 // MockFilePatterns sets custom Glob patterns to load mock from the file system, which may start with WorkDirVar.
 // Defaults to ConfigMockFilePattern.
 func (cb *ConfigBuilder) MockFilePatterns(patterns ...string) *ConfigBuilder {
-	cb.conf.MockFileSearchPatterns = patterns
-
-	return cb
+	return cb.set(func(conf *Config) { conf.MockFileSearchPatterns = patterns })
 }
 
 // Loader configures an additional Loader.
 func (cb *ConfigBuilder) Loader(loader Loader) *ConfigBuilder {
-	cb.conf.Loaders = append(cb.conf.Loaders, loader)
-	return cb
+	return cb.set(func(conf *Config) { conf.Loaders = append(conf.Loaders, loader) })
 }
 
 // Proxy configures the mock server as a proxy server.
 // Non-Matched requests will be routed based on the proxy configuration.
 func (cb *ConfigBuilder) Proxy(options ...ProxyConfigurer) *ConfigBuilder {
-	if len(options) == 0 {
-		c := _defaultProxyConfig
-		cb.proxyConf = []ProxyConfigurer{&c}
+	cb.sets = append(cb.sets, func(conf *Config) error {
+		proxyConfig := _defaultProxyConfig
+		for _, option := range options {
+			if err := option.Apply(&proxyConfig); err != nil {
+				return err
+			}
+		}
 
-		return cb
-	}
+		conf.Proxy = &proxyConfig
 
-	cb.proxyConf = options
+		return nil
+	})
 
 	return cb
 }
 
 // Record configures recording.
 func (cb *ConfigBuilder) Record(options ...RecordConfigurer) *ConfigBuilder {
-	if len(options) == 0 {
-		cb.recorderConf = []RecordConfigurer{defaultRecordConfig()}
-		return cb
-	}
+	cb.sets = append(cb.sets, func(conf *Config) error {
+		recordConfig := defaultRecordConfig()
+		for _, option := range options {
+			if err := option.Apply(recordConfig); err != nil {
+				return err
+			}
+		}
 
-	cb.recorderConf = options
+		conf.Record = recordConfig
+
+		return nil
+	})
 
 	return cb
 }
 
 // MockFileHandlers sets MockFileHandler implementations.
 func (cb *ConfigBuilder) MockFileHandlers(handlers ...MockFileHandler) *ConfigBuilder {
-	cb.conf.MockFileHandlers = append(cb.conf.MockFileHandlers, handlers...)
-	return cb
+	return cb.set(func(conf *Config) { conf.MockFileHandlers = append(conf.MockFileHandlers, handlers...) })
 }
 
 // Transport sets the transport of what the server sends. See Config.Transport.
 func (cb *ConfigBuilder) Transport(rt http.RoundTripper) *ConfigBuilder {
-	cb.conf.Transport = rt
-	return cb
+	return cb.set(func(conf *Config) { conf.Transport = rt })
 }
 
 // TLSConfig defines custom TLS configurations.
 func (cb *ConfigBuilder) TLSConfig(c *tls.Config) *ConfigBuilder {
-	cb.conf.TLSConfig = c
-	return cb
+	return cb.set(func(conf *Config) { conf.TLSConfig = c })
 }
 
 // TLSCertKeyPair sets a custom public/private key pair.
 // If none is provided, default values will be used when starting the server with Server.StartTLS or Server.MustStartTLS.
 // If TLSConfig is set, this option will be ignored.
 func (cb *ConfigBuilder) TLSCertKeyPair(certFile, keyFile string) *ConfigBuilder {
-	cb.tlsCertificateFs = certFile
-	cb.tlsKeyFs = keyFile
-	return cb
+	return cb.TLSMutual(certFile, keyFile, "")
 }
 
 // TLSMutual defines the set of root certificate authorities that the server will use.
 // If TLSConfig is set, this option will be ignored.
 func (cb *ConfigBuilder) TLSMutual(certFile, keyFile, clientCert string) *ConfigBuilder {
-	cb.tlsClientCertificateFs = clientCert
-	cb.tlsCertificateFs = certFile
-	cb.tlsKeyFs = keyFile
+	cb.sets = append(cb.sets, func(conf *Config) error {
+		if certFile == "" && keyFile == "" {
+			return nil
+		}
+
+		if err := applyTLS(conf, certFile, keyFile, clientCert); err != nil {
+			return fmt.Errorf("config: failed to build TLS config: %w", err)
+		}
+
+		return nil
+	})
+
 	return cb
 }
 
 // OnCompleteListener registers an on-complete event listener by name, for the servers built from the builder from then
-// on: a server built before doesn't get it. A name registered twice fails the server's New, with
-// vlatte.ErrEventAlreadyRegistered.
+// on: a server built before doesn't get it. Without EventListeners, it goes in the server's registry, or in the one an
+// earlier option set. A name registered twice fails the server's New, with vlatte.ErrEventAlreadyRegistered.
 func (cb *ConfigBuilder) OnCompleteListener(name string, listener vlatte.EventListener[vlatte.OnComplete]) *ConfigBuilder {
 	cb.onComplete = append(cb.onComplete, namedListener{name: name, listener: listener})
-	if cb.shared {
+	if cb.shared != nil {
 		cb.register(name, listener)
 	}
 
@@ -567,76 +552,72 @@ func (cb *ConfigBuilder) OnCompleteListener(name string, listener vlatte.EventLi
 
 // GlobalEvents sets the events that run for every mock.
 func (cb *ConfigBuilder) GlobalEvents(events *vlatte.Events) *ConfigBuilder {
-	cb.conf.GlobalEvents = events
-	return cb
+	return cb.set(func(conf *Config) { conf.GlobalEvents = events })
 }
 
 // EventListeners sets the registry of named event listeners, such as one several servers share. The listeners
 // registered with OnCompleteListener, before or after, are registered in it too, so none is dropped. Nil gives each
 // server a registry of its own again.
 func (cb *ConfigBuilder) EventListeners(listeners *vlatte.Listener) *ConfigBuilder {
-	cb.conf.Listeners = listeners
-	cb.shared = listeners != nil
-
-	if cb.shared {
+	cb.shared = listeners
+	if cb.shared != nil {
 		for _, l := range cb.onComplete {
 			cb.register(l.name, l.listener)
 		}
 	}
 
-	return cb
+	return cb.set(func(conf *Config) {
+		if listeners == nil {
+			conf.Listeners = vlatte.NewListener()
+			return
+		}
+
+		conf.Listeners = listeners
+	})
 }
 
 // Matchers sets the registry that builds the matcher lists of the server's mock files, such as one that holds
 // custom matchers: [matchbuild.WithMatcher]. Servers can share a registry. Nil builds the built-in matchers only.
 func (cb *ConfigBuilder) Matchers(r *matchbuild.Registry) *ConfigBuilder {
-	cb.conf.Matchers = r
-	return cb
+	return cb.set(func(conf *Config) { conf.Matchers = r })
 }
 
 // TLSCertificates sets the server TLS certificates.
 func (cb *ConfigBuilder) TLSCertificates(certs []tls.Certificate) *ConfigBuilder {
-	cb.conf.TLSCertificates = certs
-	return cb
+	return cb.set(func(conf *Config) { conf.TLSCertificates = certs })
 }
 
 // TLSClientCAs sets the certificate authorities used to verify client certificates (mutual TLS).
 func (cb *ConfigBuilder) TLSClientCAs(pool *x509.CertPool) *ConfigBuilder {
-	cb.conf.TLSClientCAs = pool
-	return cb
+	return cb.set(func(conf *Config) { conf.TLSClientCAs = pool })
 }
 
 // DebugFn sets the debug function.
 func (cb *ConfigBuilder) DebugFn(dfn DebugFn) *ConfigBuilder {
-	cb.conf.DebugFn = dfn
-	return cb
+	return cb.set(func(conf *Config) { conf.DebugFn = dfn })
 }
 
 // ConfigSources sets where settings are read from after code, lowest precedence first,
 // replacing DefaultConfigSources. With no arguments, only code and defaults apply.
-// A Setup() or Config applied later resets it, since they copy every field.
+// A Config applied later resets it, since it sets every field.
 func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
 	if sources == nil {
 		sources = []ConfigSource{}
 	}
 
-	cb.conf.ConfigSources = sources
-
-	return cb
+	return cb.set(func(conf *Config) { conf.ConfigSources = sources })
 }
 
 // Admin serves the admin API api, such as admin.MustNew(admin.Addr("127.0.0.1:8081")), on an HTTP server of its own.
 // Server.AdminURL returns where it listens.
 func (cb *ConfigBuilder) Admin(api AdminAPI) *ConfigBuilder {
-	cb.conf.Admin = api
-	return cb
+	return cb.set(func(conf *Config) { conf.Admin = api })
 }
 
 // Journal keeps a journal of the requests the server serves, in dir, across restarts: see JournalConfig. Empty keeps
 // it in a temporary directory, which Close removes, as a test wants: a named one keeps the requests of earlier runs.
 func (cb *ConfigBuilder) Journal(dir string) *ConfigBuilder {
-	config.Section(&cb.conf.Journal, defaultJournalConfig()).Dir = dir
-	return cb
+	return cb.set(func(conf *Config) { config.Section(&conf.Journal, defaultJournalConfig()).Dir = dir })
 }
 
 // AdminStore keeps the mocks the admin API adds in the persistent store store makes, such as FileStore(dir): each
@@ -644,87 +625,66 @@ func (cb *ConfigBuilder) Journal(dir string) *ConfigBuilder {
 // Reload, so changes made to it directly take effect too. Without one, those mocks stay in memory, as long as the
 // server runs. It needs an admin API: see Admin.
 func (cb *ConfigBuilder) AdminStore(store AdminStore) *ConfigBuilder {
-	cb.conf.AdminStore = store
-	return cb
+	return cb.set(func(conf *Config) { conf.AdminStore = store })
 }
 
 // TemplateEngine sets the engine that compiles every template of the server's mocks: reply bodies, headers and body
 // file names, multipart parts, and the parameters of events such as webhooks. Without one, the server uses a
 // vlatte.GoTemplateEngine. To give Go templates more functions, set one made with vlatte.WithTemplateFuncs.
 func (cb *ConfigBuilder) TemplateEngine(e vlatte.TemplateEngine) *ConfigBuilder {
-	cb.conf.TemplateEngine = e
-	return cb
+	return cb.set(func(conf *Config) { conf.TemplateEngine = e })
 }
 
 // TemplateEnv allows the templates of the server's default engine to read the environment variables names with env.
 // See Config.TemplateEnv.
 func (cb *ConfigBuilder) TemplateEnv(names ...string) *ConfigBuilder {
-	cb.conf.TemplateEnv = names
-	return cb
+	return cb.set(func(conf *Config) { conf.TemplateEnv = names })
 }
 
 // TemplateDataProviders sets template data providers.
 func (cb *ConfigBuilder) TemplateDataProviders(sdp []TemplateDataProvider) *ConfigBuilder {
-	cb.conf.TemplateDataProviders = sdp
-	return cb
+	return cb.set(func(conf *Config) { conf.TemplateDataProviders = sdp })
 }
 
-// Apply builds a new Config with previously configured values.
+// Apply implements Option: it sets, in order, what the methods of cb set, and leaves the rest of conf as it is.
 func (cb *ConfigBuilder) Apply(conf *Config) error {
 	if cb.err != nil {
 		return cb.err
 	}
 
-	if len(cb.recorderConf) > 0 {
-		recordConfig := defaultRecordConfig()
-		for _, option := range cb.recorderConf {
-			err := option.Apply(recordConfig)
-			if err != nil {
-				return err
-			}
-		}
-
-		cb.conf.Record = recordConfig
-	}
-
-	if len(cb.proxyConf) > 0 {
-		proxyConfig := _defaultProxyConfig
-		for _, option := range cb.proxyConf {
-			err := option.Apply(&proxyConfig)
-			if err != nil {
-				return err
-			}
-		}
-
-		cb.conf.Proxy = &proxyConfig
-	}
-
-	// Without a shared registry, each config gets one of its own: a listener registered later doesn't reach the
-	// servers built before.
-	listeners := cb.conf.Listeners
-	if !cb.shared {
-		listeners = vlatte.NewListener()
-		if err := registerAll(listeners, cb.onComplete); err != nil {
+	for _, set := range cb.sets {
+		if err := set(conf); err != nil {
 			return err
 		}
 	}
 
-	if len(cb.tlsCertificateFs) > 0 || len(cb.tlsKeyFs) > 0 {
-		if err := applyTLS(cb.conf, cb.tlsCertificateFs, cb.tlsKeyFs, cb.tlsClientCertificateFs); err != nil {
-			return fmt.Errorf("config: failed to build TLS config: %w", err)
+	// Without a shared registry, the listeners go in the config's own: a listener registered later doesn't reach the
+	// servers built before.
+	if cb.shared == nil && len(cb.onComplete) > 0 {
+		if conf.Listeners == nil {
+			conf.Listeners = vlatte.NewListener()
 		}
+
+		return registerAll(conf.Listeners, cb.onComplete)
 	}
 
-	err := cb.conf.Apply(conf)
-	conf.Listeners = listeners
+	return nil
+}
 
-	return err
+// set adds fn to the settings Apply sets.
+func (cb *ConfigBuilder) set(fn func(conf *Config)) *ConfigBuilder {
+	cb.sets = append(cb.sets, func(conf *Config) error {
+		fn(conf)
+		return nil
+	})
+
+	return cb
 }
 
 // register adds listener to the shared registry. A name the registry has already joins its error to the one Apply
 // returns.
 func (cb *ConfigBuilder) register(name string, listener vlatte.EventListener[vlatte.OnComplete]) {
-	cb.err = errors.Join(cb.err, registerAll(cb.conf.Listeners, []namedListener{{name: name, listener: listener}}))
+	cb.err = errors.Join(cb.err, registerAll(cb.shared, []namedListener{{name: name, listener: listener}}))
 }
 
 // registerAll adds each listener to registry, and returns the errors of the names it has already.
