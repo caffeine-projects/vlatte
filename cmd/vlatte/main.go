@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"errors"
@@ -202,10 +203,7 @@ func commandSettings(cmd *cobra.Command, args []string, stdout, stderr io.Writer
 func startServer(cmd *cobra.Command, args []string, s settings, out, logOutput, stderr io.Writer) (*mockhttp.Server, *mockgrpc.Server, *admin.Admin, int) {
 	// Mock files name their on_complete listeners: webhook sends their webhooks, logging with the server's logger and
 	// waiting for their answers as long as the webhook.timeout setting says.
-	wh, err := webhook.New(webhook.WithTimeout(s.webhookTimeout))
-	if err != nil {
-		return nil, nil, nil, failure(cmd, err, out, stderr)
-	}
+	wh := cmp.Or(s.webhook, &webhook.WebHook{})
 
 	httpArgs, grpcArgs := splitArgs(args)
 

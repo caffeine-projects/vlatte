@@ -299,6 +299,11 @@ func TestRun_UsageErrors(t *testing.T) {
 			args: []string{"--error-status-code", "99"},
 			want: []string{`error_status_code="99": expected an HTTP status code from 100 to 599`},
 		},
+		{
+			name: "negative webhook timeout",
+			args: []string{"--webhook-timeout=-1s"},
+			want: []string{`webhook.timeout must be 0 or more, not "-1s"`},
+		},
 	}
 
 	for _, tc := range tests {

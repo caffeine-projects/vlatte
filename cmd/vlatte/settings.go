@@ -2,7 +2,6 @@ package main
 
 import (
 	"io"
-	"time"
 
 	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/config"
@@ -24,7 +23,7 @@ type settings struct {
 	grpcAdmin     bool // the gRPC server's admin API, which serves when the gRPC server does
 	grpcAdminAddr string
 
-	webhookTimeout time.Duration // of the webhook listener, which the HTTP and gRPC servers share
+	webhook *webhook.WebHook // the webhook listener the HTTP and gRPC servers share, if webhook.timeout is set
 }
 
 // defaultSettings serve the admin API, over MCP too, which keeps the mocks it adds across restarts, and the gRPC
@@ -83,8 +82,8 @@ func settingsSchema() *config.Schema[settings] {
 			Usage: "How long a webhook without a timeout of its own waits for its answer, for HTTP and gRPC mocks: " +
 				"milliseconds or a Go duration (1.5s). 0 uses " + httpx.DefaultWebhookTimeout.String() + ".",
 			Set: func(s *settings, v config.Value) error {
-				s.webhookTimeout = v.Dur
-				_, err := webhook.New(webhook.WithTimeout(v.Dur))
+				var err error
+				s.webhook, err = webhook.New(webhook.WithTimeout(v.Dur))
 
 				return err
 			},
