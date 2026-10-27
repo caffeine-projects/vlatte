@@ -43,9 +43,10 @@ type mockDescription struct {
 
 // Describe implements descriptor.SelfDescriptive: the mock as a mock file writes it, which the admin API returns and
 // saves. A mock read from a document is described by it, with its ID. A mock built in Go is described as far as mock
-// files can hold it: a Func reply, a CallMatches matcher, a callback, a custom matcher or a DelayFunc delay can't be,
-// and is left out. A mock with a matcher or a delay left out is described without its reply too, so its description
-// doesn't load back as a mock that matches more calls, or replies sooner.
+// files can hold it. A Func reply can't be: encoding the description of its mock fails. A CallMatches matcher, a
+// callback, a custom matcher or a DelayFunc delay can't be either, and is left out. A mock with a matcher or a delay
+// left out is described without its reply too, so its description doesn't load back as a mock that matches more calls,
+// or replies sooner.
 func (m *Mock) Describe() descriptor.Descriptor {
 	if m.doc != nil {
 		doc := maps.Clone(m.doc)
@@ -103,6 +104,12 @@ func (m *Mock) Describe() descriptor.Descriptor {
 
 	req, complete := d.describeRequest(m.method)
 	doc["request"] = req
+
+	// A function, unlike a part left out, is never in a mock file: the description fails rather than show the mock.
+	if _, ok := m.reply.(ReplierFunc); ok {
+		doc["response"] = descriptor.Fail("response", errFuncNotDescribed)
+		return descriptor.Root(doc)
+	}
 
 	if !complete || d.delayFunc {
 		return descriptor.Root(doc)

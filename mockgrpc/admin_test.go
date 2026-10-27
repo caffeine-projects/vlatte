@@ -212,6 +212,17 @@ func TestAdmin_DescribesAMockBuiltInGo(t *testing.T) {
 	}`, body)
 }
 
+func TestAdmin_AFuncMockCantBeDescribed(t *testing.T) {
+	// A mock file can't hold a Func reply: reading the mock fails, and says why, as it does on a mockhttp server.
+	m, _ := adminServer(t)
+	m.MustMock(Method("Greetings").ID("func").Reply(Func(func(context.Context, *Call) error { return nil })))
+
+	status, body := call(t, http.MethodGet, m.AdminURL()+"/mocks/func", "")
+	require.Equal(t, http.StatusInternalServerError, status, body)
+	require.Contains(t, body, `"code": "describe_failed"`)
+	require.Contains(t, body, "a Func reply can't be described as a mock file")
+}
+
 func TestAdmin_MovesScenarios(t *testing.T) {
 	m, client := adminServer(t)
 	m.MustMock(

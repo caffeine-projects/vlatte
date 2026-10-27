@@ -213,8 +213,6 @@ func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 		Method("Chat").ID("otherwise").Reply(Bidi().Otherwise(Message(&pb.HiRes{}).MessageDelayFunc(vlatte.Latency(time.Millisecond)))),
 		Method("Chat").ID("rule-response").
 			Reply(Bidi().On(match.Contain("x"), Message(&pb.HiRes{}).MessageDelayFunc(vlatte.Latency(time.Millisecond)))),
-		Method("Greetings").ID("call").CallMatches(func(*Call) (bool, error) { return true, nil }).Body(custom).
-			Reply(Func(func(context.Context, *Call) error { return nil })),
 		Method("Greetings").ID("utf8").Message(&pb.HiReq{Message: "\xff"}).Reply(Messages(&pb.HiRes{Message: "\xff"})),
 		Method("Greetings").ID("detail").Reply(Status(codes.NotFound, "x").Details(&anypb.Any{TypeUrl: "type.googleapis.com/nope.X"})),
 		Method("Greetings").ID("dial").Reply(From("localhost:1").DialOptions(grpc.WithUserAgent("x"))),
@@ -225,7 +223,6 @@ func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 		"rule":          `{"id": "rule", "request": {"method": "Chat"}}`,
 		"otherwise":     `{"id": "otherwise", "request": {"method": "Chat"}}`,
 		"rule-response": `{"id": "rule-response", "request": {"method": "Chat"}}`,
-		"call":          `{"id": "call", "request": {"method": "Greetings"}}`,
 		"utf8":          `{"id": "utf8", "request": {"method": "Greetings"}}`,
 		"detail":        `{"id": "detail", "request": {"method": "Greetings"}}`,
 		"dial":          `{"id": "dial", "request": {"method": "Greetings"}}`,
@@ -237,6 +234,26 @@ func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 		doc, err := mock.Describe().MarshalJSON()
 		require.NoError(t, err)
 		require.JSONEq(t, want[mock.ID()], string(doc))
+	}
+}
+
+func TestDescribe_AFuncReplyFailsSayingSo(t *testing.T) {
+	// A Func reply described as nothing, so the admin API showed a mock without its reply, as it does a part a mock
+	// file can't hold, while mockhttp fails to describe its Func (#42). A mock file can never hold a function: describing
+	// the mock fails, and says why, whatever else of the mock is left out.
+	fn := Func(func(context.Context, *Call) error { return nil })
+	m := serve(t)
+	scope := m.MustMock(
+		Method("Greetings").ID("func").Reply(fn),
+		Method("Greetings").ID("call").CallMatches(func(*Call) (bool, error) { return true, nil }).Reply(fn),
+		Method("Greetings").ID("delay").DelayFunc(vlatte.Latency(time.Millisecond)).Reply(fn),
+	)
+
+	require.Len(t, scope.Mocks(), 3)
+
+	for _, mock := range scope.Mocks() {
+		_, err := mock.Describe().MarshalJSON()
+		require.ErrorIs(t, err, errFuncNotDescribed, mock.ID())
 	}
 }
 
