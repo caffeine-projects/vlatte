@@ -33,7 +33,7 @@ import (
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid/recovery"
 )
 
-var _ vlatte.Flavor[*Mock, *Server] = (*Server)(nil)
+var _ vlatte.Server[*Mock, *Server] = (*Server)(nil)
 
 var errAdminStoreWithoutAdmin = errors.New("server: AdminStore needs an admin API: pass ConfigBuilder.Admin")
 
@@ -386,7 +386,7 @@ func prepareGlobalEvents(conf *Config) (*vlatte.Events, error) {
 // It stops at the first recipe that fails and returns its error.
 func (app *Server) Prep(ctx context.Context, recipes ...Recipe) error {
 	for i, recipe := range recipes {
-		if err := recipe.Prep(ctx, &vlatte.RecipeInput[*Mock, *Server]{Flavor: app}); err != nil {
+		if err := recipe.Prep(ctx, &vlatte.RecipeInput[*Mock, *Server]{Server: app}); err != nil {
 			return fmt.Errorf("server: error applying recipe at index %d with type %T\n%w", i, recipe, err)
 		}
 	}
@@ -504,12 +504,12 @@ func (app *Server) MustReload() {
 	}
 }
 
-// Close closes the mock server. It closes the admin API first, which waits for the operations it serves. It cancels
-// the on_complete events still running, such as a webhook waiting for its delay or its target, so the requests
-// waiting for them end, and waits for those requests. It stops the recording, and waits until it wrote what it took,
-// and closes the forward proxy's open tunnels. It closes the idle connections of the transports it made, such as the
-// one of webhooks. Last, it closes the journal, and removes a temporary one: verify the requests before Close, as
-// t.Cleanup(m.Close) leaves a test to. A closed server doesn't start again.
+// Close closes the mock server. It closes the admin API first, which waits for the operations it serves. It cancels the
+// on_complete events still running, such as a webhook waiting for its delay or its target, so the requests waiting for
+// them end, and waits for those requests and for the events that run after the response. It stops the recording, and
+// waits until it wrote what it took, and closes the forward proxy's open tunnels. It closes the idle connections of the
+// transports it made, such as the one of webhooks. Last, it closes the journal, and removes a temporary one: verify the
+// requests before Close, as t.Cleanup(m.Close) leaves a test to. A closed server doesn't start again.
 func (app *Server) Close() {
 	app.closed.Store(true)
 

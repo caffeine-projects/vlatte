@@ -1,11 +1,14 @@
 package mpart
 
 import (
+	json "encoding/json/v2"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/value"
@@ -48,6 +51,10 @@ func TestDecode_Rules(t *testing.T) {
 		{"name as a number", `{"type": "form-data", "parts": [{"name": 1}]}`, []want{{config.CodeInvalidValue, "m.parts[0].name", "must be a string, not a number", ""}}},
 		{"null body", `{"type": "mixed", "parts": [{"body": null}]}`, []want{{config.CodeInvalidValue, "m.parts[0].body", "m.parts[0].body is null", `write "" for an empty body`}}},
 		{"body and body_file", `{"type": "mixed", "parts": [{"body": "x", "body_file": "x.bin"}]}`, []want{{config.CodeConflict, "m.parts[0].body_file", "m.parts[0].body_file is set with m.parts[0].body", "keep one of them"}}},
+		{"body_base64 that isn't base64", `{"type": "mixed", "parts": [{"body_base64": "//4"}]}`, []want{{config.CodeInvalidValue, "m.parts[0].body_base64", "m.parts[0].body_base64 isn't standard base64", "padding included"}}},
+		{"body_base64 as a number", `{"type": "mixed", "parts": [{"body_base64": 5}]}`, []want{{config.CodeInvalidValue, "m.parts[0].body_base64", "m.parts[0].body_base64 must be a string, not a number", ""}}},
+		{"body and body_base64", `{"type": "mixed", "parts": [{"body": "x", "body_base64": "eA=="}]}`, []want{{config.CodeConflict, "m.parts[0].body_base64", "m.parts[0].body_base64 is set with m.parts[0].body", "keep one of them"}}},
+		{"body_base64 and body_file", `{"type": "mixed", "parts": [{"body_base64": "eA==", "body_file": "x.bin"}]}`, []want{{config.CodeConflict, "m.parts[0].body_file", "m.parts[0].body_file is set with m.parts[0].body_base64", "keep one of them"}}},
 		{"empty body_file", `{"type": "mixed", "parts": [{"body_file": ""}]}`, []want{{config.CodeInvalidValue, "m.parts[0].body_file", "expected a file name", ""}}},
 		{"body and body_file, and a typo", `{"type": "mixed", "parts": [{"body": "x", "body_file": "x.bin", "nmae": "a"}]}`, []want{
 			{config.CodeConflict, "m.parts[0].body_file", "m.parts[0].body_file is set with m.parts[0].body", "keep one of them"},
@@ -105,7 +112,8 @@ func TestDecode_AValidObject(t *testing.T) {
 		"parts": [
 			{"header": {"Content-Id": "<root>", "X-A": ["1", "2", "3"]}, "body": {"id": 1}},
 			{"name": "report", "filename": "r.pdf", "content_type": "application/pdf", "body_file": "r.pdf", "delay": "500ms"},
-			{"body": "text"}
+			{"body": "text"},
+			{"body_base64": "//4A"}
 		]}`))
 	require.NoError(t, err)
 
@@ -120,9 +128,185 @@ func TestDecode_AValidObject(t *testing.T) {
 			{Header: []Header{{Name: "Content-Id", Value: "<root>"}, {Name: "X-A", Value: "1"}, {Name: "X-A", Value: "2"}, {Name: "X-A", Value: "3"}}, Body: []byte(`{"id":1}`), Kind: BodyJSON},
 			{Name: "report", Filename: "r.pdf", ContentType: "application/pdf", File: "r.pdf", Delay: 500_000_000},
 			{Body: []byte("text"), Kind: BodyText},
+			{Body: []byte{0xff, 0xfe, 0x00}, Kind: BodyBytes},
 		},
 	}, s)
 
 	// Doc writes back what Decode read, so admin GET output loads again.
 	require.Equal(t, doc, s.Doc())
+}
+
+func TestDecode_ReadsATemplatedSpecsByteBodyAsBytes(t *testing.T) {
+	// A templated spec renders its text bodies, and writes its byte bodies as they are. A byte body that is UTF-8,
+	// written as text, would read back as a template and render: it is written in body_base64.
+	s := &Spec{Subtype: "mixed", Boundary: "b", Templated: true, Parts: []*PartSpec{
+		{Body: []byte("{{ .X }} as is"), Kind: BodyBytes},
+		{Body: []byte("{{ .X }}"), Kind: BodyText},
+	}}
+
+	data, err := json.Marshal(s.Doc(), json.Deterministic(true))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"type": "mixed", "boundary": "b", "parts": [{"body_base64": "e3sgLlggfX0gYXMgaXM="}, {"body": "{{ .X }}"}]}`, string(data))
+
+	doc, err := value.DecodeJSON(data)
+	require.NoError(t, err)
+
+	got, err := Decode(config.Value{Key: "multipart", Origin: "doc", Any: doc})
+	require.NoError(t, err)
+
+	got.Templated = true // as the reply's template.enabled, or multipart_template, sets it
+
+	e, err := Compile(got, _engine)
+	require.NoError(t, err)
+
+	body, _, err := e.Encode(map[string]any{"X": "x"})
+	require.NoError(t, err)
+	require.Equal(t, "--b\r\n\r\n{{ .X }} as is\r\n--b\r\n\r\nx\r\n--b--\r\n", string(body))
+}
+
+func TestPropDecode_ReadsWhatDocWrites(t *testing.T) {
+	// MP5: Decode reads a spec's Doc back as the same spec: the same Doc, and the same bytes on the wire. A byte
+	// body comes back as text, which writes the same bytes, or as body_base64 when it isn't UTF-8, which JSON and
+	// YAML can't hold as text.
+	dir := t.TempDir()
+
+	rapid.Check(t, func(t *rapid.T) {
+		s := genSpec(dir).Draw(t, "spec")
+		s.Boundary = genBoundary().Draw(t, "boundary")
+
+		// A mock file is JSON or YAML, so the document goes through JSON as a file does.
+		data, err := json.Marshal(s.Doc(), json.Deterministic(true))
+		require.NoError(t, err)
+
+		read, err := value.DecodeJSON(data)
+		require.NoError(t, err)
+
+		got, err := Decode(config.Value{Key: "multipart", Origin: "doc", Any: read})
+		if slices.ContainsFunc(s.Parts, func(p *PartSpec) bool { return p.File == "" && lineStarts(p.Body, s.Boundary) }) {
+			require.ErrorContains(t, err, "has a line that starts with the boundary", "MP2")
+			return
+		}
+
+		require.NoError(t, err)
+
+		got.Dir = s.Dir
+		require.Equal(t, s.Doc(), got.Doc())
+
+		want, err := Compile(s, _engine)
+		require.NoError(t, err)
+
+		decoded, err := Compile(got, _engine)
+		require.NoError(t, err)
+
+		wantBody, wantPauses, wantErr := want.Encode(nil)
+		gotBody, gotPauses, gotErr := decoded.Encode(nil)
+
+		require.Equal(t, wantErr, gotErr)
+		require.Equal(t, string(wantBody), string(gotBody))
+		require.Equal(t, wantPauses, gotPauses)
+		require.Equal(t, want.ContentType(), decoded.ContentType())
+	})
+}
+
+// specFault is an invalid setting injected into a valid multipart document, and the problem it must cause.
+type specFault struct {
+	area   string // what it touches, so faults drawn together never touch the same thing
+	code   string
+	key    string
+	inject func(doc map[string]any)
+}
+
+// _specFaults touch distinct settings of a valid multipart document. Each document has one part at least.
+var _specFaults = []specFault{
+	{"type", config.CodeMissingValue, "m.type", func(doc map[string]any) { delete(doc, "type") }},
+	{"type", config.CodeInvalidValue, "m.type", func(doc map[string]any) { doc["type"] = "multipart/mixed" }},
+	{"boundary", config.CodeInvalidValue, "m.boundary", func(doc map[string]any) { doc["boundary"] = "ends in a space " }},
+	{"params", config.CodeNotAllowed, "m.params.boundary", func(doc map[string]any) { doc["params"] = map[string]any{"boundary": "x"} }},
+	{"parts", config.CodeInvalidValue, "m.parts", func(doc map[string]any) { doc["parts"] = []any{} }},
+	{"parts", config.CodeConflict, "m.parts[0].header.Content-Type", func(doc map[string]any) {
+		p := doc["parts"].([]any)[0].(map[string]any)
+		p["content_type"] = "a/b"
+		p["header"] = map[string]any{"Content-Type": "c/d"}
+	}},
+	{"parts", config.CodeInvalidValue, "m.parts[0].header.X-N", func(doc map[string]any) {
+		doc["parts"].([]any)[0].(map[string]any)["header"] = map[string]any{"X-N": "a\nb"}
+	}},
+	{"parts", config.CodeInvalidValue, "m.parts[0].delay", func(doc map[string]any) { doc["parts"].([]any)[0].(map[string]any)["delay"] = int64(-5) }},
+	{"parts", config.CodeConflict, "m.parts[0].body_file", func(doc map[string]any) {
+		p := doc["parts"].([]any)[0].(map[string]any)
+		p["body"] = "x"
+		p["body_file"] = "x.bin"
+	}},
+	{"parts", config.CodeUnknownKey, "m.parts[0].nmae", func(doc map[string]any) { doc["parts"].([]any)[0].(map[string]any)["nmae"] = "x" }},
+}
+
+func TestPropDecode_EveryFaultOnce(t *testing.T) {
+	// MP5: each fault of a multipart document is reported once, with its code and key, and nothing else is: the
+	// checks of the model don't repeat what decoding already found.
+	dir := t.TempDir()
+
+	rapid.Check(t, func(t *rapid.T) {
+		s := genSpec(dir).Draw(t, "spec")
+		for _, p := range s.Parts {
+			p.Body = []byte("text")
+		}
+
+		doc := s.Doc()
+
+		faults := rapid.SliceOfNDistinct(rapid.SampledFrom(_specFaults), 1, len(_specFaults),
+			func(f specFault) string { return f.area }).Draw(t, "faults")
+
+		want := make([]string, 0, len(faults))
+		for _, f := range faults {
+			f.inject(doc)
+			want = append(want, f.code+" "+f.key)
+		}
+
+		_, err := Decode(config.Value{Key: "m", Origin: "doc", Any: doc})
+
+		cfgErr, ok := errors.AsType[*config.Error](err)
+		require.True(t, ok, "want a *config.Error, got %v", err)
+
+		got := make([]string, 0, len(cfgErr.Problems))
+		for _, p := range cfgErr.Problems {
+			require.Equal(t, "doc", p.Origin)
+			got = append(got, p.Code+" "+p.Key)
+		}
+
+		require.ElementsMatch(t, want, got)
+	})
+}
+
+func FuzzMultipartDecode(f *testing.F) {
+	// MP6: no document panics Decode, and every problem is keyed under the object's key.
+	for _, seed := range []string{
+		`{"type": "mixed", "parts": [{"body": "x"}]}`,
+		`{"type": "form-data", "boundary": "b", "params": {"start": "<a>"}, "parts": [{"name": "a", "filename": "a.png", "body_file": "a.png", "delay": "1s"}]}`,
+		`{"type": "related", "parts": [{"header": {"content-id": ["<a>", "<b>"]}, "body": {"id": 1}}]}`,
+		`{"type": 1, "parts": {}}`,
+		`{"parts": [null, 1, "x", {"body": null}]}`,
+		`[]`,
+	} {
+		f.Add([]byte(seed))
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		doc, err := value.DecodeJSON(data)
+		if err != nil {
+			return
+		}
+
+		_, err = Decode(config.Value{Key: "m", Origin: "fuzz", Any: doc})
+		if err == nil {
+			return
+		}
+
+		cfgErr, ok := errors.AsType[*config.Error](err)
+		require.True(t, ok, "want a *config.Error, got %v", err)
+
+		for _, p := range cfgErr.Problems {
+			require.True(t, p.Key == "m" || strings.HasPrefix(p.Key, "m.") || strings.HasPrefix(p.Key, "m["), "key %q", p.Key)
+			require.NotEmpty(t, p.Code)
+		}
+	})
 }

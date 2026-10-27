@@ -85,6 +85,7 @@ func TestDescribe_WritesEveryPartAMockFileHolds(t *testing.T) {
 		ScenarioStateWillBe("b").
 		ScenarioKey("{{ .Request.Method }}").
 		OnCompleteEvent(vlatte.EventConfig{Name: "record", Parameters: map[string]any{"k": "v"}}).
+		OnCompleteEvent(vlatte.EventConfig{Name: "record", AfterResponse: true}).
 		Callback(noop).
 		Field("message", match.Equal("hi")).
 		Body(match.Contain("hi")).
@@ -103,7 +104,7 @@ func TestDescribe_WritesEveryPartAMockFileHolds(t *testing.T) {
 		"delay": "1s",
 		"repeat": 3,
 		"scenario": {"name": "s", "required_state": "a", "new_state": "b", "key": "{{ .Request.Method }}"},
-		"on_complete": [{"name": "record", "parameters": {"k": "v"}}],
+		"on_complete": [{"name": "record", "parameters": {"k": "v"}}, {"name": "record", "after_response": true}],
 		"request": {
 			"method": "List",
 			"fields": {"message": ["eq", "hi"]},
@@ -258,17 +259,14 @@ func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 		Method("Chat").ID("otherwise").Reply(Bidi().Otherwise(Message(&pb.HiRes{}).MessageDelayFunc(vlatte.Latency(time.Millisecond)))),
 		Method("Chat").ID("rule-response").
 			Reply(Bidi().On(match.Contain("x"), Message(&pb.HiRes{}).MessageDelayFunc(vlatte.Latency(time.Millisecond)))),
-		Method("Greetings").ID("call").CallMatches(func(*Call) (bool, error) { return true, nil }).Body(custom).
-			Reply(Func(func(context.Context, *Call) error { return nil })),
 		Method("Greetings").ID("utf8").Message(&pb.HiReq{Message: "\xff"}).Reply(Messages(&pb.HiRes{Message: "\xff"})),
 		Method("Greetings").ID("detail").Reply(Status(codes.NotFound, "x").Details(&anypb.Any{TypeUrl: "type.googleapis.com/nope.X"})),
 		Method("Greetings").ID("dial").Reply(From("localhost:1").DialOptions(grpc.WithUserAgent("x"))),
-		Method("Greetings").ID("echo").Reply(Echo()),
 		Method("Greetings").ID("shared").Reply(Shared(&countingReplier{})),
-		Method("Greetings").ID("seq-func").Reply(Seq(Message(&pb.HiRes{}), Func(func(context.Context, *Call) error { return nil }))),
-		Method("Greetings").ID("seq-after").Reply(Seq(Message(&pb.HiRes{})).OnSequenceEnded(Echo())),
+		Method("Greetings").ID("seq-shared").Reply(Seq(Message(&pb.HiRes{}), Shared(&countingReplier{}))),
+		Method("Greetings").ID("seq-after").Reply(Seq(Message(&pb.HiRes{})).OnSequenceEnded(Shared(&countingReplier{}))),
+		Method("Greetings").ID("rand-shared").Reply(Rand(Shared(&countingReplier{}))),
 		Method("List").ID("seq-delay").Reply(Seq(Messages(&pb.ListItem{}).MessageDelayFunc(vlatte.Latency(time.Millisecond)))),
-		Method("Greetings").ID("rand-echo").Reply(Rand(Echo())),
 	)
 
 	want := map[string]string{
@@ -276,16 +274,14 @@ func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 		"rule":          `{"id": "rule", "request": {"method": "Chat"}}`,
 		"otherwise":     `{"id": "otherwise", "request": {"method": "Chat"}}`,
 		"rule-response": `{"id": "rule-response", "request": {"method": "Chat"}}`,
-		"call":          `{"id": "call", "request": {"method": "Greetings"}}`,
 		"utf8":          `{"id": "utf8", "request": {"method": "Greetings"}}`,
 		"detail":        `{"id": "detail", "request": {"method": "Greetings"}}`,
 		"dial":          `{"id": "dial", "request": {"method": "Greetings"}}`,
-		"echo":          `{"id": "echo", "request": {"method": "Greetings"}}`,
 		"shared":        `{"id": "shared", "request": {"method": "Greetings"}}`,
-		"seq-func":      `{"id": "seq-func", "request": {"method": "Greetings"}}`,
+		"seq-shared":    `{"id": "seq-shared", "request": {"method": "Greetings"}}`,
 		"seq-after":     `{"id": "seq-after", "request": {"method": "Greetings"}}`,
+		"rand-shared":   `{"id": "rand-shared", "request": {"method": "Greetings"}}`,
 		"seq-delay":     `{"id": "seq-delay", "request": {"method": "List"}}`,
-		"rand-echo":     `{"id": "rand-echo", "request": {"method": "Greetings"}}`,
 	}
 
 	require.Len(t, scope.Mocks(), len(want))
@@ -294,6 +290,42 @@ func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
 		doc, err := mock.Describe().MarshalJSON()
 		require.NoError(t, err)
 		require.JSONEq(t, want[mock.ID()], string(doc))
+	}
+}
+
+func TestDescribe_AFuncOrEchoReplyFailsSayingSo(t *testing.T) {
+	// A Func or Echo reply described as nothing, so the admin API showed a mock without its reply, as it does a part a
+	// mock file can't hold, while mockhttp fails to describe its Func and Echo (#42). A mock file can never hold either:
+	// describing the mock fails, and says why, wherever the reply is and whatever else of the mock is left out.
+	fn := Func(func(context.Context, *Call) error { return nil })
+	m := serve(t)
+	scope := m.MustMock(
+		Method("Greetings").ID("func").Reply(fn),
+		Method("Greetings").ID("call").CallMatches(func(*Call) (bool, error) { return true, nil }).Reply(fn),
+		Method("Greetings").ID("delay").DelayFunc(vlatte.Latency(time.Millisecond)).Reply(fn),
+		Method("Greetings").ID("seq-func").Reply(Seq(Message(&pb.HiRes{}), fn)),
+		Method("Greetings").ID("rand-func").Reply(Rand(Message(&pb.HiRes{}), fn)),
+		Method("Greetings").ID("echo").Reply(Echo()),
+		Method("Greetings").ID("seq-after-echo").Reply(Seq(Message(&pb.HiRes{})).OnSequenceEnded(Echo())),
+		Method("Greetings").ID("rand-echo").Reply(Rand(Echo())),
+	)
+
+	want := map[string]error{
+		"func":           errFuncNotDescribed,
+		"call":           errFuncNotDescribed,
+		"delay":          errFuncNotDescribed,
+		"seq-func":       errFuncNotDescribed,
+		"rand-func":      errFuncNotDescribed,
+		"echo":           errEchoNotDescribed,
+		"seq-after-echo": errEchoNotDescribed,
+		"rand-echo":      errEchoNotDescribed,
+	}
+
+	require.Len(t, scope.Mocks(), len(want))
+
+	for _, mock := range scope.Mocks() {
+		_, err := mock.Describe().MarshalJSON()
+		require.ErrorIs(t, err, want[mock.ID()], mock.ID())
 	}
 }
 

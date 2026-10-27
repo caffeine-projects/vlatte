@@ -580,7 +580,11 @@
           "description": "Name of a listener registered with Setup().OnCompleteListener. The vlatte command registers webhook.",
           "type": "string"
         },
-        "parameters": {}
+        "parameters": {},
+        "after_response": {
+          "description": "Send the response without waiting for the event, which runs on.",
+          "$ref": "#/$defs/bool"
+        }
       },
       "additionalProperties": false,
       "required": [

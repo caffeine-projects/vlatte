@@ -1,16 +1,21 @@
 package mockhttp
 
 import (
+	"context"
 	json "encoding/json/v2"
 	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/match"
@@ -231,4 +236,177 @@ func TestFormFile_DescribesUnknownMatchersAsAnything(t *testing.T) {
 		Build(MustNew(Setup().Silent()))
 	require.NoError(t, err)
 	require.Contains(t, describe(t, mock), `"form_file":{"f":{"filename":["anything"]}}`)
+}
+
+// filePatternModel is a FilePattern as plain values, with the oracle that says which files it matches.
+type filePatternModel struct {
+	filename    *string
+	contentType *string
+	header      *string // X-A
+	body        *string
+	every       bool
+}
+
+// matches is the oracle: whether one file has every condition, written without the code under test.
+func (p filePatternModel) matches(file formFile) bool {
+	mediaType, _, _ := strings.Cut(file.contentType, ";")
+
+	return (p.filename == nil || *p.filename == file.filename) &&
+		(p.contentType == nil || *p.contentType == strings.ToLower(strings.TrimSpace(mediaType))) &&
+		(p.header == nil || *p.header == file.header["X-A"]) &&
+		(p.body == nil || *p.body == string(file.body))
+}
+
+// spec is the pattern in a mock file. A literal is compared as is, as StrictEqual does with text.
+func (p filePatternModel) spec() map[string]any {
+	spec := make(map[string]any)
+	if p.filename != nil {
+		spec["filename"] = *p.filename
+	}
+
+	if p.contentType != nil {
+		spec["content_type"] = *p.contentType
+	}
+
+	if p.header != nil {
+		spec["header"] = map[string]any{"x-a": *p.header}
+	}
+
+	if p.body != nil {
+		spec["body"] = *p.body
+	}
+
+	if p.every {
+		spec["every"] = true
+	}
+
+	return spec
+}
+
+func (p filePatternModel) pattern() *FilePattern {
+	return p.patternWith(func(v any) vlatte.Matcher { return match.StrictEqual(v) })
+}
+
+// patternWith builds the pattern with a matcher of the literals, such as match.Equal, which mock files use.
+func (p filePatternModel) patternWith(literal func(v any) vlatte.Matcher) *FilePattern {
+	f := FileWith()
+	if p.filename != nil {
+		f.Filename(literal(*p.filename))
+	}
+
+	if p.contentType != nil {
+		f.ContentType(literal(*p.contentType))
+	}
+
+	if p.header != nil {
+		f.Header("x-a", literal(*p.header))
+	}
+
+	if p.body != nil {
+		f.Body(literal(*p.body))
+	}
+
+	if p.every {
+		f.Every()
+	}
+
+	return f
+}
+
+func TestPropFormFile_SomeOrEveryFileMatches(t *testing.T) {
+	// M19: FormFile matches iff some file of the field has every condition of the pattern, or, with Every, the field
+	// has a file and all of its files do. Files of other fields never count. A pattern means the same in Go and in a
+	// mock file.
+	t.Parallel()
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	rapid.Check(t, func(t *rapid.T) {
+		model := genFilePatternModel().Draw(t, "pattern")
+		fromFile := rapid.Bool().Draw(t, "from a mock file")
+
+		// A mock file is text: JSON and YAML can't hold the invalid UTF-8 of this body, which Go patterns cover.
+		if fromFile && model.body != nil && !utf8.ValidString(*model.body) {
+			model.body = new("hello")
+		}
+		files := rapid.SliceOfN(genPatternFile(), 0, 3).Draw(t, "files")
+		others := rapid.SliceOfN(genPatternFile(), 0, 2).Draw(t, "files of another field")
+
+		some, every := false, len(files) > 0
+		for _, f := range files {
+			some = some || model.matches(f)
+			every = every && model.matches(f)
+		}
+
+		want := some
+		if model.every {
+			want = every
+		}
+
+		for i := range others {
+			others[i].field = "g"
+		}
+
+		var builder vlatte.Builder[*Mock, *Server] = Postf("/files").FormFile("f", model.pattern()).Reply(OK())
+		if fromFile {
+			doc := map[string]any{
+				"request":  map[string]any{"method": "POST", "path": "/files", "form_file": map[string]any{"f": model.spec()}},
+				"response": map[string]any{"status": int64(200)},
+			}
+			format := rapid.SampledFrom(MockFileFormats()).Draw(t, "format")
+			builder = docBuilder{mockDoc{origin: "model", format: format, data: encodeMock(t, doc, format)}}
+		}
+
+		scope, err := m.Mock(builder)
+		require.NoError(t, err)
+
+		defer scope.Clear(context.Background())
+
+		contentType, body := formModel{files: slices.Concat(others, files)}.encode(t)
+
+		res, _ := post(t, m.URL("/files"), contentType, body)
+		require.Equal(t, want, res.StatusCode == http.StatusOK, "status %d", res.StatusCode)
+	})
+}
+
+// Generators
+
+func genFilePatternModel() *rapid.Generator[filePatternModel] {
+	return rapid.Custom(func(t *rapid.T) filePatternModel {
+		maybe := func(label string, values []string) *string {
+			if !rapid.Bool().Draw(t, label+" set") {
+				return nil
+			}
+
+			return new(rapid.SampledFrom(values).Draw(t, label))
+		}
+
+		return filePatternModel{
+			filename:    maybe("filename", []string{"a.png", "b.txt", "c"}),
+			contentType: maybe("content type", []string{"", "image/png", "text/plain"}),
+			header:      maybe("header", []string{"", "1", "2"}),
+			body:        maybe("body", []string{"", "hello", "\x00\xff", `{"id":1}`}),
+			every:       rapid.Bool().Draw(t, "every"),
+		}
+	})
+}
+
+// genPatternFile draws a file of field f, from the same values the patterns compare with.
+func genPatternFile() *rapid.Generator[formFile] {
+	return rapid.Custom(func(t *rapid.T) formFile {
+		file := formFile{
+			field:       "f",
+			filename:    rapid.SampledFrom([]string{"a.png", "b.txt", "c"}).Draw(t, "filename"),
+			contentType: rapid.SampledFrom([]string{"", "image/png", "IMAGE/PNG; x=1", "text/plain"}).Draw(t, "content type"),
+			body:        []byte(rapid.SampledFrom([]string{"", "hello", "\x00\xff", `{"id":1}`}).Draw(t, "body")),
+		}
+
+		if v := rapid.SampledFrom([]string{"", "1", "2"}).Draw(t, "header"); v != "" {
+			file.header = map[string]string{"X-A": v}
+		}
+
+		return file
+	})
 }
