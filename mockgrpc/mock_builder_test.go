@@ -258,6 +258,25 @@ func TestBuilder_JSONMessageAndCallMatchesMatchTheWholeRequest(t *testing.T) {
 	require.ErrorContains(t, err, "json: not JSON")
 }
 
+func TestBuilder_MatchesGivesTheMatcherTheCall(t *testing.T) {
+	m := serve(t)
+	c := client(t, m)
+	m.MustMock(Method("Greetings").Matches(match.Function(func(v any) (bool, error) {
+		call, ok := v.(*Call)
+		return ok && call.Message().(*pb.HiReq).GetMessage() == "ann", nil
+	})).Reply(Message(&pb.HiRes{Message: "hi ann"})))
+
+	got, code := greetWith(t, c, "ann")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "hi ann", got)
+
+	_, code = greetWith(t, c, "bob")
+	require.Equal(t, codes.NotFound, code)
+
+	_, err := m.Mock(Method("Chat").Matches(match.Not(match.Nil())).Reply(Bidi()))
+	require.ErrorContains(t, err, "a bidi streaming mock matches the method and the header only", "it reads the request")
+}
+
 func TestBuilder_ABidiMockMatchesNoRequest(t *testing.T) {
 	// A bidi call matches as it starts, before its client sent anything: a matcher of its request would never match.
 	m := serve(t)
