@@ -1074,6 +1074,7 @@ var _scalarKeys = []struct {
 	{"response.multipart.parts[0].name", "a", inPart("name")},
 	{"response.multipart.parts[0].filename", "a.png", inPart("filename")},
 	{"response.multipart.parts[0].content_type", "image/png", inPart("content_type")},
+	{"response.multipart.parts[0].body_base64", "//4A\n//4A\n", inPart("body_base64")},
 	{"response.multipart.parts[0].body_file", "a.png", inPart("body_file")},
 	{"response.multipart.parts[0].delay", "1s", inPart("delay")},
 }
@@ -1746,6 +1747,12 @@ var _mockFaults = []mockFault{
 	}},
 	{"multipart", config.CodeInvalidValue, "response.multipart.parts[0].delay", func(doc map[string]any) {
 		withMultipart(doc)["parts"] = []any{map[string]any{"delay": int64(-5)}}
+	}},
+	{"multipart", config.CodeConflict, "response.multipart.parts[0].body_base64", func(doc map[string]any) {
+		withMultipart(doc)["parts"] = []any{map[string]any{"body": "x", "body_base64": "eA=="}}
+	}},
+	{"multipart", config.CodeConflict, "response.multipart.parts[0].body_file", func(doc map[string]any) {
+		withMultipart(doc)["parts"] = []any{map[string]any{"body_base64": "eA==", "body_file": "x.bin"}}
 	}},
 	{"multipart", config.CodeConflict, "response.multipart", func(doc map[string]any) {
 		withMultipart(doc)

@@ -1258,6 +1258,10 @@ func TestArgs_ADescriptionDecodesBack(t *testing.T) {
 			args: &Args{URL: "http://hooks.test", Body: "paid"},
 		},
 		{
+			name: "a body that isn't UTF-8",
+			args: &Args{URL: "http://hooks.test", Body: "\xff\xfe\x00"},
+		},
+		{
 			name: "a multipart body",
 			args: &Args{URL: "http://hooks.test", Multipart: mockhttp.MultipartMixed(mockhttp.NewPart().BodyText("a")).Boundary("b")},
 		},
@@ -1332,6 +1336,15 @@ func TestWebHook_ADescribedMockSendsTheSameWebhook(t *testing.T) {
 		{
 			name: "built in Go",
 			mock: orders(Options().URL(target.URL+"/go").Method("post").Header("X-A", "go").Body("paid").Delay(time.Millisecond).Build("webhook")),
+		},
+		{
+			name: "built in Go, with a body that isn't UTF-8",
+			mock: orders(Options().URL(target.URL + "/bytes").Method("post").Body("\xff\xfe\x00").Build("webhook")),
+		},
+		{
+			name: "built in Go, with a part that isn't UTF-8",
+			mock: orders(Options().URL(target.URL + "/part-bytes").Method("post").
+				Multipart(mockhttp.MultipartMixed(mockhttp.NewPart().Body([]byte{0xff, 0xfe, 0x00})).Boundary("b")).Build("webhook")),
 		},
 		{
 			name: "from a map, with templates",
@@ -1476,6 +1489,20 @@ func TestArgsFromMap(t *testing.T) {
 	}, args)
 }
 
+func TestArgsFromMap_BodyBase64(t *testing.T) {
+	// JSON and YAML hold text as UTF-8: a body of other bytes, such as an image, is written in standard base64, as
+	// replies write theirs, and sent as those bytes. It is one body, as the others are.
+	args, err := ArgsFromMap(map[string]any{"url": "http://a", "body_base64": "//4A\n"})
+	require.NoError(t, err)
+	require.Equal(t, &Args{URL: "http://a", Body: "\xff\xfe\x00"}, args)
+
+	_, err = ArgsFromMap(map[string]any{"url": "http://a", "body": "x", "body_base64": "//4"})
+	require.ErrorIs(t, err, ErrBadArg)
+	require.EqualError(t, err, `webhook: bad argument: parameters: 2 problems
+  on_complete: invalid_value: parameters.body_base64 isn't standard base64: illegal base64 data at input byte 0; encode the bytes with base64, padding included
+  on_complete: conflict: parameters.body_base64 is set with parameters.body; keep one of them`)
+}
+
 func TestArgsFromMap_ReportsEveryProblem(t *testing.T) {
 	// Parameters used to fall back to defaults when a value had the wrong type, and log_level ignored the int64 of
 	// mock files. Now each problem is reported, as in mock files, all at once.
@@ -1494,7 +1521,7 @@ func TestArgsFromMap_ReportsEveryProblem(t *testing.T) {
   on_complete: conflict: parameters.body_file is set with parameters.body; keep one of them
   on_complete: invalid_value: parameters.header.X must be a string or a list of strings, not a number; write it in quotes: "1"
   on_complete: unknown_key: parameters.log_level is not a known setting; `+
-		`the keys under parameters are url, url_template, method, header, header_template, body, body_template, body_file, multipart, multipart_template, delay, timeout
+		`the keys under parameters are url, url_template, method, header, header_template, body, body_base64, body_template, body_file, multipart, multipart_template, delay, timeout
   on_complete: invalid_value: parameters.method must be a string, not a number; write it in quotes: "5"
   on_complete: conflict: parameters.url_template is set with parameters.url; keep one of them`)
 }
@@ -2402,6 +2429,10 @@ func TestJSONSchema_AcceptsWhatPrepareAccepts(t *testing.T) {
 		{name: "an ftp url", params: map[string]any{"url": "ftp://files.test"}},
 		{name: "a method that isn't one", params: map[string]any{"url": "http://hooks.test", "method": "ghjk%&^*()"}},
 		{name: "two bodies", params: map[string]any{"url": "http://hooks.test", "body": "x", "body_file": "x.txt"}},
+		{name: "a body in base64", params: map[string]any{"url": "http://hooks.test", "body_base64": "//4A\n//4A"}},
+		{name: "a body in base64 without its padding", params: map[string]any{"url": "http://hooks.test", "body_base64": "//4"}},
+		{name: "a body in base64 and a body file", params: map[string]any{"url": "http://hooks.test", "body_base64": "//4A", "body_file": "x.txt"}},
+		{name: "a body in base64 and a multipart body", params: map[string]any{"url": "http://hooks.test", "body_base64": "//4A", "multipart": multipart}},
 		{name: "a multipart body and a Content-Type header", params: map[string]any{
 			"url": "http://hooks.test", "header": map[string]any{"content-type": "x"}, "multipart": multipart,
 		}},

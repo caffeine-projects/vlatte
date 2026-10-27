@@ -411,6 +411,8 @@ func TestBuildMatcher_ChecksArguments(t *testing.T) {
 		{[]any{"item", int64(0)}, "item takes 2 arguments, not 1"},
 		{[]any{"eqi", int64(1)}, `eqi takes a string, not a number; write it in quotes: "1"`},
 		{[]any{"eqi", []any{}}, "eqi takes a string, not a list"},
+		{[]any{"equalbytes", "//4"}, `equalbytes takes standard base64, not "//4": illegal base64 data at input byte 0`},
+		{[]any{"equalbytes", int64(1)}, `equalbytes takes standard base64, not a number; write it in quotes: "1"`},
 		{[]any{"item", int64(0), int64(5)}, `item: a matcher is a name or a definition such as ["equal", 1], not a number`},
 		{[]any{"jsonpath", "$.a", int64(5)}, `jsonpath: a matcher is a name or a definition such as ["equal", 1], not a number`},
 		{[]any{"regex", "("}, "regex takes a regular expression, not \"(\": error parsing regexp: missing closing ): `(`"},
@@ -507,6 +509,7 @@ func TestBuildMatcher_LoadsWhatMatchersDescribe(t *testing.T) {
 		match.EqualDateTimeNow(match.TruncateExpected(match.FirstDayOfMonth), match.TruncateActual(match.LastDayOfYear),
 			match.TruncateLast(), match.ActualFormat("02/01/2006"), match.LocalTime()), match.URLPath("/a/*"),
 		match.RequestURI("/items?page=2&a=%2F"), match.ItemsMatch([]any{match.HasPrefix("a"), int64(2)}),
+		match.EqualBytes([]byte{0xff, 0xfe, 0x00}),
 	} {
 		desc, ok := descriptor.IsSelfDescriptive(m)
 		require.True(t, ok)
@@ -537,7 +540,7 @@ var _allowed = map[string][]int{
 	"before": {1, 2}, "after": {1, 2}, "eqdt": {1, 2}, "isin": {1}, "itemsmatch": {1}, "eqi": {1}, "glob": {1},
 	"hasprefix": {1}, "hassuffix": {1}, "regex": {1}, "haskey": {1}, "gt": {1}, "gte": {1}, "lt": {1}, "lte": {1},
 	"len": {1}, "each": {1}, "some": {1}, "not": {1}, "trim": {1}, "lowercase": {1}, "uppercase": {1}, "urlpath": {1},
-	"requesturi": {1},
+	"requesturi": {1}, "equalbytes": {1},
 	"hasexactly": {1, 2, 3},
 	"xpath":      {2, 3},
 	"item":       {2}, "jsonpath": {2}, "split": {2}, "both": {1, 2}, "either": {1, 2}, "xor": {1, 2}, "all": {1, 2, 3}, "any": {1, 2, 3},
@@ -595,6 +598,7 @@ func FuzzBuildAndMatch(f *testing.F) {
 		{`["xpath", "count(//b)", ["gt", 1]]`, `"<a><b>2</b><b>1</b></a>"`},
 		{`["before", "now +1 days", {"truncate_expected": "first day of month"}]`, `"2021-06-01T12:00:00Z"`},
 		{`["eqdt", "2021-06-01", {"actual_format": "02/01/2006"}]`, `"01/06/2021"`},
+		{`["equalbytes", "//4A"]`, `"x"`},
 	} {
 		f.Add([]byte(seed[0]), []byte(seed[1]))
 	}

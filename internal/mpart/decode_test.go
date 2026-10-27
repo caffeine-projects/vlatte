@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
@@ -52,6 +51,10 @@ func TestDecode_Rules(t *testing.T) {
 		{"name as a number", `{"type": "form-data", "parts": [{"name": 1}]}`, []want{{config.CodeInvalidValue, "m.parts[0].name", "must be a string, not a number", ""}}},
 		{"null body", `{"type": "mixed", "parts": [{"body": null}]}`, []want{{config.CodeInvalidValue, "m.parts[0].body", "m.parts[0].body is null", `write "" for an empty body`}}},
 		{"body and body_file", `{"type": "mixed", "parts": [{"body": "x", "body_file": "x.bin"}]}`, []want{{config.CodeConflict, "m.parts[0].body_file", "m.parts[0].body_file is set with m.parts[0].body", "keep one of them"}}},
+		{"body_base64 that isn't base64", `{"type": "mixed", "parts": [{"body_base64": "//4"}]}`, []want{{config.CodeInvalidValue, "m.parts[0].body_base64", "m.parts[0].body_base64 isn't standard base64", "padding included"}}},
+		{"body_base64 as a number", `{"type": "mixed", "parts": [{"body_base64": 5}]}`, []want{{config.CodeInvalidValue, "m.parts[0].body_base64", "m.parts[0].body_base64 must be a string, not a number", ""}}},
+		{"body and body_base64", `{"type": "mixed", "parts": [{"body": "x", "body_base64": "eA=="}]}`, []want{{config.CodeConflict, "m.parts[0].body_base64", "m.parts[0].body_base64 is set with m.parts[0].body", "keep one of them"}}},
+		{"body_base64 and body_file", `{"type": "mixed", "parts": [{"body_base64": "eA==", "body_file": "x.bin"}]}`, []want{{config.CodeConflict, "m.parts[0].body_file", "m.parts[0].body_file is set with m.parts[0].body_base64", "keep one of them"}}},
 		{"empty body_file", `{"type": "mixed", "parts": [{"body_file": ""}]}`, []want{{config.CodeInvalidValue, "m.parts[0].body_file", "expected a file name", ""}}},
 		{"body and body_file, and a typo", `{"type": "mixed", "parts": [{"body": "x", "body_file": "x.bin", "nmae": "a"}]}`, []want{
 			{config.CodeConflict, "m.parts[0].body_file", "m.parts[0].body_file is set with m.parts[0].body", "keep one of them"},
@@ -109,7 +112,8 @@ func TestDecode_AValidObject(t *testing.T) {
 		"parts": [
 			{"header": {"Content-Id": "<root>", "X-A": ["1", "2", "3"]}, "body": {"id": 1}},
 			{"name": "report", "filename": "r.pdf", "content_type": "application/pdf", "body_file": "r.pdf", "delay": "500ms"},
-			{"body": "text"}
+			{"body": "text"},
+			{"body_base64": "//4A"}
 		]}`))
 	require.NoError(t, err)
 
@@ -124,6 +128,7 @@ func TestDecode_AValidObject(t *testing.T) {
 			{Header: []Header{{Name: "Content-Id", Value: "<root>"}, {Name: "X-A", Value: "1"}, {Name: "X-A", Value: "2"}, {Name: "X-A", Value: "3"}}, Body: []byte(`{"id":1}`), Kind: BodyJSON},
 			{Name: "report", Filename: "r.pdf", ContentType: "application/pdf", File: "r.pdf", Delay: 500_000_000},
 			{Body: []byte("text"), Kind: BodyText},
+			{Body: []byte{0xff, 0xfe, 0x00}, Kind: BodyBytes},
 		},
 	}, s)
 
@@ -131,21 +136,43 @@ func TestDecode_AValidObject(t *testing.T) {
 	require.Equal(t, doc, s.Doc())
 }
 
+func TestDecode_ReadsATemplatedSpecsByteBodyAsBytes(t *testing.T) {
+	// A templated spec renders its text bodies, and writes its byte bodies as they are. A byte body that is UTF-8,
+	// written as text, would read back as a template and render: it is written in body_base64.
+	s := &Spec{Subtype: "mixed", Boundary: "b", Templated: true, Parts: []*PartSpec{
+		{Body: []byte("{{ .X }} as is"), Kind: BodyBytes},
+		{Body: []byte("{{ .X }}"), Kind: BodyText},
+	}}
+
+	data, err := json.Marshal(s.Doc(), json.Deterministic(true))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"type": "mixed", "boundary": "b", "parts": [{"body_base64": "e3sgLlggfX0gYXMgaXM="}, {"body": "{{ .X }}"}]}`, string(data))
+
+	doc, err := value.DecodeJSON(data)
+	require.NoError(t, err)
+
+	got, err := Decode(config.Value{Key: "multipart", Origin: "doc", Any: doc})
+	require.NoError(t, err)
+
+	got.Templated = true // as the reply's template.enabled, or multipart_template, sets it
+
+	e, err := Compile(got, _engine)
+	require.NoError(t, err)
+
+	body, _, err := e.Encode(map[string]any{"X": "x"})
+	require.NoError(t, err)
+	require.Equal(t, "--b\r\n\r\n{{ .X }} as is\r\n--b\r\n\r\nx\r\n--b--\r\n", string(body))
+}
+
 func TestPropDecode_ReadsWhatDocWrites(t *testing.T) {
 	// MP5: Decode reads a spec's Doc back as the same spec: the same Doc, and the same bytes on the wire. A byte
-	// body comes back as text, which writes the same bytes.
+	// body comes back as text, which writes the same bytes, or as body_base64 when it isn't UTF-8, which JSON and
+	// YAML can't hold as text.
 	dir := t.TempDir()
 
 	rapid.Check(t, func(t *rapid.T) {
 		s := genSpec(dir).Draw(t, "spec")
 		s.Boundary = genBoundary().Draw(t, "boundary")
-
-		for _, p := range s.Parts {
-			// A mock file is text, so JSON and YAML can't hold such a body: it goes through Go only.
-			if !utf8.Valid(p.Body) {
-				p.Body = []byte("text")
-			}
-		}
 
 		// A mock file is JSON or YAML, so the document goes through JSON as a file does.
 		data, err := json.Marshal(s.Doc(), json.Deterministic(true))
