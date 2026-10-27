@@ -301,6 +301,31 @@ func TestAdmin_QueriesTheJournalWithARequestOfAMockFile(t *testing.T) {
 	require.Len(t, page.Requests, 1, body)
 }
 
+func TestAdmin_QueriesTheJournalWithACustomMatcherOfTheServer(t *testing.T) {
+	// A query reads its request as the server reads mock files: with its registry, custom matchers included.
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).Journal("").Matchers(_customMatchers))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
+
+	c := pb.NewTestServiceClient(m.MustDial())
+	for _, msg := range []string{"ann", "bob"} {
+		_, err := c.Greetings(t.Context(), &pb.HiReq{Message: msg})
+		require.NoError(t, err)
+	}
+
+	status, body := call(t, "QUERY", m.AdminURL()+"/requests", `{"request": {"method": "Greetings", "custom": [["greets", "ann"]]}}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	var page struct {
+		Requests []map[string]any `json:"requests"`
+	}
+
+	require.NoError(t, json.Unmarshal([]byte(body), &page))
+	require.Len(t, page.Requests, 1, body)
+}
+
 func TestAdmin_StreamsTheCalls(t *testing.T) {
 	// A client follows the calls the mocks answer, and those none matched, as HTTP mock servers' clients do.
 	m, client := adminServer(t)

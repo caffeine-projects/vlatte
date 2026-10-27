@@ -18,6 +18,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 // _defaultShutdownTimeout is how long Close waits for the calls in flight, unless Config.ShutdownTimeout says.
@@ -97,6 +98,10 @@ type Config struct {
 
 	// GlobalEvents are the events that run for every mock.
 	GlobalEvents *vlatte.Events
+
+	// Matchers builds the matcher lists of mock files, and of the admin API's call queries: the built-in matchers and
+	// custom ones. Nil builds the built-in matchers only.
+	Matchers *matchbuild.Registry
 
 	// TemplateEngine compiles the templates of replies and events. Nil uses a vlatte.GoTemplateEngine.
 	TemplateEngine vlatte.TemplateEngine
@@ -339,6 +344,12 @@ func (cb *ConfigBuilder) OnCompleteListener(name string, listener vlatte.EventLi
 // EventListeners sets the registry of named event listeners, such as one several servers share.
 func (cb *ConfigBuilder) EventListeners(listeners *vlatte.Listener) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.Listeners = listeners })
+}
+
+// Matchers sets the registry that builds the matcher lists of the server's mock files, such as one that holds custom
+// matchers: [matchbuild.WithMatcher]. Servers can share a registry. Nil builds the built-in matchers only.
+func (cb *ConfigBuilder) Matchers(r *matchbuild.Registry) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.Matchers = r })
 }
 
 // GlobalEvents sets the events that run for every mock, before the mock's own.
