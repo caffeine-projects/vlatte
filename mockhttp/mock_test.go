@@ -362,8 +362,9 @@ func getTarget(t *testing.T, m *Server, target string) int {
 
 func TestMock_ADescriptionKeepsTheEvents(t *testing.T) {
 	// The description of a mock dropped its on_complete events: an admin GET, then POST, of a mock lost its webhooks.
-	// It keeps them now, with their parameters as a mock file writes them, and loads back with the same events.
-	got := make(chan vlatte.Parameters, 2)
+	// It keeps them now, with their parameters as a mock file writes them, and when they run, and loads back with the
+	// same events.
+	got := make(chan vlatte.Parameters, 3)
 	capture := vlatte.EventFunc[vlatte.OnComplete](func(_ context.Context, e vlatte.OnComplete) error {
 		got <- e.Parameters()
 		return nil
@@ -376,6 +377,7 @@ func TestMock_ADescriptionKeepsTheEvents(t *testing.T) {
 	scope := m.MustMock(Getf("/x").ID("x").
 		OnCompleteEvent(vlatte.EventConfig{Name: "capture", Parameters: map[string]any{"k": "v"}}).
 		OnCompleteEvent(vlatte.EventConfig{Name: "capture"}).
+		OnCompleteEvent(vlatte.EventConfig{Name: "capture", Parameters: map[string]any{"late": true}, AfterResponse: true}).
 		Reply(NoContent()))
 
 	desc, ok := scope.Mock("x").Describe().Props.(map[string]any)
@@ -383,17 +385,24 @@ func TestMock_ADescriptionKeepsTheEvents(t *testing.T) {
 	require.Equal(t, []any{
 		map[string]any{"name": "capture", "parameters": map[string]any{"k": "v"}},
 		map[string]any{"name": "capture"},
+		map[string]any{"name": "capture", "parameters": map[string]any{"late": true}, "after_response": true},
 	}, desc["on_complete"])
 
 	doc, err := json.Marshal(desc)
 	require.NoError(t, err)
 
 	require.NoError(t, m.Clean(t.Context()))
-	m.MustMock(FromBytes(doc, "json"))
+	again := m.MustMock(FromBytes(doc, "json"))
 
 	status, _ := get(t, m, "/x")
 	require.Equal(t, http.StatusNoContent, status)
-	require.ElementsMatch(t, []vlatte.Parameters{map[string]any{"k": "v"}, nil}, []vlatte.Parameters{<-got, <-got})
+	require.ElementsMatch(t,
+		[]vlatte.Parameters{map[string]any{"k": "v"}, nil, map[string]any{"late": true}},
+		[]vlatte.Parameters{<-got, <-got, <-got})
+
+	loaded, ok := again.Mock("x").Describe().Props.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, desc["on_complete"], loaded["on_complete"])
 }
 
 func TestMock_ADescriptionLeavesOutTheCallbacks(t *testing.T) {

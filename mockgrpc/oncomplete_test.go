@@ -80,3 +80,39 @@ response: {message: {message: hello}}
 		mockName:  "greet",
 	}, <-got)
 }
+
+func TestOnComplete_AnEventAfterTheResponseDoesntHoldTheCall(t *testing.T) {
+	// The call waited for every event of its mock. One set to run after the response doesn't hold it: the client has
+	// its answer while the event still runs.
+	arrived, release := make(chan struct{}), make(chan struct{})
+	ended := make(chan error, 1)
+
+	listeners := vlatte.NewListener()
+	require.NoError(t, listeners.OnComplete.Register("late", vlatte.EventFunc[vlatte.OnComplete](
+		func(ctx context.Context, _ vlatte.OnComplete) error {
+			close(arrived)
+			<-release
+			ended <- ctx.Err()
+
+			return nil
+		})))
+
+	m := MustNew(Setup().Silent().EventListeners(listeners))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	path := writeFile(t, t.TempDir(), "greet.yaml", `
+on_complete: [{name: late, after_response: true}]
+request: {method: Greetings}
+response: {message: {message: hello}}
+`)
+	m.MustMock(FromFile(path))
+
+	res, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.NoError(t, err)
+	require.Equal(t, "hello", res.GetMessage())
+
+	<-arrived
+	close(release)
+	require.NoError(t, <-ended, "the event ran on once the call ended")
+}

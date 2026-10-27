@@ -564,7 +564,7 @@ m.MustMock(mockhttp.Postf("/orders").
 | `method` | The method, in any case. Empty means `GET`. |
 | `header`, `header_template` | Headers by name, each a string, or a list of strings to send the header once per value, in order. Names ignore case, so a name is set once. |
 | `body`, `body_template`, `body_file`, `multipart`, `multipart_template` | The body, one of them at most. Multipart bodies are as in [replies](#forms-and-multipart). |
-| `delay` | How long to wait before sending, once the mock replied. The response waits for it too. |
+| `delay` | How long to wait before sending, once the mock replied. The response waits for it too, unless the webhook runs after the response. |
 | `timeout` | How long the request may take, from sending it to its answer. Without it, the listener's timeout, or else 10s. |
 
 Templates render with the data of the request that completed the mock: see [Templates](#templates). A mistake, such as a missing URL, two bodies or a template that doesn't compile, fails the mock when it is built.
@@ -579,6 +579,17 @@ callbacks.AssertCalled(t)
 ```
 
 A webhook's `delay` counts from the reply, so it holds the response too. A reply that streams its parts, or a body over a few KB, sends its status and headers before its webhooks are done, so the call returns early; the body still ends after them, unless the mock sets `Content-Length` itself. Read the body to its end, as `io.ReadAll` does, before checking what they sent. `m.Close()` cancels the webhooks still waiting, for their delay or for their target.
+
+**After the response.** `after_response: true` on an `on_complete` entry, beside `name` and `parameters`, sends the response without waiting for the event, for an app that needs its callback once it has its answer. In Go, set `AfterResponse` on the `vlatte.EventConfig` that `Build` returns. The event starts as the response goes out, so give it a `delay` when the client must read its answer first, and have the test wait for the target to get the webhook, not for the call. `m.Close()` cancels these events too, and waits for them. A failure is logged as any other, but the journal entry of the request, recorded by then, doesn't tell it.
+
+```yaml
+on_complete:
+  - name: webhook
+    after_response: true
+    parameters:
+      url: http://localhost:8081/orders
+      delay: 100ms
+```
 
 **Failures.** A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning, and the request's [journal](#request-journal) entry, if the server keeps one, tells it in its `Message`. The timeout is 10 seconds: a webhook's `timeout` parameter (`Options().Timeout(d)` in Go) changes it for that webhook, and `webhook.WithTimeout` for every webhook its listener sends, where 0 means 10 seconds, unlike `proxy.timeout`. The CLI's `webhook.timeout` setting is the `WithTimeout` of its listener, for HTTP and gRPC mocks. A webhook reads up to 256 KiB of the answer, so its connection carries the next one. A response waits for a webhook at most its delay plus the timeout.
 

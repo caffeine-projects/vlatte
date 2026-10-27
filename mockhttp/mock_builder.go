@@ -589,7 +589,7 @@ func (b *Builder) Callback(fn vlatte.EventFunc[vlatte.OnComplete]) *Builder {
 }
 
 // OnCompleteEvent adds an on-complete event to the mock. It runs once the mock replied, and the response waits for
-// it.
+// it, unless cfg.AfterResponse is set: see [vlatte.EventConfig.AfterResponse].
 func (b *Builder) OnCompleteEvent(cfg vlatte.EventConfig) *Builder {
 	b.spec.events = append(b.spec.events, cfg)
 	return b

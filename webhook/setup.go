@@ -75,7 +75,7 @@ func (b *ArgsBuilder) BodyFile(name string) *ArgsBuilder {
 }
 
 // Delay sets how long the WebHook waits, once the mock replied, before it sends the request. The response waits for
-// it too.
+// it too, unless the event runs after the response: see [vlatte.EventConfig.AfterResponse].
 func (b *ArgsBuilder) Delay(d time.Duration) *ArgsBuilder {
 	b.input.Delay = d
 	return b
