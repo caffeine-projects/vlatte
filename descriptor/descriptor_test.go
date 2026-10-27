@@ -149,6 +149,9 @@ func TestConstructors_PanicOnEmptyKeyBecauseItIsAProgrammerError(t *testing.T) {
 	t.Run("WithMaybeItems", func(t *testing.T) {
 		require.PanicsWithValue(t, ErrKeyEmpty, func() { WithMaybeItems("", nil) })
 	})
+	t.Run("Fail", func(t *testing.T) {
+		require.PanicsWithValue(t, ErrKeyEmpty, func() { Fail("", errors.New("test: no key")) })
+	})
 }
 
 func TestWithKeyValuePairs_PanicsOnMalformedPairs(t *testing.T) {
