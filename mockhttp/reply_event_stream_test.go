@@ -33,15 +33,24 @@ func TestReplyEventStream_ServesItsEvents(t *testing.T) {
 	require.Equal(t, "retry: 3000\n\nevent: price\nid: 1\ndata: {\"value\":10}\n\n: note\nretry: 1000\ndata: line 1\ndata: line 2\n\n", string(body))
 }
 
-func TestReplyEventStream_KeepsTheCacheControlItIsGiven(t *testing.T) {
+func TestReplyEventStream_KeepsTheHeadersItIsGiven(t *testing.T) {
+	// Content-Type and Cache-Control are defaults: a server that sends a charset, or a wrong media type to test a
+	// client that refuses it, says so.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/events").Reply(OK().Header(HeaderCacheControl, "no-store").EventStream(NewEventStream())))
+	m.MustMock(Getf("/charset").Reply(OK().ContentType("text/event-stream; charset=utf-8").Header(HeaderCacheControl, "no-store").
+		EventStream(NewEventStream(NewEvent().Data("a")))))
+	m.MustMock(Getf("/wrong").Reply(OK().HeaderTemplate(HeaderContentType, "text/plain").EventStream(NewEventStream(NewEvent().Data("a")))))
 
-	res, _ := fetch(t, m.URL("/events"))
+	res, body := fetch(t, m.URL("/charset"))
+	require.Equal(t, []string{"text/event-stream; charset=utf-8"}, res.Header.Values(HeaderContentType))
 	require.Equal(t, []string{"no-store"}, res.Header.Values(HeaderCacheControl))
+	require.Equal(t, "data: a\n\n", string(body))
+
+	res, _ = fetch(t, m.URL("/wrong"))
+	require.Equal(t, []string{"text/plain"}, res.Header.Values(HeaderContentType))
 }
 
 func TestReplyEventStream_ResumesFromLastEventID(t *testing.T) {
@@ -114,7 +123,8 @@ func TestReplyEventStream_BuildErrors(t *testing.T) {
 		builder *Builder
 		want    string
 	}{
-		{"a Content-Type header too", Getf("/x").Reply(OK().ContentType("text/plain").EventStream(NewEventStream())), "reply: an event stream sets the Content-Type: remove the Content-Type header"},
+		{"a status without a body", Getf("/x").Reply(NoContent().EventStream(NewEventStream())), "reply: an event stream needs a status with a body, not 204"},
+		{"a status without a body, set last", Getf("/x").Reply(OK().EventStream(NewEventStream()).Status(http.StatusNotModified)), "reply: an event stream needs a status with a body, not 304"},
 		{"a line break in an id", Getf("/x").Reply(OK().EventStream(NewEventStream(NewEvent().ID("1\n2")))), "reply: sse: events[0]: id holds a line break"},
 		{"raw with fields", Getf("/x").Reply(OK().EventStream(NewEventStream(NewEvent().Raw("x").Data("y")))), "reply: sse: events[0]: raw is set with other fields: raw is sent alone, as it is"},
 		{"JSON that doesn't marshal", Getf("/x").Reply(OK().EventStream(NewEventStream(NewEvent().DataJSON(fn)))), "reply: sse: events[0]: " + errJSON.Error()},

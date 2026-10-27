@@ -512,8 +512,8 @@ func (rep *Reply) body(kind bodyType) {
 	rep.eventStream = nil
 }
 
-// hasTemplates reports whether the reply has templates: a body, a body file name, header values or the text of a
-// multipart body.
+// hasTemplates reports whether the reply has templates: a body, a body file name, header values, or the text of a
+// multipart body or an event stream.
 func (rep *Reply) hasTemplates() bool {
 	return rep.teType&(_teBody|_teBodyFilename) != 0 || len(rep.headerWithTemplate) > 0 ||
 		rep.bodyType == _bodyMultipart && rep.multipart.spec.Templated ||
@@ -581,8 +581,8 @@ func (r *responseReplier) compileTemplates(rep *Reply) error {
 
 // compileEventStream checks the event stream of rep and compiles it with the engine of r, once per mock.
 func (r *responseReplier) compileEventStream(rep *Reply) error {
-	if rep.response.Header.Get(HeaderContentType) != "" || rep.headerWithTemplate.Get(HeaderContentType) != "" {
-		return errors.New("reply: an event stream sets the Content-Type: remove the Content-Type header")
+	if status := rep.response.StatusCode; !bodyAllowed(status) {
+		return fmt.Errorf("reply: an event stream needs a status with a body, not %d", status)
 	}
 
 	e, err := sse.Compile(&rep.eventStream.spec, r.engine)
@@ -593,6 +593,11 @@ func (r *responseReplier) compileEventStream(rep *Reply) error {
 	r.eventStreamEncoder = e
 
 	return nil
+}
+
+// bodyAllowed reports whether a response with status can have a body: one with 1xx, 204 or 304 can't.
+func bodyAllowed(status int) bool {
+	return (status < 100 || status >= 200) && status != http.StatusNoContent && status != http.StatusNotModified
 }
 
 // compileMultipart checks the multipart body of rep and compiles it with the engine of r, once per mock: the boundary
@@ -668,7 +673,11 @@ func (r *responseReplier) build(ctx context.Context, rv *RequestValues) (*Respon
 			return nil, err
 		}
 
-		response.Header.Set(HeaderContentType, MIMETextEventStream)
+		// Defaults: a reply can send a charset, or another media type to test a client that refuses it.
+		if response.Header.Get(HeaderContentType) == "" {
+			response.Header.Set(HeaderContentType, MIMETextEventStream)
+		}
+
 		if response.Header.Get(HeaderCacheControl) == "" {
 			response.Header.Set(HeaderCacheControl, "no-cache")
 		}
