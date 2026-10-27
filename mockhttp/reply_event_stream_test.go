@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	json "encoding/json/v2"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -22,15 +23,15 @@ func TestReplyEventStream_ServesItsEvents(t *testing.T) {
 
 	m.MustMock(Getf("/events").Reply(OK().EventStream(NewEventStream(
 		NewEvent().Name("price").ID("1").DataJSON(map[string]any{"value": 10}),
-		NewEvent().Comment("note").Data("line 1\nline 2"),
-	).Retry(3 * time.Second))))
+		NewEvent().Comment("note").Data("line 1\nline 2").Retry(time.Second).Delay(0),
+	).Retry(3 * time.Second).Heartbeat(time.Hour))))
 
 	res, body := fetch(t, m.URL("/events"))
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	require.Equal(t, MIMETextEventStream, res.Header.Get(HeaderContentType))
 	require.Equal(t, "no-cache", res.Header.Get(HeaderCacheControl))
 	require.Empty(t, res.Header.Get(HeaderContentLength), "a stream has no length")
-	require.Equal(t, "retry: 3000\n\nevent: price\nid: 1\ndata: {\"value\":10}\n\n: note\ndata: line 1\ndata: line 2\n\n", string(body))
+	require.Equal(t, "retry: 3000\n\nevent: price\nid: 1\ndata: {\"value\":10}\n\n: note\nretry: 1000\ndata: line 1\ndata: line 2\n\n", string(body))
 }
 
 func TestReplyEventStream_KeepsTheCacheControlItIsGiven(t *testing.T) {
@@ -219,6 +220,36 @@ func TestNewEventStream_CopiesItsEvents(t *testing.T) {
 
 	_, body := fetch(t, m.URL("/events"))
 	require.Equal(t, "data: before\n\n", string(body))
+}
+
+func TestReplyEventStream_ServesARequestWithoutARawRequest(t *testing.T) {
+	// A reply made outside a server, as in a test of a replier, serves its stream to request values without the
+	// request: it has no Last-Event-ID.
+	r, err := OK().EventStream(NewEventStream(NewEvent().ID("1").Data("a")).ResumeFromLastEventID()).NewReplier(nil)
+	require.NoError(t, err)
+
+	res, err := r.Reply(t.Context(), ReplyInput{RequestValues: &RequestValues{}})
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(res.BodyCloser)
+	require.NoError(t, err)
+	require.Equal(t, "id: 1\ndata: a\n\n", string(body))
+}
+
+func TestReplyEventStream_ATemplateThatFailsAtTheRequestFailsTheReply(t *testing.T) {
+	// A templated id that renders a line break would end the field there: the reply fails, and says why, before it
+	// sends anything.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/events").Reply(OK().EventStream(NewEventStream(
+		NewEvent().ID(`{{ .Request.URL.Query.Get "id" }}`).Data("a"),
+	).Template())))
+
+	res, body := fetch(t, m.URL("/events?id=1%0A2"))
+	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
+	require.Contains(t, string(body), "reply: sse: events[0]: id holds a line break")
 }
 
 func TestReplyEventStream_FromAMockFile(t *testing.T) {

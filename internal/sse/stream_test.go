@@ -137,6 +137,38 @@ func TestStream_ClientLeavingEndsTheWait(t *testing.T) {
 	})
 }
 
+func TestStream_ClientLeavingEndsTheHeartbeats(t *testing.T) {
+	// A client that leaves while the stream sends heartbeats before an event ends it there: the event never goes.
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+		defer cancel()
+
+		late := data("a")
+		late.Delay, late.HasDelay = time.Hour, true
+
+		s := stream(ctx, t, &Spec{Heartbeat: 10 * time.Second, Events: []*EventSpec{late}}, "")
+
+		require.Equal(t, []read{{10 * time.Second, ": heartbeat\n"}}, readAll(t, s))
+	})
+}
+
+func TestStream_AnEndedContextSendsNoMore(t *testing.T) {
+	// Events without a wait still stop once the client left.
+	ctx, cancel := context.WithCancel(t.Context())
+	s := stream(ctx, t, &Spec{Events: []*EventSpec{data("a"), data("b")}}, "")
+
+	buf := make([]byte, 64)
+	n, err := s.Read(buf)
+	require.NoError(t, err)
+	require.Equal(t, "data: a\n\n", string(buf[:n]))
+
+	cancel()
+
+	n, err = s.Read(buf)
+	require.Equal(t, 0, n)
+	require.ErrorIs(t, err, io.EOF)
+}
+
 func TestStream_ResumesAfterTheLastEventID(t *testing.T) {
 	// A client that reconnects with a Last-Event-ID gets what it missed. The retry field comes first again.
 	withID := func(id, text string) *EventSpec {
