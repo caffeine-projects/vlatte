@@ -58,5 +58,5 @@ func (n xpathNamespace) applyXPath(o *xpathOptions) {
 	o.namespaces[n.prefix] = n.uri
 }
 
-// XPathNamespace binds prefix, in the expression of [XPath], to the namespace uri, as WireMock's xPathNamespaces does.
+// XPathNamespace binds prefix, in the expression of [XPath], to the namespace uri.
 func XPathNamespace(prefix, uri string) XPathOption { return xpathNamespace{prefix: prefix, uri: uri} }

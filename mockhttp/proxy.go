@@ -28,9 +28,9 @@ type ProxyConfig struct {
 
 	// Timeout bounds the wait for the response headers of the host, connecting and sending the request included, with
 	// any transport, and the opening of a tunnel. 0 sets no bound of its own: the transport the proxy makes, and the
-	// tunnels, still give up connecting after 30s, and a TLS handshake after 10s. Setup().Proxy() and the settings
-	// default it to 30s, as for proxy replies, but a ProxyConfig given to Setup().Proxy sets every field: one without
-	// Timeout has 0.
+	// tunnels, still give up connecting after 30s, and a TLS handshake after 10s. Setup().Proxy and the settings
+	// default it to 30s, as for proxy replies: a ProxyConfig without Timeout keeps it, and only the setting
+	// proxy.timeout sets 0.
 	Timeout time.Duration
 
 	// SSLVerify sets whether the transport the proxy makes, and the tunnels, verify the TLS certificates of the hosts,
@@ -60,14 +60,15 @@ type ProxyConfigurer interface {
 	Apply(config *ProxyConfig) error
 }
 
-// Apply allows ProxyConfig to be used as a Configurer.
+// Apply sets the fields of p that aren't zero on c, so configs compose: Setup().Proxy(&ProxyConfig{SSLVerify: true})
+// keeps the default Timeout. A config turns no setting off.
 func (p *ProxyConfig) Apply(c *ProxyConfig) error {
-	c.Transport = p.Transport
-	c.Timeout = p.Timeout
-	c.Via = p.Via
-	c.SSLVerify = p.SSLVerify
-	c.Intercept = p.Intercept
-	c.CA = p.CA
+	c.Transport = cmp.Or(p.Transport, c.Transport)
+	c.Timeout = cmp.Or(p.Timeout, c.Timeout)
+	c.Via = cmp.Or(p.Via, c.Via)
+	c.SSLVerify = c.SSLVerify || p.SSLVerify
+	c.Intercept = c.Intercept || p.Intercept
+	c.CA = cmp.Or(p.CA, c.CA)
 
 	return nil
 }

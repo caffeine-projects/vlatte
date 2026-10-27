@@ -1,4 +1,4 @@
-# WireMock's hasExactly: as many values as matchers, each matched by its own.
+# hasExactly: as many values as matchers, each matched by its own.
 id: exactly
 request:
   method: GET

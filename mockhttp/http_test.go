@@ -746,3 +746,30 @@ func TestServer_WebhookTransportHasTheDefaultLimits(t *testing.T) {
 	require.NotNil(t, got.Proxy)
 	require.NotNil(t, got.DialContext)
 }
+
+func TestNew_TemplateEnvAllowsVariablesOnTheDefaultEngine(t *testing.T) {
+	conf, err := loadConfig(t, Setup().TemplateEnv("VLATTE_TEST_ALLOWED"), ConfigArgs(nil))
+	require.NoError(t, err)
+
+	_, err = conf.TemplateEngine.Compile("body", `{{ env "VLATTE_TEST_ALLOWED" }}`)
+	require.NoError(t, err)
+
+	_, err = conf.TemplateEngine.Compile("body", `{{ env "VLATTE_TEST_OTHER" }}`)
+	require.ErrorContains(t, err, `env: "VLATTE_TEST_OTHER" is not allowed`)
+}
+
+func TestNew_TemplateEnvWithAnEngineOfTheUsersOwnFails(t *testing.T) {
+	// The variables would silently stay unreadable: the server can't change an engine it didn't make.
+	_, err := New(Setup().TemplateEngine(vlatte.MustNewGoTemplateEngine()).ConfigSources(ConfigArgs([]string{"--template-env", "X"})))
+	require.ErrorIs(t, err, errTemplateEnvWithEngine)
+}
+
+func TestNew_TemplateEnvRefusesAnInvalidName(t *testing.T) {
+	_, err := New(Setup().ConfigSources(ConfigArgs([]string{"--template-env", "A=B"})))
+	require.ErrorContains(t, err, `environment variable name "A=B" is invalid`)
+}
+
+func TestNew_TemplateEnvFromGoRefusesAnInvalidName(t *testing.T) {
+	_, err := New(Setup().TemplateEnv("A=B"))
+	require.ErrorContains(t, err, `environment variable name "A=B" is invalid`)
+}

@@ -125,8 +125,16 @@ func New(config ...Option) (*Server, error) {
 		conf.ShutdownTimeout = _defaultShutdownTimeout
 	}
 
-	if conf.TemplateEngine == nil {
-		conf.TemplateEngine = vlatte.MustNewGoTemplateEngine()
+	switch {
+	case conf.TemplateEngine == nil:
+		e, err := vlatte.NewGoTemplateEngine(vlatte.WithEnv(conf.TemplateEnv...))
+		if err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
+
+		conf.TemplateEngine = e
+	case len(conf.TemplateEnv) > 0:
+		return nil, fmt.Errorf("server: %w", errTemplateEnvWithEngine)
 	}
 
 	if conf.Parameters == nil {

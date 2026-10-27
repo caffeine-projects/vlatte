@@ -148,9 +148,16 @@ func New(config ...Option) (*Server, error) {
 		conf.ErrorStatusCode = StatusNoMatch
 	}
 
-	if conf.TemplateEngine == nil {
-		// Without options, it can't fail.
-		conf.TemplateEngine = vlatte.MustNewGoTemplateEngine()
+	switch {
+	case conf.TemplateEngine == nil:
+		e, err := vlatte.NewGoTemplateEngine(vlatte.WithEnv(conf.TemplateEnv...))
+		if err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
+
+		conf.TemplateEngine = e
+	case len(conf.TemplateEnv) > 0:
+		return nil, fmt.Errorf("server: %w", errTemplateEnvWithEngine)
 	}
 
 	if err := checkProviderKeys(conf.TemplateDataProviders); err != nil {

@@ -1,4 +1,4 @@
-# WireMock's after and before, with an offset from now and a truncation.
+# after and before, with an offset from now and a truncation.
 id: dates
 request:
   method: GET

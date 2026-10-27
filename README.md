@@ -293,22 +293,6 @@ response:
   status: 413
 ```
 
-**From WireMock.** WireMock's matchers, and what vlatte writes for each:
-
-| WireMock | vlatte |
-|---|---|
-| `equalTo`, `caseInsensitive`, `contains`, `matches` | `equal`, `eqi`, `contains`, `regex` |
-| `doesNotContain`, `doesNotMatch`, `absent` | `[not, [contains, x]]`, `[not, [regex, x]]`, `[not, present]` |
-| `equalToNumber`, `greaterThanNumber`, and the rest | `equal`, `gt`, `gte`, `lt`, `lte` |
-| `and`, `or`, `not` | `all`, `any`, `not` |
-| `matchesJsonPath` | `haskey`, `jsonpath` |
-| `equalToJson`, its placeholders | `eqj` with options; `[all, [eqj, ...], [jsonpath, $.id, ...]]` |
-| `matchesJsonSchema` | `jsonschema` |
-| `equalToXml`, `matchesXPath` | `eqx`, `xpath` |
-| `before`, `after`, `equalToDateTime` | `before`, `after`, `eqdt` |
-| `hasExactly`, `includes` | `hasExactly`, `[all, [some, m1], [some, m2]]` |
-| `customMatcher` | `request.custom` and a registry of custom matchers |
-
 **Proxy replies.** A `proxy` reply (`From` in Go) answers with what its target answers: see [Proxying](#proxying).
 
 **Templates.** A mock file is plain JSON or YAML. Only the settings that are templates, such as a templated body, render: see [Templates](#templates).
@@ -334,7 +318,7 @@ response:
   status: 201
   header_template:
     location: '/users/{{ .Request.Header.Get "X-User-Id" }}'
-  body: '{"id": {{ uuid | toJson }}, "name": {{ (fromJson .Request.Body.String).name | toJson }}}'
+  body: '{"id": {{ uuid | toJSON }}, "name": {{ (fromJSON .Request.Body.String).name | toJSON }}}'
   template:
     enabled: true
 ```
@@ -344,7 +328,7 @@ In Go:
 ```go
 m.MustMock(mockhttp.Postf("/users").Reply(mockhttp.Created().
 	HeaderTemplate("Location", `/users/{{ .Request.Header.Get "X-User-Id" }}`).
-	BodyTemplate(`{"id": {{ uuid | toJson }}}`)))
+	BodyTemplate(`{"id": {{ uuid | toJSON }}}`)))
 ```
 
 **What is a template.** Nothing else renders: `{{` anywhere else is text.
@@ -359,7 +343,7 @@ m.MustMock(mockhttp.Postf("/users").Reply(mockhttp.Created().
 |---|---|
 | `.Request.Method`, `.Request.URL`, `.Request.URLPathSegments`, `.Request.Header`, `.Request.ID` | The request. `index .Request.URLPathSegments 0` is the first segment of the path. |
 | `.Request.PathParams.<name>` | The parameters of the mock's [path template](#mock-files), decoded. |
-| `.Request.Body.String`, `.Request.Body.Content`, `.Request.HasBody` | The body. JSON bodies are text: read their fields with `fromJson`. |
+| `.Request.Body.String`, `.Request.Body.Content`, `.Request.HasBody` | The body. JSON bodies are text: read their fields with `fromJSON`. |
 | `.Request.Cookie "name"`, `.Request.PostForm.Get "f"`, `.Request.FormFile "f"` | Cookies and forms. |
 | `.Server.URL` | The server's base URL. |
 | `.Parameters.Get "key"`, `.Parameters.Has "key"` | The server's parameters. |
@@ -367,7 +351,36 @@ m.MustMock(mockhttp.Postf("/users").Reply(mockhttp.Created().
 | `.Provided.<key>` | What `Setup().TemplateDataProviders(...)` provide. |
 | `.Extra` | The reply's `template.data`, or `SetTemplateData` in Go. Webhooks don't have it. |
 
-**Functions.** Besides those of Go templates, such as `index`, `printf`, `html` and `urlquery`: `toJson`, `fromJson`, `uuid`, `now`, `base64Encode` and `base64Decode`. Add your own to the engine:
+**Functions.** Besides those of Go templates, such as `if`, `range`, `eq`, `len`, `index`, `slice`, `printf`, `html` and `urlquery`, templates call the functions below. The value a function works on comes last, so it pipes: `{{ .Request.Header.Get "X-Name" | trimSpace | toUpper }}`. List functions take the list first, as Go's `append` does. A bad argument, such as an unknown algorithm or a division by zero, fails the template.
+
+| Kind | Functions |
+|---|---|
+| JSON | `toJSON v`, `fromJSON text`, `JSONPath path v` (the first value a JSONPath selects in a value or JSON text, or nil), `JSONPathAll path v`, `deleteJSONPath path v`, `mergePatch patch v` ([RFC 7386](https://www.rfc-editor.org/rfc/rfc7386)); each `v` and `patch` is a value or JSON text, so a string is JSON text; `indentJSON text`, `compactJSON text` |
+| Strings | `toUpper`, `toLower`, `trimSpace`, `title`, `upperFirst`, `truncate max s`, `replaceAll old new s`, `split sep s`, `join sep list`, `substring start end s` (end -1 is the end), `slug`; they count runes, not bytes |
+| Regexps | `regexpFind pattern s`, `regexpSubmatch pattern s`, `regexpReplaceAll pattern repl s` (`$1` is a group), `regexpMatch pattern s`, in Go's syntax |
+| Values | `contains item collection` (a substring, a list item or a map key), `default fallback v` (when v is nil, `""` or empty; 0 and false are values) |
+| Numbers | `add`, `sub`, `mul`, `div`, `mod` (ints when both operands are integers, as in Go, so `div 7 2` is 3; float64 otherwise), `toInt v` and `toFloat v`, which convert a numeric string, such as a query parameter: arithmetic takes numbers only |
+| Lists | `list items...`, `append list item`, `insert list index item`, `remove list index` (-1 is the last), `randomItem list`, `shuffle list`, `reverse list`, `sortBy list path` (by what a JSONPath selects in each item, `"$"` for plain values; stable, missing values first). They return new lists. |
+| XML | `xpath expr xml` (the text of what an XPath 1.0 expression selects, or the number or boolean it computes), `xpathNodes expr xml` (each node's `.Name`, `.Text` and `.Attrs`; printing an element writes its XML) |
+| Time | `now`, `formatTime layout t` and `parseTime layout s` (a Go layout, `RFC3339` and the other names of package `time`, `unix` or `unixMilli`), `timeAdd offset t` (`"3 days"`, `"-1 month"` or a Go duration such as `"1h30m"`), `inZone zone t`, `truncateTime point t` (`"first day of month"`, `"last day of year"`, ...) |
+| Encoding | `base64Encode`, `base64Decode`, `queryUnescape`, `parseQuery text` (form text as `url.Values`: `(parseQuery $s).Get "a"`) |
+| Random | `uuid`, `randomString kind length` (`alphanumeric`, `alphabetic`, `numeric`, `alphanumericSymbols` or `hex`), `randomInt min max` and `randomFloat min max` (in [min, max)). Not for secrets. |
+| Hashes | `hash alg encoding s` (`md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `sha3-224` to `sha3-512`; `hex` or `base64`), `hmac alg key encoding s` (`sha1`, `sha256` or `sha512`), as webhook providers sign payloads: `{{ hmac "sha256" "secret" "hex" .Request.Body.String }}` |
+| Environment | `env name`: see below |
+
+```yaml
+response:
+  body: |
+    {"id": {{ JSONPath "$.order.id" .Request.Body.String | toJSON }},
+     "expires": {{ now | timeAdd "30 days" | formatTime "RFC3339" | toJSON }},
+     "items": {{ JSONPathAll "$.order.items[*].sku" .Request.Body.String | len }}}
+  template:
+    enabled: true
+```
+
+**Environment variables.** `env` reads only the variables the server's settings name, by exact name: `template.env` (`--template-env API_URL,TENANT`, `VLATTE_TEMPLATE_ENV`, or `Setup().TemplateEnv(...)` in Go) and `grpc.template.env` for gRPC mocks. Without it, templates read none, so a mock file can't print the server's secrets. A mock whose template names a variable that isn't allowed fails as it loads; a name read from the request is checked when it renders. An allowed variable that isn't set is `""`: `{{ env "TENANT" | default "acme" }}`. On an engine of your own, allow them with `vlatte.WithEnv`.
+
+Add your own functions to the engine:
 
 ```go
 engine := vlatte.MustNewGoTemplateEngine(vlatte.WithTemplateFuncs(map[string]any{"upper": strings.ToUpper}))
@@ -376,7 +389,7 @@ m := mockhttp.MustNew(mockhttp.Setup().TemplateEngine(engine))
 
 **Missing keys** are errors. `{{ .Extra.nmae }}` fails the request and names the key, instead of writing `<no value>`, and so does `.Parameters.Get` of a parameter that isn't set. Read an optional key with `index`, as in `{{ with index .Extra "nick" }}{{ . }}{{ end }}`, and an optional parameter with `.Parameters.Has` first. `vlatte.WithMissingKey` changes the rule for map keys.
 
-**Escaping.** Templates are Go's `text/template`, so a body can be any format and nothing is escaped for you. Write JSON values with `toJson`, and use `html` or `urlquery` where they fit.
+**Escaping.** Templates are Go's `text/template`, so a body can be any format and nothing is escaped for you. Write JSON values with `toJSON`, and use `html` or `urlquery` where they fit.
 
 **Errors.** Templates compile when the mock is built, so one that doesn't compile fails the mock. A body file whose content is a template compiles when a request reads it, since its name can depend on the request. A template that fails at a request answers as a [failure](#failures): the error status, `VLatte-Error: reply`, and a body that names the mock and the error.
 
@@ -514,7 +527,7 @@ on_complete:
   - name: webhook
     parameters:
       method: POST
-      url_template: '{{ .Data.callback }}/orders/{{ (fromJson .Request.Body.String).id }}'
+      url_template: '{{ .Data.callback }}/orders/{{ (fromJSON .Request.Body.String).id }}'
       header:
         content-type: application/json
       body: '{"status": "paid"}'
@@ -600,13 +613,13 @@ The three share one engine, and answer alike:
 
 The target's TLS certificate isn't verified unless `ssl_verify: true`, so a target with a self-signed certificate answers. Set it for a target that gets credentials, such as `https://user:pass@api.local`, whose user info goes as Basic auth: over `http`, it goes in cleartext. `ssl_verify` also decides whether the certificate of an `https` proxy on the way, from `HTTPS_PROXY`, is verified.
 
-**Proxy all.** `ProxyAll(From(target))` in Go mocks what no other mock matches with a proxy reply, as WireMock's `--proxy-all` does: it matches any method and path, and comes last, at priority `math.MaxInt`. It leaves alone `CONNECT`s, and, on a server that is a forward proxy, the requests in absolute form, which the proxy sends on to their hosts. In a mock file, `proxy_all` takes the keys of `proxy` and makes the same mock, without `request`; a `ProxyAll` mock's description loads back as one. The `proxyall` recipe mocks it. The `proxy_all` setting does the same without a mock, so assertions don't count it, and `Clean` and `Reload` leave it: `vlatte --proxy-all-target=https://api.example.com`. It takes the keys of a mock file's `proxy` but `request_header` and `header`, which flags and variables can't give.
+**Proxy all.** `ProxyAll(From(target))` in Go mocks what no other mock matches with a proxy reply: it matches any method and path, and comes last, at priority `math.MaxInt`. It leaves alone `CONNECT`s, and, on a server that is a forward proxy, the requests in absolute form, which the proxy sends on to their hosts. In a mock file, `proxy_all` takes the keys of `proxy` and makes the same mock, without `request`; a `ProxyAll` mock's description loads back as one. The `proxyall` recipe mocks it. The `proxy_all` setting does the same without a mock, so assertions don't count it, and `Clean` and `Reload` leave it: `vlatte --proxy-all-target=https://api.example.com`. It takes the keys of a mock file's `proxy` but `request_header` and `header`, which flags and variables can't give.
 
 **Forward proxy.** A client sends its requests to the server in absolute form, `GET http://api.local/users`, and opens a tunnel with `CONNECT` for an `https` URL. A mock that matches the request answers it; mocks match the path and ignore the host, unless they match it, with `host` or an absolute `url`. A request no mock matches goes to its host. A request in origin form, `GET /users`, names no host: no mock matching it, it gets the no-match answer. `proxy.timeout` is the timeout, and `proxy.ssl_verify` verifies the certificates of the hosts, and of an `https` proxy on the way, `proxy.via` or the one of `HTTPS_PROXY`: none is verified by default. `proxy.via` sends the requests through another proxy, an `http`, `https`, `socks5` or `socks5h` URL whose user info goes as its credentials: a client's `Proxy-Authorization` is for vlatte, and doesn't go on.
 
 A `CONNECT` no mock matches opens a tunnel to its host, through `proxy.via` or the proxy of the environment, if any, within `proxy.timeout`, and the log shows that it opened. What goes through a tunnel, such as a TLS connection, isn't read: mocks don't see it, unless the proxy intercepts it. Each side of a tunnel ends what it sends on its own, and the tunnel closes once both did, or once the server closes. A tunnel needs HTTP/1.1, and a response writer that can hijack its connection: a middleware's writer must unwrap, with `Unwrap() http.ResponseWriter`, to the server's.
 
-**HTTPS interception.** With `proxy.intercept` (`ProxyConfig{Intercept: true}` in Go), the proxy serves the TLS of a `CONNECT` no mock matches itself, as WireMock's HTTPS browser proxying does. It answers with a certificate for the host the `CONNECT` names, or the name the client asks for, signed by its CA, which clients must trust. The requests within are then the server's own, for `https://` that host, which `scheme` and an absolute `url` see: mocks answer them, recordings record them, the log shows them, and the proxy sends the rest on to the host. A connection that doesn't start with TLS goes to the host through a tunnel, as does one whose client offers only `h2` by ALPN, such as a gRPC client, and one whose client sends nothing for 2 seconds, waiting for a host that speaks first, such as an SSH server: a host the proxy can't reach then closes the connection, as the `200` went out already. `proxy.ca_cert` and `proxy.ca_key` name the CA's files, which the settings need: a CA's certificate, or an intermediate CA's, followed by its chain, which the proxy sends with each host's. In Go, `ProxyConfig.CA` sets it, and without one, the server makes a CA of its own, valid for a year, which `m.ProxyCA()` returns for clients to trust:
+**HTTPS interception.** With `proxy.intercept` (`ProxyConfig{Intercept: true}` in Go), the proxy serves the TLS of a `CONNECT` no mock matches itself. It answers with a certificate for the host the `CONNECT` names, or the name the client asks for, signed by its CA, which clients must trust. The requests within are then the server's own, for `https://` that host, which `scheme` and an absolute `url` see: mocks answer them, recordings record them, the log shows them, and the proxy sends the rest on to the host. A connection that doesn't start with TLS goes to the host through a tunnel, as does one whose client offers only `h2` by ALPN, such as a gRPC client, and one whose client sends nothing for 2 seconds, waiting for a host that speaks first, such as an SSH server: a host the proxy can't reach then closes the connection, as the `200` went out already. `proxy.ca_cert` and `proxy.ca_key` name the CA's files, which the settings need: a CA's certificate, or an intermediate CA's, followed by its chain, which the proxy sends with each host's. In Go, `ProxyConfig.CA` sets it, and without one, the server makes a CA of its own, valid for a year, which `m.ProxyCA()` returns for clients to trust:
 
 ```go
 m := mockhttp.MustNew(mockhttp.Setup().Proxy(&mockhttp.ProxyConfig{Intercept: true}))
@@ -912,7 +925,7 @@ mockhttp.Setup().AdminStore(func(app *mockhttp.Server) (vlatte.Store[*mockhttp.M
 
 ## Request journal
 
-A server can keep a journal of the requests its mocks get, whatever their outcome: a mock answered it (`matched`), none matched (`unmatched`), another server did (`proxied`), serving it failed (`failed`), or its client left first (`abandoned`). A test then verifies the requests it sent, as WireMock's `verify` does, while matching and hits work as before. Each entry has the status the client got: the one a reply that writes its own answer sent, as `Handler` does, `200` when it sent none, and for a failure the status sent before it, else `error_status_code`, as for a panic. A middleware (`Use`) or the decorator (`HandlerDecorator`) that answers before the mock, in its place, or once a timeout ends it, sets that status, as it does in the logs and the admin API's events.
+A server can keep a journal of the requests its mocks get, whatever their outcome: a mock answered it (`matched`), none matched (`unmatched`), another server did (`proxied`), serving it failed (`failed`), or its client left first (`abandoned`). A test then verifies the requests it sent, while matching and hits work as before. Each entry has the status the client got: the one a reply that writes its own answer sent, as `Handler` does, `200` when it sent none, and for a failure the status sent before it, else `error_status_code`, as for a panic. A middleware (`Use`) or the decorator (`HandlerDecorator`) that answers before the mock, in its place, or once a timeout ends it, sets that status, as it does in the logs and the admin API's events.
 
 ```go
 m := mockhttp.MustNew(mockhttp.Setup().Journal("")) // "" keeps it in a temporary directory, which Close removes

@@ -106,7 +106,7 @@ func healthSet(t *testing.T, pkg string) (string, protoreflect.FileDescriptor) {
 
 func TestCLI_ServesGRPCMocksOfDescriptorSets(t *testing.T) {
 	// The command served HTTP mocks only. Given descriptor sets and mock files, it serves gRPC mocks of services it
-	// has no code of, as WireMock does with .dsc files, next to the HTTP ones.
+	// has no code of, next to the HTTP ones.
 	withoutDockerHost(t)
 
 	set, file := healthSet(t, "mock.health.v1")
