@@ -41,6 +41,21 @@ func TestHealth_IsUnhealthyWhenTheServerIsNotReady(t *testing.T) {
 	require.Equal(t, "health: GET "+srv.URL+"/readyz: 503 Service Unavailable\n", errOut.String())
 }
 
+func TestHealth_ProbesTheImageAdminAPIByDefault(t *testing.T) {
+	// Without a URL, the command asks the readiness probe of the image's admin API, on VLATTE_DOCKER_HOST.
+	t.Setenv(_dockerHostEnv, "vlatte.invalid")
+
+	var errOut bytes.Buffer
+	require.Equal(t, 1, run(t.Context(), []string{"health"}, nil, io.Discard, &errOut))
+	require.Contains(t, errOut.String(), `Get "http://vlatte.invalid:8081/readyz"`)
+}
+
+func TestHealth_FailsForAURLItCantAsk(t *testing.T) {
+	var errOut bytes.Buffer
+	require.Equal(t, 1, run(t.Context(), []string{"health", "http://a b"}, nil, io.Discard, &errOut))
+	require.Equal(t, "health: parse \"http://a b\": invalid character \" \" in host name\n", errOut.String())
+}
+
 func TestHealth_TakesOneURLAtMost(t *testing.T) {
 	var errOut bytes.Buffer
 	require.Equal(t, 2, run(t.Context(), []string{"health", "http://a", "http://b"}, nil, io.Discard, &errOut))
