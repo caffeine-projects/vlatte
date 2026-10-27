@@ -99,6 +99,16 @@ func WithMaybeItems(key string, items []any) Descriptor {
 	return New(key, props)
 }
 
+// Fail creates a descriptor of something a description can't hold, such as a function. Encoding it, or any
+// description that holds it, fails with err, rather than describe it as something else.
+func Fail(key string, err error) Descriptor {
+	if len(key) == 0 {
+		panic(ErrKeyEmpty)
+	}
+
+	return Descriptor{Key: key, err: err}
+}
+
 func Root[T P](props T) Descriptor {
 	return Descriptor{Key: "root", Props: props, root: true}
 }
@@ -119,11 +129,16 @@ type Descriptor struct {
 	Props Props
 
 	root bool
+	err  error // why it can't be described, from Fail
 }
 
 func (d Descriptor) Validate() error {
 	if len(d.Key) == 0 {
 		return ErrKeyEmpty
+	}
+
+	if d.err != nil {
+		return d.err
 	}
 
 	switch t := d.Props.(type) {
@@ -137,6 +152,11 @@ func (d Descriptor) Validate() error {
 	}
 
 	return nil
+}
+
+// Err returns why d can't be described, as Fail gave it, or nil.
+func (d Descriptor) Err() error {
+	return d.err
 }
 
 func (d Descriptor) Root() bool {
@@ -176,6 +196,10 @@ func (d Descriptor) String() string {
 
 // Marshallable returns the Descriptor in a format that can be marshalled by any encoder.
 func (d Descriptor) Marshallable() (any, error) {
+	if d.err != nil {
+		return nil, d.err
+	}
+
 	switch t := d.Props.(type) {
 	case nil:
 		return []any{d.Key}, nil
