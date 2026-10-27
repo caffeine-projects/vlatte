@@ -502,7 +502,7 @@ response:
 
 ## Server-Sent Events
 
-`Reply.EventStream` serves a `text/event-stream` body event by event, each flushed to the client as it goes, over HTTP/1.1 and HTTP/2. It sets `Content-Type: text/event-stream` and `Cache-Control: no-cache`, unless the reply sets them: a `Content-Type` header can add a charset. A status without a body, 1xx, 204 or 304, fails the mock.
+`Reply.EventStream` serves a `text/event-stream` body event by event, each flushed to the client as it goes, over HTTP/1.1 and HTTP/2. It sets `Content-Type: text/event-stream` and `Cache-Control: no-cache`, unless the reply sets them: a `Content-Type` header can add a charset. A HEAD request gets those headers only. A status without a body, 1xx, 204 or 304, fails the mock.
 
 ```go
 m.MustMock(mockhttp.Getf("/prices").Reply(mockhttp.OK().EventStream(mockhttp.NewEventStream(
