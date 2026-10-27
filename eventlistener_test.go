@@ -280,3 +280,54 @@ func TestEventRunner_EventsKeepTheValuesOfTheRequestContext(t *testing.T) {
 		require.NoError(t, ctxErr, "the client leaving cancels no event")
 	})
 }
+
+// preparer is an event listener that prepares its parameters with prepare.
+type preparer struct {
+	prepare func(cfg vlatte.EventConfig, engine vlatte.TemplateEngine) (vlatte.Parameters, error)
+}
+
+func (p preparer) Run(context.Context, vlatte.OnComplete) error { return nil }
+
+func (p preparer) Prepare(cfg vlatte.EventConfig, engine vlatte.TemplateEngine) (vlatte.Parameters, error) {
+	return p.prepare(cfg, engine)
+}
+
+func TestEventRegistry_Prepare(t *testing.T) {
+	engine := vlatte.MustNewGoTemplateEngine()
+	cfg := vlatte.EventConfig{Name: "hook", Parameters: map[string]any{"url": "x"}, Dir: "mocks"}
+
+	t.Run("a preparer gets the config and the engine, and its parameters are the event's", func(t *testing.T) {
+		r := vlatte.NewEventRegistry[vlatte.OnComplete]()
+		require.NoError(t, r.Register("hook", preparer{prepare: func(got vlatte.EventConfig, e vlatte.TemplateEngine) (vlatte.Parameters, error) {
+			require.Equal(t, cfg, got)
+			require.Same(t, engine, e)
+
+			return "prepared", nil
+		}}))
+
+		params, err := r.Prepare(cfg, engine)
+		require.NoError(t, err)
+		require.Equal(t, "prepared", params)
+	})
+
+	t.Run("a preparer's error is returned", func(t *testing.T) {
+		r := vlatte.NewEventRegistry[vlatte.OnComplete]()
+		require.NoError(t, r.Register("hook", preparer{prepare: func(vlatte.EventConfig, vlatte.TemplateEngine) (vlatte.Parameters, error) {
+			return nil, errors.New("hook: bad url")
+		}}))
+
+		_, err := r.Prepare(cfg, engine)
+		require.EqualError(t, err, "hook: bad url")
+	})
+
+	t.Run("other listeners and unknown names keep the parameters", func(t *testing.T) {
+		r := vlatte.NewEventRegistry[vlatte.OnComplete]()
+		require.NoError(t, r.Register("hook", vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })))
+
+		for _, name := range []string{"hook", "nobody"} {
+			params, err := r.Prepare(vlatte.EventConfig{Name: name, Parameters: cfg.Parameters}, engine)
+			require.NoError(t, err)
+			require.Equal(t, cfg.Parameters, params)
+		}
+	})
+}
