@@ -4,6 +4,7 @@ package scenariotest
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -230,13 +231,8 @@ func stateOf(t *testing.T, srv Server, name string) string {
 	scenarios, err := srv.Scenarios(t.Context())
 	require.NoError(t, err)
 
-	for _, scn := range scenarios {
-		if strings.EqualFold(scn.Name, name) {
-			return scn.State
-		}
-	}
+	i := slices.IndexFunc(scenarios, func(scn matchscenario.Scenario) bool { return strings.EqualFold(scn.Name, name) })
+	require.NotEqual(t, -1, i, "the server lists no scenario %s: %v", name, scenarios)
 
-	require.Failf(t, "no scenario", "the server lists no scenario %s: %v", name, scenarios)
-
-	return ""
+	return scenarios[i].State
 }
