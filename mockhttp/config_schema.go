@@ -383,6 +383,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		{Key: "admin", Kind: config.Bool, Hidden: true},
 		{Key: "admin.addr", Kind: config.String, Hidden: true},
 		{Key: "admin.dir", Kind: config.String, Hidden: true},
+		{Key: "admin.docs_version", Kind: config.String, Hidden: true},
 		{Key: "mcp", Kind: config.Bool, Hidden: true},
 		{
 			Key: "journal", Kind: config.Bool, Usage: "Keep a journal of the requests the server serves, of every outcome.",

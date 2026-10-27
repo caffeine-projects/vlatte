@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"sync"
 
 	adminserver "github.com/caffeine-projects/vlatte/internal/admin"
@@ -24,6 +25,9 @@ import (
 )
 
 var _ adminapi.API = (*Admin)(nil)
+
+// _version matches a version of an npm package: major.minor.patch, with a pre-release such as -beta.1 or not.
+var _version = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`)
 
 var (
 	// ErrServing is the error of an Admin given to a second mock server: it serves one.
@@ -56,6 +60,14 @@ func MCP() Option {
 	return func(a *Admin) { a.opts.MCP = true }
 }
 
+// DocsVersion sets the version of Scalar, the npm package @scalar/api-reference, that the documentation page of the
+// admin API, at / and /docs, loads from jsDelivr, such as 1.80.0: a newer one than vlatte pins, before vlatte ships
+// it. Empty, the default, is the version vlatte pins. The page checks the pinned version against the hash of its
+// file; it loads another unchecked, as its hash isn't known.
+func DocsVersion(version string) Option {
+	return func(a *Admin) { a.opts.DocsVersion = version }
+}
+
 // Use adds middlewares that wrap every HTTP request of the admin API, such as one that checks an authentication header.
 // They run in the order they are added, across calls, before the admin API routes the request: one that answers
 // without calling the next handler answers in place of the admin API. Requests that come once the mock server closes
@@ -64,7 +76,8 @@ func Use(middlewares ...func(http.Handler) http.Handler) Option {
 	return func(a *Admin) { a.opts.Middlewares = append(a.opts.Middlewares, middlewares...) }
 }
 
-// New creates an admin API. It fails on an address that is neither host:port, :port nor a port.
+// New creates an admin API. It fails on an address that is neither host:port, :port nor a port, and on a docs version
+// that isn't one, such as 1.80.0.
 func New(options ...Option) (*Admin, error) {
 	a := &Admin{}
 	for _, option := range options {
@@ -73,6 +86,10 @@ func New(options ...Option) (*Admin, error) {
 
 	if err := checkAddr(a.opts.Addr); err != nil {
 		return nil, err
+	}
+
+	if v := a.opts.DocsVersion; v != "" && !_version.MatchString(v) {
+		return nil, fmt.Errorf("admin: docs version %q: expected a version such as 1.80.0", v)
 	}
 
 	return a, nil

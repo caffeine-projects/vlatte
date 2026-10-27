@@ -32,14 +32,20 @@ tags:
     description: |
       Scenarios: mocks that match in turn, as a scenario moves from state to state. A scenario starts in `started`.
       HTTP mock servers only.
-  - name: Recording
-    description: |
-      Recording a service as mock files: the server sends the requests the recording takes to its target, and writes
-      the answers as mock files, which it serves once the recording stops. HTTP mock servers only.
   - name: Journal
     description: |
       The journal of the requests the server served, of every outcome, newest first: a changelog in files, indexed,
       kept across restarts when the server names a directory. A mock server without a journal answers `501`.
+  - name: Streams
+    description: What the server serves and logs, as it happens, as Server-Sent Events.
+  - name: Recording
+    description: |
+      Recording a service as mock files: the server sends the requests the recording takes to its target, and writes
+      the answers as mock files, which it serves once the recording stops. HTTP mock servers only.
+  - name: MCP
+    description: The admin API's operations as tools of the Model Context Protocol, for AI agents.
+  - name: Documentation
+    description: This document, and a page that renders it.
 paths:
   /health:
     get:
@@ -108,51 +114,23 @@ paths:
             application/yaml:
               schema: { $ref: "#/components/schemas/Health" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
-  /openapi:
-    get:
+  /reset:
+    post:
       tags: [Server]
-      operationId: getOpenAPI
-      summary: Get this document
-      description: This OpenAPI document, in JSON or YAML as `Accept` asks.
-      responses:
-        "200":
-          description: The OpenAPI document.
-          content:
-            application/json:
-              schema: { type: object }
-            application/yaml:
-              schema: { type: object }
-        "406": { $ref: "#/components/responses/NotAcceptable" }
-  /docs:
-    get:
-      tags: [Server]
-      operationId: getDocs
-      summary: Read this document
-      description: A page that renders this document. It loads its renderer, Scalar, from a CDN.
-      responses:
-        "200":
-          description: The page.
-          content:
-            text/html:
-              schema: { type: string }
-  /schema:
-    get:
-      tags: [Mocks]
-      operationId: getMockSchema
-      summary: Get the mock file schema
+      operationId: reset
+      summary: Reset the server between tests
       description: |
-        The JSON Schema of the server's mock files, in JSON or YAML as `Accept` asks, so a client writes mocks the
-        server takes. HTTP mock servers only.
+        Removes the mocks added through this API, loads the mock files again, saved ones included, starts every
+        scenario over, and clears the journal. Mocks added in code stay as they are. A server without mock files,
+        scenarios, or a journal, skips them. A persistent store loads again too: its mocks come back as it holds them,
+        and nothing is deleted from it.
       responses:
-        "200":
-          description: The JSON Schema of the mock files.
-          content:
-            application/json:
-              schema: { type: object }
-            application/yaml:
-              schema: { type: object }
+        "204":
+          description: The server is back to how it started.
+        "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
-        "501": { $ref: "#/components/responses/NotSupported" }
+        "409": { $ref: "#/components/responses/DuplicateID" }
+        "500": { $ref: "#/components/responses/LoadFailed" }
   /mocks:
     get:
       tags: [Mocks]
@@ -207,77 +185,6 @@ paths:
           description: The server has no mocks.
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
-  /mocks/validate:
-    post:
-      tags: [Mocks]
-      operationId: validateMock
-      summary: Check a mock without adding it
-      description: Builds the mock of the body as `POST /mocks` would, and answers the same, without adding it.
-      requestBody: { $ref: "#/components/requestBodies/Mock" }
-      responses:
-        "200":
-          description: The mock would be added.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/MockSummary" }
-            application/yaml:
-              schema: { $ref: "#/components/schemas/MockSummary" }
-        "400": { $ref: "#/components/responses/InvalidBody" }
-        "403": { $ref: "#/components/responses/CrossOrigin" }
-        "406": { $ref: "#/components/responses/NotAcceptable" }
-        "409": { $ref: "#/components/responses/DuplicateID" }
-        "413": { $ref: "#/components/responses/BodyTooLarge" }
-        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
-        "501": { $ref: "#/components/responses/NotSupported" }
-  /mocks/reload:
-    post:
-      tags: [Mocks]
-      operationId: reloadMocks
-      summary: Load the mock files and the persistent store again
-      description: |
-        Swaps the mocks of the mock files, and of the persistent store, for what they hold now, in one step. A mock
-        added through this API gives way to a mock file's mock with its id. When a file has problems, nothing changes.
-      responses:
-        "204":
-          description: The mock files were loaded.
-        "403": { $ref: "#/components/responses/CrossOrigin" }
-        "406": { $ref: "#/components/responses/NotAcceptable" }
-        "409": { $ref: "#/components/responses/DuplicateID" }
-        "500": { $ref: "#/components/responses/LoadFailed" }
-        "501": { $ref: "#/components/responses/NotSupported" }
-  /mocks/save:
-    post:
-      tags: [Mocks]
-      operationId: saveMocks
-      summary: Save the mocks added through this API as mock files
-      description: |
-        Writes each mock added through this API as a mock file, `<id>.mock.<format>`, into the directory, then serves
-        it from its file, which loads from then on: on the next start too, when the server's mock file patterns take
-        the directory, as they take `{workdir}/_mocks`, in the server's work directory, and YAML by default. Its relative body files are named from the
-        directory. When a mock can't be described as a mock file, nothing is written.
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/SaveSettings" }
-          application/yaml:
-            schema: { $ref: "#/components/schemas/SaveSettings" }
-      responses:
-        "200":
-          description: The mock files written.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/SavedFiles" }
-            application/yaml:
-              schema: { $ref: "#/components/schemas/SavedFiles" }
-        "400": { $ref: "#/components/responses/InvalidBody" }
-        "403": { $ref: "#/components/responses/CrossOrigin" }
-        "406": { $ref: "#/components/responses/NotAcceptable" }
-        "409": { $ref: "#/components/responses/DuplicateID" }
-        "413": { $ref: "#/components/responses/BodyTooLarge" }
-        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
-        "500": { $ref: "#/components/responses/SaveFailed" }
-        "501": { $ref: "#/components/responses/NotSupported" }
   /mocks/{id}:
     parameters:
       - name: id
@@ -361,145 +268,94 @@ paths:
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "404": { $ref: "#/components/responses/MockNotFound" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
-  /recording:
-    get:
-      tags: [Recording]
-      operationId: getRecording
-      summary: Get the state of the recording
+  /mocks/validate:
+    post:
+      tags: [Mocks]
+      operationId: validateMock
+      summary: Check a mock without adding it
+      description: Builds the mock of the body as `POST /mocks` would, and answers the same, without adding it.
+      requestBody: { $ref: "#/components/requestBodies/Mock" }
       responses:
         "200":
-          description: The state of the recording, inactive when none runs.
+          description: The mock would be added.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RecordingStatus" }
+              schema: { $ref: "#/components/schemas/MockSummary" }
             application/yaml:
-              schema: { $ref: "#/components/schemas/RecordingStatus" }
-        "406": { $ref: "#/components/responses/NotAcceptable" }
-        "501": { $ref: "#/components/responses/NotSupported" }
-    post:
-      tags: [Recording]
-      operationId: startRecording
-      summary: Start a recording
-      description: |
-        Starts a recording with the settings of the server's `record` section, which the body changes. One recording
-        runs at a time.
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/RecordingSettings" }
-          application/yaml:
-            schema: { $ref: "#/components/schemas/RecordingSettings" }
-      responses:
-        "201":
-          description: The recording started.
-          headers:
-            Location:
-              description: "`/recording`"
-              schema: { type: string }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/RecordingStatus" }
-            application/yaml:
-              schema: { $ref: "#/components/schemas/RecordingStatus" }
+              schema: { $ref: "#/components/schemas/MockSummary" }
         "400": { $ref: "#/components/responses/InvalidBody" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
-        "409": { $ref: "#/components/responses/RecordingActive" }
+        "409": { $ref: "#/components/responses/DuplicateID" }
         "413": { $ref: "#/components/responses/BodyTooLarge" }
         "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "501": { $ref: "#/components/responses/NotSupported" }
-    delete:
-      tags: [Recording]
-      operationId: stopRecording
-      summary: Stop the recording and serve it
+  /schema:
+    get:
+      tags: [Mocks]
+      operationId: getMockSchema
+      summary: Get the mock file schema
       description: |
-        Stops the recording, waits until it wrote what it took, and serves it: the mock files load again, with the
-        recording's directory. Calls it couldn't record, and why it isn't served, are in `errors`: it stopped all the
-        same.
+        The JSON Schema of the server's mock files, in JSON or YAML as `Accept` asks, so a client writes mocks the
+        server takes. HTTP mock servers only.
       responses:
         "200":
-          description: The recording stopped.
+          description: The JSON Schema of the mock files.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RecordingResult" }
+              schema: { type: object }
             application/yaml:
-              schema: { $ref: "#/components/schemas/RecordingResult" }
-        "403": { $ref: "#/components/responses/CrossOrigin" }
+              schema: { type: object }
         "406": { $ref: "#/components/responses/NotAcceptable" }
-        "409": { $ref: "#/components/responses/NotRecording" }
         "501": { $ref: "#/components/responses/NotSupported" }
-  /recorder:
-    get:
-      tags: [Recording]
-      operationId: getRecorder
-      summary: Record from a browser
-      description: A page that starts and stops recordings, and shows what they wrote.
-      responses:
-        "200":
-          description: The page.
-          content:
-            text/html:
-              schema: { type: string }
-  /reset:
+  /mocks/reload:
     post:
-      tags: [Server]
-      operationId: reset
-      summary: Reset the server between tests
+      tags: [Mocks]
+      operationId: reloadMocks
+      summary: Load the mock files and the persistent store again
       description: |
-        Removes the mocks added through this API, loads the mock files again, saved ones included, starts every
-        scenario over, and clears the journal. Mocks added in code stay as they are. A server without mock files,
-        scenarios, or a journal, skips them. A persistent store loads again too: its mocks come back as it holds them,
-        and nothing is deleted from it.
+        Swaps the mocks of the mock files, and of the persistent store, for what they hold now, in one step. A mock
+        added through this API gives way to a mock file's mock with its id. When a file has problems, nothing changes.
       responses:
         "204":
-          description: The server is back to how it started.
+          description: The mock files were loaded.
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "409": { $ref: "#/components/responses/DuplicateID" }
         "500": { $ref: "#/components/responses/LoadFailed" }
-  /events:
-    get:
-      tags: [Server]
-      operationId: streamEvents
-      summary: Follow what the server serves
-      description: |
-        Streams what the mock server serves, as it happens, as Server-Sent Events: each event's type is the `type` of
-        its data, a JSON `Event`. Nothing is kept: a client gets the events that come while it listens, and one that
-        falls behind misses some. The journal, `/requests`, keeps the requests.
-      responses:
-        "200":
-          description: The stream of events.
-          content:
-            text/event-stream:
-              schema:
-                type: string
-                description: "Server-Sent Events, such as `event: matched` then `data: {\"type\": \"matched\", ...}`."
-              example: |
-                event: matched
-                data: {"method":"GET","mock_id":"hello","request_id":"7f3a","status":200,"target":"http://127.0.0.1:8080/hello","time":"2026-10-20T12:00:00Z","type":"matched"}
-
         "501": { $ref: "#/components/responses/NotSupported" }
-  /logs:
-    get:
-      tags: [Server]
-      operationId: streamLogs
-      summary: Follow the server's log
+  /mocks/save:
+    post:
+      tags: [Mocks]
+      operationId: saveMocks
+      summary: Save the mocks added through this API as mock files
       description: |
-        Streams the log lines of the mock server, as it writes them, as Server-Sent Events of type `log`: each one's
-        data is a JSON log line. Nothing is kept. A server that logs through a logger it was given streams none.
+        Writes each mock added through this API as a mock file, `<id>.mock.<format>`, into the directory, then serves
+        it from its file, which loads from then on: on the next start too, when the server's mock file patterns take
+        the directory, as they take `{workdir}/_mocks`, in the server's work directory, and YAML by default. Its relative body files are named from the
+        directory. When a mock can't be described as a mock file, nothing is written.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SaveSettings" }
+          application/yaml:
+            schema: { $ref: "#/components/schemas/SaveSettings" }
       responses:
         "200":
-          description: The stream of log lines.
+          description: The mock files written.
           content:
-            text/event-stream:
-              schema:
-                type: string
-                description: "Server-Sent Events: `event: log` then `data: {\"level\": \"info\", ...}`."
-              example: |
-                event: log
-                data: {"level":"info","url":"/hello","time":"2026-10-20T12:00:00Z","message":"---> REQUEST RECEIVED GET /hello"}
-
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedFiles" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/SavedFiles" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/DuplicateID" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "500": { $ref: "#/components/responses/SaveFailed" }
         "501": { $ref: "#/components/responses/NotSupported" }
   /scenarios:
     get:
@@ -650,9 +506,132 @@ paths:
         "404": { $ref: "#/components/responses/RequestNotFound" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "501": { $ref: "#/components/responses/NotSupported" }
+  /events:
+    get:
+      tags: [Streams]
+      operationId: streamEvents
+      summary: Follow what the server serves
+      description: |
+        Streams what the mock server serves, as it happens, as Server-Sent Events: each event's type is the `type` of
+        its data, a JSON `Event`. Nothing is kept: a client gets the events that come while it listens, and one that
+        falls behind misses some. The journal, `/requests`, keeps the requests.
+      responses:
+        "200":
+          description: The stream of events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "Server-Sent Events, such as `event: matched` then `data: {\"type\": \"matched\", ...}`."
+              example: |
+                event: matched
+                data: {"method":"GET","mock_id":"hello","request_id":"7f3a","status":200,"target":"http://127.0.0.1:8080/hello","time":"2026-10-20T12:00:00Z","type":"matched"}
+
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /logs:
+    get:
+      tags: [Streams]
+      operationId: streamLogs
+      summary: Follow the server's log
+      description: |
+        Streams the log lines of the mock server, as it writes them, as Server-Sent Events of type `log`: each one's
+        data is a JSON log line. Nothing is kept. A server that logs through a logger it was given streams none.
+      responses:
+        "200":
+          description: The stream of log lines.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "Server-Sent Events: `event: log` then `data: {\"level\": \"info\", ...}`."
+              example: |
+                event: log
+                data: {"level":"info","url":"/hello","time":"2026-10-20T12:00:00Z","message":"---> REQUEST RECEIVED GET /hello"}
+
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /recording:
+    get:
+      tags: [Recording]
+      operationId: getRecording
+      summary: Get the state of the recording
+      responses:
+        "200":
+          description: The state of the recording, inactive when none runs.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingStatus" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/RecordingStatus" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    post:
+      tags: [Recording]
+      operationId: startRecording
+      summary: Start a recording
+      description: |
+        Starts a recording with the settings of the server's `record` section, which the body changes. One recording
+        runs at a time.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordingSettings" }
+          application/yaml:
+            schema: { $ref: "#/components/schemas/RecordingSettings" }
+      responses:
+        "201":
+          description: The recording started.
+          headers:
+            Location:
+              description: "`/recording`"
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingStatus" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/RecordingStatus" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/RecordingActive" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    delete:
+      tags: [Recording]
+      operationId: stopRecording
+      summary: Stop the recording and serve it
+      description: |
+        Stops the recording, waits until it wrote what it took, and serves it: the mock files load again, with the
+        recording's directory. Calls it couldn't record, and why it isn't served, are in `errors`: it stopped all the
+        same.
+      responses:
+        "200":
+          description: The recording stopped.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingResult" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/RecordingResult" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/NotRecording" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /recorder:
+    get:
+      tags: [Recording]
+      operationId: getRecorder
+      summary: Record from a browser
+      description: A page that starts and stops recordings, and shows what they wrote.
+      responses:
+        "200":
+          description: The page.
+          content:
+            text/html:
+              schema: { type: string }
   /mcp:
     post:
-      tags: [Server]
+      tags: [MCP]
       operationId: serveMCP
       summary: Call the admin API over MCP
       description: |
@@ -675,6 +654,47 @@ paths:
         "202":
           description: The notification or response was accepted.
         "501": { $ref: "#/components/responses/NotSupported" }
+  /:
+    get:
+      tags: [Documentation]
+      operationId: getRoot
+      summary: Read this document at the root
+      description: The page of `/docs`, at the root of the admin API, so its address alone shows the documentation.
+      responses:
+        "200":
+          description: The page.
+          content:
+            text/html:
+              schema: { type: string }
+  /docs:
+    get:
+      tags: [Documentation]
+      operationId: getDocs
+      summary: Read this document
+      description: |
+        A page that renders this document. It loads its renderer, Scalar, from a CDN: the version vlatte pins, or the
+        one the admin API was given.
+      responses:
+        "200":
+          description: The page.
+          content:
+            text/html:
+              schema: { type: string }
+  /openapi:
+    get:
+      tags: [Documentation]
+      operationId: getOpenAPI
+      summary: Get this document
+      description: This OpenAPI document, in JSON or YAML as `Accept` asks.
+      responses:
+        "200":
+          description: The OpenAPI document.
+          content:
+            application/json:
+              schema: { type: object }
+            application/yaml:
+              schema: { type: object }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
 components:
   requestBodies:
     Mock:

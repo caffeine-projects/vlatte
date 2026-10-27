@@ -44,8 +44,9 @@ var _routes = []struct {
 	{pattern: "GET /livez"},
 	{pattern: "GET /readyz"},
 	{pattern: "GET /startupz"},
-	{pattern: "GET /openapi"},
+	{pattern: "GET /{$}"},
 	{pattern: "GET /docs"},
+	{pattern: "GET /openapi"},
 	{pattern: "GET /schema", lacking: "describe its mock files"},
 	{pattern: "GET /mocks"},
 	{pattern: "POST /mocks", lacking: "build mocks from documents"},
@@ -144,6 +145,9 @@ type Options struct {
 	// Middlewares wrap every HTTP request of the admin API, the first outermost. They run before the cross-origin
 	// check and the routes, and not for MCP over stdio.
 	Middlewares []func(http.Handler) http.Handler
+
+	// DocsVersion is the version of Scalar the docs page loads. Empty is the version vlatte pins.
+	DocsVersion string
 }
 
 // New creates the admin API of the mock server of caps, which needs its Mocks.
@@ -164,9 +168,11 @@ func New(opts Options, caps adminapi.Capabilities) (*Server, error) {
 
 	ops := handler.NewOperations(caps)
 
+	docs := handler.Docs(opts.DocsVersion)
 	routes := map[string]http.Handler{
+		"GET /{$}":      docs,
+		"GET /docs":     docs,
 		"GET /openapi":  handler.OpenAPI(),
-		"GET /docs":     handler.Docs(),
 		"GET /recorder": handler.RecorderPage(),
 	}
 

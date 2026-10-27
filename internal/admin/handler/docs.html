@@ -17,15 +17,18 @@
 </head>
 <body>
   <div id="app"></div>
-  <!-- Scalar renders the OpenAPI document. Its version is pinned, and the integrity hash is that of the file npm publishes. -->
+  <!--
+    Scalar renders the OpenAPI document. Its version is pinned, and the integrity hash is that of the file npm
+    publishes, unless the admin API was given another version, whose hash isn't known. Docs fills in both.
+  -->
   <script
-    src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.75.1/dist/browser/standalone.js"
-    integrity="sha384-G+2Q2i9l3PPfmYkk0b4BAIUrs7xb/DNaTL1wCYYab4c9dIKlCyiqzC0Qx3eq9Wf6"
+    src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@{version}/dist/browser/standalone.js"
+    {integrity}
     crossorigin="anonymous"></script>
   <script>
     // The configuration of the page: see https://scalar.com/products/api-references/configuration
     Scalar.createApiReference('#app', {
-      // The admin API's own document, next to this page: /openapi.
+      // The admin API's own document, next to this page, at / or /docs: /openapi.
       url: 'openapi',
       // Past the script itself, the page reaches no third party: no telemetry, assistants or web fonts.
       telemetry: false,
