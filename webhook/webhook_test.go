@@ -464,18 +464,28 @@ func TestWebHook_Timeout(t *testing.T) {
 }
 
 func TestWebHook_TimeoutPrecedence(t *testing.T) {
-	// The vlatte command set the timeout by writing the WebHook's field once its settings loaded. Now the server gives
-	// its webhook.timeout to the event, and a webhook's own timeout wins over it, so a Go user's WithTimeout isn't
-	// overwritten by a setting.
+	// A timeout is a webhook setting like any other: a webhook's own timeout parameter wins, as the most specific,
+	// over WithTimeout, the timeout of every webhook its listener sends, such as the vlatte command's webhook.timeout
+	// setting. Without either, a webhook waits 10s.
 	testCases := []struct {
 		name   string
 		option time.Duration
-		server time.Duration
+		params vlatte.Parameters
 		want   time.Duration
 	}{
-		{name: "WithTimeout wins over the server's", option: time.Minute, server: 5 * time.Second, want: time.Minute},
-		{name: "the server's without WithTimeout", server: 5 * time.Second, want: 5 * time.Second},
-		{name: "10s without either", want: 10 * time.Second},
+		{
+			name: "the parameter wins over WithTimeout", option: time.Minute, want: time.Second,
+			params: map[string]any{"url": "http://hooks.test/slow", "timeout": "1s"},
+		},
+		{
+			name: "the parameter set in Go", option: time.Minute, want: 2 * time.Second,
+			params: Options().URL("http://hooks.test/slow").Timeout(2 * time.Second).Build("webhook").Parameters,
+		},
+		{
+			name: "WithTimeout without the parameter", option: time.Minute, want: time.Minute,
+			params: map[string]any{"url": "http://hooks.test/slow"},
+		},
+		{name: "10s without either", params: map[string]any{"url": "http://hooks.test/slow"}, want: 10 * time.Second},
 	}
 
 	for _, tc := range testCases {
@@ -490,7 +500,7 @@ func TestWebHook_TimeoutPrecedence(t *testing.T) {
 				require.NoError(t, err)
 
 				start := time.Now()
-				err = wh.Run(t.Context(), timedOnComplete{params: map[string]any{"url": "http://hooks.test/slow"}, timeout: tc.server})
+				err = wh.Run(t.Context(), onComplete{params: tc.params})
 
 				require.ErrorIs(t, err, context.DeadlineExceeded)
 				require.Equal(t, tc.want, time.Since(start))
@@ -498,15 +508,6 @@ func TestWebHook_TimeoutPrecedence(t *testing.T) {
 		})
 	}
 }
-
-// timedOnComplete is an event that gives a webhook timeout, as mockhttp's gives the server's.
-type timedOnComplete struct {
-	onComplete
-
-	timeout time.Duration
-}
-
-func (e timedOnComplete) WebhookTimeout() time.Duration { return e.timeout }
 
 // silent is a RoundTripper whose target never answers: it returns when the request's context ends.
 type silent struct{}
@@ -1199,7 +1200,7 @@ func TestArgs_ADescriptionDecodesBack(t *testing.T) {
 			args: &Args{
 				URL: "http://hooks.test/x", Method: "POST", Header: http.Header{"X-A": {"1"}},
 				HeaderTemplate: map[string][]string{"X-B": {"{{ .Request.Method }}"}}, BodyTemplate: "{{ .Request.URL }}",
-				Delay: 1500 * time.Millisecond,
+				Delay: 1500 * time.Millisecond, Timeout: 2 * time.Second,
 			},
 		},
 		{
@@ -1421,6 +1422,7 @@ func TestArgsFromMap(t *testing.T) {
 		"header_template": map[string]any{"B": "{{ .X }}"},
 		"body_template":   "x",
 		"delay":           "1.5s",
+		"timeout":         "2s",
 	})
 
 	require.NoError(t, err)
@@ -1431,6 +1433,7 @@ func TestArgsFromMap(t *testing.T) {
 		HeaderTemplate: map[string][]string{"B": {"{{ .X }}"}},
 		BodyTemplate:   "x",
 		Delay:          1500 * time.Millisecond,
+		Timeout:        2 * time.Second,
 	}, args)
 }
 
@@ -1452,7 +1455,7 @@ func TestArgsFromMap_ReportsEveryProblem(t *testing.T) {
   on_complete: conflict: parameters.body_file is set with parameters.body; keep one of them
   on_complete: invalid_value: parameters.header.X must be a string or a list of strings, not a number; write it in quotes: "1"
   on_complete: unknown_key: parameters.log_level is not a known setting; `+
-		`the keys under parameters are url, url_template, method, header, header_template, body, body_template, body_file, multipart, multipart_template, delay
+		`the keys under parameters are url, url_template, method, header, header_template, body, body_template, body_file, multipart, multipart_template, delay, timeout
   on_complete: invalid_value: parameters.method must be a string, not a number; write it in quotes: "5"
   on_complete: conflict: parameters.url_template is set with parameters.url; keep one of them`)
 }
@@ -1500,7 +1503,7 @@ func takes(key string, v any) bool {
 		}
 
 		return false
-	case "delay":
+	case "delay", "timeout":
 		// Whole milliseconds from 0, or a Go duration, which no drawn string is.
 		switch v.(type) {
 		case int, int64:
@@ -1549,7 +1552,7 @@ func TestPropArgsFromMap_Types(t *testing.T) {
 	// lists of strings, for headers, whatever Go types code builds them with. Keys the webhook doesn't read are never taken.
 	keys := []string{
 		"url", "url_template", "method", "body", "body_template", "body_file", "header", "header_template",
-		"multipart", "multipart_template", "delay", "log_level", "ssl_verify",
+		"multipart", "multipart_template", "delay", "timeout", "log_level", "ssl_verify",
 	}
 	values := []any{
 		nil, true, "x", "", 5, int64(5), 1.5, float32(0.5),
@@ -1582,7 +1585,7 @@ func TestPropArgsFromMap_Types(t *testing.T) {
 		got := map[string]any{
 			"url": args.URL, "url_template": args.URLTemplate, "method": args.Method, "body": args.Body,
 			"body_template": args.BodyTemplate, "body_file": args.BodyFile, "header": args.Header, "header_template": args.HeaderTemplate,
-			"delay": args.Delay,
+			"delay": args.Delay, "timeout": args.Timeout,
 		}
 
 		switch x := v.(type) {
@@ -2105,6 +2108,18 @@ func TestWebHook_PrepareFailsTheMock(t *testing.T) {
 			params:   &Args{URL: "http://localhost", Delay: -time.Second},
 			sentinel: ErrBadArg,
 			want:     "webhook: bad argument: delay -1s is negative",
+		},
+		{
+			name:     "a negative timeout",
+			params:   map[string]any{"url": "http://localhost", "timeout": -1},
+			sentinel: ErrBadArg,
+			want:     "invalid_value: parameters.timeout must be 0 or more",
+		},
+		{
+			name:     "a negative timeout in Go",
+			params:   &Args{URL: "http://localhost", Timeout: -time.Second},
+			sentinel: ErrBadArg,
+			want:     "webhook: bad argument: timeout -1s is negative",
 		},
 		{
 			name:     "a method that isn't one",

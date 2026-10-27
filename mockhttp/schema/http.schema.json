@@ -269,6 +269,7 @@
         "header_template": { "description": "Headers whose values are templates.", "$ref": "#/$defs/header_map" },
         "trailer": { "$ref": "#/$defs/header_map" },
         "body": { "description": "Text as is; anything else as JSON.", "not": { "type": "null" } },
+        "body_base64": { "description": "The bytes of the body in standard base64, for a body that isn't UTF-8 text, such as an image. Line breaks are ignored.", "type": "string", "contentEncoding": "base64", "pattern": "^[\\r\\n]*(([A-Za-z0-9+/][\\r\\n]*){4})*(([A-Za-z0-9+/][\\r\\n]*){2}=[\\r\\n]*=|([A-Za-z0-9+/][\\r\\n]*){3}=)?[\\r\\n]*$" },
         "body_file": { "description": "Relative paths start at the mock file's directory. The name is a template: one rendered from the request must stay inside that directory.", "type": "string", "minLength": 1 },
         "multipart": { "$ref": "#/$defs/multipart" },
         "template": {
@@ -284,7 +285,10 @@
       "additionalProperties": false,
       "allOf": [
         { "not": { "required": [ "body", "body_file" ] } },
+        { "not": { "required": [ "body", "body_base64" ] } },
         { "not": { "required": [ "body", "multipart" ] } },
+        { "not": { "required": [ "body_base64", "body_file" ] } },
+        { "not": { "required": [ "body_base64", "multipart" ] } },
         { "not": { "required": [ "body_file", "multipart" ] } }
       ]
     },
@@ -346,7 +350,8 @@
         "body_file": { "description": "A file to send as the body. Relative paths start at the mock file's directory.", "type": "string" },
         "multipart": { "description": "A multipart body, as response.multipart. It's sent at once, so its parts can't have delays.", "$ref": "#/$defs/multipart" },
         "multipart_template": { "description": "A multipart body whose text is templates.", "$ref": "#/$defs/multipart" },
-        "delay": { "description": "How long to wait before sending, once the mock replied. The response waits for it too.", "$ref": "#/$defs/duration" }
+        "delay": { "description": "How long to wait before sending, once the mock replied. The response waits for it too.", "$ref": "#/$defs/duration" },
+        "timeout": { "description": "How long the request may take, from sending it to its answer. Without it, the listener's timeout, or else 10s.", "$ref": "#/$defs/duration" }
       },
       "additionalProperties": false,
       "oneOf": [ { "required": [ "url" ] }, { "required": [ "url_template" ] } ],

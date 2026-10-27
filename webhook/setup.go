@@ -81,6 +81,13 @@ func (b *ArgsBuilder) Delay(d time.Duration) *ArgsBuilder {
 	return b
 }
 
+// Timeout limits how long the request of the WebHook may take, from sending it to its answer. It wins over the
+// listener's webhook.WithTimeout.
+func (b *ArgsBuilder) Timeout(d time.Duration) *ArgsBuilder {
+	b.input.Timeout = d
+	return b
+}
+
 // Multipart sets a multipart body for the WebHook, such as one built with mockhttp.MultipartForm. For a body whose
 // text is templates, call Template on it: mockhttp.MultipartForm(...).Template().
 func (b *ArgsBuilder) Multipart(body MultipartBody) *ArgsBuilder {

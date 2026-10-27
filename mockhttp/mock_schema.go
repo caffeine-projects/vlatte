@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -115,7 +116,7 @@ type replyDef struct {
 	header         []headerValue
 	headerTemplate []headerValue
 	trailer        []headerValue
-	body           any
+	body           any // text, a JSON value, or the bytes of body_base64
 	hasBody        bool
 	bodyFile       string
 	templated      bool
@@ -591,6 +592,19 @@ var _replySchema = config.NewSchema(
 		},
 	},
 	replyField{
+		Key: "body_base64", Kind: config.String, Usage: "Body: bytes in standard base64, for a body that isn't UTF-8 text, such as an image. Line breaks are ignored.",
+		Set: func(r *replyDef, v config.Value) error {
+			b, err := base64.StdEncoding.DecodeString(v.Str)
+			if err != nil {
+				return config.Invalid(v, v.Key+" isn't standard base64: "+err.Error(), "encode the bytes with base64, padding included")
+			}
+
+			r.body, r.hasBody = b, true
+
+			return nil
+		},
+	},
+	replyField{
 		Key: "body_file", Kind: config.String, Usage: "File to read the body from. Relative paths start at the mock file's directory.",
 		Set: func(r *replyDef, v config.Value) error {
 			if v.Str == "" {
@@ -878,7 +892,7 @@ func decodeReply(r *replyDef, v config.Value) error {
 	obj, _ := v.Any.(map[string]any)
 
 	var bodies []string
-	for _, key := range []string{"body", "body_file", "multipart"} {
+	for _, key := range []string{"body", "body_base64", "body_file", "multipart"} {
 		if _, ok := obj[key]; ok {
 			bodies = append(bodies, key)
 		}
@@ -888,10 +902,14 @@ func decodeReply(r *replyDef, v config.Value) error {
 
 	// A template is text: a JSON body would be written as it is, with nothing rendered.
 	if _, isText := r.body.(string); r.templated && r.hasBody && !isText {
-		key := v.Key + ".template.enabled"
+		key, body := v.Key+".template.enabled", v.Key+".body"
+		if _, ok := obj["body_base64"]; ok {
+			body = v.Key + ".body_base64"
+		}
+
 		problems = append(problems, config.Problem{
 			Code: config.CodeConflict, Origin: v.Origin, Key: key,
-			Message: key + " is set with " + v.Key + ".body, which isn't text",
+			Message: key + " is set with " + body + ", which isn't text",
 			Hint:    "write the body as a string to render it as a template",
 		})
 	}
@@ -1457,7 +1475,10 @@ func (r *replyDef) build(dir string) *Reply {
 		}
 	case r.hasBody:
 		s, isText := r.body.(string)
+		b, isBytes := r.body.([]byte)
 		switch {
+		case isBytes:
+			rep.Body(b)
 		case isText && templated:
 			rep.BodyTemplate(s)
 		case isText:
