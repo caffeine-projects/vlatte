@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,6 +109,42 @@ func TestJournal_KeepsEachCallOnceWhateverItsOutcome(t *testing.T) {
 	require.True(t, m.AssertRequested(t.Context(), ft, 5, journal.Query{Kind: Kind, Path: match.HasSuffix("/Greetings")}))
 	require.True(t, m.AssertRequested(t.Context(), ft, 5, journal.Query{Header: map[string]vlatte.Matcher{"X-Team": match.Equal("core")}}))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
+}
+
+func TestJournal_AMatchedCallTellsTheEventsThatFailed(t *testing.T) {
+	// An on_complete event, such as a webhook, runs once the mock answered, and never changes the answer: the entry
+	// is where a test sees that one failed, and why, as for HTTP. The call still counts as matched.
+	m, c := journaled(t, Setup())
+
+	fails := func(msg string) vlatte.EventFunc[vlatte.OnComplete] {
+		return func(context.Context, vlatte.OnComplete) error { return errors.New(msg) }
+	}
+	succeeds := func(context.Context, vlatte.OnComplete) error { return nil }
+
+	m.MustMock(
+		Method("Greetings").Field("message", match.Equal("failed")).
+			Callback(fails("target answered 500")).Callback(succeeds).Callback(fails("target unreachable")).
+			Reply(Message(&pb.HiRes{Message: "hello"})),
+		Method("Greetings").Field("message", match.Equal("ok")).Callback(succeeds).Reply(Message(&pb.HiRes{Message: "hello"})),
+	)
+
+	for _, message := range []string{"failed", "ok"} {
+		_, err := c.Greetings(t.Context(), &pb.HiReq{Message: message})
+		require.NoError(t, err)
+	}
+
+	failed := onlyCall(t, m, journal.Query{Body: match.Field("message", match.Equal("failed"))})
+	require.Equal(t, journal.OutcomeMatched, failed.Outcome)
+	require.Equal(t, int(codes.OK), failed.Status)
+	// The events run at the same time: their errors come in any order.
+	require.ElementsMatch(t, []string{
+		"on_complete listener callback at index 0: target answered 500",
+		"on_complete listener callback at index 2: target unreachable",
+	}, strings.Split(failed.Message, "\n"))
+
+	ok := onlyCall(t, m, journal.Query{Body: match.Field("message", match.Equal("ok"))})
+	require.Equal(t, journal.OutcomeMatched, ok.Outcome)
+	require.Empty(t, ok.Message)
 }
 
 func TestJournal_UnmatchedCallsNameTheClosestMocks(t *testing.T) {

@@ -257,16 +257,16 @@ func (b *Builder) DelayFunc(delay vlatte.Delay) *Builder {
 // runs as the mock's other events and the global ones do: at the same time as them, once the mock replied, and the
 // call ends after it, so a test checks what it did right after the call. fn gets an [*OnComplete], read-only as the
 // events run at the same time, and a context that the client leaving doesn't end, and [Server.Close] does. An error
-// or a panic of fn is logged as a warning, unless Close canceled it, and never changes the answer. Mock files can't
-// set callbacks, and a mock's description leaves them out.
+// or a panic of fn is logged as a warning, and told by the call's journal entry, unless Close canceled it, and never
+// changes the answer. Mock files can't set callbacks, and a mock's description leaves them out.
 func (b *Builder) Callback(fn vlatte.EventFunc[vlatte.OnComplete]) *Builder {
 	b.events = append(b.events, vlatte.EventConfig{Name: "callback", Listener: fn})
 	return b
 }
 
 // OnCompleteEvent adds an on_complete event to the mock, such as a webhook: it runs once the mock replied, and the
-// call ends after it. Unless it carries its own Listener, its Name names a listener the server registered: see
-// [ConfigBuilder.OnCompleteListener].
+// call ends after it, unless cfg.AfterResponse is set: see [vlatte.EventConfig.AfterResponse]. Unless it carries its
+// own Listener, its Name names a listener the server registered: see [ConfigBuilder.OnCompleteListener].
 func (b *Builder) OnCompleteEvent(cfg vlatte.EventConfig) *Builder {
 	b.events = append(b.events, cfg)
 	return b

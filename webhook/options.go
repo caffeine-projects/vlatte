@@ -29,9 +29,9 @@ func WithTransport(transport http.RoundTripper) Option {
 	}
 }
 
-// WithTimeout returns an [Option] that limits how long a [WebHook] request may take, from sending it to its answer.
-// It wins over the event's, such as the server's Config.WebhookTimeout mockhttp gives. 0 keeps the event's, or else
-// 10 seconds. A negative timeout is an error.
+// WithTimeout returns an [Option] that limits how long each request of a [WebHook] may take, from sending it to its
+// answer: the timeout of every webhook it sends, unless a webhook sets its own timeout parameter. 0 is 10 seconds. A
+// negative timeout is an error.
 func WithTimeout(timeout time.Duration) Option {
 	return func(w *WebHook) error {
 		if timeout < 0 {
