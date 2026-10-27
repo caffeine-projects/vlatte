@@ -175,10 +175,22 @@ func mockFile(app *Server, mock *Mock, path, format, toWD string) ([]byte, error
 }
 
 // relocate makes the relative body files of doc, a mock's description, which open from the working directory, open
-// from the directory toWD leads from to it: those of its response, of the responses of its bidi reply, and of its
-// webhooks and their multipart parts.
+// from the directory toWD leads from to it: those of its response, of the responses of its sequence, random and bidi
+// replies, and of its webhooks and their multipart parts.
 func relocate(doc map[string]any, toWD string) {
 	bodyfile.Relocate(doc["response"], toWD)
+
+	seq, _ := doc["response_sequence"].(map[string]any)
+	bodyfile.Relocate(seq["after_ended"], toWD)
+
+	for _, key := range []string{"response_sequence", "response_random"} {
+		replies, _ := doc[key].(map[string]any)
+		responses, _ := replies["responses"].([]any)
+
+		for _, r := range responses {
+			bodyfile.Relocate(r, toWD)
+		}
+	}
 
 	bidi, _ := doc["bidi"].(map[string]any)
 	bodyfile.Relocate(bidi["otherwise"], toWD)
@@ -215,7 +227,7 @@ func relocate(doc map[string]any, toWD string) {
 // adminRequestPattern returns the filter of the request part of a mock file, v, the request key of a query of the
 // admin API: its keys are a mock file's, and it matches as a mock does.
 func (app *Server) adminRequestPattern(v config.Value) (journal.Filter, error) {
-	def := newMockDef()
+	def := newMockDef(app.matchers())
 	doc := config.Value{Origin: v.Origin, Any: map[string]any{"request": v.Any}}
 
 	problems := config.ProblemsOf(doc, _mockSchema.Decode(&def, doc))

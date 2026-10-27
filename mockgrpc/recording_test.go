@@ -152,7 +152,7 @@ func TestRecording_PlaysBackWhatTheTargetAnswered(t *testing.T) {
 
 func TestRecording_WritesAMockFileOfEachRequest(t *testing.T) {
 	// A mock file of a recording reads as one written by hand: the method, the metadata the recording matches, and the
-	// message, then the answer. A call that comes again, of the same request, keeps the first answer.
+	// message, then the answer. The answers of a request that comes again are a sequence, whose last one repeats.
 	target := serve(t)
 	target.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "hello"}).Header("h", "v")).Once())
 	target.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "again"})))
@@ -186,10 +186,67 @@ request:
     x-tenant: [equal, a]
     x-missing: [not, present]
   message: {message: hi}
-response:
-  header: {h: [v]}
-  message: {message: hello}
+response_sequence:
+  responses:
+    - header: {h: [v]}
+      message: {message: hello}
+    - message: {message: again}
+  after_ended:
+    message: {message: again}
 `, string(b))
+}
+
+func TestRecording_PlaysTheAnswersOfARepeatedRequestInTurn(t *testing.T) {
+	// A target that answered a request differently each time plays back the same way: each answer in turn, then the
+	// last one again, so a test sees a resource change as it did live.
+	target := serve(t)
+	target.MustMock(Method("Greetings").Reply(Seq(Message(&pb.HiRes{Message: "pending"}), Message(&pb.HiRes{Message: "done"}))))
+
+	m := recorder(t)
+	require.NoError(t, m.StartRecording(RecordTarget(target.Addr())))
+
+	for range 2 {
+		_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{Message: "job"})
+		require.NoError(t, err)
+	}
+
+	res, err := m.StopRecording(t.Context())
+	require.NoError(t, err)
+	require.Len(t, res.Recordings, 1)
+	require.Equal(t, 2, res.Recordings[0].Responses)
+
+	target.Close()
+
+	got := make([]string, 0, 3)
+	for range 3 {
+		answer, _ := greetWith(t, client(t, m), "job")
+		got = append(got, answer)
+	}
+
+	require.Equal(t, []string{"pending", "done", "done"}, got)
+}
+
+func TestRecording_RecordRepeatsFirstKeepsTheFirstAnswer(t *testing.T) {
+	target := serve(t)
+	target.MustMock(Method("Greetings").Reply(Seq(Message(&pb.HiRes{Message: "first"}), Message(&pb.HiRes{Message: "second"}))))
+
+	m := recorder(t)
+	require.NoError(t, m.StartRecording(RecordTarget(target.Addr()), RecordRepeats(vlatte.RecordFirst)))
+
+	for range 2 {
+		_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{})
+		require.NoError(t, err)
+	}
+
+	res, err := m.StopRecording(t.Context())
+	require.NoError(t, err)
+	require.Len(t, res.Recordings, 1)
+	require.Equal(t, 1, res.Recordings[0].Responses)
+
+	target.Close()
+
+	got, _ := greetWith(t, client(t, m), "")
+	require.Equal(t, "first", got)
 }
 
 func TestRecording_TakesWhatProxyRepliesAnswer(t *testing.T) {
@@ -400,6 +457,9 @@ func TestRecording_TheConfigRecordsFromStartToClose(t *testing.T) {
 func TestRecording_AConfigWithBadSettingsFailsNew(t *testing.T) {
 	_, err := New(Setup().Silent().Record(RecordFormat("xml")))
 	require.ErrorContains(t, err, `server: recorder: format "xml"`)
+
+	_, err = New(Setup().Silent().Record(RecordRepeats(3)))
+	require.ErrorContains(t, err, "server: recorder: repeats 3 is not vlatte.RecordSequence or vlatte.RecordFirst")
 
 	_, err = New(Setup().Silent().Record(failingRecordOption{}))
 	require.ErrorContains(t, err, "config: record option at index 0 with type mockgrpc.failingRecordOption: no")

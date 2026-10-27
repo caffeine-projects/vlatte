@@ -15,6 +15,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 var _ vlatte.Builder[*Mock, *Server] = (*Builder)(nil)
@@ -550,7 +551,7 @@ func (b *Builder) Matches(m vlatte.Matcher) *Builder {
 // StartScenario sets that this mock will start a new scenario with the given name.
 func (b *Builder) StartScenario(name string) *Builder {
 	b.scenario = name
-	b.scenarioRequiredState = mfeat.ScenarioStateStarted
+	b.scenarioRequiredState = matchscenario.StateStarted
 
 	return b
 }
@@ -581,15 +582,15 @@ func (b *Builder) ScenarioStateWillBe(newState string) *Builder {
 // runs as the mock's other events and the global ones do: at the same time as them, once the mock replied, and the
 // response waits for it, so a test checks what it did right after the call. fn gets an [*OnComplete], read-only as
 // the events run at the same time, and a context that the client leaving doesn't end, and [Server.Close] does. An
-// error or a panic of fn is logged as a warning, unless Close canceled it, and never changes the response. Mock files
-// can't set callbacks, and a mock's description leaves them out.
+// error or a panic of fn is logged as a warning, and told by the request's journal entry, unless Close canceled it,
+// and never changes the response. Mock files can't set callbacks, and a mock's description leaves them out.
 func (b *Builder) Callback(fn vlatte.EventFunc[vlatte.OnComplete]) *Builder {
 	b.spec.events = append(b.spec.events, vlatte.EventConfig{Name: "callback", Listener: fn})
 	return b
 }
 
 // OnCompleteEvent adds an on-complete event to the mock. It runs once the mock replied, and the response waits for
-// it.
+// it, unless cfg.AfterResponse is set: see [vlatte.EventConfig.AfterResponse].
 func (b *Builder) OnCompleteEvent(cfg vlatte.EventConfig) *Builder {
 	b.spec.events = append(b.spec.events, cfg)
 	return b
@@ -739,7 +740,7 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 	if b.scenario != "" {
 		spec.expectations = append(spec.expectations, &expectation{
 			Target:  int(matchingScopeScenario),
-			Matcher: mfeat.Scenario(app.scenarioStore, b.scenario, b.scenarioRequiredState, b.scenarioNewState),
+			Matcher: app.scenarioStore.Matcher(b.scenario, b.scenarioRequiredState, b.scenarioNewState),
 		})
 	}
 

@@ -212,6 +212,32 @@ func TestAdmin_DescribesAMockBuiltInGo(t *testing.T) {
 	}`, body)
 }
 
+func TestAdmin_AFuncMockCantBeDescribed(t *testing.T) {
+	// A mock file can't hold a Func reply: reading the mock fails, and says why, as it does on a mockhttp server.
+	m, _ := adminServer(t)
+	m.MustMock(Method("Greetings").ID("func").Reply(Func(func(context.Context, *Call) error { return nil })))
+
+	status, body := call(t, http.MethodGet, m.AdminURL()+"/mocks/func", "")
+	require.Equal(t, http.StatusInternalServerError, status, body)
+	require.Contains(t, body, `"code": "describe_failed"`)
+	require.Contains(t, body, "a Func reply can't be described as a mock file")
+}
+
+func TestAdmin_ListsMocksThatCantBeDescribed(t *testing.T) {
+	// A Func mock can't be described, but the list is a summary of each mock, never its description: the list stays
+	// whole, with the Func mock in it.
+	m, _ := adminServer(t)
+	m.MustMock(Method("Greetings").ID("message").Reply(Message(&pb.HiRes{})))
+	m.MustMock(Method("Greetings").ID("func").Priority(1).Reply(Func(func(context.Context, *Call) error { return nil })))
+
+	status, body := call(t, http.MethodGet, m.AdminURL()+"/mocks", "")
+	require.Equal(t, http.StatusOK, status, body)
+	require.JSONEq(t, `{"mocks": [
+		{"id": "message", "priority": 0, "enabled": true, "hits": 0},
+		{"id": "func", "priority": 1, "enabled": true, "hits": 0}
+	]}`, body)
+}
+
 func TestAdmin_MovesScenarios(t *testing.T) {
 	m, client := adminServer(t)
 	m.MustMock(
@@ -265,6 +291,31 @@ func TestAdmin_QueriesTheJournalWithARequestOfAMockFile(t *testing.T) {
 	}
 
 	status, body := call(t, "QUERY", m.AdminURL()+"/requests", `{"request": {"method": "Greetings", "fields": {"message": "bye"}}}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	var page struct {
+		Requests []map[string]any `json:"requests"`
+	}
+
+	require.NoError(t, json.Unmarshal([]byte(body), &page))
+	require.Len(t, page.Requests, 1, body)
+}
+
+func TestAdmin_QueriesTheJournalWithACustomMatcherOfTheServer(t *testing.T) {
+	// A query reads its request as the server reads mock files: with its registry, custom matchers included.
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).Journal("").Matchers(_customMatchers))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
+
+	c := pb.NewTestServiceClient(m.MustDial())
+	for _, msg := range []string{"ann", "bob"} {
+		_, err := c.Greetings(t.Context(), &pb.HiReq{Message: msg})
+		require.NoError(t, err)
+	}
+
+	status, body := call(t, "QUERY", m.AdminURL()+"/requests", `{"request": {"method": "Greetings", "custom": [["greets", "ann"]]}}`)
 	require.Equal(t, http.StatusOK, status, body)
 
 	var page struct {
@@ -458,6 +509,40 @@ func TestAdmin_SavesAMockWithABodyFile(t *testing.T) {
 	saved, err := os.ReadFile(filepath.Join(wd, "saved", "mocks", "items.mock.yaml"))
 	require.NoError(t, err)
 	require.Contains(t, string(saved), filepath.Join("..", "..", "items.json"))
+
+	require.Equal(t, []string{"a", "b"}, listKeys(t, pb.NewTestServiceClient(m.MustDial())))
+}
+
+func TestAdmin_SavesTheBodyFilesOfSequencesAndRandoms(t *testing.T) {
+	// The responses of a sequence or a random reply name their body files as a response does: saved into a directory
+	// of its own, each still opens the file of the working directory.
+	wd := t.TempDir()
+	t.Chdir(wd)
+	require.NoError(t, os.WriteFile("items.json", []byte(`[{"key": "a"}, {"key": "b"}]`), 0o600))
+
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger).ConfigSources())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	for _, doc := range []string{
+		`{"id": "seq", "request": {"method": "List"}, "response_sequence": {"responses": [{"body_file": "items.json"}], ` +
+			`"after_ended": {"body_file": "items.json"}}}`,
+		`{"id": "random", "request": {"method": "List"}, "response_random": {"responses": [{"body_file": "items.json"}]}}`,
+	} {
+		status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks", doc)
+		require.Equal(t, http.StatusCreated, status, body)
+	}
+
+	status, body := call(t, http.MethodPost, m.AdminURL()+"/mocks/save", `{"dir": "saved/mocks"}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	moved := filepath.Join("..", "..", "items.json")
+	for id, n := range map[string]int{"seq": 2, "random": 1} {
+		saved, err := os.ReadFile(filepath.Join(wd, "saved", "mocks", id+".mock.yaml"))
+		require.NoError(t, err)
+		require.Equal(t, n, strings.Count(string(saved), moved), "%s", saved)
+	}
 
 	require.Equal(t, []string{"a", "b"}, listKeys(t, pb.NewTestServiceClient(m.MustDial())))
 }

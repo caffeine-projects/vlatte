@@ -3,6 +3,7 @@ package mockgrpc
 import (
 	"context"
 	"errors"
+	"io"
 	"strconv"
 	"strings"
 
@@ -18,22 +19,33 @@ import (
 var (
 	errNoReply   = errors.New("mock: no reply set: use Reply")
 	errNoReplier = errors.New("reply: the factory made no replier")
+
+	// errFuncNotDescribed is why a mock with a Func reply can't be described: a mock file can't hold a function.
+	errFuncNotDescribed = errors.New("reply: a Func reply can't be described as a mock file")
 )
 
 // _failureKey is vlatte.HeaderFailure as a metadata key, which gRPC wants lowercase.
 var _failureKey = strings.ToLower(vlatte.HeaderFailure)
 
-// Reply is what a mock answers the calls it matches with: [Message], [Messages], [JSON], [Template], [Status], [Bidi]
-// and [Func] make one. [Builder.Build] asks it for a Replier for each mock, given the methods the mock serves, so it
-// checks there what it can, such as that its messages are of the type the methods answer with.
+// Reply is what a mock answers the calls it matches with: [Message], [Messages], [JSON], [Template], [Status], [Bidi],
+// [Seq], [Rand], [Echo], [Shared] and [Func] make one. [Builder.Build] asks it for a Replier for each mock, given the
+// methods the mock serves, so it checks there what it can, such as that its messages are of the type the methods
+// answer with.
 type Reply interface {
 	NewReplier(app *Server, methods []protoreflect.MethodDescriptor) (Replier, error)
 }
 
 // Replier answers the calls of one mock. Reply sends the answer through call: the messages with [Call.Send], and the
 // header and trailer with grpc.SetHeader, grpc.SendHeader and grpc.SetTrailer on ctx. An error with a gRPC status,
-// such as status.Error makes, ends the call with that status: it is the mock's answer. Any other error is a failure,
-// which the client gets as Internal with the vlatte-error trailer.
+// such as status.Error makes, ends the call with that status: it is the mock's answer.
+//
+// An error that matches [vlatte.ErrAbort] or [vlatte.ErrReset] cuts the call, as a server that crashes would: the mock
+// counts the call and runs its events, then the server cuts the call's connection after the messages of a stream
+// Reply sent, before any status, so the client reads Unavailable and no trailer. ErrReset resets a TCP connection, so
+// the client reads ECONNRESET, and ErrAbort ends it. grpc can't reset one stream from a handler, so the other calls on
+// the connection end too. A server whose ServerOptions set grpc.Creds can't cut its connections: the call fails.
+//
+// Any other error is a failure, which the client gets as Internal with the vlatte-error trailer.
 type Replier interface {
 	Reply(ctx context.Context, call *Call) error
 }
@@ -42,7 +54,8 @@ type Replier interface {
 type ReplierFunc func(ctx context.Context, call *Call) error
 
 // Func returns a Reply that answers each call with fn, which sends the answer through call: see [Replier]. A unary or
-// client streaming call whose fn sends no message answers with an empty message of the method's output type.
+// client streaming call whose fn sends no message answers with an empty message of the method's output type. A mock
+// file can't hold a function: describing a mock with it fails, so the admin API can't show the mock, nor save it.
 func Func(fn func(ctx context.Context, call *Call) error) ReplierFunc {
 	return fn
 }
@@ -108,4 +121,16 @@ func replyError(ctx context.Context, scope string, mock *Mock, err error) error 
 func hasStatus(err error) bool {
 	_, ok := status.FromError(err)
 	return ok
+}
+
+// closeAll closes cs, all of them, and returns their errors joined.
+func closeAll(cs []io.Closer) error {
+	var errs []error
+	for _, c := range cs {
+		if err := c.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
 }

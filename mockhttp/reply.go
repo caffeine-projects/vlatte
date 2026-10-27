@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"slices"
+	"unicode/utf8"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
@@ -410,7 +412,7 @@ func (rep *Reply) Describe() descriptor.Descriptor {
 	}
 
 	if len(rep.response.Trailer) > 0 {
-		response["trailers"] = rep.response.Trailer.Clone()
+		response["trailer"] = rep.response.Trailer.Clone()
 	}
 
 	if rep.bodyEncoding == _bodyEncodingGZIP {
@@ -427,8 +429,13 @@ func (rep *Reply) Describe() descriptor.Descriptor {
 		spec.Dir = rep.bodyFileDir
 		response["multipart"] = spec.Doc()
 	default:
-		if rep.response.Body != nil {
-			response["body"] = string(rep.response.Body)
+		// JSON and YAML hold text as UTF-8: other bytes, such as an image or text in another encoding, go in base64.
+		switch body := rep.response.Body; {
+		case body == nil:
+		case utf8.Valid(body):
+			response["body"] = string(body)
+		default:
+			response["body_base64"] = base64.StdEncoding.EncodeToString(body)
 		}
 	}
 

@@ -441,7 +441,7 @@ func TestMatchers_FromMockFiles(t *testing.T) {
 	stored.MustStart()
 	t.Cleanup(stored.Close)
 
-	ids := []string{"json", "schema", "xml", "xpath", "dates", "exactly", "custom"}
+	ids := []string{"json", "schema", "xml", "xpath", "dates", "exactly", "custom", "bytes"}
 	scope := files.MustMock(
 		mockhttp.FromFile("testdata/matchers/11_equaljson_options.yaml"),
 		mockhttp.FromFile("testdata/matchers/12_jsonschema.yaml"),
@@ -450,6 +450,7 @@ func TestMatchers_FromMockFiles(t *testing.T) {
 		mockhttp.FromFile("testdata/matchers/15_dates.yaml"),
 		mockhttp.FromFile("testdata/matchers/16_hasexactly.yaml"),
 		mockhttp.FromFile("testdata/matchers/17_custom.yaml"),
+		mockhttp.FromFile("testdata/matchers/18_equalbytes.yaml"),
 	)
 
 	for _, id := range ids {
@@ -496,6 +497,8 @@ func TestMatchers_FromMockFiles(t *testing.T) {
 		{"exactly: one too many", http.MethodGet, "/exactly?id=20&id=1&id=3", nil, "", mockhttp.StatusNoMatch},
 		{"custom: the header", http.MethodGet, "/custom", http.Header{"X-Admin": {"1"}}, "", http.StatusOK},
 		{"custom: no header", http.MethodGet, "/custom", nil, "", mockhttp.StatusNoMatch},
+		{"bytes: the same bytes", http.MethodPost, "/bytes", nil, "\x89PNG\xff\xfe\x00", http.StatusOK},
+		{"bytes: one byte short", http.MethodPost, "/bytes", nil, "\x89PNG\xff\xfe", mockhttp.StatusNoMatch},
 	}
 
 	for _, tc := range tests {

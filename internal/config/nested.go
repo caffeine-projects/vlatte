@@ -69,6 +69,34 @@ func Members(v Value, fn func(name string, member Value) error) error {
 	return asError(problems)
 }
 
+// MemberStrings calls fn with each string of each member of the object an Any value holds, sorted by name and then
+// in order, as Members does: a member is a string, or a list of strings, such as the values of a header. A member of
+// another type, or an item of a list that isn't a string, is a problem of its own. The error is an *Error listing
+// every problem.
+func MemberStrings(v Value, fn func(name, s string)) error {
+	return Members(v, func(name string, member Value) error {
+		switch x := member.Any.(type) {
+		case string:
+			fn(name, x)
+		case []any:
+			return Items(member, func(item Value) error {
+				s, ok := item.Any.(string)
+				if !ok {
+					return Mismatch(item, "a string", String)
+				}
+
+				fn(name, s)
+
+				return nil
+			})
+		default:
+			return Mismatch(member, "a string or a list of strings", String)
+		}
+
+		return nil
+	})
+}
+
 // Invalid returns an *Error with one invalid_value problem of v: message says what is wrong, and hint how to fix it.
 // A Set returns it to report a problem with a hint, which a plain error can't carry.
 func Invalid(v Value, message, hint string) error {

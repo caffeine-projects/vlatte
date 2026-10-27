@@ -17,6 +17,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 var _ vlatte.Builder[*Mock, *Server] = (*Builder)(nil)
@@ -192,6 +193,23 @@ func (b *Builder) CallMatches(fn func(call *Call) (bool, error)) *Builder {
 	return b
 }
 
+// Matches adds a matcher of the whole call: m gets the *Call, as the function of CallMatches does. A mock file's
+// request.custom adds matchers this way, such as custom ones of the server's registry: see
+// [ConfigBuilder.Matchers]. Unlike a function, a matcher that describes itself is described, under request.custom,
+// so the admin API's store keeps it.
+func (b *Builder) Matches(m vlatte.Matcher) *Builder {
+	b.described.custom = append(b.described.custom, m)
+	b.readsRequest = true
+	b.expectations = append(b.expectations, &vlatte.Eval[*Call]{
+		Target:   int(_scopeRequest),
+		Key:      "custom",
+		Matcher:  m,
+		Selector: selectCall,
+	})
+
+	return b
+}
+
 // Times sets how many calls each mock built from the builder serves: 1 or more. Each mock counts its own, so a mock
 // built again, as Remock does, starts from zero. The last call wins.
 func (b *Builder) Times(times int64) *Builder {
@@ -213,7 +231,7 @@ func (b *Builder) Once() *Builder {
 // first state, "started".
 func (b *Builder) StartScenario(name string) *Builder {
 	b.scenario = name
-	b.scenarioRequiredState = mfeat.ScenarioStateStarted
+	b.scenarioRequiredState = matchscenario.StateStarted
 
 	return b
 }
@@ -255,16 +273,16 @@ func (b *Builder) DelayFunc(delay vlatte.Delay) *Builder {
 // runs as the mock's other events and the global ones do: at the same time as them, once the mock replied, and the
 // call ends after it, so a test checks what it did right after the call. fn gets an [*OnComplete], read-only as the
 // events run at the same time, and a context that the client leaving doesn't end, and [Server.Close] does. An error
-// or a panic of fn is logged as a warning, unless Close canceled it, and never changes the answer. Mock files can't
-// set callbacks, and a mock's description leaves them out.
+// or a panic of fn is logged as a warning, and told by the call's journal entry, unless Close canceled it, and never
+// changes the answer. Mock files can't set callbacks, and a mock's description leaves them out.
 func (b *Builder) Callback(fn vlatte.EventFunc[vlatte.OnComplete]) *Builder {
 	b.events = append(b.events, vlatte.EventConfig{Name: "callback", Listener: fn})
 	return b
 }
 
 // OnCompleteEvent adds an on_complete event to the mock, such as a webhook: it runs once the mock replied, and the
-// call ends after it. Unless it carries its own Listener, its Name names a listener the server registered: see
-// [ConfigBuilder.OnCompleteListener].
+// call ends after it, unless cfg.AfterResponse is set: see [vlatte.EventConfig.AfterResponse]. Unless it carries its
+// own Listener, its Name names a listener the server registered: see [ConfigBuilder.OnCompleteListener].
 func (b *Builder) OnCompleteEvent(cfg vlatte.EventConfig) *Builder {
 	b.events = append(b.events, cfg)
 	return b
@@ -317,7 +335,7 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		expectations = append(expectations, &vlatte.Eval[*Call]{
 			Target:  int(_scopeScenario),
 			Key:     b.scenario,
-			Matcher: mfeat.Scenario(app.scenarios, b.scenario, b.scenarioRequiredState, b.scenarioNewState),
+			Matcher: app.scenarios.Matcher(b.scenario, b.scenarioRequiredState, b.scenarioNewState),
 		})
 	}
 

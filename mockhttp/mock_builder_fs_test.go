@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 )
 
 type customMockFileHandler struct{}
@@ -119,4 +121,8 @@ func TestBuilderFs_InvalidSchemaValid(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestFromBytes_ServesScenarios(t *testing.T) {
+	scenariotest.Run(t, newScenarioServer(true))
 }

@@ -18,9 +18,10 @@ import (
 // serve matches call with the server's mocks, and answers it with the first that matches: the path of every call,
 // whatever its type. It returns what the call ends with: nil, the status of the mock's answer, or a failure.
 //
-// In order: the mock's delay, its reply, then, once it answered, with messages or a status, the state of its stateful
-// matchers, such as Times and scenarios, and its events. The mock counts the call as its answer starts going out, so
-// the debug header carries the count: a reply that fails, or a client that leaves, takes it back, and counts nothing.
+// In order: the mock's delay, its reply, then, once it answered, with messages, a status or a cut, the state of its
+// stateful matchers, such as Times and scenarios, and its events. The mock counts the call as its answer starts going
+// out, so the debug header carries the count: a reply that fails, or a client that leaves, takes it back, and counts
+// nothing.
 func (in *interceptors) serve(ctx context.Context, call *Call) error {
 	app := in.app
 	kind := typeOf(call.desc)
@@ -116,6 +117,11 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 		journaled.failed(fmt.Errorf("%s: %w", kind, encErr))
 	}
 
+	// A reply that cut the call answered it, as long as its client is there.
+	if cuts(err) && ctx.Err() == nil {
+		return in.cut(ctx, call, mock, h, err)
+	}
+
 	if err != nil && !hasStatus(err) {
 		h.takeBack()
 		app.publish(ctx, adminapi.EventError, call.method, mock, codes.Internal, err)
@@ -172,7 +178,7 @@ func (in *interceptors) serveTarget(ctx context.Context, call *Call, rec *record
 }
 
 // afterServed runs what follows a mock's answer, which ended with err, a status or nil: its stateful matchers move
-// on, then its events run, and the call ends after them.
+// on, then its events run, and the call ends after them, but for those set to run after the response.
 func (app *Server) afterServed(ctx context.Context, mock *Mock, call *Call, err error) {
 	for i, e := range mock.expectations {
 		if stateful, ok := e.Matcher.(vlatte.Stateful); ok {
@@ -195,7 +201,13 @@ func (app *Server) afterServed(ctx context.Context, mock *Mock, call *Call, err 
 				m:      mock,
 				call:   call,
 				status: st,
-				kit:    &Kit{engine: app.templateEngine(), data: data},
+				kit: &Kit{
+					engine:    app.templateEngine(),
+					data:      data,
+					logger:    app.logger,
+					transport: app.webhooks,
+					dir:       cfg.Dir,
+				},
 				args:   cfg.Parameters,
 				dir:    cfg.Dir,
 				logger: app.logger,
@@ -203,6 +215,7 @@ func (app *Server) afterServed(ctx context.Context, mock *Mock, call *Call, err 
 		},
 		func(err error) {
 			app.logger.Warn().Err(err).Str("mock", mock.ID()).Str("method", call.method).Msg("grpc: on_complete")
+			callOf(ctx).eventFailed(err)
 		},
 	)
 }

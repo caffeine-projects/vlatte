@@ -1,11 +1,13 @@
 package mockgrpc
 
 import (
+	"cmp"
 	"context"
 	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -22,12 +24,14 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
-	"github.com/caffeine-projects/vlatte/internal/mfeat"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 var (
-	_ vlatte.Flavor[*Mock, *Server] = (*Server)(nil)
+	_ vlatte.Server[*Mock, *Server] = (*Server)(nil)
 	_ grpc.ServiceRegistrar         = (*Server)(nil)
 )
 
@@ -54,10 +58,14 @@ type Server struct {
 	logger    *zerolog.Logger
 	storage   vlatte.Store[*Mock]
 	resolver  *resolver
-	scenarios *mfeat.ScenarioStore
+	scenarios *matchscenario.Store
 	runner    *vlatte.EventRunner // runs the on_complete events of mocks
 	admin     adminapi.Server     // nil without Config.Admin
 	events    *adminapi.Events    // the admin API's; nil without it
+
+	// webhooks is the transport the server gives webhooks. Close closes its idle connections, so they don't outlive
+	// the server.
+	webhooks *http.Transport
 
 	loader *fileLoader // loads the mock files of Config.MockFiles
 
@@ -151,6 +159,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	app.logger = newLogger(conf, logs)
+	app.webhooks = httpx.NewWebhookTransport()
 
 	res, err := newResolver(conf)
 	if err != nil {
@@ -158,7 +167,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	app.resolver = res
-	app.scenarios = mfeat.NewScenarioStore()
+	app.scenarios = matchscenario.New()
 
 	global, err := app.prepareEvents(globalEvents(conf), "server: global on_complete listener")
 	if err != nil {
@@ -185,7 +194,7 @@ func New(config ...Option) (*Server, error) {
 	stream := []grpc.StreamServerInterceptor{in.recoverStream, in.StreamInterceptor}
 
 	// The server's credentials come first, so those of the user's options win: StartTLS sets TLS on them.
-	app.creds = &serverCreds{insecure.NewCredentials()}
+	app.creds = &serverCreds{TransportCredentials: insecure.NewCredentials()}
 	opts := []grpc.ServerOption{grpc.Creds(app.creds)}
 
 	// The journal sees each call as it ends, with the code the client gets, outside every interceptor of the user's
@@ -249,6 +258,7 @@ func New(config ...Option) (*Server, error) {
 			Logs:      logs,
 			Journal:   j,
 			Pattern:   app.adminRequestPattern,
+			Matchers:  app.matchers(),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("server: %w", err)
@@ -276,7 +286,7 @@ func MustNew(config ...Option) *Server {
 // It stops at the first recipe that fails and returns its error.
 func (app *Server) Prep(ctx context.Context, recipes ...Recipe) error {
 	for i, recipe := range recipes {
-		if err := recipe.Prep(ctx, &vlatte.RecipeInput[*Mock, *Server]{Flavor: app}); err != nil {
+		if err := recipe.Prep(ctx, &vlatte.RecipeInput[*Mock, *Server]{Server: app}); err != nil {
 			return fmt.Errorf("server: error applying recipe at index %d with type %T\n%w", i, recipe, err)
 		}
 	}
@@ -363,8 +373,10 @@ func (app *Server) Addr() string {
 }
 
 // Close stops the server, waiting for calls in flight to finish. It closes the admin API first, which waits for the
-// operations it serves, and the journal last, which it removes if it is a temporary one: verify the calls before
-// Close. A closed server doesn't start again, even one that never started.
+// operations it serves. It cancels the on_complete events still running, and waits for those that run after the
+// response. It closes the idle connections of the transport it gives webhooks, and the journal last, which it removes
+// if it is a temporary one: verify the calls before Close. A closed server doesn't start again, even one that never
+// started.
 func (app *Server) Close() {
 	app.mu.Lock()
 	app.closed = true
@@ -401,6 +413,8 @@ func (app *Server) Close() {
 			app.logger.Warn().Err(err).Msgf("server: Close: closing mock %s", mock.ID())
 		}
 	}
+
+	app.webhooks.CloseIdleConnections()
 
 	if err := app.Journal().Close(); err != nil {
 		app.logger.Warn().Err(err).Msg("server: Close: closing the journal")
@@ -539,7 +553,7 @@ func (app *Server) publish(ctx context.Context, kind, target string, mock *Mock,
 	}
 
 	if call := callOf(ctx); call != nil {
-		e.RequestID = call.entry.ID
+		e.RequestID = call.draft.ID()
 	}
 
 	if err != nil {
@@ -557,6 +571,12 @@ func (app *Server) register(desc *grpc.ServiceDesc, impl any) {
 	}
 
 	app.server.RegisterService(desc, impl)
+}
+
+// matchers returns the registry that builds the matcher lists of the server's mock files: Config.Matchers, or the
+// built-in matchers.
+func (app *Server) matchers() *matchbuild.Registry {
+	return cmp.Or(app.config.Matchers, _builtinMatchers)
 }
 
 // warnUnjournaled warns of each service registered on GRPCServer, past the server, with unary methods: their entries

@@ -17,7 +17,7 @@ var _scenarioChangeSchema = config.NewSchema(
 )
 
 // SetScenario moves the scenario name to the state of doc, a document in format, such as {"state": "paid"}, and
-// returns it. The mocks that require that state match next. Names are exact: Checkout isn't checkout. It needs a
+// returns it. The mocks that require that state match next. Names ignore case: Checkout is checkout. It needs a
 // server that keeps scenarios.
 func (o *Operations) SetScenario(name string, doc []byte, format string) (Scenario, error) {
 	if o.scenarios == nil {

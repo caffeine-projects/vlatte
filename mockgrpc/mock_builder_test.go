@@ -2,6 +2,7 @@ package mockgrpc
 
 import (
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"testing"
 	"time"
@@ -16,6 +17,8 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
+	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
@@ -255,6 +258,25 @@ func TestBuilder_JSONMessageAndCallMatchesMatchTheWholeRequest(t *testing.T) {
 	require.ErrorContains(t, err, "json: not JSON")
 }
 
+func TestBuilder_MatchesGivesTheMatcherTheCall(t *testing.T) {
+	m := serve(t)
+	c := client(t, m)
+	m.MustMock(Method("Greetings").Matches(match.Function(func(v any) (bool, error) {
+		call, ok := v.(*Call)
+		return ok && call.Message().(*pb.HiReq).GetMessage() == "ann", nil
+	})).Reply(Message(&pb.HiRes{Message: "hi ann"})))
+
+	got, code := greetWith(t, c, "ann")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "hi ann", got)
+
+	_, code = greetWith(t, c, "bob")
+	require.Equal(t, codes.NotFound, code)
+
+	_, err := m.Mock(Method("Chat").Matches(match.Not(match.Nil())).Reply(Bidi()))
+	require.ErrorContains(t, err, "a bidi streaming mock matches the method and the header only", "it reads the request")
+}
+
 func TestBuilder_ABidiMockMatchesNoRequest(t *testing.T) {
 	// A bidi call matches as it starts, before its client sent anything: a matcher of its request would never match.
 	m := serve(t)
@@ -311,4 +333,71 @@ func TestBuilder_AFailingCallbackDoesntChangeTheAnswer(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "answered", res.GetMessage())
 	<-done
+}
+
+// scenarioServer runs the scenario suite on a server whose mocks are built in Go, or from mock files.
+type scenarioServer struct {
+	m         *Server
+	c         pb.TestServiceClient
+	fromFiles bool
+}
+
+var _ scenariotest.Server = (*scenarioServer)(nil)
+
+func newScenarioServer(fromFiles bool) func(t *testing.T) scenariotest.Server {
+	return func(t *testing.T) scenariotest.Server {
+		m := serve(t)
+
+		return &scenarioServer{m: m, c: client(t, m), fromFiles: fromFiles}
+	}
+}
+
+func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
+	for _, mk := range mocks {
+		if s.fromFiles {
+			doc, err := json.Marshal(map[string]any{
+				"scenario": map[string]string{
+					"name": mk.Scenario, "required_state": mk.RequiredState, "new_state": mk.NewState,
+				},
+				"request":  map[string]string{"method": "Greetings"},
+				"response": map[string]any{"message": map[string]string{"message": mk.ID}},
+			})
+			require.NoError(t, err)
+
+			s.m.MustMock(FromBytes(doc, "json"))
+
+			continue
+		}
+
+		b := Method("Greetings").ScenarioIs(mk.Scenario).Reply(Message(&pb.HiRes{Message: mk.ID}))
+		if mk.RequiredState != "" {
+			b.ScenarioStateIs(mk.RequiredState)
+		}
+
+		if mk.NewState != "" {
+			b.ScenarioStateWillBe(mk.NewState)
+		}
+
+		s.m.MustMock(b)
+	}
+}
+
+func (s *scenarioServer) Call(t *testing.T) string {
+	got, code := greetWith(t, s.c, "")
+
+	switch code {
+	case codes.OK:
+		return got
+	case codes.NotFound:
+		return ""
+	default:
+		t.Fatalf("want a mock's answer or no match, got %s", code)
+		return ""
+	}
+}
+
+func (s *scenarioServer) Store() *matchscenario.Store { return s.m.scenarios }
+
+func TestBuilder_ServesScenarios(t *testing.T) {
+	scenariotest.Run(t, newScenarioServer(false))
 }

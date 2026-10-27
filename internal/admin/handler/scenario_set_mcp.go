@@ -8,7 +8,7 @@ import (
 
 // scenarioState is the input of set_scenario.
 type scenarioState struct {
-	Name  string `json:"name" jsonschema:"The name of the scenario, exactly."`
+	Name  string `json:"name" jsonschema:"The name of the scenario, in any case."`
 	State string `json:"state" jsonschema:"The state to move it to."`
 }
 

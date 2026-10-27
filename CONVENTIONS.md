@@ -25,7 +25,7 @@ One file that is not `*.md` means the task is not docs only. CI (`.github/workfl
 - Assert interface compliance at the top of the file: `var _ I = (*T)(nil)`.
 - File names are lowercase, as Go's own are: `reply_random.go`, `hasprefix.go`. Never end one in a GOOS or GOARCH name (`_js.go`, `_linux.go`): Go builds it only there.
 - Keep one short receiver name per type [lint]: `app` (`Server`, `Base`), `cb` (`ConfigBuilder`), `b` (builders), `m` (`Mock`).
-- Constructors are `New(...Option) (*T, error)` plus a panicking `MustNew`. The root package uses `New<Type>`. A `Must` prefix means the function panics.
+- A constructor returns an error only when it can fail, and then has a panicking `Must` twin (`New` and `MustNew`). The root package uses `New<Type>`. A `Must` prefix means the function panics.
 - Imports come in three groups separated by blank lines [lint]: standard library, third-party, then `github.com/caffeine-projects/vlatte/...`. Uber uses two.
 - Only `admin`, `internal/admin/...`, `cmd/...` and tests may import the admin server or the MCP SDK [lint].
 
@@ -43,7 +43,7 @@ One file that is not `*.md` means the task is not docs only. CI (`.github/workfl
 
 - **Test behavior, not implementation.** Call the code the way its caller does and assert what that caller observes: a return value, an error and its type, a response, an event. Never assert unexported state or the order of internal calls. A refactor that keeps behavior keeps every test green.
 - **Every assertion can fail.** Assert the exact value: `require.Equal(t, 3, n)`, not `require.Positive(t, n)`; `require.ErrorIs` or `errors.AsType` on an error, not `require.Error` alone. A test that still passes with the behavior it names broken is wrong. Name a test after the behavior and why it matters, not after the function it calls.
-- **A test of one file sits beside it, named after it**: `reply_seq.go`, `reply_seq_test.go`. A variant keeps the stem: `mock_prop_test.go` for rapid properties, `mock_gen_test.go` for their generators, `form_bench_test.go` for benchmarks.
+- **A file has one test file, beside it and named after it**: `reply_seq.go`, `reply_seq_test.go`. Its properties, fuzz targets and benchmarks go there too; never `_prop_test.go`, `_gen_test.go`, `_internal_test.go` or `_bench_test.go`. Generators go at the bottom, after a `// Generators` comment. A test spanning several files of a package goes in its `test/` folder.
 - **A test that drives a whole HTTP server** through the public API, across features, goes in `mockhttp/e2e/`.
 - **Fix a bug test-first.** Before changing code for a bug, or for an issue a review or a tool reports, write the test that reproduces it and run it. It must fail, and for the reason reported, not a typo or a missing import. A test you cannot make fail means the issue is not what you thought: stop, say so, and change nothing. Then fix it, see the same test pass, and keep the test in the change.
 - **A rapid failure becomes a named regression test.** rapid writes failfiles to `testdata/rapid/`, which git ignores: turn each into a test named after the case it found.
