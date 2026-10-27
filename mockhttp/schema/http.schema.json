@@ -326,7 +326,7 @@
       "not": { "required": [ "body", "body_file" ] }
     },
     "event_stream": {
-      "description": "A Server-Sent Events body, sent event by event, each flushed as it goes. It sets the Content-Type, text/event-stream.",
+      "description": "A Server-Sent Events body, sent event by event, each flushed as it goes. Its Content-Type is text/event-stream unless header sets one.",
       "type": "object",
       "properties": {
         "events": { "type": "array", "items": { "$ref": "#/$defs/event_stream_event" } },

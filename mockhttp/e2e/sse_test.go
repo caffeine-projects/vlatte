@@ -348,7 +348,8 @@ func TestSSE_SendsTheHeadersBeforeTheFirstEvent(t *testing.T) {
 
 func TestSSE_FromAMockFile(t *testing.T) {
 	// A mock file declares an event stream under response.event_stream: data that isn't text is JSON, raw is sent as
-	// it is, and template.enabled makes the text templates.
+	// it is, and template.enabled makes the text templates. A Content-Type header wins over text/event-stream, as one
+	// with a charset.
 	m := mockhttp.MustNew(mockhttp.Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -357,6 +358,7 @@ func TestSSE_FromAMockFile(t *testing.T) {
 request: {method: GET, path: /events}
 response:
   status: 200
+  header: {content-type: text/event-stream; charset=utf-8}
   event_stream:
     retry: 2s
     resume: true
@@ -368,7 +370,7 @@ response:
 `), "yaml"))
 
 	res, body := getTarget(t, m, "/events?user=ana")
-	require.Equal(t, mockhttp.MIMETextEventStream, res.Header.Get(mockhttp.HeaderContentType))
+	require.Equal(t, "text/event-stream; charset=utf-8", res.Header.Get(mockhttp.HeaderContentType))
 	require.Equal(t, "retry: 2000\n\nevent: price\nid: 1\ndata: {\"value\":10}\n\n: note\ndata: for ana\n\ndata: crlf\r\n\r\n", string(body))
 }
 

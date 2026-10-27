@@ -616,7 +616,7 @@ var _replySchema = config.NewSchema(
 	},
 	replyField{
 		Key: "event_stream", Kind: config.Any,
-		Usage: "Server-Sent Events body, sent event by event: events, retry, event_delay, heartbeat, keep_open and resume. It sets the Content-Type, text/event-stream.",
+		Usage: "Server-Sent Events body, sent event by event: events, retry, event_delay, heartbeat, keep_open and resume. Its Content-Type is text/event-stream unless header sets one.",
 		Set: func(r *replyDef, v config.Value) error {
 			spec, err := sse.Decode(v)
 			r.eventStream = spec
@@ -908,19 +908,8 @@ func decodeReply(r *replyDef, v config.Value) error {
 		})
 	}
 
-	// A multipart body sets the Content-Type, with its boundary, and an event stream sets text/event-stream.
-	for _, b := range []struct {
-		key  string
-		hint string
-	}{
-		{"multipart", "a multipart body sets the Content-Type: remove the header"},
-		{"event_stream", "an event stream sets the Content-Type: remove the header"},
-	} {
-		body, hint := b.key, b.hint
-		if _, ok := obj[body]; !ok {
-			continue
-		}
-
+	// A multipart body sets the Content-Type, with its boundary.
+	if _, ok := obj["multipart"]; ok {
 		for _, headers := range []string{"header", "header_template"} {
 			names, _ := obj[headers].(map[string]any)
 			for _, name := range slices.Sorted(maps.Keys(names)) {
@@ -928,8 +917,8 @@ func decodeReply(r *replyDef, v config.Value) error {
 					key := v.Key + "." + headers + "." + name
 					problems = append(problems, config.Problem{
 						Code: config.CodeConflict, Origin: v.Origin, Key: key,
-						Message: key + " is set with " + v.Key + "." + body,
-						Hint:    hint,
+						Message: key + " is set with " + v.Key + ".multipart",
+						Hint:    "a multipart body sets the Content-Type: remove the header",
 					})
 				}
 			}
