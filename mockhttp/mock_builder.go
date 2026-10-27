@@ -12,9 +12,9 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
-	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchrepeat"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
@@ -731,7 +731,7 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		spec.expectations = append(spec.expectations, &expectation{
 			Target:  int(matchingScopeRepeat),
 			Key:     "times",
-			Matcher: mfeat.Repeat(b.times),
+			Matcher: matchrepeat.Repeat(b.times),
 		})
 	}
 

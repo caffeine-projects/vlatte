@@ -14,9 +14,9 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchrepeat"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
@@ -332,7 +332,7 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		expectations = append(expectations, &vlatte.Eval[*Call]{
 			Target:  int(_scopeRepeat),
 			Key:     "times",
-			Matcher: mfeat.Repeat(b.times),
+			Matcher: matchrepeat.Repeat(b.times),
 		})
 	}
 
