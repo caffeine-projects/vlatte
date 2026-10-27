@@ -482,7 +482,7 @@ response:
         body_file: report.pdf  # relative to the mock file
 ```
 
-- **Bodies.** A part takes one of `body`, `body_base64` and `body_file` at most. A body that isn't UTF-8 text, such as an image, goes in `body_base64`, as standard base64 (`body_base64: //4A`), whose line breaks are ignored, or in a `body_file`. A byte body set in Go with `Part.Body` that isn't UTF-8 describes in `body_base64`.
+- **Bodies.** A part takes one of `body`, `body_base64` and `body_file` at most. A body that isn't UTF-8 text, such as an image, goes in `body_base64`, as standard base64 (`body_base64: //4A`), whose line breaks are ignored, or in a `body_file`. A byte body set in Go with `Part.Body` describes in `body_base64` when it isn't UTF-8, or when the body is templated, so it loads back as bytes, not as a template.
 - **Defaults.** A part with a name or a filename gets its `Content-Disposition`. A JSON body defaults to `application/json`, and a part with a filename to `application/octet-stream`.
 - **Templates.** With `template.enabled`, or `Template()` in Go, the text of the parts is a template: names, filenames, content types, header values, text bodies and body file names. Byte bodies, such as `body_base64`, JSON bodies and the content of body files are written as they are.
 - **Encode.** `Multipart.Encode` writes the same bodies for requests in tests.

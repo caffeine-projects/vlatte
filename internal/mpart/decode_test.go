@@ -136,6 +136,34 @@ func TestDecode_AValidObject(t *testing.T) {
 	require.Equal(t, doc, s.Doc())
 }
 
+func TestDecode_ReadsATemplatedSpecsByteBodyAsBytes(t *testing.T) {
+	// A templated spec renders its text bodies, and writes its byte bodies as they are. A byte body that is UTF-8,
+	// written as text, would read back as a template and render: it is written in body_base64.
+	s := &Spec{Subtype: "mixed", Boundary: "b", Templated: true, Parts: []*PartSpec{
+		{Body: []byte("{{ .X }} as is"), Kind: BodyBytes},
+		{Body: []byte("{{ .X }}"), Kind: BodyText},
+	}}
+
+	data, err := json.Marshal(s.Doc(), json.Deterministic(true))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"type": "mixed", "boundary": "b", "parts": [{"body_base64": "e3sgLlggfX0gYXMgaXM="}, {"body": "{{ .X }}"}]}`, string(data))
+
+	doc, err := value.DecodeJSON(data)
+	require.NoError(t, err)
+
+	got, err := Decode(config.Value{Key: "multipart", Origin: "doc", Any: doc})
+	require.NoError(t, err)
+
+	got.Templated = true // as the reply's template.enabled, or multipart_template, sets it
+
+	e, err := Compile(got, _engine)
+	require.NoError(t, err)
+
+	body, _, err := e.Encode(map[string]any{"X": "x"})
+	require.NoError(t, err)
+	require.Equal(t, "--b\r\n\r\n{{ .X }} as is\r\n--b\r\n\r\nx\r\n--b--\r\n", string(body))
+}
+
 func TestPropDecode_ReadsWhatDocWrites(t *testing.T) {
 	// MP5: Decode reads a spec's Doc back as the same spec: the same Doc, and the same bytes on the wire. A byte
 	// body comes back as text, which writes the same bytes, or as body_base64 when it isn't UTF-8, which JSON and

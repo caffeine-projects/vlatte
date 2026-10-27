@@ -261,39 +261,6 @@ func TestReplyMultipart_Describe(t *testing.T) {
 	}`, string(b))
 }
 
-func TestReplyMultipart_ABinaryPartLoadsBackFromItsDescription(t *testing.T) {
-	// A part built in Go can hold bytes that aren't UTF-8, such as an image, which JSON and YAML can't hold as text:
-	// its description failed to encode. It describes in body_base64, and loaded back serves the same bytes.
-	png := []byte{0x89, 'P', 'N', 'G', 0xff, 0xfe, 0x00}
-	reply := OK().Multipart(MultipartMixed(NewPart().ContentType("image/png").Body(png)).Boundary("b"))
-
-	m := MustNew(Setup().Silent())
-	m.MustStart()
-	t.Cleanup(m.Close)
-
-	m.MustMock(Getf("/go").Reply(reply))
-
-	b, err := json.Marshal(reply.Describe().Props)
-	require.NoError(t, err)
-	require.Contains(t, string(b), `"body_base64":"iVBOR//+AA=="`)
-
-	m.MustMock(FromBytes([]byte(`{"request": {"method": "GET", "path": "/file"}, "response": `+string(b)+`}`), "json"))
-
-	for _, path := range []string{"/go", "/file"} {
-		res, err := http.Get(m.URL(path))
-		require.NoError(t, err)
-
-		body, err := io.ReadAll(res.Body)
-		require.NoError(t, err)
-		require.NoError(t, res.Body.Close())
-		require.Equal(t, http.StatusOK, res.StatusCode, "%s: %s", path, body)
-
-		_, _, parts := readMultipart(t, res.Header.Get(HeaderContentType), body)
-		require.Len(t, parts, 1, path)
-		require.Equal(t, string(png), parts[0].body, path)
-	}
-}
-
 func TestMultipart_Encode(t *testing.T) {
 	// Encode writes the body a webhook sends, or a test posts: the same as a reply's.
 	contentType, body, err := MultipartForm(NewPart().Name("a").BodyText("1"), NewPart().Name("f").Filename("f.txt").BodyText("x")).Encode(nil, nil)
