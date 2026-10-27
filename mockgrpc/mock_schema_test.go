@@ -1,11 +1,18 @@
 package mockgrpc
 
 import (
+	"bytes"
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"io"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -128,6 +135,24 @@ func TestMockFile_NamesTheKeyOfEachProblem(t *testing.T) {
 		{"messages JSON can't write", `{request: {method: Upload, messages: [{key: .nan}]}, response: {}}`, "request.messages"},
 		{"body file that is missing", `{request: {method: Greetings}, response: {body_file: nope.json}}`, "response.body_file"},
 		{"proxy with a response", `{request: {method: Greetings}, response: {}, proxy: {target: "localhost:1"}}`, "proxy"},
+		{"sequence without responses", `{request: {method: Greetings}, response_sequence: {after_ended: {}}}`, "response_sequence.responses"},
+		{"sequence of no responses", `{request: {method: Greetings}, response_sequence: {responses: []}}`, "response_sequence.responses"},
+		{"sequence of no list", `{request: {method: Greetings}, response_sequence: {responses: {}}}`, "response_sequence.responses"},
+		{"sequence with a response", `{request: {method: Greetings}, response: {}, response_sequence: {responses: [{}]}}`, "response_sequence"},
+		{
+			"sequence response with two answers", `{request: {method: Greetings}, response_sequence: {responses: [{message: {}, messages: []}]}}`,
+			"response_sequence.responses[0].messages",
+		},
+		{
+			"after_ended with two answers", `{request: {method: Greetings}, response_sequence: {responses: [{}], after_ended: {message: {}, messages: []}}}`,
+			"response_sequence.after_ended.messages",
+		},
+		{"random without responses", `{request: {method: Greetings}, response_random: {seed: 1}}`, "response_random.responses"},
+		{"random response of an unknown key", `{request: {method: Greetings}, response_random: {responses: [{body: x}]}}`, "response_random.responses[0].body"},
+		{
+			"random response with two answers", `{request: {method: Greetings}, response_random: {responses: [{message: {}, messages: []}]}}`,
+			"response_random.responses[0].messages",
+		},
 		{"proxy header that is no string", `{request: {method: Greetings}, proxy: {target: "localhost:1", header: {h: 1}}}`, "proxy.header.h"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -145,6 +170,53 @@ func TestMockFile_NamesTheKeyOfEachProblem(t *testing.T) {
 			require.Equal(t, []string{tc.key}, keys, "%v", err)
 		})
 	}
+}
+
+func TestMockFile_ASequenceAndARandomAnswerAsSeqAndRandDo(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "done.json", `{"message": "done"}`)
+
+	seq := writeFile(t, dir, "seq.yaml", `
+request: {method: Greetings}
+response_sequence:
+  responses:
+    - message: {message: pending}
+    - status: {code: UNAVAILABLE}
+  after_ended: {body_file: done.json}
+`)
+
+	m := fileServer(t, Setup())
+	m.MustMock(FromFile(seq), FromBytes([]byte(`
+request: {method: List}
+response_random:
+  seed: 7
+  responses:
+    - messages: [{key: a}]
+    - messages: [{key: b}]
+`), "yaml"))
+
+	c := pb.NewTestServiceClient(m.MustDial())
+
+	got, _ := greetWith(t, c, "")
+	require.Equal(t, "pending", got)
+
+	_, code := greetWith(t, c, "")
+	require.Equal(t, codes.Unavailable, code)
+
+	got, _ = greetWith(t, c, "")
+	require.Equal(t, "done", got)
+
+	same := RandWithSeed(7, Messages(&pb.ListItem{Key: "a"}), Messages(&pb.ListItem{Key: "b"}))
+	other := serve(t)
+	other.MustMock(Method("List").Reply(same))
+
+	want, picked := make([]string, 0, 20), make([]string, 0, 20)
+	for range 20 {
+		want = append(want, listKeys(t, client(t, other))...)
+		picked = append(picked, listKeys(t, c)...)
+	}
+
+	require.Equal(t, want, picked, "a seed in a file picks as RandWithSeed does")
 }
 
 func TestMockFile_AProxyGoesOnToItsTarget(t *testing.T) {
@@ -178,4 +250,137 @@ func TestMockFile_ABodyFileThatIsNoJSONSaysSo(t *testing.T) {
 
 	_, err := fileServer(t, Setup()).Mock(FromFile(path))
 	require.ErrorContains(t, err, "is not JSON")
+}
+
+// grpc.schema.json is for editors: the decoder doesn't read it. These tests keep the two in step.
+
+const _schemaURL = "mem://vlatte/grpc.schema.json"
+
+func loadJSONSchema(t *testing.T) (*jsonschema.Schema, map[string]any) {
+	t.Helper()
+
+	b, err := os.ReadFile("schema/grpc.schema.json")
+	require.NoError(t, err)
+
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
+	require.NoError(t, err)
+
+	c := jsonschema.NewCompiler()
+	c.DefaultDraft(jsonschema.Draft2020)
+	require.NoError(t, c.AddResource(_schemaURL, doc))
+
+	schema, err := c.Compile(_schemaURL)
+	require.NoError(t, err)
+
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(b, &raw))
+
+	return schema, raw
+}
+
+func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
+	// Every key the decoder reads is documented for editors, and nothing else is.
+	_, raw := loadJSONSchema(t)
+
+	props := func(node any) map[string]any {
+		obj, _ := node.(map[string]any)
+		p, _ := obj["properties"].(map[string]any)
+
+		return p
+	}
+
+	keys := func(node any, groups ...string) []string {
+		var out []string
+		for k, v := range props(node) {
+			out = append(out, k)
+			if slices.Contains(groups, k) {
+				for sub := range props(v) {
+					out = append(out, k+"."+sub)
+				}
+			}
+		}
+
+		slices.Sort(out)
+
+		return out
+	}
+
+	defs, _ := raw["$defs"].(map[string]any)
+	bidi := props(raw)["bidi"]
+	rule := props(props(bidi)["on"].(map[string]any)["items"])
+
+	require.Equal(t, _mockSchema.Keys(), keys(raw, "scenario", "request"), "mock")
+	require.Equal(t, _replySchema.Keys(), keys(defs["reply"]), "reply")
+	require.Equal(t, _statusSchema.Keys(), keys(defs["status"]), "status")
+	require.Equal(t, _sequenceSchema.Keys(), keys(props(raw)["response_sequence"]), "response_sequence")
+	require.Equal(t, _randomSchema.Keys(), keys(props(raw)["response_random"]), "response_random")
+	require.Equal(t, _bidiSchema.Keys(), keys(bidi), "bidi")
+	require.Equal(t, _ruleSchema.Keys(), slices.Sorted(maps.Keys(rule)), "bidi rule")
+	require.Equal(t, _eventSchema.Keys(), keys(defs["on_complete_event"]), "on_complete")
+	require.Equal(t, _proxySchema.Keys(), keys(props(raw)["proxy"]), "proxy")
+}
+
+func TestJSONSchema_AcceptsTheFixturesTheDecoderAccepts(t *testing.T) {
+	// An editor must not mark a working mock file as wrong.
+	schema, _ := loadJSONSchema(t)
+	m := fileServer(t, Setup())
+
+	files, err := filepath.Glob("testdata/mocks/*.*")
+	require.NoError(t, err)
+
+	checked := 0
+
+	for _, file := range files {
+		if filepath.Base(file) == "items.json" { // a body_file, not a mock
+			continue
+		}
+
+		_, err := m.Mock(FromFile(file))
+		require.NoError(t, err, file)
+
+		format, _ := config.Format(filepath.Ext(file))
+		data, err := os.ReadFile(file)
+		require.NoError(t, err)
+
+		doc, err := config.Parse(data, format)
+		require.NoError(t, err)
+
+		b, err := json.Marshal(doc)
+		require.NoError(t, err)
+
+		v, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
+		require.NoError(t, err)
+		require.NoError(t, schema.Validate(v), file)
+
+		checked++
+	}
+
+	require.Equal(t, 7, checked)
+}
+
+func TestJSONSchema_RejectsWhatTheDecoderRejects(t *testing.T) {
+	schema, _ := loadJSONSchema(t)
+	m := MustNew(Setup().Silent())
+
+	for name, doc := range map[string]string{
+		"no method":            `{"request": {}, "response": {}}`,
+		"no answer":            `{"request": {"method": "Greetings"}}`,
+		"response and bidi":    `{"request": {"method": "Chat"}, "response": {}, "bidi": {}}`,
+		"response and proxy":   `{"request": {"method": "Greetings"}, "response": {}, "proxy": {"target": "localhost:1"}}`,
+		"a proxy to nowhere":   `{"request": {"method": "Greetings"}, "proxy": {}}`,
+		"response and seq":     `{"request": {"method": "Greetings"}, "response": {}, "response_sequence": {"responses": [{}]}}`,
+		"seq and random":       `{"request": {"method": "Greetings"}, "response_sequence": {"responses": [{}]}, "response_random": {"responses": [{}]}}`,
+		"seq of nothing":       `{"request": {"method": "Greetings"}, "response_sequence": {"responses": []}}`,
+		"random of nothing":    `{"request": {"method": "Greetings"}, "response_random": {}}`,
+		"message and messages": `{"request": {"method": "Greetings"}, "response": {"message": {}, "messages": []}}`,
+		"an unknown key":       `{"request": {"method": "Greetings"}, "response": {"body": "x"}}`,
+		"a code out of range":  `{"request": {"method": "Greetings"}, "response": {"status": {"code": 17}}}`,
+	} {
+		v, err := jsonschema.UnmarshalJSON(bytes.NewReader([]byte(doc)))
+		require.NoError(t, err)
+		require.Error(t, schema.Validate(v), name)
+
+		_, err = FromBytes([]byte(doc), "json").Build(m)
+		require.Error(t, err, "the decoder rejects it too: %s", name)
+	}
 }

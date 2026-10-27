@@ -183,7 +183,6 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"template-env": {
 			[]string{"--template-env", "API_URL,TENANT"}, func(t *testing.T, c *Config) { require.Equal(t, []string{"API_URL", "TENANT"}, c.TemplateEnv) },
 		},
-		"webhook-timeout": {[]string{"--webhook-timeout", "1.5s"}, func(t *testing.T, c *Config) { require.Equal(t, 1500*time.Millisecond, c.WebhookTimeout) }},
 	}
 
 	flags := ConfigFlags()

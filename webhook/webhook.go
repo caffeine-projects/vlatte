@@ -34,6 +34,7 @@ var (
 	_ vlatte.EventPreparer                    = (*WebHook)(nil)
 	_ descriptor.SelfDescriptive              = (*Args)(nil)
 	_ descriptor.SelfDescriptive              = (*multipartParams)(nil)
+	_ vlatte.Kit                              = noKit{}
 )
 
 var (
@@ -41,8 +42,12 @@ var (
 	ErrRenderingTemplate = errors.New("webhook: rendering error")
 )
 
-// _defaultEngine compiles the templates of a webhook run without a Kit, such as one called directly.
+// _defaultEngine compiles the templates of a webhook run without a Kit, such as one called directly, or with a Kit
+// without an engine.
 var _defaultEngine = vlatte.MustNewGoTemplateEngine()
+
+// _nopLogger is the logger of a webhook run without a Kit.
+var _nopLogger = zerolog.Nop()
 
 // _maxAnswer is how much of its target's answer a send reads before it ends, as net/http drains of a body closed
 // unread: past it, the connection closes.
@@ -56,15 +61,18 @@ type Transform func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Ar
 
 // WebHook is an automated HTTP request sent when an on-complete event is fired.
 // Register it with [vlatte.Listener.OnComplete] (e.g. via mockhttp.Setup().OnCompleteListener(name, wh)).
-// mockhttp sends it once the mock replied, and the response waits for it: a test checks the target right after.
+// mockhttp sends it once the mock replied, and the response waits for it: a test checks the target right after. An
+// event set to run after the response doesn't hold it: see [vlatte.EventConfig.AfterResponse].
 //
-// It logs each send and its answer at info level, with WithLogger's logger, or else with the logger of the event:
-// mockhttp gives the server's. It sends with WithTransport's transport, or else with the transport of the event:
-// mockhttp gives the server's Config.Transport, or else one it closes with the server. Without either, it sends with
-// http.DefaultTransport. A send fails when the target can't be reached in time, or answers with a status outside 2xx;
-// a redirect isn't followed. A send reads up to 256 KiB of the answer, within its time, so its connection carries the
-// next one. The time is WithTimeout's, or else the event's: mockhttp gives the server's Config.WebhookTimeout. Without
-// either, it is 10s. A zero WebHook is ready to use.
+// It logs each send and its answer at info level, with WithLogger's logger, or else with the server's, which the
+// event's [vlatte.Kit] gives. It sends with WithTransport's transport, or else with the server's, from the Kit too:
+// mockhttp gives its Config.Transport, or else one it closes with the server, as mockgrpc does. Relative files, such
+// as a body_file, open from the Kit's Dir: the directory of the mock file. An event without a Kit logs nothing,
+// sends with http.DefaultTransport, and opens files from the working directory. A send fails when the target can't be
+// reached in time, or answers with a status outside 2xx; a redirect isn't followed. A send reads up to 256 KiB of the
+// answer, within its time, so its connection carries the next one. The time is the webhook's own timeout parameter,
+// or else WithTimeout's, the timeout of every webhook the WebHook sends, such as the vlatte command's webhook.timeout
+// setting. Without either, it is 10s. A zero WebHook is ready to use.
 type WebHook struct {
 	transport http.RoundTripper
 	transform Transform
@@ -107,19 +115,24 @@ func (w *WebHook) Prepare(cfg vlatte.EventConfig, engine vlatte.TemplateEngine) 
 
 // Run implements vlatte.EventListener[vlatte.OnComplete]. It parses the event parameters and performs the HTTP request.
 func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
+	kit := args.Kit()
+	if kit == nil {
+		kit = noKit{}
+	}
+
 	// Each run has its own copy of the parameters, so a Transform changes only this request.
-	webhookArgs, err := argsOf(args.Parameters(), originOf(args), dirOf(args))
+	webhookArgs, err := argsOf(args.Parameters(), originOf(args), kit.Dir())
 	if err != nil {
 		return err
 	}
 
 	// A Transform can add headers, whether the parameters have some or not.
 	if webhookArgs.Header == nil {
-		webhookArgs.Header = make(map[string]string)
+		webhookArgs.Header = make(http.Header)
 	}
 
 	if webhookArgs.HeaderTemplate == nil {
-		webhookArgs.HeaderTemplate = make(map[string]string)
+		webhookArgs.HeaderTemplate = make(map[string][]string)
 	}
 
 	if w.transform != nil {
@@ -139,7 +152,10 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		method = http.MethodGet
 	}
 
-	engine, data := templating(args)
+	engine, data := kit.TemplateEngine(), kit.Data()
+	if engine == nil {
+		engine = _defaultEngine
+	}
 
 	rawURL := webhookArgs.URL
 	if webhookArgs.URLTemplate != "" {
@@ -188,30 +204,34 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 	logger := w.logger
 	if logger == nil {
-		logger = loggerOf(args)
+		logger = kit.Logger()
 	}
 
 	// With a context, only a bad method or URL fails it, and validate and checkURL checked both.
 	req, _ := http.NewRequestWithContext(ctx, method, u.String(), body)
 
-	for k, v := range webhookArgs.Header {
-		req.Header.Set(k, v)
+	for k, values := range webhookArgs.Header {
+		for _, v := range values {
+			req.Header.Add(k, v)
+		}
 	}
 
-	for k, v := range webhookArgs.HeaderTemplate {
-		rendered, err := render(engine, "header_template "+k, v, data)
-		if err != nil {
-			return err
-		}
+	for k, values := range webhookArgs.HeaderTemplate {
+		for _, v := range values {
+			rendered, err := render(engine, "header_template "+k, v, data)
+			if err != nil {
+				return err
+			}
 
-		// As in replies: the value goes without the spaces and line breaks around it, and a line break inside, which
-		// would end the header there, fails here, whatever the Transport would do with it.
-		rendered = textproto.TrimString(rendered)
-		if strings.ContainsAny(rendered, "\r\n") {
-			return fmt.Errorf("webhook: header_template %s holds a line break", k)
-		}
+			// As in replies: the value goes without the spaces and line breaks around it, and a line break inside,
+			// which would end the header there, fails here, whatever the Transport would do with it.
+			rendered = textproto.TrimString(rendered)
+			if strings.ContainsAny(rendered, "\r\n") {
+				return fmt.Errorf("webhook: header_template %s holds a line break", k)
+			}
 
-		req.Header.Set(k, rendered)
+			req.Header.Add(k, rendered)
+		}
 	}
 
 	// validate made sure no header sets it.
@@ -241,14 +261,14 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		Msgf("---> WEBHOOK REQUEST %s %s", method, u.Path)
 
 	// The timeout counts from the send, after the delay.
-	timeout := cmp.Or(w.timeout, timeoutOf(args), httpx.DefaultWebhookTimeout)
+	timeout := cmp.Or(webhookArgs.Timeout, w.timeout, httpx.DefaultWebhookTimeout)
 
 	sendCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	roundTripper := w.transport
 	if roundTripper == nil {
-		roundTripper = transportOf(args)
+		roundTripper = kit.Transport()
 	}
 
 	// The caller logs the errors: logging them here too would log each twice.
@@ -281,13 +301,14 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 // Args configures a WebHook HTTP request.
 // It is parsed from the parameters in the event config (e.g. mock definition).
 // URLTemplate, the HeaderTemplate values and BodyTemplate are templates, compiled with the template engine of the
-// server and rendered with the data of the request that completed the mock.
+// server and rendered with the data of the request that completed the mock. A header goes with each of its values,
+// in order. Header names ignore case, so a name is set once, in Header or HeaderTemplate.
 type Args struct {
 	URL            string
 	URLTemplate    string
 	Method         string
-	Header         map[string]string
-	HeaderTemplate map[string]string
+	Header         http.Header
+	HeaderTemplate map[string][]string
 	Body           string
 	BodyTemplate   string
 	BodyFile       string
@@ -296,8 +317,12 @@ type Args struct {
 	Multipart MultipartBody
 
 	// Delay is how long the webhook waits, once the mock replied, before it sends the request. The response waits for
-	// it too. The WebHook's timeout counts from the send.
+	// it too, unless the event runs after the response. The timeout counts from the send.
 	Delay time.Duration
+
+	// Timeout limits how long the request may take, from sending it to its answer. It wins over the WebHook's
+	// WithTimeout. 0 keeps that one, or else 10s.
+	Timeout time.Duration
 
 	dir string // where relative files open from: the mock file's directory; "" is the working directory
 }
@@ -325,11 +350,11 @@ func (a *Args) Describe() descriptor.Descriptor {
 	}
 
 	if len(a.Header) > 0 {
-		params["header"] = maps.Clone(a.Header)
+		params["header"] = describeHeader(a.Header)
 	}
 
 	if len(a.HeaderTemplate) > 0 {
-		params["header_template"] = maps.Clone(a.HeaderTemplate)
+		params["header_template"] = describeHeader(a.HeaderTemplate)
 	}
 
 	if body, ok := a.Multipart.(descriptor.SelfDescriptive); ok {
@@ -341,16 +366,37 @@ func (a *Args) Describe() descriptor.Descriptor {
 		params["delay"] = a.Delay.String()
 	}
 
+	if a.Timeout > 0 {
+		params["timeout"] = a.Timeout.String()
+	}
+
 	return descriptor.New("parameters", params)
 }
 
-// clone returns a copy of a, with copies of its maps. Multipart is shared: writing a body doesn't change it.
+// clone returns a copy of a, with copies of its headers and their values. Multipart is shared: writing a body doesn't
+// change it.
 func (a *Args) clone() *Args {
 	c := *a
-	c.Header = maps.Clone(a.Header)
-	c.HeaderTemplate = maps.Clone(a.HeaderTemplate)
+	c.Header = a.Header.Clone()
+	c.HeaderTemplate = http.Header(a.HeaderTemplate).Clone()
 
 	return &c
+}
+
+// describeHeader describes header as a mock file writes it: a name with one value has a string, and one with several
+// a list.
+func describeHeader(header map[string][]string) map[string]any {
+	described := make(map[string]any, len(header))
+	for name, values := range header {
+		if len(values) == 1 {
+			described[name] = values[0]
+			continue
+		}
+
+		described[name] = slices.Clone(values)
+	}
+
+	return described
 }
 
 // check compiles the templates of a with engine, under the names Run renders them with, without rendering them.
@@ -376,8 +422,10 @@ func (a *Args) check(engine vlatte.TemplateEngine) error {
 	}
 
 	for _, k := range slices.Sorted(maps.Keys(a.HeaderTemplate)) {
-		if err := compile("header_template "+k, a.HeaderTemplate[k]); err != nil {
-			return err
+		for _, v := range a.HeaderTemplate[k] {
+			if err := compile("header_template "+k, v); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -391,7 +439,7 @@ func (a *Args) check(engine vlatte.TemplateEngine) error {
 }
 
 // validate checks what a request needs, and what decoding a map can't check for Args built in Go: one of URL and
-// URLTemplate, a URL a request can go to, a valid method, one body at most, a delay of 0 or more, a Content-Type only
+// URLTemplate, a URL a request can go to, a valid method, one body at most, a delay and a timeout of 0 or more, a Content-Type only
 // from a multipart body, and each header once, as header names ignore case.
 func (a *Args) validate() error {
 	switch {
@@ -417,8 +465,12 @@ func (a *Args) validate() error {
 		return errorBadArg(fmt.Errorf("delay %s is negative", a.Delay))
 	}
 
+	if a.Timeout < 0 {
+		return errorBadArg(fmt.Errorf("timeout %s is negative", a.Timeout))
+	}
+
 	names := make(map[string]string, len(a.Header)+len(a.HeaderTemplate))
-	for _, header := range []map[string]string{a.Header, a.HeaderTemplate} {
+	for _, header := range []map[string][]string{a.Header, a.HeaderTemplate} {
 		for _, name := range slices.Sorted(maps.Keys(header)) {
 			key := textproto.CanonicalMIMEHeaderKey(name)
 			if other, ok := names[key]; ok {
@@ -463,12 +515,14 @@ var _argsSchema = config.NewSchema(
 		Set: func(a *Args, v config.Value) error { a.Method = v.Str; return nil },
 	},
 	argsField{
-		Key: "header", Kind: config.Any, Usage: "Headers of the request, by name.",
-		Set: func(a *Args, v config.Value) error { return headerOf(v, &a.Header) },
+		Key: "header", Kind: config.Any,
+		Usage: "Headers of the request, by name: a string, or a list of strings for several values.",
+		Set:   func(a *Args, v config.Value) (err error) { a.Header, err = headerOf(v); return err },
 	},
 	argsField{
-		Key: "header_template", Kind: config.Any, Usage: "Headers of the request whose values are templates, by name.",
-		Set: func(a *Args, v config.Value) error { return headerOf(v, &a.HeaderTemplate) },
+		Key: "header_template", Kind: config.Any,
+		Usage: "Headers of the request whose values are templates, by name: a string, or a list of strings for several values.",
+		Set:   func(a *Args, v config.Value) (err error) { a.HeaderTemplate, err = headerOf(v); return err },
 	},
 	argsField{
 		Key: "body", Kind: config.String, Usage: "Body of the request.",
@@ -507,8 +561,12 @@ var _argsSchema = config.NewSchema(
 		Set:   func(a *Args, v config.Value) error { return setMultipart(a, v, true) },
 	},
 	argsField{
-		Key: "delay", Kind: config.Duration, Usage: "How long to wait before sending, once the mock replied; the response waits for it too: milliseconds or a Go duration (1.5s).",
+		Key: "delay", Kind: config.Duration, Usage: "How long to wait before sending, once the mock replied; the response waits for it too, unless the event runs after the response: milliseconds or a Go duration (1.5s).",
 		Set: func(a *Args, v config.Value) error { a.Delay = v.Dur; return nil },
+	},
+	argsField{
+		Key: "timeout", Kind: config.Duration, Usage: "How long the request may take, from sending it to its answer: milliseconds or a Go duration (1.5s). Empty keeps the listener's, or else 10s.",
+		Set: func(a *Args, v config.Value) error { a.Timeout = v.Dur; return nil },
 	},
 )
 
@@ -537,11 +595,12 @@ func argsOf(params vlatte.Parameters, origin, dir string) (*Args, error) {
 // ArgsFromMap decodes the parameters of a webhook event, as a mock file's on_complete writes them:
 //   - url, or url_template, a template: a string;
 //   - method: a string, GET when empty;
-//   - header and header_template, whose values are templates: objects of strings;
+//   - header and header_template, whose values are templates: objects of strings, or of lists of strings for headers
+//     with several values;
 //   - one body: body, body_base64, the bytes in standard base64, body_template, a template, or body_file, a string; or
 //     multipart, or multipart_template, whose text is templates: an object with the type, boundary, params and parts
 //     of the body;
-//   - delay: milliseconds, or a Go duration such as 1.5s.
+//   - delay and timeout: milliseconds, or a Go duration such as 1.5s.
 //
 // As in mock files, each value must have its type, and other keys are errors. The webhook's checks of what a request
 // needs, such as one of url and url_template, come when the mock is built. A map built in code means what its
@@ -598,7 +657,7 @@ func conflicts(doc any, origin string) []config.Problem {
 		}
 	}
 
-	// Header names ignore case: a name set twice, in either map, is one header with one value.
+	// Header names ignore case: a name set twice, in either map, is one header, set once with its values as a list.
 	names := make(map[string]string)
 	for _, headers := range []string{"header", "header_template"} {
 		header, _ := params[headers].(map[string]any)
@@ -726,68 +785,14 @@ func countSet[T string | bool](values ...T) int {
 	return n
 }
 
-// headerOf decodes an object of header values, each a string.
-func headerOf(v config.Value, dst *map[string]string) error {
-	header := make(map[string]string)
-	err := config.Members(v, func(name string, member config.Value) error {
-		s, ok := member.Any.(string)
-		if !ok {
-			return config.Mismatch(member, "a string", config.String)
-		}
-
-		header[name] = s
-
-		return nil
+// headerOf decodes an object of header values, each a string or a list of strings, keyed as written.
+func headerOf(v config.Value) (map[string][]string, error) {
+	header := make(map[string][]string)
+	err := config.MemberStrings(v, func(name, value string) {
+		header[name] = append(header[name], value)
 	})
 
-	*dst = header
-
-	return err
-}
-
-// dirOf returns where the relative files of the event's parameters open from, as mockhttp's OnComplete says: the
-// directory of the mock file that defines the event, or "" for the working directory.
-func dirOf(args vlatte.OnComplete) string {
-	if d, ok := args.(interface{ Dir() string }); ok {
-		return d.Dir()
-	}
-
-	return ""
-}
-
-// transportOf returns the transport the event gives, as mockhttp's OnComplete gives the server's, or
-// http.DefaultTransport.
-func transportOf(args vlatte.OnComplete) http.RoundTripper {
-	if t, ok := args.(interface{ Transport() http.RoundTripper }); ok {
-		if rt := t.Transport(); rt != nil {
-			return rt
-		}
-	}
-
-	return http.DefaultTransport
-}
-
-// timeoutOf returns how long a send waits for its answer as the event says, as mockhttp's OnComplete gives the server's
-// Config.WebhookTimeout, or 0 when it doesn't say.
-func timeoutOf(args vlatte.OnComplete) time.Duration {
-	if t, ok := args.(interface{ WebhookTimeout() time.Duration }); ok {
-		return max(t.WebhookTimeout(), 0)
-	}
-
-	return 0
-}
-
-// loggerOf returns the logger the event gives, as mockhttp's OnComplete gives the server's, or one that logs nothing.
-func loggerOf(args vlatte.OnComplete) *zerolog.Logger {
-	if l, ok := args.(interface{ Logger() *zerolog.Logger }); ok {
-		if logger := l.Logger(); logger != nil {
-			return logger
-		}
-	}
-
-	nop := zerolog.Nop()
-
-	return &nop
+	return header, err
 }
 
 // originOf names where the parameters of an event come from, for problems: the mock that completed.
@@ -797,22 +802,6 @@ func originOf(args vlatte.OnComplete) string {
 	}
 
 	return "on_complete"
-}
-
-// templating returns what the templates of an event compile and render with: the engine of the server and the data
-// of the request that completed the mock. Without a Kit, they compile with a vlatte.GoTemplateEngine and no data.
-func templating(args vlatte.OnComplete) (vlatte.TemplateEngine, any) {
-	kit := args.Kit()
-	if kit == nil {
-		return _defaultEngine, nil
-	}
-
-	engine := kit.TemplateEngine()
-	if engine == nil {
-		engine = _defaultEngine
-	}
-
-	return engine, kit.Data()
 }
 
 // checkURL checks that raw is an absolute http or https URL with a host. Its errors show the URL without its
@@ -852,3 +841,14 @@ func render(engine vlatte.TemplateEngine, name, text string, data any) (string, 
 func errorBadArg(cause error) error {
 	return fmt.Errorf("%w: %w", ErrBadArg, cause)
 }
+
+// noKit is the Kit of a webhook run without one, such as one called directly: its templates compile with a
+// vlatte.GoTemplateEngine and render with no data, it logs nothing, sends with http.DefaultTransport, and opens
+// relative files from the working directory.
+type noKit struct{}
+
+func (noKit) TemplateEngine() vlatte.TemplateEngine { return _defaultEngine }
+func (noKit) Data() any                             { return nil }
+func (noKit) Logger() *zerolog.Logger               { return &_nopLogger }
+func (noKit) Transport() http.RoundTripper          { return http.DefaultTransport }
+func (noKit) Dir() string                           { return "" }

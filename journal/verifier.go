@@ -171,7 +171,7 @@ func describeRequests(page Page, what string) string {
 }
 
 // describeEntry describes e in a line: its number, time, outcome, method, target and status, the mock that matched
-// it, or the closest one that didn't, and what failed.
+// it, or the closest one that didn't, and what failed, the lines of its message joined with "; ".
 func describeEntry(e *Entry) string {
 	var b strings.Builder
 
@@ -196,7 +196,7 @@ func describeEntry(e *Entry) string {
 
 	if e.Message != "" {
 		b.WriteString(": ")
-		b.WriteString(e.Message)
+		b.WriteString(joinLines(e.Message, "; "))
 	}
 
 	if len(e.NearMisses) > 0 {

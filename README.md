@@ -102,10 +102,14 @@ A client streaming call matches once the client closed its side, on all its mess
 | `Template(texts...)` | Like `JSON`, rendered for each call: `{"message": "hi {{ .Request.Message.name }}"}`, with `.Request.Header` and `.Parameters`. |
 | `Status(code, msg)` | A status, with no message. |
 | `Bidi()` | A bidi stream, message by message: `On(matcher, reply)`, `Otherwise(reply)`, `OnEnd(reply)`. |
+| `Seq(replies...)` | Each reply in turn, one per call, a stream as a whole, then `OnSequenceEnded(reply)`'s. A call past the end without it fails with the `vlatte-error` trailer. |
+| `Rand(replies...)` | One of the replies at random for each call. `RandWithSeed(seed, replies...)` picks in an order the seed repeats, and `RandWith(r, replies...)` with a `*rand.Rand` of yours. |
+| `Echo()` | The client's messages back, read as the method's output type by field number: a unary or server streaming call's request, each message of a bidi call as it comes, the last one of a client stream. `Log()` logs each. |
+| `Shared(replier)` | The same `Replier` for every mock built with it, which they never close. |
 | `Func(fn)` | Whatever `fn` sends through the call, for anything else. |
 | `From(target)` | The answer of another gRPC server: see **Proxying and recording** below. |
 
-A reply's `Header` and `Trailer` add metadata, `Status` ends a stream with a status after its messages, `Details` adds `errdetails` messages to it, and `MessageDelay` waits before each message. `Build` checks a reply against the method: its messages' type, and that a unary or client streaming method gets one message, or a status.
+A reply's `Header` and `Trailer` add metadata, `Status` ends a stream with a status after its messages, `Details` adds `errdetails` messages to it, and `MessageDelay` waits before each message. `Build` checks a reply against the method: its messages' type, and that a unary or client streaming method gets one message, or a status. It checks each reply of `Seq` and `Rand` the same way, and each mock built with them goes through its replies on its own.
 
 ```go
 m.MustMock(mockgrpc.Method("Users/Get").
@@ -144,7 +148,7 @@ response:
       - {"@type": type.googleapis.com/google.rpc.ErrorInfo, reason: NOT_OWNER}
 ```
 
-`request.message` and `request.messages` match whole messages, `request.body` takes a matcher of the request's JSON. `response` takes `message`, `messages`, `body_file` (a JSON file of a message or a list of them), `template`, `header`, `trailer`, `status` and `message_delay`; `bidi` takes `header`, `trailer`, `on` (rules of `when` and `response`), `otherwise` and `on_end`; `proxy` takes `target`, `header` and `remove_headers`. `delay`, `repeat`, `scenario` and `on_complete` work as in HTTP mock files.
+`request.message` and `request.messages` match whole messages, `request.body` takes a matcher of the request's JSON. `response` takes `message`, `messages`, `body_file` (a JSON file of a message or a list of them), `template`, `header`, `trailer`, `status` and `message_delay`; `bidi` takes `header`, `trailer`, `on` (rules of `when` and `response`), `otherwise` and `on_end`; `proxy` takes `target`, `header` and `remove_headers`. `response_sequence` takes `responses`, a list of `response`s, and `after_ended`, a `response`; `response_random` takes `responses` and `seed`. `delay`, `repeat`, `scenario` and `on_complete` work as in HTTP mock files.
 
 **Proxying and recording.** `From(target)` answers each call with the answer of another gRPC server, of any call type: the target gets the client's metadata and messages, and the client gets the target's header, messages, trailer and status as they come, a bidi call message by message. `Header` sets metadata the target gets in place of the client's, `RemoveHeaders` leaves some out, and `DialOptions` sets options of the connection, which goes without TLS by default, such as `grpc.WithTransportCredentials`. A target's status is the mock's answer; a target it can't reach fails the call, with the `vlatte-error` trailer.
 
@@ -156,7 +160,7 @@ err := m.StartRecording(mockgrpc.RecordTarget("localhost:50051"), mockgrpc.Recor
 res, err := m.StopRecording(ctx) // writes the mock files, then serves them
 ```
 
-A gRPC server records as an HTTP one does: see [Recording and playback](#recording-and-playback). With `RecordTarget`, the calls the recording takes go to the target before any mock; without one, it takes the answers of `From` mocks, and of every mock with `RecordIncludeMocked(true)`. `RecordMethods` names the methods it takes, as `Method` does, and `RecordRequestHeaders` the metadata its mocks match. A recording matches a call by its method, its messages and that metadata, and answers with the header, messages, trailer and status of the first call of that request. A bidi call matches by its method and metadata only, as bidi mocks do, and plays its messages back at once. `Setup().Record(...)`, the `grpc.record` section of the settings and the admin API's `/recording` routes record too, and a server serves the recordings of its `grpc.record.dir`, `_mocks_recorded` under its root directory by default.
+A gRPC server records as an HTTP one does: see [Recording and playback](#recording-and-playback). With `RecordTarget`, the calls the recording takes go to the target before any mock; without one, it takes the answers of `From` mocks, and of every mock with `RecordIncludeMocked(true)`. `RecordMethods` names the methods it takes, as `Method` does, and `RecordRequestHeaders` the metadata its mocks match. A recording matches a call by its method, its messages and that metadata, and answers with the header, messages, trailer and status of the calls of that request in turn, as a `response_sequence`, then the last one again; `RecordRepeats(vlatte.RecordFirst)` keeps the first only. A bidi call matches by its method and metadata only, as bidi mocks do, and plays its messages back at once. `Setup().Record(...)`, the `grpc.record` section of the settings and the admin API's `/recording` routes record too, and a server serves the recordings of its `grpc.record.dir`, `_mocks_recorded` under its root directory by default.
 
 **More.** `Setup().Reflection()` serves server reflection, so `grpcurl` lists the services and describes their messages. A server keeps a [journal](#request-journal) of its calls with `Setup().Journal(dir)`, which tests verify with the same builders, serves an [admin API](#admin-api) with `Setup().Admin(admin.MustNew())`, and answers a call no mock matched with `Setup().NoMatchCode(code)`, `NotFound` by default. `Close` waits for the calls in flight up to `Setup().ShutdownTimeout(d)`, 5s by default, then cuts them.
 
@@ -206,7 +210,9 @@ response:
 
 **Types.** Each key takes one type, as the schema says. Write text in quotes where a string goes, as in `name: "123"`, and numbers bare, as in `priority: 10`. Bools read the way Go's `strconv.ParseBool` reads them, so `true`, `"true"`, `t` and `1` are all true. A value of the wrong type is an error that says how to write it.
 
-**Durations.** `delay`, `proxy.timeout`, the durations of [faults](#faults) and the `delay` of a [webhook](#webhooks) take whole milliseconds (`1500`) or a Go duration (`1.5s`). `"1500"` in quotes is neither.
+**Bodies.** A reply's `body` is text as is, and any other value as JSON. A body that isn't UTF-8 text, such as an image or text in another encoding, goes in `body_base64`, as standard base64 (`body_base64: //4A`), whose line breaks are ignored, or in a `body_file`. A reply takes one of `body`, `body_base64`, `body_file` and `multipart` at most.
+
+**Durations.** `delay`, `proxy.timeout`, the durations of [faults](#faults) and the `delay` and `timeout` of a [webhook](#webhooks) take whole milliseconds (`1500`) or a Go duration (`1.5s`). `"1500"` in quotes is neither.
 
 **Matching.** Most of a request is text: its path, query, headers and form values. A matcher reads that text as the type it compares with:
 - `[equal, 10]` and `[isIn, [10, 20]]` match `?page=10`;
@@ -516,7 +522,7 @@ m := mockhttp.MustNew(mockhttp.Setup().OnCompleteListener("webhook", wh))
 
 A mock that names a listener the server doesn't have fails to build, and so does a server given two listeners of one name.
 
-A webhook sends through `webhook.WithTransport`, or else the server's `Setup().Transport`, or else a transport the server makes for webhooks, whose idle connections `m.Close()` closes.
+A webhook sends through `webhook.WithTransport`, or else the server's `Setup().Transport`, or else a transport the server makes for webhooks, whose idle connections `m.Close()` closes; a gRPC server makes one too. A listener of your own gets the same from its event's `Kit()`: the server's `Logger()`, `Transport()`, and `Dir()`, the directory of the mock file, which relative files open from.
 
 ```yaml
 request:
@@ -559,9 +565,10 @@ m.MustMock(mockhttp.Postf("/orders").
 |---|---|
 | `url` or `url_template` | Where the request goes: an absolute `http` or `https` URL. One of them is required. |
 | `method` | The method, in any case. Empty means `GET`. |
-| `header`, `header_template` | Headers by name, each a string. Names ignore case, so a name is set once. |
+| `header`, `header_template` | Headers by name, each a string, or a list of strings to send the header once per value, in order. Names ignore case, so a name is set once. |
 | `body`, `body_base64`, `body_template`, `body_file`, `multipart`, `multipart_template` | The body, one of them at most. A body that isn't UTF-8 text goes in `body_base64`, as standard base64, whose line breaks are ignored; a `Body` set in Go that isn't UTF-8 describes there. Multipart bodies are as in [replies](#forms-and-multipart). |
-| `delay` | How long to wait before sending, once the mock replied. The response waits for it too. |
+| `delay` | How long to wait before sending, once the mock replied. The response waits for it too, unless the webhook runs after the response. |
+| `timeout` | How long the request may take, from sending it to its answer. Without it, the listener's timeout, or else 10s. |
 
 Templates render with the data of the request that completed the mock: see [Templates](#templates). A mistake, such as a missing URL, two bodies or a template that doesn't compile, fails the mock when it is built.
 
@@ -576,7 +583,18 @@ callbacks.AssertCalled(t)
 
 A webhook's `delay` counts from the reply, so it holds the response too. A reply that streams its parts, or a body over a few KB, sends its status and headers before its webhooks are done, so the call returns early; the body still ends after them, unless the mock sets `Content-Length` itself. Read the body to its end, as `io.ReadAll` does, before checking what they sent. `m.Close()` cancels the webhooks still waiting, for their delay or for their target.
 
-**Failures.** A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning. The timeout is 10 seconds: `webhook.WithTimeout` changes it for one webhook, and the server's `webhook.timeout` setting (`Config.WebhookTimeout`) for webhooks without one, where 0 means 10 seconds, unlike `proxy.timeout`. A webhook reads up to 256 KiB of the answer, so its connection carries the next one. A response waits for a webhook at most its delay plus the timeout.
+**After the response.** `after_response: true` on an `on_complete` entry, beside `name` and `parameters`, sends the response without waiting for the event, for an app that needs its callback once it has its answer. In Go, set `AfterResponse` on the `vlatte.EventConfig` that `Build` returns. The event starts as the response goes out, so give it a `delay` when the client must read its answer first, and have the test wait for the target to get the webhook, not for the call. `m.Close()` cancels these events too, and waits for them. A failure is logged as any other, but the journal entry of the request, recorded by then, doesn't tell it.
+
+```yaml
+on_complete:
+  - name: webhook
+    after_response: true
+    parameters:
+      url: http://localhost:8081/orders
+      delay: 100ms
+```
+
+**Failures.** A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning, and the request's [journal](#request-journal) entry, if the server keeps one, tells it in its `Message`. The timeout is 10 seconds: a webhook's `timeout` parameter (`Options().Timeout(d)` in Go) changes it for that webhook, and `webhook.WithTimeout` for every webhook its listener sends, where 0 means 10 seconds, unlike `proxy.timeout`. The CLI's `webhook.timeout` setting is the `WithTimeout` of its listener, for HTTP and gRPC mocks. A webhook reads up to 256 KiB of the answer, so its connection carries the next one. A response waits for a webhook at most its delay plus the timeout.
 
 **Logs.** Webhooks log each request and its answer with the server's logger, so `Setup().Silent()` silences them too. `webhook.WithLogger` gives them a logger of their own.
 
@@ -829,7 +847,7 @@ The `vlatte` command serves the admin API by default: `admin: false` (`--admin=f
 | `POST /reset` | Removes the mocks added through the admin API, loads the mock files again, saved ones included, starts every scenario over, and clears the [journal](#request-journal). Mocks added in code stay as they are. The mocks of a persistent store come back from it: reset never deletes what it holds. |
 | `GET /mocks` | Lists every mock, enabled or not, with its `priority`, `enabled`, `hits` and `origin`. |
 | `POST /mocks` | Adds the mock of the body, a [mock file](#mock-files). An id in use is a `409`. |
-| `GET /mocks/{id}` | The mock as a mock file describes it, which `PUT` and `POST` take back. |
+| `GET /mocks/{id}` | The mock as a mock file describes it, which `PUT` and `POST` take back. A mock whose reply a mock file can't hold, an `Echo`, `Func` or `Handler`, answers `500` with the code `describe_failed`. |
 | `PUT /mocks/{id}` | Replaces the mock, in one step. The body's id must be the path's. |
 | `PATCH /mocks/{id}` | Enables or disables the mock: `{"enabled": false}`. |
 | `DELETE /mocks/{id}`, `DELETE /mocks` | Removes the mock, or every mock. |
@@ -938,7 +956,7 @@ entries, err := m.Requests(ctx, journal.Query{Path: match.GlobMatch("/users/*"),
 n, err := m.CountRequests(ctx, journal.Query{Kind: mockhttp.Kind})
 ```
 
-A failed assertion lists the requests that matched, or the newest ones when none did, with the mock that came closest to each request no mock matched. A request is journaled as the server ends its answer, as hits count: a client gets a small answer only then, while it may read the start of a large one a moment before.
+An entry's `Message` tells what failed: the request, or else the on_complete events of a request a mock answered, one line each, such as a [webhook](#webhooks) whose target answered `500`, so a test checks a webhook failed without reading the logs. A failed assertion lists the requests that matched, or the newest ones when none did, with the mock that came closest to each request no mock matched. A request is journaled as the server ends its answer, as hits count: a client gets a small answer only then, while it may read the start of a large one a moment before.
 
 A `journal.Query`, of package `github.com/caffeine-projects/vlatte/journal`, selects by the fields every protocol has. `Kind`, `Outcome`, `MockID`, `Method`, `Path` and `Status` are indexed: a query runs each of their matchers once per value the journal holds, not once per request, and reads no request from disk for them. `Target` (the full URL), `Since` and `Until` filter in memory too. `Header`, `Body` and request patterns read the requests the other fields leave. `Limit` and `Before` page through them, newest first; `m.Journal().Find` returns the next page's cursor and the count. A `journal.Journal` works on its own too, as a changelog of any requests: `journal.New(journal.Options{Dir: dir})`.
 
@@ -1116,7 +1134,7 @@ curl http://127.0.0.1:8080/hello
 
 Without `--addr`, it listens on a random port and prints the URL. Settings can also come from a `.vlatterc` file or `VLATTE_*` environment variables; see [Configuration](#configuration). Run `vlatte --help` to list them, and `vlatte completion --help` to set up shell completion.
 
-Mock files can send [webhooks](#webhooks): the CLI registers the `webhook` listener, and `--webhook-timeout` bounds each request.
+Mock files can send [webhooks](#webhooks): the CLI registers the `webhook` listener, and `--webhook-timeout` bounds each request that sets no `timeout` of its own.
 
 It [records](#recording-and-playback) a service until it stops, and serves the recordings on the next run:
 

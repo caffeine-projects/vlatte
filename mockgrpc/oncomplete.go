@@ -10,7 +10,8 @@ import (
 var _ vlatte.OnComplete = (*OnComplete)(nil)
 
 // OnComplete implements vlatte.OnComplete for gRPC mocks. Listeners, and the callbacks of [Builder.Callback], get it
-// once the mock replied, and the call ends after them. It's read-only: the listeners of a call run at the same time.
+// once the mock replied, and the call ends after them, but for those set to run after the response, which mustn't
+// call [Call.Send] or [Call.Recv]: the call ended. It's read-only: the listeners of a call run at the same time.
 // Listeners use the context they get: the client leaving doesn't end it, as it ends the call's.
 type OnComplete struct {
 	m      *Mock

@@ -104,6 +104,50 @@
     "response": {
       "$ref": "#/$defs/reply"
     },
+    "response_sequence": {
+      "description": "Answers served in order, one per call, then after_ended once they run out.",
+      "type": "object",
+      "properties": {
+        "responses": {
+          "description": "The answers, served in order.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/reply"
+          }
+        },
+        "after_ended": {
+          "description": "The answer of the calls that come once the responses ran out.",
+          "$ref": "#/$defs/reply"
+        }
+      },
+      "required": [
+        "responses"
+      ],
+      "additionalProperties": false
+    },
+    "response_random": {
+      "description": "Answers served at random, one per call.",
+      "type": "object",
+      "properties": {
+        "responses": {
+          "description": "The answers, one picked at random for each call.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/reply"
+          }
+        },
+        "seed": {
+          "description": "Seed of the random order, to repeat it.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "responses"
+      ],
+      "additionalProperties": false
+    },
     "bidi": {
       "description": "The answer of a bidi streaming method, message by message.",
       "type": "object",
@@ -183,6 +227,74 @@
         "anyOf": [
           {
             "required": [
+              "response_sequence"
+            ]
+          },
+          {
+            "required": [
+              "response_random"
+            ]
+          },
+          {
+            "required": [
+              "bidi"
+            ]
+          },
+          {
+            "required": [
+              "proxy"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "required": [
+        "response_sequence"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "response"
+            ]
+          },
+          {
+            "required": [
+              "response_random"
+            ]
+          },
+          {
+            "required": [
+              "bidi"
+            ]
+          },
+          {
+            "required": [
+              "proxy"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "required": [
+        "response_random"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "response"
+            ]
+          },
+          {
+            "required": [
+              "response_sequence"
+            ]
+          },
+          {
+            "required": [
               "bidi"
             ]
           },
@@ -207,6 +319,16 @@
           },
           {
             "required": [
+              "response_sequence"
+            ]
+          },
+          {
+            "required": [
+              "response_random"
+            ]
+          },
+          {
+            "required": [
               "proxy"
             ]
           }
@@ -222,6 +344,16 @@
           {
             "required": [
               "response"
+            ]
+          },
+          {
+            "required": [
+              "response_sequence"
+            ]
+          },
+          {
+            "required": [
+              "response_random"
             ]
           },
           {
@@ -444,7 +576,11 @@
           "description": "Name of a listener registered with Setup().OnCompleteListener. The vlatte command registers webhook.",
           "type": "string"
         },
-        "parameters": {}
+        "parameters": {},
+        "after_response": {
+          "description": "Send the response without waiting for the event, which runs on.",
+          "$ref": "#/$defs/bool"
+        }
       },
       "additionalProperties": false,
       "required": [

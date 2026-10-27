@@ -780,7 +780,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The handler waits for the events, so the response ends after them: a test checks what they did right after it.
-	// They run before the request log, so its elapsed time counts them.
+	// They run before the request log, so its elapsed time counts them. Those set to run after the response run on.
 	h.runner.OnComplete(
 		r.Context(),
 		mock,
@@ -788,7 +788,13 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// The request's context ends when the client leaves: templates read the parameters with the event's.
 			data := *locals
 			data.Parameters = viewdata.NewParameters(ctx, h.app.params)
-			kit := &Kit{engine: h.app.config.TemplateEngine, data: &data}
+			kit := &Kit{
+				engine:    h.app.config.TemplateEngine,
+				data:      &data,
+				logger:    h.app.logger,
+				transport: h.app.webhookTransport(),
+				dir:       cfg.Dir,
+			}
 
 			return &OnComplete{
 				m:         mock,
@@ -799,10 +805,12 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				dir:       cfg.Dir,
 				logger:    h.app.logger,
 				transport: h.app.webhookTransport(),
-				timeout:   h.app.config.WebhookTimeout,
 			}
 		},
-		func(err error) { h.lifecycle.OnWarning(reqValues, err) },
+		func(err error) {
+			h.lifecycle.OnWarning(reqValues, err)
+			reqValues.journal.eventFailed(err)
+		},
 	)
 
 	h.lifecycle.OnMatch(reqValues, res)
