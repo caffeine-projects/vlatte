@@ -13,8 +13,10 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match"
 )
@@ -22,6 +24,7 @@ import (
 var (
 	_ ReplierFactory = (*ProxyReply)(nil)
 	_ Replier        = (*proxyReplier)(nil)
+	_ io.ReadCloser  = (*stepReader)(nil)
 	_ io.Closer      = (*proxyReplier)(nil)
 )
 
@@ -79,7 +82,7 @@ func From[T FromTypes](target T) *ProxyReply {
 	}
 }
 
-// ProxyAll returns a mock that answers the requests no other mock matches with reply, as WireMock's proxy-all does: it
+// ProxyAll returns a mock that answers the requests no other mock matches with reply: it
 // matches any method and path, and comes last, at the priority math.MaxInt. It leaves CONNECTs alone, and, on a server
 // that is a forward proxy, the requests in absolute form, which the proxy sends on to the hosts they name. Its
 // description holds the reply under proxy_all, which a mock file loads back as the same mock.
@@ -102,6 +105,7 @@ func proxyAll(b *Builder, reply *ProxyReply) *Builder {
 
 	b.appendExpectation(&expectation{
 		Target: int(matchingScopeNone),
+		Key:    "proxy_all",
 		Selector: func(_ context.Context, in *selectorInput) any {
 			return in.RawRequest.Method != http.MethodConnect && !in.ForProxy
 		},
@@ -307,7 +311,7 @@ type proxyReplier struct {
 }
 
 // Reply implements Replier.
-func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, error) {
+func (p *proxyReplier) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
 	in := input.RequestValues.RawRequest
 
 	target, err := p.forwardURL(in.URL)
@@ -316,15 +320,35 @@ func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, er
 	}
 
 	// The target gets a copy: what runs after the reply, such as callbacks and events, sees the request as it came.
-	out, err := forwardRequest(in.Context(), in, p.id)
+	out, err := forwardRequest(ctx, in, p.id)
 	if err != nil {
 		return nil, fmt.Errorf("reply_proxy: %w", err)
 	}
 
-	// A mock whose steps or mappers couldn't apply to a connection that switched protocols doesn't ask for a switch.
+	// A mock whose mappers couldn't apply to a connection that switched protocols doesn't ask for a switch.
 	if input.noSwitch {
 		out.Header.Del(HeaderConnection)
 		out.Header.Del(HeaderUpgrade)
+	}
+
+	// The body goes through the upstream steps of the mock, which can change its length: it goes chunked, and a retry
+	// of the transport, which would read it again past the steps, can't happen. A stage that aborts ends the call.
+	var up *stepReader
+
+	switch {
+	case input.upstreamBody != nil:
+		out.Body = io.NopCloser(input.upstreamBody)
+	case len(input.upstream) > 0 && out.Body != nil && out.Body != http.NoBody:
+		up = newStepReader(out.Context(), out.Body, input.upstream)
+
+		out = out.WithContext(up.ctx)
+		out.Body = up
+	}
+
+	if input.upstreamBody != nil || up != nil {
+		out.ContentLength = -1
+		out.GetBody = nil
+		out.Header.Del(HeaderContentLength)
 	}
 
 	out.URL = target
@@ -355,8 +379,25 @@ func (p *proxyReplier) Reply(_ context.Context, input ReplyInput) (*Response, er
 	}
 
 	res, err := p.send(out, displayURL(p.target))
+
+	// A stage that aborted what the mock sends on cut the call, even one the target answered first: the cut is the
+	// mock's answer.
+	if cause := up.aborted(); cause != nil {
+		if err == nil && res.BodyCloser != nil {
+			_ = res.BodyCloser.Close()
+		}
+
+		return nil, cause
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("reply_proxy: %w", err)
+	}
+
+	// A stage that cuts what the mock sends on once the target answered cuts the call, which ends its body: the read
+	// fails with the cut, the mock's answer.
+	if body, ok := res.BodyCloser.(*targetBody); ok && up != nil {
+		body.cut = up.aborted
 	}
 
 	// A header of the mock's replaces the target's values of that name: the client gets one Content-Type, not two.
@@ -456,4 +497,99 @@ func escapedIndex(escaped string, n int) int {
 	}
 
 	return i
+}
+
+// _upstreamPiece is how much of a body the upstream steps take at a time: of a body still the client's, a stage that
+// holds a piece holds the client's upload after little of it.
+const _upstreamPiece = 1 << 10
+
+// errBodyEnded ends the flow of a stepReader whose body broke off, or whose reader stopped, such as a target that
+// answered early: the stages stop, but no stage asked for a cut.
+var errBodyEnded = errors.New("reply_proxy: the body ended before its steps did")
+
+// stepReader reads a body through a flow of steps: from the first read, a goroutine copies the body through the flow,
+// whose sink is a pipe the reader reads, so a stage that writes later, or in parts, is read as it writes. The copy
+// takes the body as it is read, a piece at a time: of a body still the client's, a stage that holds a piece holds the
+// upload. ctx, for the call that reads it, ends with the cause of an abort a stage asks for, and so does the reader.
+type stepReader struct {
+	ctx   context.Context
+	flow  *vlatte.Flow
+	pipe  *io.PipeReader
+	sink  *io.PipeWriter
+	body  io.ReadCloser
+	start sync.Once
+	done  chan struct{}
+}
+
+// newStepReader opens a flow of steps, within ctx, for body.
+func newStepReader(ctx context.Context, body io.ReadCloser, steps []vlatte.Step) *stepReader {
+	ctx, cancel := context.WithCancelCause(ctx)
+	pr, pw := io.Pipe()
+
+	r := &stepReader{ctx: ctx, pipe: pr, sink: pw, body: body, done: make(chan struct{})}
+	r.flow = vlatte.NewFlow(ctx, &vlatte.Sink{W: pw}, steps)
+
+	context.AfterFunc(r.flow.Context(), func() {
+		if cause := r.aborted(); cause != nil {
+			cancel(cause)
+			pw.CloseWithError(cause)
+		}
+	})
+
+	return r
+}
+
+// Read starts the copy, at the first read, and reads what the steps passed on.
+func (r *stepReader) Read(p []byte) (int, error) {
+	r.start.Do(func() { go r.copy() })
+	return r.pipe.Read(p)
+}
+
+// Close stops the copy, and the steps, which drop what they hold, and waits for them to end. After an abort, it
+// neither closes the body nor waits for the copy, which may wait on a client that sends nothing more: closing a
+// server's request body reads the rest of it. The cut that follows ends the connection, and the copy with it.
+func (r *stepReader) Close() error {
+	// A body never read has no copy to wait for: its steps end here.
+	r.start.Do(func() {
+		r.flow.Abort(errBodyEnded)
+		_ = r.flow.Close()
+		close(r.done)
+	})
+
+	err := r.pipe.Close()
+	if r.aborted() != nil {
+		return err
+	}
+
+	_ = r.body.Close()
+	r.flow.Abort(errBodyEnded)
+	<-r.done
+
+	return err
+}
+
+// copy copies the body through the flow, in pieces of _upstreamPiece: the body's own WriterTo, if any, is hidden, so
+// it can't pass more at once.
+func (r *stepReader) copy() {
+	defer close(r.done)
+
+	_, err := io.CopyBuffer(r.flow, struct{ io.Reader }{r.body}, make([]byte, _upstreamPiece))
+	if err != nil {
+		r.flow.Abort(fmt.Errorf("%w: %w", errBodyEnded, err))
+	}
+
+	r.sink.CloseWithError(cmp.Or(err, r.flow.Close()))
+}
+
+// aborted returns the cause of the flow when a stage aborted it, or nil. A nil r, for a body without steps, has none.
+func (r *stepReader) aborted() error {
+	if r == nil {
+		return nil
+	}
+
+	if cause := context.Cause(r.flow.Context()); errors.Is(cause, vlatte.ErrAbort) && !errors.Is(cause, errBodyEnded) {
+		return cause
+	}
+
+	return nil
 }

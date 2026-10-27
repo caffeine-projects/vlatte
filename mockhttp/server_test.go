@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
 )
 
 // echo answers 202 and tells, in headers, the method and the path the mock got.
@@ -43,14 +44,17 @@ func TestServer_EveryMethodReachesTheMocks(t *testing.T) {
 }
 
 func TestServer_MethodMatchesIgnoringCase(t *testing.T) {
-	// Mock files and Builder.Method match the method ignoring case, so a request in another case gets that mock.
+	// Mock files and Builder.Method match the method ignoring case, so a request in another case gets that mock. One
+	// method or several: Method("get", "POST") compared several with their case, so a GET missed it.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
 	m.MustMock(
 		Request().Method("PURGE").URLPathf("/purge").Reply(Accepted()),
-		Getf("/get").Reply(Accepted()))
+		Getf("/get").Reply(Accepted()),
+		Request().Method("get", "POST").URLPathf("/many").Reply(Accepted()),
+		FromBytes([]byte("request: {method: 'get, post', path: /file}\nresponse: {status: 202}\n"), "yaml"))
 
 	tests := []struct {
 		giveMethod string
@@ -60,6 +64,10 @@ func TestServer_MethodMatchesIgnoringCase(t *testing.T) {
 		{giveMethod: "purge", givePath: "/purge"},
 		{giveMethod: "Purge", givePath: "/purge"},
 		{giveMethod: "get", givePath: "/get"},
+		{giveMethod: "GET", givePath: "/many"},
+		{giveMethod: "post", givePath: "/many"},
+		{giveMethod: "POST", givePath: "/file"},
+		{giveMethod: "Get", givePath: "/file"},
 	}
 
 	for _, tt := range tests {
@@ -152,7 +160,7 @@ func TestServer_PathsReachTheMocksAsSent(t *testing.T) {
 
 func TestServer_TheAdminAPIIsApartFromTheMocks(t *testing.T) {
 	// The admin API serves on an address of its own: every path of the mock server, /__admin included, is the mocks'.
-	m := MustNew(Setup().Silent().Admin(""))
+	m := MustNew(Setup().Silent().Admin(admin.MustNew()))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -190,7 +198,7 @@ func TestServer_AdminAPIThatCantListen(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = taken.Close() })
 
-	m := MustNew(Setup().Silent().Admin(taken.Addr().String()))
+	m := MustNew(Setup().Silent().Admin(admin.MustNew(admin.Addr(taken.Addr().String()))))
 	t.Cleanup(m.Close)
 
 	require.ErrorContains(t, m.Start(), "admin: ")

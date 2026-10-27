@@ -48,6 +48,19 @@ type EventConfig struct {
 	// Dir is where relative files of the parameters open from, such as the directory of the mock file that defines
 	// the event. "" is the working directory.
 	Dir string
+
+	// Listener, when set, runs the event in place of the listener registered under Name, which then only names the
+	// event in errors: it needs no registration. Its Parameters reach it as they are: [EventPreparer] doesn't apply.
+	// Events set in Go can carry one, as [github.com/caffeine-projects/vlatte/mockhttp.Builder.Callback] does. Mock
+	// files can't, and a mock's description leaves out the events that carry one.
+	Listener EventListener[OnComplete]
+
+	// AfterResponse has the response go out without waiting for the event, which runs on until it ends or the server
+	// closes: an app that needs its callback once it has its answer, such as a webhook's, gets it. The event starts
+	// as the response goes out, so it may start before the client reads it: a delay, such as a webhook's, sends it
+	// later. A test waits on what the event does, such as its target getting the webhook. Its failure is reported as
+	// any event's, but the journal entry of the request, recorded by then, doesn't tell it.
+	AfterResponse bool
 }
 
 type EventConfigs []EventConfig
@@ -127,12 +140,12 @@ func (r *EventRegistry[T]) Run(ctx context.Context, name string, args T) error {
 }
 
 // Listener holds registries for each event kind.
-// Add new event types by defining an interface (embedding EventArgs), adding a field here, and initializing it in NewEvents.
+// Add new event types by defining an interface (embedding EventArgs), adding a field here, and initializing it in [NewListener].
 type Listener struct {
 	OnComplete *EventRegistry[OnComplete]
 }
 
-// NewListener creates a new Listeners with all event registries initialized.
+// NewListener creates a [Listener] with all event registries initialized.
 func NewListener() *Listener {
 	return &Listener{
 		OnComplete: NewEventRegistry[OnComplete](),
@@ -149,6 +162,7 @@ type EventRunner struct {
 	ctx    context.Context    // made by the first request; Close cancels it, and so the events
 	cancel context.CancelFunc // cancels ctx
 	closed bool               // set by Close: a closed runner runs nothing
+	late   sync.WaitGroup     // the events that run after the response, which Close waits for
 }
 
 func NewEventRunner(listeners *Listener, global *Events) *EventRunner {
@@ -163,18 +177,34 @@ func NewEventRunner(listeners *Listener, global *Events) *EventRunner {
 }
 
 // OnComplete runs the on_complete events of mock, global events first, each in a goroutine of its own, and returns
-// once they all have: an event neither waits for nor stops another, and the request waits for them all, so a test
-// checks what they did right after the response. Each listener runs with what argsFn returns and a context with the
+// once they all have, but those set to run after the response: an event neither waits for nor stops another, and the
+// request waits for the others, so a test checks what they did right after the response. See
+// [EventConfig.AfterResponse]. Each listener runs with what argsFn returns and a context with the
 // values of ctx, the request's, such as a trace: the client leaving doesn't end it, and Close does. argsFn gets it
 // too. onErr gets the error, or the panic, of each event that fails, unless Close canceled it, worded like the errors
 // of mocks that name a listener that isn't registered. A closed runner runs nothing.
 func (r *EventRunner) OnComplete(ctx context.Context, mock Mock, argsFn func(ctx context.Context, cfg EventConfig) OnComplete, onErr func(err error)) {
-	closing, ok := r.context()
+	values := context.WithoutCancel(ctx)
+
+	// The events after the response start under the lock Close takes, so Close waits for each one that started.
+	closing, ok := r.context(func(closing context.Context) {
+		for i, def := range r.Global.OnComplete {
+			if def.AfterResponse {
+				r.later(closing, values, "global on_complete listener", i, def, argsFn, onErr)
+			}
+		}
+
+		for i, def := range mock.Events().OnComplete {
+			if def.AfterResponse {
+				r.later(closing, values, "on_complete listener", i, def, argsFn, onErr)
+			}
+		}
+	})
 	if !ok {
 		return
 	}
 
-	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	ctx, cancel := context.WithCancel(values)
 	defer cancel()
 
 	stop := context.AfterFunc(closing, cancel)
@@ -183,10 +213,18 @@ func (r *EventRunner) OnComplete(ctx context.Context, mock Mock, argsFn func(ctx
 	var wg sync.WaitGroup
 
 	for i, def := range r.Global.OnComplete {
+		if def.AfterResponse {
+			continue
+		}
+
 		wg.Go(func() { r.run(ctx, "global on_complete listener", i, def, argsFn, onErr) })
 	}
 
 	for i, def := range mock.Events().OnComplete {
+		if def.AfterResponse {
+			continue
+		}
+
 		wg.Go(func() { r.run(ctx, "on_complete listener", i, def, argsFn, onErr) })
 	}
 
@@ -194,9 +232,9 @@ func (r *EventRunner) OnComplete(ctx context.Context, mock Mock, argsFn func(ctx
 }
 
 // Close cancels the context of the events running, so the requests waiting for them end, and runs no event after.
+// It returns once the events that run after the response have ended.
 func (r *EventRunner) Close() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	r.closed = true
 	if r.cancel != nil {
@@ -204,10 +242,28 @@ func (r *EventRunner) Close() {
 	}
 
 	r.ctx, r.cancel = nil, nil
+	r.mu.Unlock()
+
+	r.late.Wait()
 }
 
-// context returns the context Close cancels. A closed runner has none.
-func (r *EventRunner) context() (context.Context, bool) {
+// later runs the listener of def as run does, in a goroutine that OnComplete doesn't wait for, and Close does, with a
+// context that has the values of values and that closing's end cancels. Its caller holds r.mu, and the runner is open.
+func (r *EventRunner) later(closing, values context.Context, scope string, i int, def EventConfig, argsFn func(context.Context, EventConfig) OnComplete, onErr func(error)) {
+	ctx, cancel := context.WithCancel(values)
+	stop := context.AfterFunc(closing, cancel)
+
+	r.late.Go(func() {
+		defer cancel()
+		defer stop()
+
+		r.run(ctx, scope, i, def, argsFn, onErr)
+	})
+}
+
+// context returns the context Close cancels, once it called start with it, under the lock Close takes. A closed runner
+// has none, and calls nothing.
+func (r *EventRunner) context(start func(closing context.Context)) (context.Context, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -218,6 +274,8 @@ func (r *EventRunner) context() (context.Context, bool) {
 	if r.ctx == nil {
 		r.ctx, r.cancel = context.WithCancel(context.Background())
 	}
+
+	start(r.ctx)
 
 	return r.ctx, true
 }
@@ -234,12 +292,19 @@ func (r *EventRunner) run(ctx context.Context, scope string, i int, def EventCon
 		}
 	}()
 
-	if !r.Listeners.OnComplete.Has(def.Name) {
+	var err error
+
+	switch {
+	case def.Listener != nil:
+		err = def.Listener.Run(ctx, argsFn(ctx, def))
+	case r.Listeners.OnComplete.Has(def.Name):
+		err = r.Listeners.OnComplete.Run(ctx, def.Name, argsFn(ctx, def))
+	default:
 		onErr(fmt.Errorf("%s is not registered", name))
 		return
 	}
 
-	if err := r.Listeners.OnComplete.Run(ctx, def.Name, argsFn(ctx, def)); err != nil && ctx.Err() == nil {
+	if err != nil && ctx.Err() == nil {
 		onErr(fmt.Errorf("%s: %w", name, err))
 	}
 }

@@ -16,32 +16,9 @@ import (
 )
 
 var (
-	_ vlatte.Mock          = (*Mock)(nil)
-	_ io.Closer            = (*Mock)(nil)
-	_ vlatte.CallbackInput = (*CallbackInput)(nil)
+	_ vlatte.Mock = (*Mock)(nil)
+	_ io.Closer   = (*Mock)(nil)
 )
-
-type CallbackInput struct {
-	m   *Mock
-	req *RequestValues
-	res *Response
-}
-
-func (i *CallbackInput) Kind() vlatte.Kind {
-	return Kind
-}
-
-func (i *CallbackInput) Mock() vlatte.Mock {
-	return i.m
-}
-
-func (i *CallbackInput) Request() *RequestValues {
-	return i.req
-}
-
-func (i *CallbackInput) Response() *Response {
-	return i.res
-}
 
 // Mapper is the function definition to be used to map a Mock response MockedResponse before serving it.
 // The response is the mapper's to change, but for its Body bytes, which other responses of the mock can share: replace
@@ -61,7 +38,8 @@ type selectorInput struct {
 	// RawRequest is the original incoming http.Request.
 	RawRequest *http.Request
 
-	// URL is the full request url.URL, including scheme, host, port.
+	// URL is the full request url.URL, including scheme, host, port: those a request in absolute form, as a forward
+	// proxy gets, or an intercepted one names, and the server's otherwise.
 	URL *url.URL
 
 	Query url.Values
@@ -92,9 +70,11 @@ type mockSpec struct {
 	mappers      []Mapper
 	delay        vlatte.Delay
 	events       []vlatte.EventConfig
-	callbacks    []vlatte.Callback
 	steps        []vlatte.Step
-	fallback     bool // a ProxyAll mock's: its description holds its reply under proxy_all
+	wireSteps    []vlatte.Step
+	upSteps      []vlatte.Step
+	fallback     bool          // a ProxyAll mock's: its description holds its reply under proxy_all
+	pathTemplate *pathTemplate // set with URLPathTemplate; it never changes, so the mocks share it
 }
 
 // clone returns a copy of s that shares no slice with it, so changing one doesn't change the other.
@@ -103,8 +83,9 @@ func (s mockSpec) clone() mockSpec {
 	s.expectations = slices.Clone(s.expectations)
 	s.mappers = slices.Clone(s.mappers)
 	s.events = slices.Clone(s.events)
-	s.callbacks = slices.Clone(s.callbacks)
 	s.steps = slices.Clone(s.steps)
+	s.wireSteps = slices.Clone(s.wireSteps)
+	s.upSteps = slices.Clone(s.upSteps)
 
 	return s
 }
@@ -201,12 +182,18 @@ func (m *Mock) Events() vlatte.Events {
 	return vlatte.Events{OnComplete: m.spec.events}
 }
 
-func (m *Mock) Callbacks() []vlatte.Callback {
-	return m.spec.callbacks
-}
-
 func (m *Mock) Steps() []vlatte.Step {
 	return m.spec.steps
+}
+
+// WireSteps returns the steps that the bytes of each answer of the mock pass through: see [Builder.WireStep].
+func (m *Mock) WireSteps() []vlatte.Step {
+	return m.spec.wireSteps
+}
+
+// UpstreamSteps returns the steps that what the mock sends on passes through: see [Builder.UpstreamStep].
+func (m *Mock) UpstreamSteps() []vlatte.Step {
+	return m.spec.upSteps
 }
 
 // String names the mock as "Mock [id] name", as assertion messages do.
@@ -243,7 +230,8 @@ func (m *Mock) Describe() descriptor.Descriptor {
 
 	for target, expectations := range expectationsByTarget {
 		switch target {
-		case matchingScopeQuery, matchingScopeQueries, matchingScopeHeader, matchingScopeFormField:
+		case matchingScopeQuery, matchingScopeQueries, matchingScopeHeader, matchingScopeHeaders, matchingScopeFormField,
+			matchingScopeFormFields, matchingScopeCookie, matchingScopeBasicAuth, matchingScopePathParam:
 			keys := make(map[string]any, counters[target])
 
 			if len(expectations) == 1 {
@@ -285,6 +273,10 @@ func (m *Mock) Describe() descriptor.Descriptor {
 
 			request[target.FieldName()] = keys
 
+		case matchingScopeURLPathTemplate:
+			// A mock has one path template, which describes as it was written.
+			request[target.FieldName()] = expectations[0].Key
+
 		case matchingScopeFormFile:
 			// One pattern of a field is an object, and several a list, in the order they were added.
 			files := make(map[string]any)
@@ -304,7 +296,7 @@ func (m *Mock) Describe() descriptor.Descriptor {
 			request[target.FieldName()] = files
 
 		case matchingScopeScheme, matchingScopeMethod, matchingScopeURL, matchingScopeURLPath, matchingScopeURLFragment,
-			matchingScopeBody:
+			matchingScopeBody, matchingScopeHost, matchingScopeClientIP:
 			if len(expectations) == 1 {
 				if sd, ok := expectations[0].Matcher.(descriptor.SelfDescriptive); ok {
 					request[target.FieldName()] = sd.Describe()
@@ -321,6 +313,29 @@ func (m *Mock) Describe() descriptor.Descriptor {
 			all := match.All(matchers...)
 			if sd, ok := vlatte.Matcher(all).(descriptor.SelfDescriptive); ok {
 				request[target.FieldName()] = sd.Describe()
+			}
+
+		case matchingScopeCustom:
+			// A list of the matchers that describe themselves, as request.custom lists them.
+			var custom []any
+			for _, e := range expectations {
+				if sd, ok := e.Matcher.(descriptor.SelfDescriptive); ok {
+					custom = append(custom, sd.Describe())
+				}
+			}
+
+			if len(custom) > 0 {
+				request[target.FieldName()] = custom
+			}
+
+		case matchingScopeScenario, matchingScopeRepeat:
+			// They describe as a single argument, the value of their key, such as repeat: 1.
+			for _, e := range expectations {
+				if sd, ok := e.Matcher.(descriptor.SelfDescriptive); ok {
+					if args, ok := sd.Describe().Props.([]any); ok && len(args) == 1 {
+						data[target.FieldName()] = args[0]
+					}
+				}
 			}
 
 		default:
@@ -354,9 +369,13 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		data["request"] = request
 	}
 
-	// The reply as it was when the mock was built: changing it afterwards changes only the mocks built afterwards.
-	if m.replyDesc.IsMap() {
+	// The reply as it was when the mock was built: changing it afterwards changes only the mocks built afterwards. One
+	// a mock file can't hold, such as a Handler, stays, so encoding the description fails rather than drop it.
+	switch {
+	case m.replyDesc.IsMap():
 		m.replyDesc.Merge(data)
+	case m.replyDesc.Err() != nil:
+		data[m.replyDesc.Key] = m.replyDesc
 	}
 
 	// A ProxyAll mock given another reply has no proxy reply to describe.
@@ -369,14 +388,29 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		data["on_complete"] = events
 	}
 
+	for key, steps := range map[string][]vlatte.Step{
+		"steps":          m.spec.steps,
+		"wire_steps":     m.spec.wireSteps,
+		"upstream_steps": m.spec.upSteps,
+	} {
+		if described := describeSteps(steps); len(described) > 0 {
+			data[key] = described
+		}
+	}
+
 	return descriptor.Root(data)
 }
 
-// describeEvents describes events as a mock file writes them. Parameters that describe themselves, as a webhook's do,
+// describeEvents describes events as a mock file writes them, but those that carry their listener, such as callbacks,
+// which a mock file can't hold. Parameters that describe themselves, as a webhook's do,
 // give their description; others, such as the maps of mock files, go as they are.
 func describeEvents(events []vlatte.EventConfig) []any {
 	described := make([]any, 0, len(events))
 	for _, e := range events {
+		if e.Listener != nil {
+			continue
+		}
+
 		event := map[string]any{"name": e.Name}
 
 		switch p := e.Parameters.(type) {
@@ -387,7 +421,24 @@ func describeEvents(events []vlatte.EventConfig) []any {
 			event["parameters"] = p
 		}
 
+		if e.AfterResponse {
+			event["after_response"] = true
+		}
+
 		described = append(described, event)
+	}
+
+	return described
+}
+
+// describeSteps describes steps as a mock file lists them, but those that don't describe themselves, such as a
+// [vlatte.StepFunc], which a mock file can't hold. Faults describe themselves.
+func describeSteps(steps []vlatte.Step) []any {
+	var described []any
+	for _, s := range steps {
+		if d, ok := descriptor.IsSelfDescriptive(s); ok {
+			described = append(described, d)
+		}
 	}
 
 	return described
@@ -413,6 +464,16 @@ const (
 	matchingScopeFormFile
 	matchingScopeScenario
 	matchingScopeURLFragment
+	matchingScopeHeaders
+	matchingScopeFormFields
+	matchingScopeCookie
+	matchingScopeBasicAuth
+	matchingScopeHost
+	matchingScopeClientIP
+	matchingScopeURLPathTemplate
+	matchingScopePathParam
+	matchingScopeRepeat
+	matchingScopeCustom
 )
 
 func (t matchingScope) FieldName() string {
@@ -441,6 +502,26 @@ func (t matchingScope) FieldName() string {
 		return "scenario"
 	case matchingScopeURLFragment:
 		return "fragment"
+	case matchingScopeHeaders:
+		return "headers"
+	case matchingScopeFormFields:
+		return "forms"
+	case matchingScopeCookie:
+		return "cookie"
+	case matchingScopeBasicAuth:
+		return "basic_auth"
+	case matchingScopeHost:
+		return "host"
+	case matchingScopeClientIP:
+		return "client_ip"
+	case matchingScopeURLPathTemplate:
+		return "path_template"
+	case matchingScopePathParam:
+		return "path_params"
+	case matchingScopeRepeat:
+		return "repeat"
+	case matchingScopeCustom:
+		return "custom"
 	default:
 		return ""
 	}

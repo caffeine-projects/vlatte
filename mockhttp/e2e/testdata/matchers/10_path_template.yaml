@@ -1,0 +1,12 @@
+# A path with parameters: path_params matches them by name, and templates read them as .Request.PathParams.
+request:
+  method: GET
+  path_template: /users/{id}/orders/{orderId}
+  path_params:
+    id: [regex, '^[0-9]+$']
+
+response:
+  status: 200
+  body: '{{ .Request.PathParams.orderId }} of {{ .Request.PathParams.id }}'
+  template:
+    enabled: true

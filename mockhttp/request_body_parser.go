@@ -37,10 +37,18 @@ func parseRequest(r *http.Request, options *Server) (*RequestValues, []byte, err
 	return req, rawBody, err
 }
 
-// parseURL returns the request URL, on the server's base URL, and its path segments. The path stays escaped as the
-// client sent it: decoded, "%3F" and "%23" would start a query or a fragment.
+// bodyCut reports whether the server read only part of raw, the body of r it read under limit, its
+// MaxBodyParsingLimit: short of its Content-Length, or up to the limit, unless its Content-Length says that was all.
+// A body of no length that reaches the limit may have had more.
+func bodyCut(limit int64, r *http.Request, raw []byte) bool {
+	n := int64(len(raw))
+	return limit > 0 && n >= limit && r.ContentLength != n || r.ContentLength > n
+}
+
+// parseURL returns the request URL and its path segments. The path stays escaped as the client sent it: decoded, "%3F"
+// and "%23" would start a query or a fragment.
 func parseURL(r *http.Request, baseURL string) (*url.URL, []string) {
-	// The scheme and host are the server's. A target's user info, opaque part and empty query ("/a?") are left out.
+	// A target's user info, opaque part and empty query ("/a?") are left out.
 	u := &url.URL{
 		Path:        r.URL.Path,
 		RawPath:     r.URL.RawPath,
@@ -48,7 +56,15 @@ func parseURL(r *http.Request, baseURL string) (*url.URL, []string) {
 		Fragment:    r.URL.Fragment,
 		RawFragment: r.URL.RawFragment,
 	}
-	if base, err := url.Parse(baseURL); err == nil {
+
+	// A request in absolute form, as a forward proxy gets, and an intercepted one keep their scheme and host, without
+	// the scheme's default port. Others, a CONNECT's included, are on the server's base URL.
+	if r.URL.IsAbs() {
+		u.Scheme, u.Host = r.URL.Scheme, r.URL.Host
+		if port := r.URL.Port(); (u.Scheme == "http" && port == "80") || (u.Scheme == "https" && port == "443") {
+			u.Host = strings.TrimSuffix(u.Host, ":"+port)
+		}
+	} else if base, err := url.Parse(baseURL); err == nil {
 		u.Scheme, u.Host = base.Scheme, base.Host
 	}
 

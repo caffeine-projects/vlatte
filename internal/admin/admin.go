@@ -1,6 +1,7 @@
 // Package admin serves the admin API of a mock server: a RESTful HTTP server of its own, on its own address, the same
 // for mock servers of every protocol. Package handler holds its units, one per operation; a server answers 501 to the
-// operations its protocol can't do, so the API, and its OpenAPI document, stay the same.
+// operations its protocol can't do, so the API, and its OpenAPI document, stay the same. With Options.MCP, it serves the
+// operations over MCP too, as tools, which leave out what the server can't do.
 package admin
 
 import (
@@ -8,16 +9,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
+	"github.com/caffeine-projects/vlatte/journal"
 )
 
 const (
@@ -35,8 +41,13 @@ var _routes = []struct {
 	lacking string
 }{
 	{pattern: "GET /health"},
-	{pattern: "GET /openapi"},
+	{pattern: "GET /livez"},
+	{pattern: "GET /readyz"},
+	{pattern: "GET /startupz"},
+	{pattern: "GET /{$}"},
 	{pattern: "GET /docs"},
+	{pattern: "GET /openapi"},
+	{pattern: "GET /schema", lacking: "describe its mock files"},
 	{pattern: "GET /mocks"},
 	{pattern: "POST /mocks", lacking: "build mocks from documents"},
 	{pattern: "DELETE /mocks"},
@@ -57,22 +68,62 @@ var _routes = []struct {
 	{pattern: "POST /reset"},
 	{pattern: "GET /events", lacking: "stream its events"},
 	{pattern: "GET /logs", lacking: "stream its logs"},
+	{pattern: "GET /requests", lacking: "keep a journal of requests"},
+	{pattern: "QUERY /requests", lacking: "keep a journal of requests"},
+	{pattern: "DELETE /requests", lacking: "keep a journal of requests"},
+	{pattern: "GET /requests/{id}", lacking: "keep a journal of requests"},
+	{pattern: "POST /mcp", lacking: "serve MCP"},
 }
 
-var errNoMocks = errors.New("admin: no mock store: pass the Mocks option")
+var _ adminapi.Server = (*Server)(nil)
+
+var (
+	errNoMocks = errors.New("admin: no mocks: the capabilities need Mocks")
+	errNoMCP   = errors.New("admin: MCP is off: set Options.MCP")
+	errClosing = errors.New("admin: the admin API is closing")
+)
+
+// _operations are the routes that run an admin operation, each with whether the mock server can do it: a route the
+// server can't do answers 501.
+var _operations = map[string]struct {
+	serve func(ops *handler.Operations) http.Handler
+	can   func(ops *handler.Operations) bool
+}{
+	"GET /health":           {serve: handler.Health},
+	"GET /livez":            {serve: handler.Live},
+	"GET /readyz":           {serve: handler.Ready},
+	"GET /startupz":         {serve: handler.Started},
+	"GET /schema":           {serve: handler.MockSchema, can: (*handler.Operations).HasMockSchema},
+	"GET /mocks":            {serve: handler.ListMocks},
+	"POST /mocks":           {serve: handler.AddMock, can: (*handler.Operations).Builds},
+	"DELETE /mocks":         {serve: handler.RemoveAllMocks},
+	"POST /mocks/validate":  {serve: handler.ValidateMock, can: (*handler.Operations).Builds},
+	"POST /mocks/reload":    {serve: handler.ReloadMocks, can: (*handler.Operations).HasFiles},
+	"POST /mocks/save":      {serve: handler.SaveMocks, can: (*handler.Operations).HasFiles},
+	"GET /mocks/{id}":       {serve: handler.GetMock},
+	"PUT /mocks/{id}":       {serve: handler.ReplaceMock, can: (*handler.Operations).Builds},
+	"PATCH /mocks/{id}":     {serve: handler.UpdateMock},
+	"DELETE /mocks/{id}":    {serve: handler.RemoveMock},
+	"GET /recording":        {serve: handler.RecordingStatus, can: (*handler.Operations).Records},
+	"POST /recording":       {serve: handler.StartRecording, can: (*handler.Operations).Records},
+	"DELETE /recording":     {serve: handler.StopRecording, can: (*handler.Operations).Records},
+	"GET /scenarios":        {serve: handler.ListScenarios, can: (*handler.Operations).HasScenarios},
+	"PUT /scenarios/{name}": {serve: handler.SetScenario, can: (*handler.Operations).HasScenarios},
+	"DELETE /scenarios":     {serve: handler.ResetScenarios, can: (*handler.Operations).HasScenarios},
+	"POST /reset":           {serve: handler.Reset},
+	"GET /requests":         {serve: handler.ListRequests, can: (*handler.Operations).HasJournal},
+	"QUERY /requests":       {serve: handler.QueryRequests, can: (*handler.Operations).HasJournal},
+	"DELETE /requests":      {serve: handler.ClearRequests, can: (*handler.Operations).HasJournal},
+	"GET /requests/{id}":    {serve: handler.GetRequest, can: (*handler.Operations).HasJournal},
+}
 
 // Server is the admin API of a mock server.
 type Server struct {
-	addr      string
-	kind      string
-	url       func() string
-	logger    *zerolog.Logger
-	routes    map[string]http.Handler
-	files     handler.Files
-	scenarios handler.Scenarios
-	reset     func(files handler.Files, scenarios handler.Scenarios) http.Handler
-	streams   []func() // end the streams of Server-Sent Events routes
-	handler   http.Handler
+	addr    string
+	logger  *zerolog.Logger
+	streams []func() // end the streams of Server-Sent Events routes
+	handler http.Handler
+	mcp     *mcp.Server // nil when MCP is off
 
 	mu      sync.Mutex // orders Start, Close and the requests that start as Close runs
 	srv     *http.Server
@@ -83,120 +134,73 @@ type Server struct {
 	closed  bool
 }
 
-// Option configures a Server.
-type Option func(s *Server)
+// Options configure a Server.
+type Options struct {
+	// Addr is the address the admin API listens on: host:port, :port or a port. Empty is a random local port.
+	Addr string
 
-// Addr sets the address the admin API listens on: host:port, :port or a port. Empty is a random local port.
-func Addr(addr string) Option {
-	return func(s *Server) { s.addr = addr }
+	// MCP serves the admin operations over MCP too: Streamable HTTP at POST /mcp, and stdio with [Server.ServeMCP].
+	MCP bool
+
+	// Middlewares wrap every HTTP request of the admin API, the first outermost. They run before the cross-origin
+	// check and the routes, and not for MCP over stdio.
+	Middlewares []func(http.Handler) http.Handler
+
+	// DocsVersion is the version of Scalar the docs page loads. Empty is the version vlatte pins.
+	DocsVersion string
 }
 
-// Info sets what GET /health tells of the mock server: its kind, such as http, and where it serves its mocks, which
-// url returns: its URL, or its address for gRPC.
-func Info(kind string, url func() string) Option {
-	return func(s *Server) { s.kind, s.url = kind, url }
-}
-
-// Logger sets the logger of the admin API's internal errors. Nil logs nothing.
-func Logger(logger *zerolog.Logger) Option {
-	return func(s *Server) { s.logger = logger }
-}
-
-// Mocks sets the store of the mock server's mocks, and the builder of the mocks that requests send, as mock files in
-// JSON or YAML. Without a builder, the routes that add or replace mocks answer 501.
-func Mocks[M vlatte.Mock](store vlatte.Store[M], build vlatte.MockBuilder[M]) Option {
-	return func(s *Server) {
-		s.routes["GET /mocks"] = handler.ListMocks(store)
-		s.routes["DELETE /mocks"] = handler.RemoveAllMocks(store)
-		s.routes["GET /mocks/{id}"] = handler.GetMock(store)
-		s.routes["PATCH /mocks/{id}"] = handler.UpdateMock(store)
-		s.routes["DELETE /mocks/{id}"] = handler.RemoveMock(store)
-
-		s.reset = func(files handler.Files, scenarios handler.Scenarios) http.Handler {
-			return handler.Reset(store, files, scenarios)
-		}
-
-		if build != nil {
-			s.routes["POST /mocks"] = handler.AddMock(store, build)
-			s.routes["POST /mocks/validate"] = handler.ValidateMock(store, build)
-			s.routes["PUT /mocks/{id}"] = handler.ReplaceMock(store, build)
-		}
-	}
-}
-
-// Files sets the mock files of the mock server, which POST /mocks/reload loads again, and POST /mocks/save writes.
-func Files(files handler.Files) Option {
-	return func(s *Server) {
-		s.files = files
-		s.routes["POST /mocks/reload"] = handler.ReloadMocks(files)
-		s.routes["POST /mocks/save"] = handler.SaveMocks(files)
-	}
-}
-
-// Recorder sets the recorder of the mock server, which GET, POST and DELETE /recording control.
-func Recorder(rec handler.Recorder) Option {
-	return func(s *Server) {
-		s.routes["GET /recording"] = handler.RecordingStatus(rec)
-		s.routes["POST /recording"] = handler.StartRecording(rec)
-		s.routes["DELETE /recording"] = handler.StopRecording(rec)
-	}
-}
-
-// Scenarios sets the scenarios of the mock server, which GET, PUT and DELETE /scenarios read and move.
-func Scenarios(scenarios handler.Scenarios) Option {
-	return func(s *Server) {
-		s.scenarios = scenarios
-		s.routes["GET /scenarios"] = handler.ListScenarios(scenarios)
-		s.routes["PUT /scenarios/{name}"] = handler.SetScenario(scenarios)
-		s.routes["DELETE /scenarios"] = handler.ResetScenarios(scenarios)
-	}
-}
-
-// Events sets the events of the mock server, which GET /events streams.
-func Events(events *handler.Events) Option {
-	return func(s *Server) {
-		s.routes["GET /events"] = handler.EventStream(events)
-		s.streams = append(s.streams, events.Close)
-	}
-}
-
-// Logs sets the log lines of the mock server, which GET /logs streams. Nil streams none, such as for a server that
-// logs through a logger it was given.
-func Logs(logs *handler.Logs) Option {
-	return func(s *Server) {
-		if logs == nil {
-			return
-		}
-
-		s.routes["GET /logs"] = handler.LogStream(logs)
-		s.streams = append(s.streams, logs.Close)
-	}
-}
-
-// New creates the admin API of a mock server. It needs the Mocks option.
-func New(options ...Option) (*Server, error) {
-	s := &Server{routes: make(map[string]http.Handler, len(_routes))}
-	for _, option := range options {
-		option(s)
-	}
-
-	if s.routes["GET /mocks"] == nil {
+// New creates the admin API of the mock server of caps, which needs its Mocks.
+func New(opts Options, caps adminapi.Capabilities) (*Server, error) {
+	if caps.Mocks == nil {
 		return nil, errNoMocks
 	}
 
+	// A server without a journal may pass its nil one: the routes answer 501, and reset skips it.
+	if j, ok := caps.Journal.(*journal.Journal); ok && j == nil {
+		caps.Journal = nil
+	}
+
+	s := &Server{addr: opts.Addr, logger: caps.Logger}
 	if s.logger == nil {
 		s.logger = new(zerolog.Nop())
 	}
 
-	s.routes["GET /health"] = handler.Health(s.kind, s.url)
-	s.routes["GET /openapi"] = handler.OpenAPI()
-	s.routes["GET /docs"] = handler.Docs()
-	s.routes["GET /recorder"] = handler.RecorderPage()
-	s.routes["POST /reset"] = s.reset(s.files, s.scenarios)
+	ops := handler.NewOperations(caps)
+
+	docs := handler.Docs(opts.DocsVersion)
+	routes := map[string]http.Handler{
+		"GET /{$}":      docs,
+		"GET /docs":     docs,
+		"GET /openapi":  handler.OpenAPI(),
+		"GET /recorder": handler.RecorderPage(),
+	}
+
+	if caps.Events != nil {
+		routes["GET /events"] = caps.Events
+		s.streams = append(s.streams, caps.Events.Close)
+	}
+
+	if caps.Logs != nil {
+		routes["GET /logs"] = caps.Logs
+		s.streams = append(s.streams, caps.Logs.Close)
+	}
+
+	for pattern, op := range _operations {
+		if op.can == nil || op.can(ops) {
+			routes[pattern] = op.serve(ops)
+		}
+	}
+
+	if opts.MCP {
+		s.mcp = handler.NewMCP(ops)
+		s.mcp.AddReceivingMiddleware(s.trackMCP)
+		routes["POST /mcp"] = handler.MCPHandler(s.mcp)
+	}
 
 	mux := http.NewServeMux()
 	for _, route := range _routes {
-		h := s.routes[route.pattern]
+		h := routes[route.pattern]
 		if h == nil {
 			h = handler.NotSupported(route.lacking)
 		}
@@ -206,14 +210,19 @@ func New(options ...Option) (*Server, error) {
 
 	csrf := http.NewCrossOriginProtection()
 	csrf.SetDenyHandler(handler.CrossOriginDenied())
-	s.handler = s.track(csrf.Handler(handler.Routing(mux)))
+	h := csrf.Handler(handler.Routing(mux))
+	for _, middleware := range slices.Backward(opts.Middlewares) {
+		h = middleware(h)
+	}
+
+	s.handler = s.track(h)
 
 	return s, nil
 }
 
 // MustNew is like New, but panics on an error.
-func MustNew(options ...Option) *Server {
-	s, err := New(options...)
+func MustNew(opts Options, caps adminapi.Capabilities) *Server {
+	s, err := New(opts, caps)
 	if err != nil {
 		panic(err)
 	}
@@ -276,8 +285,8 @@ func (s *Server) URL() string {
 	return "http://" + s.lis.Addr().String()
 }
 
-// Close stops the admin API, and waits for the requests it serves to end, so no admin operation runs, and no
-// connection stays, once it returns. It closes the connections of requests that take longer than a few seconds. A
+// Close stops the admin API, and waits for the requests and MCP calls it serves to end, so no admin operation runs,
+// and no connection stays, once it returns. It closes the connections of requests that take longer than a few seconds. A
 // closed server doesn't start again.
 func (s *Server) Close() error {
 	s.mu.Lock()
@@ -286,6 +295,8 @@ func (s *Server) Close() error {
 	s.mu.Unlock()
 
 	if srv == nil {
+		// A server that never started may still serve MCP calls over stdio.
+		s.running.Wait()
 		return nil
 	}
 
@@ -306,6 +317,36 @@ func (s *Server) Close() error {
 	<-served
 
 	return err
+}
+
+// ServeMCP serves the admin operations over MCP on in and out, newline-delimited JSON-RPC, as a client that starts
+// the mock server as a process talks to it, until in ends or ctx is done. It needs no Start, and Close waits for the
+// calls it serves. It fails when MCP is off.
+func (s *Server) ServeMCP(ctx context.Context, in io.Reader, out io.Writer) error {
+	if s.mcp == nil {
+		return errNoMCP
+	}
+
+	return handler.ServeMCP(ctx, s.mcp, in, out)
+}
+
+// trackMCP counts the MCP calls next handles, whichever transport they come on, so Close waits for them, and gives
+// them the server's logger. A call that comes once Close runs fails: no operation starts then.
+func (s *Server) trackMCP(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return nil, errClosing
+		}
+
+		s.running.Add(1)
+		s.mu.Unlock()
+
+		defer s.running.Done()
+
+		return next(s.logger.WithContext(ctx), method, req)
+	}
 }
 
 // track counts the requests h serves, so Close waits for them, and gives them the server's logger. A request that

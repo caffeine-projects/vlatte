@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"net/http"
+	"context"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
@@ -19,42 +19,35 @@ var _mockChangeSchema = config.NewSchema(
 	},
 )
 
-// UpdateMock changes the state of the mock of the path's id, and answers it: PATCH /mocks/{id}. A disabled mock
-// matches no request, until enabled again. The mock is stored again with its new state, which a persistent store
-// keeps: when the store refuses it, the mock keeps the state it had.
-func UpdateMock[M vlatte.Mock](store vlatte.Store[M]) http.Handler {
-	return negotiated(func(w http.ResponseWriter, r *http.Request) {
-		data, format, err := readBody(w, r)
-		if err != nil {
-			fail(w, r, err)
-			return
+// UpdateMock changes the state of the mock of id to the one of doc, a document in format, such as
+// {"enabled": false}, and returns it. A disabled mock matches no request, until enabled again. The mock is stored
+// again with its new state, which a persistent store keeps: when the store refuses it, the mock keeps the state it
+// had.
+func (o *Operations) UpdateMock(ctx context.Context, id string, doc []byte, format string) (MockSummary, error) {
+	return o.mocks.update(ctx, id, doc, format)
+}
+
+func (m *storeMocks) update(ctx context.Context, id string, doc []byte, format string) (MockSummary, error) {
+	var change mockChange
+	if err := decodeBody(_mockChangeSchema, &change, doc, format); err != nil {
+		return MockSummary{}, invalid("the body", err)
+	}
+
+	mock, err := m.pick(ctx, id)
+	if err != nil {
+		return MockSummary{}, err
+	}
+
+	if change.enabled != nil && *change.enabled != mock.Enabled() {
+		setEnabled(mock, *change.enabled)
+
+		if err := m.mocks.Replace(ctx, []vlatte.Mock{mock}, mock); err != nil {
+			setEnabled(mock, !*change.enabled)
+			return MockSummary{}, err
 		}
+	}
 
-		var change mockChange
-		if err := decodeBody(_mockChangeSchema, &change, data, format); err != nil {
-			fail(w, r, invalid("the body", err))
-			return
-		}
-
-		mock, err := pick(r, store, r.PathValue("id"))
-		if err != nil {
-			fail(w, r, err)
-			return
-		}
-
-		if change.enabled != nil && *change.enabled != mock.Enabled() {
-			setEnabled(mock, *change.enabled)
-
-			if err := store.Replace(r.Context(), []M{mock}, mock); err != nil {
-				setEnabled(mock, !*change.enabled)
-				fail(w, r, err)
-
-				return
-			}
-		}
-
-		respond(w, r, http.StatusOK, summarize(mock))
-	})
+	return summarize(mock), nil
 }
 
 func setEnabled(mock vlatte.Mock, enabled bool) {

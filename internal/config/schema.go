@@ -79,6 +79,8 @@ type Field[T any] struct {
 	// Set validates the value and applies it to dst. Its error becomes a problem of the value.
 	// A nil Set leaves the value to the caller, which reads it from Load's result.
 	Set func(dst *T, v Value) error
+	// Hidden keeps the setting out of Flags and Usage: it is read, and checked, as any other.
+	Hidden bool
 }
 
 // Value is a setting's value, converted to its Kind.
@@ -115,14 +117,21 @@ type field struct {
 	flag    string // derived flag name, such as "log-level"
 	env     string // derived environment variable name without prefix, such as "LOG_LEVEL"
 	section bool   // a Bool key that other keys nest under, such as "cors"
+	hidden  bool   // left out of Flags and Usage
 }
 
 // catalog is the view of a schema that sources use. It doesn't depend on the target type.
 type catalog struct {
-	fields []*field
-	byKey  map[string]*field
-	byFlag map[string]*field   // long names and shorthands
-	groups map[string]struct{} // prefixes with no key of their own, such as "log"
+	fields   []*field
+	byKey    map[string]*field
+	byFlag   map[string]*field   // long names and shorthands
+	groups   map[string]struct{} // prefixes with no key of their own, such as "log"
+	loadOnly bool                // sources read only its keys, and let every other one through: see Schema.LoadOnly
+
+	// skip and only name the top-level settings files and environment variables leave to other schemas, that read
+	// the same sources: those of skip, or all but those of only.
+	skip []string
+	only []string
 }
 
 // Schema holds the settings of a T, in the order they were declared.
@@ -173,6 +182,7 @@ func NewSchema[T any](fields ...Field[T]) *Schema[T] {
 			choices: decl.Choices,
 			flag:    _flagName.Replace(decl.Key),
 			env:     strings.ToUpper(strings.ReplaceAll(decl.Key, ".", "_")),
+			hidden:  decl.Hidden,
 		}
 
 		// Two keys can't share an environment variable without sharing a flag: both names turn "." and "_"
@@ -222,10 +232,29 @@ func NewSchema[T any](fields ...Field[T]) *Schema[T] {
 	return s
 }
 
+// Skip leaves the top-level settings names, such as "grpc", to another schema that reads the same files and
+// environment variables: the schema ignores them there, where it would report them as unknown. Flags are the
+// caller's to split: an Args source reports every flag it doesn't know.
+func (s *Schema[T]) Skip(names ...string) *Schema[T] {
+	s.skip = append(s.skip, names...)
+	return s
+}
+
+// Only reads only the top-level settings names, such as "grpc", from files and environment variables: the schema
+// leaves the others to the schemas that read the same sources, as Skip does.
+func (s *Schema[T]) Only(names ...string) *Schema[T] {
+	s.only = append(s.only, names...)
+	return s
+}
+
 // Flags lists the command-line flags of the settings, in declaration order.
 func (c *catalog) Flags() []Flag {
 	flags := make([]Flag, 0, len(c.fields))
 	for _, f := range c.fields {
+		if f.hidden {
+			continue
+		}
+
 		flag := Flag{Name: f.flag, Shorthand: f.short, Usage: f.usage, Bool: f.kind == Bool}
 		for _, choice := range f.choices {
 			flag.Values = append(flag.Values, choice.Name)
@@ -242,6 +271,10 @@ func (c *catalog) Usage(envPrefix string) string {
 	var b strings.Builder
 
 	for _, f := range c.fields {
+		if f.hidden {
+			continue
+		}
+
 		b.WriteString("  ")
 		if f.short != "" {
 			fmt.Fprintf(&b, "-%s, ", f.short)
@@ -296,6 +329,32 @@ func (c *catalog) KindOf(key string) (Kind, bool) {
 	}
 
 	return f.kind, true
+}
+
+// owns reports whether the top-level setting name is the schema's to read from files.
+func (c *catalog) owns(name string) bool {
+	if len(c.only) > 0 && !slices.Contains(c.only, name) {
+		return false
+	}
+
+	return !slices.Contains(c.skip, name)
+}
+
+// ownsEnv reports whether the environment variable name, without its prefix and underscore, such as GRPC_ADDR, is
+// the schema's to read.
+func (c *catalog) ownsEnv(name string) bool {
+	under := func(names []string) bool {
+		return slices.ContainsFunc(names, func(n string) bool {
+			env := strings.ToUpper(n)
+			return name == env || strings.HasPrefix(name, env+"_")
+		})
+	}
+
+	if len(c.only) > 0 && !under(c.only) {
+		return false
+	}
+
+	return !under(c.skip)
 }
 
 // children lists the names right under prefix, of keys and groups, in declaration order.

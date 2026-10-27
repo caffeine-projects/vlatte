@@ -38,3 +38,15 @@ func TestWrite_LeavesNoTemporaryFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, temps)
 }
+
+func TestWritePerm(t *testing.T) {
+	// A file of requests, which may hold secrets, is its user's alone.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.idx")
+
+	require.NoError(t, atomicfile.WritePerm(dir, ".tmp-*", path, []byte("{}"), 0o600))
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}

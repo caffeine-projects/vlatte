@@ -26,8 +26,12 @@ type scenarioMatcher struct {
 // Name implements vlatte.Matcher.
 func (m *scenarioMatcher) Name() string { return "Scenario" }
 
-// Match implements vlatte.Matcher.
+// Match implements vlatte.Matcher. A mock that requires no state matches in any state.
 func (m *scenarioMatcher) Match(_ vlatte.MatcherArg) (bool, error) {
+	if m.RequiredState == "" {
+		return true, nil
+	}
+
 	store := m.Store
 
 	if m.RequiredState == ScenarioStateStarted {
@@ -51,7 +55,7 @@ func (m *scenarioMatcher) Match(_ vlatte.MatcherArg) (bool, error) {
 	return currentState == m.RequiredState, nil
 }
 
-// SetState implements vlatte.Stateful.
+// SetState implements vlatte.Stateful. It starts the scenario when no mock did yet.
 func (m *scenarioMatcher) SetState() error {
 	if m.NewState == "" {
 		return nil
@@ -61,12 +65,8 @@ func (m *scenarioMatcher) SetState() error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	scn, ok := store.fetchByName(m.ScenarioName)
-	if !ok {
-		return nil
-	}
+	store.createNewIfNeeded(m.ScenarioName).state = m.NewState
 
-	scn.state = m.NewState
 	return nil
 }
 

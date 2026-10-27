@@ -104,7 +104,7 @@ func (app *Server) startRecording(conf *RecordConfig) error {
 	rec := &recording{
 		codec:  newRecordCodec(conf, app.config.HeaderNamesToRedact, app.logger),
 		conf:   conf,
-		dir:    conf.dir(app.config.RootDir),
+		dir:    conf.dir(app.config),
 		served: make(chan struct{}),
 		filter: conf.filter(),
 	}
@@ -236,7 +236,7 @@ func (app *Server) play(dir string) error {
 func (app *Server) recordDirs() []string {
 	dirs := make([]string, 0, 2)
 	if app.config.Record != nil {
-		dirs = append(dirs, app.config.Record.dir(app.config.RootDir))
+		dirs = append(dirs, app.config.Record.dir(app.config))
 	}
 
 	app.recordMu.Lock()

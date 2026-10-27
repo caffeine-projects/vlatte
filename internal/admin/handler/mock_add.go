@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -9,40 +10,35 @@ import (
 	"github.com/caffeine-projects/vlatte"
 )
 
-// AddMock adds the mock of the request body, a mock file in JSON or YAML, and answers its state: POST /mocks. A mock
-// with an id in use is refused, and closed.
-func AddMock[M vlatte.Mock](store vlatte.Store[M], build vlatte.MockBuilder[M]) http.Handler {
-	return negotiated(func(w http.ResponseWriter, r *http.Request) {
-		mock, err := buildMock(w, r, build)
-		if err != nil {
-			fail(w, r, err)
-			return
-		}
-
-		if err := store.Store(r.Context(), mock); err != nil {
-			closeMock(mock)
-			fail(w, r, storeError(mock.ID(), err))
-
-			return
-		}
-
-		w.Header().Set("Location", "/mocks/"+url.PathEscape(mock.ID()))
-		respond(w, r, http.StatusCreated, summarize(mock))
-	})
+// AddMock adds the mock of doc, a mock file in format, and returns its state. A mock with an id in use is refused,
+// and closed. It needs a server that makes mocks from documents.
+func (o *Operations) AddMock(ctx context.Context, doc []byte, format string) (MockSummary, error) {
+	return o.mocks.add(ctx, doc, format)
 }
 
-// buildMock builds the mock of the request body.
-func buildMock[M vlatte.Mock](w http.ResponseWriter, r *http.Request, build vlatte.MockBuilder[M]) (M, error) {
-	var zero M
-
-	data, format, err := readBody(w, r)
+func (m *storeMocks) add(ctx context.Context, doc []byte, format string) (MockSummary, error) {
+	mock, err := m.buildMock(doc, format)
 	if err != nil {
-		return zero, err
+		return MockSummary{}, err
 	}
 
-	mock, err := build.BuildFromBytes(data, format)
+	if err := m.mocks.Store(ctx, mock); err != nil {
+		closeMock(mock)
+		return MockSummary{}, storeError(mock.ID(), err)
+	}
+
+	return summarize(mock), nil
+}
+
+// buildMock builds the mock of doc, a mock file in format.
+func (m *storeMocks) buildMock(doc []byte, format string) (vlatte.Mock, error) {
+	if !m.mocks.Builds() {
+		return nil, notSupported(_lackingBuilder)
+	}
+
+	mock, err := m.mocks.Build(doc, format)
 	if err != nil {
-		return zero, invalid("the mock", err)
+		return nil, invalid("the mock", err)
 	}
 
 	return mock, nil

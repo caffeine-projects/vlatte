@@ -1,19 +1,14 @@
 package handler
 
 import (
-	"net/http"
-
-	"github.com/caffeine-projects/vlatte"
+	"context"
 )
 
-// RemoveAllMocks removes every mock, of files and code too, and closes them: DELETE /mocks.
-func RemoveAllMocks[M vlatte.Mock](store vlatte.Store[M]) http.Handler {
-	return negotiated(func(w http.ResponseWriter, r *http.Request) {
-		if err := store.Clear(r.Context()); err != nil {
-			fail(w, r, err)
-			return
-		}
+// RemoveAllMocks removes every mock, of files and code too, and closes them.
+func (o *Operations) RemoveAllMocks(ctx context.Context) error {
+	return o.mocks.removeAll(ctx)
+}
 
-		w.WriteHeader(http.StatusNoContent)
-	})
+func (m *storeMocks) removeAll(ctx context.Context) error {
+	return m.mocks.Clear(ctx)
 }

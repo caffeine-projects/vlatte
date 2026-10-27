@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
 )
@@ -146,6 +147,39 @@ func TestScenario_NamesDifferingInCaseAreTwoScenarios(t *testing.T) {
 	ok, err := Scenario(store, "checkout", ScenarioStateStarted, "paid").Match(arg)
 	assert.NoError(t, err)
 	assert.True(t, ok, "checkout is still where it started")
+}
+
+func TestScenario_NoRequiredStateMatchesInAnyState(t *testing.T) {
+	// A mock of a scenario that requires no state matches whatever state the scenario is in. It
+	// required "", the state of no scenario, so it stopped matching once its scenario existed.
+	store := NewScenarioStore()
+	arg := vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), nil)
+	anyState := Scenario(store, "checkout", "", "")
+
+	ok, err := anyState.Match(arg)
+	require.NoError(t, err)
+	require.True(t, ok, "before the scenario starts")
+
+	for _, state := range []string{ScenarioStateStarted, "paid"} {
+		store.SetScenario("checkout", state)
+
+		ok, err = anyState.Match(arg)
+		require.NoError(t, err)
+		require.True(t, ok, state)
+	}
+}
+
+func TestScenario_ANewStateStartsTheScenario(t *testing.T) {
+	// A mock's new state moves its scenario, one no mock started too: it was dropped, so mocks that
+	// require no state could never move their scenario.
+	store := NewScenarioStore()
+	move := Scenario(store, "checkout", "", "paid")
+
+	ok, err := move.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), nil))
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NoError(t, move.SetState())
+	require.Equal(t, map[string]string{"checkout": "paid"}, store.Scenarios())
 }
 
 func TestScenarioStore_SetAndReset(t *testing.T) {

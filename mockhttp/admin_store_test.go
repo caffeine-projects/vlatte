@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"iter"
@@ -12,11 +13,14 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/fault"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 var _ vlatte.Store[*Mock] = (*docsStore)(nil)
@@ -116,6 +120,10 @@ func (s *docsStore) Delete(_ context.Context, ids ...string) error {
 		delete(s.docs, id)
 	}
 
+	return nil
+}
+
+func (s *docsStore) Health(context.Context) error {
 	return nil
 }
 
@@ -231,20 +239,41 @@ func TestFileStore_RemovingMocksRemovesTheirFiles(t *testing.T) {
 }
 
 func TestFileStore_RefusesAMockThatDoesntLoadBack(t *testing.T) {
-	// A mock whose description doesn't load back as the same mock, such as one with a trailer (#42), would write a file
-	// that fails every later start: it isn't stored, nor served.
+	// A mock whose description doesn't load back, such as one of a matcher no registry has, would write a file that
+	// fails every later start: it isn't stored.
 	dir := t.TempDir()
-	m := adminServer(t, Setup().AdminStore(FileStore(dir)))
+	m := MustNew(Setup().Silent())
 
-	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil,
-		[]byte(`{"id": "trailer", "request": {"method": "GET", "path": "/t"}, "response": {"status": 200, "trailer": {"X-T": "v"}}}`))
-	require.Equal(t, http.StatusInternalServerError, res.StatusCode, string(body))
-	require.Contains(t, string(body), `trailer`)
+	store, err := FileStore(dir)(m)
+	require.NoError(t, err)
 
-	require.NoFileExists(t, filepath.Join(dir, "trailer.mock.yaml"))
+	mock, err := Postf("/x").ID("unregistered").Body(unregisteredMatcher{}).Reply(OK()).Build(m)
+	require.NoError(t, err)
 
-	res, _ = do(t, http.MethodGet, m.URL("/t"), nil, nil)
-	require.Equal(t, StatusNoMatch, res.StatusCode)
+	err = store.Store(t.Context(), mock)
+	require.ErrorContains(t, err, `server: mock "unregistered" can't be stored: its description doesn't load back: `)
+	require.ErrorContains(t, err, `unknown matcher "unregistered"`)
+
+	require.NoFileExists(t, filepath.Join(dir, "unregistered.mock.yaml"))
+}
+
+func TestFileStore_RefusesAMockThatCantBeDescribed(t *testing.T) {
+	// #42: a mock with a Handler described as the default reply, so the store kept a mock that served another
+	// answer. A mock file can't hold a Handler: it isn't stored.
+	dir := t.TempDir()
+	m := MustNew(Setup().Silent())
+
+	store, err := FileStore(dir)(m)
+	require.NoError(t, err)
+
+	mock, err := Getf("/h").ID("handler").Reply(Handler(func(http.ResponseWriter, *http.Request) {})).Build(m)
+	require.NoError(t, err)
+
+	err = store.Store(t.Context(), mock)
+	require.ErrorContains(t, err, `server: describing mock "handler": `)
+	require.ErrorIs(t, err, errFuncNotDescribed)
+
+	require.NoFileExists(t, filepath.Join(dir, "handler.mock.yaml"))
 }
 
 func TestFileStore_AMockFileWins(t *testing.T) {
@@ -295,25 +324,25 @@ func TestAdminStore_SaveExportsAsMockFiles(t *testing.T) {
 	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
 
-	require.FileExists(t, filepath.Join(root, "testdata", "_mocks", "hello.mock.yaml"))
+	require.FileExists(t, filepath.Join(root, "testdata", "vlatte", "_mocks", "hello.mock.yaml"))
 	require.FileExists(t, filepath.Join(root, "admin", "hello.mock.yaml"))
 
 	require.NoError(t, m.Reload())
 
 	_, body = do(t, http.MethodGet, m.AdminURL()+"/mocks", nil, nil)
-	require.Contains(t, string(body), `testdata/_mocks/hello.mock.yaml"`, "served from the mock file")
+	require.Contains(t, string(body), `testdata/vlatte/_mocks/hello.mock.yaml"`, "served from the mock file")
 
 	res, _ = do(t, http.MethodGet, m.URL("/hello"), nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode)
 }
 
-func TestAdminStore_AnEmptyDirKeepsTheMocksInMemory(t *testing.T) {
-	// The setting admin.dir chooses the files of the store, and an empty one turns it off, such as for a command that
-	// keeps its mocks by default.
-	m := MustNew(Setup().Silent().AdminStore(FileStore("admin")).ConfigSources(ConfigArgs([]string{"--admin-dir="})))
-	t.Cleanup(m.Close)
+func TestAdminStore_NeedsAnAdminAPI(t *testing.T) {
+	// A persistent store of the admin API's mocks without an admin API would keep nothing: it is a mistake of the
+	// setup, not a store to ignore.
+	_, err := New(Setup().Silent().AdminStore(FileStore(t.TempDir())))
 
-	require.Nil(t, m.Config().Admin.Store)
+	require.ErrorIs(t, err, errAdminStoreWithoutAdmin)
+	require.EqualError(t, err, "server: AdminStore needs an admin API: pass ConfigBuilder.Admin")
 }
 
 func TestEncodeMock_DecodesBack(t *testing.T) {
@@ -440,6 +469,7 @@ func TestFileStore_ADirectoryItCantUse(t *testing.T) {
 	require.Error(t, err)
 	require.Error(t, store.Delete(ctx, "hello"))
 	require.Error(t, store.Clear(ctx))
+	require.ErrorIs(t, store.Health(ctx), syscall.ENOTDIR)
 
 	inTheWay := t.TempDir()
 
@@ -453,6 +483,16 @@ func TestFileStore_ADirectoryItCantUse(t *testing.T) {
 	temps, err := filepath.Glob(filepath.Join(inTheWay, _fileStoreTempPattern))
 	require.NoError(t, err)
 	require.Empty(t, temps)
+}
+
+func TestFileStore_IsReadyBeforeItsDirectoryExists(t *testing.T) {
+	// A server whose admin API has added no mock yet has no store directory: it serves, so it is ready.
+	m := adminServer(t, Setup())
+
+	store, err := FileStore(filepath.Join(t.TempDir(), "_admin"))(m)
+	require.NoError(t, err)
+
+	require.NoError(t, store.Health(t.Context()))
 }
 
 func TestEncodeMock_AMockThatCantBeDescribed(t *testing.T) {
@@ -593,4 +633,70 @@ func TestFileStore_AStaleDeleteLeavesTheNewerMock(t *testing.T) {
 			require.Equal(t, "newer", string(body), "its file stays")
 		})
 	}
+}
+
+func TestFileStore_KeepsAMockOfACustomMatcher(t *testing.T) {
+	// The store writes a mock as its description and builds it back: a custom matcher, inside a built-in one, describes
+	// itself as its spec, so the mock is stored, and serves the same after a restart.
+	dir := t.TempDir()
+	setup := func() *ConfigBuilder {
+		return Setup().AdminStore(FileStore(dir)).
+			Matchers(matchbuild.MustNew(matchbuild.WithMatcher("longer-than", longerThan)))
+	}
+
+	m := adminServer(t, setup())
+	addMock(t, m, `{"id": "short", "request": {"method": "POST", "body": ["not", ["longer-than", 3]]}, "response": {"status": 200}}`)
+	m.Close()
+
+	m = adminServer(t, setup())
+
+	res, _ := do(t, http.MethodPost, m.URL(), nil, []byte("abc"))
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	res, _ = do(t, http.MethodPost, m.URL(), nil, []byte("abcd"))
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+}
+
+func TestFileStore_KeepsAMockOfACustomRequestMatcher(t *testing.T) {
+	dir := t.TempDir()
+	setup := func() *ConfigBuilder {
+		return Setup().AdminStore(FileStore(dir)).
+			Matchers(matchbuild.MustNew(matchbuild.WithMatcher("has-header", hasHeader)))
+	}
+
+	m := adminServer(t, setup())
+	addMock(t, m, `{"id": "admin", "request": {"method": "GET", "custom": [["has-header", "X-Admin"]]}, "response": {"status": 200}}`)
+	m.Close()
+
+	m = adminServer(t, setup())
+
+	res, _ := do(t, http.MethodGet, m.URL(), http.Header{"X-Admin": {"1"}}, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	res, _ = do(t, http.MethodGet, m.URL(), nil, nil)
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+}
+
+func TestFileStore_KeepsAMockOfFaults(t *testing.T) {
+	// Faults describe themselves as their specs: a mock with faults is stored, and has them after a restart.
+	dir := t.TempDir()
+
+	m := adminServer(t, Setup().AdminStore(FileStore(dir)))
+	addMock(t, m, `{"id": "faulty", "request": {"method": "GET", "path": "/f"}, "response": {"status": 200},
+		"steps": [{"type": "limit_data", "bytes": 3}, {"type": "bandwidth", "rate": "3g"}],
+		"wire_steps": [{"type": "connection_reset_by_peer"}]}`)
+	m.Close()
+
+	m = adminServer(t, Setup().AdminStore(FileStore(dir)))
+
+	res, body := do(t, http.MethodGet, m.AdminURL()+"/mocks/faulty", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+	require.Equal(t, []any{
+		map[string]any{"type": "limit_data", "bytes": 3.0},
+		map[string]any{"type": "bandwidth", "rate": float64(fault.Bandwidth3G)},
+	}, got["steps"])
+	require.Equal(t, []any{map[string]any{"type": "connection_reset_by_peer"}}, got["wire_steps"])
 }

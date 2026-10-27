@@ -14,7 +14,7 @@ import (
 	"sync"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/atomicfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/value"
@@ -56,17 +56,13 @@ func DecodeMock(app *Server, data []byte, format string) (*Mock, error) {
 
 // FileStore makes a persistent store of the mocks the admin API adds: a mock file each, <id>.mock.yaml in dir, as
 // EncodeMock describes the mock. Only the store reads them: keep dir out of the mock file patterns, or its mocks would
-// load twice. A relative dir starts at the server's root directory. A file a person adds, edits or removes takes effect
+// load twice. A relative dir starts at the server's root directory, and WorkDirVar at its work directory, as in
+// "{workdir}/_admin". A file a person adds, edits or removes takes effect
 // on the server's next reload. A mock whose description doesn't load back is refused: its file would fail every later
 // start.
 func FileStore(dir string) AdminStore {
 	return func(app *Server) (vlatte.Store[*Mock], error) {
-		path := dir
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(app.config.RootDir, path)
-		}
-
-		return &fileStore{app: app, dir: path, remove: os.Remove}, nil
+		return &fileStore{app: app, dir: app.config.path(dir), remove: os.Remove}, nil
 	}
 }
 
@@ -261,17 +257,24 @@ func (s *fileStore) Clear(context.Context) error {
 	return s.apply(nil, slices.Sorted(maps.Values(held)))
 }
 
+// Health returns an error when the store's directory can't be read. A directory that doesn't exist yet is ready: the
+// first mock the store keeps makes it.
+func (s *fileStore) Health(context.Context) error {
+	_, err := s.files()
+	return err
+}
+
 // apply writes and then removes files, all or nothing: on the first failure, it puts back the files it changed, and
 // returns the failure, with what it couldn't put back. A file already gone is removed.
 func (s *fileStore) apply(writes []fileWrite, removes []string) error {
-	changed := make([]savedFile, 0, len(writes)+len(removes))
+	changed := make([]atomicfile.Saved, 0, len(writes)+len(removes))
 
 	fail := func(err error) error {
-		return fmt.Errorf("server: admin store: %w", errors.Join(err, restore(changed, _fileStoreTempPattern)))
+		return fmt.Errorf("server: admin store: %w", errors.Join(err, atomicfile.Restore(changed, _fileStoreTempPattern)))
 	}
 
 	for _, w := range writes {
-		file, err := backup(w.path)
+		file, err := atomicfile.Backup(w.path)
 		if err == nil {
 			err = atomicfile.Write(s.dir, _fileStoreTempPattern, w.path, w.data)
 		}
@@ -284,7 +287,7 @@ func (s *fileStore) apply(writes []fileWrite, removes []string) error {
 	}
 
 	for _, path := range removes {
-		file, err := backup(path)
+		file, err := atomicfile.Backup(path)
 		if err == nil {
 			if err = s.remove(path); errors.Is(err, fs.ErrNotExist) {
 				err = nil
@@ -342,5 +345,5 @@ func (s *fileStore) decode(path string) (*Mock, error) {
 		return nil, fmt.Errorf("server: admin store: %w", err)
 	}
 
-	return mockDoc{origin: "file " + path, source: handler.Origin, format: format, data: data}.build(s.app)
+	return mockDoc{origin: "file " + path, source: adminapi.Origin, format: format, data: data}.build(s.app)
 }

@@ -3,7 +3,9 @@ package e2e
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -183,4 +185,45 @@ func TestProxyViaAnotherProxy(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusCreated, res.StatusCode)
+}
+
+func TestProxy_MocksMatchTheURLTheClientAskedFor(t *testing.T) {
+	// The URL mocks matched was the server's, for proxied requests too: scheme: https never matched an intercepted
+	// request, nor an absolute url the host of a proxied one. They match the request's own scheme and host now.
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "target")
+	}))
+	t.Cleanup(target.Close)
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Proxy(&mockhttp.ProxyConfig{Intercept: true}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(
+		mockhttp.Request().Scheme("https").URL(match.Equal(target.URL+"/secure")).Reply(mockhttp.OK().PlainText("intercepted")),
+		mockhttp.Request().Scheme("http").URL(match.Equal("http://api.example.com/users")).Reply(mockhttp.OK().PlainText("proxied")))
+
+	proxyURL, err := url.Parse(m.URL())
+	require.NoError(t, err)
+
+	pool := x509.NewCertPool()
+	pool.AddCert(m.ProxyCA())
+
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL), TLSClientConfig: &tls.Config{RootCAs: pool}}
+	t.Cleanup(transport.CloseIdleConnections)
+
+	client := &http.Client{Transport: transport}
+	body := func(target string) string {
+		res, err := client.Get(target)
+		require.NoError(t, err, target)
+
+		b, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		return string(b)
+	}
+
+	require.Equal(t, "intercepted", body(target.URL+"/secure"))
+	require.Equal(t, "proxied", body("http://api.example.com/users"))
 }

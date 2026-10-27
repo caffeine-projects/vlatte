@@ -1,0 +1,591 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "",
+  "title": "gRPC Mock Definition",
+  "description": "Describes a gRPC mock definition. The decoder in mockgrpc/mock_schema.go is the reference; tests keep this schema in step with it.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "ID of the mock, in place of a generated one.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._~-]+$"
+    },
+    "name": {
+      "type": "string"
+    },
+    "priority": {
+      "description": "Mocks with a lower priority are matched first.",
+      "type": "integer"
+    },
+    "enabled": {
+      "$ref": "#/$defs/bool"
+    },
+    "delay": {
+      "$ref": "#/$defs/duration"
+    },
+    "repeat": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "scenario": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "required_state": {
+          "type": "string"
+        },
+        "new_state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "on_complete": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/on_complete_event"
+      }
+    },
+    "request": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "description": "Method to mock, by whole segments of its full method: Method, Service/Method, pkg.Service/Method or /pkg.Service/Method.",
+          "type": "string",
+          "minLength": 1
+        },
+        "header": {
+          "description": "Metadata to match, by key.",
+          "$ref": "#/$defs/keyed_matcher"
+        },
+        "fields": {
+          "description": "Fields of the request to match, by JSON path, such as user_id or items[0].key.",
+          "$ref": "#/$defs/keyed_matcher"
+        },
+        "message": {
+          "description": "Request message to match whole, as protojson reads it.",
+          "oneOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "messages": {
+          "description": "Messages of a client stream to match whole, in order.",
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "body": {
+          "description": "Matcher list of the request as JSON text.",
+          "$ref": "#/$defs/matcher"
+        }
+      },
+      "required": [
+        "method"
+      ],
+      "additionalProperties": false,
+      "not": {
+        "required": [
+          "message",
+          "messages"
+        ]
+      }
+    },
+    "response": {
+      "$ref": "#/$defs/reply"
+    },
+    "response_sequence": {
+      "description": "Answers served in order, one per call, then after_ended once they run out.",
+      "type": "object",
+      "properties": {
+        "responses": {
+          "description": "The answers, served in order.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/reply"
+          }
+        },
+        "after_ended": {
+          "description": "The answer of the calls that come once the responses ran out.",
+          "$ref": "#/$defs/reply"
+        }
+      },
+      "required": [
+        "responses"
+      ],
+      "additionalProperties": false
+    },
+    "response_random": {
+      "description": "Answers served at random, one per call.",
+      "type": "object",
+      "properties": {
+        "responses": {
+          "description": "The answers, one picked at random for each call.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/reply"
+          }
+        },
+        "seed": {
+          "description": "Seed of the random order, to repeat it.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "responses"
+      ],
+      "additionalProperties": false
+    },
+    "bidi": {
+      "description": "The answer of a bidi streaming method, message by message.",
+      "type": "object",
+      "properties": {
+        "header": {
+          "$ref": "#/$defs/header_values"
+        },
+        "trailer": {
+          "$ref": "#/$defs/header_values"
+        },
+        "on": {
+          "description": "Rules, in order: the first whose when matches a message answers it with its response.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "when": {
+                "description": "Matcher list of the message as JSON text, such as [field, message, [equal, hi]].",
+                "$ref": "#/$defs/matcher"
+              },
+              "response": {
+                "$ref": "#/$defs/reply"
+              }
+            },
+            "required": [
+              "when",
+              "response"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "otherwise": {
+          "$ref": "#/$defs/reply"
+        },
+        "on_end": {
+          "$ref": "#/$defs/reply"
+        }
+      },
+      "additionalProperties": false
+    },
+    "proxy": {
+      "description": "The answer of another gRPC server, the target, to which the call goes on.",
+      "type": "object",
+      "properties": {
+        "target": {
+          "description": "The server to proxy to, as grpc.NewClient takes it, such as localhost:50051. The call goes without TLS.",
+          "type": "string",
+          "minLength": 1
+        },
+        "header": {
+          "description": "Metadata the target gets, by key, in place of the client's values.",
+          "$ref": "#/$defs/header_values"
+        },
+        "remove_headers": {
+          "description": "Keys of the client's metadata the target doesn't get.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "request"
+  ],
+  "oneOf": [
+    {
+      "required": [
+        "response"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "response_sequence"
+            ]
+          },
+          {
+            "required": [
+              "response_random"
+            ]
+          },
+          {
+            "required": [
+              "bidi"
+            ]
+          },
+          {
+            "required": [
+              "proxy"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "required": [
+        "response_sequence"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "response"
+            ]
+          },
+          {
+            "required": [
+              "response_random"
+            ]
+          },
+          {
+            "required": [
+              "bidi"
+            ]
+          },
+          {
+            "required": [
+              "proxy"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "required": [
+        "response_random"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "response"
+            ]
+          },
+          {
+            "required": [
+              "response_sequence"
+            ]
+          },
+          {
+            "required": [
+              "bidi"
+            ]
+          },
+          {
+            "required": [
+              "proxy"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "required": [
+        "bidi"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "response"
+            ]
+          },
+          {
+            "required": [
+              "response_sequence"
+            ]
+          },
+          {
+            "required": [
+              "response_random"
+            ]
+          },
+          {
+            "required": [
+              "proxy"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "required": [
+        "proxy"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "response"
+            ]
+          },
+          {
+            "required": [
+              "response_sequence"
+            ]
+          },
+          {
+            "required": [
+              "response_random"
+            ]
+          },
+          {
+            "required": [
+              "bidi"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "duration": {
+      "description": "Whole milliseconds, or an unsigned Go duration such as 1.5s.",
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854
+        },
+        {
+          "type": "string",
+          "pattern": "^(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        }
+      ]
+    },
+    "bool": {
+      "description": "A bool, or what Go's strconv.ParseBool reads: 1, t, T, TRUE, true, True and their false forms, or the number 1 or 0.",
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "enum": [
+            0,
+            1,
+            "1",
+            "t",
+            "T",
+            "TRUE",
+            "true",
+            "True",
+            "0",
+            "f",
+            "F",
+            "FALSE",
+            "false",
+            "False"
+          ]
+        }
+      ]
+    },
+    "matcher": {
+      "description": "A string, compared as is, or a matcher list such as [\"contains\", \"x\"].",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "minItems": 1
+        }
+      ]
+    },
+    "keyed_matcher": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "$ref": "#/$defs/matcher"
+        }
+      }
+    },
+    "header_values": {
+      "description": "Metadata by key: a string, or a list of strings, each.",
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "message": {
+      "description": "A message, as protojson reads it: an object, or JSON text, a template's included.",
+      "oneOf": [
+        {
+          "type": "object"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "status": {
+      "description": "The status the answer ends with, after its messages.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "Code of the status: its name, in any case, or its number.",
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16
+            },
+            {
+              "type": "string",
+              "examples": [
+                "OK",
+                "CANCELLED",
+                "UNKNOWN",
+                "INVALID_ARGUMENT",
+                "DEADLINE_EXCEEDED",
+                "NOT_FOUND",
+                "ALREADY_EXISTS",
+                "PERMISSION_DENIED",
+                "RESOURCE_EXHAUSTED",
+                "FAILED_PRECONDITION",
+                "ABORTED",
+                "OUT_OF_RANGE",
+                "UNIMPLEMENTED",
+                "INTERNAL",
+                "UNAVAILABLE",
+                "DATA_LOSS",
+                "UNAUTHENTICATED"
+              ]
+            }
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "description": "Details of the status, such as google.rpc error details, each with its @type.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "@type"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "reply": {
+      "description": "The answer: messages, header, trailer, status and message_delay. A unary or client streaming method answers one message, or a status.",
+      "type": "object",
+      "properties": {
+        "message": {
+          "$ref": "#/$defs/message"
+        },
+        "messages": {
+          "description": "The messages of a stream, in order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/message"
+          }
+        },
+        "body_file": {
+          "description": "JSON file of the answer, relative to the mock file: a message, or a list of messages.",
+          "type": "string"
+        },
+        "template": {
+          "description": "Render the messages as templates, for each call: write them as JSON text.",
+          "$ref": "#/$defs/bool"
+        },
+        "header": {
+          "$ref": "#/$defs/header_values"
+        },
+        "trailer": {
+          "$ref": "#/$defs/header_values"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "message_delay": {
+          "description": "How long to wait before each message.",
+          "$ref": "#/$defs/duration"
+        }
+      },
+      "additionalProperties": false,
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "message",
+              "messages"
+            ]
+          },
+          {
+            "required": [
+              "message",
+              "body_file"
+            ]
+          },
+          {
+            "required": [
+              "messages",
+              "body_file"
+            ]
+          }
+        ]
+      }
+    },
+    "on_complete_event": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Name of a listener registered with Setup().OnCompleteListener. The vlatte command registers webhook.",
+          "type": "string"
+        },
+        "parameters": {},
+        "after_response": {
+          "description": "Send the response without waiting for the event, which runs on.",
+          "$ref": "#/$defs/bool"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    }
+  }
+}

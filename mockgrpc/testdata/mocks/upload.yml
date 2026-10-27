@@ -1,0 +1,6 @@
+request:
+  method: Upload
+  messages: [{key: a}, {key: b}]
+response:
+  message: '{"message": "{{ len .Request.Message }} items"}'
+  template: true

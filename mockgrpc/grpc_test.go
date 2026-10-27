@@ -3,12 +3,20 @@ package mockgrpc
 import (
 	"bytes"
 	"context"
+	json "encoding/json/v2"
 	"errors"
+	"io/fs"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
-	"testing/iotest"
+	"testing/synctest"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -17,10 +25,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -31,14 +41,15 @@ type blockingUnaryReply struct {
 }
 
 // NewReplier gives every mock this reply itself: the test waits on its channels.
-func (r *blockingUnaryReply) NewReplier(*Server) (UnaryReplier, error) {
+func (r *blockingUnaryReply) NewReplier(*Server, []protoreflect.MethodDescriptor) (Replier, error) {
 	return r, nil
 }
 
-func (r *blockingUnaryReply) Reply(_ context.Context, _ *UnaryRequestValues) (any, error) {
+func (r *blockingUnaryReply) Reply(_ context.Context, call *Call) error {
 	close(r.entered)
 	<-r.release
-	return &pb.HiRes{Message: "bye"}, nil
+
+	return call.Send(&pb.HiRes{Message: "bye"})
 }
 
 func TestClose_BeforeStart(t *testing.T) {
@@ -123,7 +134,7 @@ func TestClose_WaitsForInFlightCalls(t *testing.T) {
 	reply := &blockingUnaryReply{entered: make(chan struct{}), release: make(chan struct{})}
 	release := sync.OnceFunc(func() { close(reply.release) })
 	t.Cleanup(release)
-	m.MustMock(UnaryMethod("Greetings").Reply(reply))
+	m.MustMock(Method("Greetings").Reply(reply))
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
@@ -187,6 +198,139 @@ func TestServeErrorsAreLogged(t *testing.T) {
 	require.Contains(t, buf.String(), errAccept.Error())
 }
 
+func TestClose_ClosesTheConnectionsOfWebhooks(t *testing.T) {
+	// Listeners such as webhooks send through the transport of the Kit, the server's, not http.DefaultTransport:
+	// Close closes its idle connections, so they don't outlive the server, as the HTTP server's don't.
+	closed := make(chan struct{}, 1)
+	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	target.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateClosed {
+			select {
+			case closed <- struct{}{}:
+			default:
+			}
+		}
+	}
+	target.Start()
+	t.Cleanup(target.Close)
+
+	logger := zerolog.Nop()
+	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}).Logger(&logger))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Method("Greetings").Callback(func(ctx context.Context, e vlatte.OnComplete) error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.URL, nil)
+		if err != nil {
+			return err
+		}
+
+		res, err := e.Kit().Transport().RoundTrip(req)
+		if err != nil {
+			return err
+		}
+
+		return res.Body.Close()
+	}).Reply(Message(&pb.HiRes{Message: "hello"})))
+
+	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.NoError(t, err)
+
+	m.Close()
+
+	select {
+	case <-closed:
+	case <-t.Context().Done():
+		t.Fatal("the webhook's connection to its target outlived the server")
+	}
+}
+
+func TestClose_ReleasesWhatTheMocksHold(t *testing.T) {
+	// A mock's replier may hold a connection, such as a proxy's: Close releases it, and logs one that fails to close,
+	// as it returns nothing.
+	var buf bytes.Buffer
+	logger := zerolog.New(&buf)
+
+	m := MustNew(Setup().Logger(&logger))
+	m.MustStart()
+
+	held := &closingReply{err: errors.New("still busy")}
+	mock := m.MustMock(Method("Greetings").Reply(held)).Mocks()[0]
+
+	m.Close()
+
+	require.Equal(t, int32(1), held.closed.Load())
+	require.Contains(t, buf.String(), "server: Close: closing mock "+mock.ID())
+	require.Contains(t, buf.String(), "still busy")
+
+	require.NoError(t, mock.Close(), "a mock closes once")
+	require.Equal(t, int32(1), held.closed.Load())
+}
+
+// closingReply is a reply whose replier holds something to release: Close counts its calls and returns err.
+type closingReply struct {
+	err    error
+	closed atomic.Int32
+}
+
+func (r *closingReply) NewReplier(*Server, []protoreflect.MethodDescriptor) (Replier, error) {
+	return r, nil
+}
+
+func (r *closingReply) Reply(context.Context, *Call) error { return nil }
+
+func (r *closingReply) Close() error {
+	r.closed.Add(1)
+	return r.err
+}
+
+func TestClose_LogsAJournalThatFailsToClose(t *testing.T) {
+	// Close returns nothing: a journal that fails to write the index of its last segment, which the next server of
+	// its directory opens fast from, must be logged, not swallowed.
+	var buf bytes.Buffer
+	logger := zerolog.New(&buf)
+
+	dir := t.TempDir()
+	m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}).Logger(&logger).Journal(dir))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	_, err = pb.NewTestServiceClient(conn).Greetings(t.Context(), &pb.HiReq{})
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	// A directory where the index of the segment goes: the journal can't write it.
+	idx := filepath.Join(dir, "journal-000001.idx")
+	require.NoError(t, os.Mkdir(idx, 0o755))
+
+	m.Close()
+
+	type logLine struct {
+		Level   string `json:"level"`
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+
+	var closing []logLine
+	for line := range strings.Lines(buf.String()) {
+		var l logLine
+		require.NoError(t, json.Unmarshal([]byte(line), &l), line)
+
+		if l.Message == "server: Close: closing the journal" {
+			closing = append(closing, l)
+		}
+	}
+
+	require.Len(t, closing, 1, buf.String())
+	require.Equal(t, "warn", closing[0].Level)
+	require.True(t, strings.HasSuffix(closing[0].Error, " "+idx+": "+syscall.EEXIST.Error()), closing[0].Error)
+}
+
 func TestServerOptionsAreApplied(t *testing.T) {
 	var calls atomic.Int32
 	count := func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
@@ -204,7 +348,7 @@ func TestServerOptionsAreApplied(t *testing.T) {
 			pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})
 			m.MustStart()
 			t.Cleanup(m.Close)
-			m.MustMock(UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{Message: "bye"})))
+			m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "bye"})))
 
 			conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 			require.NoError(t, err)
@@ -234,13 +378,13 @@ func TestUnmatchedCallsReturnNotFound(t *testing.T) {
 	var trailer metadata.MD
 	_, err = client.Greetings(context.Background(), &pb.HiReq{Message: "hi"}, grpc.Trailer(&trailer))
 	require.Equal(t, codes.NotFound, status.Code(err))
-	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.FailureHeader))
+	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.HeaderFailure))
 
 	stream, err := client.List(context.Background(), &pb.ListReq{})
 	require.NoError(t, err)
 	_, err = stream.Recv()
 	require.Equal(t, codes.NotFound, status.Code(err))
-	require.Equal(t, []string{vlatte.FailureNoMatch}, stream.Trailer().Get(vlatte.FailureHeader))
+	require.Equal(t, []string{vlatte.FailureNoMatch}, stream.Trailer().Get(vlatte.HeaderFailure))
 }
 
 func TestDefaultAddrIsLoopback(t *testing.T) {
@@ -259,9 +403,9 @@ func TestServerStream_MatchesRequestFields(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(ServerStreamMethod("List").
+	m.MustMock(Method("List").
 		Field("message", match.Eq("hi")).
-		Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})))
+		Reply(Messages(&pb.ListItem{Key: "a"})))
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
@@ -288,9 +432,9 @@ func TestServerStream_MatchesRequestHeader(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(ServerStreamMethod("List").
+	m.MustMock(Method("List").
 		Header("x-team", match.Eq("a")).
-		Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}})))
+		Reply(Messages(&pb.ListItem{Key: "a"})))
 
 	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
@@ -323,6 +467,127 @@ func TestNew_ReturnsErrors(t *testing.T) {
 	require.Panics(t, func() { MustNew(failingConfigurer{}) })
 }
 
+func TestNew_AJournalThatDoesntOpenFailsTheServer(t *testing.T) {
+	// A server without the journal it was given keeps no call a test can verify: New fails, naming what is in the
+	// way.
+	file := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(file, nil, 0o600))
+
+	_, err := New(Setup().Journal(filepath.Join(file, "journal")))
+	require.ErrorIs(t, err, syscall.ENOTDIR)
+
+	pathErr, ok := errors.AsType[*fs.PathError](err)
+	require.True(t, ok, err)
+	require.Equal(t, file, pathErr.Path)
+}
+
+func TestNew_AServerThatFailsToBuildRemovesItsTemporaryJournal(t *testing.T) {
+	// grpc panics on server options it can't take, two plain interceptors, once New opened the journal: a temporary
+	// one goes with the server, or each such test leaves a directory behind in the system's temporary one.
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+
+	pass := func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		return handler(ctx, req)
+	}
+
+	require.Panics(t, func() {
+		_, _ = New(Setup().ServerOptions(grpc.UnaryInterceptor(pass), grpc.UnaryInterceptor(pass)).Journal(""))
+	})
+
+	left, err := filepath.Glob(filepath.Join(tmp, "vlatte-journal-*"))
+	require.NoError(t, err)
+	require.Empty(t, left)
+}
+
+func TestNew_WithAJournalAStreamInterceptorGoesInTheChain(t *testing.T) {
+	// The journal runs outside every interceptor, so it has the code the client gets. grpc runs the stream interceptor
+	// set with grpc.StreamInterceptor outside all the others, so the journal takes it: New fails with one given in
+	// ServerOptions, which grpc.ChainStreamInterceptor gives as well, rather than journal the codes it changes wrong.
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+
+	passStream := func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, next grpc.StreamHandler) error {
+		return next(srv, ss)
+	}
+	pass := func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+		return next(ctx, req)
+	}
+
+	_, err := New(Setup().Journal("").ServerOptions(grpc.StreamInterceptor(passStream)))
+	require.ErrorIs(t, err, ErrStreamInterceptorSlot)
+
+	left, err := filepath.Glob(filepath.Join(tmp, "vlatte-journal-*"))
+	require.NoError(t, err)
+	require.Empty(t, left, "a server that fails to build removes its temporary journal")
+
+	for name, setup := range map[string]*ConfigBuilder{
+		"a stream interceptor without a journal":      Setup().ServerOptions(grpc.StreamInterceptor(passStream)),
+		"a chained stream interceptor with a journal": Setup().Journal("").ServerOptions(grpc.ChainStreamInterceptor(passStream)),
+		"a unary interceptor with a journal":          Setup().Journal("").ServerOptions(grpc.UnaryInterceptor(pass)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, err := New(setup)
+			require.NoError(t, err)
+			m.Close()
+		})
+	}
+}
+
+func TestServer_WarnsOfAServiceRegisteredPastTheJournal(t *testing.T) {
+	// A service registered on GRPCServer, past the mock server, has its unary calls journaled within the interceptors,
+	// with the code the mocks answered with: Start says so, and how to journal the code the client gets.
+	tests := []struct {
+		name     string
+		register func(m *Server)
+		warns    bool
+	}{
+		{
+			name:     "on GRPCServer",
+			register: func(m *Server) { pb.RegisterTestServiceServer(m.GRPCServer(), pb.UnimplementedTestServiceServer{}) },
+			warns:    true,
+		},
+		{
+			name:     "on the server",
+			register: func(m *Server) { pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{}) },
+		},
+		{
+			// A stream's journal is outside every interceptor wherever its service is registered.
+			name: "on the server, with a service of streams on GRPCServer",
+			register: func(m *Server) {
+				pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})
+				reflection.Register(m.GRPCServer())
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			logger := zerolog.New(&buf)
+
+			m := MustNew(Setup().Logger(&logger).Journal(""))
+			tt.register(m)
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			require.Equal(t, tt.warns, strings.Contains(buf.String(), "a service registered on GRPCServer"), buf.String())
+			require.Equal(t, tt.warns, strings.Contains(buf.String(), `"service":"`+pb.TestService_ServiceDesc.ServiceName+`"`), buf.String())
+
+			conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = conn.Close() })
+
+			_, err = pb.NewTestServiceClient(conn).Greetings(t.Context(), &pb.HiReq{})
+			require.Equal(t, codes.NotFound, status.Code(err))
+
+			n, err := m.CountRequests(t.Context(), journal.Query{})
+			require.NoError(t, err)
+			require.Equal(t, 1, n, "the call is journaled either way")
+		})
+	}
+}
+
 func TestListener(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -345,7 +610,7 @@ func TestListener(t *testing.T) {
 func TestUnaryBuilder_OneBuilderOnTwoServers(t *testing.T) {
 	// Build returned the builder's own mock, so two servers served one mock, with one hit count and one ID. Each build
 	// is a new mock now, with a replier of its own.
-	b := UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{Message: "hi"}))
+	b := Method("Greetings").Reply(Message(&pb.HiRes{Message: "hi"}))
 
 	servers := make([]*Server, 2)
 	mocks := make([]*Mock, 2)
@@ -377,31 +642,32 @@ func TestUnaryBuilder_OneBuilderOnTwoServers(t *testing.T) {
 // noReplier is a reply factory that makes no replier.
 type noReplier struct{}
 
-func (noReplier) NewReplier(*Server) (UnaryReplier, error) { return nil, nil }
+func (noReplier) NewReplier(*Server, []protoreflect.MethodDescriptor) (Replier, error) {
+	return nil, nil
+}
 
 func TestBuilder_ReplyErrors(t *testing.T) {
 	// Build stored the reply as given, so a mock without a reply was added and failed every call, and a stream whose
-	// reader failed streamed nothing, without an error. Build makes the replier of the mock now, and those fail it.
+	// messages didn't decode streamed nothing, without an error. Build makes the replier of the mock now, and those
+	// fail it.
 	m := MustNew()
 
-	_, err := UnaryMethod("Greetings").Build(m)
+	_, err := Method("Greetings").Build(m)
 	require.EqualError(t, err, "mock: no reply set: use Reply")
 
-	_, err = UnaryMethod("Greetings").Reply(noReplier{}).Build(m)
-	require.EqualError(t, err, "reply: the factory made no replier")
+	_, err = Method("Greetings").Reply(noReplier{}).Build(m)
+	require.EqualError(t, err, "mock: Greetings: reply: the factory made no replier")
 
-	_, err = ServerStreamMethod("List").
-		Reply(ServerStream[*pb.ListItem]().JSON(iotest.ErrReader(errors.New("boom")))).
-		Build(m)
-	require.EqualError(t, err, "stream: reading the messages: boom")
+	_, err = Method("List").Reply(JSON(`{"nope": 1}`)).Build(m)
+	require.ErrorContains(t, err, "mock: List: reply: /protobuf.TestService/List: json 0: not a protobuf.ListItem")
 }
 
 func TestMocksOfBothKinds_EachCallFindsItsKind(t *testing.T) {
 	// A mock has matchers for its own kind of call only, and no matchers match every call: a stream call matched a
 	// unary mock added before the stream mock, and failed, and a unary call did the same with a stream mock added
 	// first. Each call is matched against the mocks of its kind now.
-	unary := UnaryMethod("Greetings").Reply(Unary().Message(&pb.HiRes{Message: "hi"}))
-	stream := ServerStreamMethod("List").Reply(ServerStream[*pb.ListItem]().Messages([]proto.Message{&pb.ListItem{Key: "a"}}))
+	unary := Method("Greetings").Reply(Message(&pb.HiRes{Message: "hi"}))
+	stream := Method("List").Reply(Messages(&pb.ListItem{Key: "a"}))
 
 	for _, unaryFirst := range []bool{true, false} {
 		m := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
@@ -424,4 +690,99 @@ func TestMocksOfBothKinds_EachCallFindsItsKind(t *testing.T) {
 		require.Equal(t, "hi", res.Message)
 		require.Equal(t, []string{"a"}, listKeys(t, client), "unary first: %t", unaryFirst)
 	}
+}
+
+func TestClose_CutsTheCallsThatOutlastTheShutdownTimeout(t *testing.T) {
+	// Close waited for every call: a stream whose client never closed it held Close, and the test, forever. The
+	// clock is synctest's, which moves once every goroutine waits: the timeout passes at once.
+	synctest.Test(t, func(t *testing.T) {
+		m := MustNew(Setup().Silent().InMemory().ShutdownTimeout(time.Minute))
+		m.MustStart()
+		m.MustMock(Method("Chat").Reply(Bidi()))
+
+		// A client of its own: Close closes those of Dial first, which would end the stream.
+		conn, err := grpc.NewClient("passthrough:///bufconn",
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return m.memory.DialContext(ctx) }))
+		require.NoError(t, err)
+
+		defer conn.Close()
+
+		stream, err := pb.NewTestServiceClient(conn).Chat(t.Context())
+		require.NoError(t, err)
+		require.NoError(t, stream.Send(&pb.HiReq{Message: "never closes"}))
+
+		start := time.Now()
+		m.Close()
+		require.Equal(t, time.Minute, time.Since(start).Round(time.Second), "Close waited for the timeout, then cut the call")
+
+		_, err = stream.Recv()
+		require.Equal(t, codes.Unavailable, status.Code(err), "the call was cut: %v", err)
+	})
+}
+
+func TestNoMatchCode_IsTheCodeOfAnUnmatchedCall(t *testing.T) {
+	// A call no mock matched answered NotFound, which an app may take for the answer of a real server: the code is
+	// the server's to choose, as HTTP mock servers choose their status.
+	m := MustNew(Setup().Silent().NoMatchCode(codes.Unimplemented))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	var trailer metadata.MD
+	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{}, grpc.Trailer(&trailer))
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.HeaderFailure))
+}
+
+func TestNew_AGlobalEventOfNoListenerFails(t *testing.T) {
+	// A global event runs for every mock: one that names no listener fails New, rather than every call.
+	_, err := New(Setup().Silent().GlobalEvents(&vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "nobody"}}}))
+	require.ErrorContains(t, err, "server: global on_complete listener nobody at index 0 is not registered")
+}
+
+func TestNew_TemplateEnvAllowsVariablesOnTheDefaultEngine(t *testing.T) {
+	m, err := New(Setup().ConfigSources(ConfigArgs([]string{"--grpc-template-env=VLATTE_TEST_ALLOWED"})))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+
+	_, err = m.Config().TemplateEngine.Compile("body", `{{ env "VLATTE_TEST_ALLOWED" }}`)
+	require.NoError(t, err)
+
+	_, err = m.Config().TemplateEngine.Compile("body", `{{ env "VLATTE_TEST_OTHER" }}`)
+	require.ErrorContains(t, err, `env: "VLATTE_TEST_OTHER" is not allowed`)
+}
+
+func TestNew_TemplateEnvWithAnEngineOfTheUsersOwnFails(t *testing.T) {
+	// The variables would silently stay unreadable: the server can't change an engine it didn't make.
+	_, err := New(Setup().TemplateEngine(vlatte.MustNewGoTemplateEngine()).TemplateEnv("X"))
+	require.ErrorIs(t, err, errTemplateEnvWithEngine)
+	require.ErrorContains(t, err, "grpc.template.env")
+}
+
+func TestNew_TemplateEnvFromGoRefusesAnInvalidName(t *testing.T) {
+	_, err := New(Setup().TemplateEnv("A=B"))
+	require.ErrorContains(t, err, `environment variable name "A=B" is invalid`)
+}
+
+func TestPrep(t *testing.T) {
+	m := MustNew()
+	defer m.Close()
+	pb.RegisterTestServiceServer(m, pb.UnimplementedTestServiceServer{})
+
+	err := m.Prep(t.Context(), vlatte.RecipeFunc[*Mock, *Server](
+		func(_ context.Context, in *vlatte.RecipeInput[*Mock, *Server]) error {
+			_, err := in.Server.Mock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "from recipe"})))
+			return err
+		}))
+	require.NoError(t, err)
+	m.MustStart()
+
+	conn, err := grpc.NewClient(m.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	// The mock a recipe adds serves calls like any other mock.
+	res, err := pb.NewTestServiceClient(conn).Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.NoError(t, err)
+	require.Equal(t, "from recipe", res.Message)
 }

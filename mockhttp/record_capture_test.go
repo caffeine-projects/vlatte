@@ -62,6 +62,20 @@ func TestRecording_CapturesTheAnswerTheClientGets(t *testing.T) {
 			body:   "body<step>",
 		},
 		{
+			name: "a step that writes from a goroutine of its own sends what is recorded",
+			mock: Getf("/r").Step(asyncStep{}, appendStep("<step>")).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, "body")
+			})),
+			status: http.StatusOK,
+			body:   "body<step>",
+		},
+		{
+			name:   "a step that writes from a goroutine of its own sends a rendered body too",
+			mock:   Getf("/r").Step(asyncStep{}).Reply(OK().PlainText("body")),
+			status: http.StatusOK,
+			body:   "body",
+		},
+		{
 			name: "a flush sends the status",
 			mock: Getf("/r").Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 				http.NewResponseController(w).Flush()
@@ -147,7 +161,7 @@ func TestRecording_LeavesOutTheDebugHeaders(t *testing.T) {
 	require.NoError(t, m.StartRecording(RecordDir(dir), RecordIncludeMocked(true)))
 
 	res, _ := do(t, http.MethodGet, m.URL("/r"), nil, nil)
-	require.Equal(t, "original", res.Header.Get(vlatte.MatchedMockIDHeader), "the answer had them")
+	require.Equal(t, "original", res.Header.Get(vlatte.HeaderMatchedMockID), "the answer had them")
 
 	stopRecording(t, m)
 
@@ -388,6 +402,27 @@ func TestRecording_LargeBodies(t *testing.T) {
 		require.Equal(t, int64(1), res.Status.Failed)
 		require.Empty(t, recordedMocks(t, dir))
 	})
+}
+
+func TestRecording_AMockedAnswerAStepWritesLaterIsLeftOut(t *testing.T) {
+	// A reply that writes its own answer writes before the server knows who answers. Once it knows a mock does, the
+	// capture drops what it kept, while a step that writes from a goroutine of its own may still be writing to it.
+	dir := t.TempDir()
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Getf("/r").Step(asyncStep{}).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "body")
+	})))
+	require.NoError(t, m.StartRecording(RecordDir(dir)))
+
+	res, body := do(t, http.MethodGet, m.URL("/r"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "body", string(body))
+
+	stopRecording(t, m)
+	require.Empty(t, recordedMocks(t, dir))
 }
 
 func TestCaptureWriter_KeepsOnlyAnswersItRecords(t *testing.T) {

@@ -3,6 +3,7 @@ package mockgrpc
 import (
 	"context"
 	"errors"
+	"io"
 	"strconv"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/caffeine-projects/vlatte"
 )
@@ -17,28 +19,63 @@ import (
 var (
 	errNoReply   = errors.New("mock: no reply set: use Reply")
 	errNoReplier = errors.New("reply: the factory made no replier")
+
+	// errFuncNotDescribed is why a mock with a Func reply can't be described: a mock file can't hold a function.
+	errFuncNotDescribed = errors.New("reply: a Func reply can't be described as a mock file")
 )
 
-// _failureKey is vlatte.FailureHeader as a metadata key, which gRPC wants lowercase.
-var _failureKey = strings.ToLower(vlatte.FailureHeader)
+// _failureKey is vlatte.HeaderFailure as a metadata key, which gRPC wants lowercase.
+var _failureKey = strings.ToLower(vlatte.HeaderFailure)
 
-// newReplier asks f for the replier of a mock of app. A missing reply, or a factory that makes no replier, fails the
-// build: before, the mock was added and failed every call.
-func newReplier[I any](f vlatte.ReplierFactory[I, any, *Server], app *Server) (vlatte.Replier[I, any], error) {
-	if f == nil {
-		return nil, errNoReply
-	}
+// Reply is what a mock answers the calls it matches with: [Message], [Messages], [JSON], [Template], [Status], [Bidi],
+// [Seq], [Rand], [Echo], [Shared] and [Func] make one. [Builder.Build] asks it for a Replier for each mock, given the
+// methods the mock serves, so it checks there what it can, such as that its messages are of the type the methods
+// answer with.
+type Reply interface {
+	NewReplier(app *Server, methods []protoreflect.MethodDescriptor) (Replier, error)
+}
 
-	r, err := f.NewReplier(app)
+// Replier answers the calls of one mock. Reply sends the answer through call: the messages with [Call.Send], and the
+// header and trailer with grpc.SetHeader, grpc.SendHeader and grpc.SetTrailer on ctx. An error with a gRPC status,
+// such as status.Error makes, ends the call with that status: it is the mock's answer. Any other error is a failure,
+// which the client gets as Internal with the vlatte-error trailer.
+type Replier interface {
+	Reply(ctx context.Context, call *Call) error
+}
+
+// ReplierFunc is a Replier of a function, and a Reply that gives every mock that function.
+type ReplierFunc func(ctx context.Context, call *Call) error
+
+// Func returns a Reply that answers each call with fn, which sends the answer through call: see [Replier]. A unary or
+// client streaming call whose fn sends no message answers with an empty message of the method's output type. A mock
+// file can't hold a function: describing a mock with it fails, so the admin API can't show the mock, nor save it.
+func Func(fn func(ctx context.Context, call *Call) error) ReplierFunc {
+	return fn
+}
+
+// Reply implements Replier.
+func (f ReplierFunc) Reply(ctx context.Context, call *Call) error {
+	return f(ctx, call)
+}
+
+// NewReplier implements Reply.
+func (f ReplierFunc) NewReplier(*Server, []protoreflect.MethodDescriptor) (Replier, error) {
+	return f, nil
+}
+
+// newReplier asks r for the replier of a mock of app, which serves methods. A reply that makes no replier fails the
+// build.
+func newReplier(r Reply, app *Server, methods []protoreflect.MethodDescriptor) (Replier, error) {
+	replier, err := r.NewReplier(app, methods)
 	if err != nil {
 		return nil, err
 	}
 
-	if r == nil {
+	if replier == nil {
 		return nil, errNoReplier
 	}
 
-	return r, nil
+	return replier, nil
 }
 
 // fail answers a call the server failed to serve, or no mock matched: it adds failure, a vlatte.Failure* value, to
@@ -48,27 +85,45 @@ func fail(ctx context.Context, failure string, c codes.Code, format string, a ..
 	return status.Errorf(c, format, a...)
 }
 
-// debugHeader is the header metadata naming mock, the mock that matched a call: its ID, its hits, this call included,
-// and its name, when it has one. Inc counts the call once it is answered.
-func debugHeader(mock *Mock) metadata.MD {
+// debugHeader is the header metadata naming mock, the mock that matched a call: its ID, hits, its hits with this call,
+// and its name, when it has one.
+func debugHeader(mock *Mock, hits int64) metadata.MD {
 	md := metadata.Pairs(
-		vlatte.MatchedMockIDHeader, mock.ID(),
-		vlatte.MatchedMockHitsHeader, strconv.FormatInt(mock.Hits()+1, 10),
+		vlatte.HeaderMatchedMockID, mock.ID(),
+		vlatte.HeaderMatchedMockHits, strconv.FormatInt(hits, 10),
 	)
 
 	if name := mock.Name(); name != "" {
-		md.Set(vlatte.MatchedMockNameHeader, name)
+		md.Set(vlatte.HeaderMatchedMockName, name)
 	}
 
 	return md
 }
 
 // replyError is the answer to a call whose mock replied err. An error with a gRPC status is the mock's answer, such
-// as a status set with UnaryReply.Status, so it is returned as is. Any other error is a failure of the reply.
+// as a status set with Status, so it is returned as is. Any other error is a failure of the reply.
 func replyError(ctx context.Context, scope string, mock *Mock, err error) error {
 	if _, ok := status.FromError(err); ok {
 		return err
 	}
 
 	return fail(ctx, vlatte.FailureReply, codes.Internal, "%s: %s: reply: %v", scope, mock, err)
+}
+
+// hasStatus reports whether err carries a gRPC status: the mock's answer, not a failure.
+func hasStatus(err error) bool {
+	_, ok := status.FromError(err)
+	return ok
+}
+
+// closeAll closes cs, all of them, and returns their errors joined.
+func closeAll(cs []io.Closer) error {
+	var errs []error
+	for _, c := range cs {
+		if err := c.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
 }

@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,12 +11,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -624,6 +627,27 @@ func TestServer_AStartThatFailsClosesTheServer(t *testing.T) {
 	}
 }
 
+func TestServer_CloseLogsAJournalThatFailsToClose(t *testing.T) {
+	// Close returns nothing: a journal that can't write the index of its last segment, which the next server of its
+	// directory opens fast from, is logged, not lost.
+	logs := &bytes.Buffer{}
+	logger := zerolog.New(logs)
+
+	dir := t.TempDir()
+	m := MustNew(Setup().Logger(&logger).Journal(dir))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	res, _ := do(t, http.MethodGet, m.URL("/nope"), nil, nil)
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+
+	// A directory where the index of the segment goes: no file can take its place.
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "journal-000001.idx"), 0o700))
+
+	m.Close()
+	require.Contains(t, logs.String(), "server: Close: closing the journal")
+}
+
 func TestServer_ACloseDuringTheStartStopsIt(t *testing.T) {
 	// A Close that comes while the server loads its mocks wins: the start fails, and nothing serves.
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -721,4 +745,74 @@ func TestServer_WebhookTransportHasTheDefaultLimits(t *testing.T) {
 	require.Equal(t, want.ForceAttemptHTTP2, got.ForceAttemptHTTP2)
 	require.NotNil(t, got.Proxy)
 	require.NotNil(t, got.DialContext)
+}
+
+func TestNew_TemplateEnvAllowsVariablesOnTheDefaultEngine(t *testing.T) {
+	conf, err := loadConfig(t, Setup().TemplateEnv("VLATTE_TEST_ALLOWED"), ConfigArgs(nil))
+	require.NoError(t, err)
+
+	_, err = conf.TemplateEngine.Compile("body", `{{ env "VLATTE_TEST_ALLOWED" }}`)
+	require.NoError(t, err)
+
+	_, err = conf.TemplateEngine.Compile("body", `{{ env "VLATTE_TEST_OTHER" }}`)
+	require.ErrorContains(t, err, `env: "VLATTE_TEST_OTHER" is not allowed`)
+}
+
+func TestNew_TemplateEnvWithAnEngineOfTheUsersOwnFails(t *testing.T) {
+	// The variables would silently stay unreadable: the server can't change an engine it didn't make.
+	_, err := New(Setup().TemplateEngine(vlatte.MustNewGoTemplateEngine()).ConfigSources(ConfigArgs([]string{"--template-env", "X"})))
+	require.ErrorIs(t, err, errTemplateEnvWithEngine)
+}
+
+func TestNew_TemplateEnvRefusesAnInvalidName(t *testing.T) {
+	_, err := New(Setup().ConfigSources(ConfigArgs([]string{"--template-env", "A=B"})))
+	require.ErrorContains(t, err, `environment variable name "A=B" is invalid`)
+}
+
+func TestNew_TemplateEnvFromGoRefusesAnInvalidName(t *testing.T) {
+	_, err := New(Setup().TemplateEnv("A=B"))
+	require.ErrorContains(t, err, `environment variable name "A=B" is invalid`)
+}
+
+func TestPrep(t *testing.T) {
+	type recipe = vlatte.RecipeFunc[*Mock, *Server]
+	type input = vlatte.RecipeInput[*Mock, *Server]
+
+	t.Run("runs the recipes in order on this server", func(t *testing.T) {
+		m := MustNew(Setup().Silent())
+		var ran []string
+
+		err := m.Prep(t.Context(),
+			recipe(func(_ context.Context, in *input) error {
+				ran = append(ran, "first")
+				_, err := in.Server.Mock(Getf("/from-recipe").Reply(OK()))
+				return err
+			}),
+			recipe(func(context.Context, *input) error {
+				ran = append(ran, "second")
+				return nil
+			}))
+
+		require.NoError(t, err)
+		require.Equal(t, []string{"first", "second"}, ran)
+		require.Len(t, m.ListPending(), 1, "the mock added by a recipe belongs to the server")
+	})
+
+	t.Run("stops at the first recipe that fails", func(t *testing.T) {
+		m := MustNew(Setup().Silent())
+		errRecipe := errors.New("recipe failed")
+		ranAfterFailure := false
+
+		err := m.Prep(t.Context(),
+			recipe(func(context.Context, *input) error { return nil }),
+			recipe(func(context.Context, *input) error { return errRecipe }),
+			recipe(func(context.Context, *input) error {
+				ranAfterFailure = true
+				return nil
+			}))
+
+		require.ErrorIs(t, err, errRecipe)
+		require.ErrorContains(t, err, "index 1")
+		require.False(t, ranAfterFailure, "recipes after a failing one must not run")
+	})
 }

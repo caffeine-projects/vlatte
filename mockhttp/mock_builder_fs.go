@@ -9,7 +9,7 @@ import (
 	"slices"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
@@ -88,7 +88,7 @@ func (b *bytesBuilder) Build(app *Server) (*Mock, error) {
 // buildAdminMock builds a mock the admin API was sent. Its relative body files open from the working directory, as
 // the admin API describes the body files of mocks. Its origin tells it from mocks of files and code.
 func buildAdminMock(app *Server, content []byte, format string) (*Mock, error) {
-	return mockDoc{origin: "admin request", source: handler.Origin, format: format, data: content}.build(app)
+	return mockDoc{origin: "admin request", source: adminapi.Origin, format: format, data: content}.build(app)
 }
 
 // mockDoc is a mock definition document and where it came from.
@@ -102,7 +102,7 @@ type mockDoc struct {
 
 // build turns the document into a mock for app. Every failure is a *config.Error listing each problem.
 func (doc mockDoc) build(app *Server) (*Mock, error) {
-	def := newMockDef()
+	def := newMockDef(app.matchers())
 	def.dir = doc.dir
 
 	var problems []config.Problem

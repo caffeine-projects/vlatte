@@ -33,6 +33,9 @@ func loadConfig(t *testing.T, setup *ConfigBuilder, sources ...ConfigSource) (*C
 		return nil, err
 	}
 
+	// The server never starts: its journal, which it opened, closes.
+	t.Cleanup(func() { m.Journal().Close() })
+
 	return m.Config(), nil
 }
 
@@ -60,6 +63,8 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 	fromFile := writeConfigFile(t, t.TempDir(), "settings.json", `{"name": "from-file"}`)
 	tlsArgs := []string{"--tls-cert", _testCertFile, "--tls-key", _testKeyFile}
 
+	journalDir := t.TempDir()
+
 	// proxy.intercept needs a CA.
 	caCert, caKey := writeTestCA(t, t.TempDir())
 	intercept := []string{"--proxy-intercept", "--proxy-ca-cert", caCert, "--proxy-ca-key", caKey}
@@ -78,6 +83,7 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"name":     {[]string{"--name", "api"}, func(t *testing.T, c *Config) { require.Equal(t, "api", c.Name) }},
 		"addr":     {[]string{"--addr", "127.0.0.1:0"}, func(t *testing.T, c *Config) { require.Equal(t, "127.0.0.1:0", c.Addr) }},
 		"root-dir": {[]string{"--root-dir", "root"}, func(t *testing.T, c *Config) { require.Equal(t, "root", c.RootDir) }},
+		"workdir":  {[]string{"--workdir", "work"}, func(t *testing.T, c *Config) { require.Equal(t, "work", c.WorkDir) }},
 		"mock-files": {[]string{"--mock-files", "a/*.yaml,b/*.yaml"}, func(t *testing.T, c *Config) {
 			require.Equal(t, []string{"a/*.yaml", "b/*.yaml"}, c.MockFileSearchPatterns)
 		}},
@@ -87,15 +93,22 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"colors":               {[]string{"--colors=false"}, func(t *testing.T, c *Config) { require.False(t, c.Colors) }},
 		"debug":                {[]string{"--debug"}, func(t *testing.T, c *Config) { require.True(t, c.Debug) }},
 		"debug-headers":        {[]string{"--debug-headers=false"}, func(t *testing.T, c *Config) { require.True(t, c.NoDebugHeaders) }},
-		"tls-cert":             {tlsArgs, func(t *testing.T, c *Config) { require.Len(t, c.TLSCertificates, 1) }},
-		"tls-key":              {tlsArgs, func(t *testing.T, c *Config) { require.Len(t, c.TLSCertificates, 1) }},
-		"tls-ca":               {slices.Concat(tlsArgs, []string{"--tls-ca", _testClientCertFile}), func(t *testing.T, c *Config) { require.NotNil(t, c.TLSClientCAs) }},
-		"log-level":            {[]string{"--log-level", "warn"}, func(t *testing.T, c *Config) { require.Equal(t, vlatte.LogLevelWarn, c.LogLevel) }},
-		"log-verbosity":        {[]string{"--log-verbosity", "body"}, func(t *testing.T, c *Config) { require.Equal(t, vlatte.LogBody, c.LogVerbosity) }},
-		"log-max-body-size":    {[]string{"--log-max-body-size", "1024"}, func(t *testing.T, c *Config) { require.Equal(t, int64(1024), c.LogBodyMaxSize) }},
-		"log-pretty":           {[]string{"--log-pretty=false"}, func(t *testing.T, c *Config) { require.False(t, c.LogPretty) }},
-		"cors":                 {[]string{"--cors"}, func(t *testing.T, c *Config) { require.Equal(t, &DefaultCORSConfig, c.CORS) }},
-		"cors-allowed-origin":  {[]string{"--cors-allowed-origin", "https://a.org"}, func(t *testing.T, c *Config) { require.Equal(t, "https://a.org", c.CORS.AllowedOrigin) }},
+		"near-misses":          {[]string{"--near-misses=false"}, func(t *testing.T, c *Config) { require.True(t, c.NoNearMisses) }},
+		"journal":              {[]string{"--journal"}, func(t *testing.T, c *Config) { require.Equal(t, new(defaultJournalConfig()), c.Journal) }},
+		"journal-dir":          {[]string{"--journal-dir", journalDir}, func(t *testing.T, c *Config) { require.Equal(t, journalDir, c.Journal.Dir) }},
+		"journal-max-entries":  {[]string{"--journal-max-entries", "5"}, func(t *testing.T, c *Config) { require.Equal(t, 5, c.Journal.MaxEntries) }},
+		"journal-max-body-size": {
+			[]string{"--journal-max-body-size", "64"}, func(t *testing.T, c *Config) { require.Equal(t, int64(64), c.Journal.MaxBodySize) },
+		},
+		"tls-cert":            {tlsArgs, func(t *testing.T, c *Config) { require.Len(t, c.TLSCertificates, 1) }},
+		"tls-key":             {tlsArgs, func(t *testing.T, c *Config) { require.Len(t, c.TLSCertificates, 1) }},
+		"tls-ca":              {slices.Concat(tlsArgs, []string{"--tls-ca", _testClientCertFile}), func(t *testing.T, c *Config) { require.NotNil(t, c.TLSClientCAs) }},
+		"log-level":           {[]string{"--log-level", "warn"}, func(t *testing.T, c *Config) { require.Equal(t, vlatte.LogLevelWarn, c.LogLevel) }},
+		"log-verbosity":       {[]string{"--log-verbosity", "body"}, func(t *testing.T, c *Config) { require.Equal(t, vlatte.LogBody, c.LogVerbosity) }},
+		"log-max-body-size":   {[]string{"--log-max-body-size", "1024"}, func(t *testing.T, c *Config) { require.Equal(t, int64(1024), c.LogBodyMaxSize) }},
+		"log-pretty":          {[]string{"--log-pretty=false"}, func(t *testing.T, c *Config) { require.False(t, c.LogPretty) }},
+		"cors":                {[]string{"--cors"}, func(t *testing.T, c *Config) { require.Equal(t, &DefaultCORSConfig, c.CORS) }},
+		"cors-allowed-origin": {[]string{"--cors-allowed-origin", "https://a.org"}, func(t *testing.T, c *Config) { require.Equal(t, "https://a.org", c.CORS.AllowedOrigin) }},
 		"cors-allow-credentials": {
 			[]string{"--cors-allow-credentials"}, func(t *testing.T, c *Config) { require.True(t, c.CORS.AllowCredentials) },
 		},
@@ -167,10 +180,9 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 			[]string{"--record-repeats", "first"}, func(t *testing.T, c *Config) { require.Equal(t, vlatte.RecordFirst, c.Record.Repeats) },
 		},
 		"record-include-mocked": {[]string{"--record-include-mocked"}, func(t *testing.T, c *Config) { require.True(t, c.Record.IncludeMocked) }},
-		"admin":                 {[]string{"--admin"}, func(t *testing.T, c *Config) { require.Equal(t, &AdminConfig{}, c.Admin) }},
-		"admin-addr":            {[]string{"--admin-addr", "127.0.0.1:9090"}, func(t *testing.T, c *Config) { require.Equal(t, "127.0.0.1:9090", c.Admin.Addr) }},
-		"admin-dir":             {[]string{"--admin-dir", "admin"}, func(t *testing.T, c *Config) { require.NotNil(t, c.Admin.Store) }},
-		"webhook-timeout":       {[]string{"--webhook-timeout", "1.5s"}, func(t *testing.T, c *Config) { require.Equal(t, 1500*time.Millisecond, c.WebhookTimeout) }},
+		"template-env": {
+			[]string{"--template-env", "API_URL,TENANT"}, func(t *testing.T, c *Config) { require.Equal(t, []string{"API_URL", "TENANT"}, c.TemplateEnv) },
+		},
 	}
 
 	flags := ConfigFlags()
@@ -357,6 +369,18 @@ func TestConfigSources_Defaults(t *testing.T) {
 
 		_, err := New()
 		require.NoError(t, err)
+	})
+
+	t.Run("the grpc section is the gRPC server's", func(t *testing.T) {
+		// The vlatte command reads the gRPC server's settings from the same file and environment: a gRPC setting
+		// made every HTTP server fail as unknown.
+		t.Chdir(t.TempDir())
+		require.NoError(t, os.WriteFile(".vlatterc.yaml", []byte("name: http\ngrpc: {addr: \":50051\"}\n"), 0o600))
+		t.Setenv("VLATTE_GRPC_ADDR", ":50051")
+
+		m, err := New()
+		require.NoError(t, err)
+		require.Equal(t, "http", m.Config().Name, "the file's own settings still apply")
 	})
 }
 
@@ -633,7 +657,38 @@ func TestConfigUsage_ListsEverySetting(t *testing.T) {
 
 	require.Contains(t, usage, "file key log.max_body_size")
 	require.Contains(t, usage, "Default: info.")
-	require.Equal(t, "42", choiceName(_logLevels, 42), "a default without a name shows its number")
+	require.Equal(t, "42", choiceName(config.LogLevels, 42), "a default without a name shows its number")
+}
+
+func TestConfigSources_TheCommandsAdminSettingsServeNoAdminAPI(t *testing.T) {
+	// The admin API is opted into in code: settings the vlatte command reads, from a config file it shares with tests,
+	// or its environment, neither fail a library server nor give it an admin API.
+	t.Setenv(EnvPrefix+"_ADMIN", "true")
+	t.Setenv(EnvPrefix+"_MCP", "true")
+
+	file := writeConfigFile(t, t.TempDir(), "settings.yaml", "admin:\n  addr: 127.0.0.1:9090\n  dir: admin\nmcp: true\n")
+
+	m, err := New(Setup().Silent().ConfigSources(
+		ConfigFile(file), ConfigEnv(), ConfigArgs([]string{"--admin", "--admin-addr=:9091", "--admin-dir", "x", "--mcp"}),
+	))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+
+	require.NoError(t, m.Start())
+	require.Nil(t, m.Config().Admin)
+	require.Nil(t, m.Config().AdminStore)
+	require.Empty(t, m.AdminURL())
+}
+
+func TestConfigUsage_LeavesOutTheCommandsSettings(t *testing.T) {
+	// Help and completions of a library server offer none of the vlatte command's settings.
+	for _, name := range []string{"--admin", "VLATTE_ADMIN", "file key admin", "--mcp", "VLATTE_MCP", "file key mcp"} {
+		require.NotContains(t, ConfigUsage(), name)
+	}
+
+	for _, f := range ConfigFlags() {
+		require.NotContains(t, []string{"admin", "admin-addr", "admin-dir", "admin-docs-version", "mcp"}, f.Name)
+	}
 }
 
 // writeTestCA writes the certificate and the key of a new CA, as PEM files in dir, and returns their paths.

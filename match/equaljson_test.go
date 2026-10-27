@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 func TestToEqualJSON(t *testing.T) {
@@ -119,6 +120,69 @@ func TestEqualJSON_ParsesIncomingValuesLeniently(t *testing.T) {
 			require.True(t, ok)
 		})
 	}
+}
+
+func TestEqualJSON_Options(t *testing.T) {
+	// Array order and extra elements ignored: a stub that names only what it cares about.
+	expected := `{"a": [1, 3], "b": {"c": true}}`
+
+	tests := []struct {
+		name  string
+		opts  []EqualJSONOption
+		value string
+		want  bool
+	}{
+		{"strict", nil, `{"a": [1, 3], "b": {"c": true}}`, true},
+		{"strict: order", nil, `{"a": [3, 1], "b": {"c": true}}`, false},
+		{"strict: extra member", nil, `{"a": [1, 3], "b": {"c": true}, "d": 1}`, false},
+
+		{"order: any", []EqualJSONOption{IgnoreArrayOrder()}, `{"a": [3, 1], "b": {"c": true}}`, true},
+		{"order: still every item", []EqualJSONOption{IgnoreArrayOrder()}, `{"a": [3, 1, 1], "b": {"c": true}}`, false},
+		{"order: still every member", []EqualJSONOption{IgnoreArrayOrder()}, `{"a": [3, 1], "b": {"c": true}, "d": 1}`, false},
+		{"order: each item its own", []EqualJSONOption{IgnoreArrayOrder()}, `{"a": [1, 1], "b": {"c": true}}`, false},
+
+		{"extra: members", []EqualJSONOption{IgnoreExtraElements()}, `{"a": [1, 3], "b": {"c": true, "x": 0}, "d": 1}`, true},
+		{"extra: items in order", []EqualJSONOption{IgnoreExtraElements()}, `{"a": [0, 1, 2, 3, 4], "b": {"c": true}}`, true},
+		{"extra: not out of order", []EqualJSONOption{IgnoreExtraElements()}, `{"a": [3, 2, 1], "b": {"c": true}}`, false},
+		{"extra: not missing ones", []EqualJSONOption{IgnoreExtraElements()}, `{"a": [1, 3]}`, false},
+		{"extra: not a different value", []EqualJSONOption{IgnoreExtraElements()}, `{"a": [1, 3], "b": {"c": false}}`, false},
+
+		{"both", []EqualJSONOption{IgnoreArrayOrder(), IgnoreExtraElements()}, `{"a": [4, 3, 2, 1], "b": {"c": true}, "d": 1}`, true},
+		{"both: still the items", []EqualJSONOption{IgnoreArrayOrder(), IgnoreExtraElements()}, `{"a": [4, 3, 2], "b": {"c": true}}`, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, err := EqualJSON(expected, tc.opts...).Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), tc.value))
+			require.NoError(t, err)
+			require.Equal(t, tc.want, ok)
+		})
+	}
+}
+
+func TestEqualJSON_IgnoreArrayOrderPairsNestedItems(t *testing.T) {
+	// Items that are objects pair up as a whole: each expected object needs an object of its own that it equals,
+	// loosened the same way inside.
+	m := EqualJSON(`[{"id": 1}, {"id": 2, "tags": ["a", "b"]}]`, IgnoreArrayOrder(), IgnoreExtraElements())
+
+	ok, err := m.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(),
+		`[{"id": 2, "tags": ["b", "c", "a"], "name": "x"}, {"id": 3}, {"id": 1}]`))
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	ok, err = m.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), `[{"id": 2, "tags": ["a"]}, {"id": 1}]`))
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+func TestEqualJSON_DescribesItsOptions(t *testing.T) {
+	data, err := EqualJSON(`{"a": 1}`, IgnoreArrayOrder(), IgnoreExtraElements()).(descriptor.SelfDescriptive).Describe().MarshalJSON()
+	require.NoError(t, err)
+	require.JSONEq(t, `["eqj", "{\"a\": 1}", {"ignore_array_order": true, "ignore_extra_elements": true}]`, string(data))
+
+	data, err = EqualJSON(`{"a": 1}`).(descriptor.SelfDescriptive).Describe().MarshalJSON()
+	require.NoError(t, err)
+	require.JSONEq(t, `["eqj", "{\"a\": 1}"]`, string(data))
 }
 
 // panicOf returns the value fn panics with, or nil.

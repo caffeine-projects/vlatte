@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"slices"
+	"unicode/utf8"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
@@ -33,9 +35,16 @@ type ReplyInput struct {
 	RequestValues *RequestValues
 	Writer        http.ResponseWriter
 
-	// noSwitch keeps a proxy reply from asking its target to switch protocols, for a mock whose steps or response
-	// mappers couldn't apply to the connection: the target answers as to any request.
+	// noSwitch keeps a proxy reply from asking its target to switch protocols, for a mock whose response mappers
+	// couldn't apply to the connection: the target answers as to any request.
 	noSwitch bool
+
+	// upstream are the steps of the mock that what a proxy reply sends on passes through: the request's body.
+	upstream []vlatte.Step
+
+	// upstreamBody is the request's body as the upstream steps passed it on, when they read it before the reply, such
+	// as for a mock with wire steps: a proxy reply sends it in place of the body. Nil otherwise.
+	upstreamBody *bytes.Reader
 }
 
 // newReplier asks f for the Replier of a mock of app. A factory that makes none fails the build here: the nil Replier
@@ -389,7 +398,7 @@ func (rep *Reply) Describe() descriptor.Descriptor {
 	}
 
 	if len(rep.response.Trailer) > 0 {
-		response["trailers"] = rep.response.Trailer.Clone()
+		response["trailer"] = rep.response.Trailer.Clone()
 	}
 
 	if rep.bodyEncoding == _bodyEncodingGZIP {
@@ -406,8 +415,13 @@ func (rep *Reply) Describe() descriptor.Descriptor {
 		spec.Dir = rep.bodyFileDir
 		response["multipart"] = spec.Doc()
 	default:
-		if rep.response.Body != nil {
-			response["body"] = string(rep.response.Body)
+		// JSON and YAML hold text as UTF-8: other bytes, such as an image or text in another encoding, go in base64.
+		switch body := rep.response.Body; {
+		case body == nil:
+		case utf8.Valid(body):
+			response["body"] = string(body)
+		default:
+			response["body_base64"] = base64.StdEncoding.EncodeToString(body)
 		}
 	}
 

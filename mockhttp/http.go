@@ -1,12 +1,13 @@
 package mockhttp
 
 import (
+	"cmp"
 	"context"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,14 +23,19 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/admin"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
+	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid/recovery"
 )
 
-var _ vlatte.Flavor[*Mock, *Server] = (*Server)(nil)
+var _ vlatte.Server[*Mock, *Server] = (*Server)(nil)
+
+var errAdminStoreWithoutAdmin = errors.New("server: AdminStore needs an admin API: pass ConfigBuilder.Admin")
 
 // StatusNoMatch describes an HTTP response where no Mock was found.
 //
@@ -45,6 +51,7 @@ const Kind vlatte.Kind = "http"
 // Server is the base for the mock server.
 type Server struct {
 	*vlatte.Base[*Mock, *Server]
+	*journal.Verifier[*Mock, *Server]
 
 	config             *Config
 	server             Backend
@@ -69,14 +76,18 @@ type Server struct {
 	// intercepts.
 	handler http.Handler
 
+	// recoverer answers a panic serving a request: the outermost middleware, and a mock that answers on the
+	// connection it took over, which the middleware can't write to.
+	recoverer *recovery.Recover
+
 	data    map[string]any
 	logger  *zerolog.Logger
-	started atomic.Bool   // set by the first start: a server starts once
-	closed  atomic.Bool   // set by Close: a closed server doesn't start again
-	admin   *admin.Server // nil without Config.Admin
+	started atomic.Bool     // set by the first start: a server starts once
+	closed  atomic.Bool     // set by Close: a closed server doesn't start again
+	admin   adminapi.Server // nil without Config.Admin
 
-	// adminStore writes the changes of the admin API through to its persistent store; nil without AdminConfig.Store.
-	adminStore *admin.Store[*Mock]
+	// adminStore writes the changes of the admin API through to its persistent store; nil without Config.AdminStore.
+	adminStore *adminapi.Store[*Mock]
 
 	// events runs the on_complete events of the mocks, which their responses wait for, and Close cancels them.
 	events *vlatte.EventRunner
@@ -121,6 +132,10 @@ func New(config ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: error loading configuration sources\n%w", err)
 	}
 
+	if err := conf.checkName(); err != nil {
+		return nil, fmt.Errorf("server: %w", err)
+	}
+
 	if conf.DebugFn == nil {
 		conf.DebugFn = func(_ string, _ any) {}
 	}
@@ -133,9 +148,16 @@ func New(config ...Option) (*Server, error) {
 		conf.ErrorStatusCode = StatusNoMatch
 	}
 
-	if conf.TemplateEngine == nil {
-		// Without options, it can't fail.
-		conf.TemplateEngine = vlatte.MustNewGoTemplateEngine()
+	switch {
+	case conf.TemplateEngine == nil:
+		e, err := vlatte.NewGoTemplateEngine(vlatte.WithEnv(conf.TemplateEnv...))
+		if err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
+
+		conf.TemplateEngine = e
+	case len(conf.TemplateEnv) > 0:
+		return nil, fmt.Errorf("server: %w", errTemplateEnvWithEngine)
 	}
 
 	if err := checkProviderKeys(conf.TemplateDataProviders); err != nil {
@@ -152,11 +174,11 @@ func New(config ...Option) (*Server, error) {
 	parsers = append(parsers, conf.RequestBodyParsers...)
 	parsers = append(parsers, &plainTextParser{}, &formURLEncodedParser{}, &multipartFormParser{}, &noopParser{})
 
-	recoverer := recovery.New(func(err error) { app.logger.Error().Err(err).Msg(err.Error()) },
+	app.recoverer = recovery.New(func(err error) { app.logger.Error().Err(err).Msg(err.Error()) },
 		conf.ErrorStatusCode, http.Header{http.CanonicalHeaderKey(HeaderVlatteError): {vlatte.FailurePanic}})
 
 	middlewares := make([]func(handler http.Handler) http.Handler, 0)
-	middlewares = append(middlewares, recoverer.Recover)
+	middlewares = append(middlewares, app.recoverer.Recover)
 
 	if conf.CORS != nil {
 		middlewares = append(middlewares, corsMiddleware(conf.CORS))
@@ -190,15 +212,20 @@ func New(config ...Option) (*Server, error) {
 
 	var lifecycle mockHTTPLifecycle
 	if conf.Debug {
-		fd := os.Stdout.Fd()
-		colors := ansi(colorsEnabled(conf.Colors, isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)))
-		// On Windows consoles, colorable translates the escape codes.
-		lifecycle = newBuiltInDescriptiveMockHTTPLifecycle(app, colors, colorable.NewColorable(os.Stdout))
+		out, terminal := app.logOutput(), false
+		if f, ok := out.(*os.File); ok {
+			terminal = isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
+			// On Windows consoles, colorable translates the escape codes.
+			out = colorable.NewColorable(f)
+		}
+
+		lifecycle = newBuiltInDescriptiveMockHTTPLifecycle(app, ansi(colorsEnabled(conf.Colors, terminal)), out)
 	} else {
 		lifecycle = newBuiltInMockHTTPLifecycle(app)
 	}
 
 	events, lifecycle := withAdminEvents(conf, lifecycle)
+	lifecycle = heldLifecycle{withJournal(app, conf, lifecycle)}
 
 	globalEvents, err := prepareGlobalEvents(conf)
 	if err != nil {
@@ -212,8 +239,9 @@ func New(config ...Option) (*Server, error) {
 		handler = conf.HandlerDecorator(handler)
 	}
 
-	// Outermost: the decorator and the middlewares see the fragment in r.URL too.
-	handler = withFragment(handler)
+	// The decorator and the middlewares see the fragment in r.URL too. Outermost, the answer's writer sees the status
+	// the client gets, whatever they send.
+	handler = withAnswer(withFragment(handler))
 	app.handler = handler
 
 	factory := conf.BackendFactory
@@ -228,7 +256,21 @@ func New(config ...Option) (*Server, error) {
 	loaders = append(loaders, files)
 	loaders = append(loaders, conf.Loaders...)
 
+	j, err := openJournal(conf, app.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	// A server that fails to build closes its journal: a temporary one goes.
+	built := false
+	defer func() {
+		if !built {
+			j.Close()
+		}
+	}()
+
 	app.Base = vlatte.NewBase(app, repository)
+	app.Verifier = journal.NewVerifier[*Mock, *Server](j, app)
 	app.storage = repository
 	app.scenarioStore = mfeat.NewScenarioStore()
 	app.params = params
@@ -245,36 +287,47 @@ func New(config ...Option) (*Server, error) {
 	}
 	app.requestBodyParsers = parsers
 	app.events = eventRunner
-	app.webhooks = newWebhookTransport()
+	app.webhooks = httpx.NewWebhookTransport()
 
 	// The admin API changes mocks through a store of its own when they persist: the server's other mocks, of mock
-	// files and code, never reach the persistent store. The admin API's options have Mocks: it builds.
+	// files and code, never reach the persistent store.
+	if conf.AdminStore != nil && conf.Admin == nil {
+		return nil, errAdminStoreWithoutAdmin
+	}
+
 	if conf.Admin != nil {
 		adminMocks := repository
 
-		if conf.Admin.Store != nil {
-			durable, err := conf.Admin.Store(app)
+		if conf.AdminStore != nil {
+			durable, err := conf.AdminStore(app)
 			if err != nil {
 				return nil, fmt.Errorf("server: admin store: %w", err)
 			}
 
-			app.adminStore = admin.NewStore(repository, durable, app.logger)
+			app.adminStore = adminapi.NewStore(repository, durable, app.logger)
 			adminMocks = app.adminStore
 		}
 
-		app.admin = admin.MustNew(
-			admin.Addr(conf.Admin.Addr),
-			admin.Info(string(Kind), func() string { return app.URL() }),
-			admin.Logger(app.logger),
-			admin.Mocks(adminMocks, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
+		app.admin, err = conf.Admin.Serve(adminapi.Capabilities{
+			Kind:   string(Kind),
+			URL:    func() string { return app.URL() },
+			Logger: app.logger,
+			Mocks: adminapi.MocksOf(adminMocks, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
 				return buildAdminMock(app, content, format)
 			})),
-			admin.Files(adminFiles{app}),
-			admin.Recorder(adminRecorder{app}),
-			admin.Scenarios(app.scenarioStore),
-			admin.Events(events),
-			admin.Logs(logs),
-		)
+			Files:      adminFiles{app},
+			Recorder:   adminRecorder{app},
+			Scenarios:  app.scenarioStore,
+			Events:     events,
+			Logs:       logs,
+			Journal:    j,
+			Pattern:    app.adminRequestPattern,
+			Matchers:   app.matchers(),
+			MockSchema: _mockFileSchema,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
 	}
 
 	server, err := factory.NewBackend(BackendConfig{App: app, Handler: handler})
@@ -283,6 +336,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	app.server = server
+	built = true
 
 	return app, nil
 }
@@ -298,8 +352,8 @@ func MustNew(config ...Option) *Server {
 }
 
 // prepareGlobalEvents returns the global events of conf with their parameters as their listeners prepare them, without
-// changing conf's: see vlatte.EventPreparer. Like a mock's events, each must name a registered listener: an event
-// that names none would never run.
+// changing conf's: see vlatte.EventPreparer. Like a mock's events, each must name a registered listener, unless it
+// carries its own: an event that names none would never run.
 func prepareGlobalEvents(conf *Config) (*vlatte.Events, error) {
 	if conf.GlobalEvents == nil {
 		return conf.GlobalEvents, nil
@@ -307,6 +361,10 @@ func prepareGlobalEvents(conf *Config) (*vlatte.Events, error) {
 
 	events := &vlatte.Events{OnComplete: slices.Clone(conf.GlobalEvents.OnComplete)}
 	for i, def := range events.OnComplete {
+		if def.Listener != nil {
+			continue
+		}
+
 		if conf.Listeners == nil || !conf.Listeners.OnComplete.Has(def.Name) {
 			return nil, fmt.Errorf("server: global on_complete listener %s at index %d is not registered", def.Name, i)
 		}
@@ -326,7 +384,7 @@ func prepareGlobalEvents(conf *Config) (*vlatte.Events, error) {
 // It stops at the first recipe that fails and returns its error.
 func (app *Server) Prep(ctx context.Context, recipes ...Recipe) error {
 	for i, recipe := range recipes {
-		if err := recipe.Prep(ctx, &vlatte.RecipeInput[*Mock, *Server]{Flavor: app}); err != nil {
+		if err := recipe.Prep(ctx, &vlatte.RecipeInput[*Mock, *Server]{Server: app}); err != nil {
 			return fmt.Errorf("server: error applying recipe at index %d with type %T\n%w", i, recipe, err)
 		}
 	}
@@ -444,11 +502,12 @@ func (app *Server) MustReload() {
 	}
 }
 
-// Close closes the mock server. It closes the admin API first, which waits for the operations it serves. It cancels
-// the on_complete events still running, such as a webhook waiting for its delay or its target, so the requests
-// waiting for them end, and waits for those requests. It stops the recording, and waits until it wrote what it took,
-// and closes the forward proxy's open tunnels. It closes the idle connections of the transports it made, such as the
-// one of webhooks. A closed server doesn't start again.
+// Close closes the mock server. It closes the admin API first, which waits for the operations it serves. It cancels the
+// on_complete events still running, such as a webhook waiting for its delay or its target, so the requests waiting for
+// them end, and waits for those requests and for the events that run after the response. It stops the recording, and
+// waits until it wrote what it took, and closes the forward proxy's open tunnels. It closes the idle connections of the
+// transports it made, such as the one of webhooks. Last, it closes the journal, and removes a temporary one: verify the
+// requests before Close, as t.Cleanup(m.Close) leaves a test to. A closed server doesn't start again.
 func (app *Server) Close() {
 	app.closed.Store(true)
 
@@ -490,6 +549,11 @@ func (app *Server) Close() {
 	}
 
 	app.webhooks.CloseIdleConnections()
+
+	// Last: the requests the backend waited for are journaled. A temporary journal goes.
+	if err := app.Journal().Close(); err != nil {
+		app.logger.Warn().Err(err).Msg("server: Close: closing the journal")
+	}
 }
 
 // ProxyCA returns the certificate of the CA that signs the certificates of the hosts the forward proxy intercepts, for
@@ -533,6 +597,10 @@ func (app *Server) DescribeConfig() string {
 		buf.WriteString("\n")
 	}
 
+	buf.WriteString("Work Dir: ")
+	buf.WriteString(app.config.path(WorkDirVar))
+	buf.WriteString("\n")
+
 	buf.WriteString("Mock Search Patterns: ")
 	buf.WriteString(strings.Join(app.config.MockFileSearchPatterns, ", "))
 	buf.WriteString("\n")
@@ -562,7 +630,7 @@ func (app *Server) DescribeConfig() string {
 
 	if app.config.Record != nil {
 		buf.WriteString("Recording: ")
-		buf.WriteString(app.config.Record.dir(app.config.RootDir))
+		buf.WriteString(app.config.Record.dir(app.config))
 		buf.WriteString("\n")
 
 		if target := app.config.Record.Target; target != "" {
@@ -590,6 +658,12 @@ func (app *Server) DescribeConfig() string {
 // Internals
 // --
 
+// matchers returns the registry that builds the matcher lists of the server's mock files: Config.Matchers, or the
+// built-in matchers.
+func (app *Server) matchers() *matchbuild.Registry {
+	return cmp.Or(app.config.Matchers, _builtinMatchers)
+}
+
 // webhookTransport returns the transport webhooks send through when they have none of their own: Config.Transport,
 // which is the caller's, or else the one the server made, which Close closes.
 func (app *Server) webhookTransport() http.RoundTripper {
@@ -598,24 +672,6 @@ func (app *Server) webhookTransport() http.RoundTripper {
 	}
 
 	return app.webhooks
-}
-
-// newWebhookTransport returns the transport a server gives webhooks when its config has none. It is the server's:
-// Close closes its idle connections. It has the limits of http.DefaultTransport, built here rather than copied, as a
-// program may have replaced http.DefaultTransport.
-func newWebhookTransport() *http.Transport {
-	return &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
 }
 
 // start starts the server once with listen, the backend's Listen or ListenTLS. The backend listens first, so loaders
@@ -683,7 +739,16 @@ func (app *Server) load() error {
 	return nil
 }
 
-// getLog returns the logger of conf, or builds one that writes to the standard output, and to tee unless it is nil.
+// logOutput returns where the server writes its logs and its debug output: Config.LogOutput, or the standard output.
+func (app *Server) logOutput() io.Writer {
+	if app != nil && app.config != nil && app.config.LogOutput != nil {
+		return app.config.LogOutput
+	}
+
+	return os.Stdout
+}
+
+// getLog returns the logger of conf, or builds one that writes to its log output, and to tee unless it is nil.
 func (app *Server) getLog(conf *Config, tee io.Writer) *zerolog.Logger {
 	if conf.Logger != nil {
 		return conf.Logger
@@ -691,9 +756,9 @@ func (app *Server) getLog(conf *Config, tee io.Writer) *zerolog.Logger {
 
 	var output io.Writer
 	if conf.LogPretty {
-		output = zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+		output = zerolog.ConsoleWriter{Out: app.logOutput(), TimeFormat: time.RFC3339}
 	} else {
-		output = os.Stdout
+		output = app.logOutput()
 	}
 
 	if tee != nil {

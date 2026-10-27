@@ -1,0 +1,8 @@
+# A custom matcher the server registered, by name with its arguments, gets the whole request.
+id: custom
+request:
+  method: GET
+  path: /custom
+  custom: [[has-header, X-Admin]]
+response:
+  status: 200

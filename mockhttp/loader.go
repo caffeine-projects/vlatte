@@ -63,12 +63,7 @@ func (l *fileLoader) Load(app *Server) error {
 	}
 
 	for _, pattern := range app.config.MockFileSearchPatterns {
-		glob := pattern
-		if !filepath.IsAbs(glob) {
-			glob = filepath.Join(app.config.RootDir, glob)
-		}
-
-		matches, err := filepath.Glob(glob)
+		matches, err := filepath.Glob(app.config.path(pattern))
 		if err != nil {
 			return fmt.Errorf("loader: pattern %s: %w", pattern, err)
 		}

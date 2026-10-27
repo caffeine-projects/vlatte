@@ -1,30 +1,29 @@
 package handler
 
 import (
-	"net/http"
-
-	"github.com/caffeine-projects/vlatte"
+	"context"
 )
 
-// mockList is the answer of GET /mocks.
-type mockList struct {
-	Mocks []mockSummary `json:"mocks"`
+// MockList is the answer of [Operations.ListMocks]: GET /mocks.
+type MockList struct {
+	Mocks []MockSummary `json:"mocks"`
 }
 
-// ListMocks answers the mocks of store, enabled or not, in the order they match: GET /mocks.
-func ListMocks[M vlatte.Mock](store vlatte.Store[M]) http.Handler {
-	return negotiated(func(w http.ResponseWriter, r *http.Request) {
-		mocks, err := store.PickAll(r.Context())
-		if err != nil {
-			fail(w, r, err)
-			return
-		}
+// ListMocks returns the mocks of the server, enabled or not, in the order they match.
+func (o *Operations) ListMocks(ctx context.Context) (MockList, error) {
+	return o.mocks.list(ctx)
+}
 
-		list := mockList{Mocks: make([]mockSummary, 0, len(mocks))}
-		for _, mock := range mocks {
-			list.Mocks = append(list.Mocks, summarize(mock))
-		}
+func (m *storeMocks) list(ctx context.Context) (MockList, error) {
+	mocks, err := m.mocks.PickAll(ctx)
+	if err != nil {
+		return MockList{}, err
+	}
 
-		respond(w, r, http.StatusOK, list)
-	})
+	list := MockList{Mocks: make([]MockSummary, 0, len(mocks))}
+	for _, mock := range mocks {
+		list.Mocks = append(list.Mocks, summarize(mock))
+	}
+
+	return list, nil
 }

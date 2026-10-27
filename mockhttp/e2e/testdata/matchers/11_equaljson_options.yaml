@@ -1,0 +1,8 @@
+# eqj ignoring array order and extra elements.
+id: json
+request:
+  method: POST
+  path: /json
+  body: [eqj, {name: Rex, tags: [a, b]}, {ignore_array_order: true, ignore_extra_elements: true}]
+response:
+  status: 200

@@ -2,7 +2,6 @@ package mockhttp
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/rs/zerolog"
 
@@ -11,9 +10,9 @@ import (
 
 var _ vlatte.OnComplete = (*OnComplete)(nil)
 
-// OnComplete implements vlatte.OnComplete for HTTP mocks. Listeners get it once the mock replied, and the response
-// waits for them. It's read-only: the listeners of a request run at the same time. The request's body was read: read
-// it from Request, not from RawRequest.Body. Listeners use the context they get: it has the request's values, and the
+// OnComplete implements vlatte.OnComplete for HTTP mocks. Listeners, and the callbacks of [Builder.Callback], get it
+// once the mock replied, and the response waits for them, but for those set to run after it. It's read-only: the listeners of a request run at the same
+// time. The request's body was read: read it from Request, not from RawRequest.Body. Listeners use the context they get: it has the request's values, and the
 // client leaving doesn't end it, as it ends the request's.
 type OnComplete struct {
 	m         *Mock
@@ -24,7 +23,6 @@ type OnComplete struct {
 	dir       string
 	logger    *zerolog.Logger
 	transport http.RoundTripper
-	timeout   time.Duration
 }
 
 func (i *OnComplete) Kind() vlatte.Kind {
@@ -66,10 +64,4 @@ func (i *OnComplete) Logger() *zerolog.Logger {
 // such as webhooks send through it when they have none of their own, and their connections don't outlive the server.
 func (i *OnComplete) Transport() http.RoundTripper {
 	return i.transport
-}
-
-// WebhookTimeout is the server's Config.WebhookTimeout, so webhooks without a timeout of their own wait for their
-// answer as long as the server says. 0 leaves them to their default.
-func (i *OnComplete) WebhookTimeout() time.Duration {
-	return i.timeout
 }

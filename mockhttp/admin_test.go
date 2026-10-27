@@ -18,6 +18,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
+	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
@@ -25,7 +28,7 @@ import (
 func adminServer(t *testing.T, setup *ConfigBuilder) *Server {
 	t.Helper()
 
-	m := MustNew(setup.Silent().Admin(""))
+	m := MustNew(setup.Silent().Admin(admin.MustNew()))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -65,6 +68,7 @@ func streamEvents(t *testing.T, m *Server, n int, send func()) map[any]map[strin
 		byType[e["type"]] = e
 	}
 
+	require.NoError(t, lines.Err())
 	require.Len(t, byType, n, "events: %v", byType)
 
 	return byType
@@ -148,6 +152,68 @@ func TestAdmin_AMockReadBackPostsBack(t *testing.T) {
 	res, body = do(t, http.MethodGet, m.URL("/again"), nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	require.Equal(t, "hello from a file", string(body))
+}
+
+func TestAdmin_ABinaryBodyReadsBackAndPostsBack(t *testing.T) {
+	// #42: the admin GET of a mock whose body isn't UTF-8 failed with a 500. It reads as body_base64, and posted back,
+	// answers the same bytes.
+	m := adminServer(t, Setup())
+	m.MustMock(Getf("/bin").ID("bin").Reply(OK().Body([]byte{0xff, 0xfe, 0x00})))
+
+	res, desc := do(t, http.MethodGet, m.AdminURL()+"/mocks/bin", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, string(desc))
+	require.Contains(t, string(desc), `"body_base64": "//4A"`)
+
+	again := strings.NewReplacer(`"bin"`, `"again"`, `"/bin"`, `"/again"`).Replace(string(desc))
+	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil, []byte(again))
+	require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
+
+	_, body = do(t, http.MethodGet, m.URL("/again"), nil, nil)
+	require.Equal(t, []byte{0xff, 0xfe, 0x00}, body)
+}
+
+func TestAdmin_AMockThatCantBeDescribedSaysWhy(t *testing.T) {
+	// #42: an Echo mock read back as a document no mock file loads, and a Handler mock as the default reply. A mock
+	// file can hold neither, so reading one fails, and says why.
+	m := adminServer(t, Setup())
+	m.MustMock(Getf("/e").ID("echo").Reply(Echo()))
+	m.MustMock(Getf("/h").ID("handler").Reply(Handler(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusCreated) })))
+
+	for id, want := range map[string]string{
+		"echo":    "an Echo reply can't be described as a mock file",
+		"handler": "a Func or Handler reply can't be described as a mock file",
+	} {
+		res, body := do(t, http.MethodGet, m.AdminURL()+"/mocks/"+id, nil, nil)
+		require.Equal(t, http.StatusInternalServerError, res.StatusCode, string(body))
+		require.Contains(t, string(body), `"code": "describe_failed"`, id)
+		require.Contains(t, string(body), want, id)
+	}
+}
+
+func TestAdmin_ListsMocksThatCantBeDescribed(t *testing.T) {
+	// A server serves mocks a mock file can hold next to ones it can't, such as a Handler's (#42). The list is a summary
+	// of each, never its description: one that can't be described leaves the list whole, and is listed as it serves.
+	m := adminServer(t, Setup())
+	m.MustMock(Getf("/ok").ID("ok").Reply(OK()))
+	m.MustMock(Getf("/e").ID("echo").Reply(Echo()))
+	m.MustMock(Getf("/h").ID("handler").Reply(Handler(func(http.ResponseWriter, *http.Request) {})))
+
+	res, body := do(t, http.MethodGet, m.AdminURL()+"/mocks", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+
+	var list struct {
+		Mocks []struct {
+			ID string `json:"id"`
+		} `json:"mocks"`
+	}
+	require.NoError(t, json.Unmarshal(body, &list))
+
+	ids := make([]string, 0, len(list.Mocks))
+	for _, mock := range list.Mocks {
+		ids = append(ids, mock.ID)
+	}
+
+	require.ElementsMatch(t, []string{"ok", "echo", "handler"}, ids)
 }
 
 func TestAdmin_ProxyMocksReadBackAsTheyWere(t *testing.T) {
@@ -366,14 +432,14 @@ func TestAdmin_SavedMocksOutliveTheServer(t *testing.T) {
 
 	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
-	require.JSONEq(t, `{"files": ["testdata/_mocks/hello.mock.yaml", "testdata/_mocks/inline.mock.yaml"]}`, string(body))
+	require.JSONEq(t, `{"files": ["testdata/vlatte/_mocks/hello.mock.yaml", "testdata/vlatte/_mocks/inline.mock.yaml"]}`, string(body))
 
-	saved, err := os.ReadFile("testdata/_mocks/hello.mock.yaml")
+	saved, err := os.ReadFile("testdata/vlatte/_mocks/hello.mock.yaml")
 	require.NoError(t, err)
-	require.Contains(t, string(saved), "body_file: ../../bodies/hello.txt")
+	require.Contains(t, string(saved), "body_file: ../../../bodies/hello.txt")
 
 	_, body = do(t, http.MethodGet, m.AdminURL()+"/mocks", nil, nil)
-	require.Contains(t, string(body), `"origin": "testdata/_mocks/hello.mock.yaml"`, "served from its file")
+	require.Contains(t, string(body), `"origin": "testdata/vlatte/_mocks/hello.mock.yaml"`, "served from its file")
 	require.NotContains(t, string(body), `"origin": "admin"`)
 
 	res, _ = do(t, http.MethodPost, m.AdminURL()+"/mocks/reload", nil, nil)
@@ -417,7 +483,7 @@ func TestAdmin_SaveMovesOnlyTheBodyFilesTheServerOpens(t *testing.T) {
 	res, body = do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
 
-	data, err := os.ReadFile("testdata/_mocks/hello.mock.yaml")
+	data, err := os.ReadFile("testdata/vlatte/_mocks/hello.mock.yaml")
 	require.NoError(t, err)
 
 	doc, err := config.Parse(data, "yaml")
@@ -425,7 +491,7 @@ func TestAdmin_SaveMovesOnlyTheBodyFilesTheServerOpens(t *testing.T) {
 
 	saved := object(t, doc)
 	response := object(t, saved["response"])
-	require.Equal(t, "../../bodies/hello.txt", response["body_file"])
+	require.Equal(t, "../../../bodies/hello.txt", response["body_file"])
 	require.Equal(t, "not-a-file", object(t, object(t, response["template"])["data"])["body_file"])
 
 	events, _ := saved["on_complete"].([]any)
@@ -473,26 +539,59 @@ func TestRelocate_MovesTheBodyFilesOfTheMockFileFormatOnly(t *testing.T) {
 }
 
 func TestAdmin_SaveWritesNothingWhenAMockCantBeSaved(t *testing.T) {
-	// A mock whose description doesn't load back as the same mock, such as one with a trailer (#42), would write a
-	// broken file, which every later start would fail on: nothing is written, the others neither.
-	root := t.TempDir()
-	m := adminServer(t, Setup().RootDir(root))
-
-	for _, doc := range []string{
-		`{"id": "fine", "request": {"method": "GET", "path": "/fine"}, "response": {"status": 200}}`,
-		`{"id": "trailer", "request": {"method": "GET", "path": "/t"}, "response": {"status": 200, "trailer": {"X-T": "v"}}}`,
-	} {
-		res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil, []byte(doc))
-		require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
+	// A mock that can't be described as a mock file, or whose description doesn't load back, would write a broken
+	// file, which every later start would fail on, or one that serves another mock (#42): nothing is written, the
+	// others neither.
+	tests := []struct {
+		name string
+		give *Builder
+		want string
+	}{
+		{
+			name: "can't be described",
+			give: Getf("/x").Reply(Handler(func(http.ResponseWriter, *http.Request) {})),
+			want: "a Func or Handler reply can't be described as a mock file",
+		},
+		{
+			name: "doesn't load back",
+			give: Postf("/x").Body(unregisteredMatcher{}).Reply(OK()),
+			want: `unknown matcher \"unregistered\"`,
+		},
 	}
 
-	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, []byte(`{"dir": "saved"}`))
-	require.Equal(t, http.StatusInternalServerError, res.StatusCode, string(body))
-	require.Contains(t, string(body), `"code": "describe_failed"`)
-	require.Contains(t, string(body), `mock \"trailer\"`)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			m := adminServer(t, Setup().RootDir(root))
 
-	_, err := os.Stat(filepath.Join(root, "saved"))
-	require.ErrorIs(t, err, os.ErrNotExist, "nothing was written")
+			res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil,
+				[]byte(`{"id": "fine", "request": {"method": "GET", "path": "/fine"}, "response": {"status": 200}}`))
+			require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
+
+			m.MustMock(tt.give.ID("broken").SetSource(adminapi.Origin))
+
+			res, body = do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, []byte(`{"dir": "saved"}`))
+			require.Equal(t, http.StatusInternalServerError, res.StatusCode, string(body))
+			require.Contains(t, string(body), `"code": "describe_failed"`)
+			require.Contains(t, string(body), `mock \"broken\"`)
+			require.Contains(t, string(body), tt.want)
+
+			_, err := os.Stat(filepath.Join(root, "saved"))
+			require.ErrorIs(t, err, os.ErrNotExist, "nothing was written")
+		})
+	}
+}
+
+// unregisteredMatcher matches every request and describes itself as a matcher no registry has, as a matcher of a
+// user's may: its description doesn't load back.
+type unregisteredMatcher struct{}
+
+func (unregisteredMatcher) Name() string { return "unregistered" }
+
+func (unregisteredMatcher) Match(vlatte.MatcherArg) (bool, error) { return true, nil }
+
+func (unregisteredMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("unregistered", 1)
 }
 
 func TestAdmin_SaveThatFailsToLoadPutsTheFilesBack(t *testing.T) {
@@ -665,7 +764,7 @@ func TestAdmin_ResetsTheServer(t *testing.T) {
 
 func TestAdmin_StreamsWhatTheServerServes(t *testing.T) {
 	// A client follows the requests the mocks answer, and those no mock matched, as they come: to see why a test's
-	// request missed, without a journal of requests.
+	// request missed, without polling the journal.
 	m := adminServer(t, Setup())
 	m.MustMock(Getf("/hello").ID("hello").Reply(OK()))
 
@@ -681,7 +780,92 @@ func TestAdmin_StreamsWhatTheServerServes(t *testing.T) {
 
 	unmatched := byType["unmatched"]
 	require.Equal(t, "POST", unmatched["method"])
+	require.Equal(t, float64(StatusNoMatch), unmatched["status"])
 	require.Contains(t, unmatched["target"], "/nope")
+}
+
+func TestAdmin_StreamsTheStatusAHandlerSent(t *testing.T) {
+	// A reply that writes its own response, as Handler does, returns none: the event has the status the client got.
+	m := adminServer(t, Setup())
+	m.MustMock(Getf("/made").ID("made").Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})))
+
+	byType := streamEvents(t, m, 1, func() {
+		do(t, http.MethodGet, m.URL("/made"), nil, nil)
+	})
+
+	require.Equal(t, float64(http.StatusCreated), byType["matched"]["status"])
+}
+
+func TestAdmin_StreamsWarnings(t *testing.T) {
+	// A request can go wrong without an error of the server, as one whose client left during its mock's delay: a
+	// client follows the warning, with no status, as the client got none.
+	arrived := make(chan struct{}, 1)
+	m := adminServer(t, Setup().Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			arrived <- struct{}{}
+			next.ServeHTTP(w, r)
+		})
+	}))
+	m.MustMock(Getf("/slow").ID("slow").Delay(5 * time.Second).Reply(OK()))
+
+	byType := streamEvents(t, m, 1, func() {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		// The client leaves once the server has its request.
+		go func() {
+			select {
+			case <-arrived:
+			case <-ctx.Done():
+			}
+
+			cancel()
+		}()
+
+		r, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL("/slow"), nil)
+		require.NoError(t, err)
+
+		_, err = http.DefaultClient.Do(r)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	warning := byType["warning"]
+	require.Equal(t, "slow", warning["mock_id"])
+	require.Contains(t, warning["message"], "the client left during the delay")
+	require.NotContains(t, warning, "status")
+}
+
+func TestAdmin_StreamsTheStatusAMiddlewareSent(t *testing.T) {
+	// A middleware may answer in place of the mock: the event has the status the client got.
+	m := adminServer(t, Setup().Use(middleware(func(w http.ResponseWriter, r *http.Request, next http.Handler) {
+		next.ServeHTTP(&rewriting{ResponseWriter: w, status: http.StatusCreated}, r)
+	})))
+	m.MustMock(Getf("/made").ID("made").Reply(OK()))
+
+	byType := streamEvents(t, m, 1, func() {
+		do(t, http.MethodGet, m.URL("/made"), nil, nil)
+	})
+
+	require.Equal(t, float64(http.StatusCreated), byType["matched"]["status"])
+}
+
+func TestAdmin_StreamsTheStatusOfAnAnswerAMiddlewareDropped(t *testing.T) {
+	// A middleware that answers nothing of what the mock wrote leaves the client net/http's 200: the events of a
+	// failure and of a request no mock matched have it too.
+	m := adminServer(t, Setup().Use(middleware(func(_ http.ResponseWriter, r *http.Request, next http.Handler) {
+		next.ServeHTTP(httptest.NewRecorder(), r)
+	})))
+	m.MustMock(Getf("/fails").ID("fails").Reply(OK().BodyFile("missing.txt")))
+
+	byType := streamEvents(t, m, 2, func() {
+		do(t, http.MethodGet, m.URL("/fails"), nil, nil)
+		do(t, http.MethodGet, m.URL("/nope"), nil, nil)
+	})
+
+	require.Equal(t, float64(http.StatusOK), byType["error"]["status"])
+	require.Equal(t, float64(http.StatusOK), byType["unmatched"]["status"])
 }
 
 func TestAdmin_StreamsWhatTheProxyServes(t *testing.T) {
@@ -717,7 +901,7 @@ func TestAdmin_StreamsWhatTheProxyServes(t *testing.T) {
 
 func TestAdmin_StreamsTheLog(t *testing.T) {
 	// The log lines the server writes reach the admin API's clients too, such as for a server in a container.
-	m := MustNew(Setup().Admin("").LogLevel(vlatte.LogLevelInfo))
+	m := MustNew(Setup().Admin(admin.MustNew()).LogLevel(vlatte.LogLevelInfo))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -736,6 +920,7 @@ func TestAdmin_StreamsTheLog(t *testing.T) {
 			var entry map[string]any
 			require.NoError(t, json.Unmarshal([]byte(line), &entry), line)
 			require.Equal(t, "info", entry["level"])
+			require.NoError(t, lines.Err())
 
 			return
 		}
@@ -747,7 +932,7 @@ func TestAdmin_StreamsTheLog(t *testing.T) {
 func TestAdmin_NoLogStreamForALoggerItWasGiven(t *testing.T) {
 	// A logger the server was given writes where it was told to: the admin API doesn't take its lines.
 	logger := zerolog.Nop()
-	m := MustNew(Setup().Admin("").Logger(&logger))
+	m := MustNew(Setup().Admin(admin.MustNew()).Logger(&logger))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -791,7 +976,7 @@ func TestAdmin_AStartThatFailsLeavesNothingListening(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		setup func(t *testing.T, admin string) *ConfigBuilder
+		setup func(t *testing.T, adminAddr string) *ConfigBuilder
 	}{
 		{
 			name: "an admin address taken",
@@ -800,38 +985,38 @@ func TestAdmin_AStartThatFailsLeavesNothingListening(t *testing.T) {
 				require.NoError(t, err)
 				t.Cleanup(func() { _ = taken.Close() })
 
-				return Setup().Admin(taken.Addr().String())
+				return Setup().Admin(admin.MustNew(admin.Addr(taken.Addr().String())))
 			},
 		},
 		{
 			name: "a mock file with problems",
-			setup: func(t *testing.T, admin string) *ConfigBuilder {
+			setup: func(t *testing.T, adminAddr string) *ConfigBuilder {
 				root := t.TempDir()
 				require.NoError(t, os.Mkdir(filepath.Join(root, "mocks"), 0o700))
 				require.NoError(t, os.WriteFile(filepath.Join(root, "mocks", "bad.yaml"), []byte("request: {methd: GET}\n"), 0o600))
 
-				return Setup().Admin(admin).RootDir(root).MockFilePatterns("mocks/*.yaml")
+				return Setup().Admin(admin.MustNew(admin.Addr(adminAddr))).RootDir(root).MockFilePatterns("mocks/*.yaml")
 			},
 		},
 		{
 			name: "a persistent store it can't read",
-			setup: func(t *testing.T, admin string) *ConfigBuilder {
+			setup: func(t *testing.T, adminAddr string) *ConfigBuilder {
 				notADir := filepath.Join(t.TempDir(), "file")
 				require.NoError(t, os.WriteFile(notADir, nil, 0o600))
 
-				return Setup().Admin(admin).AdminStore(FileStore(notADir))
+				return Setup().Admin(admin.MustNew(admin.Addr(adminAddr))).AdminStore(FileStore(notADir))
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			admin := free(t)
+			adminAddr := free(t)
 
 			l, err := net.Listen("tcp", "127.0.0.1:0")
 			require.NoError(t, err)
 
-			m := MustNew(tt.setup(t, admin).Silent().Listener(l))
+			m := MustNew(tt.setup(t, adminAddr).Silent().Listener(l))
 			t.Cleanup(m.Close)
 
 			require.Error(t, m.Start())
@@ -844,7 +1029,7 @@ func TestAdmin_AStartThatFailsLeavesNothingListening(t *testing.T) {
 			_, err = l.Accept()
 			require.ErrorIs(t, err, net.ErrClosed)
 
-			for _, addr := range []string{l.Addr().String(), admin} {
+			for _, addr := range []string{l.Addr().String(), adminAddr} {
 				_, err := net.DialTimeout("tcp", addr, time.Second)
 				require.Error(t, err, "nothing listens on %s", addr)
 			}
@@ -852,4 +1037,17 @@ func TestAdmin_AStartThatFailsLeavesNothingListening(t *testing.T) {
 			require.ErrorIs(t, m.Start(), http.ErrServerClosed)
 		})
 	}
+}
+
+func TestAdmin_ServesTheMockFileSchema(t *testing.T) {
+	// A client that writes mock files, such as an editor or an agent, reads their schema from the server it writes them
+	// for: the schema the repository ships for editors.
+	m := adminServer(t, Setup())
+
+	res, body := do(t, http.MethodGet, m.AdminURL()+"/schema", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	want, err := os.ReadFile("schema/http.schema.json")
+	require.NoError(t, err)
+	require.Equal(t, string(want), string(body))
 }

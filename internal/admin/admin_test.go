@@ -2,18 +2,23 @@ package admin
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
@@ -58,10 +63,12 @@ func (f *blockingFiles) SaveMocks(context.Context, string, string) ([]string, er
 	return nil, nil
 }
 
-func newServer(t *testing.T, options ...Option) *Server {
+func newServer(t *testing.T, opts Options, caps adminapi.Capabilities) *Server {
 	t.Helper()
 
-	s, err := New(append([]Option{Mocks[*stubMock](vlatte.NewStore[*stubMock](), nil)}, options...)...)
+	caps.Mocks = adminapi.MocksOf[*stubMock](vlatte.NewStore[*stubMock](), nil)
+
+	s, err := New(opts, caps)
 	require.NoError(t, err)
 
 	return s
@@ -85,7 +92,8 @@ func TestServer_RoutesAreTheDocumentedOnes(t *testing.T) {
 
 	routes := make([]string, 0, len(_routes))
 	for _, route := range _routes {
-		routes = append(routes, route.pattern)
+		// GET /{$} is the root alone, which the document names /.
+		routes = append(routes, strings.TrimSuffix(route.pattern, "{$}"))
 	}
 
 	require.ElementsMatch(t, routes, documented)
@@ -98,7 +106,7 @@ func TestServer_ListensOnItsOwnAddress(t *testing.T) {
 	addr := free.Addr().String()
 	require.NoError(t, free.Close())
 
-	s := newServer(t, Addr(addr))
+	s := newServer(t, Options{Addr: addr}, adminapi.Capabilities{})
 	require.Empty(t, s.URL(), "nothing listens before Start")
 
 	require.NoError(t, s.Start())
@@ -119,7 +127,7 @@ func TestServer_StartsOnce(t *testing.T) {
 	// As the mock servers do: a server starts once, a closed one doesn't start again, even one that never started,
 	// and a start that fails to listen closes it.
 	t.Run("twice", func(t *testing.T) {
-		s := newServer(t)
+		s := newServer(t, Options{}, adminapi.Capabilities{})
 		require.NoError(t, s.Start())
 		t.Cleanup(func() { _ = s.Close() })
 
@@ -127,7 +135,7 @@ func TestServer_StartsOnce(t *testing.T) {
 	})
 
 	t.Run("closed before it started", func(t *testing.T) {
-		s := newServer(t)
+		s := newServer(t, Options{}, adminapi.Capabilities{})
 		require.NoError(t, s.Close())
 
 		require.ErrorIs(t, s.Start(), http.ErrServerClosed)
@@ -139,7 +147,7 @@ func TestServer_StartsOnce(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = taken.Close() })
 
-		s := newServer(t, Addr(taken.Addr().String()))
+		s := newServer(t, Options{Addr: taken.Addr().String()}, adminapi.Capabilities{})
 
 		require.ErrorContains(t, s.Start(), "admin: ")
 		require.ErrorIs(t, s.Start(), http.ErrServerClosed)
@@ -150,7 +158,7 @@ func TestServer_CloseWaitsForTheOperationsItServes(t *testing.T) {
 	// The mock server closes its mocks once the admin API closed: an operation still running, such as a reload,
 	// would store mocks after that. Close returns once no operation runs.
 	files := &blockingFiles{entered: make(chan struct{}), release: make(chan struct{})}
-	s := newServer(t, Files(files))
+	s := newServer(t, Options{}, adminapi.Capabilities{Files: files})
 	require.NoError(t, s.Start())
 
 	reloaded := make(chan int, 1)
@@ -185,10 +193,10 @@ func TestServer_CloseWaitsForTheOperationsItServes(t *testing.T) {
 }
 
 func TestNew_NeedsTheMocks(t *testing.T) {
-	_, err := New()
-	require.EqualError(t, err, "admin: no mock store: pass the Mocks option")
+	_, err := New(Options{}, adminapi.Capabilities{})
+	require.EqualError(t, err, "admin: no mocks: the capabilities need Mocks")
 
-	require.PanicsWithError(t, "admin: no mock store: pass the Mocks option", func() { MustNew() })
+	require.PanicsWithError(t, "admin: no mocks: the capabilities need Mocks", func() { MustNew(Options{}, adminapi.Capabilities{}) })
 }
 
 func TestServer_ListensOnAPort(t *testing.T) {
@@ -199,7 +207,7 @@ func TestServer_ListensOnAPort(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, free.Close())
 
-	s := newServer(t, Addr(port))
+	s := newServer(t, Options{Addr: port}, adminapi.Capabilities{})
 	require.NoError(t, s.Start())
 	t.Cleanup(func() { _ = s.Close() })
 
@@ -212,7 +220,7 @@ func TestServer_ListensOnAPort(t *testing.T) {
 func TestServer_StartsNothingOnceClosing(t *testing.T) {
 	// A request that comes once Close runs, such as on a connection kept alive, starts no operation, so none runs once
 	// Close returned.
-	s := newServer(t)
+	s := newServer(t, Options{}, adminapi.Capabilities{})
 	require.NoError(t, s.Close())
 
 	rec := httptest.NewRecorder()
@@ -224,7 +232,7 @@ func TestServer_StartsNothingOnceClosing(t *testing.T) {
 
 func TestServer_RoutesTheProtocolLacksAnswer501(t *testing.T) {
 	// Every route answers, whatever the server's protocol can do: the API is the same for every mock server.
-	s := newServer(t)
+	s := newServer(t, Options{}, adminapi.Capabilities{})
 	require.NoError(t, s.Start())
 	t.Cleanup(func() { _ = s.Close() })
 
@@ -250,4 +258,177 @@ func TestServer_RoutesTheProtocolLacksAnswer501(t *testing.T) {
 	}
 
 	require.NotZero(t, checked)
+}
+
+func TestServer_MiddlewaresWrapEveryRequestInOrder(t *testing.T) {
+	// A middleware sees each request before the admin API does, even one the cross-origin check denies, so a check
+	// such as authentication leaves no request out. The first one given is the outermost.
+	trace := func(name string) func(http.Handler) http.Handler {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Add("X-Trace", name)
+				next.ServeHTTP(w, r)
+			})
+		}
+	}
+
+	s := newServer(t, Options{Middlewares: []func(http.Handler) http.Handler{trace("first"), trace("second")}}, adminapi.Capabilities{})
+	require.NoError(t, s.Start())
+	t.Cleanup(func() { _ = s.Close() })
+
+	res, err := http.Get(s.URL() + "/health")
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, []string{"first", "second"}, res.Header.Values("X-Trace"))
+
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodDelete, s.URL()+"/mocks", nil)
+	require.NoError(t, err)
+	r.Header.Set("Sec-Fetch-Site", "cross-site")
+
+	res, err = http.DefaultClient.Do(r)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusForbidden, res.StatusCode)
+	require.Equal(t, []string{"first", "second"}, res.Header.Values("X-Trace"))
+}
+
+func TestServer_CloseEndsTheStreams(t *testing.T) {
+	// A stream never ends on its own: closing the admin API ends it, so nothing of the admin API outlives Close.
+	events := adminapi.NewEvents()
+	s := newServer(t, Options{}, adminapi.Capabilities{Events: events, Logs: adminapi.NewLogs()})
+	require.NoError(t, s.Start())
+
+	for _, path := range []string{"/events", "/logs"} {
+		// Not t.Context: it ends before the cleanups that read what is left of the streams.
+		r, err := http.NewRequestWithContext(context.Background(), http.MethodGet, s.URL()+path, nil)
+		require.NoError(t, err)
+
+		res, err := http.DefaultClient.Do(r)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, res.StatusCode, path)
+
+		ended := make(chan error, 1)
+		go func() {
+			_, err := io.ReadAll(res.Body)
+			_ = res.Body.Close()
+			ended <- err
+		}()
+
+		t.Cleanup(func() { require.NoError(t, <-ended, "the stream of %s ends", path) })
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- s.Close() }()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close waited on the streams")
+	}
+}
+
+func TestServer_StreamsItLacksAreNotSupported(t *testing.T) {
+	// A server that logs through a logger it was given streams no log lines; one without events streams none.
+	s := newServer(t, Options{}, adminapi.Capabilities{})
+	require.NoError(t, s.Start())
+	t.Cleanup(func() { _ = s.Close() })
+
+	for path, detail := range map[string]string{
+		"/events": "this mock server can't stream its events",
+		"/logs":   "this mock server can't stream its logs",
+	} {
+		res, err := http.Get(s.URL() + path)
+		require.NoError(t, err)
+
+		body, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		require.Equal(t, http.StatusNotImplemented, res.StatusCode, path)
+		require.Contains(t, string(body), `"detail": "`+detail+`"`, path)
+	}
+}
+
+// connectMCP serves s over stdio and connects a client to it, which the test closes.
+func connectMCP(t *testing.T, s *Server) *mcp.ClientSession {
+	t.Helper()
+
+	serverIn, clientOut := io.Pipe()
+	clientIn, serverOut := io.Pipe()
+
+	served := make(chan error, 1)
+	go func() {
+		served <- s.ServeMCP(context.Background(), serverIn, serverOut)
+		_ = serverOut.Close()
+	}()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := client.Connect(t.Context(), &mcp.IOTransport{Reader: clientIn, Writer: clientOut}, nil)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		_ = cs.Close()
+		<-served
+	})
+
+	return cs
+}
+
+func TestServer_CloseWaitsForTheMCPCallsItServes(t *testing.T) {
+	// A program that serves MCP over stdio starts no HTTP server, but its calls run operations all the same: Close
+	// waits for them, as it does for the requests it serves.
+	synctest.Test(t, func(t *testing.T) {
+		files := &blockingFiles{entered: make(chan struct{}), release: make(chan struct{})}
+		s := newServer(t, Options{MCP: true}, adminapi.Capabilities{Files: files})
+		cs := connectMCP(t, s)
+
+		release := sync.OnceFunc(func() { close(files.release) })
+		t.Cleanup(release) // a failed test ends the reload, so the client closes
+
+		reloaded := make(chan error, 1)
+		go func() {
+			_, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "reload_mocks"})
+			reloaded <- err
+		}()
+
+		<-files.entered
+
+		closed := make(chan struct{})
+		go func() {
+			_ = s.Close()
+			close(closed)
+		}()
+
+		// Every goroutine of the test is blocked: Close too, as long as the reload runs.
+		synctest.Wait()
+		select {
+		case <-closed:
+			t.Fatal("Close returned while a reload ran")
+		default:
+		}
+
+		release()
+		<-closed
+		require.NoError(t, <-reloaded, "the reload ended")
+	})
+}
+
+func TestServer_ServesMCPOnlyWhenAsked(t *testing.T) {
+	// MCP is a door to every operation: a server opens it only when its options say so.
+	s := newServer(t, Options{}, adminapi.Capabilities{})
+
+	err := s.ServeMCP(t.Context(), strings.NewReader(""), io.Discard)
+	require.EqualError(t, err, "admin: MCP is off: set Options.MCP")
+}
+
+func TestServer_StartsNoMCPCallOnceClosing(t *testing.T) {
+	// A call that comes once Close runs starts no operation, as a request does not.
+	s := newServer(t, Options{MCP: true}, adminapi.Capabilities{})
+	cs := connectMCP(t, s)
+	require.NoError(t, s.Close())
+
+	_, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "remove_all_mocks"})
+	require.ErrorContains(t, err, "admin: the admin API is closing")
 }

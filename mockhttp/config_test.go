@@ -3,8 +3,12 @@ package mockhttp
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"io"
 	"net"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -16,7 +20,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
+	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
 type testBodyParser struct{}
@@ -237,6 +244,13 @@ func TestConfigBuilder_TLSMutualNeedsCACertificates(t *testing.T) {
 	require.ErrorContains(t, err, _testKeyFile+" has no PEM certificates")
 }
 
+func TestConfigBuilder_TLSCertKeyPairItCantLoadFailsNew(t *testing.T) {
+	// A key given as the certificate would fail at the first handshake, far from the setting that named it.
+	_, err := New(Setup().TLSCertKeyPair(_testKeyFile, _testKeyFile))
+
+	require.ErrorContains(t, err, "config: failed to build TLS config: tls: failed to find certificate PEM data")
+}
+
 func TestLogLevelString(t *testing.T) {
 	require.Equal(t, vlatte.LogBasic.String(), "basic")
 	require.Equal(t, vlatte.LogHeader.String(), "header")
@@ -272,6 +286,8 @@ func TestConfig_ApplyCopiesEveryField(t *testing.T) {
 		reflect.TypeFor[vlatte.TemplateEngine](): vlatte.MustNewGoTemplateEngine(),
 		reflect.TypeFor[http.RoundTripper]():     &http.Transport{},
 		reflect.TypeFor[vlatte.KV]():             vlatte.NewMemoryKV(),
+		reflect.TypeFor[AdminAPI]():              admin.MustNew(),
+		reflect.TypeFor[io.Writer]():             io.Discard,
 	}
 
 	src := &Config{}
@@ -319,6 +335,105 @@ func TestConfig_ApplyCopiesEveryField(t *testing.T) {
 	}
 }
 
+func TestNew_ALaterSetupChangesOnlyWhatItSets(t *testing.T) {
+	// Options compose: a second Setup() that only silences the server must keep the name and the listener of the
+	// first, or the mocks that name the listener fail to build.
+	l := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
+
+	m := MustNew(
+		Setup().Name("api").OnCompleteListener("hook", l),
+		Setup().Silent().ConfigSources(),
+	)
+
+	require.Equal(t, "api", m.Name())
+	require.Equal(t, vlatte.LogLevelDisabled, m.Config().LogLevel)
+
+	_, err := m.Mock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "hook"}).Reply(NoContent()))
+	require.NoError(t, err)
+}
+
+func TestNew_ASetupAfterAConfigKeepsWhatTheConfigSet(t *testing.T) {
+	// A Setup() sets no default of its own, such as UseHTTP2: one applied after a Config keeps what the Config set.
+	m := MustNew(&Config{Name: "api", UseHTTP2: false}, Setup().Silent().ConfigSources())
+
+	require.Equal(t, "api", m.Name())
+	require.False(t, m.Config().UseHTTP2)
+}
+
+func TestConfigBuilder_RedactHeaderAfterAConfigWithoutAny(t *testing.T) {
+	// A Config built by hand has no map of headers to redact: a Setup() after it must still redact.
+	m := MustNew(&Config{}, Setup().RedactHeader("Authorization"))
+
+	require.Equal(t, map[string]struct{}{"authorization": {}}, m.Config().HeaderNamesToRedact)
+}
+
+func TestOnCompleteListener_AfterAConfigWithoutARegistry(t *testing.T) {
+	// A Config built by hand has no registry: the listener of a Setup() after it must still reach the mocks.
+	l := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
+
+	m := MustNew(&Config{}, Setup().OnCompleteListener("hook", l))
+
+	_, err := m.Mock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "hook"}).Reply(NoContent()))
+	require.NoError(t, err)
+}
+
+type failingProxyOption struct{}
+
+func (failingProxyOption) Apply(*ProxyConfig) error { return errors.New("no") }
+
+func TestConfigBuilder_AFailingSectionOptionFailsNew(t *testing.T) {
+	// A server must not start with a proxy or a recording other than the one its options asked for.
+	tests := map[string]*ConfigBuilder{
+		"proxy":  Setup().Proxy(failingProxyOption{}),
+		"record": Setup().Record(failingRecordOption{}),
+	}
+
+	for name, setup := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := New(setup)
+			require.EqualError(t, err, "server: error applying configuration at index 0 with type *mockhttp.ConfigBuilder\nno")
+		})
+	}
+}
+
+func TestConfigBuilder_TLSCertKeyPairWithoutFilesKeepsTheDefaultCertificate(t *testing.T) {
+	// Without files, Server.StartTLS serves its default certificate: New must not fail loading files nobody named.
+	m := MustNew(Setup().TLSCertKeyPair("", ""))
+
+	require.Nil(t, m.Config().TLSCertificates)
+}
+
+func TestConfigBuilder_TLSCertificatesAndClientCAsReachTheServer(t *testing.T) {
+	// Server.StartTLS serves these certificates and requires client certificates signed by these CAs.
+	cert, err := tls.LoadX509KeyPair(_testCertFile, _testKeyFile)
+	require.NoError(t, err)
+
+	certs := []tls.Certificate{cert}
+	pool := x509.NewCertPool()
+
+	m := MustNew(Setup().TLSCertificates(certs).TLSClientCAs(pool))
+
+	require.Equal(t, certs, m.Config().TLSCertificates)
+	require.Same(t, pool, m.Config().TLSClientCAs)
+}
+
+func TestConfigBuilder_DebugFnSeesEveryRequest(t *testing.T) {
+	reqs := make(chan *http.Request, 1)
+	m := MustNew(Setup().Silent().DebugFn(func(key string, v any) {
+		if r, ok := v.(*http.Request); ok && key == "req" {
+			reqs <- r
+		}
+	}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	res, err := http.Get(m.URL("/debugged"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	require.Equal(t, "/debugged", (<-reqs).URL.Path)
+}
+
 func TestGlobalEventsAreApplied(t *testing.T) {
 	var fired atomic.Int32
 	setup := Setup().OnCompleteListener("count", vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
@@ -353,6 +468,35 @@ func TestGlobalEventsMustNameARegisteredListener(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := New(setup.Silent().GlobalEvents(global))
 			require.EqualError(t, err, "server: global on_complete listener nobody at index 0 is not registered")
+		})
+	}
+}
+
+func TestGlobalEventsCanCarryTheirListener(t *testing.T) {
+	// A global event set in Go can carry its listener, as a callback does: it needs none registered, nor a listener
+	// store, and runs for every matched request.
+	for name, setup := range map[string]*ConfigBuilder{
+		"listeners":         Setup(),
+		"no listener store": Setup().EventListeners(nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var fired atomic.Int32
+			counts := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
+				fired.Add(1)
+				return nil
+			})
+
+			m := MustNew(setup.Silent().GlobalEvents(&vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "counts", Listener: counts}}}))
+			m.MustStart()
+			t.Cleanup(m.Close)
+			m.MustMock(Getf("/a").Reply(OK()), Getf("/b").Callback(counts).Reply(OK()))
+
+			for _, path := range []string{"/a", "/b"} {
+				status, _ := get(t, m, path)
+				require.Equal(t, http.StatusOK, status)
+			}
+
+			require.Equal(t, int32(3), fired.Load(), "the global event ran twice, and the callback of /b once")
 		})
 	}
 }
@@ -616,4 +760,132 @@ func TestUse_MiddlewaresSeeEveryMethod(t *testing.T) {
 
 	require.Equal(t, http.StatusAccepted, res.StatusCode)
 	require.Equal(t, "PURGE", res.Header.Get("X-Seen-Method"))
+}
+
+func TestConfig_TheServersFilesAreInItsWorkDir(t *testing.T) {
+	// A server keeps its own files in its work directory: one of its name, when it has one, so servers of one
+	// directory keep apart, unless workdir puts them elsewhere. Only a leading {workdir} stands for it.
+	abs := filepath.Join(t.TempDir(), "work")
+
+	tests := []struct {
+		name string
+		conf Config
+		path string
+		want string
+	}{
+		{name: "default", path: "{workdir}/_mocks", want: filepath.Join("testdata", "vlatte", "_mocks")},
+		{name: "named", conf: Config{Name: "api"}, path: "{workdir}/_journal", want: filepath.Join("testdata", "vlatte", "api", "_journal")},
+		{name: "set", conf: Config{Name: "api", WorkDir: "work"}, path: "{workdir}/_admin", want: filepath.Join("work", "_admin")},
+		{name: "from the root", conf: Config{RootDir: "root"}, path: "{workdir}/_mocks", want: filepath.Join("root", "testdata", "vlatte", "_mocks")},
+		{name: "absolute", conf: Config{RootDir: "root", WorkDir: abs + "/"}, path: "{workdir}/_mocks", want: filepath.Join(abs, "_mocks")},
+		{name: "itself", path: "{workdir}", want: filepath.Join("testdata", "vlatte")},
+		{name: "no placeholder", conf: Config{RootDir: "root"}, path: "mocks/*.yaml", want: filepath.Join("root", "mocks", "*.yaml")},
+		{name: "another name", path: "{workdirs}/a", want: filepath.Join("{workdirs}", "a")},
+		{name: "not leading", path: "a/{workdir}/b", want: filepath.Join("a", "{workdir}", "b")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.conf.path(tt.path))
+		})
+	}
+}
+
+func TestNew_ANameThatNamesTheWorkDirStaysInIt(t *testing.T) {
+	// The name of a server is a folder of testdata/vlatte, next to vlatte's own, whose names start with _: a name
+	// that would leave it, or take one of vlatte's, fails, unless workdir sets the folder. From settings, it is a
+	// problem of the name, as a bad value of any setting is.
+	for _, name := range []string{"..", ".", "../x", "/abs", "_mocks"} {
+		_, err := New(Setup().Silent().Name(name))
+		require.ErrorContains(t, err, "names the folder of the server's files", name)
+
+		_, err = New(Setup().Silent().ConfigSources(ConfigArgs([]string{"--name", name})))
+		cfgErr, ok := errors.AsType[*config.Error](err)
+		require.True(t, ok, "%s: %v", name, err)
+		require.Equal(t, "name", cfgErr.Problems[0].Key)
+	}
+
+	for _, setup := range []*ConfigBuilder{
+		Setup().Name("api"),
+		Setup().Name("orders/v1"),
+		Setup().Name("..").WorkDir("work"),
+		Setup().ConfigSources(ConfigArgs([]string{"--name", "..", "--workdir", "work"})),
+	} {
+		m, err := New(setup.Silent())
+		require.NoError(t, err)
+		m.Close()
+	}
+}
+
+// longerThan builds the custom matcher [longer-than, n]: a body longer than n bytes.
+func longerThan(_ *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
+	if len(args) != 1 {
+		return nil, errors.New("takes a length")
+	}
+
+	n, ok := args[0].(int64)
+	if !ok {
+		return nil, errors.New("takes a length")
+	}
+
+	return match.Function(func(v any) (bool, error) {
+		b, isBytes := v.([]byte)
+		return isBytes && int64(len(b)) > n, nil
+	}), nil
+}
+
+const _longerThanMock = `{"request": {"method": "POST", "body": ["longer-than", 3]}, "response": {"status": 200}}`
+
+func TestConfigBuilder_Matchers_MockFilesNameCustomMatchers(t *testing.T) {
+	m := MustNew(Setup().Silent().Matchers(matchbuild.MustNew(matchbuild.WithMatcher("longer-than", longerThan))))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(FromBytes([]byte(_longerThanMock), "json"))
+
+	res, _ := do(t, http.MethodPost, m.URL(), nil, []byte("abcd"))
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	res, _ = do(t, http.MethodPost, m.URL(), nil, []byte("abc"))
+	require.Equal(t, StatusNoMatch, res.StatusCode)
+}
+
+func TestConfigBuilder_Matchers_BelongToTheirServer(t *testing.T) {
+	// A registry is the server's, not global: a server without it doesn't know its matchers.
+	MustNew(Setup().Silent().Matchers(matchbuild.MustNew(matchbuild.WithMatcher("longer-than", longerThan)))).Close()
+
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	_, err := m.Mock(FromBytes([]byte(_longerThanMock), "json"))
+	require.ErrorContains(t, err, `unknown matcher "longer-than"`)
+}
+
+func TestConfigBuilder_LogOutput(t *testing.T) {
+	// A program that keeps the standard output for something else, such as JSON-RPC over stdio, has the server
+	// write its logs, its debug output and the requests echo replies log elsewhere.
+	for name, debug := range map[string]bool{"logs": false, "debug": true} {
+		t.Run(name, func(t *testing.T) {
+			out := &lockedBuffer{}
+
+			setup := Setup().LogOutput(out).LogLevel(vlatte.LogLevelInfo).LogPretty(false)
+			if debug {
+				setup.UseDescriptiveLogger()
+			}
+
+			m := MustNew(setup)
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(Getf("/echo").Reply(Echo().Log()))
+
+			res, err := http.Get(m.URL("/echo"))
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, http.StatusOK, res.StatusCode)
+
+			require.Contains(t, out.String(), "GET /echo HTTP/1.1", "the echo")
+			require.Contains(t, out.String(), "REQUEST MATCHED", "the request's log or debug lines")
+		})
+	}
 }

@@ -1,0 +1,11 @@
+# after and before, with an offset from now and a truncation.
+id: dates
+request:
+  method: GET
+  path: /dates
+  header:
+    X-Date: [after, "now -1 hours"]
+  query:
+    until: [before, "now +7 days", {truncate_expected: first hour of day}]
+response:
+  status: 200

@@ -9,7 +9,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	json "encoding/json/v2"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -22,8 +24,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -38,7 +42,7 @@ func start(t *testing.T, args ...string) (stop func() int) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)
 
-	go func() { done <- run(ctx, args, io.Discard, io.Discard) }()
+	go func() { done <- run(ctx, args, nil, io.Discard, io.Discard) }()
 
 	code, stopped := 0, false
 	stop = func() int {
@@ -59,6 +63,23 @@ func start(t *testing.T, args ...string) (stop func() int) {
 func withoutDockerHost(t *testing.T) {
 	t.Setenv(_dockerHostEnv, "")
 	require.NoError(t, os.Unsetenv(_dockerHostEnv))
+}
+
+func TestMain(m *testing.M) {
+	// The command keeps its admin mocks and its journal under the working directory: the tests run in a directory of
+	// their own, so none writes into the repository.
+	dir, err := os.MkdirTemp("", "vlatte-cli-test-*")
+	if err != nil {
+		panic(err)
+	}
+
+	defer os.RemoveAll(dir)
+
+	if err := os.Chdir(dir); err != nil {
+		panic(err)
+	}
+
+	m.Run()
 }
 
 func randomAddr(t *testing.T) string {
@@ -116,13 +137,16 @@ func TestCLI_HTTPS(t *testing.T) {
 }
 
 func TestDockerCLI(t *testing.T) {
+	// The server outlives the test, which doesn't wait for it to stop: its journal is apart from the next tests'.
+	t.Chdir(t.TempDir())
+
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { cancel() })
 	t.Setenv(_dockerHostEnv, "localhost")
 
 	sc := http.StatusTeapot
 
-	go run(ctx, nil, io.Discard, io.Discard)
+	go run(ctx, nil, nil, io.Discard, io.Discard)
 
 	request := func() {
 		maxAttempts := 5
@@ -165,21 +189,34 @@ func TestRun_Help(t *testing.T) {
 
 	for _, args := range [][]string{{"-h"}, {"--help"}, {"help"}} {
 		var out bytes.Buffer
-		require.Equal(t, 0, run(context.Background(), args, &out, io.Discard), args)
+		require.Equal(t, 0, run(context.Background(), args, nil, &out, io.Discard), args)
 
 		help := out.String()
 		require.Contains(t, help, "vlatte [flags]", args)
 		require.Contains(t, help, "completion", args)
 		require.Contains(t, help, "--log-level name", args)
 		require.Contains(t, help, "env VLATTE_LOG_LEVEL, file key log.level", args)
+		require.Contains(t, help, "env VLATTE_GRPC_ADDR, file key grpc.addr", args, "the gRPC settings too")
 	}
+}
+
+func TestRun_HelpListsTheCommandsSettings(t *testing.T) {
+	// The admin settings are the command's, not the server's: help lists them once, with the server's.
+	var out bytes.Buffer
+	require.Equal(t, 0, run(context.Background(), []string{"--help"}, nil, &out, io.Discard))
+
+	for _, key := range []string{"admin", "admin.addr", "admin.dir", "admin.docs_version", "grpc.admin", "grpc.admin.addr", "webhook.timeout"} {
+		require.Equal(t, 1, strings.Count(out.String(), "file key "+key+"\n"), key)
+	}
+
+	require.Equal(t, 2, strings.Count(out.String(), "file key config\n"), "the HTTP and the gRPC settings name the file")
 }
 
 func TestRun_SubcommandHelp(t *testing.T) {
 	// The settings list belongs to the server command: subcommands keep cobra's help.
 	for _, args := range [][]string{{"help", "version"}, {"version", "--help"}} {
 		var out bytes.Buffer
-		require.Equal(t, 0, run(context.Background(), args, &out, io.Discard), args)
+		require.Equal(t, 0, run(context.Background(), args, nil, &out, io.Discard), args)
 
 		help := out.String()
 		require.Contains(t, help, "vlatte version [flags]", args)
@@ -190,7 +227,7 @@ func TestRun_SubcommandHelp(t *testing.T) {
 func TestRun_Version(t *testing.T) {
 	var out bytes.Buffer
 
-	require.Equal(t, 0, run(context.Background(), []string{"version"}, &out, io.Discard))
+	require.Equal(t, 0, run(context.Background(), []string{"version"}, nil, &out, io.Discard))
 	require.Equal(t, version()+"\n", out.String())
 }
 
@@ -198,7 +235,7 @@ func TestRun_Completion(t *testing.T) {
 	// cobra completes the flags the config args source parses: every setting must be offered.
 	complete := func(args ...string) map[string]bool {
 		var out bytes.Buffer
-		require.Equal(t, 0, run(context.Background(), append([]string{"__complete"}, args...), &out, io.Discard))
+		require.Equal(t, 0, run(context.Background(), append([]string{"__complete"}, args...), nil, &out, io.Discard))
 
 		// One completion per line, with an optional tab-separated description, then a ":<directive>" line.
 		offered := make(map[string]bool)
@@ -226,11 +263,11 @@ func TestRun_Completion(t *testing.T) {
 
 	// Flags without allowed values, such as --config, leave their values to the shell's file completion.
 	var paths bytes.Buffer
-	require.Equal(t, 0, run(context.Background(), []string{"__complete", "--config", ""}, &paths, io.Discard))
+	require.Equal(t, 0, run(context.Background(), []string{"__complete", "--config", ""}, nil, &paths, io.Discard))
 	require.Equal(t, ":0\n", paths.String(), "no completions, and directive 0: ShellCompDirectiveDefault")
 
 	var script bytes.Buffer
-	require.Equal(t, 0, run(context.Background(), []string{"completion", "zsh"}, &script, io.Discard))
+	require.Equal(t, 0, run(context.Background(), []string{"completion", "zsh"}, nil, &script, io.Discard))
 	require.Contains(t, script.String(), "#compdef vlatte")
 }
 
@@ -262,12 +299,17 @@ func TestRun_UsageErrors(t *testing.T) {
 			args: []string{"--error-status-code", "99"},
 			want: []string{`error_status_code="99": expected an HTTP status code from 100 to 599`},
 		},
+		{
+			name: "negative webhook timeout",
+			args: []string{"--webhook-timeout=-1s"},
+			want: []string{`webhook.timeout must be 0 or more, not "-1s"`},
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var errOut bytes.Buffer
-			require.Equal(t, 2, run(context.Background(), tc.args, io.Discard, &errOut))
+			require.Equal(t, 2, run(context.Background(), tc.args, nil, io.Discard, &errOut))
 
 			for _, want := range tc.want {
 				require.Contains(t, errOut.String(), want)
@@ -284,7 +326,7 @@ func TestRun_PortInUse(t *testing.T) {
 	t.Cleanup(func() { _ = l.Close() })
 
 	var errOut bytes.Buffer
-	require.Equal(t, 1, run(context.Background(), []string{"--addr", l.Addr().String()}, io.Discard, &errOut))
+	require.Equal(t, 1, run(context.Background(), []string{"--addr", l.Addr().String()}, nil, io.Discard, &errOut))
 	require.Contains(t, errOut.String(), "address already in use")
 }
 
@@ -413,7 +455,7 @@ func TestCLI_WebhookTimeout(t *testing.T) {
 }
 
 func TestCLI_RecordsThenPlaysBack(t *testing.T) {
-	// --record --record-target records the target's answers until the CLI stops, into testdata/_mocks_recorded. A
+	// --record --record-target records the target's answers until the CLI stops, into testdata/vlatte/_mocks_recorded. A
 	// later run serves them, without the target: the default mock files include them.
 	withoutDockerHost(t)
 	t.Chdir(t.TempDir())
@@ -434,7 +476,7 @@ func TestCLI_RecordsThenPlaysBack(t *testing.T) {
 
 	require.Equal(t, 0, stop(), "a stopped server exits cleanly")
 
-	files, err := filepath.Glob(filepath.Join("testdata", "_mocks_recorded", "*.mock.json"))
+	files, err := filepath.Glob(filepath.Join("testdata", "vlatte", "_mocks_recorded", "*.mock.json"))
 	require.NoError(t, err)
 	require.Len(t, files, 1, "the CLI wrote the recording when it stopped")
 
@@ -463,7 +505,7 @@ func TestCLI_AStartThatFailsLeavesNothingListening(t *testing.T) {
 
 	var stderr bytes.Buffer
 
-	code := run(context.Background(), []string{"--addr", addr, "--mock-files", filepath.Join(dir, "*.yaml"), "--log-level", "disabled"}, io.Discard, &stderr)
+	code := run(context.Background(), []string{"--addr", addr, "--mock-files", filepath.Join(dir, "*.yaml"), "--log-level", "disabled"}, nil, io.Discard, &stderr)
 	require.Equal(t, 1, code)
 	require.Contains(t, stderr.String(), "unknown_key: response.stauts")
 
@@ -489,7 +531,7 @@ func TestCLI_ARecordingThatFailsFailsTheRun(t *testing.T) {
 
 	done := make(chan int, 1)
 	go func() {
-		done <- run(ctx, []string{"--addr", addr, "--record", "--record-target", target.URL, "--log-level", "disabled"}, io.Discard, &stderr)
+		done <- run(ctx, []string{"--addr", addr, "--record", "--record-target", target.URL, "--log-level", "disabled"}, nil, io.Discard, &stderr)
 	}()
 
 	require.EventuallyWithT(t, func(c *assert.CollectT) {
@@ -532,7 +574,7 @@ func TestCLI_RecordingsItCantServeDontFailTheRun(t *testing.T) {
 
 		done := make(chan int, 1)
 		go func() {
-			done <- run(ctx, []string{"--addr", addr, "--record", "--record-target", target.URL, "--log-level", "disabled"}, io.Discard, &stderr)
+			done <- run(ctx, []string{"--addr", addr, "--record", "--record-target", target.URL, "--log-level", "disabled"}, nil, io.Discard, &stderr)
 		}()
 
 		require.EventuallyWithT(t, func(c *assert.CollectT) {
@@ -556,15 +598,15 @@ func TestCLI_RecordingsItCantServeDontFailTheRun(t *testing.T) {
 	code, _ := record("1")
 	require.Equal(t, 0, code)
 
-	files, err := filepath.Glob(filepath.Join("testdata", "_mocks_recorded", "*.mock.json"))
+	files, err := filepath.Glob(filepath.Join("testdata", "vlatte", "_mocks_recorded", "*.mock.json"))
 	require.NoError(t, err)
 	require.Len(t, files, 1)
 
-	// JSON is YAML too: the default patterns load the .yaml files of testdata/_mocks.
+	// JSON is YAML too: the default patterns load the .yaml files of testdata/vlatte/_mocks.
 	data, err := os.ReadFile(files[0])
 	require.NoError(t, err)
-	require.NoError(t, os.MkdirAll(filepath.Join("testdata", "_mocks"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join("testdata", "_mocks", "items.mock.yaml"), data, 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join("testdata", "vlatte", "_mocks"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join("testdata", "vlatte", "_mocks", "items.mock.yaml"), data, 0o600))
 	require.NoError(t, os.Remove(files[0]))
 
 	code, stderr := record("2")
@@ -600,7 +642,7 @@ func startAdmin(t *testing.T, args ...string) (string, func() int) {
 	var stdout lockedBuffer
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)
-	go func() { done <- run(ctx, args, &stdout, io.Discard) }()
+	go func() { done <- run(ctx, args, nil, &stdout, io.Discard) }()
 
 	code, stopped := 0, false
 	stop := func() int {
@@ -651,7 +693,7 @@ func TestCLI_ServesTheAdminAPI(t *testing.T) {
 }
 
 func TestCLI_KeepsTheAdminMocksAcrossRestarts(t *testing.T) {
-	// The mocks the admin API adds are kept in testdata/_admin, so the next run serves them. --admin-dir moves them,
+	// The mocks the admin API adds are kept in testdata/vlatte/_admin, so the next run serves them. --admin-dir moves them,
 	// and an empty one keeps them in memory.
 	withoutDockerHost(t)
 	t.Chdir(t.TempDir())
@@ -659,7 +701,7 @@ func TestCLI_KeepsTheAdminMocksAcrossRestarts(t *testing.T) {
 	addr := randomAddr(t)
 	adminURL, stop := startAdmin(t, "--addr", addr, "--log-level", "disabled")
 	postMock(t, adminURL, "id: kept\nrequest: {method: GET, path: /kept}\nresponse: {status: 201}\n")
-	require.FileExists(t, filepath.Join("testdata", "_admin", "kept.mock.yaml"))
+	require.FileExists(t, filepath.Join("testdata", "vlatte", "_admin", "kept.mock.yaml"))
 	require.Zero(t, stop())
 
 	start(t, "--addr", addr, "--log-level", "disabled")
@@ -673,7 +715,7 @@ func TestCLI_KeepsTheAdminMocksAcrossRestarts(t *testing.T) {
 		adminURL, _ := startAdmin(t, "--addr", randomAddr(t), "--admin-dir=", "--log-level", "disabled")
 		postMock(t, adminURL, "id: gone\nrequest: {method: GET, path: /gone}\nresponse: {status: 201}\n")
 
-		_, err := os.Stat("testdata")
+		_, err := os.Stat(filepath.Join("testdata", "vlatte", "_admin"))
 		require.ErrorIs(t, err, os.ErrNotExist)
 	})
 }
@@ -691,6 +733,28 @@ func TestCLI_AdminSettings(t *testing.T) {
 		require.Contains(t, body, `"kind": "http"`)
 	})
 
+	t.Run("a docs version", func(t *testing.T) {
+		// A newer Scalar than vlatte pins renders the documentation, at the root of the admin API.
+		admin := randomAddr(t)
+		start(t, "--addr", randomAddr(t), "--admin-addr", admin, "--admin-docs-version", "1.80.0", "--log-level", "disabled")
+
+		status, body := firstAnswer(t, "http://"+admin+"/")
+		require.Equal(t, http.StatusOK, status)
+		require.Contains(t, body, "@scalar/api-reference@1.80.0/")
+	})
+
+	t.Run("a key turns it on", func(t *testing.T) {
+		// Setting a key of the admin section turns the section on, as for every section, over a source before.
+		t.Setenv("VLATTE_ADMIN", "false")
+		t.Chdir(t.TempDir())
+
+		admin := randomAddr(t)
+		start(t, "--addr", randomAddr(t), "--admin-addr", admin, "--log-level", "disabled")
+
+		status, _ := firstAnswer(t, "http://"+admin+"/health")
+		require.Equal(t, http.StatusOK, status)
+	})
+
 	t.Run("off", func(t *testing.T) {
 		addr := randomAddr(t)
 
@@ -698,7 +762,7 @@ func TestCLI_AdminSettings(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan int, 1)
 		go func() {
-			done <- run(ctx, []string{"--addr", addr, "--admin=false", "--log-level", "disabled"}, &stdout, io.Discard)
+			done <- run(ctx, []string{"--addr", addr, "--admin=false", "--log-level", "disabled"}, nil, &stdout, io.Discard)
 		}()
 		t.Cleanup(func() { cancel(); <-done })
 
@@ -765,7 +829,7 @@ func TestCLI_IsAForwardProxy(t *testing.T) {
 }
 
 func TestCLI_ProxiesWhatNoMockMatches(t *testing.T) {
-	// --proxy-all-target sends what no mock matches on to the target, as WireMock's --proxy-all does. With --record,
+	// --proxy-all-target sends what no mock matches on to the target. With --record,
 	// the target's answers are recorded, and a later run serves them without the target.
 	withoutDockerHost(t)
 	t.Chdir(t.TempDir())
@@ -874,4 +938,208 @@ func TestCLI_InterceptsHTTPS(t *testing.T) {
 	}, 10*time.Second, 100*time.Millisecond)
 
 	require.Equal(t, "mocked", string(body))
+}
+
+func TestCLI_KeepsAJournalOfRequests(t *testing.T) {
+	// The command keeps the requests it serves in testdata/vlatte/_journal, across restarts, which the admin API queries.
+	// --journal=false turns it off.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	count := func(adminURL string) (int, map[string]any) {
+		t.Helper()
+
+		req, err := http.NewRequestWithContext(t.Context(), "QUERY", adminURL+"/requests", strings.NewReader(`{"path": "/x", "limit": 0}`))
+		require.NoError(t, err)
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+
+		defer res.Body.Close()
+
+		var doc map[string]any
+		require.NoError(t, json.UnmarshalRead(res.Body, &doc))
+
+		return res.StatusCode, doc
+	}
+
+	addr := randomAddr(t)
+	adminURL, stop := startAdmin(t, "--addr", addr, "--log-level", "disabled")
+	status, _ := firstAnswer(t, "http://"+addr+"/x")
+	require.Equal(t, mockhttp.StatusNoMatch, status)
+
+	code, doc := count(adminURL)
+	require.Equal(t, http.StatusOK, code, doc)
+	require.Equal(t, float64(1), doc["count"])
+	require.Zero(t, stop())
+	require.DirExists(t, filepath.Join("testdata", "vlatte", "_journal"))
+
+	adminURL, _ = startAdmin(t, "--addr", addr, "--log-level", "disabled")
+	code, doc = count(adminURL)
+	require.Equal(t, http.StatusOK, code, doc)
+	require.Equal(t, float64(1), doc["count"], "the request of the first run")
+
+	t.Run("off", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+
+		adminURL, _ := startAdmin(t, "--addr", randomAddr(t), "--journal=false", "--log-level", "disabled")
+		code, _ := count(adminURL)
+		require.Equal(t, http.StatusNotImplemented, code)
+		require.NoDirExists(t, filepath.Join("testdata", "vlatte", "_journal"))
+	})
+}
+
+func TestCLI_NamedServersKeepTheirOwnFiles(t *testing.T) {
+	// Two servers in one directory each keep their files, the journal's lock included, in a folder of their name:
+	// both start. --workdir puts a server's files where it says.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	for _, name := range []string{"a", "b"} {
+		addr := randomAddr(t)
+		adminURL, _ := startAdmin(t, "--addr", addr, "--name", name, "--log-level", "disabled")
+		postMock(t, adminURL, "id: kept\nrequest: {method: GET, path: /kept}\nresponse: {status: 201}\n")
+
+		status, _ := firstAnswer(t, "http://"+addr+"/kept")
+		require.Equal(t, http.StatusCreated, status)
+	}
+
+	for _, name := range []string{"a", "b"} {
+		require.DirExists(t, filepath.Join("testdata", "vlatte", name, "_journal"))
+		require.FileExists(t, filepath.Join("testdata", "vlatte", name, "_admin", "kept.mock.yaml"))
+	}
+
+	adminURL, _ := startAdmin(t, "--addr", randomAddr(t), "--workdir", "elsewhere", "--log-level", "disabled")
+	postMock(t, adminURL, "id: moved\nrequest: {method: GET, path: /moved}\nresponse: {status: 201}\n")
+	require.FileExists(t, filepath.Join("elsewhere", "_admin", "moved.mock.yaml"))
+	require.DirExists(t, filepath.Join("elsewhere", "_journal"))
+}
+
+func TestCLI_ServesMCPOnStdio(t *testing.T) {
+	// An agent starts vlatte mcp as its MCP server: stdout carries MCP alone, so the banner and logs go to stderr,
+	// and the end of stdin ends the server.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	addr := randomAddr(t)
+	stdin, clientOut := io.Pipe()
+	clientIn, stdout := io.Pipe()
+
+	var stderr lockedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- run(context.Background(), []string{"mcp", "--addr", addr, "--grpc-addr", randomAddr(t)}, stdin, stdout, &stderr)
+		_ = stdout.Close()
+	}()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := client.Connect(t.Context(), &mcp.IOTransport{Reader: clientIn, Writer: clientOut}, nil)
+	require.NoError(t, err)
+
+	res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "add_mock", Arguments: map[string]any{"mock": map[string]any{
+		"request":  map[string]any{"method": "GET", "path": "/added"},
+		"response": map[string]any{"status": 201},
+	}}})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	status, _ := firstAnswer(t, "http://"+addr+"/added")
+	require.Equal(t, http.StatusCreated, status)
+
+	require.NoError(t, cs.Close())
+	require.Equal(t, 0, <-done)
+	require.Contains(t, stderr.String(), _banner)
+	require.Contains(t, stderr.String(), "GET /added", "the server logs to stderr")
+	require.Contains(t, stderr.String(), "gRPC mocks: ", "and so does the gRPC server")
+}
+
+func TestCLI_MCPNeedsTheAdminAPIAndMCP(t *testing.T) {
+	// vlatte mcp serves nothing else: with the admin API or MCP off, it is a usage error, and starts no server.
+	withoutDockerHost(t)
+
+	for _, flag := range []string{"--admin=false", "--mcp=false"} {
+		var stderr bytes.Buffer
+		addr := randomAddr(t)
+
+		require.Equal(t, 2, run(context.Background(), []string{"mcp", "--addr", addr, flag}, strings.NewReader(""), io.Discard, &stderr), flag)
+		require.Equal(t, "vlatte mcp: serves MCP through the admin API: --admin=false and --mcp=false turn it off\n"+_helpHint+"\n", stderr.String())
+
+		_, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		require.Error(t, err, "nothing listens")
+	}
+}
+
+func TestCLI_ServesMCPOverHTTP(t *testing.T) {
+	// An agent that runs elsewhere reaches the tools at POST /mcp of the admin API; --mcp=false closes that door.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	adminURL, _ := startAdmin(t, "--addr", randomAddr(t), "--log-level", "disabled")
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v1"}, nil)
+	cs, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{Endpoint: adminURL + "/mcp"}, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cs.Close() })
+
+	res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "health"})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	t.Run("off", func(t *testing.T) {
+		t.Chdir(t.TempDir()) // the journal of the server above is in use
+
+		adminURL, _ := startAdmin(t, "--addr", randomAddr(t), "--mcp=false", "--log-level", "disabled")
+
+		res, err := http.Post(adminURL+"/mcp", "application/json", strings.NewReader(`{}`))
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, http.StatusNotImplemented, res.StatusCode)
+	})
+}
+
+func TestRun_MCPHelp(t *testing.T) {
+	var out bytes.Buffer
+	require.Equal(t, 0, run(context.Background(), []string{"mcp", "--help"}, nil, &out, io.Discard))
+	require.Contains(t, out.String(), "serves its admin API to an AI agent over MCP, on stdin and stdout")
+	require.Contains(t, out.String(), "vlatte mcp [flags]")
+}
+
+func TestCLI_MCPFailsWhenTheServerCantStart(t *testing.T) {
+	// An agent that starts vlatte mcp learns why it ended: the server's error goes to stderr, and stdout stays empty.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
+
+	var stdout, stderr bytes.Buffer
+	require.Equal(t, 1, run(context.Background(), []string{"mcp", "--addr", l.Addr().String()}, strings.NewReader(""), &stdout, &stderr))
+	require.Contains(t, stderr.String(), "address already in use")
+	require.Empty(t, stdout.String())
+}
+
+func TestCLI_MCPFailsWhenStdinFails(t *testing.T) {
+	// A stdin that fails ends the server with an error, not as an agent that hung up.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+
+	var stderr lockedBuffer
+	stdin := iotest.ErrReader(errors.New("stdin: broken"))
+
+	require.Equal(t, 1, run(context.Background(), []string{"mcp", "--addr", randomAddr(t)}, stdin, io.Discard, &stderr))
+	require.Contains(t, stderr.String(), "stdin: broken")
+}
+
+func TestCLI_AServerThatCantBeCreatedFailsTheRun(t *testing.T) {
+	// A setting that is valid but can't be served, such as a root directory that is a file, fails the run, apart
+	// from usage errors.
+	withoutDockerHost(t)
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.WriteFile("afile", nil, 0o600))
+
+	var stderr bytes.Buffer
+	require.Equal(t, 1, run(context.Background(), []string{"--addr", randomAddr(t), "--root-dir=afile"}, nil, io.Discard, &stderr))
+	require.Contains(t, stderr.String(), "afile: not a directory")
+	require.NotContains(t, stderr.String(), _helpHint)
 }

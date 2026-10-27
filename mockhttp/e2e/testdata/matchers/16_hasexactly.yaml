@@ -1,0 +1,9 @@
+# hasExactly: as many values as matchers, each matched by its own.
+id: exactly
+request:
+  method: GET
+  path: /exactly
+  queries:
+    id: [hasexactly, [[equal, "1"], [contains, "2"]]]
+response:
+  status: 200

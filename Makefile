@@ -4,6 +4,8 @@
 # allow user specific optional overrides
 -include Makefile.overrides
 
+include examples/Makefile
+
 # keep in sync with the golangci-lint-action version in .github/workflows/ci.yml
 GOLANGCI_LINT_VERSION ?= v2.14.0
 
@@ -40,7 +42,7 @@ fuzz: ## run every fuzz target for FUZZTIME each
 
 .PHONY: lint
 lint: ## run linters
-	@GOTOOLCHAIN=go$$(go list -m -f '{{.GoVersion}}') go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run
+	@golangci-lint run
 
 .PHONY: bench
 bench: ## run benchmarks
@@ -66,7 +68,7 @@ tidy: ## tidy go.mod and go.sum
 
 .PHONY: fmt
 fmt: ## format code with gci and gofumpt
-	@GOTOOLCHAIN=go$$(go list -m -f '{{.GoVersion}}') go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) fmt
+	@golangci-lint fmt
 	@go tool gofumpt -w .
 
 .PHONY: fix
@@ -91,4 +93,4 @@ vuln: ## check for known vulnerabilities
 
 .PHONY: help
 help: ## show help
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ": ## "} /^[a-zA-Z0-9_\\:-]+: ## / {gsub(/\\:/, ":", $$1); printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)

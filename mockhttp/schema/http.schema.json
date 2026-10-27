@@ -26,19 +26,39 @@
       "additionalProperties": false
     },
     "on_complete": { "type": "array", "items": { "$ref": "#/$defs/on_complete_event" } },
+    "steps": { "description": "Faults the body of each answer passes through, in order.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
+    "wire_steps": { "description": "Faults every byte of each answer passes through, its head included, after steps. Needs HTTP/1.x.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
+    "upstream_steps": { "description": "Faults the body a proxy reply sends on passes through.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
     "request": {
       "type": "object",
       "properties": {
         "scheme": { "$ref": "#/$defs/matcher" },
         "method": { "$ref": "#/$defs/matcher" },
+        "host": { "description": "Host the request names, without its port: text, compared ignoring case, or a matcher list.", "$ref": "#/$defs/matcher" },
+        "client_ip": { "description": "Address of the client, without its port.", "$ref": "#/$defs/matcher" },
         "path": { "$ref": "#/$defs/matcher" },
+        "path_template": { "description": "Path with parameters, such as /users/{id}: a parameter is a whole segment, and takes any segment but an empty one.", "type": "string", "pattern": "^/" },
+        "path_params": { "description": "Parameters of path_template, by name.", "$ref": "#/$defs/keyed_matcher" },
         "url": { "description": "URL: an absolute one, compared ignoring case; a relative one, such as /items?page=2, whose path and query must be the same, the parameters in any order, each with its values in order; or a matcher list.", "$ref": "#/$defs/matcher" },
         "url_match": { "type": "string", "format": "regex" },
         "fragment": { "description": "URL fragment: the text after a \"#\" of the request target. Only clients that write a \"#\" into the request target send one.", "$ref": "#/$defs/matcher" },
         "query": { "$ref": "#/$defs/keyed_matcher" },
-        "queries": { "$ref": "#/$defs/keyed_matcher" },
+        "queries": { "description": "Query parameters with many values, by name: every value, as a list.", "$ref": "#/$defs/keyed_list_matcher" },
         "header": { "$ref": "#/$defs/keyed_matcher" },
+        "headers": { "description": "Headers with many values, by name: every value, as a list.", "$ref": "#/$defs/keyed_list_matcher" },
+        "cookie": { "description": "Cookies, by name, which keeps its case.", "$ref": "#/$defs/keyed_matcher" },
+        "basic_auth": {
+          "description": "Credentials of a Basic Authorization header.",
+          "type": "object",
+          "properties": {
+            "username": { "$ref": "#/$defs/matcher" },
+            "password": { "$ref": "#/$defs/matcher" }
+          },
+          "required": [ "username", "password" ],
+          "additionalProperties": false
+        },
         "form": { "description": "Fields of a urlencoded or multipart form body, by name.", "$ref": "#/$defs/keyed_matcher" },
+        "forms": { "description": "Fields of a form body with many values, by name: every value, as a list.", "$ref": "#/$defs/keyed_list_matcher" },
         "form_file": {
           "description": "Files of a multipart form body, by field name: a pattern, or a list of patterns, each met by some file of the field.",
           "type": "object",
@@ -51,10 +71,16 @@
             }
           }
         },
-        "body": { "$ref": "#/$defs/matcher" }
+        "body": { "$ref": "#/$defs/matcher" },
+        "custom": {
+          "description": "Matchers of the whole request, such as custom ones of the server: a list of matcher lists, or names.",
+          "type": "array",
+          "items": { "oneOf": [ { "type": "string" }, { "type": "array", "minItems": 1 } ] }
+        }
       },
       "minProperties": 1,
       "additionalProperties": false,
+      "dependentRequired": { "path_params": [ "path_template" ] },
       "allOf": [
         { "not": { "required": [ "url", "url_match" ] } },
         { "not": { "required": [ "url", "path" ] } },
@@ -132,6 +158,75 @@
         { "enum": [ 0, 1, "1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False" ] }
       ]
     },
+    "fault": {
+      "description": "A fault: an object whose type names it, and whose other keys are its parameters, such as {\"type\": \"latency\", \"latency\": \"300ms\"}.",
+      "type": "object",
+      "properties": { "type": { "enum": [ "empty_response", "malformed_response_chunk", "random_data_then_close", "connection_reset_by_peer", "chunked_dribble_delay", "latency", "bandwidth", "slicer", "slow_close", "timeout", "limit_data", "connection_reset_by_peer_after" ] } },
+      "required": [ "type" ],
+      "oneOf": [
+        {
+          "description": "Answers with nothing: no head, no body.",
+          "properties": { "type": { "const": "empty_response" } },
+          "required": [ "type" ]
+        },
+        {
+          "description": "Sends a chunk of the body that HTTP can't read.",
+          "properties": { "type": { "const": "malformed_response_chunk" } },
+          "required": [ "type" ]
+        },
+        {
+          "description": "Sends random bytes, then closes the connection.",
+          "properties": { "type": { "const": "random_data_then_close" } },
+          "required": [ "type" ]
+        },
+        {
+          "description": "Resets the connection.",
+          "properties": { "type": { "const": "connection_reset_by_peer" } },
+          "required": [ "type" ]
+        },
+        {
+          "description": "Sends the body in parts, spread over a time.",
+          "properties": { "type": { "const": "chunked_dribble_delay" }, "chunks": { "description": "How many parts the body is sent in.", "type": "integer", "minimum": 1 }, "total": { "description": "When the body ends.", "$ref": "#/$defs/duration" } },
+          "required": [ "type", "chunks", "total" ]
+        },
+        {
+          "description": "Delays each write.",
+          "properties": { "type": { "const": "latency" }, "latency": { "description": "How late each write arrives.", "$ref": "#/$defs/duration" }, "jitter": { "description": "How much the latency varies by, up to the latency. 0 by default.", "$ref": "#/$defs/duration" } },
+          "required": [ "type", "latency" ]
+        },
+        {
+          "description": "Limits the bytes sent each second.",
+          "properties": { "type": { "const": "bandwidth" }, "rate": { "description": "Bytes per second, or a common link.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "enum": [ "gprs", "dial_up", "2g", "good_2g", "3g", "good_3g", "dsl", "4g", "wifi", "fiber" ] } ] } },
+          "required": [ "type", "rate" ]
+        },
+        {
+          "description": "Sends the body in slices.",
+          "properties": { "type": { "const": "slicer" }, "average_size": { "description": "How many bytes a slice has, on average.", "type": "integer", "minimum": 1 }, "size_variation": { "description": "How many bytes a slice varies by, below average_size. 0 by default.", "type": "integer", "minimum": 0 }, "delay": { "description": "How long to wait before each slice. 0 by default.", "$ref": "#/$defs/duration" } },
+          "required": [ "type", "average_size" ]
+        },
+        {
+          "description": "Delays the end of the answer.",
+          "properties": { "type": { "const": "slow_close" }, "delay": { "description": "How long the end of the answer waits.", "$ref": "#/$defs/duration" } },
+          "required": [ "type", "delay" ]
+        },
+        {
+          "description": "Sends nothing, then ends the answer.",
+          "properties": { "type": { "const": "timeout" }, "after": { "description": "When the answer ends. 0, the default, never ends it.", "$ref": "#/$defs/duration" } },
+          "required": [ "type" ]
+        },
+        {
+          "description": "Closes the connection after some bytes.",
+          "properties": { "type": { "const": "limit_data" }, "bytes": { "description": "How many bytes pass before the connection closes.", "type": "integer", "minimum": 0 } },
+          "required": [ "type", "bytes" ]
+        },
+        {
+          "description": "Resets the connection after a time.",
+          "properties": { "type": { "const": "connection_reset_by_peer_after" }, "after": { "description": "When the connection is reset.", "$ref": "#/$defs/duration" } },
+          "required": [ "type", "after" ]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
     "matcher": {
       "description": "A string, compared as is, or a matcher list such as [\"contains\", \"x\"].",
       "oneOf": [
@@ -143,6 +238,13 @@
       "type": "object",
       "patternProperties": {
         "^.*$": { "$ref": "#/$defs/matcher" }
+      }
+    },
+    "keyed_list_matcher": {
+      "description": "Matcher lists by name, such as [\"contains\", \"x\"]: each gets every value, a list, which text never equals.",
+      "type": "object",
+      "patternProperties": {
+        "^.*$": { "type": "array", "minItems": 1 }
       }
     },
     "file_pattern": {
@@ -167,6 +269,7 @@
         "header_template": { "description": "Headers whose values are templates.", "$ref": "#/$defs/header_map" },
         "trailer": { "$ref": "#/$defs/header_map" },
         "body": { "description": "Text as is; anything else as JSON.", "not": { "type": "null" } },
+        "body_base64": { "description": "The bytes of the body in standard base64, for a body that isn't UTF-8 text, such as an image. Line breaks are ignored.", "type": "string", "contentEncoding": "base64", "pattern": "^[\\r\\n]*(([A-Za-z0-9+/][\\r\\n]*){4})*(([A-Za-z0-9+/][\\r\\n]*){2}=[\\r\\n]*=|([A-Za-z0-9+/][\\r\\n]*){3}=)?[\\r\\n]*$" },
         "body_file": { "description": "Relative paths start at the mock file's directory. The name is a template: one rendered from the request must stay inside that directory.", "type": "string", "minLength": 1 },
         "multipart": { "$ref": "#/$defs/multipart" },
         "template": {
@@ -182,7 +285,10 @@
       "additionalProperties": false,
       "allOf": [
         { "not": { "required": [ "body", "body_file" ] } },
+        { "not": { "required": [ "body", "body_base64" ] } },
         { "not": { "required": [ "body", "multipart" ] } },
+        { "not": { "required": [ "body_base64", "body_file" ] } },
+        { "not": { "required": [ "body_base64", "multipart" ] } },
         { "not": { "required": [ "body_file", "multipart" ] } }
       ]
     },
@@ -213,17 +319,23 @@
         "content_type": { "description": "JSON bodies default to application/json, and parts with a filename to application/octet-stream.", "type": "string" },
         "header": { "$ref": "#/$defs/header_map" },
         "body": { "description": "Text as is; anything else as JSON.", "not": { "type": "null" } },
+        "body_base64": { "description": "The bytes of the body in standard base64, for a body that isn't UTF-8 text, such as an image. Line breaks are ignored.", "type": "string", "contentEncoding": "base64", "pattern": "^[\\r\\n]*(([A-Za-z0-9+/][\\r\\n]*){4})*(([A-Za-z0-9+/][\\r\\n]*){2}=[\\r\\n]*=|([A-Za-z0-9+/][\\r\\n]*){3}=)?[\\r\\n]*$" },
         "body_file": { "description": "Read at each reply. Relative paths start at the mock file's directory.", "type": "string", "minLength": 1 },
         "delay": { "description": "How long a reply waits before writing the part.", "$ref": "#/$defs/duration" }
       },
       "additionalProperties": false,
-      "not": { "required": [ "body", "body_file" ] }
+      "allOf": [
+        { "not": { "required": [ "body", "body_base64" ] } },
+        { "not": { "required": [ "body", "body_file" ] } },
+        { "not": { "required": [ "body_base64", "body_file" ] } }
+      ]
     },
     "on_complete_event": {
       "type": "object",
       "properties": {
         "name": { "description": "Name of a listener registered with Setup().OnCompleteListener. The vlatte command registers webhook.", "type": "string", "examples": [ "webhook" ] },
-        "parameters": { }
+        "parameters": { },
+        "after_response": { "description": "Send the response without waiting for the event, which runs on.", "$ref": "#/$defs/bool" }
       },
       "additionalProperties": false,
       "required": [ "name" ],
@@ -240,19 +352,26 @@
         "header": { "$ref": "#/$defs/webhook_header" },
         "header_template": { "description": "Headers whose values are templates.", "$ref": "#/$defs/webhook_header" },
         "body": { "type": "string" },
+        "body_base64": { "description": "The bytes of the body in standard base64, for a body that isn't UTF-8 text, such as an image. Line breaks are ignored.", "type": "string", "contentEncoding": "base64", "pattern": "^[\\r\\n]*(([A-Za-z0-9+/][\\r\\n]*){4})*(([A-Za-z0-9+/][\\r\\n]*){2}=[\\r\\n]*=|([A-Za-z0-9+/][\\r\\n]*){3}=)?[\\r\\n]*$" },
         "body_template": { "description": "The body, as a template.", "type": "string" },
         "body_file": { "description": "A file to send as the body. Relative paths start at the mock file's directory.", "type": "string" },
         "multipart": { "description": "A multipart body, as response.multipart. It's sent at once, so its parts can't have delays.", "$ref": "#/$defs/multipart" },
         "multipart_template": { "description": "A multipart body whose text is templates.", "$ref": "#/$defs/multipart" },
-        "delay": { "description": "How long to wait before sending, once the mock replied. The response waits for it too.", "$ref": "#/$defs/duration" }
+        "delay": { "description": "How long to wait before sending, once the mock replied. The response waits for it too, unless the event runs after the response.", "$ref": "#/$defs/duration" },
+        "timeout": { "description": "How long the request may take, from sending it to its answer. Without it, the listener's timeout, or else 10s.", "$ref": "#/$defs/duration" }
       },
       "additionalProperties": false,
       "oneOf": [ { "required": [ "url" ] }, { "required": [ "url_template" ] } ],
       "allOf": [
+        { "not": { "required": [ "body", "body_base64" ] } },
         { "not": { "required": [ "body", "body_template" ] } },
         { "not": { "required": [ "body", "body_file" ] } },
         { "not": { "required": [ "body", "multipart" ] } },
         { "not": { "required": [ "body", "multipart_template" ] } },
+        { "not": { "required": [ "body_base64", "body_template" ] } },
+        { "not": { "required": [ "body_base64", "body_file" ] } },
+        { "not": { "required": [ "body_base64", "multipart" ] } },
+        { "not": { "required": [ "body_base64", "multipart_template" ] } },
         { "not": { "required": [ "body_template", "body_file" ] } },
         { "not": { "required": [ "body_template", "multipart" ] } },
         { "not": { "required": [ "body_template", "multipart_template" ] } },
@@ -271,9 +390,9 @@
       ]
     },
     "webhook_header": {
-      "description": "Headers by name, each value a string. Names ignore case: a name can be set once.",
+      "description": "Headers by name, each value a string, or a list of strings for several values. Names ignore case: a name can be set once.",
       "type": "object",
-      "additionalProperties": { "type": "string" }
+      "additionalProperties": { "oneOf": [ { "type": "string" }, { "type": "array", "items": { "type": "string" } } ] }
     },
     "header_map": {
       "type": "object",
