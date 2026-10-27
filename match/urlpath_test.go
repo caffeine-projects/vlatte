@@ -46,3 +46,18 @@ func TestURLPath(t *testing.T) {
 		}
 	})
 }
+
+// stringer is a value whose String gives a URL, as some request types do.
+type stringer string
+
+func (s stringer) String() string { return string(s) }
+
+func TestURLPath_TakesStringers(t *testing.T) {
+	ok, err := URLPath("/a/*").Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), stringer("http://x/a/b?c=d")))
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	ok, err = URLPath("/a/*").Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), url.URL{Path: "/a/b"}))
+	require.NoError(t, err)
+	require.True(t, ok)
+}

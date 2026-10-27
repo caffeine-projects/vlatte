@@ -4,6 +4,7 @@ package mpart
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"maps"
@@ -13,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
@@ -203,7 +205,9 @@ func (p *PartSpec) check(path string, formData bool) []Issue {
 	return issues
 }
 
-// Doc returns s as a mock file writes it: the object Decode reads. A byte body is written as text, the same bytes.
+// Doc returns s as a mock file writes it: the object Decode reads. A byte body is written as text, the same bytes, or
+// in body_base64 when it isn't UTF-8, which JSON and YAML can't hold as text, or when s is templated, where text
+// would read back as a template.
 // The relative body files of its parts are joined to its directory, so they open from the working directory.
 func (s *Spec) Doc() map[string]any {
 	doc := map[string]any{"type": s.Subtype}
@@ -222,7 +226,7 @@ func (s *Spec) Doc() map[string]any {
 
 	parts := make([]any, len(s.Parts))
 	for i, p := range s.Parts {
-		parts[i] = p.doc(s.Dir)
+		parts[i] = p.doc(s.Dir, s.Templated)
 	}
 
 	doc["parts"] = parts
@@ -235,8 +239,9 @@ func (s *Spec) formData() bool {
 	return strings.EqualFold(s.Subtype, "form-data")
 }
 
-// doc returns the part as a mock file writes it, its relative body file joined to dir.
-func (p *PartSpec) doc(dir string) map[string]any {
+// doc returns the part as a mock file writes it, its relative body file joined to dir. A templated spec writes a byte
+// body in body_base64, which reads back as bytes, not as a template.
+func (p *PartSpec) doc(dir string, templated bool) map[string]any {
 	doc := make(map[string]any)
 
 	fields := map[string]string{
@@ -279,6 +284,8 @@ func (p *PartSpec) doc(dir string) map[string]any {
 		default:
 			doc["body"] = v
 		}
+	case p.Kind == BodyBytes && len(p.Body) > 0 && (templated || !utf8.Valid(p.Body)):
+		doc["body_base64"] = base64.StdEncoding.EncodeToString(p.Body)
 	case len(p.Body) > 0 || p.Kind == BodyText:
 		doc["body"] = string(p.Body)
 	}

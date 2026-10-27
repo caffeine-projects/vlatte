@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="VLatte">
+  <circle cx="55" cy="60" r="41" fill="#D9622F"/>
+  <path d="M84 54 H98 a6 6 0 0 1 0 12 H84 Z" fill="#FFF3E0"/>
+  <circle cx="55" cy="60" r="32" fill="#FFF3E0"/>
+  <circle cx="55" cy="60" r="25" fill="#F2A93B"/>
+  <g transform="translate(55 60)" fill="#2C1A12">
+    <path d="M0 -15.5A15.5 15.5 0 1 1 0 15.5A15.5 15.5 0 1 1 0 -15.5ZM0 -5.5A5.5 5.5 0 1 1 0 5.5A5.5 5.5 0 1 1 0 -5.5Z" fill-rule="evenodd"/>
+    <rect x="-3.5" y="-21.5" width="7" height="10" rx="2"/>
+    <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(45)"/>
+    <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(90)"/>
+    <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(135)"/>
+    <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(180)"/>
+    <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(225)"/>
+    <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(270)"/>
+    <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(315)"/>
+  </g>
+</svg>
