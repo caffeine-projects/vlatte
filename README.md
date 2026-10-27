@@ -147,6 +147,18 @@ m.MustMock(mockgrpc.Method("Chat/Talk").Reply(mockgrpc.Bidi().
 	OnEnd(mockgrpc.Message(&pb.Line{Text: "bye"}))))
 ```
 
+**Cuts.** A reply that returns an error matching `vlatte.ErrAbort` or `vlatte.ErrReset`, such as a `Func` reply, cuts the call, to test a client against a server that dies midway. The mock counts the call and runs its events, then the server cuts the call's connection after the messages of a stream the reply sent, before any status: the client reads `Unavailable`, and no trailer. `vlatte.ErrReset` resets a TCP connection, so the client reads `ECONNRESET`, and `vlatte.ErrAbort` ends it. grpc can't reset one stream from a handler, so the other calls on the connection end too. A server whose `ServerOptions` set `grpc.Creds` can't cut its connections: the call fails, with the `vlatte-error` trailer.
+
+```go
+m.MustMock(mockgrpc.Method("Feed/Watch").Reply(mockgrpc.Func(func(_ context.Context, call *mockgrpc.Call) error {
+	if err := call.Send(&pb.Event{Id: "1"}); err != nil {
+		return err
+	}
+
+	return vlatte.ErrReset // after event 1, the client reads a reset
+})))
+```
+
 **Mock features.** As HTTP mocks, gRPC mocks have an `ID`, a `Name` and a `Priority`, can start `Enabled(false)`, serve a number of calls with `Times` and `Once`, take part in [scenarios](#scenarios) with `StartScenario`, `ScenarioIs`, `ScenarioStateIs`, `ScenarioStateWillBe` and `ScenarioKey`, wait before replying with `Delay` and `DelayFunc`, and run [on_complete events](#webhooks), such as webhooks, with `OnCompleteEvent`, and callbacks with `Callback`. An answer with a status counts as the mock's answer, for `Times` too. A scenario moves when its mock is picked to answer, before it answers.
 
 **Descriptors.** A server without the generated code of a service serves it from its descriptors, with messages of dynamic types: `Setup().Descriptors("api.binpb")` loads descriptor sets, as `protoc --descriptor_set_out=api.binpb --include_imports` or `buf build -o api.binpb` write them, and `Setup().Files(files)` takes a `*protoregistry.Files`.
@@ -1229,6 +1241,33 @@ grpcurl -plaintext -d '{"id": "u-1"}' localhost:50051 users.Users/Get
 `--grpc-tls` serves them over TLS, with a self-signed certificate, unless `--grpc-tls-cert` and `--grpc-tls-key` name the files of one; `--grpc-tls-ca` requires clients to present a certificate signed by a CA of its file. Each of these turns TLS on.
 
 It keeps a [journal](#request-journal) of the requests it serves in `{workdir}/_journal`, across restarts, which the admin API queries: `--journal-dir` moves it, `--journal-dir=""` keeps it in a temporary directory, and `--journal=false` turns it off. Two commands can't share a journal directory: give each a `--name`, which gives it a [work directory](#work-directory) of its own, `testdata/vlatte/<name>`. The journal holds the requests it got, secrets included: its directory ignores its files in git.
+
+## Docker
+
+The `Dockerfile` builds an image of the [CLI](#cli) for the platforms of its distroless base, such as `linux/amd64` and `linux/arm64`, run by a non-root user (`65532`):
+
+```sh
+make docker   # docker build -t vlatte:dev .
+docker run --rm -p 8080:8080 -p 8081:8081 -v "$PWD/testdata/vlatte/_mocks:/vlatte/testdata/vlatte/_mocks:ro" vlatte:dev
+```
+
+The image sets `VLATTE_DOCKER_HOST`, so it listens on every interface, on fixed ports: mocks on `8080`, or `8443` with `--https`, the admin API on `8081`, and gRPC mocks on `50051`, with their admin API on `8082`. Its working directory is `/vlatte`, so the CLI's defaults apply below it: mock files in `/vlatte/testdata/vlatte/_mocks`, and a `.vlatterc` file in `/vlatte` or `/vlatte/testdata`. Arguments go to `vlatte`, and `VLATTE_*` variables set the same [settings](#configuration):
+
+```sh
+docker run --rm -p 8080:8080 -e VLATTE_LOG_LEVEL=debug vlatte:dev --proxy-all-target=https://api.example.com
+docker run --rm vlatte:dev version
+```
+
+The CLI writes its journal and the mocks the admin API adds to `/vlatte/testdata/vlatte`, which the image's user owns. To keep them, or recordings, on the host, mount a `testdata` directory over `/vlatte/testdata` and run as its owner: `--user "$(id -u):$(id -g)" -v "$PWD/testdata:/vlatte/testdata"`. With a read-only root file system, give both of its writable paths a `tmpfs`:
+
+```sh
+docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --tmpfs /tmp --tmpfs /vlatte/testdata/vlatte:uid=65532,gid=65532 \
+  -v "$PWD/testdata/vlatte/_mocks:/vlatte/testdata/vlatte/_mocks:ro" \
+  -p 8080:8080 -p 8081:8081 vlatte:dev
+```
+
+Its `HEALTHCHECK` runs `vlatte health`, which asks the admin API's readiness probe, `GET /readyz` on `8081`, and exits with 0 when it answers 200. With the admin API off or on another address, it checks that the mock server accepts connections on `8080` or `8443` instead, so it needs no settings of its own. Kubernetes can probe `GET /livez` and `GET /readyz` with `httpGet` too.
 
 ## Development
 
