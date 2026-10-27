@@ -1,4 +1,4 @@
-# WireMock's equalToJson with ignoreArrayOrder and ignoreExtraElements.
+# eqj ignoring array order and extra elements.
 id: json
 request:
   method: POST

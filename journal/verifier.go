@@ -18,7 +18,7 @@ type RequestPatterns[TM vlatte.Mock, A any] interface {
 	RequestPattern(b vlatte.Builder[TM, A]) (Filter, error)
 }
 
-// Verifier verifies the requests the journal of a mock server keeps, as WireMock's verify does, with the request
+// Verifier verifies the requests the journal of a mock server keeps, with the request
 // patterns of the server's protocol. A server embeds it, next to its vlatte.Base, so every protocol verifies the same
 // way.
 type Verifier[TM vlatte.Mock, A any] struct {
