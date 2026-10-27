@@ -548,7 +548,7 @@ func (app *Server) publish(ctx context.Context, kind, target string, mock *Mock,
 	}
 
 	if call := callOf(ctx); call != nil {
-		e.RequestID = call.entry.ID
+		e.RequestID = call.draft.ID()
 	}
 
 	if err != nil {

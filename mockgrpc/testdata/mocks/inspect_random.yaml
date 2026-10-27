@@ -1,0 +1,9 @@
+id: inspect-random
+request:
+  method: protobuf.TestService/Inspect
+  fields: {user_id: any}
+response_random:
+  seed: 1
+  responses:
+    - message: {user_id: a}
+    - message: {user_id: b}

@@ -1,0 +1,9 @@
+id: inspect
+request:
+  method: protobuf.TestService/Inspect
+response_sequence:
+  responses:
+    - message: {user_id: u-1}
+    - status: {code: NOT_FOUND}
+  after_ended:
+    message: {user_id: u-2}

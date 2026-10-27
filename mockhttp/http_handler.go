@@ -807,7 +807,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				transport: h.app.webhookTransport(),
 			}
 		},
-		func(err error) { h.lifecycle.OnWarning(reqValues, err) },
+		func(err error) {
+			h.lifecycle.OnWarning(reqValues, err)
+			reqValues.journal.eventFailed(err)
+		},
 	)
 
 	h.lifecycle.OnMatch(reqValues, res)
