@@ -14,7 +14,7 @@ func SetScenario(ops *Operations) http.Handler {
 			return
 		}
 
-		s, err := ops.SetScenario(r.PathValue("name"), data, format)
+		s, err := ops.SetScenario(r.Context(), r.PathValue("name"), data, format)
 		if err != nil {
 			fail(w, r, err)
 			return

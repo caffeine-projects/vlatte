@@ -18,7 +18,7 @@ func TestStore_SetMovesAScenarioMocksMatchNext(t *testing.T) {
 	require.Equal(t, map[string]string{"checkout": "paid", "Refund": "asked"}, store.Scenarios())
 
 	require.True(t, match(t, store.Matcher("checkout", "paid", "")), "a mock that requires the state set matches")
-	require.False(t, match(t, store.Matcher("refund", "done", "")), "a scenario set before any mock started it has the state set")
+	require.False(t, match(t, store.Matcher("refund", "done", "")), "a scenario set before any mock moved it has the state set")
 }
 
 func TestStore_SetKeepsTheNameAScenarioWasFirstGiven(t *testing.T) {
@@ -41,6 +41,18 @@ func TestStore_ResetStartsEveryScenarioOver(t *testing.T) {
 
 	require.Equal(t, map[string]string{"checkout": StateStarted, "Refund": StateStarted}, store.Scenarios())
 	require.True(t, match(t, pay), "the scenario starts over")
+}
+
+func TestStore_ResetOneStartsOnlyThatScenarioOver(t *testing.T) {
+	store := New()
+	store.SetScenario("Checkout", "paid")
+	store.SetScenario("refund", "asked")
+
+	store.ResetScenario("checkout")
+	store.ResetScenario("nothing")
+
+	require.Equal(t, map[string]string{"Checkout": StateStarted, "refund": "asked"}, store.Scenarios())
+	require.Equal(t, StateStarted, store.State("nothing"))
 }
 
 func TestStore_ScenariosIsACopy(t *testing.T) {

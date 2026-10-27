@@ -17,7 +17,6 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/match"
-	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -318,7 +317,8 @@ func TestBuilder_AFailingCallbackDoesntChangeTheAnswer(t *testing.T) {
 
 // scenarioServer runs the scenario suite on a server whose mocks are built in Go, or from mock files.
 type scenarioServer struct {
-	m         *Server
+	*Server
+
 	c         pb.TestServiceClient
 	fromFiles bool
 }
@@ -329,7 +329,7 @@ func newScenarioServer(fromFiles bool) func(t *testing.T) scenariotest.Server {
 	return func(t *testing.T) scenariotest.Server {
 		m := serve(t)
 
-		return &scenarioServer{m: m, c: client(t, m), fromFiles: fromFiles}
+		return &scenarioServer{Server: m, c: client(t, m), fromFiles: fromFiles}
 	}
 }
 
@@ -337,6 +337,7 @@ func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 	for _, mk := range mocks {
 		if s.fromFiles {
 			doc, err := json.Marshal(map[string]any{
+				"id": mk.ID,
 				"scenario": map[string]string{
 					"name": mk.Scenario, "required_state": mk.RequiredState, "new_state": mk.NewState,
 				},
@@ -345,12 +346,12 @@ func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 			})
 			require.NoError(t, err)
 
-			s.m.MustMock(FromBytes(doc, "json"))
+			s.MustMock(FromBytes(doc, "json"))
 
 			continue
 		}
 
-		b := Method("Greetings").ScenarioIs(mk.Scenario).Reply(Message(&pb.HiRes{Message: mk.ID}))
+		b := Method("Greetings").ID(mk.ID).ScenarioIs(mk.Scenario).Reply(Message(&pb.HiRes{Message: mk.ID}))
 		if mk.RequiredState != "" {
 			b.ScenarioStateIs(mk.RequiredState)
 		}
@@ -359,7 +360,7 @@ func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 			b.ScenarioStateWillBe(mk.NewState)
 		}
 
-		s.m.MustMock(b)
+		s.MustMock(b)
 	}
 }
 
@@ -376,8 +377,6 @@ func (s *scenarioServer) Call(t *testing.T) string {
 		return ""
 	}
 }
-
-func (s *scenarioServer) Store() *matchscenario.Store { return s.m.scenarios }
 
 func TestBuilder_ServesScenarios(t *testing.T) {
 	scenariotest.Run(t, newScenarioServer(false))

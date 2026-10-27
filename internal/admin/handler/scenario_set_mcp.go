@@ -14,12 +14,13 @@ type scenarioState struct {
 
 func addSetScenarioTool(s *mcp.Server, ops *Operations) {
 	tool := &mcp.Tool{
-		Name:        "set_scenario",
-		Description: "Move a scenario to a state, starting it when no mock did yet.",
+		Name: "set_scenario",
+		Description: "Move a scenario to a state: the mocks that require it match next. " +
+			"A state none of the scenario's mocks names is refused.",
 		Annotations: &mcp.ToolAnnotations{IdempotentHint: true},
 	}
 
-	addTool(s, tool, func(_ context.Context, in scenarioState) (any, error) {
-		return ops.moveScenario(in.Name, in.State)
+	addTool(s, tool, func(ctx context.Context, in scenarioState) (any, error) {
+		return ops.moveScenario(ctx, in.Name, in.State)
 	})
 }

@@ -1,6 +1,8 @@
 package matchscenario
 
 import (
+	"fmt"
+
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
 )
@@ -8,6 +10,7 @@ import (
 var (
 	_ vlatte.Matcher             = (*Matcher)(nil)
 	_ vlatte.Claimer             = (*Matcher)(nil)
+	_ fmt.Stringer               = (*Matcher)(nil)
 	_ descriptor.SelfDescriptive = (*Matcher)(nil)
 )
 
@@ -29,23 +32,26 @@ func (s *Store) Matcher(name, required, next string) *Matcher {
 // Name implements vlatte.Matcher.
 func (m *Matcher) Name() string { return "Scenario" }
 
-// Match implements vlatte.Matcher. A mock that requires [StateStarted] starts its scenario. One that requires another
-// state matches while no mock started its scenario.
+// Match implements vlatte.Matcher. It changes no state: [Matcher.Claim] does.
 func (m *Matcher) Match(_ vlatte.MatcherArg) (bool, error) {
-	if m.required == "" {
-		return true, nil
-	}
-
-	state, ok := m.store.state(m.name, m.required == StateStarted)
-
-	return !ok || state == m.required, nil
+	return m.required == "" || m.store.State(m.name) == m.required, nil
 }
 
 // Claim implements vlatte.Claimer. In one step, it checks the scenario is still in the state the mock requires and
-// moves it to the mock's new state, starting it when no mock did yet. It reports false, moving nothing, when another
-// request moved the scenario since the mock matched.
+// moves it to the mock's new state. It reports false, moving nothing, when another request moved the scenario since
+// the mock matched.
 func (m *Matcher) Claim() bool {
 	return m.store.claim(m.name, m.required, m.next)
+}
+
+// String names the scenario, the state the mock needs and the one the scenario is in, such as "scenario checkout
+// needs started, is paid", for a report of a request no mock matched.
+func (m *Matcher) String() string {
+	if m.required == "" {
+		return "scenario " + m.name
+	}
+
+	return "scenario " + m.name + " needs " + m.required + ", is " + m.store.State(m.name)
 }
 
 // Describe implements descriptor.SelfDescriptive.

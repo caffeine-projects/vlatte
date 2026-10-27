@@ -19,6 +19,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 var _ grpc.ServerStream = (*callStream)(nil)
@@ -258,7 +259,8 @@ func (c *journalCall) end(ctx context.Context, err error) {
 	c.journal.Append(&entry)
 }
 
-// describeEval names the part of a call e checks, such as "header x-team".
+// describeEval names the part of a call e checks, such as "header x-team". A scenario says the state the mock needs and
+// the one it is in.
 func describeEval[T any](e *vlatte.Eval[T]) string {
 	switch scope(e.Target) {
 	case _scopeMethod:
@@ -270,6 +272,10 @@ func describeEval[T any](e *vlatte.Eval[T]) string {
 	case _scopeRepeat:
 		return "times"
 	case _scopeScenario:
+		if sm, ok := e.Matcher.(*matchscenario.Matcher); ok {
+			return sm.String()
+		}
+
 		return "scenario " + e.Key
 	}
 

@@ -55,19 +55,25 @@ func TestNoMatch_NearMissesRunNoMatcherTwice(t *testing.T) {
 	require.Equal(t, 2, runs, "the header of each mock ran once: a's in matching, b's in the report")
 }
 
-func TestNoMatch_NearMissesStartNoScenario(t *testing.T) {
-	// A scenario starts with the first request its mock matches: a near miss report, which runs the matchers
-	// matching never reached, must not start it, or a later request finds the scenario in a state no test set.
+func TestNoMatch_NearMissesSayWhereTheScenarioIs(t *testing.T) {
+	// A request that waits on a scenario's state reads why no mock answered: the state the mock needs, and the one the
+	// scenario is in. The report runs the scenario's matcher, which moves nothing: the next request still finds the
+	// scenario where it was.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/a").ID("a").StartScenario("checkout").Reply(OK()))
+	m.MustMock(
+		Getf("/a").ID("a").ScenarioIs("checkout").ScenarioStateIs("paid").Reply(OK()),
+		Getf("/b").ID("b").StartScenario("checkout").ScenarioStateWillBe("paid").Reply(Status(http.StatusAccepted)),
+	)
 
-	status, _, body := getFull(t, m, "/b")
+	status, _, body := getFull(t, m, "/a")
 	require.Equal(t, StatusNoMatch, status)
-	require.Contains(t, body, "[a]: 1 of 2 parts matched; differs in path; not checked: scenario\n")
-	require.Empty(t, m.scenarioStore.Scenarios())
+	require.Contains(t, body, "[a]: 2 of 3 parts matched; differs in scenario checkout needs paid, is started\n")
+
+	status, _, _ = getFull(t, m, "/b")
+	require.Equal(t, http.StatusAccepted, status, "the scenario is still where it started")
 }
 
 func TestNoMatch_NearMissesTurnOff(t *testing.T) {

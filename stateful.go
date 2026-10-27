@@ -11,8 +11,9 @@ type Stateful interface {
 // matched: Find then looks for a mock again. The next request sees the turn taken, even while the mock still answers,
 // and the turn stays taken when the mock then fails to answer.
 //
-// Claim reports false only when Match would now report false, or Find looks again forever, until its context ends. A
-// mock has at most one Claimer: a turn taken stays taken when the next Claimer of the mock loses its own.
+// Match changes no state, so a report of a request no mock matched runs it. Claim reports false only when Match would
+// now report false, or Find looks again forever, until its context ends. A mock has at most one Claimer: a turn taken
+// stays taken when the next Claimer of the mock loses its own.
 type Claimer interface {
 	Claim() bool
 }

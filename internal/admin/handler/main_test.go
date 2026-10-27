@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +27,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 var (
@@ -510,3 +512,34 @@ func requestIDs(doc map[string]any) []string {
 
 	return ids
 }
+
+// fakeScenarios keeps scenarios in a real store, for the scenario matchers of mocks of uses.
+type fakeScenarios struct {
+	store *matchscenario.Store
+	uses  []matchscenario.Use
+}
+
+var _ adminapi.Scenarios = (*fakeScenarios)(nil)
+
+// newScenarios keeps scenarios for mocks, each a mock ID and the scenario, the state it requires and the one it moves
+// to.
+func newScenarios(mocks ...[4]string) *fakeScenarios {
+	f := &fakeScenarios{store: matchscenario.New()}
+	for _, m := range mocks {
+		f.uses = append(f.uses, matchscenario.Use{MockID: m[0], Matcher: f.store.Matcher(m[1], m[2], m[3])})
+	}
+
+	return f
+}
+
+func (f *fakeScenarios) Scenarios(context.Context) ([]matchscenario.Scenario, error) {
+	return f.store.Model(slices.Values(f.uses)), nil
+}
+
+func (f *fakeScenarios) SetScenario(_ context.Context, name, state string) error {
+	return f.store.Move(slices.Values(f.uses), name, state)
+}
+
+func (f *fakeScenarios) ResetScenario(name string) { f.store.ResetScenario(name) }
+
+func (f *fakeScenarios) ResetScenarios() { f.store.ResetScenarios() }

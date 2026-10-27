@@ -317,7 +317,7 @@ func New(config ...Option) (*Server, error) {
 			})),
 			Files:      adminFiles{app},
 			Recorder:   adminRecorder{app},
-			Scenarios:  app.scenarioStore,
+			Scenarios:  app,
 			Events:     events,
 			Logs:       logs,
 			Journal:    j,

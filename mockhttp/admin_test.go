@@ -320,8 +320,8 @@ func TestAdmin_MovesScenarios(t *testing.T) {
 	// it over after.
 	m := adminServer(t, Setup())
 	m.MustMock(
-		Getf("/pay").StartScenario("Checkout").ScenarioStateWillBe("paid").Reply(OK()),
-		Getf("/pay").ScenarioIs("Checkout").ScenarioStateIs("paid").Reply(Status(http.StatusConflict)),
+		Getf("/pay").ID("pay").StartScenario("Checkout").ScenarioStateWillBe("paid").Reply(OK()),
+		Getf("/pay").ID("paid").ScenarioIs("Checkout").ScenarioStateIs("paid").Reply(Status(http.StatusConflict)),
 	)
 
 	res, _ := do(t, http.MethodGet, m.URL("/pay"), nil, nil)
@@ -343,7 +343,15 @@ func TestAdmin_MovesScenarios(t *testing.T) {
 	require.Equal(t, http.StatusConflict, res.StatusCode, "the mock of the state set")
 
 	_, body = do(t, http.MethodGet, m.AdminURL()+"/scenarios", nil, nil)
-	require.JSONEq(t, `{"scenarios": [{"name": "Checkout", "state": "paid"}]}`, string(body))
+	require.JSONEq(t, `{"scenarios": [{
+		"name": "Checkout",
+		"state": "paid",
+		"states": [{"name": "started", "reachable": true}, {"name": "paid", "reachable": true}],
+		"transitions": [{"from": "started", "to": "paid", "mock_id": "pay"}]
+	}]}`, string(body))
+
+	res, body = do(t, http.MethodPut, m.AdminURL()+"/scenarios/checkout", nil, []byte(`{"state": "payed"}`))
+	require.Equal(t, http.StatusBadRequest, res.StatusCode, "a state no mock names: %s", body)
 }
 
 func TestAdmin_SavedMocksOutliveTheServer(t *testing.T) {

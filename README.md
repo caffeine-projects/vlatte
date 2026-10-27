@@ -127,7 +127,7 @@ m.MustMock(mockgrpc.Method("Chat/Talk").Reply(mockgrpc.Bidi().
 	OnEnd(mockgrpc.Message(&pb.Line{Text: "bye"}))))
 ```
 
-**Mock features.** As HTTP mocks, gRPC mocks have an `ID`, a `Name` and a `Priority`, can start `Enabled(false)`, serve a number of calls with `Times` and `Once`, take part in scenarios with `StartScenario`, `ScenarioIs`, `ScenarioStateIs` and `ScenarioStateWillBe`, wait before replying with `Delay` and `DelayFunc`, and run [on_complete events](#webhooks), such as webhooks, with `OnCompleteEvent`, and callbacks with `Callback`. An answer with a status counts as the mock's answer, for `Times` too. A scenario moves when its mock is picked to answer, before it answers.
+**Mock features.** As HTTP mocks, gRPC mocks have an `ID`, a `Name` and a `Priority`, can start `Enabled(false)`, serve a number of calls with `Times` and `Once`, take part in [scenarios](#scenarios) with `StartScenario`, `ScenarioIs`, `ScenarioStateIs` and `ScenarioStateWillBe`, wait before replying with `Delay` and `DelayFunc`, and run [on_complete events](#webhooks), such as webhooks, with `OnCompleteEvent`, and callbacks with `Callback`. An answer with a status counts as the mock's answer, for `Times` too. A scenario moves when its mock is picked to answer, before it answers.
 
 **Descriptors.** A server without the generated code of a service serves it from its descriptors, with messages of dynamic types: `Setup().Descriptors("api.binpb")` loads descriptor sets, as `protoc --descriptor_set_out=api.binpb --include_imports` or `buf build -o api.binpb` write them, and `Setup().Files(files)` takes a `*protoregistry.Files`.
 
@@ -309,6 +309,37 @@ mock: 2 problems
   file testdata/vlatte/_mocks/users_mock.yaml: unknown_key: response.stauts is not a known setting; did you mean response.status?
   file testdata/vlatte/_mocks/users_mock.yaml: conflict: proxy is set with response; keep one of them
 ```
+
+## Scenarios
+
+A scenario serves mocks in turn: each mock of a scenario matches while the scenario is in the state it requires, and moves the scenario to its new state when it is picked to answer. Every scenario starts in `started`.
+
+```go
+m.MustMock(
+	mockhttp.Postf("/orders").ID("create").
+		StartScenario("order").ScenarioStateWillBe("created").
+		Reply(mockhttp.Created()),
+	mockhttp.Getf("/orders/1").ID("read").
+		ScenarioIs("order").ScenarioStateIs("created").
+		Reply(mockhttp.OK().JSON(map[string]any{"id": 1})),
+)
+```
+
+```yaml
+id: read
+scenario: {name: order, required_state: created, new_state: read}
+request: {method: GET, path: /orders/1}
+response: {status: 200, body: '{"id": 1}'}
+```
+
+- **States.** A mock that requires no state matches in any state. A mock that requires a state no request moved the scenario to yet doesn't match: a typo in a scenario's name never matches every request.
+- **Turns.** The scenario moves before the mock answers, so the next request matches in the new state, and of two concurrent requests in one state only one gets the mock of that state. It moves even when the mock then doesn't answer, such as when its client leaves during the mock's `delay`.
+- **Names** ignore case: `Checkout` is `checkout`. A scenario is listed under the name its first mock gives it.
+- **In Go,** `m.Scenarios(ctx)` lists each scenario with its state, the states its mocks name, flagging those no mock moves to, and which mock moves it where. `m.SetScenario(ctx, name, state)` moves a scenario, and refuses a state none of its mocks names with `matchscenario.ErrUnknownState`; a scenario no mock names takes any state. `m.ResetScenario(name)` and `m.ResetScenarios()` start them over.
+- **In the [admin API](#admin-api),** `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios/{name}` and `DELETE /scenarios` do the same.
+- **A request no mock matched** names the scenario a mock waits on: `differs in scenario order needs created, is started`.
+
+gRPC mocks take part in scenarios the same way.
 
 ## Templates
 
@@ -1002,7 +1033,7 @@ require.Equal(t, vlatte.FailureReply, res.Header.Get(vlatte.HeaderFailure))
 
 The status of `no-match` is `no_match_status_code`, and the status of the others is `error_status_code`. Both default to 418.
 
-The answer to a request no mock matched lists the mocks that came closest, as does its [journal](#request-journal) entry: the parts of the request each matched, those that differ, and those it didn't check, such as a scenario's state, which a report never runs. A `times` used up is a part a mock differs in.
+The answer to a request no mock matched lists the mocks that came closest, as does its [journal](#request-journal) entry: the parts of the request each matched, those that differ, and those it didn't check, such as a `times` not used up, which a report never runs. A `times` used up, or a scenario in another state, is a part a mock differs in.
 
 ```
 REQUEST DID NOT MATCH
@@ -1013,7 +1044,7 @@ CLOSEST MOCKS
 [create]: 1 of 2 parts matched; differs in method
 ```
 
-The report runs no matcher twice: it goes on from the part where matching stopped, which a mock differs in, so it runs only the matchers matching never reached, the action of a `match.Peek` among them. It runs none that keeps state, such as a scenario's, which it lists as not checked. A mock that wants the request but is used up, by its `Times`, differs in `times` only, and comes first. `near_misses: false`, `--near-misses=false` or `mockhttp.Setup().NoNearMisses()` turns it off.
+The report runs no matcher twice: it goes on from the part where matching stopped, which a mock differs in, so it runs only the matchers matching never reached, the action of a `match.Peek` among them. It runs none that keeps state, such as `times`, which it lists as not checked; a scenario's matcher keeps none as it matches, so it runs. A mock that wants the request but is used up, by its `Times`, differs in `times` only, and comes first. `near_misses: false`, `--near-misses=false` or `mockhttp.Setup().NoNearMisses()` turns it off.
 
 A gRPC server answers `NotFound` when no mock matches (`Setup().NoMatchCode` sets another), `Unimplemented` for a method no descriptor describes, and `Internal` when serving a call fails, with the same values in the `vlatte-error` trailer. A mock that answers with a status, as `Status(...)` does, gets no trailer: that status is its answer.
 

@@ -512,7 +512,7 @@ func TestJournal_NearMissesNameEachPartTheirMockChecks(t *testing.T) {
 
 	require.Equal(t, map[string][]string{
 		"parts":    {"field message", "request body", "request message"},
-		"scenario": {"scenario s"},
+		"scenario": {"scenario s needs never, is done"},
 		"once":     {"times"},
 	}, failed)
 }

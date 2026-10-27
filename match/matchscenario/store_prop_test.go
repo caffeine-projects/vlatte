@@ -32,6 +32,14 @@ func (md *model) start(name string) {
 	}
 }
 
+func (md *model) state(name string) string {
+	if state, ok := md.states[strings.ToLower(name)]; ok {
+		return state
+	}
+
+	return StateStarted
+}
+
 func (md *model) scenarios() map[string]string {
 	out := make(map[string]string, len(md.states))
 	for k, state := range md.states {
@@ -56,12 +64,7 @@ func TestStore_KeepsStateAsAModelDoes(t *testing.T) {
 					vlatte.NewMatcherArg(context.Background(), vlatte.NewExplanation(), nil))
 				require.NoError(t, err)
 
-				if required == StateStarted {
-					md.start(name)
-				}
-
-				state, started := md.states[strings.ToLower(name)]
-				require.Equal(t, required == "" || !started || state == required, ok)
+				require.Equal(t, required == "" || md.state(name) == required, ok)
 			},
 			"claim": func(t *rapid.T) {
 				name := rapid.SampledFrom(_names).Draw(t, "name")
@@ -70,12 +73,7 @@ func TestStore_KeepsStateAsAModelDoes(t *testing.T) {
 
 				claimed := store.Matcher(name, required, next).Claim()
 
-				if required == StateStarted {
-					md.start(name)
-				}
-
-				state, started := md.states[strings.ToLower(name)]
-				want := required == "" || !started || state == required
+				want := required == "" || md.state(name) == required
 				require.Equal(t, want, claimed)
 
 				if want && next != "" {
@@ -90,6 +88,14 @@ func TestStore_KeepsStateAsAModelDoes(t *testing.T) {
 				store.SetScenario(name, state)
 				md.start(name)
 				md.states[strings.ToLower(name)] = state
+			},
+			"reset one": func(t *rapid.T) {
+				name := rapid.SampledFrom(_names).Draw(t, "name")
+
+				store.ResetScenario(name)
+				if _, ok := md.states[strings.ToLower(name)]; ok {
+					md.states[strings.ToLower(name)] = StateStarted
+				}
 			},
 			"reset": func(_ *rapid.T) {
 				store.ResetScenarios()

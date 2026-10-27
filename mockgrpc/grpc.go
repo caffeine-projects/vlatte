@@ -251,7 +251,7 @@ func New(config ...Option) (*Server, error) {
 			})),
 			Files:     adminFiles{app},
 			Recorder:  adminRecorder{app},
-			Scenarios: app.scenarios,
+			Scenarios: app,
 			Events:    app.events,
 			Logs:      logs,
 			Journal:   j,
