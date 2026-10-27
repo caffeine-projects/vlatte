@@ -189,6 +189,12 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 	)...)...).Only("grpc", _keyConfigFile)
 })
 
+// _recordRepeats are the names of what a recording keeps of a request that comes again, the default first.
+var _recordRepeats = []config.Choice{
+	{Name: "sequence", Value: int64(vlatte.RecordSequence)},
+	{Name: "first", Value: int64(vlatte.RecordFirst)},
+}
+
 // _recordSchema declares the settings of a recording, as the grpc.record section of the server's settings has them:
 // the body of the admin API's POST /recording.
 var _recordSchema = sync.OnceValue(func() *config.Schema[RecordConfig] {
@@ -234,6 +240,14 @@ func recordFields() []recordField {
 			Set: func(r *RecordConfig, v config.Value) error { r.RequestHeaders = v.List; return nil },
 		},
 		{
+			Key: "repeats", Kind: config.Int, Choices: _recordRepeats, Default: _recordRepeats[0].Name,
+			Usage: "What a recording keeps of a request that comes again: every answer, in order, or the first one.",
+			Set: func(r *RecordConfig, v config.Value) error {
+				r.Repeats = vlatte.RecordRepeats(v.Int)
+				return nil
+			},
+		},
+		{
 			Key: "include_mocked", Kind: config.Bool, Usage: "Record the answers of mocks too, not only proxied ones.",
 			Set: func(r *RecordConfig, v config.Value) error { r.IncludeMocked = v.Bool; return nil },
 		},
@@ -248,7 +262,7 @@ func withRecord(fields ...field) []field {
 	for i, f := range settings {
 		set := f.Set
 		records[i] = field{
-			Key: "grpc.record." + f.Key, Usage: f.Usage, Default: f.Default, Kind: f.Kind,
+			Key: "grpc.record." + f.Key, Usage: f.Usage, Default: f.Default, Kind: f.Kind, Choices: f.Choices,
 			Set: func(c *Config, v config.Value) error {
 				return set(config.Section(&c.Record, *defaultRecordConfig()), v)
 			},
