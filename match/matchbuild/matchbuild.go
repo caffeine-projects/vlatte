@@ -8,6 +8,7 @@
 package matchbuild
 
 import (
+	"encoding/base64"
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
@@ -53,6 +54,7 @@ const (
 	_mEqualXMLAlias           = "eqx"
 	_mEqualToStrict           = "equalstrict"
 	_mEqualToStrictAlias      = "eqs"
+	_mEqualBytes              = "equalbytes"
 	_mFalsy                   = "falsy"
 	_mGlob                    = "glob"
 	_mGreater                 = "greater"
@@ -227,6 +229,14 @@ func newBuiltins() map[string]builtin {
 		_, err := jp.ParseString(path)
 		return err
 	}
+	checkBase64 := func(text string) error {
+		_, err := base64.StdEncoding.DecodeString(text)
+		return err
+	}
+	equalBytes := func(text string) vlatte.Matcher {
+		b, _ := base64.StdEncoding.DecodeString(text) // checkBase64 checked it
+		return match.EqualBytes(b)
+	}
 
 	builtins := map[string]builtin{
 		_mAnything: none(match.Anything()),
@@ -257,6 +267,7 @@ func newBuiltins() map[string]builtin {
 		_mRegex:             text("a regular expression", match.RegExpr, checkRegexp),
 		_mRequestURI:        text("a URL", match.RequestURI, checkRequestURI),
 		_mHasKey:            text("a JSON path", match.HasKey, checkJSONPath),
+		_mEqualBytes:        text("standard base64", equalBytes, checkBase64),
 
 		_mGreater:            order(match.GreaterThan[int64], match.GreaterThan[float64]),
 		_mGreaterThanOrEqual: order(match.GreaterThanOrEqual[int64], match.GreaterThanOrEqual[float64]),

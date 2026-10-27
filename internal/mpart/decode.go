@@ -1,6 +1,7 @@
 package mpart
 
 import (
+	"encoding/base64"
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
@@ -15,10 +16,9 @@ type (
 	partField = config.Field[partDef]
 )
 
-// partDef is a decoded part, and whether it set a body, which conflicts with a body file.
+// partDef is a decoded part.
 type partDef struct {
-	part    *PartSpec
-	hasBody bool
+	part *PartSpec
 }
 
 // SpecSchema decodes the multipart object of a mock file, as response.multipart and a webhook's multipart parameter
@@ -100,8 +100,6 @@ var PartSchema = config.NewSchema(
 	partField{
 		Key: "body", Kind: config.Any, Usage: "Body of the part: text as is, anything else as JSON.",
 		Set: func(d *partDef, v config.Value) error {
-			d.hasBody = true
-
 			switch x := v.Any.(type) {
 			case nil:
 				return config.Invalid(v, v.Key+" is null", `remove it, or write "" for an empty body`)
@@ -115,6 +113,20 @@ var PartSchema = config.NewSchema(
 
 				d.part.Body, d.part.Kind = b, BodyJSON
 			}
+
+			return nil
+		},
+	},
+	partField{
+		Key: "body_base64", Kind: config.String,
+		Usage: "Body of the part: bytes in standard base64, for a body that isn't UTF-8 text, such as an image. Line breaks are ignored.",
+		Set: func(d *partDef, v config.Value) error {
+			b, err := base64.StdEncoding.DecodeString(v.Str)
+			if err != nil {
+				return config.Invalid(v, v.Key+" isn't standard base64: "+err.Error(), "encode the bytes with base64, padding included")
+			}
+
+			d.part.Body, d.part.Kind = b, BodyBytes
 
 			return nil
 		},
@@ -178,19 +190,38 @@ func Decode(v config.Value) (*Spec, error) {
 	return s, nil
 }
 
-// decodePart decodes a part. It returns the part even when it has problems.
+// decodePart decodes a part. It returns the part even when it has problems. A part takes one body at most: each
+// body key after the first conflicts with it.
 func decodePart(v config.Value) (*PartSpec, error) {
 	d := partDef{part: new(PartSpec)}
 
 	err := PartSchema.Decode(&d, v)
-	if !d.hasBody || d.part.File == "" {
+
+	obj, _ := v.Any.(map[string]any)
+
+	var problems []config.Problem
+	first := ""
+	for _, key := range []string{"body", "body_base64", "body_file"} {
+		if _, ok := obj[key]; !ok {
+			continue
+		}
+
+		if first == "" {
+			first = key
+			continue
+		}
+
+		problems = append(problems, config.Problem{
+			Code: config.CodeConflict, Origin: v.Origin, Key: v.Key + "." + key,
+			Message: fmt.Sprintf("%s.%s is set with %s.%s", v.Key, key, v.Key, first), Hint: "keep one of them",
+		})
+	}
+
+	if len(problems) == 0 {
 		return d.part, err
 	}
 
-	return d.part, &config.Error{Problems: append(config.ProblemsOf(v, err), config.Problem{
-		Code: config.CodeConflict, Origin: v.Origin, Key: v.Key + ".body_file",
-		Message: fmt.Sprintf("%s.body_file is set with %s.body", v.Key, v.Key), Hint: "keep one of them",
-	})}
+	return d.part, &config.Error{Problems: append(config.ProblemsOf(v, err), problems...)}
 }
 
 // headers decodes an object of headers: a string, or a list of strings, each.

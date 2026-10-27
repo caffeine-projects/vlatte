@@ -19,6 +19,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockhttp"
@@ -263,6 +264,67 @@ func TestMultipart_AdminRoundTrip(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	require.Equal(t, "multipart/mixed; boundary=b", res.Header.Get(mockhttp.HeaderContentType))
 	require.Equal(t, "--b\r\n\r\nok\r\n--b--\r\n", string(got))
+}
+
+func TestMultipart_AByteBodyLoadsBackFromItsDescription(t *testing.T) {
+	// JSON and YAML can't hold bytes that aren't UTF-8 as text: the description of a part built in Go with such a
+	// body, as the admin API serves it, failed to encode. A templated body writes its byte bodies as they are: bytes
+	// that are UTF-8 must not load back as a template. Both describe in body_base64, and serve the same bytes back.
+	png := []byte{0x89, 'P', 'N', 'G', 0xff, 0xfe, 0x00}
+
+	tests := []struct {
+		name string
+		mock vlatte.Builder[*mockhttp.Mock, *mockhttp.Server]
+		want string
+	}{
+		{
+			name: "built in Go, not UTF-8",
+			mock: mockhttp.Getf("/x").ID("x").Reply(mockhttp.OK().
+				Multipart(mockhttp.MultipartMixed(mockhttp.NewPart().ContentType("image/png").Body(png)).Boundary("b"))),
+			want: string(png),
+		},
+		{
+			name: "from a file, templated",
+			mock: mockhttp.FromBytes([]byte("id: x\nrequest: {method: GET, path: /x}\nresponse:\n  template: {enabled: true}\n"+
+				"  multipart: {type: mixed, boundary: b, parts: [{body_base64: e3sgLlggfX0gYXMgaXM=}]}\n"), "yaml"),
+			want: "{{ .X }} as is",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			serve := func(b vlatte.Builder[*mockhttp.Mock, *mockhttp.Server]) (string, *mockhttp.Mock) {
+				m := mockhttp.MustNew(mockhttp.Setup().Silent())
+				m.MustStart()
+				t.Cleanup(m.Close)
+
+				scope := m.MustMock(b)
+
+				res, err := http.Get(m.URL("/x"))
+				require.NoError(t, err)
+
+				body, err := io.ReadAll(res.Body)
+				require.NoError(t, err)
+				require.NoError(t, res.Body.Close())
+				require.Equal(t, http.StatusOK, res.StatusCode, "%s", body)
+
+				_, _, content := parts(t, res, body)
+				require.Len(t, content, 1)
+
+				return string(content[0]), scope.Mock("x")
+			}
+
+			got, mock := serve(tc.mock)
+			require.Equal(t, tc.want, got)
+
+			doc, err := mockhttp.EncodeMock(mock, "json")
+			require.NoError(t, err)
+			require.Contains(t, string(doc), "body_base64")
+
+			again, _ := serve(mockhttp.FromBytes(doc, "json"))
+			require.Equal(t, tc.want, again, "%s", doc)
+		})
+	}
 }
 
 func TestMultipart_StreamsItsParts(t *testing.T) {

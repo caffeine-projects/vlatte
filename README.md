@@ -1,6 +1,26 @@
-# vlatte
+<p align="center">
+  <img src="docs/brand/logo.svg" alt="" width="128" height="128">
+</p>
 
-Mock HTTP and gRPC servers for Go tests, and a CLI that serves HTTP and gRPC mocks from files.
+<h1 align="center">VLatte</h1>
+
+<p align="center">
+  Mock HTTP and gRPC servers for Go tests.<br>
+  Match requests, reply with templates, record and proxy.<br>
+  A CLI that serves HTTP and gRPC mocks from files.
+</p>
+
+<p align="center">
+  <a href="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml"><img src="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/caffeine-projects/vlatte"><img src="https://codecov.io/gh/caffeine-projects/vlatte/graph/badge.svg" alt="codecov"></a>
+  <a href="https://pkg.go.dev/github.com/caffeine-projects/vlatte"><img src="https://pkg.go.dev/badge/github.com/caffeine-projects/vlatte.svg" alt="Go Reference"></a>
+</p>
+
+## About
+
+VLatte is a mocking framework for Go. In a test, `mockhttp` and `mockgrpc` start real HTTP and gRPC servers that answer the way the test says: match a request on its method, path, headers, query or body, reply with a status, headers and a templated body, call a webhook, or forward what nothing matches to a real upstream.
+
+The `vlatte` CLI serves HTTP and gRPC mocks from YAML or JSON files, records what passes through it and plays it back, and takes new mocks over an admin API.
 
 ## Install
 
@@ -211,7 +231,9 @@ response:
 
 **Types.** Each key takes one type, as the schema says. Write text in quotes where a string goes, as in `name: "123"`, and numbers bare, as in `priority: 10`. Bools read the way Go's `strconv.ParseBool` reads them, so `true`, `"true"`, `t` and `1` are all true. A value of the wrong type is an error that says how to write it.
 
-**Durations.** `delay`, `proxy.timeout`, the durations of [faults](#faults) and the `delay` of a [webhook](#webhooks) take whole milliseconds (`1500`) or a Go duration (`1.5s`). `"1500"` in quotes is neither.
+**Bodies.** A reply's `body` is text as is, and any other value as JSON. A body that isn't UTF-8 text, such as an image or text in another encoding, goes in `body_base64`, as standard base64 (`body_base64: //4A`), whose line breaks are ignored, or in a `body_file`. A reply takes one of `body`, `body_base64`, `body_file` and `multipart` at most.
+
+**Durations.** `delay`, `proxy.timeout`, the durations of [faults](#faults) and the `delay` and `timeout` of a [webhook](#webhooks) take whole milliseconds (`1500`) or a Go duration (`1.5s`). `"1500"` in quotes is neither.
 
 **Matching.** Most of a request is text: its path, query, headers and form values. A matcher reads that text as the type it compares with:
 - `[equal, 10]` and `[isIn, [10, 20]]` match `?page=10`;
@@ -255,6 +277,8 @@ request:
 ```
 
 **XML bodies.** `[eqx, '<order id="7"><item>1</item></order>']` matches an equal XML document, by what it means: attributes in any order, text trimmed, comments and indentation left out, names compared by namespace URI. Options: `ignore_child_order: true`, and `namespaces: strict` to compare prefixes too, or `none` to read no namespaces. `[xpath, expression, matcher]` applies the matcher to what an XPath 1.0 expression selects: nothing is null, one result is itself, more are a list, so `[some, m]` matches any of them; an element is its XML. `{namespaces: {t: "urn:todo"}}` binds a prefix of the expression. In Go: `EqualXML`, `IgnoreChildOrder`, `XMLNamespaces`, `XPath` and `XPathNamespace`.
+
+**Binary bodies.** `[equalbytes, "//4A"]` matches a body whose bytes are those of the standard base64 given, whose line breaks are ignored, exactly: no text reads as a number. In Go, `EqualBytes(b)`. `Equal(b)` matches the same bytes, but a mock's description, which the admin API serves, writes them as base64 text, which loads back as `[eq, "<base64>"]`, another matcher: `EqualBytes` describes them as `[equalbytes, ...]`, so the mock loads back.
 
 **Dates and times.** `[before, x]`, `[after, x]` and `[equalDateTime, x]` (`eqdt`) compare a date and time in RFC 3339, in ISO 8601 without a zone, or in an HTTP format. `x` is one of those, or `now`, and either may end with an offset: `"now +3 days"`, `"2026-01-01T00:00:00Z -2 weeks"`. Options: `truncate_expected` and `truncate_actual`, each one of `first minute of hour`, `first hour of day`, `first day of month`, `first day of next month`, `last day of month`, `first day of year`, `first day of next year` and `last day of year`; `truncate_last: true` to offset first; `actual_format` with a Go layout, such as `02/01/2006`; `local_time: true` to compare wall clocks. An `x` without a zone is local, as with `local_time`; a request's date and time without a zone, against an `x` with one, is read in the server's zone. In Go: `Before`, `After`, `EqualDateTime`, `BeforeNow`, `AfterNow` and `EqualDateTimeNow`, with typed options such as `ExpectedOffset(3, match.Days)`.
 
@@ -513,8 +537,9 @@ response:
         body_file: report.pdf  # relative to the mock file
 ```
 
+- **Bodies.** A part takes one of `body`, `body_base64` and `body_file` at most. A body that isn't UTF-8 text, such as an image, goes in `body_base64`, as standard base64 (`body_base64: //4A`), whose line breaks are ignored, or in a `body_file`. A byte body set in Go with `Part.Body` describes in `body_base64` when it isn't UTF-8, or when the body is templated, so it loads back as bytes, not as a template.
 - **Defaults.** A part with a name or a filename gets its `Content-Disposition`. A JSON body defaults to `application/json`, and a part with a filename to `application/octet-stream`.
-- **Templates.** With `template.enabled`, or `Template()` in Go, the text of the parts is a template: names, filenames, content types, header values, text bodies and body file names. Byte and JSON bodies, and the content of body files, are written as they are.
+- **Templates.** With `template.enabled`, or `Template()` in Go, the text of the parts is a template: names, filenames, content types, header values, text bodies and body file names. Byte bodies, such as `body_base64`, JSON bodies and the content of body files are written as they are.
 - **Encode.** `Multipart.Encode` writes the same bodies for requests in tests.
 
 **Streaming.** A part with a `delay` waits that long before it is written, and everything before it is flushed first. A client therefore reads each part as it comes, as `multipart/x-mixed-replace` camera feeds need.
@@ -595,9 +620,10 @@ m.MustMock(mockhttp.Postf("/orders").
 |---|---|
 | `url` or `url_template` | Where the request goes: an absolute `http` or `https` URL. One of them is required. |
 | `method` | The method, in any case. Empty means `GET`. |
-| `header`, `header_template` | Headers by name, each a string. Names ignore case, so a name is set once. |
-| `body`, `body_template`, `body_file`, `multipart`, `multipart_template` | The body, one of them at most. Multipart bodies are as in [replies](#forms-and-multipart). |
-| `delay` | How long to wait before sending, once the mock replied. The response waits for it too. |
+| `header`, `header_template` | Headers by name, each a string, or a list of strings to send the header once per value, in order. Names ignore case, so a name is set once. |
+| `body`, `body_base64`, `body_template`, `body_file`, `multipart`, `multipart_template` | The body, one of them at most. A body that isn't UTF-8 text goes in `body_base64`, as standard base64, whose line breaks are ignored; a `Body` set in Go that isn't UTF-8 describes there. Multipart bodies are as in [replies](#forms-and-multipart). |
+| `delay` | How long to wait before sending, once the mock replied. The response waits for it too, unless the webhook runs after the response. |
+| `timeout` | How long the request may take, from sending it to its answer. Without it, the listener's timeout, or else 10s. |
 
 Templates render with the data of the request that completed the mock: see [Templates](#templates). A mistake, such as a missing URL, two bodies or a template that doesn't compile, fails the mock when it is built.
 
@@ -612,7 +638,18 @@ callbacks.AssertCalled(t)
 
 A webhook's `delay` counts from the reply, so it holds the response too. A reply that streams its parts, or a body over a few KB, sends its status and headers before its webhooks are done, so the call returns early; the body still ends after them, unless the mock sets `Content-Length` itself. Read the body to its end, as `io.ReadAll` does, before checking what they sent. `m.Close()` cancels the webhooks still waiting, for their delay or for their target.
 
-**Failures.** A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning. The timeout is 10 seconds: `webhook.WithTimeout` changes it for one webhook, and the server's `webhook.timeout` setting (`Config.WebhookTimeout`) for webhooks without one, where 0 means 10 seconds, unlike `proxy.timeout`. A webhook reads up to 256 KiB of the answer, so its connection carries the next one. A response waits for a webhook at most its delay plus the timeout.
+**After the response.** `after_response: true` on an `on_complete` entry, beside `name` and `parameters`, sends the response without waiting for the event, for an app that needs its callback once it has its answer. In Go, set `AfterResponse` on the `vlatte.EventConfig` that `Build` returns. The event starts as the response goes out, so give it a `delay` when the client must read its answer first, and have the test wait for the target to get the webhook, not for the call. `m.Close()` cancels these events too, and waits for them. A failure is logged as any other, but the journal entry of the request, recorded by then, doesn't tell it.
+
+```yaml
+on_complete:
+  - name: webhook
+    after_response: true
+    parameters:
+      url: http://localhost:8081/orders
+      delay: 100ms
+```
+
+**Failures.** A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning, and the request's [journal](#request-journal) entry, if the server keeps one, tells it in its `Message`. The timeout is 10 seconds: a webhook's `timeout` parameter (`Options().Timeout(d)` in Go) changes it for that webhook, and `webhook.WithTimeout` for every webhook its listener sends, where 0 means 10 seconds, unlike `proxy.timeout`. The CLI's `webhook.timeout` setting is the `WithTimeout` of its listener, for HTTP and gRPC mocks. A webhook reads up to 256 KiB of the answer, so its connection carries the next one. A response waits for a webhook at most its delay plus the timeout.
 
 **Logs.** Webhooks log each request and its answer with the server's logger, so `Setup().Silent()` silences them too. `webhook.WithLogger` gives them a logger of their own.
 
@@ -865,7 +902,7 @@ The `vlatte` command serves the admin API by default: `admin: false` (`--admin=f
 | `POST /reset` | Removes the mocks added through the admin API, loads the mock files again, saved ones included, starts every scenario over, and clears the [journal](#request-journal). Mocks added in code stay as they are. The mocks of a persistent store come back from it: reset never deletes what it holds. |
 | `GET /mocks` | Lists every mock, enabled or not, with its `priority`, `enabled`, `hits` and `origin`. |
 | `POST /mocks` | Adds the mock of the body, a [mock file](#mock-files). An id in use is a `409`. |
-| `GET /mocks/{id}` | The mock as a mock file describes it, which `PUT` and `POST` take back. |
+| `GET /mocks/{id}` | The mock as a mock file describes it, which `PUT` and `POST` take back. A mock whose reply a mock file can't hold, an `Echo`, `Func` or `Handler`, answers `500` with the code `describe_failed`. |
 | `PUT /mocks/{id}` | Replaces the mock, in one step. The body's id must be the path's. |
 | `PATCH /mocks/{id}` | Enables or disables the mock: `{"enabled": false}`. |
 | `DELETE /mocks/{id}`, `DELETE /mocks` | Removes the mock, or every mock. |
@@ -975,7 +1012,7 @@ entries, err := m.Requests(ctx, journal.Query{Path: match.GlobMatch("/users/*"),
 n, err := m.CountRequests(ctx, journal.Query{Kind: mockhttp.Kind})
 ```
 
-A failed assertion lists the requests that matched, or the newest ones when none did, with the mock that came closest to each request no mock matched. A request is journaled as the server ends its answer, as hits count: a client gets a small answer only then, while it may read the start of a large one a moment before.
+An entry's `Message` tells what failed: the request, or else the on_complete events of a request a mock answered, one line each, such as a [webhook](#webhooks) whose target answered `500`, so a test checks a webhook failed without reading the logs. A failed assertion lists the requests that matched, or the newest ones when none did, with the mock that came closest to each request no mock matched. A request is journaled as the server ends its answer, as hits count: a client gets a small answer only then, while it may read the start of a large one a moment before.
 
 A `journal.Query`, of package `github.com/caffeine-projects/vlatte/journal`, selects by the fields every protocol has. `Kind`, `Outcome`, `MockID`, `Method`, `Path` and `Status` are indexed: a query runs each of their matchers once per value the journal holds, not once per request, and reads no request from disk for them. `Target` (the full URL), `Since` and `Until` filter in memory too. `Header`, `Body` and request patterns read the requests the other fields leave. `Limit` and `Before` page through them, newest first; `m.Journal().Find` returns the next page's cursor and the count. A `journal.Journal` works on its own too, as a changelog of any requests: `journal.New(journal.Options{Dir: dir})`.
 
@@ -1153,7 +1190,7 @@ curl http://127.0.0.1:8080/hello
 
 Without `--addr`, it listens on a random port and prints the URL. Settings can also come from a `.vlatterc` file or `VLATTE_*` environment variables; see [Configuration](#configuration). Run `vlatte --help` to list them, and `vlatte completion --help` to set up shell completion.
 
-Mock files can send [webhooks](#webhooks): the CLI registers the `webhook` listener, and `--webhook-timeout` bounds each request.
+Mock files can send [webhooks](#webhooks): the CLI registers the `webhook` listener, and `--webhook-timeout` bounds each request that sets no `timeout` of its own.
 
 It [records](#recording-and-playback) a service until it stops, and serves the recordings on the next run:
 

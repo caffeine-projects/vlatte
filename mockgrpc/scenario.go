@@ -95,7 +95,7 @@ func (app *Server) movedScenarios(ctx context.Context, mock *Mock) []matchscenar
 				Message: mv.String(),
 			}
 			if call := callOf(ctx); call != nil {
-				event.RequestID = call.entry.ID
+				event.RequestID = call.draft.ID()
 			}
 
 			app.events.Publish(event)

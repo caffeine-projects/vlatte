@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -115,7 +116,7 @@ type replyDef struct {
 	header         []headerValue
 	headerTemplate []headerValue
 	trailer        []headerValue
-	body           any
+	body           any // text, a JSON value, or the bytes of body_base64
 	hasBody        bool
 	bodyFile       string
 	templated      bool
@@ -206,7 +207,7 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error { d.scenario.set, d.scenario.newState = true, v.Str; return nil },
 	},
 	mockField{
-		Key: "on_complete", Kind: config.Any, Usage: "Events to run after the mock replies: a list of {name, parameters}.",
+		Key: "on_complete", Kind: config.Any, Usage: "Events to run after the mock replies: a list of {name, parameters, after_response}.",
 		Set: func(d *mockDef, v config.Value) error { return setEvents(&d.events, d.dir, v) },
 	},
 	mockField{
@@ -591,6 +592,19 @@ var _replySchema = config.NewSchema(
 		},
 	},
 	replyField{
+		Key: "body_base64", Kind: config.String, Usage: "Body: bytes in standard base64, for a body that isn't UTF-8 text, such as an image. Line breaks are ignored.",
+		Set: func(r *replyDef, v config.Value) error {
+			b, err := base64.StdEncoding.DecodeString(v.Str)
+			if err != nil {
+				return config.Invalid(v, v.Key+" isn't standard base64: "+err.Error(), "encode the bytes with base64, padding included")
+			}
+
+			r.body, r.hasBody = b, true
+
+			return nil
+		},
+	},
+	replyField{
 		Key: "body_file", Kind: config.String, Usage: "File to read the body from. Relative paths start at the mock file's directory.",
 		Set: func(r *replyDef, v config.Value) error {
 			if v.Str == "" {
@@ -730,6 +744,10 @@ var _eventSchema = config.NewSchema(
 	eventField{
 		Key: "parameters", Kind: config.Any, Usage: "Parameters of the listener.",
 		Set: func(e *vlatte.EventConfig, v config.Value) error { e.Parameters = v.Any; return nil },
+	},
+	eventField{
+		Key: "after_response", Kind: config.Bool, Usage: "Send the response without waiting for the event, which runs on.",
+		Set: func(e *vlatte.EventConfig, v config.Value) error { e.AfterResponse = v.Bool; return nil },
 	},
 )
 
@@ -878,7 +896,7 @@ func decodeReply(r *replyDef, v config.Value) error {
 	obj, _ := v.Any.(map[string]any)
 
 	var bodies []string
-	for _, key := range []string{"body", "body_file", "multipart"} {
+	for _, key := range []string{"body", "body_base64", "body_file", "multipart"} {
 		if _, ok := obj[key]; ok {
 			bodies = append(bodies, key)
 		}
@@ -888,10 +906,14 @@ func decodeReply(r *replyDef, v config.Value) error {
 
 	// A template is text: a JSON body would be written as it is, with nothing rendered.
 	if _, isText := r.body.(string); r.templated && r.hasBody && !isText {
-		key := v.Key + ".template.enabled"
+		key, body := v.Key+".template.enabled", v.Key+".body"
+		if _, ok := obj["body_base64"]; ok {
+			body = v.Key + ".body_base64"
+		}
+
 		problems = append(problems, config.Problem{
 			Code: config.CodeConflict, Origin: v.Origin, Key: key,
-			Message: key + " is set with " + v.Key + ".body, which isn't text",
+			Message: key + " is set with " + body + ", which isn't text",
 			Hint:    "write the body as a string to render it as a template",
 		})
 	}
@@ -1042,33 +1064,8 @@ func setSteps(steps *[]vlatte.Step, v config.Value) error {
 
 // headerValues decodes an object of header values: a string, or a list of strings, each.
 func headerValues(v config.Value, dst *[]headerValue) error {
-	return config.Members(v, func(name string, m config.Value) error {
-		switch x := m.Any.(type) {
-		case string:
-			*dst = append(*dst, headerValue{name: name, value: x})
-		case []any:
-			values := make([]headerValue, 0, len(x))
-
-			err := config.Items(m, func(item config.Value) error {
-				s, ok := item.Any.(string)
-				if !ok {
-					return config.Mismatch(item, "a string", config.String)
-				}
-
-				values = append(values, headerValue{name: name, value: s})
-
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-
-			*dst = append(*dst, values...)
-		default:
-			return config.Mismatch(m, "a string or a list of strings", config.String)
-		}
-
-		return nil
+	return config.MemberStrings(v, func(name, value string) {
+		*dst = append(*dst, headerValue{name: name, value: value})
 	})
 }
 
@@ -1482,7 +1479,10 @@ func (r *replyDef) build(dir string) *Reply {
 		}
 	case r.hasBody:
 		s, isText := r.body.(string)
+		b, isBytes := r.body.([]byte)
 		switch {
+		case isBytes:
+			rep.Body(b)
 		case isText && templated:
 			rep.BodyTemplate(s)
 		case isText:
