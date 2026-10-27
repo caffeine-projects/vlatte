@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"slices"
 
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
@@ -44,13 +45,14 @@ func (app *Server) scenarioUses(ctx context.Context) (iter.Seq[matchscenario.Use
 		return nil, fmt.Errorf("grpc: listing mocks: %w", err)
 	}
 
-	return func(yield func(matchscenario.Use) bool) {
-		for m := range mocks {
-			for _, e := range m.expectations {
-				if sm, ok := e.Matcher.(*matchscenario.Matcher); ok && !yield(matchscenario.Use{MockID: m.ID(), Matcher: sm}) {
-					return
-				}
+	var uses []matchscenario.Use
+	for m := range mocks {
+		for _, e := range m.expectations {
+			if sm, ok := e.Matcher.(*matchscenario.Matcher); ok {
+				uses = append(uses, matchscenario.Use{MockID: m.ID(), Matcher: sm})
 			}
 		}
-	}, nil
+	}
+
+	return slices.Values(uses), nil
 }
