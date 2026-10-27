@@ -150,7 +150,7 @@ func TestScenario_NamesDifferingInCaseAreTwoScenarios(t *testing.T) {
 }
 
 func TestScenario_NoRequiredStateMatchesInAnyState(t *testing.T) {
-	// A mock of a scenario that requires no state matches whatever state the scenario is in, as in WireMock. It
+	// A mock of a scenario that requires no state matches whatever state the scenario is in. It
 	// required "", the state of no scenario, so it stopped matching once its scenario existed.
 	store := NewScenarioStore()
 	arg := vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), nil)
@@ -170,7 +170,7 @@ func TestScenario_NoRequiredStateMatchesInAnyState(t *testing.T) {
 }
 
 func TestScenario_ANewStateStartsTheScenario(t *testing.T) {
-	// A mock's new state moves its scenario, one no mock started too, as in WireMock: it was dropped, so mocks that
+	// A mock's new state moves its scenario, one no mock started too: it was dropped, so mocks that
 	// require no state could never move their scenario.
 	store := NewScenarioStore()
 	move := Scenario(store, "checkout", "", "paid")

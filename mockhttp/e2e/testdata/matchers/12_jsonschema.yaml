@@ -1,4 +1,4 @@
-# WireMock's matchesJsonSchema, with a schema version.
+# jsonschema, with a schema draft.
 id: schema
 request:
   method: POST

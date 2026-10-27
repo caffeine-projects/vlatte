@@ -196,6 +196,45 @@ func TestServeErrorsAreLogged(t *testing.T) {
 	require.Contains(t, buf.String(), errAccept.Error())
 }
 
+func TestClose_ReleasesWhatTheMocksHold(t *testing.T) {
+	// A mock's replier may hold a connection, such as a proxy's: Close releases it, and logs one that fails to close,
+	// as it returns nothing.
+	var buf bytes.Buffer
+	logger := zerolog.New(&buf)
+
+	m := MustNew(Setup().Logger(&logger))
+	m.MustStart()
+
+	held := &closingReply{err: errors.New("still busy")}
+	mock := m.MustMock(Method("Greetings").Reply(held)).Mocks()[0]
+
+	m.Close()
+
+	require.Equal(t, int32(1), held.closed.Load())
+	require.Contains(t, buf.String(), "server: Close: closing mock "+mock.ID())
+	require.Contains(t, buf.String(), "still busy")
+
+	require.NoError(t, mock.Close(), "a mock closes once")
+	require.Equal(t, int32(1), held.closed.Load())
+}
+
+// closingReply is a reply whose replier holds something to release: Close counts its calls and returns err.
+type closingReply struct {
+	err    error
+	closed atomic.Int32
+}
+
+func (r *closingReply) NewReplier(*Server, []protoreflect.MethodDescriptor) (Replier, error) {
+	return r, nil
+}
+
+func (r *closingReply) Reply(context.Context, *Call) error { return nil }
+
+func (r *closingReply) Close() error {
+	r.closed.Add(1)
+	return r.err
+}
+
 func TestClose_LogsAJournalThatFailsToClose(t *testing.T) {
 	// Close returns nothing: a journal that fails to write the index of its last segment, which the next server of
 	// its directory opens fast from, must be logged, not swallowed.
@@ -648,4 +687,28 @@ func TestNew_AGlobalEventOfNoListenerFails(t *testing.T) {
 	// A global event runs for every mock: one that names no listener fails New, rather than every call.
 	_, err := New(Setup().Silent().GlobalEvents(&vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "nobody"}}}))
 	require.ErrorContains(t, err, "server: global on_complete listener nobody at index 0 is not registered")
+}
+
+func TestNew_TemplateEnvAllowsVariablesOnTheDefaultEngine(t *testing.T) {
+	m, err := New(Setup().ConfigSources(ConfigArgs([]string{"--grpc-template-env=VLATTE_TEST_ALLOWED"})))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+
+	_, err = m.Config().TemplateEngine.Compile("body", `{{ env "VLATTE_TEST_ALLOWED" }}`)
+	require.NoError(t, err)
+
+	_, err = m.Config().TemplateEngine.Compile("body", `{{ env "VLATTE_TEST_OTHER" }}`)
+	require.ErrorContains(t, err, `env: "VLATTE_TEST_OTHER" is not allowed`)
+}
+
+func TestNew_TemplateEnvWithAnEngineOfTheUsersOwnFails(t *testing.T) {
+	// The variables would silently stay unreadable: the server can't change an engine it didn't make.
+	_, err := New(Setup().TemplateEngine(vlatte.MustNewGoTemplateEngine()).TemplateEnv("X"))
+	require.ErrorIs(t, err, errTemplateEnvWithEngine)
+	require.ErrorContains(t, err, "grpc.template.env")
+}
+
+func TestNew_TemplateEnvFromGoRefusesAnInvalidName(t *testing.T) {
+	_, err := New(Setup().TemplateEnv("A=B"))
+	require.ErrorContains(t, err, `environment variable name "A=B" is invalid`)
 }

@@ -213,6 +213,16 @@ func (c *journalCall) replied(ctx context.Context, err error) {
 	})
 }
 
+// proxied sets that the target of a recording answered the call, as replied does for a mock's answer.
+func (c *journalCall) proxied(ctx context.Context, err error) {
+	c.replied(ctx, err)
+	c.update(func() {
+		if c.entry.Outcome == journal.OutcomeMatched {
+			c.entry.Outcome = journal.OutcomeProxied
+		}
+	})
+}
+
 // failed sets that the call failed with err, whatever its answer.
 func (c *journalCall) failed(err error) {
 	c.update(func() { c.entry.Outcome, c.entry.Message = journal.OutcomeFailed, err.Error() })

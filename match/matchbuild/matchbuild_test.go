@@ -236,7 +236,7 @@ func TestBuildMatcher_RequestURINeedsAPathFromTheRoot(t *testing.T) {
 }
 
 func TestBuildMatcher_HasExactly(t *testing.T) {
-	// WireMock's hasExactly: as many values as matchers, each matched by a matcher of its own, in any order.
+	// hasExactly: as many values as matchers, each matched by a matcher of its own, in any order.
 	m, err := _registry.BuildMatcher([]any{"hasExactly", []any{[]any{"equal", "1"}, []any{"contains", "2"}}})
 	require.NoError(t, err)
 	assert.True(t, matches(t, m, []any{"20", "1"}))

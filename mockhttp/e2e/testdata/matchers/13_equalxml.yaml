@@ -1,4 +1,4 @@
-# WireMock's equalToXml with ignoreOrderOfSameNode.
+# eqx ignoring the order of child elements.
 id: xml
 request:
   method: POST

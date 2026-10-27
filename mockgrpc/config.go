@@ -3,6 +3,7 @@ package mockgrpc
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -21,6 +22,11 @@ import (
 
 // _defaultShutdownTimeout is how long Close waits for the calls in flight, unless Config.ShutdownTimeout says.
 const _defaultShutdownTimeout = 5 * time.Second
+
+// errTemplateEnvWithEngine says a server has both a TemplateEngine and grpc.template.env, which configures the engine
+// the server makes without one.
+var errTemplateEnvWithEngine = errors.New("config: grpc.template.env configures the default template engine, and the " +
+	"server has a TemplateEngine: allow the variables on it with vlatte.WithEnv")
 
 // Config configures a Server. As an Option, it sets every field of the server's configuration, its zero values
 // included: [Setup] sets only what its methods set, so its options compose.
@@ -95,6 +101,11 @@ type Config struct {
 	// TemplateEngine compiles the templates of replies and events. Nil uses a vlatte.GoTemplateEngine.
 	TemplateEngine vlatte.TemplateEngine
 
+	// TemplateEnv names the environment variables templates may read with env, from the setting grpc.template.env.
+	// It configures the vlatte.GoTemplateEngine the server makes without a TemplateEngine, so setting both is an
+	// error: allow them on that engine with vlatte.WithEnv.
+	TemplateEnv []string
+
 	// Parameters are the parameters templates read. Nil keeps them in memory.
 	Parameters vlatte.KV
 
@@ -112,6 +123,10 @@ type Config struct {
 
 	// Journal keeps a journal of the calls the server serves. Nil keeps none.
 	Journal *JournalConfig
+
+	// Record records the calls the server proxies as mock files, from Start to Close, and serves the recordings of its
+	// directory: see RecordConfig. Nil records nothing, until Server.StartRecording.
+	Record *RecordConfig
 
 	// NoNearMisses turns off the report of the mocks closest to a call no mock matched, which its journal entry
 	// lists. The report runs no matcher twice: it runs those matching never reached.
@@ -337,6 +352,12 @@ func (cb *ConfigBuilder) TemplateEngine(e vlatte.TemplateEngine) *ConfigBuilder 
 	return cb.set(func(conf *Config) { conf.TemplateEngine = e })
 }
 
+// TemplateEnv allows the templates of the server's default engine to read the environment variables names with env.
+// See Config.TemplateEnv.
+func (cb *ConfigBuilder) TemplateEnv(names ...string) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.TemplateEnv = names })
+}
+
 // Parameters sets the parameters templates read: {{ .Parameters.Get "key" }}.
 func (cb *ConfigBuilder) Parameters(params vlatte.KV) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.Parameters = params })
@@ -387,6 +408,25 @@ func (cb *ConfigBuilder) Journal(dir string) *ConfigBuilder {
 // NoNearMisses turns off the report of the mocks closest to a call no mock matched: see Config.NoNearMisses.
 func (cb *ConfigBuilder) NoNearMisses() *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.NoNearMisses = true })
+}
+
+// Record records the calls the server proxies, from Start to Close, with the default settings, which options change:
+// see RecordConfig.
+func (cb *ConfigBuilder) Record(options ...RecordConfigurer) *ConfigBuilder {
+	cb.sets = append(cb.sets, func(conf *Config) error {
+		rec := defaultRecordConfig()
+		for i, option := range options {
+			if err := option.Apply(rec); err != nil {
+				return fmt.Errorf("config: record option at index %d with type %T: %w", i, option, err)
+			}
+		}
+
+		conf.Record = rec
+
+		return nil
+	})
+
+	return cb
 }
 
 // Apply implements Option: it sets, in order, what the methods of cb set, and leaves the rest of conf as it is.
