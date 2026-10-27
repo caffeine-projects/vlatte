@@ -20,6 +20,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/fault"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
@@ -480,7 +481,7 @@ func TestFileStore_ADirectoryItCantUse(t *testing.T) {
 	require.NoError(t, os.Mkdir(filepath.Join(inTheWay, "hello.mock.yaml"), 0o700))
 	require.Error(t, store.Store(ctx, hello))
 
-	temps, err := filepath.Glob(filepath.Join(inTheWay, _fileStoreTempPattern))
+	temps, err := filepath.Glob(filepath.Join(inTheWay, adminapi.FileStoreTempPattern))
 	require.NoError(t, err)
 	require.Empty(t, temps)
 }
@@ -518,7 +519,7 @@ func refusingStore(dir string, names ...string) AdminStore {
 			return os.Remove(name)
 		}
 
-		return &fileStore{app: app, dir: dir, remove: remove}, nil
+		return newFileStore(app, dir, remove), nil
 	}
 }
 

@@ -107,8 +107,25 @@ func (l *fileLoader) loadLocked(app *Server) error {
 	return nil
 }
 
-// Reload loads the mock files of Config.MockFiles again: edited and removed files take effect, in one step. When a
-// file has problems, Reload changes nothing.
+// Reload loads the mock files of Config.MockFiles again, then the mocks of the admin API's persistent store, if any:
+// edited and removed files take effect, and changes made to the store directly. When a file has problems, Reload
+// changes nothing.
 func (app *Server) Reload() error {
-	return app.loader.load(app)
+	return app.load()
+}
+
+// load loads the mock files, then the mocks of the admin API's persistent store, if any.
+func (app *Server) load() error {
+	if err := app.loader.load(app); err != nil {
+		return err
+	}
+
+	// After the mock files: a mock of the persistent store gives way to a mock file's mock of its id.
+	if app.adminStore != nil {
+		if err := app.adminStore.Reload(context.Background()); err != nil {
+			return fmt.Errorf("server: admin store: %w", err)
+		}
+	}
+
+	return nil
 }

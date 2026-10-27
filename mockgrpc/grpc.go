@@ -41,6 +41,8 @@ var (
 var ErrStreamInterceptorSlot = errors.New("journal: pass stream interceptors with grpc.ChainStreamInterceptor: " +
 	"the journal takes grpc.StreamInterceptor")
 
+var errAdminStoreWithoutAdmin = errors.New("server: AdminStore needs an admin API: pass ConfigBuilder.Admin")
+
 // Kind is the protocol of gRPC mock servers, the Kind of their journal entries.
 const Kind vlatte.Kind = "grpc"
 
@@ -57,11 +59,15 @@ type Server struct {
 
 	logger    *zerolog.Logger
 	storage   vlatte.Store[*Mock]
+	data      atomic.Pointer[map[string]any] // what templates read as .Data: see SetData
 	resolver  *resolver
 	scenarios *matchscenario.Store
 	runner    *vlatte.EventRunner // runs the on_complete events of mocks
 	admin     adminapi.Server     // nil without Config.Admin
 	events    *adminapi.Events    // the admin API's; nil without it
+
+	// adminStore writes the changes of the admin API through to its persistent store; nil without Config.AdminStore.
+	adminStore *adminapi.Store[*Mock]
 
 	// webhooks is the transport the server gives webhooks. Close closes its idle connections, so they don't outlive
 	// the server.
@@ -147,6 +153,16 @@ func New(config ...Option) (*Server, error) {
 
 	if conf.Parameters == nil {
 		conf.Parameters = vlatte.NewMemoryKV()
+	}
+
+	if err := checkProviderKeys(conf.TemplateDataProviders); err != nil {
+		return nil, err
+	}
+
+	// The admin API changes mocks through a store of its own when they persist: the server's other mocks, of mock
+	// files and code, never reach the persistent store.
+	if conf.AdminStore != nil && conf.Admin == nil {
+		return nil, errAdminStoreWithoutAdmin
 	}
 
 	store := vlatte.NewStore[*Mock]()
@@ -243,12 +259,24 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	if conf.Admin != nil {
+		adminMocks := store
+
+		if conf.AdminStore != nil {
+			durable, err := conf.AdminStore(app)
+			if err != nil {
+				return nil, fmt.Errorf("server: admin store: %w", err)
+			}
+
+			app.adminStore = adminapi.NewStore(store, durable, app.logger)
+			adminMocks = app.adminStore
+		}
+
 		app.events = adminapi.NewEvents()
 		api, err := conf.Admin.Serve(adminapi.Capabilities{
 			Kind:   string(Kind),
 			URL:    app.Addr,
 			Logger: app.logger,
-			Mocks: adminapi.MocksOf(store, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
+			Mocks: adminapi.MocksOf(adminMocks, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
 				return buildAdminMock(app, content, format)
 			})),
 			Files:     adminFiles{app},
@@ -481,7 +509,7 @@ func (app *Server) start(op string, useTLS bool) error {
 	}
 
 	// The mock files load before the server serves, so its first call finds them, and so does the recording.
-	err := app.loader.load(app)
+	err := app.load()
 	if err == nil {
 		err = app.startConfiguredRecording()
 	}
