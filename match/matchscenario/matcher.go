@@ -60,7 +60,7 @@ func (m *Matcher) Match(arg vlatte.MatcherArg) (bool, error) {
 
 // Claim implements vlatte.Claimer. In one step, it checks the scenario's instance is still in the state the mock
 // requires and moves it to the mock's new state. It reports false, moving nothing, when another request moved the
-// instance since the mock matched, or the key of arg is an error.
+// instance since the mock matched, or the key of arg is an error. Otherwise, a mock that requires no state takes it.
 func (m *Matcher) Claim(arg vlatte.MatcherArg) bool {
 	k, err := instanceKey(arg.Value())
 

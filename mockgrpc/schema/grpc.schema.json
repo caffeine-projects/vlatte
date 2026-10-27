@@ -92,6 +92,13 @@
         "body": {
           "description": "Matcher list of the request as JSON text.",
           "$ref": "#/$defs/matcher"
+        },
+        "custom": {
+          "description": "Matchers of the whole call, such as custom ones of the server: a list of matcher lists, or names.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/matcher"
+          }
         }
       },
       "required": [

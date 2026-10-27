@@ -22,6 +22,7 @@ type describedRequest struct {
 	header        []namedMatcher
 	fields        []namedMatcher
 	body          vlatte.Matcher
+	custom        []vlatte.Matcher
 	message       proto.Message
 	messages      []proto.Message
 	undescribable bool // a matcher no mock file can hold, such as CallMatches's
@@ -45,10 +46,10 @@ type mockDescription struct {
 // Describe implements descriptor.SelfDescriptive: the mock as a mock file writes it, which the admin API returns and
 // saves. A mock read from a document is described by it, with its ID. A mock built in Go is described as far as mock
 // files can hold it. A Func or Echo reply can't be, even in a Seq or Rand: encoding the description of its mock fails.
-// A Shared reply, a Seq or Rand reply of other replies than Response, a CallMatches matcher, a callback, a custom
-// matcher or a DelayFunc delay can't be either, and is left out. A mock with a matcher or a delay left out is
-// described without its reply too, so its description doesn't load back as a mock that matches more calls, or replies
-// sooner.
+// A Shared reply, a Seq or Rand reply of other replies than Response, a CallMatches matcher, a callback, a matcher
+// that doesn't describe itself or a DelayFunc delay can't be either, and is left out. A mock with a matcher or a delay
+// left out is described without its reply too, so its description doesn't load back as a mock that matches more
+// calls, or replies sooner.
 func (m *Mock) Describe() descriptor.Descriptor {
 	if m.doc != nil {
 		doc := maps.Clone(m.doc)
@@ -197,6 +198,22 @@ func (d *mockDescription) describeRequest(method string) (map[string]any, bool) 
 
 		if ok {
 			req["body"] = v
+		}
+	}
+
+	if len(d.request.custom) > 0 {
+		custom := make([]any, 0, len(d.request.custom))
+		for _, m := range d.request.custom {
+			v, ok := describeMatcher(m)
+			complete = complete && ok
+
+			if ok {
+				custom = append(custom, v)
+			}
+		}
+
+		if len(custom) > 0 {
+			req["custom"] = custom
 		}
 	}
 

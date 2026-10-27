@@ -1,6 +1,7 @@
 package mockgrpc
 
 import (
+	"cmp"
 	"context"
 	"crypto/x509"
 	"errors"
@@ -25,6 +26,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
@@ -256,6 +258,7 @@ func New(config ...Option) (*Server, error) {
 			Logs:      logs,
 			Journal:   j,
 			Pattern:   app.adminRequestPattern,
+			Matchers:  app.matchers(),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("server: %w", err)
@@ -568,6 +571,12 @@ func (app *Server) register(desc *grpc.ServiceDesc, impl any) {
 	}
 
 	app.server.RegisterService(desc, impl)
+}
+
+// matchers returns the registry that builds the matcher lists of the server's mock files: Config.Matchers, or the
+// built-in matchers.
+func (app *Server) matchers() *matchbuild.Registry {
+	return cmp.Or(app.config.Matchers, _builtinMatchers)
 }
 
 // warnUnjournaled warns of each service registered on GRPCServer, past the server, with unary methods: their entries

@@ -194,6 +194,23 @@ func (b *Builder) CallMatches(fn func(call *Call) (bool, error)) *Builder {
 	return b
 }
 
+// Matches adds a matcher of the whole call: m gets the *Call, as the function of CallMatches does. A mock file's
+// request.custom adds matchers this way, such as custom ones of the server's registry: see
+// [ConfigBuilder.Matchers]. Unlike a function, a matcher that describes itself is described, under request.custom,
+// so the admin API's store keeps it.
+func (b *Builder) Matches(m vlatte.Matcher) *Builder {
+	b.described.custom = append(b.described.custom, m)
+	b.readsRequest = true
+	b.expectations = append(b.expectations, &vlatte.Eval[*Call]{
+		Target:   int(_scopeRequest),
+		Key:      "custom",
+		Matcher:  m,
+		Selector: selectCall,
+	})
+
+	return b
+}
+
 // Times sets how many calls each mock built from the builder serves: 1 or more. Each mock counts its own, so a mock
 // built again, as Remock does, starts from zero. The last call wins.
 func (b *Builder) Times(times int64) *Builder {
@@ -244,9 +261,10 @@ func (b *Builder) ScenarioKey(tmpl string) *Builder {
 	return b
 }
 
-// ScenarioStateWillBe sets the state the scenario moves to when this mock is picked to answer a call, before it answers:
-// the next call matches in that state, and of two calls in one state, only one gets this mock. The scenario moves even
-// when the mock then fails to answer, as when its client leaves during its delay.
+// ScenarioStateWillBe sets the state the scenario moves to when this mock is picked to answer a call, before it
+// answers: the next call matches in that state. With [Builder.ScenarioStateIs], of two calls in that state, only one
+// gets this mock; without it, the mock matches in every state, so every call gets it. The scenario moves even when the
+// mock then fails to answer, as when its client leaves during its delay.
 func (b *Builder) ScenarioStateWillBe(newState string) *Builder {
 	b.scenarioNewState = newState
 	return b

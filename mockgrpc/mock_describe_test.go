@@ -340,6 +340,7 @@ func TestDescribe_AMockWithAMatcherOrDelayItCannotHoldHasNoResponse(t *testing.T
 		Method("Greetings").ID("header").Header("x-team", custom).Header("x-env", match.Equal("ci")).Reply(reply),
 		Method("Greetings").ID("field").Field("message", custom).Reply(reply),
 		Method("Greetings").ID("body").Body(custom).Reply(reply),
+		Method("Greetings").ID("custom").Matches(custom).Matches(match.Not(match.Nil())).Reply(reply),
 		Method("Greetings").ID("message").Message(&pb.HiReq{Message: "\xff"}).Reply(reply),
 		Method("Upload").ID("messages").Messages(&pb.ListItem{Key: "\xff"}).Reply(reply),
 		Method("Greetings").ID("delay").DelayFunc(vlatte.Latency(time.Millisecond)).Reply(reply),
@@ -351,6 +352,7 @@ func TestDescribe_AMockWithAMatcherOrDelayItCannotHoldHasNoResponse(t *testing.T
 		"header":           `{"id": "header", "request": {"method": "Greetings", "header": {"x-env": ["eq", "ci"]}}}`,
 		"field":            `{"id": "field", "request": {"method": "Greetings"}}`,
 		"body":             `{"id": "body", "request": {"method": "Greetings"}}`,
+		"custom":           `{"id": "custom", "request": {"method": "Greetings", "custom": [["not", ["nil"]]]}}`,
 		"message":          `{"id": "message", "request": {"method": "Greetings"}}`,
 		"messages":         `{"id": "messages", "request": {"method": "Upload"}}`,
 		"delay":            `{"id": "delay", "request": {"method": "Greetings"}}`,
@@ -369,6 +371,33 @@ func TestDescribe_AMockWithAMatcherOrDelayItCannotHoldHasNoResponse(t *testing.T
 			require.ErrorContains(t, err, "the mock has no response", mock.ID())
 		}
 	}
+}
+
+func TestDescribe_ACustomMatcherOfTheCallLoadsBack(t *testing.T) {
+	// A matcher of Matches that describes itself, such as a custom one of the server's registry, is written under
+	// request.custom, so the mock loads back on a server with that registry: a function of CallMatches can't.
+	origin := fileServer(t, Setup().Matchers(_customMatchers))
+	greets, err := _customMatchers.BuildMatcher([]any{"greets", "ann"})
+	require.NoError(t, err)
+
+	scope := origin.MustMock(Method("Greetings").ID("greets").Matches(greets).Reply(Message(&pb.HiRes{Message: "hi ann"})))
+
+	doc, err := scope.Mock("greets").Describe().MarshalJSON()
+	require.NoError(t, err)
+	require.JSONEq(t, `{"id": "greets", "request": {"method": "Greetings", "custom": [["greets", "ann"]]}, `+
+		`"response": {"messages": [{"message": "hi ann"}]}}`, string(doc))
+
+	loaded := fileServer(t, Setup().Matchers(_customMatchers))
+	_, err = loaded.Mock(FromBytes(doc, "json"))
+	require.NoError(t, err, "%s", doc)
+
+	c := pb.NewTestServiceClient(loaded.MustDial())
+	res, err := c.Greetings(t.Context(), &pb.HiReq{Message: "ann"})
+	require.NoError(t, err)
+	require.Equal(t, "hi ann", res.GetMessage())
+
+	_, err = c.Greetings(t.Context(), &pb.HiReq{Message: "bob"})
+	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
 func TestDescribe_AMockOfADocumentSaysWhetherItIsEnabled(t *testing.T) {
