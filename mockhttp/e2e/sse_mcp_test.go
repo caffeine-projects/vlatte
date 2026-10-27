@@ -95,7 +95,7 @@ func TestSSE_MCPAClientResumesAToolCallTheServerClosed(t *testing.T) {
 			Header(_mcpSessionID, match.Equal("weather-1")).
 			Body(match.JSONPath("$.method", match.Equal("tools/call")), match.JSONPath("$.params.name", match.Equal("get_forecast"))).
 			Reply(mockhttp.OK().EventStream(mockhttp.NewEventStream(
-				mockhttp.NewEvent().ID(`{{ (fromJson .Request.Body.String).id }}`).Data(""),
+				mockhttp.NewEvent().ID(`{{ (fromJSON .Request.Body.String).id }}`).Data(""),
 			).Retry(10*time.Millisecond).Template())),
 		mockhttp.Getf("/mcp").ID("forecast-resume").
 			Header(_mcpSessionID, match.Equal("weather-1")).

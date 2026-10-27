@@ -11,7 +11,7 @@ response:
     events:
       - event: message
         data: >-
-          {"jsonrpc": "2.0", "id": {{ (fromJson .Request.Body.String).id | toJson }}, "result": {"tools": [{
+          {"jsonrpc": "2.0", "id": {{ (fromJSON .Request.Body.String).id | toJSON }}, "result": {"tools": [{
           "name": "get_weather", "description": "Current weather of a city",
           "inputSchema": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}]}}
   template: {enabled: true}

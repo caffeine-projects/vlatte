@@ -14,8 +14,8 @@ response:
     events:
       - event: message
         data: >-
-          {{ $r := fromJson .Request.Body.String }}{"jsonrpc": "2.0", "id": {{ $r.id | toJson }}, "result": {
-          "protocolVersion": {{ $r.params.protocolVersion | toJson }},
+          {{ $r := fromJSON .Request.Body.String }}{"jsonrpc": "2.0", "id": {{ $r.id | toJSON }}, "result": {
+          "protocolVersion": {{ $r.params.protocolVersion | toJSON }},
           "capabilities": {"tools": {"listChanged": true}},
           "serverInfo": {"name": "weather", "version": "1.0.0"}}}
   template: {enabled: true}

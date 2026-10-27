@@ -8,5 +8,5 @@ response:
   status: 200
   header:
     content-type: application/json
-  body: '{"jsonrpc": "2.0", "id": {{ (fromJson .Request.Body.String).id | toJson }}, "error": {"code": -32601, "message": "Method not found"}}'
+  body: '{"jsonrpc": "2.0", "id": {{ (fromJSON .Request.Body.String).id | toJSON }}, "error": {"code": -32601, "message": "Method not found"}}'
   template: {enabled: true}
