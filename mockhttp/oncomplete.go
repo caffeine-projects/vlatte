@@ -2,7 +2,6 @@ package mockhttp
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/rs/zerolog"
 
@@ -24,7 +23,6 @@ type OnComplete struct {
 	dir       string
 	logger    *zerolog.Logger
 	transport http.RoundTripper
-	timeout   time.Duration
 }
 
 func (i *OnComplete) Kind() vlatte.Kind {
@@ -66,10 +64,4 @@ func (i *OnComplete) Logger() *zerolog.Logger {
 // such as webhooks send through it when they have none of their own, and their connections don't outlive the server.
 func (i *OnComplete) Transport() http.RoundTripper {
 	return i.transport
-}
-
-// WebhookTimeout is the server's Config.WebhookTimeout, so webhooks without a timeout of their own wait for their
-// answer as long as the server says. 0 leaves them to their default.
-func (i *OnComplete) WebhookTimeout() time.Duration {
-	return i.timeout
 }

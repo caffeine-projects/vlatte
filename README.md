@@ -210,7 +210,9 @@ response:
 
 **Types.** Each key takes one type, as the schema says. Write text in quotes where a string goes, as in `name: "123"`, and numbers bare, as in `priority: 10`. Bools read the way Go's `strconv.ParseBool` reads them, so `true`, `"true"`, `t` and `1` are all true. A value of the wrong type is an error that says how to write it.
 
-**Durations.** `delay`, `proxy.timeout`, the durations of [faults](#faults) and the `delay` of a [webhook](#webhooks) take whole milliseconds (`1500`) or a Go duration (`1.5s`). `"1500"` in quotes is neither.
+**Bodies.** A reply's `body` is text as is, and any other value as JSON. A body that isn't UTF-8 text, such as an image or text in another encoding, goes in `body_base64`, as standard base64 (`body_base64: //4A`), whose line breaks are ignored, or in a `body_file`. A reply takes one of `body`, `body_base64`, `body_file` and `multipart` at most.
+
+**Durations.** `delay`, `proxy.timeout`, the durations of [faults](#faults) and the `delay` and `timeout` of a [webhook](#webhooks) take whole milliseconds (`1500`) or a Go duration (`1.5s`). `"1500"` in quotes is neither.
 
 **Matching.** Most of a request is text: its path, query, headers and form values. A matcher reads that text as the type it compares with:
 - `[equal, 10]` and `[isIn, [10, 20]]` match `?page=10`;
@@ -563,6 +565,7 @@ m.MustMock(mockhttp.Postf("/orders").
 | `header`, `header_template` | Headers by name, each a string. Names ignore case, so a name is set once. |
 | `body`, `body_template`, `body_file`, `multipart`, `multipart_template` | The body, one of them at most. Multipart bodies are as in [replies](#forms-and-multipart). |
 | `delay` | How long to wait before sending, once the mock replied. The response waits for it too, unless the webhook runs after the response. |
+| `timeout` | How long the request may take, from sending it to its answer. Without it, the listener's timeout, or else 10s. |
 
 Templates render with the data of the request that completed the mock: see [Templates](#templates). A mistake, such as a missing URL, two bodies or a template that doesn't compile, fails the mock when it is built.
 
@@ -588,7 +591,7 @@ on_complete:
       delay: 100ms
 ```
 
-**Failures.** A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning, and the request's [journal](#request-journal) entry, if the server keeps one, tells it in its `Message`. The timeout is 10 seconds: `webhook.WithTimeout` changes it for one webhook, and the server's `webhook.timeout` setting (`Config.WebhookTimeout`) for webhooks without one, where 0 means 10 seconds, unlike `proxy.timeout`. A webhook reads up to 256 KiB of the answer, so its connection carries the next one. A response waits for a webhook at most its delay plus the timeout.
+**Failures.** A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning, and the request's [journal](#request-journal) entry, if the server keeps one, tells it in its `Message`. The timeout is 10 seconds: a webhook's `timeout` parameter (`Options().Timeout(d)` in Go) changes it for that webhook, and `webhook.WithTimeout` for every webhook its listener sends, where 0 means 10 seconds, unlike `proxy.timeout`. The CLI's `webhook.timeout` setting is the `WithTimeout` of its listener, for HTTP and gRPC mocks. A webhook reads up to 256 KiB of the answer, so its connection carries the next one. A response waits for a webhook at most its delay plus the timeout.
 
 **Logs.** Webhooks log each request and its answer with the server's logger, so `Setup().Silent()` silences them too. `webhook.WithLogger` gives them a logger of their own.
 
@@ -841,7 +844,7 @@ The `vlatte` command serves the admin API by default: `admin: false` (`--admin=f
 | `POST /reset` | Removes the mocks added through the admin API, loads the mock files again, saved ones included, starts every scenario over, and clears the [journal](#request-journal). Mocks added in code stay as they are. The mocks of a persistent store come back from it: reset never deletes what it holds. |
 | `GET /mocks` | Lists every mock, enabled or not, with its `priority`, `enabled`, `hits` and `origin`. |
 | `POST /mocks` | Adds the mock of the body, a [mock file](#mock-files). An id in use is a `409`. |
-| `GET /mocks/{id}` | The mock as a mock file describes it, which `PUT` and `POST` take back. |
+| `GET /mocks/{id}` | The mock as a mock file describes it, which `PUT` and `POST` take back. A mock whose reply a mock file can't hold, an `Echo`, `Func` or `Handler`, answers `500` with the code `describe_failed`. |
 | `PUT /mocks/{id}` | Replaces the mock, in one step. The body's id must be the path's. |
 | `PATCH /mocks/{id}` | Enables or disables the mock: `{"enabled": false}`. |
 | `DELETE /mocks/{id}`, `DELETE /mocks` | Removes the mock, or every mock. |
@@ -1128,7 +1131,7 @@ curl http://127.0.0.1:8080/hello
 
 Without `--addr`, it listens on a random port and prints the URL. Settings can also come from a `.vlatterc` file or `VLATTE_*` environment variables; see [Configuration](#configuration). Run `vlatte --help` to list them, and `vlatte completion --help` to set up shell completion.
 
-Mock files can send [webhooks](#webhooks): the CLI registers the `webhook` listener, and `--webhook-timeout` bounds each request.
+Mock files can send [webhooks](#webhooks): the CLI registers the `webhook` listener, and `--webhook-timeout` bounds each request that sets no `timeout` of its own.
 
 It [records](#recording-and-playback) a service until it stops, and serves the recordings on the next run:
 

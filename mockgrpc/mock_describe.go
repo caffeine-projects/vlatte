@@ -3,6 +3,7 @@ package mockgrpc
 import (
 	json "encoding/json/v2"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -43,10 +44,11 @@ type mockDescription struct {
 
 // Describe implements descriptor.SelfDescriptive: the mock as a mock file writes it, which the admin API returns and
 // saves. A mock read from a document is described by it, with its ID. A mock built in Go is described as far as mock
-// files can hold it: a Func, Echo or Shared reply, a Seq or Rand reply of other replies than Response, a CallMatches
-// matcher, a callback, a custom matcher or a DelayFunc delay can't be, and is left out. A mock with a matcher or a
-// delay left out is described without its reply too, so its description doesn't load back as a mock that matches
-// more calls, or replies sooner.
+// files can hold it. A Func or Echo reply can't be, even in a Seq or Rand: encoding the description of its mock fails.
+// A Shared reply, a Seq or Rand reply of other replies than Response, a CallMatches matcher, a callback, a custom
+// matcher or a DelayFunc delay can't be either, and is left out. A mock with a matcher or a delay left out is
+// described without its reply too, so its description doesn't load back as a mock that matches more calls, or replies
+// sooner.
 func (m *Mock) Describe() descriptor.Descriptor {
 	if m.doc != nil {
 		doc := maps.Clone(m.doc)
@@ -105,6 +107,13 @@ func (m *Mock) Describe() descriptor.Descriptor {
 	req, complete := d.describeRequest(m.method)
 	doc["request"] = req
 
+	// A Func or Echo reply, unlike a part left out, is never in a mock file: the description fails rather than show the
+	// mock.
+	if err := notDescribed(m.reply); err != nil {
+		doc["response"] = descriptor.Fail("response", err)
+		return descriptor.Root(doc)
+	}
+
 	if !complete || d.delayFunc {
 		return descriptor.Root(doc)
 	}
@@ -133,6 +142,30 @@ func (m *Mock) Describe() descriptor.Descriptor {
 	}
 
 	return descriptor.Root(doc)
+}
+
+// notDescribed returns why a mock file can never hold reply, or a reply of its Seq or Rand: it is a Func or an Echo.
+func notDescribed(reply Reply) error {
+	var replies []Reply
+
+	switch r := reply.(type) {
+	case ReplierFunc:
+		return errFuncNotDescribed
+	case *EchoReply:
+		return errEchoNotDescribed
+	case *SequentialReply:
+		replies = append(slices.Clone(r.replies), r.replyAfterSequenceEnded)
+	case *RandomReply:
+		replies = r.replies
+	}
+
+	for _, r := range replies {
+		if err := notDescribed(r); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // describeRequest describes the request part of a mock of method, and reports false when a matcher is left out.

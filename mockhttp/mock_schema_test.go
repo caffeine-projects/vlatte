@@ -191,6 +191,11 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"trailer value as a list of numbers", ok + "response: {trailer: {x: [1]}}\n", []want{{config.CodeInvalidValue, "response.trailer.x[0]", "must be a string, not a number", ""}}},
 		{"null body", ok + "response: {body: null}\n", []want{{config.CodeInvalidValue, "response.body", "is null", `write "" for an empty body`}}},
 		{"body and body_file", ok + "response: {body: x, body_file: y.txt}\n", []want{{config.CodeConflict, "response.body_file", "response.body_file is set with response.body", ""}}},
+		{"body_base64 that isn't base64", ok + "response: {body_base64: '//4'}\n", []want{{config.CodeInvalidValue, "response.body_base64", "response.body_base64 isn't standard base64", "padding included"}}},
+		{"body_base64 as a number", ok + "response: {body_base64: 5}\n", []want{{config.CodeInvalidValue, "response.body_base64", "response.body_base64 must be a string, not a number", ""}}},
+		{"body and body_base64", ok + "response: {body: x, body_base64: eA==}\n", []want{{config.CodeConflict, "response.body_base64", "response.body_base64 is set with response.body", "keep one of them"}}},
+		{"body_base64 and body_file", ok + "response: {body_base64: eA==, body_file: y.txt}\n", []want{{config.CodeConflict, "response.body_file", "response.body_file is set with response.body_base64", ""}}},
+		{"templated base64 body", ok + "response: {body_base64: eA==, template: {enabled: true}}\n", []want{{config.CodeConflict, "response.template.enabled", "response.template.enabled is set with response.body_base64, which isn't text", "write the body as a string"}}},
 		{"empty body_file", ok + "response: {body_file: ''}\n", []want{{config.CodeInvalidValue, "response.body_file", "expected a file name", ""}}},
 		{"template data as a number", ok + "response: {template: {data: 5}}\n", []want{{config.CodeInvalidValue, "response.template.data", "must be an object or a list", ""}}},
 		{"templated JSON body", ok + "response: {body: {a: 1}, template: {enabled: true}}\n", []want{{config.CodeConflict, "response.template.enabled", "response.template.enabled is set with response.body, which isn't text", "write the body as a string"}}},
@@ -532,6 +537,25 @@ func TestMockFile_ServesTrailers(t *testing.T) {
 
 	require.Equal(t, "ok", string(body))
 	require.Equal(t, "done", res.Trailer.Get("X-End"))
+}
+
+func TestMockFile_ServesABase64BodyAsItsBytes(t *testing.T) {
+	// #42: a body that isn't UTF-8, such as an image or text in another encoding, has no place in body, whose text
+	// JSON and YAML hold as UTF-8. body_base64 holds any bytes, as WireMock's base64Body does.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(FromBytes([]byte("request: {path: /b}\nresponse:\n  body_base64: //4A\n"), "yaml"))
+	m.MustMock(FromBytes([]byte("request: {path: /empty}\nresponse:\n  body_base64: ''\n"), "yaml"))
+
+	res, body := fetch(t, m.URL("/b"))
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, []byte{0xff, 0xfe, 0x00}, body)
+
+	res, body = fetch(t, m.URL("/empty"))
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Empty(t, body)
 }
 
 func TestMockFile_ServesAnyJSONValueAsItsJSON(t *testing.T) {
@@ -1015,6 +1039,7 @@ var _scalarKeys = []struct {
 		return map[string]any{"request": map[string]any{"path_template": v}}
 	}},
 	{"response.status", int64(200), inReply("status")},
+	{"response.body_base64", "//4A\n//4A\n", inReply("body_base64")},
 	{"response.body_file", "b.txt", inReply("body_file")},
 	{"response.encoding", "gzip", inReply("encoding")},
 	{"response.template.enabled", true, func(v any) map[string]any {

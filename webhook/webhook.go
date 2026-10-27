@@ -68,8 +68,9 @@ type Transform func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Ar
 // as a body_file, open from the Kit's Dir: the directory of the mock file. An event without a Kit logs nothing,
 // sends with http.DefaultTransport, and opens files from the working directory. A send fails when the target can't be
 // reached in time, or answers with a status outside 2xx; a redirect isn't followed. A send reads up to 256 KiB of the
-// answer, within its time, so its connection carries the next one. The time is WithTimeout's, or else the event's:
-// mockhttp gives the server's Config.WebhookTimeout. Without either, it is 10s. A zero WebHook is ready to use.
+// answer, within its time, so its connection carries the next one. The time is the webhook's own timeout parameter,
+// or else WithTimeout's, the timeout of every webhook the WebHook sends, such as the vlatte command's webhook.timeout
+// setting. Without either, it is 10s. A zero WebHook is ready to use.
 type WebHook struct {
 	transport http.RoundTripper
 	transform Transform
@@ -254,7 +255,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 		Msgf("---> WEBHOOK REQUEST %s %s", method, u.Path)
 
 	// The timeout counts from the send, after the delay.
-	timeout := cmp.Or(w.timeout, timeoutOf(args), httpx.DefaultWebhookTimeout)
+	timeout := cmp.Or(webhookArgs.Timeout, w.timeout, httpx.DefaultWebhookTimeout)
 
 	sendCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -309,8 +310,12 @@ type Args struct {
 	Multipart MultipartBody
 
 	// Delay is how long the webhook waits, once the mock replied, before it sends the request. The response waits for
-	// it too, unless the event runs after the response. The WebHook's timeout counts from the send.
+	// it too, unless the event runs after the response. The timeout counts from the send.
 	Delay time.Duration
+
+	// Timeout limits how long the request may take, from sending it to its answer. It wins over the WebHook's
+	// WithTimeout. 0 keeps that one, or else 10s.
+	Timeout time.Duration
 
 	dir string // where relative files open from: the mock file's directory; "" is the working directory
 }
@@ -346,6 +351,10 @@ func (a *Args) Describe() descriptor.Descriptor {
 
 	if a.Delay > 0 {
 		params["delay"] = a.Delay.String()
+	}
+
+	if a.Timeout > 0 {
+		params["timeout"] = a.Timeout.String()
 	}
 
 	return descriptor.New("parameters", params)
@@ -398,7 +407,7 @@ func (a *Args) check(engine vlatte.TemplateEngine) error {
 }
 
 // validate checks what a request needs, and what decoding a map can't check for Args built in Go: one of URL and
-// URLTemplate, a URL a request can go to, a valid method, one body at most, a delay of 0 or more, a Content-Type only
+// URLTemplate, a URL a request can go to, a valid method, one body at most, a delay and a timeout of 0 or more, a Content-Type only
 // from a multipart body, and each header once, as header names ignore case.
 func (a *Args) validate() error {
 	switch {
@@ -422,6 +431,10 @@ func (a *Args) validate() error {
 
 	if a.Delay < 0 {
 		return errorBadArg(fmt.Errorf("delay %s is negative", a.Delay))
+	}
+
+	if a.Timeout < 0 {
+		return errorBadArg(fmt.Errorf("timeout %s is negative", a.Timeout))
 	}
 
 	names := make(map[string]string, len(a.Header)+len(a.HeaderTemplate))
@@ -503,6 +516,10 @@ var _argsSchema = config.NewSchema(
 		Key: "delay", Kind: config.Duration, Usage: "How long to wait before sending, once the mock replied; the response waits for it too, unless the event runs after the response: milliseconds or a Go duration (1.5s).",
 		Set: func(a *Args, v config.Value) error { a.Delay = v.Dur; return nil },
 	},
+	argsField{
+		Key: "timeout", Kind: config.Duration, Usage: "How long the request may take, from sending it to its answer: milliseconds or a Go duration (1.5s). Empty keeps the listener's, or else 10s.",
+		Set: func(a *Args, v config.Value) error { a.Timeout = v.Dur; return nil },
+	},
 )
 
 // _exclusive lists the sets of parameters of which only one can be set.
@@ -533,7 +550,7 @@ func argsOf(params vlatte.Parameters, origin, dir string) (*Args, error) {
 //   - header and header_template, whose values are templates: objects of strings;
 //   - one body: body, body_template, a template, or body_file, a string; or multipart, or multipart_template, whose
 //     text is templates: an object with the type, boundary, params and parts of the body;
-//   - delay: milliseconds, or a Go duration such as 1.5s.
+//   - delay and timeout: milliseconds, or a Go duration such as 1.5s.
 //
 // As in mock files, each value must have its type, and other keys are errors. The webhook's checks of what a request
 // needs, such as one of url and url_template, come when the mock is built. A map built in code means what its
@@ -735,16 +752,6 @@ func headerOf(v config.Value, dst *map[string]string) error {
 	*dst = header
 
 	return err
-}
-
-// timeoutOf returns how long a send waits for its answer as the event says, as mockhttp's OnComplete gives the server's
-// Config.WebhookTimeout, or 0 when it doesn't say.
-func timeoutOf(args vlatte.OnComplete) time.Duration {
-	if t, ok := args.(interface{ WebhookTimeout() time.Duration }); ok {
-		return max(t.WebhookTimeout(), 0)
-	}
-
-	return 0
 }
 
 // originOf names where the parameters of an event come from, for problems: the mock that completed.
