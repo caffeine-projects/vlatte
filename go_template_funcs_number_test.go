@@ -12,7 +12,7 @@ func TestArithmetic(t *testing.T) {
 		{name: "a float difference", text: `{{ sub 2.5 1 }}`, want: "1.5"},
 		{name: "unsigned integers", text: `{{ add . 1 }}`, data: uint8(7), want: "8"},
 		{name: "an unsigned integer too large for an int", text: `{{ add . 1 }}`, data: uint64(math.MaxUint64), err: "error calling add: 18446744073709551615 overflows int"},
-		{name: "JSON numbers are floats", text: `{{ mul (index (fromJSON "[4]") 0) 2 }}`, want: "8"},
+		{name: "JSON numbers are floats", text: `{{ index (fromJSON "[4]") 0 | printf "%T" }} {{ mul (index (fromJSON "[4]") 0) 2 }}`, want: "float64 8"},
 		{name: "results feed other functions", text: `{{ substring 0 (sub (len .) 1) . }}`, data: "abc", want: "ab"},
 		{
 			// An overflow would answer a wrong number: it fails instead.
@@ -20,6 +20,7 @@ func TestArithmetic(t *testing.T) {
 		},
 		{name: "integer overflow below", text: `{{ sub -9223372036854775807 2 }}`, err: "error calling sub: integer overflow"},
 		{name: "integer overflow of a product", text: `{{ mul 4611686018427387904 2 }}`, err: "error calling mul: integer overflow"},
+		{name: "integer overflow of a quotient", text: `{{ div -9223372036854775808 -1 }}`, err: "error calling div: integer overflow"},
 		{name: "integer division by zero", text: `{{ div 1 0 }}`, err: "division by zero"},
 		{name: "float division by zero", text: `{{ div 1.0 0 }}`, err: "division by zero"},
 		{name: "mod by zero", text: `{{ mod 1 0 }}`, err: "division by zero"},

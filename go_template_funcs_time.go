@@ -16,12 +16,22 @@ const (
 
 // _namedLayouts are the layouts of package time, by name, which templates can't read from package time.
 var _namedLayouts = map[string]string{
+	"Layout":      time.Layout,
 	"ANSIC":       time.ANSIC,
+	"UnixDate":    time.UnixDate,
+	"RubyDate":    time.RubyDate,
+	"RFC822":      time.RFC822,
+	"RFC822Z":     time.RFC822Z,
 	"RFC850":      time.RFC850,
 	"RFC1123":     time.RFC1123,
 	"RFC1123Z":    time.RFC1123Z,
 	"RFC3339":     time.RFC3339,
 	"RFC3339Nano": time.RFC3339Nano,
+	"Kitchen":     time.Kitchen,
+	"Stamp":       time.Stamp,
+	"StampMilli":  time.StampMilli,
+	"StampMicro":  time.StampMicro,
+	"StampNano":   time.StampNano,
 	"DateTime":    time.DateTime,
 	"DateOnly":    time.DateOnly,
 	"TimeOnly":    time.TimeOnly,
@@ -111,6 +121,12 @@ func timeAdd(offset string, t time.Time) (time.Time, error) {
 	}
 
 	if date, ok := _calendarUnits[singular]; ok {
+		for _, f := range date {
+			if f > 1 && (n > math.MaxInt/f || n < math.MinInt/f) {
+				return time.Time{}, fmt.Errorf("%q overflows a duration", offset)
+			}
+		}
+
 		return t.AddDate(n*date[0], n*date[1], n*date[2]), nil
 	}
 

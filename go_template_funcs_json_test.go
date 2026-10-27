@@ -29,8 +29,21 @@ func TestDeleteJSONPath(t *testing.T) {
 		{name: "removes list items", text: `{{ deleteJSONPath "$.items[0]" (fromJSON .) | toJSON }}`, data: `{"items": [1, 2]}`, want: `{"items":[2]}`},
 		{name: "reads JSON text, such as a request body", text: `{{ deleteJSONPath "$.a" . | toJSON }}`, data: `{"a": 1, "b": 2}`, want: `{"b":2}`},
 		{name: "nothing selected changes nothing", text: `{{ deleteJSONPath "$.x" (fromJSON .) | toJSON }}`, data: `{"id": 1}`, want: `{"id":1}`},
+		{
+			// null is a value: a key that holds it stays unless the path selects it.
+			name: "keeps nulls it doesn't select", text: `{{ deleteJSONPath "$.d" . | toJSON }}`,
+			data: `{"a": {"b": null, "c": 1}, "d": 2, "e": [null]}`, want: `{"a":{"b":null,"c":1},"e":[null]}`,
+		},
 		{name: "an invalid path", text: `{{ deleteJSONPath "$[" "{}" }}`, err: "error calling deleteJSONPath: not terminated"},
 		{name: "text that isn't JSON", text: `{{ deleteJSONPath "$.a" "{" }}`, err: "error calling deleteJSONPath: jsontext: unexpected EOF"},
+	})
+
+	t.Run("keeps the values it doesn't select as they are", func(t *testing.T) {
+		data := map[string]any{"v": map[string]any{"n": 1, "z": nil, "x": "y"}}
+
+		out, err := render(t, MustNewGoTemplateEngine(), `{{ $r := deleteJSONPath "$.x" .v }}{{ printf "%T" $r.n }} {{ len $r }}`, data)
+		require.NoError(t, err)
+		require.Equal(t, "int 2", out)
 	})
 
 	t.Run("leaves its value unchanged", func(t *testing.T) {

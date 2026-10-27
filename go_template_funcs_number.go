@@ -124,6 +124,10 @@ func div(a, b any) (any, error) {
 				return 0, errDivByZero
 			}
 
+			if x == math.MinInt && y == -1 {
+				return 0, errOverflow
+			}
+
 			return x / y, nil
 		},
 		func(x, y float64) (float64, error) {

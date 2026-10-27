@@ -12,6 +12,10 @@ func TestTimeFuncs(t *testing.T) {
 
 	runFuncCases(t, []funcCase{
 		{name: "formatTime with a named layout", text: `{{ formatTime "RFC3339" . }}`, data: at, want: "2026-03-31T13:45:30Z"},
+		{name: "formatTime with RFC822", text: `{{ formatTime "RFC822" . }}`, data: at, want: "31 Mar 26 13:45 UTC"},
+		{name: "formatTime with Kitchen", text: `{{ formatTime "Kitchen" . }}`, data: at, want: "1:45PM"},
+		{name: "formatTime with StampMilli", text: `{{ formatTime "StampMilli" . }}`, data: at, want: "Mar 31 13:45:30.123"},
+		{name: "parseTime with RFC822Z", text: `{{ parseTime "RFC822Z" "31 Mar 26 13:45 -0300" | formatTime "RFC3339" }}`, want: "2026-03-31T13:45:00-03:00"},
 		{name: "formatTime with a Go layout", text: `{{ formatTime "02/01/2006 15h" . }}`, data: at, want: "31/03/2026 13h"},
 		{name: "formatTime in Unix seconds", text: `{{ formatTime "unix" . }}`, data: at, want: "1774964730"},
 		{name: "formatTime in Unix milliseconds", text: `{{ formatTime "unixMilli" . }}`, data: at, want: "1774964730123"},
@@ -31,6 +35,7 @@ func TestTimeFuncs(t *testing.T) {
 		{name: "timeAdd years", text: `{{ timeAdd "-2 years" . | formatTime "DateOnly" }}`, data: at, want: "2024-03-31"},
 		{name: "timeAdd a unit in any case", text: `{{ timeAdd "2 Days" . | formatTime "DateOnly" }}`, data: at, want: "2026-04-02"},
 		{name: "timeAdd an overflow", text: `{{ timeAdd "9999999999 hours" . }}`, data: at, err: `error calling timeAdd: "9999999999 hours" overflows a duration`},
+		{name: "timeAdd a week count that overflows", text: `{{ timeAdd "1317624576693539402 weeks" . }}`, data: at, err: `error calling timeAdd: "1317624576693539402 weeks" overflows a duration`},
 		{name: "timeAdd without a unit", text: `{{ timeAdd "1 s" . }}`, data: at, err: `error calling timeAdd: unknown unit "s"`},
 		{name: "timeAdd an unknown unit", text: `{{ timeAdd "3 fortnights" . }}`, data: at, err: `error calling timeAdd: unknown unit "fortnights"`},
 		{name: "timeAdd a count that isn't whole", text: `{{ timeAdd "1.5 days" . }}`, data: at, err: `error calling timeAdd: "1.5" is not a whole number`},

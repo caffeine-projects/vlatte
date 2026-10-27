@@ -6,7 +6,6 @@ import (
 	"maps"
 	"reflect"
 
-	"github.com/ohler55/ojg/alt"
 	"github.com/ohler55/ojg/jp"
 )
 
@@ -77,12 +76,37 @@ func deleteJSONPath(path string, v any) (any, error) {
 		return nil, err
 	}
 
-	r, err := x.Remove(alt.Dup(doc))
+	r, err := x.Remove(copyJSON(doc))
 	if err != nil {
 		return nil, err
 	}
 
 	return r, nil
+}
+
+// copyJSON returns a deep copy of the maps with string keys and the slices in v, as map[string]any and []any, so
+// a JSONPath can change it. Other values, nil among them, stay as they are.
+func copyJSON(v any) any {
+	rv := reflect.ValueOf(v)
+
+	switch {
+	case rv.Kind() == reflect.Map && rv.Type().Key().Kind() == reflect.String:
+		m := make(map[string]any, rv.Len())
+		for it := rv.MapRange(); it.Next(); {
+			m[it.Key().String()] = copyJSON(it.Value().Interface())
+		}
+
+		return m
+	case rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() != reflect.Uint8:
+		s := make([]any, rv.Len())
+		for i := range s {
+			s[i] = copyJSON(rv.Index(i).Interface())
+		}
+
+		return s
+	default:
+		return v
+	}
 }
 
 // mergePatch applies patch to v as a JSON Merge Patch, RFC 7386, and returns the result: an object patch merges
