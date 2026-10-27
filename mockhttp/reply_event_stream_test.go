@@ -94,8 +94,32 @@ func TestReplyEventStream_Templates(t *testing.T) {
 	require.Equal(t, "event: news\nid: 7\ndata: for ana\n\ndata: \"{{ .Extra.id }}\"\n\n", string(body))
 }
 
+func TestReplyEventStream_AnswersAHEADWithItsHeadersOnly(t *testing.T) {
+	// A HEAD request gets the headers of the stream and no body, which net/http wouldn't send: the answer ends at once,
+	// even for a stream that keeps open, and frees the request and its connection.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	ended := make(chan struct{}, 1)
+	m.MustMock(Headf("/events").
+		Reply(OK().EventStream(NewEventStream(NewEvent().Data("a")).KeepOpen())).
+		Callback(func(context.Context, vlatte.OnComplete) error {
+			ended <- struct{}{}
+			return nil
+		}))
+
+	res, err := http.Head(m.URL("/events"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, MIMETextEventStream, res.Header.Get(HeaderContentType))
+
+	<-ended
+}
+
 func TestReplyEventStream_CallbacksSeeTheWholeStream(t *testing.T) {
-	// The mock counts the request and runs its callbacks once the stream ends, with the body it sent.
+	// The mock runs its callbacks once the stream ends, with the body it sent.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
