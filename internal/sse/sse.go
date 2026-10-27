@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"iter"
 	"strconv"
 	"strings"
 	"time"
@@ -288,7 +287,7 @@ func (ev *compiledEvent) render(data any) (Frame, error) {
 	var b []byte
 
 	if comment != "" {
-		for line := range lines(comment) {
+		for _, line := range lines(comment) {
 			b = append(b, ": "...)
 			b = append(b, line...)
 			b = append(b, '\n')
@@ -309,7 +308,7 @@ func (ev *compiledEvent) render(data any) (Frame, error) {
 	}
 
 	if ev.hasData {
-		for line := range lines(value) {
+		for _, line := range lines(value) {
 			b = appendField(b, "data", line)
 		}
 	}
@@ -333,27 +332,24 @@ func (t text) render(data any) (string, error) {
 	return buf.String(), nil
 }
 
-// lines yields the lines of s, split where the event stream format ends a line: at CRLF, CR or LF. A line break at
-// the end yields an empty last line, so the client reads the break back.
-func lines(s string) iter.Seq[string] {
-	return func(yield func(string) bool) {
-		for {
-			i := strings.IndexAny(s, "\r\n")
-			if i < 0 {
-				yield(s)
-				return
-			}
+// lines returns the lines of s, split where the event stream format ends a line: at CRLF, CR or LF. A line break at
+// the end makes an empty last line, so the client reads the break back.
+func lines(s string) []string {
+	var out []string
 
-			if !yield(s[:i]) {
-				return
-			}
-
-			if s[i] == '\r' && i+1 < len(s) && s[i+1] == '\n' {
-				i++
-			}
-
-			s = s[i+1:]
+	for {
+		i := strings.IndexAny(s, "\r\n")
+		if i < 0 {
+			return append(out, s)
 		}
+
+		out = append(out, s[:i])
+
+		if s[i] == '\r' && i+1 < len(s) && s[i+1] == '\n' {
+			i++
+		}
+
+		s = s[i+1:]
 	}
 }
 
