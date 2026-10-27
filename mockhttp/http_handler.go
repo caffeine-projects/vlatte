@@ -788,7 +788,13 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// The request's context ends when the client leaves: templates read the parameters with the event's.
 			data := *locals
 			data.Parameters = viewdata.NewParameters(ctx, h.app.params)
-			kit := &Kit{engine: h.app.config.TemplateEngine, data: &data}
+			kit := &Kit{
+				engine:    h.app.config.TemplateEngine,
+				data:      &data,
+				logger:    h.app.logger,
+				transport: h.app.webhookTransport(),
+				dir:       cfg.Dir,
+			}
 
 			return &OnComplete{
 				m:         mock,
@@ -802,7 +808,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				timeout:   h.app.config.WebhookTimeout,
 			}
 		},
-		func(err error) { h.lifecycle.OnWarning(reqValues, err) },
+		func(err error) {
+			h.lifecycle.OnWarning(reqValues, err)
+			reqValues.journal.eventFailed(err)
+		},
 	)
 
 	h.lifecycle.OnMatch(reqValues, res)

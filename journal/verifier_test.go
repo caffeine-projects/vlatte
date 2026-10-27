@@ -134,6 +134,9 @@ func TestVerifier_AFailureTellsWhatCameOfEachRequest(t *testing.T) {
 			e.Outcome, e.Status = journal.OutcomeUnmatched, 418
 			e.NearMisses = []vlatte.NearMiss{{MockID: "m2", Passed: 2, Total: 2, Skipped: []string{"times"}}}
 		}),
+		entry("d", func(e *journal.Entry) {
+			e.MockID, e.Message = "m3", "webhook at index 0: target down\nwebhook at index 1: timeout"
+		}),
 	)
 	app := journal.NewVerifier[*fakeMock, struct{}](j, nil)
 
@@ -141,6 +144,9 @@ func TestVerifier_AFailureTellsWhatCameOfEachRequest(t *testing.T) {
 	require.False(t, app.AssertNotRequested(t.Context(), ft, journal.Query{}))
 
 	report := errorText(t, ft)
+	// A message of many lines, such as the on_complete events that failed, stays on the line of its request.
+	require.Contains(t, report,
+		"matched GET http://127.0.0.1/d 200 [m3]: webhook at index 0: target down; webhook at index 1: timeout\n")
 	require.Contains(t, report, "unmatched GET http://127.0.0.1/c 418, closest [m2] missed by times\n")
 	require.Contains(t, report, "failed GET http://127.0.0.1/b 500: reply: boom\n")
 	require.Contains(t, report, "matched GET http://127.0.0.1/a 200 [m1] (body cut)\n")

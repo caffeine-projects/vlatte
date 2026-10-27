@@ -13,7 +13,8 @@
 // An [Entry] is one request, with the fields every protocol has: its kind, its [Outcome], the mock that answered it,
 // its method, path and full target, the status of its answer, its time, headers and body, and, for a request no mock
 // matched, the mocks that came closest. [Journal.Append] gives each entry a sequence number, which orders them: a
-// query returns the newest first, and [Journal.Get] finds one by its request id.
+// query returns the newest first, and [Journal.Get] finds one by its request id. A server fills in the entry of a
+// request it serves in a [Draft], which appends it once the request ends, telling the on_complete events that failed.
 //
 // # Files
 //

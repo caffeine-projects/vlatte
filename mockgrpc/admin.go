@@ -175,10 +175,22 @@ func mockFile(app *Server, mock *Mock, path, format, toWD string) ([]byte, error
 }
 
 // relocate makes the relative body files of doc, a mock's description, which open from the working directory, open
-// from the directory toWD leads from to it: those of its response, of the responses of its bidi reply, and of its
-// webhooks and their multipart parts.
+// from the directory toWD leads from to it: those of its response, of the responses of its sequence, random and bidi
+// replies, and of its webhooks and their multipart parts.
 func relocate(doc map[string]any, toWD string) {
 	bodyfile.Relocate(doc["response"], toWD)
+
+	seq, _ := doc["response_sequence"].(map[string]any)
+	bodyfile.Relocate(seq["after_ended"], toWD)
+
+	for _, key := range []string{"response_sequence", "response_random"} {
+		replies, _ := doc[key].(map[string]any)
+		responses, _ := replies["responses"].([]any)
+
+		for _, r := range responses {
+			bodyfile.Relocate(r, toWD)
+		}
+	}
 
 	bidi, _ := doc["bidi"].(map[string]any)
 	bodyfile.Relocate(bidi["otherwise"], toWD)

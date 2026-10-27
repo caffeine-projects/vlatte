@@ -195,7 +195,13 @@ func (app *Server) afterServed(ctx context.Context, mock *Mock, call *Call, err 
 				m:      mock,
 				call:   call,
 				status: st,
-				kit:    &Kit{engine: app.templateEngine(), data: data},
+				kit: &Kit{
+					engine:    app.templateEngine(),
+					data:      data,
+					logger:    app.logger,
+					transport: app.webhooks,
+					dir:       cfg.Dir,
+				},
 				args:   cfg.Parameters,
 				dir:    cfg.Dir,
 				logger: app.logger,
@@ -203,6 +209,7 @@ func (app *Server) afterServed(ctx context.Context, mock *Mock, call *Call, err 
 		},
 		func(err error) {
 			app.logger.Warn().Err(err).Str("mock", mock.ID()).Str("method", call.method).Msg("grpc: on_complete")
+			callOf(ctx).eventFailed(err)
 		},
 	)
 }
