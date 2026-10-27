@@ -160,7 +160,7 @@ func New(config ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: %w", errTemplateEnvWithEngine)
 	}
 
-	if err := checkProviderKeys(conf.TemplateDataProviders); err != nil {
+	if err := vlatte.CheckTemplateDataProviders(conf.TemplateDataProviders); err != nil {
 		return nil, err
 	}
 

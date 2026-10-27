@@ -155,7 +155,7 @@ func New(config ...Option) (*Server, error) {
 		conf.Parameters = vlatte.NewMemoryKV()
 	}
 
-	if err := checkProviderKeys(conf.TemplateDataProviders); err != nil {
+	if err := vlatte.CheckTemplateDataProviders(conf.TemplateDataProviders); err != nil {
 		return nil, err
 	}
 

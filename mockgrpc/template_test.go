@@ -124,7 +124,7 @@ func TestTemplateDataProviders(t *testing.T) {
 		same := provider{key: "user", data: func(*TemplateDataProviderInput) (any, error) { return nil, nil }}
 
 		_, err := New(Setup().Silent().TemplateDataProviders(same, same))
-		require.ErrorIs(t, err, ErrTemplateDataKeyExists)
+		require.ErrorIs(t, err, vlatte.ErrTemplateDataKeyExists)
 		require.ErrorContains(t, err, `"user"`)
 	})
 }

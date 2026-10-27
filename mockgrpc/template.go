@@ -3,8 +3,6 @@ package mockgrpc
 import (
 	"context"
 	json "encoding/json/v2"
-	"errors"
-	"fmt"
 	"maps"
 	"net/http"
 
@@ -16,9 +14,6 @@ import (
 )
 
 var _ vlatte.Kit = (*Kit)(nil)
-
-// ErrTemplateDataKeyExists says two template data providers of a server have the same key.
-var ErrTemplateDataKeyExists = errors.New("server: two template data providers have the same key")
 
 // Parameters gives templates the server's parameters as text: {{ .Parameters.Get "key" }}. A parameter that may be
 // missing reads with Has first: {{ if .Parameters.Has "key" }}.
@@ -43,10 +38,7 @@ type TemplateData struct {
 // TemplateDataProvider adds data to the templates of gRPC mocks, which read it as .Provided.<Key>. The server calls
 // Data once for each call a mock matched, before the mock waits and replies: an error fails the call, with the
 // vlatte-error trailer.
-type TemplateDataProvider interface {
-	Key() string
-	Data(in *TemplateDataProviderInput) (any, error)
-}
+type TemplateDataProvider = vlatte.TemplateDataProvider[*TemplateDataProviderInput]
 
 // TemplateDataProviderInput is what a TemplateDataProvider receives for each call.
 type TemplateDataProviderInput struct {
@@ -133,40 +125,10 @@ func (app *Server) Data() map[string]any {
 // provide gives call the data of the server's template data providers, and the server's data, as the call arrives:
 // mock matched it. It returns the error of the first provider that fails.
 func (app *Server) provide(call *Call, mock *Mock) error {
-	call.data = app.Data()
+	provided, err := vlatte.ProvideTemplateData(app.config.TemplateDataProviders, &TemplateDataProviderInput{call: call, mock: mock})
+	call.data, call.provided = app.Data(), provided
 
-	providers := app.config.TemplateDataProviders
-	if len(providers) == 0 {
-		return nil
-	}
-
-	in := &TemplateDataProviderInput{call: call, mock: mock}
-	call.provided = make(map[string]any, len(providers))
-
-	for _, p := range providers {
-		data, err := p.Data(in)
-		if err != nil {
-			return fmt.Errorf("template data provider %s: %w", p.Key(), err)
-		}
-
-		call.provided[p.Key()] = data
-	}
-
-	return nil
-}
-
-// checkProviderKeys fails when two providers have the same key: templates could read only one of them.
-func checkProviderKeys(providers []TemplateDataProvider) error {
-	keys := make(map[string]struct{}, len(providers))
-	for _, p := range providers {
-		if _, ok := keys[p.Key()]; ok {
-			return fmt.Errorf("%w: %q", ErrTemplateDataKeyExists, p.Key())
-		}
-
-		keys[p.Key()] = struct{}{}
-	}
-
-	return nil
+	return err
 }
 
 // templateEngine returns the engine of the server's templates.
