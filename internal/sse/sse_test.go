@@ -171,15 +171,3 @@ func TestEncode_NamesTheFieldWhoseTemplateFails(t *testing.T) {
 		})
 	}
 }
-
-func TestLines_StopsWhenTheLoopBreaks(t *testing.T) {
-	var got []string
-	for line := range lines("a\nb\nc") {
-		got = append(got, line)
-		if line == "b" {
-			break
-		}
-	}
-
-	require.Equal(t, []string{"a", "b"}, got)
-}

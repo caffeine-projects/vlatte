@@ -160,6 +160,9 @@ func (ev *Event) Delay(d time.Duration) *Event {
 
 // Raw sends text as it is in place of the event's fields, which it can't be set with, to test what the fields can't
 // write: CRLF or CR line endings, a byte order mark, an event without the blank line that ends it, unknown fields.
+// An id line in the text is sent but has no id for [EventStream.ResumeFromLastEventID], which reads only [Event.ID].
+// A byte order mark counts only as the first bytes of the stream: not after the stream's retry, set with
+// [EventStream.Retry], or a heartbeat.
 func (ev *Event) Raw(text string) *Event {
 	ev.spec.Raw, ev.spec.HasRaw = []byte(text), true
 	return ev
