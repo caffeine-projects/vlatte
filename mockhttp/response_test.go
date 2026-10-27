@@ -1,10 +1,12 @@
 package mockhttp
 
 import (
+	"compress/gzip"
 	"context"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -35,6 +37,21 @@ func TestRender_AFlushedBodyStopsAtTheFirstFailure(t *testing.T) {
 			require.EqualError(t, res.Render(t.Context(), tc.w), tc.want)
 		})
 	}
+}
+
+func TestRender_AGzippedFlushedBodyEndsItsGzipStream(t *testing.T) {
+	// A gzipped stream that ends, as an event stream that doesn't keep open does, ends its gzip stream too: the client
+	// reads the body whole, not cut short.
+	rec := httptest.NewRecorder()
+	res := &Response{StatusCode: http.StatusOK, Header: make(http.Header), BodyCloser: io.NopCloser(strings.NewReader("data: a\n\n")), Encoding: "gzip", flush: true}
+	require.NoError(t, res.Render(t.Context(), rec))
+
+	gz, err := gzip.NewReader(rec.Body)
+	require.NoError(t, err)
+
+	body, err := io.ReadAll(gz)
+	require.NoError(t, err)
+	require.Equal(t, "data: a\n\n", string(body))
 }
 
 // leavingBody is a streamed body whose client leaves once it has read the body: the next read cancels the context,
