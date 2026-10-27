@@ -19,8 +19,9 @@ var (
 // which the reply sends event by event, each flushed to the client as it goes. Start one with [NewEventStream], and
 // set it with [Reply.EventStream].
 //
-// The stream ends after its last event, unless it keeps open: see [EventStream.KeepOpen]. The mock counts the request,
-// and runs its callbacks and on_complete events, once the stream ends.
+// The stream ends after its last event, unless it keeps open: see [EventStream.KeepOpen]. The mock counts the request
+// once the stream starts, so [Builder.Once] serves one client and a scenario moves on while it is open. It runs its
+// callbacks and on_complete events once the stream ends, with all it sent.
 type EventStream struct {
 	spec sse.Spec
 }
