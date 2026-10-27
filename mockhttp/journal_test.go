@@ -196,6 +196,40 @@ func TestJournal_KeepsTheRequestAsItCame(t *testing.T) {
 	require.Equal(t, "/a", e.Path)
 }
 
+func TestJournal_AMatchedRequestTellsTheEventsThatFailed(t *testing.T) {
+	// An on_complete event, such as a webhook, runs once the mock answered, and never changes the answer: the entry
+	// is where a test sees that one failed, and why, without reading the logs. The request still counts as matched.
+	m := journaledServer(t, Setup())
+
+	fails := func(msg string) vlatte.EventFunc[vlatte.OnComplete] {
+		return func(context.Context, vlatte.OnComplete) error { return errors.New(msg) }
+	}
+	succeeds := func(context.Context, vlatte.OnComplete) error { return nil }
+
+	m.MustMock(
+		Getf("/failed").Callback(fails("target answered 500")).Callback(succeeds).Callback(fails("target unreachable")).Reply(OK()),
+		Getf("/ok").Callback(succeeds).Reply(OK()),
+	)
+
+	for _, path := range []string{"/failed", "/ok"} {
+		res, _ := do(t, http.MethodGet, m.URL(path), nil, nil)
+		require.Equal(t, http.StatusOK, res.StatusCode)
+	}
+
+	failed := only(t, m, journal.Query{Path: match.Equal("/failed")})
+	require.Equal(t, journal.OutcomeMatched, failed.Outcome)
+	require.Equal(t, http.StatusOK, failed.Status)
+	// The events run at the same time: their errors come in any order.
+	require.ElementsMatch(t, []string{
+		"on_complete listener callback at index 0: target answered 500",
+		"on_complete listener callback at index 2: target unreachable",
+	}, strings.Split(failed.Message, "\n"))
+
+	ok := only(t, m, journal.Query{Path: match.Equal("/ok")})
+	require.Equal(t, journal.OutcomeMatched, ok.Outcome)
+	require.Empty(t, ok.Message)
+}
+
 func TestJournal_RedactsTheHostToo(t *testing.T) {
 	// net/http keeps the Host header apart from the others, but it is a header the client sent all the same: a
 	// server that redacts it in its logs keeps it out of its journal too. A pattern still matches its URL, which is

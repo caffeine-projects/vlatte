@@ -122,7 +122,8 @@ type Entry struct {
 	Body          []byte
 	BodyTruncated bool
 
-	// Message tells what failed, for a request that failed.
+	// Message tells what failed: the request, for one that failed, or else its on_complete events that failed, such as
+	// webhooks, whose errors it joins.
 	Message string
 
 	// NearMisses are the mocks that came closest to matching a request no mock matched.

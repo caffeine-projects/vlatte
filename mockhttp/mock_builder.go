@@ -581,8 +581,8 @@ func (b *Builder) ScenarioStateWillBe(newState string) *Builder {
 // runs as the mock's other events and the global ones do: at the same time as them, once the mock replied, and the
 // response waits for it, so a test checks what it did right after the call. fn gets an [*OnComplete], read-only as
 // the events run at the same time, and a context that the client leaving doesn't end, and [Server.Close] does. An
-// error or a panic of fn is logged as a warning, unless Close canceled it, and never changes the response. Mock files
-// can't set callbacks, and a mock's description leaves them out.
+// error or a panic of fn is logged as a warning, and told by the request's journal entry, unless Close canceled it,
+// and never changes the response. Mock files can't set callbacks, and a mock's description leaves them out.
 func (b *Builder) Callback(fn vlatte.EventFunc[vlatte.OnComplete]) *Builder {
 	b.spec.events = append(b.spec.events, vlatte.EventConfig{Name: "callback", Listener: fn})
 	return b

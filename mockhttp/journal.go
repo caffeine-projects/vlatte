@@ -108,6 +108,7 @@ type journalCall struct {
 	mu      sync.Mutex
 	entry   journal.Entry
 	warning error
+	events  []error // of the on_complete events that failed
 	done    bool
 }
 
@@ -186,12 +187,30 @@ func (c *journalCall) record(r *RequestValues, outcome journal.Outcome, status i
 		c.entry.MockID = r.Mock.ID()
 	}
 
+	// A request a mock answered tells the on_complete events that failed, such as webhooks.
+	if err == nil {
+		err = errors.Join(c.events...)
+	}
+
 	if err != nil {
 		c.entry.Message = err.Error()
 	}
 
 	// The journal logs what it fails to keep.
 	c.journal.Append(&c.entry)
+}
+
+// eventFailed keeps err, the error of an on_complete event of the request, which its entry's message tells. A server
+// that keeps no journal has no call: eventFailed does nothing.
+func (c *journalCall) eventFailed(err error) {
+	if c == nil {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.events = append(c.events, err)
 }
 
 // warn keeps err, the last warning of the request, which tells why it ended, if it reaches no outcome.

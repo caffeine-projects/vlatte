@@ -802,7 +802,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				timeout:   h.app.config.WebhookTimeout,
 			}
 		},
-		func(err error) { h.lifecycle.OnWarning(reqValues, err) },
+		func(err error) {
+			h.lifecycle.OnWarning(reqValues, err)
+			reqValues.journal.eventFailed(err)
+		},
 	)
 
 	h.lifecycle.OnMatch(reqValues, res)

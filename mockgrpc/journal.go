@@ -129,6 +129,9 @@ type journalCall struct {
 	// served is set once a mock interceptor took the call: a call that an interceptor of ServerOptions answers itself
 	// never is, and isn't the journal's.
 	served bool
+
+	// events are the errors of the on_complete events of the call that failed.
+	events []error
 }
 
 // newCall starts the entry of a call of ctx, of method.
@@ -228,12 +231,18 @@ func (c *journalCall) failed(err error) {
 	c.update(func() { c.entry.Outcome, c.entry.Message = journal.OutcomeFailed, err.Error() })
 }
 
+// eventFailed keeps err, the error of an on_complete event of the call, which its entry's message tells when the call
+// has no failure of its own.
+func (c *journalCall) eventFailed(err error) {
+	c.update(func() { c.events = append(c.events, err) })
+}
+
 // end appends the entry of the call, which ended with err, with its gRPC code. A call that reached no outcome, such
 // as one that failed before matching, or panicked, failed, or was abandoned when its client left. A call that an
 // interceptor answered itself, which reached no mock, isn't appended.
 func (c *journalCall) end(ctx context.Context, err error) {
 	c.mu.Lock()
-	served, entry := c.served, c.entry
+	served, entry, events := c.served, c.entry, errors.Join(c.events...)
 	c.mu.Unlock()
 
 	if !served {
@@ -252,6 +261,11 @@ func (c *journalCall) end(ctx context.Context, err error) {
 		if err != nil {
 			entry.Message = err.Error()
 		}
+	}
+
+	// A call a mock answered tells the on_complete events that failed, such as webhooks.
+	if entry.Message == "" && events != nil {
+		entry.Message = events.Error()
 	}
 
 	// The journal logs what it fails to keep.
