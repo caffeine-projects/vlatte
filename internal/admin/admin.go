@@ -41,6 +41,9 @@ var _routes = []struct {
 	lacking string
 }{
 	{pattern: "GET /health"},
+	{pattern: "GET /livez"},
+	{pattern: "GET /readyz"},
+	{pattern: "GET /startupz"},
 	{pattern: "GET /{$}"},
 	{pattern: "GET /docs"},
 	{pattern: "GET /openapi"},
@@ -87,6 +90,9 @@ var _operations = map[string]struct {
 	can   func(ops *handler.Operations) bool
 }{
 	"GET /health":           {serve: handler.Health},
+	"GET /livez":            {serve: handler.Live},
+	"GET /readyz":           {serve: handler.Ready},
+	"GET /startupz":         {serve: handler.Started},
 	"GET /schema":           {serve: handler.MockSchema, can: (*handler.Operations).HasMockSchema},
 	"GET /mocks":            {serve: handler.ListMocks},
 	"POST /mocks":           {serve: handler.AddMock, can: (*handler.Operations).Builds},

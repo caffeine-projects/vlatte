@@ -25,6 +25,7 @@ type Mocks interface {
 	Replace(ctx context.Context, old []vlatte.Mock, mocks ...vlatte.Mock) error
 
 	Clear(ctx context.Context) error
+	Health(ctx context.Context) error
 
 	// Build builds the mock of doc, a mock file in format. It needs a server that builds mocks: see Builds.
 	Build(doc []byte, format string) (vlatte.Mock, error)
@@ -93,6 +94,10 @@ func (m *storeMocks[M]) Replace(ctx context.Context, old []vlatte.Mock, mocks ..
 
 func (m *storeMocks[M]) Clear(ctx context.Context) error {
 	return m.store.Clear(ctx)
+}
+
+func (m *storeMocks[M]) Health(ctx context.Context) error {
+	return m.store.Health(ctx)
 }
 
 func (m *storeMocks[M]) Build(doc []byte, format string) (vlatte.Mock, error) {

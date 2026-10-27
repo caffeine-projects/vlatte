@@ -187,6 +187,11 @@ func (s *MemoryStore[B]) Clear(_ context.Context) error {
 	return nil
 }
 
+// Health returns nil: a memory store is always ready.
+func (s *MemoryStore[B]) Health(context.Context) error {
+	return nil
+}
+
 // closeMocks closes the mocks that implement io.Closer. A mock that failed to close has left already: there is no one
 // to report the error to, so closing is the mock's to get right.
 func closeMocks[B Mock](mocks []B) {

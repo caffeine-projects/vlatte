@@ -32,6 +32,7 @@ const (
 	_codeClosing              = "closing"
 	_codeRequestNotFound      = "request_not_found"
 	_codeInvalidParameter     = "invalid_parameter"
+	_codeNotReady             = "not_ready"
 )
 
 // problemError is an error of an operation that its caller can fix, which the admin API answers as an RFC 9457

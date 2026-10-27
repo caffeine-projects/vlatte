@@ -62,6 +62,58 @@ paths:
             application/yaml:
               schema: { $ref: "#/components/schemas/Health" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
+  /livez:
+    get:
+      tags: [Server]
+      operationId: getLivez
+      summary: Probe liveness
+      description: |
+        The liveness probe of Kubernetes. Answers while the admin API serves, as `/health` does, whatever the mock
+        store says, so a store that is down doesn't get the server restarted.
+      responses:
+        "200":
+          description: The admin API serves.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/Health" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+  /readyz:
+    get:
+      tags: [Server]
+      operationId: getReadyz
+      summary: Probe readiness
+      description: |
+        The readiness probe of Kubernetes. Answers as `/health` does once the mock store can serve its mocks, and `503`
+        while it can't, such as when the database behind a persistent store is down.
+      responses:
+        "200":
+          description: The mock store serves its mocks.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/Health" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "503": { $ref: "#/components/responses/NotReady" }
+  /startupz:
+    get:
+      tags: [Server]
+      operationId: getStartupz
+      summary: Probe startup
+      description: |
+        The startup probe of Kubernetes. The admin API serves only once the mock server loaded its mocks, so this
+        answers, as `/health` does, once the mock server started.
+      responses:
+        "200":
+          description: The mock server started.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/Health" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
   /reset:
     post:
       tags: [Server]
@@ -1099,6 +1151,7 @@ components:
             - closing
             - request_not_found
             - invalid_parameter
+            - not_ready
         detail:
           type: string
           description: What went wrong in this request.
@@ -1229,6 +1282,13 @@ components:
           schema: { $ref: "#/components/schemas/Problem" }
     InvalidParameter:
       description: "`invalid_parameter`: a query parameter has a value the route doesn't take."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotReady:
+      description: "`not_ready`: the mock store can't serve its mocks, such as when the database behind it is down."
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }

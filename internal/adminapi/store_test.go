@@ -55,7 +55,7 @@ func (m *docMock) Close() error {
 
 // docStore is a persistent store, such as files or a database: it keeps the descriptions of mocks by ID, here their
 // enabled state, and builds new mocks from them each time it is read. Its writes fail with writeErr, and its reads
-// with readErr.
+// and Health with readErr.
 type docStore struct {
 	mu       sync.Mutex
 	docs     map[string]bool
@@ -147,6 +147,13 @@ func (s *docStore) Delete(_ context.Context, ids ...string) error {
 	}
 
 	return nil
+}
+
+func (s *docStore) Health(context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.readErr
 }
 
 func (s *docStore) Clear(context.Context) error {
@@ -329,6 +336,21 @@ func TestStore_AReloadThatFailsChangesNothing(t *testing.T) {
 	require.ErrorIs(t, s.Reload(ctx), errDown)
 	require.Equal(t, []string{"a"}, servedIDs(t, s))
 	require.Zero(t, a.closed.Load())
+}
+
+func TestStore_IsNotReadyWhileThePersistentStoreIsDown(t *testing.T) {
+	// The server serves the mocks of its persistent store: while that store is down, the admin API answers that the
+	// server isn't ready.
+	ctx := t.Context()
+	durable := newDocStore()
+	s := NewStore[*docMock](vlatte.NewStore[*docMock](), durable, nil)
+
+	require.NoError(t, s.Health(ctx))
+
+	errDown := errors.New("database down")
+	durable.readErr = errDown
+
+	require.ErrorIs(t, s.Health(ctx), errDown)
 }
 
 // failingStore is the store of a server whose PickAll or Replace fails with the errors it has.
