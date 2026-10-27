@@ -71,4 +71,8 @@ type Store[T Mock] interface {
 
 	Delete(ctx context.Context, ids ...string) error
 	Clear(ctx context.Context) error
+
+	// Health returns an error when the store can't serve its mocks, such as when the database behind it is down. The
+	// admin API answers GET /readyz with it.
+	Health(ctx context.Context) error
 }

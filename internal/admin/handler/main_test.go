@@ -127,6 +127,7 @@ type brokenStore struct {
 	*vlatte.MemoryStore[*fakeMock]
 
 	storeErr, replaceErr, pickErr, pickAllErr, clearErr error
+	healthErr                                           error
 
 	replaces atomic.Int64
 }
@@ -163,6 +164,14 @@ func (s *brokenStore) PickAll(ctx context.Context) ([]*fakeMock, error) {
 	}
 
 	return s.MemoryStore.PickAll(ctx)
+}
+
+func (s *brokenStore) Health(ctx context.Context) error {
+	if s.healthErr != nil {
+		return s.healthErr
+	}
+
+	return s.MemoryStore.Health(ctx)
 }
 
 func (s *brokenStore) Clear(ctx context.Context) error {
