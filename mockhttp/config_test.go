@@ -243,6 +243,13 @@ func TestConfigBuilder_TLSMutualNeedsCACertificates(t *testing.T) {
 	require.ErrorContains(t, err, _testKeyFile+" has no PEM certificates")
 }
 
+func TestConfigBuilder_TLSCertKeyPairItCantLoadFailsNew(t *testing.T) {
+	// A key given as the certificate would fail at the first handshake, far from the setting that named it.
+	_, err := New(Setup().TLSCertKeyPair(_testKeyFile, _testKeyFile))
+
+	require.ErrorContains(t, err, "config: failed to build TLS config: tls: failed to find certificate PEM data")
+}
+
 func TestLogLevelString(t *testing.T) {
 	require.Equal(t, vlatte.LogBasic.String(), "basic")
 	require.Equal(t, vlatte.LogHeader.String(), "header")

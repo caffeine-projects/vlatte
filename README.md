@@ -147,6 +147,8 @@ response:
 
 **More.** `Setup().Reflection()` serves server reflection, so `grpcurl` lists the services and describes their messages. A server keeps a [journal](#request-journal) of its calls with `Setup().Journal(dir)`, which tests verify with the same builders, serves an [admin API](#admin-api) with `Setup().Admin(admin.MustNew())`, and answers a call no mock matched with `Setup().NoMatchCode(code)`, `NotFound` by default. `Close` waits for the calls in flight up to `Setup().ShutdownTimeout(d)`, 5s by default, then cuts them.
 
+**TLS.** `m.StartTLS()` starts the server as `Start` does, serving TLS. `Setup().TLSCertKeyPair(certFile, keyFile)` or `TLSCertificates(certs)` sets its certificate, `TLSMutual(certFile, keyFile, clientCAFile)` or `TLSClientCAs(pool)` requires clients to present a certificate those CAs signed, and `TLSConfig(c)` sets the whole TLS configuration. Without a certificate, it serves a self-signed one for `localhost`, `127.0.0.1` and `::1`, which `m.Certificate()` returns for clients to trust. `m.Dial()` trusts the certificate the server serves; pass it `grpc.WithTransportCredentials` for a server that requires a client certificate. Credentials `ServerOptions` set with `grpc.Creds` win over these: `StartTLS` then serves them as `Start` does, `m.Certificate()` returns `nil`, and `m.Dial()` needs `grpc.WithTransportCredentials`.
+
 ## Packages
 
 | Package | What it's for |
@@ -1110,6 +1112,8 @@ protoc --descriptor_set_out=api.binpb --include_imports api.proto
 vlatte --grpc-descriptors=api.binpb --grpc-mock-files='mocks/grpc/*.yaml'
 grpcurl -plaintext -d '{"id": "u-1"}' localhost:50051 users.Users/Get
 ```
+
+`--grpc-tls` serves them over TLS, with a self-signed certificate, unless `--grpc-tls-cert` and `--grpc-tls-key` name the files of one; `--grpc-tls-ca` requires clients to present a certificate signed by a CA of its file. Each of these turns TLS on.
 
 It keeps a [journal](#request-journal) of the requests it serves in `{workdir}/_journal`, across restarts, which the admin API queries: `--journal-dir` moves it, `--journal-dir=""` keeps it in a temporary directory, and `--journal=false` turns it off. Two commands can't share a journal directory: give each a `--name`, which gives it a [work directory](#work-directory) of its own, `testdata/vlatte/<name>`. The journal holds the requests it got, secrets included: its directory ignores its files in git.
 
