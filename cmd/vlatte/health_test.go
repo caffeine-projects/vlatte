@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"syscall"
 	"testing"
 	"time"
 
@@ -32,10 +34,7 @@ func TestHealth_IsHealthyWhileTheServerRuns(t *testing.T) {
 
 func TestHealth_IsUnhealthyWhenTheServerIsNotReady(t *testing.T) {
 	// /readyz answers 503 when the mock store can't serve its mocks: the server runs, but can't do its job.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	t.Cleanup(srv.Close)
+	srv := notReady(t)
 
 	var errOut bytes.Buffer
 	require.Equal(t, 1, run(t.Context(), []string{"health", srv.URL + "/readyz"}, nil, io.Discard, &errOut))
@@ -48,23 +47,76 @@ func TestHealth_TakesOneURLAtMost(t *testing.T) {
 	require.Contains(t, errOut.String(), "accepts at most 1 arg(s), received 2")
 }
 
-func TestHealthURL(t *testing.T) {
-	// Without a URL, the command probes the admin API of the vlatte image, which listens on port 8081 of
-	// VLATTE_DOCKER_HOST: through the loopback interface when that names every interface.
+func TestCheckServer(t *testing.T) {
+	// The image's health check works whatever the server's settings: its admin API answers for it, and where the
+	// admin API is off or elsewhere, its mock server, whose port no setting changes, does.
+	ready := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(ready.Close)
+
+	mocks := listening(t)
+
+	t.Run("the admin API is ready", func(t *testing.T) {
+		require.NoError(t, checkServer(t.Context(), ready.URL+"/readyz", randomAddr(t)))
+	})
+
+	t.Run("the admin API is not ready", func(t *testing.T) {
+		// The admin API answered: the mock server accepting connections doesn't make a server that can't serve its
+		// mocks healthy.
+		srv := notReady(t)
+		require.EqualError(t, checkServer(t.Context(), srv.URL+"/readyz", mocks),
+			"health: GET "+srv.URL+"/readyz: 503 Service Unavailable")
+	})
+
+	t.Run("no admin API, the mock server serves", func(t *testing.T) {
+		require.NoError(t, checkServer(t.Context(), "http://"+randomAddr(t)+"/readyz", randomAddr(t), mocks))
+	})
+
+	t.Run("nothing serves", func(t *testing.T) {
+		err := checkServer(t.Context(), "http://"+randomAddr(t)+"/readyz", randomAddr(t))
+		require.ErrorIs(t, err, syscall.ECONNREFUSED)
+	})
+}
+
+func TestHealthHost(t *testing.T) {
+	// The health check reaches the image's server on VLATTE_DOCKER_HOST: through the loopback interface when that
+	// names every interface.
 	tests := []struct {
 		name string
 		host string
 		want string
 	}{
-		{name: "every interface by default", host: "", want: "http://127.0.0.1:8081/readyz"},
-		{name: "every IPv4 interface", host: "0.0.0.0", want: "http://127.0.0.1:8081/readyz"},
-		{name: "a host", host: "example.org", want: "http://example.org:8081/readyz"},
+		{name: "every interface by default", host: "", want: "127.0.0.1"},
+		{name: "every interface", host: "0.0.0.0", want: "127.0.0.1"},
+		{name: "a host", host: "example.org", want: "example.org"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(_dockerHostEnv, tc.host)
-			require.Equal(t, tc.want, healthURL())
+			require.Equal(t, tc.want, healthHost())
 		})
 	}
+}
+
+// notReady returns a server whose readiness probe answers 503.
+func notReady(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+
+	return srv
+}
+
+// listening returns the address of a listener that accepts connections until the test ends.
+func listening(t *testing.T) string {
+	t.Helper()
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
+
+	return l.Addr().String()
 }

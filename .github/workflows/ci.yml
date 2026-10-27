@@ -159,17 +159,22 @@ jobs:
           exit 1
         fi
 
-        # The HEALTHCHECK probes every second while the container starts.
-        health=""
-        for _ in $(seq 1 30); do
-          health="$(docker inspect vlatte --format '{{.State.Health.Status}}')"
-          [ "$health" = "healthy" ] && break
-          sleep 1
+        # The HEALTHCHECK probes every second while a container starts, through the admin API, or the mock server
+        # when the admin API is off.
+        docker run -d --name no-admin vlatte:ci --admin=false
+        for name in vlatte no-admin; do
+          health=""
+          for _ in $(seq 1 30); do
+            health="$(docker inspect "$name" --format '{{.State.Health.Status}}')"
+            [ "$health" = "healthy" ] && break
+            sleep 1
+          done
+          if [ "$health" != "healthy" ]; then
+            echo "::error::container $name is '$health', not healthy"
+            exit 1
+          fi
         done
-        if [ "$health" != "healthy" ]; then
-          echo "::error::container is '$health', not healthy"
-          exit 1
-        fi
+        docker rm -f no-admin
 
         docker stop vlatte
         code="$(docker inspect vlatte --format '{{.State.ExitCode}}')"

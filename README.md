@@ -1192,7 +1192,7 @@ docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
   -p 8080:8080 -p 8081:8081 vlatte:dev
 ```
 
-Its `HEALTHCHECK` runs `vlatte health`, which asks the admin API's readiness probe, `GET /readyz` on `8081`, and exits with 0 when it answers 200. A server run with `--admin=false` has none: run it with `--no-healthcheck`. One whose admin API listens elsewhere names the probe's URL, in exec form, since the image has no shell, as in Compose: `test: ["CMD", "vlatte", "health", "http://127.0.0.1:9000/readyz"]`. Kubernetes can probe `GET /livez` and `GET /readyz` with `httpGet` instead.
+Its `HEALTHCHECK` runs `vlatte health`, which asks the admin API's readiness probe, `GET /readyz` on `8081`, and exits with 0 when it answers 200. With the admin API off or on another address, it checks that the mock server accepts connections on `8080` or `8443` instead, so it needs no settings of its own. Kubernetes can probe `GET /livez` and `GET /readyz` with `httpGet` too.
 
 ## Development
 
