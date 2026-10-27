@@ -7,8 +7,15 @@ import (
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
-// _dockerAdminPort is the port of the admin API in the vlatte image.
-const _dockerAdminPort = "8081"
+const (
+	// _dockerHTTPPort and _dockerHTTPSPort are the ports of the mock server in the vlatte image, which no setting
+	// changes.
+	_dockerHTTPPort  = "8080"
+	_dockerHTTPSPort = "8443"
+
+	// _dockerAdminPort is the port of the admin API in the vlatte image.
+	_dockerAdminPort = "8081"
+)
 
 type dockerConfigurer struct{}
 
@@ -16,9 +23,9 @@ func (c *dockerConfigurer) Apply(conf *mockhttp.Config) error {
 	host := dockerHost()
 
 	if conf.UseHTTPS {
-		conf.Addr = host + "8443"
+		conf.Addr = host + _dockerHTTPSPort
 	} else {
-		conf.Addr = host + "8080"
+		conf.Addr = host + _dockerHTTPPort
 	}
 
 	return nil

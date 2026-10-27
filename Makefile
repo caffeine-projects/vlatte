@@ -58,6 +58,10 @@ cov: ## run tests and generate coverage report
 build: ## build the vlatte CLI into bin/
 	@go build -o bin/vlatte ./cmd/vlatte
 
+.PHONY: docker
+docker: ## build the vlatte image as vlatte:dev
+	@docker build -t vlatte:dev .
+
 .PHONY: deps
 deps: ## dependencies
 	@go mod download
