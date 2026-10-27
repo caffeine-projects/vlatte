@@ -312,6 +312,8 @@ func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 	require.Equal(t, _mockSchema.Keys(), keys(raw, "scenario", "request"), "mock")
 	require.Equal(t, _replySchema.Keys(), keys(defs["reply"]), "reply")
 	require.Equal(t, _statusSchema.Keys(), keys(defs["status"]), "status")
+	require.Equal(t, _sequenceSchema.Keys(), keys(props(raw)["response_sequence"]), "response_sequence")
+	require.Equal(t, _randomSchema.Keys(), keys(props(raw)["response_random"]), "response_random")
 	require.Equal(t, _bidiSchema.Keys(), keys(bidi), "bidi")
 	require.Equal(t, _ruleSchema.Keys(), slices.Sorted(maps.Keys(rule)), "bidi rule")
 	require.Equal(t, _eventSchema.Keys(), keys(defs["on_complete_event"]), "on_complete")
@@ -353,7 +355,7 @@ func TestJSONSchema_AcceptsTheFixturesTheDecoderAccepts(t *testing.T) {
 		checked++
 	}
 
-	require.Equal(t, 5, checked)
+	require.Equal(t, 7, checked)
 }
 
 func TestJSONSchema_RejectsWhatTheDecoderRejects(t *testing.T) {
@@ -366,6 +368,10 @@ func TestJSONSchema_RejectsWhatTheDecoderRejects(t *testing.T) {
 		"response and bidi":    `{"request": {"method": "Chat"}, "response": {}, "bidi": {}}`,
 		"response and proxy":   `{"request": {"method": "Greetings"}, "response": {}, "proxy": {"target": "localhost:1"}}`,
 		"a proxy to nowhere":   `{"request": {"method": "Greetings"}, "proxy": {}}`,
+		"response and seq":     `{"request": {"method": "Greetings"}, "response": {}, "response_sequence": {"responses": [{}]}}`,
+		"seq and random":       `{"request": {"method": "Greetings"}, "response_sequence": {"responses": [{}]}, "response_random": {"responses": [{}]}}`,
+		"seq of nothing":       `{"request": {"method": "Greetings"}, "response_sequence": {"responses": []}}`,
+		"random of nothing":    `{"request": {"method": "Greetings"}, "response_random": {}}`,
 		"message and messages": `{"request": {"method": "Greetings"}, "response": {"message": {}, "messages": []}}`,
 		"an unknown key":       `{"request": {"method": "Greetings"}, "response": {"body": "x"}}`,
 		"a code out of range":  `{"request": {"method": "Greetings"}, "response": {"status": {"code": 17}}}`,
