@@ -2,13 +2,20 @@ package mockhttp
 
 import (
 	"context"
+	"errors"
 	"net/http"
+
+	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ ReplierFactory = (*FuncReply)(nil)
-	_ Replier        = funcReplier(nil)
+	_ ReplierFactory             = (*FuncReply)(nil)
+	_ descriptor.SelfDescriptive = (*FuncReply)(nil)
+	_ Replier                    = funcReplier(nil)
 )
+
+// errFuncNotDescribed is why a mock with a Func or Handler reply can't be described: a mock file can't hold a function.
+var errFuncNotDescribed = errors.New("reply: a Func or Handler reply can't be described as a mock file")
 
 // FuncReply is a reply that builds the response using the given function. It is a ReplierFactory: every mock built
 // with it calls the same function, so whatever the function keeps is shared by those mocks.
@@ -34,6 +41,11 @@ func Handler(h http.HandlerFunc) *FuncReply {
 // NewReplier implements ReplierFactory.
 func (r *FuncReply) NewReplier(*Server) (Replier, error) {
 	return funcReplier(r.fn), nil
+}
+
+// Describe implements descriptor.SelfDescriptive. A mock file can't hold a function: encoding the description fails.
+func (r *FuncReply) Describe() descriptor.Descriptor {
+	return descriptor.Fail("func", errFuncNotDescribed)
 }
 
 // funcReplier builds the responses of one mock with a function.

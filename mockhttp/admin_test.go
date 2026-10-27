@@ -19,6 +19,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/admin"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
@@ -150,6 +151,42 @@ func TestAdmin_AMockReadBackPostsBack(t *testing.T) {
 	res, body = do(t, http.MethodGet, m.URL("/again"), nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	require.Equal(t, "hello from a file", string(body))
+}
+
+func TestAdmin_ABinaryBodyReadsBackAndPostsBack(t *testing.T) {
+	// #42: the admin GET of a mock whose body isn't UTF-8 failed with a 500. It reads as body_base64, and posted back,
+	// answers the same bytes.
+	m := adminServer(t, Setup())
+	m.MustMock(Getf("/bin").ID("bin").Reply(OK().Body([]byte{0xff, 0xfe, 0x00})))
+
+	res, desc := do(t, http.MethodGet, m.AdminURL()+"/mocks/bin", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, string(desc))
+	require.Contains(t, string(desc), `"body_base64": "//4A"`)
+
+	again := strings.NewReplacer(`"bin"`, `"again"`, `"/bin"`, `"/again"`).Replace(string(desc))
+	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil, []byte(again))
+	require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
+
+	_, body = do(t, http.MethodGet, m.URL("/again"), nil, nil)
+	require.Equal(t, []byte{0xff, 0xfe, 0x00}, body)
+}
+
+func TestAdmin_AMockThatCantBeDescribedSaysWhy(t *testing.T) {
+	// #42: an Echo mock read back as a document no mock file loads, and a Handler mock as the default reply. A mock
+	// file can hold neither, so reading one fails, and says why.
+	m := adminServer(t, Setup())
+	m.MustMock(Getf("/e").ID("echo").Reply(Echo()))
+	m.MustMock(Getf("/h").ID("handler").Reply(Handler(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusCreated) })))
+
+	for id, want := range map[string]string{
+		"echo":    "an Echo reply can't be described as a mock file",
+		"handler": "a Func or Handler reply can't be described as a mock file",
+	} {
+		res, body := do(t, http.MethodGet, m.AdminURL()+"/mocks/"+id, nil, nil)
+		require.Equal(t, http.StatusInternalServerError, res.StatusCode, string(body))
+		require.Contains(t, string(body), `"code": "describe_failed"`, id)
+		require.Contains(t, string(body), want, id)
+	}
 }
 
 func TestAdmin_ProxyMocksReadBackAsTheyWere(t *testing.T) {
@@ -475,23 +512,22 @@ func TestRelocate_MovesTheBodyFilesOfTheMockFileFormatOnly(t *testing.T) {
 }
 
 func TestAdmin_SaveWritesNothingWhenAMockCantBeSaved(t *testing.T) {
-	// A mock whose description doesn't load back as the same mock, such as one with a trailer (#42), would write a
-	// broken file, which every later start would fail on: nothing is written, the others neither.
+	// A mock that can't be described as a mock file, such as one with a Handler (#42), would write a broken file,
+	// which every later start would fail on: nothing is written, the others neither.
 	root := t.TempDir()
 	m := adminServer(t, Setup().RootDir(root))
 
-	for _, doc := range []string{
-		`{"id": "fine", "request": {"method": "GET", "path": "/fine"}, "response": {"status": 200}}`,
-		`{"id": "trailer", "request": {"method": "GET", "path": "/t"}, "response": {"status": 200, "trailer": {"X-T": "v"}}}`,
-	} {
-		res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil, []byte(doc))
-		require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
-	}
+	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil,
+		[]byte(`{"id": "fine", "request": {"method": "GET", "path": "/fine"}, "response": {"status": 200}}`))
+	require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
 
-	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, []byte(`{"dir": "saved"}`))
+	m.MustMock(Getf("/h").ID("handler").SetSource(adminapi.Origin).Reply(Handler(func(http.ResponseWriter, *http.Request) {})))
+
+	res, body = do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, []byte(`{"dir": "saved"}`))
 	require.Equal(t, http.StatusInternalServerError, res.StatusCode, string(body))
 	require.Contains(t, string(body), `"code": "describe_failed"`)
-	require.Contains(t, string(body), `mock \"trailer\"`)
+	require.Contains(t, string(body), `mock \"handler\"`)
+	require.Contains(t, string(body), `a Func or Handler reply can't be described as a mock file`)
 
 	_, err := os.Stat(filepath.Join(root, "saved"))
 	require.ErrorIs(t, err, os.ErrNotExist, "nothing was written")

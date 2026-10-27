@@ -239,20 +239,22 @@ func TestFileStore_RemovingMocksRemovesTheirFiles(t *testing.T) {
 }
 
 func TestFileStore_RefusesAMockThatDoesntLoadBack(t *testing.T) {
-	// A mock whose description doesn't load back as the same mock, such as one with a trailer (#42), would write a file
-	// that fails every later start: it isn't stored, nor served.
+	// A mock that can't be described as a mock file, such as one with a Handler (#42), would write a file that fails
+	// every later start, or that serves another mock: it isn't stored.
 	dir := t.TempDir()
-	m := adminServer(t, Setup().AdminStore(FileStore(dir)))
+	m := MustNew(Setup().Silent())
 
-	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil,
-		[]byte(`{"id": "trailer", "request": {"method": "GET", "path": "/t"}, "response": {"status": 200, "trailer": {"X-T": "v"}}}`))
-	require.Equal(t, http.StatusInternalServerError, res.StatusCode, string(body))
-	require.Contains(t, string(body), `trailer`)
+	store, err := FileStore(dir)(m)
+	require.NoError(t, err)
 
-	require.NoFileExists(t, filepath.Join(dir, "trailer.mock.yaml"))
+	mock, err := Getf("/h").ID("handler").Reply(Handler(func(http.ResponseWriter, *http.Request) {})).Build(m)
+	require.NoError(t, err)
 
-	res, _ = do(t, http.MethodGet, m.URL("/t"), nil, nil)
-	require.Equal(t, StatusNoMatch, res.StatusCode)
+	err = store.Store(t.Context(), mock)
+	require.ErrorContains(t, err, `server: describing mock "handler": `)
+	require.ErrorContains(t, err, "a Func or Handler reply can't be described as a mock file")
+
+	require.NoFileExists(t, filepath.Join(dir, "handler.mock.yaml"))
 }
 
 func TestFileStore_AMockFileWins(t *testing.T) {

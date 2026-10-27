@@ -191,6 +191,7 @@ var _scalarKeys = []struct {
 		return map[string]any{"request": map[string]any{"path_template": v}}
 	}},
 	{"response.status", int64(200), inReply("status")},
+	{"response.body_base64", "//4A", inReply("body_base64")},
 	{"response.body_file", "b.txt", inReply("body_file")},
 	{"response.encoding", "gzip", inReply("encoding")},
 	{"response.template.enabled", true, func(v any) map[string]any {

@@ -1,6 +1,7 @@
 package descriptor
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -263,4 +264,26 @@ func TestIsSelfDescriptive_ReturnsTheDescriptionOnlyForSelfDescriptiveValues(t *
 	got, ok = IsSelfDescriptive(42)
 	require.False(t, ok)
 	require.Equal(t, Descriptor{}, got)
+}
+
+func TestFail_EncodingFailsWithItsErrorAtAnyDepth(t *testing.T) {
+	// Something a description can't hold, such as a function, must not describe as something else: encoding it, or
+	// any description that holds it, fails with the reason it gives.
+	errCant := errors.New("test: a function can't be described")
+	failed := Fail("fn", errCant)
+
+	require.ErrorIs(t, failed.Err(), errCant)
+	require.ErrorIs(t, failed.Validate(), errCant)
+	require.NoError(t, New("ok", []any{1}).Err())
+
+	_, err := failed.MarshalJSON()
+	require.ErrorIs(t, err, errCant)
+
+	for name, holder := range map[string]Descriptor{
+		"list": New("seq", []any{New("ok", []any{1}), failed}),
+		"map":  Root(map[string]any{"reply": failed}),
+	} {
+		_, err := holder.MarshalJSON()
+		require.ErrorIs(t, err, errCant, name)
+	}
 }

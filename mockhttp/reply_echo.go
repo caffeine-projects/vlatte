@@ -2,15 +2,20 @@ package mockhttp
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ ReplierFactory = (*EchoReply)(nil)
-	_ Replier        = (*echoReplier)(nil)
+	_ ReplierFactory             = (*EchoReply)(nil)
+	_ descriptor.SelfDescriptive = (*EchoReply)(nil)
+	_ Replier                    = (*echoReplier)(nil)
 )
+
+// errEchoNotDescribed is why a mock with an Echo reply can't be described: mock files have no echo reply.
+var errEchoNotDescribed = errors.New("reply: an Echo reply can't be described as a mock file")
 
 // EchoReply configures a reply that writes the request back, as it came. It is a ReplierFactory.
 type EchoReply struct {
@@ -26,10 +31,9 @@ func (e *EchoReply) Log() *EchoReply {
 	return e
 }
 
+// Describe implements descriptor.SelfDescriptive. Mock files have no echo reply: encoding the description fails.
 func (e *EchoReply) Describe() descriptor.Descriptor {
-	return descriptor.New("echo", map[string]any{
-		"stdout_log": e.stdoutLog,
-	})
+	return descriptor.Fail("echo", errEchoNotDescribed)
 }
 
 // NewReplier implements ReplierFactory.

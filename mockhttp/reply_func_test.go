@@ -70,3 +70,23 @@ func TestSteps_AStepCanEndAHandlerThatWaitsOnItsRequest(t *testing.T) {
 	require.ErrorIs(t, <-causes, errTimeout)
 	require.EqualValues(t, 1, scoped.Hits())
 }
+
+func TestFunc_DescribingItFailsSayingSo(t *testing.T) {
+	// #42: a Func or Handler reply described nothing, so its description loaded back with the default reply: a Handler
+	// that answered 201 came back as an empty 200. Describing it fails now, and says why, wherever the reply is.
+	created := Handler(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusCreated) })
+	fn := Func(func(http.ResponseWriter, *RequestValues) (*Response, error) { return nil, nil })
+
+	for name, reply := range map[string]ReplierFactory{
+		"handler":        created,
+		"func":           fn,
+		"in a sequence":  Seq(OK(), created),
+		"after sequence": Seq(OK()).OnSequenceEnded(fn),
+		"in a random":    Rand(fn),
+	} {
+		m := MustNew(Setup().Silent())
+
+		_, err := EncodeMock(m.MustMock(Getf("/h").Reply(reply)).Mocks()[0], "json")
+		require.ErrorContains(t, err, "reply: a Func or Handler reply can't be described as a mock file", name)
+	}
+}

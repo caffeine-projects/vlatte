@@ -308,6 +308,55 @@ func TestReply_DescriptionLoadsBack(t *testing.T) {
 	}
 }
 
+func TestReply_ADescribedReplyLoadsBackAndAnswersTheSame(t *testing.T) {
+	// #42: the description of a reply with trailers wrote trailers, which mock files don't read, and one with a body
+	// that isn't UTF-8 failed to encode: the admin API couldn't show either mock, nor keep it. Loaded back, each
+	// description answers the same status, body bytes and trailers.
+	tests := []struct {
+		name string
+		give *Reply
+	}{
+		{
+			name: "trailer",
+			give: OK().PlainText("t").Trailer("X-T", "v"),
+		},
+		{
+			name: "binary body",
+			give: OK().Header(HeaderContentType, "application/octet-stream").Body([]byte{0xff, 0xfe, 0x00}),
+		},
+		{
+			// Latin-1 text, as a client in another encoding gets it.
+			name: "text in another encoding",
+			give: OK().Header(HeaderContentType, "text/plain; charset=iso-8859-1").Body([]byte("caf\xe9")),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			built := MustNew(Setup().Silent())
+			built.MustStart()
+			t.Cleanup(built.Close)
+
+			desc, err := EncodeMock(built.MustMock(Getf("/x").Reply(tt.give)).Mocks()[0], "json")
+			require.NoError(t, err)
+
+			loaded := MustNew(Setup().Silent())
+			loaded.MustStart()
+			t.Cleanup(loaded.Close)
+			_, err = loaded.Mock(FromBytes(desc, "json"))
+			require.NoError(t, err, string(desc))
+
+			want, wantBody := fetch(t, built.URL("/x"))
+			got, gotBody := fetch(t, loaded.URL("/x"))
+
+			require.Equal(t, want.StatusCode, got.StatusCode, string(desc))
+			require.Equal(t, want.Header.Get(HeaderContentType), got.Header.Get(HeaderContentType), string(desc))
+			require.Equal(t, wantBody, gotBody, string(desc))
+			require.Equal(t, want.Trailer, got.Trailer, string(desc))
+		})
+	}
+}
+
 func TestReply_SharedReplyKeepsServingWhileMocksBuild(t *testing.T) {
 	// #23: building a mock compiled templates into the reply it was given, so a request to one mock could read a
 	// template that another build had just reset: 418s, missing headers and data races. Building now only reads the

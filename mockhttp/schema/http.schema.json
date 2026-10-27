@@ -269,6 +269,7 @@
         "header_template": { "description": "Headers whose values are templates.", "$ref": "#/$defs/header_map" },
         "trailer": { "$ref": "#/$defs/header_map" },
         "body": { "description": "Text as is; anything else as JSON.", "not": { "type": "null" } },
+        "body_base64": { "description": "The bytes of the body in standard base64, for a body that isn't UTF-8 text, such as an image.", "type": "string", "contentEncoding": "base64", "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$" },
         "body_file": { "description": "Relative paths start at the mock file's directory. The name is a template: one rendered from the request must stay inside that directory.", "type": "string", "minLength": 1 },
         "multipart": { "$ref": "#/$defs/multipart" },
         "template": {
@@ -284,7 +285,10 @@
       "additionalProperties": false,
       "allOf": [
         { "not": { "required": [ "body", "body_file" ] } },
+        { "not": { "required": [ "body", "body_base64" ] } },
         { "not": { "required": [ "body", "multipart" ] } },
+        { "not": { "required": [ "body_base64", "body_file" ] } },
+        { "not": { "required": [ "body_base64", "multipart" ] } },
         { "not": { "required": [ "body_file", "multipart" ] } }
       ]
     },
