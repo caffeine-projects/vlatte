@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="brand/logo.svg" alt="" width="128" height="128">
+  <img src="docs/brand/logo.svg" alt="" width="128" height="128">
 </p>
 
 <h1 align="center">VLatte</h1>
