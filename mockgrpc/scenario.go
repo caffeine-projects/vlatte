@@ -20,8 +20,8 @@ func (app *Server) Scenarios(ctx context.Context) ([]matchscenario.Scenario, err
 }
 
 // SetScenario moves the scenario name to state: the mocks that require state match next. It returns an error that
-// wraps [matchscenario.ErrUnknownState] when no mock of the scenario names state. A scenario no mock names moves to any
-// state.
+// wraps [matchscenario.ErrUnknownState] when no mock of the scenario names state, or state is empty. A scenario no
+// mock names moves to any other state.
 func (app *Server) SetScenario(ctx context.Context, name, state string) error {
 	uses, err := app.scenarioUses(ctx)
 	if err != nil {
