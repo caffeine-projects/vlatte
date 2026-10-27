@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/journal"
 )
@@ -58,6 +60,10 @@ type Server struct {
 	runner    *vlatte.EventRunner // runs the on_complete events of mocks
 	admin     adminapi.Server     // nil without Config.Admin
 	events    *adminapi.Events    // the admin API's; nil without it
+
+	// webhooks is the transport the server gives webhooks. Close closes its idle connections, so they don't outlive
+	// the server.
+	webhooks *http.Transport
 
 	loader *fileLoader // loads the mock files of Config.MockFiles
 
@@ -143,6 +149,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	app.logger = newLogger(conf, logs)
+	app.webhooks = httpx.NewWebhookTransport()
 
 	res, err := newResolver(conf)
 	if err != nil {
@@ -355,8 +362,8 @@ func (app *Server) Addr() string {
 }
 
 // Close stops the server, waiting for calls in flight to finish. It closes the admin API first, which waits for the
-// operations it serves, and the journal last, which it removes if it is a temporary one: verify the calls before
-// Close. A closed server doesn't start again, even one that never started.
+// operations it serves, then the idle connections of the transport it gives webhooks, and the journal last, which it
+// removes if it is a temporary one: verify the calls before Close. A closed server doesn't start again, even one that never started.
 func (app *Server) Close() {
 	app.mu.Lock()
 	app.closed = true
@@ -393,6 +400,8 @@ func (app *Server) Close() {
 			app.logger.Warn().Err(err).Msgf("server: Close: closing mock %s", mock.ID())
 		}
 	}
+
+	app.webhooks.CloseIdleConnections()
 
 	if err := app.Journal().Close(); err != nil {
 		app.logger.Warn().Err(err).Msg("server: Close: closing the journal")

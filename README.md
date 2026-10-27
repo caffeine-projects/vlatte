@@ -500,7 +500,7 @@ m := mockhttp.MustNew(mockhttp.Setup().OnCompleteListener("webhook", wh))
 
 A mock that names a listener the server doesn't have fails to build, and so does a server given two listeners of one name.
 
-A webhook sends through `webhook.WithTransport`, or else the server's `Setup().Transport`, or else a transport the server makes for webhooks, whose idle connections `m.Close()` closes.
+A webhook sends through `webhook.WithTransport`, or else the server's `Setup().Transport`, or else a transport the server makes for webhooks, whose idle connections `m.Close()` closes; a gRPC server makes one too. A listener of your own gets the same from its event's `Kit()`: the server's `Logger()`, `Transport()`, and `Dir()`, the directory of the mock file, which relative files open from.
 
 ```yaml
 request:
