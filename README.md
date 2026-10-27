@@ -1,6 +1,26 @@
-# vlatte
+<p align="center">
+  <img src="brand/logo.svg" alt="" width="128" height="128">
+</p>
 
-Mock HTTP and gRPC servers for Go tests, and a CLI that serves HTTP mocks from files.
+<h1 align="center">VLatte</h1>
+
+<p align="center">
+  Mock HTTP and gRPC servers for Go tests.<br>
+  Match requests, reply with templates, record and proxy.<br>
+  A CLI that serves the same mocks from files.
+</p>
+
+<p align="center">
+  <a href="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml"><img src="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/caffeine-projects/vlatte"><img src="https://codecov.io/gh/caffeine-projects/vlatte/graph/badge.svg" alt="codecov"></a>
+  <a href="https://pkg.go.dev/github.com/caffeine-projects/vlatte"><img src="https://pkg.go.dev/badge/github.com/caffeine-projects/vlatte.svg" alt="Go Reference"></a>
+</p>
+
+## About
+
+VLatte is a mocking framework for Go. In a test, `mockhttp` and `mockgrpc` start real HTTP and gRPC servers that answer the way the test says: match a request on its method, path, headers, query or body, reply with a status, headers and a templated body, call a webhook, or forward what nothing matches to a real upstream.
+
+The `vlatte` CLI serves the same mocks from YAML or JSON files, records what passes through it and plays it back, and takes new mocks over an admin API.
 
 ## Install
 
