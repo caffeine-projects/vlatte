@@ -192,7 +192,7 @@ func New(config ...Option) (*Server, error) {
 	stream := []grpc.StreamServerInterceptor{in.recoverStream, in.StreamInterceptor}
 
 	// The server's credentials come first, so those of the user's options win: StartTLS sets TLS on them.
-	app.creds = &serverCreds{insecure.NewCredentials()}
+	app.creds = &serverCreds{TransportCredentials: insecure.NewCredentials()}
 	opts := []grpc.ServerOption{grpc.Creds(app.creds)}
 
 	// The journal sees each call as it ends, with the code the client gets, outside every interceptor of the user's
