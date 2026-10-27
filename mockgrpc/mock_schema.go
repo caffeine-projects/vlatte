@@ -63,13 +63,15 @@ type scenarioDef struct {
 
 // requestDef holds the request matchers, as Builder calls, and the keys that set them.
 type requestDef struct {
-	keys    []string
-	method  string
-	header  []func(*Builder)
-	fields  []func(*Builder)
-	json    *string // message or messages, as JSON text
-	body    vlatte.Matcher
-	message []string // the keys of json that were set: message, messages
+	matchers *matchbuild.Registry // builds the matcher lists: the server's
+	keys     []string
+	method   string
+	header   []func(*Builder)
+	fields   []func(*Builder)
+	json     *string // message or messages, as JSON text
+	body     vlatte.Matcher
+	custom   []vlatte.Matcher
+	message  []string // the keys of json that were set: message, messages
 }
 
 // replyDef is a decoded response: of a mock, or of a rule of a bidi one.
@@ -107,7 +109,8 @@ type randomDef struct {
 }
 
 type bidiDef struct {
-	dir       string // where the body_file of its responses open from
+	matchers  *matchbuild.Registry // builds the matcher lists of its rules
+	dir       string               // where the body_file of its responses open from
 	header    []headerValue
 	trailer   []headerValue
 	rules     []ruleDef
@@ -116,6 +119,7 @@ type bidiDef struct {
 }
 
 type ruleDef struct {
+	matchers *matchbuild.Registry
 	dir      string
 	when     vlatte.Matcher
 	response *replyDef
@@ -197,7 +201,7 @@ var _mockSchema = config.NewSchema(
 		Key: "request.header", Kind: config.Any, Usage: "Metadata to match, by key: text or a matcher list each.",
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "header")
-			return matchEach(v, &d.request.header, func(b *Builder, key string, m vlatte.Matcher) { b.Header(key, m) })
+			return matchEach(d.request.matchers, v, &d.request.header, func(b *Builder, key string, m vlatte.Matcher) { b.Header(key, m) })
 		},
 	},
 	mockField{
@@ -205,7 +209,7 @@ var _mockSchema = config.NewSchema(
 		Usage: "Fields of the request to match, by JSON path, such as user_id or items[0].key: text or a matcher list each.",
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "fields")
-			return matchEach(v, &d.request.fields, func(b *Builder, path string, m vlatte.Matcher) { b.Field(path, m) })
+			return matchEach(d.request.matchers, v, &d.request.fields, func(b *Builder, path string, m vlatte.Matcher) { b.Field(path, m) })
 		},
 	},
 	mockField{
@@ -241,10 +245,33 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "body")
 
-			m, err := matcherOf(v)
+			m, err := matcherOf(d.request.matchers, v)
 			d.request.body = m
 
 			return err
+		},
+	},
+	mockField{
+		Key: "request.custom", Kind: config.Any,
+		Usage: "Matchers of the whole call, such as custom ones of the server: a list of matcher lists, or names.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.request.keys = append(d.request.keys, "custom")
+			return config.Items(v, func(item config.Value) error {
+				switch item.Any.(type) {
+				case string, []any:
+				default:
+					return config.Mismatch(item, "a matcher list, such as [is-admin], or a matcher's name", config.String)
+				}
+
+				m, err := d.request.matchers.BuildMatcher(item.Any)
+				if err != nil {
+					return err
+				}
+
+				d.request.custom = append(d.request.custom, m)
+
+				return nil
+			})
 		},
 	},
 	mockField{
@@ -271,7 +298,7 @@ var _mockSchema = config.NewSchema(
 	mockField{
 		Key: "bidi", Kind: config.Any, Usage: "The answer of a bidi streaming method, message by message: header, trailer, on, otherwise and on_end.",
 		Set: func(d *mockDef, v config.Value) error {
-			d.bidi = &bidiDef{dir: d.dir}
+			d.bidi = &bidiDef{matchers: d.request.matchers, dir: d.dir}
 			return _bidiSchema.Decode(d.bidi, v)
 		},
 	},
@@ -423,7 +450,7 @@ var _bidiSchema = config.NewSchema(
 		Key: "on", Kind: config.Any, Usage: "Rules, in order: the first whose when matches a message answers it with its response.",
 		Set: func(b *bidiDef, v config.Value) error {
 			return config.Items(v, func(item config.Value) error {
-				r := ruleDef{dir: b.dir}
+				r := ruleDef{matchers: b.matchers, dir: b.dir}
 				if err := _ruleSchema.Decode(&r, item); err != nil {
 					return err
 				}
@@ -458,7 +485,7 @@ var _ruleSchema = config.NewSchema(
 	ruleField{
 		Key: "when", Kind: config.Any, Usage: "Matcher list of the message as JSON text, such as [field, message, [equal, hi]].",
 		Set: func(r *ruleDef, v config.Value) error {
-			m, err := matcherOf(v)
+			m, err := matcherOf(r.matchers, v)
 			r.when = m
 
 			return err
@@ -503,8 +530,9 @@ var _eventSchema = config.NewSchema(
 	},
 )
 
-func newMockDef() mockDef {
-	return mockDef{enabled: true}
+// newMockDef returns an empty mockDef whose matcher lists matchers builds.
+func newMockDef(matchers *matchbuild.Registry) mockDef {
+	return mockDef{enabled: true, request: requestDef{matchers: matchers}}
 }
 
 // check reports the problems between keys of a decoded document that came from origin. found are the problems
@@ -677,6 +705,10 @@ func (d *mockDef) apply(b *Builder) {
 
 	if d.request.body != nil {
 		b.Body(d.request.body)
+	}
+
+	for _, m := range d.request.custom {
+		b.Matches(m)
 	}
 
 	switch {
@@ -919,29 +951,30 @@ func headerValues(v config.Value, dst *[]headerValue) error {
 	})
 }
 
-// _builtinMatchers builds the matcher lists of mock files.
+// _builtinMatchers builds the matcher lists of a server that has no registry of its own.
 var _builtinMatchers = matchbuild.MustNew()
 
-// matcherOf returns the matcher of v, a value of a mock file: text matches equal text, and a list is a matcher spec.
-func matcherOf(v config.Value) (vlatte.Matcher, error) {
+// matcherOf returns the matcher of v, a value of a mock file, that r builds: text matches equal text, and a list is a
+// matcher spec.
+func matcherOf(r *matchbuild.Registry, v config.Value) (vlatte.Matcher, error) {
 	switch x := v.Any.(type) {
 	case string:
-		return _builtinMatchers.TryBuildMatcher(x)
+		return r.TryBuildMatcher(x)
 	case []any:
 		if len(x) == 0 {
 			return nil, config.Invalid(v, v.Key+" is an empty list", "name a matcher, such as [equal, x]")
 		}
 
-		return _builtinMatchers.TryBuildMatcher(x)
+		return r.TryBuildMatcher(x)
 	default:
 		return nil, config.Mismatch(v, "a string or a matcher list, such as [equal, x]", config.String)
 	}
 }
 
-// matchEach decodes an object of matcher values, by name, into Builder calls in name order.
-func matchEach(v config.Value, dst *[]func(*Builder), add func(b *Builder, name string, m vlatte.Matcher)) error {
+// matchEach decodes an object of matcher values, by name, that r builds, into Builder calls in name order.
+func matchEach(r *matchbuild.Registry, v config.Value, dst *[]func(*Builder), add func(b *Builder, name string, m vlatte.Matcher)) error {
 	return config.Members(v, func(name string, member config.Value) error {
-		m, err := matcherOf(member)
+		m, err := matcherOf(r, member)
 		if err != nil {
 			return err
 		}
