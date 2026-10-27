@@ -193,6 +193,23 @@ func (b *Builder) CallMatches(fn func(call *Call) (bool, error)) *Builder {
 	return b
 }
 
+// Matches adds a matcher of the whole call: m gets the *Call, as the function of CallMatches does. A mock file's
+// request.custom adds matchers this way, such as custom ones of the server's registry: see
+// [ConfigBuilder.Matchers]. Unlike a function, a matcher that describes itself is described, under request.custom,
+// so the admin API's store keeps it.
+func (b *Builder) Matches(m vlatte.Matcher) *Builder {
+	b.described.custom = append(b.described.custom, m)
+	b.readsRequest = true
+	b.expectations = append(b.expectations, &vlatte.Eval[*Call]{
+		Target:   int(_scopeRequest),
+		Key:      "custom",
+		Matcher:  m,
+		Selector: selectCall,
+	})
+
+	return b
+}
+
 // Times sets how many calls each mock built from the builder serves: 1 or more. Each mock counts its own, so a mock
 // built again, as Remock does, starts from zero. The last call wins.
 func (b *Builder) Times(times int64) *Builder {
