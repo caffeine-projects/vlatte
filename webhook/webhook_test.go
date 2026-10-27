@@ -1128,6 +1128,10 @@ func TestArgs_ADescriptionDecodesBack(t *testing.T) {
 			args: &webhook.Args{URL: "http://hooks.test", Body: "paid"},
 		},
 		{
+			name: "a body that isn't UTF-8",
+			args: &webhook.Args{URL: "http://hooks.test", Body: "\xff\xfe\x00"},
+		},
+		{
 			name: "a multipart body",
 			args: &webhook.Args{URL: "http://hooks.test", Multipart: mockhttp.MultipartMixed(mockhttp.NewPart().BodyText("a")).Boundary("b")},
 		},
@@ -1198,6 +1202,15 @@ func TestWebHook_ADescribedMockSendsTheSameWebhook(t *testing.T) {
 		{
 			name: "built in Go",
 			mock: orders(webhook.Options().URL(target.URL+"/go").Method("post").Header("X-A", "go").Body("paid").Delay(time.Millisecond).Build("webhook")),
+		},
+		{
+			name: "built in Go, with a body that isn't UTF-8",
+			mock: orders(webhook.Options().URL(target.URL + "/bytes").Method("post").Body("\xff\xfe\x00").Build("webhook")),
+		},
+		{
+			name: "built in Go, with a part that isn't UTF-8",
+			mock: orders(webhook.Options().URL(target.URL + "/part-bytes").Method("post").
+				Multipart(mockhttp.MultipartMixed(mockhttp.NewPart().Body([]byte{0xff, 0xfe, 0x00})).Boundary("b")).Build("webhook")),
 		},
 		{
 			name: "from a map, with templates",

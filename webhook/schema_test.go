@@ -76,6 +76,10 @@ func TestJSONSchema_AcceptsWhatPrepareAccepts(t *testing.T) {
 		{name: "an ftp url", params: map[string]any{"url": "ftp://files.test"}},
 		{name: "a method that isn't one", params: map[string]any{"url": "http://hooks.test", "method": "ghjk%&^*()"}},
 		{name: "two bodies", params: map[string]any{"url": "http://hooks.test", "body": "x", "body_file": "x.txt"}},
+		{name: "a body in base64", params: map[string]any{"url": "http://hooks.test", "body_base64": "//4A\n//4A"}},
+		{name: "a body in base64 without its padding", params: map[string]any{"url": "http://hooks.test", "body_base64": "//4"}},
+		{name: "a body in base64 and a body file", params: map[string]any{"url": "http://hooks.test", "body_base64": "//4A", "body_file": "x.txt"}},
+		{name: "a body in base64 and a multipart body", params: map[string]any{"url": "http://hooks.test", "body_base64": "//4A", "multipart": multipart}},
 		{name: "a multipart body and a Content-Type header", params: map[string]any{
 			"url": "http://hooks.test", "header": map[string]any{"content-type": "x"}, "multipart": multipart,
 		}},

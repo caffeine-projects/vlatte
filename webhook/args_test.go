@@ -33,6 +33,20 @@ func TestArgsFromMap(t *testing.T) {
 	}, args)
 }
 
+func TestArgsFromMap_BodyBase64(t *testing.T) {
+	// JSON and YAML hold text as UTF-8: a body of other bytes, such as an image, is written in standard base64, as
+	// replies write theirs, and sent as those bytes. It is one body, as the others are.
+	args, err := webhook.ArgsFromMap(map[string]any{"url": "http://a", "body_base64": "//4A\n"})
+	require.NoError(t, err)
+	require.Equal(t, &webhook.Args{URL: "http://a", Body: "\xff\xfe\x00"}, args)
+
+	_, err = webhook.ArgsFromMap(map[string]any{"url": "http://a", "body": "x", "body_base64": "//4"})
+	require.ErrorIs(t, err, webhook.ErrBadArg)
+	require.EqualError(t, err, `webhook: bad argument: parameters: 2 problems
+  on_complete: invalid_value: parameters.body_base64 isn't standard base64: illegal base64 data at input byte 0; encode the bytes with base64, padding included
+  on_complete: conflict: parameters.body_base64 is set with parameters.body; keep one of them`)
+}
+
 func TestArgsFromMap_ReportsEveryProblem(t *testing.T) {
 	// Parameters used to fall back to defaults when a value had the wrong type, and log_level ignored the int64 of
 	// mock files. Now each problem is reported, as in mock files, all at once.
@@ -51,7 +65,7 @@ func TestArgsFromMap_ReportsEveryProblem(t *testing.T) {
   on_complete: conflict: parameters.body_file is set with parameters.body; keep one of them
   on_complete: invalid_value: parameters.header.X must be a string, not a number; write it in quotes: "1"
   on_complete: unknown_key: parameters.log_level is not a known setting; `+
-		`the keys under parameters are url, url_template, method, header, header_template, body, body_template, body_file, multipart, multipart_template, delay
+		`the keys under parameters are url, url_template, method, header, header_template, body, body_base64, body_template, body_file, multipart, multipart_template, delay
   on_complete: invalid_value: parameters.method must be a string, not a number; write it in quotes: "5"
   on_complete: conflict: parameters.url_template is set with parameters.url; keep one of them`)
 }

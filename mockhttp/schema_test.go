@@ -222,6 +222,7 @@ var _scalarKeys = []struct {
 	{"response.multipart.parts[0].name", "a", inPart("name")},
 	{"response.multipart.parts[0].filename", "a.png", inPart("filename")},
 	{"response.multipart.parts[0].content_type", "image/png", inPart("content_type")},
+	{"response.multipart.parts[0].body_base64", "//4A\n//4A\n", inPart("body_base64")},
 	{"response.multipart.parts[0].body_file", "a.png", inPart("body_file")},
 	{"response.multipart.parts[0].delay", "1s", inPart("delay")},
 }

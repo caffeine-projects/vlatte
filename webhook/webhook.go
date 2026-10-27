@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rs/zerolog"
 
@@ -302,8 +304,8 @@ type Args struct {
 
 // Describe implements descriptor.SelfDescriptive: the parameters as a mock file writes them, the ones set only, so the
 // description of a mock, such as the admin API gives, loads back with the same webhook. A relative body file is joined
-// to the mock file's directory, which a description loaded back doesn't have. A multipart body is described when it
-// describes itself, as mockhttp's do.
+// to the mock file's directory, which a description loaded back doesn't have. A body that isn't UTF-8 is described in
+// body_base64. A multipart body is described when it describes itself, as mockhttp's do.
 func (a *Args) Describe() descriptor.Descriptor {
 	params := make(map[string]any)
 
@@ -314,6 +316,12 @@ func (a *Args) Describe() descriptor.Descriptor {
 		if value != "" {
 			params[key] = value
 		}
+	}
+
+	// JSON and YAML hold text as UTF-8: other bytes, such as an image, go in base64.
+	if !utf8.ValidString(a.Body) {
+		delete(params, "body")
+		params["body_base64"] = base64.StdEncoding.EncodeToString([]byte(a.Body))
 	}
 
 	if len(a.Header) > 0 {
@@ -467,6 +475,20 @@ var _argsSchema = config.NewSchema(
 		Set: func(a *Args, v config.Value) error { a.Body = v.Str; return nil },
 	},
 	argsField{
+		Key: "body_base64", Kind: config.String,
+		Usage: "Body of the request: bytes in standard base64, for a body that isn't UTF-8 text, such as an image. Line breaks are ignored.",
+		Set: func(a *Args, v config.Value) error {
+			b, err := base64.StdEncoding.DecodeString(v.Str)
+			if err != nil {
+				return config.Invalid(v, v.Key+" isn't standard base64: "+err.Error(), "encode the bytes with base64, padding included")
+			}
+
+			a.Body = string(b)
+
+			return nil
+		},
+	},
+	argsField{
 		Key: "body_template", Kind: config.String, Usage: "Body of the request, as a template.",
 		Set: func(a *Args, v config.Value) error { a.BodyTemplate = v.Str; return nil },
 	},
@@ -491,7 +513,7 @@ var _argsSchema = config.NewSchema(
 )
 
 // _exclusive lists the sets of parameters of which only one can be set.
-var _exclusive = [][]string{{"url", "url_template"}, {"body", "body_file", "body_template", "multipart", "multipart_template"}}
+var _exclusive = [][]string{{"url", "url_template"}, {"body", "body_base64", "body_file", "body_template", "multipart", "multipart_template"}}
 
 // argsOf returns the parameters of an event as *Args: a copy of *Args, so a Transform can't change them for later
 // events, or a map decoded, whose problems name origin and whose relative files open from dir.
@@ -516,8 +538,9 @@ func argsOf(params vlatte.Parameters, origin, dir string) (*Args, error) {
 //   - url, or url_template, a template: a string;
 //   - method: a string, GET when empty;
 //   - header and header_template, whose values are templates: objects of strings;
-//   - one body: body, body_template, a template, or body_file, a string; or multipart, or multipart_template, whose
-//     text is templates: an object with the type, boundary, params and parts of the body;
+//   - one body: body, body_base64, the bytes in standard base64, body_template, a template, or body_file, a string; or
+//     multipart, or multipart_template, whose text is templates: an object with the type, boundary, params and parts
+//     of the body;
 //   - delay: milliseconds, or a Go duration such as 1.5s.
 //
 // As in mock files, each value must have its type, and other keys are errors. The webhook's checks of what a request

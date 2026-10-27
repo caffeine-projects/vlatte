@@ -15,7 +15,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
@@ -373,19 +372,13 @@ func TestPropEncode_TemplatesAreTheText(t *testing.T) {
 
 func TestPropDecode_ReadsWhatDocWrites(t *testing.T) {
 	// MP5: Decode reads a spec's Doc back as the same spec: the same Doc, and the same bytes on the wire. A byte
-	// body comes back as text, which writes the same bytes.
+	// body comes back as text, which writes the same bytes, or as body_base64 when it isn't UTF-8, which JSON and
+	// YAML can't hold as text.
 	dir := t.TempDir()
 
 	rapid.Check(t, func(t *rapid.T) {
 		s := genSpec(dir).Draw(t, "spec")
 		s.Boundary = genBoundary().Draw(t, "boundary")
-
-		for _, p := range s.Parts {
-			// A mock file is text, so JSON and YAML can't hold such a body: it goes through Go only.
-			if !utf8.Valid(p.Body) {
-				p.Body = []byte("text")
-			}
-		}
 
 		// A mock file is JSON or YAML, so the document goes through JSON as a file does.
 		data, err := json.Marshal(s.Doc(), json.Deterministic(true))

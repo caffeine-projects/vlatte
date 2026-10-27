@@ -48,6 +48,10 @@ func TestDecode_Rules(t *testing.T) {
 		{"name as a number", `{"type": "form-data", "parts": [{"name": 1}]}`, []want{{config.CodeInvalidValue, "m.parts[0].name", "must be a string, not a number", ""}}},
 		{"null body", `{"type": "mixed", "parts": [{"body": null}]}`, []want{{config.CodeInvalidValue, "m.parts[0].body", "m.parts[0].body is null", `write "" for an empty body`}}},
 		{"body and body_file", `{"type": "mixed", "parts": [{"body": "x", "body_file": "x.bin"}]}`, []want{{config.CodeConflict, "m.parts[0].body_file", "m.parts[0].body_file is set with m.parts[0].body", "keep one of them"}}},
+		{"body_base64 that isn't base64", `{"type": "mixed", "parts": [{"body_base64": "//4"}]}`, []want{{config.CodeInvalidValue, "m.parts[0].body_base64", "m.parts[0].body_base64 isn't standard base64", "padding included"}}},
+		{"body_base64 as a number", `{"type": "mixed", "parts": [{"body_base64": 5}]}`, []want{{config.CodeInvalidValue, "m.parts[0].body_base64", "m.parts[0].body_base64 must be a string, not a number", ""}}},
+		{"body and body_base64", `{"type": "mixed", "parts": [{"body": "x", "body_base64": "eA=="}]}`, []want{{config.CodeConflict, "m.parts[0].body_base64", "m.parts[0].body_base64 is set with m.parts[0].body", "keep one of them"}}},
+		{"body_base64 and body_file", `{"type": "mixed", "parts": [{"body_base64": "eA==", "body_file": "x.bin"}]}`, []want{{config.CodeConflict, "m.parts[0].body_file", "m.parts[0].body_file is set with m.parts[0].body_base64", "keep one of them"}}},
 		{"empty body_file", `{"type": "mixed", "parts": [{"body_file": ""}]}`, []want{{config.CodeInvalidValue, "m.parts[0].body_file", "expected a file name", ""}}},
 		{"body and body_file, and a typo", `{"type": "mixed", "parts": [{"body": "x", "body_file": "x.bin", "nmae": "a"}]}`, []want{
 			{config.CodeConflict, "m.parts[0].body_file", "m.parts[0].body_file is set with m.parts[0].body", "keep one of them"},
@@ -105,7 +109,8 @@ func TestDecode_AValidObject(t *testing.T) {
 		"parts": [
 			{"header": {"Content-Id": "<root>", "X-A": ["1", "2", "3"]}, "body": {"id": 1}},
 			{"name": "report", "filename": "r.pdf", "content_type": "application/pdf", "body_file": "r.pdf", "delay": "500ms"},
-			{"body": "text"}
+			{"body": "text"},
+			{"body_base64": "//4A"}
 		]}`))
 	require.NoError(t, err)
 
@@ -120,6 +125,7 @@ func TestDecode_AValidObject(t *testing.T) {
 			{Header: []Header{{Name: "Content-Id", Value: "<root>"}, {Name: "X-A", Value: "1"}, {Name: "X-A", Value: "2"}, {Name: "X-A", Value: "3"}}, Body: []byte(`{"id":1}`), Kind: BodyJSON},
 			{Name: "report", Filename: "r.pdf", ContentType: "application/pdf", File: "r.pdf", Delay: 500_000_000},
 			{Body: []byte("text"), Kind: BodyText},
+			{Body: []byte{0xff, 0xfe, 0x00}, Kind: BodyBytes},
 		},
 	}, s)
 
