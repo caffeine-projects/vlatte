@@ -6,6 +6,7 @@ import (
 	"math"
 	"reflect"
 	"strconv"
+	"strings"
 )
 
 var (
@@ -154,18 +155,21 @@ func mod(a, b any) (any, error) {
 }
 
 // toInt converts v to an int: an integer, a float without a fraction, or a string of one, such as a query parameter.
+// A string is read exactly, in decimal: "3" and "3.0" are 3, and "1e3" is not an int.
 func toInt(v any) (int, error) {
 	if s, ok := v.(string); ok {
-		if i, err := strconv.Atoi(s); err == nil {
-			return i, nil
+		whole, fraction, _ := strings.Cut(s, ".")
+		if strings.Trim(fraction, "0") == "" {
+			if i, err := strconv.Atoi(whole); err == nil {
+				return i, nil
+			}
 		}
 
-		f, err := strconv.ParseFloat(s, 64)
-		if err != nil {
+		if _, err := strconv.ParseFloat(s, 64); err != nil {
 			return 0, fmt.Errorf("%q is not a number", s)
 		}
 
-		v = f
+		return 0, fmt.Errorf("%q is not an int", s)
 	}
 
 	n, err := toNumber(v)

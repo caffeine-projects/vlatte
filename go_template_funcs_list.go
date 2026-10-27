@@ -212,6 +212,10 @@ func keyOrder(keys []any) (func(a, b any) int, error) {
 			x, _ := toNumber(a)
 			y, _ := toNumber(b)
 
+			if !x.isFloat && !y.isFloat {
+				return cmp.Compare(x.i, y.i)
+			}
+
 			return cmp.Compare(x.float(), y.float())
 		}
 	}, nil

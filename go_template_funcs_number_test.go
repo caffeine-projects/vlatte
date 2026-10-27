@@ -38,6 +38,13 @@ func TestNumberConversions(t *testing.T) {
 		{name: "toInt of a float string without a fraction", text: `{{ toInt "3.0" }}`, want: "3"},
 		{name: "toInt of a JSON number", text: `{{ toInt (index (fromJSON "[7]") 0) }}`, want: "7"},
 		{name: "toInt of an int", text: `{{ toInt 7 }}`, want: "7"},
+		{
+			// A query parameter is exact: rounding it through a float64 would answer another number.
+			name: "toInt of a string beyond float64 precision", text: `{{ toInt "9007199254740993.0" }}`, want: "9007199254740993",
+		},
+		{name: "toInt of a string below the range of int", text: `{{ toInt "-9223372036854775809" }}`, err: `error calling toInt: "-9223372036854775809" is not an int`},
+		{name: "toInt of a string with a fraction", text: `{{ toInt "2.0000000000000001" }}`, err: `error calling toInt: "2.0000000000000001" is not an int`},
+		{name: "toInt of a string in exponent form", text: `{{ toInt "1e3" }}`, err: `error calling toInt: "1e3" is not an int`},
 		{name: "toInt of a fraction", text: `{{ toInt 2.5 }}`, err: "2.5 is not an int"},
 		{name: "toInt of text", text: `{{ toInt "abc" }}`, err: `"abc" is not a number`},
 		{name: "toInt of a bool", text: `{{ toInt true }}`, err: "true is not a number"},

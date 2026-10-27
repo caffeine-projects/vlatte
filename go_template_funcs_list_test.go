@@ -74,6 +74,11 @@ func TestSortBy(t *testing.T) {
 		{name: "by a string", text: `{{ range sortBy (fromJSON .) "$.name" }}{{ .name }}{{ end }}`, data: people, want: "abcn"},
 		{name: "descending with reverse", text: `{{ range reverse (sortBy (fromJSON .) "$.age") }}{{ .name }}{{ end }}`, data: people, want: "cabn"},
 		{name: "plain values with $", text: `{{ sortBy (list 3 1.5 2) "$" | toJSON }}`, want: "[1.5,2,3]"},
+		{
+			// Large IDs and nanosecond times are integers beyond float64 precision: they still order exactly.
+			name: "integers beyond float64 precision", text: `{{ sortBy (list 9007199254740993 9007199254740992) "$" | toJSON }}`,
+			want: "[9007199254740992,9007199254740993]",
+		},
 		{name: "strings are values, not JSON text", text: `{{ sortBy (list "b" "a") "$" | join "" }}`, want: "ab"},
 		{name: "booleans, false first", text: `{{ sortBy (list true false true) "$" | toJSON }}`, want: "[false,true,true]"},
 		{name: "values that don't order", text: `{{ sortBy (list (list 1)) "$" }}`, err: "error calling sortBy: can't sort by []interface {} values"},
