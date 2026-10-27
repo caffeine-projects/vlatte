@@ -426,3 +426,76 @@ func TestJSONSchema_ProxyTargetPattern(t *testing.T) {
 		require.Equal(t, want, pattern.MatchString(target), "pattern on %q", target)
 	}
 }
+
+// faultSpec returns the spec of a fault of type typ, with the keys and values of its parameters.
+func faultSpec(typ string, params ...any) map[string]any {
+	spec := map[string]any{"type": typ}
+	for i := 0; i < len(params); i += 2 {
+		spec[params[i].(string)] = params[i+1]
+	}
+
+	return spec
+}
+
+func TestJSONSchema_FaultsAgreeWithTheDecoder(t *testing.T) {
+	// The editor schema accepts a fault spec exactly when the decoder builds it, at each level. A slicer's variation
+	// must stay below its size, and a latency's jitter within it, which the schema can't compare: the decoder alone
+	// checks them.
+	schema, _ := loadJSONSchema(t)
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+
+	tests := []struct {
+		spec  any
+		valid bool
+	}{
+		{faultSpec("empty_response"), true},
+		{faultSpec("malformed_response_chunk"), true},
+		{faultSpec("random_data_then_close"), true},
+		{faultSpec("connection_reset_by_peer"), true},
+		{faultSpec("connection_reset_by_peer_after", "after", "1s"), true},
+		{faultSpec("chunked_dribble_delay", "chunks", int64(3), "total", int64(300)), true},
+		{faultSpec("latency", "latency", "100ms"), true},
+		{faultSpec("latency", "latency", "100ms", "jitter", "20ms"), true},
+		{faultSpec("bandwidth", "rate", int64(1)), true},
+		{faultSpec("bandwidth", "rate", "good_3g"), true},
+		{faultSpec("slicer", "average_size", int64(8)), true},
+		{faultSpec("slicer", "average_size", int64(8), "size_variation", int64(7), "delay", "0"), true},
+		{faultSpec("slow_close", "delay", int64(0)), true},
+		{faultSpec("timeout"), true},
+		{faultSpec("timeout", "after", "1.5s"), true},
+		{faultSpec("limit_data", "bytes", int64(0)), true},
+		{"empty_response", false},
+		{[]any{"slow_close", "1s"}, false},
+		{map[string]any{"latency": "1s"}, false},
+		{faultSpec("nope"), false},
+		{faultSpec("Latency", "latency", "1s"), false},
+		{faultSpec("slow_close"), false},
+		{faultSpec("empty_response", "delay", "1s"), false},
+		{faultSpec("latency", "latency", "1s", "latncy", "1s"), false},
+		{faultSpec("connection_reset_by_peer_after", "after", "-1s"), false},
+		{faultSpec("chunked_dribble_delay", "chunks", int64(0), "total", "1s"), false},
+		{faultSpec("chunked_dribble_delay", "chunks", int64(3)), false},
+		{faultSpec("latency", "latency", "1s", "jitter", int64(-1)), false},
+		{faultSpec("latency", "latency", "1s", "jitter", 12.5), false},
+		{faultSpec("bandwidth", "rate", int64(0)), false},
+		{faultSpec("bandwidth", "rate", "5g"), false},
+		{faultSpec("slicer", "average_size", int64(0)), false},
+		{faultSpec("slicer", "average_size", int64(4), "size_variation", int64(-1)), false},
+		{faultSpec("timeout", "after", "1500"), false},
+		{faultSpec("limit_data", "bytes", 1.5), false},
+	}
+
+	for _, key := range []string{"steps", "wire_steps", "upstream_steps"} {
+		for _, tc := range tests {
+			doc := withRequest(map[string]any{key: []any{tc.spec}})
+
+			data, err := config.Encode(doc, "json")
+			require.NoError(t, err)
+
+			_, decodeErr := mockDoc{origin: "doc", format: "json", data: data}.build(m)
+			require.Equal(t, tc.valid, decodeErr == nil, "%s: %#v: %v", key, tc.spec, decodeErr)
+			require.Equal(t, tc.valid, schema.Validate(instance(t, doc)) == nil, "%s: %#v", key, tc.spec)
+		}
+	}
+}

@@ -154,6 +154,11 @@ func (s *Store[M]) Clear(ctx context.Context) error {
 	return s.serving.Clear(ctx)
 }
 
+// Health returns the errors of the persistent store and of the server's.
+func (s *Store[M]) Health(ctx context.Context) error {
+	return errors.Join(s.durable.Health(ctx), s.serving.Health(ctx))
+}
+
 // Reload serves what the persistent store holds now, in place of the mocks it served from it, in one step: the
 // changes made to it directly take effect. A mock whose ID a mock the server has from elsewhere holds, such as a mock
 // file's, gives way to it, as mocks the admin API adds do. When it fails, the server serves what it did.

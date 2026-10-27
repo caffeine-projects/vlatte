@@ -535,3 +535,8 @@ func TestPropScopesAdd_AllOrNothing(t *testing.T) {
 		}
 	})
 }
+
+func TestMemoryStore_IsAlwaysReady(t *testing.T) {
+	// A memory store has nothing behind it that can go down: the admin API's GET /readyz answers while it serves.
+	require.NoError(t, vlatte.NewStore[*fakeMock]().Health(t.Context()))
+}

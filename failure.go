@@ -1,6 +1,6 @@
 package vlatte
 
-// Values of FailureHeader.
+// Values of HeaderFailure.
 const (
 	FailureNoMatch = "no-match" // no mock matched the request
 	FailureMatch   = "match"    // finding a mock failed: a matcher or the store returned an error

@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"sync"
 
 	adminserver "github.com/caffeine-projects/vlatte/internal/admin"
@@ -53,6 +54,14 @@ func Addr(addr string) Option {
 // of the admin API, without sessions, and stdio with [Admin.ServeMCP]. Off, POST /mcp answers 501.
 func MCP() Option {
 	return func(a *Admin) { a.opts.MCP = true }
+}
+
+// Use adds middlewares that wrap every HTTP request of the admin API, such as one that checks an authentication header.
+// They run in the order they are added, across calls, before the admin API routes the request: one that answers
+// without calling the next handler answers in place of the admin API. Requests that come once the mock server closes
+// get a 503 without reaching them. MCP over stdio, with [Admin.ServeMCP], doesn't go through them.
+func Use(middlewares ...func(http.Handler) http.Handler) Option {
+	return func(a *Admin) { a.opts.Middlewares = append(a.opts.Middlewares, middlewares...) }
 }
 
 // New creates an admin API. It fails on an address that is neither host:port, :port nor a port.

@@ -1,6 +1,7 @@
 package adminapi_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -97,4 +98,23 @@ func TestMocksOf_WorksOnTheServersStore(t *testing.T) {
 	all, err := mocks.PickAll(t.Context())
 	require.NoError(t, err)
 	require.Empty(t, all)
+}
+
+// downStore is a store whose backing store is down.
+type downStore struct {
+	*vlatte.MemoryStore[*plainMock]
+
+	err error
+}
+
+func (s *downStore) Health(context.Context) error {
+	return s.err
+}
+
+func TestMocksOf_ReportsTheHealthOfTheStore(t *testing.T) {
+	// The admin API's GET /readyz asks the mocks: a store that is down must say so through them.
+	errDown := errors.New("database down")
+	mocks := adminapi.MocksOf[*plainMock](&downStore{MemoryStore: new(vlatte.MemoryStore[*plainMock]), err: errDown}, nil)
+
+	require.ErrorIs(t, mocks.Health(t.Context()), errDown)
 }

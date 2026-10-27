@@ -31,7 +31,7 @@ func requireMatchFailure(t *testing.T, err error, trailer metadata.MD, msg ...st
 	t.Helper()
 
 	require.Equal(t, codes.Internal, status.Code(err), "%v", err)
-	require.Equal(t, []string{vlatte.FailureMatch}, trailer.Get(vlatte.FailureHeader))
+	require.Equal(t, []string{vlatte.FailureMatch}, trailer.Get(vlatte.HeaderFailure))
 
 	for _, m := range msg {
 		require.Contains(t, status.Convert(err).Message(), m)

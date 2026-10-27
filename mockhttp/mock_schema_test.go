@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -516,6 +517,92 @@ func TestMockFile_ServesTrailers(t *testing.T) {
 	require.Equal(t, "done", res.Trailer.Get("X-End"))
 }
 
+func TestMockFile_ServesAnyJSONValueAsItsJSON(t *testing.T) {
+	// A body that isn't text is sent as JSON, whatever kind of value it is and whichever format the file is in:
+	// a top-level list or an integer was once dropped without a word (B5). Text is sent as is, so a JSON string
+	// or null is written as text.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	tests := []struct {
+		name   string
+		format string
+		body   string
+		want   string
+	}{
+		{"JSON object", "json", `{"b": 1, "a": "x"}`, `{"a":"x","b":1}`},
+		{"JSON empty object", "json", `{}`, `{}`},
+		{"JSON list", "json", `[1, 2, 3]`, `[1,2,3]`},
+		{"JSON empty list", "json", `[]`, `[]`},
+		{"JSON list of objects", "json", `[{"a": 1}, {"b": [true, null]}]`, `[{"a":1},{"b":[true,null]}]`},
+		{"JSON integer", "json", `42`, `42`},
+		{"JSON integer past float64 precision", "json", `9007199254740993`, `9007199254740993`},
+		{"JSON negative integer", "json", `-7`, `-7`},
+		{"JSON float", "json", `1.5`, `1.5`},
+		{"JSON true", "json", `true`, `true`},
+		{"JSON false", "json", `false`, `false`},
+		{"JSON nested values", "json", `{"a": {"b": [1, 2.5, "x", false, null, {"c": []}]}}`, `{"a":{"b":[1,2.5,"x",false,null,{"c":[]}]}}`},
+		{"JSON string as text", "json", `"hi"`, `hi`},
+		{"JSON string literal", "json", `"\"hi\""`, `"hi"`},
+		{"JSON null literal", "json", `"null"`, `null`},
+		{"YAML object", "yaml", `{b: 1, a: x}`, `{"a":"x","b":1}`},
+		{"YAML block object", "yaml", "\n    b: 1\n    a: x", `{"a":"x","b":1}`},
+		{"YAML empty object", "yaml", `{}`, `{}`},
+		{"YAML list", "yaml", `[1, 2, 3]`, `[1,2,3]`},
+		{"YAML empty list", "yaml", `[]`, `[]`},
+		{"YAML block list of objects", "yaml", "\n    - a: 1\n    - b: [true, null]", `[{"a":1},{"b":[true,null]}]`},
+		{"YAML integer", "yaml", `42`, `42`},
+		{"YAML integer past float64 precision", "yaml", `9007199254740993`, `9007199254740993`},
+		{"YAML negative integer", "yaml", `-7`, `-7`},
+		{"YAML float", "yaml", `1.5`, `1.5`},
+		{"YAML true", "yaml", `true`, `true`},
+		{"YAML false", "yaml", `false`, `false`},
+		{"YAML nested values", "yaml", `{a: {b: [1, 2.5, x, false, null, {c: []}]}}`, `{"a":{"b":[1,2.5,"x",false,null,{"c":[]}]}}`},
+		{"YAML string as text", "yaml", `hi`, `hi`},
+		{"YAML string literal", "yaml", `'"hi"'`, `"hi"`},
+		{"YAML null literal", "yaml", `'null'`, `null`},
+	}
+
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := fmt.Sprintf("/%d", i)
+			doc := "request: {path: " + path + "}\nresponse:\n  body: " + tc.body + "\n"
+			if tc.format == "json" {
+				doc = `{"request": {"path": "` + path + `"}, "response": {"body": ` + tc.body + `}}`
+			}
+
+			scope, err := m.Mock(FromBytes([]byte(doc), tc.format))
+			require.NoError(t, err)
+			t.Cleanup(func() { scope.Clear(context.Background()) })
+
+			res, err := http.Get(m.URL(path))
+			require.NoError(t, err)
+
+			got, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+
+			require.Equal(t, http.StatusOK, res.StatusCode)
+			require.Equal(t, tc.want, string(got))
+		})
+	}
+}
+
+func TestMockFile_RefusesANullBodyInJSON(t *testing.T) {
+	// A null body is refused, as in YAML, rather than served empty: an empty body is written "", and JSON null "null".
+	m := MustNew(Setup().Silent())
+
+	mock, err := mockDoc{origin: "doc", format: "json", data: []byte(`{"request": {"path": "/x"}, "response": {"body": null}}`)}.build(m)
+	require.Nil(t, mock)
+
+	problems := mockProblems(t, err)
+	require.Len(t, problems, 1)
+	require.Equal(t, config.CodeInvalidValue, problems[0].Code)
+	require.Equal(t, "response.body", problems[0].Key)
+	require.Equal(t, "response.body is null", problems[0].Message)
+}
+
 func TestMockFile_ProxyKeys(t *testing.T) {
 	// Every proxy key reaches the forwarded request or the response.
 	var forwarded *http.Request
@@ -702,5 +789,40 @@ func TestMockFile_CustomProblems(t *testing.T) {
 		for i, want := range tc.want {
 			require.Contains(t, problems[i].Message, want, tc.doc)
 		}
+	}
+}
+
+func TestMockFile_StepsProblems(t *testing.T) {
+	// A fault spec that can't be built fails the file, at its key, with what is wrong.
+	app := MustNew(Setup().Silent())
+	t.Cleanup(app.Close)
+
+	tests := []struct {
+		doc  string
+		key  string
+		want string
+	}{
+		{
+			"steps: [{type: slow_close, delay: 1s}, {type: bandwidth, rate: 0}]", "steps[1]",
+			"steps[1]: bandwidth needs a byte per second at least, not 0",
+		},
+		{
+			"wire_steps: [{type: nope}]", "wire_steps[0].type",
+			"wire_steps[0].type must be one of empty_response, malformed_response_chunk, random_data_then_close, " +
+				"connection_reset_by_peer, chunked_dribble_delay, latency, bandwidth, slicer, slow_close, timeout, " +
+				`limit_data or connection_reset_by_peer_after, not "nope"`,
+		},
+		{"upstream_steps: [{type: latency}]", "upstream_steps[0].latency", "upstream_steps[0].latency is required by a latency fault"},
+		{"steps: [{type: slow_close, dely: 1s, delay: 1s}]", "steps[0].dely", "steps[0].dely is not a known setting"},
+		{"steps: [[slow_close, 1s]]", "steps[0]", "steps[0] must be an object, such as {type: latency, latency: 300ms}, not a list"},
+		{"steps: empty_response", "steps", "steps must be a list, not a string"},
+	}
+
+	for _, tc := range tests {
+		_, err := decodeDoc(app, "request: {path: /f}\nresponse: {status: 200}\n"+tc.doc)
+		problems := mockProblems(t, err)
+		require.Len(t, problems, 1, tc.doc)
+		require.Equal(t, tc.key, problems[0].Key, tc.doc)
+		require.Equal(t, tc.want, problems[0].Message, tc.doc)
 	}
 }

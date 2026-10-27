@@ -257,6 +257,13 @@ func (s *fileStore) Clear(context.Context) error {
 	return s.apply(nil, slices.Sorted(maps.Values(held)))
 }
 
+// Health returns an error when the store's directory can't be read. A directory that doesn't exist yet is ready: the
+// first mock the store keeps makes it.
+func (s *fileStore) Health(context.Context) error {
+	_, err := s.files()
+	return err
+}
+
 // apply writes and then removes files, all or nothing: on the first failure, it puts back the files it changed, and
 // returns the failure, with what it couldn't put back. A file already gone is removed.
 func (s *fileStore) apply(writes []fileWrite, removes []string) error {

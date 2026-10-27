@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"iter"
@@ -12,11 +13,13 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/fault"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
@@ -117,6 +120,10 @@ func (s *docsStore) Delete(_ context.Context, ids ...string) error {
 		delete(s.docs, id)
 	}
 
+	return nil
+}
+
+func (s *docsStore) Health(context.Context) error {
 	return nil
 }
 
@@ -441,6 +448,7 @@ func TestFileStore_ADirectoryItCantUse(t *testing.T) {
 	require.Error(t, err)
 	require.Error(t, store.Delete(ctx, "hello"))
 	require.Error(t, store.Clear(ctx))
+	require.ErrorIs(t, store.Health(ctx), syscall.ENOTDIR)
 
 	inTheWay := t.TempDir()
 
@@ -454,6 +462,16 @@ func TestFileStore_ADirectoryItCantUse(t *testing.T) {
 	temps, err := filepath.Glob(filepath.Join(inTheWay, _fileStoreTempPattern))
 	require.NoError(t, err)
 	require.Empty(t, temps)
+}
+
+func TestFileStore_IsReadyBeforeItsDirectoryExists(t *testing.T) {
+	// A server whose admin API has added no mock yet has no store directory: it serves, so it is ready.
+	m := adminServer(t, Setup())
+
+	store, err := FileStore(filepath.Join(t.TempDir(), "_admin"))(m)
+	require.NoError(t, err)
+
+	require.NoError(t, store.Health(t.Context()))
 }
 
 func TestEncodeMock_AMockThatCantBeDescribed(t *testing.T) {
@@ -636,4 +654,28 @@ func TestFileStore_KeepsAMockOfACustomRequestMatcher(t *testing.T) {
 
 	res, _ = do(t, http.MethodGet, m.URL(), nil, nil)
 	require.Equal(t, StatusNoMatch, res.StatusCode)
+}
+
+func TestFileStore_KeepsAMockOfFaults(t *testing.T) {
+	// Faults describe themselves as their specs: a mock with faults is stored, and has them after a restart.
+	dir := t.TempDir()
+
+	m := adminServer(t, Setup().AdminStore(FileStore(dir)))
+	addMock(t, m, `{"id": "faulty", "request": {"method": "GET", "path": "/f"}, "response": {"status": 200},
+		"steps": [{"type": "limit_data", "bytes": 3}, {"type": "bandwidth", "rate": "3g"}],
+		"wire_steps": [{"type": "connection_reset_by_peer"}]}`)
+	m.Close()
+
+	m = adminServer(t, Setup().AdminStore(FileStore(dir)))
+
+	res, body := do(t, http.MethodGet, m.AdminURL()+"/mocks/faulty", nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+	require.Equal(t, []any{
+		map[string]any{"type": "limit_data", "bytes": 3.0},
+		map[string]any{"type": "bandwidth", "rate": float64(fault.Bandwidth3G)},
+	}, got["steps"])
+	require.Equal(t, []any{map[string]any{"type": "connection_reset_by_peer"}}, got["wire_steps"])
 }

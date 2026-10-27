@@ -26,6 +26,9 @@
       "additionalProperties": false
     },
     "on_complete": { "type": "array", "items": { "$ref": "#/$defs/on_complete_event" } },
+    "steps": { "description": "Faults the body of each answer passes through, in order.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
+    "wire_steps": { "description": "Faults every byte of each answer passes through, its head included, after steps. Needs HTTP/1.x.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
+    "upstream_steps": { "description": "Faults the body a proxy reply sends on passes through.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
     "request": {
       "type": "object",
       "properties": {
@@ -154,6 +157,75 @@
         { "type": "boolean" },
         { "enum": [ 0, 1, "1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False" ] }
       ]
+    },
+    "fault": {
+      "description": "A fault: an object whose type names it, and whose other keys are its parameters, such as {\"type\": \"latency\", \"latency\": \"300ms\"}.",
+      "type": "object",
+      "properties": { "type": { "enum": [ "empty_response", "malformed_response_chunk", "random_data_then_close", "connection_reset_by_peer", "chunked_dribble_delay", "latency", "bandwidth", "slicer", "slow_close", "timeout", "limit_data", "connection_reset_by_peer_after" ] } },
+      "required": [ "type" ],
+      "oneOf": [
+        {
+          "description": "Answers with nothing: no head, no body.",
+          "properties": { "type": { "const": "empty_response" } },
+          "required": [ "type" ]
+        },
+        {
+          "description": "Sends a chunk of the body that HTTP can't read.",
+          "properties": { "type": { "const": "malformed_response_chunk" } },
+          "required": [ "type" ]
+        },
+        {
+          "description": "Sends random bytes, then closes the connection.",
+          "properties": { "type": { "const": "random_data_then_close" } },
+          "required": [ "type" ]
+        },
+        {
+          "description": "Resets the connection.",
+          "properties": { "type": { "const": "connection_reset_by_peer" } },
+          "required": [ "type" ]
+        },
+        {
+          "description": "Sends the body in parts, spread over a time.",
+          "properties": { "type": { "const": "chunked_dribble_delay" }, "chunks": { "description": "How many parts the body is sent in.", "type": "integer", "minimum": 1 }, "total": { "description": "When the body ends.", "$ref": "#/$defs/duration" } },
+          "required": [ "type", "chunks", "total" ]
+        },
+        {
+          "description": "Delays each write.",
+          "properties": { "type": { "const": "latency" }, "latency": { "description": "How late each write arrives.", "$ref": "#/$defs/duration" }, "jitter": { "description": "How much the latency varies by, up to the latency. 0 by default.", "$ref": "#/$defs/duration" } },
+          "required": [ "type", "latency" ]
+        },
+        {
+          "description": "Limits the bytes sent each second.",
+          "properties": { "type": { "const": "bandwidth" }, "rate": { "description": "Bytes per second, or a common link.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "enum": [ "gprs", "dial_up", "2g", "good_2g", "3g", "good_3g", "dsl", "4g", "wifi", "fiber" ] } ] } },
+          "required": [ "type", "rate" ]
+        },
+        {
+          "description": "Sends the body in slices.",
+          "properties": { "type": { "const": "slicer" }, "average_size": { "description": "How many bytes a slice has, on average.", "type": "integer", "minimum": 1 }, "size_variation": { "description": "How many bytes a slice varies by, below average_size. 0 by default.", "type": "integer", "minimum": 0 }, "delay": { "description": "How long to wait before each slice. 0 by default.", "$ref": "#/$defs/duration" } },
+          "required": [ "type", "average_size" ]
+        },
+        {
+          "description": "Delays the end of the answer.",
+          "properties": { "type": { "const": "slow_close" }, "delay": { "description": "How long the end of the answer waits.", "$ref": "#/$defs/duration" } },
+          "required": [ "type", "delay" ]
+        },
+        {
+          "description": "Sends nothing, then ends the answer.",
+          "properties": { "type": { "const": "timeout" }, "after": { "description": "When the answer ends. 0, the default, never ends it.", "$ref": "#/$defs/duration" } },
+          "required": [ "type" ]
+        },
+        {
+          "description": "Closes the connection after some bytes.",
+          "properties": { "type": { "const": "limit_data" }, "bytes": { "description": "How many bytes pass before the connection closes.", "type": "integer", "minimum": 0 } },
+          "required": [ "type", "bytes" ]
+        },
+        {
+          "description": "Resets the connection after a time.",
+          "properties": { "type": { "const": "connection_reset_by_peer_after" }, "after": { "description": "When the connection is reset.", "$ref": "#/$defs/duration" } },
+          "required": [ "type", "after" ]
+        }
+      ],
+      "unevaluatedProperties": false
     },
     "matcher": {
       "description": "A string, compared as is, or a matcher list such as [\"contains\", \"x\"].",

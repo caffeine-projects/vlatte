@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -40,6 +41,9 @@ var _routes = []struct {
 	lacking string
 }{
 	{pattern: "GET /health"},
+	{pattern: "GET /livez"},
+	{pattern: "GET /readyz"},
+	{pattern: "GET /startupz"},
 	{pattern: "GET /openapi"},
 	{pattern: "GET /docs"},
 	{pattern: "GET /schema", lacking: "describe its mock files"},
@@ -85,6 +89,9 @@ var _operations = map[string]struct {
 	can   func(ops *handler.Operations) bool
 }{
 	"GET /health":           {serve: handler.Health},
+	"GET /livez":            {serve: handler.Live},
+	"GET /readyz":           {serve: handler.Ready},
+	"GET /startupz":         {serve: handler.Started},
 	"GET /schema":           {serve: handler.MockSchema, can: (*handler.Operations).HasMockSchema},
 	"GET /mocks":            {serve: handler.ListMocks},
 	"POST /mocks":           {serve: handler.AddMock, can: (*handler.Operations).Builds},
@@ -133,6 +140,10 @@ type Options struct {
 
 	// MCP serves the admin operations over MCP too: Streamable HTTP at POST /mcp, and stdio with [Server.ServeMCP].
 	MCP bool
+
+	// Middlewares wrap every HTTP request of the admin API, the first outermost. They run before the cross-origin
+	// check and the routes, and not for MCP over stdio.
+	Middlewares []func(http.Handler) http.Handler
 }
 
 // New creates the admin API of the mock server of caps, which needs its Mocks.
@@ -193,7 +204,12 @@ func New(opts Options, caps adminapi.Capabilities) (*Server, error) {
 
 	csrf := http.NewCrossOriginProtection()
 	csrf.SetDenyHandler(handler.CrossOriginDenied())
-	s.handler = s.track(csrf.Handler(handler.Routing(mux)))
+	h := csrf.Handler(handler.Routing(mux))
+	for _, middleware := range slices.Backward(opts.Middlewares) {
+		h = middleware(h)
+	}
+
+	s.handler = s.track(h)
 
 	return s, nil
 }

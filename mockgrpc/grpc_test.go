@@ -288,13 +288,13 @@ func TestUnmatchedCallsReturnNotFound(t *testing.T) {
 	var trailer metadata.MD
 	_, err = client.Greetings(context.Background(), &pb.HiReq{Message: "hi"}, grpc.Trailer(&trailer))
 	require.Equal(t, codes.NotFound, status.Code(err))
-	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.FailureHeader))
+	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.HeaderFailure))
 
 	stream, err := client.List(context.Background(), &pb.ListReq{})
 	require.NoError(t, err)
 	_, err = stream.Recv()
 	require.Equal(t, codes.NotFound, status.Code(err))
-	require.Equal(t, []string{vlatte.FailureNoMatch}, stream.Trailer().Get(vlatte.FailureHeader))
+	require.Equal(t, []string{vlatte.FailureNoMatch}, stream.Trailer().Get(vlatte.HeaderFailure))
 }
 
 func TestDefaultAddrIsLoopback(t *testing.T) {
@@ -641,7 +641,7 @@ func TestNoMatchCode_IsTheCodeOfAnUnmatchedCall(t *testing.T) {
 	var trailer metadata.MD
 	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{}, grpc.Trailer(&trailer))
 	require.Equal(t, codes.Unimplemented, status.Code(err))
-	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.FailureHeader))
+	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.HeaderFailure))
 }
 
 func TestNew_AGlobalEventOfNoListenerFails(t *testing.T) {
