@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
 type customMockFileHandler struct{}
@@ -119,4 +122,25 @@ func TestBuilderFs_InvalidSchemaValid(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestBuilderFs_ADocumentOfSeveralMocksFails(t *testing.T) {
+	// A builder makes one mock: a document of several fails rather than drop all but the first.
+	m := MustNew()
+
+	_, err := m.Mock(FromBytes([]byte("request: {path: /a}\n---\nrequest: {path: /b}\n"), "yaml"))
+	cfgErr, ok := errors.AsType[*config.Error](err)
+	require.True(t, ok, "%v", err)
+	require.Len(t, cfgErr.Problems, 1)
+	require.Equal(t, config.CodeInvalidValue, cfgErr.Problems[0].Code)
+	require.Equal(t, "the document holds 2 mocks, where one is expected", cfgErr.Problems[0].Message)
+}
+
+func TestBuilderFs_AnEmptyDocumentBeforeTheMockKeepsIt(t *testing.T) {
+	// YAML reads an empty first document here: the mock after it must not be lost.
+	m := MustNew()
+
+	scope, err := m.Mock(FromBytes([]byte("---\n---\nid: kept\nrequest: {path: /a}\nresponse: {status: 201}\n"), "yaml"))
+	require.NoError(t, err)
+	require.Equal(t, "kept", scope.Mocks()[0].ID())
 }

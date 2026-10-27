@@ -144,3 +144,15 @@ func TestFromFile_AFileThatCantBeReadSaysWhy(t *testing.T) {
 		require.Equal(t, tc.code, cfgErr.Problems[0].Code, "%s", tc.path)
 	}
 }
+
+func TestFromBytes_ADocumentOfSeveralMocksFails(t *testing.T) {
+	// A builder makes one mock: a document of several fails rather than drop all but the first.
+	m := fileServer(t, Setup())
+
+	_, err := m.Mock(FromBytes([]byte("request: {method: Greetings}\nresponse: {}\n---\nrequest: {method: Greetings}\nresponse: {}\n"), "yaml"))
+	cfgErr, ok := errors.AsType[*config.Error](err)
+	require.True(t, ok, "%v", err)
+	require.Len(t, cfgErr.Problems, 1)
+	require.Equal(t, config.CodeInvalidValue, cfgErr.Problems[0].Code)
+	require.Equal(t, "the document holds 2 mocks, where one is expected", cfgErr.Problems[0].Message)
+}

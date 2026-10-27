@@ -16,6 +16,7 @@ import (
 var (
 	_ vlatte.Builder[*Mock, *Server] = (*fileBuilder)(nil)
 	_ vlatte.Builder[*Mock, *Server] = (*bytesBuilder)(nil)
+	_ vlatte.Builder[*Mock, *Server] = mockDoc{}
 )
 
 // MockFileFormats lists the formats of mock files, as file extensions without the dot.
@@ -37,34 +38,70 @@ type fileBuilder struct {
 //	  message: {message: hello ann}
 //
 // A relative body_file opens from the file's directory. When the file has problems, the error is a list of every one,
-// each with its key and a hint.
+// each with its key and a hint. A YAML file of several mocks, one per document, fails: the server loads those from
+// Config.MockFiles.
 func FromFile(path string) vlatte.Builder[*Mock, *Server] {
 	return &fileBuilder{path: path}
 }
 
 // Build implements vlatte.Builder.
 func (b *fileBuilder) Build(app *Server) (*Mock, error) {
-	origin := "file " + b.path
+	doc, err := readMockFile(b.path)
+	if err != nil {
+		return nil, err
+	}
 
-	format, ok := config.Format(filepath.Ext(b.path))
+	return doc.build(app)
+}
+
+// readMockFile reads the mock file at path. Every failure is a *config.Error listing each problem.
+func readMockFile(path string) (mockDoc, error) {
+	origin := "file " + path
+
+	format, ok := config.Format(filepath.Ext(path))
 	if !ok {
-		return nil, docProblems(config.Problem{
+		return mockDoc{}, docProblems(config.Problem{
 			Code: config.CodeUnsupportedFormat, Origin: origin,
-			Message: fmt.Sprintf("mock file %q is not JSON or YAML", b.path), Hint: "use a .json, .yaml or .yml file",
+			Message: fmt.Sprintf("mock file %q is not JSON or YAML", path), Hint: "use a .json, .yaml or .yml file",
 		})
 	}
 
-	data, err := os.ReadFile(b.path)
+	data, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return nil, docProblems(config.Problem{
-			Code: config.CodeFileNotFound, Origin: origin, Message: fmt.Sprintf("mock file %q does not exist", b.path),
+		return mockDoc{}, docProblems(config.Problem{
+			Code: config.CodeFileNotFound, Origin: origin, Message: fmt.Sprintf("mock file %q does not exist", path),
 		})
 	case err != nil:
-		return nil, docProblems(config.Problem{Code: config.CodeReadError, Origin: origin, Message: err.Error()})
+		return mockDoc{}, docProblems(config.Problem{Code: config.CodeReadError, Origin: origin, Message: err.Error()})
 	}
 
-	return mockDoc{origin: origin, source: b.path, format: format, dir: filepath.Dir(b.path), data: data}.build(app)
+	return mockDoc{origin: origin, source: path, format: format, dir: filepath.Dir(path), data: data}, nil
+}
+
+// fileMocks returns a builder for each mock of the mock file at path, in the order the file holds them: a YAML file
+// holds one per document. A file that can't be read gives one builder, which fails as FromFile does.
+func fileMocks(path string) []vlatte.Builder[*Mock, *Server] {
+	doc, err := readMockFile(path)
+	if err != nil {
+		return []vlatte.Builder[*Mock, *Server]{FromFile(path)}
+	}
+
+	docs := config.Documents(doc.data, doc.format)
+	if len(docs) == 1 {
+		doc.data = docs[0]
+		return []vlatte.Builder[*Mock, *Server]{doc}
+	}
+
+	builders := make([]vlatte.Builder[*Mock, *Server], 0, len(docs))
+	for i, data := range docs {
+		mock := doc
+		mock.origin = fmt.Sprintf("%s, mock %d", doc.origin, i+1)
+		mock.data = data
+		builders = append(builders, mock)
+	}
+
+	return builders
 }
 
 type bytesBuilder struct {
@@ -97,8 +134,22 @@ type mockDoc struct {
 	data   []byte
 }
 
-// build turns the document into a mock for app. Every failure is a *config.Error listing each problem.
+// Build implements vlatte.Builder, as build does.
+func (doc mockDoc) Build(app *Server) (*Mock, error) {
+	return doc.build(app)
+}
+
+// build turns the document into a mock for app. Every failure is a *config.Error listing each problem, as is a YAML
+// document of several mocks.
 func (doc mockDoc) build(app *Server) (*Mock, error) {
+	// Parsed whole, a stream would give its first document, which can be an empty one before the mock.
+	docs := config.Documents(doc.data, doc.format)
+	if len(docs) > 1 {
+		return nil, docProblems(severalMocks(doc.origin, len(docs)))
+	}
+
+	doc.data = docs[0]
+
 	def := newMockDef()
 	def.dir = doc.dir
 
@@ -145,6 +196,15 @@ func parseFailed(problems []config.Problem) bool {
 	return slices.ContainsFunc(problems, func(p config.Problem) bool {
 		return p.Code == config.CodeParseError || p.Code == config.CodeUnsupportedFormat
 	})
+}
+
+// severalMocks is the problem of a document of n mocks, where one is expected.
+func severalMocks(origin string, n int) config.Problem {
+	return config.Problem{
+		Code: config.CodeInvalidValue, Origin: origin,
+		Message: fmt.Sprintf("the document holds %d mocks, where one is expected", n),
+		Hint:    "build each mock on its own; only the mock files a server loads from Config.MockFiles hold several",
+	}
 }
 
 // docProblems returns the problems of a mock document as an error.

@@ -17,9 +17,10 @@ type fileLoader struct {
 	saved []string // the directories of the admin API's saved mocks and of recordings, whose <id>.mock.<format> files load too
 }
 
-// load adds the mocks of every matching file, in file name order, so mocks of equal priority match in that order. A
-// reload swaps them for the mocks of the last load in one step, so a call finds one set or the other. When a file has
-// problems, load changes nothing and reports every file with problems.
+// load adds the mocks of every matching file, in file name order, and in a YAML file of several documents, in document
+// order, so mocks of equal priority match in that order. A reload swaps them for the mocks of the last load in one
+// step, so a call finds one set or the other. When a file has problems, load changes nothing and reports every file
+// with problems.
 func (l *fileLoader) load(app *Server) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -94,7 +95,7 @@ func (l *fileLoader) loadLocked(app *Server) error {
 
 	builders := make([]vlatte.Builder[*Mock, *Server], 0, len(files))
 	for _, file := range files {
-		builders = append(builders, FromFile(file))
+		builders = append(builders, fileMocks(file)...)
 	}
 
 	scope, err := app.Remock(context.Background(), l.scope, builders...)

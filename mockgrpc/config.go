@@ -369,7 +369,8 @@ func (cb *ConfigBuilder) RootDir(dir string) *ConfigBuilder {
 }
 
 // MockFiles adds glob patterns of mock files, such as "testdata/grpc/*.yaml", which the server loads at Start, before
-// it serves, and again on Reload. See FromFile for their format.
+// it serves, and again on Reload. See FromFile for their format. A YAML file may hold several mocks, one per
+// document, separated by ---.
 func (cb *ConfigBuilder) MockFiles(patterns ...string) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.MockFiles = append(conf.MockFiles, patterns...) })
 }

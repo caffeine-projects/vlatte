@@ -127,7 +127,7 @@ m.MustMock(mockgrpc.Method("Chat/Talk").Reply(mockgrpc.Bidi().
 
 **Descriptors.** A server without the generated code of a service serves it from its descriptors, with messages of dynamic types: `Setup().Descriptors("api.binpb")` loads descriptor sets, as `protoc --descriptor_set_out=api.binpb --include_imports` or `buf build -o api.binpb` write them, and `Setup().Files(files)` takes a `*protoregistry.Files`.
 
-**Mock files.** `Setup().MockFiles("testdata/grpc/*.yaml")` loads gRPC mock files at `Start`, and `m.Reload()` again; `mockgrpc.FromFile` and `FromBytes` build one. Their keys mirror the Go API, and [`mockgrpc/schema/grpc.schema.json`](mockgrpc/schema/grpc.schema.json) describes them for editors:
+**Mock files.** `Setup().MockFiles("testdata/grpc/*.yaml")` loads gRPC mock files at `Start`, and `m.Reload()` again; a YAML file holds one mock per document, separated by `---`. `mockgrpc.FromFile` and `FromBytes` build one mock, and fail on a document of several. Their keys mirror the Go API, and [`mockgrpc/schema/grpc.schema.json`](mockgrpc/schema/grpc.schema.json) describes them for editors:
 
 ```yaml
 id: denied
@@ -185,7 +185,8 @@ err := m.Prep(ctx, proxyall.New(mockhttp.From("https://api.example.com").Timeout
 
 Mocks can also live in YAML or JSON files (`.json`, `.yaml` or `.yml`).
 - **On start,** the server loads the files matching `testdata/vlatte/_mocks/*mock.yaml` and `testdata/vlatte/_mocks/*mock.yml`, and the [recordings](#recording-and-playback) in `testdata/vlatte/_mocks_recorded`, in name order: the folders of its [work directory](#work-directory). Change the patterns with `Setup().MockFilePatterns(...)`.
-- **To load one file,** use `m.MustMock(mockhttp.FromFile(path))`.
+- **Several mocks in one file:** a YAML file holds one mock per document, separated by `---`, loaded in order. A problem names the mock it is in, as in `file mocks.yaml, mock 2`.
+- **To load one file,** use `m.MustMock(mockhttp.FromFile(path))`. It builds one mock: a file of several fails, so load those with the patterns.
 - **`m.Reload()`** replaces the mocks of the files with what they hold now, in one step. When a file has problems, it returns them and the mocks stay as they were.
 
 ```yaml

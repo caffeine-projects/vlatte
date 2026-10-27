@@ -63,3 +63,24 @@ func TestLoader_ABadPatternFailsStart(t *testing.T) {
 	_, err = http.DefaultClient.Do(r)
 	require.ErrorIs(t, err, syscall.ECONNREFUSED)
 }
+
+func TestMockFiles_LoadEveryMockOfAMultiDocumentYAMLFile(t *testing.T) {
+	// A YAML file can hold several mocks, one per document: none may be dropped.
+	dir := t.TempDir()
+	writeFile(t, dir, "greet.yaml", `---
+request: {method: Greetings, fields: {message: hi}}
+response: {message: {message: one}}
+---
+request: {method: Greetings, fields: {message: hey}}
+response: {message: {message: two}}
+`)
+
+	m := fileServer(t, Setup().RootDir(dir).MockFiles("*.yaml"))
+	c := pb.NewTestServiceClient(m.MustDial())
+
+	got, _ := greetWith(t, c, "hi")
+	require.Equal(t, "one", got)
+
+	got, _ = greetWith(t, c, "hey")
+	require.Equal(t, "two", got)
+}

@@ -477,7 +477,7 @@ func (cb *ConfigBuilder) Parameters(params vlatte.KV) *ConfigBuilder {
 }
 
 // MockFilePatterns sets custom Glob patterns to load mock from the file system, which may start with WorkDirVar.
-// Defaults to ConfigMockFilePattern.
+// Defaults to ConfigMockFilePattern. A YAML file may hold several mocks, one per document, separated by ---.
 func (cb *ConfigBuilder) MockFilePatterns(patterns ...string) *ConfigBuilder {
 	cb.conf.MockFileSearchPatterns = patterns
 
