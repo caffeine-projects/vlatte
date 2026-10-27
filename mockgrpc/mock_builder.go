@@ -263,8 +263,8 @@ func (b *Builder) Callback(fn vlatte.EventFunc[vlatte.OnComplete]) *Builder {
 }
 
 // OnCompleteEvent adds an on_complete event to the mock, such as a webhook: it runs once the mock replied, and the
-// call ends after it. Unless it carries its own Listener, its Name names a listener the server registered: see
-// [ConfigBuilder.OnCompleteListener].
+// call ends after it, unless cfg.AfterResponse is set: see [vlatte.EventConfig.AfterResponse]. Unless it carries its
+// own Listener, its Name names a listener the server registered: see [ConfigBuilder.OnCompleteListener].
 func (b *Builder) OnCompleteEvent(cfg vlatte.EventConfig) *Builder {
 	b.events = append(b.events, cfg)
 	return b

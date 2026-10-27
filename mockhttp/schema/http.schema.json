@@ -325,7 +325,8 @@
       "type": "object",
       "properties": {
         "name": { "description": "Name of a listener registered with Setup().OnCompleteListener. The vlatte command registers webhook.", "type": "string", "examples": [ "webhook" ] },
-        "parameters": { }
+        "parameters": { },
+        "after_response": { "description": "Send the response without waiting for the event, which runs on.", "$ref": "#/$defs/bool" }
       },
       "additionalProperties": false,
       "required": [ "name" ],
@@ -346,7 +347,7 @@
         "body_file": { "description": "A file to send as the body. Relative paths start at the mock file's directory.", "type": "string" },
         "multipart": { "description": "A multipart body, as response.multipart. It's sent at once, so its parts can't have delays.", "$ref": "#/$defs/multipart" },
         "multipart_template": { "description": "A multipart body whose text is templates.", "$ref": "#/$defs/multipart" },
-        "delay": { "description": "How long to wait before sending, once the mock replied. The response waits for it too.", "$ref": "#/$defs/duration" }
+        "delay": { "description": "How long to wait before sending, once the mock replied. The response waits for it too, unless the event runs after the response.", "$ref": "#/$defs/duration" }
       },
       "additionalProperties": false,
       "oneOf": [ { "required": [ "url" ] }, { "required": [ "url_template" ] } ],

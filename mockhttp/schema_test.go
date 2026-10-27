@@ -210,6 +210,9 @@ var _scalarKeys = []struct {
 	{"on_complete.name", "hook", func(v any) map[string]any {
 		return withRequest(map[string]any{"on_complete": []any{map[string]any{"name": v}}})
 	}},
+	{"on_complete.after_response", true, func(v any) map[string]any {
+		return withRequest(map[string]any{"on_complete": []any{map[string]any{"name": "hook", "after_response": v}}})
+	}},
 	{"request.form_file.f.every", true, func(v any) map[string]any {
 		return map[string]any{"request": map[string]any{"form_file": map[string]any{"f": map[string]any{"every": v}}}}
 	}},

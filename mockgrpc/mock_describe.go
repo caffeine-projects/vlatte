@@ -232,6 +232,10 @@ func describeEvents(events vlatte.EventConfigs) []any {
 			ev["parameters"] = e.Parameters
 		}
 
+		if e.AfterResponse {
+			ev["after_response"] = true
+		}
+
 		out = append(out, ev)
 	}
 

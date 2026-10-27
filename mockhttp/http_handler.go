@@ -780,7 +780,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The handler waits for the events, so the response ends after them: a test checks what they did right after it.
-	// They run before the request log, so its elapsed time counts them.
+	// They run before the request log, so its elapsed time counts them. Those set to run after the response run on.
 	h.runner.OnComplete(
 		r.Context(),
 		mock,

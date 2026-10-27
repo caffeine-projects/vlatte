@@ -83,6 +83,7 @@ func TestDescribe_WritesEveryPartAMockFileHolds(t *testing.T) {
 		ScenarioStateIs("a").
 		ScenarioStateWillBe("b").
 		OnCompleteEvent(vlatte.EventConfig{Name: "record", Parameters: map[string]any{"k": "v"}}).
+		OnCompleteEvent(vlatte.EventConfig{Name: "record", AfterResponse: true}).
 		Callback(noop).
 		Field("message", match.Equal("hi")).
 		Body(match.Contain("hi")).
@@ -101,7 +102,7 @@ func TestDescribe_WritesEveryPartAMockFileHolds(t *testing.T) {
 		"delay": "1s",
 		"repeat": 3,
 		"scenario": {"name": "s", "required_state": "a", "new_state": "b"},
-		"on_complete": [{"name": "record", "parameters": {"k": "v"}}],
+		"on_complete": [{"name": "record", "parameters": {"k": "v"}}, {"name": "record", "after_response": true}],
 		"request": {
 			"method": "List",
 			"fields": {"message": ["eq", "hi"]},

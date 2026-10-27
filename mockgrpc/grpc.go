@@ -355,8 +355,8 @@ func (app *Server) Addr() string {
 }
 
 // Close stops the server, waiting for calls in flight to finish. It closes the admin API first, which waits for the
-// operations it serves, and the journal last, which it removes if it is a temporary one: verify the calls before
-// Close. A closed server doesn't start again, even one that never started.
+// operations it serves. It cancels the on_complete events still running, and waits for those that run after the
+// response. It closes the journal last, and removes it if it is a temporary one: verify the calls before Close. A closed server doesn't start again, even one that never started.
 func (app *Server) Close() {
 	app.mu.Lock()
 	app.closed = true

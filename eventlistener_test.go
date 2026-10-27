@@ -280,3 +280,92 @@ func TestEventRunner_EventsKeepTheValuesOfTheRequestContext(t *testing.T) {
 		require.NoError(t, ctxErr, "the client leaving cancels no event")
 	})
 }
+
+func TestEventRunner_EventsAfterTheResponseDontHoldIt(t *testing.T) {
+	// An app that needs its callback once it has its answer, as WireMock serves it, got it only after the response,
+	// which waited for every event. An event set to run after the response doesn't hold it now: OnComplete returns
+	// while it still runs, and it keeps the values of the request's context, not its end. The others still hold it.
+	synctest.Test(t, func(t *testing.T) {
+		type traceKey struct{}
+
+		release := make(chan struct{})
+		var waited atomic.Bool
+		var trace any
+
+		listeners := vlatte.NewListener()
+		register(t, listeners, "late", func(ctx context.Context, _ vlatte.OnComplete) error {
+			<-release
+			trace = ctx.Value(traceKey{})
+
+			return ctx.Err()
+		})
+		register(t, listeners, "failing", func(context.Context, vlatte.OnComplete) error {
+			<-release
+			return errors.New("target down")
+		})
+		register(t, listeners, "waited", func(context.Context, vlatte.OnComplete) error {
+			time.Sleep(time.Second)
+			waited.Store(true)
+
+			return nil
+		})
+
+		global := &vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "failing", AfterResponse: true}}}
+		runner := vlatte.NewEventRunner(listeners, global)
+		mock := newFakeMock()
+		mock.events.OnComplete = vlatte.EventConfigs{{Name: "waited"}, {Name: "late", AfterResponse: true}}
+
+		ctx, leave := context.WithCancel(context.WithValue(t.Context(), traceKey{}, "trace-1"))
+
+		var got reported
+		runner.OnComplete(ctx, mock, argsOf(mock), got.add)
+		leave() // the client left once it had its answer
+
+		require.True(t, waited.Load(), "the response waits for the events without the flag")
+		require.Empty(t, got.all(), "the events after the response still run")
+
+		close(release)
+		synctest.Wait()
+
+		require.Equal(t, "trace-1", trace)
+		require.Equal(t, []string{"global on_complete listener failing at index 0: target down"}, got.all(),
+			"the client leaving cancels none, and a failure is reported as any event's")
+	})
+}
+
+func TestEventRunner_CloseCancelsAndWaitsForTheEventsAfterTheResponse(t *testing.T) {
+	// No request waits for an event that runs after the response: Close cancels it, such as a webhook waiting for a
+	// slow target, and returns once it ended, so a server closes with none still running. A closed runner starts none.
+	synctest.Test(t, func(t *testing.T) {
+		var started atomic.Int32
+		var ended atomic.Bool
+
+		listeners := vlatte.NewListener()
+		register(t, listeners, "waits", func(ctx context.Context, _ vlatte.OnComplete) error {
+			started.Add(1)
+			<-ctx.Done()
+			time.Sleep(time.Second) // what it does once canceled, such as closing a connection
+			ended.Store(true)
+
+			return ctx.Err()
+		})
+
+		runner := vlatte.NewEventRunner(listeners, nil)
+		mock := newFakeMock()
+		mock.events.OnComplete = vlatte.EventConfigs{{Name: "waits", AfterResponse: true}}
+
+		var got reported
+		runner.OnComplete(t.Context(), mock, argsOf(mock), got.add)
+
+		synctest.Wait()
+		require.Equal(t, int32(1), started.Load())
+
+		runner.Close()
+		require.True(t, ended.Load(), "Close returned before the event ended")
+		require.Empty(t, got.all(), "an event Close canceled isn't a failure")
+
+		runner.OnComplete(t.Context(), mock, argsOf(mock), got.add)
+		synctest.Wait()
+		require.Equal(t, int32(1), started.Load(), "a closed runner starts nothing")
+	})
+}
