@@ -14,7 +14,8 @@ var (
 // Shared returns a Reply that gives r to every mock built with it: those mocks share r, and whatever it keeps. Use it
 // for a Replier that keeps no state, such as one from another package. A Replier that keeps state, such as a counter,
 // should come from a Reply of its own that makes one for each mock. The mocks never close r: when it implements
-// io.Closer, closing it is the caller's.
+// io.Closer, closing it is the caller's. Mock files have no shared reply: describing a mock with it fails, so the admin
+// API can't show the mock, nor save it.
 func Shared(r Replier) Reply {
 	return sharedReply{r: r}
 }

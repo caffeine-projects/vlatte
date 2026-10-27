@@ -2,6 +2,7 @@ package mockgrpc
 
 import (
 	"context"
+	"errors"
 	"math/rand/v2"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -67,7 +69,7 @@ func TestDescribe_AMockBuiltInGoLoadsBackTheSame(t *testing.T) {
 
 func TestDescribe_WritesEveryPartAMockFileHolds(t *testing.T) {
 	// The admin API shows a mock built in Go as its description: each part a mock file holds is written as the file
-	// writes it, and the parts it can't hold, such as a callback, are left out.
+	// writes it.
 	noop := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
 	m := MustNew(Setup().Silent().OnCompleteListener("record", noop))
 	m.MustStart()
@@ -85,7 +87,6 @@ func TestDescribe_WritesEveryPartAMockFileHolds(t *testing.T) {
 		ScenarioStateWillBe("b").
 		OnCompleteEvent(vlatte.EventConfig{Name: "record", Parameters: map[string]any{"k": "v"}}).
 		OnCompleteEvent(vlatte.EventConfig{Name: "record", AfterResponse: true}).
-		Callback(noop).
 		Field("message", match.Equal("hi")).
 		Body(match.Contain("hi")).
 		Reply(Template(`{"message": "{{ .Request.message }}"}`).
@@ -247,129 +248,159 @@ func TestDescribe_WritesSequencesAndRandoms(t *testing.T) {
 	require.Equal(t, []string{"aOK", "NotFound", "cOK"}, got, "the sequence loaded back answers in turn")
 }
 
-func TestDescribe_LeavesOutAReplyAMockFileCannotHold(t *testing.T) {
-	// A description without a response doesn't load back: the admin API shows what it can, rather than a reply that
-	// answers differently.
+func TestDescribe_APartAMockFileCannotHoldFailsNamingIt(t *testing.T) {
+	// A description that left out a part a mock file can't hold showed, in the admin API, a mock that isn't the one
+	// serving: one that matches more calls, answers sooner or without its callbacks, or has no reply at all. Describing
+	// it fails instead, as a Func or Echo reply does, and the error names the part, wherever it is in the mock.
 	custom := match.Function(func(any) (bool, error) { return true, nil })
-	m := serve(t)
-	scope := m.MustMock(
-		Method("List").ID("delay").Reply(Message(&pb.ListItem{}).MessageDelayFunc(vlatte.Latency(time.Millisecond))),
-		Method("Chat").ID("rule").Reply(Bidi().On(custom, Message(&pb.HiRes{}))),
-		Method("Chat").ID("otherwise").Reply(Bidi().Otherwise(Message(&pb.HiRes{}).MessageDelayFunc(vlatte.Latency(time.Millisecond)))),
-		Method("Chat").ID("rule-response").
-			Reply(Bidi().On(match.Contain("x"), Message(&pb.HiRes{}).MessageDelayFunc(vlatte.Latency(time.Millisecond)))),
-		Method("Greetings").ID("utf8").Message(&pb.HiReq{Message: "\xff"}).Reply(Messages(&pb.HiRes{Message: "\xff"})),
-		Method("Greetings").ID("detail").Reply(Status(codes.NotFound, "x").Details(&anypb.Any{TypeUrl: "type.googleapis.com/nope.X"})),
-		Method("Greetings").ID("dial").Reply(From("localhost:1").DialOptions(grpc.WithUserAgent("x"))),
-		Method("Greetings").ID("shared").Reply(Shared(&countingReplier{})),
-		Method("Greetings").ID("seq-shared").Reply(Seq(Message(&pb.HiRes{}), Shared(&countingReplier{}))),
-		Method("Greetings").ID("seq-after").Reply(Seq(Message(&pb.HiRes{})).OnSequenceEnded(Shared(&countingReplier{}))),
-		Method("Greetings").ID("rand-shared").Reply(Rand(Shared(&countingReplier{}))),
-		Method("List").ID("seq-delay").Reply(Seq(Messages(&pb.ListItem{}).MessageDelayFunc(vlatte.Latency(time.Millisecond)))),
-	)
+	fn := Func(func(context.Context, *Call) error { return nil })
+	jitter := vlatte.Latency(time.Millisecond)
+	reply := Message(&pb.HiRes{Message: "hi"})
+	noop := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
 
-	want := map[string]string{
-		"delay":         `{"id": "delay", "request": {"method": "List"}}`,
-		"rule":          `{"id": "rule", "request": {"method": "Chat"}}`,
-		"otherwise":     `{"id": "otherwise", "request": {"method": "Chat"}}`,
-		"rule-response": `{"id": "rule-response", "request": {"method": "Chat"}}`,
-		"utf8":          `{"id": "utf8", "request": {"method": "Greetings"}}`,
-		"detail":        `{"id": "detail", "request": {"method": "Greetings"}}`,
-		"dial":          `{"id": "dial", "request": {"method": "Greetings"}}`,
-		"shared":        `{"id": "shared", "request": {"method": "Greetings"}}`,
-		"seq-shared":    `{"id": "seq-shared", "request": {"method": "Greetings"}}`,
-		"seq-after":     `{"id": "seq-after", "request": {"method": "Greetings"}}`,
-		"rand-shared":   `{"id": "rand-shared", "request": {"method": "Greetings"}}`,
-		"seq-delay":     `{"id": "seq-delay", "request": {"method": "List"}}`,
+	tests := []struct {
+		mock    *Builder
+		wantErr error
+		wantMsg string
+	}{
+		{mock: Method("Greetings").ID("func").Reply(fn), wantErr: errFuncNotDescribed},
+		{mock: Method("Greetings").ID("echo").Reply(Echo()), wantErr: errEchoNotDescribed},
+		{mock: Method("Greetings").ID("shared").Reply(Shared(&countingReplier{})), wantErr: errSharedNotDescribed},
+		{mock: Method("Greetings").ID("seq-func").Reply(Seq(reply, fn)), wantErr: errFuncNotDescribed, wantMsg: "responses[1]: "},
+		{mock: Method("Greetings").ID("rand-func").Reply(Rand(reply, fn)), wantErr: errFuncNotDescribed},
+		{
+			mock:    Method("Greetings").ID("seq-after-echo").Reply(Seq(reply).OnSequenceEnded(Echo())),
+			wantErr: errEchoNotDescribed,
+			wantMsg: "after_ended: ",
+		},
+		{mock: Method("Greetings").ID("rand-echo").Reply(Rand(Echo())), wantErr: errEchoNotDescribed},
+		{mock: Method("Greetings").ID("seq-shared").Reply(Seq(reply, Shared(&countingReplier{}))), wantErr: errSharedNotDescribed},
+		{mock: Method("Greetings").ID("rand-shared").Reply(Rand(Shared(&countingReplier{}))), wantErr: errSharedNotDescribed},
+		{mock: Method("Greetings").ID("seq-seq").Reply(Seq(Seq(reply))), wantErr: errResponsesOnly},
+		{
+			mock:    Method("Greetings").ID("call").CallMatches(func(*Call) (bool, error) { return true, nil }).Reply(reply),
+			wantErr: errCallMatchesNotDescribed,
+		},
+		{
+			mock:    Method("Greetings").ID("call-func").CallMatches(func(*Call) (bool, error) { return true, nil }).Reply(fn),
+			wantErr: errCallMatchesNotDescribed,
+		},
+		{
+			mock:    Method("Greetings").ID("header").Header("x-env", match.Equal("ci")).Header("x-team", custom).Reply(reply),
+			wantErr: errMatcherNotDescribed,
+			wantMsg: `header "x-team": `,
+		},
+		{
+			mock:    Method("Greetings").ID("field").Field("message", custom).Reply(reply),
+			wantErr: errMatcherNotDescribed,
+			wantMsg: `fields "message": `,
+		},
+		{mock: Method("Greetings").ID("body").Body(custom).Reply(reply), wantErr: errMatcherNotDescribed, wantMsg: "body: "},
+		{
+			mock:    Method("Greetings").ID("custom").Matches(match.Not(match.Nil())).Matches(custom).Reply(reply),
+			wantErr: errMatcherNotDescribed,
+			wantMsg: "custom[1]: ",
+		},
+		{
+			mock:    Method("Chat").ID("rule").Reply(Bidi().On(custom, Message(&pb.HiRes{}))),
+			wantErr: errMatcherNotDescribed,
+			wantMsg: "on[0].when: ",
+		},
+		{mock: Method("Greetings").ID("delay").DelayFunc(jitter).Reply(reply), wantErr: errDelayFuncNotDescribed},
+		{mock: Method("Greetings").ID("callback").Callback(noop).Reply(reply), wantErr: errCallbackNotDescribed},
+		{
+			mock:    Method("Greetings").ID("listener").OnCompleteEvent(vlatte.EventConfig{Name: "audit", Listener: noop}).Reply(reply),
+			wantErr: errCallbackNotDescribed,
+			wantMsg: `"audit"`,
+		},
+		{
+			mock:    Method("List").ID("message-delay").Reply(Message(&pb.ListItem{}).MessageDelayFunc(jitter)),
+			wantErr: errMessageDelayFuncNotDescribed,
+		},
+		{
+			mock:    Method("List").ID("seq-delay").Reply(Seq(Messages(&pb.ListItem{}).MessageDelayFunc(jitter))),
+			wantErr: errMessageDelayFuncNotDescribed,
+		},
+		{
+			mock:    Method("Chat").ID("otherwise").Reply(Bidi().Otherwise(Message(&pb.HiRes{}).MessageDelayFunc(jitter))),
+			wantErr: errMessageDelayFuncNotDescribed,
+			wantMsg: "otherwise: ",
+		},
+		{
+			mock:    Method("Chat").ID("rule-response").Reply(Bidi().On(match.Contain("x"), Message(&pb.HiRes{}).MessageDelayFunc(jitter))),
+			wantErr: errMessageDelayFuncNotDescribed,
+			wantMsg: "on[0].response: ",
+		},
+		{mock: Method("Greetings").ID("dial").Reply(From("localhost:1").DialOptions(grpc.WithUserAgent("x"))), wantErr: errDialOptionsNotDescribed},
+		{mock: Method("Greetings").ID("own").Reply(&closingReply{}), wantErr: errReplyNotDescribed, wantMsg: "*mockgrpc.closingReply"},
+		{
+			mock:    Method("Greetings").ID("failing-matcher").Body(failingDescription{}).Reply(reply),
+			wantErr: errMatcherNotDescribed,
+			wantMsg: "test: no description",
+		},
 	}
 
-	require.Len(t, scope.Mocks(), len(want))
+	m := serve(t)
 
-	for _, mock := range scope.Mocks() {
-		doc, err := mock.Describe().MarshalJSON()
-		require.NoError(t, err)
-		require.JSONEq(t, want[mock.ID()], string(doc))
+	for _, tt := range tests {
+		mock := m.MustMock(tt.mock).Mocks()[0]
+
+		_, err := mock.Describe().MarshalJSON()
+		require.ErrorIs(t, err, tt.wantErr, mock.ID())
+		require.ErrorContains(t, err, tt.wantMsg, mock.ID())
 	}
 }
 
-func TestDescribe_AFuncOrEchoReplyFailsSayingSo(t *testing.T) {
-	// A Func or Echo reply described as nothing, so the admin API showed a mock without its reply, as it does a part a
-	// mock file can't hold, while mockhttp fails to describe its Func and Echo (#42). A mock file can never hold either:
-	// describing the mock fails, and says why, wherever the reply is and whatever else of the mock is left out.
-	fn := Func(func(context.Context, *Call) error { return nil })
+// failingDescription is a matcher that describes itself as something a description can't hold.
+type failingDescription struct{}
+
+func (failingDescription) Name() string { return "failing" }
+
+func (failingDescription) Match(vlatte.MatcherArg) (bool, error) { return true, nil }
+
+func (failingDescription) Describe() descriptor.Descriptor {
+	return descriptor.Fail("failing", errors.New("test: no description"))
+}
+
+func TestDescribe_AMessageAMockFileCannotHoldFailsNamingIt(t *testing.T) {
+	// Text that isn't UTF-8, or a status detail of a type the program doesn't have, can't be written as protojson:
+	// describing the mock fails with protojson's error, and names the message.
 	m := serve(t)
 	scope := m.MustMock(
-		Method("Greetings").ID("func").Reply(fn),
-		Method("Greetings").ID("call").CallMatches(func(*Call) (bool, error) { return true, nil }).Reply(fn),
-		Method("Greetings").ID("delay").DelayFunc(vlatte.Latency(time.Millisecond)).Reply(fn),
-		Method("Greetings").ID("seq-func").Reply(Seq(Message(&pb.HiRes{}), fn)),
-		Method("Greetings").ID("rand-func").Reply(Rand(Message(&pb.HiRes{}), fn)),
-		Method("Greetings").ID("echo").Reply(Echo()),
-		Method("Greetings").ID("seq-after-echo").Reply(Seq(Message(&pb.HiRes{})).OnSequenceEnded(Echo())),
-		Method("Greetings").ID("rand-echo").Reply(Rand(Echo())),
+		Method("Greetings").ID("message").Message(&pb.HiReq{Message: "\xff"}).Reply(Message(&pb.HiRes{})),
+		Method("Upload").ID("messages").Messages(&pb.ListItem{}, &pb.ListItem{Key: "\xff"}).Reply(Message(&pb.HiRes{})),
+		Method("Greetings").ID("reply").Reply(Messages(&pb.HiRes{Message: "\xff"})),
+		Method("Greetings").ID("detail").Reply(Status(codes.NotFound, "x").Details(&anypb.Any{TypeUrl: "type.googleapis.com/nope.X"})),
 	)
 
-	want := map[string]error{
-		"func":           errFuncNotDescribed,
-		"call":           errFuncNotDescribed,
-		"delay":          errFuncNotDescribed,
-		"seq-func":       errFuncNotDescribed,
-		"rand-func":      errFuncNotDescribed,
-		"echo":           errEchoNotDescribed,
-		"seq-after-echo": errEchoNotDescribed,
-		"rand-echo":      errEchoNotDescribed,
+	want := map[string]string{
+		"message":  "message: ",
+		"messages": "messages[1]: ",
+		"reply":    "messages[0]: ",
+		"detail":   "status.details[0]: ",
 	}
 
 	require.Len(t, scope.Mocks(), len(want))
 
 	for _, mock := range scope.Mocks() {
 		_, err := mock.Describe().MarshalJSON()
-		require.ErrorIs(t, err, want[mock.ID()], mock.ID())
+		require.ErrorContains(t, err, want[mock.ID()], mock.ID())
 	}
 }
 
-func TestDescribe_AMockWithAMatcherOrDelayItCannotHoldHasNoResponse(t *testing.T) {
-	// A description without a matcher, or the delay, of its mock would load back as a mock that matches more calls,
-	// or answers sooner: it has no response, so it doesn't load back at all.
-	custom := match.Function(func(any) (bool, error) { return true, nil })
-	reply := Message(&pb.HiRes{Message: "hi"})
+func TestDescribe_AFixedDelayAfterDelayFuncIsDescribed(t *testing.T) {
+	// The last delay set wins: Delay after DelayFunc is a delay a mock file holds, and MessageDelay after
+	// MessageDelayFunc too.
 	m := serve(t)
-	scope := m.MustMock(
-		Method("Greetings").ID("call").CallMatches(func(*Call) (bool, error) { return true, nil }).Reply(reply),
-		Method("Greetings").ID("header").Header("x-team", custom).Header("x-env", match.Equal("ci")).Reply(reply),
-		Method("Greetings").ID("field").Field("message", custom).Reply(reply),
-		Method("Greetings").ID("body").Body(custom).Reply(reply),
-		Method("Greetings").ID("custom").Matches(custom).Matches(match.Not(match.Nil())).Reply(reply),
-		Method("Greetings").ID("message").Message(&pb.HiReq{Message: "\xff"}).Reply(reply),
-		Method("Upload").ID("messages").Messages(&pb.ListItem{Key: "\xff"}).Reply(reply),
-		Method("Greetings").ID("delay").DelayFunc(vlatte.Latency(time.Millisecond)).Reply(reply),
-		Method("Greetings").ID("delay-then-fixed").DelayFunc(vlatte.Latency(time.Millisecond)).Delay(time.Second).Reply(reply),
-	)
+	scope := m.MustMock(Method("List").ID("fixed").DelayFunc(vlatte.Latency(time.Millisecond)).Delay(time.Second).
+		Reply(Messages(&pb.ListItem{Key: "a"}).MessageDelayFunc(vlatte.Latency(time.Millisecond)).MessageDelay(0)))
 
-	want := map[string]string{
-		"call":             `{"id": "call", "request": {"method": "Greetings"}}`,
-		"header":           `{"id": "header", "request": {"method": "Greetings", "header": {"x-env": ["eq", "ci"]}}}`,
-		"field":            `{"id": "field", "request": {"method": "Greetings"}}`,
-		"body":             `{"id": "body", "request": {"method": "Greetings"}}`,
-		"custom":           `{"id": "custom", "request": {"method": "Greetings", "custom": [["not", ["nil"]]]}}`,
-		"message":          `{"id": "message", "request": {"method": "Greetings"}}`,
-		"messages":         `{"id": "messages", "request": {"method": "Upload"}}`,
-		"delay":            `{"id": "delay", "request": {"method": "Greetings"}}`,
-		"delay-then-fixed": `{"id": "delay-then-fixed", "delay": "1s", "request": {"method": "Greetings"}, "response": {"messages": [{"message": "hi"}]}}`,
-	}
+	doc, err := scope.Mock("fixed").Describe().MarshalJSON()
+	require.NoError(t, err)
+	require.JSONEq(t, `{"id": "fixed", "delay": "1s", "request": {"method": "List"}, "response": {"messages": [{"key": "a"}]}}`, string(doc))
 
-	require.Len(t, scope.Mocks(), len(want))
-
-	for _, mock := range scope.Mocks() {
-		doc, err := mock.Describe().MarshalJSON()
-		require.NoError(t, err)
-		require.JSONEq(t, want[mock.ID()], string(doc))
-
-		if mock.ID() != "delay-then-fixed" {
-			_, err = serve(t).Mock(FromBytes(doc, "json"))
-			require.ErrorContains(t, err, "the mock has no response", mock.ID())
-		}
-	}
+	_, err = serve(t).Mock(FromBytes(doc, "json"))
+	require.NoError(t, err, "%s", doc)
 }
 
 func TestDescribe_ACustomMatcherOfTheCallLoadsBack(t *testing.T) {

@@ -73,8 +73,8 @@ func (r *ProxyReply) RemoveHeaders(keys ...string) *ProxyReply {
 }
 
 // DialOptions sets options of the connection to the target, after the reply's own, which connects without TLS: such
-// as grpc.WithTransportCredentials for a target that serves TLS. A mock with them has no mock file description: the
-// admin API describes it without its reply.
+// as grpc.WithTransportCredentials for a target that serves TLS. A mock file can't hold them: describing a mock with
+// them fails, so the admin API can't show the mock, nor save it.
 func (r *ProxyReply) DialOptions(opts ...grpc.DialOption) *ProxyReply {
 	r.dialOptions = append(r.dialOptions, opts...)
 	return r

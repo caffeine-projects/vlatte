@@ -223,6 +223,20 @@ func TestAdmin_AFuncMockCantBeDescribed(t *testing.T) {
 	require.Contains(t, body, "a Func reply can't be described as a mock file")
 }
 
+func TestAdmin_AMockWithACallbackCantBeDescribed(t *testing.T) {
+	// Shown without its callback, the mock would load back through PUT as one that answers the same and never calls it:
+	// reading the mock fails, and names the callback.
+	m, _ := adminServer(t)
+	m.MustMock(Method("Greetings").ID("callback").
+		Callback(func(context.Context, vlatte.OnComplete) error { return nil }).
+		Reply(Message(&pb.HiRes{})))
+
+	status, body := call(t, http.MethodGet, m.AdminURL()+"/mocks/callback", "")
+	require.Equal(t, http.StatusInternalServerError, status, body)
+	require.Contains(t, body, `"code": "describe_failed"`)
+	require.Contains(t, body, `a callback, or an event with its own listener, can't be described as a mock file: \"callback\"`)
+}
+
 func TestAdmin_ListsMocksThatCantBeDescribed(t *testing.T) {
 	// A Func mock can't be described, but the list is a summary of each mock, never its description: the list stays
 	// whole, with the Func mock in it.
