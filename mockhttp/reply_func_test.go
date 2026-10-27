@@ -87,6 +87,6 @@ func TestFunc_DescribingItFailsSayingSo(t *testing.T) {
 		m := MustNew(Setup().Silent())
 
 		_, err := EncodeMock(m.MustMock(Getf("/h").Reply(reply)).Mocks()[0], "json")
-		require.ErrorContains(t, err, "reply: a Func or Handler reply can't be described as a mock file", name)
+		require.ErrorIs(t, err, errFuncNotDescribed, name)
 	}
 }

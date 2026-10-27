@@ -19,6 +19,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/admin"
+	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
@@ -512,25 +513,59 @@ func TestRelocate_MovesTheBodyFilesOfTheMockFileFormatOnly(t *testing.T) {
 }
 
 func TestAdmin_SaveWritesNothingWhenAMockCantBeSaved(t *testing.T) {
-	// A mock that can't be described as a mock file, such as one with a Handler (#42), would write a broken file,
-	// which every later start would fail on: nothing is written, the others neither.
-	root := t.TempDir()
-	m := adminServer(t, Setup().RootDir(root))
+	// A mock that can't be described as a mock file, or whose description doesn't load back, would write a broken
+	// file, which every later start would fail on, or one that serves another mock (#42): nothing is written, the
+	// others neither.
+	tests := []struct {
+		name string
+		give *Builder
+		want string
+	}{
+		{
+			name: "can't be described",
+			give: Getf("/x").Reply(Handler(func(http.ResponseWriter, *http.Request) {})),
+			want: "a Func or Handler reply can't be described as a mock file",
+		},
+		{
+			name: "doesn't load back",
+			give: Postf("/x").Body(unregisteredMatcher{}).Reply(OK()),
+			want: `unknown matcher \"unregistered\"`,
+		},
+	}
 
-	res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil,
-		[]byte(`{"id": "fine", "request": {"method": "GET", "path": "/fine"}, "response": {"status": 200}}`))
-	require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			m := adminServer(t, Setup().RootDir(root))
 
-	m.MustMock(Getf("/h").ID("handler").SetSource(adminapi.Origin).Reply(Handler(func(http.ResponseWriter, *http.Request) {})))
+			res, body := do(t, http.MethodPost, m.AdminURL()+"/mocks", nil,
+				[]byte(`{"id": "fine", "request": {"method": "GET", "path": "/fine"}, "response": {"status": 200}}`))
+			require.Equal(t, http.StatusCreated, res.StatusCode, string(body))
 
-	res, body = do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, []byte(`{"dir": "saved"}`))
-	require.Equal(t, http.StatusInternalServerError, res.StatusCode, string(body))
-	require.Contains(t, string(body), `"code": "describe_failed"`)
-	require.Contains(t, string(body), `mock \"handler\"`)
-	require.Contains(t, string(body), `a Func or Handler reply can't be described as a mock file`)
+			m.MustMock(tt.give.ID("broken").SetSource(adminapi.Origin))
 
-	_, err := os.Stat(filepath.Join(root, "saved"))
-	require.ErrorIs(t, err, os.ErrNotExist, "nothing was written")
+			res, body = do(t, http.MethodPost, m.AdminURL()+"/mocks/save", nil, []byte(`{"dir": "saved"}`))
+			require.Equal(t, http.StatusInternalServerError, res.StatusCode, string(body))
+			require.Contains(t, string(body), `"code": "describe_failed"`)
+			require.Contains(t, string(body), `mock \"broken\"`)
+			require.Contains(t, string(body), tt.want)
+
+			_, err := os.Stat(filepath.Join(root, "saved"))
+			require.ErrorIs(t, err, os.ErrNotExist, "nothing was written")
+		})
+	}
+}
+
+// unregisteredMatcher matches every request and describes itself as a matcher no registry has, as a matcher of a
+// user's may: its description doesn't load back.
+type unregisteredMatcher struct{}
+
+func (unregisteredMatcher) Name() string { return "unregistered" }
+
+func (unregisteredMatcher) Match(vlatte.MatcherArg) (bool, error) { return true, nil }
+
+func (unregisteredMatcher) Describe() descriptor.Descriptor {
+	return descriptor.SingleArg("unregistered", 1)
 }
 
 func TestAdmin_SaveThatFailsToLoadPutsTheFilesBack(t *testing.T) {

@@ -22,6 +22,8 @@ type EchoReply struct {
 	stdoutLog bool
 }
 
+// Echo returns a reply that writes the request back, as it came. Mock files have no echo reply: describing a mock
+// with it fails, so the admin API can't show the mock, nor save or store it.
 func Echo() *EchoReply {
 	return &EchoReply{}
 }

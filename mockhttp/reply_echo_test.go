@@ -41,5 +41,5 @@ func TestEcho_DescribingItFailsSayingSo(t *testing.T) {
 	m := MustNew(Setup().Silent())
 
 	_, err := EncodeMock(m.MustMock(Getf("/e").Reply(Echo())).Mocks()[0], "json")
-	require.ErrorContains(t, err, "reply: an Echo reply can't be described as a mock file")
+	require.ErrorIs(t, err, errEchoNotDescribed)
 }

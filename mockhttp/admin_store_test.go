@@ -239,8 +239,27 @@ func TestFileStore_RemovingMocksRemovesTheirFiles(t *testing.T) {
 }
 
 func TestFileStore_RefusesAMockThatDoesntLoadBack(t *testing.T) {
-	// A mock that can't be described as a mock file, such as one with a Handler (#42), would write a file that fails
-	// every later start, or that serves another mock: it isn't stored.
+	// A mock whose description doesn't load back, such as one of a matcher no registry has, would write a file that
+	// fails every later start: it isn't stored.
+	dir := t.TempDir()
+	m := MustNew(Setup().Silent())
+
+	store, err := FileStore(dir)(m)
+	require.NoError(t, err)
+
+	mock, err := Postf("/x").ID("unregistered").Body(unregisteredMatcher{}).Reply(OK()).Build(m)
+	require.NoError(t, err)
+
+	err = store.Store(t.Context(), mock)
+	require.ErrorContains(t, err, `server: mock "unregistered" can't be stored: its description doesn't load back: `)
+	require.ErrorContains(t, err, `unknown matcher "unregistered"`)
+
+	require.NoFileExists(t, filepath.Join(dir, "unregistered.mock.yaml"))
+}
+
+func TestFileStore_RefusesAMockThatCantBeDescribed(t *testing.T) {
+	// #42: a mock with a Handler described as the default reply, so the store kept a mock that served another
+	// answer. A mock file can't hold a Handler: it isn't stored.
 	dir := t.TempDir()
 	m := MustNew(Setup().Silent())
 
@@ -252,7 +271,7 @@ func TestFileStore_RefusesAMockThatDoesntLoadBack(t *testing.T) {
 
 	err = store.Store(t.Context(), mock)
 	require.ErrorContains(t, err, `server: describing mock "handler": `)
-	require.ErrorContains(t, err, "a Func or Handler reply can't be described as a mock file")
+	require.ErrorIs(t, err, errFuncNotDescribed)
 
 	require.NoFileExists(t, filepath.Join(dir, "handler.mock.yaml"))
 }

@@ -206,7 +206,7 @@ response:
 
 **Types.** Each key takes one type, as the schema says. Write text in quotes where a string goes, as in `name: "123"`, and numbers bare, as in `priority: 10`. Bools read the way Go's `strconv.ParseBool` reads them, so `true`, `"true"`, `t` and `1` are all true. A value of the wrong type is an error that says how to write it.
 
-**Bodies.** A reply's `body` is text as is, and any other value as JSON. A body that isn't UTF-8 text, such as an image or text in another encoding, goes in `body_base64`, as standard base64 (`body_base64: //4A`), or in a `body_file`. A reply takes one of `body`, `body_base64`, `body_file` and `multipart` at most.
+**Bodies.** A reply's `body` is text as is, and any other value as JSON. A body that isn't UTF-8 text, such as an image or text in another encoding, goes in `body_base64`, as standard base64 (`body_base64: //4A`), whose line breaks are ignored, or in a `body_file`. A reply takes one of `body`, `body_base64`, `body_file` and `multipart` at most.
 
 **Durations.** `delay`, `proxy.timeout`, the durations of [faults](#faults) and the `delay` of a [webhook](#webhooks) take whole milliseconds (`1500`) or a Go duration (`1.5s`). `"1500"` in quotes is neither.
 

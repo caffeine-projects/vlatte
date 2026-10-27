@@ -24,13 +24,14 @@ type FuncReply struct {
 }
 
 // Func returns a reply that builds the response using the given function. The context of its RawRequest also ends
-// when a step of the mock cuts the answer.
+// when a step of the mock cuts the answer. A mock file can't hold a function: describing a mock with it fails, so the
+// admin API can't show the mock, nor save or store it.
 func Func(fn func(http.ResponseWriter, *RequestValues) (*Response, error)) *FuncReply {
 	return &FuncReply{fn: fn}
 }
 
 // Handler returns a reply that delegates to the given http.HandlerFunc. The context of its request also ends when a
-// step of the mock cuts the answer.
+// step of the mock cuts the answer. Describing a mock with it fails, as with [Func].
 func Handler(h http.HandlerFunc) *FuncReply {
 	return Func(func(w http.ResponseWriter, r *RequestValues) (*Response, error) {
 		h(w, r.RawRequest)

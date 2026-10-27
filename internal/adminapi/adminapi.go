@@ -17,7 +17,7 @@ import (
 // the admin API, so the admin API tells them from mocks of files and code.
 const Origin = "admin"
 
-// ErrNotDescribed is the error of a mock that can't be described as a mock file, such as one with a binary body.
+// ErrNotDescribed is the error of a mock that can't be described as a mock file, such as one with a Handler reply.
 var ErrNotDescribed = errors.New("admin: the mock can't be described as a mock file")
 
 // Files is a mock server that serves mock files.

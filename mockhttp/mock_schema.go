@@ -592,7 +592,7 @@ var _replySchema = config.NewSchema(
 		},
 	},
 	replyField{
-		Key: "body_base64", Kind: config.String, Usage: "Body: bytes in standard base64, for a body that isn't UTF-8 text, such as an image.",
+		Key: "body_base64", Kind: config.String, Usage: "Body: bytes in standard base64, for a body that isn't UTF-8 text, such as an image. Line breaks are ignored.",
 		Set: func(r *replyDef, v config.Value) error {
 			b, err := base64.StdEncoding.DecodeString(v.Str)
 			if err != nil {
