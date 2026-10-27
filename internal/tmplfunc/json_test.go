@@ -1,4 +1,4 @@
-package vlatte
+package tmplfunc
 
 import (
 	"testing"
@@ -41,7 +41,7 @@ func TestDeleteJSONPath(t *testing.T) {
 	t.Run("keeps the values it doesn't select as they are", func(t *testing.T) {
 		data := map[string]any{"v": map[string]any{"n": 1, "z": nil, "x": "y"}}
 
-		out, err := render(t, MustNewGoTemplateEngine(), `{{ $r := deleteJSONPath "$.x" .v }}{{ printf "%T" $r.n }} {{ len $r }}`, data)
+		out, err := render(t, Funcs(), `{{ $r := deleteJSONPath "$.x" .v }}{{ printf "%T" $r.n }} {{ len $r }}`, data)
 		require.NoError(t, err)
 		require.Equal(t, "int 2", out)
 	})
@@ -49,7 +49,7 @@ func TestDeleteJSONPath(t *testing.T) {
 	t.Run("leaves its value unchanged", func(t *testing.T) {
 		data := map[string]any{"order": map[string]any{"id": "1", "note": "x"}}
 
-		out, err := render(t, MustNewGoTemplateEngine(), `{{ deleteJSONPath "$.note" .order | toJSON }}`, data)
+		out, err := render(t, Funcs(), `{{ deleteJSONPath "$.note" .order | toJSON }}`, data)
 		require.NoError(t, err)
 		require.JSONEq(t, `{"id": "1"}`, out)
 		require.Equal(t, map[string]any{"id": "1", "note": "x"}, data["order"])
@@ -80,7 +80,7 @@ func TestMergePatch(t *testing.T) {
 		{target: `{}`, patch: `{"a":{"bb":{"ccc":null}}}`, want: `{"a":{"bb":{}}}`},
 	}
 
-	e := MustNewGoTemplateEngine()
+	e := Funcs()
 
 	for _, tc := range rfc {
 		t.Run(tc.target+" patched with "+tc.patch, func(t *testing.T) {

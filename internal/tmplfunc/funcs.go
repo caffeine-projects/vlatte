@@ -1,4 +1,5 @@
-package vlatte
+// Package tmplfunc holds the functions of vlatte's Go template engine.
+package tmplfunc
 
 import (
 	"encoding/base64"
@@ -9,9 +10,9 @@ import (
 	"uuid"
 )
 
-// goTemplateFuncs returns the functions Go templates can call besides those of text/template, but env, which the
-// engine adds. Each call returns a new map, so an engine can add to its own.
-func goTemplateFuncs() map[string]any {
+// Funcs returns the functions templates can call besides those of text/template, but env, which an [Env] gives.
+// Each call returns a new map, so an engine can add to its own.
+func Funcs() map[string]any {
 	return map[string]any{
 		"toJSON":       toJSON,
 		"fromJSON":     fromJSON,

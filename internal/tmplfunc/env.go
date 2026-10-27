@@ -1,4 +1,4 @@
-package vlatte
+package tmplfunc
 
 import (
 	"errors"
@@ -9,37 +9,45 @@ import (
 	"text/template/parse"
 )
 
-// errEnvNotAllowed says a template read an environment variable the engine doesn't allow.
-var errEnvNotAllowed = errors.New("is not allowed")
+// ErrEnvNotAllowed says a template read an environment variable its [Env] doesn't allow.
+var ErrEnvNotAllowed = errors.New("is not allowed")
 
-// WithEnv allows templates to read the environment variables names with env. Names are exact and case-sensitive, and
-// each call adds to the names allowed. Without it, templates read none: env fails for every name.
-func WithEnv(names ...string) GoTemplateOption {
-	return func(e *GoTemplateEngine) error {
-		for _, name := range names {
-			if name == "" || strings.ContainsAny(name, "=\x00") {
-				return fmt.Errorf("environment variable name %q is invalid", name)
-			}
-
-			e.envAllowed[name] = true
-		}
-
-		return nil
-	}
+// Env is the env function of templates: it reads the environment variables it allows, by exact, case-sensitive name,
+// and no other. The zero Env allows none.
+type Env struct {
+	allowed map[string]bool
 }
 
-// env returns the value of the environment variable name, "" when it is unset, if the engine allows it.
-func (e *GoTemplateEngine) env(name string) (string, error) {
-	if !e.envAllowed[name] {
-		return "", fmt.Errorf("%q %w", name, errEnvNotAllowed)
+// Allow adds names to the variables e allows. A name that is empty or holds "=" or NUL is an error.
+func (e *Env) Allow(names ...string) error {
+	for _, name := range names {
+		if name == "" || strings.ContainsAny(name, "=\x00") {
+			return fmt.Errorf("environment variable name %q is invalid", name)
+		}
+
+		if e.allowed == nil {
+			e.allowed = make(map[string]bool)
+		}
+
+		e.allowed[name] = true
+	}
+
+	return nil
+}
+
+// Get returns the value of the environment variable name, "" when it is unset, or [ErrEnvNotAllowed]. The error
+// never holds the value.
+func (e *Env) Get(name string) (string, error) {
+	if !e.allowed[name] {
+		return "", fmt.Errorf("%q %w", name, ErrEnvNotAllowed)
 	}
 
 	return os.Getenv(name), nil
 }
 
-// checkEnv returns the error env would fail with at execution for the first name it is given as a literal in t and
-// doesn't allow, so the template fails when it compiles. Names env reads from data are checked when it runs.
-func (e *GoTemplateEngine) checkEnv(t *template.Template) error {
+// Check returns the error env would fail with when t runs, for the first name t gives env as a literal and e doesn't
+// allow, so a template can fail when it compiles. Names env reads from data are checked when it runs.
+func (e *Env) Check(t *template.Template) error {
 	for _, tt := range t.Templates() {
 		if tt.Tree == nil {
 			continue
@@ -49,7 +57,7 @@ func (e *GoTemplateEngine) checkEnv(t *template.Template) error {
 
 		walkPipes(tt.Root, func(p *parse.PipeNode) bool {
 			for _, name := range envLiterals(p) {
-				if _, err = e.env(name); err != nil {
+				if _, err = e.Get(name); err != nil {
 					return false
 				}
 			}

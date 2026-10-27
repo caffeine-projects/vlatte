@@ -1,39 +1,6 @@
-package vlatte
+package tmplfunc
 
-import (
-	"testing"
-
-	"github.com/stretchr/testify/require"
-)
-
-// funcCase is a template that renders to want, or fails with an error that contains err.
-type funcCase struct {
-	name string
-	text string
-	data any
-	want string
-	err  string
-}
-
-// runFuncCases renders each case with the default engine.
-func runFuncCases(t *testing.T, cases []funcCase) {
-	t.Helper()
-
-	e := MustNewGoTemplateEngine()
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			out, err := render(t, e, tc.text, tc.data)
-			if tc.err != "" {
-				require.ErrorContains(t, err, tc.err)
-				return
-			}
-
-			require.NoError(t, err)
-			require.Equal(t, tc.want, out)
-		})
-	}
-}
+import "testing"
 
 func TestStringFuncs(t *testing.T) {
 	runFuncCases(t, []funcCase{

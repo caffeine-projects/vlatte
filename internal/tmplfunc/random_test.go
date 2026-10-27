@@ -1,4 +1,4 @@
-package vlatte
+package tmplfunc
 
 import (
 	"strconv"
@@ -9,7 +9,7 @@ import (
 )
 
 func TestRandomString(t *testing.T) {
-	e := MustNewGoTemplateEngine()
+	e := Funcs()
 
 	for kind, alphabet := range _alphabets {
 		t.Run(kind+" has the length asked, from its alphabet", func(t *testing.T) {
@@ -31,7 +31,7 @@ func TestRandomString(t *testing.T) {
 }
 
 func TestRandomNumbers(t *testing.T) {
-	e := MustNewGoTemplateEngine()
+	e := Funcs()
 
 	t.Run("randomInt is in [min, max)", func(t *testing.T) {
 		out, err := render(t, e, `{{ range 200 }}{{ randomInt -2 3 }} {{ end }}`, nil)

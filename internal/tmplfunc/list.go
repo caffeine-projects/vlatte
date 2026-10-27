@@ -1,4 +1,4 @@
-package vlatte
+package tmplfunc
 
 import (
 	"cmp"

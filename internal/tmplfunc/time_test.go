@@ -1,4 +1,4 @@
-package vlatte
+package tmplfunc
 
 import (
 	"testing"
@@ -64,7 +64,7 @@ func TestTruncateTime(t *testing.T) {
 		{point: "last day of year", want: "2026-12-31T00:00:00-03:00"},
 	}
 
-	e := MustNewGoTemplateEngine()
+	e := Funcs()
 
 	for _, tc := range points {
 		t.Run(tc.point+", in the time's zone", func(t *testing.T) {

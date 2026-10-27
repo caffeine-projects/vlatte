@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"text/template"
+
+	"github.com/caffeine-projects/vlatte/internal/tmplfunc"
 )
 
 var _ TemplateEngine = (*GoTemplateEngine)(nil)
@@ -49,8 +51,8 @@ var _missingKeyModes = []string{"default", "invalid", "zero", "error"}
 type GoTemplateEngine struct {
 	funcs      map[string]any
 	missingKey string
-	envAllowed map[string]bool // the environment variables env reads
-	customEnv  bool            // whether WithTemplateFuncs replaced env, so Compile doesn't check its names
+	env        tmplfunc.Env
+	customEnv  bool // whether WithTemplateFuncs replaced env, so Compile doesn't check its names
 }
 
 // GoTemplateOption configures a GoTemplateEngine.
@@ -58,8 +60,8 @@ type GoTemplateOption func(*GoTemplateEngine) error
 
 // NewGoTemplateEngine creates a GoTemplateEngine.
 func NewGoTemplateEngine(opts ...GoTemplateOption) (*GoTemplateEngine, error) {
-	e := &GoTemplateEngine{funcs: goTemplateFuncs(), missingKey: "error", envAllowed: make(map[string]bool)}
-	e.funcs["env"] = e.env
+	e := &GoTemplateEngine{funcs: tmplfunc.Funcs(), missingKey: "error"}
+	e.funcs["env"] = e.env.Get
 
 	for _, opt := range opts {
 		if err := opt(e); err != nil {
@@ -78,6 +80,12 @@ func MustNewGoTemplateEngine(opts ...GoTemplateOption) *GoTemplateEngine {
 	}
 
 	return e
+}
+
+// WithEnv allows templates to read the environment variables names with env. Names are exact and case-sensitive, and
+// each call adds to the names allowed. Without it, templates read none: env fails for every name.
+func WithEnv(names ...string) GoTemplateOption {
+	return func(e *GoTemplateEngine) error { return e.env.Allow(names...) }
 }
 
 // WithTemplateFuncs adds functions templates can call, by name. A function replaces a built-in one of the same
@@ -126,7 +134,7 @@ func (e *GoTemplateEngine) Compile(name, text string) (Template, error) {
 	}
 
 	if !e.customEnv {
-		if err := e.checkEnv(t); err != nil {
+		if err := e.env.Check(t); err != nil {
 			return nil, fmt.Errorf("template: %s: env: %w", name, err)
 		}
 	}

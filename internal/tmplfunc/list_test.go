@@ -1,4 +1,4 @@
-package vlatte
+package tmplfunc
 
 import (
 	"slices"
@@ -35,7 +35,7 @@ func TestListFuncs_LeaveTheirListUnchanged(t *testing.T) {
 	// Templates read the data of every request: a function that changed a list would change it for the next one.
 	data := map[string]any{"items": []any{"a", "b", "c"}}
 
-	out, err := render(t, MustNewGoTemplateEngine(),
+	out, err := render(t, Funcs(),
 		`{{ $l := .items }}{{ append $l "d" | len }}{{ insert $l 0 "z" | len }}{{ remove $l 0 | len }}`+
 			`{{ reverse $l | len }}{{ shuffle $l | len }}{{ sortBy $l "$" | len }}`, data)
 	require.NoError(t, err)
@@ -44,7 +44,7 @@ func TestListFuncs_LeaveTheirListUnchanged(t *testing.T) {
 }
 
 func TestRandomListFuncs(t *testing.T) {
-	e := MustNewGoTemplateEngine()
+	e := Funcs()
 
 	t.Run("randomItem is an item of the list", func(t *testing.T) {
 		out, err := render(t, e, `{{ randomItem (list "a" "b" "c") }}`, nil)
