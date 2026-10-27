@@ -292,11 +292,7 @@ func numbersHold(data []byte) bool {
 			continue
 		}
 
-		n, err := value.DecodeJSON([]byte(tok.String()))
-		if err != nil {
-			return false
-		}
-
+		n, _ := value.DecodeJSON([]byte(tok.String()))
 		if b, _ := json.Marshal(n); !sameNumber(tok.String(), string(b)) {
 			return false
 		}

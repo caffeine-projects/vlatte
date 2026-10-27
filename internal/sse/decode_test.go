@@ -9,11 +9,12 @@ import (
 )
 
 func TestDoc_KeepsJSONNumbersAFileCantHold(t *testing.T) {
-	// A number past int64, as a uint64 id, would round once a file reads it back: it is written as its JSON text, which
-	// sends the same bytes.
+	// A number past int64, as a uint64 id, would round once a file reads it back, and one past float64 wouldn't read
+	// back: each is written as its JSON text, which sends the same bytes.
 	s := &Spec{Events: []*EventSpec{
 		{Data: []byte(`18446744073709551615`), DataKind: DataJSON, HasData: true},
 		{Data: []byte(`{"id":18446744073709551615}`), DataKind: DataJSON, HasData: true},
+		{Data: []byte(`1e400`), DataKind: DataJSON, HasData: true},
 	}}
 
 	text, err := config.Encode(s.Doc(), "yaml")
