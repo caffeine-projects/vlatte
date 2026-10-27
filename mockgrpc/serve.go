@@ -18,9 +18,10 @@ import (
 // serve matches call with the server's mocks, and answers it with the first that matches: the path of every call,
 // whatever its type. It returns what the call ends with: nil, the status of the mock's answer, or a failure.
 //
-// In order: the mock's delay, its reply, then, once it answered, with messages or a status, the state of its stateful
-// matchers, such as Times and scenarios, and its events. The mock counts the call as its answer starts going out, so
-// the debug header carries the count: a reply that fails, or a client that leaves, takes it back, and counts nothing.
+// In order: the mock's delay, its reply, then, once it answered, with messages, a status or a cut, the state of its
+// stateful matchers, such as Times and scenarios, and its events. The mock counts the call as its answer starts going
+// out, so the debug header carries the count: a reply that fails, or a client that leaves, takes it back, and counts
+// nothing.
 func (in *interceptors) serve(ctx context.Context, call *Call) error {
 	app := in.app
 	kind := typeOf(call.desc)
@@ -115,6 +116,11 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 
 	if encErr != nil {
 		journaled.failed(fmt.Errorf("%s: %w", kind, encErr))
+	}
+
+	// A reply that cut the call answered it, as long as its client is there.
+	if cuts(err) && ctx.Err() == nil {
+		return in.cut(ctx, call, mock, h, err)
 	}
 
 	if err != nil && !hasStatus(err) {
