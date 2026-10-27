@@ -135,6 +135,24 @@ func TestMockFile_NamesTheKeyOfEachProblem(t *testing.T) {
 		{"messages JSON can't write", `{request: {method: Upload, messages: [{key: .nan}]}, response: {}}`, "request.messages"},
 		{"body file that is missing", `{request: {method: Greetings}, response: {body_file: nope.json}}`, "response.body_file"},
 		{"proxy with a response", `{request: {method: Greetings}, response: {}, proxy: {target: "localhost:1"}}`, "proxy"},
+		{"sequence without responses", `{request: {method: Greetings}, response_sequence: {after_ended: {}}}`, "response_sequence.responses"},
+		{"sequence of no responses", `{request: {method: Greetings}, response_sequence: {responses: []}}`, "response_sequence.responses"},
+		{"sequence of no list", `{request: {method: Greetings}, response_sequence: {responses: {}}}`, "response_sequence.responses"},
+		{"sequence with a response", `{request: {method: Greetings}, response: {}, response_sequence: {responses: [{}]}}`, "response_sequence"},
+		{
+			"sequence response with two answers", `{request: {method: Greetings}, response_sequence: {responses: [{message: {}, messages: []}]}}`,
+			"response_sequence.responses[0].messages",
+		},
+		{
+			"after_ended with two answers", `{request: {method: Greetings}, response_sequence: {responses: [{}], after_ended: {message: {}, messages: []}}}`,
+			"response_sequence.after_ended.messages",
+		},
+		{"random without responses", `{request: {method: Greetings}, response_random: {seed: 1}}`, "response_random.responses"},
+		{"random response of an unknown key", `{request: {method: Greetings}, response_random: {responses: [{body: x}]}}`, "response_random.responses[0].body"},
+		{
+			"random response with two answers", `{request: {method: Greetings}, response_random: {responses: [{message: {}, messages: []}]}}`,
+			"response_random.responses[0].messages",
+		},
 		{"proxy header that is no string", `{request: {method: Greetings}, proxy: {target: "localhost:1", header: {h: 1}}}`, "proxy.header.h"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -152,6 +170,53 @@ func TestMockFile_NamesTheKeyOfEachProblem(t *testing.T) {
 			require.Equal(t, []string{tc.key}, keys, "%v", err)
 		})
 	}
+}
+
+func TestMockFile_ASequenceAndARandomAnswerAsSeqAndRandDo(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "done.json", `{"message": "done"}`)
+
+	seq := writeFile(t, dir, "seq.yaml", `
+request: {method: Greetings}
+response_sequence:
+  responses:
+    - message: {message: pending}
+    - status: {code: UNAVAILABLE}
+  after_ended: {body_file: done.json}
+`)
+
+	m := fileServer(t, Setup())
+	m.MustMock(FromFile(seq), FromBytes([]byte(`
+request: {method: List}
+response_random:
+  seed: 7
+  responses:
+    - messages: [{key: a}]
+    - messages: [{key: b}]
+`), "yaml"))
+
+	c := pb.NewTestServiceClient(m.MustDial())
+
+	got, _ := greetWith(t, c, "")
+	require.Equal(t, "pending", got)
+
+	_, code := greetWith(t, c, "")
+	require.Equal(t, codes.Unavailable, code)
+
+	got, _ = greetWith(t, c, "")
+	require.Equal(t, "done", got)
+
+	same := RandWithSeed(7, Messages(&pb.ListItem{Key: "a"}), Messages(&pb.ListItem{Key: "b"}))
+	other := serve(t)
+	other.MustMock(Method("List").Reply(same))
+
+	want, picked := make([]string, 0, 20), make([]string, 0, 20)
+	for range 20 {
+		want = append(want, listKeys(t, client(t, other))...)
+		picked = append(picked, listKeys(t, c)...)
+	}
+
+	require.Equal(t, want, picked, "a seed in a file picks as RandWithSeed does")
 }
 
 func TestMockFile_AProxyGoesOnToItsTarget(t *testing.T) {
