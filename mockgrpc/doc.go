@@ -17,7 +17,9 @@
 // [Method] starts a mock; its matchers read the call's metadata and its request, as protojson writes it with the
 // field names of the .proto file. [Message], [Messages], [JSON], [Template], [Status], [Bidi], [Echo] and [Func]
 // reply, [Seq] and [Rand] answer with other replies in turn or at random, [Shared] gives mocks one Replier, and
-// [From] answers with what another server answers, which [Server.StartRecording] records as mock files.
+// [From] answers with what another server answers, which [Server.StartRecording] records as mock files. A reply that
+// returns [github.com/caffeine-projects/vlatte.ErrAbort] or [github.com/caffeine-projects/vlatte.ErrReset] cuts the
+// call's connection, after what it sent: see [Replier].
 // Mocks can be limited with Times, take part in scenarios, wait with Delay, and run on_complete events, such as
 // webhooks. A server can keep a journal of its calls, which tests verify with the same builders, and serve an admin
 // API. Mocks can also come from JSON or YAML files: see [FromFile].

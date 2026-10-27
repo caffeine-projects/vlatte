@@ -147,6 +147,18 @@ m.MustMock(mockgrpc.Method("Chat/Talk").Reply(mockgrpc.Bidi().
 	OnEnd(mockgrpc.Message(&pb.Line{Text: "bye"}))))
 ```
 
+**Cuts.** A reply that returns an error matching `vlatte.ErrAbort` or `vlatte.ErrReset`, such as a `Func` reply, cuts the call, to test a client against a server that dies midway. The mock counts the call and runs its events, then the server cuts the call's connection after the messages of a stream the reply sent, before any status: the client reads `Unavailable`, and no trailer. `vlatte.ErrReset` resets a TCP connection, so the client reads `ECONNRESET`, and `vlatte.ErrAbort` ends it. grpc can't reset one stream from a handler, so the other calls on the connection end too. A server whose `ServerOptions` set `grpc.Creds` can't cut its connections: the call fails, with the `vlatte-error` trailer.
+
+```go
+m.MustMock(mockgrpc.Method("Feed/Watch").Reply(mockgrpc.Func(func(_ context.Context, call *mockgrpc.Call) error {
+	if err := call.Send(&pb.Event{Id: "1"}); err != nil {
+		return err
+	}
+
+	return vlatte.ErrReset // after event 1, the client reads a reset
+})))
+```
+
 **Mock features.** As HTTP mocks, gRPC mocks have an `ID`, a `Name` and a `Priority`, can start `Enabled(false)`, serve a number of calls with `Times` and `Once`, take part in scenarios with `StartScenario`, `ScenarioIs`, `ScenarioStateIs` and `ScenarioStateWillBe`, wait before replying with `Delay` and `DelayFunc`, and run [on_complete events](#webhooks), such as webhooks, with `OnCompleteEvent`, and callbacks with `Callback`. An answer with a status counts as the mock's answer, for `Times` and scenarios too.
 
 **Descriptors.** A server without the generated code of a service serves it from its descriptors, with messages of dynamic types: `Setup().Descriptors("api.binpb")` loads descriptor sets, as `protoc --descriptor_set_out=api.binpb --include_imports` or `buf build -o api.binpb` write them, and `Setup().Files(files)` takes a `*protoregistry.Files`.

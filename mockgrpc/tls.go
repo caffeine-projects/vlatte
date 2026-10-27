@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -20,9 +21,11 @@ import (
 const _selfSignedValidity = 24 * time.Hour
 
 // serverCreds are the transport credentials of the server, which grpc takes when it is built: none until StartTLS
-// sets TLS ones, before the server serves.
+// sets TLS ones, before the server serves. conns holds the connections they handshook, by their key: see cutConn.
 type serverCreds struct {
 	credentials.TransportCredentials
+
+	conns sync.Map
 }
 
 // StartTLS starts the mock server as Start does, serving TLS: Config.TLSConfig, or the certificates of

@@ -190,8 +190,8 @@ func (c *journalCall) unmatched(misses []vlatte.NearMiss) {
 }
 
 // replied sets that the mock that matched the call answered it, unless err, its reply's error, has no gRPC status: a
-// mock's status is its answer, any other error a failure. A reply that failed as the client left, of ctx, is left to
-// end, which tells the call was abandoned.
+// mock's status is its answer, and so is a cut, whose cause the entry keeps; any other error is a failure. A reply that
+// failed as the client left, of ctx, is left to end, which tells the call was abandoned.
 func (c *journalCall) replied(ctx context.Context, err error) {
 	if err != nil && ctx.Err() != nil {
 		return
@@ -200,7 +200,11 @@ func (c *journalCall) replied(ctx context.Context, err error) {
 	c.update(func(e *journal.Entry) {
 		e.Outcome = journal.OutcomeMatched
 
-		if _, ok := status.FromError(err); !ok {
+		switch _, ok := status.FromError(err); {
+		case ok:
+		case cuts(err):
+			e.Message = err.Error()
+		default:
 			e.Outcome, e.Message = journal.OutcomeFailed, err.Error()
 		}
 	})
