@@ -67,8 +67,8 @@ type Transform func(ctx context.Context, args vlatte.OnComplete, webhookArgs *Ar
 // as a body_file, open from the Kit's Dir: the directory of the mock file. An event without a Kit logs nothing,
 // sends with http.DefaultTransport, and opens files from the working directory. A send fails when the target can't be
 // reached in time, or answers with a status outside 2xx; a redirect isn't followed. A send reads up to 256 KiB of the
-// answer, within its time, so its connection carries the next one. The time is WithTimeout's, or else the event's: mockhttp gives the server's Config.WebhookTimeout. Without
-// either, it is 10s. A zero WebHook is ready to use.
+// answer, within its time, so its connection carries the next one. The time is WithTimeout's, or else the event's:
+// mockhttp gives the server's Config.WebhookTimeout. Without either, it is 10s. A zero WebHook is ready to use.
 type WebHook struct {
 	transport http.RoundTripper
 	transform Transform
