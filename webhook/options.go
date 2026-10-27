@@ -20,8 +20,8 @@ func WithTransform(transform Transform) Option {
 	}
 }
 
-// WithTransport returns an [Option] that sets the [http.RoundTripper] for a [WebHook], in place of the event's,
-// such as the server's transport mockhttp gives.
+// WithTransport returns an [Option] that sets the [http.RoundTripper] for a [WebHook], in place of the server's,
+// which the event's [vlatte.Kit] gives.
 func WithTransport(transport http.RoundTripper) Option {
 	return func(w *WebHook) error {
 		w.transport = transport
@@ -45,7 +45,7 @@ func WithTimeout(timeout time.Duration) Option {
 }
 
 // WithLogger returns an [Option] that sets the logger of a [WebHook]'s sends and answers. Without it, a WebHook
-// logs with the logger of its event: mockhttp gives the server's, so Setup().Silent() silences webhooks too.
+// logs with the server's logger, which the event's [vlatte.Kit] gives, so Setup().Silent() silences webhooks too.
 func WithLogger(logger *zerolog.Logger) Option {
 	return func(w *WebHook) error {
 		w.logger = logger
