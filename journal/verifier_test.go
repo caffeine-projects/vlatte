@@ -88,7 +88,7 @@ func errorText(t *testing.T, ft *testmock.FakeT) string {
 }
 
 func TestVerifier_AssertRequested(t *testing.T) {
-	// A test verifies the requests a server got, as WireMock's verify does: the count is exact, a request no mock
+	// A test verifies the requests a server got: the count is exact, a request no mock
 	// matched counts as any other, and a failure lists what the server got, the newest first, with the mock that
 	// came closest to one no mock matched.
 	j := journaled(t,

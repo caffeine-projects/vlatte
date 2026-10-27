@@ -829,7 +829,7 @@ func TestCLI_IsAForwardProxy(t *testing.T) {
 }
 
 func TestCLI_ProxiesWhatNoMockMatches(t *testing.T) {
-	// --proxy-all-target sends what no mock matches on to the target, as WireMock's --proxy-all does. With --record,
+	// --proxy-all-target sends what no mock matches on to the target. With --record,
 	// the target's answers are recorded, and a later run serves them without the target.
 	withoutDockerHost(t)
 	t.Chdir(t.TempDir())

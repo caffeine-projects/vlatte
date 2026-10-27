@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"io"
 	"net"
@@ -332,6 +333,105 @@ func TestConfig_ApplyCopiesEveryField(t *testing.T) {
 			require.False(t, dv.Field(i).IsZero(), "Config.Apply doesn't copy %s", field.Name)
 		}
 	}
+}
+
+func TestNew_ALaterSetupChangesOnlyWhatItSets(t *testing.T) {
+	// Options compose: a second Setup() that only silences the server must keep the name and the listener of the
+	// first, or the mocks that name the listener fail to build.
+	l := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
+
+	m := MustNew(
+		Setup().Name("api").OnCompleteListener("hook", l),
+		Setup().Silent().ConfigSources(),
+	)
+
+	require.Equal(t, "api", m.Name())
+	require.Equal(t, vlatte.LogLevelDisabled, m.Config().LogLevel)
+
+	_, err := m.Mock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "hook"}).Reply(NoContent()))
+	require.NoError(t, err)
+}
+
+func TestNew_ASetupAfterAConfigKeepsWhatTheConfigSet(t *testing.T) {
+	// A Setup() sets no default of its own, such as UseHTTP2: one applied after a Config keeps what the Config set.
+	m := MustNew(&Config{Name: "api", UseHTTP2: false}, Setup().Silent().ConfigSources())
+
+	require.Equal(t, "api", m.Name())
+	require.False(t, m.Config().UseHTTP2)
+}
+
+func TestConfigBuilder_RedactHeaderAfterAConfigWithoutAny(t *testing.T) {
+	// A Config built by hand has no map of headers to redact: a Setup() after it must still redact.
+	m := MustNew(&Config{}, Setup().RedactHeader("Authorization"))
+
+	require.Equal(t, map[string]struct{}{"authorization": {}}, m.Config().HeaderNamesToRedact)
+}
+
+func TestOnCompleteListener_AfterAConfigWithoutARegistry(t *testing.T) {
+	// A Config built by hand has no registry: the listener of a Setup() after it must still reach the mocks.
+	l := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
+
+	m := MustNew(&Config{}, Setup().OnCompleteListener("hook", l))
+
+	_, err := m.Mock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "hook"}).Reply(NoContent()))
+	require.NoError(t, err)
+}
+
+type failingProxyOption struct{}
+
+func (failingProxyOption) Apply(*ProxyConfig) error { return errors.New("no") }
+
+func TestConfigBuilder_AFailingSectionOptionFailsNew(t *testing.T) {
+	// A server must not start with a proxy or a recording other than the one its options asked for.
+	tests := map[string]*ConfigBuilder{
+		"proxy":  Setup().Proxy(failingProxyOption{}),
+		"record": Setup().Record(failingRecordOption{}),
+	}
+
+	for name, setup := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := New(setup)
+			require.EqualError(t, err, "server: error applying configuration at index 0 with type *mockhttp.ConfigBuilder\nno")
+		})
+	}
+}
+
+func TestConfigBuilder_TLSCertKeyPairWithoutFilesKeepsTheDefaultCertificate(t *testing.T) {
+	// Without files, Server.StartTLS serves its default certificate: New must not fail loading files nobody named.
+	m := MustNew(Setup().TLSCertKeyPair("", ""))
+
+	require.Nil(t, m.Config().TLSCertificates)
+}
+
+func TestConfigBuilder_TLSCertificatesAndClientCAsReachTheServer(t *testing.T) {
+	// Server.StartTLS serves these certificates and requires client certificates signed by these CAs.
+	cert, err := tls.LoadX509KeyPair(_testCertFile, _testKeyFile)
+	require.NoError(t, err)
+
+	certs := []tls.Certificate{cert}
+	pool := x509.NewCertPool()
+
+	m := MustNew(Setup().TLSCertificates(certs).TLSClientCAs(pool))
+
+	require.Equal(t, certs, m.Config().TLSCertificates)
+	require.Same(t, pool, m.Config().TLSClientCAs)
+}
+
+func TestConfigBuilder_DebugFnSeesEveryRequest(t *testing.T) {
+	reqs := make(chan *http.Request, 1)
+	m := MustNew(Setup().Silent().DebugFn(func(key string, v any) {
+		if r, ok := v.(*http.Request); ok && key == "req" {
+			reqs <- r
+		}
+	}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	res, err := http.Get(m.URL("/debugged"))
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	require.Equal(t, "/debugged", (<-reqs).URL.Path)
 }
 
 func TestGlobalEventsAreApplied(t *testing.T) {
@@ -769,7 +869,9 @@ func TestConfigBuilder_LogOutput(t *testing.T) {
 			out := &lockedBuffer{}
 
 			setup := Setup().LogOutput(out).LogLevel(vlatte.LogLevelInfo).LogPretty(false)
-			setup.conf.Debug = debug
+			if debug {
+				setup.UseDescriptiveLogger()
+			}
 
 			m := MustNew(setup)
 			m.MustStart()

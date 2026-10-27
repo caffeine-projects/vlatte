@@ -1,0 +1,9 @@
+request:
+  path: /tenant
+  method: GET
+
+response:
+  status: 200
+  body: '{"tenant": {{ env "VLATTE_E2E_TENANT" | toJSON }}}'
+  template:
+    enabled: true

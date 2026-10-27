@@ -418,6 +418,16 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return checkMin(v.Int, 0)
 			},
 		},
+		{
+			Key: "template.env", Kind: config.List,
+			Usage: "Environment variables templates may read with env, by exact name. Templates read none without it.",
+			Set: func(c *Config, v config.Value) error {
+				c.TemplateEnv = v.List
+				_, err := vlatte.NewGoTemplateEngine(vlatte.WithEnv(v.List...))
+
+				return err
+			},
+		},
 	}
 
 	records := recordFields()

@@ -739,3 +739,27 @@ func TestNew_AGlobalEventOfNoListenerFails(t *testing.T) {
 	_, err := New(Setup().Silent().GlobalEvents(&vlatte.Events{OnComplete: vlatte.EventConfigs{{Name: "nobody"}}}))
 	require.ErrorContains(t, err, "server: global on_complete listener nobody at index 0 is not registered")
 }
+
+func TestNew_TemplateEnvAllowsVariablesOnTheDefaultEngine(t *testing.T) {
+	m, err := New(Setup().ConfigSources(ConfigArgs([]string{"--grpc-template-env=VLATTE_TEST_ALLOWED"})))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+
+	_, err = m.Config().TemplateEngine.Compile("body", `{{ env "VLATTE_TEST_ALLOWED" }}`)
+	require.NoError(t, err)
+
+	_, err = m.Config().TemplateEngine.Compile("body", `{{ env "VLATTE_TEST_OTHER" }}`)
+	require.ErrorContains(t, err, `env: "VLATTE_TEST_OTHER" is not allowed`)
+}
+
+func TestNew_TemplateEnvWithAnEngineOfTheUsersOwnFails(t *testing.T) {
+	// The variables would silently stay unreadable: the server can't change an engine it didn't make.
+	_, err := New(Setup().TemplateEngine(vlatte.MustNewGoTemplateEngine()).TemplateEnv("X"))
+	require.ErrorIs(t, err, errTemplateEnvWithEngine)
+	require.ErrorContains(t, err, "grpc.template.env")
+}
+
+func TestNew_TemplateEnvFromGoRefusesAnInvalidName(t *testing.T) {
+	_, err := New(Setup().TemplateEnv("A=B"))
+	require.ErrorContains(t, err, `environment variable name "A=B" is invalid`)
+}
