@@ -346,7 +346,8 @@
         "body_file": { "description": "A file to send as the body. Relative paths start at the mock file's directory.", "type": "string" },
         "multipart": { "description": "A multipart body, as response.multipart. It's sent at once, so its parts can't have delays.", "$ref": "#/$defs/multipart" },
         "multipart_template": { "description": "A multipart body whose text is templates.", "$ref": "#/$defs/multipart" },
-        "delay": { "description": "How long to wait before sending, once the mock replied. The response waits for it too.", "$ref": "#/$defs/duration" }
+        "delay": { "description": "How long to wait before sending, once the mock replied. The response waits for it too.", "$ref": "#/$defs/duration" },
+        "timeout": { "description": "How long the request may take, from sending it to its answer. Without it, the listener's timeout, or else 10s.", "$ref": "#/$defs/duration" }
       },
       "additionalProperties": false,
       "oneOf": [ { "required": [ "url" ] }, { "required": [ "url_template" ] } ],

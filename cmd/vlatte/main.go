@@ -201,8 +201,11 @@ func commandSettings(cmd *cobra.Command, args []string, stdout, stderr io.Writer
 // servers and the exit code.
 func startServer(cmd *cobra.Command, args []string, s settings, out, logOutput, stderr io.Writer) (*mockhttp.Server, *mockgrpc.Server, *admin.Admin, int) {
 	// Mock files name their on_complete listeners: webhook sends their webhooks, logging with the server's logger and
-	// waiting for their answers as long as the server's webhook.timeout setting says.
-	wh := &webhook.WebHook{}
+	// waiting for their answers as long as the webhook.timeout setting says.
+	wh, err := webhook.New(webhook.WithTimeout(s.webhookTimeout))
+	if err != nil {
+		return nil, nil, nil, failure(cmd, err, out, stderr)
+	}
 
 	httpArgs, grpcArgs := splitArgs(args)
 

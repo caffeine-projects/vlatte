@@ -155,6 +155,18 @@ func TestWebHook_PrepareFailsTheMock(t *testing.T) {
 			want:     "webhook: bad argument: delay -1s is negative",
 		},
 		{
+			name:     "a negative timeout",
+			params:   map[string]any{"url": "http://localhost", "timeout": -1},
+			sentinel: webhook.ErrBadArg,
+			want:     "invalid_value: parameters.timeout must be 0 or more",
+		},
+		{
+			name:     "a negative timeout in Go",
+			params:   &webhook.Args{URL: "http://localhost", Timeout: -time.Second},
+			sentinel: webhook.ErrBadArg,
+			want:     "webhook: bad argument: timeout -1s is negative",
+		},
+		{
 			name:     "a method that isn't one",
 			params:   map[string]any{"url": "http://localhost", "method": "ghjk%&^*()"},
 			sentinel: webhook.ErrBadArg,

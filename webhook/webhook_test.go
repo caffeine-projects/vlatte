@@ -398,18 +398,28 @@ func TestWebHook_Timeout(t *testing.T) {
 }
 
 func TestWebHook_TimeoutPrecedence(t *testing.T) {
-	// The vlatte command set the timeout by writing the WebHook's field once its settings loaded. Now the server gives
-	// its webhook.timeout to the event, and a webhook's own timeout wins over it, so a Go user's WithTimeout isn't
-	// overwritten by a setting.
+	// A timeout is a webhook setting like any other: a webhook's own timeout parameter wins, as the most specific,
+	// over WithTimeout, the timeout of every webhook its listener sends, such as the vlatte command's webhook.timeout
+	// setting. Without either, a webhook waits 10s.
 	testCases := []struct {
 		name   string
 		option time.Duration
-		server time.Duration
+		params vlatte.Parameters
 		want   time.Duration
 	}{
-		{name: "WithTimeout wins over the server's", option: time.Minute, server: 5 * time.Second, want: time.Minute},
-		{name: "the server's without WithTimeout", server: 5 * time.Second, want: 5 * time.Second},
-		{name: "10s without either", want: 10 * time.Second},
+		{
+			name: "the parameter wins over WithTimeout", option: time.Minute, want: time.Second,
+			params: map[string]any{"url": "http://hooks.test/slow", "timeout": "1s"},
+		},
+		{
+			name: "the parameter set in Go", option: time.Minute, want: 2 * time.Second,
+			params: webhook.Options().URL("http://hooks.test/slow").Timeout(2 * time.Second).Build("webhook").Parameters,
+		},
+		{
+			name: "WithTimeout without the parameter", option: time.Minute, want: time.Minute,
+			params: map[string]any{"url": "http://hooks.test/slow"},
+		},
+		{name: "10s without either", params: map[string]any{"url": "http://hooks.test/slow"}, want: 10 * time.Second},
 	}
 
 	for _, tc := range testCases {
@@ -424,7 +434,7 @@ func TestWebHook_TimeoutPrecedence(t *testing.T) {
 				require.NoError(t, err)
 
 				start := time.Now()
-				err = wh.Run(t.Context(), timedOnComplete{params: map[string]any{"url": "http://hooks.test/slow"}, timeout: tc.server})
+				err = wh.Run(t.Context(), onComplete{params: tc.params})
 
 				require.ErrorIs(t, err, context.DeadlineExceeded)
 				require.Equal(t, tc.want, time.Since(start))
@@ -432,15 +442,6 @@ func TestWebHook_TimeoutPrecedence(t *testing.T) {
 		})
 	}
 }
-
-// timedOnComplete is an event that gives a webhook timeout, as mockhttp's gives the server's.
-type timedOnComplete struct {
-	onComplete
-
-	timeout time.Duration
-}
-
-func (e timedOnComplete) WebhookTimeout() time.Duration { return e.timeout }
 
 // silent is a RoundTripper whose target never answers: it returns when the request's context ends.
 type silent struct{}
@@ -1127,7 +1128,7 @@ func TestArgs_ADescriptionDecodesBack(t *testing.T) {
 			args: &webhook.Args{
 				URL: "http://hooks.test/x", Method: "POST", Header: map[string]string{"X-A": "1"},
 				HeaderTemplate: map[string]string{"X-B": "{{ .Request.Method }}"}, BodyTemplate: "{{ .Request.URL }}",
-				Delay: 1500 * time.Millisecond,
+				Delay: 1500 * time.Millisecond, Timeout: 2 * time.Second,
 			},
 		},
 		{

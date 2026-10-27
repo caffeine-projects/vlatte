@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rs/zerolog"
 
@@ -115,10 +114,6 @@ type Config struct {
 	// they go through the proxy the transport the server makes picks, Via or the proxy of the environment.
 	Transport http.RoundTripper
 
-	// WebhookTimeout is how long a webhook waits for its answer, from the setting webhook.timeout, unless the webhook
-	// has a timeout of its own, as webhook.WithTimeout gives. 0 uses the webhook's default, 10s.
-	WebhookTimeout time.Duration
-
 	// proxyAll is the proxy reply of the setting proxy_all, which answers the requests no mock matches, without a
 	// mock: see Server.proxyAll. Code mocks ProxyAll itself.
 	proxyAll *proxyDef
@@ -170,7 +165,6 @@ func (c *Config) Apply(conf *Config) error {
 	conf.Admin = c.Admin
 	conf.AdminStore = c.AdminStore
 	conf.UseHTTPS = c.UseHTTPS
-	conf.WebhookTimeout = c.WebhookTimeout
 	conf.MockFileHandlers = c.MockFileHandlers
 	conf.Transport = c.Transport
 	conf.HeaderNamesToRedact = c.HeaderNamesToRedact

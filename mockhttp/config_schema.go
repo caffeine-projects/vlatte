@@ -385,6 +385,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		{Key: "admin.dir", Kind: config.String, Hidden: true},
 		{Key: "admin.docs_version", Kind: config.String, Hidden: true},
 		{Key: "mcp", Kind: config.Bool, Hidden: true},
+		{Key: "webhook.timeout", Kind: config.Duration, Hidden: true},
 		{
 			Key: "journal", Kind: config.Bool, Usage: "Keep a journal of the requests the server serves, of every outcome.",
 			Set: func(c *Config, v config.Value) error {
@@ -416,12 +417,6 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				config.Section(&c.Journal, defaultJournalConfig()).MaxBodySize = v.Int
 				return checkMin(v.Int, 0)
 			},
-		},
-		{
-			Key: "webhook.timeout", Kind: config.Duration,
-			Usage: "How long a webhook without a timeout of its own waits for its answer: milliseconds or a Go duration " +
-				"(1.5s). 0 uses " + httpx.DefaultWebhookTimeout.String() + ".",
-			Set: func(c *Config, v config.Value) error { c.WebhookTimeout = v.Dur; return nil },
 		},
 	}
 
