@@ -1,6 +1,7 @@
 package sse
 
 import (
+	"bytes"
 	json "encoding/json/v2"
 	"time"
 
@@ -213,9 +214,10 @@ func (e *EventSpec) doc() map[string]any {
 	return doc
 }
 
-// dataDoc returns the data as a mock file writes it: text as text, and JSON as the value it holds. JSON text or null
-// is written as its JSON text, which sends the same bytes: a file reads a string as text, and refuses null. In a
-// templated stream, that text is a template then, as JSON data isn't.
+// dataDoc returns the data as a mock file writes it: text as text, and JSON as the value it holds. JSON a file can't
+// hold is written as its JSON text, which sends the same bytes: a string, which a file reads as text, null, which it
+// refuses, and a number that would round, as one past int64. In a templated stream, that text is a template then, as
+// JSON data isn't.
 func (e *EventSpec) dataDoc() any {
 	if e.DataKind != DataJSON {
 		return string(e.Data)
@@ -225,6 +227,11 @@ func (e *EventSpec) dataDoc() any {
 	v, _ := value.DecodeJSON(e.Data)
 	switch v.(type) {
 	case string, nil:
+		return string(e.Data)
+	}
+
+	// A value DecodeJSON returned marshals.
+	if b, _ := json.Marshal(v, json.Deterministic(true)); !bytes.Equal(b, e.Data) {
 		return string(e.Data)
 	}
 

@@ -47,9 +47,9 @@ func genEvent() *rapid.Generator[*EventSpec] {
 	})
 }
 
-// _jsonData holds the JSON data a mock file can hold: objects, arrays and scalars, and a string and null, which a
-// file writes as text.
-var _jsonData = []string{`{"a":1,"b":[true,null,"x"]}`, `[]`, `{}`, `3`, `false`, `"s"`, `null`, `{"z":{"y":"é"}}`}
+// _jsonData holds the JSON data of events: objects, arrays and scalars, and what a file writes as text: a string,
+// null, and a number past int64.
+var _jsonData = []string{`{"a":1,"b":[true,null,"x"]}`, `[]`, `{}`, `3`, `false`, `"s"`, `null`, `{"z":{"y":"é"}}`, `18446744073709551615`, `[1.5,-2]`}
 
 // genDocEvent draws an event as a mock file can write it: any field of genEvent, JSON data, a retry, or raw text
 // alone, each with a delay or not.
