@@ -133,12 +133,12 @@ func (r *EventRegistry[T]) Run(ctx context.Context, name string, args T) error {
 }
 
 // Listener holds registries for each event kind.
-// Add new event types by defining an interface (embedding EventArgs), adding a field here, and initializing it in NewEvents.
+// Add new event types by defining an interface (embedding EventArgs), adding a field here, and initializing it in [NewListener].
 type Listener struct {
 	OnComplete *EventRegistry[OnComplete]
 }
 
-// NewListener creates a new Listeners with all event registries initialized.
+// NewListener creates a [Listener] with all event registries initialized.
 func NewListener() *Listener {
 	return &Listener{
 		OnComplete: NewEventRegistry[OnComplete](),
