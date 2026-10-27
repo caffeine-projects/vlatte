@@ -62,6 +62,7 @@ func TestDoc_KeepsTheJSONOfATemplatedStreamOutOfItsTemplates(t *testing.T) {
 	}{
 		{"keys out of order", `{"b":"{{ .X }}","a":1}`, `{"a":1,"b":"{{ .X }}"}`},
 		{"white space", `[ "{{ .X }}" ]`, `["{{ .X }}"]`},
+		{"a number written another way", `{"n":1.0,"t":"{{ .X }}"}`, `{"n":1,"t":"{{ .X }}"}`},
 		{"a number that would round", `{"id":18446744073709551615,"b":"x"}`, `{"id":18446744073709551615,"b":"x"}`},
 	}
 

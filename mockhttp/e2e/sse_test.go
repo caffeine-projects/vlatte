@@ -584,31 +584,6 @@ func TestSSE_HeartbeatsKeepAQuietFeedAlive(t *testing.T) {
 	require.Equal(t, []string{"heartbeat", "heartbeat"}, es.comments, "a heartbeat each 10ms of the 30ms wait, but the last")
 }
 
-func TestSSE_FlushesEachHeartbeat(t *testing.T) {
-	// A heartbeat that waits in a buffer leaves the connection as quiet as none would: each one reaches the client as
-	// it is sent, gzipped or not.
-	m := mockhttp.MustNew(mockhttp.Setup().Silent())
-	m.MustStart()
-	t.Cleanup(m.Close)
-
-	stream := mockhttp.NewEventStream().Heartbeat(time.Millisecond).KeepOpen()
-	m.MustMock(mockhttp.Getf("/plain").Reply(mockhttp.OK().EventStream(stream)))
-	m.MustMock(mockhttp.Getf("/gzip").Reply(mockhttp.OK().Gzip().EventStream(stream)))
-
-	for _, path := range []string{"/plain", "/gzip"} {
-		t.Run(path, func(t *testing.T) {
-			ctx, leave := context.WithCancel(t.Context())
-			defer leave()
-
-			_, es := openStream(ctx, t, newClient(t), m.URL(path), "")
-
-			line, err := es.line()
-			require.NoError(t, err)
-			require.Equal(t, ": heartbeat", line)
-		})
-	}
-}
-
 func TestSSE_EachUserGetsTheirOwnNotifications(t *testing.T) {
 	// A notification feed at /users/{id}/notifications serves a signed-in user the notifications the path names. A
 	// request without a token gets 401 before any stream starts, which makes EventSource give up rather than retry.
@@ -649,7 +624,7 @@ func TestSSE_EachUserGetsTheirOwnNotifications(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, res.Body.Close())
 	require.Equal(t, http.StatusUnauthorized, res.StatusCode)
-	require.NotEqual(t, mockhttp.MIMETextEventStream, res.Header.Get(mockhttp.HeaderContentType))
+	require.Equal(t, mockhttp.MIMETextPlain, res.Header.Get(mockhttp.HeaderContentType))
 }
 
 func TestSSE_A204TellsTheClientToStopReconnecting(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	json "encoding/json/v2"
 	"errors"
 	"io"
+	"math/big"
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
@@ -252,7 +253,8 @@ func (e *EventSpec) doc(templated bool) map[string]any {
 // data, or data_json for a string or null, which data reads as text or refuses. JSON its value doesn't write back as
 // the same bytes, as a Go struct's with its keys in field order, is written as its text, which sends them. In a
 // templated stream that text would be a template, so there only JSON with a number that would round, as one past
-// int64, is text: other JSON is written as its value, and sent with its keys sorted.
+// int64, is text: other JSON is written as its value, and sent as encoding/json writes it, compact, with its object
+// keys sorted.
 func (e *EventSpec) dataDoc(templated bool) (string, any) {
 	if e.DataKind != DataJSON {
 		return "data", string(e.Data)
@@ -275,8 +277,8 @@ func (e *EventSpec) dataDoc(templated bool) (string, any) {
 	return "data", v
 }
 
-// numbersHold reports whether each number of data, JSON, decodes to a value written back as it is: one past int64
-// rounds.
+// numbersHold reports whether each number of data, JSON, decodes to a value written back as the same number, as 1.0
+// is written back as 1. One past int64 rounds.
 func numbersHold(data []byte) bool {
 	dec := jsontext.NewDecoder(bytes.NewReader(data))
 
@@ -290,9 +292,22 @@ func numbersHold(data []byte) bool {
 			continue
 		}
 
-		n, _ := value.DecodeJSON([]byte(tok.String()))
-		if b, _ := json.Marshal(n); string(b) != tok.String() {
+		n, err := value.DecodeJSON([]byte(tok.String()))
+		if err != nil {
+			return false
+		}
+
+		if b, _ := json.Marshal(n); !sameNumber(tok.String(), string(b)) {
 			return false
 		}
 	}
+}
+
+// sameNumber reports whether a and b, JSON numbers, are the same number. They are compared at 512 bits, far past
+// the 53 of a float64: a number that rounds differs from what it rounds to, and 1.0 is 1.
+func sameNumber(a, b string) bool {
+	x, _, errA := big.ParseFloat(a, 10, 512, big.ToNearestEven)
+	y, _, errB := big.ParseFloat(b, 10, 512, big.ToNearestEven)
+
+	return errA == nil && errB == nil && x.Cmp(y) == 0
 }

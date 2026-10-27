@@ -76,7 +76,11 @@ func TestSSE_MCPAClientListsAndCallsAToolOfAMockedServer(t *testing.T) {
 
 	require.NoError(t, cs.Close())
 
-	for _, id := range []string{"mcp-initialize", "mcp-initialized", "mcp-tools-list", "mcp-tools-call", "mcp-delete"} {
+	// A mock counts a request once it answered, which can be after the client read the answer. Closing the server
+	// waits for the requests it serves.
+	m.Close()
+
+	for _, id := range []string{"mcp-discover", "mcp-initialize", "mcp-initialized", "mcp-tools-list", "mcp-tools-call", "mcp-delete"} {
 		require.EqualValues(t, 1, scope.Mock(id).Hits(), id)
 	}
 }
@@ -105,11 +109,13 @@ func TestSSE_MCPAClientResumesAToolCallTheServerClosed(t *testing.T) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "agent", Version: "v1"}, nil)
 	cs, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{Endpoint: m.URL("/mcp")}, nil)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = cs.Close() })
 
 	res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "get_forecast", Arguments: map[string]any{"city": "Porto"}})
 	require.NoError(t, err)
 	require.Equal(t, []mcp.Content{&mcp.TextContent{Text: "Rain tomorrow"}}, res.Content)
+
+	require.NoError(t, cs.Close())
+	m.Close() // the requests are counted once they end
 
 	require.EqualValues(t, 1, scope.Mock("forecast-call").Hits())
 	require.EqualValues(t, 1, scope.Mock("forecast-resume").Hits())
