@@ -373,9 +373,9 @@
       ]
     },
     "webhook_header": {
-      "description": "Headers by name, each value a string. Names ignore case: a name can be set once.",
+      "description": "Headers by name, each value a string, or a list of strings for several values. Names ignore case: a name can be set once.",
       "type": "object",
-      "additionalProperties": { "type": "string" }
+      "additionalProperties": { "oneOf": [ { "type": "string" }, { "type": "array", "items": { "type": "string" } } ] }
     },
     "header_map": {
       "type": "object",

@@ -412,3 +412,24 @@ func TestPropNested_Deterministic(t *testing.T) {
 		}
 	})
 }
+
+func TestMemberStrings_TakesAStringOrAListOfStrings(t *testing.T) {
+	// Headers in mock files, of replies, proxies and webhooks, take one value or several: each server decoded them
+	// with a copy of its own. Each value comes in order, the names sorted, and every value of another type is a problem.
+	type value struct {
+		name string
+		s    string
+	}
+
+	var got []value
+	v := Value{Key: "header", Origin: "doc", Any: map[string]any{"X-B": []any{"1", "2"}, "X-A": "0"}}
+	require.NoError(t, MemberStrings(v, func(name, s string) { got = append(got, value{name, s}) }))
+	require.Equal(t, []value{{"X-A", "0"}, {"X-B", "1"}, {"X-B", "2"}}, got)
+
+	v = Value{Key: "header", Origin: "doc", Any: map[string]any{"X-A": 1, "X-B": []any{"1", true}}}
+	err := MemberStrings(v, func(string, string) {})
+	require.Equal(t, []string{
+		fault{CodeInvalidValue, "header.X-A"}.String(),
+		fault{CodeInvalidValue, "header.X-B[1]"}.String(),
+	}, problemSet(t, err))
+}

@@ -113,11 +113,11 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 	// A Transform can add headers, whether the parameters have some or not.
 	if webhookArgs.Header == nil {
-		webhookArgs.Header = make(map[string]string)
+		webhookArgs.Header = make(http.Header)
 	}
 
 	if webhookArgs.HeaderTemplate == nil {
-		webhookArgs.HeaderTemplate = make(map[string]string)
+		webhookArgs.HeaderTemplate = make(map[string][]string)
 	}
 
 	if w.transform != nil {
@@ -192,24 +192,28 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 	// With a context, only a bad method or URL fails it, and validate and checkURL checked both.
 	req, _ := http.NewRequestWithContext(ctx, method, u.String(), body)
 
-	for k, v := range webhookArgs.Header {
-		req.Header.Set(k, v)
+	for k, values := range webhookArgs.Header {
+		for _, v := range values {
+			req.Header.Add(k, v)
+		}
 	}
 
-	for k, v := range webhookArgs.HeaderTemplate {
-		rendered, err := render(engine, "header_template "+k, v, data)
-		if err != nil {
-			return err
-		}
+	for k, values := range webhookArgs.HeaderTemplate {
+		for _, v := range values {
+			rendered, err := render(engine, "header_template "+k, v, data)
+			if err != nil {
+				return err
+			}
 
-		// As in replies: the value goes without the spaces and line breaks around it, and a line break inside, which
-		// would end the header there, fails here, whatever the Transport would do with it.
-		rendered = textproto.TrimString(rendered)
-		if strings.ContainsAny(rendered, "\r\n") {
-			return fmt.Errorf("webhook: header_template %s holds a line break", k)
-		}
+			// As in replies: the value goes without the spaces and line breaks around it, and a line break inside,
+			// which would end the header there, fails here, whatever the Transport would do with it.
+			rendered = textproto.TrimString(rendered)
+			if strings.ContainsAny(rendered, "\r\n") {
+				return fmt.Errorf("webhook: header_template %s holds a line break", k)
+			}
 
-		req.Header.Set(k, rendered)
+			req.Header.Add(k, rendered)
+		}
 	}
 
 	// validate made sure no header sets it.
@@ -279,13 +283,14 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 // Args configures a WebHook HTTP request.
 // It is parsed from the parameters in the event config (e.g. mock definition).
 // URLTemplate, the HeaderTemplate values and BodyTemplate are templates, compiled with the template engine of the
-// server and rendered with the data of the request that completed the mock.
+// server and rendered with the data of the request that completed the mock. A header goes with each of its values,
+// in order. Header names ignore case, so a name is set once, in Header or HeaderTemplate.
 type Args struct {
 	URL            string
 	URLTemplate    string
 	Method         string
-	Header         map[string]string
-	HeaderTemplate map[string]string
+	Header         http.Header
+	HeaderTemplate map[string][]string
 	Body           string
 	BodyTemplate   string
 	BodyFile       string
@@ -317,11 +322,11 @@ func (a *Args) Describe() descriptor.Descriptor {
 	}
 
 	if len(a.Header) > 0 {
-		params["header"] = maps.Clone(a.Header)
+		params["header"] = describeHeader(a.Header)
 	}
 
 	if len(a.HeaderTemplate) > 0 {
-		params["header_template"] = maps.Clone(a.HeaderTemplate)
+		params["header_template"] = describeHeader(a.HeaderTemplate)
 	}
 
 	if body, ok := a.Multipart.(descriptor.SelfDescriptive); ok {
@@ -336,13 +341,30 @@ func (a *Args) Describe() descriptor.Descriptor {
 	return descriptor.New("parameters", params)
 }
 
-// clone returns a copy of a, with copies of its maps. Multipart is shared: writing a body doesn't change it.
+// clone returns a copy of a, with copies of its headers and their values. Multipart is shared: writing a body doesn't
+// change it.
 func (a *Args) clone() *Args {
 	c := *a
-	c.Header = maps.Clone(a.Header)
-	c.HeaderTemplate = maps.Clone(a.HeaderTemplate)
+	c.Header = a.Header.Clone()
+	c.HeaderTemplate = http.Header(a.HeaderTemplate).Clone()
 
 	return &c
+}
+
+// describeHeader describes header as a mock file writes it: a name with one value has a string, and one with several
+// a list.
+func describeHeader(header map[string][]string) map[string]any {
+	described := make(map[string]any, len(header))
+	for name, values := range header {
+		if len(values) == 1 {
+			described[name] = values[0]
+			continue
+		}
+
+		described[name] = slices.Clone(values)
+	}
+
+	return described
 }
 
 // check compiles the templates of a with engine, under the names Run renders them with, without rendering them.
@@ -368,8 +390,10 @@ func (a *Args) check(engine vlatte.TemplateEngine) error {
 	}
 
 	for _, k := range slices.Sorted(maps.Keys(a.HeaderTemplate)) {
-		if err := compile("header_template "+k, a.HeaderTemplate[k]); err != nil {
-			return err
+		for _, v := range a.HeaderTemplate[k] {
+			if err := compile("header_template "+k, v); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -410,7 +434,7 @@ func (a *Args) validate() error {
 	}
 
 	names := make(map[string]string, len(a.Header)+len(a.HeaderTemplate))
-	for _, header := range []map[string]string{a.Header, a.HeaderTemplate} {
+	for _, header := range []map[string][]string{a.Header, a.HeaderTemplate} {
 		for _, name := range slices.Sorted(maps.Keys(header)) {
 			key := textproto.CanonicalMIMEHeaderKey(name)
 			if other, ok := names[key]; ok {
@@ -455,12 +479,14 @@ var _argsSchema = config.NewSchema(
 		Set: func(a *Args, v config.Value) error { a.Method = v.Str; return nil },
 	},
 	argsField{
-		Key: "header", Kind: config.Any, Usage: "Headers of the request, by name.",
-		Set: func(a *Args, v config.Value) error { return headerOf(v, &a.Header) },
+		Key: "header", Kind: config.Any,
+		Usage: "Headers of the request, by name: a string, or a list of strings for several values.",
+		Set:   func(a *Args, v config.Value) (err error) { a.Header, err = headerOf(v); return err },
 	},
 	argsField{
-		Key: "header_template", Kind: config.Any, Usage: "Headers of the request whose values are templates, by name.",
-		Set: func(a *Args, v config.Value) error { return headerOf(v, &a.HeaderTemplate) },
+		Key: "header_template", Kind: config.Any,
+		Usage: "Headers of the request whose values are templates, by name: a string, or a list of strings for several values.",
+		Set:   func(a *Args, v config.Value) (err error) { a.HeaderTemplate, err = headerOf(v); return err },
 	},
 	argsField{
 		Key: "body", Kind: config.String, Usage: "Body of the request.",
@@ -515,7 +541,8 @@ func argsOf(params vlatte.Parameters, origin, dir string) (*Args, error) {
 // ArgsFromMap decodes the parameters of a webhook event, as a mock file's on_complete writes them:
 //   - url, or url_template, a template: a string;
 //   - method: a string, GET when empty;
-//   - header and header_template, whose values are templates: objects of strings;
+//   - header and header_template, whose values are templates: objects of strings, or of lists of strings for headers
+//     with several values;
 //   - one body: body, body_template, a template, or body_file, a string; or multipart, or multipart_template, whose
 //     text is templates: an object with the type, boundary, params and parts of the body;
 //   - delay: milliseconds, or a Go duration such as 1.5s.
@@ -575,7 +602,7 @@ func conflicts(doc any, origin string) []config.Problem {
 		}
 	}
 
-	// Header names ignore case: a name set twice, in either map, is one header with one value.
+	// Header names ignore case: a name set twice, in either map, is one header, set once with its values as a list.
 	names := make(map[string]string)
 	for _, headers := range []string{"header", "header_template"} {
 		header, _ := params[headers].(map[string]any)
@@ -703,23 +730,14 @@ func countSet[T string | bool](values ...T) int {
 	return n
 }
 
-// headerOf decodes an object of header values, each a string.
-func headerOf(v config.Value, dst *map[string]string) error {
-	header := make(map[string]string)
-	err := config.Members(v, func(name string, member config.Value) error {
-		s, ok := member.Any.(string)
-		if !ok {
-			return config.Mismatch(member, "a string", config.String)
-		}
-
-		header[name] = s
-
-		return nil
+// headerOf decodes an object of header values, each a string or a list of strings, keyed as written.
+func headerOf(v config.Value) (map[string][]string, error) {
+	header := make(map[string][]string)
+	err := config.MemberStrings(v, func(name, value string) {
+		header[name] = append(header[name], value)
 	})
 
-	*dst = header
-
-	return err
+	return header, err
 }
 
 // dirOf returns where the relative files of the event's parameters open from, as mockhttp's OnComplete says: the

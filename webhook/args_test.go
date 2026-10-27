@@ -1,6 +1,7 @@
 package webhook_test
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -26,8 +27,8 @@ func TestArgsFromMap(t *testing.T) {
 	require.Equal(t, &webhook.Args{
 		URL:            "http://a",
 		Method:         "POST",
-		Header:         map[string]string{"A": "1"},
-		HeaderTemplate: map[string]string{"B": "{{ .X }}"},
+		Header:         http.Header{"A": {"1"}},
+		HeaderTemplate: map[string][]string{"B": {"{{ .X }}"}},
 		BodyTemplate:   "x",
 		Delay:          1500 * time.Millisecond,
 	}, args)
@@ -49,7 +50,7 @@ func TestArgsFromMap_ReportsEveryProblem(t *testing.T) {
 	require.ErrorIs(t, err, webhook.ErrBadArg)
 	require.EqualError(t, err, `webhook: bad argument: parameters: 5 problems
   on_complete: conflict: parameters.body_file is set with parameters.body; keep one of them
-  on_complete: invalid_value: parameters.header.X must be a string, not a number; write it in quotes: "1"
+  on_complete: invalid_value: parameters.header.X must be a string or a list of strings, not a number; write it in quotes: "1"
   on_complete: unknown_key: parameters.log_level is not a known setting; `+
 		`the keys under parameters are url, url_template, method, header, header_template, body, body_template, body_file, multipart, multipart_template, delay
   on_complete: invalid_value: parameters.method must be a string, not a number; write it in quotes: "5"
@@ -88,11 +89,13 @@ func takes(key string, v any) bool {
 			return true
 		case map[string]any:
 			for _, x := range m {
-				if _, ok := x.(string); !ok {
+				if !headerValue(x) {
 					return false
 				}
 			}
 
+			return true
+		case map[string][]string:
 			return true
 		}
 
@@ -113,9 +116,37 @@ func takes(key string, v any) bool {
 	}
 }
 
+// requireHeader asserts that got, a header of Args, holds want, whichever of the header types it has.
+func requireHeader(t require.TestingT, want map[string][]string, got any) {
+	switch h := got.(type) {
+	case http.Header:
+		require.Equal(t, want, map[string][]string(h))
+	default:
+		require.Equal(t, want, got)
+	}
+}
+
+// headerValue reports whether x is a value a header takes: a string, or a list of strings.
+func headerValue(x any) bool {
+	switch x := x.(type) {
+	case string:
+		return true
+	case []any:
+		for _, item := range x {
+			if _, ok := item.(string); !ok {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	return false
+}
+
 func TestPropArgsFromMap_Types(t *testing.T) {
-	// W1: a parameter is taken exactly when it has its type, as in mock files: strings, and objects of strings for
-	// headers, whatever Go types code builds them with. Keys the webhook doesn't read are never taken.
+	// W1: a parameter is taken exactly when it has its type, as in mock files: strings, and objects of strings, or of
+	// lists of strings, for headers, whatever Go types code builds them with. Keys the webhook doesn't read are never taken.
 	keys := []string{
 		"url", "url_template", "method", "body", "body_template", "body_file", "header", "header_template",
 		"multipart", "multipart_template", "delay", "log_level", "ssl_verify",
@@ -127,6 +158,9 @@ func TestPropArgsFromMap_Types(t *testing.T) {
 		map[string]any{"a": "b"},
 		map[string]string{"a": "b"},
 		map[string]any{"a": 1},
+		map[string]any{"a": []any{"b", "c"}},
+		map[string]any{"a": []any{"b", 1}},
+		map[string][]string{"a": {"b", "c"}},
 		make(map[string]any),
 	}
 
@@ -157,7 +191,14 @@ func TestPropArgsFromMap_Types(t *testing.T) {
 		case string:
 			require.Equal(t, x, got[key])
 		case map[string]string:
-			require.Equal(t, x, got[key])
+			header := make(map[string][]string, len(x))
+			for name, value := range x {
+				header[name] = []string{value}
+			}
+
+			requireHeader(t, header, got[key])
+		case map[string][]string:
+			requireHeader(t, x, got[key])
 		case map[string]any:
 			require.Len(t, got[key], len(x))
 		}

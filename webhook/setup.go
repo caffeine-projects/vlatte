@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"net/http"
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
@@ -13,7 +14,7 @@ type ArgsBuilder struct {
 
 // Options starts an ArgsBuilder to configure a WebHook for a mock.
 func Options() *ArgsBuilder {
-	return &ArgsBuilder{input: &Args{Header: make(map[string]string)}}
+	return &ArgsBuilder{input: &Args{Header: make(http.Header)}}
 }
 
 // URL sets the URL of the target service.
@@ -34,19 +35,21 @@ func (b *ArgsBuilder) Method(method string) *ArgsBuilder {
 	return b
 }
 
-// Header adds an HTTP header to be sent in the WebHook.
+// Header adds a value of an HTTP header to be sent in the WebHook. A name given again adds another value, sent after
+// the ones before.
 func (b *ArgsBuilder) Header(k, v string) *ArgsBuilder {
-	b.input.Header[k] = v
+	b.input.Header[k] = append(b.input.Header[k], v)
 	return b
 }
 
-// HeaderTemplate adds an HTTP header whose value is a template, rendered with the request that completed the mock.
+// HeaderTemplate adds a value of an HTTP header that is a template, rendered with the request that completed the mock.
+// A name given again adds another value, sent after the ones before.
 func (b *ArgsBuilder) HeaderTemplate(k, v string) *ArgsBuilder {
 	if b.input.HeaderTemplate == nil {
-		b.input.HeaderTemplate = make(map[string]string)
+		b.input.HeaderTemplate = make(map[string][]string)
 	}
 
-	b.input.HeaderTemplate[k] = v
+	b.input.HeaderTemplate[k] = append(b.input.HeaderTemplate[k], v)
 
 	return b
 }

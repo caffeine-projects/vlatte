@@ -764,26 +764,8 @@ func setEvents(events *[]vlatte.EventConfig, dir string, v config.Value) error {
 
 // headerValues decodes an object of metadata values: a string, or a list of strings, each.
 func headerValues(v config.Value, dst *[]headerValue) error {
-	return config.Members(v, func(name string, m config.Value) error {
-		switch x := m.Any.(type) {
-		case string:
-			*dst = append(*dst, headerValue{name: name, value: x})
-		case []any:
-			return config.Items(m, func(item config.Value) error {
-				s, ok := item.Any.(string)
-				if !ok {
-					return config.Mismatch(item, "a string", config.String)
-				}
-
-				*dst = append(*dst, headerValue{name: name, value: s})
-
-				return nil
-			})
-		default:
-			return config.Mismatch(m, "a string or a list of strings", config.String)
-		}
-
-		return nil
+	return config.MemberStrings(v, func(name, value string) {
+		*dst = append(*dst, headerValue{name: name, value: value})
 	})
 }
 

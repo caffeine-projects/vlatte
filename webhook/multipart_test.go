@@ -123,7 +123,7 @@ func TestWebHook_MultipartErrors(t *testing.T) {
 	}{
 		{"two bodies", &webhook.Args{URL: "http://localhost", Body: "x", Multipart: mockhttp.MultipartMixed(mockhttp.NewPart())}, "webhook: bad argument: more than one body is set: keep one of Body, BodyTemplate, BodyFile and Multipart"},
 		{"a template that doesn't parse", brokenTemplate, "webhook: multipart body: multipart: parts[0]: body: template: body:1: unclosed action"},
-		{"a Content-Type header", &webhook.Args{URL: "http://localhost", Header: map[string]string{"content-type": "x"}, Multipart: mockhttp.MultipartMixed(mockhttp.NewPart())}, "webhook: bad argument: a multipart body sets the Content-Type: remove the Content-Type header"},
+		{"a Content-Type header", &webhook.Args{URL: "http://localhost", Header: http.Header{"content-type": {"x"}}, Multipart: mockhttp.MultipartMixed(mockhttp.NewPart())}, "webhook: bad argument: a multipart body sets the Content-Type: remove the Content-Type header"},
 		{"a body that can't be written", &webhook.Args{URL: "http://localhost", Multipart: mockhttp.MultipartForm(mockhttp.NewPart())}, "webhook: multipart body: multipart: parts[0].name is required in a form-data part; name the form field"},
 		{"a Go part with a delay", &webhook.Args{URL: "http://localhost", Multipart: mockhttp.MultipartMixed(mockhttp.NewPart().Delay(time.Second))}, "webhook: multipart body: multipart: parts[0].delay can't be set: a body written at once doesn't pause; delays apply to replies only"},
 	}

@@ -79,7 +79,11 @@ func TestJSONSchema_AcceptsWhatPrepareAccepts(t *testing.T) {
 		{name: "a multipart body and a Content-Type header", params: map[string]any{
 			"url": "http://hooks.test", "header": map[string]any{"content-type": "x"}, "multipart": multipart,
 		}},
-		{name: "a list as a header value", params: map[string]any{"url": "http://hooks.test", "header": map[string]any{"X-A": []any{"1"}}}},
+		{name: "a list as a header value", params: map[string]any{"url": "http://hooks.test", "header": map[string]any{"X-A": []any{"1", "2"}}}},
+		{name: "a list holding a number as a header value", params: map[string]any{
+			"url": "http://hooks.test", "header_template": map[string]any{"X-A": []any{"1", 2}},
+		}},
+		{name: "a number as a header value", params: map[string]any{"url": "http://hooks.test", "header": map[string]any{"X-A": 1}}},
 		{name: "a negative delay", params: map[string]any{"url": "http://hooks.test", "delay": -1}},
 		{name: "a key that doesn't exist", params: map[string]any{"url": "http://hooks.test", "urll": "x"}},
 		{name: "an uppercase scheme", params: map[string]any{"url": "HTTP://hooks.test"}},

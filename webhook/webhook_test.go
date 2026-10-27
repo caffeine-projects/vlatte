@@ -258,6 +258,66 @@ func TestWebHook_TheTargetHasTheWebhookWhenTheResponseComes(t *testing.T) {
 	require.True(t, target.AssertNumberOfCalls(t, 1))
 }
 
+func TestWebHook_SendsEveryValueOfAHeader(t *testing.T) {
+	// A webhook sent one value per header, while replies send several, as a target may need a header given twice:
+	// a list of values sends each of them, in order, from a mock file and from Go.
+	got := make(chan http.Header, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got <- r.Header }))
+	t.Cleanup(target.Close)
+
+	wh, err := webhook.New()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name string
+		mock vlatte.Builder[*mockhttp.Mock, *mockhttp.Server]
+	}{
+		{
+			name: "from a mock file",
+			mock: mockhttp.FromBytes([]byte(`
+request: {method: GET, path: /orders}
+response: {status: 204}
+on_complete:
+  - name: webhook
+    parameters:
+      url: `+strconv.Quote(target.URL)+`
+      header: {X-Tag: [a, b]}
+      header_template: {X-Seen: ['{{ .Request.Method }}', two]}
+`), "yaml"),
+		},
+		{
+			name: "from Go",
+			mock: mockhttp.Getf("/orders").
+				OnCompleteEvent(webhook.Options().URL(target.URL).
+					Header("X-Tag", "a").
+					Header("X-Tag", "b").
+					HeaderTemplate("X-Seen", "{{ .Request.Method }}").
+					HeaderTemplate("X-Seen", "two").
+					Build("webhook")).
+				Reply(mockhttp.NoContent()),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := mockhttp.MustNew(mockhttp.Setup().Silent().OnCompleteListener("webhook", wh))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(tc.mock)
+
+			res, err := http.Get(m.URL("/orders"))
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, http.StatusNoContent, res.StatusCode)
+
+			header := <-got
+			require.Equal(t, []string{"a", "b"}, header.Values("X-Tag"))
+			require.Equal(t, []string{"GET", "two"}, header.Values("X-Seen"))
+		})
+	}
+}
+
 func TestWebHook_InvalidArgs(t *testing.T) {
 	// Parameters that are neither *Args nor a map fail the mock when it is built, not each request after it.
 	name := "webhook"
@@ -1114,9 +1174,16 @@ func TestArgs_ADescriptionDecodesBack(t *testing.T) {
 		{
 			name: "text keys",
 			args: &webhook.Args{
-				URL: "http://hooks.test/x", Method: "POST", Header: map[string]string{"X-A": "1"},
-				HeaderTemplate: map[string]string{"X-B": "{{ .Request.Method }}"}, BodyTemplate: "{{ .Request.URL }}",
+				URL: "http://hooks.test/x", Method: "POST", Header: http.Header{"X-A": {"1"}},
+				HeaderTemplate: map[string][]string{"X-B": {"{{ .Request.Method }}"}}, BodyTemplate: "{{ .Request.URL }}",
 				Delay: 1500 * time.Millisecond,
+			},
+		},
+		{
+			name: "headers with several values",
+			args: &webhook.Args{
+				URL: "http://hooks.test/x", Header: http.Header{"X-A": {"1", "2"}},
+				HeaderTemplate: map[string][]string{"X-B": {"{{ .Request.Method }}", "b"}},
 			},
 		},
 		{
@@ -1154,6 +1221,10 @@ func TestArgs_ADescriptionDecodesBack(t *testing.T) {
 			}
 		})
 	}
+
+	header := (&webhook.Args{Header: http.Header{"X-One": {"1"}, "X-Two": {"1", "2"}}}).Describe().Props.(map[string]any)["header"]
+	require.Equal(t, map[string]any{"X-One": "1", "X-Two": []string{"1", "2"}}, header,
+		"a header with one value is written as a mock file writes it: a string")
 
 	_, templated := (&webhook.Args{Multipart: mockhttp.MultipartMixed().Template()}).Describe().Props.(map[string]any)["multipart_template"]
 	require.True(t, templated, "a body whose text is templates goes under multipart_template")

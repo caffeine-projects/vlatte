@@ -1042,33 +1042,8 @@ func setSteps(steps *[]vlatte.Step, v config.Value) error {
 
 // headerValues decodes an object of header values: a string, or a list of strings, each.
 func headerValues(v config.Value, dst *[]headerValue) error {
-	return config.Members(v, func(name string, m config.Value) error {
-		switch x := m.Any.(type) {
-		case string:
-			*dst = append(*dst, headerValue{name: name, value: x})
-		case []any:
-			values := make([]headerValue, 0, len(x))
-
-			err := config.Items(m, func(item config.Value) error {
-				s, ok := item.Any.(string)
-				if !ok {
-					return config.Mismatch(item, "a string", config.String)
-				}
-
-				values = append(values, headerValue{name: name, value: s})
-
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-
-			*dst = append(*dst, values...)
-		default:
-			return config.Mismatch(m, "a string or a list of strings", config.String)
-		}
-
-		return nil
+	return config.MemberStrings(v, func(name, value string) {
+		*dst = append(*dst, headerValue{name: name, value: value})
 	})
 }
 

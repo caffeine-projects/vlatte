@@ -98,7 +98,7 @@ func TestWebHook_PrepareFailsTheMock(t *testing.T) {
 		{
 			name: "a multipart body and a Content-Type header in Go",
 			params: &webhook.Args{
-				URL: "http://localhost", HeaderTemplate: map[string]string{"content-type": "x"},
+				URL: "http://localhost", HeaderTemplate: map[string][]string{"content-type": {"x"}},
 				Multipart: mockhttp.MultipartMixed(mockhttp.NewPart()),
 			},
 			sentinel: webhook.ErrBadArg,
@@ -113,7 +113,7 @@ func TestWebHook_PrepareFailsTheMock(t *testing.T) {
 		},
 		{
 			name:     "a header twice in Go",
-			params:   &webhook.Args{URL: "http://localhost", Header: map[string]string{"x-a": "1", "X-A": "2"}},
+			params:   &webhook.Args{URL: "http://localhost", Header: http.Header{"x-a": {"1"}, "X-A": {"2"}}},
 			sentinel: webhook.ErrBadArg,
 			want:     "webhook: bad argument: headers X-A and x-a are one header: keep one of them",
 		},
@@ -183,8 +183,8 @@ func TestWebHook_TransformCanAddHeaders(t *testing.T) {
 	// Parameters without headers had nil header maps, and a Transform that added a header panicked.
 	rt := &sent{}
 	wh, err := webhook.New(webhook.WithTransport(rt), webhook.WithTransform(func(_ context.Context, _ vlatte.OnComplete, a *webhook.Args) error {
-		a.Header["X-A"] = "a"
-		a.HeaderTemplate["X-B"] = "{{ .b }}"
+		a.Header["X-A"] = []string{"a"}
+		a.HeaderTemplate["X-B"] = []string{"{{ .b }}"}
 
 		return nil
 	}))
@@ -249,8 +249,8 @@ func TestArgsBuilder_EachConfigHasItsOwnArgs(t *testing.T) {
 	b.URL("http://b.test").Header("X-A", "2")
 	second := b.Build("webhook")
 
-	require.Equal(t, &webhook.Args{URL: "http://a.test", Header: map[string]string{"X-A": "1"}}, first.Parameters)
-	require.Equal(t, &webhook.Args{URL: "http://b.test", Header: map[string]string{"X-A": "2"}}, second.Parameters)
+	require.Equal(t, &webhook.Args{URL: "http://a.test", Header: http.Header{"X-A": {"1"}}}, first.Parameters)
+	require.Equal(t, &webhook.Args{URL: "http://b.test", Header: http.Header{"X-A": {"1", "2"}}}, second.Parameters)
 }
 
 func TestWebHook_PrepareFailsAMockFile(t *testing.T) {
@@ -295,7 +295,7 @@ func TestWebHook_TransformChangesOneSend(t *testing.T) {
 		Reply(mockhttp.OK()))
 
 	wh, err := webhook.New(webhook.WithTransform(func(_ context.Context, _ vlatte.OnComplete, a *webhook.Args) error {
-		a.Header["X-Seen"] += "x"
+		a.Header["X-Seen"][0] += "x"
 		a.BodyTemplate = "{{ .Request.Method }} transformed"
 
 		return nil
@@ -306,7 +306,7 @@ func TestWebHook_TransformChangesOneSend(t *testing.T) {
 	m.MustStart()
 	defer m.Close()
 
-	args := &webhook.Args{URL: target.URL("/hooks"), Method: http.MethodPost, Header: map[string]string{"X-Seen": ""}}
+	args := &webhook.Args{URL: target.URL("/hooks"), Method: http.MethodPost, Header: http.Header{"X-Seen": {""}}}
 	m.MustMock(mockhttp.Getf("/x").
 		OnCompleteEvent(vlatte.EventConfig{Name: "webhook", Parameters: args}).
 		Reply(mockhttp.NoContent()))
@@ -330,6 +330,6 @@ func TestWebHook_TransformChangesOneSend(t *testing.T) {
 	wg.Wait()
 
 	require.True(t, target.AssertNumberOfCalls(t, 10))
-	require.Empty(t, args.Header["X-Seen"], "the mock's parameters stay as they were given")
+	require.Equal(t, []string{""}, args.Header["X-Seen"], "the mock's parameters stay as they were given")
 	require.Empty(t, args.BodyTemplate)
 }
