@@ -130,8 +130,9 @@ func TestPropStream_EachPauseFollowsAFlush(t *testing.T) {
 type failingWriter struct {
 	header    http.Header
 	writes    int
+	flushes   int
 	failWrite int // the write that fails, from 1; 0 never
-	failFlush bool
+	failFlush int // the flush that fails, from 1; 0 never
 }
 
 func (w *failingWriter) Header() http.Header { return w.header }
@@ -147,28 +148,35 @@ func (w *failingWriter) Write(p []byte) (int, error) {
 }
 
 func (w *failingWriter) FlushError() error {
-	if w.failFlush {
+	w.flushes++
+	if w.flushes == w.failFlush {
 		return errors.New("flush failed")
 	}
 
 	return nil
 }
 
-func TestRender_AFlushedGzippedBodyStopsAtTheFirstFailure(t *testing.T) {
-	// A streamed body, such as an event stream, gzipped, stops at the first write or flush that fails, and says why.
+func TestRender_AFlushedBodyStopsAtTheFirstFailure(t *testing.T) {
+	// A streamed body, such as an event stream, gzipped or not, stops at the first write or flush that fails, and
+	// says why. The headers are flushed first.
 	tests := []struct {
-		name string
-		w    *failingWriter
-		want string
+		name     string
+		encoding string
+		w        *failingWriter
+		want     string
 	}{
-		{"the gzip header", &failingWriter{failWrite: 1}, "broken pipe"},
-		{"a flush", &failingWriter{failFlush: true}, "flush failed"},
+		{"the headers", "", &failingWriter{failFlush: 1}, "flush failed"},
+		{"a write", "", &failingWriter{failWrite: 1}, "broken pipe"},
+		{"a flush", "", &failingWriter{failFlush: 2}, "flush failed"},
+		{"the gzipped headers", "gzip", &failingWriter{failFlush: 1}, "flush failed"},
+		{"the gzip header", "gzip", &failingWriter{failWrite: 1}, "broken pipe"},
+		{"a gzipped flush", "gzip", &failingWriter{failFlush: 2}, "flush failed"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.w.header = make(http.Header)
-			res := &Response{StatusCode: http.StatusOK, Header: make(http.Header), BodyCloser: io.NopCloser(strings.NewReader("data: a\n\n")), Encoding: "gzip", flush: true}
+			res := &Response{StatusCode: http.StatusOK, Header: make(http.Header), BodyCloser: io.NopCloser(strings.NewReader("data: a\n\n")), Encoding: tc.encoding, flush: true}
 			require.EqualError(t, res.Render(t.Context(), tc.w), tc.want)
 		})
 	}
@@ -187,11 +195,11 @@ func TestStream_ErrorsEndIt(t *testing.T) {
 	}{
 		{"a segment", "", &failingWriter{failWrite: 1}, "broken pipe"},
 		{"the rest", "", &failingWriter{failWrite: 3}, "broken pipe"},
-		{"a flush", "", &failingWriter{failFlush: true}, "flush failed"},
+		{"a flush", "", &failingWriter{failFlush: 1}, "flush failed"},
 		{"a gzipped segment", "gzip", &failingWriter{failWrite: 1}, "broken pipe"},
 		// gzip writes its header first, and holds the segment until it is flushed.
 		{"a gzipped segment, when it is flushed", "gzip", &failingWriter{failWrite: 2}, "broken pipe"},
-		{"a gzipped flush", "gzip", &failingWriter{failFlush: true}, "flush failed"},
+		{"a gzipped flush", "gzip", &failingWriter{failFlush: 1}, "flush failed"},
 	}
 
 	for _, tc := range tests {

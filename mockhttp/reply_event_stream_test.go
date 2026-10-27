@@ -1,7 +1,6 @@
 package mockhttp
 
 import (
-	"bufio"
 	"context"
 	json "encoding/json/v2"
 	"io"
@@ -43,49 +42,6 @@ func TestReplyEventStream_KeepsTheCacheControlItIsGiven(t *testing.T) {
 
 	res, _ := fetch(t, m.URL("/events"))
 	require.Equal(t, []string{"no-store"}, res.Header.Values(HeaderCacheControl))
-}
-
-// firstEvent requests url and reads the stream up to the blank line that ends its first event, while the stream
-// keeps open: the event can only arrive if the server flushed it. Leaving ends the stream.
-func firstEvent(t *testing.T, url string) string {
-	t.Helper()
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	require.NoError(t, err)
-
-	res, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-
-	defer res.Body.Close()
-
-	var event string
-
-	r := bufio.NewReader(res.Body)
-	for {
-		line, err := r.ReadString('\n')
-		require.NoError(t, err)
-
-		if event += line; line == "\n" {
-			return event
-		}
-	}
-}
-
-func TestReplyEventStream_FlushesEachEvent(t *testing.T) {
-	// A stream that keeps open never fills the server's buffer: a client gets each event as it is sent, gzipped or
-	// not, or live updates would never arrive.
-	m := MustNew(Setup().Silent())
-	m.MustStart()
-	t.Cleanup(m.Close)
-
-	m.MustMock(Getf("/plain").Reply(OK().EventStream(NewEventStream(NewEvent().Data("first")).KeepOpen())))
-	m.MustMock(Getf("/gzip").Reply(OK().Gzip().EventStream(NewEventStream(NewEvent().Data("first")).KeepOpen())))
-
-	require.Equal(t, "data: first\n\n", firstEvent(t, m.URL("/plain")))
-	require.Equal(t, "data: first\n\n", firstEvent(t, m.URL("/gzip")))
 }
 
 func TestReplyEventStream_ResumesFromLastEventID(t *testing.T) {

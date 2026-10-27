@@ -196,6 +196,14 @@ func (r *Response) render(ctx context.Context, w http.ResponseWriter, wait func(
 			return err
 		}
 	} else if r.BodyCloser != nil {
+		// A flushed body can wait before its first bytes, as an event stream with nothing to send yet does: the
+		// headers go first, so the client sees the response open.
+		if r.flush {
+			if err := flushTo(http.NewResponseController(w)); err != nil {
+				return err
+			}
+		}
+
 		if len(r.Encoding) > 0 && r.flush {
 			if err := r.encodeFlushing(w, r.BodyCloser); err != nil {
 				return err
