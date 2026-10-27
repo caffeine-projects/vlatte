@@ -216,7 +216,7 @@ func TestBuilder_ScenarioAdvancesPerServer(t *testing.T) {
 }
 
 func TestBuilder_AScenarioMockWithoutARequiredState(t *testing.T) {
-	// A mock that requires no state of its scenario matches in any state, as in WireMock, and its new state moves the
+	// A mock that requires no state of its scenario matches in any state, and its new state moves the
 	// scenario, one no mock started too: it required "", the state of no scenario, and its new state was dropped.
 	newServer := func(builders ...*Builder) *Server {
 		m := MustNew(Setup().Silent())

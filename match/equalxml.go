@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/xmldoc"
 )
 
 // EqualXML matches text, such as a request body, that is an XML document equal to expected. Documents are equal when
@@ -22,12 +23,12 @@ func EqualXML(expected string, opts ...EqualXMLOption) vlatte.Matcher {
 		opt.applyXML(&m.opts)
 	}
 
-	want, err := parseXML([]byte(expected), m.opts.namespaces)
+	want, err := xmldoc.Parse([]byte(expected), m.opts.namespaces == XMLNamespacesIgnored)
 	if err != nil {
 		panic(fmt.Errorf("match: eqx: %w", err))
 	}
 
-	m.want = want.root()
+	m.want = want.Root()
 
 	return m
 }
@@ -51,8 +52,8 @@ type ignoreChildOrder struct{}
 
 func (ignoreChildOrder) applyXML(o *xmlOptions) { o.ignoreChildOrder = true }
 
-// IgnoreChildOrder makes [EqualXML] match elements whose child elements and text pair up in any order, as WireMock's
-// ignoreOrderOfSameNode does: <a><b>1</b><b>2</b></a> matches <a><b>2</b><b>1</b></a>.
+// IgnoreChildOrder makes [EqualXML] match elements whose child elements and text pair up in any order:
+// <a><b>1</b><b>2</b></a> matches <a><b>2</b><b>1</b></a>.
 func IgnoreChildOrder() EqualXMLOption { return ignoreChildOrder{} }
 
 // XMLNamespaceMode is how [EqualXML] compares the names of elements and attributes.
@@ -87,6 +88,5 @@ type xmlNamespaces XMLNamespaceMode
 
 func (m xmlNamespaces) applyXML(o *xmlOptions) { o.namespaces = XMLNamespaceMode(m) }
 
-// XMLNamespaces sets how [EqualXML] compares the names of elements and attributes, as WireMock's namespaceAwareness
-// does.
+// XMLNamespaces sets how [EqualXML] compares the names of elements and attributes.
 func XMLNamespaces(mode XMLNamespaceMode) EqualXMLOption { return xmlNamespaces(mode) }

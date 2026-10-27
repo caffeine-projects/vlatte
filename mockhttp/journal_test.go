@@ -257,7 +257,7 @@ func TestJournal_UnmatchedEntriesNameTheClosestMocks(t *testing.T) {
 }
 
 func TestJournal_VerifiesWithRequestPatterns(t *testing.T) {
-	// A test verifies with the request part of a mock, as WireMock's verify does, with all a mock can match: query
+	// A test verifies with the request part of a mock, with all a mock can match: query
 	// parameters, form fields, files of a multipart form, the parsed body, a predicate of the request.
 	m := journaledServer(t, Setup())
 

@@ -55,7 +55,7 @@ func TestDateTime_ComparesInstants(t *testing.T) {
 }
 
 func TestDateTime_LocalAndZoned(t *testing.T) {
-	// As WireMock: a value without a zone is read in the system's zone when the expected one has a zone, and a local
+	// A value without a zone is read in the system's zone when the expected one has a zone, and a local
 	// expected date and time compares wall clocks, whatever the value's zone. The system's zone here isn't UTC, as it
 	// is on CI's machines, where reading the value as UTC would pass too.
 	system := time.Local
@@ -107,7 +107,7 @@ func TestDateTime_Truncations(t *testing.T) {
 }
 
 func TestDateTime_TruncateActualMatchesAPeriod(t *testing.T) {
-	// "Is in March 2020", WireMock's example.
+	// "Is in March 2020".
 	march := EqualDateTime(time.Date(2020, time.March, 1, 0, 0, 0, 0, time.UTC), TruncateActual(FirstDayOfMonth))
 	require.True(t, dateMatches(t, march, "2020-03-31T23:59:59Z"))
 	require.True(t, dateMatches(t, march, "2020-03-01T00:00:00Z"))

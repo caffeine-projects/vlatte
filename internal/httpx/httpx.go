@@ -4,6 +4,7 @@ package httpx
 import (
 	"context"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,24 @@ func Wait(ctx context.Context, d time.Duration) error {
 		return ctx.Err()
 	case <-t.C:
 		return nil
+	}
+}
+
+// NewWebhookTransport returns the transport a server gives webhooks when its config has none. It is the server's:
+// Close closes its idle connections. It has the limits of http.DefaultTransport, built here rather than copied, as a
+// program may have replaced http.DefaultTransport.
+func NewWebhookTransport() *http.Transport {
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
 	}
 }
 

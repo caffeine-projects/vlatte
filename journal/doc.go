@@ -1,5 +1,5 @@
 // Package journal keeps the requests a mock server serves, of any protocol, whatever their outcome, so a test can
-// verify after the fact what the code under test sent, as WireMock's verify does: a changelog of JSON lines in segment
+// verify after the fact what the code under test sent: a changelog of JSON lines in segment
 // files, with an index in memory that narrows queries. Queries match with the matchers of mocks, such as those of
 // package [github.com/caffeine-projects/vlatte/match]. A server embeds a [Verifier], next to its [vlatte.Base], to
 // verify its requests.

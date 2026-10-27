@@ -3,7 +3,9 @@ package mockgrpc
 import (
 	"context"
 	json "encoding/json/v2"
+	"net/http"
 
+	"github.com/rs/zerolog"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/caffeine-projects/vlatte"
@@ -40,10 +42,14 @@ type TemplateRequest struct {
 	Message any
 }
 
-// Kit is the vlatte.Kit of gRPC mocks: the server's template engine, and the template data of the call.
+// Kit is the vlatte.Kit of gRPC mocks: the server's template engine, logger and webhook transport, the template data
+// of the call, and the directory of the mock file of the event it serves.
 type Kit struct {
-	engine vlatte.TemplateEngine
-	data   *TemplateData
+	engine    vlatte.TemplateEngine
+	data      *TemplateData
+	logger    *zerolog.Logger
+	transport http.RoundTripper
+	dir       string
 }
 
 // TemplateEngine implements vlatte.Kit.
@@ -54,6 +60,22 @@ func (k *Kit) TemplateEngine() vlatte.TemplateEngine {
 // Data implements vlatte.Kit: the call's *TemplateData.
 func (k *Kit) Data() any {
 	return k.data
+}
+
+// Logger implements vlatte.Kit: the server's logger.
+func (k *Kit) Logger() *zerolog.Logger {
+	return k.logger
+}
+
+// Transport implements vlatte.Kit: a transport the server makes and closes with it.
+func (k *Kit) Transport() http.RoundTripper {
+	return k.transport
+}
+
+// Dir implements vlatte.Kit: the directory of the mock file that defines the event, or "" for the working directory,
+// as for events defined in Go and global events.
+func (k *Kit) Dir() string {
+	return k.dir
 }
 
 // templateEngine returns the engine of the server's templates.

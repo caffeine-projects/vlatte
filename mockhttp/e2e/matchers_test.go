@@ -409,8 +409,8 @@ func TestMatchers_NoReply_ShouldReturn200ByDefault(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 }
 
-func TestMatchers_WireMockParity(t *testing.T) {
-	// The matchers WireMock has and vlatte lacked, each from a mock file, on a server with a custom matcher. A second
+func TestMatchers_FromMockFiles(t *testing.T) {
+	// Matchers with options, each from a mock file, on a server with a custom matcher. A second
 	// server holds each mock as the admin API's store keeps it, EncodeMock's description: every request must be
 	// answered the same by both, so no matcher is lost on the way.
 	hasHeader := func(_ *matchbuild.Registry, args []any) (vlatte.Matcher, error) {

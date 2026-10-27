@@ -3,6 +3,7 @@ package mockgrpc
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -21,6 +22,11 @@ import (
 
 // _defaultShutdownTimeout is how long Close waits for the calls in flight, unless Config.ShutdownTimeout says.
 const _defaultShutdownTimeout = 5 * time.Second
+
+// errTemplateEnvWithEngine says a server has both a TemplateEngine and grpc.template.env, which configures the engine
+// the server makes without one.
+var errTemplateEnvWithEngine = errors.New("config: grpc.template.env configures the default template engine, and the " +
+	"server has a TemplateEngine: allow the variables on it with vlatte.WithEnv")
 
 // Config configures a Server. As an Option, it sets every field of the server's configuration, its zero values
 // included: [Setup] sets only what its methods set, so its options compose.
@@ -94,6 +100,11 @@ type Config struct {
 
 	// TemplateEngine compiles the templates of replies and events. Nil uses a vlatte.GoTemplateEngine.
 	TemplateEngine vlatte.TemplateEngine
+
+	// TemplateEnv names the environment variables templates may read with env, from the setting grpc.template.env.
+	// It configures the vlatte.GoTemplateEngine the server makes without a TemplateEngine, so setting both is an
+	// error: allow them on that engine with vlatte.WithEnv.
+	TemplateEnv []string
 
 	// Parameters are the parameters templates read. Nil keeps them in memory.
 	Parameters vlatte.KV
@@ -339,6 +350,12 @@ func (cb *ConfigBuilder) GlobalEvents(events *vlatte.Events) *ConfigBuilder {
 // vlatte.GoTemplateEngine.
 func (cb *ConfigBuilder) TemplateEngine(e vlatte.TemplateEngine) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.TemplateEngine = e })
+}
+
+// TemplateEnv allows the templates of the server's default engine to read the environment variables names with env.
+// See Config.TemplateEnv.
+func (cb *ConfigBuilder) TemplateEnv(names ...string) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.TemplateEnv = names })
 }
 
 // Parameters sets the parameters templates read: {{ .Parameters.Get "key" }}.
