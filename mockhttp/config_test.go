@@ -334,6 +334,31 @@ func TestConfig_ApplyCopiesEveryField(t *testing.T) {
 	}
 }
 
+func TestNew_ALaterSetupChangesOnlyWhatItSets(t *testing.T) {
+	// Options compose: a second Setup() that only silences the server must keep the name and the listener of the
+	// first, or the mocks that name the listener fail to build.
+	l := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
+
+	m := MustNew(
+		Setup().Name("api").OnCompleteListener("hook", l),
+		Setup().Silent().ConfigSources(),
+	)
+
+	require.Equal(t, "api", m.Name())
+	require.Equal(t, vlatte.LogLevelDisabled, m.Config().LogLevel)
+
+	_, err := m.Mock(Getf("/x").OnCompleteEvent(vlatte.EventConfig{Name: "hook"}).Reply(NoContent()))
+	require.NoError(t, err)
+}
+
+func TestNew_ASetupAfterAConfigKeepsWhatTheConfigSet(t *testing.T) {
+	// A Setup() sets no default of its own, such as UseHTTP2: one applied after a Config keeps what the Config set.
+	m := MustNew(&Config{Name: "api", UseHTTP2: false}, Setup().Silent().ConfigSources())
+
+	require.Equal(t, "api", m.Name())
+	require.False(t, m.Config().UseHTTP2)
+}
+
 func TestGlobalEventsAreApplied(t *testing.T) {
 	var fired atomic.Int32
 	setup := Setup().OnCompleteListener("count", vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error {
@@ -769,7 +794,9 @@ func TestConfigBuilder_LogOutput(t *testing.T) {
 			out := &lockedBuffer{}
 
 			setup := Setup().LogOutput(out).LogLevel(vlatte.LogLevelInfo).LogPretty(false)
-			setup.conf.Debug = debug
+			if debug {
+				setup.UseDescriptiveLogger()
+			}
 
 			m := MustNew(setup)
 			m.MustStart()

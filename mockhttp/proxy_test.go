@@ -2517,3 +2517,20 @@ func TestForwardProxy_SendsInterceptedRequestsOnWithItsSettings(t *testing.T) {
 		require.Equal(t, "host /x", body)
 	})
 }
+
+func TestProxyConfig_AConfigWithoutTimeoutKeepsTheDefault(t *testing.T) {
+	// A config that sets one field must not turn the timeout to 0, which waits for the host forever.
+	m := MustNew(Setup().Silent().ConfigSources().Proxy(&ProxyConfig{SSLVerify: true}))
+
+	require.Equal(t, &ProxyConfig{Timeout: 30 * time.Second, SSLVerify: true}, m.Config().Proxy)
+}
+
+func TestProxyConfig_ConfigsCompose(t *testing.T) {
+	// Each config given to Setup().Proxy sets what it has, and keeps what the ones before it set.
+	m := MustNew(Setup().Silent().ConfigSources().Proxy(
+		&ProxyConfig{Via: "http://127.0.0.1:1", Timeout: time.Second},
+		&ProxyConfig{SSLVerify: true},
+	))
+
+	require.Equal(t, &ProxyConfig{Via: "http://127.0.0.1:1", Timeout: time.Second, SSLVerify: true}, m.Config().Proxy)
+}
