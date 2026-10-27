@@ -43,7 +43,7 @@ func (m *Matcher) Match(_ vlatte.MatcherArg) (bool, error) {
 
 // Claim implements vlatte.Claimer. In one step, it checks the scenario is still in the state the mock requires and
 // moves it to the mock's new state, starting it when no mock did yet. It reports false, moving nothing, when another
-// request moved the scenario since the mock matched.
+// request moved the scenario since the mock matched. A mock that requires no state always takes it.
 func (m *Matcher) Claim() bool {
 	return m.store.claim(m.name, m.required, m.next)
 }

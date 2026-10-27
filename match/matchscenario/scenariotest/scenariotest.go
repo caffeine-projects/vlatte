@@ -153,6 +153,35 @@ func Run(t *testing.T, newServer func(t *testing.T) Server) {
 		require.Equal(t, map[string]int{"pay": 1, "refund": 1, "done": calls - 2}, got)
 	})
 
+	t.Run("concurrent requests share a mock that requires no state", func(t *testing.T) {
+		// Only a mock that requires a state takes a turn. One that requires none matches in every state, so every
+		// request gets it, as it moves the scenario again and again.
+		srv := newServer(t)
+		srv.Mock(t, Mock{ID: "any", Scenario: "checkout", NewState: "paid"})
+
+		const calls = 30
+
+		var mu sync.Mutex
+		got := make(map[string]int)
+
+		t.Run("calls", func(t *testing.T) {
+			for i := range calls {
+				t.Run(strconv.Itoa(i), func(t *testing.T) {
+					t.Parallel()
+
+					id := srv.Call(t)
+
+					mu.Lock()
+					got[id]++
+					mu.Unlock()
+				})
+			}
+		})
+
+		require.Equal(t, map[string]int{"any": calls}, got)
+		require.Equal(t, map[string]string{"checkout": "paid"}, srv.Store().Scenarios())
+	})
+
 	t.Run("servers keep their own scenarios", func(t *testing.T) {
 		a, b := newServer(t), newServer(t)
 		for _, srv := range []Server{a, b} {
