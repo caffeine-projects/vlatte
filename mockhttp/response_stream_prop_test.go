@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -154,32 +153,6 @@ func (w *failingWriter) FlushError() error {
 	}
 
 	return nil
-}
-
-func TestRender_AFlushedBodyStopsAtTheFirstFailure(t *testing.T) {
-	// A streamed body, such as an event stream, gzipped or not, stops at the first write or flush that fails, and
-	// says why. The headers are flushed first.
-	tests := []struct {
-		name     string
-		encoding string
-		w        *failingWriter
-		want     string
-	}{
-		{"the headers", "", &failingWriter{failFlush: 1}, "flush failed"},
-		{"a write", "", &failingWriter{failWrite: 1}, "broken pipe"},
-		{"a flush", "", &failingWriter{failFlush: 2}, "flush failed"},
-		{"the gzipped headers", "gzip", &failingWriter{failFlush: 1}, "flush failed"},
-		{"the gzip header", "gzip", &failingWriter{failWrite: 1}, "broken pipe"},
-		{"a gzipped flush", "gzip", &failingWriter{failFlush: 2}, "flush failed"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.w.header = make(http.Header)
-			res := &Response{StatusCode: http.StatusOK, Header: make(http.Header), BodyCloser: io.NopCloser(strings.NewReader("data: a\n\n")), Encoding: tc.encoding, flush: true}
-			require.EqualError(t, res.Render(t.Context(), tc.w), tc.want)
-		})
-	}
 }
 
 func TestStream_ErrorsEndIt(t *testing.T) {

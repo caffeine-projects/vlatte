@@ -205,7 +205,7 @@ func (r *Response) render(ctx context.Context, w http.ResponseWriter, wait func(
 		}
 
 		if len(r.Encoding) > 0 && r.flush {
-			if err := r.encodeFlushing(w, r.BodyCloser); err != nil {
+			if err := r.encodeFlushing(ctx, w, r.BodyCloser); err != nil {
 				return err
 			}
 		} else if len(r.Encoding) > 0 {
@@ -359,13 +359,19 @@ func (r *Response) stream(ctx context.Context, w http.ResponseWriter, wait func(
 
 // encodeFlushing writes reader to w gzipped, the one encoding there is, and flushes both after each read, so a
 // streamed body, such as an event stream, reaches the client as it comes rather than once the encoder's buffer fills.
-func (r *Response) encodeFlushing(w http.ResponseWriter, reader io.Reader) error {
+func (r *Response) encodeFlushing(ctx context.Context, w http.ResponseWriter, reader io.Reader) error {
 	gz := gzipWriter(w)
 	defer gzipper.Put(gz)
 
 	rc := http.NewResponseController(w)
 	if _, err := io.Copy(gzipFlushingWriter{gz: gz, rc: rc}, reader); err != nil {
 		return err
+	}
+
+	// A client that left ended the body, as it ends a stream that keeps open: the end of the gzip stream has no one
+	// to go to.
+	if ctx.Err() != nil {
+		return nil
 	}
 
 	return cmp.Or(gz.Close(), flushTo(rc))
