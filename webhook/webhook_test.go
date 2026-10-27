@@ -727,6 +727,12 @@ func TestWebHook_TemplateErrors(t *testing.T) {
 
 	err = wh.Run(t.Context(), onComplete{params: map[string]any{"url_template": "http://localhost/{{ .Nope"}})
 	require.ErrorIs(t, err, webhook.ErrRenderingTemplate)
+
+	// Each value of a header renders: a broken one after a good one fails the send.
+	err = wh.Run(t.Context(), onComplete{params: map[string]any{
+		"url": "http://localhost", "header_template": map[string]any{"X-A": []any{"ok", "{{ .Nope"}},
+	}})
+	require.ErrorIs(t, err, webhook.ErrRenderingTemplate)
 }
 
 func TestWebHook_KitWithoutAnEngine(t *testing.T) {
