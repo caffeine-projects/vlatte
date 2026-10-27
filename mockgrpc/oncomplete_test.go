@@ -15,15 +15,17 @@ import (
 
 func TestOnComplete_GivesListenersTheCallAndTheServersTools(t *testing.T) {
 	// A listener, such as a webhook, renders its templates with the server's engine and the call's data, opens its
-	// files from the mock file's directory, and logs with the server's logger.
+	// files from the mock file's directory, and logs with the server's logger: the event and its Kit both give them.
 	type seen struct {
-		dir      string
-		logger   *zerolog.Logger
-		engine   vlatte.TemplateEngine
-		message  any
-		server   *Server
-		method   protoreflect.FullName
-		mockName string
+		dir       string
+		logger    *zerolog.Logger
+		kitDir    string
+		kitLogger *zerolog.Logger
+		engine    vlatte.TemplateEngine
+		message   any
+		server    *Server
+		method    protoreflect.FullName
+		mockName  string
 	}
 
 	got := make(chan seen, 1)
@@ -32,13 +34,15 @@ func TestOnComplete_GivesListenersTheCallAndTheServersTools(t *testing.T) {
 		func(_ context.Context, e vlatte.OnComplete) error {
 			oc := e.(*OnComplete)
 			got <- seen{
-				dir:      oc.Dir(),
-				logger:   oc.Logger(),
-				engine:   oc.Kit().TemplateEngine(),
-				message:  oc.Kit().Data().(*TemplateData).Request.Message,
-				server:   oc.Call().Server(),
-				method:   oc.Call().Descriptor().FullName(),
-				mockName: oc.Mock().(*Mock).Name(),
+				dir:       oc.Dir(),
+				logger:    oc.Logger(),
+				kitDir:    oc.Kit().Dir(),
+				kitLogger: oc.Kit().Logger(),
+				engine:    oc.Kit().TemplateEngine(),
+				message:   oc.Kit().Data().(*TemplateData).Request.Message,
+				server:    oc.Call().Server(),
+				method:    oc.Call().Descriptor().FullName(),
+				mockName:  oc.Mock().(*Mock).Name(),
 			}
 
 			return nil
@@ -65,12 +69,50 @@ response: {message: {message: hello}}
 	require.NoError(t, err)
 
 	require.Equal(t, seen{
-		dir:      filepath.Dir(path),
-		logger:   &logger,
-		engine:   engine,
-		message:  map[string]any{"message": "hi"},
-		server:   m,
-		method:   "protobuf.TestService.Greetings",
-		mockName: "greet",
+		dir:       filepath.Dir(path),
+		logger:    &logger,
+		kitDir:    filepath.Dir(path),
+		kitLogger: &logger,
+		engine:    engine,
+		message:   map[string]any{"message": "hi"},
+		server:    m,
+		method:    "protobuf.TestService.Greetings",
+		mockName:  "greet",
 	}, <-got)
+}
+
+func TestOnComplete_AnEventAfterTheResponseDoesntHoldTheCall(t *testing.T) {
+	// The call waited for every event of its mock. One set to run after the response doesn't hold it: the client has
+	// its answer while the event still runs.
+	arrived, release := make(chan struct{}), make(chan struct{})
+	ended := make(chan error, 1)
+
+	listeners := vlatte.NewListener()
+	require.NoError(t, listeners.OnComplete.Register("late", vlatte.EventFunc[vlatte.OnComplete](
+		func(ctx context.Context, _ vlatte.OnComplete) error {
+			close(arrived)
+			<-release
+			ended <- ctx.Err()
+
+			return nil
+		})))
+
+	m := MustNew(Setup().Silent().EventListeners(listeners))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	path := writeFile(t, t.TempDir(), "greet.yaml", `
+on_complete: [{name: late, after_response: true}]
+request: {method: Greetings}
+response: {message: {message: hello}}
+`)
+	m.MustMock(FromFile(path))
+
+	res, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.NoError(t, err)
+	require.Equal(t, "hello", res.GetMessage())
+
+	<-arrived
+	close(release)
+	require.NoError(t, <-ended, "the event ran on once the call ended")
 }

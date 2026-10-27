@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,15 +24,16 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
-	"github.com/caffeine-projects/vlatte/internal/mfeat"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid/recovery"
 )
 
-var _ vlatte.Flavor[*Mock, *Server] = (*Server)(nil)
+var _ vlatte.Server[*Mock, *Server] = (*Server)(nil)
 
 var errAdminStoreWithoutAdmin = errors.New("server: AdminStore needs an admin API: pass ConfigBuilder.Admin")
 
@@ -56,7 +56,7 @@ type Server struct {
 	config             *Config
 	server             Backend
 	storage            vlatte.Store[*Mock]
-	scenarioStore      *mfeat.ScenarioStore
+	scenarioStore      *matchscenario.Store
 	requestBodyParsers []RequestBodyParser
 	params             vlatte.KV
 	loaders            []Loader
@@ -272,7 +272,7 @@ func New(config ...Option) (*Server, error) {
 	app.Base = vlatte.NewBase(app, repository)
 	app.Verifier = journal.NewVerifier[*Mock, *Server](j, app)
 	app.storage = repository
-	app.scenarioStore = mfeat.NewScenarioStore()
+	app.scenarioStore = matchscenario.New()
 	app.params = params
 	app.loaders = loaders
 	app.files = files
@@ -287,7 +287,7 @@ func New(config ...Option) (*Server, error) {
 	}
 	app.requestBodyParsers = parsers
 	app.events = eventRunner
-	app.webhooks = newWebhookTransport()
+	app.webhooks = httpx.NewWebhookTransport()
 
 	// The admin API changes mocks through a store of its own when they persist: the server's other mocks, of mock
 	// files and code, never reach the persistent store.
@@ -384,7 +384,7 @@ func prepareGlobalEvents(conf *Config) (*vlatte.Events, error) {
 // It stops at the first recipe that fails and returns its error.
 func (app *Server) Prep(ctx context.Context, recipes ...Recipe) error {
 	for i, recipe := range recipes {
-		if err := recipe.Prep(ctx, &vlatte.RecipeInput[*Mock, *Server]{Flavor: app}); err != nil {
+		if err := recipe.Prep(ctx, &vlatte.RecipeInput[*Mock, *Server]{Server: app}); err != nil {
 			return fmt.Errorf("server: error applying recipe at index %d with type %T\n%w", i, recipe, err)
 		}
 	}
@@ -502,12 +502,12 @@ func (app *Server) MustReload() {
 	}
 }
 
-// Close closes the mock server. It closes the admin API first, which waits for the operations it serves. It cancels
-// the on_complete events still running, such as a webhook waiting for its delay or its target, so the requests
-// waiting for them end, and waits for those requests. It stops the recording, and waits until it wrote what it took,
-// and closes the forward proxy's open tunnels. It closes the idle connections of the transports it made, such as the
-// one of webhooks. Last, it closes the journal, and removes a temporary one: verify the requests before Close, as
-// t.Cleanup(m.Close) leaves a test to. A closed server doesn't start again.
+// Close closes the mock server. It closes the admin API first, which waits for the operations it serves. It cancels the
+// on_complete events still running, such as a webhook waiting for its delay or its target, so the requests waiting for
+// them end, and waits for those requests and for the events that run after the response. It stops the recording, and
+// waits until it wrote what it took, and closes the forward proxy's open tunnels. It closes the idle connections of the
+// transports it made, such as the one of webhooks. Last, it closes the journal, and removes a temporary one: verify the
+// requests before Close, as t.Cleanup(m.Close) leaves a test to. A closed server doesn't start again.
 func (app *Server) Close() {
 	app.closed.Store(true)
 
@@ -672,24 +672,6 @@ func (app *Server) webhookTransport() http.RoundTripper {
 	}
 
 	return app.webhooks
-}
-
-// newWebhookTransport returns the transport a server gives webhooks when its config has none. It is the server's:
-// Close closes its idle connections. It has the limits of http.DefaultTransport, built here rather than copied, as a
-// program may have replaced http.DefaultTransport.
-func newWebhookTransport() *http.Transport {
-	return &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
 }
 
 // start starts the server once with listen, the backend's Listen or ListenTLS. The backend listens first, so loaders

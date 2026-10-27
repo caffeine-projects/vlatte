@@ -22,13 +22,15 @@ import (
 // into the *Def types below; mockDoc.build checks them, then applies them to a Builder.
 
 type (
-	mockField   = config.Field[mockDef]
-	replyField  = config.Field[replyDef]
-	statusField = config.Field[statusDef]
-	bidiField   = config.Field[bidiDef]
-	proxyField  = config.Field[proxyDef]
-	ruleField   = config.Field[ruleDef]
-	eventField  = config.Field[vlatte.EventConfig]
+	mockField     = config.Field[mockDef]
+	replyField    = config.Field[replyDef]
+	statusField   = config.Field[statusDef]
+	sequenceField = config.Field[sequenceDef]
+	randomField   = config.Field[randomDef]
+	bidiField     = config.Field[bidiDef]
+	proxyField    = config.Field[proxyDef]
+	ruleField     = config.Field[ruleDef]
+	eventField    = config.Field[vlatte.EventConfig]
 )
 
 // mockDef is a decoded mock file: what its keys set, before it is applied to a Builder.
@@ -45,6 +47,8 @@ type mockDef struct {
 	events      []vlatte.EventConfig
 	request     requestDef
 	reply       *replyDef
+	sequence    *sequenceDef
+	random      *randomDef
 	bidi        *bidiDef
 	proxy       *proxyDef
 	dir         string // where relative files open from: the mock file's directory; "" is the working directory
@@ -59,13 +63,15 @@ type scenarioDef struct {
 
 // requestDef holds the request matchers, as Builder calls, and the keys that set them.
 type requestDef struct {
-	keys    []string
-	method  string
-	header  []func(*Builder)
-	fields  []func(*Builder)
-	json    *string // message or messages, as JSON text
-	body    vlatte.Matcher
-	message []string // the keys of json that were set: message, messages
+	matchers *matchbuild.Registry // builds the matcher lists: the server's
+	keys     []string
+	method   string
+	header   []func(*Builder)
+	fields   []func(*Builder)
+	json     *string // message or messages, as JSON text
+	body     vlatte.Matcher
+	custom   []vlatte.Matcher
+	message  []string // the keys of json that were set: message, messages
 }
 
 // replyDef is a decoded response: of a mock, or of a rule of a bidi one.
@@ -87,8 +93,24 @@ type statusDef struct {
 	details []string // JSON texts of Any messages
 }
 
+type sequenceDef struct {
+	dir        string // where the body_file of its responses open from
+	replies    []*replyDef
+	afterEnded *replyDef
+	set        bool // responses was set
+}
+
+type randomDef struct {
+	dir     string // where the body_file of its responses open from
+	replies []*replyDef
+	seed    int64
+	seeded  bool
+	set     bool // responses was set
+}
+
 type bidiDef struct {
-	dir       string // where the body_file of its responses open from
+	matchers  *matchbuild.Registry // builds the matcher lists of its rules
+	dir       string               // where the body_file of its responses open from
 	header    []headerValue
 	trailer   []headerValue
 	rules     []ruleDef
@@ -97,6 +119,7 @@ type bidiDef struct {
 }
 
 type ruleDef struct {
+	matchers *matchbuild.Registry
 	dir      string
 	when     vlatte.Matcher
 	response *replyDef
@@ -161,7 +184,7 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error { d.scenario.set, d.scenario.newState = true, v.Str; return nil },
 	},
 	mockField{
-		Key: "on_complete", Kind: config.Any, Usage: "Events to run once the mock replied: a list of {name, parameters}.",
+		Key: "on_complete", Kind: config.Any, Usage: "Events to run once the mock replied: a list of {name, parameters, after_response}.",
 		Set: func(d *mockDef, v config.Value) error { return setEvents(&d.events, d.dir, v) },
 	},
 	mockField{
@@ -178,7 +201,7 @@ var _mockSchema = config.NewSchema(
 		Key: "request.header", Kind: config.Any, Usage: "Metadata to match, by key: text or a matcher list each.",
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "header")
-			return matchEach(v, &d.request.header, func(b *Builder, key string, m vlatte.Matcher) { b.Header(key, m) })
+			return matchEach(d.request.matchers, v, &d.request.header, func(b *Builder, key string, m vlatte.Matcher) { b.Header(key, m) })
 		},
 	},
 	mockField{
@@ -186,7 +209,7 @@ var _mockSchema = config.NewSchema(
 		Usage: "Fields of the request to match, by JSON path, such as user_id or items[0].key: text or a matcher list each.",
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "fields")
-			return matchEach(v, &d.request.fields, func(b *Builder, path string, m vlatte.Matcher) { b.Field(path, m) })
+			return matchEach(d.request.matchers, v, &d.request.fields, func(b *Builder, path string, m vlatte.Matcher) { b.Field(path, m) })
 		},
 	},
 	mockField{
@@ -222,10 +245,33 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error {
 			d.request.keys = append(d.request.keys, "body")
 
-			m, err := matcherOf(v)
+			m, err := matcherOf(d.request.matchers, v)
 			d.request.body = m
 
 			return err
+		},
+	},
+	mockField{
+		Key: "request.custom", Kind: config.Any,
+		Usage: "Matchers of the whole call, such as custom ones of the server: a list of matcher lists, or names.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.request.keys = append(d.request.keys, "custom")
+			return config.Items(v, func(item config.Value) error {
+				switch item.Any.(type) {
+				case string, []any:
+				default:
+					return config.Mismatch(item, "a matcher list, such as [is-admin], or a matcher's name", config.String)
+				}
+
+				m, err := d.request.matchers.BuildMatcher(item.Any)
+				if err != nil {
+					return err
+				}
+
+				d.request.custom = append(d.request.custom, m)
+
+				return nil
+			})
 		},
 	},
 	mockField{
@@ -236,9 +282,23 @@ var _mockSchema = config.NewSchema(
 		},
 	},
 	mockField{
+		Key: "response_sequence", Kind: config.Any, Usage: "Answers served in order, one per call: responses, and after_ended once they run out.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.sequence = &sequenceDef{dir: d.dir}
+			return _sequenceSchema.Decode(d.sequence, v)
+		},
+	},
+	mockField{
+		Key: "response_random", Kind: config.Any, Usage: "Answers served at random, one per call: responses, and a seed to repeat the order.",
+		Set: func(d *mockDef, v config.Value) error {
+			d.random = &randomDef{dir: d.dir}
+			return _randomSchema.Decode(d.random, v)
+		},
+	},
+	mockField{
 		Key: "bidi", Kind: config.Any, Usage: "The answer of a bidi streaming method, message by message: header, trailer, on, otherwise and on_end.",
 		Set: func(d *mockDef, v config.Value) error {
-			d.bidi = &bidiDef{dir: d.dir}
+			d.bidi = &bidiDef{matchers: d.request.matchers, dir: d.dir}
 			return _bidiSchema.Decode(d.bidi, v)
 		},
 	},
@@ -346,6 +406,37 @@ var _statusSchema = config.NewSchema(
 	},
 )
 
+var _sequenceSchema = config.NewSchema(
+	sequenceField{
+		Key: "responses", Kind: config.Any, Usage: "The answers, served in order, one per call: a list of responses.",
+		Set: func(s *sequenceDef, v config.Value) error {
+			s.set = true
+			return decodeReplies(&s.replies, s.dir, v)
+		},
+	},
+	sequenceField{
+		Key: "after_ended", Kind: config.Any, Usage: "The answer of the calls that come once the responses ran out.",
+		Set: func(s *sequenceDef, v config.Value) error {
+			s.afterEnded = &replyDef{dir: s.dir}
+			return _replySchema.Decode(s.afterEnded, v)
+		},
+	},
+)
+
+var _randomSchema = config.NewSchema(
+	randomField{
+		Key: "responses", Kind: config.Any, Usage: "The answers, one picked at random for each call: a list of responses.",
+		Set: func(r *randomDef, v config.Value) error {
+			r.set = true
+			return decodeReplies(&r.replies, r.dir, v)
+		},
+	},
+	randomField{
+		Key: "seed", Kind: config.Int, Usage: "Seed of the random order, to repeat it.",
+		Set: func(r *randomDef, v config.Value) error { r.seed, r.seeded = v.Int, true; return nil },
+	},
+)
+
 var _bidiSchema = config.NewSchema(
 	bidiField{
 		Key: "header", Kind: config.Any, Usage: "Metadata the answer starts with, by key.",
@@ -359,7 +450,7 @@ var _bidiSchema = config.NewSchema(
 		Key: "on", Kind: config.Any, Usage: "Rules, in order: the first whose when matches a message answers it with its response.",
 		Set: func(b *bidiDef, v config.Value) error {
 			return config.Items(v, func(item config.Value) error {
-				r := ruleDef{dir: b.dir}
+				r := ruleDef{matchers: b.matchers, dir: b.dir}
 				if err := _ruleSchema.Decode(&r, item); err != nil {
 					return err
 				}
@@ -394,7 +485,7 @@ var _ruleSchema = config.NewSchema(
 	ruleField{
 		Key: "when", Kind: config.Any, Usage: "Matcher list of the message as JSON text, such as [field, message, [equal, hi]].",
 		Set: func(r *ruleDef, v config.Value) error {
-			m, err := matcherOf(v)
+			m, err := matcherOf(r.matchers, v)
 			r.when = m
 
 			return err
@@ -433,10 +524,15 @@ var _eventSchema = config.NewSchema(
 		Key: "parameters", Kind: config.Any, Usage: "Parameters of the listener.",
 		Set: func(e *vlatte.EventConfig, v config.Value) error { e.Parameters = v.Any; return nil },
 	},
+	eventField{
+		Key: "after_response", Kind: config.Bool, Usage: "Send the response without waiting for the event, which runs on.",
+		Set: func(e *vlatte.EventConfig, v config.Value) error { e.AfterResponse = v.Bool; return nil },
+	},
 )
 
-func newMockDef() mockDef {
-	return mockDef{enabled: true}
+// newMockDef returns an empty mockDef whose matcher lists matchers builds.
+func newMockDef(matchers *matchbuild.Registry) mockDef {
+	return mockDef{enabled: true, request: requestDef{matchers: matchers}}
 }
 
 // check reports the problems between keys of a decoded document that came from origin. found are the problems
@@ -467,11 +563,30 @@ func (d *mockDef) check(origin string, found []config.Problem) []config.Problem 
 		})
 	}
 
-	if len(answers) == 0 && !failed("response") && !failed("bidi") && !failed("proxy") {
+	if len(answers) == 0 && !slices.ContainsFunc(_answerKeys, failed) {
 		problems = append(problems, config.Problem{
 			Code: config.CodeMissingValue, Origin: origin, Key: "response",
-			Message: "the mock has no response", Hint: "set response, bidi for a bidi streaming method, or proxy",
+			Message: "the mock has no response",
+			Hint:    "set response, response_sequence, response_random, bidi for a bidi streaming method, or proxy",
 		})
+	}
+
+	var noResponses []string // the answers of a list of responses that list none
+	if d.sequence != nil && !d.sequence.set {
+		noResponses = append(noResponses, "response_sequence")
+	}
+
+	if d.random != nil && !d.random.set {
+		noResponses = append(noResponses, "response_random")
+	}
+
+	for _, key := range noResponses {
+		if !failed(key + ".responses") {
+			problems = append(problems, config.Problem{
+				Code: config.CodeMissingValue, Origin: origin, Key: key + ".responses",
+				Message: key + ".responses is required", Hint: "list the answers, one response each",
+			})
+		}
 	}
 
 	for key, r := range d.replies() {
@@ -488,19 +603,16 @@ func (d *mockDef) check(origin string, found []config.Problem) []config.Problem 
 	return problems
 }
 
-// answers returns the keys of the answers the document sets, of response, bidi and proxy, in that order: a mock has one.
+// _answerKeys are the ways a mock file answers, in the order conflicts are reported: a mock has one.
+var _answerKeys = []string{"response", "response_sequence", "response_random", "bidi", "proxy"}
+
+// answers returns the keys of the answers the document sets, in the order of _answerKeys.
 func (d *mockDef) answers() []string {
 	var keys []string
-	if d.reply != nil {
-		keys = append(keys, "response")
-	}
-
-	if d.bidi != nil {
-		keys = append(keys, "bidi")
-	}
-
-	if d.proxy != nil {
-		keys = append(keys, "proxy")
+	for i, set := range []bool{d.reply != nil, d.sequence != nil, d.random != nil, d.bidi != nil, d.proxy != nil} {
+		if set {
+			keys = append(keys, _answerKeys[i])
+		}
 	}
 
 	return keys
@@ -511,6 +623,22 @@ func (d *mockDef) replies() map[string]*replyDef {
 	out := make(map[string]*replyDef)
 	if d.reply != nil {
 		out["response"] = d.reply
+	}
+
+	if d.sequence != nil {
+		for i, r := range d.sequence.replies {
+			out[fmt.Sprintf("response_sequence.responses[%d]", i)] = r
+		}
+
+		if d.sequence.afterEnded != nil {
+			out["response_sequence.after_ended"] = d.sequence.afterEnded
+		}
+	}
+
+	if d.random != nil {
+		for i, r := range d.random.replies {
+			out[fmt.Sprintf("response_random.responses[%d]", i)] = r
+		}
 	}
 
 	if d.bidi != nil {
@@ -579,11 +707,19 @@ func (d *mockDef) apply(b *Builder) {
 		b.Body(d.request.body)
 	}
 
+	for _, m := range d.request.custom {
+		b.Matches(m)
+	}
+
 	switch {
 	case d.bidi != nil:
 		b.Reply(d.bidi.reply())
 	case d.reply != nil:
 		b.Reply(d.reply.response())
+	case d.sequence != nil:
+		b.Reply(d.sequence.reply())
+	case d.random != nil:
+		b.Reply(d.random.reply())
 	case d.proxy != nil:
 		b.Reply(d.proxy.reply())
 	}
@@ -625,6 +761,34 @@ func (r *replyDef) response() *Response {
 	}
 
 	return res
+}
+
+// reply returns the SequentialReply the document describes.
+func (s *sequenceDef) reply() *SequentialReply {
+	rep := Seq()
+	for _, r := range s.replies {
+		rep.Add(r.response())
+	}
+
+	if s.afterEnded != nil {
+		rep.OnSequenceEnded(s.afterEnded.response())
+	}
+
+	return rep
+}
+
+// reply returns the RandomReply the document describes.
+func (r *randomDef) reply() *RandomReply {
+	rep := Rand()
+	if r.seeded {
+		rep = RandWithSeed(r.seed)
+	}
+
+	for _, res := range r.replies {
+		rep.Add(res.response())
+	}
+
+	return rep
 }
 
 // reply returns the BidiReply the document describes.
@@ -685,6 +849,24 @@ func readMessages(r *replyDef, v config.Value) error {
 	}
 
 	return nil
+}
+
+// decodeReplies decodes a list of responses, v, whose body_file open from dir: one at least.
+func decodeReplies(replies *[]*replyDef, dir string, v config.Value) error {
+	if list, ok := v.Any.([]any); ok && len(list) == 0 {
+		return config.Invalid(v, v.Key+" is empty", "list one response at least")
+	}
+
+	return config.Items(v, func(item config.Value) error {
+		r := &replyDef{dir: dir}
+		if err := _replySchema.Decode(r, item); err != nil {
+			return err
+		}
+
+		*replies = append(*replies, r)
+
+		return nil
+	})
 }
 
 // jsonText returns the JSON text a value holds: the text of a string, which must be JSON, else the value written as
@@ -764,52 +946,35 @@ func setEvents(events *[]vlatte.EventConfig, dir string, v config.Value) error {
 
 // headerValues decodes an object of metadata values: a string, or a list of strings, each.
 func headerValues(v config.Value, dst *[]headerValue) error {
-	return config.Members(v, func(name string, m config.Value) error {
-		switch x := m.Any.(type) {
-		case string:
-			*dst = append(*dst, headerValue{name: name, value: x})
-		case []any:
-			return config.Items(m, func(item config.Value) error {
-				s, ok := item.Any.(string)
-				if !ok {
-					return config.Mismatch(item, "a string", config.String)
-				}
-
-				*dst = append(*dst, headerValue{name: name, value: s})
-
-				return nil
-			})
-		default:
-			return config.Mismatch(m, "a string or a list of strings", config.String)
-		}
-
-		return nil
+	return config.MemberStrings(v, func(name, value string) {
+		*dst = append(*dst, headerValue{name: name, value: value})
 	})
 }
 
-// _builtinMatchers builds the matcher lists of mock files.
+// _builtinMatchers builds the matcher lists of a server that has no registry of its own.
 var _builtinMatchers = matchbuild.MustNew()
 
-// matcherOf returns the matcher of v, a value of a mock file: text matches equal text, and a list is a matcher spec.
-func matcherOf(v config.Value) (vlatte.Matcher, error) {
+// matcherOf returns the matcher of v, a value of a mock file, that r builds: text matches equal text, and a list is a
+// matcher spec.
+func matcherOf(r *matchbuild.Registry, v config.Value) (vlatte.Matcher, error) {
 	switch x := v.Any.(type) {
 	case string:
-		return _builtinMatchers.TryBuildMatcher(x)
+		return r.TryBuildMatcher(x)
 	case []any:
 		if len(x) == 0 {
 			return nil, config.Invalid(v, v.Key+" is an empty list", "name a matcher, such as [equal, x]")
 		}
 
-		return _builtinMatchers.TryBuildMatcher(x)
+		return r.TryBuildMatcher(x)
 	default:
 		return nil, config.Mismatch(v, "a string or a matcher list, such as [equal, x]", config.String)
 	}
 }
 
-// matchEach decodes an object of matcher values, by name, into Builder calls in name order.
-func matchEach(v config.Value, dst *[]func(*Builder), add func(b *Builder, name string, m vlatte.Matcher)) error {
+// matchEach decodes an object of matcher values, by name, that r builds, into Builder calls in name order.
+func matchEach(r *matchbuild.Registry, v config.Value, dst *[]func(*Builder), add func(b *Builder, name string, m vlatte.Matcher)) error {
 	return config.Members(v, func(name string, member config.Value) error {
-		m, err := matcherOf(member)
+		m, err := matcherOf(r, member)
 		if err != nil {
 			return err
 		}

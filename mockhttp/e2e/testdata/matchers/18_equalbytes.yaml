@@ -1,0 +1,8 @@
+# equalbytes: a body that isn't UTF-8 text, such as an image, by its bytes in standard base64.
+id: bytes
+request:
+  method: POST
+  path: /bytes
+  body: [equalbytes, iVBOR//+AA==]
+response:
+  status: 200

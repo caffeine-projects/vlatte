@@ -5,7 +5,7 @@ import (
 )
 
 // SetScenario moves the scenario of the path's name to the state of the request body, and answers it: PUT
-// /scenarios/{name}. The mocks that require that state match next. Names are exact: Checkout isn't checkout.
+// /scenarios/{name}. The mocks that require that state match next. Names ignore case: Checkout is checkout.
 func SetScenario(ops *Operations) http.Handler {
 	return negotiated(func(w http.ResponseWriter, r *http.Request) {
 		data, format, err := readBody(w, r)

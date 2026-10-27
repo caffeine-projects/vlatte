@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"errors"
@@ -116,7 +117,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	})
 
 	registerCompletions(root)
-	root.AddCommand(versionCmd(), mcpCmd(ctx, &code, stdin, stdout, stderr))
+	root.AddCommand(versionCmd(), healthCmd(&code), mcpCmd(ctx, &code, stdin, stdout, stderr))
 
 	// cobra reads os.Args when the args are nil.
 	if args == nil {
@@ -201,8 +202,8 @@ func commandSettings(cmd *cobra.Command, args []string, stdout, stderr io.Writer
 // servers and the exit code.
 func startServer(cmd *cobra.Command, args []string, s settings, out, logOutput, stderr io.Writer) (*mockhttp.Server, *mockgrpc.Server, *admin.Admin, int) {
 	// Mock files name their on_complete listeners: webhook sends their webhooks, logging with the server's logger and
-	// waiting for their answers as long as the server's webhook.timeout setting says.
-	wh := &webhook.WebHook{}
+	// waiting for their answers as long as the webhook.timeout setting says.
+	wh := cmp.Or(s.webhook, &webhook.WebHook{})
 
 	httpArgs, grpcArgs := splitArgs(args)
 

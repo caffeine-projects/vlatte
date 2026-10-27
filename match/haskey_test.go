@@ -50,3 +50,9 @@ func TestHasKeyNew(t *testing.T) {
 		HasKey(".")
 	})
 }
+
+func TestHasKey_TextThatIsntJSON(t *testing.T) {
+	ok, err := HasKey("$.a").Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), "{"))
+	require.NoError(t, err)
+	require.False(t, ok)
+}

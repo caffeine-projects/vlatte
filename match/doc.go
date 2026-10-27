@@ -22,7 +22,7 @@
 // Nothing else crosses classes: no number equals the character of its value, so Equal(49) doesn't match "1", and
 // text never equals a list. Equal isn't transitive: "1.0" and "1" both equal 1, but not each other.
 // [StrictEqual] and [EqualJSON] read no text at all, but still compare numbers by value: StrictEqual(1) matches a
-// JSON 1.0, but not "1".
+// JSON 1.0, but not "1". [EqualBytes] compares the bytes of text, exactly.
 //
 // The order matchers, such as [GreaterThan], compare numbers, and text that reads as one, by their exact values.
 // [Truthy] and [Falsy] read bools the way Equal does; nil is neither true nor false. [Len] counts the bytes of text,

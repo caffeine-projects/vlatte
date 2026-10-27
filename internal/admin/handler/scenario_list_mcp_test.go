@@ -6,11 +6,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
-	"github.com/caffeine-projects/vlatte/internal/mfeat"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 func TestListScenariosTool(t *testing.T) {
-	scenarios := mfeat.NewScenarioStore()
+	scenarios := matchscenario.New()
 	scenarios.SetScenario("checkout", "paid")
 	cs := connect(t, newStore(t), adminapi.Capabilities{Scenarios: scenarios})
 

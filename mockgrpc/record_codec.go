@@ -65,10 +65,16 @@ type RecordedStatus struct {
 
 // recordedMockFile is the mock file of a recording.
 type recordedMockFile struct {
-	ID       string           `json:"id"`
-	Name     string           `json:"name,omitempty"`
-	Request  RecordedRequest  `json:"request"`
-	Response RecordedResponse `json:"response"`
+	ID       string            `json:"id"`
+	Name     string            `json:"name,omitempty"`
+	Request  RecordedRequest   `json:"request"`
+	Response *RecordedResponse `json:"response,omitzero"`
+	Sequence *recordedSequence `json:"response_sequence,omitzero"`
+}
+
+type recordedSequence struct {
+	Responses  []RecordedResponse `json:"responses"`
+	AfterEnded RecordedResponse   `json:"after_ended"`
 }
 
 // recordedCall is a call the server captured for a recording: the request as the client sent it, and the answer as
@@ -186,9 +192,17 @@ func (c *recordCodec) Response(x *recordedCall, _ *vlatte.RecordFiles) (Recorded
 	return s, nil
 }
 
-// Mock writes the mock file of m: its first response, the one a recording keeps.
+// Mock writes the mock file of m: its response, or a sequence of its responses whose last one repeats.
 func (c *recordCodec) Mock(m *RecordedMock) any {
-	return recordedMockFile{ID: m.ID, Name: m.Name, Request: m.Request, Response: m.Responses[0]}
+	doc := recordedMockFile{ID: m.ID, Name: m.Name, Request: m.Request}
+
+	if len(m.Responses) == 1 {
+		doc.Response = &m.Responses[0]
+	} else {
+		doc.Sequence = &recordedSequence{Responses: m.Responses, AfterEnded: m.Responses[len(m.Responses)-1]}
+	}
+
+	return doc
 }
 
 // message returns msg as a mock file holds it: as protojson writes it, decoded as JSON, so equal messages are written
