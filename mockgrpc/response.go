@@ -49,6 +49,7 @@ type Response struct {
 	delay      vlatte.Delay
 	// delayDuration is the delay of MessageDelay, which a description writes; MessageDelayFunc's can't be.
 	delayDuration time.Duration
+	delayFunc     bool // the delay is MessageDelayFunc's
 }
 
 // Message returns a Response that answers msg, which must be of the type the method answers with.
@@ -118,13 +119,14 @@ func (r *Response) Details(details ...proto.Message) *Response {
 
 // MessageDelay waits for d before each message of the answer: a stream that trickles in.
 func (r *Response) MessageDelay(d time.Duration) *Response {
-	r.delay, r.delayDuration = vlatte.Latency(d), d
+	r.delay, r.delayDuration, r.delayFunc = vlatte.Latency(d), d, false
 	return r
 }
 
-// MessageDelayFunc sets a function that picks the delay before each message of the answer, such as [vlatte.Jitter].
+// MessageDelayFunc sets a function that picks the delay before each message of the answer, such as [vlatte.Jitter]. A
+// mock file can't hold a function: describing a mock with it fails, so the admin API can't show the mock, nor save it.
 func (r *Response) MessageDelayFunc(delay vlatte.Delay) *Response {
-	r.delay, r.delayDuration = delay, 0
+	r.delay, r.delayDuration, r.delayFunc = delay, 0, delay != nil
 	return r
 }
 

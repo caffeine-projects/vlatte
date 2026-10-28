@@ -317,6 +317,106 @@ func TestBase_AMockOutsideEveryScopeGivesWay(t *testing.T) {
 	})
 }
 
+func TestBase_RemockWith(t *testing.T) {
+	// A server reloads its mock files and the mocks of the admin API's persistent store together: a request finds the
+	// old ones or the new ones, never a mix, and a reload that fails leaves the old ones serving.
+	t.Run("swaps the mocks of swap in the same step", func(t *testing.T) {
+		store := vlatte.NewStore[*fakeMock]()
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		a := newFakeMockWith("a", 0)
+		old, err := app.Mock(fakeBuilder{mock: a})
+		require.NoError(t, err)
+
+		// Mocks outside every scope, as the admin API stores them: x gives way to the mock file's x.
+		p, x := newFakeMockWith("p", 0), newFakeMockWith("x", 0)
+		require.NoError(t, store.Store(t.Context(), p, x))
+
+		a2, x2, q := newFakeMockWith("a", 0), newFakeMockWith("x", 0), newFakeMockWith("q", 0)
+
+		var built, gone []*fakeMock
+
+		scope, err := app.RemockWith(t.Context(), old, func(b, g []*fakeMock) ([]*fakeMock, []*fakeMock, error) {
+			built, gone = b, g
+			return []*fakeMock{p}, []*fakeMock{q}, nil
+		}, fakeBuilder{mock: a2}, fakeBuilder{mock: x2})
+		require.NoError(t, err)
+
+		require.True(t, sameMocks([]*fakeMock{a2, x2}, built))
+		require.True(t, sameMocks([]*fakeMock{a, x}, gone), "the old scope's mocks and those that give way")
+
+		all, _ := store.PickAll(t.Context())
+		require.True(t, sameMocks([]*fakeMock{a2, x2, q}, all))
+		require.True(t, sameMocks([]*fakeMock{a2, x2}, scope.Mocks()), "the scope holds the mocks of the builders only")
+	})
+
+	t.Run("with no old scope, it adds", func(t *testing.T) {
+		store := vlatte.NewStore[*fakeMock]()
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		p := newFakeMockWith("p", 0)
+		require.NoError(t, store.Store(t.Context(), p))
+
+		a, q := newFakeMockWith("a", 0), newFakeMockWith("q", 0)
+		_, err := app.RemockWith(t.Context(), nil, func([]*fakeMock, []*fakeMock) ([]*fakeMock, []*fakeMock, error) {
+			return []*fakeMock{p}, []*fakeMock{q}, nil
+		}, fakeBuilder{mock: a})
+		require.NoError(t, err)
+
+		all, _ := store.PickAll(t.Context())
+		require.True(t, sameMocks([]*fakeMock{a, q}, all))
+	})
+
+	// setup tracks the scope old, with mock a, and another scope, with mock x, and stores p outside every scope.
+	setup := func(t *testing.T) (*vlatte.Base[*fakeMock, struct{}], vlatte.Store[*fakeMock], *vlatte.Scope[*fakeMock], []*fakeMock) {
+		t.Helper()
+
+		store := vlatte.NewStore[*fakeMock]()
+		app := vlatte.NewBase[*fakeMock](struct{}{}, store)
+		mocks := []*fakeMock{newFakeMockWith("a", 0), newFakeMockWith("x", 0), newFakeMockWith("p", 0)}
+
+		old, err := app.Mock(fakeBuilder{mock: mocks[0]})
+		require.NoError(t, err)
+
+		_, err = app.Mock(fakeBuilder{mock: mocks[1]})
+		require.NoError(t, err)
+		require.NoError(t, store.Store(t.Context(), mocks[2]))
+
+		return app, store, old, mocks
+	}
+
+	t.Run("a swap that fails changes nothing", func(t *testing.T) {
+		app, store, old, mocks := setup(t)
+		errDown := errors.New("store down")
+
+		a2 := newFakeMockWith("a", 0)
+		_, err := app.RemockWith(t.Context(), old, func([]*fakeMock, []*fakeMock) ([]*fakeMock, []*fakeMock, error) {
+			return nil, nil, errDown
+		}, fakeBuilder{mock: a2})
+		require.ErrorIs(t, err, errDown)
+
+		all, _ := store.PickAll(t.Context())
+		require.True(t, sameMocks(mocks, all))
+		require.True(t, sameMocks(mocks[:1], old.Mocks()), "the old scope holds its mocks")
+		require.Equal(t, int64(1), a2.closed.Load(), "the mock built is closed")
+	})
+
+	t.Run("a store that refuses what swap adds changes nothing", func(t *testing.T) {
+		app, store, old, mocks := setup(t)
+
+		// x is in use in another scope: the store refuses the whole swap.
+		a2, x2 := newFakeMockWith("a", 0), newFakeMockWith("x", 0)
+		_, err := app.RemockWith(t.Context(), old, func([]*fakeMock, []*fakeMock) ([]*fakeMock, []*fakeMock, error) {
+			return []*fakeMock{mocks[2]}, []*fakeMock{x2}, nil
+		}, fakeBuilder{mock: a2})
+		require.ErrorIs(t, err, vlatte.ErrDuplicateID)
+
+		all, _ := store.PickAll(t.Context())
+		require.True(t, sameMocks(mocks, all))
+		require.True(t, sameMocks(mocks[:1], old.Mocks()), "the old scope holds its mocks")
+		require.Equal(t, int64(1), a2.closed.Load(), "the mock built is closed")
+		require.Zero(t, x2.closed.Load(), "the mocks of swap stay the caller's")
+	})
+}
+
 // blockingBuilder builds its mock once release is closed, after telling entered it began.
 type blockingBuilder struct {
 	mock    *fakeMock
