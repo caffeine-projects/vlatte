@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"slices"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 )
 
 var (
@@ -81,17 +83,29 @@ func (r *ProxyReply) DialOptions(opts ...grpc.DialOption) *ProxyReply {
 }
 
 // NewReplier implements Reply. It makes the connection of the mock, which connects on its first call.
-func (r *ProxyReply) NewReplier(*Server, []protoreflect.MethodDescriptor) (Replier, error) {
-	return r.replier()
+func (r *ProxyReply) NewReplier(app *Server, _ []protoreflect.MethodDescriptor) (Replier, error) {
+	return r.replier(app.config)
 }
 
-// replier makes the replier of NewReplier.
-func (r *ProxyReply) replier() (*proxyReplier, error) {
+// replier makes the replier of NewReplier, which connects as the outbound rules of conf allow.
+func (r *ProxyReply) replier(conf *Config) (*proxyReplier, error) {
 	if r.target == "" {
 		return nil, errNoTarget
 	}
 
-	opts := slices.Concat([]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}, r.dialOptions)
+	// The rules are about network addresses: a unix socket, on this host by its nature, is dialed as grpc does.
+	unix := strings.HasPrefix(r.target, "unix:") || strings.HasPrefix(r.target, "unix-abstract:")
+
+	base := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	if !unix && (len(conf.OutboundAllow) > 0 || len(conf.OutboundDeny) > 0) {
+		d := httpx.NewDialer(conf.OutboundAllow, conf.OutboundDeny)
+		base = append(base, grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
+			return d.DialContext(ctx, "tcp", addr)
+		}))
+	}
+
+	// The reply's own options come after, so a dialer of the caller's wins.
+	opts := slices.Concat(base, r.dialOptions)
 
 	conn, err := grpc.NewClient(r.target, opts...)
 	if err != nil {

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"golang.org/x/net/http/httpproxy"
+
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 )
 
 // _idleConnTimeout closes a connection to an upstream that stays idle. A request still being served when its mock
@@ -17,16 +19,14 @@ import (
 const _idleConnTimeout = 15 * time.Second
 
 const (
-	// _dialTimeout bounds connecting to an upstream, or to a proxy on the way, as http.DefaultTransport does.
-	_dialTimeout = 30 * time.Second
-
 	// _tlsHandshakeTimeout bounds a TLS handshake with an upstream, or with an https proxy on the way.
 	_tlsHandshakeTimeout = 10 * time.Second
 )
 
-// newDialer returns a dialer of the connections the server opens to its upstreams, and to the proxies on the way.
-func newDialer() *net.Dialer {
-	return &net.Dialer{Timeout: _dialTimeout, KeepAlive: 30 * time.Second}
+// newDialer returns a dialer of the connections the server opens to its upstreams, and to the proxies on the way,
+// which follows the outbound rules of conf.
+func newDialer(conf *Config) *net.Dialer {
+	return httpx.NewDialer(conf.OutboundAllow, conf.OutboundDeny)
 }
 
 // newTransport returns a transport the server makes for its upstreams: the targets of proxy replies and of the
@@ -45,7 +45,7 @@ func newTransport(conf *Config, verify bool, via *url.URL) *http.Transport {
 
 	return &http.Transport{
 		Proxy:       proxy,
-		DialContext: newDialer().DialContext,
+		DialContext: newDialer(conf).DialContext,
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: !verify,
 			RootCAs:            conf.TLSClientCAs,

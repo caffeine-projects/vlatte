@@ -5,6 +5,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -182,6 +183,16 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"record-include-mocked": {[]string{"--record-include-mocked"}, func(t *testing.T, c *Config) { require.True(t, c.Record.IncludeMocked) }},
 		"template-env": {
 			[]string{"--template-env", "API_URL,TENANT"}, func(t *testing.T, c *Config) { require.Equal(t, []string{"API_URL", "TENANT"}, c.TemplateEnv) },
+		},
+		"outbound-allow": {
+			[]string{"--outbound-allow", "10.1.0.0/16,fd00::/8"}, func(t *testing.T, c *Config) {
+				require.Equal(t, []netip.Prefix{netip.MustParsePrefix("10.1.0.0/16"), netip.MustParsePrefix("fd00::/8")}, c.OutboundAllow)
+			},
+		},
+		"outbound-deny": {
+			[]string{"--outbound-deny", "169.254.0.0/16"}, func(t *testing.T, c *Config) {
+				require.Equal(t, []netip.Prefix{netip.MustParsePrefix("169.254.0.0/16")}, c.OutboundDeny)
+			},
 		},
 	}
 
@@ -594,6 +605,11 @@ func TestConfigSources_ValueChecks(t *testing.T) {
 				require.NotNil(t, c.Record)
 				require.Empty(t, c.Record.Target)
 			},
+		},
+		{
+			name:    "an outbound range that isn't in CIDR form",
+			sources: []ConfigSource{ConfigArgs([]string{"--outbound-deny=169.254.169.254"})},
+			problem: `outbound.deny="169.254.169.254": expected address ranges in CIDR form, such as 10.0.0.0/8, not "169.254.169.254"`,
 		},
 		{
 			name:    "an empty proxy via, which clears one from a lower source",

@@ -720,6 +720,14 @@ An intercepted connection speaks HTTP/1.1.
 
 The transports vlatte makes go through the proxy of `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`, which leaves out `localhost`, unless `proxy.via` sets one. Docker can set these variables in containers from `~/.docker/config.json`, and so send the hosts of a compose network, such as `http://api:8080`, to that proxy: add them to `NO_PROXY`. A variable that names the vlatte server itself sends the requests it proxies back to it, until they fail as a proxy loop: set `NO_PROXY=*` for its process, or `proxy.via`.
 
+**Outbound rules.** `outbound.deny` lists address ranges the server never connects to, and `outbound.allow`, once set, the only ones it may: proxy replies, the recording target, the forward proxy and its tunnels, and webhooks. Deny wins over allow. A server that others reach, as in Docker, keeps them from using its mocks to reach hosts they shouldn't, such as cloud metadata at `169.254.169.254` or an internal network:
+
+```sh
+vlatte --outbound-deny=169.254.0.0/16,10.0.0.0/8
+```
+
+The ranges are in CIDR form, `VLATTE_OUTBOUND_DENY` sets them too, and in Go `mockhttp.Setup().OutboundDeny(netip.MustParsePrefix("169.254.0.0/16"))`. They check the address the server connects to, once a host name resolves, so a name that resolves into a refused range is refused, and either one refuses `0.0.0.0` and `::`, which reach the server's own host. An IPv4 range holds no IPv6 address: deny `::1/128` with `127.0.0.0/8`, and `fd00:ec2::254/128` with `169.254.0.0/16` on AWS. Through a proxy on the way, `proxy.via` or the one of the environment, they check that proxy's address. A refused connection fails with `vlatte.ErrOutboundRefused`, which the answer's body names. A transport of yours, `Setup().Transport(rt)` or `From(target).Transport(rt)`, dials on its own, and they don't apply to it. gRPC mocks have `grpc.outbound.allow` and `grpc.outbound.deny`, which connect proxy replies and the recording target directly once set, never through the proxy of the environment, and don't apply to a target on a unix socket.
+
 ## Steps
 
 In Go, `Step` passes the body of each answer of a mock through steps, in order, before it reaches the client: to delay it, send it in parts, change it or cut it. A step is a `vlatte.Step`. For each answer, its `Open` makes the step's stage of that answer's `vlatte.Flow`, so a stage keeps what it counts for one answer only: a mock's answers don't share it.

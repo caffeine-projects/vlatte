@@ -10,6 +10,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
@@ -85,6 +86,24 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				c.TemplateEnv = v.List
 				_, err := vlatte.NewGoTemplateEngine(vlatte.WithEnv(v.List...))
 
+				return err
+			},
+		},
+		field{
+			Key: "grpc.outbound.allow", Kind: config.List,
+			Usage: "Address ranges the gRPC server may connect to, in CIDR form, such as 10.1.0.0/16: proxied calls, " +
+				"the recording target and webhooks reach no other address. Empty allows every address.",
+			Set: func(c *Config, v config.Value) (err error) {
+				c.OutboundAllow, err = httpx.ParsePrefixes(v.List)
+				return err
+			},
+		},
+		field{
+			Key: "grpc.outbound.deny", Kind: config.List,
+			Usage: "Address ranges the gRPC server never connects to, in CIDR form, such as 169.254.0.0/16. Deny " +
+				"wins over grpc.outbound.allow.",
+			Set: func(c *Config, v config.Value) (err error) {
+				c.OutboundDeny, err = httpx.ParsePrefixes(v.List)
 				return err
 			},
 		},

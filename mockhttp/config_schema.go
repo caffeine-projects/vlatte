@@ -428,6 +428,24 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				return err
 			},
 		},
+		{
+			Key: "outbound.allow", Kind: config.List,
+			Usage: "Address ranges the server may connect to, in CIDR form, such as 10.1.0.0/16: proxied requests, " +
+				"the recording target, the forward proxy and webhooks reach no other address. Empty allows every address.",
+			Set: func(c *Config, v config.Value) (err error) {
+				c.OutboundAllow, err = httpx.ParsePrefixes(v.List)
+				return err
+			},
+		},
+		{
+			Key: "outbound.deny", Kind: config.List,
+			Usage: "Address ranges the server never connects to, in CIDR form, such as 169.254.0.0/16. Deny wins " +
+				"over outbound.allow.",
+			Set: func(c *Config, v config.Value) (err error) {
+				c.OutboundDeny, err = httpx.ParsePrefixes(v.List)
+				return err
+			},
+		},
 	}
 
 	records := recordFields()

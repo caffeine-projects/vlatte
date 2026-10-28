@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"net"
+	"net/netip"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -294,4 +296,85 @@ func TestProxy_TheTargetGetsTheGRPCMetadataLeftToTheApplication(t *testing.T) {
 	md := <-got
 	require.Equal(t, []string{"trace"}, md.Get("grpc-trace-bin"))
 	require.Equal(t, []string{"2"}, md.Get("grpc-previous-rpc-attempts"))
+}
+
+func TestProxy_TheOutboundRulesKeepTheServerFromAddresses(t *testing.T) {
+	// The outbound rules keep a server exposed to others, as in Docker, from reaching hosts it must not, whoever adds
+	// the mock. The target listens on 127.0.0.1.
+	loopback := netip.MustParsePrefix("127.0.0.0/8")
+
+	tests := []struct {
+		name    string
+		setup   *ConfigBuilder
+		reached bool
+	}{
+		{
+			name:    "no rules reach any address",
+			setup:   Setup(),
+			reached: true,
+		},
+		{
+			name:    "a denied range is refused",
+			setup:   Setup().OutboundDeny(loopback),
+			reached: false,
+		},
+		{
+			name:    "an allowed range is reached",
+			setup:   Setup().OutboundAllow(loopback),
+			reached: true,
+		},
+		{
+			name:    "an address outside the allowed ranges is refused",
+			setup:   Setup().OutboundAllow(netip.MustParsePrefix("10.0.0.0/8")),
+			reached: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			target := serve(t)
+			target.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "hello"})))
+
+			m := MustNew(tc.setup.Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}))
+			m.MustStart()
+			t.Cleanup(m.Close)
+			m.MustMock(Method("Greetings").Reply(From(target.Addr())))
+
+			res, err := client(t, m).Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+			if tc.reached {
+				require.NoError(t, err)
+				require.Equal(t, "hello", res.GetMessage())
+
+				return
+			}
+
+			require.Equal(t, codes.Internal, status.Code(err))
+			require.Contains(t, status.Convert(err).Message(), vlatte.ErrOutboundRefused.Error())
+			require.Zero(t, target.Hits(), "a refused address gets no call")
+		})
+	}
+}
+
+func TestProxy_AUnixSocketTargetOutlivesTheOutboundRules(t *testing.T) {
+	// The outbound rules are about network addresses: a target on a unix socket, on this host by its nature, is
+	// reached as it was without them.
+	sock := filepath.Join(t.TempDir(), "target.sock")
+	lis, err := net.Listen("unix", sock)
+	require.NoError(t, err)
+
+	target := MustNew(Setup().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}).Listener(lis))
+	target.MustStart()
+	t.Cleanup(target.Close)
+	target.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "hello"})))
+
+	m := MustNew(Setup().
+		Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}).
+		OutboundDeny(netip.MustParsePrefix("127.0.0.0/8")))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(Method("Greetings").Reply(From("unix://" + sock)))
+
+	res, err := client(t, m).Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.NoError(t, err)
+	require.Equal(t, "hello", res.GetMessage())
 }
