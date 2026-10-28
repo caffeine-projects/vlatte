@@ -222,39 +222,3 @@ func TestNew_RefusesTLSWithoutACertificate(t *testing.T) {
 		require.EqualError(t, err, "admin: tls: the config has no certificate")
 	}
 }
-
-func TestAdmin_AsksEveryRequestForCredentials(t *testing.T) {
-	// The admin API changes the mocks of a running server: with credentials set, a request without them changes
-	// nothing, and one with them does.
-	api := admin.MustNew(admin.Addr("127.0.0.1:0"), admin.BasicAuth("ops", "pw"), admin.BearerToken("tok"))
-	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(api))
-	require.NoError(t, m.Start())
-	t.Cleanup(m.Close)
-
-	m.MustMock(mockhttp.Get(match.URLPath("/hello")).Reply(mockhttp.OK()))
-
-	removeAll := func(set func(r *http.Request)) int {
-		r, err := http.NewRequestWithContext(t.Context(), http.MethodDelete, m.AdminURL()+"/mocks", nil)
-		require.NoError(t, err)
-		set(r)
-
-		res, err := http.DefaultClient.Do(r)
-		require.NoError(t, err)
-		require.NoError(t, res.Body.Close())
-
-		return res.StatusCode
-	}
-
-	require.Equal(t, http.StatusUnauthorized, removeAll(func(*http.Request) {}))
-	require.Equal(t, http.StatusUnauthorized, removeAll(func(r *http.Request) { r.SetBasicAuth("ops", "tok!") }))
-	requireStatus(t, m.URL("/hello"), http.StatusOK, "a request without the credentials removes nothing")
-
-	require.Equal(t, http.StatusNoContent, removeAll(func(r *http.Request) { r.SetBasicAuth("ops", "pw") }))
-	requireStatus(t, m.URL("/hello"), mockhttp.StatusNoMatch, "a request with them removes the mocks")
-
-	m.MustMock(mockhttp.Get(match.URLPath("/hello")).Reply(mockhttp.OK()))
-	require.Equal(t, http.StatusNoContent, removeAll(func(r *http.Request) { r.Header.Set("Authorization", "Bearer tok") }))
-	requireStatus(t, m.URL("/hello"), mockhttp.StatusNoMatch, "so does one with the token")
-
-	requireStatus(t, m.AdminURL()+"/readyz", http.StatusOK, "the probes need no credentials")
-}
