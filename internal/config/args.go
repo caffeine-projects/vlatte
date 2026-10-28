@@ -148,11 +148,21 @@ func flagProblem(c *catalog, err error) Problem {
 	msg := err.Error()
 
 	if name, ok := strings.CutPrefix(msg, "flag provided but not defined: -"); ok {
+		if f := c.secrets[strings.TrimPrefix(name, "-")]; f != nil {
+			return Problem{
+				Code: CodeUnknownKey, Origin: "flag " + dashed(name), Key: f.key,
+				Message: f.key + " is a secret, which no flag sets: the command line shows to every user of the host",
+				Hint:    "set it in the environment or a config file",
+			}
+		}
+
 		p := Problem{Code: CodeUnknownKey, Origin: "flag " + dashed(name), Message: dashed(name) + " is not a known flag"}
 
 		names := make([]string, 0, len(c.fields))
 		for _, f := range c.fields {
-			names = append(names, f.flag)
+			if !f.secret {
+				names = append(names, f.flag)
+			}
 		}
 
 		if near := suggest(name, names); near != "" {

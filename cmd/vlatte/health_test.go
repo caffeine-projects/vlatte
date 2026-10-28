@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"io"
 	"net"
 	"net/http"
@@ -50,6 +51,33 @@ func TestHealth_ProbesTheImageAdminAPIByDefault(t *testing.T) {
 	require.Contains(t, errOut.String(), `Get "http://vlatte.invalid:8081/readyz"`)
 }
 
+func TestHealth_ProbesTheImageAdminAPIOverTLS(t *testing.T) {
+	// With admin.tls.cert, the image's admin API serves HTTPS: the check asks it over HTTPS, and trusts only the
+	// certificate the settings name, which needn't name the host the check reaches.
+	t.Chdir(t.TempDir())
+	certFile, keyFile, _ := writeCert(t, t.TempDir())
+	t.Setenv("VLATTE_ADMIN_TLS_CERT", certFile)
+	t.Setenv("VLATTE_ADMIN_TLS_KEY", keyFile)
+	t.Setenv(_dockerHostEnv, "vlatte.invalid")
+
+	var errOut bytes.Buffer
+	require.Equal(t, 1, run(t.Context(), []string{"health"}, nil, io.Discard, &errOut))
+	require.Contains(t, errOut.String(), `Get "https://vlatte.invalid:8081/readyz"`)
+}
+
+func TestProbe_TrustsThePinnedCertificateAlone(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(srv.Close)
+
+	require.NoError(t, probe(t.Context(), srv.URL, srv.Certificate()), "the server presents the pinned certificate")
+
+	certFile, keyFile, _ := writeCert(t, t.TempDir())
+	other, err := tls.LoadX509KeyPair(certFile, keyFile)
+	require.NoError(t, err)
+
+	require.ErrorIs(t, probe(t.Context(), srv.URL, other.Leaf), errNotPinned, "the server presents another certificate")
+}
+
 func TestHealth_FailsForAURLItCantAsk(t *testing.T) {
 	var errOut bytes.Buffer
 	require.Equal(t, 1, run(t.Context(), []string{"health", "http://a b"}, nil, io.Discard, &errOut))
@@ -71,23 +99,23 @@ func TestCheckServer(t *testing.T) {
 	mocks := listening(t)
 
 	t.Run("the admin API is ready", func(t *testing.T) {
-		require.NoError(t, checkServer(t.Context(), ready.URL+"/readyz", randomAddr(t)))
+		require.NoError(t, checkServer(t.Context(), ready.URL+"/readyz", nil, randomAddr(t)))
 	})
 
 	t.Run("the admin API is not ready", func(t *testing.T) {
 		// The admin API answered: the mock server accepting connections doesn't make a server that can't serve its
 		// mocks healthy.
 		srv := notReady(t)
-		require.EqualError(t, checkServer(t.Context(), srv.URL+"/readyz", mocks),
+		require.EqualError(t, checkServer(t.Context(), srv.URL+"/readyz", nil, mocks),
 			"health: GET "+srv.URL+"/readyz: 503 Service Unavailable")
 	})
 
 	t.Run("no admin API, the mock server serves", func(t *testing.T) {
-		require.NoError(t, checkServer(t.Context(), "http://"+randomAddr(t)+"/readyz", randomAddr(t), mocks))
+		require.NoError(t, checkServer(t.Context(), "http://"+randomAddr(t)+"/readyz", nil, randomAddr(t), mocks))
 	})
 
 	t.Run("nothing serves", func(t *testing.T) {
-		err := checkServer(t.Context(), "http://"+randomAddr(t)+"/readyz", randomAddr(t))
+		err := checkServer(t.Context(), "http://"+randomAddr(t)+"/readyz", nil, randomAddr(t))
 		require.ErrorIs(t, err, syscall.ECONNREFUSED)
 	})
 }
