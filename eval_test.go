@@ -48,6 +48,10 @@ type turnMatcher struct {
 	taken   bool
 	lose    bool
 	matches int
+
+	// claimedWith and claimedFor are the value and the mock of the argument of its last claim.
+	claimedWith any
+	claimedFor  vlatte.Mock
 }
 
 func (m *turnMatcher) Name() string { return "turn" }
@@ -57,7 +61,10 @@ func (m *turnMatcher) Match(vlatte.MatcherArg) (bool, error) {
 	return !m.taken, nil
 }
 
-func (m *turnMatcher) Claim() bool {
+func (m *turnMatcher) Claim(arg vlatte.MatcherArg) bool {
+	m.claimedWith = arg.Value()
+	m.claimedFor = arg.Mock()
+
 	if m.taken || m.lose {
 		m.taken = true
 		return false
@@ -85,6 +92,43 @@ func TestFind_TakesTheTurnOfTheMockFound(t *testing.T) {
 	_, matched, err = seq.Find(t.Context(), vlatte.NewExplanation(), request{}, evals, nil)
 	require.NoError(t, err)
 	require.False(t, matched, "the turn is taken")
+}
+
+// A claim acts on what the request selects: it gets the value Match got.
+func TestFind_AClaimGetsTheValueTheSelectorSelects(t *testing.T) {
+	turn := &turnMatcher{}
+	a := newFakeMockWith("a", 0)
+	seq := vlatte.Mocks[*fakeMock, request](slices.Values([]*fakeMock{a}))
+	evals := func(*fakeMock) vlatte.Evaluators[*fakeMock, request] {
+		return vlatte.Evaluators[*fakeMock, request]{{
+			Key:      "turn",
+			Matcher:  turn,
+			Selector: func(_ context.Context, in request) any { return in["path"] },
+		}}
+	}
+
+	_, matched, err := seq.Find(t.Context(), vlatte.NewExplanation(), request{"path": "/t1"}, evals, nil)
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.Equal(t, "/t1", turn.claimedWith)
+}
+
+// A claim tells who took the turn, such as a scenario's move that names its mock: it gets the mock Find picked.
+func TestFind_AClaimGetsTheMockWhoseTurnItTakes(t *testing.T) {
+	a, b := &turnMatcher{lose: true}, &turnMatcher{}
+	ma, mb := newFakeMockWith("a", 0), newFakeMockWith("b", 0)
+	turns := map[*fakeMock]*turnMatcher{ma: a, mb: b}
+	seq := vlatte.Mocks[*fakeMock, request](slices.Values([]*fakeMock{ma, mb}))
+	evals := func(m *fakeMock) vlatte.Evaluators[*fakeMock, request] {
+		return vlatte.Evaluators[*fakeMock, request]{{Key: "turn", Matcher: turns[m]}}
+	}
+
+	mock, matched, err := seq.Find(t.Context(), vlatte.NewExplanation(), request{}, evals, nil)
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.Same(t, mb, mock)
+	require.Same(t, ma, a.claimedFor, "a lost its turn")
+	require.Same(t, mb, b.claimedFor)
 }
 
 func TestFind_LooksAgainWhenAnotherRequestTookTheTurn(t *testing.T) {
@@ -120,7 +164,7 @@ type brokenClaimer struct {
 func (m brokenClaimer) Name() string                          { return "broken" }
 func (m brokenClaimer) Match(vlatte.MatcherArg) (bool, error) { return true, nil }
 
-func (m brokenClaimer) Claim() bool {
+func (m brokenClaimer) Claim(vlatte.MatcherArg) bool {
 	if m.panics {
 		panic("claim broke")
 	}
