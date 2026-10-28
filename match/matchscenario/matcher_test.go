@@ -33,23 +33,24 @@ func TestMatcher_AScenarioMovesThroughItsStates(t *testing.T) {
 	require.Equal(t, map[string]string{"checkout": "refunded"}, store.Scenarios())
 }
 
-func TestMatcher_RequiringStartedStartsTheScenario(t *testing.T) {
-	// The scenario shows in the store once a mock that starts it is matched, before it answered.
+func TestMatcher_MatchingChangesNoState(t *testing.T) {
+	// A report of a request no mock matched runs the matcher again: matching must move nothing, only the mock picked
+	// does.
 	store := New()
 
 	require.True(t, match(t, store.Matcher("checkout", StateStarted, "paid")))
-	require.Equal(t, map[string]string{"checkout": StateStarted}, store.Scenarios())
+	require.Empty(t, store.Scenarios())
 }
 
-func TestMatcher_AnotherStateMatchesWhileNoMockStartedTheScenario(t *testing.T) {
+func TestMatcher_AScenarioNoMockMovedIsInStarted(t *testing.T) {
+	// A mock that requires paid waits for the scenario to get there, even before anything moved it: a typo in a
+	// scenario's name, or a missing first mock, makes the mock never match, rather than match every request.
 	store := New()
-	refund := store.Matcher("checkout", "paid", "")
 
-	require.True(t, match(t, refund))
-	require.Empty(t, store.Scenarios(), "matching a state other than started starts nothing")
-
-	store.SetScenario("checkout", StateStarted)
-	require.False(t, match(t, refund))
+	require.False(t, match(t, store.Matcher("checkout", "paid", "")))
+	require.False(t, store.Matcher("checkout", "paid", "refunded").Claim())
+	require.True(t, match(t, store.Matcher("checkout", StateStarted, "")))
+	require.Empty(t, store.Scenarios(), "nothing moved")
 }
 
 func TestMatcher_NoRequiredStateMatchesInAnyState(t *testing.T) {
@@ -81,7 +82,7 @@ func TestMatcher_AClaimLostToAnotherRequestMovesNothing(t *testing.T) {
 }
 
 func TestMatcher_ANewStateStartsTheScenario(t *testing.T) {
-	// A mock that requires no state still moves its scenario, one no mock started too.
+	// A mock that requires no state still moves its scenario, one nothing moved yet too.
 	store := New()
 	move := store.Matcher("checkout", "", "paid")
 
@@ -137,7 +138,16 @@ func TestMatcher_StoresAreIsolated(t *testing.T) {
 	require.True(t, payA.Claim())
 
 	require.True(t, match(t, b.Matcher("checkout", StateStarted, "")))
-	require.Equal(t, map[string]string{"checkout": StateStarted}, b.Scenarios())
+	require.Empty(t, b.Scenarios())
+}
+
+func TestMatcher_StringSaysWhyItFails(t *testing.T) {
+	// A report of a request no mock matched names the scenario, the state the mock needs, and the one it is in.
+	store := New()
+	store.SetScenario("checkout", "paid")
+
+	require.Equal(t, "scenario checkout needs started, is paid", store.Matcher("checkout", StateStarted, "").String())
+	require.Equal(t, "scenario checkout", store.Matcher("checkout", "", "refunded").String())
 }
 
 func TestMatcher_DescribesAsTheScenarioOfAMockFile(t *testing.T) {

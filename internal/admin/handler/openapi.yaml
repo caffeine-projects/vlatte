@@ -362,7 +362,9 @@ paths:
       tags: [Scenarios]
       operationId: listScenarios
       summary: List scenarios
-      description: Every scenario a mock started, or whose state was set, in the order of their names.
+      description: >-
+        Every scenario the mocks name, and every one set without a mock, in the order of their names: its state, the
+        states its mocks name, and the moves they make. A scenario is in `started` until something moves it.
       responses:
         "200":
           description: The scenarios.
@@ -395,7 +397,9 @@ paths:
       tags: [Scenarios]
       operationId: setScenario
       summary: Move a scenario to a state
-      description: The mocks that require the state match next. A scenario no mock started yet starts in it.
+      description: >-
+        The mocks that require the state match next. A state none of the scenario's mocks names is an `unknown_state`
+        problem; a scenario no mock names moves to any state.
       requestBody:
         required: true
         content:
@@ -411,11 +415,28 @@ paths:
               schema: { $ref: "#/components/schemas/Scenario" }
             application/yaml:
               schema: { $ref: "#/components/schemas/Scenario" }
-        "400": { $ref: "#/components/responses/InvalidBody" }
+        "400":
+          description: "`invalid_body`: the body has problems. `unknown_state`: none of the scenario's mocks names the state."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+            application/problem+yaml:
+              schema: { $ref: "#/components/schemas/Problem" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "413": { $ref: "#/components/responses/BodyTooLarge" }
         "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    delete:
+      tags: [Scenarios]
+      operationId: resetScenario
+      summary: Start a scenario over
+      description: Moves the scenario back to `started`.
+      responses:
+        "204":
+          description: The scenario is in `started`.
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
         "501": { $ref: "#/components/responses/NotSupported" }
   /requests:
     get:
@@ -828,13 +849,45 @@ components:
       additionalProperties: false
     Scenario:
       type: object
-      required: [name, state]
+      required: [name, state, states, transitions]
       properties:
         name:
           type: string
+          description: The name its first mock gives it, or the name it was first set under when no mock names it.
         state:
           type: string
           examples: [started]
+        states:
+          type: array
+          description: >-
+            The states its mocks name, `started` first. A scenario no mock names, but that was set, has none.
+          items: { $ref: "#/components/schemas/ScenarioState" }
+        transitions:
+          type: array
+          description: The moves its mocks make when picked to answer, in the order of the mocks.
+          items: { $ref: "#/components/schemas/ScenarioTransition" }
+      additionalProperties: false
+    ScenarioState:
+      type: object
+      required: [name, reachable]
+      properties:
+        name:
+          type: string
+        reachable:
+          type: boolean
+          description: False when no move of a mock leads to the state from `started`, so only setting it gets there.
+      additionalProperties: false
+    ScenarioTransition:
+      type: object
+      required: [to, mock_id]
+      properties:
+        from:
+          type: string
+          description: The state the mock requires. Absent when it matches in any.
+        to:
+          type: string
+        mock_id:
+          type: string
       additionalProperties: false
     ScenarioList:
       type: object
@@ -1048,7 +1101,7 @@ components:
         skipped:
           type: array
           items: { type: string }
-          description: The parts it didn't check, which keep state, such as `times` or `scenario`.
+          description: The parts it didn't check, which keep state, such as `times`.
       additionalProperties: false
     RequestList:
       type: object
@@ -1152,6 +1205,7 @@ components:
             - request_not_found
             - invalid_parameter
             - not_ready
+            - unknown_state
         detail:
           type: string
           description: What went wrong in this request.

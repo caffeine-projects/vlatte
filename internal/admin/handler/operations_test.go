@@ -63,15 +63,20 @@ func TestOperations_ACapabilityTheServerLacksIsNotSupported(t *testing.T) {
 		},
 		{
 			name:   "list the scenarios",
-			call:   func(context.Context) error { _, err := ops.ListScenarios(); return err },
+			call:   func(ctx context.Context) error { _, err := ops.ListScenarios(ctx); return err },
 			detail: "this mock server can't keep scenarios",
 		},
 		{
 			name: "set a scenario",
-			call: func(context.Context) error {
-				_, err := ops.SetScenario("a", []byte(`{"state": "b"}`), "json")
+			call: func(ctx context.Context) error {
+				_, err := ops.SetScenario(ctx, "a", []byte(`{"state": "b"}`), "json")
 				return err
 			},
+			detail: "this mock server can't keep scenarios",
+		},
+		{
+			name:   "reset a scenario",
+			call:   func(context.Context) error { return ops.ResetScenario("a") },
 			detail: "this mock server can't keep scenarios",
 		},
 		{

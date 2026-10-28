@@ -25,3 +25,17 @@ func TestResetScenarios_OnOperationsThatKeepNoScenarios(t *testing.T) {
 	doc := problem(t, res, rec.Body.String(), http.StatusNotImplemented, "not_supported")
 	require.Equal(t, "this mock server can't keep scenarios", doc["detail"])
 }
+
+func TestResetScenario_OnOperationsThatKeepNoScenarios(t *testing.T) {
+	// As for every scenario: a 501 problem, never a 204 that tells a test its scenario started over.
+	ops := handler.NewOperations(adminapi.Capabilities{Mocks: adminapi.MocksOf[*fakeMock](newStore(t), nil)})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/scenarios/checkout", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ResetScenario(ops).ServeHTTP(rec, req)
+
+	res := rec.Result()
+	res.Request = req
+	doc := problem(t, res, rec.Body.String(), http.StatusNotImplemented, "not_supported")
+	require.Equal(t, "this mock server can't keep scenarios", doc["detail"])
+}

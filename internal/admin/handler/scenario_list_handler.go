@@ -4,11 +4,11 @@ import (
 	"net/http"
 )
 
-// ListScenarios answers the state of every scenario, in the order of their names: GET /scenarios. A scenario shows
-// once a mock started it, or its state was set.
+// ListScenarios answers every scenario, in the order of their names, with its state, the states its mocks name and
+// the moves they make: GET /scenarios.
 func ListScenarios(ops *Operations) http.Handler {
 	return negotiated(func(w http.ResponseWriter, r *http.Request) {
-		list, err := ops.ListScenarios()
+		list, err := ops.ListScenarios(r.Context())
 		if err != nil {
 			fail(w, r, err)
 			return

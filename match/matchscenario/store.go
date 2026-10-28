@@ -6,7 +6,7 @@ import (
 	"unicode"
 )
 
-// StateStarted is the state a scenario starts in, and the one a reset moves it back to.
+// StateStarted is the state every scenario starts in, and the one a reset moves it back to.
 const StateStarted = "started"
 
 // scenario is the state of one scenario, under the name it was first given.
@@ -15,8 +15,9 @@ type scenario struct {
 	state string
 }
 
-// Store holds the state of scenarios by name. Names ignore case, as [strings.EqualFold] does: Checkout and checkout
-// are one scenario, listed under the name it was first given. It is safe for concurrent use.
+// Store holds the state of scenarios by name. Every scenario is in [StateStarted] until a mock or SetScenario moves
+// it. Names ignore case, as [strings.EqualFold] does: Checkout and checkout are one scenario, listed under the name it
+// was first given. It is safe for concurrent use.
 type Store struct {
 	mu   sync.RWMutex
 	data map[string]*scenario
@@ -27,7 +28,8 @@ func New() *Store {
 	return &Store{data: make(map[string]*scenario)}
 }
 
-// Scenarios returns the state of every scenario, by name: those a mock started, and those SetScenario set.
+// Scenarios returns the state of every scenario that moved, by name: those a mock moved, and those SetScenario set.
+// A scenario that never moved is in [StateStarted], and isn't listed.
 func (s *Store) Scenarios() map[string]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -40,16 +42,37 @@ func (s *Store) Scenarios() map[string]string {
 	return states
 }
 
-// SetScenario moves the scenario name to state, starting it when no mock did yet.
+// State returns the state of the scenario name.
+func (s *Store) State(name string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if scn, ok := s.data[key(name)]; ok {
+		return scn.state
+	}
+
+	return StateStarted
+}
+
+// SetScenario moves the scenario name to state, whatever states its mocks name. [Store.Move] checks the state first.
 func (s *Store) SetScenario(name, state string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.start(name).state = state
+	s.scenario(name).state = state
 }
 
-// ResetScenarios moves every scenario back to [StateStarted]. Scenarios are kept, not removed: a mock of a scenario
-// no mock started matches whatever the state it requires.
+// ResetScenario moves the scenario name back to [StateStarted].
+func (s *Store) ResetScenario(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if scn, ok := s.data[key(name)]; ok {
+		scn.state = StateStarted
+	}
+}
+
+// ResetScenarios moves every scenario back to [StateStarted].
 func (s *Store) ResetScenarios() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -64,43 +87,29 @@ func (s *Store) claim(name, required, next string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if required == StateStarted {
-		s.start(name)
-	}
-
-	if scn, ok := s.data[key(name)]; ok && required != "" && scn.state != required {
+	if required != "" && s.state(name) != required {
 		return false
 	}
 
 	if next != "" {
-		s.start(name).state = next
+		s.scenario(name).state = next
 	}
 
 	return true
 }
 
-// state returns the state of the scenario name, and whether it started. With start, it starts the scenario first.
-func (s *Store) state(name string, start bool) (string, bool) {
-	if start {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-
-		return s.start(name).state, true
+// state returns the state of the scenario name. The caller holds the lock.
+func (s *Store) state(name string) string {
+	if scn, ok := s.data[key(name)]; ok {
+		return scn.state
 	}
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	scn, ok := s.data[key(name)]
-	if !ok {
-		return "", false
-	}
-
-	return scn.state, true
+	return StateStarted
 }
 
-// start returns the scenario name, starting it when it hasn't. The caller holds the write lock.
-func (s *Store) start(name string) *scenario {
+// scenario returns the scenario name, adding it in [StateStarted] when the store has none. The caller holds the write
+// lock.
+func (s *Store) scenario(name string) *scenario {
 	k := key(name)
 
 	scn, ok := s.data[k]

@@ -20,6 +20,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
@@ -1297,8 +1298,13 @@ func expectationsOf(m *Mock) vlatte.Evaluators[*Mock, *selectorInput] {
 }
 
 // describeExpectation names the part of a request e checks, such as "header Accept": the name of a header, query
-// parameter, form field, cookie or path param goes with its kind. Times, and a part of no kind, go by their key.
+// parameter, form field, cookie or path param goes with its kind. Times, and a part of no kind, go by their key. A
+// scenario says the state the mock needs and the one it is in.
 func describeExpectation(e *expectation) string {
+	if sm, ok := e.Matcher.(*matchscenario.Matcher); ok {
+		return sm.String()
+	}
+
 	scope := matchingScope(e.Target)
 	name := scope.FieldName()
 

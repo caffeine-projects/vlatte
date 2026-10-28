@@ -253,7 +253,7 @@ func (b *Builder) ScenarioStateIs(requiredState string) *Builder {
 // ScenarioStateWillBe sets the state the scenario moves to when this mock is picked to answer a call, before it
 // answers: the next call matches in that state. With [Builder.ScenarioStateIs], of two calls in that state, only one
 // gets this mock; without it, the mock matches in every state, so every call gets it. The scenario moves even when the
-// mock then fails to answer, as when its client leaves during its delay. It starts the scenario when no mock did yet.
+// mock then fails to answer, as when its client leaves during its delay.
 func (b *Builder) ScenarioStateWillBe(newState string) *Builder {
 	b.scenarioNewState = newState
 	return b

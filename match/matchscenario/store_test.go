@@ -21,7 +21,7 @@ func TestStore_SetMovesAScenarioMocksMatchNext(t *testing.T) {
 	require.Equal(t, map[string]string{"checkout": "paid", "Refund": "asked"}, store.Scenarios())
 
 	require.True(t, match(t, store.Matcher("checkout", "paid", "")), "a mock that requires the state set matches")
-	require.False(t, match(t, store.Matcher("refund", "done", "")), "a scenario set before any mock started it has the state set")
+	require.False(t, match(t, store.Matcher("refund", "done", "")), "a scenario set before any mock moved it has the state set")
 }
 
 func TestStore_SetKeepsTheNameAScenarioWasFirstGiven(t *testing.T) {
@@ -44,6 +44,18 @@ func TestStore_ResetStartsEveryScenarioOver(t *testing.T) {
 
 	require.Equal(t, map[string]string{"checkout": StateStarted, "Refund": StateStarted}, store.Scenarios())
 	require.True(t, match(t, pay), "the scenario starts over")
+}
+
+func TestStore_ResetOneStartsOnlyThatScenarioOver(t *testing.T) {
+	store := New()
+	store.SetScenario("Checkout", "paid")
+	store.SetScenario("refund", "asked")
+
+	store.ResetScenario("checkout")
+	store.ResetScenario("nothing")
+
+	require.Equal(t, map[string]string{"Checkout": StateStarted, "refund": "asked"}, store.Scenarios())
+	require.Equal(t, StateStarted, store.State("nothing"))
 }
 
 func TestStore_ScenariosIsACopy(t *testing.T) {
@@ -98,6 +110,14 @@ func (md *model) start(name string) {
 	}
 }
 
+func (md *model) state(name string) string {
+	if state, ok := md.states[strings.ToLower(name)]; ok {
+		return state
+	}
+
+	return StateStarted
+}
+
 func (md *model) scenarios() map[string]string {
 	out := make(map[string]string, len(md.states))
 	for k, state := range md.states {
@@ -122,12 +142,7 @@ func TestStore_KeepsStateAsAModelDoes(t *testing.T) {
 					vlatte.NewMatcherArg(context.Background(), vlatte.NewExplanation(), nil))
 				require.NoError(t, err)
 
-				if required == StateStarted {
-					md.start(name)
-				}
-
-				state, started := md.states[strings.ToLower(name)]
-				require.Equal(t, required == "" || !started || state == required, ok)
+				require.Equal(t, required == "" || md.state(name) == required, ok)
 			},
 			"claim": func(t *rapid.T) {
 				name := rapid.SampledFrom(_names).Draw(t, "name")
@@ -136,12 +151,7 @@ func TestStore_KeepsStateAsAModelDoes(t *testing.T) {
 
 				claimed := store.Matcher(name, required, next).Claim()
 
-				if required == StateStarted {
-					md.start(name)
-				}
-
-				state, started := md.states[strings.ToLower(name)]
-				want := required == "" || !started || state == required
+				want := required == "" || md.state(name) == required
 				require.Equal(t, want, claimed)
 
 				if want && next != "" {
@@ -156,6 +166,14 @@ func TestStore_KeepsStateAsAModelDoes(t *testing.T) {
 				store.SetScenario(name, state)
 				md.start(name)
 				md.states[strings.ToLower(name)] = state
+			},
+			"reset one": func(t *rapid.T) {
+				name := rapid.SampledFrom(_names).Draw(t, "name")
+
+				store.ResetScenario(name)
+				if _, ok := md.states[strings.ToLower(name)]; ok {
+					md.states[strings.ToLower(name)] = StateStarted
+				}
 			},
 			"reset": func(_ *rapid.T) {
 				store.ResetScenarios()

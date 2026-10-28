@@ -21,7 +21,6 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match"
-	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 )
 
@@ -219,8 +218,8 @@ func TestBuilder_ScenarioAdvancesPerServer(t *testing.T) {
 }
 
 func TestBuilder_AScenarioMockWithoutARequiredState(t *testing.T) {
-	// A mock that requires no state of its scenario matches in any state, and its new state moves the
-	// scenario, one no mock started too: it required "", the state of no scenario, and its new state was dropped.
+	// A mock that requires no state of its scenario matches in any state, and its new state moves the scenario, one
+	// nothing moved yet too.
 	newServer := func(builders ...*Builder) *Server {
 		m := MustNew(Setup().Silent())
 		m.MustStart()
@@ -252,7 +251,7 @@ func TestBuilder_AScenarioMockWithoutARequiredState(t *testing.T) {
 		}
 	})
 
-	t.Run("starts the scenario it moves", func(t *testing.T) {
+	t.Run("moves the scenario", func(t *testing.T) {
 		m := newServer(
 			Getf("/pay").ScenarioIs("checkout").ScenarioStateWillBe("paid").Reply(OK()),
 			Getf("/cart").ScenarioIs("checkout").ScenarioStateIs("cart").Reply(OK()))
@@ -260,7 +259,7 @@ func TestBuilder_AScenarioMockWithoutARequiredState(t *testing.T) {
 		status, _ := get(t, m, "/pay")
 		require.Equal(t, http.StatusOK, status)
 
-		// A scenario no mock started matches whatever state a mock requires: this one was started, at paid.
+		// In paid, the mock requiring cart doesn't match.
 		status, _ = get(t, m, "/cart")
 		require.Equal(t, StatusNoMatch, status)
 	})
@@ -468,7 +467,8 @@ func TestBuilder_MatchesDescribesUnderCustom(t *testing.T) {
 
 // scenarioServer runs the scenario suite on a server whose mocks are built in Go, or from mock files.
 type scenarioServer struct {
-	m         *Server
+	*Server
+
 	fromFiles bool
 }
 
@@ -480,7 +480,7 @@ func newScenarioServer(fromFiles bool) func(t *testing.T) scenariotest.Server {
 		m.MustStart()
 		t.Cleanup(m.Close)
 
-		return &scenarioServer{m: m, fromFiles: fromFiles}
+		return &scenarioServer{Server: m, fromFiles: fromFiles}
 	}
 }
 
@@ -488,6 +488,8 @@ func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 	for _, mk := range mocks {
 		if s.fromFiles {
 			doc, err := json.Marshal(map[string]any{
+				"id":      mk.ID,
+				"enabled": !mk.Disabled,
 				"scenario": map[string]string{
 					"name": mk.Scenario, "required_state": mk.RequiredState, "new_state": mk.NewState,
 				},
@@ -496,12 +498,12 @@ func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 			})
 			require.NoError(t, err)
 
-			s.m.MustMock(FromBytes(doc, "json"))
+			s.MustMock(FromBytes(doc, "json"))
 
 			continue
 		}
 
-		b := Getf("/scenario").ScenarioIs(mk.Scenario).Reply(OK().PlainText(mk.ID))
+		b := Getf("/scenario").ID(mk.ID).Enabled(!mk.Disabled).ScenarioIs(mk.Scenario).Reply(OK().PlainText(mk.ID))
 		if mk.RequiredState != "" {
 			b.ScenarioStateIs(mk.RequiredState)
 		}
@@ -510,12 +512,12 @@ func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 			b.ScenarioStateWillBe(mk.NewState)
 		}
 
-		s.m.MustMock(b)
+		s.MustMock(b)
 	}
 }
 
 func (s *scenarioServer) Call(t *testing.T) string {
-	res, body := do(t, http.MethodGet, s.m.URL("/scenario"), nil, nil)
+	res, body := do(t, http.MethodGet, s.URL("/scenario"), nil, nil)
 
 	switch res.StatusCode {
 	case http.StatusOK:
@@ -527,8 +529,6 @@ func (s *scenarioServer) Call(t *testing.T) string {
 		return ""
 	}
 }
-
-func (s *scenarioServer) Store() *matchscenario.Store { return s.m.scenarioStore }
 
 func TestBuilder_ServesScenarios(t *testing.T) {
 	scenariotest.Run(t, newScenarioServer(false))

@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
-	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 func TestResetTool(t *testing.T) {
@@ -16,13 +15,13 @@ func TestResetTool(t *testing.T) {
 	added := newFake("added")
 	added.origin = adminapi.Origin
 	store := newStore(t, added, newFake("from-code"))
-	scenarios := matchscenario.New()
-	scenarios.SetScenario("checkout", "paid")
+	scenarios := newScenarios()
+	scenarios.store.SetScenario("checkout", "paid")
 	cs := connect(t, store, adminapi.Capabilities{Scenarios: scenarios})
 
 	require.Equal(t, "done", call(t, cs, "reset", nil))
 	require.Equal(t, []string{"from-code"}, ids(t, store))
-	require.Equal(t, map[string]string{"checkout": "started"}, scenarios.Scenarios())
+	require.Equal(t, map[string]string{"checkout": "started"}, scenarios.store.Scenarios())
 }
 
 func TestResetTool_FilesThatFailToLoad(t *testing.T) {
