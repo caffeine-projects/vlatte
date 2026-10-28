@@ -45,7 +45,7 @@ docker run --rm -p 8080:8080 -p 8081:8081 \
 
 ## Routes
 
-The [OpenAPI reference](/reference/admin-api) describes every route with its parameters, bodies and answers, and the raw document is at [`/openapi/admin.yaml`](/reference/admin-api#the-document).
+The [OpenAPI reference](/vlatte/reference/admin-api.html){target="_self"} describes every route with its parameters, bodies and answers. Its document is at [`https://caffeine-projects.github.io/vlatte/openapi/admin.yaml`](/vlatte/openapi/admin.yaml){target="_self"}, for client generators and API tools, and a running server serves it at `GET /openapi`.
 
 | Route | What it does |
 |---|---|
@@ -70,7 +70,7 @@ The [OpenAPI reference](/reference/admin-api) describes every route with its par
 | `GET /requests/{id}`, `DELETE /requests` | Gets a request by the id its answer's `VLatte-Request-Id` names, and clears the journal. |
 | `GET /events` | Streams what the server serves as it happens, as [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html): requests a mock answered, requests no mock matched, proxied requests, warnings, errors and [scenario](/features/scenarios) moves. Nothing is kept: the [journal](/features/journal) keeps the requests. `curl -N <admin>/events` follows it. |
 | `GET /logs` | Streams the server's log lines, as it writes them, as Server-Sent Events. A server given its own `Logger` streams none. |
-| `POST /recording`, `GET /recording`, `DELETE /recording` | Starts a [recording](/http/recording) with the keys of the `record` section, counts its calls, and stops it, listing the files it wrote. |
+| `POST /recording`, `GET /recording`, `DELETE /recording` | Starts a [recording](/recording/) with the keys of the `record` section, counts its calls, and stops it, listing the files it wrote. |
 | `GET /` | The admin's homepage: what the mock server serves and what it served, its mocks, requests, scenarios and recording, live, with links to the other pages. Every page has a navbar with a light and dark theme toggle. |
 | `GET /recorder` | A page that records a service from a browser. |
 | `GET /scenario-board` | A page that shows and moves [scenarios](/features/scenarios) from a browser, live. |

@@ -1,31 +1,4 @@
-# TLS and CORS
-
-## TLS
-
-`m.StartTLS()` starts the server as `Start` does, serving HTTPS, and `m.URL()` starts with `https://`.
-
-| Option | Sets |
-|---|---|
-| `Setup().TLSCertKeyPair(certFile, keyFile)` | The certificate, from PEM files. |
-| `Setup().TLSCertificates(certs)` | The certificates, as `tls.Certificate` values. |
-| `Setup().TLSMutual(certFile, keyFile, clientCAFile)`, `Setup().TLSClientCAs(pool)` | Mutual TLS: clients present a certificate those CAs signed. |
-| `Setup().TLSConfig(c)` | The whole TLS configuration. Other TLS options are then ignored. |
-
-Without a certificate, the server serves the test certificate of `net/http/httptest`, which clients must trust or not verify:
-
-```go
-m := mockhttp.MustNew()
-m.MustStartTLS()
-t.Cleanup(m.Close)
-
-client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
-```
-
-The `vlatte` command serves HTTPS with `--https`, on port `8443` in [Docker](/run/docker), and its certificate with `tls.cert` and `tls.key` (`--tls-cert`, `--tls-key`); `tls.ca` (`--tls-ca`) requires client certificates signed by its CAs.
-
-For TLS between the server and the services it proxies to, see [Proxying](/http/proxying): `ssl_verify` on proxy replies, and [HTTPS interception](/http/proxying#https-interception) for the forward proxy.
-
-## CORS
+# CORS
 
 `Setup().CORS(...)` answers CORS requests, preflights included, with the headers of its configuration. `mockhttp.CORS()` builds one, and `mockhttp.DefaultCORSConfig` is the default: any origin, the methods `GET`, `POST`, `HEAD`, `PUT`, `DELETE` and `PATCH`, and `204` for a preflight.
 

@@ -11,7 +11,7 @@ Without `--addr`, it listens on a random port and prints the URL. Settings can a
 
 Mock files can send [webhooks](/features/webhooks-events): the CLI registers the `webhook` listener, and `--webhook-timeout` bounds each request that sets no `timeout` of its own.
 
-It [records](/http/recording) a service until it stops, and serves the recordings on the next run:
+It [records](/recording/) a service until it stops, and serves the recordings on the next run:
 
 ```sh
 vlatte --record --record-target=https://api.example.com --record-paths='/v1/*'

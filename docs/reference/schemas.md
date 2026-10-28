@@ -4,8 +4,8 @@ Mock files have JSON Schemas, served at stable addresses, so editors complete an
 
 | Mock files | Schema |
 |---|---|
-| HTTP | [`https://caffeine-projects.github.io/vlatte/schemas/http.schema.json`](/schemas/http.schema.json){target="_self"} |
-| gRPC | [`https://caffeine-projects.github.io/vlatte/schemas/grpc.schema.json`](/schemas/grpc.schema.json){target="_self"} |
+| HTTP | [`https://caffeine-projects.github.io/vlatte/schemas/http.schema.json`](/vlatte/schemas/http.schema.json){target="_self"} |
+| gRPC | [`https://caffeine-projects.github.io/vlatte/schemas/grpc.schema.json`](/vlatte/schemas/grpc.schema.json){target="_self"} |
 
 Each schema's `$id` is its address. They describe the format the decoder reads: tests keep the schemas in step with it. The server never reads them; a file a schema accepts can still fail to load, such as one that names a body file that isn't there, and the error says why.
 

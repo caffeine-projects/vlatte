@@ -41,9 +41,9 @@ A gRPC server keeps a [journal](/features/journal#in-grpc) of its calls with `Se
 - [Streaming](/grpc/streaming): server, client and bidi streams.
 - [Cuts](/grpc/cuts): a server that dies midway.
 - [Descriptors and reflection](/grpc/descriptors): serving services without their generated code.
-- [Proxying and recording](/grpc/proxying-recording).
+- [Proxying](/grpc/proxying): answers of another gRPC server. [Recording](/recording/grpc) has a section of its own.
 - [Mock files](/grpc/mock-files): the YAML and JSON format.
 - [TLS](/grpc/tls).
 - [Troubleshooting](/grpc/troubleshooting): no-match codes, trailers and debug metadata.
 
-What gRPC shares with HTTP, such as [matchers](/features/matchers), [scenarios](/features/scenarios), [templates](/features/templates#in-grpc), [webhooks](/features/webhooks-events#in-grpc) and the [journal](/features/journal#in-grpc), is under [Features](/features/).
+What gRPC shares with HTTP, such as [matchers](/matchers/), [scenarios](/features/scenarios), [templates](/features/templates#in-grpc), [webhooks](/features/webhooks-events#in-grpc) and the [journal](/features/journal#in-grpc), works the same for both: see [Matchers](/matchers/) and [Features](/features/).

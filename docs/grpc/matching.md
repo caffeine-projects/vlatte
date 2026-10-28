@@ -21,4 +21,4 @@ m.MustMock(mockgrpc.Method("users.Users/Get").
 	Reply(mockgrpc.JSON(`{"id": "u-1", "name": "ann"}`)))
 ```
 
-The matchers they take, such as `match.Equal`, `match.RegExpr` or `match.JSONPath`, are shared by every protocol: see [Matchers](/features/matchers). In a [mock file](/grpc/mock-files), `request.header`, `request.fields`, `request.message`, `request.messages`, `request.body` and `request.custom` match the same parts.
+The matchers they take, such as `match.Equal`, `match.RegExpr` or `match.JSONPath`, are shared by every protocol: see [Matchers](/matchers/). In a [mock file](/grpc/mock-files), `request.header`, `request.fields`, `request.message`, `request.messages`, `request.body` and `request.custom` match the same parts.

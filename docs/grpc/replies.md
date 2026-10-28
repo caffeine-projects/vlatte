@@ -13,7 +13,7 @@
 | `Echo()` | The client's messages back, read as the method's output type by field number: a unary or server streaming call's request, each message of a bidi call as it comes, the last one of a client stream. `Log()` logs each. |
 | `Shared(replier)` | The same `Replier` for every mock built with it, which they never close. |
 | `Func(fn)` | Whatever `fn` sends through the call, for anything else. |
-| `From(target)` | The answer of another gRPC server: see **Proxying and recording** below. |
+| `From(target)` | The answer of another gRPC server: see **Proxy replies** below. |
 
 A reply's `Header` and `Trailer` add metadata, `Status` ends a stream with a status after its messages, `Details` adds `errdetails` messages to it, and `MessageDelay` waits before each message. `Build` checks a reply against the method: its messages' type, and that a unary or client streaming method gets one message, or a status. It checks each reply of `Seq` and `Rand` the same way, and each mock built with them goes through its replies on its own.
 
@@ -39,4 +39,4 @@ m.MustMock(mockgrpc.Method("Chat/Talk").Reply(mockgrpc.Bidi().
 
 ## Proxy replies
 
-`From(target)` answers with what another gRPC server answers: see [Proxying and recording](/grpc/proxying-recording).
+`From(target)` answers with what another gRPC server answers: see [Proxying](/grpc/proxying).

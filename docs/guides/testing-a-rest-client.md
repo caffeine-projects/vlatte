@@ -145,4 +145,4 @@ func TestCreateUserSendsTheName(t *testing.T) {
 - `mockhttp.MustNew`, `Setup().Journal`, `Setup().Silent`: [HTTP](/http/), [Request journal](/features/journal).
 - `Getf`, `Postf`, `Header`: [Mocks](/http/mocks), [Request matching](/http/matching).
 - `OK().JSON`, `NotFound`, `Created`: [Replies](/http/replies).
-- `match.Equal`, `match.JSONPath`: [Matchers](/features/matchers).
+- `match.Equal`, `match.JSONPath`: [Matchers](/matchers/).

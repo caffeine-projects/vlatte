@@ -4,7 +4,7 @@ vlatte sends requests on to real servers in three ways:
 
 - a **proxy reply**: a mock that answers with what its target answers, `From(target)` in Go and the `proxy` key in mock files;
 - the **forward proxy**: clients use the server as their HTTP proxy, `Setup().Proxy()` in Go and the `proxy` setting, and what no mock matches goes to its host;
-- the **recording target**: see [Recording and playback](/http/recording).
+- the **recording target**: see [Recording and playback](/recording/).
 
 ## How proxies answer
 

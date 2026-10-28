@@ -38,9 +38,9 @@ func TestHello(t *testing.T) {
 - [Forms and multipart](/http/forms-multipart): matching uploads and replying with multipart bodies.
 - [Proxying](/http/proxying): proxy replies, proxy all, the forward proxy and HTTPS interception.
 - [Steps](/http/steps) and [Faults](/http/faults): changing, slowing and breaking answers.
-- [Recording and playback](/http/recording): recording a real service as mock files.
+- [Recording](/recording/http): recording a real service as mock files.
 - [Mock files](/http/mock-files): the YAML and JSON format.
-- [TLS and CORS](/http/tls-cors).
+- [TLS](/http/tls) and [CORS](/http/cors).
 - [Troubleshooting](/http/troubleshooting): failures, near misses and debug headers.
 
-What HTTP shares with gRPC, such as [matchers](/features/matchers), [scenarios](/features/scenarios), [templates](/features/templates), [webhooks](/features/webhooks-events) and the [journal](/features/journal), is under [Features](/features/).
+What HTTP shares with gRPC, such as [matchers](/matchers/), [scenarios](/features/scenarios), [templates](/features/templates), [webhooks](/features/webhooks-events) and the [journal](/features/journal), works the same for both: see [Matchers](/matchers/) and [Features](/features/).

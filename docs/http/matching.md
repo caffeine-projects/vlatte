@@ -1,6 +1,6 @@
 # Request matching
 
-A mock matches a request when every matcher it has matches. Each part of the request has a builder method in Go and a key under `request` in a [mock file](/http/mock-files). The matchers themselves, such as `match.Equal` or `[contains, x]`, are shared by every protocol: see [Matchers](/features/matchers).
+A mock matches a request when every matcher it has matches. Each part of the request has a builder method in Go and a key under `request` in a [mock file](/http/mock-files). The matchers themselves, such as `match.Equal` or `[contains, x]`, are shared by every protocol: see [Matchers](/matchers/).
 
 ## What a mock can match
 
@@ -21,8 +21,8 @@ A mock matches a request when every matcher it has matches. Each part of the req
 | `BasicAuth(user, pass)`, `BasicAuthMatches(user, pass)` | `basic_auth` | Basic credentials. |
 | `ClientIP(m)` | `client_ip` | The client's address, as the server's connection has it, not `X-Forwarded-For`. |
 | `FormField`, `FormFields`, `FormFile` | `form`, `forms`, `form_file` | Form fields and files: see [Forms and multipart](/http/forms-multipart). |
-| `Body(matchers...)` | `body` | The body. See [Bodies](#json-bodies). |
-| `Matches(m)`, `RequestMatches(fn)` | `custom` | The whole `*http.Request`. See [Custom matchers](/features/custom-matchers). |
+| `Body(matchers...)` | `body` | The body. See [JSON and XML bodies](#json-and-xml-bodies). |
+| `Matches(m)`, `RequestMatches(fn)` | `custom` | The whole `*http.Request`. See [Custom matchers](/matchers/custom). |
 
 ```go
 m.MustMock(mockhttp.Postf("/pets").
@@ -94,13 +94,9 @@ A name the request doesn't have is an empty list, which `[not, present]` matches
 - `host` matches the host the request names, without its port, and text ignores case: `Host` in Go.
 - `client_ip` matches the client's address, as the server's connection has it, not `X-Forwarded-For`: `ClientIP` in Go.
 
-## JSON bodies
+## JSON and XML bodies
 
-`[eqj, {...}]` matches JSON equal to the document given, in full. An object of options after it loosens that: `ignore_array_order: true` pairs list items up in any order, and `ignore_extra_elements: true` ignores members and list items the stub doesn't name.
-
-`[jsonschema, schema]` matches JSON that conforms to a JSON Schema, an object or JSON text, of draft 2020-12 unless `$schema` or `{draft: 7}` says otherwise; it loads no `$ref` outside the schema.
-
-In Go: `EqualJSON(doc, IgnoreArrayOrder(), IgnoreExtraElements())` and `JSONSchema(text, SchemaDraft(JSONSchemaDraft7))`.
+`[eqj, {...}]` matches a JSON body equal to a document, `[jsonschema, schema]` one that conforms to a JSON Schema, `[eqx, '...']` an equal XML document, and `[jsonpath, ...]` and `[xpath, ...]` match what a path selects. Their options, such as `ignore_array_order`, are in [JSON and XML](/matchers/json-xml).
 
 ```yaml
 request:
@@ -111,14 +107,6 @@ request:
     [jsonpath, $.id, [regex, '^[0-9]+$']]
   ]]
 ```
-
-## XML bodies
-
-`[eqx, '<order id="7"><item>1</item></order>']` matches an equal XML document, by what it means: attributes in any order, text trimmed, comments and indentation left out, names compared by namespace URI. Options: `ignore_child_order: true`, and `namespaces: strict` to compare prefixes too, or `none` to read no namespaces.
-
-`[xpath, expression, matcher]` applies the matcher to what an XPath 1.0 expression selects: nothing is null, one result is itself, more are a list, so `[some, m]` matches any of them; an element is its XML. `{namespaces: {t: "urn:todo"}}` binds a prefix of the expression.
-
-In Go: `EqualXML`, `IgnoreChildOrder`, `XMLNamespaces`, `XPath` and `XPathNamespace`.
 
 ## Binary bodies
 

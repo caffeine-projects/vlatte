@@ -92,4 +92,4 @@ response:
 
 **Templates** read forms: `{{ .Request.PostForm.Get "title" }}` and `{{ with .Request.FormFile "avatar" }}{{ .Filename }}{{ end }}`.
 
-**Recording** matches a recorded upload by all its text fields, each with its values in order, and its files by `form_file` patterns, so it replays whatever boundary the next client picks. Files that aren't UTF-8 text go to files next to the recording. An upload with another field doesn't match; one with more files still does. See [Recording and playback](/http/recording).
+**Recording** matches a recorded upload by all its text fields, each with its values in order, and its files by `form_file` patterns, so it replays whatever boundary the next client picks. Files that aren't UTF-8 text go to files next to the recording. An upload with another field doesn't match; one with more files still does. See [Recording and playback](/recording/).

@@ -4,13 +4,17 @@ These features work the same for every protocol. Each page shows HTTP first, and
 
 | Feature | What it does |
 |---|---|
-| [Matchers](/features/matchers) | The `match` catalog: equality, text, numbers, lists, JSON, XML, dates, and combinations. |
-| [Custom matchers](/features/custom-matchers) | Matchers of your own, in Go and in mock files. |
 | [Scenarios](/features/scenarios) | Mocks that answer in turn, as a scenario moves from state to state. |
 | [Mock lifecycle](/features/mock-lifecycle) | IDs, names, priorities, `Times`, delays, enabling and disabling. |
 | [Templates](/features/templates) | Replies rendered from the request. |
 | [Webhooks and events](/features/webhooks-events) | Requests and callbacks a mock runs once it replied. |
 | [Request journal](/features/journal) | The requests a server got, to verify after the fact. |
-| [Recipes](/features/recipes) | Reusable preparations of a server. |
+| [TLS](/features/tls) | HTTPS and gRPC over TLS, mutual TLS included, in one line. |
 
-Running a server outside Go tests, with the CLI, Docker, the admin API and MCP, is under [Run](/run/cli).
+Three features have sections of their own:
+
+- **[Matchers](/matchers/)**: the `match` catalog every protocol shares, from equality and text to JSON, XML, dates and combinations, plus matchers of your own.
+- **[Recording](/recording/)**: record a real service once as mock files, and replay it without the service.
+- **[Recipes](/recipes/)**: reusable preparations of a server, such as proxying what no mock matches.
+
+Running a server outside Go tests, with the CLI, Docker, the admin API and MCP, is under [Run](/run/).

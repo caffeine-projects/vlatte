@@ -8,7 +8,7 @@ A mock server is a real server: `mockhttp.Server` for HTTP, `mockgrpc.Server` fo
 
 A mock is three things:
 
-1. **Matchers** that say which requests it answers: a method, a path, a header, a field of the body. See [HTTP matching](/http/matching), [gRPC matching](/grpc/matching), and the [matchers](/features/matchers) both share.
+1. **Matchers** that say which requests it answers: a method, a path, a header, a field of the body. See [HTTP matching](/http/matching), [gRPC matching](/grpc/matching), and the [matchers](/matchers/) both share.
 2. **A reply** that says how it answers: a status, headers, a body, a stream of messages, a proxy to a real service. See [HTTP replies](/http/replies) and [gRPC replies](/grpc/replies).
 3. **Mock features** that both protocols share: an ID and a name, a priority, `Times` and `Once`, delays, [scenarios](/features/scenarios), and [events such as webhooks](/features/webhooks-events). See [Mock lifecycle](/features/mock-lifecycle).
 

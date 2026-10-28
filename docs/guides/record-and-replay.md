@@ -1,6 +1,6 @@
 # Record and replay
 
-This guide records a real API once, commits what it answered as mock files, and replays them in every later test run, without the API. It uses [recording and playback](/http/recording) and [mock files](/http/mock-files).
+This guide records a real API once, commits what it answered as mock files, and replays them in every later test run, without the API. It uses [recording and playback](/recording/) and [mock files](/http/mock-files).
 
 ## A server that records on demand
 
@@ -87,11 +87,11 @@ Each call becomes a mock file, named after its request:
 }
 ```
 
-A recording matches its request's method, path and query, and its body, and no other request. `RecordRequestHeaders` adds headers it matches, and calls it can't tell apart play their answers in turn. See [What a recording matches](/http/recording#what-a-recording-matches).
+A recording matches its request's method, path and query, and its body, and no other request. `RecordRequestHeaders` adds headers it matches, and calls it can't tell apart play their answers in turn. See [What a recording matches](/recording/http#what-a-recording-matches).
 
 ## Keep secrets out
 
-Recordings are plain text, and they get committed: review them first. The helper keeps the `Authorization` header's value out with `RedactHeader`, and drops a header that changes on every call with `RecordTransform`. `Set-Cookie` is left out by default. See [Secrets](/http/recording#secrets).
+Recordings are plain text, and they get committed: review them first. The helper keeps the `Authorization` header's value out with `RedactHeader`, and drops a header that changes on every call with `RecordTransform`. `Set-Cookie` is left out by default. See [Secrets](/recording/files-secrets#secrets).
 
 ## Record with the CLI
 
@@ -107,5 +107,5 @@ The admin API's `/recorder` page starts and stops a recording from a browser.
 
 ## What you used
 
-- `StartRecording`, `StopRecording`, `RecordDir`, `RecordTarget`, `RecordTransform`: [Recording and playback](/http/recording).
+- `StartRecording`, `StopRecording`, `RecordDir`, `RecordTarget`, `RecordTransform`: [Recording and playback](/recording/).
 - `Setup().MockFilePatterns`, `Setup().RedactHeader`: [Mock files](/http/mock-files), [Troubleshooting](/http/troubleshooting#logs).

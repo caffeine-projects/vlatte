@@ -12,3 +12,4 @@ Each guide works through one task from start to end, with code you can run. The 
 | [Testing a gRPC streaming client](/guides/grpc-streaming-client) | Tests of a client of a server stream, through errors and a server that dies midway. |
 | [Docker Compose](/guides/docker-compose) | vlatte next to an app under test, with mocks changed over the admin API. |
 | [Testing webhooks](/guides/webhooks) | A payment API that calls your service back, and a test that the callback came. |
+| [HTTPS and mTLS mocks](/guides/https-mtls) | Tests of a client of an HTTPS-only API, with mutual TLS, and the CLI serving the same mock. |

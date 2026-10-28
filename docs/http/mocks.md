@@ -20,7 +20,7 @@ scoped.AssertCalled(t)
 | `Getf(path, a...)`, `Postf`, `Putf`, `Patchf`, `Deletef`, `Headf` | That method, and a path glob formatted as `fmt.Sprintf` formats it. |
 | `Get(m)`, `Post(m)`, `Put(m)`, `Patch(m)`, `Delete(m)`, `Head(m)` | That method, and a URL matcher, such as `match.URLPath("/users")`. |
 | `AnyMethod()` | Any method, and any path. |
-| `Request()` | Nothing yet: add matchers yourself. Also the request part of a [record filter](/http/recording) and of a [journal query](/features/journal). |
+| `Request()` | Nothing yet: add matchers yourself. Also the request part of a [record filter](/recording/) and of a [journal query](/features/journal). |
 | `ProxyAll(From(target))` | What no other mock matches: see [Proxying](/http/proxying#proxy-all). |
 | `FromFile(path)`, `FromBytes(data, format)` | What a [mock file](/http/mock-files) says. |
 

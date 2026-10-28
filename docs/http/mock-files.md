@@ -2,7 +2,7 @@
 
 Mocks can also live in YAML or JSON files (`.json`, `.yaml` or `.yml`).
 
-- **On start,** the server loads the files matching `testdata/vlatte/_mocks/*mock.yaml` and `testdata/vlatte/_mocks/*mock.yml`, and the [recordings](/http/recording) in `testdata/vlatte/_mocks_recorded`, in name order: the folders of its [work directory](/run/configuration#work-directory). Change the patterns with `Setup().MockFilePatterns(...)`.
+- **On start,** the server loads the files matching `testdata/vlatte/_mocks/*mock.yaml` and `testdata/vlatte/_mocks/*mock.yml`, and the [recordings](/recording/) in `testdata/vlatte/_mocks_recorded`, in name order: the folders of its [work directory](/run/configuration#work-directory). Change the patterns with `Setup().MockFilePatterns(...)`.
 - **To load one file,** use `m.MustMock(mockhttp.FromFile(path))`.
 - **`m.Reload()`** replaces the mocks of the files with what they hold now, in one step. When a file has problems, it returns them and the mocks stay as they were.
 
@@ -57,7 +57,7 @@ A reply's `body` is text as is, and any other value as JSON. A body that isn't U
 
 ## Matching
 
-The `request` key matches requests as the Go builder does: see [Request matching](/http/matching) for every key, and [Matchers](/features/matchers) for the matcher lists, such as `[contains, x]` or `[jsonpath, $.id, [gt, 1]]`, and [Custom matchers](/features/custom-matchers) for matchers of your own, in `request.custom`.
+The `request` key matches requests as the Go builder does: see [Request matching](/http/matching) for every key, and [Matchers](/matchers/) for the matcher lists, such as `[contains, x]` or `[jsonpath, $.id, [gt, 1]]`, and [Custom matchers](/matchers/custom) for matchers of your own, in `request.custom`.
 
 ## Proxy replies
 

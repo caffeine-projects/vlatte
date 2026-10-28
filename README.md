@@ -26,14 +26,14 @@ VLatte starts real HTTP and gRPC servers that answer the way you tell them to. S
 ## Features
 
 - **[HTTP](https://caffeine-projects.github.io/vlatte/http/) and [gRPC](https://caffeine-projects.github.io/vlatte/grpc/) mock servers.** gRPC needs no service implementation: unary, server, client and bidi streaming calls, from generated code or descriptor sets.
-- **[Matchers](https://caffeine-projects.github.io/vlatte/features/matchers)** shared by every protocol: equality, JSON path, JSON Schema, XPath, regex, globs, dates and combinators, plus your own.
+- **[Matchers](https://caffeine-projects.github.io/vlatte/matchers/)** shared by every protocol: equality, JSON path, JSON Schema, XPath, regex, globs, dates and combinators, plus your own.
 - **Replies** with templated headers and bodies, sequences, random picks, echo, multipart and custom functions.
 - **Mock files** in YAML or JSON, with [JSON schemas](https://caffeine-projects.github.io/vlatte/reference/schemas) for editors, reloaded on demand.
 - **Scenarios** for stateful flows, and **webhooks** sent after a mock answers.
 - **Proxying, and recording** of a real service to play it back later, with outbound rules that limit the addresses a server connects to.
 - **Fault injection:** latency, slow bandwidth, connection resets, malformed and empty answers.
 - **A request journal** to verify what clients sent, and debug headers on every answer.
-- **An [admin API](https://caffeine-projects.github.io/vlatte/reference/admin-api)** to manage mocks while a server runs, with Basic or bearer authentication and TLS, also served over **MCP** for AI agents.
+- **An [admin API](https://caffeine-projects.github.io/vlatte/reference/admin-api.html)** to manage mocks while a server runs, with Basic or bearer authentication and TLS, also served over **MCP** for AI agents.
 - **[A CLI and a Docker image](https://caffeine-projects.github.io/vlatte/run/)** to run mock servers outside Go.
 
 ## Install
