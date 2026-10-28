@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>vlatte scenarios</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #fafaf9;
+      --fg: #1c1917;
+      --muted: #78716c;
+      --line: #e7e5e4;
+      --panel: #ffffff;
+      --accent: #b45309;
+      --accent-soft: #fef3c7;
+      --danger: #b91c1c;
+      --ok: #15803d;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1c1917;
+        --fg: #f5f5f4;
+        --muted: #a8a29e;
+        --line: #44403c;
+        --panel: #292524;
+        --accent: #f59e0b;
+        --accent-soft: #451a03;
+        --danger: #f87171;
+        --ok: #4ade80;
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 32px 16px 64px;
+    }
+
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 16px; margin: 0; overflow-wrap: anywhere; }
+    p { margin: 0 0 12px; }
+    code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .muted { color: var(--muted); }
+
+    .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 20px; }
+    .toolbar input { flex: 1 1 220px; }
+
+    input[type="search"] {
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--fg);
+      font: inherit;
+    }
+
+    button {
+      padding: 6px 14px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--fg);
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button:disabled { opacity: 0.5; cursor: default; }
+
+    .live { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    .dot.on { background: var(--ok); }
+
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-top: 16px;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      section.moved { animation: flash 1.2s; }
+    }
+
+    @keyframes flash { from { border-color: var(--accent); } }
+
+    .head { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+    .title { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; min-width: 0; }
+
+    .pill {
+      padding: 2px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    .states { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+
+    .states button { font-weight: 500; }
+    .states button.current { background: var(--accent); border-color: var(--accent); color: var(--bg); opacity: 1; }
+    .states button.unreachable { border-style: dashed; }
+
+    table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { font-size: 13px; color: var(--muted); font-weight: 600; }
+    td { overflow-wrap: anywhere; }
+
+    .note { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+
+    .error { color: var(--danger); }
+
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Scenarios</h1>
+  <p class="muted">Where each scenario is, the states its mocks name, and which mock moves it where. Pick a state to
+    move a scenario to it.</p>
+
+  <p id="unsupported" class="error" role="alert" hidden></p>
+
+  <div id="board">
+    <div class="toolbar">
+      <input id="filter" type="search" placeholder="Filter by name" autocomplete="off" aria-label="Filter scenarios by name">
+      <button id="reset-all" type="button">Start every scenario over</button>
+      <span class="live" title="The page follows the server's events, or checks every 2 seconds without them.">
+        <span id="live-dot" class="dot"></span><span id="live">Connecting</span>
+      </span>
+    </div>
+
+    <p id="load-problem" class="error" role="alert" hidden></p>
+    <p id="problem" class="error" role="alert" hidden></p>
+    <p id="empty" class="muted" hidden>No scenario yet. The scenarios of the server's mocks show up here.</p>
+    <p id="no-match" class="muted" hidden>No scenario matches the filter.</p>
+    <div id="scenarios"></div>
+  </div>
+</main>
+<script>
+  // The page talks to the admin API it is served by: GET, PUT and DELETE /scenarios, and GET /events to follow moves.
+  // Its URLs are relative, so it works wherever the admin API is mounted.
+  const $ = (id) => document.getElementById(id)
+  let shown = new Map()
+  let lastBody = null
+  let loading = null
+  let again = false
+  let polling = null
+  let events = null
+
+  async function call(method, path, body) {
+    const init = { method, headers: { Accept: 'application/json' } }
+    if (body !== undefined) {
+      init.headers['Content-Type'] = 'application/json'
+      init.body = JSON.stringify(body)
+    }
+
+    const res = await fetch(path, init)
+    const text = await res.text()
+    let doc = null
+    try {
+      doc = text ? JSON.parse(text) : null
+    } catch {
+      // A proxy in front of the admin API may answer HTML: the status says what went wrong.
+    }
+
+    if (!res.ok && (doc === null || !doc.detail)) doc = { detail: res.status + ' ' + res.statusText }
+    return { res, text, doc }
+  }
+
+  function scenarioPath(name) {
+    return 'scenarios/' + encodeURIComponent(name)
+  }
+
+  function el(tag, props, ...children) {
+    const node = document.createElement(tag)
+    Object.assign(node, props)
+    node.append(...children)
+    return node
+  }
+
+  function show(where, doc) {
+    $(where).textContent = doc ? doc.detail : ''
+    $(where).hidden = !doc
+  }
+
+  async function act(method, path, body) {
+    try {
+      const { res, doc } = await call(method, path, body)
+      show('problem', res.ok ? null : doc)
+    } catch (err) {
+      show('problem', { detail: "Can't reach the admin API: " + err.message })
+    }
+
+    await refresh()
+  }
+
+  function render(scenario) {
+    const states = el('div', { className: 'states', role: 'group' })
+    states.setAttribute('aria-label', 'States of ' + scenario.name)
+
+    for (const state of scenario.states) {
+      const current = state.name === scenario.state
+      const button = el('button', {
+        type: 'button',
+        className: (current ? 'current ' : '') + (state.reachable ? '' : 'unreachable'),
+        disabled: current,
+        title: 'Move ' + scenario.name + ' to ' + state.name +
+          (state.reachable ? '' : ': no path of mock moves leads here from started'),
+      }, state.name)
+      button.setAttribute('aria-pressed', String(current))
+      button.dataset.key = 'state:' + scenario.name + ':' + state.name
+      button.dataset.scenario = scenario.name
+      button.addEventListener('click', () => act('PUT', scenarioPath(scenario.name), { state: state.name }))
+      states.append(button)
+    }
+
+    const reset = el('button', { type: 'button', disabled: scenario.state === 'started' }, 'Start over')
+    reset.dataset.key = 'reset:' + scenario.name
+    reset.dataset.scenario = scenario.name
+    reset.addEventListener('click', () => act('DELETE', scenarioPath(scenario.name)))
+
+    const section = el('section', {},
+      el('div', { className: 'head' },
+        el('div', { className: 'title' }, el('h2', {}, scenario.name), el('span', { className: 'pill' }, scenario.state)),
+        reset))
+    section.dataset.name = scenario.name.toLowerCase()
+
+    if (scenario.states.length === 0) {
+      section.append(el('p', { className: 'note' }, 'No mock names this scenario: it was set without one.'))
+      return section
+    }
+
+    section.append(states)
+
+    const unreachable = scenario.states.filter((s) => !s.reachable).map((s) => s.name)
+    if (unreachable.length > 0) {
+      section.append(el('p', { className: 'note' }, 'No path of mock moves leads from started to ' + unreachable.join(', ') +
+        ': requests get there only after the scenario is set to one of them, here or with the admin API.'))
+    }
+
+    if (scenario.transitions.length > 0) {
+      const rows = scenario.transitions.map((t) => el('tr', {},
+        el('td', {}, el('code', {}, t.mock_id)),
+        el('td', {}, t.from || el('span', { className: 'muted' }, 'any state')),
+        el('td', {}, t.to)))
+      section.append(el('table', {},
+        el('thead', {}, el('tr', {}, el('th', {}, 'Mock'), el('th', {}, 'From'), el('th', {}, 'To'))),
+        el('tbody', {}, ...rows)))
+    }
+
+    return section
+  }
+
+  function applyFilter() {
+    const query = $('filter').value.trim().toLowerCase()
+    let visible = 0
+    for (const section of $('scenarios').children) {
+      section.hidden = !section.dataset.name.includes(query)
+      if (!section.hidden) visible++
+    }
+
+    $('no-match').hidden = visible > 0 || $('scenarios').children.length === 0
+  }
+
+  // A new board keeps the focus of the old one: the button with the same key, else the scenario's first enabled one.
+  function draw(sections) {
+    const active = document.activeElement
+    const focused = active && active.dataset ? active.dataset.key : undefined
+    const scenario = focused === undefined ? undefined : active.dataset.scenario
+    $('scenarios').replaceChildren(...sections)
+    if (focused === undefined) return
+
+    const same = $('scenarios').querySelector('[data-key="' + CSS.escape(focused) + '"]')
+    if (same && !same.disabled) {
+      same.focus()
+      return
+    }
+
+    const section = [...$('scenarios').children].find((s) => s.dataset.name === scenario.toLowerCase())
+    const next = section && section.querySelector('button:not(:disabled)')
+    if (next) next.focus()
+  }
+
+  // refresh loads the scenarios and draws them. One load runs at a time, so answers draw in order: a refresh asked for
+  // while one runs loads once more after it. Moves faster than the loads then cost one load at a time, and each draws.
+  function refresh() {
+    if (loading !== null) {
+      again = true
+      return loading
+    }
+
+    loading = (async () => {
+      do {
+        again = false
+        await load()
+      } while (again)
+    })().finally(() => {
+      loading = null
+    })
+
+    return loading
+  }
+
+  async function load() {
+    let answer
+    try {
+      answer = await call('GET', 'scenarios')
+    } catch (err) {
+      show('load-problem', { detail: "Can't reach the admin API: " + err.message })
+      return
+    }
+
+    const { res, text, doc } = answer
+    if (res.status === 501) {
+      $('unsupported').textContent = doc.detail + '.'
+      $('unsupported').hidden = false
+      $('board').hidden = true
+      stopFollowing()
+      return
+    }
+
+    if (!res.ok) {
+      show('load-problem', doc)
+      return
+    }
+
+    show('load-problem', null)
+    if (text === lastBody) return
+    lastBody = text
+
+    const next = new Map()
+    const sections = doc.scenarios.map((scenario) => {
+      const section = render(scenario)
+      const before = shown.get(scenario.name)
+      if (before !== undefined && before !== scenario.state) section.classList.add('moved')
+      next.set(scenario.name, scenario.state)
+      return section
+    })
+
+    shown = next
+    draw(sections)
+    $('empty').hidden = sections.length > 0
+    $('reset-all').disabled = sections.length === 0
+    applyFilter()
+  }
+
+  function live(on, text) {
+    $('live-dot').classList.toggle('on', on)
+    $('live').textContent = text
+  }
+
+  function stopFollowing() {
+    if (events !== null) events.close()
+    if (polling !== null) clearInterval(polling)
+    events = null
+    polling = null
+  }
+
+  function poll(ms) {
+    if (polling !== null) clearInterval(polling)
+    polling = setInterval(refresh, ms)
+  }
+
+  // Each move streams a scenario event: the page loads the scenarios again. A change of the mocks streams none, so the
+  // page also checks every 5 seconds, and every 2 without the events.
+  function follow() {
+    poll(5000)
+    events = new EventSource('events')
+    events.addEventListener('scenario', refresh)
+    events.addEventListener('open', () => {
+      live(true, 'Live')
+      refresh()
+    })
+    events.addEventListener('error', () => {
+      if (events.readyState !== EventSource.CLOSED) {
+        live(false, 'Reconnecting')
+        return
+      }
+
+      events = null
+      live(false, 'Checking every 2 seconds')
+      poll(2000)
+    })
+  }
+
+  $('filter').addEventListener('input', applyFilter)
+  $('reset-all').addEventListener('click', () => act('DELETE', 'scenarios'))
+
+  refresh().finally(() => {
+    if (!$('board').hidden) follow()
+  })
+</script>
+</body>
+</html>

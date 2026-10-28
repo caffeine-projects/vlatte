@@ -15,8 +15,8 @@ type Scenario struct {
 	Transitions []ScenarioTransition `json:"transitions"`
 }
 
-// ScenarioState is a state a mock of a scenario names. An unreachable one is a state no move of a mock leads to from
-// started: only setting the scenario gets there.
+// ScenarioState is a state a mock of a scenario names. An unreachable one is a state no path of mock moves leads to
+// from started: requests get there only after the scenario is set to it or to another such state.
 type ScenarioState struct {
 	Name      string `json:"name"`
 	Reachable bool   `json:"reachable"`
