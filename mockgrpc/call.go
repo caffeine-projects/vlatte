@@ -10,6 +10,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 var (
@@ -37,6 +39,9 @@ type Call struct {
 	// data and provided are what templates read as .Data and .Provided: set once a mock matched the call.
 	data     map[string]any
 	provided map[string]any
+
+	// scenarioMoves are the moves of the scenarios of the mock that matched the call, which its templates read.
+	scenarioMoves []matchscenario.Move
 
 	mu       sync.Mutex
 	message  proto.Message

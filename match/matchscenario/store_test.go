@@ -51,8 +51,8 @@ func TestStore_ResetOneStartsOnlyThatScenarioOver(t *testing.T) {
 	store.SetScenario("Checkout", "paid")
 	store.SetScenario("refund", "asked")
 
-	store.ResetScenario("checkout")
-	store.ResetScenario("nothing")
+	require.True(t, store.ResetScenario("checkout"))
+	require.False(t, store.ResetScenario("nothing"), "a scenario the store doesn't hold doesn't move")
 
 	require.Equal(t, map[string]string{"Checkout": StateStarted, "refund": "asked"}, store.Scenarios())
 	require.Equal(t, StateStarted, store.State("nothing"))
@@ -98,6 +98,20 @@ func TestView_ReadsTheStateOfAScenario(t *testing.T) {
 
 	store.SetScenario("Checkout", "paid")
 	require.Equal(t, "paid", view.State("CHECKOUT"))
+}
+
+func TestView_ReadsTheStateItsOwnMoveTookAScenarioTo(t *testing.T) {
+	// A request's templates read the state its mock moved a scenario to, as its journal entry says, even once another
+	// request moved the scenario on; a scenario it didn't move reads as it is.
+	store := New()
+	store.SetScenario("checkout", "paid")
+	view := store.View(Move{Scenario: "checkout", From: StateStarted, To: "paid"})
+
+	store.SetScenario("checkout", "shipped")
+	store.SetScenario("refund", "asked")
+
+	require.Equal(t, "paid", view.State("Checkout"))
+	require.Equal(t, "asked", view.State("refund"))
 }
 
 // _names spell two scenarios in several cases.

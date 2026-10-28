@@ -33,8 +33,8 @@ type Data struct {
 	// a webhook's, don't have it.
 	Extra any
 
-	// Scenarios reads the state of the server's scenarios: {{ .Scenarios.State "checkout" }}. The scenario of the mock
-	// that matched has moved already, when the server picked it.
+	// Scenarios reads the state of the server's scenarios: {{ .Scenarios.State "checkout" }}. A scenario the mock that
+	// matched moved is in the state it moved it to, even once another request moved it on.
 	Scenarios matchscenario.View
 }
 
