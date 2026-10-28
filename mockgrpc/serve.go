@@ -93,7 +93,8 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 			call.method)
 	}
 
-	journaled.matched(mock)
+	call.scenarioMoves = movedScenarios(mock)
+	journaled.matched(mock, call.scenarioMoves)
 
 	// The template data providers see the mock that matched. One that fails fails the call: its mock doesn't answer.
 	if err := app.provide(call, mock); err != nil {

@@ -180,9 +180,9 @@ func (c *journalCall) request(body []byte) {
 	c.update(func(e *journal.Entry) { e.Body = body })
 }
 
-// matched sets that mock matched the call.
-func (c *journalCall) matched(mock *Mock) {
-	c.update(func(e *journal.Entry) { e.MockID = mock.ID() })
+// matched sets that mock matched the call, and moved the scenarios of moves.
+func (c *journalCall) matched(mock *Mock, moves []matchscenario.Move) {
+	c.update(func(e *journal.Entry) { e.MockID, e.Scenarios = mock.ID(), moves })
 }
 
 // unmatched sets that no mock matched the call: misses came closest.

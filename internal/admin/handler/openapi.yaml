@@ -800,10 +800,13 @@ components:
       properties:
         type:
           type: string
-          enum: [matched, unmatched, proxied, warning, error]
+          enum: [matched, unmatched, proxied, warning, error, scenario]
           description: |
             `matched`: a mock answered a request. `unmatched`: no mock matched it. `proxied`: the server proxied it.
             `warning`: something went wrong without failing the request, such as a webhook. `error`: it failed.
+            `scenario`: a scenario moved, by the mock a request picked, or by the admin API or the server's own methods;
+            `target` names it, in any case, as names ignore case, or is missing when every scenario was reset, and
+            `message` says where it moved.
         time:
           type: string
           format: date-time
@@ -814,7 +817,7 @@ components:
           description: The method of the request, such as `GET`.
         target:
           type: string
-          description: What the request asked for, such as the URL of an HTTP request.
+          description: What the request asked for, such as the URL of an HTTP request, or the scenario that moved.
         mock_id:
           type: string
           description: The mock that matched, if one did.
@@ -823,7 +826,7 @@ components:
           description: The status of the answer, when there was one.
         message:
           type: string
-          description: What went wrong.
+          description: What went wrong, or where a scenario moved.
       additionalProperties: false
     SaveSettings:
       type: object
@@ -1079,6 +1082,24 @@ components:
           type: array
           description: The mocks that came closest to matching a request no mock matched, the closest first.
           items: { $ref: "#/components/schemas/NearMiss" }
+        scenarios:
+          type: array
+          description: The moves of the scenarios of the mock that matched the request, made as the server picked it.
+          items: { $ref: "#/components/schemas/ScenarioMove" }
+      additionalProperties: false
+    ScenarioMove:
+      type: object
+      required: [scenario, to]
+      properties:
+        scenario:
+          type: string
+          description: The name of the scenario, as the mock gives it.
+        from:
+          type: string
+          description: The state the mock requires; missing when it requires none.
+        to:
+          type: string
+          description: The state the mock moved the scenario to.
       additionalProperties: false
     NearMiss:
       type: object

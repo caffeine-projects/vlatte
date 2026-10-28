@@ -501,7 +501,9 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	sub := vlatte.NewExplanation()
 	mocks := vlatte.Mocks[*Mock, *selectorInput](stored)
-	mock, matched, err := mocks.Find(r.Context(), sub, input, expectationsOf, misses)
+	// A scenario's move names its request, which the context of the claim carries.
+	claimCtx := context.WithValue(r.Context(), requestKey{}, reqValues)
+	mock, matched, err := mocks.Find(claimCtx, sub, input, expectationsOf, misses)
 	if err != nil {
 		h.onError(w, reqValues, vlatte.FailureMatch, fmt.Errorf("http: finding a mock: %w", err))
 		return
@@ -527,6 +529,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Template data providers see the mock that matched.
 	reqValues.Mock = mock
+	h.app.movedScenarios(reqValues)
 
 	// The hits count this request, which Inc counts once the answer is sent.
 	h.debugHeader(w, vlatte.HeaderMatchedMockID, mock.ID())
@@ -1362,6 +1365,7 @@ func locals(r *RequestValues, provided map[string]any, params *viewdata.Paramete
 		Parameters: params,
 		Server:     &viewdata.Server{URL: r.App.URL()},
 		Data:       r.App.Data(),
+		Scenarios:  r.App.scenarioStore.View(r.scenarioMoves...),
 	}
 }
 

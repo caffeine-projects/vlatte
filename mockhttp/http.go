@@ -57,6 +57,7 @@ type Server struct {
 	server             Backend
 	storage            vlatte.Store[*Mock]
 	scenarioStore      *matchscenario.Store
+	eventStream        *adminapi.Events // the admin API's; nil without it
 	requestBodyParsers []RequestBodyParser
 	params             vlatte.KV
 	loaders            []Loader
@@ -225,6 +226,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	events, lifecycle := withAdminEvents(conf, lifecycle)
+	app.eventStream = events
 	lifecycle = heldLifecycle{withJournal(app, conf, lifecycle)}
 
 	globalEvents, err := prepareGlobalEvents(conf)
@@ -269,6 +271,9 @@ func New(config ...Option) (*Server, error) {
 	app.Verifier = journal.NewVerifier[*Mock, *Server](j, app)
 	app.storage = repository
 	app.scenarioStore = matchscenario.New()
+	if app.eventStream != nil {
+		app.scenarioStore.Notify(app.publishScenario)
+	}
 	app.params = params
 	app.loaders = conf.Loaders
 	app.files = files

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 // StateStarted is the state every scenario starts in, and the one a reset moves it back to.
@@ -19,8 +21,31 @@ type scenario struct {
 // it. Names ignore case, as [strings.EqualFold] does: Checkout and checkout are one scenario, listed under the name it
 // was first given. It is safe for concurrent use.
 type Store struct {
-	mu   sync.RWMutex
-	data map[string]*scenario
+	mu     sync.RWMutex
+	data   map[string]*scenario
+	notify func(Change)
+}
+
+// Change is a change of the states of a [Store]'s scenarios, which it gives the function set with [Store.Notify].
+type Change struct {
+	// Scenario names the scenario that changed, or is empty when every scenario did, as ResetScenarios does.
+	Scenario string
+
+	// Message says what changed, such as "checkout moved from started to paid".
+	Message string
+
+	// Claim is the argument of the [Matcher.Claim] of a mock that moved the scenario: its Mock and Context tell which
+	// mock and which request did. It is nil when no request did, as for SetScenario.
+	Claim *vlatte.MatcherArg
+}
+
+// Notify sets fn as the function s gives each change, as it makes it: fn gets them in the order the scenarios changed.
+// s holds its lock while fn runs, so fn must not block, nor call s.
+func (s *Store) Notify(fn func(Change)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.notify = fn
 }
 
 // New creates an empty store.
@@ -60,15 +85,18 @@ func (s *Store) SetScenario(name, state string) {
 	defer s.mu.Unlock()
 
 	s.scenario(name).state = state
+	s.changed(Change{Scenario: name, Message: name + " set to " + state})
 }
 
-// ResetScenario moves the scenario name back to [StateStarted].
+// ResetScenario moves the scenario name back to [StateStarted]. It changes nothing, and gives no [Change], when the
+// store doesn't hold name: no mock moved it and SetScenario never set it, so it is in StateStarted already.
 func (s *Store) ResetScenario(name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if scn, ok := s.data[key(name)]; ok {
 		scn.state = StateStarted
+		s.changed(Change{Scenario: name, Message: name + " reset to " + StateStarted})
 	}
 }
 
@@ -80,10 +108,19 @@ func (s *Store) ResetScenarios() {
 	for _, scn := range s.data {
 		scn.state = StateStarted
 	}
+
+	s.changed(Change{Message: "every scenario reset to " + StateStarted})
 }
 
-// claim moves the scenario name from required to next, as [Matcher.Claim] does.
-func (s *Store) claim(name, required, next string) bool {
+// View returns a view of s for a request whose mock made moves. A scenario a move of moves names is in the state that
+// move took it to, even once another request moved it on, as the request's journal entry says; any other scenario is
+// in the state it is in when read. A zero View reads no store, and panics.
+func (s *Store) View(moves ...Move) View {
+	return View{store: s, moves: moves}
+}
+
+// claim moves the scenario name from required to next, as [Matcher.Claim] does with arg.
+func (s *Store) claim(name, required, next string, arg *vlatte.MatcherArg) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -93,9 +130,17 @@ func (s *Store) claim(name, required, next string) bool {
 
 	if next != "" {
 		s.scenario(name).state = next
+		s.changed(Change{Scenario: name, Message: Move{Scenario: name, From: required, To: next}.String(), Claim: arg})
 	}
 
 	return true
+}
+
+// changed gives c to the function set with Notify, if any. The caller holds the write lock.
+func (s *Store) changed(c Change) {
+	if s.notify != nil {
+		s.notify(c)
+	}
 }
 
 // state returns the state of the scenario name. The caller holds the lock.
@@ -131,4 +176,23 @@ func key(name string) string {
 
 		return least
 	}, name)
+}
+
+// View reads the states of the scenarios of a [Store], and changes none: what templates get.
+type View struct {
+	store *Store
+	moves []Move
+}
+
+// State returns the state of the scenario name, whatever its case: the state the view's move of it took it to, or else
+// the one [Store.State] returns.
+func (v View) State(name string) string {
+	k := key(name)
+	for _, mv := range v.moves {
+		if key(mv.Scenario) == k {
+			return mv.To
+		}
+	}
+
+	return v.store.State(name)
 }

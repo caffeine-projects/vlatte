@@ -39,9 +39,9 @@ func (m *Matcher) Match(_ vlatte.MatcherArg) (bool, error) {
 
 // Claim implements vlatte.Claimer. In one step, it checks the scenario is still in the state the mock requires and
 // moves it to the mock's new state. It reports false, moving nothing, when another request moved the scenario since
-// the mock matched. A mock that requires no state always takes it.
-func (m *Matcher) Claim() bool {
-	return m.store.claim(m.name, m.required, m.next)
+// the mock matched. A mock that requires no state always takes it. The [Change] of a move has arg.
+func (m *Matcher) Claim(arg vlatte.MatcherArg) bool {
+	return m.store.claim(m.name, m.required, m.next, &arg)
 }
 
 // String names the scenario, the state the mock needs and the one the scenario is in, such as "scenario checkout
@@ -61,4 +61,26 @@ func (m *Matcher) Describe() descriptor.Descriptor {
 		"required_state": m.required,
 		"new_state":      m.next,
 	})
+}
+
+// Move is a move of a scenario a mock makes when it is picked: from the state it requires, empty when it requires none,
+// to its new state.
+type Move struct {
+	Scenario string `json:"scenario"`
+	From     string `json:"from,omitempty"`
+	To       string `json:"to"`
+}
+
+// Move returns the move the mock makes when it is picked, and false when it has no new state, so moves nothing.
+func (m *Matcher) Move() (Move, bool) {
+	return Move{Scenario: m.name, From: m.required, To: m.next}, m.next != ""
+}
+
+// String says what the move does, such as "checkout moved from started to paid".
+func (mv Move) String() string {
+	if mv.From == "" {
+		return mv.Scenario + " moved to " + mv.To
+	}
+
+	return mv.Scenario + " moved from " + mv.From + " to " + mv.To
 }

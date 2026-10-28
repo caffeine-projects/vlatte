@@ -13,6 +13,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 func TestOutcome_KeepsItsNameInJSON(t *testing.T) {
@@ -88,6 +89,7 @@ func TestEntry_ReadsBackTheJSONItWrites(t *testing.T) {
 		e.Body, e.BodyTruncated = []byte{0xff, 0x00}, true
 		e.Message = "why"
 		e.NearMisses = []vlatte.NearMiss{{MockID: "m2", Passed: 1, Total: 2, Skipped: []string{"times"}}}
+		e.Scenarios = []matchscenario.Move{{Scenario: "checkout", From: "started", To: "paid"}}
 	})
 
 	var data bytes.Buffer

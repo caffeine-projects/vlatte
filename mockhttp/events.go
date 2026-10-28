@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 // RequestValues groups HTTP request data, including the parsed body.
@@ -48,6 +49,9 @@ type RequestValues struct {
 
 	// nearMisses are the mocks closest to matching a request no mock matched, when the server reports them.
 	nearMisses []vlatte.NearMiss
+
+	// scenarioMoves are the moves of the scenarios of the mock Find picked.
+	scenarioMoves []matchscenario.Move
 
 	// journal is the entry of the request in the server's journal, nil when it keeps none.
 	journal *journalCall

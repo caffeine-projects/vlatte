@@ -170,6 +170,7 @@ func (c *journalCall) record(r *RequestValues, outcome journal.Outcome, status i
 		e.Outcome, e.Status = outcome, status
 		e.Elapsed = time.Since(e.Time)
 		e.NearMisses = r.nearMisses
+		e.Scenarios = r.scenarioMoves
 
 		if r.Mock != nil {
 			e.MockID = r.Mock.ID()

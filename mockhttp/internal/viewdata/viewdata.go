@@ -9,6 +9,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/params"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 // Data is what templates render with: the dot of a Go template, and the context of any other engine.
@@ -31,6 +32,10 @@ type Data struct {
 	// Extra is the template data of the reply being rendered: a mock file's template.data. Other templates, such as
 	// a webhook's, don't have it.
 	Extra any
+
+	// Scenarios reads the state of the server's scenarios: {{ .Scenarios.State "checkout" }}. A scenario the mock that
+	// matched moved is in the state it moved it to, even once another request moved it on.
+	Scenarios matchscenario.View
 }
 
 // Server describes the mock server to templates.
