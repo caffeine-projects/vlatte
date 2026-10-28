@@ -24,7 +24,7 @@ vlatte --grpc-tls ...     # gRPC mocks over TLS
 ```
 
 ```sh [Docker]
-docker run --rm -p 8443:8443 -e VLATTE_HTTPS=true vlatte:dev
+docker run --rm -p 8443:8443 -e VLATTE_HTTPS=true ghcr.io/caffeine-projects/vlatte:v0.1.0-rc.1
 ```
 
 :::

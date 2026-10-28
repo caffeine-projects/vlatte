@@ -130,7 +130,7 @@ m.MustMock(mockhttp.Getf("/health").Reply(mockhttp.OK()))
 ```
 
 ```sh [Mock files]
-go install github.com/caffeine-projects/vlatte/cmd/vlatte@latest
+brew install caffeine-projects/tap/vlatte # or go install github.com/caffeine-projects/vlatte/cmd/vlatte@latest
 
 # Serves the mock files of testdata/vlatte/_mocks.
 vlatte --addr=:8080
@@ -139,7 +139,7 @@ vlatte --addr=:8080
 ```yaml [Docker Compose]
 services:
   payments:
-    build: https://github.com/caffeine-projects/vlatte.git
+    image: ghcr.io/caffeine-projects/vlatte:v0.1.0-rc.1
     ports: ["8080:8080"]
     volumes:
       - ./mocks:/vlatte/testdata/vlatte/_mocks:ro

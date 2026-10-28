@@ -1,7 +1,7 @@
 # Builds the vlatte CLI for each release tag: .github/workflows/release.yml runs it, and `make snapshot` runs it
 # locally without signing or publishing.
 #
-# On each new tag, bump the pinned image tag in the docs: grep -rn 'vlatte:v0\.' README.md docs --exclude-dir=node_modules
+# On each new tag, bump the version the docs pin: grep -rnE 'vlatte:v[0-9]|VERSION=v[0-9]' README.md docs --exclude-dir=node_modules
 version: 2
 
 project_name: vlatte

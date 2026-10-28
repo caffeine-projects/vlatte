@@ -33,7 +33,7 @@ Generate the token with `openssl rand -hex 32 > secrets/admin_token`.
 # compose.yaml
 services:
   payments:
-    build: https://github.com/caffeine-projects/vlatte.git
+    image: ghcr.io/caffeine-projects/vlatte:v0.1.0-rc.1
     ports:
       - "8080:8080" # mocks
       - "8081:8081" # admin API
@@ -58,7 +58,7 @@ secrets:
     file: ./secrets/admin_token
 ```
 
-- **The image** builds from the repository's `Dockerfile`. It listens on every interface, on fixed ports: mocks on `8080`, the admin API on `8081`, and gRPC mocks on `50051`, with their admin API on `8082`.
+- **The image** is the published one, pinned to a version. It listens on every interface, on fixed ports: mocks on `8080`, the admin API on `8081`, and gRPC mocks on `50051`, with their admin API on `8082`.
 - **Mock files** mount over `/vlatte/testdata/vlatte/_mocks`, which the command serves.
 - **The health check** of the image runs `vlatte health`, which asks the admin API's readiness probe. Probes need no credentials, so `service_healthy` works with the token set, and the app starts once the mocks are loaded.
 - **The token** comes from a file, as a Docker secret: the token has no flag, so it never shows on the command line.

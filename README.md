@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/caffeine-projects/vlatte/releases"><img src="https://img.shields.io/github/v/release/caffeine-projects/vlatte?include_prereleases&sort=semver" alt="Release"></a>
   <a href="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml"><img src="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://caffeine-projects.github.io/vlatte/"><img src="https://github.com/caffeine-projects/vlatte/actions/workflows/docs.yml/badge.svg" alt="Docs"></a>
   <a href="https://codecov.io/gh/caffeine-projects/vlatte"><img src="https://codecov.io/gh/caffeine-projects/vlatte/graph/badge.svg" alt="codecov"></a>
@@ -38,17 +39,23 @@ VLatte starts real HTTP and gRPC servers that answer the way you tell them to. S
 
 ## Install
 
-Requires Go 1.27 or later.
+The library, for Go 1.27 or later:
 
 ```sh
 go get github.com/caffeine-projects/vlatte
 ```
 
-The CLI:
+The CLI, with Homebrew, an archive from [GitHub Releases](https://github.com/caffeine-projects/vlatte/releases), Go, or Docker:
 
 ```sh
+brew install caffeine-projects/tap/vlatte
 go install github.com/caffeine-projects/vlatte/cmd/vlatte@latest
+docker run --rm ghcr.io/caffeine-projects/vlatte:v0.1.0-rc.1 version
 ```
+
+Release archives and images are signed: see [Verifying a release](https://caffeine-projects.github.io/vlatte/getting-started/installation#verifying-a-release).
+
+Until v1.0.0, a minor version may change the API.
 
 ## Quick start
 
