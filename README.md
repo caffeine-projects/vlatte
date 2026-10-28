@@ -13,6 +13,7 @@
 <p align="center">
   <a href="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml"><img src="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://codecov.io/gh/caffeine-projects/vlatte"><img src="https://codecov.io/gh/caffeine-projects/vlatte/graph/badge.svg" alt="codecov"></a>
+  <a href="https://sonarcloud.io/summary/new_code?id=caffeine-projects_vlatte"><img src="https://sonarcloud.io/api/project_badges/quality_gate?project=caffeine-projects_vlatte" alt="Quality gate"></a>
   <a href="https://pkg.go.dev/github.com/caffeine-projects/vlatte"><img src="https://pkg.go.dev/badge/github.com/caffeine-projects/vlatte.svg" alt="Go Reference"></a>
 </p>
 
