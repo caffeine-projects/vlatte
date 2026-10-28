@@ -157,7 +157,8 @@
   const $ = (id) => document.getElementById(id)
   let shown = new Map()
   let lastBody = null
-  let latest = 0
+  let loading = null
+  let again = false
   let polling = null
   let events = null
 
@@ -295,19 +296,34 @@
     if (next) next.focus()
   }
 
-  // refresh loads the scenarios. Of refreshes that overlap, only the last one started draws, so an old answer never
-  // replaces a newer one.
-  async function refresh() {
-    const seq = ++latest
+  // refresh loads the scenarios and draws them. One load runs at a time, so answers draw in order: a refresh asked for
+  // while one runs loads once more after it. Moves faster than the loads then cost one load at a time, and each draws.
+  function refresh() {
+    if (loading !== null) {
+      again = true
+      return loading
+    }
+
+    loading = (async () => {
+      do {
+        again = false
+        await load()
+      } while (again)
+    })().finally(() => {
+      loading = null
+    })
+
+    return loading
+  }
+
+  async function load() {
     let answer
     try {
       answer = await call('GET', 'scenarios')
     } catch (err) {
-      if (seq === latest) show('load-problem', { detail: "Can't reach the admin API: " + err.message })
+      show('load-problem', { detail: "Can't reach the admin API: " + err.message })
       return
     }
-
-    if (seq !== latest) return
 
     const { res, text, doc } = answer
     if (res.status === 501) {
@@ -355,9 +371,15 @@
     polling = null
   }
 
-  // Each move streams a scenario event: the page loads the scenarios again. Without the events, it checks every 2
-  // seconds.
+  function poll(ms) {
+    if (polling !== null) clearInterval(polling)
+    polling = setInterval(refresh, ms)
+  }
+
+  // Each move streams a scenario event: the page loads the scenarios again. A change of the mocks streams none, so the
+  // page also checks every 5 seconds, and every 2 without the events.
   function follow() {
+    poll(5000)
     events = new EventSource('events')
     events.addEventListener('scenario', refresh)
     events.addEventListener('open', () => {
@@ -372,7 +394,7 @@
 
       events = null
       live(false, 'Checking every 2 seconds')
-      if (polling === null) polling = setInterval(refresh, 2000)
+      poll(2000)
     })
   }
 
