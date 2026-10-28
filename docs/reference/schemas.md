@@ -40,7 +40,17 @@ To map the schemas by file name instead, without a comment in each file, add the
 
 ## JSON
 
-A JSON mock file can't name its schema in a `$schema` key: mock files take no key they don't know. Map the schemas by file name in your editor instead, such as with `json.schemas` in VS Code:
+Name the schema in a JSON mock file's `$schema` key. The server skips the key:
+
+```json
+{
+  "$schema": "https://caffeine-projects.github.io/vlatte/schemas/http.schema.json",
+  "request": {"method": "GET", "path": "/hello"},
+  "response": {"status": 200, "body": "hello"}
+}
+```
+
+To map the schemas by file name instead, use `json.schemas` in VS Code:
 
 ```json
 {

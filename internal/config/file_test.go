@@ -80,6 +80,28 @@ func TestFile_SectionForms(t *testing.T) {
 	}
 }
 
+func TestFile_SchemaKeyNamesTheEditorsSchema(t *testing.T) {
+	// A JSON document names the JSON Schema an editor checks it with in its $schema key, as YAML does in a comment:
+	// the file must load as if the key weren't there.
+	dir := t.TempDir()
+	path := writeFile(t, dir, "a.json", `{"$schema": "https://example.com/config.schema.json", "name": "api"}`)
+
+	c, values, err := loadFile(t, File("config", path))
+
+	require.NoError(t, err)
+	require.Equal(t, testConfig{Name: "api"}, c)
+	require.NotContains(t, values, "$schema")
+
+	// Only the document names its schema: inside a group, the key is a mistake.
+	path = writeFile(t, dir, "b.json", `{"log": {"$schema": "x"}}`)
+	_, _, err = loadFile(t, File("config", path))
+
+	require.Equal(t, []Problem{{
+		Code: CodeUnknownKey, Origin: "file " + path, Key: "log.$schema", Message: "log.$schema is not a known setting",
+		Hint: "the keys under log are level, timeout",
+	}}, requireProblems(t, err))
+}
+
 func TestFile_EmptyFilesSetNothing(t *testing.T) {
 	dir := t.TempDir()
 

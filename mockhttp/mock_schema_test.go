@@ -912,6 +912,35 @@ func TestJSONSchema_IDIsTheAddressTheDocsServe(t *testing.T) {
 	require.Equal(t, "https://caffeine-projects.github.io/vlatte/schemas/http.schema.json", raw["$id"])
 }
 
+func TestJSONSchema_JSONMockFilesNameItInTheirSchemaKey(t *testing.T) {
+	// A JSON mock file names its schema for editors in $schema, as a YAML one does in a comment: the schema must
+	// accept the key, and the decoder must load the file as if the key weren't there.
+	schema, _ := loadJSONSchema(t)
+	doc := `{
+		"$schema": "https://caffeine-projects.github.io/vlatte/schemas/http.schema.json",
+		"request": {"method": "GET", "path": "/hello"},
+		"response": {"status": 200, "body": "hello"}
+	}`
+
+	var v any
+	require.NoError(t, json.Unmarshal([]byte(doc), &v))
+	require.NoError(t, schema.Validate(instance(t, v)))
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(FromBytes([]byte(doc), "json"))
+
+	res, err := http.Get(m.URL("/hello"))
+	require.NoError(t, err)
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "hello", string(body))
+}
+
 func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 	// Every key the decoder reads is documented for editors, and nothing else is.
 	_, raw := loadJSONSchema(t)
@@ -942,7 +971,9 @@ func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 
 	defs, _ := raw["$defs"].(map[string]any)
 
-	require.Equal(t, _mockSchema.Keys(), keys(raw, "scenario", "request"), "mock")
+	// $schema is for editors: the decoder skips it.
+	mockKeys := slices.DeleteFunc(keys(raw, "scenario", "request"), func(k string) bool { return k == "$schema" })
+	require.Equal(t, _mockSchema.Keys(), mockKeys, "mock")
 	require.Equal(t, _replySchema.Keys(), keys(defs["reply"], "template"), "reply")
 	require.Equal(t, _sequenceSchema.Keys(), keys(props(raw)["response_sequence"]), "response_sequence")
 	require.Equal(t, _randomSchema.Keys(), keys(props(raw)["response_random"]), "response_random")

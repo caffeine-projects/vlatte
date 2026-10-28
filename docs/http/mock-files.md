@@ -26,7 +26,7 @@ response:
 # yaml-language-server: $schema=https://caffeine-projects.github.io/vlatte/schemas/http.schema.json
 ```
 
-and editors that use the YAML language server, such as VS Code with the YAML extension, complete and check it. See [Mock file schemas](/reference/schemas) for other editors.
+and editors that use the YAML language server, such as VS Code with the YAML extension, complete and check it. A JSON mock file names it in a `"$schema"` key. See [Mock file schemas](/reference/schemas) for other editors.
 
 ## Keys
 
