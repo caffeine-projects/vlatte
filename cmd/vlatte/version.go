@@ -2,8 +2,8 @@ package main
 
 import "runtime/debug"
 
-// version reports the module version of binaries installed with go install …@version,
-// or the VCS revision of binaries built from a checkout.
+// version reports the module version: the tag the binary was built at, or a pseudo-version
+// naming its commit, with +dirty for uncommitted changes.
 func version() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
