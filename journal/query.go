@@ -34,7 +34,8 @@ type Query struct {
 	// request has none.
 	Header map[string]vlatte.Matcher
 
-	// Body gets the body as text.
+	// Body gets the body as text. A query the rest of which selects an entry whose body the journal cut fails with
+	// [vlatte.ErrMatching]: what was cut may hold what Body looks for.
 	Body vlatte.Matcher
 
 	// Limit is the most entries Find returns, the newest first; 0 returns them all. Count leaves it out.
@@ -187,7 +188,9 @@ func (q *Query) selects(ctx context.Context, e *Entry, filters []Filter) (bool, 
 		}
 	}
 
-	if q.Body != nil {
+	// A body the journal cut can't tell whether the whole matched: the rest of the query goes first, as a miss there
+	// is a miss.
+	if q.Body != nil && !e.BodyTruncated {
 		ok, err := matchValue(ctx, q.Body, string(e.Body))
 		if err != nil || !ok {
 			return false, err
@@ -199,6 +202,11 @@ func (q *Query) selects(ctx context.Context, e *Entry, filters []Filter) (bool, 
 		if err != nil || !ok {
 			return false, err
 		}
+	}
+
+	if q.Body != nil && e.BodyTruncated {
+		return false, fmt.Errorf("journal: %w: entry %d: the journal kept part of its body, which the query reads",
+			vlatte.ErrMatching, e.Seq)
 	}
 
 	return true, nil

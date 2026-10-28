@@ -1,6 +1,7 @@
 package journal_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -85,4 +86,23 @@ func TestJournal_AfterSelectsWhatCameSinceAPointInTheJournal(t *testing.T) {
 	require.NoError(t, j.Clear())
 	require.NoError(t, j.Append(entry("e")))
 	require.Equal(t, []string{"e"}, find(t, j, journal.Query{After: mark}))
+}
+
+func TestJournal_ABodyQueryCantTellOfABodyTheJournalCut(t *testing.T) {
+	// The journal keeps MaxBodySize bytes of a body. A query of the body matched the part kept as if it were the
+	// whole, so a request whose cut-off part held what the query looks for counted as a miss, and a verification that
+	// none came passed. The query fails instead, once the rest of it matches; a query the rest rules out still counts.
+	j := newJournal(t, journal.Options{MaxBodySize: 4})
+	require.NoError(t, j.Append(entry("a", func(e *journal.Entry) { e.Body = []byte("abcd-and-the-rest") })))
+
+	_, err := j.Count(t.Context(), journal.Query{Body: match.HasSuffix("rest")})
+	require.ErrorIs(t, err, vlatte.ErrMatching)
+	require.ErrorContains(t, err, "entry 1: the journal kept part of its body")
+
+	count, err := j.Count(t.Context(), journal.Query{Body: match.HasSuffix("rest"), Header: map[string]vlatte.Matcher{"X-Other": match.Equal("1")}})
+	require.NoError(t, err)
+	require.Zero(t, count, "the header rules it out: what the body holds doesn't count")
+
+	_, err = j.Find(t.Context(), journal.Query{Body: match.HasSuffix("rest")}, func(context.Context, *journal.Entry) (bool, error) { return false, nil })
+	require.NoError(t, err, "a filter rules it out")
 }
