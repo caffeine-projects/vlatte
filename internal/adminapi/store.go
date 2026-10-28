@@ -3,6 +3,7 @@ package adminapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 	"slices"
@@ -159,56 +160,107 @@ func (s *Store[M]) Health(ctx context.Context) error {
 	return errors.Join(s.durable.Health(ctx), s.serving.Health(ctx))
 }
 
-// Reload serves what the persistent store holds now, in place of the mocks it served from it, in one step: the
-// changes made to it directly take effect. A mock whose ID a mock the server has from elsewhere holds, such as a mock
-// file's, gives way to it, as mocks the admin API adds do. When it fails, the server serves what it did.
-func (s *Store[M]) Reload(ctx context.Context) error {
+// Reload serves what the persistent store holds now, in place of the mocks it served from it: the changes made to it
+// directly take effect. load, when not nil, loads the server's mock files, with swap: it swaps the mocks of the
+// persistent store in the same step as those of the files, so a request finds the old ones or the new ones, never a
+// mix. A load that doesn't call swap, such as one with no mock files to load, leaves Reload to swap them on its own. A
+// mock whose ID a mock the server has from elsewhere holds, such as a mock file's, gives way to it, as mocks the admin
+// API adds do. Reload is all or nothing: when the persistent store can't be read, load doesn't run, and when load
+// fails, the server serves what it served before.
+func (s *Store[M]) Reload(ctx context.Context, load func(swap vlatte.Swap[M]) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	fresh, err := s.durable.PickAll(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("server: admin store: %w", err)
 	}
 
-	served, err := s.serving.PickAll(ctx)
+	var kept []M
+
+	swapped := false
+	swap := func(built, gone []M) ([]M, []M, error) {
+		swapped = true
+
+		drop, add, err := s.take(ctx, fresh, built, gone)
+		kept = add
+
+		return drop, add, err
+	}
+
+	if load != nil {
+		err = load(swap)
+	}
+
+	if err == nil && !swapped {
+		var drop []M
+		if drop, kept, err = s.take(ctx, fresh, nil, nil); err == nil {
+			err = s.serving.Replace(ctx, drop, kept...)
+		}
+	}
+
 	if err != nil {
 		closeMocks(fresh)
 		return err
 	}
 
-	var old []M
-
-	others := make(map[string]struct{}, len(served))
-	for _, mock := range served {
-		if _, ok := s.owned[mock]; ok {
-			old = append(old, mock)
-		} else {
-			others[mock.ID()] = struct{}{}
-		}
+	served := make(map[any]struct{}, len(kept))
+	for _, mock := range kept {
+		served[mock] = struct{}{}
 	}
 
-	kept := make([]M, 0, len(fresh))
 	for _, mock := range fresh {
-		if _, taken := others[mock.ID()]; taken {
+		if _, ok := served[mock]; !ok {
 			s.logger.Warn().Str("mock", mock.ID()).Msg("admin: the persistent store's mock gives way to a mock of its id")
 			closeMocks([]M{mock})
-
-			continue
 		}
-
-		kept = append(kept, mock)
-	}
-
-	if err := s.serving.Replace(ctx, old, kept...); err != nil {
-		closeMocks(kept)
-		return err
 	}
 
 	clear(s.owned)
 	s.own(kept)
 
 	return nil
+}
+
+// take returns the mocks of fresh to serve, those whose IDs no other mock the server keeps holds, and the mocks it
+// served from the persistent store to drop. built are the mocks the server adds in the same step, and gone those it
+// removes.
+func (s *Store[M]) take(ctx context.Context, fresh, built, gone []M) (drop, kept []M, err error) {
+	served, err := s.serving.PickAll(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	leaving := make(map[any]struct{}, len(gone))
+	for _, mock := range gone {
+		leaving[mock] = struct{}{}
+	}
+
+	taken := make(map[string]struct{}, len(served)+len(built))
+	for _, mock := range built {
+		taken[mock.ID()] = struct{}{}
+	}
+
+	for _, mock := range served {
+		_, left := leaving[mock]
+		_, owned := s.owned[mock]
+
+		switch {
+		case left:
+		case owned:
+			drop = append(drop, mock)
+		default:
+			taken[mock.ID()] = struct{}{}
+		}
+	}
+
+	for _, mock := range fresh {
+		if _, ok := taken[mock.ID()]; !ok {
+			kept = append(kept, mock)
+		}
+	}
+
+	return drop, kept, nil
 }
 
 func (s *Store[M]) own(mocks []M) {

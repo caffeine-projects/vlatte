@@ -50,6 +50,22 @@ func (app *Base[TM, A]) Remock(ctx context.Context, old *Scope[TM], builders ...
 	return app.scopes.Replace(ctx, old, builders...)
 }
 
+// Swap gives [Base.RemockWith] more mocks to swap in the same step. built are the mocks of the builders, and gone the
+// stored mocks they take the place of: those of the old scope, and those outside every scope whose IDs built take.
+// Swap returns the stored mocks to remove too, and the mocks to add too. The new scope doesn't hold those: they stay
+// the caller's, to close when RemockWith fails.
+type Swap[TM Mock] func(built, gone []TM) (drop, add []TM, err error)
+
+// RemockWith does what Remock does, and swaps the mocks swap returns in the same step, so a request finds the mocks of
+// old and those swap drops, or the new ones and those it adds, never a mix. It changes nothing when swap fails. A nil
+// swap swaps nothing more.
+func (app *Base[TM, A]) RemockWith(ctx context.Context, old *Scope[TM], swap Swap[TM], builders ...Builder[TM, A]) (*Scope[TM], error) {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	return app.scopes.replace(ctx, old, swap, builders...)
+}
+
 // Unmock deletes the mocks of scope and stops tracking it, so Hits, the mock lists and the assertions leave it out.
 func (app *Base[TM, A]) Unmock(ctx context.Context, scope *Scope[TM]) error {
 	app.mu.Lock()

@@ -37,6 +37,12 @@ type fileLoader struct {
 // request finds one set or the other. When a file has problems, Load changes nothing and reports every file with
 // problems.
 func (l *fileLoader) Load(app *Server) error {
+	return l.load(app, nil)
+}
+
+// load does what Load does. swap, when not nil, swaps more mocks in the same step, those of the admin API's persistent
+// store: see [vlatte.Swap]. With no file to load and none loaded, load calls no swap.
+func (l *fileLoader) load(app *Server, swap vlatte.Swap[*Mock]) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -97,7 +103,7 @@ func (l *fileLoader) Load(app *Server) error {
 	}
 
 	// A reload replaces the mocks of the last load, so edited and removed files take effect.
-	scope, err := app.Remock(context.Background(), l.scope, builders...)
+	scope, err := app.RemockWith(context.Background(), l.scope, swap, builders...)
 	if err != nil {
 		return fmt.Errorf("loader: %w", err)
 	}

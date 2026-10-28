@@ -315,6 +315,11 @@ func (s *Scopes[B, A]) Add(builders ...Builder[B, A]) (*Scope[B], error) {
 // failing builder by index, or when the store refuses the mocks, for example over an ID in use in another scope.
 // Once replaced, old holds no mocks.
 func (s *Scopes[B, A]) Replace(ctx context.Context, old *Scope[B], builders ...Builder[B, A]) (*Scope[B], error) {
+	return s.replace(ctx, old, nil, builders...)
+}
+
+// replace does what Replace does, and swaps the mocks of swap, when not nil, in the same step: see [Swap].
+func (s *Scopes[B, A]) replace(ctx context.Context, old *Scope[B], swap Swap[B], builders ...Builder[B, A]) (*Scope[B], error) {
 	if old != nil && !slices.Contains(s.All(), old) {
 		return nil, errNotTracked
 	}
@@ -340,14 +345,28 @@ func (s *Scopes[B, A]) Replace(ctx context.Context, old *Scope[B], builders ...B
 	}
 
 	unscoped, err := s.unscoped(ctx, built)
+
+	drop, mocks := unscoped, built
+	if err == nil && swap != nil {
+		gone := unscoped
+		if old != nil {
+			gone = slices.Concat(old.Mocks(), unscoped)
+		}
+
+		var more, add []B
+		if more, add, err = swap(built, gone); err == nil {
+			drop, mocks = slices.Concat(unscoped, more), slices.Concat(built, add)
+		}
+	}
+
 	switch {
 	case err != nil:
 	case old != nil:
-		err = old.replace(ctx, built, unscoped)
-	case len(unscoped) > 0:
-		err = s.store.Replace(ctx, unscoped, built...)
+		err = old.replace(ctx, mocks, drop)
+	case len(drop) > 0:
+		err = s.store.Replace(ctx, drop, mocks...)
 	default:
-		err = s.store.Store(ctx, built...)
+		err = s.store.Store(ctx, mocks...)
 	}
 
 	if err != nil {

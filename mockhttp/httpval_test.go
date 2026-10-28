@@ -27,3 +27,8 @@ func TestHeaderNames(t *testing.T) {
 		require.Equal(t, tt.name, tt.constant)
 	}
 }
+
+func TestMIMEApplicationProblemJSON(t *testing.T) {
+	// Clients recognize an RFC 9457 problem details body by this exact media type.
+	require.Equal(t, "application/problem+json", MIMEApplicationProblemJSON)
+}

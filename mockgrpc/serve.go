@@ -95,6 +95,14 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 
 	journaled.matched(mock, app.movedScenarios(ctx, mock))
 
+	// The template data providers see the mock that matched. One that fails fails the call: its mock doesn't answer.
+	if err := app.provide(call, mock); err != nil {
+		journaled.replied(ctx, err)
+		app.publish(ctx, adminapi.EventError, call.method, mock, codes.Internal, err)
+
+		return fail(ctx, vlatte.FailureReply, codes.Internal, "%s: %s: %v", kind, mock, err)
+	}
+
 	// A client that leaves during the delay gets nothing: the mock doesn't reply, nor count the call. Its scenario moved
 	// already, when Find picked it.
 	if d := mock.wait(); d > 0 {
