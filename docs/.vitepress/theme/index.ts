@@ -8,13 +8,9 @@ import '@fontsource/jetbrains-mono/400.css'
 import '@fontsource/jetbrains-mono/500.css'
 
 import Layout from './Layout.vue'
-import AdminApi from './components/AdminApi.vue'
 import './vars.css'
 
 export default {
   extends: DefaultTheme,
   Layout,
-  enhanceApp({ app }) {
-    app.component('AdminApi', AdminApi)
-  },
 } satisfies Theme

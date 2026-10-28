@@ -2,7 +2,7 @@
 // site never keeps a copy of its own: the brand assets, the JSON Schemas of mock files and the admin API's OpenAPI
 // document. It also writes the settings the vlatte command lists, for the settings reference.
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -43,3 +43,19 @@ if (start < 0) {
 const generated = join(docs, '.vitepress', 'generated')
 mkdirSync(generated, { recursive: true })
 writeFileSync(join(generated, 'settings.txt'), help.slice(start + 1).trimEnd() + '\n')
+
+// The admin API reference: a page of its own, with the version of Scalar the admin API pins, read from its source so
+// the two never differ.
+const pins = readFileSync(join(root, 'internal/admin/handler/docs.go'), 'utf8')
+const pin = (name) => {
+  const m = pins.match(new RegExp(`${name}\\s*=\\s*"([^"]+)"`))
+  if (!m) {
+    throw new Error(`prepare: no ${name} in internal/admin/handler/docs.go`)
+  }
+  return m[1]
+}
+const page = readFileSync(join(docs, 'scripts', 'admin-api.html'), 'utf8')
+  .replace('{version}', pin('_scalarVersion'))
+  .replace('{integrity}', pin('_scalarIntegrity'))
+mkdirSync(join(pub, 'reference'), { recursive: true })
+writeFileSync(join(pub, 'reference', 'admin-api.html'), page)

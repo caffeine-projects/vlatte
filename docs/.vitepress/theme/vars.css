@@ -100,10 +100,3 @@ h2,
 h3 {
   letter-spacing: -0.02em;
 }
-
-/* The Admin API page is full width for the reference below it: its head keeps the width and type of a doc page. */
-.vl-reference-head {
-  max-width: 784px;
-  margin: 0 auto;
-  padding: 32px 24px 0;
-}
