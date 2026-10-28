@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	json "encoding/json/v2"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -422,4 +423,52 @@ func TestScenarios_ResettingAScenarioNothingNamesStreamsNoMove(t *testing.T) {
 	require.Equal(t, []map[string]any{
 		{"type": "scenario", "target": "checkout", "message": "checkout set to paid"},
 	}, events)
+}
+
+func TestScenarios_StreamsConcurrentMovesInTheOrderTheyHappened(t *testing.T) {
+	// A client that follows the events ends on the state the scenario is in: requests that move it at once stream
+	// their moves in the order they made them.
+	const steps = 64
+
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(admin.MustNew()))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	state := func(i int) string {
+		if i == 0 {
+			return matchscenario.StateStarted
+		}
+
+		return fmt.Sprintf("s%d", i)
+	}
+
+	want := make([]string, 0, steps)
+	for i := range steps {
+		m.MustMock(mockhttp.Postf("/next").ScenarioIs("checkout").ScenarioStateIs(state(i)).
+			ScenarioStateWillBe(state(i + 1)).Reply(mockhttp.OK()))
+		want = append(want, "checkout moved from "+state(i)+" to "+state(i+1))
+	}
+
+	events := scenarioEvents(t, m, steps, func() {
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Go(func() {
+				for range steps / 8 {
+					res, err := http.Post(m.URL("/next"), "", nil)
+					if assert.NoError(t, err) {
+						assert.Equal(t, http.StatusOK, res.StatusCode)
+						_ = res.Body.Close()
+					}
+				}
+			})
+		}
+		wg.Wait()
+	})
+
+	got := make([]string, 0, steps)
+	for _, e := range events {
+		got = append(got, e["message"].(string))
+	}
+
+	require.Equal(t, want, got)
 }

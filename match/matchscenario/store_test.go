@@ -52,11 +52,61 @@ func TestStore_ResetOneStartsOnlyThatScenarioOver(t *testing.T) {
 	store.SetScenario("Checkout", "paid")
 	store.SetScenario("refund", "asked")
 
-	require.True(t, store.ResetScenario("checkout"))
-	require.False(t, store.ResetScenario("nothing"), "a scenario the store doesn't hold doesn't move")
+	store.ResetScenario("checkout")
+	store.ResetScenario("nothing")
 
 	require.Equal(t, map[string]string{"Checkout": StateStarted, "refund": "asked"}, store.Scenarios())
 	require.Equal(t, StateStarted, store.State("nothing"))
+}
+
+func TestStore_NotifiesEachChangeAsItMakesIt(t *testing.T) {
+	// A server streams the changes of its scenarios as the store makes them, so they stream in the order they were
+	// made: a move a request made has the argument of its claim, which tells the request and its mock.
+	store := New()
+
+	var changes []Change
+	store.Notify(func(c Change) { changes = append(changes, c) })
+
+	arg := shared(t)
+	store.Matcher("checkout", StateStarted, "paid").Claim(arg)
+	store.Matcher("checkout", "paid", "").Claim(arg)
+	store.SetScenario("refund", "asked")
+	store.ResetScenario("checkout")
+	store.ResetScenario("nothing")
+	store.ResetScenarios()
+
+	require.Len(t, changes, 4, "a claim that moves nothing and a reset of a scenario the store doesn't hold change nothing")
+	require.NotNil(t, changes[0].Claim)
+	require.Equal(t, t.Context(), changes[0].Claim.Context(), "the move has the argument of its claim")
+	changes[0].Claim = nil
+
+	require.Equal(t, []Change{
+		{Scenario: "checkout", Message: "checkout moved from started to paid"},
+		{Scenario: "refund", Message: "refund set to asked"},
+		{Scenario: "checkout", Message: "checkout reset to started"},
+		{Message: "every scenario reset to started"},
+	}, changes)
+}
+
+func TestStore_NotifiesTheChangesOfAKey(t *testing.T) {
+	// The board redraws the instance of the key a change names; a key that never moved doesn't change.
+	store := New()
+
+	var changes []string
+	store.Notify(func(c Change) { changes = append(changes, c.Message) })
+
+	store.Matcher("checkout", StateStarted, "paid").Claim(keyed(t, "t1"))
+	store.SetScenario("checkout", "refunded", Key("t2"))
+	store.ResetScenario("checkout", Key("t1"))
+	store.ResetScenario("checkout", Key("t3"))
+	store.ResetScenario("checkout", Key(""))
+
+	require.Equal(t, []string{
+		"checkout (key t1) moved from started to paid",
+		"checkout (key t2) set to refunded",
+		"checkout (key t1) reset to started",
+		"checkout reset to started",
+	}, changes)
 }
 
 func TestStore_ScenariosIsACopy(t *testing.T) {
@@ -111,8 +161,7 @@ func TestStore_ResetOfAKeyStartsOnlyThatInstanceOver(t *testing.T) {
 	store.SetScenario("checkout", "paid", Key("t1"))
 	store.SetScenario("checkout", "refunded", Key("t2"))
 
-	require.True(t, store.ResetScenario("CHECKOUT", Key("t1")))
-	require.False(t, store.ResetScenario("checkout", Key("t3")), "a key that never moved doesn't move")
+	store.ResetScenario("CHECKOUT", Key("t1"))
 	require.Equal(t, StateStarted, store.State("checkout", Key("t1")))
 	require.Equal(t, "refunded", store.State("checkout", Key("t2")))
 	require.Equal(t, "paid", store.State("checkout"))

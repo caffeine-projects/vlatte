@@ -130,7 +130,7 @@ func (mocks Mocks[M, TIn]) find(
 				misses.tried = misses.tried[:0]
 			}
 
-			claimed, err := e.claim(ctx, in)
+			claimed, err := e.claim(ctx, mock, in)
 			if err != nil {
 				var nothing M
 				return nothing, false, false, fmt.Errorf("%w: %s: %w", ErrMatching, mock.String(), err)
@@ -158,16 +158,16 @@ func (e Evaluators[M, TIn]) Eval(ctx context.Context, sub *Explanation, in TIn) 
 	return err == nil && stop == len(e), err
 }
 
-// claim takes the turns of the [Claimer] matchers for in, in order, up to the first another request took: it reports
-// whether it took them all.
-func (e Evaluators[M, TIn]) claim(ctx context.Context, in TIn) (claimed bool, err error) {
+// claim takes the turns of the [Claimer] matchers of mock for in, in order, up to the first another request took: it
+// reports whether it took them all.
+func (e Evaluators[M, TIn]) claim(ctx context.Context, mock M, in TIn) (claimed bool, err error) {
 	for i, eval := range e {
 		c, ok := eval.Matcher.(Claimer)
 		if !ok {
 			continue
 		}
 
-		if claimed, err = claimOne(ctx, c, eval, in); err != nil || !claimed {
+		if claimed, err = claimOne(ctx, c, eval, mock, in); err != nil || !claimed {
 			if err != nil {
 				err = fmt.Errorf("eval[%d][%s]: %w", i, eval.String(), err)
 			}
@@ -179,15 +179,19 @@ func (e Evaluators[M, TIn]) claim(ctx context.Context, in TIn) (claimed bool, er
 	return true, nil
 }
 
-// claimOne takes the turn of c, the matcher of eval, for in, turning a panic into an error, as [Eval.Match] does.
-func claimOne[TIn any](ctx context.Context, c Claimer, eval *Eval[TIn], in TIn) (claimed bool, err error) {
+// claimOne takes the turn of c, the matcher of eval of mock, for in, turning a panic into an error, as [Eval.Match]
+// does.
+func claimOne[TIn any](ctx context.Context, c Claimer, eval *Eval[TIn], mock Mock, in TIn) (claimed bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("%w: Claim: type: %T %v", ErrMatchPanicked, c, r)
 		}
 	}()
 
-	return c.Claim(eval.Arg(ctx, nil, in)), nil
+	arg := eval.Arg(ctx, nil, in)
+	arg.mock = mock
+
+	return c.Claim(arg), nil
 }
 
 // stop evaluates the input against the evaluators in order, up to the first that doesn't match: it returns its

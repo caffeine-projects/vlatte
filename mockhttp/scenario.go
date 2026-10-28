@@ -35,28 +35,19 @@ func (app *Server) SetScenario(ctx context.Context, name, state string, in ...ma
 		return err
 	}
 
-	if err := app.scenarioStore.Move(uses, name, state, in...); err != nil {
-		return err
-	}
-
-	app.publishScenario(name, matchscenario.Label(name, in...)+" set to "+state)
-
-	return nil
+	return app.scenarioStore.Move(uses, name, state, in...)
 }
 
 // ResetScenario moves the scenario name back to [matchscenario.StateStarted]: every instance of it, or only the one of
 // a key in, such as matchscenario.Key("t1"). An instance nothing moved and none set is there already: the admin API's
 // events get no move of it.
 func (app *Server) ResetScenario(name string, in ...matchscenario.Instance) {
-	if app.scenarioStore.ResetScenario(name, in...) {
-		app.publishScenario(name, matchscenario.Label(name, in...)+" reset to "+matchscenario.StateStarted)
-	}
+	app.scenarioStore.ResetScenario(name, in...)
 }
 
 // ResetScenarios moves every scenario back to [matchscenario.StateStarted].
 func (app *Server) ResetScenarios() {
 	app.scenarioStore.ResetScenarios()
-	app.publishScenario("", "every scenario reset to "+matchscenario.StateStarted)
 }
 
 // scenarioUses lists the scenario matchers of the server's mocks, disabled ones too: a disabled mock matches again once
@@ -102,8 +93,8 @@ func (app *Server) scenarioKey(tmpl string, t *pathTemplate) (vlatte.Selector[*s
 	}, nil
 }
 
-// movedScenarios keeps the moves of the scenarios of r's mock, which Find picked for in, for the journal, and publishes
-// them to the admin API's events.
+// movedScenarios keeps the moves of the scenarios of r's mock, which Find picked for in, for the journal and the
+// templates.
 func (app *Server) movedScenarios(r *RequestValues, in *selectorInput) {
 	for _, e := range r.Mock.spec.expectations {
 		sm, ok := e.Matcher.(*matchscenario.Matcher)
@@ -117,24 +108,25 @@ func (app *Server) movedScenarios(r *RequestValues, in *selectorInput) {
 		}
 
 		r.scenarioMoves = append(r.scenarioMoves, mv)
-
-		if app.eventStream != nil {
-			app.eventStream.Publish(adminapi.Event{
-				Type:      adminapi.EventScenario,
-				Time:      time.Now(),
-				RequestID: r.ReqID,
-				Target:    mv.Scenario,
-				MockID:    r.Mock.ID(),
-				Message:   mv.String(),
-			})
-		}
 	}
 }
 
-// publishScenario publishes a move of the scenario target, or of every scenario when it is empty, which no request made,
-// to the admin API's events.
-func (app *Server) publishScenario(target, message string) {
-	if app.eventStream != nil {
-		app.eventStream.Publish(adminapi.Event{Type: adminapi.EventScenario, Time: time.Now(), Target: target, Message: message})
+// requestKey keys the request whose mocks Find looks through in the context of their claims.
+type requestKey struct{}
+
+// publishScenario publishes c to the admin API's events. The scenario store calls it as it makes c, so the events
+// stream in the order the scenarios changed, and a move a request made names it and its mock.
+func (app *Server) publishScenario(c matchscenario.Change) {
+	event := adminapi.Event{Type: adminapi.EventScenario, Time: time.Now(), Target: c.Scenario, Message: c.Message}
+	if c.Claim != nil {
+		if mock := c.Claim.Mock(); mock != nil {
+			event.MockID = mock.ID()
+		}
+
+		if r, ok := c.Claim.Context().Value(requestKey{}).(*RequestValues); ok {
+			event.RequestID = r.ReqID
+		}
 	}
+
+	app.eventStream.Publish(event)
 }

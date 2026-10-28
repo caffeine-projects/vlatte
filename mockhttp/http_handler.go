@@ -501,7 +501,9 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	sub := vlatte.NewExplanation()
 	mocks := vlatte.Mocks[*Mock, *selectorInput](stored)
-	mock, matched, err := mocks.Find(r.Context(), sub, input, expectationsOf, misses)
+	// A scenario's move names its request, which the context of the claim carries.
+	claimCtx := context.WithValue(r.Context(), requestKey{}, reqValues)
+	mock, matched, err := mocks.Find(claimCtx, sub, input, expectationsOf, misses)
 	if err != nil {
 		h.onError(w, reqValues, vlatte.FailureMatch, fmt.Errorf("http: finding a mock: %w", err))
 		return

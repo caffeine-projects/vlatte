@@ -382,7 +382,7 @@ scenario: {name: checkout, required_state: started, new_state: paid, key: '{{ .R
 - **In the [admin API](#admin-api),** `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios/{name}` and `DELETE /scenarios` do the same, and `?key=t1` picks the instance of a key. Its `/scenario-board` page does it from a browser: it shows where each scenario and each of its keys is, flags the states no mock moves to, moves a scenario with a click, and follows the moves as requests make them.
 - **A request no mock matched** names the scenario a mock waits on: `differs in scenario order needs created, is started`.
 - **Templates** read a scenario's state, the one its mock moved it to: `{{ .Scenarios.State "checkout" }}`, and the state of a key: `{{ .Scenarios.StateOf "checkout" (.Request.Header.Get "X-Test-Id") }}`. One mock can then answer in every state.
-- **The [journal](#request-journal)** keeps the moves of each request's mock under `scenarios`, and [`GET /events`](#admin-api) streams a `scenario` event for each move, by a request or by the methods and admin API above.
+- **The [journal](#request-journal)** keeps the moves of each request's mock under `scenarios`, and [`GET /events`](#admin-api) streams a `scenario` event for each move, by a request or by the methods and admin API above, in the order the moves happened.
 
 gRPC mocks take part in scenarios the same way.
 

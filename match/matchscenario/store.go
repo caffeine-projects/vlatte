@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"github.com/caffeine-projects/vlatte"
 )
 
 // StateStarted is the state every scenario starts in, and the one a reset moves it back to.
@@ -59,8 +61,31 @@ func Label(name string, in ...Instance) string {
 // was first given. A scenario has a shared instance, and one for each key its keyed mocks name: see [Key]. It is safe
 // for concurrent use.
 type Store struct {
-	mu   sync.RWMutex
-	data map[string]*scenario
+	mu     sync.RWMutex
+	data   map[string]*scenario
+	notify func(Change)
+}
+
+// Change is a change of the states of a [Store]'s scenarios, which it gives the function set with [Store.Notify].
+type Change struct {
+	// Scenario names the scenario that changed, or is empty when every scenario did, as ResetScenarios does.
+	Scenario string
+
+	// Message says what changed, such as "checkout moved from started to paid".
+	Message string
+
+	// Claim is the argument of the [Matcher.Claim] of a mock that moved the scenario: its Mock and Context tell which
+	// mock and which request did. It is nil when no request did, as for SetScenario.
+	Claim *vlatte.MatcherArg
+}
+
+// Notify sets fn as the function s gives each change, as it makes it: fn gets them in the order the scenarios changed.
+// s holds its lock while fn runs, so fn must not block, nor call s.
+func (s *Store) Notify(fn func(Change)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.notify = fn
 }
 
 // New creates an empty store.
@@ -102,38 +127,37 @@ func (s *Store) SetScenario(name, state string, in ...Instance) {
 
 	k, _ := keyOf(in)
 	s.set(name, k, state)
+	s.changed(Change{Scenario: name, Message: Label(name, in...) + " set to " + state})
 }
 
 // ResetScenario moves the scenario name back to [StateStarted]: every instance of it, or only the one in picks. It
-// reports false, changing nothing, when the store doesn't hold that instance: nothing moved it and SetScenario never
-// set it, so it is in StateStarted already.
-func (s *Store) ResetScenario(name string, in ...Instance) bool {
+// changes nothing, and gives no [Change], when the store doesn't hold that instance: nothing moved it and SetScenario
+// never set it, so it is in StateStarted already.
+func (s *Store) ResetScenario(name string, in ...Instance) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	scn, ok := s.data[key(name)]
 	if !ok {
-		return false
+		return
 	}
 
 	k, picked := keyOf(in)
-	if !picked {
+	switch {
+	case !picked:
 		scn.state = StateStarted
 		clear(scn.keys)
-
-		return true
-	}
-
-	if k == "" {
+	case k == "":
 		scn.state = StateStarted
+	default:
+		if _, ok := scn.keys[k]; !ok {
+			return
+		}
 
-		return true
+		delete(scn.keys, k)
 	}
 
-	_, ok = scn.keys[k]
-	delete(scn.keys, k)
-
-	return ok
+	s.changed(Change{Scenario: name, Message: Label(name, in...) + " reset to " + StateStarted})
 }
 
 // ResetScenarios moves every instance of every scenario back to [StateStarted].
@@ -145,6 +169,8 @@ func (s *Store) ResetScenarios() {
 		scn.state = StateStarted
 		clear(scn.keys)
 	}
+
+	s.changed(Change{Message: "every scenario reset to " + StateStarted})
 }
 
 // View returns a view of s for a request whose mock made moves. A scenario a move of moves names is in the state that
@@ -154,8 +180,8 @@ func (s *Store) View(moves ...Move) View {
 	return View{store: s, moves: moves}
 }
 
-// claim moves the instance k of the scenario name from required to next, as [Matcher.Claim] does.
-func (s *Store) claim(name, k, required, next string) bool {
+// claim moves the instance k of the scenario name from required to next, as [Matcher.Claim] does with arg.
+func (s *Store) claim(name, k, required, next string, arg *vlatte.MatcherArg) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -165,9 +191,21 @@ func (s *Store) claim(name, k, required, next string) bool {
 
 	if next != "" {
 		s.set(name, k, next)
+		s.changed(Change{
+			Scenario: name,
+			Message:  Move{Scenario: name, Key: k, From: required, To: next}.String(),
+			Claim:    arg,
+		})
 	}
 
 	return true
+}
+
+// changed gives c to the function set with Notify, if any. The caller holds the write lock.
+func (s *Store) changed(c Change) {
+	if s.notify != nil {
+		s.notify(c)
+	}
 }
 
 // state returns the state of the instance k of the scenario name. The caller holds the lock.
