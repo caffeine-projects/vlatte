@@ -382,3 +382,22 @@ func requireServing(t *testing.T, addr string, file protoreflect.FileDescriptor,
 		assert.Equal(c, status.Enum().Values().ByName("SERVING").Number(), res.Get(status).Enum())
 	}, 10*time.Second, 100*time.Millisecond)
 }
+
+func TestRun_AGRPCAdminDirOfAWorkingDirectoryThatIsGoneFailsTheRun(t *testing.T) {
+	// A {workdir} admin directory is made absolute from the working directory: without one, the run fails with the
+	// setting's name instead of keeping the mocks somewhere else.
+	withoutDockerHost(t)
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.Remove(dir))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var stderr bytes.Buffer
+	code := run(ctx, []string{"--addr", randomAddr(t), "--journal=false", "--log-level", "disabled"}, nil, io.Discard, &stderr)
+
+	require.Equal(t, 1, code, stderr.String())
+	require.Contains(t, stderr.String(), "config: grpc.admin.dir: ")
+}
