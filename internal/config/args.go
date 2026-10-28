@@ -32,7 +32,10 @@ func (s *argsSource) load(c *catalog, _ lookup) ([]entry, []Problem, error) {
 
 	fs := flag.NewFlagSet("args", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	fs.Usage = func() {}
+	fs.Usage = func() {
+		// The caller reports what parsing finds: a bad flag becomes a Problem, from flagProblem, and -help returns
+		// flag.ErrHelp.
+	}
 
 	var entries []entry
 	lists := make(map[string]int) // index of each list's entry, so repeated flags add to it

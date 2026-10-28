@@ -138,7 +138,9 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	if conf.DebugFn == nil {
-		conf.DebugFn = func(_ string, _ any) {}
+		conf.DebugFn = func(_ string, _ any) {
+			// Debug logging is off unless a DebugFn is given.
+		}
 	}
 
 	if conf.RequestWasNotMatchedStatusCode == 0 {

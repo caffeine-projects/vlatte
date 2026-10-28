@@ -23,13 +23,5 @@ func JSONPath(path string, matcher vlatte.Matcher) vlatte.Matcher {
 
 // Field is an alias for JSONPath.
 func Field(path string, matcher vlatte.Matcher) vlatte.Matcher {
-	x, err := jp.ParseString(path)
-	if err != nil {
-		panic(fmt.Errorf("the json path expression %s is invalid: %w", path, err))
-	}
-	return &jsonPathMatcher{
-		Path:    path,
-		Expr:    x,
-		Matcher: matcher,
-	}
+	return JSONPath(path, matcher)
 }

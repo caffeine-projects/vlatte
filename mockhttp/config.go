@@ -286,8 +286,10 @@ func defaultConfig() *Config {
 		LogLevel:                       vlatte.LogLevelInfo,
 		LogVerbosity:                   vlatte.LogHeader,
 		Colors:                         true,
-		DebugFn:                        func(string, any) {},
-		GlobalEvents:                   &vlatte.Events{},
+		DebugFn: func(string, any) {
+			// Debug logging is off unless a DebugFn is given.
+		},
+		GlobalEvents: &vlatte.Events{},
 	}
 	return c
 }
