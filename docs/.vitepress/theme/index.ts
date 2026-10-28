@@ -9,6 +9,7 @@ import '@fontsource/jetbrains-mono/500.css'
 
 import Layout from './Layout.vue'
 import './vars.css'
+import './home.css'
 
 export default {
   extends: DefaultTheme,
