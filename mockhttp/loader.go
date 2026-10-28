@@ -69,7 +69,7 @@ func (l *fileLoader) load(app *Server, swap vlatte.Swap[*Mock]) error {
 	}
 
 	for _, pattern := range app.config.MockFileSearchPatterns {
-		matches, err := filepath.Glob(app.config.path(pattern))
+		matches, err := filepath.Glob(app.config.Path(pattern))
 		if err != nil {
 			return fmt.Errorf("loader: pattern %s: %w", pattern, err)
 		}

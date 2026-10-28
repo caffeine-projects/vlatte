@@ -45,7 +45,7 @@ func DecodeMock(app *Server, data []byte, format string) (*Mock, error) {
 // doesn't fails the start and the reload.
 func FileStore(dir string) AdminStore {
 	return func(app *Server) (vlatte.Store[*Mock], error) {
-		return newFileStore(app, app.config.path(dir), os.Remove), nil
+		return newFileStore(app, app.config.Path(dir), os.Remove), nil
 	}
 }
 

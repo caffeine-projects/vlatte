@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte/mockgrpc"
+	"github.com/caffeine-projects/vlatte/mockhttp"
 	"github.com/caffeine-projects/vlatte/webhook"
 )
 
@@ -16,6 +17,10 @@ const (
 
 	// _dockerGRPCAdminPort is the port of the gRPC server's admin API in the vlatte image.
 	_dockerGRPCAdminPort = "8082"
+
+	// _grpcAdminDir is where the command keeps the mocks the gRPC server's admin API adds, across restarts, in the
+	// HTTP server's work directory, next to the HTTP admin API's.
+	_grpcAdminDir = mockhttp.WorkDirVar + "/_grpc_admin"
 )
 
 // splitArgs splits the command's arguments between its servers: the flags of gRPC settings, --grpc-*, go to the gRPC
@@ -71,15 +76,20 @@ func splitArgs(args []string) (httpArgs, grpcArgs []string) {
 
 // newGRPC returns the command's gRPC server, as args and the shared sources set it, with the command's settings s,
 // which logs to logOutput: it serves only when its settings turn the grpc section on. It sends the webhooks of mock
-// files through wh, as the HTTP server does, serves reflection, and serves its admin API and keeps a journal, unless
-// settings turn them off.
-func newGRPC(args []string, s settings, wh *webhook.WebHook, logOutput io.Writer) (*mockgrpc.Server, error) {
+// files through wh, as the HTTP server does, serves reflection, and serves its admin API, which keeps the mocks it adds
+// in the work directory of the HTTP server httpConf configures, and keeps a journal, unless settings turn them off.
+func newGRPC(args []string, s settings, httpConf *mockhttp.Config, wh *webhook.WebHook, logOutput io.Writer) (*mockgrpc.Server, error) {
 	addr := _grpcAddr
 	if _, ok := os.LookupEnv(_dockerHostEnv); ok {
 		addr = dockerHost() + strings.TrimPrefix(_grpcAddr, ":")
 	}
 
-	return mockgrpc.New(s.setupGRPC(mockgrpc.Setup()).
+	cb, err := s.setupGRPC(mockgrpc.Setup(), httpConf)
+	if err != nil {
+		return nil, err
+	}
+
+	return mockgrpc.New(cb.
 		Addr(addr).
 		Journal("").
 		Reflection().

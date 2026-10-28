@@ -212,7 +212,7 @@ func startServer(cmd *cobra.Command, args []string, s settings, out, logOutput, 
 		return nil, nil, nil, failure(cmd, err, out, stderr)
 	}
 
-	g, err := newGRPC(grpcArgs, s, wh, logOutput)
+	g, err := newGRPC(grpcArgs, s, m.Config(), wh, logOutput)
 	if err != nil {
 		// Close releases what New opened, such as the journal.
 		m.Close()
@@ -336,6 +336,7 @@ Setting a key of the grpc section, such as --grpc or --grpc-descriptors, serves 
 the descriptor sets --grpc-descriptors names, as the mock files --grpc-mock-files names describe their calls. It
 serves gRPC server reflection, and its own admin API, on a random local port, and keeps a journal of its calls, for
 as long as it runs: --grpc-reflection=false, --grpc-admin=false and --grpc-journal=false turn them off.
+Its admin API keeps the mocks it adds in %s, across restarts: --grpc-admin-dir="" keeps them in memory.
 
 Settings:
 %s
@@ -343,7 +344,7 @@ gRPC settings:
 %s`,
 		root.Long, root.Use, root.Use, commands.String(), root.Example,
 		mockhttp.DefaultConfigFileName, strings.Join(mockhttp.DefaultConfigDirectories, " or "), mockhttp.EnvPrefix,
-		mockhttp.DefaultWorkDir, mockhttp.DefaultWorkDir, _adminDir, _journalDir, _grpcAddr,
+		mockhttp.DefaultWorkDir, mockhttp.DefaultWorkDir, _adminDir, _journalDir, _grpcAddr, _grpcAdminDir,
 		settingsSchema().Usage(mockhttp.EnvPrefix)+mockhttp.ConfigUsage(), mockgrpc.ConfigUsage())
 }
 

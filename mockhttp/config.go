@@ -186,6 +186,20 @@ func (c *Config) Apply(conf *Config) error {
 	return nil
 }
 
+// Path returns where the file or pattern p of the server is: a leading [WorkDirVar] is the server's work directory,
+// and a relative path starts at [Config.RootDir]. Path(WorkDirVar) is the work directory itself.
+func (c *Config) Path(p string) string {
+	if rest, ok := strings.CutPrefix(p, WorkDirVar); ok && (rest == "" || os.IsPathSeparator(rest[0])) {
+		p = filepath.Join(c.workDir(), rest)
+	}
+
+	if filepath.IsAbs(p) {
+		return p
+	}
+
+	return filepath.Join(c.RootDir, p)
+}
+
 // AdminAPI is an admin API the server opts into: a RESTful HTTP server of its own, apart from the mocks, that lists,
 // adds and changes them while the server runs. Make one with [github.com/caffeine-projects/vlatte/admin.New]. A nil
 // AdminAPI serves none.
@@ -719,20 +733,6 @@ func applyTLS(c *Config, certFile, keyFile, clientCertFile string) error {
 // in it for a named server.
 func (c *Config) workDir() string {
 	return cmp.Or(c.WorkDir, filepath.Join(DefaultWorkDir, c.Name))
-}
-
-// path returns where the file or pattern p of the server is: a leading WorkDirVar is the server's work directory,
-// and a relative path starts at RootDir.
-func (c *Config) path(p string) string {
-	if rest, ok := strings.CutPrefix(p, WorkDirVar); ok && (rest == "" || os.IsPathSeparator(rest[0])) {
-		p = filepath.Join(c.workDir(), rest)
-	}
-
-	if filepath.IsAbs(p) {
-		return p
-	}
-
-	return filepath.Join(c.RootDir, p)
 }
 
 // checkName checks the name of a server that names its work directory, a folder of DefaultWorkDir.

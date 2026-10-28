@@ -205,7 +205,7 @@ func TestRun_HelpListsTheCommandsSettings(t *testing.T) {
 	var out bytes.Buffer
 	require.Equal(t, 0, run(context.Background(), []string{"--help"}, nil, &out, io.Discard))
 
-	for _, key := range []string{"admin", "admin.addr", "admin.dir", "admin.docs_version", "grpc.admin", "grpc.admin.addr", "webhook.timeout"} {
+	for _, key := range []string{"admin", "admin.addr", "admin.dir", "admin.docs_version", "grpc.admin", "grpc.admin.addr", "grpc.admin.dir", "webhook.timeout"} {
 		require.Equal(t, 1, strings.Count(out.String(), "file key "+key+"\n"), key)
 	}
 
