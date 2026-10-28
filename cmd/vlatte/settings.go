@@ -1,7 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/config"
@@ -22,16 +26,17 @@ type settings struct {
 
 	grpcAdmin     bool // the gRPC server's admin API, which serves when the gRPC server does
 	grpcAdminAddr string
+	grpcAdminDir  string
 
 	webhook *webhook.WebHook // the webhook listener the HTTP and gRPC servers share, if webhook.timeout is set
 }
 
-// defaultSettings serve the admin API, over MCP too, which keeps the mocks it adds across restarts, and the gRPC
-// server's own: settings apply after them.
+// defaultSettings serve the admin API, over MCP too, and the gRPC server's own, which keep the mocks they add across
+// restarts: settings apply after them.
 func defaultSettings() settings {
 	return settings{
 		admin: true, adminAddr: adminAddr(), adminDir: _adminDir, mcp: true,
-		grpcAdmin: true, grpcAdminAddr: grpcAdminAddr(),
+		grpcAdmin: true, grpcAdminAddr: grpcAdminAddr(), grpcAdminDir: _grpcAdminDir,
 	}
 }
 
@@ -103,6 +108,13 @@ func settingsSchema() *config.Schema[settings] {
 				return err
 			},
 		},
+		config.Field[settings]{
+			Key: "grpc.admin.dir", Kind: config.String,
+			Usage: "Directory of the files that keep the mocks the gRPC server's admin API adds across restarts, which only " +
+				"the server loads: keep it out of grpc.mock_files. Relative paths start at grpc.root_dir, and {workdir} at " +
+				"workdir. Empty keeps them in memory.",
+			Set: func(s *settings, v config.Value) error { s.grpcAdmin, s.grpcAdminDir = true, v.Str; return nil },
+		},
 	)
 }
 
@@ -146,13 +158,30 @@ func (s settings) setupHTTP(cb *mockhttp.ConfigBuilder) (*mockhttp.ConfigBuilder
 	return cb, api
 }
 
-// setupGRPC applies s to the gRPC server's setup.
-func (s settings) setupGRPC(cb *mockgrpc.ConfigBuilder) *mockgrpc.ConfigBuilder {
-	if s.grpcAdmin {
-		cb.Admin(s.newAdmin(s.grpcAdminAddr))
+// setupGRPC applies s to the gRPC server's setup. The gRPC server has no work directory: a grpc.admin.dir that starts
+// with {workdir} starts at the HTTP server's, which httpConf configures.
+func (s settings) setupGRPC(cb *mockgrpc.ConfigBuilder, httpConf *mockhttp.Config) (*mockgrpc.ConfigBuilder, error) {
+	if !s.grpcAdmin {
+		return cb, nil
 	}
 
-	return cb
+	cb.Admin(s.newAdmin(s.grpcAdminAddr))
+
+	if s.grpcAdminDir == "" {
+		return cb, nil
+	}
+
+	dir := s.grpcAdminDir
+
+	// The path is absolute, so that grpc.root_dir doesn't apply to the HTTP server's work directory.
+	if rest, ok := strings.CutPrefix(dir, mockhttp.WorkDirVar); ok && (rest == "" || os.IsPathSeparator(rest[0])) {
+		var err error
+		if dir, err = filepath.Abs(httpConf.Path(dir)); err != nil {
+			return nil, fmt.Errorf("config: grpc.admin.dir: %w", err)
+		}
+	}
+
+	return cb.AdminStore(mockgrpc.FileStore(dir)), nil
 }
 
 // newAdmin returns an admin API on addr, which serves MCP too unless s turns it off.

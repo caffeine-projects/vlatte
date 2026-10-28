@@ -993,7 +993,7 @@ The `vlatte` command serves MCP at `POST /mcp` by default, and `vlatte mcp` serv
 
 The mocks the admin API adds last as long as the server, unless a persistent store keeps them. Each change the admin API makes, adding, replacing, enabling, disabling or removing a mock, reaches the store at once, and the server serves what the store holds when it starts and on each reload, so a change made to the store directly takes effect then too. The mocks of mock files and code never reach it, and a mock file's mock wins over a mock of the store with its id. A reload swaps the mocks of the store and of the mock files in one step: when either fails, the server serves what it served before.
 
-`FileStore(dir)` keeps them as mock files, `<id>.mock.yaml`, which only the store loads: keep `dir` out of the mock file patterns. A relative `dir` starts at `root_dir`, and `{workdir}` at the [work directory](#work-directory). A mock whose description doesn't load back is refused, as its file would fail every later start. A file's mock keeps the ID its name gives: one whose `id` differs fails the start and the reload, as the store finds its file by that name. The `vlatte` command keeps them in `{workdir}/_admin`: `admin.dir` (`--admin-dir`, `VLATTE_ADMIN_DIR`) sets another directory, and an empty one keeps the mocks in memory. In Go, `AdminStore` needs `Admin`:
+`FileStore(dir)` keeps them as mock files, `<id>.mock.yaml`, which only the store loads: keep `dir` out of the mock file patterns. A relative `dir` starts at `root_dir`, and `{workdir}` at the [work directory](#work-directory). A mock whose description doesn't load back is refused, as its file would fail every later start. A file's mock keeps the ID its name gives: one whose `id` differs fails the start and the reload, as the store finds its file by that name. The `vlatte` command keeps them in `{workdir}/_admin`: `admin.dir` (`--admin-dir`, `VLATTE_ADMIN_DIR`) sets another directory, and an empty one keeps the mocks in memory. It keeps those of the gRPC server's admin API in `{workdir}/_grpc_admin`, the HTTP server's work directory, as the gRPC server has none: `grpc.admin.dir` (`--grpc-admin-dir`, `VLATTE_GRPC_ADMIN_DIR`) sets another, whose relative paths start at `grpc.root_dir`, and an empty one keeps them in memory. A kept gRPC mock of a method the descriptor sets no longer hold fails the start, which names its file: remove the file to start again. In Go, `AdminStore` needs `Admin`:
 
 ```go
 m := mockhttp.MustNew(mockhttp.Setup().Admin(admin.MustNew()).AdminStore(mockhttp.FileStore("{workdir}/_admin")))
@@ -1179,11 +1179,12 @@ testdata/
     _mocks/            mock files
     _mocks_recorded/   recordings
     _admin/            the mocks the CLI's admin API adds
+    _grpc_admin/       the mocks the CLI's gRPC admin API adds
     _journal/          the CLI's journal
     test/              a server named "test": its own _mocks, _admin, _journal...
 ```
 
-A path setting that starts with `{workdir}`, such as `mock_files`, `record.dir`, `admin.dir` or `journal.dir`, starts at the work directory: the defaults do, as `--help` shows. Other relative paths start at `root_dir`. In a YAML file, quote such a value: `dir: "{workdir}/recordings"`.
+A path setting that starts with `{workdir}`, such as `mock_files`, `record.dir`, `admin.dir`, `grpc.admin.dir` or `journal.dir`, starts at the work directory: the defaults do, as `--help` shows. Other relative paths start at `root_dir`, or `grpc.root_dir` for a `grpc` setting. In a YAML file, quote such a value: `dir: "{workdir}/recordings"`.
 
 Unknown keys, flags and `VLATTE_*` variables are errors, except `VLATTE_DOCKER_HOST`. A server that can't load its settings reports every problem at once:
 
@@ -1240,6 +1241,8 @@ protoc --descriptor_set_out=api.binpb --include_imports api.proto
 vlatte --grpc-descriptors=api.binpb --grpc-mock-files='mocks/grpc/*.yaml'
 grpcurl -plaintext -d '{"id": "u-1"}' localhost:50051 users.Users/Get
 ```
+
+The gRPC admin API keeps the mocks it adds in `{workdir}/_grpc_admin`, as [persistent admin mocks](#persistent-admin-mocks), so the next run serves them: `--grpc-admin-dir` moves them, and `--grpc-admin-dir=""` keeps them in memory.
 
 `--grpc-tls` serves them over TLS, with a self-signed certificate, unless `--grpc-tls-cert` and `--grpc-tls-key` name the files of one; `--grpc-tls-ca` requires clients to present a certificate signed by a CA of its file. Each of these turns TLS on.
 

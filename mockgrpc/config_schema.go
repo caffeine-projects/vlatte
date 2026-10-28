@@ -148,6 +148,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		// them, so a config file it shares with the command loads.
 		field{Key: "grpc.admin", Kind: config.Bool, Hidden: true},
 		field{Key: "grpc.admin.addr", Kind: config.String, Hidden: true},
+		field{Key: "grpc.admin.dir", Kind: config.String, Hidden: true},
 		field{
 			Key: "grpc.journal", Kind: config.Bool, Usage: "Keep a journal of the calls the gRPC server serves, of every outcome.",
 			Set: func(c *Config, v config.Value) error {

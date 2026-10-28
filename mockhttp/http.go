@@ -600,7 +600,7 @@ func (app *Server) DescribeConfig() string {
 	}
 
 	buf.WriteString("Work Dir: ")
-	buf.WriteString(app.config.path(WorkDirVar))
+	buf.WriteString(app.config.Path(WorkDirVar))
 	buf.WriteString("\n")
 
 	buf.WriteString("Mock Search Patterns: ")

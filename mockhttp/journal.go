@@ -43,7 +43,7 @@ func openJournal(conf *Config, logger *zerolog.Logger) (*journal.Journal, error)
 
 	dir := conf.Journal.Dir
 	if dir != "" {
-		dir = conf.path(dir)
+		dir = conf.Path(dir)
 	}
 
 	journal, err := journal.New(journal.Options{

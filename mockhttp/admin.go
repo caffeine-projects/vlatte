@@ -168,7 +168,7 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 	// A dir the admin API sends stays inside root_dir, as it checked: only the default is in the work directory.
 	switch {
 	case dir == "":
-		dir = app.config.path(_defaultSaveDir)
+		dir = app.config.Path(_defaultSaveDir)
 	case !filepath.IsAbs(dir):
 		dir = filepath.Join(app.config.RootDir, dir)
 	}
