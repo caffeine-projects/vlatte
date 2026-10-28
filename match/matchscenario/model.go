@@ -41,8 +41,8 @@ type Scenario struct {
 type State struct {
 	Name string
 
-	// Reachable is false for a state a mock requires but no move of a mock leads to from [StateStarted]: only setting
-	// the scenario gets there.
+	// Reachable is false for a state a mock requires but no path of mock moves leads to from [StateStarted]: requests
+	// get there only after the scenario is set to it or to another such state.
 	Reachable bool
 }
 

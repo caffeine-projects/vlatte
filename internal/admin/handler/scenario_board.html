@@ -219,8 +219,8 @@
         type: 'button',
         className: (current ? 'current ' : '') + (state.reachable ? '' : 'unreachable'),
         disabled: current,
-        title: state.reachable ? 'Move ' + scenario.name + ' to ' + state.name
-          : 'No mock moves the scenario to this state: only this page or the admin API can',
+        title: 'Move ' + scenario.name + ' to ' + state.name +
+          (state.reachable ? '' : ': no path of mock moves leads here from started'),
       }, state.name)
       button.setAttribute('aria-pressed', String(current))
       button.dataset.key = 'state:' + scenario.name + ':' + state.name
@@ -249,8 +249,8 @@
 
     const unreachable = scenario.states.filter((s) => !s.reachable).map((s) => s.name)
     if (unreachable.length > 0) {
-      section.append(el('p', { className: 'note' }, 'No mock moves the scenario to ' + unreachable.join(', ') +
-        ': a mock that requires it waits for this page or the admin API.'))
+      section.append(el('p', { className: 'note' }, 'No path of mock moves leads from started to ' + unreachable.join(', ') +
+        ': requests get there only after the scenario is set to one of them, here or with the admin API.'))
     }
 
     if (scenario.transitions.length > 0) {
