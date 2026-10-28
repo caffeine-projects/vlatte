@@ -31,7 +31,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -631,7 +630,7 @@ func TestServer_WarnsOfAServiceRegisteredPastTheJournal(t *testing.T) {
 			_, err = pb.NewTestServiceClient(conn).Greetings(t.Context(), &pb.HiReq{})
 			require.Equal(t, codes.NotFound, status.Code(err))
 
-			n, err := m.CountRequests(t.Context(), journal.Query{})
+			n, err := m.VerifyRequests().Count(t.Context())
 			require.NoError(t, err)
 			require.Equal(t, 1, n, "the call is journaled either way")
 		})

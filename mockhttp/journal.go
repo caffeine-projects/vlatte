@@ -19,11 +19,13 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/verify"
 )
 
 var (
-	_ mockHTTPLifecycle                       = journalEvents{}
-	_ journal.RequestPatterns[*Mock, *Server] = (*Server)(nil)
+	_ mockHTTPLifecycle               = journalEvents{}
+	_ verify.Patterns[*Mock, *Server] = (*Server)(nil)
+	_ verify.Pattern                  = (*requestPattern)(nil)
 )
 
 var (
@@ -223,10 +225,11 @@ func (c *journalCall) end(r *RequestValues, p any, left error) {
 	}
 }
 
-// RequestPattern returns the filter of journal entries that the request part of b matches, as it matches a request:
-// b is a *Builder, such as Request(), whose reply counts for nothing. Times, Once and scenarios match no request
-// served before, so a pattern has none. It implements journal.RequestPatterns.
-func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (journal.Filter, error) {
+// RequestPattern returns the pattern of journal entries that the request part of b matches, as it matches a request:
+// b is a *Builder, such as Request().Query("page", match.Equal("2")), whose reply counts for nothing. Times, Once and
+// scenarios match no request served before, so a pattern has none. It implements verify.Patterns, for
+// VerifyRequests().Matching.
+func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (verify.Pattern, error) {
 	builder, ok := b.(*Builder)
 
 	switch {
@@ -249,31 +252,72 @@ func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (journal.Fil
 		return nil, fmt.Errorf("http: request pattern: %w", err)
 	}
 
-	evals := vlatte.Evaluators[*Mock, *selectorInput](slices.Concat(builder.spec.expectations, params))
+	p := &requestPattern{app: app, evals: slices.Concat(builder.spec.expectations, params)}
 
 	// A pattern that reads the body can't tell whether a body the journal cut matched: the rest of the pattern runs
 	// first, as a miss there is a miss.
-	var rest vlatte.Evaluators[*Mock, *selectorInput]
-
-	for _, e := range evals {
+	for _, e := range p.evals {
 		if !readsBody(matchingScope(e.Target)) {
-			rest = append(rest, e)
+			p.rest = append(p.rest, e)
 		}
 	}
 
-	return func(ctx context.Context, e *journal.Entry) (bool, error) {
-		if !e.BodyTruncated || len(rest) == len(evals) {
-			return app.matchEntry(ctx, e, evals)
+	return p, nil
+}
+
+// requestPattern is the pattern of the request part of a mock: evals, and rest, those of them that read no body.
+type requestPattern struct {
+	app   *Server
+	evals vlatte.Evaluators[*Mock, *selectorInput]
+	rest  vlatte.Evaluators[*Mock, *selectorInput]
+}
+
+// Match tells whether the pattern matches the request of e, as it came.
+func (p *requestPattern) Match(ctx context.Context, e *journal.Entry) (bool, error) {
+	if !e.BodyTruncated || len(p.rest) == len(p.evals) {
+		return p.app.matchEntry(ctx, e, p.evals)
+	}
+
+	ok, err := p.app.matchEntry(ctx, e, p.rest)
+	if err != nil || !ok {
+		return false, err
+	}
+
+	return false, fmt.Errorf("http: %w: entry %d: the journal kept part of its body, which the pattern reads",
+		vlatte.ErrMatching, e.Seq)
+}
+
+// Explain tells which parts of the pattern the request of e passes, by the names a near miss gives them, such as
+// "query page". A part that reads a body the journal cut is neither passed nor failed.
+func (p *requestPattern) Explain(ctx context.Context, e *journal.Entry) (verify.Miss, error) {
+	if e.Kind != Kind {
+		return verify.Miss{Total: 1, Failed: []string{"kind"}}, nil
+	}
+
+	in, done, err := p.app.entryInput(ctx, e)
+	if err != nil {
+		return verify.Miss{}, err
+	}
+
+	defer done()
+
+	var miss verify.Miss
+
+	for _, eval := range p.evals {
+		if e.BodyTruncated && readsBody(matchingScope(eval.Target)) {
+			continue
 		}
 
-		ok, err := app.matchEntry(ctx, e, rest)
-		if err != nil || !ok {
-			return false, err
-		}
+		miss.Total++
 
-		return false, fmt.Errorf("http: %w: entry %d: the journal kept part of its body, which the pattern reads",
-			vlatte.ErrMatching, e.Seq)
-	}, nil
+		if ok, err := eval.Match(ctx, nil, in); err == nil && ok {
+			miss.Passed++
+		} else {
+			miss.Failed = append(miss.Failed, describeExpectation(eval))
+		}
+	}
+
+	return miss, nil
 }
 
 // readsBody reports whether a matcher of scope reads the body of a request: one of the body or of a form does, and so
@@ -290,7 +334,7 @@ func readsBody(scope matchingScope) bool {
 
 // adminRequestPattern returns the filter of the request part of a mock file, v, the request key of a query of the
 // admin API: its keys are a mock file's, and it matches as a mock does. An empty one matches every request.
-func (app *Server) adminRequestPattern(v config.Value) (journal.Filter, error) {
+func (app *Server) adminRequestPattern(v config.Value) (verify.Pattern, error) {
 	def := newMockDef(app.matchers())
 	doc := config.Value{Origin: v.Origin, Any: map[string]any{"request": v.Any}}
 
@@ -314,22 +358,38 @@ func (app *Server) matchEntry(ctx context.Context, e *journal.Entry, evals vlatt
 		return false, nil
 	}
 
-	req, err := entryRequest(ctx, e)
+	in, done, err := app.entryInput(ctx, e)
 	if err != nil {
 		return false, err
 	}
 
-	rv, _, _ := parseRequest(req, app)
-	if req.MultipartForm != nil {
-		defer req.MultipartForm.RemoveAll()
-	}
+	defer done()
 
-	ok, err := evals.Eval(ctx, vlatte.NewExplanation(), newSelectorInput(req, rv, false))
+	ok, err := evals.Eval(ctx, vlatte.NewExplanation(), in)
 	if err != nil {
 		return false, fmt.Errorf("http: %w: entry %d: %w", vlatte.ErrMatching, e.Seq, err)
 	}
 
 	return ok, nil
+}
+
+// entryInput returns what the matchers of a mock read of the request of e, through the server's body parsers, as it
+// came, and done, which lets go of what parsing it kept, such as the files of a multipart form.
+func (app *Server) entryInput(ctx context.Context, e *journal.Entry) (*selectorInput, func(), error) {
+	req, err := entryRequest(ctx, e)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	rv, _, _ := parseRequest(req, app)
+
+	done := func() {
+		if req.MultipartForm != nil {
+			req.MultipartForm.RemoveAll()
+		}
+	}
+
+	return newSelectorInput(req, rv, false), done, nil
 }
 
 // entryRequest rebuilds the request of e, with its target's URL: the server reads the scheme and host of a request to

@@ -176,6 +176,27 @@ func (e *Entry) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	return nil
 }
 
+// Messages returns the lines of the entry's Message, each a failure, trimmed, without the empty ones.
+func (e *Entry) Messages() []string {
+	return lines(e.Message)
+}
+
+// HeaderValue returns the first value of the entry's header named name, in any case, or "" when it has none: the
+// value a query's Header matcher gets. Of two spellings of a name, the one spelled as name comes first.
+func (e *Entry) HeaderValue(name string) string {
+	if values := e.Header[name]; len(values) > 0 {
+		return values[0]
+	}
+
+	for k, values := range e.Header {
+		if strings.EqualFold(k, name) && len(values) > 0 {
+			return values[0]
+		}
+	}
+
+	return ""
+}
+
 // validUTF8 replaces the bytes of the text of e that the index keeps, which aren't UTF-8, with U+FFFD, as the JSON of
 // e has them: the index and the journal's files have the same values. Encoding replaces those of the rest.
 func (e *Entry) validUTF8() {
@@ -244,12 +265,17 @@ func (l *journalLine) entry() Entry {
 
 // joinLines returns the lines of s that aren't blank, trimmed, joined with sep.
 func joinLines(s, sep string) string {
-	var lines []string
+	return strings.Join(lines(s), sep)
+}
+
+// lines returns the lines of s, trimmed, without the empty ones.
+func lines(s string) []string {
+	var out []string
 	for line := range strings.Lines(s) {
 		if line = strings.TrimSpace(line); line != "" {
-			lines = append(lines, line)
+			out = append(out, line)
 		}
 	}
 
-	return strings.Join(lines, sep)
+	return out
 }

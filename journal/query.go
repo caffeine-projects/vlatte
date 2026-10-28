@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
@@ -182,7 +181,7 @@ func (q *Query) readsEntries(filters []Filter) bool {
 // selects tells whether q, with filters, selects e by what only its file holds.
 func (q *Query) selects(ctx context.Context, e *Entry, filters []Filter) (bool, error) {
 	for name, m := range q.Header {
-		ok, err := matchValue(ctx, m, firstValue(e.Header, name))
+		ok, err := matchValue(ctx, m, e.HeaderValue(name))
 		if err != nil || !ok {
 			return false, err
 		}
@@ -254,21 +253,6 @@ func matchValue(ctx context.Context, m vlatte.Matcher, v any) (ok bool, err erro
 	}
 
 	return ok, nil
-}
-
-// firstValue returns the first value of the header of h named name, in any case, or "".
-func firstValue(h map[string][]string, name string) string {
-	if values := h[name]; len(values) > 0 {
-		return values[0]
-	}
-
-	for k, values := range h {
-		if strings.EqualFold(k, name) && len(values) > 0 {
-			return values[0]
-		}
-	}
-
-	return ""
 }
 
 // searchRows returns where seq is in rows, ordered by sequence number, or would be, and whether it is.

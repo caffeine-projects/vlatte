@@ -25,12 +25,12 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
-	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid/recovery"
+	"github.com/caffeine-projects/vlatte/verify"
 )
 
 var _ vlatte.Server[*Mock, *Server] = (*Server)(nil)
@@ -51,7 +51,7 @@ const Kind vlatte.Kind = "http"
 // Server is the base for the mock server.
 type Server struct {
 	*vlatte.Base[*Mock, *Server]
-	*journal.Verifier[*Mock, *Server]
+	*verify.Verifier[*Mock, *Server]
 
 	config             *Config
 	server             Backend
@@ -268,7 +268,7 @@ func New(config ...Option) (*Server, error) {
 	}()
 
 	app.Base = vlatte.NewBase(app, repository)
-	app.Verifier = journal.NewVerifier[*Mock, *Server](j, app)
+	app.Verifier = verify.NewVerifier(j, verify.Protocol[*Mock, *Server]{Patterns: app})
 	app.storage = repository
 	app.scenarioStore = matchscenario.New()
 	if app.eventStream != nil {

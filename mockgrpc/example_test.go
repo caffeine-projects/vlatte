@@ -9,7 +9,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockgrpc"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
@@ -106,7 +105,7 @@ func ExampleBidi() {
 	// bye
 }
 
-func ExampleServer_CountRequests() {
+func ExampleServer_VerifyRequests() {
 	m := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory().Journal(""))
 	m.MustStart()
 	defer m.Close()
@@ -121,8 +120,7 @@ func ExampleServer_CountRequests() {
 	}
 
 	// A mock builder is a pattern of the calls the journal kept.
-	n, err := m.CountRequests(context.Background(), journal.Query{},
-		mockgrpc.Method("TestService/Greetings").Field("message", match.Equal("hi")))
+	n, err := m.VerifyRequests().Matching(mockgrpc.Method("TestService/Greetings").Field("message", match.Equal("hi"))).Count(context.Background())
 	if err != nil {
 		panic(err)
 	}

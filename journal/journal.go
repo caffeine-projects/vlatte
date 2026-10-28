@@ -34,9 +34,6 @@ var (
 	ErrClosed    = errors.New("journal: closed")
 	ErrInUse     = errors.New("journal: another journal keeps its files in the directory")
 	ErrNotFound  = errors.New("journal: request not found")
-
-	// ErrNoRequestPatterns is the error of a verification with request patterns on a server whose protocol has none.
-	ErrNoRequestPatterns = errors.New("journal: the server takes no request patterns")
 )
 
 // _closedChan is the channel Changed returns once nothing will change.

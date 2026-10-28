@@ -72,8 +72,6 @@
 //
 // # Verifying
 //
-// A [Verifier] verifies the requests of a server with [Verifier.Requests] and [Verifier.CountRequests], and asserts
-// them in a test with [Verifier.AssertRequested] and [Verifier.AssertNotRequested], whose failures list the requests
-// that matched, or, when none did, the newest ones. A protocol that implements [RequestPatterns] turns the request part
-// of its own mocks into filters, so a test verifies a request as a mock matches one.
+// Package [github.com/caffeine-projects/vlatte/verify] checks the requests of a server's journal in a test: which came,
+// how many, by when and in what order.
 package journal

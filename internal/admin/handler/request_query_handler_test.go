@@ -14,7 +14,24 @@ import (
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
+	"github.com/caffeine-projects/vlatte/verify"
 )
+
+var _ verify.Pattern = patternFunc(nil)
+
+// patternFunc is a request pattern that matches as its func does, as the patterns of a protocol's mocks match.
+type patternFunc func(ctx context.Context, e *journal.Entry) (bool, error)
+
+func (f patternFunc) Match(ctx context.Context, e *journal.Entry) (bool, error) { return f(ctx, e) }
+
+func (f patternFunc) Explain(ctx context.Context, e *journal.Entry) (verify.Miss, error) {
+	ok, err := f(ctx, e)
+	if err != nil || ok {
+		return verify.Miss{Passed: 1, Total: 1}, err
+	}
+
+	return verify.Miss{Total: 1, Failed: []string{"request"}}, nil
+}
 
 func TestQueryRequests(t *testing.T) {
 	// QUERY selects requests by the keys of a query, with the matchers mock files write, and counts them: limit 0
@@ -230,7 +247,7 @@ func TestQueryRequests_TheRequestPartIsTheProtocolsPattern(t *testing.T) {
 
 	var got config.Value
 
-	pattern := func(v config.Value) (journal.Filter, error) {
+	pattern := func(v config.Value) (verify.Pattern, error) {
 		got = v
 
 		if v.Any == "bad" {
@@ -238,12 +255,12 @@ func TestQueryRequests_TheRequestPartIsTheProtocolsPattern(t *testing.T) {
 		}
 
 		if v.Any == "failing" {
-			return func(context.Context, *journal.Entry) (bool, error) {
+			return patternFunc(func(context.Context, *journal.Entry) (bool, error) {
 				return false, fmt.Errorf("%w: a matcher that fails", vlatte.ErrMatching)
-			}, nil
+			}), nil
 		}
 
-		return func(_ context.Context, e *journal.Entry) (bool, error) { return e.Path == "/b", nil }, nil
+		return patternFunc(func(_ context.Context, e *journal.Entry) (bool, error) { return e.Path == "/b", nil }), nil
 	}
 
 	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j, Pattern: pattern})
