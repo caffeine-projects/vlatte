@@ -1,13 +1,20 @@
 package e2e
 
 import (
+	"bufio"
+	"context"
+	json "encoding/json/v2"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
+	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	"github.com/caffeine-projects/vlatte/mockhttp"
@@ -160,4 +167,177 @@ func TestScenarios_EachKeyPlaysInAnInstanceOfItsOwn(t *testing.T) {
 
 	_, order = getTarget(t, m, "/order?tenant=a")
 	require.Equal(t, "paid", string(order))
+}
+
+// scenarioEvents follows the admin API's events of m while send runs, and returns the first n scenario events. It
+// waits 5 seconds at most, so a missing event fails the test rather than hangs it.
+func scenarioEvents(t *testing.T, m *mockhttp.Server, n int, send func()) []map[string]any {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, m.AdminURL()+"/events", nil)
+	require.NoError(t, err)
+
+	res, err := http.DefaultClient.Do(r)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = res.Body.Close() })
+
+	send()
+
+	lines := bufio.NewScanner(res.Body)
+
+	var events []map[string]any
+	for len(events) < n && lines.Scan() {
+		line, ok := strings.CutPrefix(lines.Text(), "data: ")
+		if !ok {
+			continue
+		}
+
+		var e map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &e))
+
+		if e["type"] == "scenario" {
+			delete(e, "time")
+			events = append(events, e)
+		}
+	}
+
+	require.NoError(t, lines.Err())
+	require.Len(t, events, n, "events: %v", events)
+
+	return events
+}
+
+func TestScenarios_TemplatesReadTheStateOfAScenario(t *testing.T) {
+	// One mock answers in every state of a scenario, with what the state says, instead of a mock per state. It reads
+	// the state its own mock moved the scenario to.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(
+		mockhttp.Getf("/order").Reply(mockhttp.OK().BodyTemplate(`{{ .Scenarios.State "Checkout" }}`)),
+		mockhttp.Postf("/pay").StartScenario("checkout").ScenarioStateWillBe("paid").
+			Reply(mockhttp.OK().BodyTemplate(`{{ .Scenarios.State "checkout" }}`)),
+	)
+
+	for _, step := range []struct {
+		get  bool
+		path string
+		want string
+	}{
+		{true, "/order", matchscenario.StateStarted},
+		{false, "/pay", "paid"},
+		{true, "/order", "paid"},
+	} {
+		var body []byte
+		if step.get {
+			_, body = getTarget(t, m, step.path)
+		} else {
+			_, body = postBody(t, m.URL(step.path), "", nil)
+		}
+
+		require.Equal(t, step.want, string(body), step.path)
+	}
+}
+
+func TestScenarios_TheJournalKeepsTheMovesOfARequest(t *testing.T) {
+	// A test verifies which request moved a scenario: its entry has the move, and a request whose mock moves none has
+	// none.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Journal(t.TempDir()))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(
+		mockhttp.Postf("/pay").ScenarioIs("checkout").ScenarioStateIs(matchscenario.StateStarted).
+			ScenarioStateWillBe("paid").Reply(mockhttp.OK()),
+		mockhttp.Getf("/order").ScenarioIs("checkout").ScenarioStateIs("paid").Reply(mockhttp.OK()),
+	)
+
+	postBody(t, m.URL("/pay"), "", nil)
+	getTarget(t, m, "/order")
+
+	only := func(path string) *journal.Entry {
+		entries, err := m.Requests(t.Context(), journal.Query{Path: match.Equal(path)})
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+
+		return entries[0]
+	}
+
+	pay := only("/pay")
+	require.Equal(t, []matchscenario.Move{{Scenario: "checkout", From: matchscenario.StateStarted, To: "paid"}},
+		pay.Scenarios)
+
+	order := only("/order")
+	require.Equal(t, journal.OutcomeMatched, order.Outcome)
+	require.Empty(t, order.Scenarios)
+}
+
+func TestScenarios_StreamsEachMove(t *testing.T) {
+	// A client, such as the admin page, follows the scenarios as they move: by a request, which names its mock, or by
+	// the server's methods and the admin API.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(admin.MustNew()))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.Postf("/pay").ID("pay").StartScenario("checkout").ScenarioStateWillBe("paid").
+		Reply(mockhttp.OK()))
+
+	var paid *http.Response
+
+	events := scenarioEvents(t, m, 4, func() {
+		paid, _ = postBody(t, m.URL("/pay"), "", nil)
+		require.NoError(t, m.SetScenario(t.Context(), "checkout", matchscenario.StateStarted))
+		m.ResetScenario("checkout")
+		m.ResetScenarios()
+	})
+
+	require.Equal(t, paid.Header.Get(vlatte.HeaderRequestID), events[0]["request_id"], "the event names its request")
+	delete(events[0], "request_id")
+
+	require.Equal(t, []map[string]any{
+		{"type": "scenario", "target": "checkout", "mock_id": "pay", "message": "checkout moved from started to paid"},
+		{"type": "scenario", "target": "checkout", "message": "checkout set to started"},
+		{"type": "scenario", "target": "checkout", "message": "checkout reset to started"},
+		{"type": "scenario", "message": "every scenario reset to started"},
+	}, events)
+}
+
+func TestScenarios_TheJournalAndTheEventsNameTheKey(t *testing.T) {
+	// A test verifies which instance its request moved, and the admin page which one to redraw.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Journal(t.TempDir()).Admin(admin.MustNew()))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.Postf("/pay").ID("pay").StartScenario("checkout").ScenarioStateWillBe("paid").
+		ScenarioKey(`{{ .Request.Header.Get "X-Test" }}`).Reply(mockhttp.OK()))
+
+	events := scenarioEvents(t, m, 3, func() {
+		req, err := http.NewRequest(http.MethodPost, m.URL("/pay"), nil)
+		require.NoError(t, err)
+		req.Header.Set("X-Test", "t1")
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		require.NoError(t, m.SetScenario(t.Context(), "checkout", "paid", matchscenario.Key("t2")))
+		m.ResetScenario("checkout", matchscenario.Key("t1"))
+	})
+
+	delete(events[0], "request_id")
+	require.Equal(t, []map[string]any{
+		{"type": "scenario", "target": "checkout", "mock_id": "pay", "message": "checkout (key t1) moved from started to paid"},
+		{"type": "scenario", "target": "checkout", "message": "checkout (key t2) set to paid"},
+		{"type": "scenario", "target": "checkout", "message": "checkout (key t1) reset to started"},
+	}, events)
+
+	entries, err := m.Requests(t.Context(), journal.Query{Path: match.Equal("/pay")})
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, []matchscenario.Move{{Scenario: "checkout", Key: "t1", From: matchscenario.StateStarted, To: "paid"}},
+		entries[0].Scenarios)
 }
