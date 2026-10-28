@@ -18,8 +18,6 @@ import (
 // _healthTimeout bounds the health check, below the 30s Docker waits for a HEALTHCHECK by default.
 const _healthTimeout = 5 * time.Second
 
-var errNotPinned = errors.New("health: the admin API presents another certificate than admin.tls.cert")
-
 // healthCmd checks that a running vlatte serves, for a container's health check, which needs a command: the vlatte
 // image has no shell or HTTP client. It sets code to 0 when it does, and to 1 otherwise.
 func healthCmd(code *int) *cobra.Command {
@@ -108,8 +106,8 @@ func checkServer(ctx context.Context, adminURL string, pinned *x509.Certificate,
 }
 
 // probe checks that a GET of url answers 200. With pinned, an HTTPS server must present that certificate, which
-// needn't name the host the check reaches it on, nor chain to a CA the system trusts: the check trusts the one the
-// settings name.
+// needn't chain to a CA the system trusts, nor name the host the check reaches it on: the check trusts it alone, and
+// verifies it for a name it holds.
 func probe(ctx context.Context, url string, pinned *x509.Certificate) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -119,18 +117,10 @@ func probe(ctx context.Context, url string, pinned *x509.Certificate) error {
 	// A transport without a proxy asks the server directly: a proxy the environment names would answer for it.
 	transport := &http.Transport{}
 	if pinned != nil {
-		transport.TLSClientConfig = &tls.Config{
-			MinVersion: tls.VersionTLS12,
-			// VerifyConnection checks the certificate in place of the system's verification.
-			InsecureSkipVerify: true, //nolint:gosec // the certificate must be the pinned one
-			VerifyConnection: func(cs tls.ConnectionState) error {
-				if len(cs.PeerCertificates) == 0 || !cs.PeerCertificates[0].Equal(pinned) {
-					return errNotPinned
-				}
+		roots := x509.NewCertPool()
+		roots.AddCert(pinned)
 
-				return nil
-			},
-		}
+		transport.TLSClientConfig = &tls.Config{RootCAs: roots, ServerName: certName(pinned), MinVersion: tls.VersionTLS12}
 	}
 
 	client := &http.Client{Transport: transport}
@@ -148,4 +138,17 @@ func probe(ctx context.Context, url string, pinned *x509.Certificate) error {
 	}
 
 	return nil
+}
+
+// certName returns a name cert is valid for: its first DNS name, or else its first IP address.
+func certName(cert *x509.Certificate) string {
+	if len(cert.DNSNames) > 0 {
+		return cert.DNSNames[0]
+	}
+
+	if len(cert.IPAddresses) > 0 {
+		return cert.IPAddresses[0].String()
+	}
+
+	return ""
 }

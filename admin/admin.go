@@ -121,7 +121,7 @@ func BearerToken(token string) Option {
 func TLS(c *tls.Config) Option {
 	return func(a *Admin) {
 		// A nil config has no certificate either: New fails for it.
-		a.opts.TLS = cmp.Or(c, &tls.Config{}).Clone()
+		a.opts.TLS = cmp.Or(c, &tls.Config{MinVersion: tls.VersionTLS12}).Clone()
 	}
 }
 

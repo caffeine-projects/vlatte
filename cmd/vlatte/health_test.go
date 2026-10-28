@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -75,7 +77,8 @@ func TestProbe_TrustsThePinnedCertificateAlone(t *testing.T) {
 	other, err := tls.LoadX509KeyPair(certFile, keyFile)
 	require.NoError(t, err)
 
-	require.ErrorIs(t, probe(t.Context(), srv.URL, other.Leaf), errNotPinned, "the server presents another certificate")
+	_, unknown := errors.AsType[x509.UnknownAuthorityError](probe(t.Context(), srv.URL, other.Leaf))
+	require.True(t, unknown, "the server presents another certificate")
 }
 
 func TestHealth_FailsForAURLItCantAsk(t *testing.T) {
