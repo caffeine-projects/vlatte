@@ -862,17 +862,21 @@ func connect(t *testing.T, m *Server, host string) (*http.Response, string) {
 	return res, string(body)
 }
 
-// closedAddr returns the address of a TCP server that is gone: dialing it is refused.
+// closedAddr returns an address nothing listens on until the test ends: dialing it is refused. The port is the local
+// end of a connection the test holds open, so no listener of this process or another picks it up meanwhile, as one
+// could a port freed by closing its listener.
 func closedAddr(t *testing.T) string {
 	t.Helper()
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
 
-	addr := l.Addr().String()
-	require.NoError(t, l.Close())
+	conn, err := net.Dial("tcp", l.Addr().String())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
 
-	return addr
+	return conn.LocalAddr().String()
 }
 
 func TestForwardProxy_AViaThatFailsFailsTheTunnel(t *testing.T) {
