@@ -533,17 +533,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.debugHeader(w, vlatte.HeaderMatchedMockHits, strconv.FormatInt(mock.Hits()+1, 10))
 	h.debugHeader(w, vlatte.HeaderMatchedMockSource, mock.Origin())
 
-	d := make(map[string]any, len(h.templateDataProviders))
-	sdpIn := &TemplateDataProviderInput{r: reqValues}
-
-	for _, sdp := range h.templateDataProviders {
-		dd, err := sdp.Data(sdpIn)
-		if err != nil {
-			h.onError(w, reqValues, vlatte.FailureReply, fmt.Errorf("http: template data provider %s: %w", sdp.Key(), err))
-			return
-		}
-
-		d[sdp.Key()] = dd
+	d, err := vlatte.ProvideTemplateData(h.templateDataProviders, &TemplateDataProviderInput{r: reqValues})
+	if err != nil {
+		h.onError(w, reqValues, vlatte.FailureReply, fmt.Errorf("http: %w", err))
+		return
 	}
 
 	locals := locals(reqValues, d, viewdata.NewParameters(r.Context(), h.app.params))

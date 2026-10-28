@@ -120,7 +120,7 @@ A client streaming call matches once the client closed its side, on all its mess
 | `Message(msg)` | A message, which must be of the method's output type. |
 | `Messages(msgs...)` | The messages of a server or bidi stream, in turn. |
 | `JSON(texts...)` | The messages `texts` hold, in the method's output type. |
-| `Template(texts...)` | Like `JSON`, rendered for each call: `{"message": "hi {{ .Request.Message.name }}"}`, with `.Request.Header` and `.Parameters`. |
+| `Template(texts...)` | Like `JSON`, rendered for each call: `{"message": "hi {{ .Request.Message.name }}"}`, with `.Request.Header`, `.Parameters`, `.Data`, which `m.SetData` sets, and `.Provided.<key>`, which `Setup().TemplateDataProviders(...)` provide. |
 | `Status(code, msg)` | A status, with no message. |
 | `Bidi()` | A bidi stream, message by message: `On(matcher, reply)`, `Otherwise(reply)`, `OnEnd(reply)`. |
 | `Seq(replies...)` | Each reply in turn, one per call, a stream as a whole, then `OnSequenceEnded(reply)`'s. A call past the end without it fails with the `vlatte-error` trailer. |
@@ -195,7 +195,7 @@ res, err := m.StopRecording(ctx) // writes the mock files, then serves them
 
 A gRPC server records as an HTTP one does: see [Recording and playback](#recording-and-playback). With `RecordTarget`, the calls the recording takes go to the target before any mock; without one, it takes the answers of `From` mocks, and of every mock with `RecordIncludeMocked(true)`. `RecordMethods` names the methods it takes, as `Method` does, and `RecordRequestHeaders` the metadata its mocks match. A recording matches a call by its method, its messages and that metadata, and answers with the header, messages, trailer and status of the calls of that request in turn, as a `response_sequence`, then the last one again; `RecordRepeats(vlatte.RecordFirst)` keeps the first only. A bidi call matches by its method and metadata only, as bidi mocks do, and plays its messages back at once. `Setup().Record(...)`, the `grpc.record` section of the settings and the admin API's `/recording` routes record too, and a server serves the recordings of its `grpc.record.dir`, `_mocks_recorded` under its root directory by default.
 
-**More.** `Setup().Reflection()` serves server reflection, so `grpcurl` lists the services and describes their messages. A server keeps a [journal](#request-journal) of its calls with `Setup().Journal(dir)`, which tests verify with the same builders, serves an [admin API](#admin-api) with `Setup().Admin(admin.MustNew())`, and answers a call no mock matched with `Setup().NoMatchCode(code)`, `NotFound` by default. `Close` waits for the calls in flight up to `Setup().ShutdownTimeout(d)`, 5s by default, then cuts them.
+**More.** `Setup().Reflection()` serves server reflection, so `grpcurl` lists the services and describes their messages. A server keeps a [journal](#request-journal) of its calls with `Setup().Journal(dir)`, which tests verify with the same builders, serves an [admin API](#admin-api) with `Setup().Admin(admin.MustNew())`, whose mocks `Setup().AdminStore(mockgrpc.FileStore(dir))` [keeps](#persistent-admin-mocks) across restarts, and answers a call no mock matched with `Setup().NoMatchCode(code)`, `NotFound` by default. `Close` waits for the calls in flight up to `Setup().ShutdownTimeout(d)`, 5s by default, then cuts them.
 
 **TLS.** `m.StartTLS()` starts the server as `Start` does, serving TLS. `Setup().TLSCertKeyPair(certFile, keyFile)` or `TLSCertificates(certs)` sets its certificate, `TLSMutual(certFile, keyFile, clientCAFile)` or `TLSClientCAs(pool)` requires clients to present a certificate those CAs signed, and `TLSConfig(c)` sets the whole TLS configuration. Without a certificate, it serves a self-signed one for `localhost`, `127.0.0.1` and `::1`, which `m.Certificate()` returns for clients to trust. `m.Dial()` trusts the certificate the server serves; pass it `grpc.WithTransportCredentials` for a server that requires a client certificate. Credentials `ServerOptions` set with `grpc.Creds` win over these: `StartTLS` then serves them as `Start` does, `m.Certificate()` returns `nil`, and `m.Dial()` needs `grpc.WithTransportCredentials`.
 
@@ -949,9 +949,9 @@ The `vlatte` command serves MCP at `POST /mcp` by default, and `vlatte mcp` serv
 
 ### Persistent admin mocks
 
-The mocks the admin API adds last as long as the server, unless a persistent store keeps them. Each change the admin API makes, adding, replacing, enabling, disabling or removing a mock, reaches the store at once, and the server serves what the store holds when it starts and on each reload, so a change made to the store directly takes effect then too. The mocks of mock files and code never reach it, and a mock file's mock wins over a mock of the store with its id.
+The mocks the admin API adds last as long as the server, unless a persistent store keeps them. Each change the admin API makes, adding, replacing, enabling, disabling or removing a mock, reaches the store at once, and the server serves what the store holds when it starts and on each reload, so a change made to the store directly takes effect then too. The mocks of mock files and code never reach it, and a mock file's mock wins over a mock of the store with its id. A reload swaps the mocks of the store and of the mock files in one step: when either fails, the server serves what it served before.
 
-`FileStore(dir)` keeps them as mock files, `<id>.mock.yaml`, which only the store loads: keep `dir` out of the mock file patterns. A relative `dir` starts at `root_dir`, and `{workdir}` at the [work directory](#work-directory). A mock whose description doesn't load back is refused, as its file would fail every later start. The `vlatte` command keeps them in `{workdir}/_admin`: `admin.dir` (`--admin-dir`, `VLATTE_ADMIN_DIR`) sets another directory, and an empty one keeps the mocks in memory. In Go, `AdminStore` needs `Admin`:
+`FileStore(dir)` keeps them as mock files, `<id>.mock.yaml`, which only the store loads: keep `dir` out of the mock file patterns. A relative `dir` starts at `root_dir`, and `{workdir}` at the [work directory](#work-directory). A mock whose description doesn't load back is refused, as its file would fail every later start. A file's mock keeps the ID its name gives: one whose `id` differs fails the start and the reload, as the store finds its file by that name. The `vlatte` command keeps them in `{workdir}/_admin`: `admin.dir` (`--admin-dir`, `VLATTE_ADMIN_DIR`) sets another directory, and an empty one keeps the mocks in memory. In Go, `AdminStore` needs `Admin`:
 
 ```go
 m := mockhttp.MustNew(mockhttp.Setup().Admin(admin.MustNew()).AdminStore(mockhttp.FileStore("{workdir}/_admin")))
@@ -964,6 +964,8 @@ mockhttp.Setup().AdminStore(func(app *mockhttp.Server) (vlatte.Store[*mockhttp.M
 	return &collectionStore{app: app, coll: coll}, nil // Store: EncodeMock(mock, "json"); PickAll: DecodeMock(app, doc, "json")
 })
 ```
+
+A gRPC server takes a store the same way, `mockgrpc.Setup().Admin(admin.MustNew()).AdminStore(mockgrpc.FileStore(dir))`, with `mockgrpc.EncodeMock` and `mockgrpc.DecodeMock` for a store of yours. Its relative `dir` starts at its root directory. The `vlatte` command keeps the gRPC server's admin mocks in memory.
 
 `POST /mocks/save` is apart from the store: it exports the admin API's mocks as mock files to commit, which then serve in place of the store's copies.
 

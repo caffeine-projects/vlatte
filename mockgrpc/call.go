@@ -34,6 +34,10 @@ type Call struct {
 
 	json []byte // the request as JSON, as matchers read it: set as the call is served
 
+	// data and provided are what templates read as .Data and .Provided: set once a mock matched the call.
+	data     map[string]any
+	provided map[string]any
+
 	mu       sync.Mutex
 	message  proto.Message
 	messages []proto.Message

@@ -111,6 +111,9 @@ type Config struct {
 	// error: allow them on that engine with vlatte.WithEnv.
 	TemplateEnv []string
 
+	// TemplateDataProviders add data to templates, which read it as .Provided.<Key>. Two of the same key are an error.
+	TemplateDataProviders []TemplateDataProvider
+
 	// Parameters are the parameters templates read. Nil keeps them in memory.
 	Parameters vlatte.KV
 
@@ -125,6 +128,10 @@ type Config struct {
 
 	// Admin serves the admin API, on an HTTP server of its own. Nil serves none.
 	Admin AdminAPI
+
+	// AdminStore keeps the mocks the admin API adds in a persistent store: see ConfigBuilder.AdminStore. Nil keeps them
+	// in memory. It needs Admin.
+	AdminStore AdminStore
 
 	// Journal keeps a journal of the calls the server serves. Nil keeps none.
 	Journal *JournalConfig
@@ -142,6 +149,11 @@ type Config struct {
 // Make one with [github.com/caffeine-projects/vlatte/admin.New]. The operations gRPC mocks can't do, such as recording,
 // answer 501.
 type AdminAPI = adminapi.API
+
+// AdminStore makes the persistent store of the mocks the admin API adds, for the server app. The store keeps their
+// descriptions, by ID, such as in files or a database: EncodeMock describes a mock, and DecodeMock builds it back.
+// The mocks of mock files and code never reach it.
+type AdminStore func(app *Server) (vlatte.Store[*Mock], error)
 
 // JournalConfig configures the journal of a server: the calls its mocks get, of every outcome, which tests and the
 // admin API verify and search, while the server runs: Close closes it. The calls an interceptor of ServerOptions
@@ -369,6 +381,11 @@ func (cb *ConfigBuilder) TemplateEnv(names ...string) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.TemplateEnv = names })
 }
 
+// TemplateDataProviders sets the providers of data templates read as .Provided.<Key>: see TemplateDataProvider.
+func (cb *ConfigBuilder) TemplateDataProviders(providers ...TemplateDataProvider) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.TemplateDataProviders = providers })
+}
+
 // Parameters sets the parameters templates read: {{ .Parameters.Get "key" }}.
 func (cb *ConfigBuilder) Parameters(params vlatte.KV) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.Parameters = params })
@@ -402,6 +419,14 @@ func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
 // Server.AdminURL returns where it listens.
 func (cb *ConfigBuilder) Admin(api AdminAPI) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.Admin = api })
+}
+
+// AdminStore keeps the mocks the admin API adds in the persistent store store makes, such as FileStore(dir): each
+// change the admin API makes reaches it at once, and the server serves what it holds when it starts and on each
+// Reload, so changes made to it directly take effect too. Without one, those mocks stay in memory, as long as the
+// server runs. It needs an admin API: see Admin.
+func (cb *ConfigBuilder) AdminStore(store AdminStore) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.AdminStore = store })
 }
 
 // Journal keeps a journal of the calls the server serves, in dir, across restarts: see JournalConfig. Empty keeps it

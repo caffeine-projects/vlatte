@@ -160,7 +160,7 @@ func New(config ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: %w", errTemplateEnvWithEngine)
 	}
 
-	if err := checkProviderKeys(conf.TemplateDataProviders); err != nil {
+	if err := vlatte.CheckTemplateDataProviders(conf.TemplateDataProviders); err != nil {
 		return nil, err
 	}
 
@@ -250,11 +250,7 @@ func New(config ...Option) (*Server, error) {
 		factory = newBackendFactory()
 	}
 
-	internalLoaders := 1
 	files := &fileLoader{}
-	loaders := make([]Loader, 0, len(conf.Loaders)+internalLoaders)
-	loaders = append(loaders, files)
-	loaders = append(loaders, conf.Loaders...)
 
 	j, err := openJournal(conf, app.logger)
 	if err != nil {
@@ -274,7 +270,7 @@ func New(config ...Option) (*Server, error) {
 	app.storage = repository
 	app.scenarioStore = matchscenario.New()
 	app.params = params
-	app.loaders = loaders
+	app.loaders = conf.Loaders
 	app.files = files
 	app.proxy = p
 
@@ -485,9 +481,10 @@ func (app *Server) Logger() *zerolog.Logger {
 	return app.logger
 }
 
-// Reload loads the mocks of external sources, such as mock files, again.
+// Reload loads the mocks of external sources, such as mock files and the admin API's persistent store, again.
 // Each loader replaces the mocks it added before; mocks added in code are kept.
-// Mock files are swapped in one step, and stay as they were when a file has problems.
+// The mocks of the mock files and of the persistent store are swapped in one step, and stay as they were when a file
+// has problems, or the persistent store can't be read or its mocks served. The loaders of Config.Loaders run after.
 func (app *Server) Reload() error {
 	return app.load()
 }
@@ -721,18 +718,27 @@ func (app *Server) onStart() error {
 	return app.startConfiguredRecording()
 }
 
+// load loads the mock files, with the mocks of the admin API's persistent store, if any, then runs the loaders of the
+// config.
 func (app *Server) load() error {
-	for _, loader := range app.loaders {
-		err := loader.Load(app)
-		if err != nil {
-			return err
-		}
+	var err error
+	if app.adminStore == nil {
+		err = app.files.load(app, nil)
+	} else {
+		// A mock of the persistent store gives way to a mock file's mock of its id. Both swap in one step, and stay as
+		// they were when a file has problems, or the store can't be read or its mocks served.
+		err = app.adminStore.Reload(context.Background(), func(swap vlatte.Swap[*Mock]) error {
+			return app.files.load(app, swap)
+		})
 	}
 
-	// After the mock files: a mock of the persistent store gives way to a mock file's mock of its id.
-	if app.adminStore != nil {
-		if err := app.adminStore.Reload(context.Background()); err != nil {
-			return fmt.Errorf("server: admin store: %w", err)
+	if err != nil {
+		return err
+	}
+
+	for _, loader := range app.loaders {
+		if err := loader.Load(app); err != nil {
+			return err
 		}
 	}
 
