@@ -62,14 +62,18 @@ func (s *Store) SetScenario(name, state string) {
 	s.scenario(name).state = state
 }
 
-// ResetScenario moves the scenario name back to [StateStarted].
-func (s *Store) ResetScenario(name string) {
+// ResetScenario moves the scenario name back to [StateStarted]. It reports false, changing nothing, when the store
+// doesn't hold name: no mock moved it and SetScenario never set it, so it is in StateStarted already.
+func (s *Store) ResetScenario(name string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if scn, ok := s.data[key(name)]; ok {
+	scn, ok := s.data[key(name)]
+	if ok {
 		scn.state = StateStarted
 	}
+
+	return ok
 }
 
 // ResetScenarios moves every scenario back to [StateStarted].
@@ -82,9 +86,11 @@ func (s *Store) ResetScenarios() {
 	}
 }
 
-// View returns a view of s that sees every later move. A zero View reads no store, and panics.
-func (s *Store) View() View {
-	return View{store: s}
+// View returns a view of s for a request whose mock made moves. A scenario a move of moves names is in the state that
+// move took it to, even once another request moved it on, as the request's journal entry says; any other scenario is
+// in the state it is in when read. A zero View reads no store, and panics.
+func (s *Store) View(moves ...Move) View {
+	return View{store: s, moves: moves}
 }
 
 // claim moves the scenario name from required to next, as [Matcher.Claim] does.
@@ -141,9 +147,18 @@ func key(name string) string {
 // View reads the states of the scenarios of a [Store], and changes none: what templates get.
 type View struct {
 	store *Store
+	moves []Move
 }
 
-// State returns the state of the scenario name, whatever its case, as [Store.State] does.
+// State returns the state of the scenario name, whatever its case: the state the view's move of it took it to, or else
+// the one [Store.State] returns.
 func (v View) State(name string) string {
+	k := key(name)
+	for _, mv := range v.moves {
+		if key(mv.Scenario) == k {
+			return mv.To
+		}
+	}
+
 	return v.store.State(name)
 }

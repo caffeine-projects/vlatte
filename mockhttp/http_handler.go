@@ -1363,7 +1363,7 @@ func locals(r *RequestValues, provided map[string]any, params *viewdata.Paramete
 		Parameters: params,
 		Server:     &viewdata.Server{URL: r.App.URL()},
 		Data:       r.App.Data(),
-		Scenarios:  r.App.scenarioStore.View(),
+		Scenarios:  r.App.scenarioStore.View(r.scenarioMoves...),
 	}
 }
 

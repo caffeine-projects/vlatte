@@ -40,10 +40,12 @@ func (app *Server) SetScenario(ctx context.Context, name, state string) error {
 	return nil
 }
 
-// ResetScenario moves the scenario name back to [matchscenario.StateStarted].
+// ResetScenario moves the scenario name back to [matchscenario.StateStarted]. A scenario no mock moved and none set is
+// there already: the admin API's events get no move of it.
 func (app *Server) ResetScenario(name string) {
-	app.scenarios.ResetScenario(name)
-	app.publishScenario(name, name+" reset to "+matchscenario.StateStarted)
+	if app.scenarios.ResetScenario(name) {
+		app.publishScenario(name, name+" reset to "+matchscenario.StateStarted)
+	}
 }
 
 // ResetScenarios moves every scenario back to [matchscenario.StateStarted].
