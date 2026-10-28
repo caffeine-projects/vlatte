@@ -93,11 +93,11 @@ vuln: ## check for known vulnerabilities
 
 .PHONY: docs-dev
 docs-dev: ## serve the docs site with live reload
-	@cd docs && npm ci && npm run dev
+	@cd docs && npm ci --ignore-scripts && npm run dev
 
 .PHONY: docs-build
 docs-build: ## build the docs site into docs/.vitepress/dist
-	@cd docs && npm ci && npm run build
+	@cd docs && npm ci --ignore-scripts && npm run build
 
 # --
 # Miscellaneous
