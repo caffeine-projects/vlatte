@@ -272,7 +272,6 @@ func (rep *Reply) Cookie(cookie *http.Cookie) *Reply {
 }
 
 // ExpireCookie expires a cookie. It expires a copy, so the given cookie stays as it was.
-// TODO: rename this
 func (rep *Reply) ExpireCookie(cookie *http.Cookie) *Reply {
 	expired := *cookie
 	expired.MaxAge = -1
