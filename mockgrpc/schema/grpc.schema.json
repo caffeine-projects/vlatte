@@ -1,10 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "",
+  "$id": "https://caffeine-projects.github.io/vlatte/schemas/grpc.schema.json",
   "title": "gRPC Mock Definition",
   "description": "Describes a gRPC mock definition. The decoder in mockgrpc/mock_schema.go is the reference; tests keep this schema in step with it.",
   "type": "object",
   "properties": {
+    "$schema": { "description": "The schema an editor checks the file with, such as https://caffeine-projects.github.io/vlatte/schemas/grpc.schema.json. The server ignores it.", "type": "string" },
     "id": {
       "description": "ID of the mock, in place of a generated one.",
       "type": "string",

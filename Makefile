@@ -91,6 +91,14 @@ generate: ## run code generators
 vuln: ## check for known vulnerabilities
 	@go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+.PHONY: docs-dev
+docs-dev: ## serve the docs site with live reload
+	@cd docs && npm ci --ignore-scripts && npm run dev
+
+.PHONY: docs-build
+docs-build: ## build the docs site into docs/.vitepress/dist
+	@cd docs && npm ci --ignore-scripts && npm run build
+
 # --
 # Miscellaneous
 # --
