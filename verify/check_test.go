@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -25,7 +26,7 @@ func appendAfter(t *testing.T, j *journal.Journal, d time.Duration, e *journal.E
 
 	go func() {
 		time.Sleep(d)
-		require.NoError(t, j.Append(e))
+		assert.NoError(t, j.Append(e))
 	}()
 }
 
@@ -115,7 +116,7 @@ func TestCheck_AWaitEndsWhenTheJournalIsCleared(t *testing.T) {
 
 		go func() {
 			time.Sleep(time.Second)
-			require.NoError(t, j.Clear())
+			assert.NoError(t, j.Clear())
 		}()
 
 		start := time.Now()
@@ -164,6 +165,57 @@ func TestCheck_ARequestTheJournalDroppedFailsTheCheck(t *testing.T) {
 
 	_, err = v.VerifyRequests().Since(mark).Count(t.Context())
 	require.ErrorIs(t, err, verify.ErrDropped)
+}
+
+func TestCheck_AMarkPastTheJournalFailsTheCheck(t *testing.T) {
+	// A mark of a journal that started over, as a temporary one does when its server restarts, names requests this
+	// journal never held: a count of none after it would pass whatever came.
+	j := newJournal(t, journal.Options{}, entry("a"))
+
+	_, err := verify.Check(t.Context(), verify.Spec{
+		Journal: j, Query: journal.Query{After: 100}, Marked: true, Count: match.Equal(0), Expect: "no",
+	})
+	require.ErrorIs(t, err, verify.ErrCleared)
+}
+
+func TestCheck_AClearAsItCountsFailsTheCheck(t *testing.T) {
+	// The journal cleared as a check read it took some of the requests it would count: the count it got is of part
+	// of them.
+	j := newJournal(t, journal.Options{}, entry("a"), entry("b"), entry("c"))
+	v := verify.NewVerifier(j, verify.Protocol[*fakeMock, fakeServer]{Patterns: fakeServer{}})
+
+	_, err := v.VerifyRequests().Matching(clearingPattern{j: j}).Count(t.Context())
+	require.ErrorIs(t, err, verify.ErrCleared)
+
+	require.NoError(t, j.Append(entry("d")))
+	require.NoError(t, j.Append(entry("e")))
+
+	_, err = verify.CheckOrder(t.Context(), verify.Spec{Journal: j, Patterns: []verify.Pattern{clearingPattern{j: j}}})
+	require.ErrorIs(t, err, verify.ErrCleared)
+}
+
+// clearingPattern is a pattern that clears its journal as it matches the first entry, as a reset that comes as a
+// check reads does.
+type clearingPattern struct {
+	j *journal.Journal
+}
+
+func (clearingPattern) Build(fakeServer) (*fakeMock, error) {
+	return nil, errors.New("a pattern builds no mock")
+}
+
+func (p clearingPattern) Match(context.Context, *journal.Entry) (bool, error) {
+	if p.j.Cleared() < p.j.Last() {
+		if err := p.j.Clear(); err != nil {
+			return false, err
+		}
+	}
+
+	return true, nil
+}
+
+func (clearingPattern) Explain(context.Context, *journal.Entry) (verify.Miss, error) {
+	return verify.Miss{}, nil
 }
 
 func TestCheck_ACheckOfAClearedJournalCountsWhatCameSince(t *testing.T) {
@@ -224,6 +276,11 @@ func TestCheck_RefusesASpecItCantRun(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := verify.Check(t.Context(), tt.give)
 			require.ErrorContains(t, err, tt.wants)
+
+			// A count matcher that fails is the matcher's problem, as one of a query is.
+			if tt.wants == "count: boom" {
+				require.ErrorIs(t, err, vlatte.ErrMatching)
+			}
 
 			// A client of the admin API sends the spec: one that can't run is its problem.
 			if strings.HasPrefix(tt.wants, "verify: invalid check: ") {

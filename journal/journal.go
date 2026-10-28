@@ -34,6 +34,10 @@ var (
 	ErrClosed    = errors.New("journal: closed")
 	ErrInUse     = errors.New("journal: another journal keeps its files in the directory")
 	ErrNotFound  = errors.New("journal: request not found")
+
+	// ErrBodyCut is the error of a query, or a pattern, that reads the body of an entry the journal kept part of, as
+	// its MaxBodySize says: what was cut may hold what it looks for. It comes with [vlatte.ErrMatching].
+	ErrBodyCut = errors.New("journal: the journal kept part of the body")
 )
 
 // _closedChan is the channel Changed returns once nothing will change.

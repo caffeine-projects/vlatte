@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
@@ -38,9 +37,6 @@ type Operations struct {
 	endWaits context.CancelFunc
 }
 
-// errWaitEnded is the cause of the end of the waits EndWaits ends.
-var errWaitEnded = errors.New("handler: the admin API ended the wait: it is closing")
-
 // NewOperations returns the admin operations of the mock server of caps, which has its Mocks.
 func NewOperations(caps adminapi.Capabilities) *Operations {
 	matchers := caps.Matchers
@@ -48,11 +44,11 @@ func NewOperations(caps adminapi.Capabilities) *Operations {
 		matchers = matchbuild.MustNew()
 	}
 
-	waits, endWaits := context.WithCancelCause(context.Background())
+	waits, endWaits := context.WithCancel(context.Background())
 
 	return &Operations{
 		waits:     waits,
-		endWaits:  func() { endWaits(errWaitEnded) },
+		endWaits:  endWaits,
 		mocks:     storeMocks{mocks: caps.Mocks},
 		kind:      caps.Kind,
 		url:       caps.URL,
@@ -91,12 +87,12 @@ func (o *Operations) HasJournal() bool { return o.journal != nil }
 
 // waiting returns ctx, which ends too with EndWaits, for an operation that waits, and the func that releases it.
 func (o *Operations) waiting(ctx context.Context) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancelCause(ctx)
-	stop := context.AfterFunc(o.waits, func() { cancel(context.Cause(o.waits)) })
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(o.waits, cancel)
 
 	return ctx, func() {
 		stop()
-		cancel(nil)
+		cancel()
 	}
 }
 

@@ -204,8 +204,7 @@ func (q *Query) selects(ctx context.Context, e *Entry, filters []Filter) (bool, 
 	}
 
 	if q.Body != nil && e.BodyTruncated {
-		return false, fmt.Errorf("journal: %w: entry %d: the journal kept part of its body, which the query reads",
-			vlatte.ErrMatching, e.Seq)
+		return false, fmt.Errorf("journal: %w: entry %d: %w, which the query reads", vlatte.ErrMatching, e.Seq, ErrBodyCut)
 	}
 
 	return true, nil

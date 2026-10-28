@@ -597,7 +597,7 @@ func TestJournal_APatternCantReadABodyTheJournalCut(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := tt.server.VerifyRequests().Matching(tt.pattern).Count(t.Context())
 			require.ErrorIs(t, err, vlatte.ErrMatching)
-			require.ErrorContains(t, err, "the journal kept part of its body")
+			require.ErrorIs(t, err, journal.ErrBodyCut)
 
 			ft := testmock.NewFakeT()
 			require.False(t, tt.server.VerifyRequests().Matching(tt.pattern).Never(ft), "it can't tell")
@@ -644,6 +644,21 @@ func TestJournal_APatternFailsOnAnEntryThatIsNoRequest(t *testing.T) {
 	require.True(t, ok, "%v", err)
 	require.Equal(t, "http://[::1", urlErr.URL)
 	require.ErrorContains(t, err, fmt.Sprintf("entry %d: target", broken.Seq))
+}
+
+func TestJournal_AFailureListsAnEntryThatIsNoRequest(t *testing.T) {
+	// An entry the criteria leave out, no request a pattern can match, is a request that came close or not: it
+	// misses the pattern, and the failure lists the requests rather than fail to.
+	m := journaledServer(t, Setup())
+
+	require.NoError(t, m.Journal().Append(&journal.Entry{Kind: Kind, Method: http.MethodDelete, Target: "http://[::1"}))
+
+	ft := testmock.NewFakeT()
+	require.False(t, m.VerifyRequests().Method("GET").Matching(Request().URLPath(match.Equal("/"))).Times(ft, 1))
+
+	errs := ft.Errors()
+	require.Len(t, errs, 1)
+	require.Contains(t, errs[0], "unknown DELETE http://[::1 0\n        missed 2 of 2: method, request\n")
 }
 
 func TestJournal_AMatcherThatFailsFailsTheVerification(t *testing.T) {

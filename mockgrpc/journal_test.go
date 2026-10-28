@@ -257,6 +257,7 @@ func TestJournal_APatternOfACutRequestCantTell(t *testing.T) {
 
 	_, err = m.VerifyRequests().Matching(Method("Greetings").Field("message", match.Equal("x"))).Count(t.Context())
 	require.ErrorIs(t, err, vlatte.ErrMatching)
+	require.ErrorIs(t, err, journal.ErrBodyCut)
 
 	n, err := m.VerifyRequests().Matching(Method("List").Field("message", match.Equal("x"))).Count(t.Context())
 	require.NoError(t, err)

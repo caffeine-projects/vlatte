@@ -97,7 +97,7 @@ func TestJournal_ABodyQueryCantTellOfABodyTheJournalCut(t *testing.T) {
 
 	_, err := j.Count(t.Context(), journal.Query{Body: match.HasSuffix("rest")})
 	require.ErrorIs(t, err, vlatte.ErrMatching)
-	require.ErrorContains(t, err, "entry 1: the journal kept part of its body")
+	require.ErrorIs(t, err, journal.ErrBodyCut)
 
 	count, err := j.Count(t.Context(), journal.Query{Body: match.HasSuffix("rest"), Header: map[string]vlatte.Matcher{"X-Other": match.Equal("1")}})
 	require.NoError(t, err)

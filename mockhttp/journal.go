@@ -283,8 +283,8 @@ func (p *requestPattern) Match(ctx context.Context, e *journal.Entry) (bool, err
 		return false, err
 	}
 
-	return false, fmt.Errorf("http: %w: entry %d: the journal kept part of its body, which the pattern reads",
-		vlatte.ErrMatching, e.Seq)
+	return false, fmt.Errorf("http: %w: entry %d: %w, which the pattern reads", vlatte.ErrMatching, e.Seq,
+		journal.ErrBodyCut)
 }
 
 // Explain tells which parts of the pattern the request of e passes, by the names a near miss gives them, such as
@@ -296,7 +296,8 @@ func (p *requestPattern) Explain(ctx context.Context, e *journal.Entry) (verify.
 
 	in, done, err := p.app.entryInput(ctx, e)
 	if err != nil {
-		return verify.Miss{}, err
+		// No request the pattern can match, such as an entry appended by hand.
+		return verify.Miss{Total: 1, Failed: []string{"request"}}, nil
 	}
 
 	defer done()

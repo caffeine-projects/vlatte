@@ -34,6 +34,10 @@ var (
 		config.Field[requestQuery]{
 			Key: "count", Kind: config.Any, Usage: "The number of requests: a number, or a matcher list such as [\"gte\", 2]. None is at least 1.",
 			Set: func(c *requestQuery, v config.Value) error {
+				if n, ok := v.Any.(int64); ok && n < 0 {
+					return config.Invalid(v, "count must be 0 or more", "send a number of requests, or a matcher list")
+				}
+
 				m, err := matcherOf(c.matchers, v)
 				if err != nil {
 					return err
@@ -104,10 +108,15 @@ func (o *Operations) VerifyRequests(ctx context.Context, doc []byte, format stri
 		return RequestVerdict{}, invalid("the check", err)
 	}
 
-	waiting, stop := o.waiting(ctx)
-	defer stop()
+	checking := ctx
+	if spec.Within > 0 || spec.During > 0 {
+		var stop context.CancelFunc
 
-	result, err := verify.Check(waiting, spec)
+		checking, stop = o.waiting(ctx)
+		defer stop()
+	}
+
+	result, err := verify.Check(checking, spec)
 	if err != nil {
 		return RequestVerdict{}, checkError(ctx, err)
 	}
@@ -174,7 +183,7 @@ func checkError(ctx context.Context, err error) error {
 	case errors.Is(err, context.Canceled), errors.Is(err, journal.ErrClosed):
 		// The caller is there: the admin API ended the wait, or the mock server closed its journal.
 		return &problemError{status: http.StatusServiceUnavailable, code: _codeClosing, detail: "the mock server is closing"}
-	case errors.Is(err, verify.ErrCleared), errors.Is(err, verify.ErrDropped):
+	case errors.Is(err, verify.ErrCleared), errors.Is(err, verify.ErrDropped), errors.Is(err, journal.ErrBodyCut):
 		return &problemError{status: http.StatusConflict, code: _codeIncompleteJournal, detail: err.Error()}
 	case errors.Is(err, verify.ErrInvalidSpec), errors.Is(err, vlatte.ErrMatching), errors.Is(err, vlatte.ErrMatchPanicked):
 		return &problemError{status: http.StatusBadRequest, code: _codeInvalidBody, detail: "the check: " + err.Error()}

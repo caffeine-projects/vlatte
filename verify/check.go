@@ -16,6 +16,7 @@ var _ Journal = (*journal.Journal)(nil)
 type Journal interface {
 	Find(ctx context.Context, q journal.Query, filters ...journal.Filter) (journal.Page, error)
 	Count(ctx context.Context, q journal.Query, filters ...journal.Filter) (int, error)
+	Last() uint64
 	Cleared() uint64
 	Trimmed() uint64
 	Changed() <-chan struct{}
@@ -92,9 +93,7 @@ func Check(ctx context.Context, s Spec) (Result, error) {
 		return Result{}, err
 	}
 
-	if len(s.Outcomes) == 1 {
-		s.Query.Outcome, s.Outcomes = s.Outcomes[0], nil
-	}
+	s.foldOutcome()
 
 	filters := s.filters()
 	wait := max(s.Within, s.During)
@@ -181,6 +180,13 @@ func (s *Spec) check() error {
 	return nil
 }
 
+// foldOutcome makes the one outcome s selects by, if one, the Outcome of its query, which the journal indexes.
+func (s *Spec) foldOutcome() {
+	if len(s.Outcomes) == 1 {
+		s.Query.Outcome, s.Outcomes = s.Outcomes[0], nil
+	}
+}
+
 // checkSelection tells whether s can select the requests it checks.
 func (s *Spec) checkSelection() error {
 	switch {
@@ -217,27 +223,33 @@ func (s *Spec) filters() []journal.Filter {
 }
 
 // count returns how many requests s selects, unless the journal no longer holds all those it would count: a clear
-// after the mark, or entries dropped to keep MaxEntries, removed some.
+// after the mark or as it counted, or entries dropped to keep MaxEntries, removed some.
 func (s *Spec) count(ctx context.Context, filters []journal.Filter) (int, error) {
+	cleared := s.Journal.Cleared()
+
 	count, err := s.Journal.Count(ctx, s.Query, filters...)
 	if err != nil {
 		return 0, err
 	}
 
-	// Checked once the count is taken: what the journal dropped while it counted counts too.
-	if err := s.whole(); err != nil {
+	if err := s.whole(cleared); err != nil {
 		return 0, err
 	}
 
 	return count, nil
 }
 
-// whole tells whether the journal holds every request s would select: a clear after the mark, or entries dropped to
-// keep MaxEntries, may have removed some.
-func (s *Spec) whole() error {
-	cleared, trimmed := s.Journal.Cleared(), s.Journal.Trimmed()
+// whole tells whether the journal held every request s would select as it read them, once it read them: cleared is
+// where its last clear was before it read. A clear after the mark or as it read, or entries dropped to keep
+// MaxEntries, may have removed some, and a mark past the journal's newest request is of a journal that started over.
+func (s *Spec) whole(cleared uint64) error {
+	// Trimmed first: a clear that comes after it, which starts the trim over, moves Cleared.
+	trimmed := s.Journal.Trimmed()
 
-	if s.Marked && s.Query.After < cleared {
+	switch {
+	case s.Journal.Cleared() != cleared:
+		return ErrCleared
+	case s.Marked && (s.Query.After < cleared || s.Query.After > s.Journal.Last()):
 		return ErrCleared
 	}
 

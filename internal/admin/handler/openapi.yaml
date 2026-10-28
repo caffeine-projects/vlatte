@@ -1642,7 +1642,8 @@ components:
     IncompleteJournal:
       description: |
         `incomplete_journal`: the journal no longer holds every request the check counts: it dropped some to keep
-        its most entries, or it was cleared after `after` or during the wait.
+        its most entries, it was cleared after `after` or during the wait, or `after` is past its newest request; or
+        it kept part of a body the check reads.
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }

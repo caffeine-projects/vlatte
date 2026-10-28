@@ -30,9 +30,10 @@
 // they missed: one line each, without their headers or body, which may hold secrets.
 //
 // A check never passes on part of the requests it would count. One whose window holds requests the journal dropped
-// to keep its MaxEntries fails with [ErrDropped], and one from a mark the journal was cleared after with
-// [ErrCleared]. A check of a body the journal cut, once the rest of it matches, fails with
-// [github.com/caffeine-projects/vlatte.ErrMatching].
+// to keep its MaxEntries fails with [ErrDropped]; one of a journal cleared after its mark or as it reads, or from a
+// mark past the journal's newest request, as of a journal that started over, with [ErrCleared]. A check of a body
+// the journal cut, once the rest of it matches, fails with
+// [github.com/caffeine-projects/vlatte/journal.ErrBodyCut].
 //
 // [Check] and [CheckOrder] run checks [Spec] values describe, for those that verify other than in a test, such as the
 // admin API's QUERY /requests/verify.

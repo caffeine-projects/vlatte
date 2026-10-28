@@ -113,6 +113,7 @@ func TestVerifyRequests_RefusesACheckItCantRun(t *testing.T) {
 	for _, body := range []string{
 		`{"limit": 1}`,
 		`{"count": ["no_such_matcher", 1]}`,
+		`{"count": -1, "within": "30s"}`,
 		`{"within": "31s"}`,
 		`{"within": 0}`,
 		`{"during": "-1s"}`,
@@ -138,6 +139,19 @@ func TestVerifyRequests_ACheckOfPartOfTheRequestsIsNoVerdict(t *testing.T) {
 	res, body := send(t, request{method: "QUERY", url: url + "/requests/verify", body: `{"after": 0, "count": 0}`})
 	doc := problem(t, res, body, http.StatusConflict, "incomplete_journal")
 	require.Equal(t, verify.ErrCleared.Error(), doc["detail"])
+}
+
+func TestVerifyRequests_ABodyTheJournalCutIsNoVerdict(t *testing.T) {
+	// The journal kept part of a body, as its MaxBodySize says: the check is right, and the server can't tell.
+	j, err := journal.New(journal.Options{Dir: t.TempDir(), MaxBodySize: 2})
+	require.NoError(t, err)
+	t.Cleanup(func() { j.Close() })
+	require.NoError(t, j.Append(entryOf("a", "GET", "/a", journal.OutcomeMatched)))
+
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j})
+
+	res, body := send(t, request{method: "QUERY", url: url + "/requests/verify", body: `{"body": ["contains", "7"], "count": 0}`})
+	problem(t, res, body, http.StatusConflict, "incomplete_journal")
 }
 
 func TestVerifyRequests_AServerWithoutAJournalCantVerify(t *testing.T) {

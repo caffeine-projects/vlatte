@@ -79,7 +79,7 @@ func (r Requests[TM, A]) Header(name string, m vlatte.Matcher) Requests[TM, A] {
 
 // Body selects the requests whose body, as text, m matches, such as with [match.JSONPath]. A gRPC call's body is its
 // request message as JSON, or the array of a client stream's messages. A check that selects a request whose body the
-// journal cut fails with [vlatte.ErrMatching]: what was cut may hold what m looks for.
+// journal cut fails with [journal.ErrBodyCut] and [vlatte.ErrMatching]: what was cut may hold what m looks for.
 func (r Requests[TM, A]) Body(m vlatte.Matcher) Requests[TM, A] {
 	r.q.Body = m
 	return r.need(m, "Body")
@@ -199,13 +199,15 @@ func (r Requests[TM, A]) Find(ctx context.Context) ([]*journal.Entry, error) {
 		return nil, err
 	}
 
+	cleared := s.Journal.Cleared()
+
 	page, err := s.Journal.Find(ctx, s.Query, s.filters()...)
 	if err != nil {
 		return nil, err
 	}
 
 	// Checked once the entries are found, as a check does: what the journal dropped while it read counts too.
-	if err := s.whole(); err != nil {
+	if err := s.whole(cleared); err != nil {
 		return nil, err
 	}
 
@@ -268,9 +270,7 @@ func (r Requests[TM, A]) spec(count vlatte.Matcher, expect string) (Spec, error)
 		During:   r.during,
 	}
 
-	if len(r.outcomes) == 1 {
-		s.Query.Outcome, s.Outcomes = r.outcomes[0], nil
-	}
+	s.foldOutcome()
 
 	if r.mark != nil {
 		if r.mark.j != r.v.j {

@@ -1,10 +1,12 @@
 package handler_test
 
 import (
+	"strconv"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
@@ -27,7 +29,7 @@ func TestOperations_VerifyRequestsWaitsForTheCountToPass(t *testing.T) {
 
 		go func() {
 			time.Sleep(time.Second)
-			require.NoError(t, j.Append(entryOf("a", "GET", "/a", journal.OutcomeMatched)))
+			assert.NoError(t, j.Append(entryOf("a", "GET", "/a", journal.OutcomeMatched)))
 		}()
 
 		verdict, err := ops.VerifyRequests(t.Context(), []byte(`{"path": "/a", "within": "5s"}`), "json")
@@ -86,7 +88,7 @@ func TestOperations_VerifyRequestsEndsItsWait(t *testing.T) {
 
 				go func() {
 					time.Sleep(time.Second)
-					require.NoError(t, tt.end(ops, j))
+					assert.NoError(t, tt.end(ops, j))
 				}()
 
 				start := time.Now()
@@ -102,16 +104,22 @@ func TestOperations_VerifyRequestsEndsItsWait(t *testing.T) {
 }
 
 func TestOperations_VerifyRequestsEndsTheWaitsThatStartOnceClosing(t *testing.T) {
-	// A check that comes as the admin API closes waits for nothing.
-	j := journalOf(t)
-	ops := operationsOf(t, j)
+	// A check that comes as the admin API closes waits for nothing, but one that doesn't wait still runs: it reads the
+	// journal through.
+	entries := make([]*journal.Entry, 300)
+	for i := range entries {
+		entries[i] = entryOf(strconv.Itoa(i), "GET", "/a", journal.OutcomeMatched)
+	}
+
+	ops := operationsOf(t, journalOf(t, entries...))
 	ops.EndWaits()
 
-	_, err := ops.VerifyRequests(t.Context(), []byte(`{"within": "30s"}`), "json")
+	_, err := ops.VerifyRequests(t.Context(), []byte(`{"count": 301, "within": "30s"}`), "json")
 	require.Equal(t, "closing", handler.Problem(err, "verify_requests").Code)
 
-	// A check that doesn't wait still runs.
-	verdict, err := ops.VerifyRequests(t.Context(), []byte(`{"count": 0}`), "json")
-	require.NoError(t, err)
-	require.True(t, verdict.Passed)
+	for range 20 {
+		verdict, err := ops.VerifyRequests(t.Context(), []byte(`{"count": 300}`), "json")
+		require.NoError(t, err)
+		require.True(t, verdict.Passed)
+	}
 }

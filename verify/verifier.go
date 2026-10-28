@@ -21,8 +21,8 @@ var (
 	// ErrOtherJournal is the error of a check from a mark of another server's journal.
 	ErrOtherJournal = errors.New("verify: the mark is of another server's journal")
 
-	// ErrCleared is the error of a check of a journal cleared after its mark, or during its wait: the requests it
-	// counts are gone.
+	// ErrCleared is the error of a check of a journal cleared after its mark, as it read, or during its wait: the
+	// requests it counts are gone. A mark past the journal's newest request, of a journal that started over, is one.
 	ErrCleared = errors.New("verify: the journal was cleared: the requests the check counts are gone")
 
 	// ErrDropped is the error of a check whose window holds requests the journal dropped to keep its MaxEntries: a
@@ -58,18 +58,18 @@ type Patterns[TM vlatte.Mock, A any] interface {
 
 // Protocol tells a [Verifier] about the requests of a server's protocol.
 type Protocol[TM vlatte.Mock, A any] struct {
-	// Patterns turns builders of the server's mocks into patterns. Nil takes none: Matching fails with
-	// ErrNoRequestPatterns.
+	// Patterns turns builders of the server's mocks into patterns. Nil takes none: [Requests.Matching] fails with
+	// [ErrNoRequestPatterns].
 	Patterns Patterns[TM, A]
 
-	// NoMethod tells that the protocol's requests have no method, as gRPC calls: Method fails with ErrNoMethod rather
-	// than select none.
+	// NoMethod tells that the protocol's requests have no method, as gRPC calls: [Requests.Method] fails with
+	// [ErrNoMethod] rather than select none.
 	NoMethod bool
 }
 
-// Verifier verifies the requests the journal of a mock server keeps. A server embeds it, next to its vlatte.Base, so
+// Verifier verifies the requests the journal of a mock server keeps. A server embeds it, next to its [vlatte.Base], so
 // its methods are the server's own and every protocol verifies the same way. TM is the server's mock type and A the
-// server, as in vlatte.Base.
+// server, as in [vlatte.Base].
 type Verifier[TM vlatte.Mock, A any] struct {
 	j        *journal.Journal
 	protocol Protocol[TM, A]

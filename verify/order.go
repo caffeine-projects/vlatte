@@ -75,12 +75,14 @@ func CheckOrder(ctx context.Context, steps ...Spec) (Result, error) {
 	for i := range steps {
 		s := &steps[i]
 
+		cleared := s.Journal.Cleared()
+
 		page, err := s.Journal.Find(ctx, s.Query, s.filters()...)
 		if err != nil {
 			return Result{}, fmt.Errorf("verify: step %d: %w", i+1, err)
 		}
 
-		if err := s.whole(); err != nil {
+		if err := s.whole(cleared); err != nil {
 			return Result{}, fmt.Errorf("verify: step %d: %w", i+1, err)
 		}
 

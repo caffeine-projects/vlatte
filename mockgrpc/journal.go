@@ -353,8 +353,8 @@ func (p *callPattern) Match(ctx context.Context, e *journal.Entry) (bool, error)
 			return true, nil
 		}
 
-		return false, fmt.Errorf("grpc: %w: entry %d: the journal kept part of its request, which the pattern reads",
-			vlatte.ErrMatching, e.Seq)
+		return false, fmt.Errorf("grpc: %w: entry %d: %w, which the pattern reads", vlatte.ErrMatching, e.Seq,
+			journal.ErrBodyCut)
 	}
 
 	call, err := decodeEntry(p.app, e, md)

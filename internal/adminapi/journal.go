@@ -11,7 +11,6 @@ var _ Journal = (*journal.Journal)(nil)
 // Journal is the journal of the requests a mock server serves, such as a *journal.Journal.
 type Journal interface {
 	verify.Journal
-	Last() uint64
 	Get(id string) (*journal.Entry, error)
 	Clear() error
 }
