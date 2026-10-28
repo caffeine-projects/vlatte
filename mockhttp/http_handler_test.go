@@ -844,6 +844,10 @@ func (failingStore) List(context.Context) (iter.Seq[*Mock], error) {
 	return nil, errors.New("store down")
 }
 
+func (failingStore) PickAll(context.Context) ([]*Mock, error) {
+	return nil, errors.New("store down")
+}
+
 func TestHandler_StoreAndMatcherErrorsAreFailures(t *testing.T) {
 	// A store that failed answered an empty 200, and a matcher that failed answered as if no mock matched.
 	// Both are failures to find a mock, so a test can't mistake them for a mock's answer or for a missing mock.
