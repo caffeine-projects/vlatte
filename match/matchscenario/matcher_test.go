@@ -9,10 +9,15 @@ import (
 	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
+// requestArg is the argument a scenario's matcher gets for a request, in Match and Claim.
+func requestArg(t *testing.T) vlatte.MatcherArg {
+	return vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), nil)
+}
+
 func match(t *testing.T, m *Matcher) bool {
 	t.Helper()
 
-	ok, err := m.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), nil))
+	ok, err := m.Match(requestArg(t))
 	require.NoError(t, err)
 
 	return ok
@@ -25,11 +30,11 @@ func TestMatcher_AScenarioMovesThroughItsStates(t *testing.T) {
 
 	require.True(t, match(t, pay))
 	require.False(t, match(t, refund), "the scenario is still where it started")
-	require.True(t, pay.Claim())
+	require.True(t, pay.Claim(requestArg(t)))
 
 	require.False(t, match(t, pay), "the scenario moved on to paid")
 	require.True(t, match(t, refund))
-	require.True(t, refund.Claim())
+	require.True(t, refund.Claim(requestArg(t)))
 	require.Equal(t, map[string]string{"checkout": "refunded"}, store.Scenarios())
 }
 
@@ -48,7 +53,7 @@ func TestMatcher_AScenarioNoMockMovedIsInStarted(t *testing.T) {
 	store := New()
 
 	require.False(t, match(t, store.Matcher("checkout", "paid", "")))
-	require.False(t, store.Matcher("checkout", "paid", "refunded").Claim())
+	require.False(t, store.Matcher("checkout", "paid", "refunded").Claim(requestArg(t)))
 	require.True(t, match(t, store.Matcher("checkout", StateStarted, "")))
 	require.Empty(t, store.Scenarios(), "nothing moved")
 }
@@ -76,8 +81,8 @@ func TestMatcher_AClaimLostToAnotherRequestMovesNothing(t *testing.T) {
 	require.True(t, match(t, first))
 	require.True(t, match(t, second))
 
-	require.True(t, first.Claim())
-	require.False(t, second.Claim())
+	require.True(t, first.Claim(requestArg(t)))
+	require.False(t, second.Claim(requestArg(t)))
 	require.Equal(t, map[string]string{"checkout": "paid"}, store.Scenarios())
 }
 
@@ -87,7 +92,7 @@ func TestMatcher_ANewStateStartsTheScenario(t *testing.T) {
 	move := store.Matcher("checkout", "", "paid")
 
 	require.True(t, match(t, move))
-	require.True(t, move.Claim())
+	require.True(t, move.Claim(requestArg(t)))
 	require.Equal(t, map[string]string{"checkout": "paid"}, store.Scenarios())
 }
 
@@ -95,7 +100,7 @@ func TestMatcher_NoNewStateLeavesTheScenarioWhereItIs(t *testing.T) {
 	store := New()
 	store.SetScenario("checkout", "paid")
 
-	require.True(t, store.Matcher("checkout", "paid", "").Claim())
+	require.True(t, store.Matcher("checkout", "paid", "").Claim(requestArg(t)))
 	require.Equal(t, map[string]string{"checkout": "paid"}, store.Scenarios())
 }
 
@@ -106,7 +111,7 @@ func TestMatcher_NamesIgnoreCase(t *testing.T) {
 	pay := store.Matcher("Checkout", StateStarted, "paid")
 
 	require.True(t, match(t, pay))
-	require.True(t, pay.Claim())
+	require.True(t, pay.Claim(requestArg(t)))
 
 	require.False(t, match(t, store.Matcher("checkout", StateStarted, "")))
 	require.True(t, match(t, store.Matcher("CHECKOUT", "paid", "")))
@@ -119,11 +124,11 @@ func TestMatcher_NamesIgnoreCaseAsEqualFoldDoes(t *testing.T) {
 	for _, names := range [][2]string{{"σ", "ς"}, {"ΣΑΣ", "σας"}, {"K", "\u212a"}} {
 		t.Run(names[0], func(t *testing.T) {
 			store := New()
-			require.True(t, store.Matcher(names[0], "", "paid").Claim())
+			require.True(t, store.Matcher(names[0], "", "paid").Claim(requestArg(t)))
 
 			refund := store.Matcher(names[1], "paid", "refunded")
 			require.True(t, match(t, refund))
-			require.True(t, refund.Claim())
+			require.True(t, refund.Claim(requestArg(t)))
 			require.Equal(t, map[string]string{names[0]: "refunded"}, store.Scenarios())
 		})
 	}
@@ -135,7 +140,7 @@ func TestMatcher_StoresAreIsolated(t *testing.T) {
 	payA := a.Matcher("checkout", StateStarted, "paid")
 
 	require.True(t, match(t, payA))
-	require.True(t, payA.Claim())
+	require.True(t, payA.Claim(requestArg(t)))
 
 	require.True(t, match(t, b.Matcher("checkout", StateStarted, "")))
 	require.Empty(t, b.Scenarios())

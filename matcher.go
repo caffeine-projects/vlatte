@@ -13,9 +13,10 @@ type Matcher interface {
 }
 
 type MatcherArg struct {
-	ctx context.Context
-	exp *Explanation
-	v   any
+	ctx  context.Context
+	exp  *Explanation
+	v    any
+	mock Mock
 }
 
 func NewMatcherArg(ctx context.Context, exp *Explanation, v any) MatcherArg {
@@ -34,6 +35,12 @@ func (a *MatcherArg) Explain() *Explanation {
 
 func (a *MatcherArg) Value() any {
 	return a.v
+}
+
+// Mock returns the mock whose turn a [Claimer] takes, in the argument of its Claim. It is nil in the argument of
+// Match, which has no turn to take.
+func (a *MatcherArg) Mock() Mock {
+	return a.mock
 }
 
 type fnDelegate struct {

@@ -37,7 +37,7 @@ func TestStore_ResetStartsEveryScenarioOver(t *testing.T) {
 	store := New()
 	pay := store.Matcher("checkout", StateStarted, "paid")
 	require.True(t, match(t, pay))
-	require.True(t, pay.Claim())
+	require.True(t, pay.Claim(requestArg(t)))
 	store.SetScenario("Refund", "asked")
 
 	store.ResetScenarios()
@@ -51,11 +51,40 @@ func TestStore_ResetOneStartsOnlyThatScenarioOver(t *testing.T) {
 	store.SetScenario("Checkout", "paid")
 	store.SetScenario("refund", "asked")
 
-	require.True(t, store.ResetScenario("checkout"))
-	require.False(t, store.ResetScenario("nothing"), "a scenario the store doesn't hold doesn't move")
+	store.ResetScenario("checkout")
+	store.ResetScenario("nothing")
 
 	require.Equal(t, map[string]string{"Checkout": StateStarted, "refund": "asked"}, store.Scenarios())
 	require.Equal(t, StateStarted, store.State("nothing"))
+}
+
+func TestStore_NotifiesEachChangeAsItMakesIt(t *testing.T) {
+	// A server streams the changes of its scenarios as the store makes them, so they stream in the order they were
+	// made: a move a request made has the argument of its claim, which tells the request and its mock.
+	store := New()
+
+	var changes []Change
+	store.Notify(func(c Change) { changes = append(changes, c) })
+
+	arg := requestArg(t)
+	store.Matcher("checkout", StateStarted, "paid").Claim(arg)
+	store.Matcher("checkout", "paid", "").Claim(arg)
+	store.SetScenario("refund", "asked")
+	store.ResetScenario("checkout")
+	store.ResetScenario("nothing")
+	store.ResetScenarios()
+
+	require.Len(t, changes, 4, "a claim that moves nothing and a reset of a scenario the store doesn't hold change nothing")
+	require.NotNil(t, changes[0].Claim)
+	require.Equal(t, t.Context(), changes[0].Claim.Context(), "the move has the argument of its claim")
+	changes[0].Claim = nil
+
+	require.Equal(t, []Change{
+		{Scenario: "checkout", Message: "checkout moved from started to paid"},
+		{Scenario: "refund", Message: "refund set to asked"},
+		{Scenario: "checkout", Message: "checkout reset to started"},
+		{Message: "every scenario reset to started"},
+	}, changes)
 }
 
 func TestStore_ScenariosIsACopy(t *testing.T) {
@@ -78,7 +107,7 @@ func TestStore_IsSafeForConcurrentUse(t *testing.T) {
 		wg.Go(func() {
 			m := store.Matcher("checkout", StateStarted, "paid")
 			m.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), nil))
-			m.Claim()
+			m.Claim(requestArg(t))
 			store.SetScenario("Checkout", "refunded")
 			store.Scenarios()
 			store.ResetScenarios()
@@ -174,7 +203,8 @@ func TestStore_KeepsStateAsAModelDoes(t *testing.T) {
 				required := rapid.SampledFrom(_states).Draw(t, "required")
 				next := rapid.SampledFrom(_states).Draw(t, "next")
 
-				claimed := store.Matcher(name, required, next).Claim()
+				claimed := store.Matcher(name, required, next).Claim(
+					vlatte.NewMatcherArg(context.Background(), vlatte.NewExplanation(), nil))
 
 				want := required == "" || md.state(name) == required
 				require.Equal(t, want, claimed)

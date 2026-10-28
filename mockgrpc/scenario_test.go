@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	json "encoding/json/v2"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -21,6 +22,47 @@ import (
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
+
+// scenarioEvents follows the admin API's events of m while send runs, and returns the first n scenario events. It
+// waits 5 seconds at most, so a missing event fails the test rather than hangs it.
+func scenarioEvents(t *testing.T, m *Server, n int, send func()) []map[string]any {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, m.AdminURL()+"/events", nil)
+	require.NoError(t, err)
+
+	res, err := http.DefaultClient.Do(r)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = res.Body.Close() })
+
+	send()
+
+	lines := bufio.NewScanner(res.Body)
+
+	var events []map[string]any
+	for len(events) < n && lines.Scan() {
+		line, ok := strings.CutPrefix(lines.Text(), "data: ")
+		if !ok {
+			continue
+		}
+
+		var e map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &e))
+
+		if e["type"] == "scenario" {
+			delete(e, "time")
+			events = append(events, e)
+		}
+	}
+
+	require.NoError(t, lines.Err())
+	require.Len(t, events, n, "events: %v", events)
+
+	return events
+}
 
 func TestScenarios_TemplatesAndTheJournalSeeTheMove(t *testing.T) {
 	// A call's template reads the state its own mock moved the scenario to, and its journal entry keeps the move, as
@@ -45,40 +87,14 @@ func TestScenarios_StreamsEachMove(t *testing.T) {
 	m.MustMock(Method("Greetings").ID("pay").StartScenario("checkout").ScenarioStateWillBe("paid").
 		Reply(Message(&pb.HiRes{})))
 
-	// A missing event fails the test, rather than hangs it.
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	t.Cleanup(cancel)
+	events := scenarioEvents(t, m, 4, func() {
+		_, code := greetWith(t, c, "")
+		require.Equal(t, codes.OK, code)
+		require.NoError(t, m.SetScenario(t.Context(), "checkout", matchscenario.StateStarted))
+		m.ResetScenario("checkout")
+		m.ResetScenarios()
+	})
 
-	r, err := http.NewRequestWithContext(ctx, http.MethodGet, m.AdminURL()+"/events", nil)
-	require.NoError(t, err)
-
-	res, err := http.DefaultClient.Do(r)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = res.Body.Close() })
-
-	_, code := greetWith(t, c, "")
-	require.Equal(t, codes.OK, code)
-	require.NoError(t, m.SetScenario(t.Context(), "checkout", matchscenario.StateStarted))
-	m.ResetScenario("checkout")
-	m.ResetScenarios()
-
-	lines := bufio.NewScanner(res.Body)
-
-	var events []map[string]any
-	for len(events) < 4 && lines.Scan() {
-		if line, ok := strings.CutPrefix(lines.Text(), "data: "); ok {
-			var e map[string]any
-			require.NoError(t, json.Unmarshal([]byte(line), &e))
-
-			if e["type"] == "scenario" {
-				delete(e, "time")
-				events = append(events, e)
-			}
-		}
-	}
-
-	require.NoError(t, lines.Err())
-	require.Len(t, events, 4, "events: %v", events)
 	require.Equal(t, onlyCall(t, m, journal.Query{}).ID, events[0]["request_id"], "the event names its call")
 	delete(events[0], "request_id")
 
@@ -159,35 +175,59 @@ func TestScenarios_ResettingAScenarioNothingNamesStreamsNoMove(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	// A missing event fails the test, rather than hangs it.
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	t.Cleanup(cancel)
+	events := scenarioEvents(t, m, 1, func() {
+		m.ResetScenario("nope")
+		require.NoError(t, m.SetScenario(t.Context(), "checkout", "paid"))
+	})
 
-	r, err := http.NewRequestWithContext(ctx, http.MethodGet, m.AdminURL()+"/events", nil)
-	require.NoError(t, err)
+	require.Equal(t, []map[string]any{
+		{"type": "scenario", "target": "checkout", "message": "checkout set to paid"},
+	}, events)
+}
 
-	res, err := http.DefaultClient.Do(r)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = res.Body.Close() })
+func TestScenarios_StreamsConcurrentMovesInTheOrderTheyHappened(t *testing.T) {
+	// A client that follows the events ends on the state the scenario is in: calls that move it at once stream their
+	// moves in the order they made them.
+	const steps = 64
 
-	m.ResetScenario("nope")
-	require.NoError(t, m.SetScenario(t.Context(), "checkout", "paid"))
+	m := MustNew(Setup().Silent().Admin(admin.MustNew()))
+	m.MustStart()
+	t.Cleanup(m.Close)
 
-	lines := bufio.NewScanner(res.Body)
+	c := pb.NewTestServiceClient(m.MustDial())
 
-	var first map[string]any
-	for first == nil && lines.Scan() {
-		if line, ok := strings.CutPrefix(lines.Text(), "data: "); ok {
-			var e map[string]any
-			require.NoError(t, json.Unmarshal([]byte(line), &e))
-
-			if e["type"] == "scenario" {
-				delete(e, "time")
-				first = e
-			}
+	state := func(i int) string {
+		if i == 0 {
+			return matchscenario.StateStarted
 		}
+
+		return fmt.Sprintf("s%d", i)
 	}
 
-	require.NoError(t, lines.Err())
-	require.Equal(t, map[string]any{"type": "scenario", "target": "checkout", "message": "checkout set to paid"}, first)
+	want := make([]string, 0, steps)
+	for i := range steps {
+		m.MustMock(Method("Greetings").ScenarioIs("checkout").ScenarioStateIs(state(i)).ScenarioStateWillBe(state(i + 1)).
+			Reply(Message(&pb.HiRes{})))
+		want = append(want, "checkout moved from "+state(i)+" to "+state(i+1))
+	}
+
+	events := scenarioEvents(t, m, steps, func() {
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Go(func() {
+				for range steps / 8 {
+					_, err := c.Greetings(t.Context(), &pb.HiReq{})
+					assert.NoError(t, err)
+				}
+			})
+		}
+		wg.Wait()
+	})
+
+	got := make([]string, 0, steps)
+	for _, e := range events {
+		got = append(got, e["message"].(string))
+	}
+
+	require.Equal(t, want, got)
 }

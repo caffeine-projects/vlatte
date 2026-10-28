@@ -271,6 +271,9 @@ func New(config ...Option) (*Server, error) {
 	app.Verifier = journal.NewVerifier[*Mock, *Server](j, app)
 	app.storage = repository
 	app.scenarioStore = matchscenario.New()
+	if app.eventStream != nil {
+		app.scenarioStore.Notify(app.publishScenario)
+	}
 	app.params = params
 	app.loaders = conf.Loaders
 	app.files = files
