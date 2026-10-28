@@ -151,6 +151,9 @@ func TestNewSchema_PanicsOnBadDeclarations(t *testing.T) {
 		{"help shorthand", []Field[testConfig]{{Key: "hosts", Short: "h"}}, `can't use flag "h"`},
 		{"long shorthand", []Field[testConfig]{{Key: "a", Short: "ab"}}, "must be one letter"},
 		{"choices on a string", []Field[testConfig]{{Key: "a", Kind: String, Choices: []Choice{{Name: "x"}}}}, "only Int settings"},
+		{"secret of another kind", []Field[testConfig]{{Key: "a", Kind: Int, Secret: true}}, `secret key "a" must be a String`},
+		{"secret with a shorthand", []Field[testConfig]{{Key: "a", Short: "x", Secret: true}}, `secret key "a" must be a String`},
+		{"secret flag collision", []Field[testConfig]{{Key: "a.b", Secret: true}, {Key: "a_b"}}, `both use flag "a-b"`},
 		{"nested under a non-bool", []Field[testConfig]{{Key: "a", Kind: Int, Set: set}, {Key: "a.b"}}, `nests under "a", which is not a bool`},
 	}
 
@@ -232,6 +235,76 @@ func TestSchema_HiddenSettingsAreReadButNotListed(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "api", c.Name)
 	require.True(t, values["admin"].Bool)
+}
+
+func TestSchema_SecretsTakeNoFlagAndStayOutOfProblems(t *testing.T) {
+	// A password on the command line shows to every user of the host, and a problem ends up in a terminal or a log:
+	// a secret loads from the environment and files alone, and no problem quotes it.
+	s := NewSchema(
+		Field[testConfig]{Key: "name", Kind: String, Usage: "Name.", Set: func(c *testConfig, v Value) error { c.Name = v.Str; return nil }},
+		Field[testConfig]{
+			Key: "token", Kind: String, Usage: "Token.", Secret: true,
+			Set: func(c *testConfig, v Value) error {
+				if strings.Contains(v.Str, " ") {
+					return errors.New("a token has no spaces")
+				}
+
+				c.Proxy = v.Str
+
+				return nil
+			},
+		},
+	)
+
+	require.Equal(t, []Flag{{Name: "name", Usage: "Name."}}, s.Flags())
+	require.Equal(t, "  --name string\n        Name.\n        env APP_NAME, file key name\n"+
+		"  APP_TOKEN string\n        Token.\n        file key token; no flag, as the command line shows to every user of the host\n",
+		s.Usage("APP"))
+
+	t.Run("from the environment", func(t *testing.T) {
+		t.Setenv("APP_TOKEN", "s3cret")
+
+		var c testConfig
+		_, err := s.Load(&c, []Source{Env("APP")})
+		require.NoError(t, err)
+		require.Equal(t, "s3cret", c.Proxy)
+	})
+
+	t.Run("a flag", func(t *testing.T) {
+		var c testConfig
+		_, err := s.Load(&c, []Source{Args([]string{"--token=s3cret"})})
+
+		cfgErr, ok := errors.AsType[*Error](err)
+		require.True(t, ok, err)
+		require.Equal(t, []Problem{{
+			Code: CodeUnknownKey, Origin: "flag --token", Key: "token",
+			Message: "token is a secret, which no flag sets: the command line shows to every user of the host",
+			Hint:    "set it in the environment or a config file",
+		}}, cfgErr.Problems)
+		require.Empty(t, c.Proxy)
+	})
+
+	t.Run("a value its Set refuses", func(t *testing.T) {
+		t.Setenv("APP_TOKEN", "s3cret token")
+
+		var c testConfig
+		_, err := s.Load(&c, []Source{Env("APP")})
+		require.EqualError(t, err, "config: 1 problem\n  env APP_TOKEN: invalid_value: token: a token has no spaces")
+		require.NotContains(t, err.Error(), "s3cret")
+	})
+
+	t.Run("a value of another type", func(t *testing.T) {
+		path := writeFile(t, t.TempDir(), "app.yaml", "token: 12345678\n")
+
+		var c testConfig
+		_, err := s.Load(&c, []Source{File("config", path)})
+
+		cfgErr, ok := errors.AsType[*Error](err)
+		require.True(t, ok, err)
+		require.Len(t, cfgErr.Problems, 1)
+		require.Empty(t, cfgErr.Problems[0].Value)
+		require.NotContains(t, cfgErr.Problems[0].String(), "12345678")
+	})
 }
 
 func TestSkipAndOnly_ShareFilesAndEnvironmentWithAnotherSchema(t *testing.T) {

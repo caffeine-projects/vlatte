@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -143,6 +144,19 @@ type Config struct {
 	// NoNearMisses turns off the report of the mocks closest to a call no mock matched, which its journal entry
 	// lists. The report runs no matcher twice: it runs those matching never reached.
 	NoNearMisses bool
+
+	// OutboundAllow and OutboundDeny limit the addresses the server connects to, for its proxy replies, the recording
+	// target and webhooks: an address in OutboundDeny is refused, and so is one outside OutboundAllow when it isn't
+	// empty. Deny wins, and either one refuses the unspecified address, 0.0.0.0 or ::, which reaches this host. They
+	// check the address after DNS resolution, so a host name that resolves into a refused range is refused. An IPv4
+	// range doesn't hold IPv6 addresses: deny ::1/128 with 127.0.0.0/8. With either set, proxy replies and the
+	// recording target connect directly, never through the proxy of the environment; webhooks still do, and the rules
+	// check that proxy's address then. A target on a unix socket isn't a network address: they don't apply to it. A
+	// refused connection fails with [vlatte.ErrOutboundRefused]. Empty, the default, refuses nothing. A dialer of the
+	// caller's, a grpc.WithContextDialer in [ProxyReply.DialOptions] or [RecordConfig.DialOptions], or a webhook's
+	// own transport, dials on its own, and they don't apply.
+	OutboundAllow []netip.Prefix
+	OutboundDeny  []netip.Prefix
 }
 
 // AdminAPI is an admin API the server opts into: a RESTful HTTP server of its own, the same as HTTP mock servers have.
@@ -379,6 +393,17 @@ func (cb *ConfigBuilder) TemplateEngine(e vlatte.TemplateEngine) *ConfigBuilder 
 // See Config.TemplateEnv.
 func (cb *ConfigBuilder) TemplateEnv(names ...string) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.TemplateEnv = names })
+}
+
+// OutboundAllow adds the ranges the server may connect to: once set, it refuses every other address. See
+// [Config.OutboundAllow].
+func (cb *ConfigBuilder) OutboundAllow(prefixes ...netip.Prefix) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.OutboundAllow = append(conf.OutboundAllow, prefixes...) })
+}
+
+// OutboundDeny adds ranges the server refuses to connect to, such as 169.254.0.0/16. See [Config.OutboundAllow].
+func (cb *ConfigBuilder) OutboundDeny(prefixes ...netip.Prefix) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.OutboundDeny = append(conf.OutboundDeny, prefixes...) })
 }
 
 // TemplateDataProviders sets the providers of data templates read as .Provided.<Key>: see TemplateDataProvider.

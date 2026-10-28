@@ -288,7 +288,7 @@ func New(config ...Option) (*Server, error) {
 	}
 	app.requestBodyParsers = parsers
 	app.events = eventRunner
-	app.webhooks = httpx.NewWebhookTransport()
+	app.webhooks = httpx.NewWebhookTransport(conf.OutboundAllow, conf.OutboundDeny)
 
 	// The admin API changes mocks through a store of its own when they persist: the server's other mocks, of mock
 	// files and code, never reach the persistent store.

@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"flag"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,6 +125,24 @@ func TestConfigSources_ReadTheRestOfTheGRPCSection(t *testing.T) {
 	require.True(t, c.NoNearMisses)
 	require.Equal(t, dir, c.Journal.Dir)
 	require.Equal(t, int64(64), c.Journal.MaxBodySize)
+}
+
+func TestConfigSources_ReadTheOutboundRanges(t *testing.T) {
+	m, err := New(Setup().ConfigSources(ConfigArgs([]string{
+		"--grpc-outbound-allow=10.1.0.0/16,fd00::/8",
+		"--grpc-outbound-deny=169.254.0.0/16",
+	})))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+
+	c := m.Config()
+	require.Equal(t, []netip.Prefix{netip.MustParsePrefix("10.1.0.0/16"), netip.MustParsePrefix("fd00::/8")}, c.OutboundAllow)
+	require.Equal(t, []netip.Prefix{netip.MustParsePrefix("169.254.0.0/16")}, c.OutboundDeny)
+}
+
+func TestConfigSources_AnOutboundRangeThatIsntCIDRFails(t *testing.T) {
+	_, err := New(Setup().ConfigSources(ConfigArgs([]string{"--grpc-outbound-deny=169.254.169.254"})))
+	require.ErrorContains(t, err, `grpc.outbound.deny="169.254.169.254": expected address ranges in CIDR form`)
 }
 
 func TestConfigSources_AShutdownTimeoutOfZeroFails(t *testing.T) {

@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -169,4 +170,55 @@ func TestAdmin_AServerItCantServeLeavesItFree(t *testing.T) {
 
 	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(api))
 	t.Cleanup(m.Close)
+}
+
+func TestNew_RefusesCredentialsThatCantBeSent(t *testing.T) {
+	// Credentials are checked in the user's code, before a server starts that no one could reach, and the error never
+	// holds them: it can end up in a log.
+	tests := []struct {
+		name   string
+		option admin.Option
+		err    string
+	}{
+		{name: "no username", option: admin.BasicAuth("", "s3cret"), err: "admin: basic auth: the username is empty"},
+		{name: "no password", option: admin.BasicAuth("ops", ""), err: "admin: basic auth: the password is empty"},
+		{name: "a colon in the username", option: admin.BasicAuth("op:s", "s3cret"), err: `admin: basic auth: the username can't contain ":"`},
+		{
+			name: "a control character", option: admin.BasicAuth("ops", "s3cret\n"),
+			err: "admin: basic auth: the username and the password can't contain control characters",
+		},
+		{name: "no token", option: admin.BearerToken(""), err: "admin: bearer token: the token is empty"},
+		{
+			name: "a space in the token", option: admin.BearerToken("s3cret token"),
+			err: "admin: bearer token: the token can hold only letters, digits, -._~+/ and a trailing =",
+		},
+		{
+			name: "a padding inside the token", option: admin.BearerToken("s3cret=token"),
+			err: "admin: bearer token: the token can hold only letters, digits, -._~+/ and a trailing =",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := admin.New(tc.option)
+			require.EqualError(t, err, tc.err)
+			require.NotContains(t, err.Error(), "s3cret")
+		})
+	}
+
+	for _, option := range []admin.Option{
+		admin.BasicAuth("ops", "pass word: ünïcode"),
+		admin.BearerToken("a-Z_0.9~+/=="),
+	} {
+		_, err := admin.New(option)
+		require.NoError(t, err)
+	}
+}
+
+func TestNew_RefusesTLSWithoutACertificate(t *testing.T) {
+	// An HTTPS server without a certificate fails every handshake: the user learns it at once.
+	for _, c := range []*tls.Config{nil, {}} {
+		_, err := admin.New(admin.TLS(c))
+		require.EqualError(t, err, "admin: tls: the config has no certificate")
+	}
 }

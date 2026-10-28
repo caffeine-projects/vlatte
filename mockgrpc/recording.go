@@ -104,7 +104,7 @@ func (app *Server) startRecording(conf *RecordConfig) error {
 	rec := &recording{conf: conf, dir: conf.dir(app.config), served: make(chan struct{})}
 
 	if conf.Target != "" {
-		target, err := From(conf.Target).DialOptions(conf.DialOptions...).replier()
+		target, err := From(conf.Target).DialOptions(conf.DialOptions...).replier(app.config)
 		if err != nil {
 			return fmt.Errorf("recorder: %w", err)
 		}

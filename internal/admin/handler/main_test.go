@@ -311,6 +311,7 @@ type request struct {
 	contentType string
 	accept      string
 	body        string
+	set         func(r *http.Request) // changes the request, such as to add credentials, when not nil
 }
 
 // send sends req and returns the response, with its body read.
@@ -326,6 +327,10 @@ func send(t *testing.T, req request) (*http.Response, string) {
 
 	if req.accept != "" {
 		r.Header.Set("Accept", req.accept)
+	}
+
+	if req.set != nil {
+		req.set(r)
 	}
 
 	res, err := http.DefaultClient.Do(r)

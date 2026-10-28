@@ -7,6 +7,7 @@ package admin
 import (
 	"cmp"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -77,6 +78,10 @@ var _routes = []struct {
 	{pattern: "POST /mcp", lacking: "serve MCP"},
 }
 
+// _probes are the Kubernetes probes, which need no credentials: a probe that needs a secret turns a wrong one into a
+// restart loop.
+var _probes = []string{"GET /livez", "GET /readyz", "GET /startupz"}
+
 var _ adminapi.Server = (*Server)(nil)
 
 var (
@@ -92,9 +97,6 @@ var _operations = map[string]struct {
 	can   func(ops *handler.Operations) bool
 }{
 	"GET /health":              {serve: handler.Health},
-	"GET /livez":               {serve: handler.Live},
-	"GET /readyz":              {serve: handler.Ready},
-	"GET /startupz":            {serve: handler.Started},
 	"GET /schema":              {serve: handler.MockSchema, can: (*handler.Operations).HasMockSchema},
 	"GET /mocks":               {serve: handler.ListMocks},
 	"POST /mocks":              {serve: handler.AddMock, can: (*handler.Operations).Builds},
@@ -123,6 +125,8 @@ var _operations = map[string]struct {
 // Server is the admin API of a mock server.
 type Server struct {
 	addr    string
+	tls     *tls.Config // nil serves plain HTTP
+	auth    bool        // whether requests need credentials
 	logger  *zerolog.Logger
 	streams []func() // end the streams of Server-Sent Events routes
 	handler http.Handler
@@ -151,6 +155,13 @@ type Options struct {
 
 	// DocsVersion is the version of Scalar the docs page loads. Empty is the version vlatte pins.
 	DocsVersion string
+
+	// Auth are the credentials every HTTP request needs, but those of the probes. The zero value asks for none. They
+	// are checked after the middlewares, so one can answer a CORS preflight, which carries none.
+	Auth handler.Credentials
+
+	// TLS serves the admin API over HTTPS with its certificates. Nil serves plain HTTP.
+	TLS *tls.Config
 }
 
 // New creates the admin API of the mock server of caps, which needs its Mocks.
@@ -164,7 +175,7 @@ func New(opts Options, caps adminapi.Capabilities) (*Server, error) {
 		caps.Journal = nil
 	}
 
-	s := &Server{addr: opts.Addr, logger: caps.Logger}
+	s := &Server{addr: opts.Addr, tls: opts.TLS, auth: opts.Auth.Required(), logger: caps.Logger}
 	if s.logger == nil {
 		s.logger = new(zerolog.Nop())
 	}
@@ -177,6 +188,9 @@ func New(opts Options, caps adminapi.Capabilities) (*Server, error) {
 		"GET /openapi":        handler.OpenAPI(),
 		"GET /recorder":       handler.RecorderPage(),
 		"GET /scenario-board": handler.ScenarioBoardPage(),
+		"GET /livez":          handler.Live(ops, s.auth),
+		"GET /readyz":         handler.Ready(ops, s.auth),
+		"GET /startupz":       handler.Started(ops, s.auth),
 	}
 
 	if caps.Events != nil {
@@ -214,6 +228,10 @@ func New(opts Options, caps adminapi.Capabilities) (*Server, error) {
 	csrf := http.NewCrossOriginProtection()
 	csrf.SetDenyHandler(handler.CrossOriginDenied())
 	h := csrf.Handler(handler.Routing(mux))
+	if s.auth {
+		h = handler.Authenticate(opts.Auth, _probes, h)
+	}
+
 	for _, middleware := range slices.Backward(opts.Middlewares) {
 		h = middleware(h)
 	}
@@ -263,12 +281,24 @@ func (s *Server) Start() error {
 	srv := &http.Server{Handler: s.handler, ReadHeaderTimeout: _readHeaderTimeout}
 	served := make(chan struct{})
 
+	if s.tls != nil {
+		srv.TLSConfig = s.tls.Clone()
+	}
+
 	s.srv, s.lis, s.served = srv, lis, served
+	s.warnExposed()
 
 	go func() {
 		defer close(served)
 
-		if err := srv.Serve(lis); !errors.Is(err, http.ErrServerClosed) {
+		var err error
+		if srv.TLSConfig != nil {
+			err = srv.ServeTLS(lis, "", "")
+		} else {
+			err = srv.Serve(lis)
+		}
+
+		if !errors.Is(err, http.ErrServerClosed) {
 			s.logger.Error().Err(err).Msg("admin: serving")
 		}
 	}()
@@ -283,6 +313,10 @@ func (s *Server) URL() string {
 
 	if s.lis == nil {
 		return ""
+	}
+
+	if s.tls != nil {
+		return "https://" + s.lis.Addr().String()
 	}
 
 	return "http://" + s.lis.Addr().String()
@@ -331,6 +365,24 @@ func (s *Server) ServeMCP(ctx context.Context, in io.Reader, out io.Writer) erro
 	}
 
 	return handler.ServeMCP(ctx, s.mcp, in, out)
+}
+
+// warnExposed warns when the admin API listens beyond the local host without authentication, or sends credentials
+// in plain text there: anyone on the network could change the mocks, or read the credentials.
+func (s *Server) warnExposed() {
+	addr, ok := s.lis.Addr().(*net.TCPAddr)
+	if !ok || addr.IP.IsLoopback() {
+		return
+	}
+
+	switch {
+	case !s.auth:
+		s.logger.Warn().Str("addr", addr.String()).
+			Msg("admin: the admin API listens beyond the local host without authentication: anyone who reaches it can change the mocks")
+	case s.tls == nil:
+		s.logger.Warn().Str("addr", addr.String()).
+			Msg("admin: the admin API listens beyond the local host over plain HTTP: anyone on the network can read its credentials")
+	}
 }
 
 // trackMCP counts the MCP calls next handles, whichever transport they come on, so Close waits for them, and gives

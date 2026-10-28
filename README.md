@@ -13,7 +13,7 @@
   <a href="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml"><img src="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://caffeine-projects.github.io/vlatte/"><img src="https://github.com/caffeine-projects/vlatte/actions/workflows/docs.yml/badge.svg" alt="Docs"></a>
   <a href="https://codecov.io/gh/caffeine-projects/vlatte"><img src="https://codecov.io/gh/caffeine-projects/vlatte/graph/badge.svg" alt="codecov"></a>
-  <a href="https://sonarcloud.io/summary/new_code?id=caffeine-projects_vlatte"><img src="https://sonarcloud.io/api/project_badges/quality_gate?project=caffeine-projects_vlatte" alt="Quality gate"></a>
+  <a href="https://sonarcloud.io/summary/new_code?id=caffeine-projects_vlatte"><img src="https://sonarcloud.io/api/project_badges/measure?project=caffeine-projects_vlatte&metric=alert_status" alt="Quality gate status"></a>
   <a href="https://pkg.go.dev/github.com/caffeine-projects/vlatte"><img src="https://pkg.go.dev/badge/github.com/caffeine-projects/vlatte.svg" alt="Go Reference"></a>
 </p>
 
@@ -30,10 +30,10 @@ VLatte starts real HTTP and gRPC servers that answer the way you tell them to. S
 - **Replies** with templated headers and bodies, sequences, random picks, echo, multipart and custom functions.
 - **Mock files** in YAML or JSON, with [JSON schemas](https://caffeine-projects.github.io/vlatte/reference/schemas) for editors, reloaded on demand.
 - **Scenarios** for stateful flows, and **webhooks** sent after a mock answers.
-- **Proxying, and recording** of a real service to play it back later.
+- **Proxying, and recording** of a real service to play it back later, with outbound rules that limit the addresses a server connects to.
 - **Fault injection:** latency, slow bandwidth, connection resets, malformed and empty answers.
 - **A request journal** to verify what clients sent, and debug headers on every answer.
-- **An [admin API](https://caffeine-projects.github.io/vlatte/reference/admin-api)** to manage mocks while a server runs, also served over **MCP** for AI agents.
+- **An [admin API](https://caffeine-projects.github.io/vlatte/reference/admin-api)** to manage mocks while a server runs, with Basic or bearer authentication and TLS, also served over **MCP** for AI agents.
 - **[A CLI and a Docker image](https://caffeine-projects.github.io/vlatte/run/)** to run mock servers outside Go.
 
 ## Install

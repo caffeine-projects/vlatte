@@ -122,7 +122,7 @@ func newProxy(id string, conf *Config) (*forwardProxy, error) {
 			rt:               rt,
 			timeout:          conf.Proxy.Timeout,
 			id:               id,
-			dialer:           newDialer(),
+			dialer:           newDialer(conf),
 			handshakeTimeout: _tlsHandshakeTimeout,
 			interceptor:      in,
 		}, nil
@@ -135,7 +135,7 @@ func newProxy(id string, conf *Config) (*forwardProxy, error) {
 		owned:            transport,
 		timeout:          conf.Proxy.Timeout,
 		id:               id,
-		dialer:           newDialer(),
+		dialer:           newDialer(conf),
 		handshakeTimeout: _tlsHandshakeTimeout,
 		interceptor:      in,
 	}, nil
