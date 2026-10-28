@@ -230,7 +230,12 @@ func TestRequests_ASelectionItCantTakeFailsTheCheck(t *testing.T) {
 		{
 			name:  "an outcome that is none",
 			give:  v.VerifyRequests().Outcome(journal.Outcome(99)),
-			wants: "journal: outcome 99 is not one of matched, unmatched, proxied, failed or abandoned",
+			wants: "verify: invalid check: outcome 99 is not one of matched, unmatched, proxied, failed or abandoned",
+		},
+		{
+			name:  "the unknown outcome",
+			give:  v.VerifyRequests().Outcome(journal.OutcomeUnknown),
+			wants: "verify: invalid check: outcome 0 is not one of matched, unmatched, proxied, failed or abandoned",
 		},
 		{
 			name:  "one of several outcomes that is none",
@@ -271,6 +276,18 @@ func TestRequests_ASelectionItCantTakeFailsTheCheck(t *testing.T) {
 			require.Equal(t, "\nCould not verify the requests.\n"+tt.wants, errorText(t, ft))
 		})
 	}
+}
+
+func TestRequests_AReadOfASelectionItCantTakeFails(t *testing.T) {
+	// A read of an outcome that is none returns an error, never every request: the journal's query takes outcome 0 for
+	// any outcome.
+	unknown := served(t).VerifyRequests().Outcome(journal.OutcomeUnknown)
+
+	_, err := unknown.Count(t.Context())
+	require.ErrorIs(t, err, verify.ErrInvalidSpec)
+
+	_, err = unknown.Find(t.Context())
+	require.ErrorIs(t, err, verify.ErrInvalidSpec)
 }
 
 func TestRequests_AnAssertionItCantTakeFailsTheCheck(t *testing.T) {

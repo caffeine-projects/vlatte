@@ -3,6 +3,7 @@ package verify_test
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -144,6 +145,66 @@ func TestReport_NamesTheMarkItCountsFrom(t *testing.T) {
 		"    #2 2026-10-21T12:00:00.000Z matched GET http://127.0.0.1/b 200\n"+
 		"        missed 1 of 1: path\n",
 		errorText(t, ft))
+}
+
+func TestReport_TheClosestLeaveOutEveryRequestSelected(t *testing.T) {
+	// More requests selected than the report lists are no near misses: listed among the closest, with no part missed,
+	// they would push out the request that tells why the check failed.
+	entries := make([]*journal.Entry, 0, 13)
+	for i := range 12 {
+		entries = append(entries, entry(strconv.Itoa(i), func(e *journal.Entry) { e.Method = "POST" }))
+	}
+
+	j := newJournal(t, journal.Options{}, append(entries, entry("put", func(e *journal.Entry) { e.Method = "PUT" }))...)
+
+	result, err := verify.Check(t.Context(), verify.Spec{
+		Journal: j, Query: journal.Query{Method: match.Equal("POST")}, Count: match.Equal(13), Expect: "exactly 13",
+	})
+	require.NoError(t, err)
+	require.False(t, result.Passed)
+	require.Len(t, result.Selected, 10)
+	require.Equal(t, []verify.Listed{{
+		Seq: 13, ID: "put", Line: "#13 2026-10-21T12:00:00.000Z matched PUT http://127.0.0.1/put 200",
+		Total: 1, Missed: []string{"method"},
+	}}, result.Closest)
+}
+
+func TestReport_StopsWhenTheCheckIsCanceled(t *testing.T) {
+	// A client that leaves, or an admin API that closes, ends the report of a check that failed: its matchers may wait
+	// on the context.
+	j := newJournal(t, journal.Options{}, entry("a"), entry("b"))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	_, err := verify.Check(ctx, verify.Spec{
+		Journal: j, Patterns: []verify.Pattern{&cancelingPattern{cancel: cancel}}, Count: match.Equal(1), Expect: "exactly 1",
+	})
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+// cancelingPattern is a pattern that matches no request and cancels the check as it tells why the first missed, as a
+// client that leaves does: it tells why the next missed only while the check's context isn't done.
+type cancelingPattern struct {
+	cancel context.CancelFunc
+	told   bool
+}
+
+func (*cancelingPattern) Build(fakeServer) (*fakeMock, error) {
+	return nil, errors.New("a pattern builds no mock")
+}
+
+func (*cancelingPattern) Match(context.Context, *journal.Entry) (bool, error) { return false, nil }
+
+func (p *cancelingPattern) Explain(ctx context.Context, _ *journal.Entry) (verify.Miss, error) {
+	if p.told {
+		return verify.Miss{}, ctx.Err()
+	}
+
+	p.told = true
+	p.cancel()
+
+	return verify.Miss{Total: 1, Failed: []string{"pattern"}}, nil
 }
 
 func TestReport_AReportThatCantRankTheRequestsSaysWhy(t *testing.T) {

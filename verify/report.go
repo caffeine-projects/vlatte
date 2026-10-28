@@ -16,8 +16,6 @@ import (
 // report lists in r the requests that tell why s failed with r's count, and says it in r's Report: those s selected,
 // and, when s wanted more, those of its window that came closest, with the parts they missed.
 func (s *Spec) report(ctx context.Context, filters []journal.Filter, r *Result) error {
-	ctx = context.WithoutCancel(ctx)
-
 	selected, err := s.Journal.Find(ctx, s.withLimit(_listed), filters...)
 	if err != nil {
 		return err
@@ -37,8 +35,17 @@ func (s *Spec) report(ctx context.Context, filters []journal.Filter, r *Result) 
 		return err
 	}
 
-	if wantsMore {
-		if r.Closest, err = s.closest(ctx, window.Entries, selected.Entries); err != nil {
+	if wantsMore && len(window.Entries) > 0 {
+		// Every request of the window s selects, not only those listed, came in, not close.
+		in := s.Query
+		in.After, in.Before = window.Entries[len(window.Entries)-1].Seq-1, window.Entries[0].Seq+1
+
+		page, err := s.Journal.Find(ctx, in, filters...)
+		if err != nil {
+			return err
+		}
+
+		if r.Closest, err = s.closest(ctx, window.Entries, page.Entries); err != nil {
 			return err
 		}
 	}

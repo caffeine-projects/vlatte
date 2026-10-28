@@ -270,6 +270,11 @@ func (r Requests[TM, A]) spec(count vlatte.Matcher, expect string) (Spec, error)
 		During:   r.during,
 	}
 
+	// Checked before the fold: outcome 0 is no outcome to the journal's query, which then selects every request.
+	if err := s.checkSelection(); err != nil {
+		return Spec{}, err
+	}
+
 	s.foldOutcome()
 
 	if r.mark != nil {

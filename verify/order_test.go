@@ -137,3 +137,39 @@ func TestInOrder_RefusesStepsOfRequestsTheJournalDropped(t *testing.T) {
 	require.Equal(t, "\nCould not verify the order of the requests.\nverify: step 1: "+verify.ErrDropped.Error()+": 1 of them",
 		errorText(t, ft))
 }
+
+func TestCheckOrder_AClearBetweenTwoStepsFailsTheOrder(t *testing.T) {
+	// A login from before a reset and a logout after it were never in the journal together: the order of the two is
+	// not one the journal holds.
+	j := &clearingJournal{
+		Journal: newJournal(t, journal.Options{}, entry("login")),
+		t:       t, at: 3, after: entry("logout"),
+	}
+
+	_, err := verify.CheckOrder(t.Context(),
+		verify.Spec{Journal: j, Query: journal.Query{Path: match.Equal("/login")}},
+		verify.Spec{Journal: j, Query: journal.Query{Path: match.Equal("/logout")}},
+	)
+	require.ErrorIs(t, err, verify.ErrCleared)
+}
+
+// clearingJournal is a journal that is cleared and then gets after as a check reads where its last clear was for the
+// at-th time, as a reset between the reads of two steps does.
+type clearingJournal struct {
+	*journal.Journal
+
+	t     *testing.T
+	at    int
+	reads int
+	after *journal.Entry
+}
+
+func (j *clearingJournal) Cleared() uint64 {
+	j.reads++
+	if j.reads == j.at {
+		require.NoError(j.t, j.Clear())
+		require.NoError(j.t, j.Append(j.after))
+	}
+
+	return j.Journal.Cleared()
+}

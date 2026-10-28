@@ -69,13 +69,13 @@ func CheckOrder(ctx context.Context, steps ...Spec) (Result, error) {
 		}
 	}
 
-	// Each step's request comes after the previous step's: the first of its requests after it.
+	// Each step's request comes after the previous step's: the first of its requests after it. One clear holds for
+	// every step: a clear between two steps' reads would order requests the journal never held together.
 	seqs := make([][]uint64, len(steps))
+	cleared := steps[0].Journal.Cleared()
 
 	for i := range steps {
 		s := &steps[i]
-
-		cleared := s.Journal.Cleared()
 
 		page, err := s.Journal.Find(ctx, s.Query, s.filters()...)
 		if err != nil {
