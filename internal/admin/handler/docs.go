@@ -20,7 +20,7 @@ const (
 //go:embed docs.html
 var _docsPage string
 
-// Docs answers the page that documents the admin API from its OpenAPI document: GET / and GET /docs. The page loads
+// Docs answers the page that documents the admin API from its OpenAPI document: GET /docs. The page loads
 // Scalar at version, or at the version vlatte pins when it is empty. Only the pinned version is checked against the
 // hash of its file: the hash of another isn't known. version goes into the page as it is: the caller checks it is a
 // version.
@@ -32,13 +32,15 @@ func Docs(version string) http.Handler {
 		integrity = ""
 	}
 
-	return page([]byte(strings.NewReplacer("{version}", version, "{integrity}", integrity).Replace(_docsPage)))
+	return page(strings.NewReplacer("{version}", version, "{integrity}", integrity).Replace(layout(_docsPage, "docs")))
 }
 
 // page answers an HTML page.
-func page(html []byte) http.Handler {
+func page(html string) http.Handler {
+	body := []byte(html)
+
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(html)
+		_, _ = w.Write(body)
 	})
 }

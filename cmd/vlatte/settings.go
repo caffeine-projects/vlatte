@@ -62,7 +62,7 @@ func settingsSchema() *config.Schema[settings] {
 		},
 		config.Field[settings]{
 			Key: "admin.docs_version", Kind: config.String,
-			Usage: "Version of Scalar, such as 1.80.0, that the documentation page of the admin APIs, at / and /docs, " +
+			Usage: "Version of Scalar, such as 1.80.0, that the documentation page of the admin APIs, at /docs, " +
 				"loads instead of the one vlatte pins, which it checks against its hash. Empty is the pinned one.",
 			Set: func(s *settings, v config.Value) error {
 				s.admin, s.docsVersion = true, v.Str

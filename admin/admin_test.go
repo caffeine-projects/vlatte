@@ -45,12 +45,12 @@ func TestNew_RefusesAMalformedDocsVersion(t *testing.T) {
 }
 
 func TestAdmin_DocsLoadTheVersionItIsGiven(t *testing.T) {
-	// A user takes a newer Scalar before vlatte pins it: the page at the root loads it, unchecked by a hash it lacks.
+	// A user takes a newer Scalar before vlatte pins it: the docs page loads it, unchecked by a hash it lacks.
 	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(admin.MustNew(admin.DocsVersion("1.80.0"))))
 	require.NoError(t, m.Start())
 	t.Cleanup(m.Close)
 
-	res, err := http.Get(m.AdminURL() + "/")
+	res, err := http.Get(m.AdminURL() + "/docs")
 	require.NoError(t, err)
 
 	body, err := io.ReadAll(res.Body)

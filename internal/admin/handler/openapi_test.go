@@ -38,19 +38,17 @@ func TestOpenAPI(t *testing.T) {
 }
 
 func TestDocs(t *testing.T) {
-	// The documentation page renders the admin API's own document, at the root of the admin API and at /docs, with a
-	// renderer pinned to a version and its hash, so a changed file on the CDN doesn't run.
+	// The documentation page renders the admin API's own document, at /docs, with a renderer pinned to a version and
+	// its hash, so a changed file on the CDN doesn't run.
 	url := serve(t, newStore(t))
 
-	for _, path := range []string{"/", "/docs"} {
-		res, body := send(t, request{method: http.MethodGet, url: url + path})
+	res, body := send(t, request{method: http.MethodGet, url: url + "/docs"})
 
-		require.Equal(t, http.StatusOK, res.StatusCode, path)
-		require.Equal(t, "text/html; charset=utf-8", res.Header.Get("Content-Type"), path)
-		require.Contains(t, body, `url: 'openapi'`, path)
-		require.Regexp(t, `src="https://cdn\.jsdelivr\.net/npm/@scalar/api-reference@\d+\.\d+\.\d+/dist/browser/standalone\.js"`, body, path)
-		require.Regexp(t, `integrity="sha384-[A-Za-z0-9+/=]+"`, body, path)
-	}
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "text/html; charset=utf-8", res.Header.Get("Content-Type"))
+	require.Contains(t, body, `url: 'openapi'`)
+	require.Regexp(t, `src="https://cdn\.jsdelivr\.net/npm/@scalar/api-reference@\d+\.\d+\.\d+/dist/browser/standalone\.js"`, body)
+	require.Regexp(t, `integrity="sha384-[A-Za-z0-9+/=]+"`, body)
 }
 
 func TestDocs_LoadsTheVersionItIsGiven(t *testing.T) {

@@ -61,7 +61,7 @@ func MCP() Option {
 }
 
 // DocsVersion sets the version of Scalar, the npm package @scalar/api-reference, that the documentation page of the
-// admin API, at / and /docs, loads from jsDelivr, such as 1.80.0: a newer one than vlatte pins, before vlatte ships
+// admin API, at /docs, loads from jsDelivr, such as 1.80.0: a newer one than vlatte pins, before vlatte ships
 // it. Empty, the default, is the version vlatte pins. The page checks the pinned version against the hash of its
 // file; it loads another unchecked, as its hash isn't known.
 func DocsVersion(version string) Option {

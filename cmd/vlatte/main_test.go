@@ -734,11 +734,11 @@ func TestCLI_AdminSettings(t *testing.T) {
 	})
 
 	t.Run("a docs version", func(t *testing.T) {
-		// A newer Scalar than vlatte pins renders the documentation, at the root of the admin API.
+		// A newer Scalar than vlatte pins renders the documentation, at /docs of the admin API.
 		admin := randomAddr(t)
 		start(t, "--addr", randomAddr(t), "--admin-addr", admin, "--admin-docs-version", "1.80.0", "--log-level", "disabled")
 
-		status, body := firstAnswer(t, "http://"+admin+"/")
+		status, body := firstAnswer(t, "http://"+admin+"/docs")
 		require.Equal(t, http.StatusOK, status)
 		require.Contains(t, body, "@scalar/api-reference@1.80.0/")
 	})

@@ -171,10 +171,9 @@ func New(opts Options, caps adminapi.Capabilities) (*Server, error) {
 
 	ops := handler.NewOperations(caps)
 
-	docs := handler.Docs(opts.DocsVersion)
 	routes := map[string]http.Handler{
-		"GET /{$}":            docs,
-		"GET /docs":           docs,
+		"GET /{$}":            handler.Home(),
+		"GET /docs":           handler.Docs(opts.DocsVersion),
 		"GET /openapi":        handler.OpenAPI(),
 		"GET /recorder":       handler.RecorderPage(),
 		"GET /scenario-board": handler.ScenarioBoardPage(),
