@@ -823,3 +823,45 @@ func TestReplyTemplates_RequestErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestReply_ProblemAnswersWithProblemJSON(t *testing.T) {
+	// Clients pick their decoder by the media type, and RFC 9457 asks the problem's status to match the response's.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	tests := []struct {
+		name       string
+		reply      *Reply
+		wantStatus int
+	}{
+		{
+			name:       "the problem's status sets the response's",
+			reply:      OK().Problem(NewProblem().Status(http.StatusConflict)),
+			wantStatus: http.StatusConflict,
+		},
+		{
+			name:       "a problem without status keeps the reply's",
+			reply:      NotFound().Problem(NewProblem().Title("Not found")),
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "a later Status overrides the problem's",
+			reply:      NewReply().Problem(NewProblem().Status(http.StatusConflict)).Status(http.StatusBadRequest),
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := "/problem/" + strconv.Itoa(i)
+			m.MustMock(Getf("%s", path).Reply(tc.reply))
+
+			res, err := http.Get(m.URL(path))
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, tc.wantStatus, res.StatusCode)
+			require.Equal(t, MIMEApplicationProblemJSON, res.Header.Get(HeaderContentType))
+		})
+	}
+}

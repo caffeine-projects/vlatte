@@ -73,6 +73,7 @@ var _debugHeaders = []string{
 const (
 	MIMEApplicationJSON                  = "application/json"
 	MIMEApplicationCharsetUTF8           = MIMEApplicationJSON + "; " + _charsetUTF8
+	MIMEApplicationProblemJSON           = "application/problem+json"
 	MIMETextPlain                        = "text/plain"
 	MIMETextPlainCharsetUTF8             = MIMETextPlain + "; " + _charsetUTF8
 	MIMETextHTML                         = "text/html"

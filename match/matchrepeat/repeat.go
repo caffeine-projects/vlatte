@@ -1,4 +1,4 @@
-package mfeat
+package matchrepeat
 
 import (
 	"sync/atomic"

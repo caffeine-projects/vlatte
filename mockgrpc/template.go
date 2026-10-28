@@ -3,6 +3,7 @@ package mockgrpc
 import (
 	"context"
 	json "encoding/json/v2"
+	"maps"
 	"net/http"
 
 	"github.com/rs/zerolog"
@@ -32,6 +33,33 @@ type TemplateData struct {
 	// a key, {{ .Scenarios.StateOf "checkout" (index .Request.Header "x-test-id" 0) }}. The scenario of the mock that
 	// matched has moved already, when the server picked it.
 	Scenarios matchscenario.View
+
+	// Data is the data set with Server.SetData, in force when the call arrived: {{ .Data.target }}.
+	Data map[string]any
+
+	// Provided is what the server's template data providers gave for the call, by their key: {{ .Provided.user.name }}.
+	Provided map[string]any
+}
+
+// TemplateDataProvider adds data to the templates of gRPC mocks, which read it as .Provided.<Key>. The server calls
+// Data once for each call a mock matched, before the mock waits and replies: an error fails the call, with the
+// vlatte-error trailer.
+type TemplateDataProvider = vlatte.TemplateDataProvider[*TemplateDataProviderInput]
+
+// TemplateDataProviderInput is what a TemplateDataProvider receives for each call.
+type TemplateDataProviderInput struct {
+	call *Call
+	mock *Mock
+}
+
+// Call returns the call being served.
+func (in *TemplateDataProviderInput) Call() *Call {
+	return in.call
+}
+
+// Mock returns the mock that matched the call.
+func (in *TemplateDataProviderInput) Mock() *Mock {
+	return in.mock
 }
 
 // TemplateRequest is the call being served, to templates.
@@ -84,6 +112,31 @@ func (k *Kit) Dir() string {
 	return k.dir
 }
 
+// SetData sets the data templates read as .Data, such as the address of another server: {{ .Data.target }}. The
+// server keeps a copy of the map, and calls read the data in force when they arrive.
+func (app *Server) SetData(data map[string]any) {
+	data = maps.Clone(data)
+	app.data.Store(&data)
+}
+
+// Data returns the data templates read as .Data. Calls read the map, so don't change it: set new data instead.
+func (app *Server) Data() map[string]any {
+	if data := app.data.Load(); data != nil {
+		return *data
+	}
+
+	return nil
+}
+
+// provide gives call the data of the server's template data providers, and the server's data, as the call arrives:
+// mock matched it. It returns the error of the first provider that fails.
+func (app *Server) provide(call *Call, mock *Mock) error {
+	provided, err := vlatte.ProvideTemplateData(app.config.TemplateDataProviders, &TemplateDataProviderInput{call: call, mock: mock})
+	call.data, call.provided = app.Data(), provided
+
+	return err
+}
+
 // templateEngine returns the engine of the server's templates.
 func (app *Server) templateEngine() vlatte.TemplateEngine {
 	return app.config.TemplateEngine
@@ -105,5 +158,7 @@ func (app *Server) templateData(ctx context.Context, call *Call) *TemplateData {
 		},
 		Parameters: params.New(ctx, app.config.Parameters),
 		Scenarios:  app.scenarios.View(),
+		Data:       call.data,
+		Provided:   call.provided,
 	}
 }
