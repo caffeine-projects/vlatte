@@ -1,5 +1,6 @@
 id: petstore-list-pets
 name: List pets matching the given filters
+scenario: {name: adoption, required_state: started}
 request:
   method: GET
   path: /pets

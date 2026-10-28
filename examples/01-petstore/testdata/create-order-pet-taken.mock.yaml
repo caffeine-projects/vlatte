@@ -1,0 +1,13 @@
+id: petstore-create-order-pet-taken
+name: Refuse an order for a pet an order already holds
+scenario: {name: adoption, required_state: ordered}
+request:
+  method: POST
+  path: /orders
+response:
+  status: 422
+  header:
+    Content-Type: application/json
+  body:
+    code: PET_NOT_AVAILABLE
+    message: Buddy is already held by an order.

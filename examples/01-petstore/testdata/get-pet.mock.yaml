@@ -1,5 +1,6 @@
 id: petstore-get-pet
 name: Get a pet by ID
+scenario: {name: adoption, required_state: started}
 request:
   method: GET
   path: /pets/11111111-1111-4111-8111-111111111111
