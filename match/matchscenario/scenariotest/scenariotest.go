@@ -32,6 +32,9 @@ type Mock struct {
 	// Keyed makes the mock play in the instance of the scenario of the key [Server.CallWithKey] sends, as the
 	// server's scenario key does: the shared instance for a call without a key.
 	Keyed bool
+
+	// Disabled adds the mock disabled: it matches nothing until enabled.
+	Disabled bool
 }
 
 // Server is a mock server under test, as the server's test builds it: the scenario methods are the server's own.
@@ -128,6 +131,50 @@ func Run(t *testing.T, newServer func(t *testing.T) Server) {
 
 		require.NoError(t, srv.SetScenario(t.Context(), "refund", "asked"), "a scenario no mock names takes any state")
 		require.Equal(t, "asked", stateOf(t, srv, "refund"))
+	})
+
+	t.Run("a disabled mock keeps the states it names", func(t *testing.T) {
+		// A disabled mock matches again once enabled: the scenario keeps its states and moves meanwhile, so a test can
+		// still move it to a state only that mock names, and not to one no mock names.
+		srv := newServer(t)
+		srv.Mock(t,
+			Mock{ID: "pay", Scenario: "checkout", RequiredState: matchscenario.StateStarted, NewState: "paid"},
+			Mock{ID: "refund", Scenario: "checkout", RequiredState: "paid", NewState: "refunded", Disabled: true},
+		)
+
+		got, err := srv.Scenarios(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, []matchscenario.Scenario{{
+			Name:  "checkout",
+			State: matchscenario.StateStarted,
+			States: []matchscenario.State{
+				{Name: matchscenario.StateStarted, Reachable: true},
+				{Name: "paid", Reachable: true},
+				{Name: "refunded", Reachable: true},
+			},
+			Transitions: []matchscenario.Transition{
+				{From: matchscenario.StateStarted, To: "paid", MockID: "pay"},
+				{From: "paid", To: "refunded", MockID: "refund"},
+			},
+		}}, got)
+
+		require.NoError(t, srv.SetScenario(t.Context(), "checkout", "refunded"))
+		require.ErrorIs(t, srv.SetScenario(t.Context(), "checkout", "payed"), matchscenario.ErrUnknownState)
+	})
+
+	t.Run("a scenario whose mocks are all disabled still names its states", func(t *testing.T) {
+		srv := newServer(t)
+		srv.Mock(t, Mock{
+			ID:            "pay",
+			Scenario:      "checkout",
+			RequiredState: matchscenario.StateStarted,
+			NewState:      "paid",
+			Disabled:      true,
+		})
+
+		require.ErrorIs(t, srv.SetScenario(t.Context(), "checkout", "payed"), matchscenario.ErrUnknownState,
+			"it is not a scenario no mock names")
+		require.NoError(t, srv.SetScenario(t.Context(), "checkout", "paid"))
 	})
 
 	t.Run("the scenarios list the states and moves of the mocks", func(t *testing.T) {

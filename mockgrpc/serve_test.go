@@ -236,6 +236,10 @@ func (failingStore) List(context.Context) (iter.Seq[*Mock], error) {
 	return nil, errors.New("store down")
 }
 
+func (failingStore) PickAll(context.Context) ([]*Mock, error) {
+	return nil, errors.New("store down")
+}
+
 // requireMatchFailure asserts err and trailer are the answer to a call the server failed to find a mock for.
 func requireMatchFailure(t *testing.T, err error, trailer metadata.MD, msg ...string) {
 	t.Helper()
