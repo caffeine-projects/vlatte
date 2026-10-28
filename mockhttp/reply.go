@@ -373,6 +373,28 @@ func (rep *Reply) JSON(payload any) *Reply {
 	return rep.BodyJSON(payload)
 }
 
+// Problem defines an RFC 9457 problem details response: it sets the Content-Type to
+// [MIMEApplicationProblemJSON] and the body to p encoded as JSON. When p has a status, it sets the response status
+// too, as the RFC asks them to match; a later call to [Reply.Status] overrides it. A nil p encodes as {}.
+// An extension of p named after a standard member makes building the mock fail.
+func (rep *Reply) Problem(p *Problem) *Reply {
+	members, err := p.members()
+	if err != nil {
+		rep.body(_bodyDefault)
+		rep.delayedErr = err
+
+		return rep
+	}
+
+	if p != nil && p.status != 0 {
+		rep.Status(p.status)
+	}
+
+	rep.Header(HeaderContentType, MIMEApplicationProblemJSON)
+
+	return rep.BodyJSON(members)
+}
+
 // PlainText defines a text/plain response with the given text body.
 func (rep *Reply) PlainText(text string) *Reply {
 	rep.Header(HeaderContentType, MIMETextPlain)
