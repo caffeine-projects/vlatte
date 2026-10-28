@@ -1,0 +1,15 @@
+id: petstore-get-inventory-ordered
+name: Count pets by status, once an order holds Buddy
+scenario: {name: adoption, required_state: ordered}
+request:
+  method: GET
+  path: /inventories
+response:
+  status: 200
+  header:
+    Content-Type: application/json
+  body:
+    AVAILABLE: 0
+    PENDING: 1
+    ADOPTED: 0
+    NOT_AVAILABLE: 0

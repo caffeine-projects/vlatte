@@ -30,7 +30,10 @@
     .muted { color: var(--muted); }
     .error { color: var(--danger); }
 
-    .bar { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+    .bar { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+    .hero { display: flex; gap: 16px; align-items: center; min-width: 0; }
+    .hero .logo { width: 64px; height: 64px; flex: none; }
+    .hero p { margin: 0; overflow-wrap: anywhere; }
 
     .live { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
@@ -95,12 +98,33 @@
 <!-- layout:nav -->
 <main>
   <div class="bar">
-    <h1>Mock server</h1>
+    <div class="hero">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" class="logo" aria-hidden="true">
+        <circle cx="55" cy="60" r="41" fill="#F2A93B"/>
+        <path d="M84 54 H98 a6 6 0 0 1 0 12 H84 Z" fill="#D9622F"/>
+        <circle cx="55" cy="60" r="32" fill="#D9622F"/>
+        <circle cx="55" cy="60" r="25" fill="#FFF3E0"/>
+        <g transform="translate(55 60)" fill="#2C1A12">
+          <path d="M0 -15.5A15.5 15.5 0 1 1 0 15.5A15.5 15.5 0 1 1 0 -15.5ZM0 -5.5A5.5 5.5 0 1 1 0 5.5A5.5 5.5 0 1 1 0 -5.5Z" fill-rule="evenodd"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(45)"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(90)"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(135)"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(180)"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(225)"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(270)"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(315)"/>
+        </g>
+      </svg>
+      <div>
+        <h1>Mock server</h1>
+        <p id="summary" class="muted">What the mock server serves, and what it served.</p>
+      </div>
+    </div>
     <span class="live" title="The page follows the server's events, and checks every 5 seconds, or every 2 without them.">
       <span id="live-dot" class="dot"></span><span id="live">Connecting</span>
     </span>
   </div>
-  <p id="summary" class="muted">What the mock server serves, and what it served.</p>
   <p id="problem" class="error" role="alert" hidden></p>
 
   <div class="boxes">

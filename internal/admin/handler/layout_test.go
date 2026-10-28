@@ -9,8 +9,8 @@ import (
 )
 
 func TestLayout_EveryPageHasTheNavbarAndMarksItsOwnLink(t *testing.T) {
-	// Every admin page shares one navbar: a relative link to each page, so it works wherever the admin API is mounted,
-	// with the page shown marked, then the repository link and the theme toggle, in that order.
+	// Every admin page shares one navbar, under the vlatte mark: a relative link to each page, so it works wherever the
+	// admin API is mounted, with the page shown marked, then the repository link and the theme toggle, in that order.
 	base := serve(t, newStore(t))
 
 	tests := []struct {
@@ -28,6 +28,8 @@ func TestLayout_EveryPageHasTheNavbarAndMarksItsOwnLink(t *testing.T) {
 			_, body := send(t, request{method: http.MethodGet, url: base + tt.path})
 
 			require.Equal(t, 1, strings.Count(body, `<nav class="vl-nav"`))
+			require.Contains(t, body, `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,`, "the tab shows the vlatte mark")
+			require.Contains(t, body, `<span class="vl-wordmark"><span>v</span>latte</span>`)
 			require.NotContains(t, body, "<!-- layout:")
 			for _, link := range []string{
 				`<a href="./" data-page="home"`,

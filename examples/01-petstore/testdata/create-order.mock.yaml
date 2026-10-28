@@ -1,5 +1,6 @@
 id: petstore-create-order
 name: Place an adoption order
+scenario: {name: adoption, required_state: started, new_state: ordered}
 request:
   method: POST
   path: /orders

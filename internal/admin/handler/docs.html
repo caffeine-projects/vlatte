@@ -11,6 +11,17 @@
       dark modes: set them here to change how the documentation looks.
       See https://scalar.com/products/api-references/themes
     */
+    /* Scalar takes the brand's colors of the theme shown: the class of the body is the theme. */
+    body.light-mode,
+    body.dark-mode {
+      --scalar-background-1: var(--bg);
+      --scalar-background-2: var(--panel);
+      --scalar-color-1: var(--fg);
+      --scalar-color-2: var(--muted);
+      --scalar-color-accent: var(--accent);
+      --scalar-border-color: var(--line);
+    }
+
     body {
       margin: 0;
       /* Scalar keeps its sticky header and sidebar under the navbar. */

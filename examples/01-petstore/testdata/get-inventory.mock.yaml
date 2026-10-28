@@ -1,5 +1,6 @@
 id: petstore-get-inventory
 name: Count pets by status
+scenario: {name: adoption, required_state: started}
 request:
   method: GET
   path: /inventories

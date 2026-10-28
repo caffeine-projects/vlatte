@@ -1,5 +1,6 @@
 id: petstore-search-pets
 name: Search pets by structured criteria
+scenario: {name: adoption, required_state: started}
 request:
   method: QUERY
   path: /pets
