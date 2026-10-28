@@ -41,6 +41,8 @@ func DecodeMock(app *Server, data []byte, format string) (*Mock, error) {
 // load twice. A relative dir starts at the server's root directory. A file a person adds, edits or removes takes
 // effect on the server's next reload. A mock whose description doesn't load back is refused: its file would fail every
 // later start.
+// A file's mock must have the ID the file's name gives, as the store finds a mock's file by its name: one that
+// doesn't fails the start and the reload.
 func FileStore(dir string) AdminStore {
 	return func(app *Server) (vlatte.Store[*Mock], error) {
 		path := dir

@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 
@@ -241,6 +242,69 @@ func TestFileStore_AReloadTheStoreFailsKeepsTheMockFilesAsTheyWere(t *testing.T)
 
 	_, body := do(t, http.MethodGet, m.URL("/x"), nil, nil)
 	require.Equal(t, "first", string(body))
+}
+
+// durable is a persistent store a test store embeds, under a name that doesn't hide its Store method.
+type durable = vlatte.Store[*Mock]
+
+// twinStore is a persistent store that, once twins is set, also holds two mocks of one ID, which the server's store
+// refuses.
+type twinStore struct {
+	durable
+
+	app   *Server
+	twins atomic.Bool
+}
+
+func (s *twinStore) PickAll(ctx context.Context) ([]*Mock, error) {
+	all, err := s.durable.PickAll(ctx)
+	if err != nil || !s.twins.Load() {
+		return all, err
+	}
+
+	for range 2 {
+		twin, err := DecodeMock(s.app, []byte(`{"id": "twin", "request": {"method": "GET", "path": "/twin"}, "response": {"status": 200}}`), "json")
+		if err != nil {
+			return nil, err
+		}
+
+		all = append(all, twin)
+	}
+
+	return all, nil
+}
+
+func TestAdminStore_AReloadTheServerRefusesKeepsTheMockFilesAsTheyWere(t *testing.T) {
+	// The persistent store reads fine, but the server's store refuses its mocks: the mock file edited meanwhile isn't
+	// served either, and the next reload serves it.
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "mocks"), 0o700))
+
+	file := filepath.Join(root, "mocks", "x.yaml")
+	require.NoError(t, os.WriteFile(file, []byte("request: {method: GET, path: /x}\nresponse: {status: 200, body: first}\n"), 0o600))
+
+	var store *twinStore
+
+	m := adminServer(t, Setup().RootDir(root).MockFilePatterns("mocks/*.yaml").AdminStore(func(app *Server) (vlatte.Store[*Mock], error) {
+		files, err := FileStore("admin")(app)
+		store = &twinStore{durable: files, app: app}
+
+		return store, err
+	}))
+
+	require.NoError(t, os.WriteFile(file, []byte("request: {method: GET, path: /x}\nresponse: {status: 200, body: edited}\n"), 0o600))
+	store.twins.Store(true)
+
+	require.ErrorIs(t, m.Reload(), vlatte.ErrDuplicateID)
+
+	_, body := do(t, http.MethodGet, m.URL("/x"), nil, nil)
+	require.Equal(t, "first", string(body))
+
+	store.twins.Store(false)
+	require.NoError(t, m.Reload())
+
+	_, body = do(t, http.MethodGet, m.URL("/x"), nil, nil)
+	require.Equal(t, "edited", string(body))
 }
 
 func TestFileStore_RemovingMocksRemovesTheirFiles(t *testing.T) {

@@ -62,3 +62,18 @@ func TestFileStore_AFileThatCantBeReadFailsItsPick(t *testing.T) {
 	require.ErrorContains(t, err, "server: admin store: ")
 	require.ErrorIs(t, err, fs.ErrNotExist)
 }
+
+func TestFileStore_RefusesAFileWhoseMockIDIsntItsName(t *testing.T) {
+	// The store finds a mock's file by its name: a mock served under another ID, such as a new one each reload for a
+	// document without one, would leave its file behind when the admin API deletes or edits it.
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "hello.mock.yaml"), []byte("other"), 0o600))
+
+	store := docFileStore(dir, os.Remove)
+
+	_, err := store.PickAll(t.Context())
+	require.ErrorContains(t, err, `server: admin store: file `+filepath.Join(dir, "hello.mock.yaml")+` holds mock "other": its id must be "hello"`)
+
+	_, err = store.Pick(t.Context(), "hello")
+	require.ErrorContains(t, err, `its id must be "hello"`)
+}

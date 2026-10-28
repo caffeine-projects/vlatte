@@ -19,12 +19,14 @@ type fileLoader struct {
 
 // load adds the mocks of every matching file, in file name order, so mocks of equal priority match in that order. A
 // reload swaps them for the mocks of the last load in one step, so a call finds one set or the other. When a file has
-// problems, load changes nothing and reports every file with problems.
-func (l *fileLoader) load(app *Server) error {
+// problems, load changes nothing and reports every file with problems. swap, when not nil, swaps more mocks in the same
+// step, those of the admin API's persistent store: see [vlatte.Swap]. With no file to load and none loaded, load calls
+// no swap.
+func (l *fileLoader) load(app *Server, swap vlatte.Swap[*Mock]) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	return l.loadLocked(app)
+	return l.loadLocked(app, swap)
 }
 
 // loadWith adds dir to the directories of saved mocks, and loads: a dir whose files fail to load is left out again.
@@ -37,7 +39,7 @@ func (l *fileLoader) loadWith(app *Server, dir string) error {
 		l.saved = append(l.saved, dir)
 	}
 
-	err := l.loadLocked(app)
+	err := l.loadLocked(app, nil)
 	if err != nil && !known {
 		l.saved = slices.DeleteFunc(l.saved, func(d string) bool { return d == dir })
 	}
@@ -45,7 +47,7 @@ func (l *fileLoader) loadWith(app *Server, dir string) error {
 	return err
 }
 
-func (l *fileLoader) loadLocked(app *Server) error {
+func (l *fileLoader) loadLocked(app *Server, swap vlatte.Swap[*Mock]) error {
 	var files []string
 
 	seen := make(map[string]bool)
@@ -97,7 +99,7 @@ func (l *fileLoader) loadLocked(app *Server) error {
 		builders = append(builders, FromFile(file))
 	}
 
-	scope, err := app.Remock(context.Background(), l.scope, builders...)
+	scope, err := app.RemockWith(context.Background(), l.scope, swap, builders...)
 	if err != nil {
 		return fmt.Errorf("loader: %w", err)
 	}
@@ -116,11 +118,12 @@ func (app *Server) Reload() error {
 
 // load loads the mock files, and the mocks of the admin API's persistent store, if any, all or nothing.
 func (app *Server) load() error {
-	files := func() error { return app.loader.load(app) }
 	if app.adminStore == nil {
-		return files()
+		return app.loader.load(app, nil)
 	}
 
 	// A mock of the persistent store gives way to a mock file's mock of its id.
-	return app.adminStore.Reload(context.Background(), files)
+	return app.adminStore.Reload(context.Background(), func(swap vlatte.Swap[*Mock]) error {
+		return app.loader.load(app, swap)
+	})
 }

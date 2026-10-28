@@ -322,6 +322,69 @@ func TestStore_APersistentMockGivesWayToAMockOfItsID(t *testing.T) {
 	require.Equal(t, map[string]bool{"x": false, "y": true}, durable.held(), "a reload never writes")
 }
 
+func TestStore_AReloadSwapsItsMocksWithTheFilesMocks(t *testing.T) {
+	// The server swaps the mocks of its files and those of the persistent store in one step: swap tells it which of
+	// the store's mocks to drop and to add, given the files' mocks it adds and those it removes.
+	ctx := t.Context()
+	serving, durable := vlatte.NewStore[*docMock](), newDocStore()
+	s := NewStore[*docMock](serving, durable, nil)
+
+	// The last load's mock file mocks: f goes with the reload, and k stays.
+	f, k := newDocMock("f", true), newDocMock("k", true)
+	require.NoError(t, serving.Store(ctx, f, k))
+
+	a := newDocMock("a", true)
+	require.NoError(t, s.Store(ctx, a))
+
+	durable.docs = map[string]bool{"a": true, "f": true, "g": true, "k": true}
+
+	g := newDocMock("g", true)
+	err := s.Reload(ctx, func(swap vlatte.Swap[*docMock]) error {
+		drop, add, err := swap([]*docMock{g}, []*docMock{f})
+		require.NoError(t, err)
+		require.Equal(t, []*docMock{a}, drop)
+		require.Equal(t, []string{"a", "f"}, ids(add), "g and k give way to the file mocks of their ids")
+
+		return serving.Replace(ctx, append([]*docMock{f}, drop...), append([]*docMock{g}, add...)...)
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"k", "g", "a", "f"}, servedIDs(t, s))
+
+	// The mocks it serves now are the persistent store's: the admin API's changes to them reach it.
+	reloaded, err := s.Pick(ctx, "a")
+	require.NoError(t, err)
+	require.NoError(t, s.Replace(ctx, []*docMock{reloaded}))
+	require.Equal(t, map[string]bool{"f": true, "g": true, "k": true}, durable.held())
+}
+
+func TestStore_ASwapTheServerRefusesKeepsItsMocks(t *testing.T) {
+	// The server's store refuses the swap: the mocks the server served from the persistent store stay, and stay its.
+	ctx := t.Context()
+	serving, durable := vlatte.NewStore[*docMock](), newDocStore()
+	s := NewStore[*docMock](serving, durable, nil)
+
+	a := newDocMock("a", true)
+	require.NoError(t, s.Store(ctx, a))
+
+	durable.docs = map[string]bool{"a": true, "b": true}
+
+	errRefused := errors.New("refused")
+	err := s.Reload(ctx, func(swap vlatte.Swap[*docMock]) error {
+		_, _, err := swap(nil, nil)
+		require.NoError(t, err)
+
+		return errRefused
+	})
+	require.ErrorIs(t, err, errRefused)
+
+	require.Equal(t, []string{"a"}, servedIDs(t, s))
+	require.Zero(t, a.closed.Load())
+
+	require.NoError(t, s.Replace(ctx, []*docMock{a}))
+	require.Equal(t, map[string]bool{"b": true}, durable.held(), "a is still the persistent store's")
+}
+
 func TestStore_AReloadWhoseOtherSourcesFailChangesNothing(t *testing.T) {
 	// The server's mock files fail to load: the persistent store's changes don't take effect either.
 	ctx := t.Context()
@@ -334,7 +397,7 @@ func TestStore_AReloadWhoseOtherSourcesFailChangesNothing(t *testing.T) {
 	durable.docs = map[string]bool{"b": true}
 
 	errFiles := errors.New("a mock file has problems")
-	err := s.Reload(ctx, func() error { return errFiles })
+	err := s.Reload(ctx, func(vlatte.Swap[*docMock]) error { return errFiles })
 
 	require.ErrorIs(t, err, errFiles)
 	require.Equal(t, []string{"a"}, servedIDs(t, s))

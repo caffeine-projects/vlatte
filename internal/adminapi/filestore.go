@@ -165,7 +165,7 @@ func (s *FileStore[M]) Pick(_ context.Context, id string) (M, error) {
 		return zero, vlatte.ErrNotFound
 	}
 
-	return s.load(path)
+	return s.load(id, path)
 }
 
 // PickAll builds the mocks of every file, in file name order. When a file has problems, it builds none, and reports
@@ -176,13 +176,13 @@ func (s *FileStore[M]) PickAll(context.Context) ([]M, error) {
 		return nil, err
 	}
 
-	paths := slices.Sorted(maps.Values(held))
+	ids := slices.SortedFunc(maps.Keys(held), func(a, b string) int { return strings.Compare(held[a], held[b]) })
 
 	var errs []error
 
-	mocks := make([]M, 0, len(paths))
-	for _, path := range paths {
-		mock, err := s.load(path)
+	mocks := make([]M, 0, len(ids))
+	for _, id := range ids {
+		mock, err := s.load(id, held[id])
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -327,15 +327,28 @@ func (s *FileStore[M]) check(mock M) ([]byte, error) {
 	return data, nil
 }
 
-// load builds the mock of the file at path.
-func (s *FileStore[M]) load(path string) (M, error) {
+// load builds the mock of id from the file at path. A mock of another ID, such as one of a document without an id, is
+// refused: the store finds a mock's file by its name, so it would leave the file behind on a delete or an edit.
+func (s *FileStore[M]) load(id, path string) (M, error) {
+	var zero M
+
 	format, _ := config.Format(filepath.Ext(path))
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		var zero M
 		return zero, fmt.Errorf("server: admin store: %w", err)
 	}
 
-	return s.decode("file "+path, data, format)
+	mock, err := s.decode("file "+path, data, format)
+	if err != nil {
+		return zero, err
+	}
+
+	if mock.ID() != id {
+		closeMocks([]M{mock})
+		return zero, fmt.Errorf("server: admin store: file %s holds mock %q: its id must be %q, as its name says", path,
+			mock.ID(), id)
+	}
+
+	return mock, nil
 }
