@@ -137,6 +137,11 @@ export default defineConfig({
   ],
   markdown: {
     theme: { light: 'github-light', dark: 'github-dark' },
+    // Inline code shows Go templates, such as `{{ .Request.Body }}`: Vue must not read them as its own.
+    config(md) {
+      const codeInline = md.renderer.rules.code_inline!
+      md.renderer.rules.code_inline = (...args) => codeInline(...args).replace(/^<code/, '<code v-pre')
+    },
   },
   themeConfig: {
     // The navbar shows the small cut of the mark, and the wordmark the theme's Layout adds after it.
