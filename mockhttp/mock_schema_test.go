@@ -904,6 +904,14 @@ func instance(t require.TestingT, doc any) any {
 	return v
 }
 
+func TestJSONSchema_IDIsTheAddressTheDocsServe(t *testing.T) {
+	// Mock files and editors name the schema by its $id: the address the docs site serves it at, which
+	// docs/scripts/prepare.mjs copies it to. A schema whose $id names another address points them at nothing.
+	_, raw := loadJSONSchema(t)
+
+	require.Equal(t, "https://caffeine-projects.github.io/vlatte/schemas/http.schema.json", raw["$id"])
+}
+
 func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 	// Every key the decoder reads is documented for editors, and nothing else is.
 	_, raw := loadJSONSchema(t)

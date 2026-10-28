@@ -1,0 +1,102 @@
+/*
+  The colors of the Admin pages, internal/admin/handler/layout_head.html, which takes them from docs/brand/README.md:
+  keep the two in step. The type is the brand's: Sora, and JetBrains Mono for code.
+*/
+:root {
+  --vl-bg: #f5ede2;
+  --vl-fg: #2c1a12;
+  --vl-muted: #7a6355;
+  --vl-line: #e5d6c3;
+  --vl-panel: #fffaf3;
+  --vl-accent: #b4471c;
+  --vl-accent-soft: #fce6c4;
+  --vl-danger: #b42318;
+  --vl-ok: #2f7d32;
+  --vl-brand-v: #d9622f;
+
+  --vp-font-family-base: 'Sora', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --vp-font-family-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.dark {
+  --vl-bg: #17100c;
+  --vl-fg: #fff3e0;
+  --vl-muted: #b9a493;
+  --vl-line: #3a2a20;
+  --vl-panel: #221812;
+  --vl-accent: #f2a93b;
+  --vl-accent-soft: #3d2710;
+  --vl-danger: #f87171;
+  --vl-ok: #4ade80;
+}
+
+:root,
+.dark {
+  --vp-c-bg: var(--vl-bg);
+  --vp-c-bg-alt: var(--vl-panel);
+  --vp-c-bg-elv: var(--vl-panel);
+  --vp-c-bg-soft: var(--vl-panel);
+
+  --vp-c-text-1: var(--vl-fg);
+  --vp-c-text-2: var(--vl-muted);
+  --vp-c-text-3: var(--vl-muted);
+
+  --vp-c-divider: var(--vl-line);
+  --vp-c-border: var(--vl-line);
+  --vp-c-gutter: var(--vl-line);
+
+  --vp-c-brand-1: var(--vl-accent);
+  --vp-c-brand-2: var(--vl-brand-v);
+  --vp-c-brand-3: var(--vl-accent);
+  --vp-c-brand-soft: var(--vl-accent-soft);
+
+  --vp-c-tip-1: var(--vl-accent);
+  --vp-c-tip-soft: var(--vl-accent-soft);
+  --vp-c-danger-1: var(--vl-danger);
+  --vp-c-success-1: var(--vl-ok);
+
+  --vp-nav-bg-color: var(--vl-panel);
+  --vp-sidebar-bg-color: var(--vl-panel);
+  --vp-code-block-bg: var(--vl-panel);
+  --vp-code-bg: var(--vl-accent-soft);
+
+  --vp-button-brand-bg: var(--vl-accent);
+  --vp-button-brand-hover-bg: var(--vl-brand-v);
+  --vp-button-brand-active-bg: var(--vl-accent);
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-active-border: transparent;
+
+  --vp-home-hero-name-color: var(--vl-fg);
+}
+
+.dark {
+  /* Amber on a dark surface takes dark text, as the Admin's dark accents do. */
+  --vp-button-brand-text: var(--vl-bg);
+  --vp-button-brand-hover-text: var(--vl-bg);
+  --vp-button-brand-active-text: var(--vl-bg);
+}
+
+/* The wordmark: Sora 700, -0.03em, a terracotta v. */
+.vl-wordmark {
+  margin-left: 8px;
+  font-weight: 700;
+  font-size: 19px;
+  letter-spacing: -0.03em;
+  color: var(--vl-fg);
+}
+
+.vl-wordmark span,
+.VPHero .name .vl-v {
+  color: var(--vl-brand-v);
+}
+
+.VPHero .name {
+  letter-spacing: -0.03em;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: -0.02em;
+}

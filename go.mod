@@ -6,6 +6,7 @@ ignore (
 	./.idea
 	./.local
 	./.vscode
+	./docs/node_modules
 )
 
 tool mvdan.cc/gofumpt
