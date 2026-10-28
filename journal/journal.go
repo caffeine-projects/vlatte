@@ -39,6 +39,14 @@ var (
 	ErrNoRequestPatterns = errors.New("journal: the server takes no request patterns")
 )
 
+// _closedChan is the channel Changed returns once nothing will change.
+var _closedChan = func() chan struct{} {
+	c := make(chan struct{})
+	close(c)
+
+	return c
+}()
+
 // Options configures a [Journal].
 type Options struct {
 	// Dir is where the journal keeps its files, across restarts. Empty keeps them in a temporary directory, which
@@ -80,6 +88,10 @@ type Journal struct {
 	rows     []journalRow
 	index    journalIndex
 	failures int
+
+	cleared uint64        // the last sequence number before the journal's latest start
+	trimmed uint64        // the newest sequence number trim dropped since then, 0 for none
+	changed chan struct{} // closed on the next change, made by the first caller of Changed to wait for it
 }
 
 // New opens the journal of o.Dir, with the entries it holds, or creates it. One journal at a time keeps its
@@ -222,6 +234,70 @@ func (j *Journal) Count(ctx context.Context, q Query, filters ...Filter) (int, e
 	return page.Count, err
 }
 
+// Last returns the sequence number of the newest entry appended, which the next entry's exceeds: a [Query] with it
+// as After selects the entries appended since. It is 0 for a journal that never kept one, and for a nil journal.
+func (j *Journal) Last() uint64 {
+	if j == nil {
+		return 0
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	return j.seq
+}
+
+// Cleared returns the sequence number of the last entry before the journal's latest start, of which it holds none:
+// the newest one when [Journal.Clear] last cleared it, or, for a journal that holds none of the entries of its
+// directory before the oldest it loaded, the one before that. It is 0 for a journal that started empty and was never
+// cleared, and for a nil journal.
+func (j *Journal) Cleared() uint64 {
+	if j == nil {
+		return 0
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	return j.cleared
+}
+
+// Trimmed returns the sequence number of the newest entry the journal dropped to keep MaxEntries since its latest
+// start, as [Journal.Cleared] tells it, or 0 when it dropped none. A query of the entries after one up to it misses
+// those it dropped. It is 0 for a nil journal.
+func (j *Journal) Trimmed() uint64 {
+	if j == nil {
+		return 0
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	return j.trimmed
+}
+
+// Changed returns a channel closed once the journal changes: an entry is appended, or the journal is cleared or
+// closed. A caller waiting for an entry queries the journal again once it is closed, and calls Changed again to wait
+// for the next change. A nil or closed journal returns a closed channel: a query tells why.
+func (j *Journal) Changed() <-chan struct{} {
+	if j == nil {
+		return _closedChan
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	if j.closed {
+		return _closedChan
+	}
+
+	if j.changed == nil {
+		j.changed = make(chan struct{})
+	}
+
+	return j.changed
+}
+
 // Clear removes every entry. Sequence numbers go on from the last one given while the journal is open: a journal
 // opened on an empty directory starts them over. A file it can't remove yet, such as one a query holds open where the
 // system keeps it, it logs and removes later: its entries are gone either way.
@@ -270,6 +346,8 @@ func (j *Journal) Clear() error {
 	j.active, j.size, j.count = f, 0, 0
 	j.rows = nil
 	j.index = newJournalIndex()
+	j.cleared, j.trimmed = j.seq, 0
+	j.change()
 
 	return nil
 }
@@ -288,6 +366,7 @@ func (j *Journal) Close() error {
 	}
 
 	j.closed = true
+	j.change()
 
 	active := j.files[len(j.files)-1]
 
@@ -303,6 +382,14 @@ func (j *Journal) Close() error {
 	j.release()
 
 	return err
+}
+
+// change wakes the callers waiting on Changed. The journal's lock is held.
+func (j *Journal) change() {
+	if j.changed != nil {
+		close(j.changed)
+		j.changed = nil
+	}
 }
 
 // append writes line, the line of e, or fails with encodeErr, the error encoding it, under the lock. It returns the
@@ -362,6 +449,7 @@ func (j *Journal) append(e *Entry, line []byte, encodeErr error) (*sealedSegment
 	j.count++
 
 	j.trim()
+	j.change()
 
 	if j.count >= j.perSegment || j.size >= _segmentBytes {
 		return j.rotate(), nil
@@ -497,6 +585,9 @@ func (j *Journal) load() error {
 	j.trim()
 	j.index.compact(j.first())
 
+	// The entries before those it holds are gone, whatever dropped them: the journal starts after them.
+	j.cleared, j.trimmed = j.first()-1, 0
+
 	// The segments it scanned and keeps get their sidecars: the next journal reads those.
 	for n, rows := range scanned {
 		if slices.Contains(j.files, n) {
@@ -572,6 +663,7 @@ func (j *Journal) trim() {
 	if j.maxEntries > 0 && len(j.rows) > j.maxEntries {
 		dropped := len(j.rows) - j.maxEntries
 		j.index.drop(j.rows[:dropped])
+		j.trimmed = j.rows[dropped-1].Seq
 
 		// A query reads the rows it was given without the lock: they are never changed, only left behind.
 		j.rows = j.rows[dropped:]

@@ -62,3 +62,27 @@ func TestJournal_AHeaderNamedAsAskedComesFirst(t *testing.T) {
 		require.Equal(t, 16, count, name)
 	}
 }
+
+func TestJournal_AfterSelectsWhatCameSinceAPointInTheJournal(t *testing.T) {
+	// A test that shares a server counts the requests it sent, and none of those before: it takes the newest sequence
+	// number before it sends them, and selects the entries after it. Count selects by it too, unlike Before, so a
+	// count is of the same entries Find returns. A Clear between keeps it right, as numbers go on.
+	j := newJournal(t, journal.Options{})
+	require.NoError(t, j.Append(entry("a")))
+	require.NoError(t, j.Append(entry("b")))
+
+	mark := j.Last()
+	require.Equal(t, uint64(2), mark)
+
+	require.NoError(t, j.Append(entry("c")))
+	require.NoError(t, j.Append(entry("d", func(e *journal.Entry) { e.Method = "POST" })))
+
+	require.Equal(t, []string{"d", "c"}, find(t, j, journal.Query{After: mark}))
+	require.Equal(t, []string{"c"}, find(t, j, journal.Query{After: mark, Method: match.Equal("GET")}))
+	require.Empty(t, find(t, j, journal.Query{After: j.Last()}))
+
+	mark = j.Last()
+	require.NoError(t, j.Clear())
+	require.NoError(t, j.Append(entry("e")))
+	require.Equal(t, []string{"e"}, find(t, j, journal.Query{After: mark}))
+}

@@ -43,6 +43,10 @@ type Query struct {
 	// Before selects the entries with a lower sequence number, those that follow a page Find returned, which its Next
 	// names. Count leaves it out.
 	Before uint64
+
+	// After selects the entries with a greater sequence number, those appended since the entry it names, such as the
+	// newest one [Journal.Last] returned before a test sent its requests. Count selects by it too.
+	After uint64
 }
 
 // Page is a page of the entries a query selects, the newest first. Count is the number of entries the query
@@ -150,6 +154,10 @@ func acceptedValues[K comparable](ctx context.Context, m vlatte.Matcher, values 
 
 // keeps tells whether row, a candidate, is one q selects by the fields rows hold that the index doesn't.
 func (q *Query) keeps(ctx context.Context, row *journalRow) (bool, error) {
+	if row.Seq <= q.After {
+		return false, nil
+	}
+
 	if !q.Since.IsZero() && row.Time.Before(q.Since) {
 		return false, nil
 	}

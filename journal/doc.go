@@ -36,9 +36,9 @@
 //
 // # Queries
 //
-// A [Query] selects entries by those fields, by the full target, by time, and by headers and body; [Filter] values,
-// such as the request patterns of a protocol, narrow them further. A query runs in steps, each reading less than the
-// one before:
+// A [Query] selects entries by those fields, by the full target, by time, by sequence number, and by headers and
+// body; [Filter] values, such as the request patterns of a protocol, narrow them further. A query runs in steps, each
+// reading less than the one before:
 //
 //  1. It copies the rows, and the values of the indexed fields it selects by, then lets go of the journal.
 //  2. It runs each matcher of an indexed field once per value the journal holds, not once per entry, and takes the
@@ -48,18 +48,23 @@
 //     from disk.
 //
 // So [Journal.Count] of a query of indexed fields alone reads no file. [Journal.Find] returns a [Page]: the entries,
-// the count of all the query selects, and, for a query with a Limit, where the next page starts.
+// the count of all the query selects, and, for a query with a Limit, where the next page starts. A query's After,
+// such as the [Journal.Last] of a moment before, selects the entries appended since.
 //
 // # Writes and reads
 //
 // Append is synchronous: an entry is in the journal once Append returns. The mock servers append a request's entry as
 // they end its answer, so a test checks it right after the request returns. Queries match and read the copy they took
-// without holding the journal, so appends don't wait on them. A journal is safe for concurrent use.
+// without holding the journal, so appends don't wait on them. A journal is safe for concurrent use. [Journal.Changed]
+// wakes a caller waiting for an entry on the next append, clear or close, so it queries again rather than poll.
 //
 // # Retention and recovery
 //
 // The journal keeps the newest MaxEntries entries, all of them for 0, and MaxBodySize bytes of each body: an entry
 // whose body lost the rest says so. Dropping the oldest entries deletes the segments that hold none of the newest.
+// [Journal.Trimmed] tells the newest entry dropped so, and [Journal.Cleared] the last one before the journal's latest
+// start, a clear or the oldest entry it loaded: a count of the entries after a point is whole when neither reaches
+// past it.
 //
 // A crash may cut a line short, or leave a file half written: the next journal of the directory leaves the line out,
 // logs it, and removes the file. [Journal.Clear] writes a tombstone, journal.clear, before it deletes the segments, so
