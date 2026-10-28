@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -125,6 +126,17 @@ type Config struct {
 	// they go through the proxy the transport the server makes picks, Via or the proxy of the environment.
 	Transport http.RoundTripper
 
+	// OutboundAllow and OutboundDeny limit the addresses the server connects to, for its proxy replies, the recording
+	// target, the forward proxy and its tunnels, and webhooks: an address in OutboundDeny is refused, and so is one
+	// outside OutboundAllow when it isn't empty. Deny wins, and either one refuses the unspecified address, 0.0.0.0 or
+	// ::, which reaches this host. They check the address after DNS resolution, so a host name that resolves into a
+	// refused range is refused, and through a proxy on the way, Via or the proxy of the environment, they check the
+	// proxy's. An IPv4 range doesn't hold IPv6 addresses: deny ::1/128 with 127.0.0.0/8. A refused connection fails
+	// with [vlatte.ErrOutboundRefused]. Empty, the default, refuses nothing. A transport of the caller's, such as
+	// [Config.Transport], dials on its own, and they don't apply.
+	OutboundAllow []netip.Prefix
+	OutboundDeny  []netip.Prefix
+
 	// proxyAll is the proxy reply of the setting proxy_all, which answers the requests no mock matches, without a
 	// mock: see Server.proxyAll. Code mocks ProxyAll itself.
 	proxyAll *proxyDef
@@ -180,6 +192,8 @@ func (c *Config) Apply(conf *Config) error {
 	conf.UseHTTPS = c.UseHTTPS
 	conf.MockFileHandlers = c.MockFileHandlers
 	conf.Transport = c.Transport
+	conf.OutboundAllow = c.OutboundAllow
+	conf.OutboundDeny = c.OutboundDeny
 	conf.HeaderNamesToRedact = c.HeaderNamesToRedact
 	conf.proxyAll = c.proxyAll
 
@@ -514,6 +528,17 @@ func (cb *ConfigBuilder) MockFileHandlers(handlers ...MockFileHandler) *ConfigBu
 // Transport sets the transport of what the server sends. See Config.Transport.
 func (cb *ConfigBuilder) Transport(rt http.RoundTripper) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.Transport = rt })
+}
+
+// OutboundAllow adds the ranges the server may connect to: once set, it refuses every other address. See
+// [Config.OutboundAllow].
+func (cb *ConfigBuilder) OutboundAllow(prefixes ...netip.Prefix) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.OutboundAllow = append(conf.OutboundAllow, prefixes...) })
+}
+
+// OutboundDeny adds ranges the server refuses to connect to, such as 169.254.0.0/16. See [Config.OutboundAllow].
+func (cb *ConfigBuilder) OutboundDeny(prefixes ...netip.Prefix) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.OutboundDeny = append(conf.OutboundDeny, prefixes...) })
 }
 
 // TLSConfig defines custom TLS configurations.

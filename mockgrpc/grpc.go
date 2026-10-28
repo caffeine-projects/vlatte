@@ -175,7 +175,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	app.logger = newLogger(conf, logs)
-	app.webhooks = httpx.NewWebhookTransport()
+	app.webhooks = httpx.NewWebhookTransport(conf.OutboundAllow, conf.OutboundDeny)
 
 	res, err := newResolver(conf)
 	if err != nil {
