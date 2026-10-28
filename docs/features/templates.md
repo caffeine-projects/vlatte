@@ -46,7 +46,7 @@ Templates read:
 | `.Server.URL` | The server's base URL. |
 | `.Parameters.Get "key"`, `.Parameters.Has "key"` | The server's parameters. |
 | `.Data` | The map set with `m.SetData`. |
-| `.Provided.<key>` | What `Setup().TemplateDataProviders(...)` provide. |
+| `.Provided.<key>` | What `Setup().TemplateDataProviders(providers)` provide. |
 | `.Extra` | The reply's `template.data`, or `SetTemplateData` in Go. Webhooks don't have it. |
 | `.Scenarios.State "name"` | The state of a [scenario](/features/scenarios). |
 | `.Scenarios.StateOf "name" "key"` | The state of the instance of a [scenario](/features/scenarios) of a key. |
@@ -139,7 +139,7 @@ A gRPC mock renders its messages with `Template(texts...)`, `template` in a [gRP
 |---|---|
 | `.Request.Message.<field>` | The request, by the field names of the `.proto` file. |
 | `.Request.Header` | The call's metadata. |
-| `.Parameters`, `.Data`, `.Provided.<key>` | As for HTTP: `m.SetData` sets `.Data`, and `Setup().TemplateDataProviders(...)` provide `.Provided`. |
+| `.Parameters`, `.Data`, `.Provided.<key>` | As for HTTP: `m.SetData` sets `.Data`, and `Setup().TemplateDataProviders(providers)` provide `.Provided`. |
 | `.Scenarios.State "name"`, `.Scenarios.StateOf "name" "key"` | The state of a [scenario](/features/scenarios). |
 
 ```go

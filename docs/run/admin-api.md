@@ -128,6 +128,6 @@ mockhttp.Setup().AdminStore(func(app *mockhttp.Server) (vlatte.Store[*mockhttp.M
 })
 ```
 
-A gRPC server takes a store the same way, `mockgrpc.Setup().Admin(admin.MustNew()).AdminStore(mockgrpc.FileStore(dir))`, with `mockgrpc.EncodeMock` and `mockgrpc.DecodeMock` for a store of yours. Its relative `dir` starts at its root directory. The `vlatte` command keeps the gRPC server's admin mocks in memory.
+A gRPC server takes a store the same way, `mockgrpc.Setup().Admin(admin.MustNew()).AdminStore(mockgrpc.FileStore(dir))`, with `mockgrpc.EncodeMock` and `mockgrpc.DecodeMock` for a store of yours. Its relative `dir` starts at its root directory.
 
 `POST /mocks/save` is apart from the store: it exports the admin API's mocks as mock files to commit, which then serve in place of the store's copies.

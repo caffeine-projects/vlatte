@@ -91,6 +91,7 @@ const sidebar: DefaultTheme.Sidebar = {
     {
       text: 'Run',
       items: [
+        { text: 'Overview', link: '/run/' },
         { text: 'CLI', link: '/run/cli' },
         { text: 'Configuration', link: '/run/configuration' },
         { text: 'Docker', link: '/run/docker' },
@@ -153,7 +154,7 @@ export default defineConfig({
       { text: 'HTTP', link: '/http/', activeMatch: '/http/' },
       { text: 'gRPC', link: '/grpc/', activeMatch: '/grpc/' },
       { text: 'Features', link: '/features/', activeMatch: '/features/' },
-      { text: 'Run', link: '/run/cli', activeMatch: '/run/' },
+      { text: 'Run', link: '/run/', activeMatch: '/run/' },
       { text: 'Reference', link: '/reference/', activeMatch: '/reference/' },
     ],
     sidebar,

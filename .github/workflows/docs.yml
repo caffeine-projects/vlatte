@@ -15,8 +15,7 @@ on:
   pull_request:
     paths:
       - 'docs/**'
-      - '**/example_test.go'
-      - 'cmd/vlatte/**'
+      - '**.go'
       - 'mockhttp/schema/http.schema.json'
       - 'mockgrpc/schema/grpc.schema.json'
       - 'internal/admin/handler/openapi.yaml'
@@ -24,7 +23,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A push to main never cancels a deploy that started.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -37,6 +37,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
+        persist-credentials: false
         # The pages show when each was last updated, from git.
         fetch-depth: 0
 
