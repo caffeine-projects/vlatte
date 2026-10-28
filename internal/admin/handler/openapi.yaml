@@ -918,7 +918,7 @@ components:
           type: string
         reachable:
           type: boolean
-          description: False when no move of a mock leads to the state from `started`, so only setting it gets there.
+          description: False when no path of mock moves leads to the state from `started`, so requests get there only after the scenario is set to it or to another such state.
       additionalProperties: false
     ScenarioTransition:
       type: object
