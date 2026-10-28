@@ -937,10 +937,11 @@ The `vlatte` command serves the admin API by default: `admin: false` (`--admin=f
 | `GET /events` | Streams what the server serves as it happens, as [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html): requests a mock answered, requests no mock matched, proxied requests, warnings, errors and [scenario](#scenarios) moves. Nothing is kept: the [journal](#request-journal) keeps the requests. `curl -N <admin>/events` follows it. |
 | `GET /logs` | Streams the server's log lines, as it writes them, as Server-Sent Events. A server given its own `Logger` streams none. |
 | `POST /recording`, `GET /recording`, `DELETE /recording` | Starts a [recording](#recording-and-playback) with the keys of the `record` section, counts its calls, and stops it, listing the files it wrote. |
+| `GET /` | The admin's homepage: what the mock server serves and what it served, its mocks, requests, scenarios and recording, live, with links to the other pages. Every page has a navbar with a light and dark theme toggle. |
 | `GET /recorder` | A page that records a service from a browser. |
 | `GET /scenario-board` | A page that shows and moves [scenarios](#scenarios) from a browser, live. |
 | `POST /mcp` | The [MCP](#mcp) endpoint, when the admin API serves MCP; `501` otherwise. |
-| `GET /`, `GET /docs`, `GET /openapi` | A page that renders the OpenAPI document, at the root and at `/docs`, and the document. The page loads [Scalar](https://scalar.com) from a CDN, so it needs internet: the version vlatte pins, checked against its hash, or a newer one that `admin.DocsVersion("1.80.0")` (`admin.docs_version`, `--admin-docs-version` for the command) names. |
+| `GET /docs`, `GET /openapi` | A page that renders the OpenAPI document, and the document. The page loads [Scalar](https://scalar.com) from a CDN, so it needs internet: the version vlatte pins, checked against its hash, or a newer one that `admin.DocsVersion("1.80.0")` (`admin.docs_version`, `--admin-docs-version` for the command) names. |
 
 **Formats.** Bodies are JSON, or YAML with `Content-Type: application/yaml`. Answers follow `Accept`: JSON, or YAML when it is preferred. A relative `body_file` in a mock sent to the admin API opens from the server's working directory, as `GET /mocks/{id}` writes it.
 
