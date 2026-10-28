@@ -392,6 +392,10 @@ func TestRun_AGRPCAdminDirOfAWorkingDirectoryThatIsGoneFailsTheRun(t *testing.T)
 	t.Chdir(dir)
 	require.NoError(t, os.Remove(dir))
 
+	if _, err := os.Getwd(); err == nil {
+		t.Skip("the OS still names a working directory that is gone, as macOS does")
+	}
+
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
