@@ -3,6 +3,7 @@ package adminapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 	"slices"
@@ -160,15 +161,25 @@ func (s *Store[M]) Health(ctx context.Context) error {
 }
 
 // Reload serves what the persistent store holds now, in place of the mocks it served from it, in one step: the
-// changes made to it directly take effect. A mock whose ID a mock the server has from elsewhere holds, such as a mock
-// file's, gives way to it, as mocks the admin API adds do. When it fails, the server serves what it did.
-func (s *Store[M]) Reload(ctx context.Context) error {
+// changes made to it directly take effect. load, when not nil, loads the server's other sources, such as its mock
+// files, in between: after Reload reads the persistent store, and before it serves its mocks. A mock whose ID a mock
+// the server has from elsewhere holds, such as a mock file's, gives way to it, as mocks the admin API adds do. Reload is
+// all or nothing: when the persistent store can't be read, load doesn't run, and when load fails, the server serves
+// what the persistent store gave it before.
+func (s *Store[M]) Reload(ctx context.Context, load func() error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	fresh, err := s.durable.PickAll(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("server: admin store: %w", err)
+	}
+
+	if load != nil {
+		if err := load(); err != nil {
+			closeMocks(fresh)
+			return err
+		}
 	}
 
 	served, err := s.serving.PickAll(ctx)

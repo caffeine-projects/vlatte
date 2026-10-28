@@ -281,7 +281,7 @@ func TestStore_ReloadServesWhatThePersistentStoreHolds(t *testing.T) {
 
 	durable.docs = map[string]bool{"a": false, "c": true}
 
-	require.NoError(t, s.Reload(ctx))
+	require.NoError(t, s.Reload(ctx, nil))
 
 	require.Equal(t, []string{"file", "a", "c"}, servedIDs(t, s))
 
@@ -312,7 +312,7 @@ func TestStore_APersistentMockGivesWayToAMockOfItsID(t *testing.T) {
 
 	durable.docs = map[string]bool{"x": false, "y": true}
 
-	require.NoError(t, s.Reload(ctx))
+	require.NoError(t, s.Reload(ctx, nil))
 
 	got, err := s.Pick(ctx, "x")
 	require.NoError(t, err)
@@ -320,6 +320,25 @@ func TestStore_APersistentMockGivesWayToAMockOfItsID(t *testing.T) {
 	require.Equal(t, []string{"x", "y"}, servedIDs(t, s))
 	require.Contains(t, logs.String(), `"mock":"x"`)
 	require.Equal(t, map[string]bool{"x": false, "y": true}, durable.held(), "a reload never writes")
+}
+
+func TestStore_AReloadWhoseOtherSourcesFailChangesNothing(t *testing.T) {
+	// The server's mock files fail to load: the persistent store's changes don't take effect either.
+	ctx := t.Context()
+	serving, durable := vlatte.NewStore[*docMock](), newDocStore()
+	s := NewStore[*docMock](serving, durable, nil)
+
+	a := newDocMock("a", true)
+	require.NoError(t, s.Store(ctx, a))
+
+	durable.docs = map[string]bool{"b": true}
+
+	errFiles := errors.New("a mock file has problems")
+	err := s.Reload(ctx, func() error { return errFiles })
+
+	require.ErrorIs(t, err, errFiles)
+	require.Equal(t, []string{"a"}, servedIDs(t, s))
+	require.Zero(t, a.closed.Load())
 }
 
 func TestStore_AReloadThatFailsChangesNothing(t *testing.T) {
@@ -333,7 +352,7 @@ func TestStore_AReloadThatFailsChangesNothing(t *testing.T) {
 	errDown := errors.New("database down")
 	durable.readErr = errDown
 
-	require.ErrorIs(t, s.Reload(ctx), errDown)
+	require.ErrorIs(t, s.Reload(ctx, nil), errDown)
 	require.Equal(t, []string{"a"}, servedIDs(t, s))
 	require.Zero(t, a.closed.Load())
 }
@@ -392,7 +411,7 @@ func TestStore_AReloadTheServerRefusesChangesNothing(t *testing.T) {
 
 			s := NewStore[*docMock](serving, durable, nil)
 
-			require.ErrorIs(t, s.Reload(ctx), errBroken)
+			require.ErrorIs(t, s.Reload(ctx, nil), errBroken)
 
 			all, err := serving.MemoryStore.PickAll(ctx)
 			require.NoError(t, err)
@@ -428,7 +447,7 @@ func TestStore_AMockPickedBeforeAReloadLeavesTheNewerOne(t *testing.T) {
 
 	picked := newDocMock("a", true)
 	require.NoError(t, s.Store(ctx, picked))
-	require.NoError(t, s.Reload(ctx))
+	require.NoError(t, s.Reload(ctx, nil))
 
 	newer, err := s.Pick(ctx, "a")
 	require.NoError(t, err)

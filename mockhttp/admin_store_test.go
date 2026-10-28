@@ -223,6 +223,26 @@ func TestFileStore_ResetKeepsWhatItHolds(t *testing.T) {
 	require.FileExists(t, filepath.Join(dir, "hello.mock.yaml"))
 }
 
+func TestFileStore_AReloadTheStoreFailsKeepsTheMockFilesAsTheyWere(t *testing.T) {
+	// A reload is all or nothing: the store fails, so the mock file edited meanwhile isn't served either.
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "mocks"), 0o700))
+
+	file := filepath.Join(root, "mocks", "x.yaml")
+	require.NoError(t, os.WriteFile(file, []byte("request: {method: GET, path: /x}\nresponse: {status: 200, body: first}\n"), 0o600))
+
+	m := adminServer(t, Setup().RootDir(root).MockFilePatterns("mocks/*.yaml").AdminStore(FileStore("admin")))
+
+	require.NoError(t, os.WriteFile(file, []byte("request: {method: GET, path: /x}\nresponse: {status: 200, body: edited}\n"), 0o600))
+	require.NoError(t, os.Mkdir(filepath.Join(root, "admin"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "admin", "bad.mock.yaml"), []byte("id: bad\nrequest: {methd: GET}\n"), 0o600))
+
+	require.ErrorContains(t, m.Reload(), "bad.mock.yaml")
+
+	_, body := do(t, http.MethodGet, m.URL("/x"), nil, nil)
+	require.Equal(t, "first", string(body))
+}
+
 func TestFileStore_RemovingMocksRemovesTheirFiles(t *testing.T) {
 	dir := t.TempDir()
 	m := adminServer(t, Setup().AdminStore(FileStore(dir)))

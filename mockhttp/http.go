@@ -485,9 +485,10 @@ func (app *Server) Logger() *zerolog.Logger {
 	return app.logger
 }
 
-// Reload loads the mocks of external sources, such as mock files, again.
+// Reload loads the mocks of external sources, such as mock files and the admin API's persistent store, again.
 // Each loader replaces the mocks it added before; mocks added in code are kept.
-// Mock files are swapped in one step, and stay as they were when a file has problems.
+// Mock files are swapped in one step, and stay as they were when a file has problems, or the persistent store can't be
+// read.
 func (app *Server) Reload() error {
 	return app.load()
 }
@@ -722,21 +723,23 @@ func (app *Server) onStart() error {
 }
 
 func (app *Server) load() error {
-	for _, loader := range app.loaders {
-		err := loader.Load(app)
-		if err != nil {
-			return err
+	loaders := func() error {
+		for _, loader := range app.loaders {
+			if err := loader.Load(app); err != nil {
+				return err
+			}
 		}
+
+		return nil
 	}
 
-	// After the mock files: a mock of the persistent store gives way to a mock file's mock of its id.
-	if app.adminStore != nil {
-		if err := app.adminStore.Reload(context.Background()); err != nil {
-			return fmt.Errorf("server: admin store: %w", err)
-		}
+	if app.adminStore == nil {
+		return loaders()
 	}
 
-	return nil
+	// A mock of the persistent store gives way to a mock file's mock of its id. When the store can't be read, the mock
+	// files stay as they were.
+	return app.adminStore.Reload(context.Background(), loaders)
 }
 
 // logOutput returns where the server writes its logs and its debug output: Config.LogOutput, or the standard output.
