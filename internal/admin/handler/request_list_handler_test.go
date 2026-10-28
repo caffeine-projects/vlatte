@@ -40,10 +40,34 @@ func TestListRequests(t *testing.T) {
 	res, body = send(t, request{method: http.MethodGet, url: url + "/requests", accept: "application/yaml"})
 	require.Equal(t, []string{"c", "b", "a"}, requestIDs(conforms(t, res, body, "RequestList")))
 
-	for _, params := range []string{"limit=-1", "limit=1001", "limit=x", "before=-1"} {
+	for _, params := range []string{"limit=-1", "limit=1001", "limit=x", "before=-1", "after=-1"} {
 		res, body = send(t, request{method: http.MethodGet, url: url + "/requests?" + params})
 		problem(t, res, body, http.StatusBadRequest, "invalid_parameter")
 	}
+}
+
+func TestListRequests_AMarkLeavesOutTheRequestsUpToIt(t *testing.T) {
+	// A client takes a mark before its test, and lists, queries or checks only the requests of its test with it.
+	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched))
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j})
+
+	res, body := send(t, request{method: http.MethodGet, url: url + "/requests?limit=0"})
+	doc := conforms(t, res, body, "RequestList")
+	require.Equal(t, int64(1), doc["mark"])
+
+	mark := strconv.FormatInt(doc["mark"].(int64), 10)
+	require.NoError(t, j.Append(entryOf("b", "GET", "/b", journal.OutcomeMatched)))
+
+	res, body = send(t, request{method: http.MethodGet, url: url + "/requests?after=" + mark})
+	doc = conforms(t, res, body, "RequestList")
+	require.Equal(t, []string{"b"}, requestIDs(doc))
+	require.Equal(t, int64(1), doc["count"])
+	require.Equal(t, int64(2), doc["mark"])
+
+	res, body = send(t, request{method: "QUERY", url: url + "/requests", body: `{"after": ` + mark + `, "path": "/a"}`})
+	require.Empty(t, requestIDs(conforms(t, res, body, "RequestList")))
+
+	require.Equal(t, int64(1), verified(t, url, `{"after": `+mark+`}`)["count"])
 }
 
 func TestListRequests_AClientThatLeftGetsNoAnswer(t *testing.T) {

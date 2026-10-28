@@ -75,6 +75,7 @@ var _routes = []struct {
 	{pattern: "QUERY /requests", lacking: "keep a journal of requests"},
 	{pattern: "DELETE /requests", lacking: "keep a journal of requests"},
 	{pattern: "GET /requests/{id}", lacking: "keep a journal of requests"},
+	{pattern: "QUERY /requests/verify", lacking: "keep a journal of requests"},
 	{pattern: "POST /mcp", lacking: "serve MCP"},
 }
 
@@ -120,6 +121,7 @@ var _operations = map[string]struct {
 	"QUERY /requests":          {serve: handler.QueryRequests, can: (*handler.Operations).HasJournal},
 	"DELETE /requests":         {serve: handler.ClearRequests, can: (*handler.Operations).HasJournal},
 	"GET /requests/{id}":       {serve: handler.GetRequest, can: (*handler.Operations).HasJournal},
+	"QUERY /requests/verify":   {serve: handler.VerifyRequests, can: (*handler.Operations).HasJournal},
 }
 
 // Server is the admin API of a mock server.
@@ -129,6 +131,7 @@ type Server struct {
 	auth    bool        // whether requests need credentials
 	logger  *zerolog.Logger
 	streams []func() // end the streams of Server-Sent Events routes
+	ops     *handler.Operations
 	handler http.Handler
 	mcp     *mcp.Server // nil when MCP is off
 
@@ -181,6 +184,7 @@ func New(opts Options, caps adminapi.Capabilities) (*Server, error) {
 	}
 
 	ops := handler.NewOperations(caps)
+	s.ops = ops
 
 	routes := map[string]http.Handler{
 		"GET /{$}":            handler.Home(),
@@ -330,6 +334,9 @@ func (s *Server) Close() error {
 	s.closed = true
 	srv, served := s.srv, s.served
 	s.mu.Unlock()
+
+	// An operation that waits, such as a check of the journal, never holds up Close.
+	s.ops.EndWaits()
 
 	if srv == nil {
 		// A server that never started may still serve MCP calls over stdio.

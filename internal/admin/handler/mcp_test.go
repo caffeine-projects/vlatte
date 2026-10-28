@@ -35,7 +35,7 @@ func TestNewMCP_ToolsAreTheOperationsTheServerCanDo(t *testing.T) {
 			// A gRPC server: mocks of code only, and a journal.
 			name: "a journal",
 			caps: adminapi.Capabilities{Journal: journalOf(t)},
-			want: append([]string{"clear_requests", "get_request", "list_requests", "query_requests"}, always...),
+			want: append([]string{"clear_requests", "get_request", "list_requests", "query_requests", "verify_requests"}, always...),
 		},
 		{
 			name: "everything",
@@ -47,7 +47,7 @@ func TestNewMCP_ToolsAreTheOperationsTheServerCanDo(t *testing.T) {
 			want: append([]string{
 				"add_mock", "clear_requests", "get_request", "list_requests", "list_scenarios", "mock_schema", "query_requests",
 				"recording_status", "reload_mocks", "replace_mock", "reset_scenario", "reset_scenarios", "save_mocks", "set_scenario",
-				"start_recording", "stop_recording", "validate_mock",
+				"start_recording", "stop_recording", "validate_mock", "verify_requests",
 			}, always...),
 		},
 	}
@@ -93,6 +93,7 @@ func TestNewMCP_ReadOnlyToolsSayTheyAre(t *testing.T) {
 
 	require.True(t, readOnly["list_mocks"])
 	require.True(t, readOnly["query_requests"])
+	require.True(t, readOnly["verify_requests"])
 	require.False(t, readOnly["add_mock"])
 	require.False(t, readOnly["reset"])
 }

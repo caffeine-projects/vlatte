@@ -86,12 +86,17 @@ func TestOperations_ACapabilityTheServerLacksIsNotSupported(t *testing.T) {
 		},
 		{
 			name:   "list the requests",
-			call:   func(ctx context.Context) error { _, err := ops.ListRequests(ctx, 1, 0); return err },
+			call:   func(ctx context.Context) error { _, err := ops.ListRequests(ctx, 1, 0, 0); return err },
 			detail: "this mock server can't keep a journal of requests",
 		},
 		{
 			name:   "query the requests",
 			call:   func(ctx context.Context) error { _, err := ops.QueryRequests(ctx, nil, "json"); return err },
+			detail: "this mock server can't keep a journal of requests",
+		},
+		{
+			name:   "verify the requests",
+			call:   func(ctx context.Context) error { _, err := ops.VerifyRequests(ctx, nil, "json"); return err },
 			detail: "this mock server can't keep a journal of requests",
 		},
 		{

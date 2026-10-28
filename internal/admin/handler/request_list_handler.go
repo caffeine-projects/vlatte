@@ -6,16 +6,16 @@ import (
 )
 
 // ListRequests answers the newest requests the server served: GET /requests. The limit and before parameters page
-// through them.
+// through them, and after, a mark, leaves out those up to it.
 func ListRequests(ops *Operations) http.Handler {
 	return negotiated(func(w http.ResponseWriter, r *http.Request) {
-		limit, before, err := pageOf(r)
+		limit, before, after, err := pageOf(r)
 		if err != nil {
 			fail(w, r, err)
 			return
 		}
 
-		list, err := ops.ListRequests(r.Context(), limit, before)
+		list, err := ops.ListRequests(r.Context(), limit, before, after)
 		answerRequests(w, r, list, err)
 	})
 }
@@ -33,14 +33,14 @@ func answerRequests(w http.ResponseWriter, r *http.Request, list RequestList, er
 	}
 }
 
-// pageOf returns the limit and before parameters of r, a page of GET /requests.
-func pageOf(r *http.Request) (int, uint64, error) {
-	limit, before := _requestsPage, uint64(0)
+// pageOf returns the limit, before and after parameters of r, a page of GET /requests.
+func pageOf(r *http.Request) (int, uint64, uint64, error) {
+	limit, before, after := _requestsPage, uint64(0), uint64(0)
 
 	if s := r.URL.Query().Get("limit"); s != "" {
 		n, err := strconv.Atoi(s)
 		if err != nil || !pageLimit(int64(n)) {
-			return 0, 0, invalidParameter("limit", s, _limitRule)
+			return 0, 0, 0, invalidParameter("limit", s, _limitRule)
 		}
 
 		limit = n
@@ -49,11 +49,20 @@ func pageOf(r *http.Request) (int, uint64, error) {
 	if s := r.URL.Query().Get("before"); s != "" {
 		n, err := strconv.ParseUint(s, 10, 64)
 		if err != nil {
-			return 0, 0, invalidParameter("before", s, "the next of a page")
+			return 0, 0, 0, invalidParameter("before", s, "the next of a page")
 		}
 
 		before = n
 	}
 
-	return limit, before, nil
+	if s := r.URL.Query().Get("after"); s != "" {
+		n, err := strconv.ParseUint(s, 10, 64)
+		if err != nil {
+			return 0, 0, 0, invalidParameter("after", s, "the mark of a list")
+		}
+
+		after = n
+	}
+
+	return limit, before, after, nil
 }

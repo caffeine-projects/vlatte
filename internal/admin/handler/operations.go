@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"context"
+	"errors"
+
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
@@ -29,7 +32,14 @@ type Operations struct {
 	pattern   adminapi.RequestPattern
 	matchers  *matchbuild.Registry
 	schema    []byte
+
+	// waits ends with EndWaits: an operation that waits, such as VerifyRequests, waits on it too.
+	waits    context.Context
+	endWaits context.CancelFunc
 }
+
+// errWaitEnded is the cause of the end of the waits EndWaits ends.
+var errWaitEnded = errors.New("handler: the admin API ended the wait: it is closing")
 
 // NewOperations returns the admin operations of the mock server of caps, which has its Mocks.
 func NewOperations(caps adminapi.Capabilities) *Operations {
@@ -38,7 +48,11 @@ func NewOperations(caps adminapi.Capabilities) *Operations {
 		matchers = matchbuild.MustNew()
 	}
 
+	waits, endWaits := context.WithCancelCause(context.Background())
+
 	return &Operations{
+		waits:     waits,
+		endWaits:  func() { endWaits(errWaitEnded) },
 		mocks:     storeMocks{mocks: caps.Mocks},
 		kind:      caps.Kind,
 		url:       caps.URL,
@@ -51,6 +65,10 @@ func NewOperations(caps adminapi.Capabilities) *Operations {
 		schema:    caps.MockSchema,
 	}
 }
+
+// EndWaits ends the waits of the operations in progress, and of those to come, as the admin API closes: their
+// clients get a closing problem rather than hold up Close.
+func (o *Operations) EndWaits() { o.endWaits() }
 
 // Builds reports whether the server builds mocks from documents, for [Operations.AddMock], [Operations.ValidateMock]
 // and [Operations.ReplaceMock].
@@ -70,6 +88,17 @@ func (o *Operations) HasMockSchema() bool { return o.schema != nil }
 
 // HasJournal reports whether the server keeps a journal of requests, for [Operations.ListRequests] and its siblings.
 func (o *Operations) HasJournal() bool { return o.journal != nil }
+
+// waiting returns ctx, which ends too with EndWaits, for an operation that waits, and the func that releases it.
+func (o *Operations) waiting(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	stop := context.AfterFunc(o.waits, func() { cancel(context.Cause(o.waits)) })
+
+	return ctx, func() {
+		stop()
+		cancel(nil)
+	}
+}
 
 // storeMocks does the operations on the mocks of a mock server.
 type storeMocks struct {
