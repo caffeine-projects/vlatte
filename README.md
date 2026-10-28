@@ -918,16 +918,41 @@ fmt.Println(m.AdminURL()) // http://127.0.0.1:8081
 
 A gRPC server serves the same admin API with `mockgrpc.Setup().Admin(admin.MustNew(...))`, with gRPC mock files, and recordings with the keys of its `grpc.record` section. An `Admin` serves one mock server. A server that doesn't ask for an admin API links neither it nor what it serves with.
 
-`admin.Use(middlewares...)` wraps every HTTP request of the admin API, `POST /mcp` included, in the middlewares given, the first outermost, such as one that checks an authentication header and answers `401` in place of the admin API. MCP over stdio doesn't go through them.
+`admin.Use(middlewares...)` wraps every HTTP request of the admin API, `POST /mcp` included, in the middlewares given, the first outermost, before the credentials are checked, so one can answer a CORS preflight, which carries none. MCP over stdio doesn't go through them.
+
+**Authentication.** `admin.BasicAuth(username, password)` and `admin.BearerToken(token)` ask every HTTP request of the admin API for credentials: the pages, `/openapi`, the streams, `POST /mcp` and unknown paths too. With both, a request passes with either. A request without them gets `401` with the code `unauthorized`, and `WWW-Authenticate` names the schemes taken. Only the Kubernetes probes, `/livez`, `/readyz` and `/startupz`, need none, as a probe that needs a secret turns a wrong one into a restart loop: they answer their status alone then, and a `503` that doesn't say why, which the server logs. `/health`, which says what the server serves, needs them.
+
+```go
+api := admin.MustNew(
+	admin.Addr(":8081"),
+	admin.BasicAuth("ops", os.Getenv("ADMIN_PASSWORD")),
+	admin.BearerToken(os.Getenv("ADMIN_TOKEN")),
+	admin.TLS(&tls.Config{Certificates: []tls.Certificate{cert}}),
+)
+```
+
+A browser shows its sign-in prompt for the admin pages, and sends what it was given with each of their requests and live streams. It sends no bearer token, so the prompt takes the token as the password, with any username. Basic has no sign-out: closing the browser forgets the credentials. A token goes in `Authorization: Bearer`, never in a query parameter. Credentials are compared in constant time, and `New` refuses empty ones, a username with `:`, control characters, and a token an `Authorization` header can't carry; its errors never quote them. Generate a token with `openssl rand -hex 32`.
+
+Basic and bearer credentials travel in plain text over HTTP: `admin.TLS(config)` serves HTTPS, and `AdminURL` starts with `https://`. The admin API logs a warning when it listens beyond the local host without credentials, or with credentials over plain HTTP.
 
 The `vlatte` command serves the admin API by default: `admin: false` (`--admin=false`, `VLATTE_ADMIN=false`) turns it off, and `admin.addr` (`--admin-addr`, `VLATTE_ADMIN_ADDR`) sets its address. Its gRPC server serves an admin API of its own, which `grpc.admin: false` (`--grpc-admin=false`) turns off and `grpc.admin.addr` (`--grpc-admin-addr`) places. These settings are the command's: a server made in Go ignores them, even in a `.vlatterc` it shares with the command, and serves an admin API only when its code asks for one.
+
+The command's credentials and certificate apply to both admin APIs. `admin.auth.username` with `admin.auth.password` asks for Basic, and `admin.auth.token` for a bearer token. The password and the token have no flag, as the command line shows to every user of the host: set them in the environment (`VLATTE_ADMIN_AUTH_PASSWORD`, `VLATTE_ADMIN_AUTH_TOKEN`), in a config file, or in a file that `admin.auth.password_file` or `admin.auth.token_file` names, such as a Docker or Kubernetes secret, whose trailing line break isn't part of it. `admin.tls.cert` and `admin.tls.key` (`--admin-tls-cert`, `--admin-tls-key`) serve HTTPS. `vlatte health` reads the same settings: with a certificate, it asks the admin API over HTTPS, and trusts that certificate alone.
+
+```sh
+docker run --rm -p 8080:8080 -p 8081:8081 \
+  -v "$PWD/secrets:/run/secrets:ro" -v "$PWD/certs:/certs:ro" \
+  -e VLATTE_ADMIN_AUTH_TOKEN_FILE=/run/secrets/admin_token \
+  -e VLATTE_ADMIN_TLS_CERT=/certs/admin.pem -e VLATTE_ADMIN_TLS_KEY=/certs/admin-key.pem \
+  vlatte:dev
+```
 
 | Route | What it does |
 |---|---|
 | `GET /health` | Answers once the admin API serves, with the kind of the server and the URL of its mocks. |
-| `GET /livez` | The Kubernetes liveness probe: answers as `/health` does, whatever the mock store says. |
-| `GET /readyz` | The Kubernetes readiness probe: answers as `/health` does once the mock store's `Health` returns nil, and `503` while it returns an error. |
-| `GET /startupz` | The Kubernetes startup probe: answers as `/health` does. The admin API serves only once the mock server loaded its mocks. |
+| `GET /livez` | The Kubernetes liveness probe: answers as `/health` does, whatever the mock store says. Needs no credentials, and answers its status alone when the admin API asks for some. |
+| `GET /readyz` | The Kubernetes readiness probe: answers as `/health` does once the mock store's `Health` returns nil, and `503` while it returns an error. Needs no credentials, as `/livez`. |
+| `GET /startupz` | The Kubernetes startup probe: answers as `/livez` does. The admin API serves only once the mock server loaded its mocks. |
 | `POST /reset` | Removes the mocks added through the admin API, loads the mock files again, saved ones included, starts every scenario over, and clears the [journal](#request-journal). Mocks added in code stay as they are. The mocks of a persistent store come back from it: reset never deletes what it holds. |
 | `GET /mocks` | Lists every mock, enabled or not, with its `priority`, `enabled`, `hits` and `origin`. |
 | `POST /mocks` | Adds the mock of the body, a [mock file](#mock-files). An id in use is a `409`. |
@@ -977,7 +1002,7 @@ The `vlatte` command serves the admin API by default: `admin: false` (`--admin=f
 
 A request net/http refuses before the admin API reads it, such as one with a malformed request line, is answered in plain text.
 
-**Safety.** The admin API has no authentication: anyone who reaches it can change the mocks, which can read files the server can, and read the requests of the journal. It listens on a local address unless told otherwise; with `VLATTE_DOCKER_HOST`, the CLI listens on every interface, as for the mocks, so publish its port only where the network is trusted. A browser's cross-site request that would change the server, or query its journal, is refused with `403`.
+**Safety.** Without [credentials](#admin-api), anyone who reaches the admin API can change the mocks, which can read files the server can, and read the requests of the journal. It listens on a local address unless told otherwise; with `VLATTE_DOCKER_HOST`, the CLI listens on every interface, as for the mocks, so set credentials and TLS, or publish its port only where the network is trusted. A browser's cross-site request that would change the server, or query its journal, is refused with `403`, credentials or not: a browser sends those of its sign-in prompt on its own.
 
 ### MCP
 
@@ -991,7 +1016,7 @@ fmt.Println(m.AdminURL() + "/mcp") // Streamable HTTP, for an agent that runs el
 err := api.ServeMCP(ctx, os.Stdin, os.Stdout) // stdio, for an agent that starts the program, until stdin ends
 ```
 
-`POST /mcp` keeps no sessions and answers in JSON. It is as open as the rest of the admin API: see Safety above.
+`POST /mcp` keeps no sessions and answers in JSON. It needs the credentials the rest of the admin API needs, which an MCP client sends as `Authorization: Bearer <token>`: see Safety above. MCP over stdio needs none: whoever holds the pipes started the program.
 
 The `vlatte` command serves MCP at `POST /mcp` by default, and `vlatte mcp` serves it on stdin and stdout, for an agent that starts the command as its MCP server. `vlatte mcp` takes the server's flags, and writes its banner and logs to stderr. `mcp: false` (`--mcp=false`, `VLATTE_MCP=false`) turns MCP off. An agent's MCP settings start it as any command:
 

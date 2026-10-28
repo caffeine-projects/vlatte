@@ -384,6 +384,13 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		{Key: "admin.addr", Kind: config.String, Hidden: true},
 		{Key: "admin.dir", Kind: config.String, Hidden: true},
 		{Key: "admin.docs_version", Kind: config.String, Hidden: true},
+		{Key: "admin.auth.username", Kind: config.String, Hidden: true},
+		{Key: "admin.auth.password", Kind: config.String, Hidden: true, Secret: true},
+		{Key: "admin.auth.password_file", Kind: config.String, Hidden: true},
+		{Key: "admin.auth.token", Kind: config.String, Hidden: true, Secret: true},
+		{Key: "admin.auth.token_file", Kind: config.String, Hidden: true},
+		{Key: "admin.tls.cert", Kind: config.String, Hidden: true},
+		{Key: "admin.tls.key", Kind: config.String, Hidden: true},
 		{Key: "mcp", Kind: config.Bool, Hidden: true},
 		{Key: "webhook.timeout", Kind: config.Duration, Hidden: true},
 		{

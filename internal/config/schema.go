@@ -81,6 +81,9 @@ type Field[T any] struct {
 	Set func(dst *T, v Value) error
 	// Hidden keeps the setting out of Flags and Usage: it is read, and checked, as any other.
 	Hidden bool
+	// Secret marks a String setting, such as a password, that only files and environment variables set: the command
+	// line shows to every user of the host. No problem of its value holds it.
+	Secret bool
 }
 
 // Value is a setting's value, converted to its Kind.
@@ -118,6 +121,7 @@ type field struct {
 	env     string // derived environment variable name without prefix, such as "LOG_LEVEL"
 	section bool   // a Bool key that other keys nest under, such as "cors"
 	hidden  bool   // left out of Flags and Usage
+	secret  bool   // has no flag, and no problem holds its value
 }
 
 // catalog is the view of a schema that sources use. It doesn't depend on the target type.
@@ -125,6 +129,7 @@ type catalog struct {
 	fields   []*field
 	byKey    map[string]*field
 	byFlag   map[string]*field   // long names and shorthands
+	secrets  map[string]*field   // the flag names secrets would have, which no flag takes
 	groups   map[string]struct{} // prefixes with no key of their own, such as "log"
 	loadOnly bool                // sources read only its keys, and let every other one through: see Schema.LoadOnly
 
@@ -152,6 +157,7 @@ func NewSchema[T any](fields ...Field[T]) *Schema[T] {
 	s := &Schema[T]{sets: make(map[string]func(*T, Value) error, len(fields))}
 	s.byKey = make(map[string]*field, len(fields))
 	s.byFlag = make(map[string]*field, len(fields))
+	s.secrets = make(map[string]*field)
 	s.groups = make(map[string]struct{})
 
 	for _, decl := range fields {
@@ -169,6 +175,10 @@ func NewSchema[T any](fields ...Field[T]) *Schema[T] {
 			panic(fmt.Sprintf("config: key %q has choices, but only Int settings can", decl.Key))
 		}
 
+		if decl.Secret && (decl.Kind != String || decl.Short != "") {
+			panic(fmt.Sprintf("config: secret key %q must be a String without a short flag", decl.Key))
+		}
+
 		if len(decl.Short) > 1 {
 			panic(fmt.Sprintf("config: short flag %q of key %q must be one letter", decl.Short, decl.Key))
 		}
@@ -183,6 +193,7 @@ func NewSchema[T any](fields ...Field[T]) *Schema[T] {
 			flag:    _flagName.Replace(decl.Key),
 			env:     strings.ToUpper(strings.ReplaceAll(decl.Key, ".", "_")),
 			hidden:  decl.Hidden,
+			secret:  decl.Secret,
 		}
 
 		// Two keys can't share an environment variable without sharing a flag: both names turn "." and "_"
@@ -196,11 +207,20 @@ func NewSchema[T any](fields ...Field[T]) *Schema[T] {
 				panic(fmt.Sprintf("config: key %q can't use flag %q: it asks for help", decl.Key, name))
 			}
 
-			if other, ok := s.byFlag[name]; ok {
+			other, ok := s.byFlag[name]
+			if !ok {
+				other, ok = s.secrets[name]
+			}
+
+			if ok {
 				panic(fmt.Sprintf("config: keys %q and %q both use flag %q", other.key, decl.Key, name))
 			}
 
-			s.byFlag[name] = f
+			if f.secret {
+				s.secrets[name] = f
+			} else {
+				s.byFlag[name] = f
+			}
 		}
 
 		s.fields = append(s.fields, f)
@@ -251,7 +271,7 @@ func (s *Schema[T]) Only(names ...string) *Schema[T] {
 func (c *catalog) Flags() []Flag {
 	flags := make([]Flag, 0, len(c.fields))
 	for _, f := range c.fields {
-		if f.hidden {
+		if f.hidden || f.secret {
 			continue
 		}
 
@@ -272,6 +292,13 @@ func (c *catalog) Usage(envPrefix string) string {
 
 	for _, f := range c.fields {
 		if f.hidden {
+			continue
+		}
+
+		if f.secret {
+			fmt.Fprintf(&b, "  %s_%s %s\n        %s", envPrefix, f.env, f.kind, f.usage)
+			fmt.Fprintf(&b, "\n        file key %s; no flag, as the command line shows to every user of the host\n", f.key)
+
 			continue
 		}
 
