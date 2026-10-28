@@ -9,6 +9,7 @@ import (
 	"sync"
 )
 
+// ErrEventAlreadyRegistered is returned by [EventRegistry.Register] when a listener has the name already.
 var ErrEventAlreadyRegistered = errors.New("vlatte: event already registered")
 
 // EventArgs is the common argument type for all events.
@@ -63,14 +64,17 @@ type EventConfig struct {
 	AfterResponse bool
 }
 
+// EventConfigs lists the events of one kind, such as the on_complete events of a mock.
 type EventConfigs []EventConfig
 
+// Has reports whether an event of the list has the given name.
 func (e EventConfigs) Has(name string) bool {
 	return slices.ContainsFunc(e, func(v EventConfig) bool {
 		return v.Name == name
 	})
 }
 
+// Events holds the events of a mock, or the global events of a server, by kind.
 type Events struct {
 	OnComplete EventConfigs
 }
@@ -165,6 +169,8 @@ type EventRunner struct {
 	late   sync.WaitGroup     // the events that run after the response, which Close waits for
 }
 
+// NewEventRunner creates an [EventRunner] that runs the listeners registered in listeners, and the events of global
+// before those of each mock. A nil listeners has no listener registered, and a nil global no event.
 func NewEventRunner(listeners *Listener, global *Events) *EventRunner {
 	if listeners == nil {
 		listeners = NewListener()

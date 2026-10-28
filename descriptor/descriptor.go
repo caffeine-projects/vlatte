@@ -10,8 +10,16 @@ import (
 var _ json.Marshaler = (*Descriptor)(nil)
 
 var (
-	ErrKeyEmpty         = errors.New("descriptor: key is empty")
+	// ErrKeyEmpty is the panic of the constructors given an empty key, and the error of [Descriptor.Validate] on a
+	// descriptor without one.
+	ErrKeyEmpty = errors.New("descriptor: key is empty")
+
+	// ErrSpecNotValidType is the error of [Descriptor.Validate] and [Descriptor.Marshallable] on a descriptor whose
+	// Props is not []any, map[string]any, a [Descriptor] or nil, and of [Descriptor.Merge] on one whose Props is not
+	// a map.
 	ErrSpecNotValidType = errors.New("descriptor: spec is not a valid type")
+
+	// ErrKeyAlreadyExists is the error of [Descriptor.Merge] when the map already holds the descriptor's key.
 	ErrKeyAlreadyExists = errors.New("descriptor: key already exists")
 )
 
@@ -20,10 +28,12 @@ type SelfDescriptive interface {
 	Describe() Descriptor
 }
 
+// P is the constraint of the props [New] and [Root] take: the types a [Descriptor] marshals.
 type P interface {
 	[]any | map[string]any | Descriptor
 }
 
+// New creates a descriptor with the given key and props. It panics with [ErrKeyEmpty] if key is empty.
 func New[T P](key string, props T) Descriptor {
 	if len(key) == 0 {
 		panic(ErrKeyEmpty)
@@ -32,10 +42,14 @@ func New[T P](key string, props T) Descriptor {
 	return Descriptor{Key: key, Props: props}
 }
 
+// SingleArg creates a descriptor with the given key and item as its only argument. It panics with [ErrKeyEmpty] if
+// key is empty.
 func SingleArg(key string, item any) Descriptor {
 	return New(key, []any{item})
 }
 
+// KeyOnly creates a descriptor with the given key and no arguments: it renders as a list of the key alone. It
+// panics with [ErrKeyEmpty] if key is empty.
 func KeyOnly(key string) Descriptor {
 	return New[[]any](key, nil)
 }
@@ -50,7 +64,8 @@ func KeyOnlyMaybe(key string, item any) Descriptor {
 	return KeyOnly(key)
 }
 
-// MultiArgs creates a descriptor with the given key and the list of properties.
+// MultiArgs creates a descriptor with the given key and the list of properties. It panics with [ErrKeyEmpty] if key
+// is empty.
 func MultiArgs(key string, props ...any) Descriptor {
 	if len(key) == 0 {
 		panic(ErrKeyEmpty)
@@ -59,7 +74,8 @@ func MultiArgs(key string, props ...any) Descriptor {
 	return New(key, props)
 }
 
-// WithKeyValuePairs creates a descriptor with the given key and the list of key/value pairs.
+// WithKeyValuePairs creates a descriptor with the given key and the list of key/value pairs. It panics with
+// [ErrKeyEmpty] if key is empty, and panics if props has an odd length or a key in props is not a string.
 func WithKeyValuePairs(key string, props ...any) Descriptor {
 	if len(key) == 0 {
 		panic(ErrKeyEmpty)
@@ -83,7 +99,8 @@ func WithKeyValuePairs(key string, props ...any) Descriptor {
 }
 
 // WithMaybeItems is a helper function to create a descriptor with items that might be also [SelfDescriptive] descriptive.
-// In the case the child is not a [SelfDescriptive] descriptive type, it will be ignored.
+// In the case the child is not a [SelfDescriptive] descriptive type, it will be ignored. It panics with
+// [ErrKeyEmpty] if key is empty.
 func WithMaybeItems(key string, items []any) Descriptor {
 	if len(key) == 0 {
 		panic(ErrKeyEmpty)
@@ -100,7 +117,8 @@ func WithMaybeItems(key string, items []any) Descriptor {
 }
 
 // Fail creates a descriptor of something a description can't hold, such as a function. Encoding it, or any
-// description that holds it, fails with err, rather than describe it as something else.
+// description that holds it, fails with err, rather than describe it as something else. It panics with
+// [ErrKeyEmpty] if key is empty.
 func Fail(key string, err error) Descriptor {
 	if len(key) == 0 {
 		panic(ErrKeyEmpty)
@@ -109,6 +127,7 @@ func Fail(key string, err error) Descriptor {
 	return Descriptor{Key: key, err: err}
 }
 
+// Root creates the top-level descriptor of a description, with the key "root" and the given props.
 func Root[T P](props T) Descriptor {
 	return Descriptor{Key: "root", Props: props, root: true}
 }
@@ -132,6 +151,8 @@ type Descriptor struct {
 	err  error // why it can't be described, from Fail
 }
 
+// Validate returns [ErrKeyEmpty] if d has no key, the error [Fail] gave it, or an error wrapping
+// [ErrSpecNotValidType] if its Props is not a type it marshals.
 func (d Descriptor) Validate() error {
 	if len(d.Key) == 0 {
 		return ErrKeyEmpty
@@ -159,15 +180,18 @@ func (d Descriptor) Err() error {
 	return d.err
 }
 
+// Root reports whether d was created by [Root].
 func (d Descriptor) Root() bool {
 	return d.root
 }
 
+// IsMap reports whether d's Props is a map[string]any: d renders without its key, for [Descriptor.Merge].
 func (d Descriptor) IsMap() bool {
 	_, ok := d.Props.(map[string]any)
 	return ok
 }
 
+// IsArray reports whether d's Props is an []any. A nil Props, which also renders as an array, is not one.
 func (d Descriptor) IsArray() bool {
 	_, ok := d.Props.([]any)
 	return ok
@@ -225,6 +249,7 @@ func (d Descriptor) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m, json.Deterministic(true))
 }
 
+// IsSelfDescriptive returns the description of v and true if v is [SelfDescriptive], or a zero [Descriptor] and false.
 func IsSelfDescriptive(v any) (Descriptor, bool) {
 	if self, ok := v.(SelfDescriptive); ok {
 		return self.Describe(), true

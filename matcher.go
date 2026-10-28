@@ -12,6 +12,7 @@ type Matcher interface {
 	Match(arg MatcherArg) (bool, error)
 }
 
+// MatcherArg is the argument a [Matcher] gets: the value to match, with the context and the explanation of the match.
 type MatcherArg struct {
 	ctx  context.Context
 	exp  *Explanation
@@ -19,10 +20,13 @@ type MatcherArg struct {
 	mock Mock
 }
 
+// NewMatcherArg creates a [MatcherArg] for v, such as for a matcher that hands part of its value to another. exp,
+// which records why the value matched or not, can be nil.
 func NewMatcherArg(ctx context.Context, exp *Explanation, v any) MatcherArg {
 	return MatcherArg{ctx: ctx, exp: exp, v: v}
 }
 
+// Context returns the context of the match, such as that of the request.
 func (a *MatcherArg) Context() context.Context {
 	return a.ctx
 }
@@ -33,6 +37,7 @@ func (a *MatcherArg) Explain() *Explanation {
 	return a.exp
 }
 
+// Value returns the value to match, such as the part of the request the Selector of an [Eval] selected.
 func (a *MatcherArg) Value() any {
 	return a.v
 }
@@ -51,6 +56,7 @@ type fnDelegate struct {
 func (f *fnDelegate) Name() string                       { return f.name }
 func (f *fnDelegate) Match(arg MatcherArg) (bool, error) { return f.fn(arg) }
 
+// MatcherFunc returns a [Matcher] named name that matches with fn.
 func MatcherFunc(name string, fn func(arg MatcherArg) (bool, error)) Matcher {
 	return &fnDelegate{name: name, fn: fn}
 }

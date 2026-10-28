@@ -53,7 +53,8 @@ type ProxyReply struct {
 }
 
 // From creates a ProxyReply with the given target. The target's path and query come before the request's: with
-// http://api/v1?tenant=a, a request to /users?page=2 goes to http://api/v1/users?tenant=a&page=2.
+// http://api/v1?tenant=a, a request to /users?page=2 goes to http://api/v1/users?tenant=a&page=2. It panics when
+// target is a nil *url.URL, or text that [url.Parse] fails on.
 func From[T FromTypes](target T) *ProxyReply {
 	var u *url.URL
 

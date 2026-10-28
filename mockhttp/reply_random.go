@@ -57,6 +57,8 @@ func (rep *RandomReply) Add(reply ...ReplierFactory) *RandomReply {
 	return rep
 }
 
+// Describe implements [descriptor.SelfDescriptive]: the reply in the mock file format. It leaves out the replies that
+// don't implement [descriptor.SelfDescriptive], and the generator of [RandWith].
 func (rep *RandomReply) Describe() descriptor.Descriptor {
 	replies := make([]any, 0, len(rep.replies))
 	for _, v := range rep.replies {

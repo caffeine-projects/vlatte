@@ -108,6 +108,7 @@ type Mock struct {
 	hits      atomic.Int64
 }
 
+// ID returns the ID of the mock: the one set with [Builder.ID], or one generated when it was built.
 func (m *Mock) ID() string {
 	return m.spec.id
 }
@@ -126,18 +127,22 @@ func (m *Mock) Close() error {
 	return err
 }
 
+// Name returns the name of the mock, or "" when it has none.
 func (m *Mock) Name() string {
 	return m.spec.name
 }
 
+// Priority returns the priority of the mock: mocks with a lower one match first.
 func (m *Mock) Priority() int {
 	return m.spec.priority
 }
 
+// Origin returns where the mock comes from, such as the mock file that describes it, or "" for a mock built in Go.
 func (m *Mock) Origin() string {
 	return m.spec.origin
 }
 
+// Enabled reports whether the mock may match requests.
 func (m *Mock) Enabled() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -175,16 +180,19 @@ func (m *Mock) Disable() {
 	m.enabled = false
 }
 
+// Switch enables the mock when state is true, and disables it otherwise.
 func (m *Mock) Switch(state bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.enabled = state
 }
 
+// Events returns the events the mock runs once it replied, its callbacks included.
 func (m *Mock) Events() vlatte.Events {
 	return vlatte.Events{OnComplete: m.spec.events}
 }
 
+// Steps returns the steps that the body of each answer of the mock passes through: see [Builder.Step].
 func (m *Mock) Steps() []vlatte.Step {
 	return m.spec.steps
 }
@@ -204,6 +212,9 @@ func (m *Mock) String() string {
 	return strings.TrimSpace("Mock [" + m.ID() + "] " + m.Name())
 }
 
+// Describe implements [descriptor.SelfDescriptive]: the mock in the mock file format. It leaves out callbacks, and
+// steps that don't describe themselves. A reply a mock file can't hold, such as [Echo], stays, so encoding the
+// description fails.
 func (m *Mock) Describe() descriptor.Descriptor {
 	mockExpectations := m.spec.expectations
 	data := make(map[string]any)
@@ -447,6 +458,8 @@ func describeSteps(steps []vlatte.Step) []any {
 	return described
 }
 
+// MarshalJSON implements [encoding/json.Marshaler]: it encodes the mock's [Mock.Describe] description, and fails when
+// the description holds a reply a mock file can't, such as [Echo].
 func (m *Mock) MarshalJSON() ([]byte, error) {
 	return m.Describe().MarshalJSON()
 }

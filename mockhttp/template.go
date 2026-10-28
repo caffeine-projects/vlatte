@@ -10,6 +10,7 @@ type TemplateDataProviderInput struct {
 	r *RequestValues
 }
 
+// Request returns the request being served, its matched mock in [RequestValues.Mock].
 func (p *TemplateDataProviderInput) Request() *RequestValues {
 	return p.r
 }

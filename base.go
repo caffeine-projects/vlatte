@@ -7,11 +7,14 @@ import (
 	"sync"
 )
 
+// Base is what every mock server shares: it adds mocks to its store in scopes, and asserts on them. A protocol's
+// server embeds it.
 type Base[TM Mock, A any] struct {
 	scopes *Scopes[TM, A]
 	mu     sync.RWMutex
 }
 
+// NewBase creates a [Base] that builds mocks for the server app and stores them in repo.
 func NewBase[TM Mock, A any](app A, repo Store[TM]) *Base[TM, A] {
 	return &Base[TM, A]{scopes: &Scopes[TM, A]{server: app, store: repo}}
 }
@@ -105,6 +108,8 @@ func (app *Base[TM, A]) Disable() {
 	}
 }
 
+// ListPending returns the mocks of every scope that were not called. It leaves out mocks stored outside every scope,
+// such as those the admin API added.
 func (app *Base[TM, A]) ListPending() []TM {
 	scopes := app.scopes.All()
 	ret := make([]TM, 0, len(scopes)/2)
@@ -115,6 +120,8 @@ func (app *Base[TM, A]) ListPending() []TM {
 	return ret
 }
 
+// ListCalled returns the mocks of every scope that were called at least once. It leaves out mocks stored outside
+// every scope, such as those the admin API added.
 func (app *Base[TM, A]) ListCalled() []TM {
 	scopes := app.scopes.All()
 	ret := make([]TM, 0, len(scopes)/2)

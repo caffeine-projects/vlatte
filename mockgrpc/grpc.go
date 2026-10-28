@@ -46,6 +46,8 @@ var errAdminStoreWithoutAdmin = errors.New("server: AdminStore needs an admin AP
 // Kind is the protocol of gRPC mock servers, the Kind of their journal entries.
 const Kind vlatte.Kind = "grpc"
 
+// Server is a gRPC mock server. [New] creates it and [Server.Start] serves it, once: a closed server doesn't start
+// again.
 type Server struct {
 	*vlatte.Base[*Mock, *Server]
 	*journal.Verifier[*Mock, *Server]
@@ -394,6 +396,8 @@ func (app *Server) AdminURL() string {
 	return app.admin.URL()
 }
 
+// Addr returns the address the server listens on, or "" before it starts. An in-memory server's is "bufconn", which no
+// network reaches: connect with [Server.Dial].
 func (app *Server) Addr() string {
 	app.mu.Lock()
 	defer app.mu.Unlock()

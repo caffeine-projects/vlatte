@@ -406,6 +406,8 @@ func (rep *Reply) Gzip() *Reply {
 	return rep
 }
 
+// Describe implements [descriptor.SelfDescriptive]: the reply in the mock file format. A body that isn't valid UTF-8
+// is described in base64.
 func (rep *Reply) Describe() descriptor.Descriptor {
 	headers := rep.response.Header.Clone()
 	for _, cookie := range rep.response.Cookies {

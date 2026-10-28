@@ -65,6 +65,7 @@ func (s *Scope[B]) Mocks() []B {
 	return mocks
 }
 
+// IDs returns the IDs of the mocks kept in this Scope, in no particular order.
 func (s *Scope[B]) IDs() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -77,6 +78,7 @@ func (s *Scope[B]) IDs() []string {
 	return ids
 }
 
+// Exists reports whether this Scope keeps a mock with the given ID.
 func (s *Scope[B]) Exists(id string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -401,6 +403,7 @@ func (s *Scopes[B, A]) Remove(ctx context.Context, scope *Scope[B]) error {
 	return nil
 }
 
+// All returns the scopes tracked, in the order they were added. A scope that replaced another takes its place.
 func (s *Scopes[B, A]) All() []*Scope[B] {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

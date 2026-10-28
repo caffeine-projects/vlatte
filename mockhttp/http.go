@@ -435,7 +435,8 @@ func (app *Server) MustStartTLS() {
 // URL returns the base URL of the mock server. With paths, it joins them to it as path elements, with url.JoinPath:
 // URL("/users", "1") is <base>/users/1, and "%3F" is a "?" in the path. A "?" or "#" in the last element starts the
 // query or the fragment, which are appended as given, so they must already be escaped:
-// URL("/users/1?active=true#top"). Go's http.Client doesn't send the fragment.
+// URL("/users/1?active=true#top"). Go's http.Client doesn't send the fragment. With paths, it panics when
+// [url.JoinPath] fails on the base URL.
 func (app *Server) URL(paths ...string) string {
 	if len(paths) == 0 {
 		return app.server.Info().URL
