@@ -34,8 +34,8 @@ type Data struct {
 	Extra any
 
 	// Scenarios reads the state of the server's scenarios: {{ .Scenarios.State "checkout" }}, and of the instance of
-	// a key, {{ .Scenarios.StateOf "checkout" (.Request.Header.Get "X-Test-Id") }}. The scenario of the mock that
-	// matched has moved already, when the server picked it.
+	// a key, {{ .Scenarios.StateOf "checkout" (.Request.Header.Get "X-Test-Id") }}. A scenario the mock that matched
+	// moved is in the state it moved it to, even once another request moved it on.
 	Scenarios matchscenario.View
 }
 

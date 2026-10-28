@@ -104,26 +104,36 @@ func (s *Store) SetScenario(name, state string, in ...Instance) {
 	s.set(name, k, state)
 }
 
-// ResetScenario moves the scenario name back to [StateStarted]: every instance of it, or only the one in picks.
-func (s *Store) ResetScenario(name string, in ...Instance) {
+// ResetScenario moves the scenario name back to [StateStarted]: every instance of it, or only the one in picks. It
+// reports false, changing nothing, when the store doesn't hold that instance: nothing moved it and SetScenario never
+// set it, so it is in StateStarted already.
+func (s *Store) ResetScenario(name string, in ...Instance) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	scn, ok := s.data[key(name)]
 	if !ok {
-		return
+		return false
 	}
 
 	k, picked := keyOf(in)
-	if !picked || k == "" {
+	if !picked {
 		scn.state = StateStarted
+		clear(scn.keys)
+
+		return true
 	}
 
-	if picked {
-		delete(scn.keys, k)
-	} else {
-		clear(scn.keys)
+	if k == "" {
+		scn.state = StateStarted
+
+		return true
 	}
+
+	_, ok = scn.keys[k]
+	delete(scn.keys, k)
+
+	return ok
 }
 
 // ResetScenarios moves every instance of every scenario back to [StateStarted].
@@ -137,9 +147,11 @@ func (s *Store) ResetScenarios() {
 	}
 }
 
-// View returns a view of s that sees every later move. A zero View reads no store, and panics.
-func (s *Store) View() View {
-	return View{store: s}
+// View returns a view of s for a request whose mock made moves. A scenario a move of moves names is in the state that
+// move took it to, even once another request moved it on, as the request's journal entry says; any other scenario is
+// in the state it is in when read. A zero View reads no store, and panics.
+func (s *Store) View(moves ...Move) View {
+	return View{store: s, moves: moves}
 }
 
 // claim moves the instance k of the scenario name from required to next, as [Matcher.Claim] does.
@@ -228,15 +240,23 @@ func key(name string) string {
 // View reads the states of the scenarios of a [Store], and changes none: what templates get.
 type View struct {
 	store *Store
+	moves []Move
 }
 
-// State returns the state of the shared instance of the scenario name, whatever its case, as [Store.State] does.
+// State returns the state of the shared instance of the scenario name, whatever its case: the state the view's move of
+// it took it to, or else the one [Store.State] returns.
 func (v View) State(name string) string {
-	return v.store.State(name)
+	return v.StateOf(name, "")
 }
 
-// StateOf returns the state of the instance of the scenario name keyed key, as [Store.State] does with [Key]: the
-// shared one when key is empty.
-func (v View) StateOf(name, key string) string {
-	return v.store.State(name, Key(key))
+// StateOf returns the state of the instance of the scenario name keyed key, the shared one when key is empty: the state
+// the view's move of it took it to, or else the one [Store.State] returns with [Key].
+func (v View) StateOf(name, k string) string {
+	for _, mv := range v.moves {
+		if mv.Key == k && key(mv.Scenario) == key(name) {
+			return mv.To
+		}
+	}
+
+	return v.store.State(name, Key(k))
 }

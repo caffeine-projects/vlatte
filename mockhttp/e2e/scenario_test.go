@@ -7,9 +7,11 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
@@ -340,4 +342,84 @@ func TestScenarios_TheJournalAndTheEventsNameTheKey(t *testing.T) {
 	require.Len(t, entries, 1)
 	require.Equal(t, []matchscenario.Move{{Scenario: "checkout", Key: "t1", From: matchscenario.StateStarted, To: "paid"}},
 		entries[0].Scenarios)
+}
+
+// holdFirst is a template data provider that holds the first request of path once its mock matched: it says so on
+// matched, then waits for release.
+type holdFirst struct {
+	path    string
+	once    *sync.Once
+	matched chan struct{}
+	release chan struct{}
+}
+
+func (p holdFirst) Key() string { return "hold" }
+
+func (p holdFirst) Data(in *mockhttp.TemplateDataProviderInput) (any, error) {
+	if in.Request().URL.Path == p.path {
+		p.once.Do(func() {
+			close(p.matched)
+			<-p.release
+		})
+	}
+
+	return nil, nil
+}
+
+func TestScenarios_ATemplateReadsTheMoveOfItsOwnRequest(t *testing.T) {
+	// A request's answer says the state its own mock moved the scenario to, as its journal entry does, even when
+	// another request moved the scenario on before the answer was rendered, such as during the mock's delay.
+	hold := holdFirst{path: "/pay", once: new(sync.Once), matched: make(chan struct{}), release: make(chan struct{})}
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().TemplateDataProviders([]mockhttp.TemplateDataProvider{hold}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	// A test that fails before it releases the request still ends: Close waits for the request.
+	release := sync.OnceFunc(func() { close(hold.release) })
+	t.Cleanup(release)
+
+	m.MustMock(
+		mockhttp.Postf("/pay").ScenarioIs("checkout").ScenarioStateIs(matchscenario.StateStarted).
+			ScenarioStateWillBe("paid").Reply(mockhttp.OK().BodyTemplate(`{{ .Scenarios.State "checkout" }}`)),
+		mockhttp.Postf("/ship").ScenarioIs("checkout").ScenarioStateIs("paid").ScenarioStateWillBe("shipped").
+			Reply(mockhttp.OK()),
+	)
+
+	paid := make(chan string, 1)
+
+	go func() {
+		res, err := http.Post(m.URL("/pay"), "", nil)
+		if !assert.NoError(t, err) {
+			paid <- ""
+			return
+		}
+
+		b, _ := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		paid <- string(b)
+	}()
+
+	<-hold.matched
+
+	res, _ := postBody(t, m.URL("/ship"), "", nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, "the next request matches in the state /pay moved to")
+	release()
+
+	require.Equal(t, "paid", <-paid)
+}
+
+func TestScenarios_ResettingAScenarioNothingNamesStreamsNoMove(t *testing.T) {
+	// A client following the events sees only scenarios that exist: one no mock names and nobody set doesn't move.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(admin.MustNew()))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	events := scenarioEvents(t, m, 1, func() {
+		m.ResetScenario("nope")
+		require.NoError(t, m.SetScenario(t.Context(), "checkout", "paid"))
+	})
+
+	require.Equal(t, []map[string]any{
+		{"type": "scenario", "target": "checkout", "message": "checkout set to paid"},
+	}, events)
 }

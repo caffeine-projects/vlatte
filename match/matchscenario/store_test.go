@@ -52,8 +52,8 @@ func TestStore_ResetOneStartsOnlyThatScenarioOver(t *testing.T) {
 	store.SetScenario("Checkout", "paid")
 	store.SetScenario("refund", "asked")
 
-	store.ResetScenario("checkout")
-	store.ResetScenario("nothing")
+	require.True(t, store.ResetScenario("checkout"))
+	require.False(t, store.ResetScenario("nothing"), "a scenario the store doesn't hold doesn't move")
 
 	require.Equal(t, map[string]string{"Checkout": StateStarted, "refund": "asked"}, store.Scenarios())
 	require.Equal(t, StateStarted, store.State("nothing"))
@@ -111,7 +111,8 @@ func TestStore_ResetOfAKeyStartsOnlyThatInstanceOver(t *testing.T) {
 	store.SetScenario("checkout", "paid", Key("t1"))
 	store.SetScenario("checkout", "refunded", Key("t2"))
 
-	store.ResetScenario("CHECKOUT", Key("t1"))
+	require.True(t, store.ResetScenario("CHECKOUT", Key("t1")))
+	require.False(t, store.ResetScenario("checkout", Key("t3")), "a key that never moved doesn't move")
 	require.Equal(t, StateStarted, store.State("checkout", Key("t1")))
 	require.Equal(t, "refunded", store.State("checkout", Key("t2")))
 	require.Equal(t, "paid", store.State("checkout"))
@@ -161,6 +162,26 @@ func TestLabel_NamesTheInstance(t *testing.T) {
 	require.Equal(t, "checkout", Label("checkout"))
 	require.Equal(t, "checkout", Label("checkout", Key("")))
 	require.Equal(t, "checkout (key t1)", Label("checkout", Key("t1")))
+}
+
+func TestView_ReadsTheStateItsOwnMoveTookAScenarioTo(t *testing.T) {
+	// A request's templates read the state its mock moved a scenario to, as its journal entry says, even once another
+	// request moved the scenario on; a scenario it didn't move reads as it is.
+	store := New()
+	store.SetScenario("checkout", "paid")
+	view := store.View(Move{Scenario: "checkout", From: StateStarted, To: "paid"})
+
+	store.SetScenario("checkout", "shipped")
+	store.SetScenario("refund", "asked")
+
+	require.Equal(t, "paid", view.State("Checkout"))
+	require.Equal(t, "asked", view.State("refund"))
+
+	keyed := store.View(Move{Scenario: "checkout", Key: "t1", From: StateStarted, To: "paid"})
+	store.SetScenario("checkout", "shipped", Key("t1"))
+
+	require.Equal(t, "paid", keyed.StateOf("checkout", "t1"))
+	require.Equal(t, "shipped", keyed.State("checkout"), "the move of a key leaves the shared instance as it is")
 }
 
 // _names spell two scenarios in several cases.

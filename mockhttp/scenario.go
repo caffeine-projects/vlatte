@@ -45,10 +45,12 @@ func (app *Server) SetScenario(ctx context.Context, name, state string, in ...ma
 }
 
 // ResetScenario moves the scenario name back to [matchscenario.StateStarted]: every instance of it, or only the one of
-// a key in, such as matchscenario.Key("t1").
+// a key in, such as matchscenario.Key("t1"). An instance nothing moved and none set is there already: the admin API's
+// events get no move of it.
 func (app *Server) ResetScenario(name string, in ...matchscenario.Instance) {
-	app.scenarioStore.ResetScenario(name, in...)
-	app.publishScenario(name, matchscenario.Label(name, in...)+" reset to "+matchscenario.StateStarted)
+	if app.scenarioStore.ResetScenario(name, in...) {
+		app.publishScenario(name, matchscenario.Label(name, in...)+" reset to "+matchscenario.StateStarted)
+	}
 }
 
 // ResetScenarios moves every scenario back to [matchscenario.StateStarted].

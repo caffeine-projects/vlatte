@@ -6,9 +6,12 @@ import (
 	json "encoding/json/v2"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -136,4 +139,92 @@ func TestScenarios_AKeyThatFailsToRenderFailsTheCall(t *testing.T) {
 
 	_, err = m.Mock(Method("Greetings").StartScenario("checkout").ScenarioKey(`{{`).Reply(Message(&pb.HiRes{})))
 	require.ErrorContains(t, err, "mock: scenario.key: template: scenario.key")
+}
+
+func TestScenarios_ATemplateReadsTheMoveOfItsOwnCall(t *testing.T) {
+	// A call's answer says the state its own mock moved the scenario to, as its journal entry does, even when another
+	// call moved the scenario on before the answer was rendered, such as during the mock's delay.
+	// The provider holds the first call once its mock matched, until the second was answered.
+	var held atomic.Bool
+	matched, release := make(chan struct{}), make(chan struct{})
+	hold := provider{key: "hold", data: func(*TemplateDataProviderInput) (any, error) {
+		if held.CompareAndSwap(false, true) {
+			close(matched)
+			<-release
+		}
+
+		return nil, nil
+	}}
+
+	m := MustNew(Setup().Silent().TemplateDataProviders(hold))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	// A test that fails before it releases the call still ends: Close waits for the call.
+	unhold := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(unhold)
+
+	c := pb.NewTestServiceClient(m.MustDial())
+	m.MustMock(
+		Method("Greetings").ScenarioIs("checkout").ScenarioStateIs(matchscenario.StateStarted).
+			ScenarioStateWillBe("paid").Reply(Template(`{"message": "{{ .Scenarios.State "checkout" }}"}`)),
+		Method("Greetings").ScenarioIs("checkout").ScenarioStateIs("paid").ScenarioStateWillBe("shipped").
+			Reply(Message(&pb.HiRes{Message: "shipping"})),
+	)
+
+	paid := make(chan string, 1)
+
+	go func() {
+		res, err := c.Greetings(t.Context(), &pb.HiReq{})
+		assert.NoError(t, err)
+		paid <- res.GetMessage()
+	}()
+
+	<-matched
+
+	got, code := greetWith(t, c, "")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "shipping", got, "the next call matches in the state the first moved to")
+	unhold()
+
+	require.Equal(t, "paid", <-paid)
+}
+
+func TestScenarios_ResettingAScenarioNothingNamesStreamsNoMove(t *testing.T) {
+	// A client following the events sees only scenarios that exist: one no mock names and nobody set doesn't move.
+	m := MustNew(Setup().Silent().Admin(admin.MustNew()))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	// A missing event fails the test, rather than hangs it.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, m.AdminURL()+"/events", nil)
+	require.NoError(t, err)
+
+	res, err := http.DefaultClient.Do(r)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = res.Body.Close() })
+
+	m.ResetScenario("nope")
+	require.NoError(t, m.SetScenario(t.Context(), "checkout", "paid"))
+
+	lines := bufio.NewScanner(res.Body)
+
+	var first map[string]any
+	for first == nil && lines.Scan() {
+		if line, ok := strings.CutPrefix(lines.Text(), "data: "); ok {
+			var e map[string]any
+			require.NoError(t, json.Unmarshal([]byte(line), &e))
+
+			if e["type"] == "scenario" {
+				delete(e, "time")
+				first = e
+			}
+		}
+	}
+
+	require.NoError(t, lines.Err())
+	require.Equal(t, map[string]any{"type": "scenario", "target": "checkout", "message": "checkout set to paid"}, first)
 }
