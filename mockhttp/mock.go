@@ -56,6 +56,9 @@ type selectorInput struct {
 	// ForProxy is set on a request the server's forward proxy sends on to the host it names: a CONNECT, or a request
 	// in absolute form.
 	ForProxy bool
+
+	// values are the values of the request, which the key of a scenario renders with.
+	values *RequestValues
 }
 
 type expectation = vlatte.Eval[*selectorInput]

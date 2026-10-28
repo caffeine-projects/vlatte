@@ -344,6 +344,33 @@ func TestMock_ADescriptionKeepsTheScenarioAndRepeat(t *testing.T) {
 	}
 }
 
+func TestMock_ADescriptionKeepsTheScenarioKey(t *testing.T) {
+	// Saved through the admin API, a keyed mock stays keyed: each key still moves an instance of its own.
+	built := MustNew(Setup().Silent())
+	t.Cleanup(built.Close)
+
+	desc, err := built.MustMock(Getf("/x").StartScenario("checkout").ScenarioStateWillBe("paid").
+		ScenarioKey(`{{ .Request.Header.Get "X-Test" }}`).Reply(OK())).Mocks()[0].MarshalJSON()
+	require.NoError(t, err)
+
+	loaded := MustNew(Setup().Silent())
+	loaded.MustStart()
+	t.Cleanup(loaded.Close)
+	loaded.MustMock(FromBytes(desc, "json"))
+
+	for _, step := range []struct {
+		key  string
+		want int
+	}{
+		{"t1", http.StatusOK},
+		{"t1", StatusNoMatch},
+		{"t2", http.StatusOK},
+	} {
+		res, _ := do(t, http.MethodGet, loaded.URL("/x"), http.Header{"X-Test": {step.key}}, nil)
+		require.Equal(t, step.want, res.StatusCode, "%s: %s", step.key, desc)
+	}
+}
+
 // getTarget sends a GET with target as the request target, as is, and returns the status: Go's http.Client doesn't
 // send a URL's fragment.
 func getTarget(t *testing.T, m *Server, target string) int {

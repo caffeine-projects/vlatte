@@ -85,6 +85,7 @@ func TestDescribe_WritesEveryPartAMockFileHolds(t *testing.T) {
 		ScenarioIs("s").
 		ScenarioStateIs("a").
 		ScenarioStateWillBe("b").
+		ScenarioKey("{{ .Request.Method }}").
 		OnCompleteEvent(vlatte.EventConfig{Name: "record", Parameters: map[string]any{"k": "v"}}).
 		OnCompleteEvent(vlatte.EventConfig{Name: "record", AfterResponse: true}).
 		Field("message", match.Equal("hi")).
@@ -103,7 +104,7 @@ func TestDescribe_WritesEveryPartAMockFileHolds(t *testing.T) {
 		"enabled": false,
 		"delay": "1s",
 		"repeat": 3,
-		"scenario": {"name": "s", "required_state": "a", "new_state": "b"},
+		"scenario": {"name": "s", "required_state": "a", "new_state": "b", "key": "{{ .Request.Method }}"},
 		"on_complete": [{"name": "record", "parameters": {"k": "v"}}, {"name": "record", "after_response": true}],
 		"request": {
 			"method": "List",

@@ -410,6 +410,7 @@ func TestAdmin_MovesScenarios(t *testing.T) {
 	require.JSONEq(t, `{"scenarios": [{
 		"name": "Checkout",
 		"state": "paid",
+		"instances": [],
 		"states": [{"name": "started", "reachable": true}, {"name": "paid", "reachable": true}],
 		"transitions": [{"from": "started", "to": "paid", "mock_id": "pay"}]
 	}]}`, string(body))

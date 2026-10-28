@@ -138,6 +138,40 @@ func TestScenarios(t *testing.T) {
 	}
 }
 
+func TestScenarios_EachKeyPlaysInAnInstanceOfItsOwn(t *testing.T) {
+	// Tenants of one server, or tests that run at once, each move their own checkout: the key renders with the
+	// request, its path parameters included, and a reply reads the state of its own key.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(
+		mockhttp.FromBytes([]byte(`{
+			"scenario": {"name": "checkout", "required_state": "started", "new_state": "paid", "key": "{{ .Request.PathParams.tenant }}"},
+			"request": {"method": "POST", "path_template": "/tenants/{tenant}/pay"},
+			"response": {"status": 200, "body": "{{ .Scenarios.StateOf \"checkout\" .Request.PathParams.tenant }}", "template": {"enabled": true}}
+		}`), "json"),
+		mockhttp.Getf("/order").
+			Reply(mockhttp.OK().BodyTemplate(`{{ .Scenarios.StateOf "checkout" (.Request.URL.Query.Get "tenant") }}`)),
+	)
+
+	res, body := postBody(t, m.URL("/tenants/a/pay"), "", nil)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "paid", string(body), "the reply reads the state its own request moved")
+
+	res, _ = postBody(t, m.URL("/tenants/a/pay"), "", nil)
+	require.Equal(t, mockhttp.StatusNoMatch, res.StatusCode, "a paid once")
+
+	res, _ = postBody(t, m.URL("/tenants/b/pay"), "", nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, "b pays in its own instance")
+
+	_, order := getTarget(t, m, "/order?tenant=c")
+	require.Equal(t, matchscenario.StateStarted, string(order))
+
+	_, order = getTarget(t, m, "/order?tenant=a")
+	require.Equal(t, "paid", string(order))
+}
+
 // scenarioEvents follows the admin API's events of m while send runs, and returns the first n scenario events. It
 // waits 5 seconds at most, so a missing event fails the test rather than hangs it.
 func scenarioEvents(t *testing.T, m *mockhttp.Server, n int, send func()) []map[string]any {
@@ -273,6 +307,42 @@ func TestScenarios_StreamsEachMove(t *testing.T) {
 		{"type": "scenario", "target": "checkout", "message": "checkout reset to started"},
 		{"type": "scenario", "message": "every scenario reset to started"},
 	}, events)
+}
+
+func TestScenarios_TheJournalAndTheEventsNameTheKey(t *testing.T) {
+	// A test verifies which instance its request moved, and the admin page which one to redraw.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().Journal(t.TempDir()).Admin(admin.MustNew()))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(mockhttp.Postf("/pay").ID("pay").StartScenario("checkout").ScenarioStateWillBe("paid").
+		ScenarioKey(`{{ .Request.Header.Get "X-Test" }}`).Reply(mockhttp.OK()))
+
+	events := scenarioEvents(t, m, 3, func() {
+		req, err := http.NewRequest(http.MethodPost, m.URL("/pay"), nil)
+		require.NoError(t, err)
+		req.Header.Set("X-Test", "t1")
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		require.NoError(t, m.SetScenario(t.Context(), "checkout", "paid", matchscenario.Key("t2")))
+		m.ResetScenario("checkout", matchscenario.Key("t1"))
+	})
+
+	delete(events[0], "request_id")
+	require.Equal(t, []map[string]any{
+		{"type": "scenario", "target": "checkout", "mock_id": "pay", "message": "checkout (key t1) moved from started to paid"},
+		{"type": "scenario", "target": "checkout", "message": "checkout (key t2) set to paid"},
+		{"type": "scenario", "target": "checkout", "message": "checkout (key t1) reset to started"},
+	}, events)
+
+	entries, err := m.Requests(t.Context(), journal.Query{Path: match.Equal("/pay")})
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, []matchscenario.Move{{Scenario: "checkout", Key: "t1", From: matchscenario.StateStarted, To: "paid"}},
+		entries[0].Scenarios)
 }
 
 // holdFirst is a template data provider that holds the first request of path once its mock matched: it says so on

@@ -38,6 +38,10 @@
         },
         "new_state": {
           "type": "string"
+        },
+        "key": {
+          "description": "Template of the key of the scenario's instance a call plays in, such as {{ with index .Request.Header \"x-test-id\" }}{{ index . 0 }}{{ end }}: each key moves an instance of its own. Empty plays in the shared instance.",
+          "type": "string"
         }
       },
       "required": [

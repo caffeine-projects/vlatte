@@ -7,12 +7,21 @@ import (
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
-// Scenario is a scenario: where it is, the states its mocks name, and the moves they make.
+// Scenario is a scenario: where its shared instance and its keyed ones are, the states its mocks name, and the moves
+// they make.
 type Scenario struct {
 	Name        string               `json:"name"`
 	State       string               `json:"state"`
+	Instances   []ScenarioInstance   `json:"instances"`
 	States      []ScenarioState      `json:"states"`
 	Transitions []ScenarioTransition `json:"transitions"`
+}
+
+// ScenarioInstance is the instance of a scenario of one key, which the mocks with a scenario key move for each key of
+// their requests.
+type ScenarioInstance struct {
+	Key   string `json:"key"`
+	State string `json:"state"`
 }
 
 // ScenarioState is a state a mock of a scenario names. An unreachable one is a state no path of mock moves leads to
@@ -60,8 +69,13 @@ func scenarioOf(scn matchscenario.Scenario) Scenario {
 	out := Scenario{
 		Name:        scn.Name,
 		State:       scn.State,
+		Instances:   make([]ScenarioInstance, 0, len(scn.Instances)),
 		States:      make([]ScenarioState, 0, len(scn.States)),
 		Transitions: make([]ScenarioTransition, 0, len(scn.Transitions)),
+	}
+
+	for _, in := range scn.Instances {
+		out.Instances = append(out.Instances, ScenarioInstance{Key: in.Key, State: in.State})
 	}
 
 	for _, s := range scn.States {

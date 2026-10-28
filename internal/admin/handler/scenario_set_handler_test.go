@@ -24,8 +24,9 @@ func TestScenarios(t *testing.T) {
 	res, body := send(t, request{method: http.MethodPut, url: base + "/scenarios/CHECKOUT", body: `{"state": "paid"}`})
 	require.Equal(t, http.StatusOK, res.StatusCode, body)
 	checkout := map[string]any{
-		"name":  "Checkout",
-		"state": "paid",
+		"name":      "Checkout",
+		"state":     "paid",
+		"instances": []any{},
 		"states": []any{
 			map[string]any{"name": "started", "reachable": true},
 			map[string]any{"name": "paid", "reachable": true},
@@ -40,7 +41,7 @@ func TestScenarios(t *testing.T) {
 	res, body = send(t, request{method: http.MethodGet, url: base + "/scenarios"})
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	require.Equal(t, []any{
-		map[string]any{"name": "Check out", "state": "on", "states": []any{}, "transitions": []any{}},
+		map[string]any{"name": "Check out", "state": "on", "instances": []any{}, "states": []any{}, "transitions": []any{}},
 		checkout,
 	}, conforms(t, res, body, "ScenarioList")["scenarios"])
 
@@ -123,4 +124,18 @@ func TestScenarios_AServerThatFailsAnswersAnError(t *testing.T) {
 			require.Equal(t, tt.want, doc["detail"])
 		})
 	}
+}
+
+func TestSetScenario_AKeyMovesTheInstanceOfThatKey(t *testing.T) {
+	// A test that sends a key of its own moves its instance only: the shared one, and other tests', stay.
+	store := newScenarios([4]string{"pay", "checkout", "started", "paid"})
+	base := serve(t, newStore(t), adminapi.Capabilities{Scenarios: store})
+
+	res, body := send(t, request{method: http.MethodPut, url: base + "/scenarios/checkout?key=t1", body: `{"state": "paid"}`})
+	require.Equal(t, http.StatusOK, res.StatusCode, body)
+
+	doc := conforms(t, res, body, "Scenario")
+	require.Equal(t, "started", doc["state"])
+	require.Equal(t, []any{map[string]any{"key": "t1", "state": "paid"}}, doc["instances"])
+	require.Equal(t, "paid", store.store.State("checkout", matchscenario.Key("t1")))
 }

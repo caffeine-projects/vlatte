@@ -29,8 +29,9 @@ type TemplateData struct {
 	// Parameters reads the server's parameters: {{ .Parameters.Get "key" }}.
 	Parameters *Parameters
 
-	// Scenarios reads the state of the server's scenarios: {{ .Scenarios.State "checkout" }}. A scenario the mock that
-	// matched moved is in the state it moved it to, even once another request moved it on.
+	// Scenarios reads the state of the server's scenarios: {{ .Scenarios.State "checkout" }}, and of the instance of
+	// a key, {{ .Scenarios.StateOf "checkout" (index .Request.Header "x-test-id" 0) }}. A scenario the mock that matched
+	// moved is in the state it moved it to, even once another request moved it on.
 	Scenarios matchscenario.View
 
 	// Data is the data set with Server.SetData, in force when the call arrived: {{ .Data.target }}.

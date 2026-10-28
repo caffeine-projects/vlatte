@@ -54,12 +54,12 @@ type Scenarios interface {
 	// Scenarios returns every scenario, by name, with its state, the states its mocks name, and their moves.
 	Scenarios(ctx context.Context) ([]matchscenario.Scenario, error)
 
-	// SetScenario moves the scenario name to state. It returns an error that wraps matchscenario.ErrUnknownState when
-	// no mock of the scenario names state.
-	SetScenario(ctx context.Context, name, state string) error
+	// SetScenario moves the scenario name to state: its shared instance, or the one in picks. It returns an error that
+	// wraps matchscenario.ErrUnknownState when no mock of the scenario names state.
+	SetScenario(ctx context.Context, name, state string, in ...matchscenario.Instance) error
 
-	// ResetScenario moves the scenario name back to where it started.
-	ResetScenario(name string)
+	// ResetScenario moves the scenario name back to where it started: every instance of it, or the one in picks.
+	ResetScenario(name string, in ...matchscenario.Instance)
 
 	// ResetScenarios moves every scenario back to where it started.
 	ResetScenarios()

@@ -20,7 +20,8 @@
       "properties": {
         "name": { "type": "string" },
         "required_state": { "type": "string" },
-        "new_state": { "type": "string" }
+        "new_state": { "type": "string" },
+        "key": { "description": "Template of the key of the scenario's instance a request plays in, such as {{ .Request.Header.Get \"X-Test-Id\" }}: each key moves an instance of its own. Empty plays in the shared instance.", "type": "string" }
       },
       "required": [ "name" ],
       "additionalProperties": false

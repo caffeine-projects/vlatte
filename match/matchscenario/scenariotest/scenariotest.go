@@ -29,6 +29,10 @@ type Mock struct {
 	// NewState is the state the scenario moves to when the mock is picked to answer. Empty leaves it where it is.
 	NewState string
 
+	// Keyed makes the mock play in the instance of the scenario of the key [Server.CallWithKey] sends, as the
+	// server's scenario key does: the shared instance for a call without a key.
+	Keyed bool
+
 	// Disabled adds the mock disabled: it matches nothing until enabled.
 	Disabled bool
 }
@@ -41,14 +45,17 @@ type Server interface {
 	// Call sends the request every mock answers, and returns the ID of the mock that answered, or "" when none did.
 	Call(t *testing.T) string
 
+	// CallWithKey sends the request of Call with key, the key of the instance of the scenario keyed mocks play in.
+	CallWithKey(t *testing.T, key string) string
+
 	// Scenarios returns every scenario, as [matchscenario.Store.Model] does for the server's mocks.
 	Scenarios(ctx context.Context) ([]matchscenario.Scenario, error)
 
 	// SetScenario moves a scenario, as [matchscenario.Store.Move] does for the server's mocks.
-	SetScenario(ctx context.Context, name, state string) error
+	SetScenario(ctx context.Context, name, state string, in ...matchscenario.Instance) error
 
-	// ResetScenario moves a scenario back to [matchscenario.StateStarted].
-	ResetScenario(name string)
+	// ResetScenario moves a scenario back to [matchscenario.StateStarted], as [matchscenario.Store.ResetScenario] does.
+	ResetScenario(name string, in ...matchscenario.Instance)
 
 	// ResetScenarios moves every scenario back to [matchscenario.StateStarted].
 	ResetScenarios()
@@ -258,6 +265,54 @@ func Run(t *testing.T, newServer func(t *testing.T) Server) {
 		})
 
 		require.Equal(t, map[string]int{"pay": 1, "refund": 1, "done": calls - 2}, got)
+	})
+
+	t.Run("each key moves an instance of its own", func(t *testing.T) {
+		// Tests that run at once against one server each send a key of their own: none moves another's scenario.
+		srv := newServer(t)
+		srv.Mock(t,
+			Mock{ID: "pay", Scenario: "checkout", RequiredState: matchscenario.StateStarted, NewState: "paid", Keyed: true},
+			Mock{ID: "refund", Scenario: "checkout", RequiredState: "paid", NewState: "refunded", Keyed: true},
+		)
+
+		require.Equal(t, "pay", srv.CallWithKey(t, "t1"))
+		require.Equal(t, "refund", srv.CallWithKey(t, "t1"))
+		require.Equal(t, "pay", srv.CallWithKey(t, "t2"), "t1 moved its own instance only")
+		require.Equal(t, "pay", srv.Call(t), "a call without a key plays in the shared instance")
+		require.Equal(t, "pay", srv.CallWithKey(t, "T1"), "keys are exact")
+
+		got, err := srv.Scenarios(t.Context())
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, "paid", got[0].State, "the shared instance")
+		require.Equal(t, []matchscenario.KeyedInstance{
+			{Key: "T1", State: "paid"},
+			{Key: "t1", State: "refunded"},
+			{Key: "t2", State: "paid"},
+		}, got[0].Instances)
+	})
+
+	t.Run("a keyed instance is set and reset on its own", func(t *testing.T) {
+		srv := newServer(t)
+		srv.Mock(t,
+			Mock{ID: "pay", Scenario: "checkout", RequiredState: matchscenario.StateStarted, NewState: "paid", Keyed: true},
+			Mock{ID: "refund", Scenario: "checkout", RequiredState: "paid", Keyed: true},
+		)
+
+		require.ErrorIs(t, srv.SetScenario(t.Context(), "checkout", "payed", matchscenario.Key("t1")),
+			matchscenario.ErrUnknownState, "a keyed instance has the states of the scenario's mocks")
+		require.NoError(t, srv.SetScenario(t.Context(), "checkout", "paid", matchscenario.Key("t1")))
+		require.NoError(t, srv.SetScenario(t.Context(), "checkout", "paid", matchscenario.Key("t2")))
+		require.Equal(t, "refund", srv.CallWithKey(t, "t1"))
+		require.Equal(t, "pay", srv.Call(t), "the shared instance didn't move")
+
+		srv.ResetScenario("checkout", matchscenario.Key("t1"))
+		require.Equal(t, "pay", srv.CallWithKey(t, "t1"))
+		require.Equal(t, "refund", srv.CallWithKey(t, "t2"), "a reset of one key leaves the others")
+
+		srv.ResetScenario("checkout")
+		require.Equal(t, "pay", srv.CallWithKey(t, "t2"), "a reset of the scenario starts every instance over")
+		require.Equal(t, matchscenario.StateStarted, stateOf(t, srv, "checkout"))
 	})
 
 	t.Run("concurrent requests share a mock that requires no state", func(t *testing.T) {

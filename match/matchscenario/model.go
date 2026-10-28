@@ -26,8 +26,12 @@ type Scenario struct {
 	// names it.
 	Name string
 
-	// State is the state the scenario is in.
+	// State is the state of the shared instance of the scenario.
 	State string
+
+	// Instances are the keyed instances of the scenario that moved, in the order of their keys. A keyed instance
+	// that didn't move, or was reset, is in [StateStarted], and isn't listed.
+	Instances []KeyedInstance
 
 	// States are the states the mocks of the scenario name, [StateStarted] first and the others by name. A scenario
 	// no mock names, but that was set, has none.
@@ -35,6 +39,12 @@ type Scenario struct {
 
 	// Transitions are the moves the mocks of the scenario make, in the order of the mocks.
 	Transitions []Transition
+}
+
+// KeyedInstance is the instance of a scenario of one key: see [Key].
+type KeyedInstance struct {
+	Key   string
+	State string
 }
 
 // State is a state of a scenario.
@@ -103,6 +113,7 @@ func (s *Store) Model(uses iter.Seq[Use]) []Scenario {
 		}
 
 		scn.State = moved.state
+		scn.Instances = moved.instances()
 	}
 	s.mu.RUnlock()
 
@@ -120,11 +131,11 @@ func (s *Store) Model(uses iter.Seq[Use]) []Scenario {
 	return out
 }
 
-// Move moves the scenario name to state, as [Store.SetScenario] does, once it checked a mock of uses names state: the
-// scenario takes the name of the first use, whatever the case of name. It returns an error that wraps
+// Move moves the scenario name to state, its shared instance or the one in picks, as [Store.SetScenario] does, once it
+// checked a mock of uses names state: the scenario takes the name of the first use, whatever the case of name. It returns an error that wraps
 // [ErrUnknownState] when the scenario's mocks name other states only, or state is empty. A scenario no mock names
 // moves to any state but the empty one, so a test can set it before its mocks load.
-func (s *Store) Move(uses iter.Seq[Use], name, state string) error {
+func (s *Store) Move(uses iter.Seq[Use], name, state string, in ...Instance) error {
 	if state == "" {
 		return fmt.Errorf("%w: %s has no state \"\"", ErrUnknownState, name)
 	}
@@ -150,7 +161,7 @@ func (s *Store) Move(uses iter.Seq[Use], name, state string) error {
 			strings.Join(named, ", "))
 	}
 
-	s.SetScenario(name, state)
+	s.SetScenario(name, state, in...)
 
 	return nil
 }

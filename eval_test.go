@@ -94,7 +94,8 @@ func TestFind_TakesTheTurnOfTheMockFound(t *testing.T) {
 	require.False(t, matched, "the turn is taken")
 }
 
-// A claim acts on what the request selects: it gets the value Match got.
+// A claim acts on what the request selects, such as the instance of a scenario its key names: it gets the value Match
+// got.
 func TestFind_AClaimGetsTheValueTheSelectorSelects(t *testing.T) {
 	turn := &turnMatcher{}
 	a := newFakeMockWith("a", 0)

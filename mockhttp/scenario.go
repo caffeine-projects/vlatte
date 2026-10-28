@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"iter"
 	"slices"
+	"strings"
 	"time"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
+	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
 
 // Scenarios returns every scenario, by name: those the server's mocks name, with their states and the moves of their
@@ -22,22 +25,24 @@ func (app *Server) Scenarios(ctx context.Context) ([]matchscenario.Scenario, err
 	return app.scenarioStore.Model(uses), nil
 }
 
-// SetScenario moves the scenario name to state: the mocks that require state match next. It returns an error that
-// wraps [matchscenario.ErrUnknownState] when no mock of the scenario names state, or state is empty. A scenario no
-// mock names moves to any other state.
-func (app *Server) SetScenario(ctx context.Context, name, state string) error {
+// SetScenario moves the scenario name to state: its shared instance, or the one of a key in, such as
+// matchscenario.Key("t1"). The mocks that require state match next. It returns an error that wraps
+// [matchscenario.ErrUnknownState] when no mock of the scenario names state, or state is empty. A scenario no mock names
+// moves to any other state.
+func (app *Server) SetScenario(ctx context.Context, name, state string, in ...matchscenario.Instance) error {
 	uses, err := app.scenarioUses(ctx)
 	if err != nil {
 		return err
 	}
 
-	return app.scenarioStore.Move(uses, name, state)
+	return app.scenarioStore.Move(uses, name, state, in...)
 }
 
-// ResetScenario moves the scenario name back to [matchscenario.StateStarted]. A scenario no mock moved and none set is
-// there already: the admin API's events get no move of it.
-func (app *Server) ResetScenario(name string) {
-	app.scenarioStore.ResetScenario(name)
+// ResetScenario moves the scenario name back to [matchscenario.StateStarted]: every instance of it, or only the one of
+// a key in, such as matchscenario.Key("t1"). An instance nothing moved and none set is there already: the admin API's
+// events get no move of it.
+func (app *Server) ResetScenario(name string, in ...matchscenario.Instance) {
+	app.scenarioStore.ResetScenario(name, in...)
 }
 
 // ResetScenarios moves every scenario back to [matchscenario.StateStarted].
@@ -65,15 +70,39 @@ func (app *Server) scenarioUses(ctx context.Context) (iter.Seq[matchscenario.Use
 	return slices.Values(uses), nil
 }
 
-// movedScenarios keeps the moves of the scenarios of r's mock, which Find picked, for the journal and the templates.
-func (app *Server) movedScenarios(r *RequestValues) {
+// scenarioKey returns the selector of the key of the instance of a scenario a request plays in: tmpl rendered with the
+// data of reply templates, and the parameters of path template t, of a mock that has one.
+func (app *Server) scenarioKey(tmpl string, t *pathTemplate) (vlatte.Selector[*selectorInput], error) {
+	compiled, err := app.config.TemplateEngine.Compile("scenario.key", tmpl)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(ctx context.Context, in *selectorInput) any {
+		data := locals(in.values, nil, viewdata.NewParameters(ctx, app.params))
+		if t != nil {
+			data.Request.PathParams, _ = t.params(in.URL.EscapedPath())
+		}
+
+		var key strings.Builder
+		if err := compiled.Execute(&key, data); err != nil {
+			return err
+		}
+
+		return key.String()
+	}, nil
+}
+
+// movedScenarios keeps the moves of the scenarios of r's mock, which Find picked for in, for the journal and the
+// templates.
+func (app *Server) movedScenarios(r *RequestValues, in *selectorInput) {
 	for _, e := range r.Mock.spec.expectations {
 		sm, ok := e.Matcher.(*matchscenario.Matcher)
 		if !ok {
 			continue
 		}
 
-		mv, ok := sm.Move()
+		mv, ok := sm.Move(e.Arg(r.RawRequest.Context(), nil, in))
 		if !ok {
 			continue
 		}
