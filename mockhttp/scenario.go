@@ -12,7 +12,7 @@ import (
 )
 
 // Scenarios returns every scenario, by name: those the server's mocks name, with their states and the moves of their
-// mocks, and those set without a mock.
+// mocks, and those set without a mock. A disabled mock counts, as it matches again once enabled.
 func (app *Server) Scenarios(ctx context.Context) ([]matchscenario.Scenario, error) {
 	uses, err := app.scenarioUses(ctx)
 	if err != nil {
@@ -52,15 +52,16 @@ func (app *Server) ResetScenarios() {
 	app.publishScenario("", "every scenario reset to "+matchscenario.StateStarted)
 }
 
-// scenarioUses lists the scenario matchers of the server's mocks.
+// scenarioUses lists the scenario matchers of the server's mocks, disabled ones too: a disabled mock matches again once
+// enabled, so its scenario keeps the states it names.
 func (app *Server) scenarioUses(ctx context.Context) (iter.Seq[matchscenario.Use], error) {
-	mocks, err := app.storage.List(ctx)
+	mocks, err := app.storage.PickAll(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("http: listing mocks: %w", err)
 	}
 
 	var uses []matchscenario.Use
-	for m := range mocks {
+	for _, m := range mocks {
 		for _, e := range m.spec.expectations {
 			if sm, ok := e.Matcher.(*matchscenario.Matcher); ok {
 				uses = append(uses, matchscenario.Use{MockID: m.ID(), Matcher: sm})

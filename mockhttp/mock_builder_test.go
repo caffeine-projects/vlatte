@@ -488,7 +488,8 @@ func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 	for _, mk := range mocks {
 		if s.fromFiles {
 			doc, err := json.Marshal(map[string]any{
-				"id": mk.ID,
+				"id":      mk.ID,
+				"enabled": !mk.Disabled,
 				"scenario": map[string]string{
 					"name": mk.Scenario, "required_state": mk.RequiredState, "new_state": mk.NewState,
 				},
@@ -502,7 +503,7 @@ func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 			continue
 		}
 
-		b := Getf("/scenario").ID(mk.ID).ScenarioIs(mk.Scenario).Reply(OK().PlainText(mk.ID))
+		b := Getf("/scenario").ID(mk.ID).Enabled(!mk.Disabled).ScenarioIs(mk.Scenario).Reply(OK().PlainText(mk.ID))
 		if mk.RequiredState != "" {
 			b.ScenarioStateIs(mk.RequiredState)
 		}
