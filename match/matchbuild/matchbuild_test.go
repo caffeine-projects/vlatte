@@ -2,6 +2,8 @@ package matchbuild
 
 import (
 	"context"
+	"crypto"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
@@ -16,6 +18,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/jose"
 	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/match"
 )
@@ -492,6 +495,66 @@ func TestBuildMatcher_EqualTakesNull(t *testing.T) {
 	require.False(t, matches(t, m, ""))
 }
 
+func TestBuildMatcher_JWT(t *testing.T) {
+	m, err := _registry.BuildMatcher([]any{"jwt", []any{"jsonPath", "$.claims.sub", []any{"equal", "ana"}}})
+	require.NoError(t, err)
+
+	// {"alg":"none"} and {"sub":"ana"}: jwt reads the claims without checking who signed them.
+	require.True(t, matches(t, m, "Bearer eyJhbGciOiJub25lIn0.eyJzdWIiOiJhbmEifQ."))
+	require.False(t, matches(t, m, "Bearer gho_opaque"))
+}
+
+func TestBuildMatcher_SignedJWT(t *testing.T) {
+	// Either form of the keys matches a token their key signed, and not one another key signed.
+	key, other := newSigningKey(t), newSigningKey(t)
+
+	jwk, err := jose.PublicJWK("ES256", "key-1", key.Public())
+	require.NoError(t, err)
+
+	text, err := json.Marshal(jose.JWKSet{Keys: []jose.JWK{jwk}})
+	require.NoError(t, err)
+
+	object, err := value.DecodeJSON(text)
+	require.NoError(t, err)
+
+	for name, keys := range map[string]any{"a JWK Set object": object, "a JWK Set as text": string(text)} {
+		t.Run(name, func(t *testing.T) {
+			m, err := _registry.BuildMatcher([]any{"signedJWT", keys, []any{"jsonpath", "$.claims.sub", []any{"equal", "ana"}}})
+			require.NoError(t, err)
+
+			require.True(t, matches(t, m, signToken(t, key, "key-1", `{"sub":"ana"}`)))
+			require.False(t, matches(t, m, signToken(t, key, "key-1", `{"sub":"bob"}`)))
+			require.False(t, matches(t, m, signToken(t, other, "key-1", `{"sub":"ana"}`)))
+		})
+	}
+
+	t.Run("keys that hold no key", func(t *testing.T) {
+		_, err := _registry.BuildMatcher([]any{"signedJWT", map[string]any{"keys": []any{}}, []any{"anything"}})
+		require.EqualError(t, err, "signedJWT takes keys: match: signedjwt: jose: the key set has no signing key")
+	})
+
+	t.Run("keys that aren't text or an object", func(t *testing.T) {
+		_, err := _registry.BuildMatcher([]any{"signedJWT", int64(1), []any{"anything"}})
+		require.EqualError(t, err, "signedJWT takes keys first: a JWK Set, a JWK or PEM public keys, not a number")
+	})
+
+	t.Run("no matcher", func(t *testing.T) {
+		_, err := _registry.BuildMatcher([]any{"signedJWT", string(text)})
+		require.EqualError(t, err, "signedJWT takes 2 arguments, not 1")
+	})
+
+	t.Run("a matcher that doesn't build", func(t *testing.T) {
+		_, err := _registry.BuildMatcher([]any{"signedJWT", string(text), []any{"nope"}})
+		require.EqualError(t, err, `signedJWT: unknown matcher "nope"`)
+	})
+}
+
+// _publicJWKS is the example P-256 key of RFC 7517 §A.1 twice: for encryption, which signedJWT skips, and signing.
+const _publicJWKS = `{"keys":[{"kty":"EC","crv":"P-256","x":"MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4",` +
+	`"y":"4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM","use":"enc","kid":"1"},` +
+	`{"kty":"EC","crv":"P-256","x":"MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4",` +
+	`"y":"4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM","use":"sig","kid":"2"}]}`
+
 func TestBuildMatcher_LoadsWhatMatchersDescribe(t *testing.T) {
 	// A mock describes its matchers in the format of mock files, so a description loads back, regexp included.
 	for _, m := range []vlatte.Matcher{
@@ -508,7 +571,8 @@ func TestBuildMatcher_LoadsWhatMatchersDescribe(t *testing.T) {
 		match.EqualDateTimeNow(match.TruncateExpected(match.FirstDayOfMonth), match.TruncateActual(match.LastDayOfYear),
 			match.TruncateLast(), match.ActualFormat("02/01/2006"), match.LocalTime()), match.URLPath("/a/*"),
 		match.RequestURI("/items?page=2&a=%2F"), match.ItemsMatch([]any{match.HasPrefix("a"), int64(2)}),
-		match.EqualBytes([]byte{0xff, 0xfe, 0x00}),
+		match.EqualBytes([]byte{0xff, 0xfe, 0x00}), match.JWT(match.Field("$.claims.sub", match.Equal("a"))),
+		match.SignedJWT(_publicJWKS, match.Anything()),
 	} {
 		desc, ok := vlatte.IsSelfDescriptive(m)
 		require.True(t, ok)
@@ -539,10 +603,10 @@ var _allowed = map[string][]int{
 	"before": {1, 2}, "after": {1, 2}, "eqdt": {1, 2}, "isin": {1}, "itemsmatch": {1}, "eqi": {1}, "glob": {1},
 	"hasprefix": {1}, "hassuffix": {1}, "regex": {1}, "haskey": {1}, "gt": {1}, "gte": {1}, "lt": {1}, "lte": {1},
 	"len": {1}, "each": {1}, "some": {1}, "not": {1}, "trim": {1}, "lowercase": {1}, "uppercase": {1}, "urlpath": {1},
-	"requesturi": {1}, "equalbytes": {1},
+	"requesturi": {1}, "equalbytes": {1}, "jwt": {1},
 	"hasexactly": {1, 2, 3},
 	"xpath":      {2, 3},
-	"item":       {2}, "jsonpath": {2}, "split": {2}, "both": {1, 2}, "either": {1, 2}, "xor": {1, 2}, "all": {1, 2, 3}, "any": {1, 2, 3},
+	"item":       {2}, "jsonpath": {2}, "split": {2}, "signedjwt": {2}, "both": {1, 2}, "either": {1, 2}, "xor": {1, 2}, "all": {1, 2, 3}, "any": {1, 2, 3},
 }
 
 func TestPropBuildMatcher_Arguments(t *testing.T) {
@@ -640,4 +704,24 @@ func genArg() *rapid.Generator[any] {
 			map[string]any{"a": int64(1)},
 		}),
 	)
+}
+
+// newSigningKey returns a new ES256 key.
+func newSigningKey(t *testing.T) crypto.Signer {
+	t.Helper()
+
+	key, err := jose.GenerateKey("ES256")
+	require.NoError(t, err)
+
+	return key
+}
+
+// signToken returns a token of claims, signed by key with ES256 as kid.
+func signToken(t *testing.T, key crypto.Signer, kid, claims string) string {
+	t.Helper()
+
+	token, err := jose.Sign("ES256", kid, key, []byte(claims))
+	require.NoError(t, err)
+
+	return token
 }

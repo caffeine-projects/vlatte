@@ -38,6 +38,8 @@ The matchers of the `match` package, by their Go name and their name in mock fil
 | `ItemsMatch` with matchers | `hasexactly` | [Lists and objects](/matchers/lists-objects) |
 | `HasKey(path)` | `haskey` | [Lists and objects](/matchers/lists-objects) |
 | `JSONPath(path, m)`, `Field` | `jsonpath`, `field` | [JSON and XML](/matchers/json-xml) |
+| `JWT(m)` | `jwt` | [JSON and XML](/matchers/json-xml#jwts) |
+| `SignedJWT(keys, m)` | `signedjwt` | [JSON and XML](/matchers/json-xml#jwts) |
 | `EqualJSON(doc, opts...)`, `EQJ` | `equaljson`, `eqj` | [JSON and XML](/matchers/json-xml) |
 | `JSONSchema(schema, opts...)` | `jsonschema` | [JSON and XML](/matchers/json-xml) |
 | `EqualXML(doc, opts...)`, `EQX` | `equalxml`, `eqx` | [JSON and XML](/matchers/json-xml) |

@@ -1,0 +1,11 @@
+# The API, which serves a token the issuer signed, for it, and not expired.
+request:
+  method: GET
+  path: /orders
+  header:
+    Authorization: [signedjwt, ISSUER_PUBLIC_KEY, [jsonpath, $.claims.aud, [equal, orders]]]
+response:
+  status: 200
+  header:
+    Content-Type: application/json
+  body: '[{"id": 1, "total": 42}]'

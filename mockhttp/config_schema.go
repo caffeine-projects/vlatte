@@ -13,6 +13,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
+	"github.com/caffeine-projects/vlatte/internal/tmplfunc"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
@@ -158,6 +159,14 @@ var _recordRepeats = []config.Choice{
 	{Name: "first", Value: int64(vlatte.RecordFirst)},
 }
 
+var _noMatchFormats = []config.Choice{
+	{Name: "auto", Value: int64(NoMatchAuto)},
+	{Name: "text", Value: int64(NoMatchText)},
+	{Name: "markdown", Value: int64(NoMatchMarkdown)},
+	{Name: "json", Value: int64(NoMatchJSON)},
+	{Name: "problem", Value: int64(NoMatchProblem)},
+}
+
 var _logVerbosities = []config.Choice{
 	{Name: vlatte.LogBasic.String(), Value: int64(vlatte.LogBasic)},
 	{Name: vlatte.LogHeader.String(), Value: int64(vlatte.LogHeader)},
@@ -207,6 +216,11 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				c.RequestWasNotMatchedStatusCode = int(v.Int)
 				return checkStatus(v.Int)
 			},
+		},
+		{
+			Key: "no_match_format", Kind: config.Int, Choices: _noMatchFormats, Default: choiceName(_noMatchFormats, int64(d.NoMatchFormat)),
+			Usage: "Format of the response to a request that matches no mock. auto follows its Accept header.",
+			Set:   func(c *Config, v config.Value) error { c.NoMatchFormat = NoMatchFormat(v.Int); return nil },
 		},
 		{
 			Key: "error_status_code", Kind: config.Int, Default: strconv.Itoa(d.ErrorStatusCode),
@@ -433,6 +447,15 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				_, err := vlatte.NewGoTemplateEngine(vlatte.WithEnv(v.List...))
 
 				return err
+			},
+		},
+		{
+			Key: "template.keys", Kind: config.List,
+			Usage: "Keys templates sign tokens with, jwt, and publish, jwks: kid=ALG generates one at start, such as " +
+				"google-1=RS256, and kid=ALG:path reads a PEM private key, relative paths starting at root_dir.",
+			Set: func(c *Config, v config.Value) error {
+				c.TemplateKeys = v.List
+				return tmplfunc.CheckKeySpecs(v.List)
 			},
 		},
 		{

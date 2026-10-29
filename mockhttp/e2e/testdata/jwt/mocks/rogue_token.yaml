@@ -1,0 +1,15 @@
+# A token endpoint of another issuer, that signs with a key the API doesn't trust.
+request:
+  method: POST
+  path: /rogue/token
+response:
+  status: 200
+  header:
+    Content-Type: application/json
+  body: >-
+    {"token_type": "Bearer", "access_token": "{{
+    printf `{"iss": "https://auth.example", "sub": "billing", "aud": "orders", "exp": %s}`
+    (now | timeAdd "1h" | formatTime "unix")
+    | jwt "rogue" }}"}
+  template:
+    enabled: true

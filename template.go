@@ -1,6 +1,7 @@
 package vlatte
 
 import (
+	"crypto"
 	"errors"
 	"fmt"
 	"io"
@@ -109,6 +110,10 @@ var _missingKeyModes = []string{"default", "invalid", "zero", "error"}
 //   - Hashes: hash, such as {{ hash "sha256" "hex" .Request.Body.String }}, and hmac.
 //   - env: the value of an environment variable WithEnv allows. A name env is given as a literal and isn't allowed
 //     fails the template when it compiles.
+//   - Tokens: jwt, a JWT signed with a key WithSigningKey added, as in {{ jwt "key-1" $claims }}, where the claims
+//     are JSON text or a map, such as fromJSON returns, and the token holds them and no other; and jwks, the JWK Set
+//     of the public halves of the keys named, as in {{ jwks "key-1" "key-2" }}. A key named as a literal that the
+//     engine doesn't hold fails the template when it compiles.
 //
 // A missing map key is an error, so a typo doesn't render as "<no value>". Read an optional key with index, which
 // gives the zero value, as in {{ with index .Extra "name" }}{{ . }}{{ end }}, or change the rule with WithMissingKey.
@@ -117,6 +122,8 @@ type GoTemplateEngine struct {
 	missingKey string
 	env        tmplfunc.Env
 	customEnv  bool // whether WithTemplateFuncs replaced env, so Compile doesn't check its names
+	keys       tmplfunc.Keys
+	customKeys bool // whether WithTemplateFuncs replaced jwt or jwks, so Compile doesn't check their keys
 }
 
 // GoTemplateOption configures a GoTemplateEngine.
@@ -126,6 +133,8 @@ type GoTemplateOption func(*GoTemplateEngine) error
 func NewGoTemplateEngine(opts ...GoTemplateOption) (*GoTemplateEngine, error) {
 	e := &GoTemplateEngine{funcs: tmplfunc.Funcs(), missingKey: "error"}
 	e.funcs["env"] = e.env.Get
+	e.funcs["jwt"] = e.keys.JWT
+	e.funcs["jwks"] = e.keys.JWKS
 
 	for _, opt := range opts {
 		if err := opt(e); err != nil {
@@ -152,6 +161,16 @@ func WithEnv(names ...string) GoTemplateOption {
 	return func(e *GoTemplateEngine) error { return e.env.Allow(names...) }
 }
 
+// WithSigningKey adds key, which jwt signs with as kid and jwks publishes the public half of, with algorithm alg:
+// RS256, RS384, RS512, PS256, PS384 or PS512 for an *rsa.PrivateKey of 2048 bits or more; ES256, ES384 or ES512 for an
+// *ecdsa.PrivateKey on P-256, P-384 or P-521; EdDSA for an ed25519.PrivateKey. HMAC algorithms are refused: no
+// provider publishes the secret of one, so a client that accepts them is the bug a mock should catch. An empty or
+// repeated kid, or a key that doesn't fit alg, is an error. The engine never prints a private key: templates read only
+// the tokens and the public halves.
+func WithSigningKey(kid, alg string, key crypto.Signer) GoTemplateOption {
+	return func(e *GoTemplateEngine) error { return e.keys.Add(kid, alg, key) }
+}
+
 // WithTemplateFuncs adds functions templates can call, by name. A function replaces a built-in one of the same
 // name. Each must be a function text/template can call: one result, or two with an error second.
 func WithTemplateFuncs(funcs map[string]any) GoTemplateOption {
@@ -164,6 +183,11 @@ func WithTemplateFuncs(funcs map[string]any) GoTemplateOption {
 
 		if _, ok := funcs["env"]; ok {
 			e.customEnv = true
+		}
+
+		_, jwt := funcs["jwt"]
+		if _, jwks := funcs["jwks"]; jwt || jwks {
+			e.customKeys = true
 		}
 
 		return nil
@@ -186,7 +210,8 @@ func WithMissingKey(mode string) GoTemplateOption {
 }
 
 // Compile parses text as a Go template. The error is text/template's, such as "template: body:1: unclosed action",
-// or names an environment variable env is given and the engine doesn't allow.
+// or names an environment variable env is given and the engine doesn't allow, or a key jwt or jwks is given and the
+// engine doesn't hold.
 func (e *GoTemplateEngine) Compile(name, text string) (Template, error) {
 	if e.missingKey == "" {
 		return nil, errors.New("vlatte: go template engine: create it with NewGoTemplateEngine")
@@ -200,6 +225,12 @@ func (e *GoTemplateEngine) Compile(name, text string) (Template, error) {
 	if !e.customEnv {
 		if err := e.env.Check(t); err != nil {
 			return nil, fmt.Errorf("template: %s: env: %w", name, err)
+		}
+	}
+
+	if !e.customKeys {
+		if err := e.keys.Check(t); err != nil {
+			return nil, fmt.Errorf("template: %s: %w", name, err)
 		}
 	}
 

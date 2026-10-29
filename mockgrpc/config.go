@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"path/filepath"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -29,6 +30,11 @@ const _defaultShutdownTimeout = 5 * time.Second
 // the server makes without one.
 var errTemplateEnvWithEngine = errors.New("config: grpc.template.env configures the default template engine, and the " +
 	"server has a TemplateEngine: allow the variables on it with vlatte.WithEnv")
+
+// errTemplateKeysWithEngine says a server has both a TemplateEngine and grpc.template.keys, which configures the
+// engine the server makes without one.
+var errTemplateKeysWithEngine = errors.New("config: grpc.template.keys configures the default template engine, and " +
+	"the server has a TemplateEngine: add the keys on it with vlatte.WithSigningKey")
 
 // Config configures a Server. As an Option, it sets every field of the server's configuration, its zero values
 // included: [Setup] sets only what its methods set, so its options compose.
@@ -112,6 +118,12 @@ type Config struct {
 	// error: allow them on that engine with vlatte.WithEnv.
 	TemplateEnv []string
 
+	// TemplateKeys are the keys templates sign tokens with, jwt, and publish, jwks, from the setting
+	// grpc.template.keys: "kid=ALG" generates a key when the server is made, a new one each time, and
+	// "kid=ALG:path/to/key.pem" reads one, a relative path starting at RootDir. Like TemplateEnv, it configures the
+	// default engine only: add keys to an engine of your own with vlatte.WithSigningKey.
+	TemplateKeys []string
+
 	// TemplateDataProviders add data to templates, which read it as .Provided.<Key>. Two of the same key are an error.
 	TemplateDataProviders []TemplateDataProvider
 
@@ -189,6 +201,15 @@ type JournalConfig struct {
 func (c *Config) Apply(conf *Config) error {
 	*conf = *c
 	return nil
+}
+
+// path returns where the file p is: a relative path starts at RootDir.
+func (c *Config) path(p string) string {
+	if filepath.IsAbs(p) {
+		return p
+	}
+
+	return filepath.Join(c.RootDir, p)
 }
 
 func defaultConfig() *Config {
@@ -393,6 +414,12 @@ func (cb *ConfigBuilder) TemplateEngine(e vlatte.TemplateEngine) *ConfigBuilder 
 // See Config.TemplateEnv.
 func (cb *ConfigBuilder) TemplateEnv(names ...string) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.TemplateEnv = names })
+}
+
+// TemplateKeys sets the keys the templates of the server's default engine sign and publish with: see
+// Config.TemplateKeys.
+func (cb *ConfigBuilder) TemplateKeys(specs ...string) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.TemplateKeys = specs })
 }
 
 // OutboundAllow adds the ranges the server may connect to: once set, it refuses every other address. See
