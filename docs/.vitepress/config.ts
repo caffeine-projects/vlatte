@@ -153,6 +153,7 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Settings', link: '/reference/settings' },
     ],
   },
+  { text: 'Contributing', link: '/contributing' },
 ]
 
 export default defineConfig({
