@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 // anyOfMatcher passes when any of the inner matchers pass.
@@ -39,14 +38,14 @@ func (m *anyOfMatcher) Match(arg vlatte.MatcherArg) (ok bool, e error) {
 	return mismatch("Any() none matched")
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *anyOfMatcher) Describe() descriptor.Descriptor {
+// Describe implements vlatte.SelfDescriptive.
+func (m *anyOfMatcher) Describe() vlatte.Descriptor {
 	d := make([]any, 0, len(m.Matchers))
 	for _, v := range m.Matchers {
-		if vv, ok := v.(descriptor.SelfDescriptive); ok {
+		if vv, ok := v.(vlatte.SelfDescriptive); ok {
 			d = append(d, vv.Describe())
 		}
 	}
 
-	return descriptor.MultiArgs("any", d)
+	return vlatte.DescribeMultiArgs("any", d)
 }

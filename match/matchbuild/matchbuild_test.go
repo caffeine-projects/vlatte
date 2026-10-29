@@ -16,7 +16,6 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/match"
 )
@@ -362,7 +361,7 @@ func TestBuildMatcher_JSONSchemaObjectDescribesTheSameEachTime(t *testing.T) {
 		m, err := _registry.BuildMatcher([]any{"jsonschema", schema})
 		require.NoError(t, err)
 
-		data, err := m.(descriptor.SelfDescriptive).Describe().MarshalJSON()
+		data, err := m.(vlatte.SelfDescriptive).Describe().MarshalJSON()
 		require.NoError(t, err)
 
 		if i == 0 {
@@ -511,7 +510,7 @@ func TestBuildMatcher_LoadsWhatMatchersDescribe(t *testing.T) {
 		match.RequestURI("/items?page=2&a=%2F"), match.ItemsMatch([]any{match.HasPrefix("a"), int64(2)}),
 		match.EqualBytes([]byte{0xff, 0xfe, 0x00}),
 	} {
-		desc, ok := descriptor.IsSelfDescriptive(m)
+		desc, ok := vlatte.IsSelfDescriptive(m)
 		require.True(t, ok)
 
 		data, err := desc.MarshalJSON()
@@ -524,7 +523,7 @@ func TestBuildMatcher_LoadsWhatMatchersDescribe(t *testing.T) {
 		require.NoError(t, err, "%s", data)
 
 		// The same matcher loads back, options included: it describes itself the same.
-		loadedDesc, ok := descriptor.IsSelfDescriptive(loaded)
+		loadedDesc, ok := vlatte.IsSelfDescriptive(loaded)
 		require.True(t, ok)
 
 		loadedData, err := loadedDesc.MarshalJSON()

@@ -6,7 +6,6 @@ import (
 	"github.com/ohler55/ojg/jp"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 // hasKeyMatcher passes if the JSON key at the given path is present.
@@ -35,7 +34,7 @@ func (m *hasKeyMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return success()
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *hasKeyMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("hasKey", m.Path)
+// Describe implements vlatte.SelfDescriptive.
+func (m *hasKeyMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("hasKey", m.Path)
 }

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
@@ -34,7 +33,8 @@ type Query struct {
 	// request has none.
 	Header map[string]vlatte.Matcher
 
-	// Body gets the body as text.
+	// Body gets the body as text. A query the rest of which selects an entry whose body the journal cut fails with
+	// [vlatte.ErrMatching]: what was cut may hold what Body looks for.
 	Body vlatte.Matcher
 
 	// Limit is the most entries Find returns, the newest first; 0 returns them all. Count leaves it out.
@@ -43,6 +43,10 @@ type Query struct {
 	// Before selects the entries with a lower sequence number, those that follow a page Find returned, which its Next
 	// names. Count leaves it out.
 	Before uint64
+
+	// After selects the entries with a greater sequence number, those appended since the entry it names, such as the
+	// newest one [Journal.Last] returned before a test sent its requests. Count selects by it too.
+	After uint64
 }
 
 // Page is a page of the entries a query selects, the newest first. Count is the number of entries the query
@@ -150,6 +154,10 @@ func acceptedValues[K comparable](ctx context.Context, m vlatte.Matcher, values 
 
 // keeps tells whether row, a candidate, is one q selects by the fields rows hold that the index doesn't.
 func (q *Query) keeps(ctx context.Context, row *journalRow) (bool, error) {
+	if row.Seq <= q.After {
+		return false, nil
+	}
+
 	if !q.Since.IsZero() && row.Time.Before(q.Since) {
 		return false, nil
 	}
@@ -173,13 +181,15 @@ func (q *Query) readsEntries(filters []Filter) bool {
 // selects tells whether q, with filters, selects e by what only its file holds.
 func (q *Query) selects(ctx context.Context, e *Entry, filters []Filter) (bool, error) {
 	for name, m := range q.Header {
-		ok, err := matchValue(ctx, m, firstValue(e.Header, name))
+		ok, err := matchValue(ctx, m, e.HeaderValue(name))
 		if err != nil || !ok {
 			return false, err
 		}
 	}
 
-	if q.Body != nil {
+	// A body the journal cut can't tell whether the whole matched: the rest of the query goes first, as a miss there
+	// is a miss.
+	if q.Body != nil && !e.BodyTruncated {
 		ok, err := matchValue(ctx, q.Body, string(e.Body))
 		if err != nil || !ok {
 			return false, err
@@ -191,6 +201,10 @@ func (q *Query) selects(ctx context.Context, e *Entry, filters []Filter) (bool, 
 		if err != nil || !ok {
 			return false, err
 		}
+	}
+
+	if q.Body != nil && e.BodyTruncated {
+		return false, fmt.Errorf("journal: %w: entry %d: %w, which the query reads", vlatte.ErrMatching, e.Seq, ErrBodyCut)
 	}
 
 	return true, nil
@@ -238,21 +252,6 @@ func matchValue(ctx context.Context, m vlatte.Matcher, v any) (ok bool, err erro
 	}
 
 	return ok, nil
-}
-
-// firstValue returns the first value of the header of h named name, in any case, or "".
-func firstValue(h map[string][]string, name string) string {
-	if values := h[name]; len(values) > 0 {
-		return values[0]
-	}
-
-	for k, values := range h {
-		if strings.EqualFold(k, name) && len(values) > 0 {
-			return values[0]
-		}
-	}
-
-	return ""
 }
 
 // searchRows returns where seq is in rows, ordered by sequence number, or would be, and whether it is.

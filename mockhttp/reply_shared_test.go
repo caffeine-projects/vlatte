@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte"
 )
 
 // counting answers with how many requests it has served.
@@ -67,8 +67,8 @@ func (teapot) Reply(context.Context, ReplyInput) (*Response, error) {
 	return &Response{StatusCode: http.StatusTeapot}, nil
 }
 
-func (teapot) Describe() descriptor.Descriptor {
-	return descriptor.New("teapot", map[string]any{"short": true})
+func (teapot) Describe() vlatte.Descriptor {
+	return vlatte.NewDescriptor("teapot", map[string]any{"short": true})
 }
 
 func TestShared_DescribesAsItsReplier(t *testing.T) {

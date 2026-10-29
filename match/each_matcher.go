@@ -6,7 +6,6 @@ import (
 	"slices"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -46,11 +45,11 @@ func (m *eachMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return success()
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *eachMatcher) Describe() descriptor.Descriptor {
-	if desc, ok := descriptor.IsSelfDescriptive(m.Matcher); ok {
-		return descriptor.MultiArgs("each", desc)
+// Describe implements vlatte.SelfDescriptive.
+func (m *eachMatcher) Describe() vlatte.Descriptor {
+	if desc, ok := vlatte.IsSelfDescriptive(m.Matcher); ok {
+		return vlatte.DescribeMultiArgs("each", desc)
 	}
 
-	return descriptor.KeyOnly("each")
+	return vlatte.DescribeKeyOnly("each")
 }

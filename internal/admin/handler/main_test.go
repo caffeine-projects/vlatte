@@ -21,7 +21,6 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
@@ -31,17 +30,13 @@ import (
 )
 
 var (
-	_ vlatte.Mock                = (*fakeMock)(nil)
-	_ descriptor.SelfDescriptive = (*fakeMock)(nil)
-	_ io.Closer                  = (*fakeMock)(nil)
+	_ vlatte.Mock            = (*fakeMock)(nil)
+	_ vlatte.SelfDescriptive = (*fakeMock)(nil)
+	_ io.Closer              = (*fakeMock)(nil)
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(
-		m,
-		goleak.IgnoreTopFunction("net/http.(*persistConn).readLoop"),
-		goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),
-	)
+	goleak.VerifyTestMain(m)
 }
 
 // fakeMock is a mock of no protocol: the admin API knows mocks through vlatte.Mock and the interfaces it checks for.
@@ -68,7 +63,7 @@ func (m *fakeMock) Events() vlatte.Events { return vlatte.Events{} }
 func (m *fakeMock) String() string        { return m.id }
 func (m *fakeMock) Origin() string        { return m.origin }
 
-func (m *fakeMock) Describe() descriptor.Descriptor { return descriptor.Root(m.doc) }
+func (m *fakeMock) Describe() vlatte.Descriptor { return vlatte.DescribeRoot(m.doc) }
 
 func (m *fakeMock) Close() error {
 	m.closed.Add(1)

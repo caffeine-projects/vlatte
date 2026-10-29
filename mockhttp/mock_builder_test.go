@@ -19,7 +19,6 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 )
@@ -462,7 +461,7 @@ func TestBuilder_MatchesDescribesUnderCustom(t *testing.T) {
 
 	request, ok := desc["request"].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, []any{descriptor.SingleArg("not", descriptor.KeyOnly("nil"))}, request["custom"])
+	require.Equal(t, []any{vlatte.DescribeSingleArg("not", vlatte.DescribeKeyOnly("nil"))}, request["custom"])
 }
 
 // scenarioServer runs the scenario suite on a server whose mocks are built in Go, or from mock files.

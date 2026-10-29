@@ -7,7 +7,6 @@ import (
 	"github.com/ohler55/ojg/jp"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -56,9 +55,9 @@ func (m *jsonPathMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"Field(", m.Path, ") value did not match"}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *jsonPathMatcher) Describe() descriptor.Descriptor {
-	return descriptor.MultiArgs("jsonPath", m.Path, describe(m.Matcher))
+// Describe implements vlatte.SelfDescriptive.
+func (m *jsonPathMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeMultiArgs("jsonPath", m.Path, describe(m.Matcher))
 }
 
 // jsonDoc returns the document a value holds: text, such as a request body, read as JSON the way documents are

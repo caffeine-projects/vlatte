@@ -6,7 +6,6 @@ import (
 	"github.com/ryanuber/go-glob"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -33,7 +32,7 @@ func (m *globMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"Glob(", m.Pattern, ") ", text}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *globMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("glob", m.Pattern)
+// Describe implements vlatte.SelfDescriptive.
+func (m *globMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("glob", m.Pattern)
 }

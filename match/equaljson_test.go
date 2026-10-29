@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 func TestToEqualJSON(t *testing.T) {
@@ -176,11 +175,11 @@ func TestEqualJSON_IgnoreArrayOrderPairsNestedItems(t *testing.T) {
 }
 
 func TestEqualJSON_DescribesItsOptions(t *testing.T) {
-	data, err := EqualJSON(`{"a": 1}`, IgnoreArrayOrder(), IgnoreExtraElements()).(descriptor.SelfDescriptive).Describe().MarshalJSON()
+	data, err := EqualJSON(`{"a": 1}`, IgnoreArrayOrder(), IgnoreExtraElements()).(vlatte.SelfDescriptive).Describe().MarshalJSON()
 	require.NoError(t, err)
 	require.JSONEq(t, `["eqj", "{\"a\": 1}", {"ignore_array_order": true, "ignore_extra_elements": true}]`, string(data))
 
-	data, err = EqualJSON(`{"a": 1}`).(descriptor.SelfDescriptive).Describe().MarshalJSON()
+	data, err = EqualJSON(`{"a": 1}`).(vlatte.SelfDescriptive).Describe().MarshalJSON()
 	require.NoError(t, err)
 	require.JSONEq(t, `["eqj", "{\"a\": 1}"]`, string(data))
 }

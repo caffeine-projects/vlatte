@@ -67,6 +67,7 @@ func NewMCP(ops *Operations) *mcp.Server {
 	if ops.HasJournal() {
 		addListRequestsTool(s, ops)
 		addQueryRequestsTool(s, ops)
+		addVerifyRequestsTool(s, ops)
 		addGetRequestTool(s, ops)
 		addClearRequestsTool(s, ops)
 	}

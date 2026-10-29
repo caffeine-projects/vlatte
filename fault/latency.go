@@ -11,13 +11,12 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ vlatte.Step                = latencyStep{}
-	_ descriptor.SelfDescriptive = latencyStep{}
-	_ vlatte.Stage               = (*latencyStage)(nil)
+	_ vlatte.Step            = latencyStep{}
+	_ vlatte.SelfDescriptive = latencyStep{}
+	_ vlatte.Stage           = (*latencyStage)(nil)
 )
 
 // Latency returns a step that delays every write and flush by latency, give or take jitter at random, to test a client
@@ -46,13 +45,13 @@ type latencyStep struct {
 	jitter  time.Duration
 }
 
-// Describe implements [descriptor.SelfDescriptive], without a jitter of 0.
-func (l latencyStep) Describe() descriptor.Descriptor {
+// Describe implements [vlatte.SelfDescriptive], without a jitter of 0.
+func (l latencyStep) Describe() vlatte.Descriptor {
 	if l.jitter == 0 {
-		return descriptor.WithKeyValuePairs("latency", "type", "latency", "latency", l.latency.String())
+		return vlatte.DescribeKeyValuePairs("latency", "type", "latency", "latency", l.latency.String())
 	}
 
-	return descriptor.WithKeyValuePairs("latency", "type", "latency", "latency", l.latency.String(), "jitter", l.jitter.String())
+	return vlatte.DescribeKeyValuePairs("latency", "type", "latency", "latency", l.latency.String(), "jitter", l.jitter.String())
 }
 
 func (l latencyStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {

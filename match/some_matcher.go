@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -37,7 +36,7 @@ func (m *someMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch("Some() no element matched")
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *someMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("some", describe(m.Matcher))
+// Describe implements vlatte.SelfDescriptive.
+func (m *someMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("some", describe(m.Matcher))
 }

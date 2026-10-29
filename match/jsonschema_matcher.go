@@ -6,13 +6,12 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match/internal/anyconv"
 )
 
 var (
-	_ vlatte.Matcher             = (*jsonSchemaMatcher)(nil)
-	_ descriptor.SelfDescriptive = (*jsonSchemaMatcher)(nil)
+	_ vlatte.Matcher         = (*jsonSchemaMatcher)(nil)
+	_ vlatte.SelfDescriptive = (*jsonSchemaMatcher)(nil)
 )
 
 // jsonSchemaMatcher passes when the JSON of the value conforms to the schema.
@@ -38,11 +37,11 @@ func (m *jsonSchemaMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"JSONSchema() Got: ", anyconv.Stringify(v)}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *jsonSchemaMatcher) Describe() descriptor.Descriptor {
+// Describe implements vlatte.SelfDescriptive.
+func (m *jsonSchemaMatcher) Describe() vlatte.Descriptor {
 	if !m.drafted {
-		return descriptor.SingleArg("jsonSchema", m.Schema)
+		return vlatte.DescribeSingleArg("jsonSchema", m.Schema)
 	}
 
-	return descriptor.MultiArgs("jsonSchema", m.Schema, map[string]any{"draft": m.draft.String()})
+	return vlatte.DescribeMultiArgs("jsonSchema", m.Schema, map[string]any{"draft": m.draft.String()})
 }

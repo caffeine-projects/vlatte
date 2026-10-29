@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -37,7 +36,7 @@ func (m *lowerCaseMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch("Lower() value did not match")
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *lowerCaseMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("lowercase", describe(m.Matcher))
+// Describe implements vlatte.SelfDescriptive.
+func (m *lowerCaseMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("lowercase", describe(m.Matcher))
 }

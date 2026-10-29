@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -30,7 +29,7 @@ func (m *hasPrefixMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"HasPrefix(", m.Prefix, ") Prefix is not present. Got: ", txt}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *hasPrefixMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("hasPrefix", m.Prefix)
+// Describe implements vlatte.SelfDescriptive.
+func (m *hasPrefixMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("hasPrefix", m.Prefix)
 }

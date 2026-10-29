@@ -15,7 +15,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
@@ -406,9 +405,9 @@ func (rep *Reply) Gzip() *Reply {
 	return rep
 }
 
-// Describe implements [descriptor.SelfDescriptive]: the reply in the mock file format. A body that isn't valid UTF-8
+// Describe implements [vlatte.SelfDescriptive]: the reply in the mock file format. A body that isn't valid UTF-8
 // is described in base64.
-func (rep *Reply) Describe() descriptor.Descriptor {
+func (rep *Reply) Describe() vlatte.Descriptor {
 	headers := rep.response.Header.Clone()
 	for _, cookie := range rep.response.Cookies {
 		headers.Add("Set-Cookie", cookie.String())
@@ -466,7 +465,7 @@ func (rep *Reply) Describe() descriptor.Descriptor {
 		response["template"] = tmpl
 	}
 
-	return descriptor.New("response", response)
+	return vlatte.NewDescriptor("response", response)
 }
 
 // NewReplier implements ReplierFactory. It compiles the templates of the reply with the template engine of app into a

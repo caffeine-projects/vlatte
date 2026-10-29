@@ -31,7 +31,7 @@ See [Mock lifecycle](/features/mock-lifecycle), [Scenarios](/features/scenarios)
 
 ## The server
 
-A gRPC server keeps a [journal](/features/journal#in-grpc) of its calls with `Setup().Journal(dir)`, which tests verify with the same builders, serves an [admin API](/run/admin-api) with `Setup().Admin(admin.MustNew())`, whose mocks `Setup().AdminStore(mockgrpc.FileStore(dir))` [keeps](/run/admin-api#persistent-admin-mocks) across restarts, and answers a call no mock matched with `Setup().NoMatchCode(code)`, `NotFound` by default. `Setup().ServerOptions(...)` passes options to the `grpc.Server`, such as interceptors.
+A gRPC server keeps a [journal](/features/journal#in-grpc) of its calls with `Setup().Journal(dir)`, which tests [verify](/verify/) as HTTP tests do, serves an [admin API](/run/admin-api) with `Setup().Admin(admin.MustNew())`, whose mocks `Setup().AdminStore(mockgrpc.FileStore(dir))` [keeps](/run/admin-api#persistent-admin-mocks) across restarts, and answers a call no mock matched with `Setup().NoMatchCode(code)`, `NotFound` by default. `Setup().ServerOptions(...)` passes options to the `grpc.Server`, such as interceptors.
 
 ## In this section
 

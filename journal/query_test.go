@@ -1,6 +1,7 @@
 package journal_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -61,4 +62,47 @@ func TestJournal_AHeaderNamedAsAskedComesFirst(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 16, count, name)
 	}
+}
+
+func TestJournal_AfterSelectsWhatCameSinceAPointInTheJournal(t *testing.T) {
+	// A test that shares a server counts the requests it sent, and none of those before: it takes the newest sequence
+	// number before it sends them, and selects the entries after it. Count selects by it too, unlike Before, so a
+	// count is of the same entries Find returns. A Clear between keeps it right, as numbers go on.
+	j := newJournal(t, journal.Options{})
+	require.NoError(t, j.Append(entry("a")))
+	require.NoError(t, j.Append(entry("b")))
+
+	mark := j.Last()
+	require.Equal(t, uint64(2), mark)
+
+	require.NoError(t, j.Append(entry("c")))
+	require.NoError(t, j.Append(entry("d", func(e *journal.Entry) { e.Method = "POST" })))
+
+	require.Equal(t, []string{"d", "c"}, find(t, j, journal.Query{After: mark}))
+	require.Equal(t, []string{"c"}, find(t, j, journal.Query{After: mark, Method: match.Equal("GET")}))
+	require.Empty(t, find(t, j, journal.Query{After: j.Last()}))
+
+	mark = j.Last()
+	require.NoError(t, j.Clear())
+	require.NoError(t, j.Append(entry("e")))
+	require.Equal(t, []string{"e"}, find(t, j, journal.Query{After: mark}))
+}
+
+func TestJournal_ABodyQueryCantTellOfABodyTheJournalCut(t *testing.T) {
+	// The journal keeps MaxBodySize bytes of a body. A query of the body matched the part kept as if it were the
+	// whole, so a request whose cut-off part held what the query looks for counted as a miss, and a verification that
+	// none came passed. The query fails instead, once the rest of it matches; a query the rest rules out still counts.
+	j := newJournal(t, journal.Options{MaxBodySize: 4})
+	require.NoError(t, j.Append(entry("a", func(e *journal.Entry) { e.Body = []byte("abcd-and-the-rest") })))
+
+	_, err := j.Count(t.Context(), journal.Query{Body: match.HasSuffix("rest")})
+	require.ErrorIs(t, err, vlatte.ErrMatching)
+	require.ErrorIs(t, err, journal.ErrBodyCut)
+
+	count, err := j.Count(t.Context(), journal.Query{Body: match.HasSuffix("rest"), Header: map[string]vlatte.Matcher{"X-Other": match.Equal("1")}})
+	require.NoError(t, err)
+	require.Zero(t, count, "the header rules it out: what the body holds doesn't count")
+
+	_, err = j.Find(t.Context(), journal.Query{Body: match.HasSuffix("rest")}, func(context.Context, *journal.Entry) (bool, error) { return false, nil })
+	require.NoError(t, err, "a filter rules it out")
 }

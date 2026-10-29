@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 func xmlMatches(t *testing.T, m vlatte.Matcher, v any) bool {
@@ -119,11 +118,11 @@ func TestEqualXML_PanicsOnWhatIsntXML(t *testing.T) {
 }
 
 func TestEqualXML_DescribesItsOptions(t *testing.T) {
-	data, err := EqualXML(`<a/>`).(descriptor.SelfDescriptive).Describe().MarshalJSON()
+	data, err := EqualXML(`<a/>`).(vlatte.SelfDescriptive).Describe().MarshalJSON()
 	require.NoError(t, err)
 	require.JSONEq(t, `["eqx", "<a/>"]`, string(data))
 
-	data, err = EqualXML(`<a/>`, IgnoreChildOrder(), XMLNamespaces(XMLNamespacesStrict)).(descriptor.SelfDescriptive).Describe().MarshalJSON()
+	data, err = EqualXML(`<a/>`, IgnoreChildOrder(), XMLNamespaces(XMLNamespacesStrict)).(vlatte.SelfDescriptive).Describe().MarshalJSON()
 	require.NoError(t, err)
 	require.JSONEq(t, `["eqx", "<a/>", {"ignore_child_order": true, "namespaces": "strict"}]`, string(data))
 }

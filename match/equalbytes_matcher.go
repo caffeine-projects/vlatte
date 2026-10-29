@@ -4,13 +4,12 @@ import (
 	"encoding/base64"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 var (
-	_ vlatte.Matcher             = (*equalBytesMatcher)(nil)
-	_ descriptor.SelfDescriptive = (*equalBytesMatcher)(nil)
+	_ vlatte.Matcher         = (*equalBytesMatcher)(nil)
+	_ vlatte.SelfDescriptive = (*equalBytesMatcher)(nil)
 )
 
 // equalBytesMatcher passes when the value is text of the expected bytes.
@@ -37,7 +36,7 @@ func (m *equalBytesMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		base64.StdEncoding.EncodeToString([]byte(txt)))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *equalBytesMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("equalbytes", base64.StdEncoding.EncodeToString(m.Expected))
+// Describe implements vlatte.SelfDescriptive.
+func (m *equalBytesMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("equalbytes", base64.StdEncoding.EncodeToString(m.Expected))
 }

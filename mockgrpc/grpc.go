@@ -25,9 +25,9 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
-	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
+	"github.com/caffeine-projects/vlatte/verify"
 )
 
 var (
@@ -50,7 +50,7 @@ const Kind vlatte.Kind = "grpc"
 // again.
 type Server struct {
 	*vlatte.Base[*Mock, *Server]
-	*journal.Verifier[*Mock, *Server]
+	*verify.Verifier[*Mock, *Server]
 
 	server *grpc.Server
 	config *Config
@@ -240,7 +240,7 @@ func New(config ...Option) (*Server, error) {
 
 	app.ownsCreds = keepsCreds(srv, app.creds)
 	app.Base = vlatte.NewBase(app, store)
-	app.Verifier = journal.NewVerifier[*Mock, *Server](j, app)
+	app.Verifier = verify.NewVerifier(j, verify.Protocol[*Mock, *Server]{Patterns: app, NoMethod: true})
 	app.storage = store
 	app.server = srv
 	app.journaled = make(map[string]bool)

@@ -20,9 +20,14 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
+	"github.com/caffeine-projects/vlatte/verify"
 )
 
-var _ grpc.ServerStream = (*callStream)(nil)
+var (
+	_ grpc.ServerStream               = (*callStream)(nil)
+	_ verify.Patterns[*Mock, *Server] = (*Server)(nil)
+	_ verify.Pattern                  = (*callPattern)(nil)
+)
 
 // callKey is the key of the journal entry of a call in its context.
 type callKey struct{}
@@ -283,10 +288,11 @@ func describeEval[T any](e *vlatte.Eval[T]) string {
 	return "field " + e.Key
 }
 
-// RequestPattern returns the filter of journal entries that the request part of b matches, as it matches a call: b is
-// a *Builder, such as Method("Greetings").Field("message", match.Equal("hi")), whose reply counts for nothing. Times,
-// Once and scenarios match no call served before, so a pattern has none. It implements journal.RequestPatterns.
-func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (journal.Filter, error) {
+// RequestPattern returns the pattern of journal entries that the request part of b matches, as it matches a call: b
+// is a *Builder, such as Method("Greetings").Field("message", match.Equal("hi")), whose reply counts for nothing.
+// Times, Once and scenarios match no call served before, so a pattern has none. It implements verify.Patterns, for
+// VerifyRequests().Matching.
+func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (verify.Pattern, error) {
 	builder, ok := b.(*Builder)
 
 	switch {
@@ -305,51 +311,102 @@ func (app *Server) RequestPattern(b vlatte.Builder[*Mock, *Server]) (journal.Fil
 		return nil, fmt.Errorf("grpc: request pattern: %w", err)
 	}
 
+	p := &callPattern{app: app, evals: evals, readsRequest: builder.readsRequest}
+
 	// A pattern that reads the request can't tell whether a request the journal cut matched: the method and the
 	// header go first, as a miss there is a miss.
-	var rest vlatte.Evaluators[*Mock, *Call]
-
 	for _, ev := range evals {
 		if s := scope(ev.Target); s == _scopeMethod || s == _scopeHeader {
-			rest = append(rest, ev)
+			p.rest = append(p.rest, ev)
 		}
 	}
 
-	return func(ctx context.Context, e *journal.Entry) (bool, error) {
-		if e.Kind != Kind {
-			return false, nil
+	return p, nil
+}
+
+// callPattern is the pattern of the request part of a mock: evals, and rest, those of them that read no request
+// message, which readsRequest says some do.
+type callPattern struct {
+	app          *Server
+	evals        vlatte.Evaluators[*Mock, *Call]
+	rest         vlatte.Evaluators[*Mock, *Call]
+	readsRequest bool
+}
+
+// Match tells whether the pattern matches the call of e, as it came.
+func (p *callPattern) Match(ctx context.Context, e *journal.Entry) (bool, error) {
+	if e.Kind != Kind {
+		return false, nil
+	}
+
+	md, ok := p.app.resolver.method(e.Path)
+	if !ok {
+		return false, nil
+	}
+
+	if e.BodyTruncated {
+		ok, err := p.rest.Eval(ctx, vlatte.NewExplanation(), entryCall(p.app, e, md, nil))
+		switch {
+		case err != nil || !ok:
+			return false, err
+		case !p.readsRequest:
+			return true, nil
 		}
 
-		md, ok := app.resolver.method(e.Path)
-		if !ok {
-			return false, nil
-		}
+		return false, fmt.Errorf("grpc: %w: entry %d: %w, which the pattern reads", vlatte.ErrMatching, e.Seq,
+			journal.ErrBodyCut)
+	}
 
-		if e.BodyTruncated {
-			ok, err := rest.Eval(ctx, vlatte.NewExplanation(), entryCall(app, e, md, nil))
-			switch {
-			case err != nil || !ok:
-				return false, err
-			case !builder.readsRequest:
-				return true, nil
-			}
+	call, err := decodeEntry(p.app, e, md)
+	if err != nil {
+		return false, fmt.Errorf("grpc: %w: entry %d: %w", vlatte.ErrMatching, e.Seq, err)
+	}
 
-			return false, fmt.Errorf("grpc: %w: entry %d: the journal kept part of its request, which the pattern reads",
-				vlatte.ErrMatching, e.Seq)
-		}
+	ok, err = p.evals.Eval(ctx, vlatte.NewExplanation(), call)
+	if err != nil {
+		return false, fmt.Errorf("grpc: %w: entry %d: %w", vlatte.ErrMatching, e.Seq, err)
+	}
 
-		call, err := decodeEntry(app, e, md)
+	return ok, nil
+}
+
+// Explain tells which parts of the pattern the call of e passes, by the names a near miss gives them, such as
+// "field message". A part that reads a request the journal cut is neither passed nor failed, and a call of a method
+// the server doesn't know, or whose request doesn't decode, misses by that.
+func (p *callPattern) Explain(ctx context.Context, e *journal.Entry) (verify.Miss, error) {
+	if e.Kind != Kind {
+		return verify.Miss{Total: 1, Failed: []string{"kind"}}, nil
+	}
+
+	md, ok := p.app.resolver.method(e.Path)
+	if !ok {
+		return verify.Miss{Total: 1, Failed: []string{"method"}}, nil
+	}
+
+	evals, call := p.rest, entryCall(p.app, e, md, nil)
+
+	if !e.BodyTruncated {
+		decoded, err := decodeEntry(p.app, e, md)
 		if err != nil {
-			return false, fmt.Errorf("grpc: %w: entry %d: %w", vlatte.ErrMatching, e.Seq, err)
+			return verify.Miss{Total: 1, Failed: []string{"request"}}, nil
 		}
 
-		ok, err = vlatte.Evaluators[*Mock, *Call](evals).Eval(ctx, vlatte.NewExplanation(), call)
-		if err != nil {
-			return false, fmt.Errorf("grpc: %w: entry %d: %w", vlatte.ErrMatching, e.Seq, err)
-		}
+		evals, call = p.evals, decoded
+	}
 
-		return ok, nil
-	}, nil
+	var miss verify.Miss
+
+	for _, ev := range evals {
+		miss.Total++
+
+		if ok, err := ev.Match(ctx, nil, call); err == nil && ok {
+			miss.Passed++
+		} else {
+			miss.Failed = append(miss.Failed, describeEval(ev))
+		}
+	}
+
+	return miss, nil
 }
 
 // entryCall returns the call of e, an entry of the server's journal, of the method md describes, with msgs, its

@@ -90,13 +90,18 @@ func readBody(w http.ResponseWriter, r *http.Request) ([]byte, string, error) {
 
 // decodeBody applies a document in format to dst through schema. An empty document changes nothing.
 func decodeBody[T any](schema *config.Schema[T], dst *T, data []byte, format string) error {
+	_, err := loadBody(schema, dst, data, format)
+	return err
+}
+
+// loadBody applies a document in format to dst through schema, as decodeBody does, and returns the values it set, by
+// key.
+func loadBody[T any](schema *config.Schema[T], dst *T, data []byte, format string) (map[string]config.Value, error) {
 	if strings.TrimSpace(string(data)) == "" {
-		return nil
+		return nil, nil
 	}
 
-	_, err := schema.Load(dst, []config.Source{config.Bytes("admin request", format, data)})
-
-	return err
+	return schema.Load(dst, []config.Source{config.Bytes("admin request", format, data)})
 }
 
 // responseFormat returns the format r accepts answers in: the one Accept gives the most weight, JSON on a tie or

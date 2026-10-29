@@ -5,15 +5,14 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/internal/xmldoc"
 	"github.com/caffeine-projects/vlatte/match/internal/anyconv"
 )
 
 var (
-	_ vlatte.Matcher             = (*equalXMLMatcher)(nil)
-	_ descriptor.SelfDescriptive = (*equalXMLMatcher)(nil)
+	_ vlatte.Matcher         = (*equalXMLMatcher)(nil)
+	_ vlatte.SelfDescriptive = (*equalXMLMatcher)(nil)
 )
 
 // equalXMLMatcher passes when the value is an XML document equal to the expected one.
@@ -132,9 +131,9 @@ func (o xmlOptions) sameItem(want, got xmlItem) bool {
 	return o.sameElement(want.elem, got.elem)
 }
 
-// Describe implements descriptor.SelfDescriptive. Options are described as an object after the expected XML, with the
+// Describe implements vlatte.SelfDescriptive. Options are described as an object after the expected XML, with the
 // keys of mock files.
-func (m *equalXMLMatcher) Describe() descriptor.Descriptor {
+func (m *equalXMLMatcher) Describe() vlatte.Descriptor {
 	opts := make(map[string]any, 2)
 	if m.opts.ignoreChildOrder {
 		opts["ignore_child_order"] = true
@@ -145,8 +144,8 @@ func (m *equalXMLMatcher) Describe() descriptor.Descriptor {
 	}
 
 	if len(opts) == 0 {
-		return descriptor.SingleArg("eqx", m.Expected)
+		return vlatte.DescribeSingleArg("eqx", m.Expected)
 	}
 
-	return descriptor.MultiArgs("eqx", m.Expected, opts)
+	return vlatte.DescribeMultiArgs("eqx", m.Expected, opts)
 }

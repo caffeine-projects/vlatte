@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -222,7 +221,7 @@ func (r *ProxyReply) SSLVerify(v bool) *ProxyReply {
 // Describe describes the reply in the mock file format. The target is described as it was set, its credentials
 // included, so the description loads back as the same reply: errors and logs hide them. ssl_verify is described only
 // when it was set, so the description loads back on a server whose Config.Transport would refuse it.
-func (r *ProxyReply) Describe() descriptor.Descriptor {
+func (r *ProxyReply) Describe() vlatte.Descriptor {
 	props := map[string]any{
 		"target":                 r.target.String(),
 		"request_header":         r.requestHeaders.Clone(),
@@ -245,7 +244,7 @@ func (r *ProxyReply) Describe() descriptor.Descriptor {
 		props["preserve_host"] = true
 	}
 
-	return descriptor.New("proxy", props)
+	return vlatte.NewDescriptor("proxy", props)
 }
 
 // NewReplier implements ReplierFactory. Each mock gets a proxy of its own: copies of the target and the headers, and,
