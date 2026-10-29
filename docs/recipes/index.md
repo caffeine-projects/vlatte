@@ -10,5 +10,6 @@ err := m.Prep(ctx, proxyall.New(mockhttp.From("https://api.example.com").Timeout
 | Recipe | Prepares |
 |---|---|
 | [Proxy all](/recipes/proxy-all) | A mock that sends what no other mock matches to a real service. |
+| [GitHub Auth](/recipes/github-auth) | "Sign in with GitHub": the OAuth web flow and the user's profile. |
 
 A recipe of your own takes a few lines: see [Writing a recipe](/recipes/writing).
