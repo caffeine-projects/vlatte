@@ -16,6 +16,7 @@
   <a href="https://codecov.io/gh/caffeine-projects/vlatte"><img src="https://codecov.io/gh/caffeine-projects/vlatte/graph/badge.svg" alt="codecov"></a>
   <a href="https://sonarcloud.io/summary/new_code?id=caffeine-projects_vlatte"><img src="https://sonarcloud.io/api/project_badges/measure?project=caffeine-projects_vlatte&metric=alert_status" alt="Quality gate status"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/caffeine-projects/vlatte"><img src="https://api.scorecard.dev/projects/github.com/caffeine-projects/vlatte/badge" alt="OpenSSF Scorecard"></a>
+  <a href="https://www.bestpractices.dev/projects/16055"><img src="https://www.bestpractices.dev/projects/16055/badge" alt="OpenSSF Best Practices"></a>
   <a href="https://pkg.go.dev/github.com/caffeine-projects/vlatte"><img src="https://pkg.go.dev/badge/github.com/caffeine-projects/vlatte.svg" alt="Go Reference"></a>
 </p>
 

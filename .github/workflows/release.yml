@@ -50,7 +50,7 @@ jobs:
     - name: Test
       run: make testci
 
-  # The archives, their checksums, SBOMs and signature, the GitHub release as a draft, and the Homebrew cask.
+  # The archives, their checksums, SBOMs, signature and provenance, the GitHub release as a draft, and the Homebrew cask.
   goreleaser:
     needs: verify
     runs-on: ubuntu-latest
@@ -91,9 +91,21 @@ jobs:
         HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
     - name: Attest provenance
+      id: attest
       uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
       with:
         subject-checksums: dist/checksums.txt
+
+    # The attestation also goes on the release, where tools that do not query GitHub's attestation API, such as the
+    # OpenSSF Scorecard, look for a *.intoto.jsonl file.
+    - name: Upload provenance
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG: ${{ github.ref_name }}
+        BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+      run: |
+        cp "$BUNDLE" "$RUNNER_TEMP/vlatte.intoto.jsonl"
+        gh release upload "$TAG" "$RUNNER_TEMP/vlatte.intoto.jsonl" --repo "$GITHUB_REPOSITORY"
 
   # The image, for every platform the CI builds, with its SBOM, provenance and signature.
   image:
