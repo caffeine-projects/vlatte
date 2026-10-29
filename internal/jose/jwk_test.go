@@ -175,6 +175,25 @@ func TestParseKeySet_RefusesWhatHoldsNoPublicKey(t *testing.T) {
 	}
 }
 
+func TestParseKeySet_RefusesAPrivateJWK(t *testing.T) {
+	// A private JWK pasted where the public one goes would be served by the admin API with the mock, as a private PEM
+	// key would.
+	for _, alg := range []string{"RS256", "ES256", "EdDSA"} {
+		jwk, err := PublicJWK(alg, "key-1", testKey(t, alg).Public())
+		require.NoError(t, err)
+
+		var private map[string]any
+		require.NoError(t, json.Unmarshal(mustJSON(t, jwk), &private))
+		private["d"] = "c2VjcmV0"
+
+		_, err = ParseKeySet(mustJSON(t, private))
+		require.EqualError(t, err, `jose: jwk "key-1" holds a private key: give its public half`, alg)
+
+		_, err = ParseKeySet(mustJSON(t, map[string]any{"keys": []any{private}}))
+		require.EqualError(t, err, `jose: jwk "key-1" holds a private key: give its public half`, alg)
+	}
+}
+
 func TestParseKeySet_RefusesASetWithAMalformedKey(t *testing.T) {
 	// A key of a supported type that can't be read is a mistake in the set, not a key to skip.
 	rsaJWK, err := PublicJWK("RS256", "key-1", testKey(t, "RS256").Public())

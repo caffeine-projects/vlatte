@@ -10,6 +10,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json/jsontext"
 	json "encoding/json/v2"
 	"encoding/pem"
 	"errors"
@@ -177,8 +178,8 @@ type setKey struct {
 
 // ParseKeySet reads the public keys of text: a JWK Set, a single JWK, or PEM blocks of public keys ("PUBLIC KEY",
 // "RSA PUBLIC KEY") and certificates ("CERTIFICATE"). JWKs of a set whose use is "enc", or whose type or curve the
-// package doesn't support, are skipped; a JWK of a supported type that can't be read is an error. A PEM private key is
-// refused, so a mock file can't hold one by mistake. A set with no key is an error.
+// package doesn't support, are skipped; a JWK of a supported type that can't be read is an error. A private key, PEM
+// or JWK, is refused, so a mock file can't hold one by mistake. A set with no key is an error.
 func ParseKeySet(text []byte) (*KeySet, error) {
 	text = bytes.TrimSpace(text)
 
@@ -207,13 +208,29 @@ func ParseKeySet(text []byte) (*KeySet, error) {
 	return ks, nil
 }
 
+// readJWK is a JWK as ParseKeySet reads it, with d: the private key of an RSA, EC or OKP JWK (RFC 7518 §6.3.2.1 and
+// §6.2.2.1, RFC 8037 §2), which a public JWK never has.
+type readJWK struct {
+	JWK
+
+	D jsontext.Value `json:"d"`
+}
+
 func parseJWKs(text []byte) (*KeySet, error) {
 	var doc struct {
-		JWKSet
-		JWK
+		readJWK
+
+		Keys []readJWK `json:"keys"`
 	}
 	if err := json.Unmarshal(text, &doc); err != nil {
 		return nil, fmt.Errorf("jose: key set: %w", err)
+	}
+
+	// A mock that held a private key would show it through the admin API, as it would a PEM one.
+	for _, k := range append(doc.Keys, doc.readJWK) {
+		if k.D != nil {
+			return nil, fmt.Errorf("jose: jwk %q holds a private key: give its public half", k.Kid)
+		}
 	}
 
 	if doc.Kty != "" {
