@@ -128,6 +128,7 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Overview', link: '/recipes/' },
       { text: 'Proxy all', link: '/recipes/proxy-all' },
       { text: 'GitHub Auth', link: '/recipes/github-auth' },
+      { text: 'OpenID Connect', link: '/recipes/oidc' },
       { text: 'Writing a recipe', link: '/recipes/writing' },
     ],
   },
