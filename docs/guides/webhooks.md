@@ -1,6 +1,6 @@
 # Testing webhooks
 
-This guide mocks a payment API that calls your service back once a payment is made, and checks that the callback came. It uses [webhooks](/features/webhooks-events), [templates](/features/templates) and server data.
+This guide mocks a payment API that calls your service back once a payment is made, and checks that the callback came. It uses [webhooks](/webhooks/), [templates](/templating/) and server data.
 
 ## Two servers
 
@@ -78,4 +78,4 @@ on_complete:
 
 ## When the callback fails
 
-A webhook that can't reach its target, or gets a status outside `2xx`, doesn't change the mock's reply: the payment still answers `202`. The server logs the failure as a warning, and the [journal](/features/journal) keeps it in the request's `Message`, one line for each event, so a test checks a webhook failed without reading the logs. A test of the happy path asserts on the callback server, as above.
+A webhook that can't reach its target, or gets a status outside `2xx`, doesn't change the mock's reply: the payment still answers `202`. The server logs the failure as a warning, and the [journal](/more/journal) keeps it in the request's `Message`, one line for each event, so a test checks a webhook failed without reading the logs. A test of the happy path asserts on the callback server, as above.

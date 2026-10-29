@@ -40,7 +40,7 @@ A mock's delay comes before its reply: a client that leaves during it gets nothi
 
 ## Enabling and disabling
 
-A scope's `Enable()` and `Disable()` turn its mocks on and off, and the server's turn every mock. The [admin API](/run/admin-api) does it with `PATCH /mocks/{id}` and `{"enabled": false}`.
+A scope's `Enable()` and `Disable()` turn its mocks on and off, and the server's turn every mock. The [admin API](/admin-api/) does it with `PATCH /mocks/{id}` and `{"enabled": false}`.
 
 ## Priorities and proxies
 

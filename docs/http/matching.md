@@ -67,7 +67,7 @@ An absolute `url`, such as `https://api.example.com/items`, compares as text ign
 
 `path_template: /users/{id}/orders/{orderId}` matches paths of its shape: as many segments, the literal ones the same once decoded, and a non-empty one for each parameter, so `/users/7/orders` and `/users/7/orders/9/` don't match. A parameter is a whole segment; write a literal brace as `%7B` or `%7D`.
 
-`path_params` matches the parameters by name, decoded, and [templates](/features/templates) read them as `.Request.PathParams.id`, or `index .Request.PathParams "order-id"` for a name that isn't a Go identifier. `url`, `url_match` or `path` can match the request too. In Go, `URLPathTemplate` and `PathParam`.
+`path_params` matches the parameters by name, decoded, and [templates](/templating/) read them as `.Request.PathParams.id`, or `index .Request.PathParams "order-id"` for a name that isn't a Go identifier. `url`, `url_match` or `path` can match the request too. In Go, `URLPathTemplate` and `PathParam`.
 
 ```yaml
 request:

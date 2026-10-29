@@ -97,7 +97,7 @@ The [Docker](/run/docker) image serves HTTPS on port `8443`, in place of `8080`,
 
 ## The admin API
 
-The admin API serves HTTPS of its own, apart from the mocks: `admin.TLS(config)` in Go, and `admin.tls.cert` with `admin.tls.key` (`--admin-tls-cert`, `--admin-tls-key`) for the command, whose `vlatte health` then asks over HTTPS and trusts that certificate alone. Credentials sent to it travel in plain text without TLS: see [Authentication](/run/admin-api#authentication).
+The admin API serves HTTPS of its own, apart from the mocks: `admin.TLS(config)` in Go, and `admin.tls.cert` with `admin.tls.key` (`--admin-tls-cert`, `--admin-tls-key`) for the command, whose `vlatte health` then asks over HTTPS and trusts that certificate alone. Credentials sent to it travel in plain text without TLS: see [Authentication](/admin-api/#authentication).
 
 ## Proxies and recordings
 

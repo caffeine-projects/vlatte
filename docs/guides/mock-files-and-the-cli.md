@@ -1,6 +1,6 @@
 # Mock files and the CLI
 
-This guide writes mock files with editor support, serves them with the `vlatte` command, changes them while it runs, and loads the same files in Go tests. It uses [mock files](/http/mock-files), [path templates](/http/matching#path-templates), [templates](/features/templates), the [CLI](/run/cli) and the [admin API](/run/admin-api).
+This guide writes mock files with editor support, serves them with the `vlatte` command, changes them while it runs, and loads the same files in Go tests. It uses [mock files](/http/mock-files), [path templates](/http/matching#path-templates), [templates](/templating/), the [CLI](/run/cli) and the [admin API](/admin-api/).
 
 ## Write the files
 
@@ -113,5 +113,5 @@ func TestWithMockFiles(t *testing.T) {
 ## What you used
 
 - [Mock files](/http/mock-files) and their [schemas](/reference/schemas).
-- [Path templates](/http/matching#path-templates) and [templates](/features/templates).
-- The [CLI](/run/cli) and the [admin API](/run/admin-api).
+- [Path templates](/http/matching#path-templates) and [templates](/templating/).
+- The [CLI](/run/cli) and the [admin API](/admin-api/).

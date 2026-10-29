@@ -56,4 +56,4 @@ Some requests are never journaled, so `Never` passes for them, and other checks 
 - Requests the server answers before its mocks get them, such as CORS preflights, or that a middleware answers.
 - gRPC calls an interceptor answers itself, or that grpc answers before any interceptor, such as one whose request it can't decode.
 
-The [Request journal](/features/journal#limits) page lists the journal's limits.
+The [Request journal](/more/journal#limits) page lists the journal's limits.

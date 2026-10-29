@@ -49,4 +49,4 @@ entries, err := orders.Find(ctx)
 n, err := orders.Count(ctx)
 ```
 
-A selection has no limit, so `Find` returns every request it holds. `m.Journal().Find` takes a [`journal.Query`](/features/journal) with a `Limit`, and pages through the requests instead. Like a check, `Find` and `Count` fail rather than return part of the requests: see [Troubleshooting](/verify/troubleshooting).
+A selection has no limit, so `Find` returns every request it holds. `m.Journal().Find` takes a [`journal.Query`](/more/journal) with a `Limit`, and pages through the requests instead. Like a check, `Find` and `Count` fail rather than return part of the requests: see [Troubleshooting](/verify/troubleshooting).

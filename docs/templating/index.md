@@ -1,4 +1,4 @@
-# Templates
+# Templating
 
 Replies can render parts of the response from the request: header values, the body, and the name or content of a body file. So can multipart parts and webhooks.
 
@@ -48,8 +48,8 @@ Templates read:
 | `.Data` | The map set with `m.SetData`. |
 | `.Provided.<key>` | What `Setup().TemplateDataProviders(providers)` provide. |
 | `.Extra` | The reply's `template.data`, or `SetTemplateData` in Go. Webhooks don't have it. |
-| `.Scenarios.State "name"` | The state of a [scenario](/features/scenarios). |
-| `.Scenarios.StateOf "name" "key"` | The state of the instance of a [scenario](/features/scenarios) of a key. |
+| `.Scenarios.State "name"` | The state of a [scenario](/scenarios/). |
+| `.Scenarios.StateOf "name" "key"` | The state of the instance of a [scenario](/scenarios/) of a key. |
 
 ## Functions
 
@@ -140,7 +140,7 @@ A gRPC mock renders its messages with `Template(texts...)`, `template` in a [gRP
 | `.Request.Message.<field>` | The request, by the field names of the `.proto` file. |
 | `.Request.Header` | The call's metadata. |
 | `.Parameters`, `.Data`, `.Provided.<key>` | As for HTTP: `m.SetData` sets `.Data`, and `Setup().TemplateDataProviders(providers)` provide `.Provided`. |
-| `.Scenarios.State "name"`, `.Scenarios.StateOf "name" "key"` | The state of a [scenario](/features/scenarios). |
+| `.Scenarios.State "name"`, `.Scenarios.StateOf "name" "key"` | The state of a [scenario](/scenarios/). |
 
 ```go
 m.MustMock(mockgrpc.Method("greeter.Greeter/SayHello").
