@@ -48,6 +48,7 @@ func TestKeys_SignsTokensItsJWKSVerifies(t *testing.T) {
 		{name: "claims piped", text: `{{ "{\"sub\":\"ana\",\"admin\":true}" | jwt "ed-1" }}`, kid: "ed-1", alg: "EdDSA"},
 		{name: "claims as fromJSON returns them", text: `{{ fromJSON .body | jwt "es-1" }}`, data: map[string]any{"body": `{"admin":true,"sub":"ana"}`}, kid: "es-1", alg: "ES256"},
 		{name: "a kid read from data", text: `{{ jwt .kid "{\"sub\":\"ana\",\"admin\":true}" }}`, data: map[string]any{"kid": "ed-1"}, kid: "ed-1", alg: "EdDSA"},
+		{name: "claims as bytes", text: `{{ jwt "es-1" .body }}`, data: map[string]any{"body": []byte(`{"sub": "ana", "admin": true}`)}, kid: "es-1", alg: "ES256"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -82,6 +83,7 @@ func TestKeys_RefusesWhatItCantSign(t *testing.T) {
 	tests := []struct {
 		name string
 		text string
+		data any
 		err  string
 	}{
 		{name: "an unknown kid", text: `{{ jwt "es-9" "{}" }}`, err: `error calling jwt: "es-9" is not a signing key of the server`},
@@ -90,10 +92,11 @@ func TestKeys_RefusesWhatItCantSign(t *testing.T) {
 		{name: "claims that aren't JSON", text: `{{ jwt "es-1" "sub=ana" }}`, err: "error calling jwt: claims are not JSON: "},
 		{name: "claims that aren't an object", text: `{{ jwt "es-1" "[1, 2]" }}`, err: "error calling jwt: claims are not a JSON object"},
 		{name: "a claim given twice", text: `{{ jwt "es-1" "{\"sub\":\"a\",\"sub\":\"b\"}" }}`, err: "error calling jwt: claims are not JSON: "},
+		{name: "claims JSON can't hold", text: `{{ jwt "es-1" .claims }}`, data: map[string]any{"claims": map[string]any{"ch": make(chan int)}}, err: "error calling jwt: claims: json: cannot marshal from Go chan int"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := render(t, funcs, tt.text, nil)
+			_, err := render(t, funcs, tt.text, tt.data)
 			require.ErrorContains(t, err, tt.err)
 		})
 	}
@@ -213,11 +216,41 @@ func TestKeySpec_Load(t *testing.T) {
 		require.EqualError(t, err, `signing key "a": ec.pem: jose: key does not fit the algorithm: RS256 takes an RSA key, not an ECDSA key`)
 	})
 
+	t.Run("refuses an algorithm it can't generate a key for", func(t *testing.T) {
+		_, err := KeySpec{Kid: "a", Alg: "HS256"}.Load(resolve)
+		require.ErrorIs(t, err, jose.ErrUnsupportedAlg)
+		require.EqualError(t, err, `signing key "a": jose: unsupported algorithm "HS256": HMAC signs with a shared secret no provider publishes: use one of ES256, ES384, ES512, EdDSA, PS256, PS384, PS512, RS256, RS384, RS512`)
+	})
+
+	t.Run("names the file that holds no key", func(t *testing.T) {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("not a key"), 0o600))
+
+		_, err := KeySpec{Kid: "a", Alg: "ES256", Path: "notes.txt"}.Load(resolve)
+		require.EqualError(t, err, `signing key "a": notes.txt: jose: no PEM block`)
+	})
+
 	t.Run("a missing file names the key", func(t *testing.T) {
 		_, err := KeySpec{Kid: "a", Alg: "RS256", Path: "nope.pem"}.Load(resolve)
 		require.ErrorIs(t, err, os.ErrNotExist)
 		require.ErrorContains(t, err, `signing key "a": `)
 	})
+}
+
+func TestLoadKeySpecs_LoadsEachKeyInOrder(t *testing.T) {
+	keys, err := LoadKeySpecs([]string{"b=EdDSA", "a=ES256"}, func(p string) string { return p })
+	require.NoError(t, err)
+	require.Len(t, keys, 2)
+	require.Equal(t, []string{"b", "a"}, []string{keys[0].Kid, keys[1].Kid})
+	require.Equal(t, []string{"EdDSA", "ES256"}, []string{keys[0].Alg, keys[1].Alg})
+	require.NoError(t, jose.CheckKey("EdDSA", keys[0].Key))
+	require.NoError(t, jose.CheckKey("ES256", keys[1].Key))
+}
+
+func TestLoadKeySpecs_RefusesASpecItCantParse(t *testing.T) {
+	// A setting with one bad spec loads no key, rather than a server missing the key its mocks name.
+	keys, err := LoadKeySpecs([]string{"a=ES256", "b"}, func(p string) string { return p })
+	require.EqualError(t, err, `signing key "b": write it as kid=ALG or kid=ALG:path/to/key.pem`)
+	require.Nil(t, keys)
 }
 
 // Generators

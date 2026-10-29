@@ -537,6 +537,16 @@ func TestBuildMatcher_SignedJWT(t *testing.T) {
 		_, err := _registry.BuildMatcher([]any{"signedJWT", int64(1), []any{"anything"}})
 		require.EqualError(t, err, "signedJWT takes keys first: a JWK Set, a JWK or PEM public keys, not a number")
 	})
+
+	t.Run("no matcher", func(t *testing.T) {
+		_, err := _registry.BuildMatcher([]any{"signedJWT", string(text)})
+		require.EqualError(t, err, "signedJWT takes 2 arguments, not 1")
+	})
+
+	t.Run("a matcher that doesn't build", func(t *testing.T) {
+		_, err := _registry.BuildMatcher([]any{"signedJWT", string(text), []any{"nope"}})
+		require.EqualError(t, err, `signedJWT: unknown matcher "nope"`)
+	})
 }
 
 // _publicJWKS is the example P-256 key of RFC 7517 §A.1 twice: for encryption, which signedJWT skips, and signing.

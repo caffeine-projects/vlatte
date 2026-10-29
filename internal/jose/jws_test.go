@@ -28,6 +28,7 @@ func TestParse_RefusesWhatIsNotAJWT(t *testing.T) {
 			msg: "jose: not a JWT: the header has crit extensions, which are not supported",
 		},
 		{name: "a kid that isn't a string", token: b64([]byte(`{"alg":"RS256","kid":1}`)) + "." + b64([]byte(`{}`)) + ".", msg: "jose: not a JWT: the kid of the header is not a string"},
+		{name: "a signature that isn't base64url", token: b64([]byte(`{"alg":"RS256"}`)) + "." + b64([]byte(`{}`)) + ".%%%", msg: "jose: not a JWT: signature: illegal base64 data at input byte 0"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -65,6 +66,10 @@ func TestCheckTime_RefusesATokenOutsideItsLifetime(t *testing.T) {
 		{
 			name: "an exp that isn't a number", claims: map[string]any{"exp": "tomorrow"},
 			is: ErrMalformed, msg: "jose: not a JWT: the exp claim is not a number",
+		},
+		{
+			name: "an nbf that isn't a number", claims: map[string]any{"nbf": "yesterday"},
+			is: ErrMalformed, msg: "jose: not a JWT: the nbf claim is not a number",
 		},
 	}
 	for _, tt := range tests {

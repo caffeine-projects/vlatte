@@ -2,6 +2,7 @@ package jose
 
 import (
 	"crypto"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -112,6 +113,20 @@ func TestCheckKey_RefusesWhatTheAlgorithmDoesntTake(t *testing.T) {
 			msg:  "jose: key does not fit the algorithm: ES256 takes a key on P-256, not P-384",
 		},
 		{
+			name: "an RSA key for ES256",
+			alg:  "ES256",
+			key:  testKey(t, "RS256"),
+			is:   ErrKeyMismatch,
+			msg:  "jose: key does not fit the algorithm: ES256 takes an ECDSA key, not an RSA key",
+		},
+		{
+			name: "an Ed25519 key for RS256",
+			alg:  "RS256",
+			key:  testKey(t, "EdDSA"),
+			is:   ErrKeyMismatch,
+			msg:  "jose: key does not fit the algorithm: RS256 takes an RSA key, not an Ed25519 key",
+		},
+		{
 			name: "an RSA key for EdDSA",
 			alg:  "EdDSA",
 			key:  testKey(t, "RS256"),
@@ -135,6 +150,20 @@ func TestCheckKey_RefusesWhatTheAlgorithmDoesntTake(t *testing.T) {
 			require.ErrorIs(t, err, tt.is)
 		})
 	}
+}
+
+func TestSign_RefusesAKidJSONCantHold(t *testing.T) {
+	// The header is JSON, whose strings are UTF-8: a kid that isn't would make a header no verifier reads.
+	_, err := Sign("ES256", "key-\xff", testKey(t, "ES256"), []byte(`{}`))
+	require.EqualError(t, err, `jose: header: jsontext: invalid UTF-8 within "/kid" after offset 21`)
+}
+
+func TestSign_RefusesASignerOfAnotherType(t *testing.T) {
+	// A crypto.Signer whose public key fits the algorithm, such as one backed by a KMS, is not a key the package
+	// signs with: it signs with the standard library's key types only.
+	_, err := Sign("ES256", "k", wrappedSigner{testKey(t, "ES256")}, []byte(`{}`))
+	require.ErrorIs(t, err, ErrKeyMismatch)
+	require.EqualError(t, err, "jose: sign: jose: key does not fit the algorithm: a jose.wrappedSigner")
 }
 
 func TestGenerateKey_MakesAKeyForTheAlgorithm(t *testing.T) {
@@ -195,6 +224,7 @@ func TestParsePrivateKey_ErrorsHoldNoKeyMaterial(t *testing.T) {
 		{name: "a broken key", pem: pemBlock("PRIVATE KEY", secret), msg: `jose: PEM block "PRIVATE KEY": `},
 		{name: "a public key", pem: pemBlock("PUBLIC KEY", secret), msg: `jose: PEM block "PUBLIC KEY" is not a private key`},
 		{name: "no PEM", pem: secret, msg: "jose: no PEM block"},
+		{name: "an X25519 key, which can't sign", pem: x25519PEM(t), msg: `jose: PEM block "PRIVATE KEY" holds a *ecdh.PrivateKey, which can't sign`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -288,4 +318,22 @@ func mustPKCS1(t *testing.T, key crypto.Signer) []byte {
 
 func pemBlock(typ string, der []byte) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: typ, Bytes: der})
+}
+
+// wrappedSigner is a crypto.Signer of a type the package doesn't know.
+type wrappedSigner struct {
+	crypto.Signer
+}
+
+// x25519PEM returns a PKCS #8 PEM X25519 key, a key agreement key that can't sign.
+func x25519PEM(t *testing.T) []byte {
+	t.Helper()
+
+	key, err := ecdh.X25519().GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	require.NoError(t, err)
+
+	return pemBlock("PRIVATE KEY", der)
 }

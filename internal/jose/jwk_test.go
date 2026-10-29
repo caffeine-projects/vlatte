@@ -2,11 +2,15 @@ package jose
 
 import (
 	"crypto"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
 	json "encoding/json/v2"
+	"math/big"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -90,6 +94,13 @@ func TestPublicJWK_RoundTripsEachKeyType(t *testing.T) {
 	}
 }
 
+func TestPublicJWK_RefusesAKeyThatDoesntFitTheAlg(t *testing.T) {
+	// A JWKS must not publish a key under an alg it can't verify.
+	_, err := PublicJWK("RS256", "key-1", testKey(t, "ES256").Public())
+	require.ErrorIs(t, err, ErrKeyMismatch)
+	require.EqualError(t, err, "jose: key does not fit the algorithm: RS256 takes an RSA key, not an ECDSA key")
+}
+
 func TestPublicJWK_WritesTheExponentAsRFC7518Does(t *testing.T) {
 	jwk, err := PublicJWK("RS256", "", testKey(t, "RS256").Public())
 	require.NoError(t, err)
@@ -117,6 +128,7 @@ func TestParseKeySet_ReadsSetsSingleKeysAndPEM(t *testing.T) {
 			keys: 1,
 		},
 		{name: "PEM public keys", text: append(pemKey, pemBlock("RSA PUBLIC KEY", mustPKCS1(t, testKey(t, "RS256")))...), keys: 2},
+		{name: "a PEM certificate", text: pemBlock("CERTIFICATE", selfSigned(t, testKey(t, "ES256"))), keys: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -138,6 +150,17 @@ func TestParseKeySet_RefusesWhatHoldsNoPublicKey(t *testing.T) {
 		{name: "an unknown kty", text: `{"keys":[{"kty":"oct","k":"c2VjcmV0"}]}`, msg: `jose: jwk: unsupported kty "oct"`},
 		{name: "an unknown curve", text: `{"kty":"EC","crv":"secp256k1","x":"AA","y":"AA"}`, msg: `jose: jwk: unsupported curve "secp256k1"`},
 		{name: "an RSA key without n", text: `{"kty":"RSA","e":"AQAB"}`, msg: "jose: jwk: no n"},
+		{name: "an RSA key without e", text: `{"kty":"RSA","n":"AQAB"}`, msg: "jose: jwk: no e"},
+		{name: "an RSA key whose e isn't base64url", text: `{"kty":"RSA","n":"AQAB","e":"!!"}`, msg: "jose: jwk: e: illegal base64 data at input byte 0"},
+		{name: "an RSA key whose e is past 2^31-1", text: `{"kty":"RSA","n":"AQAB","e":"gAAAAA"}`, msg: "jose: jwk: e is too large"},
+		{name: "an EC key without x", text: `{"kty":"EC","crv":"P-256","y":"AA"}`, msg: "jose: jwk: no x"},
+		{name: "an EC key without y", text: `{"kty":"EC","crv":"P-256","x":"AA"}`, msg: "jose: jwk: no y"},
+		{name: "an EC point P-256 can't read", text: `{"kty":"EC","crv":"P-256","x":"AA","y":"AA"}`, msg: "jose: jwk: invalid P256 point encoding"},
+		{name: "an X25519 key, which can't sign", text: `{"kty":"OKP","crv":"X25519","x":"AA"}`, msg: `jose: jwk: unsupported curve "X25519"`},
+		{name: "an Ed25519 key without x", text: `{"kty":"OKP","crv":"Ed25519"}`, msg: "jose: jwk: no x"},
+		{name: "an Ed25519 key of the wrong size", text: `{"kty":"OKP","crv":"Ed25519","x":"AA"}`, msg: "jose: jwk: x is not an Ed25519 public key"},
+		{name: "JSON that doesn't parse", text: `{"keys":`, msg: `jose: key set: jsontext: unexpected EOF within "/keys" after offset 8`},
+		{name: "a PEM public key that doesn't parse", text: string(pemBlock("PUBLIC KEY", []byte("x"))), msg: `jose: PEM block "PUBLIC KEY": asn1: syntax error: truncated tag or length`},
 		{
 			// A private key pasted where the public one goes would be served by the admin API with the mock.
 			name: "a private key", text: string(pemBlock("PRIVATE KEY", []byte("x"))),
@@ -208,6 +231,14 @@ func TestKeySet_Verify(t *testing.T) {
 		require.NoError(t, pem.Verify(sign("RS256", "anything")))
 	})
 
+	t.Run("skips a key that doesn't fit the token's alg", func(t *testing.T) {
+		// The ECDSA key, first, can't verify RS256: the RSA key after it does.
+		ks, err := ParseKeySet(append(pemBlock("PUBLIC KEY", mustPKIX(t, ecKey.Public())),
+			pemBlock("PUBLIC KEY", mustPKIX(t, rsaKey.Public()))...))
+		require.NoError(t, err)
+		require.NoError(t, ks.Verify(sign("RS256", "")))
+	})
+
 	t.Run("refuses a kid no key has", func(t *testing.T) {
 		err := set(rs256).Verify(sign("RS256", "key-9"))
 		require.ErrorIs(t, err, ErrUnknownKid)
@@ -243,4 +274,15 @@ func mustJSON(t *testing.T, v any) []byte {
 	require.NoError(t, err)
 
 	return b
+}
+
+// selfSigned returns the DER of a certificate of key, signed by itself.
+func selfSigned(t *testing.T, key crypto.Signer) []byte {
+	t.Helper()
+
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), NotAfter: time.Now().Add(time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
+	require.NoError(t, err)
+
+	return der
 }

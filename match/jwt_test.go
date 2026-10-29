@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	json "encoding/json/v2"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -40,6 +41,17 @@ func TestJWT_MatchesTheHeaderAndClaimsOfAToken(t *testing.T) {
 			require.Equal(t, tt.want, ok)
 		})
 	}
+}
+
+func TestJWT_ReturnsTheErrorOfItsMatcher(t *testing.T) {
+	// A matcher that fails on the claims is an error, not a token that didn't match.
+	boom := errors.New("boom")
+	token := signJWT(t, newECKey(t), "key-1", `{"sub":"ana"}`)
+
+	ok, err := JWT(Function(func(any) (bool, error) { return false, boom })).
+		Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), token))
+	require.ErrorIs(t, err, boom)
+	require.False(t, ok)
 }
 
 func TestJWT_DoesNotVerifyTheSignature(t *testing.T) {
