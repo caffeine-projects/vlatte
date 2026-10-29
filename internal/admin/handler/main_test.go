@@ -37,11 +37,7 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(
-		m,
-		goleak.IgnoreTopFunction("net/http.(*persistConn).readLoop"),
-		goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),
-	)
+	goleak.VerifyTestMain(m)
 }
 
 // fakeMock is a mock of no protocol: the admin API knows mocks through vlatte.Mock and the interfaces it checks for.

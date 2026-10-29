@@ -27,11 +27,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(
-		m,
-		goleak.IgnoreTopFunction("net/http.(*persistConn).readLoop"),
-		goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),
-	)
+	goleak.VerifyTestMain(m)
 }
 
 // stubMock is the least a store needs.
