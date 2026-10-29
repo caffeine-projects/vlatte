@@ -541,7 +541,7 @@ func TestMockFile_ServesTrailers(t *testing.T) {
 
 func TestMockFile_ServesABase64BodyAsItsBytes(t *testing.T) {
 	// #42: a body that isn't UTF-8, such as an image or text in another encoding, has no place in body, whose text
-	// JSON and YAML hold as UTF-8. body_base64 holds any bytes, as WireMock's base64Body does.
+	// JSON and YAML hold as UTF-8. body_base64 holds any bytes.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)

@@ -282,7 +282,7 @@ func TestEventRunner_EventsKeepTheValuesOfTheRequestContext(t *testing.T) {
 }
 
 func TestEventRunner_EventsAfterTheResponseDontHoldIt(t *testing.T) {
-	// An app that needs its callback once it has its answer, as WireMock serves it, got it only after the response,
+	// An app that needs its callback once it has its answer, got it only after the response,
 	// which waited for every event. An event set to run after the response doesn't hold it now: OnComplete returns
 	// while it still runs, and it keeps the values of the request's context, not its end. The others still hold it.
 	synctest.Test(t, func(t *testing.T) {
