@@ -29,7 +29,7 @@ m.MustMock(mockhttp.Postf("/users").Reply(mockhttp.Created().
 Nothing else renders: `{{` anywhere else is text.
 
 - `header_template` values (`HeaderTemplate`).
-- With `template.enabled`: a text `body` (`BodyTemplate`), the content of a `body_file` (`BodyFileWithTemplate`), the text of `multipart` parts (`Template()`), and the text of `event_stream` events (`Template()`).
+- With `template.enabled`: a text `body` (`BodyTemplate`), the content of a `body_file` (`BodyFileWithTemplate`), the text of `multipart` parts (`Template()`), and the text of `event_stream` [events](/sse/events#templated-events) (`Template()`).
 - `body_file` names, always. The content of the file is written as it is unless `template.enabled` is set.
 - Webhook parameters: `url_template`, `header_template`, `body_template` and `multipart_template`.
 

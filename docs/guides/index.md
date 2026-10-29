@@ -13,3 +13,5 @@ Each guide works through one task from start to end, with code you can run. The 
 | [Docker Compose](/guides/docker-compose) | vlatte next to an app under test, with mocks changed over the admin API. |
 | [Testing webhooks](/guides/webhooks) | A payment API that calls your service back, and a test that the callback came. |
 | [HTTPS and mTLS mocks](/guides/https-mtls) | Tests of a client of an HTTPS-only API, with mutual TLS, and the CLI serving the same mock. |
+| [Testing an LLM streaming client](/guides/llm-streaming) | Tests of a client of a chat API that streams its answers, through a dropped stream and a rate limit. |
+| [Mocking a remote MCP server](/guides/mcp-server) | Mock files that play an MCP server over Streamable HTTP, and a test of an MCP client against them. |
