@@ -35,7 +35,7 @@ response:
 
 Everything before a wait is flushed first, so the client reads the events before it while it waits. A mock file can't write a function: a stream with `EventDelayFunc` is described without it, such as by `GET /mocks/{id}` on the [admin API](/admin-api/#routes).
 
-These delays are between events. The mock's own [delay](/more/mock-lifecycle#delays) waits before the reply starts, and [steps](/http/steps) can slow the bytes of the stream.
+These delays are between events. The mock's own [delay](/more/mock-lifecycle#delays) waits before the reply starts, and [pipes](/http/pipes) can slow the bytes of the stream.
 
 ## Heartbeats
 

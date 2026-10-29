@@ -20,7 +20,7 @@ import (
 
 func TestRecording_CapturesTheAnswerTheClientGets(t *testing.T) {
 	// The capture sees what the server sends, the way net/http sends it: the status of the first final WriteHeader,
-	// or 200, and the body after the steps of the mock.
+	// or 200, and the body after the pipes of the mock.
 	tests := []struct {
 		name   string
 		mock   *Builder
@@ -56,22 +56,22 @@ func TestRecording_CapturesTheAnswerTheClientGets(t *testing.T) {
 			status: http.StatusOK,
 		},
 		{
-			name:   "the steps of a mock change what is sent",
-			mock:   Getf("/r").Step(appendStep("<step>")).Reply(OK().PlainText("body")),
+			name:   "the pipes of a mock change what is sent",
+			mock:   Getf("/r").Pipe(appendPipe("<pipe>")).Reply(OK().PlainText("body")),
 			status: http.StatusOK,
-			body:   "body<step>",
+			body:   "body<pipe>",
 		},
 		{
-			name: "a step that writes from a goroutine of its own sends what is recorded",
-			mock: Getf("/r").Step(asyncStep{}, appendStep("<step>")).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+			name: "a pipe that writes from a goroutine of its own sends what is recorded",
+			mock: Getf("/r").Pipe(asyncPipe{}, appendPipe("<pipe>")).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = io.WriteString(w, "body")
 			})),
 			status: http.StatusOK,
-			body:   "body<step>",
+			body:   "body<pipe>",
 		},
 		{
-			name:   "a step that writes from a goroutine of its own sends a rendered body too",
-			mock:   Getf("/r").Step(asyncStep{}).Reply(OK().PlainText("body")),
+			name:   "a pipe that writes from a goroutine of its own sends a rendered body too",
+			mock:   Getf("/r").Pipe(asyncPipe{}).Reply(OK().PlainText("body")),
 			status: http.StatusOK,
 			body:   "body",
 		},
@@ -404,15 +404,15 @@ func TestRecording_LargeBodies(t *testing.T) {
 	})
 }
 
-func TestRecording_AMockedAnswerAStepWritesLaterIsLeftOut(t *testing.T) {
+func TestRecording_AMockedAnswerAPipeWritesLaterIsLeftOut(t *testing.T) {
 	// A reply that writes its own answer writes before the server knows who answers. Once it knows a mock does, the
-	// capture drops what it kept, while a step that writes from a goroutine of its own may still be writing to it.
+	// capture drops what it kept, while a pipe that writes from a goroutine of its own may still be writing to it.
 	dir := t.TempDir()
 
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
-	m.MustMock(Getf("/r").Step(asyncStep{}).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+	m.MustMock(Getf("/r").Pipe(asyncPipe{}).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "body")
 	})))
 	require.NoError(t, m.StartRecording(RecordDir(dir)))

@@ -8,20 +8,20 @@ import (
 )
 
 var (
-	_ vlatte.Step            = limitData{}
+	_ vlatte.Pipe            = limitData{}
 	_ vlatte.SelfDescriptive = limitData{}
 	_ vlatte.Stage           = (*limitDataStage)(nil)
 )
 
-// LimitData returns a step that passes the first n bytes of the answer on, flushed, then aborts the flow, so the
+// LimitData returns a pipe that passes the first n bytes of the answer on, flushed, then aborts the flow, so the
 // connection closes, to test a client against an answer cut short. An answer of fewer than n bytes passes whole, and
 // ends as it would; a longer one, or one of n bytes, is cut once its n-th byte went out. A limit of 0 cuts the answer
 // at its first byte.
 //
-// With [github.com/caffeine-projects/vlatte/mockhttp.Builder.Step], n counts the bytes of the body. With
-// [github.com/caffeine-projects/vlatte/mockhttp.Builder.WireStep], it counts every byte of the answer, its status
+// With [github.com/caffeine-projects/vlatte/mockhttp.Builder.Pipe], n counts the bytes of the body. With
+// [github.com/caffeine-projects/vlatte/mockhttp.Builder.WirePipe], it counts every byte of the answer, its status
 // line, headers and framing included. It panics when n is negative.
-func LimitData(n int) vlatte.Step {
+func LimitData(n int) vlatte.Pipe {
 	if n < 0 {
 		panic(fmt.Sprintf("fault: limit data can't be %d bytes", n))
 	}

@@ -50,7 +50,8 @@ jobs:
     - name: Test
       run: make testci
 
-  # The archives, their checksums, SBOMs, signature and provenance, the GitHub release as a draft, and the Homebrew cask.
+  # The archives, their checksums, SBOMs, signature and provenance, the GitHub release, and for a stable release the
+  # Homebrew cask.
   goreleaser:
     needs: verify
     runs-on: ubuntu-latest
@@ -62,6 +63,14 @@ jobs:
       id-token: write # signs with cosign and the provenance attestation, keyless
       attestations: write
     steps:
+    # A stable release uploads the cask: fail before the release is created if the token expired or was revoked. The tap
+    # is public, so this cannot tell whether the token may still write to it.
+    - name: Check the tap token
+      if: ${{ !contains(github.ref_name, '-') }}
+      env:
+        GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+      run: gh api repos/caffeine-projects/homebrew-tap --silent
+
     - name: Checkout
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
@@ -80,6 +89,14 @@ jobs:
     - name: Install syft
       uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
 
+    # The tag before a release candidate, even another release candidate, which .goreleaser.yaml's ignore_tags skips.
+    - name: Pin the previous tag of a release candidate
+      if: ${{ contains(github.ref_name, '-') }}
+      run: |
+        if prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null)"; then
+          echo "GORELEASER_PREVIOUS_TAG=${prev}" >> "$GITHUB_ENV"
+        fi
+
     - name: Release
       uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
       with:
@@ -89,6 +106,8 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        # The tag that started this run, not a stable tag pushed later onto the same commit.
+        GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
 
     - name: Attest provenance
       id: attest

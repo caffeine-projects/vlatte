@@ -9,33 +9,33 @@ import (
 )
 
 var (
-	_ vlatte.Step            = timeoutStep{}
-	_ vlatte.SelfDescriptive = timeoutStep{}
+	_ vlatte.Pipe            = timeoutPipe{}
+	_ vlatte.SelfDescriptive = timeoutPipe{}
 	_ vlatte.Stage           = (*timeoutStage)(nil)
 )
 
-// Timeout returns a step that sends nothing, then ends the answer after timeout, to test a client's read timeout
+// Timeout returns a pipe that sends nothing, then ends the answer after timeout, to test a client's read timeout
 // against a server that hangs: it drops every write and flush, and aborts the flow timeout after it opened, as the
 // answer began, so the connection closes. The writer doesn't wait for it, but the end of the answer does. A timeout
-// of 0 never ends it: the answer hangs until the flow's context ends, as when the client leaves, with Step, or the
+// of 0 never ends it: the answer hangs until the flow's context ends, as when the client leaves, with Pipe, or the
 // server closes.
 //
-// With [github.com/caffeine-projects/vlatte/mockhttp.Builder.WireStep], the client gets no byte, not even a status
-// line. With [github.com/caffeine-projects/vlatte/mockhttp.Builder.Step], the server sends the head as it cuts the
+// With [github.com/caffeine-projects/vlatte/mockhttp.Builder.WirePipe], the client gets no byte, not even a status
+// line. With [github.com/caffeine-projects/vlatte/mockhttp.Builder.Pipe], the server sends the head as it cuts the
 // answer: the client waits, then reads a head and the end of the connection where the body should be. It panics when
 // timeout is negative.
-func Timeout(timeout time.Duration) vlatte.Step {
+func Timeout(timeout time.Duration) vlatte.Pipe {
 	if timeout < 0 {
 		panic(fmt.Sprintf("fault: timeout can't last %s", timeout))
 	}
 
-	return timeoutStep{timeout: timeout}
+	return timeoutPipe{timeout: timeout}
 }
 
-type timeoutStep struct{ timeout time.Duration }
+type timeoutPipe struct{ timeout time.Duration }
 
 // Describe implements [vlatte.SelfDescriptive], without a timeout of 0, which never ends the answer.
-func (t timeoutStep) Describe() vlatte.Descriptor {
+func (t timeoutPipe) Describe() vlatte.Descriptor {
 	if t.timeout == 0 {
 		return vlatte.DescribeKeyValuePairs("timeout", "type", "timeout")
 	}
@@ -43,7 +43,7 @@ func (t timeoutStep) Describe() vlatte.Descriptor {
 	return vlatte.DescribeKeyValuePairs("timeout", "type", "timeout", "after", t.timeout.String())
 }
 
-func (t timeoutStep) Open(flow *vlatte.Flow, _ vlatte.Stage) vlatte.Stage {
+func (t timeoutPipe) Open(flow *vlatte.Flow, _ vlatte.Stage) vlatte.Stage {
 	if t.timeout > 0 {
 		abortAfter(flow, t.timeout, nil)
 	}

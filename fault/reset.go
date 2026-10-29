@@ -9,18 +9,18 @@ import (
 )
 
 var (
-	_ vlatte.Step            = resetByPeer{}
+	_ vlatte.Pipe            = resetByPeer{}
 	_ vlatte.SelfDescriptive = resetByPeer{}
 	_ vlatte.Stage           = (*resetStage)(nil)
-	_ vlatte.Step            = resetAfter{}
+	_ vlatte.Pipe            = resetAfter{}
 	_ vlatte.SelfDescriptive = resetAfter{}
 	_ vlatte.Stage           = (*resetAfterStage)(nil)
 )
 
-// ConnectionResetByPeer returns a wire step that resets the connection: at the first byte of the answer, or at its
+// ConnectionResetByPeer returns a wire pipe that resets the connection: at the first byte of the answer, or at its
 // end, it aborts the flow with [vlatte.ErrReset], so the connection closes with a TCP reset before a status line. The
 // client reads a reset, such as syscall.ECONNRESET, not an end.
-func ConnectionResetByPeer() vlatte.Step {
+func ConnectionResetByPeer() vlatte.Pipe {
 	return resetByPeer{}
 }
 
@@ -49,15 +49,15 @@ func (s *resetStage) reset() error {
 	return context.Cause(s.flow.Context())
 }
 
-// ConnectionResetByPeerAfter returns a step that passes the answer on as it is, then resets the connection after d: it
+// ConnectionResetByPeerAfter returns a pipe that passes the answer on as it is, then resets the connection after d: it
 // aborts the flow with [vlatte.ErrReset] d after it opened, as the answer began, to test a client that a reset meets
 // while it reads. An answer that ends before d is flushed whole, then waits for the reset, so a client that reads
 // until the end reads a reset. A d of 0 resets at once, as [ConnectionResetByPeer] does.
 //
-// It goes with [github.com/caffeine-projects/vlatte/mockhttp.Builder.WireStep], or with
-// [github.com/caffeine-projects/vlatte/mockhttp.Builder.Step] over HTTP/1, where a reset resets the connection too.
+// It goes with [github.com/caffeine-projects/vlatte/mockhttp.Builder.WirePipe], or with
+// [github.com/caffeine-projects/vlatte/mockhttp.Builder.Pipe] over HTTP/1, where a reset resets the connection too.
 // It panics when d is negative.
-func ConnectionResetByPeerAfter(d time.Duration) vlatte.Step {
+func ConnectionResetByPeerAfter(d time.Duration) vlatte.Pipe {
 	if d < 0 {
 		panic(fmt.Sprintf("fault: connection reset by peer can't come %s after", d))
 	}

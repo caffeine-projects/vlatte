@@ -56,14 +56,14 @@ func (w *eventWriter) readable(t require.TestingT, gzipped bool) []byte {
 
 func TestPropStream_EachPauseFollowsAFlush(t *testing.T) {
 	// M21: a streamed body waits at each pause only once everything before it is written and flushed, through gzip
-	// and steps too, so the client reads it during the wait. When the client goes away during a wait, nothing more
+	// and pipes too, so the client reads it during the wait. When the client goes away during a wait, nothing more
 	// is written. No real time passes: the wait is a fake.
 	t.Parallel()
 
 	rapid.Check(t, func(t *rapid.T) {
 		body := []byte(rapid.StringN(1, 200, -1).Draw(t, "body"))
 		gzipped := rapid.Bool().Draw(t, "gzip")
-		withSteps := rapid.Bool().Draw(t, "steps")
+		withPipes := rapid.Bool().Draw(t, "pipes")
 
 		// Offsets past the end stand for a body a Mapper shortened.
 		offsets := rapid.SliceOfNDistinct(rapid.IntRange(1, len(body)+10), 1, 4, func(n int) int { return n }).Draw(t, "pauses")
@@ -87,8 +87,8 @@ func TestPropStream_EachPauseFollowsAFlush(t *testing.T) {
 		ew := &eventWriter{header: make(http.Header)}
 
 		var w http.ResponseWriter = ew
-		if withSteps {
-			w = newTopResponseWriter(context.Background(), []vlatte.Step{appendStep("")}, ew)
+		if withPipes {
+			w = newTopResponseWriter(context.Background(), []vlatte.Pipe{appendPipe("")}, ew)
 		}
 
 		waits := 0

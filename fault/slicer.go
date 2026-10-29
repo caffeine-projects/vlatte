@@ -10,21 +10,21 @@ import (
 )
 
 var (
-	_ vlatte.Step            = slicer{}
+	_ vlatte.Pipe            = slicer{}
 	_ vlatte.SelfDescriptive = slicer{}
 	_ vlatte.Stage           = (*slicerStage)(nil)
 )
 
-// Slicer returns a step that slices each write into flushed slices of averageSize bytes, give or take sizeVariation,
+// Slicer returns a pipe that slices each write into flushed slices of averageSize bytes, give or take sizeVariation,
 // at random, and waits delay before each slice, to test a client that takes one read for a whole message: the client
 // reads the answer in many small reads. The bytes, and their order, don't change. The writer waits for its slices.
 // TCP can join slices that come close together: a delay keeps them apart.
 //
-// It goes with [github.com/caffeine-projects/vlatte/mockhttp.Builder.Step], to slice the body, or with
-// [github.com/caffeine-projects/vlatte/mockhttp.Builder.WireStep], to slice the whole answer, its head included. It
+// It goes with [github.com/caffeine-projects/vlatte/mockhttp.Builder.Pipe], to slice the body, or with
+// [github.com/caffeine-projects/vlatte/mockhttp.Builder.WirePipe], to slice the whole answer, its head included. It
 // panics when averageSize is less than 1, sizeVariation is negative or not less than averageSize, or delay is
 // negative.
-func Slicer(averageSize, sizeVariation int, delay time.Duration) vlatte.Step {
+func Slicer(averageSize, sizeVariation int, delay time.Duration) vlatte.Pipe {
 	if averageSize < 1 {
 		panic(fmt.Sprintf("fault: slicer needs slices of a byte at least, not %d", averageSize))
 	}

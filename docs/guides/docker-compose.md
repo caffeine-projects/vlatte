@@ -15,7 +15,7 @@ This guide runs vlatte next to an app under test with Docker Compose: the app ca
 
 ```yaml
 # mocks/payments_mock.yaml
-# yaml-language-server: $schema=https://caffeine-projects.github.io/vlatte/schemas/http.schema.json
+# yaml-language-server: $schema=https://vlatte.dev/schemas/http.schema.json
 id: create-payment
 request:
   method: POST

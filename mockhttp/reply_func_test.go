@@ -42,17 +42,17 @@ func TestHandlerReply(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 }
 
-func TestSteps_AStepCanEndAHandlerThatWaitsOnItsRequest(t *testing.T) {
-	// A handler stops when its request's context ends, as for any server: a step that times the response out ends it
+func TestPipes_APipeCanEndAHandlerThatWaitsOnItsRequest(t *testing.T) {
+	// A handler stops when its request's context ends, as for any server: a pipe that times the response out ends it
 	// too, else the handler holds the client until it leaves.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	errTimeout := errors.New("step: timed out")
+	errTimeout := errors.New("pipe: timed out")
 	release := make(chan struct{})
 	causes := make(chan error, 1)
-	scoped := m.MustMock(Getf("/wait").Step(abortOn{release: release, err: errTimeout}).Reply(Handler(func(_ http.ResponseWriter, r *http.Request) {
+	scoped := m.MustMock(Getf("/wait").Pipe(abortOn{release: release, err: errTimeout}).Reply(Handler(func(_ http.ResponseWriter, r *http.Request) {
 		close(release)
 		<-r.Context().Done()
 		causes <- context.Cause(r.Context())

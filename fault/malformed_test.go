@@ -32,7 +32,7 @@ func TestMalformedResponseChunk_BreaksTheBodyAfterAValidHead(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
-			flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Step{fault.MalformedResponseChunk()})
+			flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Pipe{fault.MalformedResponseChunk()})
 
 			for _, w := range tc.writes {
 				if _, err := flow.Write([]byte(w)); err != nil {
@@ -59,7 +59,7 @@ func TestMalformedResponseChunk_PassesFlushesAndTheEndOn(t *testing.T) {
 	// Until the head ends, the answer goes on as it is: a flush still sends it, and an answer that ends before its
 	// head did isn't broken further.
 	var out bytes.Buffer
-	flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &bufioFlusher{w: &out}}, []vlatte.Step{fault.MalformedResponseChunk()})
+	flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &bufioFlusher{w: &out}}, []vlatte.Pipe{fault.MalformedResponseChunk()})
 
 	_, err := flow.Write([]byte("HTTP/1.1 200 OK\r\n"))
 	require.NoError(t, err)
@@ -113,7 +113,7 @@ func TestMalformedResponseChunk_AClientThatWentAwayEndsIt(t *testing.T) {
 		"as the head ends":     {_head},
 	} {
 		t.Run(name, func(t *testing.T) {
-			flow := vlatte.NewFlow(t.Context(), failingSink{err: errGone, writes: true}, []vlatte.Step{fault.MalformedResponseChunk()})
+			flow := vlatte.NewFlow(t.Context(), failingSink{err: errGone, writes: true}, []vlatte.Pipe{fault.MalformedResponseChunk()})
 
 			_, err := flow.Write([]byte(writes[0]))
 			require.ErrorIs(t, err, errGone)
