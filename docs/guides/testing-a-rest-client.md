@@ -1,6 +1,6 @@
 # Testing a REST client
 
-This guide tests a small Go client of a users API against a mock server: the happy path, an error answer, and what the client sent. It uses [mocks](/http/mocks), [request matching](/http/matching), [replies](/http/replies) and the [request journal](/features/journal).
+This guide tests a small Go client of a users API against a mock server: the happy path, an error answer, and what the client sent. It uses [mocks](/http/mocks), [request matching](/http/matching), [replies](/http/replies) and [request verification](/verify/).
 
 ## The client
 
@@ -119,7 +119,7 @@ A request no mock matches gets `418` with a `VLatte-Error: no-match` header, nev
 
 ## What the client sent
 
-The journal verifies requests after the fact, whatever answered them. `AssertRequested` checks how many requests a query selects, here by their method, path and a field of their JSON body, and `AssertNotRequested` that no request went unmatched.
+The journal keeps every request, whatever answered it, and `VerifyRequests` checks them after the fact. `Times` checks how many requests a selection holds, here by their method, path and a field of their JSON body, and `Never` that no request went unmatched. A failure lists the requests that came closest, with the parts they missed.
 
 ```go
 func TestCreateUserSendsTheName(t *testing.T) {
@@ -131,18 +131,19 @@ func TestCreateUserSendsTheName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m.AssertRequested(t.Context(), t, 1, journal.Query{
-		Method: match.Equal("POST"),
-		Path:   match.Equal("/users"),
-		Body:   match.JSONPath("$.name", match.Equal("bob")),
-	})
-	m.AssertNotRequested(t.Context(), t, journal.Query{Outcome: journal.OutcomeUnmatched})
+	m.VerifyRequests().
+		Method("POST").
+		Path(match.Equal("/users")).
+		Body(match.JSONPath("$.name", match.Equal("bob"))).
+		Times(t, 1)
+	m.VerifyRequests().Outcome(journal.OutcomeUnmatched).Never(t)
 }
 ```
 
 ## What you used
 
 - `mockhttp.MustNew`, `Setup().Journal`, `Setup().Silent`: [HTTP](/http/), [Request journal](/features/journal).
+- `VerifyRequests`, `Times`, `Never`: [Verifying requests](/verify/).
 - `Getf`, `Postf`, `Header`: [Mocks](/http/mocks), [Request matching](/http/matching).
 - `OK().JSON`, `NotFound`, `Created`: [Replies](/http/replies).
 - `match.Equal`, `match.JSONPath`: [Matchers](/matchers/).
