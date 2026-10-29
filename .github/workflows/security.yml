@@ -44,6 +44,19 @@ jobs:
       # keep in sync with GOVULNCHECK_VERSION in the Makefile
       run: go run golang.org/x/vuln/cmd/govulncheck@e672cbe8fbc8c76e28fcb6db0efd9ce354e0dac5 ./... # v1.9.0
 
+  osv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: 'stable'
+        cache: false
+    - run: go run github.com/google/osv-scanner/v2/cmd/osv-scanner@bfe2f84abd2f09fe0b83ba7f6dad40d296762f40 scan source -r --format vertical . || true
+
   image:
     runs-on: ubuntu-latest
     timeout-minutes: 15
