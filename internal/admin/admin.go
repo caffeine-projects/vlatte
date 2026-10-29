@@ -412,11 +412,14 @@ func (s *Server) trackMCP(next mcp.MethodHandler) mcp.MethodHandler {
 }
 
 // track counts the requests h serves, so Close waits for them, and gives them the server's logger. A request that
-// starts once Close runs gets a 503: no operation starts then.
+// starts once Close runs gets a 503: no operation starts then. Every answer tells browsers not to sniff its type, as
+// answers hold what clients sent, such as the requests of the journal.
 func (s *Server) track(h http.Handler) http.Handler {
 	closing := handler.Closing()
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+
 		s.mu.Lock()
 		if s.closed {
 			s.mu.Unlock()

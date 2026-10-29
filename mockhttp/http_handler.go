@@ -1204,7 +1204,8 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, misse
 	buf.WriteString("\n\n")
 	writeNearMisses(buf, r.nearMisses)
 
-	w.Header().Add(HeaderContentType, MIMETextPlainCharsetUTF8)
+	w.Header().Set(HeaderContentType, MIMETextPlainCharsetUTF8)
+	w.Header().Set(HeaderXContentTypeOptions, _noSniff)
 	w.Header().Set(HeaderVlatteError, vlatte.FailureNoMatch)
 	w.WriteHeader(h.app.config.RequestWasNotMatchedStatusCode)
 
@@ -1287,6 +1288,7 @@ func (h *mockHandler) onError(w http.ResponseWriter, r *RequestValues, failure s
 	buf.WriteString(err.Error())
 
 	w.Header().Set(HeaderContentType, MIMETextPlainCharsetUTF8)
+	w.Header().Set(HeaderXContentTypeOptions, _noSniff)
 	w.Header().Set(HeaderVlatteError, failure)
 	w.WriteHeader(h.app.config.ErrorStatusCode)
 
