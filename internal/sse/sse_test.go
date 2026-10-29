@@ -1,12 +1,14 @@
 package sse
 
 import (
+	"cmp"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
 )
@@ -170,4 +172,174 @@ func TestEncode_NamesTheFieldWhoseTemplateFails(t *testing.T) {
 			require.ErrorContains(t, err, "can't evaluate field Y")
 		})
 	}
+}
+
+// dispatched is an event as a client dispatches it.
+type dispatched struct {
+	Type        string
+	Data        string
+	LastEventID string
+}
+
+// parse reads body as the WHATWG HTML standard's event stream interpretation does, and returns the events a client
+// dispatches.
+func parse(body string) []dispatched {
+	var (
+		events                  []dispatched
+		data, eventType, lastID string
+		hasData                 bool
+	)
+
+	body = strings.TrimPrefix(body, "\uFEFF")
+
+	// Split apart from lines, the splitter under test.
+	for line := range strings.SplitSeq(normalize(body), "\n") {
+		switch {
+		case line == "":
+			if hasData {
+				events = append(events, dispatched{Type: cmp.Or(eventType, "message"), Data: strings.TrimSuffix(data, "\n"), LastEventID: lastID})
+			}
+
+			data, eventType, hasData = "", "", false
+		case strings.HasPrefix(line, ":"):
+		default:
+			name, value, _ := strings.Cut(line, ":")
+			value = strings.TrimPrefix(value, " ")
+
+			switch name {
+			case "event":
+				eventType = value
+			case "data":
+				data += value + "\n"
+				hasData = true
+			case "id":
+				if !strings.ContainsRune(value, 0) {
+					lastID = value
+				}
+			}
+		}
+	}
+
+	return events
+}
+
+func TestPropEncode_ClientsReadTheEventsBack(t *testing.T) {
+	// SSE1: whatever the data, comments, types and ids, a client dispatches each event with data, in order, with the
+	// type, data and last event ID it was written with. Events without data aren't dispatched, but their ids count.
+	rapid.Check(t, func(t *rapid.T) {
+		events := rapid.SliceOfN(genEvent(), 0, 6).Draw(t, "events")
+
+		e, err := Compile(&Spec{Events: events}, nil)
+		require.NoError(t, err)
+
+		frames, err := e.Encode(nil)
+		require.NoError(t, err)
+
+		var body strings.Builder
+		for _, f := range frames {
+			body.Write(f.Bytes)
+		}
+
+		var (
+			want   []dispatched
+			lastID string
+		)
+
+		for _, ev := range events {
+			if ev.HasID {
+				lastID = ev.ID
+			}
+
+			if ev.HasData {
+				want = append(want, dispatched{Type: cmp.Or(ev.Event, "message"), Data: normalize(string(ev.Data)), LastEventID: lastID})
+			}
+		}
+
+		require.Equal(t, want, parse(body.String()))
+	})
+}
+
+// normalize returns s with its line endings as a client reads them back: LF.
+func normalize(s string) string {
+	return strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(s)
+}
+
+// Generators
+
+// genFieldText draws the text of an event type or id: anything but CR, LF and NUL, which Compile refuses, spaces
+// at either end included, which the format keeps but for the one after the colon.
+func genFieldText() *rapid.Generator[string] {
+	return rapid.StringMatching(`[A-Za-z0-9 :._\-éü😀]{0,8}`)
+}
+
+// genText draws data and comments: unicode, colons, spaces and every line ending, at the ends too.
+func genText() *rapid.Generator[string] {
+	return rapid.Map(rapid.SliceOfN(rapid.SampledFrom([]string{"\r\n", "\r", "\n", " ", ":", "a", "data: x", "é", "😀"}), 0, 10),
+		func(chunks []string) string {
+			var s string
+			for _, c := range chunks {
+				s += c
+			}
+
+			return s
+		})
+}
+
+// genEvent draws an event with any of its fields, but raw.
+func genEvent() *rapid.Generator[*EventSpec] {
+	return rapid.Custom(func(t *rapid.T) *EventSpec {
+		ev := &EventSpec{
+			Event:   rapid.OneOf(rapid.Just(""), genFieldText()).Draw(t, "event"),
+			HasID:   rapid.Bool().Draw(t, "has_id"),
+			HasData: rapid.Bool().Draw(t, "has_data"),
+			Comment: rapid.OneOf(rapid.Just(""), genText()).Draw(t, "comment"),
+		}
+
+		if ev.HasID {
+			ev.ID = genFieldText().Draw(t, "id")
+		}
+
+		if ev.HasData {
+			ev.Data = []byte(genText().Draw(t, "data"))
+		}
+
+		return ev
+	})
+}
+
+// _jsonData holds the JSON data of events: objects, arrays and scalars, what data reads as text or refuses, a string
+// and null, a number past int64, which a file can't hold, and strings a templated stream would run as templates.
+var _jsonData = []string{
+	`{"a":1,"b":[true,null,"x"]}`, `[]`, `{}`, `3`, `false`, `"s"`, `null`, `{"z":{"y":"é"}}`, `18446744073709551615`,
+	`[1.5,-2]`, `"{{ .X }}"`, `{"a":"{{ .X }}"}`,
+}
+
+// genDocEvent draws an event as a mock file can write it: any field of genEvent, JSON data, a retry, or raw text
+// alone, each with a delay or not.
+func genDocEvent() *rapid.Generator[*EventSpec] {
+	return rapid.Custom(func(t *rapid.T) *EventSpec {
+		ev := new(EventSpec)
+
+		switch rapid.IntRange(0, 2).Draw(t, "kind") {
+		case 0:
+			ev.Raw, ev.HasRaw = []byte(genText().Draw(t, "raw")), true
+		case 1:
+			ev = genEvent().Draw(t, "event")
+			ev.Data, ev.DataKind, ev.HasData = []byte(rapid.SampledFrom(_jsonData).Draw(t, "json_data")), DataJSON, true
+		default:
+			ev = genEvent().Draw(t, "event")
+		}
+
+		if !ev.HasRaw {
+			if ev.HasRetry = rapid.Bool().Draw(t, "has_retry"); ev.HasRetry {
+				ev.Retry = time.Duration(rapid.Int64Range(0, 1e12).Draw(t, "retry"))
+			}
+		}
+
+		if ev.HasDelay = rapid.Bool().Draw(t, "has_delay"); ev.HasDelay {
+			ev.Delay = time.Duration(rapid.Int64Range(0, 1e12).Draw(t, "delay"))
+		}
+
+		return ev
+	})
 }
