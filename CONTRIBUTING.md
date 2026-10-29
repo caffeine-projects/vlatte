@@ -11,7 +11,7 @@ Thanks for helping with VLatte. This page covers what you need to get a change m
 
 - Go 1.27 or later. CI tests the latest Go and the minimum in `go.mod`.
 - [golangci-lint](https://golangci-lint.run/) v2.14.0, for `make lint`.
-- Node.js 22, only to work on the docs site in `docs/`.
+- Node.js 26, the current LTS, only to work on the docs site in `docs/`.
 
 [`mise.toml`](mise.toml) pins all three: run `mise install` if you use [mise](https://mise.jdx.dev/).
 
