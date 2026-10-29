@@ -24,13 +24,14 @@ const (
 )
 
 // newHTTP creates the HTTP server of args, with the command's settings s, whose mock files name wh as an on_complete
-// listener, and which logs to logOutput. The command serves the admin API, which keeps the mocks it adds across
-// restarts, and keeps a journal of the requests it serves, unless settings turn them off: they apply after code. It
-// returns the admin API too, nil when it is off.
-func newHTTP(args []string, s settings, wh *webhook.WebHook, logOutput io.Writer) (*mockhttp.Server, *admin.Admin, error) {
+// listener, whose templates read kv, and which logs to logOutput. The command serves the admin API, which keeps the
+// mocks it adds across restarts, and keeps a journal of the requests it serves, unless settings turn them off: they
+// apply after code. It returns the admin API too, nil when it is off.
+func newHTTP(args []string, s settings, wh *webhook.WebHook, kv vlatte.KV, logOutput io.Writer) (*mockhttp.Server, *admin.Admin, error) {
 	cb, api := s.setupHTTP(mockhttp.Setup())
 
 	m, err := mockhttp.New(cb.
+		KV(kv).
 		Journal(_journalDir).
 		LogOutput(logOutput).
 		ConfigSources(mockhttp.DefaultConfigSources(args)...).

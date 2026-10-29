@@ -196,14 +196,20 @@ func startServer(cmd *cobra.Command, args []string, s settings, out, logOutput, 
 	// waiting for their answers as long as the webhook.timeout setting says.
 	wh := cmp.Or(s.webhook, &webhook.WebHook{})
 
-	httpArgs, grpcArgs := splitArgs(args)
-
-	m, api, err := newHTTP(httpArgs, s, wh, logOutput)
+	// Both servers read one key-value store.
+	kv, err := s.newKV()
 	if err != nil {
 		return nil, nil, nil, failure(cmd, err, out, stderr)
 	}
 
-	g, err := newGRPC(grpcArgs, s, m.Config(), wh, logOutput)
+	httpArgs, grpcArgs := splitArgs(args)
+
+	m, api, err := newHTTP(httpArgs, s, wh, kv, logOutput)
+	if err != nil {
+		return nil, nil, nil, failure(cmd, err, out, stderr)
+	}
+
+	g, err := newGRPC(grpcArgs, s, m.Config(), wh, kv, logOutput)
 	if err != nil {
 		// Close releases what New opened, such as the journal.
 		m.Close()

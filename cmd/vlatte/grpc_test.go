@@ -146,6 +146,43 @@ response:
 	require.Equal(t, 0, stop(), "a stopped command exits cleanly")
 }
 
+func TestCLI_GRPCMocksReadTheKVFile(t *testing.T) {
+	// kv.file fills the store of both servers: a gRPC mock's template reads it as an HTTP mock's does.
+	withoutDockerHost(t)
+
+	set, file := healthSet(t, "kv.health.v1")
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "kv.csv"), []byte("key,value\nstatus,SERVING\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "check.yaml"), []byte(`
+request:
+  method: kv.health.v1.Health/Check
+response:
+  message: '{"status": "{{ .KV.Get "status" }}"}'
+  template: true
+`), 0o600))
+
+	httpAddr, grpcAddr := randomAddr(t), randomAddr(t)
+	start(t, "--addr", httpAddr, "--kv-file", filepath.Join(dir, "kv.csv"),
+		"--grpc-addr", grpcAddr, "--grpc-descriptors", set, "--grpc-mock-files", filepath.Join(dir, "*.yaml"))
+
+	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	msgs := file.Messages()
+	req := dynamicpb.NewMessage(msgs.ByName("HealthCheckRequest"))
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res := dynamicpb.NewMessage(msgs.ByName("HealthCheckResponse"))
+		if !assert.NoError(c, conn.Invoke(t.Context(), "/kv.health.v1.Health/Check", req, res)) {
+			return
+		}
+
+		status := res.Descriptor().Fields().ByName("status")
+		assert.Equal(c, status.Enum().Values().ByName("SERVING").Number(), res.Get(status).Enum())
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
 func TestRun_InvalidGRPCSettingsLeaveNothingOpen(t *testing.T) {
 	// An invalid gRPC setting is a usage error. The HTTP server, built first, kept its journal open: the next run in
 	// the directory found it in use.

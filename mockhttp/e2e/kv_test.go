@@ -1,11 +1,15 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -23,7 +27,7 @@ import (
 var _ vlatte.KV = (*redisKV)(nil)
 
 // _kvStores are the stores the suite runs on. start returns a store that holds seed, and how another client writes to
-// it: Set for the memory store, and the Redis server itself for the Redis one, as another process would.
+// it: Set for the memory and CSV stores, and the Redis server itself for the Redis one, as another process would.
 var _kvStores = []struct {
 	name  string
 	start func(t *testing.T, seed map[string]string) (kv vlatte.KV, write func(k, v string))
@@ -37,6 +41,10 @@ var _kvStores = []struct {
 		}
 
 		return kv, write
+	}},
+	{"csv", func(t *testing.T, seed map[string]string) (vlatte.KV, func(k, v string)) {
+		kv := vlatte.MustNewCSVKV(writeCSV(t, seed))
+		return kv, func(k, v string) { require.NoError(t, kv.Set(t.Context(), k, []byte(v))) }
 	}},
 	{"redis", func(t *testing.T, seed map[string]string) (vlatte.KV, func(k, v string)) {
 		mr, kv := startRedis(t)
@@ -228,4 +236,26 @@ func startRedis(t *testing.T) (*miniredis.Miniredis, redisKV) {
 	t.Cleanup(func() { _ = c.Close() })
 
 	return mr, redisKV{c}
+}
+
+// writeCSV writes seed as the CSV file of a store, a header then a row for each key, and returns its path.
+func writeCSV(t *testing.T, seed map[string]string) string {
+	t.Helper()
+
+	var b bytes.Buffer
+
+	w := csv.NewWriter(&b)
+	require.NoError(t, w.Write([]string{"key", "value"}))
+
+	for k, v := range seed {
+		require.NoError(t, w.Write([]string{k, v}))
+	}
+
+	w.Flush()
+	require.NoError(t, w.Error())
+
+	path := filepath.Join(t.TempDir(), "kv.csv")
+	require.NoError(t, os.WriteFile(path, b.Bytes(), 0o600))
+
+	return path
 }

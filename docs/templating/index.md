@@ -67,6 +67,19 @@ type KV interface {
 
 `Get` of a key that isn't stored returns an error that wraps `vlatte.ErrKVKeyNotFound`, `Has` is true for a key set to an empty value, `Del` of a key that isn't stored is not an error, and `Keys` lists the keys in any order. A store keeps and returns copies of the values. A server reads the store from every request at once, so it must be safe for concurrent use. A store reads with the context of the request, or with an event's own for webhooks, which outlives a client that leaves.
 
+A CSV file can fill the store. `vlatte.NewCSVKV("testdata/kv.csv")` loads one, and `Setup().KV(kv)` gives it to a server. The `vlatte` command loads the file that `--kv-file`, `VLATTE_KV_FILE` or `kv.file` names, into the one store its HTTP and gRPC servers read. A server built in Go ignores `kv.file`.
+
+```csv
+key,value
+token,abc123
+greeting,"Hello, ""world"""
+banner,"line one
+line two"
+empty,
+```
+
+The first row is the header `key,value`, and each other row is a key and its value, quoted as RFC 4180 says, so `{{ .KV.Get "greeting" }}` renders `Hello, "world"`. A byte order mark, which Excel writes, is dropped, and keys and values keep their spaces. A missing header, a row without two fields, an empty key or a repeated key fails the load, and the error names the line. The file is read once: `Set` and `Del` change the store, never the file. The image's working directory is `/vlatte`, so mount the file there: `docker run -v "$PWD/kv.csv:/vlatte/kv.csv" -e VLATTE_KV_FILE=kv.csv …`.
+
 A store on Redis, with [go-redis](https://github.com/redis/go-redis), as [`kv_test.go`](https://github.com/caffeine-projects/vlatte/blob/main/mockhttp/e2e/kv_test.go) runs it:
 
 ```go

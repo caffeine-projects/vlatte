@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -65,6 +67,19 @@ func TestHealth_ProbesTheImageAdminAPIOverTLS(t *testing.T) {
 	var errOut bytes.Buffer
 	require.Equal(t, 1, run(t.Context(), []string{"health"}, nil, io.Discard, &errOut))
 	require.Contains(t, errOut.String(), `Get "https://vlatte.invalid:8081/readyz"`)
+}
+
+func TestHealth_DoesntReadTheKVFile(t *testing.T) {
+	// The check loads the settings it shares with the server, which reads kv.file once, as it starts: a file broken
+	// since, which the server never reads again, doesn't fail the check.
+	broken := filepath.Join(t.TempDir(), "kv.csv")
+	require.NoError(t, os.WriteFile(broken, []byte("name,token\n"), 0o600))
+	t.Setenv("VLATTE_KV_FILE", broken)
+	t.Setenv(_dockerHostEnv, "vlatte.invalid")
+
+	var errOut bytes.Buffer
+	require.Equal(t, 1, run(t.Context(), []string{"health"}, nil, io.Discard, &errOut))
+	require.Contains(t, errOut.String(), `Get "http://vlatte.invalid:8081/readyz"`)
 }
 
 func TestProbe_TrustsThePinnedCertificateAlone(t *testing.T) {

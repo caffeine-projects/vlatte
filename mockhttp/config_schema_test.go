@@ -695,6 +695,24 @@ func TestConfigSources_TheCommandsAdminSettingsServeNoAdminAPI(t *testing.T) {
 	require.Empty(t, m.AdminURL())
 }
 
+func TestConfigSources_TheCommandsKVFileFillsNoStore(t *testing.T) {
+	// A library server reads a CSV file into its key-value store only when code asks with vlatte.NewCSVKV: kv.file,
+	// which the vlatte command reads, from a config file it shares with tests, its environment or its flags, neither
+	// fails a library server nor fills its store.
+	dir := t.TempDir()
+	kvFile := writeConfigFile(t, dir, "kv.csv", "key,value\ntoken,abc123\n")
+	file := writeConfigFile(t, dir, "settings.yaml", "kv:\n  file: "+kvFile+"\n")
+	t.Setenv(EnvPrefix+"_KV_FILE", kvFile)
+
+	m, err := New(Setup().Silent().ConfigSources(ConfigFile(file), ConfigEnv(), ConfigArgs([]string{"--kv-file", kvFile})))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+
+	keys, err := m.KV().Keys(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, keys)
+}
+
 func TestConfigUsage_LeavesOutTheCommandsSettings(t *testing.T) {
 	// Help and completions of a library server offer none of the vlatte command's settings.
 	for _, name := range []string{"--admin", "VLATTE_ADMIN", "file key admin", "--mcp", "VLATTE_MCP", "file key mcp"} {

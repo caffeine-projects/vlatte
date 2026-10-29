@@ -206,7 +206,7 @@ func TestRun_HelpListsTheCommandsSettings(t *testing.T) {
 	var out bytes.Buffer
 	require.Equal(t, 0, run(context.Background(), []string{"--help"}, nil, &out, io.Discard))
 
-	for _, key := range []string{"admin", "admin.addr", "admin.dir", "admin.docs_version", "grpc.admin", "grpc.admin.addr", "grpc.admin.dir", "webhook.timeout"} {
+	for _, key := range []string{"admin", "admin.addr", "admin.dir", "admin.docs_version", "grpc.admin", "grpc.admin.addr", "grpc.admin.dir", "kv.file", "webhook.timeout"} {
 		require.Equal(t, 1, strings.Count(out.String(), "file key "+key+"\n"), key)
 	}
 
@@ -275,6 +275,9 @@ func TestRun_Completion(t *testing.T) {
 func TestRun_UsageErrors(t *testing.T) {
 	withoutDockerHost(t)
 
+	repeats := filepath.Join(t.TempDir(), "kv.csv")
+	require.NoError(t, os.WriteFile(repeats, []byte("key,value\ntoken,abc\ntoken,def\n"), 0o600))
+
 	tests := []struct {
 		name string
 		args []string
@@ -331,6 +334,16 @@ func TestRun_UsageErrors(t *testing.T) {
 			name: "a token file that isn't there",
 			args: []string{"--admin-auth-token-file=missing-token"},
 			want: []string{"admin.auth.token_file", "no such file or directory"},
+		},
+		{
+			name: "a kv file that isn't there",
+			args: []string{"--kv-file=missing.csv"},
+			want: []string{"kv.file", "kv: reading missing.csv: open missing.csv: no such file or directory"},
+		},
+		{
+			name: "a kv file that repeats a key",
+			args: []string{"--kv-file=" + repeats},
+			want: []string{"kv.file", `key "token" repeats line 2: keep one of them`},
 		},
 		{
 			name: "a certificate without its key",
@@ -498,6 +511,50 @@ func TestCLI_WebhookTimeout(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the webhook waited past its 100ms timeout")
 	}
+}
+
+func TestCLI_KVFileFillsTheStore(t *testing.T) {
+	// The command's users can't set values from Go: kv.file fills the store that templates read from a CSV file.
+	withoutDockerHost(t)
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "kv.csv"), []byte("key,value\ngreeting,\"Hello, world\"\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "greet.yaml"), []byte(`
+request: {method: GET, path: /greet}
+response:
+  body: '{{ .KV.Get "greeting" }}'
+  template: {enabled: true}
+`), 0o600))
+
+	addr := randomAddr(t)
+	start(t, "--addr", addr, "--mock-files", filepath.Join(dir, "*.yaml"), "--kv-file", filepath.Join(dir, "kv.csv"),
+		"--log-level", "disabled")
+
+	status, body := firstAnswer(t, "http://"+addr+"/greet")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, "Hello, world", body)
+}
+
+func TestCLI_AnEmptyKVFileStartsAnEmptyStore(t *testing.T) {
+	// --kv-file= turns off the file another source names, as --admin-dir= does: the store starts empty.
+	withoutDockerHost(t)
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "kv.csv"), []byte("key,value\ngreeting,hi\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "greet.yaml"), []byte(`
+request: {method: GET, path: /greet}
+response:
+  body: '{{ if .KV.Has "greeting" }}set{{ else }}empty{{ end }}'
+  template: {enabled: true}
+`), 0o600))
+	t.Setenv("VLATTE_KV_FILE", filepath.Join(dir, "kv.csv"))
+
+	addr := randomAddr(t)
+	start(t, "--addr", addr, "--mock-files", filepath.Join(dir, "*.yaml"), "--kv-file=", "--log-level", "disabled")
+
+	status, body := firstAnswer(t, "http://"+addr+"/greet")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, "empty", body)
 }
 
 func TestCLI_RecordsThenPlaysBack(t *testing.T) {
