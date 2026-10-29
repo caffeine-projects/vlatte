@@ -6,6 +6,7 @@ package vlatte
 // apart.
 type Kind string
 
+// String implements [fmt.Stringer].
 func (k Kind) String() string {
 	return string(k)
 }

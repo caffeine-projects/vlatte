@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/caffeine-projects/vlatte/releases"><img src="https://img.shields.io/github/v/release/caffeine-projects/vlatte?include_prereleases&sort=semver" alt="Release"></a>
   <a href="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml"><img src="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://caffeine-projects.github.io/vlatte/"><img src="https://github.com/caffeine-projects/vlatte/actions/workflows/docs.yml/badge.svg" alt="Docs"></a>
   <a href="https://codecov.io/gh/caffeine-projects/vlatte"><img src="https://codecov.io/gh/caffeine-projects/vlatte/graph/badge.svg" alt="codecov"></a>
@@ -26,29 +27,35 @@ VLatte starts real HTTP and gRPC servers that answer the way you tell them to. S
 ## Features
 
 - **[HTTP](https://caffeine-projects.github.io/vlatte/http/) and [gRPC](https://caffeine-projects.github.io/vlatte/grpc/) mock servers.** gRPC needs no service implementation: unary, server, client and bidi streaming calls, from generated code or descriptor sets.
-- **[Matchers](https://caffeine-projects.github.io/vlatte/features/matchers)** shared by every protocol: equality, JSON path, JSON Schema, XPath, regex, globs, dates and combinators, plus your own.
+- **[Matchers](https://caffeine-projects.github.io/vlatte/matchers/)** shared by every protocol: equality, JSON path, JSON Schema, XPath, regex, globs, dates and combinators, plus your own.
 - **Replies** with templated headers and bodies, sequences, random picks, echo, multipart and custom functions.
 - **Mock files** in YAML or JSON, with [JSON schemas](https://caffeine-projects.github.io/vlatte/reference/schemas) for editors, reloaded on demand.
 - **Scenarios** for stateful flows, and **webhooks** sent after a mock answers.
 - **Proxying, and recording** of a real service to play it back later, with outbound rules that limit the addresses a server connects to.
 - **Fault injection:** latency, slow bandwidth, connection resets, malformed and empty answers.
-- **A request journal** to verify what clients sent: how many requests, by when and in what order, from Go tests, the admin API or MCP, with the closest requests and the parts they missed when a check fails. Debug headers on every answer.
-- **An [admin API](https://caffeine-projects.github.io/vlatte/reference/admin-api)** to manage mocks while a server runs, with Basic or bearer authentication and TLS, also served over **MCP** for AI agents.
+- **A request journal** to verify what clients sent, and debug headers on every answer.
+- **An [admin API](https://caffeine-projects.github.io/vlatte/reference/admin-api.html)** to manage mocks while a server runs, with Basic or bearer authentication and TLS, also served over **MCP** for AI agents.
 - **[A CLI and a Docker image](https://caffeine-projects.github.io/vlatte/run/)** to run mock servers outside Go.
 
 ## Install
 
-Requires Go 1.27 or later.
+The library, for Go 1.27 or later:
 
 ```sh
 go get github.com/caffeine-projects/vlatte
 ```
 
-The CLI:
+The CLI, with Homebrew, an archive from [GitHub Releases](https://github.com/caffeine-projects/vlatte/releases), Go, or Docker:
 
 ```sh
+brew install caffeine-projects/tap/vlatte
 go install github.com/caffeine-projects/vlatte/cmd/vlatte@latest
+docker run --rm ghcr.io/caffeine-projects/vlatte:v0.1.0-rc.1 version
 ```
+
+Release archives and images are signed: see [Verifying a release](https://caffeine-projects.github.io/vlatte/getting-started/installation#verifying-a-release).
+
+Until v1.0.0, a minor version may change the API.
 
 ## Quick start
 

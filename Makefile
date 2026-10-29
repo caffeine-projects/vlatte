@@ -9,6 +9,12 @@ include examples/Makefile
 # keep in sync with the golangci-lint-action version in .github/workflows/ci.yml
 GOLANGCI_LINT_VERSION ?= v2.14.0
 
+# keep in sync with the goreleaser-action version in .github/workflows/release.yml
+GORELEASER_VERSION ?= v2.18.3
+
+# keep in sync with the govulncheck commit in .github/workflows/security.yml
+GOVULNCHECK_VERSION ?= v1.9.0
+
 # time per target for make fuzz
 FUZZTIME ?= 30s
 
@@ -62,6 +68,14 @@ build: ## build the vlatte CLI into bin/
 docker: ## build the vlatte image as vlatte:dev
 	@docker build -t vlatte:dev .
 
+.PHONY: release-check
+release-check: ## check the GoReleaser config
+	@go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) check
+
+.PHONY: snapshot
+snapshot: ## build the release archives into dist/, without signing or publishing them
+	@go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) release --snapshot --clean --skip=sign,sbom
+
 .PHONY: deps
 deps: ## dependencies
 	@go mod download
@@ -89,7 +103,15 @@ generate: ## run code generators
 
 .PHONY: vuln
 vuln: ## check for known vulnerabilities
-	@go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	@go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
+
+.PHONY: docs-dev
+docs-dev: ## serve the docs site with live reload
+	@cd docs && npm ci --ignore-scripts && npm run dev
+
+.PHONY: docs-build
+docs-build: ## build the docs site into docs/.vitepress/dist
+	@cd docs && npm ci --ignore-scripts && npm run build
 
 # --
 # Miscellaneous

@@ -286,8 +286,10 @@ func defaultConfig() *Config {
 		LogLevel:                       vlatte.LogLevelInfo,
 		LogVerbosity:                   vlatte.LogHeader,
 		Colors:                         true,
-		DebugFn:                        func(string, any) {},
-		GlobalEvents:                   &vlatte.Events{},
+		DebugFn: func(string, any) {
+			// Debug logging is off unless a DebugFn is given.
+		},
+		GlobalEvents: &vlatte.Events{},
 	}
 	return c
 }
@@ -416,6 +418,8 @@ func (cb *ConfigBuilder) LogOutput(w io.Writer) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.LogOutput = w })
 }
 
+// Silent turns the server's logs off: it sets the log level to [vlatte.LogLevelDisabled]. Echo replies set with
+// [EchoReply.Log] still write requests to the log output.
 func (cb *ConfigBuilder) Silent() *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.LogLevel = vlatte.LogLevelDisabled })
 }

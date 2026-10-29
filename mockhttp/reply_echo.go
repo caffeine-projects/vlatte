@@ -28,6 +28,8 @@ func Echo() *EchoReply {
 	return &EchoReply{}
 }
 
+// Log makes the reply also write each request to the server's log output, whatever its log level: see
+// [ConfigBuilder.LogOutput].
 func (e *EchoReply) Log() *EchoReply {
 	e.stdoutLog = true
 	return e

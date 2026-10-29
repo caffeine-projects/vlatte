@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -358,7 +359,12 @@ func TestProxy_TheOutboundRulesKeepTheServerFromAddresses(t *testing.T) {
 func TestProxy_AUnixSocketTargetOutlivesTheOutboundRules(t *testing.T) {
 	// The outbound rules are about network addresses: a target on a unix socket, on this host by its nature, is
 	// reached as it was without them.
-	sock := filepath.Join(t.TempDir(), "target.sock")
+	// A unix socket path holds 104 bytes on macOS: the directory of t.TempDir is longer there.
+	dir, err := os.MkdirTemp("", "sock")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	sock := filepath.Join(dir, "target.sock")
 	lis, err := net.Listen("unix", sock)
 	require.NoError(t, err)
 

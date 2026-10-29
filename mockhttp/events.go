@@ -62,12 +62,21 @@ type RequestValues struct {
 	answer *answerWriter
 }
 
-// Accessors for the fields above.
-func (r *RequestValues) ID() string                     { return r.ReqID }
-func (r *RequestValues) StartedAt() time.Time           { return r.StartedAtTime }
+// ID returns the ID the server gave the request, as its logs and journal name it.
+func (r *RequestValues) ID() string { return r.ReqID }
+
+// StartedAt returns when the request arrived.
+func (r *RequestValues) StartedAt() time.Time { return r.StartedAtTime }
+
+// OriginalRequest returns the request as the server got it.
 func (r *RequestValues) OriginalRequest() *http.Request { return r.RawRequest }
-func (r *RequestValues) RawBody() []byte                { return r.RawBodyBytes }
-func (r *RequestValues) ParsedBody() any                { return r.ParsedBodyData }
+
+// RawBody returns the request body the server read, at most [ConfigBuilder.MaxBodyParsingLimit] bytes: nil for GET
+// and HEAD requests, and with [ConfigBuilder.NoBodyParsing].
+func (r *RequestValues) RawBody() []byte { return r.RawBodyBytes }
+
+// ParsedBody returns the request body as a [RequestBodyParser] parsed it, or nil when none did.
+func (r *RequestValues) ParsedBody() any { return r.ParsedBodyData }
 
 // sent returns the status the server sent the client, 0 before it sends one.
 func (r *RequestValues) sent() int {

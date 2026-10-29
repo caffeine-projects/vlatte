@@ -14,6 +14,9 @@ import (
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
+// The docs site shows Example from here to the end of the region.
+// #region example
+
 func Example() {
 	m := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory())
 	m.MustStart()
@@ -31,6 +34,8 @@ func Example() {
 	fmt.Println(res.GetMessage())
 	// Output: hello
 }
+
+// #endregion example
 
 func ExampleMessages() {
 	m := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory())

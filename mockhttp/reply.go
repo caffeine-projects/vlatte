@@ -272,7 +272,6 @@ func (rep *Reply) Cookie(cookie *http.Cookie) *Reply {
 }
 
 // ExpireCookie expires a cookie. It expires a copy, so the given cookie stays as it was.
-// TODO: rename this
 func (rep *Reply) ExpireCookie(cookie *http.Cookie) *Reply {
 	expired := *cookie
 	expired.MaxAge = -1
@@ -407,6 +406,8 @@ func (rep *Reply) Gzip() *Reply {
 	return rep
 }
 
+// Describe implements [descriptor.SelfDescriptive]: the reply in the mock file format. A body that isn't valid UTF-8
+// is described in base64.
 func (rep *Reply) Describe() descriptor.Descriptor {
 	headers := rep.response.Header.Clone()
 	for _, cookie := range rep.response.Cookies {

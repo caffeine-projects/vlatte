@@ -51,6 +51,9 @@ func (c *CORSConfig) Apply(opts *CORSConfig) {
 	opts.SuccessStatusCode = c.SuccessStatusCode
 }
 
+// DefaultCORSConfig is the CORS configuration that [ConfigBuilder.CORS] and the cors configuration keys start from:
+// any origin, the methods GET, POST, HEAD, PUT, DELETE and PATCH, any header a preflight request asks for, and 204 for
+// preflight requests.
 var DefaultCORSConfig = CORSConfig{
 	AllowedOrigin: "*",
 	AllowedMethods: strings.Join([]string{

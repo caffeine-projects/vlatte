@@ -21,8 +21,11 @@ import (
 var _ vlatte.Builder[*Mock, *Server] = (*Builder)(nil)
 
 var (
+	// ErrNoExpectations is returned by [Builder.Build] for a mock with no request matcher and no [Builder.Times].
 	ErrNoExpectations = errors.New("mock: at least 1 request matcher must be set")
-	ErrNoReplies      = errors.New("mock: no reply set. Use .Reply() or any equivalent to set the expected mock response")
+
+	// ErrNoReplies is returned by [Builder.Build] for a mock with no reply: see [Builder.Reply].
+	ErrNoReplies = errors.New("mock: no reply set. Use .Reply() or any equivalent to set the expected mock response")
 )
 
 // errMockID says what an ID may hold. IDs name mocks in admin API paths, such as /mocks/{id}.
@@ -443,11 +446,12 @@ func (b *Builder) Queries(name string, m vlatte.Matcher) *Builder {
 	return b
 }
 
-// Body adds matchers to the HTTP request body.
-// If the request contains a JSON body, you can provide multiple matchers to several fields.
-// Example:
+// Body adds matchers to the HTTP request body. With more than one, the body must match them all, such as matchers of
+// several fields of a JSON body:
 //
-//	m.Body(JSONPath("name", EqualTo("test")), JSONPath("address.street", ToContains("nowhere")))
+//	m.Body(match.JSONPath("name", match.Equal("test")), match.JSONPath("address.street", match.Contain("nowhere")))
+//
+// It panics when given no matcher.
 func (b *Builder) Body(matcherList ...vlatte.Matcher) *Builder {
 	var m vlatte.Matcher
 	if len(matcherList) == 0 {

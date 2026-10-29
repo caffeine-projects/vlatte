@@ -20,10 +20,12 @@ type Kit struct {
 	dir       string
 }
 
+// TemplateEngine implements [vlatte.Kit]: the server's template engine.
 func (k *Kit) TemplateEngine() vlatte.TemplateEngine {
 	return k.engine
 }
 
+// Data implements [vlatte.Kit]: the template data of the request, as the templates of its reply read it.
 func (k *Kit) Data() any {
 	return k.data
 }

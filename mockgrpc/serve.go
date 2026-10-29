@@ -290,7 +290,9 @@ func (h *hit) count() {
 
 // takeBack uncounts the call, if it was counted, and keeps a reply that goes on from counting it.
 func (h *hit) takeBack() {
-	h.once.Do(func() {})
+	h.once.Do(func() {
+		// Spends the once: a call taken back is never counted after.
+	})
 
 	if h.counted {
 		h.mock.hits.Add(-1)

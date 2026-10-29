@@ -30,10 +30,18 @@ const (
 )
 
 var (
+	// ErrNoJournal is the error of the methods of a nil [Journal], and of a [Verifier] of a server without a journal.
 	ErrNoJournal = errors.New("journal: the server keeps no journal of requests: turn its journal on")
-	ErrClosed    = errors.New("journal: closed")
-	ErrInUse     = errors.New("journal: another journal keeps its files in the directory")
-	ErrNotFound  = errors.New("journal: request not found")
+
+	// ErrClosed is the error of the methods of a [Journal] after [Journal.Close], but Dir and Close.
+	ErrClosed = errors.New("journal: closed")
+
+	// ErrInUse is the error of [New] when another journal, of this process or another, keeps its files in the
+	// directory, where the system locks files.
+	ErrInUse = errors.New("journal: another journal keeps its files in the directory")
+
+	// ErrNotFound is the error of [Journal.Get] when the journal holds no entry with the id, such as one it dropped.
+	ErrNotFound = errors.New("journal: request not found")
 
 	// ErrBodyCut is the error of a query, or a pattern, that reads the body of an entry the journal kept part of, as
 	// its MaxBodySize says: what was cut may hold what it looks for. It comes with [vlatte.ErrMatching].

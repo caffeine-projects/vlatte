@@ -13,6 +13,9 @@ import (
 	"strings"
 )
 
+// _schemaKey is the key a JSON document names its JSON Schema in, for editors.
+const _schemaKey = "$schema"
+
 type fileSource struct {
 	pathKey string
 	path    string
@@ -167,8 +170,9 @@ func (w *walker) walk(settings map[string]any, prefix string) {
 		f := w.byKey[key]
 		_, group := w.groups[key]
 
-		// A top-level setting of another schema is that schema's to read.
-		if prefix == "" && w.outer == "" && !w.owns(name) {
+		// A top-level setting of another schema is that schema's to read. $schema names the JSON Schema an editor
+		// checks the document with: nothing reads it.
+		if prefix == "" && w.outer == "" && (!w.owns(name) || name == _schemaKey) {
 			continue
 		}
 

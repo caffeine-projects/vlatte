@@ -40,6 +40,8 @@ func (r *SequentialReply) Add(reply ...ReplierFactory) *SequentialReply {
 	return r
 }
 
+// Describe implements [descriptor.SelfDescriptive]: the reply in the mock file format. It leaves out the replies that
+// don't implement [descriptor.SelfDescriptive].
 func (r *SequentialReply) Describe() descriptor.Descriptor {
 	replies := make([]any, 0, len(r.replies))
 	for _, v := range r.replies {

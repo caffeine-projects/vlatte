@@ -3,7 +3,7 @@ package main
 import (
 	"cmp"
 	"context"
-	_ "embed"
+	_ "embed" // for the //go:embed of the banner
 	"errors"
 	"flag"
 	"fmt"

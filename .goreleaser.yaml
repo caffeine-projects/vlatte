@@ -1,0 +1,89 @@
+# Builds the vlatte CLI for each release tag: .github/workflows/release.yml runs it, and `make snapshot` runs it
+# locally without signing or publishing.
+#
+# On each new tag, bump the version the docs pin: grep -rnE 'vlatte:v[0-9]|VERSION=v[0-9]' README.md docs --exclude-dir=node_modules
+version: 2
+
+project_name: vlatte
+
+builds:
+  - main: ./cmd/vlatte
+    binary: vlatte
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    # No -X flags: the binary reads its version from the build info, which Go stamps from the tag.
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+# Keyless: the workflow's OIDC identity signs, and the bundle carries the certificate.
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: ${artifact}.sigstore.json
+    args:
+      - sign-blob
+      - --bundle=${signature}
+      - --yes
+      - ${artifact}
+
+changelog:
+  use: git
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Performance
+      regexp: '^.*?perf(\(.+\))??!?:.+$'
+      order: 2
+  filters:
+    exclude:
+      - '^.*?(chore|ci|docs|refactor|test)(\(.+\))??!?:.+$'
+
+# Tags with a suffix, such as -rc.1, are prereleases.
+release:
+  prerelease: auto
+
+homebrew_casks:
+  - name: vlatte
+    repository:
+      owner: caffeine-projects
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: https://caffeine-projects.github.io/vlatte/
+    description: Mock HTTP and gRPC servers for Go tests, and a CLI that serves them from files
+    # The binaries are not notarized: macOS would refuse to run them.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/vlatte"]
+          end

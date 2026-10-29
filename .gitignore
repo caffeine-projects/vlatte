@@ -48,5 +48,13 @@ CLAUDE.local.md
 docs/.ai/
 out/
 bin/
+/dist/
 
 Makefile.overrides
+
+# Docs site
+docs/node_modules/
+docs/public/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+docs/.vitepress/generated/

@@ -38,7 +38,13 @@ var (
 )
 
 var (
-	ErrBadArg            = errors.New("webhook: bad argument")
+	// ErrBadArg is the error of [ArgsFromMap], [WebHook.Prepare] and [WebHook.Run] on webhook parameters that are
+	// malformed or conflict, such as a missing url or two bodies.
+	ErrBadArg = errors.New("webhook: bad argument")
+
+	// ErrRenderingTemplate is the error of a url, body or header template that fails to compile, in
+	// [WebHook.Prepare] or [WebHook.Run], or to execute, in [WebHook.Run]. A multipart template's error doesn't wrap
+	// it.
 	ErrRenderingTemplate = errors.New("webhook: rendering error")
 )
 
@@ -53,6 +59,7 @@ var _nopLogger = zerolog.Nop()
 // unread: past it, the connection closes.
 const _maxAnswer = 256 << 10
 
+// Option configures a [WebHook] in [New]. An Option that returns an error fails New.
 type Option func(*WebHook) error
 
 // Transform lets users transform and customize the [WebHook] event args and the [Args]

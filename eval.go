@@ -10,8 +10,12 @@ import (
 var _ fmt.Stringer = (*Eval[any])(nil)
 
 var (
+	// ErrMatchPanicked is wrapped by the error of a match whose matcher panicked, such as that of [Eval.Match], with
+	// the panic value.
 	ErrMatchPanicked = errors.New("mock: panic")
-	ErrMatching      = errors.New("mock: matching")
+
+	// ErrMatching is wrapped by the error of [Mocks.Find] when a matcher fails or panics, with the name of its mock.
+	ErrMatching = errors.New("mock: matching")
 )
 
 // Selector selects a value from the parameter input.
