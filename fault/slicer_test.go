@@ -79,7 +79,7 @@ func TestSlicer_SendsEachWriteInSlices(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				sink := &timedSink{start: time.Now()}
-				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.Slicer(tc.size, 0, tc.delay)})
+				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Slicer(tc.size, 0, tc.delay)})
 
 				for _, w := range tc.writes {
 					n, err := flow.Write([]byte(w))
@@ -98,7 +98,7 @@ func TestSlicer_PassesFlushesOnAsTheyCome(t *testing.T) {
 	// A flush, such as of a head before its body, carries no bytes to slice: it isn't delayed.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.Slicer(1, 0, time.Second)})
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Slicer(1, 0, time.Second)})
 
 		require.NoError(t, flow.Flush())
 		require.NoError(t, flow.Close())
@@ -109,7 +109,7 @@ func TestSlicer_PassesFlushesOnAsTheyCome(t *testing.T) {
 func TestSlicer_SlicesOfVaryingSizesKeepTheBytes(t *testing.T) {
 	// Sizes vary at random within the variation, so a client meets cuts anywhere, but it reads the same answer.
 	sink := &sliceSink{}
-	flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.Slicer(4, 2, 0)})
+	flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Slicer(4, 2, 0)})
 	body := strings.Repeat("0123456789", 100)
 
 	_, err := flow.Write([]byte(body))
@@ -134,7 +134,7 @@ func TestSlicer_StopsWhenTheClientLeaves(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(ctx, sink, []vlatte.Step{fault.Slicer(1, 0, 100*time.Millisecond)})
+		flow := vlatte.NewFlow(ctx, sink, []vlatte.Pipe{fault.Slicer(1, 0, 100*time.Millisecond)})
 
 		time.AfterFunc(150*time.Millisecond, cancel)
 
@@ -157,7 +157,7 @@ func TestSlicer_AClientThatWentAwayEndsIt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				start := time.Now()
-				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.Slicer(1, 0, 100*time.Millisecond)})
+				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Slicer(1, 0, 100*time.Millisecond)})
 
 				_, err := flow.Write([]byte("abc"))
 				require.ErrorIs(t, err, errGone)

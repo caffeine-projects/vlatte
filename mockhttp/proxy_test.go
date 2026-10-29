@@ -1290,15 +1290,15 @@ func TestProxy_AMockThatCantFollowASwitchDoesntAskForOne(t *testing.T) {
 	}
 }
 
-func TestProxy_ASwitchedConnectionPassesTheStepsOfTheMock(t *testing.T) {
-	// Faults apply to a WebSocket as to any connection: what the target sends the client passes the steps of the mock,
-	// and what the client sends the target its upstream steps.
+func TestProxy_ASwitchedConnectionPassesThePipesOfTheMock(t *testing.T) {
+	// Faults apply to a WebSocket as to any connection: what the target sends the client passes the pipes of the mock,
+	// and what the client sends the target its upstream pipes.
 	echo := switchingTarget(t, "echo")
 
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
-	scoped := m.MustMock(Getf("/ws").Step(appendStep("!")).UpstreamStep(appendStep("?")).Reply(From(echo.URL)))
+	scoped := m.MustMock(Getf("/ws").Pipe(appendPipe("!")).UpstreamPipe(appendPipe("?")).Reply(From(echo.URL)))
 
 	conn, br, res := switchThrough(t, m, "/ws")
 	require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
@@ -1313,9 +1313,9 @@ func TestProxy_ASwitchedConnectionPassesTheStepsOfTheMock(t *testing.T) {
 	require.EqualValues(t, 1, scoped.Hits())
 }
 
-func TestProxy_TheWireStepsOfASwitchSeeEveryByte(t *testing.T) {
-	// A mock that answers on the wire passes the whole connection through its wire steps: the 101, then what the
-	// target sends, after the steps of the mock.
+func TestProxy_TheWirePipesOfASwitchSeeEveryByte(t *testing.T) {
+	// A mock that answers on the wire passes the whole connection through its wire pipes: the 101, then what the
+	// target sends, after the pipes of the mock.
 	echo := switchingTarget(t, "echo")
 
 	m := MustNew(Setup().Silent())
@@ -1323,7 +1323,7 @@ func TestProxy_TheWireStepsOfASwitchSeeEveryByte(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	wire := make(chan []byte, 1)
-	m.MustMock(Getf("/ws").Step(appendStep("!")).WireStep(wireLogStep{got: wire}).Reply(From(echo.URL)))
+	m.MustMock(Getf("/ws").Pipe(appendPipe("!")).WirePipe(wireLogPipe{got: wire}).Reply(From(echo.URL)))
 
 	conn, br, res := switchThrough(t, m, "/ws")
 	require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
@@ -1342,8 +1342,8 @@ func TestProxy_TheWireStepsOfASwitchSeeEveryByte(t *testing.T) {
 	require.True(t, bytes.HasSuffix(seen, []byte("\r\n\r\nhi!")), "%q", seen)
 }
 
-func TestProxy_AStepThatAbortsASwitchedConnectionCutsBothSides(t *testing.T) {
-	// A step cuts a WebSocket as it cuts any answer, after the bytes it let through, or resets it: the client gets the
+func TestProxy_APipeThatAbortsASwitchedConnectionCutsBothSides(t *testing.T) {
+	// A pipe cuts a WebSocket as it cuts any answer, after the bytes it let through, or resets it: the client gets the
 	// close, or the reset, it would get from a server that fails.
 	tests := []struct {
 		name  string
@@ -1361,7 +1361,7 @@ func TestProxy_AStepThatAbortsASwitchedConnectionCutsBothSides(t *testing.T) {
 			m := MustNew(Setup().Silent())
 			m.MustStart()
 			t.Cleanup(m.Close)
-			scoped := m.MustMock(Getf("/ws").Step(limitStep{n: 2, err: tc.err}).Reply(From(echo.URL)))
+			scoped := m.MustMock(Getf("/ws").Pipe(limitPipe{n: 2, err: tc.err}).Reply(From(echo.URL)))
 
 			conn, br, res := switchThrough(t, m, "/ws")
 			require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
@@ -1382,15 +1382,15 @@ func TestProxy_AStepThatAbortsASwitchedConnectionCutsBothSides(t *testing.T) {
 	}
 }
 
-func TestProxy_AStepThatFailsAsASideEndsCutsBothSides(t *testing.T) {
-	// A side that ends what it sends ends its steps: one that fails there, such as to reset once the client is done
+func TestProxy_APipeThatFailsAsASideEndsCutsBothSides(t *testing.T) {
+	// A side that ends what it sends ends its pipes: one that fails there, such as to reset once the client is done
 	// sending, cuts both sides, rather than leave the other going on, which waits for an end that doesn't come.
 	tests := []struct {
 		name  string
 		err   error
 		reset bool
 	}{
-		{name: "a failure", err: errors.New("step: failed")},
+		{name: "a failure", err: errors.New("pipe: failed")},
 		{name: "a reset", err: vlatte.ErrReset, reset: true},
 	}
 
@@ -1403,7 +1403,7 @@ func TestProxy_AStepThatFailsAsASideEndsCutsBothSides(t *testing.T) {
 			t.Cleanup(m.Close)
 
 			closed := make(chan error, 1)
-			m.MustMock(Getf("/ws").UpstreamStep(closeStep{closed: closed, err: tc.err}).Reply(From(echo.URL)))
+			m.MustMock(Getf("/ws").UpstreamPipe(closePipe{closed: closed, err: tc.err}).Reply(From(echo.URL)))
 
 			conn, br, res := switchThrough(t, m, "/ws")
 			require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
@@ -1431,7 +1431,7 @@ func TestProxy_AStepThatFailsAsASideEndsCutsBothSides(t *testing.T) {
 	}
 }
 
-func TestProxy_AStepCanCutAnIdleSwitchedConnection(t *testing.T) {
+func TestProxy_APipeCanCutAnIdleSwitchedConnection(t *testing.T) {
 	// A timeout on a WebSocket that carries nothing: no write comes, so only the flow's abort can cut it.
 	echo := switchingTarget(t, "echo")
 
@@ -1440,7 +1440,7 @@ func TestProxy_AStepCanCutAnIdleSwitchedConnection(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	release := make(chan struct{})
-	m.MustMock(Getf("/ws").Step(abortOn{release: release, err: errors.New("step: idle")}).Reply(From(echo.URL)))
+	m.MustMock(Getf("/ws").Pipe(abortOn{release: release, err: errors.New("pipe: idle")}).Reply(From(echo.URL)))
 
 	_, br, res := switchThrough(t, m, "/ws")
 	require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
@@ -1452,8 +1452,8 @@ func TestProxy_AStepCanCutAnIdleSwitchedConnection(t *testing.T) {
 	require.Empty(t, got)
 }
 
-func TestProxy_AStepThatCutsTheAnswerCutsTheSwitch(t *testing.T) {
-	// The answer of a switch ends with its head: a step that cuts it there leaves the client without a switch.
+func TestProxy_APipeThatCutsTheAnswerCutsTheSwitch(t *testing.T) {
+	// The answer of a switch ends with its head: a pipe that cuts it there leaves the client without a switch.
 	echo := switchingTarget(t, "echo")
 
 	m := MustNew(Setup().Silent())
@@ -1461,7 +1461,7 @@ func TestProxy_AStepThatCutsTheAnswerCutsTheSwitch(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	closed := make(chan error, 2)
-	scoped := m.MustMock(Getf("/ws").Step(closeStep{closed: closed, err: vlatte.ErrAbort}).Reply(From(echo.URL)))
+	scoped := m.MustMock(Getf("/ws").Pipe(closePipe{closed: closed, err: vlatte.ErrAbort}).Reply(From(echo.URL)))
 
 	conn, err := net.Dial("tcp", hostOf(t, m))
 	require.NoError(t, err)
@@ -1477,8 +1477,8 @@ func TestProxy_AStepThatCutsTheAnswerCutsTheSwitch(t *testing.T) {
 	require.EqualValues(t, 1, scoped.Hits())
 }
 
-func TestProxy_AWireStepThatCutsThe101CutsTheSwitch(t *testing.T) {
-	// The wire steps see the 101 as any head: one that cuts it leaves the client without a switch, closed or reset, as
+func TestProxy_AWirePipeThatCutsThe101CutsTheSwitch(t *testing.T) {
+	// The wire pipes see the 101 as any head: one that cuts it leaves the client without a switch, closed or reset, as
 	// it asked. The cut is the mock's answer: the call counts.
 	tests := []struct {
 		name  string
@@ -1497,8 +1497,8 @@ func TestProxy_AWireStepThatCutsThe101CutsTheSwitch(t *testing.T) {
 			m.MustStart()
 			t.Cleanup(m.Close)
 
-			cut := vlatte.StepFunc(func(context.Context, []byte, vlatte.Stage) (int, error) { return 0, tc.err })
-			scoped := m.MustMock(Getf("/ws").WireStep(cut).Reply(From(echo.URL)))
+			cut := vlatte.PipeFunc(func(context.Context, []byte, vlatte.Stage) (int, error) { return 0, tc.err })
+			scoped := m.MustMock(Getf("/ws").WirePipe(cut).Reply(From(echo.URL)))
 
 			conn, err := net.Dial("tcp", hostOf(t, m))
 			require.NoError(t, err)
@@ -1522,8 +1522,8 @@ func TestProxy_AWireStepThatCutsThe101CutsTheSwitch(t *testing.T) {
 }
 
 func TestProxy_ATargetThatEndsWhatItSendsLeavesTheClientSending(t *testing.T) {
-	// A side that ends what it sends has the other side go on until its own end, through the steps of each direction:
-	// the end of what the target sends, through the wire steps, doesn't end what the client sends.
+	// A side that ends what it sends has the other side go on until its own end, through the pipes of each direction:
+	// the end of what the target sends, through the wire pipes, doesn't end what the client sends.
 	got := make(chan string, 1)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		conn, rw, err := http.NewResponseController(w).Hijack()
@@ -1545,7 +1545,7 @@ func TestProxy_ATargetThatEndsWhatItSendsLeavesTheClientSending(t *testing.T) {
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
-	m.MustMock(Getf("/ws").WireStep(vlatte.StepFunc(passWire)).UpstreamStep(appendStep("?")).Reply(From(target.URL)))
+	m.MustMock(Getf("/ws").WirePipe(vlatte.PipeFunc(passWire)).UpstreamPipe(appendPipe("?")).Reply(From(target.URL)))
 
 	conn, br, res := switchThrough(t, m, "/ws")
 	require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
@@ -1752,7 +1752,7 @@ func TestProxy_ASwitchedConnectionThatBreaksIsAWarning(t *testing.T) {
 		want   string
 	}{
 		{name: "before the 101", writes: true, want: "http: answering the switch of protocols: "},
-		{name: "before the 101 through the wire steps", writes: true, wire: true, want: "http: answering the switch of protocols: "},
+		{name: "before the 101 through the wire pipes", writes: true, wire: true, want: "http: answering the switch of protocols: "},
 		{name: "once switched", reads: true, want: "http: connection that switched protocols: "},
 	}
 
@@ -1769,7 +1769,7 @@ func TestProxy_ASwitchedConnectionThatBreaksIsAWarning(t *testing.T) {
 
 			mock := Getf("/ws")
 			if tt.wire {
-				mock = mock.WireStep(vlatte.StepFunc(passWire))
+				mock = mock.WirePipe(vlatte.PipeFunc(passWire))
 			}
 
 			m.MustMock(mock.Reply(From(target.URL)))

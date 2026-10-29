@@ -17,7 +17,7 @@ response:
       - {"@type": type.googleapis.com/google.rpc.ErrorInfo, reason: NOT_OWNER}
 ```
 
-Start a YAML file with `# yaml-language-server: $schema=https://caffeine-projects.github.io/vlatte/schemas/grpc.schema.json` for completion and checks in editors, or give a JSON file a `"$schema"` key: see [Mock file schemas](/reference/schemas).
+Start a YAML file with `# yaml-language-server: $schema=https://vlatte.dev/schemas/grpc.schema.json` for completion and checks in editors, or give a JSON file a `"$schema"` key: see [Mock file schemas](/reference/schemas).
 
 ## Keys
 

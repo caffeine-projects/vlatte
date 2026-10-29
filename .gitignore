@@ -39,6 +39,7 @@ test-report.out
 .claude/*
 !.claude/skills
 CLAUDE.local.md
+.mcp.json
 
 # Project
 .idea/

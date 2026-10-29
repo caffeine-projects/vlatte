@@ -149,7 +149,7 @@ func hijack(w http.ResponseWriter) (net.Conn, error) {
 // the other side read to an end, so the other direction goes on until its own end. A side that breaks off ends both:
 // the other direction has nowhere to go. It returns the first error that isn't the end of a connection, or a cut.
 //
-// toClient and toUpstream, when not nil, are the flows of steps each direction writes through: a flow ends with its
+// toClient and toUpstream, when not nil, are the flows of pipes each direction writes through: a flow ends with its
 // direction. A stage that aborts one, even on a timer while no byte comes, cuts both sides, or resets them with
 // vlatte.ErrReset.
 func pipe(client, upstream io.ReadWriteCloser, toClient, toUpstream *vlatte.Flow) error {

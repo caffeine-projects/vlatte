@@ -24,14 +24,14 @@ type FuncReply struct {
 }
 
 // Func returns a reply that builds the response using the given function. The context of its RawRequest also ends
-// when a step of the mock cuts the answer. A mock file can't hold a function: describing a mock with it fails, so the
+// when a pipe of the mock cuts the answer. A mock file can't hold a function: describing a mock with it fails, so the
 // admin API can't show the mock, nor save or store it.
 func Func(fn func(http.ResponseWriter, *RequestValues) (*Response, error)) *FuncReply {
 	return &FuncReply{fn: fn}
 }
 
 // Handler returns a reply that delegates to the given http.HandlerFunc. The context of its request also ends when a
-// step of the mock cuts the answer. Describing a mock with it fails, as with [Func].
+// pipe of the mock cuts the answer. Describing a mock with it fails, as with [Func].
 func Handler(h http.HandlerFunc) *FuncReply {
 	return Func(func(w http.ResponseWriter, r *RequestValues) (*Response, error) {
 		h(w, r.RawRequest)
@@ -52,7 +52,7 @@ func (r *FuncReply) Describe() vlatte.Descriptor {
 // funcReplier builds the responses of one mock with a function.
 type funcReplier func(http.ResponseWriter, *RequestValues) (*Response, error)
 
-// Reply implements Replier. The function's request has the reply's context, the one of the mock's steps.
+// Reply implements Replier. The function's request has the reply's context, the one of the mock's pipes.
 func (f funcReplier) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
 	r := input.RequestValues
 	if raw := r.RawRequest; raw != nil && raw.Context() != ctx {

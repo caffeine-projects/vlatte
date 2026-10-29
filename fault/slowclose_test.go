@@ -28,7 +28,7 @@ func TestSlowClose_SendsTheAnswerThenEndsItLate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				sink := &timedSink{start: time.Now()}
-				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.SlowClose(tc.delay)})
+				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.SlowClose(tc.delay)})
 
 				_, err := flow.Write([]byte("body"))
 				require.NoError(t, err)
@@ -45,7 +45,7 @@ func TestSlowClose_StopsWhenTheClientLeaves(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(ctx, sink, []vlatte.Step{fault.SlowClose(time.Second)})
+		flow := vlatte.NewFlow(ctx, sink, []vlatte.Pipe{fault.SlowClose(time.Second)})
 
 		time.AfterFunc(300*time.Millisecond, cancel)
 
@@ -61,7 +61,7 @@ func TestSlowClose_AClientThatWentAwayEndsItAtOnce(t *testing.T) {
 
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now()
-		flow := vlatte.NewFlow(t.Context(), failingSink{err: errGone, flushes: true}, []vlatte.Step{fault.SlowClose(time.Second)})
+		flow := vlatte.NewFlow(t.Context(), failingSink{err: errGone, flushes: true}, []vlatte.Pipe{fault.SlowClose(time.Second)})
 
 		require.ErrorIs(t, flow.Close(), errGone)
 		require.Zero(t, time.Since(start))

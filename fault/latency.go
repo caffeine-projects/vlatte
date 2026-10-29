@@ -14,21 +14,21 @@ import (
 )
 
 var (
-	_ vlatte.Step            = latencyStep{}
-	_ vlatte.SelfDescriptive = latencyStep{}
+	_ vlatte.Pipe            = latencyPipe{}
+	_ vlatte.SelfDescriptive = latencyPipe{}
 	_ vlatte.Stage           = (*latencyStage)(nil)
 )
 
-// Latency returns a step that delays every write and flush by latency, give or take jitter at random, to test a client
+// Latency returns a pipe that delays every write and flush by latency, give or take jitter at random, to test a client
 // against a distant server: each reaches the client from latency-jitter to latency+jitter after the writer sent it,
 // in order, as over a link with that latency. The writer doesn't wait: the answer keeps its pace, only later, and a
 // stream whose writes come a second apart still gets them a second apart. With jitter, a write waits for those
 // before it, so nothing comes out of order. The end of the answer comes once what was sent before it did.
 //
-// It goes with [github.com/caffeine-projects/vlatte/mockhttp.Builder.Step], to delay the body, or with
-// [github.com/caffeine-projects/vlatte/mockhttp.Builder.WireStep], to delay the whole answer, its head included. It
+// It goes with [github.com/caffeine-projects/vlatte/mockhttp.Builder.Pipe], to delay the body, or with
+// [github.com/caffeine-projects/vlatte/mockhttp.Builder.WirePipe], to delay the whole answer, its head included. It
 // panics when latency is negative, or jitter is negative or more than latency.
-func Latency(latency, jitter time.Duration) vlatte.Step {
+func Latency(latency, jitter time.Duration) vlatte.Pipe {
 	if latency < 0 {
 		panic(fmt.Sprintf("fault: latency can't be %s", latency))
 	}
@@ -37,16 +37,16 @@ func Latency(latency, jitter time.Duration) vlatte.Step {
 		panic(fmt.Sprintf("fault: latency jitter must be from 0 to %s, not %s", latency, jitter))
 	}
 
-	return latencyStep{latency: latency, jitter: jitter}
+	return latencyPipe{latency: latency, jitter: jitter}
 }
 
-type latencyStep struct {
+type latencyPipe struct {
 	latency time.Duration
 	jitter  time.Duration
 }
 
 // Describe implements [vlatte.SelfDescriptive], without a jitter of 0.
-func (l latencyStep) Describe() vlatte.Descriptor {
+func (l latencyPipe) Describe() vlatte.Descriptor {
 	if l.jitter == 0 {
 		return vlatte.DescribeKeyValuePairs("latency", "type", "latency", "latency", l.latency.String())
 	}
@@ -54,7 +54,7 @@ func (l latencyStep) Describe() vlatte.Descriptor {
 	return vlatte.DescribeKeyValuePairs("latency", "type", "latency", "latency", l.latency.String(), "jitter", l.jitter.String())
 }
 
-func (l latencyStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+func (l latencyPipe) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	s := &latencyStage{
 		flow:  flow,
 		ctx:   flow.Context(),
@@ -71,7 +71,7 @@ func (l latencyStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 
 // delay picks the delay of a write or flush: from latency-jitter to latency+jitter, which is at most twice the
 // longest duration, so it can't overflow a uint64. One longer than a duration holds is the longest one.
-func (l latencyStep) delay() time.Duration {
+func (l latencyPipe) delay() time.Duration {
 	if l.jitter == 0 {
 		return l.latency
 	}

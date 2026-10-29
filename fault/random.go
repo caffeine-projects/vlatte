@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	_ vlatte.Step            = randomData{}
+	_ vlatte.Pipe            = randomData{}
 	_ vlatte.SelfDescriptive = randomData{}
 	_ vlatte.Stage           = (*randomStage)(nil)
 )
@@ -16,10 +16,10 @@ var (
 // RandomDataSize is how many random bytes [RandomDataThenClose] sends.
 const RandomDataSize = 1 << 10
 
-// RandomDataThenClose returns a wire step that sends [RandomDataSize] random bytes in place of the answer, then aborts
+// RandomDataThenClose returns a wire pipe that sends [RandomDataSize] random bytes in place of the answer, then aborts
 // the flow, so the connection closes: at the first byte of the answer, or at its end. The client reads garbage where
 // it waits for a status line.
-func RandomDataThenClose() vlatte.Step {
+func RandomDataThenClose() vlatte.Pipe {
 	return randomData{}
 }
 

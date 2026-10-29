@@ -59,7 +59,7 @@ func newClient(t *testing.T) *http.Client {
 }
 
 func TestFault_EmptyResponse(t *testing.T) {
-	m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.EmptyResponse()).Reply(mockhttp.OK().PlainText("hello")))
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").WirePipe(fault.EmptyResponse()).Reply(mockhttp.OK().PlainText("hello")))
 
 	_, err := newClient(t).Get(m.URL("/f"))
 	require.ErrorIs(t, err, io.EOF)
@@ -68,7 +68,7 @@ func TestFault_EmptyResponse(t *testing.T) {
 
 func TestFault_MalformedResponseChunk(t *testing.T) {
 	// The client fails on the garbage before the connection ends: the call counts by that end.
-	m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.MalformedResponseChunk()).Reply(mockhttp.NotFound().PlainText("hello")))
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").WirePipe(fault.MalformedResponseChunk()).Reply(mockhttp.NotFound().PlainText("hello")))
 
 	got, err := rawGet(t, m, "/f")
 	require.NoError(t, err)
@@ -83,7 +83,7 @@ func TestFault_MalformedResponseChunk(t *testing.T) {
 }
 
 func TestFault_RandomDataThenClose(t *testing.T) {
-	m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.RandomDataThenClose()).Reply(mockhttp.OK().PlainText("hello")))
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").WirePipe(fault.RandomDataThenClose()).Reply(mockhttp.OK().PlainText("hello")))
 
 	got, err := rawGet(t, m, "/f")
 	require.NoError(t, err)
@@ -93,7 +93,7 @@ func TestFault_RandomDataThenClose(t *testing.T) {
 }
 
 func TestFault_ConnectionResetByPeer(t *testing.T) {
-	m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.ConnectionResetByPeer()).Reply(mockhttp.OK().PlainText("hello")))
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").WirePipe(fault.ConnectionResetByPeer()).Reply(mockhttp.OK().PlainText("hello")))
 
 	_, err := newClient(t).Get(m.URL("/f"))
 	require.ErrorIs(t, err, syscall.ECONNRESET)
@@ -102,7 +102,7 @@ func TestFault_ConnectionResetByPeer(t *testing.T) {
 
 func TestFault_ChunkedDribbleDelay(t *testing.T) {
 	// The body arrives late and in parts, but whole.
-	m, scoped := startFaulty(t, mockhttp.Getf("/f").Step(fault.ChunkedDribbleDelay(3, 30*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello world")))
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").Pipe(fault.ChunkedDribbleDelay(3, 30*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello world")))
 
 	res, err := newClient(t).Get(m.URL("/f"))
 	require.NoError(t, err)
@@ -118,7 +118,7 @@ func TestFault_ChunkedDribbleDelay(t *testing.T) {
 
 func TestFault_Latency(t *testing.T) {
 	// The whole answer, its head included, comes the latency late, and whole.
-	m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.Latency(50*time.Millisecond, 0)).Reply(mockhttp.OK().PlainText("hello")))
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").WirePipe(fault.Latency(50*time.Millisecond, 0)).Reply(mockhttp.OK().PlainText("hello")))
 
 	start := time.Now()
 	res, err := newClient(t).Get(m.URL("/f"))
@@ -137,7 +137,7 @@ func TestFault_Latency(t *testing.T) {
 func TestFault_Bandwidth(t *testing.T) {
 	// A body of 400 bytes at 2000 bytes a second takes 200ms at least, and arrives whole.
 	want := strings.Repeat("a", 400)
-	m, scoped := startFaulty(t, mockhttp.Getf("/f").Step(fault.Bandwidth(2000)).Reply(mockhttp.OK().PlainText(want)))
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").Pipe(fault.Bandwidth(2000)).Reply(mockhttp.OK().PlainText(want)))
 
 	start := time.Now()
 	res, err := newClient(t).Get(m.URL("/f"))
@@ -154,7 +154,7 @@ func TestFault_Bandwidth(t *testing.T) {
 
 func TestFault_SlowClose(t *testing.T) {
 	// The client has the body, but reads its end late.
-	m, scoped := startFaulty(t, mockhttp.Getf("/f").Step(fault.SlowClose(50*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello")))
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").Pipe(fault.SlowClose(50*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello")))
 
 	start := time.Now()
 	res, err := newClient(t).Get(m.URL("/f"))
@@ -170,9 +170,9 @@ func TestFault_SlowClose(t *testing.T) {
 }
 
 func TestFault_Timeout(t *testing.T) {
-	t.Run("WireStep", func(t *testing.T) {
+	t.Run("WirePipe", func(t *testing.T) {
 		// The client waits, gets no byte, not even a head, then the end of the connection.
-		m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.Timeout(50*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello")))
+		m, scoped := startFaulty(t, mockhttp.Getf("/f").WirePipe(fault.Timeout(50*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello")))
 
 		start := time.Now()
 		got, err := rawGet(t, m, "/f")
@@ -182,9 +182,9 @@ func TestFault_Timeout(t *testing.T) {
 		require.EqualValues(t, 1, scoped.Hits())
 	})
 
-	t.Run("Step", func(t *testing.T) {
+	t.Run("Pipe", func(t *testing.T) {
 		// The client waits, then gets the head, sent as the answer is cut, and the end of the connection for a body.
-		m, scoped := startFaulty(t, mockhttp.Getf("/f").Step(fault.Timeout(50*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello")))
+		m, scoped := startFaulty(t, mockhttp.Getf("/f").Pipe(fault.Timeout(50*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello")))
 
 		start := time.Now()
 		res, err := newClient(t).Get(m.URL("/f"))
@@ -202,7 +202,7 @@ func TestFault_Timeout(t *testing.T) {
 
 func TestFault_ConnectionResetByPeerAfter(t *testing.T) {
 	// The client reads the whole answer, then a reset where it waits for the end of the connection.
-	m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.ConnectionResetByPeerAfter(50*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello")))
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").WirePipe(fault.ConnectionResetByPeerAfter(50*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello")))
 
 	got, err := rawGet(t, m, "/f")
 	require.ErrorIs(t, err, syscall.ECONNRESET)
@@ -220,7 +220,7 @@ func TestFault_ConnectionResetByPeerAfter(t *testing.T) {
 func TestFault_Slicer(t *testing.T) {
 	// The answer comes in slices of 6 bytes at most, its head included, each 2ms after the one before, and the client
 	// reads it whole.
-	m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.Slicer(4, 2, 2*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello world")))
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").WirePipe(fault.Slicer(4, 2, 2*time.Millisecond)).Reply(mockhttp.OK().PlainText("hello world")))
 
 	start := time.Now()
 	got, err := rawGet(t, m, "/f")
@@ -238,9 +238,9 @@ func TestFault_Slicer(t *testing.T) {
 }
 
 func TestFault_LimitData(t *testing.T) {
-	t.Run("WireStep", func(t *testing.T) {
+	t.Run("WirePipe", func(t *testing.T) {
 		// The limit counts the bytes of the whole answer: the client gets the start of the status line, then the end.
-		m, scoped := startFaulty(t, mockhttp.Getf("/f").WireStep(fault.LimitData(12)).Reply(mockhttp.OK().PlainText("hello")))
+		m, scoped := startFaulty(t, mockhttp.Getf("/f").WirePipe(fault.LimitData(12)).Reply(mockhttp.OK().PlainText("hello")))
 
 		got, err := rawGet(t, m, "/f")
 		require.NoError(t, err)
@@ -248,9 +248,9 @@ func TestFault_LimitData(t *testing.T) {
 		require.EqualValues(t, 1, scoped.Hits())
 	})
 
-	t.Run("Step", func(t *testing.T) {
+	t.Run("Pipe", func(t *testing.T) {
 		// The limit counts the bytes of the body: the client gets a valid head, then a body cut short.
-		m, scoped := startFaulty(t, mockhttp.Getf("/f").Step(fault.LimitData(3)).Reply(mockhttp.OK().PlainText("hello")))
+		m, scoped := startFaulty(t, mockhttp.Getf("/f").Pipe(fault.LimitData(3)).Reply(mockhttp.OK().PlainText("hello")))
 
 		res, err := newClient(t).Get(m.URL("/f"))
 		require.NoError(t, err)
@@ -276,7 +276,7 @@ func TestFault_FromAMockFile(t *testing.T) {
 		return m, m.MustMock(mockhttp.FromFile("testdata/fault/" + file))
 	}
 
-	t.Run("wire_steps", func(t *testing.T) {
+	t.Run("wire_pipes", func(t *testing.T) {
 		m, scoped := start(t, "1_reset.yaml")
 
 		_, err := newClient(t).Get(m.URL("/reset"))
@@ -284,7 +284,7 @@ func TestFault_FromAMockFile(t *testing.T) {
 		require.EqualValues(t, 1, scoped.Hits())
 	})
 
-	t.Run("steps", func(t *testing.T) {
+	t.Run("pipes", func(t *testing.T) {
 		m, scoped := start(t, "2_limit_data.yaml")
 
 		res, err := newClient(t).Get(m.URL("/limit"))

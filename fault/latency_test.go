@@ -19,7 +19,7 @@ func TestLatency_DelaysTheAnswerAndKeepsItsPace(t *testing.T) {
 	// keeps the time between its writes, only later.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.Latency(500*time.Millisecond, 0)})
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(500*time.Millisecond, 0)})
 
 		_, err := flow.Write([]byte("a"))
 		require.NoError(t, err)
@@ -44,7 +44,7 @@ func TestLatency_TheWriterDoesntWait(t *testing.T) {
 	// The writer goes on at its own pace, as a server whose bytes are on the wire: only the end waits for them.
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now()
-		flow := vlatte.NewFlow(t.Context(), failingSink{}, []vlatte.Step{fault.Latency(time.Second, 0)})
+		flow := vlatte.NewFlow(t.Context(), failingSink{}, []vlatte.Pipe{fault.Latency(time.Second, 0)})
 
 		for range 3 {
 			n, err := flow.Write([]byte("ab"))
@@ -64,7 +64,7 @@ func TestLatency_JitterKeepsTheOrder(t *testing.T) {
 	// in order, each write within the jitter of the latency, or later for that wait.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.Latency(time.Second, time.Second)})
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(time.Second, time.Second)})
 
 		want := make([]string, 0, 20)
 		for i := range cap(want) {
@@ -113,7 +113,7 @@ func TestLatency_KeepsWhatItWasGiven(t *testing.T) {
 	// The writer may reuse its buffer once Write returned: the bytes that go out later are those it wrote.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.Latency(time.Second, 0)})
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(time.Second, 0)})
 
 		b := []byte("ab")
 		_, err := flow.Write(b)
@@ -129,7 +129,7 @@ func TestLatency_AnEmptyAnswerEndsAtOnce(t *testing.T) {
 	// Only what is sent is delayed: the end of an answer that sent nothing comes as it does.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.Latency(time.Second, 0)})
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(time.Second, 0)})
 
 		require.NoError(t, flow.Close())
 		require.Equal(t, []string{"close at 0s"}, sink.log)
@@ -141,7 +141,7 @@ func TestLatency_StopsWhenTheClientLeaves(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(ctx, sink, []vlatte.Step{fault.Latency(time.Second, 0)})
+		flow := vlatte.NewFlow(ctx, sink, []vlatte.Pipe{fault.Latency(time.Second, 0)})
 
 		_, err := flow.Write([]byte("a"))
 		require.NoError(t, err)
@@ -159,7 +159,7 @@ func TestLatency_StopsWhenTheClientLeavesAnIdleAnswer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(ctx, sink, []vlatte.Step{fault.Latency(time.Second, 0)})
+		flow := vlatte.NewFlow(ctx, sink, []vlatte.Pipe{fault.Latency(time.Second, 0)})
 
 		time.Sleep(time.Second)
 		cancel()
@@ -182,7 +182,7 @@ func TestLatency_AClientThatWentAwayEndsIt(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.Latency(100*time.Millisecond, 0)})
+				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(100*time.Millisecond, 0)})
 
 				_, err := flow.Write([]byte("a"))
 				require.NoError(t, err)
@@ -205,9 +205,9 @@ func TestLatency_AStageAfterItThatAbortsEndsTheFlow(t *testing.T) {
 	for name, abort := range map[string]error{"an abort": vlatte.ErrAbort, "a reset": vlatte.ErrReset} {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				cut := vlatte.StepFunc(func(context.Context, []byte, vlatte.Stage) (int, error) { return 0, abort })
+				cut := vlatte.PipeFunc(func(context.Context, []byte, vlatte.Stage) (int, error) { return 0, abort })
 				start := time.Now()
-				flow := vlatte.NewFlow(t.Context(), failingSink{}, []vlatte.Step{fault.Latency(time.Second, 0), cut})
+				flow := vlatte.NewFlow(t.Context(), failingSink{}, []vlatte.Pipe{fault.Latency(time.Second, 0), cut})
 
 				_, err := flow.Write([]byte("a"))
 				require.NoError(t, err)
