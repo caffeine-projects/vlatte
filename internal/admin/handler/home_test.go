@@ -1,10 +1,13 @@
 package handler_test
 
 import (
+	"html"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/caffeine-projects/vlatte/internal/buildinfo"
 )
 
 func TestHome_ServesTheHomepageAtTheRootInPlaceOfTheDocs(t *testing.T) {
@@ -20,12 +23,13 @@ func TestHome_ServesTheHomepageAtTheRootInPlaceOfTheDocs(t *testing.T) {
 }
 
 func TestHome_ShowsTheVersionOfVlatte(t *testing.T) {
-	// The server box tells which vlatte serves, which no endpoint of the admin API answers: the server fills it in.
+	// The server box tells which vlatte serves, which no endpoint of the admin API answers: the server fills it in,
+	// with the version vlatte version prints for the same build, devel included.
 	base := serve(t, newStore(t))
 
 	_, body := send(t, request{method: http.MethodGet, url: base + "/"})
 	require.NotContains(t, body, "{vlatte-version}")
-	require.Regexp(t, `<dt>Version</dt><dd><code>[^<>{}]+</code></dd>`, body)
+	require.Contains(t, body, "<dt>Version</dt><dd><code>"+html.EscapeString(buildinfo.Version())+"</code></dd>")
 }
 
 func TestHome_ReadsTheAdminAPIByRelativeURLs(t *testing.T) {
