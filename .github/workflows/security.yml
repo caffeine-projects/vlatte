@@ -55,7 +55,7 @@ jobs:
       with:
         go-version: 'stable'
         cache: false
-    - run: go run github.com/google/osv-scanner/v2/cmd/osv-scanner@bfe2f84abd2f09fe0b83ba7f6dad40d296762f40 scan source -r --format vertical . || true
+    - run: go run github.com/google/osv-scanner/v2/cmd/osv-scanner@bfe2f84abd2f09fe0b83ba7f6dad40d296762f40 scan source -r --all-vulns --format vertical . || true
 
   image:
     runs-on: ubuntu-latest
