@@ -48,8 +48,9 @@ signs:
       - --yes
       - ${artifact}
 
-# Sorts v0.1.0 after v0.1.0-rc.2 when both tag one commit, so the run releases the stable tag. Notes start at the last
-# stable tag: a stable release lists everything since the stable release before it, not since its last release candidate.
+# Sorts v0.1.0 after v0.1.0-rc.2 when both tag one commit. Ignoring tags with a suffix starts a stable release's notes at
+# the stable release before it, not at its last release candidate. release.yml names the tag being released, and a
+# release candidate's previous tag, so its notes start at the tag before it.
 git:
   prerelease_suffix: "-"
   ignore_tags:
