@@ -1,6 +1,8 @@
 package match
 
 import (
+	"fmt"
+
 	"github.com/ohler55/ojg/jp"
 
 	"github.com/caffeine-projects/vlatte"
@@ -11,7 +13,7 @@ import (
 func HasKey(path string) vlatte.Matcher {
 	x, err := jp.ParseString(path)
 	if err != nil {
-		panic(err)
+		panic(fmt.Errorf("match: haskey: the path %s is invalid: %w", path, err))
 	}
 	return &hasKeyMatcher{Path: path, Expr: x}
 }

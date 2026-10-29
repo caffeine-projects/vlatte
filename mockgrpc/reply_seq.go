@@ -97,8 +97,7 @@ func (s *sequenceReplier) Reply(ctx context.Context, call *Call) error {
 	reply, hits := s.next()
 	if reply == nil {
 		return fmt.Errorf(
-			"reply_sequence: unable to obtain a response, and no default response was set. call number=%d, sequence size=%d",
-			hits, len(s.replies))
+			"reply_sequence: call %d came after the end of the sequence: set OnSequenceEnded or after_ended", hits)
 	}
 
 	return reply.Reply(ctx, call)

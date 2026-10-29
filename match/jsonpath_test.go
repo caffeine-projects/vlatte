@@ -3,6 +3,7 @@ package match
 import (
 	"testing"
 
+	"github.com/ohler55/ojg/jp"
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
@@ -127,12 +128,11 @@ func TestJSONPathMatcherInvalidPaths(t *testing.T) {
 	}
 }
 
-func TestJSONPathNew(t *testing.T) {
-	require.Panics(t, func() {
-		JSONPath(".", Eq(""))
-	})
+func TestJSONPath_AnInvalidPathPanicsNamingTheMatcherAndThePath(t *testing.T) {
+	// The panic must say which matcher and which expression failed, so a caller finds the line to fix.
+	_, parseErr := jp.ParseString(".")
+	want := "match: jsonpath: the expression . is invalid: " + parseErr.Error()
 
-	require.Panics(t, func() {
-		Field(".", Eq(""))
-	})
+	require.PanicsWithError(t, want, func() { JSONPath(".", Eq("")) })
+	require.PanicsWithError(t, want, func() { Field(".", Eq("")) })
 }

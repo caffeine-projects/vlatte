@@ -24,7 +24,7 @@ var (
 	ErrNoExpectations = errors.New("mock: at least 1 request matcher must be set")
 
 	// ErrNoReplies is returned by [Builder.Build] for a mock with no reply: see [Builder.Reply].
-	ErrNoReplies = errors.New("mock: no reply set. Use .Reply() or any equivalent to set the expected mock response")
+	ErrNoReplies = errors.New("mock: no reply set: use Reply")
 )
 
 // errMockID says what an ID may hold. IDs name mocks in admin API paths, such as /mocks/{id}.
@@ -202,7 +202,7 @@ func (b *Builder) Method(methods ...string) *Builder {
 	var key string
 
 	if len(methods) == 0 {
-		panic(".Method() requires at least one HTTP Method")
+		panic("mock: Method needs at least one HTTP method")
 	} else if len(methods) == 1 {
 		m = match.EqualIgnoreCase(methods[0])
 		key = methods[0]
@@ -454,7 +454,7 @@ func (b *Builder) Queries(name string, m vlatte.Matcher) *Builder {
 func (b *Builder) Body(matcherList ...vlatte.Matcher) *Builder {
 	var m vlatte.Matcher
 	if len(matcherList) == 0 {
-		panic(".Body() func requires at least one matcher.Matcher")
+		panic("mock: Body needs at least one matcher")
 	} else if len(matcherList) == 1 {
 		m = matcherList[0]
 	} else {

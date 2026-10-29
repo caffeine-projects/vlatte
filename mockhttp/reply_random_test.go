@@ -35,7 +35,7 @@ func TestRandomReplies(t *testing.T) {
 
 func TestShouldReturnErrorWhenRandomDoesNotContainReplies(t *testing.T) {
 	_, err := Rand().NewReplier(nil)
-	require.Error(t, err)
+	require.EqualError(t, err, "reply_random: no replies: add at least one")
 }
 
 func TestRandWithCustom(t *testing.T) {

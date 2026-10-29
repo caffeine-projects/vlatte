@@ -192,6 +192,21 @@ func TestBuilder_Times(t *testing.T) {
 	require.Equal(t, StatusNoMatch, status, "served 3")
 }
 
+func TestBuilder_AMockWithoutAReplyNamesTheFix(t *testing.T) {
+	// One lowercase clause, as the gRPC mock says it, with the call that fixes it.
+	m := MustNew(Setup().Silent())
+
+	_, err := Getf("/no-reply").Build(m)
+	require.ErrorIs(t, err, ErrNoReplies)
+	require.EqualError(t, err, "mock: no reply set: use Reply")
+}
+
+func TestBuilder_MethodOrBodyWithoutAnArgumentPanicsNamingTheMissingArgument(t *testing.T) {
+	// A panic must name the call and what it needs, so the caller finds the line to fix.
+	require.PanicsWithValue(t, "mock: Method needs at least one HTTP method", func() { AnyMethod().Method() })
+	require.PanicsWithValue(t, "mock: Body needs at least one matcher", func() { AnyMethod().Body() })
+}
+
 func TestBuilder_ScenarioAdvancesPerServer(t *testing.T) {
 	// Build binds the scenario matcher to the server's scenario store and adds it to the mock it makes: a builder
 	// used on two servers runs the scenario on each, and building adds no matcher to the builder.

@@ -78,7 +78,7 @@ func (rep *RandomReply) Describe() vlatte.Descriptor {
 // NewReplier implements ReplierFactory. It makes the Replier of each reply, so each mock picks from replies of its own.
 func (rep *RandomReply) NewReplier(app *Server) (Replier, error) {
 	if len(rep.replies) == 0 {
-		return nil, errors.New("reply_random: you need to set at least one response when using random reply")
+		return nil, errors.New("reply_random: no replies: add at least one")
 	}
 
 	r := &randomReplier{replies: make([]Replier, len(rep.replies)), random: rep.random}

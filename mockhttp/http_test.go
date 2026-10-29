@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -493,9 +494,33 @@ func TestNew_ReturnsErrors(t *testing.T) {
 	require.ErrorContains(t, err, "bad config")
 
 	_, err = New(Setup().BackendFactory(failingBackendFactory{}))
-	require.ErrorContains(t, err, "no server")
+	require.EqualError(t, err, "server: building the backend: no server")
 
 	require.Panics(t, func() { MustNew(failingConfigurer{}) })
+}
+
+func TestServer_MustPanicsSayWhatTheServerWasDoing(t *testing.T) {
+	failLoad := loaderFunc(func(*Server) error { return errLoad })
+
+	m := MustNew(Setup().Silent().Loader(failLoad))
+	require.PanicsWithError(t, "server: starting: "+errLoad.Error(), m.MustStart)
+
+	m = MustNew(Setup().Silent().TLSCertKeyPair(_testCertFile, _testKeyFile).Loader(failLoad))
+	require.PanicsWithError(t, "server: starting with TLS: "+errLoad.Error(), m.MustStartTLS)
+
+	var reloading atomic.Bool
+	m = MustNew(Setup().Silent().Loader(loaderFunc(func(*Server) error {
+		if reloading.Load() {
+			return errLoad
+		}
+
+		return nil
+	})))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	reloading.Store(true)
+	require.PanicsWithError(t, "server: reloading the mocks: "+errLoad.Error(), m.MustReload)
 }
 
 // loaderFunc is a Loader that runs a function, such as one that is slow, fails, or closes the server.
@@ -808,7 +833,7 @@ func TestPrep(t *testing.T) {
 			}))
 
 		require.ErrorIs(t, err, errRecipe)
-		require.ErrorContains(t, err, "index 1")
+		require.EqualError(t, err, "server: applying recipe 1 (vlatte.RecipeFunc[*github.com/caffeine-projects/vlatte/mockhttp.Mock,*github.com/caffeine-projects/vlatte/mockhttp.Server]): recipe failed")
 		require.False(t, ranAfterFailure, "recipes after a failing one must not run")
 	})
 }

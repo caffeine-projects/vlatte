@@ -61,7 +61,7 @@ func TestSeq_ACallAfterTheEndWithoutOnSequenceEndedFails(t *testing.T) {
 	_, err := c.Greetings(t.Context(), &pb.HiReq{}, grpc.Trailer(&trailer))
 	require.Equal(t, codes.Internal, status.Code(err))
 	require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(vlatte.HeaderFailure))
-	require.Contains(t, status.Convert(err).Message(), "call number=2, sequence size=1")
+	require.Contains(t, status.Convert(err).Message(), "reply_sequence: call 2 came after the end of the sequence: set OnSequenceEnded or after_ended")
 }
 
 func TestSeq_EachMockRunsTheSequenceOnItsOwn(t *testing.T) {

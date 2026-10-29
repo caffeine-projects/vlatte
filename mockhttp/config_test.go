@@ -241,14 +241,14 @@ func TestConfigBuilder_TLSMutualNeedsCACertificates(t *testing.T) {
 	// An empty client CA pool would start a server that rejects every client.
 	_, err := New(Setup().TLSMutual(_testCertFile, _testKeyFile, _testKeyFile))
 
-	require.ErrorContains(t, err, _testKeyFile+" has no PEM certificates")
+	require.EqualError(t, err, "server: applying option 0 (*mockhttp.ConfigBuilder): config: building the TLS config: "+_testKeyFile+" has no PEM certificates")
 }
 
 func TestConfigBuilder_TLSCertKeyPairItCantLoadFailsNew(t *testing.T) {
 	// A key given as the certificate would fail at the first handshake, far from the setting that named it.
 	_, err := New(Setup().TLSCertKeyPair(_testKeyFile, _testKeyFile))
 
-	require.ErrorContains(t, err, "config: failed to build TLS config: tls: failed to find certificate PEM data")
+	require.ErrorContains(t, err, "config: building the TLS config: tls: failed to find certificate PEM data")
 }
 
 func TestLogLevelString(t *testing.T) {
@@ -391,7 +391,7 @@ func TestConfigBuilder_AFailingSectionOptionFailsNew(t *testing.T) {
 	for name, setup := range tests {
 		t.Run(name, func(t *testing.T) {
 			_, err := New(setup)
-			require.EqualError(t, err, "server: error applying configuration at index 0 with type *mockhttp.ConfigBuilder\nno")
+			require.EqualError(t, err, "server: applying option 0 (*mockhttp.ConfigBuilder): no")
 		})
 	}
 }

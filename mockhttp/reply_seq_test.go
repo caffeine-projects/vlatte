@@ -40,7 +40,7 @@ func TestSequentialReply(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, res.StatusCode)
 
 		_, err = builder.Reply(context.Background(), input)
-		assert.NotNil(t, err)
+		require.EqualError(t, err, "reply_sequence: request 5 came after the end of the sequence: set OnSequenceEnded or after_ended")
 	})
 
 	t.Run("should return the configured reply when the sequence has ended", func(t *testing.T) {
@@ -65,7 +65,7 @@ func TestSequentialReply(t *testing.T) {
 func TestSequentialReplyShouldReturnErrorWhenSequenceDoesNotContainReplies(t *testing.T) {
 	r, err := Seq().NewReplier(nil)
 	assert.Nil(t, r)
-	assert.NotNil(t, err)
+	require.EqualError(t, err, "reply_sequence: no replies: add at least one")
 }
 
 func TestSequentialReply_PreparesNestedReplies(t *testing.T) {

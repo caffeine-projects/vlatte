@@ -196,7 +196,7 @@ func parseRequestBody(app *Server, r *http.Request) (parsedBody any, rawBody []b
 			parsedBody, err = parser.Parse(rawBody, r)
 			if err != nil {
 				return nil, rawBody, parser,
-					fmt.Errorf("%T failed: %w", parser, err)
+					fmt.Errorf("parsing the body with %T: %w", parser, err)
 			}
 
 			return parsedBody, rawBody, parser, nil
