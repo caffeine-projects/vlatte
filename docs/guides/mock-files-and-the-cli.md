@@ -7,7 +7,7 @@ This guide writes mock files with editor support, serves them with the `vlatte` 
 The command serves the files matching `testdata/vlatte/_mocks/*mock.yaml` and `*mock.yml`. The first line of each names its [schema](/reference/schemas), so editors complete keys and flag mistakes as you type.
 
 ```yaml
-# yaml-language-server: $schema=https://caffeine-projects.github.io/vlatte/schemas/http.schema.json
+# yaml-language-server: $schema=https://vlatte.dev/schemas/http.schema.json
 id: get-user
 name: get a user
 request:
@@ -25,7 +25,7 @@ response:
 ```
 
 ```yaml
-# yaml-language-server: $schema=https://caffeine-projects.github.io/vlatte/schemas/http.schema.json
+# yaml-language-server: $schema=https://vlatte.dev/schemas/http.schema.json
 id: create-user
 request:
   method: POST

@@ -103,4 +103,4 @@ m.MustMock(mockhttp.Getf("/now").Reply(mockhttp.Func(func(w http.ResponseWriter,
 })))
 ```
 
-The context of the request of a `Func` or `Handler` reply also ends when a [step](/http/steps) of the mock cuts the answer.
+The context of the request of a `Func` or `Handler` reply also ends when a [pipe](/http/pipes) of the mock cuts the answer.

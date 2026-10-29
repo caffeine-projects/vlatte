@@ -30,7 +30,7 @@ func TestEmptyResponse_SendsNothingAndAborts(t *testing.T) {
 	for _, c := range _calls {
 		t.Run(c.name, func(t *testing.T) {
 			var out bytes.Buffer
-			flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Step{fault.EmptyResponse()})
+			flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Pipe{fault.EmptyResponse()})
 
 			require.ErrorIs(t, c.do(flow), vlatte.ErrAbort)
 

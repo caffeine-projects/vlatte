@@ -78,7 +78,7 @@ func TestRetriesAResetConnection(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	m.MustMock(
-		mockhttp.Getf("/report").Once().WireStep(fault.ConnectionResetByPeer()).Reply(mockhttp.OK()),
+		mockhttp.Getf("/report").Once().WirePipe(fault.ConnectionResetByPeer()).Reply(mockhttp.OK()),
 		mockhttp.Getf("/report").Priority(1).Reply(mockhttp.OK().PlainText("done")),
 	)
 
@@ -105,7 +105,7 @@ func TestGivesUpOnASlowServer(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	m.MustMock(mockhttp.Getf("/report").
-		WireStep(fault.Latency(500*time.Millisecond, 0)).
+		WirePipe(fault.Latency(500*time.Millisecond, 0)).
 		Reply(mockhttp.OK().PlainText("too late")))
 
 	client := &http.Client{Timeout: 100 * time.Millisecond}
@@ -117,14 +117,14 @@ func TestGivesUpOnASlowServer(t *testing.T) {
 }
 ```
 
-To slow only the body, use `Step` in place of `WireStep`: the client then gets the status and headers at once. `fault.Bandwidth`, `fault.ChunkedDribbleDelay` and `fault.Timeout` shape a slow network in other ways: see [Faults](/http/faults).
+To slow only the body, use `Pipe` in place of `WirePipe`: the client then gets the status and headers at once. `fault.Bandwidth`, `fault.ChunkedDribbleDelay` and `fault.Timeout` shape a slow network in other ways: see [Faults](/http/faults).
 
 ## The same in mock files
 
 ```yaml
 request: {method: GET, path: /report}
 response: {status: 200, body: done}
-wire_steps:
+wire_pipes:
   - type: latency
     latency: 500ms
 ```
@@ -132,5 +132,5 @@ wire_steps:
 ## What you used
 
 - `Seq`, `OnSequenceEnded`: [Replies](/http/replies#sequences).
-- `WireStep`, `fault.ConnectionResetByPeer`, `fault.Latency`: [Steps](/http/steps), [Faults](/http/faults).
+- `WirePipe`, `fault.ConnectionResetByPeer`, `fault.Latency`: [Pipes](/http/pipes), [Faults](/http/faults).
 - `Once`, `Priority`, `AssertNumberOfCalls`: [Mock lifecycle](/more/mock-lifecycle), [Mocks](/http/mocks#asserting).

@@ -119,7 +119,7 @@ func TestBandwidth_SendsEachWriteAtTheRate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				sink := &bandwidthSink{start: time.Now()}
-				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{Bandwidth(tc.rate)})
+				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{Bandwidth(tc.rate)})
 
 				for _, w := range tc.writes {
 					n, err := flow.Write([]byte(w))
@@ -138,7 +138,7 @@ func TestBandwidth_APauseDoesntSpeedTheNextWriteUp(t *testing.T) {
 	// The rate holds for each write: an idle second earns no burst, as a link has no store of time unused.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &bandwidthSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{Bandwidth(10)})
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{Bandwidth(10)})
 
 		_, err := flow.Write([]byte("a"))
 		require.NoError(t, err)
@@ -155,7 +155,7 @@ func TestBandwidth_PassesFlushesOnAsTheyCome(t *testing.T) {
 	// A flush, such as of a head before its body, isn't slowed: it carries no bytes.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &bandwidthSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{Bandwidth(1)})
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{Bandwidth(1)})
 
 		require.NoError(t, flow.Flush())
 		require.NoError(t, flow.Close())
@@ -189,7 +189,7 @@ func TestBandwidth_CommonBandwidthsAreInBytesPerSecond(t *testing.T) {
 
 			synctest.Test(t, func(t *testing.T) {
 				start := time.Now()
-				flow := vlatte.NewFlow(t.Context(), bandwidthFailingSink{}, []vlatte.Step{Bandwidth(tc.bandwidth)})
+				flow := vlatte.NewFlow(t.Context(), bandwidthFailingSink{}, []vlatte.Pipe{Bandwidth(tc.bandwidth)})
 
 				_, err := flow.Write(make([]byte, 2*tc.bandwidth))
 				require.NoError(t, err)
@@ -204,7 +204,7 @@ func TestBandwidth_StopsWhenTheClientLeaves(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		sink := &bandwidthSink{start: time.Now()}
-		flow := vlatte.NewFlow(ctx, sink, []vlatte.Step{Bandwidth(10)})
+		flow := vlatte.NewFlow(ctx, sink, []vlatte.Pipe{Bandwidth(10)})
 
 		time.AfterFunc(150*time.Millisecond, cancel)
 
@@ -227,7 +227,7 @@ func TestBandwidth_AClientThatWentAwayEndsIt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				start := time.Now()
-				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{Bandwidth(10)})
+				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{Bandwidth(10)})
 
 				_, err := flow.Write([]byte("abc"))
 				require.ErrorIs(t, err, errGone)

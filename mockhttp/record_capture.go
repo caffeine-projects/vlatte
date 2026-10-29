@@ -94,8 +94,8 @@ func (x *recordedCall) size() int {
 }
 
 // captureWriter passes a response to the client, and keeps what the client gets for a recording: the status, the
-// headers, the body and the trailers. It wraps the server's writer, so it sees what the steps of a mock send, and
-// what replies that write their own response send. A step of a mock may write from a goroutine of its own, so mu
+// headers, the body and the trailers. It wraps the server's writer, so it sees what the pipes of a mock send, and
+// what replies that write their own response send. A pipe of a mock may write from a goroutine of its own, so mu
 // guards the state of the capture.
 type captureWriter struct {
 	rw     http.ResponseWriter

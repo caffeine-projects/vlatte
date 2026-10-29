@@ -4,7 +4,7 @@ request:
 response:
   status: 200
   body: hello
-steps:
+pipes:
   - type: slow_close
     delay: 0
   - type: limit_data

@@ -38,12 +38,12 @@ func (s *timedSink) Close() error {
 	return nil
 }
 
-// described returns how step describes itself, as a mock file holds it once read back.
-func described(t *testing.T, step vlatte.Step) any {
+// described returns how pipe describes itself, as a mock file holds it once read back.
+func described(t *testing.T, pipe vlatte.Pipe) any {
 	t.Helper()
 
-	d, ok := vlatte.IsSelfDescriptive(step)
-	require.True(t, ok, "%T doesn't describe itself", step)
+	d, ok := vlatte.IsSelfDescriptive(pipe)
+	require.True(t, ok, "%T doesn't describe itself", pipe)
 
 	doc, err := value.ViaJSON(d)
 	require.NoError(t, err)
@@ -67,7 +67,7 @@ func TestBuild_BuildsTheFaultItsSpecNames(t *testing.T) {
 	tests := []struct {
 		name string
 		spec map[string]any
-		want vlatte.Step
+		want vlatte.Pipe
 		desc map[string]any
 	}{
 		{
@@ -143,12 +143,12 @@ func TestBuild_BuildsTheFaultItsSpecNames(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			step, err := Build(tc.spec)
+			pipe, err := Build(tc.spec)
 			require.NoError(t, err)
-			require.Equal(t, tc.desc, described(t, step))
-			require.Equal(t, described(t, tc.want), described(t, step))
+			require.Equal(t, tc.desc, described(t, pipe))
+			require.Equal(t, described(t, tc.want), described(t, pipe))
 
-			again, err := Build(described(t, step))
+			again, err := Build(described(t, pipe))
 			require.NoError(t, err)
 			require.Equal(t, tc.desc, described(t, again))
 		})
@@ -178,13 +178,13 @@ func TestBuild_LatencyDelaysAsItsSpecSays(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			step, err := Build(tc.spec)
+			pipe, err := Build(tc.spec)
 			require.NoError(t, err)
-			require.Equal(t, tc.desc, described(t, step))
+			require.Equal(t, tc.desc, described(t, pipe))
 
 			synctest.Test(t, func(t *testing.T) {
 				sink := &timedSink{start: time.Now()}
-				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{step})
+				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{pipe})
 
 				_, err := flow.Write([]byte("a"))
 				require.NoError(t, err)
@@ -324,8 +324,8 @@ func TestBuild_RefusesASpecItCantBuild(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			step, err := Build(tc.spec)
-			require.Nil(t, step)
+			pipe, err := Build(tc.spec)
+			require.Nil(t, pipe)
 
 			cfgErr, ok := errors.AsType[*config.Error](err)
 			require.True(t, ok, "%v", err)
@@ -342,15 +342,15 @@ func TestBuild_RefusesASpecItCantBuild(t *testing.T) {
 }
 
 func TestBuildAt_KeysItsProblemsAsTheFileDoes(t *testing.T) {
-	// A mock file lists faults under a key, such as steps: each problem names the file and the fault's place in it,
+	// A mock file lists faults under a key, such as pipes: each problem names the file and the fault's place in it,
 	// so the user finds the line to fix.
-	_, err := BuildAt(obj("type", "slicer", "size_variation", int64(1)), "file mocks/users.yaml", "steps[2]")
+	_, err := BuildAt(obj("type", "slicer", "size_variation", int64(1)), "file mocks/users.yaml", "pipes[2]")
 
 	cfgErr, ok := errors.AsType[*config.Error](err)
 	require.True(t, ok, "%v", err)
 	require.Equal(t, []config.Problem{{
-		Code: config.CodeMissingValue, Origin: "file mocks/users.yaml", Key: "steps[2].average_size",
-		Message: "steps[2].average_size is required by a slicer fault",
+		Code: config.CodeMissingValue, Origin: "file mocks/users.yaml", Key: "pipes[2].average_size",
+		Message: "pipes[2].average_size is required by a slicer fault",
 	}}, cfgErr.Problems)
 }
 
@@ -424,10 +424,10 @@ func TestPropBuild_ADescriptionBuildsTheSameFault(t *testing.T) {
 	// The admin API describes a mock, and its store writes the description to a file that must load as the same mock:
 	// a fault built from its own description describes itself the same, through JSON or YAML as a file holds it.
 	rapid.Check(t, func(t *rapid.T) {
-		step, err := Build(genSpec().Draw(t, "spec"))
+		pipe, err := Build(genSpec().Draw(t, "spec"))
 		require.NoError(t, err)
 
-		first, err := value.ViaJSON(step.(vlatte.SelfDescriptive).Describe())
+		first, err := value.ViaJSON(pipe.(vlatte.SelfDescriptive).Describe())
 		require.NoError(t, err)
 
 		// The admin store writes YAML, the admin API JSON.
@@ -452,9 +452,9 @@ func TestBuilt_ABugStillPanics(t *testing.T) {
 	// Only the messages constructors panic with on input they refuse become errors: a bug, such as an index out of
 	// range, must not pass for a spec that is wrong.
 	require.PanicsWithError(t, "runtime error: index out of range [1] with length 0", func() {
-		_, _ = built(func() vlatte.Step {
-			var steps []vlatte.Step
-			return steps[1]
+		_, _ = built(func() vlatte.Pipe {
+			var pipes []vlatte.Pipe
+			return pipes[1]
 		})
 	})
 }

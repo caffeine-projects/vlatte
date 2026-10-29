@@ -1,36 +1,36 @@
 # Faults
 
-The `fault` package has steps that make an HTTP mock answer wrong, to test how a client handles a server that fails, or a bad network. A step of either level acts on the body with `Step`, and on every byte of the answer, its head included, with `WireStep`:
+The `fault` package has pipes that make an HTTP mock answer wrong, to test how a client handles a server that fails, or a bad network. A pipe of either level acts on the body with `Pipe`, and on every byte of the answer, its head included, with `WirePipe`:
 
-## Fault steps
+## Fault pipes
 
-| Step | Level | What the client gets |
+| Pipe | Level | What the client gets |
 |---|---|---|
-| `fault.EmptyResponse()` | `WireStep` | No byte at all: the connection ends where it waits for a status line. |
-| `fault.MalformedResponseChunk()` | `WireStep` | The status line and headers, with the mock's status, then garbage in place of the first chunk of the body, then the end of the connection. |
-| `fault.RandomDataThenClose()` | `WireStep` | `fault.RandomDataSize` random bytes in place of the answer, then the end of the connection. |
-| `fault.ConnectionResetByPeer()` | `WireStep` | A TCP reset, such as `ECONNRESET`, before a status line. |
-| `fault.ChunkedDribbleDelay(chunks, total)` | `Step` | The whole body, in `chunks` flushed parts spread over `total`: part k comes at k·total/chunks, and the body ends at `total`. The body is held until the reply wrote all of it. |
+| `fault.EmptyResponse()` | `WirePipe` | No byte at all: the connection ends where it waits for a status line. |
+| `fault.MalformedResponseChunk()` | `WirePipe` | The status line and headers, with the mock's status, then garbage in place of the first chunk of the body, then the end of the connection. |
+| `fault.RandomDataThenClose()` | `WirePipe` | `fault.RandomDataSize` random bytes in place of the answer, then the end of the connection. |
+| `fault.ConnectionResetByPeer()` | `WirePipe` | A TCP reset, such as `ECONNRESET`, before a status line. |
+| `fault.ChunkedDribbleDelay(chunks, total)` | `Pipe` | The whole body, in `chunks` flushed parts spread over `total`: part k comes at k·total/chunks, and the body ends at `total`. The body is held until the reply wrote all of it. |
 | `fault.Latency(latency, jitter)` | Either | Every write and flush `latency` later, give or take `jitter` at random, in order. The answer keeps its pace: the writer doesn't wait. |
 | `fault.Bandwidth(bytesPerSecond)` | Either | Each write at that rate, in flushed pieces of a tenth of a second. `fault.Bandwidth3G` and the other `fault.Bandwidth*` constants are common links, in bytes per second. |
 | `fault.Slicer(averageSize, sizeVariation, delay)` | Either | Each write in flushed slices of `averageSize` bytes, give or take `sizeVariation` at random, `delay` apart. |
-| `fault.SlowClose(delay)` | Either | The whole answer, then its end `delay` later: the body's last chunk with `Step`, the close of the connection with `WireStep`. |
-| `fault.Timeout(timeout)` | Either | Nothing, then the end of the connection `timeout` after the answer began; with `Step`, the head comes with that end. A timeout of 0 never ends. |
-| `fault.LimitData(n)` | Either | The first `n` bytes, then the end of the connection: bytes of the body with `Step`, of the whole answer with `WireStep`. |
-| `fault.ConnectionResetByPeerAfter(d)` | Either | The answer as it comes, then a TCP reset `d` after it began. With `Step` over HTTP/2, the stream is cut instead. |
+| `fault.SlowClose(delay)` | Either | The whole answer, then its end `delay` later: the body's last chunk with `Pipe`, the close of the connection with `WirePipe`. |
+| `fault.Timeout(timeout)` | Either | Nothing, then the end of the connection `timeout` after the answer began; with `Pipe`, the head comes with that end. A timeout of 0 never ends. |
+| `fault.LimitData(n)` | Either | The first `n` bytes, then the end of the connection: bytes of the body with `Pipe`, of the whole answer with `WirePipe`. |
+| `fault.ConnectionResetByPeerAfter(d)` | Either | The answer as it comes, then a TCP reset `d` after it began. With `Pipe` over HTTP/2, the stream is cut instead. |
 
 ```go
-m.MustMock(mockhttp.Getf("/users").WireStep(fault.ConnectionResetByPeer()).Reply(mockhttp.OK()))
-m.MustMock(mockhttp.Getf("/report").Step(fault.ChunkedDribbleDelay(5, 2*time.Second)).Reply(mockhttp.OK().BodyFile("report.csv")))
-m.MustMock(mockhttp.Getf("/search").WireStep(fault.Latency(300*time.Millisecond, 60*time.Millisecond)).Reply(mockhttp.OK()))
-m.MustMock(mockhttp.Getf("/video").Step(fault.Bandwidth(fault.Bandwidth3G)).Reply(mockhttp.OK().BodyFile("video.mp4")))
+m.MustMock(mockhttp.Getf("/users").WirePipe(fault.ConnectionResetByPeer()).Reply(mockhttp.OK()))
+m.MustMock(mockhttp.Getf("/report").Pipe(fault.ChunkedDribbleDelay(5, 2*time.Second)).Reply(mockhttp.OK().BodyFile("report.csv")))
+m.MustMock(mockhttp.Getf("/search").WirePipe(fault.Latency(300*time.Millisecond, 60*time.Millisecond)).Reply(mockhttp.OK()))
+m.MustMock(mockhttp.Getf("/video").Pipe(fault.Bandwidth(fault.Bandwidth3G)).Reply(mockhttp.OK().BodyFile("video.mp4")))
 ```
 
-A wire fault needs HTTP/1.x, as wire steps do. Faults combine with other steps: a fault on the wire comes after the steps of `Step`. A mock that answers with a fault still counts the call, and runs its callbacks and events, before the connection ends.
+A wire fault needs HTTP/1.x, as wire pipes do. Faults combine with other pipes: a fault on the wire comes after the pipes of `Pipe`. A mock that answers with a fault still counts the call, and runs its callbacks and events, before the connection ends.
 
 ## In mock files
 
-`steps`, `wire_steps` and `upstream_steps` list faults for `Step`, `WireStep` and `UpstreamStep`. A fault is an object: `type` names it, after its function in snake case, and its other keys are its parameters, by name. Durations are whole milliseconds or a Go duration, such as `1.5s`. A parameter with a default can be left out.
+`pipes`, `wire_pipes` and `upstream_pipes` list faults for `Pipe`, `WirePipe` and `UpstreamPipe`. A fault is an object: `type` names it, after its function in snake case, and its other keys are its parameters, by name. Durations are whole milliseconds or a Go duration, such as `1.5s`. A parameter with a default can be left out.
 
 | `type` | Parameters |
 |---|---|
@@ -51,17 +51,17 @@ request:
 response:
   status: 200
   body_file: report.csv
-steps:
+pipes:
   - type: bandwidth
     rate: 3g
   - type: connection_reset_by_peer_after
     after: 5s
-wire_steps:
+wire_pipes:
   - type: latency
     latency: 300ms
     jitter: 60ms
 ```
 
-A fault with a missing parameter, a key it doesn't take, or a value its function refuses fails the file, with each problem at its key, such as `steps[1].after`. `faultbuild.Build`, of package `fault/faultbuild`, builds a fault from its object in Go.
+A fault with a missing parameter, a key it doesn't take, or a value its function refuses fails the file, with each problem at its key, such as `pipes[1].after`. `faultbuild.Build`, of package `fault/faultbuild`, builds a fault from its object in Go.
 
-A mock describes its faults the same way, so the admin API shows them and its store keeps them. A step of your own, such as a `vlatte.StepFunc`, isn't in the description.
+A mock describes its faults the same way, so the admin API shows them and its store keeps them. A pipe of your own, such as a `vlatte.PipeFunc`, isn't in the description.

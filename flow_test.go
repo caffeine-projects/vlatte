@@ -24,20 +24,20 @@ var (
 	_ Stage = (*timedSink)(nil)
 	_ Stage = failStage{}
 	_ Stage = lateStage{}
-	_ Step  = lateStep{}
-	_ Step  = (*TestStep)(nil)
-	_ Step  = countStep{}
-	_ Step  = logStep{}
-	_ Step  = holdStep{}
-	_ Step  = shiftStep{}
-	_ Step  = abortAfter{}
+	_ Pipe  = latePipe{}
+	_ Pipe  = (*TestPipe)(nil)
+	_ Pipe  = countPipe{}
+	_ Pipe  = logPipe{}
+	_ Pipe  = holdPipe{}
+	_ Pipe  = shiftPipe{}
+	_ Pipe  = abortAfter{}
 )
 
-// TestStep appends "--" and its text to every buffer it passes on.
-type TestStep struct{ txt string }
+// TestPipe appends "--" and its text to every buffer it passes on.
+type TestPipe struct{ txt string }
 
-func (in *TestStep) Open(flow *Flow, next Stage) Stage {
-	return StepFunc(func(_ context.Context, p []byte, next Stage) (int, error) {
+func (in *TestPipe) Open(flow *Flow, next Stage) Stage {
+	return PipeFunc(func(_ context.Context, p []byte, next Stage) (int, error) {
 		if _, err := next.Write(append(p, []byte("--"+in.txt)...)); err != nil {
 			return 0, err
 		}
@@ -59,9 +59,9 @@ func TestFlow(t *testing.T) {
 	ctx := context.Background()
 	data := []byte("init")
 	expected := []byte("init--hello--world!")
-	step1 := &TestStep{"hello"}
-	step2 := &TestStep{"world"}
-	step3 := StepFunc(func(_ context.Context, p []byte, next Stage) (n int, err error) {
+	pipe1 := &TestPipe{"hello"}
+	pipe2 := &TestPipe{"world"}
+	pipe3 := PipeFunc(func(_ context.Context, p []byte, next Stage) (n int, err error) {
 		if _, err := next.Write(append(p, []byte("!")...)); err != nil {
 			return 0, err
 		}
@@ -71,7 +71,7 @@ func TestFlow(t *testing.T) {
 
 	w := &TestWriter{}
 	w.On("Write", expected).Return(len(expected), nil)
-	flow := NewFlow(ctx, &Sink{w}, []Step{step1, step2, step3})
+	flow := NewFlow(ctx, &Sink{w}, []Pipe{pipe1, pipe2, pipe3})
 
 	n, err := flow.Write(data)
 
@@ -80,15 +80,15 @@ func TestFlow(t *testing.T) {
 	require.True(t, w.AssertCalled(t, "Write", expected))
 }
 
-func TestFlow_LeavesTheStepsAlone(t *testing.T) {
-	// D1: a mock's steps are shared by its requests. Flow appended its sink to them, so with spare capacity a second
+func TestFlow_LeavesThePipesAlone(t *testing.T) {
+	// D1: a mock's pipes are shared by its requests. Flow appended its sink to them, so with spare capacity a second
 	// pipeline's sink replaced the first one's, and one request wrote into another's response.
-	steps := make([]Step, 1, 2)
-	steps[0] = StepFunc(passOn)
+	pipes := make([]Pipe, 1, 2)
+	pipes[0] = PipeFunc(passOn)
 
 	var first, second bytes.Buffer
-	a := NewFlow(t.Context(), &Sink{W: &first}, steps)
-	b := NewFlow(t.Context(), &Sink{W: &second}, steps)
+	a := NewFlow(t.Context(), &Sink{W: &first}, pipes)
+	b := NewFlow(t.Context(), &Sink{W: &second}, pipes)
 
 	_, err := a.Write([]byte("a"))
 	require.NoError(t, err)
@@ -101,10 +101,10 @@ func TestFlow_LeavesTheStepsAlone(t *testing.T) {
 
 func passOn(_ context.Context, b []byte, next Stage) (int, error) { return next.Write(b) }
 
-// sliceStep passes its buffer on in parts of size bytes, as fault.Slicer does. It slices the buffer without
-// clipping the parts, as a hand-written step may.
-func sliceStep(size int) Step {
-	return StepFunc(func(_ context.Context, p []byte, next Stage) (int, error) {
+// slicePipe passes its buffer on in parts of size bytes, as fault.Slicer does. It slices the buffer without
+// clipping the parts, as a hand-written pipe may.
+func slicePipe(size int) Pipe {
+	return PipeFunc(func(_ context.Context, p []byte, next Stage) (int, error) {
 		for i := 0; i < len(p); i += size {
 			if _, err := next.Write(p[i:min(i+size, len(p))]); err != nil {
 				return i, err
@@ -127,25 +127,25 @@ func (s *partsSink) Flush() error { return nil }
 
 func (s *partsSink) Close() error { return nil }
 
-func TestFlow_AStepCanPassItsBufferInParts(t *testing.T) {
+func TestFlow_APipeCanPassItsBufferInParts(t *testing.T) {
 	// fault.Slicer and fault.Bandwidth pass one buffer on in parts. The flow kept one position for all its calls, so
 	// once the first part reached the sink, the second got io.EOF.
 	sink := &partsSink{}
 
-	n, err := NewFlow(t.Context(), sink, []Step{sliceStep(2)}).Write([]byte("abcde"))
+	n, err := NewFlow(t.Context(), sink, []Pipe{slicePipe(2)}).Write([]byte("abcde"))
 
 	require.NoError(t, err)
 	require.Equal(t, 5, n)
 	require.Equal(t, []string{"ab", "cd", "e"}, sink.parts)
 }
 
-func TestFlow_AStepThatDropsEverythingDropsEveryPart(t *testing.T) {
-	// A step that passes nothing on, as fault.Timeout does, drops every part a step before it passes. The flow
-	// resumed a part from the step after the last one that ran, so the second part got past the drop.
-	drop := StepFunc(func(_ context.Context, p []byte, _ Stage) (int, error) { return len(p), nil })
+func TestFlow_APipeThatDropsEverythingDropsEveryPart(t *testing.T) {
+	// A pipe that passes nothing on, as fault.Timeout does, drops every part a pipe before it passes. The flow
+	// resumed a part from the pipe after the last one that ran, so the second part got past the drop.
+	drop := PipeFunc(func(_ context.Context, p []byte, _ Stage) (int, error) { return len(p), nil })
 
 	var out bytes.Buffer
-	n, err := NewFlow(t.Context(), &Sink{W: &out}, []Step{sliceStep(2), drop}).Write([]byte("abcd"))
+	n, err := NewFlow(t.Context(), &Sink{W: &out}, []Pipe{slicePipe(2), drop}).Write([]byte("abcd"))
 
 	require.NoError(t, err)
 	require.Equal(t, 4, n)
@@ -153,27 +153,27 @@ func TestFlow_AStepThatDropsEverythingDropsEveryPart(t *testing.T) {
 }
 
 func TestFlow_AppendingToAPartLeavesTheNextPartAlone(t *testing.T) {
-	// A part shares its array with the parts after it. A step that appended to a part would write over the next one
+	// A part shares its array with the parts after it. A pipe that appended to a part would write over the next one
 	// before it was passed on.
 	b := make([]byte, 4, 16)
 	copy(b, "abcd")
 	sink := &partsSink{}
 
-	_, err := NewFlow(t.Context(), sink, []Step{sliceStep(2), &TestStep{"x"}}).Write(b)
+	_, err := NewFlow(t.Context(), sink, []Pipe{slicePipe(2), &TestPipe{"x"}}).Write(b)
 
 	require.NoError(t, err)
 	require.Equal(t, []string{"ab--x", "cd--x"}, sink.parts)
 	require.Equal(t, "abcd", string(b[:4]))
 }
 
-func TestFlow_AStepThatFailsStopsTheFlow(t *testing.T) {
-	// A step that fails fails the write: its error goes back through the steps before it, and the steps after it and
+func TestFlow_APipeThatFailsStopsTheFlow(t *testing.T) {
+	// A pipe that fails fails the write: its error goes back through the pipes before it, and the pipes after it and
 	// the sink get nothing.
-	errFailed := errors.New("step: failed")
-	fail := StepFunc(func(context.Context, []byte, Stage) (int, error) { return 0, errFailed })
+	errFailed := errors.New("pipe: failed")
+	fail := PipeFunc(func(context.Context, []byte, Stage) (int, error) { return 0, errFailed })
 
 	var out bytes.Buffer
-	flow := NewFlow(t.Context(), &Sink{W: &out}, []Step{&TestStep{"before"}, fail, &TestStep{"after"}})
+	flow := NewFlow(t.Context(), &Sink{W: &out}, []Pipe{&TestPipe{"before"}, fail, &TestPipe{"after"}})
 	n, err := flow.Write([]byte("a"))
 
 	require.ErrorIs(t, err, errFailed)
@@ -186,17 +186,17 @@ func TestFlow_AStepThatFailsStopsTheFlow(t *testing.T) {
 
 type ctxKey struct{}
 
-func TestFlow_EveryStepGetsTheContextOfTheFlow(t *testing.T) {
-	// A step stops when the client leaves, as fault.Timeout must, through the context the flow was given.
+func TestFlow_EveryPipeGetsTheContextOfTheFlow(t *testing.T) {
+	// A pipe stops when the client leaves, as fault.Timeout must, through the context the flow was given.
 	ctx := context.WithValue(t.Context(), ctxKey{}, "request")
 
 	var got []any
-	record := StepFunc(func(ctx context.Context, p []byte, next Stage) (int, error) {
+	record := PipeFunc(func(ctx context.Context, p []byte, next Stage) (int, error) {
 		got = append(got, ctx.Value(ctxKey{}))
 		return next.Write(p)
 	})
 
-	_, err := NewFlow(ctx, &partsSink{}, []Step{record, record}).Write([]byte("a"))
+	_, err := NewFlow(ctx, &partsSink{}, []Pipe{record, record}).Write([]byte("a"))
 
 	require.NoError(t, err)
 	require.Equal(t, []any{"request", "request"}, got)
@@ -249,10 +249,10 @@ func TestSink_FlushFlushesAWriterThatCan(t *testing.T) {
 	require.Equal(t, "a", out.String())
 }
 
-// countStep counts the bytes its stage passed, in that stage, and sends the count at the end.
-type countStep struct{ counts chan<- int }
+// countPipe counts the bytes its stage passed, in that stage, and sends the count at the end.
+type countPipe struct{ counts chan<- int }
 
-func (s countStep) Open(_ *Flow, next Stage) Stage {
+func (s countPipe) Open(_ *Flow, next Stage) Stage {
 	return &countStage{counts: s.counts, next: next}
 }
 
@@ -274,13 +274,13 @@ func (s *countStage) Close() error {
 	return s.next.Close()
 }
 
-func TestFlow_EachFlowHasItsOwnStageOfAStep(t *testing.T) {
-	// A limit on the bytes of a response counts that response's only, though the mock's steps serve all of them.
+func TestFlow_EachFlowHasItsOwnStageOfAPipe(t *testing.T) {
+	// A limit on the bytes of a response counts that response's only, though the mock's pipes serve all of them.
 	counts := make(chan int, 2)
-	step := countStep{counts: counts}
+	pipe := countPipe{counts: counts}
 
-	a := NewFlow(t.Context(), &partsSink{}, []Step{step})
-	b := NewFlow(t.Context(), &partsSink{}, []Step{step})
+	a := NewFlow(t.Context(), &partsSink{}, []Pipe{pipe})
+	b := NewFlow(t.Context(), &partsSink{}, []Pipe{pipe})
 
 	_, err := a.Write([]byte("aaa"))
 	require.NoError(t, err)
@@ -293,13 +293,13 @@ func TestFlow_EachFlowHasItsOwnStageOfAStep(t *testing.T) {
 	require.Equal(t, 1, <-counts)
 }
 
-// logStep logs each call its stage gets, by name, before it passes the call on.
-type logStep struct {
+// logPipe logs each call its stage gets, by name, before it passes the call on.
+type logPipe struct {
 	name string
 	log  *[]string
 }
 
-func (s logStep) Open(_ *Flow, next Stage) Stage {
+func (s logPipe) Open(_ *Flow, next Stage) Stage {
 	return &logStage{name: s.name, log: s.log, next: next}
 }
 
@@ -328,8 +328,8 @@ func TestFlow_FlushAndCloseReachEveryStageThenTheSink(t *testing.T) {
 	// A flush of a stream reaches the client only once every stage passed it on, and so does its end.
 	var log []string
 	sink := &logStage{name: "sink", log: &log, next: &partsSink{}}
-	steps := []Step{logStep{name: "a", log: &log}, StepFunc(passOn), logStep{name: "b", log: &log}}
-	flow := NewFlow(t.Context(), sink, steps)
+	pipes := []Pipe{logPipe{name: "a", log: &log}, PipeFunc(passOn), logPipe{name: "b", log: &log}}
+	flow := NewFlow(t.Context(), sink, pipes)
 
 	_, err := flow.Write([]byte("x"))
 	require.NoError(t, err)
@@ -343,11 +343,11 @@ func TestFlow_FlushAndCloseReachEveryStageThenTheSink(t *testing.T) {
 	}, log)
 }
 
-// holdStep holds what its stage gets until a flush or the end, as a stage that sends a body in parts of its own
+// holdPipe holds what its stage gets until a flush or the end, as a stage that sends a body in parts of its own
 // does.
-type holdStep struct{}
+type holdPipe struct{}
 
-func (holdStep) Open(_ *Flow, next Stage) Stage { return &holdStage{next: next} }
+func (holdPipe) Open(_ *Flow, next Stage) Stage { return &holdStage{next: next} }
 
 type holdStage struct {
 	held []byte
@@ -390,7 +390,7 @@ func TestFlow_WhatAStageHoldsGoesOnAtAFlushAndAtTheEnd(t *testing.T) {
 	// The end of a body is an event of its own: a stage that holds bytes, such as one that sends a body in timed
 	// parts, still gets to send them.
 	sink := &partsSink{}
-	flow := NewFlow(t.Context(), sink, []Step{holdStep{}})
+	flow := NewFlow(t.Context(), sink, []Pipe{holdPipe{}})
 
 	_, err := flow.Write([]byte("a"))
 	require.NoError(t, err)
@@ -416,7 +416,7 @@ func TestFlow_WhatAStageHoldsGoesOnAtAFlushAndAtTheEnd(t *testing.T) {
 func TestFlow_AbortEndsTheFlowWithItsCause(t *testing.T) {
 	// A stage's timer aborts the flow from another goroutine: the reply that waits on the flow's context stops, and
 	// the server knows to cut the connection, or to reset it.
-	errIdle := errors.New("step: idle")
+	errIdle := errors.New("pipe: idle")
 
 	tests := []struct {
 		name  string
@@ -451,7 +451,7 @@ func TestFlow_AbortEndsTheFlowWithItsCause(t *testing.T) {
 			require.Empty(t, sink.parts)
 
 			// The first end wins.
-			flow.Abort(errors.New("step: later"))
+			flow.Abort(errors.New("pipe: later"))
 			require.NoError(t, flow.Close())
 			require.Equal(t, cause, context.Cause(flow.Context()))
 		})
@@ -492,10 +492,10 @@ func TestFlow_AStageThatReturnsAnAbortAbortsTheFlow(t *testing.T) {
 	}
 }
 
-// lateStep passes something on at its end, whatever happened before, as a stage that ignores the end of its flow does.
-type lateStep struct{}
+// latePipe passes something on at its end, whatever happened before, as a stage that ignores the end of its flow does.
+type latePipe struct{}
 
-func (lateStep) Open(_ *Flow, next Stage) Stage { return lateStage{next: next} }
+func (latePipe) Open(_ *Flow, next Stage) Stage { return lateStage{next: next} }
 
 type lateStage struct{ next Stage }
 
@@ -515,7 +515,7 @@ func TestFlow_NothingReachesTheSinkOnceTheFlowEnded(t *testing.T) {
 	// the cut, such as a second answer on a connection that was cut.
 	var log []string
 	sink := &logStage{name: "sink", log: &log, next: &partsSink{}}
-	flow := NewFlow(t.Context(), sink, []Step{lateStep{}})
+	flow := NewFlow(t.Context(), sink, []Pipe{latePipe{}})
 
 	flow.Abort(nil)
 
@@ -550,10 +550,10 @@ func (a abortAfter) Open(flow *Flow, next Stage) Stage {
 func TestFlow_AStageCanAbortTheFlowOnATimer(t *testing.T) {
 	// A reply waiting for its target writes nothing, so a stage that only ran on writes couldn't time it out.
 	synctest.Test(t, func(t *testing.T) {
-		errIdle := errors.New("step: idle")
+		errIdle := errors.New("pipe: idle")
 		start := time.Now()
 
-		flow := NewFlow(t.Context(), &partsSink{}, []Step{abortAfter{d: time.Second, err: errIdle}})
+		flow := NewFlow(t.Context(), &partsSink{}, []Pipe{abortAfter{d: time.Second, err: errIdle}})
 		<-flow.Context().Done()
 
 		require.Equal(t, time.Second, time.Since(start))
@@ -562,11 +562,11 @@ func TestFlow_AStageCanAbortTheFlowOnATimer(t *testing.T) {
 	})
 }
 
-// shiftStep passes every write on d after it came, from a goroutine of its stage, as fault.Latency does: the writer
+// shiftPipe passes every write on d after it came, from a goroutine of its stage, as fault.Latency does: the writer
 // goes on meanwhile, so the whole stream is shifted by d, not slowed down.
-type shiftStep struct{ d time.Duration }
+type shiftPipe struct{ d time.Duration }
 
-func (s shiftStep) Open(flow *Flow, next Stage) Stage {
+func (s shiftPipe) Open(flow *Flow, next Stage) Stage {
 	st := &shiftStage{
 		ctx:   flow.Context(),
 		d:     s.d,
@@ -663,7 +663,7 @@ func TestFlow_AStageCanShiftAStreamInTime(t *testing.T) {
 	// blocked each write for d instead would have the second part arrive 2d after the first was sent.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &timedSink{start: time.Now()}
-		flow := NewFlow(t.Context(), sink, []Step{shiftStep{d: 200 * time.Millisecond}})
+		flow := NewFlow(t.Context(), sink, []Pipe{shiftPipe{d: 200 * time.Millisecond}})
 
 		_, err := flow.Write([]byte("a"))
 		require.NoError(t, err)

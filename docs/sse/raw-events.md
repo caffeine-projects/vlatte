@@ -38,7 +38,7 @@ A client that follows the standard dispatches three events, `bom`, `no space` of
 
 ## Cut connections and other faults
 
-[Steps](/http/steps) and [faults](/http/faults) apply to a stream as to any body, after the stream renders it:
+[Pipes](/http/pipes) and [faults](/http/faults) apply to a stream as to any body, after the stream renders it:
 
 | Fault | Tests a client against |
 |---|---|
