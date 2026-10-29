@@ -29,4 +29,4 @@ The target's TLS certificate is verified: a recording sends the target its reque
 
 ## Admin API
 
-The [admin API](/run/admin-api) starts and stops recordings while the server runs: `POST /recording` takes the keys of the `record` section, `GET /recording` counts the calls, and `DELETE /recording` stops it and lists the files it wrote. Its `/recorder` page does the same from a browser.
+The [admin API](/admin-api/) starts and stops recordings while the server runs: `POST /recording` takes the keys of the `record` section, `GET /recording` counts the calls, and `DELETE /recording` stops it and lists the files it wrote. Its `/recorder` page does the same from a browser.

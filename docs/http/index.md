@@ -44,4 +44,4 @@ func TestHello(t *testing.T) {
 - [TLS](/http/tls) and [CORS](/http/cors).
 - [Troubleshooting](/http/troubleshooting): failures, near misses and debug headers.
 
-What HTTP shares with gRPC, such as [matchers](/matchers/), [scenarios](/features/scenarios), [templates](/features/templates), [webhooks](/features/webhooks-events) and the [journal](/features/journal), works the same for both: see [Matchers](/matchers/) and [Features](/features/).
+What HTTP shares with gRPC, such as [matchers](/matchers/), [scenarios](/scenarios/), [templates](/templating/), [webhooks](/webhooks/) and the [journal](/more/journal), works the same for both: each has a section of its own in the sidebar.

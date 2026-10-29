@@ -1,6 +1,6 @@
 # Matchers
 
-The `match` package holds the matchers every protocol shares. A mock's builder methods, such as `Header`, `Query` or `Field`, take one for the part of the request they read; [request journal](/features/journal) queries take them too.
+The `match` package holds the matchers every protocol shares. A mock's builder methods, such as `Header`, `Query` or `Field`, take one for the part of the request they read; [request journal](/more/journal) queries take them too.
 
 ```go
 mockhttp.Getf("/users").Query("page", match.GreaterThan(0))

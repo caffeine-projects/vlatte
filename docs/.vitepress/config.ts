@@ -19,6 +19,27 @@ const sidebar: DefaultTheme.SidebarItem[] = [
     ],
   },
   {
+    text: 'Reference',
+    collapsed: true,
+    items: [
+      { text: 'Overview', link: '/reference/' },
+      { text: 'Go API', link: '/reference/go-api' },
+      { text: 'Mock file schemas', link: '/reference/schemas' },
+      { text: 'Admin API (OpenAPI)', link: '/reference/admin-api.html', target: '_self' },
+      { text: 'Settings', link: '/reference/settings' },
+    ],
+  },
+  {
+    text: 'Run',
+    collapsed: true,
+    items: [
+      { text: 'Overview', link: '/run/' },
+      { text: 'CLI', link: '/run/cli' },
+      { text: 'Configuration', link: '/run/configuration' },
+      { text: 'Docker', link: '/run/docker' },
+    ],
+  },
+  {
     text: 'Guides',
     collapsed: true,
     items: [
@@ -32,6 +53,15 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Docker Compose', link: '/guides/docker-compose' },
       { text: 'Testing webhooks', link: '/guides/webhooks' },
       { text: 'HTTPS and mTLS mocks', link: '/guides/https-mtls' },
+    ],
+  },
+  {
+    text: 'MCP',
+    collapsed: true,
+    items: [
+      { text: 'Overview', link: '/mcp/' },
+      { text: 'Setup', link: '/mcp/setup' },
+      { text: 'Tools', link: '/mcp/tools' },
     ],
   },
   {
@@ -85,6 +115,21 @@ const sidebar: DefaultTheme.SidebarItem[] = [
     ],
   },
   {
+    text: 'Templating',
+    collapsed: true,
+    items: [
+      { text: 'Overview', link: '/templating/' },
+    ],
+  },
+  {
+    text: 'Scenarios',
+    collapsed: true,
+    items: [
+      { text: 'Overview', link: '/scenarios/' },
+      { text: 'Stateful flows', link: '/guides/stateful-flows' },
+    ],
+  },
+  {
     text: 'Recording',
     collapsed: true,
     items: [
@@ -93,20 +138,6 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'gRPC', link: '/recording/grpc' },
       { text: 'CLI, settings and admin API', link: '/recording/cli-admin' },
       { text: 'Files and secrets', link: '/recording/files-secrets' },
-    ],
-  },
-  {
-    text: 'Features',
-    collapsed: true,
-    items: [
-      { text: 'Overview', link: '/features/' },
-      { text: 'Scenarios', link: '/features/scenarios' },
-      { text: 'Mock lifecycle', link: '/features/mock-lifecycle' },
-      { text: 'Templates', link: '/features/templates' },
-      { text: 'Webhooks and events', link: '/features/webhooks-events' },
-      { text: 'Request journal', link: '/features/journal' },
-      { text: 'Verifying requests', link: '/verify/' },
-      { text: 'TLS', link: '/features/tls' },
     ],
   },
   {
@@ -123,6 +154,32 @@ const sidebar: DefaultTheme.SidebarItem[] = [
     ],
   },
   {
+    text: 'Webhooks and events',
+    collapsed: true,
+    items: [
+      { text: 'Overview', link: '/webhooks/' },
+      { text: 'Testing webhooks', link: '/guides/webhooks' },
+    ],
+  },
+  {
+    text: 'TLS',
+    collapsed: true,
+    items: [
+      { text: 'Overview', link: '/tls/' },
+      { text: 'HTTP', link: '/http/tls' },
+      { text: 'gRPC', link: '/grpc/tls' },
+      { text: 'HTTPS and mTLS', link: '/guides/https-mtls' },
+    ],
+  },
+  {
+    text: 'Admin API',
+    collapsed: true,
+    items: [
+      { text: 'Overview', link: '/admin-api/' },
+      { text: 'OpenAPI reference', link: '/reference/admin-api.html', target: '_self' },
+    ],
+  },
+  {
     text: 'Recipes',
     collapsed: true,
     items: [
@@ -133,26 +190,12 @@ const sidebar: DefaultTheme.SidebarItem[] = [
     ],
   },
   {
-    text: 'Run',
+    text: 'More',
     collapsed: true,
     items: [
-      { text: 'Overview', link: '/run/' },
-      { text: 'CLI', link: '/run/cli' },
-      { text: 'Configuration', link: '/run/configuration' },
-      { text: 'Docker', link: '/run/docker' },
-      { text: 'Admin API', link: '/run/admin-api' },
-      { text: 'MCP', link: '/run/mcp' },
-    ],
-  },
-  {
-    text: 'Reference',
-    collapsed: true,
-    items: [
-      { text: 'Overview', link: '/reference/' },
-      { text: 'Go API', link: '/reference/go-api' },
-      { text: 'Mock file schemas', link: '/reference/schemas' },
-      { text: 'Admin API (OpenAPI)', link: '/reference/admin-api.html', target: '_self' },
-      { text: 'Settings', link: '/reference/settings' },
+      { text: 'Overview', link: '/more/' },
+      { text: 'Mock lifecycle', link: '/more/mock-lifecycle' },
+      { text: 'Request journal', link: '/more/journal' },
     ],
   },
   { text: 'Contributing', link: '/contributing' },

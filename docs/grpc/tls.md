@@ -12,4 +12,4 @@ client := pb.NewUsersClient(m.MustDial())
 
 `m.Certificate()` returns the certificate for clients of your own to trust. Credentials `ServerOptions` set with `grpc.Creds` win over these: `StartTLS` then serves them as `Start` does, `m.Certificate()` returns `nil`, and `m.Dial()` needs `grpc.WithTransportCredentials`.
 
-Certificates of your own, mutual TLS and the CLI's `--grpc-tls` are on the [TLS](/features/tls) page, for HTTP and gRPC alike.
+Certificates of your own, mutual TLS and the CLI's `--grpc-tls` are on the [TLS](/tls/) page, for HTTP and gRPC alike.

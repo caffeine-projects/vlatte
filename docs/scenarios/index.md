@@ -61,10 +61,10 @@ scenario: {name: checkout, required_state: started, new_state: paid, key: '{{ .R
 
 In Go, `m.Scenarios(ctx)` lists each scenario with its state, the states of its keyed instances that moved, the states its mocks name, flagging those no path of mock moves reaches from `started`, and which mock moves it where. `m.SetScenario(ctx, name, state)` moves a scenario, and refuses a state none of its mocks names with `matchscenario.ErrUnknownState`; a scenario no mock names takes any state. `m.ResetScenario(name)` starts every instance of a scenario over, and `m.ResetScenarios()` every scenario. `matchscenario.Key("t1")`, as the last argument of `SetScenario` and `ResetScenario`, picks the instance of a key.
 
-In the [admin API](/run/admin-api), `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios/{name}` and `DELETE /scenarios` do the same, and `?key=t1` picks the instance of a key. Its `/scenario-board` page does it from a browser: it shows where each scenario and each of its keys is, flags the states no path of mock moves reaches from `started`, moves a scenario with a click, and follows the moves as requests make them.
+In the [admin API](/admin-api/), `GET /scenarios`, `PUT /scenarios/{name}`, `DELETE /scenarios/{name}` and `DELETE /scenarios` do the same, and `?key=t1` picks the instance of a key. Its `/scenario-board` page does it from a browser: it shows where each scenario and each of its keys is, flags the states no path of mock moves reaches from `started`, moves a scenario with a click, and follows the moves as requests make them.
 
 ## In templates, near misses and the journal
 
 - A request no mock matched names the scenario a mock waits on: `differs in scenario order needs created, is started`.
 - Templates read a scenario's state, the one its mock moved it to: `{{ .Scenarios.State "checkout" }}`, and the state of a key: `{{ .Scenarios.StateOf "checkout" (.Request.Header.Get "X-Test-Id") }}`. One mock can then answer in every state.
-- The [journal](/features/journal) keeps the moves of each request's mock under `scenarios`, and [`GET /events`](/run/admin-api) streams a `scenario` event for each move, by a request or by the methods and admin API above, in the order the moves happened.
+- The [journal](/more/journal) keeps the moves of each request's mock under `scenarios`, and [`GET /events`](/admin-api/) streams a `scenario` event for each move, by a request or by the methods and admin API above, in the order the moves happened.

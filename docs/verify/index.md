@@ -1,6 +1,6 @@
 # Verifying requests
 
-A test checks what the code under test sent: which requests came, how many, by when, and in what order. A server with a [journal](/features/journal) keeps every request it gets, whatever answered it, and `m.VerifyRequests()` selects and counts them, on HTTP and gRPC servers alike. A failed check says why: the requests it selected and, when it wanted more, those that came closest, with the parts each one missed.
+A test checks what the code under test sent: which requests came, how many, by when, and in what order. A server with a [journal](/more/journal) keeps every request it gets, whatever answered it, and `m.VerifyRequests()` selects and counts them, on HTTP and gRPC servers alike. A failed check says why: the requests it selected and, when it wanted more, those that came closest, with the parts each one missed.
 
 ::: code-group
 
@@ -55,4 +55,4 @@ A check never passes on part of the requests: one whose requests the journal dro
 | [Admin API and MCP](/verify/admin-api) | The same checks for a client in any language, or an AI agent. |
 | [Troubleshooting](/verify/troubleshooting) | The errors of a check that can't run, and what to do about each. |
 
-The [Request journal](/features/journal) page covers the journal itself: what each entry holds, where it is kept, and its limits.
+The [Request journal](/more/journal) page covers the journal itself: what each entry holds, where it is kept, and its limits.

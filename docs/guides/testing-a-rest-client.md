@@ -142,7 +142,7 @@ func TestCreateUserSendsTheName(t *testing.T) {
 
 ## What you used
 
-- `mockhttp.MustNew`, `Setup().Journal`, `Setup().Silent`: [HTTP](/http/), [Request journal](/features/journal).
+- `mockhttp.MustNew`, `Setup().Journal`, `Setup().Silent`: [HTTP](/http/), [Request journal](/more/journal).
 - `VerifyRequests`, `Times`, `Never`: [Verifying requests](/verify/).
 - `Getf`, `Postf`, `Header`: [Mocks](/http/mocks), [Request matching](/http/matching).
 - `OK().JSON`, `NotFound`, `Created`: [Replies](/http/replies).

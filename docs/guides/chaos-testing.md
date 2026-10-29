@@ -1,6 +1,6 @@
 # Chaos testing
 
-This guide checks that a client retries a failing server, survives a reset connection, and gives up on a slow one. It uses [sequences](/http/replies#sequences), [faults](/http/faults) and [priorities](/features/mock-lifecycle).
+This guide checks that a client retries a failing server, survives a reset connection, and gives up on a slow one. It uses [sequences](/http/replies#sequences), [faults](/http/faults) and [priorities](/more/mock-lifecycle).
 
 ## The client
 
@@ -133,4 +133,4 @@ wire_steps:
 
 - `Seq`, `OnSequenceEnded`: [Replies](/http/replies#sequences).
 - `WireStep`, `fault.ConnectionResetByPeer`, `fault.Latency`: [Steps](/http/steps), [Faults](/http/faults).
-- `Once`, `Priority`, `AssertNumberOfCalls`: [Mock lifecycle](/features/mock-lifecycle), [Mocks](/http/mocks#asserting).
+- `Once`, `Priority`, `AssertNumberOfCalls`: [Mock lifecycle](/more/mock-lifecycle), [Mocks](/http/mocks#asserting).

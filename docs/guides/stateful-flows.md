@@ -1,6 +1,6 @@
 # Stateful flows
 
-This guide mocks a cart and checkout flow, where an answer depends on what came before, and runs its tests in parallel against one server. It uses [scenarios](/features/scenarios), scenario keys, [priorities](/features/mock-lifecycle) and [templates](/features/templates).
+This guide mocks a cart and checkout flow, where an answer depends on what came before, and runs its tests in parallel against one server. It uses [scenarios](/scenarios/), scenario keys, [priorities](/more/mock-lifecycle) and [templates](/templating/).
 
 ## The flow
 
@@ -111,6 +111,6 @@ response: {status: 200, body: {order: 1}}
 
 ## What you used
 
-- `StartScenario`, `ScenarioIs`, `ScenarioStateIs`, `ScenarioStateWillBe`, `ScenarioKey`: [Scenarios](/features/scenarios).
-- `Priority`: [Mock lifecycle](/features/mock-lifecycle).
-- `BodyTemplate`, `.Scenarios.StateOf`: [Templates](/features/templates).
+- `StartScenario`, `ScenarioIs`, `ScenarioStateIs`, `ScenarioStateWillBe`, `ScenarioKey`: [Scenarios](/scenarios/).
+- `Priority`: [Mock lifecycle](/more/mock-lifecycle).
+- `BodyTemplate`, `.Scenarios.StateOf`: [Templates](/templating/).

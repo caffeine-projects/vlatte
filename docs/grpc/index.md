@@ -25,13 +25,13 @@ func TestGreeter(t *testing.T) {
 
 ## Mock features
 
-As HTTP mocks, gRPC mocks have an `ID`, a `Name` and a `Priority`, can start `Enabled(false)`, serve a number of calls with `Times` and `Once`, take part in [scenarios](/features/scenarios) with `StartScenario`, `ScenarioIs`, `ScenarioStateIs`, `ScenarioStateWillBe` and `ScenarioKey`, wait before replying with `Delay` and `DelayFunc`, and run [on_complete events](/features/webhooks-events), such as webhooks, with `OnCompleteEvent`, and callbacks with `Callback`. An answer with a status counts as the mock's answer, for `Times` too. A scenario moves when its mock is picked to answer, before it answers.
+As HTTP mocks, gRPC mocks have an `ID`, a `Name` and a `Priority`, can start `Enabled(false)`, serve a number of calls with `Times` and `Once`, take part in [scenarios](/scenarios/) with `StartScenario`, `ScenarioIs`, `ScenarioStateIs`, `ScenarioStateWillBe` and `ScenarioKey`, wait before replying with `Delay` and `DelayFunc`, and run [on_complete events](/webhooks/), such as webhooks, with `OnCompleteEvent`, and callbacks with `Callback`. An answer with a status counts as the mock's answer, for `Times` too. A scenario moves when its mock is picked to answer, before it answers.
 
-See [Mock lifecycle](/features/mock-lifecycle), [Scenarios](/features/scenarios) and [Webhooks and events](/features/webhooks-events).
+See [Mock lifecycle](/more/mock-lifecycle), [Scenarios](/scenarios/) and [Webhooks and events](/webhooks/).
 
 ## The server
 
-A gRPC server keeps a [journal](/features/journal#in-grpc) of its calls with `Setup().Journal(dir)`, which tests [verify](/verify/) as HTTP tests do, serves an [admin API](/run/admin-api) with `Setup().Admin(admin.MustNew())`, whose mocks `Setup().AdminStore(mockgrpc.FileStore(dir))` [keeps](/run/admin-api#persistent-admin-mocks) across restarts, and answers a call no mock matched with `Setup().NoMatchCode(code)`, `NotFound` by default. `Setup().ServerOptions(...)` passes options to the `grpc.Server`, such as interceptors.
+A gRPC server keeps a [journal](/more/journal#in-grpc) of its calls with `Setup().Journal(dir)`, which tests [verify](/verify/) as HTTP tests do, serves an [admin API](/admin-api/) with `Setup().Admin(admin.MustNew())`, whose mocks `Setup().AdminStore(mockgrpc.FileStore(dir))` [keeps](/admin-api/#persistent-admin-mocks) across restarts, and answers a call no mock matched with `Setup().NoMatchCode(code)`, `NotFound` by default. `Setup().ServerOptions(...)` passes options to the `grpc.Server`, such as interceptors.
 
 ## In this section
 
@@ -46,4 +46,4 @@ A gRPC server keeps a [journal](/features/journal#in-grpc) of its calls with `Se
 - [TLS](/grpc/tls).
 - [Troubleshooting](/grpc/troubleshooting): no-match codes, trailers and debug metadata.
 
-What gRPC shares with HTTP, such as [matchers](/matchers/), [scenarios](/features/scenarios), [templates](/features/templates#in-grpc), [webhooks](/features/webhooks-events#in-grpc) and the [journal](/features/journal#in-grpc), works the same for both: see [Matchers](/matchers/) and [Features](/features/).
+What gRPC shares with HTTP, such as [matchers](/matchers/), [scenarios](/scenarios/), [templates](/templating/#in-grpc), [webhooks](/webhooks/#in-grpc) and the [journal](/more/journal#in-grpc), works the same for both: each has a section of its own in the sidebar.

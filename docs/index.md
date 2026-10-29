@@ -18,11 +18,11 @@ import HomeStats from './.vitepress/theme/components/home/HomeStats.vue'
 const strengths = [
   { title: 'HTTP and gRPC', badge: 'unary to bidi', text: 'Real servers in your tests. gRPC needs no service implementation: any method, any call type.', link: '/getting-started/concepts' },
   { title: 'Matchers', badge: 'JSONPath · XPath · Schema', text: 'Match the method, path, headers, query, forms, files and body, with the same matchers on both protocols.', link: '/matchers/' },
-  { title: 'Templated replies', badge: 'Go templates', text: 'Build headers and bodies from the request, with functions for JSON, strings, time and hashes.', link: '/features/templates' },
+  { title: 'Templated replies', badge: 'Go templates', text: 'Build headers and bodies from the request, with functions for JSON, strings, time and hashes.', link: '/templating/' },
   { title: 'Record and replay', badge: 'no API needed', text: 'Proxy a real service once, save what passes through as mock files, and play it back without it.', link: '/recording/' },
   { title: 'Faults', badge: 'resets · latency', text: 'See how clients cope with slow networks, dribbled bodies, resets, garbage and timeouts.', link: '/http/faults' },
-  { title: 'Scenarios', badge: 'stateful flows', text: 'Mocks that answer by state, for flows that change as they go: a cart that fills, a job that ends.', link: '/features/scenarios' },
-  { title: 'TLS in one line', badge: 'mTLS too', text: 'HTTPS and gRPC over TLS with no certificate to make, or with yours, and client certificates if you like.', link: '/features/tls' },
+  { title: 'Scenarios', badge: 'stateful flows', text: 'Mocks that answer by state, for flows that change as they go: a cart that fills, a job that ends.', link: '/scenarios/' },
+  { title: 'TLS in one line', badge: 'mTLS too', text: 'HTTPS and gRPC over TLS with no certificate to make, or with yours, and client certificates if you like.', link: '/tls/' },
   { title: 'Outside Go', badge: 'CLI · Docker · MCP', text: 'Serve mock files with the vlatte command or Docker, and change mocks while they run, over REST or MCP.', link: '/run/' },
 ]
 
@@ -30,8 +30,8 @@ const toolbox = [
   { title: 'Matchers', text: 'Every matcher, in Go and in mock files, and how to write your own.', link: '/matchers/' },
   { title: 'Recording', text: 'Record HTTP and gRPC services as mock files, from Go, the CLI or the admin API.', link: '/recording/' },
   { title: 'Recipes', text: 'Ready-made setups, such as a server that proxies every request.', link: '/recipes/' },
-  { title: 'Webhooks', text: 'Call other services after a mock answers, with templated requests.', link: '/features/webhooks-events' },
-  { title: 'Request journal', text: 'What clients sent, to verify in tests or read over the admin API.', link: '/features/journal' },
+  { title: 'Webhooks', text: 'Call other services after a mock answers, with templated requests.', link: '/webhooks/' },
+  { title: 'Request journal', text: 'What clients sent, to verify in tests or read over the admin API.', link: '/more/journal' },
   { title: 'Mock file schemas', text: 'JSON schemas that give your editor completion and checks for mock files.', link: '/reference/schemas' },
 ]
 </script>
@@ -150,7 +150,7 @@ services:
 </HomeRun>
 </HomeSection>
 
-<HomeSplit title="HTTPS without the certificate dance" link="/features/tls" link-text="TLS">
+<HomeSplit title="HTTPS without the certificate dance" link="/tls/" link-text="TLS">
 
 `MustStartTLS` serves HTTPS, or gRPC over TLS, with a certificate built in: no openssl, no files to keep.
 
