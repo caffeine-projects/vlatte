@@ -54,6 +54,8 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Docker Compose', link: '/guides/docker-compose' },
       { text: 'Testing webhooks', link: '/guides/webhooks' },
       { text: 'HTTPS and mTLS mocks', link: '/guides/https-mtls' },
+      { text: 'Testing an LLM streaming client', link: '/guides/llm-streaming' },
+      { text: 'Mocking a remote MCP server', link: '/guides/mcp-server' },
     ],
   },
   {
@@ -74,7 +76,6 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Request matching', link: '/http/matching' },
       { text: 'Replies', link: '/http/replies' },
       { text: 'Forms and multipart', link: '/http/forms-multipart' },
-      { text: 'Server-Sent Events', link: '/http/server-sent-events' },
       { text: 'Proxying', link: '/http/proxying' },
       { text: 'Steps', link: '/http/steps' },
       { text: 'Faults', link: '/http/faults' },
@@ -99,6 +100,20 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Mock files', link: '/grpc/mock-files' },
       { text: 'TLS', link: '/grpc/tls' },
       { text: 'Troubleshooting', link: '/grpc/troubleshooting' },
+    ],
+  },
+  {
+    text: 'SSE (Server-sent Events)',
+    collapsed: true,
+    items: [
+      { text: 'Overview', link: '/sse/' },
+      { text: 'Events', link: '/sse/events' },
+      { text: 'Timing and lifetime', link: '/sse/timing' },
+      { text: 'Reconnecting', link: '/sse/reconnecting' },
+      { text: 'Testing a client\'s parser', link: '/sse/raw-events' },
+      { text: 'With other features', link: '/sse/other-features' },
+      { text: 'Testing an LLM streaming client', link: '/guides/llm-streaming' },
+      { text: 'Mocking a remote MCP server', link: '/guides/mcp-server' },
     ],
   },
   {

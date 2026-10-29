@@ -14,6 +14,8 @@ vlatte speaks the [Model Context Protocol](https://modelcontextprotocol.io): an 
 
 Every tool is listed in [Tools](/mcp/tools).
 
+To mock an MCP server that your code calls, rather than drive vlatte from an agent, see [Mocking a remote MCP server](/guides/mcp-server).
+
 ## Connect an agent
 
 The `vlatte` command serves MCP two ways, and so does a server built in Go with `admin.MCP()`:
