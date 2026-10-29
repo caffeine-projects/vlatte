@@ -61,10 +61,11 @@ type KV interface {
 	Has(ctx context.Context, k string) (bool, error)
 	Set(ctx context.Context, k string, v []byte) error
 	Del(ctx context.Context, k string) error
+	Keys(ctx context.Context) ([]string, error)
 }
 ```
 
-A store reads with the context of the request, or with an event's own for webhooks, which outlives a client that leaves. `.Data` holds values too: a map of any values that `m.SetData` sets on one server. The key-value store holds text by key, and a store of your own can share it with other servers and processes.
+`Get` of a key that isn't stored returns an error that wraps `vlatte.ErrKVKeyNotFound`, `Has` is true for a key set to an empty value, `Del` of a key that isn't stored is not an error, and `Keys` lists the keys in any order. A store keeps and returns copies of the values. A server reads the store from every request at once, so it must be safe for concurrent use. A store reads with the context of the request, or with an event's own for webhooks, which outlives a client that leaves. `.Data` holds values too: a map of any values that `m.SetData` sets on one server. The key-value store holds text by key, and a store of your own can share it with other servers and processes.
 
 ## Functions
 

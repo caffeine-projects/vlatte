@@ -3,6 +3,7 @@ package kvview
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/caffeine-projects/vlatte"
@@ -23,21 +24,24 @@ func New(ctx context.Context, kv vlatte.KV) *View {
 // Get returns the value stored under key as text. A key that isn't stored is an error, as a missing map key is, so a
 // typo doesn't render as an empty value.
 func (v *View) Get(key string) (string, error) {
-	ok, err := v.Has(key)
-	if err != nil {
-		return "", err
-	}
-
-	if !ok {
+	b, err := v.kv.Get(v.ctx, key)
+	if errors.Is(err, vlatte.ErrKVKeyNotFound) {
 		return "", fmt.Errorf("key %q is not set: set it, or check for it with .KV.Has", key)
 	}
 
-	b, err := v.kv.Get(v.ctx, key)
+	if err != nil {
+		return "", fmt.Errorf("reading key %q: %w", key, err)
+	}
 
-	return string(b), err
+	return string(b), nil
 }
 
 // Has reports whether a value is stored under key.
 func (v *View) Has(key string) (bool, error) {
-	return v.kv.Has(v.ctx, key)
+	ok, err := v.kv.Has(v.ctx, key)
+	if err != nil {
+		return false, fmt.Errorf("reading key %q: %w", key, err)
+	}
+
+	return ok, nil
 }
