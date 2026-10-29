@@ -45,6 +45,11 @@ var (
 var errTemplateEnvWithEngine = errors.New("config: template.env configures the default template engine, and the " +
 	"server has a TemplateEngine: allow the variables on it with vlatte.WithEnv")
 
+// errTemplateKeysWithEngine says a server has both a TemplateEngine and template.keys, which configures the engine the
+// server makes without one.
+var errTemplateKeysWithEngine = errors.New("config: template.keys configures the default template engine, and the " +
+	"server has a TemplateEngine: add the keys on it with vlatte.WithSigningKey")
+
 // Config holds the configuration of an HTTP mock Server.
 type Config struct {
 	// Common fields
@@ -79,6 +84,12 @@ type Config struct {
 	// configures the vlatte.GoTemplateEngine the server makes without a TemplateEngine, so setting both is an error:
 	// allow them on that engine with vlatte.WithEnv.
 	TemplateEnv []string
+
+	// TemplateKeys are the keys templates sign tokens with, jwt, and publish, jwks, from the setting template.keys:
+	// "kid=ALG" generates a key when the server is made, a new one each time, and "kid=ALG:path/to/key.pem" reads one,
+	// a relative path starting at RootDir. Like TemplateEnv, it configures the default engine only: add keys to an
+	// engine of your own with vlatte.WithSigningKey.
+	TemplateKeys []string
 
 	// ConfigSources lists where settings are read from after code, lowest precedence first.
 	// Nil reads DefaultConfigSources(nil): the config file, then VLATTE_* environment variables.
@@ -173,6 +184,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.GlobalEvents = c.GlobalEvents
 	conf.TemplateEngine = c.TemplateEngine
 	conf.TemplateEnv = c.TemplateEnv
+	conf.TemplateKeys = c.TemplateKeys
 	conf.TemplateDataProviders = c.TemplateDataProviders
 	conf.DebugFn = c.DebugFn
 	conf.ConfigSources = c.ConfigSources
@@ -700,6 +712,12 @@ func (cb *ConfigBuilder) TemplateEngine(e vlatte.TemplateEngine) *ConfigBuilder 
 // See Config.TemplateEnv.
 func (cb *ConfigBuilder) TemplateEnv(names ...string) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.TemplateEnv = names })
+}
+
+// TemplateKeys sets the keys the templates of the server's default engine sign and publish with: see
+// Config.TemplateKeys.
+func (cb *ConfigBuilder) TemplateKeys(specs ...string) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.TemplateKeys = specs })
 }
 
 // TemplateDataProviders sets template data providers.

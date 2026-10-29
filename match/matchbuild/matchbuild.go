@@ -70,6 +70,7 @@ const (
 	_mItemsMatch              = "itemsmatch"
 	_mJSONPath                = "jsonpath"
 	_mJSONSchema              = "jsonschema"
+	_mJWT                     = "jwt"
 	_mField                   = "field"
 	_mLength                  = "length"
 	_mLen                     = "len"
@@ -82,6 +83,7 @@ const (
 	_mRegex                   = "regex"
 	_mRegexAlias              = "regexp" // the name match.RegExpr describes itself with
 	_mRequestURI              = "requesturi"
+	_mSignedJWT               = "signedjwt"
 	_mSome                    = "some"
 	_mNot                     = "not"
 	_mPresent                 = "present"
@@ -279,6 +281,7 @@ func newBuiltins() map[string]builtin {
 		_mSome:      inner(match.Some),
 		_mNot:       inner(match.Not),
 		_mTrim:      inner(match.Trim),
+		_mJWT:       inner(match.JWT),
 		_mLowerCase: inner(match.ToLower),
 		_mUpperCase: inner(match.ToUpper),
 		_mURLPath:   spec.urlPath,
@@ -286,6 +289,8 @@ func newBuiltins() map[string]builtin {
 		_mItem:     spec.item,
 		_mJSONPath: spec.jsonPath,
 		_mSplit:    spec.split,
+
+		_mSignedJWT: spec.signedJWT,
 
 		_mBoth:   pair(match.Both),
 		_mEither: pair(match.Either),
@@ -508,6 +513,40 @@ func (s spec) jsonSchema() (vlatte.Matcher, error) {
 	}
 
 	return m, nil
+}
+
+// signedJWT builds ["signedjwt", keys, matcher]. The keys are JSON text, a JWK Set or JWK written as JSON, or PEM.
+func (s spec) signedJWT() (vlatte.Matcher, error) {
+	if err := s.arity(2); err != nil {
+		return nil, err
+	}
+
+	keys, isText := s.args[0].(string)
+	if !isText {
+		set, isObject := s.args[0].(map[string]any)
+		if !isObject {
+			return nil, s.takes("keys first: a JWK Set, a JWK or PEM public keys", s.args[0], "")
+		}
+
+		data, err := json.Marshal(set, json.Deterministic(true))
+		if err != nil {
+			return nil, fmt.Errorf("%s takes keys: %w", s.name, err)
+		}
+
+		keys = string(data)
+	}
+
+	m, err := s.matcher(1)
+	if err != nil {
+		return nil, err
+	}
+
+	signed, err := built(func() vlatte.Matcher { return match.SignedJWT(keys, m) })
+	if err != nil {
+		return nil, fmt.Errorf("%s takes keys: %w", s.name, err)
+	}
+
+	return signed, nil
 }
 
 // xml builds ["equalxml", xml] and ["equalxml", xml, {ignore_child_order: true, namespaces: strict}].

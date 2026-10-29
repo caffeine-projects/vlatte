@@ -1,0 +1,7 @@
+# The server signs with issuer, a key the test writes to keys/issuer.pem, and with rogue, a key it makes as it starts.
+template:
+  keys:
+    - issuer=ES256:keys/issuer.pem
+    - rogue=ES256
+mock_files:
+  - mocks/*.yaml

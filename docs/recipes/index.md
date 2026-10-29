@@ -11,5 +11,6 @@ err := m.Prep(ctx, proxyall.New(mockhttp.From("https://api.example.com").Timeout
 |---|---|
 | [Proxy all](/recipes/proxy-all) | A mock that sends what no other mock matches to a real service. |
 | [GitHub Auth](/recipes/github-auth) | "Sign in with GitHub": the OAuth web flow and the user's profile. |
+| [OpenID Connect](/recipes/oidc) | An OpenID Connect provider: discovery, JWKS, signed ID tokens, PKCE and userinfo. |
 
 A recipe of your own takes a few lines: see [Writing a recipe](/recipes/writing).

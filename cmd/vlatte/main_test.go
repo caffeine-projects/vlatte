@@ -40,13 +40,31 @@ import (
 func start(t *testing.T, args ...string) (stop func() int) {
 	t.Helper()
 
+	stop, _ = startOutput(t, args...)
+
+	return stop
+}
+
+// startOutput is start, and returns what the run writes to stdout. A run that ends before stop is called fails the
+// test with what it wrote to stderr: the test would otherwise see only a server that never answers.
+func startOutput(t *testing.T, args ...string) (func() int, *lockedBuffer) {
+	t.Helper()
+
+	var stdout, stderr lockedBuffer
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)
 
-	go func() { done <- run(ctx, args, nil, io.Discard, io.Discard) }()
+	go func() {
+		code := run(ctx, args, nil, &stdout, &stderr)
+		if ctx.Err() == nil {
+			t.Errorf("the run ended before it was stopped, with exit code %d: %s", code, stderr.String())
+		}
+
+		done <- code
+	}()
 
 	code, stopped := 0, false
-	stop = func() int {
+	stop := func() int {
 		if !stopped {
 			cancel()
 			code, stopped = <-done, true
@@ -57,7 +75,7 @@ func start(t *testing.T, args ...string) (stop func() int) {
 
 	t.Cleanup(func() { stop() })
 
-	return stop
+	return stop, &stdout
 }
 
 // withoutDockerHost unsets VLATTE_DOCKER_HOST for the test, since it replaces the address.
@@ -687,32 +705,24 @@ func (b *lockedBuffer) String() string {
 func startAdmin(t *testing.T, args ...string) (string, func() int) {
 	t.Helper()
 
-	var stdout lockedBuffer
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan int, 1)
-	go func() { done <- run(ctx, args, nil, &stdout, io.Discard) }()
+	stop, stdout := startOutput(t, args...)
 
-	code, stopped := 0, false
-	stop := func() int {
-		if !stopped {
-			cancel()
-			code, stopped = <-done, true
-		}
+	return printed(t, stdout, "Admin API: "), stop
+}
 
-		return code
-	}
+// printed waits for the run that writes stdout to print label, and returns the rest of that line.
+func printed(t *testing.T, stdout *lockedBuffer, label string) string {
+	t.Helper()
 
-	t.Cleanup(func() { stop() })
-
-	var adminURL string
+	var value string
 	require.EventuallyWithT(t, func(c *assert.CollectT) {
-		_, after, ok := strings.Cut(stdout.String(), "Admin API: ")
+		_, after, ok := strings.Cut(stdout.String(), label)
 		if assert.True(c, ok) {
-			adminURL, _, _ = strings.Cut(after, "\n")
+			value, _, _ = strings.Cut(after, "\n")
 		}
 	}, 5*time.Second, 10*time.Millisecond)
 
-	return adminURL, stop
+	return value
 }
 
 // postMock adds the mock of doc, a YAML document, through the admin API at adminURL.

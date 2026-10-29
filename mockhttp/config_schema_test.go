@@ -185,6 +185,9 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"template-env": {
 			[]string{"--template-env", "API_URL,TENANT"}, func(t *testing.T, c *Config) { require.Equal(t, []string{"API_URL", "TENANT"}, c.TemplateEnv) },
 		},
+		"template-keys": {
+			[]string{"--template-keys", "a=EdDSA,b=ES256"}, func(t *testing.T, c *Config) { require.Equal(t, []string{"a=EdDSA", "b=ES256"}, c.TemplateKeys) },
+		},
 		"outbound-allow": {
 			[]string{"--outbound-allow", "10.1.0.0/16,fd00::/8"}, func(t *testing.T, c *Config) {
 				require.Equal(t, []netip.Prefix{netip.MustParsePrefix("10.1.0.0/16"), netip.MustParsePrefix("fd00::/8")}, c.OutboundAllow)
