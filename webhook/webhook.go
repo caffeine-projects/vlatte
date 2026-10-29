@@ -143,7 +143,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 
 	if w.transform != nil {
 		if err := w.transform(ctx, args, webhookArgs); err != nil {
-			return fmt.Errorf("webhook: failed to Transform args: %w", err)
+			return fmt.Errorf("webhook: transforming the args: %w", err)
 		}
 	}
 
@@ -200,7 +200,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 	case webhookArgs.BodyFile != "":
 		b, err := os.ReadFile(bodyfile.Path(webhookArgs.dir, webhookArgs.BodyFile))
 		if err != nil {
-			return fmt.Errorf("webhook: error reading body_file %s: %w", webhookArgs.BodyFile, err)
+			return fmt.Errorf("webhook: reading body_file %s: %w", webhookArgs.BodyFile, err)
 		}
 
 		body = bytes.NewReader(b)
@@ -280,7 +280,7 @@ func (w *WebHook) Run(ctx context.Context, args vlatte.OnComplete) error {
 	// The caller logs the errors: logging them here too would log each twice.
 	res, err := roundTripper.RoundTrip(req.WithContext(sendCtx))
 	if err != nil {
-		return fmt.Errorf("webhook: %s %s: request failed: %w", method, redacted, err)
+		return fmt.Errorf("webhook: %s %s: sending the request: %w", method, redacted, err)
 	}
 
 	// The answer is read, up to a limit, while the send's timeout holds, so its connection carries the next send:

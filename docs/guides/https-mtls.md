@@ -1,6 +1,6 @@
 # HTTPS and mTLS mocks
 
-This guide tests a client of an API that serves HTTPS only, first with a certificate the client trusts, then with mutual TLS, where the client must present a certificate of its own. Then the `vlatte` command serves the same mock with the same certificates. It uses [TLS](/features/tls) and [mock files](/http/mock-files).
+This guide tests a client of an API that serves HTTPS only, first with a certificate the client trusts, then with mutual TLS, where the client must present a certificate of its own. Then the `vlatte` command serves the same mock with the same certificates. It uses [TLS](/tls/) and [mock files](/http/mock-files).
 
 ## The client
 

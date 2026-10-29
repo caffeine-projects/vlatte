@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"net"
 	"net/http"
@@ -791,6 +792,37 @@ func TestWebHook_TemplateErrors(t *testing.T) {
 	}})
 	require.ErrorIs(t, err, ErrRenderingTemplate)
 }
+
+func TestWebHook_RunErrorsSayWhatTheWebhookWasDoing(t *testing.T) {
+	errTransform := errors.New("boom")
+	wh, err := New(WithTransform(func(context.Context, vlatte.OnComplete, *Args) error { return errTransform }))
+	require.NoError(t, err)
+
+	err = wh.Run(t.Context(), onComplete{params: map[string]any{"url": "http://localhost"}})
+	require.ErrorIs(t, err, errTransform)
+	require.EqualError(t, err, "webhook: transforming the args: boom")
+
+	wh, err = New()
+	require.NoError(t, err)
+
+	err = wh.Run(t.Context(), onComplete{params: map[string]any{"url": "http://localhost", "body_file": "testdata/missing.txt"}})
+	require.ErrorIs(t, err, fs.ErrNotExist)
+	require.ErrorContains(t, err, "webhook: reading body_file testdata/missing.txt: ")
+
+	wh, err = New(WithTransport(refused{}))
+	require.NoError(t, err)
+
+	err = wh.Run(t.Context(), onComplete{params: map[string]any{"url": "http://hooks.test/x"}})
+	require.ErrorIs(t, err, errRefused)
+	require.EqualError(t, err, "webhook: GET http://hooks.test/x: sending the request: refused")
+}
+
+var errRefused = errors.New("refused")
+
+// refused is a RoundTripper whose target refuses every request.
+type refused struct{}
+
+func (refused) RoundTrip(*http.Request) (*http.Response, error) { return nil, errRefused }
 
 func TestWebHook_KitWithoutAnEngine(t *testing.T) {
 	// A Kit without a template engine renders the event's templates with Go templates, and the Kit's data.

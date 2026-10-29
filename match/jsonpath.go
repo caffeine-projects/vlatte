@@ -13,7 +13,7 @@ import (
 func JSONPath(path string, matcher vlatte.Matcher) vlatte.Matcher {
 	x, err := jp.ParseString(path)
 	if err != nil {
-		panic(fmt.Errorf("the json path expression %s is invalid: %w", path, err))
+		panic(fmt.Errorf("match: jsonpath: the expression %s is invalid: %w", path, err))
 	}
 	return &jsonPathMatcher{
 		Path:    path,

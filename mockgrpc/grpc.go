@@ -108,7 +108,7 @@ func New(config ...Option) (*Server, error) {
 		err := configurer.Apply(conf)
 		if err != nil {
 			return nil, fmt.Errorf(
-				"server: error applying configuration at index %d with type %T\n%w",
+				"server: applying option %d (%T): %w",
 				i,
 				configurer,
 				err,
@@ -331,7 +331,7 @@ func MustNew(config ...Option) *Server {
 func (app *Server) Prep(ctx context.Context, recipes ...Recipe) error {
 	for i, recipe := range recipes {
 		if err := recipe.Prep(ctx, &vlatte.RecipeInput[*Mock, *Server]{Server: app}); err != nil {
-			return fmt.Errorf("server: error applying recipe at index %d with type %T\n%w", i, recipe, err)
+			return fmt.Errorf("server: applying recipe %d (%T): %w", i, recipe, err)
 		}
 	}
 
@@ -509,7 +509,7 @@ func (app *Server) start(op string, useTLS bool) error {
 			app.closed = true
 			app.Journal().Close()
 
-			return fmt.Errorf("server: %s: failed to create listener: %w", op, err)
+			return fmt.Errorf("server: %s: creating the listener: %w", op, err)
 		}
 	}
 

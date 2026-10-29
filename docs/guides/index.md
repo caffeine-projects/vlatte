@@ -1,6 +1,6 @@
 # Guides
 
-Each guide works through one task from start to end, with code you can run. The sections on [HTTP](/http/), [gRPC](/grpc/) and [features](/features/) say what each part does; the guides show the parts together.
+Each guide works through one task from start to end, with code you can run. The sections on [HTTP](/http/), [gRPC](/grpc/) and each feature say what each part does; the guides show the parts together.
 
 | Guide | What you build |
 |---|---|

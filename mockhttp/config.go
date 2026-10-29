@@ -578,7 +578,7 @@ func (cb *ConfigBuilder) TLSMutual(certFile, keyFile, clientCert string) *Config
 		}
 
 		if err := applyTLS(conf, certFile, keyFile, clientCert); err != nil {
-			return fmt.Errorf("config: failed to build TLS config: %w", err)
+			return fmt.Errorf("config: building the TLS config: %w", err)
 		}
 
 		return nil

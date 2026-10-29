@@ -12,6 +12,7 @@
 // Use [github.com/caffeine-projects/vlatte/match] to match headers, query parameters or bodies.
 // [Builder.FormField] and [Builder.FormFile] match the fields and files of forms, as net/http parses them, and
 // [Reply.Multipart] replies with multipart bodies, streamed part by part when parts have delays.
+// [Reply.EventStream] replies with Server-Sent Events, sent event by event.
 // Mocks can also come from YAML or JSON files; see [FromFile] and [ConfigBuilder.MockFilePatterns].
 //
 // Settings come from code, then from a .vlatterc.json, .vlatterc.yaml or .vlatterc.yml file and VLATTE_*

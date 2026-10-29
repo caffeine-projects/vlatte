@@ -140,7 +140,7 @@ func (app *Base[TM, A]) Clean(ctx context.Context) error {
 	for i, scope := range app.scopes.All() {
 		err := scope.Clear(ctx)
 		if err != nil {
-			return fmt.Errorf("error cleaning mocks from scope %d. %w", i, err)
+			return fmt.Errorf("server: cleaning the mocks of scope %d: %w", i, err)
 		}
 	}
 

@@ -35,6 +35,7 @@ import (
 	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
+	"github.com/caffeine-projects/vlatte/internal/sse"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
@@ -210,6 +211,18 @@ func TestMockSchema_Rules(t *testing.T) {
 		{"part body JSON can't write", ok + "response: {multipart: {type: mixed, parts: [{body: .nan}]}}\n", []want{{config.CodeInvalidValue, "response.multipart.parts[0].body", `response.multipart.parts[0].body="NaN": json: `, ""}}},
 		{"form-data part without a name", ok + "response: {multipart: {type: form-data, parts: [{body: x}]}}\n", []want{{config.CodeMissingValue, "response.multipart.parts[0].name", "is required in a form-data part", ""}}},
 		{"multipart in a sequence", ok + "response_sequence: {responses: [{multipart: {type: 'multipart/mixed', parts: [{}]}}]}\n", []want{{config.CodeInvalidValue, "response_sequence.responses[0].multipart.type", `must be a subtype, not "multipart/mixed"`, "write the subtype only"}}},
+		{"event_stream as text", ok + "response: {event_stream: x}\n", []want{{config.CodeInvalidValue, "response.event_stream", "must be an object, not a string", ""}}},
+		{"event_stream and body", ok + "response: {body: x, event_stream: {}}\n", []want{{config.CodeConflict, "response.event_stream", "response.event_stream is set with response.body", "keep one of them"}}},
+		{"event_stream and multipart", ok + "response: {multipart: {type: mixed, parts: [{}]}, event_stream: {}}\n", []want{{config.CodeConflict, "response.event_stream", "response.event_stream is set with response.multipart", "keep one of them"}}},
+		{"event_stream and body_base64", ok + "response: {body_base64: eA==, event_stream: {}}\n", []want{{config.CodeConflict, "response.event_stream", "response.event_stream is set with response.body_base64", "keep one of them"}}},
+		{"event raw with data", ok + "response: {event_stream: {events: [{raw: x, data: y}]}}\n", []want{{config.CodeConflict, "response.event_stream.events[0].raw", "response.event_stream.events[0].raw is set with other fields", "raw is sent alone, as it is, with a delay at most"}}},
+		{"event data and data_json", ok + "response: {event_stream: {events: [{data: x, data_json: y}]}}\n", []want{{config.CodeConflict, "response.event_stream.events[0].data_json", "response.event_stream.events[0].data_json is set with response.event_stream.events[0].data", "keep one of them"}}},
+		{"event data_json JSON can't write", ok + "response: {event_stream: {events: [{data_json: .nan}]}}\n", []want{{config.CodeInvalidValue, "response.event_stream.events[0].data_json", `response.event_stream.events[0].data_json="NaN": json: `, ""}}},
+		{"event null data", ok + "response: {event_stream: {events: [{}, {data: null}]}}\n", []want{{config.CodeInvalidValue, "response.event_stream.events[1].data", "is null", `write "" for empty data`}}},
+		{"event data JSON can't write", ok + "response: {event_stream: {events: [{data: .nan}]}}\n", []want{{config.CodeInvalidValue, "response.event_stream.events[0].data", `response.event_stream.events[0].data="NaN": json: `, ""}}},
+		{"event negative delay", ok + "response: {event_stream: {events: [{delay: -1}]}}\n", []want{{config.CodeInvalidValue, "response.event_stream.events[0].delay", "must be 0 or more", ""}}},
+		{"event key with a typo", ok + "response: {event_stream: {events: [{dat: x}]}}\n", []want{{config.CodeUnknownKey, "response.event_stream.events[0].dat", "not a known setting", "did you mean response.event_stream.events[0].data?"}}},
+		{"events as an object", ok + "response: {event_stream: {events: {data: x}}}\n", []want{{config.CodeInvalidValue, "response.event_stream.events", "must be a list", ""}}},
 		{"template that isn't an object", ok + "response: {template: 5}\n", []want{{config.CodeInvalidValue, "response.template", "must be an object", "its keys are enabled, data"}}},
 		{"unsupported encoding", ok + "response: {encoding: br}\n", []want{{config.CodeInvalidValue, "response.encoding", `response.encoding must be gzip, not "br"`, ""}}},
 		{"encoding in capitals", ok + "response: {encoding: GZIP}\n", []want{{config.CodeInvalidValue, "response.encoding", `response.encoding must be gzip, not "GZIP"`, ""}}},
@@ -983,6 +996,8 @@ func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 	require.Equal(t, _basicAuthSchema.Keys(), keys(props(props(raw)["request"])["basic_auth"]), "basic_auth")
 	require.Equal(t, mpart.SpecSchema.Keys(), keys(defs["multipart"]), "multipart")
 	require.Equal(t, mpart.PartSchema.Keys(), keys(defs["multipart_part"]), "multipart part")
+	require.Equal(t, sse.SpecSchema.Keys(), keys(defs["event_stream"]), "event_stream")
+	require.Equal(t, sse.EventSchema.Keys(), keys(defs["event_stream_event"]), "event_stream event")
 }
 
 func TestPropJSONSchema_AgreesWithTheDecoder(t *testing.T) {
@@ -1805,6 +1820,34 @@ var _mockFaults = []mockFault{
 		multipart["boundary"] = "b"
 		multipart["parts"] = []any{map[string]any{"body": "a\n--b"}}
 	}},
+	// The event_stream faults share the multipart area: both replace the body, so the two would conflict.
+	{"multipart", config.CodeConflict, "response.event_stream.events[0].raw", func(doc map[string]any) {
+		withEventStream(doc)["events"] = []any{map[string]any{"raw": "x", "data": "y"}}
+	}},
+	{"multipart", config.CodeInvalidValue, "response.event_stream.events[0].data", func(doc map[string]any) {
+		withEventStream(doc)["events"] = []any{map[string]any{"data": nil}}
+	}},
+	{"multipart", config.CodeInvalidValue, "response.event_stream.events[0].delay", func(doc map[string]any) {
+		withEventStream(doc)["events"] = []any{map[string]any{"raw": "x", "delay": int64(-5)}}
+	}},
+	{"multipart", config.CodeInvalidValue, "response.event_stream.events", func(doc map[string]any) {
+		withEventStream(doc)["events"] = map[string]any{"data": "x"}
+	}},
+	{"multipart", config.CodeConflict, "response.event_stream", func(doc map[string]any) {
+		withEventStream(doc)
+		sub(doc, "response")["body"] = "x"
+	}},
+}
+
+// withEventStream replaces the body of the response with an event stream, and returns the event_stream object.
+func withEventStream(doc map[string]any) map[string]any {
+	response := sub(doc, "response")
+	delete(response, "body")
+
+	stream := map[string]any{"events": []any{map[string]any{"data": "x"}}}
+	response["event_stream"] = stream
+
+	return stream
 }
 
 // withMultipart replaces the body of the response with a multipart body, and returns the multipart object.

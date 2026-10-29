@@ -102,14 +102,14 @@ func DescribeKeyValuePairs(key string, props ...any) Descriptor {
 	}
 
 	if len(props)%2 != 0 {
-		panic(fmt.Errorf("descriptor: expected an even number of key/value props. got: %d", len(props)))
+		panic(fmt.Errorf("descriptor: expected an even number of key/value props, not %d", len(props)))
 	}
 
 	m := make(map[string]any, len(props)/2)
 	for i := 0; i < len(props); i += 2 {
 		k, ok := props[i].(string)
 		if !ok {
-			panic(fmt.Errorf("descriptor: expected a string key at index %d. got: %T. value: %v", i, props[i], props[i]))
+			panic(fmt.Errorf("descriptor: expected a string key at index %d, not %T %v", i, props[i], props[i]))
 		}
 
 		m[k] = props[i+1]
@@ -170,7 +170,7 @@ func (d Descriptor) Validate() error {
 	case map[string]any:
 		break
 	default:
-		return fmt.Errorf("%w: expected: []any, map[string]any, Descriptor or nil. got: %T", ErrDescriptorSpecNotValidType, t)
+		return fmt.Errorf("%w: expected []any, map[string]any, Descriptor or nil, not %T", ErrDescriptorSpecNotValidType, t)
 	}
 
 	return nil
@@ -202,7 +202,7 @@ func (d Descriptor) IsArray() bool {
 // It will return an error if the key already exists in the map.
 func (d Descriptor) Merge(m map[string]any) error {
 	if _, ok := d.Props.(map[string]any); !ok {
-		return fmt.Errorf("%w: expected: map[string]any. got: %T", ErrDescriptorSpecNotValidType, d.Props)
+		return fmt.Errorf("%w: expected map[string]any, not %T", ErrDescriptorSpecNotValidType, d.Props)
 	}
 
 	if _, ok := m[d.Key]; ok {
@@ -236,7 +236,7 @@ func (d Descriptor) Marshallable() (any, error) {
 		return d.Props, nil
 	}
 
-	return nil, fmt.Errorf("%w: expected: []any, map[string]any, Descriptor or nil. got: %T", ErrDescriptorSpecNotValidType, d.Props)
+	return nil, fmt.Errorf("%w: expected []any, map[string]any, Descriptor or nil, not %T", ErrDescriptorSpecNotValidType, d.Props)
 }
 
 // MarshalJSON implements the [json.Marshaler] interface.

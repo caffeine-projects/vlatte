@@ -101,7 +101,7 @@ func TestServer_AStartThatFailsClosesTheServer(t *testing.T) {
 	m := MustNew(Setup().Addr(taken.Addr().String()))
 	t.Cleanup(m.Close)
 
-	require.ErrorContains(t, m.Start(), "failed to create listener")
+	require.ErrorContains(t, m.Start(), "creating the listener: ")
 	require.ErrorIs(t, m.Start(), grpc.ErrServerStopped)
 }
 
@@ -875,4 +875,26 @@ func TestPrep(t *testing.T) {
 	res, err := pb.NewTestServiceClient(conn).Greetings(t.Context(), &pb.HiReq{Message: "hi"})
 	require.NoError(t, err)
 	require.Equal(t, "from recipe", res.Message)
+}
+
+type failingOption struct{}
+
+func (failingOption) Apply(*Config) error { return errors.New("bad config") }
+
+func TestNew_AFailingOptionIsNamedByItsPlace(t *testing.T) {
+	_, err := New(Setup(), failingOption{})
+	require.EqualError(t, err, "server: applying option 1 (mockgrpc.failingOption): bad config")
+}
+
+func TestPrep_AFailingRecipeIsNamedByItsPlace(t *testing.T) {
+	m := MustNew()
+	defer m.Close()
+
+	errRecipe := errors.New("recipe failed")
+	err := m.Prep(t.Context(),
+		vlatte.RecipeFunc[*Mock, *Server](func(context.Context, *vlatte.RecipeInput[*Mock, *Server]) error { return nil }),
+		vlatte.RecipeFunc[*Mock, *Server](func(context.Context, *vlatte.RecipeInput[*Mock, *Server]) error { return errRecipe }))
+
+	require.ErrorIs(t, err, errRecipe)
+	require.EqualError(t, err, "server: applying recipe 1 (vlatte.RecipeFunc[*github.com/caffeine-projects/vlatte/mockgrpc.Mock,*github.com/caffeine-projects/vlatte/mockgrpc.Server]): recipe failed")
 }

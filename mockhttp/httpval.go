@@ -24,6 +24,7 @@ const (
 	HeaderSetCookie                       = "Set-Cookie"
 	HeaderIfModifiedSince                 = "If-Modified-Since"
 	HeaderLastModified                    = "Last-Modified"
+	HeaderLastEventID                     = "Last-Event-ID"
 	HeaderRetryAfter                      = "Retry-After"
 	HeaderUpgrade                         = "Upgrade"
 	HeaderWWWAuthenticate                 = "WWW-Authenticate"
@@ -54,6 +55,18 @@ const (
 	HeaderContentSecurityPolicyReportOnly = "Content-Security-Policy-Report-Only"
 	HeaderXCSRFToken                      = "X-CSRF-Token"
 	HeaderReferrerPolicy                  = "Referrer-Policy"
+	HeaderIdempotencyKey                  = "Idempotency-Key"
+	HeaderETag                            = "Etag"
+	HeaderIfNoneMatch                     = "If-None-Match"
+	HeaderIfMatch                         = "If-Match"
+	HeaderExpires                         = "Expires"
+	HeaderLink                            = "Link"
+	HeaderUserAgent                       = "User-Agent"
+	HeaderAcceptLanguage                  = "Accept-Language"
+	HeaderTraceparent                     = "Traceparent"
+	HeaderXRateLimitLimit                 = "X-Ratelimit-Limit"
+	HeaderXRateLimitRemaining             = "X-Ratelimit-Remaining"
+	HeaderXRateLimitReset                 = "X-Ratelimit-Reset"
 
 	// HeaderVlatteError says why vlatte, and not a mock, answered a request: one of the vlatte.Failure* values.
 	HeaderVlatteError = vlatte.HeaderFailure
@@ -88,5 +101,6 @@ const (
 	MIMEApplicationXMLCharsetUTF8        = MIMEApplicationXML + "; " + _charsetUTF8
 	MIMEApplicationProtobuf              = "application/protobuf"
 	MIMEMultipartForm                    = "multipart/form-data"
+	MIMETextEventStream                  = "text/event-stream"
 	MIMEOctetStream                      = "application/octet-stream"
 )

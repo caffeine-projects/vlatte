@@ -21,7 +21,7 @@ The status of `no-match` is `no_match_status_code`, and the status of the others
 
 ## Near misses
 
-The answer to a request no mock matched lists the mocks that came closest, as does its [journal](/features/journal) entry: the parts of the request each matched, those that differ, and those it didn't check, such as a `times` not used up, which a report never runs. A `times` used up, or a scenario in another state, is a part a mock differs in.
+The answer to a request no mock matched lists the mocks that came closest, as does its [journal](/more/journal) entry: the parts of the request each matched, those that differ, and those it didn't check, such as a `times` not used up, which a report never runs. A `times` used up, or a scenario in another state, is a part a mock differs in.
 
 ```
 REQUEST DID NOT MATCH
@@ -44,7 +44,7 @@ Each answer says how the server served it, in `VLatte-*` headers:
 | `VLatte-Matched-Mock-Name` | Its name, when it has one. |
 | `VLatte-Matched-Mock-Hits` | Its hits, this request included. |
 | `VLatte-Matched-Mock-Source` | The file it was loaded from, when it was loaded from one. |
-| `VLatte-Request-Id` | The ID of the request: `.Request.ID` in templates, `request_id` in the logs, its id in the [journal](/features/journal). Every answer has it, failures and no-match included. |
+| `VLatte-Request-Id` | The ID of the request: `.Request.ID` in templates, `request_id` in the logs, its id in the [journal](/more/journal). Every answer has it, failures and no-match included. |
 | `VLatte-Proxied` | `true` when a real service answered instead of a mock: a mock that replies with `From(...)`, a proxy passing on a request no mock matches, or the target of a recording. |
 
 A failure keeps the headers of the mock that matched before it failed. Hits count once the answer is sent, so two requests served at the same time can show the same number. A test checks them like any header:
@@ -59,4 +59,4 @@ Header names don't depend on case: Go sends `Vlatte-Matched-Mock-Id`, and HTTP/2
 
 ## Logs
 
-The server logs each request it serves, and how. `Setup().LogLevel(...)` and `Setup().LogVerbosity(...)` set what it logs, `Setup().UseDescriptiveLogger()` (`--debug` for the command) prints a readable block for each request in place of structured lines, `Setup().RedactHeader(...)` hides the values of headers, and `Setup().Silent()` logs nothing. The [admin API](/run/admin-api) streams the log lines at `GET /logs`, and what the server serves at `GET /events`.
+The server logs each request it serves, and how. `Setup().LogLevel(...)` and `Setup().LogVerbosity(...)` set what it logs, `Setup().UseDescriptiveLogger()` (`--debug` for the command) prints a readable block for each request in place of structured lines, `Setup().RedactHeader(...)` hides the values of headers, and `Setup().Silent()` logs nothing. The [admin API](/admin-api/) streams the log lines at `GET /logs`, and what the server serves at `GET /events`.

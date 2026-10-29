@@ -2202,3 +2202,37 @@ func TestNoMatch_NamesAKeyedPartWithItsKey(t *testing.T) {
 	require.Contains(t, body, "\n[cookie]: 2 of 3 parts matched; differs in cookie session\n")
 	require.Contains(t, body, "\n[param]: 2 of 3 parts matched; differs in path_params id\n")
 }
+
+// failingStateMatcher is a matcher that keeps state, matches every request, and fails to move its state on.
+type failingStateMatcher struct{}
+
+func (failingStateMatcher) Name() string                          { return "failing state" }
+func (failingStateMatcher) Match(vlatte.MatcherArg) (bool, error) { return true, nil }
+func (failingStateMatcher) SetState() error                       { return errors.New("state store down") }
+
+func TestHandler_AMatcherFailingToMoveItsStateOnIsAWarning(t *testing.T) {
+	// A matcher that can't move its state on once the mock served, as a scenario whose store fails, doesn't fail an
+	// answer already chosen: the client gets it, the mock counts, and the log says which matcher failed and why. A
+	// stream, counted as it starts, warns the same.
+	logs := &logBuffer{}
+	logger := zerolog.New(logs)
+
+	m := MustNew(Setup().Logger(&logger))
+	m.MustStart()
+
+	plain := m.MustMock(Getf("/plain").Matches(failingStateMatcher{}).Reply(OK().BodyText("ok")))
+	stream := m.MustMock(Getf("/stream").Matches(failingStateMatcher{}).Reply(OK().EventStream(NewEventStream(NewEvent().Data("a")))))
+
+	_, body := fetch(t, m.URL("/plain"))
+	require.Equal(t, "ok", string(body))
+
+	_, body = fetch(t, m.URL("/stream"))
+	require.Equal(t, "data: a\n\n", string(body))
+
+	// Close waits for the handlers, and so for their logs.
+	m.Close()
+
+	require.Equal(t, int64(1), plain.Hits())
+	require.Equal(t, int64(1), stream.Hits())
+	require.Equal(t, 2, strings.Count(logs.String(), "http: after mock served event: matcher[2] state store down"), logs.String())
+}

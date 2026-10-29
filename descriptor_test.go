@@ -163,12 +163,12 @@ func TestDescribeKeyValuePairs_PanicsOnMalformedPairs(t *testing.T) {
 		{
 			name:    "odd count",
 			give:    []any{"a", 1, "b"},
-			wantErr: "descriptor: expected an even number of key/value props. got: 3",
+			wantErr: "descriptor: expected an even number of key/value props, not 3",
 		},
 		{
 			name:    "non-string key reports its props index",
 			give:    []any{"a", 1, 2, "b"},
-			wantErr: "descriptor: expected a string key at index 2. got: int. value: 2",
+			wantErr: "descriptor: expected a string key at index 2, not int 2",
 		},
 	}
 
@@ -234,12 +234,13 @@ func TestDescriptor_MergeRefusesNonMapPropsAndLeavesTargetUntouched(t *testing.T
 
 	err := NewDescriptor("k", []any{"x"}).Merge(target)
 	require.ErrorIs(t, err, ErrDescriptorSpecNotValidType)
+	require.EqualError(t, err, "descriptor: spec is not a valid type: expected map[string]any, not []interface {}")
 	require.Equal(t, map[string]any{"a": 1}, target)
 }
 
 func TestDescriptor_InvalidPropsAreRejectedNamingTheAcceptedTypes(t *testing.T) {
 	d := Descriptor{Key: "k", Props: "boom"}
-	wantMsg := "descriptor: spec is not a valid type: expected: []any, map[string]any, Descriptor or nil. got: string"
+	wantMsg := "descriptor: spec is not a valid type: expected []any, map[string]any, Descriptor or nil, not string"
 
 	require.EqualError(t, d.Validate(), wantMsg)
 

@@ -58,8 +58,7 @@ A path setting that starts with `{workdir}`, such as `mock_files`, `record.dir`,
 Unknown keys, flags and `VLATTE_*` variables are errors, except `VLATTE_DOCKER_HOST`. A server that can't load its settings reports every problem at once:
 
 ```
-server: error loading configuration sources
-config: 2 problems
+server: loading the configuration sources: config: 2 problems
   env VLATTE_LOGLEVEL: unknown_key: VLATTE_LOGLEVEL is not a known setting; did you mean VLATTE_LOG_LEVEL?
   file .vlatterc.yaml: invalid_value: proxy.timeout must be milliseconds or a Go duration, not "10x"; such as 1500 or 1.5s
 ```

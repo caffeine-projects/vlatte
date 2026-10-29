@@ -91,6 +91,19 @@ func TestBase_UnmockKeepsTrackingWhatItCantDelete(t *testing.T) {
 	require.True(t, sameMocks([]*fakeMock{m}, app.ListPending()))
 }
 
+func TestBase_CleanNamesTheScopeItCouldNotClear(t *testing.T) {
+	// The error must say it came from the server and which scope kept its mocks.
+	errStore := errors.New("store down")
+	app := vlatte.NewBase[*fakeMock](struct{}{}, newBrokenStore(errStore, nil))
+
+	_, err := app.Mock(fakeBuilder{mock: newFakeMockWith("a", 0)})
+	require.NoError(t, err)
+
+	err = app.Clean(t.Context())
+	require.ErrorIs(t, err, errStore)
+	require.EqualError(t, err, "server: cleaning the mocks of scope 0: store down")
+}
+
 func TestBase_Remock(t *testing.T) {
 	// A reload swaps the mocks of the files: a request finds the old ones or the new ones, never neither,
 	// and a reload that fails leaves the old ones serving, tracked as before.

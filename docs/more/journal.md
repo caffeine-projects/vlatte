@@ -23,7 +23,7 @@ page, err := m.Journal().Find(ctx, journal.Query{Path: match.GlobMatch("/users/*
 
 [Verifying requests](/verify/) covers the checks: their criteria, failure reports, waits, marks and order, and the admin API's `QUERY /requests/verify`.
 
-An entry's `Message` tells what failed: the request, or else the on_complete events of a request a mock answered, one line each, such as a [webhook](/features/webhooks-events) whose target answered `500`, so a test checks a webhook failed without reading the logs. A request is journaled as the server ends its answer, as hits count: a client gets a small answer only then, while it may read the start of a large one a moment before, so a check of a request sent in the background [waits](/verify/waiting).
+An entry's `Message` tells what failed: the request, or else the on_complete events of a request a mock answered, one line each, such as a [webhook](/webhooks/) whose target answered `500`, so a test checks a webhook failed without reading the logs. A request is journaled as the server ends its answer, as hits count: a client gets a small answer only then, while it may read the start of a large one a moment before, so a check of a request sent in the background [waits](/verify/waiting).
 
 `m.Journal()` is the journal itself. A `journal.Query`, of package `github.com/caffeine-projects/vlatte/journal`, selects by the fields every protocol has, as the criteria of a check do. `Kind`, `Outcome`, `MockID`, `Method`, `Path` and `Status` are indexed: a query runs each of their matchers once per value the journal holds, not once per request, and reads no request from disk for them. `Target` (the full URL), `Since` and `Until` filter in memory too. `Header`, `Body` and request patterns read the requests the other fields leave. `Limit` and `Before` page through them, newest first, and `After` leaves out those up to a mark; `m.Journal().Find` returns the next page's cursor and the count. A `journal.Journal` works on its own too, as a changelog of any requests: `journal.New(journal.Options{Dir: dir})`.
 
@@ -47,7 +47,7 @@ A named directory keeps the requests across restarts: a server that starts again
 
 The settings `journal` (`--journal`, `VLATTE_JOURNAL`), `journal.dir`, `journal.max_entries` and `journal.max_body_size` configure it.
 
-Through the [admin API](/run/admin-api), `QUERY /requests` takes a query in the body, with the matchers of mock files, and answers the requests, newest first, their `count`, and `mark`, the number of the newest request of the journal. `"limit": 0` answers the count alone. [`QUERY /requests/verify`](/verify/admin-api) checks them, as a Go test does. `request` is the request part of a mock file:
+Through the [admin API](/admin-api/), `QUERY /requests` takes a query in the body, with the matchers of mock files, and answers the requests, newest first, their `count`, and `mark`, the number of the newest request of the journal. `"limit": 0` answers the count alone. [`QUERY /requests/verify`](/verify/admin-api) checks them, as a Go test does. `request` is the request part of a mock file:
 
 ```sh
 curl -X QUERY -H 'Content-Type: application/json' \

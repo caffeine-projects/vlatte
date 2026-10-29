@@ -63,7 +63,7 @@ m.MustMock(mockhttp.Postf("/orders").
 | `delay` | How long to wait before sending, once the mock replied. The response waits for it too, unless the webhook runs after the response. |
 | `timeout` | How long the request may take, from sending it to its answer. Without it, the listener's timeout, or else 10s. |
 
-Templates render with the data of the request that completed the mock: see [Templates](/features/templates). A mistake, such as a missing URL, two bodies or a template that doesn't compile, fails the mock when it is built.
+Templates render with the data of the request that completed the mock: see [Templates](/templating/). A mistake, such as a missing URL, two bodies or a template that doesn't compile, fails the mock when it is built.
 
 ## When they run
 
@@ -93,7 +93,7 @@ on_complete:
 
 ## Failures
 
-A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning, and the request's [journal](/features/journal) entry, if the server keeps one, tells it in its `Message`. The timeout is 10 seconds: a webhook's `timeout` parameter (`Options().Timeout(d)` in Go) changes it for that webhook, and `webhook.WithTimeout` for every webhook its listener sends, where 0 means 10 seconds, unlike `proxy.timeout`. The CLI's `webhook.timeout` setting is the `WithTimeout` of its listener, for HTTP and gRPC mocks. A webhook reads up to 256 KiB of the answer, so its connection carries the next one. A response waits for a webhook at most its delay plus the timeout.
+A webhook fails when its target doesn't answer in time, or answers with a status outside 2xx: a redirect isn't followed. The server logs the failure as a warning, and the request's [journal](/more/journal) entry, if the server keeps one, tells it in its `Message`. The timeout is 10 seconds: a webhook's `timeout` parameter (`Options().Timeout(d)` in Go) changes it for that webhook, and `webhook.WithTimeout` for every webhook its listener sends, where 0 means 10 seconds, unlike `proxy.timeout`. The CLI's `webhook.timeout` setting is the `WithTimeout` of its listener, for HTTP and gRPC mocks. A webhook reads up to 256 KiB of the answer, so its connection carries the next one. A response waits for a webhook at most its delay plus the timeout.
 
 ## Logs
 
@@ -108,5 +108,5 @@ wh, err := webhook.New()
 m := mockgrpc.MustNew(mockgrpc.Setup().OnCompleteListener("webhook", wh))
 ```
 
-The webhook's templates render with the data of the call: see [Templates in gRPC](/features/templates#in-grpc).
+The webhook's templates render with the data of the call: see [Templates in gRPC](/templating/#in-grpc).
 

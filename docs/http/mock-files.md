@@ -37,9 +37,9 @@ and editors that use the YAML language server, such as VS Code with the YAML ext
 | `response` | The [reply](/http/replies). |
 | `response_sequence`, `response_random` | [Sequences](/http/replies#sequences) and [random replies](/http/replies#random-replies). |
 | `proxy`, `proxy_all` | [Proxy replies](/http/proxying#proxy-replies) and [proxy all](/http/proxying#proxy-all). |
-| `delay`, `repeat` | A delay before replying, and how many requests the mock serves: see [Mock lifecycle](/features/mock-lifecycle). |
-| `scenario` | A [scenario](/features/scenarios). |
-| `on_complete` | [Events such as webhooks](/features/webhooks-events). |
+| `delay`, `repeat` | A delay before replying, and how many requests the mock serves: see [Mock lifecycle](/more/mock-lifecycle). |
+| `scenario` | A [scenario](/scenarios/). |
+| `on_complete` | [Events such as webhooks](/webhooks/). |
 | `steps`, `wire_steps`, `upstream_steps` | [Faults](/http/faults#in-mock-files). |
 | `ext` | Settings for the server's mock file handlers, `Setup().MockFileHandlers(...)` in Go. |
 
@@ -49,11 +49,11 @@ Each key takes one type, as the schema says. Write text in quotes where a string
 
 ## Bodies
 
-A reply's `body` is text as is, and any other value as JSON. A body that isn't UTF-8 text, such as an image or text in another encoding, goes in `body_base64`, as standard base64 (`body_base64: //4A`), whose line breaks are ignored, or in a `body_file`. A reply takes one of `body`, `body_base64`, `body_file` and `multipart` at most.
+A reply's `body` is text as is, and any other value as JSON. A body that isn't UTF-8 text, such as an image or text in another encoding, goes in `body_base64`, as standard base64 (`body_base64: //4A`), whose line breaks are ignored, or in a `body_file`. A reply takes one of `body`, `body_base64`, `body_file`, `multipart` and `event_stream` at most.
 
 ## Durations
 
-`delay`, `proxy.timeout`, the durations of [faults](/http/faults) and the `delay` and `timeout` of a [webhook](/features/webhooks-events) take whole milliseconds (`1500`) or a Go duration (`1.5s`). `"1500"` in quotes is neither.
+`delay`, `proxy.timeout`, the durations of [faults](/http/faults) and the `delay` and `timeout` of a [webhook](/webhooks/) take whole milliseconds (`1500`) or a Go duration (`1.5s`). `"1500"` in quotes is neither.
 
 ## Matching
 
@@ -65,7 +65,7 @@ A `proxy` reply (`From` in Go) answers with what its target answers: see [Proxyi
 
 ## Templates
 
-A mock file is plain JSON or YAML. Only the settings that are templates, such as a templated body, render: see [Templates](/features/templates).
+A mock file is plain JSON or YAML. Only the settings that are templates, such as a templated body, render: see [Templates](/templating/).
 
 ## Errors
 

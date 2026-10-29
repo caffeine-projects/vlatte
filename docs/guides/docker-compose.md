@@ -1,6 +1,6 @@
 # Docker Compose
 
-This guide runs vlatte next to an app under test with Docker Compose: the app calls a mocked payments API, a test changes the mocks over the admin API, and the admin API asks for a token. It uses [Docker](/run/docker), [mock files](/http/mock-files), the [admin API](/run/admin-api) and [outbound rules](/http/proxying#outbound-rules).
+This guide runs vlatte next to an app under test with Docker Compose: the app calls a mocked payments API, a test changes the mocks over the admin API, and the admin API asks for a token. It uses [Docker](/run/docker), [mock files](/http/mock-files), the [admin API](/admin-api/) and [outbound rules](/http/proxying#outbound-rules).
 
 ## The files
 
@@ -80,7 +80,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
 curl -X POST -H "Authorization: Bearer $TOKEN" localhost:8081/reset
 ```
 
-`POST /reset` removes the mocks the admin API added, loads the mock files again, starts every scenario over and clears the journal, so the next test starts clean. `QUERY /requests` checks what the app sent: see [Request journal](/features/journal).
+`POST /reset` removes the mocks the admin API added, loads the mock files again, starts every scenario over and clears the journal, so the next test starts clean. `QUERY /requests` checks what the app sent: see [Request journal](/more/journal).
 
 The admin pages, such as `http://localhost:8081/`, ask for the token in the browser's sign-in prompt, as the password, with any username.
 
@@ -91,5 +91,5 @@ Docker can set `HTTP_PROXY` and `HTTPS_PROXY` in containers from `~/.docker/conf
 ## What you used
 
 - The image, its ports and its health check: [Docker](/run/docker).
-- `admin.auth.token_file`, `POST /mocks`, `POST /reset`: [Admin API](/run/admin-api).
+- `admin.auth.token_file`, `POST /mocks`, `POST /reset`: [Admin API](/admin-api/).
 - `outbound.deny`: [Outbound rules](/http/proxying#outbound-rules).

@@ -32,7 +32,10 @@ One file that is not `*.md` means the task is not docs only. CI (`.github/workfl
 ## Errors
 
 - Messages are lowercase [lint] and start with their scope, e.g. `store: …`, `config: …`.
-- Wrap with `fmt.Errorf("<context>: %w", err)`. Older `"\n%w"` and `". %w"` forms stay until their line changes.
+- A message is one sentence: join its parts with `: `, never `. `. Only a list of problems or a stack trace takes more than one line.
+- Name the offending value and what was expected: `expected X, not %q`. When the caller can fix it, end with the fix: `mock: no reply set: use Reply`.
+- A message that its caller always prefixes with a scope, such as a schema field's validation message or a template function's error, starts without one.
+- Wrap with `fmt.Errorf("<context>: %w", err)`, the context saying what the code was doing: `reading body_file %s: %w`, never `error …` or `failed to …`.
 - Sentinels are exported `Err…` vars built with `errors.New`, grouped in `var (…)`. Unexported error vars are `err…`, never `_`-prefixed [lint].
 - Static messages use `errors.New`, not `fmt.Errorf` [lint].
 - Match error types with `errors.AsType[T](err)`. Never `errors.As` [lint].
