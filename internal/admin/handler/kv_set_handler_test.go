@@ -76,3 +76,16 @@ func TestSetKV_AStoreThatFailsAnswersAnError(t *testing.T) {
 	doc := problem(t, res, body, http.StatusInternalServerError, "internal")
 	require.Equal(t, `admin: setting key "token": redis down`, doc["detail"])
 }
+
+func TestSetKV_ABodyInAFormatItCantReadSetsNothing(t *testing.T) {
+	kv := vlatte.NewMemoryKV()
+	base := serve(t, newStore(t), adminapi.Capabilities{KV: kv})
+
+	res, body := send(t, request{method: http.MethodPut, url: base + "/kv/token", contentType: "text/csv", body: "value\nabc"})
+
+	problem(t, res, body, http.StatusUnsupportedMediaType, "unsupported_media_type")
+
+	has, err := kv.Has(t.Context(), "token")
+	require.NoError(t, err)
+	require.False(t, has)
+}
