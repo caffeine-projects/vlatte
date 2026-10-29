@@ -1,17 +1,17 @@
 package handler
 
 import (
-	"cmp"
 	"context"
 	"encoding/json/jsontext"
 	"io"
 	"net/http"
 	"reflect"
-	"runtime/debug"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
+
+	"github.com/caffeine-projects/vlatte/internal/buildinfo"
 )
 
 // _mcpDone is the text of a tool whose operation answers nothing, as its route answers 204.
@@ -21,7 +21,7 @@ const _mcpDone = "done"
 // such as add_mock for [Operations.AddMock]. A tool's result is the operation's, in JSON, as its route answers it,
 // and the error of a tool whose operation fails is the operation's problem document.
 func NewMCP(ops *Operations) *mcp.Server {
-	impl := &mcp.Implementation{Name: "vlatte", Title: "vlatte mock server", Version: moduleVersion()}
+	impl := &mcp.Implementation{Name: "vlatte", Title: "vlatte mock server", Version: buildinfo.Version()}
 
 	s := mcp.NewServer(impl, &mcp.ServerOptions{
 		Instructions: "Manage a vlatte mock server while it runs: list, add and change its mocks, and read the requests " +
@@ -177,21 +177,4 @@ func inputSchema[In any]() (*jsonschema.Schema, error) {
 	return jsonschema.For[In](&jsonschema.ForOptions{
 		TypeSchemas: map[reflect.Type]*jsonschema.Schema{reflect.TypeFor[jsontext.Value](): _documentSchema},
 	})
-}
-
-// moduleVersion is the version of vlatte the program was built with, as the main module or a dependency, or
-// "(devel)".
-func moduleVersion() string {
-	const path = "github.com/caffeine-projects/vlatte"
-
-	version := "(devel)"
-	if info, ok := debug.ReadBuildInfo(); ok {
-		for _, m := range append([]*debug.Module{&info.Main}, info.Deps...) {
-			if m.Path == path {
-				version = cmp.Or(m.Version, version)
-			}
-		}
-	}
-
-	return version
 }

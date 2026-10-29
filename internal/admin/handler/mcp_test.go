@@ -16,6 +16,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
+	"github.com/caffeine-projects/vlatte/internal/buildinfo"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
 
@@ -111,6 +112,14 @@ func TestNewMCP_ArgumentsOutOfTheSchemaAreRefused(t *testing.T) {
 	text, failed = callTool(t, cs, "add_mock", map[string]any{"mock": "hello"})
 	require.True(t, failed, text)
 	require.Equal(t, []string{"hello"}, ids(t, store))
+}
+
+func TestNewMCP_ReportsTheVersionTheCLIPrints(t *testing.T) {
+	// An MCP client lists the server by the version it reports: the one vlatte version prints for the same build,
+	// devel included.
+	cs := connect(t, newStore(t))
+
+	require.Equal(t, buildinfo.Version(), cs.InitializeResult().ServerInfo.Version)
 }
 
 func TestMCPHandler_ServesOverStreamableHTTP(t *testing.T) {

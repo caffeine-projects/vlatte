@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte/internal/buildinfo"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
@@ -229,7 +230,7 @@ func TestRun_Version(t *testing.T) {
 	var out bytes.Buffer
 
 	require.Equal(t, 0, run(context.Background(), []string{"version"}, nil, &out, io.Discard))
-	require.Equal(t, version()+"\n", out.String())
+	require.Equal(t, buildinfo.Version()+"\n", out.String())
 }
 
 func TestRun_Completion(t *testing.T) {
