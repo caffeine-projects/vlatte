@@ -18,3 +18,4 @@ The Go API is documented on pkg.go.dev, from the doc comments of the code:
 | `verify` | [pkg.go.dev/github.com/caffeine-projects/vlatte/verify](https://pkg.go.dev/github.com/caffeine-projects/vlatte/verify) |
 | `admin` | [pkg.go.dev/github.com/caffeine-projects/vlatte/admin](https://pkg.go.dev/github.com/caffeine-projects/vlatte/admin) |
 | `recipe/http/proxyall` | [pkg.go.dev/github.com/caffeine-projects/vlatte/recipe/http/proxyall](https://pkg.go.dev/github.com/caffeine-projects/vlatte/recipe/http/proxyall) |
+| `recipe/http/githubauth` | [pkg.go.dev/github.com/caffeine-projects/vlatte/recipe/http/githubauth](https://pkg.go.dev/github.com/caffeine-projects/vlatte/recipe/http/githubauth) |
