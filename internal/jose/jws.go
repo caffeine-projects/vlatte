@@ -5,6 +5,7 @@ import (
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -60,6 +61,12 @@ func Parse(token string) (*Token, error) {
 
 	t.Alg = alg
 
+	// RFC 7515 §4.1.11: a JWS with critical extensions the recipient doesn't understand is invalid, and the package
+	// understands none.
+	if _, ok := t.Header["crit"]; ok {
+		return nil, fmt.Errorf("%w: the header has crit extensions, which are not supported", ErrMalformed)
+	}
+
 	if kid, ok := t.Header["kid"]; ok {
 		if t.Kid, ok = kid.(string); !ok {
 			return nil, fmt.Errorf("%w: the kid of the header is not a string", ErrMalformed)
@@ -111,6 +118,9 @@ func (t *Token) CheckTime(now time.Time) error {
 	return nil
 }
 
+// _maxNumericDate is the last second of the year 9999, as a NumericDate: a date past it is no date a token means.
+const _maxNumericDate = 253402300799
+
 // numericDate returns the claim name of t, a NumericDate: seconds since the epoch.
 func (t *Token) numericDate(name string) (time.Time, bool, error) {
 	v, ok := t.Claims[name]
@@ -121,6 +131,10 @@ func (t *Token) numericDate(name string) (time.Time, bool, error) {
 	f, ok := v.(float64)
 	if !ok {
 		return time.Time{}, false, fmt.Errorf("%w: the %s claim is not a number", ErrMalformed, name)
+	}
+
+	if math.Abs(f) > _maxNumericDate {
+		return time.Time{}, false, fmt.Errorf("%w: the %s claim is out of range", ErrMalformed, name)
 	}
 
 	sec := int64(f)

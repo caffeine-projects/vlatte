@@ -2,6 +2,8 @@ package matchbuild
 
 import (
 	"context"
+	"crypto"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
@@ -16,6 +18,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/jose"
 	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/match"
 )
@@ -502,21 +505,28 @@ func TestBuildMatcher_JWT(t *testing.T) {
 }
 
 func TestBuildMatcher_SignedJWT(t *testing.T) {
-	t.Run("keys as a JWK Set object", func(t *testing.T) {
-		set, err := value.DecodeJSON([]byte(_publicJWKS))
-		require.NoError(t, err)
+	// Either form of the keys matches a token their key signed, and not one another key signed.
+	key, other := newSigningKey(t), newSigningKey(t)
 
-		_, err = _registry.BuildMatcher([]any{"signedJWT", set, []any{"anything"}})
-		require.NoError(t, err)
-	})
+	jwk, err := jose.PublicJWK("ES256", "key-1", key.Public())
+	require.NoError(t, err)
 
-	t.Run("keys as text", func(t *testing.T) {
-		m, err := _registry.BuildMatcher([]any{"signedjwt", _publicJWKS, []any{"anything"}})
-		require.NoError(t, err)
+	text, err := json.Marshal(jose.JWKSet{Keys: []jose.JWK{jwk}})
+	require.NoError(t, err)
 
-		// An unsigned token isn't signed by the keys.
-		require.False(t, matches(t, m, "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhbmEifQ."))
-	})
+	object, err := value.DecodeJSON(text)
+	require.NoError(t, err)
+
+	for name, keys := range map[string]any{"a JWK Set object": object, "a JWK Set as text": string(text)} {
+		t.Run(name, func(t *testing.T) {
+			m, err := _registry.BuildMatcher([]any{"signedJWT", keys, []any{"jsonpath", "$.claims.sub", []any{"equal", "ana"}}})
+			require.NoError(t, err)
+
+			require.True(t, matches(t, m, signToken(t, key, "key-1", `{"sub":"ana"}`)))
+			require.False(t, matches(t, m, signToken(t, key, "key-1", `{"sub":"bob"}`)))
+			require.False(t, matches(t, m, signToken(t, other, "key-1", `{"sub":"ana"}`)))
+		})
+	}
 
 	t.Run("keys that hold no key", func(t *testing.T) {
 		_, err := _registry.BuildMatcher([]any{"signedJWT", map[string]any{"keys": []any{}}, []any{"anything"}})
@@ -684,4 +694,24 @@ func genArg() *rapid.Generator[any] {
 			map[string]any{"a": int64(1)},
 		}),
 	)
+}
+
+// newSigningKey returns a new ES256 key.
+func newSigningKey(t *testing.T) crypto.Signer {
+	t.Helper()
+
+	key, err := jose.GenerateKey("ES256")
+	require.NoError(t, err)
+
+	return key
+}
+
+// signToken returns a token of claims, signed by key with ES256 as kid.
+func signToken(t *testing.T, key crypto.Signer, kid, claims string) string {
+	t.Helper()
+
+	token, err := jose.Sign("ES256", kid, key, []byte(claims))
+	require.NoError(t, err)
+
+	return token
 }

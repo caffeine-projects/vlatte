@@ -2,6 +2,7 @@ package jose
 
 import (
 	"bytes"
+	"cmp"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -18,6 +19,9 @@ import (
 
 // ErrUnknownKid says no key of a key set has the kid of a token.
 var ErrUnknownKid = errors.New("jose: kid not in the key set")
+
+// errUnsupportedKey is returned for a JWK of a type or curve the package doesn't support.
+var errUnsupportedKey = errors.New("jose: jwk: unsupported")
 
 // _curves are the JWK names of the ECDSA curves, by curve.
 var _curves = map[elliptic.Curve]string{
@@ -107,7 +111,7 @@ func (k *JWK) publicKey() (crypto.PublicKey, error) {
 		}
 
 		if curve == nil {
-			return nil, fmt.Errorf("jose: jwk: unsupported curve %q", k.Crv)
+			return nil, fmt.Errorf("%w curve %q", errUnsupportedKey, k.Crv)
 		}
 
 		x, err := decodeField("x", k.X)
@@ -128,7 +132,7 @@ func (k *JWK) publicKey() (crypto.PublicKey, error) {
 		return pub, nil
 	case "OKP":
 		if k.Crv != "Ed25519" {
-			return nil, fmt.Errorf("jose: jwk: unsupported curve %q", k.Crv)
+			return nil, fmt.Errorf("%w curve %q", errUnsupportedKey, k.Crv)
 		}
 
 		x, err := decodeField("x", k.X)
@@ -142,7 +146,7 @@ func (k *JWK) publicKey() (crypto.PublicKey, error) {
 
 		return ed25519.PublicKey(x), nil
 	default:
-		return nil, fmt.Errorf("jose: jwk: unsupported kty %q", k.Kty)
+		return nil, fmt.Errorf("%w kty %q", errUnsupportedKey, k.Kty)
 	}
 }
 
@@ -172,7 +176,8 @@ type setKey struct {
 }
 
 // ParseKeySet reads the public keys of text: a JWK Set, a single JWK, or PEM blocks of public keys ("PUBLIC KEY",
-// "RSA PUBLIC KEY") and certificates ("CERTIFICATE"). JWKs whose use is "enc" are skipped. A PEM private key is
+// "RSA PUBLIC KEY") and certificates ("CERTIFICATE"). JWKs of a set whose use is "enc", or whose type or curve the
+// package doesn't support, are skipped; a JWK of a supported type that can't be read is an error. A PEM private key is
 // refused, so a mock file can't hold one by mistake. A set with no key is an error.
 func ParseKeySet(text []byte) (*KeySet, error) {
 	text = bytes.TrimSpace(text)
@@ -211,24 +216,41 @@ func parseJWKs(text []byte) (*KeySet, error) {
 		return nil, fmt.Errorf("jose: key set: %w", err)
 	}
 
-	keys := doc.Keys
 	if doc.Kty != "" {
-		keys = []JWK{doc.JWK}
+		pub, err := doc.publicKey()
+		if err != nil {
+			return nil, err
+		}
+
+		return &KeySet{keys: []setKey{{kid: doc.Kid, alg: doc.Alg, pub: pub}}}, nil
 	}
 
-	ks := &KeySet{}
+	var (
+		ks          = &KeySet{}
+		unsupported error
+	)
 
-	for _, k := range keys {
+	for _, k := range doc.Keys {
 		if k.Use == "enc" {
 			continue
 		}
 
 		pub, err := k.publicKey()
+		if errors.Is(err, errUnsupportedKey) {
+			unsupported = cmp.Or(unsupported, err)
+			continue
+		}
+
 		if err != nil {
 			return nil, err
 		}
 
 		ks.keys = append(ks.keys, setKey{kid: k.Kid, alg: k.Alg, pub: pub})
+	}
+
+	// A set of keys the package can't use says why.
+	if len(ks.keys) == 0 && unsupported != nil {
+		return nil, unsupported
 	}
 
 	return ks, nil
@@ -273,8 +295,8 @@ func parsePEMs(text []byte) (*KeySet, error) {
 }
 
 // Verify returns nil when a key of ks signed t. It takes only the algorithms of the package, so never "none" or an
-// HMAC one. A key whose JWK names a kid is used only for tokens with that kid, and one whose JWK names an alg only for
-// that alg, so a token can't pick how its key is read. A token whose kid no key has fails with [ErrUnknownKid]
+// HMAC one. A key whose JWK names a kid is not used for a token that names another kid, and one whose JWK names an alg
+// is used only for that alg, so a token can't pick how its key is read. A token without a kid is tried with every key. A token whose kid no key has fails with [ErrUnknownKid]
 // unless ks has keys without a kid, such as PEM ones, which are tried in turn.
 func (ks *KeySet) Verify(t *Token) error {
 	if _, err := lookup(t.Alg); err != nil {

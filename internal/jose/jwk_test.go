@@ -110,6 +110,12 @@ func TestParseKeySet_ReadsSetsSingleKeysAndPEM(t *testing.T) {
 		{name: "a JWK Set", text: mustJSON(t, JWKSet{Keys: []JWK{rsaJWK}}), keys: 1},
 		{name: "a single JWK", text: mustJSON(t, rsaJWK), keys: 1},
 		{name: "a set whose encryption keys are skipped", text: mustJSON(t, JWKSet{Keys: []JWK{rsaJWK, {Kty: "RSA", Use: "enc", N: rsaJWK.N, E: rsaJWK.E}}}), keys: 1},
+		{
+			// A provider's JWKS may hold keys of types the package doesn't support: its other keys still verify.
+			name: "a set whose keys of unsupported types are skipped",
+			text: mustJSON(t, JWKSet{Keys: []JWK{{Kty: "oct"}, rsaJWK, {Kty: "EC", Crv: "secp256k1", X: "AA", Y: "AA"}}}),
+			keys: 1,
+		},
 		{name: "PEM public keys", text: append(pemKey, pemBlock("RSA PUBLIC KEY", mustPKCS1(t, testKey(t, "RS256")))...), keys: 2},
 	}
 	for _, tt := range tests {
@@ -144,6 +150,15 @@ func TestParseKeySet_RefusesWhatHoldsNoPublicKey(t *testing.T) {
 			require.EqualError(t, err, tt.msg)
 		})
 	}
+}
+
+func TestParseKeySet_RefusesASetWithAMalformedKey(t *testing.T) {
+	// A key of a supported type that can't be read is a mistake in the set, not a key to skip.
+	rsaJWK, err := PublicJWK("RS256", "key-1", testKey(t, "RS256").Public())
+	require.NoError(t, err)
+
+	_, err = ParseKeySet(mustJSON(t, JWKSet{Keys: []JWK{rsaJWK, {Kty: "RSA", E: "AQAB"}}}))
+	require.EqualError(t, err, "jose: jwk: no n")
 }
 
 func TestKeySet_Verify(t *testing.T) {

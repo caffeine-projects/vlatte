@@ -22,6 +22,11 @@ func TestParse_RefusesWhatIsNotAJWT(t *testing.T) {
 		{name: "a header that isn't an object", token: b64([]byte(`[1]`)) + "." + b64([]byte(`{}`)) + ".", msg: "jose: not a JWT: the header is not a JSON object"},
 		{name: "a payload that isn't an object", token: b64([]byte(`{"alg":"RS256"}`)) + "." + b64([]byte(`"text"`)) + ".", msg: "jose: not a JWT: the payload is not a JSON object"},
 		{name: "a header without alg", token: b64([]byte(`{"typ":"JWT"}`)) + "." + b64([]byte(`{}`)) + ".", msg: "jose: not a JWT: the header has no alg"},
+		{
+			// RFC 7515 §4.1.11: a recipient that doesn't understand every critical extension must refuse the JWS.
+			name: "a header with crit", token: b64([]byte(`{"alg":"RS256","crit":["b64"],"b64":false}`)) + "." + b64([]byte(`{}`)) + ".",
+			msg: "jose: not a JWT: the header has crit extensions, which are not supported",
+		},
 		{name: "a kid that isn't a string", token: b64([]byte(`{"alg":"RS256","kid":1}`)) + "." + b64([]byte(`{}`)) + ".", msg: "jose: not a JWT: the kid of the header is not a string"},
 	}
 	for _, tt := range tests {
@@ -52,6 +57,10 @@ func TestCheckTime_RefusesATokenOutsideItsLifetime(t *testing.T) {
 		{
 			name: "before nbf", claims: map[string]any{"nbf": 1_800_000_060.0},
 			is: ErrNotYetValid, msg: "jose: token not yet valid until 2027-01-15T08:01:00Z",
+		},
+		{
+			name: "an exp past the year 9999", claims: map[string]any{"exp": 1e300},
+			is: ErrMalformed, msg: "jose: not a JWT: the exp claim is out of range",
 		},
 		{
 			name: "an exp that isn't a number", claims: map[string]any{"exp": "tomorrow"},

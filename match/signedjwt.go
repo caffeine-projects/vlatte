@@ -15,8 +15,9 @@ import (
 //   - when a JWK names an alg other than the token's, so a token can't choose how its key is read;
 //   - when its exp claim is now or past, or its nbf claim future.
 //
-// The algorithms are RS256, RS384, RS512, PS256, PS384, PS512, ES256, ES384, ES512 and EdDSA. SignedJWT panics when
-// keys holds no public key, or holds a private one: a mock is no place for it.
+// The algorithms are RS256, RS384, RS512, PS256, PS384, PS512, ES256, ES384, ES512 and EdDSA. Keys of a JWK Set it
+// can't use, such as encryption keys or keys on other curves, are skipped. SignedJWT panics when keys holds no public
+// key it can use, holds a malformed one, or holds a private one: a mock is no place for it.
 func SignedJWT(keys string, matcher vlatte.Matcher) vlatte.Matcher {
 	ks, err := jose.ParseKeySet([]byte(keys))
 	if err != nil {
