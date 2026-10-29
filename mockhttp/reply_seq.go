@@ -65,7 +65,7 @@ func (r *SequentialReply) Describe() vlatte.Descriptor {
 // and a place in the sequence of its own.
 func (r *SequentialReply) NewReplier(app *Server) (Replier, error) {
 	if len(r.replies) == 0 {
-		return nil, errors.New("reply_sequence: you need to set at least one response when using multiple sequential reply")
+		return nil, errors.New("reply_sequence: no replies: add at least one")
 	}
 
 	s := &sequenceReplier{replies: make([]Replier, len(r.replies))}
@@ -111,11 +111,10 @@ type sequenceReplier struct {
 // Reply implements Replier. Only taking the next reply is locked: the replies run at the same time, as those of any
 // mock do.
 func (s *sequenceReplier) Reply(ctx context.Context, input ReplyInput) (*Response, error) {
-	reply := s.next()
+	reply, hits := s.next()
 	if reply == nil {
 		return nil, fmt.Errorf(
-			"reply_sequence: unable to obtain a response, and no default response was set. request number=%d, sequence size=%d",
-			s.totalHits(), len(s.replies))
+			"reply_sequence: request %d came after the end of the sequence: set OnSequenceEnded or after_ended", hits)
 	}
 
 	return reply.Reply(ctx, input)
@@ -126,8 +125,9 @@ func (s *sequenceReplier) Close() error {
 	return closeAll(s.closers)
 }
 
-// next takes the reply of the next request: the next one of the sequence, then after, which can be nil.
-func (s *sequenceReplier) next() Replier {
+// next takes the reply of the next request, the next one of the sequence, then after, which can be nil, and the
+// requests the sequence took so far, this one included.
+func (s *sequenceReplier) next() (Replier, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -135,10 +135,12 @@ func (s *sequenceReplier) next() Replier {
 		reply := s.replies[s.hits]
 		s.hits++
 
-		return reply
+		return reply, s.hits
 	}
 
-	return s.after
+	s.hits++
+
+	return s.after, s.hits
 }
 
 // own keeps what releases reply, which f made, when the sequence owns it.

@@ -66,7 +66,7 @@ func (p *FilePattern) Header(name string, m vlatte.Matcher) *FilePattern {
 func (p *FilePattern) Body(matchers ...vlatte.Matcher) *FilePattern {
 	switch len(matchers) {
 	case 0:
-		panic(".Body() requires at least one matcher.Matcher")
+		panic("form_file: Body needs at least one matcher")
 	case 1:
 		p.body = matchers[0]
 	default:

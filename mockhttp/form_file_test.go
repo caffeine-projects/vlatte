@@ -225,7 +225,7 @@ func TestFormFile_MatcherErrorsStopTheSearch(t *testing.T) {
 }
 
 func TestFormFile_BodyNeedsAMatcher(t *testing.T) {
-	require.PanicsWithValue(t, ".Body() requires at least one matcher.Matcher", func() { FileWith().Body() })
+	require.PanicsWithValue(t, "form_file: Body needs at least one matcher", func() { FileWith().Body() })
 }
 
 func TestFormFile_DescribesUnknownMatchersAsAnything(t *testing.T) {

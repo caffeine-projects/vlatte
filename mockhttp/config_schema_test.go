@@ -651,8 +651,7 @@ func TestConfigSources_ErrorListsEveryProblemWithItsOrigin(t *testing.T) {
 
 	_, err := loadConfig(t, Setup(), ConfigFile(path), ConfigEnv(), ConfigArgs([]string{"--tls-cert", _testCertFile}))
 
-	want := `server: error loading configuration sources
-config: 5 problems
+	want := `server: loading the configuration sources: config: 5 problems
   env VLATTE_LOGLEVEL: unknown_key: VLATTE_LOGLEVEL is not a known setting; did you mean VLATTE_LOG_LEVEL?
   env VLATTE_PROXY_TIMEOUT: invalid_value: proxy.timeout must be milliseconds or a Go duration, not "10x"; such as 1500 or 1.5s
   file ` + path + `: unknown_key: cors.allowed_origins is not a known setting; did you mean cors.allowed_origin?

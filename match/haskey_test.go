@@ -3,6 +3,7 @@ package match
 import (
 	"testing"
 
+	"github.com/ohler55/ojg/jp"
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
@@ -45,10 +46,11 @@ func TestHasKey(t *testing.T) {
 	}
 }
 
-func TestHasKeyNew(t *testing.T) {
-	require.Panics(t, func() {
-		HasKey(".")
-	})
+func TestHasKey_AnInvalidPathPanicsNamingTheMatcherAndThePath(t *testing.T) {
+	// The parser's error alone names neither the matcher nor the expression that failed.
+	_, parseErr := jp.ParseString(".")
+
+	require.PanicsWithError(t, "match: haskey: the path . is invalid: "+parseErr.Error(), func() { HasKey(".") })
 }
 
 func TestHasKey_TextThatIsntJSON(t *testing.T) {

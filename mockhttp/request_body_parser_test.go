@@ -3,6 +3,7 @@ package mockhttp
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -234,6 +235,30 @@ func (p replacingParser) CanParse(content string, _ *http.Request) bool {
 func (p replacingParser) Parse(_ []byte, r *http.Request) (any, error) {
 	r.Body = io.NopCloser(strings.NewReader(p.body))
 	return p.body, nil
+}
+
+// failingParser fails to parse its media type.
+type failingParser struct{}
+
+func (failingParser) CanParse(content string, _ *http.Request) bool {
+	return content == "application/x-broken"
+}
+
+func (failingParser) Parse([]byte, *http.Request) (any, error) { return nil, errors.New("bad body") }
+
+func TestRequestBodyParser_AFailingParserWarnsNamingWhatItWasDoing(t *testing.T) {
+	logs := &logBuffer{}
+	logger := zerolog.New(logs)
+
+	m := MustNew(Setup().Logger(&logger).RequestBodyParsers(failingParser{}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Postf("/x").Reply(OK()))
+
+	res, _ := post(t, m.URL("/x"), "application/x-broken", []byte("x"))
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Contains(t, logs.String(), "request_body_parser: parsing the body with mockhttp.failingParser: bad body")
 }
 
 func TestRequestBodyParser_KeepsTheBodyAParserReplaced(t *testing.T) {

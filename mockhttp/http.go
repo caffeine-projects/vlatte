@@ -121,7 +121,7 @@ func New(config ...Option) (*Server, error) {
 		err := configurer.Apply(conf)
 		if err != nil {
 			return nil, fmt.Errorf(
-				"server: error applying configuration at index %d with type %T\n%w",
+				"server: applying option %d (%T): %w",
 				i,
 				configurer,
 				err,
@@ -130,7 +130,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	if err := loadConfigSources(conf); err != nil {
-		return nil, fmt.Errorf("server: error loading configuration sources\n%w", err)
+		return nil, fmt.Errorf("server: loading the configuration sources: %w", err)
 	}
 
 	if err := conf.checkName(); err != nil {
@@ -335,7 +335,7 @@ func New(config ...Option) (*Server, error) {
 
 	server, err := factory.NewBackend(BackendConfig{App: app, Handler: handler})
 	if err != nil {
-		return nil, fmt.Errorf("server: backend factory failed to build the backend. %w", err)
+		return nil, fmt.Errorf("server: building the backend: %w", err)
 	}
 
 	app.server = server
@@ -388,7 +388,7 @@ func prepareGlobalEvents(conf *Config) (*vlatte.Events, error) {
 func (app *Server) Prep(ctx context.Context, recipes ...Recipe) error {
 	for i, recipe := range recipes {
 		if err := recipe.Prep(ctx, &vlatte.RecipeInput[*Mock, *Server]{Server: app}); err != nil {
-			return fmt.Errorf("server: error applying recipe at index %d with type %T\n%w", i, recipe, err)
+			return fmt.Errorf("server: applying recipe %d (%T): %w", i, recipe, err)
 		}
 	}
 
@@ -414,7 +414,7 @@ func (app *Server) Start() error {
 func (app *Server) MustStart() {
 	err := app.Start()
 	if err != nil {
-		panic(fmt.Errorf("server: start failed. %w", err))
+		panic(fmt.Errorf("server: starting: %w", err))
 	}
 }
 
@@ -428,7 +428,7 @@ func (app *Server) StartTLS() error {
 func (app *Server) MustStartTLS() {
 	err := app.StartTLS()
 	if err != nil {
-		panic(fmt.Errorf("server: failed to start server with TLS. %w", err))
+		panic(fmt.Errorf("server: starting with TLS: %w", err))
 	}
 }
 
@@ -503,7 +503,7 @@ func (app *Server) Reload() error {
 func (app *Server) MustReload() {
 	err := app.Reload()
 	if err != nil {
-		panic(fmt.Errorf("server: error reloading mock definitions. %w", err))
+		panic(fmt.Errorf("server: reloading the mocks: %w", err))
 	}
 }
 
