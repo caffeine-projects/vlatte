@@ -43,7 +43,7 @@ Request ID: `0f8c2b1e-6d4a-4c3e-9a57-2b8e1d4f7c90`
 - See the request in the journal: `GET http://127.0.0.1:8081/requests/0f8c2b1e-6d4a-4c3e-9a57-2b8e1d4f7c90`
 ```
 
-The journal line shows when the server keeps a journal and serves the [admin API](/run/admin-api), as the `vlatte` command does. Every name and value is in a code span, so none can change the structure of the document.
+The journal line shows when the server keeps a journal and serves the [admin API](/admin-api/), as the `vlatte` command does. Every name and value is in a code span, so none can change the structure of the document.
 
 The report runs no matcher twice: it goes on from the part where matching stopped, which a mock differs in, so it runs only the matchers matching never reached, the action of a `match.Peek` among them. It runs none that keeps state, such as `times`, which it lists as not checked; a scenario's matcher keeps none as it matches, so it runs. A mock that wants the request but is used up, by its `Times`, differs in `times` only, and comes first. `near_misses: false`, `--near-misses=false` or `mockhttp.Setup().NoNearMisses()` turns it off.
 
