@@ -201,11 +201,11 @@ Clients fail in the ways their servers do. Faults make a mock reset the connecti
 m.MustMock(
 	// The first call loses its connection.
 	mockhttp.Getf("/report").Once().
-		WireStep(fault.ConnectionResetByPeer()).
+		WirePipe(fault.ConnectionResetByPeer()).
 		Reply(mockhttp.OK()),
 	// The retry gets its body over a 3G link.
 	mockhttp.Getf("/report").Priority(1).
-		Step(fault.Bandwidth(fault.Bandwidth3G)).
+		Pipe(fault.Bandwidth(fault.Bandwidth3G)).
 		Reply(mockhttp.OK().BodyFile("testdata/report.csv")),
 )
 ```
@@ -213,7 +213,7 @@ m.MustMock(
 ```yaml [Mock file]
 request: {method: GET, path: /report}
 response: {status: 200, body_file: report.csv}
-steps:
+pipes:
   - type: bandwidth
     rate: 3g
 ```

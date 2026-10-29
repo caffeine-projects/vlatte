@@ -24,10 +24,10 @@ import (
 )
 
 var (
-	_ vlatte.Step  = wireLogStep{}
+	_ vlatte.Pipe  = wireLogPipe{}
 	_ vlatte.Stage = (*wireLogStage)(nil)
-	_ vlatte.Step  = holdHeadStep{}
-	_ vlatte.Step  = seenStep{}
+	_ vlatte.Pipe  = holdHeadPipe{}
+	_ vlatte.Pipe  = seenPipe{}
 )
 
 // dialServer opens a connection to the server of m, and sends it a GET of path in HTTP/1.1.
@@ -53,10 +53,10 @@ func readWire(conn net.Conn) ([]byte, error) {
 	return io.ReadAll(conn)
 }
 
-// wireLogStep sends what its stage passed on, as it ends.
-type wireLogStep struct{ got chan<- []byte }
+// wireLogPipe sends what its stage passed on, as it ends.
+type wireLogPipe struct{ got chan<- []byte }
 
-func (s wireLogStep) Open(_ *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+func (s wireLogPipe) Open(_ *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	return &wireLogStage{got: s.got, next: next}
 }
 
@@ -79,14 +79,14 @@ func (s *wireLogStage) Close() error {
 }
 
 func TestWire_AStageSeesEveryByteOfTheAnswer(t *testing.T) {
-	// A fault on the wire changes what isn't the body: the status line, the headers and the framing. The steps see
+	// A fault on the wire changes what isn't the body: the status line, the headers and the framing. The pipes see
 	// what the client reads, an HTTP/1.1 answer that ends with the connection.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
 	got := make(chan []byte, 1)
-	scoped := m.MustMock(Getf("/wire").Step(appendStep("!")).WireStep(wireLogStep{got: got}).Reply(OK().PlainText("hello")))
+	scoped := m.MustMock(Getf("/wire").Pipe(appendPipe("!")).WirePipe(wireLogPipe{got: got}).Reply(OK().PlainText("hello")))
 
 	wire, err := readWire(dialServer(t, m, "/wire"))
 	require.NoError(t, err)
@@ -98,7 +98,7 @@ func TestWire_AStageSeesEveryByteOfTheAnswer(t *testing.T) {
 	body, err := io.ReadAll(res.Body)
 	require.NoError(t, err)
 
-	// The body steps come first: the wire sees the body they send.
+	// The body pipes come first: the wire sees the body they send.
 	require.Equal(t, "hello!", string(body))
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	require.Equal(t, "HTTP/1.1", res.Proto)
@@ -116,14 +116,14 @@ func TestWire_AnAbortClosesTheConnectionThere(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	headOnly := vlatte.StepFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
+	headOnly := vlatte.PipeFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
 		if bytes.HasPrefix(b, []byte("HTTP/1.1 ")) {
 			return next.Write(b)
 		}
 
 		return 0, vlatte.ErrAbort
 	})
-	scoped := m.MustMock(Getf("/cut").WireStep(headOnly).Reply(OK().PlainText("hello")))
+	scoped := m.MustMock(Getf("/cut").WirePipe(headOnly).Reply(OK().PlainText("hello")))
 
 	wire, err := readWire(dialServer(t, m, "/cut"))
 	require.NoError(t, err)
@@ -143,8 +143,8 @@ func TestWire_AResetResetsTheConnection(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	reset := vlatte.StepFunc(func(context.Context, []byte, vlatte.Stage) (int, error) { return 0, vlatte.ErrReset })
-	scoped := m.MustMock(Getf("/reset").WireStep(reset).Reply(OK().PlainText("hello")))
+	reset := vlatte.PipeFunc(func(context.Context, []byte, vlatte.Stage) (int, error) { return 0, vlatte.ErrReset })
+	scoped := m.MustMock(Getf("/reset").WirePipe(reset).Reply(OK().PlainText("hello")))
 
 	wire, err := readWire(dialServer(t, m, "/reset"))
 	require.ErrorIs(t, err, syscall.ECONNRESET)
@@ -152,17 +152,17 @@ func TestWire_AResetResetsTheConnection(t *testing.T) {
 	require.EqualValues(t, 1, scoped.Hits())
 }
 
-// holdHeadStep holds the first bytes of the answer, the status line and the headers, until release is closed. It
+// holdHeadPipe holds the first bytes of the answer, the status line and the headers, until release is closed. It
 // tells held once it holds them.
-type holdHeadStep struct {
+type holdHeadPipe struct {
 	held    chan<- struct{}
 	release <-chan struct{}
 }
 
-func (s holdHeadStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+func (s holdHeadPipe) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	first := true
 
-	return vlatte.StepFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
+	return vlatte.PipeFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
 		if first {
 			first = false
 			close(s.held)
@@ -182,7 +182,7 @@ func TestWire_AStageCanHoldTheStatusLine(t *testing.T) {
 
 	held := make(chan struct{})
 	release := make(chan struct{})
-	m.MustMock(Getf("/slow").WireStep(holdHeadStep{held: held, release: release}).Reply(OK().PlainText("hello")))
+	m.MustMock(Getf("/slow").WirePipe(holdHeadPipe{held: held, release: release}).Reply(OK().PlainText("hello")))
 
 	conn := dialServer(t, m, "/slow")
 	<-held
@@ -204,14 +204,14 @@ func TestWire_AStageCanHoldTheStatusLine(t *testing.T) {
 	require.Equal(t, "hello", string(body))
 }
 
-func TestWire_AFailureIsVlattesAnswerWithoutTheSteps(t *testing.T) {
-	// A failure is vlatte's answer, not the mock's: a step that drops everything doesn't hide it.
+func TestWire_AFailureIsVlattesAnswerWithoutThePipes(t *testing.T) {
+	// A failure is vlatte's answer, not the mock's: a pipe that drops everything doesn't hide it.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	drop := vlatte.StepFunc(func(_ context.Context, b []byte, _ vlatte.Stage) (int, error) { return len(b), nil })
-	m.MustMock(Getf("/fail").WireStep(drop).Reply(OK().BodyFile("missing.txt")))
+	drop := vlatte.PipeFunc(func(_ context.Context, b []byte, _ vlatte.Stage) (int, error) { return len(b), nil })
+	m.MustMock(Getf("/fail").WirePipe(drop).Reply(OK().BodyFile("missing.txt")))
 
 	wire, err := readWire(dialServer(t, m, "/fail"))
 	require.NoError(t, err)
@@ -226,15 +226,15 @@ func TestWire_AFailureIsVlattesAnswerWithoutTheSteps(t *testing.T) {
 	require.True(t, res.Close)
 }
 
-func TestWire_APanicIsVlattesAnswerWithoutTheSteps(t *testing.T) {
+func TestWire_APanicIsVlattesAnswerWithoutThePipes(t *testing.T) {
 	// A panic is a failure, which the client learns from vlatte's answer on the connection the mock took over, as on
-	// any other: a step that drops everything doesn't hide it.
+	// any other: a pipe that drops everything doesn't hide it.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	drop := vlatte.StepFunc(func(_ context.Context, b []byte, _ vlatte.Stage) (int, error) { return len(b), nil })
-	m.MustMock(Getf("/panic").WireStep(drop).Reply(Handler(func(http.ResponseWriter, *http.Request) {
+	drop := vlatte.PipeFunc(func(_ context.Context, b []byte, _ vlatte.Stage) (int, error) { return len(b), nil })
+	m.MustMock(Getf("/panic").WirePipe(drop).Reply(Handler(func(http.ResponseWriter, *http.Request) {
 		panic("boom")
 	})))
 
@@ -259,7 +259,7 @@ func TestWire_AHandlerThatAbortsCutsTheConnection(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/abort").WireStep(vlatte.StepFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+	m.MustMock(Getf("/abort").WirePipe(vlatte.PipeFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "part")
 		w.(http.Flusher).Flush()
 		panic(http.ErrAbortHandler)
@@ -281,7 +281,7 @@ func TestWire_ABodyThatFailsIsVlattesAnswer(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	scoped := m.MustMock(Postf("/body").WireStep(vlatte.StepFunc(passWire)).Reply(OK()))
+	scoped := m.MustMock(Postf("/body").WirePipe(vlatte.PipeFunc(passWire)).Reply(OK()))
 
 	u, err := url.Parse(m.URL("/body"))
 	require.NoError(t, err)
@@ -306,14 +306,14 @@ func TestWire_ABodyThatFailsIsVlattesAnswer(t *testing.T) {
 
 func TestWire_BehindAWriterThatCantHandTheConnectionOverIsVlattesAnswer(t *testing.T) {
 	// A middleware's writer that doesn't unwrap to the server's can't give the connection over: the client learns
-	// why, rather than an answer without the steps.
+	// why, rather than an answer without the pipes.
 	m := MustNew(Setup().Silent().Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { next.ServeHTTP(opaqueWriter{w}, r) })
 	}))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	scoped := m.MustMock(Getf("/wire").WireStep(vlatte.StepFunc(passWire)).Reply(OK().PlainText("hello")))
+	scoped := m.MustMock(Getf("/wire").WirePipe(vlatte.PipeFunc(passWire)).Reply(OK().PlainText("hello")))
 
 	res, err := http.ReadResponse(bufio.NewReader(dialServer(t, m, "/wire")), nil)
 	require.NoError(t, err)
@@ -339,7 +339,7 @@ func TestWire_WhileTheServerClosesNothingIsAnswered(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	scoped := m.MustMock(Getf("/wire").WireStep(vlatte.StepFunc(passWire)).Reply(OK().PlainText("hello")))
+	scoped := m.MustMock(Getf("/wire").WirePipe(vlatte.PipeFunc(passWire)).Reply(OK().PlainText("hello")))
 
 	// net/http logs a write on a connection taken over to the log package, without a server ErrorLog.
 	logs := &lockedBuffer{}
@@ -360,13 +360,13 @@ func TestWire_WhileTheServerClosesNothingIsAnswered(t *testing.T) {
 }
 
 func TestWire_OverHTTP2IsVlattesAnswer(t *testing.T) {
-	// HTTP/2 can't give a connection over, so a mock with wire steps can't answer on it: the client learns why, rather
-	// than an answer without the steps.
+	// HTTP/2 can't give a connection over, so a mock with wire pipes can't answer on it: the client learns why, rather
+	// than an answer without the pipes.
 	m := MustNew(Setup().Silent())
 	m.MustStartTLS()
 	t.Cleanup(m.Close)
 
-	scoped := m.MustMock(Getf("/h2").WireStep(wireLogStep{got: make(chan []byte, 1)}).Reply(OK().PlainText("hello")))
+	scoped := m.MustMock(Getf("/h2").WirePipe(wireLogPipe{got: make(chan []byte, 1)}).Reply(OK().PlainText("hello")))
 
 	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, Protocols: new(http.Protocols)}
 	tr.Protocols.SetHTTP2(true)
@@ -393,7 +393,7 @@ func TestWire_TheEndOfTheAnswerCarriesTheTrailers(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/trailer").WireStep(vlatte.StepFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+	m.MustMock(Getf("/trailer").WirePipe(vlatte.PipeFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Trailer", "X-Sum")
 		_, _ = io.WriteString(w, "body")
 		w.Header().Set("X-Sum", "4")
@@ -419,7 +419,7 @@ func TestWire_ATrailerSetBeforeTheBodyStaysOutOfTheHead(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/trailer").WireStep(vlatte.StepFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+	m.MustMock(Getf("/trailer").WirePipe(vlatte.PipeFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set(http.TrailerPrefix+"X-Early", "yes")
 		_, _ = io.WriteString(w, "body")
 	})))
@@ -445,7 +445,7 @@ func TestWire_AnEmptyWriteDoesntEndTheBody(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/empty").WireStep(vlatte.StepFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+	m.MustMock(Getf("/empty").WirePipe(vlatte.PipeFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "bo")
 		_, _ = w.Write(nil)
 		_, _ = io.WriteString(w, "dy")
@@ -466,7 +466,7 @@ func TestWire_AReplyThatWritesNothingAnswers200(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	scoped := m.MustMock(Getf("/nothing").WireStep(vlatte.StepFunc(passWire)).Reply(Handler(func(http.ResponseWriter, *http.Request) {})))
+	scoped := m.MustMock(Getf("/nothing").WirePipe(vlatte.PipeFunc(passWire)).Reply(Handler(func(http.ResponseWriter, *http.Request) {})))
 
 	wire, err := readWire(dialServer(t, m, "/nothing"))
 	require.NoError(t, err)
@@ -490,7 +490,7 @@ func TestWire_AnHTTP10ClientGetsAnAnswerThatEndsWithTheConnection(t *testing.T) 
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/old").WireStep(vlatte.StepFunc(passWire)).Reply(OK().PlainText("hello")))
+	m.MustMock(Getf("/old").WirePipe(vlatte.PipeFunc(passWire)).Reply(OK().PlainText("hello")))
 
 	u, err := url.Parse(m.URL("/old"))
 	require.NoError(t, err)
@@ -515,7 +515,7 @@ func TestWire_AHeadAnswerHasNoBody(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	got := make(chan []byte, 1)
-	m.MustMock(Headf("/head").WireStep(wireLogStep{got: got}).Reply(OK().PlainText("hello")))
+	m.MustMock(Headf("/head").WirePipe(wireLogPipe{got: got}).Reply(OK().PlainText("hello")))
 
 	u, err := url.Parse(m.URL("/head"))
 	require.NoError(t, err)
@@ -541,7 +541,7 @@ func TestWire_AnInformationalStatusComesFirst(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/hint").WireStep(vlatte.StepFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+	m.MustMock(Getf("/hint").WirePipe(vlatte.PipeFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Link", "</style.css>; rel=preload")
 		w.WriteHeader(http.StatusEarlyHints)
 		w.WriteHeader(http.StatusAccepted)
@@ -572,7 +572,7 @@ func TestWire_ANoContentAnswerRefusesABody(t *testing.T) {
 
 	written := make(chan error, 1)
 
-	m.MustMock(Getf("/none").WireStep(vlatte.StepFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+	m.MustMock(Getf("/none").WirePipe(vlatte.PipeFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		_, err := io.WriteString(w, "body")
 		written <- err
@@ -594,7 +594,7 @@ func TestWire_AnUnknownStatusHasAText(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/odd").WireStep(vlatte.StepFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+	m.MustMock(Getf("/odd").WirePipe(vlatte.PipeFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(599)
 	})))
 
@@ -610,7 +610,7 @@ func TestWire_TheRequestBodyCanStillBeRead(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Postf("/body").WireStep(vlatte.StepFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, r *http.Request) {
+	m.MustMock(Postf("/body").WirePipe(vlatte.PipeFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, r *http.Request) {
 		b, err := io.ReadAll(r.Body)
 		if err != nil {
 			b = []byte(err.Error())
@@ -628,19 +628,19 @@ func TestWire_TheRequestBodyCanStillBeRead(t *testing.T) {
 	require.Equal(t, "ping", string(body))
 }
 
-// seenStep sends each part its stage gets on seen, then passes it on.
-type seenStep struct{ seen chan<- string }
+// seenPipe sends each part its stage gets on seen, then passes it on.
+type seenPipe struct{ seen chan<- string }
 
-func (s seenStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
-	return vlatte.StepFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
+func (s seenPipe) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+	return vlatte.PipeFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
 		s.seen <- string(b)
 		return next.Write(b)
 	}).Open(flow, next)
 }
 
-func TestWire_UpstreamStepsTakeABodyLeftUnreadAsItComes(t *testing.T) {
+func TestWire_UpstreamPipesTakeABodyLeftUnreadAsItComes(t *testing.T) {
 	// The mock takes its connection over before it replies, so it reads first what the server left of the body,
-	// through the upstream steps: they take it from the client as it comes, so a stage that holds a part holds the
+	// through the upstream pipes: they take it from the client as it comes, so a stage that holds a part holds the
 	// upload. The target gets the body as they passed it on, once.
 	got := make(chan upstreamReceived, 1)
 	target := receivingTarget(t, got)
@@ -651,8 +651,8 @@ func TestWire_UpstreamStepsTakeABodyLeftUnreadAsItComes(t *testing.T) {
 
 	seen := make(chan string, 4)
 	m.MustMock(Postf("/up").
-		WireStep(vlatte.StepFunc(passWire)).
-		UpstreamStep(seenStep{seen: seen}, appendStep("?")).
+		WirePipe(vlatte.PipeFunc(passWire)).
+		UpstreamPipe(seenPipe{seen: seen}, appendPipe("?")).
 		Reply(From(target.URL)))
 
 	upload, sending := io.Pipe()
@@ -675,7 +675,7 @@ func TestWire_UpstreamStepsTakeABodyLeftUnreadAsItComes(t *testing.T) {
 	case part := <-seen:
 		require.Equal(t, "part1", part)
 	case <-time.After(5 * time.Second):
-		require.Fail(t, "the steps waited for the whole upload")
+		require.Fail(t, "the pipes waited for the whole upload")
 	}
 
 	_, err = io.WriteString(sending, "part2")
@@ -686,8 +686,8 @@ func TestWire_UpstreamStepsTakeABodyLeftUnreadAsItComes(t *testing.T) {
 	require.Equal(t, upstreamReceived{body: "part1?part2?", contentLength: -1, transferEncoding: []string{"chunked"}}, <-got)
 }
 
-func TestWire_TheTargetGetsTheBodyTheUpstreamStepsPassedOn(t *testing.T) {
-	// A client that sends its length sends a body the steps can change: the target gets theirs, chunked, rather than
+func TestWire_TheTargetGetsTheBodyTheUpstreamPipesPassedOn(t *testing.T) {
+	// A client that sends its length sends a body the pipes can change: the target gets theirs, chunked, rather than
 	// a body whose length the client's no longer tells.
 	got := make(chan upstreamReceived, 1)
 	target := receivingTarget(t, got)
@@ -696,7 +696,7 @@ func TestWire_TheTargetGetsTheBodyTheUpstreamStepsPassedOn(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Postf("/up").WireStep(vlatte.StepFunc(passWire)).UpstreamStep(appendStep("?")).Reply(From(target.URL)))
+	m.MustMock(Postf("/up").WirePipe(vlatte.PipeFunc(passWire)).UpstreamPipe(appendPipe("?")).Reply(From(target.URL)))
 
 	res, err := (&http.Client{Transport: &http.Transport{DisableKeepAlives: true}}).Post(m.URL("/up"), MIMETextPlain, strings.NewReader("ping"))
 	require.NoError(t, err)
@@ -707,13 +707,13 @@ func TestWire_TheTargetGetsTheBodyTheUpstreamStepsPassedOn(t *testing.T) {
 }
 
 func TestWire_AReplyReadsTheBodyTheClientSent(t *testing.T) {
-	// The upstream steps shape what a proxy sends on: a reply that reads the body itself reads the client's, as the
-	// same mock without wire steps does.
+	// The upstream pipes shape what a proxy sends on: a reply that reads the body itself reads the client's, as the
+	// same mock without wire pipes does.
 	m := MustNew(Setup().Silent().NoBodyParsing())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Postf("/body").WireStep(vlatte.StepFunc(passWire)).UpstreamStep(appendStep("?")).Reply(Handler(func(w http.ResponseWriter, r *http.Request) {
+	m.MustMock(Postf("/body").WirePipe(vlatte.PipeFunc(passWire)).UpstreamPipe(appendPipe("?")).Reply(Handler(func(w http.ResponseWriter, r *http.Request) {
 		b, err := io.ReadAll(r.Body)
 		if err != nil {
 			b = []byte(err.Error())
@@ -753,7 +753,7 @@ func stallUpload(t *testing.T, m *Server, path string) net.Conn {
 }
 
 func TestWire_AnUpstreamAbortEndsAStalledUpload(t *testing.T) {
-	// A step that times the upload out, while the client sends nothing more, cuts the answer then: the mock doesn't
+	// A pipe that times the upload out, while the client sends nothing more, cuts the answer then: the mock doesn't
 	// wait for a client that may never send the rest.
 	target := receivingTarget(t, make(chan upstreamReceived, 1))
 
@@ -764,8 +764,8 @@ func TestWire_AnUpstreamAbortEndsAStalledUpload(t *testing.T) {
 	seen := make(chan string, 1)
 	release := make(chan struct{})
 	scoped := m.MustMock(Postf("/up").
-		WireStep(vlatte.StepFunc(passWire)).
-		UpstreamStep(seenStep{seen: seen}, abortOn{release: release, err: errors.New("step: timed out")}).
+		WirePipe(vlatte.PipeFunc(passWire)).
+		UpstreamPipe(seenPipe{seen: seen}, abortOn{release: release, err: errors.New("pipe: timed out")}).
 		Reply(From(target.URL)))
 
 	conn := stallUpload(t, m, "/up")
@@ -790,8 +790,8 @@ func TestWire_AnUpstreamAbortOfABodyLeftUnreadCutsTheAnswer(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	scoped := m.MustMock(Postf("/up").
-		WireStep(vlatte.StepFunc(passWire)).
-		UpstreamStep(limitStep{n: 2, err: vlatte.ErrAbort}).
+		WirePipe(vlatte.PipeFunc(passWire)).
+		UpstreamPipe(limitPipe{n: 2, err: vlatte.ErrAbort}).
 		Reply(From(target.URL)))
 
 	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
@@ -802,15 +802,15 @@ func TestWire_AnUpstreamAbortOfABodyLeftUnreadCutsTheAnswer(t *testing.T) {
 	require.Empty(t, got)
 }
 
-func TestWire_AnAbortOfTheBodyStepsCutsTheWireToo(t *testing.T) {
-	// A body step that cuts the answer cuts the connection the wire steps answer on.
+func TestWire_AnAbortOfTheBodyPipesCutsTheWireToo(t *testing.T) {
+	// A body pipe that cuts the answer cuts the connection the wire pipes answer on.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
 	m.MustMock(Getf("/both").
-		Step(limitStep{n: 2, err: vlatte.ErrReset}).
-		WireStep(vlatte.StepFunc(passWire)).
+		Pipe(limitPipe{n: 2, err: vlatte.ErrReset}).
+		WirePipe(vlatte.PipeFunc(passWire)).
 		Reply(OK().PlainText("hello")))
 
 	_, err := readWire(dialServer(t, m, "/both"))
@@ -824,7 +824,7 @@ func TestWire_AFlushSendsTheHeadAtOnce(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	release := make(chan struct{})
-	m.MustMock(Getf("/stream").WireStep(vlatte.StepFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+	m.MustMock(Getf("/stream").WirePipe(vlatte.PipeFunc(passWire)).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		w.(http.Flusher).Flush()
 		<-release
 		_, _ = io.WriteString(w, "event")
@@ -844,16 +844,16 @@ func TestWire_AFlushSendsTheHeadAtOnce(t *testing.T) {
 	require.Equal(t, "event", string(body))
 }
 
-func TestWire_ACutOfTheBodyStepsEndsTheAnswerShort(t *testing.T) {
-	// A body step that cuts the answer leaves the client with a body that breaks off, not one that looks whole: the
+func TestWire_ACutOfTheBodyPipesEndsTheAnswerShort(t *testing.T) {
+	// A body pipe that cuts the answer leaves the client with a body that breaks off, not one that looks whole: the
 	// wire doesn't get its last chunk.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
 	scoped := m.MustMock(Getf("/cut").
-		Step(limitStep{n: 2, err: vlatte.ErrAbort}).
-		WireStep(vlatte.StepFunc(passWire)).
+		Pipe(limitPipe{n: 2, err: vlatte.ErrAbort}).
+		WirePipe(vlatte.PipeFunc(passWire)).
 		Reply(OK().PlainText("hello")))
 
 	res, err := http.ReadResponse(bufio.NewReader(dialServer(t, m, "/cut")), nil)

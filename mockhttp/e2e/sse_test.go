@@ -194,7 +194,7 @@ func TestSSE_ReconnectsAfterADropAndResumes(t *testing.T) {
 	).Retry(1500 * time.Millisecond).ResumeFromLastEventID()
 
 	m.MustMock(mockhttp.Getf("/events").Once().
-		Step(fault.LimitData(len("retry: 1500\n\nid: 1\ndata: a\n\n"))).
+		Pipe(fault.LimitData(len("retry: 1500\n\nid: 1\ndata: a\n\n"))).
 		Reply(mockhttp.OK().EventStream(stream)))
 	m.MustMock(mockhttp.Getf("/events").
 		Header(mockhttp.HeaderLastEventID, match.Equal("1")).

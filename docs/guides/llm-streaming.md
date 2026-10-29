@@ -119,7 +119,7 @@ func TestFailsWhenTheStreamDrops(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	m.MustMock(mockhttp.Postf("/v1/chat/completions").
-		Step(fault.LimitData(100)).
+		Pipe(fault.LimitData(100)).
 		Reply(mockhttp.OK().EventStream(mockhttp.NewEventStream(
 			chunk("Hel"), chunk("lo, "), chunk("world"),
 			mockhttp.NewEvent().Data("[DONE]"),

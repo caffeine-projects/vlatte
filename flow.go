@@ -27,10 +27,10 @@ var (
 	_ Stage = (*funcStage)(nil)
 	_ Stage = clipped{}
 	_ Stage = sinkStage{}
-	_ Step  = StepFunc(nil)
+	_ Pipe  = PipeFunc(nil)
 )
 
-// Stage is a step's part of one [Flow]. Write follows [io.Writer]: n is how much of b the stage took, which is len(b)
+// Stage is a pipe's part of one [Flow]. Write follows [io.Writer]: n is how much of b the stage took, which is len(b)
 // when it passed b on changed, in parts, later, or not at all.
 //
 // A stage decides what goes on to next: b as it is, changed or in parts, later, or nothing. It fails the flow by
@@ -49,36 +49,36 @@ type Stage interface {
 	Close() error
 }
 
-// Step makes its [Stage] of each [Flow] it is part of, in front of next: the rest of the flow. A step keeps what
-// lasts the whole flow in its stage, such as a count of the bytes it passed. A mock's steps make the stages of all
+// Pipe makes its [Stage] of each [Flow] it is part of, in front of next: the rest of the flow. A pipe keeps what
+// lasts the whole flow in its stage, such as a count of the bytes it passed. A mock's pipes make the stages of all
 // its responses: Open must be safe for concurrent use.
 //
 // flow gives the stage the flow's context, and a way to abort it from a timer: see [Flow.Abort].
-type Step interface {
+type Pipe interface {
 	Open(flow *Flow, next Stage) Stage
 }
 
-// StepFunc is a [Step] with no state, an adapter for ordinary functions: its stage calls it for each write, with the
+// PipeFunc is a [Pipe] with no state, an adapter for ordinary functions: its stage calls it for each write, with the
 // flow's context, and passes Flush and Close on.
 //
 // Example:
 //
-//	StepFunc(func(ctx context.Context, b []byte, next Stage) (int, error) {
+//	PipeFunc(func(ctx context.Context, b []byte, next Stage) (int, error) {
 //	    if _, err := next.Write(bytes.ToUpper(b)); err != nil {
 //	        return 0, err
 //	    }
 //
 //	    return len(b), nil
 //	})
-type StepFunc func(ctx context.Context, b []byte, next Stage) (n int, err error)
+type PipeFunc func(ctx context.Context, b []byte, next Stage) (n int, err error)
 
 // Open makes the stage of f in flow, in front of next.
-func (f StepFunc) Open(flow *Flow, next Stage) Stage {
+func (f PipeFunc) Open(flow *Flow, next Stage) Stage {
 	return &funcStage{fn: f, ctx: flow.Context(), next: next}
 }
 
-// Flow is one stream through steps: a response body, the bytes of a response on the wire, a request body, one
-// direction of a connection. Each step has its [Stage] in it, and the sink comes last.
+// Flow is one stream through pipes: a response body, the bytes of a response on the wire, a request body, one
+// direction of a connection. Each pipe has its [Stage] in it, and the sink comes last.
 //
 // A flow is a [Stage] itself: its caller calls Write, Flush and Close, one call at a time, and Close once the stream
 // ends. Once its [Flow.Context] ends, Write and Flush return the cause.
@@ -89,16 +89,16 @@ type Flow struct {
 	closed bool
 }
 
-// NewFlow opens the stages of steps in a new flow, in front of sink, from the last step to the first. The flow's
-// context derives from ctx, typically the request's, so its stages stop when the client leaves. Steps can be shared,
-// such as a mock's steps across its concurrent requests: NewFlow neither keeps nor changes steps.
-func NewFlow(ctx context.Context, sink Stage, steps []Step) *Flow {
+// NewFlow opens the stages of pipes in a new flow, in front of sink, from the last pipe to the first. The flow's
+// context derives from ctx, typically the request's, so its stages stop when the client leaves. Pipes can be shared,
+// such as a mock's pipes across its concurrent requests: NewFlow neither keeps nor changes pipes.
+func NewFlow(ctx context.Context, sink Stage, pipes []Pipe) *Flow {
 	f := &Flow{}
 	f.ctx, f.cancel = context.WithCancelCause(ctx)
 
 	next := Stage(sinkStage{flow: f, sink: sink})
-	for _, step := range slices.Backward(steps) {
-		next = clipped{step.Open(f, next)}
+	for _, pipe := range slices.Backward(pipes) {
+		next = clipped{pipe.Open(f, next)}
 	}
 
 	f.head = next
@@ -169,9 +169,9 @@ func (f *Flow) check(err error) error {
 	return err
 }
 
-// funcStage is the stage of a StepFunc in a flow.
+// funcStage is the stage of a PipeFunc in a flow.
 type funcStage struct {
-	fn   StepFunc
+	fn   PipeFunc
 	ctx  context.Context
 	next Stage
 }

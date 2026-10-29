@@ -23,7 +23,7 @@ import (
 var (
 	_ ReplierFactory = (*ProxyReply)(nil)
 	_ Replier        = (*proxyReplier)(nil)
-	_ io.ReadCloser  = (*stepReader)(nil)
+	_ io.ReadCloser  = (*pipeReader)(nil)
 	_ io.Closer      = (*proxyReplier)(nil)
 )
 
@@ -331,15 +331,15 @@ func (p *proxyReplier) Reply(ctx context.Context, input ReplyInput) (*Response, 
 		out.Header.Del(HeaderUpgrade)
 	}
 
-	// The body goes through the upstream steps of the mock, which can change its length: it goes chunked, and a retry
-	// of the transport, which would read it again past the steps, can't happen. A stage that aborts ends the call.
-	var up *stepReader
+	// The body goes through the upstream pipes of the mock, which can change its length: it goes chunked, and a retry
+	// of the transport, which would read it again past the pipes, can't happen. A stage that aborts ends the call.
+	var up *pipeReader
 
 	switch {
 	case input.upstreamBody != nil:
 		out.Body = io.NopCloser(input.upstreamBody)
 	case len(input.upstream) > 0 && out.Body != nil && out.Body != http.NoBody:
-		up = newStepReader(out.Context(), out.Body, input.upstream)
+		up = newPipeReader(out.Context(), out.Body, input.upstream)
 
 		out = out.WithContext(up.ctx)
 		out.Body = up
@@ -499,19 +499,19 @@ func escapedIndex(escaped string, n int) int {
 	return i
 }
 
-// _upstreamPiece is how much of a body the upstream steps take at a time: of a body still the client's, a stage that
+// _upstreamPiece is how much of a body the upstream pipes take at a time: of a body still the client's, a stage that
 // holds a piece holds the client's upload after little of it.
 const _upstreamPiece = 1 << 10
 
-// errBodyEnded ends the flow of a stepReader whose body broke off, or whose reader stopped, such as a target that
+// errBodyEnded ends the flow of a pipeReader whose body broke off, or whose reader stopped, such as a target that
 // answered early: the stages stop, but no stage asked for a cut.
-var errBodyEnded = errors.New("reply_proxy: the body ended before its steps did")
+var errBodyEnded = errors.New("reply_proxy: the body ended before its pipes did")
 
-// stepReader reads a body through a flow of steps: from the first read, a goroutine copies the body through the flow,
+// pipeReader reads a body through a flow of pipes: from the first read, a goroutine copies the body through the flow,
 // whose sink is a pipe the reader reads, so a stage that writes later, or in parts, is read as it writes. The copy
 // takes the body as it is read, a piece at a time: of a body still the client's, a stage that holds a piece holds the
 // upload. ctx, for the call that reads it, ends with the cause of an abort a stage asks for, and so does the reader.
-type stepReader struct {
+type pipeReader struct {
 	ctx   context.Context
 	flow  *vlatte.Flow
 	pipe  *io.PipeReader
@@ -521,13 +521,13 @@ type stepReader struct {
 	done  chan struct{}
 }
 
-// newStepReader opens a flow of steps, within ctx, for body.
-func newStepReader(ctx context.Context, body io.ReadCloser, steps []vlatte.Step) *stepReader {
+// newPipeReader opens a flow of pipes, within ctx, for body.
+func newPipeReader(ctx context.Context, body io.ReadCloser, pipes []vlatte.Pipe) *pipeReader {
 	ctx, cancel := context.WithCancelCause(ctx)
 	pr, pw := io.Pipe()
 
-	r := &stepReader{ctx: ctx, pipe: pr, sink: pw, body: body, done: make(chan struct{})}
-	r.flow = vlatte.NewFlow(ctx, &vlatte.Sink{W: pw}, steps)
+	r := &pipeReader{ctx: ctx, pipe: pr, sink: pw, body: body, done: make(chan struct{})}
+	r.flow = vlatte.NewFlow(ctx, &vlatte.Sink{W: pw}, pipes)
 
 	context.AfterFunc(r.flow.Context(), func() {
 		if cause := r.aborted(); cause != nil {
@@ -539,17 +539,17 @@ func newStepReader(ctx context.Context, body io.ReadCloser, steps []vlatte.Step)
 	return r
 }
 
-// Read starts the copy, at the first read, and reads what the steps passed on.
-func (r *stepReader) Read(p []byte) (int, error) {
+// Read starts the copy, at the first read, and reads what the pipes passed on.
+func (r *pipeReader) Read(p []byte) (int, error) {
 	r.start.Do(func() { go r.copy() })
 	return r.pipe.Read(p)
 }
 
-// Close stops the copy, and the steps, which drop what they hold, and waits for them to end. After an abort, it
+// Close stops the copy, and the pipes, which drop what they hold, and waits for them to end. After an abort, it
 // neither closes the body nor waits for the copy, which may wait on a client that sends nothing more: closing a
 // server's request body reads the rest of it. The cut that follows ends the connection, and the copy with it.
-func (r *stepReader) Close() error {
-	// A body never read has no copy to wait for: its steps end here.
+func (r *pipeReader) Close() error {
+	// A body never read has no copy to wait for: its pipes end here.
 	r.start.Do(func() {
 		r.flow.Abort(errBodyEnded)
 		_ = r.flow.Close()
@@ -570,7 +570,7 @@ func (r *stepReader) Close() error {
 
 // copy copies the body through the flow, in pieces of _upstreamPiece: the body's own WriterTo, if any, is hidden, so
 // it can't pass more at once.
-func (r *stepReader) copy() {
+func (r *pipeReader) copy() {
 	defer close(r.done)
 
 	_, err := io.CopyBuffer(r.flow, struct{ io.Reader }{r.body}, make([]byte, _upstreamPiece))
@@ -581,8 +581,8 @@ func (r *stepReader) copy() {
 	r.sink.CloseWithError(cmp.Or(err, r.flow.Close()))
 }
 
-// aborted returns the cause of the flow when a stage aborted it, or nil. A nil r, for a body without steps, has none.
-func (r *stepReader) aborted() error {
+// aborted returns the cause of the flow when a stage aborted it, or nil. A nil r, for a body without pipes, has none.
+func (r *pipeReader) aborted() error {
 	if r == nil {
 		return nil
 	}

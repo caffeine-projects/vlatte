@@ -18,7 +18,7 @@ Import the packages you use: `mockhttp` for HTTP, `mockgrpc` for gRPC, and `matc
 | `match/matchbuild` | The matcher lists of mock files, and the registry of custom matchers |
 | `match/matchscenario` | Scenario state for mock servers |
 | `webhook` | Calling a URL after a mock is served |
-| `fault` | Steps that make an HTTP mock answer wrong |
+| `fault` | Pipes that make an HTTP mock answer wrong |
 | `journal` | The request journal |
 | `admin` | The admin API |
 | `recipe/<protocol>/<recipe>` | Recipes that prepare a server, such as `recipe/http/proxyall` |
