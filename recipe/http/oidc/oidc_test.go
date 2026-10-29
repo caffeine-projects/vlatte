@@ -180,6 +180,45 @@ func TestOIDC_Options(t *testing.T) {
 	require.Equal(t, "app", claims["aud"])
 }
 
+func TestOIDC_SignsWithTheKeyItIsGiven(t *testing.T) {
+	// A server can hold several keys: the recipe signs with the one KeyID names, and discovery announces that key's
+	// algorithm, so a client that checks it accepts the tokens.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().TemplateKeys(oidc.DefaultKeyID+"=RS256", "ec=ES256"))
+	require.NoError(t, m.Prep(t.Context(), oidc.New(oidc.KeyID("ec"))))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	_, body := get(t, m.URL("/.well-known/openid-configuration"), "")
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal([]byte(body), &doc))
+	require.Equal(t, []any{"ES256"}, doc["id_token_signing_alg_values_supported"])
+
+	code, _ := authorize(t, m, nil)
+	status, tokens := exchange(t, m, code, "")
+	require.Equal(t, http.StatusOK, status)
+
+	tok, err := jose.Parse(tokens["id_token"].(string))
+	require.NoError(t, err)
+	require.Equal(t, "ES256", tok.Alg)
+	require.Equal(t, "ec", tok.Kid)
+}
+
+func TestOIDC_KeepsTheClaimsItWasGiven(t *testing.T) {
+	// A test that reuses its claims map for another server must not change what this one answers.
+	claims := map[string]any{"sub": "ana"}
+	m := newServer(t, oidc.Claims(claims))
+	claims["sub"] = "bob"
+
+	code, _ := authorize(t, m, nil)
+	_, tokens := exchange(t, m, code, "")
+	status, body := get(t, m.URL("/userinfo"), "Bearer "+oidc.DefaultAccessToken)
+
+	require.Equal(t, http.StatusOK, status)
+	require.JSONEq(t, `{"sub": "ana"}`, body)
+	require.Equal(t, "ana", verify(t, m, tokens["id_token"].(string))["sub"])
+}
+
 func TestOIDC_AuthorizeNeedsAnOpenIDScopeAndTheClient(t *testing.T) {
 	m := newServer(t)
 
@@ -204,8 +243,8 @@ func TestOIDC_PrepFailsOnAServerWithoutTheKey(t *testing.T) {
 }
 
 func TestOIDC_WorksWithAKeyFromTheSettings(t *testing.T) {
-	// The setup the package doc shows: a key generated from template.keys, with the default algorithm.
-	m := mockhttp.MustNew(mockhttp.Setup().Silent().TemplateKeys(oidc.DefaultKeyID + "=" + oidc.DefaultAlg))
+	// The setup the package doc shows: a key generated from template.keys.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().TemplateKeys(oidc.DefaultKeyID + "=RS256"))
 	require.NoError(t, m.Prep(t.Context(), oidc.New()))
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -230,7 +269,7 @@ func newServer(t *testing.T, opts ...oidc.Option) *mockhttp.Server {
 
 	engine := vlatte.MustNewGoTemplateEngine(vlatte.WithSigningKey(oidc.DefaultKeyID, "ES256", key))
 	m := mockhttp.MustNew(mockhttp.Setup().Silent().TemplateEngine(engine))
-	require.NoError(t, m.Prep(t.Context(), oidc.New(append([]oidc.Option{oidc.SigningKey(oidc.DefaultKeyID, "ES256")}, opts...)...)))
+	require.NoError(t, m.Prep(t.Context(), oidc.New(opts...)))
 	m.MustStart()
 	t.Cleanup(m.Close)
 

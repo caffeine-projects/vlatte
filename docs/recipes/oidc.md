@@ -15,7 +15,7 @@ err := m.Prep(ctx, oidc.New(
 ))
 ```
 
-A server without the key fails `Prep` with an error naming it. In Go, a key of your own goes on the engine with `vlatte.WithSigningKey`; pass its kid and algorithm with `oidc.SigningKey(kid, alg)`.
+A server without the key fails `Prep` with an error naming it. In Go, a key of your own goes on the engine with `vlatte.WithSigningKey`; name its kid with `oidc.KeyID(kid)` when it isn't `oidc.DefaultKeyID`.
 
 | Request | Answer |
 |---|---|
@@ -32,7 +32,7 @@ Each code is exchanged once, and PKCE takes S256 only. Every mock is a template,
 | Option | Sets | Default |
 |---|---|---|
 | `ClientID(id)`, `ClientSecret(secret)` | The app's credentials. ID tokens have the client ID as `aud`. | `oidc.DefaultClientID`, `DefaultClientSecret` |
-| `SigningKey(kid, alg)` | The server's key ID tokens are signed with, and its algorithm, which discovery announces. | `DefaultKeyID`, `DefaultAlg` (RS256) |
+| `KeyID(kid)` | The server's key ID tokens are signed with. Discovery announces its algorithm. | `DefaultKeyID` |
 | `Issuer(url)` | The `iss` of ID tokens, and the base URL of the endpoints. | The server's URL |
 | `Claims(map)` | The user's claims, in ID tokens and from userinfo. | `oidc.DefaultClaims()` |
 | `AccessToken(token)`, `TokenTTL(d)` | The access token issued, and how long tokens last. | `DefaultAccessToken`, `DefaultTokenTTL` (1h) |

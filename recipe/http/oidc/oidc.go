@@ -15,6 +15,7 @@ package oidc
 import (
 	"cmp"
 	"context"
+	"maps"
 	"net/http"
 	"strconv"
 	"time"
@@ -29,7 +30,6 @@ const (
 	DefaultClientID     = "vlatte-client-id"
 	DefaultClientSecret = "vlatte-client-secret"
 	DefaultKeyID        = "vlatte"
-	DefaultAlg          = "RS256"
 	DefaultAccessToken  = "vlatte-access-token"
 	DefaultTokenTTL     = time.Hour
 )
@@ -75,7 +75,6 @@ type config struct {
 	clientID     string
 	clientSecret string
 	kid          string
-	alg          string
 	issuer       string
 	accessToken  string
 	ttl          time.Duration
@@ -95,10 +94,10 @@ func ClientSecret(secret string) Option {
 	return func(c *config) { c.clientSecret = secret }
 }
 
-// SigningKey sets the key of the server ID tokens are signed with, and its algorithm, which discovery announces. The
-// defaults are [DefaultKeyID] and [DefaultAlg]. A server without the key fails Prep.
-func SigningKey(kid, alg string) Option {
-	return func(c *config) { c.kid, c.alg = kid, alg }
+// KeyID sets the kid of the server's key that ID tokens are signed with. Discovery announces the key's algorithm. The
+// default is [DefaultKeyID]. A server without the key fails Prep.
+func KeyID(kid string) Option {
+	return func(c *config) { c.kid = kid }
 }
 
 // Issuer sets the issuer: the iss of ID tokens, and the base URL of the endpoints discovery announces. The default
@@ -120,13 +119,13 @@ func TokenTTL(ttl time.Duration) Option {
 }
 
 // Claims sets the claims of the user who signs in: those of ID tokens, but the ones the provider sets (iss, aud,
-// iat, exp and nonce), and those userinfo answers. The default is [DefaultClaims].
+// iat, exp and nonce), and those userinfo answers. The default is [DefaultClaims]. The recipe keeps a copy: changing
+// claims afterwards changes nothing.
 func Claims(claims map[string]any) Option {
-	return func(c *config) { c.claims = claims }
+	return func(c *config) { c.claims = maps.Clone(claims) }
 }
 
-// WithPaths sets where the endpoints are; the fields left empty keep their default. It is not named Paths, the type
-// of the paths.
+// WithPaths sets where the endpoints are; the fields left empty keep their default.
 func WithPaths(paths Paths) Option {
 	return func(c *config) { c.paths = paths }
 }
@@ -149,7 +148,6 @@ func New(opts ...Option) mockhttp.Recipe {
 		clientID:     DefaultClientID,
 		clientSecret: DefaultClientSecret,
 		kid:          DefaultKeyID,
-		alg:          DefaultAlg,
 		accessToken:  DefaultAccessToken,
 		ttl:          DefaultTokenTTL,
 		claims:       DefaultClaims(),
@@ -197,8 +195,9 @@ const _redirect = _code + `{{ $u := .Request.URL.Query.Get "redirect_uri" }}{{ $
 	`{{ if contains "?" $u }}&{{ else }}?{{ end }}code={{ urlquery $code }}` +
 	`{{ with .Request.URL.Query.Get "state" }}&state={{ urlquery . }}{{ end }}`
 
-// _discovery is the body of the discovery endpoint.
-const _discovery = `{{ $iss := or .Extra.issuer .Server.URL }}{"issuer": {{ toJSON $iss }},
+// discovery is the body of the discovery endpoint, which reads the algorithm of the signing key kid from its JWK.
+func discovery(kid string) string {
+	return `{{ $iss := or .Extra.issuer .Server.URL }}{"issuer": {{ toJSON $iss }},
 "authorization_endpoint": {{ print $iss .Extra.paths.authorize | toJSON }},
 "token_endpoint": {{ print $iss .Extra.paths.token | toJSON }},
 "jwks_uri": {{ print $iss .Extra.paths.jwks | toJSON }},
@@ -206,10 +205,11 @@ const _discovery = `{{ $iss := or .Extra.issuer .Server.URL }}{"issuer": {{ toJS
 "response_types_supported": ["code"],
 "grant_types_supported": ["authorization_code"],
 "subject_types_supported": ["public"],
-"id_token_signing_alg_values_supported": [{{ toJSON .Extra.alg }}],
+"id_token_signing_alg_values_supported": [{{ (index (fromJSON (jwks ` + strconv.Quote(kid) + `)).keys 0).alg | toJSON }}],
 "scopes_supported": ["openid", "email", "profile"],
 "token_endpoint_auth_methods_supported": ["client_secret_post"],
 "code_challenge_methods_supported": ["S256"]}`
+}
 
 // endpoint starts a mock of requests of method to path, exactly.
 func endpoint(method, path string) *mockhttp.Builder {
@@ -220,7 +220,6 @@ func (c *config) mocks() []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
 	data := map[string]any{
 		"issuer":       c.issuer,
 		"client_id":    c.clientID,
-		"alg":          c.alg,
 		"access_token": c.accessToken,
 		"ttl":          c.ttl.String(),
 		"expires_in":   int64(c.ttl / time.Second),
@@ -246,7 +245,7 @@ func (c *config) mocks() []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
 
 	return []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server]{
 		endpoint(http.MethodGet, c.paths.Discovery).
-			Reply(mockhttp.OK().ContentType("application/json").BodyTemplate(_discovery).SetTemplateData(data)),
+			Reply(mockhttp.OK().ContentType("application/json").BodyTemplate(discovery(c.kid)).SetTemplateData(data)),
 
 		endpoint(http.MethodGet, c.paths.JWKS).
 			Reply(mockhttp.OK().ContentType("application/json").BodyTemplate(`{{ jwks ` + strconv.Quote(c.kid) + ` }}`)),
