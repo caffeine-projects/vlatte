@@ -543,7 +543,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	locals := locals(reqValues, d, viewdata.NewParameters(r.Context(), h.app.params))
+	locals := locals(reqValues, d, viewdata.NewKVView(r.Context(), h.app.config.KV))
 
 	reqValues.Data = locals
 
@@ -782,9 +782,9 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Context(),
 		mock,
 		func(ctx context.Context, cfg vlatte.EventConfig) vlatte.OnComplete {
-			// The request's context ends when the client leaves: templates read the parameters with the event's.
+			// The request's context ends when the client leaves: templates read the key-value store with the event's.
 			data := *locals
-			data.Parameters = viewdata.NewParameters(ctx, h.app.params)
+			data.KV = viewdata.NewKVView(ctx, h.app.config.KV)
 			kit := &Kit{
 				engine:    h.app.config.TemplateEngine,
 				data:      &data,
@@ -1344,7 +1344,7 @@ func describeExpectation(e *expectation) string {
 	return name
 }
 
-func locals(r *RequestValues, provided map[string]any, params *viewdata.Parameters) *viewdata.Data {
+func locals(r *RequestValues, provided map[string]any, kv *viewdata.KVView) *viewdata.Data {
 	parsed := r.RawRequest.Cookies()
 	cookies := make(map[string]*http.Cookie, len(parsed))
 	for _, cookie := range parsed {
@@ -1375,12 +1375,12 @@ func locals(r *RequestValues, provided map[string]any, params *viewdata.Paramete
 	}
 
 	return &viewdata.Data{
-		Request:    req,
-		Provided:   provided,
-		Parameters: params,
-		Server:     &viewdata.Server{URL: r.App.URL()},
-		Data:       r.App.Data(),
-		Scenarios:  r.App.scenarioStore.View(r.scenarioMoves...),
+		Request:   req,
+		Provided:  provided,
+		KV:        kv,
+		Server:    &viewdata.Server{URL: r.App.URL()},
+		Data:      r.App.Data(),
+		Scenarios: r.App.scenarioStore.View(r.scenarioMoves...),
 	}
 }
 

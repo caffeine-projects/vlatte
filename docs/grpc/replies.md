@@ -5,7 +5,7 @@
 | `Message(msg)` | A message, which must be of the method's output type. |
 | `Messages(msgs...)` | The messages of a server or bidi stream, in turn. |
 | `JSON(texts...)` | The messages `texts` hold, in the method's output type. |
-| `Template(texts...)` | Like `JSON`, rendered for each call: `{"message": "hi {{ .Request.Message.name }}"}`, with `.Request.Header`, `.Parameters`, `.Scenarios.State "name"`, `.Scenarios.StateOf "name" "key"`, `.Data`, which `m.SetData` sets, and `.Provided.<key>`, which `Setup().TemplateDataProviders(...)` provide. |
+| `Template(texts...)` | Like `JSON`, rendered for each call: `{"message": "hi {{ .Request.Message.name }}"}`, with `.Request.Header`, `.KV`, `.Scenarios.State "name"`, `.Scenarios.StateOf "name" "key"`, `.Data`, which `m.SetData` sets, and `.Provided.<key>`, which `Setup().TemplateDataProviders(...)` provide. |
 | `Status(code, msg)` | A status, with no message. |
 | `Bidi()` | A bidi stream, message by message: `On(matcher, reply)`, `Otherwise(reply)`, `OnEnd(reply)`. |
 | `Seq(replies...)` | Each reply in turn, one per call, a stream as a whole, then `OnSequenceEnded(reply)`'s. A call past the end without it fails with the `vlatte-error` trailer. |

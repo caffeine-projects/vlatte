@@ -10,15 +10,15 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/params"
+	"github.com/caffeine-projects/vlatte/internal/kvview"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 var _ vlatte.Kit = (*Kit)(nil)
 
-// Parameters gives templates the server's parameters as text: {{ .Parameters.Get "key" }}. A parameter that may be
-// missing reads with Has first: {{ if .Parameters.Has "key" }}.
-type Parameters = params.Parameters
+// KVView gives templates the server's key-value store as text: {{ .KV.Get "key" }}. A key that may be missing reads
+// with Has first: {{ if .KV.Has "key" }}.
+type KVView = kvview.View
 
 // TemplateData is what templates render with: the dot of the templates of [Template] replies, and the data of the
 // [Kit] of event listeners, such as webhooks.
@@ -26,8 +26,8 @@ type TemplateData struct {
 	// Request is the call being served.
 	Request *TemplateRequest
 
-	// Parameters reads the server's parameters: {{ .Parameters.Get "key" }}.
-	Parameters *Parameters
+	// KV reads the server's key-value store: {{ .KV.Get "key" }}.
+	KV *KVView
 
 	// Scenarios reads the state of the server's scenarios: {{ .Scenarios.State "checkout" }}, and of the instance of
 	// a key, {{ .Scenarios.StateOf "checkout" (index .Request.Header "x-test-id" 0) }}. A scenario the mock that matched
@@ -142,7 +142,7 @@ func (app *Server) templateEngine() vlatte.TemplateEngine {
 	return app.config.TemplateEngine
 }
 
-// templateData returns the template data of call, whose parameters read with ctx.
+// templateData returns the template data of call, whose key-value store reads with ctx.
 func (app *Server) templateData(ctx context.Context, call *Call) *TemplateData {
 	// The request is as protojson writes it: JSON, which reads.
 	var msg any
@@ -156,9 +156,9 @@ func (app *Server) templateData(ctx context.Context, call *Call) *TemplateData {
 			Header:  call.header,
 			Message: msg,
 		},
-		Parameters: params.New(ctx, app.config.Parameters),
-		Scenarios:  app.scenarios.View(call.scenarioMoves...),
-		Data:       call.data,
-		Provided:   call.provided,
+		KV:        kvview.New(ctx, app.config.KV),
+		Scenarios: app.scenarios.View(call.scenarioMoves...),
+		Data:      call.data,
+		Provided:  call.provided,
 	}
 }

@@ -6,8 +6,8 @@ request:
 response:
   status: 200
   header_template:
-    test: '{{ .Parameters.Get "test" }}'
-    ctx: '{{ .Parameters.Get "context" }}'
+    test: '{{ .KV.Get "test" }}'
+    ctx: '{{ .KV.Get "context" }}'
     message: '{{ .Extra.message }}'
   body: >
     {{ .Extra.mode }} --> {{ .Extra.lang }} --> {{ .Request.Method }} --> {{ .Request.Header.Get "template" }}

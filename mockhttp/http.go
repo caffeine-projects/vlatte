@@ -59,7 +59,6 @@ type Server struct {
 	scenarioStore      *matchscenario.Store
 	eventStream        *adminapi.Events // the admin API's; nil without it
 	requestBodyParsers []RequestBodyParser
-	params             vlatte.KV
 	loaders            []Loader
 	rwMutex            sync.RWMutex
 	proxy              *forwardProxy
@@ -192,11 +191,8 @@ func New(config ...Option) (*Server, error) {
 
 	middlewares = append(middlewares, conf.Middlewares...)
 
-	var params vlatte.KV
-	if conf.Parameters != nil {
-		params = conf.Parameters
-	} else {
-		params = vlatte.NewMemoryKV()
+	if conf.KV == nil {
+		conf.KV = vlatte.NewMemoryKV()
 	}
 
 	if conf.Record != nil {
@@ -279,7 +275,6 @@ func New(config ...Option) (*Server, error) {
 	if app.eventStream != nil {
 		app.scenarioStore.Notify(app.publishScenario)
 	}
-	app.params = params
 	app.loaders = conf.Loaders
 	app.files = files
 	app.proxy = p
@@ -472,9 +467,10 @@ func (app *Server) AdminURL() string {
 	return app.admin.URL()
 }
 
-// Parameters returns Params instance associated with this application.
-func (app *Server) Parameters() vlatte.KV {
-	return app.params
+// KV returns the key-value store templates read as .KV: the one [ConfigBuilder.KV] set, or the memory store the
+// server made without one, which [Config.KV] holds too.
+func (app *Server) KV() vlatte.KV {
+	return app.config.KV
 }
 
 // Config returns the mock server Config.

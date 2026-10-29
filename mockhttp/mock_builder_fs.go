@@ -35,7 +35,7 @@ type fileBuilder struct {
 // FromFile builds a mock from a JSON or YAML file, chosen by its extension: .json, .yaml or .yml.
 //
 // The file is data: only the settings that are templates, such as a templated reply body, are compiled, with the
-// template engine of the server. Templates read the server's parameters, data and URL when a request arrives.
+// template engine of the server. Templates read the server's key-value store, data and URL when a request arrives.
 // A relative body_file opens from the file's directory.
 // When the file has problems, the error is a list of every one, each with its key and a hint.
 func FromFile(path string) vlatte.Builder[*Mock, *Server] {

@@ -64,20 +64,20 @@ func TestTemplateData_PathParams(t *testing.T) {
 	require.Equal(t, vlatte.FailureReply, header.Get(HeaderVlatteError), "no path template, no parameters: the reply fails")
 }
 
-func TestTemplateData_Parameters(t *testing.T) {
-	// A parameter that isn't set fails the request, as a missing map key does, so a typo doesn't render as an empty
-	// value. Has reads a parameter that may be missing.
-	params := vlatte.NewMemoryKV()
-	require.NoError(t, params.Set(t.Context(), "set", []byte("v")))
-	require.NoError(t, params.Set(t.Context(), "empty", nil))
+func TestTemplateData_AKeyThatIsNotSetFailsTheRequestAndHasGuardsIt(t *testing.T) {
+	// A key that isn't set fails the request, as a missing map key does, so a typo doesn't render as an empty value.
+	// Has reads a key that may be missing.
+	kv := vlatte.NewMemoryKV()
+	require.NoError(t, kv.Set(t.Context(), "set", []byte("v")))
+	require.NoError(t, kv.Set(t.Context(), "empty", nil))
 
-	m := MustNew(Setup().Silent().Parameters(params))
+	m := MustNew(Setup().Silent().KV(kv))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/get").Reply(OK().BodyTemplate(`[{{ .Parameters.Get "set" }}][{{ .Parameters.Get "empty" }}]`)))
-	m.MustMock(Getf("/typo").Reply(OK().BodyTemplate(`{{ .Parameters.Get "sett" }}`)))
-	m.MustMock(Getf("/has").Reply(OK().BodyTemplate(`{{ if .Parameters.Has "set" }}set{{ end }} {{ if .Parameters.Has "sett" }}sett{{ else }}no sett{{ end }}`)))
+	m.MustMock(Getf("/get").Reply(OK().BodyTemplate(`[{{ .KV.Get "set" }}][{{ .KV.Get "empty" }}]`)))
+	m.MustMock(Getf("/typo").Reply(OK().BodyTemplate(`{{ .KV.Get "sett" }}`)))
+	m.MustMock(Getf("/has").Reply(OK().BodyTemplate(`{{ if .KV.Has "set" }}set{{ end }} {{ if .KV.Has "sett" }}sett{{ else }}no sett{{ end }}`)))
 
 	status, body := get(t, m, "/get")
 	require.Equal(t, http.StatusOK, status, body)
@@ -85,7 +85,7 @@ func TestTemplateData_Parameters(t *testing.T) {
 
 	status, body = get(t, m, "/typo")
 	require.Equal(t, StatusNoMatch, status)
-	require.Contains(t, body, `parameters: no parameter "sett"`)
+	require.Contains(t, body, `key "sett" is not set: set it, or check for it with .KV.Has`)
 
 	status, body = get(t, m, "/has")
 	require.Equal(t, http.StatusOK, status, body)

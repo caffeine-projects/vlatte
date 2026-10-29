@@ -8,7 +8,7 @@ import (
 	"net/url"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/params"
+	"github.com/caffeine-projects/vlatte/internal/kvview"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
@@ -20,8 +20,8 @@ type Data struct {
 	// Provided holds the data of the server's template data providers, by key: {{ .Provided.user }}.
 	Provided map[string]any
 
-	// Parameters reads the server's parameters: {{ .Parameters.Get "key" }} and {{ .Parameters.Has "key" }}.
-	Parameters *Parameters
+	// KV reads the server's key-value store: {{ .KV.Get "key" }} and {{ .KV.Has "key" }}.
+	KV *KVView
 
 	// Server describes the mock server.
 	Server *Server
@@ -52,12 +52,12 @@ func (d *Data) WithExtra(extra any) *Data {
 	return &c
 }
 
-// Parameters gives templates the app parameters as text: {{ .Parameters.Get "key" }}.
-type Parameters = params.Parameters
+// KVView gives templates the server's key-value store as text: {{ .KV.Get "key" }}.
+type KVView = kvview.View
 
-// NewParameters returns the Parameters of kv, read with ctx.
-func NewParameters(ctx context.Context, kv vlatte.KV) *Parameters {
-	return params.New(ctx, kv)
+// NewKVView returns the KVView of kv, read with ctx.
+func NewKVView(ctx context.Context, kv vlatte.KV) *KVView {
+	return kvview.New(ctx, kv)
 }
 
 // Request is the request being served.
