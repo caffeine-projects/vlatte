@@ -10,7 +10,7 @@ A mock is three things:
 
 1. **Matchers** that say which requests it answers: a method, a path, a header, a field of the body. See [HTTP matching](/http/matching), [gRPC matching](/grpc/matching), and the [matchers](/matchers/) both share.
 2. **A reply** that says how it answers: a status, headers, a body, a stream of messages, a proxy to a real service. See [HTTP replies](/http/replies) and [gRPC replies](/grpc/replies).
-3. **Mock features** that both protocols share: an ID and a name, a priority, `Times` and `Once`, delays, [scenarios](/features/scenarios), and [events such as webhooks](/features/webhooks-events). See [Mock lifecycle](/features/mock-lifecycle).
+3. **Mock features** that both protocols share: an ID and a name, a priority, `Times` and `Once`, delays, [scenarios](/scenarios/), and [events such as webhooks](/webhooks/). See [Mock lifecycle](/more/mock-lifecycle).
 
 ```go
 m.MustMock(mockhttp.Postf("/orders").            // matchers

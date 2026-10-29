@@ -9,7 +9,7 @@ The `vlatte` CLI serves HTTP and gRPC mocks from YAML or JSON files, records wha
 | | In Go tests | With the `vlatte` CLI |
 |---|---|---|
 | Starts | `mockhttp.MustNew()` or `mockgrpc.MustNew()` in the test | `vlatte`, a binary or a [Docker image](/run/docker) |
-| Mocks | Built in Go, or loaded from [mock files](/http/mock-files) | [Mock files](/http/mock-files), and the [admin API](/run/admin-api) |
+| Mocks | Built in Go, or loaded from [mock files](/http/mock-files) | [Mock files](/http/mock-files), and the [admin API](/admin-api/) |
 | Fits | Unit and integration tests of Go code | Any language, local development, demos, CI environments |
 
 Both share one engine: everything a mock file says, Go can say too, and the other way round for what a file can hold.
@@ -19,4 +19,5 @@ Both share one engine: everything a mock file says, Go can say too, and the othe
 - [Install](/getting-started/installation) the library and the CLI.
 - Write a first test in the [quick start](/getting-started/quick-start).
 - Learn the few ideas everything else builds on in [Concepts](/getting-started/concepts).
-- Then read the section of your protocol, [HTTP](/http/) or [gRPC](/grpc/), and the [features](/features/) both share.
+- See where a server's [settings](/getting-started/settings) come from: code, a `.vlatterc` file, `VLATTE_*` variables and flags.
+- Then read the section of your protocol, [HTTP](/http/) or [gRPC](/grpc/), and then the sections of the features both share, such as [Matchers](/matchers/), [Templating](/templating/) and [Scenarios](/scenarios/).

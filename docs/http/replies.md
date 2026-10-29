@@ -25,7 +25,7 @@ response:
 |---|---|---|
 | `Status(code)` | `status` | The status. |
 | `Header(k, v)`, `HeaderArr(k, vs...)` | `header` | Headers. A value can be a list. |
-| `HeaderTemplate(k, v)`, `HeaderArrTemplate` | `header_template` | Headers rendered from the request: see [Templates](/features/templates). |
+| `HeaderTemplate(k, v)`, `HeaderArrTemplate` | `header_template` | Headers rendered from the request: see [Templates](/templating/). |
 | `Trailer(k, v)`, `TrailerArr(k, vs...)` | `trailer` | Trailers. |
 | `Cookie(c)`, `ExpireCookie(c)` | | Cookies, and cookies that expire one the client holds. |
 | `ContentType(mime)` | `header: {content-type: ...}` | The `Content-Type`. |

@@ -21,4 +21,4 @@ m := mockhttp.MustNew(mockhttp.Setup().CORS(mockhttp.CORS().
 
 In settings, `cors: true` (`--cors`) turns CORS on with the defaults, and setting any `cors` key turns it on too.
 
-An answer that sends a CORS header, such as a proxied one, answers CORS by itself: the server's CORS headers aren't sent with it. A `Handler` reply writes its answer on top of the server's CORS headers: it should `Set` its CORS headers, or `Del` the server's. Preflights the server answers aren't [journaled](/features/journal).
+An answer that sends a CORS header, such as a proxied one, answers CORS by itself: the server's CORS headers aren't sent with it. A `Handler` reply writes its answer on top of the server's CORS headers: it should `Set` its CORS headers, or `Del` the server's. Preflights the server answers aren't [journaled](/more/journal).

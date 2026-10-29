@@ -1,6 +1,8 @@
 # Admin API and MCP
 
-A client in any language, or an AI agent, checks the requests as a Go test does, through the [admin API](/run/admin-api). `QUERY /requests/verify` takes a check in the body and answers its verdict, with the report a Go test gets. One engine runs both, so a check gives the same verdict from Go and from the admin API.
+A client in any language, or an AI agent, checks the requests as a Go test does, through the [admin API](/admin-api/). `QUERY /requests/verify` takes a check in the body and answers its verdict, with the report a Go test gets. One engine runs both, so a check gives the same verdict from Go and from the admin API.
+
+A Go test that only checks its mocks were called needs none of this: see [Do you need it?](/verify/#do-you-need-it).
 
 ```sh
 curl -X QUERY -H 'Content-Type: application/json' \
@@ -17,7 +19,7 @@ A check takes the keys of `QUERY /requests`, with the matchers of mock files, to
 
 | Key | What it does |
 |---|---|
-| `kind`, `outcome`, `mock_id`, `method`, `path`, `target`, `status`, `body`, `header`, `since`, `until`, `request` | Select the requests, as for [`QUERY /requests`](/features/journal). `limit` and `before` don't apply: a check counts all it selects. |
+| `kind`, `outcome`, `mock_id`, `method`, `path`, `target`, `status`, `body`, `header`, `since`, `until`, `request` | Select the requests, as for [`QUERY /requests`](/more/journal). `limit` and `before` don't apply: a check counts all it selects. |
 | `count` | The number of requests: a number, or a matcher list, such as `["gte", 2]` or `["lte", 3]`. None is at least 1. |
 | `within` | Waits up to this long for the count to pass, such as `"2s"`, as [`Within`](/verify/waiting#within) does. |
 | `during` | Holds the count this long, such as `"2s"`, as [`During`](/verify/waiting#during) does. |
@@ -79,7 +81,7 @@ curl -X QUERY -H 'Content-Type: application/json' \
 
 ## Errors
 
-A check that can't run answers a [problem document](/run/admin-api), never a verdict, as a check that selected nothing could pass:
+A check that can't run answers a [problem document](/admin-api/), never a verdict, as a check that selected nothing could pass:
 
 | Status | Code | When |
 |---|---|---|
@@ -92,7 +94,7 @@ A check that can't run answers a [problem document](/run/admin-api), never a ver
 
 ## MCP
 
-Over [MCP](/run/mcp), the `verify_requests` tool runs the same check. Its argument is the check under `check`, and it answers the verdict:
+Over [MCP](/mcp/setup), the `verify_requests` tool runs the same check. Its argument is the check under `check`, and it answers the verdict:
 
 ```json
 {"check": {"method": "POST", "path": "/orders", "count": 1, "within": "2s"}}

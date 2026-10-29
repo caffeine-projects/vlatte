@@ -24,8 +24,8 @@ const columns = [
     links: [
       { text: 'CLI', link: '/run/cli' },
       { text: 'Docker image', link: '/run/docker' },
-      { text: 'Admin API', link: '/run/admin-api' },
-      { text: 'MCP', link: '/run/mcp' },
+      { text: 'Admin API', link: '/admin-api/' },
+      { text: 'MCP', link: '/mcp/' },
       { text: 'Mock file schemas', link: '/reference/schemas' },
     ],
   },
