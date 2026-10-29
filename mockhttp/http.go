@@ -178,7 +178,10 @@ func New(config ...Option) (*Server, error) {
 	parsers = append(parsers, &plainTextParser{}, &formURLEncodedParser{}, &multipartFormParser{}, &noopParser{})
 
 	app.recoverer = recovery.New(func(err error) { app.logger.Error().Err(err).Msg(err.Error()) },
-		conf.ErrorStatusCode, http.Header{http.CanonicalHeaderKey(HeaderVlatteError): {vlatte.FailurePanic}})
+		conf.ErrorStatusCode, http.Header{
+			http.CanonicalHeaderKey(HeaderVlatteError):         {vlatte.FailurePanic},
+			http.CanonicalHeaderKey(HeaderXContentTypeOptions): {_noSniff},
+		})
 
 	middlewares := make([]func(handler http.Handler) http.Handler, 0)
 	middlewares = append(middlewares, app.recoverer.Recover)
