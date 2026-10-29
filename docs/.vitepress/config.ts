@@ -43,6 +43,7 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Request matching', link: '/http/matching' },
       { text: 'Replies', link: '/http/replies' },
       { text: 'Forms and multipart', link: '/http/forms-multipart' },
+      { text: 'Server-Sent Events', link: '/http/server-sent-events' },
       { text: 'Proxying', link: '/http/proxying' },
       { text: 'Steps', link: '/http/steps' },
       { text: 'Faults', link: '/http/faults' },

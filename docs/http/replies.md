@@ -35,9 +35,10 @@ response:
 | `BodyTemplate(text)` | `body` with `template.enabled` | A body rendered from the request. |
 | `Problem(p)` | | An [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem document, built with `NewProblem()`. |
 | `Multipart(mp)` | `multipart` | A multipart body: see [Forms and multipart](/http/forms-multipart#multipart-replies). |
+| `EventStream(es)` | `event_stream` | A `text/event-stream` body, sent event by event: see [Server-Sent Events](/http/server-sent-events). |
 | `Gzip()` | `encoding: gzip` | A gzip-encoded body. |
 
-A body that isn't UTF-8 text, such as an image or text in another encoding, goes in `body_base64`, as standard base64 (`body_base64: //4A`), whose line breaks are ignored, or in a `body_file`. A reply takes one of `body`, `body_base64`, `body_file` and `multipart` at most.
+A body that isn't UTF-8 text, such as an image or text in another encoding, goes in `body_base64`, as standard base64 (`body_base64: //4A`), whose line breaks are ignored, or in a `body_file`. A reply takes one of `body`, `body_base64`, `body_file`, `multipart` and `event_stream` at most.
 
 ```go
 m.MustMock(mockhttp.Postf("/orders").Reply(mockhttp.UnprocessableEntity().Problem(mockhttp.NewProblem().

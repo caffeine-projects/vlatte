@@ -1,0 +1,9 @@
+# The client ends the session when it closes.
+id: mcp-delete
+request:
+  method: DELETE
+  path: /mcp
+  header:
+    mcp-session-id: weather-1
+response:
+  status: 204

@@ -1,0 +1,17 @@
+# The client listens on a GET for what the server sends on its own. The stream stays open for the session, and
+# tells the client the server's tools changed. A GET with a Last-Event-ID resumes a stream instead.
+id: mcp-listen
+request:
+  method: GET
+  path: /mcp
+  header:
+    mcp-session-id: weather-1
+    last-event-id: [not, present]
+response:
+  status: 200
+  event_stream:
+    keep_open: true
+    heartbeat: 15s
+    events:
+      - event: message
+        data: {jsonrpc: "2.0", method: notifications/tools/list_changed}

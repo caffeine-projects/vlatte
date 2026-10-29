@@ -450,6 +450,8 @@ func (rep *Reply) Describe() vlatte.Descriptor {
 		spec := rep.multipart.spec
 		spec.Dir = rep.bodyFileDir
 		response["multipart"] = spec.Doc()
+	case _bodyEventStream:
+		response["event_stream"] = rep.eventStream.spec.Doc()
 	default:
 		// JSON and YAML hold text as UTF-8: other bytes, such as an image or text in another encoding, go in base64.
 		switch body := rep.response.Body; {
@@ -467,7 +469,8 @@ func (rep *Reply) Describe() vlatte.Descriptor {
 
 	// template.enabled says the body is a template; template.data is what every template of the reply reads.
 	tmpl := make(map[string]any, 2)
-	if rep.teType&_teBody != 0 || rep.bodyType == _bodyMultipart && rep.multipart.spec.Templated {
+	if rep.teType&_teBody != 0 || rep.bodyType == _bodyMultipart && rep.multipart.spec.Templated ||
+		rep.bodyType == _bodyEventStream && rep.eventStream.spec.Templated {
 		tmpl["enabled"] = true
 	}
 

@@ -29,7 +29,7 @@ VLatte starts real HTTP and gRPC servers that answer the way you tell them to. S
 
 - **[HTTP](https://caffeine-projects.github.io/vlatte/http/) and [gRPC](https://caffeine-projects.github.io/vlatte/grpc/) mock servers.** gRPC needs no service implementation: unary, server, client and bidi streaming calls, from generated code or descriptor sets.
 - **[Matchers](https://caffeine-projects.github.io/vlatte/matchers/)** shared by every protocol: equality, JSON path, JSON Schema, XPath, regex, globs, dates and combinators, plus your own.
-- **Replies** with templated headers and bodies, sequences, random picks, echo, multipart and custom functions.
+- **Replies** with templated headers and bodies, sequences, random picks, echo, multipart, Server-Sent Events and custom functions.
 - **Mock files** in YAML or JSON, with [JSON schemas](https://caffeine-projects.github.io/vlatte/reference/schemas) for editors, reloaded on demand.
 - **Scenarios** for stateful flows, and **webhooks** sent after a mock answers.
 - **Proxying, and recording** of a real service to play it back later, with outbound rules that limit the addresses a server connects to.

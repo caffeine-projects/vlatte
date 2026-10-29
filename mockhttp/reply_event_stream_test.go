@@ -241,3 +241,42 @@ func TestReplyEventStream_ATemplateThatFailsAtTheRequestFailsTheReply(t *testing
 	require.Equal(t, vlatte.FailureReply, res.Header.Get(HeaderVlatteError))
 	require.Contains(t, string(body), "reply: sse: events[0]: id holds a line break")
 }
+
+func TestReplyEventStream_Describe(t *testing.T) {
+	// The description is a mock file's response.event_stream, with the template switch when the stream is templated.
+	// A delay function can't be written: it is left out.
+	reply := OK().EventStream(NewEventStream(
+		NewEvent().Name("price").ID("").DataJSON(map[string]any{"value": 10}).Delay(1500*time.Millisecond),
+		NewEvent().Comment("note").Data("{{ .X }}").Retry(time.Second),
+		NewEvent().DataJSON("text"),
+		NewEvent().Raw("data: x\r\n\r\n"),
+	).Retry(3 * time.Second).EventDelay(time.Second).Heartbeat(15 * time.Second).KeepOpen().ResumeFromLastEventID().Template())
+
+	_, err := MustNew(Setup().Silent()).Mock(Getf("/x").Reply(reply))
+	require.NoError(t, err)
+
+	b, err := json.Marshal(reply.Describe().Props, json.Deterministic(true))
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"status": 200,
+		"event_stream": {
+			"events": [
+				{"event": "price", "id": "", "data": {"value": 10}, "delay": "1.5s"},
+				{"comment": "note", "data": "{{ .X }}", "retry": "1s"},
+				{"data_json": "text"},
+				{"raw": "data: x\r\n\r\n"}
+			],
+			"retry": "3s",
+			"event_delay": "1s",
+			"heartbeat": "15s",
+			"keep_open": true,
+			"resume": true
+		},
+		"template": {"enabled": true}
+	}`, string(b))
+
+	described := OK().EventStream(NewEventStream().EventDelayFunc(vlatte.Jitter(time.Second, 10)))
+	b, err = json.Marshal(described.Describe().Props, json.Deterministic(true))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"status": 200, "event_stream": {"events": []}}`, string(b))
+}
