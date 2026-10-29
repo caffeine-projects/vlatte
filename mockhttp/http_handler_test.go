@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -34,11 +35,11 @@ import (
 	"github.com/caffeine-projects/vlatte/match"
 )
 
-// appendStep appends its text to every buffer it passes on.
-type appendStep string
+// appendPipe appends its text to every buffer it passes on.
+type appendPipe string
 
-func (s appendStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
-	return vlatte.StepFunc(func(_ context.Context, p []byte, next vlatte.Stage) (int, error) {
+func (s appendPipe) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+	return vlatte.PipeFunc(func(_ context.Context, p []byte, next vlatte.Stage) (int, error) {
 		if _, err := next.Write(append(slices.Clip(p), s...)); err != nil {
 			return 0, err
 		}
@@ -47,11 +48,11 @@ func (s appendStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	}).Open(flow, next)
 }
 
-func TestTopResponseWriter_EveryWritePassesTheSteps(t *testing.T) {
+func TestTopResponseWriter_EveryWritePassesThePipes(t *testing.T) {
 	// D1: a pipeline passes one buffer once, and the writer reused one for every write, so the 2nd write returned
 	// io.EOF. Write reports len(p) as well: io.Copy rejects a count larger than the buffer it handed over.
 	rec := httptest.NewRecorder()
-	w := newTopResponseWriter(t.Context(), []vlatte.Step{appendStep("!")}, rec)
+	w := newTopResponseWriter(t.Context(), []vlatte.Pipe{appendPipe("!")}, rec)
 
 	for _, s := range []string{"a", "b", "c"} {
 		n, err := w.Write([]byte(s))
@@ -62,9 +63,9 @@ func TestTopResponseWriter_EveryWritePassesTheSteps(t *testing.T) {
 	require.Equal(t, "a!b!c!", rec.Body.String())
 }
 
-func TestTopResponseWriter_AStepCanPassAWriteOnInParts(t *testing.T) {
+func TestTopResponseWriter_APipeCanPassAWriteOnInParts(t *testing.T) {
 	// fault.Slicer passes each write on in parts. Every part after the first failed the write, which cut the body.
-	slicer := vlatte.StepFunc(func(_ context.Context, p []byte, next vlatte.Stage) (int, error) {
+	slicer := vlatte.PipeFunc(func(_ context.Context, p []byte, next vlatte.Stage) (int, error) {
 		for part := range slices.Chunk(p, 2) {
 			if _, err := next.Write(part); err != nil {
 				return 0, err
@@ -75,7 +76,7 @@ func TestTopResponseWriter_AStepCanPassAWriteOnInParts(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	w := newTopResponseWriter(t.Context(), []vlatte.Step{slicer}, rec)
+	w := newTopResponseWriter(t.Context(), []vlatte.Pipe{slicer}, rec)
 
 	n, err := w.Write([]byte("hello"))
 
@@ -85,16 +86,16 @@ func TestTopResponseWriter_AStepCanPassAWriteOnInParts(t *testing.T) {
 }
 
 func TestTopResponseWriter_FlushReachesTheResponseWriter(t *testing.T) {
-	// D2: streamed parts are flushed with http.ResponseController, which reaches the response writer through the steps.
+	// D2: streamed parts are flushed with http.ResponseController, which reaches the response writer through the pipes.
 	rec := httptest.NewRecorder()
-	w := newTopResponseWriter(t.Context(), []vlatte.Step{appendStep("")}, rec)
+	w := newTopResponseWriter(t.Context(), []vlatte.Pipe{appendPipe("")}, rec)
 
 	require.NoError(t, http.NewResponseController(w).Flush())
 	require.True(t, rec.Flushed)
 }
 
-func TestSteps_ServeABodyFileLargerThanOneWrite(t *testing.T) {
-	// D1: io.Copy writes a body file in 32 KB chunks, and through steps every chunk after the first failed.
+func TestPipes_ServeABodyFileLargerThanOneWrite(t *testing.T) {
+	// D1: io.Copy writes a body file in 32 KB chunks, and through pipes every chunk after the first failed.
 	body := bytes.Repeat([]byte("0123456789abcdef"), 8<<10)
 	file := filepath.Join(t.TempDir(), "body.bin")
 	require.NoError(t, os.WriteFile(file, body, 0o600))
@@ -103,8 +104,8 @@ func TestSteps_ServeABodyFileLargerThanOneWrite(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	// The reply's headers reach the client through the steps too.
-	m.MustMock(Getf("/file").Step(appendStep("")).Reply(OK().Header("X-Id", "7").BodyFile(file)))
+	// The reply's headers reach the client through the pipes too.
+	m.MustMock(Getf("/file").Pipe(appendPipe("")).Reply(OK().Header("X-Id", "7").BodyFile(file)))
 
 	res, err := http.Get(m.URL("/file"))
 	require.NoError(t, err)
@@ -118,43 +119,43 @@ func TestSteps_ServeABodyFileLargerThanOneWrite(t *testing.T) {
 	require.Equal(t, body, got)
 }
 
-// failingStep is a step that fails every write.
-type failingStep struct{}
+// failingPipe is a pipe that fails every write.
+type failingPipe struct{}
 
-func (failingStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
-	return vlatte.StepFunc(func(context.Context, []byte, vlatte.Stage) (int, error) {
-		return 0, errors.New("step: failed")
+func (failingPipe) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+	return vlatte.PipeFunc(func(context.Context, []byte, vlatte.Stage) (int, error) {
+		return 0, errors.New("pipe: failed")
 	}).Open(flow, next)
 }
 
-func TestTopResponseWriter_AFailingStepFailsTheWrite(t *testing.T) {
-	// A write a step fails writes nothing, and says why: io.Copy and Render stop there.
+func TestTopResponseWriter_AFailingPipeFailsTheWrite(t *testing.T) {
+	// A write a pipe fails writes nothing, and says why: io.Copy and Render stop there.
 	rec := httptest.NewRecorder()
-	w := newTopResponseWriter(t.Context(), []vlatte.Step{failingStep{}}, rec)
+	w := newTopResponseWriter(t.Context(), []vlatte.Pipe{failingPipe{}}, rec)
 
 	n, err := w.Write([]byte("a"))
-	require.EqualError(t, err, "step: failed")
+	require.EqualError(t, err, "pipe: failed")
 	require.Zero(t, n)
 	require.Empty(t, rec.Body.String())
 }
 
 var (
-	_ vlatte.Step  = asyncStep{}
+	_ vlatte.Pipe  = asyncPipe{}
 	_ vlatte.Stage = (*asyncStage)(nil)
-	_ vlatte.Step  = logStep{}
+	_ vlatte.Pipe  = logPipe{}
 	_ vlatte.Stage = (*logStage)(nil)
-	_ vlatte.Step  = limitStep{}
+	_ vlatte.Pipe  = limitPipe{}
 	_ vlatte.Stage = (*limitStage)(nil)
-	_ vlatte.Step  = closeStep{}
+	_ vlatte.Pipe  = closePipe{}
 	_ vlatte.Stage = (*closeStage)(nil)
-	_ vlatte.Step  = abortOn{}
+	_ vlatte.Pipe  = abortOn{}
 )
 
-// asyncStep passes on what its stage gets from a goroutine of its own, in order, as a stage that delays a stream
+// asyncPipe passes on what its stage gets from a goroutine of its own, in order, as a stage that delays a stream
 // does: the reply and the stage write to the response at once.
-type asyncStep struct{}
+type asyncPipe struct{}
 
-func (asyncStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+func (asyncPipe) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	s := &asyncStage{ctx: flow.Context(), next: next, ops: make(chan asyncOp), done: make(chan error, 1)}
 	go s.run()
 
@@ -233,10 +234,10 @@ func (s *asyncStage) run() {
 	}
 }
 
-// logStep logs each call its stage gets, before it passes the call on.
-type logStep struct{ log *[]string }
+// logPipe logs each call its stage gets, before it passes the call on.
+type logPipe struct{ log *[]string }
 
-func (s logStep) Open(_ *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+func (s logPipe) Open(_ *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	return &logStage{log: s.log, next: next}
 }
 
@@ -260,12 +261,12 @@ func (s *logStage) Close() error {
 	return s.next.Close()
 }
 
-func TestTopResponseWriter_AFlushGoesThroughTheSteps(t *testing.T) {
+func TestTopResponseWriter_AFlushGoesThroughThePipes(t *testing.T) {
 	// A stage that delays a stream must delay its flushes too: a flush that got past it would send the headers, and
 	// what came before it, early.
 	var log []string
 	rec := httptest.NewRecorder()
-	w := newTopResponseWriter(t.Context(), []vlatte.Step{logStep{log: &log}}, rec)
+	w := newTopResponseWriter(t.Context(), []vlatte.Pipe{logPipe{log: &log}}, rec)
 
 	require.NoError(t, http.NewResponseController(w).Flush())
 
@@ -296,10 +297,10 @@ func (w *timedWriter) Flush() {
 	w.log = append(w.log, "flush at "+time.Since(w.start).String())
 }
 
-func TestTopResponseWriter_AStepSendsItsPartsWhenItWants(t *testing.T) {
-	// A body sent in timed parts, flushed one by one, reaches the client part by part: the steps time what goes out.
+func TestTopResponseWriter_APipeSendsItsPartsWhenItWants(t *testing.T) {
+	// A body sent in timed parts, flushed one by one, reaches the client part by part: the pipes time what goes out.
 	synctest.Test(t, func(t *testing.T) {
-		dribble := vlatte.StepFunc(func(_ context.Context, p []byte, next vlatte.Stage) (int, error) {
+		dribble := vlatte.PipeFunc(func(_ context.Context, p []byte, next vlatte.Stage) (int, error) {
 			for part := range slices.Chunk(p, 2) {
 				time.Sleep(100 * time.Millisecond)
 
@@ -316,7 +317,7 @@ func TestTopResponseWriter_AStepSendsItsPartsWhenItWants(t *testing.T) {
 		})
 
 		tw := &timedWriter{header: http.Header{}, start: time.Now()}
-		w := newTopResponseWriter(t.Context(), []vlatte.Step{dribble}, tw)
+		w := newTopResponseWriter(t.Context(), []vlatte.Pipe{dribble}, tw)
 
 		_, err := w.Write([]byte("abcd"))
 		require.NoError(t, err)
@@ -326,7 +327,7 @@ func TestTopResponseWriter_AStepSendsItsPartsWhenItWants(t *testing.T) {
 	})
 }
 
-func TestSteps_AStageCanWriteFromAGoroutineOfItsOwn(t *testing.T) {
+func TestPipes_AStageCanWriteFromAGoroutineOfItsOwn(t *testing.T) {
 	// A stage that delays a stream writes from its own goroutine while the reply goes on with the response: setting a
 	// trailer, flushing, setting a deadline. The race detector checks they don't race.
 	m := MustNew(Setup().Silent())
@@ -335,7 +336,7 @@ func TestSteps_AStageCanWriteFromAGoroutineOfItsOwn(t *testing.T) {
 
 	controls := make(chan [3]error, 1)
 
-	m.MustMock(Getf("/async").Step(asyncStep{}, appendStep("!")).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+	m.MustMock(Getf("/async").Pipe(asyncPipe{}, appendPipe("!")).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Trailer", "X-Sum")
 		_, _ = io.WriteString(w, "a")
 		_ = http.NewResponseController(w).Flush()
@@ -362,14 +363,14 @@ func TestSteps_AStageCanWriteFromAGoroutineOfItsOwn(t *testing.T) {
 	require.Equal(t, [3]error{nil, nil, nil}, <-controls)
 }
 
-func TestSteps_AHandlerCanTakeItsConnectionOver(t *testing.T) {
-	// A handler that answers on the connection itself, as one that switches protocols does, still can behind steps:
+func TestPipes_AHandlerCanTakeItsConnectionOver(t *testing.T) {
+	// A handler that answers on the connection itself, as one that switches protocols does, still can behind pipes:
 	// what it writes there is past them, which see only what it writes to the response.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/raw").Step(appendStep("!")).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+	m.MustMock(Getf("/raw").Pipe(appendPipe("!")).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		conn, rw, err := http.NewResponseController(w).Hijack()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -392,8 +393,8 @@ func TestSteps_AHandlerCanTakeItsConnectionOver(t *testing.T) {
 	require.Equal(t, "hi", string(body))
 }
 
-func TestSteps_AStepThatFailsAsTheAnswerEndsIsLogged(t *testing.T) {
-	// The steps end once a reply wrote its answer, which is sent by then: a step that fails there can't change it, so
+func TestPipes_APipeThatFailsAsTheAnswerEndsIsLogged(t *testing.T) {
+	// The pipes end once a reply wrote its answer, which is sent by then: a pipe that fails there can't change it, so
 	// the failure is logged, and the mock counts as served.
 	logs := &logBuffer{}
 	logger := zerolog.New(logs)
@@ -402,8 +403,8 @@ func TestSteps_AStepThatFailsAsTheAnswerEndsIsLogged(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	failed := errors.New("step: failed at the end")
-	scoped := m.MustMock(Getf("/end").Step(closeStep{closed: make(chan error, 1), err: failed}).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+	failed := errors.New("pipe: failed at the end")
+	scoped := m.MustMock(Getf("/end").Pipe(closePipe{closed: make(chan error, 1), err: failed}).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "body")
 	})))
 
@@ -416,17 +417,17 @@ func TestSteps_AStepThatFailsAsTheAnswerEndsIsLogged(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	require.Equal(t, "body", string(body))
 	require.EqualValues(t, 1, scoped.Hits())
-	require.Contains(t, logs.String(), "http: ending the steps: step: failed at the end")
+	require.Contains(t, logs.String(), "http: ending the pipes: pipe: failed at the end")
 }
 
-// limitStep passes on the first n bytes of each response, then aborts it with err, as a limit on the data a
+// limitPipe passes on the first n bytes of each response, then aborts it with err, as a limit on the data a
 // connection takes does. Each response has its own count.
-type limitStep struct {
+type limitPipe struct {
 	n   int
 	err error
 }
 
-func (s limitStep) Open(_ *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+func (s limitPipe) Open(_ *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	return &limitStage{left: s.n, err: s.err, next: next}
 }
 
@@ -456,14 +457,14 @@ func (s *limitStage) Flush() error { return s.next.Flush() }
 
 func (s *limitStage) Close() error { return s.next.Close() }
 
-func TestSteps_AStepCanCutEachResponseAfterSomeBytes(t *testing.T) {
-	// The count of a limit is the response's own, though the mock's steps serve all its requests: each client gets
+func TestPipes_APipeCanCutEachResponseAfterSomeBytes(t *testing.T) {
+	// The count of a limit is the response's own, though the mock's pipes serve all its requests: each client gets
 	// the first bytes, then a cut, not a short body that looks whole. The cut is the mock's answer: it counts.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	scoped := m.MustMock(Getf("/limit").Step(limitStep{n: 5, err: vlatte.ErrAbort}).Reply(OK().PlainText("hello world")))
+	scoped := m.MustMock(Getf("/limit").Pipe(limitPipe{n: 5, err: vlatte.ErrAbort}).Reply(OK().PlainText("hello world")))
 
 	var wg sync.WaitGroup
 	for range 2 {
@@ -485,13 +486,13 @@ func TestSteps_AStepCanCutEachResponseAfterSomeBytes(t *testing.T) {
 	require.EqualValues(t, 2, scoped.Hits())
 }
 
-func TestSteps_AResetCutsTheConnectionWithAReset(t *testing.T) {
+func TestPipes_AResetCutsTheConnectionWithAReset(t *testing.T) {
 	// A peer that resets the connection is an error a client must handle apart from a connection that ends.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	scoped := m.MustMock(Getf("/reset").Step(limitStep{n: 5, err: vlatte.ErrReset}).Reply(OK().PlainText("hello world")))
+	scoped := m.MustMock(Getf("/reset").Pipe(limitPipe{n: 5, err: vlatte.ErrReset}).Reply(OK().PlainText("hello world")))
 
 	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
 
@@ -505,13 +506,13 @@ func TestSteps_AResetCutsTheConnectionWithAReset(t *testing.T) {
 	require.EqualValues(t, 1, scoped.Hits())
 }
 
-func TestSteps_AResetCutsATLSConnectionWithAReset(t *testing.T) {
+func TestPipes_AResetCutsATLSConnectionWithAReset(t *testing.T) {
 	// A reset reaches the TCP connection under TLS too: the client reads a reset, not the end of the TLS stream.
 	m := MustNew(Setup().Silent())
 	m.MustStartTLS()
 	t.Cleanup(m.Close)
 
-	scoped := m.MustMock(Getf("/reset").Step(limitStep{n: 5, err: vlatte.ErrReset}).Reply(OK().PlainText("hello world")))
+	scoped := m.MustMock(Getf("/reset").Pipe(limitPipe{n: 5, err: vlatte.ErrReset}).Reply(OK().PlainText("hello world")))
 
 	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, DisableKeepAlives: true, Protocols: new(http.Protocols)}
 	tr.Protocols.SetHTTP1(true)
@@ -526,13 +527,13 @@ func TestSteps_AResetCutsATLSConnectionWithAReset(t *testing.T) {
 	require.EqualValues(t, 1, scoped.Hits())
 }
 
-// closeStep sends, as its stage closes, the cause of its flow's context, nil while the flow is on.
-type closeStep struct {
+// closePipe sends, as its stage closes, the cause of its flow's context, nil while the flow is on.
+type closePipe struct {
 	closed chan<- error
 	err    error
 }
 
-func (s closeStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+func (s closePipe) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	return &closeStage{flow: flow, closed: s.closed, err: s.err, next: next}
 }
 
@@ -558,9 +559,9 @@ func (s *closeStage) Close() error {
 	return s.next.Close()
 }
 
-func TestSteps_EveryResponseEndsItsSteps(t *testing.T) {
-	// The end of a response is an event of the steps, whatever the reply: an empty body has no write, and a reply that
-	// panics is vlatte's failure, which skips the steps. Either way, the stages end before the client gets the
+func TestPipes_EveryResponseEndsItsPipes(t *testing.T) {
+	// The end of a response is an event of the pipes, whatever the reply: an empty body has no write, and a reply that
+	// panics is vlatte's failure, which skips the pipes. Either way, the stages end before the client gets the
 	// answer, so their goroutines and timers don't outlive it.
 	tests := []struct {
 		name   string
@@ -588,7 +589,7 @@ func TestSteps_EveryResponseEndsItsSteps(t *testing.T) {
 			t.Cleanup(m.Close)
 
 			closed := make(chan error, 1)
-			m.MustMock(Getf("/end").Step(closeStep{closed: closed}, asyncStep{}).Reply(tc.reply))
+			m.MustMock(Getf("/end").Pipe(closePipe{closed: closed}, asyncPipe{}).Reply(tc.reply))
 
 			res, err := http.Get(m.URL("/end"))
 			require.NoError(t, err)
@@ -603,20 +604,20 @@ func TestSteps_EveryResponseEndsItsSteps(t *testing.T) {
 			case cause := <-closed:
 				require.Equal(t, tc.abort, errors.Is(cause, vlatte.ErrAbort))
 			default:
-				require.Fail(t, "the steps didn't end before the answer")
+				require.Fail(t, "the pipes didn't end before the answer")
 			}
 		})
 	}
 }
 
-func TestSteps_AStepCanCutAResponseWithoutABody(t *testing.T) {
-	// A reply with no body writes nothing, so only the end of the response lets a step cut it.
+func TestPipes_APipeCanCutAResponseWithoutABody(t *testing.T) {
+	// A reply with no body writes nothing, so only the end of the response lets a pipe cut it.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
 	closed := make(chan error, 1)
-	scoped := m.MustMock(Getf("/empty").Step(closeStep{closed: closed, err: vlatte.ErrAbort}).Reply(OK()))
+	scoped := m.MustMock(Getf("/empty").Pipe(closePipe{closed: closed, err: vlatte.ErrAbort}).Reply(OK()))
 
 	res, err := http.Get(m.URL("/empty"))
 	require.NoError(t, err)
@@ -646,8 +647,8 @@ func (s abortOn) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	return next
 }
 
-func TestSteps_AStepCanEndAReplyThatWaits(t *testing.T) {
-	// A target that holds the rest of its body writes nothing: a step that times the response out aborts the flow,
+func TestPipes_APipeCanEndAReplyThatWaits(t *testing.T) {
+	// A target that holds the rest of its body writes nothing: a pipe that times the response out aborts the flow,
 	// and the reply waiting on the target ends with it. The client gets a cut, and the mock counts the call.
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "start")
@@ -660,9 +661,9 @@ func TestSteps_AStepCanEndAReplyThatWaits(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	errTimeout := errors.New("step: timed out")
+	errTimeout := errors.New("pipe: timed out")
 	release := make(chan struct{})
-	scoped := m.MustMock(Getf("/wait").Step(abortOn{release: release, err: errTimeout}).Reply(From(target.URL)))
+	scoped := m.MustMock(Getf("/wait").Pipe(abortOn{release: release, err: errTimeout}).Reply(From(target.URL)))
 
 	res, err := http.Get(m.URL("/wait"))
 	require.NoError(t, err)
@@ -681,17 +682,17 @@ func TestSteps_AStepCanEndAReplyThatWaits(t *testing.T) {
 	require.EqualValues(t, 1, scoped.Hits())
 }
 
-func TestSteps_ConcurrentRequestsKeepTheirOwnResponse(t *testing.T) {
-	// D1: three Step calls leave spare capacity in the mock's steps, and every request appended its sink there, so
+func TestPipes_ConcurrentRequestsKeepTheirOwnResponse(t *testing.T) {
+	// D1: three Pipe calls leave spare capacity in the mock's pipes, and every request appended its sink there, so
 	// concurrent requests could write into each other's responses. The race detector also flags it.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
 	m.MustMock(Getf("/echo").
-		Step(appendStep("1")).
-		Step(appendStep("2")).
-		Step(appendStep("3")).
+		Pipe(appendPipe("1")).
+		Pipe(appendPipe("2")).
+		Pipe(appendPipe("3")).
 		Reply(OK().BodyTemplate(`{{ .Request.URL.Query.Get "n" }}`)))
 
 	var wg sync.WaitGroup
@@ -799,7 +800,7 @@ func TestHandler_FailuresAreToldApartFromNoMatch(t *testing.T) {
 	status, header, body = getFull(t, m, "/nothing")
 	require.Equal(t, StatusNoMatch, status)
 	require.Equal(t, vlatte.FailureNoMatch, header.Get(HeaderVlatteError))
-	require.True(t, strings.HasPrefix(body, "REQUEST DID NOT MATCH\n"), body)
+	require.True(t, strings.HasPrefix(body, "# Request did not match\n"), body)
 }
 
 func TestHandler_ErrorStatusCodeIsItsOwnSetting(t *testing.T) {
@@ -817,21 +818,21 @@ func TestHandler_ErrorStatusCodeIsItsOwnSetting(t *testing.T) {
 	require.Equal(t, StatusNoMatch, status)
 }
 
-func TestHandler_FailuresSkipTheStepsOfTheMock(t *testing.T) {
-	// The steps of a mock change its answer. A failure is vlatte's answer, so the steps must not change it.
+func TestHandler_FailuresSkipThePipesOfTheMock(t *testing.T) {
+	// The pipes of a mock change its answer. A failure is vlatte's answer, so the pipes must not change it.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/x").Step(appendStep("<step>")).Reply(OK().BodyFile("missing.txt")))
-	m.MustMock(Getf("/mapper").Step(appendStep("<step>")).Reply(OK()).
+	m.MustMock(Getf("/x").Pipe(appendPipe("<pipe>")).Reply(OK().BodyFile("missing.txt")))
+	m.MustMock(Getf("/mapper").Pipe(appendPipe("<pipe>")).Reply(OK()).
 		Map(func(*RequestValues, *Response) error { return errors.New("mapper failed") }))
 
 	for _, path := range []string{"/x", "/mapper"} {
 		status, header, body := getFull(t, m, path)
 		require.Equal(t, StatusNoMatch, status, body)
 		require.Equal(t, vlatte.FailureReply, header.Get(HeaderVlatteError))
-		require.NotContains(t, body, "<step>")
+		require.NotContains(t, body, "<pipe>")
 	}
 }
 
@@ -899,6 +900,39 @@ func TestHandler_APanicIsAFailure(t *testing.T) {
 
 	status, _ = get(t, m, "/ok")
 	require.Equal(t, http.StatusOK, status)
+}
+
+func TestHandler_VlatteAnswersAreNeverRenderedAsHTML(t *testing.T) {
+	// No-match, failure and panic answers echo the request's URL. A browser that opens a crafted URL on a mock must
+	// show it as text, never run it: one text/plain type, which it must not sniff, whatever a middleware set before.
+	m := MustNew(Setup().Silent().Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set(HeaderContentType, MIMETextHTMLCharsetUTF8)
+			next.ServeHTTP(w, r)
+		})
+	}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/reply").Reply(OK().BodyFile("missing.txt")))
+	m.MustMock(Getf("/panic").Reply(Func(func(http.ResponseWriter, *RequestValues) (*Response, error) {
+		panic("boom")
+	})))
+
+	for path, failure := range map[string]string{
+		"/nothing?q=%3Cscript%3E": vlatte.FailureNoMatch,
+		"/reply":                  vlatte.FailureReply,
+		"/panic":                  vlatte.FailurePanic,
+	} {
+		_, header, body := getFull(t, m, path)
+		require.Equal(t, failure, header.Get(HeaderVlatteError), body)
+		require.Len(t, header.Values(HeaderContentType), 1, path)
+
+		mediaType, _, err := mime.ParseMediaType(header.Get(HeaderContentType))
+		require.NoError(t, err)
+		require.Equal(t, MIMETextPlain, mediaType, path)
+		require.Equal(t, "nosniff", header.Get(HeaderXContentTypeOptions), path)
+	}
 }
 
 func TestLifecycle_ErrorLogsNameTheMock(t *testing.T) {
@@ -1228,7 +1262,7 @@ func TestLifecycle_LogsWhatTheVerbosityAsksFor(t *testing.T) {
 	})
 }
 
-// cancelableKV is a parameter store that fails once its context is done, as a remote store does.
+// cancelableKV is a key-value store that fails once its context is done, as a remote store does.
 type cancelableKV struct {
 	vlatte.KV
 }
@@ -1243,15 +1277,15 @@ func (kv cancelableKV) Get(ctx context.Context, k string) ([]byte, error) {
 
 func TestHandler_EventsOutliveTheClient(t *testing.T) {
 	// A client that leaves, as one that times out does, ends the context of its request, not the events of the
-	// request: they run with a context of their own, and their templates read the parameters with it, through a store
-	// that fails once its context is done.
+	// request: they run with a context of their own, and their templates read the key-value store with it, through a
+	// store that fails once its context is done.
 	kv := cancelableKV{vlatte.NewMemoryKV()}
 	require.NoError(t, kv.Set(t.Context(), "target", []byte("api")))
 
 	started := make(chan struct{})
 	rendered := make(chan string, 1)
 
-	m := MustNew(Setup().Silent().Parameters(kv).OnCompleteListener("renders", vlatte.EventFunc[vlatte.OnComplete](
+	m := MustNew(Setup().Silent().KV(kv).OnCompleteListener("renders", vlatte.EventFunc[vlatte.OnComplete](
 		func(ctx context.Context, e vlatte.OnComplete) error {
 			close(started)
 
@@ -1263,7 +1297,7 @@ func TestHandler_EventsOutliveTheClient(t *testing.T) {
 
 			var b strings.Builder
 
-			tmpl, err := e.Kit().TemplateEngine().Compile("target", `{{ .Parameters.Get "target" }}`)
+			tmpl, err := e.Kit().TemplateEngine().Compile("target", `{{ .KV.Get "target" }}`)
 			if err == nil {
 				err = tmpl.Execute(&b, e.Kit().Data())
 			}
@@ -1319,7 +1353,7 @@ func TestHandler_EventsOutliveTheClient(t *testing.T) {
 
 type tenantKey struct{}
 
-// tenantKV is a parameter store scoped to the tenant of each request: a read without one fails.
+// tenantKV is a key-value store scoped to the tenant of each request: a read without one fails.
 type tenantKV struct {
 	vlatte.KV
 }
@@ -1334,7 +1368,7 @@ func (kv tenantKV) Get(ctx context.Context, k string) ([]byte, error) {
 
 func TestHandler_EventsSeeTheValuesOfTheRequestContext(t *testing.T) {
 	// Middlewares put request-scoped values in the request's context, such as a trace or a tenant, which listeners and
-	// parameter stores read: the events of the request see them.
+	// key-value stores read: the events of the request see them.
 	kv := tenantKV{vlatte.NewMemoryKV()}
 	require.NoError(t, kv.Set(t.Context(), "target", []byte("api")))
 
@@ -1345,7 +1379,7 @@ func TestHandler_EventsSeeTheValuesOfTheRequestContext(t *testing.T) {
 
 	got := make(chan seen, 1)
 
-	m := MustNew(Setup().Silent().Parameters(kv).
+	m := MustNew(Setup().Silent().KV(kv).
 		Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), tenantKey{}, "acme")))
@@ -1354,7 +1388,7 @@ func TestHandler_EventsSeeTheValuesOfTheRequestContext(t *testing.T) {
 		OnCompleteListener("reads", vlatte.EventFunc[vlatte.OnComplete](func(ctx context.Context, e vlatte.OnComplete) error {
 			var b strings.Builder
 
-			tmpl, err := e.Kit().TemplateEngine().Compile("target", `{{ .Parameters.Get "target" }}`)
+			tmpl, err := e.Kit().TemplateEngine().Compile("target", `{{ .KV.Get "target" }}`)
 			if err == nil {
 				err = tmpl.Execute(&b, e.Kit().Data())
 			}
@@ -1516,20 +1550,20 @@ func TestHandler_NoDebugHeadersTurnsThemAllOff(t *testing.T) {
 	require.Equal(t, vlatte.FailureNoMatch, header.Get(HeaderVlatteError))
 }
 
-func TestHandler_StepsDropTheContentLengthOfAReplyThatWritesItsOwn(t *testing.T) {
-	// A step can change how many bytes go out, so the Content-Length a reply declares would be wrong: the server
-	// failed the write. Steps drop it, whatever reply set it, a proxy's or one that writes its own response.
+func TestHandler_PipesDropTheContentLengthOfAReplyThatWritesItsOwn(t *testing.T) {
+	// A pipe can change how many bytes go out, so the Content-Length a reply declares would be wrong: the server
+	// failed the write. Pipes drop it, whatever reply set it, a proxy's or one that writes its own response.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
-	m.MustMock(Getf("/h").Step(appendStep("<step>")).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
+	m.MustMock(Getf("/h").Pipe(appendPipe("<pipe>")).Reply(Handler(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set(HeaderContentLength, "5")
 		_, _ = io.WriteString(w, "hello")
 	})))
 
 	status, body := get(t, m, "/h")
 	require.Equal(t, http.StatusOK, status)
-	require.Equal(t, "hello<step>", body)
+	require.Equal(t, "hello<pipe>", body)
 }
 
 func TestHandler_AFlushSendsTheAnswerSoFar(t *testing.T) {
@@ -2088,11 +2122,15 @@ func TestNoMatch_ListsTheClosestMocks(t *testing.T) {
 	status, header, body := getFull(t, m, "/users")
 	require.Equal(t, StatusNoMatch, status)
 	require.Equal(t, vlatte.FailureNoMatch, header.Get(HeaderVlatteError))
-	require.Equal(t, "REQUEST DID NOT MATCH\nGET "+m.URL("/users")+"\n\n"+
-		"CLOSEST MOCKS\n"+
-		"[users] list users: 2 of 3 parts matched; differs in header Accept\n"+
-		"[create]: 1 of 2 parts matched; differs in method\n"+
-		"[orders]: 1 of 3 parts matched; differs in path, query page\n", body)
+	require.Equal(t, "# Request did not match\n\n"+
+		"No mock matched `GET "+m.URL("/users")+"`.\n\n"+
+		"Request ID: `"+header.Get(vlatte.HeaderRequestID)+"`\n\n"+
+		"## Closest mocks\n\n"+
+		"1. `users` (`list users`): 2 of 3 parts matched; differs in `header Accept`\n"+
+		"2. `create`: 1 of 2 parts matched; differs in `method`\n"+
+		"3. `orders`: 1 of 3 parts matched; differs in `path`, `query page`\n\n"+
+		"## Next steps\n\n"+
+		"- Change the request, or the closest mock, in the parts they differ in.\n", body)
 }
 
 func TestNoMatch_NearMissesRunNoMatcherTwice(t *testing.T) {
@@ -2112,7 +2150,7 @@ func TestNoMatch_NearMissesRunNoMatcherTwice(t *testing.T) {
 
 	status, _, body := getFull(t, m, "/a")
 	require.Equal(t, StatusNoMatch, status)
-	require.Contains(t, body, "[a]: 2 of 3 parts matched; differs in header x\n")
+	require.Contains(t, body, "`a`: 2 of 3 parts matched; differs in `header x`\n")
 	require.Equal(t, 2, runs, "the header of each mock ran once: a's in matching, b's in the report")
 }
 
@@ -2131,7 +2169,7 @@ func TestNoMatch_NearMissesSayWhereTheScenarioIs(t *testing.T) {
 
 	status, _, body := getFull(t, m, "/a")
 	require.Equal(t, StatusNoMatch, status)
-	require.Contains(t, body, "[a]: 2 of 3 parts matched; differs in scenario checkout needs paid, is started\n")
+	require.Contains(t, body, "`a`: 2 of 3 parts matched; differs in `scenario checkout needs paid, is started`\n")
 
 	status, _, _ = getFull(t, m, "/b")
 	require.Equal(t, http.StatusAccepted, status, "the scenario is still where it started")
@@ -2151,9 +2189,10 @@ func TestNoMatch_NearMissesTurnOff(t *testing.T) {
 
 			m.MustMock(Getf("/a").Reply(OK()))
 
-			status, _, body := getFull(t, m, "/b")
+			status, header, body := getFull(t, m, "/b")
 			require.Equal(t, StatusNoMatch, status)
-			require.Equal(t, "REQUEST DID NOT MATCH\nGET "+m.URL("/b")+"\n\n", body)
+			require.Equal(t, "# Request did not match\n\nNo mock matched `GET "+m.URL("/b")+"`.\n\n"+
+				"Request ID: `"+header.Get(vlatte.HeaderRequestID)+"`\n", body)
 		})
 	}
 }
@@ -2177,11 +2216,11 @@ func TestNoMatch_NamesEachPartAsTheBuilderDoes(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 
 	_, _, body := getFull(t, m, "/a")
-	require.Contains(t, body, "\n[once]: 2 of 3 parts matched; differs in times\n")
+	require.Contains(t, body, " `once`: 2 of 3 parts matched; differs in `times`\n")
 
 	_, _, body = getFull(t, m, "/b")
-	require.Contains(t, body, "\n[predicate]: 1 of 3 parts matched; differs in path, request: ")
-	require.Contains(t, body, "bad request\n")
+	require.Contains(t, body, " `predicate`: 1 of 3 parts matched; differs in `path`, `request: ")
+	require.Contains(t, body, "bad request`\n")
 }
 
 func TestNoMatch_NamesAKeyedPartWithItsKey(t *testing.T) {
@@ -2198,9 +2237,9 @@ func TestNoMatch_NamesAKeyedPartWithItsKey(t *testing.T) {
 	)
 
 	_, _, body := getFull(t, m, "/a")
-	require.Contains(t, body, "\n[headers]: 2 of 3 parts matched; differs in headers X-Id\n")
-	require.Contains(t, body, "\n[cookie]: 2 of 3 parts matched; differs in cookie session\n")
-	require.Contains(t, body, "\n[param]: 2 of 3 parts matched; differs in path_params id\n")
+	require.Contains(t, body, " `headers`: 2 of 3 parts matched; differs in `headers X-Id`\n")
+	require.Contains(t, body, " `cookie`: 2 of 3 parts matched; differs in `cookie session`\n")
+	require.Contains(t, body, " `param`: 2 of 3 parts matched; differs in `path_params id`\n")
 }
 
 // failingStateMatcher is a matcher that keeps state, matches every request, and fails to move its state on.

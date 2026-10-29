@@ -513,6 +513,46 @@ func TestServer_EveryRouteNeedsCredentials(t *testing.T) {
 	require.Equal(t, len(_routes)-len(_probes), checked)
 }
 
+func TestServer_NoAnswerIsSniffedAsHTML(t *testing.T) {
+	// Answers hold what clients sent, such as the requests of the journal and the paths of problem documents: a
+	// browser must take each for the type it says, never sniff one as HTML. Every route, unknown paths, refusals and
+	// requests during Close included.
+	s := newServer(t, Options{Auth: handler.Credentials{Token: "tok"}}, adminapi.Capabilities{})
+	require.NoError(t, s.Start())
+	t.Cleanup(func() { _ = s.Close() })
+
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	patterns := make([]string, 0, len(_routes)+1)
+	patterns = append(patterns, "GET /nothing")
+
+	for _, route := range _routes {
+		patterns = append(patterns, strings.TrimSuffix(route.pattern, "{$}"))
+	}
+
+	for _, pattern := range patterns {
+		for _, token := range []string{"tok", "wrong"} {
+			method, path, _ := strings.Cut(pattern, " ")
+			path = strings.NewReplacer("{id}", "x", "{name}", "x").Replace(path)
+
+			r, err := http.NewRequestWithContext(t.Context(), method, s.URL()+path, nil)
+			require.NoError(t, err)
+			r.Header.Set("Authorization", "Bearer "+token)
+
+			res, err := client.Do(r)
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, "nosniff", res.Header.Get("X-Content-Type-Options"), "%s %d", pattern, res.StatusCode)
+		}
+	}
+
+	require.NoError(t, s.Close())
+
+	rec := httptest.NewRecorder()
+	s.handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/mocks", nil))
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+}
+
 func TestServer_MiddlewaresRunBeforeTheCredentialsCheck(t *testing.T) {
 	// A browser's CORS preflight carries no credentials: a middleware that answers it must see it first.
 	preflight := func(next http.Handler) http.Handler {

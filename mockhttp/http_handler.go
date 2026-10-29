@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -39,11 +38,11 @@ var (
 	_ io.ReaderFrom       = (*answerWriter)(nil)
 )
 
-// errAbandoned ends the flow of the steps of a mock whose reply failed or panicked: a failure is vlatte's answer, not
+// errAbandoned ends the flow of the pipes of a mock whose reply failed or panicked: a failure is vlatte's answer, not
 // the mock's.
-var errAbandoned = errors.New("http: the reply ended before its steps did")
+var errAbandoned = errors.New("http: the reply ended before its pipes did")
 
-// topResponseWriter passes the body a reply writes, and its flushes, through one flow of the steps of its mock, then
+// topResponseWriter passes the body a reply writes, and its flushes, through one flow of the pipes of its mock, then
 // to rw. A stage may write from a goroutine of its own, so mu guards rw: every call to it, the wrapper's and the
 // flow's sink's, takes mu. The reply sees an http.ResponseWriter as any other, and needs no lock of its own.
 type topResponseWriter struct {
@@ -54,10 +53,10 @@ type topResponseWriter struct {
 	ended      bool
 }
 
-// newTopResponseWriter opens the flow of steps, within ctx, in front of rw.
-func newTopResponseWriter(ctx context.Context, steps []vlatte.Step, rw http.ResponseWriter) *topResponseWriter {
+// newTopResponseWriter opens the flow of pipes, within ctx, in front of rw.
+func newTopResponseWriter(ctx context.Context, pipes []vlatte.Pipe, rw http.ResponseWriter) *topResponseWriter {
 	w := &topResponseWriter{rw: rw}
-	w.flow = vlatte.NewFlow(ctx, responseSink{w}, steps)
+	w.flow = vlatte.NewFlow(ctx, responseSink{w}, pipes)
 
 	return w
 }
@@ -69,7 +68,7 @@ func (w *topResponseWriter) Header() http.Header {
 	return w.rw.Header()
 }
 
-// WriteHeader sends the status and the headers. Steps can change how many bytes go out, so a Content-Length, such as
+// WriteHeader sends the status and the headers. Pipes can change how many bytes go out, so a Content-Length, such as
 // a proxy's target sends, would be wrong: the server measures the body instead, or sends it chunked.
 func (w *topResponseWriter) WriteHeader(statusCode int) {
 	w.mu.Lock()
@@ -83,13 +82,13 @@ func (w *topResponseWriter) WriteHeader(statusCode int) {
 	}
 }
 
-// Write passes p through the steps, then to rw, after the headers.
+// Write passes p through the pipes, then to rw, after the headers.
 func (w *topResponseWriter) Write(p []byte) (int, error) {
 	w.sendHeader()
 	return w.flow.Write(p)
 }
 
-// FlushError passes the flush through the steps, then flushes rw, after the headers: a stage that delays the body
+// FlushError passes the flush through the pipes, then flushes rw, after the headers: a stage that delays the body
 // delays its flushes too.
 func (w *topResponseWriter) FlushError() error {
 	w.sendHeader()
@@ -157,7 +156,7 @@ func (w *topResponseWriter) end() error {
 }
 
 // abandon ends a flow that end didn't, such as on a panic or a failure, which are vlatte's answer, not the mock's:
-// its stages drop what they hold. A nil w, for a mock without steps, has none.
+// its stages drop what they hold. A nil w, for a mock without pipes, has none.
 func (w *topResponseWriter) abandon() {
 	if w != nil && !w.ended {
 		w.flow.Abort(errAbandoned)
@@ -165,7 +164,7 @@ func (w *topResponseWriter) abandon() {
 	}
 }
 
-// aborted returns the cause of the flow when a stage aborted it, or nil. A nil w, for a mock without steps, has none.
+// aborted returns the cause of the flow when a stage aborted it, or nil. A nil w, for a mock without pipes, has none.
 func (w *topResponseWriter) aborted() error {
 	if w == nil {
 		return nil
@@ -543,7 +542,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	locals := locals(reqValues, d, viewdata.NewParameters(r.Context(), h.app.params))
+	locals := locals(reqValues, d, viewdata.NewKVView(r.Context(), h.app.config.KV))
 
 	reqValues.Data = locals
 
@@ -566,17 +565,17 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		counted bool // the mock counted as served before it answered, as a stream does
 	)
 
-	// A mock with wire steps answers on its connection, which it takes over, so they see every byte of the answer. It
-	// reads a body still the client's first, through the upstream steps: a proxy reply sends what they passed on, and
+	// A mock with wire pipes answers on its connection, which it takes over, so they see every byte of the answer. It
+	// reads a body still the client's first, through the upstream pipes: a proxy reply sends what they passed on, and
 	// a stage that aborts them cuts the answer before it starts.
-	upSteps := mock.UpstreamSteps()
+	upPipes := mock.UpstreamPipes()
 
 	var upBody *bytes.Reader
 
 	var wire *wireResponseWriter
-	if steps := mock.WireSteps(); len(steps) > 0 {
+	if pipes := mock.WirePipes(); len(pipes) > 0 {
 		var err error
-		if wire, err = h.takeOver(ctx, w, reqValues, steps, upSteps); err != nil && !errors.Is(err, vlatte.ErrAbort) {
+		if wire, err = h.takeOver(ctx, w, reqValues, pipes, upPipes); err != nil && !errors.Is(err, vlatte.ErrAbort) {
 			// A connection the server's close took over is closed: it can't get an answer.
 			if !errors.Is(err, errTakeOverClosed) {
 				h.onError(w, reqValues, vlatte.FailureReply, err)
@@ -590,10 +589,10 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if wire != nil {
 		if upBody = wire.upstream; upBody != nil {
-			upSteps = nil
+			upPipes = nil
 		}
 
-		// A panic is vlatte's answer, without the steps, which the recovery middleware can't write on the connection
+		// A panic is vlatte's answer, without the pipes, which the recovery middleware can't write on the connection
 		// the mock took over: it is answered here. An abort of the handler cuts the connection.
 		defer func() {
 			p := recover()
@@ -616,13 +615,13 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx = wire.Context()
 	}
 
-	// A failure is vlatte's answer, not the mock's, so it skips the steps of the mock. The flow of the steps drives the
+	// A failure is vlatte's answer, not the mock's, so it skips the pipes of the mock. The flow of the pipes drives the
 	// reply: a stage that aborts it, such as on a timer, ends a reply that waits.
 	rw := w
 
 	var top *topResponseWriter
-	if steps := mock.Steps(); len(steps) > 0 && cut == nil {
-		top = newTopResponseWriter(ctx, steps, w)
+	if pipes := mock.Pipes(); len(pipes) > 0 && cut == nil {
+		top = newTopResponseWriter(ctx, pipes, w)
 		defer top.abandon()
 
 		w = top
@@ -631,7 +630,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	noSwitch := len(mock.spec.mappers) > 0
 
-	// fail answers a failure to serve the mock, which skips its steps, and ends the answer.
+	// fail answers a failure to serve the mock, which skips its pipes, and ends the answer.
 	fail := func(err error) {
 		top.abandon()
 		wire.abandon()
@@ -645,7 +644,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			RequestValues: reqValues,
 			Writer:        w,
 			noSwitch:      noSwitch,
-			upstream:      upSteps,
+			upstream:      upPipes,
 			upstreamBody:  upBody,
 		})
 	}
@@ -663,7 +662,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// The steps of the body end as for any cut: they drop what they hold.
+		// The pipes of the body end as for any cut: they drop what they hold.
 		if top != nil {
 			top.flow.Abort(cut)
 			_ = top.end()
@@ -693,7 +692,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case cut != nil:
 		// A cut answer isn't recorded.
 	case res != nil && res.upgrade != nil:
-		// The answer ends with its head: the steps go on with the connection. A stage that cut the answer cuts the
+		// The answer ends with its head: the pipes go on with the connection. A stage that cut the answer cuts the
 		// switch.
 		if top != nil {
 			_ = top.end()
@@ -757,13 +756,13 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		cut = h.render(ctx, w, reqValues, res, capture)
 		started = true
 	default:
-		// A reply that writes its own answer, such as Echo, wrote it all: the steps pass on what they hold.
+		// A reply that writes its own answer, such as Echo, wrote it all: the pipes pass on what they hold.
 		if top != nil {
 			started = top.headerSent
 
 			endErr := top.end()
 			if cut = cmp.Or(top.aborted(), wire.aborted()); cut == nil && endErr != nil {
-				h.renderFailed(reqValues, false, fmt.Errorf("http: ending the steps: %w", endErr))
+				h.renderFailed(reqValues, false, fmt.Errorf("http: ending the pipes: %w", endErr))
 			}
 		}
 
@@ -782,9 +781,9 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Context(),
 		mock,
 		func(ctx context.Context, cfg vlatte.EventConfig) vlatte.OnComplete {
-			// The request's context ends when the client leaves: templates read the parameters with the event's.
+			// The request's context ends when the client leaves: templates read the key-value store with the event's.
 			data := *locals
-			data.Parameters = viewdata.NewParameters(ctx, h.app.params)
+			data.KV = viewdata.NewKVView(ctx, h.app.config.KV)
 			kit := &Kit{
 				engine:    h.app.config.TemplateEngine,
 				data:      &data,
@@ -822,7 +821,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // cut ends the answer as a stage of the mock asked, once the call is counted and logged: with a reset over a
 // connection that can take one, else by aborting the handler, which closes an HTTP/1 connection and resets an HTTP/2
-// stream. w is the writer under the steps. An answer that started goes out first, as far as it got: neither an abort
+// stream. w is the writer under the pipes. An answer that started goes out first, as far as it got: neither an abort
 // nor a hijack sends what the server buffers. One that didn't sends nothing, not even a status.
 func (h *mockHandler) cut(w http.ResponseWriter, r *http.Request, cause error, started bool) {
 	if started {
@@ -887,9 +886,9 @@ func (h *mockHandler) serveUpstream(w http.ResponseWriter, r *RequestValues, ups
 // connection over, the client gets the server's answer to the failure, and after, the log warns. It returns false
 // too when a stage of wire cut the 101, which leaves wire to finish with the cut.
 //
-// mock, when not nil, is the mock that answered: its steps pass on what the target sends, and its upstream steps what
-// the client sends. wire, when not nil, holds the client's connection already: its steps go on with the bytes of the
-// connection, the 101 included, after the steps of the mock.
+// mock, when not nil, is the mock that answered: its pipes pass on what the target sends, and its upstream pipes what
+// the client sends. wire, when not nil, holds the client's connection already: its pipes go on with the bytes of the
+// connection, the 101 included, after the pipes of the mock.
 func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, res *Response, mock *Mock, wire *wireResponseWriter) (func(), bool) {
 	upstream := res.upgrade
 
@@ -909,7 +908,7 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 	)
 
 	if wire != nil {
-		// The 101 goes first, through the wire steps: they see every byte of the connection. A stage that cuts it cuts
+		// The 101 goes first, through the wire pipes: they see every byte of the connection. A stage that cuts it cuts
 		// the switch, which the caller finishes as any cut of the answer.
 		if _, err := wire.flow.Write(head.Bytes()); err != nil {
 			upstream.Close()
@@ -936,9 +935,9 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 			return nil, false
 		}
 
-		// What goes to the client ends with the wire steps, and an abort of theirs cuts it: its flow derives from
+		// What goes to the client ends with the wire pipes, and an abort of theirs cuts it: its flow derives from
 		// theirs. What goes the other way, from ctx, outlives the end of what goes to the client.
-		toClient = vlatte.NewFlow(wireFlow.Context(), wireFlow, mock.Steps())
+		toClient = vlatte.NewFlow(wireFlow.Context(), wireFlow, mock.Pipes())
 		done = func() {
 			h.app.tunnels.remove(upstream)
 			upstream.Close()
@@ -981,14 +980,14 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 			return nil, false
 		}
 
-		if mock != nil && len(mock.Steps()) > 0 {
-			toClient = vlatte.NewFlow(ctx, &vlatte.Sink{W: client}, mock.Steps())
+		if mock != nil && len(mock.Pipes()) > 0 {
+			toClient = vlatte.NewFlow(ctx, &vlatte.Sink{W: client}, mock.Pipes())
 		}
 	}
 
 	var toUpstream *vlatte.Flow
-	if mock != nil && len(mock.UpstreamSteps()) > 0 {
-		toUpstream = vlatte.NewFlow(ctx, &vlatte.Sink{W: upstream}, mock.UpstreamSteps())
+	if mock != nil && len(mock.UpstreamPipes()) > 0 {
+		toUpstream = vlatte.NewFlow(ctx, &vlatte.Sink{W: upstream}, mock.UpstreamPipes())
 	}
 
 	r.answer.wroteOn(res.StatusCode)
@@ -1135,13 +1134,13 @@ func (h *mockHandler) served(mock *Mock, r *RequestValues) {
 	}
 }
 
-// render sends res through w, ends the steps of the mock, if any, and has the capture, if any, record the answer once
+// render sends res through w, ends the pipes of the mock, if any, and has the capture, if any, record the answer once
 // the client got it whole. It returns the cause of an abort a stage asked for, or nil: the caller cuts the answer.
 // The status and headers are sent by now, so an error can't become the response: renderFailed logs it.
 func (h *mockHandler) render(ctx context.Context, w http.ResponseWriter, r *RequestValues, res *Response, capture *captureWriter) error {
 	err := res.Render(ctx, w)
 
-	// The steps pass on what they hold before anything reads what the client got.
+	// The pipes pass on what they hold before anything reads what the client got.
 	if top, ok := w.(*topResponseWriter); ok {
 		err = cmp.Or(err, top.end())
 	}
@@ -1184,8 +1183,8 @@ func (h *mockHandler) renderFailed(r *RequestValues, proxied bool, err error) {
 	}
 }
 
-// onNoMatches answers a request no mock matched with the mocks that came closest, of misses, unless the server
-// reports none: misses is nil then. Its journal entry lists them too.
+// onNoMatches answers a request no mock matched through the server's NoMatchRenderer, with the mocks that came
+// closest, of misses, unless the server reports none: misses is nil then. Its journal entry lists them too.
 func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, misses *vlatte.Misses[*Mock, *selectorInput]) {
 	defer h.lifecycle.OnNoMatch(r)
 
@@ -1193,56 +1192,22 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, misse
 		r.nearMisses = misses.NearMisses(r.RawRequest.Context(), describeExpectation)
 	}
 
-	buf := bufpool.Get()
-	buf.Reset()
-	defer bufpool.Put(buf)
+	nm := &NoMatch{
+		Request:    r,
+		NearMisses: cloneNearMisses(r.nearMisses),
+		Status:     h.app.config.RequestWasNotMatchedStatusCode,
+	}
 
-	buf.WriteString("REQUEST DID NOT MATCH\n")
-	buf.WriteString(r.RawRequest.Method)
-	buf.WriteString(" ")
-	buf.WriteString(r.URL.String())
-	buf.WriteString("\n\n")
-	writeNearMisses(buf, r.nearMisses)
-
-	w.Header().Add(HeaderContentType, MIMETextPlainCharsetUTF8)
 	w.Header().Set(HeaderVlatteError, vlatte.FailureNoMatch)
-	w.WriteHeader(h.app.config.RequestWasNotMatchedStatusCode)
+	w.Header().Set(HeaderXContentTypeOptions, _noSniff)
 
-	buf.WriteTo(w)
-}
+	h.app.noMatch.RenderNoMatch(w, nm)
 
-// writeNearMisses writes misses to buf, one per line, after a title: the parts of each mock that matched, those that
-// differ, and those it didn't check. A line break in a name or a matcher's error is a space: a mock stays a line.
-func writeNearMisses(buf *bytes.Buffer, misses []vlatte.NearMiss) {
-	if len(misses) == 0 {
-		return
-	}
-
-	buf.WriteString("CLOSEST MOCKS\n")
-
-	for _, miss := range misses {
-		line := "[" + miss.MockID + "]"
-		if miss.Name != "" && miss.Name != miss.MockID {
-			line += " " + miss.Name
-		}
-
-		line += fmt.Sprintf(": %d of %d parts matched", miss.Passed, miss.Total)
-
-		if len(miss.Failed) > 0 {
-			line += "; differs in " + strings.Join(miss.Failed, ", ")
-		}
-
-		if len(miss.Skipped) > 0 {
-			line += "; not checked: " + strings.Join(miss.Skipped, ", ")
-		}
-
-		_oneLine.WriteString(buf, line)
-		buf.WriteString("\n")
+	// A renderer that wrote nothing would answer 200, as net/http does, and pass the request off as matched.
+	if r.sent() == 0 {
+		w.WriteHeader(nm.Status)
 	}
 }
-
-// _oneLine turns line breaks into spaces.
-var _oneLine = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
 
 // onError answers a request whose serving failed, with the error status, so a client tells it from a mock's answer.
 // failure is a vlatte.Failure* value. The body names the mock that matched, if one did, and the error.
@@ -1287,6 +1252,7 @@ func (h *mockHandler) onError(w http.ResponseWriter, r *RequestValues, failure s
 	buf.WriteString(err.Error())
 
 	w.Header().Set(HeaderContentType, MIMETextPlainCharsetUTF8)
+	w.Header().Set(HeaderXContentTypeOptions, _noSniff)
 	w.Header().Set(HeaderVlatteError, failure)
 	w.WriteHeader(h.app.config.ErrorStatusCode)
 
@@ -1342,7 +1308,7 @@ func describeExpectation(e *expectation) string {
 	return name
 }
 
-func locals(r *RequestValues, provided map[string]any, params *viewdata.Parameters) *viewdata.Data {
+func locals(r *RequestValues, provided map[string]any, kv *viewdata.KVView) *viewdata.Data {
 	parsed := r.RawRequest.Cookies()
 	cookies := make(map[string]*http.Cookie, len(parsed))
 	for _, cookie := range parsed {
@@ -1373,12 +1339,12 @@ func locals(r *RequestValues, provided map[string]any, params *viewdata.Paramete
 	}
 
 	return &viewdata.Data{
-		Request:    req,
-		Provided:   provided,
-		Parameters: params,
-		Server:     &viewdata.Server{URL: r.App.URL()},
-		Data:       r.App.Data(),
-		Scenarios:  r.App.scenarioStore.View(r.scenarioMoves...),
+		Request:   req,
+		Provided:  provided,
+		KV:        kv,
+		Server:    &viewdata.Server{URL: r.App.URL()},
+		Data:      r.App.Data(),
+		Scenarios: r.App.scenarioStore.View(r.scenarioMoves...),
 	}
 }
 

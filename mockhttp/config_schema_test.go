@@ -95,6 +95,7 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		"debug":                {[]string{"--debug"}, func(t *testing.T, c *Config) { require.True(t, c.Debug) }},
 		"debug-headers":        {[]string{"--debug-headers=false"}, func(t *testing.T, c *Config) { require.True(t, c.NoDebugHeaders) }},
 		"near-misses":          {[]string{"--near-misses=false"}, func(t *testing.T, c *Config) { require.True(t, c.NoNearMisses) }},
+		"no-match-format":      {[]string{"--no-match-format", "PROBLEM"}, func(t *testing.T, c *Config) { require.Equal(t, NoMatchProblem, c.NoMatchFormat) }},
 		"journal":              {[]string{"--journal"}, func(t *testing.T, c *Config) { require.Equal(t, new(defaultJournalConfig()), c.Journal) }},
 		"journal-dir":          {[]string{"--journal-dir", journalDir}, func(t *testing.T, c *Config) { require.Equal(t, journalDir, c.Journal.Dir) }},
 		"journal-max-entries":  {[]string{"--journal-max-entries", "5"}, func(t *testing.T, c *Config) { require.Equal(t, 5, c.Journal.MaxEntries) }},
@@ -613,6 +614,11 @@ func TestConfigSources_ValueChecks(t *testing.T) {
 			name:    "an outbound range that isn't in CIDR form",
 			sources: []ConfigSource{ConfigArgs([]string{"--outbound-deny=169.254.169.254"})},
 			problem: `outbound.deny="169.254.169.254": expected address ranges in CIDR form, such as 10.0.0.0/8, not "169.254.169.254"`,
+		},
+		{
+			name:    "a no-match format that isn't one",
+			sources: []ConfigSource{ConfigArgs([]string{"--no-match-format=xml"})},
+			problem: `no_match_format must be one of auto, text, markdown, json or problem, not "xml"`,
 		},
 		{
 			name:    "an empty proxy via, which clears one from a lower source",

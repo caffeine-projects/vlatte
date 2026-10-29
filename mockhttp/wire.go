@@ -20,9 +20,9 @@ var (
 	_ http.Flusher        = (*wireResponseWriter)(nil)
 )
 
-// errWireNeedsHTTP1 is the failure of a mock with wire steps over a connection it can't take over, such as an HTTP/2
+// errWireNeedsHTTP1 is the failure of a mock with wire pipes over a connection it can't take over, such as an HTTP/2
 // one: it answers in HTTP/1.x on the connection itself.
-var errWireNeedsHTTP1 = errors.New("http: wire steps need an HTTP/1.x connection")
+var errWireNeedsHTTP1 = errors.New("http: wire pipes need an HTTP/1.x connection")
 
 // errTakeOverClosed is the failure of a takeover while the server closes: the connection is closed, without an answer.
 var errTakeOverClosed = errors.New("http: the server closed the connection it took over")
@@ -31,7 +31,7 @@ var errTakeOverClosed = errors.New("http: the server closed the connection it to
 var _wireHeaders = []string{HeaderContentLength, "Transfer-Encoding", HeaderConnection}
 
 // wireResponseWriter answers a request on its connection, which the server took over, in HTTP/1.x, through the flow of
-// the wire steps of its mock: their stages see every byte of the answer, the status line, the headers, the framing and
+// the wire pipes of its mock: their stages see every byte of the answer, the status line, the headers, the framing and
 // the body. The answer ends with the connection, so it needs no length. Nothing else writes to the connection, and the
 // flow orders the writes of a stage that writes from a goroutine of its own.
 type wireResponseWriter struct {
@@ -40,9 +40,9 @@ type wireResponseWriter struct {
 	base      context.Context    // the context the flow derives from, which the server's close ends
 	release   context.CancelFunc // releases base
 	flow      *vlatte.Flow
-	out       vlatte.Stage // the flow, or the connection once the steps are abandoned
+	out       vlatte.Stage // the flow, or the connection once the pipes are abandoned
 	header    http.Header
-	upstream  *bytes.Reader // the body as the upstream steps passed it on, when they read it before the takeover
+	upstream  *bytes.Reader // the body as the upstream pipes passed it on, when they read it before the takeover
 	proto     string
 	head      bool // a HEAD: the answer has no body
 	chunked   bool // HTTP/1.1: the body is chunked
@@ -52,18 +52,18 @@ type wireResponseWriter struct {
 	finished  bool
 }
 
-// takeOver takes the connection of r over from w, for the wire steps of its mock, and returns the writer that answers
+// takeOver takes the connection of r over from w, for the wire pipes of its mock, and returns the writer that answers
 // on it, within ctx, which the server's close ends too: once the connection is taken over, a read on it, such as of
 // a switch of protocols, can end the request's context. What is left of the request's body is read first, through
-// upSteps, the upstream steps of the mock: net/http forbids the body once the connection is taken over. A stage that
+// upPipes, the upstream pipes of the mock: net/http forbids the body once the connection is taken over. A stage that
 // aborts them returns the cause, before the connection is taken over.
-func (h *mockHandler) takeOver(ctx context.Context, w http.ResponseWriter, r *RequestValues, steps, upSteps []vlatte.Step) (*wireResponseWriter, error) {
+func (h *mockHandler) takeOver(ctx context.Context, w http.ResponseWriter, r *RequestValues, pipes, upPipes []vlatte.Pipe) (*wireResponseWriter, error) {
 	req := r.RawRequest
 	if req.ProtoMajor != 1 {
 		return nil, fmt.Errorf("%w, not %s", errWireNeedsHTTP1, req.Proto)
 	}
 
-	upstream, err := bufferBody(ctx, req, upSteps)
+	upstream, err := bufferBody(ctx, req, upPipes)
 	if errors.Is(err, vlatte.ErrAbort) {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func (h *mockHandler) takeOver(ctx context.Context, w http.ResponseWriter, r *Re
 	}
 
 	ww.base, ww.release = h.app.tunnels.bind(context.WithoutCancel(ctx))
-	ww.flow = vlatte.NewFlow(ww.base, &vlatte.Sink{W: conn}, steps)
+	ww.flow = vlatte.NewFlow(ww.base, &vlatte.Sink{W: conn}, pipes)
 	ww.out = ww.flow
 
 	return ww, nil
@@ -109,16 +109,16 @@ func (h *mockHandler) takeOver(ctx context.Context, w http.ResponseWriter, r *Re
 
 // bufferBody reads what is left of the body of req into memory, so it can be read once the connection is taken over:
 // req reads it again as the client sent it. A body the server didn't read whole, which GetBody can't read again, is
-// still the client's: it is read through steps, as the target would read it, so they pace the upload. It returns the
+// still the client's: it is read through pipes, as the target would read it, so they pace the upload. It returns the
 // body as they passed it on, or nil when they didn't read it, and the cause of an abort a stage asks for.
-func bufferBody(ctx context.Context, req *http.Request, steps []vlatte.Step) (*bytes.Reader, error) {
+func bufferBody(ctx context.Context, req *http.Request, pipes []vlatte.Pipe) (*bytes.Reader, error) {
 	if req.Body == nil || req.Body == http.NoBody {
 		return nil, nil
 	}
 
 	var (
 		sent bytes.Buffer
-		up   *stepReader
+		up   *pipeReader
 	)
 
 	body := io.ReadCloser(struct {
@@ -126,8 +126,8 @@ func bufferBody(ctx context.Context, req *http.Request, steps []vlatte.Step) (*b
 		io.Closer
 	}{io.TeeReader(req.Body, &sent), req.Body})
 
-	if len(steps) > 0 && req.GetBody == nil {
-		up = newStepReader(ctx, body, steps)
+	if len(pipes) > 0 && req.GetBody == nil {
+		up = newPipeReader(ctx, body, pipes)
 		body = up
 	}
 
@@ -223,7 +223,7 @@ func (w *wireResponseWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// FlushError passes the flush through the steps, after the status line and the headers.
+// FlushError passes the flush through the pipes, after the status line and the headers.
 func (w *wireResponseWriter) FlushError() error {
 	if !w.started {
 		w.WriteHeader(http.StatusOK)
@@ -257,7 +257,7 @@ func (w *wireResponseWriter) statusHead(code int, header http.Header) []byte {
 	return b.Bytes()
 }
 
-// aborted returns the cause of the flow when a stage aborted it, or nil. A nil w, for a mock without wire steps, has
+// aborted returns the cause of the flow when a stage aborted it, or nil. A nil w, for a mock without wire pipes, has
 // none.
 func (w *wireResponseWriter) aborted() error {
 	if w == nil {
@@ -271,8 +271,8 @@ func (w *wireResponseWriter) aborted() error {
 	return nil
 }
 
-// abandon ends the steps, which drop what they hold, for vlatte's answer to a failure: what is written after goes
-// to the connection as it is. A nil w, for a mock without wire steps, has none.
+// abandon ends the pipes, which drop what they hold, for vlatte's answer to a failure: what is written after goes
+// to the connection as it is. A nil w, for a mock without wire pipes, has none.
 func (w *wireResponseWriter) abandon() {
 	if w == nil || w.abandoned {
 		return
@@ -285,8 +285,8 @@ func (w *wireResponseWriter) abandon() {
 }
 
 // finish ends the answer and the connection, once. Without a cut, the answer gets its end, the last chunk and the
-// trailers, and the steps end; cut, or aborted by a stage, the steps drop what they hold. Then the connection is
-// closed, or reset for a cause that matches ErrReset. A nil w, for a mock without wire steps, has none.
+// trailers, and the pipes end; cut, or aborted by a stage, the pipes drop what they hold. Then the connection is
+// closed, or reset for a cause that matches ErrReset. A nil w, for a mock without wire pipes, has none.
 func (w *wireResponseWriter) finish(cut error) {
 	if w == nil || w.finished {
 		return
@@ -306,7 +306,7 @@ func (w *wireResponseWriter) finish(cut error) {
 	w.close(cut)
 }
 
-// handOver hands the connection over to a switch of protocols, with the flow of the wire steps, which go on with
+// handOver hands the connection over to a switch of protocols, with the flow of the wire pipes, which go on with
 // what goes to the client, and base, the context of what goes the other way, which the end of the flow doesn't end:
 // the answer no longer finishes them. close ends them, as finish does, with the cause of a cut, if any.
 func (w *wireResponseWriter) handOver() (conn net.Conn, base context.Context, flow *vlatte.Flow, closeConn func(cut error)) {
@@ -314,7 +314,7 @@ func (w *wireResponseWriter) handOver() (conn net.Conn, base context.Context, fl
 	return w.conn, w.base, w.flow, w.close
 }
 
-// close ends the flow, and closes the connection, or resets it for a cut that matches ErrReset. The steps of a cut
+// close ends the flow, and closes the connection, or resets it for a cut that matches ErrReset. The pipes of a cut
 // drop what they hold.
 func (w *wireResponseWriter) close(cut error) {
 	defer w.release()
@@ -334,7 +334,7 @@ func (w *wireResponseWriter) close(cut error) {
 	_ = w.conn.Close()
 }
 
-// end writes the end of the answer, the last chunk and the trailers, and ends the steps: they pass on what they hold.
+// end writes the end of the answer, the last chunk and the trailers, and ends the pipes: they pass on what they hold.
 // A reply that wrote nothing answers 200.
 func (w *wireResponseWriter) end() {
 	if !w.started {

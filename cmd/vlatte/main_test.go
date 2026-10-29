@@ -114,11 +114,12 @@ func randomAddr(t *testing.T) string {
 }
 
 func TestCLI(t *testing.T) {
-	// Flags configure the server: it listens on --addr and answers unmatched requests with --no-match-status-code.
+	// Flags configure the server: it listens on --addr and answers unmatched requests with --no-match-status-code, in
+	// --no-match-format.
 	withoutDockerHost(t)
 
 	addr := randomAddr(t)
-	stop := start(t, "--addr", addr, "--no-match-status-code", "404")
+	stop := start(t, "--addr", addr, "--no-match-status-code", "404", "--no-match-format", "json")
 
 	// Connection errors mean it is not up yet: they are retried, never counted as success.
 	require.EventuallyWithT(t, func(c *assert.CollectT) {
@@ -129,6 +130,7 @@ func TestCLI(t *testing.T) {
 
 		_ = res.Body.Close()
 		assert.Equal(c, http.StatusNotFound, res.StatusCode)
+		assert.Equal(c, "application/json", res.Header.Get("Content-Type"))
 	}, 10*time.Second, 100*time.Millisecond)
 
 	require.Equal(t, 0, stop(), "a stopped server exits cleanly")

@@ -50,9 +50,9 @@ type mockDef struct {
 	repeat      int64
 	scenario    scenarioDef
 	events      []vlatte.EventConfig
-	steps       []vlatte.Step
-	wireSteps   []vlatte.Step
-	upSteps     []vlatte.Step
+	pipes       []vlatte.Pipe
+	wirePipes   []vlatte.Pipe
+	upPipes     []vlatte.Pipe
 	request     requestDef
 	reply       *replyDef
 	sequence    *sequenceDef
@@ -220,16 +220,16 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error { return setEvents(&d.events, d.dir, v) },
 	},
 	mockField{
-		Key: "steps", Kind: config.Any, Usage: "Faults the body of each answer passes through, in order: a list of fault specs, such as {type: slow_close, delay: 2s}.",
-		Set: func(d *mockDef, v config.Value) error { return setSteps(&d.steps, v) },
+		Key: "pipes", Kind: config.Any, Usage: "Faults the body of each answer passes through, in order: a list of fault specs, such as {type: slow_close, delay: 2s}.",
+		Set: func(d *mockDef, v config.Value) error { return setPipes(&d.pipes, v) },
 	},
 	mockField{
-		Key: "wire_steps", Kind: config.Any, Usage: "Faults every byte of each answer passes through, its head included, after steps: a list of fault specs. Needs HTTP/1.x.",
-		Set: func(d *mockDef, v config.Value) error { return setSteps(&d.wireSteps, v) },
+		Key: "wire_pipes", Kind: config.Any, Usage: "Faults every byte of each answer passes through, its head included, after pipes: a list of fault specs. Needs HTTP/1.x.",
+		Set: func(d *mockDef, v config.Value) error { return setPipes(&d.wirePipes, v) },
 	},
 	mockField{
-		Key: "upstream_steps", Kind: config.Any, Usage: "Faults the body a proxy reply sends on passes through: a list of fault specs.",
-		Set: func(d *mockDef, v config.Value) error { return setSteps(&d.upSteps, v) },
+		Key: "upstream_pipes", Kind: config.Any, Usage: "Faults the body a proxy reply sends on passes through: a list of fault specs.",
+		Set: func(d *mockDef, v config.Value) error { return setPipes(&d.upPipes, v) },
 	},
 	mockField{
 		Key: "request.scheme", Kind: config.Any, Usage: "Scheme to match: text, or a matcher list.",
@@ -1067,15 +1067,15 @@ func setEvents(events *[]vlatte.EventConfig, dir string, v config.Value) error {
 	})
 }
 
-// setSteps decodes a list of fault specs, such as {type: latency, latency: 100ms}: see [faultbuild.Build].
-func setSteps(steps *[]vlatte.Step, v config.Value) error {
+// setPipes decodes a list of fault specs, such as {type: latency, latency: 100ms}: see [faultbuild.Build].
+func setPipes(pipes *[]vlatte.Pipe, v config.Value) error {
 	return config.Items(v, func(item config.Value) error {
-		step, err := faultbuild.BuildAt(item.Any, item.Origin, item.Key)
+		pipe, err := faultbuild.BuildAt(item.Any, item.Origin, item.Key)
 		if err != nil {
 			return err
 		}
 
-		*steps = append(*steps, step)
+		*pipes = append(*pipes, pipe)
 
 		return nil
 	})
@@ -1362,7 +1362,7 @@ func (d *mockDef) apply(b *Builder, dir string) {
 		b.OnCompleteEvent(e)
 	}
 
-	b.Step(d.steps...).WireStep(d.wireSteps...).UpstreamStep(d.upSteps...)
+	b.Pipe(d.pipes...).WirePipe(d.wirePipes...).UpstreamPipe(d.upPipes...)
 
 	d.request.apply(b)
 

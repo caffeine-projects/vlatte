@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prepare-site": "node scripts/prepare.mjs",
+    "prepare-site": "node scripts/prepare.mjs && node scripts/llms.mjs",
     "dev": "npm run prepare-site && vitepress dev",
     "build": "npm run prepare-site && vitepress build",
     "preview": "vitepress preview"

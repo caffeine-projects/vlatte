@@ -54,19 +54,19 @@ type kind struct {
 	name     string
 	schema   *config.Schema[spec]
 	required []string
-	build    func(s spec) vlatte.Step
+	build    func(s spec) vlatte.Pipe
 }
 
 type field = config.Field[spec]
 
 var _kinds = []kind{
-	{name: "empty_response", schema: params(), build: func(spec) vlatte.Step { return fault.EmptyResponse() }},
-	{name: "malformed_response_chunk", schema: params(), build: func(spec) vlatte.Step { return fault.MalformedResponseChunk() }},
-	{name: "random_data_then_close", schema: params(), build: func(spec) vlatte.Step { return fault.RandomDataThenClose() }},
-	{name: "connection_reset_by_peer", schema: params(), build: func(spec) vlatte.Step { return fault.ConnectionResetByPeer() }},
+	{name: "empty_response", schema: params(), build: func(spec) vlatte.Pipe { return fault.EmptyResponse() }},
+	{name: "malformed_response_chunk", schema: params(), build: func(spec) vlatte.Pipe { return fault.MalformedResponseChunk() }},
+	{name: "random_data_then_close", schema: params(), build: func(spec) vlatte.Pipe { return fault.RandomDataThenClose() }},
+	{name: "connection_reset_by_peer", schema: params(), build: func(spec) vlatte.Pipe { return fault.ConnectionResetByPeer() }},
 	{
 		name: "chunked_dribble_delay", required: []string{"chunks", "total"},
-		build: func(s spec) vlatte.Step { return fault.ChunkedDribbleDelay(s.chunks, s.total) },
+		build: func(s spec) vlatte.Pipe { return fault.ChunkedDribbleDelay(s.chunks, s.total) },
 		schema: params(
 			whole("chunks", "How many parts the body is sent in.", func(s *spec, n int) { s.chunks = n }),
 			duration("total", "When the body ends.", func(s *spec, d time.Duration) { s.total = d }),
@@ -74,7 +74,7 @@ var _kinds = []kind{
 	},
 	{
 		name: "latency", required: []string{"latency"},
-		build: func(s spec) vlatte.Step { return fault.Latency(s.latency, s.jitter) },
+		build: func(s spec) vlatte.Pipe { return fault.Latency(s.latency, s.jitter) },
 		schema: params(
 			duration("latency", "How late each write arrives.", func(s *spec, d time.Duration) { s.latency = d }),
 			duration("jitter", "How much the latency varies by, up to the latency. 0 by default.", func(s *spec, d time.Duration) { s.jitter = d }),
@@ -82,7 +82,7 @@ var _kinds = []kind{
 	},
 	{
 		name: "bandwidth", required: []string{"rate"},
-		build: func(s spec) vlatte.Step { return fault.Bandwidth(s.rate) },
+		build: func(s spec) vlatte.Pipe { return fault.Bandwidth(s.rate) },
 		schema: params(field{
 			Key: "rate", Kind: config.Any, Usage: "Bytes per second, or a link: " + listOf(_bandwidthNames) + ".",
 			Set: setRate,
@@ -90,7 +90,7 @@ var _kinds = []kind{
 	},
 	{
 		name: "slicer", required: []string{"average_size"},
-		build: func(s spec) vlatte.Step { return fault.Slicer(s.averageSize, s.sizeVariation, s.delay) },
+		build: func(s spec) vlatte.Pipe { return fault.Slicer(s.averageSize, s.sizeVariation, s.delay) },
 		schema: params(
 			whole("average_size", "How many bytes a slice has, on average.", func(s *spec, n int) { s.averageSize = n }),
 			whole("size_variation", "How many bytes a slice varies by, below average_size. 0 by default.", func(s *spec, n int) { s.sizeVariation = n }),
@@ -99,28 +99,28 @@ var _kinds = []kind{
 	},
 	{
 		name: "slow_close", required: []string{"delay"},
-		build: func(s spec) vlatte.Step { return fault.SlowClose(s.delay) },
+		build: func(s spec) vlatte.Pipe { return fault.SlowClose(s.delay) },
 		schema: params(
 			duration("delay", "How long the end of the answer waits.", func(s *spec, d time.Duration) { s.delay = d }),
 		),
 	},
 	{
 		name:  "timeout",
-		build: func(s spec) vlatte.Step { return fault.Timeout(s.after) },
+		build: func(s spec) vlatte.Pipe { return fault.Timeout(s.after) },
 		schema: params(
 			duration("after", "When the answer ends. 0, the default, never ends it.", func(s *spec, d time.Duration) { s.after = d }),
 		),
 	},
 	{
 		name: "limit_data", required: []string{"bytes"},
-		build: func(s spec) vlatte.Step { return fault.LimitData(s.bytes) },
+		build: func(s spec) vlatte.Pipe { return fault.LimitData(s.bytes) },
 		schema: params(
 			whole("bytes", "How many bytes pass before the connection closes.", func(s *spec, n int) { s.bytes = n }),
 		),
 	},
 	{
 		name: "connection_reset_by_peer_after", required: []string{"after"},
-		build: func(s spec) vlatte.Step { return fault.ConnectionResetByPeerAfter(s.after) },
+		build: func(s spec) vlatte.Pipe { return fault.ConnectionResetByPeerAfter(s.after) },
 		schema: params(
 			duration("after", "When the connection is reset.", func(s *spec, d time.Duration) { s.after = d }),
 		),
@@ -154,18 +154,18 @@ var _types = config.NewSchema(config.Field[int64]{
 //
 // A spec with problems, such as a missing parameter, a key the fault doesn't take, or a value its function of
 // package fault would panic on, fails with an error that lists each, keyed as in fault.latency.
-func Build(doc any) (vlatte.Step, error) {
-	step, err := BuildAt(doc, "fault", "fault")
+func Build(doc any) (vlatte.Pipe, error) {
+	pipe, err := BuildAt(doc, "fault", "fault")
 	if cfgErr, ok := errors.AsType[*config.Error](err); ok {
 		cfgErr.Scope = "faultbuild"
 	}
 
-	return step, err
+	return pipe, err
 }
 
-// BuildAt is like [Build], for the spec at key of a document from origin, such as steps[0] of
+// BuildAt is like [Build], for the spec at key of a document from origin, such as pipes[0] of
 // "file mocks/users.yaml": its problems name both.
-func BuildAt(doc any, origin, key string) (vlatte.Step, error) {
+func BuildAt(doc any, origin, key string) (vlatte.Pipe, error) {
 	v := config.Value{Key: key, Origin: origin, Any: doc}
 
 	obj, ok := doc.(map[string]any)
@@ -194,12 +194,12 @@ func BuildAt(doc any, origin, key string) (vlatte.Step, error) {
 		return nil, &config.Error{Problems: problems}
 	}
 
-	step, err := built(func() vlatte.Step { return k.build(s) })
+	pipe, err := built(func() vlatte.Pipe { return k.build(s) })
 	if err != nil {
 		return nil, config.Invalid(v, fmt.Sprintf("%s: %s", key, strings.TrimPrefix(err.Error(), "fault: ")), "")
 	}
 
-	return step, nil
+	return pipe, nil
 }
 
 // kindOf reads the type of the spec obj, at v.
@@ -284,7 +284,7 @@ func setRate(s *spec, v config.Value) error {
 
 // built returns what fault, a constructor of package fault, returns, or the error of the message it panics with on
 // input it refuses: the constructors check their input only by panicking.
-func built(fault func() vlatte.Step) (step vlatte.Step, err error) {
+func built(fault func() vlatte.Pipe) (pipe vlatte.Pipe, err error) {
 	defer func() {
 		r := recover()
 		if r == nil {

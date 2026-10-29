@@ -4,8 +4,8 @@ Mock files have JSON Schemas, served at stable addresses, so editors complete an
 
 | Mock files | Schema |
 |---|---|
-| HTTP | [`https://caffeine-projects.github.io/vlatte/schemas/http.schema.json`](/vlatte/schemas/http.schema.json){target="_self"} |
-| gRPC | [`https://caffeine-projects.github.io/vlatte/schemas/grpc.schema.json`](/vlatte/schemas/grpc.schema.json){target="_self"} |
+| HTTP | [`https://vlatte.dev/schemas/http.schema.json`](/schemas/http.schema.json){target="_self"} |
+| gRPC | [`https://vlatte.dev/schemas/grpc.schema.json`](/schemas/grpc.schema.json){target="_self"} |
 
 Each schema's `$id` is its address. They describe the format the decoder reads: tests keep the schemas in step with it. The server never reads them; a file a schema accepts can still fail to load, such as one that names a body file that isn't there, and the error says why.
 
@@ -16,7 +16,7 @@ The admin API serves the HTTP schema too, at `GET /schema`.
 Start a YAML mock file with a comment naming its schema:
 
 ```yaml
-# yaml-language-server: $schema=https://caffeine-projects.github.io/vlatte/schemas/http.schema.json
+# yaml-language-server: $schema=https://vlatte.dev/schemas/http.schema.json
 request:
   method: GET
   path: /hello
@@ -32,8 +32,8 @@ To map the schemas by file name instead, without a comment in each file, add the
 ```json
 {
   "yaml.schemas": {
-    "https://caffeine-projects.github.io/vlatte/schemas/http.schema.json": ["**/_mocks/*mock.yaml", "**/_mocks/*mock.yml"],
-    "https://caffeine-projects.github.io/vlatte/schemas/grpc.schema.json": ["**/grpc/*.yaml"]
+    "https://vlatte.dev/schemas/http.schema.json": ["**/_mocks/*mock.yaml", "**/_mocks/*mock.yml"],
+    "https://vlatte.dev/schemas/grpc.schema.json": ["**/grpc/*.yaml"]
   }
 }
 ```
@@ -44,7 +44,7 @@ Name the schema in a JSON mock file's `$schema` key. The server skips the key:
 
 ```json
 {
-  "$schema": "https://caffeine-projects.github.io/vlatte/schemas/http.schema.json",
+  "$schema": "https://vlatte.dev/schemas/http.schema.json",
   "request": {"method": "GET", "path": "/hello"},
   "response": {"status": 200, "body": "hello"}
 }
@@ -55,7 +55,7 @@ To map the schemas by file name instead, use `json.schemas` in VS Code:
 ```json
 {
   "json.schemas": [
-    {"fileMatch": ["**/_mocks/*mock.json"], "url": "https://caffeine-projects.github.io/vlatte/schemas/http.schema.json"}
+    {"fileMatch": ["**/_mocks/*mock.json"], "url": "https://vlatte.dev/schemas/http.schema.json"}
   ]
 }
 ```

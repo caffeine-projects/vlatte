@@ -39,11 +39,11 @@ type ReplyInput struct {
 	// couldn't apply to the connection: the target answers as to any request.
 	noSwitch bool
 
-	// upstream are the steps of the mock that what a proxy reply sends on passes through: the request's body.
-	upstream []vlatte.Step
+	// upstream are the pipes of the mock that what a proxy reply sends on passes through: the request's body.
+	upstream []vlatte.Pipe
 
-	// upstreamBody is the request's body as the upstream steps passed it on, when they read it before the reply, such
-	// as for a mock with wire steps: a proxy reply sends it in place of the body. Nil otherwise.
+	// upstreamBody is the request's body as the upstream pipes passed it on, when they read it before the reply, such
+	// as for a mock with wire pipes: a proxy reply sends it in place of the body. Nil otherwise.
 	upstreamBody *bytes.Reader
 }
 
@@ -267,7 +267,8 @@ func (rep *Reply) TrailerArr(key string, values ...string) *Reply {
 	return rep
 }
 
-// Cookie adds a http.Cookie to the response.
+// Cookie adds an [http.Cookie] to the response, sent as given: vlatte adds no attribute. Set Secure only on a mock
+// served over HTTPS: a client doesn't send a Secure cookie back over plain HTTP.
 func (rep *Reply) Cookie(cookie *http.Cookie) *Reply {
 	rep.response.Cookies = append(rep.response.Cookies, cookie)
 	return rep

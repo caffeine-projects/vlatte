@@ -286,7 +286,7 @@ func TestJSONSchema_IDIsTheAddressTheDocsServe(t *testing.T) {
 	// docs/scripts/prepare.mjs copies it to. A schema whose $id names another address points them at nothing.
 	_, raw := loadJSONSchema(t)
 
-	require.Equal(t, "https://caffeine-projects.github.io/vlatte/schemas/grpc.schema.json", raw["$id"])
+	require.Equal(t, "https://vlatte.dev/schemas/grpc.schema.json", raw["$id"])
 }
 
 func TestJSONSchema_JSONMockFilesNameItInTheirSchemaKey(t *testing.T) {
@@ -294,7 +294,7 @@ func TestJSONSchema_JSONMockFilesNameItInTheirSchemaKey(t *testing.T) {
 	// accept the key, and the decoder must load the file as if the key weren't there.
 	schema, _ := loadJSONSchema(t)
 	doc := `{
-		"$schema": "https://caffeine-projects.github.io/vlatte/schemas/grpc.schema.json",
+		"$schema": "https://vlatte.dev/schemas/grpc.schema.json",
 		"request": {"method": "Greetings"},
 		"response": {"message": {"message": "hello"}}
 	}`

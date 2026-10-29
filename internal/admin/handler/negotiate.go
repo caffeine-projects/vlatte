@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -54,12 +55,6 @@ type answerFormat struct {
 	contentType string
 	names       []string
 	problemType string
-}
-
-// acceptRange is a media range of an Accept header, and its weight.
-type acceptRange struct {
-	mediaType string
-	q         float64
 }
 
 // readBody reads the body of r, in the format its Content-Type names: JSON when it names none.
@@ -122,7 +117,7 @@ func acceptedFormat(r *http.Request, problem bool) (answerFormat, bool) {
 		return _answerFormats[0], true
 	}
 
-	ranges := parseAccept(header)
+	ranges := httpx.ParseAccept(header)
 
 	best, bestQ := answerFormat{}, 0.0
 	for _, f := range _answerFormats {
@@ -131,73 +126,12 @@ func acceptedFormat(r *http.Request, problem bool) (answerFormat, bool) {
 			names = append(slices.Clone(names), f.problemType)
 		}
 
-		if q := quality(ranges, names); q > bestQ {
+		if q := httpx.Prefer(ranges, names...).Q; q > bestQ {
 			best, bestQ = f, q
 		}
 	}
 
 	return best, bestQ > 0
-}
-
-// parseAccept parses the media ranges of Accept headers, leaving out those it can't parse.
-func parseAccept(header []string) []acceptRange {
-	var ranges []acceptRange
-
-	for _, h := range header {
-		for item := range strings.SplitSeq(h, ",") {
-			mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(item))
-			if err != nil {
-				continue
-			}
-
-			q := 1.0
-			if v, ok := params["q"]; ok {
-				if q, err = strconv.ParseFloat(v, 64); err != nil {
-					continue
-				}
-			}
-
-			ranges = append(ranges, acceptRange{mediaType: mediaType, q: q})
-		}
-	}
-
-	return ranges
-}
-
-// quality returns the weight ranges give a format, whose media types have names: the weight of the most specific
-// range that matches a name, the highest of those when several are as specific.
-func quality(ranges []acceptRange, names []string) float64 {
-	specificity, q := 0, 0.0
-
-	for _, rng := range ranges {
-		s := 0
-		for _, name := range names {
-			s = max(s, rng.matches(name))
-		}
-
-		if s > specificity || s > 0 && s == specificity && rng.q > q {
-			specificity, q = s, rng.q
-		}
-	}
-
-	return q
-}
-
-// matches tells how specifically the range matches mediaType: 3 by name, 2 by type, as text/*, 1 as */*, 0 not.
-func (a acceptRange) matches(mediaType string) int {
-	switch a.mediaType {
-	case mediaType:
-		return 3
-	case "*/*":
-		return 1
-	}
-
-	prefix, ok := strings.CutSuffix(a.mediaType, "*")
-	if ok && strings.HasSuffix(prefix, "/") && strings.HasPrefix(mediaType, prefix) {
-		return 2
-	}
-
-	return 0
 }
 
 // negotiated answers 406 to a request that accepts neither JSON nor YAML, before h does anything.

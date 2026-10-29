@@ -60,14 +60,14 @@ func TestTemplating_BodyFilename(t *testing.T) {
 }
 
 func TestTemplating_BodyFilename_BodyTemplate(t *testing.T) {
-	params := vlatte.NewMemoryKV()
-	m := mockhttp.MustNew(mockhttp.Setup().Parameters(params))
+	kv := vlatte.NewMemoryKV()
+	m := mockhttp.MustNew(mockhttp.Setup().KV(kv))
 	m.MustStart()
 	defer m.Close()
 
 	m.MustMock(mockhttp.FromFile("testdata/templating/templating_03.yaml"))
 
-	err := params.Set(t.Context(), "message", []byte("hello world"))
+	err := kv.Set(t.Context(), "message", []byte("hello world"))
 	require.NoError(t, err)
 
 	httpClient := &http.Client{}
@@ -86,16 +86,16 @@ func TestTemplating_BodyFilename_BodyTemplate(t *testing.T) {
 }
 
 func TestTemplating_Header(t *testing.T) {
-	params := vlatte.NewMemoryKV()
-	m := mockhttp.MustNew(mockhttp.Setup().Parameters(params))
+	kv := vlatte.NewMemoryKV()
+	m := mockhttp.MustNew(mockhttp.Setup().KV(kv))
 	m.MustStart()
 	defer m.Close()
 
 	m.MustMock(mockhttp.FromFile("testdata/templating/templating_04.yaml"))
 
-	err := params.Set(t.Context(), "test", []byte("ok"))
+	err := kv.Set(t.Context(), "test", []byte("ok"))
 	require.NoError(t, err)
-	err = params.Set(t.Context(), "context", []byte("test"))
+	err = kv.Set(t.Context(), "context", []byte("test"))
 	require.NoError(t, err)
 
 	httpClient := &http.Client{}
@@ -112,14 +112,14 @@ func TestTemplating_Header(t *testing.T) {
 }
 
 func TestTemplating_All(t *testing.T) {
-	params := vlatte.NewMemoryKV()
-	m := mockhttp.MustNew(mockhttp.Setup().Parameters(params))
+	kv := vlatte.NewMemoryKV()
+	m := mockhttp.MustNew(mockhttp.Setup().KV(kv))
 	m.MustStart()
 	defer m.Close()
 
-	err := params.Set(t.Context(), "test", []byte("ok"))
+	err := kv.Set(t.Context(), "test", []byte("ok"))
 	require.NoError(t, err)
-	err = params.Set(t.Context(), "context", []byte("test"))
+	err = kv.Set(t.Context(), "context", []byte("test"))
 	require.NoError(t, err)
 
 	m.MustMock(mockhttp.FromFile("testdata/templating/templating_05.yaml"))

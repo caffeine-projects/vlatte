@@ -898,3 +898,18 @@ func TestPrep_AFailingRecipeIsNamedByItsPlace(t *testing.T) {
 	require.ErrorIs(t, err, errRecipe)
 	require.EqualError(t, err, "server: applying recipe 1 (vlatte.RecipeFunc[*github.com/caffeine-projects/vlatte/mockgrpc.Mock,*github.com/caffeine-projects/vlatte/mockgrpc.Server]): recipe failed")
 }
+
+func TestServer_KVIsTheStoreTemplatesRead(t *testing.T) {
+	// Go code sets the values templates read through KV, or Config().KV: the same store, which the server makes when
+	// none is given.
+	m := serve(t)
+
+	require.Same(t, m.Config().KV, m.KV())
+	require.NoError(t, m.KV().Set(t.Context(), "greeting", []byte("hello")))
+
+	m.MustMock(Method("Greetings").Reply(Template(`{"message": "{{ .KV.Get "greeting" }}"}`)))
+
+	got, code := greetWith(t, client(t, m), "ann")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "hello", got)
+}

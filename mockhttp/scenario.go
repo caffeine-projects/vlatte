@@ -79,7 +79,7 @@ func (app *Server) scenarioKey(tmpl string, t *pathTemplate) (vlatte.Selector[*s
 	}
 
 	return func(ctx context.Context, in *selectorInput) any {
-		data := locals(in.values, nil, viewdata.NewParameters(ctx, app.params))
+		data := locals(in.values, nil, viewdata.NewKVView(ctx, app.config.KV))
 		if t != nil {
 			data.Request.PathParams, _ = t.params(in.URL.EscapedPath())
 		}

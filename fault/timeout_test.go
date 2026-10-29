@@ -19,7 +19,7 @@ func TestTimeout_SendsNothingThenEndsTheAnswer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var out bytes.Buffer
 		start := time.Now()
-		flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Step{fault.Timeout(time.Second)})
+		flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Pipe{fault.Timeout(time.Second)})
 
 		time.Sleep(400 * time.Millisecond)
 
@@ -41,7 +41,7 @@ func TestTimeout_SendsNothingThenEndsTheAnswer(t *testing.T) {
 func TestTimeout_EndsAStreamThatDoesntEnd(t *testing.T) {
 	// A reply that writes past the timeout, as a stream does, learns at its next write that the answer ended.
 	synctest.Test(t, func(t *testing.T) {
-		flow := vlatte.NewFlow(t.Context(), failingSink{}, []vlatte.Step{fault.Timeout(time.Second)})
+		flow := vlatte.NewFlow(t.Context(), failingSink{}, []vlatte.Pipe{fault.Timeout(time.Second)})
 
 		_, err := flow.Write([]byte("event"))
 		require.NoError(t, err)
@@ -59,7 +59,7 @@ func TestTimeout_ZeroHangsUntilTheClientLeaves(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		start := time.Now()
-		flow := vlatte.NewFlow(ctx, failingSink{}, []vlatte.Step{fault.Timeout(0)})
+		flow := vlatte.NewFlow(ctx, failingSink{}, []vlatte.Pipe{fault.Timeout(0)})
 
 		time.AfterFunc(time.Hour, cancel)
 
@@ -73,7 +73,7 @@ func TestTimeout_StopsWhenTheClientLeaves(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		start := time.Now()
-		flow := vlatte.NewFlow(ctx, failingSink{}, []vlatte.Step{fault.Timeout(time.Second)})
+		flow := vlatte.NewFlow(ctx, failingSink{}, []vlatte.Pipe{fault.Timeout(time.Second)})
 
 		time.AfterFunc(200*time.Millisecond, cancel)
 

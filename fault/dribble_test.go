@@ -69,7 +69,7 @@ func TestChunkedDribbleDelay_SendsTheBodyInPartsOverTime(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				sink := &timedSink{start: time.Now()}
-				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.ChunkedDribbleDelay(3, 300*time.Millisecond)})
+				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.ChunkedDribbleDelay(3, 300*time.Millisecond)})
 
 				for _, w := range tc.writes {
 					_, err := flow.Write([]byte(w))
@@ -87,7 +87,7 @@ func TestChunkedDribbleDelay_AFlushBeforeTheEndSendsNoBody(t *testing.T) {
 	// A reply that flushes, as a stream does, sends its head: the body still waits for the end.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.ChunkedDribbleDelay(1, time.Second)})
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.ChunkedDribbleDelay(1, time.Second)})
 
 		_, err := flow.Write([]byte("body"))
 		require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestChunkedDribbleDelay_StopsWhenTheClientLeaves(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				sink := &timedSink{start: time.Now()}
-				flow := vlatte.NewFlow(ctx, sink, []vlatte.Step{fault.ChunkedDribbleDelay(2, time.Second)})
+				flow := vlatte.NewFlow(ctx, sink, []vlatte.Pipe{fault.ChunkedDribbleDelay(2, time.Second)})
 
 				_, err := flow.Write([]byte("ab"))
 				require.NoError(t, err)
@@ -140,7 +140,7 @@ func TestChunkedDribbleDelay_AClientThatWentAwayEndsIt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				start := time.Now()
-				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.ChunkedDribbleDelay(2, time.Second)})
+				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.ChunkedDribbleDelay(2, time.Second)})
 
 				_, err := flow.Write([]byte("ab"))
 				require.NoError(t, err)

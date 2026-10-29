@@ -20,10 +20,10 @@ response:
   body_file: hello.txt   # relative to this file
 ```
 
-[`mockhttp/schema/http.schema.json`](/reference/schemas) describes the format, so editors can validate mock files. Its address is `https://caffeine-projects.github.io/vlatte/schemas/http.schema.json`: start a YAML mock file with
+[`mockhttp/schema/http.schema.json`](/reference/schemas) describes the format, so editors can validate mock files. Its address is `https://vlatte.dev/schemas/http.schema.json`: start a YAML mock file with
 
 ```yaml
-# yaml-language-server: $schema=https://caffeine-projects.github.io/vlatte/schemas/http.schema.json
+# yaml-language-server: $schema=https://vlatte.dev/schemas/http.schema.json
 ```
 
 and editors that use the YAML language server, such as VS Code with the YAML extension, complete and check it. A JSON mock file names it in a `"$schema"` key. See [Mock file schemas](/reference/schemas) for other editors.
@@ -40,7 +40,7 @@ and editors that use the YAML language server, such as VS Code with the YAML ext
 | `delay`, `repeat` | A delay before replying, and how many requests the mock serves: see [Mock lifecycle](/more/mock-lifecycle). |
 | `scenario` | A [scenario](/scenarios/). |
 | `on_complete` | [Events such as webhooks](/webhooks/). |
-| `steps`, `wire_steps`, `upstream_steps` | [Faults](/http/faults#in-mock-files). |
+| `pipes`, `wire_pipes`, `upstream_pipes` | [Faults](/http/faults#in-mock-files). |
 | `ext` | Settings for the server's mock file handlers, `Setup().MockFileHandlers(...)` in Go. |
 
 ## Types

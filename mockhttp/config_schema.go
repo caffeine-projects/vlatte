@@ -159,6 +159,14 @@ var _recordRepeats = []config.Choice{
 	{Name: "first", Value: int64(vlatte.RecordFirst)},
 }
 
+var _noMatchFormats = []config.Choice{
+	{Name: "auto", Value: int64(NoMatchAuto)},
+	{Name: "text", Value: int64(NoMatchText)},
+	{Name: "markdown", Value: int64(NoMatchMarkdown)},
+	{Name: "json", Value: int64(NoMatchJSON)},
+	{Name: "problem", Value: int64(NoMatchProblem)},
+}
+
 var _logVerbosities = []config.Choice{
 	{Name: vlatte.LogBasic.String(), Value: int64(vlatte.LogBasic)},
 	{Name: vlatte.LogHeader.String(), Value: int64(vlatte.LogHeader)},
@@ -208,6 +216,11 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				c.RequestWasNotMatchedStatusCode = int(v.Int)
 				return checkStatus(v.Int)
 			},
+		},
+		{
+			Key: "no_match_format", Kind: config.Int, Choices: _noMatchFormats, Default: choiceName(_noMatchFormats, int64(d.NoMatchFormat)),
+			Usage: "Format of the response to a request that matches no mock. auto follows its Accept header.",
+			Set:   func(c *Config, v config.Value) error { c.NoMatchFormat = NoMatchFormat(v.Int); return nil },
 		},
 		{
 			Key: "error_status_code", Kind: config.Int, Default: strconv.Itoa(d.ErrorStatusCode),

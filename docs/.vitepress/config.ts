@@ -1,7 +1,7 @@
 import { defineConfig, type DefaultTheme } from 'vitepress'
 
-const base = '/vlatte/'
-const site = 'https://caffeine-projects.github.io/vlatte/'
+const base = '/'
+const site = 'https://vlatte.dev/'
 const repo = 'https://github.com/caffeine-projects/vlatte'
 
 const tagline = 'Mock HTTP and gRPC servers for Go tests.'
@@ -54,6 +54,8 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Docker Compose', link: '/guides/docker-compose' },
       { text: 'Testing webhooks', link: '/guides/webhooks' },
       { text: 'HTTPS and mTLS mocks', link: '/guides/https-mtls' },
+      { text: 'Testing an LLM streaming client', link: '/guides/llm-streaming' },
+      { text: 'Mocking a remote MCP server', link: '/guides/mcp-server' },
     ],
   },
   {
@@ -74,9 +76,8 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Request matching', link: '/http/matching' },
       { text: 'Replies', link: '/http/replies' },
       { text: 'Forms and multipart', link: '/http/forms-multipart' },
-      { text: 'Server-Sent Events', link: '/http/server-sent-events' },
       { text: 'Proxying', link: '/http/proxying' },
-      { text: 'Steps', link: '/http/steps' },
+      { text: 'Pipes', link: '/http/pipes' },
       { text: 'Faults', link: '/http/faults' },
       { text: 'Mock files', link: '/http/mock-files' },
       { text: 'TLS', link: '/http/tls' },
@@ -99,6 +100,20 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Mock files', link: '/grpc/mock-files' },
       { text: 'TLS', link: '/grpc/tls' },
       { text: 'Troubleshooting', link: '/grpc/troubleshooting' },
+    ],
+  },
+  {
+    text: 'SSE (Server-sent Events)',
+    collapsed: true,
+    items: [
+      { text: 'Overview', link: '/sse/' },
+      { text: 'Events', link: '/sse/events' },
+      { text: 'Timing and lifetime', link: '/sse/timing' },
+      { text: 'Reconnecting', link: '/sse/reconnecting' },
+      { text: 'Testing a client\'s parser', link: '/sse/raw-events' },
+      { text: 'With other features', link: '/sse/other-features' },
+      { text: 'Testing an LLM streaming client', link: '/guides/llm-streaming' },
+      { text: 'Mocking a remote MCP server', link: '/guides/mcp-server' },
     ],
   },
   {
@@ -210,8 +225,11 @@ export default defineConfig({
   description: tagline,
   cleanUrls: true,
   lastUpdated: true,
-  // brand/ is the source of the assets scripts/prepare.mjs copies to public/; its README is for the repository.
-  srcExclude: ['brand/**', 'README.md'],
+  // brand/ is the source of the assets scripts/prepare.mjs copies to public/; its README is for the repository. The
+  // Markdown in public/ is the copy of each page that scripts/llms.mjs writes for AI tools, not pages of its own.
+  srcExclude: ['brand/**', 'README.md', 'public/**'],
+  // The hostname holds the base: the sitemap resolves each page's path against it.
+  sitemap: { hostname: site },
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}favicon.svg` }],
     ['link', { rel: 'icon', type: 'image/png', sizes: '48x48', href: `${base}favicon-48.png` }],

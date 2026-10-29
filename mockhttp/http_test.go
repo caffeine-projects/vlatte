@@ -71,11 +71,11 @@ func TestResponseMapperModifyingResponse(t *testing.T) {
 	const k = "key"
 	const v = "test-ok"
 
-	params := vlatte.NewMemoryKV()
-	err := params.Set(t.Context(), k, []byte(v))
+	kv := vlatte.NewMemoryKV()
+	err := kv.Set(t.Context(), k, []byte(v))
 	require.NoError(t, err)
 
-	m := MustNew(Setup().Parameters(params))
+	m := MustNew(Setup().KV(kv))
 	m.MustStart()
 
 	defer m.Close()
@@ -83,7 +83,7 @@ func TestResponseMapperModifyingResponse(t *testing.T) {
 	scoped := m.MustMock(Get(match.URLPath("/test")).
 		Reply(OK()).
 		Map(func(rv *RequestValues, r *Response) error {
-			val, _ := rv.App.Parameters().Get(t.Context(), k)
+			val, _ := rv.App.KV().Get(t.Context(), k)
 
 			r.Header.Add("x-param-key", string(val))
 			r.Header.Add("x-test", rv.RawRequest.Header.Get("x-param"))
@@ -875,6 +875,23 @@ func TestPrep(t *testing.T) {
 		require.EqualError(t, err, "server: applying recipe 1 (vlatte.RecipeFunc[*github.com/caffeine-projects/vlatte/mockhttp.Mock,*github.com/caffeine-projects/vlatte/mockhttp.Server]): recipe failed")
 		require.False(t, ranAfterFailure, "recipes after a failing one must not run")
 	})
+}
+
+func TestServer_KVIsTheStoreTemplatesRead(t *testing.T) {
+	// Go code sets the values templates read through KV, or Config().KV: the same store, which the server makes when
+	// none is given.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	require.Same(t, m.Config().KV, m.KV())
+	require.NoError(t, m.KV().Set(t.Context(), "greeting", []byte("hi")))
+
+	m.MustMock(Getf("/greet").Reply(OK().BodyTemplate(`{{ .KV.Get "greeting" }}`)))
+
+	status, body := get(t, m, "/greet")
+	require.Equal(t, http.StatusOK, status, body)
+	require.Equal(t, "hi", body)
 }
 
 // writeECKey writes a new P-256 private key to path, as PKCS #8 PEM.

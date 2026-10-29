@@ -36,9 +36,9 @@ func TestHello(t *testing.T) {
 - [Request matching](/http/matching): what a mock can match in a request.
 - [Replies](/http/replies): statuses, headers, bodies, sequences and functions.
 - [Forms and multipart](/http/forms-multipart): matching uploads and replying with multipart bodies.
-- [Server-Sent Events](/http/server-sent-events): replying with event streams.
+- [SSE (Server-sent Events)](/sse/): replying with event streams.
 - [Proxying](/http/proxying): proxy replies, proxy all, the forward proxy and HTTPS interception.
-- [Steps](/http/steps) and [Faults](/http/faults): changing, slowing and breaking answers.
+- [Pipes](/http/pipes) and [Faults](/http/faults): changing, slowing and breaking answers.
 - [Recording](/recording/http): recording a real service as mock files.
 - [Mock files](/http/mock-files): the YAML and JSON format.
 - [TLS](/http/tls) and [CORS](/http/cors).

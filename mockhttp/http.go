@@ -60,10 +60,10 @@ type Server struct {
 	scenarioStore      *matchscenario.Store
 	eventStream        *adminapi.Events // the admin API's; nil without it
 	requestBodyParsers []RequestBodyParser
-	params             vlatte.KV
 	loaders            []Loader
 	rwMutex            sync.RWMutex
 	proxy              *forwardProxy
+	noMatch            NoMatchRenderer // answers the requests no mock matches
 
 	// id tells the requests this server sends on, in their VLatte-Via, so one that comes back fails as a proxy loop.
 	id string
@@ -180,7 +180,13 @@ func New(config ...Option) (*Server, error) {
 		return nil, err
 	}
 
+	noMatch, err := noMatchRendererOf(conf)
+	if err != nil {
+		return nil, fmt.Errorf("server: %w", err)
+	}
+
 	app.config = conf
+	app.noMatch = noMatch
 	logs, tee := adminLogs(conf)
 	app.logger = app.getLog(conf, tee)
 
@@ -191,7 +197,10 @@ func New(config ...Option) (*Server, error) {
 	parsers = append(parsers, &plainTextParser{}, &formURLEncodedParser{}, &multipartFormParser{}, &noopParser{})
 
 	app.recoverer = recovery.New(func(err error) { app.logger.Error().Err(err).Msg(err.Error()) },
-		conf.ErrorStatusCode, http.Header{http.CanonicalHeaderKey(HeaderVlatteError): {vlatte.FailurePanic}})
+		conf.ErrorStatusCode, http.Header{
+			http.CanonicalHeaderKey(HeaderVlatteError):         {vlatte.FailurePanic},
+			http.CanonicalHeaderKey(HeaderXContentTypeOptions): {_noSniff},
+		})
 
 	middlewares := make([]func(handler http.Handler) http.Handler, 0)
 	middlewares = append(middlewares, app.recoverer.Recover)
@@ -202,11 +211,8 @@ func New(config ...Option) (*Server, error) {
 
 	middlewares = append(middlewares, conf.Middlewares...)
 
-	var params vlatte.KV
-	if conf.Parameters != nil {
-		params = conf.Parameters
-	} else {
-		params = vlatte.NewMemoryKV()
+	if conf.KV == nil {
+		conf.KV = vlatte.NewMemoryKV()
 	}
 
 	if conf.Record != nil {
@@ -289,7 +295,6 @@ func New(config ...Option) (*Server, error) {
 	if app.eventStream != nil {
 		app.scenarioStore.Notify(app.publishScenario)
 	}
-	app.params = params
 	app.loaders = conf.Loaders
 	app.files = files
 	app.proxy = p
@@ -482,9 +487,10 @@ func (app *Server) AdminURL() string {
 	return app.admin.URL()
 }
 
-// Parameters returns Params instance associated with this application.
-func (app *Server) Parameters() vlatte.KV {
-	return app.params
+// KV returns the key-value store templates read as .KV: the one [ConfigBuilder.KV] set, or the memory store the
+// server made without one, which [Config.KV] holds too.
+func (app *Server) KV() vlatte.KV {
+	return app.config.KV
 }
 
 // Config returns the mock server Config.

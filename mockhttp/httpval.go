@@ -4,6 +4,10 @@ import "github.com/caffeine-projects/vlatte"
 
 const _charsetUTF8 = "charset=UTF-8"
 
+// _noSniff tells a browser to take a response for its Content-Type: vlatte's own answers echo the request, which a
+// browser that sniffs could run as HTML.
+const _noSniff = "nosniff"
+
 // Header names, for building and matching mocks.
 const (
 	HeaderAccept                          = "Accept"
@@ -89,6 +93,8 @@ const (
 	MIMEApplicationProblemJSON           = "application/problem+json"
 	MIMETextPlain                        = "text/plain"
 	MIMETextPlainCharsetUTF8             = MIMETextPlain + "; " + _charsetUTF8
+	MIMETextMarkdown                     = "text/markdown"
+	MIMETextMarkdownCharsetUTF8          = MIMETextMarkdown + "; " + _charsetUTF8
 	MIMETextHTML                         = "text/html"
 	MIMETextHTMLCharsetUTF8              = MIMETextHTML + "; " + _charsetUTF8
 	MIMETextXML                          = "text/xml"
