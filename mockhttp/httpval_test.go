@@ -1,6 +1,7 @@
 package mockhttp
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,28 @@ func TestHeaderNames(t *testing.T) {
 
 	for _, tt := range tests {
 		require.Equal(t, tt.name, tt.constant)
+	}
+}
+
+func TestHeaderNamesAreCanonical(t *testing.T) {
+	// Header maps are indexed by canonical names: a constant in another form misses the header it names when it indexes
+	// one, as a matcher reading the request or a test reading the response might.
+	for _, name := range []string{
+		HeaderIdempotencyKey,
+		HeaderRetryAfter,
+		HeaderETag,
+		HeaderIfNoneMatch,
+		HeaderIfMatch,
+		HeaderExpires,
+		HeaderLink,
+		HeaderUserAgent,
+		HeaderAcceptLanguage,
+		HeaderTraceparent,
+		HeaderXRateLimitLimit,
+		HeaderXRateLimitRemaining,
+		HeaderXRateLimitReset,
+	} {
+		require.Equal(t, http.CanonicalHeaderKey(name), name)
 	}
 }
 
