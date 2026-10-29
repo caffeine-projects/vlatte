@@ -19,6 +19,8 @@ type downKV struct {
 
 func (downKV) Has(context.Context, string) (bool, error) { return false, errKVDown }
 
+func (downKV) Get(context.Context, string) ([]byte, error) { return nil, errKVDown }
+
 func TestKVView_AMissingKeyAndAStoreThatFailsAreErrors(t *testing.T) {
 	kv := vlatte.NewMemoryKV()
 	require.NoError(t, kv.Set(t.Context(), "empty", nil))
