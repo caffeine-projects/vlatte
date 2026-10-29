@@ -53,7 +53,6 @@ func TestGitHubOAuthWebFlow_SignsInAndReadsTheUsersData(t *testing.T) {
 	gh.exchange.AssertNumberOfCalls(t, 1)
 	gh.api.AssertNumberOfCalls(t, 3)
 	gh.badCode.AssertNotCalled(t)
-	gh.badCredentials.AssertNotCalled(t)
 }
 
 func TestGitHubOAuthWebFlow_RejectsAForgedState(t *testing.T) {
@@ -221,11 +220,9 @@ type githubMocks struct {
 	// badCode answers any other exchange, as GitHub does a code that is wrong, already used or not issued for the
 	// code verifier.
 	badCode *mockhttp.Scope
-	// api answers the REST API calls made with the token.
+	// api answers the REST API calls made with the token. A call they don't match, such as one missing a header,
+	// matches no mock, so its test fails on what the call got wrong.
 	api *mockhttp.Scope
-	// badCredentials answers the REST API calls made with another token or none. A call with the token the api mocks
-	// don't match, such as one missing a header, matches no mock, so its test fails on what the call got wrong.
-	badCredentials *mockhttp.Scope
 }
 
 // mockGitHub mocks the OAuth web flow of github.com and a few REST API calls of api.github.com. Each mock matches what
@@ -301,17 +298,6 @@ func mockGitHub(t *testing.T, server *mockhttp.Server, callback string) *githubM
 			{"number": 1348, "title": "Add a README", "state": "open"},
 		})),
 	)
-
-	gh.badCredentials = server.MustMock(mockhttp.Request().
-		Method(http.MethodGet).
-		URLPath(match.Either(match.HasPrefix("/user"), match.HasPrefix("/repos/"))).
-		Header("Authorization", match.Not(match.StrictEqual("Bearer "+_ghToken))).
-		Priority(1).
-		Reply(mockhttp.Unauthorized().JSON(map[string]string{
-			"message":           "Bad credentials",
-			"documentation_url": "https://docs.github.com/rest",
-			"status":            "401",
-		})))
 
 	return gh
 }

@@ -116,3 +116,18 @@ func ExampleNewGoTemplateEngine() {
 	}
 	// Output: ADA!
 }
+
+func ExampleNewGoTemplateEngine_pkce() {
+	// The S256 code challenge of a PKCE code verifier (RFC 7636): base64url, without padding, of its SHA-256.
+	engine := vlatte.MustNewGoTemplateEngine()
+
+	tmpl, err := engine.Compile("challenge", `{{ hash "sha256" "base64url" .Verifier }}`)
+	if err != nil {
+		panic(err)
+	}
+
+	if err := tmpl.Execute(os.Stdout, map[string]any{"Verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"}); err != nil {
+		panic(err)
+	}
+	// Output: E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
+}
