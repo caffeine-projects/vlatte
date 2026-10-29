@@ -15,10 +15,7 @@ import (
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 )
 
-var (
-	_ NoMatchRenderer     = noMatchRenderer{}
-	_ http.ResponseWriter = (*noMatchWriter)(nil)
-)
+var _ NoMatchRenderer = noMatchRenderer{}
 
 // _noMatchProblemType is the type of the problem details the default renderer answers a request no mock matched with:
 // the page that explains the answer.
@@ -122,25 +119,21 @@ func (nr noMatchRenderer) RenderNoMatch(w http.ResponseWriter, nm *NoMatch) {
 	buf.Reset()
 	defer bufpool.Put(buf)
 
-	contentType := MIMETextPlainCharsetUTF8
-
 	switch format {
-	case NoMatchJSON, NoMatchProblem:
-		contentType = MIMEApplicationJSON
-		if format == NoMatchProblem {
-			contentType = MIMEApplicationProblemJSON
-		}
-
+	case NoMatchJSON:
+		w.Header().Set(HeaderContentType, MIMEApplicationJSON)
+		writeNoMatchJSON(buf, nm)
+	case NoMatchProblem:
+		w.Header().Set(HeaderContentType, MIMEApplicationProblemJSON)
 		writeNoMatchJSON(buf, nm)
 	case NoMatchMarkdown:
-		contentType = MIMETextMarkdownCharsetUTF8
-
+		w.Header().Set(HeaderContentType, MIMETextMarkdownCharsetUTF8)
 		writeNoMatchMarkdown(buf, nm)
 	default:
+		w.Header().Set(HeaderContentType, MIMETextPlainCharsetUTF8)
 		writeNoMatchMarkdown(buf, nm)
 	}
 
-	w.Header().Set(HeaderContentType, contentType)
 	w.WriteHeader(nm.Status)
 
 	buf.WriteTo(w)
@@ -367,28 +360,4 @@ func cloneNearMisses(misses []vlatte.NearMiss) []vlatte.NearMiss {
 type noMatchRequest struct {
 	Method string `json:"method"`
 	URL    string `json:"url"`
-}
-
-// noMatchWriter is the writer a NoMatchRenderer writes to, which tells whether it wrote anything.
-type noMatchWriter struct {
-	http.ResponseWriter
-
-	wrote bool
-}
-
-// WriteHeader implements http.ResponseWriter.
-func (w *noMatchWriter) WriteHeader(status int) {
-	w.wrote = true
-	w.ResponseWriter.WriteHeader(status)
-}
-
-// Write implements http.ResponseWriter.
-func (w *noMatchWriter) Write(b []byte) (int, error) {
-	w.wrote = true
-	return w.ResponseWriter.Write(b)
-}
-
-// Unwrap returns the writer w wraps, for http.ResponseController.
-func (w *noMatchWriter) Unwrap() http.ResponseWriter {
-	return w.ResponseWriter
 }

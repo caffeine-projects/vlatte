@@ -1200,10 +1200,10 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, misse
 
 	w.Header().Set(HeaderVlatteError, vlatte.FailureNoMatch)
 
-	nw := &noMatchWriter{ResponseWriter: w}
-	h.app.noMatch.RenderNoMatch(nw, nm)
+	h.app.noMatch.RenderNoMatch(w, nm)
 
-	if !nw.wrote {
+	// A renderer that wrote nothing would answer 200, as net/http does, and pass the request off as matched.
+	if r.sent() == 0 {
 		w.WriteHeader(nm.Status)
 	}
 }
