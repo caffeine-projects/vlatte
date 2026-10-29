@@ -36,6 +36,7 @@ const (
 	_codeUnknownState         = "unknown_state"
 	_codeUnauthorized         = "unauthorized"
 	_codeIncompleteJournal    = "incomplete_journal"
+	_codeKeyNotFound          = "key_not_found"
 )
 
 // problemError is an error of an operation that its caller can fix, which the admin API answers as an RFC 9457

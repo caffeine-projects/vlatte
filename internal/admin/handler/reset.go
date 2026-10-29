@@ -11,6 +11,7 @@ import (
 // persistent store, starts every scenario over, and clears the journal. Mocks added in code stay as they are. A
 // server without mock files, scenarios, or a journal, skips them. The sources load first: when they fail to, nothing
 // changes. The mocks of a persistent store come back from it, as it holds them: reset never deletes what it holds.
+// The key-value store stays as it is.
 func (o *Operations) Reset(ctx context.Context) error {
 	return o.mocks.reset(ctx, o.files, o.scenarios, o.journal)
 }

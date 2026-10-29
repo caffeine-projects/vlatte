@@ -64,6 +64,17 @@ func NewMCP(ops *Operations) *mcp.Server {
 		addResetScenarioTool(s, ops)
 	}
 
+	if ops.HasKV() {
+		addListKVTool(s, ops)
+		addGetKVTool(s, ops)
+		addSetKVTool(s, ops)
+		addDeleteKVTool(s, ops)
+	}
+
+	if ops.ReloadsKV() {
+		addReloadKVTool(s, ops)
+	}
+
 	if ops.HasJournal() {
 		addListRequestsTool(s, ops)
 		addQueryRequestsTool(s, ops)

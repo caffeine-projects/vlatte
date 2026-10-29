@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -33,6 +35,7 @@ var (
 	_ vlatte.Mock            = (*fakeMock)(nil)
 	_ vlatte.SelfDescriptive = (*fakeMock)(nil)
 	_ io.Closer              = (*fakeMock)(nil)
+	_ vlatte.KV              = brokenKV{}
 )
 
 func TestMain(m *testing.M) {
@@ -557,3 +560,24 @@ func (f *fakeScenarios) ResetScenario(name string, in ...matchscenario.Instance)
 }
 
 func (f *fakeScenarios) ResetScenarios() { f.store.ResetScenarios() }
+
+// brokenKV is a key-value store that is down: every operation fails with err.
+type brokenKV struct {
+	err error
+}
+
+func (kv brokenKV) Get(context.Context, string) ([]byte, error) { return nil, kv.err }
+func (kv brokenKV) Has(context.Context, string) (bool, error)   { return false, kv.err }
+func (kv brokenKV) Set(context.Context, string, []byte) error   { return kv.err }
+func (kv brokenKV) Del(context.Context, string) error           { return kv.err }
+func (kv brokenKV) Keys(context.Context) ([]string, error)      { return nil, kv.err }
+
+// writeKVFile writes content as the CSV file of a key-value store, in a directory of t's, and returns its path.
+func writeKVFile(t *testing.T, content string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "kv.csv")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+	return path
+}

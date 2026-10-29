@@ -3,8 +3,10 @@ package vlatte_test
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
@@ -58,12 +60,12 @@ func TestCSVKV_ABrokenFileNamesTheLineToFix(t *testing.T) {
 		{
 			name:    "no header",
 			content: "name,token\nana,abc\n",
-			want:    `kv: kv.csv:1: expected the header key,value, not "name,token"`,
+			want:    "kv: kv.csv:1: expected the header key,value: write it as the file's first row",
 		},
 		{
 			name:    "a header after blank lines",
 			content: "\n\nname,token\n",
-			want:    `kv: kv.csv:3: expected the header key,value, not "name,token"`,
+			want:    "kv: kv.csv:3: expected the header key,value: write it as the file's first row",
 		},
 		{
 			name:    "an empty file",
@@ -83,7 +85,7 @@ func TestCSVKV_ABrokenFileNamesTheLineToFix(t *testing.T) {
 		{
 			name:    "a header without two fields",
 			content: "key\n",
-			want:    `kv: kv.csv:1: expected the header key,value, not "key"`,
+			want:    "kv: kv.csv:1: expected the header key,value: write it as the file's first row",
 		},
 		{
 			name:    "an empty key",
@@ -119,6 +121,16 @@ func TestCSVKV_ABrokenFileNamesTheLineToFix(t *testing.T) {
 	}
 }
 
+func TestCSVKV_ABrokenFileNeverQuotesAValue(t *testing.T) {
+	// Values can be secrets, such as tokens, and a load's error reaches logs: a file without its header starts with a
+	// key and its value, which the error doesn't repeat.
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.WriteFile("kv.csv", []byte("token,s3cr3t-value\n"), 0o600))
+
+	_, err := vlatte.NewCSVKV("kv.csv")
+	require.EqualError(t, err, "kv: kv.csv:1: expected the header key,value: write it as the file's first row")
+}
+
 func TestCSVKV_AFileThatIsNotThereFails(t *testing.T) {
 	t.Chdir(t.TempDir())
 
@@ -144,6 +156,71 @@ func TestCSVKV_NeverWritesTheFile(t *testing.T) {
 	b, err := os.ReadFile(file)
 	require.NoError(t, err)
 	require.Equal(t, content, string(b))
+}
+
+func TestCSVKV_ReloadReplacesEveryValueWithTheFiles(t *testing.T) {
+	// A test edits the file the server started with and reloads: values set since are gone, keys removed since come
+	// back, and keys the file no longer has are gone too.
+	file := writeFile(t, "kv.csv", "key,value\ntoken,abc123\nname,ana\n")
+	kv := vlatte.MustNewCSVKV(file)
+
+	require.NoError(t, kv.Set(t.Context(), "token", []byte("def456")))
+	require.NoError(t, kv.Set(t.Context(), "city", []byte("rio")))
+	require.NoError(t, kv.Del(t.Context(), "name"))
+	require.NoError(t, os.WriteFile(file, []byte("key,value\nname,bia\ngreeting,hi\n"), 0o600))
+
+	require.NoError(t, kv.Reload(t.Context()))
+
+	keys, err := kv.Keys(t.Context())
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"name", "greeting"}, keys)
+
+	got, err := kv.Get(t.Context(), "name")
+	require.NoError(t, err)
+	require.Equal(t, "bia", string(got))
+}
+
+func TestCSVKV_ABrokenFileReloadsNothing(t *testing.T) {
+	// A bad edit fails the reload, naming the line, and the store keeps serving what it held.
+	file := writeFile(t, "kv.csv", "key,value\ntoken,abc123\n")
+	kv := vlatte.MustNewCSVKV(file)
+	require.NoError(t, kv.Set(t.Context(), "city", []byte("rio")))
+	require.NoError(t, os.WriteFile(file, []byte("key,value\ntoken,def456\ntoken,ghi789\n"), 0o600))
+
+	err := kv.Reload(t.Context())
+	require.EqualError(t, err, `kv: `+file+`:3: key "token" repeats line 2: keep one of them`)
+
+	keys, err := kv.Keys(t.Context())
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"token", "city"}, keys)
+
+	got, err := kv.Get(t.Context(), "token")
+	require.NoError(t, err)
+	require.Equal(t, "abc123", string(got))
+}
+
+func TestCSVKV_ReloadsWhileServing(t *testing.T) {
+	// Requests read the store while a test reloads it: each read sees a value the file held.
+	file := writeFile(t, "kv.csv", "key,value\ntoken,abc123\n")
+	kv := vlatte.MustNewCSVKV(file)
+
+	var wg sync.WaitGroup
+
+	for range 4 {
+		wg.Go(func() {
+			for range 50 {
+				v, err := kv.Get(t.Context(), "token")
+				assert.NoError(t, err)
+				assert.Equal(t, "abc123", string(v))
+			}
+		})
+	}
+
+	for range 20 {
+		require.NoError(t, kv.Reload(t.Context()))
+	}
+
+	wg.Wait()
 }
 
 // writeFile writes content to a file named name in a directory of t's, and returns its path.

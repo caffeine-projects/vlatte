@@ -29,6 +29,16 @@ type KV interface {
 	Keys(ctx context.Context) ([]string, error)
 }
 
+// KVReloader is a [KV] that loads its values again from where they came from, such as the file of [NewCSVKV]. The
+// admin API's POST /kv/reload reloads one.
+type KVReloader interface {
+	KV
+
+	// Reload replaces every value with those of the store's source: values set since the last load are gone, and
+	// keys removed since come back. When the source can't be loaded, it returns the error and keeps the values it had.
+	Reload(ctx context.Context) error
+}
+
 // ErrKVKeyNotFound is the error of [KV.Get] for a key that isn't stored.
 var ErrKVKeyNotFound = errors.New("kv: key not found")
 

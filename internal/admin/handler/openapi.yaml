@@ -35,6 +35,10 @@ tags:
     description: |
       Scenarios: mocks that match in turn, as a scenario moves from state to state. A scenario starts in `started`.
       HTTP mock servers only.
+  - name: KV
+    description: |
+      The key-value store, whose values templates read as `.KV`, such as `{{ .KV.Get "token" }}`. A value set here is
+      read from the next request on. Values are text. In the vlatte command, its HTTP and gRPC servers share one store.
   - name: Journal
     description: |
       The journal of the requests the server served, of every outcome, newest first: a changelog in files, indexed,
@@ -135,10 +139,10 @@ paths:
         Removes the mocks added through this API, loads the mock files again, saved ones included, starts every
         scenario over, and clears the journal. Mocks added in code stay as they are. A server without mock files,
         scenarios, or a journal, skips them. A persistent store loads again too: its mocks come back as it holds them,
-        and nothing is deleted from it.
+        and nothing is deleted from it. The key-value store stays as it is: `POST /kv/reload` loads its file again.
       responses:
         "204":
-          description: The server is back to how it started.
+          description: The mocks, scenarios and journal are back to how they started.
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
@@ -491,6 +495,116 @@ paths:
             text/html:
               schema: { type: string }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /kv:
+    get:
+      tags: [KV]
+      operationId: listKV
+      summary: List the keys
+      description: The keys of the key-value store, in order, without their values. An empty store lists none.
+      responses:
+        "200":
+          description: The keys.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KVKeys" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/KVKeys" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /kv/reload:
+    post:
+      tags: [KV]
+      operationId: reloadKV
+      summary: Load the key-value store again from its file
+      description: |
+        Replaces every value with those of the store's file, such as the CSV file of the vlatte command's `kv.file`:
+        values set since the last load are gone, and keys removed since come back. The whole file is read and checked
+        first, so a request reads the old values or the new ones, never a mix. `POST /mocks/reload` and `POST /reset`
+        leave the store as it is.
+      responses:
+        "204":
+          description: The store holds the file's values.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "500":
+          description: "`load_failed`: the file can't be read, or has a problem, which `detail` names with its line. Nothing changed."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+            application/problem+yaml:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "501":
+          description: "`not_supported`: the store loads from no file, such as one kept in memory alone."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+            application/problem+yaml:
+              schema: { $ref: "#/components/schemas/Problem" }
+  /kv/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: The key, one path segment. A key with a slash is sent escaped, so `a%2Fb` is the key `a/b`.
+        schema: { type: string }
+    get:
+      tags: [KV]
+      operationId: getKV
+      summary: Get the value of a key
+      description: The bytes of a key or a value that aren't UTF-8 are replaced with U+FFFD.
+      responses:
+        "200":
+          description: The key and its value.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KVEntry" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/KVEntry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/KeyNotFound" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    put:
+      tags: [KV]
+      operationId: setKV
+      summary: Set a key to a value
+      description: Templates read the value from the next request on. An empty value is a value, which `.KV.Has` reports.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KVChange" }
+          application/yaml:
+            schema: { $ref: "#/components/schemas/KVChange" }
+      responses:
+        "200":
+          description: The key and its value.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KVEntry" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/KVEntry" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+    delete:
+      tags: [KV]
+      operationId: deleteKV
+      summary: Remove a key
+      description: A template that reads the key next fails, as for a key never set. A key that isn't set answers `204` too.
+      responses:
+        "204":
+          description: The key isn't set.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "501": { $ref: "#/components/responses/NotSupported" }
   /requests:
     get:
       tags: [Journal]
@@ -1041,6 +1155,32 @@ components:
           minLength: 1
           description: The state the scenario moves to.
       additionalProperties: false
+    KVKeys:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items: { type: string }
+          description: The keys, in order.
+      additionalProperties: false
+    KVEntry:
+      type: object
+      required: [key, value]
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+      additionalProperties: false
+    KVChange:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+          description: The value of the key, as text. An empty one is a value.
+      additionalProperties: false
     RecordingSettings:
       type: object
       description: The settings of a recording, as the `record` section of the server's settings has them.
@@ -1490,6 +1630,7 @@ components:
             - unknown_state
             - unauthorized
             - incomplete_journal
+            - key_not_found
         detail:
           type: string
           description: What went wrong in this request.
@@ -1540,6 +1681,13 @@ components:
           schema: { $ref: "#/components/schemas/Problem" }
     MockNotFound:
       description: "`mock_not_found`: no mock has the id."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    KeyNotFound:
+      description: "`key_not_found`: the key-value store holds no value for the key."
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }

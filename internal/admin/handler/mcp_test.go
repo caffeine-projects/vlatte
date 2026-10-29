@@ -38,16 +38,23 @@ func TestNewMCP_ToolsAreTheOperationsTheServerCanDo(t *testing.T) {
 			want: append([]string{"clear_requests", "get_request", "list_requests", "query_requests", "verify_requests"}, always...),
 		},
 		{
+			// A store kept in memory alone has no file to reload.
+			name: "a key-value store in memory",
+			caps: adminapi.Capabilities{KV: vlatte.NewMemoryKV()},
+			want: append([]string{"delete_kv", "get_kv", "list_kv", "set_kv"}, always...),
+		},
+		{
 			name: "everything",
 			caps: adminapi.Capabilities{
 				Files: &fakeFiles{}, Recorder: &fakeRecorder{}, Scenarios: newScenarios(), Journal: journalOf(t),
-				MockSchema: []byte(`{}`),
+				MockSchema: []byte(`{}`), KV: vlatte.MustNewCSVKV(writeKVFile(t, "key,value\n")),
 			},
 			build: true,
 			want: append([]string{
-				"add_mock", "clear_requests", "get_request", "list_requests", "list_scenarios", "mock_schema", "query_requests",
-				"recording_status", "reload_mocks", "replace_mock", "reset_scenario", "reset_scenarios", "save_mocks", "set_scenario",
-				"start_recording", "stop_recording", "validate_mock", "verify_requests",
+				"add_mock", "clear_requests", "delete_kv", "get_kv", "get_request", "list_kv", "list_requests", "list_scenarios",
+				"mock_schema", "query_requests", "recording_status", "reload_kv", "reload_mocks", "replace_mock", "reset_scenario",
+				"reset_scenarios", "save_mocks", "set_kv", "set_scenario", "start_recording", "stop_recording", "validate_mock",
+				"verify_requests",
 			}, always...),
 		},
 	}

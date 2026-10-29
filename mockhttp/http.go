@@ -322,6 +322,7 @@ func New(config ...Option) (*Server, error) {
 			Events:     events,
 			Logs:       logs,
 			Journal:    j,
+			KV:         conf.KV,
 			Pattern:    app.adminRequestPattern,
 			Matchers:   app.matchers(),
 			MockSchema: _mockFileSchema,

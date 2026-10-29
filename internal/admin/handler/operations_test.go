@@ -114,6 +114,34 @@ func TestOperations_ACapabilityTheServerLacksIsNotSupported(t *testing.T) {
 			call:   func(context.Context) error { return ops.ClearRequests() },
 			detail: "this mock server can't keep a journal of requests",
 		},
+		{
+			name:   "list the keys",
+			call:   func(ctx context.Context) error { _, err := ops.ListKV(ctx); return err },
+			detail: "this mock server can't keep a key-value store",
+		},
+		{
+			name:   "get a key",
+			call:   func(ctx context.Context) error { _, err := ops.GetKV(ctx, "a"); return err },
+			detail: "this mock server can't keep a key-value store",
+		},
+		{
+			name: "set a key",
+			call: func(ctx context.Context) error {
+				_, err := ops.SetKV(ctx, "a", []byte(`{"value": "b"}`), "json")
+				return err
+			},
+			detail: "this mock server can't keep a key-value store",
+		},
+		{
+			name:   "remove a key",
+			call:   func(ctx context.Context) error { return ops.DeleteKV(ctx, "a") },
+			detail: "this mock server can't keep a key-value store",
+		},
+		{
+			name:   "reload the key-value store",
+			call:   func(ctx context.Context) error { return ops.ReloadKV(ctx) },
+			detail: "this mock server can't load its key-value store from a file",
+		},
 	}
 
 	for _, tt := range tests {
