@@ -131,7 +131,7 @@ const convert = (page) => {
   if (!description) {
     // The first block under the title, when it is a paragraph: a later one may lean on what came before it.
     const lead = text.match(/^# .*\n+(.*)/m)?.[1] ?? ''
-    const paragraph = !/^([A-Za-z`_[]|\*\*)/.test(lead) ? '' : lead.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    const paragraph = !/^(?!```)([A-Za-z`_[]|\*\*)/.test(lead) ? '' : lead.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     description = (paragraph.match(/^.+?[.!?](?=\s|$)/)?.[0] ?? paragraph).replace(/:$/, '.')
   }
   return { markdown, description }
