@@ -1,0 +1,9 @@
+# Any other request to the API.
+priority: 10
+request:
+  method: GET
+  path: /orders
+response:
+  status: 401
+  header:
+    WWW-Authenticate: Bearer error="invalid_token"

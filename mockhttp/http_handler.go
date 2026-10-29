@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -1184,8 +1183,8 @@ func (h *mockHandler) renderFailed(r *RequestValues, proxied bool, err error) {
 	}
 }
 
-// onNoMatches answers a request no mock matched with the mocks that came closest, of misses, unless the server
-// reports none: misses is nil then. Its journal entry lists them too.
+// onNoMatches answers a request no mock matched through the server's NoMatchRenderer, with the mocks that came
+// closest, of misses, unless the server reports none: misses is nil then. Its journal entry lists them too.
 func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, misses *vlatte.Misses[*Mock, *selectorInput]) {
 	defer h.lifecycle.OnNoMatch(r)
 
@@ -1193,57 +1192,22 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, misse
 		r.nearMisses = misses.NearMisses(r.RawRequest.Context(), describeExpectation)
 	}
 
-	buf := bufpool.Get()
-	buf.Reset()
-	defer bufpool.Put(buf)
+	nm := &NoMatch{
+		Request:    r,
+		NearMisses: cloneNearMisses(r.nearMisses),
+		Status:     h.app.config.RequestWasNotMatchedStatusCode,
+	}
 
-	buf.WriteString("REQUEST DID NOT MATCH\n")
-	buf.WriteString(r.RawRequest.Method)
-	buf.WriteString(" ")
-	buf.WriteString(r.URL.String())
-	buf.WriteString("\n\n")
-	writeNearMisses(buf, r.nearMisses)
-
-	w.Header().Set(HeaderContentType, MIMETextPlainCharsetUTF8)
-	w.Header().Set(HeaderXContentTypeOptions, _noSniff)
 	w.Header().Set(HeaderVlatteError, vlatte.FailureNoMatch)
-	w.WriteHeader(h.app.config.RequestWasNotMatchedStatusCode)
+	w.Header().Set(HeaderXContentTypeOptions, _noSniff)
 
-	buf.WriteTo(w)
-}
+	h.app.noMatch.RenderNoMatch(w, nm)
 
-// writeNearMisses writes misses to buf, one per line, after a title: the parts of each mock that matched, those that
-// differ, and those it didn't check. A line break in a name or a matcher's error is a space: a mock stays a line.
-func writeNearMisses(buf *bytes.Buffer, misses []vlatte.NearMiss) {
-	if len(misses) == 0 {
-		return
-	}
-
-	buf.WriteString("CLOSEST MOCKS\n")
-
-	for _, miss := range misses {
-		line := "[" + miss.MockID + "]"
-		if miss.Name != "" && miss.Name != miss.MockID {
-			line += " " + miss.Name
-		}
-
-		line += fmt.Sprintf(": %d of %d parts matched", miss.Passed, miss.Total)
-
-		if len(miss.Failed) > 0 {
-			line += "; differs in " + strings.Join(miss.Failed, ", ")
-		}
-
-		if len(miss.Skipped) > 0 {
-			line += "; not checked: " + strings.Join(miss.Skipped, ", ")
-		}
-
-		_oneLine.WriteString(buf, line)
-		buf.WriteString("\n")
+	// A renderer that wrote nothing would answer 200, as net/http does, and pass the request off as matched.
+	if r.sent() == 0 {
+		w.WriteHeader(nm.Status)
 	}
 }
-
-// _oneLine turns line breaks into spaces.
-var _oneLine = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
 
 // onError answers a request whose serving failed, with the error status, so a client tells it from a mock's answer.
 // failure is a vlatte.Failure* value. The body names the mock that matched, if one did, and the error.

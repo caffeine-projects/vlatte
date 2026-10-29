@@ -119,3 +119,15 @@ func ExampleEqualJSON() {
 	// true
 	// false
 }
+
+func ExampleJWT() {
+	// The Authorization header of a request: a JWT whose claims are {"sub": "ana", "scope": "read"}. JWT reads the
+	// claims without checking who signed them; SignedJWT checks that too.
+	header := "Bearer eyJhbGciOiJub25lIn0.eyJzdWIiOiJhbmEiLCJzY29wZSI6InJlYWQifQ."
+
+	fmt.Println(matches(match.JWT(match.JSONPath("$.claims.sub", match.Equal("ana"))), header))
+	fmt.Println(matches(match.JWT(match.JSONPath("$.claims.scope", match.Equal("write"))), header))
+	// Output:
+	// true
+	// false
+}

@@ -1,6 +1,9 @@
 package vlatte
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"strconv"
@@ -11,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte/internal/jose"
 	"github.com/caffeine-projects/vlatte/internal/tmplfunc"
 )
 
@@ -165,6 +169,58 @@ func TestGoTemplateEngine_Env(t *testing.T) {
 	t.Run("an invalid name is an error", func(t *testing.T) {
 		_, err := NewGoTemplateEngine(WithEnv("A=B"))
 		require.EqualError(t, err, fmt.Sprintf("vlatte: go template engine: environment variable name %q is invalid", "A=B"))
+	})
+}
+
+func TestGoTemplateEngine_SigningKeys(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	e := MustNewGoTemplateEngine(WithSigningKey("key-1", "ES256", key))
+
+	t.Run("signs a token the engine's JWKS verifies", func(t *testing.T) {
+		token, err := render(t, e, `{{ jwt "key-1" .claims }}`, map[string]any{"claims": `{"sub":"ana"}`})
+		require.NoError(t, err)
+
+		jwks, err := render(t, e, `{{ jwks "key-1" }}`, nil)
+		require.NoError(t, err)
+
+		ks, err := jose.ParseKeySet([]byte(jwks))
+		require.NoError(t, err)
+
+		tok, err := jose.Parse(token)
+		require.NoError(t, err)
+		require.NoError(t, ks.Verify(tok))
+		require.Equal(t, map[string]any{"sub": "ana"}, tok.Claims)
+	})
+
+	t.Run("a literal key the engine lacks fails the template when it compiles", func(t *testing.T) {
+		_, err := e.Compile("body", `{{ jwks "key-1" "key-2" }}`)
+		require.EqualError(t, err, `template: body: "key-2" is not a signing key of the server`)
+		require.ErrorIs(t, err, tmplfunc.ErrUnknownKey)
+	})
+
+	t.Run("an engine without keys signs nothing", func(t *testing.T) {
+		_, err := MustNewGoTemplateEngine().Compile("body", `{{ jwt "key-1" "{}" }}`)
+		require.ErrorIs(t, err, tmplfunc.ErrUnknownKey)
+	})
+
+	t.Run("a jwt of the user's own is not checked", func(t *testing.T) {
+		own := MustNewGoTemplateEngine(WithTemplateFuncs(map[string]any{"jwt": func(string, any) string { return "own" }}))
+
+		out, err := render(t, own, `{{ jwt "key-9" "{}" }}`, nil)
+		require.NoError(t, err)
+		require.Equal(t, "own", out)
+	})
+
+	t.Run("an HMAC key is refused", func(t *testing.T) {
+		_, err := NewGoTemplateEngine(WithSigningKey("key-1", "HS256", key))
+		require.ErrorIs(t, err, jose.ErrUnsupportedAlg)
+	})
+
+	t.Run("a key added twice is refused", func(t *testing.T) {
+		_, err := NewGoTemplateEngine(WithSigningKey("key-1", "ES256", key), WithSigningKey("key-1", "ES256", key))
+		require.EqualError(t, err, `vlatte: go template engine: signing key "key-1" is added twice`)
 	})
 }
 

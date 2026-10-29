@@ -326,21 +326,19 @@ func TestRun_ServesTheGRPCAdminAPIItsSettingsSay(t *testing.T) {
 	// and --grpc-admin=false turns it off.
 	withoutDockerHost(t)
 
-	adminAddr := randomAddr(t)
-	start(t, "--addr", randomAddr(t), "--grpc-addr", randomAddr(t), "--grpc-admin-addr", adminAddr, "--log-level", "disabled")
+	// Port 0 has the system choose free ports, which no other process can take before the run listens on them.
+	_, out := startOutput(t, "--addr", "127.0.0.1:0", "--grpc-addr", "127.0.0.1:0", "--grpc-admin-addr", "127.0.0.1:0",
+		"--log-level", "disabled")
 
-	require.EventuallyWithT(t, func(c *assert.CollectT) {
-		res, err := http.Get("http://" + adminAddr + "/health")
-		if !assert.NoError(c, err) {
-			return
-		}
+	res, err := http.Get(printed(t, out, ", admin API: ") + "/health")
+	require.NoError(t, err)
 
-		body, _ := io.ReadAll(res.Body)
-		_ = res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
 
-		assert.Equal(c, http.StatusOK, res.StatusCode)
-		assert.Contains(c, string(body), `"kind": "grpc"`)
-	}, 10*time.Second, 50*time.Millisecond)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Contains(t, string(body), `"kind": "grpc"`)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -348,7 +346,7 @@ func TestRun_ServesTheGRPCAdminAPIItsSettingsSay(t *testing.T) {
 	// Another run, beside the first, which holds the journal's directory: without a journal.
 	var stdout, stderr bytes.Buffer
 	require.Equal(t, 0, run(ctx, []string{
-		"--addr", randomAddr(t), "--grpc-addr", randomAddr(t), "--grpc-admin=false",
+		"--addr", "127.0.0.1:0", "--grpc-addr", "127.0.0.1:0", "--grpc-admin=false",
 		"--journal=false", "--log-level", "disabled",
 	}, nil, &stdout, &stderr), stderr.String())
 	require.Contains(t, stdout.String(), ", admin API: \n", "no admin API serves the gRPC server")

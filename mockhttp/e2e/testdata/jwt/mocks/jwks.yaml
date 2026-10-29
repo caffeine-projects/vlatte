@@ -1,0 +1,11 @@
+# The public keys of the issuer, as a client fetches them.
+request:
+  method: GET
+  path: /.well-known/jwks.json
+response:
+  status: 200
+  header:
+    Content-Type: application/json
+  body: '{{ jwks "issuer" }}'
+  template:
+    enabled: true
