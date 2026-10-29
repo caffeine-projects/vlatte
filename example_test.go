@@ -64,9 +64,9 @@ func ExampleMatcherFunc() {
 	// Output: 200 418
 }
 
-func ExampleStepFunc() {
-	// A step sees the bytes of the answer on their way to the client: this one shouts them.
-	shout := vlatte.StepFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
+func ExamplePipeFunc() {
+	// A pipe sees the bytes of the answer on their way to the client: this one shouts them.
+	shout := vlatte.PipeFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
 		if _, err := next.Write(bytes.ToUpper(b)); err != nil {
 			return 0, err
 		}
@@ -78,7 +78,7 @@ func ExampleStepFunc() {
 	m.MustStart()
 	defer m.Close()
 
-	m.MustMock(mockhttp.Getf("/hello").Step(shout).Reply(mockhttp.OK().PlainText("hello")))
+	m.MustMock(mockhttp.Getf("/hello").Pipe(shout).Reply(mockhttp.OK().PlainText("hello")))
 
 	fmt.Println(get(m, "/hello", nil))
 	// Output: 200 HELLO

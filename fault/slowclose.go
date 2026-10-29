@@ -9,20 +9,20 @@ import (
 )
 
 var (
-	_ vlatte.Step            = slowClose{}
+	_ vlatte.Pipe            = slowClose{}
 	_ vlatte.SelfDescriptive = slowClose{}
 	_ vlatte.Stage           = (*slowCloseStage)(nil)
 )
 
-// SlowClose returns a step that delays the end of the answer by delay, as a server slow to close its connection does:
+// SlowClose returns a pipe that delays the end of the answer by delay, as a server slow to close its connection does:
 // it passes the answer on as it is, flushes it at its end, then waits delay before it ends it. The client has every
 // byte by then, and waits only when it reads until the end.
 //
-// With [github.com/caffeine-projects/vlatte/mockhttp.Builder.Step], the end of the body waits: the last chunk of a
-// chunked body. With [github.com/caffeine-projects/vlatte/mockhttp.Builder.WireStep], the close of the connection
+// With [github.com/caffeine-projects/vlatte/mockhttp.Builder.Pipe], the end of the body waits: the last chunk of a
+// chunked body. With [github.com/caffeine-projects/vlatte/mockhttp.Builder.WirePipe], the close of the connection
 // waits, after the last chunk: a body that ends with the connection, as over HTTP/1.0, waits for it. It panics when
 // delay is negative.
-func SlowClose(delay time.Duration) vlatte.Step {
+func SlowClose(delay time.Duration) vlatte.Pipe {
 	if delay < 0 {
 		panic(fmt.Sprintf("fault: slow close can't last %s", delay))
 	}

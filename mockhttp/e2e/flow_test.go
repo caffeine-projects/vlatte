@@ -12,10 +12,10 @@ import (
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
-type TestStep struct{ txt string }
+type TestPipe struct{ txt string }
 
-func (in *TestStep) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
-	return vlatte.StepFunc(func(_ context.Context, p []byte, next vlatte.Stage) (int, error) {
+func (in *TestPipe) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
+	return vlatte.PipeFunc(func(_ context.Context, p []byte, next vlatte.Stage) (int, error) {
 		if _, err := next.Write(append(p, []byte(in.txt)...)); err != nil {
 			return 0, err
 		}
@@ -29,10 +29,10 @@ func TestFlow(t *testing.T) {
 	t.Cleanup(func() { m.Close() })
 	m.MustStart()
 
-	in1 := &TestStep{"(extra)"}
-	in2 := &TestStep{"(other)"}
+	in1 := &TestPipe{"(extra)"}
+	in2 := &TestPipe{"(other)"}
 
-	scope := m.MustMock(mockhttp.Getf("/test").Step(in1, in2).Reply(mockhttp.OK().BodyText("hi")))
+	scope := m.MustMock(mockhttp.Getf("/test").Pipe(in1, in2).Reply(mockhttp.OK().BodyText("hi")))
 
 	client := &http.Client{}
 	res, err := client.Get(m.URL("/test"))

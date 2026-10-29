@@ -6,7 +6,7 @@ import (
 )
 
 // Mock is what the core needs from a protocol's mock: identity, ordering, state, hits and events.
-// Protocol packages add what only they use, such as callbacks or steps, on their own mock types.
+// Protocol packages add what only they use, such as callbacks or pipes, on their own mock types.
 //
 // A mock that holds something to release, such as the connections of an HTTP client, implements io.Closer: the store
 // closes it when it leaves, and a builder's mock that never makes it into the store is closed too.

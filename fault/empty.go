@@ -7,15 +7,15 @@ import (
 )
 
 var (
-	_ vlatte.Step            = emptyResponse{}
+	_ vlatte.Pipe            = emptyResponse{}
 	_ vlatte.SelfDescriptive = emptyResponse{}
 	_ vlatte.Stage           = (*emptyStage)(nil)
 )
 
-// EmptyResponse returns a wire step that sends nothing: at the first byte of the answer, or at its end, it aborts the
+// EmptyResponse returns a wire pipe that sends nothing: at the first byte of the answer, or at its end, it aborts the
 // flow, so the connection closes before a status line. The client reads the end of the connection where it waits for
 // an answer.
-func EmptyResponse() vlatte.Step {
+func EmptyResponse() vlatte.Pipe {
 	return emptyResponse{}
 }
 

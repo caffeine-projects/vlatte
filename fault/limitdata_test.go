@@ -30,7 +30,7 @@ func TestLimitData_CutsTheAnswerAtTheLimit(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
-			flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Step{fault.LimitData(tc.limit)})
+			flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Pipe{fault.LimitData(tc.limit)})
 
 			var err error
 			for _, w := range tc.writes {
@@ -54,7 +54,7 @@ func TestLimitData_CutsTheAnswerAtTheLimit(t *testing.T) {
 func TestLimitData_TellsTheWriterHowMuchWentOut(t *testing.T) {
 	// The write that meets the limit took only what fit, and the rest is flushed so the client gets it before the cut.
 	sink := &sliceSink{}
-	flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.LimitData(4)})
+	flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.LimitData(4)})
 
 	n, err := flow.Write([]byte("ab"))
 	require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestLimitData_AShorterAnswerEndsAsItWould(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
-			flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Step{fault.LimitData(tc.limit)})
+			flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Pipe{fault.LimitData(tc.limit)})
 
 			for _, w := range tc.writes {
 				_, err := flow.Write([]byte(w))
@@ -104,7 +104,7 @@ func TestLimitData_AClientThatWentAwayEndsIt(t *testing.T) {
 		"the flush at the limit": {err: errGone, flushes: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.LimitData(2)})
+			flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.LimitData(2)})
 
 			_, err := flow.Write([]byte("abc"))
 			require.ErrorIs(t, err, errGone)

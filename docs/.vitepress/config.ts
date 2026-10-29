@@ -1,7 +1,7 @@
 import { defineConfig, type DefaultTheme } from 'vitepress'
 
-const base = '/vlatte/'
-const site = 'https://caffeine-projects.github.io/vlatte/'
+const base = '/'
+const site = 'https://vlatte.dev/'
 const repo = 'https://github.com/caffeine-projects/vlatte'
 
 const tagline = 'Mock HTTP and gRPC servers for Go tests.'
@@ -77,7 +77,7 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Replies', link: '/http/replies' },
       { text: 'Forms and multipart', link: '/http/forms-multipart' },
       { text: 'Proxying', link: '/http/proxying' },
-      { text: 'Steps', link: '/http/steps' },
+      { text: 'Pipes', link: '/http/pipes' },
       { text: 'Faults', link: '/http/faults' },
       { text: 'Mock files', link: '/http/mock-files' },
       { text: 'TLS', link: '/http/tls' },
@@ -224,8 +224,11 @@ export default defineConfig({
   description: tagline,
   cleanUrls: true,
   lastUpdated: true,
-  // brand/ is the source of the assets scripts/prepare.mjs copies to public/; its README is for the repository.
-  srcExclude: ['brand/**', 'README.md'],
+  // brand/ is the source of the assets scripts/prepare.mjs copies to public/; its README is for the repository. The
+  // Markdown in public/ is the copy of each page that scripts/llms.mjs writes for AI tools, not pages of its own.
+  srcExclude: ['brand/**', 'README.md', 'public/**'],
+  // The hostname holds the base: the sitemap resolves each page's path against it.
+  sitemap: { hostname: site },
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}favicon.svg` }],
     ['link', { rel: 'icon', type: 'image/png', sizes: '48x48', href: `${base}favicon-48.png` }],

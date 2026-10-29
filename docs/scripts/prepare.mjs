@@ -13,6 +13,7 @@ const pub = join(docs, 'public')
 // Each entry is [source, path under public/]. The paths of schemas/ and openapi/ are addresses users put in their
 // files: keep them stable.
 const files = [
+  ['docs/CNAME', 'CNAME'],
   ['mockhttp/schema/http.schema.json', 'schemas/http.schema.json'],
   ['mockgrpc/schema/grpc.schema.json', 'schemas/grpc.schema.json'],
   ['internal/admin/handler/openapi.yaml', 'openapi/admin.yaml'],

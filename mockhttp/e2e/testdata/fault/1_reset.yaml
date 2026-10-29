@@ -4,5 +4,5 @@ request:
 response:
   status: 200
   body: hello
-wire_steps:
+wire_pipes:
   - type: connection_reset_by_peer

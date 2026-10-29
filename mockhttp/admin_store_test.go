@@ -768,8 +768,8 @@ func TestFileStore_KeepsAMockOfFaults(t *testing.T) {
 
 	m := adminServer(t, Setup().AdminStore(FileStore(dir)))
 	addMock(t, m, `{"id": "faulty", "request": {"method": "GET", "path": "/f"}, "response": {"status": 200},
-		"steps": [{"type": "limit_data", "bytes": 3}, {"type": "bandwidth", "rate": "3g"}],
-		"wire_steps": [{"type": "connection_reset_by_peer"}]}`)
+		"pipes": [{"type": "limit_data", "bytes": 3}, {"type": "bandwidth", "rate": "3g"}],
+		"wire_pipes": [{"type": "connection_reset_by_peer"}]}`)
 	m.Close()
 
 	m = adminServer(t, Setup().AdminStore(FileStore(dir)))
@@ -782,6 +782,6 @@ func TestFileStore_KeepsAMockOfFaults(t *testing.T) {
 	require.Equal(t, []any{
 		map[string]any{"type": "limit_data", "bytes": 3.0},
 		map[string]any{"type": "bandwidth", "rate": float64(fault.Bandwidth3G)},
-	}, got["steps"])
-	require.Equal(t, []any{map[string]any{"type": "connection_reset_by_peer"}}, got["wire_steps"])
+	}, got["pipes"])
+	require.Equal(t, []any{map[string]any{"type": "connection_reset_by_peer"}}, got["wire_pipes"])
 }

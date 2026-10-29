@@ -18,7 +18,7 @@ func TestConnectionResetByPeer_SendsNothingAndResets(t *testing.T) {
 	for _, c := range _calls {
 		t.Run(c.name, func(t *testing.T) {
 			var out bytes.Buffer
-			flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Step{fault.ConnectionResetByPeer()})
+			flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Pipe{fault.ConnectionResetByPeer()})
 
 			require.ErrorIs(t, c.do(flow), vlatte.ErrReset)
 
@@ -35,7 +35,7 @@ func TestConnectionResetByPeerAfter_PassesTheAnswerOnThenResets(t *testing.T) {
 	// that ended before is flushed whole, and the connection waits for its reset.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.ConnectionResetByPeerAfter(time.Second)})
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.ConnectionResetByPeerAfter(time.Second)})
 
 		_, err := flow.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 		require.NoError(t, err)
@@ -55,7 +55,7 @@ func TestConnectionResetByPeerAfter_ResetsAStreamThatDoesntEnd(t *testing.T) {
 	// A reply that writes past the reset, as a stream does, learns at its next write that the connection is gone.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Step{fault.ConnectionResetByPeerAfter(time.Second)})
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.ConnectionResetByPeerAfter(time.Second)})
 
 		_, err := flow.Write([]byte("a"))
 		require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestConnectionResetByPeerAfter_ZeroResetsAtOnce(t *testing.T) {
 	for _, c := range _calls {
 		t.Run(c.name, func(t *testing.T) {
 			var out bytes.Buffer
-			flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Step{fault.ConnectionResetByPeerAfter(0)})
+			flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Pipe{fault.ConnectionResetByPeerAfter(0)})
 
 			require.ErrorIs(t, c.do(flow), vlatte.ErrReset)
 			require.Empty(t, out.String())
@@ -86,7 +86,7 @@ func TestConnectionResetByPeerAfter_StopsWhenTheClientLeaves(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		start := time.Now()
-		flow := vlatte.NewFlow(ctx, failingSink{}, []vlatte.Step{fault.ConnectionResetByPeerAfter(time.Second)})
+		flow := vlatte.NewFlow(ctx, failingSink{}, []vlatte.Pipe{fault.ConnectionResetByPeerAfter(time.Second)})
 
 		time.AfterFunc(200*time.Millisecond, cancel)
 

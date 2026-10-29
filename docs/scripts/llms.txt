@@ -1,0 +1,20 @@
+# vlatte
+
+> Mock HTTP and gRPC servers for Go tests, and a CLI that serves them from files.
+
+vlatte is a mocking framework for Go, at `github.com/caffeine-projects/vlatte`, for Go 1.27 or later. There are two ways to use it:
+
+- In Go tests, `mockhttp` and `mockgrpc` start real HTTP and gRPC servers. A test adds mocks to a server and sends it requests through the code under test.
+- The `vlatte` CLI, a binary or a Docker image, serves HTTP and gRPC mocks from YAML or JSON mock files, records a real service and plays it back, and takes new mocks over an admin API.
+
+A mock is matchers, which say which requests it answers, and a reply, which says how it answers. The matchers, from the `match` package, are the same for both protocols. Everything a mock file says, Go can say too. A request no mock matches gets HTTP `418` with a `VLatte-Error` header, or gRPC `NotFound`, and a list of the mocks that came closest.
+
+{sections}
+
+## Optional
+
+- [Every page in one file]({site}llms-full.txt): the pages above, in the same order.
+- [HTTP mock file schema]({site}schemas/http.schema.json): the JSON Schema of HTTP mock files.
+- [gRPC mock file schema]({site}schemas/grpc.schema.json): the JSON Schema of gRPC mock files.
+- [Admin API]({site}openapi/admin.yaml): the OpenAPI document of the admin API.
+- [Go API](https://pkg.go.dev/github.com/caffeine-projects/vlatte): the doc comments of every package, on pkg.go.dev.

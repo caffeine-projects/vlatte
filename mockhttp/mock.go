@@ -72,9 +72,9 @@ type mockSpec struct {
 	mappers      []Mapper
 	delay        vlatte.Delay
 	events       []vlatte.EventConfig
-	steps        []vlatte.Step
-	wireSteps    []vlatte.Step
-	upSteps      []vlatte.Step
+	pipes        []vlatte.Pipe
+	wirePipes    []vlatte.Pipe
+	upPipes      []vlatte.Pipe
 	fallback     bool          // a ProxyAll mock's: its description holds its reply under proxy_all
 	pathTemplate *pathTemplate // set with URLPathTemplate; it never changes, so the mocks share it
 }
@@ -85,9 +85,9 @@ func (s mockSpec) clone() mockSpec {
 	s.expectations = slices.Clone(s.expectations)
 	s.mappers = slices.Clone(s.mappers)
 	s.events = slices.Clone(s.events)
-	s.steps = slices.Clone(s.steps)
-	s.wireSteps = slices.Clone(s.wireSteps)
-	s.upSteps = slices.Clone(s.upSteps)
+	s.pipes = slices.Clone(s.pipes)
+	s.wirePipes = slices.Clone(s.wirePipes)
+	s.upPipes = slices.Clone(s.upPipes)
 
 	return s
 }
@@ -191,19 +191,19 @@ func (m *Mock) Events() vlatte.Events {
 	return vlatte.Events{OnComplete: m.spec.events}
 }
 
-// Steps returns the steps that the body of each answer of the mock passes through: see [Builder.Step].
-func (m *Mock) Steps() []vlatte.Step {
-	return m.spec.steps
+// Pipes returns the pipes that the body of each answer of the mock passes through: see [Builder.Pipe].
+func (m *Mock) Pipes() []vlatte.Pipe {
+	return m.spec.pipes
 }
 
-// WireSteps returns the steps that the bytes of each answer of the mock pass through: see [Builder.WireStep].
-func (m *Mock) WireSteps() []vlatte.Step {
-	return m.spec.wireSteps
+// WirePipes returns the pipes that the bytes of each answer of the mock pass through: see [Builder.WirePipe].
+func (m *Mock) WirePipes() []vlatte.Pipe {
+	return m.spec.wirePipes
 }
 
-// UpstreamSteps returns the steps that what the mock sends on passes through: see [Builder.UpstreamStep].
-func (m *Mock) UpstreamSteps() []vlatte.Step {
-	return m.spec.upSteps
+// UpstreamPipes returns the pipes that what the mock sends on passes through: see [Builder.UpstreamPipe].
+func (m *Mock) UpstreamPipes() []vlatte.Pipe {
+	return m.spec.upPipes
 }
 
 // String names the mock as "Mock [id] name", as assertion messages do.
@@ -212,7 +212,7 @@ func (m *Mock) String() string {
 }
 
 // Describe implements [vlatte.SelfDescriptive]: the mock in the mock file format. It leaves out callbacks, and
-// steps that don't describe themselves. A reply a mock file can't hold, such as [Echo], stays, so encoding the
+// pipes that don't describe themselves. A reply a mock file can't hold, such as [Echo], stays, so encoding the
 // description fails.
 func (m *Mock) Describe() vlatte.Descriptor {
 	mockExpectations := m.spec.expectations
@@ -401,12 +401,12 @@ func (m *Mock) Describe() vlatte.Descriptor {
 		data["on_complete"] = events
 	}
 
-	for key, steps := range map[string][]vlatte.Step{
-		"steps":          m.spec.steps,
-		"wire_steps":     m.spec.wireSteps,
-		"upstream_steps": m.spec.upSteps,
+	for key, pipes := range map[string][]vlatte.Pipe{
+		"pipes":          m.spec.pipes,
+		"wire_pipes":     m.spec.wirePipes,
+		"upstream_pipes": m.spec.upPipes,
 	} {
-		if described := describeSteps(steps); len(described) > 0 {
+		if described := describePipes(pipes); len(described) > 0 {
 			data[key] = described
 		}
 	}
@@ -444,11 +444,11 @@ func describeEvents(events []vlatte.EventConfig) []any {
 	return described
 }
 
-// describeSteps describes steps as a mock file lists them, but those that don't describe themselves, such as a
-// [vlatte.StepFunc], which a mock file can't hold. Faults describe themselves.
-func describeSteps(steps []vlatte.Step) []any {
+// describePipes describes pipes as a mock file lists them, but those that don't describe themselves, such as a
+// [vlatte.PipeFunc], which a mock file can't hold. Faults describe themselves.
+func describePipes(pipes []vlatte.Pipe) []any {
 	var described []any
-	for _, s := range steps {
+	for _, s := range pipes {
 		if d, ok := vlatte.IsSelfDescriptive(s); ok {
 			described = append(described, d)
 		}
