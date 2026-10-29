@@ -492,6 +492,49 @@ func TestBuildMatcher_EqualTakesNull(t *testing.T) {
 	require.False(t, matches(t, m, ""))
 }
 
+func TestBuildMatcher_JWT(t *testing.T) {
+	m, err := _registry.BuildMatcher([]any{"jwt", []any{"jsonPath", "$.claims.sub", []any{"equal", "ana"}}})
+	require.NoError(t, err)
+
+	// {"alg":"none"} and {"sub":"ana"}: jwt reads the claims without checking who signed them.
+	require.True(t, matches(t, m, "Bearer eyJhbGciOiJub25lIn0.eyJzdWIiOiJhbmEifQ."))
+	require.False(t, matches(t, m, "Bearer gho_opaque"))
+}
+
+func TestBuildMatcher_SignedJWT(t *testing.T) {
+	t.Run("keys as a JWK Set object", func(t *testing.T) {
+		set, err := value.DecodeJSON([]byte(_publicJWKS))
+		require.NoError(t, err)
+
+		_, err = _registry.BuildMatcher([]any{"signedJWT", set, []any{"anything"}})
+		require.NoError(t, err)
+	})
+
+	t.Run("keys as text", func(t *testing.T) {
+		m, err := _registry.BuildMatcher([]any{"signedjwt", _publicJWKS, []any{"anything"}})
+		require.NoError(t, err)
+
+		// An unsigned token isn't signed by the keys.
+		require.False(t, matches(t, m, "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhbmEifQ."))
+	})
+
+	t.Run("keys that hold no key", func(t *testing.T) {
+		_, err := _registry.BuildMatcher([]any{"signedJWT", map[string]any{"keys": []any{}}, []any{"anything"}})
+		require.EqualError(t, err, "signedJWT takes keys: match: signedjwt: jose: the key set has no signing key")
+	})
+
+	t.Run("keys that aren't text or an object", func(t *testing.T) {
+		_, err := _registry.BuildMatcher([]any{"signedJWT", int64(1), []any{"anything"}})
+		require.EqualError(t, err, "signedJWT takes keys first: a JWK Set, a JWK or PEM public keys, not a number")
+	})
+}
+
+// _publicJWKS is the example P-256 key of RFC 7517 §A.1 twice: for encryption, which signedJWT skips, and signing.
+const _publicJWKS = `{"keys":[{"kty":"EC","crv":"P-256","x":"MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4",` +
+	`"y":"4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM","use":"enc","kid":"1"},` +
+	`{"kty":"EC","crv":"P-256","x":"MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4",` +
+	`"y":"4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM","use":"sig","kid":"2"}]}`
+
 func TestBuildMatcher_LoadsWhatMatchersDescribe(t *testing.T) {
 	// A mock describes its matchers in the format of mock files, so a description loads back, regexp included.
 	for _, m := range []vlatte.Matcher{
@@ -508,7 +551,8 @@ func TestBuildMatcher_LoadsWhatMatchersDescribe(t *testing.T) {
 		match.EqualDateTimeNow(match.TruncateExpected(match.FirstDayOfMonth), match.TruncateActual(match.LastDayOfYear),
 			match.TruncateLast(), match.ActualFormat("02/01/2006"), match.LocalTime()), match.URLPath("/a/*"),
 		match.RequestURI("/items?page=2&a=%2F"), match.ItemsMatch([]any{match.HasPrefix("a"), int64(2)}),
-		match.EqualBytes([]byte{0xff, 0xfe, 0x00}),
+		match.EqualBytes([]byte{0xff, 0xfe, 0x00}), match.JWT(match.Field("$.claims.sub", match.Equal("a"))),
+		match.SignedJWT(_publicJWKS, match.Anything()),
 	} {
 		desc, ok := vlatte.IsSelfDescriptive(m)
 		require.True(t, ok)
@@ -539,10 +583,10 @@ var _allowed = map[string][]int{
 	"before": {1, 2}, "after": {1, 2}, "eqdt": {1, 2}, "isin": {1}, "itemsmatch": {1}, "eqi": {1}, "glob": {1},
 	"hasprefix": {1}, "hassuffix": {1}, "regex": {1}, "haskey": {1}, "gt": {1}, "gte": {1}, "lt": {1}, "lte": {1},
 	"len": {1}, "each": {1}, "some": {1}, "not": {1}, "trim": {1}, "lowercase": {1}, "uppercase": {1}, "urlpath": {1},
-	"requesturi": {1}, "equalbytes": {1},
+	"requesturi": {1}, "equalbytes": {1}, "jwt": {1},
 	"hasexactly": {1, 2, 3},
 	"xpath":      {2, 3},
-	"item":       {2}, "jsonpath": {2}, "split": {2}, "both": {1, 2}, "either": {1, 2}, "xor": {1, 2}, "all": {1, 2, 3}, "any": {1, 2, 3},
+	"item":       {2}, "jsonpath": {2}, "split": {2}, "signedjwt": {2}, "both": {1, 2}, "either": {1, 2}, "xor": {1, 2}, "all": {1, 2, 3}, "any": {1, 2, 3},
 }
 
 func TestPropBuildMatcher_Arguments(t *testing.T) {
