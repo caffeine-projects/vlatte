@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/match"
 )
@@ -85,7 +84,7 @@ func TestRegistry_CustomMatcherLoadsBackFromItsDescription(t *testing.T) {
 	m, err := r.BuildMatcher([]any{"not", []any{"longer-than", int64(3)}})
 	require.NoError(t, err)
 
-	desc, ok := descriptor.IsSelfDescriptive(m)
+	desc, ok := vlatte.IsSelfDescriptive(m)
 	require.True(t, ok)
 
 	data, err := desc.MarshalJSON()

@@ -10,7 +10,6 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/fault"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/value"
@@ -43,7 +42,7 @@ func (s *timedSink) Close() error {
 func described(t *testing.T, step vlatte.Step) any {
 	t.Helper()
 
-	d, ok := descriptor.IsSelfDescriptive(step)
+	d, ok := vlatte.IsSelfDescriptive(step)
 	require.True(t, ok, "%T doesn't describe itself", step)
 
 	doc, err := value.ViaJSON(d)
@@ -428,7 +427,7 @@ func TestPropBuild_ADescriptionBuildsTheSameFault(t *testing.T) {
 		step, err := Build(genSpec().Draw(t, "spec"))
 		require.NoError(t, err)
 
-		first, err := value.ViaJSON(step.(descriptor.SelfDescriptive).Describe())
+		first, err := value.ViaJSON(step.(vlatte.SelfDescriptive).Describe())
 		require.NoError(t, err)
 
 		// The admin store writes YAML, the admin API JSON.
@@ -442,7 +441,7 @@ func TestPropBuild_ADescriptionBuildsTheSameFault(t *testing.T) {
 			again, err := Build(read)
 			require.NoError(t, err)
 
-			second, err := value.ViaJSON(again.(descriptor.SelfDescriptive).Describe())
+			second, err := value.ViaJSON(again.(vlatte.SelfDescriptive).Describe())
 			require.NoError(t, err)
 			require.Equal(t, first, second, format)
 		}

@@ -6,13 +6,12 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ vlatte.Step                = timeoutStep{}
-	_ descriptor.SelfDescriptive = timeoutStep{}
-	_ vlatte.Stage               = (*timeoutStage)(nil)
+	_ vlatte.Step            = timeoutStep{}
+	_ vlatte.SelfDescriptive = timeoutStep{}
+	_ vlatte.Stage           = (*timeoutStage)(nil)
 )
 
 // Timeout returns a step that sends nothing, then ends the answer after timeout, to test a client's read timeout
@@ -35,13 +34,13 @@ func Timeout(timeout time.Duration) vlatte.Step {
 
 type timeoutStep struct{ timeout time.Duration }
 
-// Describe implements [descriptor.SelfDescriptive], without a timeout of 0, which never ends the answer.
-func (t timeoutStep) Describe() descriptor.Descriptor {
+// Describe implements [vlatte.SelfDescriptive], without a timeout of 0, which never ends the answer.
+func (t timeoutStep) Describe() vlatte.Descriptor {
 	if t.timeout == 0 {
-		return descriptor.WithKeyValuePairs("timeout", "type", "timeout")
+		return vlatte.DescribeKeyValuePairs("timeout", "type", "timeout")
 	}
 
-	return descriptor.WithKeyValuePairs("timeout", "type", "timeout", "after", t.timeout.String())
+	return vlatte.DescribeKeyValuePairs("timeout", "type", "timeout", "after", t.timeout.String())
 }
 
 func (t timeoutStep) Open(flow *vlatte.Flow, _ vlatte.Stage) vlatte.Stage {

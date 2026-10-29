@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 const _todoList = `<todo-list owner="ann">
@@ -104,11 +103,11 @@ func TestXPath_PanicsOnWhatIsntAnExpression(t *testing.T) {
 }
 
 func TestXPath_Describes(t *testing.T) {
-	data, err := XPath("/a", Equal("1")).(descriptor.SelfDescriptive).Describe().MarshalJSON()
+	data, err := XPath("/a", Equal("1")).(vlatte.SelfDescriptive).Describe().MarshalJSON()
 	require.NoError(t, err)
 	require.JSONEq(t, `["xpath", "/a", ["eq", "1"]]`, string(data))
 
-	data, err = XPath("/p:a", Present(), XPathNamespace("p", "urn:p")).(descriptor.SelfDescriptive).Describe().MarshalJSON()
+	data, err = XPath("/p:a", Present(), XPathNamespace("p", "urn:p")).(vlatte.SelfDescriptive).Describe().MarshalJSON()
 	require.NoError(t, err)
 	require.JSONEq(t, `["xpath", "/p:a", ["present"], {"namespaces": {"p": "urn:p"}}]`, string(data))
 }

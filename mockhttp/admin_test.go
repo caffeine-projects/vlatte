@@ -19,7 +19,6 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/admin"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 )
@@ -599,8 +598,8 @@ func (unregisteredMatcher) Name() string { return "unregistered" }
 
 func (unregisteredMatcher) Match(vlatte.MatcherArg) (bool, error) { return true, nil }
 
-func (unregisteredMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("unregistered", 1)
+func (unregisteredMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("unregistered", 1)
 }
 
 func TestAdmin_SaveThatFailsToLoadPutsTheFilesBack(t *testing.T) {

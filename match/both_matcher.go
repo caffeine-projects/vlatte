@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 // bothMatcher passes when both inner matchers pass.
@@ -35,7 +34,7 @@ func (m *bothMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch("Both() one or both did not match")
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *bothMatcher) Describe() descriptor.Descriptor {
-	return descriptor.MultiArgs("both", describe(m.First), describe(m.Second))
+// Describe implements vlatte.SelfDescriptive.
+func (m *bothMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeMultiArgs("both", describe(m.First), describe(m.Second))
 }

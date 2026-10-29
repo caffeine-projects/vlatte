@@ -5,14 +5,13 @@ import (
 	"fmt"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ vlatte.Matcher             = (*Matcher)(nil)
-	_ vlatte.Claimer             = (*Matcher)(nil)
-	_ fmt.Stringer               = (*Matcher)(nil)
-	_ descriptor.SelfDescriptive = (*Matcher)(nil)
+	_ vlatte.Matcher         = (*Matcher)(nil)
+	_ vlatte.Claimer         = (*Matcher)(nil)
+	_ fmt.Stringer           = (*Matcher)(nil)
+	_ vlatte.SelfDescriptive = (*Matcher)(nil)
 )
 
 // errKeyType is the error of a [Matcher] whose argument is no key.
@@ -82,8 +81,8 @@ func (m *Matcher) String() string {
 	return "scenario " + m.name + " needs " + m.required + ", is " + m.store.State(m.name)
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *Matcher) Describe() descriptor.Descriptor {
+// Describe implements vlatte.SelfDescriptive.
+func (m *Matcher) Describe() vlatte.Descriptor {
 	props := map[string]any{
 		"name":           m.name,
 		"required_state": m.required,
@@ -93,7 +92,7 @@ func (m *Matcher) Describe() descriptor.Descriptor {
 		props["key"] = m.key
 	}
 
-	return descriptor.SingleArg("scenario", props)
+	return vlatte.DescribeSingleArg("scenario", props)
 }
 
 // Move is a move of a scenario a mock makes when it is picked: of the instance of Key, the shared one when it is

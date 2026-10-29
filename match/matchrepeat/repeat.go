@@ -4,7 +4,6 @@ import (
 	"sync/atomic"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 // Repeat returns a matcher that passes until the max number of matches is reached.
@@ -32,7 +31,7 @@ func (m *repeatMatcher) SetState() error {
 	return nil
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *repeatMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("repeat", m.Max)
+// Describe implements vlatte.SelfDescriptive.
+func (m *repeatMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("repeat", m.Max)
 }

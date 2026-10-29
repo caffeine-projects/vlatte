@@ -21,7 +21,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
@@ -32,8 +31,8 @@ import (
 var (
 	_ vlatte.EventListener[vlatte.OnComplete] = (*WebHook)(nil)
 	_ vlatte.EventPreparer                    = (*WebHook)(nil)
-	_ descriptor.SelfDescriptive              = (*Args)(nil)
-	_ descriptor.SelfDescriptive              = (*multipartParams)(nil)
+	_ vlatte.SelfDescriptive                  = (*Args)(nil)
+	_ vlatte.SelfDescriptive                  = (*multipartParams)(nil)
 	_ vlatte.Kit                              = noKit{}
 )
 
@@ -334,11 +333,11 @@ type Args struct {
 	dir string // where relative files open from: the mock file's directory; "" is the working directory
 }
 
-// Describe implements descriptor.SelfDescriptive: the parameters as a mock file writes them, the ones set only, so the
+// Describe implements vlatte.SelfDescriptive: the parameters as a mock file writes them, the ones set only, so the
 // description of a mock, such as the admin API gives, loads back with the same webhook. A relative body file is joined
 // to the mock file's directory, which a description loaded back doesn't have. A body that isn't UTF-8 is described in
 // body_base64. A multipart body is described when it describes itself, as mockhttp's do.
-func (a *Args) Describe() descriptor.Descriptor {
+func (a *Args) Describe() vlatte.Descriptor {
 	params := make(map[string]any)
 
 	for key, value := range map[string]string{
@@ -364,7 +363,7 @@ func (a *Args) Describe() descriptor.Descriptor {
 		params["header_template"] = describeHeader(a.HeaderTemplate)
 	}
 
-	if body, ok := a.Multipart.(descriptor.SelfDescriptive); ok {
+	if body, ok := a.Multipart.(vlatte.SelfDescriptive); ok {
 		d := body.Describe()
 		params[d.Key] = d.Props
 	}
@@ -377,7 +376,7 @@ func (a *Args) Describe() descriptor.Descriptor {
 		params["timeout"] = a.Timeout.String()
 	}
 
-	return descriptor.New("parameters", params)
+	return vlatte.NewDescriptor("parameters", params)
 }
 
 // clone returns a copy of a, with copies of its headers and their values. Multipart is shared: writing a body doesn't
@@ -751,8 +750,8 @@ func (m *multipartParams) Check(engine vlatte.TemplateEngine) error {
 	return err
 }
 
-// Describe implements descriptor.SelfDescriptive: the body as the parameters of a mock file write it.
-func (m *multipartParams) Describe() descriptor.Descriptor {
+// Describe implements vlatte.SelfDescriptive: the body as the parameters of a mock file write it.
+func (m *multipartParams) Describe() vlatte.Descriptor {
 	return describeMultipart(m.spec)
 }
 
@@ -770,12 +769,12 @@ func (m *multipartParams) Encode(engine vlatte.TemplateEngine, data any) (string
 
 // describeMultipart describes a multipart body as the parameters of a mock file write it: under multipart_template
 // when its text is templates, else under multipart.
-func describeMultipart(spec *mpart.Spec) descriptor.Descriptor {
+func describeMultipart(spec *mpart.Spec) vlatte.Descriptor {
 	if spec.Templated {
-		return descriptor.New("multipart_template", spec.Doc())
+		return vlatte.NewDescriptor("multipart_template", spec.Doc())
 	}
 
-	return descriptor.New("multipart", spec.Doc())
+	return vlatte.NewDescriptor("multipart", spec.Doc())
 }
 
 // countSet counts the values that are set: non-empty strings and true bools.

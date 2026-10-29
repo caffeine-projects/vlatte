@@ -5,7 +5,6 @@ import (
 	"slices"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -28,7 +27,7 @@ func (m *isInMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(fmt.Sprintf("IsIn() Value %v is not contained in %v", v, m.Items))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *isInMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("isIn", m.Items)
+// Describe implements vlatte.SelfDescriptive.
+func (m *isInMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("isIn", m.Items)
 }

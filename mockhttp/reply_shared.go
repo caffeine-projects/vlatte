@@ -1,10 +1,10 @@
 package mockhttp
 
-import "github.com/caffeine-projects/vlatte/descriptor"
+import "github.com/caffeine-projects/vlatte"
 
 var (
-	_ ReplierFactory             = sharedFactory{}
-	_ descriptor.SelfDescriptive = sharedFactory{}
+	_ ReplierFactory         = sharedFactory{}
+	_ vlatte.SelfDescriptive = sharedFactory{}
 )
 
 // Shared returns a ReplierFactory that gives r to every mock built with it: those mocks share r, and whatever it keeps.
@@ -26,7 +26,7 @@ func (f sharedFactory) NewReplier(*Server) (Replier, error) {
 }
 
 // Describe describes r, when r describes itself.
-func (f sharedFactory) Describe() descriptor.Descriptor {
-	d, _ := descriptor.IsSelfDescriptive(f.r)
+func (f sharedFactory) Describe() vlatte.Descriptor {
+	d, _ := vlatte.IsSelfDescriptive(f.r)
 	return d
 }

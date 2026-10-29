@@ -16,7 +16,6 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -359,8 +358,8 @@ func (failingDescription) Name() string { return "failing" }
 
 func (failingDescription) Match(vlatte.MatcherArg) (bool, error) { return true, nil }
 
-func (failingDescription) Describe() descriptor.Descriptor {
-	return descriptor.Fail("failing", errors.New("test: no description"))
+func (failingDescription) Describe() vlatte.Descriptor {
+	return vlatte.DescribeFail("failing", errors.New("test: no description"))
 }
 
 func TestDescribe_AMessageAMockFileCannotHoldFailsNamingIt(t *testing.T) {

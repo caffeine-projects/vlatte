@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 func TestEqualElementsMatcher(t *testing.T) {
@@ -100,11 +99,11 @@ func TestItemsMatch_ReturnsTheErrorOfAMatcher(t *testing.T) {
 func TestItemsMatch_DescribesMatcherItemsAsHasExactly(t *testing.T) {
 	// A mock file can't tell a list item that is a value from one that is a matcher spec, so items that are matchers
 	// describe as hasExactly, every item a spec.
-	data, err := ItemsMatch([]any{HasPrefix("a"), 2}).(descriptor.SelfDescriptive).Describe().MarshalJSON()
+	data, err := ItemsMatch([]any{HasPrefix("a"), 2}).(vlatte.SelfDescriptive).Describe().MarshalJSON()
 	require.NoError(t, err)
 	require.JSONEq(t, `["hasExactly", [["hasPrefix", "a"], ["eq", 2]]]`, string(data))
 
-	data, err = ItemsMatch([]any{"a", 2}).(descriptor.SelfDescriptive).Describe().MarshalJSON()
+	data, err = ItemsMatch([]any{"a", 2}).(vlatte.SelfDescriptive).Describe().MarshalJSON()
 	require.NoError(t, err)
 	require.JSONEq(t, `["itemsMatch", ["a", 2]]`, string(data))
 }

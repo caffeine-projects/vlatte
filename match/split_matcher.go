@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -38,7 +37,7 @@ func (m *splitMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"Split(", m.Separator, ")"}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *splitMatcher) Describe() descriptor.Descriptor {
-	return descriptor.MultiArgs("split", m.Separator, describe(m.Matcher))
+// Describe implements vlatte.SelfDescriptive.
+func (m *splitMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeMultiArgs("split", m.Separator, describe(m.Matcher))
 }

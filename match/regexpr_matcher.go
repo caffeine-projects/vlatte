@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -32,7 +31,7 @@ func (m *regExpMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"Match(", m.Expression, ") Expression did not match. Got: ", txt}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *regExpMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("regexp", m.Expression)
+// Describe implements vlatte.SelfDescriptive.
+func (m *regExpMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("regexp", m.Expression)
 }

@@ -8,13 +8,12 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ vlatte.Step                = bandwidth{}
-	_ descriptor.SelfDescriptive = bandwidth{}
-	_ vlatte.Stage               = (*bandwidthStage)(nil)
+	_ vlatte.Step            = bandwidth{}
+	_ vlatte.SelfDescriptive = bandwidth{}
+	_ vlatte.Stage           = (*bandwidthStage)(nil)
 )
 
 // _kbps is a kilobit per second, in bytes per second.
@@ -57,9 +56,9 @@ func Bandwidth(bytesPerSecond int) vlatte.Step {
 
 type bandwidth struct{ rate int }
 
-// Describe implements [descriptor.SelfDescriptive], with the rate in bytes per second.
-func (b bandwidth) Describe() descriptor.Descriptor {
-	return descriptor.WithKeyValuePairs("bandwidth", "type", "bandwidth", "rate", b.rate)
+// Describe implements [vlatte.SelfDescriptive], with the rate in bytes per second.
+func (b bandwidth) Describe() vlatte.Descriptor {
+	return vlatte.DescribeKeyValuePairs("bandwidth", "type", "bandwidth", "rate", b.rate)
 }
 
 func (b bandwidth) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
