@@ -29,8 +29,12 @@ func UniformDistribution(minMillis, maxMillis int64) Delay {
 
 // Jitter returns a [Delay] picked at random around avg, spread over deviation percent of avg: with an avg of 100ms and
 // a deviation of 20, it picks from 90ms to just under 110ms. A deviation that leaves no spread, such as 0, gives avg
-// every time.
+// every time. It panics when deviation is greater than 200: the spread would then reach below zero.
 func Jitter(avg time.Duration, deviation float64) Delay {
+	if deviation > 200 {
+		panic(fmt.Sprintf("delay: jitter deviation (%v) must not be greater than 200", deviation))
+	}
+
 	maxDeviation := time.Duration(float64(avg) * (deviation / 100.0))
 	if maxDeviation <= 0 {
 		return Latency(avg)

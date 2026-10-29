@@ -10,13 +10,13 @@ These features work the same on HTTP and gRPC mocks, in Go and in mock files.
 | `Enabled(false)` | `enabled: false` | Starts the mock disabled. |
 | `Times(n)`, `Once()` | `repeat: n` | Serves `n` requests, then stops matching. |
 | `Delay(d)` | `delay` | Waits `d` before replying. |
-| `DelayFunc(fn)` | | Picks the delay of each reply, such as `vlatte.Jitter(avg, deviation)`, `vlatte.Latency(d)` or `vlatte.UniformDistribution(min, max)`. |
+| `DelayFunc(fn)` | | Picks the delay of each reply, such as `vlatte.Jitter(avg, deviation)`, where deviation is a percent of avg from 0 to 200, `vlatte.Latency(d)` or `vlatte.UniformDistribution(min, max)`. |
 
 ```go
 m.MustMock(mockhttp.Getf("/users").
 	ID("users-list").Name("list users").
 	Priority(1).Times(3).
-	DelayFunc(vlatte.Jitter(200*time.Millisecond, 0.2)).
+	DelayFunc(vlatte.Jitter(200*time.Millisecond, 20)).
 	Reply(mockhttp.OK().JSON([]any{})))
 ```
 
