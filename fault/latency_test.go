@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/fault"
 )
 
@@ -97,13 +96,13 @@ func TestLatency_JitterKeepsTheOrder(t *testing.T) {
 func TestLatency_IsDescribedByItsDurations(t *testing.T) {
 	// A latency describes itself as the spec that builds it again, from Go code as from a mock file.
 	// A jitter of 0, the default, is left out.
-	got, ok := descriptor.IsSelfDescriptive(fault.Latency(1500*time.Millisecond, 0))
+	got, ok := vlatte.IsSelfDescriptive(fault.Latency(1500*time.Millisecond, 0))
 	require.True(t, ok)
 	b, err := got.MarshalJSON()
 	require.NoError(t, err)
 	require.JSONEq(t, `{"type": "latency", "latency": "1.5s"}`, string(b))
 
-	got, ok = descriptor.IsSelfDescriptive(fault.Latency(time.Second, 200*time.Millisecond))
+	got, ok = vlatte.IsSelfDescriptive(fault.Latency(time.Second, 200*time.Millisecond))
 	require.True(t, ok)
 	b, err = got.MarshalJSON()
 	require.NoError(t, err)

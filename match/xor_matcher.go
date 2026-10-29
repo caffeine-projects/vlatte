@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 // xorMatcher is an exclusive OR matcher.
@@ -35,7 +34,7 @@ func (m *xorMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch("XOR() both matched or both failed")
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *xorMatcher) Describe() descriptor.Descriptor {
-	return descriptor.MultiArgs("xor", describe(m.First), describe(m.Second))
+// Describe implements vlatte.SelfDescriptive.
+func (m *xorMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeMultiArgs("xor", describe(m.First), describe(m.Second))
 }

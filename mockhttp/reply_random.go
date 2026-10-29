@@ -8,7 +8,7 @@ import (
 	"math/rand/v2"
 	"sync"
 
-	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte"
 )
 
 var (
@@ -57,12 +57,12 @@ func (rep *RandomReply) Add(reply ...ReplierFactory) *RandomReply {
 	return rep
 }
 
-// Describe implements [descriptor.SelfDescriptive]: the reply in the mock file format. It leaves out the replies that
-// don't implement [descriptor.SelfDescriptive], and the generator of [RandWith].
-func (rep *RandomReply) Describe() descriptor.Descriptor {
+// Describe implements [vlatte.SelfDescriptive]: the reply in the mock file format. It leaves out the replies that
+// don't implement [vlatte.SelfDescriptive], and the generator of [RandWith].
+func (rep *RandomReply) Describe() vlatte.Descriptor {
 	replies := make([]any, 0, len(rep.replies))
 	for _, v := range rep.replies {
-		if sd, ok := v.(descriptor.SelfDescriptive); ok {
+		if sd, ok := v.(vlatte.SelfDescriptive); ok {
 			replies = append(replies, sd.Describe())
 		}
 	}
@@ -72,7 +72,7 @@ func (rep *RandomReply) Describe() descriptor.Descriptor {
 		desc["seed"] = rep.seed
 	}
 
-	return descriptor.New("response_random", desc)
+	return vlatte.NewDescriptor("response_random", desc)
 }
 
 // NewReplier implements ReplierFactory. It makes the Replier of each reply, so each mock picks from replies of its own.

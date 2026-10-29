@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 // urlPathMatcher applies the inner matcher to the URL path of the value.
@@ -45,7 +44,7 @@ func urlPath(v any) (string, bool) {
 	return u.Path, true
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *urlPathMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("urlPath", describe(m.Matcher))
+// Describe implements vlatte.SelfDescriptive.
+func (m *urlPathMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("urlPath", describe(m.Matcher))
 }

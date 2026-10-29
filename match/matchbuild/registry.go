@@ -6,12 +6,11 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ vlatte.Matcher             = (*customMatcher)(nil)
-	_ descriptor.SelfDescriptive = (*customMatcher)(nil)
+	_ vlatte.Matcher         = (*customMatcher)(nil)
+	_ vlatte.SelfDescriptive = (*customMatcher)(nil)
 )
 
 var (
@@ -126,17 +125,17 @@ func (s spec) custom(b namedBuild) (vlatte.Matcher, error) {
 		return nil, fmt.Errorf("%s built no matcher", s.name)
 	}
 
-	if _, ok := m.(descriptor.SelfDescriptive); ok {
+	if _, ok := m.(vlatte.SelfDescriptive); ok {
 		return m, nil
 	}
 
-	return &customMatcher{matcher: m, desc: descriptor.MultiArgs(b.name, s.args...)}, nil
+	return &customMatcher{matcher: m, desc: vlatte.DescribeMultiArgs(b.name, s.args...)}, nil
 }
 
 // customMatcher is a custom matcher that describes itself as the spec it was built from.
 type customMatcher struct {
 	matcher vlatte.Matcher
-	desc    descriptor.Descriptor
+	desc    vlatte.Descriptor
 }
 
 // Name implements vlatte.Matcher.
@@ -145,5 +144,5 @@ func (m *customMatcher) Name() string { return m.matcher.Name() }
 // Match implements vlatte.Matcher.
 func (m *customMatcher) Match(arg vlatte.MatcherArg) (bool, error) { return m.matcher.Match(arg) }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *customMatcher) Describe() descriptor.Descriptor { return m.desc }
+// Describe implements vlatte.SelfDescriptive.
+func (m *customMatcher) Describe() vlatte.Descriptor { return m.desc }

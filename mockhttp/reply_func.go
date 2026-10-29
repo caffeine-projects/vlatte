@@ -5,13 +5,13 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte"
 )
 
 var (
-	_ ReplierFactory             = (*FuncReply)(nil)
-	_ descriptor.SelfDescriptive = (*FuncReply)(nil)
-	_ Replier                    = funcReplier(nil)
+	_ ReplierFactory         = (*FuncReply)(nil)
+	_ vlatte.SelfDescriptive = (*FuncReply)(nil)
+	_ Replier                = funcReplier(nil)
 )
 
 // errFuncNotDescribed is why a mock with a Func or Handler reply can't be described: a mock file can't hold a function.
@@ -44,9 +44,9 @@ func (r *FuncReply) NewReplier(*Server) (Replier, error) {
 	return funcReplier(r.fn), nil
 }
 
-// Describe implements descriptor.SelfDescriptive. A mock file can't hold a function: encoding the description fails.
-func (r *FuncReply) Describe() descriptor.Descriptor {
-	return descriptor.Fail("func", errFuncNotDescribed)
+// Describe implements vlatte.SelfDescriptive. A mock file can't hold a function: encoding the description fails.
+func (r *FuncReply) Describe() vlatte.Descriptor {
+	return vlatte.DescribeFail("func", errFuncNotDescribed)
 }
 
 // funcReplier builds the responses of one mock with a function.

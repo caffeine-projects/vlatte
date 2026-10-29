@@ -8,14 +8,13 @@ import (
 	"github.com/antchfx/xpath"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/internal/xmldoc"
 )
 
 var (
-	_ vlatte.Matcher             = (*xpathMatcher)(nil)
-	_ descriptor.SelfDescriptive = (*xpathMatcher)(nil)
+	_ vlatte.Matcher         = (*xpathMatcher)(nil)
+	_ vlatte.SelfDescriptive = (*xpathMatcher)(nil)
 )
 
 // xpathMatcher applies the inner matcher to what the expression selects in the XML document of the value.
@@ -66,10 +65,10 @@ func nodeValue(n xpath.NodeNavigator) any {
 	return n.Value()
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *xpathMatcher) Describe() descriptor.Descriptor {
+// Describe implements vlatte.SelfDescriptive.
+func (m *xpathMatcher) Describe() vlatte.Descriptor {
 	if len(m.namespaces) == 0 {
-		return descriptor.MultiArgs("xpath", m.Expr, describe(m.Matcher))
+		return vlatte.DescribeMultiArgs("xpath", m.Expr, describe(m.Matcher))
 	}
 
 	namespaces := make(map[string]any, len(m.namespaces))
@@ -77,7 +76,7 @@ func (m *xpathMatcher) Describe() descriptor.Descriptor {
 		namespaces[prefix] = uri
 	}
 
-	return descriptor.MultiArgs("xpath", m.Expr, describe(m.Matcher), map[string]any{"namespaces": namespaces})
+	return vlatte.DescribeMultiArgs("xpath", m.Expr, describe(m.Matcher), map[string]any{"namespaces": namespaces})
 }
 
 // evaluate returns what the expression selects in a document: nil for no node, the node for one, and a list for more,

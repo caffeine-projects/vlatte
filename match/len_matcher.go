@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -27,7 +26,7 @@ func (m *lenMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"Len(", strconv.Itoa(m.Length), ") Got: ", strconv.Itoa(n)}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *lenMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("len", m.Length)
+// Describe implements vlatte.SelfDescriptive.
+func (m *lenMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("len", m.Length)
 }

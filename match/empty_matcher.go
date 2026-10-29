@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/match/internal/anyconv"
 )
@@ -29,7 +28,7 @@ func (m *emptyMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"Empty(", anyconv.Stringify(v), ")"}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *emptyMatcher) Describe() descriptor.Descriptor {
-	return descriptor.KeyOnly("empty")
+// Describe implements vlatte.SelfDescriptive.
+func (m *emptyMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeKeyOnly("empty")
 }

@@ -4,7 +4,6 @@ import (
 	"reflect"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match/internal/anyconv"
 )
 
@@ -41,7 +40,7 @@ func (m *presentMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return success()
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *presentMatcher) Describe() descriptor.Descriptor {
-	return descriptor.KeyOnly("present")
+// Describe implements vlatte.SelfDescriptive.
+func (m *presentMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeKeyOnly("present")
 }

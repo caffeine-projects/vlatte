@@ -2,7 +2,6 @@ package match
 
 import (
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 // isNilMatcher passes when the value is nil.
@@ -20,7 +19,7 @@ func (m *isNilMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch("Nil() Value is not nil")
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *isNilMatcher) Describe() descriptor.Descriptor {
-	return descriptor.KeyOnly("nil")
+// Describe implements vlatte.SelfDescriptive.
+func (m *isNilMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeKeyOnly("nil")
 }

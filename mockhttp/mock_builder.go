@@ -11,7 +11,6 @@ import (
 	"uuid"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/match/matchrepeat"
@@ -793,7 +792,7 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		return nil, err
 	}
 
-	desc, _ := descriptor.IsSelfDescriptive(b.reply)
+	desc, _ := vlatte.IsSelfDescriptive(b.reply)
 
 	return &Mock{spec: spec, reply: reply, replyDesc: desc, closer: owned(b.reply, reply), enabled: b.enabled}, nil
 }

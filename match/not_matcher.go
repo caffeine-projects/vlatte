@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 // notMatcher negates the provided matcher.
@@ -29,7 +28,7 @@ func (m *notMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch("Not() inner matcher matched")
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *notMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("not", describe(m.Matcher))
+// Describe implements vlatte.SelfDescriptive.
+func (m *notMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("not", describe(m.Matcher))
 }

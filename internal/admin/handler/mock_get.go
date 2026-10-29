@@ -7,24 +7,23 @@ import (
 	"net/http"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 // GetMock returns the mock of id as a mock file describes it, so it can be sent back. A mock server whose mocks can't
 // describe themselves returns a not_supported problem.
-func (o *Operations) GetMock(ctx context.Context, id string) (descriptor.Descriptor, error) {
+func (o *Operations) GetMock(ctx context.Context, id string) (vlatte.Descriptor, error) {
 	return o.mocks.get(ctx, id)
 }
 
-func (m *storeMocks) get(ctx context.Context, id string) (descriptor.Descriptor, error) {
+func (m *storeMocks) get(ctx context.Context, id string) (vlatte.Descriptor, error) {
 	mock, err := m.pick(ctx, id)
 	if err != nil {
-		return descriptor.Descriptor{}, err
+		return vlatte.Descriptor{}, err
 	}
 
-	self, ok := any(mock).(descriptor.SelfDescriptive)
+	self, ok := any(mock).(vlatte.SelfDescriptive)
 	if !ok {
-		return descriptor.Descriptor{}, notSupported("describe its mocks")
+		return vlatte.Descriptor{}, notSupported("describe its mocks")
 	}
 
 	return self.Describe(), nil

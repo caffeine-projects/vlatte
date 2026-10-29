@@ -2,7 +2,6 @@ package match
 
 import (
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -21,7 +20,7 @@ func (m *falsyMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch("Falsy() Expected false but it is actually true")
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *falsyMatcher) Describe() descriptor.Descriptor {
-	return descriptor.KeyOnly("falsy")
+// Describe implements vlatte.SelfDescriptive.
+func (m *falsyMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeKeyOnly("falsy")
 }

@@ -7,7 +7,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte"
 )
 
 var (
@@ -40,12 +40,12 @@ func (r *SequentialReply) Add(reply ...ReplierFactory) *SequentialReply {
 	return r
 }
 
-// Describe implements [descriptor.SelfDescriptive]: the reply in the mock file format. It leaves out the replies that
-// don't implement [descriptor.SelfDescriptive].
-func (r *SequentialReply) Describe() descriptor.Descriptor {
+// Describe implements [vlatte.SelfDescriptive]: the reply in the mock file format. It leaves out the replies that
+// don't implement [vlatte.SelfDescriptive].
+func (r *SequentialReply) Describe() vlatte.Descriptor {
 	replies := make([]any, 0, len(r.replies))
 	for _, v := range r.replies {
-		if sd, ok := v.(descriptor.SelfDescriptive); ok {
+		if sd, ok := v.(vlatte.SelfDescriptive); ok {
 			replies = append(replies, sd.Describe())
 		}
 	}
@@ -53,12 +53,12 @@ func (r *SequentialReply) Describe() descriptor.Descriptor {
 	desc := map[string]any{"responses": replies}
 
 	if r.replyAfterSequenceEnded != nil {
-		if sd, ok := r.replyAfterSequenceEnded.(descriptor.SelfDescriptive); ok {
+		if sd, ok := r.replyAfterSequenceEnded.(vlatte.SelfDescriptive); ok {
 			desc["after_ended"] = sd.Describe()
 		}
 	}
 
-	return descriptor.New("response_sequence", desc)
+	return vlatte.NewDescriptor("response_sequence", desc)
 }
 
 // NewReplier implements ReplierFactory. It makes the Replier of each reply of the sequence, so each mock has replies

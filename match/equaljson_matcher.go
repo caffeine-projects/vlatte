@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/match/internal/anyconv"
 )
@@ -89,9 +88,9 @@ func (o jsonOptions) same(want, got any) bool {
 	}
 }
 
-// Describe implements descriptor.SelfDescriptive. Options are described as an object after the expected JSON, with
+// Describe implements vlatte.SelfDescriptive. Options are described as an object after the expected JSON, with
 // the keys of mock files.
-func (m *equalJSONMatcher) Describe() descriptor.Descriptor {
+func (m *equalJSONMatcher) Describe() vlatte.Descriptor {
 	opts := make(map[string]any, 2)
 	if m.opts.ignoreArrayOrder {
 		opts["ignore_array_order"] = true
@@ -102,8 +101,8 @@ func (m *equalJSONMatcher) Describe() descriptor.Descriptor {
 	}
 
 	if len(opts) == 0 {
-		return descriptor.MultiArgs("eqj", m.Expected)
+		return vlatte.DescribeMultiArgs("eqj", m.Expected)
 	}
 
-	return descriptor.MultiArgs("eqj", m.Expected, opts)
+	return vlatte.DescribeMultiArgs("eqj", m.Expected, opts)
 }

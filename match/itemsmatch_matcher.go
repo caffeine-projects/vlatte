@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -51,11 +50,11 @@ func (m *itemsMatchMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return success()
 }
 
-// Describe implements descriptor.SelfDescriptive. Items that are matchers describe as hasExactly, whose items are
+// Describe implements vlatte.SelfDescriptive. Items that are matchers describe as hasExactly, whose items are
 // matcher specs: an item that is a value is written as the Equal matcher that compares it.
-func (m *itemsMatchMatcher) Describe() descriptor.Descriptor {
+func (m *itemsMatchMatcher) Describe() vlatte.Descriptor {
 	if !slices.ContainsFunc(m.Expected, isMatcher) {
-		return descriptor.SingleArg("itemsMatch", m.Expected)
+		return vlatte.DescribeSingleArg("itemsMatch", m.Expected)
 	}
 
 	specs := make([]any, len(m.Expected))
@@ -68,7 +67,7 @@ func (m *itemsMatchMatcher) Describe() descriptor.Descriptor {
 		specs[i] = describe(inner)
 	}
 
-	return descriptor.SingleArg("hasExactly", specs)
+	return vlatte.DescribeSingleArg("hasExactly", specs)
 }
 
 func isMatcher(v any) bool {

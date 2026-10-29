@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 func match(t *testing.T, m *Matcher) bool {
@@ -165,7 +164,7 @@ func TestMatcher_DescribesAsTheScenarioOfAMockFile(t *testing.T) {
 	m := New().Matcher("checkout", StateStarted, "paid")
 
 	require.Equal(t, "Scenario", m.Name())
-	require.Equal(t, descriptor.SingleArg("scenario", map[string]any{
+	require.Equal(t, vlatte.DescribeSingleArg("scenario", map[string]any{
 		"name":           "checkout",
 		"required_state": StateStarted,
 		"new_state":      "paid",
@@ -240,7 +239,7 @@ func TestMatcher_AKeyedMockDescribesItsKey(t *testing.T) {
 	// The admin API's store loads a mock back from its description: a keyed mock stays keyed.
 	m := New().Matcher("checkout", StateStarted, "paid").KeyedBy(`{{ .Request.Header.Get "X-Test" }}`)
 
-	require.Equal(t, descriptor.SingleArg("scenario", map[string]any{
+	require.Equal(t, vlatte.DescribeSingleArg("scenario", map[string]any{
 		"name":           "checkout",
 		"required_state": StateStarted,
 		"new_state":      "paid",

@@ -13,10 +13,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
-var _ descriptor.SelfDescriptive = (*Mock)(nil)
+var _ vlatte.SelfDescriptive = (*Mock)(nil)
 
 var (
 	errCallMatchesNotDescribed = errors.New("mock: a CallMatches matcher can't be described as a mock file")
@@ -57,14 +56,14 @@ type mockDescription struct {
 	scenario  [4]string // name, required state, new state, key
 }
 
-// Describe implements descriptor.SelfDescriptive: the mock as a mock file writes it, which the admin API returns and
+// Describe implements vlatte.SelfDescriptive: the mock as a mock file writes it, which the admin API returns and
 // saves. A mock read from a document is described by it, with its ID. A mock built in Go is described whole, or not
 // at all: a part no mock file can hold, such as a Func, Echo or Shared reply, a CallMatches matcher, a matcher that
 // doesn't describe itself, a callback or a DelayFunc delay, fails encoding the description, with an error that names
 // it, so the admin API never shows a mock that loads back matching more calls, answering differently or without its
 // callbacks. RandWith's generator is the exception: a mock file loads it back as a Rand, which picks from the same
 // replies.
-func (m *Mock) Describe() descriptor.Descriptor {
+func (m *Mock) Describe() vlatte.Descriptor {
 	if m.doc != nil {
 		doc := maps.Clone(m.doc)
 		doc["id"] = m.id
@@ -76,7 +75,7 @@ func (m *Mock) Describe() descriptor.Descriptor {
 			doc["enabled"] = false
 		}
 
-		return descriptor.Root(doc)
+		return vlatte.DescribeRoot(doc)
 	}
 
 	doc := map[string]any{"id": m.id}
@@ -95,8 +94,8 @@ func (m *Mock) Describe() descriptor.Descriptor {
 	}
 
 	if d.delayFunc {
-		doc["delay"] = descriptor.Fail("delay", errDelayFuncNotDescribed)
-		return descriptor.Root(doc)
+		doc["delay"] = vlatte.DescribeFail("delay", errDelayFuncNotDescribed)
+		return vlatte.DescribeRoot(doc)
 	}
 
 	if d.delay > 0 {
@@ -126,8 +125,8 @@ func (m *Mock) Describe() descriptor.Descriptor {
 
 	events, err := describeEvents(m.events)
 	if err != nil {
-		doc["on_complete"] = descriptor.Fail("on_complete", err)
-		return descriptor.Root(doc)
+		doc["on_complete"] = vlatte.DescribeFail("on_complete", err)
+		return vlatte.DescribeRoot(doc)
 	}
 
 	if len(events) > 0 {
@@ -136,21 +135,21 @@ func (m *Mock) Describe() descriptor.Descriptor {
 
 	req, err := d.describeRequest(m.method)
 	if err != nil {
-		doc["request"] = descriptor.Fail("request", err)
-		return descriptor.Root(doc)
+		doc["request"] = vlatte.DescribeFail("request", err)
+		return vlatte.DescribeRoot(doc)
 	}
 
 	doc["request"] = req
 
 	key, res, err := describeReply(m.reply)
 	if err != nil {
-		doc[key] = descriptor.Fail(key, err)
-		return descriptor.Root(doc)
+		doc[key] = vlatte.DescribeFail(key, err)
+		return vlatte.DescribeRoot(doc)
 	}
 
 	doc[key] = res
 
-	return descriptor.Root(doc)
+	return vlatte.DescribeRoot(doc)
 }
 
 // describeReply describes reply under the key of a mock file that holds it, or returns why none can.
@@ -287,7 +286,7 @@ func describeMatchers(key string, matchers []namedMatcher) (map[string]any, erro
 
 // describeMatcher returns the matcher list of m, as matchbuild reads it, or why a mock file can't hold m.
 func describeMatcher(m vlatte.Matcher) (any, error) {
-	d, ok := descriptor.IsSelfDescriptive(m)
+	d, ok := vlatte.IsSelfDescriptive(m)
 	if !ok {
 		return nil, errMatcherNotDescribed
 	}

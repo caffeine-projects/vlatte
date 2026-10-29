@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -31,7 +30,7 @@ func (m *hasSuffixMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"HasSuffix(", m.Suffix, ") Suffix is not present. Got: ", txt}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *hasSuffixMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("hasSuffix", m.Suffix)
+// Describe implements vlatte.SelfDescriptive.
+func (m *hasSuffixMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("hasSuffix", m.Suffix)
 }

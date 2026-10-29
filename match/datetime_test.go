@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 func dateMatches(t *testing.T, m vlatte.Matcher, v any) bool {
@@ -207,7 +206,7 @@ func TestDateTime_Describes(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		data, err := tc.m.(descriptor.SelfDescriptive).Describe().MarshalJSON()
+		data, err := tc.m.(vlatte.SelfDescriptive).Describe().MarshalJSON()
 		require.NoError(t, err)
 		require.JSONEq(t, tc.want, string(data))
 	}
