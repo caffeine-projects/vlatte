@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"iter"
+	"strings"
 	"testing"
 	"time"
 
@@ -225,6 +226,98 @@ func TestDebugHeader_AClientThatLeavesDuringTheDelayIsNotCounted(t *testing.T) {
 
 	m.Close()
 	require.Zero(t, scope.Hits())
+}
+
+// cancelableKV is a key-value store that fails once its context is done, as a remote store does.
+type cancelableKV struct {
+	vlatte.KV
+}
+
+func (kv cancelableKV) Get(ctx context.Context, k string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	return kv.KV.Get(ctx, k)
+}
+
+func TestEvents_OutliveTheClient(t *testing.T) {
+	// A client that leaves, as one that times out does, ends the context of its call, not the events of the call:
+	// they run with a context of their own, and their templates read the key-value store with it, through a store
+	// that fails once its context is done.
+	kv := cancelableKV{vlatte.NewMemoryKV()}
+	require.NoError(t, kv.Set(t.Context(), "target", []byte("api")))
+
+	calls := make(chan context.Context, 1)
+	started := make(chan struct{})
+	rendered := make(chan string, 1)
+
+	m := MustNew(Setup().Silent().KV(kv).Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}).
+		ServerOptions(grpc.ChainUnaryInterceptor(
+			func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+				calls <- ctx
+				return next(ctx, req)
+			})).
+		OnCompleteListener("renders", vlatte.EventFunc[vlatte.OnComplete](func(ctx context.Context, e vlatte.OnComplete) error {
+			call := <-calls
+			close(started)
+
+			select {
+			case <-call.Done():
+			case <-ctx.Done(): // Close, when the test fails first
+				return ctx.Err()
+			}
+
+			var b strings.Builder
+
+			tmpl, err := e.Kit().TemplateEngine().Compile("target", `{{ .KV.Get "target" }}`)
+			if err == nil {
+				err = tmpl.Execute(&b, e.Kit().Data())
+			}
+
+			if err == nil {
+				err = ctx.Err()
+			}
+
+			if err != nil {
+				b.WriteString(err.Error())
+			}
+
+			rendered <- b.String()
+
+			return err
+		})))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Method("Greetings").OnCompleteEvent(vlatte.EventConfig{Name: "renders"}).Reply(Message(&pb.HiRes{})))
+
+	ctx, leave := context.WithCancel(t.Context())
+	defer leave()
+
+	c := client(t, m)
+	ended := make(chan error, 1)
+
+	go func() {
+		_, err := c.Greetings(ctx, &pb.HiReq{})
+		ended <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the event never started")
+	}
+
+	leave()
+	require.Equal(t, codes.Canceled, status.Code(<-ended))
+
+	select {
+	case got := <-rendered:
+		require.Equal(t, "api", got)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the event never saw the client leave")
+	}
 }
 
 // failingStore is a store whose List fails.

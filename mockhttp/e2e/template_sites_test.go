@@ -20,8 +20,8 @@ import (
 // checkTemplateSites serves tmpl at every place a template can be, on a server that compiles templates with engine:
 // a reply's body, header, body file name, body file content and multipart part, and a webhook's url, header, body
 // and multipart part. Each place is served by a mock built in Go and by a mock file, and must render want for the
-// request PUT /<mock>/42. tmpl is in the engine's syntax.
-func checkTemplateSites(t *testing.T, engine vlatte.TemplateEngine, tmpl, want string) {
+// request PUT /<mock>/42. tmpl is in the engine's syntax. opts set up the server further.
+func checkTemplateSites(t *testing.T, engine vlatte.TemplateEngine, tmpl, want string, opts ...mockhttp.Option) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -38,7 +38,7 @@ func checkTemplateSites(t *testing.T, engine vlatte.TemplateEngine, tmpl, want s
 	wh, err := webhook.New()
 	require.NoError(t, err)
 
-	m := mockhttp.MustNew(mockhttp.Setup().Silent().TemplateEngine(engine).OnCompleteListener("webhook", wh))
+	m := mockhttp.MustNew(append([]mockhttp.Option{mockhttp.Setup().Silent().TemplateEngine(engine).OnCompleteListener("webhook", wh)}, opts...)...)
 	m.MustStart()
 	t.Cleanup(m.Close)
 

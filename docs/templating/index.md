@@ -65,7 +65,46 @@ type KV interface {
 }
 ```
 
-`Get` of a key that isn't stored returns an error that wraps `vlatte.ErrKVKeyNotFound`, `Has` is true for a key set to an empty value, `Del` of a key that isn't stored is not an error, and `Keys` lists the keys in any order. A store keeps and returns copies of the values. A server reads the store from every request at once, so it must be safe for concurrent use. A store reads with the context of the request, or with an event's own for webhooks, which outlives a client that leaves. `.Data` holds values too: a map of any values that `m.SetData` sets on one server. The key-value store holds text by key, and a store of your own can share it with other servers and processes.
+`Get` of a key that isn't stored returns an error that wraps `vlatte.ErrKVKeyNotFound`, `Has` is true for a key set to an empty value, `Del` of a key that isn't stored is not an error, and `Keys` lists the keys in any order. A store keeps and returns copies of the values. A server reads the store from every request at once, so it must be safe for concurrent use. A store reads with the context of the request, or with an event's own for webhooks, which outlives a client that leaves.
+
+A store on Redis, with [go-redis](https://github.com/redis/go-redis), as [`kv_test.go`](https://github.com/caffeine-projects/vlatte/blob/main/mockhttp/e2e/kv_test.go) runs it:
+
+```go
+type redisKV struct{ c *redis.Client }
+
+func (kv redisKV) Get(ctx context.Context, k string) ([]byte, error) {
+	b, err := kv.c.Get(ctx, k).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("%w: %q", vlatte.ErrKVKeyNotFound, k)
+	}
+
+	return b, err
+}
+
+func (kv redisKV) Has(ctx context.Context, k string) (bool, error) {
+	n, err := kv.c.Exists(ctx, k).Result()
+	return n == 1, err
+}
+
+func (kv redisKV) Set(ctx context.Context, k string, v []byte) error { return kv.c.Set(ctx, k, v, 0).Err() }
+
+func (kv redisKV) Del(ctx context.Context, k string) error { return kv.c.Del(ctx, k).Err() }
+
+func (kv redisKV) Keys(ctx context.Context) ([]string, error) {
+	var keys []string
+
+	it := kv.c.Scan(ctx, 0, "*", 0).Iterator()
+	for it.Next(ctx) {
+		keys = append(keys, it.Val())
+	}
+
+	return keys, it.Err()
+}
+```
+
+`Setup().KV(redisKV{redis.NewClient(&redis.Options{Addr: "localhost:6379"})})` plugs it in. `Keys` lists every key of the database, so give the store a database of its own.
+
+`.Data` holds values too: a map of any values that `m.SetData` sets on one server. The key-value store holds text by key, and a store of your own can share it with other servers and processes.
 
 ## Functions
 
