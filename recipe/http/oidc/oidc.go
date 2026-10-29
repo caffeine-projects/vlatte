@@ -136,11 +136,12 @@ func WithPaths(paths Paths) Option {
 //   - GET jwks answers the public half of the signing key.
 //   - GET authorize, with response_type=code, the client ID, a redirect_uri and a scope with openid, redirects to
 //     redirect_uri with a new code and the request's state, as a provider does once the user consents. It records
-//     the request's nonce and PKCE code_challenge with the code.
+//     the request's nonce, PKCE code_challenge and redirect_uri with the code. PKCE takes S256 only: a code_challenge
+//     without code_challenge_method=S256 redirects to redirect_uri with error=invalid_request instead.
 //   - POST token, with grant_type=authorization_code, the client ID and secret, a redirect_uri and a code it issued,
 //     answers an access token and an ID token signed with the server's key, holding the user's claims and the nonce.
-//     Each code is exchanged once. When the authorize request sent a code_challenge, the code_verifier must be one
-//     whose S256 is it; PKCE takes S256 only. Any other exchange gets 400 invalid_grant.
+//     Each code is exchanged once, with the redirect_uri it was issued for. When the authorize request sent a
+//     code_challenge, the code_verifier must be one whose S256 is it. Any other exchange gets 400 invalid_grant.
 //   - GET userinfo, with the access token as "Bearer <token>", answers the user's claims. Any other GET to it gets a
 //     401 with WWW-Authenticate: Bearer error="invalid_token".
 func New(opts ...Option) mockhttp.Recipe {
@@ -181,18 +182,27 @@ const _code = `{{ $code := printf "{\"id\":%s,\"nonce\":%s}" (toJSON .Request.ID
 	`(toJSON (.Request.URL.Query.Get "nonce")) | base64Encode }}`
 
 // _authorizeKey is the key of the scenario instance of an authorize request: its code_challenge, empty without one,
-// and its code.
-const _authorizeKey = _code + `{{ .Request.URL.Query.Get "code_challenge" }}:{{ $code }}`
+// its code and its redirect_uri.
+const _authorizeKey = _code + `{{ .Request.URL.Query.Get "code_challenge" }}:{{ $code }}:` +
+	`{{ .Request.URL.Query.Get "redirect_uri" }}`
 
 // _tokenKey is the key of the scenario instance of a token request: the S256 of its code_verifier, empty without one,
-// and its code. It is the key of the authorize request that issued the code only when the verifier fits the
-// challenge, so PKCE and single use are one check.
+// its code and its redirect_uri. It is the key of the authorize request that issued the code only when the verifier
+// fits the challenge and the redirect_uri is the same (RFC 6749 §4.1.3), so PKCE, the redirect_uri and single use are
+// one check.
 const _tokenKey = `{{ with .Request.PostForm.Get "code_verifier" }}{{ hash "sha256" "base64url" . }}{{ end }}:` +
-	`{{ .Request.PostForm.Get "code" }}`
+	`{{ .Request.PostForm.Get "code" }}:{{ .Request.PostForm.Get "redirect_uri" }}`
 
 // _redirect is the Location of the authorize endpoint's answer: redirect_uri with the code and the request's state.
 const _redirect = _code + `{{ $u := .Request.URL.Query.Get "redirect_uri" }}{{ $u }}` +
 	`{{ if contains "?" $u }}&{{ else }}?{{ end }}code={{ urlquery $code }}` +
+	`{{ with .Request.URL.Query.Get "state" }}&state={{ urlquery . }}{{ end }}`
+
+// _refusal is the Location of the authorize endpoint's answer to a code_challenge whose method is not S256: redirect_uri
+// with an invalid_request error and the request's state (RFC 6749 §4.1.2.1).
+const _refusal = `{{ $u := .Request.URL.Query.Get "redirect_uri" }}{{ $u }}` +
+	`{{ if contains "?" $u }}&{{ else }}?{{ end }}error=invalid_request` +
+	`&error_description={{ urlquery "PKCE takes S256 only: send code_challenge_method=S256" }}` +
 	`{{ with .Request.URL.Query.Get "state" }}&state={{ urlquery . }}{{ end }}`
 
 // discovery is the body of the discovery endpoint, which reads the algorithm of the signing key kid from its JWK.
@@ -209,6 +219,15 @@ func discovery(kid string) string {
 "scopes_supported": ["openid", "email", "profile"],
 "token_endpoint_auth_methods_supported": ["client_secret_post"],
 "code_challenge_methods_supported": ["S256"]}`
+}
+
+// authorize starts a mock of the authorize requests of a sign-in with the client of c.
+func authorize(c *config) *mockhttp.Builder {
+	return endpoint(http.MethodGet, c.paths.Authorize).
+		Query("response_type", match.StrictEqual("code")).
+		Query("client_id", match.StrictEqual(c.clientID)).
+		Query("redirect_uri", match.Present()).
+		Query("scope", match.Split(" ", match.Contain("openid")))
 }
 
 // endpoint starts a mock of requests of method to path, exactly.
@@ -250,15 +269,17 @@ func (c *config) mocks() []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
 		endpoint(http.MethodGet, c.paths.JWKS).
 			Reply(mockhttp.OK().ContentType(mockhttp.MIMEApplicationJSON).BodyTemplate(`{{ jwks ` + strconv.Quote(c.kid) + ` }}`)),
 
-		endpoint(http.MethodGet, c.paths.Authorize).
-			Query("response_type", match.StrictEqual("code")).
-			Query("client_id", match.StrictEqual(c.clientID)).
-			Query("redirect_uri", match.Present()).
-			Query("scope", match.Split(" ", match.Contain("openid"))).
+		authorize(c).
 			StartScenario(Scenario).
 			ScenarioKey(_authorizeKey).
 			ScenarioStateWillBe("issued").
 			Reply(mockhttp.Status(http.StatusFound).HeaderTemplate(mockhttp.HeaderLocation, _redirect)),
+		// A challenge without a method is plain (RFC 7636 §4.3).
+		authorize(c).
+			Query("code_challenge", match.Present()).
+			Query("code_challenge_method", match.Not(match.StrictEqual("S256"))).
+			Priority(-1).
+			Reply(mockhttp.Status(http.StatusFound).HeaderTemplate(mockhttp.HeaderLocation, _refusal)),
 
 		endpoint(http.MethodPost, c.paths.Token).
 			FormField("grant_type", match.StrictEqual("authorization_code")).

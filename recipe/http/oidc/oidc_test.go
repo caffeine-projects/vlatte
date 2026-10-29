@@ -79,7 +79,7 @@ func TestOIDC_SignsInWithPKCEAndANonce(t *testing.T) {
 func TestOIDC_ExchangesACodeOnce(t *testing.T) {
 	// A code replayed, from the browser's history or by an attacker who saw it, must not get a token.
 	m := newServer(t)
-	code, _ := authorize(t, m, url.Values{"code_challenge": {challenge("v-1")}})
+	code, _ := authorize(t, m, url.Values{"code_challenge": {challenge("v-1")}, "code_challenge_method": {"S256"}})
 
 	status, _ := exchange(t, m, code, "v-1")
 	require.Equal(t, http.StatusOK, status)
@@ -92,7 +92,7 @@ func TestOIDC_ExchangesACodeOnce(t *testing.T) {
 func TestOIDC_RefusesACodeVerifierThatDoesntFitTheChallenge(t *testing.T) {
 	// PKCE: a code stolen on its way to the app is useless without the verifier only the app has.
 	m := newServer(t)
-	code, _ := authorize(t, m, url.Values{"code_challenge": {challenge("v-1")}})
+	code, _ := authorize(t, m, url.Values{"code_challenge": {challenge("v-1")}, "code_challenge_method": {"S256"}})
 
 	for _, verifier := range []string{"stolen", ""} {
 		status, body := exchange(t, m, code, verifier)
@@ -108,8 +108,8 @@ func TestOIDC_RefusesACodeVerifierThatDoesntFitTheChallenge(t *testing.T) {
 func TestOIDC_RefusesAnotherSignInsCode(t *testing.T) {
 	// Two sign-ins, each with its own challenge: one's code with the other's verifier is a code injection.
 	m := newServer(t)
-	codeA, _ := authorize(t, m, url.Values{"code_challenge": {challenge("v-a")}})
-	codeB, _ := authorize(t, m, url.Values{"code_challenge": {challenge("v-b")}})
+	codeA, _ := authorize(t, m, url.Values{"code_challenge": {challenge("v-a")}, "code_challenge_method": {"S256"}})
+	codeB, _ := authorize(t, m, url.Values{"code_challenge": {challenge("v-b")}, "code_challenge_method": {"S256"}})
 	require.NotEqual(t, codeA, codeB)
 
 	status, _ := exchange(t, m, codeA, "v-b")
@@ -117,6 +117,48 @@ func TestOIDC_RefusesAnotherSignInsCode(t *testing.T) {
 
 	status, _ = exchange(t, m, codeB, "v-b")
 	require.Equal(t, http.StatusOK, status)
+}
+
+func TestOIDC_RefusesACodeSentWithAnotherRedirectURI(t *testing.T) {
+	// The token request names the redirect_uri the code was issued for (RFC 6749 §4.1.3): a client that sends another
+	// has its callback URLs wired wrong, which a real provider refuses.
+	m := newServer(t)
+	code, _ := authorize(t, m, nil)
+
+	status, body := exchangeTo(t, m, code, "", "https://app.example/other")
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Equal(t, "invalid_grant", body["error"])
+
+	status, _ = exchange(t, m, code, "")
+	require.Equal(t, http.StatusOK, status)
+}
+
+func TestOIDC_AuthorizeRefusesAChallengeThatIsNotS256(t *testing.T) {
+	// Discovery says PKCE takes S256 only, and a challenge without a method is plain (RFC 7636 §4.3): the provider
+	// sends the browser back with an error, not a code a S256 verifier would redeem.
+	m := newServer(t)
+
+	for name, method := range map[string][]string{"no method": nil, "plain": {"plain"}, "another method": {"S512"}} {
+		query := url.Values{
+			"response_type":  {"code"},
+			"client_id":      {oidc.DefaultClientID},
+			"redirect_uri":   {"https://app.example/callback?from=login"},
+			"scope":          {"openid"},
+			"state":          {"st-1"},
+			"code_challenge": {challenge("v-1")},
+		}
+		if method != nil {
+			query["code_challenge_method"] = method
+		}
+
+		res := do(t, http.MethodGet, m.URL("/authorize")+"?"+query.Encode(), "", nil)
+		require.Equal(t, http.StatusFound, res.StatusCode, name)
+		require.Equal(t, "https://app.example/callback?from=login&"+url.Values{
+			"error":             {"invalid_request"},
+			"error_description": {"PKCE takes S256 only: send code_challenge_method=S256"},
+			"state":             {"st-1"},
+		}.Encode(), res.Header.Get(mockhttp.HeaderLocation), name)
+	}
 }
 
 func TestOIDC_SignsInWithoutPKCEOrANonce(t *testing.T) {
@@ -303,11 +345,18 @@ func authorize(t *testing.T, m *mockhttp.Server, extra url.Values) (string, stri
 func exchange(t *testing.T, m *mockhttp.Server, code, verifier string) (int, map[string]any) {
 	t.Helper()
 
+	return exchangeTo(t, m, code, verifier, "https://app.example/callback")
+}
+
+// exchangeTo is exchange with redirectURI as the redirect_uri.
+func exchangeTo(t *testing.T, m *mockhttp.Server, code, verifier, redirectURI string) (int, map[string]any) {
+	t.Helper()
+
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"client_id":     {oidc.DefaultClientID},
 		"client_secret": {oidc.DefaultClientSecret},
-		"redirect_uri":  {"https://app.example/callback"},
+		"redirect_uri":  {redirectURI},
 		"code":          {code},
 	}
 	if verifier != "" {

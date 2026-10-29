@@ -21,13 +21,14 @@ A server without the key fails `Prep` with an error naming it. In Go, a key of y
 |---|---|
 | `GET /.well-known/openid-configuration` | The issuer, the endpoints below on it, and what the provider supports: the code flow, `client_secret_post`, PKCE S256 and the key's algorithm. |
 | `GET /jwks` | The public half of the signing key. |
-| `GET /authorize` with `response_type=code`, the client ID, a `redirect_uri` and a `scope` with `openid` | 302 to `redirect_uri` with a new `code` and the request's `state`. The `nonce` and `code_challenge` are kept with the code. |
+| `GET /authorize` with `response_type=code`, the client ID, a `redirect_uri` and a `scope` with `openid` | 302 to `redirect_uri` with a new `code` and the request's `state`. The `nonce`, `code_challenge` and `redirect_uri` are kept with the code. |
+| The same with a `code_challenge` but no `code_challenge_method=S256` | 302 to `redirect_uri` with `error=invalid_request` and the request's `state`. |
 | `POST /token` with `grant_type=authorization_code`, the client ID and secret, a `redirect_uri` and a code it issued | `access_token`, `token_type`, `expires_in` and an `id_token` signed with the server's key: the user's claims, `iss`, `aud`, `iat`, `exp`, and the `nonce` when the authorize request sent one. |
-| The same with a code already exchanged, unknown, or whose `code_verifier` doesn't fit its `code_challenge` | 400, `invalid_grant`. A code issued with a challenge needs its verifier. |
+| The same with a code already exchanged, unknown, issued for another `redirect_uri`, or whose `code_verifier` doesn't fit its `code_challenge` | 400, `invalid_grant`. A code issued with a challenge needs its verifier. |
 | `GET /userinfo` with `Authorization: Bearer <access token>` | The user's claims. |
 | Any other `GET /userinfo` | 401 with `WWW-Authenticate: Bearer error="invalid_token"`. |
 
-Each code is exchanged once, and PKCE takes S256 only. Every mock is a template, which the admin API shows: codes, PKCE and single use are a [keyed scenario](/scenarios/#keys) named `oidc-code`, and tokens come from the `jwt` and `jwks` [template functions](/templating/#tokens).
+Each code is exchanged once, and PKCE takes S256 only. Every mock is a template, which the admin API shows: codes, PKCE, the `redirect_uri` and single use are a [keyed scenario](/scenarios/#keys) named `oidc-code`, and tokens come from the `jwt` and `jwks` [template functions](/templating/#tokens).
 
 | Option | Sets | Default |
 |---|---|---|
