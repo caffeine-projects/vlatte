@@ -265,6 +265,7 @@ func TestNoMatch_ARendererThatWritesNothingAnswersTheStatus(t *testing.T) {
 	res, body := do(t, http.MethodGet, m.URL("/users"), nil, nil)
 	require.Equal(t, http.StatusNotFound, res.StatusCode)
 	require.Equal(t, vlatte.FailureNoMatch, res.Header.Get(HeaderVlatteError))
+	require.Equal(t, "nosniff", res.Header.Get(HeaderXContentTypeOptions), "a custom renderer's answer isn't sniffed either")
 	require.Empty(t, body)
 }
 

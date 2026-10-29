@@ -267,7 +267,8 @@ func (rep *Reply) TrailerArr(key string, values ...string) *Reply {
 	return rep
 }
 
-// Cookie adds a http.Cookie to the response.
+// Cookie adds an [http.Cookie] to the response, sent as given: vlatte adds no attribute. Set Secure only on a mock
+// served over HTTPS: a client doesn't send a Secure cookie back over plain HTTP.
 func (rep *Reply) Cookie(cookie *http.Cookie) *Reply {
 	rep.response.Cookies = append(rep.response.Cookies, cookie)
 	return rep

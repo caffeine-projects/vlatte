@@ -1199,6 +1199,7 @@ func (h *mockHandler) onNoMatches(w http.ResponseWriter, r *RequestValues, misse
 	}
 
 	w.Header().Set(HeaderVlatteError, vlatte.FailureNoMatch)
+	w.Header().Set(HeaderXContentTypeOptions, _noSniff)
 
 	h.app.noMatch.RenderNoMatch(w, nm)
 
@@ -1251,6 +1252,7 @@ func (h *mockHandler) onError(w http.ResponseWriter, r *RequestValues, failure s
 	buf.WriteString(err.Error())
 
 	w.Header().Set(HeaderContentType, MIMETextPlainCharsetUTF8)
+	w.Header().Set(HeaderXContentTypeOptions, _noSniff)
 	w.Header().Set(HeaderVlatteError, failure)
 	w.WriteHeader(h.app.config.ErrorStatusCode)
 

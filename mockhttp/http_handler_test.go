@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -899,6 +900,39 @@ func TestHandler_APanicIsAFailure(t *testing.T) {
 
 	status, _ = get(t, m, "/ok")
 	require.Equal(t, http.StatusOK, status)
+}
+
+func TestHandler_VlatteAnswersAreNeverRenderedAsHTML(t *testing.T) {
+	// No-match, failure and panic answers echo the request's URL. A browser that opens a crafted URL on a mock must
+	// show it as text, never run it: one text/plain type, which it must not sniff, whatever a middleware set before.
+	m := MustNew(Setup().Silent().Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set(HeaderContentType, MIMETextHTMLCharsetUTF8)
+			next.ServeHTTP(w, r)
+		})
+	}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/reply").Reply(OK().BodyFile("missing.txt")))
+	m.MustMock(Getf("/panic").Reply(Func(func(http.ResponseWriter, *RequestValues) (*Response, error) {
+		panic("boom")
+	})))
+
+	for path, failure := range map[string]string{
+		"/nothing?q=%3Cscript%3E": vlatte.FailureNoMatch,
+		"/reply":                  vlatte.FailureReply,
+		"/panic":                  vlatte.FailurePanic,
+	} {
+		_, header, body := getFull(t, m, path)
+		require.Equal(t, failure, header.Get(HeaderVlatteError), body)
+		require.Len(t, header.Values(HeaderContentType), 1, path)
+
+		mediaType, _, err := mime.ParseMediaType(header.Get(HeaderContentType))
+		require.NoError(t, err)
+		require.Equal(t, MIMETextPlain, mediaType, path)
+		require.Equal(t, "nosniff", header.Get(HeaderXContentTypeOptions), path)
+	}
 }
 
 func TestLifecycle_ErrorLogsNameTheMock(t *testing.T) {

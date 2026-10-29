@@ -45,7 +45,8 @@ type NoMatch struct {
 // NoMatchRenderer writes the answer to a request no mock matched. The server calls it for many requests at once.
 //
 // The server sets the VLatte-Error header before it calls RenderNoMatch: it tells a client that the server answered,
-// not a mock, so a renderer should keep it. A renderer that writes nothing answers with [NoMatch.Status] and no body.
+// not a mock, so a renderer should keep it. It sets X-Content-Type-Options: nosniff too, so a browser takes the
+// answer, which can echo the request, for the Content-Type the renderer sets. A renderer that writes nothing answers with [NoMatch.Status] and no body.
 // The journal, the events and the logs record the request whatever the renderer sends.
 type NoMatchRenderer interface {
 	RenderNoMatch(w http.ResponseWriter, nm *NoMatch)
