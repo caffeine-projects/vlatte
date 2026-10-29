@@ -97,7 +97,7 @@ m := mockhttp.MustNew(mockhttp.Setup().TemplateEngine(engine))
 `jwt` signs a JWT with one of the server's keys, and `jwks` publishes the public halves of the keys you name, so a mock can stand in for an OpenID Connect provider, or any service that issues signed tokens:
 
 ```yaml
-# The provider's keys, as a client fetches them from jwks_uri.
+# _mocks/certs_mock.yaml: the provider's keys, as a client fetches them from jwks_uri.
 request:
   method: GET
   path: /certs
@@ -105,8 +105,10 @@ response:
   body: '{{ jwks "key-1" }}'
   template:
     enabled: true
----
-# A token endpoint: the claims are JSON text, and the token holds them and no other.
+```
+
+```yaml
+# _mocks/token_mock.yaml: a token endpoint. The claims are JSON text, and the token holds them and no other.
 request:
   method: POST
   path: /token
