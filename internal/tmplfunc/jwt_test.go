@@ -6,9 +6,12 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	json "encoding/json/v2"
 	"encoding/pem"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"text/template"
 
@@ -83,7 +86,6 @@ func TestKeys_RefusesWhatItCantSign(t *testing.T) {
 	tests := []struct {
 		name string
 		text string
-		data any
 		err  string
 	}{
 		{name: "an unknown kid", text: `{{ jwt "es-9" "{}" }}`, err: `error calling jwt: "es-9" is not a signing key of the server`},
@@ -92,11 +94,10 @@ func TestKeys_RefusesWhatItCantSign(t *testing.T) {
 		{name: "claims that aren't JSON", text: `{{ jwt "es-1" "sub=ana" }}`, err: "error calling jwt: claims are not JSON: "},
 		{name: "claims that aren't an object", text: `{{ jwt "es-1" "[1, 2]" }}`, err: "error calling jwt: claims are not a JSON object"},
 		{name: "a claim given twice", text: `{{ jwt "es-1" "{\"sub\":\"a\",\"sub\":\"b\"}" }}`, err: "error calling jwt: claims are not JSON: "},
-		{name: "claims JSON can't hold", text: `{{ jwt "es-1" .claims }}`, data: map[string]any{"claims": map[string]any{"ch": make(chan int)}}, err: "error calling jwt: claims: json: cannot marshal from Go chan int"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := render(t, funcs, tt.text, tt.data)
+			_, err := render(t, funcs, tt.text, nil)
 			require.ErrorContains(t, err, tt.err)
 		})
 	}
@@ -128,6 +129,16 @@ func TestKeys_Add(t *testing.T) {
 			require.EqualError(t, k.Add(tt.kid, tt.alg, tt.key), tt.msg)
 		})
 	}
+}
+
+func TestKeys_RefusesClaimsJSONCantHold(t *testing.T) {
+	// The json package words this error one of two ways, at random once per process: the test reads its type.
+	_, err := render(t, keysFuncs(testKeys(t)), `{{ jwt "es-1" .claims }}`, map[string]any{"claims": map[string]any{"ch": make(chan int)}})
+	require.ErrorContains(t, err, "error calling jwt: claims: json: ")
+
+	semantic, ok := errors.AsType[*json.SemanticError](err)
+	require.True(t, ok, err)
+	require.Equal(t, reflect.TypeFor[chan int](), semantic.GoType)
 }
 
 func TestKeys_Check(t *testing.T) {
