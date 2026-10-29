@@ -114,7 +114,7 @@ func TestGoogleOIDC_RejectsADeniedConsent(t *testing.T) {
 	g, app, browser := startGoogleOIDC(t)
 	denied := g.server.MustMock(mockhttp.Getf("/o/oauth2/v2/auth").
 		Priority(-1).
-		Reply(mockhttp.Status(http.StatusFound).HeaderTemplate("Location",
+		Reply(mockhttp.Status(http.StatusFound).HeaderTemplate(mockhttp.HeaderLocation,
 			`{{ .Request.URL.Query.Get "redirect_uri" }}?error=access_denied&state={{ .Request.URL.Query.Get "state" | urlquery }}`)))
 
 	status, body := browse(t, browser, app.URL+"/login")
@@ -279,7 +279,7 @@ func TestGoogleOIDC_FollowsAKeyRotation(t *testing.T) {
 	rotated := g.server.MustMock(
 		mockhttp.Getf("/oauth2/v3/certs").
 			Priority(-1).
-			Reply(mockhttp.OK().ContentType("application/json").BodyTemplate(`{{ jwks "key-1" "key-2" }}`)),
+			Reply(mockhttp.OK().ContentType(mockhttp.MIMEApplicationJSON).BodyTemplate(`{{ jwks "key-1" "key-2" }}`)),
 		googleToken(g.callback, `{{ jwt "key-2" $claims }}`).Priority(-1),
 	)
 
@@ -338,9 +338,9 @@ func TestGoogleOIDC_EndsTheSessionWhenGoogleRevokesTheAccessToken(t *testing.T) 
 	require.Equal(t, http.StatusOK, status)
 
 	revoked := g.server.MustMock(mockhttp.Getf("/v1/userinfo").
-		Header("Authorization", match.StrictEqual("Bearer "+_googleAccessToken)).
+		Header(mockhttp.HeaderAuthorization, match.StrictEqual("Bearer "+_googleAccessToken)).
 		Priority(-1).
-		Reply(mockhttp.Unauthorized().Header("WWW-Authenticate", `Bearer error="invalid_token"`)))
+		Reply(mockhttp.Unauthorized().Header(mockhttp.HeaderWWWAuthenticate, `Bearer error="invalid_token"`)))
 
 	status, body := browse(t, browser, app.URL+"/profile")
 
@@ -435,7 +435,7 @@ func mockGoogle(t *testing.T, server *mockhttp.Server, callback string) *googleM
 	g := &googleMocks{server: server, callback: callback}
 
 	g.discovery = server.MustMock(mockhttp.Getf("/.well-known/openid-configuration").
-		Reply(mockhttp.OK().ContentType("application/json").BodyTemplate(`{{ $iss := .Server.URL }}{
+		Reply(mockhttp.OK().ContentType(mockhttp.MIMEApplicationJSON).BodyTemplate(`{{ $iss := .Server.URL }}{
 "issuer": {{ toJSON $iss }},
 "authorization_endpoint": {{ print $iss "/o/oauth2/v2/auth" | toJSON }},
 "token_endpoint": {{ print $iss "/token" | toJSON }},
@@ -451,7 +451,7 @@ func mockGoogle(t *testing.T, server *mockhttp.Server, callback string) *googleM
 "grant_types_supported": ["authorization_code", "refresh_token"]}`)))
 
 	g.jwks = server.MustMock(mockhttp.Getf("/oauth2/v3/certs").
-		Reply(mockhttp.OK().ContentType("application/json").BodyTemplate(`{{ jwks "key-1" }}`)))
+		Reply(mockhttp.OK().ContentType(mockhttp.MIMEApplicationJSON).BodyTemplate(`{{ jwks "key-1" }}`)))
 
 	g.authorize = server.MustMock(mockhttp.Getf("/o/oauth2/v2/auth").
 		Query("response_type", match.StrictEqual("code")).
@@ -465,7 +465,7 @@ func mockGoogle(t *testing.T, server *mockhttp.Server, callback string) *googleM
 		StartScenario(_googleScenario).
 		ScenarioKey(_googleCode + `{{ .Request.URL.Query.Get "code_challenge" }}:{{ $code }}`).
 		ScenarioStateWillBe("issued").
-		Reply(mockhttp.Status(http.StatusFound).HeaderTemplate("Location", _googleCode+
+		Reply(mockhttp.Status(http.StatusFound).HeaderTemplate(mockhttp.HeaderLocation, _googleCode+
 			`{{ .Request.URL.Query.Get "redirect_uri" }}?code={{ urlquery $code }}`+
 			`&state={{ .Request.URL.Query.Get "state" | urlquery }}`)))
 
@@ -479,12 +479,12 @@ func mockGoogle(t *testing.T, server *mockhttp.Server, callback string) *googleM
 		})))
 
 	g.userinfo = server.MustMock(mockhttp.Getf("/v1/userinfo").
-		Header("Authorization", match.StrictEqual("Bearer "+_googleAccessToken)).
+		Header(mockhttp.HeaderAuthorization, match.StrictEqual("Bearer "+_googleAccessToken)).
 		Reply(mockhttp.OK().JSON(_googleUser)))
 
 	g.badToken = server.MustMock(mockhttp.Getf("/v1/userinfo").
 		Priority(1).
-		Reply(mockhttp.Unauthorized().Header("WWW-Authenticate", `Bearer error="invalid_token"`)))
+		Reply(mockhttp.Unauthorized().Header(mockhttp.HeaderWWWAuthenticate, `Bearer error="invalid_token"`)))
 
 	return g
 }
@@ -502,7 +502,7 @@ func googleToken(callback, idToken string) *mockhttp.Builder {
 			`{{ .Request.PostForm.Get "code" }}`).
 		ScenarioStateIs("issued").
 		ScenarioStateWillBe("used").
-		Reply(mockhttp.OK().ContentType("application/json").Header("Cache-Control", "no-store").
+		Reply(mockhttp.OK().ContentType(mockhttp.MIMEApplicationJSON).Header(mockhttp.HeaderCacheControl, "no-store").
 			BodyTemplate(_googleClaims + `{"access_token": "` + _googleAccessToken + `", "expires_in": 3599, ` +
 				`"scope": "openid https://www.googleapis.com/auth/userinfo.email ` +
 				`https://www.googleapis.com/auth/userinfo.profile", "token_type": "Bearer", ` +

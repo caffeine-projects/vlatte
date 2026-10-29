@@ -73,7 +73,7 @@ func TestJWTFromMockFiles_IssuesAndChecksTokens(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.path != "" {
-				req.Header.Set("Authorization", "Bearer "+issueToken(t, server.URL()+tt.path, tt.form))
+				req.Header.Set(mockhttp.HeaderAuthorization, "Bearer "+issueToken(t, server.URL()+tt.path, tt.form))
 			}
 
 			res, err := http.DefaultClient.Do(req)
@@ -173,7 +173,7 @@ func issueToken(t *testing.T, u string, form url.Values) string {
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, u, strings.NewReader(form.Encode()))
 	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(mockhttp.HeaderContentType, mockhttp.MIMEFormURLEncoded)
 
 	res, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)

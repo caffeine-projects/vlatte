@@ -245,10 +245,10 @@ func (c *config) mocks() []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
 
 	return []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server]{
 		endpoint(http.MethodGet, c.paths.Discovery).
-			Reply(mockhttp.OK().ContentType("application/json").BodyTemplate(discovery(c.kid)).SetTemplateData(data)),
+			Reply(mockhttp.OK().ContentType(mockhttp.MIMEApplicationJSON).BodyTemplate(discovery(c.kid)).SetTemplateData(data)),
 
 		endpoint(http.MethodGet, c.paths.JWKS).
-			Reply(mockhttp.OK().ContentType("application/json").BodyTemplate(`{{ jwks ` + strconv.Quote(c.kid) + ` }}`)),
+			Reply(mockhttp.OK().ContentType(mockhttp.MIMEApplicationJSON).BodyTemplate(`{{ jwks ` + strconv.Quote(c.kid) + ` }}`)),
 
 		endpoint(http.MethodGet, c.paths.Authorize).
 			Query("response_type", match.StrictEqual("code")).
@@ -258,7 +258,7 @@ func (c *config) mocks() []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
 			StartScenario(Scenario).
 			ScenarioKey(_authorizeKey).
 			ScenarioStateWillBe("issued").
-			Reply(mockhttp.Status(http.StatusFound).HeaderTemplate("Location", _redirect)),
+			Reply(mockhttp.Status(http.StatusFound).HeaderTemplate(mockhttp.HeaderLocation, _redirect)),
 
 		endpoint(http.MethodPost, c.paths.Token).
 			FormField("grant_type", match.StrictEqual("authorization_code")).
@@ -269,7 +269,7 @@ func (c *config) mocks() []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
 			ScenarioKey(_tokenKey).
 			ScenarioStateIs("issued").
 			ScenarioStateWillBe("used").
-			Reply(mockhttp.OK().ContentType("application/json").Header("Cache-Control", "no-store").
+			Reply(mockhttp.OK().ContentType(mockhttp.MIMEApplicationJSON).Header(mockhttp.HeaderCacheControl, "no-store").
 				BodyTemplate(token).SetTemplateData(data)),
 		endpoint(http.MethodPost, c.paths.Token).
 			Priority(1).
@@ -279,10 +279,10 @@ func (c *config) mocks() []vlatte.Builder[*mockhttp.Mock, *mockhttp.Server] {
 			})),
 
 		endpoint(http.MethodGet, c.paths.UserInfo).
-			Header("Authorization", match.StrictEqual("Bearer "+c.accessToken)).
+			Header(mockhttp.HeaderAuthorization, match.StrictEqual("Bearer "+c.accessToken)).
 			Reply(mockhttp.OK().JSON(c.claims)),
 		endpoint(http.MethodGet, c.paths.UserInfo).
 			Priority(1).
-			Reply(mockhttp.Unauthorized().Header("WWW-Authenticate", `Bearer error="invalid_token"`)),
+			Reply(mockhttp.Unauthorized().Header(mockhttp.HeaderWWWAuthenticate, `Bearer error="invalid_token"`)),
 	}
 }

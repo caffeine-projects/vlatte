@@ -140,7 +140,7 @@ func TestOIDC_UserInfoAnswersTheClaimsForTheAccessToken(t *testing.T) {
 
 	res := do(t, http.MethodGet, m.URL("/userinfo"), "Bearer other", nil)
 	require.Equal(t, http.StatusUnauthorized, res.StatusCode)
-	require.Equal(t, `Bearer error="invalid_token"`, res.Header.Get("WWW-Authenticate"))
+	require.Equal(t, `Bearer error="invalid_token"`, res.Header.Get(mockhttp.HeaderWWWAuthenticate))
 }
 
 func TestOIDC_Options(t *testing.T) {
@@ -162,7 +162,7 @@ func TestOIDC_Options(t *testing.T) {
 	}.Encode(), "", nil)
 	require.Equal(t, http.StatusFound, res.StatusCode)
 
-	location, err := url.Parse(res.Header.Get("Location"))
+	location, err := url.Parse(res.Header.Get(mockhttp.HeaderLocation))
 	require.NoError(t, err)
 
 	res = do(t, http.MethodPost, m.URL("/oauth2/token"), "", url.Values{
@@ -292,7 +292,7 @@ func authorize(t *testing.T, m *mockhttp.Server, extra url.Values) (string, stri
 	res := do(t, http.MethodGet, m.URL("/authorize")+"?"+query.Encode(), "", nil)
 	require.Equal(t, http.StatusFound, res.StatusCode)
 
-	location, err := url.Parse(res.Header.Get("Location"))
+	location, err := url.Parse(res.Header.Get(mockhttp.HeaderLocation))
 	require.NoError(t, err)
 	require.Equal(t, "https://app.example/callback", location.Scheme+"://"+location.Host+location.Path)
 
@@ -372,11 +372,11 @@ func do(t *testing.T, method, u, authorization string, form url.Values) *http.Re
 	require.NoError(t, err)
 
 	if form != nil {
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set(mockhttp.HeaderContentType, mockhttp.MIMEFormURLEncoded)
 	}
 
 	if authorization != "" {
-		req.Header.Set("Authorization", authorization)
+		req.Header.Set(mockhttp.HeaderAuthorization, authorization)
 	}
 
 	res, err := _noRedirects.Do(req)

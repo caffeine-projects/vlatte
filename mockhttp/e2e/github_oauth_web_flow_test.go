@@ -163,7 +163,7 @@ func TestGitHubOAuthWebFlow_EndsTheSessionWhenGitHubRevokesTheToken(t *testing.T
 
 	revoked := gh.server.MustMock(mockhttp.Request().
 		Method(http.MethodGet).
-		Header("Authorization", match.StrictEqual("Bearer "+_ghToken)).
+		Header(mockhttp.HeaderAuthorization, match.StrictEqual("Bearer "+_ghToken)).
 		Priority(-1).
 		Reply(mockhttp.Unauthorized().JSON(map[string]string{
 			"message":           "Bad credentials",
