@@ -2,6 +2,31 @@
 
 A test checks what the code under test sent: which requests came, how many, by when, and in what order. A server with a [journal](/more/journal) keeps every request it gets, whatever answered it, and `m.VerifyRequests()` selects and counts them, on HTTP and gRPC servers alike. A failed check says why: the requests it selected and, when it wanted more, those that came closest, with the parts each one missed.
 
+## Do you need it?
+
+Most tests don't. To check that a mock was called, use the scope that `MustMock` returns: it asserts the calls of the mocks it added, with no journal and no criteria to repeat.
+
+```go
+paid := m.MustMock(mockhttp.Postf("/payments").Reply(mockhttp.Created()))
+refund := m.MustMock(mockhttp.Postf("/refunds").Reply(mockhttp.Created()))
+
+// ... the code under test sends its requests ...
+
+paid.AssertCalled(t)           // every mock of the scope was called
+paid.AssertNumberOfCalls(t, 1) // and their calls add up to 1
+refund.AssertNotCalled(t)      // no mock of the scope was called
+```
+
+Request verification is for what a scope can't see:
+
+- requests no mock answered;
+- counts across several mocks, or by request parts no single mock matches on;
+- requests the code under test sends in the background, which a check waits for;
+- the order of requests, and a test's own requests on a shared server, with marks;
+- checks from outside Go, over the admin API or MCP.
+
+## Checking the journal
+
 ::: code-group
 
 ```go [HTTP]

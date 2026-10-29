@@ -2,6 +2,8 @@
 
 A client in any language, or an AI agent, checks the requests as a Go test does, through the [admin API](/admin-api/). `QUERY /requests/verify` takes a check in the body and answers its verdict, with the report a Go test gets. One engine runs both, so a check gives the same verdict from Go and from the admin API.
 
+A Go test that only checks its mocks were called needs none of this: see [Do you need it?](/verify/#do-you-need-it).
+
 ```sh
 curl -X QUERY -H 'Content-Type: application/json' \
   -d '{"method": "POST", "path": "/orders", "count": 1, "within": "2s"}' \

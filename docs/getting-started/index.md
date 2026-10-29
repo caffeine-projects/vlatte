@@ -19,4 +19,5 @@ Both share one engine: everything a mock file says, Go can say too, and the othe
 - [Install](/getting-started/installation) the library and the CLI.
 - Write a first test in the [quick start](/getting-started/quick-start).
 - Learn the few ideas everything else builds on in [Concepts](/getting-started/concepts).
+- See where a server's [settings](/getting-started/settings) come from: code, a `.vlatterc` file, `VLATTE_*` variables and flags.
 - Then read the section of your protocol, [HTTP](/http/) or [gRPC](/grpc/), and then the sections of the features both share, such as [Matchers](/matchers/), [Templating](/templating/) and [Scenarios](/scenarios/).
