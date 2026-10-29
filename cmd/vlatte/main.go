@@ -16,7 +16,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/mockgrpc"
@@ -41,14 +40,6 @@ const (
   vlatte --grpc-descriptors=api.binpb --grpc-mock-files='mocks/grpc/*.yaml'
 `
 	_helpHint = "Run 'vlatte --help' to list flags, environment variables and file keys."
-
-	// _adminDir is where the command keeps the mocks its admin API adds, across restarts, in the server's work
-	// directory. The default mock file patterns don't match it, so only the admin API's store loads its files.
-	_adminDir = mockhttp.WorkDirVar + "/_admin"
-
-	// _journalDir is where the command keeps the journal of the requests it serves, across restarts, in the
-	// server's work directory.
-	_journalDir = mockhttp.WorkDirVar + "/_journal"
 )
 
 var (
@@ -207,7 +198,7 @@ func startServer(cmd *cobra.Command, args []string, s settings, out, logOutput, 
 
 	httpArgs, grpcArgs := splitArgs(args)
 
-	m, api, err := newServer(httpArgs, s, wh, logOutput)
+	m, api, err := newHTTP(httpArgs, s, wh, logOutput)
 	if err != nil {
 		return nil, nil, nil, failure(cmd, err, out, stderr)
 	}
@@ -219,16 +210,7 @@ func startServer(cmd *cobra.Command, args []string, s settings, out, logOutput, 
 		return nil, nil, nil, failure(cmd, err, out, stderr)
 	}
 
-	// The docker address wins over every source, and its port depends on the final https setting.
-	if _, ok := os.LookupEnv(_dockerHostEnv); ok {
-		_ = (&dockerConfigurer{}).Apply(m.Config())
-	}
-
-	if m.Config().UseHTTPS {
-		err = m.StartTLS()
-	} else {
-		err = m.Start()
-	}
+	err = startHTTP(m)
 
 	// The gRPC server serves when its settings turn it on, after the HTTP one: its mock files can name the same
 	// webhooks.
@@ -274,22 +256,6 @@ func failure(cmd *cobra.Command, err error, stdout, stderr io.Writer) int {
 	}
 
 	return 1
-}
-
-// stopRecording stops the recording of m, if one runs, and returns the exit code. A recording writes what it took: a
-// call or a mock it couldn't record fails the run. Serving the recordings can fail too, such as for a mock ID a mock
-// file holds: the server is exiting, so that is only reported.
-func stopRecording(m *mockhttp.Server, stderr io.Writer) int {
-	res, err := m.StopRecording(context.Background())
-	if err != nil && !errors.Is(err, vlatte.ErrNotRecording) {
-		_, _ = fmt.Fprintln(stderr, err)
-
-		if res == nil || res.Status.Failed > 0 {
-			return 1
-		}
-	}
-
-	return 0
 }
 
 // printCommandHelp prints the help of cmd to w: the server's, with every setting, for the root command.
