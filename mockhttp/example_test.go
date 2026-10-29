@@ -182,3 +182,49 @@ func ExampleServer_StartRecording() {
 	// the items GET-items-page-2-a59dfd52f96e8038.mock.json
 	// 200 {"items":[1,2]}
 }
+
+// apiNoMatch answers the requests no mock matched under /api/ in the error shape of the API it stands in for, and
+// hands the others to the default renderer.
+type apiNoMatch struct {
+	fallback mockhttp.NoMatchRenderer
+}
+
+func (a apiNoMatch) RenderNoMatch(w http.ResponseWriter, nm *mockhttp.NoMatch) {
+	if !strings.HasPrefix(nm.Request.URL.Path, "/api/") {
+		a.fallback.RenderNoMatch(w, nm)
+		return
+	}
+
+	w.Header().Set(mockhttp.HeaderContentType, mockhttp.MIMEApplicationJSON)
+	w.WriteHeader(http.StatusNotFound)
+	fmt.Fprintf(w, `{"code":"NOT_FOUND","closest":%d}`, len(nm.NearMisses))
+}
+
+func ExampleConfigBuilder_NoMatchRenderer() {
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().
+		NoMatchRenderer(apiNoMatch{fallback: mockhttp.DefaultNoMatchRenderer(mockhttp.NoMatchAuto)}))
+	m.MustStart()
+	defer m.Close()
+
+	m.MustMock(mockhttp.Getf("/api/users").Header("X-Tenant", match.Equal("a")).Reply(mockhttp.OK()))
+
+	for _, path := range []string{"/api/users", "/health"} {
+		res, err := http.Get(m.URL(path))
+		if err != nil {
+			panic(err)
+		}
+
+		body, err := io.ReadAll(res.Body)
+		res.Body.Close()
+
+		if err != nil {
+			panic(err)
+		}
+
+		firstLine, _, _ := strings.Cut(string(body), "\n")
+		fmt.Println(res.StatusCode, res.Header.Get(mockhttp.HeaderVlatteError), firstLine)
+	}
+	// Output:
+	// 404 no-match {"code":"NOT_FOUND","closest":1}
+	// 418 no-match # Request did not match
+}

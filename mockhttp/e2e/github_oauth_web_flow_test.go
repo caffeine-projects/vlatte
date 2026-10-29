@@ -1,9 +1,7 @@
 package e2e
 
 import (
-	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"testing"
@@ -27,8 +25,9 @@ const (
 	_ghClientID     = "e2e-client-id"
 	_ghClientSecret = "e2e-client-secret"
 	_ghScope        = "read:user repo"
-	_ghCode         = "e2e-code"
 	_ghToken        = "gho_e2e"
+	// _ghScenario is the scenario of the codes GitHub issues: each code is an instance of its own, issued, then used.
+	_ghScenario = "github-code"
 )
 
 func TestGitHubOAuthWebFlow_SignsInAndReadsTheUsersData(t *testing.T) {
@@ -54,7 +53,6 @@ func TestGitHubOAuthWebFlow_SignsInAndReadsTheUsersData(t *testing.T) {
 	gh.exchange.AssertNumberOfCalls(t, 1)
 	gh.api.AssertNumberOfCalls(t, 3)
 	gh.badCode.AssertNotCalled(t)
-	gh.badCredentials.AssertNotCalled(t)
 }
 
 func TestGitHubOAuthWebFlow_RejectsAForgedState(t *testing.T) {
@@ -65,7 +63,7 @@ func TestGitHubOAuthWebFlow_RejectsAForgedState(t *testing.T) {
 
 	// A state the app gave another browser is as forged as a made-up one.
 	for _, state := range []string{"forged", startSignIn(t, newBrowser(t, app), app)} {
-		status, body := browse(t, browser, app.URL+"/callback?code="+_ghCode+"&state="+url.QueryEscape(state))
+		status, body := browse(t, browser, app.URL+"/callback?code=any&state="+url.QueryEscape(state))
 
 		require.Equal(t, http.StatusForbidden, status)
 		require.Equal(t, "githubapp: invalid state\n", body)
@@ -101,19 +99,55 @@ func TestGitHubOAuthWebFlow_RejectsADeniedConsent(t *testing.T) {
 
 func TestGitHubOAuthWebFlow_RejectsAReusedCode(t *testing.T) {
 	// GitHub codes are single-use: a callback replayed with a code already exchanged, such as from the browser's
-	// history, must not sign anyone in.
+	// history, must not sign anyone in, while a new sign-in, with a new code, still does.
 	gh, app, browser := startGitHubOAuthWebFlow(t)
 
-	status, _ := browse(t, browser, app.URL+"/login")
+	callback := consent(t, browser, app)
+	appURL, err := url.Parse(app.URL)
+	require.NoError(t, err)
+	cookies := browser.Jar.Cookies(appURL)
+
+	status, _ := browse(t, browser, callback.String())
 	require.Equal(t, http.StatusOK, status)
 
-	// The replay gets a fresh state, so only the code is stale.
-	state := startSignIn(t, browser, app)
+	// The replay brings back the state and the code verifier of the sign-in, so only the code being used tells it
+	// apart.
+	browser.Jar.SetCookies(appURL, cookies)
 
-	status, body := browse(t, browser, app.URL+"/callback?code="+_ghCode+"&state="+url.QueryEscape(state))
+	status, body := browse(t, browser, callback.String())
 
 	require.Equal(t, http.StatusUnauthorized, status)
 	require.Equal(t, "githubapp: token exchange: bad_verification_code\n", body)
+
+	status, _ = browse(t, browser, app.URL+"/login")
+	require.Equal(t, http.StatusOK, status)
+
+	gh.exchange.AssertNumberOfCalls(t, 2)
+	gh.badCode.AssertNumberOfCalls(t, 1)
+}
+
+func TestGitHubOAuthWebFlow_RejectsAnInjectedCode(t *testing.T) {
+	// An attacker who gets hold of a user's code, such as from a log, and sends it to the app's callback in their own
+	// browser, with their own state, must not be signed in as the user. The state can't tell: it is the attacker's.
+	// PKCE does: GitHub issued the code for the user's code challenge, and the attacker's browser holds another
+	// verifier.
+	gh, app, user := startGitHubOAuthWebFlow(t)
+	callback := consent(t, user, app)
+
+	attacker := newBrowser(t, app)
+	state := startSignIn(t, attacker, app)
+
+	status, body := browse(t, attacker,
+		app.URL+"/callback?code="+url.QueryEscape(callback.Query().Get("code"))+"&state="+url.QueryEscape(state))
+
+	require.Equal(t, http.StatusUnauthorized, status)
+	require.Equal(t, "githubapp: token exchange: bad_verification_code\n", body)
+
+	// The attempt didn't spend the code: the user still signs in with it.
+	status, body = browse(t, user, callback.String())
+
+	require.Equal(t, http.StatusOK, status)
+	require.JSONEq(t, `{"login": "octocat", "name": "The Octocat"}`, body)
 
 	gh.exchange.AssertNumberOfCalls(t, 1)
 	gh.badCode.AssertNumberOfCalls(t, 1)
@@ -127,7 +161,15 @@ func TestGitHubOAuthWebFlow_EndsTheSessionWhenGitHubRevokesTheToken(t *testing.T
 	status, _ := browse(t, browser, app.URL+"/login")
 	require.Equal(t, http.StatusOK, status)
 
-	gh.api.Disable()
+	revoked := gh.server.MustMock(mockhttp.Request().
+		Method(http.MethodGet).
+		Header(mockhttp.HeaderAuthorization, match.StrictEqual("Bearer "+_ghToken)).
+		Priority(-1).
+		Reply(mockhttp.Unauthorized().JSON(map[string]string{
+			"message":           "Bad credentials",
+			"documentation_url": "https://docs.github.com/rest",
+			"status":            "401",
+		})))
 
 	status, body := browse(t, browser, app.URL+"/repos")
 
@@ -139,7 +181,8 @@ func TestGitHubOAuthWebFlow_EndsTheSessionWhenGitHubRevokesTheToken(t *testing.T
 	require.Equal(t, http.StatusUnauthorized, status)
 	require.Equal(t, "githubapp: sign in first\n", body)
 
-	gh.badCredentials.AssertNumberOfCalls(t, 1)
+	revoked.AssertNumberOfCalls(t, 1)
+	gh.api.AssertNumberOfCalls(t, 1) // the sign-in's /me
 }
 
 // startGitHubOAuthWebFlow starts the GitHub mocks, the app pointed at them, and a browser.
@@ -167,69 +210,19 @@ func startGitHubOAuthWebFlow(t *testing.T) (*githubMocks, *httptest.Server, *htt
 	return mockGitHub(t, server, callback), app, newBrowser(t, app)
 }
 
-// newBrowser returns a client that keeps cookies and follows redirects, as a browser does, and trusts app.
-func newBrowser(t *testing.T, app *httptest.Server) *http.Client {
-	t.Helper()
-
-	jar, err := cookiejar.New(nil)
-	require.NoError(t, err)
-
-	browser := &http.Client{Jar: jar, Transport: app.Client().Transport}
-	t.Cleanup(browser.CloseIdleConnections)
-
-	return browser
-}
-
-// noRedirects returns a client that shares the cookies of browser but stops at the first redirect.
-func noRedirects(browser *http.Client) *http.Client {
-	return &http.Client{
-		Jar:           browser.Jar,
-		Transport:     browser.Transport,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
-}
-
-// startSignIn sends browser to /login, stops it at the redirect to GitHub, and returns the state the app gave it.
-func startSignIn(t *testing.T, browser *http.Client, app *httptest.Server) string {
-	t.Helper()
-
-	res, err := noRedirects(browser).Get(app.URL + "/login")
-	require.NoError(t, err)
-	require.NoError(t, res.Body.Close())
-	require.Equal(t, http.StatusFound, res.StatusCode)
-
-	location, err := url.Parse(res.Header.Get("Location"))
-	require.NoError(t, err)
-
-	return location.Query().Get("state")
-}
-
-func browse(t *testing.T, browser *http.Client, u string) (int, string) {
-	t.Helper()
-
-	res, err := browser.Get(u)
-	require.NoError(t, err)
-	defer res.Body.Close()
-
-	b, err := io.ReadAll(res.Body)
-	require.NoError(t, err)
-
-	return res.StatusCode, string(b)
-}
-
 // githubMocks are the mocks of GitHub, by what they answer.
 type githubMocks struct {
 	server *mockhttp.Server
 	// authorize sends the browser back to the app with the code, as GitHub does once the user consents.
 	authorize *mockhttp.Scope
-	// exchange trades the code for the token, once.
+	// exchange trades a code and the verifier of its code challenge for the token, once per code.
 	exchange *mockhttp.Scope
-	// badCode answers any other exchange, as GitHub does a code that is wrong or already used.
+	// badCode answers any other exchange, as GitHub does a code that is wrong, already used or not issued for the
+	// code verifier.
 	badCode *mockhttp.Scope
-	// api answers the REST API calls made with the token.
+	// api answers the REST API calls made with the token. A call they don't match, such as one missing a header,
+	// matches no mock, so its test fails on what the call got wrong.
 	api *mockhttp.Scope
-	// badCredentials answers the REST API calls made without the token.
-	badCredentials *mockhttp.Scope
 }
 
 // mockGitHub mocks the OAuth web flow of github.com and a few REST API calls of api.github.com. Each mock matches what
@@ -239,27 +232,42 @@ func mockGitHub(t *testing.T, server *mockhttp.Server, callback string) *githubM
 
 	gh := &githubMocks{server: server}
 
+	// A code is made from the state, so each sign-in gets its own. The scenario instance of a code is keyed by the code
+	// challenge it was issued for and the code. The exchange's key is the S256 of its code verifier and its code, the
+	// same only when the verifier fits the challenge: the exchange then moves the instance from issued to used, so
+	// PKCE and single use are one check.
 	gh.authorize = server.MustMock(mockhttp.Getf("/login/oauth/authorize").
 		Query("client_id", match.StrictEqual(_ghClientID)).
 		Query("redirect_uri", match.StrictEqual(callback)).
 		Query("scope", match.StrictEqual(_ghScope)).
 		Query("state", match.Present()).
+		Query("code_challenge", match.Present()).
+		Query("code_challenge_method", match.StrictEqual("S256")).
+		StartScenario(_ghScenario).
+		ScenarioKey(`{{ .Request.URL.Query.Get "code_challenge" }}:gh-{{ .Request.URL.Query.Get "state" }}`).
+		ScenarioStateWillBe("issued").
 		Reply(mockhttp.Status(http.StatusFound).HeaderTemplate("Location",
-			`{{ .Request.URL.Query.Get "redirect_uri" }}?code=`+_ghCode+`&state={{ .Request.URL.Query.Get "state" | urlquery }}`)))
+			`{{ $state := .Request.URL.Query.Get "state" | urlquery }}`+
+				`{{ .Request.URL.Query.Get "redirect_uri" }}?code=gh-{{ $state }}&state={{ $state }}`)))
 
 	gh.exchange = server.MustMock(mockhttp.Postf("/login/oauth/access_token").
 		Header("Accept", match.StrictEqual("application/json")).
 		FormField("client_id", match.StrictEqual(_ghClientID)).
 		FormField("client_secret", match.StrictEqual(_ghClientSecret)).
-		FormField("code", match.StrictEqual(_ghCode)).
 		FormField("redirect_uri", match.StrictEqual(callback)).
-		Once().
+		ScenarioIs(_ghScenario).
+		ScenarioKey(`{{ hash "sha256" "base64url" (.Request.PostForm.Get "code_verifier") }}:` +
+			`{{ .Request.PostForm.Get "code" }}`).
+		ScenarioStateIs("issued").
+		ScenarioStateWillBe("used").
 		Reply(mockhttp.OK().JSON(map[string]string{
 			"access_token": _ghToken,
 			"token_type":   "bearer",
 			"scope":        _ghScope,
 		})))
 
+	// GitHub doesn't document its error for a code verifier that doesn't fit, so a wrong verifier gets the error of a
+	// wrong code.
 	gh.badCode = server.MustMock(mockhttp.Postf("/login/oauth/access_token").
 		Priority(1).
 		Reply(mockhttp.OK().JSON(map[string]string{
@@ -290,16 +298,6 @@ func mockGitHub(t *testing.T, server *mockhttp.Server, callback string) *githubM
 			{"number": 1348, "title": "Add a README", "state": "open"},
 		})),
 	)
-
-	gh.badCredentials = server.MustMock(mockhttp.Request().
-		Method(http.MethodGet).
-		URLPath(match.Either(match.HasPrefix("/user"), match.HasPrefix("/repos/"))).
-		Priority(1).
-		Reply(mockhttp.Unauthorized().JSON(map[string]string{
-			"message":           "Bad credentials",
-			"documentation_url": "https://docs.github.com/rest",
-			"status":            "401",
-		})))
 
 	return gh
 }

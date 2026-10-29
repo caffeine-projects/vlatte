@@ -809,23 +809,23 @@ func TestAdmin_StreamsTheStatusAHandlerSent(t *testing.T) {
 func TestAdmin_StreamsWarnings(t *testing.T) {
 	// A request can go wrong without an error of the server, as one whose client left during its mock's delay: a
 	// client follows the warning, with no status, as the client got none.
-	arrived := make(chan struct{}, 1)
-	m := adminServer(t, Setup().Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			arrived <- struct{}{}
-			next.ServeHTTP(w, r)
-		})
-	}))
-	m.MustMock(Getf("/slow").ID("slow").Delay(5 * time.Second).Reply(OK()))
+	m := adminServer(t, Setup())
+
+	// The delay is picked once the server has found the mock: a client that left before would leave no mock to name.
+	delaying := make(chan struct{}, 1)
+	m.MustMock(Getf("/slow").ID("slow").DelayFunc(func() time.Duration {
+		delaying <- struct{}{}
+		return 5 * time.Second
+	}).Reply(OK()))
 
 	byType := streamEvents(t, m, 1, func() {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		// The client leaves once the server has its request.
+		// The client leaves once the server waits on the delay.
 		go func() {
 			select {
-			case <-arrived:
+			case <-delaying:
 			case <-ctx.Done():
 			}
 

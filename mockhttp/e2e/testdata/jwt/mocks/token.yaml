@@ -1,0 +1,19 @@
+# The token endpoint of the issuer, for the client credentials grant: the token is for the audience the client asks
+# for, and lives for expires_in, such as 1h, or -1h for a token already expired.
+request:
+  method: POST
+  path: /oauth/token
+  form:
+    grant_type: client_credentials
+response:
+  status: 200
+  header:
+    Content-Type: application/json
+  body: >-
+    {"token_type": "Bearer", "access_token": "{{
+    printf `{"iss": "https://auth.example", "sub": "billing", "aud": %q, "exp": %s}`
+    (.Request.PostForm.Get "audience")
+    (now | timeAdd (.Request.PostForm.Get "expires_in") | formatTime "unix")
+    | jwt "issuer" }}"}
+  template:
+    enabled: true
