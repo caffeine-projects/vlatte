@@ -74,7 +74,7 @@ func TestCheckKey_RefusesWhatTheAlgorithmDoesntTake(t *testing.T) {
 			alg:  "HS256",
 			key:  testKey(t, "RS256"),
 			is:   ErrUnsupportedAlg,
-			msg:  `jose: unsupported algorithm "HS256": HMAC signs with a shared secret no provider publishes; use one of ES256, ES384, ES512, EdDSA, PS256, PS384, PS512, RS256, RS384, RS512`,
+			msg:  `jose: unsupported algorithm "HS256": HMAC signs with a shared secret no provider publishes: use one of ES256, ES384, ES512, EdDSA, PS256, PS384, PS512, RS256, RS384, RS512`,
 		},
 		{
 			name: "none",

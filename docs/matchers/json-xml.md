@@ -63,6 +63,6 @@ request:
     Authorization: [signedjwt, "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n", [jsonpath, $.claims.iss, [equal, "123456"]]]
 ```
 
-A matcher can't read the server's own keys, so to check tokens the server's [`jwt` templates](/features/templates#tokens) sign, load the key from a file with `template.keys` and give `signedjwt` its public half.
+A matcher can't read the server's own keys, so to check tokens the server's [`jwt` templates](/templating/#tokens) sign, load the key from a file with `template.keys` and give `signedjwt` its public half.
 
 In Go: `JWT(m)` and `SignedJWT(keys, m)`, which panics when `keys` holds no public key.

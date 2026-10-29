@@ -85,7 +85,7 @@ func lookup(alg string) (algorithm, error) {
 
 	switch {
 	case strings.HasPrefix(alg, "HS"):
-		return algorithm{}, fmt.Errorf("%w %q: HMAC signs with a shared secret no provider publishes; use one of %s",
+		return algorithm{}, fmt.Errorf("%w %q: HMAC signs with a shared secret no provider publishes: use one of %s",
 			ErrUnsupportedAlg, alg, strings.Join(Algorithms(), ", "))
 	case strings.EqualFold(alg, "none"):
 		return algorithm{}, fmt.Errorf("%w %q: an unsigned token proves nothing", ErrUnsupportedAlg, alg)

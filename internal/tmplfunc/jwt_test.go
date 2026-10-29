@@ -116,7 +116,7 @@ func TestKeys_Add(t *testing.T) {
 		{name: "a kid added twice", kid: "a", alg: "ES256", key: ec, msg: `signing key "a" is added twice`},
 		{
 			name: "HMAC", kid: "b", alg: "HS256", key: ec,
-			msg: `signing key "b": jose: unsupported algorithm "HS256": HMAC signs with a shared secret no provider publishes; use one of ES256, ES384, ES512, EdDSA, PS256, PS384, PS512, RS256, RS384, RS512`,
+			msg: `signing key "b": jose: unsupported algorithm "HS256": HMAC signs with a shared secret no provider publishes: use one of ES256, ES384, ES512, EdDSA, PS256, PS384, PS512, RS256, RS384, RS512`,
 		},
 		{name: "a key that doesn't fit", kid: "b", alg: "RS256", key: ec, msg: `signing key "b": jose: key does not fit the algorithm: RS256 takes an RSA key, not an ECDSA key`},
 	}
@@ -171,7 +171,7 @@ func TestParseKeySpec(t *testing.T) {
 		{spec: "google-1", msg: `signing key "google-1": write it as kid=ALG or kid=ALG:path/to/key.pem`},
 		{spec: "=RS256", msg: `signing key "=RS256": write it as kid=ALG or kid=ALG:path/to/key.pem`},
 		{spec: "a=RS256:", msg: `signing key "a": the path after "RS256:" is empty`},
-		{spec: "a=HS256", msg: `signing key "a": jose: unsupported algorithm "HS256": HMAC signs with a shared secret no provider publishes; use one of ES256, ES384, ES512, EdDSA, PS256, PS384, PS512, RS256, RS384, RS512`},
+		{spec: "a=HS256", msg: `signing key "a": jose: unsupported algorithm "HS256": HMAC signs with a shared secret no provider publishes: use one of ES256, ES384, ES512, EdDSA, PS256, PS384, PS512, RS256, RS384, RS512`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.spec, func(t *testing.T) {
