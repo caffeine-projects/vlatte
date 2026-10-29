@@ -24,6 +24,7 @@ const (
 	HeaderSetCookie                       = "Set-Cookie"
 	HeaderIfModifiedSince                 = "If-Modified-Since"
 	HeaderLastModified                    = "Last-Modified"
+	HeaderLastEventID                     = "Last-Event-ID"
 	HeaderRetryAfter                      = "Retry-After"
 	HeaderUpgrade                         = "Upgrade"
 	HeaderWWWAuthenticate                 = "WWW-Authenticate"
@@ -88,5 +89,6 @@ const (
 	MIMEApplicationXMLCharsetUTF8        = MIMEApplicationXML + "; " + _charsetUTF8
 	MIMEApplicationProtobuf              = "application/protobuf"
 	MIMEMultipartForm                    = "multipart/form-data"
+	MIMETextEventStream                  = "text/event-stream"
 	MIMEOctetStream                      = "application/octet-stream"
 )

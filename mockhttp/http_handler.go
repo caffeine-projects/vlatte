@@ -563,6 +563,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var (
 		cut     error
 		started bool
+		counted bool // the mock counted as served before it answered, as a stream does
 	)
 
 	// A mock with wire steps answers on its connection, which it takes over, so they see every byte of the answer. It
@@ -745,6 +746,13 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.debugHeader(w, vlatte.HeaderProxied, "true")
 		}
 
+		// A stream may stay open as long as its client does: it counts once it starts, so a mock served once serves one
+		// client, and a scenario moves on. Its callbacks and events still run once it ends, with all it sent.
+		if _, ok := res.BodyCloser.(*eventStreamBody); ok {
+			h.served(mock, reqValues)
+			counted = true
+		}
+
 		// The mock counts as served, whatever happens to the answer once its status and headers are sent.
 		cut = h.render(ctx, w, reqValues, res, capture)
 		started = true
@@ -764,17 +772,8 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	mock.Inc()
-
-	// run matcher events after we sent the mock.
-	// some matcher might need to keep state.
-	for i, exp := range mock.spec.expectations {
-		if stateful, ok := exp.Matcher.(vlatte.Stateful); ok {
-			if err = stateful.SetState(); err != nil {
-				h.lifecycle.OnWarning(reqValues,
-					fmt.Errorf("http: after mock served event: matcher[%d] %w", i, err))
-			}
-		}
+	if !counted {
+		h.served(mock, reqValues)
 	}
 
 	// The handler waits for the events, so the response ends after them: a test checks what they did right after it.
@@ -1121,6 +1120,19 @@ func (h *mockHandler) debugHeader(w http.ResponseWriter, key, value string) {
 	}
 
 	w.Header().Set(key, value)
+}
+
+// served counts mock as served for r, and moves on the state its matchers keep, such as a scenario's.
+func (h *mockHandler) served(mock *Mock, r *RequestValues) {
+	mock.Inc()
+
+	for i, exp := range mock.spec.expectations {
+		if stateful, ok := exp.Matcher.(vlatte.Stateful); ok {
+			if err := stateful.SetState(); err != nil {
+				h.lifecycle.OnWarning(r, fmt.Errorf("http: after mock served event: matcher[%d] %w", i, err))
+			}
+		}
+	}
 }
 
 // render sends res through w, ends the steps of the mock, if any, and has the capture, if any, record the answer once

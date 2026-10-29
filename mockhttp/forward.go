@@ -190,12 +190,10 @@ func (u *upstream) close() {
 type targetBody struct {
 	io.ReadCloser
 
+	keeper
+
 	cancel context.CancelCauseFunc
 	cut    func() error // the cause of a cut of the call, such as by an upstream step, or nil
-	keep   bool         // set before the body is read
-	kept   []byte
-	over   bool // read more than it keeps
-	eof    bool
 }
 
 // Read reads the body, and keeps what it read, with keep. A read that fails once the call was cut fails with the
@@ -209,17 +207,7 @@ func (b *targetBody) Read(p []byte) (int, error) {
 		}
 	}
 
-	switch {
-	case !b.keep || b.over:
-	case len(b.kept)+n > _keptBodyLimit:
-		b.over, b.kept = true, nil
-	default:
-		b.kept = append(b.kept, p[:n]...)
-	}
-
-	if errors.Is(err, io.EOF) {
-		b.eof = true
-	}
+	b.record(p[:n], err)
 
 	return n, err
 }
@@ -232,16 +220,12 @@ func (b *targetBody) Close() error {
 	return err
 }
 
-// Kept returns the body, once read to its end, when it kept it, and it fits in _keptBodyLimit.
-func (b *targetBody) Kept() ([]byte, bool) {
-	return b.kept, b.keep && b.eof && !b.over
-}
-
-// keepBody has res keep its streamed body, if it is a target's, for what reads it once it is sent: callbacks, events
-// or the log. A body nothing reads isn't kept, which spares a server that proxies many bodies their memory.
+// keepBody has res keep its streamed body, if it is a target's or an event stream, for what reads it once it is sent:
+// callbacks, events or the log. A body nothing reads isn't kept, which spares a server that proxies many bodies their
+// memory.
 func keepBody(res *Response, keep bool) {
-	if body, ok := res.BodyCloser.(*targetBody); ok {
-		body.keep = keep
+	if body, ok := res.BodyCloser.(interface{ keepSent(bool) }); ok {
+		body.keepSent(keep)
 	}
 }
 
