@@ -15,5 +15,6 @@ The Go API is documented on pkg.go.dev, from the doc comments of the code:
 | `fault/faultbuild` | [pkg.go.dev/github.com/caffeine-projects/vlatte/fault/faultbuild](https://pkg.go.dev/github.com/caffeine-projects/vlatte/fault/faultbuild) |
 | `webhook` | [pkg.go.dev/github.com/caffeine-projects/vlatte/webhook](https://pkg.go.dev/github.com/caffeine-projects/vlatte/webhook) |
 | `journal` | [pkg.go.dev/github.com/caffeine-projects/vlatte/journal](https://pkg.go.dev/github.com/caffeine-projects/vlatte/journal) |
+| `verify` | [pkg.go.dev/github.com/caffeine-projects/vlatte/verify](https://pkg.go.dev/github.com/caffeine-projects/vlatte/verify) |
 | `admin` | [pkg.go.dev/github.com/caffeine-projects/vlatte/admin](https://pkg.go.dev/github.com/caffeine-projects/vlatte/admin) |
 | `recipe/http/proxyall` | [pkg.go.dev/github.com/caffeine-projects/vlatte/recipe/http/proxyall](https://pkg.go.dev/github.com/caffeine-projects/vlatte/recipe/http/proxyall) |

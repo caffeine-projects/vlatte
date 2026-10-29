@@ -29,6 +29,7 @@ import (
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
+	"github.com/caffeine-projects/vlatte/verify"
 )
 
 // journaled starts a gRPC mock server that keeps a journal in a temporary directory, and a client of it.
@@ -51,11 +52,11 @@ func journaled(t *testing.T, setup *ConfigBuilder) (*Server, pb.TestServiceClien
 func onlyCall(t *testing.T, m *Server, q journal.Query) *journal.Entry {
 	t.Helper()
 
-	entries, err := m.Requests(t.Context(), q)
+	page, err := m.Journal().Find(t.Context(), q)
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
+	require.Len(t, page.Entries, 1)
 
-	return entries[0]
+	return page.Entries[0]
 }
 
 func TestJournal_KeepsEachCallOnceWhateverItsOutcome(t *testing.T) {
@@ -106,8 +107,8 @@ func TestJournal_KeepsEachCallOnceWhateverItsOutcome(t *testing.T) {
 	}
 
 	ft := testmock.NewFakeT()
-	require.True(t, m.AssertRequested(t.Context(), ft, 5, journal.Query{Kind: Kind, Path: match.HasSuffix("/Greetings")}))
-	require.True(t, m.AssertRequested(t.Context(), ft, 5, journal.Query{Header: map[string]vlatte.Matcher{"X-Team": match.Equal("core")}}))
+	require.True(t, m.VerifyRequests().Path(match.HasSuffix("/Greetings")).Times(ft, 5))
+	require.True(t, m.VerifyRequests().Header("X-Team", match.Equal("core")).Times(ft, 5))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
 }
 
@@ -221,15 +222,14 @@ func TestJournal_VerifiesCallsWithMockBuilders(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	require.True(t, m.AssertRequested(t.Context(), t, 2, journal.Query{},
-		Method("Greetings").Field("message", match.Equal("hi")).Header("x-team", match.Equal("core"))))
-	require.True(t, m.AssertRequested(t.Context(), t, 1, journal.Query{}, Method("Greetings").Message(&pb.HiReq{Message: "bye"})))
-	require.True(t, m.AssertNotRequested(t.Context(), t, journal.Query{}, Method("List")))
+	require.True(t, m.VerifyRequests().Matching(Method("Greetings").Field("message", match.Equal("hi")).Header("x-team", match.Equal("core"))).Times(t, 2))
+	require.True(t, m.VerifyRequests().Matching(Method("Greetings").Message(&pb.HiReq{Message: "bye"})).Times(t, 1))
+	require.True(t, m.VerifyRequests().Matching(Method("List")).Never(t))
 
-	_, err := m.CountRequests(t.Context(), journal.Query{}, Method("Greetings").Once())
+	_, err := m.VerifyRequests().Matching(Method("Greetings").Once()).Count(t.Context())
 	require.ErrorContains(t, err, "a request pattern has no Times or Once")
 
-	_, err = m.CountRequests(t.Context(), journal.Query{}, Method("Nope"))
+	_, err = m.VerifyRequests().Matching(Method("Nope")).Count(t.Context())
 	require.ErrorIs(t, err, ErrUnknownMethod)
 }
 
@@ -240,9 +240,8 @@ func TestJournal_VerifiesClientStreamsByAllTheirMessages(t *testing.T) {
 	_, code := upload(t, c, "a", "b")
 	require.Equal(t, codes.OK, code)
 
-	require.True(t, m.AssertRequested(t.Context(), t, 1, journal.Query{},
-		Method("Upload").Messages(&pb.ListItem{Key: "a"}, &pb.ListItem{Key: "b"})))
-	require.True(t, m.AssertRequested(t.Context(), t, 1, journal.Query{}, Method("Upload").Field("$[1].key", match.Equal("b"))))
+	require.True(t, m.VerifyRequests().Matching(Method("Upload").Messages(&pb.ListItem{Key: "a"}, &pb.ListItem{Key: "b"})).Times(t, 1))
+	require.True(t, m.VerifyRequests().Matching(Method("Upload").Field("$[1].key", match.Equal("b"))).Times(t, 1))
 }
 
 func TestJournal_APatternOfACutRequestCantTell(t *testing.T) {
@@ -256,10 +255,11 @@ func TestJournal_APatternOfACutRequestCantTell(t *testing.T) {
 	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{Message: "a long message, cut"})
 	require.NoError(t, err)
 
-	_, err = m.CountRequests(t.Context(), journal.Query{}, Method("Greetings").Field("message", match.Equal("x")))
+	_, err = m.VerifyRequests().Matching(Method("Greetings").Field("message", match.Equal("x"))).Count(t.Context())
 	require.ErrorIs(t, err, vlatte.ErrMatching)
+	require.ErrorIs(t, err, journal.ErrBodyCut)
 
-	n, err := m.CountRequests(t.Context(), journal.Query{}, Method("List").Field("message", match.Equal("x")))
+	n, err := m.VerifyRequests().Matching(Method("List").Field("message", match.Equal("x"))).Count(t.Context())
 	require.NoError(t, err)
 	require.Zero(t, n, "a miss on the method is a miss")
 }
@@ -299,7 +299,7 @@ func TestJournal_TheAdminAPIServesGRPCCalls(t *testing.T) {
 
 	code, body := call(t, "QUERY", m.AdminURL()+"/requests", `{"kind": "grpc", "outcome": "unmatched", "limit": 0}`)
 	require.Equal(t, http.StatusOK, code, body)
-	require.JSONEq(t, `{"count": 1, "requests": []}`, body)
+	require.JSONEq(t, `{"count": 1, "requests": [], "mark": 1}`, body)
 
 	code, body = call(t, "QUERY", m.AdminURL()+"/requests", `{"request": {"method": "GET"}}`)
 	require.Equal(t, http.StatusBadRequest, code, body)
@@ -343,10 +343,7 @@ func TestJournal_ACallWhoseClientLeftIsAbandoned(t *testing.T) {
 
 	cancel()
 
-	require.Eventually(t, func() bool {
-		n, err := m.CountRequests(t.Context(), journal.Query{})
-		return err == nil && n == 1
-	}, 5*time.Second, 10*time.Millisecond)
+	require.True(t, m.VerifyRequests().Within(5*time.Second).Times(t, 1))
 
 	e := onlyCall(t, m, journal.Query{})
 	require.Equal(t, journal.OutcomeAbandoned, e.Outcome)
@@ -447,7 +444,7 @@ func TestJournal_LeavesOutTheCallsAnInterceptorAnswers(t *testing.T) {
 
 			require.Equal(t, codes.Unauthenticated, status.Code(tt.call(t, c)))
 
-			n, err := m.CountRequests(t.Context(), journal.Query{})
+			n, err := m.VerifyRequests().Count(t.Context())
 			require.NoError(t, err)
 			require.Zero(t, n)
 		})
@@ -488,7 +485,7 @@ func TestJournal_LeavesOutACallWhoseRequestDoesntDecode(t *testing.T) {
 	err = conn.Invoke(t.Context(), pb.TestService_Greetings_FullMethodName, []byte{0x0a, 0xff}, &pb.HiRes{}, grpc.ForceCodec(rawCodec{}))
 	require.Equal(t, codes.Internal, status.Code(err))
 
-	n, err := m.CountRequests(t.Context(), journal.Query{})
+	n, err := m.VerifyRequests().Count(t.Context())
 	require.NoError(t, err)
 	require.Zero(t, n)
 }
@@ -569,7 +566,7 @@ func TestJournal_APatternIsABuilderOfTheRequestOnly(t *testing.T) {
 		{"a scenario", Method("Greetings").ScenarioIs("s"), "a request pattern has no scenario"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := m.CountRequests(t.Context(), journal.Query{}, tc.pattern)
+			_, err := m.VerifyRequests().Matching(tc.pattern).Count(t.Context())
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
@@ -587,11 +584,11 @@ func TestJournal_APatternOfTheMethodOnlyCountsACutRequest(t *testing.T) {
 	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{Message: "a long message, cut"})
 	require.NoError(t, err)
 
-	n, err := m.CountRequests(t.Context(), journal.Query{}, Method("Greetings"))
+	n, err := m.VerifyRequests().Matching(Method("Greetings")).Count(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 
-	n, err = m.CountRequests(t.Context(), journal.Query{}, Method("List"))
+	n, err = m.VerifyRequests().Matching(Method("List")).Count(t.Context())
 	require.NoError(t, err)
 	require.Zero(t, n)
 }
@@ -605,7 +602,7 @@ func TestJournal_APatternWhoseMatcherFailsFailsTheQuery(t *testing.T) {
 	require.NoError(t, err)
 
 	broken := match.Function(func(any) (bool, error) { return false, errors.New("broken") })
-	_, err = m.CountRequests(t.Context(), journal.Query{}, Method("Greetings").Body(broken))
+	_, err = m.VerifyRequests().Matching(Method("Greetings").Body(broken)).Count(t.Context())
 	require.ErrorIs(t, err, vlatte.ErrMatching)
 }
 
@@ -635,7 +632,7 @@ func TestJournal_APatternReadsTheEntriesAJournalKeptAcrossRestarts(t *testing.T)
 			m.MustStart()
 			t.Cleanup(m.Close)
 
-			n, err := m.CountRequests(t.Context(), journal.Query{}, tc.pattern)
+			n, err := m.VerifyRequests().Matching(tc.pattern).Count(t.Context())
 			require.NoError(t, err)
 			require.Zero(t, n, "neither entry is a call of the method")
 
@@ -649,7 +646,7 @@ func TestJournal_APatternReadsTheEntriesAJournalKeptAcrossRestarts(t *testing.T)
 			m.MustStart()
 			t.Cleanup(m.Close)
 
-			_, err = m.CountRequests(t.Context(), journal.Query{}, tc.pattern)
+			_, err = m.VerifyRequests().Matching(tc.pattern).Count(t.Context())
 			require.ErrorIs(t, err, vlatte.ErrMatching)
 		})
 	}
@@ -719,4 +716,32 @@ func TestJournal_ABidiCallWhoseMessagesCantBeWrittenFailed(t *testing.T) {
 	require.Empty(t, e.Body)
 	require.Contains(t, e.Message, "bidi streaming: ")
 	require.Contains(t, e.Message, "nope.X")
+}
+
+func TestJournal_AFailureNamesThePartsOfAPatternTheClosestMissed(t *testing.T) {
+	// A pattern names its parts as a near miss does: the test tells which part of the call it got was wrong.
+	m, c := journaled(t, Setup())
+	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{})))
+
+	_, err := c.Greetings(t.Context(), &pb.HiReq{Message: "bye"})
+	require.NoError(t, err)
+
+	ft := testmock.NewFakeT()
+	require.False(t, m.VerifyRequests().Matching(Method("Greetings").Field("message", match.Equal("hi"))).Times(ft, 1))
+
+	errs := ft.Errors()
+	require.Len(t, errs, 1)
+
+	report := errs[0]
+	require.Contains(t, report, "Expected exactly 1 request(s) with a pattern.\nGot 0.\n")
+	require.Contains(t, report, "matched /protobuf.TestService/Greetings 0 [")
+	require.Contains(t, report, "\n        missed 1 of 2: field message\n")
+}
+
+func TestJournal_ACallHasNoMethodToSelectBy(t *testing.T) {
+	// A gRPC call has no HTTP method: a selection by one would select none, and Never would pass.
+	m, _ := journaled(t, Setup())
+
+	_, err := m.VerifyRequests().Method("POST").Count(t.Context())
+	require.ErrorIs(t, err, verify.ErrNoMethod)
 }

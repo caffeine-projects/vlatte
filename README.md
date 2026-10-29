@@ -34,7 +34,8 @@ VLatte starts real HTTP and gRPC servers that answer the way you tell them to. S
 - **Scenarios** for stateful flows, and **webhooks** sent after a mock answers.
 - **Proxying, and recording** of a real service to play it back later, with outbound rules that limit the addresses a server connects to.
 - **Fault injection:** latency, slow bandwidth, connection resets, malformed and empty answers.
-- **A request journal** to verify what clients sent, and debug headers on every answer.
+- **[Request verification](https://caffeine-projects.github.io/vlatte/verify/)** of what clients sent: how many requests, by when and in what order, from Go tests, the admin API or MCP, with the closest requests and the parts they missed when a check fails.
+- **A [request journal](https://caffeine-projects.github.io/vlatte/features/journal)** of every request a server gets, and debug headers on every answer.
 - **An [admin API](https://caffeine-projects.github.io/vlatte/reference/admin-api.html)** to manage mocks while a server runs, with Basic or bearer authentication and TLS, also served over **MCP** for AI agents.
 - **[A CLI and a Docker image](https://caffeine-projects.github.io/vlatte/run/)** to run mock servers outside Go.
 

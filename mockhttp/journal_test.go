@@ -45,11 +45,11 @@ func journaledServer(t *testing.T, setup *ConfigBuilder) *Server {
 func only(t *testing.T, m *Server, q journal.Query) *journal.Entry {
 	t.Helper()
 
-	entries, err := m.Requests(t.Context(), q)
+	page, err := m.Journal().Find(t.Context(), q)
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
+	require.Len(t, page.Entries, 1)
 
-	return entries[0]
+	return page.Entries[0]
 }
 
 func TestJournal_KeepsEachRequestOnceWhateverItsOutcome(t *testing.T) {
@@ -154,10 +154,7 @@ func TestJournal_KeepsEachRequestOnceWhateverItsOutcome(t *testing.T) {
 			q := journal.Query{Path: match.Equal(tt.path)}
 
 			// The client of a request that hangs leaves before the server ends it.
-			require.Eventually(t, func() bool {
-				n, err := tt.server.CountRequests(t.Context(), q)
-				return err == nil && n > 0
-			}, 5*time.Second, 10*time.Millisecond)
+			require.True(t, tt.server.VerifyRequests().Path(match.Equal(tt.path)).Within(5*time.Second).AtLeast(t, 1))
 
 			e := only(t, tt.server, q)
 			require.Equal(t, tt.outcome, e.Outcome)
@@ -241,7 +238,7 @@ func TestJournal_RedactsTheHostToo(t *testing.T) {
 	e := only(t, m, journal.Query{Path: match.Equal("/private")})
 	require.Equal(t, []string{"<redacted>"}, e.Header["Host"])
 
-	n, err := m.CountRequests(t.Context(), journal.Query{}, Request().URL(match.Equal(m.URL("/private"))))
+	n, err := m.VerifyRequests().Matching(Request().URL(match.Equal(m.URL("/private")))).Count(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 }
@@ -274,15 +271,15 @@ func TestJournal_VerifiesWithRequestPatterns(t *testing.T) {
 
 	ft := testmock.NewFakeT()
 
-	require.True(t, m.AssertRequested(t.Context(), ft, 1, journal.Query{}, Request().Method("POST").Query("page", match.Equal("2"))))
-	require.True(t, m.AssertRequested(t.Context(), ft, 1, journal.Query{}, Request().Body(match.JSONPath("$.id", match.Equal(7)))))
-	require.True(t, m.AssertRequested(t.Context(), ft, 1, journal.Query{}, Request().FormField("b", match.Equal("2"))))
-	require.True(t, m.AssertRequested(t.Context(), ft, 1, journal.Query{}, Request().FormFile("doc", FileWith().Filename(match.Equal("a.txt")).Body(match.Equal("hello")))))
-	require.True(t, m.AssertRequested(t.Context(), ft, 1, journal.Query{}, Request().RequestMatches(func(r *http.Request) (bool, error) {
+	require.True(t, m.VerifyRequests().Matching(Request().Method("POST").Query("page", match.Equal("2"))).Times(ft, 1))
+	require.True(t, m.VerifyRequests().Matching(Request().Body(match.JSONPath("$.id", match.Equal(7)))).Times(ft, 1))
+	require.True(t, m.VerifyRequests().Matching(Request().FormField("b", match.Equal("2"))).Times(ft, 1))
+	require.True(t, m.VerifyRequests().Matching(Request().FormFile("doc", FileWith().Filename(match.Equal("a.txt")).Body(match.Equal("hello")))).Times(ft, 1))
+	require.True(t, m.VerifyRequests().Matching(Request().RequestMatches(func(r *http.Request) (bool, error) {
 		return r.URL.Path == "/form", nil
-	})))
-	require.True(t, m.AssertNotRequested(t.Context(), ft, journal.Query{}, Request().Query("page", match.Equal("3"))))
-	require.True(t, m.AssertRequested(t.Context(), ft, 3, journal.Query{Method: match.Equal("POST")}, Request().URLPath(match.HasPrefix("/"))))
+	})).Times(ft, 1))
+	require.True(t, m.VerifyRequests().Matching(Request().Query("page", match.Equal("3"))).Never(ft))
+	require.True(t, m.VerifyRequests().Method("POST").Matching(Request().URLPath(match.HasPrefix("/"))).Times(ft, 3))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
 }
 
@@ -294,12 +291,12 @@ func TestJournal_APatternMatchesItsPathParams(t *testing.T) {
 	_, _ = do(t, http.MethodGet, m.URL("/users/7"), nil, nil)
 	_, _ = do(t, http.MethodGet, m.URL("/users/8"), nil, nil)
 
-	n, err := m.CountRequests(t.Context(), journal.Query{}, Request().URLPathTemplate("/users/{id}").PathParam("id", match.Equal("7")))
+	n, err := m.VerifyRequests().Matching(Request().URLPathTemplate("/users/{id}").PathParam("id", match.Equal("7"))).Count(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 
-	_, err = m.CountRequests(t.Context(), journal.Query{}, Request().PathParam("id", match.Equal("7")))
-	require.EqualError(t, err, `journal: pattern 0: http: request pattern: path param "id": the mock has no path template: set one with URLPathTemplate`)
+	_, err = m.VerifyRequests().Matching(Request().PathParam("id", match.Equal("7"))).Count(t.Context())
+	require.EqualError(t, err, `verify: pattern 0: http: request pattern: path param "id": the mock has no path template: set one with URLPathTemplate`)
 }
 
 func TestJournal_APatternMatchesTheURLAProxiedRequestNames(t *testing.T) {
@@ -315,19 +312,16 @@ func TestJournal_APatternMatchesTheURLAProxiedRequestNames(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 
 	pattern := Request().URL(match.Equal(host.URL + "/up?q=1"))
-	require.Eventually(t, func() bool {
-		n, err := m.CountRequests(t.Context(), journal.Query{}, pattern)
-		return err == nil && n == 1
-	}, 5*time.Second, 10*time.Millisecond)
+	require.True(t, m.VerifyRequests().Matching(pattern).Within(5*time.Second).Times(t, 1))
 }
 
 func TestJournal_RefusesPatternsOfTheClientAddress(t *testing.T) {
-	// The journal keeps no client address: a pattern of one would count no request, and AssertNotRequested would
+	// The journal keeps no client address: a pattern of one would count no request, and Never would
 	// pass for a request the server got.
 	m := journaledServer(t, Setup())
 
-	_, err := m.CountRequests(t.Context(), journal.Query{}, Request().ClientIP(match.Equal("127.0.0.1")))
-	require.EqualError(t, err, "journal: pattern 0: http: a request pattern has no ClientIP: the journal keeps no client address")
+	_, err := m.VerifyRequests().Matching(Request().ClientIP(match.Equal("127.0.0.1"))).Count(t.Context())
+	require.EqualError(t, err, "verify: pattern 0: http: a request pattern has no ClientIP: the journal keeps no client address")
 }
 
 func TestJournal_RefusesPatternsThatCountRequests(t *testing.T) {
@@ -341,12 +335,12 @@ func TestJournal_RefusesPatternsThatCountRequests(t *testing.T) {
 		"broken":   Request().Times(0),
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := m.CountRequests(t.Context(), journal.Query{}, pattern)
+			_, err := m.VerifyRequests().Matching(pattern).Count(t.Context())
 			require.Error(t, err)
 		})
 	}
 
-	_, err := m.CountRequests(t.Context(), journal.Query{}, vlatte.Builder[*Mock, *Server](FromBytes([]byte("{}"), ".json")))
+	_, err := m.VerifyRequests().Matching(vlatte.Builder[*Mock, *Server](FromBytes([]byte("{}"), ".json"))).Count(t.Context())
 	require.ErrorContains(t, err, "is a *Builder")
 }
 
@@ -364,7 +358,7 @@ func TestJournal_KeepsRequestsAcrossRestarts(t *testing.T) {
 	t.Cleanup(second.Close)
 
 	ft := testmock.NewFakeT()
-	require.True(t, second.AssertRequested(t.Context(), ft, 1, journal.Query{Path: match.Equal("/before")}))
+	require.True(t, second.VerifyRequests().Path(match.Equal("/before")).Times(ft, 1))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
 }
 
@@ -394,7 +388,7 @@ func TestJournal_AServerWithoutOneCantVerify(t *testing.T) {
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	_, err := m.CountRequests(t.Context(), journal.Query{})
+	_, err := m.VerifyRequests().Count(t.Context())
 	require.ErrorIs(t, err, journal.ErrNoJournal)
 }
 
@@ -439,10 +433,7 @@ func TestJournal_ARequestToTheForwardProxyKeepsTheURLItNames(t *testing.T) {
 	require.NoError(t, res.Body.Close())
 
 	q := journal.Query{Target: match.Equal(host.URL + "/up?q=1")}
-	require.Eventually(t, func() bool {
-		n, err := m.CountRequests(t.Context(), q)
-		return err == nil && n == 1
-	}, 5*time.Second, 10*time.Millisecond)
+	require.True(t, m.VerifyRequests().Target(match.Equal(host.URL+"/up?q=1")).Within(5*time.Second).Times(t, 1))
 
 	e := only(t, m, q)
 	require.Equal(t, journal.OutcomeProxied, e.Outcome)
@@ -481,10 +472,7 @@ func TestJournal_AConnectKeepsTheAnswerItGot(t *testing.T) {
 			_, _ = io.ReadAll(conn)
 
 			q := journal.Query{Method: match.Equal(http.MethodConnect)}
-			require.Eventually(t, func() bool {
-				n, err := m.CountRequests(t.Context(), q)
-				return err == nil && n == 1
-			}, 5*time.Second, 10*time.Millisecond)
+			require.True(t, m.VerifyRequests().Method(http.MethodConnect).Within(5*time.Second).Times(t, 1))
 
 			e := only(t, m, q)
 			require.Equal(t, http.StatusOK, e.Status, "the 200 the client got")
@@ -516,10 +504,7 @@ func TestJournal_ASwitchKeepsItsStatus(t *testing.T) {
 			require.NoError(t, conn.Close())
 
 			q := journal.Query{Path: match.Equal(path)}
-			require.Eventually(t, func() bool {
-				n, err := m.CountRequests(t.Context(), q)
-				return err == nil && n > 0
-			}, 5*time.Second, 10*time.Millisecond)
+			require.True(t, m.VerifyRequests().Path(match.Equal(path)).Within(5*time.Second).AtLeast(t, 1))
 
 			e := only(t, m, q)
 			require.Equal(t, outcome, e.Outcome)
@@ -538,7 +523,7 @@ func TestJournal_AFailingJournalNeverFailsARequest(t *testing.T) {
 	status, _ := get(t, m, "/a")
 	require.Equal(t, http.StatusOK, status)
 
-	_, err := m.CountRequests(t.Context(), journal.Query{})
+	_, err := m.VerifyRequests().Count(t.Context())
 	require.True(t, errors.Is(err, journal.ErrClosed))
 }
 
@@ -575,14 +560,14 @@ func TestJournal_ABodyAtTheParseLimitIsWholeWhenItsLengthSaysSo(t *testing.T) {
 	require.False(t, only(t, m, journal.Query{Path: match.Equal("/sized")}).BodyTruncated)
 	require.True(t, only(t, m, journal.Query{Path: match.Equal("/streamed")}).BodyTruncated)
 
-	n, err := m.CountRequests(t.Context(), journal.Query{Path: match.Equal("/sized")}, Request().Body(match.Equal("abcd")))
+	n, err := m.VerifyRequests().Path(match.Equal("/sized")).Matching(Request().Body(match.Equal("abcd"))).Count(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 }
 
 func TestJournal_APatternCantReadABodyTheJournalCut(t *testing.T) {
 	// A pattern that reads the body of a request whose body the journal didn't keep whole can't tell whether the
-	// request matched: verifying fails, rather than count no request, so AssertNotRequested can't pass for a request
+	// request matched: verifying fails, rather than count no request, so Never can't pass for a request
 	// the server got. A pattern of the rest of the request still counts it, and one the rest misses misses it.
 	cut := journaledServer(t, Setup().ConfigSources(ConfigArgs([]string{"--journal-max-body-size", "64"})))
 	unread := journaledServer(t, Setup().NoBodyParsing())
@@ -610,20 +595,20 @@ func TestJournal_APatternCantReadABodyTheJournalCut(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := tt.server.CountRequests(t.Context(), journal.Query{}, tt.pattern)
+			_, err := tt.server.VerifyRequests().Matching(tt.pattern).Count(t.Context())
 			require.ErrorIs(t, err, vlatte.ErrMatching)
-			require.ErrorContains(t, err, "the journal kept part of its body")
+			require.ErrorIs(t, err, journal.ErrBodyCut)
 
 			ft := testmock.NewFakeT()
-			require.False(t, tt.server.AssertNotRequested(t.Context(), ft, journal.Query{}, tt.pattern), "it can't tell")
+			require.False(t, tt.server.VerifyRequests().Matching(tt.pattern).Never(ft), "it can't tell")
 		})
 	}
 
-	n, err := cut.CountRequests(t.Context(), journal.Query{}, Request().URLPath(match.Equal("/upload")))
+	n, err := cut.VerifyRequests().Matching(Request().URLPath(match.Equal("/upload"))).Count(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 1, n, "a pattern of the rest of the request still reads it")
 
-	n, err = cut.CountRequests(t.Context(), journal.Query{}, Request().URLPath(match.Equal("/other")).FormFile("upload", FileWith()))
+	n, err = cut.VerifyRequests().Matching(Request().URLPath(match.Equal("/other")).FormFile("upload", FileWith())).Count(t.Context())
 	require.NoError(t, err)
 	require.Zero(t, n, "the rest of the request differs: no body tells otherwise")
 }
@@ -636,11 +621,11 @@ func TestJournal_APatternCountsOnlyTheRequestsOfItsProtocol(t *testing.T) {
 	_, _ = do(t, http.MethodGet, m.URL("/pkg.Service/Call"), nil, nil)
 	require.NoError(t, m.Journal().Append(&journal.Entry{Kind: "grpc", Path: "/pkg.Service/Call", Target: "/pkg.Service/Call"}))
 
-	total, err := m.CountRequests(t.Context(), journal.Query{})
+	total, err := m.VerifyRequests().Count(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 2, total, "the journal has both")
 
-	n, err := m.CountRequests(t.Context(), journal.Query{}, Request().URLPath(match.Equal("/pkg.Service/Call")))
+	n, err := m.VerifyRequests().Matching(Request().URLPath(match.Equal("/pkg.Service/Call"))).Count(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 1, n, "the HTTP request only")
 }
@@ -653,7 +638,7 @@ func TestJournal_APatternFailsOnAnEntryThatIsNoRequest(t *testing.T) {
 	broken := &journal.Entry{Kind: Kind, Method: http.MethodGet, Target: "http://[::1"}
 	require.NoError(t, m.Journal().Append(broken))
 
-	_, err := m.CountRequests(t.Context(), journal.Query{}, Request().URLPath(match.Equal("/")))
+	_, err := m.VerifyRequests().Matching(Request().URLPath(match.Equal("/"))).Count(t.Context())
 
 	urlErr, ok := errors.AsType[*url.Error](err)
 	require.True(t, ok, "%v", err)
@@ -661,21 +646,36 @@ func TestJournal_APatternFailsOnAnEntryThatIsNoRequest(t *testing.T) {
 	require.ErrorContains(t, err, fmt.Sprintf("entry %d: target", broken.Seq))
 }
 
+func TestJournal_AFailureListsAnEntryThatIsNoRequest(t *testing.T) {
+	// An entry the criteria leave out, no request a pattern can match, is a request that came close or not: it
+	// misses the pattern, and the failure lists the requests rather than fail to.
+	m := journaledServer(t, Setup())
+
+	require.NoError(t, m.Journal().Append(&journal.Entry{Kind: Kind, Method: http.MethodDelete, Target: "http://[::1"}))
+
+	ft := testmock.NewFakeT()
+	require.False(t, m.VerifyRequests().Method("GET").Matching(Request().URLPath(match.Equal("/"))).Times(ft, 1))
+
+	errs := ft.Errors()
+	require.Len(t, errs, 1)
+	require.Contains(t, errs[0], "unknown DELETE http://[::1 0\n        missed 2 of 2: method, request\n")
+}
+
 func TestJournal_AMatcherThatFailsFailsTheVerification(t *testing.T) {
 	// A matcher that can't tell whether a request matches, such as a predicate that fails, fails verifying, as it
-	// fails matching, rather than count the request out: AssertNotRequested can't pass for a request the server got.
+	// fails matching, rather than count the request out: Never can't pass for a request the server got.
 	m := journaledServer(t, Setup())
 	_, _ = do(t, http.MethodGet, m.URL("/a"), nil, nil)
 
 	errPredicate := errors.New("predicate: failed")
 	pattern := Request().RequestMatches(func(*http.Request) (bool, error) { return false, errPredicate })
 
-	_, err := m.CountRequests(t.Context(), journal.Query{}, pattern)
+	_, err := m.VerifyRequests().Matching(pattern).Count(t.Context())
 	require.ErrorIs(t, err, vlatte.ErrMatching)
 	require.ErrorIs(t, err, errPredicate)
 
 	ft := testmock.NewFakeT()
-	require.False(t, m.AssertNotRequested(t.Context(), ft, journal.Query{}, pattern))
+	require.False(t, m.VerifyRequests().Matching(pattern).Never(ft))
 }
 
 func TestJournal_APatternReadsAnEntryWithoutHeaders(t *testing.T) {
@@ -685,9 +685,9 @@ func TestJournal_APatternReadsAnEntryWithoutHeaders(t *testing.T) {
 
 	require.NoError(t, m.Journal().Append(&journal.Entry{Kind: Kind, Method: http.MethodGet, Path: "/plain", Target: "http://example.com/plain"}))
 
-	n, err := m.CountRequests(t.Context(), journal.Query{}, Request().URLPath(match.Equal("/plain")).RequestMatches(func(r *http.Request) (bool, error) {
+	n, err := m.VerifyRequests().Matching(Request().URLPath(match.Equal("/plain")).RequestMatches(func(r *http.Request) (bool, error) {
 		return r.Header != nil && r.Host == "example.com", nil
-	}))
+	})).Count(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 }
@@ -936,10 +936,7 @@ func TestJournal_AnAnswerATimeoutGaveFirstKeepsItsStatus(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, res.StatusCode)
 	close(release)
 
-	require.Eventually(t, func() bool {
-		n, err := m.CountRequests(t.Context(), journal.Query{})
-		return err == nil && n == 1
-	}, 5*time.Second, 10*time.Millisecond)
+	require.True(t, m.VerifyRequests().Within(5*time.Second).Times(t, 1))
 
 	e := only(t, m, journal.Query{})
 	require.Equal(t, http.StatusServiceUnavailable, e.Status, "the status the client got")
@@ -1057,4 +1054,23 @@ func TestJournal_AnInterceptedRequestKeepsTheStatusTheClientGot(t *testing.T) {
 
 	e := only(t, m, journal.Query{Path: match.Equal("/mocked")})
 	require.Equal(t, http.StatusCreated, e.Status)
+}
+
+func TestJournal_AFailureNamesThePartsOfAPatternTheClosestMissed(t *testing.T) {
+	// A pattern names its parts as a near miss does: the test tells which part of the request it got was wrong.
+	m := journaledServer(t, Setup())
+
+	_, _ = do(t, http.MethodPost, m.URL("/orders?page=1"), http.Header{"Content-Type": {"application/json"}}, []byte(`{"id": 7}`))
+
+	ft := testmock.NewFakeT()
+	require.False(t, m.VerifyRequests().
+		Matching(Request().Method("POST").Query("page", match.Equal("2")).Body(match.JSONPath("$.id", match.Equal(7)))).
+		Times(ft, 1))
+
+	errs := ft.Errors()
+	require.Len(t, errs, 1)
+
+	report := errs[0]
+	require.Contains(t, report, "Expected exactly 1 request(s) with a pattern.\nGot 0.\n")
+	require.Contains(t, report, "unmatched POST "+m.URL("/orders?page=1")+" 418\n        missed 1 of 3: query page\n")
 }

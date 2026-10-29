@@ -19,12 +19,13 @@ const (
 )
 
 // RequestList is the answer of [Operations.ListRequests] and [Operations.QueryRequests], GET and QUERY /requests: count
-// is how many requests the query selects, whatever page requests holds, and next, the before of the next page, when
-// there is one.
+// is how many requests the query selects, whatever page requests holds, next, the before of the next page, when there
+// is one, and mark, the number of the newest request of the journal, for a later query or check to take as its after.
 type RequestList struct {
 	Count    int              `json:"count"`
 	Requests []*journal.Entry `json:"requests"`
 	Next     uint64           `json:"next,omitzero"`
+	Mark     uint64           `json:"mark"`
 }
 
 // findRequests returns the requests q, with filters, selects, a page of limit of them, or their count only for 0. A
@@ -35,6 +36,8 @@ func (o *Operations) findRequests(ctx context.Context, q journal.Query, filters 
 	}
 
 	var (
+		// Taken first: a request that comes as the query runs comes after the mark.
+		mark = o.journal.Last()
 		list RequestList
 		err  error
 	)
@@ -65,6 +68,8 @@ func (o *Operations) findRequests(ctx context.Context, q journal.Query, filters 
 	if list.Requests == nil {
 		list.Requests = []*journal.Entry{}
 	}
+
+	list.Mark = mark
 
 	return list, nil
 }

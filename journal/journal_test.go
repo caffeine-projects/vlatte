@@ -325,6 +325,96 @@ func TestJournal_ClearsEverything(t *testing.T) {
 	require.Len(t, logs, 1)
 }
 
+func TestJournal_TellsWhatItDroppedAndWhatItCleared(t *testing.T) {
+	// A count of the entries after a point is whole only if the journal dropped none of them to keep MaxEntries: a
+	// verification that counted what's left would pass on a partial count. A Clear is a reset the user asked for,
+	// so the journal tells the two apart, and a clear starts its count of dropped entries over.
+	j := newJournal(t, journal.Options{MaxEntries: 2})
+	require.Zero(t, j.Cleared(), "a new journal starts empty")
+	require.Zero(t, j.Trimmed())
+
+	for _, id := range []string{"a", "b"} {
+		require.NoError(t, j.Append(entry(id)))
+	}
+
+	require.Zero(t, j.Trimmed(), "nothing dropped while it holds MaxEntries")
+
+	require.NoError(t, j.Append(entry("c")))
+	require.Equal(t, uint64(1), j.Trimmed())
+	require.Zero(t, j.Cleared())
+
+	require.NoError(t, j.Clear())
+	require.Equal(t, uint64(3), j.Cleared())
+	require.Zero(t, j.Trimmed())
+
+	for _, id := range []string{"d", "e", "f", "g"} {
+		require.NoError(t, j.Append(entry(id)))
+	}
+
+	require.Equal(t, uint64(5), j.Trimmed())
+	require.Equal(t, uint64(7), j.Last())
+}
+
+func TestJournal_StartsAfterTheEntriesItDidntLoad(t *testing.T) {
+	// A journal opened on a directory holds what an earlier one kept, maybe fewer under a lower MaxEntries: those it
+	// doesn't hold came before its start, not drops a verification of its own requests must report.
+	dir := t.TempDir()
+
+	j, err := journal.New(journal.Options{Dir: dir})
+	require.NoError(t, err)
+
+	for _, id := range []string{"a", "b", "c"} {
+		require.NoError(t, j.Append(entry(id)))
+	}
+
+	require.NoError(t, j.Close())
+
+	j = newJournal(t, journal.Options{Dir: dir, MaxEntries: 2})
+	require.Equal(t, []string{"c", "b"}, find(t, j, journal.Query{}))
+	require.Equal(t, uint64(1), j.Cleared())
+	require.Zero(t, j.Trimmed())
+	require.Equal(t, uint64(3), j.Last())
+}
+
+func TestJournal_ChangedWakesThoseWaitingOnEachChange(t *testing.T) {
+	// A verification that waits for a request wakes when the journal changes, rather than poll: on each append, on a
+	// clear, and on close, after which it queries and gets ErrClosed rather than wait forever.
+	j := newJournal(t, journal.Options{})
+
+	changed := j.Changed()
+	require.False(t, isClosed(changed))
+	require.Equal(t, changed, j.Changed(), "waiters share the channel of the next change")
+
+	require.NoError(t, j.Append(entry("a")))
+	require.True(t, isClosed(changed), "an append wakes them")
+
+	changed = j.Changed()
+	require.False(t, isClosed(changed), "the next change gets a channel of its own")
+	require.NoError(t, j.Clear())
+	require.True(t, isClosed(changed), "a clear wakes them")
+
+	changed = j.Changed()
+	require.NoError(t, j.Close())
+	require.True(t, isClosed(changed), "a close wakes them")
+	require.True(t, isClosed(j.Changed()), "nothing changes a closed journal: no one waits on it")
+
+	var none *journal.Journal
+	require.True(t, isClosed(none.Changed()), "no journal: the query that follows fails with ErrNoJournal")
+	require.Zero(t, none.Last())
+	require.Zero(t, none.Cleared())
+	require.Zero(t, none.Trimmed())
+}
+
+// isClosed tells whether c is closed, without waiting.
+func isClosed(c <-chan struct{}) bool {
+	select {
+	case <-c:
+		return true
+	default:
+		return false
+	}
+}
+
 func TestJournal_KeepsItsEntriesAcrossRestarts(t *testing.T) {
 	// A journal of a named directory is a changelog: a server that restarts finds the requests it served before,
 	// and numbers new ones after them.

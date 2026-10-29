@@ -506,6 +506,10 @@ paths:
           in: query
           description: Answer the requests before this one, the `next` of a page.
           schema: { type: integer, minimum: 0 }
+        - name: after
+          in: query
+          description: Answer the requests after this one, such as the `mark` of a list taken before a test.
+          schema: { type: integer, minimum: 0 }
       responses:
         "200":
           description: The requests.
@@ -561,6 +565,42 @@ paths:
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "501": { $ref: "#/components/responses/NotSupported" }
+  /requests/verify:
+    query:
+      tags: [Journal]
+      operationId: verifyRequests
+      summary: Verify requests
+      description: |
+        Checks the requests of the journal as a Go test does with package `verify`, and answers its verdict: `200`
+        whether it passed or not. The keys of `QUERY /requests`, but `limit` and `before`, select the requests;
+        `count` matches how many, at least 1 when it's left out. The check runs now, or waits: up to `within` for the
+        count to pass, or `during` for it to fail, waking as each request comes, up to 30s. `in_order`, a list of
+        queries, checks instead that a request of each came after the request of the one before. `after`, the `mark`
+        of a list, leaves out the requests up to it, such as those of earlier tests. A check that failed lists the
+        requests that tell why, without their headers or bodies, which `GET /requests/{id}` answers.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RequestCheck" }
+          application/yaml:
+            schema: { $ref: "#/components/schemas/RequestCheck" }
+      responses:
+        "200":
+          description: The verdict.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestVerdict" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/RequestVerdict" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/IncompleteJournal" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+        "503": { $ref: "#/components/responses/Closing" }
   /requests/{id}:
     parameters:
       - name: id
@@ -1221,7 +1261,7 @@ components:
       additionalProperties: false
     RequestList:
       type: object
-      required: [count, requests]
+      required: [count, requests, mark]
       properties:
         count:
           type: integer
@@ -1233,6 +1273,11 @@ components:
         next:
           type: integer
           description: The `before` of the next page, when there is one.
+        mark:
+          type: integer
+          description: |
+            The number of the newest request of the journal. A query or a check that takes it as `after` leaves out
+            the requests up to it.
       additionalProperties: false
     Matcher:
       description: |
@@ -1287,6 +1332,127 @@ components:
           type: integer
           minimum: 0
           description: Answer the requests before this one, the `next` of a page.
+        after:
+          type: integer
+          minimum: 0
+          description: Answer the requests after this one, such as the `mark` of a list taken before a test.
+      additionalProperties: false
+    RequestCheck:
+      type: object
+      description: |
+        The keys of a `RequestQuery`, but `limit` and `before`, select the requests the check counts. `in_order` takes
+        their place, and `count`'s, for a check of order.
+      properties:
+        kind: { $ref: "#/components/schemas/RequestQuery/properties/kind" }
+        outcome: { $ref: "#/components/schemas/RequestQuery/properties/outcome" }
+        mock_id: { $ref: "#/components/schemas/Matcher" }
+        method: { $ref: "#/components/schemas/Matcher" }
+        path: { $ref: "#/components/schemas/Matcher" }
+        target: { $ref: "#/components/schemas/Matcher" }
+        status: { $ref: "#/components/schemas/Matcher" }
+        body: { $ref: "#/components/schemas/RequestQuery/properties/body" }
+        header: { $ref: "#/components/schemas/RequestQuery/properties/header" }
+        since: { $ref: "#/components/schemas/RequestQuery/properties/since" }
+        until: { $ref: "#/components/schemas/RequestQuery/properties/until" }
+        request: { $ref: "#/components/schemas/RequestQuery/properties/request" }
+        after:
+          type: integer
+          minimum: 0
+          description: |
+            Check the requests after this one, the `mark` of a list. A journal cleared since answers
+            `incomplete_journal`.
+        count:
+          $ref: "#/components/schemas/Matcher"
+          description: How many requests, such as `2` or `["gte", 2]`. None is at least 1.
+        within:
+          $ref: "#/components/schemas/Wait"
+          description: Wait up to this long for the count to pass, such as for a request sent in the background.
+        during:
+          $ref: "#/components/schemas/Wait"
+          description: Wait this long for the count to fail, such as for `count` 0. It passes when it ends.
+        in_order:
+          type: array
+          minItems: 1
+          description: |
+            The steps of an order, each the keys of a query that select its requests, but `after`, which is the
+            check's. A step's request comes after the request of the step before; other requests may come between.
+            It checks now.
+          items:
+            type: object
+            properties:
+              kind: { $ref: "#/components/schemas/RequestQuery/properties/kind" }
+              outcome: { $ref: "#/components/schemas/RequestQuery/properties/outcome" }
+              mock_id: { $ref: "#/components/schemas/Matcher" }
+              method: { $ref: "#/components/schemas/Matcher" }
+              path: { $ref: "#/components/schemas/Matcher" }
+              target: { $ref: "#/components/schemas/Matcher" }
+              status: { $ref: "#/components/schemas/Matcher" }
+              body: { $ref: "#/components/schemas/RequestQuery/properties/body" }
+              header: { $ref: "#/components/schemas/RequestQuery/properties/header" }
+              since: { $ref: "#/components/schemas/RequestQuery/properties/since" }
+              until: { $ref: "#/components/schemas/RequestQuery/properties/until" }
+              request: { $ref: "#/components/schemas/RequestQuery/properties/request" }
+            additionalProperties: false
+      additionalProperties: false
+    Wait:
+      description: |
+        How long to wait, up to 30s: whole milliseconds, or a duration, such as `1.5s`. The wait ends with the server,
+        and with a reset of its journal.
+      anyOf:
+        - type: integer
+          minimum: 1
+          maximum: 30000
+        - type: string
+    RequestVerdict:
+      type: object
+      required: [passed, waited_ms]
+      properties:
+        passed:
+          type: boolean
+        count:
+          type: integer
+          description: How many requests the check selected. A check of order has none.
+        waited_ms:
+          type: integer
+          description: How long the check waited, in milliseconds.
+        selected:
+          type: array
+          description: Of a check that failed, the requests it selected, the newest first, up to 10.
+          items: { $ref: "#/components/schemas/ListedRequest" }
+        closest:
+          type: array
+          description: |
+            Of a check that failed for want of requests, those that came closest to being selected, up to 10: the
+            fewest parts missed first, then the newest.
+          items: { $ref: "#/components/schemas/ListedRequest" }
+        report:
+          type: string
+          description: Of a check that failed, why, in lines, as a Go test reports it.
+      additionalProperties: false
+    ListedRequest:
+      type: object
+      description: A request a verdict lists, without its headers or body, which may hold secrets.
+      required: [seq, id, line]
+      properties:
+        seq:
+          type: integer
+          description: The number of the request in the journal.
+        id:
+          type: string
+          description: The id of the request, for `GET /requests/{id}`.
+        line:
+          type: string
+          description: The request in a line, such as `#3 2026-10-21T12:00:00.000Z matched GET http://127.0.0.1/a 200`.
+        passed:
+          type: integer
+          description: Of a request that came close, how many of the parts of the check it passed.
+        total:
+          type: integer
+          description: Of a request that came close, how many parts of the check it was checked by.
+        missed:
+          type: array
+          items: { type: string }
+          description: Of a request that came close, the parts of the check it missed, such as `header Accept`.
       additionalProperties: false
     Problem:
       type: object
@@ -1323,6 +1489,7 @@ components:
             - not_ready
             - unknown_state
             - unauthorized
+            - incomplete_journal
         detail:
           type: string
           description: What went wrong in this request.
@@ -1467,6 +1634,23 @@ components:
           schema: { $ref: "#/components/schemas/Problem" }
     NotSupported:
       description: "`not_supported`: the mock server's protocol can't do this."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    IncompleteJournal:
+      description: |
+        `incomplete_journal`: the journal no longer holds every request the check counts: it dropped some to keep
+        its most entries, it was cleared after `after` or during the wait, or `after` is past its newest request; or
+        it kept part of a body the check reads.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Closing:
+      description: "`closing`: the mock server is closing, and ended the wait."
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }

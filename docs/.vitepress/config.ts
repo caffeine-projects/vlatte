@@ -104,7 +104,21 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Templates', link: '/features/templates' },
       { text: 'Webhooks and events', link: '/features/webhooks-events' },
       { text: 'Request journal', link: '/features/journal' },
+      { text: 'Verifying requests', link: '/verify/' },
       { text: 'TLS', link: '/features/tls' },
+    ],
+  },
+  {
+    text: 'Verifying requests',
+    collapsed: true,
+    items: [
+      { text: 'Overview', link: '/verify/' },
+      { text: 'Selecting requests', link: '/verify/selecting' },
+      { text: 'Counts and reports', link: '/verify/counting' },
+      { text: 'Waiting', link: '/verify/waiting' },
+      { text: 'Marks and order', link: '/verify/marks-and-order' },
+      { text: 'Admin API and MCP', link: '/verify/admin-api' },
+      { text: 'Troubleshooting', link: '/verify/troubleshooting' },
     ],
   },
   {

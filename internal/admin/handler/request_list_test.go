@@ -17,14 +17,14 @@ func TestOperations_ListRequestsTakesAPageOfALimitItCanAnswer(t *testing.T) {
 	ops := handler.NewOperations(adminapi.Capabilities{Mocks: adminapi.MocksOf[*fakeMock](newStore(t), nil), Journal: j})
 
 	for _, limit := range []int{-1, 1001} {
-		_, err := ops.ListRequests(t.Context(), limit, 0)
+		_, err := ops.ListRequests(t.Context(), limit, 0, 0)
 
 		doc := handler.Problem(err, "list_requests")
 		require.Equal(t, 400, doc.Status)
 		require.Equal(t, "invalid_parameter", doc.Code)
 	}
 
-	list, err := ops.ListRequests(t.Context(), 1000, 0)
+	list, err := ops.ListRequests(t.Context(), 1000, 0, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, list.Count)
 }

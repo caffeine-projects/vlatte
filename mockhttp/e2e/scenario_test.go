@@ -263,7 +263,7 @@ func TestScenarios_TheJournalKeepsTheMovesOfARequest(t *testing.T) {
 	getTarget(t, m, "/order")
 
 	only := func(path string) *journal.Entry {
-		entries, err := m.Requests(t.Context(), journal.Query{Path: match.Equal(path)})
+		entries, err := m.VerifyRequests().Path(match.Equal(path)).Find(t.Context())
 		require.NoError(t, err)
 		require.Len(t, entries, 1)
 
@@ -338,7 +338,7 @@ func TestScenarios_TheJournalAndTheEventsNameTheKey(t *testing.T) {
 		{"type": "scenario", "target": "checkout", "message": "checkout (key t1) reset to started"},
 	}, events)
 
-	entries, err := m.Requests(t.Context(), journal.Query{Path: match.Equal("/pay")})
+	entries, err := m.VerifyRequests().Path(match.Equal("/pay")).Find(t.Context())
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	require.Equal(t, []matchscenario.Move{{Scenario: "checkout", Key: "t1", From: matchscenario.StateStarted, To: "paid"}},

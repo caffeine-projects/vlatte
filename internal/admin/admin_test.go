@@ -24,6 +24,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/journal"
 )
 
 func TestMain(m *testing.M) {
@@ -194,6 +195,49 @@ func TestServer_CloseWaitsForTheOperationsItServes(t *testing.T) {
 	close(files.release)
 	<-closed
 	require.Equal(t, http.StatusNoContent, <-reloaded, "the reload ended")
+}
+
+func TestServer_CloseEndsTheChecksThatWait(t *testing.T) {
+	// A check of the journal waits up to 30s for a request that may never come: Close ends it rather than wait for it,
+	// or give up on it, and its client learns why.
+	j, err := journal.New(journal.Options{Dir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { j.Close() })
+
+	entered := make(chan struct{})
+	signal := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(entered)
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	s := newServer(t, Options{Middlewares: []func(http.Handler) http.Handler{signal}}, adminapi.Capabilities{Journal: j})
+	require.NoError(t, s.Start())
+
+	verified := make(chan int, 1)
+	go func() {
+		r, err := http.NewRequestWithContext(context.Background(), "QUERY", s.URL()+"/requests/verify", strings.NewReader(`{"within": "30s"}`))
+		if err != nil {
+			verified <- 0
+			return
+		}
+
+		r.Header.Set("Content-Type", "application/json")
+
+		res, err := http.DefaultClient.Do(r)
+		if err != nil {
+			verified <- 0
+			return
+		}
+
+		_ = res.Body.Close()
+		verified <- res.StatusCode
+	}()
+
+	<-entered
+	require.NoError(t, s.Close(), "the check ended before Close gave up on it")
+	require.Equal(t, http.StatusServiceUnavailable, <-verified)
 }
 
 func TestNew_NeedsTheMocks(t *testing.T) {

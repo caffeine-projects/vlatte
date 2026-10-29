@@ -1,6 +1,8 @@
 package testmock
 
 import (
+	"fmt"
+
 	"github.com/stretchr/testify/mock"
 
 	"github.com/caffeine-projects/vlatte"
@@ -40,3 +42,17 @@ func (m *FakeT) Errorf(format string, args ...any) {
 }
 
 func (m *FakeT) Cleanup(_ func()) { /* not necessary */ }
+
+// Errors returns the messages of the Errorf calls the fake received, formatted, in the order it received them.
+func (m *FakeT) Errors() []string {
+	var out []string
+
+	for _, call := range m.Calls {
+		if call.Method == "Errorf" {
+			args, _ := call.Arguments.Get(1).([]any)
+			out = append(out, fmt.Sprintf(call.Arguments.String(0), args...))
+		}
+	}
+
+	return out
+}
