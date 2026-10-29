@@ -46,6 +46,8 @@ type Config struct {
 
 // App is the web app. Its routes:
 //
+// Its cookies are Secure: serve it over HTTPS.
+//
 //   - GET /login sends the browser to GitHub to sign in.
 //   - GET /callback is where GitHub sends it back. It checks the state, exchanges the code for a token, starts a
 //     session and sends the browser to /me.
@@ -83,7 +85,7 @@ func (app *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (app *App) login(w http.ResponseWriter, r *http.Request) {
 	state := rand.Text()
-	http.SetCookie(w, &http.Cookie{Name: StateCookie, Value: state, Path: "/", HttpOnly: true})
+	http.SetCookie(w, &http.Cookie{Name: StateCookie, Value: state, Path: "/", Secure: true, HttpOnly: true})
 
 	query := url.Values{
 		"client_id":    {app.cfg.ClientID},
@@ -103,7 +105,7 @@ func (app *App) callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "githubapp: invalid state", http.StatusForbidden)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: StateCookie, Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: StateCookie, Path: "/", MaxAge: -1, Secure: true, HttpOnly: true})
 
 	if e := query.Get("error"); e != "" {
 		http.Error(w, "githubapp: sign in failed: "+e, http.StatusUnauthorized)
@@ -121,7 +123,7 @@ func (app *App) callback(w http.ResponseWriter, r *http.Request) {
 	app.sessions[id] = token
 	app.mu.Unlock()
 
-	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: id, Path: "/", HttpOnly: true})
+	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: id, Path: "/", Secure: true, HttpOnly: true})
 	http.Redirect(w, r, "/me", http.StatusFound)
 }
 

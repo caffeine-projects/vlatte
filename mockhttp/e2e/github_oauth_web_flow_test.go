@@ -64,7 +64,7 @@ func TestGitHubOAuthWebFlow_RejectsAForgedState(t *testing.T) {
 	startSignIn(t, browser, app)
 
 	// A state the app gave another browser is as forged as a made-up one.
-	for _, state := range []string{"forged", startSignIn(t, newBrowser(t), app)} {
+	for _, state := range []string{"forged", startSignIn(t, newBrowser(t, app), app)} {
 		status, body := browse(t, browser, app.URL+"/callback?code="+_ghCode+"&state="+url.QueryEscape(state))
 
 		require.Equal(t, http.StatusForbidden, status)
@@ -150,9 +150,9 @@ func startGitHubOAuthWebFlow(t *testing.T) (*githubMocks, *httptest.Server, *htt
 	server.MustStart()
 	t.Cleanup(server.Close)
 
-	// The app must know its own URL, its redirect URL, before it serves.
+	// The app must know its own URL, its redirect URL, before it serves. It serves HTTPS, as its cookies are Secure.
 	app := httptest.NewUnstartedServer(nil)
-	callback := "http://" + app.Listener.Addr().String() + "/callback"
+	callback := "https://" + app.Listener.Addr().String() + "/callback"
 	app.Config.Handler = githubapp.New(githubapp.Config{
 		AuthURL:      server.URL(),
 		APIURL:       server.URL(),
@@ -161,20 +161,20 @@ func startGitHubOAuthWebFlow(t *testing.T) (*githubMocks, *httptest.Server, *htt
 		RedirectURL:  callback,
 		Scope:        _ghScope,
 	})
-	app.Start()
+	app.StartTLS()
 	t.Cleanup(app.Close)
 
-	return mockGitHub(t, server, callback), app, newBrowser(t)
+	return mockGitHub(t, server, callback), app, newBrowser(t, app)
 }
 
-// newBrowser returns a client that keeps cookies and follows redirects, as a browser does.
-func newBrowser(t *testing.T) *http.Client {
+// newBrowser returns a client that keeps cookies and follows redirects, as a browser does, and trusts app.
+func newBrowser(t *testing.T, app *httptest.Server) *http.Client {
 	t.Helper()
 
 	jar, err := cookiejar.New(nil)
 	require.NoError(t, err)
 
-	browser := &http.Client{Jar: jar}
+	browser := &http.Client{Jar: jar, Transport: app.Client().Transport}
 	t.Cleanup(browser.CloseIdleConnections)
 
 	return browser
@@ -184,6 +184,7 @@ func newBrowser(t *testing.T) *http.Client {
 func noRedirects(browser *http.Client) *http.Client {
 	return &http.Client{
 		Jar:           browser.Jar,
+		Transport:     browser.Transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 }
