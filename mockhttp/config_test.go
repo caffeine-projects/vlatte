@@ -171,6 +171,7 @@ func TestConfigBuilder(t *testing.T) {
 	customLogger := zerolog.Nop()
 	tlsConfig := &tls.Config{InsecureSkipVerify: true}
 	engine := vlatte.MustNewGoTemplateEngine()
+	kv := vlatte.NewMemoryKV()
 
 	m := MustNew(Setup().
 		Name(nm).
@@ -193,7 +194,7 @@ func TestConfigBuilder(t *testing.T) {
 		Logger(&customLogger).
 		UseDescriptiveLogger().
 		RedactHeader("header-1", "HEADER-2", "hEaDeR-3").
-		Parameters(vlatte.NewMemoryKV()).
+		KV(kv).
 		MockFilePatterns("test", "dev").
 		Loader(&fileLoader{}).
 		MockFileHandlers(&customMockFileHandler{}).
@@ -221,7 +222,7 @@ func TestConfigBuilder(t *testing.T) {
 	require.False(t, conf.LogPretty)
 	require.Equal(t, &customLogger, conf.Logger)
 	require.Equal(t, int64(100), conf.LogBodyMaxSize)
-	require.Equal(t, vlatte.NewMemoryKV(), conf.Parameters)
+	require.Same(t, kv, conf.KV)
 	require.Equal(t, []string{"test", "dev"}, conf.MockFileSearchPatterns)
 	require.True(t, conf.Debug)
 	require.Len(t, conf.HeaderNamesToRedact, 3)

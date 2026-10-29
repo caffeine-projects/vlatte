@@ -1,2 +1,2 @@
 Method is: {{ .Request.Method }}
-Message is: {{ .Parameters.Get "message" }}
+Message is: {{ .KV.Get "message" }}

@@ -54,7 +54,7 @@ type Config struct {
 	TLSConfig             *tls.Config
 	TLSCertificates       []tls.Certificate
 	TLSClientCAs          *x509.CertPool
-	Parameters            vlatte.KV
+	KV                    vlatte.KV
 	Logger                *zerolog.Logger
 	LogOutput             io.Writer
 	LogVerbosity          vlatte.LogVerbosity
@@ -151,7 +151,7 @@ func (c *Config) Apply(conf *Config) error {
 	conf.TLSConfig = c.TLSConfig
 	conf.TLSCertificates = c.TLSCertificates
 	conf.TLSClientCAs = c.TLSClientCAs
-	conf.Parameters = c.Parameters
+	conf.KV = c.KV
 	conf.Logger = c.Logger
 	conf.LogOutput = c.LogOutput
 	conf.LogVerbosity = c.LogVerbosity
@@ -471,9 +471,10 @@ func (cb *ConfigBuilder) RedactHeader(names ...string) *ConfigBuilder {
 	})
 }
 
-// Parameters sets a custom reply parameters store.
-func (cb *ConfigBuilder) Parameters(params vlatte.KV) *ConfigBuilder {
-	return cb.set(func(conf *Config) { conf.Parameters = params })
+// KV sets the key-value store templates read as .KV: {{ .KV.Get "key" }}. Without one, the server keeps the values
+// in memory.
+func (cb *ConfigBuilder) KV(kv vlatte.KV) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.KV = kv })
 }
 
 // MockFilePatterns sets custom Glob patterns to load mock from the file system, which may start with WorkDirVar.

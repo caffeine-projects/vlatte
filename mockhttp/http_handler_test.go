@@ -1262,7 +1262,7 @@ func TestLifecycle_LogsWhatTheVerbosityAsksFor(t *testing.T) {
 	})
 }
 
-// cancelableKV is a parameter store that fails once its context is done, as a remote store does.
+// cancelableKV is a key-value store that fails once its context is done, as a remote store does.
 type cancelableKV struct {
 	vlatte.KV
 }
@@ -1277,15 +1277,15 @@ func (kv cancelableKV) Get(ctx context.Context, k string) ([]byte, error) {
 
 func TestHandler_EventsOutliveTheClient(t *testing.T) {
 	// A client that leaves, as one that times out does, ends the context of its request, not the events of the
-	// request: they run with a context of their own, and their templates read the parameters with it, through a store
-	// that fails once its context is done.
+	// request: they run with a context of their own, and their templates read the key-value store with it, through a
+	// store that fails once its context is done.
 	kv := cancelableKV{vlatte.NewMemoryKV()}
 	require.NoError(t, kv.Set(t.Context(), "target", []byte("api")))
 
 	started := make(chan struct{})
 	rendered := make(chan string, 1)
 
-	m := MustNew(Setup().Silent().Parameters(kv).OnCompleteListener("renders", vlatte.EventFunc[vlatte.OnComplete](
+	m := MustNew(Setup().Silent().KV(kv).OnCompleteListener("renders", vlatte.EventFunc[vlatte.OnComplete](
 		func(ctx context.Context, e vlatte.OnComplete) error {
 			close(started)
 
@@ -1297,7 +1297,7 @@ func TestHandler_EventsOutliveTheClient(t *testing.T) {
 
 			var b strings.Builder
 
-			tmpl, err := e.Kit().TemplateEngine().Compile("target", `{{ .Parameters.Get "target" }}`)
+			tmpl, err := e.Kit().TemplateEngine().Compile("target", `{{ .KV.Get "target" }}`)
 			if err == nil {
 				err = tmpl.Execute(&b, e.Kit().Data())
 			}
@@ -1353,7 +1353,7 @@ func TestHandler_EventsOutliveTheClient(t *testing.T) {
 
 type tenantKey struct{}
 
-// tenantKV is a parameter store scoped to the tenant of each request: a read without one fails.
+// tenantKV is a key-value store scoped to the tenant of each request: a read without one fails.
 type tenantKV struct {
 	vlatte.KV
 }
@@ -1368,7 +1368,7 @@ func (kv tenantKV) Get(ctx context.Context, k string) ([]byte, error) {
 
 func TestHandler_EventsSeeTheValuesOfTheRequestContext(t *testing.T) {
 	// Middlewares put request-scoped values in the request's context, such as a trace or a tenant, which listeners and
-	// parameter stores read: the events of the request see them.
+	// key-value stores read: the events of the request see them.
 	kv := tenantKV{vlatte.NewMemoryKV()}
 	require.NoError(t, kv.Set(t.Context(), "target", []byte("api")))
 
@@ -1379,7 +1379,7 @@ func TestHandler_EventsSeeTheValuesOfTheRequestContext(t *testing.T) {
 
 	got := make(chan seen, 1)
 
-	m := MustNew(Setup().Silent().Parameters(kv).
+	m := MustNew(Setup().Silent().KV(kv).
 		Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), tenantKey{}, "acme")))
@@ -1388,7 +1388,7 @@ func TestHandler_EventsSeeTheValuesOfTheRequestContext(t *testing.T) {
 		OnCompleteListener("reads", vlatte.EventFunc[vlatte.OnComplete](func(ctx context.Context, e vlatte.OnComplete) error {
 			var b strings.Builder
 
-			tmpl, err := e.Kit().TemplateEngine().Compile("target", `{{ .Parameters.Get "target" }}`)
+			tmpl, err := e.Kit().TemplateEngine().Compile("target", `{{ .KV.Get "target" }}`)
 			if err == nil {
 				err = tmpl.Execute(&b, e.Kit().Data())
 			}

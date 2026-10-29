@@ -44,12 +44,27 @@ Templates read:
 | `.Request.Body.String`, `.Request.Body.Content`, `.Request.HasBody` | The body. JSON bodies are text: read their fields with `fromJSON`. |
 | `.Request.Cookie "name"`, `.Request.PostForm.Get "f"`, `.Request.FormFile "f"` | Cookies and forms. |
 | `.Server.URL` | The server's base URL. |
-| `.Parameters.Get "key"`, `.Parameters.Has "key"` | The server's parameters. |
+| `.KV.Get "key"`, `.KV.Has "key"` | The server's [key-value store](#key-value-store). |
 | `.Data` | The map set with `m.SetData`. |
 | `.Provided.<key>` | What `Setup().TemplateDataProviders(providers)` provide. |
 | `.Extra` | The reply's `template.data`, or `SetTemplateData` in Go. Webhooks don't have it. |
 | `.Scenarios.State "name"` | The state of a [scenario](/scenarios/). |
 | `.Scenarios.StateOf "name" "key"` | The state of the instance of a [scenario](/scenarios/) of a key. |
+
+## Key-value store
+
+`.KV` reads the server's key-value store: `{{ .KV.Get "token" }}` writes the value of `token`, and `{{ if .KV.Has "token" }}` checks for a key that may be missing. Go code sets the values, as in `m.KV().Set(ctx, "token", []byte("abc123"))`. The server keeps them in memory, and `Setup().KV(store)` gives it a store of your own instead, such as one on Redis, that implements `vlatte.KV`:
+
+```go
+type KV interface {
+	Get(ctx context.Context, k string) ([]byte, error)
+	Has(ctx context.Context, k string) (bool, error)
+	Set(ctx context.Context, k string, v []byte) error
+	Del(ctx context.Context, k string) error
+}
+```
+
+A store reads with the context of the request, or with an event's own for webhooks, which outlives a client that leaves. `.Data` holds values too: a map of any values that `m.SetData` sets on one server. The key-value store holds text by key, and a store of your own can share it with other servers and processes.
 
 ## Functions
 
@@ -93,7 +108,7 @@ m := mockhttp.MustNew(mockhttp.Setup().TemplateEngine(engine))
 
 ## Missing keys
 
-Missing keys are errors. `{{ .Extra.nmae }}` fails the request and names the key, instead of writing `<no value>`, and so does `.Parameters.Get` of a parameter that isn't set. Read an optional key with `index`, as in `{{ with index .Extra "nick" }}{{ . }}{{ end }}`, and an optional parameter with `.Parameters.Has` first. `vlatte.WithMissingKey` changes the rule for map keys.
+Missing keys are errors. `{{ .Extra.nmae }}` fails the request and names the key, instead of writing `<no value>`, and so does `.KV.Get` of a key that isn't set. Read an optional key with `index`, as in `{{ with index .Extra "nick" }}{{ . }}{{ end }}`, and an optional key of the key-value store with `.KV.Has` first. `vlatte.WithMissingKey` changes the rule for map keys.
 
 ## Escaping
 
@@ -129,7 +144,7 @@ type Template interface {
 }
 ```
 
-Pass it with `Setup().TemplateEngine(e)`. Templates then use its syntax everywhere, mock files included, as in `{{Request.Method}}` for Handlebars. [`template_handlebars_test.go`](https://github.com/caffeine-projects/vlatte/blob/main/mockhttp/e2e/template_handlebars_test.go) wraps [raymond](https://github.com/mailgun/raymond) in a few lines. Other engines read the same fields, maps and methods without arguments; methods with arguments, such as `.Parameters.Get "key"`, are Go template syntax.
+Pass it with `Setup().TemplateEngine(e)`. Templates then use its syntax everywhere, mock files included, as in `{{Request.Method}}` for Handlebars. [`template_handlebars_test.go`](https://github.com/caffeine-projects/vlatte/blob/main/mockhttp/e2e/template_handlebars_test.go) wraps [raymond](https://github.com/mailgun/raymond) in a few lines. Other engines read the same fields, maps and methods without arguments; methods with arguments, such as `.KV.Get "key"`, are Go template syntax.
 
 ## In gRPC
 
@@ -139,7 +154,7 @@ A gRPC mock renders its messages with `Template(texts...)`, `template` in a [gRP
 |---|---|
 | `.Request.Message.<field>` | The request, by the field names of the `.proto` file. |
 | `.Request.Header` | The call's metadata. |
-| `.Parameters`, `.Data`, `.Provided.<key>` | As for HTTP: `m.SetData` sets `.Data`, and `Setup().TemplateDataProviders(providers)` provide `.Provided`. |
+| `.KV`, `.Data`, `.Provided.<key>` | As for HTTP: `m.SetData` sets `.Data`, and `Setup().TemplateDataProviders(providers)` provide `.Provided`. |
 | `.Scenarios.State "name"`, `.Scenarios.StateOf "name" "key"` | The state of a [scenario](/scenarios/). |
 
 ```go

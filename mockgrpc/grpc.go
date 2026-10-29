@@ -153,8 +153,8 @@ func New(config ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: %w", errTemplateEnvWithEngine)
 	}
 
-	if conf.Parameters == nil {
-		conf.Parameters = vlatte.NewMemoryKV()
+	if conf.KV == nil {
+		conf.KV = vlatte.NewMemoryKV()
 	}
 
 	if err := vlatte.CheckTemplateDataProviders(conf.TemplateDataProviders); err != nil {
@@ -384,6 +384,12 @@ func newGRPCServer(opts []grpc.ServerOption, journaled bool) (srv *grpc.Server, 
 // nothing the server set up already.
 func (app *Server) Config() *Config {
 	return app.config
+}
+
+// KV returns the key-value store templates read as .KV: the one [ConfigBuilder.KV] set, or the memory store the
+// server made without one, which [Config.KV] holds too.
+func (app *Server) KV() vlatte.KV {
+	return app.config.KV
 }
 
 // AdminURL returns the base URL of the admin API, or "" when the server serves none, or hasn't started: see

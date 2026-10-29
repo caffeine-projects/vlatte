@@ -262,3 +262,22 @@ func TestSetup_MatchersBelongToTheirServer(t *testing.T) {
 	_, err := m.Mock(FromBytes([]byte(`{request: {method: Greetings, custom: [[greets, ann]]}, response: {}}`), "yaml"))
 	require.ErrorContains(t, err, `unknown matcher "greets"`)
 }
+
+func TestSetup_KVIsTheStoreTheServerReads(t *testing.T) {
+	// A store given in Go, such as one on Redis, is the very store the server reads, not a copy of it: a value set on
+	// it after the server started is what templates render.
+	kv := vlatte.NewMemoryKV()
+	m := MustNew(Setup().Silent().Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}).KV(kv))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	require.Same(t, kv, m.KV())
+	require.Same(t, kv, m.Config().KV)
+
+	m.MustMock(Method("Greetings").Reply(Template(`{"message": "{{ .KV.Get "greeting" }}"}`)))
+	require.NoError(t, kv.Set(t.Context(), "greeting", []byte("hello")))
+
+	got, code := greetWith(t, client(t, m), "ann")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "hello", got)
+}

@@ -176,16 +176,16 @@ func TestResponse_JSONAnswersInTheMethodsType(t *testing.T) {
 }
 
 func TestResponse_TemplateRendersEachCall(t *testing.T) {
-	// A template reads the call: its request, as JSON reads it, its header and the server's parameters.
-	params := vlatte.NewMemoryKV()
-	require.NoError(t, params.Set(t.Context(), "greeting", []byte("hello")))
+	// A template reads the call: its request, as JSON reads it, its header and the server's key-value store.
+	kv := vlatte.NewMemoryKV()
+	require.NoError(t, kv.Set(t.Context(), "greeting", []byte("hello")))
 
-	m := MustNew(Setup().Silent().Parameters(params))
+	m := MustNew(Setup().Silent().KV(kv))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
 	m.MustMock(Method("Greetings").Reply(Template(
-		`{"message": "{{ .Parameters.Get "greeting" }} {{ .Request.Message.message }} of {{ index .Request.Header "x-team" 0 }}"}`)))
+		`{"message": "{{ .KV.Get "greeting" }} {{ .Request.Message.message }} of {{ index .Request.Header "x-team" 0 }}"}`)))
 
 	c := pb.NewTestServiceClient(m.MustDial())
 	for _, name := range []string{"ann", "bob"} {

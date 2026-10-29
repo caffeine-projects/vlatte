@@ -115,8 +115,8 @@ type Config struct {
 	// TemplateDataProviders add data to templates, which read it as .Provided.<Key>. Two of the same key are an error.
 	TemplateDataProviders []TemplateDataProvider
 
-	// Parameters are the parameters templates read. Nil keeps them in memory.
-	Parameters vlatte.KV
+	// KV is the key-value store templates read as .KV. Nil keeps the values in memory.
+	KV vlatte.KV
 
 	// RootDir is where relative MockFiles patterns start. Empty is the working directory.
 	RootDir string
@@ -411,9 +411,10 @@ func (cb *ConfigBuilder) TemplateDataProviders(providers ...TemplateDataProvider
 	return cb.set(func(conf *Config) { conf.TemplateDataProviders = providers })
 }
 
-// Parameters sets the parameters templates read: {{ .Parameters.Get "key" }}.
-func (cb *ConfigBuilder) Parameters(params vlatte.KV) *ConfigBuilder {
-	return cb.set(func(conf *Config) { conf.Parameters = params })
+// KV sets the key-value store templates read as .KV: {{ .KV.Get "key" }}. Without one, the server keeps the values in
+// memory.
+func (cb *ConfigBuilder) KV(kv vlatte.KV) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.KV = kv })
 }
 
 // RootDir sets where relative MockFiles patterns start. The default is the working directory.
