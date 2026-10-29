@@ -38,7 +38,7 @@ Then chain [matchers](/http/matching), a [reply](/http/replies), and the mock fe
 | `StartScenario`, `ScenarioIs`, `ScenarioStateIs`, `ScenarioStateWillBe`, `ScenarioKey` | Take part in a [scenario](/scenarios/). |
 | `OnCompleteEvent(cfg)`, `Callback(fn)` | Run [events such as webhooks](/webhooks/), or a function, once the mock replied. |
 | `Map(mapper)` | Change the response after it was built. A mapper finds the body in `Body`: one that streams, such as a proxy's, is read whole for it first. |
-| `Step`, `WireStep`, `UpstreamStep` | Pass the answer through [steps](/http/steps), such as [faults](/http/faults). |
+| `Pipe`, `WirePipe`, `UpstreamPipe` | Pass the answer through [pipes](/http/pipes), such as [faults](/http/faults). |
 
 ## Adding, reloading and removing
 

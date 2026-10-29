@@ -358,7 +358,7 @@ func TestMock_ADescriptionKeepsTheScenarioKey(t *testing.T) {
 	t.Cleanup(loaded.Close)
 	loaded.MustMock(FromBytes(desc, "json"))
 
-	for _, step := range []struct {
+	for _, pipe := range []struct {
 		key  string
 		want int
 	}{
@@ -366,8 +366,8 @@ func TestMock_ADescriptionKeepsTheScenarioKey(t *testing.T) {
 		{"t1", StatusNoMatch},
 		{"t2", http.StatusOK},
 	} {
-		res, _ := do(t, http.MethodGet, loaded.URL("/x"), http.Header{"X-Test": {step.key}}, nil)
-		require.Equal(t, step.want, res.StatusCode, "%s: %s", step.key, desc)
+		res, _ := do(t, http.MethodGet, loaded.URL("/x"), http.Header{"X-Test": {pipe.key}}, nil)
+		require.Equal(t, pipe.want, res.StatusCode, "%s: %s", pipe.key, desc)
 	}
 }
 
@@ -586,27 +586,27 @@ func TestMock_ADisabledMockDescribesAsDisabled(t *testing.T) {
 
 func TestMock_FaultsDescribeAsTheirSpecs(t *testing.T) {
 	// A mock's faults describe as a mock file lists them, each at its level, so the description loads back with them.
-	// A step of Go code, which a mock file can't hold, is left out, as a callback is.
+	// A pipe of Go code, which a mock file can't hold, is left out, as a callback is.
 	m := MustNew(Setup().Silent())
 	t.Cleanup(m.Close)
 
-	upper := vlatte.StepFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
+	upper := vlatte.PipeFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
 		return next.Write(bytes.ToUpper(b))
 	})
 
 	scope := m.MustMock(Getf("/f").
-		Step(fault.SlowClose(2*time.Second), upper, fault.LimitData(3)).
-		WireStep(fault.ConnectionResetByPeer()).
-		UpstreamStep(fault.Bandwidth(100)).
+		Pipe(fault.SlowClose(2*time.Second), upper, fault.LimitData(3)).
+		WirePipe(fault.ConnectionResetByPeer()).
+		UpstreamPipe(fault.Bandwidth(100)).
 		Reply(OK()))
 
 	want := map[string]any{
-		"steps": []any{
+		"pipes": []any{
 			map[string]any{"type": "slow_close", "delay": "2s"},
 			map[string]any{"type": "limit_data", "bytes": 3.0},
 		},
-		"wire_steps":     []any{map[string]any{"type": "connection_reset_by_peer"}},
-		"upstream_steps": []any{map[string]any{"type": "bandwidth", "rate": 100.0}},
+		"wire_pipes":     []any{map[string]any{"type": "connection_reset_by_peer"}},
+		"upstream_pipes": []any{map[string]any{"type": "bandwidth", "rate": 100.0}},
 	}
 
 	desc, err := scope.Mocks()[0].MarshalJSON()
@@ -621,26 +621,26 @@ func TestMock_FaultsDescribeAsTheirSpecs(t *testing.T) {
 		var got map[string]any
 		require.NoError(t, json.Unmarshal(d, &got))
 
-		for key, steps := range want {
-			require.Equal(t, steps, got[key], key)
+		for key, pipes := range want {
+			require.Equal(t, pipes, got[key], key)
 		}
 	}
 }
 
-func TestMock_NoStepsDescribeAsNone(t *testing.T) {
-	// A mock without faults, or with steps of Go code only, has no steps in its description: an empty list would be
+func TestMock_NoPipesDescribeAsNone(t *testing.T) {
+	// A mock without faults, or with pipes of Go code only, has no pipes in its description: an empty list would be
 	// a key the mock file never had.
 	m := MustNew(Setup().Silent())
 	t.Cleanup(m.Close)
 
-	upper := vlatte.StepFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
+	upper := vlatte.PipeFunc(func(_ context.Context, b []byte, next vlatte.Stage) (int, error) {
 		return next.Write(bytes.ToUpper(b))
 	})
 
-	for _, b := range []*Builder{Getf("/a"), Getf("/b").Step(upper).WireStep(upper)} {
+	for _, b := range []*Builder{Getf("/a"), Getf("/b").Pipe(upper).WirePipe(upper)} {
 		desc, err := m.MustMock(b.Reply(OK())).Mocks()[0].MarshalJSON()
 		require.NoError(t, err)
-		require.NotContains(t, string(desc), "steps")
+		require.NotContains(t, string(desc), "pipes")
 	}
 }
 

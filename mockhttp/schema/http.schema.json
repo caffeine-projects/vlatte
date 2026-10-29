@@ -28,9 +28,9 @@
       "additionalProperties": false
     },
     "on_complete": { "type": "array", "items": { "$ref": "#/$defs/on_complete_event" } },
-    "steps": { "description": "Faults the body of each answer passes through, in order.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
-    "wire_steps": { "description": "Faults every byte of each answer passes through, its head included, after steps. Needs HTTP/1.x.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
-    "upstream_steps": { "description": "Faults the body a proxy reply sends on passes through.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
+    "pipes": { "description": "Faults the body of each answer passes through, in order.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
+    "wire_pipes": { "description": "Faults every byte of each answer passes through, its head included, after pipes. Needs HTTP/1.x.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
+    "upstream_pipes": { "description": "Faults the body a proxy reply sends on passes through.", "type": "array", "items": { "$ref": "#/$defs/fault" } },
     "request": {
       "type": "object",
       "properties": {

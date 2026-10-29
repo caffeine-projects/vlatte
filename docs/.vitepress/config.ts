@@ -77,7 +77,7 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Replies', link: '/http/replies' },
       { text: 'Forms and multipart', link: '/http/forms-multipart' },
       { text: 'Proxying', link: '/http/proxying' },
-      { text: 'Steps', link: '/http/steps' },
+      { text: 'Pipes', link: '/http/pipes' },
       { text: 'Faults', link: '/http/faults' },
       { text: 'Mock files', link: '/http/mock-files' },
       { text: 'TLS', link: '/http/tls' },

@@ -16,7 +16,7 @@ func TestRandomDataThenClose_SendsGarbageInPlaceOfTheAnswer(t *testing.T) {
 	for _, c := range _calls {
 		t.Run(c.name, func(t *testing.T) {
 			var out bytes.Buffer
-			flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Step{fault.RandomDataThenClose()})
+			flow := vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Pipe{fault.RandomDataThenClose()})
 
 			require.ErrorIs(t, c.do(flow), vlatte.ErrAbort)
 			require.ErrorIs(t, context.Cause(flow.Context()), vlatte.ErrAbort)
@@ -38,7 +38,7 @@ func TestRandomDataThenClose_SendsOtherBytesEachTime(t *testing.T) {
 	answers := make([][]byte, 2)
 	for i := range answers {
 		var out bytes.Buffer
-		_ = vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Step{fault.RandomDataThenClose()}).Close()
+		_ = vlatte.NewFlow(t.Context(), &vlatte.Sink{W: &out}, []vlatte.Pipe{fault.RandomDataThenClose()}).Close()
 		answers[i] = out.Bytes()
 	}
 

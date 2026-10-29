@@ -985,15 +985,15 @@ func TestRecording_AClientThatLeavesIsNotRecorded(t *testing.T) {
 	require.Empty(t, recordedMocks(t, dir))
 }
 
-func TestRecording_AStepThatFailsIsNotRecorded(t *testing.T) {
-	// A step that fails before the body goes out leaves the client without it: it isn't recorded either.
+func TestRecording_APipeThatFailsIsNotRecorded(t *testing.T) {
+	// A pipe that fails before the body goes out leaves the client without it: it isn't recorded either.
 	dir := t.TempDir()
 
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	m.MustMock(Getf("/slow").Step(vlatte.StepFunc(func(ctx context.Context, _ []byte, _ vlatte.Stage) (int, error) {
+	m.MustMock(Getf("/slow").Pipe(vlatte.PipeFunc(func(ctx context.Context, _ []byte, _ vlatte.Stage) (int, error) {
 		<-ctx.Done()
 		return 0, ctx.Err()
 	})).Reply(OK().PlainText("hello")))

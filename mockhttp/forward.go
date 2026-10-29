@@ -193,7 +193,7 @@ type targetBody struct {
 	keeper
 
 	cancel context.CancelCauseFunc
-	cut    func() error // the cause of a cut of the call, such as by an upstream step, or nil
+	cut    func() error // the cause of a cut of the call, such as by an upstream pipe, or nil
 }
 
 // Read reads the body, and keeps what it read, with keep. A read that fails once the call was cut fails with the

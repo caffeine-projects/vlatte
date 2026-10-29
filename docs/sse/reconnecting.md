@@ -80,7 +80,7 @@ stream := mockhttp.NewEventStream(
 
 // The first connection drops after the retry field and event 1.
 m.MustMock(mockhttp.Getf("/events").Once().
-	Step(fault.LimitData(len("retry: 1500\n\nid: 1\ndata: a\n\n"))).
+	Pipe(fault.LimitData(len("retry: 1500\n\nid: 1\ndata: a\n\n"))).
 	Reply(mockhttp.OK().EventStream(stream)))
 // The reconnection gets events 2 and 3: nothing is lost, nothing sent twice.
 m.MustMock(mockhttp.Getf("/events").
@@ -92,7 +92,7 @@ m.MustMock(mockhttp.Getf("/events").
 # The first connection drops after the retry field and event 1.
 request: {method: GET, path: /events}
 repeat: 1
-steps: [{type: limit_data, bytes: 28}]
+pipes: [{type: limit_data, bytes: 28}]
 response:
   status: 200
   event_stream:

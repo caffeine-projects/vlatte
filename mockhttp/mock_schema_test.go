@@ -846,7 +846,7 @@ func TestMockFile_CustomProblems(t *testing.T) {
 	}
 }
 
-func TestMockFile_StepsProblems(t *testing.T) {
+func TestMockFile_PipesProblems(t *testing.T) {
 	// A fault spec that can't be built fails the file, at its key, with what is wrong.
 	app := MustNew(Setup().Silent())
 	t.Cleanup(app.Close)
@@ -857,19 +857,19 @@ func TestMockFile_StepsProblems(t *testing.T) {
 		want string
 	}{
 		{
-			"steps: [{type: slow_close, delay: 1s}, {type: bandwidth, rate: 0}]", "steps[1]",
-			"steps[1]: bandwidth needs a byte per second at least, not 0",
+			"pipes: [{type: slow_close, delay: 1s}, {type: bandwidth, rate: 0}]", "pipes[1]",
+			"pipes[1]: bandwidth needs a byte per second at least, not 0",
 		},
 		{
-			"wire_steps: [{type: nope}]", "wire_steps[0].type",
-			"wire_steps[0].type must be one of empty_response, malformed_response_chunk, random_data_then_close, " +
+			"wire_pipes: [{type: nope}]", "wire_pipes[0].type",
+			"wire_pipes[0].type must be one of empty_response, malformed_response_chunk, random_data_then_close, " +
 				"connection_reset_by_peer, chunked_dribble_delay, latency, bandwidth, slicer, slow_close, timeout, " +
 				`limit_data or connection_reset_by_peer_after, not "nope"`,
 		},
-		{"upstream_steps: [{type: latency}]", "upstream_steps[0].latency", "upstream_steps[0].latency is required by a latency fault"},
-		{"steps: [{type: slow_close, dely: 1s, delay: 1s}]", "steps[0].dely", "steps[0].dely is not a known setting"},
-		{"steps: [[slow_close, 1s]]", "steps[0]", "steps[0] must be an object, such as {type: latency, latency: 300ms}, not a list"},
-		{"steps: empty_response", "steps", "steps must be a list, not a string"},
+		{"upstream_pipes: [{type: latency}]", "upstream_pipes[0].latency", "upstream_pipes[0].latency is required by a latency fault"},
+		{"pipes: [{type: slow_close, dely: 1s, delay: 1s}]", "pipes[0].dely", "pipes[0].dely is not a known setting"},
+		{"pipes: [[slow_close, 1s]]", "pipes[0]", "pipes[0] must be an object, such as {type: latency, latency: 300ms}, not a list"},
+		{"pipes: empty_response", "pipes", "pipes must be a list, not a string"},
 	}
 
 	for _, tc := range tests {
@@ -881,7 +881,7 @@ func TestMockFile_StepsProblems(t *testing.T) {
 	}
 }
 
-// http.schema.json is for editors: the decoder doesn't read it. These tests keep the two in step.
+// http.schema.json is for editors: the decoder doesn't read it. These tests keep the two in pipe.
 
 const _schemaURL = "mem://vlatte/mock.schema.json"
 
@@ -1371,7 +1371,7 @@ func TestJSONSchema_FaultsAgreeWithTheDecoder(t *testing.T) {
 		{faultSpec("limit_data", "bytes", 1.5), false},
 	}
 
-	for _, key := range []string{"steps", "wire_steps", "upstream_steps"} {
+	for _, key := range []string{"pipes", "wire_pipes", "upstream_pipes"} {
 		for _, tc := range tests {
 			doc := withRequest(map[string]any{key: []any{tc.spec}})
 

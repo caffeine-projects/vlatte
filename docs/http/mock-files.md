@@ -40,7 +40,7 @@ and editors that use the YAML language server, such as VS Code with the YAML ext
 | `delay`, `repeat` | A delay before replying, and how many requests the mock serves: see [Mock lifecycle](/more/mock-lifecycle). |
 | `scenario` | A [scenario](/scenarios/). |
 | `on_complete` | [Events such as webhooks](/webhooks/). |
-| `steps`, `wire_steps`, `upstream_steps` | [Faults](/http/faults#in-mock-files). |
+| `pipes`, `wire_pipes`, `upstream_pipes` | [Faults](/http/faults#in-mock-files). |
 | `ext` | Settings for the server's mock file handlers, `Setup().MockFileHandlers(...)` in Go. |
 
 ## Types

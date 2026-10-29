@@ -36,7 +36,7 @@ response: {status: 200, body: []}
 
 ## Delays
 
-A mock's delay comes before its reply: a client that leaves during it gets nothing, and a [proxy reply](/http/proxying)'s target isn't called. Durations in mock files are whole milliseconds (`1500`) or a Go duration (`1.5s`). For delays inside an answer, such as between the parts of a body, see [Steps](/http/steps) and [Faults](/http/faults) for HTTP, and `MessageDelay` for [gRPC streams](/grpc/streaming).
+A mock's delay comes before its reply: a client that leaves during it gets nothing, and a [proxy reply](/http/proxying)'s target isn't called. Durations in mock files are whole milliseconds (`1500`) or a Go duration (`1.5s`). For delays inside an answer, such as between the parts of a body, see [Pipes](/http/pipes) and [Faults](/http/faults) for HTTP, and `MessageDelay` for [gRPC streams](/grpc/streaming).
 
 ## Enabling and disabling
 

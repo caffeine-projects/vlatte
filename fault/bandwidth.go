@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	_ vlatte.Step            = bandwidth{}
+	_ vlatte.Pipe            = bandwidth{}
 	_ vlatte.SelfDescriptive = bandwidth{}
 	_ vlatte.Stage           = (*bandwidthStage)(nil)
 )
@@ -37,16 +37,16 @@ const (
 	BandwidthFiber  = 100000 * _kbps // 100 Mbit/s, fiber
 )
 
-// Bandwidth returns a step that limits what passes to bytesPerSecond, such as [Bandwidth3G], to test a client against
+// Bandwidth returns a pipe that limits what passes to bytesPerSecond, such as [Bandwidth3G], to test a client against
 // a slow link: it sends each write in flushed pieces of a tenth of a second's worth of bytes, each once the time its
 // bytes take at that rate passed since the write began, so a write of n bytes ends n/bytesPerSecond seconds later.
 // The writer waits for it, as it would on a slow connection. The time between writes isn't counted: a write never
 // goes faster for an earlier pause.
 //
-// It goes with [github.com/caffeine-projects/vlatte/mockhttp.Builder.Step], to slow the body, or with
-// [github.com/caffeine-projects/vlatte/mockhttp.Builder.WireStep], to slow the whole answer. It panics when
+// It goes with [github.com/caffeine-projects/vlatte/mockhttp.Builder.Pipe], to slow the body, or with
+// [github.com/caffeine-projects/vlatte/mockhttp.Builder.WirePipe], to slow the whole answer. It panics when
 // bytesPerSecond is less than 1.
-func Bandwidth(bytesPerSecond int) vlatte.Step {
+func Bandwidth(bytesPerSecond int) vlatte.Pipe {
 	if bytesPerSecond < 1 {
 		panic(fmt.Sprintf("fault: bandwidth needs a byte per second at least, not %d", bytesPerSecond))
 	}
