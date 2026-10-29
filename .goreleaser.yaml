@@ -1,7 +1,5 @@
 # Builds the vlatte CLI for each release tag: .github/workflows/release.yml runs it, and `make snapshot` runs it
-# locally without signing or publishing.
-#
-# On each new tag, bump the version the docs pin: grep -rnE 'vlatte:v[0-9]|VERSION=v[0-9]' README.md docs --exclude-dir=node_modules
+# locally without signing or publishing. The steps of a release are in CONTRIBUTING.md.
 version: 2
 
 project_name: vlatte
@@ -50,29 +48,47 @@ signs:
       - --yes
       - ${artifact}
 
+# Sorts v0.1.0 after v0.1.0-rc.2 when both tag one commit, so the run releases the stable tag. Notes start at the last
+# stable tag: a stable release lists everything since the stable release before it, not since its last release candidate.
+git:
+  prerelease_suffix: "-"
+  ignore_tags:
+    - "*-*"
+
 changelog:
   use: git
   sort: asc
+  abbrev: 7
   groups:
+    # First, so a feat!: or fix!: lands here and not under its type.
+    - title: Breaking changes
+      regexp: '^\w+(\([^)]+\))?!:.+$'
+      order: 0
     - title: Features
       regexp: '^.*?feat(\(.+\))??!?:.+$'
-      order: 0
+      order: 1
     - title: Bug fixes
       regexp: '^.*?fix(\(.+\))??!?:.+$'
-      order: 1
+      order: 2
     - title: Performance
       regexp: '^.*?perf(\(.+\))??!?:.+$'
-      order: 2
+      order: 3
   filters:
     exclude:
-      - '^.*?(chore|ci|docs|refactor|test)(\(.+\))??!?:.+$'
+      # Anchored, so a word such as test: in the description drops nothing. No !: a breaking refactor still reaches
+      # Breaking changes.
+      - '^(chore|ci|docs|refactor|test)(\([^)]+\))?:.+$'
 
 # Tags with a suffix, such as -rc.1, are prereleases.
 release:
   prerelease: auto
+  # The message of an annotated tag after its first line: write a release's highlights there.
+  header: "{{ .TagBody }}"
 
 homebrew_casks:
   - name: vlatte
+    # Prereleases are not uploaded: brew installs the latest stable release.
+    skip_upload: auto
     repository:
       owner: caffeine-projects
       name: homebrew-tap

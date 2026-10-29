@@ -34,6 +34,8 @@ On macOS and Linux:
 brew install caffeine-projects/tap/vlatte
 ```
 
+Homebrew installs the latest stable release. For a release candidate, use its archive or Docker image, or `go install` with its tag, such as `@v0.2.0-rc.1`.
+
 ### An archive
 
 [GitHub Releases](https://github.com/caffeine-projects/vlatte/releases) has an archive for Linux, macOS and Windows, on `amd64` and `arm64`. Each holds the `vlatte` binary, which needs nothing else:
