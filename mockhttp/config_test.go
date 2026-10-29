@@ -288,6 +288,7 @@ func TestConfig_ApplyCopiesEveryField(t *testing.T) {
 		reflect.TypeFor[vlatte.KV]():             vlatte.NewMemoryKV(),
 		reflect.TypeFor[AdminAPI]():              admin.MustNew(),
 		reflect.TypeFor[io.Writer]():             io.Discard,
+		reflect.TypeFor[NoMatchRenderer]():       DefaultNoMatchRenderer(NoMatchAuto),
 	}
 
 	src := &Config{}

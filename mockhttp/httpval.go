@@ -89,6 +89,8 @@ const (
 	MIMEApplicationProblemJSON           = "application/problem+json"
 	MIMETextPlain                        = "text/plain"
 	MIMETextPlainCharsetUTF8             = MIMETextPlain + "; " + _charsetUTF8
+	MIMETextMarkdown                     = "text/markdown"
+	MIMETextMarkdownCharsetUTF8          = MIMETextMarkdown + "; " + _charsetUTF8
 	MIMETextHTML                         = "text/html"
 	MIMETextHTMLCharsetUTF8              = MIMETextHTML + "; " + _charsetUTF8
 	MIMETextXML                          = "text/xml"

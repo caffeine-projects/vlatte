@@ -60,14 +60,23 @@ curl -i -X POST -H 'Content-Type: application/json' -d '{"name": "ann"}' localho
 # {"name": "ann"}
 ```
 
-A request no mock matches gets `418`, and a body that says which mocks came closest and why they didn't match:
+A request no mock matches gets `418`, and a body that says which mocks came closest and why they didn't match. It is Markdown, or JSON for a client that asks for it: see [near misses](/http/troubleshooting#near-misses).
 
-```
-REQUEST DID NOT MATCH
-GET http://127.0.0.1:8080/nope
+```md
+# Request did not match
 
-CLOSEST MOCKS
-[get-user] get a user: 1 of 3 parts matched; differs in path_template, path_params id
+No mock matched `GET http://127.0.0.1:8080/nope`.
+
+Request ID: `0f8c2b1e-6d4a-4c3e-9a57-2b8e1d4f7c90`
+
+## Closest mocks
+
+1. `get-user` (`get a user`): 1 of 3 parts matched; differs in `path_template`, `path_params id`
+
+## Next steps
+
+- Change the request, or the closest mock, in the parts they differ in.
+- See the request in the journal: `GET http://127.0.0.1:8081/requests/0f8c2b1e-6d4a-4c3e-9a57-2b8e1d4f7c90`
 ```
 
 ## Change mocks while it runs

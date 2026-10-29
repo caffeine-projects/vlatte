@@ -11,7 +11,7 @@ When no mock matches, or serving a request fails, the server answers itself. It 
 | `reply` | A mock matched, and its reply failed: a template, a body file, a template data provider or a response mapper. |
 | `panic` | Serving the request panicked. |
 
-The body says the same in text, and names the mock and the error. A test checks the header:
+The body says the same, and names the mock and the error. A test checks the header:
 
 ```go
 require.Equal(t, vlatte.FailureReply, res.Header.Get(vlatte.HeaderFailure))
@@ -23,16 +23,84 @@ The status of `no-match` is `no_match_status_code`, and the status of the others
 
 The answer to a request no mock matched lists the mocks that came closest, as does its [journal](/features/journal) entry: the parts of the request each matched, those that differ, and those it didn't check, such as a `times` not used up, which a report never runs. A `times` used up, or a scenario in another state, is a part a mock differs in.
 
-```
-REQUEST DID NOT MATCH
-GET http://127.0.0.1:8080/users
+The answer is a Markdown document, which reads the same raw, in a terminal or a test's failure, as rendered:
 
-CLOSEST MOCKS
-[users] list users: 2 of 3 parts matched; differs in header Accept
-[create]: 1 of 2 parts matched; differs in method
+```md
+# Request did not match
+
+No mock matched `GET http://127.0.0.1:8080/users`.
+
+Request ID: `0f8c2b1e-6d4a-4c3e-9a57-2b8e1d4f7c90`
+
+## Closest mocks
+
+1. `users` (`list users`): 2 of 3 parts matched; differs in `header Accept`
+2. `create`: 1 of 2 parts matched; differs in `method`
+
+## Next steps
+
+- Change the request, or the closest mock, in the parts they differ in.
+- See the request in the journal: `GET http://127.0.0.1:8081/requests/0f8c2b1e-6d4a-4c3e-9a57-2b8e1d4f7c90`
 ```
+
+The journal line shows when the server keeps a journal and serves the [admin API](/run/admin-api), as the `vlatte` command does. Every name and value is in a code span, so none can change the structure of the document.
 
 The report runs no matcher twice: it goes on from the part where matching stopped, which a mock differs in, so it runs only the matchers matching never reached, the action of a `match.Peek` among them. It runs none that keeps state, such as `times`, which it lists as not checked; a scenario's matcher keeps none as it matches, so it runs. A mock that wants the request but is used up, by its `Times`, differs in `times` only, and comes first. `near_misses: false`, `--near-misses=false` or `mockhttp.Setup().NoNearMisses()` turns it off.
+
+### Formats
+
+The application under test often asks for JSON, and fails to decode anything else. The answer follows the request's `Accept` header, and adds `Accept` to `Vary`:
+
+| `Accept` prefers | Answer | `Content-Type` |
+|---|---|---|
+| `application/json`, or a JSON type such as `application/vnd.api+json` | Problem details | `application/json` |
+| `application/problem+json`, over `application/json` | Problem details | `application/problem+json` |
+| `text/markdown` | The Markdown document | `text/markdown; charset=utf-8` |
+| Anything else, `*/*`, or no `Accept` | The Markdown document | `text/plain; charset=utf-8` |
+
+Of the types `Accept` weighs the same, the one a more specific range names wins, then the one it lists first: `application/json, text/plain, */*` gets JSON, `*/*, application/json` gets JSON too, and a request that accepts only `*/*` gets text. `application/problem+json` wins only when `Accept` prefers it to `application/json`, by weight or by a more specific range.
+
+Problem details are [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) members, with the request and the near misses as the journal gives them:
+
+```json
+{
+  "type": "https://caffeine-projects.github.io/vlatte/http/troubleshooting#near-misses",
+  "title": "Request did not match",
+  "status": 418,
+  "detail": "No mock matched GET http://127.0.0.1:8080/users.",
+  "request_id": "0f8c2b1e-6d4a-4c3e-9a57-2b8e1d4f7c90",
+  "request": {"method": "GET", "url": "http://127.0.0.1:8080/users"},
+  "near_misses": [
+    {"mock_id": "users", "name": "list users", "passed": 2, "total": 3, "failed": ["header Accept"]}
+  ]
+}
+```
+
+`no_match_format`, `--no-match-format` or `mockhttp.Setup().NoMatchFormat(...)` sends one format whatever `Accept` asks: `auto`, the default, `text`, `markdown`, `json` or `problem`.
+
+### Custom answers
+
+A server made in Go can answer in a shape of its own, such as the error body of the API a mock stands in for. A `NoMatchRenderer` gets the request, the near misses and the status, and writes the answer; `VLatte-Error` is set before it runs, and the journal records the request whatever it sends. It can hand requests to the default renderer:
+
+```go
+type apiNoMatch struct{ fallback mockhttp.NoMatchRenderer }
+
+func (a apiNoMatch) RenderNoMatch(w http.ResponseWriter, nm *mockhttp.NoMatch) {
+	if !strings.HasPrefix(nm.Request.URL.Path, "/api/") {
+		a.fallback.RenderNoMatch(w, nm)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	fmt.Fprintf(w, `{"code":"NOT_FOUND","closest":%d}`, len(nm.NearMisses))
+}
+
+m := mockhttp.MustNew(mockhttp.Setup().
+	NoMatchRenderer(apiNoMatch{fallback: mockhttp.DefaultNoMatchRenderer(mockhttp.NoMatchAuto)}))
+```
+
+The server calls a renderer for many requests at once. One that writes nothing answers with the no-match status and no body. A renderer and a format other than `auto` don't go together: the format configures the default renderer, and building the server fails.
 
 ## Debug headers
 

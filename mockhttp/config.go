@@ -111,6 +111,14 @@ type Config struct {
 	HeaderNamesToRedact            map[string]struct{}
 	UseHTTPS                       bool
 
+	// NoMatchRenderer answers the requests no mock matches. Nil uses [DefaultNoMatchRenderer] in NoMatchFormat.
+	NoMatchRenderer NoMatchRenderer
+
+	// NoMatchFormat is the format of the default no-match renderer, from the setting no_match_format. It configures
+	// the renderer the server makes without a NoMatchRenderer, so setting both is an error: pass the format to
+	// [DefaultNoMatchRenderer].
+	NoMatchFormat NoMatchFormat
+
 	// Transport sends what the server sends: the requests of proxy replies, of the recording target, of the forward
 	// proxy and of webhooks. Each takes its own transport first, when it has one: ProxyReply.Transport,
 	// RecordConfig.Transport, ProxyConfig.Transport or webhook.WithTransport. For upstreams with different needs,
@@ -173,6 +181,8 @@ func (c *Config) Apply(conf *Config) error {
 	conf.UseHTTP2 = c.UseHTTP2
 	conf.RequestWasNotMatchedStatusCode = c.RequestWasNotMatchedStatusCode
 	conf.ErrorStatusCode = c.ErrorStatusCode
+	conf.NoMatchRenderer = c.NoMatchRenderer
+	conf.NoMatchFormat = c.NoMatchFormat
 	conf.RequestBodyParsers = c.RequestBodyParsers
 	conf.MaxBodyParsingLimit = c.MaxBodyParsingLimit
 	conf.NoBodyParsing = c.NoBodyParsing
@@ -345,6 +355,19 @@ func (cb *ConfigBuilder) MockNotFoundStatusCode(code int) *ConfigBuilder {
 // that fails. It defaults to StatusNoMatch, as no-match does: the VLatte-Error header tells them apart.
 func (cb *ConfigBuilder) ErrorStatusCode(code int) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.ErrorStatusCode = code })
+}
+
+// NoMatchRenderer sets the renderer of the answers to requests no mock matches, in place of [DefaultNoMatchRenderer].
+// See [NoMatchRenderer] for what the server does around it.
+func (cb *ConfigBuilder) NoMatchRenderer(r NoMatchRenderer) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.NoMatchRenderer = r })
+}
+
+// NoMatchFormat sets the format of the answers to requests no mock matches: [NoMatchAuto], the default, negotiates
+// it with the request's Accept header. Building a server with both a format other than NoMatchAuto and a
+// [NoMatchRenderer] fails.
+func (cb *ConfigBuilder) NoMatchFormat(format NoMatchFormat) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.NoMatchFormat = format })
 }
 
 // RequestBodyParsers adds a custom list of RequestBodyParsers.

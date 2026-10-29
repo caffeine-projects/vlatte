@@ -799,7 +799,7 @@ func TestHandler_FailuresAreToldApartFromNoMatch(t *testing.T) {
 	status, header, body = getFull(t, m, "/nothing")
 	require.Equal(t, StatusNoMatch, status)
 	require.Equal(t, vlatte.FailureNoMatch, header.Get(HeaderVlatteError))
-	require.True(t, strings.HasPrefix(body, "REQUEST DID NOT MATCH\n"), body)
+	require.True(t, strings.HasPrefix(body, "# Request did not match\n"), body)
 }
 
 func TestHandler_ErrorStatusCodeIsItsOwnSetting(t *testing.T) {
@@ -2088,11 +2088,15 @@ func TestNoMatch_ListsTheClosestMocks(t *testing.T) {
 	status, header, body := getFull(t, m, "/users")
 	require.Equal(t, StatusNoMatch, status)
 	require.Equal(t, vlatte.FailureNoMatch, header.Get(HeaderVlatteError))
-	require.Equal(t, "REQUEST DID NOT MATCH\nGET "+m.URL("/users")+"\n\n"+
-		"CLOSEST MOCKS\n"+
-		"[users] list users: 2 of 3 parts matched; differs in header Accept\n"+
-		"[create]: 1 of 2 parts matched; differs in method\n"+
-		"[orders]: 1 of 3 parts matched; differs in path, query page\n", body)
+	require.Equal(t, "# Request did not match\n\n"+
+		"No mock matched `GET "+m.URL("/users")+"`.\n\n"+
+		"Request ID: `"+header.Get(vlatte.HeaderRequestID)+"`\n\n"+
+		"## Closest mocks\n\n"+
+		"1. `users` (`list users`): 2 of 3 parts matched; differs in `header Accept`\n"+
+		"2. `create`: 1 of 2 parts matched; differs in `method`\n"+
+		"3. `orders`: 1 of 3 parts matched; differs in `path`, `query page`\n\n"+
+		"## Next steps\n\n"+
+		"- Change the request, or the closest mock, in the parts they differ in.\n", body)
 }
 
 func TestNoMatch_NearMissesRunNoMatcherTwice(t *testing.T) {
@@ -2112,7 +2116,7 @@ func TestNoMatch_NearMissesRunNoMatcherTwice(t *testing.T) {
 
 	status, _, body := getFull(t, m, "/a")
 	require.Equal(t, StatusNoMatch, status)
-	require.Contains(t, body, "[a]: 2 of 3 parts matched; differs in header x\n")
+	require.Contains(t, body, "`a`: 2 of 3 parts matched; differs in `header x`\n")
 	require.Equal(t, 2, runs, "the header of each mock ran once: a's in matching, b's in the report")
 }
 
@@ -2131,7 +2135,7 @@ func TestNoMatch_NearMissesSayWhereTheScenarioIs(t *testing.T) {
 
 	status, _, body := getFull(t, m, "/a")
 	require.Equal(t, StatusNoMatch, status)
-	require.Contains(t, body, "[a]: 2 of 3 parts matched; differs in scenario checkout needs paid, is started\n")
+	require.Contains(t, body, "`a`: 2 of 3 parts matched; differs in `scenario checkout needs paid, is started`\n")
 
 	status, _, _ = getFull(t, m, "/b")
 	require.Equal(t, http.StatusAccepted, status, "the scenario is still where it started")
@@ -2151,9 +2155,10 @@ func TestNoMatch_NearMissesTurnOff(t *testing.T) {
 
 			m.MustMock(Getf("/a").Reply(OK()))
 
-			status, _, body := getFull(t, m, "/b")
+			status, header, body := getFull(t, m, "/b")
 			require.Equal(t, StatusNoMatch, status)
-			require.Equal(t, "REQUEST DID NOT MATCH\nGET "+m.URL("/b")+"\n\n", body)
+			require.Equal(t, "# Request did not match\n\nNo mock matched `GET "+m.URL("/b")+"`.\n\n"+
+				"Request ID: `"+header.Get(vlatte.HeaderRequestID)+"`\n", body)
 		})
 	}
 }
@@ -2177,11 +2182,11 @@ func TestNoMatch_NamesEachPartAsTheBuilderDoes(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 
 	_, _, body := getFull(t, m, "/a")
-	require.Contains(t, body, "\n[once]: 2 of 3 parts matched; differs in times\n")
+	require.Contains(t, body, " `once`: 2 of 3 parts matched; differs in `times`\n")
 
 	_, _, body = getFull(t, m, "/b")
-	require.Contains(t, body, "\n[predicate]: 1 of 3 parts matched; differs in path, request: ")
-	require.Contains(t, body, "bad request\n")
+	require.Contains(t, body, " `predicate`: 1 of 3 parts matched; differs in `path`, `request: ")
+	require.Contains(t, body, "bad request`\n")
 }
 
 func TestNoMatch_NamesAKeyedPartWithItsKey(t *testing.T) {
@@ -2198,9 +2203,9 @@ func TestNoMatch_NamesAKeyedPartWithItsKey(t *testing.T) {
 	)
 
 	_, _, body := getFull(t, m, "/a")
-	require.Contains(t, body, "\n[headers]: 2 of 3 parts matched; differs in headers X-Id\n")
-	require.Contains(t, body, "\n[cookie]: 2 of 3 parts matched; differs in cookie session\n")
-	require.Contains(t, body, "\n[param]: 2 of 3 parts matched; differs in path_params id\n")
+	require.Contains(t, body, " `headers`: 2 of 3 parts matched; differs in `headers X-Id`\n")
+	require.Contains(t, body, " `cookie`: 2 of 3 parts matched; differs in `cookie session`\n")
+	require.Contains(t, body, " `param`: 2 of 3 parts matched; differs in `path_params id`\n")
 }
 
 // failingStateMatcher is a matcher that keeps state, matches every request, and fails to move its state on.
