@@ -25,6 +25,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
+	"github.com/caffeine-projects/vlatte/internal/tmplfunc"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
@@ -153,7 +154,17 @@ func New(config ...Option) (*Server, error) {
 
 	switch {
 	case conf.TemplateEngine == nil:
-		e, err := vlatte.NewGoTemplateEngine(vlatte.WithEnv(conf.TemplateEnv...))
+		keys, err := tmplfunc.LoadKeySpecs(conf.TemplateKeys, conf.Path)
+		if err != nil {
+			return nil, fmt.Errorf("server: template.keys: %w", err)
+		}
+
+		opts := []vlatte.GoTemplateOption{vlatte.WithEnv(conf.TemplateEnv...)}
+		for _, k := range keys {
+			opts = append(opts, vlatte.WithSigningKey(k.Kid, k.Alg, k.Key))
+		}
+
+		e, err := vlatte.NewGoTemplateEngine(opts...)
 		if err != nil {
 			return nil, fmt.Errorf("server: %w", err)
 		}
@@ -161,6 +172,8 @@ func New(config ...Option) (*Server, error) {
 		conf.TemplateEngine = e
 	case len(conf.TemplateEnv) > 0:
 		return nil, fmt.Errorf("server: %w", errTemplateEnvWithEngine)
+	case len(conf.TemplateKeys) > 0:
+		return nil, fmt.Errorf("server: %w", errTemplateKeysWithEngine)
 	}
 
 	if err := vlatte.CheckTemplateDataProviders(conf.TemplateDataProviders); err != nil {

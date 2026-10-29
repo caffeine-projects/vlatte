@@ -3,7 +3,12 @@ package mockgrpc
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
 	json "encoding/json/v2"
+	"encoding/pem"
 	"errors"
 	"io/fs"
 	"net"
@@ -811,6 +816,42 @@ func TestNew_TemplateEnvWithAnEngineOfTheUsersOwnFails(t *testing.T) {
 func TestNew_TemplateEnvFromGoRefusesAnInvalidName(t *testing.T) {
 	_, err := New(Setup().TemplateEnv("A=B"))
 	require.ErrorContains(t, err, `environment variable name "A=B" is invalid`)
+}
+
+func TestNew_TemplateKeysGiveTheDefaultEngineKeys(t *testing.T) {
+	m, err := New(Setup().ConfigSources(ConfigArgs([]string{"--grpc-template-keys=k=ES256"})))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+
+	_, err = m.Config().TemplateEngine.Compile("body", `{{ jwks "k" }}`)
+	require.NoError(t, err)
+
+	_, err = m.Config().TemplateEngine.Compile("body", `{{ jwks "other" }}`)
+	require.ErrorContains(t, err, `"other" is not a signing key of the server`)
+}
+
+func TestNew_TemplateKeysWithAnEngineOfTheUsersOwnFails(t *testing.T) {
+	_, err := New(Setup().TemplateEngine(vlatte.MustNewGoTemplateEngine()).TemplateKeys("k=ES256"))
+	require.ErrorIs(t, err, errTemplateKeysWithEngine)
+	require.ErrorContains(t, err, "grpc.template.keys")
+}
+
+func TestNew_TemplateKeysReadAFileRelativeToRootDir(t *testing.T) {
+	dir := t.TempDir()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "ec.pem"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600))
+
+	m, err := New(Setup().RootDir(dir).TemplateKeys("k=ES256:ec.pem"))
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+
+	_, err = New(Setup().TemplateKeys("k=ES256:" + filepath.Join(dir, "missing.pem")))
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestPrep(t *testing.T) {

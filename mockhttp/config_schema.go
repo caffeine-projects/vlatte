@@ -13,6 +13,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
+	"github.com/caffeine-projects/vlatte/internal/tmplfunc"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
@@ -433,6 +434,15 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				_, err := vlatte.NewGoTemplateEngine(vlatte.WithEnv(v.List...))
 
 				return err
+			},
+		},
+		{
+			Key: "template.keys", Kind: config.List,
+			Usage: "Keys templates sign tokens with, jwt, and publish, jwks: kid=ALG generates one at start, such as " +
+				"google-1=RS256, and kid=ALG:path reads a PEM private key, relative paths starting at root_dir.",
+			Set: func(c *Config, v config.Value) error {
+				c.TemplateKeys = v.List
+				return tmplfunc.CheckKeySpecs(v.List)
 			},
 		},
 		{

@@ -4,6 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -770,6 +776,39 @@ func TestNew_TemplateEnvFromGoRefusesAnInvalidName(t *testing.T) {
 	require.ErrorContains(t, err, `environment variable name "A=B" is invalid`)
 }
 
+func TestNew_TemplateKeysGiveTheDefaultEngineKeys(t *testing.T) {
+	// A key generated at start and one read from a file, relative to root_dir, both sign and publish from templates.
+	dir := t.TempDir()
+	writeECKey(t, filepath.Join(dir, "keys", "ec.pem"))
+
+	conf, err := loadConfig(t, Setup().RootDir(dir), ConfigArgs([]string{"--template-keys", "gen=ES384,file=ES256:keys/ec.pem"}))
+	require.NoError(t, err)
+
+	tmpl, err := conf.TemplateEngine.Compile("body", `{{ range (fromJSON (jwks "gen" "file")).keys }}{{ .kid }}:{{ .crv }} {{ end }}`)
+	require.NoError(t, err)
+
+	var b strings.Builder
+	require.NoError(t, tmpl.Execute(&b, nil))
+	require.Equal(t, "gen:P-384 file:P-256 ", b.String())
+}
+
+func TestNew_TemplateKeysWithAnEngineOfTheUsersOwnFails(t *testing.T) {
+	// The keys would silently be missing: the server can't change an engine it didn't make.
+	_, err := New(Setup().TemplateEngine(vlatte.MustNewGoTemplateEngine()).TemplateKeys("k=ES256"))
+	require.ErrorIs(t, err, errTemplateKeysWithEngine)
+}
+
+func TestNew_TemplateKeysRefusesHMAC(t *testing.T) {
+	_, err := New(Setup().ConfigSources(ConfigArgs([]string{"--template-keys", "k=HS256"})))
+	require.ErrorContains(t, err, `signing key "k": jose: unsupported algorithm "HS256"`)
+}
+
+func TestNew_TemplateKeysOfAMissingFileFails(t *testing.T) {
+	_, err := New(Setup().RootDir(t.TempDir()).TemplateKeys("k=ES256:nope.pem"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+	require.ErrorContains(t, err, `server: template.keys: signing key "k": `)
+}
+
 func TestPrep(t *testing.T) {
 	type recipe = vlatte.RecipeFunc[*Mock, *Server]
 	type input = vlatte.RecipeInput[*Mock, *Server]
@@ -811,4 +850,18 @@ func TestPrep(t *testing.T) {
 		require.ErrorContains(t, err, "index 1")
 		require.False(t, ranAfterFailure, "recipes after a failing one must not run")
 	})
+}
+
+// writeECKey writes a new P-256 private key to path, as PKCS #8 PEM.
+func writeECKey(t *testing.T, path string) {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	require.NoError(t, err)
+
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600))
 }
