@@ -45,7 +45,7 @@ docker run --rm -p 8080:8080 -p 8081:8081 \
 
 ## Routes
 
-The [OpenAPI reference](/vlatte/reference/admin-api.html){target="_self"} describes every route with its parameters, bodies and answers. Its document is at [`https://caffeine-projects.github.io/vlatte/openapi/admin.yaml`](/vlatte/openapi/admin.yaml){target="_self"}, for client generators and API tools, and a running server serves it at `GET /openapi`.
+The [OpenAPI reference](/reference/admin-api.html){target="_self"} describes every route with its parameters, bodies and answers. Its document is at [`https://vlatte.dev/openapi/admin.yaml`](/openapi/admin.yaml){target="_self"}, for client generators and API tools, and a running server serves it at `GET /openapi`.
 
 | Route | What it does |
 |---|---|
