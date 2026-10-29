@@ -223,6 +223,33 @@ steps:
 </template>
 </HomeSplit>
 
+<HomeSplit title="Mocks your AI agent can drive" link="/mcp/" link-text="MCP">
+
+Over MCP, a coding agent sees every mock, writes new ones, records a real service and checks what your client sent, with the tools the admin API serves.
+
+Start `vlatte mcp` from the agent's settings, or point it at `/mcp` on a server that runs already.
+
+<template #code>
+
+::: code-group
+
+```json [Agent settings]
+{"mcpServers": {"vlatte": {"command": "vlatte", "args": ["mcp", "--mock-files=mocks/*.yaml"]}}}
+```
+
+```go [Go]
+api := admin.MustNew(admin.MCP())
+m := mockhttp.MustNew(mockhttp.Setup().Admin(api))
+m.MustStart()
+
+fmt.Println(m.AdminURL() + "/mcp") // Streamable HTTP
+```
+
+:::
+
+</template>
+</HomeSplit>
+
 <HomeSection title="Toolbox" lead="More of what comes in the box.">
   <HomeCards :items="toolbox" style="--vl-cards: 3" />
 </HomeSection>
