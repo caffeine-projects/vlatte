@@ -5,7 +5,7 @@ Thanks for helping with VLatte. This page covers what you need to get a change m
 - Coding conventions: [`CONVENTIONS.md`](CONVENTIONS.md)
 - Rules for AI coding tools: [`AGENTS.md`](AGENTS.md)
 - Security issues: [`SECURITY.md`](SECURITY.md). Never in a public issue.
-- User documentation: [caffeine-projects.github.io/vlatte](https://caffeine-projects.github.io/vlatte/)
+- User documentation: [vlatte.dev](https://vlatte.dev/)
 
 ## Prerequisites
 

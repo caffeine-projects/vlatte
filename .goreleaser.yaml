@@ -95,7 +95,7 @@ homebrew_casks:
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Casks
-    homepage: https://caffeine-projects.github.io/vlatte/
+    homepage: https://vlatte.dev/
     description: Mock HTTP and gRPC servers for Go tests, and a CLI that serves them from files
     # The binaries are not notarized: macOS would refuse to run them.
     hooks:

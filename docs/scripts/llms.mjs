@@ -23,11 +23,9 @@ const source = (link) => link.slice(1).replace(/\/$/, '/index') + '.md'
 
 // A link of the site made absolute: a page links to its Markdown copy, any other file to itself.
 const absolute = (link) => {
-  if (link.startsWith(config.base)) {
-    return site + link.slice(config.base.length)
-  }
   const [path, hash] = link.split('#')
-  return site + source(path) + (hash ? `#${hash}` : '')
+  const page = source(path)
+  return site + (listed.has(page) ? page : path.slice(1)) + (hash ? `#${hash}` : '')
 }
 
 // Each sidebar group, with its pages in order. A link outside any group is a group of its own.

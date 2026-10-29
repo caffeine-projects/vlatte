@@ -1,7 +1,7 @@
 import { defineConfig, type DefaultTheme } from 'vitepress'
 
-const base = '/vlatte/'
-const site = 'https://caffeine-projects.github.io/vlatte/'
+const base = '/'
+const site = 'https://vlatte.dev/'
 const repo = 'https://github.com/caffeine-projects/vlatte'
 
 const tagline = 'Mock HTTP and gRPC servers for Go tests.'
