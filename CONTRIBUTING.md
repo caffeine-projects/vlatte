@@ -67,6 +67,8 @@ fix: panic when Jitter deviation is over 200
 docs: document the exported API for pkg.go.dev
 ```
 
+The release notes list each `feat`, `fix` and `perf` commit by its first line. Mark a breaking change with `!` after the type or scope, as in `feat(admin)!: rewrite the admin API`: the notes list it under Breaking changes, whatever its type.
+
 ## Pull requests
 
 - One concern per pull request.
@@ -75,6 +77,28 @@ docs: document the exported API for pkg.go.dev
 - All checks pass before you ask for review.
 
 You may use AI tools. You own every line you submit and must be able to explain it. The tools follow [`AGENTS.md`](AGENTS.md).
+
+## Releasing
+
+For maintainers. Pushing a tag that starts with `v` runs [`.github/workflows/release.yml`](.github/workflows/release.yml). A tag with a suffix, such as `v0.2.0-rc.1`, is a prerelease, and Homebrew does not get it.
+
+1. For a stable release, bump the version the docs pin, and merge that first:
+
+   ```sh
+   grep -rnE 'vlatte:v[0-9]|VERSION=v[0-9]' README.md docs --exclude-dir=node_modules
+   ```
+
+2. Sign the tag and push it. The first `-m` is the tag's subject. Each later `-m` is a paragraph of the highlights that open the release notes. Never push a lightweight tag: the notes would open with the tagged commit's body instead.
+
+   ```sh
+   git tag -s v0.2.0 -m v0.2.0 -m "Highlights of the release."
+   git push origin v0.2.0
+   ```
+
+3. Approve the `release` environment when its jobs ask.
+4. Check the release notes and, for a stable release, the new commit in [caffeine-projects/homebrew-tap](https://github.com/caffeine-projects/homebrew-tap).
+
+For a stable release, the `goreleaser` job stops before it creates the GitHub release when `HOMEBREW_TAP_GITHUB_TOKEN` has expired. Replace the token in the `release` environment and re-run the failed jobs.
 
 ## Issues
 
