@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -285,22 +284,6 @@ func readSecret(file string) (string, error) {
 	}
 
 	return strings.TrimSuffix(strings.TrimSuffix(string(b), "\n"), "\r"), nil
-}
-
-// newServer creates the server of args, with the command's settings s, whose mock files name wh as an on_complete
-// listener, and which logs to logOutput. The command serves the admin API, which keeps the mocks it adds across
-// restarts, and keeps a journal of the requests it serves, unless settings turn them off: they apply after code. It
-// returns the admin API too, nil when it is off.
-func newServer(args []string, s settings, wh *webhook.WebHook, logOutput io.Writer) (*mockhttp.Server, *admin.Admin, error) {
-	cb, api := s.setupHTTP(mockhttp.Setup())
-
-	m, err := mockhttp.New(cb.
-		Journal(_journalDir).
-		LogOutput(logOutput).
-		ConfigSources(mockhttp.DefaultConfigSources(args)...).
-		OnCompleteListener("webhook", wh))
-
-	return m, api, err
 }
 
 // setupHTTP applies s to the HTTP server's setup, and returns the admin API it adds, if any.
