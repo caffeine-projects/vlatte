@@ -9,6 +9,7 @@
 **/testdata/rapid/
 bin/
 out/
+dist/
 docs/.ai/
 *.test
 *.out

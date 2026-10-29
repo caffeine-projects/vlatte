@@ -68,28 +68,44 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # The latest Go, and the minimum go.mod requires. Coverage comes from the latest alone.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - go-version: 'stable'
+          - go-version-file: 'go.mod'
     steps:
     - name: Checkout
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
+        fetch-depth: 0 # SonarCloud reads the history to find new code
 
     - name: Set up Go
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
-        go-version: 'stable'
+        go-version: ${{ matrix.go-version }}
+        go-version-file: ${{ matrix.go-version-file }}
 
     - name: Test
       run: make testci
 
     # Dependabot-triggered runs get no Actions secrets.
     - name: Coverage
-      if: github.actor != 'dependabot[bot]'
+      if: matrix.go-version == 'stable' && github.actor != 'dependabot[bot]'
       uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ./coverage.txt
         disable_search: true
+
+    # Settings are in sonar-project.properties. Runs only where SONAR_TOKEN is given: not for Dependabot or forks.
+    - name: SonarCloud
+      if: matrix.go-version == 'stable' && github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      uses: SonarSource/sonarqube-scan-action@4d1dc0c91ee400dcf8a6dddf2f705ac36542e304 # v8.4.0
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   docker:
     runs-on: ubuntu-latest

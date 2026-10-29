@@ -554,7 +554,7 @@ func TestMockFile_ServesTrailers(t *testing.T) {
 
 func TestMockFile_ServesABase64BodyAsItsBytes(t *testing.T) {
 	// #42: a body that isn't UTF-8, such as an image or text in another encoding, has no place in body, whose text
-	// JSON and YAML hold as UTF-8. body_base64 holds any bytes, as WireMock's base64Body does.
+	// JSON and YAML hold as UTF-8. body_base64 holds any bytes.
 	m := MustNew(Setup().Silent())
 	m.MustStart()
 	t.Cleanup(m.Close)
@@ -917,6 +917,43 @@ func instance(t require.TestingT, doc any) any {
 	return v
 }
 
+func TestJSONSchema_IDIsTheAddressTheDocsServe(t *testing.T) {
+	// Mock files and editors name the schema by its $id: the address the docs site serves it at, which
+	// docs/scripts/prepare.mjs copies it to. A schema whose $id names another address points them at nothing.
+	_, raw := loadJSONSchema(t)
+
+	require.Equal(t, "https://caffeine-projects.github.io/vlatte/schemas/http.schema.json", raw["$id"])
+}
+
+func TestJSONSchema_JSONMockFilesNameItInTheirSchemaKey(t *testing.T) {
+	// A JSON mock file names its schema for editors in $schema, as a YAML one does in a comment: the schema must
+	// accept the key, and the decoder must load the file as if the key weren't there.
+	schema, _ := loadJSONSchema(t)
+	doc := `{
+		"$schema": "https://caffeine-projects.github.io/vlatte/schemas/http.schema.json",
+		"request": {"method": "GET", "path": "/hello"},
+		"response": {"status": 200, "body": "hello"}
+	}`
+
+	var v any
+	require.NoError(t, json.Unmarshal([]byte(doc), &v))
+	require.NoError(t, schema.Validate(instance(t, v)))
+
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(FromBytes([]byte(doc), "json"))
+
+	res, err := http.Get(m.URL("/hello"))
+	require.NoError(t, err)
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Equal(t, "hello", string(body))
+}
+
 func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 	// Every key the decoder reads is documented for editors, and nothing else is.
 	_, raw := loadJSONSchema(t)
@@ -947,7 +984,9 @@ func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 
 	defs, _ := raw["$defs"].(map[string]any)
 
-	require.Equal(t, _mockSchema.Keys(), keys(raw, "scenario", "request"), "mock")
+	// $schema is for editors: the decoder skips it.
+	mockKeys := slices.DeleteFunc(keys(raw, "scenario", "request"), func(k string) bool { return k == "$schema" })
+	require.Equal(t, _mockSchema.Keys(), mockKeys, "mock")
 	require.Equal(t, _replySchema.Keys(), keys(defs["reply"], "template"), "reply")
 	require.Equal(t, _sequenceSchema.Keys(), keys(props(raw)["response_sequence"]), "response_sequence")
 	require.Equal(t, _randomSchema.Keys(), keys(props(raw)["response_random"]), "response_random")
@@ -1048,6 +1087,9 @@ var _scalarKeys = []struct {
 	}},
 	{"scenario.new_state", "b", func(v any) map[string]any {
 		return withRequest(map[string]any{"scenario": map[string]any{"name": "s", "new_state": v}})
+	}},
+	{"scenario.key", "k", func(v any) map[string]any {
+		return withRequest(map[string]any{"scenario": map[string]any{"name": "s", "key": v}})
 	}},
 	{"request.url_match", "x", func(v any) map[string]any { return map[string]any{"request": map[string]any{"url_match": v}} }},
 	{"request.path_template", "/users/{id}", func(v any) map[string]any {

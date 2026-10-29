@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,26 +21,22 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 var (
-	_ vlatte.Mock                = (*fakeMock)(nil)
-	_ descriptor.SelfDescriptive = (*fakeMock)(nil)
-	_ io.Closer                  = (*fakeMock)(nil)
+	_ vlatte.Mock            = (*fakeMock)(nil)
+	_ vlatte.SelfDescriptive = (*fakeMock)(nil)
+	_ io.Closer              = (*fakeMock)(nil)
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(
-		m,
-		goleak.IgnoreTopFunction("net/http.(*persistConn).readLoop"),
-		goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),
-	)
+	goleak.VerifyTestMain(m)
 }
 
 // fakeMock is a mock of no protocol: the admin API knows mocks through vlatte.Mock and the interfaces it checks for.
@@ -66,7 +63,7 @@ func (m *fakeMock) Events() vlatte.Events { return vlatte.Events{} }
 func (m *fakeMock) String() string        { return m.id }
 func (m *fakeMock) Origin() string        { return m.origin }
 
-func (m *fakeMock) Describe() descriptor.Descriptor { return descriptor.Root(m.doc) }
+func (m *fakeMock) Describe() vlatte.Descriptor { return vlatte.DescribeRoot(m.doc) }
 
 func (m *fakeMock) Close() error {
 	m.closed.Add(1)
@@ -309,6 +306,7 @@ type request struct {
 	contentType string
 	accept      string
 	body        string
+	set         func(r *http.Request) // changes the request, such as to add credentials, when not nil
 }
 
 // send sends req and returns the response, with its body read.
@@ -324,6 +322,10 @@ func send(t *testing.T, req request) (*http.Response, string) {
 
 	if req.accept != "" {
 		r.Header.Set("Accept", req.accept)
+	}
+
+	if req.set != nil {
+		req.set(r)
 	}
 
 	res, err := http.DefaultClient.Do(r)
@@ -510,3 +512,48 @@ func requestIDs(doc map[string]any) []string {
 
 	return ids
 }
+
+// fakeScenarios keeps scenarios in a real store, for the scenario matchers of mocks of uses. listErr fails listing
+// them, and setErr moving one; unlisted lists none.
+type fakeScenarios struct {
+	store    *matchscenario.Store
+	uses     []matchscenario.Use
+	listErr  error
+	setErr   error
+	unlisted bool
+}
+
+var _ adminapi.Scenarios = (*fakeScenarios)(nil)
+
+// newScenarios keeps scenarios for mocks, each a mock ID and the scenario, the state it requires and the one it moves
+// to.
+func newScenarios(mocks ...[4]string) *fakeScenarios {
+	f := &fakeScenarios{store: matchscenario.New()}
+	for _, m := range mocks {
+		f.uses = append(f.uses, matchscenario.Use{MockID: m[0], Matcher: f.store.Matcher(m[1], m[2], m[3])})
+	}
+
+	return f
+}
+
+func (f *fakeScenarios) Scenarios(context.Context) ([]matchscenario.Scenario, error) {
+	if f.listErr != nil || f.unlisted {
+		return nil, f.listErr
+	}
+
+	return f.store.Model(slices.Values(f.uses)), nil
+}
+
+func (f *fakeScenarios) SetScenario(_ context.Context, name, state string, in ...matchscenario.Instance) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+
+	return f.store.Move(slices.Values(f.uses), name, state, in...)
+}
+
+func (f *fakeScenarios) ResetScenario(name string, in ...matchscenario.Instance) {
+	f.store.ResetScenario(name, in...)
+}
+
+func (f *fakeScenarios) ResetScenarios() { f.store.ResetScenarios() }

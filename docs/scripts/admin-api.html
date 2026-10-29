@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin API | vlatte</title>
+  <meta name="description" content="The routes of the vlatte admin API, from its OpenAPI document.">
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+  <!--
+    The admin API reference, on a page of its own as a running server serves it at /docs. scripts/prepare.mjs copies
+    this file to public/reference/admin-api.html, with the version of Scalar the admin API pins and its integrity hash.
+  -->
+  <script>
+    // The docs site's theme: VitePress keeps the visitor's pick under this key, so both stay in step.
+    try {
+      const pick = localStorage.getItem('vitepress-theme-appearance')
+      if (pick === 'light' || pick === 'dark') document.documentElement.dataset.theme = pick
+    } catch {
+      // Storage may be off: the page follows the system.
+    }
+  </script>
+  <style>
+    /* The colors of the vlatte brand, as the docs site and the admin pages use them. */
+    :root {
+      color-scheme: light;
+      --bg: #f5ede2;
+      --fg: #2c1a12;
+      --muted: #7a6355;
+      --line: #e5d6c3;
+      --panel: #fffaf3;
+      --accent: #b4471c;
+      --brand-v: #d9622f;
+      --nav-height: 56px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        color-scheme: dark;
+        --bg: #17100c;
+        --fg: #fff3e0;
+        --muted: #b9a493;
+        --line: #3a2a20;
+        --panel: #221812;
+        --accent: #f2a93b;
+      }
+    }
+
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #17100c;
+      --fg: #fff3e0;
+      --muted: #b9a493;
+      --line: #3a2a20;
+      --panel: #221812;
+      --accent: #f2a93b;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      /* Scalar keeps its sticky header and sidebar under the bar. */
+      --scalar-custom-header-height: var(--nav-height);
+    }
+
+    body.light-mode,
+    body.dark-mode {
+      --scalar-background-1: var(--bg);
+      --scalar-background-2: var(--panel);
+      --scalar-color-1: var(--fg);
+      --scalar-color-2: var(--muted);
+      --scalar-color-accent: var(--accent);
+      --scalar-border-color: var(--line);
+    }
+
+    .vl-bar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      height: var(--nav-height);
+      padding: 0 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      font: 14px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .vl-bar a { color: var(--fg); text-decoration: none; }
+    .vl-bar a:hover { color: var(--accent); }
+    .vl-bar a:focus-visible, .vl-bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .vl-brand { display: flex; align-items: center; gap: 8px; }
+    .vl-brand img { display: block; width: 28px; height: 28px; }
+    .vl-wordmark { font-weight: 700; font-size: 19px; letter-spacing: -0.03em; }
+    .vl-wordmark span { color: var(--brand-v); }
+    .vl-title { color: var(--muted); white-space: nowrap; }
+    .vl-links { display: flex; align-items: center; gap: 16px; margin-left: auto; }
+
+    .vl-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--fg);
+      cursor: pointer;
+    }
+
+    .vl-icon svg { width: 16px; height: 16px; fill: currentColor; }
+
+    @media (max-width: 480px) {
+      .vl-title { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="vl-bar" aria-label="vlatte docs">
+    <a class="vl-brand" href="../" aria-label="vlatte docs home">
+      <img src="../logo-small.svg" alt="">
+      <span class="vl-wordmark"><span>v</span>latte</span>
+    </a>
+    <span class="vl-title">Admin API</span>
+    <div class="vl-links">
+      <a href="../run/admin-api">Guide</a>
+      <a href="../openapi/admin.yaml">OpenAPI</a>
+      <a class="vl-icon" href="https://github.com/caffeine-projects/vlatte" aria-label="vlatte on GitHub" title="vlatte on GitHub">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      </a>
+      <button class="vl-icon" id="vl-theme" type="button">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0 1.5a5.5 5.5 0 0 0 0-11v11Z"/></svg>
+      </button>
+    </div>
+  </nav>
+  <div id="app"></div>
+  <script
+    src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@{version}/dist/browser/standalone.js"
+    integrity="{integrity}"
+    crossorigin="anonymous"></script>
+  <script>
+    const root = document.documentElement
+    const system = matchMedia('(prefers-color-scheme: dark)')
+    const dark = () => (root.dataset.theme ? root.dataset.theme === 'dark' : system.matches)
+
+    // Scalar reads the forced theme once, and themes the page by a class of the body: a change sets the class.
+    const follow = () => {
+      document.body.classList.toggle('dark-mode', dark())
+      document.body.classList.toggle('light-mode', !dark())
+      const text = dark() ? 'Switch to the light theme' : 'Switch to the dark theme'
+      toggle.setAttribute('aria-label', text)
+      toggle.title = text
+    }
+
+    const toggle = document.getElementById('vl-theme')
+    toggle.addEventListener('click', () => {
+      const pick = dark() ? 'light' : 'dark'
+      root.dataset.theme = pick
+      try {
+        localStorage.setItem('vitepress-theme-appearance', pick)
+      } catch {
+        // Storage may be off: the pick lasts until the page closes.
+      }
+      follow()
+    })
+    system.addEventListener('change', follow)
+
+    // The same configuration as the admin API's own page: no telemetry, assistants or web fonts.
+    Scalar.createApiReference('#app', {
+      url: '../openapi/admin.yaml',
+      telemetry: false,
+      withDefaultFonts: false,
+      agent: { disabled: true },
+      mcp: { disabled: true },
+      showDeveloperTools: 'never',
+      forceDarkModeState: dark() ? 'dark' : 'light',
+      hideDarkModeToggle: true,
+    })
+    follow()
+  </script>
+</body>
+</html>

@@ -59,7 +59,6 @@ type kind struct {
 
 type field = config.Field[spec]
 
-// _kinds are the faults of mock files, in the order of the README.
 var _kinds = []kind{
 	{name: "empty_response", schema: params(), build: func(spec) vlatte.Step { return fault.EmptyResponse() }},
 	{name: "malformed_response_chunk", schema: params(), build: func(spec) vlatte.Step { return fault.MalformedResponseChunk() }},

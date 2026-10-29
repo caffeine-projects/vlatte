@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/match/internal/anyconv"
 )
@@ -28,7 +27,7 @@ func (m *greaterOrEqualMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"Gte(", anyconv.Stringify(m.Expected), ") Got: ", anyconv.Stringify(v)}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *greaterOrEqualMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("gte", m.Expected)
+// Describe implements vlatte.SelfDescriptive.
+func (m *greaterOrEqualMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("gte", m.Expected)
 }

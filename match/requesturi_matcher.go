@@ -8,13 +8,12 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
 var (
-	_ vlatte.Matcher             = (*requestURIMatcher)(nil)
-	_ descriptor.SelfDescriptive = (*requestURIMatcher)(nil)
+	_ vlatte.Matcher         = (*requestURIMatcher)(nil)
+	_ vlatte.SelfDescriptive = (*requestURIMatcher)(nil)
 )
 
 // requestURIMatcher passes when the value is a URL with the path and query of Expected.
@@ -40,9 +39,9 @@ func (m *requestURIMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"RequestURI(", m.Expected, ") ", u.RequestURI()}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *requestURIMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("requestURI", m.Expected)
+// Describe implements vlatte.SelfDescriptive.
+func (m *requestURIMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("requestURI", m.Expected)
 }
 
 // requestTarget is what RequestURI compares of a URL: its decoded path segments, its query and its fragment.

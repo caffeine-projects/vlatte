@@ -1,0 +1,113 @@
+  <!--
+    The layout every admin page shares: its icon, the colors of its light and dark themes, and the navbar's styles. layout puts it
+    in each page's head. The theme follows the system until the visitor picks one with the navbar's toggle; the script
+    applies that pick before the page paints, so it doesn't flash the other theme.
+  -->
+  <script>
+    try {
+      const theme = localStorage.getItem('vlatte-theme')
+      if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme
+    } catch {
+      // Storage may be off: the page follows the system.
+    }
+  </script>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 120 120%22 width=%22120%22 height=%22120%22 role=%22img%22 aria-label=%22VLatte%22%3E%3Cpath d=%22M92 52 H104 a8 8 0 0 1 0 16 H92 Z%22 fill=%22%23D9622F%22/%3E%3Ccircle cx=%2252%22 cy=%2260%22 r=%2244%22 fill=%22%23D9622F%22/%3E%3Ccircle cx=%2252%22 cy=%2260%22 r=%2235%22 fill=%22%23FFF3E0%22/%3E%3Cg transform=%22translate(52 60)%22 fill=%22%232C1A12%22%3E%3Cpath d=%22M0 -21A21 21 0 1 1 0 21A21 21 0 1 1 0 -21ZM0 -7.5A7.5 7.5 0 1 1 0 7.5A7.5 7.5 0 1 1 0 -7.5Z%22 fill-rule=%22evenodd%22/%3E%3Crect x=%22-5%22 y=%22-29.5%22 width=%2210%22 height=%2212%22 rx=%222.5%22/%3E%3Crect x=%22-5%22 y=%22-29.5%22 width=%2210%22 height=%2212%22 rx=%222.5%22 transform=%22rotate(45)%22/%3E%3Crect x=%22-5%22 y=%22-29.5%22 width=%2210%22 height=%2212%22 rx=%222.5%22 transform=%22rotate(90)%22/%3E%3Crect x=%22-5%22 y=%22-29.5%22 width=%2210%22 height=%2212%22 rx=%222.5%22 transform=%22rotate(135)%22/%3E%3Crect x=%22-5%22 y=%22-29.5%22 width=%2210%22 height=%2212%22 rx=%222.5%22 transform=%22rotate(180)%22/%3E%3Crect x=%22-5%22 y=%22-29.5%22 width=%2210%22 height=%2212%22 rx=%222.5%22 transform=%22rotate(225)%22/%3E%3Crect x=%22-5%22 y=%22-29.5%22 width=%2210%22 height=%2212%22 rx=%222.5%22 transform=%22rotate(270)%22/%3E%3Crect x=%22-5%22 y=%22-29.5%22 width=%2210%22 height=%2212%22 rx=%222.5%22 transform=%22rotate(315)%22/%3E%3C/g%3E%3C/svg%3E">
+  <style>
+    /* The colors of the vlatte brand (docs/brand): espresso, terracotta, amber and cream. */
+    :root {
+      color-scheme: light;
+      --bg: #f5ede2;
+      --fg: #2c1a12;
+      --muted: #7a6355;
+      --line: #e5d6c3;
+      --panel: #fffaf3;
+      --accent: #b4471c;
+      --accent-soft: #fce6c4;
+      --danger: #b42318;
+      --ok: #2f7d32;
+      --brand-v: #d9622f;
+      --nav-height: 56px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        color-scheme: dark;
+        --bg: #17100c;
+        --fg: #fff3e0;
+        --muted: #b9a493;
+        --line: #3a2a20;
+        --panel: #221812;
+        --accent: #f2a93b;
+        --accent-soft: #3d2710;
+        --danger: #f87171;
+        --ok: #4ade80;
+      }
+    }
+
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #17100c;
+      --fg: #fff3e0;
+      --muted: #b9a493;
+      --line: #3a2a20;
+      --panel: #221812;
+      --accent: #f2a93b;
+      --accent-soft: #3d2710;
+      --danger: #f87171;
+      --ok: #4ade80;
+    }
+
+    .vl-nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      height: var(--nav-height);
+      padding: 0 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      font: 14px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .vl-nav a { color: var(--fg); text-decoration: none; }
+    .vl-nav a:focus-visible, .vl-nav button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .vl-brand { display: flex; align-items: center; gap: 8px; flex: none; }
+    .vl-brand svg { display: block; width: 30px; height: 30px; }
+    .vl-wordmark { font-weight: 700; font-size: 19px; letter-spacing: -0.03em; }
+    .vl-wordmark span { color: var(--brand-v); }
+
+    .vl-links { display: flex; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+    .vl-links a { padding: 7px 10px; border-radius: 6px; white-space: nowrap; }
+    .vl-links a:hover { background: var(--bg); }
+    .vl-links a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+    .vl-tools { display: flex; gap: 8px; margin-left: auto; flex: none; }
+
+    .vl-nav .vl-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--fg);
+      cursor: pointer;
+    }
+
+    .vl-nav .vl-icon:hover { background: var(--bg); }
+    .vl-nav .vl-icon svg { display: block; width: 16px; height: 16px; fill: currentColor; }
+
+    /* On a phone the links take a row of their own under the name and the buttons. */
+    @media (max-width: 600px) {
+      :root { --nav-height: 96px; }
+      .vl-nav { flex-wrap: wrap; align-content: center; row-gap: 8px; }
+      .vl-links { order: 3; flex-basis: 100%; margin: 0 -10px; }
+    }
+  </style>

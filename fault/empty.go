@@ -4,13 +4,12 @@ import (
 	"context"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ vlatte.Step                = emptyResponse{}
-	_ descriptor.SelfDescriptive = emptyResponse{}
-	_ vlatte.Stage               = (*emptyStage)(nil)
+	_ vlatte.Step            = emptyResponse{}
+	_ vlatte.SelfDescriptive = emptyResponse{}
+	_ vlatte.Stage           = (*emptyStage)(nil)
 )
 
 // EmptyResponse returns a wire step that sends nothing: at the first byte of the answer, or at its end, it aborts the
@@ -22,9 +21,9 @@ func EmptyResponse() vlatte.Step {
 
 type emptyResponse struct{}
 
-// Describe implements [descriptor.SelfDescriptive].
-func (emptyResponse) Describe() descriptor.Descriptor {
-	return descriptor.WithKeyValuePairs("empty_response", "type", "empty_response")
+// Describe implements [vlatte.SelfDescriptive].
+func (emptyResponse) Describe() vlatte.Descriptor {
+	return vlatte.DescribeKeyValuePairs("empty_response", "type", "empty_response")
 }
 
 func (emptyResponse) Open(flow *vlatte.Flow, _ vlatte.Stage) vlatte.Stage {

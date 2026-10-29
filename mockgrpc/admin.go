@@ -14,7 +14,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/atomicfile"
 	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
-	"github.com/caffeine-projects/vlatte/journal"
+	"github.com/caffeine-projects/vlatte/verify"
 )
 
 var (
@@ -226,7 +226,7 @@ func relocate(doc map[string]any, toWD string) {
 
 // adminRequestPattern returns the filter of the request part of a mock file, v, the request key of a query of the
 // admin API: its keys are a mock file's, and it matches as a mock does.
-func (app *Server) adminRequestPattern(v config.Value) (journal.Filter, error) {
+func (app *Server) adminRequestPattern(v config.Value) (verify.Pattern, error) {
 	def := newMockDef(app.matchers())
 	doc := config.Value{Origin: v.Origin, Any: map[string]any{"request": v.Any}}
 

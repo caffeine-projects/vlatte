@@ -58,8 +58,9 @@ type nearMiss struct {
 // part whose matcher failed with an error names it too.
 //
 // No matcher runs twice for a request: each mock goes on from the part Find stopped at, which failed, and only the
-// parts after it run now. Of those, it skips the ones that keep state, as running a scenario's may change it. A mock
-// none of whose request parts passed is left out, unless it differs in none.
+// parts after it run now. Of those, it skips the [Stateful] ones, as running them may change their state, and runs the
+// [Claimer] ones, whose Match changes nothing, such as a scenario's. A mock none of whose request parts passed is left
+// out, unless it differs in none.
 //
 // The report is whole even once ctx, the request's, is done, as when its client left: the matchers get a context
 // with its values that isn't.
@@ -73,7 +74,9 @@ func (m *Misses[M, TIn]) NearMisses(ctx context.Context, describe func(*Eval[TIn
 		matched := 0
 
 		for i, eval := range m.evals(t.mock) {
-			_, keepsState := eval.Matcher.(Stateful)
+			_, stateful := eval.Matcher.(Stateful)
+			_, claims := eval.Matcher.(Claimer)
+			notOfRequest := stateful || claims
 
 			var (
 				ok  bool
@@ -85,7 +88,7 @@ func (m *Misses[M, TIn]) NearMisses(ctx context.Context, describe func(*Eval[TIn
 			case i < t.stop:
 				ok = true
 			case i == t.stop:
-			case keepsState:
+			case stateful:
 				near.miss.Skipped = append(near.miss.Skipped, describe(eval))
 				continue
 			default:
@@ -104,7 +107,7 @@ func (m *Misses[M, TIn]) NearMisses(ctx context.Context, describe func(*Eval[TIn
 			}
 
 			switch {
-			case keepsState:
+			case notOfRequest:
 			case ok && err == nil:
 				matched++
 			default:

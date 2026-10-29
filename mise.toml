@@ -1,0 +1,6 @@
+# Tools for working on vlatte. Install them with `mise install`.
+# Keep versions in sync with go.mod, GOLANGCI_LINT_VERSION in the Makefile and the Node version in .github/workflows/docs.yml.
+[tools]
+go = "1.27"
+golangci-lint = "2.14.0"
+node = "26"

@@ -6,13 +6,12 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ vlatte.Step                = slowClose{}
-	_ descriptor.SelfDescriptive = slowClose{}
-	_ vlatte.Stage               = (*slowCloseStage)(nil)
+	_ vlatte.Step            = slowClose{}
+	_ vlatte.SelfDescriptive = slowClose{}
+	_ vlatte.Stage           = (*slowCloseStage)(nil)
 )
 
 // SlowClose returns a step that delays the end of the answer by delay, as a server slow to close its connection does:
@@ -33,9 +32,9 @@ func SlowClose(delay time.Duration) vlatte.Step {
 
 type slowClose struct{ delay time.Duration }
 
-// Describe implements [descriptor.SelfDescriptive].
-func (c slowClose) Describe() descriptor.Descriptor {
-	return descriptor.WithKeyValuePairs("slow_close", "type", "slow_close", "delay", c.delay.String())
+// Describe implements [vlatte.SelfDescriptive].
+func (c slowClose) Describe() vlatte.Descriptor {
+	return vlatte.DescribeKeyValuePairs("slow_close", "type", "slow_close", "delay", c.delay.String())
 }
 
 func (c slowClose) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {

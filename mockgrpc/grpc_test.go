@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,7 +31,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -245,6 +245,55 @@ func TestClose_ClosesTheConnectionsOfWebhooks(t *testing.T) {
 	case <-t.Context().Done():
 		t.Fatal("the webhook's connection to its target outlived the server")
 	}
+}
+
+func TestWebhooks_FollowTheOutboundRules(t *testing.T) {
+	// Listeners such as webhooks send through the server's transport, which refuses what the outbound rules refuse:
+	// a webhook's URL comes from a mock, which anyone who reaches the admin API sets.
+	var hits atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(target.Close)
+
+	logger := zerolog.Nop()
+	m := MustNew(Setup().
+		Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}).
+		Logger(&logger).
+		OutboundDeny(netip.MustParsePrefix("127.0.0.0/8")))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	sent := make(chan error, 1)
+	m.MustMock(Method("Greetings").Callback(func(ctx context.Context, e vlatte.OnComplete) error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.URL, nil)
+		if err != nil {
+			return err
+		}
+
+		res, err := e.Kit().Transport().RoundTrip(req)
+		if err == nil {
+			err = res.Body.Close()
+		}
+
+		sent <- err
+
+		return nil
+	}).Reply(Message(&pb.HiRes{Message: "hello"})))
+
+	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.NoError(t, err)
+
+	// The answer waits for the callback, so it sent already.
+	select {
+	case err := <-sent:
+		require.ErrorIs(t, err, vlatte.ErrOutboundRefused)
+	default:
+		t.Fatal("the answer came before the callback ran")
+	}
+
+	require.Zero(t, hits.Load())
 }
 
 func TestClose_ReleasesWhatTheMocksHold(t *testing.T) {
@@ -581,7 +630,7 @@ func TestServer_WarnsOfAServiceRegisteredPastTheJournal(t *testing.T) {
 			_, err = pb.NewTestServiceClient(conn).Greetings(t.Context(), &pb.HiReq{})
 			require.Equal(t, codes.NotFound, status.Code(err))
 
-			n, err := m.CountRequests(t.Context(), journal.Query{})
+			n, err := m.VerifyRequests().Count(t.Context())
 			require.NoError(t, err)
 			require.Equal(t, 1, n, "the call is journaled either way")
 		})

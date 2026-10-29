@@ -10,7 +10,6 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 func requestURIMatches(t require.TestingT, expected string, v any) bool {
@@ -92,7 +91,7 @@ func TestRequestURI(t *testing.T) {
 	})
 
 	t.Run("it describes itself as mock files write it", func(t *testing.T) {
-		desc, ok := descriptor.IsSelfDescriptive(RequestURI("/items?page=2"))
+		desc, ok := vlatte.IsSelfDescriptive(RequestURI("/items?page=2"))
 		require.True(t, ok)
 
 		data, err := desc.MarshalJSON()

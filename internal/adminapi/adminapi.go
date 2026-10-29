@@ -11,6 +11,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 // Origin is the origin of the mocks the admin API adds. A mock server's builder gives it to the mocks it builds for
@@ -50,11 +51,15 @@ type Recorder interface {
 
 // Scenarios is a mock server that keeps the state of scenarios: mocks that match in turn.
 type Scenarios interface {
-	// Scenarios returns the state of every scenario, by name.
-	Scenarios() map[string]string
+	// Scenarios returns every scenario, by name, with its state, the states its mocks name, and their moves.
+	Scenarios(ctx context.Context) ([]matchscenario.Scenario, error)
 
-	// SetScenario moves the scenario name to state, starting it when no mock did yet.
-	SetScenario(name, state string)
+	// SetScenario moves the scenario name to state: its shared instance, or the one in picks. It returns an error that
+	// wraps matchscenario.ErrUnknownState when no mock of the scenario names state.
+	SetScenario(ctx context.Context, name, state string, in ...matchscenario.Instance) error
+
+	// ResetScenario moves the scenario name back to where it started: every instance of it, or the one in picks.
+	ResetScenario(name string, in ...matchscenario.Instance)
 
 	// ResetScenarios moves every scenario back to where it started.
 	ResetScenarios()

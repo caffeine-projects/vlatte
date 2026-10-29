@@ -20,6 +20,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
@@ -500,7 +501,9 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	sub := vlatte.NewExplanation()
 	mocks := vlatte.Mocks[*Mock, *selectorInput](stored)
-	mock, matched, err := mocks.Find(r.Context(), sub, input, expectationsOf, misses)
+	// A scenario's move names its request, which the context of the claim carries.
+	claimCtx := context.WithValue(r.Context(), requestKey{}, reqValues)
+	mock, matched, err := mocks.Find(claimCtx, sub, input, expectationsOf, misses)
 	if err != nil {
 		h.onError(w, reqValues, vlatte.FailureMatch, fmt.Errorf("http: finding a mock: %w", err))
 		return
@@ -526,6 +529,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Template data providers see the mock that matched.
 	reqValues.Mock = mock
+	h.app.movedScenarios(reqValues, input)
 
 	// The hits count this request, which Inc counts once the answer is sent.
 	h.debugHeader(w, vlatte.HeaderMatchedMockID, mock.ID())
@@ -533,24 +537,18 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.debugHeader(w, vlatte.HeaderMatchedMockHits, strconv.FormatInt(mock.Hits()+1, 10))
 	h.debugHeader(w, vlatte.HeaderMatchedMockSource, mock.Origin())
 
-	d := make(map[string]any, len(h.templateDataProviders))
-	sdpIn := &TemplateDataProviderInput{r: reqValues}
-
-	for _, sdp := range h.templateDataProviders {
-		dd, err := sdp.Data(sdpIn)
-		if err != nil {
-			h.onError(w, reqValues, vlatte.FailureReply, fmt.Errorf("http: template data provider %s: %w", sdp.Key(), err))
-			return
-		}
-
-		d[sdp.Key()] = dd
+	d, err := vlatte.ProvideTemplateData(h.templateDataProviders, &TemplateDataProviderInput{r: reqValues})
+	if err != nil {
+		h.onError(w, reqValues, vlatte.FailureReply, fmt.Errorf("http: %w", err))
+		return
 	}
 
 	locals := locals(reqValues, d, viewdata.NewParameters(r.Context(), h.app.params))
 
 	reqValues.Data = locals
 
-	// A client that leaves during the delay gets nothing: the mock doesn't reply, nor count the request.
+	// A client that leaves during the delay gets nothing: the mock doesn't reply, nor count the request. Its scenario
+	// moved already, when Find picked it.
 	if mock.spec.delay != nil {
 		if err := httpx.Wait(r.Context(), mock.spec.delay()); errors.Is(err, context.Canceled) {
 			h.lifecycle.OnWarning(reqValues, fmt.Errorf("http: the client left during the delay: %w", context.Cause(r.Context())))
@@ -1306,6 +1304,7 @@ func newSelectorInput(r *http.Request, rv *RequestValues, forProxy bool) *select
 		Files:      formFiles(r),
 		ParsedBody: rv.ParsedBodyData,
 		ForProxy:   forProxy,
+		values:     rv,
 	}
 }
 
@@ -1315,8 +1314,13 @@ func expectationsOf(m *Mock) vlatte.Evaluators[*Mock, *selectorInput] {
 }
 
 // describeExpectation names the part of a request e checks, such as "header Accept": the name of a header, query
-// parameter, form field, cookie or path param goes with its kind. Times, and a part of no kind, go by their key.
+// parameter, form field, cookie or path param goes with its kind. Times, and a part of no kind, go by their key. A
+// scenario says the state the mock needs and the one it is in.
 func describeExpectation(e *expectation) string {
+	if sm, ok := e.Matcher.(*matchscenario.Matcher); ok {
+		return sm.String()
+	}
+
 	scope := matchingScope(e.Target)
 	name := scope.FieldName()
 
@@ -1374,6 +1378,7 @@ func locals(r *RequestValues, provided map[string]any, params *viewdata.Paramete
 		Parameters: params,
 		Server:     &viewdata.Server{URL: r.App.URL()},
 		Data:       r.App.Data(),
+		Scenarios:  r.App.scenarioStore.View(r.scenarioMoves...),
 	}
 }
 

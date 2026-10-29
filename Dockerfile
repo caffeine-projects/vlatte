@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 ARG TARGETOS
 ARG TARGETARCH
 
-# The context keeps .git: the binary reports its VCS revision as its version.
+# The context keeps .git: Go stamps the binary's version from it, the tag of a release.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=bind,target=. \
@@ -34,7 +34,7 @@ LABEL org.opencontainers.image.title="vlatte" \
       org.opencontainers.image.description="Build Mock APIs in Go" \
       org.opencontainers.image.url="https://github.com/caffeine-projects/vlatte" \
       org.opencontainers.image.source="https://github.com/caffeine-projects/vlatte" \
-      org.opencontainers.image.documentation="https://github.com/caffeine-projects/vlatte#docker" \
+      org.opencontainers.image.documentation="https://caffeine-projects.github.io/vlatte/run/docker" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="$VERSION" \
       org.opencontainers.image.revision="$REVISION"

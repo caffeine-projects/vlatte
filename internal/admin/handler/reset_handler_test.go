@@ -11,7 +11,6 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/journal"
-	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 func TestReset(t *testing.T) {
@@ -23,8 +22,8 @@ func TestReset(t *testing.T) {
 
 	store := newStore(t, added, fromFile)
 	files := &fakeFiles{}
-	scenarios := matchscenario.New()
-	scenarios.SetScenario("checkout", "paid")
+	scenarios := newScenarios()
+	scenarios.store.SetScenario("checkout", "paid")
 
 	url := serve(t, store, adminapi.Capabilities{Files: files, Scenarios: scenarios})
 
@@ -34,7 +33,7 @@ func TestReset(t *testing.T) {
 	require.Equal(t, []string{"from-file"}, ids(t, store))
 	require.Equal(t, int64(1), added.closed.Load(), "a removed mock is closed")
 	require.Equal(t, 1, files.reloads)
-	require.Equal(t, map[string]string{"checkout": "started"}, scenarios.Scenarios())
+	require.Equal(t, map[string]string{"checkout": "started"}, scenarios.store.Scenarios())
 }
 
 func TestReset_KeepsWhatAPersistentStoreBringsBack(t *testing.T) {
@@ -80,8 +79,8 @@ func TestReset_FilesThatFailToLoad(t *testing.T) {
 	added := newFake("added")
 	added.origin = adminapi.Origin
 	store := newStore(t, added)
-	scenarios := matchscenario.New()
-	scenarios.SetScenario("checkout", "paid")
+	scenarios := newScenarios()
+	scenarios.store.SetScenario("checkout", "paid")
 
 	files := &fakeFiles{err: errors.New("loader: pattern [: syntax error in pattern")}
 	url := serve(t, store, adminapi.Capabilities{Files: files, Scenarios: scenarios})
@@ -91,7 +90,7 @@ func TestReset_FilesThatFailToLoad(t *testing.T) {
 	problem(t, res, body, http.StatusInternalServerError, "load_failed")
 	require.Equal(t, []string{"added"}, ids(t, store))
 	require.Zero(t, added.closed.Load())
-	require.Equal(t, map[string]string{"checkout": "paid"}, scenarios.Scenarios())
+	require.Equal(t, map[string]string{"checkout": "paid"}, scenarios.store.Scenarios())
 }
 
 func TestReset_AStoreThatFailsAfterTheReload(t *testing.T) {
@@ -101,8 +100,8 @@ func TestReset_AStoreThatFailsAfterTheReload(t *testing.T) {
 	added.origin = adminapi.Origin
 	store := &brokenStore{MemoryStore: new(vlatte.MemoryStore[*fakeMock])}
 	require.NoError(t, store.Store(t.Context(), added))
-	scenarios := matchscenario.New()
-	scenarios.SetScenario("checkout", "paid")
+	scenarios := newScenarios()
+	scenarios.store.SetScenario("checkout", "paid")
 
 	files := &fakeFiles{onReload: func() { store.pickAllErr = errors.New("store: broken") }}
 	url := serve(t, store, adminapi.Capabilities{Files: files, Scenarios: scenarios})
@@ -117,7 +116,7 @@ func TestReset_AStoreThatFailsAfterTheReload(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []*fakeMock{added}, all)
 	require.Zero(t, added.closed.Load())
-	require.Equal(t, map[string]string{"checkout": "paid"}, scenarios.Scenarios())
+	require.Equal(t, map[string]string{"checkout": "paid"}, scenarios.store.Scenarios())
 }
 
 func TestReset_AJournalThatFailsToClear(t *testing.T) {

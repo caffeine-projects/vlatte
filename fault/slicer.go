@@ -7,13 +7,12 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 var (
-	_ vlatte.Step                = slicer{}
-	_ descriptor.SelfDescriptive = slicer{}
-	_ vlatte.Stage               = (*slicerStage)(nil)
+	_ vlatte.Step            = slicer{}
+	_ vlatte.SelfDescriptive = slicer{}
+	_ vlatte.Stage           = (*slicerStage)(nil)
 )
 
 // Slicer returns a step that slices each write into flushed slices of averageSize bytes, give or take sizeVariation,
@@ -47,8 +46,8 @@ type slicer struct {
 	delay     time.Duration
 }
 
-// Describe implements [descriptor.SelfDescriptive], without a size variation or a delay of 0.
-func (sl slicer) Describe() descriptor.Descriptor {
+// Describe implements [vlatte.SelfDescriptive], without a size variation or a delay of 0.
+func (sl slicer) Describe() vlatte.Descriptor {
 	props := []any{"type", "slicer", "average_size", sl.size}
 	if sl.variation != 0 {
 		props = append(props, "size_variation", sl.variation)
@@ -58,7 +57,7 @@ func (sl slicer) Describe() descriptor.Descriptor {
 		props = append(props, "delay", sl.delay.String())
 	}
 
-	return descriptor.WithKeyValuePairs("slicer", props...)
+	return vlatte.DescribeKeyValuePairs("slicer", props...)
 }
 
 func (sl slicer) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {

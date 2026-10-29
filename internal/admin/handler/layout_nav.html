@@ -1,0 +1,67 @@
+<nav class="vl-nav" aria-label="Admin pages">
+  <a class="vl-brand" href="./" aria-label="vlatte admin home">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-hidden="true">
+      <path d="M92 52 H104 a8 8 0 0 1 0 16 H92 Z" fill="#D9622F"/>
+      <circle cx="52" cy="60" r="44" fill="#D9622F"/>
+      <circle cx="52" cy="60" r="35" fill="#FFF3E0"/>
+      <g transform="translate(52 60)" fill="#2C1A12">
+        <path d="M0 -21A21 21 0 1 1 0 21A21 21 0 1 1 0 -21ZM0 -7.5A7.5 7.5 0 1 1 0 7.5A7.5 7.5 0 1 1 0 -7.5Z" fill-rule="evenodd"/>
+        <rect x="-5" y="-29.5" width="10" height="12" rx="2.5"/>
+        <rect x="-5" y="-29.5" width="10" height="12" rx="2.5" transform="rotate(45)"/>
+        <rect x="-5" y="-29.5" width="10" height="12" rx="2.5" transform="rotate(90)"/>
+        <rect x="-5" y="-29.5" width="10" height="12" rx="2.5" transform="rotate(135)"/>
+        <rect x="-5" y="-29.5" width="10" height="12" rx="2.5" transform="rotate(180)"/>
+        <rect x="-5" y="-29.5" width="10" height="12" rx="2.5" transform="rotate(225)"/>
+        <rect x="-5" y="-29.5" width="10" height="12" rx="2.5" transform="rotate(270)"/>
+        <rect x="-5" y="-29.5" width="10" height="12" rx="2.5" transform="rotate(315)"/>
+      </g>
+    </svg>
+    <span class="vl-wordmark"><span>v</span>latte</span>
+  </a>
+  <div class="vl-links">
+    <a href="./" data-page="home">Home</a>
+    <a href="scenario-board" data-page="scenario-board">Scenarios</a>
+    <a href="recorder" data-page="recorder">Recorder</a>
+    <a href="docs" data-page="docs">API docs</a>
+  </div>
+  <div class="vl-tools">
+    <a class="vl-icon" href="https://github.com/caffeine-projects/vlatte" target="_blank" rel="noopener"
+       aria-label="vlatte on GitHub" title="vlatte on GitHub">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+    </a>
+    <button class="vl-icon" id="vl-theme" type="button">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0 1.5a5.5 5.5 0 0 0 0-11v11Z"/></svg>
+    </button>
+  </div>
+</nav>
+<script>
+  // The toggle flips the theme, remembers it for every admin page, and tells the page, as a vlatte-theme event, so a
+  // page that themes something of its own, such as the docs, follows it.
+  {
+    const toggle = document.getElementById('vl-theme')
+    const root = document.documentElement
+    const system = matchMedia('(prefers-color-scheme: dark)')
+    const dark = () => (root.dataset.theme ? root.dataset.theme === 'dark' : system.matches)
+    const label = () => {
+      const text = dark() ? 'Switch to the light theme' : 'Switch to the dark theme'
+      toggle.setAttribute('aria-label', text)
+      toggle.title = text
+    }
+
+    toggle.addEventListener('click', () => {
+      const theme = dark() ? 'light' : 'dark'
+      root.dataset.theme = theme
+      try {
+        localStorage.setItem('vlatte-theme', theme)
+      } catch {
+        // Storage may be off: the pick lasts until the page closes.
+      }
+
+      label()
+      dispatchEvent(new CustomEvent('vlatte-theme', { detail: theme }))
+    })
+
+    system.addEventListener('change', label)
+    label()
+  }
+</script>

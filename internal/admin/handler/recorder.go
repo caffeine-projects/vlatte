@@ -8,9 +8,9 @@ import (
 // _recorderPage starts and stops recordings through GET, POST and DELETE /recording.
 //
 //go:embed recorder.html
-var _recorderPage []byte
+var _recorderPage string
 
 // RecorderPage answers the page that records a service: GET /recorder. On a server that can't record, it says so.
 func RecorderPage() http.Handler {
-	return page(_recorderPage)
+	return page(layout(_recorderPage, "recorder"))
 }

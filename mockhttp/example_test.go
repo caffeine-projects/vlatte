@@ -15,6 +15,9 @@ import (
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
+// The docs site shows Example from here to the end of the region.
+// #region example
+
 func Example() {
 	m := mockhttp.MustNew(mockhttp.Setup().Silent())
 	m.MustStart()
@@ -36,6 +39,8 @@ func Example() {
 	fmt.Println(res.StatusCode, string(body), scoped.Called())
 	// Output: 200 hello world true
 }
+
+// #endregion example
 
 func Example_multipart() {
 	m := mockhttp.MustNew(mockhttp.Setup().Silent())

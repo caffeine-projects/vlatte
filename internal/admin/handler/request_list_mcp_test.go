@@ -30,5 +30,9 @@ func TestListRequestsTool(t *testing.T) {
 	require.Empty(t, requestIDs(doc), "a limit of 0 counts them only")
 	require.Equal(t, int64(3), doc["count"])
 
+	doc = conformsAs(t, call(t, cs, "list_requests", map[string]any{"after": 2}), "json", "RequestList")
+	require.Equal(t, []string{"c"}, requestIDs(doc), "after a mark")
+	require.Equal(t, int64(3), doc["mark"])
+
 	callFails(t, cs, "list_requests", map[string]any{"limit": 1001}, http.StatusBadRequest, "invalid_parameter")
 }

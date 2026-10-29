@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 func TestEqualBytes(t *testing.T) {
@@ -39,7 +38,7 @@ func TestEqualBytes(t *testing.T) {
 func TestEqualBytes_DescribesItsBytesInBase64(t *testing.T) {
 	// JSON and YAML hold text as UTF-8: the bytes go in standard base64, so a mock's description encodes, and
 	// [equalbytes, ...] reads it back.
-	desc, ok := descriptor.IsSelfDescriptive(EqualBytes([]byte{0xff, 0xfe, 0x00}))
+	desc, ok := vlatte.IsSelfDescriptive(EqualBytes([]byte{0xff, 0xfe, 0x00}))
 	require.True(t, ok)
 
 	b, err := desc.MarshalJSON()

@@ -10,6 +10,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/httpx"
 	"github.com/caffeine-projects/vlatte/journal"
 )
 
@@ -89,6 +90,24 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			},
 		},
 		field{
+			Key: "grpc.outbound.allow", Kind: config.List,
+			Usage: "Address ranges the gRPC server may connect to, in CIDR form, such as 10.1.0.0/16: proxied calls, " +
+				"the recording target and webhooks reach no other address. Empty allows every address.",
+			Set: func(c *Config, v config.Value) (err error) {
+				c.OutboundAllow, err = httpx.ParsePrefixes(v.List)
+				return err
+			},
+		},
+		field{
+			Key: "grpc.outbound.deny", Kind: config.List,
+			Usage: "Address ranges the gRPC server never connects to, in CIDR form, such as 169.254.0.0/16. Deny " +
+				"wins over grpc.outbound.allow.",
+			Set: func(c *Config, v config.Value) (err error) {
+				c.OutboundDeny, err = httpx.ParsePrefixes(v.List)
+				return err
+			},
+		},
+		field{
 			Key: "grpc.tls", Kind: config.Bool, Usage: "Serve TLS. Only the vlatte command reads it: in Go, Server.StartTLS serves TLS.",
 			Set: func(c *Config, v config.Value) error { c.UseTLS = v.Bool; return nil },
 		},
@@ -148,6 +167,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		// them, so a config file it shares with the command loads.
 		field{Key: "grpc.admin", Kind: config.Bool, Hidden: true},
 		field{Key: "grpc.admin.addr", Kind: config.String, Hidden: true},
+		field{Key: "grpc.admin.dir", Kind: config.String, Hidden: true},
 		field{
 			Key: "grpc.journal", Kind: config.Bool, Usage: "Keep a journal of the calls the gRPC server serves, of every outcome.",
 			Set: func(c *Config, v config.Value) error {

@@ -10,13 +10,12 @@ import (
 	"slices"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
 var (
-	_ vlatte.Matcher             = (*fileMatcher)(nil)
-	_ descriptor.SelfDescriptive = (*fileMatcher)(nil)
+	_ vlatte.Matcher         = (*fileMatcher)(nil)
+	_ vlatte.SelfDescriptive = (*fileMatcher)(nil)
 )
 
 // FilePattern is what a file of a multipart form must have to match: its name, content type, headers and content.
@@ -158,8 +157,8 @@ func (m *fileMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return m.pattern.every, nil
 }
 
-// Describe implements descriptor.SelfDescriptive, with the keys of a mock file's form_file pattern.
-func (m *fileMatcher) Describe() descriptor.Descriptor {
+// Describe implements vlatte.SelfDescriptive, with the keys of a mock file's form_file pattern.
+func (m *fileMatcher) Describe() vlatte.Descriptor {
 	props := make(map[string]any)
 
 	if m.pattern.filename != nil {
@@ -190,7 +189,7 @@ func (m *fileMatcher) Describe() descriptor.Descriptor {
 		props["every"] = true
 	}
 
-	return descriptor.New("form_file", props)
+	return vlatte.NewDescriptor("form_file", props)
 }
 
 // matchFile reports whether a file has every condition of the pattern, the cheap ones first.
@@ -269,9 +268,9 @@ func mediaType(contentType string) string {
 
 // describeMatcher describes a matcher for a mock file, or as anything when it can't describe itself.
 func describeMatcher(m vlatte.Matcher) any {
-	if d, ok := descriptor.IsSelfDescriptive(m); ok {
+	if d, ok := vlatte.IsSelfDescriptive(m); ok {
 		return d
 	}
 
-	return descriptor.KeyOnly("anything")
+	return vlatte.DescribeKeyOnly("anything")
 }

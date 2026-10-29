@@ -19,9 +19,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match"
-	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 )
 
@@ -219,8 +217,8 @@ func TestBuilder_ScenarioAdvancesPerServer(t *testing.T) {
 }
 
 func TestBuilder_AScenarioMockWithoutARequiredState(t *testing.T) {
-	// A mock that requires no state of its scenario matches in any state, and its new state moves the
-	// scenario, one no mock started too: it required "", the state of no scenario, and its new state was dropped.
+	// A mock that requires no state of its scenario matches in any state, and its new state moves the scenario, one
+	// nothing moved yet too.
 	newServer := func(builders ...*Builder) *Server {
 		m := MustNew(Setup().Silent())
 		m.MustStart()
@@ -252,7 +250,7 @@ func TestBuilder_AScenarioMockWithoutARequiredState(t *testing.T) {
 		}
 	})
 
-	t.Run("starts the scenario it moves", func(t *testing.T) {
+	t.Run("moves the scenario", func(t *testing.T) {
 		m := newServer(
 			Getf("/pay").ScenarioIs("checkout").ScenarioStateWillBe("paid").Reply(OK()),
 			Getf("/cart").ScenarioIs("checkout").ScenarioStateIs("cart").Reply(OK()))
@@ -260,7 +258,7 @@ func TestBuilder_AScenarioMockWithoutARequiredState(t *testing.T) {
 		status, _ := get(t, m, "/pay")
 		require.Equal(t, http.StatusOK, status)
 
-		// A scenario no mock started matches whatever state a mock requires: this one was started, at paid.
+		// In paid, the mock requiring cart doesn't match.
 		status, _ = get(t, m, "/cart")
 		require.Equal(t, StatusNoMatch, status)
 	})
@@ -463,12 +461,13 @@ func TestBuilder_MatchesDescribesUnderCustom(t *testing.T) {
 
 	request, ok := desc["request"].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, []any{descriptor.SingleArg("not", descriptor.KeyOnly("nil"))}, request["custom"])
+	require.Equal(t, []any{vlatte.DescribeSingleArg("not", vlatte.DescribeKeyOnly("nil"))}, request["custom"])
 }
 
 // scenarioServer runs the scenario suite on a server whose mocks are built in Go, or from mock files.
 type scenarioServer struct {
-	m         *Server
+	*Server
+
 	fromFiles bool
 }
 
@@ -480,28 +479,38 @@ func newScenarioServer(fromFiles bool) func(t *testing.T) scenariotest.Server {
 		m.MustStart()
 		t.Cleanup(m.Close)
 
-		return &scenarioServer{m: m, fromFiles: fromFiles}
+		return &scenarioServer{Server: m, fromFiles: fromFiles}
 	}
 }
 
+// _scenarioKey is the scenario key of the keyed mocks of a scenarioServer: the header CallWithKey sends.
+const _scenarioKey = `{{ .Request.Header.Get "X-Scenario-Key" }}`
+
 func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 	for _, mk := range mocks {
+		var key string
+		if mk.Keyed {
+			key = _scenarioKey
+		}
+
 		if s.fromFiles {
 			doc, err := json.Marshal(map[string]any{
+				"id":      mk.ID,
+				"enabled": !mk.Disabled,
 				"scenario": map[string]string{
-					"name": mk.Scenario, "required_state": mk.RequiredState, "new_state": mk.NewState,
+					"name": mk.Scenario, "required_state": mk.RequiredState, "new_state": mk.NewState, "key": key,
 				},
 				"request":  map[string]string{"method": http.MethodGet, "path": "/scenario"},
 				"response": map[string]any{"status": http.StatusOK, "body": mk.ID},
 			})
 			require.NoError(t, err)
 
-			s.m.MustMock(FromBytes(doc, "json"))
+			s.MustMock(FromBytes(doc, "json"))
 
 			continue
 		}
 
-		b := Getf("/scenario").ScenarioIs(mk.Scenario).Reply(OK().PlainText(mk.ID))
+		b := Getf("/scenario").ID(mk.ID).Enabled(!mk.Disabled).ScenarioIs(mk.Scenario).Reply(OK().PlainText(mk.ID))
 		if mk.RequiredState != "" {
 			b.ScenarioStateIs(mk.RequiredState)
 		}
@@ -510,12 +519,25 @@ func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 			b.ScenarioStateWillBe(mk.NewState)
 		}
 
-		s.m.MustMock(b)
+		if key != "" {
+			b.ScenarioKey(key)
+		}
+
+		s.MustMock(b)
 	}
 }
 
 func (s *scenarioServer) Call(t *testing.T) string {
-	res, body := do(t, http.MethodGet, s.m.URL("/scenario"), nil, nil)
+	return s.call(t, nil)
+}
+
+func (s *scenarioServer) CallWithKey(t *testing.T, key string) string {
+	return s.call(t, http.Header{"X-Scenario-Key": {key}})
+}
+
+// call sends the request of the mocks with header.
+func (s *scenarioServer) call(t *testing.T, header http.Header) string {
+	res, body := do(t, http.MethodGet, s.URL("/scenario"), header, nil)
 
 	switch res.StatusCode {
 	case http.StatusOK:
@@ -528,10 +550,50 @@ func (s *scenarioServer) Call(t *testing.T) string {
 	}
 }
 
-func (s *scenarioServer) Store() *matchscenario.Store { return s.m.scenarioStore }
-
 func TestBuilder_ServesScenarios(t *testing.T) {
 	scenariotest.Run(t, newScenarioServer(false))
+}
+
+func TestBuilder_AScenarioMovesWhenItsClientLeavesDuringTheDelay(t *testing.T) {
+	// The scenario moves when its mock is picked: a client that gives up during the delay and calls again gets the
+	// mock of the next state, as another client would have.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	waiting := make(chan struct{})
+	m.MustMock(
+		Getf("/pay").StartScenario("checkout").ScenarioStateWillBe("paid").
+			DelayFunc(func() time.Duration {
+				close(waiting)
+				return time.Hour
+			}).
+			Reply(OK()),
+		Getf("/pay").ScenarioIs("checkout").ScenarioStateIs("paid").Reply(Status(http.StatusConflict)),
+	)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL("/pay"), nil)
+	require.NoError(t, err)
+
+	called := make(chan error, 1)
+	go func() {
+		res, err := _rawClient.Do(req)
+		if err == nil {
+			res.Body.Close()
+		}
+
+		called <- err
+	}()
+
+	<-waiting
+	cancel()
+	require.ErrorIs(t, <-called, context.Canceled)
+
+	res, _ := do(t, http.MethodGet, m.URL("/pay"), nil, nil)
+	require.Equal(t, http.StatusConflict, res.StatusCode)
 }
 
 // statusOf sends req and returns the status of the response.

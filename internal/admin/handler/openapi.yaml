@@ -13,8 +13,11 @@ info:
     **Errors.** Every error is an RFC 9457 problem document, `application/problem+json` or `application/problem+yaml`,
     with a stable `code`. Problems of a mock or a body list each in `problems`.
 
-    **Safety.** The admin API has no authentication: it listens on a local address unless told otherwise. Browsers'
-    cross-site requests that change state are refused with `403`.
+    **Safety.** The admin API asks for no credentials unless it is given some: then every route needs them, Basic or a
+    bearer token, and a request without them gets `401` with the code `unauthorized`, but the Kubernetes probes,
+    `/livez`, `/readyz` and `/startupz`, which answer their status alone. A browser sends the token as the password of
+    Basic. Without credentials, it listens on a local address unless told otherwise. Browsers' cross-site requests
+    that change state are refused with `403`.
 
     **Persistence.** A mock server with a persistent store, such as the files of the vlatte command or a database,
     writes each change this API makes to its mocks to that store at once: the mocks it adds outlive the server. The
@@ -46,6 +49,9 @@ tags:
     description: The admin API's operations as tools of the Model Context Protocol, for AI agents.
   - name: Documentation
     description: This document, and a page that renders it.
+security:
+  - basic: []
+  - bearer: []
 paths:
   /health:
     get:
@@ -61,6 +67,7 @@ paths:
               schema: { $ref: "#/components/schemas/Health" }
             application/yaml:
               schema: { $ref: "#/components/schemas/Health" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
   /livez:
     get:
@@ -69,7 +76,9 @@ paths:
       summary: Probe liveness
       description: |
         The liveness probe of Kubernetes. Answers while the admin API serves, as `/health` does, whatever the mock
-        store says, so a store that is down doesn't get the server restarted.
+        store says, so a store that is down doesn't get the server restarted. It needs no credentials: when the admin
+        API asks for some, it answers the status alone.
+      security: []
       responses:
         "200":
           description: The admin API serves.
@@ -86,7 +95,9 @@ paths:
       summary: Probe readiness
       description: |
         The readiness probe of Kubernetes. Answers as `/health` does once the mock store can serve its mocks, and `503`
-        while it can't, such as when the database behind a persistent store is down.
+        while it can't, such as when the database behind a persistent store is down. It needs no credentials: when the
+        admin API asks for some, it answers the status alone, and a `503` that doesn't say why.
+      security: []
       responses:
         "200":
           description: The mock store serves its mocks.
@@ -104,7 +115,8 @@ paths:
       summary: Probe startup
       description: |
         The startup probe of Kubernetes. The admin API serves only once the mock server loaded its mocks, so this
-        answers, as `/health` does, once the mock server started.
+        answers, as `/livez` does, once the mock server started. It needs no credentials.
+      security: []
       responses:
         "200":
           description: The mock server started.
@@ -127,6 +139,7 @@ paths:
       responses:
         "204":
           description: The server is back to how it started.
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "409": { $ref: "#/components/responses/DuplicateID" }
@@ -145,6 +158,7 @@ paths:
               schema: { $ref: "#/components/schemas/MockList" }
             application/yaml:
               schema: { $ref: "#/components/schemas/MockList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
     post:
       tags: [Mocks]
@@ -167,6 +181,7 @@ paths:
             application/yaml:
               schema: { $ref: "#/components/schemas/MockSummary" }
         "400": { $ref: "#/components/responses/InvalidBody" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "409": { $ref: "#/components/responses/DuplicateID" }
@@ -183,6 +198,7 @@ paths:
       responses:
         "204":
           description: The server has no mocks.
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
   /mocks/{id}:
@@ -205,6 +221,7 @@ paths:
               schema: { $ref: "#/components/schemas/Mock" }
             application/yaml:
               schema: { $ref: "#/components/schemas/Mock" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/MockNotFound" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "500": { $ref: "#/components/responses/DescribeFailed" }
@@ -226,6 +243,7 @@ paths:
             application/yaml:
               schema: { $ref: "#/components/schemas/MockSummary" }
         "400": { $ref: "#/components/responses/InvalidBody" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "404": { $ref: "#/components/responses/MockNotFound" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
@@ -253,6 +271,7 @@ paths:
             application/yaml:
               schema: { $ref: "#/components/schemas/MockSummary" }
         "400": { $ref: "#/components/responses/InvalidBody" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "404": { $ref: "#/components/responses/MockNotFound" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
@@ -265,6 +284,7 @@ paths:
       responses:
         "204":
           description: The mock was removed.
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "404": { $ref: "#/components/responses/MockNotFound" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
@@ -284,6 +304,7 @@ paths:
             application/yaml:
               schema: { $ref: "#/components/schemas/MockSummary" }
         "400": { $ref: "#/components/responses/InvalidBody" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "409": { $ref: "#/components/responses/DuplicateID" }
@@ -306,6 +327,7 @@ paths:
               schema: { type: object }
             application/yaml:
               schema: { type: object }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "501": { $ref: "#/components/responses/NotSupported" }
   /mocks/reload:
@@ -319,6 +341,7 @@ paths:
       responses:
         "204":
           description: The mock files were loaded.
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "409": { $ref: "#/components/responses/DuplicateID" }
@@ -350,6 +373,7 @@ paths:
             application/yaml:
               schema: { $ref: "#/components/schemas/SavedFiles" }
         "400": { $ref: "#/components/responses/InvalidBody" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "409": { $ref: "#/components/responses/DuplicateID" }
@@ -362,7 +386,9 @@ paths:
       tags: [Scenarios]
       operationId: listScenarios
       summary: List scenarios
-      description: Every scenario a mock started, or whose state was set, in the order of their names.
+      description: >-
+        Every scenario the mocks name, and every one set without a mock, in the order of their names: its state, the
+        states its mocks name, and the moves they make. A scenario is in `started` until something moves it.
       responses:
         "200":
           description: The scenarios.
@@ -371,6 +397,7 @@ paths:
               schema: { $ref: "#/components/schemas/ScenarioList" }
             application/yaml:
               schema: { $ref: "#/components/schemas/ScenarioList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "501": { $ref: "#/components/responses/NotSupported" }
     delete:
@@ -381,6 +408,7 @@ paths:
       responses:
         "204":
           description: Every scenario is in `started`.
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "501": { $ref: "#/components/responses/NotSupported" }
@@ -395,7 +423,14 @@ paths:
       tags: [Scenarios]
       operationId: setScenario
       summary: Move a scenario to a state
-      description: The mocks that require the state match next. A scenario no mock started yet starts in it.
+      description: >-
+        The mocks that require the state match next. A state none of the scenario's mocks names is an `unknown_state`
+        problem; a scenario no mock names moves to any state. Without `key`, the shared instance moves.
+      parameters:
+        - name: key
+          in: query
+          description: The key of the instance to move, as the scenario key of its mocks renders it. Empty is the shared instance.
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -411,12 +446,51 @@ paths:
               schema: { $ref: "#/components/schemas/Scenario" }
             application/yaml:
               schema: { $ref: "#/components/schemas/Scenario" }
-        "400": { $ref: "#/components/responses/InvalidBody" }
+        "400":
+          description: "`invalid_body`: the body has problems. `unknown_state`: none of the scenario's mocks names the state."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+            application/problem+yaml:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "413": { $ref: "#/components/responses/BodyTooLarge" }
         "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "501": { $ref: "#/components/responses/NotSupported" }
+    delete:
+      tags: [Scenarios]
+      operationId: resetScenario
+      summary: Start a scenario over
+      description: Moves every instance of the scenario back to `started`, or only the instance of `key`.
+      parameters:
+        - name: key
+          in: query
+          description: The key of the only instance to reset. Empty is the shared instance.
+          schema: { type: string }
+      responses:
+        "204":
+          description: The scenario is in `started`.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+  /scenario-board:
+    get:
+      tags: [Scenarios]
+      operationId: getScenarioBoard
+      summary: Manage scenarios from a browser
+      description: |
+        A page that shows where each scenario is, the states its mocks name and which mock moves it where, moves a
+        scenario to a state, and starts one or all over. It follows `GET /events` to show moves as they happen.
+      responses:
+        "200":
+          description: The page.
+          content:
+            text/html:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /requests:
     get:
       tags: [Journal]
@@ -432,6 +506,10 @@ paths:
           in: query
           description: Answer the requests before this one, the `next` of a page.
           schema: { type: integer, minimum: 0 }
+        - name: after
+          in: query
+          description: Answer the requests after this one, such as the `mark` of a list taken before a test.
+          schema: { type: integer, minimum: 0 }
       responses:
         "200":
           description: The requests.
@@ -441,6 +519,7 @@ paths:
             application/yaml:
               schema: { $ref: "#/components/schemas/RequestList" }
         "400": { $ref: "#/components/responses/InvalidParameter" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "501": { $ref: "#/components/responses/NotSupported" }
     query:
@@ -469,6 +548,7 @@ paths:
             application/yaml:
               schema: { $ref: "#/components/schemas/RequestList" }
         "400": { $ref: "#/components/responses/InvalidBody" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "413": { $ref: "#/components/responses/BodyTooLarge" }
@@ -481,9 +561,46 @@ paths:
       responses:
         "204":
           description: The journal holds no request.
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "501": { $ref: "#/components/responses/NotSupported" }
+  /requests/verify:
+    query:
+      tags: [Journal]
+      operationId: verifyRequests
+      summary: Verify requests
+      description: |
+        Checks the requests of the journal as a Go test does with package `verify`, and answers its verdict: `200`
+        whether it passed or not. The keys of `QUERY /requests`, but `limit` and `before`, select the requests;
+        `count` matches how many, at least 1 when it's left out. The check runs now, or waits: up to `within` for the
+        count to pass, or `during` for it to fail, waking as each request comes, up to 30s. `in_order`, a list of
+        queries, checks instead that a request of each came after the request of the one before. `after`, the `mark`
+        of a list, leaves out the requests up to it, such as those of earlier tests. A check that failed lists the
+        requests that tell why, without their headers or bodies, which `GET /requests/{id}` answers.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RequestCheck" }
+          application/yaml:
+            schema: { $ref: "#/components/schemas/RequestCheck" }
+      responses:
+        "200":
+          description: The verdict.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestVerdict" }
+            application/yaml:
+              schema: { $ref: "#/components/schemas/RequestVerdict" }
+        "400": { $ref: "#/components/responses/InvalidBody" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/IncompleteJournal" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "501": { $ref: "#/components/responses/NotSupported" }
+        "503": { $ref: "#/components/responses/Closing" }
   /requests/{id}:
     parameters:
       - name: id
@@ -503,6 +620,7 @@ paths:
               schema: { $ref: "#/components/schemas/JournalEntry" }
             application/yaml:
               schema: { $ref: "#/components/schemas/JournalEntry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/RequestNotFound" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "501": { $ref: "#/components/responses/NotSupported" }
@@ -527,6 +645,7 @@ paths:
                 event: matched
                 data: {"method":"GET","mock_id":"hello","request_id":"7f3a","status":200,"target":"http://127.0.0.1:8080/hello","time":"2026-10-20T12:00:00Z","type":"matched"}
 
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "501": { $ref: "#/components/responses/NotSupported" }
   /logs:
     get:
@@ -548,6 +667,7 @@ paths:
                 event: log
                 data: {"level":"info","url":"/hello","time":"2026-10-20T12:00:00Z","message":"---> REQUEST RECEIVED GET /hello"}
 
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "501": { $ref: "#/components/responses/NotSupported" }
   /recording:
     get:
@@ -562,6 +682,7 @@ paths:
               schema: { $ref: "#/components/schemas/RecordingStatus" }
             application/yaml:
               schema: { $ref: "#/components/schemas/RecordingStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "501": { $ref: "#/components/responses/NotSupported" }
     post:
@@ -591,6 +712,7 @@ paths:
             application/yaml:
               schema: { $ref: "#/components/schemas/RecordingStatus" }
         "400": { $ref: "#/components/responses/InvalidBody" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "409": { $ref: "#/components/responses/RecordingActive" }
@@ -613,6 +735,7 @@ paths:
               schema: { $ref: "#/components/schemas/RecordingResult" }
             application/yaml:
               schema: { $ref: "#/components/schemas/RecordingResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
         "409": { $ref: "#/components/responses/NotRecording" }
@@ -629,6 +752,7 @@ paths:
           content:
             text/html:
               schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /mcp:
     post:
       tags: [MCP]
@@ -653,6 +777,7 @@ paths:
               schema: { type: object }
         "202":
           description: The notification or response was accepted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "501": { $ref: "#/components/responses/NotSupported" }
   /:
     get:
@@ -666,6 +791,7 @@ paths:
           content:
             text/html:
               schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /docs:
     get:
       tags: [Documentation]
@@ -680,6 +806,7 @@ paths:
           content:
             text/html:
               schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /openapi:
     get:
       tags: [Documentation]
@@ -694,8 +821,18 @@ paths:
               schema: { type: object }
             application/yaml:
               schema: { type: object }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "406": { $ref: "#/components/responses/NotAcceptable" }
 components:
+  securitySchemes:
+    basic:
+      type: http
+      scheme: basic
+      description: The username and password the admin API was given, or any username and its bearer token.
+    bearer:
+      type: http
+      scheme: bearer
+      description: The bearer token the admin API was given, in `Authorization`, never in the query.
   requestBodies:
     Mock:
       required: true
@@ -715,13 +852,13 @@ components:
           const: ok
         kind:
           type: string
-          description: The protocol of the mock server.
+          description: The protocol of the mock server. A probe answered without credentials leaves it out.
           examples: [http, grpc]
         url:
           type: string
           description: |
             Where the mock server serves its mocks: its URL, such as `http://127.0.0.1:8080`, or its address for gRPC,
-            such as `127.0.0.1:50051`.
+            such as `127.0.0.1:50051`. A probe answered without credentials leaves it out.
     Mock:
       type: object
       description: |
@@ -779,10 +916,13 @@ components:
       properties:
         type:
           type: string
-          enum: [matched, unmatched, proxied, warning, error]
+          enum: [matched, unmatched, proxied, warning, error, scenario]
           description: |
             `matched`: a mock answered a request. `unmatched`: no mock matched it. `proxied`: the server proxied it.
             `warning`: something went wrong without failing the request, such as a webhook. `error`: it failed.
+            `scenario`: a scenario moved, by the mock a request picked, or by the admin API or the server's own methods;
+            `target` names it, in any case, as names ignore case, or is missing when every scenario was reset, and
+            `message` says where it moved.
         time:
           type: string
           format: date-time
@@ -793,7 +933,7 @@ components:
           description: The method of the request, such as `GET`.
         target:
           type: string
-          description: What the request asked for, such as the URL of an HTTP request.
+          description: What the request asked for, such as the URL of an HTTP request, or the scenario that moved.
         mock_id:
           type: string
           description: The mock that matched, if one did.
@@ -802,7 +942,7 @@ components:
           description: The status of the answer, when there was one.
         message:
           type: string
-          description: What went wrong.
+          description: What went wrong, or where a scenario moved.
       additionalProperties: false
     SaveSettings:
       type: object
@@ -828,13 +968,61 @@ components:
       additionalProperties: false
     Scenario:
       type: object
-      required: [name, state]
+      required: [name, state, instances, states, transitions]
       properties:
         name:
           type: string
+          description: The name its first mock gives it, or the name it was first set under when no mock names it.
         state:
           type: string
+          description: The state of the shared instance, the one of requests without a key.
           examples: [started]
+        instances:
+          type: array
+          description: >-
+            The instances of keys that moved, in the order of their keys: mocks with a scenario key move an instance
+            for each key of their requests. An instance not listed is in `started`.
+          items: { $ref: "#/components/schemas/ScenarioInstance" }
+        states:
+          type: array
+          description: >-
+            The states its mocks name, `started` first. A scenario no mock names, but that was set, has none.
+          items: { $ref: "#/components/schemas/ScenarioState" }
+        transitions:
+          type: array
+          description: The moves its mocks make when picked to answer, in the order of the mocks.
+          items: { $ref: "#/components/schemas/ScenarioTransition" }
+      additionalProperties: false
+    ScenarioInstance:
+      type: object
+      required: [key, state]
+      properties:
+        key:
+          type: string
+        state:
+          type: string
+      additionalProperties: false
+    ScenarioState:
+      type: object
+      required: [name, reachable]
+      properties:
+        name:
+          type: string
+        reachable:
+          type: boolean
+          description: False when no path of mock moves leads to the state from `started`, so requests get there only after the scenario is set to it or to another such state.
+      additionalProperties: false
+    ScenarioTransition:
+      type: object
+      required: [to, mock_id]
+      properties:
+        from:
+          type: string
+          description: The state the mock requires. Absent when it matches in any.
+        to:
+          type: string
+        mock_id:
+          type: string
       additionalProperties: false
     ScenarioList:
       type: object
@@ -1026,6 +1214,27 @@ components:
           type: array
           description: The mocks that came closest to matching a request no mock matched, the closest first.
           items: { $ref: "#/components/schemas/NearMiss" }
+        scenarios:
+          type: array
+          description: The moves of the scenarios of the mock that matched the request, made as the server picked it.
+          items: { $ref: "#/components/schemas/ScenarioMove" }
+      additionalProperties: false
+    ScenarioMove:
+      type: object
+      required: [scenario, to]
+      properties:
+        scenario:
+          type: string
+          description: The name of the scenario, as the mock gives it.
+        key:
+          type: string
+          description: The key of the instance the request moved; missing for the shared instance.
+        from:
+          type: string
+          description: The state the mock requires; missing when it requires none.
+        to:
+          type: string
+          description: The state the mock moved the scenario to.
       additionalProperties: false
     NearMiss:
       type: object
@@ -1048,11 +1257,11 @@ components:
         skipped:
           type: array
           items: { type: string }
-          description: The parts it didn't check, which keep state, such as `times` or `scenario`.
+          description: The parts it didn't check, which keep state, such as `times`.
       additionalProperties: false
     RequestList:
       type: object
-      required: [count, requests]
+      required: [count, requests, mark]
       properties:
         count:
           type: integer
@@ -1064,6 +1273,11 @@ components:
         next:
           type: integer
           description: The `before` of the next page, when there is one.
+        mark:
+          type: integer
+          description: |
+            The number of the newest request of the journal. A query or a check that takes it as `after` leaves out
+            the requests up to it.
       additionalProperties: false
     Matcher:
       description: |
@@ -1118,6 +1332,127 @@ components:
           type: integer
           minimum: 0
           description: Answer the requests before this one, the `next` of a page.
+        after:
+          type: integer
+          minimum: 0
+          description: Answer the requests after this one, such as the `mark` of a list taken before a test.
+      additionalProperties: false
+    RequestCheck:
+      type: object
+      description: |
+        The keys of a `RequestQuery`, but `limit` and `before`, select the requests the check counts. `in_order` takes
+        their place, and `count`'s, for a check of order.
+      properties:
+        kind: { $ref: "#/components/schemas/RequestQuery/properties/kind" }
+        outcome: { $ref: "#/components/schemas/RequestQuery/properties/outcome" }
+        mock_id: { $ref: "#/components/schemas/Matcher" }
+        method: { $ref: "#/components/schemas/Matcher" }
+        path: { $ref: "#/components/schemas/Matcher" }
+        target: { $ref: "#/components/schemas/Matcher" }
+        status: { $ref: "#/components/schemas/Matcher" }
+        body: { $ref: "#/components/schemas/RequestQuery/properties/body" }
+        header: { $ref: "#/components/schemas/RequestQuery/properties/header" }
+        since: { $ref: "#/components/schemas/RequestQuery/properties/since" }
+        until: { $ref: "#/components/schemas/RequestQuery/properties/until" }
+        request: { $ref: "#/components/schemas/RequestQuery/properties/request" }
+        after:
+          type: integer
+          minimum: 0
+          description: |
+            Check the requests after this one, the `mark` of a list. A journal cleared since answers
+            `incomplete_journal`.
+        count:
+          $ref: "#/components/schemas/Matcher"
+          description: How many requests, such as `2` or `["gte", 2]`. None is at least 1.
+        within:
+          $ref: "#/components/schemas/Wait"
+          description: Wait up to this long for the count to pass, such as for a request sent in the background.
+        during:
+          $ref: "#/components/schemas/Wait"
+          description: Wait this long for the count to fail, such as for `count` 0. It passes when it ends.
+        in_order:
+          type: array
+          minItems: 1
+          description: |
+            The steps of an order, each the keys of a query that select its requests, but `after`, which is the
+            check's. A step's request comes after the request of the step before; other requests may come between.
+            It checks now.
+          items:
+            type: object
+            properties:
+              kind: { $ref: "#/components/schemas/RequestQuery/properties/kind" }
+              outcome: { $ref: "#/components/schemas/RequestQuery/properties/outcome" }
+              mock_id: { $ref: "#/components/schemas/Matcher" }
+              method: { $ref: "#/components/schemas/Matcher" }
+              path: { $ref: "#/components/schemas/Matcher" }
+              target: { $ref: "#/components/schemas/Matcher" }
+              status: { $ref: "#/components/schemas/Matcher" }
+              body: { $ref: "#/components/schemas/RequestQuery/properties/body" }
+              header: { $ref: "#/components/schemas/RequestQuery/properties/header" }
+              since: { $ref: "#/components/schemas/RequestQuery/properties/since" }
+              until: { $ref: "#/components/schemas/RequestQuery/properties/until" }
+              request: { $ref: "#/components/schemas/RequestQuery/properties/request" }
+            additionalProperties: false
+      additionalProperties: false
+    Wait:
+      description: |
+        How long to wait, up to 30s: whole milliseconds, or a duration, such as `1.5s`. The wait ends with the server,
+        and with a reset of its journal.
+      anyOf:
+        - type: integer
+          minimum: 1
+          maximum: 30000
+        - type: string
+    RequestVerdict:
+      type: object
+      required: [passed, waited_ms]
+      properties:
+        passed:
+          type: boolean
+        count:
+          type: integer
+          description: How many requests the check selected. A check of order has none.
+        waited_ms:
+          type: integer
+          description: How long the check waited, in milliseconds.
+        selected:
+          type: array
+          description: Of a check that failed, the requests it selected, the newest first, up to 10.
+          items: { $ref: "#/components/schemas/ListedRequest" }
+        closest:
+          type: array
+          description: |
+            Of a check that failed for want of requests, those that came closest to being selected, up to 10: the
+            fewest parts missed first, then the newest.
+          items: { $ref: "#/components/schemas/ListedRequest" }
+        report:
+          type: string
+          description: Of a check that failed, why, in lines, as a Go test reports it.
+      additionalProperties: false
+    ListedRequest:
+      type: object
+      description: A request a verdict lists, without its headers or body, which may hold secrets.
+      required: [seq, id, line]
+      properties:
+        seq:
+          type: integer
+          description: The number of the request in the journal.
+        id:
+          type: string
+          description: The id of the request, for `GET /requests/{id}`.
+        line:
+          type: string
+          description: The request in a line, such as `#3 2026-10-21T12:00:00.000Z matched GET http://127.0.0.1/a 200`.
+        passed:
+          type: integer
+          description: Of a request that came close, how many of the parts of the check it passed.
+        total:
+          type: integer
+          description: Of a request that came close, how many parts of the check it was checked by.
+        missed:
+          type: array
+          items: { type: string }
+          description: Of a request that came close, the parts of the check it missed, such as `header Accept`.
       additionalProperties: false
     Problem:
       type: object
@@ -1152,6 +1487,9 @@ components:
             - request_not_found
             - invalid_parameter
             - not_ready
+            - unknown_state
+            - unauthorized
+            - incomplete_journal
         detail:
           type: string
           description: What went wrong in this request.
@@ -1296,6 +1634,35 @@ components:
           schema: { $ref: "#/components/schemas/Problem" }
     NotSupported:
       description: "`not_supported`: the mock server's protocol can't do this."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    IncompleteJournal:
+      description: |
+        `incomplete_journal`: the journal no longer holds every request the check counts: it dropped some to keep
+        its most entries, it was cleared after `after` or during the wait, or `after` is past its newest request; or
+        it kept part of a body the check reads.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Closing:
+      description: "`closing`: the mock server is closing, and ended the wait."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+        application/problem+yaml:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unauthorized:
+      description: |
+        `unauthorized`: the admin API asks for credentials, and the request has none, or not those. `WWW-Authenticate`
+        names the schemes it takes.
+      headers:
+        WWW-Authenticate:
+          schema: { type: string }
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }

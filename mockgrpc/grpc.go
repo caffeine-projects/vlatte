@@ -25,9 +25,9 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
-	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
+	"github.com/caffeine-projects/vlatte/verify"
 )
 
 var (
@@ -41,12 +41,16 @@ var (
 var ErrStreamInterceptorSlot = errors.New("journal: pass stream interceptors with grpc.ChainStreamInterceptor: " +
 	"the journal takes grpc.StreamInterceptor")
 
+var errAdminStoreWithoutAdmin = errors.New("server: AdminStore needs an admin API: pass ConfigBuilder.Admin")
+
 // Kind is the protocol of gRPC mock servers, the Kind of their journal entries.
 const Kind vlatte.Kind = "grpc"
 
+// Server is a gRPC mock server. [New] creates it and [Server.Start] serves it, once: a closed server doesn't start
+// again.
 type Server struct {
 	*vlatte.Base[*Mock, *Server]
-	*journal.Verifier[*Mock, *Server]
+	*verify.Verifier[*Mock, *Server]
 
 	server *grpc.Server
 	config *Config
@@ -57,11 +61,15 @@ type Server struct {
 
 	logger    *zerolog.Logger
 	storage   vlatte.Store[*Mock]
+	data      atomic.Pointer[map[string]any] // what templates read as .Data: see SetData
 	resolver  *resolver
 	scenarios *matchscenario.Store
 	runner    *vlatte.EventRunner // runs the on_complete events of mocks
 	admin     adminapi.Server     // nil without Config.Admin
 	events    *adminapi.Events    // the admin API's; nil without it
+
+	// adminStore writes the changes of the admin API through to its persistent store; nil without Config.AdminStore.
+	adminStore *adminapi.Store[*Mock]
 
 	// webhooks is the transport the server gives webhooks. Close closes its idle connections, so they don't outlive
 	// the server.
@@ -149,6 +157,16 @@ func New(config ...Option) (*Server, error) {
 		conf.Parameters = vlatte.NewMemoryKV()
 	}
 
+	if err := vlatte.CheckTemplateDataProviders(conf.TemplateDataProviders); err != nil {
+		return nil, err
+	}
+
+	// The admin API changes mocks through a store of its own when they persist: the server's other mocks, of mock
+	// files and code, never reach the persistent store.
+	if conf.AdminStore != nil && conf.Admin == nil {
+		return nil, errAdminStoreWithoutAdmin
+	}
+
 	store := vlatte.NewStore[*Mock]()
 	app.config = conf
 
@@ -159,7 +177,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	app.logger = newLogger(conf, logs)
-	app.webhooks = httpx.NewWebhookTransport()
+	app.webhooks = httpx.NewWebhookTransport(conf.OutboundAllow, conf.OutboundDeny)
 
 	res, err := newResolver(conf)
 	if err != nil {
@@ -222,7 +240,7 @@ func New(config ...Option) (*Server, error) {
 
 	app.ownsCreds = keepsCreds(srv, app.creds)
 	app.Base = vlatte.NewBase(app, store)
-	app.Verifier = journal.NewVerifier[*Mock, *Server](j, app)
+	app.Verifier = verify.NewVerifier(j, verify.Protocol[*Mock, *Server]{Patterns: app, NoMethod: true})
 	app.storage = store
 	app.server = srv
 	app.journaled = make(map[string]bool)
@@ -243,17 +261,30 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	if conf.Admin != nil {
+		adminMocks := store
+
+		if conf.AdminStore != nil {
+			durable, err := conf.AdminStore(app)
+			if err != nil {
+				return nil, fmt.Errorf("server: admin store: %w", err)
+			}
+
+			app.adminStore = adminapi.NewStore(store, durable, app.logger)
+			adminMocks = app.adminStore
+		}
+
 		app.events = adminapi.NewEvents()
+		app.scenarios.Notify(app.publishScenario)
 		api, err := conf.Admin.Serve(adminapi.Capabilities{
 			Kind:   string(Kind),
 			URL:    app.Addr,
 			Logger: app.logger,
-			Mocks: adminapi.MocksOf(store, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
+			Mocks: adminapi.MocksOf(adminMocks, vlatte.MockBuilderFunc[*Mock](func(content []byte, format string) (*Mock, error) {
 				return buildAdminMock(app, content, format)
 			})),
 			Files:     adminFiles{app},
 			Recorder:  adminRecorder{app},
-			Scenarios: app.scenarios,
+			Scenarios: app,
 			Events:    app.events,
 			Logs:      logs,
 			Journal:   j,
@@ -365,6 +396,8 @@ func (app *Server) AdminURL() string {
 	return app.admin.URL()
 }
 
+// Addr returns the address the server listens on, or "" before it starts. An in-memory server's is "bufconn", which no
+// network reaches: connect with [Server.Dial].
 func (app *Server) Addr() string {
 	app.mu.Lock()
 	defer app.mu.Unlock()
@@ -481,7 +514,7 @@ func (app *Server) start(op string, useTLS bool) error {
 	}
 
 	// The mock files load before the server serves, so its first call finds them, and so does the recording.
-	err := app.loader.load(app)
+	err := app.load()
 	if err == nil {
 		err = app.startConfiguredRecording()
 	}

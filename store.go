@@ -19,15 +19,18 @@ var (
 	ErrDuplicateID = errors.New("store: mock id already in use")
 )
 
+// MemoryStore is a [Store] that keeps its mocks in memory.
 type MemoryStore[B Mock] struct {
 	mocks []B
 	mu    sync.RWMutex
 }
 
+// NewStore creates an empty [MemoryStore].
 func NewStore[B Mock]() Store[B] {
 	return &MemoryStore[B]{mocks: make([]B, 0)}
 }
 
+// List returns the enabled mocks, in the order they match, as they were when List was called. It never fails.
 func (s *MemoryStore[B]) List(ctx context.Context) (iter.Seq[B], error) {
 	s.mu.RLock()
 	mocks := make([]B, len(s.mocks))
@@ -139,6 +142,7 @@ func (s *MemoryStore[B]) exchange(drop func(B) bool, mocks []B) ([]B, error) {
 	return gone, nil
 }
 
+// Pick returns the mock with the given ID, enabled or not. It fails with [ErrNotFound] when no mock has it.
 func (s *MemoryStore[B]) Pick(_ context.Context, id string) (B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -153,6 +157,7 @@ func (s *MemoryStore[B]) Pick(_ context.Context, id string) (B, error) {
 	return result, ErrNotFound
 }
 
+// PickAll returns every mock, enabled or not, in the order they match. It never fails.
 func (s *MemoryStore[B]) PickAll(_ context.Context) ([]B, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -163,6 +168,8 @@ func (s *MemoryStore[B]) PickAll(_ context.Context) ([]B, error) {
 	return ret, nil
 }
 
+// Delete removes the mocks with the given IDs, skipping those it doesn't hold, and closes the removed mocks that
+// implement [io.Closer] once the store is unlocked. It never fails.
 func (s *MemoryStore[B]) Delete(_ context.Context, ids ...string) error {
 	gone := make(map[string]struct{}, len(ids))
 	for _, id := range ids {

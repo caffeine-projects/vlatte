@@ -4,32 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>vlatte recorder</title>
+  <!-- layout:head -->
   <style>
-    :root {
-      color-scheme: light dark;
-      --bg: #fafaf9;
-      --fg: #1c1917;
-      --muted: #78716c;
-      --line: #e7e5e4;
-      --panel: #ffffff;
-      --accent: #b45309;
-      --danger: #b91c1c;
-      --ok: #15803d;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #1c1917;
-        --fg: #f5f5f4;
-        --muted: #a8a29e;
-        --line: #44403c;
-        --panel: #292524;
-        --accent: #f59e0b;
-        --danger: #f87171;
-        --ok: #4ade80;
-      }
-    }
-
     * { box-sizing: border-box; }
 
     body {
@@ -91,7 +67,7 @@
       cursor: pointer;
     }
 
-    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
     button:disabled { opacity: 0.5; cursor: default; }
 
     .state { display: flex; align-items: center; gap: 8px; font-weight: 600; }
@@ -115,6 +91,7 @@
   </style>
 </head>
 <body>
+<!-- layout:nav -->
 <main>
   <h1>Recorder</h1>
   <p class="muted">Records the answers of a service as mock files, which the server serves once the recording stops.</p>

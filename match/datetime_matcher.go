@@ -6,15 +6,14 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/match/internal/anyconv"
 	"github.com/caffeine-projects/vlatte/match/internal/timetext"
 )
 
 var (
-	_ vlatte.Matcher             = (*dateTimeMatcher)(nil)
-	_ descriptor.SelfDescriptive = (*dateTimeMatcher)(nil)
+	_ vlatte.Matcher         = (*dateTimeMatcher)(nil)
+	_ vlatte.SelfDescriptive = (*dateTimeMatcher)(nil)
 )
 
 // dateTimeOp is how a date and time matcher compares the value with the expected date and time.
@@ -134,9 +133,9 @@ func wallClock(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
 }
 
-// Describe implements descriptor.SelfDescriptive: the expected date and time as mock files write it, now or a date and
+// Describe implements vlatte.SelfDescriptive: the expected date and time as mock files write it, now or a date and
 // time, with its offset, such as "now +3 days", and the other options as an object after it.
-func (m *dateTimeMatcher) Describe() descriptor.Descriptor {
+func (m *dateTimeMatcher) Describe() vlatte.Descriptor {
 	key := map[dateTimeOp]string{_opBefore: "before", _opAfter: "after", _opEqual: "equalDateTime"}[m.op]
 
 	expected := "now"
@@ -175,10 +174,10 @@ func (m *dateTimeMatcher) Describe() descriptor.Descriptor {
 	}
 
 	if len(opts) == 0 {
-		return descriptor.SingleArg(key, expected)
+		return vlatte.DescribeSingleArg(key, expected)
 	}
 
-	return descriptor.MultiArgs(key, expected, opts)
+	return vlatte.DescribeMultiArgs(key, expected, opts)
 }
 
 // actual reads the date and time of a value. zoned reports whether it has a zone.

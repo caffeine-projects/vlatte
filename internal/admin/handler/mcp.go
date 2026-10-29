@@ -61,11 +61,13 @@ func NewMCP(ops *Operations) *mcp.Server {
 		addListScenariosTool(s, ops)
 		addSetScenarioTool(s, ops)
 		addResetScenariosTool(s, ops)
+		addResetScenarioTool(s, ops)
 	}
 
 	if ops.HasJournal() {
 		addListRequestsTool(s, ops)
 		addQueryRequestsTool(s, ops)
+		addVerifyRequestsTool(s, ops)
 		addGetRequestTool(s, ops)
 		addClearRequestsTool(s, ops)
 	}

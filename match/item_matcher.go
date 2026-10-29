@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -38,7 +37,7 @@ func (m *itemMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"Item(", strconv.Itoa(m.Index), ")"}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *itemMatcher) Describe() descriptor.Descriptor {
-	return descriptor.MultiArgs("item", m.Index, describe(m.Matcher))
+// Describe implements vlatte.SelfDescriptive.
+func (m *itemMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeMultiArgs("item", m.Index, describe(m.Matcher))
 }

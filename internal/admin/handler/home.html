@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>vlatte admin</title>
+  <!-- layout:head -->
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 16px 64px;
+    }
+
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 15px; margin: 0; }
+    p { margin: 0 0 12px; }
+    code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+    a { color: var(--accent); }
+
+    .muted { color: var(--muted); }
+    .error { color: var(--danger); }
+
+    .bar { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+    .hero { display: flex; gap: 16px; align-items: center; min-width: 0; }
+    .hero .logo { width: 64px; height: 64px; flex: none; }
+    .hero p { margin: 0; overflow-wrap: anywhere; }
+
+    .live { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    .dot.on { background: var(--ok); }
+
+    .boxes {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+      margin-top: 20px;
+    }
+
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px 20px;
+      min-width: 0;
+    }
+
+    .head { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
+    .head a { font-size: 13px; text-decoration: none; }
+    .head a:hover { text-decoration: underline; }
+
+    .big { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 8px 0 4px; }
+
+    dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 8px 0 0; font-size: 14px; }
+    dt { color: var(--muted); }
+    dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+    .pill {
+      display: inline-block;
+      padding: 1px 10px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .pill.ok { color: var(--ok); }
+    .pill.warn { color: var(--accent); }
+    .pill.bad { color: var(--danger); }
+    .pill.off { color: var(--muted); border-style: dashed; }
+
+    .unsupported { margin: 8px 0 0; font-size: 14px; color: var(--muted); }
+
+    .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .links a {
+      padding: 4px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--fg);
+      font-size: 14px;
+      text-decoration: none;
+    }
+    .links a:hover { border-color: var(--accent); }
+
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<!-- layout:nav -->
+<main>
+  <div class="bar">
+    <div class="hero">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" class="logo" aria-hidden="true">
+        <circle cx="55" cy="60" r="41" fill="#F2A93B"/>
+        <path d="M84 54 H98 a6 6 0 0 1 0 12 H84 Z" fill="#D9622F"/>
+        <circle cx="55" cy="60" r="32" fill="#D9622F"/>
+        <circle cx="55" cy="60" r="25" fill="#FFF3E0"/>
+        <g transform="translate(55 60)" fill="#2C1A12">
+          <path d="M0 -15.5A15.5 15.5 0 1 1 0 15.5A15.5 15.5 0 1 1 0 -15.5ZM0 -5.5A5.5 5.5 0 1 1 0 5.5A5.5 5.5 0 1 1 0 -5.5Z" fill-rule="evenodd"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(45)"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(90)"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(135)"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(180)"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(225)"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(270)"/>
+          <rect x="-3.5" y="-21.5" width="7" height="10" rx="2" transform="rotate(315)"/>
+        </g>
+      </svg>
+      <div>
+        <h1>Mock server</h1>
+        <p id="summary" class="muted">What the mock server serves, and what it served.</p>
+      </div>
+    </div>
+    <span class="live" title="The page follows the server's events, and checks every 5 seconds, or every 2 without them.">
+      <span id="live-dot" class="dot"></span><span id="live">Connecting</span>
+    </span>
+  </div>
+  <p id="problem" class="error" role="alert" hidden></p>
+
+  <div class="boxes">
+    <section id="server" aria-labelledby="server-title">
+      <div class="head"><h2 id="server-title">Server</h2><span id="ready" class="pill off">Checking</span></div>
+      <dl>
+        <dt>Kind</dt><dd id="kind">-</dd>
+        <dt>Mocks at</dt><dd><code id="url">-</code></dd>
+        <dt>Version</dt><dd><code>{vlatte-version}</code></dd>
+      </dl>
+      <p id="ready-detail" class="unsupported" hidden></p>
+    </section>
+
+    <section id="mocks" aria-labelledby="mocks-title">
+      <div class="head"><h2 id="mocks-title">Mocks</h2><a href="docs#tag/mocks">API</a></div>
+      <div class="big" id="mocks-total">-</div>
+      <dl>
+        <dt>Enabled</dt><dd id="mocks-enabled">-</dd>
+        <dt>Disabled</dt><dd id="mocks-disabled">-</dd>
+        <dt>Hits</dt><dd id="mocks-hits">-</dd>
+      </dl>
+    </section>
+
+    <section id="requests" aria-labelledby="requests-title">
+      <div class="head"><h2 id="requests-title">Requests</h2><a href="docs#tag/journal">API</a></div>
+      <div data-supported>
+        <div class="big" id="requests-total">-</div>
+        <dl>
+          <dt>Unmatched</dt><dd><span id="requests-unmatched">-</span></dd>
+          <dt>Failed</dt><dd id="requests-failed">-</dd>
+        </dl>
+      </div>
+      <p class="unsupported" data-unsupported hidden></p>
+    </section>
+
+    <section id="scenarios" aria-labelledby="scenarios-title">
+      <div class="head"><h2 id="scenarios-title">Scenarios</h2><a href="scenario-board">Board</a></div>
+      <div data-supported>
+        <div class="big" id="scenarios-total">-</div>
+        <dl>
+          <dt>Moved from started</dt><dd id="scenarios-moved">-</dd>
+          <dt>Keyed instances</dt><dd id="scenarios-keyed">-</dd>
+        </dl>
+      </div>
+      <p class="unsupported" data-unsupported hidden></p>
+    </section>
+
+    <section id="recording" aria-labelledby="recording-title">
+      <div class="head"><h2 id="recording-title">Recording</h2><a href="recorder">Recorder</a></div>
+      <div data-supported>
+        <div class="big"><span id="recording-state" class="pill off">-</span></div>
+        <dl>
+          <dt>Calls</dt><dd id="recording-calls">-</dd>
+          <dt>Mocks written</dt><dd id="recording-mocks">-</dd>
+          <dt>Dropped</dt><dd id="recording-dropped">-</dd>
+          <dt>Failed</dt><dd id="recording-failed">-</dd>
+        </dl>
+      </div>
+      <p class="unsupported" data-unsupported hidden></p>
+    </section>
+
+    <section aria-labelledby="pages-title">
+      <h2 id="pages-title">Pages and documents</h2>
+      <div class="links">
+        <a href="scenario-board">Scenario board</a>
+        <a href="recorder">Recorder</a>
+        <a href="docs">API docs</a>
+        <a href="openapi">OpenAPI document</a>
+      </div>
+    </section>
+  </div>
+</main>
+<script>
+  // The page reads the admin API it is served by: GET /health, /readyz, /mocks, /requests, /scenarios and /recording,
+  // and QUERY /requests to count by outcome. It follows GET /events to load them again. Its URLs are relative, so it
+  // works wherever the admin API is mounted.
+  const $ = (id) => document.getElementById(id)
+  const number = new Intl.NumberFormat()
+  let loading = null
+  let again = false
+  let polling = null
+  let events = null
+
+  async function call(method, path, body) {
+    const init = { method, headers: { Accept: 'application/json' } }
+    if (body !== undefined) {
+      init.headers['Content-Type'] = 'application/json'
+      init.body = JSON.stringify(body)
+    }
+
+    const res = await fetch(path, init)
+    const text = await res.text()
+    let doc = null
+    try {
+      doc = text ? JSON.parse(text) : null
+    } catch {
+      // A proxy in front of the admin API may answer HTML: the status says what went wrong.
+    }
+
+    if (!res.ok && (doc === null || !doc.detail)) doc = { detail: res.status + ' ' + res.statusText }
+    return { res, doc }
+  }
+
+  function set(id, value) {
+    $(id).textContent = typeof value === 'number' ? number.format(value) : value
+  }
+
+  function pill(id, text, kind) {
+    set(id, text)
+    $(id).className = 'pill ' + kind
+  }
+
+  // supported shows a box's numbers, or, when its endpoint answered 501, why the server can't fill it.
+  function supported(box, res, doc) {
+    const unsupported = res.status === 501
+    $(box).querySelector('[data-supported]').hidden = unsupported
+    const note = $(box).querySelector('[data-unsupported]')
+    note.hidden = !unsupported
+    note.textContent = unsupported ? 'Not supported: ' + doc.detail : ''
+    return !unsupported
+  }
+
+  // check returns the document of an answer, or throws its problem.
+  function check({ res, doc }) {
+    if (!res.ok) throw new Error(doc.detail)
+    return doc
+  }
+
+  async function server() {
+    const health = check(await call('GET', 'health'))
+    set('kind', health.kind || '-')
+    set('url', health.url || '-')
+    const kind = health.kind ? health.kind + ' ' : ''
+    $('summary').textContent = health.url ? 'Serves ' + kind + 'mocks at ' + health.url + '.' : 'Serves ' + kind + 'mocks.'
+
+    const { res, doc } = await call('GET', 'readyz')
+    if (res.ok) pill('ready', 'Ready', 'ok')
+    else pill('ready', 'Not ready', 'bad')
+    $('ready-detail').textContent = res.ok ? '' : doc.detail
+    $('ready-detail').hidden = res.ok
+  }
+
+  async function mocks() {
+    const list = check(await call('GET', 'mocks')).mocks
+    const enabled = list.filter((m) => m.enabled).length
+    set('mocks-total', list.length)
+    set('mocks-enabled', enabled)
+    set('mocks-disabled', list.length - enabled)
+    set('mocks-hits', list.reduce((sum, m) => sum + m.hits, 0))
+  }
+
+  async function requests() {
+    const total = await call('GET', 'requests?limit=0')
+    if (!supported('requests', total.res, total.doc)) return
+
+    const [unmatched, failed] = await Promise.all(
+      ['unmatched', 'failed'].map((outcome) => call('QUERY', 'requests', { outcome, limit: 0 })),
+    )
+
+    set('requests-total', check(total).count)
+    const misses = check(unmatched).count
+    pill('requests-unmatched', number.format(misses), misses > 0 ? 'warn' : 'ok')
+    set('requests-failed', check(failed).count)
+  }
+
+  async function scenarios() {
+    const { res, doc } = await call('GET', 'scenarios')
+    if (!supported('scenarios', res, doc)) return
+
+    const list = check({ res, doc }).scenarios
+    set('scenarios-total', list.length)
+    set('scenarios-moved', list.filter((s) => s.state !== 'started' || s.instances.some((i) => i.state !== 'started')).length)
+    set('scenarios-keyed', list.reduce((sum, s) => sum + s.instances.length, 0))
+  }
+
+  async function recording() {
+    const { res, doc } = await call('GET', 'recording')
+    if (!supported('recording', res, doc)) return
+
+    const state = check({ res, doc })
+    if (state.active) pill('recording-state', 'Recording', 'bad')
+    else pill('recording-state', 'Idle', 'off')
+    set('recording-calls', state.calls)
+    set('recording-mocks', state.mocks)
+    set('recording-dropped', state.dropped)
+    set('recording-failed', state.failed)
+  }
+
+  // refresh loads every box again. A refresh asked for while one runs runs once it ends, so the boxes end current.
+  async function refresh() {
+    if (loading !== null) {
+      again = true
+      return loading
+    }
+
+    loading = Promise.allSettled([server(), mocks(), requests(), scenarios(), recording()]).then((results) => {
+      const failed = results.find((r) => r.status === 'rejected')
+      $('problem').textContent = failed ? "Can't load the mock server's state: " + failed.reason.message : ''
+      $('problem').hidden = !failed
+    })
+
+    await loading
+    loading = null
+    if (again) {
+      again = false
+      await refresh()
+    }
+  }
+
+  function live(on, text) {
+    $('live-dot').classList.toggle('on', on)
+    $('live').textContent = text
+  }
+
+  function poll(ms) {
+    if (polling !== null) clearInterval(polling)
+    polling = setInterval(refresh, ms)
+  }
+
+  // Each request the server serves streams an event, and so does each scenario move: the page loads the boxes again.
+  // A change of the mocks or of a recording streams none, so the page also checks every 5 seconds, and every 2 without
+  // the events.
+  function follow() {
+    poll(5000)
+    events = new EventSource('events')
+    for (const type of ['matched', 'unmatched', 'proxied', 'scenario']) events.addEventListener(type, refresh)
+    events.addEventListener('open', () => {
+      live(true, 'Live')
+      refresh()
+    })
+    events.addEventListener('error', (event) => {
+      // The server streams events of type error too, for requests whose serving failed.
+      if (event instanceof MessageEvent) {
+        refresh()
+        return
+      }
+
+      if (events.readyState !== EventSource.CLOSED) {
+        live(false, 'Reconnecting')
+        return
+      }
+
+      events = null
+      live(false, 'Checking every 2 seconds')
+      poll(2000)
+    })
+  }
+
+  refresh().finally(follow)
+</script>
+</body>
+</html>

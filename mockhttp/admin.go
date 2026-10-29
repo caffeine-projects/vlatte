@@ -3,7 +3,7 @@ package mockhttp
 import (
 	"cmp"
 	"context"
-	_ "embed"
+	_ "embed" // for the //go:embed of the mock file schema
 	"errors"
 	"fmt"
 	"io"
@@ -71,7 +71,10 @@ type adminEvents struct {
 	events *adminapi.Events
 }
 
-func (a adminEvents) OnRequest(*RequestValues) {}
+func (a adminEvents) OnRequest(*RequestValues) {
+	// A request publishes no event of its own: what becomes of it does, as matched, proxied, unmatched, a warning or
+	// an error.
+}
 
 func (a adminEvents) OnMatch(r *RequestValues, res *Response) {
 	a.publish(adminapi.EventMatched, r, r.answered(), nil)
@@ -168,7 +171,7 @@ func (f adminFiles) SaveMocks(ctx context.Context, dir, format string) ([]string
 	// A dir the admin API sends stays inside root_dir, as it checked: only the default is in the work directory.
 	switch {
 	case dir == "":
-		dir = app.config.path(_defaultSaveDir)
+		dir = app.config.Path(_defaultSaveDir)
 	case !filepath.IsAbs(dir):
 		dir = filepath.Join(app.config.RootDir, dir)
 	}

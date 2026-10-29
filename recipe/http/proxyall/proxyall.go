@@ -1,3 +1,7 @@
+// Package proxyall provides a recipe that prepares an HTTP mock server to send the requests no other mock matches to
+// a real service: mock the endpoints a test cares about, and let everything else reach the service as it is.
+//
+//	err := m.Prep(ctx, proxyall.New(mockhttp.From("https://api.example.com").Timeout(5*time.Second)))
 package proxyall
 
 import (

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -111,6 +112,9 @@ type Config struct {
 	// error: allow them on that engine with vlatte.WithEnv.
 	TemplateEnv []string
 
+	// TemplateDataProviders add data to templates, which read it as .Provided.<Key>. Two of the same key are an error.
+	TemplateDataProviders []TemplateDataProvider
+
 	// Parameters are the parameters templates read. Nil keeps them in memory.
 	Parameters vlatte.KV
 
@@ -126,6 +130,10 @@ type Config struct {
 	// Admin serves the admin API, on an HTTP server of its own. Nil serves none.
 	Admin AdminAPI
 
+	// AdminStore keeps the mocks the admin API adds in a persistent store: see ConfigBuilder.AdminStore. Nil keeps them
+	// in memory. It needs Admin.
+	AdminStore AdminStore
+
 	// Journal keeps a journal of the calls the server serves. Nil keeps none.
 	Journal *JournalConfig
 
@@ -136,12 +144,30 @@ type Config struct {
 	// NoNearMisses turns off the report of the mocks closest to a call no mock matched, which its journal entry
 	// lists. The report runs no matcher twice: it runs those matching never reached.
 	NoNearMisses bool
+
+	// OutboundAllow and OutboundDeny limit the addresses the server connects to, for its proxy replies, the recording
+	// target and webhooks: an address in OutboundDeny is refused, and so is one outside OutboundAllow when it isn't
+	// empty. Deny wins, and either one refuses the unspecified address, 0.0.0.0 or ::, which reaches this host. They
+	// check the address after DNS resolution, so a host name that resolves into a refused range is refused. An IPv4
+	// range doesn't hold IPv6 addresses: deny ::1/128 with 127.0.0.0/8. With either set, proxy replies and the
+	// recording target connect directly, never through the proxy of the environment; webhooks still do, and the rules
+	// check that proxy's address then. A target on a unix socket isn't a network address: they don't apply to it. A
+	// refused connection fails with [vlatte.ErrOutboundRefused]. Empty, the default, refuses nothing. A dialer of the
+	// caller's, a grpc.WithContextDialer in [ProxyReply.DialOptions] or [RecordConfig.DialOptions], or a webhook's
+	// own transport, dials on its own, and they don't apply.
+	OutboundAllow []netip.Prefix
+	OutboundDeny  []netip.Prefix
 }
 
 // AdminAPI is an admin API the server opts into: a RESTful HTTP server of its own, the same as HTTP mock servers have.
 // Make one with [github.com/caffeine-projects/vlatte/admin.New]. The operations gRPC mocks can't do, such as recording,
 // answer 501.
 type AdminAPI = adminapi.API
+
+// AdminStore makes the persistent store of the mocks the admin API adds, for the server app. The store keeps their
+// descriptions, by ID, such as in files or a database: EncodeMock describes a mock, and DecodeMock builds it back.
+// The mocks of mock files and code never reach it.
+type AdminStore func(app *Server) (vlatte.Store[*Mock], error)
 
 // JournalConfig configures the journal of a server: the calls its mocks get, of every outcome, which tests and the
 // admin API verify and search, while the server runs: Close closes it. The calls an interceptor of ServerOptions
@@ -369,6 +395,22 @@ func (cb *ConfigBuilder) TemplateEnv(names ...string) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.TemplateEnv = names })
 }
 
+// OutboundAllow adds the ranges the server may connect to: once set, it refuses every other address. See
+// [Config.OutboundAllow].
+func (cb *ConfigBuilder) OutboundAllow(prefixes ...netip.Prefix) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.OutboundAllow = append(conf.OutboundAllow, prefixes...) })
+}
+
+// OutboundDeny adds ranges the server refuses to connect to, such as 169.254.0.0/16. See [Config.OutboundAllow].
+func (cb *ConfigBuilder) OutboundDeny(prefixes ...netip.Prefix) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.OutboundDeny = append(conf.OutboundDeny, prefixes...) })
+}
+
+// TemplateDataProviders sets the providers of data templates read as .Provided.<Key>: see TemplateDataProvider.
+func (cb *ConfigBuilder) TemplateDataProviders(providers ...TemplateDataProvider) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.TemplateDataProviders = providers })
+}
+
 // Parameters sets the parameters templates read: {{ .Parameters.Get "key" }}.
 func (cb *ConfigBuilder) Parameters(params vlatte.KV) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.Parameters = params })
@@ -402,6 +444,14 @@ func (cb *ConfigBuilder) ConfigSources(sources ...ConfigSource) *ConfigBuilder {
 // Server.AdminURL returns where it listens.
 func (cb *ConfigBuilder) Admin(api AdminAPI) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.Admin = api })
+}
+
+// AdminStore keeps the mocks the admin API adds in the persistent store store makes, such as FileStore(dir): each
+// change the admin API makes reaches it at once, and the server serves what it holds when it starts and on each
+// Reload, so changes made to it directly take effect too. Without one, those mocks stay in memory, as long as the
+// server runs. It needs an admin API: see Admin.
+func (cb *ConfigBuilder) AdminStore(store AdminStore) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.AdminStore = store })
 }
 
 // Journal keeps a journal of the calls the server serves, in dir, across restarts: see JournalConfig. Empty keeps it

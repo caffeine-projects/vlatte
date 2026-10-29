@@ -25,12 +25,12 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
-	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/mid/recovery"
+	"github.com/caffeine-projects/vlatte/verify"
 )
 
 var _ vlatte.Server[*Mock, *Server] = (*Server)(nil)
@@ -51,12 +51,13 @@ const Kind vlatte.Kind = "http"
 // Server is the base for the mock server.
 type Server struct {
 	*vlatte.Base[*Mock, *Server]
-	*journal.Verifier[*Mock, *Server]
+	*verify.Verifier[*Mock, *Server]
 
 	config             *Config
 	server             Backend
 	storage            vlatte.Store[*Mock]
 	scenarioStore      *matchscenario.Store
+	eventStream        *adminapi.Events // the admin API's; nil without it
 	requestBodyParsers []RequestBodyParser
 	params             vlatte.KV
 	loaders            []Loader
@@ -137,7 +138,9 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	if conf.DebugFn == nil {
-		conf.DebugFn = func(_ string, _ any) {}
+		conf.DebugFn = func(_ string, _ any) {
+			// Debug logging is off unless a DebugFn is given.
+		}
 	}
 
 	if conf.RequestWasNotMatchedStatusCode == 0 {
@@ -160,7 +163,7 @@ func New(config ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: %w", errTemplateEnvWithEngine)
 	}
 
-	if err := checkProviderKeys(conf.TemplateDataProviders); err != nil {
+	if err := vlatte.CheckTemplateDataProviders(conf.TemplateDataProviders); err != nil {
 		return nil, err
 	}
 
@@ -225,6 +228,7 @@ func New(config ...Option) (*Server, error) {
 	}
 
 	events, lifecycle := withAdminEvents(conf, lifecycle)
+	app.eventStream = events
 	lifecycle = heldLifecycle{withJournal(app, conf, lifecycle)}
 
 	globalEvents, err := prepareGlobalEvents(conf)
@@ -250,11 +254,7 @@ func New(config ...Option) (*Server, error) {
 		factory = newBackendFactory()
 	}
 
-	internalLoaders := 1
 	files := &fileLoader{}
-	loaders := make([]Loader, 0, len(conf.Loaders)+internalLoaders)
-	loaders = append(loaders, files)
-	loaders = append(loaders, conf.Loaders...)
 
 	j, err := openJournal(conf, app.logger)
 	if err != nil {
@@ -270,11 +270,14 @@ func New(config ...Option) (*Server, error) {
 	}()
 
 	app.Base = vlatte.NewBase(app, repository)
-	app.Verifier = journal.NewVerifier[*Mock, *Server](j, app)
+	app.Verifier = verify.NewVerifier(j, verify.Protocol[*Mock, *Server]{Patterns: app})
 	app.storage = repository
 	app.scenarioStore = matchscenario.New()
+	if app.eventStream != nil {
+		app.scenarioStore.Notify(app.publishScenario)
+	}
 	app.params = params
-	app.loaders = loaders
+	app.loaders = conf.Loaders
 	app.files = files
 	app.proxy = p
 
@@ -287,7 +290,7 @@ func New(config ...Option) (*Server, error) {
 	}
 	app.requestBodyParsers = parsers
 	app.events = eventRunner
-	app.webhooks = httpx.NewWebhookTransport()
+	app.webhooks = httpx.NewWebhookTransport(conf.OutboundAllow, conf.OutboundDeny)
 
 	// The admin API changes mocks through a store of its own when they persist: the server's other mocks, of mock
 	// files and code, never reach the persistent store.
@@ -317,7 +320,7 @@ func New(config ...Option) (*Server, error) {
 			})),
 			Files:      adminFiles{app},
 			Recorder:   adminRecorder{app},
-			Scenarios:  app.scenarioStore,
+			Scenarios:  app,
 			Events:     events,
 			Logs:       logs,
 			Journal:    j,
@@ -432,7 +435,8 @@ func (app *Server) MustStartTLS() {
 // URL returns the base URL of the mock server. With paths, it joins them to it as path elements, with url.JoinPath:
 // URL("/users", "1") is <base>/users/1, and "%3F" is a "?" in the path. A "?" or "#" in the last element starts the
 // query or the fragment, which are appended as given, so they must already be escaped:
-// URL("/users/1?active=true#top"). Go's http.Client doesn't send the fragment.
+// URL("/users/1?active=true#top"). Go's http.Client doesn't send the fragment. With paths, it panics when
+// [url.JoinPath] fails on the base URL.
 func (app *Server) URL(paths ...string) string {
 	if len(paths) == 0 {
 		return app.server.Info().URL
@@ -485,9 +489,10 @@ func (app *Server) Logger() *zerolog.Logger {
 	return app.logger
 }
 
-// Reload loads the mocks of external sources, such as mock files, again.
+// Reload loads the mocks of external sources, such as mock files and the admin API's persistent store, again.
 // Each loader replaces the mocks it added before; mocks added in code are kept.
-// Mock files are swapped in one step, and stay as they were when a file has problems.
+// The mocks of the mock files and of the persistent store are swapped in one step, and stay as they were when a file
+// has problems, or the persistent store can't be read or its mocks served. The loaders of Config.Loaders run after.
 func (app *Server) Reload() error {
 	return app.load()
 }
@@ -598,7 +603,7 @@ func (app *Server) DescribeConfig() string {
 	}
 
 	buf.WriteString("Work Dir: ")
-	buf.WriteString(app.config.path(WorkDirVar))
+	buf.WriteString(app.config.Path(WorkDirVar))
 	buf.WriteString("\n")
 
 	buf.WriteString("Mock Search Patterns: ")
@@ -721,18 +726,27 @@ func (app *Server) onStart() error {
 	return app.startConfiguredRecording()
 }
 
+// load loads the mock files, with the mocks of the admin API's persistent store, if any, then runs the loaders of the
+// config.
 func (app *Server) load() error {
-	for _, loader := range app.loaders {
-		err := loader.Load(app)
-		if err != nil {
-			return err
-		}
+	var err error
+	if app.adminStore == nil {
+		err = app.files.load(app, nil)
+	} else {
+		// A mock of the persistent store gives way to a mock file's mock of its id. Both swap in one step, and stay as
+		// they were when a file has problems, or the store can't be read or its mocks served.
+		err = app.adminStore.Reload(context.Background(), func(swap vlatte.Swap[*Mock]) error {
+			return app.files.load(app, swap)
+		})
 	}
 
-	// After the mock files: a mock of the persistent store gives way to a mock file's mock of its id.
-	if app.adminStore != nil {
-		if err := app.adminStore.Reload(context.Background()); err != nil {
-			return fmt.Errorf("server: admin store: %w", err)
+	if err != nil {
+		return err
+	}
+
+	for _, loader := range app.loaders {
+		if err := loader.Load(app); err != nil {
+			return err
 		}
 	}
 

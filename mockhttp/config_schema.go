@@ -384,6 +384,13 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		{Key: "admin.addr", Kind: config.String, Hidden: true},
 		{Key: "admin.dir", Kind: config.String, Hidden: true},
 		{Key: "admin.docs_version", Kind: config.String, Hidden: true},
+		{Key: "admin.auth.username", Kind: config.String, Hidden: true},
+		{Key: "admin.auth.password", Kind: config.String, Hidden: true, Secret: true},
+		{Key: "admin.auth.password_file", Kind: config.String, Hidden: true},
+		{Key: "admin.auth.token", Kind: config.String, Hidden: true, Secret: true},
+		{Key: "admin.auth.token_file", Kind: config.String, Hidden: true},
+		{Key: "admin.tls.cert", Kind: config.String, Hidden: true},
+		{Key: "admin.tls.key", Kind: config.String, Hidden: true},
 		{Key: "mcp", Kind: config.Bool, Hidden: true},
 		{Key: "webhook.timeout", Kind: config.Duration, Hidden: true},
 		{
@@ -425,6 +432,24 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 				c.TemplateEnv = v.List
 				_, err := vlatte.NewGoTemplateEngine(vlatte.WithEnv(v.List...))
 
+				return err
+			},
+		},
+		{
+			Key: "outbound.allow", Kind: config.List,
+			Usage: "Address ranges the server may connect to, in CIDR form, such as 10.1.0.0/16: proxied requests, " +
+				"the recording target, the forward proxy and webhooks reach no other address. Empty allows every address.",
+			Set: func(c *Config, v config.Value) (err error) {
+				c.OutboundAllow, err = httpx.ParsePrefixes(v.List)
+				return err
+			},
+		},
+		{
+			Key: "outbound.deny", Kind: config.List,
+			Usage: "Address ranges the server never connects to, in CIDR form, such as 169.254.0.0/16. Deny wins " +
+				"over outbound.allow.",
+			Set: func(c *Config, v config.Value) (err error) {
+				c.OutboundDeny, err = httpx.ParsePrefixes(v.List)
 				return err
 			},
 		},

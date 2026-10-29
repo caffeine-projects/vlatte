@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -56,6 +55,9 @@ type selectorInput struct {
 	// ForProxy is set on a request the server's forward proxy sends on to the host it names: a CONNECT, or a request
 	// in absolute form.
 	ForProxy bool
+
+	// values are the values of the request, which the key of a scenario renders with.
+	values *RequestValues
 }
 
 type expectation = vlatte.Eval[*selectorInput]
@@ -97,14 +99,15 @@ type Mock struct {
 	mu sync.RWMutex
 
 	spec      mockSpec
-	reply     Replier               // made for this mock by the ReplierFactory of its builder
-	replyDesc descriptor.Descriptor // the description of that factory, as it was when the mock was built
-	closer    io.Closer             // what releases the reply, when the mock owns it; nil otherwise
+	reply     Replier           // made for this mock by the ReplierFactory of its builder
+	replyDesc vlatte.Descriptor // the description of that factory, as it was when the mock was built
+	closer    io.Closer         // what releases the reply, when the mock owns it; nil otherwise
 	closeOnce sync.Once
 	enabled   bool
 	hits      atomic.Int64
 }
 
+// ID returns the ID of the mock: the one set with [Builder.ID], or one generated when it was built.
 func (m *Mock) ID() string {
 	return m.spec.id
 }
@@ -123,18 +126,22 @@ func (m *Mock) Close() error {
 	return err
 }
 
+// Name returns the name of the mock, or "" when it has none.
 func (m *Mock) Name() string {
 	return m.spec.name
 }
 
+// Priority returns the priority of the mock: mocks with a lower one match first.
 func (m *Mock) Priority() int {
 	return m.spec.priority
 }
 
+// Origin returns where the mock comes from, such as the mock file that describes it, or "" for a mock built in Go.
 func (m *Mock) Origin() string {
 	return m.spec.origin
 }
 
+// Enabled reports whether the mock may match requests.
 func (m *Mock) Enabled() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -172,16 +179,19 @@ func (m *Mock) Disable() {
 	m.enabled = false
 }
 
+// Switch enables the mock when state is true, and disables it otherwise.
 func (m *Mock) Switch(state bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.enabled = state
 }
 
+// Events returns the events the mock runs once it replied, its callbacks included.
 func (m *Mock) Events() vlatte.Events {
 	return vlatte.Events{OnComplete: m.spec.events}
 }
 
+// Steps returns the steps that the body of each answer of the mock passes through: see [Builder.Step].
 func (m *Mock) Steps() []vlatte.Step {
 	return m.spec.steps
 }
@@ -201,7 +211,10 @@ func (m *Mock) String() string {
 	return strings.TrimSpace("Mock [" + m.ID() + "] " + m.Name())
 }
 
-func (m *Mock) Describe() descriptor.Descriptor {
+// Describe implements [vlatte.SelfDescriptive]: the mock in the mock file format. It leaves out callbacks, and
+// steps that don't describe themselves. A reply a mock file can't hold, such as [Echo], stays, so encoding the
+// description fails.
+func (m *Mock) Describe() vlatte.Descriptor {
 	mockExpectations := m.spec.expectations
 	data := make(map[string]any)
 	request := make(map[string]any)
@@ -235,7 +248,7 @@ func (m *Mock) Describe() descriptor.Descriptor {
 			keys := make(map[string]any, counters[target])
 
 			if len(expectations) == 1 {
-				if sd, ok := expectations[0].Matcher.(descriptor.SelfDescriptive); ok {
+				if sd, ok := expectations[0].Matcher.(vlatte.SelfDescriptive); ok {
 					keys[expectations[0].Key] = sd.Describe()
 					request[target.FieldName()] = keys
 				}
@@ -255,7 +268,7 @@ func (m *Mock) Describe() descriptor.Descriptor {
 				}
 
 				if size == 1 {
-					if sd, ok := e.Matcher.(descriptor.SelfDescriptive); ok {
+					if sd, ok := e.Matcher.(vlatte.SelfDescriptive); ok {
 						keys[e.Key] = sd.Describe()
 					}
 				} else {
@@ -265,7 +278,7 @@ func (m *Mock) Describe() descriptor.Descriptor {
 					}
 
 					all := match.All(matchers...)
-					if sd, ok := vlatte.Matcher(all).(descriptor.SelfDescriptive); ok {
+					if sd, ok := vlatte.Matcher(all).(vlatte.SelfDescriptive); ok {
 						keys[e.Key] = sd.Describe()
 					}
 				}
@@ -298,7 +311,7 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		case matchingScopeScheme, matchingScopeMethod, matchingScopeURL, matchingScopeURLPath, matchingScopeURLFragment,
 			matchingScopeBody, matchingScopeHost, matchingScopeClientIP:
 			if len(expectations) == 1 {
-				if sd, ok := expectations[0].Matcher.(descriptor.SelfDescriptive); ok {
+				if sd, ok := expectations[0].Matcher.(vlatte.SelfDescriptive); ok {
 					request[target.FieldName()] = sd.Describe()
 				}
 
@@ -311,7 +324,7 @@ func (m *Mock) Describe() descriptor.Descriptor {
 			}
 
 			all := match.All(matchers...)
-			if sd, ok := vlatte.Matcher(all).(descriptor.SelfDescriptive); ok {
+			if sd, ok := vlatte.Matcher(all).(vlatte.SelfDescriptive); ok {
 				request[target.FieldName()] = sd.Describe()
 			}
 
@@ -319,7 +332,7 @@ func (m *Mock) Describe() descriptor.Descriptor {
 			// A list of the matchers that describe themselves, as request.custom lists them.
 			var custom []any
 			for _, e := range expectations {
-				if sd, ok := e.Matcher.(descriptor.SelfDescriptive); ok {
+				if sd, ok := e.Matcher.(vlatte.SelfDescriptive); ok {
 					custom = append(custom, sd.Describe())
 				}
 			}
@@ -331,7 +344,7 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		case matchingScopeScenario, matchingScopeRepeat:
 			// They describe as a single argument, the value of their key, such as repeat: 1.
 			for _, e := range expectations {
-				if sd, ok := e.Matcher.(descriptor.SelfDescriptive); ok {
+				if sd, ok := e.Matcher.(vlatte.SelfDescriptive); ok {
 					if args, ok := sd.Describe().Props.([]any); ok && len(args) == 1 {
 						data[target.FieldName()] = args[0]
 					}
@@ -340,7 +353,7 @@ func (m *Mock) Describe() descriptor.Descriptor {
 
 		default:
 			for _, e := range expectations {
-				if sd, ok := e.Matcher.(descriptor.SelfDescriptive); ok {
+				if sd, ok := e.Matcher.(vlatte.SelfDescriptive); ok {
 					if desc := sd.Describe(); desc.IsMap() {
 						desc.Merge(data)
 					}
@@ -398,7 +411,7 @@ func (m *Mock) Describe() descriptor.Descriptor {
 		}
 	}
 
-	return descriptor.Root(data)
+	return vlatte.DescribeRoot(data)
 }
 
 // describeEvents describes events as a mock file writes them, but those that carry their listener, such as callbacks,
@@ -415,7 +428,7 @@ func describeEvents(events []vlatte.EventConfig) []any {
 
 		switch p := e.Parameters.(type) {
 		case nil:
-		case descriptor.SelfDescriptive:
+		case vlatte.SelfDescriptive:
 			event["parameters"] = p.Describe().Props
 		default:
 			event["parameters"] = p
@@ -436,7 +449,7 @@ func describeEvents(events []vlatte.EventConfig) []any {
 func describeSteps(steps []vlatte.Step) []any {
 	var described []any
 	for _, s := range steps {
-		if d, ok := descriptor.IsSelfDescriptive(s); ok {
+		if d, ok := vlatte.IsSelfDescriptive(s); ok {
 			described = append(described, d)
 		}
 	}
@@ -444,6 +457,8 @@ func describeSteps(steps []vlatte.Step) []any {
 	return described
 }
 
+// MarshalJSON implements [encoding/json.Marshaler]: it encodes the mock's [Mock.Describe] description, and fails when
+// the description holds a reply a mock file can't, such as [Echo].
 func (m *Mock) MarshalJSON() ([]byte, error) {
 	return m.Describe().MarshalJSON()
 }

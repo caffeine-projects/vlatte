@@ -105,8 +105,8 @@ func TestNearMisses_NoMatcherRunsTwice(t *testing.T) {
 }
 
 func TestNearMisses_RunsNoMatcherThatKeepsState(t *testing.T) {
-	// A scenario's matcher may start the scenario as it runs: the report must change nothing, so it runs none, and
-	// names those matching never reached. One matching ran, and that failed, such as a Times used up, is the reason
+	// A stateful matcher, such as Times, may change its state as it runs: the report must change nothing, so it runs
+	// none, and names those matching never reached. One matching ran, and that failed, such as a Times used up, is the reason
 	// a mock missed, and no part of the request: a mock that missed by nothing else is kept, and comes first.
 	in := request{"method": "GET", "path": "/a"}
 	scenario, usedUp, onlyTimes := &statefulMatcher{}, &statefulMatcher{}, &statefulMatcher{}
@@ -125,6 +125,24 @@ func TestNearMisses_RunsNoMatcherThatKeepsState(t *testing.T) {
 		{MockID: "used", Name: "used", Passed: 2, Total: 3, Failed: []string{"times"}},
 		{MockID: "only", Name: "only", Passed: 0, Total: 1, Failed: []string{"times"}},
 		{MockID: "m", Name: "m", Passed: 1, Total: 2, Failed: []string{"path"}, Skipped: []string{"scenario"}},
+	}, got)
+}
+
+func TestNearMisses_RunsTheMatchersThatClaimATurn(t *testing.T) {
+	// A scenario's matcher changes nothing as it matches, so the report runs it and says when the scenario is the
+	// reason a mock missed. Like a Times used up, it is no part of the request: a mock that missed by it alone comes
+	// first.
+	waiting := &turnMatcher{taken: true}
+	m, later := newFakeMockWith("m", 0), newFakeMockWith("later", 0)
+
+	got := nearMisses(t, map[*fakeMock][]*vlatte.Eval[request]{
+		m:     {part("method", match.Equal("GET")), part("path", match.Equal("/b")), {Key: "scenario", Matcher: &turnMatcher{}}},
+		later: {part("method", match.Equal("GET")), part("path", match.Equal("/a")), {Key: "scenario", Matcher: waiting}},
+	}, []*fakeMock{m, later}, request{"method": "GET", "path": "/a"})
+
+	require.Equal(t, []vlatte.NearMiss{
+		{MockID: "later", Name: "later", Passed: 2, Total: 3, Failed: []string{"scenario"}},
+		{MockID: "m", Name: "m", Passed: 2, Total: 3, Failed: []string{"path"}},
 	}, got)
 }
 

@@ -14,9 +14,9 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchrepeat"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
@@ -42,6 +42,7 @@ type Builder struct {
 	scenario              string
 	scenarioRequiredState string
 	scenarioNewState      string
+	scenarioKey           string
 	delay                 vlatte.Delay
 	delayDuration         time.Duration // the delay of Delay, which a description writes; DelayFunc's can't be
 	delayFunc             bool          // the delay is DelayFunc's
@@ -172,7 +173,8 @@ func (b *Builder) Messages(msgs ...proto.Message) *Builder {
 	return b.messages("messages", msgs)
 }
 
-// CallMatches matches a call fn reports true for. fn reads the call as matchers do, with its request: see [Call].
+// CallMatches matches a call fn reports true for. fn reads the call as matchers do, with its request: see [Call]. A
+// mock file can't hold a function: describing a mock with it fails, so the admin API can't show the mock, nor save it.
 func (b *Builder) CallMatches(fn func(call *Call) (bool, error)) *Builder {
 	b.described.undescribable = true
 	b.readsRequest = true
@@ -196,7 +198,8 @@ func (b *Builder) CallMatches(fn func(call *Call) (bool, error)) *Builder {
 // Matches adds a matcher of the whole call: m gets the *Call, as the function of CallMatches does. A mock file's
 // request.custom adds matchers this way, such as custom ones of the server's registry: see
 // [ConfigBuilder.Matchers]. Unlike a function, a matcher that describes itself is described, under request.custom,
-// so the admin API's store keeps it.
+// so the admin API's store keeps it. Describing a mock with a matcher that doesn't, here or in any other method, fails,
+// as with [Builder.CallMatches].
 func (b *Builder) Matches(m vlatte.Matcher) *Builder {
 	b.described.custom = append(b.described.custom, m)
 	b.readsRequest = true
@@ -248,8 +251,22 @@ func (b *Builder) ScenarioStateIs(requiredState string) *Builder {
 	return b
 }
 
-// ScenarioStateWillBe sets the state the scenario moves to once this mock answered a call. It starts the scenario when
-// no mock did yet.
+// ScenarioKey sets the template of the key of the instance of the mock's scenario a call plays in, such as
+// {{ with index .Request.Header "x-test-id" }}{{ index . 0 }}{{ end }}: each key is a scenario of its own, starting in
+// started, so tests that run at once with keys of their own don't move each other's. It renders with the data of
+// [Template] replies. It renders more than once for a call: as the mock matches, as it takes its turn and to journal
+// the move, so a key reads the call only, never .Scenarios, a random value or the time. A key that renders empty plays
+// in the shared instance, the one of mocks without a key. A template that fails to render fails the call's matching.
+// Read a keyed instance with [Server.Scenarios], and move it with [Server.SetScenario] and [matchscenario.Key].
+func (b *Builder) ScenarioKey(tmpl string) *Builder {
+	b.scenarioKey = tmpl
+	return b
+}
+
+// ScenarioStateWillBe sets the state the scenario moves to when this mock is picked to answer a call, before it
+// answers: the next call matches in that state. With [Builder.ScenarioStateIs], of two calls in that state, only one
+// gets this mock; without it, the mock matches in every state, so every call gets it. The scenario moves even when the
+// mock then fails to answer, as when its client leaves during its delay.
 func (b *Builder) ScenarioStateWillBe(newState string) *Builder {
 	b.scenarioNewState = newState
 	return b
@@ -263,7 +280,7 @@ func (b *Builder) Delay(d time.Duration) *Builder {
 }
 
 // DelayFunc sets a function that picks the delay before each reply, such as [vlatte.Jitter] or
-// [vlatte.UniformDistribution].
+// [vlatte.UniformDistribution]. Describing a mock with it fails, as with [Builder.CallMatches].
 func (b *Builder) DelayFunc(delay vlatte.Delay) *Builder {
 	b.delay, b.delayDuration, b.delayFunc = delay, 0, delay != nil
 	return b
@@ -274,7 +291,7 @@ func (b *Builder) DelayFunc(delay vlatte.Delay) *Builder {
 // call ends after it, so a test checks what it did right after the call. fn gets an [*OnComplete], read-only as the
 // events run at the same time, and a context that the client leaving doesn't end, and [Server.Close] does. An error
 // or a panic of fn is logged as a warning, and told by the call's journal entry, unless Close canceled it, and never
-// changes the answer. Mock files can't set callbacks, and a mock's description leaves them out.
+// changes the answer. Mock files can't set callbacks: describing a mock with one fails, as with [Builder.CallMatches].
 func (b *Builder) Callback(fn vlatte.EventFunc[vlatte.OnComplete]) *Builder {
 	b.events = append(b.events, vlatte.EventConfig{Name: "callback", Listener: fn})
 	return b
@@ -282,7 +299,8 @@ func (b *Builder) Callback(fn vlatte.EventFunc[vlatte.OnComplete]) *Builder {
 
 // OnCompleteEvent adds an on_complete event to the mock, such as a webhook: it runs once the mock replied, and the
 // call ends after it, unless cfg.AfterResponse is set: see [vlatte.EventConfig.AfterResponse]. Unless it carries its
-// own Listener, its Name names a listener the server registered: see [ConfigBuilder.OnCompleteListener].
+// own Listener, its Name names a listener the server registered: see [ConfigBuilder.OnCompleteListener]. Describing a
+// mock with an event that carries its own Listener fails, as with [Builder.Callback].
 func (b *Builder) OnCompleteEvent(cfg vlatte.EventConfig) *Builder {
 	b.events = append(b.events, cfg)
 	return b
@@ -327,16 +345,23 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		expectations = append(expectations, &vlatte.Eval[*Call]{
 			Target:  int(_scopeRepeat),
 			Key:     "times",
-			Matcher: mfeat.Repeat(b.times),
+			Matcher: matchrepeat.Repeat(b.times),
 		})
 	}
 
 	if b.scenario != "" {
-		expectations = append(expectations, &vlatte.Eval[*Call]{
-			Target:  int(_scopeScenario),
-			Key:     b.scenario,
-			Matcher: app.scenarios.Matcher(b.scenario, b.scenarioRequiredState, b.scenarioNewState),
-		})
+		sm := app.scenarios.Matcher(b.scenario, b.scenarioRequiredState, b.scenarioNewState)
+		e := &vlatte.Eval[*Call]{Target: int(_scopeScenario), Key: b.scenario, Matcher: sm}
+
+		if b.scenarioKey != "" {
+			if e.Selector, err = app.scenarioKey(b.scenarioKey); err != nil {
+				return nil, fmt.Errorf("mock: scenario.key: %w", err)
+			}
+
+			sm.KeyedBy(b.scenarioKey)
+		}
+
+		expectations = append(expectations, e)
 	}
 
 	events, err := app.prepareEvents(b.events, "mock: on_complete listener")
@@ -375,7 +400,7 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 			times:     b.times,
 			delay:     b.delayDuration,
 			delayFunc: b.delayFunc,
-			scenario:  [3]string{b.scenario, b.scenarioRequiredState, b.scenarioNewState},
+			scenario:  [4]string{b.scenario, b.scenarioRequiredState, b.scenarioNewState, b.scenarioKey},
 		},
 	}, nil
 }

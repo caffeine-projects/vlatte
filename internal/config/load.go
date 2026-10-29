@@ -104,7 +104,12 @@ func (s *Schema[T]) apply(dst *T, entries []entry, values map[string]Value, pref
 
 		v, found := coerce(f, e, under(prefix, e.key))
 		if len(found) > 0 {
+			if f.secret {
+				conceal(found)
+			}
+
 			problems = append(problems, found...)
+
 			continue
 		}
 
@@ -142,7 +147,16 @@ func (s *Schema[T]) apply(dst *T, entries []entry, values map[string]Value, pref
 
 		if set := s.sets[c.f.key]; set != nil {
 			if err := set(dst, c.v); err != nil {
+				if c.f.secret {
+					problems = append(problems, Problem{
+						Code: CodeInvalidValue, Origin: c.v.Origin, Key: c.v.Key, Message: c.v.Key + ": " + err.Error(),
+					})
+
+					continue
+				}
+
 				problems = append(problems, problemsOf(c.v, err)...)
+
 				continue
 			}
 		}
@@ -167,6 +181,13 @@ func problemsOf(v Value, err error) []Problem {
 		Value:   display(v.Raw),
 		Message: fmt.Sprintf("%s=%q: %v", v.Key, display(v.Raw), err),
 	}}
+}
+
+// conceal removes the value of a secret from its problems, which a hint can quote.
+func conceal(problems []Problem) {
+	for i := range problems {
+		problems[i].Value, problems[i].Hint = "", ""
+	}
 }
 
 // inConflict reports whether key is a conflicting section or one of its keys.

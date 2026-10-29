@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -30,7 +29,7 @@ func (m *equalIgnoreCaseMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"Eqi(", m.Expected, ") Got: ", txt}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *equalIgnoreCaseMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("eqi", m.Expected)
+// Describe implements vlatte.SelfDescriptive.
+func (m *equalIgnoreCaseMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("eqi", m.Expected)
 }

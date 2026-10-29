@@ -2,6 +2,8 @@ package vlatte
 
 import "context"
 
+// Replier makes the reply of a mock to input, which holds the request the mock matched. A [ReplierFactory] makes one
+// for each mock.
 type Replier[I any, R any] interface {
 	Reply(ctx context.Context, input I) (R, error)
 }

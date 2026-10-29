@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 
@@ -20,6 +21,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/fault"
+	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
 
@@ -220,6 +222,89 @@ func TestFileStore_ResetKeepsWhatItHolds(t *testing.T) {
 	res, _ = do(t, http.MethodGet, m.URL("/hello"), nil, nil)
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	require.FileExists(t, filepath.Join(dir, "hello.mock.yaml"))
+}
+
+func TestFileStore_AReloadTheStoreFailsKeepsTheMockFilesAsTheyWere(t *testing.T) {
+	// A reload is all or nothing: the store fails, so the mock file edited meanwhile isn't served either.
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "mocks"), 0o700))
+
+	file := filepath.Join(root, "mocks", "x.yaml")
+	require.NoError(t, os.WriteFile(file, []byte("request: {method: GET, path: /x}\nresponse: {status: 200, body: first}\n"), 0o600))
+
+	m := adminServer(t, Setup().RootDir(root).MockFilePatterns("mocks/*.yaml").AdminStore(FileStore("admin")))
+
+	require.NoError(t, os.WriteFile(file, []byte("request: {method: GET, path: /x}\nresponse: {status: 200, body: edited}\n"), 0o600))
+	require.NoError(t, os.Mkdir(filepath.Join(root, "admin"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "admin", "bad.mock.yaml"), []byte("id: bad\nrequest: {methd: GET}\n"), 0o600))
+
+	require.ErrorContains(t, m.Reload(), "bad.mock.yaml")
+
+	_, body := do(t, http.MethodGet, m.URL("/x"), nil, nil)
+	require.Equal(t, "first", string(body))
+}
+
+// durable is a persistent store a test store embeds, under a name that doesn't hide its Store method.
+type durable = vlatte.Store[*Mock]
+
+// twinStore is a persistent store that, once twins is set, also holds two mocks of one ID, which the server's store
+// refuses.
+type twinStore struct {
+	durable
+
+	app   *Server
+	twins atomic.Bool
+}
+
+func (s *twinStore) PickAll(ctx context.Context) ([]*Mock, error) {
+	all, err := s.durable.PickAll(ctx)
+	if err != nil || !s.twins.Load() {
+		return all, err
+	}
+
+	for range 2 {
+		twin, err := DecodeMock(s.app, []byte(`{"id": "twin", "request": {"method": "GET", "path": "/twin"}, "response": {"status": 200}}`), "json")
+		if err != nil {
+			return nil, err
+		}
+
+		all = append(all, twin)
+	}
+
+	return all, nil
+}
+
+func TestAdminStore_AReloadTheServerRefusesKeepsTheMockFilesAsTheyWere(t *testing.T) {
+	// The persistent store reads fine, but the server's store refuses its mocks: the mock file edited meanwhile isn't
+	// served either, and the next reload serves it.
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "mocks"), 0o700))
+
+	file := filepath.Join(root, "mocks", "x.yaml")
+	require.NoError(t, os.WriteFile(file, []byte("request: {method: GET, path: /x}\nresponse: {status: 200, body: first}\n"), 0o600))
+
+	var store *twinStore
+
+	m := adminServer(t, Setup().RootDir(root).MockFilePatterns("mocks/*.yaml").AdminStore(func(app *Server) (vlatte.Store[*Mock], error) {
+		files, err := FileStore("admin")(app)
+		store = &twinStore{durable: files, app: app}
+
+		return store, err
+	}))
+
+	require.NoError(t, os.WriteFile(file, []byte("request: {method: GET, path: /x}\nresponse: {status: 200, body: edited}\n"), 0o600))
+	store.twins.Store(true)
+
+	require.ErrorIs(t, m.Reload(), vlatte.ErrDuplicateID)
+
+	_, body := do(t, http.MethodGet, m.URL("/x"), nil, nil)
+	require.Equal(t, "first", string(body))
+
+	store.twins.Store(false)
+	require.NoError(t, m.Reload())
+
+	_, body = do(t, http.MethodGet, m.URL("/x"), nil, nil)
+	require.Equal(t, "edited", string(body))
 }
 
 func TestFileStore_RemovingMocksRemovesTheirFiles(t *testing.T) {
@@ -480,7 +565,7 @@ func TestFileStore_ADirectoryItCantUse(t *testing.T) {
 	require.NoError(t, os.Mkdir(filepath.Join(inTheWay, "hello.mock.yaml"), 0o700))
 	require.Error(t, store.Store(ctx, hello))
 
-	temps, err := filepath.Glob(filepath.Join(inTheWay, _fileStoreTempPattern))
+	temps, err := filepath.Glob(filepath.Join(inTheWay, adminapi.FileStoreTempPattern))
 	require.NoError(t, err)
 	require.Empty(t, temps)
 }
@@ -518,7 +603,7 @@ func refusingStore(dir string, names ...string) AdminStore {
 			return os.Remove(name)
 		}
 
-		return &fileStore{app: app, dir: dir, remove: remove}, nil
+		return newFileStore(app, dir, remove), nil
 	}
 }
 

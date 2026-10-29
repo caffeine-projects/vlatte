@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 var (
@@ -128,28 +129,33 @@ type Entry struct {
 
 	// NearMisses are the mocks that came closest to matching a request no mock matched.
 	NearMisses []vlatte.NearMiss
+
+	// Scenarios are the moves of the scenarios of the mock that matched the request. A scenario moves as its mock is
+	// picked, so a request that then fails has them too.
+	Scenarios []matchscenario.Move
 }
 
 // journalLine is the JSON form of an Entry, a line of its journal's files: a body that is text is kept as
 // such, so a person reads it; another goes in base64. JSON has no durations: the elapsed time is in nanoseconds.
 type journalLine struct {
-	Seq           uint64              `json:"seq,omitzero"`
-	ID            string              `json:"id"`
-	Time          time.Time           `json:"time"`
-	Kind          vlatte.Kind         `json:"kind"`
-	Outcome       Outcome             `json:"outcome"`
-	MockID        string              `json:"mock_id,omitempty"`
-	Method        string              `json:"method,omitempty"`
-	Path          string              `json:"path,omitempty"`
-	Target        string              `json:"target,omitempty"`
-	Status        int                 `json:"status,omitzero"`
-	ElapsedNS     int64               `json:"elapsed_ns,omitzero"`
-	Header        map[string][]string `json:"header,omitempty"`
-	Body          string              `json:"body,omitempty"`
-	BodyBase64    []byte              `json:"body_base64,omitempty"`
-	BodyTruncated bool                `json:"body_truncated,omitzero"`
-	Message       string              `json:"message,omitempty"`
-	NearMisses    []vlatte.NearMiss   `json:"near_misses,omitempty"`
+	Seq           uint64               `json:"seq,omitzero"`
+	ID            string               `json:"id"`
+	Time          time.Time            `json:"time"`
+	Kind          vlatte.Kind          `json:"kind"`
+	Outcome       Outcome              `json:"outcome"`
+	MockID        string               `json:"mock_id,omitempty"`
+	Method        string               `json:"method,omitempty"`
+	Path          string               `json:"path,omitempty"`
+	Target        string               `json:"target,omitempty"`
+	Status        int                  `json:"status,omitzero"`
+	ElapsedNS     int64                `json:"elapsed_ns,omitzero"`
+	Header        map[string][]string  `json:"header,omitempty"`
+	Body          string               `json:"body,omitempty"`
+	BodyBase64    []byte               `json:"body_base64,omitempty"`
+	BodyTruncated bool                 `json:"body_truncated,omitzero"`
+	Message       string               `json:"message,omitempty"`
+	NearMisses    []vlatte.NearMiss    `json:"near_misses,omitempty"`
+	Scenarios     []matchscenario.Move `json:"scenarios,omitempty"`
 }
 
 // MarshalJSONTo writes e as its journal's files keep it.
@@ -168,6 +174,27 @@ func (e *Entry) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	*e = line.entry()
 
 	return nil
+}
+
+// Messages returns the lines of the entry's Message, each a failure, trimmed, without the empty ones.
+func (e *Entry) Messages() []string {
+	return lines(e.Message)
+}
+
+// HeaderValue returns the first value of the entry's header named name, in any case, or "" when it has none: the
+// value a query's Header matcher gets. Of two spellings of a name, the one spelled as name comes first.
+func (e *Entry) HeaderValue(name string) string {
+	if values := e.Header[name]; len(values) > 0 {
+		return values[0]
+	}
+
+	for k, values := range e.Header {
+		if strings.EqualFold(k, name) && len(values) > 0 {
+			return values[0]
+		}
+	}
+
+	return ""
 }
 
 // validUTF8 replaces the bytes of the text of e that the index keeps, which aren't UTF-8, with U+FFFD, as the JSON of
@@ -197,6 +224,7 @@ func (e *Entry) line() journalLine {
 		BodyTruncated: e.BodyTruncated,
 		Message:       e.Message,
 		NearMisses:    e.NearMisses,
+		Scenarios:     e.Scenarios,
 	}
 
 	if utf8.Valid(e.Body) {
@@ -231,17 +259,23 @@ func (l *journalLine) entry() Entry {
 		BodyTruncated: l.BodyTruncated,
 		Message:       l.Message,
 		NearMisses:    l.NearMisses,
+		Scenarios:     l.Scenarios,
 	}
 }
 
 // joinLines returns the lines of s that aren't blank, trimmed, joined with sep.
 func joinLines(s, sep string) string {
-	var lines []string
+	return strings.Join(lines(s), sep)
+}
+
+// lines returns the lines of s, trimmed, without the empty ones.
+func lines(s string) []string {
+	var out []string
 	for line := range strings.Lines(s) {
 		if line = strings.TrimSpace(line); line != "" {
-			lines = append(lines, line)
+			out = append(out, line)
 		}
 	}
 
-	return strings.Join(lines, sep)
+	return out
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -39,14 +40,15 @@ func TestSplitArgs_GivesEachServerItsFlags(t *testing.T) {
 		"--grpc-mock-files=mocks/*.yaml",
 		"-c", "settings.yaml",
 		"--grpc-reflection=false",
+		"--grpc-admin-dir", "admin",
 		"--debug",
 	})
 
 	require.Equal(t, []string{"--addr", ":8080", "-c", "settings.yaml", "--debug"}, httpArgs)
 	require.Equal(t, []string{
 		"--grpc", "--grpc-addr", ":50051", "--grpc-mock-files=mocks/*.yaml", "--config=settings.yaml",
-		"--grpc-reflection=false",
-	}, grpcArgs)
+		"--grpc-reflection=false", "--grpc-admin-dir", "admin",
+	}, grpcArgs, "the command's gRPC settings too")
 }
 
 func TestSplitArgs_FlagsEndAtTheTerminator(t *testing.T) {
@@ -234,4 +236,172 @@ func TestRun_ServesTheGRPCAdminAPIItsSettingsSay(t *testing.T) {
 		"--journal=false", "--log-level", "disabled",
 	}, nil, &stdout, &stderr), stderr.String())
 	require.Contains(t, stdout.String(), ", admin API: \n", "no admin API serves the gRPC server")
+}
+
+func TestCLI_KeepsTheGRPCAdminMocksAcrossRestarts(t *testing.T) {
+	// The mocks the gRPC server's admin API adds are kept in testdata/vlatte/_grpc_admin, next to the HTTP admin API's,
+	// so the next run serves them, as it does the HTTP ones.
+	withoutDockerHost(t)
+
+	set, file := healthSet(t, "kept.health.v1")
+	t.Chdir(t.TempDir())
+
+	grpcAddr, adminAddr := randomAddr(t), randomAddr(t)
+	args := []string{
+		"--addr", randomAddr(t), "--grpc-addr", grpcAddr, "--grpc-descriptors", set, "--grpc-admin-addr", adminAddr,
+		"--log-level", "disabled",
+	}
+
+	stop := start(t, args...)
+	postGRPCMock(t, adminAddr, "kept", "kept.health.v1")
+	require.FileExists(t, filepath.Join("testdata", "vlatte", "_grpc_admin", "kept.mock.yaml"))
+	require.Zero(t, stop())
+
+	start(t, args...)
+	requireServing(t, grpcAddr, file, "kept.health.v1")
+
+	t.Run("in memory", func(t *testing.T) {
+		// --grpc-admin-dir="" keeps them in memory: nothing is written.
+		t.Chdir(t.TempDir())
+
+		adminAddr := randomAddr(t)
+		start(t, "--addr", randomAddr(t), "--grpc-addr", randomAddr(t), "--grpc-descriptors", set,
+			"--grpc-admin-addr", adminAddr, "--grpc-admin-dir=", "--log-level", "disabled")
+		postGRPCMock(t, adminAddr, "gone", "kept.health.v1")
+
+		_, err := os.Stat(filepath.Join("testdata", "vlatte", "_grpc_admin"))
+		require.ErrorIs(t, err, os.ErrNotExist)
+	})
+
+	t.Run("in a named server's work directory", func(t *testing.T) {
+		// The gRPC server has no work directory: {workdir} is the HTTP server's, so servers of one directory keep
+		// their mocks apart.
+		t.Chdir(t.TempDir())
+
+		adminAddr := randomAddr(t)
+		start(t, "--addr", randomAddr(t), "--name", "api", "--grpc-addr", randomAddr(t), "--grpc-descriptors", set,
+			"--grpc-admin-addr", adminAddr, "--log-level", "disabled")
+		postGRPCMock(t, adminAddr, "named", "kept.health.v1")
+
+		require.FileExists(t, filepath.Join("testdata", "vlatte", "api", "_grpc_admin", "named.mock.yaml"))
+	})
+
+	t.Run("in the work directory, whatever the gRPC root directory", func(t *testing.T) {
+		// grpc.root_dir is where the gRPC mock files start, not the HTTP server's work directory.
+		t.Chdir(t.TempDir())
+
+		adminAddr := randomAddr(t)
+		start(t, "--addr", randomAddr(t), "--grpc-addr", randomAddr(t), "--grpc-descriptors", set,
+			"--grpc-root-dir", "root", "--grpc-admin-addr", adminAddr, "--log-level", "disabled")
+		postGRPCMock(t, adminAddr, "worked", "kept.health.v1")
+
+		require.FileExists(t, filepath.Join("testdata", "vlatte", "_grpc_admin", "worked.mock.yaml"))
+	})
+
+	t.Run("from the gRPC root directory", func(t *testing.T) {
+		// A relative directory without {workdir} starts at grpc.root_dir, as the gRPC mock files do.
+		t.Chdir(t.TempDir())
+
+		adminAddr := randomAddr(t)
+		start(t, "--addr", randomAddr(t), "--grpc-addr", randomAddr(t), "--grpc-descriptors", set,
+			"--grpc-root-dir", "root", "--grpc-admin-dir", "admin", "--grpc-admin-addr", adminAddr, "--log-level", "disabled")
+		postGRPCMock(t, adminAddr, "rooted", "kept.health.v1")
+
+		require.FileExists(t, filepath.Join("root", "admin", "rooted.mock.yaml"))
+	})
+}
+
+func TestRun_AKeptGRPCMockOfAMethodNoLongerServedFailsTheRun(t *testing.T) {
+	// A kept mock whose method the descriptor sets no longer hold would fail every start: the run names its file, so
+	// the user can remove it.
+	withoutDockerHost(t)
+
+	set, _ := healthSet(t, "stale.health.v1")
+	t.Chdir(t.TempDir())
+
+	dir := filepath.Join("testdata", "vlatte", "_grpc_admin")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "stale.mock.yaml"), []byte(`
+id: stale
+request:
+  method: removed.v1.Service/Method
+response:
+  message: {}
+`), 0o600))
+
+	// A done context ends a run that started at once.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var stderr bytes.Buffer
+	code := run(ctx, []string{
+		"--addr", randomAddr(t), "--grpc-addr", randomAddr(t), "--grpc-descriptors", set, "--log-level", "disabled",
+	}, nil, io.Discard, &stderr)
+
+	require.Equal(t, 1, code, stderr.String())
+	require.Contains(t, stderr.String(), "stale.mock.yaml")
+}
+
+// postGRPCMock adds the mock id, of the Check method of the health service in package pkg, which answers SERVING,
+// through the gRPC admin API on addr, once it serves.
+func postGRPCMock(t *testing.T, addr, id, pkg string) {
+	t.Helper()
+
+	doc := fmt.Sprintf("id: %s\nrequest: {method: %s.Health/Check}\nresponse: {message: {status: SERVING}}\n", id, pkg)
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res, err := http.Post("http://"+addr+"/mocks", "application/yaml", strings.NewReader(doc))
+		if !assert.NoError(c, err) {
+			return
+		}
+
+		_ = res.Body.Close()
+		assert.Equal(c, http.StatusCreated, res.StatusCode)
+	}, 10*time.Second, 50*time.Millisecond)
+}
+
+// requireServing requires the gRPC server on addr to answer SERVING to the Check method of the health service of
+// file, in package pkg, once it serves.
+func requireServing(t *testing.T, addr string, file protoreflect.FileDescriptor, pkg string) {
+	t.Helper()
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	msgs := file.Messages()
+	req := dynamicpb.NewMessage(msgs.ByName("HealthCheckRequest"))
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		res := dynamicpb.NewMessage(msgs.ByName("HealthCheckResponse"))
+		if !assert.NoError(c, conn.Invoke(t.Context(), "/"+pkg+".Health/Check", req, res)) {
+			return
+		}
+
+		status := res.Descriptor().Fields().ByName("status")
+		assert.Equal(c, status.Enum().Values().ByName("SERVING").Number(), res.Get(status).Enum())
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
+func TestRun_AGRPCAdminDirOfAWorkingDirectoryThatIsGoneFailsTheRun(t *testing.T) {
+	// A {workdir} admin directory is made absolute from the working directory: without one, the run fails with the
+	// setting's name instead of keeping the mocks somewhere else.
+	withoutDockerHost(t)
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.Remove(dir))
+
+	if _, err := os.Getwd(); err == nil {
+		t.Skip("the OS still names a working directory that is gone, as macOS does")
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var stderr bytes.Buffer
+	code := run(ctx, []string{"--addr", randomAddr(t), "--journal=false", "--log-level", "disabled"}, nil, io.Discard, &stderr)
+
+	require.Equal(t, 1, code, stderr.String())
+	require.Contains(t, stderr.String(), "config: grpc.admin.dir: ")
 }

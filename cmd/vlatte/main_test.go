@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -205,7 +206,7 @@ func TestRun_HelpListsTheCommandsSettings(t *testing.T) {
 	var out bytes.Buffer
 	require.Equal(t, 0, run(context.Background(), []string{"--help"}, nil, &out, io.Discard))
 
-	for _, key := range []string{"admin", "admin.addr", "admin.dir", "admin.docs_version", "grpc.admin", "grpc.admin.addr", "webhook.timeout"} {
+	for _, key := range []string{"admin", "admin.addr", "admin.dir", "admin.docs_version", "grpc.admin", "grpc.admin.addr", "grpc.admin.dir", "webhook.timeout"} {
 		require.Equal(t, 1, strings.Count(out.String(), "file key "+key+"\n"), key)
 	}
 
@@ -304,6 +305,38 @@ func TestRun_UsageErrors(t *testing.T) {
 			args: []string{"--webhook-timeout=-1s"},
 			want: []string{`webhook.timeout must be 0 or more, not "-1s"`},
 		},
+		{
+			// The command line shows to every user of the host: a secret given there is refused, and not repeated.
+			name: "a secret as a flag",
+			args: []string{"--admin-auth-token=s3cret"},
+			want: []string{"admin.auth.token is a secret, which no flag sets", "set it in the environment or a config file"},
+		},
+		{
+			name: "a username without its password",
+			args: []string{"--admin-auth-username=ops"},
+			want: []string{"admin.auth.username is set but admin.auth.password is not"},
+		},
+		{
+			name: "a username with a colon",
+			args: []string{"--admin-auth-username=op:s", "--admin-auth-password-file=" + secretFile(t, "s3cret\n")},
+			want: []string{`admin: basic auth: the username can't contain ":"`},
+		},
+		{
+			// The problem names the setting to fix: the file's password, not the username.
+			name: "a password with a control character",
+			args: []string{"--admin-auth-username=ops", "--admin-auth-password-file=" + secretFile(t, "s3cret\tpassword")},
+			want: []string{"flag --admin-auth-password-file: invalid_value: admin: basic auth: the username and the password can't contain control characters"},
+		},
+		{
+			name: "a token file that isn't there",
+			args: []string{"--admin-auth-token-file=missing-token"},
+			want: []string{"admin.auth.token_file", "no such file or directory"},
+		},
+		{
+			name: "a certificate without its key",
+			args: []string{"--admin-tls-cert=cert.pem"},
+			want: []string{"admin.tls.cert is set but admin.tls.key is not"},
+		},
 	}
 
 	for _, tc := range tests {
@@ -314,8 +347,21 @@ func TestRun_UsageErrors(t *testing.T) {
 			for _, want := range tc.want {
 				require.Contains(t, errOut.String(), want)
 			}
+
+			require.NotContains(t, errOut.String(), "s3cret")
 		})
 	}
+}
+
+func TestRun_ASecretSetTwiceIsAConflict(t *testing.T) {
+	// A secret in the environment and in a file: which one the admin API asks for can't be guessed.
+	withoutDockerHost(t)
+	t.Setenv("VLATTE_ADMIN_AUTH_TOKEN", "s3cret")
+
+	var errOut bytes.Buffer
+	require.Equal(t, 2, run(context.Background(), []string{"--admin-auth-token-file=" + secretFile(t, "s3cret")}, nil, io.Discard, &errOut))
+	require.Contains(t, errOut.String(), "admin.auth.token_file and admin.auth.token are both set, by env VLATTE_ADMIN_AUTH_TOKEN")
+	require.NotContains(t, errOut.String(), "s3cret")
 }
 
 func TestRun_PortInUse(t *testing.T) {
@@ -734,11 +780,11 @@ func TestCLI_AdminSettings(t *testing.T) {
 	})
 
 	t.Run("a docs version", func(t *testing.T) {
-		// A newer Scalar than vlatte pins renders the documentation, at the root of the admin API.
+		// A newer Scalar than vlatte pins renders the documentation, at /docs of the admin API.
 		admin := randomAddr(t)
 		start(t, "--addr", randomAddr(t), "--admin-addr", admin, "--admin-docs-version", "1.80.0", "--log-level", "disabled")
 
-		status, body := firstAnswer(t, "http://"+admin+"/")
+		status, body := firstAnswer(t, "http://"+admin+"/docs")
 		require.Equal(t, http.StatusOK, status)
 		require.Contains(t, body, "@scalar/api-reference@1.80.0/")
 	})
@@ -753,6 +799,55 @@ func TestCLI_AdminSettings(t *testing.T) {
 
 		status, _ := firstAnswer(t, "http://"+admin+"/health")
 		require.Equal(t, http.StatusOK, status)
+	})
+
+	t.Run("credentials", func(t *testing.T) {
+		// Credentials come from the environment and from files, such as Docker secrets, never from flags: every route
+		// needs them then, but the probes.
+		t.Chdir(t.TempDir())
+		t.Setenv("VLATTE_ADMIN_AUTH_USERNAME", "ops")
+		t.Setenv("VLATTE_ADMIN_AUTH_PASSWORD_FILE", secretFile(t, "s3cret\n"))
+		t.Setenv("VLATTE_ADMIN_AUTH_TOKEN", "tok")
+
+		adminURL, _ := startAdmin(t, "--addr", randomAddr(t), "--log-level", "disabled")
+
+		status, _ := firstAnswer(t, adminURL+"/mocks")
+		require.Equal(t, http.StatusUnauthorized, status)
+
+		status, _ = firstAnswer(t, adminURL+"/readyz")
+		require.Equal(t, http.StatusOK, status, "the probes need no credentials")
+
+		for name, set := range map[string]func(r *http.Request){
+			"basic, the file's line break left out": func(r *http.Request) { r.SetBasicAuth("ops", "s3cret") },
+			"bearer":                                func(r *http.Request) { r.Header.Set("Authorization", "Bearer tok") },
+		} {
+			r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, adminURL+"/mocks", nil)
+			require.NoError(t, err)
+			set(r)
+
+			res, err := http.DefaultClient.Do(r)
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, http.StatusOK, res.StatusCode, name)
+		}
+	})
+
+	t.Run("TLS", func(t *testing.T) {
+		// Credentials beyond the local host need TLS: the admin API serves HTTPS with the certificate it is given.
+		t.Chdir(t.TempDir())
+		certFile, keyFile, pool := writeCert(t, t.TempDir())
+
+		adminURL, _ := startAdmin(t, "--addr", randomAddr(t), "--admin-tls-cert", certFile, "--admin-tls-key", keyFile,
+			"--log-level", "disabled")
+		require.True(t, strings.HasPrefix(adminURL, "https://127.0.0.1:"), adminURL)
+
+		client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}}
+		t.Cleanup(client.CloseIdleConnections)
+
+		res, err := client.Get(adminURL + "/health")
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, http.StatusOK, res.StatusCode)
 	})
 
 	t.Run("off", func(t *testing.T) {
@@ -863,6 +958,53 @@ func TestCLI_ProxiesWhatNoMockMatches(t *testing.T) {
 	status, body = firstAnswer(t, "http://"+addr+"/other")
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, "target /other", body, "the recording of what proxy_all answered")
+}
+
+// writeCert writes a self-signed certificate for 127.0.0.1 and its key, as PEM files, into dir, and returns them with
+// a pool that trusts the certificate.
+func writeCert(t *testing.T, dir string) (string, string, *x509.CertPool) {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "vlatte admin"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	require.NoError(t, err)
+
+	cert, err := x509.ParseCertificate(der)
+	require.NoError(t, err)
+
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(key)
+	require.NoError(t, err)
+
+	certFile, keyFile := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
+	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600))
+	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8}), 0o600))
+
+	pool := x509.NewCertPool()
+	pool.AddCert(cert)
+
+	return certFile, keyFile, pool
+}
+
+// secretFile writes secret into a file of its own, as a Docker secret, and returns its path.
+func secretFile(t *testing.T, secret string) string {
+	t.Helper()
+
+	file := filepath.Join(t.TempDir(), "secret")
+	require.NoError(t, os.WriteFile(file, []byte(secret), 0o600))
+
+	return file
 }
 
 // writeCA writes the certificate and the key of a CA, as PEM files, into dir.

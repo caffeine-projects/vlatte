@@ -11,18 +11,20 @@ import (
 	"uuid"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
-	"github.com/caffeine-projects/vlatte/internal/mfeat"
 	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchrepeat"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 var _ vlatte.Builder[*Mock, *Server] = (*Builder)(nil)
 
 var (
+	// ErrNoExpectations is returned by [Builder.Build] for a mock with no request matcher and no [Builder.Times].
 	ErrNoExpectations = errors.New("mock: at least 1 request matcher must be set")
-	ErrNoReplies      = errors.New("mock: no reply set. Use .Reply() or any equivalent to set the expected mock response")
+
+	// ErrNoReplies is returned by [Builder.Build] for a mock with no reply: see [Builder.Reply].
+	ErrNoReplies = errors.New("mock: no reply set. Use .Reply() or any equivalent to set the expected mock response")
 )
 
 // errMockID says what an ID may hold. IDs name mocks in admin API paths, such as /mocks/{id}.
@@ -42,6 +44,7 @@ type Builder struct {
 	scenario              string
 	scenarioNewState      string
 	scenarioRequiredState string
+	scenarioKey           string
 	pathParams            []namedMatcher // set with PathParam; Build makes them matchers, once it knows the template
 	err                   error          // the first error of a method that can't return one, such as FormFile's or ID's
 }
@@ -442,11 +445,12 @@ func (b *Builder) Queries(name string, m vlatte.Matcher) *Builder {
 	return b
 }
 
-// Body adds matchers to the HTTP request body.
-// If the request contains a JSON body, you can provide multiple matchers to several fields.
-// Example:
+// Body adds matchers to the HTTP request body. With more than one, the body must match them all, such as matchers of
+// several fields of a JSON body:
 //
-//	m.Body(JSONPath("name", EqualTo("test")), JSONPath("address.street", ToContains("nowhere")))
+//	m.Body(match.JSONPath("name", match.Equal("test")), match.JSONPath("address.street", match.Contain("nowhere")))
+//
+// It panics when given no matcher.
 func (b *Builder) Body(matcherList ...vlatte.Matcher) *Builder {
 	var m vlatte.Matcher
 	if len(matcherList) == 0 {
@@ -570,8 +574,24 @@ func (b *Builder) ScenarioStateIs(requiredState string) *Builder {
 	return b
 }
 
-// ScenarioStateWillBe defines the state of the scenario after this mock is matched, making the scenario flow continue.
-// It starts the scenario when no mock did yet.
+// ScenarioKey sets the template of the key of the instance of the mock's scenario a request plays in, such as
+// {{ .Request.Header.Get "X-Test-Id" }}: each key is a scenario of its own, starting in started, so tests that run at
+// once with keys of their own don't move each other's. It renders with the request data of reply templates, with
+// .Provided and .Extra empty, as no mock is picked yet. It renders more than once for a request: as the mock matches,
+// as it takes its turn and to journal the move, so a key reads the request only, never .Scenarios, a random value or
+// the time. A key that renders empty plays in the shared instance, the one of mocks without a key. A template that
+// fails to render fails the request's matching. Read a keyed instance with [Server.Scenarios], and move it with
+// [Server.SetScenario] and [matchscenario.Key].
+func (b *Builder) ScenarioKey(tmpl string) *Builder {
+	b.scenarioKey = tmpl
+
+	return b
+}
+
+// ScenarioStateWillBe sets the state the scenario moves to when this mock is picked to answer a request, before it
+// answers: the next request matches in that state. With [Builder.ScenarioStateIs], of two requests in that state, only
+// one gets this mock; without it, the mock matches in every state, so every request gets it. The scenario moves even
+// when the mock then fails to answer, as when its client leaves during its delay.
 func (b *Builder) ScenarioStateWillBe(newState string) *Builder {
 	b.scenarioNewState = newState
 
@@ -733,15 +753,24 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		spec.expectations = append(spec.expectations, &expectation{
 			Target:  int(matchingScopeRepeat),
 			Key:     "times",
-			Matcher: mfeat.Repeat(b.times),
+			Matcher: matchrepeat.Repeat(b.times),
 		})
 	}
 
 	if b.scenario != "" {
-		spec.expectations = append(spec.expectations, &expectation{
-			Target:  int(matchingScopeScenario),
-			Matcher: app.scenarioStore.Matcher(b.scenario, b.scenarioRequiredState, b.scenarioNewState),
-		})
+		sm := app.scenarioStore.Matcher(b.scenario, b.scenarioRequiredState, b.scenarioNewState)
+		e := &expectation{Target: int(matchingScopeScenario), Matcher: sm}
+
+		if b.scenarioKey != "" {
+			e.Selector, err = app.scenarioKey(b.scenarioKey, spec.pathTemplate)
+			if err != nil {
+				return nil, fmt.Errorf("mock: scenario.key: %w", err)
+			}
+
+			sm.KeyedBy(b.scenarioKey)
+		}
+
+		spec.expectations = append(spec.expectations, e)
 	}
 
 	// As prepareGlobalEvents does: the prepared parameters go into the mock's copy, never into the builder.
@@ -768,7 +797,7 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		return nil, err
 	}
 
-	desc, _ := descriptor.IsSelfDescriptive(b.reply)
+	desc, _ := vlatte.IsSelfDescriptive(b.reply)
 
 	return &Mock{spec: spec, reply: reply, replyDesc: desc, closer: owned(b.reply, reply), enabled: b.enabled}, nil
 }

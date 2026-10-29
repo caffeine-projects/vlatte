@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -37,7 +36,7 @@ func (m *trimMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"Trim(", txt, ")"}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *trimMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("trim", describe(m.Matcher))
+// Describe implements vlatte.SelfDescriptive.
+func (m *trimMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("trim", describe(m.Matcher))
 }

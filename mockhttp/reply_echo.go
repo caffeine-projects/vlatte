@@ -5,13 +5,13 @@ import (
 	"errors"
 	"io"
 
-	"github.com/caffeine-projects/vlatte/descriptor"
+	"github.com/caffeine-projects/vlatte"
 )
 
 var (
-	_ ReplierFactory             = (*EchoReply)(nil)
-	_ descriptor.SelfDescriptive = (*EchoReply)(nil)
-	_ Replier                    = (*echoReplier)(nil)
+	_ ReplierFactory         = (*EchoReply)(nil)
+	_ vlatte.SelfDescriptive = (*EchoReply)(nil)
+	_ Replier                = (*echoReplier)(nil)
 )
 
 // errEchoNotDescribed is why a mock with an Echo reply can't be described: mock files have no echo reply.
@@ -28,14 +28,16 @@ func Echo() *EchoReply {
 	return &EchoReply{}
 }
 
+// Log makes the reply also write each request to the server's log output, whatever its log level: see
+// [ConfigBuilder.LogOutput].
 func (e *EchoReply) Log() *EchoReply {
 	e.stdoutLog = true
 	return e
 }
 
-// Describe implements descriptor.SelfDescriptive. Mock files have no echo reply: encoding the description fails.
-func (e *EchoReply) Describe() descriptor.Descriptor {
-	return descriptor.Fail("echo", errEchoNotDescribed)
+// Describe implements vlatte.SelfDescriptive. Mock files have no echo reply: encoding the description fails.
+func (e *EchoReply) Describe() vlatte.Descriptor {
+	return vlatte.DescribeFail("echo", errEchoNotDescribed)
 }
 
 // NewReplier implements ReplierFactory.

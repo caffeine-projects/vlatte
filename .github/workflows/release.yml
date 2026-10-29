@@ -1,0 +1,183 @@
+name: "Release"
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# A release runs to its end: a run of the same tag, pushed again, waits instead of cancelling it halfway through
+# publishing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # The checks of CI, so a tag on a commit that fails them publishes nothing.
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Set up Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: 'go.mod'
+
+    - name: Check go.mod
+      run: go mod tidy -diff
+
+    - name: Check formatting
+      run: |
+        unformatted="$(go tool gofumpt -l .)"
+        if [ -n "$unformatted" ]; then
+          echo "::error::files not formatted with gofumpt (run 'make fmt'):"
+          echo "$unformatted"
+          exit 1
+        fi
+
+    - name: Lint
+      uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+      with:
+        version: v2.14.0 # keep in sync with GOLANGCI_LINT_VERSION in the Makefile
+
+    - name: Test
+      run: make testci
+
+  # The archives, their checksums, SBOMs and signature, the GitHub release as a draft, and the Homebrew cask.
+  goreleaser:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Holds HOMEBREW_TAP_GITHUB_TOKEN, and waits for a reviewer's approval.
+    environment: release
+    permissions:
+      contents: write # creates the release
+      id-token: write # signs with cosign and the provenance attestation, keyless
+      attestations: write
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+        fetch-depth: 0 # the changelog reads the commits since the previous tag
+
+    # The latest Go, not the minimum go.mod requires: the binaries ship with every fix of the standard library.
+    - name: Set up Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: 'stable'
+
+    - name: Install cosign
+      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+    - name: Install syft
+      uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+
+    - name: Release
+      uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+      with:
+        distribution: goreleaser
+        version: v2.18.3 # keep in sync with GORELEASER_VERSION in the Makefile
+        args: release --clean
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+    - name: Attest provenance
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      with:
+        subject-checksums: dist/checksums.txt
+
+  # The image, for every platform the CI builds, with its SBOM, provenance and signature.
+  image:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+      packages: write # pushes to ghcr.io
+      id-token: write # signs with cosign and the provenance attestation, keyless
+      attestations: write
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+        fetch-depth: 0 # the build context's .git must hold the tag for the binary to report it
+
+    - name: Set up Buildx
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+    - name: Log in to ghcr.io
+      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    # The tag with and without its v, such as v0.1.0 and 0.1.0. latest only for a release that is not a prerelease.
+    - name: Image tags
+      id: meta
+      uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+      with:
+        images: ghcr.io/${{ github.repository }}
+        tags: |
+          type=semver,pattern={{raw}}
+          type=semver,pattern={{version}}
+
+    # No build cache from earlier runs: a release builds from the tag alone. The push below reuses this build's
+    # layers.
+    - name: Build for the check
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        load: true
+        tags: vlatte:release
+
+    - name: Check the version
+      env:
+        TAG: ${{ github.ref_name }}
+      run: |
+        version="$(docker run --rm vlatte:release version)"
+        if [ "$version" != "$TAG" ]; then
+          echo "::error::the image reports version $version, not $TAG"
+          exit 1
+        fi
+
+    - name: Build and push
+      id: build
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        build-args: |
+          VERSION=${{ github.ref_name }}
+          REVISION=${{ github.sha }}
+        sbom: true
+        provenance: mode=max
+
+    - name: Install cosign
+      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+    - name: Sign
+      env:
+        IMAGE: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+      run: cosign sign --yes "$IMAGE"
+
+    - name: Attest provenance
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      with:
+        subject-name: ghcr.io/${{ github.repository }}
+        subject-digest: ${{ steps.build.outputs.digest }}
+        push-to-registry: true
+        create-storage-record: false

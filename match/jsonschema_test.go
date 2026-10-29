@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 )
 
 const _petSchema = `{
@@ -110,11 +109,11 @@ func TestJSONSchema_PanicsOnWhatIsntASchema(t *testing.T) {
 }
 
 func TestJSONSchema_Describes(t *testing.T) {
-	data, err := JSONSchema(`{"type": "string"}`).(descriptor.SelfDescriptive).Describe().MarshalJSON()
+	data, err := JSONSchema(`{"type": "string"}`).(vlatte.SelfDescriptive).Describe().MarshalJSON()
 	require.NoError(t, err)
 	require.JSONEq(t, `["jsonSchema", "{\"type\": \"string\"}"]`, string(data))
 
-	data, err = JSONSchema(`{}`, SchemaDraft(JSONSchemaDraft2019)).(descriptor.SelfDescriptive).Describe().MarshalJSON()
+	data, err = JSONSchema(`{}`, SchemaDraft(JSONSchemaDraft2019)).(vlatte.SelfDescriptive).Describe().MarshalJSON()
 	require.NoError(t, err)
 	require.JSONEq(t, `["jsonSchema", "{}", {"draft": "2019-09"}]`, string(data))
 }

@@ -7,6 +7,7 @@ package admin
 import (
 	"cmp"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -65,6 +66,8 @@ var _routes = []struct {
 	{pattern: "GET /scenarios", lacking: "keep scenarios"},
 	{pattern: "PUT /scenarios/{name}", lacking: "keep scenarios"},
 	{pattern: "DELETE /scenarios", lacking: "keep scenarios"},
+	{pattern: "DELETE /scenarios/{name}", lacking: "keep scenarios"},
+	{pattern: "GET /scenario-board"},
 	{pattern: "POST /reset"},
 	{pattern: "GET /events", lacking: "stream its events"},
 	{pattern: "GET /logs", lacking: "stream its logs"},
@@ -72,8 +75,13 @@ var _routes = []struct {
 	{pattern: "QUERY /requests", lacking: "keep a journal of requests"},
 	{pattern: "DELETE /requests", lacking: "keep a journal of requests"},
 	{pattern: "GET /requests/{id}", lacking: "keep a journal of requests"},
+	{pattern: "QUERY /requests/verify", lacking: "keep a journal of requests"},
 	{pattern: "POST /mcp", lacking: "serve MCP"},
 }
+
+// _probes are the Kubernetes probes, which need no credentials: a probe that needs a secret turns a wrong one into a
+// restart loop.
+var _probes = []string{"GET /livez", "GET /readyz", "GET /startupz"}
 
 var _ adminapi.Server = (*Server)(nil)
 
@@ -89,39 +97,41 @@ var _operations = map[string]struct {
 	serve func(ops *handler.Operations) http.Handler
 	can   func(ops *handler.Operations) bool
 }{
-	"GET /health":           {serve: handler.Health},
-	"GET /livez":            {serve: handler.Live},
-	"GET /readyz":           {serve: handler.Ready},
-	"GET /startupz":         {serve: handler.Started},
-	"GET /schema":           {serve: handler.MockSchema, can: (*handler.Operations).HasMockSchema},
-	"GET /mocks":            {serve: handler.ListMocks},
-	"POST /mocks":           {serve: handler.AddMock, can: (*handler.Operations).Builds},
-	"DELETE /mocks":         {serve: handler.RemoveAllMocks},
-	"POST /mocks/validate":  {serve: handler.ValidateMock, can: (*handler.Operations).Builds},
-	"POST /mocks/reload":    {serve: handler.ReloadMocks, can: (*handler.Operations).HasFiles},
-	"POST /mocks/save":      {serve: handler.SaveMocks, can: (*handler.Operations).HasFiles},
-	"GET /mocks/{id}":       {serve: handler.GetMock},
-	"PUT /mocks/{id}":       {serve: handler.ReplaceMock, can: (*handler.Operations).Builds},
-	"PATCH /mocks/{id}":     {serve: handler.UpdateMock},
-	"DELETE /mocks/{id}":    {serve: handler.RemoveMock},
-	"GET /recording":        {serve: handler.RecordingStatus, can: (*handler.Operations).Records},
-	"POST /recording":       {serve: handler.StartRecording, can: (*handler.Operations).Records},
-	"DELETE /recording":     {serve: handler.StopRecording, can: (*handler.Operations).Records},
-	"GET /scenarios":        {serve: handler.ListScenarios, can: (*handler.Operations).HasScenarios},
-	"PUT /scenarios/{name}": {serve: handler.SetScenario, can: (*handler.Operations).HasScenarios},
-	"DELETE /scenarios":     {serve: handler.ResetScenarios, can: (*handler.Operations).HasScenarios},
-	"POST /reset":           {serve: handler.Reset},
-	"GET /requests":         {serve: handler.ListRequests, can: (*handler.Operations).HasJournal},
-	"QUERY /requests":       {serve: handler.QueryRequests, can: (*handler.Operations).HasJournal},
-	"DELETE /requests":      {serve: handler.ClearRequests, can: (*handler.Operations).HasJournal},
-	"GET /requests/{id}":    {serve: handler.GetRequest, can: (*handler.Operations).HasJournal},
+	"GET /health":              {serve: handler.Health},
+	"GET /schema":              {serve: handler.MockSchema, can: (*handler.Operations).HasMockSchema},
+	"GET /mocks":               {serve: handler.ListMocks},
+	"POST /mocks":              {serve: handler.AddMock, can: (*handler.Operations).Builds},
+	"DELETE /mocks":            {serve: handler.RemoveAllMocks},
+	"POST /mocks/validate":     {serve: handler.ValidateMock, can: (*handler.Operations).Builds},
+	"POST /mocks/reload":       {serve: handler.ReloadMocks, can: (*handler.Operations).HasFiles},
+	"POST /mocks/save":         {serve: handler.SaveMocks, can: (*handler.Operations).HasFiles},
+	"GET /mocks/{id}":          {serve: handler.GetMock},
+	"PUT /mocks/{id}":          {serve: handler.ReplaceMock, can: (*handler.Operations).Builds},
+	"PATCH /mocks/{id}":        {serve: handler.UpdateMock},
+	"DELETE /mocks/{id}":       {serve: handler.RemoveMock},
+	"GET /recording":           {serve: handler.RecordingStatus, can: (*handler.Operations).Records},
+	"POST /recording":          {serve: handler.StartRecording, can: (*handler.Operations).Records},
+	"DELETE /recording":        {serve: handler.StopRecording, can: (*handler.Operations).Records},
+	"GET /scenarios":           {serve: handler.ListScenarios, can: (*handler.Operations).HasScenarios},
+	"PUT /scenarios/{name}":    {serve: handler.SetScenario, can: (*handler.Operations).HasScenarios},
+	"DELETE /scenarios":        {serve: handler.ResetScenarios, can: (*handler.Operations).HasScenarios},
+	"DELETE /scenarios/{name}": {serve: handler.ResetScenario, can: (*handler.Operations).HasScenarios},
+	"POST /reset":              {serve: handler.Reset},
+	"GET /requests":            {serve: handler.ListRequests, can: (*handler.Operations).HasJournal},
+	"QUERY /requests":          {serve: handler.QueryRequests, can: (*handler.Operations).HasJournal},
+	"DELETE /requests":         {serve: handler.ClearRequests, can: (*handler.Operations).HasJournal},
+	"GET /requests/{id}":       {serve: handler.GetRequest, can: (*handler.Operations).HasJournal},
+	"QUERY /requests/verify":   {serve: handler.VerifyRequests, can: (*handler.Operations).HasJournal},
 }
 
 // Server is the admin API of a mock server.
 type Server struct {
 	addr    string
+	tls     *tls.Config // nil serves plain HTTP
+	auth    bool        // whether requests need credentials
 	logger  *zerolog.Logger
 	streams []func() // end the streams of Server-Sent Events routes
+	ops     *handler.Operations
 	handler http.Handler
 	mcp     *mcp.Server // nil when MCP is off
 
@@ -148,6 +158,13 @@ type Options struct {
 
 	// DocsVersion is the version of Scalar the docs page loads. Empty is the version vlatte pins.
 	DocsVersion string
+
+	// Auth are the credentials every HTTP request needs, but those of the probes. The zero value asks for none. They
+	// are checked after the middlewares, so one can answer a CORS preflight, which carries none.
+	Auth handler.Credentials
+
+	// TLS serves the admin API over HTTPS with its certificates. Nil serves plain HTTP.
+	TLS *tls.Config
 }
 
 // New creates the admin API of the mock server of caps, which needs its Mocks.
@@ -161,19 +178,23 @@ func New(opts Options, caps adminapi.Capabilities) (*Server, error) {
 		caps.Journal = nil
 	}
 
-	s := &Server{addr: opts.Addr, logger: caps.Logger}
+	s := &Server{addr: opts.Addr, tls: opts.TLS, auth: opts.Auth.Required(), logger: caps.Logger}
 	if s.logger == nil {
 		s.logger = new(zerolog.Nop())
 	}
 
 	ops := handler.NewOperations(caps)
+	s.ops = ops
 
-	docs := handler.Docs(opts.DocsVersion)
 	routes := map[string]http.Handler{
-		"GET /{$}":      docs,
-		"GET /docs":     docs,
-		"GET /openapi":  handler.OpenAPI(),
-		"GET /recorder": handler.RecorderPage(),
+		"GET /{$}":            handler.Home(),
+		"GET /docs":           handler.Docs(opts.DocsVersion),
+		"GET /openapi":        handler.OpenAPI(),
+		"GET /recorder":       handler.RecorderPage(),
+		"GET /scenario-board": handler.ScenarioBoardPage(),
+		"GET /livez":          handler.Live(ops, s.auth),
+		"GET /readyz":         handler.Ready(ops, s.auth),
+		"GET /startupz":       handler.Started(ops, s.auth),
 	}
 
 	if caps.Events != nil {
@@ -211,6 +232,10 @@ func New(opts Options, caps adminapi.Capabilities) (*Server, error) {
 	csrf := http.NewCrossOriginProtection()
 	csrf.SetDenyHandler(handler.CrossOriginDenied())
 	h := csrf.Handler(handler.Routing(mux))
+	if s.auth {
+		h = handler.Authenticate(opts.Auth, _probes, h)
+	}
+
 	for _, middleware := range slices.Backward(opts.Middlewares) {
 		h = middleware(h)
 	}
@@ -260,12 +285,24 @@ func (s *Server) Start() error {
 	srv := &http.Server{Handler: s.handler, ReadHeaderTimeout: _readHeaderTimeout}
 	served := make(chan struct{})
 
+	if s.tls != nil {
+		srv.TLSConfig = s.tls.Clone()
+	}
+
 	s.srv, s.lis, s.served = srv, lis, served
+	s.warnExposed()
 
 	go func() {
 		defer close(served)
 
-		if err := srv.Serve(lis); !errors.Is(err, http.ErrServerClosed) {
+		var err error
+		if srv.TLSConfig != nil {
+			err = srv.ServeTLS(lis, "", "")
+		} else {
+			err = srv.Serve(lis)
+		}
+
+		if !errors.Is(err, http.ErrServerClosed) {
 			s.logger.Error().Err(err).Msg("admin: serving")
 		}
 	}()
@@ -282,6 +319,10 @@ func (s *Server) URL() string {
 		return ""
 	}
 
+	if s.tls != nil {
+		return "https://" + s.lis.Addr().String()
+	}
+
 	return "http://" + s.lis.Addr().String()
 }
 
@@ -293,6 +334,9 @@ func (s *Server) Close() error {
 	s.closed = true
 	srv, served := s.srv, s.served
 	s.mu.Unlock()
+
+	// An operation that waits, such as a check of the journal, never holds up Close.
+	s.ops.EndWaits()
 
 	if srv == nil {
 		// A server that never started may still serve MCP calls over stdio.
@@ -328,6 +372,24 @@ func (s *Server) ServeMCP(ctx context.Context, in io.Reader, out io.Writer) erro
 	}
 
 	return handler.ServeMCP(ctx, s.mcp, in, out)
+}
+
+// warnExposed warns when the admin API listens beyond the local host without authentication, or sends credentials
+// in plain text there: anyone on the network could change the mocks, or read the credentials.
+func (s *Server) warnExposed() {
+	addr, ok := s.lis.Addr().(*net.TCPAddr)
+	if !ok || addr.IP.IsLoopback() {
+		return
+	}
+
+	switch {
+	case !s.auth:
+		s.logger.Warn().Str("addr", addr.String()).
+			Msg("admin: the admin API listens beyond the local host without authentication: anyone who reaches it can change the mocks")
+	case s.tls == nil:
+		s.logger.Warn().Str("addr", addr.String()).
+			Msg("admin: the admin API listens beyond the local host over plain HTTP: anyone on the network can read its credentials")
+	}
 }
 
 // trackMCP counts the MCP calls next handles, whichever transport they come on, so Close waits for them, and gives

@@ -13,7 +13,6 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/admin"
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
-	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 // plainMock is a mock that can't describe itself, as gRPC mocks can't.
@@ -106,7 +105,7 @@ func TestProblems_NotAcceptableIsJSON(t *testing.T) {
 func TestProblems_UnsupportedMediaTypeSaysWhatIs(t *testing.T) {
 	// Every route that reads a body reads JSON or YAML only. RFC 9110: a 415 can list the media types the server takes.
 	files := &fakeFiles{}
-	url := serve(t, newStore(t, newFake("hello")), adminapi.Capabilities{Files: files, Recorder: &fakeRecorder{}, Scenarios: matchscenario.New(), Journal: journalOf(t)})
+	url := serve(t, newStore(t, newFake("hello")), adminapi.Capabilities{Files: files, Recorder: &fakeRecorder{}, Scenarios: newScenarios(), Journal: journalOf(t)})
 
 	for _, route := range []string{
 		"POST /mocks", "POST /mocks/validate", "PUT /mocks/hello", "PATCH /mocks/hello", "POST /mocks/save",

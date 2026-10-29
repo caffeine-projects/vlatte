@@ -54,6 +54,29 @@ func TestServer_AnUnknownMethodIsUnimplemented(t *testing.T) {
 	require.Equal(t, []string{vlatte.FailureNoMatch}, trailer.Get(vlatte.HeaderFailure))
 }
 
+func TestServer_AScenarioMovesBeforeItsMockAnswers(t *testing.T) {
+	// A client that gets the answer and calls again at once must match in the new state: a call sent while the mock
+	// still answers already does.
+	m := serve(t)
+	c := client(t, m)
+
+	during := make(chan string, 1)
+	m.MustMock(
+		Method("Greetings").StartScenario("checkout").ScenarioStateWillBe("paid").
+			Reply(funcUnaryReply(func() (any, error) {
+				got, _ := greetWith(t, c, "")
+				during <- got
+				return &pb.HiRes{Message: "pay"}, nil
+			})),
+		Method("Greetings").ScenarioIs("checkout").ScenarioStateIs("paid").Reply(Message(&pb.HiRes{Message: "receipt"})),
+	)
+
+	got, code := greetWith(t, c, "")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "pay", got)
+	require.Equal(t, "receipt", <-during, "the receipt of paid answered while pay still answered")
+}
+
 // streamHeader opens the List stream, reads it whole, and returns its header.
 func streamHeader(t *testing.T, c pb.TestServiceClient) metadata.MD {
 	stream, err := c.List(t.Context(), &pb.ListReq{})
@@ -213,6 +236,10 @@ func (failingStore) List(context.Context) (iter.Seq[*Mock], error) {
 	return nil, errors.New("store down")
 }
 
+func (failingStore) PickAll(context.Context) ([]*Mock, error) {
+	return nil, errors.New("store down")
+}
+
 // requireMatchFailure asserts err and trailer are the answer to a call the server failed to find a mock for.
 func requireMatchFailure(t *testing.T, err error, trailer metadata.MD, msg ...string) {
 	t.Helper()
@@ -262,4 +289,52 @@ func TestFailures_FindingAMock(t *testing.T) {
 		_, err = s.Recv()
 		requireMatchFailure(t, err, s.Trailer(), "store down")
 	})
+}
+
+func TestFailures_AContextThatEndsBeforeAMockIsFoundEndsWithItsCode(t *testing.T) {
+	// A call whose context ends before a mock is found, such as one whose deadline runs out as the server reads it,
+	// ends with the code of its context, as one that ends during the delay does: nothing failed to match.
+	for name, tt := range map[string]struct {
+		end  func(context.Context) (context.Context, context.CancelFunc)
+		want codes.Code
+	}{
+		"canceled": {
+			end: func(ctx context.Context) (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(ctx)
+				cancel()
+				return ctx, cancel
+			},
+			want: codes.Canceled,
+		},
+		"past its deadline": {
+			end: func(ctx context.Context) (context.Context, context.CancelFunc) {
+				return context.WithDeadline(ctx, time.Now().Add(-time.Second))
+			},
+			want: codes.DeadlineExceeded,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ended := func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+				ctx, cancel := tt.end(ctx)
+				defer cancel()
+
+				return next(ctx, req)
+			}
+
+			m := MustNew(Setup().Silent().
+				Service(&pb.TestService_ServiceDesc, &pb.UnimplementedTestServiceServer{}).
+				ServerOptions(grpc.ChainUnaryInterceptor(ended)))
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			scope := m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "hello"})))
+
+			var trailer metadata.MD
+			_, err := client(t, m).Greetings(context.Background(), &pb.HiReq{Message: "hi"}, grpc.Trailer(&trailer))
+
+			require.Equal(t, tt.want, status.Code(err))
+			require.Empty(t, trailer.Get(_failureKey))
+			require.Zero(t, scope.Hits())
+		})
+	}
 }

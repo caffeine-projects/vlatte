@@ -281,6 +281,37 @@ func loadJSONSchema(t *testing.T) (*jsonschema.Schema, map[string]any) {
 	return schema, raw
 }
 
+func TestJSONSchema_IDIsTheAddressTheDocsServe(t *testing.T) {
+	// Mock files and editors name the schema by its $id: the address the docs site serves it at, which
+	// docs/scripts/prepare.mjs copies it to. A schema whose $id names another address points them at nothing.
+	_, raw := loadJSONSchema(t)
+
+	require.Equal(t, "https://caffeine-projects.github.io/vlatte/schemas/grpc.schema.json", raw["$id"])
+}
+
+func TestJSONSchema_JSONMockFilesNameItInTheirSchemaKey(t *testing.T) {
+	// A JSON mock file names its schema for editors in $schema, as a YAML one does in a comment: the schema must
+	// accept the key, and the decoder must load the file as if the key weren't there.
+	schema, _ := loadJSONSchema(t)
+	doc := `{
+		"$schema": "https://caffeine-projects.github.io/vlatte/schemas/grpc.schema.json",
+		"request": {"method": "Greetings"},
+		"response": {"message": {"message": "hello"}}
+	}`
+
+	v, err := jsonschema.UnmarshalJSON(bytes.NewReader([]byte(doc)))
+	require.NoError(t, err)
+	require.NoError(t, schema.Validate(v))
+
+	m := fileServer(t, Setup())
+	_, err = m.Mock(FromBytes([]byte(doc), "json"))
+	require.NoError(t, err)
+
+	res, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{Message: "hi"})
+	require.NoError(t, err)
+	require.Equal(t, "hello", res.GetMessage())
+}
+
 func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 	// Every key the decoder reads is documented for editors, and nothing else is.
 	_, raw := loadJSONSchema(t)
@@ -312,7 +343,9 @@ func TestJSONSchema_KeysMatchTheTables(t *testing.T) {
 	bidi := props(raw)["bidi"]
 	rule := props(props(bidi)["on"].(map[string]any)["items"])
 
-	require.Equal(t, _mockSchema.Keys(), keys(raw, "scenario", "request"), "mock")
+	// $schema is for editors: the decoder skips it.
+	mockKeys := slices.DeleteFunc(keys(raw, "scenario", "request"), func(k string) bool { return k == "$schema" })
+	require.Equal(t, _mockSchema.Keys(), mockKeys, "mock")
 	require.Equal(t, _replySchema.Keys(), keys(defs["reply"]), "reply")
 	require.Equal(t, _statusSchema.Keys(), keys(defs["status"]), "status")
 	require.Equal(t, _sequenceSchema.Keys(), keys(props(raw)["response_sequence"]), "response_sequence")

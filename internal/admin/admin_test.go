@@ -1,11 +1,14 @@
 package admin
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +16,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -20,14 +24,11 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/admin/handler"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/journal"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(
-		m,
-		goleak.IgnoreTopFunction("net/http.(*persistConn).readLoop"),
-		goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),
-	)
+	goleak.VerifyTestMain(m)
 }
 
 // stubMock is the least a store needs.
@@ -190,6 +191,49 @@ func TestServer_CloseWaitsForTheOperationsItServes(t *testing.T) {
 	close(files.release)
 	<-closed
 	require.Equal(t, http.StatusNoContent, <-reloaded, "the reload ended")
+}
+
+func TestServer_CloseEndsTheChecksThatWait(t *testing.T) {
+	// A check of the journal waits up to 30s for a request that may never come: Close ends it rather than wait for it,
+	// or give up on it, and its client learns why.
+	j, err := journal.New(journal.Options{Dir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { j.Close() })
+
+	entered := make(chan struct{})
+	signal := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(entered)
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	s := newServer(t, Options{Middlewares: []func(http.Handler) http.Handler{signal}}, adminapi.Capabilities{Journal: j})
+	require.NoError(t, s.Start())
+
+	verified := make(chan int, 1)
+	go func() {
+		r, err := http.NewRequestWithContext(context.Background(), "QUERY", s.URL()+"/requests/verify", strings.NewReader(`{"within": "30s"}`))
+		if err != nil {
+			verified <- 0
+			return
+		}
+
+		r.Header.Set("Content-Type", "application/json")
+
+		res, err := http.DefaultClient.Do(r)
+		if err != nil {
+			verified <- 0
+			return
+		}
+
+		_ = res.Body.Close()
+		verified <- res.StatusCode
+	}()
+
+	<-entered
+	require.NoError(t, s.Close(), "the check ended before Close gave up on it")
+	require.Equal(t, http.StatusServiceUnavailable, <-verified)
 }
 
 func TestNew_NeedsTheMocks(t *testing.T) {
@@ -431,4 +475,124 @@ func TestServer_StartsNoMCPCallOnceClosing(t *testing.T) {
 
 	_, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "remove_all_mocks"})
 	require.ErrorContains(t, err, "admin: the admin API is closing")
+}
+
+func TestServer_EveryRouteNeedsCredentials(t *testing.T) {
+	// Every route, the pages, the streams and MCP included, needs credentials once they are set, but the probes: a
+	// route added later is covered without a test of its own.
+	s := newServer(t, Options{MCP: true, Auth: handler.Credentials{Token: "tok"}}, adminapi.Capabilities{
+		Events: adminapi.NewEvents(), Logs: adminapi.NewLogs(),
+	})
+	require.NoError(t, s.Start())
+	t.Cleanup(func() { _ = s.Close() })
+
+	// A connection each: a 401 can close one, and a dial that loses its race to another sits unused, which Close
+	// waits for.
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	checked := 0
+
+	for _, route := range _routes {
+		if slices.Contains(_probes, route.pattern) {
+			continue
+		}
+
+		method, path, _ := strings.Cut(strings.TrimSuffix(route.pattern, "{$}"), " ")
+		path = strings.NewReplacer("{id}", "x", "{name}", "x").Replace(path)
+
+		r, err := http.NewRequestWithContext(t.Context(), method, s.URL()+path, nil)
+		require.NoError(t, err)
+
+		res, err := client.Do(r)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, http.StatusUnauthorized, res.StatusCode, route.pattern)
+
+		checked++
+	}
+
+	require.Equal(t, len(_routes)-len(_probes), checked)
+}
+
+func TestServer_MiddlewaresRunBeforeTheCredentialsCheck(t *testing.T) {
+	// A browser's CORS preflight carries no credentials: a middleware that answers it must see it first.
+	preflight := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	s := newServer(t, Options{Middlewares: []func(http.Handler) http.Handler{preflight}, Auth: handler.Credentials{Token: "tok"}}, adminapi.Capabilities{})
+	require.NoError(t, s.Start())
+	t.Cleanup(func() { _ = s.Close() })
+
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodOptions, s.URL()+"/mocks", nil)
+	require.NoError(t, err)
+
+	res, err := http.DefaultClient.Do(r)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusNoContent, res.StatusCode)
+}
+
+func TestServer_ServesHTTPSWithTLS(t *testing.T) {
+	// Credentials over plain HTTP are readable on the network: with TLS, the admin API serves HTTPS, and its URL says so.
+	cert := httptest.NewTLSServer(http.NotFoundHandler())
+	t.Cleanup(cert.Close)
+
+	s := newServer(t, Options{TLS: &tls.Config{Certificates: cert.TLS.Certificates}}, adminapi.Capabilities{})
+	require.NoError(t, s.Start())
+	t.Cleanup(func() { _ = s.Close() })
+
+	require.True(t, strings.HasPrefix(s.URL(), "https://"), s.URL())
+
+	// The test server's client trusts its certificate, which the admin API serves.
+	res, err := cert.Client().Get(s.URL() + "/health")
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+	require.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func TestServer_WarnsWhenExposedBeyondTheLocalHost(t *testing.T) {
+	// Beyond the local host, anyone on the network reaches the admin API: it warns when nothing keeps them out, or
+	// when the credentials that do travel in plain text. On the local host, it says nothing.
+	cert := httptest.NewTLSServer(http.NotFoundHandler())
+	t.Cleanup(cert.Close)
+
+	tests := []struct {
+		name string
+		opts Options
+		warn string
+	}{
+		{name: "no auth", opts: Options{Addr: "0.0.0.0:0"}, warn: "without authentication"},
+		{name: "auth over HTTP", opts: Options{Addr: "0.0.0.0:0", Auth: handler.Credentials{Token: "tok"}}, warn: "over plain HTTP"},
+		{
+			name: "auth over HTTPS",
+			opts: Options{Addr: "0.0.0.0:0", Auth: handler.Credentials{Token: "tok"}, TLS: &tls.Config{Certificates: cert.TLS.Certificates}},
+		},
+		{name: "local host", opts: Options{Addr: "127.0.0.1:0"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			logger := zerolog.New(&logs)
+
+			s := newServer(t, tc.opts, adminapi.Capabilities{Logger: &logger})
+			require.NoError(t, s.Start())
+			require.NoError(t, s.Close())
+
+			if tc.warn == "" {
+				require.Empty(t, logs.String())
+				return
+			}
+
+			require.Contains(t, logs.String(), `"level":"warn"`)
+			require.Contains(t, logs.String(), tc.warn)
+		})
+	}
 }

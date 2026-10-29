@@ -274,9 +274,9 @@ func checkRecordTarget(target string) error {
 	}
 }
 
-// dir returns the directory of the recordings of the server c configures: Dir, as c.path reads it.
+// dir returns the directory of the recordings of the server c configures: Dir, as c.Path reads it.
 func (r *RecordConfig) dir(c *Config) string {
-	return c.path(r.Dir)
+	return c.Path(r.Dir)
 }
 
 // recordedMockFiles returns the glob patterns of the mock files a recording writes into dir.

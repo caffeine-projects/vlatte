@@ -17,7 +17,6 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/match"
-	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -337,7 +336,8 @@ func TestBuilder_AFailingCallbackDoesntChangeTheAnswer(t *testing.T) {
 
 // scenarioServer runs the scenario suite on a server whose mocks are built in Go, or from mock files.
 type scenarioServer struct {
-	m         *Server
+	*Server
+
 	c         pb.TestServiceClient
 	fromFiles bool
 }
@@ -348,28 +348,40 @@ func newScenarioServer(fromFiles bool) func(t *testing.T) scenariotest.Server {
 	return func(t *testing.T) scenariotest.Server {
 		m := serve(t)
 
-		return &scenarioServer{m: m, c: client(t, m), fromFiles: fromFiles}
+		return &scenarioServer{Server: m, c: client(t, m), fromFiles: fromFiles}
 	}
 }
 
+// _scenarioKey is the scenario key of the keyed mocks of a scenarioServer: the message CallWithKey sends, which a
+// call without one leaves out.
+const _scenarioKey = `{{ with index .Request.Message "message" }}{{ . }}{{ end }}`
+
 func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 	for _, mk := range mocks {
+		var key string
+		if mk.Keyed {
+			key = _scenarioKey
+		}
+
 		if s.fromFiles {
 			doc, err := json.Marshal(map[string]any{
+				"id":      mk.ID,
+				"enabled": !mk.Disabled,
 				"scenario": map[string]string{
-					"name": mk.Scenario, "required_state": mk.RequiredState, "new_state": mk.NewState,
+					"name": mk.Scenario, "required_state": mk.RequiredState, "new_state": mk.NewState, "key": key,
 				},
 				"request":  map[string]string{"method": "Greetings"},
 				"response": map[string]any{"message": map[string]string{"message": mk.ID}},
 			})
 			require.NoError(t, err)
 
-			s.m.MustMock(FromBytes(doc, "json"))
+			s.MustMock(FromBytes(doc, "json"))
 
 			continue
 		}
 
-		b := Method("Greetings").ScenarioIs(mk.Scenario).Reply(Message(&pb.HiRes{Message: mk.ID}))
+		b := Method("Greetings").ID(mk.ID).Enabled(!mk.Disabled).ScenarioIs(mk.Scenario).
+			Reply(Message(&pb.HiRes{Message: mk.ID}))
 		if mk.RequiredState != "" {
 			b.ScenarioStateIs(mk.RequiredState)
 		}
@@ -378,12 +390,20 @@ func (s *scenarioServer) Mock(t *testing.T, mocks ...scenariotest.Mock) {
 			b.ScenarioStateWillBe(mk.NewState)
 		}
 
-		s.m.MustMock(b)
+		if key != "" {
+			b.ScenarioKey(key)
+		}
+
+		s.MustMock(b)
 	}
 }
 
 func (s *scenarioServer) Call(t *testing.T) string {
-	got, code := greetWith(t, s.c, "")
+	return s.CallWithKey(t, "")
+}
+
+func (s *scenarioServer) CallWithKey(t *testing.T, key string) string {
+	got, code := greetWith(t, s.c, key)
 
 	switch code {
 	case codes.OK:
@@ -395,8 +415,6 @@ func (s *scenarioServer) Call(t *testing.T) string {
 		return ""
 	}
 }
-
-func (s *scenarioServer) Store() *matchscenario.Store { return s.m.scenarios }
 
 func TestBuilder_ServesScenarios(t *testing.T) {
 	scenariotest.Run(t, newScenarioServer(false))

@@ -20,6 +20,9 @@ const (
 	EventWarning = "warning"
 	// EventError is a request that failed.
 	EventError = "error"
+	// EventScenario is a move of a scenario: by the mock a request picked, or by the server's SetScenario,
+	// ResetScenario or ResetScenarios, which the admin API calls. Target names the scenario, in any case.
+	EventScenario = "scenario"
 )
 
 // Event is something that happened on a mock server, as GET /events streams it.

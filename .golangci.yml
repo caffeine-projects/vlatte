@@ -55,7 +55,6 @@ linters:
               desc: only the admin API serves MCP, so basic usage links no MCP SDK
         templates:
           files:
-            - "!**/go_template*.go"
             - "!**/internal/tmplfunc/**"
           deny:
             - pkg: text/template
@@ -123,6 +122,11 @@ linters:
       - path: _test\.go
         linters:
           - forcetypeassert
+      # vlatte's Go engine is the one place that compiles with text/template.
+      - path: ^template\.go$
+        linters:
+          - depguard
+        text: text/template
     paths:
       - third_party$
       - builtin$

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/descriptor"
 	"github.com/caffeine-projects/vlatte/internal/value"
 	"github.com/caffeine-projects/vlatte/match/internal/anyconv"
 )
@@ -29,9 +28,9 @@ func (m *containsMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	return mismatch(strings.Join([]string{"Contain(", anyconv.Stringify(m.Expected), ") Got: ", anyconv.Stringify(v)}, ""))
 }
 
-// Describe implements descriptor.SelfDescriptive.
-func (m *containsMatcher) Describe() descriptor.Descriptor {
-	return descriptor.SingleArg("contains", m.Expected)
+// Describe implements vlatte.SelfDescriptive.
+func (m *containsMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeSingleArg("contains", m.Expected)
 }
 
 func (m *containsMatcher) holds(v any) bool {
