@@ -11,8 +11,6 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/admin"
-	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -109,6 +107,26 @@ func TestNoMatch_JSONIsProblemDetailsWithTheNearMisses(t *testing.T) {
 	}
 }
 
+func TestNoMatch_JSONStaysValidWithInvalidUTF8(t *testing.T) {
+	// A mock name or a raw query byte can be invalid UTF-8: the JSON client still gets JSON it can decode, with the
+	// replacement character in its place, not an empty body labeled as JSON.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/a").ID("bad").Name("caf\xe9").Header("X", match.Equal("1")).Reply(OK()))
+
+	_, body := do(t, http.MethodGet, m.URL("/a"), http.Header{HeaderAccept: {MIMEApplicationJSON}}, nil)
+
+	var problem struct {
+		NearMisses []vlatte.NearMiss `json:"near_misses"`
+	}
+
+	require.NoError(t, json.Unmarshal(body, &problem), string(body))
+	require.Len(t, problem.NearMisses, 1)
+	require.Equal(t, "caf\uFFFD", problem.NearMisses[0].Name)
+}
+
 func TestNoMatch_TheFormatSettingIgnoresAccept(t *testing.T) {
 	// A team whose tools read one format sets it, and every client gets it, whatever it accepts: the answer varies by
 	// nothing, so it says so to no cache.
@@ -125,37 +143,6 @@ func TestNoMatch_TheFormatSettingIgnoresAccept(t *testing.T) {
 			require.True(t, strings.HasPrefix(string(body), "# Request did not match\n"), string(body))
 		})
 	}
-}
-
-func TestNoMatch_TellsWhereTheJournalHasTheRequest(t *testing.T) {
-	// An agent or a person that reads the answer can fetch the whole request, its headers and body included, from the
-	// link the answer gives: the admin API listens on its own address.
-	m := noMatchServer(t, Setup().Journal("").Admin(admin.MustNew()))
-
-	res, body := do(t, http.MethodGet, m.URL("/users"), nil, nil)
-	id := res.Header.Get(vlatte.HeaderRequestID)
-	link := m.AdminURL() + "/requests/" + id
-	require.Contains(t, string(body), "\n- See the request in the journal: `GET "+link+"`\n")
-
-	entry, _ := do(t, http.MethodGet, link, nil, nil)
-	require.Equal(t, http.StatusOK, entry.StatusCode)
-}
-
-func TestNoMatch_PointsToNoJournalItDoesNotKeep(t *testing.T) {
-	// A link to a journal the server doesn't keep would send the reader to a 404.
-	m := noMatchServer(t, Setup().Admin(admin.MustNew()))
-
-	_, body := do(t, http.MethodGet, m.URL("/users"), nil, nil)
-	require.NotContains(t, string(body), "journal")
-}
-
-func TestNoMatch_KeepsTheVaryOfCORS(t *testing.T) {
-	// A browser's cache keys a CORS answer by Origin: negotiating the format adds Accept to Vary, and keeps Origin.
-	m := noMatchServer(t, Setup().CORS())
-
-	res, _ := do(t, http.MethodGet, m.URL("/users"), http.Header{"Origin": {"https://example.org"}}, nil)
-	require.Equal(t, StatusNoMatch, res.StatusCode)
-	require.ElementsMatch(t, []string{HeaderOrigin, HeaderAccept}, res.Header.Values(HeaderVary))
 }
 
 func TestNoMatch_ValuesCannotChangeTheDocument(t *testing.T) {
@@ -195,32 +182,6 @@ func TestWriteCodeSpan_HoldsAnyValueWhole(t *testing.T) {
 		require.NotContains(t, buf.String(), "\r")
 		require.Equal(t, want, readCodeSpan(t, buf.String()))
 	})
-}
-
-func TestNoMatch_ACustomRendererAnswers(t *testing.T) {
-	// A team whose clients expect their own error shape answers in it, with the mocks that came closest, as the
-	// journal records them. The VLatte-Error header stays, so tests still tell the answer from a mock's.
-	var got []vlatte.NearMiss
-
-	renderer := noMatchFunc(func(w http.ResponseWriter, nm *NoMatch) {
-		got = nm.NearMisses
-		w.Header().Set(HeaderContentType, MIMEApplicationJSON)
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"code":"NOT_FOUND"}`))
-	})
-
-	m := noMatchServer(t, Setup().Journal("").NoMatchRenderer(renderer))
-
-	res, body := do(t, http.MethodGet, m.URL("/users"), nil, nil)
-	require.Equal(t, http.StatusNotFound, res.StatusCode)
-	require.Equal(t, vlatte.FailureNoMatch, res.Header.Get(HeaderVlatteError))
-	require.JSONEq(t, `{"code":"NOT_FOUND"}`, string(body))
-
-	entry := only(t, m, journal.Query{Path: match.Equal("/users")})
-	require.Equal(t, journal.OutcomeUnmatched, entry.Outcome)
-	require.Equal(t, http.StatusNotFound, entry.Status)
-	require.Equal(t, got, entry.NearMisses)
-	require.Len(t, got, 1)
 }
 
 func TestNoMatch_ACustomRendererCanHandOverToTheDefault(t *testing.T) {

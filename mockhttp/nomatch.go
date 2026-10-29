@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -336,9 +337,10 @@ func writeNoMatchJSON(buf *bytes.Buffer, nm *NoMatch) {
 		p.Extension("near_misses", nm.NearMisses)
 	}
 
-	// Neither fails: no extension is named after a standard member, every value encodes, and a buffer takes all.
+	// Neither fails: no extension is named after a standard member, every value encodes, and a buffer takes all. A
+	// name or a URL that isn't UTF-8 gets the replacement character where it isn't.
 	members, _ := p.members()
-	_ = json.MarshalWrite(buf, members, json.Deterministic(true))
+	_ = json.MarshalWrite(buf, members, json.Deterministic(true), jsontext.AllowInvalidUTF8(true))
 }
 
 // cloneNearMisses returns a copy of misses that shares nothing with it.
