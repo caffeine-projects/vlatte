@@ -54,6 +54,8 @@ func TestNoMatch_AnswersInTheFormatAcceptPrefers(t *testing.T) {
 		{accept: "application/vnd.api+json", want: MIMEApplicationJSON},
 		{accept: "application/vnd.api+json;q=0.5, text/plain", want: MIMETextPlainCharsetUTF8},
 		{accept: "application/json;q=0, application/vnd.api+json", want: MIMETextPlainCharsetUTF8},
+		{accept: "application/vnd.api+json;q=0.1, application/*", want: MIMEApplicationJSON},
+		{accept: "application/vnd.api+json, text/plain, application/json;q=0.5", want: MIMEApplicationJSON},
 		{accept: "application/json;q=0, */*", want: MIMETextPlainCharsetUTF8},
 		{accept: "application/problem+json", want: MIMEApplicationProblemJSON},
 		{accept: "application/problem+json, */*", want: MIMEApplicationProblemJSON},

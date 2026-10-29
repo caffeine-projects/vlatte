@@ -121,13 +121,19 @@ func (nr noMatchRenderer) RenderNoMatch(w http.ResponseWriter, nm *NoMatch) {
 	buf.Reset()
 	defer bufpool.Put(buf)
 
+	// A JSON body that doesn't encode whole is never sent: the text one goes in its place.
+	if format == NoMatchJSON || format == NoMatchProblem {
+		if err := writeNoMatchJSON(buf, nm); err != nil {
+			buf.Reset()
+			format = NoMatchText
+		}
+	}
+
 	switch format {
 	case NoMatchJSON:
 		w.Header().Set(HeaderContentType, MIMEApplicationJSON)
-		writeNoMatchJSON(buf, nm)
 	case NoMatchProblem:
 		w.Header().Set(HeaderContentType, MIMEApplicationProblemJSON)
-		writeNoMatchJSON(buf, nm)
 	case NoMatchMarkdown:
 		w.Header().Set(HeaderContentType, MIMETextMarkdownCharsetUTF8)
 		writeNoMatchMarkdown(buf, nm)
@@ -169,10 +175,11 @@ func negotiateNoMatch(accept []string) NoMatchFormat {
 }
 
 // preferJSON returns how much ranges want application/json. A range of another JSON type, such as
-// application/vnd.api+json, names it too, unless a range names application/json itself, as one that refuses it does.
+// application/vnd.api+json, names it too, when Accept prefers it to every range that names application/json, unless
+// one refuses application/json by name.
 func preferJSON(ranges []httpx.AcceptRange) httpx.Preference {
 	pref := httpx.Prefer(ranges, MIMEApplicationJSON)
-	if pref.Specificity == 3 {
+	if pref.Specificity == 3 && pref.Q <= 0 {
 		return pref
 	}
 
@@ -181,8 +188,8 @@ func preferJSON(ranges []httpx.AcceptRange) httpx.Preference {
 			continue
 		}
 
-		if pref.Specificity < 3 || rng.Q > pref.Q {
-			pref = httpx.Preference{Q: rng.Q, Specificity: 3, Index: i}
+		if p := (httpx.Preference{Q: rng.Q, Specificity: 3, Index: i}); prefers(p, pref, true) {
+			pref = p
 		}
 	}
 
@@ -319,8 +326,9 @@ func writeCodeSpan(buf *bytes.Buffer, s string) {
 // _oneLine turns line breaks into spaces.
 var _oneLine = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
 
-// writeNoMatchJSON writes the problem details object that answers nm to buf.
-func writeNoMatchJSON(buf *bytes.Buffer, nm *NoMatch) {
+// writeNoMatchJSON writes the problem details object that answers nm to buf. A name or a URL that isn't UTF-8 gets the
+// replacement character where it isn't. On an error, buf may hold part of the object.
+func writeNoMatchJSON(buf *bytes.Buffer, nm *NoMatch) error {
 	r := nm.Request
 
 	p := NewProblem().
@@ -338,10 +346,12 @@ func writeNoMatchJSON(buf *bytes.Buffer, nm *NoMatch) {
 		p.Extension("near_misses", nm.NearMisses)
 	}
 
-	// Neither fails: no extension is named after a standard member, every value encodes, and a buffer takes all. A
-	// name or a URL that isn't UTF-8 gets the replacement character where it isn't.
-	members, _ := p.members()
-	_ = json.MarshalWrite(buf, members, json.Deterministic(true), jsontext.AllowInvalidUTF8(true))
+	members, err := p.members()
+	if err != nil {
+		return err
+	}
+
+	return json.MarshalWrite(buf, members, json.Deterministic(true), jsontext.AllowInvalidUTF8(true))
 }
 
 // cloneNearMisses returns a copy of misses that shares nothing with it.
