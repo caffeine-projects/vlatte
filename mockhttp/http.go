@@ -62,6 +62,7 @@ type Server struct {
 	loaders            []Loader
 	rwMutex            sync.RWMutex
 	proxy              *forwardProxy
+	noMatch            NoMatchRenderer // answers the requests no mock matches
 
 	// id tells the requests this server sends on, in their VLatte-Via, so one that comes back fails as a proxy loop.
 	id string
@@ -166,7 +167,13 @@ func New(config ...Option) (*Server, error) {
 		return nil, err
 	}
 
+	noMatch, err := noMatchRendererOf(conf)
+	if err != nil {
+		return nil, fmt.Errorf("server: %w", err)
+	}
+
 	app.config = conf
+	app.noMatch = noMatch
 	logs, tee := adminLogs(conf)
 	app.logger = app.getLog(conf, tee)
 
