@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/caffeine-projects/vlatte/admin"
+	"github.com/caffeine-projects/vlatte/internal/buildinfo"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/mockgrpc"
 	"github.com/caffeine-projects/vlatte/mockhttp"
@@ -412,7 +413,7 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "print version info",
 		Run: func(cmd *cobra.Command, args []string) {
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), version())
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), buildinfo.Version())
 		},
 	}
 }
