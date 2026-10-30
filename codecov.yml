@@ -3,6 +3,9 @@ coverage:
     project:
       default:
         threshold: 0.1% # tests whose timing varies cover a few lines more or less from run to run
+    patch:
+      default:
+        threshold: 0.1%
 
 ignore:
   - "mockhttp/e2e/internal/testcert" # test-only certificate generator
