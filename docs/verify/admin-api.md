@@ -11,7 +11,7 @@ curl -X QUERY -H 'Content-Type: application/json' \
 # {"passed": true, "count": 1, "waited_ms": 12}
 ```
 
-`QUERY` is the HTTP [`QUERY`](https://httpwg.org/http-extensions/draft-ietf-httpbis-safe-method-w-body.html) method, safe as `GET` is, with a body: `curl -X QUERY`.
+`QUERY` is the HTTP [`QUERY`](https://httpwg.org/specs/rfc10008.html) method, safe as `GET` is, with a body: `curl -X QUERY`.
 
 ## Keys
 

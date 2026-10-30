@@ -40,6 +40,18 @@ Also useful: `make fuzz`, `make bench` and `make vuln`.
 
 The Go checks in CI skip changes that touch only `*.md` files or `docs/`. For the docs site, `make docs-dev` serves it with live reload and `make docs-build` builds it.
 
+To check documentation links, install [Lychee](https://lychee.cli.rs/) v0.24.2 (the version the pinned `lychee-action` installs), then run:
+
+```sh
+make docs-build
+make docs-check-links
+make docs-check-external-links
+```
+
+Internal checks run offline on the built site and repository Markdown, including heading anchors, images and downloads. Links to `https://vlatte.dev/` resolve against the local build. CI runs these checks on pull requests and pushes to `main` before publishing the site.
+
+External checks run weekly and on manual runs of the **External Links** workflow, so third-party outages do not block pull requests. They check HTTP and HTTPS links without validating remote heading anchors. Both checks use `lychee.toml`; code examples and private network addresses are excluded. Any exception for a public URL must name the specific URL and explain why it cannot be checked.
+
 ## What reviewers look for
 
 [`CONVENTIONS.md`](CONVENTIONS.md) has the full rules. These are the ones most often missed:

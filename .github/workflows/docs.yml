@@ -5,21 +5,7 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'docs/**'
-      - '**.go'
-      - 'mockhttp/schema/http.schema.json'
-      - 'mockgrpc/schema/grpc.schema.json'
-      - 'internal/admin/handler/openapi.yaml'
-      - '.github/workflows/docs.yml'
   pull_request:
-    paths:
-      - 'docs/**'
-      - '**.go'
-      - 'mockhttp/schema/http.schema.json'
-      - 'mockgrpc/schema/grpc.schema.json'
-      - 'internal/admin/handler/openapi.yaml'
-      - '.github/workflows/docs.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -61,6 +47,18 @@ jobs:
     - name: Build
       working-directory: docs
       run: npm run build
+
+    # Install Lychee here; the Makefile owns the arguments for both local and CI checks.
+    - name: Install Lychee
+      uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+      with:
+        args: --version
+        failIfEmpty: false
+        jobSummary: false
+        output: ${{ runner.temp }}/lychee-version.md
+
+    - name: Check internal links
+      run: make docs-check-links
 
     - name: Configure Pages
       if: github.ref == 'refs/heads/main'

@@ -2,7 +2,7 @@
 
 `recipe/http/oidc` prepares an HTTP server to stand in for an OpenID Connect provider, for "Sign in with ..." through the authorization code flow: discovery, a JWKS, ID tokens the server signs, PKCE and userinfo. Point the issuer URL of the app under test at the server.
 
-The server signs ID tokens with a key of its own, which the recipe can't add: give it one first, with the setting [`template.keys`](/templating/#tokens).
+The server signs ID tokens with a key of its own, which the recipe can't add: give it one first, with the setting [`template.keys`](/reference/settings).
 
 ```go
 import "github.com/caffeine-projects/vlatte/recipe/http/oidc"
@@ -28,7 +28,7 @@ A server without the key fails `Prep` with an error naming it. In Go, a key of y
 | `GET /userinfo` with `Authorization: Bearer <access token>` | The user's claims. |
 | Any other `GET /userinfo` | 401 with `WWW-Authenticate: Bearer error="invalid_token"`. |
 
-Each code is exchanged once, and PKCE takes S256 only. Every mock is a template, which the admin API shows: codes, PKCE, the `redirect_uri` and single use are a [keyed scenario](/scenarios/#keys) named `oidc-code`, and tokens come from the `jwt` and `jwks` [template functions](/templating/#tokens).
+Each code is exchanged once, and PKCE takes S256 only. Every mock is a template, which the admin API shows: codes, PKCE, the `redirect_uri` and single use are a [keyed scenario](/scenarios/#keys) named `oidc-code`, and tokens come from the `jwt` and `jwks` [template functions](/templating/).
 
 | Option | Sets | Default |
 |---|---|---|

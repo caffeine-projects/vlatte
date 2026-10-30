@@ -113,6 +113,24 @@ docs-dev: ## serve the docs site with live reload
 docs-build: ## build the docs site into docs/.vitepress/dist
 	@cd docs && npm ci --ignore-scripts && npm run build
 
+.PHONY: docs-check-links
+docs-check-links: ## check internal links after make docs-build (requires lychee)
+	@set -eu
+	lychee --offline --root-dir "$(CURDIR)/docs/.vitepress/dist" \
+		--remap '^https://vlatte\.dev/ file://$(CURDIR)/docs/.vitepress/dist/' \
+		--extensions html docs/.vitepress/dist
+	git ls-files --cached --others --exclude-standard -- '*.md' | \
+		lychee --offline --root-dir "$(CURDIR)/docs/.vitepress/dist" \
+			--remap '^https://vlatte\.dev/ file://$(CURDIR)/docs/.vitepress/dist/' --files-from -
+
+.PHONY: docs-check-external-links
+docs-check-external-links: ## check external links after make docs-build (requires lychee)
+	@set -eu
+	git ls-files --cached --others --exclude-standard -- '*.md' | \
+		lychee --scheme http --scheme https --include-fragments=none \
+			--exclude '^https://vlatte\.dev/' --root-dir "$(CURDIR)/docs/.vitepress/dist" \
+			--files-from - 'docs/.vitepress/dist/**/*.html'
+
 # --
 # Miscellaneous
 # --

@@ -1,0 +1,27 @@
+# Shared by the local Makefile targets and GitHub Actions.
+no_progress = true
+format = "detailed"
+
+# VitePress serves /page as page.html and /section/ as section/index.html.
+fallback_extensions = ["html"]
+index_files = ["index.html"]
+include_fragments = "anchor-only"
+
+# The built site lives in an ignored, hidden directory.
+hidden = true
+no_ignore = true
+
+timeout = 20
+max_retries = 2
+max_concurrency = 8
+host_concurrency = 2
+host_request_interval = "100ms"
+
+# Examples are not navigable documentation links.
+include_verbatim = false
+exclude_all_private = true
+
+# This article, linked by the vendored Go style guide, returns 403 to automated requests.
+exclude = [
+    '^https://infiniteundo\.com/post/25326999628/falsehoods-programmers-believe-about-time$',
+]
