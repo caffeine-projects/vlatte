@@ -36,15 +36,14 @@ The `vlatte` command serves the admin API by default: `admin: false` (`--admin=f
 The command's credentials and certificate apply to both admin APIs. `admin.auth.username` with `admin.auth.password` asks for Basic, and `admin.auth.token` for a bearer token. The password and the token have no flag, as the command line shows to every user of the host: set them in the environment (`VLATTE_ADMIN_AUTH_PASSWORD`, `VLATTE_ADMIN_AUTH_TOKEN`), in a config file, or in a file that `admin.auth.password_file` or `admin.auth.token_file` names, such as a Docker or Kubernetes secret, whose trailing line break isn't part of it. `admin.tls.cert` and `admin.tls.key` (`--admin-tls-cert`, `--admin-tls-key`) serve HTTPS. `vlatte health` reads the same settings: with a certificate, it asks the admin API over HTTPS, and trusts that certificate alone.
 
 ```sh
-# Build vlatte:dev first; see Run > Docker.
 docker run --rm -p 8080:8080 -p 8081:8081 \
   -v "$PWD/secrets:/run/secrets:ro" -v "$PWD/certs:/certs:ro" \
   -e VLATTE_ADMIN_AUTH_TOKEN_FILE=/run/secrets/admin_token \
   -e VLATTE_ADMIN_TLS_CERT=/certs/admin.pem -e VLATTE_ADMIN_TLS_KEY=/certs/admin-key.pem \
-  vlatte:dev
+  ghcr.io/caffeine-projects/vlatte:v1.0.0
 ```
 
-See [Docker](/run/docker#building-the-image) for the source image used by this site's examples.
+See [Docker](/run/docker) for the image's ports and settings.
 
 ## Routes
 

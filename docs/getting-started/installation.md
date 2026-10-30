@@ -2,14 +2,14 @@
 
 Use the library inside Go tests, or install the standalone CLI for apps in any language. The release binary and Docker image need no Go installation on your machine.
 
-This site documents the `main` branch, including features added after `v0.1.0-rc.1`. The Go commands below select `main` so they match these examples. For Docker, [build the image from the same source](/run/docker#building-the-image). Published archives and images describe their own version; the release commands below use the published `v0.1.0-rc.1`, which does not include every feature on this site.
+The commands below install `v1.0.0` of the library, CLI and Docker image. Pin a release version for repeatable builds.
 
 ## The library
 
 Requires Go 1.27 or later.
 
 ```sh
-go get github.com/caffeine-projects/vlatte@main
+go get github.com/caffeine-projects/vlatte@v1.0.0
 ```
 
 Import the packages you use: `mockhttp` for HTTP, `mockgrpc` for gRPC, and `match` for matchers.
@@ -38,14 +38,14 @@ On macOS and Linux:
 brew install caffeine-projects/tap/vlatte
 ```
 
-Run `vlatte version` to check the version installed. For a particular release candidate, use its archive or Docker image, or `go install` with its published tag, such as `@v0.1.0-rc.1`. Use the source installation below for features added on `main`.
+Homebrew installs the latest stable release. Run `vlatte version` to check the version installed. For a particular version, use its archive or Docker image, or `go install` with its published tag.
 
 ### An archive
 
 [GitHub Releases](https://github.com/caffeine-projects/vlatte/releases) has an archive for Linux, macOS and Windows, on `amd64` and `arm64`. Each holds the `vlatte` binary, which needs nothing else. This example installs the Linux `amd64` archive into your user's executable directory:
 
 ```sh
-VERSION=v0.1.0-rc.1
+VERSION=v1.0.0
 curl -fsSL "https://github.com/caffeine-projects/vlatte/releases/download/$VERSION/vlatte_${VERSION#v}_linux_amd64.tar.gz" | tar -xz vlatte
 install -d "$HOME/.local/bin"
 install -m 755 vlatte "$HOME/.local/bin/vlatte"
@@ -60,7 +60,7 @@ Keep that directory on `PATH` in your shell configuration. For macOS, choose `da
 Requires Go 1.27 or later.
 
 ```sh
-go install github.com/caffeine-projects/vlatte/cmd/vlatte@main
+go install github.com/caffeine-projects/vlatte/cmd/vlatte@v1.0.0
 vlatte version
 ```
 
@@ -73,7 +73,7 @@ The image is `ghcr.io/caffeine-projects/vlatte`, for `linux/amd64` and `linux/ar
 To inspect the published release image:
 
 ```sh
-docker run --rm ghcr.io/caffeine-projects/vlatte:v0.1.0-rc.1 version
+docker run --rm ghcr.io/caffeine-projects/vlatte:v1.0.0 version
 ```
 
 ## Verifying a release
@@ -83,7 +83,7 @@ The release workflow of this repository builds every archive and image, and sign
 An archive: check the signature of `checksums.txt`, then the archive against it.
 
 ```sh
-VERSION=v0.1.0-rc.1
+VERSION=v1.0.0
 ARCHIVE="vlatte_${VERSION#v}_linux_amd64.tar.gz"
 gh release download "$VERSION" -R caffeine-projects/vlatte -p checksums.txt -p checksums.txt.sigstore.json -p "$ARCHIVE"
 
@@ -111,7 +111,7 @@ gh attestation verify "oci://ghcr.io/caffeine-projects/vlatte:$VERSION" -R caffe
 
 ## Versions
 
-Versions follow [semantic versioning](https://semver.org). Until v1.0.0, a minor version may change the API. A version with a suffix, such as `v0.1.0-rc.1`, is a release candidate. The changes of each version are on [GitHub Releases](https://github.com/caffeine-projects/vlatte/releases). Pin a published Go module version and the same Docker tag for repeatable builds; `@main` follows development and is useful for the examples on this site before their release.
+Versions follow [semantic versioning](https://semver.org). In v1.x, patch releases fix bugs and minor releases add backward-compatible features. Breaking API changes require a new major version. A version with a suffix, such as `v0.1.0-rc.1`, is a release candidate. The changes of each version are on [GitHub Releases](https://github.com/caffeine-projects/vlatte/releases). Pin a published Go module version and the same Docker tag for repeatable builds; `@main` follows development.
 
 ## Editor support for mock files
 
