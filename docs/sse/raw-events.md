@@ -18,10 +18,10 @@ response:
   status: 200
   event_stream:
     events:
-      - {raw: "\uFEFFdata: bom\r\n\r\n"}                     # a byte order mark, CRLF
-      - {raw: "event: cr\rdata:no space\r\r"}                # CR, no space after the colon
-      - {raw: ": comment\nunknown: x\nretry: soon\ndata: kept\n\n"}  # skipped lines
-      - {raw: "id: 7\n\n"}                                   # an id without data
+      - raw: "\uFEFFdata: bom\r\n\r\n"                     # a byte order mark, CRLF
+      - raw: "event: cr\rdata:no space\r\r"                # CR, no space after the colon
+      - raw: ": comment\nunknown: x\nretry: soon\ndata: kept\n\n"  # skipped lines
+      - raw: "id: 7\n\n"                                   # an id without data
 ```
 
 :::
@@ -42,7 +42,7 @@ A client that follows the standard dispatches three events, `bom`, `no space` of
 
 | Fault | Tests a client against |
 |---|---|
-| `fault.LimitData(n)`, `{type: limit_data, bytes: n}` | A connection that drops after `n` bytes, as a flaky network does, such as in the middle of an event: see [Testing a reconnection](/sse/reconnecting#testing-a-reconnection). |
+| `fault.LimitData(n)`, or the `limit_data` fault with `bytes: n` | A connection that drops after `n` bytes, as a flaky network does, such as in the middle of an event: see [Testing a reconnection](/sse/reconnecting#testing-a-reconnection). |
 | `fault.Latency(latency, jitter)` | Events that arrive late, at the pace they were sent. |
 | `fault.Bandwidth(bytesPerSecond)` | A slow link, which sends a large event in pieces. |
 | `fault.Slicer(averageSize, sizeVariation, delay)` | Events split across reads at random. |

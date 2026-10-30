@@ -1,5 +1,7 @@
 # Replies
 
+Build gRPC messages and status replies, sequence or randomize answers, and generate responses from the incoming call.
+
 | Reply | Answers |
 |---|---|
 | `Message(msg)` | A message, which must be of the method's output type. |

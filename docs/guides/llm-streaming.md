@@ -162,16 +162,32 @@ A [mock file](/http/mock-files) keeps the stream with the tests' other mocks, an
 request:
   method: POST
   path: /v1/chat/completions
-  header: {authorization: "Bearer sk-test"}
+  header:
+    authorization: "Bearer sk-test"
   body: [jsonpath, $.stream, [equal, true]]
 response:
   status: 200
   event_stream:
     event_delay: 20ms
     events:
-      - data: {object: chat.completion.chunk, choices: [{index: 0, delta: {content: "Hel"}}]}
-      - data: {object: chat.completion.chunk, choices: [{index: 0, delta: {content: "lo, "}}]}
-      - data: {object: chat.completion.chunk, choices: [{index: 0, delta: {content: "world"}}]}
+      - data:
+          object: chat.completion.chunk
+          choices:
+            - index: 0
+              delta:
+                content: "Hel"
+      - data:
+          object: chat.completion.chunk
+          choices:
+            - index: 0
+              delta:
+                content: "lo, "
+      - data:
+          object: chat.completion.chunk
+          choices:
+            - index: 0
+              delta:
+                content: "world"
       - data: "[DONE]"
 ```
 
@@ -183,20 +199,57 @@ Anthropic's Messages API names each event after the type of its data, and sends 
 request:
   method: POST
   path: /v1/messages
-  header: {x-api-key: test-key, anthropic-version: "2023-06-01"}
+  header:
+    x-api-key: test-key
+    anthropic-version: "2023-06-01"
   body: [jsonpath, $.stream, [equal, true]]
 response:
   status: 200
   event_stream:
     events:
-      - {event: message_start, data: {type: message_start, message: {id: msg_1, role: assistant, content: []}}}
-      - {event: content_block_start, data: {type: content_block_start, index: 0, content_block: {type: text, text: ""}}}
-      - {event: ping, data: {type: ping}}
-      - {event: content_block_delta, data: {type: content_block_delta, index: 0, delta: {type: text_delta, text: Hello}}}
-      - {event: content_block_delta, data: {type: content_block_delta, index: 0, delta: {type: text_delta, text: ", world"}}}
-      - {event: content_block_stop, data: {type: content_block_stop, index: 0}}
-      - {event: message_delta, data: {type: message_delta, delta: {stop_reason: end_turn}}}
-      - {event: message_stop, data: {type: message_stop}}
+      - event: message_start
+        data:
+          type: message_start
+          message:
+            id: msg_1
+            role: assistant
+            content: []
+      - event: content_block_start
+        data:
+          type: content_block_start
+          index: 0
+          content_block:
+            type: text
+            text: ""
+      - event: ping
+        data:
+          type: ping
+      - event: content_block_delta
+        data:
+          type: content_block_delta
+          index: 0
+          delta:
+            type: text_delta
+            text: Hello
+      - event: content_block_delta
+        data:
+          type: content_block_delta
+          index: 0
+          delta:
+            type: text_delta
+            text: ", world"
+      - event: content_block_stop
+        data:
+          type: content_block_stop
+          index: 0
+      - event: message_delta
+        data:
+          type: message_delta
+          delta:
+            stop_reason: end_turn
+      - event: message_stop
+        data:
+          type: message_stop
 ```
 
 A client that splits events at blank lines, and reads both `event:` and `data:` lines, gets `Hello, world` from it.

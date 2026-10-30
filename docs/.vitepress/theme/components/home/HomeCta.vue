@@ -7,8 +7,8 @@ import { withBase } from 'vitepress'
     <h2>Ready to mock?</h2>
     <p>Write your first mock in a Go test, or serve one from a file.</p>
     <div class="vl-cta-actions">
-      <a class="vl-button brand" :href="withBase('/getting-started/quick-start')">Get started</a>
-      <a class="vl-button alt" href="https://github.com/caffeine-projects/vlatte">Star on GitHub</a>
+      <a class="vl-button brand" :href="withBase('/getting-started/quick-start#http')">Use in Go tests</a>
+      <a class="vl-button alt" :href="withBase('/getting-started/quick-start#the-cli')">Run a mock server</a>
     </div>
   </section>
 </template>

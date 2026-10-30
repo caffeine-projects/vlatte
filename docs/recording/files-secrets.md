@@ -1,5 +1,7 @@
 # Files and secrets
 
+Find where recordings are written and how to keep credentials and sensitive payloads out of saved fixtures.
+
 ## Files
 
 A recording writes a mock file named after its request, such as `GET-items-page-2-<hash>.mock.json`, or `.yaml` or `.yml` with `RecordFormat`, into its directory: `{workdir}/_mocks_recorded` by default, `testdata/vlatte/_mocks_recorded`. A mock file appears whole, or not at all.

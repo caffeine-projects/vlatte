@@ -54,9 +54,15 @@ request:
 bidi:
   on:
     - when: [field, text, [eq, hi]]
-      response: {message: {text: hello}}
-  otherwise: {message: {text: "?"}}
-  on_end: {message: {text: bye}}
+      response:
+        message:
+          text: hello
+  otherwise:
+    message:
+      text: "?"
+  on_end:
+    message:
+      text: bye
 ```
 
 ## Cutting a stream

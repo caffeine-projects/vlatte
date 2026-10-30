@@ -2,7 +2,7 @@
 
 `recipe/http/oidc` prepares an HTTP server to stand in for an OpenID Connect provider, for "Sign in with ..." through the authorization code flow: discovery, a JWKS, ID tokens the server signs, PKCE and userinfo. Point the issuer URL of the app under test at the server.
 
-The server signs ID tokens with a key of its own, which the recipe can't add: give it one first, with the setting [`template.keys`](/reference/settings).
+The server signs ID tokens with a key of its own, which the recipe can't add: give it one first, with the setting [`template.keys`](/templating/#tokens).
 
 ```go
 import "github.com/caffeine-projects/vlatte/recipe/http/oidc"

@@ -63,25 +63,16 @@ func (c *Client) Create(ctx context.Context, name string) error {
 
 Each test starts its own server, so tests can run in parallel without sharing mocks. `Journal("")` keeps a journal of the requests in a temporary directory, which `Close` removes, and `Silent()` keeps the test output clean.
 
-```go
-func newServer(t *testing.T) *mockhttp.Server {
-	t.Helper()
-
-	m := mockhttp.MustNew(mockhttp.Setup().Journal("").Silent())
-	m.MustStart()
-	t.Cleanup(m.Close)
-
-	return m
-}
-```
-
 ## The happy path
 
 The mock matches the path and the token, and answers JSON. `AssertCalled` fails the test when the client never called it, such as when it built a wrong URL.
 
 ```go
 func TestGetUser(t *testing.T) {
-	m := newServer(t)
+	m := mockhttp.MustNew(mockhttp.Setup().Journal("").Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
 	scoped := m.MustMock(mockhttp.Getf("/users/42").
 		Header("Authorization", match.Equal("Bearer secret")).
 		Reply(mockhttp.OK().JSON(map[string]any{"id": 42, "name": "ann"})))
@@ -105,13 +96,18 @@ func TestGetUser(t *testing.T) {
 
 ```go
 func TestGetUserNotFound(t *testing.T) {
-	m := newServer(t)
-	m.MustMock(mockhttp.Getf("/users/*").Reply(mockhttp.NotFound()))
+	m := mockhttp.MustNew(mockhttp.Setup().Journal("").Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	scoped := m.MustMock(mockhttp.Getf("/users/*").Reply(mockhttp.NotFound()))
 
 	client := &Client{BaseURL: m.URL(), Token: "secret"}
-	if _, err := client.Get(t.Context(), 7); err == nil {
-		t.Fatal("want an error for a 404")
+	_, err := client.Get(t.Context(), 7)
+	if err == nil || err.Error() != "users: get 7: 404 Not Found" {
+		t.Fatalf("err = %v, want users: get 7: 404 Not Found", err)
 	}
+	scoped.AssertCalled(t)
 }
 ```
 
@@ -123,7 +119,10 @@ The journal keeps every request, whatever answered it, and `VerifyRequests` chec
 
 ```go
 func TestCreateUserSendsTheName(t *testing.T) {
-	m := newServer(t)
+	m := mockhttp.MustNew(mockhttp.Setup().Journal("").Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
 	m.MustMock(mockhttp.Postf("/users").Reply(mockhttp.Created()))
 
 	client := &Client{BaseURL: m.URL(), Token: "secret"}

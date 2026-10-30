@@ -53,24 +53,11 @@ The server certificate names `127.0.0.1`, as `m.URL()` does. Keys of test CAs be
 
 Without certificates of your own, `m.MustStartTLS()` serves a test certificate the client must skip verifying. That tests less: a client that verifies certificates, as it should, needs one it can trust.
 
-## Helpers
+## The HTTP client
 
-`newInventory` starts an HTTPS mock of the API with the TLS options it's given. `clientTLS` makes an HTTP client that trusts the test CA, with the client certificate or without it.
+`clientTLS` makes an HTTP client that trusts the test CA, with the client certificate or without it. Each test creates its mock server where its TLS settings are used.
 
 ```go
-// newInventory starts an HTTPS mock of the inventory API with the setup given.
-func newInventory(t *testing.T, setup *mockhttp.ConfigBuilder) *mockhttp.Server {
-	t.Helper()
-
-	m := mockhttp.MustNew(setup.Silent())
-	m.MustStartTLS()
-	t.Cleanup(m.Close)
-
-	m.MustMock(mockhttp.Getf("/stock/sku-1").Reply(mockhttp.OK().JSON(map[string]any{"available": 7})))
-
-	return m
-}
-
 // clientTLS trusts the test CA, and presents the client certificate when asked to.
 func clientTLS(t *testing.T, withCert bool) *http.Client {
 	t.Helper()
@@ -100,7 +87,12 @@ func clientTLS(t *testing.T, withCert bool) *http.Client {
 
 ```go
 func TestStock_OverHTTPS(t *testing.T) {
-	m := newInventory(t, mockhttp.Setup().TLSCertKeyPair("testdata/localhost.pem", "testdata/localhost-key.pem"))
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().
+		TLSCertKeyPair("testdata/localhost.pem", "testdata/localhost-key.pem"))
+	m.MustStartTLS()
+	t.Cleanup(m.Close)
+	m.MustMock(mockhttp.Getf("/stock/sku-1").Reply(mockhttp.OK().JSON(map[string]any{"available": 7})))
+
 	client := &Client{BaseURL: m.URL(), HTTP: clientTLS(t, false)}
 
 	n, err := client.Stock(t.Context(), "sku-1")
@@ -116,8 +108,11 @@ func TestStock_OverHTTPS(t *testing.T) {
 
 ```go
 func TestStock_WithMutualTLS(t *testing.T) {
-	m := newInventory(t, mockhttp.Setup().
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().
 		TLSMutual("testdata/localhost.pem", "testdata/localhost-key.pem", "testdata/ca.pem"))
+	m.MustStartTLS()
+	t.Cleanup(m.Close)
+	m.MustMock(mockhttp.Getf("/stock/sku-1").Reply(mockhttp.OK().JSON(map[string]any{"available": 7})))
 
 	t.Run("a client with a certificate gets the stock", func(t *testing.T) {
 		client := &Client{BaseURL: m.URL(), HTTP: clientTLS(t, true)}

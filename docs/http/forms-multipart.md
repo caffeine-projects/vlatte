@@ -56,10 +56,13 @@ response:
   status: 200
   multipart:
     type: related              # the subtype: form-data, mixed, related, x-mixed-replace…
-    params: {start: "<root>"}
+    params:
+      start: "<root>"
     parts:
-      - header: {content-id: "<root>"}
-        body: {id: 1}          # text as is, anything else as JSON
+      - header:
+          content-id: "<root>"
+        body:
+          id: 1          # text as is, anything else as JSON
       - name: report
         filename: report.pdf
         body_file: report.pdf  # relative to the mock file
@@ -80,8 +83,11 @@ response:
   multipart:
     type: x-mixed-replace
     parts:
-      - {content_type: image/jpeg, body_file: frame1.jpg}
-      - {content_type: image/jpeg, body_file: frame2.jpg, delay: 500ms}
+      - content_type: image/jpeg
+        body_file: frame1.jpg
+      - content_type: image/jpeg
+        body_file: frame2.jpg
+        delay: 500ms
 ```
 
 **Webhooks** send multipart bodies too:

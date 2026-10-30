@@ -19,10 +19,13 @@ response:
   event_stream:
     retry: 3s
     events:
-      - {event: price, id: "1", data: {value: 10}}  # text as is, anything else as JSON
-      - {comment: keep-alive}
-      - {data: "line 1\nline 2"}                   # a data line per line
-      - {data_json: "done"}                        # always JSON: sends "done", quotes too
+      - event: price
+        id: "1"
+        data:
+          value: 10  # text as is, anything else as JSON
+      - comment: keep-alive
+      - data: "line 1\nline 2"                   # a data line per line
+      - data_json: "done"                        # always JSON: sends "done", quotes too
 ```
 
 :::
@@ -85,7 +88,9 @@ mockhttp.Request().Method(http.MethodGet).URLPathTemplate("/users/{id}/notificat
 ```
 
 ```yaml [Mock file]
-request: {method: GET, path_template: "/users/{id}/notifications"}
+request:
+  method: GET
+  path_template: "/users/{id}/notifications"
 response:
   status: 200
   event_stream:
@@ -93,7 +98,8 @@ response:
       - event: notification
         id: "{{ .Request.PathParams.id }}-1"
         data: '{"user": "{{ .Request.PathParams.id }}", "text": "Your order shipped"}'
-  template: {enabled: true}
+  template:
+    enabled: true
 ```
 
 :::

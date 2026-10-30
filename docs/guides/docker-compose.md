@@ -2,6 +2,18 @@
 
 This guide runs vlatte next to an app under test with Docker Compose: the app calls a mocked payments API, a test changes the mocks over the admin API, and the admin API asks for a token. It uses [Docker](/run/docker), [mock files](/http/mock-files), the [admin API](/admin-api/) and [outbound rules](/http/proxying#outbound-rules).
 
+## Prerequisites
+
+These docs describe the current source. Build its [Docker image](/run/docker#building-the-image) before running this example, so its admin API and settings match the guide:
+
+```sh
+git clone https://github.com/caffeine-projects/vlatte.git
+cd vlatte
+docker build -t vlatte:dev .
+```
+
+The resulting image is `vlatte:dev`. Put the files below in your app's directory, alongside the Dockerfile that builds it. The app must read `PAYMENTS_URL` as its payments API base URL. For a self-contained browser example without an app image, use [Testing a frontend client](/guides/testing-a-frontend-client).
+
 ## The files
 
 ```
@@ -22,10 +34,12 @@ request:
   path: /payments
 response:
   status: 201
-  body: {id: pay_1, status: authorized}
+  body:
+    id: pay_1
+    status: authorized
 ```
 
-Generate the token with `openssl rand -hex 32 > secrets/admin_token`.
+Create the `mocks` and `secrets` directories, then generate the token with `openssl rand -hex 32 > secrets/admin_token`.
 
 ## The compose file
 
@@ -33,7 +47,7 @@ Generate the token with `openssl rand -hex 32 > secrets/admin_token`.
 # compose.yaml
 services:
   payments:
-    image: ghcr.io/caffeine-projects/vlatte:v0.1.0-rc.1
+    image: vlatte:dev
     ports:
       - "8080:8080" # mocks
       - "8081:8081" # admin API
@@ -58,11 +72,13 @@ secrets:
     file: ./secrets/admin_token
 ```
 
-- **The image** is the published one, pinned to a version. It listens on every interface, on fixed ports: mocks on `8080`, the admin API on `8081`, and gRPC mocks on `50051`, with their admin API on `8082`.
+- **The image** is the one built from the source above. It listens on every interface, on fixed ports: mocks on `8080`, the admin API on `8081`, and gRPC mocks on `50051`, with their admin API on `8082`.
 - **Mock files** mount over `/vlatte/testdata/vlatte/_mocks`, which the command serves.
 - **The health check** of the image runs `vlatte health`, which asks the admin API's readiness probe. Probes need no credentials, so `service_healthy` works with the token set, and the app starts once the mocks are loaded.
 - **The token** comes from a file, as a Docker secret: the token has no flag, so it never shows on the command line.
 - **Outbound rules** keep the mocks from reaching cloud metadata at `169.254.169.254`, should a proxy reply or a webhook be pointed there. Add the ranges of your internal networks too, but not the range of the compose network if the mocks proxy to other services in it.
+
+Run `docker compose up --build --wait` from the app's directory to build the app and wait for the services to be ready.
 
 ## Changing mocks from a test
 

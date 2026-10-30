@@ -1,6 +1,6 @@
 # JSON and XML
 
-These matchers read JSON and XML: a request body, a gRPC message as JSON, or any value a matcher gets that holds them, and the claims of a JWT.
+These matchers read JSON and XML from request bodies, gRPC messages or other values, and inspect JWT headers and claims. `SignedJWT` also verifies a token's signature and lifetime with public keys.
 
 | Go | Mock file | Matches |
 |---|---|---|

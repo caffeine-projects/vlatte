@@ -62,13 +62,23 @@ curl -X QUERY -H 'Content-Type: application/json' \
 | `mock_id`, `method`, `path`, `target`, `status`, `body` | By a matcher: text matches equal text, a number or a bool an equal value, and a list is a matcher, such as `["glob", "/users/*"]` or `["jsonpath", "$.id", ["equal", 7]]`. |
 | `header` | Headers, or metadata, by name in any case, each by a matcher. |
 | `since`, `until` | The time of the requests, in RFC 3339. |
-| `request` | The request part of a mock file of the server's protocol. HTTP only. Send `method` and `path` on their own too: the index narrows the requests before `request` reads them. |
+| `request` | The request part of an HTTP or gRPC mock file. Send `path` on its own too, and `method` for HTTP: the index narrows the requests before `request` reads them. |
 | `limit`, `before` | The page: 100 requests by default, 1000 at most, and the `next` of the page before. |
 | `after` | The requests after a `mark`. |
 
 ## In gRPC
 
 gRPC servers keep the same journal with `mockgrpc.Setup().Journal(dir)`, and [verify](/verify/selecting#grpc-calls) it the same way: a call's path is its full method, such as `/pkg.Service/Method`, its headers its metadata, its body its request message as JSON, which `match.Field` and `match.JSONPath` read, and its status its code, the one the client got, after every interceptor of `ServerOptions`. Its answer's `vlatte-request-id` header names its entry. A client or bidi stream's body is the JSON array of the messages its client sent. Patterns are gRPC mock builders, such as `mockgrpc.Method("Greetings").Field("message", match.Equal("hi"))`, and the admin API's `request` key takes the request part of a gRPC mock file.
+
+For example, query the gRPC server's admin API for calls with a particular request field. Set `GRPC_ADMIN_URL` to the address the command prints for that admin API, or `m.AdminURL()` in Go:
+
+```sh
+curl -X QUERY -H 'Content-Type: application/json' \
+  -d '{"path":"/helloworld.Greeter/SayHello","request":{"method":"helloworld.Greeter/SayHello","fields":{"name":"ann"}}}' \
+  "$GRPC_ADMIN_URL/requests"
+```
+
+`request.method` is required and names the gRPC method, as in a mock file. The top-level `path` selects its full method through the journal's index. A gRPC call has no HTTP method: don't send a top-level `method` criterion.
 
 - With a journal, a stream interceptor goes through `grpc.ChainStreamInterceptor`: the journal takes `grpc.StreamInterceptor`, which grpc runs before every other, and `New` fails with `mockgrpc.ErrStreamInterceptorSlot` when `ServerOptions` sets it. A unary interceptor goes either way.
 - A call an interceptor answers itself isn't journaled, nor one grpc answers before any interceptor, such as one whose request it can't decode. A call of a method no descriptor describes is journaled as unmatched.

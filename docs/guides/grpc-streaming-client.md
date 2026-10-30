@@ -49,25 +49,16 @@ func collect(ctx context.Context, client pb.FeedClient, topic string) ([]string,
 
 `InMemory()` serves on an in-memory listener: no port, and `m.Dial()` connects to it. The connection closes with the server.
 
-```go
-func newFeed(t *testing.T) *mockgrpc.Server {
-	t.Helper()
-
-	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory().Silent())
-	m.MustStart()
-	t.Cleanup(m.Close)
-
-	return m
-}
-```
-
 ## Reading every event
 
 `Messages` sends the events in turn, and `MessageDelay` spaces them out:
 
 ```go
 func TestCollectReadsEveryEvent(t *testing.T) {
-	m := newFeed(t)
+	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
 	m.MustMock(mockgrpc.Method("feed.Feed/Watch").
 		Field("topic", match.Equal("orders")).
 		Reply(mockgrpc.Messages(&pb.Event{Id: "1"}, &pb.Event{Id: "2"}).
@@ -89,7 +80,10 @@ func TestCollectReadsEveryEvent(t *testing.T) {
 
 ```go
 func TestCollectReturnsTheStatus(t *testing.T) {
-	m := newFeed(t)
+	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
 	m.MustMock(mockgrpc.Method("feed.Feed/Watch").
 		Reply(mockgrpc.Messages(&pb.Event{Id: "1"}).Status(codes.Unavailable, "restarting")))
 
@@ -106,7 +100,10 @@ A `Func` reply sends what it wants through the call. Returning `vlatte.ErrReset`
 
 ```go
 func TestCollectSurvivesACut(t *testing.T) {
-	m := newFeed(t)
+	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
 	m.MustMock(mockgrpc.Method("feed.Feed/Watch").Reply(mockgrpc.Func(func(_ context.Context, call *mockgrpc.Call) error {
 		if err := call.Send(&pb.Event{Id: "1"}); err != nil {
 			return err

@@ -19,9 +19,12 @@ response:
     retry: 3s     # sent first: how long clients wait before they reconnect
     resume: true  # a Last-Event-ID gets only the events after that id
     events:
-      - {id: "1", data: a}
-      - {id: "2", data: b}
-      - {id: "3", data: c}
+      - id: "1"
+        data: a
+      - id: "2"
+        data: b
+      - id: "3"
+        data: c
 ```
 
 :::
@@ -52,7 +55,8 @@ m.MustMock(mockhttp.Getf("/jobs/7/progress").
 request:
   method: GET
   path: /jobs/7/progress
-  header: {last-event-id: "3"}
+  header:
+    last-event-id: "3"
 response:
   status: 204
 ```
@@ -90,18 +94,25 @@ m.MustMock(mockhttp.Getf("/events").
 
 ```yaml [drop.yaml]
 # The first connection drops after the retry field and event 1.
-request: {method: GET, path: /events}
+request:
+  method: GET
+  path: /events
 repeat: 1
-pipes: [{type: limit_data, bytes: 28}]
+pipes:
+  - type: limit_data
+    bytes: 28
 response:
   status: 200
   event_stream:
     retry: 1500ms
     resume: true
     events:
-      - {id: "1", data: a}
-      - {id: "2", data: b}
-      - {id: "3", data: c}
+      - id: "1"
+        data: a
+      - id: "2"
+        data: b
+      - id: "3"
+        data: c
 ```
 
 ```yaml [resume.yaml]
@@ -109,16 +120,20 @@ response:
 request:
   method: GET
   path: /events
-  header: {last-event-id: "1"}
+  header:
+    last-event-id: "1"
 response:
   status: 200
   event_stream:
     retry: 1500ms
     resume: true
     events:
-      - {id: "1", data: a}
-      - {id: "2", data: b}
-      - {id: "3", data: c}
+      - id: "1"
+        data: a
+      - id: "2"
+        data: b
+      - id: "3"
+        data: c
 ```
 
 :::

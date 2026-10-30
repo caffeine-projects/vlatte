@@ -2,8 +2,8 @@
 layout: home
 markdownStyles: false
 title: vlatte
-titleTemplate: API mocking for Go
-description: Mock HTTP and gRPC servers for Go tests, and a CLI that serves them from files.
+titleTemplate: HTTP and gRPC API mocking
+description: Mock HTTP and gRPC APIs inside Go tests or from YAML and JSON for apps in any language.
 ---
 
 <script setup>
@@ -13,17 +13,16 @@ import HomeHero from './.vitepress/theme/components/home/HomeHero.vue'
 import HomeRun from './.vitepress/theme/components/home/HomeRun.vue'
 import HomeSection from './.vitepress/theme/components/home/HomeSection.vue'
 import HomeSplit from './.vitepress/theme/components/home/HomeSplit.vue'
-import HomeStats from './.vitepress/theme/components/home/HomeStats.vue'
 
 const strengths = [
   { title: 'HTTP and gRPC', badge: 'unary to bidi', text: 'Real servers in your tests. gRPC needs no service implementation: any method, any call type.', link: '/getting-started/concepts' },
   { title: 'Matchers', badge: 'JSONPath · XPath · Schema', text: 'Match the method, path, headers, query, forms, files and body, with the same matchers on both protocols.', link: '/matchers/' },
   { title: 'Templated replies', badge: 'Go templates', text: 'Build headers and bodies from the request, with functions for JSON, strings, time and hashes.', link: '/templating/' },
-  { title: 'Record and replay', badge: 'no API needed', text: 'Proxy a real service once, save what passes through as mock files, and play it back without it.', link: '/recording/' },
+  { title: 'Record and replay', badge: 'fixtures from traffic', text: 'Proxy a real service once, save what passes through as mock files, and play it back without it.', link: '/recording/' },
   { title: 'Faults', badge: 'resets · latency', text: 'See how clients cope with slow networks, dribbled bodies, resets, garbage and timeouts.', link: '/http/faults' },
   { title: 'Scenarios', badge: 'stateful flows', text: 'Mocks that answer by state, for flows that change as they go: a cart that fills, a job that ends.', link: '/scenarios/' },
-  { title: 'TLS in one line', badge: 'mTLS too', text: 'HTTPS and gRPC over TLS with no certificate to make, or with yours, and client certificates if you like.', link: '/tls/' },
-  { title: 'Outside Go', badge: 'CLI · Docker · MCP', text: 'Serve mock files with the vlatte command or Docker, and change mocks while they run, over REST or MCP.', link: '/run/' },
+  { title: 'Verify requests', badge: 'counts · order · waits', text: 'Check what your client sent, detect unmatched requests and see which parts came closest when a check fails.', link: '/verify/' },
+  { title: 'Streaming clients', badge: 'SSE · gRPC streams', text: 'Test incremental answers, reconnections and interrupted streams, including LLM and remote MCP clients.', link: '/sse/' },
 ]
 
 const toolbox = [
@@ -92,7 +91,8 @@ response:
   status: 201
   header:
     content-type: application/json
-  body: {id: pay_1}
+  body:
+    id: pay_1
 ```
 
 ```sh [CLI]
@@ -109,19 +109,13 @@ curl -k https://localhost:8443/payments \
 
 </HomeHero>
 
-<HomeStats />
-
-<HomeSection title="Mocks that behave like the real thing" lead="Everything a test needs from a server it doesn't own: the right answer, the wrong one, and the slow one.">
-  <HomeCards :items="strengths" />
-</HomeSection>
-
 <HomeSection title="Run it your way" lead="The same mocks, in a test, from files, or in a container.">
 <HomeRun>
 
 ::: code-group
 
 ```go [Go test]
-// go get github.com/caffeine-projects/vlatte
+// go get github.com/caffeine-projects/vlatte@main
 m := mockhttp.MustNew()
 m.MustStart()
 t.Cleanup(m.Close)
@@ -130,7 +124,7 @@ m.MustMock(mockhttp.Getf("/health").Reply(mockhttp.OK()))
 ```
 
 ```sh [Mock files]
-brew install caffeine-projects/tap/vlatte # or go install github.com/caffeine-projects/vlatte/cmd/vlatte@latest
+# Install the binary for your platform; see Installation.
 
 # Serves the mock files of testdata/vlatte/_mocks.
 vlatte --addr=:8080
@@ -139,7 +133,7 @@ vlatte --addr=:8080
 ```yaml [Docker Compose]
 services:
   payments:
-    image: ghcr.io/caffeine-projects/vlatte:v0.1.0-rc.1
+    image: vlatte:dev # see Run > Docker to build from source
     ports: ["8080:8080"]
     volumes:
       - ./mocks:/vlatte/testdata/vlatte/_mocks:ro
@@ -148,6 +142,10 @@ services:
 :::
 
 </HomeRun>
+</HomeSection>
+
+<HomeSection title="Mocks that behave like the real thing" lead="Everything a test needs from a server it doesn't own: the right answer, the wrong one, and the slow one.">
+  <HomeCards :items="strengths" />
 </HomeSection>
 
 <HomeSplit title="HTTPS without the certificate dance" link="/tls/" link-text="TLS">
@@ -211,8 +209,12 @@ m.MustMock(
 ```
 
 ```yaml [Mock file]
-request: {method: GET, path: /report}
-response: {status: 200, body_file: report.csv}
+request:
+  method: GET
+  path: /report
+response:
+  status: 200
+  body_file: report.csv
 pipes:
   - type: bandwidth
     rate: 3g
@@ -223,11 +225,13 @@ pipes:
 </template>
 </HomeSplit>
 
-<HomeSplit title="Mocks your AI agent can drive" link="/mcp/" link-text="MCP">
+<HomeSplit title="Mocks your coding agent can drive" link="/agents/" link-text="Coding Agents">
 
 Over MCP, a coding agent sees every mock, writes new ones, records a real service and checks what your client sent, with the tools the admin API serves.
 
 Start `vlatte mcp` from the agent's settings, or point it at `/mcp` on a server that runs already.
+
+Give your agent the documentation index at [`/llms.txt`](/llms.txt), or the focused Markdown pages it links to, so it can find the APIs and examples for its task.
 
 <template #code>
 

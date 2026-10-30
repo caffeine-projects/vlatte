@@ -12,13 +12,22 @@ m.MustMock(mockhttp.Getf("/prices").Reply(mockhttp.OK().EventStream(mockhttp.New
 ```
 
 ```yaml [Mock file]
-request: {method: GET, path: /prices}
+request:
+  method: GET
+  path: /prices
 response:
   status: 200
   event_stream:
     events:
-      - {event: price, id: "1", data: {value: 10}}
-      - {event: price, id: "2", data: {value: 11}, delay: 1s}
+      - event: price
+        id: "1"
+        data:
+          value: 10
+      - event: price
+        id: "2"
+        data:
+          value: 11
+        delay: 1s
 ```
 
 ```sh [CLI]

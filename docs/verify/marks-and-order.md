@@ -1,5 +1,7 @@
 # Marks and order
 
+Select requests after a mark and verify their order without counting traffic from earlier tests.
+
 ## Marks
 
 A check counts every request the journal holds. Tests that share one server, one after the other, see each other's requests: a test that checks `Times(t, 1)` after another test sent the same request fails with 2.

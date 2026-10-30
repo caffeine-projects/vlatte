@@ -1,5 +1,7 @@
 # Lists and objects
 
+Match collection sizes, items, keys and nested fields. Use these with request parts that contain several values, such as HTTP `Headers` or `Queries`, or with values a JSONPath selects.
+
 | Go | Mock file | Matches |
 |---|---|---|
 | `Len(n)` | `len`, `length` | Text of `n` bytes, or a list or an object of `n` items. |

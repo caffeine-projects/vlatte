@@ -37,7 +37,9 @@ vlatte
 |---|---|
 | [HTTP](/recording/http) | What is recorded, filters, playback, what a recording matches and answers. |
 | [gRPC](/recording/grpc) | How gRPC calls, streams included, are recorded and played back. |
-| [CLI, settings and admin API](/recording/cli-admin) | Recording from the command line, from settings, and while a server runs. |
+| [CLI](/recording/cli) | Recording from the command line and replaying on the next run. |
+| [Settings](/recording/settings) | Recording configuration, headers and upstream TLS. |
+| [Admin API](/recording/admin-api) | Starting, inspecting and stopping a recording while the server runs. |
 | [Files and secrets](/recording/files-secrets) | Where recordings go, and keeping secrets out of them. |
 
-The [Record and replay](/guides/record-and-replay) guide builds a test helper that records on demand and replays otherwise.
+The [Record and replay](/guides/record-and-replay) guide records on demand inside a test and replays the same request with the upstream stopped.

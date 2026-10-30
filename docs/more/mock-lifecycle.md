@@ -26,8 +26,12 @@ name: list users
 priority: 1
 repeat: 3
 delay: 200ms
-request: {method: GET, path: /users}
-response: {status: 200, body: []}
+request:
+  method: GET
+  path: /users
+response:
+  status: 200
+  body: []
 ```
 
 ## Times

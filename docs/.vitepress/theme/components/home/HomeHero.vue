@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { withBase } from 'vitepress'
 
-const install = 'go get github.com/caffeine-projects/vlatte'
+const install = 'go get github.com/caffeine-projects/vlatte@main'
 const copied = ref(false)
 
 async function copy() {
@@ -18,20 +18,21 @@ async function copy() {
       <p class="vl-hero-eyebrow">HTTP · gRPC · CLI · Docker</p>
       <h1>
         <span class="vl-hero-name"><span class="vl-v">v</span>latte</span>
-        <span class="vl-hero-title">API mocking for Go</span>
+        <span class="vl-hero-title">Mock HTTP and gRPC APIs for your tests</span>
       </h1>
       <p class="vl-hero-tagline">
-        Real HTTP and gRPC servers for your tests, that answer the way you tell them to. Match any part of a request,
-        reply with templates, record real APIs and break things on purpose. Then serve the same mocks from files.
+        Start real mock servers inside Go tests, or run them from YAML and JSON for apps in any language.
+        Simulate responses, streaming, stateful flows and network failures, and verify what your client sent.
       </p>
       <div class="vl-hero-actions">
-        <a class="vl-button brand" :href="withBase('/getting-started/quick-start')">Get started</a>
-        <a class="vl-button alt" :href="withBase('/guides/')">Guides</a>
+        <a class="vl-button brand" :href="withBase('/getting-started/quick-start#http')">Use in Go tests</a>
+        <a class="vl-button alt" :href="withBase('/getting-started/quick-start#the-cli')">Run a mock server</a>
         <a class="vl-button alt" href="https://github.com/caffeine-projects/vlatte">GitHub</a>
       </div>
+      <p class="vl-hero-note">The binary and Docker image need no Go installation.</p>
       <div class="vl-hero-install">
         <code><span aria-hidden="true">$ </span>{{ install }}</code>
-        <button type="button" :aria-label="copied ? 'Copied' : 'Copy the install command'" @click="copy">
+        <button type="button" :aria-label="copied ? 'Copied' : 'Copy the Go library install command'" @click="copy">
           {{ copied ? 'Copied' : 'Copy' }}
         </button>
       </div>
@@ -129,6 +130,13 @@ h1 {
   border: 1px solid var(--vl-line);
   border-radius: 10px;
   background: var(--vl-panel);
+}
+
+.vl-hero-note {
+  margin: 16px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--vl-muted);
 }
 
 .vl-hero-install code {

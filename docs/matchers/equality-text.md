@@ -1,10 +1,12 @@
 # Equality and text
 
+Compare values, match text, check for missing values, and match URL paths or query strings. These matchers work in Go and in mock-file matcher lists.
+
 ## Equality
 
 | Go | Mock file | Matches |
 |---|---|---|
-| `Equal(v)`, `Eq` | `equal`, `eq` | A value equal to `v`, by the rule above. |
+| `Equal(v)`, `Eq` | `equal`, `eq` | A value equal to `v`, by the [shared comparison rule](/matchers/#how-values-compare). |
 | `StrictEqual(v)`, `EQS` | `equalstrict`, `eqs` | A value equal to `v`, reading no text. |
 | `EqualIgnoreCase(s)`, `EQI` | `equalignorecase`, `eqi` | Text equal to `s`, ignoring case. |
 | `IsIn(items)` | `isin` | A value equal to one of `items`: `[isIn, [10, 20]]`. |

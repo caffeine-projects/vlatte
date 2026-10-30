@@ -1,5 +1,7 @@
 # Quick start
 
+Choose [HTTP](#http) or [gRPC](#grpc) to embed VLatte in a Go test. For a client in another language, use [the CLI](#the-cli) to serve mock files; a binary or Docker image needs no Go installation.
+
 ## HTTP
 
 A test starts a server, adds a mock, and points the code under test at `m.URL(...)`:
@@ -32,6 +34,8 @@ A gRPC mock server serves any method of the services whose generated code the pr
 
 ## The CLI
 
+Use a CLI built from the version of VLatte documented here; see [Installation](/getting-started/installation). For a complete browser workflow without Go, follow [Testing a frontend client](/guides/testing-a-frontend-client).
+
 Write a mock file:
 
 ```yaml
@@ -48,8 +52,16 @@ Serve it:
 
 ```sh
 vlatte --addr=127.0.0.1:8080
-curl http://127.0.0.1:8080/hello
 ```
+
+Leave the server running, then call it from another terminal:
+
+```sh
+curl http://127.0.0.1:8080/hello
+# hello world
+```
+
+Point your app's development or test API base URL at `http://127.0.0.1:8080`. Browser apps may also need [CORS](/http/cors); a device needs an [address it can reach](/guides/testing-a-frontend-client#connect-a-mobile-app).
 
 ## Next
 

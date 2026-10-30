@@ -24,12 +24,14 @@ vlatte --grpc-tls ...     # gRPC mocks over TLS
 ```
 
 ```sh [Docker]
-docker run --rm -p 8443:8443 -e VLATTE_HTTPS=true ghcr.io/caffeine-projects/vlatte:v0.1.0-rc.1
+docker run --rm -p 8443:8443 -e VLATTE_HTTPS=true vlatte:dev
 ```
 
 :::
 
 ## The default certificate
+
+The Docker example uses the [image built from `main`](/run/docker#building-the-image), as the rest of this site's current-source examples do.
 
 Without a certificate of yours, each protocol serves one of its own:
 
@@ -104,6 +106,6 @@ The admin API serves HTTPS of its own, apart from the mocks: `admin.TLS(config)`
 When a server sends requests on, how it treats the certificates of the services it reaches depends on what sends them:
 
 - [Proxy replies](/http/proxying) and the forward proxy don't verify certificates by default, so a target with a self-signed one answers. `SSLVerify(true)`, or `ssl_verify: true`, turns verification on: set it for a target that gets credentials.
-- A [recording](/recording/cli-admin#settings) verifies its target's certificate, as it sends the target credentials. `record.skip_ssl_verify` skips it.
+- A [recording](/recording/settings) verifies its target's certificate, as it sends the target credentials. `record.skip_ssl_verify` skips it.
 - The forward proxy's [HTTPS interception](/http/proxying#https-interception) answers HTTPS a client sends through it with certificates its own CA signs, so mocks can answer it.
 - `Setup().Transport(rt)` sends all of them through a transport of yours, such as one with a client certificate.

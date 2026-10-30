@@ -7,14 +7,17 @@ id: denied
 priority: 1
 request:
   method: users.Users/Get
-  header: {authorization: [hasprefix, "Bearer "]}
-  fields: {id: [regex, "^u-"]}
+  header:
+    authorization: [hasprefix, "Bearer "]
+  fields:
+    id: [regex, "^u-"]
 response:
   status:
     code: PERMISSION_DENIED
     message: not yours
     details:
-      - {"@type": type.googleapis.com/google.rpc.ErrorInfo, reason: NOT_OWNER}
+      - "@type": type.googleapis.com/google.rpc.ErrorInfo
+        reason: NOT_OWNER
 ```
 
 Start a YAML file with `# yaml-language-server: $schema=https://vlatte.dev/schemas/grpc.schema.json` for completion and checks in editors, or give a JSON file a `"$schema"` key: see [Mock file schemas](/reference/schemas).

@@ -16,7 +16,7 @@ A mock matches a request when every matcher it has matches. Each part of the req
 | `URLFragment(m)` | `fragment` | The decoded text after a `#` in the request target. |
 | `Query(name, m)`, `Queryf`, `Queries(name, m)` | `query`, `queries` | Query parameters. See [Many values](#many-values). |
 | `Header(name, m)`, `Headerf`, `Headers(name, m)` | `header`, `headers` | Headers, by name in any case. |
-| `ContentType(value)` | `header: {content-type: ...}` | The `Content-Type`, ignoring case. A value without parameters matches the media type alone. |
+| `ContentType(value)` | `content-type` under `header` | The `Content-Type`, ignoring case. A value without parameters matches the media type alone. |
 | `Cookie(name, m)` | `cookie` | Cookies by name. |
 | `BasicAuth(user, pass)`, `BasicAuthMatches(user, pass)` | `basic_auth` | Basic credentials. |
 | `ClientIP(m)` | `client_ip` | The client's address, as the server's connection has it, not `X-Forwarded-For`. |
@@ -90,7 +90,14 @@ A name the request doesn't have is an empty list, which `[not, present]` matches
 ## More of the request
 
 - `cookie` matches cookies by name, as `Cookie` does; a cookie the request doesn't have is null, which no text matches.
-- `basic_auth: {username: jeff, password: s3cret}` matches Basic credentials, as `BasicAuth` does, and `BasicAuthMatches` takes matchers; without credentials, the username and password are null, which no text matches.
+- `basic_auth` matches Basic credentials, as `BasicAuth` does, and `BasicAuthMatches` takes matchers; without credentials, the username and password are null, which no text matches. A mock file names its credentials as follows:
+
+  ```yaml
+  request:
+    basic_auth:
+      username: jeff
+      password: s3cret
+  ```
 - `host` matches the host the request names, without its port, and text ignores case: `Host` in Go.
 - `client_ip` matches the client's address, as the server's connection has it, not `X-Forwarded-For`: `ClientIP` in Go.
 

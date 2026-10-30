@@ -10,35 +10,28 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import config from '../.vitepress/config.ts'
+import { assertPageCoverage, pageSource, renderSidebar, sidebarPages } from './sidebar.mjs'
 
 const docs = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const pub = join(docs, 'public')
 const site = config.sitemap.hostname
 
 // Sidebar links to pages that are not Markdown, and the file a model reads in their place.
-const standIns = { '/reference/admin-api.html': 'openapi/admin.yaml' }
-
-// The source of a page, from its link: /http/ is http/index.md, /http/mocks is http/mocks.md.
-const source = (link) => link.slice(1).replace(/\/$/, '/index') + '.md'
+const standIns = { [site + 'reference/admin-api.html']: 'openapi/admin.yaml' }
+const compatibilityPages = ['recording/cli-admin.md']
 
 // A link of the site made absolute: a page links to its Markdown copy, any other file to itself.
 const absolute = (link) => {
   const [path, hash] = link.split('#')
-  const page = source(path)
-  return site + (listed.has(page) ? page : path.slice(1)) + (hash ? `#${hash}` : '')
+  const page = pageSource(path)
+  return site + (listed.has(page) || compatibilityPages.includes(page) ? page : path.slice(1)) + (hash ? `#${hash}` : '')
 }
-
-// Each sidebar group, with its pages in order. A link outside any group is a group of its own.
-const groups = config.themeConfig.sidebar.map((item) => ({ text: item.text, items: item.items ?? [item] }))
 
 // Every page but the home page, which is made of Vue components, must be in the sidebar.
-const listed = new Set(groups.flatMap((g) => g.items.filter((i) => !standIns[i.link]).map((i) => source(i.link))))
+// The former recording page stays available for existing links, outside the current navigation.
+const listed = sidebarPages(config.themeConfig.sidebar, standIns)
 const pages = globSync('**/*.md', { cwd: docs, exclude: ['node_modules/**', ...config.srcExclude] })
-for (const page of pages) {
-  if (page !== 'index.md' && !listed.has(page)) {
-    throw new Error(`llms: ${page} is in no sidebar group: add it to the sidebar in .vitepress/config.ts`)
-  }
-}
+assertPageCoverage(pages, listed, compatibilityPages)
 
 // The lines of a snippet, <<< @/path#region{lang}, where @ is the docs folder.
 const snippet = (page, line) => {
@@ -138,30 +131,29 @@ const convert = (page) => {
 const fill = (template) => readFileSync(join(docs, 'scripts', template), 'utf8').replaceAll('{site}', site)
 
 const converted = new Map()
-const sections = []
-for (const group of groups) {
-  const lines = [`## ${group.text}`, '']
-  for (const item of group.items) {
-    if (standIns[item.link]) {
-      lines.push(`- [${item.text}](${site}${standIns[item.link]})`)
-      continue
-    }
-    const page = source(item.link)
-    if (!converted.has(page)) {
-      converted.set(page, convert(page))
-    }
-    const { description } = converted.get(page)
-    lines.push(`- [${item.text}](${absolute(item.link)})` + (description ? `: ${description}` : ''))
+const sections = renderSidebar(config.themeConfig.sidebar, (item) => {
+  if (standIns[item.link]) {
+    return `[${item.text}](${site}${standIns[item.link]})`
   }
-  sections.push(lines.join('\n'))
-}
+  const page = pageSource(item.link)
+  if (!converted.has(page)) {
+    converted.set(page, convert(page))
+  }
+  const { description } = converted.get(page)
+  return `[${item.text}](${absolute(item.link)})` + (description ? `: ${description}` : '')
+})
 
 const llms = fill('llms.txt')
 const [header] = llms.split('{sections}')
-writeFileSync(join(pub, 'llms.txt'), llms.replace('{sections}', sections.join('\n\n')))
+writeFileSync(join(pub, 'llms.txt'), llms.replace('{sections}', sections))
 
 const full = [...converted].map(([page, { markdown }]) => `---\n\nSource: ${site}${page}\n\n${markdown}`)
 writeFileSync(join(pub, 'llms-full.txt'), header + full.join('\n'))
+
+// Keep old Markdown URLs available too, without listing compatibility pages as current reference material.
+for (const page of compatibilityPages) {
+  converted.set(page, convert(page))
+}
 
 for (const [page, { markdown }] of converted) {
   mkdirSync(dirname(join(pub, page)), { recursive: true })

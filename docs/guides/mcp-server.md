@@ -37,7 +37,8 @@ response:
           "protocolVersion": {{ $r.params.protocolVersion | toJSON }},
           "capabilities": {"tools": {"listChanged": true}},
           "serverInfo": {"name": "weather", "version": "1.0.0"}}}
-  template: {enabled: true}
+  template:
+    enabled: true
 ```
 
 A notification has no answer but `202 Accepted`:
@@ -69,7 +70,8 @@ response:
   header:
     content-type: application/json
   body: '{"jsonrpc": "2.0", "id": {{ (fromJSON .Request.Body.String).id | toJSON }}, "error": {"code": -32601, "message": "Method not found"}}'
-  template: {enabled: true}
+  template:
+    enabled: true
 ```
 
 `tools/list` lists one tool, and `tools/call` streams its progress, then its result, on the answer to the call. Both match the session, and the call matches the tool's name too:
@@ -92,7 +94,8 @@ response:
           {"jsonrpc": "2.0", "id": {{ (fromJSON .Request.Body.String).id | toJSON }}, "result": {"tools": [{
           "name": "get_weather", "description": "Current weather of a city",
           "inputSchema": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}]}}
-  template: {enabled: true}
+  template:
+    enabled: true
 ```
 
 ```yaml
@@ -117,7 +120,8 @@ response:
         data: >-
           {{ $r := fromJSON .Request.Body.String }}{"jsonrpc": "2.0", "id": {{ $r.id | toJSON }}, "result": {
           "content": [{"type": "text", "text": {{ printf "Sunny, 24°C in %s" $r.params.arguments.city | toJSON }}}]}}
-  template: {enabled: true}
+  template:
+    enabled: true
 ```
 
 The `data` that holds a template is text, folded with `>-`: data written as a YAML object is sent as JSON, never as a template. See [Templated events](/sse/events#templated-events).
@@ -140,7 +144,9 @@ response:
     heartbeat: 15s
     events:
       - event: message
-        data: {jsonrpc: "2.0", method: notifications/tools/list_changed}
+        data:
+          jsonrpc: "2.0"
+          method: notifications/tools/list_changed
 ```
 
 ```yaml

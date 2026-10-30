@@ -1,8 +1,10 @@
 # Concepts
 
+Understand how servers, mocks and files fit together, where their working data lives, and what happens when no mock matches.
+
 ## Servers
 
-A mock server is a real server: `mockhttp.Server` for HTTP, `mockgrpc.Server` for gRPC. A test starts one, adds mocks, and sends it requests through the code under test. `Setup()` configures it, and its settings can also come from a `.vlatterc` file and `VLATTE_*` variables: see [Configuration](/run/configuration).
+A mock server is a real server: `mockhttp.Server` for HTTP, `mockgrpc.Server` for gRPC. A Go test starts one, adds mocks, and sends it requests through the code under test. The standalone `vlatte` command starts the same servers for an app in any language. `Setup()` configures a server in Go, and its settings can also come from a `.vlatterc` file and `VLATTE_*` variables: see [Configuration](/run/configuration).
 
 ## Mocks
 

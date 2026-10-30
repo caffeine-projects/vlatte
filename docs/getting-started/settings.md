@@ -7,7 +7,7 @@ A server's settings, such as its address, its mock files or its log level, come 
 3. `VLATTE_*` environment variables.
 4. Command-line flags, for the `vlatte` command.
 
-Each setting has one key that the others derive from: `log.level` is `log: {level: debug}` in a file, `VLATTE_LOG_LEVEL=debug` and `--log-level=debug`.
+Each setting has one key that the others derive from: `log.level` is nested under `log` in a file, as below, `VLATTE_LOG_LEVEL=debug` in the environment and `--log-level=debug` on the command line.
 
 ```yaml
 # .vlatterc.yaml

@@ -1,5 +1,7 @@
 # Combining
 
+Combine matchers with AND, OR, NOT or XOR. Each combined matcher tests the same value, such as a request header or a JSON field.
+
 ## Combining
 
 | Go | Mock file | Matches |

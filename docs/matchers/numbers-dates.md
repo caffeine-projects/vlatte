@@ -1,5 +1,7 @@
 # Numbers, dates and times
 
+Compare numeric values and timestamps, including request text that represents them. Date matchers can compare against fixed times or `now`, with offsets and truncation.
+
 ## Numbers
 
 | Go | Mock file | Matches |

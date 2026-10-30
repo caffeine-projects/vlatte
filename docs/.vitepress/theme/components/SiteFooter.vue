@@ -25,7 +25,7 @@ const columns = [
       { text: 'CLI', link: '/run/cli' },
       { text: 'Docker image', link: '/run/docker' },
       { text: 'Admin API', link: '/admin-api/' },
-      { text: 'MCP', link: '/mcp/' },
+      { text: 'Coding Agents', link: '/agents/' },
       { text: 'Mock file schemas', link: '/reference/schemas' },
     ],
   },
@@ -51,7 +51,7 @@ const href = (link: string) => (link.startsWith('http') ? link : withBase(link))
           <img :src="withBase('/logo-small.svg')" alt="" width="28" height="28" />
           <span class="vl-wordmark"><span>v</span>latte</span>
         </a>
-        <p>API mocking for Go: HTTP and gRPC mock servers for tests, mock files and Docker.</p>
+        <p>HTTP and gRPC mock servers for Go tests and apps in any language, from mock files or Docker.</p>
         <a class="vl-footer-github" :href="repo" aria-label="vlatte on GitHub">
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path

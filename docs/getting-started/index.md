@@ -1,8 +1,8 @@
 # Introduction
 
-VLatte is a mocking framework for Go. In a test, `mockhttp` and `mockgrpc` start real HTTP and gRPC servers that answer the way the test says: match a request on its method, path, headers, query or body, reply with a status, headers and a templated body, call a webhook, or forward what nothing matches to a real upstream.
+VLatte mocks HTTP and gRPC APIs for tests and local development. Use it as a library inside Go tests, or run it as a standalone server for an app in any language, including web and mobile clients.
 
-The `vlatte` CLI serves HTTP and gRPC mocks from YAML or JSON files, records what passes through it and plays it back, and takes new mocks over an admin API.
+Mocks match requests, return fixed or templated answers, simulate network failures, and record real services for later replay. You can check what your app sent through the request journal, and change a running server's mocks through its admin API or coding-agent tools.
 
 ## Two ways to use it
 
@@ -12,7 +12,12 @@ The `vlatte` CLI serves HTTP and gRPC mocks from YAML or JSON files, records wha
 | Mocks | Built in Go, or loaded from [mock files](/http/mock-files) | [Mock files](/http/mock-files), and the [admin API](/admin-api/) |
 | Fits | Unit and integration tests of Go code | Any language, local development, demos, CI environments |
 
-Both share one engine: everything a mock file says, Go can say too, and the other way round for what a file can hold.
+Both modes load the same mock files and share the matching, reply, recording and verification features. Go also supports callbacks and custom reply functions that a declarative file cannot hold.
+
+## Choose your first workflow
+
+- **Go tests:** [Install the library](/getting-started/installation#the-library), then write an [HTTP or gRPC test](/getting-started/quick-start#http).
+- **Web, mobile or another language:** run the [standalone server](/getting-started/quick-start#the-cli), or follow [Testing a frontend client](/guides/testing-a-frontend-client). A binary or Docker image runs without a Go installation.
 
 ## Where to go next
 

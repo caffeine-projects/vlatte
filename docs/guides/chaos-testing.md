@@ -122,8 +122,12 @@ To slow only the body, use `Pipe` in place of `WirePipe`: the client then gets t
 ## The same in mock files
 
 ```yaml
-request: {method: GET, path: /report}
-response: {status: 200, body: done}
+request:
+  method: GET
+  path: /report
+response:
+  status: 200
+  body: done
 wire_pipes:
   - type: latency
     latency: 500ms

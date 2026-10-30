@@ -85,7 +85,8 @@ m.MustMock(mockhttp.Request().Method(http.MethodGet).
 request:
   method: GET
   path_template: "/users/{id}/notifications"
-  header: {authorization: [hasprefix, "Bearer "]}
+  header:
+    authorization: [hasprefix, "Bearer "]
 response:
   status: 200
   event_stream:
@@ -94,7 +95,8 @@ response:
       - event: notification
         id: "{{ .Request.PathParams.id }}-1"
         data: '{"user": "{{ .Request.PathParams.id }}", "text": "Your order shipped"}'
-  template: {enabled: true}
+  template:
+    enabled: true
 ```
 
 ```yaml [Mock file, 401]
@@ -104,7 +106,8 @@ request:
 priority: 1
 response:
   status: 401
-  header: {content-type: text/plain}
+  header:
+    content-type: text/plain
   body: sign in first
 ```
 

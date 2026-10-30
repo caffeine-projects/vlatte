@@ -10,7 +10,7 @@ A server's settings come from these sources, each overriding the ones before it:
 
 ## Keys, variables and flags
 
-Each setting has a key that its variable and flag derive from: `log.level` is `log: {level: debug}` in a file, `VLATTE_LOG_LEVEL=debug` and `--log-level=debug`. `vlatte --help` lists every setting, as does the [settings reference](/reference/settings).
+Each setting has a key that its variable and flag derive from: `log.level` is nested under `log` in a file, as below, `VLATTE_LOG_LEVEL=debug` in the environment and `--log-level=debug` on the command line. `vlatte --help` lists every setting, as does the [settings reference](/reference/settings).
 
 In a file, each setting has its type, as in mock files: `addr: ":8080"` in quotes, `max_age: 150` bare, and a list as a list. Environment variables and flags are text:
 

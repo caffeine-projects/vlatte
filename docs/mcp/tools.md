@@ -1,4 +1,4 @@
-# Tools
+# MCP tools
 
 Each tool runs an [admin API](/admin-api/) operation. A tool's arguments carry what its route takes, the body under a key, such as `{"mock": ...}` for `add_mock` and `{"query": ...}` for `query_requests`, and its schema names them. The server lists only the tools it can do: the last column says when a tool is there. A server without a journal has none of the request tools, and a gRPC server has no `mock_schema`.
 
@@ -33,7 +33,7 @@ Each tool runs an [admin API](/admin-api/) operation. A tool's arguments carry w
 | `recording_status` | `GET /recording` | Counts the recording's calls and the mocks it wrote, or tells that none runs. | Always |
 | `stop_recording` | `DELETE /recording` | Stops the recording, and lists the mock files it wrote, which the server serves from then on. | Always |
 
-See [Recording](/recording/cli-admin).
+See [Recording through the admin API](/recording/admin-api).
 
 ## Scenarios
 

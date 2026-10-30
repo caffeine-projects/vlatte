@@ -8,6 +8,7 @@ The command serves the files matching `testdata/vlatte/_mocks/*mock.yaml` and `*
 
 ```yaml
 # yaml-language-server: $schema=https://vlatte.dev/schemas/http.schema.json
+# testdata/vlatte/_mocks/get-user_mock.yaml
 id: get-user
 name: get a user
 request:
@@ -26,6 +27,7 @@ response:
 
 ```yaml
 # yaml-language-server: $schema=https://vlatte.dev/schemas/http.schema.json
+# testdata/vlatte/_mocks/create-user_mock.yaml
 id: create-user
 request:
   method: POST
@@ -104,7 +106,18 @@ func TestWithMockFiles(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	res, err := http.Get(m.URL("/users/7"))
-	// ...
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK || string(body) != `{"id": 7, "name": "user 7"}` {
+		t.Fatalf("status = %d, body = %s", res.StatusCode, body)
+	}
 }
 ```
 

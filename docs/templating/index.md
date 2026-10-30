@@ -136,6 +136,7 @@ Besides those of Go templates, such as `if`, `range`, `eq`, `len`, `index`, `sli
 | Encoding | `base64Encode`, `base64Decode`, `queryUnescape`, `parseQuery text` (form text as `url.Values`: `(parseQuery $s).Get "a"`) |
 | Random | `uuid`, `randomString kind length` (`alphanumeric`, `alphabetic`, `numeric`, `alphanumericSymbols` or `hex`), `randomInt min max` and `randomFloat min max` (in [min, max)). Not for secrets. |
 | Hashes | `hash alg encoding s` (`md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `sha3-224` to `sha3-512`; `hex` or `base64`), `hmac alg key encoding s` (`sha1`, `sha256` or `sha512`), as webhook providers sign payloads: `{{ hmac "sha256" "secret" "hex" .Request.Body.String }}` |
+| Tokens | `jwt kid claims` signs a JWT; `jwks kids...` publishes public keys: see [Tokens](#tokens). |
 | Environment | `env name`: see below |
 
 ```yaml
@@ -147,6 +148,53 @@ response:
   template:
     enabled: true
 ```
+
+## Tokens
+
+`jwt` signs a JWT with a private key the server holds, and `jwks` publishes its public half as a JWK Set, for a client to verify the signature. Use them to mock an authentication provider, or use the [OpenID Connect recipe](/recipes/oidc) for the authorization code flow.
+
+The default template engine has no signing keys. Add them with `template.keys` in `.vlatterc`:
+
+```yaml
+template:
+  keys:
+    - test-1=RS256
+```
+
+The same setting is `--template-keys=test-1=RS256`, `VLATTE_TEMPLATE_KEYS=test-1=RS256`, or `mockhttp.Setup().TemplateKeys("test-1=RS256")` in Go. For gRPC, use `grpc.template.keys`, `--grpc-template-keys`, `VLATTE_GRPC_TEMPLATE_KEYS`, or `mockgrpc.Setup().TemplateKeys(...)`.
+
+Each entry names a key ID and its algorithm:
+
+| Entry | What it does |
+|---|---|
+| `test-1=RS256` | Generates a new private key when the server is created. A new server gets a different key, even with the same ID. |
+| `test-1=RS256:keys/test.pem` | Reads a PEM private key, with a relative path starting at `root_dir` (`grpc.root_dir` for gRPC). Use a file to keep the same key across restarts, or to give a signature matcher its public half. |
+
+Supported algorithms are `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256`, `ES384`, `ES512` and `EdDSA`. The key must fit the algorithm. HMAC algorithms and `none` are refused. Private keys stay in the engine: templates can publish only their public halves.
+
+A mock can then issue a signed token:
+
+```yaml
+request:
+  method: POST
+  path: /token
+response:
+  status: 200
+  header:
+    content-type: application/json
+  body: |
+    {"access_token": {{ jwt "test-1" (fromJSON `{"sub":"ana"}`) | toJSON }}}
+  template:
+    enabled: true
+```
+
+`jwt` takes claims as JSON object text or a map, such as `fromJSON` returns. It signs exactly those claims: it adds no `iss`, `aud`, `iat` or `exp`, so set the claims the client validates. Its header contains the key's `alg`, its `kid`, and `typ: JWT`. `toJSON` above writes the returned token as a quoted JSON string.
+
+`{{ jwks "test-1" }}` renders a JWK Set as JSON text. Use it as the body of a `/jwks` mock with `Content-Type: application/json`, without quotes or `toJSON`. Name several keys to publish them together, such as `{{ jwks "old" "new" }}` for a key rotation test. A literal key ID the engine doesn't hold fails the mock when its template compiles; an ID read from request data is checked when it renders.
+
+For an engine of your own, add a `crypto.Signer` private key with `vlatte.WithSigningKey(kid, alg, key)` when creating the `vlatte.GoTemplateEngine`, then pass it with `Setup().TemplateEngine(engine)`. Setting both `TemplateKeys` and `TemplateEngine` is an error.
+
+Signing replies and matching incoming tokens are separate operations. The [`jwt` matcher](/matchers/json-xml#jwts) only decodes a token; `signedjwt` verifies its signature and lifetime with public keys you give it. It doesn't read the template engine's signing keys.
 
 ## Environment variables
 

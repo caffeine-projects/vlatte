@@ -4,23 +4,37 @@ This guide records a real API once, commits what it answered as mock files, and 
 
 ## A server that records on demand
 
-The helper below starts a server that serves the recordings in `testdata/api`. Run the tests with `-record` and it sends the requests to the real API instead, and records its answers.
+The test below serves the recordings in `testdata/api`. With `-record`, it sends the request to `API_URL` instead and records the answer. [Install the library](/getting-started/installation#the-library), then save this as `record_test.go` in a directory of its own inside your Go module:
 
 ```go
-var record = flag.Bool("record", false, "record the real API into testdata/api")
+package recording_test
 
-const target = "https://api.example.com"
+import (
+	"context"
+	"flag"
+	"io"
+	"net/http"
+	"os"
+	"testing"
 
-func newAPI(t *testing.T) *mockhttp.Server {
-	t.Helper()
+	"github.com/caffeine-projects/vlatte/mockhttp"
+)
 
+var _record = flag.Bool("record", false, "record the API into testdata/api")
+
+func TestUsers(t *testing.T) {
 	m := mockhttp.MustNew(mockhttp.Setup().
 		MockFilePatterns("testdata/api/*.mock.json").
 		RedactHeader("Authorization"))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
-	if *record {
+	if *_record {
+		target := os.Getenv("API_URL")
+		if target == "" {
+			t.Fatal("API_URL must name the upstream to record")
+		}
+
 		err := m.StartRecording(
 			mockhttp.RecordDir("testdata/api"),
 			mockhttp.RecordTarget(target),
@@ -43,24 +57,65 @@ func newAPI(t *testing.T) *mockhttp.Server {
 		})
 	}
 
-	return m
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, m.URL("/users/1"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK || string(body) != `{"id":1}` {
+		t.Fatalf("status = %d, body = %s", res.StatusCode, body)
+	}
 }
 ```
+
+The cleanup that stops recording uses `context.Background()` because the test's context is canceled before its cleanups run. It is registered after `m.Close`, so it writes the recordings before the server closes.
+
+## Record, then replay without the upstream
+
+For a local walkthrough, start this small upstream in another terminal. It returns the response the test expects:
 
 ```sh
-go test ./... -run TestUsers -args -record   # once, against the real API
-go test ./...                                # every other run, from the recordings
+python3 - <<'PY'
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class API(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != "/users/1":
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"id":1}')
+
+HTTPServer(("127.0.0.1", 9000), API).serve_forever()
+PY
 ```
 
-A test uses the server as it would the API:
+Record it once:
 
-```go
-func TestUsers(t *testing.T) {
-	m := newAPI(t)
-	client := &Client{BaseURL: m.URL()}
-	// ...
-}
+```sh
+API_URL=http://127.0.0.1:9000 go test . -run '^TestUsers$' -args -record
 ```
+
+Check that `testdata/api` holds the recording, then stop the upstream with Ctrl-C and run the test again without `-record`:
+
+```sh
+go test . -run '^TestUsers$'
+```
+
+The same status and body checks now pass using the files alone. For your own API, use its URL and client call, and assert the response your app depends on. Review the recordings before committing them.
 
 ## What a recording looks like
 
@@ -91,7 +146,7 @@ A recording matches its request's method, path and query, and its body, and no o
 
 ## Keep secrets out
 
-Recordings are plain text, and they get committed: review them first. The helper keeps the `Authorization` header's value out with `RedactHeader`, and drops a header that changes on every call with `RecordTransform`. `Set-Cookie` is left out by default. See [Secrets](/recording/files-secrets#secrets).
+Recordings are plain text, and they get committed: review them first. The server's `RedactHeader` keeps the `Authorization` header's value out, and `RecordTransform` drops a header that changes on every call. `Set-Cookie` is left out by default. See [Secrets](/recording/files-secrets#secrets).
 
 ## Record with the CLI
 
@@ -103,7 +158,7 @@ vlatte --record --record-target=https://api.example.com --record-paths='/v1/*'
 vlatte   # serves them
 ```
 
-The admin API's `/recorder` page starts and stops a recording from a browser.
+The admin API's `/recorder` page starts and stops a recording from a browser. See [Recording from the CLI](/recording/cli), [Recording settings](/recording/settings), and [Recording through the admin API](/recording/admin-api).
 
 ## What you used
 

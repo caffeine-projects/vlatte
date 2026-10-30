@@ -13,12 +13,16 @@ m.MustMock(mockhttp.Getf("/users/1").Reply(mockhttp.OK().
 ```
 
 ```yaml
-request: {method: GET, path: /users/1}
+request:
+  method: GET
+  path: /users/1
 response:
   status: 200
   header:
     cache-control: no-store
-  body: {id: 1, name: ann}
+  body:
+    id: 1
+    name: ann
 ```
 
 | Go | Mock file | Sets |
@@ -28,7 +32,7 @@ response:
 | `HeaderTemplate(k, v)`, `HeaderArrTemplate` | `header_template` | Headers rendered from the request: see [Templates](/templating/). |
 | `Trailer(k, v)`, `TrailerArr(k, vs...)` | `trailer` | Trailers. |
 | `Cookie(c)`, `ExpireCookie(c)` | | Cookies, and cookies that expire one the client holds. |
-| `ContentType(mime)` | `header: {content-type: ...}` | The `Content-Type`. |
+| `ContentType(mime)` | `content-type` under `header` | The `Content-Type`. |
 | `PlainText(text)`, `JSON(v)` | | A `text/plain` or `application/json` body. |
 | `BodyText(s)`, `Body(b)`, `BodyJSON(v)`, `BodyReader(r)` | `body`, `body_base64` | The body. A mock file's `body` is text as is, and any other value as JSON. |
 | `BodyFile(name)`, `BodyFileWithTemplate(name)` | `body_file` | A body read from a file, relative to the mock file. |
@@ -59,12 +63,21 @@ m.MustMock(mockhttp.Getf("/jobs/1").Reply(mockhttp.Seq(
 ```
 
 ```yaml
-request: {method: GET, path: /jobs/1}
+request:
+  method: GET
+  path: /jobs/1
 response_sequence:
   responses:
-    - {status: 200, body: {status: running}}
-    - {status: 200, body: {status: running}}
-  after_ended: {status: 200, body: {status: done}}
+    - status: 200
+      body:
+        status: running
+    - status: 200
+      body:
+        status: running
+  after_ended:
+    status: 200
+    body:
+      status: done
 ```
 
 ## Random replies
@@ -72,12 +85,14 @@ response_sequence:
 `Rand(replies...)` answers each request with one of its replies at random. `RandWithSeed(seed, replies...)` picks in an order the seed repeats, and `RandWith(r, replies...)` with a `*rand.Rand` of yours. In a mock file, `response_random` takes `responses` and `seed`.
 
 ```yaml
-request: {method: GET, path: /flaky}
+request:
+  method: GET
+  path: /flaky
 response_random:
   seed: 42
   responses:
-    - {status: 200}
-    - {status: 503}
+    - status: 200
+    - status: 503
 ```
 
 ## Proxy replies

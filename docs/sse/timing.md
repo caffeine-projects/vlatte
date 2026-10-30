@@ -19,8 +19,11 @@ response:
     heartbeat: 15s      # a comment each time the stream waits this long
     keep_open: true     # stay open after the last event, until the client leaves
     events:
-      - {event: price, data: "10"}
-      - {event: price, data: "11", delay: 30s}
+      - event: price
+        data: "10"
+      - event: price
+        data: "11"
+        delay: 30s
 ```
 
 :::

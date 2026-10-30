@@ -6,39 +6,11 @@ This guide mocks a cart and checkout flow, where an answer depends on what came 
 
 A scenario starts in `started`. Adding an item moves it to `has-items`; checking out requires `has-items` and moves it to `paid`. A checkout in any other state falls through to the mock of priority 1, which refuses it. The order's status reads the scenario's state in a template.
 
-```go
-// newShop serves a cart and checkout flow. Each test plays it in its own instance, by its X-Test-Id header.
-func newShop(t *testing.T) *mockhttp.Server {
-	t.Helper()
-
-	m := mockhttp.MustNew(mockhttp.Setup().Silent())
-	m.MustStart()
-	t.Cleanup(m.Close)
-
-	const key = `{{ .Request.Header.Get "X-Test-Id" }}`
-
-	m.MustMock(
-		mockhttp.Postf("/cart/items").
-			StartScenario("checkout").ScenarioKey(key).ScenarioStateWillBe("has-items").
-			Reply(mockhttp.Created()),
-		mockhttp.Postf("/checkout").
-			ScenarioIs("checkout").ScenarioKey(key).ScenarioStateIs("has-items").ScenarioStateWillBe("paid").
-			Reply(mockhttp.OK().JSON(map[string]any{"order": 1})),
-		mockhttp.Postf("/checkout").Priority(1).
-			Reply(mockhttp.Status(http.StatusConflict).PlainText("the cart is empty")),
-		mockhttp.Getf("/orders/1").
-			Reply(mockhttp.OK().BodyTemplate(`{"status": "{{ .Scenarios.StateOf "checkout" (.Request.Header.Get "X-Test-Id") }}"}`)),
-	)
-
-	return m
-}
-```
-
 `ScenarioKey` gives each value of `X-Test-Id` an instance of the scenario of its own, so tests that run at once each move their own. A key that renders empty plays in the shared instance.
 
 ## The tests
 
-Each subtest sends its name as its `X-Test-Id`, and runs in parallel with the other:
+The request helper sends each subtest's name as its `X-Test-Id`. The parent test creates one server and registers the flow before its subtests run in parallel:
 
 ```go
 func call(t *testing.T, m *mockhttp.Server, method, path string) (int, string) {
@@ -65,7 +37,24 @@ func call(t *testing.T, m *mockhttp.Server, method, path string) (int, string) {
 }
 
 func TestCheckout(t *testing.T) {
-	m := newShop(t)
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	const key = `{{ .Request.Header.Get "X-Test-Id" }}`
+
+	m.MustMock(
+		mockhttp.Postf("/cart/items").
+			StartScenario("checkout").ScenarioKey(key).ScenarioStateWillBe("has-items").
+			Reply(mockhttp.Created()),
+		mockhttp.Postf("/checkout").
+			ScenarioIs("checkout").ScenarioKey(key).ScenarioStateIs("has-items").ScenarioStateWillBe("paid").
+			Reply(mockhttp.OK().JSON(map[string]any{"order": 1})),
+		mockhttp.Postf("/checkout").Priority(1).
+			Reply(mockhttp.Status(http.StatusConflict).PlainText("the cart is empty")),
+		mockhttp.Getf("/orders/1").
+			Reply(mockhttp.OK().BodyTemplate(`{"status": "{{ .Scenarios.StateOf "checkout" (.Request.Header.Get "X-Test-Id") }}"}`)),
+	)
 
 	t.Run("pays a cart with items", func(t *testing.T) {
 		t.Parallel()
@@ -105,8 +94,13 @@ scenario:
   required_state: has-items
   new_state: paid
   key: '{{ .Request.Header.Get "X-Test-Id" }}'
-request: {method: POST, path: /checkout}
-response: {status: 200, body: {order: 1}}
+request:
+  method: POST
+  path: /checkout
+response:
+  status: 200
+  body:
+    order: 1
 ```
 
 ## What you used

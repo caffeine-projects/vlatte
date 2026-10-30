@@ -4,7 +4,7 @@ const base = '/'
 const site = 'https://vlatte.dev/'
 const repo = 'https://github.com/caffeine-projects/vlatte'
 
-const tagline = 'Mock HTTP and gRPC servers for Go tests.'
+const tagline = 'Mock HTTP and gRPC APIs in Go tests or from files for apps in any language.'
 
 // One sidebar for every page: each section folds, and the one that holds the page opens.
 const sidebar: DefaultTheme.SidebarItem[] = [
@@ -17,17 +17,6 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'Quick start', link: '/getting-started/quick-start' },
       { text: 'Concepts', link: '/getting-started/concepts' },
       { text: 'Settings', link: '/getting-started/settings' },
-    ],
-  },
-  {
-    text: 'Reference',
-    collapsed: true,
-    items: [
-      { text: 'Overview', link: '/reference/' },
-      { text: 'Go API', link: '/reference/go-api' },
-      { text: 'Mock file schemas', link: '/reference/schemas' },
-      { text: 'Admin API (OpenAPI)', link: '/reference/admin-api.html', target: '_self' },
-      { text: 'Settings', link: '/reference/settings' },
     ],
   },
   {
@@ -45,6 +34,7 @@ const sidebar: DefaultTheme.SidebarItem[] = [
     collapsed: true,
     items: [
       { text: 'Overview', link: '/guides/' },
+      { text: 'Testing a frontend client', link: '/guides/testing-a-frontend-client' },
       { text: 'Testing a REST client', link: '/guides/testing-a-rest-client' },
       { text: 'Mock files and the CLI', link: '/guides/mock-files-and-the-cli' },
       { text: 'Record and replay', link: '/guides/record-and-replay' },
@@ -56,15 +46,6 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: 'HTTPS and mTLS mocks', link: '/guides/https-mtls' },
       { text: 'Testing an LLM streaming client', link: '/guides/llm-streaming' },
       { text: 'Mocking a remote MCP server', link: '/guides/mcp-server' },
-    ],
-  },
-  {
-    text: 'MCP',
-    collapsed: true,
-    items: [
-      { text: 'Overview', link: '/mcp/' },
-      { text: 'Setup', link: '/mcp/setup' },
-      { text: 'Tools', link: '/mcp/tools' },
     ],
   },
   {
@@ -103,88 +84,104 @@ const sidebar: DefaultTheme.SidebarItem[] = [
     ],
   },
   {
-    text: 'SSE (Server-sent Events)',
+    text: 'Features',
     collapsed: true,
     items: [
-      { text: 'Overview', link: '/sse/' },
-      { text: 'Events', link: '/sse/events' },
-      { text: 'Timing and lifetime', link: '/sse/timing' },
-      { text: 'Reconnecting', link: '/sse/reconnecting' },
-      { text: 'Testing a client\'s parser', link: '/sse/raw-events' },
-      { text: 'With other features', link: '/sse/other-features' },
-      { text: 'Testing an LLM streaming client', link: '/guides/llm-streaming' },
-      { text: 'Mocking a remote MCP server', link: '/guides/mcp-server' },
-    ],
-  },
-  {
-    text: 'Matchers',
-    collapsed: true,
-    items: [
-      { text: 'Overview', link: '/matchers/' },
-      { text: 'Equality and text', link: '/matchers/equality-text' },
-      { text: 'Numbers, dates and times', link: '/matchers/numbers-dates' },
-      { text: 'Lists and objects', link: '/matchers/lists-objects' },
-      { text: 'JSON and XML', link: '/matchers/json-xml' },
-      { text: 'Combining', link: '/matchers/combining' },
-      { text: 'Custom matchers', link: '/matchers/custom' },
-      { text: 'All matchers', link: '/matchers/reference' },
-    ],
-  },
-  {
-    text: 'Templating',
-    collapsed: true,
-    items: [
-      { text: 'Overview', link: '/templating/' },
-    ],
-  },
-  {
-    text: 'Scenarios',
-    collapsed: true,
-    items: [
-      { text: 'Overview', link: '/scenarios/' },
-      { text: 'Stateful flows', link: '/guides/stateful-flows' },
-    ],
-  },
-  {
-    text: 'Recording',
-    collapsed: true,
-    items: [
-      { text: 'Overview', link: '/recording/' },
-      { text: 'HTTP', link: '/recording/http' },
-      { text: 'gRPC', link: '/recording/grpc' },
-      { text: 'CLI, settings and admin API', link: '/recording/cli-admin' },
-      { text: 'Files and secrets', link: '/recording/files-secrets' },
-    ],
-  },
-  {
-    text: 'Verifying requests',
-    collapsed: true,
-    items: [
-      { text: 'Overview', link: '/verify/' },
-      { text: 'Selecting requests', link: '/verify/selecting' },
-      { text: 'Counts and reports', link: '/verify/counting' },
-      { text: 'Waiting', link: '/verify/waiting' },
-      { text: 'Marks and order', link: '/verify/marks-and-order' },
-      { text: 'Admin API and MCP', link: '/verify/admin-api' },
-      { text: 'Troubleshooting', link: '/verify/troubleshooting' },
-    ],
-  },
-  {
-    text: 'Webhooks and events',
-    collapsed: true,
-    items: [
-      { text: 'Overview', link: '/webhooks/' },
-      { text: 'Testing webhooks', link: '/guides/webhooks' },
-    ],
-  },
-  {
-    text: 'TLS',
-    collapsed: true,
-    items: [
-      { text: 'Overview', link: '/tls/' },
-      { text: 'HTTP', link: '/http/tls' },
-      { text: 'gRPC', link: '/grpc/tls' },
-      { text: 'HTTPS and mTLS', link: '/guides/https-mtls' },
+      { text: 'Overview', link: '/more/' },
+      {
+        text: 'SSE (Server-sent Events)',
+        collapsed: true,
+        items: [
+          { text: 'Overview', link: '/sse/' },
+          { text: 'Events', link: '/sse/events' },
+          { text: 'Timing and lifetime', link: '/sse/timing' },
+          { text: 'Reconnecting', link: '/sse/reconnecting' },
+          { text: 'Testing a client\'s parser', link: '/sse/raw-events' },
+          { text: 'With other features', link: '/sse/other-features' },
+          { text: 'Testing an LLM streaming client', link: '/guides/llm-streaming' },
+          { text: 'Mocking a remote MCP server', link: '/guides/mcp-server' },
+        ],
+      },
+      {
+        text: 'Matchers',
+        collapsed: true,
+        items: [
+          { text: 'Overview', link: '/matchers/' },
+          { text: 'Equality and text', link: '/matchers/equality-text' },
+          { text: 'Numbers, dates and times', link: '/matchers/numbers-dates' },
+          { text: 'Lists and objects', link: '/matchers/lists-objects' },
+          { text: 'JSON and XML', link: '/matchers/json-xml' },
+          { text: 'Combining', link: '/matchers/combining' },
+          { text: 'Custom matchers', link: '/matchers/custom' },
+          { text: 'All matchers', link: '/matchers/reference' },
+        ],
+      },
+      { text: 'Templating', link: '/templating/' },
+      {
+        text: 'Scenarios',
+        collapsed: true,
+        items: [
+          { text: 'Overview', link: '/scenarios/' },
+          { text: 'Stateful flows', link: '/guides/stateful-flows' },
+        ],
+      },
+      {
+        text: 'Recording',
+        collapsed: true,
+        items: [
+          { text: 'Overview', link: '/recording/' },
+          { text: 'HTTP', link: '/recording/http' },
+          { text: 'gRPC', link: '/recording/grpc' },
+          { text: 'CLI', link: '/recording/cli' },
+          { text: 'Settings', link: '/recording/settings' },
+          { text: 'Admin API', link: '/recording/admin-api' },
+          { text: 'Files and secrets', link: '/recording/files-secrets' },
+        ],
+      },
+      {
+        text: 'Verifying requests',
+        collapsed: true,
+        items: [
+          { text: 'Overview', link: '/verify/' },
+          { text: 'Selecting requests', link: '/verify/selecting' },
+          { text: 'Counts and reports', link: '/verify/counting' },
+          { text: 'Waiting', link: '/verify/waiting' },
+          { text: 'Marks and order', link: '/verify/marks-and-order' },
+          { text: 'Admin API and MCP', link: '/verify/admin-api' },
+          { text: 'Troubleshooting', link: '/verify/troubleshooting' },
+        ],
+      },
+      {
+        text: 'Webhooks and events',
+        collapsed: true,
+        items: [
+          { text: 'Overview', link: '/webhooks/' },
+          { text: 'Testing webhooks', link: '/guides/webhooks' },
+        ],
+      },
+      {
+        text: 'TLS',
+        collapsed: true,
+        items: [
+          { text: 'Overview', link: '/tls/' },
+          { text: 'HTTP', link: '/http/tls' },
+          { text: 'gRPC', link: '/grpc/tls' },
+          { text: 'HTTPS and mTLS', link: '/guides/https-mtls' },
+        ],
+      },
+      {
+        text: 'Recipes',
+        collapsed: true,
+        items: [
+          { text: 'Overview', link: '/recipes/' },
+          { text: 'Proxy all', link: '/recipes/proxy-all' },
+          { text: 'GitHub Auth', link: '/recipes/github-auth' },
+          { text: 'OpenID Connect', link: '/recipes/oidc' },
+          { text: 'Writing a recipe', link: '/recipes/writing' },
+        ],
+      },
+      { text: 'Mock lifecycle', link: '/more/mock-lifecycle' },
+      { text: 'Request journal', link: '/more/journal' },
     ],
   },
   {
@@ -192,27 +189,29 @@ const sidebar: DefaultTheme.SidebarItem[] = [
     collapsed: true,
     items: [
       { text: 'Overview', link: '/admin-api/' },
-      { text: 'OpenAPI reference', link: '/reference/admin-api.html', target: '_self' },
+      { text: 'OpenAPI reference', link: `${site}reference/admin-api.html`, target: '_blank' },
     ],
   },
   {
-    text: 'Recipes',
+    text: 'Coding Agents',
     collapsed: true,
     items: [
-      { text: 'Overview', link: '/recipes/' },
-      { text: 'Proxy all', link: '/recipes/proxy-all' },
-      { text: 'GitHub Auth', link: '/recipes/github-auth' },
-      { text: 'OpenID Connect', link: '/recipes/oidc' },
-      { text: 'Writing a recipe', link: '/recipes/writing' },
+      { text: 'Overview', link: '/agents/' },
+      { text: 'Documentation for agents', link: '/agents/documentation' },
+      { text: 'MCP overview', link: '/mcp/' },
+      { text: 'MCP setup', link: '/mcp/setup' },
+      { text: 'MCP tools', link: '/mcp/tools' },
     ],
   },
   {
-    text: 'More',
+    text: 'Reference',
     collapsed: true,
     items: [
-      { text: 'Overview', link: '/more/' },
-      { text: 'Mock lifecycle', link: '/more/mock-lifecycle' },
-      { text: 'Request journal', link: '/more/journal' },
+      { text: 'Overview', link: '/reference/' },
+      { text: 'Go API', link: '/reference/go-api' },
+      { text: 'Mock file schemas', link: '/reference/schemas' },
+      { text: 'Admin API (OpenAPI)', link: `${site}reference/admin-api.html`, target: '_blank' },
+      { text: 'Settings', link: '/reference/settings' },
     ],
   },
   { text: 'Contributing', link: '/contributing' },
@@ -243,7 +242,13 @@ export default defineConfig({
     ['meta', { property: 'og:image', content: `${site}og-1280x640.png` }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
   ],
+  transformPageData(pageData) {
+    if (pageData.frontmatter.aside === undefined && (pageData.headers.length === 0 || pageData.frontmatter.outline === false)) {
+      return { frontmatter: { ...pageData.frontmatter, aside: false } }
+    }
+  },
   markdown: {
+    headers: { level: [2, 3] },
     theme: { light: 'github-light', dark: 'github-dark' },
     // Inline code shows Go templates, such as `{{ .Request.Body }}`: Vue must not read them as its own.
     config(md) {

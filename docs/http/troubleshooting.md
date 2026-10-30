@@ -1,5 +1,7 @@
 # Troubleshooting
 
+Diagnose unmatched requests and serving failures through near misses, debug headers, logs and the request journal.
+
 ## Failures
 
 When no mock matches, or serving a request fails, the server answers itself. It sends `418 I'm a teapot`, a status a real server rarely sends, so the answer never looks like a mock's, and the `VLatte-Error` header says why:

@@ -26,7 +26,7 @@ The [package docs](https://pkg.go.dev/github.com/caffeine-projects/vlatte/match)
 | [Equality and text](/matchers/equality-text) | Equality, text, presence and URLs. |
 | [Numbers, dates and times](/matchers/numbers-dates) | Comparisons of numbers, and of dates and times, with offsets and truncation. |
 | [Lists and objects](/matchers/lists-objects) | Length, items, keys, and every or some item. |
-| [JSON and XML](/matchers/json-xml) | JSONPath, JSON equality and JSON Schema; XML equality and XPath. |
+| [JSON and XML](/matchers/json-xml) | JSONPath, JSON equality and JSON Schema; XML equality and XPath; JWT claims and signature verification. |
 | [Combining](/matchers/combining) | `All`, `Any`, `Not` and the rest, and the matchers only Go has. |
 | [Custom matchers](/matchers/custom) | Matchers of your own, in Go and in mock files. |
 | [All matchers](/matchers/reference) | Every matcher, its Go name and its mock-file name, in one table. |

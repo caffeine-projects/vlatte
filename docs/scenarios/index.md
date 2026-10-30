@@ -28,9 +28,16 @@ m.MustMock(
 
 ```yaml [Mock file]
 id: read
-scenario: {name: order, required_state: created, new_state: read}
-request: {method: GET, path: /orders/1}
-response: {status: 200, body: '{"id": 1}'}
+scenario:
+  name: order
+  required_state: created
+  new_state: read
+request:
+  method: GET
+  path: /orders/1
+response:
+  status: 200
+  body: '{"id": 1}'
 ```
 
 :::
@@ -54,7 +61,11 @@ Names ignore case: `Checkout` is `checkout`. A scenario is listed under the name
 A mock with a scenario key plays in an instance of the scenario for each key: tests that run at once against one server, or tenants of one API, each move their own. The key is a template that renders with the request, as reply templates do: ``ScenarioKey(`{{ .Request.Header.Get "X-Test-Id" }}`)`` in Go, `key` under `scenario` in a mock file. Each key starts in `started`; keys are exact, so `t1` is not `T1`. A key that renders empty plays in the shared instance, the one of mocks without a key, and a key that fails to render fails the request's matching.
 
 ```yaml
-scenario: {name: checkout, required_state: started, new_state: paid, key: '{{ .Request.Header.Get "X-Test-Id" }}'}
+scenario:
+  name: checkout
+  required_state: started
+  new_state: paid
+  key: '{{ .Request.Header.Get "X-Test-Id" }}'
 ```
 
 ## Moving scenarios

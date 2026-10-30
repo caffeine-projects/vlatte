@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --test scripts/*.test.mjs .vitepress/*.test.mjs",
     "prepare-site": "node scripts/prepare.mjs && node scripts/llms.mjs",
     "dev": "npm run prepare-site && vitepress dev",
-    "build": "npm run prepare-site && vitepress build",
+    "build": "npm test && npm run prepare-site && vitepress build",
     "preview": "vitepress preview"
   },
   "devDependencies": {

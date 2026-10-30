@@ -1,5 +1,7 @@
 # Recording gRPC
 
+Record gRPC calls, including streams, as mock files and replay them without the original upstream.
+
 ```go
 err := m.StartRecording(mockgrpc.RecordTarget("localhost:50051"), mockgrpc.RecordDir("testdata/grpc_recorded"))
 // ... calls to m reach the target, and are recorded ...

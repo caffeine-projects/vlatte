@@ -4,6 +4,7 @@ Each guide works through one task from start to end, with code you can run. The 
 
 | Guide | What you build |
 |---|---|
+| [Testing a frontend client](/guides/testing-a-frontend-client) | A mock API for a browser app without Go, with CORS, request verification and mobile connection notes. |
 | [Testing a REST client](/guides/testing-a-rest-client) | Tests of a Go client of a users API: the happy path, an error answer, and what the client sent. |
 | [Mock files and the CLI](/guides/mock-files-and-the-cli) | Mock files with editor support, served by the `vlatte` command and loaded by Go tests. |
 | [Record and replay](/guides/record-and-replay) | Mock files recorded from a real API once and replayed in every later run. |

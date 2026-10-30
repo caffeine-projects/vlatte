@@ -9,12 +9,12 @@ const ways = [
   },
   {
     title: 'From mock files',
-    text: 'The vlatte command serves the YAML or JSON files of a folder.',
+    text: 'A standalone binary serves YAML or JSON mocks for web, mobile and backend apps. No Go installation needed.',
     link: '/run/cli',
   },
   {
     title: 'In Docker Compose',
-    text: 'The image serves your mock files next to the app that calls them.',
+    text: 'Run the same mock files next to your app locally or in CI.',
     link: '/guides/docker-compose',
   },
 ]

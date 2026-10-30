@@ -1,5 +1,7 @@
 # Custom matchers
 
+Create matchers from Go functions, or register named matchers to use in mock files, admin API requests and journal queries.
+
 ## In Go
 
 Any `vlatte.Matcher` works where a matcher goes. `match.Function(fn)` and `match.Predicate(fn)` make one from a function, and a mock's whole-request matchers get the request itself:
