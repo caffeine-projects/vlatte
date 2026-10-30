@@ -290,6 +290,17 @@ func TestRequests_AReadOfASelectionItCantTakeFails(t *testing.T) {
 	require.ErrorIs(t, err, verify.ErrInvalidSpec)
 }
 
+func TestRequests_FindRefusesAPartialOrClosedJournal(t *testing.T) {
+	j := newJournal(t, journal.Options{MaxEntries: 1}, entry("a"), entry("b"))
+	v := verify.NewVerifier(j, verify.Protocol[*fakeMock, fakeServer]{})
+	_, err := v.VerifyRequests().Find(t.Context())
+	require.ErrorIs(t, err, verify.ErrDropped)
+
+	require.NoError(t, j.Close())
+	_, err = v.VerifyRequests().Find(t.Context())
+	require.ErrorIs(t, err, journal.ErrClosed)
+}
+
 func TestRequests_AnAssertionItCantTakeFailsTheCheck(t *testing.T) {
 	r := served(t).VerifyRequests()
 

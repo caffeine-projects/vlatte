@@ -3,6 +3,8 @@ package viewdata
 import (
 	"context"
 	"errors"
+	"mime/multipart"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,6 +13,34 @@ import (
 )
 
 var errKVDown = errors.New("kv down")
+
+func TestRequest_CookiesAndBodyAreAvailableToTemplates(t *testing.T) {
+	cookie := &http.Cookie{Name: "session", Value: "abc"}
+	r := &Request{Cookies: map[string]*http.Cookie{"session": cookie}, Body: NewBody("text", []byte("tea"), "tea")}
+
+	got, err := r.Cookie("session")
+	require.NoError(t, err)
+	require.Equal(t, cookie, got)
+	_, err = r.Cookie("missing")
+	require.ErrorIs(t, err, http.ErrNoCookie)
+	require.True(t, r.HasBody())
+	require.Equal(t, "tea", r.Body.Content())
+	require.Equal(t, []byte("tea"), r.Body.Bytes())
+	require.Equal(t, "dGVh", r.Body.Base64())
+	require.Equal(t, "tea", r.Body.String())
+	require.False(t, (&Request{}).HasBody())
+	require.False(t, (&Request{Body: NewBody("text", nil, nil)}).HasBody())
+}
+
+func TestRequest_FormFilePicksTheFirstFileOfTheNamedField(t *testing.T) {
+	first := &multipart.FileHeader{Filename: "first.txt"}
+	second := &multipart.FileHeader{Filename: "second.txt"}
+	r := &Request{MultipartForm: &multipart.Form{File: map[string][]*multipart.FileHeader{"doc": {first, second}}}}
+
+	require.Equal(t, first, r.FormFile("doc"))
+	require.Nil(t, r.FormFile("missing"))
+	require.Nil(t, (&Request{}).FormFile("doc"))
+}
 
 // downKV is a key-value store that can't answer.
 type downKV struct {

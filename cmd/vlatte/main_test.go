@@ -20,6 +20,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -35,6 +36,16 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/buildinfo"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
+
+func TestExecutable_VersionReachesStandardOutputAndExitsSuccessfully(t *testing.T) {
+	bin, err := os.Executable()
+	require.NoError(t, err)
+	command := exec.CommandContext(t.Context(), bin, "version")
+	command.Env = append(os.Environ(), "GO_WANT_VLATTE_MAIN_HELPER=1")
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	require.Equal(t, "devel\n", string(output))
+}
 
 // start runs the CLI with args until the test ends, or until the returned stop is called.
 // stop returns the exit code.
@@ -86,6 +97,11 @@ func withoutDockerHost(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
+	if os.Getenv("GO_WANT_VLATTE_MAIN_HELPER") == "1" {
+		main()
+		return
+	}
+
 	// The command keeps its admin mocks and its journal under the working directory: the tests run in a directory of
 	// their own, so none writes into the repository.
 	dir, err := os.MkdirTemp("", "vlatte-cli-test-*")

@@ -40,6 +40,13 @@ import (
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
+func TestServer_MustStartReportsASecondStart(t *testing.T) {
+	m := MustNew(Setup().Silent().InMemory())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	require.PanicsWithError(t, "server: Start: "+vlatte.ErrStarted.Error(), m.MustStart)
+}
+
 type blockingUnaryReply struct {
 	entered chan struct{}
 	release chan struct{}

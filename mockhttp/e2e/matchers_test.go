@@ -153,6 +153,32 @@ func TestMatcherCombinations(t *testing.T) {
 	actAndAssert(m.URL())
 }
 
+func TestFormattedMatchers_UseTheFormattedURLAndFormValue(t *testing.T) {
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	m.MustMock(mockhttp.Request().URLf(m.URL()+"/%s", "tea").FormFieldf("tag", "%s-%d", "tea", 2).Reply(mockhttp.Created()))
+
+	tests := []struct {
+		name   string
+		path   string
+		value  string
+		status int
+	}{
+		{name: "both match", path: "/tea", value: "tea-2", status: http.StatusCreated},
+		{name: "wrong form", path: "/tea", value: "tea-3", status: mockhttp.StatusNoMatch},
+		{name: "wrong URL", path: "/coffee", value: "tea-2", status: mockhttp.StatusNoMatch},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := http.PostForm(m.URL(tt.path), url.Values{"tag": {tt.value}})
+			require.NoError(t, err)
+			require.NoError(t, res.Body.Close())
+			require.Equal(t, tt.status, res.StatusCode)
+		})
+	}
+}
+
 func TestMatchers_MultipleMethods(t *testing.T) {
 	m := mockhttp.MustNew()
 	t.Cleanup(func() { m.Close() })

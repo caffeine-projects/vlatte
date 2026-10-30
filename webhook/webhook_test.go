@@ -793,6 +793,18 @@ func TestWebHook_TemplateErrors(t *testing.T) {
 	require.ErrorIs(t, err, ErrRenderingTemplate)
 }
 
+func TestWebHook_ABodyTemplateExecutionFailurePreventsTheSend(t *testing.T) {
+	transport := &sent{}
+	wh, err := New(WithTransport(transport))
+	require.NoError(t, err)
+	err = wh.Run(t.Context(), onComplete{
+		params: map[string]any{"url": "http://hooks.test", "body_template": "{{ .missing }}"},
+		kit:    kit{data: make(map[string]any)},
+	})
+	require.ErrorIs(t, err, ErrRenderingTemplate)
+	require.Nil(t, transport.req)
+}
+
 func TestWebHook_RunErrorsSayWhatTheWebhookWasDoing(t *testing.T) {
 	errTransform := errors.New("boom")
 	wh, err := New(WithTransform(func(context.Context, vlatte.OnComplete, *Args) error { return errTransform }))

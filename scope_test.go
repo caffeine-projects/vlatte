@@ -103,6 +103,35 @@ func TestScopedDelete(t *testing.T) {
 	require.Nil(t, scope.Mock(m1.ID()))
 }
 
+func TestScope_IDsFollowTheMocksTheScopeStillHolds(t *testing.T) {
+	a, b := newFakeMockWith("a", 0), newFakeMockWith("b", 0)
+	store := vlatte.NewStore[*fakeMock]()
+	require.NoError(t, store.Store(t.Context(), a, b))
+	scope := vlatte.NewScope([]*fakeMock{a, b}, store)
+
+	require.ElementsMatch(t, []string{"a", "b"}, scope.IDs())
+	require.True(t, scope.Exists("a"))
+	require.False(t, scope.Exists("missing"))
+	require.NoError(t, scope.Delete(t.Context(), "a"))
+	require.False(t, scope.Exists("a"))
+	require.Equal(t, []string{"b"}, scope.IDs())
+	require.NoError(t, scope.Clear(t.Context()))
+	require.Empty(t, scope.IDs())
+}
+
+func TestScope_AssertNumberOfCallsReportsTheActualTotal(t *testing.T) {
+	m := newFakeMockWith("twice", 0)
+	m.hit()
+	m.hit()
+	scope := vlatte.NewScope([]*fakeMock{m}, vlatte.NewStore[*fakeMock]())
+	ft := testmock.NewFakeT()
+
+	require.True(t, scope.AssertNumberOfCalls(ft, 2))
+	require.Empty(t, ft.Errors())
+	require.False(t, scope.AssertNumberOfCalls(ft, 1))
+	require.Equal(t, "\nExpected 1 matched request hits.\nGot 2", errorText(t, ft))
+}
+
 func TestScope_DeleteOnlyOwnMocks(t *testing.T) {
 	// A scope that deleted another scope's mock by ID would break that scope's assertions and cleanup.
 	store := vlatte.NewStore[*fakeMock]()

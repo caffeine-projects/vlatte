@@ -74,6 +74,8 @@ func TestCoerce_Documents(t *testing.T) {
 		{name: "null for a string", key: "name", raw: nil, problems: problem("name", "name must be a string, not null", "")},
 		{name: "list for a string", key: "name", raw: []any{"a"}, problems: problem("name", "name must be a string, not a list", "")},
 		{name: "object for a string", key: "name", raw: map[string]any{"a": "b"}, problems: problem("name", "name must be a string, not an object", "")},
+		{name: "non-string object keys", key: "name", raw: map[any]any{1: "a"}, problems: problem("name", "name must be a string, not an object with non-string keys", "")},
+		{name: "unsupported Go value", key: "name", raw: complex(1, 2), problems: problem("name", "name must be a string, not a complex128", "")},
 
 		{name: "bool", key: "debug", raw: true, want: Value{Bool: true}},
 		{name: "bool text", key: "debug", raw: "false", want: Value{Bool: false}},

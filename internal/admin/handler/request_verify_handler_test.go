@@ -1,12 +1,14 @@
 package handler_test
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
+	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/verify"
@@ -52,6 +54,31 @@ func TestVerifyRequests(t *testing.T) {
 	doc = conforms(t, res, body, "RequestVerdict")
 	require.Equal(t, false, doc["passed"])
 	require.Equal(t, int64(1), doc["count"])
+}
+
+func TestVerifyRequests_AProtocolPatternNarrowsBothCountsAndOrders(t *testing.T) {
+	j := journalOf(t, entryOf("a", "GET", "/a", journal.OutcomeMatched), entryOf("b", "GET", "/b", journal.OutcomeMatched))
+	pattern := func(config.Value) (verify.Pattern, error) {
+		return patternFunc(func(_ context.Context, e *journal.Entry) (bool, error) { return e.Path == "/b", nil }), nil
+	}
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: j, Pattern: pattern})
+	doc := verified(t, url, `{"request": {"path": "/b"}, "count": 1}`)
+	require.Equal(t, map[string]any{"passed": true, "count": int64(1), "waited_ms": int64(0)}, doc)
+	doc = verified(t, url, `{"in_order": [{"path": "/a"}, {"request": {"path": "/b"}}]}`)
+	require.Equal(t, map[string]any{"passed": true, "waited_ms": int64(0)}, doc)
+	doc = verified(t, url, `{"in_order": [{"request": {"path": "/b"}}, {"path": "/b"}]}`)
+	require.Equal(t, map[string]any{
+		"passed": false, "waited_ms": int64(0),
+		"report": "\nExpected requests in this order:\n" +
+			"  1. request with a pattern: #2\n" +
+			"  2. request with path: none after #2, #2 before it\n",
+	}, doc)
+}
+
+func TestVerifyRequests_RejectsAnUnsupportedBodyMediaType(t *testing.T) {
+	url := serve(t, newStore(t), adminapi.Capabilities{Journal: journalOf(t)})
+	res, body := send(t, request{method: "QUERY", url: url + "/requests/verify", body: "count=1", contentType: "text/plain"})
+	problem(t, res, body, http.StatusUnsupportedMediaType, "unsupported_media_type")
 }
 
 func TestVerifyRequests_AFailureSaysWhatAGoTestSays(t *testing.T) {
@@ -111,6 +138,7 @@ func TestVerifyRequests_RefusesACheckItCantRun(t *testing.T) {
 	url := serve(t, newStore(t), adminapi.Capabilities{Journal: journalOf(t)})
 
 	for _, body := range []string{
+		`{"after": -1}`,
 		`{"limit": 1}`,
 		`{"count": ["no_such_matcher", 1]}`,
 		`{"count": -1, "within": "30s"}`,
@@ -120,6 +148,8 @@ func TestVerifyRequests_RefusesACheckItCantRun(t *testing.T) {
 		`{"within": "1s", "during": "1s"}`,
 		`{"within": "1s", "count": 0}`,
 		`{"request": {"path": "/a"}}`,
+		`{"in_order": [{"request": {"path": "/a"}}]}`,
+		`{`,
 		`{"in_order": []}`,
 		`{"in_order": [{"path": "/a"}], "count": 1}`,
 		`{"in_order": [{"path": "/a", "after": 1}]}`,

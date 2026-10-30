@@ -31,12 +31,23 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/testmock"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m)
+}
+
+func TestNew_AnAdminStoreFactoryFailurePreventsServing(t *testing.T) {
+	errStore := errors.New("test: admin store unavailable")
+	app, err := New(Setup().Silent().Admin(admin.MustNew()).AdminStore(func(*Server) (vlatte.Store[*Mock], error) {
+		return nil, errStore
+	}))
+	require.Nil(t, app)
+	require.ErrorIs(t, err, errStore)
+	require.EqualError(t, err, "server: admin store: test: admin store unavailable")
 }
 
 func TestHTTPMockApp(t *testing.T) {

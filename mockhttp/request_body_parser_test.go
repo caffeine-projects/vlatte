@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
@@ -75,6 +76,28 @@ func TestRequestBodyParsers_CanParse(t *testing.T) {
 			assert.Equal(t, tc.expected, tc.parser.CanParse(tc.contentType, tc.req))
 		})
 	}
+}
+
+func TestParseRequestBody_ANilBodyNeedsNoParser(t *testing.T) {
+	r, err := http.NewRequest(http.MethodPost, "http://example.org", nil)
+	require.NoError(t, err)
+	parsed, raw, parser, err := parseRequestBody(MustNew(Setup().Silent()), r)
+	require.NoError(t, err)
+	require.Nil(t, parsed)
+	require.Nil(t, raw)
+	require.Nil(t, parser)
+}
+
+func TestParseRequestBody_AReadFailureCannotBeMatchedAsAnEmptyBody(t *testing.T) {
+	errRead := errors.New("test: request body unavailable")
+	r, err := http.NewRequest(http.MethodPost, "http://example.org", iotest.ErrReader(errRead))
+	require.NoError(t, err)
+	parsed, raw, parser, err := parseRequestBody(MustNew(Setup().Silent()), r)
+	t.Cleanup(func() { _ = r.Body.Close() })
+	require.ErrorIs(t, err, errRead)
+	require.Nil(t, parsed)
+	require.Nil(t, raw)
+	require.Nil(t, parser)
 }
 
 func TestRequestBodyParsers_Parse(t *testing.T) {

@@ -105,6 +105,26 @@ func TestMock_String(t *testing.T) {
 	require.Equal(t, "Mock [b]", unnamed.String())
 }
 
+func TestMock_SwitchControlsWhetherTheMockIsEnabled(t *testing.T) {
+	m, err := Getf("/").Reply(OK()).Build(MustNew(Setup().Silent()))
+	require.NoError(t, err)
+	m.Switch(false)
+	require.False(t, m.Enabled())
+	m.Switch(true)
+	require.True(t, m.Enabled())
+}
+
+func TestMock_ADescriptionCombinesRepeatedMatchersOfTheSameHeader(t *testing.T) {
+	m, err := Request().ID("headers").
+		Header("X-Tag", match.HasPrefix("tea")).
+		Header("X-Tag", match.HasSuffix("pot")).
+		Header("X-Other", match.Equal("one")).Reply(OK()).Build(MustNew(Setup().Silent()))
+	require.NoError(t, err)
+	doc, err := m.MarshalJSON()
+	require.NoError(t, err)
+	require.JSONEq(t, `{"id":"headers","request":{"header":{"X-Tag":["all",[["hasPrefix","tea"],["hasSuffix","pot"]]],"X-Other":["eq","one"]}},"response":{"status":200}}`, string(doc))
+}
+
 func TestMock_ADescribedMockLoadsBackAndMatchesTheSame(t *testing.T) {
 	// The description of a mock is a mock file, as the admin API shows and takes it. Loaded back, it must match the
 	// same requests: a matcher of the method must not get lost, nor one of the path or fragment turn into one of the

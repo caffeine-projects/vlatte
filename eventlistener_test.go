@@ -68,6 +68,18 @@ func mockWith(names ...string) *fakeMock {
 	return m
 }
 
+func TestEventConfigs_HasFindsANamedEventWithoutDroppingLaterOnes(t *testing.T) {
+	events := vlatte.EventConfigs{{Name: "first"}, {Name: "second"}}
+	require.True(t, events.Has("second"))
+	require.False(t, events.Has("missing"))
+	require.False(t, vlatte.EventConfigs(nil).Has("first"))
+}
+
+func TestEventRegistry_AnUnregisteredEventIsANoOp(t *testing.T) {
+	registry := vlatte.NewEventRegistry[vlatte.OnComplete]()
+	require.NoError(t, registry.Run(t.Context(), "missing", completed{}))
+}
+
 func TestEventRunner_RunsEachEventOnItsOwnAndWaitsForAll(t *testing.T) {
 	// Events ran one after the other, and the first error skipped the rest: a failing global webhook stopped the
 	// mock's own. Each runs in a goroutine of its own now, so none holds up or skips another, and OnComplete returns

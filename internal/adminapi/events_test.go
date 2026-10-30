@@ -102,6 +102,17 @@ func TestEvents(t *testing.T) {
 	}
 }
 
+func TestEvents_AnUnencodableEventDoesNotBreakTheStream(t *testing.T) {
+	events := adminapi.NewEvents()
+	t.Cleanup(events.Close)
+	client := listen(t, serveStream(t, events))
+	events.Publish(adminapi.Event{Type: adminapi.EventWarning, Time: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)})
+	events.Publish(adminapi.Event{Type: adminapi.EventMatched, Time: time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC), RequestID: "r1"})
+	event, data := client.next(t)
+	require.Equal(t, adminapi.EventMatched, event)
+	require.JSONEq(t, `{"type":"matched","time":"2026-10-30T00:00:00Z","request_id":"r1"}`, data)
+}
+
 func TestEvents_AClientThatLeavesStopsGettingThem(t *testing.T) {
 	// Publishers never wait on clients: one that left, or falls behind, misses events, and the others don't.
 	events := adminapi.NewEvents()

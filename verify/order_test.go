@@ -138,6 +138,29 @@ func TestInOrder_RefusesStepsOfRequestsTheJournalDropped(t *testing.T) {
 		errorText(t, ft))
 }
 
+func TestCheckOrder_RefusesAnInvalidSelection(t *testing.T) {
+	j := newJournal(t, journal.Options{}, entry("a"))
+	_, err := verify.CheckOrder(t.Context(), verify.Spec{Journal: j, Query: journal.Query{Limit: 1}})
+	require.ErrorIs(t, err, verify.ErrInvalidSpec)
+	require.EqualError(t, err, "verify: step 1: verify: invalid check: a check counts all it selects: its query has no Limit or Before")
+}
+
+func TestCheckOrder_AClosedJournalCannotProveTheOrder(t *testing.T) {
+	j := newJournal(t, journal.Options{}, entry("a"))
+	require.NoError(t, j.Close())
+	_, err := verify.CheckOrder(t.Context(), verify.Spec{Journal: j})
+	require.ErrorIs(t, err, journal.ErrClosed)
+}
+
+func TestInOrder_ListsOnlyTheLastThreeRequestsBeforeThePreviousStep(t *testing.T) {
+	v := verifierOf(t, entry("a"), entry("b"), entry("c"), entry("d"), entry("last"))
+	ft := testmock.NewFakeT()
+	require.False(t, verify.InOrder(ft, v.VerifyRequests().Path(match.Equal("/last")), v.VerifyRequests().Path(match.Not(match.Equal("/last")))))
+	require.Equal(t, "\nExpected requests in this order:\n"+
+		"  1. request with path: #5\n"+
+		"  2. request with path: none after #5, 4, the last #2, #3, #4 before it\n", errorText(t, ft))
+}
+
 func TestCheckOrder_AClearBetweenTwoStepsFailsTheOrder(t *testing.T) {
 	// A login from before a reset and a logout after it were never in the journal together: the order of the two is
 	// not one the journal holds.
