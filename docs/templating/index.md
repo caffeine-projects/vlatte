@@ -53,7 +53,7 @@ Templates read:
 
 ## Key-value store
 
-`.KV` reads the server's key-value store: `{{ .KV.Get "token" }}` writes the value of `token`, and `{{ if .KV.Has "token" }}` checks for a key that may be missing. Go code sets the values, as in `m.KV().Set(ctx, "token", []byte("abc123"))`. The server keeps them in memory, and `Setup().KV(store)` gives it a store of your own instead, such as one on Redis, that implements `vlatte.KV`:
+`.KV` reads the server's key-value store: `{{ .KV.Get "token" }}` writes the value of `token`, and `{{ if .KV.Has "token" }}` checks for a key that may be missing. Go code sets the values, as in `m.KV().Set(ctx, "token", []byte("abc123"))`, and so does the [admin API](/admin-api/), `PUT /kv/token` with `{"value": "abc123"}`, while the server runs. The server keeps them in memory, and `Setup().KV(store)` gives it a store of your own instead, such as one on Redis, that implements `vlatte.KV`:
 
 ```go
 type KV interface {
@@ -78,7 +78,7 @@ line two"
 empty,
 ```
 
-The first row is the header `key,value`, and each other row is a key and its value, quoted as RFC 4180 says, so `{{ .KV.Get "greeting" }}` renders `Hello, "world"`. A byte order mark, which Excel writes, is dropped, and keys and values keep their spaces. A missing header, a row without two fields, an empty key or a repeated key fails the load, and the error names the line. The file is read once: `Set` and `Del` change the store, never the file. The image's working directory is `/vlatte`, so mount the file there: `docker run -v "$PWD/kv.csv:/vlatte/kv.csv" -e VLATTE_KV_FILE=kv.csv …`.
+The first row is the header `key,value`, and each other row is a key and its value, quoted as RFC 4180 says, so `{{ .KV.Get "greeting" }}` renders `Hello, "world"`. A byte order mark, which Excel writes, is dropped, and keys and values keep their spaces. A missing header, a row without two fields, an empty key or a repeated key fails the load, and the error names the line. `Set` and `Del` change the store, never the file. The admin API's `POST /kv/reload` loads the file again, in place of every value: values set since are gone, and keys removed since come back. A store of your own that implements `vlatte.KVReloader` reloads too. The image's working directory is `/vlatte`, so mount the file there: `docker run -v "$PWD/kv.csv:/vlatte/kv.csv" -e VLATTE_KV_FILE=kv.csv …`.
 
 A store on Redis, with [go-redis](https://github.com/redis/go-redis), as [`kv_test.go`](https://github.com/caffeine-projects/vlatte/blob/main/mockhttp/e2e/kv_test.go) runs it:
 

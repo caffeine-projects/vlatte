@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
@@ -14,6 +15,8 @@ const (
 	_lackingScenarios = "keep scenarios"
 	_lackingJournal   = "keep a journal of requests"
 	_lackingSchema    = "describe its mock files"
+	_lackingKV        = "keep a key-value store"
+	_lackingKVReload  = "load its key-value store from a file"
 )
 
 // Operations are the admin operations of a mock server, apart from how a request reaches them: each route of the
@@ -28,6 +31,7 @@ type Operations struct {
 	recorder  adminapi.Recorder
 	scenarios adminapi.Scenarios
 	journal   adminapi.Journal
+	kv        vlatte.KV
 	pattern   adminapi.RequestPattern
 	matchers  *matchbuild.Registry
 	schema    []byte
@@ -56,6 +60,7 @@ func NewOperations(caps adminapi.Capabilities) *Operations {
 		recorder:  caps.Recorder,
 		scenarios: caps.Scenarios,
 		journal:   caps.Journal,
+		kv:        caps.KV,
 		pattern:   caps.Pattern,
 		matchers:  matchers,
 		schema:    caps.MockSchema,
@@ -84,6 +89,16 @@ func (o *Operations) HasMockSchema() bool { return o.schema != nil }
 
 // HasJournal reports whether the server keeps a journal of requests, for [Operations.ListRequests] and its siblings.
 func (o *Operations) HasJournal() bool { return o.journal != nil }
+
+// HasKV reports whether the server keeps a key-value store, for [Operations.ListKV] and its siblings.
+func (o *Operations) HasKV() bool { return o.kv != nil }
+
+// ReloadsKV reports whether the server's key-value store is a [vlatte.KVReloader], which loads its values again, for
+// [Operations.ReloadKV].
+func (o *Operations) ReloadsKV() bool {
+	_, ok := o.kv.(vlatte.KVReloader)
+	return ok
+}
 
 // waiting returns ctx, which ends too with EndWaits, for an operation that waits, and the func that releases it.
 func (o *Operations) waiting(ctx context.Context) (context.Context, context.CancelFunc) {

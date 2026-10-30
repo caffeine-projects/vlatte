@@ -87,6 +87,10 @@ type Capabilities struct {
 	Logs      *Logs
 	Journal   Journal
 
+	// KV is the key-value store the server's templates read. POST /kv/reload reloads it when it is a
+	// [vlatte.KVReloader].
+	KV vlatte.KV
+
 	// Pattern makes the filter of the request part of a mock of the server's protocol, for a query of the journal.
 	// Nil, for a protocol that has none, takes no request part.
 	Pattern RequestPattern

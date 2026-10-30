@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/kvtest"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
@@ -173,12 +175,93 @@ func TestKV_RequestsReadWhileATestWrites(t *testing.T) {
 	}
 }
 
-// startKV starts a server that reads kv, with mocks that read the key greeting: GET /greeting reads it, and
-// GET /guarded checks for it first, with hello in its place.
+func TestKV_TheAdminAPISetsAndRemovesKeys(t *testing.T) {
+	// A test sets the value its mocks read through the admin API, and removes it, on every store: requests read the
+	// change at once.
+	for _, store := range _kvStores {
+		t.Run(store.name, func(t *testing.T) {
+			kv, _ := store.start(t, nil)
+			m := startKV(t, kv)
+
+			status, body := sendAdmin(t, m, http.MethodPut, "/kv/greeting", `{"value": "hi"}`)
+			require.Equal(t, http.StatusOK, status, body)
+
+			res, got := getTarget(t, m, "/greeting")
+			require.Equal(t, http.StatusOK, res.StatusCode, string(got))
+			require.Equal(t, "hi", string(got))
+
+			status, body = sendAdmin(t, m, http.MethodGet, "/kv", "")
+			require.Equal(t, http.StatusOK, status, body)
+			require.JSONEq(t, `{"keys": ["greeting"]}`, body)
+
+			status, body = sendAdmin(t, m, http.MethodDelete, "/kv/greeting", "")
+			require.Equal(t, http.StatusNoContent, status, body)
+
+			res, got = getTarget(t, m, "/greeting")
+			require.Equal(t, mockhttp.StatusNoMatch, res.StatusCode)
+			require.Contains(t, string(got), `key "greeting" is not set`)
+
+			res, got = getTarget(t, m, "/guarded")
+			require.Equal(t, http.StatusOK, res.StatusCode, string(got))
+			require.Equal(t, "hello", string(got))
+
+			status, body = sendAdmin(t, m, http.MethodGet, "/kv", "")
+			require.Equal(t, http.StatusOK, status, body)
+			require.JSONEq(t, `{"keys": []}`, body)
+		})
+	}
+}
+
+func TestKV_ReloadingTheFileReplacesTheValues(t *testing.T) {
+	// A test edits the store's file and reloads it: requests read the file's values, and the value the admin API set
+	// since is gone. A reset of the mocks leaves the store as it is.
+	file := writeCSV(t, map[string]string{"greeting": "v1"})
+	m := startKV(t, vlatte.MustNewCSVKV(file))
+
+	status, body := sendAdmin(t, m, http.MethodPut, "/kv/greeting", `{"value": "v2"}`)
+	require.Equal(t, http.StatusOK, status, body)
+
+	status, body = sendAdmin(t, m, http.MethodPost, "/reset", "")
+	require.Equal(t, http.StatusNoContent, status, body)
+
+	res, got := getTarget(t, m, "/greeting")
+	require.Equal(t, http.StatusOK, res.StatusCode, string(got))
+	require.Equal(t, "v2", string(got), "a reset leaves the store")
+
+	require.NoError(t, os.WriteFile(file, []byte("key,value\ngreeting,v3\n"), 0o600))
+
+	status, body = sendAdmin(t, m, http.MethodPost, "/kv/reload", "")
+	require.Equal(t, http.StatusNoContent, status, body)
+
+	res, got = getTarget(t, m, "/greeting")
+	require.Equal(t, http.StatusOK, res.StatusCode, string(got))
+	require.Equal(t, "v3", string(got))
+}
+
+func TestKV_OnlyAFileStoreReloads(t *testing.T) {
+	// A store with no file has nothing to load: the test learns, rather than read the values it set as the file's.
+	for _, store := range _kvStores {
+		if store.name == "csv" {
+			continue
+		}
+
+		t.Run(store.name, func(t *testing.T) {
+			kv, _ := store.start(t, nil)
+			m := startKV(t, kv)
+
+			status, body := sendAdmin(t, m, http.MethodPost, "/kv/reload", "")
+			require.Equal(t, http.StatusNotImplemented, status, body)
+			require.Contains(t, body, "this mock server can't load its key-value store from a file")
+		})
+	}
+}
+
+// startKV starts a server that reads kv, with an admin API, and mocks that read the key greeting: GET /greeting reads
+// it, and GET /guarded checks for it first, with hello in its place.
 func startKV(t *testing.T, kv vlatte.KV) *mockhttp.Server {
 	t.Helper()
 
-	m := mockhttp.MustNew(mockhttp.Setup().Silent().KV(kv))
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().KV(kv).Admin(admin.MustNew()))
 	m.MustStart()
 	t.Cleanup(m.Close)
 
@@ -187,6 +270,24 @@ func startKV(t *testing.T, kv vlatte.KV) *mockhttp.Server {
 		BodyTemplate(`{{ if .KV.Has "greeting" }}{{ .KV.Get "greeting" }}{{ else }}hello{{ end }}`)))
 
 	return m
+}
+
+// sendAdmin sends a request of method to path of the admin API of m, with body in JSON, and returns the status and
+// body of the answer.
+func sendAdmin(t *testing.T, m *mockhttp.Server, method, path, body string) (int, string) {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(t.Context(), method, m.AdminURL()+path, strings.NewReader(body))
+	require.NoError(t, err)
+
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+
+	b, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.NoError(t, res.Body.Close())
+
+	return res.StatusCode, string(b)
 }
 
 // redisKV is a [vlatte.KV] on Redis, as a user plugs one in.

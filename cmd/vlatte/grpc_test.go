@@ -183,6 +183,85 @@ response:
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
+func TestCLI_BothAdminAPIsChangeTheOneKVStore(t *testing.T) {
+	// The command's servers share one store: a value the HTTP server's admin API sets is what a gRPC mock reads, and
+	// the gRPC server's admin API loads the file again for both. Reloading the mock files leaves the store as it is.
+	withoutDockerHost(t)
+
+	set, file := healthSet(t, "shared.health.v1")
+	dir := t.TempDir()
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "kv.csv"), []byte("key,value\nstatus,SERVING\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "check.yaml"), []byte(`
+request:
+  method: shared.health.v1.Health/Check
+response:
+  message: '{"status": "{{ .KV.Get "status" }}"}'
+  template: true
+`), 0o600))
+
+	grpcAddr, httpAdmin, grpcAdmin := randomAddr(t), randomAddr(t), randomAddr(t)
+	start(t, "--addr", randomAddr(t), "--admin-addr", httpAdmin, "--kv-file", filepath.Join(dir, "kv.csv"),
+		"--grpc-addr", grpcAddr, "--grpc-descriptors", set, "--grpc-mock-files", filepath.Join(dir, "*.yaml"),
+		"--grpc-admin-addr", grpcAdmin, "--log-level", "disabled")
+
+	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	msgs := file.Messages()
+	req := dynamicpb.NewMessage(msgs.ByName("HealthCheckRequest"))
+	health := func() (string, error) {
+		res := dynamicpb.NewMessage(msgs.ByName("HealthCheckResponse"))
+		if err := conn.Invoke(t.Context(), "/shared.health.v1.Health/Check", req, res); err != nil {
+			return "", err
+		}
+
+		status := res.Descriptor().Fields().ByName("status")
+		return string(status.Enum().Values().ByNumber(res.Get(status).Enum()).Name()), nil
+	}
+
+	admin := func(method, url, body string) int {
+		req, err := http.NewRequestWithContext(t.Context(), method, url, strings.NewReader(body))
+		require.NoError(t, err)
+
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+
+		return res.StatusCode
+	}
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		got, err := health()
+		assert.NoError(c, err)
+		assert.Equal(c, "SERVING", got)
+
+		res, err := http.Get("http://" + httpAdmin + "/health")
+		if assert.NoError(c, err, "the HTTP admin API serves") {
+			_ = res.Body.Close()
+		}
+	}, 10*time.Second, 100*time.Millisecond)
+
+	require.Equal(t, http.StatusOK, admin(http.MethodPut, "http://"+httpAdmin+"/kv/status", `{"value": "NOT_SERVING"}`))
+
+	got, err := health()
+	require.NoError(t, err)
+	require.Equal(t, "NOT_SERVING", got)
+
+	require.Equal(t, http.StatusNoContent, admin(http.MethodPost, "http://"+httpAdmin+"/mocks/reload", ""))
+
+	got, err = health()
+	require.NoError(t, err)
+	require.Equal(t, "NOT_SERVING", got, "reloading the mock files leaves the store")
+
+	require.Equal(t, http.StatusNoContent, admin(http.MethodPost, "http://"+grpcAdmin+"/kv/reload", ""))
+
+	got, err = health()
+	require.NoError(t, err)
+	require.Equal(t, "SERVING", got, "the file's value is back")
+}
+
 func TestRun_InvalidGRPCSettingsLeaveNothingOpen(t *testing.T) {
 	// An invalid gRPC setting is a usage error. The HTTP server, built first, kept its journal open: the next run in
 	// the directory found it in use.
