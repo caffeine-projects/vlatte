@@ -9,7 +9,7 @@ A mock answers its method whatever its call type. `Build` checks a reply against
 ```go
 m.MustMock(mockgrpc.Method("Feed/Watch").
 	Reply(mockgrpc.Messages(&pb.Event{Id: "1"}, &pb.Event{Id: "2"}).
-		MessageDelay(100 * time.Millisecond).
+		MessageDelay(vlatte.Latency(100 * time.Millisecond)).
 		Status(codes.Unavailable, "restarting")))
 ```
 

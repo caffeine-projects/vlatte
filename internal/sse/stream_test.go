@@ -247,3 +247,14 @@ func TestStream_ShortReadsGetTheRestOfTheEvent(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "a: abcdef\n\ndata: g\n\n", string(rest))
 }
+
+func TestStream_DelayEvaluationFailureIsNotSuccessfulEOF(t *testing.T) {
+	cause := errors.New("test: delay unavailable")
+	s := stream(t.Context(), t, &Spec{
+		Events:     []*EventSpec{data("unsent")},
+		EventDelay: vlatte.DelayFunc(func(context.Context) (time.Duration, error) { return time.Hour, cause }),
+	}, "")
+	b, err := io.ReadAll(s)
+	require.ErrorIs(t, err, cause)
+	require.Empty(t, b)
+}

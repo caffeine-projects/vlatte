@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"time"
 	"uuid"
 
 	"github.com/caffeine-projects/vlatte"
@@ -663,18 +662,9 @@ func (b *Builder) UpstreamPipe(pipes ...vlatte.Pipe) *Builder {
 	return b
 }
 
-// Delay waits for the given duration before serving the mocked response.
-func (b *Builder) Delay(duration time.Duration) *Builder {
-	b.spec.delay = vlatte.Latency(duration)
-
-	return b
-}
-
-// DelayFunc sets a function that picks the delay before each mocked response,
-// such as [vlatte.Jitter] or [vlatte.UniformDistribution].
-func (b *Builder) DelayFunc(delay vlatte.Delay) *Builder {
-	b.spec.delay = delay
-
+// Delay chooses the wait before each reply. Nil disables it. An evaluation error prevents the reply.
+func (b *Builder) Delay(d vlatte.Delay) *Builder {
+	b.spec.delay = d
 	return b
 }
 

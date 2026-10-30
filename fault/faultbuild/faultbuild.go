@@ -1,6 +1,6 @@
 // Package faultbuild builds the faults of package [github.com/caffeine-projects/vlatte/fault] from the fault specs of
 // mock files: an object whose type names the fault and whose other keys are its parameters, such as
-// {"type": "latency", "latency": "300ms", "jitter": "60ms"}. Each fault describes itself as the spec that builds it
+// {"type": "latency", "delay": {"type": "jitter", "latency": "300ms", "jitter": "60ms"}}. Each fault describes itself as the spec that builds it
 // again.
 package faultbuild
 
@@ -13,6 +13,7 @@ import (
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/fault"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/delay"
 )
 
 // _durationUsage says how mock files write durations.
@@ -39,8 +40,7 @@ var _bandwidthNames = []string{"gprs", "dial_up", "2g", "good_2g", "3g", "good_3
 type spec struct {
 	after         time.Duration
 	total         time.Duration
-	latency       time.Duration
-	jitter        time.Duration
+	latencyDelay  vlatte.Delay
 	delay         time.Duration
 	chunks        int
 	averageSize   int
@@ -73,12 +73,16 @@ var _kinds = []kind{
 		),
 	},
 	{
-		name: "latency", required: []string{"latency"},
-		build: func(s spec) vlatte.Pipe { return fault.Latency(s.latency, s.jitter) },
-		schema: params(
-			duration("latency", "How late each write arrives.", func(s *spec, d time.Duration) { s.latency = d }),
-			duration("jitter", "How much the latency varies by, up to the latency. 0 by default.", func(s *spec, d time.Duration) { s.jitter = d }),
-		),
+		name: "latency", required: []string{"delay"},
+		build: func(s spec) vlatte.Pipe { return fault.Latency(s.latencyDelay) },
+		schema: params(field{
+			Key: "delay", Kind: config.Any, Usage: "Delay of each write or flush: milliseconds, a duration, or a typed delay distribution.",
+			Set: func(s *spec, v config.Value) error {
+				var err error
+				s.latencyDelay, err = delay.Decode(v)
+				return err
+			},
+		}),
 	},
 	{
 		name: "bandwidth", required: []string{"rate"},
@@ -143,7 +147,7 @@ var _types = config.NewSchema(config.Field[int64]{
 //	random_data_then_close
 //	connection_reset_by_peer
 //	chunked_dribble_delay           chunks, total
-//	latency                         latency, jitter (0 by default)
+//	latency                         delay (duration or typed delay distribution)
 //	bandwidth                       rate: bytes per second, or gprs, dial_up, 2g, good_2g, 3g, good_3g, dsl, 4g,
 //	                                wifi or fiber, the Bandwidth constants of package fault
 //	slicer                          average_size, size_variation (0 by default), delay (0 by default)
@@ -153,7 +157,7 @@ var _types = config.NewSchema(config.Field[int64]{
 //	connection_reset_by_peer_after  after
 //
 // A spec with problems, such as a missing parameter, a key the fault doesn't take, or a value its function of
-// package fault would panic on, fails with an error that lists each, keyed as in fault.latency.
+// package fault would panic on, fails with an error that lists each, keyed as in fault.delay.
 func Build(doc any) (vlatte.Pipe, error) {
 	pipe, err := BuildAt(doc, "fault", "fault")
 	if cfgErr, ok := errors.AsType[*config.Error](err); ok {
@@ -170,7 +174,7 @@ func BuildAt(doc any, origin, key string) (vlatte.Pipe, error) {
 
 	obj, ok := doc.(map[string]any)
 	if !ok {
-		return nil, config.Mismatch(v, "an object, such as {type: latency, latency: 300ms}")
+		return nil, config.Mismatch(v, "an object, such as {type: latency, delay: 300ms}")
 	}
 
 	k, err := kindOf(v, obj)

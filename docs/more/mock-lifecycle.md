@@ -9,14 +9,13 @@ These features work the same on HTTP and gRPC mocks, in Go and in mock files.
 | `Priority(p)` | `priority` | Mocks with a lower priority are matched first; mocks of equal priority, in the order they were added. |
 | `Enabled(false)` | `enabled: false` | Starts the mock disabled. |
 | `Times(n)`, `Once()` | `repeat: n` | Serves `n` requests, then stops matching. |
-| `Delay(d)` | `delay` | Waits `d` before replying. |
-| `DelayFunc(fn)` | | Picks the delay of each reply, such as `vlatte.Jitter(avg, deviation)`, where deviation is a percent of avg from 0 to 200, `vlatte.Latency(d)` or `vlatte.UniformDistribution(min, max)`. |
+| `Delay(delay)` | `delay` | Chooses the wait before each reply. Use `vlatte.Latency(d)`, `vlatte.UniformDistribution(lower, upper)`, `vlatte.Jitter(latency, jitter)` or `vlatte.LogNormalDistribution(median, sigma, maxValue)`. |
 
 ```go
 m.MustMock(mockhttp.Getf("/users").
 	ID("users-list").Name("list users").
 	Priority(1).Times(3).
-	DelayFunc(vlatte.Jitter(200*time.Millisecond, 20)).
+	Delay(vlatte.Jitter(200*time.Millisecond, 20*time.Millisecond)).
 	Reply(mockhttp.OK().JSON([]any{})))
 ```
 
@@ -41,6 +40,30 @@ response:
 ## Delays
 
 A mock's delay comes before its reply: a client that leaves during it gets nothing, and a [proxy reply](/http/proxying)'s target isn't called. Durations in mock files are whole milliseconds (`1500`) or a Go duration (`1.5s`). For delays inside an answer, such as between the parts of a body, see [Pipes](/http/pipes) and [Faults](/http/faults) for HTTP, and `MessageDelay` for [gRPC streams](/grpc/streaming).
+
+The built-in delays describe themselves and round-trip through mock files and the admin API. Uniform bounds are durations, both included. Jitter is a duration on either side of the latency: `Jitter(200*time.Millisecond, 20*time.Millisecond)` picks from 180ms to 220ms, both included. Invalid constructor parameters panic.
+
+A lognormal distribution models long-tail latency:
+
+```go
+m.MustMock(mockhttp.Getf("/search").
+    Delay(vlatte.LogNormalDistribution(100*time.Millisecond, 1.0, 2*time.Second)).
+    Reply(mockhttp.OK()))
+```
+
+```yaml
+delay:
+  type: lognormal
+  median: 100ms
+  sigma: 1.0
+  maxValue: 2s
+```
+
+`median` must be positive. `sigma` is the finite, nonnegative standard deviation of the natural logarithm; 0 gives the median every time. Optional `maxValue` defaults to 0, meaning no explicit cutoff. A positive cutoff must be at least the median. Larger samples are rejected and drawn again, rather than clipped to the cutoff. Unrepresentable durations are also rejected. The median and sigma describe the distribution before truncation.
+
+The same object format supports `{type: fixed, duration: 100ms}`, `{type: uniform, lower: 50ms, upper: 150ms}` and `{type: jitter, latency: 100ms, jitter: 20ms}`. Duration parameters accept whole milliseconds or Go duration strings. The editor schema checks shapes and types; loading also checks bounds and representability.
+
+Custom implementations expose `Next(context.Context) (time.Duration, error)` and `Describe() vlatte.Descriptor`. `vlatte.DelayFunc` adapts a function with the same signature. The server waits for the returned duration; the function calculates it. Errors and negative durations fail the operation. Cancellation interrupts waiting, and implementations must support concurrent calls. `Delay(nil)` disables the delay. Functions cannot be serialized: describing a mock containing one fails explicitly.
 
 ## Enabling and disabling
 

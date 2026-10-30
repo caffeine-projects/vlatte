@@ -166,12 +166,12 @@ func TestBuild_LatencyDelaysAsItsSpecSays(t *testing.T) {
 		to   time.Duration
 	}{
 		{
-			name: "a latency", spec: obj("type", "latency", "latency", "500ms"), desc: obj("type", "latency", "latency", "500ms"),
+			name: "a latency", spec: obj("type", "latency", "delay", "500ms"), desc: obj("type", "latency", "delay", "500ms"),
 			from: 500 * time.Millisecond, to: 500 * time.Millisecond,
 		},
 		{
-			name: "a latency and its jitter", spec: obj("type", "latency", "latency", int64(1000), "jitter", "20ms"),
-			desc: obj("type", "latency", "latency", "1s", "jitter", "20ms"),
+			name: "a latency and its jitter", spec: obj("type", "latency", "delay", obj("type", "jitter", "latency", int64(1000), "jitter", "20ms")),
+			desc: obj("type", "latency", "delay", obj("type", "jitter", "latency", "1s", "jitter", "20ms")),
 			from: 980 * time.Millisecond, to: 1020 * time.Millisecond,
 		},
 	}
@@ -214,11 +214,11 @@ func TestBuild_RefusesASpecItCantBuild(t *testing.T) {
 	}{
 		{
 			name: "a name alone", spec: "empty_response",
-			want: []string{"fault: invalid_value: fault must be an object, such as {type: latency, latency: 300ms}, not a string"},
+			want: []string{"fault: invalid_value: fault must be an object, such as {type: latency, delay: 300ms}, not a string"},
 		},
 		{
 			name: "a list", spec: []any{"latency", "1s"},
-			want: []string{"fault: invalid_value: fault must be an object, such as {type: latency, latency: 300ms}, not a list"},
+			want: []string{"fault: invalid_value: fault must be an object, such as {type: latency, delay: 300ms}, not a list"},
 		},
 		{
 			name: "no type", spec: obj("latency", "1s"),
@@ -242,7 +242,7 @@ func TestBuild_RefusesASpecItCantBuild(t *testing.T) {
 		},
 		{
 			name: "a parameter missing", spec: obj("type", "latency"),
-			want: []string{"fault: missing_value: fault.latency is required by a latency fault"},
+			want: []string{"fault: missing_value: fault.delay is required by a latency fault"},
 		},
 		{
 			name: "every parameter missing", spec: obj("type", "chunked_dribble_delay"),
@@ -252,10 +252,10 @@ func TestBuild_RefusesASpecItCantBuild(t *testing.T) {
 			},
 		},
 		{
-			name: "a parameter misspelled", spec: obj("type", "latency", "latncy", "1s"),
+			name: "a parameter misspelled", spec: obj("type", "latency", "dely", "1s"),
 			want: []string{
-				"fault: missing_value: fault.latency is required by a latency fault",
-				"fault: unknown_key: fault.latncy is not a known setting; did you mean fault.latency?",
+				"fault: missing_value: fault.delay is required by a latency fault",
+				"fault: unknown_key: fault.dely is not a known setting; did you mean fault.delay?",
 			},
 		},
 		{
@@ -276,8 +276,8 @@ func TestBuild_RefusesASpecItCantBuild(t *testing.T) {
 			want: []string{"fault: invalid_value: fault.after must be 0 or more, not -1"},
 		},
 		{
-			name: "a duration of another type", spec: obj("type", "latency", "latency", true),
-			want: []string{"fault: invalid_value: fault.latency must be milliseconds or a Go duration, not a bool"},
+			name: "a duration of another type", spec: obj("type", "latency", "delay", true),
+			want: []string{"fault: invalid_value: fault.delay must be milliseconds or a Go duration, not a bool"},
 		},
 		{
 			name: "past the most milliseconds", spec: obj("type", "slow_close", "delay", int64(9223372036855)),
@@ -317,8 +317,8 @@ func TestBuild_RefusesASpecItCantBuild(t *testing.T) {
 			want: []string{"fault: invalid_value: fault: slicer size variation must be from 0 to 1, not 2"},
 		},
 		{
-			name: "a jitter past the latency", spec: obj("type", "latency", "latency", "1s", "jitter", "2s"),
-			want: []string{"fault: invalid_value: fault: latency jitter must be from 0 to 1s, not 2s"},
+			name: "a jitter past the latency", spec: obj("type", "latency", "delay", obj("type", "jitter", "latency", "1s", "jitter", "2s")),
+			want: []string{"fault: invalid_value: fault.delay: expected 0 <= jitter <= latency and a representable latency+jitter, not latency 1s and jitter 2s"},
 		},
 	}
 
@@ -384,10 +384,10 @@ func genSpec() *rapid.Generator[map[string]any] {
 			latency := time.Duration(rapid.Int64Range(0, int64(time.Hour)).Draw(t, "latency"))
 			if rapid.Bool().Draw(t, "jitter") {
 				jitter := time.Duration(rapid.Int64Range(0, int64(latency)).Draw(t, "jitter"))
-				return obj("type", "latency", "latency", latency.String(), "jitter", jitter.String())
+				return obj("type", "latency", "delay", obj("type", "jitter", "latency", latency.String(), "jitter", jitter.String()))
 			}
 
-			return obj("type", "latency", "latency", genDuration(t, "latency"))
+			return obj("type", "latency", "delay", genDuration(t, "latency"))
 		case 7:
 			if rapid.Bool().Draw(t, "a common link") {
 				return obj("type", "bandwidth", "rate", rapid.SampledFrom(_bandwidthNames).Draw(t, "link"))

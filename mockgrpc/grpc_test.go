@@ -579,7 +579,7 @@ func TestConnectionLimits_DoNotCutAnActiveSlowStream(t *testing.T) {
 		defer m.Close()
 		m.MustMock(Method("List").Reply(Messages(
 			&pb.ListItem{Key: "a"}, &pb.ListItem{Key: "b"},
-		).MessageDelay(2 * time.Second)))
+		).MessageDelay(vlatte.Latency(2 * time.Second))))
 
 		conn, err := grpc.NewClient("passthrough:///bufconn",
 			grpc.WithTransportCredentials(insecure.NewCredentials()),

@@ -1094,3 +1094,34 @@ func TestServer_CloseLeavesTheCallersProxyTransportOpen(t *testing.T) {
 
 	require.Zero(t, shared.closes.Load())
 }
+
+func TestDescribe_DelayFunctionsAreNeverSilentlyOmitted(t *testing.T) {
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+	d := vlatte.DelayFunc(func(context.Context) (time.Duration, error) { panic("description must not evaluate a delay") })
+	for _, b := range []*Builder{
+		Getf("/delay").Delay(d).Reply(OK()),
+		Getf("/events").Reply(OK().EventStream(NewEventStream().EventDelay(d))),
+		Getf("/fault").Pipe(fault.Latency(d)).Reply(OK()),
+	} {
+		mock := m.MustMock(b).Mocks()[0]
+		_, err := mock.Describe().MarshalJSON()
+		require.ErrorIs(t, err, vlatte.ErrDelayNotDescribed)
+	}
+}
+
+func TestDescribe_DelayConfigurationRoundTripsWithoutSampling(t *testing.T) {
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+	peer := MustNew(Setup().Silent())
+	t.Cleanup(peer.Close)
+	for _, d := range []vlatte.Delay{vlatte.Latency(0), vlatte.UniformDistribution(10, 20), vlatte.Jitter(100, 20), vlatte.LogNormalDistribution(100, 1, 200)} {
+		mock := m.MustMock(Getf("/roundtrip").Delay(d).Reply(OK())).Mocks()[0]
+		first, err := mock.Describe().MarshalJSON()
+		require.NoError(t, err)
+		back := peer.MustMock(FromBytes(first, "json")).Mocks()[0]
+		second, err := back.Describe().MarshalJSON()
+		require.NoError(t, err)
+		require.JSONEq(t, string(first), string(second))
+	}
+}

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"time"
 	"uuid"
 
 	"google.golang.org/protobuf/proto"
@@ -44,8 +43,6 @@ type Builder struct {
 	scenarioNewState      string
 	scenarioKey           string
 	delay                 vlatte.Delay
-	delayDuration         time.Duration // the delay of Delay, which a description writes; DelayFunc's can't be
-	delayFunc             bool          // the delay is DelayFunc's
 	events                vlatte.EventConfigs
 	expectations          []*vlatte.Eval[*Call]
 	readsRequest          bool    // a matcher reads the request, which a bidi call hasn't sent when it matches
@@ -272,17 +269,10 @@ func (b *Builder) ScenarioStateWillBe(newState string) *Builder {
 	return b
 }
 
-// Delay waits for d before the mock replies. A client that leaves during the delay gets nothing, and the mock doesn't
-// count the call.
-func (b *Builder) Delay(d time.Duration) *Builder {
-	b.delay, b.delayDuration, b.delayFunc = vlatte.Latency(d), d, false
-	return b
-}
-
-// DelayFunc sets a function that picks the delay before each reply, such as [vlatte.Jitter] or
-// [vlatte.UniformDistribution]. Describing a mock with it fails, as with [Builder.CallMatches].
-func (b *Builder) DelayFunc(delay vlatte.Delay) *Builder {
-	b.delay, b.delayDuration, b.delayFunc = delay, 0, delay != nil
+// Delay chooses the wait before each reply. Nil disables it. A client that leaves during the wait gets no reply,
+// and the mock does not count the call. An evaluation error prevents the reply.
+func (b *Builder) Delay(d vlatte.Delay) *Builder {
+	b.delay = d
 	return b
 }
 
@@ -395,12 +385,10 @@ func (b *Builder) Build(app *Server) (*Mock, error) {
 		replier:      replier,
 		doc:          b.doc,
 		described: mockDescription{
-			request:   b.described,
-			json:      b.json,
-			times:     b.times,
-			delay:     b.delayDuration,
-			delayFunc: b.delayFunc,
-			scenario:  [4]string{b.scenario, b.scenarioRequiredState, b.scenarioNewState, b.scenarioKey},
+			request:  b.described,
+			json:     b.json,
+			times:    b.times,
+			scenario: [4]string{b.scenario, b.scenarioRequiredState, b.scenarioNewState, b.scenarioKey},
 		},
 	}, nil
 }

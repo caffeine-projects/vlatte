@@ -116,9 +116,8 @@ func TestPropDoc_DecodesBackToTheSameStream(t *testing.T) {
 			s.Retry = time.Duration(rapid.Int64Range(0, 1e12).Draw(t, "retry"))
 		}
 
-		if s.HasFixedEventDelay = rapid.Bool().Draw(t, "has_event_delay"); s.HasFixedEventDelay {
-			s.FixedEventDelay = time.Duration(rapid.Int64Range(0, 1e12).Draw(t, "event_delay"))
-			s.EventDelay = vlatte.Latency(s.FixedEventDelay)
+		if rapid.Bool().Draw(t, "has_event_delay") {
+			s.EventDelay = vlatte.Latency(time.Duration(rapid.Int64Range(0, 1e12).Draw(t, "event_delay")))
 		}
 
 		text, err := config.Encode(s.Doc(), "yaml")
@@ -135,7 +134,7 @@ func TestPropDoc_DecodesBackToTheSameStream(t *testing.T) {
 
 		require.Equal(t, wire(t, s), wire(t, back), "%s", text)
 		require.Equal(t,
-			[]any{s.HasRetry, s.Retry, s.HasFixedEventDelay, s.FixedEventDelay, s.Heartbeat, s.KeepOpen, s.Resume},
-			[]any{back.HasRetry, back.Retry, back.HasFixedEventDelay, back.FixedEventDelay, back.Heartbeat, back.KeepOpen, back.Resume})
+			[]any{s.HasRetry, s.Retry, s.EventDelay, s.Heartbeat, s.KeepOpen, s.Resume},
+			[]any{back.HasRetry, back.Retry, back.EventDelay, back.Heartbeat, back.KeepOpen, back.Resume})
 	})
 }

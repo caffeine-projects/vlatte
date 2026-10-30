@@ -1797,7 +1797,7 @@ func TestProxyReply_AClientThatLeavesDuringTheDelayIsNoError(t *testing.T) {
 	m := MustNew(Setup().Logger(&logger).LogPretty(false))
 	m.MustStart()
 	t.Cleanup(m.Close)
-	scoped := m.MustMock(Getf("/p").Delay(300 * time.Millisecond).Reply(From(target.URL)))
+	scoped := m.MustMock(Getf("/p").Delay(vlatte.Latency(300 * time.Millisecond)).Reply(From(target.URL)))
 
 	client := &http.Client{Timeout: 50 * time.Millisecond}
 	_, err := client.Get(m.URL("/p"))

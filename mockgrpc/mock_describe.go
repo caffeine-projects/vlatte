@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"maps"
 	"strings"
-	"time"
 
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/delay"
 )
 
 var _ vlatte.SelfDescriptive = (*Mock)(nil)
@@ -20,14 +20,12 @@ var _ vlatte.SelfDescriptive = (*Mock)(nil)
 var (
 	errCallMatchesNotDescribed = errors.New("mock: a CallMatches matcher can't be described as a mock file")
 	errMatcherNotDescribed     = errors.New("mock: a matcher that doesn't describe itself can't be described as a mock file")
-	errDelayFuncNotDescribed   = errors.New("mock: a DelayFunc delay can't be described as a mock file")
 	errCallbackNotDescribed    = errors.New("mock: a callback, or an event with its own listener, can't be described as a mock file")
 	errSharedNotDescribed      = errors.New("reply: a Shared reply can't be described as a mock file")
 	errDialOptionsNotDescribed = errors.New("reply: a From reply with dial options can't be described as a mock file")
 	errReplyNotDescribed       = errors.New("reply: mock files have no such reply")
 	errResponsesOnly           = errors.New("reply: a Seq or Rand of a mock file holds only Message, Messages, JSON, " +
 		"Template and Status replies")
-	errMessageDelayFuncNotDescribed = errors.New("reply: a MessageDelayFunc delay can't be described as a mock file")
 )
 
 // describedRequest is the request part of a builder, as a mock file writes it.
@@ -48,18 +46,16 @@ type namedMatcher struct {
 
 // mockDescription is what a mock built in Go keeps of its builder, to describe itself.
 type mockDescription struct {
-	request   describedRequest
-	json      *string
-	times     int64
-	delay     time.Duration
-	delayFunc bool      // the delay is DelayFunc's, which no mock file can hold
-	scenario  [4]string // name, required state, new state, key
+	request  describedRequest
+	json     *string
+	times    int64
+	scenario [4]string // name, required state, new state, key
 }
 
 // Describe implements vlatte.SelfDescriptive: the mock as a mock file writes it, which the admin API returns and
 // saves. A mock read from a document is described by it, with its ID. A mock built in Go is described whole, or not
 // at all: a part no mock file can hold, such as a Func, Echo or Shared reply, a CallMatches matcher, a matcher that
-// doesn't describe itself, a callback or a DelayFunc delay, fails encoding the description, with an error that names
+// doesn't describe itself, a callback or a [vlatte.DelayFunc] delay, fails encoding the description, with an error that names
 // it, so the admin API never shows a mock that loads back matching more calls, answering differently or without its
 // callbacks. RandWith's generator is the exception: a mock file loads it back as a Rand, which picks from the same
 // replies.
@@ -93,13 +89,8 @@ func (m *Mock) Describe() vlatte.Descriptor {
 		doc["enabled"] = false
 	}
 
-	if d.delayFunc {
-		doc["delay"] = vlatte.DescribeFail("delay", errDelayFuncNotDescribed)
-		return vlatte.DescribeRoot(doc)
-	}
-
-	if d.delay > 0 {
-		doc["delay"] = d.delay.String()
+	if m.delay != nil {
+		doc["delay"] = delay.Doc(m.delay)
 	}
 
 	if d.times > 0 {
@@ -352,13 +343,8 @@ func describeMessages(msgs []proto.Message) ([]any, error) {
 	return out, nil
 }
 
-// describe describes the Response as a mock file's response, or returns why one can't hold it, as for a
-// MessageDelayFunc delay.
+// describe describes the Response as a mock file's response, or returns why one cannot hold it.
 func (r *Response) describe() (map[string]any, error) {
-	if r.delayFunc {
-		return nil, errMessageDelayFuncNotDescribed
-	}
-
 	res := make(map[string]any)
 
 	switch {
@@ -419,8 +405,14 @@ func (r *Response) describe() (map[string]any, error) {
 		res["status"] = st
 	}
 
-	if r.delayDuration > 0 {
-		res["message_delay"] = r.delayDuration.String()
+	if r.delay != nil {
+		doc := delay.Doc(r.delay)
+		if desc, ok := doc.(vlatte.Descriptor); ok {
+			if err := desc.Validate(); err != nil {
+				return nil, err
+			}
+		}
+		res["message_delay"] = doc
 	}
 
 	return res, nil

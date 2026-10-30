@@ -420,3 +420,42 @@ func TestJSONSchema_RejectsWhatTheDecoderRejects(t *testing.T) {
 		require.Error(t, err, "the decoder rejects it too: %s", name)
 	}
 }
+
+func TestJSONSchema_DelayDistributionsAtEveryReplyLevel(t *testing.T) {
+	schema, _ := loadJSONSchema(t)
+	m := fileServer(t, Setup())
+	for _, tt := range []struct {
+		delay string
+		valid bool
+	}{
+		{`0`, true},
+		{`"1ns"`, true},
+		{`{"type":"fixed","duration":"1ms"}`, true},
+		{`{"type":"uniform","lower":"1ns","upper":"2ns"}`, true},
+		{`{"type":"jitter","latency":"1ms","jitter":"100us"}`, true},
+		{`{"type":"lognormal","median":"1ms","sigma":0.5,"maxValue":"2ms"}`, true},
+		{`{"type":"lognormal","median":"1ms","sigma":0}`, true},
+		{`true`, false},
+		{`[]`, false},
+		{`-1`, false},
+		{`{"type":"fixed"}`, false},
+		{`{"type":"lognormal","median":"1ms","sigma":"1"}`, false},
+		{`{"type":"lognormal","median":"1ms","sigma":-1}`, false},
+		{`{"type":"lognormal","median":"1ms","sigma":1,"max_value":"2ms"}`, false},
+	} {
+		response := `{"message":{},"message_delay":` + tt.delay + `}`
+		for _, doc := range []string{
+			`{"request":{"method":"Greetings"},"delay":` + tt.delay + `,"response":{"message":{}}}`,
+			`{"request":{"method":"Greetings"},"response":` + response + `}`,
+			`{"request":{"method":"Greetings"},"response_sequence":{"responses":[` + response + `]}}`,
+			`{"request":{"method":"Greetings"},"response_random":{"responses":[` + response + `]}}`,
+			`{"request":{"method":"Chat"},"bidi":{"otherwise":` + response + `}}`,
+		} {
+			_, err := m.Mock(FromBytes([]byte(doc), "json"))
+			require.Equal(t, tt.valid, err == nil, "%s: %v", doc, err)
+			var obj any
+			require.NoError(t, json.Unmarshal([]byte(doc), &obj))
+			require.Equal(t, tt.valid, schema.Validate(obj) == nil, "%s", doc)
+		}
+	}
+}

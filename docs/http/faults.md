@@ -11,7 +11,7 @@ The `fault` package has pipes that make an HTTP mock answer wrong, to test how a
 | `fault.RandomDataThenClose()` | `WirePipe` | `fault.RandomDataSize` random bytes in place of the answer, then the end of the connection. |
 | `fault.ConnectionResetByPeer()` | `WirePipe` | A TCP reset, such as `ECONNRESET`, before a status line. |
 | `fault.ChunkedDribbleDelay(chunks, total)` | `Pipe` | The whole body, in `chunks` flushed parts spread over `total`: part k comes at k·total/chunks, and the body ends at `total`. The body is held until the reply wrote all of it. |
-| `fault.Latency(latency, jitter)` | Either | Every write and flush `latency` later, give or take `jitter` at random, in order. The answer keeps its pace: the writer doesn't wait. |
+| `fault.Latency(delay)` | Either | Every write and flush after a duration chosen by `delay`, in order. The answer keeps its pace: the writer doesn't wait. |
 | `fault.Bandwidth(bytesPerSecond)` | Either | Each write at that rate, in flushed pieces of a tenth of a second. `fault.Bandwidth3G` and the other `fault.Bandwidth*` constants are common links, in bytes per second. |
 | `fault.Slicer(averageSize, sizeVariation, delay)` | Either | Each write in flushed slices of `averageSize` bytes, give or take `sizeVariation` at random, `delay` apart. |
 | `fault.SlowClose(delay)` | Either | The whole answer, then its end `delay` later: the body's last chunk with `Pipe`, the close of the connection with `WirePipe`. |
@@ -22,7 +22,7 @@ The `fault` package has pipes that make an HTTP mock answer wrong, to test how a
 ```go
 m.MustMock(mockhttp.Getf("/users").WirePipe(fault.ConnectionResetByPeer()).Reply(mockhttp.OK()))
 m.MustMock(mockhttp.Getf("/report").Pipe(fault.ChunkedDribbleDelay(5, 2*time.Second)).Reply(mockhttp.OK().BodyFile("report.csv")))
-m.MustMock(mockhttp.Getf("/search").WirePipe(fault.Latency(300*time.Millisecond, 60*time.Millisecond)).Reply(mockhttp.OK()))
+m.MustMock(mockhttp.Getf("/search").WirePipe(fault.Latency(vlatte.Jitter(300*time.Millisecond, 60*time.Millisecond))).Reply(mockhttp.OK()))
 m.MustMock(mockhttp.Getf("/video").Pipe(fault.Bandwidth(fault.Bandwidth3G)).Reply(mockhttp.OK().BodyFile("video.mp4")))
 ```
 
@@ -36,7 +36,7 @@ A wire fault needs HTTP/1.x, as wire pipes do. Faults combine with other pipes: 
 |---|---|
 | `empty_response`, `malformed_response_chunk`, `random_data_then_close`, `connection_reset_by_peer` | None. |
 | `chunked_dribble_delay` | `chunks`, `total` |
-| `latency` | `latency`; `jitter`, 0 by default |
+| `latency` | `delay`: a duration or a [delay distribution](/more/mock-lifecycle#delays) |
 | `bandwidth` | `rate`: bytes per second, or a `fault.Bandwidth*` constant in snake case: `gprs`, `dial_up`, `2g`, `good_2g`, `3g`, `good_3g`, `dsl`, `4g`, `wifi` or `fiber` |
 | `slicer` | `average_size`; `size_variation` and `delay`, 0 by default |
 | `slow_close` | `delay` |
@@ -58,8 +58,10 @@ pipes:
     after: 5s
 wire_pipes:
   - type: latency
-    latency: 300ms
-    jitter: 60ms
+    delay:
+      type: jitter
+      latency: 300ms
+      jitter: 60ms
 ```
 
 A fault with a missing parameter, a key it doesn't take, or a value its function refuses fails the file, with each problem at its key, such as `pipes[1].after`. `faultbuild.Build`, of package `fault/faultbuild`, builds a fault from its object in Go.

@@ -12,7 +12,7 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/adminapi"
-	"github.com/caffeine-projects/vlatte/internal/httpx"
+	"github.com/caffeine-projects/vlatte/internal/delay"
 )
 
 // serve matches call with the server's mocks, and answers it with the first that matches: the path of every call,
@@ -106,10 +106,13 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 
 	// A client that leaves during the delay gets nothing: the mock doesn't reply, nor count the call. Its scenario moved
 	// already, when Find picked it.
-	if d := mock.wait(); d > 0 {
-		if err := httpx.Wait(ctx, d); err != nil {
-			return status.FromContextError(err).Err()
+	if err := delay.Wait(ctx, mock.delay); err != nil {
+		if ctx.Err() != nil {
+			return status.FromContextError(ctx.Err()).Err()
 		}
+		journaled.failed(err)
+		app.publish(ctx, adminapi.EventError, call.method, mock, codes.Internal, err)
+		return fail(ctx, vlatte.FailureReply, codes.Internal, "%s: %s: evaluating delay: %v", kind, mock, err)
 	}
 
 	h := &hit{ctx: ctx, mock: mock, debug: !app.config.NoDebugHeaders}

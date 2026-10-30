@@ -14,7 +14,7 @@
     "name": { "type": "string" },
     "priority": { "description": "Mocks with a lower priority are matched first.", "type": "integer" },
     "enabled": { "$ref": "#/$defs/bool" },
-    "delay": { "$ref": "#/$defs/duration" },
+    "delay": { "$ref": "#/$defs/delay" },
     "repeat": { "type": "integer", "minimum": 1 },
     "scenario": {
       "type": "object",
@@ -146,6 +146,94 @@
     { "not": { "required": [ "proxy", "proxy_all" ] } }
   ],
   "$defs": {
+    "delay": {
+      "description": "A duration shorthand or a delay distribution. Duration parameters are whole milliseconds or Go duration strings; bounds and representability are checked when loading.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/duration"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "fixed"
+            },
+            "duration": {
+              "$ref": "#/$defs/duration"
+            }
+          },
+          "required": [
+            "type",
+            "duration"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "uniform"
+            },
+            "lower": {
+              "$ref": "#/$defs/duration"
+            },
+            "upper": {
+              "$ref": "#/$defs/duration"
+            }
+          },
+          "required": [
+            "type",
+            "lower",
+            "upper"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "jitter"
+            },
+            "latency": {
+              "$ref": "#/$defs/duration"
+            },
+            "jitter": {
+              "$ref": "#/$defs/duration"
+            }
+          },
+          "required": [
+            "type",
+            "latency",
+            "jitter"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "lognormal"
+            },
+            "median": {
+              "$ref": "#/$defs/duration"
+            },
+            "sigma": {
+              "type": "number",
+              "minimum": 0
+            },
+            "maxValue": {
+              "$ref": "#/$defs/duration"
+            }
+          },
+          "required": [
+            "type",
+            "median",
+            "sigma"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
     "duration": {
       "description": "Whole milliseconds, or an unsigned Go duration such as 1.5s.",
       "oneOf": [
@@ -161,7 +249,7 @@
       ]
     },
     "fault": {
-      "description": "A fault: an object whose type names it, and whose other keys are its parameters, such as {\"type\": \"latency\", \"latency\": \"300ms\"}.",
+      "description": "A fault: an object whose type names it, and whose other keys are its parameters, such as {\"type\": \"latency\", \"delay\": \"300ms\"}.",
       "type": "object",
       "properties": { "type": { "enum": [ "empty_response", "malformed_response_chunk", "random_data_then_close", "connection_reset_by_peer", "chunked_dribble_delay", "latency", "bandwidth", "slicer", "slow_close", "timeout", "limit_data", "connection_reset_by_peer_after" ] } },
       "required": [ "type" ],
@@ -193,8 +281,8 @@
         },
         {
           "description": "Delays each write.",
-          "properties": { "type": { "const": "latency" }, "latency": { "description": "How late each write arrives.", "$ref": "#/$defs/duration" }, "jitter": { "description": "How much the latency varies by, up to the latency. 0 by default.", "$ref": "#/$defs/duration" } },
-          "required": [ "type", "latency" ]
+          "properties": { "type": { "const": "latency" }, "delay": { "$ref": "#/$defs/delay" } },
+          "required": [ "type", "delay" ]
         },
         {
           "description": "Limits the bytes sent each second.",
@@ -343,7 +431,7 @@
       "properties": {
         "events": { "type": "array", "items": { "$ref": "#/$defs/event_stream_event" } },
         "retry": { "description": "Reconnection time sent first, which clients read in whole milliseconds.", "$ref": "#/$defs/duration" },
-        "event_delay": { "description": "How long to wait before each event without a delay of its own.", "$ref": "#/$defs/duration" },
+        "event_delay": { "description": "Delay before each event without a delay of its own.", "$ref": "#/$defs/delay" },
         "heartbeat": { "description": "Send a comment each time the stream waits this long without sending anything.", "$ref": "#/$defs/duration" },
         "keep_open": { "description": "Keep the stream open after its last event, until the client leaves.", "$ref": "#/$defs/bool" },
         "resume": { "description": "Send a request with a Last-Event-ID only the events after the one with that id.", "$ref": "#/$defs/bool" }

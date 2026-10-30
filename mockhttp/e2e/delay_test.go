@@ -1,13 +1,17 @@
 package e2e
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
@@ -22,7 +26,7 @@ func TestResponseDelay(t *testing.T) {
 	delay := 250 * time.Millisecond
 
 	scoped := m.MustMock(mockhttp.Get(match.URLPath("/test")).
-		Delay(delay).
+		Delay(vlatte.Latency(delay)).
 		Reply(mockhttp.OK()))
 
 	res, err := http.Get(fmt.Sprintf("%s/test", m.URL()))
@@ -73,4 +77,21 @@ func TestResponseDelay_SetupFromFile(t *testing.T) {
 			require.GreaterOrEqual(t, elapsed, tc.delay)
 		})
 	}
+}
+
+func TestResponseDelay_EvaluationFailurePreventsTheReply(t *testing.T) {
+	m := mockhttp.MustNew(mockhttp.Setup().Silent().ErrorStatusCode(http.StatusServiceUnavailable))
+	m.MustStart()
+	t.Cleanup(m.Close)
+	scope := m.MustMock(mockhttp.Getf("/fail").Delay(vlatte.DelayFunc(
+		func(context.Context) (time.Duration, error) { return time.Hour, errors.New("test: no delay available") },
+	)).Reply(mockhttp.NoContent()))
+	res, err := http.Get(m.URL("/fail"))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	require.Equal(t, http.StatusServiceUnavailable, res.StatusCode)
+	b, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(b), "test: no delay available")
+	require.EqualValues(t, 0, scope.Hits())
 }

@@ -9,8 +9,8 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/delay"
 	"github.com/caffeine-projects/vlatte/internal/value"
 )
 
@@ -40,11 +40,12 @@ var SpecSchema = config.NewSchema(
 		Set:   func(s *Spec, v config.Value) error { s.Retry, s.HasRetry = v.Dur, true; return nil },
 	},
 	specField{
-		Key: "event_delay", Kind: config.Duration,
-		Usage: "How long to wait before each event without a delay of its own: milliseconds or a Go duration (1.5s).",
+		Key: "event_delay", Kind: config.Any,
+		Usage: "Wait before each event without a delay of its own: milliseconds, a Go duration (1.5s), or a typed delay distribution.",
 		Set: func(s *Spec, v config.Value) error {
-			s.EventDelay, s.FixedEventDelay, s.HasFixedEventDelay = vlatte.Latency(v.Dur), v.Dur, true
-			return nil
+			var err error
+			s.EventDelay, err = delay.Decode(v)
+			return err
 		},
 	},
 	specField{
@@ -176,8 +177,7 @@ func decodeEvent(v config.Value) (*EventSpec, error) {
 	return e, &config.Error{Problems: append(config.ProblemsOf(v, err), conflicts...)}
 }
 
-// Doc returns s as a mock file writes it, under response.event_stream. An EventDelay that isn't fixed can't be
-// written, and is left out.
+// Doc returns s as a mock file writes it, including any failure to describe its delay.
 func (s *Spec) Doc() map[string]any {
 	events := make([]any, len(s.Events))
 	for i, e := range s.Events {
@@ -185,6 +185,9 @@ func (s *Spec) Doc() map[string]any {
 	}
 
 	doc := map[string]any{"events": events}
+	if s.EventDelay != nil {
+		doc["event_delay"] = delay.Doc(s.EventDelay)
+	}
 
 	durations := []struct {
 		key string
@@ -192,7 +195,6 @@ func (s *Spec) Doc() map[string]any {
 		set bool
 	}{
 		{"retry", s.Retry, s.HasRetry},
-		{"event_delay", s.FixedEventDelay, s.HasFixedEventDelay},
 		{"heartbeat", s.Heartbeat, s.Heartbeat > 0},
 	}
 	for _, f := range durations {

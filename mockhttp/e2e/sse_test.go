@@ -462,7 +462,7 @@ func TestSSE_StreamsAChatCompletionAsOpenAIDoes(t *testing.T) {
 		Reply(mockhttp.OK().EventStream(mockhttp.NewEventStream(
 			chunk("Hel"), chunk("lo, "), chunk("world"),
 			mockhttp.NewEvent().Data("[DONE]"),
-		).EventDelay(time.Millisecond))))
+		).EventDelay(vlatte.Latency(time.Millisecond)))))
 	m.MustMock(mockhttp.Postf("/v1/chat/completions").
 		Header(mockhttp.HeaderAuthorization, match.Equal("Bearer sk-test")).
 		Body(match.JSONPath("$.stream", match.Equal(false))).

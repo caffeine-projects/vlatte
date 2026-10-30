@@ -250,7 +250,7 @@ func TestReplyEventStream_Describe(t *testing.T) {
 		NewEvent().Comment("note").Data("{{ .X }}").Retry(time.Second),
 		NewEvent().DataJSON("text"),
 		NewEvent().Raw("data: x\r\n\r\n"),
-	).Retry(3 * time.Second).EventDelay(time.Second).Heartbeat(15 * time.Second).KeepOpen().ResumeFromLastEventID().Template())
+	).Retry(3 * time.Second).EventDelay(vlatte.Latency(time.Second)).Heartbeat(15 * time.Second).KeepOpen().ResumeFromLastEventID().Template())
 
 	_, err := MustNew(Setup().Silent()).Mock(Getf("/x").Reply(reply))
 	require.NoError(t, err)
@@ -275,8 +275,8 @@ func TestReplyEventStream_Describe(t *testing.T) {
 		"template": {"enabled": true}
 	}`, string(b))
 
-	described := OK().EventStream(NewEventStream().EventDelayFunc(vlatte.Jitter(time.Second, 10)))
+	described := OK().EventStream(NewEventStream().EventDelay(vlatte.Jitter(time.Second, 10*time.Millisecond)))
 	b, err = json.Marshal(described.Describe().Props, json.Deterministic(true))
 	require.NoError(t, err)
-	require.JSONEq(t, `{"status": 200, "event_stream": {"events": []}}`, string(b))
+	require.JSONEq(t, `{"status": 200, "event_stream": {"events": [], "event_delay":{"type":"jitter","latency":"1s","jitter":"10ms"}}}`, string(b))
 }

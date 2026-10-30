@@ -62,7 +62,7 @@ func TestCollectReadsEveryEvent(t *testing.T) {
 	m.MustMock(mockgrpc.Method("feed.Feed/Watch").
 		Field("topic", match.Equal("orders")).
 		Reply(mockgrpc.Messages(&pb.Event{Id: "1"}, &pb.Event{Id: "2"}).
-			MessageDelay(10 * time.Millisecond)))
+			MessageDelay(vlatte.Latency(10 * time.Millisecond))))
 
 	ids, err := collect(t.Context(), pb.NewFeedClient(m.MustDial()), "orders")
 	if err != nil {

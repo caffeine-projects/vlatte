@@ -866,9 +866,9 @@ func TestMockFile_PipesProblems(t *testing.T) {
 				"connection_reset_by_peer, chunked_dribble_delay, latency, bandwidth, slicer, slow_close, timeout, " +
 				`limit_data or connection_reset_by_peer_after, not "nope"`,
 		},
-		{"upstream_pipes: [{type: latency}]", "upstream_pipes[0].latency", "upstream_pipes[0].latency is required by a latency fault"},
+		{"upstream_pipes: [{type: latency}]", "upstream_pipes[0].delay", "upstream_pipes[0].delay is required by a latency fault"},
 		{"pipes: [{type: slow_close, dely: 1s, delay: 1s}]", "pipes[0].dely", "pipes[0].dely is not a known setting"},
-		{"pipes: [[slow_close, 1s]]", "pipes[0]", "pipes[0] must be an object, such as {type: latency, latency: 300ms}, not a list"},
+		{"pipes: [[slow_close, 1s]]", "pipes[0]", "pipes[0] must be an object, such as {type: latency, delay: 300ms}, not a list"},
 		{"pipes: empty_response", "pipes", "pipes must be a list, not a string"},
 	}
 
@@ -1241,7 +1241,8 @@ func TestJSONSchema_ScalarTypesAgreeWithTheDecoder(t *testing.T) {
 				continue
 			}
 
-			if kind, ok := kindOf(key); ok && kind != config.Any {
+			// Delay keeps a scalar shorthand alongside its structured distribution form.
+			if kind, ok := kindOf(key); ok && (kind != config.Any || prefix+key == "delay") {
 				scalar = append(scalar, prefix+key)
 			}
 		}
@@ -1340,8 +1341,8 @@ func TestJSONSchema_FaultsAgreeWithTheDecoder(t *testing.T) {
 		{faultSpec("connection_reset_by_peer"), true},
 		{faultSpec("connection_reset_by_peer_after", "after", "1s"), true},
 		{faultSpec("chunked_dribble_delay", "chunks", int64(3), "total", int64(300)), true},
-		{faultSpec("latency", "latency", "100ms"), true},
-		{faultSpec("latency", "latency", "100ms", "jitter", "20ms"), true},
+		{faultSpec("latency", "delay", "100ms"), true},
+		{faultSpec("latency", "delay", faultSpec("jitter", "latency", "100ms", "jitter", "20ms")), true},
 		{faultSpec("bandwidth", "rate", int64(1)), true},
 		{faultSpec("bandwidth", "rate", "good_3g"), true},
 		{faultSpec("slicer", "average_size", int64(8)), true},
@@ -1361,8 +1362,8 @@ func TestJSONSchema_FaultsAgreeWithTheDecoder(t *testing.T) {
 		{faultSpec("connection_reset_by_peer_after", "after", "-1s"), false},
 		{faultSpec("chunked_dribble_delay", "chunks", int64(0), "total", "1s"), false},
 		{faultSpec("chunked_dribble_delay", "chunks", int64(3)), false},
-		{faultSpec("latency", "latency", "1s", "jitter", int64(-1)), false},
-		{faultSpec("latency", "latency", "1s", "jitter", 12.5), false},
+		{faultSpec("latency", "delay", faultSpec("jitter", "latency", "1s", "jitter", int64(-1))), false},
+		{faultSpec("latency", "delay", faultSpec("jitter", "latency", "1s", "jitter", 12.5)), false},
 		{faultSpec("bandwidth", "rate", int64(0)), false},
 		{faultSpec("bandwidth", "rate", "5g"), false},
 		{faultSpec("slicer", "average_size", int64(0)), false},
@@ -1656,10 +1657,12 @@ func TestPropMockFile_DurationsAreTheSameEverywhere(t *testing.T) {
 		_, err := _mockSchema.Load(&def, []config.Source{config.Bytes("doc", "yaml", encodeMock(t, doc, "yaml"))})
 		require.NoError(t, err)
 
-		require.Equal(t, def.delay, def.proxy.timeout)
+		n, err := def.delay.Next(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, n, def.proxy.timeout)
 
 		if ms, ok := raw.(int64); ok {
-			require.Equal(t, time.Duration(ms)*time.Millisecond, def.delay)
+			require.Equal(t, time.Duration(ms)*time.Millisecond, n)
 		}
 	})
 }
@@ -2236,6 +2239,47 @@ func TestPropAdmin_AddsMocksByID(t *testing.T) {
 		require.Empty(t, replyDiff(served, req.method, res, got))
 		require.Equal(t, http.StatusConflict, post(), "the id is taken")
 	})
+}
+
+func TestJSONSchema_DelayDistributionsAgreeWithTheDecoder(t *testing.T) {
+	schema, _ := loadJSONSchema(t)
+	m := MustNew(Setup().Silent())
+	t.Cleanup(m.Close)
+	for _, tt := range []struct {
+		value any
+		valid bool
+	}{
+		{int64(0), true},
+		{"1ns", true},
+		{faultSpec("fixed", "duration", "1ms"), true},
+		{faultSpec("uniform", "lower", "1ns", "upper", "2ns"), true},
+		{faultSpec("jitter", "latency", "1ms", "jitter", "100us"), true},
+		{faultSpec("lognormal", "median", "1ms", "sigma", 0.5, "maxValue", "2ms"), true},
+		{faultSpec("lognormal", "median", "1ms", "sigma", int64(0)), true},
+		{true, false},
+		{[]any{}, false},
+		{int64(-1), false},
+		{faultSpec("fixed"), false},
+		{faultSpec("uniform", "lower", "1ms"), false},
+		{faultSpec("lognormal", "median", "1ms", "sigma", "1"), false},
+		{faultSpec("lognormal", "median", "1ms", "sigma", -1.0), false},
+		{faultSpec("lognormal", "median", "1ms", "sigma", 1.0, "max_value", "2ms"), false},
+		{faultSpec("lognormal", "median", "1ms", "sigma", 1.0, "extra", true), false},
+	} {
+		for _, doc := range []map[string]any{
+			withRequest(map[string]any{"delay": tt.value}),
+			withRequest(map[string]any{"response": map[string]any{"event_stream": map[string]any{"events": []any{}, "event_delay": tt.value}}}),
+			withRequest(map[string]any{"pipes": []any{faultSpec("latency", "delay", tt.value)}}),
+			withRequest(map[string]any{"wire_pipes": []any{faultSpec("latency", "delay", tt.value)}}),
+			withRequest(map[string]any{"upstream_pipes": []any{faultSpec("latency", "delay", tt.value)}}),
+		} {
+			b, err := config.Encode(doc, "json")
+			require.NoError(t, err)
+			_, err = mockDoc{Origin: "doc", Format: "json", Data: b}.build(m)
+			require.Equal(t, tt.valid, err == nil, "%s: %v", b, err)
+			require.Equal(t, tt.valid, schema.Validate(instance(t, doc)) == nil, "%s", b)
+		}
+	}
 }
 
 // Generators

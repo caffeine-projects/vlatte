@@ -18,6 +18,7 @@ import (
 	"github.com/caffeine-projects/vlatte/fault/faultbuild"
 	"github.com/caffeine-projects/vlatte/internal/bodyfile"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/delay"
 	"github.com/caffeine-projects/vlatte/internal/mpart"
 	"github.com/caffeine-projects/vlatte/internal/sse"
 	"github.com/caffeine-projects/vlatte/match"
@@ -45,7 +46,7 @@ type mockDef struct {
 	priority    int
 	hasPriority bool
 	enabled     bool
-	delay       time.Duration
+	delay       vlatte.Delay
 	hasDelay    bool
 	repeat      int64
 	scenario    scenarioDef
@@ -187,8 +188,13 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error { d.enabled = v.Bool; return nil },
 	},
 	mockField{
-		Key: "delay", Kind: config.Duration, Usage: "How long to wait before replying: milliseconds or a Go duration (1.5s).",
-		Set: func(d *mockDef, v config.Value) error { d.delay, d.hasDelay = v.Dur, true; return nil },
+		Key: "delay", Kind: config.Any, Usage: "Wait before replying: milliseconds, a Go duration (1.5s), or a typed fixed, uniform, jitter or lognormal distribution.",
+		Set: func(d *mockDef, v config.Value) error {
+			var err error
+			d.delay, err = delay.Decode(v)
+			d.hasDelay = err == nil
+			return err
+		},
 	},
 	mockField{
 		Key: "repeat", Kind: config.Int, Usage: "How many times the mock can match.",

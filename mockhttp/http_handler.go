@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/httpx"
+	"github.com/caffeine-projects/vlatte/internal/delay"
 	"github.com/caffeine-projects/vlatte/match/matchscenario"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/bufpool"
 	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
@@ -548,11 +548,13 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// A client that leaves during the delay gets nothing: the mock doesn't reply, nor count the request. Its scenario
 	// moved already, when Find picked it.
-	if mock.spec.delay != nil {
-		if err := httpx.Wait(r.Context(), mock.spec.delay()); errors.Is(err, context.Canceled) {
+	if err := delay.Wait(r.Context(), mock.spec.delay); err != nil {
+		if r.Context().Err() != nil {
 			h.lifecycle.OnWarning(reqValues, fmt.Errorf("http: the client left during the delay: %w", context.Cause(r.Context())))
-			return
+		} else {
+			h.onError(w, reqValues, vlatte.FailureReply, fmt.Errorf("http: evaluating delay: %w", err))
 		}
+		return
 	}
 
 	ctx := r.Context()

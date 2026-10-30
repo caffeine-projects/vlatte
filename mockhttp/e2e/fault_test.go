@@ -118,7 +118,7 @@ func TestFault_ChunkedDribbleDelay(t *testing.T) {
 
 func TestFault_Latency(t *testing.T) {
 	// The whole answer, its head included, comes the latency late, and whole.
-	m, scoped := startFaulty(t, mockhttp.Getf("/f").WirePipe(fault.Latency(50*time.Millisecond, 0)).Reply(mockhttp.OK().PlainText("hello")))
+	m, scoped := startFaulty(t, mockhttp.Getf("/f").WirePipe(fault.Latency(vlatte.Latency(50*time.Millisecond))).Reply(mockhttp.OK().PlainText("hello")))
 
 	start := time.Now()
 	res, err := newClient(t).Get(m.URL("/f"))

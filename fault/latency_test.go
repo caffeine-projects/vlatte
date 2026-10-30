@@ -19,7 +19,7 @@ func TestLatency_DelaysTheAnswerAndKeepsItsPace(t *testing.T) {
 	// keeps the time between its writes, only later.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(500*time.Millisecond, 0)})
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(vlatte.Latency(500 * time.Millisecond))})
 
 		_, err := flow.Write([]byte("a"))
 		require.NoError(t, err)
@@ -44,7 +44,7 @@ func TestLatency_TheWriterDoesntWait(t *testing.T) {
 	// The writer goes on at its own pace, as a server whose bytes are on the wire: only the end waits for them.
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now()
-		flow := vlatte.NewFlow(t.Context(), failingSink{}, []vlatte.Pipe{fault.Latency(time.Second, 0)})
+		flow := vlatte.NewFlow(t.Context(), failingSink{}, []vlatte.Pipe{fault.Latency(vlatte.Latency(time.Second))})
 
 		for range 3 {
 			n, err := flow.Write([]byte("ab"))
@@ -64,7 +64,7 @@ func TestLatency_JitterKeepsTheOrder(t *testing.T) {
 	// in order, each write within the jitter of the latency, or later for that wait.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(time.Second, time.Second)})
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(vlatte.Jitter(time.Second, time.Second))})
 
 		want := make([]string, 0, 20)
 		for i := range cap(want) {
@@ -96,24 +96,24 @@ func TestLatency_JitterKeepsTheOrder(t *testing.T) {
 func TestLatency_IsDescribedByItsDurations(t *testing.T) {
 	// A latency describes itself as the spec that builds it again, from Go code as from a mock file.
 	// A jitter of 0, the default, is left out.
-	got, ok := vlatte.IsSelfDescriptive(fault.Latency(1500*time.Millisecond, 0))
+	got, ok := vlatte.IsSelfDescriptive(fault.Latency(vlatte.Latency(1500 * time.Millisecond)))
 	require.True(t, ok)
 	b, err := got.MarshalJSON()
 	require.NoError(t, err)
-	require.JSONEq(t, `{"type": "latency", "latency": "1.5s"}`, string(b))
+	require.JSONEq(t, `{"type": "latency", "delay": "1.5s"}`, string(b))
 
-	got, ok = vlatte.IsSelfDescriptive(fault.Latency(time.Second, 200*time.Millisecond))
+	got, ok = vlatte.IsSelfDescriptive(fault.Latency(vlatte.Jitter(time.Second, 200*time.Millisecond)))
 	require.True(t, ok)
 	b, err = got.MarshalJSON()
 	require.NoError(t, err)
-	require.JSONEq(t, `{"type": "latency", "latency": "1s", "jitter": "200ms"}`, string(b))
+	require.JSONEq(t, `{"type": "latency", "delay": {"type": "jitter", "latency": "1s", "jitter": "200ms"}}`, string(b))
 }
 
 func TestLatency_KeepsWhatItWasGiven(t *testing.T) {
 	// The writer may reuse its buffer once Write returned: the bytes that go out later are those it wrote.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(time.Second, 0)})
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(vlatte.Latency(time.Second))})
 
 		b := []byte("ab")
 		_, err := flow.Write(b)
@@ -129,7 +129,7 @@ func TestLatency_AnEmptyAnswerEndsAtOnce(t *testing.T) {
 	// Only what is sent is delayed: the end of an answer that sent nothing comes as it does.
 	synctest.Test(t, func(t *testing.T) {
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(time.Second, 0)})
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(vlatte.Latency(time.Second))})
 
 		require.NoError(t, flow.Close())
 		require.Equal(t, []string{"close at 0s"}, sink.log)
@@ -141,7 +141,7 @@ func TestLatency_StopsWhenTheClientLeaves(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(ctx, sink, []vlatte.Pipe{fault.Latency(time.Second, 0)})
+		flow := vlatte.NewFlow(ctx, sink, []vlatte.Pipe{fault.Latency(vlatte.Latency(time.Second))})
 
 		_, err := flow.Write([]byte("a"))
 		require.NoError(t, err)
@@ -159,7 +159,7 @@ func TestLatency_StopsWhenTheClientLeavesAnIdleAnswer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		sink := &timedSink{start: time.Now()}
-		flow := vlatte.NewFlow(ctx, sink, []vlatte.Pipe{fault.Latency(time.Second, 0)})
+		flow := vlatte.NewFlow(ctx, sink, []vlatte.Pipe{fault.Latency(vlatte.Latency(time.Second))})
 
 		time.Sleep(time.Second)
 		cancel()
@@ -182,7 +182,7 @@ func TestLatency_AClientThatWentAwayEndsIt(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(100*time.Millisecond, 0)})
+				flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(vlatte.Latency(100 * time.Millisecond))})
 
 				_, err := flow.Write([]byte("a"))
 				require.NoError(t, err)
@@ -207,7 +207,7 @@ func TestLatency_AStageAfterItThatAbortsEndsTheFlow(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				cut := vlatte.PipeFunc(func(context.Context, []byte, vlatte.Stage) (int, error) { return 0, abort })
 				start := time.Now()
-				flow := vlatte.NewFlow(t.Context(), failingSink{}, []vlatte.Pipe{fault.Latency(time.Second, 0), cut})
+				flow := vlatte.NewFlow(t.Context(), failingSink{}, []vlatte.Pipe{fault.Latency(vlatte.Latency(time.Second)), cut})
 
 				_, err := flow.Write([]byte("a"))
 				require.NoError(t, err)
@@ -222,11 +222,29 @@ func TestLatency_AStageAfterItThatAbortsEndsTheFlow(t *testing.T) {
 	}
 }
 
-func TestLatency_RefusesANegativeDelay(t *testing.T) {
-	// A delay below 0 is a mistake of the mock: it fails as the mock is built.
-	require.PanicsWithValue(t, "fault: latency can't be -1s", func() { fault.Latency(-time.Second, 0) })
-	require.PanicsWithValue(t, "fault: latency jitter must be from 0 to 1s, not -1ns", func() { fault.Latency(time.Second, -1) })
-	require.PanicsWithValue(t, "fault: latency jitter must be from 0 to 1s, not 1.000000001s", func() {
-		fault.Latency(time.Second, time.Second+1)
+func TestLatency_NilAddsNoDelay(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sink := &timedSink{start: time.Now()}
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(nil)})
+		_, err := flow.Write([]byte("x"))
+		require.NoError(t, err)
+		require.NoError(t, flow.Close())
+		require.Equal(t, []string{"x at 0s", "close at 0s"}, sink.log)
+	})
+}
+
+func TestLatency_DelayErrorsReachTheWriterWithoutSendingTheBytes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cause := errors.New("test: no latency available")
+		sink := &timedSink{start: time.Now()}
+		flow := vlatte.NewFlow(t.Context(), sink, []vlatte.Pipe{fault.Latency(vlatte.DelayFunc(
+			func(context.Context) (time.Duration, error) { return time.Hour, cause },
+		))})
+		n, err := flow.Write([]byte("unsent"))
+		require.Equal(t, 0, n)
+		require.ErrorIs(t, err, cause)
+		require.ErrorIs(t, flow.Flush(), cause)
+		require.NoError(t, flow.Close())
+		require.Equal(t, []string{"close at 0s"}, sink.log)
 	})
 }

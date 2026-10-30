@@ -71,7 +71,7 @@ func TestJournal_KeepsEachRequestOnceWhateverItsOutcome(t *testing.T) {
 		Getf("/matched").ID("matched").Reply(OK()),
 		Getf("/failed").ID("failed").Reply(OK().BodyFile("missing.txt")),
 		Getf("/panics").ID("panics").Reply(Func(func(http.ResponseWriter, *RequestValues) (*Response, error) { panic("boom") })),
-		Getf("/slow").ID("slow").Delay(5*time.Second).Reply(OK()),
+		Getf("/slow").ID("slow").Delay(vlatte.Latency(5*time.Second)).Reply(OK()),
 		Getf("/handler").ID("handler").Reply(Handler(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusCreated) })),
 		Getf("/silent").ID("silent").Reply(Handler(func(http.ResponseWriter, *http.Request) {})),
 		Getf("/echo").ID("echo").Reply(Echo()),

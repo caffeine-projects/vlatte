@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/delay"
 	"github.com/caffeine-projects/vlatte/match"
 )
 
@@ -212,7 +213,7 @@ func (m *Mock) String() string {
 }
 
 // Describe implements [vlatte.SelfDescriptive]: the mock in the mock file format. It leaves out callbacks, and
-// pipes that don't describe themselves. A reply a mock file can't hold, such as [Echo], stays, so encoding the
+// pipes that don't describe themselves. Delay description errors propagate. A reply a mock file can't hold, such as [Echo], stays, so encoding the
 // description fails.
 func (m *Mock) Describe() vlatte.Descriptor {
 	mockExpectations := m.spec.expectations
@@ -360,6 +361,10 @@ func (m *Mock) Describe() vlatte.Descriptor {
 				}
 			}
 		}
+	}
+
+	if m.spec.delay != nil {
+		data["delay"] = delay.Doc(m.spec.delay)
 	}
 
 	data["id"] = m.ID()

@@ -813,10 +813,10 @@ func TestAdmin_StreamsWarnings(t *testing.T) {
 
 	// The delay is picked once the server has found the mock: a client that left before would leave no mock to name.
 	delaying := make(chan struct{}, 1)
-	m.MustMock(Getf("/slow").ID("slow").DelayFunc(func() time.Duration {
+	m.MustMock(Getf("/slow").ID("slow").Delay(vlatte.DelayFunc(func(ctx context.Context) (time.Duration, error) {
 		delaying <- struct{}{}
-		return 5 * time.Second
-	}).Reply(OK()))
+		return 5 * time.Second, nil
+	})).Reply(OK()))
 
 	byType := streamEvents(t, m, 1, func() {
 		ctx, cancel := context.WithCancel(t.Context())
