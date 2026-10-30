@@ -85,48 +85,53 @@ Release archives and images are signed: see [Verifying a release](https://vlatte
 
 ### HTTP in a test
 
+This [runnable example](mockhttp/example_test.go) includes the imports. In a test, use `t.Cleanup(m.Close)` in place of `defer m.Close()`.
+
 ```go
-func TestCreateUser(t *testing.T) {
-	m := mockhttp.MustNew()
+func Example() {
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
 	m.MustStart()
-	t.Cleanup(m.Close)
+	defer m.Close()
 
-	created := m.MustMock(mockhttp.Postf("/users").
-		Header("Authorization", match.HasPrefix("Bearer ")).
-		Body(match.JSONPath("$.name", match.Equal("ann"))).
-		Reply(mockhttp.Created().
-			HeaderTemplate("Location", `/users/{{ uuid }}`).
-			ContentType("application/json").
-			BodyTemplate(`{"name": {{ (fromJSON .Request.Body.String).name | toJSON }}}`)))
+	scoped := m.MustMock(mockhttp.Getf("/hello").Reply(mockhttp.OK().PlainText("hello world")))
 
-	// Point your client at m.URL() and call it.
-	user, err := users.NewClient(m.URL(), "token").Create(t.Context(), "ann")
-	// 201, Location: /users/<uuid>, body {"name": "ann"}
+	res, err := http.Get(m.URL("/hello"))
+	if err != nil {
+		panic(err)
+	}
+	defer res.Body.Close()
 
-	created.AssertNumberOfCalls(t, 1)
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(res.StatusCode, string(body), scoped.Called())
+	// Output: 200 hello world true
 }
 ```
 
 ### gRPC in a test
 
+Here, `pb` is the generated code for [test.proto](mockgrpc/internal/protobuf/test.proto). Use your own service's generated code in application tests. The [runnable example](mockgrpc/example_test.go) includes the imports.
+
 ```go
-func TestGreeter(t *testing.T) {
-	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory()) // no port: only m.Dial reaches it
+func Example() {
+	m := mockgrpc.MustNew(mockgrpc.Setup().Silent().InMemory())
 	m.MustStart()
-	t.Cleanup(m.Close)
+	defer m.Close()
 
-	m.MustMock(mockgrpc.Method("Greeter/SayHello").
-		Field("name", match.HasPrefix("a")).
-		Reply(mockgrpc.Template(`{"message": "hi {{ .Request.Message.name }}"}`)))
+	m.MustMock(mockgrpc.Method("TestService/Greetings").
+		Field("message", match.Equal("hi")).
+		Reply(mockgrpc.Message(&pb.HiRes{Message: "hello"})))
 
-	m.MustMock(mockgrpc.Method("Greeter/Watch").
-		Reply(mockgrpc.Messages(&pb.Event{Id: "1"}, &pb.Event{Id: "2"}).
-			MessageDelay(100 * time.Millisecond).
-			Status(codes.Unavailable, "restarting")))
+	res, err := pb.NewTestServiceClient(m.MustDial()).Greetings(context.Background(), &pb.HiReq{Message: "hi"})
+	if err != nil {
+		panic(err)
+	}
 
-	client := pb.NewGreeterClient(m.MustDial()) // closed with the server
-	res, err := client.SayHello(t.Context(), &pb.HelloRequest{Name: "ann"})
-	// res.Message == "hi ann"; Watch sends 1, 2, then Unavailable
+	fmt.Println(res.GetMessage())
+	// Output: hello
 }
 ```
 

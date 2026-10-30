@@ -26,7 +26,7 @@ This project's own rules are not a skill: they live in [`CONVENTIONS.md`](../CON
 
 Create `.agents/skills/<name>/SKILL.md` with `name` (equal to the folder name) and `description` frontmatter. Keep `SKILL.md` short and put details in `references/` files, which agents read only when needed. Never create skills under `.claude/skills/`.
 
-Then add a row to the Skills table in [`AGENTS.md`](../AGENTS.md) naming the work that loads it. `go test -run TestAgentDocs .` fails when a table row names no skill, a `name` differs from its folder, or `.claude/skills` stops linking here.
+Then add a row to the Skills table in [`AGENTS.md`](../AGENTS.md) naming the work that loads it. `go test -run TestAgentDocs ./test` fails when a table row names no skill, a `name` differs from its folder, or `.claude/skills` stops linking here.
 
 ## Third-party skills
 

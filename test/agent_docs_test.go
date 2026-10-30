@@ -1,4 +1,4 @@
-package vlatte
+package test
 
 import (
 	"os"
@@ -28,6 +28,8 @@ var (
 const _agentSkillsDir = ".agents/skills"
 
 func TestAgentDocs_LinksResolve(t *testing.T) {
+	t.Chdir("..")
+
 	skills, err := filepath.Glob(filepath.Join(_agentSkillsDir, "*", "SKILL.md"))
 	require.NoError(t, err)
 
@@ -57,6 +59,8 @@ func TestAgentDocs_LinksResolve(t *testing.T) {
 }
 
 func TestAgentDocs_RuleMapSendsToSectionsThatExist(t *testing.T) {
+	t.Chdir("..")
+
 	rows := agentDocTable(t, "Rule map")
 
 	var missing []string
@@ -73,6 +77,8 @@ func TestAgentDocs_RuleMapSendsToSectionsThatExist(t *testing.T) {
 }
 
 func TestAgentDocs_SkillsTableLoadsSkillsThatExist(t *testing.T) {
+	t.Chdir("..")
+
 	rows := agentDocTable(t, "Skills")
 	names := make([]string, 0, len(rows))
 	for _, row := range rows {
@@ -92,6 +98,8 @@ func TestAgentDocs_SkillsTableLoadsSkillsThatExist(t *testing.T) {
 }
 
 func TestAgentDocs_SkillNamesMatchTheirFolders(t *testing.T) {
+	t.Chdir("..")
+
 	// The Agent Skills format loads a skill only when its name is its folder's.
 	entries, err := os.ReadDir(_agentSkillsDir)
 	require.NoError(t, err)
@@ -108,6 +116,8 @@ func TestAgentDocs_SkillNamesMatchTheirFolders(t *testing.T) {
 }
 
 func TestAgentDocs_ClaudeSkillsLinksAgentSkills(t *testing.T) {
+	t.Chdir("..")
+
 	// Claude Code reads .claude/skills; the other agents read .agents/skills. A clone without symlinks checks the link
 	// out as a plain file, and Claude Code loads no skill.
 	target, err := os.Readlink(".claude/skills")
@@ -116,6 +126,8 @@ func TestAgentDocs_ClaudeSkillsLinksAgentSkills(t *testing.T) {
 }
 
 func TestAgentDocs_ClaudeImportsTheRules(t *testing.T) {
+	t.Chdir("..")
+
 	// Claude Code reads CLAUDE.md, which imports the rule files the other agents read directly. A lost or broken import
 	// drops those rules from Claude Code without a word.
 	var imports []string

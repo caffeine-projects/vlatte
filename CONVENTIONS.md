@@ -9,7 +9,7 @@ These override the `use-modern-go` and `uber-go-style` skills. Apply them to cod
 Run the checks in this order and fix failures before calling the task done. First match wins.
 
 - **Docs only**: every file the task changed is `*.md`.
-  1. `go test -run TestAgentDocs .` when an agent doc or a skill changed. Nothing else.
+  1. `go test -run TestAgentDocs ./test` when an agent doc or a skill changed. Nothing else.
 - **Anything else**:
   1. `go tool gofumpt -l .` prints nothing. `make fmt` fixes it.
   2. `go mod tidy -diff` prints nothing. `make tidy` fixes it.
