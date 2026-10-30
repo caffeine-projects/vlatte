@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
 )
 
 func TestScenarios_AStoreThatFailsFailsTheCall(t *testing.T) {
@@ -39,4 +40,27 @@ func TestScenarios_AKeyThatFailsToRenderFailsTheRequest(t *testing.T) {
 
 	_, err := m.Mock(Postf("/pay").StartScenario("checkout").ScenarioKey(`{{`).Reply(OK()))
 	require.ErrorContains(t, err, "mock: scenario.key: template: scenario.key")
+}
+
+func TestScenarios_AKeyReadsTheKVStore(t *testing.T) {
+	// A key can read the key-value store, such as the tenant a test sets: the request plays in the instance of its
+	// value.
+	kv := vlatte.NewMemoryKV()
+	require.NoError(t, kv.Set(t.Context(), "tenant", []byte("acme")))
+
+	m := MustNew(Setup().Silent().KV(kv))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Postf("/pay").StartScenario("checkout").ScenarioStateWillBe("paid").ScenarioKey(`{{ .KV.Get "tenant" }}`).
+		Reply(OK()))
+
+	res, body := do(t, http.MethodPost, m.URL("/pay"), nil, nil)
+	require.Equal(t, http.StatusOK, res.StatusCode, string(body))
+
+	got, err := m.Scenarios(t.Context())
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, matchscenario.StateStarted, got[0].State, "the shared instance")
+	require.Equal(t, []matchscenario.KeyedInstance{{Key: "acme", State: "paid"}}, got[0].Instances)
 }

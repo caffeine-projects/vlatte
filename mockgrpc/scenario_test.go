@@ -144,6 +144,24 @@ func TestScenarios_EachKeyPlaysInAnInstanceOfItsOwn(t *testing.T) {
 		e.Scenarios)
 }
 
+func TestScenarios_AKeyReadsTheKVStore(t *testing.T) {
+	// A key can read the key-value store, such as the tenant a test sets: the call plays in the instance of its value.
+	kv := vlatte.NewMemoryKV()
+	require.NoError(t, kv.Set(t.Context(), "tenant", []byte("acme")))
+
+	m, c := journaled(t, Setup().KV(kv))
+	m.MustMock(Method("Greetings").StartScenario("checkout").ScenarioStateWillBe("paid").ScenarioKey(`{{ .KV.Get "tenant" }}`).
+		Reply(Template(`{"message": "{{ .Scenarios.StateOf "checkout" "acme" }}"}`)))
+
+	got, code := greetWith(t, c, "hi")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "paid", got)
+
+	e := onlyCall(t, m, journal.Query{})
+	require.Equal(t, []matchscenario.Move{{Scenario: "checkout", Key: "acme", From: matchscenario.StateStarted, To: "paid"}},
+		e.Scenarios)
+}
+
 func TestScenarios_AKeyThatFailsToRenderFailsTheCall(t *testing.T) {
 	// A key that can't render is a mistake of the mock: the call fails, rather than play in the shared instance.
 	m := serve(t)

@@ -65,7 +65,46 @@ type KV interface {
 }
 ```
 
-`Get` of a key that isn't stored returns an error that wraps `vlatte.ErrKVKeyNotFound`, `Has` is true for a key set to an empty value, `Del` of a key that isn't stored is not an error, and `Keys` lists the keys in any order. A store keeps and returns copies of the values. A server reads the store from every request at once, so it must be safe for concurrent use. A store reads with the context of the request, or with an event's own for webhooks, which outlives a client that leaves. `.Data` holds values too: a map of any values that `m.SetData` sets on one server. The key-value store holds text by key, and a store of your own can share it with other servers and processes.
+`Get` of a key that isn't stored returns an error that wraps `vlatte.ErrKVKeyNotFound`, `Has` is true for a key set to an empty value, `Del` of a key that isn't stored is not an error, and `Keys` lists the keys in any order. A store keeps and returns copies of the values. A server reads the store from every request at once, so it must be safe for concurrent use. A store reads with the context of the request, or with an event's own for webhooks, which outlives a client that leaves.
+
+A store on Redis, with [go-redis](https://github.com/redis/go-redis), as [`kv_test.go`](https://github.com/caffeine-projects/vlatte/blob/main/mockhttp/e2e/kv_test.go) runs it:
+
+```go
+type redisKV struct{ c *redis.Client }
+
+func (kv redisKV) Get(ctx context.Context, k string) ([]byte, error) {
+	b, err := kv.c.Get(ctx, k).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("%w: %q", vlatte.ErrKVKeyNotFound, k)
+	}
+
+	return b, err
+}
+
+func (kv redisKV) Has(ctx context.Context, k string) (bool, error) {
+	n, err := kv.c.Exists(ctx, k).Result()
+	return n == 1, err
+}
+
+func (kv redisKV) Set(ctx context.Context, k string, v []byte) error { return kv.c.Set(ctx, k, v, 0).Err() }
+
+func (kv redisKV) Del(ctx context.Context, k string) error { return kv.c.Del(ctx, k).Err() }
+
+func (kv redisKV) Keys(ctx context.Context) ([]string, error) {
+	var keys []string
+
+	it := kv.c.Scan(ctx, 0, "*", 0).Iterator()
+	for it.Next(ctx) {
+		keys = append(keys, it.Val())
+	}
+
+	return keys, it.Err()
+}
+```
+
+`Setup().KV(redisKV{redis.NewClient(&redis.Options{Addr: "localhost:6379"})})` plugs it in. `Keys` lists every key of the database, so give the store a database of its own.
+
+`.Data` holds values too: a map of any values that `m.SetData` sets on one server. The key-value store holds text by key, and a store of your own can share it with other servers and processes.
 
 ## Functions
 
@@ -83,8 +122,7 @@ Besides those of Go templates, such as `if`, `range`, `eq`, `len`, `index`, `sli
 | Time | `now`, `formatTime layout t` and `parseTime layout s` (a Go layout, `RFC3339` and the other names of package `time`, `unix` or `unixMilli`), `timeAdd offset t` (`"3 days"`, `"-1 month"` or a Go duration such as `"1h30m"`), `inZone zone t`, `truncateTime point t` (`"first day of month"`, `"last day of year"`, ...) |
 | Encoding | `base64Encode`, `base64Decode`, `queryUnescape`, `parseQuery text` (form text as `url.Values`: `(parseQuery $s).Get "a"`) |
 | Random | `uuid`, `randomString kind length` (`alphanumeric`, `alphabetic`, `numeric`, `alphanumericSymbols` or `hex`), `randomInt min max` and `randomFloat min max` (in [min, max)). Not for secrets. |
-| Hashes | `hash alg encoding s` (`md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `sha3-224` to `sha3-512`; `hex`, `base64` or `base64url`, unpadded, as JWS and PKCE write it), `hmac alg key encoding s` (`sha1`, `sha256` or `sha512`), as webhook providers sign payloads: `{{ hmac "sha256" "secret" "hex" .Request.Body.String }}` |
-| Tokens | `jwt kid claims`, `jwks kids...`: see [Tokens](#tokens) |
+| Hashes | `hash alg encoding s` (`md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `sha3-224` to `sha3-512`; `hex` or `base64`), `hmac alg key encoding s` (`sha1`, `sha256` or `sha512`), as webhook providers sign payloads: `{{ hmac "sha256" "secret" "hex" .Request.Body.String }}` |
 | Environment | `env name`: see below |
 
 ```yaml
@@ -107,49 +145,6 @@ Add your own functions to the engine:
 engine := vlatte.MustNewGoTemplateEngine(vlatte.WithTemplateFuncs(map[string]any{"upper": strings.ToUpper}))
 m := mockhttp.MustNew(mockhttp.Setup().TemplateEngine(engine))
 ```
-
-## Tokens
-
-`jwt` signs a JWT with one of the server's keys, and `jwks` publishes the public halves of the keys you name, so a mock can stand in for an OpenID Connect provider, or any service that issues signed tokens:
-
-```yaml
-# _mocks/certs_mock.yaml: the provider's keys, as a client fetches them from jwks_uri.
-request:
-  method: GET
-  path: /certs
-response:
-  body: '{{ jwks "key-1" }}'
-  template:
-    enabled: true
-```
-
-```yaml
-# _mocks/token_mock.yaml: a token endpoint. The claims are JSON text, and the token holds them and no other.
-request:
-  method: POST
-  path: /token
-response:
-  body: |
-    {"token_type": "Bearer", "expires_in": 3600,
-     "id_token": "{{ printf `{"iss": %q, "sub": "ana", "aud": "my-app", "exp": %s}` "https://id.example" (now | timeAdd "1h" | formatTime "unix") | jwt "key-1" }}"}
-  template:
-    enabled: true
-```
-
-- `jwt kid claims` takes the claims last, so they pipe. They are JSON text or a map, such as `fromJSON` returns, and must be a JSON object. The header is `{"alg": <the key's>, "kid": kid, "typ": "JWT"}`. Nothing is added: write `exp` and `iat` yourself, so a test sees the expiry it chose.
-- `jwks kid...` answers `{"keys": [...]}` in the order named. Name two keys while a client moves from one to the other, and one to see how it handles a token signed by a key it can't find.
-- A key named as a literal that the server lacks fails the mock as it loads.
-
-Keys come from the setting `template.keys` (`--template-keys`, `VLATTE_TEMPLATE_KEYS`, or `Setup().TemplateKeys(...)` in Go) and `grpc.template.keys` for gRPC mocks:
-
-| Spec | Key |
-|---|---|
-| `kid=ALG` | Generated when the server is made: a new one each time, so its JWKS changes on restart. |
-| `kid=ALG:path/to/key.pem` | Read from a PEM file: PKCS #1, PKCS #8 or SEC 1. A relative path starts at `root_dir`. |
-
-`ALG` is `RS256`, `RS384`, `RS512`, `PS256`, `PS384` or `PS512` for RSA keys of 2048 bits or more, `ES256`, `ES384` or `ES512` for ECDSA keys on P-256, P-384 or P-521, or `EdDSA` for Ed25519. HMAC algorithms, such as `HS256`, are refused: no provider publishes the secret of one, so a client that accepts an HMAC token is the bug a mock should catch, not hide. On an engine of your own, add keys with `vlatte.WithSigningKey(kid, alg, key)`.
-
-The server never prints a private key: templates read only tokens and public keys, and errors name a key by its kid and path. To check the tokens a client sends, see the [JWT matchers](/matchers/json-xml#jwts).
 
 ## Missing keys
 
@@ -207,5 +202,5 @@ m.MustMock(mockgrpc.Method("greeter.Greeter/SayHello").
 	Reply(mockgrpc.Template(`{"message": "hi {{ .Request.Message.name }}"}`)))
 ```
 
-`grpc.template.env` names the environment variables gRPC templates may read, and `grpc.template.keys` the keys they sign with.
+`grpc.template.env` names the environment variables gRPC templates may read.
 
