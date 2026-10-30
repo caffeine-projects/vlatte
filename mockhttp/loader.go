@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/mockfile"
 )
 
 // Loader loads mocks from outside the code, such as mock files.
@@ -32,8 +33,9 @@ type fileLoader struct {
 }
 
 // Load adds the mocks of every matching file, and of every mock file of the recording directories and of those the
-// admin API saved mocks into, in file name order,
-// so mocks of equal priority match in that order. A reload swaps them for the mocks of the last load in one step, so a
+// admin API saved mocks into, in file name order and then YAML document order,
+// so mocks of equal priority match in that order. Empty YAML documents add no mocks.
+// A reload swaps them for the mocks of the last load in one step, so a
 // request finds one set or the other. When a file has problems, Load changes nothing and reports every file with
 // problems.
 func (l *fileLoader) Load(app *Server) error {
@@ -97,9 +99,10 @@ func (l *fileLoader) load(app *Server, swap vlatte.Swap[*Mock]) error {
 		return nil
 	}
 
-	builders := make([]vlatte.Builder[*Mock, *Server], 0, len(files))
-	for _, file := range files {
-		builders = append(builders, FromFile(file))
+	documents := mockfile.Load(files, workingDirHint)
+	builders := make([]vlatte.Builder[*Mock, *Server], 0, len(documents))
+	for _, doc := range documents {
+		builders = append(builders, mockDoc{Document: doc})
 	}
 
 	// A reload replaces the mocks of the last load, so edited and removed files take effect.

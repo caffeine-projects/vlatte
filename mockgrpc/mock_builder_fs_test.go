@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
@@ -148,4 +149,142 @@ func TestFromFile_AFileThatCantBeReadSaysWhy(t *testing.T) {
 
 func TestFromBytes_ServesScenarios(t *testing.T) {
 	scenariotest.Run(t, newScenarioServer(true))
+}
+
+func TestSingularMockBuilders_RejectMultipleYAMLDocuments(t *testing.T) {
+	dir := t.TempDir()
+	m := fileServer(t, Setup().InMemory())
+	for _, tc := range []struct {
+		name  string
+		build func([]byte) (*Mock, error)
+	}{
+		{"FromFile", func(data []byte) (*Mock, error) {
+			path := writeFile(t, dir, "greet.yaml", string(data))
+			return FromFile(path).Build(m)
+		}},
+		{"FromBytes", func(data []byte) (*Mock, error) {
+			return FromBytes(data, ".YML").Build(m)
+		}},
+		{"DecodeMock", func(data []byte) (*Mock, error) {
+			return DecodeMock(m, data, "yaml")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock, err := tc.build([]byte(`
+request: {method: Greetings}
+response: {message: {message: first}}
+---
+request: {method: Greetings}
+response: {message: {message: second}}
+`))
+			require.Nil(t, mock)
+			cfgErr, ok := errors.AsType[*config.Error](err)
+			require.True(t, ok, "%v", err)
+			require.Len(t, cfgErr.Problems, 1)
+			require.Equal(t, config.CodeParseError, cfgErr.Problems[0].Code)
+			require.Equal(t, "expected one mock document, not 2", cfgErr.Problems[0].Message)
+			require.Equal(t, "use MockFiles to load multiple mock documents", cfgErr.Problems[0].Hint)
+		})
+	}
+}
+
+func TestSingularMockBuilders_RejectMalformedLaterYAMLContent(t *testing.T) {
+	dir := t.TempDir()
+	m := fileServer(t, Setup().InMemory())
+	for _, tc := range []struct {
+		name  string
+		build func([]byte) (*Mock, error)
+	}{
+		{"FromFile", func(data []byte) (*Mock, error) {
+			path := writeFile(t, dir, "greet.yaml", string(data))
+			return FromFile(path).Build(m)
+		}},
+		{"FromBytes", func(data []byte) (*Mock, error) {
+			return FromBytes(data, "yaml").Build(m)
+		}},
+		{"DecodeMock", func(data []byte) (*Mock, error) {
+			return DecodeMock(m, data, "yaml")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock, err := tc.build([]byte("request: {method: Greetings}\nresponse: {}\n---\nrequest: ["))
+			require.Nil(t, mock)
+			cfgErr, ok := errors.AsType[*config.Error](err)
+			require.True(t, ok, "%v", err)
+			require.Len(t, cfgErr.Problems, 1)
+			require.Equal(t, config.CodeParseError, cfgErr.Problems[0].Code)
+			require.ErrorContains(t, err, "document 2")
+		})
+	}
+}
+
+func TestSingularMockBuilders_EmptyYAMLStillReportsMissingMockFields(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		data string
+	}{
+		{name: "empty", data: ""},
+		{name: "comment only", data: "# no mock\n"},
+		{name: "empty documents", data: "---\n# no mock\n---\n...\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeFile(t, t.TempDir(), "empty.yaml", tt.data)
+			m := MustNew(Setup().Silent().InMemory())
+			t.Cleanup(m.Close)
+
+			for _, builder := range []struct {
+				name    string
+				builder vlatte.Builder[*Mock, *Server]
+				origin  string
+			}{
+				{name: "file", builder: FromFile(path), origin: "file " + path},
+				{name: "bytes", builder: FromBytes([]byte(tt.data), "yaml"), origin: "bytes"},
+			} {
+				t.Run(builder.name, func(t *testing.T) {
+					scope, err := m.Mock(builder.builder)
+					require.Nil(t, scope)
+					cfgErr, ok := errors.AsType[*config.Error](err)
+					require.True(t, ok, "%v", err)
+					require.Equal(t, []config.Problem{
+						{
+							Code: config.CodeMissingValue, Origin: builder.origin, Key: "request.method",
+							Message: "request.method is required", Hint: "name the method, such as pkg.Service/Method",
+						},
+						{
+							Code: config.CodeMissingValue, Origin: builder.origin, Key: "response",
+							Message: "the mock has no response",
+							Hint:    "set response, response_sequence, response_random, bidi for a bidi streaming method, or proxy",
+						},
+					}, cfgErr.Problems)
+					require.Len(t, m.ListPending(), 0, "an empty singular mock must not be stored")
+				})
+			}
+		})
+	}
+}
+
+func TestFromBytes_EmptyDocumentsDoNotMakeOneMockPlural(t *testing.T) {
+	m := fileServer(t, Setup().InMemory())
+	m.MustMock(FromBytes([]byte(`
+---
+# empty first document
+---
+request: {method: Greetings}
+response: {message: {message: hello}}
+---
+# empty last document
+`), "yaml"))
+
+	got, code := greetWith(t, pb.NewTestServiceClient(m.MustDial()), "hi")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "hello", got)
+}
+
+func TestFromBytes_ConcatenatedJSONObjectsRemainInvalid(t *testing.T) {
+	m := fileServer(t, Setup().InMemory())
+	_, err := m.Mock(FromBytes([]byte(`{"request":{"method":"Greetings"},"response":{}} {"response":{}}`), "json"))
+	cfgErr, ok := errors.AsType[*config.Error](err)
+	require.True(t, ok, "%v", err)
+	require.Len(t, cfgErr.Problems, 1)
+	require.Equal(t, config.CodeParseError, cfgErr.Problems[0].Code)
 }

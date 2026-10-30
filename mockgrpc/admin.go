@@ -167,7 +167,7 @@ func mockFile(app *Server, mock *Mock, path, format, toWD string) ([]byte, error
 		return nil, err
 	}
 
-	if _, err := (mockDoc{origin: "file " + path, source: path, format: format, dir: filepath.Dir(path), data: data}).build(app); err != nil {
+	if _, err := (mockDoc{Origin: "file " + path, Source: path, Format: format, Dir: filepath.Dir(path), Data: data}).build(app); err != nil {
 		return nil, err
 	}
 
