@@ -59,7 +59,7 @@ curl -X POST -H 'Content-Type: application/json' \
   http://127.0.0.1:8081/mocks
 ```
 
-`GET /mocks/{id}` describes a stream built in Go as a mock file would, but for `EventDelayFunc`, which a file can't write. The [mock file schema](/reference/schemas) describes `event_stream`, so editors complete it.
+`GET /mocks/{id}` describes a stream built in Go as a mock file would, including built-in event delay distributions. A `vlatte.DelayFunc` cannot be serialized and makes description fail. The [mock file schema](/reference/schemas) describes `event_stream`, so editors complete it.
 
 ## Feeds per user
 

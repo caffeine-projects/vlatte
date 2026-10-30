@@ -26,7 +26,7 @@ m.MustMock(mockgrpc.Method("Users/Get").
 
 m.MustMock(mockgrpc.Method("Feed/Watch").
 	Reply(mockgrpc.Messages(&pb.Event{Id: "1"}, &pb.Event{Id: "2"}).
-		MessageDelay(100 * time.Millisecond).
+		MessageDelay(vlatte.Latency(100 * time.Millisecond)).
 		Status(codes.Unavailable, "restarting")))
 
 m.MustMock(mockgrpc.Method("Chat/Talk").Reply(mockgrpc.Bidi().

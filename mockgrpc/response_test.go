@@ -2,6 +2,7 @@ package mockgrpc
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/journal"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
 
@@ -127,7 +129,7 @@ func TestResponse_AStreamEndsWithItsStatusAfterItsMessages(t *testing.T) {
 func TestResponse_AClientThatLeavesBetweenMessagesIsNotCounted(t *testing.T) {
 	m := serve(t)
 	scope := m.MustMock(Method("List").Reply(Messages(&pb.ListItem{Key: "a"}, &pb.ListItem{Key: "b"}).
-		MessageDelayFunc(delays(0, time.Hour))))
+		MessageDelay(delays(0, time.Hour))))
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -157,14 +159,14 @@ func delays(ds ...time.Duration) vlatte.Delay {
 
 	last := ds[len(ds)-1]
 
-	return func() time.Duration {
+	return vlatte.DelayFunc(func(ctx context.Context) (time.Duration, error) {
 		select {
 		case d := <-next:
-			return d
+			return d, nil
 		default:
-			return last
+			return last, nil
 		}
-	}
+	})
 }
 
 func TestResponse_JSONAnswersInTheMethodsType(t *testing.T) {
@@ -230,4 +232,31 @@ func TestResponse_ATemplateThatFailsToRenderFailsTheCall(t *testing.T) {
 func TestResponse_ADetailThatIsNoMessageFailsTheMock(t *testing.T) {
 	_, err := serve(t).Mock(Method("Greetings").Reply(Status(codes.NotFound, "x").Details(&pb.HiReq{Message: "\xff"})))
 	require.ErrorContains(t, err, "reply: status detail 0")
+}
+
+func TestResponse_DelayEvaluationFailureIsNotAMockedStatus(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		cause error
+	}{
+		{"plain", errors.New("test: no message delay")},
+		{"status", status.Error(codes.Unavailable, "test: no message delay")},
+		{"cut", vlatte.ErrAbort},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m, c := journaled(t, Setup())
+			scope := m.MustMock(Method("List").Reply(Messages(&pb.ListItem{Key: "unsent"}).MessageDelay(vlatte.DelayFunc(
+				func(context.Context) (time.Duration, error) { return time.Hour, tt.cause },
+			))))
+			s, err := c.List(t.Context(), &pb.ListReq{})
+			require.NoError(t, err)
+			_, err = s.Recv()
+			require.Equal(t, codes.Internal, status.Code(err))
+			require.Contains(t, status.Convert(err).Message(), tt.cause.Error())
+			require.Equal(t, []string{vlatte.FailureReply}, s.Trailer().Get(_failureKey))
+			require.Equal(t, journal.OutcomeFailed, onlyCall(t, m, journal.Query{}).Outcome)
+			m.Close()
+			require.EqualValues(t, 0, scope.Hits())
+		})
+	}
 }

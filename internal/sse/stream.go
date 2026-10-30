@@ -6,6 +6,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/delay"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
 )
 
@@ -19,7 +21,7 @@ type Stream struct {
 	frames     []Frame
 	next       int
 	pending    []byte
-	eventDelay func() time.Duration
+	eventDelay vlatte.Delay
 	heartbeat  time.Duration
 	keepOpen   bool
 	waiting    bool          // the wait before the next frame started
@@ -52,15 +54,19 @@ func (e *Encoder) Stream(ctx context.Context, data any, lastEventID string) (*St
 	}, nil
 }
 
-// Read implements io.Reader. It blocks until the next event or heartbeat is due.
+// Read implements io.Reader. It blocks until the next event or heartbeat is due. A delay evaluation failure is
+// returned to the reader; cancellation retains the stream's EOF behavior.
 func (s *Stream) Read(p []byte) (int, error) {
 	for len(s.pending) == 0 {
 		if s.done {
 			return 0, io.EOF
 		}
 
-		if s.advance() != nil {
+		if err := s.advance(); err != nil {
 			s.done = true
+			if s.ctx.Err() == nil {
+				return 0, err
+			}
 		}
 	}
 
@@ -108,7 +114,11 @@ func (s *Stream) advance() error {
 		s.left = f.Delay
 
 		if !f.HasDelay && s.eventDelay != nil {
-			s.left = s.eventDelay()
+			var err error
+			s.left, err = delay.Next(s.ctx, s.eventDelay)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

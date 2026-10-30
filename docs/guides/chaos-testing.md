@@ -105,7 +105,7 @@ func TestGivesUpOnASlowServer(t *testing.T) {
 	t.Cleanup(m.Close)
 
 	m.MustMock(mockhttp.Getf("/report").
-		WirePipe(fault.Latency(500*time.Millisecond, 0)).
+		WirePipe(fault.Latency(vlatte.Latency(500*time.Millisecond))).
 		Reply(mockhttp.OK().PlainText("too late")))
 
 	client := &http.Client{Timeout: 100 * time.Millisecond}
@@ -130,7 +130,7 @@ response:
   body: done
 wire_pipes:
   - type: latency
-    latency: 500ms
+    delay: 500ms
 ```
 
 ## What you used

@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"google.golang.org/grpc/codes"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/internal/delay"
 	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/match/matchbuild"
 )
@@ -40,7 +40,7 @@ type mockDef struct {
 	priority    int
 	hasPriority bool
 	enabled     bool
-	delay       time.Duration
+	delay       vlatte.Delay
 	hasDelay    bool
 	repeat      int64
 	scenario    scenarioDef
@@ -84,7 +84,7 @@ type replyDef struct {
 	messages  []string // JSON texts
 	templated bool
 	status    *statusDef
-	delay     time.Duration
+	delay     vlatte.Delay
 	hasDelay  bool
 }
 
@@ -155,8 +155,13 @@ var _mockSchema = config.NewSchema(
 		Set: func(d *mockDef, v config.Value) error { d.enabled = v.Bool; return nil },
 	},
 	mockField{
-		Key: "delay", Kind: config.Duration, Usage: "How long to wait before replying: milliseconds or a Go duration (1.5s).",
-		Set: func(d *mockDef, v config.Value) error { d.delay, d.hasDelay = v.Dur, true; return nil },
+		Key: "delay", Kind: config.Any, Usage: "Wait before replying: milliseconds, a Go duration (1.5s), or a typed fixed, uniform, jitter or lognormal distribution.",
+		Set: func(d *mockDef, v config.Value) error {
+			var err error
+			d.delay, err = delay.Decode(v)
+			d.hasDelay = err == nil
+			return err
+		},
 	},
 	mockField{
 		Key: "repeat", Kind: config.Int, Usage: "How many calls the mock answers.",
@@ -371,8 +376,13 @@ var _replySchema = config.NewSchema(
 		},
 	},
 	replyField{
-		Key: "message_delay", Kind: config.Duration, Usage: "How long to wait before each message: milliseconds or a Go duration (1.5s).",
-		Set: func(r *replyDef, v config.Value) error { r.delay, r.hasDelay = v.Dur, true; return nil },
+		Key: "message_delay", Kind: config.Any, Usage: "Wait before each message: milliseconds, a Go duration (1.5s), or a typed delay distribution.",
+		Set: func(r *replyDef, v config.Value) error {
+			var err error
+			r.delay, err = delay.Decode(v)
+			r.hasDelay = err == nil
+			return err
+		},
 	},
 )
 

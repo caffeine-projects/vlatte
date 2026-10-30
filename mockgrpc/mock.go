@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/caffeine-projects/vlatte"
 )
@@ -131,13 +130,4 @@ func (m *Mock) Close() error {
 	})
 
 	return err
-}
-
-// wait waits for the mock's delay, if it has one.
-func (m *Mock) wait() time.Duration {
-	if m.delay == nil {
-		return 0
-	}
-
-	return m.delay()
 }

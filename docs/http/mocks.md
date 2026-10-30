@@ -34,7 +34,7 @@ Then chain [matchers](/http/matching), a [reply](/http/replies), and the mock fe
 | `Priority(p)` | When several mocks match, the lowest number answers. |
 | `Enabled(false)` | Start the mock disabled: its scope's `Enable`, or the admin API, enables it. |
 | `Times(n)`, `Once()` | Serve a number of requests, then stop matching. See [Mock lifecycle](/more/mock-lifecycle). |
-| `Delay(d)`, `DelayFunc(delay)` | Wait before replying. |
+| `Delay(delay)` | Wait before replying. |
 | `StartScenario`, `ScenarioIs`, `ScenarioStateIs`, `ScenarioStateWillBe`, `ScenarioKey` | Take part in a [scenario](/scenarios/). |
 | `OnCompleteEvent(cfg)`, `Callback(fn)` | Run [events such as webhooks](/webhooks/), or a function, once the mock replied. |
 | `Map(mapper)` | Change the response after it was built. A mapper finds the body in `Body`: one that streams, such as a proxy's, is read whole for it first. |

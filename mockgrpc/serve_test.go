@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -188,7 +189,7 @@ func TestDebugHeader_AClientThatLeavesAfterTheHeaderTakesTheHitBack(t *testing.T
 	// answer ends takes the hit back, so the next call's header says 1 again.
 	m := serve(t)
 	scope := m.MustMock(Method("List").Reply(Messages(&pb.ListItem{Key: "a"}, &pb.ListItem{Key: "b"}).
-		MessageDelayFunc(delays(0, time.Hour, 0, 0))))
+		MessageDelay(delays(0, time.Hour, 0, 0))))
 	c := client(t, m)
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -216,7 +217,7 @@ func TestDebugHeader_AClientThatLeavesAfterTheHeaderTakesTheHitBack(t *testing.T
 
 func TestDebugHeader_AClientThatLeavesDuringTheDelayIsNotCounted(t *testing.T) {
 	m := serve(t)
-	scope := m.MustMock(Method("Greetings").Delay(time.Hour).Reply(Message(&pb.HiRes{})))
+	scope := m.MustMock(Method("Greetings").Delay(vlatte.Latency(time.Hour)).Reply(Message(&pb.HiRes{})))
 
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
@@ -428,6 +429,32 @@ func TestFailures_AContextThatEndsBeforeAMockIsFoundEndsWithItsCode(t *testing.T
 			require.Equal(t, tt.want, status.Code(err))
 			require.Empty(t, trailer.Get(_failureKey))
 			require.Zero(t, scope.Hits())
+		})
+	}
+}
+
+func TestServe_DelayEvaluationFailurePreventsTheReply(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		cause error
+	}{
+		{"plain", errors.New("test: no mock delay")},
+		{"status", status.Error(codes.Unavailable, "test: no mock delay")},
+		{"cut", vlatte.ErrAbort},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m, c := journaled(t, Setup())
+			scope := m.MustMock(Method("Greetings").Delay(vlatte.DelayFunc(
+				func(context.Context) (time.Duration, error) { return time.Hour, tt.cause },
+			)).Reply(Message(&pb.HiRes{Message: "unsent"})))
+			var trailer metadata.MD
+			_, err := c.Greetings(t.Context(), &pb.HiReq{}, grpc.Trailer(&trailer))
+			require.Equal(t, codes.Internal, status.Code(err))
+			require.Contains(t, status.Convert(err).Message(), tt.cause.Error())
+			require.Equal(t, []string{vlatte.FailureReply}, trailer.Get(_failureKey))
+			require.Equal(t, journal.OutcomeFailed, onlyCall(t, m, journal.Query{}).Outcome)
+			m.Close()
+			require.EqualValues(t, 0, scope.Hits())
 		})
 	}
 }

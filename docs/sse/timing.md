@@ -8,7 +8,7 @@ A stream sends its events at once, unless they have delays, and ends after the l
 mockhttp.OK().EventStream(mockhttp.NewEventStream(
 	mockhttp.NewEvent().Name("price").Data("10"),
 	mockhttp.NewEvent().Name("price").Data("11").Delay(30*time.Second),
-).EventDelay(100*time.Millisecond).Heartbeat(15*time.Second).KeepOpen())
+).EventDelay(vlatte.Latency(100*time.Millisecond)).Heartbeat(15*time.Second).KeepOpen())
 ```
 
 ```yaml [Mock file]
@@ -32,11 +32,10 @@ response:
 
 | Go | Mock file | Waits |
 |---|---|---|
-| `EventDelay(d)` on the stream | `event_delay` | `d` before each event without a delay of its own: a stream that trickles in. A negative `d` waits for none. |
-| `EventDelayFunc(delay)` on the stream | | What `delay` picks, before each event without a delay of its own, such as `vlatte.Jitter(100*time.Millisecond, 20)`. |
+| `EventDelay(delay)` on the stream | `event_delay` | A duration chosen before each event without a delay of its own. Use any [delay distribution](/more/mock-lifecycle#delays). |
 | `Delay(d)` on an event | `delay` | `d` before that event, in place of the stream's. |
 
-Everything before a wait is flushed first, so the client reads the events before it while it waits. A mock file can't write a function: a stream with `EventDelayFunc` is described without it, such as by `GET /mocks/{id}` on the [admin API](/admin-api/#routes).
+Everything before a wait is flushed first, so the client reads the events before it while it waits. Built-in event delays describe themselves, including distributions. A `vlatte.DelayFunc` cannot be serialized, so describing its mock fails explicitly. Evaluation errors end the stream and are reported as reply failures.
 
 These delays are between events. The mock's own [delay](/more/mock-lifecycle#delays) waits before the reply starts, and [pipes](/http/pipes) can slow the bytes of the stream.
 

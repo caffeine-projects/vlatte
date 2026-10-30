@@ -21,15 +21,11 @@ type Spec struct {
 	Events     []*EventSpec
 	Retry      time.Duration // the reconnection time sent first, when HasRetry is set
 	HasRetry   bool
-	EventDelay vlatte.Delay // picks the wait before each event that has no delay of its own; nil waits for none
-	// FixedEventDelay is the EventDelay as a mock file writes it, when HasFixedEventDelay is set: a function can't be
-	// written.
-	FixedEventDelay    time.Duration
-	HasFixedEventDelay bool
-	Heartbeat          time.Duration // sends a comment after this long without a write; 0 sends none
-	KeepOpen           bool          // the stream stays open after the last event, until the client leaves
-	Resume             bool          // a request with a Last-Event-ID gets the events after the one with that id
-	Templated          bool          // the text of the events is templates: see Compile
+	EventDelay vlatte.Delay  // picks the wait before each event that has no delay of its own; nil waits for none
+	Heartbeat  time.Duration // sends a comment after this long without a write; 0 sends none
+	KeepOpen   bool          // the stream stays open after the last event, until the client leaves
+	Resume     bool          // a request with a Last-Event-ID gets the events after the one with that id
+	Templated  bool          // the text of the events is templates: see Compile
 }
 
 // DataKind says what the data of an event is.

@@ -123,10 +123,10 @@ func TestBuilder_AClientThatLeavesDuringTheDelayIsNotCounted(t *testing.T) {
 	m := serve(t)
 	waiting := make(chan struct{})
 	scope := m.MustMock(Method("Greetings").Once().
-		DelayFunc(func() time.Duration {
+		Delay(vlatte.DelayFunc(func(ctx context.Context) (time.Duration, error) {
 			close(waiting)
-			return time.Hour
-		}).
+			return time.Hour, nil
+		})).
 		Reply(Message(&pb.HiRes{})))
 
 	ctx, cancel := context.WithCancel(t.Context())

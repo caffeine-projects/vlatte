@@ -25,7 +25,7 @@ func TestGreeter(t *testing.T) {
 
 ## Mock features
 
-As HTTP mocks, gRPC mocks have an `ID`, a `Name` and a `Priority`, can start `Enabled(false)`, serve a number of calls with `Times` and `Once`, take part in [scenarios](/scenarios/) with `StartScenario`, `ScenarioIs`, `ScenarioStateIs`, `ScenarioStateWillBe` and `ScenarioKey`, wait before replying with `Delay` and `DelayFunc`, and run [on_complete events](/webhooks/), such as webhooks, with `OnCompleteEvent`, and callbacks with `Callback`. An answer with a status counts as the mock's answer, for `Times` too. A scenario moves when its mock is picked to answer, before it answers.
+As HTTP mocks, gRPC mocks have an `ID`, a `Name` and a `Priority`, can start `Enabled(false)`, serve a number of calls with `Times` and `Once`, take part in [scenarios](/scenarios/) with `StartScenario`, `ScenarioIs`, `ScenarioStateIs`, `ScenarioStateWillBe` and `ScenarioKey`, wait before replying with `Delay`, and run [on_complete events](/webhooks/), such as webhooks, with `OnCompleteEvent`, and callbacks with `Callback`. An answer with a status counts as the mock's answer, for `Times` too. A scenario moves when its mock is picked to answer, before it answers.
 
 See [Mock lifecycle](/more/mock-lifecycle), [Scenarios](/scenarios/) and [Webhooks and events](/webhooks/).
 

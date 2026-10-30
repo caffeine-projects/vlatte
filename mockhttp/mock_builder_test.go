@@ -429,10 +429,10 @@ func TestBuilder_DelayFunc(t *testing.T) {
 
 	var picks atomic.Int64
 	m.MustMock(Getf("/d").
-		DelayFunc(func() time.Duration {
+		Delay(vlatte.DelayFunc(func(ctx context.Context) (time.Duration, error) {
 			picks.Add(1)
-			return time.Millisecond
-		}).
+			return time.Millisecond, nil
+		})).
 		Reply(OK()))
 
 	for range 2 {
@@ -579,10 +579,10 @@ func TestBuilder_AScenarioMovesWhenItsClientLeavesDuringTheDelay(t *testing.T) {
 	waiting := make(chan struct{})
 	m.MustMock(
 		Getf("/pay").StartScenario("checkout").ScenarioStateWillBe("paid").
-			DelayFunc(func() time.Duration {
+			Delay(vlatte.DelayFunc(func(ctx context.Context) (time.Duration, error) {
 				close(waiting)
-				return time.Hour
-			}).
+				return time.Hour, nil
+			})).
 			Reply(OK()),
 		Getf("/pay").ScenarioIs("checkout").ScenarioStateIs("paid").Reply(Status(http.StatusConflict)),
 	)

@@ -244,7 +244,7 @@ func TestWebHook_TheTargetHasTheWebhookWhenTheResponseComes(t *testing.T) {
 	target.MustStart()
 	t.Cleanup(target.Close)
 
-	target.MustMock(mockhttp.Postf("/hook").Delay(100 * time.Millisecond).Reply(mockhttp.NoContent()))
+	target.MustMock(mockhttp.Postf("/hook").Delay(vlatte.Latency(100 * time.Millisecond)).Reply(mockhttp.NoContent()))
 
 	wh, err := New()
 	require.NoError(t, err)
@@ -462,7 +462,7 @@ func TestWebHook_AStreamedReplyEndsAfterItsWebhooks(t *testing.T) {
 	target.MustStart()
 	t.Cleanup(target.Close)
 
-	target.MustMock(mockhttp.Postf("/hook").Delay(100 * time.Millisecond).Reply(mockhttp.NoContent()))
+	target.MustMock(mockhttp.Postf("/hook").Delay(vlatte.Latency(100 * time.Millisecond)).Reply(mockhttp.NoContent()))
 
 	wh, err := New()
 	require.NoError(t, err)

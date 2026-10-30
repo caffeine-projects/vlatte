@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
-	"math"
-	"math/rand/v2"
 	"sync"
 	"time"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/delay"
 )
 
 var (
@@ -19,39 +17,23 @@ var (
 	_ vlatte.Stage           = (*latencyStage)(nil)
 )
 
-// Latency returns a pipe that delays every write and flush by latency, give or take jitter at random, to test a client
-// against a distant server: each reaches the client from latency-jitter to latency+jitter after the writer sent it,
-// in order, as over a link with that latency. The writer doesn't wait: the answer keeps its pace, only later, and a
-// stream whose writes come a second apart still gets them a second apart. With jitter, a write waits for those
-// before it, so nothing comes out of order. The end of the answer comes once what was sent before it did.
-//
-// It goes with [github.com/caffeine-projects/vlatte/mockhttp.Builder.Pipe], to delay the body, or with
-// [github.com/caffeine-projects/vlatte/mockhttp.Builder.WirePipe], to delay the whole answer, its head included. It
-// panics when latency is negative, or jitter is negative or more than latency.
-func Latency(latency, jitter time.Duration) vlatte.Pipe {
-	if latency < 0 {
-		panic(fmt.Sprintf("fault: latency can't be %s", latency))
+// Latency delays each write and flush by a duration chosen by d, preserving their order. The writer does not wait:
+// the answer keeps its pace, only later. The end waits for the queued writes. Nil adds no delay. Evaluation errors
+// are returned by Write or Flush. It goes with a mock's body Pipe or WirePipe to include the response headers.
+func Latency(d vlatte.Delay) vlatte.Pipe {
+	if d == nil {
+		d = vlatte.Latency(0)
 	}
-
-	if jitter < 0 || jitter > latency {
-		panic(fmt.Sprintf("fault: latency jitter must be from 0 to %s, not %s", latency, jitter))
-	}
-
-	return latencyPipe{latency: latency, jitter: jitter}
+	return latencyPipe{delay: d}
 }
 
 type latencyPipe struct {
-	latency time.Duration
-	jitter  time.Duration
+	delay vlatte.Delay
 }
 
-// Describe implements [vlatte.SelfDescriptive], without a jitter of 0.
+// Describe implements [vlatte.SelfDescriptive], preserving the delay configuration and description errors.
 func (l latencyPipe) Describe() vlatte.Descriptor {
-	if l.jitter == 0 {
-		return vlatte.DescribeKeyValuePairs("latency", "type", "latency", "latency", l.latency.String())
-	}
-
-	return vlatte.DescribeKeyValuePairs("latency", "type", "latency", "latency", l.latency.String(), "jitter", l.jitter.String())
+	return vlatte.DescribeKeyValuePairs("latency", "type", "latency", "delay", delay.Doc(l.delay))
 }
 
 func (l latencyPipe) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
@@ -67,18 +49,6 @@ func (l latencyPipe) Open(flow *vlatte.Flow, next vlatte.Stage) vlatte.Stage {
 	go s.run()
 
 	return s
-}
-
-// delay picks the delay of a write or flush: from latency-jitter to latency+jitter, which is at most twice the
-// longest duration, so it can't overflow a uint64. One longer than a duration holds is the longest one.
-func (l latencyPipe) delay() time.Duration {
-	if l.jitter == 0 {
-		return l.latency
-	}
-
-	d := uint64(l.latency-l.jitter) + rand.Uint64N(2*uint64(l.jitter)+1)
-
-	return time.Duration(min(d, math.MaxInt64))
 }
 
 // latencyOp is what a latencyStage passes on at: a write of b, a flush, or the end.
@@ -106,7 +76,11 @@ type latencyStage struct {
 }
 
 func (s *latencyStage) Write(b []byte) (int, error) {
-	if err := s.push(latencyOp{at: time.Now().Add(s.delay()), b: bytes.Clone(b)}); err != nil {
+	d, err := delay.Next(s.ctx, s.delay)
+	if err != nil {
+		return 0, err
+	}
+	if err := s.push(latencyOp{at: time.Now().Add(d), b: bytes.Clone(b)}); err != nil {
 		return 0, err
 	}
 
@@ -114,7 +88,11 @@ func (s *latencyStage) Write(b []byte) (int, error) {
 }
 
 func (s *latencyStage) Flush() error {
-	return s.push(latencyOp{at: time.Now().Add(s.delay()), flush: true})
+	d, err := delay.Next(s.ctx, s.delay)
+	if err != nil {
+		return err
+	}
+	return s.push(latencyOp{at: time.Now().Add(d), flush: true})
 }
 
 func (s *latencyStage) Close() error {

@@ -85,7 +85,7 @@ func TestPutsTheAnswerTogether(t *testing.T) {
 		Reply(mockhttp.OK().EventStream(mockhttp.NewEventStream(
 			chunk("Hel"), chunk("lo, "), chunk("world"),
 			mockhttp.NewEvent().Data("[DONE]"),
-		).EventDelay(20 * time.Millisecond))))
+		).EventDelay(vlatte.Latency(20 * time.Millisecond)))))
 
 	answer, err := complete(t.Context(), http.DefaultClient, m.URL(), "Say hello")
 	if err != nil {

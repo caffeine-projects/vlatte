@@ -43,7 +43,7 @@ A client that follows the standard dispatches three events, `bom`, `no space` of
 | Fault | Tests a client against |
 |---|---|
 | `fault.LimitData(n)`, or the `limit_data` fault with `bytes: n` | A connection that drops after `n` bytes, as a flaky network does, such as in the middle of an event: see [Testing a reconnection](/sse/reconnecting#testing-a-reconnection). |
-| `fault.Latency(latency, jitter)` | Events that arrive late, at the pace they were sent. |
+| `fault.Latency(delay)` | Events that arrive late, at the pace they were sent. |
 | `fault.Bandwidth(bytesPerSecond)` | A slow link, which sends a large event in pieces. |
 | `fault.Slicer(averageSize, sizeVariation, delay)` | Events split across reads at random. |
 | `fault.ConnectionResetByPeerAfter(d)` | A reset `d` after the stream began. |

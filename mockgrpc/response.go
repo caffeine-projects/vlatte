@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	// Mock files name the google.rpc error details of a status by type: the program has them.
 	_ "google.golang.org/genproto/googleapis/rpc/errdetails"
@@ -20,7 +19,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/caffeine-projects/vlatte"
-	"github.com/caffeine-projects/vlatte/internal/httpx"
+	"github.com/caffeine-projects/vlatte/internal/delay"
 )
 
 var _ Reply = (*Response)(nil)
@@ -47,9 +46,6 @@ type Response struct {
 	details    []proto.Message
 	detailJSON []string // details as mock files give them: JSON of Any messages, read as the replier is made
 	delay      vlatte.Delay
-	// delayDuration is the delay of MessageDelay, which a description writes; MessageDelayFunc's can't be.
-	delayDuration time.Duration
-	delayFunc     bool // the delay is MessageDelayFunc's
 }
 
 // Message returns a Response that answers msg, which must be of the type the method answers with.
@@ -117,16 +113,9 @@ func (r *Response) Details(details ...proto.Message) *Response {
 	return r
 }
 
-// MessageDelay waits for d before each message of the answer: a stream that trickles in.
-func (r *Response) MessageDelay(d time.Duration) *Response {
-	r.delay, r.delayDuration, r.delayFunc = vlatte.Latency(d), d, false
-	return r
-}
-
-// MessageDelayFunc sets a function that picks the delay before each message of the answer, such as [vlatte.Jitter]. A
-// mock file can't hold a function: describing a mock with it fails, so the admin API can't show the mock, nor save it.
-func (r *Response) MessageDelayFunc(delay vlatte.Delay) *Response {
-	r.delay, r.delayDuration, r.delayFunc = delay, 0, delay != nil
+// MessageDelay chooses the wait before each message. Nil disables it. An evaluation error ends the reply.
+func (r *Response) MessageDelay(d vlatte.Delay) *Response {
+	r.delay = d
 	return r
 }
 
@@ -297,8 +286,13 @@ func (r *responseReplier) send(ctx context.Context, call *Call) error {
 func (r *responseReplier) sendMessages(ctx context.Context, call *Call, msgs []proto.Message) error {
 	for _, msg := range msgs {
 		if r.delay != nil {
-			if err := httpx.Wait(ctx, r.delay()); err != nil {
-				return status.FromContextError(err).Err()
+			if err := delay.Wait(ctx, r.delay); err != nil {
+				if ctx.Err() != nil {
+					return status.FromContextError(ctx.Err()).Err()
+				}
+				// Replier status and cut errors are intentional mock answers. A delay failure must not carry
+				// those semantics across this boundary; Next itself preserves its original error.
+				return errors.New("reply: evaluating message delay: " + err.Error())
 			}
 		}
 

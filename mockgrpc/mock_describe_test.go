@@ -79,7 +79,7 @@ func TestDescribe_WritesEveryPartAMockFileHolds(t *testing.T) {
 		Name("greet").
 		Priority(2).
 		Enabled(false).
-		Delay(time.Second).
+		Delay(vlatte.Latency(time.Second)).
 		Times(3).
 		ScenarioIs("s").
 		ScenarioStateIs("a").
@@ -92,7 +92,7 @@ func TestDescribe_WritesEveryPartAMockFileHolds(t *testing.T) {
 		Reply(Template(`{"message": "{{ .Request.message }}"}`).
 			Trailer("T", "1").
 			Status(codes.Aborted, "cut").
-			MessageDelay(time.Millisecond)))
+			MessageDelay(vlatte.Latency(time.Millisecond))))
 
 	doc, err := scope.Mocks()[0].Describe().MarshalJSON()
 	require.NoError(t, err)
@@ -254,7 +254,7 @@ func TestDescribe_APartAMockFileCannotHoldFailsNamingIt(t *testing.T) {
 	// it fails instead, as a Func or Echo reply does, and the error names the part, wherever it is in the mock.
 	custom := match.Function(func(any) (bool, error) { return true, nil })
 	fn := Func(func(context.Context, *Call) error { return nil })
-	jitter := vlatte.Latency(time.Millisecond)
+	jitter := vlatte.DelayFunc(func(context.Context) (time.Duration, error) { return time.Millisecond, nil })
 	reply := Message(&pb.HiRes{Message: "hi"})
 	noop := vlatte.EventFunc[vlatte.OnComplete](func(context.Context, vlatte.OnComplete) error { return nil })
 
@@ -306,7 +306,7 @@ func TestDescribe_APartAMockFileCannotHoldFailsNamingIt(t *testing.T) {
 			wantErr: errMatcherNotDescribed,
 			wantMsg: "on[0].when: ",
 		},
-		{mock: Method("Greetings").ID("delay").DelayFunc(jitter).Reply(reply), wantErr: errDelayFuncNotDescribed},
+		{mock: Method("Greetings").ID("delay").Delay(jitter).Reply(reply), wantErr: vlatte.ErrDelayNotDescribed},
 		{mock: Method("Greetings").ID("callback").Callback(noop).Reply(reply), wantErr: errCallbackNotDescribed},
 		{
 			mock:    Method("Greetings").ID("listener").OnCompleteEvent(vlatte.EventConfig{Name: "audit", Listener: noop}).Reply(reply),
@@ -314,21 +314,21 @@ func TestDescribe_APartAMockFileCannotHoldFailsNamingIt(t *testing.T) {
 			wantMsg: `"audit"`,
 		},
 		{
-			mock:    Method("List").ID("message-delay").Reply(Message(&pb.ListItem{}).MessageDelayFunc(jitter)),
-			wantErr: errMessageDelayFuncNotDescribed,
+			mock:    Method("List").ID("message-delay").Reply(Message(&pb.ListItem{}).MessageDelay(jitter)),
+			wantErr: vlatte.ErrDelayNotDescribed,
 		},
 		{
-			mock:    Method("List").ID("seq-delay").Reply(Seq(Messages(&pb.ListItem{}).MessageDelayFunc(jitter))),
-			wantErr: errMessageDelayFuncNotDescribed,
+			mock:    Method("List").ID("seq-delay").Reply(Seq(Messages(&pb.ListItem{}).MessageDelay(jitter))),
+			wantErr: vlatte.ErrDelayNotDescribed,
 		},
 		{
-			mock:    Method("Chat").ID("otherwise").Reply(Bidi().Otherwise(Message(&pb.HiRes{}).MessageDelayFunc(jitter))),
-			wantErr: errMessageDelayFuncNotDescribed,
+			mock:    Method("Chat").ID("otherwise").Reply(Bidi().Otherwise(Message(&pb.HiRes{}).MessageDelay(jitter))),
+			wantErr: vlatte.ErrDelayNotDescribed,
 			wantMsg: "otherwise: ",
 		},
 		{
-			mock:    Method("Chat").ID("rule-response").Reply(Bidi().On(match.Contain("x"), Message(&pb.HiRes{}).MessageDelayFunc(jitter))),
-			wantErr: errMessageDelayFuncNotDescribed,
+			mock:    Method("Chat").ID("rule-response").Reply(Bidi().On(match.Contain("x"), Message(&pb.HiRes{}).MessageDelay(jitter))),
+			wantErr: vlatte.ErrDelayNotDescribed,
 			wantMsg: "on[0].response: ",
 		},
 		{mock: Method("Greetings").ID("dial").Reply(From("localhost:1").DialOptions(grpc.WithUserAgent("x"))), wantErr: errDialOptionsNotDescribed},
@@ -392,12 +392,12 @@ func TestDescribe_AFixedDelayAfterDelayFuncIsDescribed(t *testing.T) {
 	// The last delay set wins: Delay after DelayFunc is a delay a mock file holds, and MessageDelay after
 	// MessageDelayFunc too.
 	m := serve(t)
-	scope := m.MustMock(Method("List").ID("fixed").DelayFunc(vlatte.Latency(time.Millisecond)).Delay(time.Second).
-		Reply(Messages(&pb.ListItem{Key: "a"}).MessageDelayFunc(vlatte.Latency(time.Millisecond)).MessageDelay(0)))
+	scope := m.MustMock(Method("List").ID("fixed").Delay(vlatte.DelayFunc(func(context.Context) (time.Duration, error) { return time.Millisecond, nil })).Delay(vlatte.Latency(time.Second)).
+		Reply(Messages(&pb.ListItem{Key: "a"}).MessageDelay(vlatte.Latency(time.Millisecond)).MessageDelay(vlatte.Latency(0))))
 
 	doc, err := scope.Mock("fixed").Describe().MarshalJSON()
 	require.NoError(t, err)
-	require.JSONEq(t, `{"id": "fixed", "delay": "1s", "request": {"method": "List"}, "response": {"messages": [{"key": "a"}]}}`, string(doc))
+	require.JSONEq(t, `{"id": "fixed", "delay": "1s", "request": {"method": "List"}, "response": {"messages": [{"key": "a"}], "message_delay":"0s"}}`, string(doc))
 
 	_, err = serve(t).Mock(FromBytes(doc, "json"))
 	require.NoError(t, err, "%s", doc)

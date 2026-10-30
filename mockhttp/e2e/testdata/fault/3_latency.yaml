@@ -6,5 +6,7 @@ response:
   body: hello
 wire_pipes:
   - type: latency
-    latency: 50ms
-    jitter: 10ms
+    delay:
+      type: jitter
+      latency: 50ms
+      jitter: 10ms

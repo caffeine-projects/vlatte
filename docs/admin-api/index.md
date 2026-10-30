@@ -58,7 +58,7 @@ The [OpenAPI reference](/reference/admin-api.html){target="_blank" rel="noopener
 | `POST /reset` | Removes the mocks added through the admin API, loads the mock files again, saved ones included, starts every scenario over, and clears the [journal](/more/journal). Mocks added in code, and the [key-value store](/templating/#key-value-store), stay as they are. The mocks of a persistent store come back from it: reset never deletes what it holds. |
 | `GET /mocks` | Lists every mock, enabled or not, with its `priority`, `enabled`, `hits` and `origin`. |
 | `POST /mocks` | Adds the mock of the body, a [mock file](/http/mock-files). An id in use is a `409`. |
-| `GET /mocks/{id}` | The mock as a mock file describes it, which `PUT` and `POST` take back. A mock whose reply a mock file can't hold, an `Echo`, `Func` or `Handler`, answers `500` with the code `describe_failed`. A gRPC mock built in Go does too when any part of it is one a mock file can't hold, such as a `Shared` reply, a `CallMatches` matcher, a callback or a `DelayFunc` delay, and the detail names it. |
+| `GET /mocks/{id}` | The mock as a mock file describes it, which `PUT` and `POST` take back. A mock whose reply a mock file can't hold, an `Echo`, `Func` or `Handler`, answers `500` with the code `describe_failed`. A gRPC mock built in Go does too when any part of it is one a mock file can't hold, such as a `Shared` reply, a `CallMatches` matcher, a callback or a `vlatte.DelayFunc` callback, and the detail names it. |
 | `PUT /mocks/{id}` | Replaces the mock, in one step. The body's id must be the path's. |
 | `PATCH /mocks/{id}` | Enables or disables the mock: `{"enabled": false}`. |
 | `DELETE /mocks/{id}`, `DELETE /mocks` | Removes the mock, or every mock. |

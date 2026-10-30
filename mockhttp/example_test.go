@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
@@ -93,7 +94,7 @@ func Example_eventStream() {
 			mockhttp.NewEvent().DataJSON(map[string]string{"text": "Hel"}),
 			mockhttp.NewEvent().DataJSON(map[string]string{"text": "lo"}),
 			mockhttp.NewEvent().Name("done").Data("[DONE]"),
-		).EventDelay(time.Millisecond))))
+		).EventDelay(vlatte.Latency(time.Millisecond)))))
 
 	res, err := http.Post(m.URL("/v1/completions"), mockhttp.MIMEApplicationJSON, strings.NewReader(`{"prompt":"hi"}`))
 	if err != nil {
