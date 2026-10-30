@@ -114,6 +114,10 @@ vuln: ## check for known vulnerabilities
 docs-dev: ## serve the docs site with live reload
 	@cd docs && npm ci --ignore-scripts && npm run dev
 
+.PHONY: docs-version
+docs-version: ## update the documented stable release (VERSION=v1.1.0)
+	@node docs/scripts/version.mjs "$(VERSION)"
+
 .PHONY: docs-build
 docs-build: ## build the docs site into docs/.vitepress/dist
 	@cd docs && npm ci --ignore-scripts && npm run build

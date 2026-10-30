@@ -94,17 +94,19 @@ You may use AI tools. You own every line you submit and must be able to explain 
 
 For maintainers. Pushing a tag that starts with `v` runs [`.github/workflows/release.yml`](.github/workflows/release.yml). A tag with a suffix, such as `v0.2.0-rc.1`, is a prerelease, and Homebrew does not get it.
 
-1. For a stable release, bump the version the docs pin, and merge that first:
+1. For a stable release, update the Go and archive version pins with Node.js 26, and merge that first:
 
    ```sh
-   grep -rnE 'vlatte:v[0-9]|VERSION=v[0-9]' README.md docs --exclude-dir=node_modules
+   make docs-version VERSION=v1.1.0
    ```
+
+   The command updates `docs/release.json` and the source examples together. The docs build checks that their versions agree. Docker examples omit the tag and use `latest`, which stable releases update.
 
 2. Sign the tag and push it. The first `-m` is the tag's subject. Each later `-m` is a paragraph of the highlights that open the release notes. Never push a lightweight tag: the notes would open with the tagged commit's body instead.
 
    ```sh
-   git tag -s v0.2.0 -m v0.2.0 -m "Highlights of the release."
-   git push origin v0.2.0
+   git tag -s v1.1.0 -m v1.1.0 -m "Highlights of the release."
+   git push origin v1.1.0
    ```
 
 3. Approve the `release` environment when its jobs ask.

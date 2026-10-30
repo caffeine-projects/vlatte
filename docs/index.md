@@ -115,7 +115,7 @@ curl -k https://localhost:8443/payments \
 ::: code-group
 
 ```go [Go test]
-// go get github.com/caffeine-projects/vlatte@v1.0.0
+// go get github.com/caffeine-projects/vlatte@v1.1.0
 m := mockhttp.MustNew()
 m.MustStart()
 t.Cleanup(m.Close)
@@ -133,7 +133,7 @@ vlatte --addr=:8080
 ```yaml [Docker Compose]
 services:
   payments:
-    image: ghcr.io/caffeine-projects/vlatte:v1.0.0
+    image: ghcr.io/caffeine-projects/vlatte
     ports: ["8080:8080"]
     volumes:
       - ./mocks:/vlatte/testdata/vlatte/_mocks:ro

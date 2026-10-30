@@ -4,7 +4,7 @@ This guide runs vlatte next to an app under test with Docker Compose: the app ca
 
 ## Prerequisites
 
-Install Docker with Docker Compose. This guide uses the `ghcr.io/caffeine-projects/vlatte:v1.0.0` release image. Put the files below in your app's directory, alongside the Dockerfile that builds your app. The app must read `PAYMENTS_URL` as its payments API base URL. For a self-contained browser example without an app image, use [Testing a frontend client](/guides/testing-a-frontend-client).
+Install Docker with Docker Compose. Put the files below in your app's directory, alongside the Dockerfile that builds your app. The app must read `PAYMENTS_URL` as its payments API base URL. For a self-contained browser example without an app image, use [Testing a frontend client](/guides/testing-a-frontend-client).
 
 ## The files
 
@@ -39,7 +39,7 @@ Create the `mocks` and `secrets` directories, then generate the token with `open
 # compose.yaml
 services:
   payments:
-    image: ghcr.io/caffeine-projects/vlatte:v1.0.0
+    image: ghcr.io/caffeine-projects/vlatte
     ports:
       - "8080:8080" # mocks
       - "8081:8081" # admin API
@@ -64,7 +64,7 @@ secrets:
     file: ./secrets/admin_token
 ```
 
-- **The image** is pinned to `v1.0.0`. It listens on every interface, on fixed ports: mocks on `8080`, the admin API on `8081`, and gRPC mocks on `50051`, with their admin API on `8082`.
+- **The image** listens on every interface, on fixed ports: mocks on `8080`, the admin API on `8081`, and gRPC mocks on `50051`, with their admin API on `8082`.
 - **Mock files** mount over `/vlatte/testdata/vlatte/_mocks`, which the command serves.
 - **The health check** of the image runs `vlatte health`, which asks the admin API's readiness probe. Probes need no credentials, so `service_healthy` works with the token set, and the app starts once the mocks are loaded.
 - **The token** comes from a file, as a Docker secret: the token has no flag, so it never shows on the command line.

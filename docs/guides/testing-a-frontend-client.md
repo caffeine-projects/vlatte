@@ -4,7 +4,7 @@ Run VLatte as a local API for a web or mobile app, without installing Go. This g
 
 ## Prepare the server
 
-Install Docker, then create a directory for the example. The commands below use the `v1.0.0` release image:
+Install Docker, then create a directory for the example:
 
 ```sh
 mkdir -p frontend-example/mocks
@@ -37,7 +37,7 @@ Start the server in one terminal:
 ```sh
 docker run --rm -p 127.0.0.1:8080:8080 -p 127.0.0.1:8081:8081 \
   -v "$PWD/mocks:/vlatte/testdata/vlatte/_mocks:ro" \
-  ghcr.io/caffeine-projects/vlatte:v1.0.0 --journal-dir="" \
+  ghcr.io/caffeine-projects/vlatte --journal-dir="" \
   --cors-allowed-origin=http://localhost:5173
 ```
 
@@ -121,7 +121,7 @@ For a physical device, bind the mock API to the network interface and keep the a
 ```sh
 docker run --rm -p 8080:8080 -p 127.0.0.1:8081:8081 \
   -v "$PWD/mocks:/vlatte/testdata/vlatte/_mocks:ro" \
-  ghcr.io/caffeine-projects/vlatte:v1.0.0 --journal-dir=""
+  ghcr.io/caffeine-projects/vlatte --journal-dir=""
 ```
 
 Check that the device and host can reach each other and that the host firewall allows port `8080`. For other simulators or a WebView, check that runtime's host-routing and browser-origin rules. CORS applies to browsers and WebViews, rather than a native HTTP client.

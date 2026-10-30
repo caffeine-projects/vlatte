@@ -40,7 +40,7 @@ docker run --rm -p 8080:8080 -p 8081:8081 \
   -v "$PWD/secrets:/run/secrets:ro" -v "$PWD/certs:/certs:ro" \
   -e VLATTE_ADMIN_AUTH_TOKEN_FILE=/run/secrets/admin_token \
   -e VLATTE_ADMIN_TLS_CERT=/certs/admin.pem -e VLATTE_ADMIN_TLS_KEY=/certs/admin-key.pem \
-  ghcr.io/caffeine-projects/vlatte:v1.0.0
+  ghcr.io/caffeine-projects/vlatte
 ```
 
 See [Docker](/run/docker) for the image's ports and settings.
