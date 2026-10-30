@@ -101,6 +101,11 @@ func TestCSVKV_ABrokenFileNamesTheLineToFix(t *testing.T) {
 			want:    `kv: kv.csv:4: key "banner" repeats line 2: keep one of them`,
 		},
 		{
+			name:    "a header with a quote that doesn't close",
+			content: "key,\"value\n",
+			want:    `kv: reading kv.csv: parse error on line 1, column 12: extraneous or missing " in quoted-field`,
+		},
+		{
 			name:    "a quote that doesn't close",
 			content: "key,value\ntoken,\"abc\n",
 			want:    `kv: reading kv.csv: parse error on line 2, column 12: extraneous or missing " in quoted-field`,
