@@ -30,16 +30,20 @@ The `MockFiles` loader reads every mock separated by `---` in each YAML file:
 id: first
 request:
   method: users.Users/Get
-  fields: {id: u-1}
+  fields: 
+    id: u-1
 response:
-  status: {code: NOT_FOUND}
+  status: 
+    code: NOT_FOUND
 ---
 id: second
 request:
   method: users.Users/Get
-  fields: {id: u-2}
+  fields: 
+    id: u-2
 response:
-  status: {code: PERMISSION_DENIED}
+  status: 
+    code: PERMISSION_DENIED
 ```
 
 Mocks of equal priority match in file-name order, then document order. Relative `body_file` paths start at the YAML file's directory. Empty documents are skipped; a file with only empty documents contributes no mocks. Explicit `null`, scalar and list documents are invalid mock definitions. Anchors belong to their own document.
