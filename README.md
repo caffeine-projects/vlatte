@@ -10,6 +10,16 @@
 </p>
 
 <p align="center">
+  <a href="https://vlatte.dev/"><strong>vlatte.dev</strong></a>
+  <br>
+</p>
+
+<p align="center">
+  <a href="https://pkg.go.dev/github.com/caffeine-projects/vlatte"><img src="https://pkg.go.dev/badge/github.com/caffeine-projects/vlatte.svg" alt="Go Reference"></a>
+  <br>
+</p>
+
+<p align="center">
   <a href="https://github.com/caffeine-projects/vlatte/releases"><img src="https://img.shields.io/github/v/release/caffeine-projects/vlatte?include_prereleases&sort=semver" alt="Release"></a>
   <a href="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml"><img src="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://vlatte.dev/"><img src="https://github.com/caffeine-projects/vlatte/actions/workflows/docs.yml/badge.svg" alt="Docs"></a>
@@ -17,7 +27,6 @@
   <a href="https://sonarcloud.io/summary/new_code?id=caffeine-projects_vlatte"><img src="https://sonarcloud.io/api/project_badges/measure?project=caffeine-projects_vlatte&metric=alert_status" alt="Quality gate status"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/caffeine-projects/vlatte"><img src="https://api.scorecard.dev/projects/github.com/caffeine-projects/vlatte/badge" alt="OpenSSF Scorecard"></a>
   <a href="https://www.bestpractices.dev/projects/16055"><img src="https://www.bestpractices.dev/projects/16055/badge" alt="OpenSSF Best Practices"></a>
-  <a href="https://pkg.go.dev/github.com/caffeine-projects/vlatte"><img src="https://pkg.go.dev/badge/github.com/caffeine-projects/vlatte.svg" alt="Go Reference"></a>
 </p>
 
 ## About
@@ -50,15 +59,26 @@ go get github.com/caffeine-projects/vlatte
 
 The CLI, with Homebrew, an archive from [GitHub Releases](https://github.com/caffeine-projects/vlatte/releases), Go, or Docker:
 
+### Homebrew
+
 ```sh
 brew install caffeine-projects/tap/vlatte
+```
+
+### Go
+
+```sh
 go install github.com/caffeine-projects/vlatte/cmd/vlatte@latest
+```
+
+### Docker
+
+```sh
 docker run --rm ghcr.io/caffeine-projects/vlatte:v0.1.0-rc.1 version
 ```
 
 Release archives and images are signed: see [Verifying a release](https://vlatte.dev/getting-started/installation#verifying-a-release).
 
-Until v1.0.0, a minor version may change the API.
 
 ## Quick start
 
