@@ -1312,6 +1312,10 @@ func locals(r *RequestValues, provided map[string]any, kv *viewdata.KVView) *vie
 	parsed := r.RawRequest.Cookies()
 	cookies := make(map[string]*http.Cookie, len(parsed))
 	for _, cookie := range parsed {
+		if _, exists := cookies[cookie.Name]; exists {
+			continue
+		}
+
 		cookies[cookie.Name] = cookie
 	}
 

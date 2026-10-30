@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
@@ -35,6 +36,45 @@ func TestTemplating(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	require.Equal(t, "test --> go --> POST --> true cookie_value Path 0 test Path 1 templating", string(b))
+}
+
+func TestTemplating_CookiesUseTheValueThatMatched(t *testing.T) {
+	// A template must read the cookie value that selected its mock, even when the request repeats the name.
+	tests := []struct {
+		name   string
+		cookie string
+		want   string
+	}{
+		{name: "single cookie", cookie: "session=first", want: "first"},
+		{name: "duplicates", cookie: "session=first; session=second", want: "first"},
+		{name: "duplicates reversed", cookie: "session=second; session=first", want: "second"},
+		{name: "empty first value", cookie: "session=; session=second", want: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := mockhttp.MustNew(mockhttp.Setup().Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			m.MustMock(mockhttp.Getf("/cookie").
+				Cookie("session", match.Equal(tc.want)).
+				Reply(mockhttp.OK().BodyTemplate(`{{ (.Request.Cookie "session").Value }}|{{ .Request.Cookies.session.Value }}`)))
+
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, m.URL("/cookie"), nil)
+			require.NoError(t, err)
+			req.Header.Set("Cookie", tc.cookie)
+
+			res, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer res.Body.Close()
+
+			body, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, res.StatusCode)
+			require.Equal(t, tc.want+"|"+tc.want, string(body))
+		})
+	}
 }
 
 func TestTemplating_BodyFilename(t *testing.T) {
