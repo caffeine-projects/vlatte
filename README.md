@@ -15,12 +15,13 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/caffeine-projects/vlatte/releases"><img src="https://img.shields.io/github/v/release/caffeine-projects/vlatte?include_prereleases&sort=semver" alt="Release"></a>
   <a href="https://pkg.go.dev/github.com/caffeine-projects/vlatte"><img src="https://pkg.go.dev/badge/github.com/caffeine-projects/vlatte.svg" alt="Go Reference"></a>
+  <br>
   <br>
 </p>
 
 <p align="center">
-  <a href="https://github.com/caffeine-projects/vlatte/releases"><img src="https://img.shields.io/github/v/release/caffeine-projects/vlatte?include_prereleases&sort=semver" alt="Release"></a>
   <a href="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml"><img src="https://github.com/caffeine-projects/vlatte/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://vlatte.dev/"><img src="https://github.com/caffeine-projects/vlatte/actions/workflows/docs.yml/badge.svg" alt="Docs"></a>
   <a href="https://codecov.io/gh/caffeine-projects/vlatte"><img src="https://codecov.io/gh/caffeine-projects/vlatte/graph/badge.svg" alt="codecov"></a>
