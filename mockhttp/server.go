@@ -139,6 +139,9 @@ func (s *httptestBackend) Info() *BackendInfo {
 // address, or else on a random local port.
 func (s *httptestBackend) build() error {
 	s.server = httptest.NewUnstartedServer(s.handler)
+	s.server.Config.ReadTimeout = s.app.config.ReadTimeout
+	s.server.Config.ReadHeaderTimeout = s.app.config.ReadHeaderTimeout
+	s.server.Config.IdleTimeout = s.app.config.IdleTimeout
 
 	addr := s.app.config.Addr
 	if l := s.app.config.Listener; l != nil {

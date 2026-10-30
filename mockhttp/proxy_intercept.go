@@ -258,7 +258,7 @@ func (h *mockHandler) intercept(w http.ResponseWriter, r *RequestValues) {
 		return
 	}
 
-	// The requests within have no limit of their own, as on the server's own connections.
+	// The HTTP server sets its own read deadlines after the handshake.
 	_ = client.SetReadDeadline(time.Time{})
 
 	h.logConnect(r)
@@ -291,6 +291,9 @@ func (h *mockHandler) serveIntercepted(conn *tls.Conn, authority string) bool {
 
 	l := &oneConnListener{conn: conn, done: make(chan struct{})}
 	srv := &http.Server{
+		ReadTimeout:       h.app.config.ReadTimeout,
+		ReadHeaderTimeout: h.app.config.ReadHeaderTimeout,
+		IdleTimeout:       h.app.config.IdleTimeout,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r.URL.Scheme, r.URL.Host = "https", authority
 			if strings.HasPrefix(r.RequestURI, "/") {

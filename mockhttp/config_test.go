@@ -176,6 +176,9 @@ func TestConfigBuilder(t *testing.T) {
 	m := MustNew(Setup().
 		Name(nm).
 		Addr(addr).
+		ReadTimeout(3*time.Second).
+		ReadHeaderTimeout(time.Second).
+		IdleTimeout(2*time.Second).
 		RootDir("test_root_dir").
 		MockNotFoundStatusCode(http.StatusNotFound).
 		ErrorStatusCode(http.StatusInternalServerError).
@@ -207,6 +210,9 @@ func TestConfigBuilder(t *testing.T) {
 
 	require.Equal(t, nm, conf.Name)
 	require.Equal(t, addr, conf.Addr)
+	require.Equal(t, 3*time.Second, conf.ReadTimeout)
+	require.Equal(t, time.Second, conf.ReadHeaderTimeout)
+	require.Equal(t, 2*time.Second, conf.IdleTimeout)
 	require.Equal(t, "test_root_dir", conf.RootDir)
 	require.Equal(t, http.StatusNotFound, conf.RequestWasNotMatchedStatusCode)
 	require.Equal(t, http.StatusInternalServerError, conf.ErrorStatusCode)

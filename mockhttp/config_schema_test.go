@@ -80,9 +80,18 @@ func TestConfigSources_EveryKeyHasAWorkingFlag(t *testing.T) {
 		args  []string
 		check func(t *testing.T, c *Config)
 	}{
-		"config":   {[]string{"--config", fromFile}, func(t *testing.T, c *Config) { require.Equal(t, "from-file", c.Name) }},
-		"name":     {[]string{"--name", "api"}, func(t *testing.T, c *Config) { require.Equal(t, "api", c.Name) }},
-		"addr":     {[]string{"--addr", "127.0.0.1:0"}, func(t *testing.T, c *Config) { require.Equal(t, "127.0.0.1:0", c.Addr) }},
+		"config": {[]string{"--config", fromFile}, func(t *testing.T, c *Config) { require.Equal(t, "from-file", c.Name) }},
+		"name":   {[]string{"--name", "api"}, func(t *testing.T, c *Config) { require.Equal(t, "api", c.Name) }},
+		"addr":   {[]string{"--addr", "127.0.0.1:0"}, func(t *testing.T, c *Config) { require.Equal(t, "127.0.0.1:0", c.Addr) }},
+		"read-timeout": {[]string{"--read-timeout", "3s"}, func(t *testing.T, c *Config) {
+			require.Equal(t, 3*time.Second, c.ReadTimeout)
+		}},
+		"read-header-timeout": {[]string{"--read-header-timeout", "250"}, func(t *testing.T, c *Config) {
+			require.Equal(t, 250*time.Millisecond, c.ReadHeaderTimeout)
+		}},
+		"idle-timeout": {[]string{"--idle-timeout", "1.5s"}, func(t *testing.T, c *Config) {
+			require.Equal(t, 1500*time.Millisecond, c.IdleTimeout)
+		}},
 		"root-dir": {[]string{"--root-dir", "root"}, func(t *testing.T, c *Config) { require.Equal(t, "root", c.RootDir) }},
 		"workdir":  {[]string{"--workdir", "work"}, func(t *testing.T, c *Config) { require.Equal(t, "work", c.WorkDir) }},
 		"mock-files": {[]string{"--mock-files", "a/*.yaml,b/*.yaml"}, func(t *testing.T, c *Config) {
@@ -282,6 +291,33 @@ func TestConfigSources_ProxyTimeoutUnits(t *testing.T) {
 	c, err = loadConfig(t, Setup(), ConfigArgs([]string{"--proxy-timeout", "1.5s"}))
 	require.NoError(t, err)
 	require.Equal(t, 1500*time.Millisecond, c.Proxy.Timeout)
+}
+
+func TestConfigSources_InboundTimeoutsFollowSourcePrecedenceAndUnits(t *testing.T) {
+	path := writeConfigFile(t, t.TempDir(), "server.yaml", "read_timeout: 2000\nread_header_timeout: 1.5s\nidle_timeout: 3s\n")
+	setup := Setup().ReadTimeout(time.Second).ReadHeaderTimeout(time.Second).IdleTimeout(time.Second)
+	c, err := loadConfig(t, setup, ConfigFile(path))
+	require.NoError(t, err)
+	require.Equal(t, 2*time.Second, c.ReadTimeout)
+	require.Equal(t, 1500*time.Millisecond, c.ReadHeaderTimeout)
+	require.Equal(t, 3*time.Second, c.IdleTimeout)
+
+	t.Setenv("VLATTE_READ_TIMEOUT", "4s")
+	t.Setenv("VLATTE_READ_HEADER_TIMEOUT", "250")
+	t.Setenv("VLATTE_IDLE_TIMEOUT", "5s")
+	c, err = loadConfig(t, setup, ConfigFile(path), ConfigEnv())
+	require.NoError(t, err)
+	require.Equal(t, 4*time.Second, c.ReadTimeout)
+	require.Equal(t, 250*time.Millisecond, c.ReadHeaderTimeout)
+	require.Equal(t, 5*time.Second, c.IdleTimeout)
+
+	c, err = loadConfig(t, setup, ConfigFile(path), ConfigEnv(), ConfigArgs([]string{
+		"--read-timeout=0", "--read-header-timeout=0", "--idle-timeout=0",
+	}))
+	require.NoError(t, err)
+	require.Equal(t, time.Duration(0), c.ReadTimeout)
+	require.Equal(t, time.Duration(0), c.ReadHeaderTimeout)
+	require.Equal(t, time.Duration(0), c.IdleTimeout)
 }
 
 func TestConfigSources_ConfigFlagAndEnvPickTheFile(t *testing.T) {

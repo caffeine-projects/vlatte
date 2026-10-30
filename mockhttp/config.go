@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -96,7 +97,19 @@ type Config struct {
 	// An empty, non-nil slice reads nothing, so only code and defaults apply.
 	ConfigSources []ConfigSource
 
-	// HTTP-specific fields
+	// ReadTimeout bounds reading an entire request, headers and body included, on the default backend and
+	// intercepted HTTPS connections. Zero or negative leaves it unbounded. It does not limit response writes.
+	// It follows [http.Server.ReadTimeout]: for HTTP/2, the body timeout starts after the request headers arrive.
+	ReadTimeout time.Duration
+
+	// ReadHeaderTimeout bounds reading HTTP/1.x request headers. Zero uses ReadTimeout; negative disables the bound.
+	// It follows [http.Server.ReadHeaderTimeout], which does not impose a per-stream header timeout on HTTP/2.
+	ReadHeaderTimeout time.Duration
+
+	// IdleTimeout bounds the wait for the next request on a keep-alive connection, after the response ends.
+	// Zero uses ReadTimeout; negative disables the idle bound. It does not limit an active response stream.
+	IdleTimeout time.Duration
+
 	Addr                           string
 	Listener                       net.Listener // in place of listening on Addr: see ConfigBuilder.Listener
 	UseHTTP2                       bool
@@ -190,6 +203,9 @@ func (c *Config) Apply(conf *Config) error {
 	conf.ConfigSources = c.ConfigSources
 	conf.Addr = c.Addr
 	conf.Listener = c.Listener
+	conf.ReadTimeout = c.ReadTimeout
+	conf.ReadHeaderTimeout = c.ReadHeaderTimeout
+	conf.IdleTimeout = c.IdleTimeout
 	conf.UseHTTP2 = c.UseHTTP2
 	conf.RequestWasNotMatchedStatusCode = c.RequestWasNotMatchedStatusCode
 	conf.ErrorStatusCode = c.ErrorStatusCode
@@ -337,6 +353,21 @@ func (cb *ConfigBuilder) Addr(addr string) *ConfigBuilder {
 // Start takes it: Close, or a Start that fails, closes it, so nothing listens without a server behind it.
 func (cb *ConfigBuilder) Listener(l net.Listener) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.Listener = l })
+}
+
+// ReadTimeout sets the bound for reading each request, including its headers and body: see [Config.ReadTimeout].
+func (cb *ConfigBuilder) ReadTimeout(timeout time.Duration) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.ReadTimeout = timeout })
+}
+
+// ReadHeaderTimeout sets the bound for reading request headers: see [Config.ReadHeaderTimeout].
+func (cb *ConfigBuilder) ReadHeaderTimeout(timeout time.Duration) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.ReadHeaderTimeout = timeout })
+}
+
+// IdleTimeout sets the wait for another request on a keep-alive connection: see [Config.IdleTimeout].
+func (cb *ConfigBuilder) IdleTimeout(timeout time.Duration) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.IdleTimeout = timeout })
 }
 
 // Port sets a custom port to the mock HTTP server.

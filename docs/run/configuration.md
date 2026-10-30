@@ -32,6 +32,26 @@ cors: true
 
 Setting a key of a section (`cors`, `proxy`, `proxy_all`, `record`, `admin` or `journal`) turns the section on, and `false` turns it off.
 
+## HTTP read timeouts
+
+HTTP read timeouts are opt-in. They apply to the default HTTP backend and intercepted HTTPS connections:
+
+- `read_header_timeout` bounds reading HTTP/1.x request headers. It does not impose a per-stream header timeout on HTTP/2.
+- `read_timeout` bounds reading the entire HTTP/1.x request, including headers and body. In HTTP/2, it bounds reading the body after the headers arrive. Receiving another body chunk does not restart it.
+- `idle_timeout` bounds waiting for the next request on a keep-alive connection after the response ends.
+
+All three default to `0`. A zero header or idle timeout uses `read_timeout`; with all three at zero, reads have no timeout. These settings do not limit response writes, so delayed replies and active response streams can outlast them. A custom `BackendFactory` controls its own server timeouts.
+
+Settings accept nonnegative Go durations, such as `5s`, or numbers in milliseconds. For example:
+
+```yaml
+read_header_timeout: 5s
+read_timeout: 30s
+idle_timeout: 60s
+```
+
+The same controls are `--read-header-timeout`, `--read-timeout` and `--idle-timeout`, or `VLATTE_READ_HEADER_TIMEOUT`, `VLATTE_READ_TIMEOUT` and `VLATTE_IDLE_TIMEOUT`. In Go, use `mockhttp.Setup().ReadHeaderTimeout(5*time.Second).ReadTimeout(30*time.Second).IdleTimeout(60*time.Second)`, or the corresponding `mockhttp.Config` fields. The Go API follows `net/http.Server` semantics, including negative header or idle values to disable their fallback to `ReadTimeout`.
+
 ## Root directory
 
 `root_dir` is the directory that relative mock file patterns and record directories start at. Absolute ones are used as they are.

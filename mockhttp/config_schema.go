@@ -195,6 +195,29 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Set:   func(c *Config, v config.Value) error { c.Addr = v.Str; return checkAddr(v.Str) },
 		},
 		{
+			Key:     "read_timeout",
+			Kind:    config.Duration,
+			Default: d.ReadTimeout.String(),
+			Usage: "Time allowed to read an HTTP request: headers and body in HTTP/1.x, body in HTTP/2. 0 leaves it unbounded. " +
+				"Applies to the default backend and intercepted HTTPS connections, not response writes.",
+			Set: func(c *Config, v config.Value) error { c.ReadTimeout = v.Dur; return nil },
+		},
+		{
+			Key:     "read_header_timeout",
+			Kind:    config.Duration,
+			Default: d.ReadHeaderTimeout.String(),
+			Usage:   "Time allowed to read HTTP/1.x request headers. 0 uses read_timeout.",
+			Set:     func(c *Config, v config.Value) error { c.ReadHeaderTimeout = v.Dur; return nil },
+		},
+		{
+			Key:     "idle_timeout",
+			Kind:    config.Duration,
+			Default: d.IdleTimeout.String(),
+			Usage: "Time to wait for the next HTTP request on a keep-alive connection after its response ends. " +
+				"0 uses read_timeout. Does not limit an active response stream.",
+			Set: func(c *Config, v config.Value) error { c.IdleTimeout = v.Dur; return nil },
+		},
+		{
 			Key: "root_dir", Kind: config.String, Usage: "Directory that relative mock file patterns and recording paths start at.",
 			Set: func(c *Config, v config.Value) error { c.RootDir = v.Str; return nil },
 		},
