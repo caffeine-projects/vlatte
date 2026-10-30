@@ -96,3 +96,20 @@ m = mockhttp.MustNew(mockhttp.Setup().ConfigSources(mockhttp.ConfigFile("testdat
 
 The settings of gRPC mocks are in the `grpc` section: `grpc.addr`, `grpc.descriptors`, `grpc.mock_files`, `grpc.record`, `grpc.admin` and the others, as `--grpc-*` flags and `VLATTE_GRPC_*` variables. In Go, `mockgrpc.Setup()` configures a gRPC server. See the [CLI](/run/cli) and the [settings reference](/reference/settings).
 
+gRPC has connection controls suited to HTTP/2:
+
+- `grpc.connection_timeout` bounds connection setup, including TLS and the HTTP/2 handshake. Zero keeps gRPC's existing default of 120 seconds.
+- `grpc.max_connection_idle` sends GOAWAY after a connection has had no active RPCs for this long. Zero keeps gRPC's default of no idle limit. An active RPC or stream keeps the connection busy, even while it exchanges no messages.
+
+Both settings accept nonnegative Go durations or milliseconds, through the same sources as HTTP settings:
+
+```yaml
+grpc:
+  connection_timeout: 5s
+  max_connection_idle: 60s
+```
+
+The flags are `--grpc-connection-timeout` and `--grpc-max-connection-idle`; the variables are `VLATTE_GRPC_CONNECTION_TIMEOUT` and `VLATTE_GRPC_MAX_CONNECTION_IDLE`. In Go, use `mockgrpc.Setup().ConnectionTimeout(5*time.Second).MaxConnectionIdle(60*time.Second)`, or the corresponding `mockgrpc.Config` fields. Explicit `grpc.ConnectionTimeout` or `grpc.KeepaliveParams` options passed through `ServerOptions` take precedence over these settings.
+
+These controls do not impose a deadline on an active RPC or stream, or a separate limit on reading each RPC's headers or messages. RPC deadlines come from the client's context.
+

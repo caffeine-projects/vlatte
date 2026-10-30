@@ -64,6 +64,22 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 			Set: func(c *Config, v config.Value) error { c.Addr = v.Str; return nil },
 		},
 		field{
+			Key:     "grpc.connection_timeout",
+			Kind:    config.Duration,
+			Default: d.ConnectionTimeout.String(),
+			Usage: "Time allowed for connection setup, including TLS and HTTP/2 handshaking. " +
+				"0 keeps gRPC's default of 120s. Does not limit an active RPC or stream.",
+			Set: func(c *Config, v config.Value) error { c.ConnectionTimeout = v.Dur; return nil },
+		},
+		field{
+			Key:     "grpc.max_connection_idle",
+			Kind:    config.Duration,
+			Default: d.MaxConnectionIdle.String(),
+			Usage: "Time a connection with no active RPCs can stay idle before GOAWAY. " +
+				"0 keeps gRPC's default of no idle limit. An active stream is not idle.",
+			Set: func(c *Config, v config.Value) error { c.MaxConnectionIdle = v.Dur; return nil },
+		},
+		field{
 			Key: "grpc.root_dir", Kind: config.String, Usage: "Directory relative mock_files patterns start at. Empty is the working directory.",
 			Set: func(c *Config, v config.Value) error { c.RootDir = v.Str; return nil },
 		},

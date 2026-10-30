@@ -10,6 +10,7 @@ import (
 	json "encoding/json/v2"
 	"encoding/pem"
 	"errors"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -27,12 +28,15 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/caffeine-projects/vlatte"
@@ -420,6 +424,222 @@ func TestServerOptionsAreApplied(t *testing.T) {
 			// Server options from the configuration, like user interceptors, must be applied.
 			require.Equal(t, int32(1), calls.Load())
 		})
+	}
+}
+
+func TestConnectionTimeout_ClosesAConnectionWithoutTheClientPreface(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup *ConfigBuilder
+		wait  time.Duration
+	}{
+		{
+			name:  "configured through a flag",
+			setup: Setup().ConfigSources(ConfigArgs([]string{"--grpc-connection-timeout=1s"})),
+			wait:  time.Second,
+		},
+		{
+			name:  "configured through Setup",
+			setup: Setup().ConfigSources().ConnectionTimeout(time.Second),
+			wait:  time.Second,
+		},
+		{
+			name:  "default keeps the native timeout",
+			setup: Setup().ConfigSources(),
+			wait:  120 * time.Second,
+		},
+		{
+			name:  "zero keeps the native timeout",
+			setup: Setup().ConfigSources().ConnectionTimeout(0),
+			wait:  120 * time.Second,
+		},
+		{
+			name: "native options override the configured timeout",
+			setup: Setup().ConfigSources().ConnectionTimeout(time.Second).
+				ServerOptions(grpc.ConnectionTimeout(2 * time.Second)),
+			wait: 2 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				listener := bufconn.Listen(1024)
+				m := MustNew(tt.setup.Silent().Listener(listener))
+				m.MustStart()
+				defer m.Close()
+
+				conn, err := listener.DialContext(t.Context())
+				require.NoError(t, err)
+				defer conn.Close()
+
+				start := time.Now()
+				framer := http2.NewFramer(conn, conn)
+				frame, err := framer.ReadFrame()
+				require.NoError(t, err)
+				require.IsType(t, &http2.SettingsFrame{}, frame)
+
+				// A client that never finishes HTTP/2 setup must not hold the connection forever.
+				_, err = framer.ReadFrame()
+				require.ErrorIs(t, err, io.EOF)
+				require.Equal(t, tt.wait, time.Since(start))
+			})
+		})
+	}
+}
+
+func TestMaxConnectionIdle_AsksAnIdleClientToReconnect(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup *ConfigBuilder
+		wait  time.Duration
+	}{
+		{
+			name:  "configured through a flag",
+			setup: Setup().ConfigSources(ConfigArgs([]string{"--grpc-max-connection-idle=1s"})),
+			wait:  time.Second,
+		},
+		{
+			name:  "configured through Setup",
+			setup: Setup().ConfigSources().MaxConnectionIdle(time.Second),
+			wait:  time.Second,
+		},
+		{
+			name: "native options override the configured idle limit",
+			setup: Setup().ConfigSources().MaxConnectionIdle(time.Second).
+				ServerOptions(grpc.KeepaliveParams(keepalive.ServerParameters{MaxConnectionIdle: 2 * time.Second})),
+			wait: 2 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				listener := bufconn.Listen(1024)
+				m := MustNew(tt.setup.Silent().Listener(listener))
+				m.MustStart()
+				defer m.Close()
+
+				_, framer := connectHTTP2(t, listener)
+				start := time.Now()
+				frame, err := framer.ReadFrame()
+				require.NoError(t, err)
+				goaway, ok := frame.(*http2.GoAwayFrame)
+				require.True(t, ok, "expected GOAWAY, got %T", frame)
+				require.Equal(t, http2.ErrCodeNo, goaway.ErrCode)
+				require.Equal(t, "max_idle", string(goaway.DebugData()))
+				require.Equal(t, tt.wait, time.Since(start))
+			})
+		})
+	}
+}
+
+func TestMaxConnectionIdle_ZeroKeepsIdleConnectionsAvailable(t *testing.T) {
+	for name, setup := range map[string]*ConfigBuilder{
+		"default":       Setup().ConfigSources(),
+		"explicit zero": Setup().ConfigSources().MaxConnectionIdle(0),
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				listener := bufconn.Listen(1024)
+				m := MustNew(setup.Silent().Listener(listener))
+				m.MustStart()
+				defer m.Close()
+
+				conn, framer := connectHTTP2(t, listener)
+				start := time.Now()
+				require.NoError(t, conn.SetReadDeadline(start.Add(time.Minute)))
+				_, err := framer.ReadFrame()
+				netErr, ok := errors.AsType[net.Error](err)
+				require.True(t, ok, err)
+				require.True(t, netErr.Timeout(), err)
+				require.Equal(t, time.Minute, time.Since(start))
+
+				// No GOAWAY arrived, and the same idle connection still answers the client.
+				require.NoError(t, conn.SetReadDeadline(time.Time{}))
+				data := [8]byte{1}
+				require.NoError(t, framer.WritePing(false, data))
+				frame, err := framer.ReadFrame()
+				require.NoError(t, err)
+				ping, ok := frame.(*http2.PingFrame)
+				require.True(t, ok, "expected PING acknowledgement, got %T", frame)
+				require.True(t, ping.IsAck())
+				require.Equal(t, data, ping.Data)
+			})
+		})
+	}
+}
+
+func TestConnectionLimits_DoNotCutAnActiveSlowStream(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		listener := bufconn.Listen(1024)
+		m := MustNew(Setup().Silent().ConfigSources().Listener(listener).
+			ConnectionTimeout(time.Second).MaxConnectionIdle(time.Second))
+		m.MustStart()
+		defer m.Close()
+		m.MustMock(Method("List").Reply(Messages(
+			&pb.ListItem{Key: "a"}, &pb.ListItem{Key: "b"},
+		).MessageDelay(2 * time.Second)))
+
+		conn, err := grpc.NewClient("passthrough:///bufconn",
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+				return listener.DialContext(ctx)
+			}))
+		require.NoError(t, err)
+		defer conn.Close()
+
+		start := time.Now()
+		stream, err := pb.NewTestServiceClient(conn).List(t.Context(), &pb.ListReq{})
+		require.NoError(t, err)
+		first, err := stream.Recv()
+		require.NoError(t, err)
+		require.Equal(t, "a", first.GetKey())
+		require.Equal(t, 2*time.Second, time.Since(start))
+		second, err := stream.Recv()
+		require.NoError(t, err)
+		require.Equal(t, "b", second.GetKey())
+		require.Equal(t, 4*time.Second, time.Since(start))
+		_, err = stream.Recv()
+		require.ErrorIs(t, err, io.EOF)
+	})
+}
+
+func TestConnectionLimits_RejectNegativeDurations(t *testing.T) {
+	for name, conf := range map[string]*Config{
+		"connection_timeout":  {ConfigSources: []ConfigSource{}, ConnectionTimeout: -time.Second},
+		"max_connection_idle": {ConfigSources: []ConfigSource{}, MaxConnectionIdle: -time.Second},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := New(conf)
+			require.EqualError(t, err, "server: grpc."+name+": expected 0 or more, not -1s")
+		})
+	}
+}
+
+func connectHTTP2(t *testing.T, listener *bufconn.Listener) (net.Conn, *http2.Framer) {
+	t.Helper()
+
+	conn, err := listener.DialContext(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	_, err = conn.Write([]byte(http2.ClientPreface))
+	require.NoError(t, err)
+	framer := http2.NewFramer(conn, conn)
+	require.NoError(t, framer.WriteSettings())
+
+	frame, err := framer.ReadFrame()
+	require.NoError(t, err)
+	require.IsType(t, &http2.SettingsFrame{}, frame)
+	require.NoError(t, framer.WriteSettingsAck())
+
+	for {
+		frame, err := framer.ReadFrame()
+		require.NoError(t, err)
+		if settings, ok := frame.(*http2.SettingsFrame); ok && settings.IsAck() {
+			return conn, framer
+		}
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
@@ -91,6 +92,20 @@ func TestConfig_SetsEverySettingItsZeroValuesIncluded(t *testing.T) {
 
 	_, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{})
 	require.Equal(t, codes.Aborted, status.Code(err))
+}
+
+func TestSetup_InboundTimeoutsComposeAndConfigCanResetThem(t *testing.T) {
+	setup := Setup().ConfigSources().ConnectionTimeout(time.Second)
+	idle := Setup().MaxConnectionIdle(2 * time.Second)
+	m := MustNew(setup, idle)
+	t.Cleanup(m.Close)
+	require.Equal(t, time.Second, m.Config().ConnectionTimeout)
+	require.Equal(t, 2*time.Second, m.Config().MaxConnectionIdle)
+
+	reset := MustNew(setup, idle, &Config{ConfigSources: []ConfigSource{}})
+	t.Cleanup(reset.Close)
+	require.Equal(t, time.Duration(0), reset.Config().ConnectionTimeout)
+	require.Equal(t, time.Duration(0), reset.Config().MaxConnectionIdle)
 }
 
 func TestSetup_AListenerNameTwiceFailsNew(t *testing.T) {

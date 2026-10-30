@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
@@ -124,6 +125,14 @@ func New(config ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: %w", errInMemoryListener)
 	}
 
+	if conf.ConnectionTimeout < 0 {
+		return nil, fmt.Errorf("server: grpc.connection_timeout: expected 0 or more, not %s", conf.ConnectionTimeout)
+	}
+
+	if conf.MaxConnectionIdle < 0 {
+		return nil, fmt.Errorf("server: grpc.max_connection_idle: expected 0 or more, not %s", conf.MaxConnectionIdle)
+	}
+
 	// The server's record settings are its own: a caller's Config may be shared.
 	if conf.Record != nil {
 		rec := conf.Record.clone()
@@ -227,6 +236,14 @@ func New(config ...Option) (*Server, error) {
 	// The server's credentials come first, so those of the user's options win: StartTLS sets TLS on them.
 	app.creds = &serverCreds{TransportCredentials: insecure.NewCredentials()}
 	opts := []grpc.ServerOption{grpc.Creds(app.creds)}
+
+	if conf.ConnectionTimeout != 0 {
+		opts = append(opts, grpc.ConnectionTimeout(conf.ConnectionTimeout))
+	}
+
+	if conf.MaxConnectionIdle != 0 {
+		opts = append(opts, grpc.KeepaliveParams(keepalive.ServerParameters{MaxConnectionIdle: conf.MaxConnectionIdle}))
+	}
 
 	// The journal sees each call as it ends, with the code the client gets, outside every interceptor of the user's
 	// options. A unary call's journals within its method's handler, where grpc runs every unary interceptor: see

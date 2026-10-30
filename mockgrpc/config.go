@@ -55,6 +55,16 @@ type Config struct {
 	Addr          string
 	Listener      net.Listener // in place of listening on Addr: see ConfigBuilder.Listener
 
+	// ConnectionTimeout bounds connection setup, including TLS and the HTTP/2 handshake. Zero keeps gRPC's
+	// default, 120s. Values must be nonnegative. A [grpc.ConnectionTimeout] in [Config.ServerOptions] overrides it.
+	// It does not impose a deadline on an RPC or stream after setup.
+	ConnectionTimeout time.Duration
+
+	// MaxConnectionIdle sends GOAWAY after a connection has had no active RPCs for this long. Zero keeps gRPC's
+	// default, no idle limit. Values must be nonnegative. A [grpc.KeepaliveParams] in [Config.ServerOptions] overrides it.
+	// An active RPC or stream keeps the connection busy, even while no messages are being exchanged.
+	MaxConnectionIdle time.Duration
+
 	// InMemory serves the server in memory, in place of listening on Addr: see ConfigBuilder.InMemory.
 	InMemory bool
 
@@ -279,6 +289,16 @@ func (cb *ConfigBuilder) Addr(addr string) *ConfigBuilder {
 // Start takes it: Close, or a Start that fails, closes it, so nothing listens without a server behind it.
 func (cb *ConfigBuilder) Listener(l net.Listener) *ConfigBuilder {
 	return cb.set(func(conf *Config) { conf.Listener = l })
+}
+
+// ConnectionTimeout sets the limit for connection setup: see [Config.ConnectionTimeout].
+func (cb *ConfigBuilder) ConnectionTimeout(timeout time.Duration) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.ConnectionTimeout = timeout })
+}
+
+// MaxConnectionIdle sets how long a connection with no active RPCs can stay idle: see [Config.MaxConnectionIdle].
+func (cb *ConfigBuilder) MaxConnectionIdle(timeout time.Duration) *ConfigBuilder {
+	return cb.set(func(conf *Config) { conf.MaxConnectionIdle = timeout })
 }
 
 // InMemory serves the server in memory, in place of listening on a port: only the connections of Server.Dial reach

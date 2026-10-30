@@ -150,6 +150,74 @@ func TestConfigSources_AShutdownTimeoutOfZeroFails(t *testing.T) {
 	require.ErrorContains(t, err, "grpc.shutdown_timeout")
 }
 
+func TestConfigSources_InboundTimeoutsFollowSourcePrecedenceAndUnits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("grpc:\n  connection_timeout: 1500\n  max_connection_idle: 2s\n"), 0o600))
+	t.Setenv("VLATTE_GRPC_CONNECTION_TIMEOUT", "3s")
+	t.Setenv("VLATTE_GRPC_MAX_CONNECTION_IDLE", "4000")
+
+	tests := []struct {
+		name       string
+		sources    []ConfigSource
+		connection time.Duration
+		idle       time.Duration
+	}{
+		{
+			name:       "code",
+			connection: time.Second,
+			idle:       time.Second,
+		},
+		{
+			name:       "file overrides code",
+			sources:    []ConfigSource{ConfigFile(path)},
+			connection: 1500 * time.Millisecond,
+			idle:       2 * time.Second,
+		},
+		{
+			name:       "environment overrides file",
+			sources:    []ConfigSource{ConfigFile(path), ConfigEnv()},
+			connection: 3 * time.Second,
+			idle:       4 * time.Second,
+		},
+		{
+			name: "flags override environment",
+			sources: []ConfigSource{ConfigFile(path), ConfigEnv(), ConfigArgs([]string{
+				"--grpc-connection-timeout=250", "--grpc-max-connection-idle=1.5s",
+			})},
+			connection: 250 * time.Millisecond,
+			idle:       1500 * time.Millisecond,
+		},
+		{
+			name: "zero flags restore defaults",
+			sources: []ConfigSource{ConfigFile(path), ConfigEnv(), ConfigArgs([]string{
+				"--grpc-connection-timeout=0", "--grpc-max-connection-idle=0",
+			})},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, err := New(Setup().ConnectionTimeout(time.Second).MaxConnectionIdle(time.Second).ConfigSources(tt.sources...))
+			require.NoError(t, err)
+			t.Cleanup(m.Close)
+			require.Equal(t, tt.connection, m.Config().ConnectionTimeout)
+			require.Equal(t, tt.idle, m.Config().MaxConnectionIdle)
+		})
+	}
+}
+
+func TestConfigSources_NegativeInboundTimeoutsFail(t *testing.T) {
+	for _, key := range []string{"connection_timeout", "max_connection_idle"} {
+		t.Run(key, func(t *testing.T) {
+			_, err := New(Setup().ConfigSources(ConfigArgs([]string{"--grpc-" + strings.ReplaceAll(key, "_", "-") + "=-1s"})))
+			cfgErr, ok := errors.AsType[*config.Error](err)
+			require.True(t, ok, "%v", err)
+			require.Len(t, cfgErr.Problems, 1)
+			require.Equal(t, config.CodeInvalidValue, cfgErr.Problems[0].Code)
+			require.Equal(t, "grpc."+key, cfgErr.Problems[0].Key)
+		})
+	}
+}
+
 func TestConfigSources_ReadTheRecordSection(t *testing.T) {
 	// The record keys each turn recording on, with the defaults for the keys left out. A recording read from the
 	// settings records from start.
