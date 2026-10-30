@@ -1,4 +1,4 @@
-package delay_test
+package delay
 
 import (
 	"context"
@@ -12,13 +12,12 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
-	"github.com/caffeine-projects/vlatte/internal/delay"
 )
 
 func TestDecode_DescriptionsRoundTripThroughJSONAndYAML(t *testing.T) {
 	for _, format := range []string{"json", "yaml"} {
 		for _, d := range []vlatte.Delay{vlatte.Latency(0), vlatte.Latency(123), vlatte.UniformDistribution(10, 20), vlatte.Jitter(10, 2), vlatte.LogNormalDistribution(100, 0.5, 200)} {
-			raw, err := json.Marshal(map[string]any{"delay": delay.Doc(d)})
+			raw, err := json.Marshal(map[string]any{"delay": Doc(d)})
 			require.NoError(t, err)
 			plain, err := config.Parse(raw, "json")
 			require.NoError(t, err)
@@ -26,7 +25,7 @@ func TestDecode_DescriptionsRoundTripThroughJSONAndYAML(t *testing.T) {
 			require.NoError(t, err)
 			obj, err := config.Parse(b, format)
 			require.NoError(t, err)
-			back, err := delay.Decode(config.Value{Key: "delay", Origin: "test", Any: obj.(map[string]any)["delay"]})
+			back, err := Decode(config.Value{Key: "delay", Origin: "test", Any: obj.(map[string]any)["delay"]})
 			require.NoError(t, err)
 			want, err := d.Describe().MarshalJSON()
 			require.NoError(t, err)
@@ -63,7 +62,7 @@ func TestDecode_InvalidFilesReturnProblemsInsteadOfPanicking(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d, err := delay.Decode(config.Value{Key: "delay", Origin: "test", Any: tt.value})
+			d, err := Decode(config.Value{Key: "delay", Origin: "test", Any: tt.value})
 			require.Nil(t, d)
 			problems, ok := errors.AsType[*config.Error](err)
 			require.True(t, ok, "%v", err)
@@ -77,7 +76,7 @@ func TestDecode_InvalidFilesReturnProblemsInsteadOfPanicking(t *testing.T) {
 
 func TestDecode_MaxValueKeepsItsPublicNameWithoutMutatingInput(t *testing.T) {
 	obj := map[string]any{"type": "lognormal", "median": "1s", "sigma": int64(0), "maxValue": "2s"}
-	d, err := delay.Decode(config.Value{Key: "response.event_delay", Any: obj})
+	d, err := Decode(config.Value{Key: "response.event_delay", Any: obj})
 	require.NoError(t, err)
 	n, err := d.Next(t.Context())
 	require.NoError(t, err)
@@ -87,7 +86,7 @@ func TestDecode_MaxValueKeepsItsPublicNameWithoutMutatingInput(t *testing.T) {
 
 func TestDoc_OpaqueFunctionsFailWithoutBeingEvaluated(t *testing.T) {
 	d := vlatte.DelayFunc(func(context.Context) (time.Duration, error) { panic("must not sample to describe") })
-	_, err := json.Marshal(map[string]any{"delay": delay.Doc(d)})
+	_, err := json.Marshal(map[string]any{"delay": Doc(d)})
 	require.ErrorIs(t, err, vlatte.ErrDelayNotDescribed)
 }
 
@@ -100,13 +99,23 @@ func TestDecode_DiagnosticsPreserveExternalParameterNames(t *testing.T) {
 		{"max_value_extra", "the keys under delay are type, median, sigma, maxValue"},
 	} {
 		t.Run(tt.key, func(t *testing.T) {
-			_, err := delay.Decode(config.Value{Key: "delay", Any: map[string]any{"type": "lognormal", "median": "1s", "sigma": 1.0, tt.key: "2s"}})
+			_, err := Decode(config.Value{Key: "delay", Any: map[string]any{"type": "lognormal", "median": "1s", "sigma": 1.0, tt.key: "2s"}})
 			cfg, ok := errors.AsType[*config.Error](err)
 			require.True(t, ok)
 			require.Len(t, cfg.Problems, 1)
 			require.Equal(t, "delay."+tt.key, cfg.Problems[0].Key)
 			require.Equal(t, "delay."+tt.key+" is not a known setting", cfg.Problems[0].Message)
 			require.Equal(t, tt.hint, cfg.Problems[0].Hint)
+		})
+	}
+}
+
+func TestBuild_UnexpectedConstructorPanicsRemainVisible(t *testing.T) {
+	for _, cause := range []any{errors.New("test: unexpected constructor panic"), "test: unexpected constructor panic"} {
+		require.PanicsWithValue(t, cause, func() {
+			_, _ = build(config.Value{Key: "delay"}, kind{
+				build: func(spec) vlatte.Delay { panic(cause) },
+			}, spec{})
 		})
 	}
 }

@@ -207,3 +207,45 @@ func TestLogNormalDistribution_PreservesTheSmallTailOfALargeMedian(t *testing.T)
 	want := cdf(-math.Log(float64(median))/sigma) / cdf(math.Log(float64(math.MaxInt64)/float64(median))/sigma)
 	require.InDelta(t, want, float64(zeros)/count, 0.015)
 }
+
+func TestDelayFunc_CancellationPreventsCallingTheFunction(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	called := false
+	d := DelayFunc(func(context.Context) (time.Duration, error) {
+		called = true
+		return time.Second, nil
+	})
+	n, err := d.Next(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, time.Duration(0), n)
+	require.False(t, called)
+}
+
+func TestLogNormalDistribution_SamplesRespectDurationPrecisionAndBounds(t *testing.T) {
+	// At this boundary the floating-point cutoff rounds up: the integer check must still reject the sample.
+	roundedUpper := time.Duration(math.Expm1(40))
+	for _, tt := range []struct {
+		name     string
+		median   time.Duration
+		exponent float64
+		upper    time.Duration
+		want     time.Duration
+		accepted bool
+	}{
+		{"median at maximum duration", math.MaxInt64, 0, math.MaxInt64, math.MaxInt64, true},
+		{"positive sample", 100, 1, 300, 271, true},
+		{"negative exponent near median", 100, -0.1, 100, 90, true},
+		{"subnanosecond sample near median", 1, -0.1, 1, 0, true},
+		{"small tail of a large median", 1e18, -40, math.MaxInt64, 4, true},
+		{"above cutoff", 100, 1, 200, 0, false},
+		{"unrepresentable sample", 1, math.Inf(1), math.MaxInt64, 0, false},
+		{"rounded cutoff", 1, 40, roundedUpper, 0, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			n, ok := (lognormalDelay{median: tt.median}).sample(tt.exponent, tt.upper)
+			require.Equal(t, tt.accepted, ok)
+			require.Equal(t, tt.want, n)
+		})
+	}
+}

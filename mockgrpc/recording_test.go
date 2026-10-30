@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -492,7 +493,15 @@ func TestRecording_StartsFromTheServersRecordSettings(t *testing.T) {
 func TestRecording_AStartEndsARecordingWhoseStopGaveUp(t *testing.T) {
 	m := recorder(t)
 	m.MustMock(Method("Greetings").Reply(Message(&pb.HiRes{Message: "mocked"})))
-	require.NoError(t, m.StartRecording(RecordIncludeMocked(true)))
+
+	// Keep the write pending until StopRecording gives up, so completion cannot win against cancellation.
+	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(unblock)
+	require.NoError(t, m.StartRecording(RecordIncludeMocked(true), RecordTransform(func(*RecordedMock) error {
+		<-release
+		return nil
+	})))
 
 	_, err := client(t, m).Greetings(t.Context(), &pb.HiReq{})
 	require.NoError(t, err)
@@ -505,6 +514,7 @@ func TestRecording_AStartEndsARecordingWhoseStopGaveUp(t *testing.T) {
 	_, err = m.StopRecording(ctx)
 	require.ErrorIs(t, err, context.Canceled)
 
+	unblock()
 	<-rec.session.Done()
 	require.NoError(t, m.StartRecording())
 	require.NotSame(t, rec, m.recording.Load())

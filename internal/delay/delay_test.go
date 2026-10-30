@@ -80,3 +80,12 @@ func TestDoc_InvalidDescriptorKeyCannotBeHiddenByShorthand(t *testing.T) {
 	_, err := json.Marshal(delay.Doc(describedDelay{desc: desc}))
 	require.ErrorIs(t, err, vlatte.ErrDescriptorKeyEmpty)
 }
+
+func TestNext_CancellationTakesPrecedenceOverACustomDelay(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	// The custom implementation ignores cancellation: the shared evaluator must check it first.
+	n, err := delay.Next(ctx, describedDelay{})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, time.Duration(0), n)
+}

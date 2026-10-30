@@ -170,39 +170,45 @@ func (d lognormalDelay) Next(ctx context.Context) (time.Duration, error) {
 			return d.median, nil
 		}
 
-		// Keep the offset separate so tiny sigma still terminates at median MaxInt64, whose float64 rounds up to an
-		// unrepresentable duration. Expm1 also retains precision near zero.
-		exponent := d.sigma * rand.NormFloat64()
-		if exponent < -math.Ln2 {
-			// Subtraction from a large median loses its small tail; this branch is at most half the median, so
-			// direct multiplication is both representable and accurate.
-			return time.Duration(float64(d.median) * math.Exp(exponent)), nil
+		if sample, ok := d.sample(d.sigma*rand.NormFloat64(), upper); ok {
+			return sample, nil
 		}
-
-		offset := float64(d.median) * math.Expm1(exponent)
-		if offset >= 0 {
-			if offset > float64(upper-d.median) || offset >= float64(math.MaxInt64) {
-				continue
-			}
-
-			n := time.Duration(offset)
-			if n > upper-d.median {
-				continue
-			}
-
-			return d.median + n, nil
-		}
-
-		below := math.Ceil(-offset)
-		if below >= float64(d.median) {
-			return 0, nil
-		}
-
-		return d.median - time.Duration(below), nil
 	}
 }
 
 func (d lognormalDelay) Describe() Descriptor {
 	return DescribeKeyValuePairs("delay", "type", "lognormal", "median", d.median.String(), "sigma", d.sigma,
 		"maxValue", d.maxValue.String())
+}
+
+// sample converts a lognormal exponent to a duration, or rejects it when it exceeds upper or cannot be represented.
+func (d lognormalDelay) sample(exponent float64, upper time.Duration) (time.Duration, bool) {
+	// Keep the offset separate so tiny sigma still terminates at median MaxInt64, whose float64 rounds up to an
+	// unrepresentable duration. Expm1 also retains precision near zero.
+	if exponent < -math.Ln2 {
+		// Subtraction from a large median loses its small tail; this branch is at most half the median, so
+		// direct multiplication is both representable and accurate.
+		return time.Duration(float64(d.median) * math.Exp(exponent)), true
+	}
+
+	offset := float64(d.median) * math.Expm1(exponent)
+	if offset >= 0 {
+		if offset > float64(upper-d.median) || offset >= float64(math.MaxInt64) {
+			return 0, false
+		}
+
+		n := time.Duration(offset)
+		if n > upper-d.median {
+			return 0, false
+		}
+
+		return d.median + n, true
+	}
+
+	below := math.Ceil(-offset)
+	if below >= float64(d.median) {
+		return 0, true
+	}
+
+	return d.median - time.Duration(below), true
 }

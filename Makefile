@@ -32,9 +32,14 @@ testfail: ## run tests and print the name of failed ones
 	grep -E '^[[:space:]]*--- FAIL: ' "$$log" | sed -E 's/^[[:space:]]*--- FAIL: ([^ ]+).*/\1/'; \
 	rm -f "$$log" "$$st"; exit $$status
 
+# Generated test protobuf is already excluded by Codecov and SonarCloud. Do not instrument it: its entries make
+# SonarCloud warn once per package profile, even though it correctly ignores that source.
 .PHONY: testci
 testci: ## run tests with a focus on ci
-	@go test -v -race -timeout 10m ./... -coverpkg=./... -coverprofile=coverage.txt
+	@set -eu; \
+	coverage_packages=$$(go list ./...); \
+	coverage_packages=$$(printf '%s\n' "$$coverage_packages" | awk '!/\/mockgrpc\/internal\/protobuf(\/|$$)/' | paste -sd, -); \
+	go test -v -race -timeout 10m ./... -coverpkg="$$coverage_packages" -coverprofile=coverage.txt
 
 .PHONY: fuzz
 fuzz: ## run every fuzz target for FUZZTIME each
