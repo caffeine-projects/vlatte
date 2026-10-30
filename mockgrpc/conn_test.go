@@ -57,3 +57,12 @@ func TestInMemory_RefusesAListener(t *testing.T) {
 	_, err = New(Setup().InMemory().Listener(l))
 	require.ErrorIs(t, err, errInMemoryListener)
 }
+
+func TestDial_InvalidCredentialsFailBeforeACall(t *testing.T) {
+	m := MustNew(Setup().Silent().InMemory())
+	m.MustStart()
+	t.Cleanup(m.Close)
+	_, err := m.Dial(grpc.WithTransportCredentials(nil))
+	require.EqualError(t, err, "grpc: no transport security set (use grpc.WithTransportCredentials(insecure.NewCredentials()) explicitly or set credentials)")
+	require.PanicsWithError(t, err.Error(), func() { m.MustDial(grpc.WithTransportCredentials(nil)) })
+}

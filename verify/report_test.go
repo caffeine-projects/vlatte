@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -33,6 +34,85 @@ func TestReport_ListsTheRequestsSelectedTheNewestFirst(t *testing.T) {
 		"    #2 2026-10-21T12:00:00.000Z unmatched GET http://127.0.0.1/b 418, closest [m1] differs in header Accept\n"+
 		"    #1 2026-10-21T12:00:00.000Z matched GET http://127.0.0.1/a 200\n",
 		errorText(t, ft))
+}
+
+func TestReport_NamesEveryCriterionThatExcludedARequest(t *testing.T) {
+	j := newJournal(t, journal.Options{}, entry("a"))
+	tests := []struct {
+		name  string
+		query journal.Query
+	}{
+		{name: "kind", query: journal.Query{Kind: "grpc"}},
+		{name: "outcome", query: journal.Query{Outcome: journal.OutcomeFailed}},
+		{name: "mock id", query: journal.Query{MockID: match.Equal("missing")}},
+		{name: "target", query: journal.Query{Target: match.Equal("http://elsewhere/a")}},
+		{name: "status", query: journal.Query{Status: match.Equal(404)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := verify.Check(t.Context(), verify.Spec{Journal: j, Query: tt.query, Count: match.Equal(1), Expect: "exactly 1"})
+			require.NoError(t, err)
+			require.False(t, result.Passed)
+			require.Equal(t, 0, result.Count)
+			require.Equal(t, []verify.Listed{{Seq: 1, ID: "a", Line: "#1 2026-10-21T12:00:00.000Z matched GET http://127.0.0.1/a 200", Total: 1, Missed: []string{tt.name}}}, result.Closest)
+		})
+	}
+}
+
+func TestReport_NamesMultiplePatternsAndTheTimeWindow(t *testing.T) {
+	j := newJournal(t, journal.Options{}, entry("a"))
+	result, err := verify.Check(t.Context(), verify.Spec{
+		Journal: j, Query: journal.Query{Since: _t0.Add(-time.Second)},
+		Patterns: []verify.Pattern{pathPattern("/b"), pathPattern("/c")}, Count: match.Equal(1), Expect: "exactly 1",
+	})
+	require.NoError(t, err)
+	require.False(t, result.Passed)
+	require.Equal(t, "\nExpected exactly 1 request(s) with 2 patterns, time.\nGot 0.\n"+
+		"  Closest requests (1 of 1 the server served, the newest first):\n"+
+		"    #1 2026-10-21T12:00:00.000Z matched GET http://127.0.0.1/a 200\n"+
+		"        missed 2 of 2: pattern path, pattern path\n", result.Report)
+	require.Equal(t, []verify.Listed{{Seq: 1, ID: "a", Line: "#1 2026-10-21T12:00:00.000Z matched GET http://127.0.0.1/a 200", Total: 2, Missed: []string{"pattern path", "pattern path"}}}, result.Closest)
+}
+
+func TestReport_DoesNotRankATruncatedBodyAsAMiss(t *testing.T) {
+	j := newJournal(t, journal.Options{MaxBodySize: 1}, entry("a", func(e *journal.Entry) { e.Body = []byte("tea") }))
+	result, err := verify.Check(t.Context(), verify.Spec{
+		Journal: j, Query: journal.Query{Path: match.Equal("/b"), Body: match.Equal("coffee")}, Count: match.Equal(1),
+	})
+	require.NoError(t, err)
+	require.False(t, result.Passed)
+	require.Equal(t, []verify.Listed{{Seq: 1, ID: "a", Line: "#1 2026-10-21T12:00:00.000Z matched GET http://127.0.0.1/a 200 (body cut)", Total: 1, Missed: []string{"path"}}}, result.Closest)
+}
+
+func TestReport_ACountMatcherFailureDoesNotProduceAMisleadingReport(t *testing.T) {
+	errCount := errors.New("test: count unavailable")
+	j := newJournal(t, journal.Options{})
+	count := vlatte.MatcherFunc("count", func(arg vlatte.MatcherArg) (bool, error) {
+		if arg.Value() == 0 {
+			return false, nil
+		}
+		return false, errCount
+	})
+	_, err := verify.Check(t.Context(), verify.Spec{Journal: j, Count: count})
+	require.ErrorIs(t, err, errCount)
+	require.ErrorIs(t, err, vlatte.ErrMatching)
+}
+
+func TestReport_AnUnreadableJournalDoesNotProduceAMisleadingReport(t *testing.T) {
+	errRead := errors.New("test: journal unavailable")
+	j := &unreadableJournal{Journal: newJournal(t, journal.Options{}, entry("a")), err: errRead}
+	_, err := verify.Check(t.Context(), verify.Spec{Journal: j, Count: match.Equal(0)})
+	require.ErrorIs(t, err, errRead)
+}
+
+type unreadableJournal struct {
+	*journal.Journal
+
+	err error
+}
+
+func (j *unreadableJournal) Find(context.Context, journal.Query, ...journal.Filter) (journal.Page, error) {
+	return journal.Page{}, j.err
 }
 
 func TestReport_TellsWhatCameOfEachRequest(t *testing.T) {

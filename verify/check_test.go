@@ -259,6 +259,11 @@ func TestCheck_RefusesASpecItCantRun(t *testing.T) {
 			wants: "verify: invalid check: a wait must be longer than 0",
 		},
 		{
+			name:  "two waits",
+			give:  verify.Spec{Journal: j, Count: match.Equal(1), Within: time.Second, During: time.Second},
+			wants: "verify: invalid check: it waits Within or During, not both",
+		},
+		{
 			name:  "a count that passes with none, within a wait",
 			give:  verify.Spec{Journal: j, Count: match.Equal(0), Expect: "no", Within: time.Second},
 			wants: "verify: invalid check: no request(s) passes with none, so Within would pass at once: use During",
@@ -305,4 +310,12 @@ func TestCheck_AResultForAClientLeavesOutWhatItWaited(t *testing.T) {
 		"selected": [{"seq": 1, "id": "a", "line": "#1 2026-10-21T12:00:00.000Z matched GET http://127.0.0.1/a 200"}],
 		"report": "\nExpected no request(s).\nGot 1.\n  Requests selected (1 of 1, the newest first):\n    #1 2026-10-21T12:00:00.000Z matched GET http://127.0.0.1/a 200\n"
 	}`, string(b))
+}
+
+func TestCheck_AWithinMatcherThatFailsAtZeroCannotStartAWait(t *testing.T) {
+	errCount := errors.New("test: invalid count")
+	count := vlatte.MatcherFunc("count", func(vlatte.MatcherArg) (bool, error) { return false, errCount })
+	_, err := verify.Check(t.Context(), verify.Spec{Journal: newJournal(t, journal.Options{}), Count: count, Within: time.Hour})
+	require.ErrorIs(t, err, errCount)
+	require.ErrorIs(t, err, vlatte.ErrMatching)
 }

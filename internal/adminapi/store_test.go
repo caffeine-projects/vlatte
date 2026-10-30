@@ -501,6 +501,19 @@ func TestStore_ListsWhatTheServerServes(t *testing.T) {
 	require.Equal(t, []string{"on"}, listed)
 }
 
+func TestStore_AReplaceThatCannotReadTheServerLeavesDurableMocksAlone(t *testing.T) {
+	errRead := errors.New("test: serving store unavailable")
+	serving := &failingStore{MemoryStore: &vlatte.MemoryStore[*docMock]{}, pickAllErr: errRead}
+	durable := newDocStore()
+	old := newDocMock("a", true)
+	require.NoError(t, durable.Store(t.Context(), old))
+	s := NewStore[*docMock](serving, durable, nil)
+	require.ErrorIs(t, s.Replace(t.Context(), []*docMock{old}, newDocMock("b", true)), errRead)
+	all, err := durable.PickAll(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []string{"a"}, ids(all))
+}
+
 func TestStore_AMockPickedBeforeAReloadLeavesTheNewerOne(t *testing.T) {
 	// A delete or replace of a mock picked before a reload swapped in a newer one with its id, as a race between two
 	// admin requests can: the newer mock, and the description the persistent store holds for it, stay.

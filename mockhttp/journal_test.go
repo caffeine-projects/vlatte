@@ -28,6 +28,7 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/testmock"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/verify"
 )
 
 // journaledServer starts a server that keeps a journal in a temporary directory.
@@ -281,6 +282,19 @@ func TestJournal_VerifiesWithRequestPatterns(t *testing.T) {
 	require.True(t, m.VerifyRequests().Matching(Request().Query("page", match.Equal("3"))).Never(ft))
 	require.True(t, m.VerifyRequests().Method("POST").Matching(Request().URLPath(match.HasPrefix("/"))).Times(ft, 3))
 	ft.AssertNotCalled(t, "Errorf", mock.Anything, mock.Anything)
+}
+
+func TestRequestPattern_ExplainsAnotherProtocolAndOmitsACutBody(t *testing.T) {
+	m := MustNew(Setup().Silent())
+	pattern, err := m.RequestPattern(Postf("/tea").Body(match.Equal("tea")))
+	require.NoError(t, err)
+	miss, err := pattern.Explain(t.Context(), &journal.Entry{Kind: "grpc"})
+	require.NoError(t, err)
+	require.Equal(t, verify.Miss{Total: 1, Failed: []string{"kind"}}, miss)
+
+	miss, err = pattern.Explain(t.Context(), &journal.Entry{Kind: Kind, Method: http.MethodPost, Path: "/tea", Target: "http://example.org/tea", Body: []byte("t"), BodyTruncated: true})
+	require.NoError(t, err)
+	require.Equal(t, verify.Miss{Passed: 2, Total: 2}, miss)
 }
 
 func TestJournal_APatternMatchesItsPathParams(t *testing.T) {

@@ -59,6 +59,28 @@ func onlyCall(t *testing.T, m *Server, q journal.Query) *journal.Entry {
 	return page.Entries[0]
 }
 
+func TestRequestPattern_ExplainsEntriesThatCannotBeReadAsCalls(t *testing.T) {
+	m := serve(t)
+	pattern, err := m.RequestPattern(Method("Greetings").Field("message", match.Equal("tea")))
+	require.NoError(t, err)
+	tests := []struct {
+		name  string
+		entry *journal.Entry
+		miss  string
+	}{
+		{name: "another protocol", entry: &journal.Entry{Kind: "http"}, miss: "kind"},
+		{name: "unknown method", entry: &journal.Entry{Kind: Kind, Path: "/unknown/Method"}, miss: "method"},
+		{name: "invalid message", entry: &journal.Entry{Kind: Kind, Path: pb.TestService_Greetings_FullMethodName, Body: []byte("{")}, miss: "request"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			miss, err := pattern.Explain(t.Context(), tt.entry)
+			require.NoError(t, err)
+			require.Equal(t, verify.Miss{Total: 1, Failed: []string{tt.miss}}, miss)
+		})
+	}
+}
+
 func TestJournal_KeepsEachCallOnceWhateverItsOutcome(t *testing.T) {
 	// The journal is the same for every protocol: a gRPC call is an entry, with its full method as its path, its
 	// metadata as its headers, its request message as JSON as its body, and its code as its status.

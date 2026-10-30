@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -225,6 +226,24 @@ func TestRender_AGzippedFlushedBodyEndsItsGzipStream(t *testing.T) {
 	body, err := io.ReadAll(gz)
 	require.NoError(t, err)
 	require.Equal(t, "data: a\n\n", string(body))
+}
+
+func TestResponse_GunzipRejectsAnInvalidGzipHeader(t *testing.T) {
+	res := &Response{Body: []byte("this is not a gzip stream")}
+	_, err := res.Gunzip()
+	require.ErrorIs(t, err, gzip.ErrHeader)
+}
+
+func TestRender_AGzippedBodyReportsAClientWriteFailure(t *testing.T) {
+	res := &Response{StatusCode: http.StatusOK, Body: []byte("tea"), Encoding: "gzip"}
+	w := &failingWriter{header: make(http.Header), failWrite: 1}
+	require.EqualError(t, res.Render(t.Context(), w), "broken pipe")
+}
+
+func TestRender_AGzippedReaderReportsItsReadFailure(t *testing.T) {
+	errRead := errors.New("test: body unavailable")
+	res := &Response{StatusCode: http.StatusOK, BodyCloser: io.NopCloser(iotest.ErrReader(errRead)), Encoding: "gzip"}
+	require.ErrorIs(t, res.Render(t.Context(), httptest.NewRecorder()), errRead)
 }
 
 // leavingBody is a streamed body whose client leaves once it has read the body: the next read cancels the context,

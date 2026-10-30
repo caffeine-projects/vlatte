@@ -2,6 +2,7 @@ package mockhttp
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"slices"
 	"strings"
@@ -24,6 +25,20 @@ func corsServer(t *testing.T, options ...CORSConfigurer) *Server {
 	m.MustMock(AnyMethod().Reply(OK().Header("X-Mock", "1")))
 
 	return m
+}
+
+func TestCORSMiddleware_NilOptionsUseTheDefaultPreflightPolicy(t *testing.T) {
+	called := false
+	h := corsMiddleware(nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	r := httptest.NewRequest(http.MethodOptions, "/tea", nil)
+	r.Header.Set("Origin", "https://example.org")
+	r.Header.Set("Access-Control-Request-Method", http.MethodPut)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	require.False(t, called)
+	require.Equal(t, http.StatusNoContent, w.Code)
+	require.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+	require.Equal(t, DefaultCORSConfig.AllowedMethods, w.Header().Get("Access-Control-Allow-Methods"))
 }
 
 // preflight sends what a browser at origin sends before a cross-origin PUT with an X-Custom header.

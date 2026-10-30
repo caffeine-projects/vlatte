@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	json "encoding/json/v2"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -88,6 +90,26 @@ func TestStdReplyBodyString(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "text", string(res.Body))
+}
+
+func TestReply_HeaderAndTrailerArraysKeepEveryValueInOrder(t *testing.T) {
+	rv := &RequestValues{RawRequest: _req, URL: _req.URL}
+	rep := OK().HeaderArr("X-Tag", "a", "b").
+		HeaderArrTemplate("X-Path", `{{ "rendered" }}`, "fixed").
+		TrailerArr("X-Result", "one", "two")
+
+	res, err := replierOf(t, rep).Reply(t.Context(), ReplyInput{RequestValues: rv})
+	require.NoError(t, err)
+	require.Equal(t, []string{"a", "b"}, res.Header.Values("X-Tag"))
+	require.Equal(t, []string{"rendered", "fixed"}, res.Header.Values("X-Path"))
+	require.Equal(t, []string{"one", "two"}, res.Trailer.Values("X-Result"))
+}
+
+func TestReply_ABodyReadFailureFailsTheBuild(t *testing.T) {
+	errRead := errors.New("test: body unavailable")
+	replier, err := OK().BodyReader(iotest.ErrReader(errRead)).NewReplier(MustNew(Setup().Silent()))
+	require.ErrorIs(t, err, errRead)
+	require.Nil(t, replier)
 }
 
 func TestStdReplyBodyJSON(t *testing.T) {

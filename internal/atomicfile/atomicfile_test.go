@@ -1,6 +1,8 @@
 package atomicfile_test
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,4 +51,28 @@ func TestWritePerm(t *testing.T) {
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+func TestRestore_AnAlreadyMissingNewFileNeedsNoRemoval(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "new.json")
+	saved, err := atomicfile.Backup(path)
+	require.NoError(t, err)
+	require.NoError(t, atomicfile.Restore([]atomicfile.Saved{saved}, ".tmp-*"))
+	_, err = os.Stat(path)
+	require.ErrorIs(t, err, fs.ErrNotExist)
+}
+
+func TestRestore_ReportsTheFileItCannotPutBack(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "old.json")
+	require.NoError(t, os.WriteFile(path, []byte("old"), 0o600))
+	saved, err := atomicfile.Backup(path)
+	require.NoError(t, err)
+	require.NoError(t, os.RemoveAll(dir))
+
+	err = atomicfile.Restore([]atomicfile.Saved{saved}, ".tmp-*")
+	require.ErrorIs(t, err, fs.ErrNotExist)
+	pathError, ok := errors.AsType[*fs.PathError](err)
+	require.True(t, ok)
+	require.EqualError(t, err, "putting "+path+" back: "+pathError.Error())
 }

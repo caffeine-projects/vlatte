@@ -51,6 +51,31 @@ func TestBase_AssertNotCalled(t *testing.T) {
 	passes(t)
 }
 
+func TestBase_AssertNumberOfCallsReportsTheTotalAcrossScopes(t *testing.T) {
+	app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock]())
+	a, b := newFakeMockWith("a", 0), newFakeMockWith("b", 0)
+	app.MustMock(fakeBuilder{mock: a})
+	app.MustMock(fakeBuilder{mock: b})
+	a.hit()
+	b.hit()
+	ft := testmock.NewFakeT()
+
+	require.True(t, app.AssertNumberOfCalls(ft, 2))
+	require.Empty(t, ft.Errors())
+	require.False(t, app.AssertNumberOfCalls(ft, 1))
+	require.Equal(t, "\nExpected 1 matched request hit(s).\n Got 2", errorText(t, ft))
+}
+
+func TestBase_MustMockPanicsWithTheBuildError(t *testing.T) {
+	errBuild := errors.New("test: invalid mock")
+	app := vlatte.NewBase[*fakeMock](struct{}{}, vlatte.NewStore[*fakeMock]())
+
+	require.PanicsWithError(t, "server: mock 0: test: invalid mock", func() {
+		app.MustMock(fakeBuilder{err: errBuild})
+	})
+	require.Empty(t, app.ListPending())
+}
+
 func TestBase_Unmock(t *testing.T) {
 	// Unmock deletes the mocks of a scope and stops tracking it; other scopes are left alone.
 	store := vlatte.NewStore[*fakeMock]()

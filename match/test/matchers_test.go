@@ -226,22 +226,72 @@ func TestTextMatchers_ValuesThatArentText(t *testing.T) {
 
 func TestCombinators_PassOnErrorsOfUserCode(t *testing.T) {
 	// Errors come only from user code now, and they still stop the search: they are bugs to fix.
-	boom := match.Function(func(any) (bool, error) { return false, errors.New("boom") })
+	errMatcher := errors.New("test: matcher unavailable")
+	boom := match.Function(func(any) (bool, error) { return false, errMatcher })
 
 	for m, v := range map[vlatte.Matcher]any{
-		match.Each(boom):          []any{1},
-		match.Item(0, boom):       []any{1},
-		match.Some(boom):          []any{1},
-		match.URLPathMatch(boom):  "/a",
-		match.Trim(boom):          "a",
-		match.ToLower(boom):       "a",
-		match.ToUpper(boom):       "a",
-		match.Split(",", boom):    "a",
-		match.JSONPath("$", boom): "{}",
+		match.Each(boom):                   []any{1},
+		match.Item(0, boom):                []any{1},
+		match.Some(boom):                   []any{1},
+		match.URLPathMatch(boom):           "/a",
+		match.Trim(boom):                   "a",
+		match.ToLower(boom):                "a",
+		match.ToUpper(boom):                "a",
+		match.Split(",", boom):             "a",
+		match.JSONPath("$", boom):          "{}",
+		match.Both(match.Anything(), boom): "a",
+		match.Not(boom):                    "a",
+		match.XOR(match.Anything(), boom):  "a",
 	} {
 		_, err := m.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), v))
-		require.ErrorContains(t, err, "boom", m.Name())
+		require.ErrorIs(t, err, errMatcher, m.Name())
 	}
+}
+
+func TestCombinators_AUserPanicBecomesAMatchingError(t *testing.T) {
+	panicking := match.Function(func(any) (bool, error) { panic("broken matcher") })
+	tests := []struct {
+		name    string
+		matcher vlatte.Matcher
+		want    string
+	}{
+		{name: "all", matcher: match.All(match.Anything(), panicking), want: "all: matcher[1]: panic: broken matcher"},
+		{name: "any", matcher: match.Any(match.Nil(), panicking), want: "any: matcher[1]: panic: broken matcher"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ok, err := tt.matcher.Match(vlatte.NewMatcherArg(t.Context(), vlatte.NewExplanation(), "tea"))
+			require.False(t, ok)
+			require.EqualError(t, err, tt.want)
+		})
+	}
+}
+
+func TestCombinators_DescriptionsTolerateUserMatchersWithoutADescription(t *testing.T) {
+	user := match.Function(func(any) (bool, error) { return true, nil })
+	tests := []struct {
+		name    string
+		matcher vlatte.Matcher
+		want    string
+	}{
+		{name: "not", matcher: match.Not(user), want: `["not",["anything"]]`},
+		{name: "each", matcher: match.Each(user), want: `["each"]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			desc, ok := vlatte.IsSelfDescriptive(tt.matcher)
+			require.True(t, ok)
+			data, err := desc.MarshalJSON()
+			require.NoError(t, err)
+			require.JSONEq(t, tt.want, string(data))
+		})
+	}
+}
+
+func TestMatchers_ATypedNilPointerIsAbsent(t *testing.T) {
+	var pointer *point
+	require.False(t, matches(t, match.Present(), pointer))
+	require.True(t, matches(t, match.Not(match.Present()), pointer))
 }
 
 // Generators

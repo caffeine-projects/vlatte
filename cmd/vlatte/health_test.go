@@ -108,6 +108,26 @@ func TestHealth_TakesOneURLAtMost(t *testing.T) {
 	require.Contains(t, errOut.String(), "accepts at most 1 arg(s), received 2")
 }
 
+func TestHealth_ReportsInvalidSettingsBeforeProbing(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("VLATTE_ADMIN_AUTH_PASSWORD", "secret-password")
+	var out bytes.Buffer
+	require.Equal(t, 1, run(t.Context(), []string{"health"}, nil, io.Discard, &out))
+	require.Equal(t, "health: config: 1 problem\n  env VLATTE_ADMIN_AUTH_PASSWORD: missing_value: admin.auth.password is set but admin.auth.username is not; set both\n", out.String())
+}
+
+func TestHealth_RejectsATokenThatCannotBeSentInAnAuthorizationHeader(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("VLATTE_ADMIN_AUTH_TOKEN", "invalid token")
+	var out bytes.Buffer
+	require.Equal(t, 1, run(t.Context(), []string{"health"}, nil, io.Discard, &out))
+	require.Equal(t, "health: config: 1 problem\n  env VLATTE_ADMIN_AUTH_TOKEN: invalid_value: admin: bearer token: the token can hold only letters, digits, -._~+/ and a trailing =\n", out.String())
+}
+
+func TestCertName_ACertificateWithoutSANsHasNoServerName(t *testing.T) {
+	require.Equal(t, "", certName(&x509.Certificate{}))
+}
+
 func TestCheckServer(t *testing.T) {
 	// The image's health check works whatever the server's settings: its admin API answers for it, and where the
 	// admin API is off or elsewhere, its mock server, whose port no setting changes, does.

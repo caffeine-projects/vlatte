@@ -77,3 +77,11 @@ func TestOpen_EmptyDirIsTheWorkingDir(t *testing.T) {
 	_, err := Open("", "{{ .Name }}", "../in.txt")
 	require.Error(t, err)
 }
+
+func TestFromDir_TheWorkingDirectoryNeedsNoPrefix(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	rel, err := FromDir(dir)
+	require.NoError(t, err)
+	require.Equal(t, "", rel)
+}
