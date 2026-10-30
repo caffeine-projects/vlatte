@@ -230,6 +230,15 @@ export default defineConfig({
   // The hostname holds the base: the sitemap resolves each page's path against it.
   sitemap: { hostname: site },
   head: [
+    // Google tag (gtag.js)
+    ['script', { async: '', src: 'https://www.googletagmanager.com/gtag/js?id=G-CQ48BZW649' }],
+    ['script', {}, `
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-CQ48BZW649');
+`],
     ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}favicon.svg` }],
     ['link', { rel: 'icon', type: 'image/png', sizes: '48x48', href: `${base}favicon-48.png` }],
     ['link', { rel: 'icon', type: 'image/png', sizes: '32x32', href: `${base}favicon-32.png` }],
