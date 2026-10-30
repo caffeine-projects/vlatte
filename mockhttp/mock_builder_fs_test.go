@@ -197,6 +197,45 @@ func TestSingularMockDocuments_ValidateLaterYAMLSyntax(t *testing.T) {
 	require.ErrorContains(t, err, "yaml: document 2:")
 }
 
+func TestSingularMockDocuments_EmptyYAMLStillReportsMissingRequest(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		data string
+	}{
+		{name: "empty", data: ""},
+		{name: "comment only", data: "# no mock\n"},
+		{name: "empty documents", data: "---\n# no mock\n---\n...\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "empty.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(tt.data), 0o600))
+			app := MustNew(Setup().Silent())
+			t.Cleanup(app.Close)
+
+			for _, builder := range []struct {
+				name    string
+				builder vlatte.Builder[*Mock, *Server]
+				origin  string
+			}{
+				{name: "file", builder: FromFile(path), origin: "file " + path},
+				{name: "bytes", builder: FromBytes([]byte(tt.data), "yaml"), origin: "bytes"},
+			} {
+				t.Run(builder.name, func(t *testing.T) {
+					scope, err := app.Mock(builder.builder)
+					require.Nil(t, scope)
+					cfgErr, ok := errors.AsType[*config.Error](err)
+					require.True(t, ok, "%v", err)
+					require.Equal(t, []config.Problem{{
+						Code: config.CodeMissingValue, Origin: builder.origin, Key: "request",
+						Message: "request sets no matcher", Hint: `to match every request, write request: {path: "*"}`,
+					}}, cfgErr.Problems)
+					require.Len(t, app.ListPending(), 0, "an empty singular mock must not be stored")
+				})
+			}
+		})
+	}
+}
+
 func TestFromBytes_EmptyYAMLDocumentsDoNotCountAsMocks(t *testing.T) {
 	data := []byte("---\n# empty\n---\nid: only\nrequest: {path: /only}\nresponse: {status: 204}\n---\n")
 	app := MustNew(Setup().Silent())

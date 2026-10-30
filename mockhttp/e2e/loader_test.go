@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -15,30 +16,29 @@ import (
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
-func TestFileLoader_YAMLDocumentsServeEveryMock(t *testing.T) {
+func TestFileLoader_DocumentedYAMLDocumentsServeEveryMock(t *testing.T) {
+	doc, err := os.ReadFile("../../docs/http/mock-files.md")
+	require.NoError(t, err)
+	_, section, ok := strings.Cut(string(doc), "## Multiple mocks in a YAML file")
+	require.True(t, ok)
+	_, example, ok := strings.Cut(section, "```yaml\n")
+	require.True(t, ok)
+	example, _, ok = strings.Cut(example, "\n```")
+	require.True(t, ok)
 	path := filepath.Join(t.TempDir(), "mocks.yaml")
-	require.NoError(t, os.WriteFile(path, []byte(`request:
-  path: /first
-response:
-  body: first
----
-request:
-  path: /second
-response:
-  body: second
-`), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte(example), 0o600))
 
 	app := mockhttp.MustNew(mockhttp.Setup().Silent().MockFilePatterns(path))
 	t.Cleanup(app.Close)
 	require.NoError(t, app.Start())
 
-	for _, want := range []string{"first", "second"} {
+	for i, want := range []string{"first", "second"} {
 		res, err := http.Get(app.URL("/" + want))
 		require.NoError(t, err)
 		body, err := io.ReadAll(res.Body)
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
-		require.Equal(t, http.StatusOK, res.StatusCode)
+		require.Equal(t, http.StatusCreated+i, res.StatusCode)
 		require.Equal(t, want, string(body))
 	}
 }

@@ -42,7 +42,7 @@ import (
 
 // decodeDoc builds a YAML mock document for app, as the admin API does.
 func decodeDoc(app *Server, doc string) (*Mock, error) {
-	return mockDoc{origin: "doc", format: "yaml", data: []byte(doc)}.build(app)
+	return mockDoc{Origin: "doc", Format: "yaml", Data: []byte(doc)}.build(app)
 }
 
 // mockProblems returns the problems of a mock document's error, failing unless it is a mock *config.Error.
@@ -324,7 +324,7 @@ func TestMockSchema_ReadProblems(t *testing.T) {
 	m := MustNew(Setup().Silent())
 
 	t.Run("syntax error points to the line, without noise from checks", func(t *testing.T) {
-		_, err := mockDoc{origin: "doc", format: "json", data: []byte("{\n  \"request\": \n}")}.build(m)
+		_, err := mockDoc{Origin: "doc", Format: "json", Data: []byte("{\n  \"request\": \n}")}.build(m)
 
 		problems := mockProblems(t, err)
 		require.Len(t, problems, 1)
@@ -647,7 +647,7 @@ func TestMockFile_RefusesANullBodyInJSON(t *testing.T) {
 	// A null body is refused, as in YAML, rather than served empty: an empty body is written "", and JSON null "null".
 	m := MustNew(Setup().Silent())
 
-	mock, err := mockDoc{origin: "doc", format: "json", data: []byte(`{"request": {"path": "/x"}, "response": {"body": null}}`)}.build(m)
+	mock, err := mockDoc{Origin: "doc", Format: "json", Data: []byte(`{"request": {"path": "/x"}, "response": {"body": null}}`)}.build(m)
 	require.Nil(t, mock)
 
 	problems := mockProblems(t, err)
@@ -1052,7 +1052,7 @@ func TestJSONSchema_AcceptsTheFixturesTheDecoderAccepts(t *testing.T) {
 		require.NoError(t, err)
 
 		// dir, as FromFile sets it: without it, fixtures with relative files would be skipped as wrong.
-		if _, err := (mockDoc{origin: file, format: format, dir: filepath.Dir(file), data: data}).build(m); err != nil {
+		if _, err := (mockDoc{Origin: file, Format: format, Dir: filepath.Dir(file), Data: data}).build(m); err != nil {
 			continue // wrong on purpose, or not a mock file
 		}
 
@@ -1201,7 +1201,7 @@ func TestJSONSchema_ScalarTypesAgreeWithTheDecoder(t *testing.T) {
 			data, err := config.Encode(doc, "json")
 			require.NoError(t, err)
 
-			_, decodeErr := mockDoc{origin: "doc", format: "json", data: data}.build(m)
+			_, decodeErr := mockDoc{Origin: "doc", Format: "json", Data: data}.build(m)
 			schemaErr := schema.Validate(instance(t, doc))
 
 			require.Equal(t, decodeErr == nil, schemaErr == nil, "%s: %#v\ndecoder: %v\nschema: %v", row.key, v, decodeErr, schemaErr)
@@ -1277,7 +1277,7 @@ func TestPropJSONSchema_DurationPattern(t *testing.T) {
 		data, err := config.Encode(withRequest(map[string]any{"delay": s}), "json")
 		require.NoError(t, err)
 
-		_, err = mockDoc{origin: "doc", format: "json", data: data}.build(m)
+		_, err = mockDoc{Origin: "doc", Format: "json", Data: data}.build(m)
 		require.Equal(t, want, err == nil, "decoder on %q: %v", s, err)
 	})
 }
@@ -1378,7 +1378,7 @@ func TestJSONSchema_FaultsAgreeWithTheDecoder(t *testing.T) {
 			data, err := config.Encode(doc, "json")
 			require.NoError(t, err)
 
-			_, decodeErr := mockDoc{origin: "doc", format: "json", data: data}.build(m)
+			_, decodeErr := mockDoc{Origin: "doc", Format: "json", Data: data}.build(m)
 			require.Equal(t, tc.valid, decodeErr == nil, "%s: %#v: %v", key, tc.spec, decodeErr)
 			require.Equal(t, tc.valid, schema.Validate(instance(t, doc)) == nil, "%s: %#v", key, tc.spec)
 		}
@@ -1533,7 +1533,7 @@ func TestPropMockFile_ServesItsModel(t *testing.T) {
 		model := genMock(m.URL()).Draw(t, "mock")
 		format := rapid.SampledFrom(MockFileFormats()).Draw(t, "format")
 
-		scope, err := m.Mock(docBuilder{mockDoc{origin: "model", format: format, data: encodeMock(t, model.doc(), format)}})
+		scope, err := m.Mock(docBuilder{mockDoc{Origin: "model", Format: format, Data: encodeMock(t, model.doc(), format)}})
 		require.NoError(t, err)
 
 		defer scope.Clear(context.Background())
@@ -1600,7 +1600,7 @@ func TestPropMockFile_FormatsBuildTheSameMock(t *testing.T) {
 
 		described := make([]string, 0, len(MockFileFormats()))
 		for _, format := range MockFileFormats() {
-			mock, err := mockDoc{origin: format, format: format, data: encodeMock(t, doc, format)}.build(m)
+			mock, err := mockDoc{Origin: format, Format: format, Data: encodeMock(t, doc, format)}.build(m)
 			require.NoError(t, err, format)
 
 			described = append(described, describe(t, mock))
@@ -1621,7 +1621,7 @@ func TestPropMockFile_BuildIsRepeatable(t *testing.T) {
 		doc := genMock("http://localhost").Draw(t, "mock").doc()
 		doc["id"] = "same"
 
-		b := docBuilder{mockDoc{origin: "doc", format: "json", data: encodeMock(t, doc, "json")}}
+		b := docBuilder{mockDoc{Origin: "doc", Format: "json", Data: encodeMock(t, doc, "json")}}
 
 		first, err := b.Build(m)
 		require.NoError(t, err)
@@ -1674,7 +1674,7 @@ func TestPropMockFile_IDRule(t *testing.T) {
 		id := rapid.OneOf(rapid.StringMatching(`[A-Za-z0-9._~-]{1,12}`), rapid.String()).Draw(t, "id")
 		doc := map[string]any{"id": id, "request": map[string]any{"path": "/x"}}
 
-		mock, err := mockDoc{origin: "doc", format: "json", data: encodeMock(t, doc, "json")}.build(m)
+		mock, err := mockDoc{Origin: "doc", Format: "json", Data: encodeMock(t, doc, "json")}.build(m)
 		if _idOracle.MatchString(id) {
 			require.NoError(t, err)
 			require.Equal(t, id, mock.ID())
@@ -1900,7 +1900,7 @@ func TestPropMockFile_EveryFaultIsReported(t *testing.T) {
 		}
 
 		format := rapid.SampledFrom(MockFileFormats()).Draw(t, "format")
-		_, err := mockDoc{origin: "doc", format: format, data: encodeMock(t, doc, format)}.build(m)
+		_, err := mockDoc{Origin: "doc", Format: format, Data: encodeMock(t, doc, format)}.build(m)
 
 		got := make([]string, 0, len(want))
 		for _, p := range mockProblems(t, err) {
@@ -2000,7 +2000,7 @@ func TestPropMockFile_MutationsNeverPanic(t *testing.T) {
 
 		format := rapid.SampledFrom(MockFileFormats()).Draw(t, "format")
 
-		scope, err := m.Mock(docBuilder{mockDoc{origin: "doc", format: format, data: encodeMock(t, doc, format)}})
+		scope, err := m.Mock(docBuilder{mockDoc{Origin: "doc", Format: format, Data: encodeMock(t, doc, format)}})
 		if err != nil {
 			_, ok := errors.AsType[*config.Error](err)
 			require.True(t, ok, "a mock document fails with its problems, not %v", err)
@@ -2058,7 +2058,7 @@ func FuzzMockDoc(f *testing.F) {
 	m := MustNew(Setup().Silent().OnCompleteListener("webhook", stop))
 
 	f.Fuzz(func(t *testing.T, data []byte, format string) {
-		_, err := mockDoc{origin: "fuzz", format: format, data: data}.build(m)
+		_, err := mockDoc{Origin: "fuzz", Format: format, Data: data}.build(m)
 		if err == nil {
 			return
 		}
@@ -2107,7 +2107,7 @@ func TestPropMockFile_KeysKeepTheirText(t *testing.T) {
 
 		format := rapid.SampledFrom(MockFileFormats()).Draw(t, "format")
 
-		scope, err := m.Mock(docBuilder{mockDoc{origin: "doc", format: format, data: encodeMock(t, doc, format)}})
+		scope, err := m.Mock(docBuilder{mockDoc{Origin: "doc", Format: format, Data: encodeMock(t, doc, format)}})
 		require.NoError(t, err)
 
 		defer scope.Clear(context.Background())

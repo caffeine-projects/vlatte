@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
@@ -213,6 +214,51 @@ func TestSingularMockBuilders_RejectMalformedLaterYAMLContent(t *testing.T) {
 			require.Len(t, cfgErr.Problems, 1)
 			require.Equal(t, config.CodeParseError, cfgErr.Problems[0].Code)
 			require.ErrorContains(t, err, "document 2")
+		})
+	}
+}
+
+func TestSingularMockBuilders_EmptyYAMLStillReportsMissingMockFields(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		data string
+	}{
+		{name: "empty", data: ""},
+		{name: "comment only", data: "# no mock\n"},
+		{name: "empty documents", data: "---\n# no mock\n---\n...\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeFile(t, t.TempDir(), "empty.yaml", tt.data)
+			m := MustNew(Setup().Silent().InMemory())
+			t.Cleanup(m.Close)
+
+			for _, builder := range []struct {
+				name    string
+				builder vlatte.Builder[*Mock, *Server]
+				origin  string
+			}{
+				{name: "file", builder: FromFile(path), origin: "file " + path},
+				{name: "bytes", builder: FromBytes([]byte(tt.data), "yaml"), origin: "bytes"},
+			} {
+				t.Run(builder.name, func(t *testing.T) {
+					scope, err := m.Mock(builder.builder)
+					require.Nil(t, scope)
+					cfgErr, ok := errors.AsType[*config.Error](err)
+					require.True(t, ok, "%v", err)
+					require.Equal(t, []config.Problem{
+						{
+							Code: config.CodeMissingValue, Origin: builder.origin, Key: "request.method",
+							Message: "request.method is required", Hint: "name the method, such as pkg.Service/Method",
+						},
+						{
+							Code: config.CodeMissingValue, Origin: builder.origin, Key: "response",
+							Message: "the mock has no response",
+							Hint:    "set response, response_sequence, response_random, bidi for a bidi streaming method, or proxy",
+						},
+					}, cfgErr.Problems)
+					require.Len(t, m.ListPending(), 0, "an empty singular mock must not be stored")
+				})
+			}
 		})
 	}
 }

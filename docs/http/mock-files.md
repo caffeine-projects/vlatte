@@ -34,16 +34,20 @@ Separate mock definitions with `---`:
 
 ```yaml
 id: first
-request: 
-    method: GET, path: /first
-response: 
-    status: 201, body: first
+request:
+  method: GET
+  path: /first
+response:
+  status: 201
+  body: first
 ---
 id: second
-request: 
-    method: GET, path: /second
-response: 
-    status: 202, body: second
+request:
+  method: GET
+  path: /second
+response:
+  status: 202
+  body: second
 ```
 
 The file loader reads and validates the complete file before installing its mocks. Mocks of equal priority match in file-name order, then document order. Each relative `body_file` starts at the YAML file's directory. A bad document or duplicate mock ID fails the load; a failed reload keeps the previous complete set. Syntax and schema errors in a file with multiple documents identify the file and document number.

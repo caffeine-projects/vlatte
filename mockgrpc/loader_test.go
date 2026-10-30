@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
 
@@ -175,6 +176,43 @@ response: {message: {message: new-first}}
 				require.Equal(t, "old-"+message, got, "a failed reload must preserve the entire old set")
 			}
 		})
+	}
+}
+
+func TestMockFiles_AReadFailureKeepsEveryOldMock(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "first.yaml", `
+request: {method: Greetings, fields: {message: first}}
+response: {message: {message: old-first}}
+`)
+	writeFile(t, dir, "second.yaml", `
+request: {method: Greetings, fields: {message: second}}
+response: {message: {message: old-second}}
+`)
+	m := fileServer(t, Setup().InMemory().RootDir(dir).MockFiles("*.yaml"))
+	c := pb.NewTestServiceClient(m.MustDial())
+	writeFile(t, dir, "first.yaml", `
+request: {method: Greetings, fields: {message: first}}
+response: {message: {message: new-first}}
+`)
+	writeFile(t, dir, "second.yaml", `
+request: {method: Greetings, fields: {message: second}}
+response: {message: {message: new-second}}
+`)
+	broken := filepath.Join(dir, "broken.yaml")
+	require.NoError(t, os.Mkdir(broken, 0o755))
+
+	err := m.Reload()
+	cfgErr, ok := errors.AsType[*config.Error](err)
+	require.True(t, ok, "%v", err)
+	require.Len(t, cfgErr.Problems, 1)
+	require.Equal(t, config.CodeReadError, cfgErr.Problems[0].Code)
+	require.Equal(t, "file "+broken, cfgErr.Problems[0].Origin)
+
+	for _, message := range []string{"first", "second"} {
+		got, code := greetWith(t, c, message)
+		require.Equal(t, codes.OK, code)
+		require.Equal(t, "old-"+message, got, "a read failure must preserve the entire old set")
 	}
 }
 

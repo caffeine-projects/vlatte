@@ -356,7 +356,7 @@ func TestPropFormFile_SomeOrEveryFileMatches(t *testing.T) {
 				"response": map[string]any{"status": int64(200)},
 			}
 			format := rapid.SampledFrom(MockFileFormats()).Draw(t, "format")
-			builder = docBuilder{mockDoc{origin: "model", format: format, data: encodeMock(t, doc, format)}}
+			builder = docBuilder{mockDoc{Origin: "model", Format: format, Data: encodeMock(t, doc, format)}}
 		}
 
 		scope, err := m.Mock(builder)

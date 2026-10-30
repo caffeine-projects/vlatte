@@ -564,7 +564,7 @@ func TestPropMultipart_GoAndFilesDescribeTheSame(t *testing.T) {
 		}
 
 		format := rapid.SampledFrom(MockFileFormats()).Draw(t, "format")
-		scope, err := m.Mock(goBuilder, docBuilder{mockDoc{origin: "model", format: format, data: encodeMock(t, doc, format)}})
+		scope, err := m.Mock(goBuilder, docBuilder{mockDoc{Origin: "model", Format: format, Data: encodeMock(t, doc, format)}})
 		require.NoError(t, err)
 
 		defer scope.Clear(context.Background())
@@ -620,7 +620,7 @@ func TestPropJSONSchema_MultipartPatterns(t *testing.T) {
 		data, err := config.Encode(doc, "json")
 		require.NoError(t, err)
 
-		_, decodeErr := mockDoc{origin: "doc", format: "json", data: data}.build(m)
+		_, decodeErr := mockDoc{Origin: "doc", Format: "json", Data: data}.build(m)
 		schemaErr := schema.Validate(instance(t, doc))
 
 		require.Equal(t, decodeErr == nil, schemaErr == nil, "%q\ndecoder: %v\nschema: %v", s, decodeErr, schemaErr)

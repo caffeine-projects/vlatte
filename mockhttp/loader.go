@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/mockfile"
 )
 
 // Loader loads mocks from outside the code, such as mock files.
@@ -98,23 +99,10 @@ func (l *fileLoader) load(app *Server, swap vlatte.Swap[*Mock]) error {
 		return nil
 	}
 
-	builders := make([]vlatte.Builder[*Mock, *Server], 0, len(files))
-	for _, file := range files {
-		doc, err := (&fileBuilder{path: file}).read()
-		if err != nil {
-			builders = append(builders, mockDoc{err: err})
-			continue
-		}
-
-		docs, err := doc.documents()
-		if err != nil {
-			builders = append(builders, mockDoc{err: err})
-			continue
-		}
-
-		for _, doc := range docs {
-			builders = append(builders, doc)
-		}
+	documents := mockfile.Load(files, workingDirHint)
+	builders := make([]vlatte.Builder[*Mock, *Server], 0, len(documents))
+	for _, doc := range documents {
+		builders = append(builders, mockDoc{Document: doc})
 	}
 
 	// A reload replaces the mocks of the last load, so edited and removed files take effect.

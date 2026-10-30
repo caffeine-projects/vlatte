@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/mockfile"
 )
 
 // fileLoader loads the mock files matching the server's patterns.
@@ -94,23 +95,10 @@ func (l *fileLoader) loadLocked(app *Server, swap vlatte.Swap[*Mock]) error {
 		return nil
 	}
 
-	builders := make([]vlatte.Builder[*Mock, *Server], 0, len(files))
-	for _, file := range files {
-		doc, err := (&fileBuilder{path: file}).read()
-		if err != nil {
-			builders = append(builders, mockDoc{err: err})
-			continue
-		}
-
-		docs, err := doc.documents()
-		if err != nil {
-			builders = append(builders, mockDoc{err: err})
-			continue
-		}
-
-		for _, doc := range docs {
-			builders = append(builders, doc)
-		}
+	documents := mockfile.Load(files, nil)
+	builders := make([]vlatte.Builder[*Mock, *Server], 0, len(documents))
+	for _, doc := range documents {
+		builders = append(builders, mockDoc{Document: doc})
 	}
 
 	scope, err := app.RemockWith(context.Background(), l.scope, swap, builders...)

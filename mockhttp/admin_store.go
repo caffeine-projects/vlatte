@@ -53,7 +53,7 @@ func FileStore(dir string) AdminStore {
 func newFileStore(app *Server, dir string, remove func(name string) error) vlatte.Store[*Mock] {
 	encode := func(mock *Mock) ([]byte, error) { return EncodeMock(mock, adminapi.FileStoreFormat) }
 	decode := func(origin string, data []byte, format string) (*Mock, error) {
-		return mockDoc{origin: origin, source: adminapi.Origin, format: format, data: data}.build(app)
+		return mockDoc{Origin: origin, Source: adminapi.Origin, Format: format, Data: data}.build(app)
 	}
 
 	return adminapi.NewFileStore(dir, encode, decode, remove)
