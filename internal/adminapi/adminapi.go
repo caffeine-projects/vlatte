@@ -6,6 +6,7 @@ package adminapi
 import (
 	"context"
 	"errors"
+	"io"
 
 	"github.com/rs/zerolog"
 
@@ -115,8 +116,34 @@ type Server interface {
 	Close() error
 }
 
-// API is an admin API a mock server opts into: it serves the capabilities of the server.
-type API interface {
-	// Serve returns the admin API of the mock server of caps, not started yet.
-	Serve(caps Capabilities) (Server, error)
+// API is the handle of the built-in admin API. Only its constructor in package admin initializes it.
+type API struct {
+	serve    func(Capabilities) (Server, error)
+	serveMCP func(context.Context, io.Reader, io.Writer) error
+}
+
+// NewAPI makes the handle of the built-in admin API, whose implementation binds capabilities with serve and serves
+// MCP over stdio with serveMCP. It imports neither implementation into a mock server.
+func NewAPI(serve func(Capabilities) (Server, error), serveMCP func(context.Context, io.Reader, io.Writer) error) *API {
+	return &API{serve: serve, serveMCP: serveMCP}
+}
+
+// Serve binds api to the mock server of caps, returning its admin server, not started yet.
+func Serve(api *API, caps Capabilities) (Server, error) {
+	if api == nil || api.serve == nil {
+		return nil, errors.New("admin: uninitialized admin API: use admin.New")
+	}
+
+	return api.serve(caps)
+}
+
+// ServeMCP serves the admin operations over MCP on in and out, newline-delimited JSON-RPC, until in ends or ctx is
+// done. Nothing else may write to out, such as logs. It needs the MCP option and a mock server created with the
+// admin API; the mock server's Close waits for the calls it serves.
+func (api *API) ServeMCP(ctx context.Context, in io.Reader, out io.Writer) error {
+	if api == nil || api.serveMCP == nil {
+		return errors.New("admin: uninitialized admin API: use admin.New")
+	}
+
+	return api.serveMCP(ctx, in, out)
 }

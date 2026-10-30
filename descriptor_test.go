@@ -179,12 +179,14 @@ func TestDescribeKeyValuePairs_PanicsOnMalformedPairs(t *testing.T) {
 	}
 }
 
-func TestDescribeRoot_MarksOnlyRootDescriptors(t *testing.T) {
+func TestDescribeRoot_RendersTheTopLevelDocument(t *testing.T) {
 	root := DescribeRoot(map[string]any{"a": 1})
-	require.True(t, root.Root())
 	require.Equal(t, "root", root.Key)
+	require.NoError(t, root.Validate())
 
-	require.False(t, NewDescriptor("k", []any{}).Root())
+	data, err := root.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, `{"a":1}`, string(data))
 }
 
 func TestDescriptor_IsMapAndIsArrayTellPropsShapesApart(t *testing.T) {

@@ -171,10 +171,10 @@ type Config struct {
 	OutboundDeny  []netip.Prefix
 }
 
-// AdminAPI is an admin API the server opts into: a RESTful HTTP server of its own, the same as HTTP mock servers have.
+// AdminAPI is a handle to the built-in admin API: a RESTful HTTP server of its own, the same as HTTP mock servers have.
 // Make one with [github.com/caffeine-projects/vlatte/admin.New]. The operations gRPC mocks can't do, such as recording,
 // answer 501.
-type AdminAPI = adminapi.API
+type AdminAPI = *adminapi.API
 
 // AdminStore makes the persistent store of the mocks the admin API adds, for the server app. The store keeps their
 // descriptions, by ID, such as in files or a database: EncodeMock describes a mock, and DecodeMock builds it back.

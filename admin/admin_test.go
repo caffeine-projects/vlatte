@@ -165,7 +165,7 @@ func TestAdmin_AServerItCantServeLeavesItFree(t *testing.T) {
 	// A mock server the admin API refuses, such as one without its mocks, doesn't take it: the next one gets it.
 	api := admin.MustNew()
 
-	_, err := api.Serve(adminapi.Capabilities{})
+	_, err := adminapi.Serve(api, adminapi.Capabilities{})
 	require.EqualError(t, err, "admin: no mocks: the capabilities need Mocks")
 
 	m := mockhttp.MustNew(mockhttp.Setup().Silent().Admin(api))

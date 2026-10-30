@@ -236,10 +236,10 @@ func (c *Config) Path(p string) string {
 	return filepath.Join(c.RootDir, p)
 }
 
-// AdminAPI is an admin API the server opts into: a RESTful HTTP server of its own, apart from the mocks, that lists,
+// AdminAPI is a handle to the built-in admin API: a RESTful HTTP server of its own, apart from the mocks, that lists,
 // adds and changes them while the server runs. Make one with [github.com/caffeine-projects/vlatte/admin.New]. A nil
 // AdminAPI serves none.
-type AdminAPI = adminapi.API
+type AdminAPI = *adminapi.API
 
 // JournalConfig configures the journal of a server: the requests its mocks get, of every outcome, which tests and the
 // admin API verify and search, while the server runs: Close closes it. The requests the server answers before its

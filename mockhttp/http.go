@@ -329,7 +329,7 @@ func New(config ...Option) (*Server, error) {
 			adminMocks = app.adminStore
 		}
 
-		app.admin, err = conf.Admin.Serve(adminapi.Capabilities{
+		app.admin, err = adminapi.Serve(conf.Admin, adminapi.Capabilities{
 			Kind:   string(Kind),
 			URL:    func() string { return app.URL() },
 			Logger: app.logger,

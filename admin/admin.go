@@ -28,8 +28,6 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/httpx"
 )
 
-var _ adminapi.API = (*Admin)(nil)
-
 // _version matches a version of an npm package: major.minor.patch, with a pre-release such as -beta.1 or not.
 var _version = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`)
 
@@ -52,8 +50,12 @@ var (
 	errNoCertificate = errors.New("admin: tls: the config has no certificate")
 )
 
-// Admin is the admin API a mock server opts into, with ConfigBuilder.Admin of mockhttp or mockgrpc.
-type Admin struct {
+// Admin is the built-in admin API a mock server opts into, with ConfigBuilder.Admin of mockhttp or mockgrpc. Create
+// one with [New] or [MustNew]: its zero value is uninitialized. An Admin serves one mock server.
+type Admin = adminapi.API
+
+// api is the configuration and serving state of the built-in admin API.
+type api struct {
 	opts   adminserver.Options
 	basic  bool // BasicAuth was given, maybe with empty credentials, which New refuses
 	bearer bool // BearerToken was given, maybe with an empty token, which New refuses
@@ -63,18 +65,18 @@ type Admin struct {
 }
 
 // Option configures an Admin.
-type Option func(a *Admin)
+type Option func(a *api)
 
 // Addr sets the address the admin API listens on: host:port, :port or a port. Empty, the default, is a random local
 // port: the mock server's AdminURL returns where it listens.
 func Addr(addr string) Option {
-	return func(a *Admin) { a.opts.Addr = addr }
+	return func(a *api) { a.opts.Addr = addr }
 }
 
 // MCP serves the admin operations over the Model Context Protocol too, for AI agents: Streamable HTTP at POST /mcp
 // of the admin API, without sessions, and stdio with [Admin.ServeMCP]. Off, POST /mcp answers 501.
 func MCP() Option {
-	return func(a *Admin) { a.opts.MCP = true }
+	return func(a *api) { a.opts.MCP = true }
 }
 
 // DocsVersion sets the version of Scalar, the npm package @scalar/api-reference, that the documentation page of the
@@ -82,7 +84,7 @@ func MCP() Option {
 // it. Empty, the default, is the version vlatte pins. The page checks the pinned version against the hash of its
 // file; it loads another unchecked, as its hash isn't known.
 func DocsVersion(version string) Option {
-	return func(a *Admin) { a.opts.DocsVersion = version }
+	return func(a *api) { a.opts.DocsVersion = version }
 }
 
 // Use adds middlewares that wrap every HTTP request of the admin API, such as one that answers CORS preflights.
@@ -91,7 +93,7 @@ func DocsVersion(version string) Option {
 // of the admin API, credentials or not. Requests that come once the mock server closes get a 503 without reaching
 // them. MCP over stdio, with [Admin.ServeMCP], doesn't go through them.
 func Use(middlewares ...func(http.Handler) http.Handler) Option {
-	return func(a *Admin) { a.opts.Middlewares = append(a.opts.Middlewares, middlewares...) }
+	return func(a *api) { a.opts.Middlewares = append(a.opts.Middlewares, middlewares...) }
 }
 
 // BasicAuth asks every HTTP request of the admin API for username and password, with HTTP Basic authentication,
@@ -99,7 +101,7 @@ func Use(middlewares ...func(http.Handler) http.Handler) Option {
 // shows its sign-in prompt for them, and sends them on with the requests of the admin pages. With [BearerToken], a
 // request passes with either. Basic sends them in plain text: serve the admin API over [TLS] beyond the local host.
 func BasicAuth(username, password string) Option {
-	return func(a *Admin) {
+	return func(a *api) {
 		a.basic = true
 		a.opts.Auth.Username, a.opts.Auth.Password = username, password
 	}
@@ -110,7 +112,7 @@ func BasicAuth(username, password string) Option {
 // Kubernetes probes, as [BasicAuth] does. A query parameter doesn't carry it: URLs end up in logs and histories. With
 // BasicAuth, a request passes with either.
 func BearerToken(token string) Option {
-	return func(a *Admin) {
+	return func(a *api) {
 		a.bearer = true
 		a.opts.Auth.Token = token
 	}
@@ -119,7 +121,7 @@ func BearerToken(token string) Option {
 // TLS serves the admin API over HTTPS, with the certificates of c, which New fails without. The mock server's
 // AdminURL starts with https then.
 func TLS(c *tls.Config) Option {
-	return func(a *Admin) {
+	return func(a *api) {
 		// A nil config has no certificate either: New fails for it.
 		a.opts.TLS = cmp.Or(c, &tls.Config{MinVersion: tls.VersionTLS12}).Clone()
 	}
@@ -130,7 +132,7 @@ func TLS(c *tls.Config) Option {
 // a token an Authorization header can't carry, and a TLS config without a certificate. Its errors never hold a
 // secret.
 func New(options ...Option) (*Admin, error) {
-	a := &Admin{}
+	a := &api{}
 	for _, option := range options {
 		option(a)
 	}
@@ -151,7 +153,7 @@ func New(options ...Option) (*Admin, error) {
 		return nil, errNoCertificate
 	}
 
-	return a, nil
+	return adminapi.NewAPI(a.serve, a.serveMCP), nil
 }
 
 // MustNew is like New, but panics on an error.
@@ -164,9 +166,8 @@ func MustNew(options ...Option) *Admin {
 	return a
 }
 
-// Serve returns the admin API of the mock server of caps. Only mock servers call it, as they are created: code passes
-// the Admin to the ConfigBuilder.Admin of mockhttp or mockgrpc. A second call fails with ErrServing.
-func (a *Admin) Serve(caps adminapi.Capabilities) (adminapi.Server, error) {
+// serve binds the admin API to a mock server. A second successful binding fails with ErrServing.
+func (a *api) serve(caps adminapi.Capabilities) (adminapi.Server, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -184,11 +185,8 @@ func (a *Admin) Serve(caps adminapi.Capabilities) (adminapi.Server, error) {
 	return s, nil
 }
 
-// ServeMCP serves the admin operations over MCP on in and out, newline-delimited JSON-RPC, as an agent that starts
-// the program talks to it over its stdin and stdout, until in ends or ctx is done. Nothing else may write to out, such
-// as logs. It needs the MCP option, and the mock server created with the admin API; the mock server's Close waits for
-// the calls it serves.
-func (a *Admin) ServeMCP(ctx context.Context, in io.Reader, out io.Writer) error {
+// serveMCP serves the bound admin API over stdio when MCP was enabled.
+func (a *api) serveMCP(ctx context.Context, in io.Reader, out io.Writer) error {
 	if !a.opts.MCP {
 		return errNoMCP
 	}
@@ -205,7 +203,7 @@ func (a *Admin) ServeMCP(ctx context.Context, in io.Reader, out io.Writer) error
 }
 
 // checkAuth checks the credentials of BasicAuth and BearerToken, when given.
-func (a *Admin) checkAuth() error {
+func (a *api) checkAuth() error {
 	c := a.opts.Auth
 
 	if a.basic {

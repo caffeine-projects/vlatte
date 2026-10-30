@@ -48,8 +48,7 @@ type Descriptor struct {
 	Key   string
 	Props DescriptorProps
 
-	root bool
-	err  error // why it can't be described, from DescribeFail
+	err error // why it can't be described, from DescribeFail
 }
 
 // NewDescriptor creates a descriptor with the given key and props. It panics with [ErrDescriptorKeyEmpty] if key is
@@ -149,7 +148,7 @@ func DescribeFail(key string, err error) Descriptor {
 
 // DescribeRoot creates the top-level descriptor of a description, with the key "root" and the given props.
 func DescribeRoot[T DescriptorPropsType](props T) Descriptor {
-	return Descriptor{Key: "root", Props: props, root: true}
+	return Descriptor{Key: "root", Props: props}
 }
 
 // Validate returns [ErrDescriptorKeyEmpty] if d has no key, the error [DescribeFail] gave it, or an error wrapping
@@ -179,11 +178,6 @@ func (d Descriptor) Validate() error {
 // Err returns why d can't be described, as DescribeFail gave it, or nil.
 func (d Descriptor) Err() error {
 	return d.err
-}
-
-// Root reports whether d was created by [DescribeRoot].
-func (d Descriptor) Root() bool {
-	return d.root
 }
 
 // IsMap reports whether d's Props is a map[string]any: d renders without its key, for [Descriptor.Merge].

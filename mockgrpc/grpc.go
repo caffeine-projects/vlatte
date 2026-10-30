@@ -288,7 +288,7 @@ func New(config ...Option) (*Server, error) {
 
 		app.events = adminapi.NewEvents()
 		app.scenarios.Notify(app.publishScenario)
-		api, err := conf.Admin.Serve(adminapi.Capabilities{
+		api, err := adminapi.Serve(conf.Admin, adminapi.Capabilities{
 			Kind:   string(Kind),
 			URL:    app.Addr,
 			Logger: app.logger,
