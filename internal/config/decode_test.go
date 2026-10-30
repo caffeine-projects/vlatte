@@ -104,6 +104,103 @@ func TestDecode_Errors(t *testing.T) {
 	}
 }
 
+func TestYAMLDocuments_EachDocumentKeepsItsDataModel(t *testing.T) {
+	data := []byte(`id: first
+n: 9.007199254740993e15
+when: 2024-01-01
+body: |
+  before
+  ---
+  after
+---
+id: second
+value: &v true
+copy: *v
+200: text
+`)
+	documents, err := YAMLDocuments(data)
+	require.NoError(t, err)
+	require.Len(t, documents, 2)
+	want := []map[string]any{
+		{"id": "first", "n": int64(9007199254740993), "when": "2024-01-01", "body": "before\n---\nafter\n"},
+		{"id": "second", "value": true, "copy": true, "200": "text"},
+	}
+	for i, document := range documents {
+		require.Equal(t, i+1, document.Number)
+		parsed, err := Parse(document.Data, "yaml")
+		require.NoError(t, err)
+		require.Equal(t, want[i], parsed)
+	}
+}
+
+func TestYAMLDocuments_EmptyDocumentsKeepTheFollowingNumbers(t *testing.T) {
+	documents, err := YAMLDocuments([]byte("---\n# empty\n---\nid: first\n---\n---\nid: second\n---\n"))
+	require.NoError(t, err)
+	require.Len(t, documents, 2)
+	require.Equal(t, 2, documents[0].Number)
+	require.Equal(t, 4, documents[1].Number)
+	first, err := Parse(documents[0].Data, "yaml")
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{"id": "first"}, first)
+	second, err := Parse(documents[1].Data, "yaml")
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{"id": "second"}, second)
+}
+
+func TestYAMLDocuments_EmptyStreamsHaveNoMocks(t *testing.T) {
+	for _, data := range []string{"", "# empty\n", "---\n# empty\n---\n...\n"} {
+		t.Run(data, func(t *testing.T) {
+			documents, err := YAMLDocuments([]byte(data))
+			require.NoError(t, err)
+			require.Nil(t, documents)
+		})
+	}
+}
+
+func TestYAMLDocuments_ExplicitValuesRemainForSchemaValidation(t *testing.T) {
+	for _, data := range []string{"null\n", "~\n", "!!null\n", "tea\n", "[tea]\n"} {
+		t.Run(data, func(t *testing.T) {
+			documents, err := YAMLDocuments([]byte(data))
+			require.NoError(t, err)
+			require.Equal(t, []YAMLDocument{{Number: 1, Data: []byte(data)}}, documents)
+		})
+	}
+}
+
+func TestYAMLDocuments_ASingleFirstDocumentKeepsItsOriginalDiagnostics(t *testing.T) {
+	data := []byte("# header\n\n---\nid: first\n\n# trailing\n")
+	documents, err := YAMLDocuments(data)
+	require.NoError(t, err)
+	require.Equal(t, []YAMLDocument{{Number: 1, Data: data}}, documents)
+}
+
+func TestYAMLDocuments_ALaterSyntaxErrorReturnsNoDocuments(t *testing.T) {
+	for _, data := range []string{"id: first\n---\nbad: [\n", "---\n---\nbad: [\n"} {
+		t.Run(data, func(t *testing.T) {
+			documents, err := YAMLDocuments([]byte(data))
+			require.ErrorContains(t, err, "yaml: document 2: yaml: line")
+			require.Nil(t, documents)
+		})
+	}
+}
+
+func TestYAMLDocuments_AnchorsBelongToTheirOwnDocument(t *testing.T) {
+	documents, err := YAMLDocuments([]byte("value: &v first\ncopy: *v\n---\nvalue: &v second\ncopy: *v\n"))
+	require.NoError(t, err)
+	require.Len(t, documents, 2)
+	for i, want := range []string{"first", "second"} {
+		parsed, err := Parse(documents[i].Data, "yaml")
+		require.NoError(t, err)
+		require.Equal(t, map[string]any{"value": want, "copy": want}, parsed)
+	}
+
+	documents, err = YAMLDocuments([]byte("value: &v first\n---\ncopy: *v\n"))
+	require.NoError(t, err)
+	require.Len(t, documents, 2)
+	_, err = Parse(documents[1].Data, "yaml")
+	require.ErrorContains(t, err, "unknown anchor 'v' referenced")
+}
+
 func TestPropDecode_FormatsAgree(t *testing.T) {
 	// C1: a value written as JSON and as YAML decodes back to itself in both formats.
 	rapid.Check(t, func(t *rapid.T) {

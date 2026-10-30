@@ -2,8 +2,8 @@
 
 Mocks can also live in YAML or JSON files (`.json`, `.yaml` or `.yml`).
 
-- **On start,** the server loads the files matching `testdata/vlatte/_mocks/*mock.yaml` and `testdata/vlatte/_mocks/*mock.yml`, and the [recordings](/recording/) in `testdata/vlatte/_mocks_recorded`, in name order: the folders of its [work directory](/run/configuration#work-directory). Change the patterns with `Setup().MockFilePatterns(...)`.
-- **To load one file,** use `m.MustMock(mockhttp.FromFile(path))`.
+- **On start,** the server loads the files matching `testdata/vlatte/_mocks/*mock.yaml` and `testdata/vlatte/_mocks/*mock.yml`, and the [recordings](/recording/) in `testdata/vlatte/_mocks_recorded`, in name order, then YAML document order: the folders of its [work directory](/run/configuration#work-directory). Change the patterns with `Setup().MockFilePatterns(...)`.
+- **To load a file with multiple mocks,** set `Setup().MockFilePatterns(path)`. To build one mock explicitly, use `m.MustMock(mockhttp.FromFile(path))`.
 - **`m.Reload()`** replaces the mocks of the files with what they hold now, in one step. When a file has problems, it returns them and the mocks stay as they were.
 
 ```yaml
@@ -27,6 +27,26 @@ response:
 ```
 
 and editors that use the YAML language server, such as VS Code with the YAML extension, complete and check it. A JSON mock file names it in a `"$schema"` key. See [Mock file schemas](/reference/schemas) for other editors.
+
+## Multiple mocks in a YAML file
+
+Separate mock definitions with `---`:
+
+```yaml
+id: first
+request: {method: GET, path: /first}
+response: {status: 201, body: first}
+---
+id: second
+request: {method: GET, path: /second}
+response: {status: 202, body: second}
+```
+
+The file loader reads and validates the complete file before installing its mocks. Mocks of equal priority match in file-name order, then document order. Each relative `body_file` starts at the YAML file's directory. A bad document or duplicate mock ID fails the load; a failed reload keeps the previous complete set. Syntax and schema errors in a file with multiple documents identify the file and document number.
+
+Empty documents are skipped. A file with only empty documents contributes no mocks, so emptying a file and reloading removes its previous mocks. Explicit `null`, scalar and list documents are invalid mock definitions. Anchors belong to their own document.
+
+`FromFile`, `FromBytes` and `DecodeMock` build one mock and reject multiple nonempty YAML documents. JSON files still hold one mock object. This feature does not merge server settings across YAML documents.
 
 ## Keys
 

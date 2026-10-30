@@ -16,6 +16,7 @@ import (
 var (
 	_ vlatte.Builder[*Mock, *Server] = (*fileBuilder)(nil)
 	_ vlatte.Builder[*Mock, *Server] = (*bytesBuilder)(nil)
+	_ vlatte.Builder[*Mock, *Server] = mockDoc{}
 )
 
 // MockFileFormats lists the formats of mock files, as file extensions without the dot.
@@ -37,18 +38,28 @@ type fileBuilder struct {
 //	  message: {message: hello ann}
 //
 // A relative body_file opens from the file's directory. When the file has problems, the error is a list of every one,
-// each with its key and a hint.
+// each with its key and a hint. A YAML stream must contain one nonempty mock document: use [ConfigBuilder.MockFiles]
+// to load multiple documents from a file.
 func FromFile(path string) vlatte.Builder[*Mock, *Server] {
 	return &fileBuilder{path: path}
 }
 
 // Build implements vlatte.Builder.
 func (b *fileBuilder) Build(app *Server) (*Mock, error) {
+	doc, err := b.read()
+	if err != nil {
+		return nil, err
+	}
+
+	return doc.build(app)
+}
+
+func (b *fileBuilder) read() (mockDoc, error) {
 	origin := "file " + b.path
 
 	format, ok := config.Format(filepath.Ext(b.path))
 	if !ok {
-		return nil, docProblems(config.Problem{
+		return mockDoc{}, docProblems(config.Problem{
 			Code: config.CodeUnsupportedFormat, Origin: origin,
 			Message: fmt.Sprintf("mock file %q is not JSON or YAML", b.path), Hint: "use a .json, .yaml or .yml file",
 		})
@@ -57,14 +68,14 @@ func (b *fileBuilder) Build(app *Server) (*Mock, error) {
 	data, err := os.ReadFile(b.path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return nil, docProblems(config.Problem{
+		return mockDoc{}, docProblems(config.Problem{
 			Code: config.CodeFileNotFound, Origin: origin, Message: fmt.Sprintf("mock file %q does not exist", b.path),
 		})
 	case err != nil:
-		return nil, docProblems(config.Problem{Code: config.CodeReadError, Origin: origin, Message: err.Error()})
+		return mockDoc{}, docProblems(config.Problem{Code: config.CodeReadError, Origin: origin, Message: err.Error()})
 	}
 
-	return mockDoc{origin: origin, source: b.path, format: format, dir: filepath.Dir(b.path), data: data}.build(app)
+	return mockDoc{origin: origin, source: b.path, format: format, dir: filepath.Dir(b.path), data: data}, nil
 }
 
 type bytesBuilder struct {
@@ -73,7 +84,7 @@ type bytesBuilder struct {
 }
 
 // FromBytes builds a mock from a JSON or YAML document, as FromFile does. format is json, yaml or yml. A relative
-// body_file opens from the working directory.
+// body_file opens from the working directory. Multiple nonempty YAML documents are rejected.
 func FromBytes(data []byte, format string) vlatte.Builder[*Mock, *Server] {
 	return &bytesBuilder{data: data, format: format}
 }
@@ -95,10 +106,15 @@ type mockDoc struct {
 	format string // json, yaml or yml
 	dir    string // where a relative body_file opens from; empty is the working directory
 	data   []byte
+	err    error
 }
 
-// build turns the document into a mock for app. Every failure is a *config.Error listing each problem.
-func (doc mockDoc) build(app *Server) (*Mock, error) {
+// Build implements [vlatte.Builder] for one parsed document or a file's read or parse error.
+func (doc mockDoc) Build(app *Server) (*Mock, error) {
+	if doc.err != nil {
+		return nil, doc.err
+	}
+
 	def := newMockDef(app.matchers())
 	def.dir = doc.dir
 
@@ -138,6 +154,54 @@ func (doc mockDoc) build(app *Server) (*Mock, error) {
 	}
 
 	return mock, nil
+}
+
+// build turns the document into a mock for app. Every failure is a *config.Error listing each problem.
+func (doc mockDoc) build(app *Server) (*Mock, error) {
+	docs, err := doc.documents()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(docs) > 1 {
+		return nil, docProblems(config.Problem{
+			Code: config.CodeParseError, Origin: doc.origin,
+			Message: fmt.Sprintf("expected one mock document, not %d", len(docs)),
+			Hint:    "use MockFiles to load multiple mock documents",
+		})
+	}
+
+	if len(docs) == 1 {
+		return docs[0].Build(app)
+	}
+
+	return doc.Build(app)
+}
+
+func (doc mockDoc) documents() ([]mockDoc, error) {
+	format, ok := config.Format(doc.format)
+	if !ok || format == "json" {
+		return []mockDoc{doc}, nil
+	}
+
+	doc.format = format
+	documents, err := config.YAMLDocuments(doc.data)
+	if err != nil {
+		return nil, docProblems(config.Problem{Code: config.CodeParseError, Origin: doc.origin, Message: err.Error()})
+	}
+
+	docs := make([]mockDoc, 0, len(documents))
+	for _, document := range documents {
+		part := doc
+		part.data = document.Data
+		if len(documents) != 1 || document.Number != 1 {
+			part.origin = fmt.Sprintf("%s document %d", doc.origin, document.Number)
+		}
+
+		docs = append(docs, part)
+	}
+
+	return docs, nil
 }
 
 // parseFailed reports whether the document couldn't be read at all, so checks between its keys would only add noise.

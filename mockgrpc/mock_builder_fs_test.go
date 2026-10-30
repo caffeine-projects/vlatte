@@ -149,3 +149,96 @@ func TestFromFile_AFileThatCantBeReadSaysWhy(t *testing.T) {
 func TestFromBytes_ServesScenarios(t *testing.T) {
 	scenariotest.Run(t, newScenarioServer(true))
 }
+
+func TestSingularMockBuilders_RejectMultipleYAMLDocuments(t *testing.T) {
+	dir := t.TempDir()
+	m := fileServer(t, Setup().InMemory())
+	for _, tc := range []struct {
+		name  string
+		build func([]byte) (*Mock, error)
+	}{
+		{"FromFile", func(data []byte) (*Mock, error) {
+			path := writeFile(t, dir, "greet.yaml", string(data))
+			return FromFile(path).Build(m)
+		}},
+		{"FromBytes", func(data []byte) (*Mock, error) {
+			return FromBytes(data, ".YML").Build(m)
+		}},
+		{"DecodeMock", func(data []byte) (*Mock, error) {
+			return DecodeMock(m, data, "yaml")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock, err := tc.build([]byte(`
+request: {method: Greetings}
+response: {message: {message: first}}
+---
+request: {method: Greetings}
+response: {message: {message: second}}
+`))
+			require.Nil(t, mock)
+			cfgErr, ok := errors.AsType[*config.Error](err)
+			require.True(t, ok, "%v", err)
+			require.Len(t, cfgErr.Problems, 1)
+			require.Equal(t, config.CodeParseError, cfgErr.Problems[0].Code)
+			require.Equal(t, "expected one mock document, not 2", cfgErr.Problems[0].Message)
+			require.Equal(t, "use MockFiles to load multiple mock documents", cfgErr.Problems[0].Hint)
+		})
+	}
+}
+
+func TestSingularMockBuilders_RejectMalformedLaterYAMLContent(t *testing.T) {
+	dir := t.TempDir()
+	m := fileServer(t, Setup().InMemory())
+	for _, tc := range []struct {
+		name  string
+		build func([]byte) (*Mock, error)
+	}{
+		{"FromFile", func(data []byte) (*Mock, error) {
+			path := writeFile(t, dir, "greet.yaml", string(data))
+			return FromFile(path).Build(m)
+		}},
+		{"FromBytes", func(data []byte) (*Mock, error) {
+			return FromBytes(data, "yaml").Build(m)
+		}},
+		{"DecodeMock", func(data []byte) (*Mock, error) {
+			return DecodeMock(m, data, "yaml")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock, err := tc.build([]byte("request: {method: Greetings}\nresponse: {}\n---\nrequest: ["))
+			require.Nil(t, mock)
+			cfgErr, ok := errors.AsType[*config.Error](err)
+			require.True(t, ok, "%v", err)
+			require.Len(t, cfgErr.Problems, 1)
+			require.Equal(t, config.CodeParseError, cfgErr.Problems[0].Code)
+			require.ErrorContains(t, err, "document 2")
+		})
+	}
+}
+
+func TestFromBytes_EmptyDocumentsDoNotMakeOneMockPlural(t *testing.T) {
+	m := fileServer(t, Setup().InMemory())
+	m.MustMock(FromBytes([]byte(`
+---
+# empty first document
+---
+request: {method: Greetings}
+response: {message: {message: hello}}
+---
+# empty last document
+`), "yaml"))
+
+	got, code := greetWith(t, pb.NewTestServiceClient(m.MustDial()), "hi")
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, "hello", got)
+}
+
+func TestFromBytes_ConcatenatedJSONObjectsRemainInvalid(t *testing.T) {
+	m := fileServer(t, Setup().InMemory())
+	_, err := m.Mock(FromBytes([]byte(`{"request":{"method":"Greetings"},"response":{}} {"response":{}}`), "json"))
+	cfgErr, ok := errors.AsType[*config.Error](err)
+	require.True(t, ok, "%v", err)
+	require.Len(t, cfgErr.Problems, 1)
+	require.Equal(t, config.CodeParseError, cfgErr.Problems[0].Code)
+}

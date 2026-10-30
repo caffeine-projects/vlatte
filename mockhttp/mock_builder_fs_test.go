@@ -1,14 +1,18 @@
 package mockhttp
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 )
 
@@ -125,4 +129,91 @@ func TestBuilderFs_InvalidSchemaValid(t *testing.T) {
 
 func TestFromBytes_ServesScenarios(t *testing.T) {
 	scenariotest.Run(t, newScenarioServer(true))
+}
+
+func TestSingularMockDocuments_RejectMultipleYAMLMocks(t *testing.T) {
+	data := []byte("request: {path: /first}\nresponse: {status: 200}\n---\nrequest: {path: /second}\nresponse: {status: 201}\n")
+	path := filepath.Join(t.TempDir(), "mocks.yaml")
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+	app := MustNew(Setup().Silent())
+	t.Cleanup(app.Close)
+
+	tests := []struct {
+		name    string
+		builder vlatte.Builder[*Mock, *Server]
+		origin  string
+	}{
+		{name: "file", builder: FromFile(path), origin: "file " + path},
+		{name: "bytes", builder: FromBytes(data, ".YAML"), origin: "bytes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock, err := tt.builder.Build(app)
+			require.Nil(t, mock)
+			cfgErr, ok := errors.AsType[*config.Error](err)
+			require.True(t, ok, "%v", err)
+			require.Equal(t, []config.Problem{{
+				Code: config.CodeParseError, Origin: tt.origin,
+				Message: "expected one mock document, not 2",
+				Hint:    "use MockFilePatterns to load multiple mock documents",
+			}}, cfgErr.Problems)
+		})
+	}
+
+	mock, err := DecodeMock(app, data, "yml")
+	require.Nil(t, mock)
+	cfgErr, ok := errors.AsType[*config.Error](err)
+	require.True(t, ok, "%v", err)
+	require.Equal(t, []config.Problem{{
+		Code: config.CodeParseError, Origin: "admin request",
+		Message: "expected one mock document, not 2",
+		Hint:    "use MockFilePatterns to load multiple mock documents",
+	}}, cfgErr.Problems)
+}
+
+func TestSingularMockDocuments_ValidateLaterYAMLSyntax(t *testing.T) {
+	data := []byte("request: {path: /first}\nresponse: {status: 200}\n---\nresponse: [")
+	path := filepath.Join(t.TempDir(), "mocks.yaml")
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+	app := MustNew(Setup().Silent())
+	t.Cleanup(app.Close)
+
+	for _, builder := range []vlatte.Builder[*Mock, *Server]{FromFile(path), FromBytes(data, "yaml")} {
+		mock, err := builder.Build(app)
+		require.Nil(t, mock)
+		cfgErr, ok := errors.AsType[*config.Error](err)
+		require.True(t, ok, "%v", err)
+		require.Len(t, cfgErr.Problems, 1)
+		require.Equal(t, config.CodeParseError, cfgErr.Problems[0].Code)
+		require.ErrorContains(t, err, "yaml: document 2:")
+	}
+
+	mock, err := DecodeMock(app, data, "yaml")
+	require.Nil(t, mock)
+	cfgErr, ok := errors.AsType[*config.Error](err)
+	require.True(t, ok, "%v", err)
+	require.Len(t, cfgErr.Problems, 1)
+	require.Equal(t, config.CodeParseError, cfgErr.Problems[0].Code)
+	require.ErrorContains(t, err, "yaml: document 2:")
+}
+
+func TestFromBytes_EmptyYAMLDocumentsDoNotCountAsMocks(t *testing.T) {
+	data := []byte("---\n# empty\n---\nid: only\nrequest: {path: /only}\nresponse: {status: 204}\n---\n")
+	app := MustNew(Setup().Silent())
+	t.Cleanup(app.Close)
+	mock, err := FromBytes(data, "yaml").Build(app)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, mock.Close()) })
+	require.Equal(t, "only", mock.ID())
+}
+
+func TestFromBytes_JSONRejectsTrailingDocuments(t *testing.T) {
+	app := MustNew(Setup().Silent())
+	t.Cleanup(app.Close)
+	mock, err := FromBytes([]byte(`{"request":{"path":"/first"},"response":{"status":200}} {"request":{"path":"/second"}}`), "json").Build(app)
+	require.Nil(t, mock)
+	cfgErr, ok := errors.AsType[*config.Error](err)
+	require.True(t, ok, "%v", err)
+	require.Len(t, cfgErr.Problems, 1)
+	require.Equal(t, config.CodeParseError, cfgErr.Problems[0].Code)
 }

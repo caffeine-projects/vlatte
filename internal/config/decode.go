@@ -2,7 +2,9 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"math"
 	"slices"
 	"strconv"
@@ -45,6 +47,54 @@ func Parse(data []byte, format string) (any, error) {
 	}
 
 	return decode(data, "."+f)
+}
+
+// YAMLDocument is one nonempty document of a YAML stream.
+type YAMLDocument struct {
+	// Number is its 1-based position in the stream, including empty documents.
+	Number int
+	// Data is a standalone YAML document. A sole first document keeps the original bytes, so its diagnostics keep
+	// their line numbers and formatting.
+	Data []byte
+}
+
+// YAMLDocuments reads the complete YAML stream before returning its nonempty documents, in order. Implicit empty
+// documents are skipped; explicit null, scalar and list values remain for the caller to validate. A failure names
+// its document number and returns no documents. Each result can be parsed independently with [Parse].
+func YAMLDocuments(data []byte) ([]YAMLDocument, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var documents []YAMLDocument
+	for number := 1; ; number++ {
+		var node yaml.Node
+		err := decoder.Decode(&node)
+		if errors.Is(err, io.EOF) {
+			if len(documents) == 1 && documents[0].Number == 1 {
+				documents[0].Data = data
+			}
+
+			return documents, nil
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("yaml: document %d: %w", number, err)
+		}
+
+		if len(node.Content) == 0 {
+			continue
+		}
+
+		root := node.Content[0]
+		if root.Kind == yaml.ScalarNode && root.ShortTag() == "!!null" && root.Value == "" && root.Style == 0 {
+			continue
+		}
+
+		encoded, err := yaml.Marshal(&node)
+		if err != nil {
+			return nil, fmt.Errorf("yaml: encoding document %d: %w", number, err)
+		}
+
+		documents = append(documents, YAMLDocument{Number: number, Data: encoded})
+	}
 }
 
 // decode parses data, a JSON or YAML document chosen by ext, into the data model of package value, one for both

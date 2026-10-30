@@ -96,7 +96,21 @@ func (l *fileLoader) loadLocked(app *Server, swap vlatte.Swap[*Mock]) error {
 
 	builders := make([]vlatte.Builder[*Mock, *Server], 0, len(files))
 	for _, file := range files {
-		builders = append(builders, FromFile(file))
+		doc, err := (&fileBuilder{path: file}).read()
+		if err != nil {
+			builders = append(builders, mockDoc{err: err})
+			continue
+		}
+
+		docs, err := doc.documents()
+		if err != nil {
+			builders = append(builders, mockDoc{err: err})
+			continue
+		}
+
+		for _, doc := range docs {
+			builders = append(builders, doc)
+		}
 	}
 
 	scope, err := app.RemockWith(context.Background(), l.scope, swap, builders...)
