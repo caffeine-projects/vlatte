@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/admin"
 	"github.com/caffeine-projects/vlatte/internal/config"
 	"github.com/caffeine-projects/vlatte/internal/httpx"
@@ -36,6 +37,7 @@ type settings struct {
 	grpcAdminDir  string
 
 	webhook *webhook.WebHook // the webhook listener the HTTP and gRPC servers share, if webhook.timeout is set
+	kvFile  config.Value     // kv.file, the CSV file of the key-value store the HTTP and gRPC servers share
 }
 
 // defaultSettings serve the admin API, over MCP too, and the gRPC server's own, which keep the mocks they add across
@@ -151,6 +153,13 @@ func settingsSchema() *config.Schema[settings] {
 
 				return err
 			},
+		},
+		config.Field[settings]{
+			Key: "kv.file", Kind: config.String,
+			Usage: "CSV file to fill the key-value store with, which templates of HTTP and gRPC mocks read as .KV: the " +
+				"header key,value, then a row for each key. Changes to the store stay in memory, never in the file. Empty " +
+				"starts the store empty.",
+			Set: func(s *settings, v config.Value) error { s.kvFile = v; return nil },
 		},
 		config.Field[settings]{
 			Key: "grpc.admin", Kind: config.Bool, Default: "true",
@@ -326,6 +335,22 @@ func (s settings) setupGRPC(cb *mockgrpc.ConfigBuilder, httpConf *mockhttp.Confi
 	}
 
 	return cb.AdminStore(mockgrpc.FileStore(dir)), nil
+}
+
+// newKV returns the key-value store of s: the CSV store of kv.file, or an empty memory store without one. The file
+// loads here, as the server starts, and not with the settings: the health check loads them too, and mustn't fail for
+// a file that changed since.
+func (s settings) newKV() (vlatte.KV, error) {
+	if s.kvFile.Str == "" {
+		return vlatte.NewMemoryKV(), nil
+	}
+
+	kv, err := vlatte.NewCSVKV(s.kvFile.Str)
+	if err != nil {
+		return nil, &config.Error{Problems: config.ProblemsOf(s.kvFile, err)}
+	}
+
+	return kv, nil
 }
 
 // newAdmin returns an admin API on addr, which serves MCP too unless s turns it off.

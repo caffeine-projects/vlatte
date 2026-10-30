@@ -407,6 +407,7 @@ var _schema = sync.OnceValue(func() *config.Schema[Config] {
 		{Key: "admin.tls.key", Kind: config.String, Hidden: true},
 		{Key: "mcp", Kind: config.Bool, Hidden: true},
 		{Key: "webhook.timeout", Kind: config.Duration, Hidden: true},
+		{Key: "kv.file", Kind: config.String, Hidden: true},
 		{
 			Key: "journal", Kind: config.Bool, Usage: "Keep a journal of the requests the server serves, of every outcome.",
 			Set: func(c *Config, v config.Value) error {

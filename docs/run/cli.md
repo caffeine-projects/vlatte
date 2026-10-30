@@ -11,6 +11,8 @@ Without `--addr`, it listens on a random port and prints the URL. Settings can a
 
 Mock files can send [webhooks](/webhooks/): the CLI registers the `webhook` listener, and `--webhook-timeout` bounds each request that sets no `timeout` of its own.
 
+Templates read the [key-value store](/templating/#key-value-store) as `.KV`: `--kv-file=kv.csv` fills it from a CSV file, for HTTP and gRPC mocks alike.
+
 It [records](/recording/) a service until it stops, and serves the recordings on the next run:
 
 ```sh
