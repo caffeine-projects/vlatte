@@ -327,6 +327,93 @@ func TestMultipart_AByteBodyLoadsBackFromItsDescription(t *testing.T) {
 	}
 }
 
+func TestMultipart_RepeatedHeaderConstraintsSurviveExport(t *testing.T) {
+	// Saving and loading a mock must preserve every constraint on a part header, including names in different cases.
+	for _, format := range []string{"json", "yaml"} {
+		t.Run(format, func(t *testing.T) {
+			for _, secondHeader := range []string{"X-Tag", "x-tag"} {
+				t.Run(secondHeader, func(t *testing.T) {
+					m := mockhttp.MustNew(mockhttp.Setup().Silent())
+					m.MustStart()
+					t.Cleanup(m.Close)
+
+					scope := m.MustMock(mockhttp.Postf("/upload").ID("upload").
+						FormFile("avatar", mockhttp.FileWith().
+							Header("X-Tag", match.HasPrefix("required-")).
+							Header(secondHeader, match.HasSuffix("-suffix"))).
+						Reply(mockhttp.OK()))
+
+					check := func(t *testing.T) {
+						tests := []struct {
+							value  string
+							status int
+						}{
+							{value: "required-value-suffix", status: http.StatusOK},
+							{value: "wrong-suffix", status: mockhttp.StatusNoMatch},
+							{value: "required-value", status: mockhttp.StatusNoMatch},
+						}
+
+						for _, tc := range tests {
+							t.Run(tc.value, func(t *testing.T) {
+								var body bytes.Buffer
+								w := multipart.NewWriter(&body)
+								part, err := w.CreatePart(textproto.MIMEHeader{
+									"Content-Disposition": {multipart.FileContentDisposition("avatar", "pic.png")},
+									"X-Tag":               {tc.value},
+								})
+								require.NoError(t, err)
+								_, err = part.Write([]byte("hello"))
+								require.NoError(t, err)
+								require.NoError(t, w.Close())
+
+								res, got := postBody(t, m.URL("/upload"), w.FormDataContentType(), body.Bytes())
+								require.Equal(t, tc.status, res.StatusCode, "%s", got)
+							})
+						}
+					}
+
+					t.Run("original", check)
+
+					doc, err := mockhttp.EncodeMock(scope.Mock("upload"), format)
+					require.NoError(t, err)
+					require.NoError(t, m.Unmock(t.Context(), scope))
+					_, err = m.Mock(mockhttp.FromBytes(doc, format))
+					require.NoError(t, err)
+
+					t.Run("reloaded", check)
+				})
+			}
+		})
+	}
+}
+
+func TestMultipart_RepeatedCustomHeaderMatchersRemainExportable(t *testing.T) {
+	// A custom matcher without a description keeps the existing anything fallback, even when its header is repeated.
+	for _, format := range []string{"json", "yaml"} {
+		t.Run(format, func(t *testing.T) {
+			m := mockhttp.MustNew(mockhttp.Setup().Silent())
+			m.MustStart()
+			t.Cleanup(m.Close)
+
+			custom := vlatte.MatcherFunc("custom", func(vlatte.MatcherArg) (bool, error) { return true, nil })
+			scope := m.MustMock(mockhttp.Postf("/upload").ID("upload").
+				FormFile("avatar", mockhttp.FileWith().
+					Header("Content-Type", custom).
+					Header("Content-Type", custom)).
+				Reply(mockhttp.OK()))
+
+			doc, err := mockhttp.EncodeMock(scope.Mock("upload"), format)
+			require.NoError(t, err)
+			_, err = m.Remock(t.Context(), scope, mockhttp.FromBytes(doc, format))
+			require.NoError(t, err)
+
+			contentType, body := upload(t, "pic.png", []byte("hello"))
+			res, got := postBody(t, m.URL("/upload"), contentType, body)
+			require.Equal(t, http.StatusOK, res.StatusCode, "%s", got)
+		})
+	}
+}
+
 func TestMultipart_StreamsItsParts(t *testing.T) {
 	// Decision 14, over real time: a part's delay is waited after the delimiter line that opens it, and what comes
 	// before is flushed first. So a client reads each part as it comes: none before its delay, and the first well

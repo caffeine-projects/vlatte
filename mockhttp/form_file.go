@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"net/http"
 	"os"
 	"slices"
 
@@ -170,9 +171,20 @@ func (m *fileMatcher) Describe() vlatte.Descriptor {
 	}
 
 	if len(m.pattern.header) > 0 {
-		header := make(map[string]any, len(m.pattern.header))
+		byName := make(map[string][]any, len(m.pattern.header))
 		for _, h := range m.pattern.header {
-			header[h.name] = describeMatcher(h.matcher)
+			name := http.CanonicalHeaderKey(h.name)
+			byName[name] = append(byName[name], describeMatcher(h.matcher))
+		}
+
+		header := make(map[string]any, len(byName))
+		for name, descriptions := range byName {
+			if len(descriptions) == 1 {
+				header[name] = descriptions[0]
+				continue
+			}
+
+			header[name] = vlatte.DescribeMultiArgs("all", descriptions)
 		}
 
 		props["header"] = header
