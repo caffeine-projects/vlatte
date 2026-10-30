@@ -249,3 +249,25 @@ func TestLogNormalDistribution_SamplesRespectDurationPrecisionAndBounds(t *testi
 		})
 	}
 }
+
+func TestDelays_ZeroOnlyDelaysDoNotCancelImmediateReplies(t *testing.T) {
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	expired, done := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer done()
+	for name, ctx := range map[string]context.Context{"canceled": canceled, "expired": expired} {
+		t.Run(name, func(t *testing.T) {
+			for name, d := range map[string]Delay{
+				"fixed":   Latency(0),
+				"uniform": UniformDistribution(0, 0),
+				"jitter":  Jitter(0, 0),
+			} {
+				t.Run(name, func(t *testing.T) {
+					n, err := d.Next(ctx)
+					require.NoError(t, err)
+					require.Equal(t, time.Duration(0), n)
+				})
+			}
+		})
+	}
+}

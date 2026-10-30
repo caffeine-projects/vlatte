@@ -10,12 +10,9 @@ import (
 	"github.com/caffeine-projects/vlatte/internal/httpx"
 )
 
-// Next evaluates d without waiting and rejects negative outputs, including those of custom implementations.
+// Next evaluates d without waiting and rejects negative outputs, including those of custom implementations. Nil
+// and successful zero samples need no wait and succeed even when ctx has ended. Positive samples honor cancellation.
 func Next(ctx context.Context, d vlatte.Delay) (time.Duration, error) {
-	if err := ctx.Err(); err != nil {
-		return 0, err
-	}
-
 	if d == nil {
 		return 0, nil
 	}
@@ -29,10 +26,19 @@ func Next(ctx context.Context, d vlatte.Delay) (time.Duration, error) {
 		return 0, fmt.Errorf("delay: expected a nonnegative duration, not %s: return 0 or a positive duration", n)
 	}
 
+	if n == 0 {
+		return 0, nil
+	}
+
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
 	return n, nil
 }
 
-// Wait evaluates d once and waits for its duration, unless the evaluation fails or ctx ends.
+// Wait evaluates d once and waits for a positive duration, unless the evaluation fails or ctx ends. Nil or a
+// successful zero duration returns immediately, even when ctx has ended.
 func Wait(ctx context.Context, d vlatte.Delay) error {
 	n, err := Next(ctx, d)
 	if err != nil {
@@ -40,7 +46,7 @@ func Wait(ctx context.Context, d vlatte.Delay) error {
 	}
 
 	if n == 0 {
-		return ctx.Err()
+		return nil
 	}
 
 	return httpx.Wait(ctx, n)

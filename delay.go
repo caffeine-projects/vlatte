@@ -21,8 +21,9 @@ var (
 var ErrDelayNotDescribed = errors.New("delay: a function cannot be described as a mock file")
 
 // Delay chooses a nonnegative duration without waiting for it. The caller waits with the same context and ignores
-// the duration on error. Implementations must support concurrent calls and honor cancellation. Describe describes
-// the configuration without sampling it, or returns a failed descriptor when no mock file can represent it.
+// the duration on error. A successful zero result needs no wait, even if the context has ended. Implementations must
+// support concurrent calls and honor cancellation. Describe describes the configuration without sampling it, or
+// returns a failed descriptor when no mock file can represent it.
 type Delay interface {
 	SelfDescriptive
 	Next(ctx context.Context) (time.Duration, error)
@@ -56,7 +57,8 @@ type latencyDelay struct {
 	latency time.Duration
 }
 
-// Latency returns a [Delay] of latency every time. It panics when latency is negative.
+// Latency returns a [Delay] of latency every time. Zero succeeds even when the context has ended. It panics when
+// latency is negative.
 func Latency(latency time.Duration) Delay {
 	if latency < 0 {
 		panic(fmt.Sprintf("delay: expected a nonnegative latency, not %s", latency))
@@ -66,6 +68,10 @@ func Latency(latency time.Duration) Delay {
 }
 
 func (d latencyDelay) Next(ctx context.Context) (time.Duration, error) {
+	if d.latency == 0 {
+		return 0, nil
+	}
+
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -83,7 +89,7 @@ type uniformDelay struct {
 }
 
 // UniformDistribution picks uniformly from lower to upper, both included, with nanosecond resolution. It panics
-// when either bound is negative or upper is below lower.
+// when either bound is negative or upper is below lower. Zero bounds succeed even when the context has ended.
 func UniformDistribution(lower, upper time.Duration) Delay {
 	if lower < 0 || upper < lower {
 		panic(fmt.Sprintf("delay: expected 0 <= lower <= upper, not lower %s and upper %s", lower, upper))
@@ -93,6 +99,10 @@ func UniformDistribution(lower, upper time.Duration) Delay {
 }
 
 func (d uniformDelay) Next(ctx context.Context) (time.Duration, error) {
+	if d.upper == 0 {
+		return 0, nil
+	}
+
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}

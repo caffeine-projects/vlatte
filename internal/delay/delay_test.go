@@ -62,9 +62,12 @@ func TestNext_NegativeCustomOutputsCannotBecomeImmediateReplies(t *testing.T) {
 	require.EqualError(t, err, "delay: expected a nonnegative duration, not -1ns: return 0 or a positive duration")
 }
 
-type describedDelay struct{ desc vlatte.Descriptor }
+type describedDelay struct {
+	desc     vlatte.Descriptor
+	duration time.Duration
+}
 
-func (d describedDelay) Next(context.Context) (time.Duration, error) { return time.Second, nil }
+func (d describedDelay) Next(context.Context) (time.Duration, error) { return d.duration, nil }
 func (d describedDelay) Describe() vlatte.Descriptor                 { return d.desc }
 
 func TestDoc_FixedShorthandDoesNotHideAnInvalidDescriptor(t *testing.T) {
@@ -84,8 +87,55 @@ func TestDoc_InvalidDescriptorKeyCannotBeHiddenByShorthand(t *testing.T) {
 func TestNext_CancellationTakesPrecedenceOverACustomDelay(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	// The custom implementation ignores cancellation: the shared evaluator must check it first.
-	n, err := delay.Next(ctx, describedDelay{})
+	// Even when a custom implementation ignores context, positive delays must observe cancellation.
+	n, err := delay.Next(ctx, describedDelay{duration: time.Second})
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, time.Duration(0), n)
+}
+
+func TestNext_ZeroDelaysDoNotCancelImmediateReplies(t *testing.T) {
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	expired, done := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer done()
+	for name, ctx := range map[string]context.Context{"canceled": canceled, "expired": expired} {
+		t.Run(name, func(t *testing.T) {
+			for name, d := range map[string]vlatte.Delay{
+				"nil":     nil,
+				"fixed":   vlatte.Latency(0),
+				"uniform": vlatte.UniformDistribution(0, 0),
+				"jitter":  vlatte.Jitter(0, 0),
+				"custom":  describedDelay{},
+			} {
+				t.Run(name, func(t *testing.T) {
+					n, err := delay.Next(ctx, d)
+					require.NoError(t, err)
+					require.Equal(t, time.Duration(0), n)
+					require.NoError(t, delay.Wait(ctx, d))
+				})
+			}
+		})
+	}
+}
+
+func TestWait_CancellationDuringAZeroSampleDoesNotDropTheReply(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	d := vlatte.DelayFunc(func(context.Context) (time.Duration, error) {
+		cancel()
+		return 0, nil
+	})
+	require.NoError(t, delay.Wait(ctx, d))
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+}
+
+func TestWait_AZeroDurationDoesNotHideASamplingError(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	cause := errors.New("test: no duration available")
+	d := vlatte.DelayFunc(func(context.Context) (time.Duration, error) {
+		cancel()
+		return 0, cause
+	})
+	require.ErrorIs(t, delay.Wait(ctx, d), cause)
 }
