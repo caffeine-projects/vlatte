@@ -7,7 +7,7 @@ vlatte is an API mocking framework at `github.com/caffeine-projects/vlatte`. The
 - In Go tests, `mockhttp` and `mockgrpc` start real HTTP and gRPC servers. A test adds mocks to a server and sends it requests through the code under test. The library requires Go 1.27 or later.
 - The `vlatte` CLI, a binary or a Docker image, serves HTTP and gRPC mocks from YAML or JSON mock files for applications in any language, records a real service and plays it back, and takes new mocks over an admin API. Running the release binary or image needs no Go installation.
 
-These pages document the `main` branch, including features added after `v0.1.0-rc.1`. To match the examples, install the Go library or CLI from `@main`, or build the Docker image from the same source. Published archives and images describe their own version and may not contain every feature here. See [Installation]({site}getting-started/installation.md).
+The installation commands and Docker examples use `v1.0.0`. Pin that version of the Go library, CLI or Docker image to match the examples. See [Installation]({site}getting-started/installation.md).
 
 A mock is matchers, which say which requests it answers, and a reply, which says how it answers. The matchers, from the `match` package, are the same for both protocols. Everything a mock file says, Go can say too. A request no mock matches gets HTTP `418` with a `VLatte-Error` header, or gRPC `NotFound`, and a list of the mocks that came closest.
 
