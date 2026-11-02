@@ -87,6 +87,45 @@ response:
 
 A name the request doesn't have is an empty list, which `[not, present]` matches, and a header sent empty isn't. A header line such as `a, b` is one value.
 
+## Content negotiation
+
+An operation that answers in several media types takes a mock per media type. `accept` (`match.Accept` in Go) on the `Accept` header matches when its media type is the one of the offers the client prefers: the offer the heaviest range takes, the first offer on a tie, and the first offer when the request has no `Accept`. A range with `q=0` refuses its media types, and media types ignore case and parameters. Give each mock the same offers, so the client's q-values pick the mock, not the mocks' order; the media type must be one of the offers. `notacceptable` (`match.NotAcceptable`) matches a request whose `Accept` takes none of the offers, for a 406 mock. Match them under `headers`, which reads every `Accept` line a request sends:
+
+```yaml
+id: pets.json
+request:
+  method: GET
+  path: /pets
+  headers:
+    Accept: [accept, application/json, [application/json, application/xml]]
+response:
+  status: 200
+  header:
+    Content-Type: application/json
+  body: '[]'
+---
+id: pets.xml
+request:
+  method: GET
+  path: /pets
+  headers:
+    Accept: [accept, application/xml, [application/json, application/xml]]
+response:
+  status: 200
+  header:
+    Content-Type: application/xml
+  body: <pets/>
+---
+id: pets.406
+request:
+  method: GET
+  path: /pets
+  headers:
+    Accept: [notacceptable, [application/json, application/xml]]
+response:
+  status: 406
+```
+
 ## More of the request
 
 - `cookie` matches cookies by name, as `Cookie` does; a cookie the request doesn't have is null, which no text matches.

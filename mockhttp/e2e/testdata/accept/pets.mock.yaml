@@ -1,0 +1,34 @@
+id: pets.json
+request:
+  method: GET
+  path: /pets
+  headers:
+    Accept: [accept, application/json, [application/json, application/xml]]
+response:
+  status: 200
+  header:
+    Content-Type: application/json
+  body: '[]'
+---
+id: pets.xml
+request:
+  method: GET
+  path: /pets
+  headers:
+    Accept: [accept, application/xml, [application/json, application/xml]]
+response:
+  status: 200
+  header:
+    Content-Type: application/xml
+  body: <pets/>
+---
+id: pets.406
+priority: 1
+request:
+  method: GET
+  path: /pets
+  headers:
+    Accept: [notacceptable, [application/json, application/xml]]
+response:
+  status: 406
+  body: 'expected one of: application/json, application/xml'

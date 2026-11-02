@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"mime"
 	"net/url"
 	"regexp"
 	"runtime"
@@ -32,6 +33,7 @@ import (
 )
 
 const (
+	_mAccept                  = "accept"
 	_mAfter                   = "after"
 	_mAll                     = "all"
 	_mAny                     = "any"
@@ -80,6 +82,7 @@ const (
 	_mLessThanOrEqual         = "lesseq"
 	_mLessThanOrEqualAlias    = "lte"
 	_mNil                     = "nil"
+	_mNotAcceptable           = "notacceptable"
 	_mRegex                   = "regex"
 	_mRegexAlias              = "regexp" // the name match.RegExpr describes itself with
 	_mRequestURI              = "requesturi"
@@ -291,6 +294,9 @@ func newBuiltins() map[string]builtin {
 		_mSplit:    spec.split,
 
 		_mSignedJWT: spec.signedJWT,
+
+		_mAccept:        spec.accept,
+		_mNotAcceptable: spec.notAcceptable,
 
 		_mBoth:   pair(match.Both),
 		_mEither: pair(match.Either),
@@ -931,6 +937,80 @@ func (s spec) split() (vlatte.Matcher, error) {
 	}
 
 	return match.Split(separator, m), nil
+}
+
+func (s spec) accept() (vlatte.Matcher, error) {
+	if err := s.arity(2); err != nil {
+		return nil, err
+	}
+
+	mediaType, err := s.mediaType(s.args[0])
+	if err != nil {
+		return nil, err
+	}
+
+	offers, err := s.offers(s.args[1])
+	if err != nil {
+		return nil, err
+	}
+
+	if !slices.ContainsFunc(offers, func(offer string) bool { return strings.EqualFold(offer, mediaType) }) {
+		return nil, fmt.Errorf("%s takes a media type among its offers, not %q", s.name, mediaType)
+	}
+
+	return match.Accept(mediaType, offers...), nil
+}
+
+func (s spec) notAcceptable() (vlatte.Matcher, error) {
+	if err := s.arity(1); err != nil {
+		return nil, err
+	}
+
+	offers, err := s.offers(s.args[0])
+	if err != nil {
+		return nil, err
+	}
+
+	return match.NotAcceptable(offers...), nil
+}
+
+// offers reads arg as the media types an operation offers: a list of one or more.
+func (s spec) offers(arg any) ([]string, error) {
+	list, ok := arg.([]any)
+	if !ok {
+		return nil, s.takes("a list of the media types offered", arg, "")
+	}
+
+	if len(list) == 0 {
+		return nil, fmt.Errorf("%s takes 1 media type or more, not 0", s.name)
+	}
+
+	out := make([]string, 0, len(list))
+
+	for _, item := range list {
+		mediaType, err := s.mediaType(item)
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, mediaType)
+	}
+
+	return out, nil
+}
+
+// mediaType reads arg as a media type, such as application/json.
+func (s spec) mediaType(arg any) (string, error) {
+	mediaType, ok := arg.(string)
+	if !ok {
+		return "", s.takes("media types such as application/json", arg, "")
+	}
+
+	if _, _, err := mime.ParseMediaType(mediaType); err != nil || !strings.Contains(mediaType, "/") {
+		return "", fmt.Errorf("%s takes media types such as application/json, not %q", s.name, mediaType)
+	}
+
+	return mediaType, nil
 }
 
 // matchers reads the arguments as matchers: each argument is one, or the only argument is a list of them.
