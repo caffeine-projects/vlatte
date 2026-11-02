@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json/v2"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -101,6 +102,27 @@ func TestSchema_ValuesValidateAgainstTheirSchema(t *testing.T) {
 		{name: "optional items no value satisfies", schema: `{"type": "array", "items": false}`},
 		{name: "a property a pattern constrains too", schema: `{"type": "object", "required": ["x1"], "properties": {"x1": {"type": "string"}}, "patternProperties": {"^x": {"maxLength": 2}}}`},
 		{name: "a required property of a pattern", schema: `{"type": "object", "required": ["x1"], "patternProperties": {"^x": {"type": "integer"}}, "additionalProperties": false}`},
+		{name: "a schema that refers to its root", schema: `{"type": "object", "properties": {"child": {"$ref": "#"}}}`},
+		{name: "a ref to an item of a list", schema: `{"type": "array", "prefixItems": [{"type": "integer"}, {"$ref": "#/prefixItems/0"}], "minItems": 2, "maxItems": 2}`},
+		{name: "optional items no value of the bounds satisfies", schema: `{"type": "array", "items": {"type": "integer", "minimum": 5, "maximum": 1}}`},
+		{name: "allOf maximums", schema: `{"allOf": [{"type": "integer", "maximum": 10}, {"maximum": 5}]}`},
+		{name: "allOf prefix items", schema: `{"type": "array", "minItems": 2, "maxItems": 2, "allOf": [{"prefixItems": [{"type": "integer"}]}, {"prefixItems": [{"minimum": 3, "maximum": 4}, {"type": "boolean"}]}]}`},
+		{name: "allOf unique items", schema: `{"type": "array", "maxItems": 3, "allOf": [{"uniqueItems": true, "items": {"enum": [1, 2, 3]}}, {"uniqueItems": false}]}`},
+		{name: "allOf items one of which is true", schema: `{"type": "array", "allOf": [{"items": {"type": "integer"}}, {"items": true}]}`},
+		{name: "allOf type lists that share two types", schema: `{"allOf": [{"type": ["string", "null"]}, {"type": ["string", "null", "integer"]}]}`},
+		{name: "allOf of a closed object and its own property", schema: `{"allOf": [
+			{"type": "object", "required": ["a"], "properties": {"a": {"type": "string"}}, "additionalProperties": false},
+			{"properties": {"a": {"maxLength": 3}}}]}`},
+		{name: "unique items of objects", schema: `{"type": "array", "uniqueItems": true, "minItems": 2, "maxItems": 3, "items": {"enum": [{"a": 1}, {"a": 2}, {"b": 1}, {"a": 1, "b": 2}]}}`},
+		{name: "unique items of arrays", schema: `{"type": "array", "uniqueItems": true, "minItems": 2, "maxItems": 3, "items": {"enum": [[1], [1, 2], [2], "x"]}}`},
+		{name: "allOf enums of objects", schema: `{"allOf": [{"enum": [{"a": 1}, [1]]}, {"enum": [{"a": 1}]}]}`},
+		{name: "a type list of null", schema: `{"type": ["null"]}`},
+		{name: "items without a type", schema: `{"minItems": 1, "items": {"type": "integer"}}`},
+		{name: "a minimum without a type", schema: `{"minimum": 3}`},
+		{name: "a known name shorter than minLength", schema: `{"type": "object", "required": ["city"], "properties": {"city": {"type": "string", "minLength": 40}}}`},
+		{name: "minProperties past a declared property1", schema: `{"type": "object", "minProperties": 2, "required": ["property1"], "properties": {"property1": {"type": "integer"}}}`},
+		{name: "optional properties past maxProperties", schema: `{"type": "object", "maxProperties": 1, "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}, "c": {"type": "integer"}}}`},
+		{name: "exclusive bounds a few doubles apart", schema: `{"type": "number", "exclusiveMinimum": 1, "exclusiveMaximum": 1.0000000000000009}`},
 	}
 
 	for _, tt := range tests {
@@ -192,6 +214,15 @@ func TestSchema_FailsWithErrUnsatisfiableWhenNoValueFits(t *testing.T) {
 		{name: "allOf of types that share no value", schema: `{"allOf": [{"type": "string"}, {"type": "integer"}]}`, want: `at the root: allOf: no type is both of ["string"] and ["integer"]`},
 		{name: "allOf of enums that share no value", schema: `{"allOf": [{"enum": ["a"]}, {"enum": ["b"]}]}`, want: "at the root: allOf: no value is in both enums"},
 		{name: "allOf of different consts", schema: `{"allOf": [{"const": 1}, {"const": 2}]}`, want: "at the root: allOf: two consts"},
+		{name: "minProperties past what additionalProperties allows", schema: `{"type": "object", "minProperties": 2, "properties": {"a": {"type": "integer"}}, "additionalProperties": false}`, want: "at the root: expected 2 properties, not 1"},
+		{name: "minProperties of additionalProperties no value satisfies", schema: `{"type": "object", "minProperties": 1, "additionalProperties": {"type": "integer", "minimum": 3, "maximum": 1}}`, want: `at "/property1": minimum 3 is above maximum 1`},
+		{name: "required properties past maxProperties", schema: `{"type": "object", "required": ["a", "b"], "maxProperties": 1}`, want: "at the root: 2 required properties exceed maxProperties 1"},
+		{name: "a required property additionalProperties refuses", schema: `{"type": "object", "required": ["x"], "additionalProperties": {"type": "integer", "minimum": 3, "maximum": 1}}`, want: `at "/x": minimum 3 is above maximum 1`},
+		{name: "an item before minItems no value satisfies", schema: `{"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 5, "maximum": 1}}`, want: `at "/0": minimum 5 is above maximum 1`},
+		{name: "a multiple past int64", schema: `{"type": "integer", "multipleOf": 1e300}`, want: "at the root: no integer is a multiple of 1e+300"},
+		{name: "no number between bounds that meet", schema: `{"type": "number", "minimum": 1, "exclusiveMaximum": 1}`, want: "at the root: no number between 1 and 1, exclusive"},
+		{name: "no decimal multiple within the bounds", schema: `{"type": "number", "multipleOf": 0.7, "minimum": 0.1, "maximum": 0.6}`, want: "at the root: no multiple of 0.7 between 0.1 and 0.6"},
+		{name: "number bounds that cross", schema: `{"type": "number", "minimum": 5, "maximum": 1}`, want: "at the root: minimum 5 is above maximum 1"},
 	}
 
 	for _, tt := range tests {
@@ -217,6 +248,14 @@ func TestSchema_FailsWithErrInvalidForWhatIsNotASchema(t *testing.T) {
 		{name: "a negative minItems", schema: map[string]any{"type": "array", "minItems": -5}, want: "at the root: minItems must be a whole number from 0, not -5"},
 		{name: "a maxProperties that isn't whole", schema: map[string]any{"type": "object", "maxProperties": 1.5}, want: "at the root: maxProperties must be a whole number from 0, not 1.5"},
 		{name: "a pattern that doesn't compile", schema: map[string]any{"type": "string", "pattern": "(unclosed"}, want: "at the root: pattern \"(unclosed\": compiling: error parsing regexp: missing closing ): `(unclosed`"},
+		{name: "a number in an allOf", schema: map[string]any{"allOf": []any{3}}, want: "at the root: expected a schema object or boolean, not int"},
+		{name: "a $ref to a number", schema: map[string]any{"$defs": map[string]any{"a": 3}, "$ref": "#/$defs/a"}, want: "at the root: expected a schema object or boolean, not int"},
+		{name: "patternProperties that don't compile", schema: map[string]any{"type": "object", "properties": map[string]any{"a": true}, "patternProperties": map[string]any{"(": true}}, want: "at the root: patternProperties \"(\": compiling: error parsing regexp: missing closing ): `(`"},
+		{name: "patternProperties of a required property that don't compile", schema: map[string]any{"type": "object", "required": []any{"a"}, "patternProperties": map[string]any{"(": true}}, want: "at the root: patternProperties \"(\": compiling: error parsing regexp: missing closing ): `(`"},
+		{name: "a maxItems that isn't whole", schema: map[string]any{"type": "array", "maxItems": 1.5}, want: "at the root: maxItems must be a whole number from 0, not 1.5"},
+		{name: "a negative maxLength", schema: map[string]any{"type": "string", "maxLength": -1}, want: "at the root: maxLength must be a whole number from 0, not -1"},
+		{name: "a negative minProperties", schema: map[string]any{"type": "object", "minProperties": -1}, want: "at the root: minProperties must be a whole number from 0, not -1"},
+		{name: "null as a schema", schema: map[string]any{"properties": map[string]any{"a": nil}}, want: `at "/a": expected a schema object or boolean, not <nil>`},
 	}
 
 	for _, tt := range tests {
@@ -225,6 +264,52 @@ func TestSchema_FailsWithErrInvalidForWhatIsNotASchema(t *testing.T) {
 			require.ErrorIs(t, err, fakefy.ErrInvalid)
 			require.EqualError(t, err, "fakefy: invalid schema: "+tt.want)
 		})
+	}
+}
+
+func TestSchema_FailsWhenNoValueValidates(t *testing.T) {
+	// A keyword the generator doesn't read, such as not, still holds: a value that breaks it is never returned.
+	_, doc := compile(t, `{"type": "string", "not": {"type": "string"}}`)
+
+	_, err := fakefy.New(fakefy.WithSeed(1)).Schema(doc)
+	require.ErrorIs(t, err, fakefy.ErrUnsatisfiable)
+	require.ErrorContains(t, err, "fakefy: no value satisfies the schema: at the root: no value of 20 validates: ")
+}
+
+func TestSchema_FailsOnAOneOfOfNoSchemas(t *testing.T) {
+	_, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"oneOf": []any{}})
+	require.ErrorIs(t, err, fakefy.ErrUnsatisfiable)
+	require.EqualError(t, err, "fakefy: no value satisfies the schema: at the root: oneOf has no schemas")
+}
+
+func TestSchema_ARefChainEnds(t *testing.T) {
+	// $refs that only name each other never reach a schema: the generator stops rather than follow them forever.
+	defs := make(map[string]any)
+	for i := range 40 {
+		defs[fmt.Sprintf("a%d", i)] = map[string]any{"$ref": fmt.Sprintf("#/$defs/a%d", i+1)}
+	}
+
+	_, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"$defs": defs, "$ref": "#/$defs/a0"})
+	require.ErrorIs(t, err, fakefy.ErrUnsatisfiable)
+	require.EqualError(t, err, "fakefy: no value satisfies the schema: at the root: $refs chain past 32 schemas")
+}
+
+func TestSchema_ASchemaThatIsNotJSONStillMakesValues(t *testing.T) {
+	// A Go caller's schema can hold what JSON can't, such as an infinite number in an extension keyword: the
+	// validator can't read it, so the values go unchecked rather than fail.
+	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"type": "integer", "minimum": 3, "maximum": 3, "x-limit": math.Inf(1)})
+	require.NoError(t, err)
+	require.Equal(t, int64(3), v)
+}
+
+func TestSchema_AnAllOfBoundThatIsNotANumberIsIgnored(t *testing.T) {
+	for _, all := range [][]any{
+		{map[string]any{"type": "integer", "minimum": "5", "maximum": 7}, map[string]any{"minimum": 7}},
+		{map[string]any{"type": "integer", "minimum": 7, "maximum": 7}, map[string]any{"minimum": "5"}},
+	} {
+		v, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"allOf": all})
+		require.NoError(t, err)
+		require.Equal(t, int64(7), v)
 	}
 }
 
@@ -275,10 +360,49 @@ func TestSchema_NumbersOfTheSchemaComeBackAsDecodedJSON(t *testing.T) {
 	require.Equal(t, map[string]any{"a": int64(3), "b": int64(7)}, v)
 }
 
+func TestSchema_GoNumbersOfTheSchemaComeBackAsDecodedJSON(t *testing.T) {
+	// A Go caller writes schemas with any number type: values come back as int64 or float64 all the same, and bounds
+	// of any type hold.
+	tests := []struct {
+		name string
+		n    any
+		want any
+	}{
+		{name: "int", n: 3, want: int64(3)},
+		{name: "int8", n: int8(3), want: int64(3)},
+		{name: "int16", n: int16(3), want: int64(3)},
+		{name: "int32", n: int32(3), want: int64(3)},
+		{name: "int64", n: int64(3), want: int64(3)},
+		{name: "uint", n: uint(3), want: int64(3)},
+		{name: "uint8", n: uint8(3), want: int64(3)},
+		{name: "uint16", n: uint16(3), want: int64(3)},
+		{name: "uint32", n: uint32(3), want: int64(3)},
+		{name: "uint64", n: uint64(3), want: int64(3)},
+		{name: "a uint64 past int64", n: uint64(math.MaxUint64), want: float64(math.MaxUint64)},
+		{name: "float32", n: float32(2.5), want: 2.5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"type": "number", "example": tt.n})
+			require.NoError(t, err)
+			require.Equal(t, tt.want, v)
+		})
+	}
+
+	for _, n := range []any{3, int8(3), int16(3), int32(3), uint(3), uint8(3), uint16(3), uint32(3), uint64(3), float32(3)} {
+		t.Run(fmt.Sprintf("bounds of %T", n), func(t *testing.T) {
+			v, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"type": "number", "minimum": n, "maximum": n})
+			require.NoError(t, err)
+			require.Equal(t, float64(3), v)
+		})
+	}
+}
+
 func TestSchema_FailsWithErrUnresolvedForARefOutsideTheDocument(t *testing.T) {
-	for _, ref := range []string{"#/$defs/Missing", "other.json#/$defs/Pet", "#/properties/0"} {
+	for _, ref := range []string{"#/$defs/Missing", "other.json#/$defs/Pet", "#/properties/0", "#/%zz", "#anchor", "#/allOf/9", "#/allOf/x", "#/type/x"} {
 		t.Run(ref, func(t *testing.T) {
-			_, err := fakefy.New().Schema(map[string]any{"$ref": ref, "properties": make(map[string]any)})
+			_, err := fakefy.New().Schema(map[string]any{"$ref": ref, "properties": make(map[string]any), "allOf": []any{true}, "type": "object"})
 			require.ErrorIs(t, err, fakefy.ErrUnresolved)
 			require.ErrorContains(t, err, fmt.Sprintf("fakefy: unresolved $ref: at the root: %q: ", ref))
 		})
@@ -333,6 +457,27 @@ func TestSchema_TheDiscriminatorKeepsAValueTheBranchFixes(t *testing.T) {
 	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(doc)
 	require.NoError(t, err)
 	require.Equal(t, map[string]any{"kind": "dog"}, v)
+}
+
+func TestSchema_TheDiscriminatorTagsABranchThatDoesNotDeclareIt(t *testing.T) {
+	_, doc := compile(t, `{
+		"$defs": {"Dog": {"type": "object", "required": ["bark"], "properties": {"bark": {"const": true}}}},
+		"oneOf": [{"$ref": "#/$defs/Dog"}], "discriminator": {"propertyName": "kind"}}`)
+
+	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(doc)
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{"bark": true, "kind": "Dog"}, v)
+}
+
+func TestSchema_TheDiscriminatorLeavesAnInlineBranchAsMade(t *testing.T) {
+	// Only a $ref, or the mapping, names a branch: an inline one has no name to tag the value with.
+	_, doc := compile(t, `{
+		"oneOf": [{"type": "object", "required": ["kind"], "properties": {"kind": {"type": "string", "example": "x"}}}],
+		"discriminator": {"propertyName": "kind"}}`)
+
+	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(doc)
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{"kind": "x"}, v)
 }
 
 func TestSchema_AValueChangedAfterLeavesTheSchemaAsItWas(t *testing.T) {

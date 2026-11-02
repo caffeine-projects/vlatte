@@ -23,11 +23,8 @@ var errNoMatch = errors.New("no string matches it")
 // strings the first of res matches, and keeps the first the others match too. JSON Schema patterns search the string,
 // so a string a whole pattern matches does.
 func (f *Faker) pattern(res []*regexp.Regexp, lo, hi int, bounded bool) (string, error) {
-	tree, err := syntax.Parse(res[0].String(), syntax.Perl)
-	if err != nil {
-		return "", fmt.Errorf("parsing: %w", err)
-	}
-
+	// res[0] compiled, so it parses.
+	tree, _ := syntax.Parse(res[0].String(), syntax.Perl)
 	tree = tree.Simplify()
 
 	for range _maxTries {
@@ -74,11 +71,10 @@ func matchAll(res []*regexp.Regexp, s string) bool {
 // more than their minimum.
 func (f *Faker) regexp(re *syntax.Regexp, b *strings.Builder, rest, target int) error {
 	switch re.Op {
-	case syntax.OpNoMatch:
-		return errNoMatch
 	case syntax.OpLiteral:
 		b.WriteString(string(re.Rune))
-	case syntax.OpCharClass:
+	case syntax.OpCharClass, syntax.OpNoMatch:
+		// A class with no ranges, as OpNoMatch has, fails.
 		r, err := f.class(re.Rune)
 		if err != nil {
 			return err
@@ -163,7 +159,7 @@ func (f *Faker) repeat(re *syntax.Regexp, b *strings.Builder, rest, target int) 
 	return nil
 }
 
-// minLen returns the fewest runes a string re matches has.
+// minLen returns the fewest runes a string re, simplified, matches has: Simplify writes {n,m} repeats out.
 func minLen(re *syntax.Regexp) int {
 	switch re.Op {
 	case syntax.OpLiteral:
@@ -172,8 +168,6 @@ func minLen(re *syntax.Regexp) int {
 		return 1
 	case syntax.OpCapture, syntax.OpPlus:
 		return minLen(re.Sub[0])
-	case syntax.OpRepeat:
-		return re.Min * minLen(re.Sub[0])
 	case syntax.OpConcat:
 		n := 0
 		for _, sub := range re.Sub {

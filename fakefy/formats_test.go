@@ -13,7 +13,7 @@ func TestSchema_FormatsMakeStringsTheValidatorAccepts(t *testing.T) {
 	formats := []string{
 		"date-time", "date", "time", "duration", "email", "idn-email", "hostname", "idn-hostname", "ipv4", "ipv6",
 		"uri", "iri", "uri-reference", "iri-reference", "uri-template", "json-pointer", "relative-json-pointer",
-		"uuid", "regex",
+		"uuid", "regex", "password",
 	}
 
 	for _, format := range formats {

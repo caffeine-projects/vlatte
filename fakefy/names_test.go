@@ -1,6 +1,7 @@
 package fakefy_test
 
 import (
+	"net"
 	"net/mail"
 	"net/url"
 	"regexp"
@@ -60,6 +61,50 @@ func TestField_TheNameMakesAStringThatLooksLikeIt(t *testing.T) {
 		{names: []string{"description", "bio"}, check: func(t *testing.T, v string) {
 			require.Regexp(t, `^[A-Z][a-z]+( [a-z]+){4,}\.$`, v)
 		}},
+		{names: []string{"lastName", "surname"}, check: func(t *testing.T, v string) {
+			require.Regexp(t, `^[A-Z][a-z]+$`, v)
+		}},
+		{names: []string{"username", "login"}, check: func(t *testing.T, v string) {
+			require.Regexp(t, `^[a-z]+\d\d$`, v)
+		}},
+		{names: []string{"password"}, check: func(t *testing.T, v string) {
+			require.Regexp(t, `^[A-Za-z0-9]{12}$`, v)
+		}},
+		{names: []string{"apiKey", "token"}, check: func(t *testing.T, v string) {
+			require.Regexp(t, `^[A-Za-z0-9]{32}$`, v)
+		}},
+		{names: []string{"city", "country"}, check: func(t *testing.T, v string) {
+			require.Regexp(t, `^[A-Z][a-z]+( [A-Z][a-z]+)?$`, v)
+		}},
+		{names: []string{"countryCode"}, check: func(t *testing.T, v string) {
+			require.Regexp(t, `^[A-Z]{2}$`, v)
+		}},
+		{names: []string{"street", "address"}, check: func(t *testing.T, v string) {
+			require.Regexp(t, `^\d{1,3} [A-Z][a-z]+ [A-Z][a-z]+$`, v)
+		}},
+		{names: []string{"title", "subject"}, check: func(t *testing.T, v string) {
+			require.Regexp(t, `^[A-Z][a-z]+( [a-z]+){1,2}$`, v)
+		}},
+		{names: []string{"company"}, check: func(t *testing.T, v string) {
+			require.Regexp(t, `^[A-Z][a-z]+ [A-Z][a-z]+\.?$`, v)
+		}},
+		{names: []string{"color"}, check: func(t *testing.T, v string) {
+			require.Regexp(t, `^[a-z]+$`, v)
+		}},
+		{names: []string{"locale", "language"}, check: func(t *testing.T, v string) {
+			require.Equal(t, "en-US", v)
+		}},
+		{names: []string{"ipAddress"}, check: func(t *testing.T, v string) {
+			ip := net.ParseIP(v)
+			require.NotNil(t, ip)
+			require.NotNil(t, ip.To4())
+		}},
+		{names: []string{"hostname", "domain"}, check: func(t *testing.T, v string) {
+			require.Regexp(t, `^[a-z]+(\.[a-z]+)+$`, v)
+		}},
+		{names: []string{"slug"}, check: func(t *testing.T, v string) {
+			require.Regexp(t, `^[a-z]+-[a-z]+$`, v)
+		}},
 	}
 
 	for _, tt := range tests {
@@ -99,6 +144,16 @@ func TestField_TheNamePicksTheRangeOfANumberWithoutBounds(t *testing.T) {
 		{name: "year", schema: map[string]any{"type": "integer"}, lo: 2000, hi: 2026},
 		{name: "latitude", schema: map[string]any{"type": "number"}, lo: -90, hi: 90},
 		{name: "rating", schema: map[string]any{"type": "number"}, lo: 1, hi: 5},
+		{name: "month", schema: map[string]any{"type": "integer"}, lo: 1, hi: 12},
+		{name: "day", schema: map[string]any{"type": "integer"}, lo: 1, hi: 28},
+		{name: "hour", schema: map[string]any{"type": "integer"}, lo: 0, hi: 23},
+		{name: "minute", schema: map[string]any{"type": "integer"}, lo: 0, hi: 59},
+		{name: "price", schema: map[string]any{"type": "number"}, lo: 1, hi: 500},
+		{name: "quantity", schema: map[string]any{"type": "integer"}, lo: 1, hi: 10},
+		{name: "pageSize", schema: map[string]any{"type": "integer"}, lo: 10, hi: 50},
+		{name: "longitude", schema: map[string]any{"type": "number"}, lo: -180, hi: 180},
+		{name: "percent", schema: map[string]any{"type": "number"}, lo: 0, hi: 100},
+		{name: "userId", schema: map[string]any{"type": "integer"}, lo: 1, hi: 1000},
 		{name: "unknown", schema: map[string]any{"type": "integer"}, lo: 1, hi: 100},
 		{name: "age", schema: map[string]any{"type": "integer", "minimum": 200}, lo: 200, hi: 289},
 	}
