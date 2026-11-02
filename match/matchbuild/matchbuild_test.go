@@ -389,6 +389,34 @@ func TestBuilt_OnlyAConstructorsErrorBecomesAnError(t *testing.T) {
 	require.Panics(t, func() { _, _ = built(func() vlatte.Matcher { nilMap["x"] = 1; return nil }) }, "a runtime error")
 }
 
+func TestBuildMatcher_AcceptAndNotAcceptable(t *testing.T) {
+	// A generated mock file holds one mock per representation and a 406 mock: each reads back as the matcher it was.
+	for _, def := range []any{
+		[]any{"accept", "application/xml", []any{"application/json", "application/xml"}},
+		[]any{"notacceptable", []any{"application/json", "application/xml"}},
+	} {
+		m, err := _registry.BuildMatcher(def)
+		require.NoError(t, err)
+
+		data, err := m.(vlatte.SelfDescriptive).Describe().MarshalJSON()
+		require.NoError(t, err)
+
+		want, err := json.Marshal(def)
+		require.NoError(t, err)
+		require.JSONEq(t, string(want), string(data))
+	}
+
+	accept, err := _registry.BuildMatcher([]any{"accept", "application/xml", []any{"application/json", "application/xml"}})
+	require.NoError(t, err)
+	require.True(t, matches(t, accept, []string{"application/xml, application/json;q=0.5"}))
+	require.False(t, matches(t, accept, []string{"application/json"}))
+
+	none, err := _registry.BuildMatcher([]any{"notacceptable", []any{"application/json"}})
+	require.NoError(t, err)
+	require.True(t, matches(t, none, []string{"text/html"}))
+	require.False(t, matches(t, none, []string{}))
+}
+
 func TestBuildMatcher_ChecksArguments(t *testing.T) {
 	// A spec is checked when the mock loads: a wrong argument used to become a matcher that failed, panicked or
 	// silently matched something else on every request.
@@ -427,6 +455,15 @@ func TestBuildMatcher_ChecksArguments(t *testing.T) {
 		{[]any{int64(1), "x"}, `a matcher spec names its matcher first, as in ["equal", 1], not a number`},
 		{[]any{"nope"}, `unknown matcher "nope"`},
 		{[]any{"split", ",", int64(5)}, `split: a matcher is a name or a definition such as ["equal", 1], not a number`},
+		{[]any{"accept", int64(1), []any{"application/json"}}, "accept takes media types such as application/json, not a number"},
+		{[]any{"accept", "application/josn", []any{"application/json", "application/xml"}}, `accept takes a media type among its offers, not "application/josn"`},
+		{[]any{"accept", "application/json", []any{}}, "accept takes 1 media type or more, not 0"},
+		{[]any{"accept", "json", []any{"application/json"}}, `accept takes media types such as application/json, not "json"`},
+		{[]any{"accept", "application/json", "application/json"}, "accept takes a list of the media types offered, not a string"},
+		{[]any{"accept", "application/json", []any{int64(1)}}, "accept takes media types such as application/json, not a number"},
+		{[]any{"accept", "application/json"}, "accept takes 2 arguments, not 1"},
+		{[]any{"notacceptable", "application/json"}, "notacceptable takes a list of the media types offered, not a string"},
+		{[]any{"notacceptable", []any{}}, "notacceptable takes 1 media type or more, not 0"},
 		// Each kind of matcher reports a missing argument.
 		{[]any{"eqj"}, "eqj takes 1 argument, or 2 with options, not 0"},
 		{[]any{"eqj", "{}", make(map[string]any), "x"}, "eqj takes 1 argument, or 2 with options, not 3"},
@@ -603,7 +640,7 @@ var _allowed = map[string][]int{
 	"before": {1, 2}, "after": {1, 2}, "eqdt": {1, 2}, "isin": {1}, "itemsmatch": {1}, "eqi": {1}, "glob": {1},
 	"hasprefix": {1}, "hassuffix": {1}, "regex": {1}, "haskey": {1}, "gt": {1}, "gte": {1}, "lt": {1}, "lte": {1},
 	"len": {1}, "each": {1}, "some": {1}, "not": {1}, "trim": {1}, "lowercase": {1}, "uppercase": {1}, "urlpath": {1},
-	"requesturi": {1}, "equalbytes": {1}, "jwt": {1},
+	"requesturi": {1}, "equalbytes": {1}, "jwt": {1}, "notacceptable": {1}, "accept": {2},
 	"hasexactly": {1, 2, 3},
 	"xpath":      {2, 3},
 	"item":       {2}, "jsonpath": {2}, "split": {2}, "signedjwt": {2}, "both": {1, 2}, "either": {1, 2}, "xor": {1, 2}, "all": {1, 2, 3}, "any": {1, 2, 3},
@@ -662,6 +699,8 @@ func FuzzBuildAndMatch(f *testing.F) {
 		{`["before", "now +1 days", {"truncate_expected": "first day of month"}]`, `"2021-06-01T12:00:00Z"`},
 		{`["eqdt", "2021-06-01", {"actual_format": "02/01/2006"}]`, `"01/06/2021"`},
 		{`["equalbytes", "//4A"]`, `"x"`},
+		{`["accept", "application/json", ["application/json", "text/plain"]]`, `["text/plain;q=0.5, */*;q=0.1"]`},
+		{`["notacceptable", ["application/json"]]`, `"text/html"`},
 	} {
 		f.Add([]byte(seed[0]), []byte(seed[1]))
 	}

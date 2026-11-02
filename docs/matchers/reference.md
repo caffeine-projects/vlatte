@@ -16,6 +16,7 @@ The matchers of the `match` package, by their Go name and their name in mock fil
 | `Trim(m)` | `trim` | [Equality and text](/matchers/equality-text) |
 | `ToLower(m)`, `ToUpper(m)` | `lowercase`, `uppercase` | [Equality and text](/matchers/equality-text) |
 | `Split(sep, m)` | `split` | [Equality and text](/matchers/equality-text) |
+| `Accept(mediaType, offers...)`, `NotAcceptable(offers...)` | `accept`, `notacceptable` | [Request matching](/http/matching#content-negotiation) |
 | `Present()` | `present` | [Equality and text](/matchers/equality-text) |
 | `Nil()` | `nil` | [Equality and text](/matchers/equality-text) |
 | `Empty()` | `empty` | [Equality and text](/matchers/equality-text) |
