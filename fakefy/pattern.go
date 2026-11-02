@@ -21,7 +21,8 @@ var errNoMatch = errors.New("no string matches it")
 
 // pattern returns a string every one of res matches, with lo to hi runes when bounded, or at least lo. It writes
 // strings the first of res matches, and keeps the first the others match too. JSON Schema patterns search the string,
-// so a string a whole pattern matches does.
+// so a string a whole pattern matches does, and one too short may take letters after it, or before, where the
+// patterns don't anchor it.
 func (f *Faker) pattern(res []*regexp.Regexp, lo, hi int, bounded bool) (string, error) {
 	// res[0] compiled, so it parses.
 	tree, _ := syntax.Parse(res[0].String(), syntax.Perl)
@@ -47,12 +48,33 @@ func (f *Faker) pattern(res []*regexp.Regexp, lo, hi int, bounded bool) (string,
 		s := b.String()
 		n := utf8.RuneCountInString(s)
 
-		if n >= lo && (!bounded || n <= hi) && matchAll(res, s) {
-			return s, nil
+		if n > lo {
+			if (!bounded || n <= hi) && matchAll(res, s) {
+				return s, nil
+			}
+
+			continue
+		}
+
+		pad := f.letters(lo - n)
+		for _, v := range []string{s + pad, pad + s} {
+			if matchAll(res, v) {
+				return v, nil
+			}
 		}
 	}
 
 	return "", fmt.Errorf("no string of %s after %d tries", lengths(lo, hi, bounded), _maxTries)
+}
+
+// letters returns n random lowercase letters.
+func (f *Faker) letters(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = byte('a' + f.rnd.IntN(26))
+	}
+
+	return string(b)
 }
 
 // matchAll reports whether every one of res matches s.
