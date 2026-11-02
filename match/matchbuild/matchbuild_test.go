@@ -464,6 +464,7 @@ func TestBuildMatcher_ChecksArguments(t *testing.T) {
 		{[]any{"accept", "application/json"}, "accept takes 2 arguments, not 1"},
 		{[]any{"notacceptable", "application/json"}, "notacceptable takes a list of the media types offered, not a string"},
 		{[]any{"notacceptable", []any{}}, "notacceptable takes 1 media type or more, not 0"},
+		{[]any{"notacceptable"}, "notacceptable takes 1 argument, not 0"},
 		// Each kind of matcher reports a missing argument.
 		{[]any{"eqj"}, "eqj takes 1 argument, or 2 with options, not 0"},
 		{[]any{"eqj", "{}", make(map[string]any), "x"}, "eqj takes 1 argument, or 2 with options, not 3"},
