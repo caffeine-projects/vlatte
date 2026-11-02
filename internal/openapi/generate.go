@@ -29,7 +29,7 @@ var _contractStatuses = []string{"400", "401", "405", "415", "422"}
 
 // Mock is a generated mock: the route and response it answers, and the request it matches.
 type Mock struct {
-	// ID is the mock's ID, which its file is named after. [Generate] sets it with the [Namer].
+	// ID is the mock's ID, which its file is named after. [Generate] sets it with [RouteFirst].
 	ID string
 
 	// Route is the path the mock answers, under the document's base path, as the spec writes it.
@@ -102,38 +102,10 @@ type Output struct {
 	Warnings []string
 }
 
-// Option configures [Generate].
-type Option interface {
-	apply(o *options)
-}
-
-type options struct {
-	namer  Namer
-	layout Layout
-}
-
-type namerOption Namer
-
-func (n namerOption) apply(o *options) { o.namer = Namer(n) }
-
-// WithNamer names the mocks with n, instead of [RouteFirst].
-func WithNamer(n Namer) Option { return namerOption(n) }
-
-type layoutOption Layout
-
-func (l layoutOption) apply(o *options) { o.layout = Layout(l) }
-
-// WithLayout lays the mocks out in files with l, instead of [PerMock].
-func WithLayout(l Layout) Option { return layoutOption(l) }
-
-// Generate makes the mock files of doc. A body no value fits, by its examples or its schema, leaves its mock
-// without one and disabled, with a warning. It fails when the [Namer] gives a mock an ID that is not one.
-func Generate(doc *Document, opts ...Option) (*Output, error) {
-	o := options{namer: RouteFirst, layout: PerMock}
-	for _, opt := range opts {
-		opt.apply(&o)
-	}
-
+// Generate makes the mock files of doc: mocks named by [RouteFirst], each in a file of its own, as [PerMock] lays
+// them out. A body no value fits, by its examples or its schema, leaves its mock without one and disabled, with a
+// warning.
+func Generate(doc *Document) *Output {
 	g := generator{doc: doc, defs: make(map[string]any, len(doc.Defs))}
 	for name, def := range doc.Defs {
 		g.defs[name] = stripWriteOnly(def)
@@ -148,11 +120,9 @@ func Generate(doc *Document, opts ...Option) (*Output, error) {
 		g.operation(op)
 	}
 
-	if err := name(g.mocks, o.namer); err != nil {
-		return nil, err
-	}
+	name(g.mocks, RouteFirst)
 
-	return &Output{Files: o.layout(g.mocks), Warnings: g.warnings}, nil
+	return &Output{Files: PerMock(g.mocks), Warnings: g.warnings}
 }
 
 // generator holds the mocks and warnings of a document as they are made.
@@ -282,14 +252,14 @@ func (g *generator) body(m Mock, r Response, c Content, status int, extras bool)
 
 	switch {
 	case len(c.Examples) > 0:
-		m.Reply.Body = g.encode(m, c, c.Examples[0].Value)
+		m.Reply.Body = encodeBody(c.MediaType, c.Examples[0].Value, c.Schema)
 	case c.Schema != nil:
 		v, err := fakefy.New(fakefy.WithSeed(seed(m))).Schema(g.root(c.Schema))
 		if err != nil {
 			g.warnf(m, "no body fits: %v: written disabled", err)
 			m.Enabled = false
 		} else {
-			m.Reply.Body = g.encode(m, c, v)
+			m.Reply.Body = encodeBody(c.MediaType, v, c.Schema)
 		}
 	}
 
@@ -313,7 +283,7 @@ func (g *generator) body(m Mock, r Response, c Content, status int, extras bool)
 		em.Variant = cmp.Or(ex.Name, "example"+strconv.Itoa(i+2))
 		em.Enabled = false
 		em.Priority = _bandDisabled + templated(m.Route)
-		em.Reply.Body = g.encode(em, c, ex.Value)
+		em.Reply.Body = encodeBody(c.MediaType, ex.Value, c.Schema)
 		g.mocks = append(g.mocks, em)
 	}
 }
@@ -345,16 +315,6 @@ func (g *generator) withoutRanges(m Mock, r Response) Response {
 // isRange reports whether mediaType is a media range, such as */* or text/*.
 func isRange(mediaType string) bool {
 	return strings.Contains(mediaType, "*")
-}
-
-// encode returns v as the body of mock m, in the media type of c.
-func (g *generator) encode(m Mock, c Content, v any) any {
-	body, err := encodeBody(c.MediaType, v, c.Schema)
-	if err != nil {
-		g.warnf(m, "%v", err)
-	}
-
-	return body
 }
 
 // notAcceptable adds the 406 mock of an operation whose primary response r offers media types: the operation's own
@@ -625,10 +585,6 @@ func routeRequest(method, route string) Request {
 // joinPath joins a base path and a path of the spec.
 func joinPath(base, path string) string {
 	base = strings.TrimSuffix(base, "/")
-	if path == "" {
-		path = "/"
-	}
-
 	if base == "" {
 		return path
 	}
@@ -640,16 +596,14 @@ func joinPath(base, path string) string {
 	return base + path
 }
 
-// text returns v as text: a string as is, anything else as JSON.
+// text returns v, a value of the spec or a fake one, which JSON holds, as text: a string as is, anything else as
+// JSON.
 func text(v any) string {
 	if s, ok := v.(string); ok {
 		return s
 	}
 
-	b, err := json.Marshal(v, json.Deterministic(true))
-	if err != nil {
-		return fmt.Sprint(v)
-	}
+	b, _ := json.Marshal(v, json.Deterministic(true))
 
 	return string(b)
 }

@@ -3,37 +3,31 @@ package openapi
 import (
 	json "encoding/json/v2"
 	"encoding/xml"
-	"fmt"
 	"maps"
-	"mime"
 	"slices"
 	"strings"
 )
 
-// encodeBody returns v as the body of a mock file in mediaType, as its body key takes it: an object or a list in
-// JSON as is, anything else as text. schema, the schema of the body, names the root element of XML.
-func encodeBody(mediaType string, v any, schema any) (any, error) {
-	mt, _, err := mime.ParseMediaType(mediaType)
-	if err != nil {
-		mt = strings.ToLower(mediaType)
-	}
+// encodeBody returns v, a value of the spec or a fake one, as the body of a mock file in mediaType, as its body key
+// takes it: an object or a list in JSON as is, anything else as text. schema, the schema of the body, names the root
+// element of XML.
+func encodeBody(mediaType string, v any, schema any) any {
+	mt, _, _ := strings.Cut(strings.ToLower(mediaType), ";")
+	mt = strings.TrimSpace(mt)
 
 	switch {
 	case isJSON(mt):
 		switch v.(type) {
 		case map[string]any, []any:
-			return v, nil
+			return v
 		}
 
-		b, err := json.Marshal(v, json.Deterministic(true))
-		if err != nil {
-			return nil, fmt.Errorf("writing the body as JSON: %w", err)
-		}
+		b, _ := json.Marshal(v, json.Deterministic(true))
 
-		return string(b), nil
+		return string(b)
 	case isXML(mt):
 		if s, ok := v.(string); ok {
-			return s, nil
+			return s
 		}
 
 		var b strings.Builder
@@ -55,9 +49,9 @@ func encodeBody(mediaType string, v any, schema any) (any, error) {
 			writeXML(&b, name, v)
 		}
 
-		return b.String(), nil
+		return b.String()
 	default:
-		return text(v), nil
+		return text(v)
 	}
 }
 

@@ -79,10 +79,9 @@ func Write(dir, title string, files []File) (*Report, error) {
 		report.Written = append(report.Written, f.Name)
 	}
 
-	stale, err := staleFiles(dir, header, report.Written)
-	report.Stale = stale
+	report.Stale = staleFiles(dir, header, report.Written)
 
-	return report, err
+	return report, nil
 }
 
 // encodeFile returns the content of f: header, then a YAML document for each of its mocks.
@@ -101,11 +100,8 @@ func encodeFile(header string, f File) ([]byte, error) {
 			return nil, err
 		}
 
-		data, err := config.Encode(doc, "yaml")
-		if err != nil {
-			return nil, err
-		}
-
+		// doc went through JSON: YAML holds it.
+		data, _ := config.Encode(doc, "yaml")
 		b.Write(data)
 	}
 
@@ -157,12 +153,10 @@ func firstLine(path string) (string, error) {
 	return string(bytes.TrimSuffix(line, []byte("\r"))) + "\n", nil
 }
 
-// staleFiles returns the names of the files of dir whose first line is header, but written.
-func staleFiles(dir, header string, written []string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("openapi: listing %s: %w", dir, err)
-	}
+// staleFiles returns the names of the files of dir whose first line is header, but written. Write just wrote to dir:
+// a listing that fails there lists what it read.
+func staleFiles(dir, header string, written []string) []string {
+	entries, _ := os.ReadDir(dir)
 
 	var stale []string
 
@@ -176,5 +170,5 @@ func staleFiles(dir, header string, written []string) ([]string, error) {
 		}
 	}
 
-	return stale, nil
+	return stale
 }

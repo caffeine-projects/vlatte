@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/internal/slug"
 )
 
@@ -53,7 +52,7 @@ func RouteFirst(m *Mock) string {
 		parts = append(parts, "root")
 	}
 
-	parts = append(parts, strings.ToLower(m.Method), strings.ToLower(m.Status))
+	parts = append(parts, slug.Make(strings.ToLower(m.Method), _idMax), strings.ToLower(m.Status))
 
 	if m.MediaType != "" {
 		parts = append(parts, mediaName(m.MediaType))
@@ -87,21 +86,16 @@ func mediaName(mt string) string {
 // name sets the ID of each of mocks with namer, then makes them safe and unique: an ID that is a Windows device name
 // before its first '.' starts with '_', one longer than _idMax is cut and ends with a hash of itself, and one that
 // another takes, ignoring case, as macOS and Windows do, ends with -2, -3 and so on, in ID order.
-func name(mocks []Mock, namer Namer) error {
+func name(mocks []Mock, namer Namer) {
 	for i := range mocks {
-		m := &mocks[i]
-
-		id := namer(m)
-		if err := mockid.Check(id); err != nil {
-			return fmt.Errorf("openapi: the namer named %s %s %s %q: %w", m.Method, m.Route, m.Status, id, err)
-		}
+		id := namer(&mocks[i])
 
 		first, _, _ := strings.Cut(id, ".")
 		if slices.Contains(_devices, strings.ToLower(first)) {
 			id = "_" + id
 		}
 
-		m.ID = shorten(id)
+		mocks[i].ID = shorten(id)
 	}
 
 	order := make([]int, len(mocks))
@@ -124,8 +118,6 @@ func name(mocks []Mock, namer Namer) error {
 		taken[strings.ToLower(id)] = true
 		mocks[i].ID = id
 	}
-
-	return nil
 }
 
 // shorten returns id when it is at most _idMax bytes, and otherwise its start and a hash of all of it.

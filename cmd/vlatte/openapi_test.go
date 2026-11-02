@@ -93,6 +93,16 @@ func TestOpenAPI_FailsOnASpecItCannotUse(t *testing.T) {
 			spec: write("other.yaml", "name: x\n"),
 			want: "openapi: not an OpenAPI or Swagger document: expected an openapi or swagger field with its version, such as openapi: 3.1.0\n",
 		},
+		{
+			name: "a URL that doesn't parse",
+			spec: "http://%zz",
+			want: "openapi: parsing the spec's URL: parse \"http://%zz\": invalid URL escape \"%zz\"\n",
+		},
+		{
+			name: "no file",
+			spec: filepath.Join(dir, "missing.yaml"),
+			want: "openapi: opening the file: open " + filepath.Join(dir, "missing.yaml") + ": no such file or directory\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -135,6 +145,37 @@ paths:
 	require.Equal(t, 1, run(t.Context(), []string{"openapi", "--in", srv.URL + "/spec.yaml", "--out", out}, nil, io.Discard, &stderr))
 	require.Contains(t, stderr.String(), fmt.Sprintf("openapi: %s/spec.yaml refers to %s: a spec over http(s) refers to http(s) URLs only", srv.URL, ref))
 	require.NoDirExists(t, out)
+}
+
+func TestOpenAPI_WarnsAndListsWhatItNoLongerWrites(t *testing.T) {
+	// A rerun after the spec dropped an operation leaves its file, which still loads: the user hears of it.
+	dir := t.TempDir()
+	spec := filepath.Join(dir, "spec.yaml")
+	out := filepath.Join(dir, "mocks")
+	write := func(paths string) {
+		require.NoError(t, os.WriteFile(spec, []byte(`openapi: 3.1.0
+info: {title: X, version: "1"}
+servers: [{url: "/v1"}, {url: "/v2"}]
+paths:
+`+paths), 0o600))
+	}
+
+	write("  /a: {get: {responses: {\"204\": {description: OK}}}}\n  /b: {get: {responses: {\"204\": {description: OK}}}}\n")
+
+	var stdout, stderr bytes.Buffer
+	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, &stderr))
+	require.Equal(t, "warning: the servers have different paths: the mocks answer under the first one's, \"/v1\"\n", stderr.String())
+
+	write("  /a: {get: {responses: {\"204\": {description: OK}}}}\n")
+	stdout.Reset()
+	require.Equal(t, 0, run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, &stdout, io.Discard))
+	require.Contains(t, stdout.String(), "These files were generated from this spec, but no longer are, and still load: v1.b.get.204.mock.yaml\n")
+
+	// A file of the folder that the command didn't write stays as it is.
+	require.NoError(t, os.WriteFile(filepath.Join(out, "v1.a.get.204.mock.yaml"), []byte("id: mine\n"), 0o600))
+	stderr.Reset()
+	require.Equal(t, 1, run(t.Context(), []string{"openapi", "--in", spec, "--out", out}, nil, io.Discard, &stderr))
+	require.Contains(t, stderr.String(), "\nopenapi: a file to write is not one generated from this spec: v1.a.get.204.mock.yaml: move them, or write to another folder\n")
 }
 
 func TestOpenAPI_TakesAnInAndAnOut(t *testing.T) {

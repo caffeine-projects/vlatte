@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/caffeine-projects/vlatte/internal/mockid"
 	"github.com/caffeine-projects/vlatte/internal/openapi"
 )
 
@@ -23,6 +24,7 @@ func TestRouteFirst_NamesAMockByWhatItAnswers(t *testing.T) {
 		{name: "a range", mock: openapi.Mock{Route: "/a", Method: "POST", Status: "5XX"}, want: "a.post.5xx"},
 		{name: "a vendor media type", mock: openapi.Mock{Route: "/a", Method: "GET", Status: "200", MediaType: "application/vnd.api+json; charset=utf-8"}, want: "a.get.200.vnd.api-json"},
 		{name: "another media type", mock: openapi.Mock{Route: "/a", Method: "GET", Status: "200", MediaType: "image/png"}, want: "a.get.200.image-png"},
+		{name: "any media type", mock: openapi.Mock{Route: "/a", Method: "GET", Status: "200", MediaType: "*/*"}, want: "a.get.200.any"},
 		{name: "a variant", mock: openapi.Mock{Route: "/a", Method: "GET", Status: "200", MediaType: "application/json", Variant: "sold out"}, want: "a.get.200.json.sold-out"},
 		{name: "odd segments", mock: openapi.Mock{Route: "/users/{id}:activate/ä", Method: "POST", Status: "200"}, want: "users._id-activate.post.200"},
 	}
@@ -36,25 +38,21 @@ func TestRouteFirst_NamesAMockByWhatItAnswers(t *testing.T) {
 
 func TestGenerate_GivesEveryMockAUniqueIDEveryFileSystemTakes(t *testing.T) {
 	// macOS and Windows ignore case in file names, Windows refuses its device names, and file names have a limit:
-	// whatever the Namer says, every mock gets a file of its own.
+	// whatever the routes, every mock gets a file of its own.
 	long := strings.Repeat("a", 250)
-	names := []string{"Pets", "pets", "PETS", "con.get", long, long}
+	routes := []string{"/Pets", "/pets", "/PETS", "/con", "/" + long, "/" + long + "b"}
 
-	ops := make([]openapi.Operation, len(names))
-	for i := range names {
-		ops[i] = openapi.Operation{Method: "GET", Path: "/" + string(rune('a'+i)), Responses: []openapi.Response{{Status: "200"}}}
+	ops := make([]openapi.Operation, len(routes))
+	for i, route := range routes {
+		ops[i] = openapi.Operation{Method: "GET", Path: route, Responses: []openapi.Response{{Status: "200"}}}
 	}
 
-	out, err := openapi.Generate(&openapi.Document{Operations: ops}, openapi.WithNamer(func(m *openapi.Mock) string {
-		return names[m.Route[1]-'a']
-	}))
-	require.NoError(t, err)
-
-	got := make([]string, 0, len(out.Files))
-	for _, f := range out.Files {
+	got := make([]string, 0, len(routes))
+	for _, f := range openapi.Generate(&openapi.Document{Operations: ops}).Files {
+		require.NoError(t, mockid.Check(f.Mocks[0].ID))
 		got = append(got, f.Mocks[0].ID)
 	}
 
-	cut := strings.Repeat("a", 191) + "-15da3d4f"
-	require.Equal(t, []string{"PETS", "Pets-2", "_con.get", cut[:198] + "-2", cut, "pets-3"}, got)
+	cut := strings.Repeat("a", 191) + "-be5759bf"
+	require.Equal(t, []string{"PETS.get.200", "Pets.get.200-2", "_con.get.200", cut[:198] + "-2", cut, "pets.get.200-3"}, got)
 }

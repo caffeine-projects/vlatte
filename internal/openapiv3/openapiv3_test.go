@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -107,11 +109,16 @@ components:
       maximum: 9
       exclusiveMaximum: false
       example: 3
+    Name:
+      type: string
 `})
 
-	require.Equal(t, map[string]any{"Age": map[string]any{
-		"type": []any{"integer", "null"}, "exclusiveMinimum": int64(0), "maximum": int64(9), "example": int64(3),
-	}}, doc.Defs)
+	require.Equal(t, map[string]any{
+		"Age": map[string]any{
+			"type": []any{"integer", "null"}, "exclusiveMinimum": int64(0), "maximum": int64(9), "example": int64(3),
+		},
+		"Name": map[string]any{"type": "string"},
+	}, doc.Defs)
 }
 
 func TestLoad_ReadsTheFilesItsReferencesName(t *testing.T) {
@@ -151,6 +158,49 @@ paths: {}
 	require.Equal(t, []string{`the servers have different paths: the mocks answer under the first one's, "/v1"`}, doc.Warnings)
 }
 
+func TestLoad_WarnsOfAServerWhosePathIsNotAURL(t *testing.T) {
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+servers: [{url: "https://x.example.com/{v}", variables: {v: {default: "%zz"}}}]
+paths: {}
+`})
+
+	require.Empty(t, doc.BasePath)
+	require.Equal(t, []string{`server https://x.example.com/{v}: parse "https://x.example.com/%zz": invalid URL escape "%zz": ignored`}, doc.Warnings)
+}
+
+func TestLoad_ReadsWhatASpecMayLeaveOut(t *testing.T) {
+	// OpenAPI 3.1 makes paths and responses optional, and an example may live at an URL: none is an error.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+webhooks: {}
+`})
+	require.Empty(t, doc.Operations)
+
+	doc = load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /a:
+    get: {summary: A}
+  /b:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              examples:
+                far: {externalValue: "https://x.example.com/far.json"}
+`})
+	require.Equal(t, []openapi.Operation{
+		{Method: "GET", Path: "/a", Summary: "A"},
+		{Method: "GET", Path: "/b", Responses: []openapi.Response{{Status: "200", Content: []openapi.Content{{MediaType: "application/json"}}}}},
+	}, sortedOperations(doc))
+}
+
 func TestLoad_FailsOnAnInvalidSpec(t *testing.T) {
 	// A contract that contradicts itself makes mocks that mislead.
 	dir := t.TempDir()
@@ -158,6 +208,11 @@ func TestLoad_FailsOnAnInvalidSpec(t *testing.T) {
 
 	_, err := openapiv3.Load(t.Context(), data, &url.URL{Path: filepath.ToSlash(filepath.Join(dir, "spec.yaml"))}, read(t))
 	require.ErrorIs(t, err, openapi.ErrInvalid)
+}
+
+// sortedOperations returns the operations of doc in path order: Load leaves them in any order.
+func sortedOperations(doc *openapi.Document) []openapi.Operation {
+	return slices.SortedFunc(slices.Values(doc.Operations), func(a, b openapi.Operation) int { return strings.Compare(a.Path, b.Path) })
 }
 
 // load writes files to a folder and loads its spec.yaml.

@@ -35,8 +35,7 @@ func TestOpenAPI_TheGeneratedMocksServeTheSpec(t *testing.T) {
 	doc, err := openapiv3.Load(t.Context(), data, loc, read)
 	require.NoError(t, err)
 
-	out, err := openapi.Generate(doc)
-	require.NoError(t, err)
+	out := openapi.Generate(doc)
 	require.Empty(t, out.Warnings)
 
 	_, err = openapi.Write(dir, doc.Title, out.Files)

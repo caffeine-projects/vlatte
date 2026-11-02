@@ -26,6 +26,9 @@ func TestLocation_ResolvesAFileToItsAbsolutePath(t *testing.T) {
 	u, err = openapi.Location("https://example.com/specs/pets.yaml")
 	require.NoError(t, err)
 	require.Equal(t, "https://example.com/specs/pets.yaml", u.String())
+
+	_, err = openapi.Location("http://%zz")
+	require.EqualError(t, err, `openapi: parsing the spec's URL: parse "http://%zz": invalid URL escape "%zz"`)
 }
 
 func TestRead_ReadsAFileOrAURL(t *testing.T) {
@@ -46,6 +49,10 @@ func TestRead_ReadsAFileOrAURL(t *testing.T) {
 			_, _ = w.Write([]byte("openapi: 3.0.3\n"))
 		case "/big.yaml":
 			_, _ = w.Write([]byte(strings.Repeat("a", openapi.MaxSpecSize+1)))
+		case "/cut.yaml":
+			// A body shorter than its length: the connection ends before it does.
+			w.Header().Set("Content-Length", "100")
+			_, _ = w.Write([]byte("openapi"))
 		default:
 			http.NotFound(w, r)
 		}
@@ -71,8 +78,23 @@ func TestRead_ReadsAFileOrAURL(t *testing.T) {
 	_, err = openapi.Read(t.Context(), srv.Client(), u)
 	require.ErrorIs(t, err, openapi.ErrTooLarge)
 
+	u, err = url.Parse(srv.URL + "/cut.yaml")
+	require.NoError(t, err)
+
+	_, err = openapi.Read(t.Context(), srv.Client(), u)
+	require.EqualError(t, err, "openapi: reading "+u.String()+": unexpected EOF")
+
 	_, err = openapi.Read(t.Context(), srv.Client(), &url.URL{Scheme: "ftp", Host: "example.com", Path: "/a"})
 	require.EqualError(t, err, `openapi: expected a file or an http(s) URL, not "ftp://example.com/a"`)
+
+	_, err = openapi.Read(t.Context(), srv.Client(), &url.URL{Path: filepath.ToSlash(filepath.Join(dir, "missing.yaml"))})
+	require.ErrorIs(t, err, os.ErrNotExist)
+	require.ErrorContains(t, err, "openapi: opening the file: ")
+
+	srv.Close()
+
+	_, err = openapi.Read(t.Context(), srv.Client(), u)
+	require.ErrorContains(t, err, "openapi: fetching: Get \""+u.String()+"\": ")
 }
 
 func TestDetect_ReadsTheVersionAsWritten(t *testing.T) {
@@ -95,7 +117,11 @@ func TestDetect_ReadsTheVersionAsWritten(t *testing.T) {
 		})
 	}
 
-	_, err := openapi.Detect([]byte("name: not a spec\n"))
+	_, err := openapi.Detect([]byte("{"))
+	require.ErrorIs(t, err, openapi.ErrNotOpenAPI)
+	require.ErrorContains(t, err, "openapi: not an OpenAPI or Swagger document: yaml: ")
+
+	_, err = openapi.Detect([]byte("name: not a spec\n"))
 	require.ErrorIs(t, err, openapi.ErrNotOpenAPI)
 	require.EqualError(t, err, "openapi: not an OpenAPI or Swagger document: expected an openapi or swagger field with its version, such as openapi: 3.1.0")
 }

@@ -2,6 +2,7 @@ package openapi_test
 
 import (
 	"bytes"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -121,6 +122,28 @@ func TestWrite_KnowsItsFilesWithWindowsLineEndings(t *testing.T) {
 	report, err := openapi.Write(dir, "Pets", []openapi.File{file("a.mock.yaml")})
 	require.NoError(t, err)
 	require.Equal(t, &openapi.Report{Written: []string{"a.mock.yaml"}, Stale: []string{"b.mock.yaml"}}, report)
+}
+
+func TestWrite_FailsWithoutWritingWhatItCannot(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file")
+	require.NoError(t, os.WriteFile(file, nil, 0o600))
+
+	ok := []openapi.File{{Name: "a.mock.yaml", Mocks: []openapi.Mock{{ID: "a", Reply: openapi.Reply{Status: 200}}}}}
+
+	_, err := openapi.Write(filepath.Join(file, "mocks"), "Pets", ok)
+	require.ErrorContains(t, err, "openapi: creating "+filepath.Join(file, "mocks")+": ")
+
+	_, err = openapi.Write(dir, "Pets", []openapi.File{{Name: "b.mock.yaml", Mocks: []openapi.Mock{{ID: "b", Reply: openapi.Reply{Status: 200, Body: math.NaN()}}}}})
+	require.ErrorContains(t, err, "openapi: writing b.mock.yaml: ")
+
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "a.mock.yaml"), 0o700))
+	_, err = openapi.Write(dir, "Pets", ok)
+	require.ErrorContains(t, err, "openapi: reading a.mock.yaml: ")
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 2, "only the file and the folder in the way")
 }
 
 func TestWrite_NeverOverwritesAFileItDidNotWriteFromTheSpec(t *testing.T) {

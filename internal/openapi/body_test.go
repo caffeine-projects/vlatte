@@ -35,6 +35,15 @@ func TestGenerate_WritesABodyInItsMediaType(t *testing.T) {
 			want:   "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ids><id>1</id><id>2</id></ids>",
 		},
 		{name: "XML text", media: "application/atom+xml", value: "<feed/>", want: "<feed/>"},
+		{
+			name: "XML of a list without a schema", media: "application/xml", value: []any{1, nil},
+			want: "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<root><item>1</item><item></item></root>",
+		},
+		{
+			name: "XML of an object of a schema without a name", media: "application/xml", schema: map[string]any{"type": "object"}, value: map[string]any{"a": nil},
+			want: "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<root><a></a></root>",
+		},
+		{name: "JSON of a media type with parameters", media: "Application/JSON ; charset=utf-8", value: true, want: "true"},
 		{name: "plain text", media: "text/plain", value: 42, want: "42"},
 		{name: "other text", media: "application/octet-stream", value: "AAEC", want: "AAEC"},
 	}

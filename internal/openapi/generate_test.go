@@ -378,27 +378,56 @@ func TestGenerate_DisablesAMockNoBodyFits(t *testing.T) {
 	}, warnings)
 }
 
-func TestGenerate_FailsOnANamerThatGivesNoID(t *testing.T) {
-	_, err := openapi.Generate(&openapi.Document{Operations: []openapi.Operation{{Method: "GET", Path: "/", Responses: []openapi.Response{{Status: "200"}}}}},
-		openapi.WithNamer(func(*openapi.Mock) string { return "a/b" }))
-	require.EqualError(t, err, `openapi: the namer named GET / 200 "a/b": an id holds only letters, digits, '.', '_', '~' and '-'`)
+func TestGenerate_NumbersUnnamedPathExamples(t *testing.T) {
+	mocks := generate(t, &openapi.Document{Operations: []openapi.Operation{{
+		Method: "GET", Path: "/pets/{id}",
+		PathParams: []openapi.Parameter{{Name: "id", Examples: []openapi.Example{{Value: 1}, {Value: 2}}}},
+		Responses:  []openapi.Response{{Status: "200"}},
+	}}})
+
+	require.Equal(t, []any{"equal", "/pets/1"}, mocks["pets._id.get.200.example1"].Request.Path)
+	require.Equal(t, []any{"equal", "/pets/2"}, mocks["pets._id.get.200.example2"].Request.Path)
 }
 
-func TestGenerate_LaysMocksOutWithTheLayout(t *testing.T) {
-	byRoute := func(mocks []openapi.Mock) []openapi.File {
-		return []openapi.File{{Name: "all.mock.yaml", Mocks: mocks}}
-	}
+func TestGenerate_LeavesOutAHeaderNoValueFits(t *testing.T) {
+	// A header the spec gives no value, or one no value satisfies, is better missing than wrong.
+	mocks, warnings := generateWithWarnings(t, &openapi.Document{Operations: []openapi.Operation{{
+		Method: "GET", Path: "/a",
+		Responses: []openapi.Response{{Status: "204", Headers: []openapi.Header{
+			{Name: "X-Free"},
+			{Name: "X-None", Schema: map[string]any{"type": "integer", "minimum": 5, "maximum": 1}},
+			{Name: "X-Ok", Schema: map[string]any{"const": "ok"}},
+		}}},
+	}}})
 
-	out, err := openapi.Generate(&openapi.Document{Operations: []openapi.Operation{
-		{Method: "GET", Path: "/a", Responses: []openapi.Response{{Status: "200"}}},
-		{Method: "PUT", Path: "/a", Responses: []openapi.Response{{Status: "204"}}},
-	}}, openapi.WithLayout(byRoute))
-	require.NoError(t, err)
+	require.Equal(t, map[string]string{"X-Ok": "ok"}, mocks["a.get.204"].Reply.Header)
+	require.Equal(t, []string{
+		"GET /a 204: no value of header X-None fits: fakefy: no value satisfies the schema: at the root: minimum 5 is above maximum 1: left out",
+	}, warnings)
+}
 
-	require.Len(t, out.Files, 1)
-	require.Equal(t, "all.mock.yaml", out.Files[0].Name)
-	require.Equal(t, "a.get.200", out.Files[0].Mocks[0].ID)
-	require.Equal(t, "a.put.204", out.Files[0].Mocks[1].ID)
+func TestGenerate_ABooleanSchemaAllowsAnythingOrNothing(t *testing.T) {
+	mocks, warnings := generateWithWarnings(t, &openapi.Document{Operations: []openapi.Operation{
+		{Method: "GET", Path: "/any", Responses: []openapi.Response{{Status: "200", Content: []openapi.Content{{MediaType: "text/plain", Schema: true}}}}},
+		{Method: "GET", Path: "/none", Responses: []openapi.Response{{Status: "200", Content: []openapi.Content{{MediaType: "text/plain", Schema: false}}}}},
+	}})
+
+	require.True(t, mocks["any.get.200.text"].Enabled)
+	require.NotNil(t, mocks["any.get.200.text"].Reply.Body)
+	require.False(t, mocks["none.get.200.text"].Enabled)
+	require.Len(t, warnings, 1)
+	require.Contains(t, warnings[0], "GET /none 200 text/plain: no body fits: ")
+}
+
+func TestGenerate_ARedirectRangeIsTheSuccessWithoutA2xx(t *testing.T) {
+	mocks := generate(t, &openapi.Document{Operations: []openapi.Operation{{
+		Method: "GET", Path: "/old",
+		Responses: []openapi.Response{{Status: "default"}, {Status: "3XX"}},
+	}}})
+
+	require.True(t, mocks["old.get.3xx"].Enabled)
+	require.Equal(t, 300, mocks["old.get.3xx"].Reply.Status)
+	require.False(t, mocks["old.get.default"].Enabled)
 }
 
 // generate returns the mocks Generate makes of doc, by ID, and fails on a warning.
@@ -414,8 +443,7 @@ func generate(t *testing.T, doc *openapi.Document) map[string]openapi.Mock {
 func generateWithWarnings(t *testing.T, doc *openapi.Document) (map[string]openapi.Mock, []string) {
 	t.Helper()
 
-	out, err := openapi.Generate(doc)
-	require.NoError(t, err)
+	out := openapi.Generate(doc)
 
 	mocks := make(map[string]openapi.Mock, len(out.Files))
 	for _, f := range out.Files {

@@ -28,10 +28,8 @@ func Location(in string) (*url.URL, error) {
 		return u, nil
 	}
 
-	abs, err := filepath.Abs(in)
-	if err != nil {
-		return nil, fmt.Errorf("openapi: finding the spec's path: %w", err)
-	}
+	// Abs fails only without a working directory: reading the spec fails then.
+	abs, _ := filepath.Abs(in)
 
 	return &url.URL{Path: filepath.ToSlash(abs)}, nil
 }
@@ -43,10 +41,7 @@ func Read(ctx context.Context, client *http.Client, u *url.URL) ([]byte, error) 
 
 	switch u.Scheme {
 	case "http", "https":
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-		if err != nil {
-			return nil, fmt.Errorf("openapi: fetching %s: %w", u, err)
-		}
+		req := (&http.Request{Method: http.MethodGet, URL: u, Header: make(http.Header)}).WithContext(ctx)
 
 		res, err := client.Do(req)
 		if err != nil {

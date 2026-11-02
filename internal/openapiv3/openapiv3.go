@@ -57,12 +57,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 
 	if t.Components != nil {
 		for name, ref := range t.Components.Schemas {
-			s, err := c.schema(ref)
-			if err != nil {
-				return nil, fmt.Errorf("openapiv3: schema %s: %w", name, err)
-			}
-
-			doc.Defs[name] = s
+			doc.Defs[name] = c.schema(ref)
 		}
 	}
 
@@ -72,12 +67,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 
 	for path, item := range t.Paths.Map() {
 		for method, op := range item.Operations() {
-			o, err := c.operation(path, strings.ToUpper(method), item.Parameters, op)
-			if err != nil {
-				return nil, fmt.Errorf("openapiv3: %s %s: %w", strings.ToUpper(method), path, err)
-			}
-
-			doc.Operations = append(doc.Operations, o)
+			doc.Operations = append(doc.Operations, c.operation(path, strings.ToUpper(method), item.Parameters, op))
 		}
 	}
 
@@ -119,7 +109,7 @@ type converter struct {
 }
 
 // operation translates op, of the path item with the parameters common.
-func (c converter) operation(path, method string, common openapi3.Parameters, op *openapi3.Operation) (openapi.Operation, error) {
+func (c converter) operation(path, method string, common openapi3.Parameters, op *openapi3.Operation) openapi.Operation {
 	o := openapi.Operation{Method: method, Path: path, Summary: op.Summary}
 
 	// An operation's parameter replaces the path item's of the same name and location.
@@ -144,30 +134,17 @@ func (c converter) operation(path, method string, common openapi3.Parameters, op
 		o.PathParams = append(o.PathParams, openapi.Parameter{Name: name, Examples: examples})
 	}
 
-	if op.Responses == nil {
-		return o, nil
-	}
-
+	// Loaded, every response is resolved: Map of no responses is empty.
 	responses := op.Responses.Map()
 	for _, status := range slices.Sorted(maps.Keys(responses)) {
-		ref := responses[status]
-		if ref == nil || ref.Value == nil {
-			continue
-		}
-
-		r, err := c.response(status, ref.Value)
-		if err != nil {
-			return o, fmt.Errorf("response %s: %w", status, err)
-		}
-
-		o.Responses = append(o.Responses, r)
+		o.Responses = append(o.Responses, c.response(status, responses[status].Value))
 	}
 
-	return o, nil
+	return o
 }
 
 // response translates the response of status.
-func (c converter) response(status string, res *openapi3.Response) (openapi.Response, error) {
+func (c converter) response(status string, res *openapi3.Response) openapi.Response {
 	r := openapi.Response{Status: strings.ToUpper(status)}
 	if status == "default" {
 		r.Status = status
@@ -179,29 +156,17 @@ func (c converter) response(status string, res *openapi3.Response) (openapi.Resp
 			continue
 		}
 
-		schema, err := c.schema(ref.Value.Schema)
-		if err != nil {
-			return r, fmt.Errorf("header %s: %w", name, err)
-		}
-
-		r.Headers = append(r.Headers, openapi.Header{Name: name, Schema: schema, Examples: examplesOf(ref.Value.Example, ref.Value.Examples)})
+		r.Headers = append(r.Headers, openapi.Header{
+			Name: name, Schema: c.schema(ref.Value.Schema), Examples: examplesOf(ref.Value.Example, ref.Value.Examples),
+		})
 	}
 
 	for _, mt := range slices.Sorted(maps.Keys(res.Content)) {
 		media := res.Content[mt]
-		if media == nil {
-			continue
-		}
-
-		schema, err := c.schema(media.Schema)
-		if err != nil {
-			return r, fmt.Errorf("%s: %w", mt, err)
-		}
-
-		r.Content = append(r.Content, openapi.Content{MediaType: mt, Schema: schema, Examples: examplesOf(media.Example, media.Examples)})
+		r.Content = append(r.Content, openapi.Content{MediaType: mt, Schema: c.schema(media.Schema), Examples: examplesOf(media.Example, media.Examples)})
 	}
 
-	return r, nil
+	return r
 }
 
 // examplesOf returns the example value, if any, then the named examples, in name order. A named example that
@@ -224,23 +189,17 @@ func examplesOf(example any, named openapi3.Examples) []openapi.Example {
 	return out
 }
 
-// schema translates the schema of ref into JSON Schema 2020-12, or returns nil for no schema.
-func (c converter) schema(ref *openapi3.SchemaRef) (any, error) {
+// schema translates the schema of ref into JSON Schema 2020-12, or returns nil for no schema. kin-openapi read the
+// schema from JSON, which it writes back.
+func (c converter) schema(ref *openapi3.SchemaRef) any {
 	if ref == nil {
-		return nil, nil
+		return nil
 	}
 
-	data, err := json.Marshal(ref)
-	if err != nil {
-		return nil, err
-	}
+	data, _ := json.Marshal(ref)
+	v, _ := value.DecodeJSON(data)
 
-	v, err := value.DecodeJSON(data)
-	if err != nil {
-		return nil, err
-	}
-
-	return c.translate(v), nil
+	return c.translate(v)
 }
 
 // translate rewrites schema v of the document as JSON Schema 2020-12: its references to shared schemas point under
@@ -284,10 +243,7 @@ func (c converter) translate(v any) any {
 
 // translateEach translates each schema of a map of them, such as properties, whose keys are names, not keywords.
 func (c converter) translateEach(v any) any {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return v
-	}
+	m, _ := v.(map[string]any)
 
 	out := make(map[string]any, len(m))
 	for k, s := range m {
@@ -299,23 +255,17 @@ func (c converter) translateEach(v any) any {
 
 // localRef returns ref pointing under $defs when it points to a shared schema.
 func localRef(ref any) any {
-	if s, ok := ref.(string); ok {
-		if name, ok := strings.CutPrefix(s, _componentsPrefix); ok {
-			return "#/$defs/" + name
-		}
-	}
-
-	return ref
+	s, _ := ref.(string)
+	return strings.Replace(s, _componentsPrefix, "#/$defs/", 1)
 }
 
 // discriminator returns the discriminator v with the references of its mapping pointing under $defs.
 func discriminator(v any) any {
-	d, ok := v.(map[string]any)
-	if !ok {
-		return v
-	}
+	d, _ := v.(map[string]any)
 
-	out := maps.Clone(d)
+	out := make(map[string]any, len(d))
+	maps.Copy(out, d)
+
 	if mapping, ok := d["mapping"].(map[string]any); ok {
 		m := make(map[string]any, len(mapping))
 		for k, ref := range mapping {
@@ -333,15 +283,9 @@ func translate30(s map[string]any) {
 	if nullable, ok := s["nullable"].(bool); ok {
 		delete(s, "nullable")
 
-		switch t := s["type"].(type) {
-		case string:
-			if nullable {
-				s["type"] = []any{t, "null"}
-			}
-		case []any:
-			if nullable && !slices.Contains(t, any("null")) {
-				s["type"] = append(t, "null")
-			}
+		// OpenAPI 3.0 types are strings, never lists.
+		if t, ok := s["type"].(string); ok && nullable {
+			s["type"] = []any{t, "null"}
 		}
 	}
 
