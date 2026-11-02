@@ -26,7 +26,9 @@ var (
 // custom names included.
 //
 // An error rejects the spec, so a mock file that holds it doesn't load. The matcher may return errors from Match,
-// but an error stops the search for a mock, so it should only report a failure of its own.
+// but an error stops the search for a mock, so it should only report a failure of its own, or answer an HTTP request
+// with a [github.com/caffeine-projects/vlatte/mockhttp.StatusError]: [github.com/caffeine-projects/vlatte/mockgrpc]
+// fails the call with it.
 type BuildFunc func(r *Registry, args []any) (vlatte.Matcher, error)
 
 // Registry builds matcher specs: the built-in matchers, and the custom ones it was given. It can't change once

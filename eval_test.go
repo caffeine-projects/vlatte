@@ -2,6 +2,7 @@ package vlatte_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -92,6 +93,54 @@ func TestFind_TakesTheTurnOfTheMockFound(t *testing.T) {
 	_, matched, err = seq.Find(t.Context(), vlatte.NewExplanation(), request{}, evals, nil)
 	require.NoError(t, err)
 	require.False(t, matched, "the turn is taken")
+}
+
+func TestFind_AFailingMatcherNamesItsMock(t *testing.T) {
+	// A server answers a matcher's error on behalf of the matcher's mock, such as with the status it carries: Find
+	// must say which mock that is.
+	boom := errors.New("boom")
+	a, b := newFakeMockWith("a", 0), newFakeMockWith("b", 0)
+	seq := vlatte.Mocks[*fakeMock, request](slices.Values([]*fakeMock{a, b}))
+	evals := func(m *fakeMock) vlatte.Evaluators[*fakeMock, request] {
+		ok := m != b
+
+		return vlatte.Evaluators[*fakeMock, request]{{Key: "k", Matcher: vlatte.MatcherFunc("m", func(vlatte.MatcherArg) (bool, error) {
+			if ok {
+				return false, nil
+			}
+
+			return false, boom
+		})}}
+	}
+
+	found, matched, err := seq.Find(t.Context(), vlatte.NewExplanation(), request{}, evals, nil)
+	require.ErrorIs(t, err, vlatte.ErrMatching)
+	require.ErrorIs(t, err, boom)
+	require.False(t, matched)
+	require.Same(t, b, found)
+}
+
+func TestFind_AFailingMatcherOfAMockOutOfTurnDoesNotStopTheSearch(t *testing.T) {
+	// A mock used up, or waiting on another scenario state, would not answer: its matcher's error, such as a status to
+	// answer with, must not answer for it, and the mocks after it still match.
+	a, b := newFakeMockWith("a", 0), newFakeMockWith("b", 0)
+	seq := vlatte.Mocks[*fakeMock, request](slices.Values([]*fakeMock{a, b}))
+	evals := func(m *fakeMock) vlatte.Evaluators[*fakeMock, request] {
+		if m == b {
+			return vlatte.Evaluators[*fakeMock, request]{{Key: "any", Matcher: vlatte.MatcherFunc("any",
+				func(vlatte.MatcherArg) (bool, error) { return true, nil })}}
+		}
+
+		return vlatte.Evaluators[*fakeMock, request]{
+			{Key: "k", Matcher: vlatte.MatcherFunc("m", func(vlatte.MatcherArg) (bool, error) { return false, errors.New("boom") })},
+			{Key: "turn", Matcher: &turnMatcher{taken: true}},
+		}
+	}
+
+	found, matched, err := seq.Find(t.Context(), vlatte.NewExplanation(), request{}, evals, nil)
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.Same(t, b, found)
 }
 
 // A claim acts on what the request selects, such as the instance of a scenario its key names: it gets the value Match
@@ -206,8 +255,9 @@ func TestFind_AClaimThatPanicsIsAnError(t *testing.T) {
 		return vlatte.Evaluators[*fakeMock, request]{{Key: "broken", Matcher: brokenClaimer{panics: true}}}
 	}
 
-	_, matched, err := seq.Find(t.Context(), vlatte.NewExplanation(), request{}, evals, nil)
+	found, matched, err := seq.Find(t.Context(), vlatte.NewExplanation(), request{}, evals, nil)
 	require.ErrorIs(t, err, vlatte.ErrMatchPanicked)
 	require.ErrorIs(t, err, vlatte.ErrMatching)
 	require.False(t, matched)
+	require.Same(t, a, found, "the error names the mock whose claim failed")
 }

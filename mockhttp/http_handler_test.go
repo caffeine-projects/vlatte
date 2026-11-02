@@ -803,6 +803,99 @@ func TestHandler_FailuresAreToldApartFromNoMatch(t *testing.T) {
 	require.True(t, strings.HasPrefix(body, "# Request did not match\n"), body)
 }
 
+func TestHandler_AMatcherAnswersWithTheStatusItsErrorCarries(t *testing.T) {
+	// A contract check refuses a request its spec doesn't allow, with the spec's status, ahead of every mock below it.
+	// That answer is the check's mock's, not a failure: no VLatte-Error, a hit on the mock, a matched journal entry.
+	m := journaledServer(t, Setup())
+
+	refuse := vlatte.MatcherFunc("contract", func(arg vlatte.MatcherArg) (bool, error) {
+		r, _ := arg.Value().(*http.Request)
+		if r.URL.Query().Get("name") != "" {
+			return false, nil
+		}
+
+		return false, &StatusError{
+			Status: http.StatusUnprocessableEntity,
+			Header: http.Header{HeaderContentType: {MIMEApplicationProblemJSON}},
+			Body:   []byte(`{"title":"name is required"}`),
+			Err:    errors.New("name: required"),
+		}
+	})
+
+	scope := m.MustMock(
+		Postf("/pets").ID("contract").Priority(1).Matches(refuse).Reply(OK()),
+		Postf("/pets").ID("create").Priority(2).Reply(Created()),
+	)
+
+	res, body := do(t, http.MethodPost, m.URL("/pets"), nil, nil)
+	require.Equal(t, http.StatusUnprocessableEntity, res.StatusCode)
+	require.JSONEq(t, `{"title":"name is required"}`, string(body))
+	require.Equal(t, MIMEApplicationProblemJSON, res.Header.Get(HeaderContentType))
+	require.Empty(t, res.Header.Get(HeaderVlatteError))
+	require.Equal(t, "contract", res.Header.Get(vlatte.HeaderMatchedMockID))
+
+	e := only(t, m, journal.Query{Path: match.Equal("/pets")})
+	require.Equal(t, journal.OutcomeMatched, e.Outcome)
+	require.Equal(t, http.StatusUnprocessableEntity, e.Status)
+	require.Equal(t, "contract", e.MockID)
+
+	res, _ = do(t, http.MethodPost, m.URL("/pets?name=Buddy"), nil, nil)
+	require.Equal(t, http.StatusCreated, res.StatusCode, "a request the check lets through reaches the mocks below it")
+
+	hits := make(map[string]int64)
+	for _, mock := range scope.Mocks() {
+		hits[mock.ID()] = mock.Hits()
+	}
+
+	require.Equal(t, map[string]int64{"contract": 1, "create": 1}, hits)
+}
+
+func TestHandler_AMockUsedUpDoesNotAnswerWithItsMatchersStatus(t *testing.T) {
+	// A mock that would not answer once used up, or in another scenario state, must not answer with a status either.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	refuse := vlatte.MatcherFunc("contract", func(vlatte.MatcherArg) (bool, error) {
+		return false, &StatusError{Status: http.StatusBadRequest}
+	})
+
+	scope := m.MustMock(
+		Postf("/pets").ID("once").Priority(1).Times(1).Matches(refuse).Reply(OK()),
+		Postf("/pets").ID("waiting").Priority(2).ScenarioIs("s").ScenarioStateIs("never").Matches(refuse).Reply(OK()),
+		Postf("/pets").ID("create").Priority(3).Reply(Created()),
+	)
+
+	res, _ := do(t, http.MethodPost, m.URL("/pets"), nil, nil)
+	require.Equal(t, http.StatusBadRequest, res.StatusCode)
+
+	res, _ = do(t, http.MethodPost, m.URL("/pets"), nil, nil)
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+
+	hits := make(map[string]int64)
+	for _, mock := range scope.Mocks() {
+		hits[mock.ID()] = mock.Hits()
+	}
+
+	require.Equal(t, map[string]int64{"once": 1, "waiting": 0, "create": 1}, hits)
+}
+
+func TestHandler_AStatusErrorWithoutAValidStatusIsAMatchingFailure(t *testing.T) {
+	// net/http panics on a status outside 100 to 999: the matcher's bug is told as a failure, not a server panic.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/x").ID("broken").Matches(vlatte.MatcherFunc("contract", func(vlatte.MatcherArg) (bool, error) {
+		return false, &StatusError{}
+	})).Reply(OK()))
+
+	status, header, body := getFull(t, m, "/x")
+	require.Equal(t, StatusNoMatch, status, body)
+	require.Equal(t, vlatte.FailureMatch, header.Get(HeaderVlatteError))
+	require.Contains(t, body, "http: status error: expected a status from 100 to 999, not 0")
+}
+
 func TestHandler_ErrorStatusCodeIsItsOwnSetting(t *testing.T) {
 	// A user who wants failures apart from no-match by status alone sets the error status; no-match keeps its own.
 	m := MustNew(Setup().Silent().ErrorStatusCode(http.StatusInternalServerError))

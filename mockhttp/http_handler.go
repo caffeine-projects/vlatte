@@ -503,6 +503,21 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// A scenario's move names its request, which the context of the claim carries.
 	claimCtx := context.WithValue(r.Context(), requestKey{}, reqValues)
 	mock, matched, err := mocks.Find(claimCtx, sub, input, expectationsOf, misses)
+	if se, ok := errors.AsType[*StatusError](err); ok && r.Context().Err() == nil {
+		// net/http panics on a status it can't write.
+		if se.Status < 100 || se.Status > 999 {
+			reqValues.Mock = mock
+			h.onError(w, reqValues, vlatte.FailureMatch,
+				fmt.Errorf("http: status error: expected a status from 100 to 999, not %d", se.Status))
+
+			return
+		}
+
+		h.answerStatus(w, reqValues, mock, se, capture)
+
+		return
+	}
+
 	if err != nil {
 		h.onError(w, reqValues, vlatte.FailureMatch, fmt.Errorf("http: finding a mock: %w", err))
 		return
@@ -530,11 +545,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reqValues.Mock = mock
 	h.app.movedScenarios(reqValues, input)
 
-	// The hits count this request, which Inc counts once the answer is sent.
-	h.debugHeader(w, vlatte.HeaderMatchedMockID, mock.ID())
-	h.debugHeader(w, vlatte.HeaderMatchedMockName, mock.Name())
-	h.debugHeader(w, vlatte.HeaderMatchedMockHits, strconv.FormatInt(mock.Hits()+1, 10))
-	h.debugHeader(w, vlatte.HeaderMatchedMockSource, mock.Origin())
+	h.matchedHeaders(w, mock)
 
 	d, err := vlatte.ProvideTemplateData(h.templateDataProviders, &TemplateDataProviderInput{r: reqValues})
 	if err != nil {
@@ -1121,6 +1132,34 @@ func (h *mockHandler) debugHeader(w http.ResponseWriter, key, value string) {
 	}
 
 	w.Header().Set(key, value)
+}
+
+// matchedHeaders sets the debug headers that name mock, the mock that answers. The hits count this request, which Inc
+// counts once the answer is sent.
+func (h *mockHandler) matchedHeaders(w http.ResponseWriter, mock *Mock) {
+	h.debugHeader(w, vlatte.HeaderMatchedMockID, mock.ID())
+	h.debugHeader(w, vlatte.HeaderMatchedMockName, mock.Name())
+	h.debugHeader(w, vlatte.HeaderMatchedMockHits, strconv.FormatInt(mock.Hits()+1, 10))
+	h.debugHeader(w, vlatte.HeaderMatchedMockSource, mock.Origin())
+}
+
+// answerStatus answers r with se, the error a matcher of mock returned, on behalf of mock: mock counts r as served,
+// and r is journaled as matched. The pipes, delay and events of mock don't apply: the answer is the matcher's.
+func (h *mockHandler) answerStatus(w http.ResponseWriter, r *RequestValues, mock *Mock, se *StatusError, capture *captureWriter) {
+	r.Mock = mock
+	h.matchedHeaders(w, mock)
+
+	res := &Response{StatusCode: se.Status, Header: se.Header.Clone(), Body: se.Body}
+
+	if capture != nil {
+		capture.answeredBy(false)
+	}
+
+	// w is the server's own writer, never one a mock's reply cuts.
+	_ = h.render(r.RawRequest.Context(), w, r, res, capture)
+
+	h.served(mock, r)
+	h.lifecycle.OnMatch(r, res)
 }
 
 // served counts mock as served for r, and moves on the state its matchers keep, such as a scenario's.

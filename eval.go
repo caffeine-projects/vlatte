@@ -88,6 +88,11 @@ type Mocks[M Mock, TIn any] iter.Seq[M]
 // The mock found has taken the turn of its [Claimer] matcher. When another request took it first, Find looks again from
 // the first mock, as the mocks now match in the state that request left. A retry adds to sub. Find stops with the
 // error of ctx once it ends.
+//
+// A matcher that fails stops the search for every mock: Find returns its error, wrapping [ErrMatching], with the mock
+// of that matcher, so a server can answer what the error asks for on its behalf. A mock out of its turn, whose
+// [Claimer] or [Stateful] matchers after the one that failed don't match, such as a mock used up, is passed over
+// instead.
 func (mocks Mocks[M, TIn]) Find(
 	ctx context.Context,
 	sub *Explanation,
@@ -124,9 +129,12 @@ func (mocks Mocks[M, TIn]) find(
 		e := evals(mock)
 
 		stop, err := e.stop(ctx, sub, in)
+		if err != nil && e.inTurn(ctx, in, stop+1) {
+			return mock, false, false, fmt.Errorf("%w: %s: %w", ErrMatching, mock.String(), err)
+		}
+
 		if err != nil {
-			var nothing M
-			return nothing, false, false, fmt.Errorf("%w: %s: %w", ErrMatching, mock.String(), err)
+			continue
 		}
 
 		if stop == len(e) {
@@ -136,8 +144,7 @@ func (mocks Mocks[M, TIn]) find(
 
 			claimed, err := e.claim(ctx, mock, in)
 			if err != nil {
-				var nothing M
-				return nothing, false, false, fmt.Errorf("%w: %s: %w", ErrMatching, mock.String(), err)
+				return mock, false, false, fmt.Errorf("%w: %s: %w", ErrMatching, mock.String(), err)
 			}
 
 			return mock, true, claimed, nil
@@ -196,6 +203,23 @@ func claimOne[TIn any](ctx context.Context, c Claimer, eval *Eval[TIn], mock Moc
 	arg.mock = mock
 
 	return c.Claim(arg), nil
+}
+
+// inTurn reports whether the matchers of e that keep state, [Claimer] and [Stateful] ones, from index from on match
+// in: a mock used up, or waiting on another state, is out of its turn.
+func (e Evaluators[M, TIn]) inTurn(ctx context.Context, in TIn, from int) bool {
+	for _, eval := range e[from:] {
+		_, claims := eval.Matcher.(Claimer)
+		if _, counts := eval.Matcher.(Stateful); !claims && !counts {
+			continue
+		}
+
+		if ok, err := eval.Match(ctx, nil, in); err != nil || !ok {
+			return false
+		}
+	}
+
+	return true
 }
 
 // stop evaluates the input against the evaluators in order, up to the first that doesn't match: it returns its
