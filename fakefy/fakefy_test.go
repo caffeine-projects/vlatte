@@ -138,6 +138,46 @@ func TestSchema_ValuesValidateAgainstTheirSchema(t *testing.T) {
 	}
 }
 
+func TestSchema_SchemasAValueSatisfiesMakeOne(t *testing.T) {
+	// Each schema has a value: the generator must find one, not fail, nor panic, nor return one that doesn't validate.
+	leaf := `{"type": "object", "minProperties": 1, "additionalProperties": false, "properties": {"leaf": {"type": "string"}}}`
+	for range 4 {
+		leaf = `{"type": "object", "required": ["p"], "properties": {"p": ` + leaf + `}}`
+	}
+
+	tests := []struct {
+		name   string
+		schema string
+	}{
+		{name: "a multiple whose next one past the bounds overflows", schema: `{"type": "number", "multipleOf": 1e308}`},
+		{name: "unique items an example repeats", schema: `{"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string", "example": "x"}}`},
+		{name: "a required property allOf allows by pattern", schema: `{"allOf": [
+			{"type": "object", "patternProperties": {"^x": {"type": "integer"}}, "additionalProperties": false},
+			{"required": ["x1"], "properties": {"x1": {"type": "integer"}}}]}`},
+		{name: "a decimal multiple that is the only value", schema: `{"type": "number", "minimum": 0.07, "maximum": 0.07, "multipleOf": 0.01}`},
+		{name: "an integer bound past what a float64 holds exactly", schema: `{"type": "integer", "minimum": 9007199254740993, "maximum": 9007199254740993}`},
+		{name: "a nullable type whose other type has no value", schema: `{"type": ["integer", "null"], "minimum": 2, "maximum": 1}`},
+		{name: "a nullable object that requires itself", schema: `{"type": ["object", "null"], "required": ["next"], "properties": {"next": {"$ref": "#"}}}`},
+		{name: "minProperties past the depth that leaves out optional properties", schema: leaf},
+		{name: "an unanchored pattern shorter than minLength", schema: `{"type": "string", "pattern": "[0-9]", "minLength": 10}`},
+		{name: "a format and a pattern", schema: `{"type": "string", "format": "uuid", "pattern": "^[a-f0-9-]+$"}`},
+		{name: "a format whose values the pattern doesn't match", schema: `{"type": "string", "format": "email", "pattern": "^a@b\\.co$"}`},
+		{name: "an integer range past both ends of an int64", schema: `{"type": "integer", "minimum": -1e19, "maximum": 1e19}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sch, doc := compile(t, tt.schema)
+
+			for seed := range uint64(_seeds) {
+				v, err := fakefy.New(fakefy.WithSeed(seed)).Schema(doc)
+				require.NoError(t, err)
+				requireValid(t, sch, v)
+			}
+		})
+	}
+}
+
 func TestSchema_TheFirstKeywordThatGivesAValueWins(t *testing.T) {
 	// A spec's examples say what a field holds better than a value made up from its type, so they win, in this order.
 	tests := []struct {
@@ -238,6 +278,11 @@ func TestSchema_FailsWithErrUnsatisfiableWhenNoValueFits(t *testing.T) {
 
 func TestSchema_FailsWithErrInvalidForWhatIsNotASchema(t *testing.T) {
 	// A spec that isn't valid is the author's to fix, not a value the generator can't find: the errors tell them apart.
+	deep := map[string]any{"type": "object", "minProperties": 1, "properties": map[string]any{"a": 3}}
+	for range 4 {
+		deep = map[string]any{"type": "object", "required": []any{"p"}, "properties": map[string]any{"p": deep}}
+	}
+
 	tests := []struct {
 		name   string
 		schema map[string]any
@@ -256,6 +301,7 @@ func TestSchema_FailsWithErrInvalidForWhatIsNotASchema(t *testing.T) {
 		{name: "a negative maxLength", schema: map[string]any{"type": "string", "maxLength": -1}, want: "at the root: maxLength must be a whole number from 0, not -1"},
 		{name: "a negative minProperties", schema: map[string]any{"type": "object", "minProperties": -1}, want: "at the root: minProperties must be a whole number from 0, not -1"},
 		{name: "null as a schema", schema: map[string]any{"properties": map[string]any{"a": nil}}, want: `at "/a": expected a schema object or boolean, not <nil>`},
+		{name: "an optional property minProperties needs past the depth that leaves it out", schema: deep, want: `at "/p/p/p/p/a": expected a schema object or boolean, not int`},
 	}
 
 	for _, tt := range tests {

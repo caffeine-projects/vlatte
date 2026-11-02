@@ -48,9 +48,14 @@ const (
 
 	// _maxCount is the largest count, such as maxLength, that counts: no value made reaches it.
 	_maxCount = math.MaxInt32
+)
 
-	// _intLimit is the largest float64 that converts to an int64: integers stay within it.
-	_intLimit = float64(math.MaxInt64 - 1023)
+// The ends of the ranges of an int64 and of a float64, as fractions: values made stay within them.
+var (
+	_minInt   = new(big.Rat).SetInt64(math.MinInt64)
+	_maxInt   = new(big.Rat).SetInt64(math.MaxInt64)
+	_minFloat = new(big.Rat).SetFloat64(-math.MaxFloat64)
+	_maxFloat = new(big.Rat).SetFloat64(math.MaxFloat64)
 )
 
 // Faker makes fake values. A Faker is not safe for concurrent use.
@@ -90,11 +95,13 @@ func New(opts ...Option) *Faker {
 // A value comes from the first of const, examples, example, default and enum the schema has; then from its format,
 // such as email or date-time; then from the name of its field, such as createdAt or price; then from its type and
 // bounds. A $ref resolves within schema, allOf merges its schemas, and oneOf and anyOf take one of their branches,
-// setting an OpenAPI discriminator's property to name it, unless the branch fixes its value. An optional property or
-// item no value satisfies is left out.
+// setting an OpenAPI discriminator's property to name it, unless the branch fixes its value. Of a list of types, the
+// first a value satisfies wins, null last, or first from four levels down, so a nullable schema that nests itself
+// ends. An optional property or item no value satisfies is left out.
 //
 // A schema that compiles as JSON Schema 2020-12 checks each value: one that doesn't validate, such as an example the
-// rest of the schema breaks, is made again, from the schema's examples, then without them, up to 20 times.
+// rest of the schema breaks, is made again, from the schema's examples, then without them, up to 20 times. A schema
+// whose examples leave no value, such as unique items an example repeats, is made without them.
 //
 // The error wraps [ErrUnsatisfiable], [ErrUnresolved] or [ErrInvalid], naming the place in the value it stopped at.
 func (f *Faker) Schema(schema map[string]any) (any, error) {
@@ -107,18 +114,26 @@ func (f *Faker) Field(name string, schema map[string]any) (any, error) {
 	w := walk{f: f, root: schema, examples: true}
 
 	sch := validator(schema)
-	if sch == nil {
-		return w.value(schema, name, "", 0)
-	}
 
 	var invalid error
 
 	for try := range _maxTries {
-		w.examples = try < _maxTries/2
+		w.examples = w.examples && try < _maxTries/2
 
 		v, err := w.value(schema, name, "", 0)
+
+		// The examples may be what no value satisfies, such as unique items an example repeats.
+		if errors.Is(err, ErrUnsatisfiable) && w.examples {
+			w.examples = false
+			continue
+		}
+
 		if err != nil {
 			return nil, err
+		}
+
+		if sch == nil {
+			return v, nil
 		}
 
 		if invalid = validate(sch, v); invalid == nil {
@@ -217,21 +232,35 @@ func (w *walk) value(s any, name, path string, depth int) (any, error) {
 		return w.branch(m, "anyOf", name, path, depth)
 	}
 
-	switch typeOf(m) {
+	// A type no value satisfies gives way to the next.
+	var v any
+
+	for _, t := range typesOf(m, depth) {
+		if v, err = w.typed(t, m, name, path, depth); !errors.Is(err, ErrUnsatisfiable) {
+			break
+		}
+	}
+
+	return v, err
+}
+
+// typed returns a value of type t for s, as [walk.value] does.
+func (w *walk) typed(t string, s map[string]any, name, path string, depth int) (any, error) {
+	switch t {
 	case "object":
-		return w.object(m, path, depth)
+		return w.object(s, path, depth)
 	case "array":
-		return w.array(m, name, path, depth)
+		return w.array(s, name, path, depth)
 	case "integer":
-		return w.f.integer(m, name, path)
+		return w.f.integer(s, name, path)
 	case "number":
-		return w.f.number(m, name, path)
+		return w.f.number(s, name, path)
 	case "boolean":
 		return w.f.rnd.IntN(2) == 1, nil
 	case "null":
 		return nil, nil
 	default:
-		return w.f.str(m, name, path)
+		return w.f.str(s, name, path)
 	}
 }
 
@@ -436,7 +465,8 @@ func discriminatorValue(disc map[string]any, picked any) string {
 	return last
 }
 
-// object returns an object with the properties of s. Past _optionalDepth, it leaves out the optional ones.
+// object returns an object with the properties of s. Past _optionalDepth, it leaves out the optional ones minProperties
+// doesn't need.
 func (w *walk) object(s map[string]any, path string, depth int) (any, error) {
 	props, _ := s["properties"].(map[string]any)
 	required := make(map[string]bool)
@@ -494,8 +524,12 @@ func (w *walk) object(s map[string]any, path string, depth int) (any, error) {
 		return nil, fmt.Errorf("%w: %s: minProperties %d is above maxProperties %d", ErrUnsatisfiable, at(path), minProps, maxProps)
 	}
 
+	// Optional properties left out come back for minProperties first, as additionalProperties may refuse others.
+	var skipped []string
+
 	for _, key := range slices.Sorted(maps.Keys(props)) {
 		if !required[key] && depth >= _optionalDepth {
+			skipped = append(skipped, key)
 			continue
 		}
 
@@ -525,6 +559,16 @@ func (w *walk) object(s map[string]any, path string, depth int) (any, error) {
 		}
 
 		if err := add(key, schema); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, key := range skipped {
+		if len(out) >= minProps {
+			break
+		}
+
+		if err := add(key, props[key]); err != nil {
 			return nil, err
 		}
 	}
@@ -701,23 +745,16 @@ func (f *Faker) str(s map[string]any, name, path string) (any, error) {
 		return nil, fmt.Errorf("%w: %s: minLength %d is above maxLength %d", ErrUnsatisfiable, at(path), lo, hi)
 	}
 
-	if exprs := patterns(s); len(exprs) > 0 {
-		res := make([]*regexp.Regexp, 0, len(exprs))
-		for _, expr := range exprs {
-			re, err := regexp.Compile(expr)
-			if err != nil {
-				return nil, fmt.Errorf("%w: %s: pattern %q: compiling: %w", ErrInvalid, at(path), expr, err)
-			}
+	exprs := patterns(s)
+	res := make([]*regexp.Regexp, 0, len(exprs))
 
-			res = append(res, re)
-		}
-
-		v, err := f.pattern(res, lo, hi, bounded)
+	for _, expr := range exprs {
+		re, err := regexp.Compile(expr)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s: pattern %s: %w", ErrUnsatisfiable, at(path), quoteAll(exprs), err)
+			return nil, fmt.Errorf("%w: %s: pattern %q: compiling: %w", ErrInvalid, at(path), expr, err)
 		}
 
-		return v, nil
+		res = append(res, re)
 	}
 
 	fits := func(v string) bool {
@@ -725,18 +762,30 @@ func (f *Faker) str(s map[string]any, name, path string) (any, error) {
 		return n >= lo && (!bounded || n <= hi)
 	}
 
-	// A format's value is what makes it one: it isn't cut or padded to fit.
+	// A format's value is what makes it one: it isn't cut or padded to fit. One the patterns don't match gives way
+	// to a string of the patterns.
 	format, _ := s["format"].(string)
 	if v := f.format(format); v != "" {
 		for range _maxTries {
-			if fits(v) {
+			if fits(v) && matchAll(res, v) {
 				return v, nil
 			}
 
 			v = f.format(format)
 		}
 
-		return nil, fmt.Errorf("%w: %s: format %q makes no string of %s", ErrUnsatisfiable, at(path), format, lengths(lo, hi, bounded))
+		if len(res) == 0 {
+			return nil, fmt.Errorf("%w: %s: format %q makes no string of %s", ErrUnsatisfiable, at(path), format, lengths(lo, hi, bounded))
+		}
+	}
+
+	if len(res) > 0 {
+		v, err := f.pattern(res, lo, hi, bounded)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s: pattern %s: %w", ErrUnsatisfiable, at(path), quoteAll(exprs), err)
+		}
+
+		return v, nil
 	}
 
 	v := f.byName(name)
@@ -746,14 +795,7 @@ func (f *Faker) str(s map[string]any, name, path string) (any, error) {
 	}
 
 	if n := utf8.RuneCountInString(v); n < lo {
-		var b strings.Builder
-		b.WriteString(v)
-
-		for range lo - n {
-			b.WriteByte(byte('a' + f.rnd.IntN(26)))
-		}
-
-		v = b.String()
+		v += f.letters(lo - n)
 	}
 
 	if bounded && utf8.RuneCountInString(v) > hi {
@@ -804,14 +846,16 @@ func lengths(lo, hi int, bounded bool) string {
 // integer returns an integer within the bounds of s, a multiple of its multipleOf. Without bounds, the name of its
 // field picks the range, or 1 to 100.
 func (f *Faker) integer(s map[string]any, name, path string) (any, error) {
-	step := 1.0
-	if m, ok := number(s["multipleOf"]); ok && m > 0 {
+	one := big.NewRat(1, 1)
+
+	step := one
+	if m, ok := rat(s["multipleOf"]); ok && m.Sign() > 0 {
 		// An integer that is a multiple of 2.5 is one of 5.
-		step = lcm(1, m)
+		step = lcm(one, m)
 	}
 
-	if step > _intLimit {
-		return nil, fmt.Errorf("%w: %s: no integer is a multiple of %v", ErrUnsatisfiable, at(path), step)
+	if step.Cmp(_maxInt) > 0 {
+		return nil, fmt.Errorf("%w: %s: no integer is a multiple of %v", ErrUnsatisfiable, at(path), float(step))
 	}
 
 	lo, hi, exLo, exHi, err := bounds(s, name, path, step)
@@ -819,42 +863,31 @@ func (f *Faker) integer(s map[string]any, name, path string) (any, error) {
 		return nil, err
 	}
 
-	if lo > _intLimit || hi < -_intLimit {
-		return nil, fmt.Errorf("%w: %s: integers from %v to %v don't fit an int64", ErrUnsatisfiable, at(path), lo, hi)
+	klo, khi := indices(lo, hi, exLo, exHi, step)
+	if klo.Cmp(khi) > 0 && step.Cmp(one) == 0 {
+		return nil, fmt.Errorf("%w: %s: no integer between %v and %v", ErrUnsatisfiable, at(path), float(lo), float(hi))
 	}
 
-	ilo, ihi := int64(math.Ceil(max(lo, -_intLimit))), int64(math.Floor(min(hi, _intLimit)))
-	if exLo && float64(ilo) == lo {
-		ilo++
+	if klo.Cmp(khi) > 0 {
+		return nil, fmt.Errorf("%w: %s: no multiple of %v between %v and %v", ErrUnsatisfiable, at(path), float(step), float(lo), float(hi))
 	}
 
-	if exHi && float64(ihi) == hi {
-		ihi--
+	klo, khi = clamp(klo, khi, _minInt, _maxInt, step)
+	if klo.Cmp(khi) > 0 {
+		return nil, fmt.Errorf("%w: %s: integers from %v to %v don't fit an int64", ErrUnsatisfiable, at(path), float(lo), float(hi))
 	}
 
-	st := int64(step)
+	k := f.between(klo, khi)
 
-	klo, khi := ceilDiv(ilo, st), floorDiv(ihi, st)
-	if klo > khi && st == 1 {
-		return nil, fmt.Errorf("%w: %s: no integer between %v and %v", ErrUnsatisfiable, at(path), lo, hi)
-	}
-
-	if klo > khi {
-		return nil, fmt.Errorf("%w: %s: no multiple of %v between %v and %v", ErrUnsatisfiable, at(path), step, lo, hi)
-	}
-
-	// The span may not fit an int64, but fits a uint64, and the sum wraps back within the range.
-	k := klo + int64(f.rnd.Uint64N(uint64(khi)-uint64(klo)+1))
-
-	return k * st, nil
+	return k.Mul(k, step.Num()).Int64(), nil
 }
 
 // number returns a number within the bounds of s, with two decimals where they fit, a multiple of its multipleOf.
 // Without bounds, the name of its field picks the range, or 1 to 100.
 func (f *Faker) number(s map[string]any, name, path string) (any, error) {
-	step, ok := number(s["multipleOf"])
-	if !ok || step <= 0 {
-		step = 0
+	step, ok := rat(s["multipleOf"])
+	if !ok || step.Sign() <= 0 {
+		step = nil
 	}
 
 	lo, hi, exLo, exHi, err := bounds(s, name, path, step)
@@ -862,37 +895,45 @@ func (f *Faker) number(s map[string]any, name, path string) (any, error) {
 		return nil, err
 	}
 
-	if lo == hi && (exLo || exHi) {
-		return nil, fmt.Errorf("%w: %s: no number between %v and %v, exclusive", ErrUnsatisfiable, at(path), lo, hi)
+	if lo.Cmp(hi) == 0 && (exLo || exHi) {
+		return nil, fmt.Errorf("%w: %s: no number between %v and %v, exclusive", ErrUnsatisfiable, at(path), float(lo), float(hi))
 	}
 
+	// in reports whether v is within the bounds as JSON writes it: a decimal, not a float64.
 	in := func(v float64) bool {
-		return (v > lo || !exLo && v == lo) && (v < hi || !exHi && v == hi)
+		if math.IsInf(v, 0) {
+			return false
+		}
+
+		d := decimal(v)
+		cl, ch := d.Cmp(lo), d.Cmp(hi)
+
+		return (cl > 0 || !exLo && cl == 0) && (ch < 0 || !exHi && ch == 0)
 	}
 
-	if step > 0 {
-		klo, khi := math.Ceil(lo/step), math.Floor(hi/step)
-		dec := decimals(step)
+	if step != nil {
+		klo, khi := indices(lo, hi, exLo, exHi, step)
+		klo, khi = clamp(klo, khi, _minFloat, _maxFloat, step)
 
 		for range _maxTries {
-			if klo > khi {
+			if klo.Cmp(khi) > 0 {
 				break
 			}
 
-			k := min(klo+math.Floor(f.rnd.Float64()*(khi-klo+1)), khi)
-			// The product is rounded to the decimals of the step, as 3 × 0.1 = 0.30000000000000004 isn't a multiple of
-			// 0.1 in JSON, then checked, as a float64 holds about 16 digits.
-			v, _ := strconv.ParseFloat(strconv.FormatFloat(k*step, 'f', dec, 64), 64)
-			if in(v) && multiple(v, step) {
+			// A float64 holds about 16 digits, so the decimal JSON writes for it may be another number: one past the
+			// bounds, or not a multiple.
+			k := new(big.Rat).SetInt(f.between(klo, khi))
+			if v, _ := k.Mul(k, step).Float64(); in(v) && new(big.Rat).Quo(decimal(v), step).IsInt() {
 				return v, nil
 			}
 		}
 
-		return nil, fmt.Errorf("%w: %s: no multiple of %v between %v and %v", ErrUnsatisfiable, at(path), step, lo, hi)
+		return nil, fmt.Errorf("%w: %s: no multiple of %v between %v and %v", ErrUnsatisfiable, at(path), float(step), float(lo), float(hi))
 	}
 
 	// Halves, as hi - lo overflows to +Inf over the range of a float64.
-	mid, half := lo/2+hi/2, hi/2-lo/2
+	flo, fhi := float(lo), float(hi)
+	mid, half := flo/2+fhi/2, fhi/2-flo/2
 
 	v := mid + (2*f.rnd.Float64()-1)*half
 	if r := math.Round(v*100) / 100; in(r) {
@@ -908,12 +949,15 @@ func (f *Faker) number(s map[string]any, name, path string) (any, error) {
 
 // bounds returns the range of the number s describes, and whether each end excludes itself: its bounds, or the range
 // the name of its field picks, or 1 to 100, moved to meet a single bound. A side s leaves open widens to hold a
-// multiple of step, when step is above 0.
-func bounds(s map[string]any, name, path string, step float64) (lo, hi float64, exLo, exHi bool, err error) {
-	lo, hi, ok := numberRange(name)
+// multiple of step, when step isn't nil.
+func bounds(s map[string]any, name, path string, step *big.Rat) (lo, hi *big.Rat, exLo, exHi bool, err error) {
+	flo, fhi, ok := numberRange(name)
 	if !ok {
-		lo, hi = 1, 100
+		flo, fhi = 1, 100
 	}
+
+	lo, hi = decimal(flo), decimal(fhi)
+	width := new(big.Rat).Sub(hi, lo)
 
 	minV, exLo, hasMin := lower(s)
 	maxV, exHi, hasMax := upper(s)
@@ -922,20 +966,22 @@ func bounds(s map[string]any, name, path string, step float64) (lo, hi float64, 
 	case hasMin && hasMax:
 		lo, hi = minV, maxV
 	case hasMin:
-		lo, hi = minV, max(hi, minV+hi-lo)
+		lo, hi = minV, greater(hi, new(big.Rat).Add(minV, width))
 	case hasMax:
-		lo, hi = min(lo, maxV-(hi-lo)), maxV
+		lo, hi = lesser(lo, new(big.Rat).Sub(maxV, width)), maxV
 	}
 
 	switch {
-	case step > 0 && !hasMax:
-		hi = max(hi, math.Ceil(lo/step)*step+2*step)
-	case step > 0 && !hasMin:
-		lo = min(lo, math.Floor(hi/step)*step-2*step)
+	case step != nil && !hasMax:
+		k := ceil(new(big.Rat).Quo(lo, step))
+		hi = greater(hi, new(big.Rat).Mul(new(big.Rat).SetInt(k.Add(k, big.NewInt(2))), step))
+	case step != nil && !hasMin:
+		k := floor(new(big.Rat).Quo(hi, step))
+		lo = lesser(lo, new(big.Rat).Mul(new(big.Rat).SetInt(k.Sub(k, big.NewInt(2))), step))
 	}
 
-	if lo > hi {
-		return 0, 0, false, false, fmt.Errorf("%w: %s: minimum %v is above maximum %v", ErrUnsatisfiable, at(path), lo, hi)
+	if lo.Cmp(hi) > 0 {
+		return nil, nil, false, false, fmt.Errorf("%w: %s: minimum %v is above maximum %v", ErrUnsatisfiable, at(path), float(lo), float(hi))
 	}
 
 	return lo, hi, exLo, exHi, nil
@@ -944,11 +990,11 @@ func bounds(s map[string]any, name, path string, step float64) (lo, hi float64, 
 // lower returns the lower bound of s, the stricter of minimum and exclusiveMinimum, and whether it excludes itself.
 // JSON Schema 2020-12 and draft 6 on write exclusiveMinimum as a number; draft 4 and OpenAPI 3.0 as a boolean next to
 // minimum.
-func lower(s map[string]any) (v float64, excl, ok bool) {
-	v, ok = number(s["minimum"])
+func lower(s map[string]any) (v *big.Rat, excl, ok bool) {
+	v, ok = rat(s["minimum"])
 	excl = ok && s["exclusiveMinimum"] == true
 
-	if x, isNum := number(s["exclusiveMinimum"]); isNum && (!ok || x >= v) {
+	if x, isNum := rat(s["exclusiveMinimum"]); isNum && (!ok || x.Cmp(v) >= 0) {
 		return x, true, true
 	}
 
@@ -956,51 +1002,134 @@ func lower(s map[string]any) (v float64, excl, ok bool) {
 }
 
 // upper returns the upper bound of s, as [lower] returns the lower one.
-func upper(s map[string]any) (v float64, excl, ok bool) {
-	v, ok = number(s["maximum"])
+func upper(s map[string]any) (v *big.Rat, excl, ok bool) {
+	v, ok = rat(s["maximum"])
 	excl = ok && s["exclusiveMaximum"] == true
 
-	if x, isNum := number(s["exclusiveMaximum"]); isNum && (!ok || x <= v) {
+	if x, isNum := rat(s["exclusiveMaximum"]); isNum && (!ok || x.Cmp(v) <= 0) {
 		return x, true, true
 	}
 
 	return v, excl, ok
 }
 
-// decimals returns how many decimals x has, written in full.
-func decimals(x float64) int {
-	str := strconv.FormatFloat(x, 'f', -1, 64)
-	if i := strings.IndexByte(str, '.'); i >= 0 {
-		return len(str) - i - 1
+// indices returns the least and the greatest k whose k × step is within lo and hi, each end excluding itself when
+// exLo or exHi says so. The least is above the greatest when there is no such k.
+func indices(lo, hi *big.Rat, exLo, exHi bool, step *big.Rat) (klo, khi *big.Int) {
+	q := new(big.Rat).Quo(lo, step)
+	if klo = ceil(q); exLo && q.IsInt() {
+		klo.Add(klo, big.NewInt(1))
 	}
 
-	return 0
+	q = new(big.Rat).Quo(hi, step)
+	if khi = floor(q); exHi && q.IsInt() {
+		khi.Sub(khi, big.NewInt(1))
+	}
+
+	return klo, khi
 }
 
-// multiple reports whether v is a multiple of step, as JSON has them: decimals, not float64s.
-func multiple(v, step float64) bool {
-	return new(big.Rat).Quo(decimal(v), decimal(step)).IsInt()
+// clamp narrows klo to khi, indices of multiples of step, to those of multiples within lo and hi.
+func clamp(klo, khi *big.Int, lo, hi, step *big.Rat) (*big.Int, *big.Int) {
+	if a := ceil(new(big.Rat).Quo(lo, step)); klo.Cmp(a) < 0 {
+		klo = a
+	}
+
+	if b := floor(new(big.Rat).Quo(hi, step)); khi.Cmp(b) > 0 {
+		khi = b
+	}
+
+	return klo, khi
+}
+
+// between returns an integer from lo to hi, lo at most hi. Past the span of a uint64, it is one of a float64's
+// fractions of the span.
+func (f *Faker) between(lo, hi *big.Int) *big.Int {
+	span := new(big.Int).Sub(hi, lo)
+
+	var off *big.Int
+
+	switch {
+	case span.IsUint64() && span.Uint64() == math.MaxUint64:
+		off = new(big.Int).SetUint64(f.rnd.Uint64())
+	case span.IsUint64():
+		off = new(big.Int).SetUint64(f.rnd.Uint64N(span.Uint64() + 1))
+	default:
+		// With enough precision, the product is exact, and Int rounds it down, to at most span.
+		frac := new(big.Float).SetPrec(uint(span.BitLen()) + 64).SetFloat64(f.rnd.Float64())
+		off, _ = frac.Mul(frac, new(big.Float).SetInt(span)).Int(nil)
+	}
+
+	return off.Add(off, lo)
+}
+
+// floor returns r rounded down.
+func floor(r *big.Rat) *big.Int {
+	// The denominator is above 0, so the Euclidean quotient rounds down.
+	q, _ := new(big.Int).DivMod(r.Num(), r.Denom(), new(big.Int))
+	return q
+}
+
+// ceil returns r rounded up.
+func ceil(r *big.Rat) *big.Int {
+	q := floor(new(big.Rat).Neg(r))
+	return q.Neg(q)
+}
+
+// lesser returns the lesser of a and b.
+func lesser(a, b *big.Rat) *big.Rat {
+	if a.Cmp(b) <= 0 {
+		return a
+	}
+
+	return b
+}
+
+// greater returns the greater of a and b.
+func greater(a, b *big.Rat) *big.Rat {
+	if a.Cmp(b) >= 0 {
+		return a
+	}
+
+	return b
 }
 
 // lcm returns the least number that is a multiple of a and of b, both above 0.
-func lcm(a, b float64) float64 {
-	x, y := decimal(a), decimal(b)
-
+func lcm(a, b *big.Rat) *big.Rat {
 	// lcm(p/q, r/s) is lcm(p, r) / gcd(q, s), of fractions in lowest terms.
-	gcd := new(big.Int).GCD(nil, nil, x.Num(), y.Num())
-	num := new(big.Int).Mul(x.Num(), y.Num())
+	gcd := new(big.Int).GCD(nil, nil, a.Num(), b.Num())
+	num := new(big.Int).Mul(a.Num(), b.Num())
 	num.Div(num, gcd)
 
-	den := new(big.Int).GCD(nil, nil, x.Denom(), y.Denom())
-	f, _ := new(big.Rat).SetFrac(num, den).Float64()
+	den := new(big.Int).GCD(nil, nil, a.Denom(), b.Denom())
 
-	return f
+	return new(big.Rat).SetFrac(num, den)
 }
 
-// decimal returns x as the decimal JSON writes it as, exactly.
+// decimal returns x, a finite float64, as the decimal JSON writes it as, exactly.
 func decimal(x float64) *big.Rat {
 	r, _ := new(big.Rat).SetString(strconv.FormatFloat(x, 'g', -1, 64))
 	return r
+}
+
+// rat returns v as a fraction, exactly, when it is a finite number: any Go number, a json.Number, or the *big.Rat of a
+// multipleOf an allOf merged. A float64 is the decimal JSON writes it as.
+func rat(v any) (*big.Rat, bool) {
+	if r, ok := v.(*big.Rat); ok {
+		return r, true
+	}
+
+	if x, ok := number(v); !ok || math.IsInf(x, 0) || math.IsNaN(x) {
+		return nil, false
+	}
+
+	return new(big.Rat).SetString(fmt.Sprint(v))
+}
+
+// float returns r as the nearest float64, for an error message.
+func float(r *big.Rat) float64 {
+	x, _ := r.Float64()
+	return x
 }
 
 // merge adds the keywords of src to dst, as allOf has both apply: properties and required add up, bounds take the
@@ -1028,14 +1157,14 @@ func merge(dst, src map[string]any) error {
 			add, _ := v.([]any)
 			dst[k] = append(slices.Clone(old), add...)
 		case "minimum", "exclusiveMinimum", "minLength", "minItems", "minProperties":
-			dst[k] = stricter(prev, v, math.Max)
+			dst[k] = stricter(prev, v, 1)
 		case "maximum", "exclusiveMaximum", "maxLength", "maxItems", "maxProperties":
-			dst[k] = stricter(prev, v, math.Min)
+			dst[k] = stricter(prev, v, -1)
 		case "multipleOf":
-			x, okX := number(prev)
-			y, okY := number(v)
+			x, okX := rat(prev)
+			y, okY := rat(v)
 
-			if okX && okY && x > 0 && y > 0 {
+			if okX && okY && x.Sign() > 0 && y.Sign() > 0 {
 				dst[k] = lcm(x, y)
 			}
 		case "type":
@@ -1087,24 +1216,24 @@ func merge(dst, src map[string]any) error {
 	return nil
 }
 
-// stricter returns the bound pick chooses of a and b, or the one that is a number: a bound that isn't one is ignored.
-func stricter(a, b any, pick func(x, y float64) float64) any {
-	x, okA := number(a)
-	y, okB := number(b)
+// stricter returns the greater of the bounds a and b, for sign 1, or the lesser, for sign -1, or the one that is a
+// number: a bound that isn't one is ignored.
+func stricter(a, b any, sign int) any {
+	x, okA := rat(a)
+	y, okB := rat(b)
 
-	if !okA {
+	switch {
+	case !okA:
+		return b
+	case !okB || x.Cmp(y)*sign >= 0:
+		return a
+	default:
 		return b
 	}
-
-	if !okB {
-		return a
-	}
-
-	return pick(x, y)
 }
 
-// closeProperties applies the additionalProperties of a to the properties b names and a doesn't, as allOf has a
-// apply to them. It changes the properties of b, a copy of them.
+// closeProperties applies the additionalProperties of a to the properties b names and a neither names nor matches by
+// its patternProperties, as allOf has a apply to them. It changes the properties of b, a copy of them.
 func closeProperties(a, b map[string]any) {
 	extra, ok := a["additionalProperties"]
 	if !ok {
@@ -1116,7 +1245,8 @@ func closeProperties(a, b map[string]any) {
 
 	closed := make(map[string]any, len(props))
 	for name, schema := range props {
-		if _, ok := declared[name]; ok {
+		// A patternProperties that doesn't compile fails where the object is made.
+		if _, matched, _ := patternSchema(a, name, ""); has(declared, name) || matched {
 			closed[name] = schema
 		} else {
 			closed[name] = bothSchemas(schema, extra)
@@ -1303,26 +1433,23 @@ func clone(v any) any {
 	}
 }
 
-// typeOf returns the type of the values s describes: its type, the first that isn't null of a list, or the type its
-// keywords imply.
-func typeOf(s map[string]any) string {
-	switch t := s["type"].(type) {
-	case string:
-		return t
-	case []any:
-		null := false
+// typesOf returns the types of the values s describes, depth levels down, in the order to try them: those of its
+// type keyword, null last, or first from _optionalDepth on, so a nullable schema that nests itself ends; or the type
+// its keywords imply.
+func typesOf(s map[string]any, depth int) []string {
+	listed := types(s["type"])
+	out := slices.DeleteFunc(slices.Clone(listed), func(t string) bool { return t == "null" })
 
-		for _, item := range t {
-			if name, ok := item.(string); ok && name != "null" {
-				return name
-			}
+	switch {
+	case len(out) == len(listed):
+	case depth >= _optionalDepth:
+		out = append([]string{"null"}, out...)
+	default:
+		out = append(out, "null")
+	}
 
-			null = null || item == "null"
-		}
-
-		if null {
-			return "null"
-		}
+	if len(out) > 0 {
+		return out
 	}
 
 	hasAny := func(keys ...string) bool {
@@ -1331,13 +1458,13 @@ func typeOf(s map[string]any) string {
 
 	switch {
 	case hasAny("properties", "additionalProperties", "required", "minProperties", "maxProperties"):
-		return "object"
+		return []string{"object"}
 	case hasAny("items", "prefixItems", "minItems", "maxItems", "uniqueItems"):
-		return "array"
+		return []string{"array"}
 	case hasAny("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"):
-		return "number"
+		return []string{"number"}
 	default:
-		return "string"
+		return []string{"string"}
 	}
 }
 
@@ -1411,21 +1538,6 @@ func intKeyword(s map[string]any, key, path string) (int, bool, error) {
 	}
 
 	return int(min(n, _maxCount)), true, nil
-}
-
-// ceilDiv returns a / b rounded up, for b > 0.
-func ceilDiv(a, b int64) int64 {
-	return -floorDiv(-a, b)
-}
-
-// floorDiv returns a / b rounded down, for b > 0.
-func floorDiv(a, b int64) int64 {
-	q := a / b
-	if a%b != 0 && a < 0 {
-		q--
-	}
-
-	return q
 }
 
 // escape writes key as a JSON pointer token.
