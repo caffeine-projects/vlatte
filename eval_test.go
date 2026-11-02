@@ -133,6 +133,7 @@ func TestFind_AFailingMatcherOfAMockOutOfTurnDoesNotStopTheSearch(t *testing.T) 
 
 		return vlatte.Evaluators[*fakeMock, request]{
 			{Key: "k", Matcher: vlatte.MatcherFunc("m", func(vlatte.MatcherArg) (bool, error) { return false, errors.New("boom") })},
+			{Key: "plain", Matcher: vlatte.MatcherFunc("plain", func(vlatte.MatcherArg) (bool, error) { return true, nil })},
 			{Key: "turn", Matcher: &turnMatcher{taken: true}},
 		}
 	}

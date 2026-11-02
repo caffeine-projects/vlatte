@@ -850,6 +850,38 @@ func TestHandler_AMatcherAnswersWithTheStatusItsErrorCarries(t *testing.T) {
 	require.Equal(t, map[string]int64{"contract": 1, "create": 1}, hits)
 }
 
+func TestHandler_ARecordingKeepsAMatchersStatusAnswerOnlyWithMockedAnswers(t *testing.T) {
+	// A matcher's status answer is a mock's answer: a recording keeps it only when it keeps what mocks answer.
+	refuse := vlatte.MatcherFunc("contract", func(vlatte.MatcherArg) (bool, error) {
+		return false, &StatusError{Status: http.StatusUnprocessableEntity, Body: []byte("refused")}
+	})
+
+	for _, mocked := range []bool{true, false} {
+		dir := t.TempDir()
+
+		m := MustNew(Setup().Silent())
+		m.MustStart()
+		t.Cleanup(m.Close)
+
+		m.MustMock(Postf("/pets").ID("contract").Matches(refuse).Reply(OK()))
+		require.NoError(t, m.StartRecording(RecordDir(dir), RecordIncludeMocked(mocked)))
+
+		res, _ := do(t, http.MethodPost, m.URL("/pets"), nil, nil)
+		require.Equal(t, http.StatusUnprocessableEntity, res.StatusCode)
+
+		stopRecording(t, m)
+
+		if !mocked {
+			require.Empty(t, recordedMocks(t, dir))
+			continue
+		}
+
+		rec := onlyMock(t, dir)
+		require.Equal(t, http.StatusUnprocessableEntity, rec.Response.Status)
+		require.Equal(t, "refused", rec.Response.Body)
+	}
+}
+
 func TestHandler_AMockUsedUpDoesNotAnswerWithItsMatchersStatus(t *testing.T) {
 	// A mock that would not answer once used up, or in another scenario state, must not answer with a status either.
 	m := MustNew(Setup().Silent())
