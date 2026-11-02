@@ -132,12 +132,7 @@ func (f *Faker) Field(name string, schema map[string]any) (any, error) {
 // validator returns the validator of schema as JSON Schema 2020-12, or nil when it doesn't compile as one, such as an
 // OpenAPI 3.0 schema whose exclusiveMinimum is a boolean.
 func validator(schema map[string]any) *jsonschema.Schema {
-	b, err := json.Marshal(schema)
-	if err != nil {
-		return nil
-	}
-
-	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
+	doc, err := asJSON(schema)
 	if err != nil {
 		return nil
 	}
@@ -145,9 +140,8 @@ func validator(schema map[string]any) *jsonschema.Schema {
 	c := jsonschema.NewCompiler()
 	c.DefaultDraft(jsonschema.Draft2020)
 
-	if err := c.AddResource("schema.json", doc); err != nil {
-		return nil
-	}
+	// AddResource fails only for a URL added before: Compile fails then too.
+	_ = c.AddResource("schema.json", doc)
 
 	sch, err := c.Compile("schema.json")
 	if err != nil {
@@ -157,19 +151,20 @@ func validator(schema map[string]any) *jsonschema.Schema {
 	return sch
 }
 
-// validate checks v, as JSON, against sch.
+// validate checks v against sch. Every part of v is JSON: a value made, or one of the schema, which is.
 func validate(sch *jsonschema.Schema, v any) error {
+	inst, _ := asJSON(v)
+	return sch.Validate(inst)
+}
+
+// asJSON returns v as the validator reads JSON: its numbers as json.Number, its lists as []any.
+func asJSON(v any) (any, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Errorf("writing the value as JSON: %w", err)
+		return nil, err
 	}
 
-	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
-	if err != nil {
-		return fmt.Errorf("reading the value as JSON: %w", err)
-	}
-
-	return sch.Validate(inst)
+	return jsonschema.UnmarshalJSON(bytes.NewReader(b))
 }
 
 // walk makes the values of one schema document, whose $refs resolve within root. Without examples, values come from
@@ -407,22 +402,16 @@ func (w *walk) branch(s map[string]any, key, name, path string, depth int) (any,
 // fixes reports whether s gives its property prop a const or an enum, which a discriminator's tag must not replace.
 func (w *walk) fixes(s map[string]any, prop, path string) bool {
 	m, err := w.flatten(s, path, 0)
-	if err != nil {
-		return false
-	}
-
 	props, _ := m["properties"].(map[string]any)
 
-	p, err := schemaMap(props[prop], path)
-	if err != nil {
+	p, ok := props[prop].(map[string]any)
+	if err != nil || !ok {
 		return false
 	}
 
-	if p, err = w.flatten(p, path, 0); err != nil {
-		return false
-	}
+	p, err = w.flatten(p, path, 0)
 
-	return has(p, "const") || has(p, "enum")
+	return err == nil && (has(p, "const") || has(p, "enum"))
 }
 
 // discriminatorValue returns the value of a discriminator's property that names picked: its key in the mapping, or
@@ -545,11 +534,19 @@ func (w *walk) object(s map[string]any, path string, depth int) (any, error) {
 			return nil, fmt.Errorf("%w: %s: expected %d properties, not %d", ErrUnsatisfiable, at(path), minProps, len(out))
 		}
 
-		if key := fmt.Sprintf("property%d", i); !has(out, key) {
-			if err := add(key, extra); err != nil {
-				return nil, err
-			}
+		key := fmt.Sprintf("property%d", i)
+		if has(out, key) {
+			continue
 		}
+
+		// Counted as required, a property no value satisfies fails here, rather than adding none forever.
+		required[key] = true
+
+		if err := add(key, extra); err != nil {
+			return nil, err
+		}
+
+		delete(required, key)
 	}
 
 	if boundedProps {
@@ -1090,22 +1087,20 @@ func merge(dst, src map[string]any) error {
 	return nil
 }
 
-// stricter returns the bound pick chooses of a and b, or the one that is a number; of two booleans, as draft 4 writes
-// exclusiveMinimum, true.
+// stricter returns the bound pick chooses of a and b, or the one that is a number: a bound that isn't one is ignored.
 func stricter(a, b any, pick func(x, y float64) float64) any {
 	x, okA := number(a)
 	y, okB := number(b)
 
-	switch {
-	case okA && okB:
-		return pick(x, y)
-	case okA:
-		return a
-	case okB:
+	if !okA {
 		return b
-	default:
-		return a == true || b == true
 	}
+
+	if !okB {
+		return a
+	}
+
+	return pick(x, y)
 }
 
 // closeProperties applies the additionalProperties of a to the properties b names and a doesn't, as allOf has a
@@ -1135,12 +1130,9 @@ func closeProperties(a, b map[string]any) {
 
 // mergeProperties returns the properties of a and of b, a property of both applying both schemas.
 func mergeProperties(a, b any) map[string]any {
-	props, _ := a.(map[string]any)
-	props = maps.Clone(props)
-
-	if props == nil {
-		props = make(map[string]any)
-	}
+	props := make(map[string]any)
+	old, _ := a.(map[string]any)
+	maps.Copy(props, old)
 
 	add, _ := b.(map[string]any)
 	for name, schema := range add {
@@ -1190,21 +1182,20 @@ func intersectTypes(a, b any) (any, error) {
 
 // types returns the types a type keyword, t, names.
 func types(t any) []string {
-	switch t := t.(type) {
-	case string:
-		return []string{t}
-	case []any:
-		var out []string
-		for _, item := range t {
-			if name, ok := item.(string); ok {
-				out = append(out, name)
-			}
-		}
-
-		return out
-	default:
-		return nil
+	if name, ok := t.(string); ok {
+		return []string{name}
 	}
+
+	list, _ := t.([]any)
+
+	var out []string
+	for _, item := range list {
+		if name, ok := item.(string); ok {
+			out = append(out, name)
+		}
+	}
+
+	return out
 }
 
 // anys returns strs as a []any.
@@ -1361,8 +1352,6 @@ func schemaMap(s any, path string) (map[string]any, error) {
 		}
 
 		return nil, fmt.Errorf("%w: %s: the schema is false", ErrUnsatisfiable, at(path))
-	case nil:
-		return make(map[string]any), nil
 	default:
 		return nil, fmt.Errorf("%w: %s: expected a schema object or boolean, not %T", ErrInvalid, at(path), s)
 	}

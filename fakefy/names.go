@@ -191,11 +191,7 @@ func isID(name string) bool {
 	return false
 }
 
-// capitalize returns s with its first letter in upper case.
+// capitalize returns s, which isn't empty, with its first letter in upper case.
 func capitalize(s string) string {
-	if s == "" {
-		return s
-	}
-
 	return strings.ToUpper(s[:1]) + s[1:]
 }

@@ -26,6 +26,8 @@ func TestSchema_APatternMakesAStringItMatches(t *testing.T) {
 		{name: "a dot and an open repeat", schema: `{"type": "string", "pattern": "^v.{2,}$"}`},
 		{name: "unicode letters", schema: `{"type": "string", "pattern": "^\\p{L}+$"}`},
 		{name: "a pattern with lengths", schema: `{"type": "string", "pattern": "^[a-z]+$", "minLength": 3, "maxLength": 4}`},
+		{name: "a repeat that can write nothing, to a length", schema: `{"type": "string", "pattern": "^(a?)*b$", "minLength": 3}`},
+		{name: "a class with no printable ASCII", schema: `{"type": "string", "pattern": "^[\\x{100}-\\x{200}]+$"}`},
 	}
 
 	for _, tt := range tests {
@@ -50,6 +52,9 @@ func TestSchema_APatternNoStringFitsFailsWithErrUnsatisfiable(t *testing.T) {
 		{name: "a pattern no string of the length matches", schema: `{"type": "string", "pattern": "^a{3}$", "maxLength": 2}`, want: `at the root: pattern "^a{3}$": no string of 0 to 2 characters after 20 tries`},
 		{name: "a pattern no long string matches", schema: `{"type": "string", "pattern": "^a{3}$", "minLength": 5}`, want: `at the root: pattern "^a{3}$": no string of at least 5 characters after 20 tries`},
 		{name: "a pattern no string matches", schema: `{"type": "string", "pattern": "[^\\x00-\\x{10FFFF}]"}`, want: `at the root: pattern "[^\\x00-\\x{10FFFF}]": no string matches it`},
+		{name: "a sequence a part of which no string matches", schema: `{"type": "string", "pattern": "a[^\\x00-\\x{10FFFF}]"}`, want: `at the root: pattern "a[^\\x00-\\x{10FFFF}]": no string matches it`},
+		{name: "a repeat of what no string matches", schema: `{"type": "string", "pattern": "([^\\x00-\\x{10FFFF}])+"}`, want: `at the root: pattern "([^\\x00-\\x{10FFFF}])+": no string matches it`},
+		{name: "an optional repeat of what no string matches, to a length", schema: `{"type": "string", "pattern": "x[^\\x00-\\x{10FFFF}]*", "minLength": 3}`, want: `at the root: pattern "x[^\\x00-\\x{10FFFF}]*": no string matches it`},
 	}
 
 	for _, tt := range tests {
