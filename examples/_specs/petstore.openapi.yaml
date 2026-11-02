@@ -16,7 +16,7 @@ paths:
       summary: List pets matching the given filters
       parameters:
         - name: species
-          in: querya
+          in: query
           required: false
           schema:
             anyOf:
@@ -102,96 +102,95 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
       security: []
-    additionalOperations:
-      QUERY:
-        operationId: searchPets
-        tags:
-          - Pets
-        summary: Search pets by structured criteria
-        responses:
-          "200":
-            description: OK
-            content:
-              application/json:
-                schema:
-                  $ref: "#/components/schemas/PetList"
-          "422":
-            description: Unprocessable Entity
-            content:
-              application/json:
-                schema:
-                  $ref: "#/components/schemas/ApiError"
-        requestBody:
-          required: true
+    query:
+      operationId: searchPets
+      tags:
+        - Pets
+      summary: Search pets by structured criteria
+      responses:
+        "200":
+          description: OK
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  criteria:
-                    type: object
-                    properties:
-                      species:
-                        type: array
-                        items:
-                          anyOf:
-                            - const: DOG
-                              type: string
-                            - const: CAT
-                              type: string
-                            - const: RABBIT
-                              type: string
-                            - const: BIRD
-                              type: string
-                            - const: REPTILE
-                              type: string
-                            - const: OTHER
-                              type: string
-                      ageRange:
-                        type: object
-                        properties:
-                          min:
-                            type: integer
-                          max:
-                            type: integer
-                      size:
-                        type: array
-                        items:
-                          anyOf:
-                            - const: SMALL
-                              type: string
-                            - const: MEDIUM
-                              type: string
-                            - const: LARGE
-                              type: string
-                      compatibility:
-                        type: object
-                        properties:
-                          goodWithKids:
-                            type: boolean
-                  sort:
-                    type: object
-                    properties:
-                      field:
+                $ref: "#/components/schemas/PetList"
+        "422":
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                criteria:
+                  type: object
+                  properties:
+                    species:
+                      type: array
+                      items:
                         anyOf:
-                          - const: ageMonths
+                          - const: DOG
                             type: string
-                          - const: price
+                          - const: CAT
                             type: string
-                      order:
+                          - const: RABBIT
+                            type: string
+                          - const: BIRD
+                            type: string
+                          - const: REPTILE
+                            type: string
+                          - const: OTHER
+                            type: string
+                    ageRange:
+                      type: object
+                      properties:
+                        min:
+                          type: integer
+                        max:
+                          type: integer
+                    size:
+                      type: array
+                      items:
                         anyOf:
-                          - const: ASC
+                          - const: SMALL
                             type: string
-                          - const: DESC
+                          - const: MEDIUM
                             type: string
-                  pagination:
-                    type: object
-                    properties:
-                      page:
-                        type: integer
-                      limit:
-                        type: integer
-        security: []
+                          - const: LARGE
+                            type: string
+                    compatibility:
+                      type: object
+                      properties:
+                        goodWithKids:
+                          type: boolean
+                sort:
+                  type: object
+                  properties:
+                    field:
+                      anyOf:
+                        - const: ageMonths
+                          type: string
+                        - const: price
+                          type: string
+                    order:
+                      anyOf:
+                        - const: ASC
+                          type: string
+                        - const: DESC
+                          type: string
+                pagination:
+                  type: object
+                  properties:
+                    page:
+                      type: integer
+                    limit:
+                      type: integer
+      security: []
     post:
       operationId: createPet
       tags:
