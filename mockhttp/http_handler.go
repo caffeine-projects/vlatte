@@ -718,8 +718,12 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		// The connections are piped at once, as long as both sides want, while the call is counted, its callbacks
-		// and events run, and it is logged. The handler returns once the pipe is done.
+		// The call counts before the pipe starts, so a client that gets a byte past the 101, or the cut of a pipe,
+		// sees it counted, as a stream's does. The connections are then piped at once, as long as both sides want,
+		// while the callbacks and events run, and the call is logged. The handler returns once the pipe is done.
+		h.served(mock, reqValues)
+		counted = true
+
 		piped := make(chan struct{})
 		go func() {
 			defer close(piped)
