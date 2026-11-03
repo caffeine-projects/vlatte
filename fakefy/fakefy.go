@@ -796,7 +796,9 @@ func (f *Faker) str(s map[string]any, name, path string) (any, error) {
 	}
 
 	if len(res) > 0 {
-		// A format fakefy makes is one the string must be of, as the validator asserts it.
+		// A format fakefy makes is one the string must be of, as the validator asserts it. A string of the patterns
+		// that isn't of it may be with a value of the format after it, or before it, where the patterns don't anchor
+		// it: x and jane@example.com make xjane@example.com, an email that ^x matches.
 		check := validator(map[string]any{"format": format})
 
 		for range _maxTries {
@@ -807,6 +809,13 @@ func (f *Faker) str(s map[string]any, name, path string) (any, error) {
 
 			if !known || check == nil || validate(check, v) == nil {
 				return v, nil
+			}
+
+			fv := f.format(format)
+			for _, c := range []string{v + fv, fv + v} {
+				if fits(c) && matchAll(res, c) && validate(check, c) == nil {
+					return c, nil
+				}
 			}
 		}
 

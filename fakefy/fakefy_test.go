@@ -161,6 +161,8 @@ func TestSchema_SchemasAValueSatisfiesMakeOne(t *testing.T) {
 		{name: "minProperties past the depth that leaves out optional properties", schema: leaf},
 		{name: "an unanchored pattern shorter than minLength", schema: `{"type": "string", "pattern": "[0-9]", "minLength": 10}`},
 		{name: "a format and a pattern", schema: `{"type": "string", "format": "uuid", "pattern": "^[a-f0-9-]+$"}`},
+		{name: "a format whose values start with what a pattern writes", schema: `{"type": "string", "format": "email", "pattern": "^x"}`},
+		{name: "a format whose values end with what a pattern writes", schema: `{"type": "string", "format": "hostname", "pattern": "\\.io$"}`},
 		{name: "a format whose values the pattern doesn't match", schema: `{"type": "string", "format": "email", "pattern": "^a@b\\.co$"}`},
 		{name: "an integer range past both ends of an int64", schema: `{"type": "integer", "minimum": -1e19, "maximum": 1e19}`},
 		{name: "allOf of two tuples", schema: `{"$schema": "http://json-schema.org/draft-04/schema#", "allOf": [
