@@ -99,9 +99,9 @@ func New(opts ...Option) *Faker {
 // first a value satisfies wins, null last, or first from four levels down, so a nullable schema that nests itself
 // ends. An optional property or item no value satisfies is left out.
 //
-// A schema that compiles as JSON Schema 2020-12 checks each value: one that doesn't validate, such as an example the
-// rest of the schema breaks, is made again, from the schema's examples, then without them, up to 20 times. A schema
-// whose examples leave no value, such as unique items an example repeats, is made without them.
+// A schema that compiles as JSON Schema 2020-12 checks each value, formats too: one that doesn't validate, such as an
+// example the rest of the schema breaks, is made again, from the schema's examples, then without them, up to 20
+// times. A schema whose examples leave no value, such as unique items an example repeats, is made without them.
 //
 // The error wraps [ErrUnsatisfiable], [ErrUnresolved] or [ErrInvalid], naming the place in the value it stopped at.
 func (f *Faker) Schema(schema map[string]any) (any, error) {
@@ -144,8 +144,8 @@ func (f *Faker) Field(name string, schema map[string]any) (any, error) {
 	return nil, fmt.Errorf("%w: %s: no value of %d validates: %w", ErrUnsatisfiable, at(""), _maxTries, invalid)
 }
 
-// validator returns the validator of schema as JSON Schema 2020-12, or nil when it doesn't compile as one, such as an
-// OpenAPI 3.0 schema whose exclusiveMinimum is a boolean.
+// validator returns the validator of schema as JSON Schema 2020-12, formats asserted, or nil when it doesn't compile as
+// one, such as an OpenAPI 3.0 schema whose exclusiveMinimum is a boolean.
 func validator(schema map[string]any) *jsonschema.Schema {
 	doc, err := asJSON(schema)
 	if err != nil {
@@ -154,6 +154,7 @@ func validator(schema map[string]any) *jsonschema.Schema {
 
 	c := jsonschema.NewCompiler()
 	c.DefaultDraft(jsonschema.Draft2020)
+	c.AssertFormat()
 
 	// AddResource fails only for a URL added before: Compile fails then too.
 	_ = c.AddResource("schema.json", doc)
@@ -428,9 +429,14 @@ func (w *walk) branch(s map[string]any, key, name, path string, depth int) (any,
 	return obj, nil
 }
 
-// fixes reports whether s gives its property prop a const or an enum, which a discriminator's tag must not replace.
+// fixes reports whether s gives its property prop a const or an enum, or itself one, which fixes every property: a
+// discriminator's tag must not replace it.
 func (w *walk) fixes(s map[string]any, prop, path string) bool {
 	m, err := w.flatten(s, path, 0)
+	if err == nil && (has(m, "const") || has(m, "enum")) {
+		return true
+	}
+
 	props, _ := m["properties"].(map[string]any)
 
 	p, ok := props[prop].(map[string]any)
@@ -612,9 +618,15 @@ func (w *walk) object(s map[string]any, path string, depth int) (any, error) {
 	return out, nil
 }
 
-// patternSchema returns the schema of the first of the patternProperties of s, in order, that key matches.
+// patternSchema returns a schema that applies those of all the patternProperties of s that key matches, and whether
+// one does.
 func patternSchema(s map[string]any, key, path string) (any, bool, error) {
 	patterns, _ := s["patternProperties"].(map[string]any)
+
+	var (
+		schema  any
+		matched bool
+	)
 
 	for _, p := range slices.Sorted(maps.Keys(patterns)) {
 		re, err := regexp.Compile(p)
@@ -623,11 +635,11 @@ func patternSchema(s map[string]any, key, path string) (any, bool, error) {
 		}
 
 		if re.MatchString(key) {
-			return patterns[p], true, nil
+			schema, matched = bothSchemas(schema, patterns[p]), true
 		}
 	}
 
-	return nil, false, nil
+	return schema, matched, nil
 }
 
 // array returns an array of the items of s: one to three, within minItems and maxItems, or as few as allowed past
@@ -765,7 +777,11 @@ func (f *Faker) str(s map[string]any, name, path string) (any, error) {
 	// A format's value is what makes it one: it isn't cut or padded to fit. One the patterns don't match gives way
 	// to a string of the patterns.
 	format, _ := s["format"].(string)
-	if v := f.format(format); v != "" {
+
+	v := f.format(format)
+	known := v != ""
+
+	if known {
 		for range _maxTries {
 			if fits(v) && matchAll(res, v) {
 				return v, nil
@@ -780,15 +796,24 @@ func (f *Faker) str(s map[string]any, name, path string) (any, error) {
 	}
 
 	if len(res) > 0 {
-		v, err := f.pattern(res, lo, hi, bounded)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %s: pattern %s: %w", ErrUnsatisfiable, at(path), quoteAll(exprs), err)
+		// A format fakefy makes is one the string must be of, as the validator asserts it.
+		check := validator(map[string]any{"format": format})
+
+		for range _maxTries {
+			v, err := f.pattern(res, lo, hi, bounded)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %s: pattern %s: %w", ErrUnsatisfiable, at(path), quoteAll(exprs), err)
+			}
+
+			if !known || check == nil || validate(check, v) == nil {
+				return v, nil
+			}
 		}
 
-		return v, nil
+		return nil, fmt.Errorf("%w: %s: pattern %s: no string of format %q after %d tries", ErrUnsatisfiable, at(path), quoteAll(exprs), format, _maxTries)
 	}
 
-	v := f.byName(name)
+	v = f.byName(name)
 
 	if v == "" {
 		v = f.words(1 + f.rnd.IntN(2))
@@ -1139,6 +1164,7 @@ func merge(dst, src map[string]any) error {
 	src = maps.Clone(src)
 	closeProperties(dst, src)
 	closeProperties(src, dst)
+	mergeTuples(dst, src)
 
 	for _, k := range slices.Sorted(maps.Keys(src)) {
 		v := src[k]
@@ -1198,7 +1224,7 @@ func merge(dst, src map[string]any) error {
 			items := make([]any, max(len(old), len(add)))
 
 			for i := range items {
-				items[i] = bothSchemas(nth(old, i), nth(add, i))
+				items[i] = bothSchemas(nth(old, i, nil), nth(add, i, nil))
 			}
 
 			dst[k] = items
@@ -1256,6 +1282,41 @@ func closeProperties(a, b map[string]any) {
 	if len(props) > 0 {
 		b["properties"] = closed
 	}
+}
+
+// mergeTuples merges the items of dst and src when either is a list, as draft 4 and OpenAPI 3.0 write a tuple: item i
+// applies the schema each gives it, its item i or, past the end of its list, its additionalItems, and items past both
+// lists apply both additionalItems. An items schema that isn't a list gives every item. It takes items and
+// additionalItems out of src.
+func mergeTuples(dst, src map[string]any) {
+	a, okA := dst["items"].([]any)
+	b, okB := src["items"].([]any)
+
+	if !okA && !okB {
+		return
+	}
+
+	restA, restB := pastTuple(dst), pastTuple(src)
+	items := make([]any, max(len(a), len(b)))
+
+	for i := range items {
+		items[i] = bothSchemas(nth(a, i, restA), nth(b, i, restB))
+	}
+
+	dst["items"], dst["additionalItems"] = items, bothSchemas(restA, restB)
+
+	delete(src, "items")
+	delete(src, "additionalItems")
+}
+
+// pastTuple returns the schema of the items of s past its tuple: its additionalItems, or its items when they aren't a
+// list. Absent (nil), any item goes.
+func pastTuple(s map[string]any) any {
+	if _, ok := s["items"].([]any); ok {
+		return s["additionalItems"]
+	}
+
+	return s["items"]
 }
 
 // mergeProperties returns the properties of a and of b, a property of both applying both schemas.
@@ -1338,20 +1399,20 @@ func anys(strs []string) []any {
 	return out
 }
 
-// nth returns item i of list, or nil past its end.
-func nth(list []any, i int) any {
+// nth returns item i of list, or rest past its end.
+func nth(list []any, i int, rest any) any {
 	if i < len(list) {
 		return list[i]
 	}
 
-	return nil
+	return rest
 }
 
-// same reports whether a and b are the same as JSON: numbers equal by value, whatever their Go type.
+// same reports whether a and b are the same as JSON: numbers equal by value, exactly, whatever their Go type.
 func same(a, b any) bool {
-	if x, ok := number(a); ok {
-		y, ok := number(b)
-		return ok && x == y
+	if x, ok := rat(a); ok {
+		y, ok := rat(b)
+		return ok && x.Cmp(y) == 0
 	}
 
 	switch a := a.(type) {
@@ -1372,7 +1433,7 @@ func same(a, b any) bool {
 		b, ok := b.([]any)
 		return ok && slices.EqualFunc(a, b, same)
 	default:
-		// a is a string, a bool or nil: comparable, so == doesn't panic.
+		// a is a string, a bool, nil or a float64 that isn't finite: comparable, so == doesn't panic.
 		return a == b
 	}
 }

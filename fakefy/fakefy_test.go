@@ -163,6 +163,19 @@ func TestSchema_SchemasAValueSatisfiesMakeOne(t *testing.T) {
 		{name: "a format and a pattern", schema: `{"type": "string", "format": "uuid", "pattern": "^[a-f0-9-]+$"}`},
 		{name: "a format whose values the pattern doesn't match", schema: `{"type": "string", "format": "email", "pattern": "^a@b\\.co$"}`},
 		{name: "an integer range past both ends of an int64", schema: `{"type": "integer", "minimum": -1e19, "maximum": 1e19}`},
+		{name: "allOf of two tuples", schema: `{"$schema": "http://json-schema.org/draft-04/schema#", "allOf": [
+			{"type": "array", "items": [{"type": "integer"}], "additionalItems": false},
+			{"items": [{"type": "integer"}, {"type": "string"}]}]}`},
+		{name: "allOf of a tuple and an items schema", schema: `{"$schema": "http://json-schema.org/draft-04/schema#", "allOf": [
+			{"type": "array", "minItems": 2, "items": [{"type": "integer"}], "additionalItems": {"type": "string"}},
+			{"items": {"enum": [3, "a"]}}]}`},
+		{name: "a property two patternProperties match", schema: `{"type": "object", "required": ["ab"], "patternProperties": {"^a": {"type": "string"}, "^ab$": {"const": "z"}}}`},
+		{name: "a discriminated branch whose const fixes the tag", schema: `{
+			"$defs": {"Cat": {"const": {"petType": "feline", "name": "x"}}},
+			"oneOf": [{"$ref": "#/$defs/Cat"}],
+			"discriminator": {"propertyName": "petType", "mapping": {"cat": "#/$defs/Cat"}}}`},
+		{name: "unique integers past what a float64 holds exactly", schema: `{"type": "array", "uniqueItems": true, "minItems": 2,
+			"items": {"type": "integer", "minimum": 9007199254740992, "maximum": 9007199254740993}}`},
 	}
 
 	for _, tt := range tests {
@@ -249,6 +262,7 @@ func TestSchema_FailsWithErrUnsatisfiableWhenNoValueFits(t *testing.T) {
 		{name: "prefix items too few for minItems", schema: `{"type": "array", "minItems": 2, "prefixItems": [{"type": "integer"}], "items": false}`, want: "at the root: minItems 2 is above the 1 prefixItems allowed"},
 		{name: "integers past int64", schema: `{"type": "integer", "minimum": 1e19}`, want: "at the root: integers from 1e+19 to 1e+19 don't fit an int64"},
 		{name: "a format longer than maxLength", schema: `{"type": "string", "format": "date-time", "maxLength": 10}`, want: `at the root: format "date-time" makes no string of 0 to 10 characters`},
+		{name: "a format no string of the pattern has", schema: `{"type": "string", "format": "uuid", "pattern": "^z"}`, want: `at the root: pattern "^z": no string of format "uuid" after 20 tries`},
 		{name: "a format shorter than minLength", schema: `{"type": "string", "format": "uuid", "minLength": 40}`, want: `at the root: format "uuid" makes no string of at least 40 characters`},
 		{name: "minProperties above maxProperties", schema: `{"type": "object", "minProperties": 3, "maxProperties": 1}`, want: "at the root: minProperties 3 is above maxProperties 1"},
 		{name: "allOf of types that share no value", schema: `{"allOf": [{"type": "string"}, {"type": "integer"}]}`, want: `at the root: allOf: no type is both of ["string"] and ["integer"]`},
