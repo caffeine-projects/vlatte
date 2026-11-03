@@ -2,13 +2,17 @@ package fakefy_test
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"math/big"
+	"net/url"
 	"strings"
 	"testing"
+	"uuid"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/require"
@@ -147,10 +151,65 @@ func TestSchema_SchemasAValueSatisfiesMakeOne(t *testing.T) {
 		leaf = `{"type": "object", "required": ["p"], "properties": {"p": ` + leaf + `}}`
 	}
 
+	// A tree each node of which has five children, each a nullable node, as OpenAPI 3.1 writes one.
+	children := make([]string, 5)
+	for i := range children {
+		children[i] = fmt.Sprintf(`"c%d": {"anyOf": [{"$ref": "#/$defs/N"}, {"type": "null"}]}`, i)
+	}
+
+	tree := `{"$defs": {"N": {"type": "object", "required": ["c0", "c1", "c2", "c3", "c4"], "properties": {` + strings.Join(children, ", ") + `}}},
+		"$ref": "#/$defs/N"}`
+
+	anyOfs := strings.Repeat(`{"anyOf": [{"minimum": 0}, {"maximum": 50}]}, `, 33)
+
 	tests := []struct {
 		name   string
 		schema string
 	}{
+		{name: "a tree of nullable nodes", schema: tree},
+		{name: "an allOf of more anyOfs than the levels a value nests", schema: `{"type": "integer", "allOf": [` + anyOfs + `{}]}`},
+		{name: "an items schema of allOf and the prefixItems of another", schema: `{"type": "array", "allOf": [
+			{"items": {"type": "integer", "maximum": 0}}, {"prefixItems": [{"type": "integer"}]}]}`},
+		{name: "allOf of two prefixItems and an items schema", schema: `{"type": "array", "minItems": 2, "allOf": [
+			{"prefixItems": [{"type": "integer"}], "items": {"type": "integer", "maximum": 0}},
+			{"prefixItems": [{"type": "integer"}, {"type": "integer"}]}]}`},
+		{name: "minProperties of patternProperties alone", schema: `{"type": "object", "minProperties": 1,
+			"patternProperties": {".*": {"type": "integer"}}, "additionalProperties": false}`},
+		{name: "minProperties of a key patternProperties match", schema: `{"type": "object", "minProperties": 1,
+			"patternProperties": {"^property": {"type": "integer"}}, "additionalProperties": {"type": "string"}}`},
+		{name: "minProperties of patterns that each name one key", schema: `{"type": "object", "minProperties": 2,
+			"patternProperties": {"^a$": {"type": "string"}, "^b$": {"type": "string"}}, "additionalProperties": false}`},
+		{name: "minProperties of every key a pattern names", schema: `{"type": "object", "minProperties": 10,
+			"patternProperties": {"^[0-9]$": {"type": "integer"}}, "additionalProperties": false}`},
+		{name: "minProperties of a pattern that names few keys", schema: `{"type": "object", "minProperties": 2,
+			"patternProperties": {"^x-[a-z]+$": {"type": "integer"}}, "additionalProperties": false}`},
+		{name: "allOf additionalProperties and the patternProperties of another", schema: `{"allOf": [
+			{"type": "object", "additionalProperties": {"type": "integer"}},
+			{"required": ["x1"], "patternProperties": {"^x": {"minimum": 0}}}]}`},
+		{name: "allOf additionalProperties of named properties and the patternProperties of another", schema: `{"allOf": [
+			{"type": "object", "properties": {"x_id": {"type": "string"}}, "additionalProperties": false},
+			{"required": ["x_id"], "patternProperties": {"^x": {"minLength": 2}}}]}`},
+		{name: "allOf patternProperties and the additionalProperties of another", schema: `{"allOf": [
+			{"required": ["x1"], "patternProperties": {"^x": {"minimum": 0}}},
+			{"type": "object", "additionalProperties": {"type": "integer"}}]}`},
+		{name: "allOf of draft 4 bounds, one exclusive", schema: `{"$schema": "http://json-schema.org/draft-04/schema#",
+			"type": "integer", "maximum": 1, "allOf": [{"minimum": 0, "exclusiveMinimum": true}, {"minimum": 1}]}`},
+		{name: "allOf of draft 4 upper bounds, one exclusive", schema: `{"$schema": "http://json-schema.org/draft-04/schema#",
+			"type": "integer", "minimum": 1, "allOf": [{"maximum": 2, "exclusiveMaximum": true}, {"maximum": 1}]}`},
+		{name: "a number whose only float64 is the inclusive maximum", schema: `{"type": "number", "exclusiveMinimum": 1, "maximum": 1.0000000000000002}`},
+		{name: "a number whose only float64 is the least above 0", schema: `{"type": "number", "exclusiveMinimum": 0, "maximum": 5e-324}`},
+		{name: "a const past int64", schema: `{"const": 12345678901234567890}`},
+		{name: "unique items of an enum past int64", schema: `{"type": "array", "uniqueItems": true, "minItems": 2,
+			"items": {"enum": [18446744073709551615, 18446744073709551614]}}`},
+		{name: "an email of at most 10 characters", schema: `{"type": "string", "format": "email", "maxLength": 10}`},
+		{name: "a hostname of at most 6 characters", schema: `{"type": "string", "format": "hostname", "maxLength": 6}`},
+		{name: "a uri of at most 14 characters", schema: `{"type": "string", "format": "uri", "maxLength": 14}`},
+		{name: "unique integers past the range a value has without bounds", schema: `{"type": "array", "uniqueItems": true, "minItems": 150,
+			"items": {"type": "integer"}}`},
+		{name: "unique multiples past the range a value has without bounds", schema: `{"type": "array", "uniqueItems": true, "minItems": 150,
+			"items": {"type": "integer", "multipleOf": 5, "minimum": 0}}`},
+		{name: "unique months past the range the name gives", schema: `{"type": "object", "required": ["month"], "properties": {
+			"month": {"type": "array", "uniqueItems": true, "minItems": 20, "items": {"type": "integer"}}}}`},
 		{name: "a multiple whose next one past the bounds overflows", schema: `{"type": "number", "multipleOf": 1e308}`},
 		{name: "unique items an example repeats", schema: `{"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string", "example": "x"}}`},
 		{name: "a required property allOf allows by pattern", schema: `{"allOf": [
@@ -281,6 +340,13 @@ func TestSchema_FailsWithErrUnsatisfiableWhenNoValueFits(t *testing.T) {
 		{name: "no number between bounds that meet", schema: `{"type": "number", "minimum": 1, "exclusiveMaximum": 1}`, want: "at the root: no number between 1 and 1, exclusive"},
 		{name: "no decimal multiple within the bounds", schema: `{"type": "number", "multipleOf": 0.7, "minimum": 0.1, "maximum": 0.6}`, want: "at the root: no multiple of 0.7 between 0.1 and 0.6"},
 		{name: "number bounds that cross", schema: `{"type": "number", "minimum": 5, "maximum": 1}`, want: "at the root: minimum 5 is above maximum 1"},
+		{name: "required properties without end, through anyOf", schema: `{"$defs": {"N": {"type": "object", "required": ["n"], "properties": {
+			"n": {"anyOf": [{"$ref": "#/$defs/N"}, {"$ref": "#/$defs/N"}, {"$ref": "#/$defs/N"}]}}}}, "$ref": "#/$defs/N"}`, want: `at "/n": no value after 10000 branches failed`},
+		{name: "minProperties past the keys a pattern names", schema: `{"type": "object", "minProperties": 2,
+			"patternProperties": {"^a$": {}}, "additionalProperties": false}`, want: "at the root: expected 2 properties, not 1"},
+		{name: "minProperties of a pattern no key matches", schema: `{"type": "object", "minProperties": 1,
+			"patternProperties": {"[^\\x00-\\x{10FFFF}]": {}}, "additionalProperties": false}`, want: "at the root: expected 1 properties, not 0"},
+		{name: "no float64 between the bounds", schema: `{"type": "number", "exclusiveMinimum": 1, "exclusiveMaximum": 1.0000000000000002}`, want: "at the root: no float64 between 1 and 1.0000000000000002"},
 	}
 
 	for _, tt := range tests {
@@ -311,6 +377,11 @@ func TestSchema_FailsWithErrInvalidForWhatIsNotASchema(t *testing.T) {
 		{name: "a negative minItems", schema: map[string]any{"type": "array", "minItems": -5}, want: "at the root: minItems must be a whole number from 0, not -5"},
 		{name: "a maxProperties that isn't whole", schema: map[string]any{"type": "object", "maxProperties": 1.5}, want: "at the root: maxProperties must be a whole number from 0, not 1.5"},
 		{name: "a pattern that doesn't compile", schema: map[string]any{"type": "string", "pattern": "(unclosed"}, want: "at the root: pattern \"(unclosed\": compiling: error parsing regexp: missing closing ): `(unclosed`"},
+		{name: "patternProperties that don't compile, in an allOf with additionalProperties", schema: map[string]any{"allOf": []any{
+			map[string]any{"type": "object", "additionalProperties": true},
+			map[string]any{"required": []any{"a"}, "patternProperties": map[string]any{"(": true}},
+		}}, want: "at the root: patternProperties \"(\": compiling: error parsing regexp: missing closing ): `(`"},
+		{name: "patternProperties that don't compile, for minProperties", schema: map[string]any{"type": "object", "minProperties": 1, "patternProperties": map[string]any{"(": true}}, want: "at the root: patternProperties \"(\": compiling: error parsing regexp: missing closing ): `(`"},
 		{name: "a number in an allOf", schema: map[string]any{"allOf": []any{3}}, want: "at the root: expected a schema object or boolean, not int"},
 		{name: "a $ref to a number", schema: map[string]any{"$defs": map[string]any{"a": 3}, "$ref": "#/$defs/a"}, want: "at the root: expected a schema object or boolean, not int"},
 		{name: "patternProperties that don't compile", schema: map[string]any{"type": "object", "properties": map[string]any{"a": true}, "patternProperties": map[string]any{"(": true}}, want: "at the root: patternProperties \"(\": compiling: error parsing regexp: missing closing ): `(`"},
@@ -375,6 +446,16 @@ func TestSchema_AnAllOfBoundThatIsNotANumberIsIgnored(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int64(7), v)
 	}
+
+	for _, all := range [][]any{
+		{map[string]any{"type": "string", "minLength": "5", "maxLength": 3}, map[string]any{"minLength": 3}},
+		{map[string]any{"type": "string", "minLength": 3, "maxLength": 3}, map[string]any{"minLength": "5"}},
+		{map[string]any{"type": "string", "minLength": 2, "maxLength": 3}, map[string]any{"minLength": 3}},
+	} {
+		v, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"allOf": all})
+		require.NoError(t, err)
+		require.Len(t, v, 3)
+	}
 }
 
 func TestSchema_AnAllOfOfManyAnyOfsEnds(t *testing.T) {
@@ -389,6 +470,41 @@ func TestSchema_AnAllOfOfManyAnyOfsEnds(t *testing.T) {
 	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(doc)
 	require.NoError(t, err)
 	requireValid(t, sch, v)
+}
+
+func TestSchema_AnAllOfOfASchemaTwiceManyLevelsDownEnds(t *testing.T) {
+	// Specs compose schemas from shared parts, so one part can be reached many ways: each must be merged once, or a
+	// level more doubles the work. A value a validator checks takes it as many ways: an infinite number the validator
+	// can't read leaves the work to the generator alone.
+	defs := map[string]any{"A30": map[string]any{"type": "string", "pattern": "^a", "maxLength": 3}}
+	for i := range 30 {
+		next := map[string]any{"$ref": fmt.Sprintf("#/$defs/A%d", i+1)}
+		defs[fmt.Sprintf("A%d", i)] = map[string]any{"allOf": []any{next, maps.Clone(next)}}
+	}
+
+	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"$defs": defs, "$ref": "#/$defs/A0", "x-limit": math.Inf(1)})
+	require.NoError(t, err)
+	require.Regexp(t, `^a.{0,2}$`, v)
+}
+
+func TestSchema_AValueOfManySchemasIsMade(t *testing.T) {
+	// A large response, such as a page of items each of many fields, is made of many schemas: only branches that fail
+	// count toward giving up.
+	sch, doc := compile(t, `{"type": "array", "minItems": 400, "items": {"type": "array", "minItems": 400, "items": {"type": "boolean"}}}`)
+
+	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(doc)
+	require.NoError(t, err)
+	requireValid(t, sch, v)
+}
+
+func TestSchema_AnAllOfOfEnumsOfGoListsMergesThem(t *testing.T) {
+	// A Go caller's enum may hold lists of any Go type: comparing two of one type that == can't compare must not panic.
+	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"allOf": []any{
+		map[string]any{"enum": []any{[]string{"a"}, []string{"b"}}},
+		map[string]any{"enum": []any{[]string{"b"}}},
+	}})
+	require.NoError(t, err)
+	require.Equal(t, []any{"b"}, v)
 }
 
 func TestSchema_MakesTheItemsOfATuple(t *testing.T) {
@@ -442,7 +558,7 @@ func TestSchema_GoNumbersOfTheSchemaComeBackAsDecodedJSON(t *testing.T) {
 		{name: "uint16", n: uint16(3), want: int64(3)},
 		{name: "uint32", n: uint32(3), want: int64(3)},
 		{name: "uint64", n: uint64(3), want: int64(3)},
-		{name: "a uint64 past int64", n: uint64(math.MaxUint64), want: float64(math.MaxUint64)},
+		{name: "a uint64 past int64", n: uint64(math.MaxUint64), want: uint64(math.MaxUint64)},
 		{name: "float32", n: float32(2.5), want: 2.5},
 	}
 
@@ -512,6 +628,43 @@ func TestSchema_TheDiscriminatorNamesTheBranchPicked(t *testing.T) {
 	require.Len(t, seen, 2, "both branches are picked")
 }
 
+func TestSchema_TheDiscriminatorNamesTheBranchAmongTheTagsTheBaseLists(t *testing.T) {
+	// OpenAPI inheritance lists every tag in the base schema's enum: each branch still has its own.
+	_, doc := compile(t, `{"$defs": {
+		"Pet": {"type": "object", "required": ["petType"], "properties": {"petType": {"type": "string", "enum": ["Cat", "Dog"]}}},
+		"Cat": {"allOf": [{"$ref": "#/$defs/Pet"}, {"type": "object", "required": ["lives"], "properties": {"lives": {"type": "integer"}}}]},
+		"Dog": {"allOf": [{"$ref": "#/$defs/Pet"}, {"type": "object", "required": ["bark"], "properties": {"bark": {"type": "boolean"}}}]}},
+		"oneOf": [{"$ref": "#/$defs/Cat"}, {"$ref": "#/$defs/Dog"}], "discriminator": {"propertyName": "petType"}}`)
+
+	for seed := range uint64(_seeds) {
+		v, err := fakefy.New(fakefy.WithSeed(seed)).Schema(doc)
+		require.NoError(t, err)
+
+		obj, ok := v.(map[string]any)
+		require.True(t, ok)
+
+		want := "Cat"
+		if _, dog := obj["bark"]; dog {
+			want = "Dog"
+		}
+
+		require.Equal(t, want, obj["petType"])
+	}
+}
+
+func TestSchema_TheDiscriminatorMappingNamesABranchBySchemaName(t *testing.T) {
+	// OpenAPI lets a mapping name a schema of components/schemas by its name, not only by a $ref.
+	_, doc := compile(t, `{"$defs": {"Dog": {"type": "object", "properties": {"bark": {"type": "boolean"}}}},
+		"oneOf": [{"$ref": "#/$defs/Dog"}], "discriminator": {"propertyName": "kind", "mapping": {"dog": "Dog"}}}`)
+
+	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(doc)
+	require.NoError(t, err)
+
+	obj, ok := v.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "dog", obj["kind"])
+}
+
 func TestSchema_TheDiscriminatorKeepsAValueTheBranchFixes(t *testing.T) {
 	// A branch whose schema fixes its tag, as specs often do with a const, validates only with that value.
 	_, doc := compile(t, `{
@@ -562,6 +715,65 @@ func TestSchema_AValueChangedAfterLeavesTheSchemaAsItWas(t *testing.T) {
 	obj["id"] = 1
 
 	require.Equal(t, map[string]any{"tags": []any{"a"}}, example)
+}
+
+func TestSchema_GoListsAndObjectsOfTheSchemaComeBackAsDecodedJSON(t *testing.T) {
+	// A Go caller writes examples of any list or object type: they come back as JSON decodes them, a []byte as the
+	// copy of it JSON writes as base64.
+	tests := []struct {
+		name    string
+		example any
+		want    any
+	}{
+		{name: "a list", example: []string{"a"}, want: []any{"a"}},
+		{name: "an array", example: [2]int{1, 2}, want: []any{int64(1), int64(2)}},
+		{name: "an object", example: map[string]string{"k": "v"}, want: map[string]any{"k": "v"}},
+		{name: "a nil list", example: []string(nil), want: nil},
+		{name: "bytes", example: []byte("ab"), want: []byte("ab")},
+		{name: "a list of a type of its own, which writes itself as JSON", example: jsontext.Value(`{"a":1}`), want: jsontext.Value(`{"a":1}`)},
+		{name: "an object of a type of its own", example: url.Values{"a": {"1"}}, want: url.Values{"a": {"1"}}},
+		{name: "an array of a type of its own", example: uuid.UUID{1}, want: uuid.UUID{1}},
+		{name: "an object of keys that aren't strings", example: map[int]string{1: "a"}, want: map[int]string{1: "a"}},
+		{name: "a struct", example: struct{ A int }{A: 1}, want: struct{ A int }{A: 1}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"example": tt.example})
+			require.NoError(t, err)
+			require.Equal(t, tt.want, v)
+		})
+	}
+}
+
+func TestSchema_AValueOfAGoListExampleSharesNothingWithIt(t *testing.T) {
+	// A Go caller writes examples of any list type: a value that is the example itself changes it when filled in.
+	example := []string{"a"}
+
+	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"type": "array", "example": example})
+	require.NoError(t, err)
+	require.Equal(t, []any{"a"}, v)
+
+	v.([]any)[0] = "changed"
+
+	require.Equal(t, []string{"a"}, example)
+}
+
+func TestSchema_AnOpenAPI30SchemaChecksItsValues(t *testing.T) {
+	// OpenAPI 3.0 writes exclusiveMinimum as a boolean, which JSON Schema 2020-12 refuses: its values are checked as
+	// draft 4 has them, so a oneOf branch that overlaps another never makes a value both match.
+	draft4, _ := compile(t, `{"$schema": "http://json-schema.org/draft-04/schema#", "type": "integer", "minimum": 0,
+		"exclusiveMinimum": true, "oneOf": [{"maximum": 50}, {"maximum": 100}]}`)
+	schema := map[string]any{
+		"type": "integer", "minimum": 0, "exclusiveMinimum": true,
+		"oneOf": []any{map[string]any{"maximum": 50}, map[string]any{"maximum": 100}},
+	}
+
+	for seed := range uint64(_seeds) {
+		v, err := fakefy.New(fakefy.WithSeed(seed)).Schema(schema)
+		require.NoError(t, err)
+		requireValid(t, draft4, v)
+	}
 }
 
 func TestSchema_LeavesTheSchemaAsItWas(t *testing.T) {

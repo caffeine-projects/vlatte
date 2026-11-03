@@ -32,6 +32,9 @@ func TestSchema_APatternMakesAStringItMatches(t *testing.T) {
 		{name: "a repeat that can write nothing, to a length", schema: `{"type": "string", "pattern": "^(a?)*b$", "minLength": 3}`},
 		{name: "a repeat of an optional item, to a length", schema: `{"type": "string", "pattern": "^([A-Z_]?)+$", "minLength": 17, "maxLength": 24}`},
 		{name: "a repeat that never writes, to a length", schema: `{"type": "string", "pattern": "^a(\\b)*", "minLength": 3}`},
+		{name: "a bounded repeat to a minLength", schema: `{"type": "string", "pattern": "^[0-9]{1,15}$", "minLength": 8}`},
+		{name: "optional groups to lengths", schema: `{"type": "string", "pattern": "^\\d{3}(-\\d{4}){0,3}$", "minLength": 12, "maxLength": 13}`},
+		{name: "word boundaries to a minLength", schema: `{"type": "string", "pattern": "\\bfoo\\b", "minLength": 6}`},
 		{name: "a class with no printable ASCII", schema: `{"type": "string", "pattern": "^[\\x{100}-\\x{200}]+$"}`},
 	}
 
