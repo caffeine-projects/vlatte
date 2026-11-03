@@ -8,15 +8,18 @@ import (
 	"uuid"
 )
 
+// _shortestURI is the shortest uri, iri and url.
+const _shortestURI = "https://a.co"
+
 // _shortest holds the shortest string of each format whose strings vary in length, for a maxLength the others break.
 var _shortest = map[string]string{
 	"email":        "a@b.co",
 	"idn-email":    "a@b.co",
 	"hostname":     "a.co",
 	"idn-hostname": "a.co",
-	"uri":          "https://a.co",
-	"iri":          "https://a.co",
-	"url":          "https://a.co",
+	"uri":          _shortestURI,
+	"iri":          _shortestURI,
+	"url":          _shortestURI,
 }
 
 // _epoch is the latest time a date or time can be: values are fixed in time, so a seed makes the same ones on every
