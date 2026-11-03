@@ -3,8 +3,10 @@ package fakefy_test
 import (
 	"bytes"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strings"
 	"testing"
 
@@ -578,8 +580,10 @@ func TestSchema_LeavesTheSchemaAsItWas(t *testing.T) {
 }
 
 func TestSchema_RandomSchemasMakeValidValues(t *testing.T) {
+	// Every schema a value satisfies, of the keywords fakefy reads, gets one: a generator that fails or writes an invalid
+	// value breaks the mocks of a spec it was given.
 	rapid.Check(t, func(t *rapid.T) {
-		raw := schemaGen(3).Draw(t, "schema")
+		raw := rootGen(schemaGen(3)).Draw(t, "schema")
 		seed := rapid.Uint64().Draw(t, "seed")
 
 		b, err := json.Marshal(raw)
@@ -588,6 +592,131 @@ func TestSchema_RandomSchemasMakeValidValues(t *testing.T) {
 		sch, doc := compile(t, string(b))
 
 		v, err := fakefy.New(fakefy.WithSeed(seed)).Schema(doc)
+		require.NoError(t, err)
+		requireValid(t, sch, v)
+	})
+}
+
+func TestSchema_AnySchemaMakesAValidValueOrFailsWithASentinel(t *testing.T) {
+	// A spec may hold a schema no value satisfies, or one that isn't valid: the generator must say so with an error a
+	// caller can tell apart, never panic, and never return a value the schema refuses.
+	rapid.Check(t, func(t *rapid.T) {
+		raw := anySchemaGen(3).Draw(t, "schema")
+		seed := rapid.Uint64().Draw(t, "seed")
+
+		b, err := json.Marshal(raw)
+		require.NoError(t, err)
+
+		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
+		require.NoError(t, err)
+
+		m, ok := doc.(map[string]any)
+		require.True(t, ok)
+
+		v, err := fakefy.New(fakefy.WithSeed(seed)).Schema(m)
+		if err != nil {
+			require.Contains(t, []error{fakefy.ErrUnsatisfiable, fakefy.ErrInvalid, fakefy.ErrUnresolved}, sentinel(err))
+
+			return
+		}
+
+		// A schema the validator can't compile, such as a draft-4 form, can't check the value.
+		if sch, ok := tryCompile(b); ok {
+			requireValid(t, sch, v)
+		}
+	})
+}
+
+func TestWithSeed_ARandomSchemaMakesTheSameValueForASeed(t *testing.T) {
+	// Mock generators write fake values to files: a seed that made other bytes on the next run would show every file
+	// as changed.
+	rapid.Check(t, func(t *rapid.T) {
+		raw := anySchemaGen(3).Draw(t, "schema")
+		seed := rapid.Uint64().Draw(t, "seed")
+
+		first, firstErr := fakefy.New(fakefy.WithSeed(seed)).Field("value", raw)
+		second, secondErr := fakefy.New(fakefy.WithSeed(seed)).Field("value", raw)
+
+		require.Equal(t, first, second)
+		// The message quotes the validator, which lists the properties that fail in map order.
+		require.Equal(t, sentinel(firstErr), sentinel(secondErr))
+	})
+}
+
+func TestSchema_ARandomValueSharesNothingWithItsSchema(t *testing.T) {
+	// A caller fills the value in, such as with a path parameter: a schema that changed with it would make the next
+	// value from the change.
+	rapid.Check(t, func(t *rapid.T) {
+		raw := rootGen(schemaGen(3)).Draw(t, "schema")
+		before, err := json.Marshal(raw)
+		require.NoError(t, err)
+
+		v, err := fakefy.New(fakefy.WithSeed(rapid.Uint64().Draw(t, "seed"))).Schema(raw)
+		require.NoError(t, err)
+
+		scribble(v)
+
+		after, err := json.Marshal(raw)
+		require.NoError(t, err)
+		require.JSONEq(t, string(before), string(after))
+	})
+}
+
+func TestSchema_RandomIntegerBoundsMakeAMultipleWithinThemOrFail(t *testing.T) {
+	// Integer bounds in specs reach past what a float64 holds exactly, such as int64 ids: the value must be the
+	// integer the bounds allow, exactly, and a range with none must fail rather than round into one.
+	rapid.Check(t, func(t *rapid.T) {
+		lo := bigIntGen().Draw(t, "lo")
+		hi := new(big.Int).Add(lo, big.NewInt(rapid.Int64Range(-10, 1_000_000).Draw(t, "width")))
+		exLo, exHi := rapid.Bool().Draw(t, "exclusiveMinimum"), rapid.Bool().Draw(t, "exclusiveMaximum")
+		step := rapid.SampledFrom([]string{"", "1", "3", "2.5", "1000", "0.5", "7"}).Draw(t, "multipleOf")
+
+		schema := `{"type": "integer", "` + boundKey("minimum", exLo) + `": ` + lo.String() + `, "` + boundKey("maximum", exHi) + `": ` + hi.String()
+		if step != "" {
+			schema += `, "multipleOf": ` + step
+		}
+
+		sch, doc := compile(t, schema+"}")
+
+		v, err := fakefy.New(fakefy.WithSeed(rapid.Uint64().Draw(t, "seed"))).Schema(doc)
+		if !integerExists(lo, hi, exLo, exHi, step) {
+			require.ErrorIs(t, err, fakefy.ErrUnsatisfiable)
+			return
+		}
+
+		require.NoError(t, err)
+		require.IsType(t, int64(0), v)
+		requireValid(t, sch, v)
+	})
+}
+
+func TestSchema_RandomDecimalBoundsMakeAMultipleWithinThemOrFail(t *testing.T) {
+	// Prices and rates are decimals: a value a float64 rounds past a bound, or off a multiple, breaks the contract.
+	rapid.Check(t, func(t *rapid.T) {
+		lo := decimalGen().Draw(t, "lo")
+		hi := new(big.Rat).Add(lo, decimalGen().Draw(t, "width"))
+		hi.Abs(hi)
+		if hi.Cmp(lo) < 0 {
+			lo, hi = hi, lo
+		}
+
+		exLo, exHi := rapid.Bool().Draw(t, "exclusiveMinimum"), rapid.Bool().Draw(t, "exclusiveMaximum")
+		step := rapid.SampledFrom([]string{"", "0.01", "0.05", "0.25", "1.5", "0.001", "3"}).Draw(t, "multipleOf")
+
+		schema := `{"type": "number", "` + boundKey("minimum", exLo) + `": ` + lo.FloatString(4) + `, "` +
+			boundKey("maximum", exHi) + `": ` + hi.FloatString(4)
+		if step != "" {
+			schema += `, "multipleOf": ` + step
+		}
+
+		sch, doc := compile(t, schema+"}")
+
+		v, err := fakefy.New(fakefy.WithSeed(rapid.Uint64().Draw(t, "seed"))).Schema(doc)
+		if !decimalExists(lo, hi, exLo, exHi, step) {
+			require.ErrorIs(t, err, fakefy.ErrUnsatisfiable)
+			return
+		}
+
 		require.NoError(t, err)
 		requireValid(t, sch, v)
 	})
@@ -613,6 +742,14 @@ func compile(t require.TestingT, schema string) (*jsonschema.Schema, map[string]
 	return sch, m
 }
 
+// compileMap compiles schema, a map, as [compile] does a JSON document.
+func compileMap(t require.TestingT, schema map[string]any) (*jsonschema.Schema, map[string]any) {
+	b, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	return compile(t, string(b))
+}
+
 // requireValid fails unless v, written as JSON and read back, as a mock file holds it, validates against sch.
 func requireValid(t require.TestingT, sch *jsonschema.Schema, v any) {
 	b, err := json.Marshal(v)
@@ -623,15 +760,162 @@ func requireValid(t require.TestingT, sch *jsonschema.Schema, v any) {
 	require.NoError(t, sch.Validate(inst), "value: %s", b)
 }
 
+// tryCompile returns the validator of schema, a JSON document, with formats asserted, when it compiles as JSON Schema
+// 2020-12.
+func tryCompile(schema []byte) (*jsonschema.Schema, bool) {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(schema))
+	if err != nil {
+		return nil, false
+	}
+
+	c := jsonschema.NewCompiler()
+	c.DefaultDraft(jsonschema.Draft2020)
+	c.AssertFormat()
+
+	if err := c.AddResource("schema.json", doc); err != nil {
+		return nil, false
+	}
+
+	sch, err := c.Compile("schema.json")
+
+	return sch, err == nil
+}
+
+// sentinel returns the error of fakefy that err wraps, or err when it wraps none.
+func sentinel(err error) error {
+	for _, s := range []error{fakefy.ErrUnsatisfiable, fakefy.ErrInvalid, fakefy.ErrUnresolved} {
+		if errors.Is(err, s) {
+			return s
+		}
+	}
+
+	return err
+}
+
+// scribble changes every object and list of v, at every level.
+func scribble(v any) {
+	switch v := v.(type) {
+	case map[string]any:
+		for k, x := range v {
+			scribble(x)
+			v[k] = "scribbled"
+		}
+
+		v["scribbled"] = true
+	case []any:
+		for i, x := range v {
+			scribble(x)
+			v[i] = "scribbled"
+		}
+	}
+}
+
+// boundKey returns key, or its exclusive form when exclusive.
+func boundKey(key string, exclusive bool) string {
+	if !exclusive {
+		return key
+	}
+
+	return "exclusive" + strings.ToUpper(key[:1]) + key[1:]
+}
+
+// integerExists reports whether an int64 that is a multiple of step, an integer one when step is "", lies between lo
+// and hi, each end excluded when its flag says so.
+func integerExists(lo, hi *big.Int, exLo, exHi bool, step string) bool {
+	r := big.NewRat(1, 1)
+	if step != "" {
+		m, _ := new(big.Rat).SetString(step)
+
+		// The least multiple of m that is an integer: m's numerator.
+		r.SetInt(m.Num())
+	}
+
+	k := r.Num()
+	first := ceilDiv(maxInt(lo, big.NewInt(math.MinInt64)), k, exLo && lo.Cmp(big.NewInt(math.MinInt64)) >= 0)
+	last := floorDiv(minInt(hi, big.NewInt(math.MaxInt64)), k, exHi && hi.Cmp(big.NewInt(math.MaxInt64)) <= 0)
+
+	return first.Cmp(last) <= 0
+}
+
+// decimalExists reports whether a multiple of step, any number when step is "", lies between lo and hi, each end
+// excluded when its flag says so.
+func decimalExists(lo, hi *big.Rat, exLo, exHi bool, step string) bool {
+	if step == "" {
+		return lo.Cmp(hi) < 0 || !exLo && !exHi && lo.Cmp(hi) == 0
+	}
+
+	m, _ := new(big.Rat).SetString(step)
+	ql, qh := new(big.Rat).Quo(lo, m), new(big.Rat).Quo(hi, m)
+
+	// The quotients have denominators above 0: n / d rounded down is their Euclidean quotient.
+	first := ceilDiv(ql.Num(), ql.Denom(), exLo)
+	last := floorDiv(qh.Num(), qh.Denom(), exHi)
+
+	return first.Cmp(last) <= 0
+}
+
+// ceilDiv returns the least k whose k × d is at least n, or above it when exclusive.
+func ceilDiv(n, d *big.Int, exclusive bool) *big.Int {
+	q, m := new(big.Int).DivMod(n, d, new(big.Int))
+	if m.Sign() != 0 || exclusive {
+		q.Add(q, big.NewInt(1))
+	}
+
+	return q
+}
+
+// floorDiv returns the greatest k whose k × d is at most n, or below it when exclusive.
+func floorDiv(n, d *big.Int, exclusive bool) *big.Int {
+	q, m := new(big.Int).DivMod(n, d, new(big.Int))
+	if m.Sign() == 0 && exclusive {
+		q.Sub(q, big.NewInt(1))
+	}
+
+	return q
+}
+
+// minInt returns the lesser of a and b.
+func minInt(a, b *big.Int) *big.Int {
+	if a.Cmp(b) <= 0 {
+		return a
+	}
+
+	return b
+}
+
+// maxInt returns the greater of a and b.
+func maxInt(a, b *big.Int) *big.Int {
+	if a.Cmp(b) >= 0 {
+		return a
+	}
+
+	return b
+}
+
 // Generators
+
+// rootGen draws the schemas of gen, or one of them behind a $ref to the $defs of the document.
+func rootGen(gen *rapid.Generator[map[string]any]) *rapid.Generator[map[string]any] {
+	return rapid.Custom(func(t *rapid.T) map[string]any {
+		s := gen.Draw(t, "schema")
+		if !rapid.Bool().Draw(t, "ref") {
+			return s
+		}
+
+		return map[string]any{"$defs": map[string]any{"S": s}, "$ref": "#/$defs/S"}
+	})
+}
 
 // schemaGen draws JSON Schemas whose values fakefy must make: every keyword it reads, with bounds that some value
 // meets, nested up to depth levels.
 func schemaGen(depth int) *rapid.Generator[map[string]any] {
 	return rapid.Custom(func(t *rapid.T) map[string]any {
-		kinds := []string{"string", "pattern", "integer", "allOf", "number", "boolean", "null", "enum"}
+		kinds := []string{
+			"string", "pattern", "format and pattern", "integer", "big integer", "exclusive integer", "allOf", "number",
+			"decimal", "boolean", "null", "enum", "const", "nullable", "oneOf",
+		}
 		if depth > 0 {
-			kinds = append(kinds, "object", "array")
+			kinds = append(kinds, "object", "pattern object", "array", "unique array", "tuple", "anyOf", "allOf objects")
 		}
 
 		switch rapid.SampledFrom(kinds).Draw(t, "kind") {
@@ -652,10 +936,19 @@ func schemaGen(depth int) *rapid.Generator[map[string]any] {
 
 			return map[string]any{
 				"type":      "string",
-				"pattern":   rapid.SampledFrom([]string{"^[a-z]+$", "^[0-9a-f]*$", "^[A-Z][a-z]+$", "^(ab|c)+-?[0-9]*$"}).Draw(t, "pattern"),
+				"pattern":   rapid.SampledFrom([]string{"^[a-z]+$", "^[0-9a-f]*$", "^[A-Z][a-z]+$", "^(ab|c)+-?[0-9]*$", "[0-9]", "x$", "^a"}).Draw(t, "pattern"),
 				"minLength": lo,
 				"maxLength": lo + rapid.IntRange(0, 4).Draw(t, "extra"),
 			}
+		case "format and pattern":
+			return rapid.SampledFrom([]map[string]any{
+				{"type": "string", "format": "email", "pattern": "^x"},
+				{"type": "string", "format": "email", "pattern": "@"},
+				{"type": "string", "format": "hostname", "pattern": "\\.io$"},
+				{"type": "string", "format": "uuid", "pattern": "^[0-9a-f-]+$"},
+				{"type": "string", "format": "date", "pattern": "^20"},
+				{"type": "string", "format": "uri", "pattern": "^https://"},
+			}).Draw(t, "schema")
 		case "allOf":
 			lo := rapid.IntRange(-1000, 1000).Draw(t, "minimum")
 
@@ -671,31 +964,77 @@ func schemaGen(depth int) *rapid.Generator[map[string]any] {
 			}
 
 			return s
+		case "big integer":
+			lo := rapid.Int64Range(math.MinInt64, math.MaxInt64-1000).Draw(t, "minimum")
+			return map[string]any{"type": "integer", "minimum": lo, "maximum": lo + rapid.Int64Range(0, 1000).Draw(t, "width")}
+		case "exclusive integer":
+			lo := rapid.IntRange(-1000, 1000).Draw(t, "exclusiveMinimum")
+			return map[string]any{"type": "integer", "exclusiveMinimum": lo, "exclusiveMaximum": lo + rapid.IntRange(2, 50).Draw(t, "width")}
 		case "number":
 			lo := rapid.Float64Range(-1e6, 1e6).Draw(t, "minimum")
 			return map[string]any{"type": "number", "minimum": lo, "exclusiveMaximum": lo + rapid.Float64Range(0.5, 100).Draw(t, "width")}
+		case "decimal":
+			step := rapid.SampledFrom([]float64{0.01, 0.05, 0.25, 0.5, 1.5}).Draw(t, "multipleOf")
+			lo := float64(rapid.IntRange(-100000, 100000).Draw(t, "minimum")) / 100
+
+			return map[string]any{"type": "number", "minimum": lo, "maximum": lo + 2*step + float64(rapid.IntRange(0, 1000).Draw(t, "width")), "multipleOf": step}
 		case "boolean":
 			return map[string]any{"type": "boolean"}
 		case "null":
 			return map[string]any{"type": "null"}
 		case "enum":
 			return map[string]any{"enum": []any{rapid.String().Draw(t, "a"), rapid.Int().Draw(t, "b")}}
+		case "const":
+			return map[string]any{"const": rapid.SampledFrom([]any{"c", 7, true, nil, 2.5, []any{1, "a"}, map[string]any{"k": "v"}}).Draw(t, "const")}
+		case "nullable":
+			// The bounds may cross: then only null is left.
+			return map[string]any{"type": []any{"integer", "null"}, "minimum": rapid.IntRange(0, 10).Draw(t, "minimum"), "maximum": rapid.IntRange(0, 10).Draw(t, "maximum")}
+		case "oneOf":
+			// Branches of different types: a value matches one only.
+			branches := rapid.Permutation([]any{
+				map[string]any{"type": "string", "maxLength": 3},
+				map[string]any{"type": "boolean"},
+				map[string]any{"type": "null"},
+				map[string]any{"type": "array", "maxItems": 0},
+			}).Draw(t, "branches")
+
+			return map[string]any{"oneOf": branches[:rapid.IntRange(1, len(branches)).Draw(t, "count")]}
+		case "anyOf":
+			return map[string]any{"anyOf": []any{schemaGen(depth-1).Draw(t, "a"), schemaGen(depth-1).Draw(t, "b")}}
 		case "object":
-			props := make(map[string]any)
-			var required []any
+			return objectGen(depth, "", false).Draw(t, "object")
+		case "pattern object":
+			return objectGen(depth, "", true).Draw(t, "object")
+		case "allOf objects":
+			// Each side names its own properties: one name of two unrelated schemas would have no value.
+			a, b := objectGen(depth, "a_", false).Draw(t, "a"), objectGen(depth, "b_", false).Draw(t, "b")
+			delete(a, "additionalProperties")
+			delete(b, "additionalProperties")
+			delete(a, "maxProperties")
+			delete(b, "maxProperties")
 
-			for i := range rapid.IntRange(0, 3).Draw(t, "properties") {
-				name := fmt.Sprintf("%s%d", rapid.SampledFrom([]string{"id", "email", "name", "createdAt", "price", "age", "url", "x"}).Draw(t, "name"), i)
-				props[name] = schemaGen(depth-1).Draw(t, name)
+			return map[string]any{"allOf": []any{a, b}}
+		case "unique array":
+			lo := rapid.IntRange(0, 5).Draw(t, "minItems")
+			items := rapid.SampledFrom([]map[string]any{
+				{"type": "integer", "minimum": 0, "maximum": 1000},
+				{"type": "string", "minLength": 3},
+				{"type": "integer", "minimum": 9007199254740992, "maximum": 9007199254741100},
+				{"enum": []any{"a", "b", "c", "d", "e", 1, 2, 3}},
+			}).Draw(t, "items")
 
-				if rapid.Bool().Draw(t, "required") {
-					required = append(required, name)
-				}
+			return map[string]any{"type": "array", "uniqueItems": true, "items": items, "minItems": lo, "maxItems": lo + rapid.IntRange(0, 3).Draw(t, "extra")}
+		case "tuple":
+			n := rapid.IntRange(1, 3).Draw(t, "prefixItems")
+			prefix := make([]any, n)
+
+			for i := range prefix {
+				prefix[i] = schemaGen(depth-1).Draw(t, fmt.Sprintf("prefix%d", i))
 			}
 
-			s := map[string]any{"type": "object", "properties": props, "additionalProperties": false}
-			if len(required) > 0 {
-				s["required"] = required
+			s := map[string]any{"type": "array", "prefixItems": prefix, "minItems": rapid.IntRange(0, n).Draw(t, "minItems")}
+			if rapid.Bool().Draw(t, "closed") {
+				s["items"] = false
 			}
 
 			return s
@@ -703,5 +1042,152 @@ func schemaGen(depth int) *rapid.Generator[map[string]any] {
 			lo := rapid.IntRange(0, 2).Draw(t, "minItems")
 			return map[string]any{"type": "array", "items": schemaGen(depth-1).Draw(t, "items"), "minItems": lo, "maxItems": lo + rapid.IntRange(0, 3).Draw(t, "extra")}
 		}
+	})
+}
+
+// objectGen draws closed objects of up to three properties of schemaGen, depth levels down, their names starting with
+// prefix and some of them required, with minProperties and maxProperties they meet. With patterns, it adds required
+// properties only patternProperties allow.
+func objectGen(depth int, prefix string, patterns bool) *rapid.Generator[map[string]any] {
+	return rapid.Custom(func(t *rapid.T) map[string]any {
+		props := make(map[string]any)
+		var required []any
+
+		for i := range rapid.IntRange(0, 3).Draw(t, "properties") {
+			name := prefix + fmt.Sprintf("%s%d", rapid.SampledFrom([]string{"id", "email", "name", "createdAt", "price", "age", "url", "x"}).Draw(t, "name"), i)
+			props[name] = schemaGen(depth-1).Draw(t, name)
+
+			if rapid.Bool().Draw(t, "required") {
+				required = append(required, name)
+			}
+		}
+
+		s := map[string]any{"type": "object", "properties": props, "additionalProperties": false}
+
+		if patterns {
+			s["patternProperties"] = map[string]any{"^p_": schemaGen(depth-1).Draw(t, "pattern")}
+			for i := range rapid.IntRange(1, 2).Draw(t, "pattern properties") {
+				required = append(required, fmt.Sprintf("p_%d", i))
+			}
+		}
+
+		if len(required) > 0 {
+			s["required"] = required
+		}
+
+		total := len(props) + len(required)
+		for _, r := range required {
+			if _, ok := props[r.(string)]; ok {
+				total--
+			}
+		}
+
+		lo := rapid.IntRange(0, total).Draw(t, "minProperties")
+		if lo > 0 {
+			s["minProperties"] = lo
+		}
+
+		if rapid.Bool().Draw(t, "bounded") {
+			s["maxProperties"] = max(lo, len(required)) + rapid.IntRange(0, 2).Draw(t, "extra")
+		}
+
+		return s
+	})
+}
+
+// anySchemaGen draws schemas of the keywords fakefy reads, with values of any kind, nested up to depth levels: bounds
+// that cross, keywords that contradict, counts that aren't counts, patterns that don't compile and refs to nothing.
+func anySchemaGen(depth int) *rapid.Generator[map[string]any] {
+	return rapid.Custom(func(t *rapid.T) map[string]any {
+		s := make(map[string]any)
+		keys := []string{
+			"type", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "minLength", "maxLength",
+			"pattern", "format", "enum", "const", "example", "minItems", "maxItems", "uniqueItems", "required",
+			"additionalProperties", "minProperties", "maxProperties", "$ref",
+		}
+		if depth > 0 {
+			keys = append(keys, "items", "prefixItems", "properties", "patternProperties", "allOf", "anyOf", "oneOf")
+		}
+
+		number := rapid.SampledFrom([]any{0, 1, -1, 3, 2.5, 0.01, -7.5, 1e300, -1e300, 1e-300, 9007199254740993, math.MaxInt64, "5", true})
+		count := rapid.SampledFrom([]any{0, 1, 2, 5, -1, 1.5, "2"})
+		sub := func(label string) any {
+			if rapid.IntRange(0, 5).Draw(t, label+" bool") == 0 {
+				return rapid.Bool().Draw(t, label)
+			}
+
+			return anySchemaGen(depth-1).Draw(t, label)
+		}
+
+		for range rapid.IntRange(0, 4).Draw(t, "keywords") {
+			switch key := rapid.SampledFrom(keys).Draw(t, "key"); key {
+			case "type":
+				types := []any{"string", "integer", "number", "boolean", "null", "object", "array"}
+				if rapid.Bool().Draw(t, "type list") {
+					s[key] = rapid.SliceOfNDistinct(rapid.SampledFrom(types), 1, 3, func(v any) any { return v }).Draw(t, key)
+				} else {
+					s[key] = rapid.SampledFrom(types).Draw(t, key)
+				}
+			case "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf":
+				s[key] = number.Draw(t, key)
+			case "minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties":
+				s[key] = count.Draw(t, key)
+			case "pattern":
+				s[key] = rapid.SampledFrom([]string{"^a+$", "[0-9]", "^$", "(", "^.{3}$", "x$"}).Draw(t, key)
+			case "format":
+				s[key] = rapid.SampledFrom([]string{"email", "uuid", "date-time", "int32", "hostname"}).Draw(t, key)
+			case "enum":
+				s[key] = rapid.SliceOfN(rapid.SampledFrom([]any{"a", 1, 1.0, nil, true, []any{}}), 0, 3).Draw(t, key)
+			case "const", "example":
+				s[key] = rapid.SampledFrom([]any{"a", 1, nil, false, map[string]any{"a": 1}, []any{1, 1}}).Draw(t, key)
+			case "uniqueItems":
+				s[key] = rapid.Bool().Draw(t, key)
+			case "required":
+				s[key] = rapid.SliceOfN(rapid.SampledFrom([]any{"a", "b", "c"}), 0, 3).Draw(t, key)
+			case "$ref":
+				s[key] = rapid.SampledFrom([]string{"#", "#/properties/a", "#/missing", "other.json"}).Draw(t, key)
+			case "additionalProperties", "items":
+				s[key] = sub(key)
+			case "prefixItems", "allOf", "anyOf", "oneOf":
+				list := make([]any, rapid.IntRange(0, 2).Draw(t, key+" length"))
+				for i := range list {
+					list[i] = sub(fmt.Sprintf("%s%d", key, i))
+				}
+
+				s[key] = list
+			case "properties", "patternProperties":
+				names := []string{"a", "b", "c"}
+				if key == "patternProperties" {
+					names = []string{"^a", "b$", "("}
+				}
+
+				props := make(map[string]any)
+				for _, name := range rapid.SliceOfNDistinct(rapid.SampledFrom(names), 0, 2, func(v string) string { return v }).Draw(t, key) {
+					props[name] = sub(name)
+				}
+
+				s[key] = props
+			}
+		}
+
+		return s
+	})
+}
+
+// bigIntGen draws integers across the range of an int64 and a little past both ends.
+func bigIntGen() *rapid.Generator[*big.Int] {
+	return rapid.Custom(func(t *rapid.T) *big.Int {
+		base := rapid.SampledFrom([]*big.Int{
+			big.NewInt(0), big.NewInt(1 << 53), big.NewInt(-(1 << 53)), big.NewInt(math.MaxInt64), big.NewInt(math.MinInt64),
+		}).Draw(t, "base")
+
+		return new(big.Int).Add(base, big.NewInt(rapid.Int64Range(-2_000_000, 2_000_000).Draw(t, "offset")))
+	})
+}
+
+// decimalGen draws decimals of up to four places, up to a billion.
+func decimalGen() *rapid.Generator[*big.Rat] {
+	return rapid.Custom(func(t *rapid.T) *big.Rat {
+		return big.NewRat(rapid.Int64Range(-1e13, 1e13).Draw(t, "ten-thousandths"), 10000)
 	})
 }
