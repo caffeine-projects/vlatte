@@ -11,6 +11,7 @@ import (
 	"uuid"
 
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte/fakefy"
 )
@@ -179,6 +180,44 @@ func TestField_AnIntegerIsAnInt64(t *testing.T) {
 	require.IsType(t, int64(0), v)
 }
 
+func TestField_ANameKeepsAStringWithinItsLengths(t *testing.T) {
+	// A name only picks what a string looks like: an email that breaks a maxLength fails the contract it mocks.
+	rapid.Check(t, func(t *rapid.T) {
+		lo := rapid.IntRange(0, 40).Draw(t, "minLength")
+		schema := map[string]any{"type": "string", "minLength": lo}
+		if rapid.Bool().Draw(t, "bounded") {
+			schema["maxLength"] = lo + rapid.IntRange(0, 20).Draw(t, "extra")
+		}
+
+		v, err := fakefy.New(fakefy.WithSeed(rapid.Uint64().Draw(t, "seed"))).Field(nameGen().Draw(t, "name"), schema)
+		require.NoError(t, err)
+		sch, _ := compileMap(t, schema)
+		requireValid(t, sch, v)
+	})
+}
+
+func TestField_ANameKeepsANumberWithinItsBounds(t *testing.T) {
+	// A name only picks the range of a number without bounds: an age of 90 under a maximum of 18 fails the contract.
+	rapid.Check(t, func(t *rapid.T) {
+		lo := rapid.Int64Range(-1000, 1000).Draw(t, "lo")
+		schema := map[string]any{"type": rapid.SampledFrom([]string{"integer", "number"}).Draw(t, "type")}
+
+		switch rapid.SampledFrom([]string{"both", "minimum", "maximum", "none"}).Draw(t, "bounds") {
+		case "both":
+			schema["minimum"], schema["maximum"] = lo, lo+rapid.Int64Range(0, 100).Draw(t, "width")
+		case "minimum":
+			schema["minimum"] = lo
+		case "maximum":
+			schema["maximum"] = lo
+		}
+
+		v, err := fakefy.New(fakefy.WithSeed(rapid.Uint64().Draw(t, "seed"))).Field(nameGen().Draw(t, "name"), schema)
+		require.NoError(t, err)
+		sch, _ := compileMap(t, schema)
+		requireValid(t, sch, v)
+	})
+}
+
 // stringOf writes a number fakefy made as text.
 func stringOf(v any) string {
 	switch n := v.(type) {
@@ -189,4 +228,19 @@ func stringOf(v any) string {
 	default:
 		return ""
 	}
+}
+
+// Generators
+
+// nameGen draws field names: ones fakefy knows, in the cases specs write them, and any other string.
+func nameGen() *rapid.Generator[string] {
+	return rapid.OneOf(
+		rapid.SampledFrom([]string{
+			"email", "contactEmail", "firstName", "fullName", "username", "password", "phone", "avatarUrl", "url", "city",
+			"country", "street_address", "zip", "currency", "price", "description", "title", "company", "color",
+			"locale", "token", "ip", "hostname", "slug", "createdAt", "birth_date", "id", "petId", "ID", "age", "year",
+			"month", "day", "hour", "minute", "quantity", "pageSize", "latitude", "longitude", "rating", "percent",
+		}),
+		rapid.String(),
+	)
 }

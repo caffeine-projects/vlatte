@@ -8,6 +8,17 @@ import (
 	"uuid"
 )
 
+// _shortest holds the shortest string of each format whose strings vary in length, for a maxLength the others break.
+var _shortest = map[string]string{
+	"email":        "a@b.co",
+	"idn-email":    "a@b.co",
+	"hostname":     "a.co",
+	"idn-hostname": "a.co",
+	"uri":          "https://a.co",
+	"iri":          "https://a.co",
+	"url":          "https://a.co",
+}
+
 // _epoch is the latest time a date or time can be: values are fixed in time, so a seed makes the same ones on every
 // day.
 var _epoch = time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
@@ -24,6 +35,10 @@ func (f *Faker) format(name string) string {
 		return f.instant().Format("15:04:05Z")
 	case "duration":
 		return fmt.Sprintf("P%dD", 1+f.rnd.IntN(30))
+	case "period":
+		return f.instant().Format(time.RFC3339) + fmt.Sprintf("/P%dD", 1+f.rnd.IntN(30))
+	case "semver":
+		return fmt.Sprintf("%d.%d.%d", 1+f.rnd.IntN(3), f.rnd.IntN(10), f.rnd.IntN(10))
 	case "email", "idn-email":
 		return f.email()
 	case "hostname", "idn-hostname":

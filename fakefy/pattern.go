@@ -28,7 +28,7 @@ func (f *Faker) pattern(res []*regexp.Regexp, lo, hi int, bounded bool) (string,
 	tree, _ := syntax.Parse(res[0].String(), syntax.Perl)
 	tree = tree.Simplify()
 
-	for range _maxTries {
+	for try := range _maxTries {
 		// With lengths, repeats write up to a length of lo, or a little more, and no further: no length is -1.
 		target := -1
 		if lo > 0 || bounded {
@@ -40,8 +40,10 @@ func (f *Faker) pattern(res []*regexp.Regexp, lo, hi int, bounded bool) (string,
 			target = lo + f.rnd.IntN(max(top-lo, 0)+1)
 		}
 
+		// Every other try, repeats with an upper bound repeat as far as they may toward the target, as one of
+		// [0-9]{1,15} must to reach a minLength of 8; random ones mix lengths, as ([a-z]{2,3}-)+ must for one of 15.
 		var b strings.Builder
-		if err := f.regexp(tree, &b, 0, target); err != nil {
+		if err := f.regexp(tree, &b, 0, target, try%2 == 1); err != nil {
 			return "", err
 		}
 
@@ -56,8 +58,15 @@ func (f *Faker) pattern(res []*regexp.Regexp, lo, hi int, bounded bool) (string,
 			continue
 		}
 
+		// A space before the letters keeps a word boundary, as \bfoo\b has, after the match.
 		pad := f.letters(lo - n)
-		for _, v := range []string{s + pad, pad + s} {
+		candidates := []string{s + pad, pad + s}
+
+		if pad != "" {
+			candidates = append(candidates, s+" "+pad[1:], pad[1:]+" "+s)
+		}
+
+		for _, v := range candidates {
 			if matchAll(res, v) {
 				return v, nil
 			}
@@ -89,9 +98,9 @@ func matchAll(res []*regexp.Regexp, s string) bool {
 }
 
 // regexp writes a string that re matches to b. rest is the fewest runes the pattern writes after re. With a target
-// length, repeats repeat until b and rest reach it; without one (-1), those without an upper bound repeat up to twice
-// more than their minimum.
-func (f *Faker) regexp(re *syntax.Regexp, b *strings.Builder, rest, target int) error {
+// length, repeats without an upper bound repeat until b and rest reach it, and, with fill, those with one too, up to
+// it; without one (-1), repeats without an upper bound repeat up to twice more than their minimum.
+func (f *Faker) regexp(re *syntax.Regexp, b *strings.Builder, rest, target int, fill bool) error {
 	switch re.Op {
 	case syntax.OpLiteral:
 		b.WriteString(string(re.Rune))
@@ -106,7 +115,7 @@ func (f *Faker) regexp(re *syntax.Regexp, b *strings.Builder, rest, target int) 
 	case syntax.OpAnyChar, syntax.OpAnyCharNotNL:
 		b.WriteByte(byte('a' + f.rnd.IntN(26)))
 	case syntax.OpCapture:
-		return f.regexp(re.Sub[0], b, rest, target)
+		return f.regexp(re.Sub[0], b, rest, target, fill)
 	case syntax.OpConcat:
 		for i, sub := range re.Sub {
 			after := rest
@@ -114,14 +123,14 @@ func (f *Faker) regexp(re *syntax.Regexp, b *strings.Builder, rest, target int) 
 				after += minLen(next)
 			}
 
-			if err := f.regexp(sub, b, after, target); err != nil {
+			if err := f.regexp(sub, b, after, target, fill); err != nil {
 				return err
 			}
 		}
 	case syntax.OpAlternate:
-		return f.regexp(re.Sub[f.rnd.IntN(len(re.Sub))], b, rest, target)
+		return f.regexp(re.Sub[f.rnd.IntN(len(re.Sub))], b, rest, target, fill)
 	case syntax.OpStar, syntax.OpPlus, syntax.OpQuest, syntax.OpRepeat:
-		return f.repeat(re, b, rest, target)
+		return f.repeat(re, b, rest, target, fill)
 	default:
 		// Anchors, word boundaries and the empty match write nothing.
 	}
@@ -130,7 +139,7 @@ func (f *Faker) regexp(re *syntax.Regexp, b *strings.Builder, rest, target int) 
 }
 
 // repeat writes the repeats of re, a *, +, ? or {n,m}, to b, as [Faker.regexp] has them.
-func (f *Faker) repeat(re *syntax.Regexp, b *strings.Builder, rest, target int) error {
+func (f *Faker) repeat(re *syntax.Regexp, b *strings.Builder, rest, target int, fill bool) error {
 	lo, hi := re.Min, re.Max
 
 	switch re.Op {
@@ -142,8 +151,8 @@ func (f *Faker) repeat(re *syntax.Regexp, b *strings.Builder, rest, target int) 
 		lo, hi = 0, 1
 	}
 
-	// A repeat with an upper bound repeats a random number of times; one without, with a target length, repeats
-	// until the target, and otherwise up to twice more than its minimum.
+	// A repeat with an upper bound repeats a random number of times, and one without, with no target length, up to
+	// twice more than its minimum.
 	n := lo
 	if hi >= 0 || target < 0 {
 		top := hi
@@ -155,26 +164,32 @@ func (f *Faker) repeat(re *syntax.Regexp, b *strings.Builder, rest, target int) 
 	}
 
 	for range n {
-		if err := f.regexp(re.Sub[0], b, rest, target); err != nil {
+		if err := f.regexp(re.Sub[0], b, rest, target, fill); err != nil {
 			return err
 		}
 	}
 
-	if hi >= 0 || target < 0 {
+	if target < 0 || hi >= 0 && !fill {
 		return nil
 	}
 
-	// Each repeat past n must write something, or one that writes nothing, such as (a?)*, never ends.
-	for length := utf8.RuneCountInString(b.String()); length+rest < target; {
+	// With a target length, one without an upper bound repeats on until b and rest reach the target, and, to fill,
+	// one with an upper bound too, up to it. A repeat past n may write
+	// nothing by chance, as [A-Z]? does, so only _maxTries in a row that write nothing end it: one of (^)* never
+	// writes.
+	length := utf8.RuneCountInString(b.String())
+	for i, empty := n, 0; (hi < 0 || i < hi) && length+rest < target && empty < _maxTries; i++ {
 		before := b.Len()
-		if err := f.regexp(re.Sub[0], b, rest, target); err != nil {
+		if err := f.regexp(re.Sub[0], b, rest, target, fill); err != nil {
 			return err
 		}
 
 		if b.Len() == before {
-			break
+			empty++
+			continue
 		}
 
+		empty = 0
 		length += utf8.RuneCountInString(b.String()[before:])
 	}
 

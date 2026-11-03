@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"math/rand/v2"
 	"net/url"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -42,6 +43,10 @@ const (
 
 	// _maxTries is how many values a unique array item or a pattern gets before the schema counts as unsatisfiable.
 	_maxTries = 20
+
+	// _maxFailures is how many oneOf and anyOf branches fail, giving way to others, before the schema counts as one no
+	// value ends: failing branches at every level would otherwise take years.
+	_maxFailures = 10_000
 
 	// _seedSalt is the second seed of the PCG source a seed makes.
 	_seedSalt = 0x9e3779b97f4a7c15
@@ -90,7 +95,8 @@ func New(opts ...Option) *Faker {
 
 // Schema returns a value for schema, a JSON Schema as decoded JSON or YAML: objects are map[string]any, and numbers any
 // Go number or a json.Number. The value is decoded JSON too: map[string]any, []any, string, int64 for an integer,
-// float64, bool or nil. It shares nothing with schema, so the caller may change it.
+// float64, bool or nil, or a number of the schema as the schema has it, when neither an int64 nor a float64 holds it
+// exactly. It shares nothing with schema, so the caller may change it.
 //
 // A value comes from the first of const, examples, example, default and enum the schema has; then from its format,
 // such as email or date-time; then from the name of its field, such as createdAt or price; then from its type and
@@ -99,9 +105,10 @@ func New(opts ...Option) *Faker {
 // first a value satisfies wins, null last, or first from four levels down, so a nullable schema that nests itself
 // ends. An optional property or item no value satisfies is left out.
 //
-// A schema that compiles as JSON Schema 2020-12 checks each value, formats too: one that doesn't validate, such as an
-// example the rest of the schema breaks, is made again, from the schema's examples, then without them, up to 20
-// times. A schema whose examples leave no value, such as unique items an example repeats, is made without them.
+// A schema that compiles as JSON Schema 2020-12, or as draft 4, as OpenAPI 3.0 writes one, checks each value, formats
+// too: one that doesn't validate, such as an example the rest of the schema breaks, is made again, from the schema's
+// examples, then without them, up to 20 times. A schema whose examples leave no value, such as unique items an example
+// repeats, is made without them.
 //
 // The error wraps [ErrUnsatisfiable], [ErrUnresolved] or [ErrInvalid], naming the place in the value it stopped at.
 func (f *Faker) Schema(schema map[string]any) (any, error) {
@@ -119,6 +126,7 @@ func (f *Faker) Field(name string, schema map[string]any) (any, error) {
 
 	for try := range _maxTries {
 		w.examples = w.examples && try < _maxTries/2
+		w.failures = 0
 
 		v, err := w.value(schema, name, "", 0)
 
@@ -144,27 +152,29 @@ func (f *Faker) Field(name string, schema map[string]any) (any, error) {
 	return nil, fmt.Errorf("%w: %s: no value of %d validates: %w", ErrUnsatisfiable, at(""), _maxTries, invalid)
 }
 
-// validator returns the validator of schema as JSON Schema 2020-12, formats asserted, or nil when it doesn't compile as
-// one, such as an OpenAPI 3.0 schema whose exclusiveMinimum is a boolean.
+// validator returns the validator of schema as JSON Schema 2020-12, formats asserted, or as draft 4 when it doesn't
+// compile as one, such as an OpenAPI 3.0 schema whose exclusiveMinimum is a boolean, or nil when it compiles as
+// neither.
 func validator(schema map[string]any) *jsonschema.Schema {
 	doc, err := asJSON(schema)
 	if err != nil {
 		return nil
 	}
 
-	c := jsonschema.NewCompiler()
-	c.DefaultDraft(jsonschema.Draft2020)
-	c.AssertFormat()
+	for _, draft := range []*jsonschema.Draft{jsonschema.Draft2020, jsonschema.Draft4} {
+		c := jsonschema.NewCompiler()
+		c.DefaultDraft(draft)
+		c.AssertFormat()
 
-	// AddResource fails only for a URL added before: Compile fails then too.
-	_ = c.AddResource("schema.json", doc)
+		// AddResource fails only for a URL added before: Compile fails then too.
+		_ = c.AddResource("schema.json", doc)
 
-	sch, err := c.Compile("schema.json")
-	if err != nil {
-		return nil
+		if sch, err := c.Compile("schema.json"); err == nil {
+			return sch
+		}
 	}
 
-	return sch
+	return nil
 }
 
 // validate checks v against sch. Every part of v is JSON: a value made, or one of the schema, which is.
@@ -189,6 +199,20 @@ type walk struct {
 	f        *Faker
 	root     map[string]any
 	examples bool
+	failures int
+
+	// spread is how many numbers a value's number must differ from, as a unique array's item must from those before.
+	spread int
+
+	// flat holds the schemas flatten made, by the schema they come from, kept alive by the entry: a schema an allOf
+	// names twice, at every level, would be flattened twice as often each level down.
+	flat map[uintptr]flattened
+}
+
+// flattened is a schema, and what [walk.flatten] made of it.
+type flattened struct {
+	from map[string]any
+	out  map[string]any
 }
 
 // value returns a value for s, a schema object or boolean, of the field name at path, depth levels down.
@@ -253,9 +277,9 @@ func (w *walk) typed(t string, s map[string]any, name, path string, depth int) (
 	case "array":
 		return w.array(s, name, path, depth)
 	case "integer":
-		return w.f.integer(s, name, path)
+		return w.f.integer(s, name, path, w.spread)
 	case "number":
-		return w.f.number(s, name, path)
+		return w.f.number(s, name, path, w.spread)
 	case "boolean":
 		return w.f.rnd.IntN(2) == 1, nil
 	case "null":
@@ -281,6 +305,11 @@ func (w *walk) flatten(s map[string]any, path string, depth int) (map[string]any
 		return s, nil
 	}
 
+	key := reflect.ValueOf(s).Pointer()
+	if f, ok := w.flat[key]; ok {
+		return f.out, nil
+	}
+
 	out := maps.Clone(s)
 	delete(out, "allOf")
 
@@ -298,6 +327,12 @@ func (w *walk) flatten(s map[string]any, path string, depth int) (map[string]any
 			return nil, fmt.Errorf("%w: %s: allOf: %w", ErrUnsatisfiable, at(path), err)
 		}
 	}
+
+	if w.flat == nil {
+		w.flat = make(map[uintptr]flattened)
+	}
+
+	w.flat[key] = flattened{from: s, out: out}
 
 	return out, nil
 }
@@ -393,21 +428,39 @@ func (w *walk) branch(s map[string]any, key, name, path string, depth int) (any,
 	delete(rest, key)
 	delete(rest, "discriminator")
 
-	// A branch no value satisfies, with the rest, gives way to the others, in random order.
+	// A branch no value satisfies, with the rest, gives way to the others, in random order. From _optionalDepth on,
+	// those without a $ref come first, as a null one of a nullable $ref does, so a schema that nests itself ends.
+	order := w.f.rnd.Perm(len(branches))
+	if depth >= _optionalDepth {
+		leaves := slices.DeleteFunc(slices.Clone(order), func(i int) bool { return refers(branches[i]) })
+		order = append(leaves, slices.DeleteFunc(order, func(i int) bool { return !refers(branches[i]) })...)
+	}
+
 	var (
 		picked, v any
 		both      map[string]any
 		err       error
 	)
 
-	for _, i := range w.f.rnd.Perm(len(branches)) {
+	for _, i := range order {
+		if w.failures >= _maxFailures {
+			return nil, fmt.Errorf("%w: %s: no value after %d branches failed", ErrUnsatisfiable, at(path), _maxFailures)
+		}
+
 		picked = branches[i]
 		both = map[string]any{"allOf": []any{rest, picked}}
 
-		// A branch counts as a level, so a oneOf that names itself ends.
-		if v, err = w.value(both, name, path, depth+1); !errors.Is(err, ErrUnsatisfiable) {
+		// A branch with a $ref counts as a level, so a oneOf that names itself ends; one without is part of s.
+		next := depth
+		if refers(picked) {
+			next++
+		}
+
+		if v, err = w.value(both, name, path, next); !errors.Is(err, ErrUnsatisfiable) {
 			break
 		}
+
+		w.failures++
 	}
 
 	if err != nil {
@@ -416,22 +469,22 @@ func (w *walk) branch(s map[string]any, key, name, path string, depth int) (any,
 
 	disc, _ := s["discriminator"].(map[string]any)
 	prop, _ := disc["propertyName"].(string)
+	tag := discriminatorValue(disc, picked)
 	obj, isObj := v.(map[string]any)
 
-	if prop == "" || !isObj || w.fixes(both, prop, path) {
+	if prop == "" || tag == "" || !isObj || w.fixes(both, prop, tag, path) {
 		return v, nil
 	}
 
-	if tag := discriminatorValue(disc, picked); tag != "" {
-		obj[prop] = tag
-	}
+	obj[prop] = tag
 
 	return obj, nil
 }
 
-// fixes reports whether s gives its property prop a const or an enum, or itself one, which fixes every property: a
-// discriminator's tag must not replace it.
-func (w *walk) fixes(s map[string]any, prop, path string) bool {
+// fixes reports whether s gives its property prop a const, or an enum that doesn't list tag, or itself a const or an
+// enum, which fixes every property: a discriminator's tag must not replace the value they allow. An enum that lists
+// every tag, as a base schema of OpenAPI inheritance does, leaves tag to name the branch.
+func (w *walk) fixes(s map[string]any, prop, tag, path string) bool {
 	m, err := w.flatten(s, path, 0)
 	if err == nil && (has(m, "const") || has(m, "enum")) {
 		return true
@@ -445,8 +498,27 @@ func (w *walk) fixes(s map[string]any, prop, path string) bool {
 	}
 
 	p, err = w.flatten(p, path, 0)
+	enum, isList := p["enum"].([]any)
 
-	return err == nil && (has(p, "const") || has(p, "enum"))
+	return err == nil && (has(p, "const") || has(p, "enum") && (!isList || !slices.Contains(enum, any(tag))))
+}
+
+// refers reports whether schema, or a schema within it, has a $ref.
+func refers(schema any) bool {
+	switch s := schema.(type) {
+	case map[string]any:
+		for k, v := range s {
+			if k == "$ref" || refers(v) {
+				return true
+			}
+		}
+
+		return false
+	case []any:
+		return slices.ContainsFunc(s, refers)
+	default:
+		return false
+	}
 }
 
 // discriminatorValue returns the value of a discriminator's property that names picked: its key in the mapping, or
@@ -459,16 +531,17 @@ func discriminatorValue(disc map[string]any, picked any) string {
 		return ""
 	}
 
+	_, name, _ := strings.CutLast(ref, "/")
+
+	// OpenAPI lets a mapping name a schema by its $ref or by its name.
 	mapping, _ := disc["mapping"].(map[string]any)
 	for _, k := range slices.Sorted(maps.Keys(mapping)) {
-		if mapping[k] == ref {
+		if mapping[k] == ref || mapping[k] == name {
 			return k
 		}
 	}
 
-	_, last, _ := strings.CutLast(ref, "/")
-
-	return last
+	return name
 }
 
 // object returns an object with the properties of s. Past _optionalDepth, it leaves out the optional ones minProperties
@@ -579,20 +652,25 @@ func (w *walk) object(s map[string]any, path string, depth int) (any, error) {
 		}
 	}
 
+	// A pattern may name few keys, such as ^[0-9]$, so the keys come from _maxTries tries a property.
 	for i := 1; len(out) < minProps; i++ {
-		if extra == false {
+		key, schema, err := w.extraKey(s, extra, i, path)
+		if err != nil {
+			return nil, err
+		}
+
+		if key == "" || i > _maxTries*minProps {
 			return nil, fmt.Errorf("%w: %s: expected %d properties, not %d", ErrUnsatisfiable, at(path), minProps, len(out))
 		}
 
-		key := fmt.Sprintf("property%d", i)
-		if has(out, key) {
+		if has(out, key) || has(props, key) {
 			continue
 		}
 
 		// Counted as required, a property no value satisfies fails here, rather than adding none forever.
 		required[key] = true
 
-		if err := add(key, extra); err != nil {
+		if err := add(key, schema); err != nil {
 			return nil, err
 		}
 
@@ -616,6 +694,39 @@ func (w *walk) object(s map[string]any, path string, depth int) (any, error) {
 	}
 
 	return out, nil
+}
+
+// extraKey returns the i-th key of a property s doesn't name, for minProperties, and the schema it has besides those of
+// the patternProperties it matches: propertyN, or, when additionalProperties allows no key no pattern matches, one a
+// pattern writes. The key is "" when there is none.
+func (w *walk) extraKey(s map[string]any, extra any, i int, path string) (string, any, error) {
+	key := fmt.Sprintf("property%d", i)
+
+	_, matched, err := patternSchema(s, key, path)
+	if err != nil {
+		return "", nil, err
+	}
+
+	switch {
+	case matched:
+		return key, true, nil
+	case extra != false:
+		return key, extra, nil
+	}
+
+	// Each key comes from the next pattern, so every pattern names some.
+	byPattern, _ := s["patternProperties"].(map[string]any)
+	patterns := slices.Sorted(maps.Keys(byPattern))
+	for j := range patterns {
+		// patternSchema compiled every pattern.
+		if re, err := regexp.Compile(patterns[(i+j)%len(patterns)]); err == nil {
+			if key, err := w.f.pattern([]*regexp.Regexp{re}, 1, 0, false); err == nil {
+				return key, true, nil
+			}
+		}
+	}
+
+	return "", nil, nil
 }
 
 // patternSchema returns a schema that applies those of all the patternProperties of s that key matches, and whether
@@ -727,6 +838,14 @@ func (w *walk) array(s map[string]any, name, path string, depth int) (any, error
 // item returns an item for an array that holds out already, and whether it found one: one out doesn't hold, when the
 // items are unique.
 func (w *walk) item(schema any, name, path string, depth int, out []any, unique bool) (any, bool, error) {
+	// A unique item's numbers come from a range wide enough for the items out holds and more.
+	defer func(spread int) { w.spread = spread }(w.spread)
+
+	w.spread = 0
+	if unique {
+		w.spread = len(out)
+	}
+
 	for range _maxTries {
 		v, err := w.value(schema, name, path, depth)
 		if err != nil {
@@ -757,7 +876,7 @@ func (f *Faker) str(s map[string]any, name, path string) (any, error) {
 		return nil, fmt.Errorf("%w: %s: minLength %d is above maxLength %d", ErrUnsatisfiable, at(path), lo, hi)
 	}
 
-	exprs := patterns(s)
+	exprs := listed(s["pattern"])
 	res := make([]*regexp.Regexp, 0, len(exprs))
 
 	for _, expr := range exprs {
@@ -788,6 +907,10 @@ func (f *Faker) str(s map[string]any, name, path string) (any, error) {
 			}
 
 			v = f.format(format)
+		}
+
+		if v := _shortest[format]; v != "" && fits(v) && matchAll(res, v) {
+			return v, nil
 		}
 
 		if len(res) == 0 {
@@ -839,16 +962,17 @@ func (f *Faker) str(s map[string]any, name, path string) (any, error) {
 	return v, nil
 }
 
-// patterns returns the patterns of s: one, or more an allOf merged.
-func patterns(s map[string]any) []string {
-	switch p := s["pattern"].(type) {
+// listed returns the strings of v, a keyword such as pattern: one, or a list of them, as allOf merges patterns. Items
+// that aren't strings are left out.
+func listed(v any) []string {
+	switch v := v.(type) {
 	case string:
-		return []string{p}
+		return []string{v}
 	case []any:
 		var out []string
-		for _, item := range p {
-			if expr, ok := item.(string); ok {
-				out = append(out, expr)
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
 			}
 		}
 
@@ -856,6 +980,18 @@ func patterns(s map[string]any) []string {
 	default:
 		return nil
 	}
+}
+
+// union returns the strings of a, then those of b a doesn't hold.
+func union(a, b []string) []any {
+	out := slices.Clone(a)
+	for _, s := range b {
+		if !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+
+	return anys(out)
 }
 
 // quoteAll quotes each of exprs, joined with " and ".
@@ -878,8 +1014,8 @@ func lengths(lo, hi int, bounded bool) string {
 }
 
 // integer returns an integer within the bounds of s, a multiple of its multipleOf. Without bounds, the name of its
-// field picks the range, or 1 to 100.
-func (f *Faker) integer(s map[string]any, name, path string) (any, error) {
+// field picks the range, or 1 to 100, widened to hold twice spread multiples.
+func (f *Faker) integer(s map[string]any, name, path string, spread int) (any, error) {
 	one := big.NewRat(1, 1)
 
 	step := one
@@ -892,7 +1028,7 @@ func (f *Faker) integer(s map[string]any, name, path string) (any, error) {
 		return nil, fmt.Errorf("%w: %s: no integer is a multiple of %v", ErrUnsatisfiable, at(path), float(step))
 	}
 
-	lo, hi, exLo, exHi, err := bounds(s, name, path, step)
+	lo, hi, exLo, exHi, err := bounds(s, name, path, step, spread)
 	if err != nil {
 		return nil, err
 	}
@@ -917,14 +1053,14 @@ func (f *Faker) integer(s map[string]any, name, path string) (any, error) {
 }
 
 // number returns a number within the bounds of s, with two decimals where they fit, a multiple of its multipleOf.
-// Without bounds, the name of its field picks the range, or 1 to 100.
-func (f *Faker) number(s map[string]any, name, path string) (any, error) {
+// Without bounds, the name of its field picks the range, or 1 to 100, widened as [Faker.integer] widens it.
+func (f *Faker) number(s map[string]any, name, path string, spread int) (any, error) {
 	step, ok := rat(s["multipleOf"])
 	if !ok || step.Sign() <= 0 {
 		step = nil
 	}
 
-	lo, hi, exLo, exHi, err := bounds(s, name, path, step)
+	lo, hi, exLo, exHi, err := bounds(s, name, path, step, spread)
 	if err != nil {
 		return nil, err
 	}
@@ -974,17 +1110,20 @@ func (f *Faker) number(s map[string]any, name, path string) (any, error) {
 		return r, nil
 	}
 
-	if !in(v) {
-		v = mid
+	// Bounds a few float64s apart may hold only a bound, or the float64 next to one.
+	for _, c := range []float64{v, mid, flo, fhi, math.Nextafter(flo, fhi), math.Nextafter(fhi, flo)} {
+		if in(c) {
+			return c, nil
+		}
 	}
 
-	return v, nil
+	return nil, fmt.Errorf("%w: %s: no float64 between %v and %v", ErrUnsatisfiable, at(path), flo, fhi)
 }
 
 // bounds returns the range of the number s describes, and whether each end excludes itself: its bounds, or the range
-// the name of its field picks, or 1 to 100, moved to meet a single bound. A side s leaves open widens to hold a
-// multiple of step, when step isn't nil.
-func bounds(s map[string]any, name, path string, step *big.Rat) (lo, hi *big.Rat, exLo, exHi bool, err error) {
+// the name of its field picks, or 1 to 100, widened to hold twice spread multiples of step, or of 1 when step is nil,
+// and moved to meet a single bound. A side s leaves open widens to hold a multiple of step, when step isn't nil.
+func bounds(s map[string]any, name, path string, step *big.Rat, spread int) (lo, hi *big.Rat, exLo, exHi bool, err error) {
 	flo, fhi, ok := numberRange(name)
 	if !ok {
 		flo, fhi = 1, 100
@@ -992,6 +1131,16 @@ func bounds(s map[string]any, name, path string, step *big.Rat) (lo, hi *big.Rat
 
 	lo, hi = decimal(flo), decimal(fhi)
 	width := new(big.Rat).Sub(hi, lo)
+
+	// Unique items need as many values: the range of a name, such as 1 to 12 for month, holds few.
+	need := big.NewRat(2*int64(spread), 1)
+	if step != nil {
+		need.Mul(need, step)
+	}
+
+	if width.Cmp(need) < 0 {
+		width, hi = need, new(big.Rat).Add(lo, need)
+	}
 
 	minV, exLo, hasMin := lower(s)
 	maxV, exHi, hasMax := upper(s)
@@ -1174,6 +1323,8 @@ func merge(dst, src map[string]any) error {
 	closeProperties(dst, src)
 	closeProperties(src, dst)
 	mergeTuples(dst, src)
+	mergePrefixItems(dst, src)
+	mergeBounds(dst, src)
 
 	for _, k := range slices.Sorted(maps.Keys(src)) {
 		v := src[k]
@@ -1187,13 +1338,11 @@ func merge(dst, src map[string]any) error {
 		switch k {
 		case "properties", "patternProperties":
 			dst[k] = mergeProperties(prev, v)
-		case "required":
-			old, _ := prev.([]any)
-			add, _ := v.([]any)
-			dst[k] = append(slices.Clone(old), add...)
-		case "minimum", "exclusiveMinimum", "minLength", "minItems", "minProperties":
+		case "required", "pattern":
+			dst[k] = union(listed(prev), listed(v))
+		case "minLength", "minItems", "minProperties":
 			dst[k] = stricter(prev, v, 1)
-		case "maximum", "exclusiveMaximum", "maxLength", "maxItems", "maxProperties":
+		case "maxLength", "maxItems", "maxProperties":
 			dst[k] = stricter(prev, v, -1)
 		case "multipleOf":
 			x, okX := rat(prev)
@@ -1227,28 +1376,59 @@ func merge(dst, src map[string]any) error {
 			}
 		case "items", "additionalItems", "additionalProperties":
 			dst[k] = bothSchemas(prev, v)
-		case "prefixItems":
-			old, _ := prev.([]any)
-			add, _ := v.([]any)
-			items := make([]any, max(len(old), len(add)))
-
-			for i := range items {
-				items[i] = bothSchemas(nth(old, i, nil), nth(add, i, nil))
-			}
-
-			dst[k] = items
 		case "oneOf", "anyOf":
 			// Each list picks a branch of its own: the one of dst first, then the other, from what's left of dst.
 			all, _ := dst["allOf"].([]any)
 			dst["allOf"] = append(slices.Clone(all), map[string]any{k: v})
-		case "pattern":
-			dst[k] = append(anys(patterns(dst)), anys(patterns(src))...)
 		case "uniqueItems":
 			dst[k] = prev == true || v == true
 		}
 	}
 
 	return nil
+}
+
+// mergeBounds gives dst the stricter lower bound of dst and src, and the stricter upper one, each a minimum or an
+// exclusiveMinimum, or a maximum or an exclusiveMaximum, as a number: draft 4 and OpenAPI 3.0 write a bound's
+// exclusiveness as a boolean next to it, which belongs to that bound alone. A bound that isn't a number is ignored. It
+// takes the bounds out of src.
+func mergeBounds(dst, src map[string]any) {
+	sides := []struct {
+		incl, excl string
+		bound      func(map[string]any) (*big.Rat, bool, bool)
+		sign       int
+	}{
+		{incl: "minimum", excl: "exclusiveMinimum", bound: lower, sign: 1},
+		{incl: "maximum", excl: "exclusiveMaximum", bound: upper, sign: -1},
+	}
+
+	for _, side := range sides {
+		a, exA, okA := side.bound(dst)
+		b, exB, okB := side.bound(src)
+
+		delete(src, side.incl)
+		delete(src, side.excl)
+
+		if !okB {
+			continue
+		}
+
+		// The bound of dst stays when it is stricter, or as strict and exclusive.
+		if okA {
+			if c := a.Cmp(b) * side.sign; c > 0 || c == 0 && exA {
+				continue
+			}
+		}
+
+		delete(dst, side.incl)
+		delete(dst, side.excl)
+
+		if exB {
+			dst[side.excl] = b
+		} else {
+			dst[side.incl] = b
+		}
+	}
 }
 
 // stricter returns the greater of the bounds a and b, for sign 1, or the lesser, for sign -1, or the one that is a
@@ -1268,7 +1448,8 @@ func stricter(a, b any, sign int) any {
 }
 
 // closeProperties applies the additionalProperties of a to the properties b names and a neither names nor matches by
-// its patternProperties, as allOf has a apply to them. It changes the properties of b, a copy of them.
+// its patternProperties, as allOf has a apply to them, and to the patternProperties of b, when a has none and names no
+// key they match. It changes the properties and patternProperties of b, copies of them.
 func closeProperties(a, b map[string]any) {
 	extra, ok := a["additionalProperties"]
 	if !ok {
@@ -1276,6 +1457,23 @@ func closeProperties(a, b map[string]any) {
 	}
 
 	declared, _ := a["properties"].(map[string]any)
+
+	// A key a pattern of b matches that a names or a pattern of a matches isn't one of a's additionalProperties:
+	// without either, none is.
+	if patterns, ok := b["patternProperties"].(map[string]any); ok && !has(a, "patternProperties") {
+		closed := make(map[string]any, len(patterns))
+		for p, schema := range patterns {
+			re, err := regexp.Compile(p)
+			if err != nil || slices.ContainsFunc(slices.Collect(maps.Keys(declared)), re.MatchString) {
+				closed[p] = schema
+			} else {
+				closed[p] = bothSchemas(schema, extra)
+			}
+		}
+
+		b["patternProperties"] = closed
+	}
+
 	props, _ := b["properties"].(map[string]any)
 
 	closed := make(map[string]any, len(props))
@@ -1316,6 +1514,27 @@ func mergeTuples(dst, src map[string]any) {
 
 	delete(src, "items")
 	delete(src, "additionalItems")
+}
+
+// mergePrefixItems merges the prefixItems of dst and src, as JSON Schema 2020-12 writes a tuple: item i applies the
+// schema each gives it, its prefixItems i or, past the end of its list, its items. It takes prefixItems out of src;
+// the items of both merge as any keyword does.
+func mergePrefixItems(dst, src map[string]any) {
+	a, okA := dst["prefixItems"].([]any)
+	b, okB := src["prefixItems"].([]any)
+
+	if !okA && !okB {
+		return
+	}
+
+	items := make([]any, max(len(a), len(b)))
+	for i := range items {
+		items[i] = bothSchemas(nth(a, i, dst["items"]), nth(b, i, src["items"]))
+	}
+
+	dst["prefixItems"] = items
+
+	delete(src, "prefixItems")
 }
 
 // pastTuple returns the schema of the items of s past its tuple: its additionalItems, or its items when they aren't a
@@ -1442,13 +1661,15 @@ func same(a, b any) bool {
 		b, ok := b.([]any)
 		return ok && slices.EqualFunc(a, b, same)
 	default:
-		// a is a string, a bool, nil or a float64 that isn't finite: comparable, so == doesn't panic.
-		return a == b
+		// a is a string, a bool, nil, a float64 that isn't finite, or a value of a Go type, such as []string, that
+		// == may not compare.
+		return reflect.DeepEqual(a, b)
 	}
 }
 
 // clone returns a copy of v, a value of a schema, that shares nothing with it, as decoded JSON: numbers are int64,
-// when integers, or float64.
+// when integers, or float64, or as v has them when neither holds them exactly, and lists and objects of any Go type
+// are []any and map[string]any.
 func clone(v any) any {
 	switch v := v.(type) {
 	case map[string]any:
@@ -1483,23 +1704,83 @@ func clone(v any) any {
 		return clone(uint64(v))
 	case uint64:
 		if v > math.MaxInt64 {
-			return float64(v)
+			return v
 		}
 
 		return int64(v)
 	case float32:
 		return float64(v)
 	case interface{ Int64() (int64, error) }:
-		// A json.Number.
+		// A json.Number, a string, so v shares nothing either.
 		if i, err := v.Int64(); err == nil {
 			return i
 		}
 
-		f, _ := number(v)
+		if r, ok := rat(v); ok {
+			if f, _ := number(v); decimal(f).Cmp(r) == 0 {
+				return f
+			}
+		}
 
-		return f
-	default:
 		return v
+	default:
+		return cloneOther(reflect.ValueOf(v))
+	}
+}
+
+// cloneKeepingType returns a copy of v of its type, which may write itself as JSON, as jsontext.Value and url.Values
+// may, or have keys JSON can't decode, as a map[int]string has: it shares the items of a list or an object with v.
+func cloneKeepingType(v reflect.Value) any {
+	switch v.Kind() {
+	case reflect.Slice:
+		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+		reflect.Copy(out, v)
+
+		return out.Interface()
+	case reflect.Map:
+		out := reflect.MakeMapWithSize(v.Type(), v.Len())
+		for it := v.MapRange(); it.Next(); {
+			out.SetMapIndex(it.Key(), it.Value())
+		}
+
+		return out.Interface()
+	default:
+		return v.Interface()
+	}
+}
+
+// cloneOther returns v as [clone] does a list or an object of a Go type other than []any and map[string]any, such as
+// []string, or v itself, of a type with nothing to share, such as a string.
+func cloneOther(v reflect.Value) any {
+	switch {
+	case !v.IsValid():
+		return nil
+	case (v.Kind() == reflect.Slice || v.Kind() == reflect.Map) && v.IsNil():
+		// JSON writes a nil list or object as null.
+		return nil
+	case v.Type().Name() != "":
+		return cloneKeepingType(v)
+	case v.Kind() == reflect.Slice && v.Type().Elem().Kind() != reflect.Uint8, v.Kind() == reflect.Array:
+		out := make([]any, v.Len())
+		for i := range out {
+			out[i] = clone(v.Index(i).Interface())
+		}
+
+		return out
+	case v.Kind() == reflect.Map && v.Type().Key().Kind() == reflect.String:
+		out := make(map[string]any, v.Len())
+		for it := v.MapRange(); it.Next(); {
+			out[it.Key().String()] = clone(it.Value().Interface())
+		}
+
+		return out
+	case v.Kind() == reflect.Map:
+		return cloneKeepingType(v)
+	case v.Kind() == reflect.Slice:
+		// A []byte, which JSON writes as base64.
+		return bytes.Clone(v.Bytes())
+	default:
+		return v.Interface()
 	}
 }
 

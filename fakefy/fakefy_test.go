@@ -2,11 +2,17 @@ package fakefy_test
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
+	"maps"
 	"math"
+	"math/big"
+	"net/url"
 	"strings"
 	"testing"
+	"uuid"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/require"
@@ -145,10 +151,65 @@ func TestSchema_SchemasAValueSatisfiesMakeOne(t *testing.T) {
 		leaf = `{"type": "object", "required": ["p"], "properties": {"p": ` + leaf + `}}`
 	}
 
+	// A tree each node of which has five children, each a nullable node, as OpenAPI 3.1 writes one.
+	children := make([]string, 5)
+	for i := range children {
+		children[i] = fmt.Sprintf(`"c%d": {"anyOf": [{"$ref": "#/$defs/N"}, {"type": "null"}]}`, i)
+	}
+
+	tree := `{"$defs": {"N": {"type": "object", "required": ["c0", "c1", "c2", "c3", "c4"], "properties": {` + strings.Join(children, ", ") + `}}},
+		"$ref": "#/$defs/N"}`
+
+	anyOfs := strings.Repeat(`{"anyOf": [{"minimum": 0}, {"maximum": 50}]}, `, 33)
+
 	tests := []struct {
 		name   string
 		schema string
 	}{
+		{name: "a tree of nullable nodes", schema: tree},
+		{name: "an allOf of more anyOfs than the levels a value nests", schema: `{"type": "integer", "allOf": [` + anyOfs + `{}]}`},
+		{name: "an items schema of allOf and the prefixItems of another", schema: `{"type": "array", "allOf": [
+			{"items": {"type": "integer", "maximum": 0}}, {"prefixItems": [{"type": "integer"}]}]}`},
+		{name: "allOf of two prefixItems and an items schema", schema: `{"type": "array", "minItems": 2, "allOf": [
+			{"prefixItems": [{"type": "integer"}], "items": {"type": "integer", "maximum": 0}},
+			{"prefixItems": [{"type": "integer"}, {"type": "integer"}]}]}`},
+		{name: "minProperties of patternProperties alone", schema: `{"type": "object", "minProperties": 1,
+			"patternProperties": {".*": {"type": "integer"}}, "additionalProperties": false}`},
+		{name: "minProperties of a key patternProperties match", schema: `{"type": "object", "minProperties": 1,
+			"patternProperties": {"^property": {"type": "integer"}}, "additionalProperties": {"type": "string"}}`},
+		{name: "minProperties of patterns that each name one key", schema: `{"type": "object", "minProperties": 2,
+			"patternProperties": {"^a$": {"type": "string"}, "^b$": {"type": "string"}}, "additionalProperties": false}`},
+		{name: "minProperties of every key a pattern names", schema: `{"type": "object", "minProperties": 10,
+			"patternProperties": {"^[0-9]$": {"type": "integer"}}, "additionalProperties": false}`},
+		{name: "minProperties of a pattern that names few keys", schema: `{"type": "object", "minProperties": 2,
+			"patternProperties": {"^x-[a-z]+$": {"type": "integer"}}, "additionalProperties": false}`},
+		{name: "allOf additionalProperties and the patternProperties of another", schema: `{"allOf": [
+			{"type": "object", "additionalProperties": {"type": "integer"}},
+			{"required": ["x1"], "patternProperties": {"^x": {"minimum": 0}}}]}`},
+		{name: "allOf additionalProperties of named properties and the patternProperties of another", schema: `{"allOf": [
+			{"type": "object", "properties": {"x_id": {"type": "string"}}, "additionalProperties": false},
+			{"required": ["x_id"], "patternProperties": {"^x": {"minLength": 2}}}]}`},
+		{name: "allOf patternProperties and the additionalProperties of another", schema: `{"allOf": [
+			{"required": ["x1"], "patternProperties": {"^x": {"minimum": 0}}},
+			{"type": "object", "additionalProperties": {"type": "integer"}}]}`},
+		{name: "allOf of draft 4 bounds, one exclusive", schema: `{"$schema": "http://json-schema.org/draft-04/schema#",
+			"type": "integer", "maximum": 1, "allOf": [{"minimum": 0, "exclusiveMinimum": true}, {"minimum": 1}]}`},
+		{name: "allOf of draft 4 upper bounds, one exclusive", schema: `{"$schema": "http://json-schema.org/draft-04/schema#",
+			"type": "integer", "minimum": 1, "allOf": [{"maximum": 2, "exclusiveMaximum": true}, {"maximum": 1}]}`},
+		{name: "a number whose only float64 is the inclusive maximum", schema: `{"type": "number", "exclusiveMinimum": 1, "maximum": 1.0000000000000002}`},
+		{name: "a number whose only float64 is the least above 0", schema: `{"type": "number", "exclusiveMinimum": 0, "maximum": 5e-324}`},
+		{name: "a const past int64", schema: `{"const": 12345678901234567890}`},
+		{name: "unique items of an enum past int64", schema: `{"type": "array", "uniqueItems": true, "minItems": 2,
+			"items": {"enum": [18446744073709551615, 18446744073709551614]}}`},
+		{name: "an email of at most 10 characters", schema: `{"type": "string", "format": "email", "maxLength": 10}`},
+		{name: "a hostname of at most 6 characters", schema: `{"type": "string", "format": "hostname", "maxLength": 6}`},
+		{name: "a uri of at most 14 characters", schema: `{"type": "string", "format": "uri", "maxLength": 14}`},
+		{name: "unique integers past the range a value has without bounds", schema: `{"type": "array", "uniqueItems": true, "minItems": 150,
+			"items": {"type": "integer"}}`},
+		{name: "unique multiples past the range a value has without bounds", schema: `{"type": "array", "uniqueItems": true, "minItems": 150,
+			"items": {"type": "integer", "multipleOf": 5, "minimum": 0}}`},
+		{name: "unique months past the range the name gives", schema: `{"type": "object", "required": ["month"], "properties": {
+			"month": {"type": "array", "uniqueItems": true, "minItems": 20, "items": {"type": "integer"}}}}`},
 		{name: "a multiple whose next one past the bounds overflows", schema: `{"type": "number", "multipleOf": 1e308}`},
 		{name: "unique items an example repeats", schema: `{"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string", "example": "x"}}`},
 		{name: "a required property allOf allows by pattern", schema: `{"allOf": [
@@ -279,6 +340,13 @@ func TestSchema_FailsWithErrUnsatisfiableWhenNoValueFits(t *testing.T) {
 		{name: "no number between bounds that meet", schema: `{"type": "number", "minimum": 1, "exclusiveMaximum": 1}`, want: "at the root: no number between 1 and 1, exclusive"},
 		{name: "no decimal multiple within the bounds", schema: `{"type": "number", "multipleOf": 0.7, "minimum": 0.1, "maximum": 0.6}`, want: "at the root: no multiple of 0.7 between 0.1 and 0.6"},
 		{name: "number bounds that cross", schema: `{"type": "number", "minimum": 5, "maximum": 1}`, want: "at the root: minimum 5 is above maximum 1"},
+		{name: "required properties without end, through anyOf", schema: `{"$defs": {"N": {"type": "object", "required": ["n"], "properties": {
+			"n": {"anyOf": [{"$ref": "#/$defs/N"}, {"$ref": "#/$defs/N"}, {"$ref": "#/$defs/N"}]}}}}, "$ref": "#/$defs/N"}`, want: `at "/n": no value after 10000 branches failed`},
+		{name: "minProperties past the keys a pattern names", schema: `{"type": "object", "minProperties": 2,
+			"patternProperties": {"^a$": {}}, "additionalProperties": false}`, want: "at the root: expected 2 properties, not 1"},
+		{name: "minProperties of a pattern no key matches", schema: `{"type": "object", "minProperties": 1,
+			"patternProperties": {"[^\\x00-\\x{10FFFF}]": {}}, "additionalProperties": false}`, want: "at the root: expected 1 properties, not 0"},
+		{name: "no float64 between the bounds", schema: `{"type": "number", "exclusiveMinimum": 1, "exclusiveMaximum": 1.0000000000000002}`, want: "at the root: no float64 between 1 and 1.0000000000000002"},
 	}
 
 	for _, tt := range tests {
@@ -309,6 +377,11 @@ func TestSchema_FailsWithErrInvalidForWhatIsNotASchema(t *testing.T) {
 		{name: "a negative minItems", schema: map[string]any{"type": "array", "minItems": -5}, want: "at the root: minItems must be a whole number from 0, not -5"},
 		{name: "a maxProperties that isn't whole", schema: map[string]any{"type": "object", "maxProperties": 1.5}, want: "at the root: maxProperties must be a whole number from 0, not 1.5"},
 		{name: "a pattern that doesn't compile", schema: map[string]any{"type": "string", "pattern": "(unclosed"}, want: "at the root: pattern \"(unclosed\": compiling: error parsing regexp: missing closing ): `(unclosed`"},
+		{name: "patternProperties that don't compile, in an allOf with additionalProperties", schema: map[string]any{"allOf": []any{
+			map[string]any{"type": "object", "additionalProperties": true},
+			map[string]any{"required": []any{"a"}, "patternProperties": map[string]any{"(": true}},
+		}}, want: "at the root: patternProperties \"(\": compiling: error parsing regexp: missing closing ): `(`"},
+		{name: "patternProperties that don't compile, for minProperties", schema: map[string]any{"type": "object", "minProperties": 1, "patternProperties": map[string]any{"(": true}}, want: "at the root: patternProperties \"(\": compiling: error parsing regexp: missing closing ): `(`"},
 		{name: "a number in an allOf", schema: map[string]any{"allOf": []any{3}}, want: "at the root: expected a schema object or boolean, not int"},
 		{name: "a $ref to a number", schema: map[string]any{"$defs": map[string]any{"a": 3}, "$ref": "#/$defs/a"}, want: "at the root: expected a schema object or boolean, not int"},
 		{name: "patternProperties that don't compile", schema: map[string]any{"type": "object", "properties": map[string]any{"a": true}, "patternProperties": map[string]any{"(": true}}, want: "at the root: patternProperties \"(\": compiling: error parsing regexp: missing closing ): `(`"},
@@ -373,6 +446,16 @@ func TestSchema_AnAllOfBoundThatIsNotANumberIsIgnored(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int64(7), v)
 	}
+
+	for _, all := range [][]any{
+		{map[string]any{"type": "string", "minLength": "5", "maxLength": 3}, map[string]any{"minLength": 3}},
+		{map[string]any{"type": "string", "minLength": 3, "maxLength": 3}, map[string]any{"minLength": "5"}},
+		{map[string]any{"type": "string", "minLength": 2, "maxLength": 3}, map[string]any{"minLength": 3}},
+	} {
+		v, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"allOf": all})
+		require.NoError(t, err)
+		require.Len(t, v, 3)
+	}
 }
 
 func TestSchema_AnAllOfOfManyAnyOfsEnds(t *testing.T) {
@@ -387,6 +470,41 @@ func TestSchema_AnAllOfOfManyAnyOfsEnds(t *testing.T) {
 	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(doc)
 	require.NoError(t, err)
 	requireValid(t, sch, v)
+}
+
+func TestSchema_AnAllOfOfASchemaTwiceManyLevelsDownEnds(t *testing.T) {
+	// Specs compose schemas from shared parts, so one part can be reached many ways: each must be merged once, or a
+	// level more doubles the work. A value a validator checks takes it as many ways: an infinite number the validator
+	// can't read leaves the work to the generator alone.
+	defs := map[string]any{"A30": map[string]any{"type": "string", "pattern": "^a", "maxLength": 3}}
+	for i := range 30 {
+		next := map[string]any{"$ref": fmt.Sprintf("#/$defs/A%d", i+1)}
+		defs[fmt.Sprintf("A%d", i)] = map[string]any{"allOf": []any{next, maps.Clone(next)}}
+	}
+
+	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"$defs": defs, "$ref": "#/$defs/A0", "x-limit": math.Inf(1)})
+	require.NoError(t, err)
+	require.Regexp(t, `^a.{0,2}$`, v)
+}
+
+func TestSchema_AValueOfManySchemasIsMade(t *testing.T) {
+	// A large response, such as a page of items each of many fields, is made of many schemas: only branches that fail
+	// count toward giving up.
+	sch, doc := compile(t, `{"type": "array", "minItems": 400, "items": {"type": "array", "minItems": 400, "items": {"type": "boolean"}}}`)
+
+	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(doc)
+	require.NoError(t, err)
+	requireValid(t, sch, v)
+}
+
+func TestSchema_AnAllOfOfEnumsOfGoListsMergesThem(t *testing.T) {
+	// A Go caller's enum may hold lists of any Go type: comparing two of one type that == can't compare must not panic.
+	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"allOf": []any{
+		map[string]any{"enum": []any{[]string{"a"}, []string{"b"}}},
+		map[string]any{"enum": []any{[]string{"b"}}},
+	}})
+	require.NoError(t, err)
+	require.Equal(t, []any{"b"}, v)
 }
 
 func TestSchema_MakesTheItemsOfATuple(t *testing.T) {
@@ -440,7 +558,7 @@ func TestSchema_GoNumbersOfTheSchemaComeBackAsDecodedJSON(t *testing.T) {
 		{name: "uint16", n: uint16(3), want: int64(3)},
 		{name: "uint32", n: uint32(3), want: int64(3)},
 		{name: "uint64", n: uint64(3), want: int64(3)},
-		{name: "a uint64 past int64", n: uint64(math.MaxUint64), want: float64(math.MaxUint64)},
+		{name: "a uint64 past int64", n: uint64(math.MaxUint64), want: uint64(math.MaxUint64)},
 		{name: "float32", n: float32(2.5), want: 2.5},
 	}
 
@@ -510,6 +628,43 @@ func TestSchema_TheDiscriminatorNamesTheBranchPicked(t *testing.T) {
 	require.Len(t, seen, 2, "both branches are picked")
 }
 
+func TestSchema_TheDiscriminatorNamesTheBranchAmongTheTagsTheBaseLists(t *testing.T) {
+	// OpenAPI inheritance lists every tag in the base schema's enum: each branch still has its own.
+	_, doc := compile(t, `{"$defs": {
+		"Pet": {"type": "object", "required": ["petType"], "properties": {"petType": {"type": "string", "enum": ["Cat", "Dog"]}}},
+		"Cat": {"allOf": [{"$ref": "#/$defs/Pet"}, {"type": "object", "required": ["lives"], "properties": {"lives": {"type": "integer"}}}]},
+		"Dog": {"allOf": [{"$ref": "#/$defs/Pet"}, {"type": "object", "required": ["bark"], "properties": {"bark": {"type": "boolean"}}}]}},
+		"oneOf": [{"$ref": "#/$defs/Cat"}, {"$ref": "#/$defs/Dog"}], "discriminator": {"propertyName": "petType"}}`)
+
+	for seed := range uint64(_seeds) {
+		v, err := fakefy.New(fakefy.WithSeed(seed)).Schema(doc)
+		require.NoError(t, err)
+
+		obj, ok := v.(map[string]any)
+		require.True(t, ok)
+
+		want := "Cat"
+		if _, dog := obj["bark"]; dog {
+			want = "Dog"
+		}
+
+		require.Equal(t, want, obj["petType"])
+	}
+}
+
+func TestSchema_TheDiscriminatorMappingNamesABranchBySchemaName(t *testing.T) {
+	// OpenAPI lets a mapping name a schema of components/schemas by its name, not only by a $ref.
+	_, doc := compile(t, `{"$defs": {"Dog": {"type": "object", "properties": {"bark": {"type": "boolean"}}}},
+		"oneOf": [{"$ref": "#/$defs/Dog"}], "discriminator": {"propertyName": "kind", "mapping": {"dog": "Dog"}}}`)
+
+	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(doc)
+	require.NoError(t, err)
+
+	obj, ok := v.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "dog", obj["kind"])
+}
+
 func TestSchema_TheDiscriminatorKeepsAValueTheBranchFixes(t *testing.T) {
 	// A branch whose schema fixes its tag, as specs often do with a const, validates only with that value.
 	_, doc := compile(t, `{
@@ -562,6 +717,65 @@ func TestSchema_AValueChangedAfterLeavesTheSchemaAsItWas(t *testing.T) {
 	require.Equal(t, map[string]any{"tags": []any{"a"}}, example)
 }
 
+func TestSchema_GoListsAndObjectsOfTheSchemaComeBackAsDecodedJSON(t *testing.T) {
+	// A Go caller writes examples of any list or object type: they come back as JSON decodes them, a []byte as the
+	// copy of it JSON writes as base64.
+	tests := []struct {
+		name    string
+		example any
+		want    any
+	}{
+		{name: "a list", example: []string{"a"}, want: []any{"a"}},
+		{name: "an array", example: [2]int{1, 2}, want: []any{int64(1), int64(2)}},
+		{name: "an object", example: map[string]string{"k": "v"}, want: map[string]any{"k": "v"}},
+		{name: "a nil list", example: []string(nil), want: nil},
+		{name: "bytes", example: []byte("ab"), want: []byte("ab")},
+		{name: "a list of a type of its own, which writes itself as JSON", example: jsontext.Value(`{"a":1}`), want: jsontext.Value(`{"a":1}`)},
+		{name: "an object of a type of its own", example: url.Values{"a": {"1"}}, want: url.Values{"a": {"1"}}},
+		{name: "an array of a type of its own", example: uuid.UUID{1}, want: uuid.UUID{1}},
+		{name: "an object of keys that aren't strings", example: map[int]string{1: "a"}, want: map[int]string{1: "a"}},
+		{name: "a struct", example: struct{ A int }{A: 1}, want: struct{ A int }{A: 1}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"example": tt.example})
+			require.NoError(t, err)
+			require.Equal(t, tt.want, v)
+		})
+	}
+}
+
+func TestSchema_AValueOfAGoListExampleSharesNothingWithIt(t *testing.T) {
+	// A Go caller writes examples of any list type: a value that is the example itself changes it when filled in.
+	example := []string{"a"}
+
+	v, err := fakefy.New(fakefy.WithSeed(1)).Schema(map[string]any{"type": "array", "example": example})
+	require.NoError(t, err)
+	require.Equal(t, []any{"a"}, v)
+
+	v.([]any)[0] = "changed"
+
+	require.Equal(t, []string{"a"}, example)
+}
+
+func TestSchema_AnOpenAPI30SchemaChecksItsValues(t *testing.T) {
+	// OpenAPI 3.0 writes exclusiveMinimum as a boolean, which JSON Schema 2020-12 refuses: its values are checked as
+	// draft 4 has them, so a oneOf branch that overlaps another never makes a value both match.
+	draft4, _ := compile(t, `{"$schema": "http://json-schema.org/draft-04/schema#", "type": "integer", "minimum": 0,
+		"exclusiveMinimum": true, "oneOf": [{"maximum": 50}, {"maximum": 100}]}`)
+	schema := map[string]any{
+		"type": "integer", "minimum": 0, "exclusiveMinimum": true,
+		"oneOf": []any{map[string]any{"maximum": 50}, map[string]any{"maximum": 100}},
+	}
+
+	for seed := range uint64(_seeds) {
+		v, err := fakefy.New(fakefy.WithSeed(seed)).Schema(schema)
+		require.NoError(t, err)
+		requireValid(t, draft4, v)
+	}
+}
+
 func TestSchema_LeavesTheSchemaAsItWas(t *testing.T) {
 	// A generator makes many values from one spec: a value that writes into the spec's examples changes the next one.
 	example := map[string]any{"bark": true}
@@ -578,8 +792,10 @@ func TestSchema_LeavesTheSchemaAsItWas(t *testing.T) {
 }
 
 func TestSchema_RandomSchemasMakeValidValues(t *testing.T) {
+	// Every schema a value satisfies, of the keywords fakefy reads, gets one: a generator that fails or writes an invalid
+	// value breaks the mocks of a spec it was given.
 	rapid.Check(t, func(t *rapid.T) {
-		raw := schemaGen(3).Draw(t, "schema")
+		raw := rootGen(schemaGen(3)).Draw(t, "schema")
 		seed := rapid.Uint64().Draw(t, "seed")
 
 		b, err := json.Marshal(raw)
@@ -588,6 +804,131 @@ func TestSchema_RandomSchemasMakeValidValues(t *testing.T) {
 		sch, doc := compile(t, string(b))
 
 		v, err := fakefy.New(fakefy.WithSeed(seed)).Schema(doc)
+		require.NoError(t, err)
+		requireValid(t, sch, v)
+	})
+}
+
+func TestSchema_AnySchemaMakesAValidValueOrFailsWithASentinel(t *testing.T) {
+	// A spec may hold a schema no value satisfies, or one that isn't valid: the generator must say so with an error a
+	// caller can tell apart, never panic, and never return a value the schema refuses.
+	rapid.Check(t, func(t *rapid.T) {
+		raw := anySchemaGen(3).Draw(t, "schema")
+		seed := rapid.Uint64().Draw(t, "seed")
+
+		b, err := json.Marshal(raw)
+		require.NoError(t, err)
+
+		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
+		require.NoError(t, err)
+
+		m, ok := doc.(map[string]any)
+		require.True(t, ok)
+
+		v, err := fakefy.New(fakefy.WithSeed(seed)).Schema(m)
+		if err != nil {
+			require.Contains(t, []error{fakefy.ErrUnsatisfiable, fakefy.ErrInvalid, fakefy.ErrUnresolved}, sentinel(err))
+
+			return
+		}
+
+		// A schema the validator can't compile, such as a draft-4 form, can't check the value.
+		if sch, ok := tryCompile(b); ok {
+			requireValid(t, sch, v)
+		}
+	})
+}
+
+func TestWithSeed_ARandomSchemaMakesTheSameValueForASeed(t *testing.T) {
+	// Mock generators write fake values to files: a seed that made other bytes on the next run would show every file
+	// as changed.
+	rapid.Check(t, func(t *rapid.T) {
+		raw := anySchemaGen(3).Draw(t, "schema")
+		seed := rapid.Uint64().Draw(t, "seed")
+
+		first, firstErr := fakefy.New(fakefy.WithSeed(seed)).Field("value", raw)
+		second, secondErr := fakefy.New(fakefy.WithSeed(seed)).Field("value", raw)
+
+		require.Equal(t, first, second)
+		// The message quotes the validator, which lists the properties that fail in map order.
+		require.Equal(t, sentinel(firstErr), sentinel(secondErr))
+	})
+}
+
+func TestSchema_ARandomValueSharesNothingWithItsSchema(t *testing.T) {
+	// A caller fills the value in, such as with a path parameter: a schema that changed with it would make the next
+	// value from the change.
+	rapid.Check(t, func(t *rapid.T) {
+		raw := rootGen(schemaGen(3)).Draw(t, "schema")
+		before, err := json.Marshal(raw)
+		require.NoError(t, err)
+
+		v, err := fakefy.New(fakefy.WithSeed(rapid.Uint64().Draw(t, "seed"))).Schema(raw)
+		require.NoError(t, err)
+
+		scribble(v)
+
+		after, err := json.Marshal(raw)
+		require.NoError(t, err)
+		require.JSONEq(t, string(before), string(after))
+	})
+}
+
+func TestSchema_RandomIntegerBoundsMakeAMultipleWithinThemOrFail(t *testing.T) {
+	// Integer bounds in specs reach past what a float64 holds exactly, such as int64 ids: the value must be the
+	// integer the bounds allow, exactly, and a range with none must fail rather than round into one.
+	rapid.Check(t, func(t *rapid.T) {
+		lo := bigIntGen().Draw(t, "lo")
+		hi := new(big.Int).Add(lo, big.NewInt(rapid.Int64Range(-10, 1_000_000).Draw(t, "width")))
+		exLo, exHi := rapid.Bool().Draw(t, "exclusiveMinimum"), rapid.Bool().Draw(t, "exclusiveMaximum")
+		step := rapid.SampledFrom([]string{"", "1", "3", "2.5", "1000", "0.5", "7"}).Draw(t, "multipleOf")
+
+		schema := `{"type": "integer", "` + boundKey("minimum", exLo) + `": ` + lo.String() + `, "` + boundKey("maximum", exHi) + `": ` + hi.String()
+		if step != "" {
+			schema += `, "multipleOf": ` + step
+		}
+
+		sch, doc := compile(t, schema+"}")
+
+		v, err := fakefy.New(fakefy.WithSeed(rapid.Uint64().Draw(t, "seed"))).Schema(doc)
+		if !integerExists(lo, hi, exLo, exHi, step) {
+			require.ErrorIs(t, err, fakefy.ErrUnsatisfiable)
+			return
+		}
+
+		require.NoError(t, err)
+		require.IsType(t, int64(0), v)
+		requireValid(t, sch, v)
+	})
+}
+
+func TestSchema_RandomDecimalBoundsMakeAMultipleWithinThemOrFail(t *testing.T) {
+	// Prices and rates are decimals: a value a float64 rounds past a bound, or off a multiple, breaks the contract.
+	rapid.Check(t, func(t *rapid.T) {
+		lo := decimalGen().Draw(t, "lo")
+		hi := new(big.Rat).Add(lo, decimalGen().Draw(t, "width"))
+		hi.Abs(hi)
+		if hi.Cmp(lo) < 0 {
+			lo, hi = hi, lo
+		}
+
+		exLo, exHi := rapid.Bool().Draw(t, "exclusiveMinimum"), rapid.Bool().Draw(t, "exclusiveMaximum")
+		step := rapid.SampledFrom([]string{"", "0.01", "0.05", "0.25", "1.5", "0.001", "3"}).Draw(t, "multipleOf")
+
+		schema := `{"type": "number", "` + boundKey("minimum", exLo) + `": ` + lo.FloatString(4) + `, "` +
+			boundKey("maximum", exHi) + `": ` + hi.FloatString(4)
+		if step != "" {
+			schema += `, "multipleOf": ` + step
+		}
+
+		sch, doc := compile(t, schema+"}")
+
+		v, err := fakefy.New(fakefy.WithSeed(rapid.Uint64().Draw(t, "seed"))).Schema(doc)
+		if !decimalExists(lo, hi, exLo, exHi, step) {
+			require.ErrorIs(t, err, fakefy.ErrUnsatisfiable)
+			return
+		}
+
 		require.NoError(t, err)
 		requireValid(t, sch, v)
 	})
@@ -613,6 +954,14 @@ func compile(t require.TestingT, schema string) (*jsonschema.Schema, map[string]
 	return sch, m
 }
 
+// compileMap compiles schema, a map, as [compile] does a JSON document.
+func compileMap(t require.TestingT, schema map[string]any) (*jsonschema.Schema, map[string]any) {
+	b, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	return compile(t, string(b))
+}
+
 // requireValid fails unless v, written as JSON and read back, as a mock file holds it, validates against sch.
 func requireValid(t require.TestingT, sch *jsonschema.Schema, v any) {
 	b, err := json.Marshal(v)
@@ -623,15 +972,162 @@ func requireValid(t require.TestingT, sch *jsonschema.Schema, v any) {
 	require.NoError(t, sch.Validate(inst), "value: %s", b)
 }
 
+// tryCompile returns the validator of schema, a JSON document, with formats asserted, when it compiles as JSON Schema
+// 2020-12.
+func tryCompile(schema []byte) (*jsonschema.Schema, bool) {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(schema))
+	if err != nil {
+		return nil, false
+	}
+
+	c := jsonschema.NewCompiler()
+	c.DefaultDraft(jsonschema.Draft2020)
+	c.AssertFormat()
+
+	if err := c.AddResource("schema.json", doc); err != nil {
+		return nil, false
+	}
+
+	sch, err := c.Compile("schema.json")
+
+	return sch, err == nil
+}
+
+// sentinel returns the error of fakefy that err wraps, or err when it wraps none.
+func sentinel(err error) error {
+	for _, s := range []error{fakefy.ErrUnsatisfiable, fakefy.ErrInvalid, fakefy.ErrUnresolved} {
+		if errors.Is(err, s) {
+			return s
+		}
+	}
+
+	return err
+}
+
+// scribble changes every object and list of v, at every level.
+func scribble(v any) {
+	switch v := v.(type) {
+	case map[string]any:
+		for k, x := range v {
+			scribble(x)
+			v[k] = "scribbled"
+		}
+
+		v["scribbled"] = true
+	case []any:
+		for i, x := range v {
+			scribble(x)
+			v[i] = "scribbled"
+		}
+	}
+}
+
+// boundKey returns key, or its exclusive form when exclusive.
+func boundKey(key string, exclusive bool) string {
+	if !exclusive {
+		return key
+	}
+
+	return "exclusive" + strings.ToUpper(key[:1]) + key[1:]
+}
+
+// integerExists reports whether an int64 that is a multiple of step, an integer one when step is "", lies between lo
+// and hi, each end excluded when its flag says so.
+func integerExists(lo, hi *big.Int, exLo, exHi bool, step string) bool {
+	r := big.NewRat(1, 1)
+	if step != "" {
+		m, _ := new(big.Rat).SetString(step)
+
+		// The least multiple of m that is an integer: m's numerator.
+		r.SetInt(m.Num())
+	}
+
+	k := r.Num()
+	first := ceilDiv(maxInt(lo, big.NewInt(math.MinInt64)), k, exLo && lo.Cmp(big.NewInt(math.MinInt64)) >= 0)
+	last := floorDiv(minInt(hi, big.NewInt(math.MaxInt64)), k, exHi && hi.Cmp(big.NewInt(math.MaxInt64)) <= 0)
+
+	return first.Cmp(last) <= 0
+}
+
+// decimalExists reports whether a multiple of step, any number when step is "", lies between lo and hi, each end
+// excluded when its flag says so.
+func decimalExists(lo, hi *big.Rat, exLo, exHi bool, step string) bool {
+	if step == "" {
+		return lo.Cmp(hi) < 0 || !exLo && !exHi && lo.Cmp(hi) == 0
+	}
+
+	m, _ := new(big.Rat).SetString(step)
+	ql, qh := new(big.Rat).Quo(lo, m), new(big.Rat).Quo(hi, m)
+
+	// The quotients have denominators above 0: n / d rounded down is their Euclidean quotient.
+	first := ceilDiv(ql.Num(), ql.Denom(), exLo)
+	last := floorDiv(qh.Num(), qh.Denom(), exHi)
+
+	return first.Cmp(last) <= 0
+}
+
+// ceilDiv returns the least k whose k × d is at least n, or above it when exclusive.
+func ceilDiv(n, d *big.Int, exclusive bool) *big.Int {
+	q, m := new(big.Int).DivMod(n, d, new(big.Int))
+	if m.Sign() != 0 || exclusive {
+		q.Add(q, big.NewInt(1))
+	}
+
+	return q
+}
+
+// floorDiv returns the greatest k whose k × d is at most n, or below it when exclusive.
+func floorDiv(n, d *big.Int, exclusive bool) *big.Int {
+	q, m := new(big.Int).DivMod(n, d, new(big.Int))
+	if m.Sign() == 0 && exclusive {
+		q.Sub(q, big.NewInt(1))
+	}
+
+	return q
+}
+
+// minInt returns the lesser of a and b.
+func minInt(a, b *big.Int) *big.Int {
+	if a.Cmp(b) <= 0 {
+		return a
+	}
+
+	return b
+}
+
+// maxInt returns the greater of a and b.
+func maxInt(a, b *big.Int) *big.Int {
+	if a.Cmp(b) >= 0 {
+		return a
+	}
+
+	return b
+}
+
 // Generators
+
+// rootGen draws the schemas of gen, or one of them behind a $ref to the $defs of the document.
+func rootGen(gen *rapid.Generator[map[string]any]) *rapid.Generator[map[string]any] {
+	return rapid.Custom(func(t *rapid.T) map[string]any {
+		s := gen.Draw(t, "schema")
+		if !rapid.Bool().Draw(t, "ref") {
+			return s
+		}
+
+		return map[string]any{"$defs": map[string]any{"S": s}, "$ref": "#/$defs/S"}
+	})
+}
 
 // schemaGen draws JSON Schemas whose values fakefy must make: every keyword it reads, with bounds that some value
 // meets, nested up to depth levels.
 func schemaGen(depth int) *rapid.Generator[map[string]any] {
 	return rapid.Custom(func(t *rapid.T) map[string]any {
-		kinds := []string{"string", "pattern", "integer", "allOf", "number", "boolean", "null", "enum"}
+		kinds := []string{
+			"string", "pattern", "format and pattern", "integer", "big integer", "exclusive integer", "allOf", "number",
+			"decimal", "boolean", "null", "enum", "const", "nullable", "oneOf",
+		}
 		if depth > 0 {
-			kinds = append(kinds, "object", "array")
+			kinds = append(kinds, "object", "pattern object", "array", "unique array", "tuple", "anyOf", "allOf objects")
 		}
 
 		switch rapid.SampledFrom(kinds).Draw(t, "kind") {
@@ -652,10 +1148,19 @@ func schemaGen(depth int) *rapid.Generator[map[string]any] {
 
 			return map[string]any{
 				"type":      "string",
-				"pattern":   rapid.SampledFrom([]string{"^[a-z]+$", "^[0-9a-f]*$", "^[A-Z][a-z]+$", "^(ab|c)+-?[0-9]*$"}).Draw(t, "pattern"),
+				"pattern":   rapid.SampledFrom([]string{"^[a-z]+$", "^[0-9a-f]*$", "^[A-Z][a-z]+$", "^(ab|c)+-?[0-9]*$", "[0-9]", "x$", "^a"}).Draw(t, "pattern"),
 				"minLength": lo,
 				"maxLength": lo + rapid.IntRange(0, 4).Draw(t, "extra"),
 			}
+		case "format and pattern":
+			return rapid.SampledFrom([]map[string]any{
+				{"type": "string", "format": "email", "pattern": "^x"},
+				{"type": "string", "format": "email", "pattern": "@"},
+				{"type": "string", "format": "hostname", "pattern": "\\.io$"},
+				{"type": "string", "format": "uuid", "pattern": "^[0-9a-f-]+$"},
+				{"type": "string", "format": "date", "pattern": "^20"},
+				{"type": "string", "format": "uri", "pattern": "^https://"},
+			}).Draw(t, "schema")
 		case "allOf":
 			lo := rapid.IntRange(-1000, 1000).Draw(t, "minimum")
 
@@ -671,31 +1176,77 @@ func schemaGen(depth int) *rapid.Generator[map[string]any] {
 			}
 
 			return s
+		case "big integer":
+			lo := rapid.Int64Range(math.MinInt64, math.MaxInt64-1000).Draw(t, "minimum")
+			return map[string]any{"type": "integer", "minimum": lo, "maximum": lo + rapid.Int64Range(0, 1000).Draw(t, "width")}
+		case "exclusive integer":
+			lo := rapid.IntRange(-1000, 1000).Draw(t, "exclusiveMinimum")
+			return map[string]any{"type": "integer", "exclusiveMinimum": lo, "exclusiveMaximum": lo + rapid.IntRange(2, 50).Draw(t, "width")}
 		case "number":
 			lo := rapid.Float64Range(-1e6, 1e6).Draw(t, "minimum")
 			return map[string]any{"type": "number", "minimum": lo, "exclusiveMaximum": lo + rapid.Float64Range(0.5, 100).Draw(t, "width")}
+		case "decimal":
+			step := rapid.SampledFrom([]float64{0.01, 0.05, 0.25, 0.5, 1.5}).Draw(t, "multipleOf")
+			lo := float64(rapid.IntRange(-100000, 100000).Draw(t, "minimum")) / 100
+
+			return map[string]any{"type": "number", "minimum": lo, "maximum": lo + 2*step + float64(rapid.IntRange(0, 1000).Draw(t, "width")), "multipleOf": step}
 		case "boolean":
 			return map[string]any{"type": "boolean"}
 		case "null":
 			return map[string]any{"type": "null"}
 		case "enum":
 			return map[string]any{"enum": []any{rapid.String().Draw(t, "a"), rapid.Int().Draw(t, "b")}}
+		case "const":
+			return map[string]any{"const": rapid.SampledFrom([]any{"c", 7, true, nil, 2.5, []any{1, "a"}, map[string]any{"k": "v"}}).Draw(t, "const")}
+		case "nullable":
+			// The bounds may cross: then only null is left.
+			return map[string]any{"type": []any{"integer", "null"}, "minimum": rapid.IntRange(0, 10).Draw(t, "minimum"), "maximum": rapid.IntRange(0, 10).Draw(t, "maximum")}
+		case "oneOf":
+			// Branches of different types: a value matches one only.
+			branches := rapid.Permutation([]any{
+				map[string]any{"type": "string", "maxLength": 3},
+				map[string]any{"type": "boolean"},
+				map[string]any{"type": "null"},
+				map[string]any{"type": "array", "maxItems": 0},
+			}).Draw(t, "branches")
+
+			return map[string]any{"oneOf": branches[:rapid.IntRange(1, len(branches)).Draw(t, "count")]}
+		case "anyOf":
+			return map[string]any{"anyOf": []any{schemaGen(depth-1).Draw(t, "a"), schemaGen(depth-1).Draw(t, "b")}}
 		case "object":
-			props := make(map[string]any)
-			var required []any
+			return objectGen(depth, "", false).Draw(t, "object")
+		case "pattern object":
+			return objectGen(depth, "", true).Draw(t, "object")
+		case "allOf objects":
+			// Each side names its own properties: one name of two unrelated schemas would have no value.
+			a, b := objectGen(depth, "a_", false).Draw(t, "a"), objectGen(depth, "b_", false).Draw(t, "b")
+			delete(a, "additionalProperties")
+			delete(b, "additionalProperties")
+			delete(a, "maxProperties")
+			delete(b, "maxProperties")
 
-			for i := range rapid.IntRange(0, 3).Draw(t, "properties") {
-				name := fmt.Sprintf("%s%d", rapid.SampledFrom([]string{"id", "email", "name", "createdAt", "price", "age", "url", "x"}).Draw(t, "name"), i)
-				props[name] = schemaGen(depth-1).Draw(t, name)
+			return map[string]any{"allOf": []any{a, b}}
+		case "unique array":
+			lo := rapid.IntRange(0, 5).Draw(t, "minItems")
+			items := rapid.SampledFrom([]map[string]any{
+				{"type": "integer", "minimum": 0, "maximum": 1000},
+				{"type": "string", "minLength": 3},
+				{"type": "integer", "minimum": 9007199254740992, "maximum": 9007199254741100},
+				{"enum": []any{"a", "b", "c", "d", "e", 1, 2, 3}},
+			}).Draw(t, "items")
 
-				if rapid.Bool().Draw(t, "required") {
-					required = append(required, name)
-				}
+			return map[string]any{"type": "array", "uniqueItems": true, "items": items, "minItems": lo, "maxItems": lo + rapid.IntRange(0, 3).Draw(t, "extra")}
+		case "tuple":
+			n := rapid.IntRange(1, 3).Draw(t, "prefixItems")
+			prefix := make([]any, n)
+
+			for i := range prefix {
+				prefix[i] = schemaGen(depth-1).Draw(t, fmt.Sprintf("prefix%d", i))
 			}
 
-			s := map[string]any{"type": "object", "properties": props, "additionalProperties": false}
-			if len(required) > 0 {
-				s["required"] = required
+			s := map[string]any{"type": "array", "prefixItems": prefix, "minItems": rapid.IntRange(0, n).Draw(t, "minItems")}
+			if rapid.Bool().Draw(t, "closed") {
+				s["items"] = false
 			}
 
 			return s
@@ -703,5 +1254,152 @@ func schemaGen(depth int) *rapid.Generator[map[string]any] {
 			lo := rapid.IntRange(0, 2).Draw(t, "minItems")
 			return map[string]any{"type": "array", "items": schemaGen(depth-1).Draw(t, "items"), "minItems": lo, "maxItems": lo + rapid.IntRange(0, 3).Draw(t, "extra")}
 		}
+	})
+}
+
+// objectGen draws closed objects of up to three properties of schemaGen, depth levels down, their names starting with
+// prefix and some of them required, with minProperties and maxProperties they meet. With patterns, it adds required
+// properties only patternProperties allow.
+func objectGen(depth int, prefix string, patterns bool) *rapid.Generator[map[string]any] {
+	return rapid.Custom(func(t *rapid.T) map[string]any {
+		props := make(map[string]any)
+		var required []any
+
+		for i := range rapid.IntRange(0, 3).Draw(t, "properties") {
+			name := prefix + fmt.Sprintf("%s%d", rapid.SampledFrom([]string{"id", "email", "name", "createdAt", "price", "age", "url", "x"}).Draw(t, "name"), i)
+			props[name] = schemaGen(depth-1).Draw(t, name)
+
+			if rapid.Bool().Draw(t, "required") {
+				required = append(required, name)
+			}
+		}
+
+		s := map[string]any{"type": "object", "properties": props, "additionalProperties": false}
+
+		if patterns {
+			s["patternProperties"] = map[string]any{"^p_": schemaGen(depth-1).Draw(t, "pattern")}
+			for i := range rapid.IntRange(1, 2).Draw(t, "pattern properties") {
+				required = append(required, fmt.Sprintf("p_%d", i))
+			}
+		}
+
+		if len(required) > 0 {
+			s["required"] = required
+		}
+
+		total := len(props) + len(required)
+		for _, r := range required {
+			if _, ok := props[r.(string)]; ok {
+				total--
+			}
+		}
+
+		lo := rapid.IntRange(0, total).Draw(t, "minProperties")
+		if lo > 0 {
+			s["minProperties"] = lo
+		}
+
+		if rapid.Bool().Draw(t, "bounded") {
+			s["maxProperties"] = max(lo, len(required)) + rapid.IntRange(0, 2).Draw(t, "extra")
+		}
+
+		return s
+	})
+}
+
+// anySchemaGen draws schemas of the keywords fakefy reads, with values of any kind, nested up to depth levels: bounds
+// that cross, keywords that contradict, counts that aren't counts, patterns that don't compile and refs to nothing.
+func anySchemaGen(depth int) *rapid.Generator[map[string]any] {
+	return rapid.Custom(func(t *rapid.T) map[string]any {
+		s := make(map[string]any)
+		keys := []string{
+			"type", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "minLength", "maxLength",
+			"pattern", "format", "enum", "const", "example", "minItems", "maxItems", "uniqueItems", "required",
+			"additionalProperties", "minProperties", "maxProperties", "$ref",
+		}
+		if depth > 0 {
+			keys = append(keys, "items", "prefixItems", "properties", "patternProperties", "allOf", "anyOf", "oneOf")
+		}
+
+		number := rapid.SampledFrom([]any{0, 1, -1, 3, 2.5, 0.01, -7.5, 1e300, -1e300, 1e-300, 9007199254740993, math.MaxInt64, "5", true})
+		count := rapid.SampledFrom([]any{0, 1, 2, 5, -1, 1.5, "2"})
+		sub := func(label string) any {
+			if rapid.IntRange(0, 5).Draw(t, label+" bool") == 0 {
+				return rapid.Bool().Draw(t, label)
+			}
+
+			return anySchemaGen(depth-1).Draw(t, label)
+		}
+
+		for range rapid.IntRange(0, 4).Draw(t, "keywords") {
+			switch key := rapid.SampledFrom(keys).Draw(t, "key"); key {
+			case "type":
+				types := []any{"string", "integer", "number", "boolean", "null", "object", "array"}
+				if rapid.Bool().Draw(t, "type list") {
+					s[key] = rapid.SliceOfNDistinct(rapid.SampledFrom(types), 1, 3, func(v any) any { return v }).Draw(t, key)
+				} else {
+					s[key] = rapid.SampledFrom(types).Draw(t, key)
+				}
+			case "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf":
+				s[key] = number.Draw(t, key)
+			case "minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties":
+				s[key] = count.Draw(t, key)
+			case "pattern":
+				s[key] = rapid.SampledFrom([]string{"^a+$", "[0-9]", "^$", "(", "^.{3}$", "x$"}).Draw(t, key)
+			case "format":
+				s[key] = rapid.SampledFrom([]string{"email", "uuid", "date-time", "int32", "hostname"}).Draw(t, key)
+			case "enum":
+				s[key] = rapid.SliceOfN(rapid.SampledFrom([]any{"a", 1, 1.0, nil, true, []any{}}), 0, 3).Draw(t, key)
+			case "const", "example":
+				s[key] = rapid.SampledFrom([]any{"a", 1, nil, false, map[string]any{"a": 1}, []any{1, 1}}).Draw(t, key)
+			case "uniqueItems":
+				s[key] = rapid.Bool().Draw(t, key)
+			case "required":
+				s[key] = rapid.SliceOfN(rapid.SampledFrom([]any{"a", "b", "c"}), 0, 3).Draw(t, key)
+			case "$ref":
+				s[key] = rapid.SampledFrom([]string{"#", "#/properties/a", "#/missing", "other.json"}).Draw(t, key)
+			case "additionalProperties", "items":
+				s[key] = sub(key)
+			case "prefixItems", "allOf", "anyOf", "oneOf":
+				list := make([]any, rapid.IntRange(0, 2).Draw(t, key+" length"))
+				for i := range list {
+					list[i] = sub(fmt.Sprintf("%s%d", key, i))
+				}
+
+				s[key] = list
+			case "properties", "patternProperties":
+				names := []string{"a", "b", "c"}
+				if key == "patternProperties" {
+					names = []string{"^a", "b$", "("}
+				}
+
+				props := make(map[string]any)
+				for _, name := range rapid.SliceOfNDistinct(rapid.SampledFrom(names), 0, 2, func(v string) string { return v }).Draw(t, key) {
+					props[name] = sub(name)
+				}
+
+				s[key] = props
+			}
+		}
+
+		return s
+	})
+}
+
+// bigIntGen draws integers across the range of an int64 and a little past both ends.
+func bigIntGen() *rapid.Generator[*big.Int] {
+	return rapid.Custom(func(t *rapid.T) *big.Int {
+		base := rapid.SampledFrom([]*big.Int{
+			big.NewInt(0), big.NewInt(1 << 53), big.NewInt(-(1 << 53)), big.NewInt(math.MaxInt64), big.NewInt(math.MinInt64),
+		}).Draw(t, "base")
+
+		return new(big.Int).Add(base, big.NewInt(rapid.Int64Range(-2_000_000, 2_000_000).Draw(t, "offset")))
+	})
+}
+
+// decimalGen draws decimals of up to four places, up to a billion.
+func decimalGen() *rapid.Generator[*big.Rat] {
+	return rapid.Custom(func(t *rapid.T) *big.Rat {
+		return big.NewRat(rapid.Int64Range(-1e13, 1e13).Draw(t, "ten-thousandths"), 10000)
 	})
 }
