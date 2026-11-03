@@ -1,9 +1,12 @@
 package fakefy_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 
 	"github.com/caffeine-projects/vlatte/fakefy"
 )
@@ -27,6 +30,8 @@ func TestSchema_APatternMakesAStringItMatches(t *testing.T) {
 		{name: "unicode letters", schema: `{"type": "string", "pattern": "^\\p{L}+$"}`},
 		{name: "a pattern with lengths", schema: `{"type": "string", "pattern": "^[a-z]+$", "minLength": 3, "maxLength": 4}`},
 		{name: "a repeat that can write nothing, to a length", schema: `{"type": "string", "pattern": "^(a?)*b$", "minLength": 3}`},
+		{name: "a repeat of an optional item, to a length", schema: `{"type": "string", "pattern": "^([A-Z_]?)+$", "minLength": 17, "maxLength": 24}`},
+		{name: "a repeat that never writes, to a length", schema: `{"type": "string", "pattern": "^a(\\b)*", "minLength": 3}`},
 		{name: "a class with no printable ASCII", schema: `{"type": "string", "pattern": "^[\\x{100}-\\x{200}]+$"}`},
 	}
 
@@ -66,4 +71,119 @@ func TestSchema_APatternNoStringFitsFailsWithErrUnsatisfiable(t *testing.T) {
 			require.EqualError(t, err, "fakefy: no value satisfies the schema: "+tt.want)
 		})
 	}
+}
+
+func TestSchema_ARandomPatternMakesAStringItMatches(t *testing.T) {
+	// A spec's pattern is any regular expression its author wrote: every one some string matches must make one.
+	rapid.Check(t, func(t *rapid.T) {
+		sch, doc := compileMap(t, map[string]any{"type": "string", "pattern": patternGen().Draw(t, "pattern")})
+
+		v, err := fakefy.New(fakefy.WithSeed(rapid.Uint64().Draw(t, "seed"))).Schema(doc)
+		require.NoError(t, err)
+		requireValid(t, sch, v)
+	})
+}
+
+func TestSchema_ARandomPatternWithLengthsMakesAStringOfThemOrFails(t *testing.T) {
+	// Lengths may leave a pattern no string: the generator must then fail with ErrUnsatisfiable, never return a string
+	// of another length.
+	rapid.Check(t, func(t *rapid.T) {
+		lo := rapid.IntRange(0, 30).Draw(t, "minLength")
+		schema := map[string]any{"type": "string", "pattern": patternGen().Draw(t, "pattern"), "minLength": lo}
+		if rapid.Bool().Draw(t, "bounded") {
+			schema["maxLength"] = lo + rapid.IntRange(0, 10).Draw(t, "extra")
+		}
+
+		sch, doc := compileMap(t, schema)
+
+		v, err := fakefy.New(fakefy.WithSeed(rapid.Uint64().Draw(t, "seed"))).Schema(doc)
+		if err != nil {
+			require.ErrorIs(t, err, fakefy.ErrUnsatisfiable)
+			return
+		}
+
+		requireValid(t, sch, v)
+	})
+}
+
+func TestSchema_APatternOpenAtTheEndMakesAStringOfAnyMinLength(t *testing.T) {
+	// JSON Schema patterns search the string, so letters after the match fit a pattern without $: a minLength never
+	// leaves it without a string.
+	rapid.Check(t, func(t *rapid.T) {
+		pattern := strings.TrimSuffix(patternGen().Draw(t, "pattern"), "$")
+		sch, doc := compileMap(t, map[string]any{"type": "string", "pattern": pattern, "minLength": rapid.IntRange(0, 40).Draw(t, "minLength")})
+
+		v, err := fakefy.New(fakefy.WithSeed(rapid.Uint64().Draw(t, "seed"))).Schema(doc)
+		require.NoError(t, err)
+		requireValid(t, sch, v)
+	})
+}
+
+// Generators
+
+// patternGen draws regular expressions some string matches: literals, classes, groups, alternations and repeats,
+// optionally anchored at either end and case-insensitive.
+func patternGen() *rapid.Generator[string] {
+	return rapid.Custom(func(t *rapid.T) string {
+		var b strings.Builder
+
+		if rapid.Bool().Draw(t, "case-insensitive") {
+			b.WriteString("(?i)")
+		}
+
+		if rapid.Bool().Draw(t, "starts") {
+			b.WriteString("^")
+		}
+
+		b.WriteString(sequenceGen(2).Draw(t, "sequence"))
+
+		if rapid.Bool().Draw(t, "ends") {
+			b.WriteString("$")
+		}
+
+		return b.String()
+	})
+}
+
+// sequenceGen draws one to four atoms, each repeated or not, groups nesting up to depth levels.
+func sequenceGen(depth int) *rapid.Generator[string] {
+	return rapid.Custom(func(t *rapid.T) string {
+		var b strings.Builder
+
+		for i := range rapid.IntRange(1, 4).Draw(t, "atoms") {
+			b.WriteString(atomGen(depth).Draw(t, fmt.Sprintf("atom%d", i)))
+			b.WriteString(rapid.SampledFrom([]string{"", "", "?", "*", "+", "*?", "{2}", "{0,2}", "{1,}", "{2,3}"}).Draw(t, "repeat"))
+		}
+
+		return b.String()
+	})
+}
+
+// atomGen draws a literal, a class, or, above depth 0, a group of sequences.
+func atomGen(depth int) *rapid.Generator[string] {
+	return rapid.Custom(func(t *rapid.T) string {
+		kinds := []string{"literal", "class"}
+		if depth > 0 {
+			kinds = append(kinds, "group", "alternation")
+		}
+
+		switch rapid.SampledFrom(kinds).Draw(t, "kind") {
+		case "literal":
+			return rapid.SampledFrom([]string{"a", "Z", "0", "-", "_", " ", "\\.", "\\+", "é", "日"}).Draw(t, "literal")
+		case "class":
+			return rapid.SampledFrom([]string{
+				"[a-z]", "[0-9a-f]", "[^0-9]", "\\d", "\\w", "\\s", "\\D", ".", "[A-Z_]", "\\p{L}", "[[:alpha:]]",
+				"[\\x{100}-\\x{200}]",
+			}).Draw(t, "class")
+		case "group":
+			return rapid.SampledFrom([]string{"(", "(?:"}).Draw(t, "group") + sequenceGen(depth-1).Draw(t, "sequence") + ")"
+		default:
+			alts := make([]string, rapid.IntRange(2, 3).Draw(t, "alternatives"))
+			for i := range alts {
+				alts[i] = sequenceGen(depth-1).Draw(t, fmt.Sprintf("alternative%d", i))
+			}
+
+			return "(" + strings.Join(alts, "|") + ")"
+		}
+	})
 }

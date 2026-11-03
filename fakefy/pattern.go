@@ -164,17 +164,20 @@ func (f *Faker) repeat(re *syntax.Regexp, b *strings.Builder, rest, target int) 
 		return nil
 	}
 
-	// Each repeat past n must write something, or one that writes nothing, such as (a?)*, never ends.
-	for length := utf8.RuneCountInString(b.String()); length+rest < target; {
+	// A repeat past n may write nothing by chance, as [A-Z]? does, so only _maxTries in a row that write nothing end
+	// it: one of (^)* never writes.
+	for length, empty := utf8.RuneCountInString(b.String()), 0; length+rest < target && empty < _maxTries; {
 		before := b.Len()
 		if err := f.regexp(re.Sub[0], b, rest, target); err != nil {
 			return err
 		}
 
 		if b.Len() == before {
-			break
+			empty++
+			continue
 		}
 
+		empty = 0
 		length += utf8.RuneCountInString(b.String()[before:])
 	}
 
