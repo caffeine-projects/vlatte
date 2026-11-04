@@ -394,6 +394,8 @@ func TestBuildMatcher_AcceptAndNotAcceptable(t *testing.T) {
 	for _, def := range []any{
 		[]any{"accept", "application/xml", []any{"application/json", "application/xml"}},
 		[]any{"notacceptable", []any{"application/json", "application/xml"}},
+		// match.NotAcceptable() describes itself without offers.
+		[]any{"notacceptable", []any{}},
 	} {
 		m, err := _registry.BuildMatcher(def)
 		require.NoError(t, err)
@@ -415,6 +417,21 @@ func TestBuildMatcher_AcceptAndNotAcceptable(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, matches(t, none, []string{"text/html"}))
 	require.False(t, matches(t, none, []string{}))
+}
+
+func TestBuildMatcher_AcceptIgnoresTheParametersOfItsMediaTypes(t *testing.T) {
+	// match.Accept ignores the case and the parameters of its media types: a mock file loads the media types it
+	// takes, wherever their parameters, case and spaces differ from those of its offers.
+	for _, def := range [][]any{
+		{"accept", "application/json", []any{"application/json; charset=utf-8", "application/xml"}},
+		{"accept", "application/json; charset=utf-8", []any{"application/json", "application/xml"}},
+		{"accept", "Application/JSON ;charset=utf-8", []any{"application/json; charset=UTF-8", "application/xml"}},
+	} {
+		m, err := _registry.BuildMatcher(def)
+		require.NoError(t, err, def)
+		require.True(t, matches(t, m, []string{"application/json"}), def)
+		require.False(t, matches(t, m, []string{"application/xml"}), def)
+	}
 }
 
 func TestBuildMatcher_ChecksArguments(t *testing.T) {
@@ -463,7 +480,6 @@ func TestBuildMatcher_ChecksArguments(t *testing.T) {
 		{[]any{"accept", "application/json", []any{int64(1)}}, "accept takes media types such as application/json, not a number"},
 		{[]any{"accept", "application/json"}, "accept takes 2 arguments, not 1"},
 		{[]any{"notacceptable", "application/json"}, "notacceptable takes a list of the media types offered, not a string"},
-		{[]any{"notacceptable", []any{}}, "notacceptable takes 1 media type or more, not 0"},
 		{[]any{"notacceptable"}, "notacceptable takes 1 argument, not 0"},
 		// Each kind of matcher reports a missing argument.
 		{[]any{"eqj"}, "eqj takes 1 argument, or 2 with options, not 0"},
