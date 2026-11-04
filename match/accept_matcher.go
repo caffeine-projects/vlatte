@@ -35,7 +35,7 @@ func (m *acceptMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch("Accept(" + m.mediaType + ") the client prefers another offer")
+	return mismatch(arg, "Accept("+m.mediaType+") the client prefers another offer")
 }
 
 // Describe implements vlatte.SelfDescriptive.
@@ -57,7 +57,7 @@ func (m *notAcceptableMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch("NotAcceptable() the client takes an offer")
+	return mismatch(arg, "NotAcceptable() the client takes an offer")
 }
 
 // Describe implements vlatte.SelfDescriptive.
