@@ -33,6 +33,7 @@ func (a *MatcherArg) Context() context.Context {
 
 // Explain returns the optional explain block for recording [Matcher] messages.
 // E.g. why a [Matcher] did not match).
+// The block is the matcher's only while Match runs: [Mocks.Find] reuses it for the next mock.
 func (a *MatcherArg) Explain() *Explanation {
 	return a.exp
 }

@@ -42,9 +42,8 @@ func TestEval(t *testing.T) {
 	evals.Eval(t.Context(), sub, nil)
 }
 
-func TestFind_RecordsWhatTheMatchersOfEachMockSaidTheLastBlockBeingTheMatchedMocks(t *testing.T) {
-	// A mock server hands the reply the reasons its own mock matched: the last block of sub, apart from the reasons of
-	// the mocks tried before it.
+func TestFind_LeavesOnlyWhatTheMatchersOfTheMockFoundRecorded(t *testing.T) {
+	// A mock server hands the reply the reasons its own mock matched, without those of the mocks tried before it.
 	says := func(message string, ok bool) vlatte.Matcher {
 		return match.Delegate("says", func(arg vlatte.MatcherArg) (bool, error) {
 			arg.Explain().AddMessage(message)
@@ -64,13 +63,39 @@ func TestFind_RecordsWhatTheMatchersOfEachMockSaidTheLastBlockBeingTheMatchedMoc
 	require.NoError(t, err)
 	require.True(t, matched)
 	require.Same(t, b, found)
-	require.Len(t, sub.Children, 2)
-	require.Equal(t, "a", sub.Children[0].Name)
-	require.Equal(t, []string{"a refused"}, sub.Children[0].Messages())
+	require.Len(t, sub.Children, 1, "a block for the matcher of b")
+	require.Equal(t, "says", sub.Children[0].Name)
+	require.Equal(t, []string{"b took it"}, sub.Messages())
+}
 
-	last := sub.Children[len(sub.Children)-1]
-	require.Equal(t, "b", last.Name)
-	require.Equal(t, []string{"b took it"}, last.Messages())
+func TestFind_AllocatesTheSameWhateverTheNumberOfMocksTriedBeforeTheMatch(t *testing.T) {
+	// A mock server tries every mock before the one that matches on each request: what the misses record must not cost
+	// it more with each mock it has.
+	allocs := func(n int) float64 {
+		says := func(message string, ok bool) vlatte.Evaluators[*fakeMock, request] {
+			return vlatte.Evaluators[*fakeMock, request]{{Matcher: match.Delegate("says", func(arg vlatte.MatcherArg) (bool, error) {
+				arg.Explain().AddMessage(message)
+				return ok, nil
+			})}}
+		}
+		mocks := make([]*fakeMock, n)
+		evals := make(map[*fakeMock]vlatte.Evaluators[*fakeMock, request], n)
+		for i := range mocks {
+			mocks[i] = newFakeMockWith(fmt.Sprintf("m%d", i), 0)
+			evals[mocks[i]] = says("refused", i == n-1)
+		}
+		seq := vlatte.Mocks[*fakeMock, request](slices.Values(mocks))
+		get := func(m *fakeMock) vlatte.Evaluators[*fakeMock, request] { return evals[m] }
+
+		return testing.AllocsPerRun(100, func() {
+			_, matched, err := seq.Find(t.Context(), vlatte.NewExplanation(), request{}, get, nil)
+			if err != nil || !matched {
+				t.Fatalf("expected the last mock to match, got matched %v, err %v", matched, err)
+			}
+		})
+	}
+
+	require.Equal(t, allocs(2), allocs(100))
 }
 
 // turnMatcher is the matcher of a mock that takes a turn, such as a scenario's: it matches while the turn is free,
@@ -187,14 +212,13 @@ func TestFind_LooksAgainWhenAnotherRequestTookTheTurn(t *testing.T) {
 	require.Equal(t, 2, firstRuns, "Find looked again from the first mock")
 	require.Equal(t, 1, turn.matches)
 
-	// The look again adds its blocks after those of the first: the last is still the mock found's, not a's, which
-	// matched but lost its turn.
+	// sub holds the blocks of the matchers of the mock found, not those of a, which matched but lost its turn.
 	names := make([]string, 0, len(sub.Children))
 	for _, block := range sub.Children {
 		names = append(names, block.Name)
 	}
 
-	require.Equal(t, []string{"first", "a", "first"}, names)
+	require.Equal(t, []string{"Equal", "after"}, names)
 }
 
 // brokenClaimer matches, but never takes its turn: it calls claimed, or panics, as it tries.

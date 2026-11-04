@@ -157,7 +157,7 @@ func TestTemplateData_EncodesAsJSONForAnotherEngine(t *testing.T) {
 
 	exp, ok := data["Explanation"].(map[string]any)
 	require.True(t, ok, body)
-	require.Equal(t, "role", exp["Name"], "the block of the mock that matched")
+	require.Equal(t, "root", exp["Name"], "the blocks of the mock that matched, under the root Find filled")
 	require.Contains(t, body, `"Message":"StrictEq(admin) Got: user"`)
 }
 

@@ -79,4 +79,33 @@ func TestExplanation_MessagesListsABlockThenEachOfItsBlocksDepthFirst(t *testing
 
 	require.Equal(t, []string{"root", "first", "inner", "second"}, root.Messages())
 	require.Nil(t, (*vlatte.Explanation)(nil).Messages())
+	require.Nil(t, vlatte.NewExplanation().Messages(), "a template ranges over nothing when no matcher said why")
+}
+
+func TestExplanation_MessagesAllocatesOnce(t *testing.T) {
+	// A template lists the messages on every request its mock answers: one slice, whatever the blocks.
+	root := vlatte.NewExplanation()
+	for _, name := range []string{"a", "b", "c"} {
+		block := root.Sub(name)
+		block.AddMessage(name)
+		block.Sub("inner").AddMessage(name + " inner")
+	}
+
+	require.Equal(t, 1.0, testing.AllocsPerRun(100, func() { _ = root.Messages() }))
+}
+
+func BenchmarkExplanation_Messages(b *testing.B) {
+	// A template lists the messages on every request its mock answers.
+	root := vlatte.NewExplanation()
+	for _, name := range []string{"a", "b", "c"} {
+		block := root.Sub(name)
+		block.AddMessage(name)
+		block.Sub("inner").AddMessage(name + " inner")
+	}
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		_ = root.Messages()
+	}
 }

@@ -526,11 +526,9 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Template data providers see the mock that matched, and what its matchers recorded: Find's last block, cut from
-	// the blocks of the mocks tried before it.
+	// Template data providers see the mock that matched, and what its matchers recorded.
 	reqValues.Mock = mock
-	reqValues.Explanation = sub.Children[len(sub.Children)-1]
-	reqValues.Explanation.Parent = nil
+	reqValues.Explanation = sub
 	h.app.movedScenarios(reqValues, input)
 
 	// The hits count this request, which Inc counts once the answer is sent.

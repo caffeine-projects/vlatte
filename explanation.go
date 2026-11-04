@@ -30,6 +30,17 @@ func (e *Explanation) Sub(name string) *Explanation {
 		return nil
 	}
 
+	// A block that reset left past the end is handed out again.
+	if n := len(e.Children); n < cap(e.Children) {
+		if child := e.Children[:n+1][n]; child != nil {
+			child.reset()
+			child.Parent, child.Name = e, name
+			e.Children = e.Children[:n+1]
+
+			return child
+		}
+	}
+
 	child := &Explanation{Parent: e, Name: name}
 	e.Children = append(e.Children, child)
 
@@ -48,21 +59,51 @@ func (e *Explanation) AddMessage(message string) {
 
 // Messages returns the messages of e, then those of each of its blocks, depth first. A template ranges over them,
 // as it can't walk the blocks itself.
+// It returns nil when there are none.
 func (e *Explanation) Messages() []string {
-	if e == nil {
+	n := e.count()
+	if n == 0 {
 		return nil
 	}
 
-	var out []string
+	return e.appendMessages(make([]string, 0, n))
+}
+
+// count returns the number of messages of e and its blocks.
+func (e *Explanation) count() int {
+	if e == nil {
+		return 0
+	}
+
+	n := len(e.Items)
+	for _, child := range e.Children {
+		n += child.count()
+	}
+
+	return n
+}
+
+// appendMessages appends the messages of e, then those of each of its blocks, depth first, to out.
+func (e *Explanation) appendMessages(out []string) []string {
 	for _, item := range e.Items {
 		out = append(out, item.Message)
 	}
 
 	for _, child := range e.Children {
-		out = append(out, child.Messages()...)
+		out = child.appendMessages(out)
 	}
 
 	return out
+}
+
+// reset empties e, and keeps its blocks for [Explanation.Sub] to hand out again.
+func (e *Explanation) reset() {
+	if e == nil {
+		return
+	}
+
+	e.Items = e.Items[:0]
+	e.Children = e.Children[:0]
 }
 
 // ExplanationItem is a message recorded in an [Explanation].
