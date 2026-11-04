@@ -15,6 +15,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/internal/config"
+	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchbuild"
 	"github.com/caffeine-projects/vlatte/match/matchscenario/scenariotest"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
 )
@@ -287,4 +289,41 @@ func TestFromBytes_ConcatenatedJSONObjectsRemainInvalid(t *testing.T) {
 	require.True(t, ok, "%v", err)
 	require.Len(t, cfgErr.Problems, 1)
 	require.Equal(t, config.CodeParseError, cfgErr.Problems[0].Code)
+}
+
+// fileSays builds [file-says, name]: text equal to the content of the file name, which opens from the directory of
+// the mock file, as a custom matcher of a spec file would.
+func fileSays(r *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
+	if len(args) != 1 {
+		return nil, errors.New("takes a file name")
+	}
+
+	name, ok := args[0].(string)
+	if !ok {
+		return nil, errors.New("takes a file name")
+	}
+
+	content, err := os.ReadFile(r.Path(name))
+	if err != nil {
+		return nil, err
+	}
+
+	return match.StrictEqual(string(content)), nil
+}
+
+func TestFromFile_ACustomMatcherOpensFilesFromTheMockFilesDirectory(t *testing.T) {
+	// A mock file and the file its custom matcher names sit together, wherever the server runs from.
+	dir := t.TempDir()
+	writeFile(t, dir, "word.txt", "hello")
+	path := writeFile(t, dir, "word.mock.yaml", `
+request: {method: Greetings, fields: {message: [file-says, word.txt]}}
+response: {message: {message: matched}}
+`)
+
+	m := fileServer(t, Setup().Matchers(matchbuild.MustNew(matchbuild.WithMatcher("file-says", fileSays))))
+	m.MustMock(FromFile(path))
+
+	res, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{Message: "hello"})
+	require.NoError(t, err)
+	require.Equal(t, "matched", res.GetMessage())
 }
