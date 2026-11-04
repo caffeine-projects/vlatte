@@ -1,7 +1,10 @@
 package mockhttp
 
 import (
+	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"errors"
+	"io"
 	"net/http"
 	"sync"
 	"testing"
@@ -12,6 +15,8 @@ import (
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/match"
+	"github.com/caffeine-projects/vlatte/match/matchscenario"
+	"github.com/caffeine-projects/vlatte/mockhttp/internal/viewdata"
 )
 
 func TestTemplateData_RequestAndServer(t *testing.T) {
@@ -114,6 +119,46 @@ func TestTemplateData_ExplanationSaysWhyTheMockMatched(t *testing.T) {
 	exp := <-recorded
 	require.Equal(t, []string{"StrictEq(admin) Got: user"}, exp.Messages())
 	require.True(t, exp.Root(), "the reply reaches the reasons of the mocks tried before through the parent")
+}
+
+// jsonEngine is a template engine of another runtime: its templates hand that runtime their context as JSON, and
+// write what it renders, here the JSON itself.
+type jsonEngine struct{}
+
+func (jsonEngine) Compile(string, string) (vlatte.Template, error) { return jsonTemplate{}, nil }
+
+type jsonTemplate struct{}
+
+func (jsonTemplate) Execute(w io.Writer, data any) error {
+	// The key-value store and the scenarios read their values as the template asks: they have no JSON of their own.
+	null := func(enc *jsontext.Encoder) error { return enc.WriteToken(jsontext.Null) }
+
+	return json.MarshalWrite(w, data, json.WithMarshalers(json.JoinMarshalers(
+		json.MarshalToFunc(func(enc *jsontext.Encoder, _ *viewdata.KVView) error { return null(enc) }),
+		json.MarshalToFunc(func(enc *jsontext.Encoder, _ matchscenario.View) error { return null(enc) }),
+	)))
+}
+
+func TestTemplateData_EncodesAsJSONForAnotherEngine(t *testing.T) {
+	// An engine of another runtime gets the context as JSON: the reasons a mock matched must encode too, though
+	// each of their blocks leads back to its parent.
+	m := MustNew(Setup().Silent().TemplateEngine(jsonEngine{}))
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	m.MustMock(Getf("/role").ID("role").Query("role", match.Not(match.StrictEqual("admin"))).
+		Reply(Forbidden().BodyTemplate("context")))
+
+	status, body := get(t, m, "/role?role=user")
+	require.Equal(t, http.StatusForbidden, status, body)
+
+	var data map[string]any
+	require.NoError(t, json.Unmarshal([]byte(body), &data))
+
+	exp, ok := data["Explanation"].(map[string]any)
+	require.True(t, ok, body)
+	require.Equal(t, "role", exp["Name"], "the block of the mock that matched")
+	require.Contains(t, body, `"Message":"StrictEq(admin) Got: user"`)
 }
 
 func TestServer_SetDataWhileServing(t *testing.T) {

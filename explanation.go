@@ -7,7 +7,9 @@ type Explanation struct {
 	Name     string
 	Items    []ExplanationItem
 	Children []*Explanation
-	Parent   *Explanation
+
+	// Parent is the block this one is a child of, or nil for the root. JSON leaves it out: it leads back here.
+	Parent *Explanation `json:"-"`
 }
 
 // NewExplanation returns an empty root Explanation.
