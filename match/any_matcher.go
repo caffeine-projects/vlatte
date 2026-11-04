@@ -35,7 +35,7 @@ func (m *anyOfMatcher) Match(arg vlatte.MatcherArg) (ok bool, e error) {
 		}
 	}
 
-	return mismatch("Any() none matched")
+	return mismatch(arg, "Any() none matched")
 }
 
 // Describe implements vlatte.SelfDescriptive.

@@ -526,8 +526,9 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Template data providers see the mock that matched.
+	// Template data providers see the mock that matched, and what its matchers recorded.
 	reqValues.Mock = mock
+	reqValues.Explanation = sub
 	h.app.movedScenarios(reqValues, input)
 
 	// The hits count this request, which Inc counts once the answer is sent.
@@ -1375,12 +1376,13 @@ func locals(r *RequestValues, provided map[string]any, kv *viewdata.KVView) *vie
 	}
 
 	return &viewdata.Data{
-		Request:   req,
-		Provided:  provided,
-		KV:        kv,
-		Server:    &viewdata.Server{URL: r.App.URL()},
-		Data:      r.App.Data(),
-		Scenarios: r.App.scenarioStore.View(r.scenarioMoves...),
+		Request:     req,
+		Provided:    provided,
+		KV:          kv,
+		Server:      &viewdata.Server{URL: r.App.URL()},
+		Data:        r.App.Data(),
+		Scenarios:   r.App.scenarioStore.View(r.scenarioMoves...),
+		Explanation: r.Explanation,
 	}
 }
 

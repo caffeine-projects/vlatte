@@ -2275,3 +2275,38 @@ func TestHandler_AMatcherFailingToMoveItsStateOnIsAWarning(t *testing.T) {
 	require.Equal(t, int64(1), stream.Hits())
 	require.Equal(t, 2, strings.Count(logs.String(), "http: after mock served event: matcher[2] state store down"), logs.String())
 }
+
+func BenchmarkServeHTTP_MocksTried(b *testing.B) {
+	// Each request tries every mock before the one that matches: what a miss costs adds up with the mocks a server has.
+	for _, n := range []int{1, 20, 100} {
+		b.Run(fmt.Sprintf("mocks=%d", n), func(b *testing.B) {
+			tenant := func(i int) string { return "t" + strconv.Itoa(i) }
+			mock := func(i int) *Builder {
+				return Getf("/items").Priority(i).Header("X-Tenant", match.Equal(tenant(i))).Query("page", match.Equal("2")).
+					Reply(OK().PlainText("ok"))
+			}
+
+			m, handler := benchHandler(b, mock(0))
+			for i := 1; i < n; i++ {
+				m.MustMock(mock(i))
+			}
+
+			request := func() *http.Request {
+				r := httptest.NewRequest(http.MethodGet, "/items?page=2", nil)
+				r.Header.Set("X-Tenant", tenant(n-1))
+
+				return r
+			}
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, request())
+			require.Equal(b, http.StatusOK, rec.Code, "the last mock answers")
+
+			b.ReportAllocs()
+
+			for b.Loop() {
+				handler.ServeHTTP(&discardWriter{header: make(http.Header)}, request())
+			}
+		})
+	}
+}

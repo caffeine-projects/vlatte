@@ -20,14 +20,14 @@ func (m *hasSuffixMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
 	txt, ok := value.Text(v)
 	if !ok {
-		return mismatch("HasSuffix() Value is not text")
+		return mismatch(arg, "HasSuffix() Value is not text")
 	}
 
 	if strings.HasSuffix(txt, m.Suffix) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"HasSuffix(", m.Suffix, ") Suffix is not present. Got: ", txt}, ""))
+	return mismatch(arg, strings.Join([]string{"HasSuffix(", m.Suffix, ") Suffix is not present. Got: ", txt}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.

@@ -22,7 +22,7 @@ func (m *itemMatcher) Name() string { return "Item" }
 func (m *itemMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	items, isList := value.List(arg.Value())
 	if !isList || m.Index >= len(items) {
-		return mismatch(strings.Join([]string{"Item(", strconv.Itoa(m.Index), ") No such item"}, ""))
+		return mismatch(arg, strings.Join([]string{"Item(", strconv.Itoa(m.Index), ") No such item"}, ""))
 	}
 
 	ok, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), items[m.Index]))
@@ -34,7 +34,7 @@ func (m *itemMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"Item(", strconv.Itoa(m.Index), ")"}, ""))
+	return mismatch(arg, strings.Join([]string{"Item(", strconv.Itoa(m.Index), ")"}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.

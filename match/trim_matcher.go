@@ -21,7 +21,7 @@ func (m *trimMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
 	txt, ok := value.Text(v)
 	if !ok {
-		return mismatch("Trim() Value is not text")
+		return mismatch(arg, "Trim() Value is not text")
 	}
 
 	result, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), strings.TrimSpace(txt)))
@@ -33,7 +33,7 @@ func (m *trimMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"Trim(", txt, ")"}, ""))
+	return mismatch(arg, strings.Join([]string{"Trim(", txt, ")"}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.

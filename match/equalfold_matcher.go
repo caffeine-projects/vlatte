@@ -19,14 +19,14 @@ func (m *equalIgnoreCaseMatcher) Name() string { return "EqualIgnoreCase" }
 func (m *equalIgnoreCaseMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	txt, ok := value.Text(arg.Value())
 	if !ok {
-		return mismatch("Eqi() Value is not text")
+		return mismatch(arg, "Eqi() Value is not text")
 	}
 
 	if strings.EqualFold(m.Expected, txt) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"Eqi(", m.Expected, ") Got: ", txt}, ""))
+	return mismatch(arg, strings.Join([]string{"Eqi(", m.Expected, ") Got: ", txt}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.

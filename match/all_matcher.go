@@ -35,7 +35,7 @@ func (m *allOfMatcher) Match(arg vlatte.MatcherArg) (ok bool, err error) {
 		}
 	}
 	if failed {
-		return mismatch("All() one or more matchers failed")
+		return mismatch(arg, "All() one or more matchers failed")
 	}
 	return success()
 }

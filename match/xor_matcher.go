@@ -31,7 +31,7 @@ func (m *xorMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch("XOR() both matched or both failed")
+	return mismatch(arg, "XOR() both matched or both failed")
 }
 
 // Describe implements vlatte.SelfDescriptive.

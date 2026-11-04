@@ -31,7 +31,7 @@ func (m *eitherMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch("Either() neither matched")
+	return mismatch(arg, "Either() neither matched")
 }
 
 // Describe implements vlatte.SelfDescriptive.

@@ -21,7 +21,7 @@ func (m *upperCaseMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
 	txt, ok := value.Text(v)
 	if !ok {
-		return mismatch("Upper() Value is not text")
+		return mismatch(arg, "Upper() Value is not text")
 	}
 
 	result, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), strings.ToUpper(txt)))
@@ -33,7 +33,7 @@ func (m *upperCaseMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"Upper(", txt, ")"}, ""))
+	return mismatch(arg, strings.Join([]string{"Upper(", txt, ")"}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.

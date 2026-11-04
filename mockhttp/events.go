@@ -42,6 +42,10 @@ type RequestValues struct {
 	// Mock is the matched Mock for the current HTTP request.
 	Mock *Mock
 
+	// Explanation holds what the matchers of Mock recorded when it matched, a block for each of them, such as why the
+	// matcher under a [github.com/caffeine-projects/vlatte/match.Not] didn't match. It is nil when no mock matched.
+	Explanation *vlatte.Explanation
+
 	Data any
 
 	// bodyParser is the parser that read the body, or nil.
