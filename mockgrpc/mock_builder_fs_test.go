@@ -1,9 +1,12 @@
 package mockgrpc
 
 import (
+	json "encoding/json/v2"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -291,6 +294,18 @@ func TestFromBytes_ConcatenatedJSONObjectsRemainInvalid(t *testing.T) {
 	require.Equal(t, config.CodeParseError, cfgErr.Problems[0].Code)
 }
 
+// fileSaysMatcher matches text equal to the content of the file at path, which its description names absolute, as
+// matchbuild.BuildFunc asks.
+type fileSaysMatcher struct {
+	vlatte.Matcher
+
+	path string
+}
+
+func (m fileSaysMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeMultiArgs("file-says", m.path)
+}
+
 // fileSays builds [file-says, name]: text equal to the content of the file name, which opens from the directory of
 // the mock file, as a custom matcher of a spec file would.
 func fileSays(r *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
@@ -303,12 +318,17 @@ func fileSays(r *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
 		return nil, errors.New("takes a file name")
 	}
 
-	content, err := os.ReadFile(r.Path(name))
+	path, err := filepath.Abs(r.Path(name))
 	if err != nil {
 		return nil, err
 	}
 
-	return match.StrictEqual(string(content)), nil
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return fileSaysMatcher{Matcher: match.StrictEqual(string(content)), path: path}, nil
 }
 
 func TestFromFile_ACustomMatcherOpensFilesFromTheMockFilesDirectory(t *testing.T) {
@@ -326,4 +346,78 @@ response: {message: {message: matched}}
 	res, err := pb.NewTestServiceClient(m.MustDial()).Greetings(t.Context(), &pb.HiReq{Message: "hello"})
 	require.NoError(t, err)
 	require.Equal(t, "matched", res.GetMessage())
+}
+
+func TestEncodeMock_AMockFilesMatchersDescribeThemselves(t *testing.T) {
+	// A custom matcher names its file absolute in its description: a mock of a file, described, loads back from
+	// another directory, such as the admin API's, rather than look for the file where the server runs. Its matchers
+	// describe themselves wherever the file has them: metadata, fields, the whole call and the rules of a bidi reply.
+	dir := t.TempDir()
+	word := writeFile(t, dir, "word.txt", "hello")
+	greetings := writeFile(t, dir, "greetings.mock.yaml", `
+request:
+  method: Greetings
+  header: {x-word: [file-says, word.txt]}
+  fields: {message: [file-says, word.txt]}
+  custom: [[file-says, word.txt]]
+response: {message: {message: matched}}
+`)
+	chat := writeFile(t, dir, "chat.mock.yaml", `
+request: {method: Chat}
+bidi:
+  on: [{when: [field, message, [file-says, word.txt]], response: {message: {message: matched}}}]
+`)
+
+	m := fileServer(t, Setup().Matchers(matchbuild.MustNew(matchbuild.WithMatcher("file-says", fileSays))))
+	says := []any{"file-says", word}
+
+	for path, at := range map[string][]string{
+		greetings: {"request.header.x-word", "request.fields.message", "request.custom[0]"},
+		chat:      {"bidi.on[0].when[2]"},
+	} {
+		built, err := FromFile(path).Build(m)
+		require.NoError(t, err)
+
+		data, err := EncodeMock(built, "json")
+		require.NoError(t, err)
+
+		var doc map[string]any
+		require.NoError(t, json.Unmarshal(data, &doc))
+
+		for _, key := range at {
+			require.Equal(t, says, valueAt(t, doc, key), key)
+		}
+
+		_, err = DecodeMock(m, data, "json")
+		require.NoError(t, err, "the mock loads back where word.txt isn't")
+	}
+}
+
+// valueAt returns the value at key of doc, dot-separated names and [index] steps.
+func valueAt(t *testing.T, doc map[string]any, key string) any {
+	t.Helper()
+
+	var v any = doc
+
+	for part := range strings.SplitSeq(key, ".") {
+		name, index, _ := strings.Cut(part, "[")
+		if name != "" {
+			obj, ok := v.(map[string]any)
+			require.True(t, ok, "%s: %s isn't an object", key, name)
+			v = obj[name]
+		}
+
+		for index != "" {
+			var i int
+			_, err := fmt.Sscanf(index, "%d]", &i)
+			require.NoError(t, err, key)
+
+			list, ok := v.([]any)
+			require.True(t, ok, "%s: %s isn't a list", key, part)
+			v = list[i]
+			_, index, _ = strings.Cut(index, "[")
+		}
+	}
+
+	return v
 }

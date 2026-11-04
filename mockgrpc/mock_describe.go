@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 
 	"google.golang.org/grpc/metadata"
@@ -52,13 +53,15 @@ type mockDescription struct {
 	scenario [4]string // name, required state, new state, key
 }
 
-// Describe implements vlatte.SelfDescriptive: the mock as a mock file writes it, which the admin API returns and
-// saves. A mock read from a document is described by it, with its ID. A mock built in Go is described whole, or not
-// at all: a part no mock file can hold, such as a Func, Echo or Shared reply, a CallMatches matcher, a matcher that
-// doesn't describe itself, a callback or a [vlatte.DelayFunc] delay, fails encoding the description, with an error that names
-// it, so the admin API never shows a mock that loads back matching more calls, answering differently or without its
-// callbacks. RandWith's generator is the exception: a mock file loads it back as a Rand, which picks from the same
-// replies.
+// Describe implements vlatte.SelfDescriptive: the mock as a mock file writes it, which the admin API returns and saves.
+// A mock read from a document is described by it, with its ID, and with each matcher list as its matcher describes
+// itself, such as a custom matcher that names its file absolute, so the description loads back from another directory;
+// text, and the list of a matcher that doesn't describe itself, stay as written. A mock built in Go is described whole,
+// or not at all: a part no mock file can hold, such as a Func, Echo or Shared reply, a CallMatches matcher, a matcher
+// that doesn't describe itself, a callback or a [vlatte.DelayFunc] delay, fails encoding the description, with an error
+// that names it, so the admin API never shows a mock that loads back matching more calls, answering differently or
+// without its callbacks. RandWith's generator is the exception: a mock file loads it back as a Rand, which picks from
+// the same replies.
 func (m *Mock) Describe() vlatte.Descriptor {
 	if m.doc != nil {
 		doc := maps.Clone(m.doc)
@@ -69,6 +72,16 @@ func (m *Mock) Describe() vlatte.Descriptor {
 			delete(doc, "enabled")
 		} else {
 			doc["enabled"] = false
+		}
+
+		if req, ok := doc["request"].(map[string]any); ok {
+			doc["request"] = m.described.request.over(req)
+		}
+
+		if bidi, ok := doc["bidi"].(map[string]any); ok {
+			if reply, ok := m.reply.(*BidiReply); ok {
+				doc["bidi"] = reply.rulesOver(bidi)
+			}
 		}
 
 		return vlatte.DescribeRoot(doc)
@@ -257,6 +270,80 @@ func (d *mockDescription) describeRequest(method string) (map[string]any, error)
 	}
 
 	return req, nil
+}
+
+// over returns a copy of req, the request of a mock's document, with the matchers it built from it described as they
+// describe themselves.
+func (r describedRequest) over(req map[string]any) map[string]any {
+	req = maps.Clone(req)
+
+	for key, matchers := range map[string][]namedMatcher{"header": r.header, "fields": r.fields} {
+		written, ok := req[key].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		written = maps.Clone(written)
+		for _, nm := range matchers {
+			written[nm.name] = describedOr(nm.matcher, written[nm.name])
+		}
+
+		req[key] = written
+	}
+
+	if body, ok := req["body"]; ok && r.body != nil {
+		req["body"] = describedOr(r.body, body)
+	}
+
+	if custom, ok := req["custom"].([]any); ok && len(custom) == len(r.custom) {
+		custom = slices.Clone(custom)
+		for i, m := range r.custom {
+			custom[i] = describedOr(m, custom[i])
+		}
+
+		req["custom"] = custom
+	}
+
+	return req
+}
+
+// rulesOver returns a copy of bidi, the bidi reply of a mock's document, with the when of each rule, which b built
+// from it, described as its matcher describes itself.
+func (b *BidiReply) rulesOver(bidi map[string]any) map[string]any {
+	rules, ok := bidi["on"].([]any)
+	if !ok || len(rules) != len(b.rules) {
+		return bidi
+	}
+
+	bidi = maps.Clone(bidi)
+	rules = slices.Clone(rules)
+
+	for i, rule := range b.rules {
+		if written, ok := rules[i].(map[string]any); ok {
+			written = maps.Clone(written)
+			written["when"] = describedOr(rule.matcher, written["when"])
+			rules[i] = written
+		}
+	}
+
+	bidi["on"] = rules
+
+	return bidi
+}
+
+// describedOr returns the matcher list of m, as describeMatcher does, for written, the document's matcher list of m.
+// It returns written when m doesn't describe itself, or when written is text, which a file's mock holds as written:
+// text matches equal, or names a matcher that takes no file.
+func describedOr(m vlatte.Matcher, written any) any {
+	if _, isList := written.([]any); !isList {
+		return written
+	}
+
+	if v, err := describeMatcher(m); err == nil {
+		return v
+	}
+
+	return written
 }
 
 // describeMatchers describes the matchers of key by name, or returns why a mock file can't hold one.
