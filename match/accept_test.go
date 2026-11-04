@@ -98,3 +98,17 @@ func TestAccept_DescribesItselfAsItsMockFileSpec(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `["notacceptable", ["application/json"]]`, string(data))
 }
+
+func TestAccept_AnOfferThatDoesNotParseStillIgnoresCase(t *testing.T) {
+	// A spec may offer a media type Go's parser refuses: it is still offered, and compared as written but for case.
+	m := Accept("Text/Weird; charset", "Text/Weird; charset")
+
+	data, err := m.(vlatte.SelfDescriptive).Describe().MarshalJSON()
+	require.NoError(t, err)
+	require.JSONEq(t, `["accept", "text/weird; charset", ["text/weird; charset"]]`, string(data))
+}
+
+func TestAccept_NamesItselfAfterTheHeaderItReads(t *testing.T) {
+	require.Equal(t, "Accept", Accept("text/csv").Name())
+	require.Equal(t, "NotAcceptable", NotAcceptable("text/csv").Name())
+}

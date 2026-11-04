@@ -954,7 +954,11 @@ func (s spec) accept() (vlatte.Matcher, error) {
 		return nil, err
 	}
 
-	if !slices.ContainsFunc(offers, func(offer string) bool { return strings.EqualFold(offer, mediaType) }) {
+	if len(offers) == 0 {
+		return nil, fmt.Errorf("%s takes 1 media type or more, not 0", s.name)
+	}
+
+	if !slices.Contains(offers, mediaType) {
 		return nil, fmt.Errorf("%s takes a media type among its offers, not %q", s.name, mediaType)
 	}
 
@@ -974,15 +978,11 @@ func (s spec) notAcceptable() (vlatte.Matcher, error) {
 	return match.NotAcceptable(offers...), nil
 }
 
-// offers reads arg as the media types an operation offers: a list of one or more.
+// offers reads arg as the media types an operation offers: a list, as mediaType reads each.
 func (s spec) offers(arg any) ([]string, error) {
 	list, ok := arg.([]any)
 	if !ok {
 		return nil, s.takes("a list of the media types offered", arg, "")
-	}
-
-	if len(list) == 0 {
-		return nil, fmt.Errorf("%s takes 1 media type or more, not 0", s.name)
 	}
 
 	out := make([]string, 0, len(list))
@@ -999,18 +999,20 @@ func (s spec) offers(arg any) ([]string, error) {
 	return out, nil
 }
 
-// mediaType reads arg as a media type, such as application/json.
+// mediaType reads arg as a media type, such as application/json, and returns it as match.Accept compares it: in
+// lowercase, without its parameters.
 func (s spec) mediaType(arg any) (string, error) {
 	mediaType, ok := arg.(string)
 	if !ok {
 		return "", s.takes("media types such as application/json", arg, "")
 	}
 
-	if _, _, err := mime.ParseMediaType(mediaType); err != nil || !strings.Contains(mediaType, "/") {
+	parsed, _, err := mime.ParseMediaType(mediaType)
+	if err != nil || !strings.Contains(parsed, "/") {
 		return "", fmt.Errorf("%s takes media types such as application/json, not %q", s.name, mediaType)
 	}
 
-	return mediaType, nil
+	return parsed, nil
 }
 
 // matchers reads the arguments as matchers: each argument is one, or the only argument is a list of them.

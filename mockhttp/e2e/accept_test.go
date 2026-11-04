@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match"
 	"github.com/caffeine-projects/vlatte/mockhttp"
 )
 
@@ -54,4 +55,27 @@ func TestAccept_TheClientsPreferencePicksTheRepresentation(t *testing.T) {
 			require.Equal(t, tt.mock, res.Header.Get(vlatte.HeaderMatchedMockID))
 		})
 	}
+}
+
+func TestAccept_A406MockWithoutOffersDecodesBack(t *testing.T) {
+	// NotAcceptable without offers matches every Accept that parses: a store that keeps its mock as EncodeMock
+	// describes it builds the same mock back with DecodeMock.
+	m := mockhttp.MustNew(mockhttp.Setup().Silent())
+	t.Cleanup(m.Close)
+
+	mock, err := mockhttp.Getf("/pets").ID("pets.406").
+		Headers("Accept", match.NotAcceptable()).
+		Reply(mockhttp.NewReply().Status(http.StatusNotAcceptable)).
+		Build(m)
+	require.NoError(t, err)
+
+	data, err := mockhttp.EncodeMock(mock, "json")
+	require.NoError(t, err)
+
+	back, err := mockhttp.DecodeMock(m, data, "json")
+	require.NoError(t, err)
+
+	again, err := mockhttp.EncodeMock(back, "json")
+	require.NoError(t, err)
+	require.JSONEq(t, string(data), string(again))
 }
