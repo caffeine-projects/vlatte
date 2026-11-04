@@ -1382,6 +1382,68 @@ func TestProxy_APipeThatAbortsASwitchedConnectionCutsBothSides(t *testing.T) {
 	}
 }
 
+// panickingStateMatcher is a matcher that keeps state, matches every request, and panics moving its state on, once
+// it has said so on moved.
+type panickingStateMatcher struct{ moved chan<- struct{} }
+
+func (panickingStateMatcher) Name() string                          { return "panicking state" }
+func (panickingStateMatcher) Match(vlatte.MatcherArg) (bool, error) { return true, nil }
+
+func (p panickingStateMatcher) SetState() error {
+	close(p.moved)
+	panic("state store down")
+}
+
+func TestProxy_AMatcherThatPanicsAsASwitchCountsLetsTheServerClose(t *testing.T) {
+	// A switch of protocols counts before its connections are piped, and counting moves the state of its matchers on.
+	// A matcher that panics there still leaves the connections to the pipe, which ends them: the server closes, and
+	// the client's connection with it, rather than wait for connections nothing pipes. Wire pipes hold the client's
+	// connection another way.
+	tests := []struct {
+		name string
+		wire bool
+	}{
+		{name: "a hijacked connection"},
+		{name: "a connection the wire pipes hold", wire: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			echo := switchingTarget(t, "echo")
+
+			m := MustNew(Setup().Silent())
+			m.MustStart()
+
+			moved := make(chan struct{})
+			b := Getf("/ws").Matches(panickingStateMatcher{moved: moved})
+			if tc.wire {
+				b = b.WirePipe(wireLogPipe{got: make(chan []byte, 1)})
+			}
+
+			m.MustMock(b.Reply(From(echo.URL)))
+
+			_, br, res := switchThrough(t, m, "/ws")
+			require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
+			<-moved
+
+			closed := make(chan struct{})
+			go func() {
+				defer close(closed)
+				m.Close()
+			}()
+
+			select {
+			case <-closed:
+			case <-time.After(5 * time.Second):
+				require.FailNow(t, "the server waits for the switched connections")
+			}
+
+			_, err := io.ReadAll(br)
+			require.NoError(t, err, "the client's connection closes with the server")
+		})
+	}
+}
+
 func TestProxy_APipeThatFailsAsASideEndsCutsBothSides(t *testing.T) {
 	// A side that ends what it sends ends its pipes: one that fails there, such as to reset once the client is done
 	// sending, cuts both sides, rather than leave the other going on, which waits for an end that doesn't come.

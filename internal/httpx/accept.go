@@ -2,9 +2,13 @@ package httpx
 
 import (
 	"mime"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+// _qvalue is a weight as RFC 9110 writes one: 0 to 1, with up to three decimals.
+var _qvalue = regexp.MustCompile(`^(0(\.[0-9]{0,3})?|1(\.0{0,3})?)$`)
 
 // AcceptRange is a media range of an Accept header, such as application/json, text/* or */*, and its weight.
 type AcceptRange struct {
@@ -21,7 +25,8 @@ type Preference struct {
 	Index       int
 }
 
-// ParseAccept parses the media ranges of Accept headers, in the order they come, leaving out those it can't parse.
+// ParseAccept parses the media ranges of Accept headers, in the order they come, leaving out those it can't parse and
+// those whose weight isn't one RFC 9110 allows, from 0 to 1.
 func ParseAccept(header []string) []AcceptRange {
 	var ranges []AcceptRange
 
@@ -34,9 +39,11 @@ func ParseAccept(header []string) []AcceptRange {
 
 			q := 1.0
 			if v, ok := params["q"]; ok {
-				if q, err = strconv.ParseFloat(v, 64); err != nil {
+				if !_qvalue.MatchString(v) {
 					continue
 				}
+
+				q, _ = strconv.ParseFloat(v, 64)
 			}
 
 			ranges = append(ranges, AcceptRange{MediaType: mediaType, Q: q})

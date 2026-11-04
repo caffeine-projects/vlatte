@@ -2,6 +2,7 @@ package matchbuild
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -168,4 +169,28 @@ func TestMustNew_PanicsOnABadName(t *testing.T) {
 	require.PanicsWithError(t, `matchbuild: matcher name is taken: "equal"`, func() {
 		MustNew(WithMatcher("equal", longerThan))
 	})
+}
+
+func TestRegistry_InDirOpensTheFilesOfACustomMatcherFromItsMockFile(t *testing.T) {
+	// A custom matcher opens the files its arguments name from the mock file's directory, as body_file does, and an
+	// absolute name as it is. Servers share a registry, so the copy for one file must leave the others' alone.
+	var got []string
+	r := MustNew(WithMatcher("open", func(r *Registry, args []any) (vlatte.Matcher, error) {
+		got = append(got, r.Path(args[0].(string)))
+		return match.Anything(), nil
+	}))
+
+	for _, spec := range []struct {
+		r    *Registry
+		name string
+	}{
+		{r.InDir("mocks"), "spec.yaml"},
+		{r.InDir("mocks"), "/specs/spec.yaml"},
+		{r, "spec.yaml"},
+	} {
+		_, err := spec.r.BuildMatcher([]any{"not", []any{"open", spec.name}})
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, []string{filepath.Join("mocks", "spec.yaml"), "/specs/spec.yaml", "spec.yaml"}, got)
 }

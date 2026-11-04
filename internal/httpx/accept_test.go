@@ -18,6 +18,13 @@ func TestParseAccept_KeepsTheOrderAndDropsWhatDoesNotParse(t *testing.T) {
 	}, ranges)
 }
 
+func TestParseAccept_DropsAWeightOutsideZeroToOne(t *testing.T) {
+	// RFC 9110 weighs a range from 0 to 1: NaN would refuse every offer, and 5 or Inf would outrank every other range.
+	ranges := ParseAccept([]string{"a/a;q=NaN, b/b;q=5, c/c;q=Inf, d/d;q=-1, e/e;q=0x1p-1, f/f;q=0.5, g/g;q=0"})
+
+	require.Equal(t, []AcceptRange{{MediaType: "f/f", Q: 0.5}, {MediaType: "g/g", Q: 0}}, ranges)
+}
+
 func TestPrefer_TheMostSpecificRangeDecides(t *testing.T) {
 	// RFC 9110: the most specific range that matches a media type gives its weight, so text/plain;q=0 refuses text/plain
 	// whatever */* allows. Among ranges as specific, the heaviest decides, and among those, the first listed.

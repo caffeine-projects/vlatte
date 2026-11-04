@@ -48,7 +48,7 @@ type mockDoc struct {
 
 // Build implements [vlatte.Builder] for one parsed document or a file's read or parse error.
 func (doc mockDoc) Build(app *Server) (*Mock, error) {
-	def := newMockDef(app.matchers())
+	def := newMockDef(app.matchers().InDir(doc.Dir))
 	def.dir = doc.Dir
 
 	if err := doc.Decode(_mockSchema, &def, def.check); err != nil {
