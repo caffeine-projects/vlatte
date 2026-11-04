@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/caffeine-projects/vlatte"
+	"github.com/caffeine-projects/vlatte/match"
 )
 
 func TestTemplateData_RequestAndServer(t *testing.T) {
@@ -90,6 +91,29 @@ func TestTemplateData_AKeyThatIsNotSetFailsTheRequestAndHasGuardsIt(t *testing.T
 	status, body = get(t, m, "/has")
 	require.Equal(t, http.StatusOK, status, body)
 	require.Equal(t, "set no sett", body)
+}
+
+func TestTemplateData_ExplanationSaysWhyTheMockMatched(t *testing.T) {
+	// A reply can say why its mock matched, such as the rule a request broke, from what its matchers recorded: the
+	// matcher under a not says why it didn't match. The mocks tried before it record their reasons too, which must not
+	// reach the reply.
+	m := MustNew(Setup().Silent())
+	m.MustStart()
+	t.Cleanup(m.Close)
+
+	recorded := make(chan *vlatte.Explanation, 1)
+	m.MustMock(Getf("/role").Priority(1).Query("role", match.StrictEqual("guest")).Reply(OK()))
+	m.MustMock(Getf("/role").Priority(2).Query("role", match.Not(match.StrictEqual("admin"))).
+		Map(func(r *RequestValues, _ *Response) error { recorded <- r.Explanation; return nil }).
+		Reply(Forbidden().BodyTemplate(`{{ range .Explanation.Messages }}{{ . }}{{ end }}`)))
+
+	status, body := get(t, m, "/role?role=user")
+
+	require.Equal(t, http.StatusForbidden, status)
+	require.Equal(t, "StrictEq(admin) Got: user", body)
+	exp := <-recorded
+	require.Equal(t, []string{"StrictEq(admin) Got: user"}, exp.Messages())
+	require.True(t, exp.Root(), "the reply reaches the reasons of the mocks tried before through the parent")
 }
 
 func TestServer_SetDataWhileServing(t *testing.T) {

@@ -36,7 +36,7 @@ func (m *equalXMLMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		}
 	}
 
-	return mismatch(strings.Join([]string{"EqualXML(", m.Expected, ") Got: ", anyconv.Stringify(v)}, ""))
+	return mismatch(arg, strings.Join([]string{"EqualXML(", m.Expected, ") Got: ", anyconv.Stringify(v)}, ""))
 }
 
 func (o xmlOptions) sameName(want, got xmldoc.Name) bool {

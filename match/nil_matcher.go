@@ -16,7 +16,7 @@ func (m *isNilMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch("Nil() Value is not nil")
+	return mismatch(arg, "Nil() Value is not nil")
 }
 
 // Describe implements vlatte.SelfDescriptive.

@@ -31,7 +31,7 @@ func (m *bothMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch("Both() one or both did not match")
+	return mismatch(arg, "Both() one or both did not match")
 }
 
 // Describe implements vlatte.SelfDescriptive.

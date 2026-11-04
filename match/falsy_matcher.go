@@ -17,7 +17,7 @@ func (m *falsyMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch("Falsy() Expected false but it is actually true")
+	return mismatch(arg, "Falsy() Expected false but it is actually true")
 }
 
 // Describe implements vlatte.SelfDescriptive.

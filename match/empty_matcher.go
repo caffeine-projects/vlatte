@@ -25,7 +25,7 @@ func (m *emptyMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"Empty(", anyconv.Stringify(v), ")"}, ""))
+	return mismatch(arg, strings.Join([]string{"Empty(", anyconv.Stringify(v), ")"}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.

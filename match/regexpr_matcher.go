@@ -21,14 +21,14 @@ func (m *regExpMatcher) Name() string { return "RegExp" }
 func (m *regExpMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	txt, ok := value.Text(arg.Value())
 	if !ok {
-		return mismatch("Match() Value is not text")
+		return mismatch(arg, "Match() Value is not text")
 	}
 
 	if m.rg.MatchString(txt) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"Match(", m.Expression, ") Expression did not match. Got: ", txt}, ""))
+	return mismatch(arg, strings.Join([]string{"Match(", m.Expression, ") Expression did not match. Got: ", txt}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.

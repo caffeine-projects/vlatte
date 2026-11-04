@@ -21,7 +21,7 @@ func (m *lowerCaseMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
 	txt, ok := value.Text(v)
 	if !ok {
-		return mismatch("Lower() Value is not text")
+		return mismatch(arg, "Lower() Value is not text")
 	}
 
 	result, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), strings.ToLower(txt)))
@@ -33,7 +33,7 @@ func (m *lowerCaseMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch("Lower() value did not match")
+	return mismatch(arg, "Lower() value did not match")
 }
 
 // Describe implements vlatte.SelfDescriptive.

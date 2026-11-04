@@ -42,6 +42,37 @@ func TestEval(t *testing.T) {
 	evals.Eval(t.Context(), sub, nil)
 }
 
+func TestFind_RecordsWhatTheMatchersOfEachMockSaidTheLastBlockBeingTheMatchedMocks(t *testing.T) {
+	// A mock server hands the reply the reasons its own mock matched: the last block of sub, apart from the reasons of
+	// the mocks tried before it.
+	says := func(message string, ok bool) vlatte.Matcher {
+		return match.Delegate("says", func(arg vlatte.MatcherArg) (bool, error) {
+			arg.Explain().AddMessage(message)
+			return ok, nil
+		})
+	}
+	a, b := newFakeMockWith("a", 0), newFakeMockWith("b", 0)
+	matchers := map[*fakeMock]vlatte.Matcher{a: says("a refused", false), b: says("b took it", true)}
+	seq := vlatte.Mocks[*fakeMock, request](slices.Values([]*fakeMock{a, b}))
+	evals := func(m *fakeMock) vlatte.Evaluators[*fakeMock, request] {
+		return vlatte.Evaluators[*fakeMock, request]{{Matcher: matchers[m]}}
+	}
+
+	sub := vlatte.NewExplanation()
+	found, matched, err := seq.Find(t.Context(), sub, request{}, evals, nil)
+
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.Same(t, b, found)
+	require.Len(t, sub.Children, 2)
+	require.Equal(t, "a", sub.Children[0].Name)
+	require.Equal(t, []string{"a refused"}, sub.Children[0].Messages())
+
+	last := sub.Children[len(sub.Children)-1]
+	require.Equal(t, "b", last.Name)
+	require.Equal(t, []string{"b took it"}, last.Messages())
+}
+
 // turnMatcher is the matcher of a mock that takes a turn, such as a scenario's: it matches while the turn is free,
 // and another request takes the turn between its match and its claim when lose is set.
 type turnMatcher struct {
@@ -147,13 +178,23 @@ func TestFind_LooksAgainWhenAnotherRequestTookTheTurn(t *testing.T) {
 	}
 	seq := vlatte.Mocks[*fakeMock, request](slices.Values([]*fakeMock{first, a}))
 
-	found, matched, err := seq.Find(t.Context(), vlatte.NewExplanation(), in,
+	sub := vlatte.NewExplanation()
+	found, matched, err := seq.Find(t.Context(), sub, in,
 		func(m *fakeMock) vlatte.Evaluators[*fakeMock, request] { return mocks[m] }, nil)
 	require.NoError(t, err)
 	require.True(t, matched)
 	require.Same(t, first, found)
 	require.Equal(t, 2, firstRuns, "Find looked again from the first mock")
 	require.Equal(t, 1, turn.matches)
+
+	// The look again adds its blocks after those of the first: the last is still the mock found's, not a's, which
+	// matched but lost its turn.
+	names := make([]string, 0, len(sub.Children))
+	for _, block := range sub.Children {
+		names = append(names, block.Name)
+	}
+
+	require.Equal(t, []string{"first", "a", "first"}, names)
 }
 
 // brokenClaimer matches, but never takes its turn: it calls claimed, or panics, as it tries.

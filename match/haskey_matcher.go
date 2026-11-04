@@ -21,14 +21,14 @@ func (m *hasKeyMatcher) Name() string { return "HasKey" }
 func (m *hasKeyMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	doc, ok := jsonDoc(arg.Value())
 	if !ok {
-		return mismatch(strings.Join([]string{"HasKey(", m.Path, ") Value is not JSON"}, ""))
+		return mismatch(arg, strings.Join([]string{"HasKey(", m.Path, ") Value is not JSON"}, ""))
 	}
 
 	results := m.Expr.Get(doc)
 
 	size := len(results)
 	if size == 0 || (size == 1 && results[0] == nil) {
-		return mismatch(strings.Join([]string{"HasKey(", m.Path, ") Is not present"}, ""))
+		return mismatch(arg, strings.Join([]string{"HasKey(", m.Path, ") Is not present"}, ""))
 	}
 
 	return success()

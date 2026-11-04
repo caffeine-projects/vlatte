@@ -19,7 +19,7 @@ func (m *someMatcher) Name() string { return "Some" }
 func (m *someMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	items, ok := value.List(arg.Value())
 	if !ok {
-		return mismatch("Some() Value is not a list")
+		return mismatch(arg, "Some() Value is not a list")
 	}
 
 	for _, item := range items {
@@ -33,7 +33,7 @@ func (m *someMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		}
 	}
 
-	return mismatch("Some() no element matched")
+	return mismatch(arg, "Some() no element matched")
 }
 
 // Describe implements vlatte.SelfDescriptive.

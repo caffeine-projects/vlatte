@@ -27,7 +27,7 @@ func (m *equalJSONMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"EqualJSON(", anyconv.Stringify(m.Expected), ") Got: ", anyconv.Stringify(v)}, ""))
+	return mismatch(arg, strings.Join([]string{"EqualJSON(", anyconv.Stringify(m.Expected), ") Got: ", anyconv.Stringify(v)}, ""))
 }
 
 // jsonOf returns what the JSON of v means: text is read as JSON, as a server reads a request body,

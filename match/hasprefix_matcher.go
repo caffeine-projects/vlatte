@@ -20,13 +20,13 @@ func (m *hasPrefixMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
 	txt, ok := value.Text(v)
 	if !ok {
-		return mismatch("HasPrefix() Value is not text")
+		return mismatch(arg, "HasPrefix() Value is not text")
 	}
 	if strings.HasPrefix(txt, m.Prefix) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"HasPrefix(", m.Prefix, ") Prefix is not present. Got: ", txt}, ""))
+	return mismatch(arg, strings.Join([]string{"HasPrefix(", m.Prefix, ") Prefix is not present. Got: ", txt}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.

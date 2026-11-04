@@ -85,6 +85,9 @@ type Mocks[M Mock, TIn any] iter.Seq[M]
 // misses, when not nil, starts over and keeps each mock that didn't match, with the part it stopped at, which
 // [Misses.NearMisses] goes on from.
 //
+// sub gets a block for each mock Find tries, named after its ID, which holds a block for each of its matchers, with
+// what they recorded; the last block is that of the mock Find returns.
+//
 // The mock found has taken the turn of its [Claimer] matcher. When another request took it first, Find looks again from
 // the first mock, as the mocks now match in the state that request left. A retry adds to sub. Find stops with the
 // error of ctx once it ends.
@@ -123,7 +126,7 @@ func (mocks Mocks[M, TIn]) find(
 	for mock := range mocks {
 		e := evals(mock)
 
-		stop, err := e.stop(ctx, sub, in)
+		stop, err := e.stop(ctx, sub.Sub(mock.ID()), in)
 		if err != nil {
 			var nothing M
 			return nothing, false, false, fmt.Errorf("%w: %s: %w", ErrMatching, mock.String(), err)

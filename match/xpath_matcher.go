@@ -35,12 +35,12 @@ func (m *xpathMatcher) Name() string { return "XPath" }
 func (m *xpathMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	text, ok := value.Text(arg.Value())
 	if !ok {
-		return mismatch(strings.Join([]string{"XPath(", m.Expr, ") Value is not text"}, ""))
+		return mismatch(arg, strings.Join([]string{"XPath(", m.Expr, ") Value is not text"}, ""))
 	}
 
 	doc, err := xmldoc.Parse([]byte(text), false)
 	if err != nil {
-		return mismatch(strings.Join([]string{"XPath(", m.Expr, ") Value is not XML"}, ""))
+		return mismatch(arg, strings.Join([]string{"XPath(", m.Expr, ") Value is not XML"}, ""))
 	}
 
 	ok, err = m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), m.evaluate(doc)))
@@ -52,7 +52,7 @@ func (m *xpathMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"XPath(", m.Expr, ") value did not match"}, ""))
+	return mismatch(arg, strings.Join([]string{"XPath(", m.Expr, ") value did not match"}, ""))
 }
 
 // nodeValue returns what XPath gives the inner matcher for a node it selects: an element as its XML, and any other

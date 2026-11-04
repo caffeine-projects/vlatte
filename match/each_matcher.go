@@ -25,7 +25,7 @@ func (m *eachMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	if !ok {
 		members, isObject := value.Object(v)
 		if !isObject {
-			return mismatch("Each() Value is not a list or an object")
+			return mismatch(arg, "Each() Value is not a list or an object")
 		}
 
 		items = slices.Collect(maps.Values(members))
@@ -38,7 +38,7 @@ func (m *eachMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		}
 
 		if !ok {
-			return mismatch("Each() item did not match")
+			return mismatch(arg, "Each() item did not match")
 		}
 	}
 

@@ -44,6 +44,25 @@ func (e *Explanation) AddMessage(message string) {
 	e.Items = append(e.Items, ExplanationItem{Message: message})
 }
 
+// Messages returns the messages of e, then those of each of its blocks, depth first. A template ranges over them,
+// as it can't walk the blocks itself.
+func (e *Explanation) Messages() []string {
+	if e == nil {
+		return nil
+	}
+
+	var out []string
+	for _, item := range e.Items {
+		out = append(out, item.Message)
+	}
+
+	for _, child := range e.Children {
+		out = append(out, child.Messages()...)
+	}
+
+	return out
+}
+
 // ExplanationItem is a message recorded in an [Explanation].
 type ExplanationItem struct {
 	Message string

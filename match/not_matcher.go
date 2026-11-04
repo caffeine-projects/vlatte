@@ -25,7 +25,7 @@ func (m *notMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch("Not() inner matcher matched")
+	return mismatch(arg, "Not() inner matcher matched")
 }
 
 // Describe implements vlatte.SelfDescriptive.

@@ -67,3 +67,16 @@ func TestExplanation_Sub(t *testing.T) {
 	require.Equal(t, []vlatte.ExplanationItem{{Message: "why"}}, child.Items)
 	require.Empty(t, root.Items, "a message belongs to the block it was added to")
 }
+
+func TestExplanation_MessagesListsABlockThenEachOfItsBlocksDepthFirst(t *testing.T) {
+	// A template can't walk the blocks, so Messages is how it lists every reason, in the order of the blocks.
+	root := vlatte.NewExplanation()
+	first := root.Sub("first")
+	first.Sub("inner").AddMessage("inner")
+	first.AddMessage("first")
+	root.Sub("second").AddMessage("second")
+	root.AddMessage("root")
+
+	require.Equal(t, []string{"root", "first", "inner", "second"}, root.Messages())
+	require.Nil(t, (*vlatte.Explanation)(nil).Messages())
+}

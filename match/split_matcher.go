@@ -22,7 +22,7 @@ func (m *splitMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 	v := arg.Value()
 	txt, ok := value.Text(v)
 	if !ok {
-		return mismatch("Split() Value is not text")
+		return mismatch(arg, "Split() Value is not text")
 	}
 
 	result, err := m.Matcher.Match(vlatte.NewMatcherArg(arg.Context(), arg.Explain(), strings.Split(txt, m.Separator)))
@@ -34,7 +34,7 @@ func (m *splitMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"Split(", m.Separator, ")"}, ""))
+	return mismatch(arg, strings.Join([]string{"Split(", m.Separator, ")"}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.

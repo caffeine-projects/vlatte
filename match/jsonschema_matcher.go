@@ -34,7 +34,7 @@ func (m *jsonSchemaMatcher) Match(arg vlatte.MatcherArg) (bool, error) {
 		return success()
 	}
 
-	return mismatch(strings.Join([]string{"JSONSchema() Got: ", anyconv.Stringify(v)}, ""))
+	return mismatch(arg, strings.Join([]string{"JSONSchema() Got: ", anyconv.Stringify(v)}, ""))
 }
 
 // Describe implements vlatte.SelfDescriptive.
