@@ -306,6 +306,15 @@ func (m fileSaysMatcher) Describe() vlatte.Descriptor {
 	return vlatte.DescribeMultiArgs("file-says", m.path)
 }
 
+// brokenMatcher matches every call, and fails to describe itself.
+type brokenMatcher struct{}
+
+func (brokenMatcher) Name() string                          { return "broken" }
+func (brokenMatcher) Match(vlatte.MatcherArg) (bool, error) { return true, nil }
+func (brokenMatcher) Describe() vlatte.Descriptor {
+	return vlatte.DescribeFail("broken", errors.New("broken: no description"))
+}
+
 // fileSays builds [file-says, name]: text equal to the content of the file name, which opens from the directory of
 // the mock file, as a custom matcher of a spec file would.
 func fileSays(r *matchbuild.Registry, args []any) (vlatte.Matcher, error) {
@@ -351,31 +360,59 @@ response: {message: {message: matched}}
 func TestEncodeMock_AMockFilesMatchersDescribeThemselves(t *testing.T) {
 	// A custom matcher names its file absolute in its description: a mock of a file, described, loads back from
 	// another directory, such as the admin API's, rather than look for the file where the server runs. Its matchers
-	// describe themselves wherever the file has them: metadata, fields, the whole call and the rules of a bidi reply.
+	// describe themselves wherever the file has them: metadata, fields, the body, the whole call and the rules of a
+	// bidi reply. A matcher whose description fails keeps the file's list, and the rest stays as written.
 	dir := t.TempDir()
 	word := writeFile(t, dir, "word.txt", "hello")
-	greetings := writeFile(t, dir, "greetings.mock.yaml", `
+	says := []any{"file-says", word}
+
+	tests := []struct {
+		file string
+		want map[string]any
+	}{
+		{
+			file: `
 request:
   method: Greetings
   header: {x-word: [file-says, word.txt]}
   fields: {message: [file-says, word.txt]}
-  custom: [[file-says, word.txt]]
+  body: [file-says, word.txt]
+  custom: [[file-says, word.txt], [broken]]
 response: {message: {message: matched}}
-`)
-	chat := writeFile(t, dir, "chat.mock.yaml", `
+`,
+			want: map[string]any{
+				"request.header.x-word":  says,
+				"request.fields.message": says,
+				"request.body":           says,
+				"request.custom[0]":      says,
+				"request.custom[1]":      []any{"broken"},
+			},
+		},
+		{
+			file: `
 request: {method: Chat}
 bidi:
   on: [{when: [field, message, [file-says, word.txt]], response: {message: {message: matched}}}]
-`)
+`,
+			want: map[string]any{"bidi.on[0].when[2]": says},
+		},
+		{
+			file: `
+request: {method: Chat}
+bidi: {otherwise: {message: {message: quiet}}}
+`,
+			want: map[string]any{"bidi": map[string]any{"otherwise": map[string]any{"message": map[string]any{"message": "quiet"}}}},
+		},
+	}
 
-	m := fileServer(t, Setup().Matchers(matchbuild.MustNew(matchbuild.WithMatcher("file-says", fileSays))))
-	says := []any{"file-says", word}
+	broken := func(*matchbuild.Registry, []any) (vlatte.Matcher, error) { return brokenMatcher{}, nil }
+	m := fileServer(t, Setup().Matchers(matchbuild.MustNew(
+		matchbuild.WithMatcher("file-says", fileSays),
+		matchbuild.WithMatcher("broken", broken),
+	)))
 
-	for path, at := range map[string][]string{
-		greetings: {"request.header.x-word", "request.fields.message", "request.custom[0]"},
-		chat:      {"bidi.on[0].when[2]"},
-	} {
-		built, err := FromFile(path).Build(m)
+	for i, tt := range tests {
+		built, err := FromFile(writeFile(t, dir, fmt.Sprintf("%d.mock.yaml", i), tt.file)).Build(m)
 		require.NoError(t, err)
 
 		data, err := EncodeMock(built, "json")
@@ -384,8 +421,8 @@ bidi:
 		var doc map[string]any
 		require.NoError(t, json.Unmarshal(data, &doc))
 
-		for _, key := range at {
-			require.Equal(t, says, valueAt(t, doc, key), key)
+		for key, want := range tt.want {
+			require.Equal(t, want, valueAt(t, doc, key), key)
 		}
 
 		_, err = DecodeMock(m, data, "json")

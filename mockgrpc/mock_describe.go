@@ -56,7 +56,7 @@ type mockDescription struct {
 // Describe implements vlatte.SelfDescriptive: the mock as a mock file writes it, which the admin API returns and saves.
 // A mock read from a document is described by it, with its ID, and with each matcher list as its matcher describes
 // itself, such as a custom matcher that names its file absolute, so the description loads back from another directory;
-// text, and the list of a matcher that doesn't describe itself, stay as written. A mock built in Go is described whole,
+// text, and the list of a matcher whose description fails, stay as written. A mock built in Go is described whole,
 // or not at all: a part no mock file can hold, such as a Func, Echo or Shared reply, a CallMatches matcher, a matcher
 // that doesn't describe itself, a callback or a [vlatte.DelayFunc] delay, fails encoding the description, with an error
 // that names it, so the admin API never shows a mock that loads back matching more calls, answering differently or
@@ -295,7 +295,7 @@ func (r describedRequest) over(req map[string]any) map[string]any {
 		req["body"] = describedOr(r.body, body)
 	}
 
-	if custom, ok := req["custom"].([]any); ok && len(custom) == len(r.custom) {
+	if custom, ok := req["custom"].([]any); ok {
 		custom = slices.Clone(custom)
 		for i, m := range r.custom {
 			custom[i] = describedOr(m, custom[i])
@@ -311,7 +311,7 @@ func (r describedRequest) over(req map[string]any) map[string]any {
 // from it, described as its matcher describes itself.
 func (b *BidiReply) rulesOver(bidi map[string]any) map[string]any {
 	rules, ok := bidi["on"].([]any)
-	if !ok || len(rules) != len(b.rules) {
+	if !ok {
 		return bidi
 	}
 
@@ -332,7 +332,7 @@ func (b *BidiReply) rulesOver(bidi map[string]any) map[string]any {
 }
 
 // describedOr returns the matcher list of m, as describeMatcher does, for written, the document's matcher list of m.
-// It returns written when m doesn't describe itself, or when written is text, which a file's mock holds as written:
+// It returns written when m's description fails, or when written is text, which a file's mock holds as written:
 // text matches equal, or names a matcher that takes no file.
 func describedOr(m vlatte.Matcher, written any) any {
 	if _, isList := written.([]any); !isList {
