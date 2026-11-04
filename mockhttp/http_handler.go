@@ -708,7 +708,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		h.debugHeader(rw, vlatte.HeaderProxied, "true")
 
-		pipe, end, ok := h.switchProtocols(rw, reqValues, res, mock, wire)
+		pipe, ok := h.switchProtocols(rw, reqValues, res, mock, wire)
 		if !ok {
 			// A wire stage that cut the 101 cut the switch: the mock answered, so the call counts.
 			if cut = wire.aborted(); cut == nil {
@@ -721,25 +721,24 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// The call counts before the pipe starts, so a client that gets a byte past the 101, or the cut of a pipe,
 		// sees it counted, as a stream's does. The connections are then piped at once, as long as both sides want,
 		// while the callbacks and events run, and the call is logged. The handler returns once the pipe is done.
-		// Counting runs the code of the mock's matchers: a panic there ends the connections, which nothing pipes yet.
-		func() {
-			defer func() {
-				if !counted {
-					end()
-				}
-			}()
-
-			h.served(mock, reqValues)
-			counted = true
-		}()
-
+		// Counting runs the code of the mock's matchers, which may panic: the pipe starts either way, and ends the
+		// connections.
 		piped := make(chan struct{})
+		count := make(chan struct{})
 		go func() {
 			defer close(piped)
+			<-count
 			pipe()
 		}()
 
 		defer func() { <-piped }()
+
+		func() {
+			defer close(count)
+			h.served(mock, reqValues)
+		}()
+
+		counted = true
 	case res != nil:
 		// A streamed body, such as a proxy's, is read whole for mappers.
 		if len(mock.spec.mappers) > 0 && len(res.Body) == 0 {
@@ -880,7 +879,7 @@ func (h *mockHandler) serveUpstream(w http.ResponseWriter, r *RequestValues, ups
 	h.debugHeader(w, vlatte.HeaderProxied, "true")
 
 	if res.upgrade != nil {
-		pipe, _, ok := h.switchProtocols(w, r, res, nil, nil)
+		pipe, ok := h.switchProtocols(w, r, res, nil, nil)
 		if !ok {
 			return
 		}
@@ -897,15 +896,14 @@ func (h *mockHandler) serveUpstream(w http.ResponseWriter, r *RequestValues, ups
 
 // switchProtocols answers with res, the 101 of a target that switched protocols, on the client's connection, which it
 // takes over, with the headers set on w, such as the debug headers. It returns the pipe between the client's
-// connection and the target's, to run once the call is logged; a func that closes both connections, to run in place of
-// the pipe when the pipe can't run; and false when it failed: before it took the connection over, the client gets the
-// server's answer to the failure, and after, the log warns. It returns false too when a stage of wire cut the 101,
-// which leaves wire to finish with the cut.
+// connection and the target's, to run once the call is logged, and false when it failed: before it took the
+// connection over, the client gets the server's answer to the failure, and after, the log warns. It returns false
+// too when a stage of wire cut the 101, which leaves wire to finish with the cut.
 //
 // mock, when not nil, is the mock that answered: its pipes pass on what the target sends, and its upstream pipes what
 // the client sends. wire, when not nil, holds the client's connection already: its pipes go on with the bytes of the
 // connection, the 101 included, after the pipes of the mock.
-func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, res *Response, mock *Mock, wire *wireResponseWriter) (func(), func(), bool) {
+func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, res *Response, mock *Mock, wire *wireResponseWriter) (func(), bool) {
 	upstream := res.upgrade
 
 	header := w.Header().Clone()
@@ -933,7 +931,7 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 				h.lifecycle.OnWarning(r, fmt.Errorf("http: answering the switch of protocols: %w", err))
 			}
 
-			return nil, nil, false
+			return nil, false
 		}
 
 		var (
@@ -948,7 +946,7 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 			upstream.Close()
 			closeWire(nil)
 
-			return nil, nil, false
+			return nil, false
 		}
 
 		// What goes to the client ends with the wire pipes, and an abort of theirs cuts it: its flow derives from
@@ -962,7 +960,7 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 	} else {
 		var ok bool
 		if client, ctx, toClient, done, ok = h.switchOnHijack(w, r, upstream, head.Bytes(), mock); !ok {
-			return nil, nil, false
+			return nil, false
 		}
 	}
 
@@ -980,7 +978,7 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 		}
 
 		done()
-	}, done, true
+	}, true
 }
 
 // switchOnHijack takes the client's connection over from w and answers head, the 101, on it, as

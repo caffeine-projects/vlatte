@@ -1382,17 +1382,23 @@ func TestProxy_APipeThatAbortsASwitchedConnectionCutsBothSides(t *testing.T) {
 	}
 }
 
-// panickingStateMatcher is a matcher that keeps state, matches every request, and panics moving its state on.
-type panickingStateMatcher struct{}
+// panickingStateMatcher is a matcher that keeps state, matches every request, and panics moving its state on, once
+// it has said so on moved.
+type panickingStateMatcher struct{ moved chan<- struct{} }
 
 func (panickingStateMatcher) Name() string                          { return "panicking state" }
 func (panickingStateMatcher) Match(vlatte.MatcherArg) (bool, error) { return true, nil }
-func (panickingStateMatcher) SetState() error                       { panic("state store down") }
 
-func TestProxy_AMatcherThatPanicsAsASwitchCountsClosesTheSwitch(t *testing.T) {
+func (p panickingStateMatcher) SetState() error {
+	close(p.moved)
+	panic("state store down")
+}
+
+func TestProxy_AMatcherThatPanicsAsASwitchCountsLetsTheServerClose(t *testing.T) {
 	// A switch of protocols counts before its connections are piped, and counting moves the state of its matchers on.
-	// A matcher that panics there ends the request: the client's connection closes, and so does the server, rather
-	// than wait for connections nothing pipes. Wire pipes hold the client's connection another way.
+	// A matcher that panics there still leaves the connections to the pipe, which ends them: the server closes, and
+	// the client's connection with it, rather than wait for connections nothing pipes. Wire pipes hold the client's
+	// connection another way.
 	tests := []struct {
 		name string
 		wire bool
@@ -1408,7 +1414,8 @@ func TestProxy_AMatcherThatPanicsAsASwitchCountsClosesTheSwitch(t *testing.T) {
 			m := MustNew(Setup().Silent())
 			m.MustStart()
 
-			b := Getf("/ws").Matches(panickingStateMatcher{})
+			moved := make(chan struct{})
+			b := Getf("/ws").Matches(panickingStateMatcher{moved: moved})
 			if tc.wire {
 				b = b.WirePipe(wireLogPipe{got: make(chan []byte, 1)})
 			}
@@ -1417,9 +1424,7 @@ func TestProxy_AMatcherThatPanicsAsASwitchCountsClosesTheSwitch(t *testing.T) {
 
 			_, br, res := switchThrough(t, m, "/ws")
 			require.Equal(t, http.StatusSwitchingProtocols, res.StatusCode)
-
-			_, err := io.ReadAll(br)
-			require.NoError(t, err, "the client's connection closes")
+			<-moved
 
 			closed := make(chan struct{})
 			go func() {
@@ -1432,6 +1437,9 @@ func TestProxy_AMatcherThatPanicsAsASwitchCountsClosesTheSwitch(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				require.FailNow(t, "the server waits for the switched connections")
 			}
+
+			_, err := io.ReadAll(br)
+			require.NoError(t, err, "the client's connection closes with the server")
 		})
 	}
 }
