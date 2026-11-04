@@ -950,12 +950,10 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 			closeWire(nil)
 		}
 	} else {
-		side, ok := h.switchOnHijack(w, r, upstream, head.Bytes(), mock)
-		if !ok {
+		var ok bool
+		if client, ctx, toClient, done, ok = h.switchOnHijack(w, r, upstream, head.Bytes(), mock); !ok {
 			return nil, false
 		}
-
-		client, ctx, toClient, done = side.conn, side.ctx, side.toClient, side.done
 	}
 
 	var toUpstream *vlatte.Flow
@@ -975,24 +973,24 @@ func (h *mockHandler) switchProtocols(w http.ResponseWriter, r *RequestValues, r
 	}, true
 }
 
-// switchedClient is the client's side of a connection that switched protocols.
-type switchedClient struct {
-	conn     net.Conn
-	ctx      context.Context // ends what the client sends: the context of the flow to the target
-	toClient *vlatte.Flow    // what goes to the client, through the pipes of the mock, or nil to write conn
-	done     func()          // ends both connections
-}
-
 // switchOnHijack takes the client's connection over from w and answers head, the 101, on it, as
-// [mockHandler.switchProtocols] has it. It reports false when it failed, upstream closed.
-func (h *mockHandler) switchOnHijack(w http.ResponseWriter, r *RequestValues, upstream io.ReadWriteCloser, head []byte, mock *Mock) (switchedClient, bool) {
+// [mockHandler.switchProtocols] has it. It returns the client's connection; ctx, which ends what the client sends, the
+// context of the flow to the target; toClient, what goes to the client through the pipes of the mock, or nil to write
+// the connection; and done, which ends both connections. It reports false when it failed, upstream closed.
+func (h *mockHandler) switchOnHijack(
+	w http.ResponseWriter,
+	r *RequestValues,
+	upstream io.ReadWriteCloser,
+	head []byte,
+	mock *Mock,
+) (client net.Conn, ctx context.Context, toClient *vlatte.Flow, done func(), ok bool) {
 	client, err := hijack(w)
 	if err != nil {
 		upstream.Close()
 		h.onError(w, r, vlatte.FailureReply, fmt.Errorf("http: switching protocols needs an HTTP/1.1 connection, "+
 			"and a response writer that can hijack it, or that unwraps to one that can: %w", err))
 
-		return switchedClient{}, false
+		return nil, nil, nil, nil, false
 	}
 
 	// The server is closing.
@@ -1000,13 +998,13 @@ func (h *mockHandler) switchOnHijack(w http.ResponseWriter, r *RequestValues, up
 		client.Close()
 		upstream.Close()
 
-		return switchedClient{}, false
+		return nil, nil, nil, nil, false
 	}
 
 	// A read of the client's connection, now the mock's, can end the request's context.
 	ctx, release := h.app.tunnels.bind(context.WithoutCancel(r.RawRequest.Context()))
 
-	done := func() {
+	done = func() {
 		defer release()
 
 		h.app.tunnels.remove(client, upstream)
@@ -1018,15 +1016,14 @@ func (h *mockHandler) switchOnHijack(w http.ResponseWriter, r *RequestValues, up
 		done()
 		h.lifecycle.OnWarning(r, fmt.Errorf("http: answering the switch of protocols: %w", err))
 
-		return switchedClient{}, false
+		return nil, nil, nil, nil, false
 	}
 
-	var toClient *vlatte.Flow
 	if mock != nil && len(mock.Pipes()) > 0 {
 		toClient = vlatte.NewFlow(ctx, &vlatte.Sink{W: client}, mock.Pipes())
 	}
 
-	return switchedClient{conn: client, ctx: ctx, toClient: toClient, done: done}, true
+	return client, ctx, toClient, done, true
 }
 
 // connect opens a tunnel to the host of r, a CONNECT no mock matched, and pipes the client's connection to it until
