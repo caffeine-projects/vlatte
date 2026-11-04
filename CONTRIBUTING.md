@@ -48,9 +48,15 @@ make docs-check-links
 make docs-check-external-links
 ```
 
-Internal checks run offline on the built site and repository Markdown, including heading anchors, images and downloads. Links to `https://vlatte.dev/` resolve against the local build. CI runs these checks on pull requests and pushes to `main` before publishing the site.
+Internal checks run offline on the built site and repository Markdown, including heading anchors, images and downloads. Links to `https://vlatte.dev/` resolve against the local build. CI runs these checks on pull requests and pushes to `main`, and before publishing the site.
 
 External checks run weekly and on manual runs of the **External Links** workflow, so third-party outages do not block pull requests. They check HTTP and HTTPS links without validating remote heading anchors. Both checks use `lychee.toml`; code examples and private network addresses are excluded. Any exception for a public URL must name the specific URL and explain why it cannot be checked.
+
+Publishing is manual. To publish the site, run the `Docs` workflow on `main`, from the Actions tab or with:
+
+```sh
+gh workflow run docs.yml --ref main
+```
 
 ## What reviewers look for
 
@@ -111,6 +117,11 @@ For maintainers. Pushing a tag that starts with `v` runs [`.github/workflows/rel
 
 3. Approve the `release` environment when its jobs ask.
 4. Check the release notes and, for a stable release, the new commit in [caffeine-projects/homebrew-tap](https://github.com/caffeine-projects/homebrew-tap).
+5. For a stable release, publish the site, so it shows the new version pins:
+
+   ```sh
+   gh workflow run docs.yml --ref main
+   ```
 
 For a stable release, the `goreleaser` job stops before it creates the GitHub release when `HOMEBREW_TAP_GITHUB_TOKEN` has expired. Replace the token in the `release` environment and re-run the failed jobs.
 
