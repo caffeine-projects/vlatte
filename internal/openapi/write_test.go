@@ -146,6 +146,21 @@ func TestWrite_FailsWithoutWritingWhatItCannot(t *testing.T) {
 	require.Len(t, entries, 2, "only the file and the folder in the way")
 }
 
+func TestWrite_ReportsWhatItWroteBeforeAWriteFailed(t *testing.T) {
+	// A write can fail once others are done, such as into a folder that doesn't exist: the files written stay, and
+	// the report names them, so a rerun knows them as its own.
+	dir := t.TempDir()
+	files := []openapi.File{
+		{Name: "a.mock.yaml", Mocks: []openapi.Mock{{ID: "a", Reply: openapi.Reply{Status: 200}}}},
+		{Name: filepath.Join("missing", "b.mock.yaml"), Mocks: []openapi.Mock{{ID: "b", Reply: openapi.Reply{Status: 200}}}},
+	}
+
+	report, err := openapi.Write(dir, "Pets", files)
+	require.ErrorContains(t, err, "openapi: writing "+filepath.Join("missing", "b.mock.yaml")+": ")
+	require.Equal(t, &openapi.Report{Written: []string{"a.mock.yaml"}}, report)
+	require.FileExists(t, filepath.Join(dir, "a.mock.yaml"))
+}
+
 func TestWrite_NeverOverwritesAFileItDidNotWriteFromTheSpec(t *testing.T) {
 	// A mock written by hand, or generated from another spec into the same folder, is someone else's work.
 	dir := t.TempDir()
