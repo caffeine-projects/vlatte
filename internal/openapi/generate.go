@@ -202,7 +202,25 @@ func (g *generator) operation(op Operation) {
 			m.Priority = priority(_bandDisabled, route)
 		}
 
-		g.first(m, *notFound, http.StatusNotFound)
+		g.fallback(m, g.withoutRanges(m, *notFound), http.StatusNotFound)
+	}
+}
+
+// fallback adds the mocks of response r answering with status as [generator.contents] does, for a response that
+// answers whatever the client accepts, such as a 404: a client whose Accept takes none of its media types gets the
+// first, and a response of one media type takes any Accept.
+func (g *generator) fallback(m Mock, r Response, status int) {
+	start := len(g.mocks)
+	g.contents(m, r, status, false)
+
+	// The first mock contents added is that of the first media type: without extras, each media type adds one.
+	first := &g.mocks[start]
+	switch {
+	case len(r.Content) == 1:
+		first.Request.Accept = nil
+	case first.Request.Accept != nil:
+		offers := first.Request.Accept[2]
+		first.Request.Accept = []any{"any", first.Request.Accept, []any{"notacceptable", offers}}
 	}
 }
 
@@ -322,7 +340,7 @@ func isRange(mediaType string) bool {
 }
 
 // notAcceptable adds the 406 mock of an operation whose primary response r offers media types: the operation's own
-// 406 response, or text listing the offers.
+// 406 response, in its first media type only, as its client accepts none of r's, or text listing the offers.
 func (g *generator) notAcceptable(base Mock, r Response, declared *Response) {
 	offers := make([]any, len(r.Content))
 	names := make([]string, len(r.Content))
@@ -510,18 +528,25 @@ func pathExamples(op Operation) []pathExample {
 
 	out := make([]pathExample, n)
 	for i := range n {
-		path := op.Path
+		values := make(map[string]string, len(op.PathParams))
 
 		for _, p := range op.PathParams {
 			ex := p.Examples[min(i, len(p.Examples)-1)]
-			path = strings.ReplaceAll(path, "{"+p.Name+"}", pathValue(p, ex.Value))
+			values["{"+p.Name+"}"] = pathValue(p, ex.Value)
 
 			if len(op.PathParams) == 1 {
 				out[i].name = ex.Name
 			}
 		}
 
-		out[i].path = path
+		// One pass over the template: a value that holds {name} is a value, not a parameter to fill.
+		out[i].path = _param.ReplaceAllStringFunc(op.Path, func(param string) string {
+			if v, ok := values[param]; ok {
+				return v
+			}
+
+			return param
+		})
 	}
 
 	return out

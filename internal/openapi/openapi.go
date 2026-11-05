@@ -10,7 +10,8 @@
 //   - 200 + 1000s: a mock for each example of the path parameters, on the concrete path.
 //   - 300 + 1000s: the main success response, one mock for each media type it offers.
 //   - 400 + 1000s: a 406 for a request whose Accept takes none of those media types.
-//   - 500 + 1000s: a 404, when the spec declares one and the path parameters have examples.
+//   - 500 + 1000s: a 404, when the spec declares one and the path parameters have examples, one mock for each media
+//     type it offers. A client whose Accept takes none of them gets the first.
 //
 // s is the number of templated segments of the path: every mock of /pets/mine answers before those of /pets/{id},
 // as OpenAPI matches a literal path first. The statuses that a request's contract decides, 400, 401, 405, 415 and

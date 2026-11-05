@@ -309,6 +309,55 @@ paths:
 	require.Equal(t, "pets._id.get.404", mock)
 }
 
+func TestOpenAPI_A404AnswersInTheMediaTypeTheClientPrefers(t *testing.T) {
+	// An unknown id is a 404 in the representation the client reads, as the success would have been.
+	spec := `
+openapi: 3.1.0
+info: {title: Not found negotiation, version: "1"}
+paths:
+  /pets/{id}:
+    get:
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}, example: "1"}
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json: {example: {id: "1"}}
+            application/xml: {example: <pet/>}
+        "404":
+          description: Not found
+          content:
+            application/json: {example: {error: missing}}
+            application/xml: {example: <missing/>}
+`
+	m := serveSpec(t, spec)
+
+	tests := []struct {
+		accept string
+		status int
+		mock   string
+		body   string
+	}{
+		{accept: "application/json", status: http.StatusNotFound, mock: "pets._id.get.404.json", body: `{"error":"missing"}`},
+		{accept: "application/xml", status: http.StatusNotFound, mock: "pets._id.get.404.xml", body: "<missing/>"},
+		{accept: "", status: http.StatusNotFound, mock: "pets._id.get.404.json", body: `{"error":"missing"}`},
+		{accept: "text/csv", status: http.StatusNotAcceptable, mock: "pets._id.get.406"},
+	}
+
+	for _, tt := range tests {
+		t.Run("Accept "+tt.accept, func(t *testing.T) {
+			status, mock, body := call(t, m, http.MethodGet, "/pets/2", tt.accept)
+			require.Equal(t, tt.status, status, body)
+			require.Equal(t, tt.mock, mock)
+
+			if tt.body != "" {
+				require.Equal(t, tt.body, strings.TrimSpace(body))
+			}
+		})
+	}
+}
+
 // serveSpec serves the mocks the generator writes of spec, an OpenAPI document.
 func serveSpec(t *testing.T, spec string) *mockhttp.Server {
 	t.Helper()

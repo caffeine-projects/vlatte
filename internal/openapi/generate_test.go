@@ -207,6 +207,78 @@ func TestGenerate_WritesAPathExampleInTheStyleOfItsParameter(t *testing.T) {
 	}
 }
 
+func TestGenerate_A404AnswersInTheMediaTypeTheClientPrefers(t *testing.T) {
+	// A 404 is a response like the others: a client gets it in the media type its Accept prefers, and one whose
+	// Accept takes none of them still learns the id is unknown, in the first.
+	mocks, warnings := generateWithWarnings(t, &openapi.Document{Operations: []openapi.Operation{{
+		Method: "GET", Path: "/pets/{id}",
+		PathParams: []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{{Value: "1"}}}},
+		Responses: []openapi.Response{
+			{Status: "200", Content: []openapi.Content{
+				{MediaType: "application/json", Examples: []openapi.Example{{Value: map[string]any{"id": "1"}}}},
+				{MediaType: "application/xml", Examples: []openapi.Example{{Value: "<pet/>"}}},
+			}},
+			{Status: "404", Content: []openapi.Content{
+				{MediaType: "*/*", Examples: []openapi.Example{{Value: "missing"}}},
+				{MediaType: "application/json", Examples: []openapi.Example{{Value: map[string]any{"error": "missing"}}}},
+				{MediaType: "application/xml", Examples: []openapi.Example{{Value: "<missing/>"}}},
+			}},
+		},
+	}}})
+
+	offers := []any{"application/json", "application/xml"}
+
+	require.Equal(t, []string{
+		"pets._id.get.200.json.example", "pets._id.get.200.xml.example", "pets._id.get.404.json", "pets._id.get.404.xml", "pets._id.get.406",
+	}, ids(mocks))
+	require.Equal(t, []string{"GET /pets/{id} 404: media range */*: left out: the mocks answer application/json"}, warnings)
+
+	json := mocks["pets._id.get.404.json"]
+	require.Equal(t, []any{"any", []any{"accept", "application/json", offers}, []any{"notacceptable", offers}}, json.Request.Accept)
+	require.Equal(t, map[string]any{"error": "missing"}, json.Reply.Body)
+	require.Equal(t, 1500, json.Priority)
+
+	xml := mocks["pets._id.get.404.xml"]
+	require.Equal(t, []any{"accept", "application/xml", offers}, xml.Request.Accept)
+	require.Equal(t, "<missing/>", xml.Reply.Body)
+	require.Equal(t, "/pets/{id}", xml.Request.PathTemplate)
+	require.Equal(t, 1500, xml.Priority)
+}
+
+func TestGenerate_A404OfOneMediaTypeTakesAnyAccept(t *testing.T) {
+	// With one representation, there is nothing for Accept to choose.
+	mocks := generate(t, &openapi.Document{Operations: []openapi.Operation{{
+		Method: "GET", Path: "/pets/{id}",
+		PathParams: []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{{Value: "1"}}}},
+		Responses: []openapi.Response{
+			{Status: "200"},
+			{Status: "404", Content: []openapi.Content{{MediaType: "application/json", Examples: []openapi.Example{{Value: "missing"}}}}},
+		},
+	}}})
+
+	require.Nil(t, mocks["pets._id.get.404.json"].Request.Accept)
+}
+
+func TestGenerate_FillsEachPathParameterOnceFromTheTemplate(t *testing.T) {
+	// An example is a value: a { in it is a character the client writes, not a parameter to fill.
+	mocks := generate(t, &openapi.Document{Operations: []openapi.Operation{{
+		Method: "GET", Path: "/p/{a}/{b}",
+		PathParams: []openapi.Parameter{
+			{Name: "a", Style: "simple", Examples: []openapi.Example{{Value: "{b}"}}},
+			{Name: "b", Style: "simple", Examples: []openapi.Example{{Value: "1"}}},
+		},
+		Responses: []openapi.Response{{Status: "200"}},
+	}, {
+		// A placeholder the operation declares no parameter for stays as the spec writes it.
+		Method: "GET", Path: "/q/{a}/{c}",
+		PathParams: []openapi.Parameter{{Name: "a", Style: "simple", Examples: []openapi.Example{{Value: "1"}}}},
+		Responses:  []openapi.Response{{Status: "200"}},
+	}}})
+
+	require.Equal(t, []any{"equal", "/p/{b}/1"}, mocks["p._a._b.get.200.example"].Request.Path)
+	require.Equal(t, []any{"equal", "/q/1/{c}"}, mocks["q._a._c.get.200.example"].Request.Path)
+}
+
 func TestGenerate_NamedPathExamplesGetAMockEach(t *testing.T) {
 	mocks := generate(t, &openapi.Document{Operations: []openapi.Operation{{
 		Method: "GET", Path: "/pets/{id}",
