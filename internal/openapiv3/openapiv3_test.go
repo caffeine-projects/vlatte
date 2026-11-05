@@ -63,8 +63,7 @@ components:
 	pet := map[string]any{"$ref": "#/$defs/Pet"}
 
 	require.Equal(t, &openapi.Document{
-		Title:    "Pets",
-		BasePath: "/v1",
+		Title: "Pets",
 		Defs: map[string]any{"Pet": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -74,8 +73,8 @@ components:
 			"discriminator": map[string]any{"propertyName": "name", "mapping": map[string]any{"rex": "#/$defs/Pet"}},
 		}},
 		Operations: []openapi.Operation{{
-			Method: "GET", Path: "/pets/{id}", Summary: "Get a pet",
-			PathParams: []openapi.Parameter{{Name: "id", Examples: []openapi.Example{{Name: "rex", Value: "1"}, {Value: "9"}}}},
+			Method: "GET", Path: "/pets/{id}", BasePath: "/v1", Summary: "Get a pet",
+			PathParams: []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{{Name: "rex", Value: "1"}, {Value: "9"}}}},
 			Responses: []openapi.Response{
 				{
 					Status: "200", Headers: []openapi.Header{{Name: "X-Rate", Schema: map[string]any{"type": "integer"}, Examples: []openapi.Example{{Value: float64(5)}}}},
@@ -151,11 +150,62 @@ func TestLoad_WarnsWhenServersHaveDifferentPaths(t *testing.T) {
 openapi: 3.1.0
 info: {title: Pets, version: "1"}
 servers: [{url: "/v1/"}, {url: "https://x.example.com/v2"}]
-paths: {}
+paths:
+  /pets:
+    get: {responses: {"200": {description: OK}}}
 `})
 
-	require.Equal(t, "/v1", doc.BasePath)
+	require.Equal(t, "/v1", doc.Operations[0].BasePath)
 	require.Equal(t, []string{`the servers have different paths: the mocks answer under the first one's, "/v1"`}, doc.Warnings)
+}
+
+func TestLoad_ReadsHowAPathParameterIsWritten(t *testing.T) {
+	// A path example is only matched as a client writes it: in the parameter's style, simple unless it says.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets/{id}/{tags}:
+    get:
+      parameters:
+        - {name: id, in: path, required: true, style: matrix, schema: {type: integer}}
+        - {name: tags, in: path, required: true, style: label, explode: true, schema: {type: array}}
+      responses: {"200": {description: OK}}
+`})
+
+	require.Equal(t, []openapi.Parameter{
+		{Name: "id", Style: "matrix"},
+		{Name: "tags", Style: "label", Explode: true},
+	}, doc.Operations[0].PathParams)
+}
+
+func TestLoad_PutsAnOperationUnderItsServersElseItsPathsElseTheDocuments(t *testing.T) {
+	// OpenAPI lets a path, and an operation, replace the servers above them: each operation answers under its own.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+servers: [{url: /v1}]
+paths:
+  /owners:
+    get: {responses: {"200": {description: OK}}}
+  /pets:
+    servers: [{url: /v2}, {url: /v4}]
+    get: {responses: {"200": {description: OK}}}
+    post:
+      servers: [{url: /v3}, {url: /v5}]
+      responses: {"200": {description: OK}}
+`})
+
+	bases := make(map[string]string, len(doc.Operations))
+	for _, op := range doc.Operations {
+		bases[op.Method+" "+op.Path] = op.BasePath
+	}
+
+	require.Equal(t, map[string]string{"GET /owners": "/v1", "GET /pets": "/v2", "POST /pets": "/v3"}, bases)
+	require.Equal(t, []string{
+		`/pets: the servers have different paths: the mocks answer under the first one's, "/v2"`,
+		`POST /pets: the servers have different paths: the mocks answer under the first one's, "/v3"`,
+	}, doc.Warnings)
 }
 
 func TestLoad_WarnsOfAServerWhosePathIsNotAURL(t *testing.T) {
@@ -166,7 +216,6 @@ servers: [{url: "https://x.example.com/{v}", variables: {v: {default: "%zz"}}}]
 paths: {}
 `})
 
-	require.Empty(t, doc.BasePath)
 	require.Equal(t, []string{`server https://x.example.com/{v}: parse "https://x.example.com/%zz": invalid URL escape "%zz": ignored`}, doc.Warnings)
 }
 

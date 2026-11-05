@@ -2,7 +2,7 @@
 enabled: true
 id: pets._id.get.406
 name: Get a pet by ID
-priority: 401
+priority: 1400
 request:
     headers:
         Accept:

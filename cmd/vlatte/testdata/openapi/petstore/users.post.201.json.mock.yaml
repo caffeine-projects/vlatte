@@ -10,7 +10,9 @@ request:
             - application/json
             - - application/json
     method: POST
-    path: /users
+    path:
+        - equal
+        - /users
 response:
     body:
         createdAt: "2024-03-13T06:46:26Z"

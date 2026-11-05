@@ -2,7 +2,7 @@
 enabled: true
 id: pets._id.put.200.json
 name: Update an existing pet
-priority: 301
+priority: 1300
 request:
     headers:
         Accept:

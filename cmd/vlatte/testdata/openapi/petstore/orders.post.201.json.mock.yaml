@@ -10,7 +10,9 @@ request:
             - application/json
             - - application/json
     method: POST
-    path: /orders
+    path:
+        - equal
+        - /orders
 response:
     body:
         createdAt: "2024-01-05T21:36:38Z"

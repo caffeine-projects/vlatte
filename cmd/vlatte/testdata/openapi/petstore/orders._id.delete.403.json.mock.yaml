@@ -2,7 +2,7 @@
 enabled: false
 id: orders._id.delete.403.json
 name: Cancel an order
-priority: 101
+priority: 1100
 request:
     headers:
         Accept:

@@ -2,7 +2,7 @@
 enabled: false
 id: pets._id.delete.403.json
 name: Remove a pet from the store
-priority: 101
+priority: 1100
 request:
     headers:
         Accept:

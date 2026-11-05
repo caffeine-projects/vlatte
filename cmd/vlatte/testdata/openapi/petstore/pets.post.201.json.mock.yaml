@@ -10,7 +10,9 @@ request:
             - application/json
             - - application/json
     method: POST
-    path: /pets
+    path:
+        - equal
+        - /pets
 response:
     body:
         ageMonths: 18

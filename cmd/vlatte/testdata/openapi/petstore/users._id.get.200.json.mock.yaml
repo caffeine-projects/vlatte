@@ -2,7 +2,7 @@
 enabled: true
 id: users._id.get.200.json
 name: Get a user by ID
-priority: 301
+priority: 1300
 request:
     headers:
         Accept:

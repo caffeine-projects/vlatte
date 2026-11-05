@@ -2,7 +2,7 @@
 enabled: true
 id: users._id.put.200.json
 name: Update a user account
-priority: 301
+priority: 1300
 request:
     headers:
         Accept:

@@ -15,7 +15,8 @@ import (
 	"github.com/caffeine-projects/vlatte/fakefy"
 )
 
-// The priority bands of generated mocks, which the number of templated segments of their path adds to.
+// The priority bands of generated mocks, which order the mocks of a route. [priority] puts them after the bands of
+// the routes with fewer templated segments.
 const (
 	_bandDisabled      = 100
 	_bandExample       = 200
@@ -23,6 +24,10 @@ const (
 	_bandNotAcceptable = 400
 	_bandNotFound      = 500
 )
+
+// _routeStep is how far apart [priority] puts the bands of routes whose number of templated segments differs by one:
+// past every band.
+const _routeStep = 1000
 
 // _contractStatuses are the statuses a request's contract decides, which no generated mock answers.
 var _contractStatuses = []string{"400", "401", "405", "415", "422"}
@@ -69,9 +74,9 @@ type Request struct {
 	// Method is the HTTP method.
 	Method string
 
-	// Path is what the path matches, as a mock file's path key takes it: the route as a glob, for a route without
-	// parameters; an equal matcher list, for an example of one; or a regex matcher list, for a route with a parameter
-	// inside a segment. It is nil for a PathTemplate.
+	// Path is what the path matches, as a mock file's path key takes it: an equal matcher list, for a route without
+	// parameters or an example of one; or a regex matcher list, for a route with a parameter inside a segment. It is
+	// nil for a PathTemplate.
 	Path any
 
 	// PathTemplate is the path template to match, for a route whose parameters are whole segments.
@@ -108,7 +113,7 @@ type Output struct {
 func Generate(doc *Document) *Output {
 	g := generator{doc: doc, defs: make(map[string]any, len(doc.Defs))}
 	for name, def := range doc.Defs {
-		g.defs[name] = stripWriteOnly(def)
+		g.defs[name] = stripWriteOnly(def, doc.Defs)
 	}
 
 	ops := slices.Clone(doc.Operations)
@@ -135,8 +140,7 @@ type generator struct {
 
 // operation makes the mocks of op.
 func (g *generator) operation(op Operation) {
-	route := joinPath(g.doc.BasePath, op.Path)
-	segments := templated(route)
+	route := joinPath(op.BasePath, op.Path)
 	request := routeRequest(op.Method, route)
 
 	primary := primaryResponse(op.Responses)
@@ -154,7 +158,7 @@ func (g *generator) operation(op Operation) {
 		r = g.withoutRanges(m, r)
 
 		if primary == nil || r.Status != primary.Status {
-			m.Priority = _bandDisabled + segments
+			m.Priority = priority(_bandDisabled, route)
 			g.contents(m, r, statusCode(r.Status, http.StatusInternalServerError), true)
 
 			continue
@@ -171,20 +175,20 @@ func (g *generator) operation(op Operation) {
 				em.Variant += strconv.Itoa(i + 1)
 			}
 
-			em.Priority = _bandExample + segments
+			em.Priority = priority(_bandExample, route)
 			// The server compares the path decoded, and a glob would read an example's * or [ as its own.
-			em.Request = Request{Method: op.Method, Path: []any{"equal", joinPath(g.doc.BasePath, ex.path)}}
+			em.Request = Request{Method: op.Method, Path: []any{"equal", joinPath(op.BasePath, ex.path)}}
 			g.contents(em, r, code, false)
 		}
 
 		// With examples, a 404 answers the other values of the parameters; without, every value answers.
 		if len(examples) == 0 || notFound == nil {
-			m.Priority = _bandSuccess + segments
+			m.Priority = priority(_bandSuccess, route)
 			g.contents(m, r, code, true)
 		}
 
 		if len(r.Content) > 0 && !isRange(r.Content[0].MediaType) {
-			g.notAcceptable(base, r, findResponse(op.Responses, "406"), segments)
+			g.notAcceptable(base, r, findResponse(op.Responses, "406"))
 		}
 	}
 
@@ -192,10 +196,10 @@ func (g *generator) operation(op Operation) {
 		m := base
 		m.Status = notFound.Status
 		m.Enabled = len(examples) > 0
-		m.Priority = _bandNotFound + segments
+		m.Priority = priority(_bandNotFound, route)
 
 		if !m.Enabled {
-			m.Priority = _bandDisabled + segments
+			m.Priority = priority(_bandDisabled, route)
 		}
 
 		g.first(m, *notFound, http.StatusNotFound)
@@ -282,7 +286,7 @@ func (g *generator) body(m Mock, r Response, c Content, status int, extras bool)
 		em := m
 		em.Variant = cmp.Or(ex.Name, "example"+strconv.Itoa(i+2))
 		em.Enabled = false
-		em.Priority = _bandDisabled + templated(m.Route)
+		em.Priority = priority(_bandDisabled, m.Route)
 		em.Reply.Body = encodeBody(c.MediaType, ex.Value, c.Schema)
 		g.mocks = append(g.mocks, em)
 	}
@@ -319,7 +323,7 @@ func isRange(mediaType string) bool {
 
 // notAcceptable adds the 406 mock of an operation whose primary response r offers media types: the operation's own
 // 406 response, or text listing the offers.
-func (g *generator) notAcceptable(base Mock, r Response, declared *Response, segments int) {
+func (g *generator) notAcceptable(base Mock, r Response, declared *Response) {
 	offers := make([]any, len(r.Content))
 	names := make([]string, len(r.Content))
 
@@ -329,7 +333,7 @@ func (g *generator) notAcceptable(base Mock, r Response, declared *Response, seg
 
 	m := base
 	m.Status = "406"
-	m.Priority = _bandNotAcceptable + segments
+	m.Priority = priority(_bandNotAcceptable, base.Route)
 	m.Enabled = true
 	m.Request.Accept = []any{"notacceptable", offers}
 
@@ -383,7 +387,7 @@ func (g *generator) headers(m Mock, r Response) map[string]string {
 func (g *generator) root(schema any) map[string]any {
 	root := make(map[string]any, 2)
 
-	switch s := stripWriteOnly(schema).(type) {
+	switch s := stripWriteOnly(schema, g.doc.Defs).(type) {
 	case map[string]any:
 		root = s
 	case bool:
@@ -510,7 +514,7 @@ func pathExamples(op Operation) []pathExample {
 
 		for _, p := range op.PathParams {
 			ex := p.Examples[min(i, len(p.Examples)-1)]
-			path = strings.ReplaceAll(path, "{"+p.Name+"}", text(ex.Value))
+			path = strings.ReplaceAll(path, "{"+p.Name+"}", pathValue(p, ex.Value))
 
 			if len(op.PathParams) == 1 {
 				out[i].name = ex.Name
@@ -523,8 +527,79 @@ func pathExamples(op Operation) []pathExample {
 	return out
 }
 
+// pathValue returns v, a value of parameter p, as a client writes it in a path, in the style of p, as RFC 6570, which
+// OpenAPI follows, does: 7 as 7, .7 or ;id=7. An object's keys come in order, as JSON has none.
+func pathValue(p Parameter, v any) string {
+	// prefix starts the value, sep joins its items, and named names each item in matrix style.
+	prefix, sep, named := "", ",", false
+
+	switch p.Style {
+	case "label":
+		prefix = "."
+		if p.Explode {
+			sep = "."
+		}
+	case "matrix":
+		prefix, named = ";", true
+		if p.Explode {
+			sep = ";"
+		}
+	}
+
+	item := func(name, value string) string {
+		if !named {
+			return value
+		}
+
+		if value == "" {
+			return name
+		}
+
+		return name + "=" + value
+	}
+
+	var items []string
+
+	switch x := v.(type) {
+	case []any:
+		for _, e := range x {
+			items = append(items, text(e))
+		}
+
+		if !p.Explode {
+			return prefix + item(p.Name, strings.Join(items, ","))
+		}
+
+		for i, e := range items {
+			items[i] = item(p.Name, e)
+		}
+	case map[string]any:
+		for _, k := range slices.Sorted(maps.Keys(x)) {
+			if p.Explode {
+				items = append(items, k+"="+text(x[k]))
+			} else {
+				items = append(items, k, text(x[k]))
+			}
+		}
+
+		if !p.Explode {
+			return prefix + item(p.Name, strings.Join(items, ","))
+		}
+	default:
+		return prefix + item(p.Name, text(v))
+	}
+
+	return prefix + strings.Join(items, sep)
+}
+
 // _param matches a parameter of a path, such as {id}.
 var _param = regexp.MustCompile(`\{[^{}/]+\}`)
+
+// priority returns the priority of a mock of route in band: every mock of a route answers before those of a route
+// with more templated segments, as OpenAPI matches /pets/mine before /pets/{id}, whatever their bands.
+func priority(band int, route string) int {
+	return templated(route)*_routeStep + band
+}
 
 // templated returns the number of segments of path that hold a parameter.
 func templated(path string) int {
@@ -546,8 +621,9 @@ var _wholeParam = regexp.MustCompile(`^\{[^{}/]+\}$`)
 func routeRequest(method, route string) Request {
 	r := Request{Method: method}
 
+	// The server compares the path decoded, and a glob would read a * or [ of the route as its own.
 	if !_param.MatchString(route) {
-		r.Path = route
+		r.Path = []any{"equal", route}
 		return r
 	}
 
@@ -623,8 +699,8 @@ func headerValue(v any) string {
 }
 
 // stripWriteOnly returns a copy of the schema v without its writeOnly properties, which a response never holds, at
-// any depth.
-func stripWriteOnly(v any) any {
+// any depth: those whose schema says so, or a schema of defs, the document's shared schemas, it refers to.
+func stripWriteOnly(v any, defs map[string]any) any {
 	switch x := v.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(x))
@@ -638,12 +714,12 @@ func stripWriteOnly(v any) any {
 					kept := make(map[string]any, len(props))
 
 					for name, p := range props {
-						if pm, ok := p.(map[string]any); ok && pm["writeOnly"] == true {
+						if writeOnly(p, defs, nil) {
 							dropped = append(dropped, name)
 							continue
 						}
 
-						kept[name] = stripWriteOnly(p)
+						kept[name] = stripWriteOnly(p, defs)
 					}
 
 					out[k] = kept
@@ -652,7 +728,7 @@ func stripWriteOnly(v any) any {
 				}
 			}
 
-			out[k] = stripWriteOnly(val)
+			out[k] = stripWriteOnly(val, defs)
 		}
 
 		if req, ok := out["required"].([]any); ok && len(dropped) > 0 {
@@ -666,11 +742,29 @@ func stripWriteOnly(v any) any {
 	case []any:
 		out := make([]any, len(x))
 		for i, item := range x {
-			out[i] = stripWriteOnly(item)
+			out[i] = stripWriteOnly(item, defs)
 		}
 
 		return out
 	default:
 		return v
 	}
+}
+
+// writeOnly reports whether schema v is writeOnly, or refers to a schema of defs that is. seen holds the names of
+// the schemas the references followed so far, which a cycle comes back to.
+func writeOnly(v any, defs map[string]any, seen []string) bool {
+	s, _ := v.(map[string]any)
+	if s["writeOnly"] == true {
+		return true
+	}
+
+	ref, _ := s["$ref"].(string)
+
+	name, ok := strings.CutPrefix(ref, "#/$defs/")
+	if !ok || slices.Contains(seen, name) {
+		return false
+	}
+
+	return writeOnly(defs[name], defs, append(seen, name))
 }

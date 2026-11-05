@@ -10,7 +10,9 @@ request:
             - application/json
             - - application/json
     method: QUERY
-    path: /pets
+    path:
+        - equal
+        - /pets
 response:
     body:
         data:

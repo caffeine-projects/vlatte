@@ -10,7 +10,9 @@ request:
             - application/json
             - - application/json
     method: GET
-    path: /inventories
+    path:
+        - equal
+        - /inventories
 response:
     body:
         code: river

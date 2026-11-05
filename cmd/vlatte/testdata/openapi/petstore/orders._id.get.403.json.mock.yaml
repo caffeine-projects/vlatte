@@ -2,7 +2,7 @@
 enabled: false
 id: orders._id.get.403.json
 name: Get an order by ID
-priority: 101
+priority: 1100
 request:
     headers:
         Accept:

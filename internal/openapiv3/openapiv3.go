@@ -53,7 +53,8 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 		doc.Title = t.Info.Title
 	}
 
-	doc.BasePath, doc.Warnings = basePath(t.Servers)
+	root, warnings := basePath(t.Servers, "")
+	doc.Warnings = append(doc.Warnings, warnings...)
 
 	if t.Components != nil {
 		for name, ref := range t.Components.Schemas {
@@ -65,18 +66,40 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 		return doc, nil
 	}
 
-	for path, item := range t.Paths.Map() {
-		for method, op := range item.Operations() {
-			doc.Operations = append(doc.Operations, c.operation(path, strings.ToUpper(method), item.Parameters, op))
+	// Sorted, so the warnings come in the same order on every run.
+	paths := t.Paths.Map()
+	for _, path := range slices.Sorted(maps.Keys(paths)) {
+		item := paths[path]
+
+		// A path's servers replace the document's, and an operation's replace its path's.
+		itemBase := root
+		if len(item.Servers) > 0 {
+			itemBase, warnings = basePath(item.Servers, path)
+			doc.Warnings = append(doc.Warnings, warnings...)
+		}
+
+		ops := item.Operations()
+		for _, method := range slices.Sorted(maps.Keys(ops)) {
+			op := ops[method]
+			o := c.operation(path, strings.ToUpper(method), item.Parameters, op)
+			o.BasePath = itemBase
+
+			if op.Servers != nil && len(*op.Servers) > 0 {
+				o.BasePath, warnings = basePath(*op.Servers, o.Method+" "+path)
+				doc.Warnings = append(doc.Warnings, warnings...)
+			}
+
+			doc.Operations = append(doc.Operations, o)
 		}
 	}
 
 	return doc, nil
 }
 
-// basePath returns the path of the first server, which every operation is under, and a warning when the servers'
-// paths differ: the mocks answer the first one's only.
-func basePath(servers openapi3.Servers) (string, []string) {
+// basePath returns the path of the first of servers, which the operations they serve are under, and a warning when
+// the servers' paths differ: the mocks answer the first one's only. where names what the servers serve in the
+// warnings, or is "" for the whole document.
+func basePath(servers openapi3.Servers, where string) (string, []string) {
 	var (
 		paths    []string
 		warnings []string
@@ -85,7 +108,7 @@ func basePath(servers openapi3.Servers) (string, []string) {
 	for _, s := range servers {
 		p, err := s.BasePath()
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("server %s: %v: ignored", s.URL, err))
+			warnings = append(warnings, prefixed(where, fmt.Sprintf("server %s: %v: ignored", s.URL, err)))
 			continue
 		}
 
@@ -97,10 +120,19 @@ func basePath(servers openapi3.Servers) (string, []string) {
 	}
 
 	if slices.ContainsFunc(paths, func(p string) bool { return p != paths[0] }) {
-		warnings = append(warnings, fmt.Sprintf("the servers have different paths: the mocks answer under the first one's, %q", cmp.Or(paths[0], "/")))
+		warnings = append(warnings, prefixed(where, fmt.Sprintf("the servers have different paths: the mocks answer under the first one's, %q", cmp.Or(paths[0], "/"))))
 	}
 
 	return paths[0], warnings
+}
+
+// prefixed returns warning, after where when where is not "".
+func prefixed(where, warning string) string {
+	if where == "" {
+		return warning
+	}
+
+	return where + ": " + warning
 }
 
 // converter translates the parts of a document into the model.
@@ -131,7 +163,9 @@ func (c converter) operation(path, method string, common openapi3.Parameters, op
 			}
 		}
 
-		o.PathParams = append(o.PathParams, openapi.Parameter{Name: name, Examples: examples})
+		o.PathParams = append(o.PathParams, openapi.Parameter{
+			Name: name, Style: cmp.Or(p.Style, openapi3.SerializationSimple), Explode: p.Explode != nil && *p.Explode, Examples: examples,
+		})
 	}
 
 	// Loaded, every response is resolved: Map of no responses is empty.

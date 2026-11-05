@@ -10,7 +10,9 @@ request:
             - application/json
             - - application/json
     method: POST
-    path: /orders
+    path:
+        - equal
+        - /orders
 response:
     body:
         code: cedar harbor

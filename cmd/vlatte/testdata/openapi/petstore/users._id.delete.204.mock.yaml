@@ -2,7 +2,7 @@
 enabled: true
 id: users._id.delete.204
 name: Delete a user account
-priority: 301
+priority: 1300
 request:
     method: DELETE
     path_template: /users/{id}

@@ -5,15 +5,16 @@
 // [Generate] turns each operation of a document into mocks in priority bands, above the priority 0 of mocks written
 // by hand, so those always win:
 //
-//   - 100 + s: the responses nothing in a request predicts, such as 403 or 503, written disabled. Enabled through
+//   - 100 + 1000s: the responses nothing in a request predicts, such as 403 or 503, written disabled. Enabled through
 //     the admin API, one answers before the others.
-//   - 200 + s: a mock for each example of the path parameters, on the concrete path.
-//   - 300 + s: the main success response, one mock for each media type it offers.
-//   - 400 + s: a 406 for a request whose Accept takes none of those media types.
-//   - 500 + s: a 404, when the spec declares one and the path parameters have examples.
+//   - 200 + 1000s: a mock for each example of the path parameters, on the concrete path.
+//   - 300 + 1000s: the main success response, one mock for each media type it offers.
+//   - 400 + 1000s: a 406 for a request whose Accept takes none of those media types.
+//   - 500 + 1000s: a 404, when the spec declares one and the path parameters have examples.
 //
-// s is the number of templated segments of the path, so /pets/mine matches before /pets/{id}. The statuses that a
-// request's contract decides, 400, 401, 405, 415 and 422, get no mock.
+// s is the number of templated segments of the path: every mock of /pets/mine answers before those of /pets/{id},
+// as OpenAPI matches a literal path first. The statuses that a request's contract decides, 400, 401, 405, 415 and
+// 422, get no mock.
 //
 // A rerun on the same document writes the same bytes: the operations are sorted, and fake values are seeded by the
 // mock they belong to.
@@ -38,9 +39,6 @@ type Document struct {
 	// Title is the title of the API. Generated files name it, so a rerun knows them.
 	Title string
 
-	// BasePath is the path every operation's path is under, such as /v1, or "" for none.
-	BasePath string
-
 	// Operations are the operations of the API, in any order.
 	Operations []Operation
 
@@ -59,6 +57,10 @@ type Operation struct {
 	// Path is the path, as the spec writes it, such as /pets/{id}.
 	Path string
 
+	// BasePath is the path Path is under, such as /v1, or "" for none: that of the operation's servers, else of its
+	// path's, else of the document's.
+	BasePath string
+
 	// Summary describes the operation in a line. It may be empty.
 	Summary string
 
@@ -73,6 +75,12 @@ type Operation struct {
 type Parameter struct {
 	// Name is the name the path gives it, between braces.
 	Name string
+
+	// Style is how a client writes its value in the path: simple, label or matrix.
+	Style string
+
+	// Explode tells, for a list or an object, whether each item is written apart, as Style does it.
+	Explode bool
 
 	// Examples are values of the parameter, the parameter's own examples first, then its schema's.
 	Examples []Example

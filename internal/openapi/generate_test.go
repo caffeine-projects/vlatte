@@ -1,6 +1,7 @@
 package openapi_test
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"testing"
@@ -27,7 +28,7 @@ func TestGenerate_GivesEachMediaTypeAMockAndA406(t *testing.T) {
 	require.Equal(t, openapi.Mock{
 		ID: "pets.get.200.json", Route: "/pets", Method: "GET", Status: "200", MediaType: "application/json",
 		Name: "GET /pets", Priority: 300, Enabled: true,
-		Request: openapi.Request{Method: "GET", Path: "/pets", Accept: []any{"accept", "application/json", offers}},
+		Request: openapi.Request{Method: "GET", Path: []any{"equal", "/pets"}, Accept: []any{"accept", "application/json", offers}},
 		Reply:   openapi.Reply{Status: 200, Header: map[string]string{"Content-Type": "application/json"}, Body: []any{"rex"}},
 	}, mocks["pets.get.200.json"])
 	require.Equal(t, []any{"accept", "application/xml", offers}, mocks["pets.get.200.xml"].Request.Accept)
@@ -35,7 +36,7 @@ func TestGenerate_GivesEachMediaTypeAMockAndA406(t *testing.T) {
 	require.Equal(t, openapi.Mock{
 		ID: "pets.get.406", Route: "/pets", Method: "GET", Status: "406",
 		Name: "GET /pets", Priority: 400, Enabled: true,
-		Request: openapi.Request{Method: "GET", Path: "/pets", Accept: []any{"notacceptable", offers}},
+		Request: openapi.Request{Method: "GET", Path: []any{"equal", "/pets"}, Accept: []any{"notacceptable", offers}},
 		Reply: openapi.Reply{
 			Status: 406, Header: map[string]string{"Content-Type": "text/plain; charset=utf-8"},
 			Body: "expected one of: application/json, application/xml",
@@ -72,7 +73,7 @@ func TestGenerate_AResponseOfMediaRangesOnlyTakesAnyAccept(t *testing.T) {
 	require.Equal(t, openapi.Mock{
 		ID: "files.get.200.text-any", Route: "/files", Method: "GET", Status: "200", MediaType: "text/*",
 		Name: "GET /files", Priority: 300, Enabled: true,
-		Request: openapi.Request{Method: "GET", Path: "/files"},
+		Request: openapi.Request{Method: "GET", Path: []any{"equal", "/files"}},
 		Reply:   openapi.Reply{Status: 200, Body: "a file"},
 	}, mocks["files.get.200.text-any"])
 	require.Equal(t, []string{"GET /files 200: media range */*: left out: the mocks answer text/*"}, warnings)
@@ -157,9 +158,53 @@ func TestGenerate_PathExamplesAndA404(t *testing.T) {
 	require.Equal(t, openapi.Request{
 		Method: "GET", Path: []any{"equal", "/pets/a b"}, Accept: []any{"accept", "application/json", []any{"application/json"}},
 	}, mocks["pets._id.get.200.json.example"].Request)
-	require.Equal(t, 201, mocks["pets._id.get.200.json.example"].Priority)
+	require.Equal(t, 1200, mocks["pets._id.get.200.json.example"].Priority)
 	require.Equal(t, openapi.Request{Method: "GET", PathTemplate: "/pets/{id}"}, mocks["pets._id.get.404"].Request)
-	require.Equal(t, 501, mocks["pets._id.get.404"].Priority)
+	require.Equal(t, 1500, mocks["pets._id.get.404"].Priority)
+}
+
+func TestGenerate_WritesAPathExampleInTheStyleOfItsParameter(t *testing.T) {
+	// A client writes a path parameter in its style, as RFC 6570 does: the mock of an example matches that path, not
+	// the bare value.
+	list := []any{"blue", "black", "brown"}
+	object := map[string]any{"R": float64(100), "G": float64(200), "B": float64(150)}
+
+	tests := []struct {
+		style   string
+		explode bool
+		value   any
+		path    string
+	}{
+		{style: "simple", value: "blue", path: "/c/blue"},
+		{style: "simple", value: list, path: "/c/blue,black,brown"},
+		{style: "simple", explode: true, value: list, path: "/c/blue,black,brown"},
+		{style: "simple", value: object, path: "/c/B,150,G,200,R,100"},
+		{style: "simple", explode: true, value: object, path: "/c/B=150,G=200,R=100"},
+		{style: "label", value: "", path: "/c/."},
+		{style: "label", value: "blue", path: "/c/.blue"},
+		{style: "label", value: list, path: "/c/.blue,black,brown"},
+		{style: "label", explode: true, value: list, path: "/c/.blue.black.brown"},
+		{style: "label", value: object, path: "/c/.B,150,G,200,R,100"},
+		{style: "label", explode: true, value: object, path: "/c/.B=150.G=200.R=100"},
+		{style: "matrix", value: "", path: "/c/;color"},
+		{style: "matrix", value: float64(7), path: "/c/;color=7"},
+		{style: "matrix", value: list, path: "/c/;color=blue,black,brown"},
+		{style: "matrix", explode: true, value: list, path: "/c/;color=blue;color=black;color=brown"},
+		{style: "matrix", value: object, path: "/c/;color=B,150,G,200,R,100"},
+		{style: "matrix", explode: true, value: object, path: "/c/;B=150;G=200;R=100"},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s explode=%v %v", tt.style, tt.explode, tt.value), func(t *testing.T) {
+			mocks := generate(t, &openapi.Document{Operations: []openapi.Operation{{
+				Method: "GET", Path: "/c/{color}",
+				PathParams: []openapi.Parameter{{Name: "color", Style: tt.style, Explode: tt.explode, Examples: []openapi.Example{{Value: tt.value}}}},
+				Responses:  []openapi.Response{{Status: "200"}},
+			}}})
+
+			require.Equal(t, []any{"equal", tt.path}, mocks["c._color.get.200.example"].Request.Path)
+		})
+	}
 }
 
 func TestGenerate_NamedPathExamplesGetAMockEach(t *testing.T) {
@@ -249,38 +294,41 @@ func TestGenerate_ExamplesPastTheFirstAreDisabled(t *testing.T) {
 }
 
 func TestGenerate_MoreTemplatedSegmentsMatchLater(t *testing.T) {
-	// OpenAPI matches a concrete path before a templated one: /pets/mine must not answer as /pets/{id}.
+	// OpenAPI matches a concrete path before a templated one: /pets/mine must not answer as /pets/{id}, not even by
+	// a mock of /pets/{id} in an earlier band, such as one enabled through the admin API.
 	mocks := generate(t, &openapi.Document{Operations: []openapi.Operation{
-		{Method: "GET", Path: "/pets/mine", Responses: []openapi.Response{{Status: "200"}}},
-		{Method: "GET", Path: "/pets/{id}", PathParams: []openapi.Parameter{{Name: "id"}}, Responses: []openapi.Response{{Status: "200"}}},
+		{Method: "GET", Path: "/pets/mine", Responses: []openapi.Response{{Status: "200"}, {Status: "503"}}},
+		{Method: "GET", Path: "/pets/{id}", PathParams: []openapi.Parameter{{Name: "id"}}, Responses: []openapi.Response{{Status: "200"}, {Status: "503"}}},
 		{Method: "GET", Path: "/pets/{id}/{photo}", Responses: []openapi.Response{{Status: "200"}}},
 	}})
 
+	require.Equal(t, 100, mocks["pets.mine.get.503"].Priority)
 	require.Equal(t, 300, mocks["pets.mine.get.200"].Priority)
-	require.Equal(t, 301, mocks["pets._id.get.200"].Priority)
-	require.Equal(t, 302, mocks["pets._id._photo.get.200"].Priority)
+	require.Equal(t, 1100, mocks["pets._id.get.503"].Priority)
+	require.Equal(t, 1300, mocks["pets._id.get.200"].Priority)
+	require.Equal(t, 2300, mocks["pets._id._photo.get.200"].Priority)
 }
 
 func TestGenerate_MatchesAParameterInsideASegmentWithARegularExpression(t *testing.T) {
 	// A path template takes whole segments only.
-	mocks := generate(t, &openapi.Document{BasePath: "/v1", Operations: []openapi.Operation{{
-		Method: "GET", Path: "/files/{name}.{ext}", Responses: []openapi.Response{{Status: "200"}},
+	mocks := generate(t, &openapi.Document{Operations: []openapi.Operation{{
+		Method: "GET", Path: "/files/{name}.{ext}", BasePath: "/v1", Responses: []openapi.Response{{Status: "200"}},
 	}}})
 
 	m := mocks["v1.files._name._ext.get.200"]
 	require.Equal(t, []any{"regex", `^/v1/files/[^/]+\.[^/]+$`}, m.Request.Path)
 	require.Equal(t, "/v1/files/{name}.{ext}", m.Route)
-	require.Equal(t, 301, m.Priority)
+	require.Equal(t, 1300, m.Priority)
 }
 
 func TestGenerate_PutsEveryPathUnderTheBasePath(t *testing.T) {
-	mocks := generate(t, &openapi.Document{BasePath: "/v1/", Operations: []openapi.Operation{
-		{Method: "GET", Path: "/", Responses: []openapi.Response{{Status: "200"}}},
-		{Method: "GET", Path: "/pets", Responses: []openapi.Response{{Status: "200"}}},
+	mocks := generate(t, &openapi.Document{Operations: []openapi.Operation{
+		{Method: "GET", Path: "/", BasePath: "/v1/", Responses: []openapi.Response{{Status: "200"}}},
+		{Method: "GET", Path: "/pets", BasePath: "/v1/", Responses: []openapi.Response{{Status: "200"}}},
 	}})
 
-	require.Equal(t, "/v1", mocks["v1.get.200"].Request.Path)
-	require.Equal(t, "/v1/pets", mocks["v1.pets.get.200"].Request.Path)
+	require.Equal(t, []any{"equal", "/v1"}, mocks["v1.get.200"].Request.Path)
+	require.Equal(t, []any{"equal", "/v1/pets"}, mocks["v1.pets.get.200"].Request.Path)
 }
 
 func TestGenerate_ASchemaKeepsItsOwnDefs(t *testing.T) {
@@ -314,6 +362,32 @@ func TestGenerate_LeavesOutWriteOnlyPropertiesOfASharedSchemaOfAnyName(t *testin
 	})
 
 	require.Equal(t, make(map[string]any), mocks["a.get.200.json"].Reply.Body)
+}
+
+func TestGenerate_LeavesOutAPropertyThatRefersToAWriteOnlySchema(t *testing.T) {
+	// A property's schema may be shared, through any number of references: it is writeOnly when the schema they end
+	// at is. A cycle of references ends nowhere, and doesn't keep the generator from finishing.
+	mocks := generate(t, &openapi.Document{
+		Defs: map[string]any{
+			"Password": map[string]any{"$ref": "#/$defs/Secret"},
+			"Secret":   map[string]any{"type": "string", "const": "very-secret", "writeOnly": true},
+			"Loop":     map[string]any{"$ref": "#/$defs/Again"},
+			"Again":    map[string]any{"$ref": "#/$defs/Loop"},
+		},
+		Operations: []openapi.Operation{{
+			Method: "GET", Path: "/a",
+			Responses: []openapi.Response{{Status: "200", Content: []openapi.Content{{MediaType: "application/json", Schema: map[string]any{
+				"type": "object", "required": []any{"password", "name"},
+				"properties": map[string]any{
+					"password": map[string]any{"$ref": "#/$defs/Password"},
+					"name":     map[string]any{"const": "rex"},
+					"loop":     map[string]any{"$ref": "#/$defs/Loop"},
+				},
+			}}}}},
+		}},
+	})
+
+	require.Equal(t, map[string]any{"name": "rex"}, mocks["a.get.200.json"].Reply.Body)
 }
 
 func TestGenerate_FakesWhatHasNoExample(t *testing.T) {

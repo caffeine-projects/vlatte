@@ -2,7 +2,7 @@
 enabled: true
 id: orders._id.delete.204
 name: Cancel an order
-priority: 301
+priority: 1300
 request:
     method: DELETE
     path_template: /orders/{id}

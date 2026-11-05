@@ -5,7 +5,9 @@ name: Place an adoption order
 priority: 100
 request:
     method: POST
-    path: /orders
+    path:
+        - equal
+        - /orders
 response:
     body:
         code: amber

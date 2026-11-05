@@ -9,7 +9,9 @@ request:
             - notacceptable
             - - application/json
     method: POST
-    path: /orders
+    path:
+        - equal
+        - /orders
 response:
     body: 'expected one of: application/json'
     header:

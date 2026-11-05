@@ -9,7 +9,9 @@ request:
             - notacceptable
             - - application/json
     method: QUERY
-    path: /pets
+    path:
+        - equal
+        - /pets
 response:
     body: 'expected one of: application/json'
     header:
