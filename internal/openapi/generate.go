@@ -253,19 +253,6 @@ func (g *generator) contents(m Mock, r Response, status int, extras bool) {
 	}
 }
 
-// first adds the mock of response r answering with status, with the body of its first media type, if any.
-func (g *generator) first(m Mock, r Response, status int) {
-	if len(r.Content) == 0 {
-		m.Reply = Reply{Status: status, Header: g.headers(m, r)}
-		g.mocks = append(g.mocks, m)
-
-		return
-	}
-
-	m.MediaType = r.Content[0].MediaType
-	g.body(m, r, r.Content[0], status, false)
-}
-
 // body adds the mock m of content c of response r: its body is the first example of c, or a fake value of its
 // schema. With extras, each example past the first adds a disabled mock of its own. A body no value fits leaves m
 // disabled and without one, with a warning.
@@ -356,7 +343,8 @@ func (g *generator) notAcceptable(base Mock, r Response, declared *Response) {
 	m.Request.Accept = []any{"notacceptable", offers}
 
 	if declared != nil && len(declared.Content) > 0 {
-		g.first(m, *declared, http.StatusNotAcceptable)
+		m.MediaType = declared.Content[0].MediaType
+		g.body(m, *declared, declared.Content[0], http.StatusNotAcceptable, false)
 		return
 	}
 
