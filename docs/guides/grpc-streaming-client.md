@@ -18,7 +18,7 @@ service Feed {
 }
 ```
 
-A gRPC mock server serves any method of the services whose generated code the test imports, here `pb`: it needs no implementation.
+A gRPC mock server needs no implementation: it serves any method of the services whose generated code the test imports, here `pb`, the package generated from the proto above.
 
 ## The client
 

@@ -19,6 +19,8 @@ Build gRPC messages and status replies, sequence or randomize answers, and gener
 
 A reply's `Header` and `Trailer` add metadata, `Status` ends a stream with a status after its messages, `Details` adds `errdetails` messages to it, and `MessageDelay` waits before each message. `Build` checks a reply against the method: its messages' type, and that a unary or client streaming method gets one message, or a status. It checks each reply of `Seq` and `Rand` the same way, and each mock built with them goes through its replies on its own.
 
+Here, `pb` is the generated code of the service a snippet mocks, such as `Feed`.
+
 ```go
 m.MustMock(mockgrpc.Method("Users/Get").
 	Reply(mockgrpc.Status(codes.InvalidArgument, "bad id").

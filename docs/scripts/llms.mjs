@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 
 import config from '../.vitepress/config.ts'
 import { assertPageCoverage, pageSource, renderSidebar, sidebarPages } from './sidebar.mjs'
+import { assertSnippets, snippet } from './snippet.mjs'
 
 const docs = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const pub = join(docs, 'public')
@@ -32,26 +33,7 @@ const absolute = (link) => {
 const listed = sidebarPages(config.themeConfig.sidebar, standIns)
 const pages = globSync('**/*.md', { cwd: docs, exclude: ['node_modules/**', ...config.srcExclude] })
 assertPageCoverage(pages, listed, compatibilityPages)
-
-// The lines of a snippet, <<< @/path#region{lang}, where @ is the docs folder.
-const snippet = (page, line) => {
-  const m = line.match(/^<<< @\/([^#{\s]+)(?:#([\w-]+))?(?:\{(?:[\d,-]+ ?)?(\w*)\})?$/)
-  if (!m) {
-    throw new Error(`llms: ${page}: cannot read snippet ${line}`)
-  }
-  const [, path, region, lang] = m
-  let lines = readFileSync(join(docs, path), 'utf8').trimEnd().split('\n')
-  if (region) {
-    const start = lines.findIndex((l) => new RegExp(`#region ${region}$`).test(l.trim()))
-    const end = lines.findIndex((l) => new RegExp(`#endregion ${region}$`).test(l.trim()))
-    if (start < 0 || end < start) {
-      throw new Error(`llms: ${page}: no region ${region} in ${path}`)
-    }
-    lines = lines.slice(start + 1, end)
-  }
-  const code = lines.join('\n').replace(/^\n+|\n+$/g, '')
-  return ['```' + (lang ?? ''), code, '```']
-}
+assertSnippets(docs, 'index.md')
 
 // A page as plain Markdown, and the note llms.txt gives it: its description, or the first sentence of its first
 // paragraph.
@@ -93,7 +75,7 @@ const convert = (page) => {
       continue
     }
     if (line.startsWith('<<< ')) {
-      out.push(...snippet(page, line).map((l) => (l ? prefix + l : prefix.trimEnd())))
+      out.push(...snippet(docs, page, line).map((l) => (l ? prefix + l : prefix.trimEnd())))
       continue
     }
     const container = line.match(/^:::\s*(.*)$/)

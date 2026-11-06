@@ -16,7 +16,7 @@ A gRPC status says how the call ended. The `vlatte-error` trailer identifies an 
 
 A mock that answers with a status, as `Status(...)` does, gets no `vlatte-error` trailer: that status is its answer. Check the trailer to distinguish an intentional mock error from a failure to serve the mock.
 
-For a unary call that no mock matches, with the default no-match code:
+Here, `pb` is the generated code of the Greeter service of [examples/03-grpc-greeter](https://github.com/caffeine-projects/vlatte/tree/main/examples/03-grpc-greeter). For a unary call that no mock matches, with the default no-match code:
 
 ```go
 var trailer metadata.MD

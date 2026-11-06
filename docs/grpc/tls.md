@@ -1,6 +1,6 @@
 # TLS
 
-`m.MustStartTLS()` serves gRPC over TLS, with a self-signed certificate for `localhost`, `127.0.0.1` and `::1`, and `m.Dial()` already trusts it:
+`m.MustStartTLS()` serves gRPC over TLS, with a self-signed certificate for `localhost`, `127.0.0.1` and `::1`, and `m.Dial()` already trusts it. Here, `pb` is the generated code of a `Users` service:
 
 ```go
 m := mockgrpc.MustNew()

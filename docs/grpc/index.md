@@ -4,24 +4,11 @@
 
 A gRPC mock server serves any method of the services whose generated code the program imports: it needs no implementation registered. A mock names its method, matches the calls, and answers them, whatever their type: unary, server streaming, client streaming or bidi streaming.
 
-```go
-func TestGreeter(t *testing.T) {
-	m := mockgrpc.MustNew(mockgrpc.Setup().InMemory()) // no port: only m.Dial reaches it
-	m.MustStart()
-	t.Cleanup(m.Close)
+Here, `pb` is the generated code for the `greeter.proto` of [examples/03-grpc-greeter](https://github.com/caffeine-projects/vlatte/tree/main/examples/03-grpc-greeter), where this test runs. Use your own service's generated code in its place.
 
-	m.MustMock(mockgrpc.Method("greeter.Greeter/SayHello").
-		Header("x-team", match.Equal("core")).
-		Field("name", match.Equal("ann")).
-		Reply(mockgrpc.Message(&pb.HelloReply{Message: "hi ann"})))
+<<< @/../examples/03-grpc-greeter/greeter_test.go#example{go}
 
-	client := pb.NewGreeterClient(m.MustDial()) // closed with the server
-	res, err := client.SayHello(metadata.AppendToOutgoingContext(t.Context(), "x-team", "core"), &pb.HelloRequest{Name: "ann"})
-	// ...
-}
-```
-
-`Setup().InMemory()` serves on an in-memory listener, with no port: only `m.Dial()` reaches it. Without it, the server listens on a local port, which `m.Addr()` names, for clients of any language.
+`Setup().InMemory()` serves on an in-memory listener, with no port: only `m.Dial()` reaches it, and `m.Close()` closes the connections it returns. Without it, the server listens on a local port, which `m.Addr()` names, for clients of any language.
 
 ## Mock features
 

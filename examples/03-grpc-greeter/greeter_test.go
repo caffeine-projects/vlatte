@@ -1,6 +1,6 @@
 package greeter_test
 
-// The docs home page shows the imports and TestGreeter, from here to the end of the region.
+// The docs home page and gRPC overview show the imports and TestGreeter, from here to the end of the region.
 // #region example
 import (
 	"testing"
