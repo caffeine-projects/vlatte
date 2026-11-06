@@ -172,7 +172,9 @@ func (c *Call) Send(msg proto.Message) error {
 // The server's [RequestParser] values parse the message as it comes, and [Call.Parsed] then has what they read: Recv
 // returns the message as the client sent it. A message a parser failed to parse returns an error that wraps
 // [ErrParsing] and the parser's error, whose gRPC status, when it has one, is the answer the client gets when the reply
-// returns it.
+// returns it. Check for ErrParsing before io.EOF: the client hasn't closed its side, even when the parser's error wraps
+// io.EOF. Returned, the error fails the reply, even when it wraps [github.com/caffeine-projects/vlatte.ErrAbort] or
+// [github.com/caffeine-projects/vlatte.ErrReset].
 func (c *Call) Recv() (proto.Message, error) {
 	msg, _, err := c.recvNext(true)
 	return msg, err

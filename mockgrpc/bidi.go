@@ -157,8 +157,9 @@ func (r *bidiReplier) Reply(ctx context.Context, call *Call) error {
 	}
 
 	for {
+		// Only the client ends its side: a parser's error fails the reply, even one that wraps io.EOF.
 		_, parsed, err := call.recvNext(true)
-		if errors.Is(err, io.EOF) {
+		if errors.Is(err, io.EOF) && !errors.Is(err, ErrParsing) {
 			break
 		}
 

@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -30,8 +31,9 @@ import (
 )
 
 var (
-	_ RequestParser = (*sealParser)(nil)
-	_ RequestParser = (*funcParser)(nil)
+	_ RequestParser  = (*sealParser)(nil)
+	_ RequestParser  = (*funcParser)(nil)
+	_ json.Marshaler = panicky{}
 )
 
 func TestRequestParser_ACallNoParserCanParseIsReadAsTheClientSentIt(t *testing.T) {
@@ -382,6 +384,13 @@ func TestRequestParser_APanicOrAValueJSONCantWriteFailsTheCall(t *testing.T) {
 			}},
 			want: "writing the parsed value as JSON",
 		},
+		{
+			name: "the value panics as it's written",
+			parser: &funcParser{parse: func(context.Context, *Call, proto.Message) (any, error) {
+				return panicky{}, nil
+			}},
+			want: "panic: can't write",
+		},
 	}
 
 	for _, tt := range tests {
@@ -574,6 +583,11 @@ func opening(s *sealer, rejected error) *funcParser {
 		return inner, nil
 	}}
 }
+
+// panicky is a value a parser returns whose JSON panics as it's written.
+type panicky struct{}
+
+func (panicky) MarshalJSON() ([]byte, error) { panic("can't write") }
 
 // funcParser is a RequestParser of functions: one without can parses every message. It counts the messages it parses.
 type funcParser struct {

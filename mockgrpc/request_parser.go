@@ -117,12 +117,19 @@ func (app *Server) parse(ctx context.Context, call *Call, msg proto.Message, ind
 			continue
 		}
 
-		v, err := try(func() (any, error) { return p.Parse(ctx, call, msg) })
-		if err == nil {
-			var b []byte
-			if b, err = app.resolver.encodeValue(v); err == nil {
-				return parsedMessage{value: v, json: b}, nil
+		// The value is written as JSON within the parse: a value whose MarshalJSON panics fails it, as a panic of Parse.
+		var v any
+
+		b, err := try(func() ([]byte, error) {
+			var err error
+			if v, err = p.Parse(ctx, call, msg); err != nil {
+				return nil, err
 			}
+
+			return app.resolver.encodeValue(v)
+		})
+		if err == nil {
+			return parsedMessage{value: v, json: b}, nil
 		}
 
 		return parsedMessage{value: nil, json: []byte("null")}, &parseError{index: index, parser: p, err: err}

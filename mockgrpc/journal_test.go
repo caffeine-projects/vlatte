@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -873,4 +874,24 @@ func TestRequestPattern_AQueryWhoseContextEndedGivesTheParsersNothing(t *testing
 	_, err = pattern.Explain(ctx, entry)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Zero(t, p.total())
+}
+
+func TestRequestPattern_ARequestWhoseParsedValuePanicsMisses(t *testing.T) {
+	// A parser's value that panics as it's written fails to read the request, as a panic of the parser does: the
+	// request misses the pattern, and the query goes on.
+	m := parsing(t, &funcParser{parse: func(context.Context, *Call, proto.Message) (any, error) {
+		return panicky{}, nil
+	}})
+	pattern, err := m.RequestPattern(Method("Greetings").Field("user_id", match.Equal("u1")))
+	require.NoError(t, err)
+
+	entry := &journal.Entry{Kind: Kind, Path: pb.TestService_Greetings_FullMethodName, Body: []byte(`{"message": "hi"}`)}
+
+	ok, err := pattern.Match(t.Context(), entry)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	miss, err := pattern.Explain(t.Context(), entry)
+	require.NoError(t, err)
+	require.Equal(t, verify.Miss{Total: 2, Passed: 1, Failed: []string{"request"}}, miss)
 }

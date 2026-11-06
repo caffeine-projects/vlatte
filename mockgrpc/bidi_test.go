@@ -1,6 +1,7 @@
 package mockgrpc
 
 import (
+	"context"
 	"errors"
 	"io"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/journal"
@@ -168,23 +170,37 @@ func TestBidi_RulesReadWhatTheParsersReadOfEachMessage(t *testing.T) {
 func TestBidi_AMessageAParserFailsToReadEndsTheCall(t *testing.T) {
 	// A bidi message is parsed once its mock matched, as its reply reads it: a parser's error fails the reply, and the
 	// mock doesn't count the call. A parser's status is the answer the client gets, as a status of the mock is: the
-	// mock counts the call.
+	// mock counts the call. A parser's error is never the end of the client's side nor a cut, whatever it wraps, and
+	// neither is a panic as its value is written.
+	failure := func(err error) func() (any, error) { return func() (any, error) { return nil, err } }
 	tests := []struct {
-		name     string
-		rejected error
-		code     codes.Code
-		trailer  []string
-		hits     int64
+		name    string
+		failed  func() (any, error)
+		code    codes.Code
+		trailer []string
+		hits    int64
 	}{
-		{name: "an error", rejected: errors.New("bad envelope"), code: codes.Internal, trailer: []string{vlatte.FailureReply}, hits: 0},
-		{name: "a status", rejected: status.Error(codes.InvalidArgument, "bad envelope"), code: codes.InvalidArgument, trailer: nil, hits: 1},
+		{name: "an error", failed: failure(errors.New("bad envelope")), code: codes.Internal, trailer: []string{vlatte.FailureReply}, hits: 0},
+		{name: "a status", failed: failure(status.Error(codes.InvalidArgument, "bad envelope")), code: codes.InvalidArgument, trailer: nil, hits: 1},
+		{name: "io.EOF", failed: failure(io.EOF), code: codes.Internal, trailer: []string{vlatte.FailureReply}, hits: 0},
+		{name: "vlatte.ErrAbort", failed: failure(vlatte.ErrAbort), code: codes.Internal, trailer: []string{vlatte.FailureReply}, hits: 0},
+		{name: "vlatte.ErrReset", failed: failure(vlatte.ErrReset), code: codes.Internal, trailer: []string{vlatte.FailureReply}, hits: 0},
+		{name: "a value whose JSON panics", failed: func() (any, error) { return panicky{}, nil }, code: codes.Internal, trailer: []string{vlatte.FailureReply}, hits: 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newSealer(t)
-			m := parsing(t, opening(s, tt.rejected))
-			scope := m.MustMock(Method("Chat").Reply(Bidi().Otherwise(Message(&pb.HiRes{Message: "ok"}))))
+			m := parsing(t, &funcParser{parse: func(_ context.Context, _ *Call, msg proto.Message) (any, error) {
+				if inner, err := s.open(envelopeText(msg)); err == nil {
+					return inner, nil
+				}
+
+				return tt.failed()
+			}})
+			scope := m.MustMock(Method("Chat").Reply(Bidi().
+				Otherwise(Message(&pb.HiRes{Message: "ok"})).
+				OnEnd(Message(&pb.HiRes{Message: "bye"}))))
 
 			var trailer metadata.MD
 			got, code := chat(t, client(t, m), []grpc.CallOption{grpc.Trailer(&trailer)},
