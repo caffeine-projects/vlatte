@@ -16,6 +16,7 @@
 //	completion  generate the shell completion script
 //	health      check that a running server serves, as a container health check
 //	mcp         serve the admin API to an AI agent over MCP, on stdin and stdout
+//	openapi     write mock files from an OpenAPI spec
 //	version     print version info
 //
 // It exits with 0 on success, 2 for invalid settings or usage, and 1 for other errors.
