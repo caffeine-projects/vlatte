@@ -217,7 +217,8 @@ func (p *proxyReplier) send(call *Call, cs grpc.ClientStream) {
 // the target's.
 func pump(call *Call, cs grpc.ClientStream) {
 	for {
-		msg, err := call.Recv()
+		// The target gets the message as the client sent it: the server's parsers don't read it.
+		msg, _, err := call.recvNext(false)
 		if errors.Is(err, io.EOF) {
 			_ = cs.CloseSend()
 			return

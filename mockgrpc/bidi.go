@@ -45,8 +45,9 @@ func Bidi() *BidiReply {
 	return &BidiReply{}
 }
 
-// On answers each message m matches with r. m reads the message as JSON, as [Builder.Field] reads a request:
-// match.Field("message", match.Equal("hi")). The rules run in the order they were added.
+// On answers each message m matches with r. m reads the message as JSON, as [Builder.Field] reads a request, so what
+// the server's [RequestParser] values read of it: match.Field("message", match.Equal("hi")). The rules run in the order
+// they were added.
 func (b *BidiReply) On(m vlatte.Matcher, r *Response) *BidiReply {
 	b.rules = append(b.rules, bidiRule{matcher: m, response: r})
 	return b
@@ -156,7 +157,7 @@ func (r *bidiReplier) Reply(ctx context.Context, call *Call) error {
 	}
 
 	for {
-		msg, err := call.Recv()
+		_, parsed, err := call.recvNext(true)
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -165,7 +166,7 @@ func (r *bidiReplier) Reply(ctx context.Context, call *Call) error {
 			return err
 		}
 
-		b, err := call.server.resolver.encode(msg)
+		b, err := parsed.encode(call.server.resolver)
 		if err != nil {
 			return err
 		}

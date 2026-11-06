@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/caffeine-projects/vlatte"
 	"github.com/caffeine-projects/vlatte/journal"
 	"github.com/caffeine-projects/vlatte/match"
 	pb "github.com/caffeine-projects/vlatte/mockgrpc/internal/protobuf"
@@ -148,4 +149,50 @@ func TestBidi_ARuleWhoseMatcherFailsFailsTheCall(t *testing.T) {
 	got, code := chat(t, client(t, m), nil, "a")
 	require.Equal(t, codes.Internal, code)
 	require.Empty(t, got)
+}
+
+func TestBidi_RulesReadWhatTheParsersReadOfEachMessage(t *testing.T) {
+	// Each message is parsed as it comes, before its rule is chosen: rules read what the parsers read of it, and
+	// templates the messages so far, each as the parsers read it.
+	s := newSealer(t)
+	m := parsing(t, opening(s, errors.New("bad envelope")))
+	m.MustMock(Method("Chat").Reply(Bidi().
+		On(match.Field("user_id", match.Equal("u1")), Message(&pb.HiRes{Message: "one"})).
+		Otherwise(Template(`{"message": "{{ (index .Request.Message 1).user_id }}"}`))))
+
+	got, code := chat(t, client(t, m), nil, s.seal(t, &pb.Rich{UserId: "u1"}), s.seal(t, &pb.Rich{UserId: "u2"}))
+	require.Equal(t, codes.OK, code)
+	require.Equal(t, []string{"one", "u2"}, got)
+}
+
+func TestBidi_AMessageAParserFailsToReadEndsTheCall(t *testing.T) {
+	// A bidi message is parsed once its mock matched, as its reply reads it: a parser's error fails the reply, and the
+	// mock doesn't count the call. A parser's status is the answer the client gets, as a status of the mock is: the
+	// mock counts the call.
+	tests := []struct {
+		name     string
+		rejected error
+		code     codes.Code
+		trailer  []string
+		hits     int64
+	}{
+		{name: "an error", rejected: errors.New("bad envelope"), code: codes.Internal, trailer: []string{vlatte.FailureReply}, hits: 0},
+		{name: "a status", rejected: status.Error(codes.InvalidArgument, "bad envelope"), code: codes.InvalidArgument, trailer: nil, hits: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newSealer(t)
+			m := parsing(t, opening(s, tt.rejected))
+			scope := m.MustMock(Method("Chat").Reply(Bidi().Otherwise(Message(&pb.HiRes{Message: "ok"}))))
+
+			var trailer metadata.MD
+			got, code := chat(t, client(t, m), []grpc.CallOption{grpc.Trailer(&trailer)},
+				s.seal(t, &pb.Rich{}), "not sealed", s.seal(t, &pb.Rich{}))
+			require.Equal(t, tt.code, code)
+			require.Equal(t, []string{"ok"}, got, "nothing answers after the message that failed")
+			require.Equal(t, tt.trailer, trailer.Get(_failureKey))
+			require.Equal(t, tt.hits, scope.Hits())
+		})
+	}
 }

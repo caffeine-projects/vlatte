@@ -16,7 +16,8 @@ import (
 )
 
 // serve matches call with the server's mocks, and answers it with the first that matches: the path of every call,
-// whatever its type. It returns what the call ends with: nil, the status of the mock's answer, or a failure.
+// whatever its type. It returns what the call ends with: nil, the status of the mock's answer, or a failure. The
+// server's parsers read the request before the mocks: see RequestParser.
 //
 // The scenario of the mock moves when the mock is found, before its delay. Then, in order: the delay, the reply, then,
 // once it answered, with messages, a status or a cut, the state of its stateful matchers, such as Times, and its
@@ -52,6 +53,14 @@ func (in *interceptors) serve(ctx context.Context, call *Call) error {
 
 		if rec.target != nil {
 			return in.serveTarget(ctx, call, rec, cs)
+		}
+	}
+
+	// The server's parsers read the request once, for every mock: a bidi call's messages come as its reply reads them.
+	// The target of a recording answers what the client sent: its calls aren't parsed.
+	if kind != _bidiStream {
+		if err := app.parseRequest(ctx, call); err != nil {
+			return app.parseFailed(ctx, call, err)
 		}
 	}
 

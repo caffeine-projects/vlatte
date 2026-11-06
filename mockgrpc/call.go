@@ -23,7 +23,8 @@ var (
 //
 // A unary or server streaming call has one request message, in Message. A client streaming call has all the messages
 // the client sent, in Messages, once it closed its side. A bidi streaming call has the messages received so far: its
-// mock matches before any, on the method and the header, and its reply reads them with Recv.
+// mock matches before any, on the method and the header, and its reply reads them with Recv. Message and Messages are
+// the messages as the client sent them; Parsed is what the server's [RequestParser] values read of them.
 //
 // Its methods are safe for concurrent use, but Send and Recv, which follow grpc's streams: one goroutine at a time may
 // call Send, and one Recv. The messages are the server's: don't change them.
@@ -34,7 +35,7 @@ type Call struct {
 	desc   protoreflect.MethodDescriptor
 	stream grpc.ServerStream // nil for a unary call
 
-	json []byte // the request as JSON, as matchers read it: set as the call is served
+	json []byte // the request as JSON, as matchers read it, parsed: set as the call is served
 
 	// data and provided are what templates read as .Data and .Provided: set once a mock matched the call.
 	data     map[string]any
@@ -46,6 +47,7 @@ type Call struct {
 	mu       sync.Mutex
 	message  proto.Message
 	messages []proto.Message
+	parsed   []parsedMessage // what the server's parsers read of the request messages, in order: a prefix of them
 	sent     []proto.Message
 	answer   proto.Message // what Send set, for a call that answers one message
 	hit      *hit          // counts the call as its answer goes out
@@ -90,11 +92,24 @@ func (c *Call) Messages() []proto.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.message != nil {
-		return []proto.Message{c.message}
+	return c.received()
+}
+
+// Parsed returns what the server's [RequestParser] values read of the messages the client sent so far, in order, one
+// for each of Messages: the value of the parser that parsed a message, or the message itself when none did. The value
+// of a message whose parsing failed is nil. A bidi message a proxy or [Echo] received isn't parsed. Matchers and
+// templates read these values as JSON. Don't change them.
+func (c *Call) Parsed() []any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	msgs := c.received()
+	values := make([]any, len(msgs))
+	for i, msg := range msgs {
+		values[i] = c.parsedAt(i, msg).value
 	}
 
-	return slices.Clip(c.messages)
+	return values
 }
 
 // Sent returns the messages the mock sent so far, in order.
@@ -105,9 +120,10 @@ func (c *Call) Sent() []proto.Message {
 	return slices.Clip(c.sent)
 }
 
-// JSON returns the request as JSON, as matchers, the journal and templates read it: the message of a unary or server
-// streaming call, as protojson writes it with the field names of the .proto file, and an array of the messages of a
-// streaming client, received so far.
+// JSON returns the request as JSON, as the journal keeps it: the message of a unary or server streaming call, as
+// protojson writes it with the field names of the .proto file, and an array of the messages of a streaming client,
+// received so far. It is the request as the client sent it: [Builder.Field], [Builder.Body] and templates read what the
+// server's [RequestParser] values read of it, written the same way. Without parsers, they read this JSON.
 func (c *Call) JSON() []byte {
 	b, _ := c.encode()
 	return b
@@ -152,21 +168,50 @@ func (c *Call) Send(msg proto.Message) error {
 
 // Recv receives the next message of a bidi streaming call, and returns io.EOF once the client closed its side.
 // Other calls received their messages before the mock matched: see Message and Messages.
+//
+// The server's [RequestParser] values parse the message as it comes, and [Call.Parsed] then has what they read: Recv
+// returns the message as the client sent it. A message a parser failed to parse returns an error that wraps
+// [ErrParsing] and the parser's error, whose gRPC status, when it has one, is the answer the client gets when the reply
+// returns it.
 func (c *Call) Recv() (proto.Message, error) {
+	msg, _, err := c.recvNext(true)
+	return msg, err
+}
+
+// recvNext receives the next message of a bidi streaming call, as Recv does, and returns what the server's parsers read
+// of it. Without parse, it doesn't parse the message, for replies that forward it as it came, such as proxies and Echo.
+func (c *Call) recvNext(parse bool) (proto.Message, parsedMessage, error) {
 	if !c.isClientStream() || !c.isServerStream() {
-		return nil, errNoRecv
+		return nil, parsedMessage{}, errNoRecv
 	}
 
 	msg := newMessage(c.desc.Input())
 	if err := c.stream.RecvMsg(msg); err != nil {
-		return nil, err
+		return nil, parsedMessage{}, err
 	}
 
+	p := parsedMessage{value: msg, json: nil}
+
+	var err error
+	if parse {
+		c.mu.Lock()
+		i := len(c.messages)
+		c.mu.Unlock()
+
+		p, err = c.server.parse(c.stream.Context(), c, msg, i)
+	}
+
+	// The message and what the parsers read of it come in together: Parsed has one value for each of Messages.
 	c.mu.Lock()
 	c.messages = append(c.messages, msg)
+	c.parsed = append(c.parsed, p)
 	c.mu.Unlock()
 
-	return msg, nil
+	if err != nil {
+		return nil, parsedMessage{}, err
+	}
+
+	return msg, p, nil
 }
 
 // encode returns the request as JSON, as JSON does, or the error of a message protojson can't write, such as an Any
@@ -180,6 +225,40 @@ func (c *Call) encode() ([]byte, error) {
 	}
 
 	return c.server.resolver.encodeArray(c.messages)
+}
+
+// view returns the request as matchers and templates read it, as JSON: as JSON writes it, with what the server's parsers
+// read of each message in place of the message.
+func (c *Call) view() ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	r := c.server.resolver
+
+	if !c.isClientStream() {
+		return c.parsedAt(0, c.message).encode(r)
+	}
+
+	return jsonArray(len(c.messages), func(i int) ([]byte, error) { return c.parsedAt(i, c.messages[i]).encode(r) })
+}
+
+// received returns the request messages of the call so far: the one of a unary or server streaming call. c.mu is held.
+func (c *Call) received() []proto.Message {
+	if c.message != nil {
+		return []proto.Message{c.message}
+	}
+
+	return slices.Clip(c.messages)
+}
+
+// parsedAt returns what the server's parsers read of msg, the i-th request message, or msg itself, which they didn't
+// read. c.mu is held.
+func (c *Call) parsedAt(i int, msg proto.Message) parsedMessage {
+	if i < len(c.parsed) {
+		return c.parsed[i]
+	}
+
+	return parsedMessage{value: msg, json: nil}
 }
 
 // receive reads the request of a streaming call before matching: the one message of a server streaming call, every
