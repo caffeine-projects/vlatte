@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"maps"
 	"net/url"
+	"path"
+	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -55,7 +58,7 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 	}
 
 	// The model refers to shared schemas by name: a reference to another file becomes one.
-	t.InternalizeRefs(ctx, nil)
+	t.InternalizeRefs(ctx, refNames(location))
 
 	c := converter{v30: t.IsOpenAPI30(), raw: r}
 	doc := &openapi.Document{Defs: make(map[string]any)}
@@ -104,6 +107,64 @@ func Load(ctx context.Context, data []byte, location *url.URL, read func(u *url.
 	}
 
 	return doc, nil
+}
+
+// refNames returns how kin-openapi names, as a shared component, what a reference of the spec at location names
+// outside its components: by its file, relative to location's folder, without its extension, and its JSON pointer,
+// without its components part: pets.yaml#/components/schemas/Pet is pets_Pet. A name taken by another component gets
+// a number. kin-openapi's own naming loops forever on a reference into paths.
+func refNames(location *url.URL) openapi3.RefNameResolver {
+	given := make(map[string]string) // the reference each name was given to, by collection and name
+
+	return func(t *openapi3.T, ref openapi3.ComponentRef) string {
+		target, collection := ref.RefPath(), ref.CollectionName()
+		local := fileKey(target) == fileKey(location)
+
+		pointer := strings.TrimPrefix(target.Fragment, "/")
+		if name, ok := strings.CutPrefix(pointer, "components/"+collection+"/"); ok {
+			if local && !strings.Contains(name, "/") {
+				return name
+			}
+
+			pointer = name
+		}
+
+		file := ""
+		if !local {
+			file = strings.TrimPrefix(target.Path, path.Dir(location.Path)+"/")
+			file = strings.TrimSuffix(file, path.Ext(file))
+		}
+
+		base := openapi3.InvalidIdentifierCharRegExp.ReplaceAllString(strings.Trim(file+"_"+pointer, "_/"), "_")
+
+		name := base
+		for i := 2; ; i++ {
+			key := collection + "/" + name
+
+			prev, ok := given[key]
+			if ok && prev == target.String() {
+				return name
+			}
+
+			if !ok && !hasComponent(t, collection, name) {
+				given[key] = target.String()
+				return name
+			}
+
+			name = base + "_" + strconv.Itoa(i)
+		}
+	}
+}
+
+// hasComponent reports whether t has a component name in collection, such as schemas.
+func hasComponent(t *openapi3.T, collection, name string) bool {
+	if t.Components == nil {
+		return false
+	}
+
+	m := reflect.ValueOf(t.Components).Elem().FieldByNameFunc(func(field string) bool { return strings.EqualFold(field, collection) })
+
+	return m.Kind() == reflect.Map && m.MapIndex(reflect.ValueOf(name)).IsValid()
 }
 
 // validate validates t as kin-openapi does, but for the examples of media types that aren't JSON: OpenAPI writes
@@ -428,7 +489,7 @@ func (c converter) examplesOf(owner, example any, named openapi3.Examples) []ope
 }
 
 // schema translates the schema of ref into JSON Schema 2020-12, or returns nil for no schema. kin-openapi read the
-// schema from JSON, which it writes back.
+// schema from JSON, which it writes back, with each integer as the spec writes it.
 func (c converter) schema(ref *openapi3.SchemaRef) any {
 	if ref == nil {
 		return nil
@@ -436,6 +497,10 @@ func (c converter) schema(ref *openapi3.SchemaRef) any {
 
 	data, _ := json.Marshal(ref)
 	v, _ := value.DecodeJSON(data)
+
+	if ref.Value != nil {
+		v = exact(v, c.raw[field{object: ref.Value}])
+	}
 
 	return c.translate(v)
 }

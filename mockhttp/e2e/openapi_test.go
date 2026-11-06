@@ -552,13 +552,18 @@ components:
 	}
 }
 
-func TestOpenAPI_AnIntegerExamplePast2To53IsServedExactly(t *testing.T) {
+func TestOpenAPI_AnIntegerPast2To53IsServedExactly(t *testing.T) {
 	// A float64 holds every integer up to 2^53 only: 9007199254740993 read as one is 9007199254740992, another
-	// resource, in the path, a header and a body alike, and through a reference.
+	// resource, in the path, a header and a body alike, through a reference, and as the const a fake value takes.
 	spec := `{
   "openapi": "3.1.0",
   "info": {"title": "Big integers", "version": "1"},
   "paths": {
+    "/const": {
+      "get": {
+        "responses": {"200": {"description": "OK", "content": {"application/json": {"schema": {"const": 9007199254740993}}}}}
+      }
+    },
     "/ids/{id}": {
       "get": {
         "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}, "example": 9007199254740993}],
@@ -584,6 +589,10 @@ func TestOpenAPI_AnIntegerExamplePast2To53IsServedExactly(t *testing.T) {
 
 	res, body = respond(t, m, http.MethodGet, "/ids/9007199254740992", "application/json")
 	require.Equal(t, http.StatusNotFound, res.StatusCode, body)
+
+	res, body = respond(t, m, http.MethodGet, "/const", "application/json")
+	require.Equal(t, http.StatusOK, res.StatusCode, body)
+	require.Equal(t, "9007199254740993", body)
 }
 
 func TestOpenAPI_AResponseHeaderIsWrittenAsItsSpecSays(t *testing.T) {

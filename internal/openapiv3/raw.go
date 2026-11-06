@@ -13,7 +13,7 @@ import (
 // raw holds the example fields of the spec's objects as the spec writes them, which kin-openapi changes as it reads
 // them: it reads every number as a float64, which rounds an integer past 2^53, and a null as no value. A field is
 // keyed by the object kin-openapi read it into, such as a *openapi3.MediaType, and its name, such as example. A field
-// the spec doesn't write isn't there.
+// the spec doesn't write isn't there. A schema is there whole, under the name "".
 type raw map[field]any
 
 // field names a field of an object of kin-openapi.
@@ -66,6 +66,12 @@ func readRaw(t *openapi3.T, location *url.URL, files map[string][]byte) raw {
 
 	if c := t.Components; c != nil {
 		n := r.child(doc, "components")
+
+		schemas := r.child(n, "schemas")
+		for name, ref := range c.Schemas {
+			r.schema(ref, r.child(schemas, name))
+		}
+
 		r.parameters(c.Parameters, r.child(n, "parameters"))
 		r.examples(c.Examples, r.child(n, "examples"))
 		r.callbacks(c.Callbacks, r.child(n, "callbacks"))
@@ -225,14 +231,26 @@ func (r *rawReader) callbacks(cs openapi3.Callbacks, n node) {
 
 // parameterList walks ps, which kin-openapi read in the order of the list n.
 func (r *rawReader) parameterList(ps openapi3.Parameters, n node) {
-	n = r.deref(n)
-	list, _ := n.v.([]any)
+	list := r.items(n)
 
 	for i, ref := range ps {
 		if i < len(list) {
-			r.parameter(ref.Value, node{file: n.file, v: list[i]})
+			r.parameter(ref.Value, list[i])
 		}
 	}
+}
+
+// items returns the items of the list n is, or refers to.
+func (r *rawReader) items(n node) []node {
+	n = r.deref(n)
+	list, _ := n.v.([]any)
+
+	out := make([]node, len(list))
+	for i, v := range list {
+		out[i] = node{file: n.file, v: v}
+	}
+
+	return out
 }
 
 func (r *rawReader) parameters(ps openapi3.ParametersMap, n node) {
@@ -250,12 +268,14 @@ func (r *rawReader) parameter(p *openapi3.Parameter, n node) {
 		sn := r.child(n, "schema")
 		r.record(p.Schema.Value, sn, "example")
 		r.record(p.Schema.Value, sn, "examples")
+		r.schema(p.Schema, sn)
 	}
 }
 
 func (r *rawReader) headers(hs openapi3.Headers, n node) {
 	for name, ref := range hs {
 		hn := r.child(n, name)
+		r.schema(ref.Value.Schema, r.child(hn, "schema"))
 		r.record(ref.Value, hn, "example")
 		r.examples(ref.Value.Examples, r.child(hn, "examples"))
 		r.content(ref.Value.Content, r.child(hn, "content"))
@@ -274,6 +294,7 @@ func (r *rawReader) content(c openapi3.Content, n node) {
 		}
 
 		mn := r.child(n, name)
+		r.schema(mt.Schema, r.child(mn, "schema"))
 		r.record(mt, mn, "example")
 		r.examples(mt.Examples, r.child(mn, "examples"))
 	}
@@ -283,4 +304,66 @@ func (r *rawReader) examples(es openapi3.Examples, n node) {
 	for name, ref := range es {
 		r.record(ref.Value, r.child(n, name), "value")
 	}
+}
+
+// schema records the schema of ref, which kin-openapi read from n, whole, and each schema within it.
+func (r *rawReader) schema(ref *openapi3.SchemaRef, n node) {
+	if ref == nil || ref.Value == nil {
+		return
+	}
+
+	s, key := ref.Value, field{object: ref.Value}
+	if _, ok := r.out[key]; ok {
+		return
+	}
+
+	n = r.deref(n)
+	r.out[key] = n.v
+
+	for name, sub := range map[string]*openapi3.SchemaRef{
+		"items": s.Items, "not": s.Not, "contains": s.Contains, "propertyNames": s.PropertyNames, "contentSchema": s.ContentSchema,
+		"if": s.If, "then": s.Then, "else": s.Else, "additionalProperties": s.AdditionalProperties.Schema,
+		"unevaluatedItems": s.UnevaluatedItems.Schema, "unevaluatedProperties": s.UnevaluatedProperties.Schema,
+	} {
+		r.schema(sub, r.child(n, name))
+	}
+
+	for name, list := range map[string]openapi3.SchemaRefs{"allOf": s.AllOf, "anyOf": s.AnyOf, "oneOf": s.OneOf, "prefixItems": s.PrefixItems} {
+		items := r.items(r.child(n, name))
+		for i, sub := range list {
+			if i < len(items) {
+				r.schema(sub, items[i])
+			}
+		}
+	}
+
+	for name, named := range map[string]openapi3.Schemas{"properties": s.Properties, "patternProperties": s.PatternProperties, "dependentSchemas": s.DependentSchemas, "$defs": s.Defs} {
+		mn := r.child(n, name)
+		for key, sub := range named {
+			r.schema(sub, r.child(mn, key))
+		}
+	}
+}
+
+// exact returns kin, a value of the spec as kin-openapi read it, with each integer as raw, the same value as the spec
+// writes it, has it, where kin-openapi rounded it.
+func exact(kin, raw any) any {
+	switch k := kin.(type) {
+	case map[string]any:
+		r, _ := raw.(map[string]any)
+		for key, v := range k {
+			k[key] = exact(v, r[key])
+		}
+	case []any:
+		r, _ := raw.([]any)
+		for i := range min(len(k), len(r)) {
+			k[i] = exact(k[i], r[i])
+		}
+	case int64:
+		if r, ok := raw.(int64); ok && float64(r) == float64(k) {
+			return r
+		}
+	}
+
+	return kin
 }

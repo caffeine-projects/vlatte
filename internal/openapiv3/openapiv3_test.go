@@ -266,6 +266,111 @@ paths:
 	require.ErrorContains(t, err, `example none: validation failed due to: at '': got null, want object`)
 }
 
+func TestLoad_ReadsAReferenceToAnythingOfASpec(t *testing.T) {
+	// A $ref may name any part of a spec, not only a shared component: kin-openapi's own naming of what it names
+	// loops forever on one into paths.
+	doc := load(t, map[string]string{"spec.yaml": `
+openapi: 3.1.0
+info: {title: Refs, version: "1"}
+paths:
+  /a/{id}:
+    get:
+      parameters: [{name: id, in: path, required: true, schema: {type: string}, example: "7"}]
+      responses: {"204": {description: OK}}
+  /b/{id}:
+    get:
+      parameters: [{$ref: "#/paths/~1a~1{id}/get/parameters/0"}]
+      responses: {"204": {description: OK}}
+`})
+
+	param := []openapi.Parameter{{Name: "id", Style: "simple", Examples: []openapi.Example{{Value: "7"}}}}
+	require.Equal(t, []openapi.Operation{
+		{Method: "GET", Path: "/a/{id}", PathParams: param, Responses: []openapi.Response{{Status: "204"}}},
+		{Method: "GET", Path: "/b/{id}", PathParams: param, Responses: []openapi.Response{{Status: "204"}}},
+	}, sortedOperations(doc))
+}
+
+func TestLoad_NamesASchemaOfAnotherFileApartFromAShared(t *testing.T) {
+	// A schema of another file becomes a shared one, named after its file and its place in it: one already shared
+	// under that name keeps its own, and every reference to the same schema names the same one.
+	doc := load(t, map[string]string{
+		"spec.yaml": `
+openapi: 3.1.0
+info: {title: Pets, version: "1"}
+paths:
+  /pets:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  a: {$ref: "pet.yaml"}
+                  b: {$ref: "pet.yaml"}
+                  c: {$ref: "#/components/schemas/pet"}
+                  d: {$ref: "lib.yaml#/components/schemas/Owner"}
+components:
+  schemas:
+    pet: {const: shared}
+`,
+		"pet.yaml": "{const: file}\n",
+		"lib.yaml": "components: {schemas: {Owner: {items: {$ref: \"spec.yaml#/components/schemas/pet\"}}}}\n",
+	})
+
+	props := doc.Operations[0].Responses[0].Content[0].Schema.(map[string]any)["properties"].(map[string]any)
+	require.Equal(t, map[string]any{
+		"a": map[string]any{"$ref": "#/$defs/pet_2"},
+		"b": map[string]any{"$ref": "#/$defs/pet_2"},
+		"c": map[string]any{"$ref": "#/$defs/pet"},
+		"d": map[string]any{"$ref": "#/$defs/lib_Owner"},
+	}, props)
+	require.Equal(t, map[string]any{
+		"pet":       map[string]any{"const": "shared"},
+		"pet_2":     map[string]any{"const": "file"},
+		"lib_Owner": map[string]any{"items": map[string]any{"$ref": "#/$defs/pet"}},
+	}, doc.Defs)
+}
+
+func TestLoad_ReadsTheNumbersOfASchemaAsTheSpecWritesThem(t *testing.T) {
+	// A fake value comes from its schema's const, enum or default: 9007199254740993 read as a float64 is another
+	// value. Shared schemas and those of other files alike.
+	doc := load(t, map[string]string{
+		"spec.yaml": `
+openapi: 3.1.0
+info: {title: Big, version: "1"}
+paths:
+  /big:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  a: {const: 9007199254740993}
+                  b: {$ref: "#/components/schemas/B"}
+                  c: {$ref: "c.yaml"}
+components:
+  schemas:
+    B: {enum: [9007199254740995], default: 9007199254740997}
+`,
+		"c.yaml": "{type: array, items: {const: {n: 9007199254740999}}}\n",
+	})
+
+	schema := doc.Operations[0].Responses[0].Content[0].Schema.(map[string]any)
+	props := schema["properties"].(map[string]any)
+	require.Equal(t, map[string]any{"const": int64(9007199254740993)}, props["a"])
+	require.Equal(t, map[string]any{"enum": []any{int64(9007199254740995)}, "default": int64(9007199254740997)}, doc.Defs["B"])
+
+	c := strings.TrimPrefix(props["c"].(map[string]any)["$ref"].(string), "#/$defs/")
+	require.Equal(t, map[string]any{"type": "array", "items": map[string]any{"const": map[string]any{"n": int64(9007199254740999)}}}, doc.Defs[c])
+}
+
 func TestLoad_WarnsWhenServersHaveDifferentPaths(t *testing.T) {
 	doc, warnings := loadWithWarnings(t, map[string]string{"spec.yaml": `
 openapi: 3.1.0
