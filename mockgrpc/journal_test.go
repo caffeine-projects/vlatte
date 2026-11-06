@@ -847,3 +847,30 @@ func TestRequestPattern_ARequestTheParsersCantReadMissesByIt(t *testing.T) {
 	require.Equal(t, verify.Miss{Total: 1, Failed: []string{"method"}}, miss)
 	require.Equal(t, 2, p.total(), "the request of Greetings was parsed by Match and Explain, the others never")
 }
+
+func TestRequestPattern_AQueryWhoseContextEndedGivesTheParsersNothing(t *testing.T) {
+	// A query whose context ended, such as one its caller gave up on, gives no parser a request: it fails with the
+	// context's error, rather than report a miss for a call it never read.
+	p := newSealParser(newSealer(t))
+	m := parsing(t, p)
+	pattern, err := m.RequestPattern(Method("Greetings").Field("user_id", match.Equal("u1")))
+	require.NoError(t, err)
+
+	entry := &journal.Entry{
+		Kind:   Kind,
+		Path:   pb.TestService_Greetings_FullMethodName,
+		Header: map[string][]string{"x-sealed": {"v1"}},
+		Body:   []byte(`{"message": "not sealed"}`),
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err = pattern.Match(ctx, entry)
+	require.ErrorIs(t, err, vlatte.ErrMatching)
+	require.ErrorIs(t, err, context.Canceled)
+
+	_, err = pattern.Explain(ctx, entry)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, p.total())
+}

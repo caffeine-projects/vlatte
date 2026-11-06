@@ -165,12 +165,9 @@ func (app *Server) parseRequest(ctx context.Context, call *Call) error {
 		return err
 	}
 
-	view, err := call.view()
-	if err != nil {
-		return err
-	}
-
-	call.json = view
+	// The view writes: each message no parser read was written as JSON before, as the call was served or journaled,
+	// and the others are what their parsers read, written as they read them.
+	call.json, _ = call.view()
 
 	return nil
 }
